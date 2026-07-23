@@ -6,6 +6,7 @@ import { Button } from "@/components/Button";
 import { useSubmitOnboarding } from "@/api/hooks";
 import type { OnboardingInput } from "@/api/types";
 import { useTheme } from "@/theme";
+import { validateOnboardingNumbers } from "@/lib/validateOnboarding";
 
 const GOALS: OnboardingInput["goal"][] = ["fat_loss", "maintenance", "muscle_gain"];
 const ACTIVITIES: OnboardingInput["activity_level"][] = ["sedentary", "light", "moderate", "active", "very_active"];
@@ -32,6 +33,11 @@ export default function Onboarding() {
 
   function onSubmit() {
     setError(null);
+    const validationError = validateOnboardingNumbers(birthYear, heightCm, weightKg);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
     const input: OnboardingInput = {
       sex,
       goal,
@@ -63,9 +69,9 @@ export default function Onboarding() {
         <View style={{ flex: 1 }}><Button title="Female" variant={sex === "female" ? "primary" : "secondary"} onPress={() => setSex("female")} /></View>
       </View>
 
-      <TextInput style={inputStyle} placeholder="Birth year (e.g. 1995)" placeholderTextColor={colors.mutedForeground} keyboardType="number-pad" value={birthYear} onChangeText={setBirthYear} />
-      <TextInput style={inputStyle} placeholder="Height (cm)" placeholderTextColor={colors.mutedForeground} keyboardType="decimal-pad" value={heightCm} onChangeText={setHeightCm} />
-      <TextInput style={inputStyle} placeholder="Weight (kg)" placeholderTextColor={colors.mutedForeground} keyboardType="decimal-pad" value={weightKg} onChangeText={setWeightKg} />
+      <TextInput accessibilityLabel="Birth year" style={inputStyle} placeholder="Birth year (e.g. 1995)" placeholderTextColor={colors.mutedForeground} keyboardType="number-pad" value={birthYear} onChangeText={setBirthYear} />
+      <TextInput accessibilityLabel="Height in centimetres" style={inputStyle} placeholder="Height (cm)" placeholderTextColor={colors.mutedForeground} keyboardType="decimal-pad" value={heightCm} onChangeText={setHeightCm} />
+      <TextInput accessibilityLabel="Weight in kilograms" style={inputStyle} placeholder="Weight (kg)" placeholderTextColor={colors.mutedForeground} keyboardType="decimal-pad" value={weightKg} onChangeText={setWeightKg} />
 
       <AppText variant="h3">Activity</AppText>
       <View style={{ gap: spacing.sm }}>

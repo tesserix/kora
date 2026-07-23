@@ -55,6 +55,7 @@ export default function LogScreen() {
         <AppText variant="h2">{selected.name}</AppText>
         <ProvenanceChip provenance={selected.provenance} />
         <TextInput
+          accessibilityLabel="Quantity in grams"
           style={inputStyle}
           placeholder={`Grams (default ${selected.serving_grams || 100})`}
           placeholderTextColor={colors.mutedForeground}
@@ -78,6 +79,7 @@ export default function LogScreen() {
     <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg, gap: spacing.md }}>
       <AppText variant="h1">Log food</AppText>
       <TextInput
+        accessibilityLabel="Search foods"
         style={inputStyle}
         placeholder="Search foods…"
         placeholderTextColor={colors.mutedForeground}
