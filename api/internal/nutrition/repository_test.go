@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -42,4 +43,22 @@ func TestSeedIsIdempotentAndSearchable(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, results)
 	require.Contains(t, strings.ToLower(results[0].Name), "chicken")
+}
+
+func TestInsertDedupsOnBarcode(t *testing.T) {
+	db := testDB(t)
+	repo := NewRepository(db)
+	bc := "999" + uuid.NewString()[:9]
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE barcode = ?", bc) })
+
+	first := []FoodItem{{Name: "Barcode A", Provenance: ProvenanceOFF, Barcode: &bc, KcalPer100g: 100}}
+	n1, err := repo.Insert(context.Background(), first)
+	require.NoError(t, err)
+	require.Equal(t, 1, n1)
+
+	// Different name, SAME barcode → must be skipped (would violate the unique index).
+	second := []FoodItem{{Name: "Barcode A Renamed", Provenance: ProvenanceOFF, Barcode: &bc, KcalPer100g: 100}}
+	n2, err := repo.Insert(context.Background(), second)
+	require.NoError(t, err)
+	require.Equal(t, 0, n2)
 }

@@ -51,10 +51,22 @@ func (r Repository) Count(ctx context.Context) (int64, error) {
 	return n, nil
 }
 
-// Insert adds items that are not already present (matched by name+brand).
+// Insert adds items that are not already present (matched by barcode when
+// present, falling back to name+brand for barcodeless items).
 func (r Repository) Insert(ctx context.Context, items []FoodItem) (int, error) {
 	inserted := 0
 	for _, item := range items {
+		if item.Barcode != nil && *item.Barcode != "" {
+			var bcount int64
+			if err := r.db.WithContext(ctx).Model(&FoodItem{}).
+				Where("barcode = ?", *item.Barcode).
+				Count(&bcount).Error; err != nil {
+				return inserted, fmt.Errorf("nutrition: insert barcode check: %w", err)
+			}
+			if bcount > 0 {
+				continue
+			}
+		}
 		var count int64
 		if err := r.db.WithContext(ctx).Model(&FoodItem{}).
 			Where("name = ? AND brand = ?", item.Name, item.Brand).
