@@ -45,7 +45,7 @@ func (h Handler) Add(c *gin.Context) {
 	}
 	e, err := h.repo.AddWater(c.Request.Context(), userID, req.VolumeML, req.LoggedAt)
 	if err != nil {
-		httpx.Error(c, http.StatusBadRequest, "invalid_input", err.Error())
+		httpx.RespondServiceError(c, err)
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"data": e})

@@ -41,7 +41,7 @@ func (h Handler) Create(c *gin.Context) {
 	}
 	log, err := h.svc.LogFood(c.Request.Context(), userID, req)
 	if err != nil {
-		httpx.Error(c, http.StatusBadRequest, "invalid_input", err.Error())
+		httpx.RespondServiceError(c, err)
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"data": log})

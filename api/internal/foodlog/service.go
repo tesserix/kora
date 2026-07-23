@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/tesserix/kora/api/internal/httpx"
 	"github.com/tesserix/kora/api/internal/nutrition"
 )
 
@@ -33,13 +34,13 @@ func NewService(logs Repository, foods nutrition.Repository) Service {
 
 func (s Service) LogFood(ctx context.Context, userID uuid.UUID, req LogRequest) (FoodLog, error) {
 	if !validMealSlots[req.MealSlot] {
-		return FoodLog{}, fmt.Errorf("foodlog: invalid meal_slot")
+		return FoodLog{}, httpx.ValidationError{Message: "invalid meal_slot"}
 	}
 	if req.QuantityGrams <= 0 {
-		return FoodLog{}, fmt.Errorf("foodlog: quantity_grams must be positive")
+		return FoodLog{}, httpx.ValidationError{Message: "quantity_grams must be positive"}
 	}
 	if req.FoodItemID == nil {
-		return FoodLog{}, fmt.Errorf("foodlog: food_item_id required in phase 1")
+		return FoodLog{}, httpx.ValidationError{Message: "food_item_id is required"}
 	}
 	item, err := s.foods.GetByID(ctx, *req.FoodItemID)
 	if err != nil {

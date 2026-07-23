@@ -7,6 +7,8 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+
+	"github.com/tesserix/kora/api/internal/httpx"
 )
 
 type Repository struct {
@@ -19,7 +21,7 @@ func NewRepository(db *gorm.DB) Repository {
 
 func (r Repository) AddWater(ctx context.Context, userID uuid.UUID, volumeML int, at time.Time) (WaterEntry, error) {
 	if volumeML <= 0 {
-		return WaterEntry{}, fmt.Errorf("tracking: volume_ml must be positive")
+		return WaterEntry{}, httpx.ValidationError{Message: "volume_ml must be positive"}
 	}
 	if at.IsZero() {
 		at = time.Now()
