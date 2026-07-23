@@ -60,3 +60,32 @@ func TestCreateAndListLog(t *testing.T) {
 	require.Equal(t, http.StatusOK, w2.Code)
 	require.Contains(t, w2.Body.String(), `"meal_slot":"lunch"`)
 }
+
+func TestRepeatWithEmptyBodyDefaultsToNow(t *testing.T) {
+	db := testDB(t)
+	gin.SetMode(gin.TestMode)
+	fuid := "repeat-" + uuid.NewString()
+	uRepo := user.NewRepository(db)
+	u, err := uRepo.UpsertByFirebaseUID(context.Background(), fuid, "r@test.dev")
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE id = ?", u.ID) })
+
+	item := nutrition.FoodItem{Name: "Repeat Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	repo := NewRepository(db)
+	svc := NewService(repo, nutrition.NewRepository(db))
+	first, err := svc.LogFood(context.Background(), u.ID, LogRequest{FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 100, LoggedAt: time.Now()})
+	require.NoError(t, err)
+
+	h := NewHandler(svc, repo)
+	r := gin.New()
+	r.Use(func(c *gin.Context) { c.Set("uid", fuid); c.Set("user_id", u.ID); c.Next() })
+	r.POST("/v1/logs/:id/repeat", h.Repeat)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/v1/logs/"+first.ID.String()+"/repeat", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code)
+}

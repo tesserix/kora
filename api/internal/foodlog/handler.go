@@ -1,6 +1,8 @@
 package foodlog
 
 import (
+	"errors"
+	"io"
 	"net/http"
 	"time"
 
@@ -126,9 +128,11 @@ func (h Handler) Repeat(c *gin.Context) {
 		return
 	}
 	var req repeatRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Error(c, http.StatusBadRequest, "invalid_input", "malformed body")
-		return
+	if c.Request.Body != nil {
+		if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+			httpx.Error(c, http.StatusBadRequest, "invalid_input", "malformed body")
+			return
+		}
 	}
 	at := req.At
 	if at.IsZero() {
