@@ -1,0 +1,216 @@
+/* Tesserix color tokens — OKLCH, shadcn-derived semantic system.
+   Base primitives + semantic aliases (light + dark) for the `default` (slate) theme,
+   plus the `emerald` accent theme used by the Kora app UI kit.
+   Semantic status colors (success/warning/error/info/neutral) are referenced by
+   Badge/Alert/StatusBadge in the source; defined here in the Tesserix OKLCH register. */
+
+:root,
+:root[data-theme="default"],
+[data-theme="default"].light {
+  /* surfaces & text */
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.2064 0.0377 264.41);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.2064 0.0377 264.41);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.2064 0.0377 264.41);
+  /* brand */
+  --primary: oklch(0.3752 0.0365 252.58);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.9686 0.0132 131.09);
+  --secondary-foreground: oklch(0.376 0.0275 254.09);
+  --muted: oklch(0.9844 0.0143 124.56);
+  --muted-foreground: oklch(0.4357 0.0188 248.94);
+  --accent: oklch(0.9686 0.0132 131.09);
+  --accent-foreground: oklch(0.2064 0.0377 264.41);
+  --destructive: oklch(0.58 0.2157 27.72);
+  --destructive-foreground: oklch(1 0 0);
+  /* lines & focus */
+  --border: oklch(0.9278 0.01 138.24);
+  --input: oklch(0.9278 0.01 138.24);
+  --ring: oklch(0.3752 0.0365 252.58);
+  /* sidebar */
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.2064 0.0377 264.41);
+  --sidebar-primary: oklch(0.3752 0.0365 252.58);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.9686 0.0132 131.09);
+  --sidebar-accent-foreground: oklch(0.2064 0.0377 264.41);
+  --sidebar-border: oklch(0.9278 0.01 138.24);
+  --sidebar-ring: oklch(0.3752 0.0365 252.58);
+  --radius: 0.625rem;
+
+  /* semantic status — light */
+  --success: oklch(0.63 0.16 150);
+  --success-foreground: oklch(1 0 0);
+  --success-muted: oklch(0.955 0.045 152);
+  --success-muted-foreground: oklch(0.44 0.11 152);
+  --warning: oklch(0.75 0.15 74);
+  --warning-foreground: oklch(0.26 0.05 70);
+  --warning-muted: oklch(0.96 0.05 85);
+  --warning-muted-foreground: oklch(0.48 0.1 66);
+  --error: oklch(0.58 0.2157 27.72);
+  --error-foreground: oklch(1 0 0);
+  --error-muted: oklch(0.955 0.035 25);
+  --error-muted-foreground: oklch(0.5 0.18 27);
+  --info: oklch(0.6 0.13 240);
+  --info-foreground: oklch(1 0 0);
+  --info-muted: oklch(0.955 0.03 240);
+  --info-muted-foreground: oklch(0.46 0.1 245);
+  --neutral: oklch(0.55 0.01 250);
+  --neutral-foreground: oklch(1 0 0);
+  --neutral-muted: oklch(0.965 0.004 250);
+  --neutral-muted-foreground: oklch(0.45 0.01 250);
+}
+
+:root.dark,
+:root[data-theme="default"].dark,
+[data-theme="default"].dark {
+  --background: oklch(0.1847 0.0551 281.72);
+  --foreground: oklch(0.9844 0.0143 124.56);
+  --card: oklch(0.2251 0.04 282.06);
+  --card-foreground: oklch(0.9844 0.0143 124.56);
+  --popover: oklch(0.2251 0.04 282.06);
+  --popover-foreground: oklch(0.9844 0.0143 124.56);
+  --primary: oklch(0.6959 0.1435 280.77);
+  --primary-foreground: oklch(0.1847 0.0551 281.72);
+  --secondary: oklch(0.2452 0.1079 277.36);
+  --secondary-foreground: oklch(0.9078 0.0245 257.45);
+  --muted: oklch(0.2452 0.1079 277.36);
+  --muted-foreground: oklch(0.71 0.0286 243.94);
+  --accent: oklch(0.2931 0.1689 271.77);
+  --accent-foreground: oklch(0.9078 0.0245 257.45);
+  --destructive: oklch(0.6606 0.1423 24.41);
+  --destructive-foreground: oklch(0.1847 0.0551 281.72);
+  --border: oklch(0.3636 0.1394 279.26);
+  --input: oklch(0.3636 0.1394 279.26);
+  --ring: oklch(0.6959 0.1435 280.77);
+  --sidebar: oklch(0.145 0 0);
+  --sidebar-foreground: oklch(0.9844 0.0143 124.56);
+  --sidebar-primary: oklch(0.6959 0.1435 280.77);
+  --sidebar-primary-foreground: oklch(0.1847 0.0551 281.72);
+  --sidebar-accent: oklch(0.2931 0.1689 271.77);
+  --sidebar-accent-foreground: oklch(0.9078 0.0245 257.45);
+  --sidebar-border: oklch(0.3636 0.1394 279.26);
+  --sidebar-ring: oklch(0.6959 0.1435 280.77);
+
+  --success: oklch(0.72 0.17 152);
+  --success-foreground: oklch(0.17 0.03 160);
+  --success-muted: oklch(0.32 0.07 158);
+  --success-muted-foreground: oklch(0.85 0.12 150);
+  --warning: oklch(0.82 0.16 80);
+  --warning-foreground: oklch(0.22 0.05 70);
+  --warning-muted: oklch(0.35 0.08 72);
+  --warning-muted-foreground: oklch(0.88 0.11 82);
+  --error: oklch(0.6606 0.1423 24.41);
+  --error-foreground: oklch(0.18 0.04 25);
+  --error-muted: oklch(0.33 0.09 26);
+  --error-muted-foreground: oklch(0.85 0.1 25);
+  --info: oklch(0.7 0.13 240);
+  --info-foreground: oklch(0.18 0.04 245);
+  --info-muted: oklch(0.32 0.07 243);
+  --info-muted-foreground: oklch(0.85 0.09 240);
+  --neutral: oklch(0.7 0.01 250);
+  --neutral-foreground: oklch(0.18 0.02 250);
+  --neutral-muted: oklch(0.3 0.01 250);
+  --neutral-muted-foreground: oklch(0.82 0.01 250);
+}
+
+
+
+
+/* Iris — the locked Kora brand theme (custom OKLCH, hue 285). */
+:root[data-theme="iris"],
+[data-theme="iris"].light,
+[data-theme="iris"]:not(.dark):not(.light) {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.2064 0.0377 264.41);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.2064 0.0377 264.41);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.2064 0.0377 264.41);
+  --primary: oklch(0.55 0.2 285);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.972 0.022 285);
+  --secondary-foreground: oklch(0.33 0.09 285);
+  --muted: oklch(0.975 0.02 285);
+  --muted-foreground: oklch(0.52 0.045 285);
+  --accent: oklch(0.972 0.022 285);
+  --accent-foreground: oklch(0.55 0.2 285);
+  --destructive: oklch(0.58 0.2157 27.72);
+  --destructive-foreground: oklch(1 0 0);
+  --border: oklch(0.922 0.022 285);
+  --input: oklch(0.922 0.022 285);
+  --ring: oklch(0.55 0.2 285);
+  --radius: 0.625rem;
+}
+:root[data-theme="iris"].dark,
+[data-theme="iris"].dark {
+  --background: oklch(0.18 0.03 285);
+  --foreground: oklch(0.97 0.015 285);
+  --card: oklch(0.22 0.035 285);
+  --card-foreground: oklch(0.97 0.015 285);
+  --popover: oklch(0.22 0.035 285);
+  --popover-foreground: oklch(0.97 0.015 285);
+  --primary: oklch(0.72 0.17 285);
+  --primary-foreground: oklch(0.18 0.03 285);
+  --secondary: oklch(0.29 0.05 285);
+  --secondary-foreground: oklch(0.97 0.015 285);
+  --muted: oklch(0.29 0.05 285);
+  --muted-foreground: oklch(0.75 0.04 285);
+  --accent: oklch(0.35 0.09 285);
+  --accent-foreground: oklch(0.97 0.015 285);
+  --destructive: oklch(0.6606 0.1423 24.41);
+  --destructive-foreground: oklch(0.18 0.03 285);
+  --border: oklch(0.32 0.06 285);
+  --input: oklch(0.32 0.06 285);
+  --ring: oklch(0.72 0.17 285);
+}
+
+/* ===== LOCKED BRAND: Iris is the Tesserix/Kora default primary (custom OKLCH, hue 285). =====
+   Overrides the unscoped :root accent tokens so all default surfaces + component cards use Iris.
+   Named themes ([data-theme="default"|"slate"|"teal"…]) are unaffected and remain selectable. */
+:root {
+  --primary: oklch(0.55 0.20 285);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.972 0.022 285);
+  --secondary-foreground: oklch(0.33 0.09 285);
+  --muted: oklch(0.975 0.02 285);
+  --muted-foreground: oklch(0.52 0.045 285);
+  --accent: oklch(0.972 0.022 285);
+  --accent-foreground: oklch(0.55 0.20 285);
+  --border: oklch(0.922 0.022 285);
+  --input: oklch(0.922 0.022 285);
+  --ring: oklch(0.55 0.20 285);
+  --sidebar-primary: oklch(0.55 0.20 285);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.972 0.022 285);
+  --sidebar-accent-foreground: oklch(0.55 0.20 285);
+  --sidebar-border: oklch(0.922 0.022 285);
+  --sidebar-ring: oklch(0.55 0.20 285);
+}
+:root.dark {
+  --background: oklch(0.18 0.03 285);
+  --foreground: oklch(0.97 0.015 285);
+  --card: oklch(0.22 0.035 285);
+  --card-foreground: oklch(0.97 0.015 285);
+  --popover: oklch(0.22 0.035 285);
+  --popover-foreground: oklch(0.97 0.015 285);
+  --primary: oklch(0.72 0.17 285);
+  --primary-foreground: oklch(0.18 0.03 285);
+  --secondary: oklch(0.29 0.05 285);
+  --secondary-foreground: oklch(0.97 0.015 285);
+  --muted: oklch(0.29 0.05 285);
+  --muted-foreground: oklch(0.75 0.04 285);
+  --accent: oklch(0.35 0.09 285);
+  --accent-foreground: oklch(0.97 0.015 285);
+  --border: oklch(0.32 0.06 285);
+  --input: oklch(0.32 0.06 285);
+  --ring: oklch(0.72 0.17 285);
+  --sidebar-primary: oklch(0.72 0.17 285);
+  --sidebar-primary-foreground: oklch(0.18 0.03 285);
+  --sidebar-accent: oklch(0.35 0.09 285);
+  --sidebar-accent-foreground: oklch(0.97 0.015 285);
+  --sidebar-border: oklch(0.32 0.06 285);
+  --sidebar-ring: oklch(0.72 0.17 285);
+}

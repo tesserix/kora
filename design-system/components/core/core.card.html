@@ -1,0 +1,63 @@
+<!-- @dsCard group="Components" viewport="700x360" name="Core" subtitle="Button, Badge, Input, Avatar, Tag, Separator" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<link rel="stylesheet" href="../../styles.css" />
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous" onerror="(function(){var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/@babel/standalone@7.29.0/babel.min.js';s.crossOrigin='anonymous';document.head.appendChild(s);})()"></script>
+<script src="https://unpkg.com/lucide@0.469.0/dist/umd/lucide.min.js"></script>
+<script src="../../_ds_bundle.js"></script>
+<style>body{margin:0;font-family:var(--font-sans);color:var(--foreground);background:var(--background)}.wrap{padding:28px;display:flex;flex-direction:column;gap:22px}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.lbl{font-size:11px;color:var(--muted-foreground);text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:8px}</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { Button, Badge, Input, Avatar, Tag, Separator, Icon } = window.TesserixDesignSystem_275930;
+function Demo(){
+  return (
+    <div className="wrap">
+      <div>
+        <div className="lbl">Buttons</div>
+        <div className="row">
+          <Button>Default</Button>
+          <Button variant="secondary">Secondary</Button>
+          <Button variant="outline">Outline</Button>
+          <Button variant="ghost">Ghost</Button>
+          <Button variant="success"><Icon name="check" size="sm" />Success</Button>
+          <Button variant="destructive">Delete</Button>
+          <Button size="icon" variant="outline"><Icon name="plus" size="sm" /></Button>
+        </div>
+      </div>
+      <div>
+        <div className="lbl">Badges &amp; Tags</div>
+        <div className="row">
+          <Badge>Default</Badge>
+          <Badge variant="success">On track</Badge>
+          <Badge variant="warning">Over</Badge>
+          <Badge variant="info">Synced</Badge>
+          <Badge variant="outline">Draft</Badge>
+          <Tag color="var(--success)">High protein</Tag>
+          <Tag onRemove={()=>{}}>Breakfast</Tag>
+        </div>
+      </div>
+      <div>
+        <div className="lbl">Input / Avatar</div>
+        <div className="row">
+          <div style={{width:240}}><Input placeholder="Search foods…" /></div>
+          <Avatar initials="AS" />
+          <Avatar initials="JD" size="lg" />
+          <Separator orientation="vertical" style={{height:36}} />
+          <Icon name="flame" color="var(--primary)" size="lg" />
+          <Icon name="droplet" color="var(--info)" size="lg" />
+          <Icon name="footprints" size="lg" />
+        </div>
+      </div>
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<Demo />);
+</script>
+</body>
+</html>

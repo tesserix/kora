@@ -1,0 +1,129 @@
+<!-- @dsCard group="Kora" viewport="1600x1000" name="Kora — Screen Mockups" subtitle="Static gallery of all app screens in device frames" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Kora — Mockups</title>
+<link rel="stylesheet" href="../../styles.css" />
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous" onerror="(function(){var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/@babel/standalone@7.29.0/babel.min.js';s.crossOrigin='anonymous';document.head.appendChild(s);})()"></script>
+<script src="https://unpkg.com/lucide@0.469.0/dist/umd/lucide.min.js"></script>
+<script src="../../_ds_bundle.js"></script>
+<style>
+  html,body{margin:0}
+  body{background:oklch(0.97 0.008 160);font-family:var(--font-sans);color:#0f172a}
+  .head{padding:44px 56px 8px}
+  .head h1{margin:0;font-size:34px;font-weight:800;letter-spacing:-0.03em}
+  .head p{margin:8px 0 0;font-size:15px;color:#64748b;max-width:640px}
+  .grid{display:flex;flex-wrap:wrap;gap:56px 44px;padding:36px 56px 80px}
+  .item{display:flex;flex-direction:column;align-items:center;gap:16px}
+  .cap{text-align:center}
+  .cap .t{font-size:14px;font-weight:700}
+  .cap .s{font-size:12px;color:#64748b;margin-top:2px;max-width:300px}
+  .phone{position:relative;width:390px;height:812px;border-radius:52px;background:#0c0f0d;padding:11px;box-shadow:0 30px 60px -18px rgba(0,0,0,0.34),0 0 0 2px rgba(0,0,0,0.55)}
+  .screen{position:relative;width:368px;height:790px;border-radius:42px;overflow:hidden;background:var(--background);color:var(--foreground)}
+  .island{position:absolute;top:13px;left:50%;transform:translateX(-50%);width:110px;height:30px;background:#000;border-radius:18px;z-index:100;pointer-events:none}
+  .home-ind{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:122px;height:5px;border-radius:999px;background:currentColor;opacity:0.28;z-index:60;pointer-events:none}
+</style>
+</head>
+<body>
+<div class="head">
+  <h1>Kora — screen mockups</h1>
+  <p>Kora — the AI nutrition coach, built on the Tesserix design system (Iris theme). Every screen composed from design-system primitives.</p>
+</div>
+<div id="root"></div>
+
+<script type="text/babel" src="Chrome.jsx"></script>
+<script type="text/babel" src="MealDetail.jsx"></script>
+<script type="text/babel" src="HomeScreen.jsx"></script>
+<script type="text/babel" src="CaptureScreen.jsx"></script>
+<script type="text/babel" src="CoachScreen.jsx"></script>
+<script type="text/babel" src="InsightsScreen.jsx"></script>
+<script type="text/babel" src="PlannerScreen.jsx"></script>
+<script type="text/babel" src="RestaurantScreen.jsx"></script>
+<script type="text/babel" src="DiaryScreen.jsx"></script>
+<script type="text/babel" src="ProgressScreen.jsx"></script>
+<script type="text/babel" src="AddonsScreen.jsx"></script>
+<script type="text/babel" src="Onboarding.jsx"></script>
+<script type="text/babel" src="KoraApp.jsx"></script>
+
+<script type="text/babel" data-presets="react">
+function Frame({ title, sub, dark, children }){
+  return (
+    <div className="item">
+      <div className="phone">
+        <div className="island"></div>
+        <div className={"screen "+(dark?"dark":"light")} data-theme="iris">
+          {children}
+          <div className="home-ind"></div>
+        </div>
+      </div>
+      <div className="cap"><div className="t">{title}</div><div className="s">{sub}</div></div>
+    </div>
+  );
+}
+
+function Gallery(){
+  const D = window.KORA_DATA;
+  const meal = window.KORA_MEALS[0];
+  const noop = ()=>{};
+  const scroll = { position:"absolute", inset:0, overflow:"hidden" };
+  const withBar = (screen) => (
+    <>
+      <div style={scroll}><window.StatusBar />{screen}</div>
+      <window.TabBar active="home" onNav={noop} />
+    </>
+  );
+  return (
+    <div className="grid">
+      <Frame title="Onboarding" sub="Goal setup — the first run">
+        <window.Onboarding onStart={noop} />
+      </Frame>
+      <Frame title="Home" sub="Calorie ring, macros, today's meals, Otto nudge">
+        <div style={scroll}><window.StatusBar /><window.HomeScreen data={D} onNav={noop} onOpenMeal={noop} /></div>
+        <window.TabBar active="home" onNav={noop} />
+      </Frame>
+      <Frame title="AI Capture" sub="Snap or chat — Otto detects items and macros" dark>
+        <window.CaptureScreen mode="both" onNav={noop} onLog={noop} initialStage="result" />
+      </Frame>
+      <Frame title="AI Coach" sub="Otto coaches you — focus cards + conversation">
+        <window.CoachScreen onNav={noop} />
+      </Frame>
+      <Frame title="Weekly Insights" sub="Otto's weekly report">
+        <window.InsightsScreen onNav={noop} />
+      </Frame>
+      <Frame title="Meal Planner" sub="AI-generated day plan + shopping list">
+        <window.PlannerScreen onNav={noop} />
+      </Frame>
+      <Frame title="Restaurant mode" sub="Chain nutrition, AI-matched">
+        <window.RestaurantScreen onNav={noop} />
+      </Frame>
+      <Frame title="Meal detail" sub="Edit AI-logged items and portions">
+        <div style={scroll}><window.StatusBar /><window.HomeScreen data={D} onNav={noop} onOpenMeal={noop} /></div>
+        <window.Sheet open={true} onClose={noop}><window.MealDetailSheet meal={meal} onClose={noop} /></window.Sheet>
+      </Frame>
+      <Frame title="Diary" sub="Week strip + day timeline">
+        <div style={scroll}><window.StatusBar /><window.DiaryScreen data={D} onOpenMeal={noop} /></div>
+        <window.TabBar active="diary" onNav={noop} />
+      </Frame>
+      <Frame title="Progress" sub="Weight trend + key stats">
+        <div style={scroll}><window.StatusBar /><window.ProgressScreen /></div>
+        <window.TabBar active="progress" onNav={noop} />
+      </Frame>
+      <Frame title="Add-ons" sub="Steps, water, weight, sleep, meds, fasting">
+        <div style={scroll}><window.StatusBar /><window.AddonsScreen /></div>
+        <window.TabBar active="addons" onNav={noop} />
+      </Frame>
+    </div>
+  );
+}
+(function mount(){
+  if(!window.KoraApp || !window.HomeScreen){ setTimeout(mount,80); return; }
+  ReactDOM.createRoot(document.getElementById("root")).render(<Gallery/>);
+  if(window.lucide) window.lucide.createIcons();
+})();
+</script>
+</body>
+</html>

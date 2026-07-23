@@ -1,0 +1,8 @@
+/* Tesserix Design System — global entry point.
+   Consumers link this one file. It is an @import manifest only (no rules here). */
+@import "./tokens/colors.css";
+@import "./tokens/typography.css";
+@import "./tokens/spacing.css";
+@import "./tokens/radius.css";
+@import "./tokens/shadows.css";
+@import "./tokens/motion.css";

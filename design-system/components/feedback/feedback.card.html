@@ -1,0 +1,40 @@
+<!-- @dsCard group="Components" viewport="700x260" name="Feedback & Data" subtitle="Progress, ring gauge, stat, skeleton, callout" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<link rel="stylesheet" href="../../styles.css" />
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous" onerror="(function(){var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/@babel/standalone@7.29.0/babel.min.js';s.crossOrigin='anonymous';document.head.appendChild(s);})()"></script>
+<script src="../../_ds_bundle.js"></script>
+<style>body{margin:0;font-family:var(--font-sans);color:var(--foreground);background:var(--background)}.wrap{padding:28px;display:flex;gap:32px;align-items:center;flex-wrap:wrap}.stack{display:flex;flex-direction:column;gap:14px;min-width:220px}</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { Progress, CircularProgress, Stat, Skeleton, Callout } = window.TesserixDesignSystem_275930;
+function Demo(){
+  return (
+    <div className="wrap">
+      <CircularProgress value={1420} max={2000} size={116} color="var(--primary)">
+        <strong style={{fontSize:26,fontWeight:800,letterSpacing:"-0.02em"}}>1420</strong>
+        <span style={{fontSize:11,color:"var(--muted-foreground)",fontFamily:"var(--font-mono)"}}>/ 2000 kcal</span>
+      </CircularProgress>
+      <div className="stack">
+        <div><div style={{fontSize:12,marginBottom:6,color:"var(--muted-foreground)"}}>Protein</div><Progress value={72} color="var(--primary)" /></div>
+        <div><div style={{fontSize:12,marginBottom:6,color:"var(--muted-foreground)"}}>Carbs</div><Progress value={54} color="var(--warning)" /></div>
+        <Stat label="Weight" value="72.4" unit="kg" delta="0.6 kg this week" trend="down" />
+      </div>
+      <div className="stack">
+        <Callout variant="success" title="Logged!">Otto added 2 items to breakfast.</Callout>
+        <Skeleton height={14} width={180} />
+        <Skeleton height={14} width={120} />
+      </div>
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<Demo />);
+</script>
+</body>
+</html>

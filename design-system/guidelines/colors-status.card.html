@@ -1,0 +1,11 @@
+<!-- @dsCard group="Colors" viewport="700x160" name="Semantic Status" subtitle="Success, warning, error, info, neutral — solid + muted pairs" -->
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8" /><link rel="stylesheet" href="../styles.css" />
+<style>body{margin:0;font-family:var(--font-sans);background:var(--background)}.g{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;padding:16px}.s{display:flex;flex-direction:column;gap:6px}.pair{display:flex;height:56px;border-radius:var(--radius-lg);overflow:hidden;border:1px solid var(--border)}.pair>div{flex:1}.n{font-size:11px;color:var(--foreground);font-weight:600}.chip{align-self:flex-start;font-size:10px;padding:2px 8px;border-radius:var(--radius-full);font-weight:600}</style></head>
+<body><div class="g">
+<div class="s"><div class="pair"><div style="background:var(--success)"></div><div style="background:var(--success-muted)"></div></div><span class="n">Success</span><span class="chip" style="background:var(--success-muted);color:var(--success-muted-foreground)">On track</span></div>
+<div class="s"><div class="pair"><div style="background:var(--warning)"></div><div style="background:var(--warning-muted)"></div></div><span class="n">Warning</span><span class="chip" style="background:var(--warning-muted);color:var(--warning-muted-foreground)">Over</span></div>
+<div class="s"><div class="pair"><div style="background:var(--error)"></div><div style="background:var(--error-muted)"></div></div><span class="n">Error</span><span class="chip" style="background:var(--error-muted);color:var(--error-muted-foreground)">Failed</span></div>
+<div class="s"><div class="pair"><div style="background:var(--info)"></div><div style="background:var(--info-muted)"></div></div><span class="n">Info</span><span class="chip" style="background:var(--info-muted);color:var(--info-muted-foreground)">Synced</span></div>
+<div class="s"><div class="pair"><div style="background:var(--neutral)"></div><div style="background:var(--neutral-muted)"></div></div><span class="n">Neutral</span><span class="chip" style="background:var(--neutral-muted);color:var(--neutral-muted-foreground)">Draft</span></div>
+</div></body></html>

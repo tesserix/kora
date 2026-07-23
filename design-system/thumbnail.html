@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<link rel="stylesheet" href="styles.css" />
+<style>
+  html,body{margin:0;height:100%}
+  .tile{width:1280px;height:854px;display:flex;font-family:var(--font-sans)}
+  .main{flex:1;background:var(--primary);display:flex;align-items:center;justify-content:center}
+  .main img{width:60%;height:auto;filter:brightness(0) invert(1)}
+  .strip{width:22%;display:flex;flex-direction:column}
+  .strip span{flex:1;display:block}
+</style>
+</head>
+<body>
+<div class="tile">
+  <div class="main"><img src="assets/tesserix-icon.png" alt="Tesserix" /></div>
+  <div class="strip">
+    <span style="background:oklch(0.75 0.15 74)"></span>
+    <span style="background:oklch(0.63 0.16 150)"></span>
+    <span style="background:oklch(0.6 0.13 240)"></span>
+    <span style="background:oklch(0.58 0.2157 27.72)"></span>
+  </div>
+</div>
+</body>
+</html>

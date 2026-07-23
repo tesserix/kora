@@ -1,0 +1,38 @@
+<!-- @dsCard group="Components" viewport="700x180" name="Forms" subtitle="Switch and Checkbox — on/off and disabled states" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<link rel="stylesheet" href="../../styles.css" />
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous" onerror="(function(){var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/@babel/standalone@7.29.0/babel.min.js';s.crossOrigin='anonymous';document.head.appendChild(s);})()"></script>
+<script src="../../_ds_bundle.js"></script>
+<style>body{margin:0;font-family:var(--font-sans);color:var(--foreground);background:var(--background)}.wrap{display:flex;gap:40px;align-items:center;padding:32px}.col{display:flex;flex-direction:column;gap:14px}.row{display:flex;align-items:center;gap:10px;font-size:14px}.lbl{font-size:12px;color:var(--muted-foreground);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px}</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { Switch, Checkbox } = window.TesserixDesignSystem_275930;
+function Demo(){
+  return (
+    <div className="wrap">
+      <div className="col">
+        <span className="lbl">Switch</span>
+        <div className="row"><Switch defaultChecked /> On</div>
+        <div className="row"><Switch /> Off</div>
+        <div className="row"><Switch disabled defaultChecked /> Disabled</div>
+      </div>
+      <div className="col">
+        <span className="lbl">Checkbox</span>
+        <div className="row"><Checkbox defaultChecked /> Selected</div>
+        <div className="row"><Checkbox /> Unselected</div>
+        <div className="row"><Checkbox disabled defaultChecked /> Disabled</div>
+      </div>
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<Demo />);
+</script>
+</body>
+</html>

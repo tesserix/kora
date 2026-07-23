@@ -1,0 +1,21 @@
+/* Tesserix motion tokens — durations + easing. Mirrors animations.ts. */
+:root {
+  --duration-instant: 0ms; /* @kind other */
+  --duration-fast: 150ms; /* @kind other */
+  --duration-normal: 200ms; /* @kind other */
+  --duration-slow: 300ms; /* @kind other */
+  --duration-slower: 500ms; /* @kind other */
+  --duration-slowest: 1000ms; /* @kind other */
+
+  --ease-linear: linear; /* @kind other */
+  --ease-in: cubic-bezier(0.4, 0, 1, 1); /* @kind other */
+  --ease-out: cubic-bezier(0, 0, 0.2, 1); /* @kind other */
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1); /* @kind other */
+  --ease-sharp: cubic-bezier(0.4, 0, 0.6, 1); /* @kind other */
+  --ease-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55); /* @kind other */
+
+  --transition-colors: background-color var(--duration-normal) var(--ease-in-out),
+    border-color var(--duration-normal) var(--ease-in-out),
+    color var(--duration-normal) var(--ease-in-out); /* @kind other */
+  --transition-all: all var(--duration-normal) var(--ease-in-out); /* @kind other */
+}
