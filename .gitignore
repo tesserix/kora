@@ -1,0 +1,20 @@
+# env & secrets
+.env
+.env.*
+!.env.example
+*-service-account*.json
+google-services.json
+GoogleService-Info.plist
+
+# Go
+api/bin/
+api/coverage.out
+
+# Node / Expo
+node_modules/
+.expo/
+dist/
+*.tsbuildinfo
+
+# OS / editor
+.DS_Store
