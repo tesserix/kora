@@ -13,7 +13,10 @@ import { useAddWater, useDashboard, useDayLogs, useProfile } from "@/api/hooks";
 import { useTheme } from "@/theme";
 
 function today(): string {
-  return new Date().toISOString().slice(0, 10);
+  // Local calendar date (YYYY-MM-DD), not UTC — the backend buckets a day by the
+  // user's timezone, so requesting the UTC date would show the wrong day in the
+  // morning for AU users. en-CA formats as ISO in the device's local zone.
+  return new Date().toLocaleDateString("en-CA");
 }
 
 export default function Index() {
