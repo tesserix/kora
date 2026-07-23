@@ -15,8 +15,8 @@ export function MacroBar({ label, value, target, color }: Props) {
           {Math.round(value)} / {Math.round(target)} g
         </AppText>
       </View>
-      <View style={{ height: 8, backgroundColor: colors.muted, borderRadius: radius.full }}>
-        <View style={{ height: 8, width: `${pct}%`, backgroundColor: color, borderRadius: radius.full }} />
+      <View style={{ height: spacing.sm, backgroundColor: colors.muted, borderRadius: radius.full }}>
+        <View style={{ height: spacing.sm, width: `${pct}%`, backgroundColor: color, borderRadius: radius.full }} />
       </View>
     </View>
   );

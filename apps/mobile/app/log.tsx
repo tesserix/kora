@@ -18,6 +18,7 @@ export default function LogScreen() {
   const [selected, setSelected] = useState<FoodItem | null>(null);
   const [grams, setGrams] = useState("");
   const [meal, setMeal] = useState<(typeof MEALS)[number]>("lunch");
+  const [error, setError] = useState<string | null>(null);
   const search = useFoodSearch(q);
   const createLog = useCreateLog();
 
@@ -41,7 +42,10 @@ export default function LogScreen() {
         logged_at: new Date().toISOString(),
         client_log_ms: Date.now() - mountedAt.current,
       },
-      { onSuccess: () => router.replace("/") },
+      {
+        onSuccess: () => router.replace("/"),
+        onError: () => setError("Couldn't log that. Please try again."),
+      },
     );
   }
 
@@ -63,6 +67,7 @@ export default function LogScreen() {
             <Button key={m} title={m} variant={meal === m ? "primary" : "secondary"} onPress={() => setMeal(m)} />
           ))}
         </View>
+        {error ? <AppText style={{ color: colors.destructive }}>{error}</AppText> : null}
         <Button title={createLog.isPending ? "Logging…" : "Log it"} onPress={submit} disabled={createLog.isPending} />
         <Button title="Back" variant="ghost" onPress={() => setSelected(null)} />
       </View>

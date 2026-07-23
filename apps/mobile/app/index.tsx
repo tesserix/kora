@@ -41,6 +41,7 @@ export default function Index() {
   if (!isFirebaseConfigured) return null;
 
   const d = dashboard.data;
+  const loadError = dashboard.isError || logs.isError || profile.isError;
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: spacing.lg, gap: spacing.md }}>
@@ -72,6 +73,8 @@ export default function Index() {
             </View>
           </Card>
         </>
+      ) : loadError ? (
+        <AppText style={{ color: colors.destructive }}>Couldn&apos;t load your day. Pull to refresh or try again.</AppText>
       ) : (
         <AppText muted>Loading your day…</AppText>
       )}
