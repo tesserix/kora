@@ -8,6 +8,7 @@ import (
 
 	"github.com/tesserix/kora/api/internal/auth"
 	"github.com/tesserix/kora/api/internal/httpx"
+	"github.com/tesserix/kora/api/internal/onboarding"
 	"github.com/tesserix/kora/api/internal/user"
 )
 
@@ -40,9 +41,13 @@ func NewRouter(deps Deps) *gin.Engine {
 	})
 
 	if deps.DB != nil && deps.Verifier != nil {
-		userHandler := user.NewHandler(user.NewRepository(deps.DB))
+		userRepo := user.NewRepository(deps.DB)
+		userHandler := user.NewHandler(userRepo)
+		onboardingHandler := onboarding.NewHandler(userRepo)
+
 		v1 := r.Group("/v1", auth.Middleware(deps.Verifier))
 		v1.GET("/me", userHandler.Me)
+		v1.POST("/onboarding", onboardingHandler.Submit)
 	}
 
 	r.NoRoute(func(c *gin.Context) {

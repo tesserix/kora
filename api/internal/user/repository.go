@@ -45,3 +45,41 @@ func (r Repository) IDByFirebaseUID(ctx context.Context, firebaseUID string) (uu
 	}
 	return u.ID, nil
 }
+
+// OnboardingFields mirrors onboarding.Input plus the computed onboarding.Targets.
+type OnboardingFields struct {
+	Sex            string
+	BirthYear      int
+	HeightCm       float64
+	WeightKg       float64
+	ActivityLevel  string
+	Goal           string
+	TargetKcal     float64
+	TargetProteinG float64
+	TargetCarbsG   float64
+	TargetFatG     float64
+}
+
+func (r Repository) SaveOnboarding(ctx context.Context, userID uuid.UUID, f OnboardingFields) (User, error) {
+	updates := map[string]any{
+		"sex":              f.Sex,
+		"birth_year":       f.BirthYear,
+		"height_cm":        f.HeightCm,
+		"weight_kg":        f.WeightKg,
+		"activity_level":   f.ActivityLevel,
+		"goal":             f.Goal,
+		"target_kcal":      f.TargetKcal,
+		"target_protein_g": f.TargetProteinG,
+		"target_carbs_g":   f.TargetCarbsG,
+		"target_fat_g":     f.TargetFatG,
+		"onboarded_at":     gorm.Expr("now()"),
+	}
+	if err := r.db.WithContext(ctx).Model(&User{}).Where("id = ?", userID).Updates(updates).Error; err != nil {
+		return User{}, fmt.Errorf("user: save onboarding: %w", err)
+	}
+	var out User
+	if err := r.db.WithContext(ctx).First(&out, "id = ?", userID).Error; err != nil {
+		return User{}, fmt.Errorf("user: fetch after onboarding: %w", err)
+	}
+	return out, nil
+}
