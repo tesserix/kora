@@ -1,13 +1,14 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { initializeApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
+// Metro resolves `firebase/auth` to the React Native build
+// (@firebase/auth/dist/rn/) at runtime, which exports
+// `getReactNativePersistence` for durable AsyncStorage-backed auth
+// persistence. tsc, however, resolves the non-RN package types
+// (index.d.ts), which don't declare that export — see firebase#8674
+// (RN persistence typing gap).
+// @ts-expect-error - getReactNativePersistence is exported by the RN build at runtime (firebase/auth dist/rn) but missing from the default published types (firebase#8674)
+import { getReactNativePersistence, initializeAuth } from "firebase/auth";
 
-// `@react-native-async-storage/async-storage` must stay installed: the
-// React Native build of firebase/auth (resolved by Metro's platform-aware
-// module resolution, not by this file) imports it internally and uses it
-// automatically for persistence when the package is present. Firebase's
-// current published types don't expose `initializeAuth`/
-// `getReactNativePersistence` for React Native under TypeScript's package
-// export resolution, so we rely on that automatic persistence via `getAuth`.
 const app = initializeApp({
   apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
@@ -15,4 +16,6 @@ const app = initializeApp({
   appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
 });
 
-export const auth = getAuth(app);
+export const auth = initializeAuth(app, {
+  persistence: getReactNativePersistence(AsyncStorage),
+});
