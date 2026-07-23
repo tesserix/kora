@@ -7,6 +7,13 @@ import (
 	"github.com/google/uuid"
 )
 
+// DefaultTimezone is the timezone assigned to newly-provisioned users when
+// none is supplied yet, mirroring the migration's SQL DEFAULT for the
+// timezone column. It must be set explicitly in Go (see repository.go) since
+// GORM's Create inserts the zero value for unset fields, overriding any SQL
+// DEFAULT.
+const DefaultTimezone = "Australia/Sydney"
+
 type User struct {
 	ID          uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	FirebaseUID string    `gorm:"uniqueIndex" json:"-"`

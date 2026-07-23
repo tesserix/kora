@@ -19,7 +19,7 @@ func NewRepository(db *gorm.DB) Repository {
 }
 
 func (r Repository) UpsertByFirebaseUID(ctx context.Context, firebaseUID, email string) (User, error) {
-	u := User{FirebaseUID: firebaseUID, Email: email}
+	u := User{FirebaseUID: firebaseUID, Email: email, Timezone: DefaultTimezone}
 	err := r.db.WithContext(ctx).
 		Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "firebase_uid"}},

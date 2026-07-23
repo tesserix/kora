@@ -37,7 +37,7 @@ func (h Handler) Submit(c *gin.Context) {
 	}
 	tz := in.Timezone
 	if tz == "" {
-		tz = "Australia/Sydney"
+		tz = user.DefaultTimezone
 	}
 	saved, err := h.users.SaveOnboarding(c.Request.Context(), userID, user.OnboardingFields{
 		Sex: in.Sex, BirthYear: in.BirthYear, HeightCm: in.HeightCm, WeightKg: in.WeightKg,

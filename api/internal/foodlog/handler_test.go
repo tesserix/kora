@@ -48,7 +48,12 @@ func TestCreateAndListLog(t *testing.T) {
 	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusCreated, w.Code)
 
-	today := time.Now().UTC().Format("2006-01-02")
+	// The seeded user has no explicit timezone, so it provisions with
+	// user.DefaultTimezone (Australia/Sydney) — compute "today" in that zone
+	// to match the day-bucketing the handler actually applies.
+	loc, err := time.LoadLocation(user.DefaultTimezone)
+	require.NoError(t, err)
+	today := time.Now().In(loc).Format("2006-01-02")
 	w2 := httptest.NewRecorder()
 	req2, _ := http.NewRequest(http.MethodGet, "/v1/logs?date="+today, nil)
 	r.ServeHTTP(w2, req2)

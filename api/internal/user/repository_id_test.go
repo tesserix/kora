@@ -64,3 +64,13 @@ func TestEnsureUserProvisionsThenReturnsExisting(t *testing.T) {
 	db.Model(&User{}).Where("firebase_uid = ?", fuid).Count(&count)
 	require.Equal(t, int64(1), count)
 }
+
+func TestEnsureUserGetsDefaultTimezone(t *testing.T) {
+	db := idTestDB(t)
+	repo := NewRepository(db)
+	fuid := "tz-" + uuid.NewString()
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", fuid) })
+	u, err := repo.EnsureUser(context.Background(), fuid, "tz@test.dev")
+	require.NoError(t, err)
+	require.Equal(t, DefaultTimezone, u.Timezone)
+}
