@@ -5,12 +5,14 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
 } from "firebase/auth";
-import { auth } from "@/lib/firebase";
+import { auth, isFirebaseConfigured } from "@/lib/firebase";
 import { AppText } from "@/components/Text";
 import { Button } from "@/components/Button";
 import { useTheme } from "@/theme";
 
 export default function SignIn() {
+  if (!isFirebaseConfigured) return null;
+
   const { colors, spacing, radius } = useTheme();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -27,6 +29,7 @@ export default function SignIn() {
   } as const;
 
   async function submit(mode: "in" | "up") {
+    if (!auth) return;
     setBusy(true);
     setError(null);
     try {

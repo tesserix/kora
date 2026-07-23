@@ -2,7 +2,7 @@ import { render } from "@testing-library/react-native";
 
 import Index from "../index";
 
-jest.mock("@/lib/firebase", () => ({ auth: {} }));
+jest.mock("@/lib/firebase", () => ({ auth: {}, isFirebaseConfigured: true }));
 jest.mock("firebase/auth", () => ({
   onAuthStateChanged: jest.fn(() => jest.fn()),
   signOut: jest.fn(),

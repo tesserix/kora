@@ -14,7 +14,7 @@ export class ApiError extends Error {
 }
 
 export async function apiFetch(path: string, init: RequestInit = {}): Promise<unknown> {
-  const user = auth.currentUser;
+  const user = auth?.currentUser;
   const token = user ? await user.getIdToken() : null;
 
   const res = await fetch(`${BASE_URL}${path}`, {
