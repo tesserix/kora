@@ -1,0 +1,16 @@
+{
+  "name": "design-system",
+  "version": "1.0.0",
+  "description": "",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "export-rn-tokens": "node scripts/export-rn-tokens.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "culori": "^4.0.2"
+  }
+}
