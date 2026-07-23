@@ -7,10 +7,12 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/tesserix/kora/api/internal/auth"
+	"github.com/tesserix/kora/api/internal/dashboard"
 	"github.com/tesserix/kora/api/internal/foodlog"
 	"github.com/tesserix/kora/api/internal/httpx"
 	"github.com/tesserix/kora/api/internal/nutrition"
 	"github.com/tesserix/kora/api/internal/onboarding"
+	"github.com/tesserix/kora/api/internal/tracking"
 	"github.com/tesserix/kora/api/internal/user"
 )
 
@@ -59,6 +61,17 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.DELETE("/logs/:id", logHandler.Delete)
 		v1.POST("/logs/copy-day", logHandler.CopyDay)
 		v1.POST("/logs/:id/repeat", logHandler.Repeat)
+
+		nutritionHandler := nutrition.NewHandler(foodRepo)
+		v1.GET("/foods", nutritionHandler.Search)
+
+		trackingRepo := tracking.NewRepository(deps.DB)
+		trackingHandler := tracking.NewHandler(trackingRepo, userRepo)
+		v1.POST("/water", trackingHandler.Add)
+		v1.GET("/water", trackingHandler.DayTotal)
+
+		dashboardHandler := dashboard.NewHandler(dashboard.NewService(logRepo, trackingRepo, deps.DB), userRepo)
+		v1.GET("/dashboard", dashboardHandler.Get)
 	}
 
 	r.NoRoute(func(c *gin.Context) {
