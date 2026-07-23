@@ -93,7 +93,7 @@ api/
 - `User` — profile, goal, computed targets (TDEE via Mifflin-St Jeor → macro targets),
   preferences, connected integrations, entitlement tier.
 - `FoodItem` — canonical nutrition record with provenance (`afcd` / `off` / `usda` /
-  `user_estimate`); FTS + pgvector embedding columns for resolution.
+  `label_ocr` / `user_estimate`); FTS + pgvector embedding columns for resolution.
 - `FoodAlias` — maps common names ("flat white") to canonical FoodItems; seeded for top AU
   foods, grown from user corrections.
 - `FoodLog` — one consumption event: time, meal slot, source (photo/chat/voice/barcode/
@@ -121,6 +121,11 @@ AFCD, OpenFoodFacts (AU slice + global barcodes), and USDA are ingested into Pos
 `FoodItem` rows with full-text + embedding search. Barcode scans resolve directly against
 the index and never hit an LLM.
 
+When a barcode has no index entry (common for AU imports and local brands), the user can
+photograph the nutrition panel: **nutrition-label OCR** parses it into a `FoodItem` with
+`label_ocr` provenance, linked to the barcode — closing the dead-end and enriching the
+index for every user.
+
 ### Resolution flow (photo, chat, voice converge here)
 
 1. AI call returns structured guesses: `[{food, portion_estimate, cooking_method, confidence}]`.
@@ -134,6 +139,8 @@ the index and never hit an LLM.
 5. Corrections (§2 of OPEN_QUESTIONS) are first-class: edit portion/food after logging,
    undo/delete, re-run AI on request. Corrections update the alias table and the user's
    MemoryPatterns — the edit loop teaches the system.
+6. **Provenance is visible in the UI**: every logged item carries a trust chip
+   ("AFCD · verified" vs "AI estimate ±15%") so users always know where numbers came from.
 
 ### Model routing & cost (`ai/`)
 
@@ -182,9 +189,11 @@ GAR) per existing workflow patterns. Dev deploy to GKE via `tesserix-k8s`.
 Food index ingestion pipeline (AFCD + OFF + USDA → FoodItem, FTS + embeddings). Onboarding
 (goal selection → Mifflin-St Jeor TDEE → macro targets; integration connect prompts; empty
 states). Manual food search + logging, barcode scanning, diary, daily dashboard (calorie
-ring, macros, streak), water tracking quick-adds, offline queue. Success-metric
-instrumentation starts here (time-to-log, % logs by source, % zero-correction logs).
-*(Features: 7, 12, 14, 16 + onboarding.)*
+ring, macros, streak), water tracking quick-adds, offline queue. Fast-repeat affordances
+from day one: **copy previous day** and **repeat any past meal** (one tap), plus
+**backdated manual entry** ("I forgot yesterday"). Provenance trust chip on every logged
+item. Success-metric instrumentation starts here (time-to-log, % logs by source,
+% zero-correction logs). *(Features: 7, 12, 14, 16 + onboarding.)*
 
 ### Phase 2 — Nutrition resolution engine
 Provider clients + routing + fallback, structured food identification, index resolution
@@ -194,13 +203,23 @@ Minimal UI. *(The §1/§6 core.)*
 
 ### Phase 3 — Conversational logging
 Camera capture → detection card → one-tap log (streamed, < 3s feel). Chat logging with
-clarifying questions. Voice logging (speech-to-text → chat pipeline). Full correction /
-edit / undo loop feeding the alias table. *(Features: 1, 2, 3 + edit loop.)*
+clarifying questions, including **retroactive logging** with natural-language dates
+("yesterday I had biryani for lunch"). Voice logging (speech-to-text → chat pipeline).
+**Nutrition-label OCR** as the barcode-miss fallback. Full correction / edit / undo loop
+feeding the alias table. Stretch: share-sheet ingestion (share a photo / screenshot / URL
+from any app into the capture pipeline); "ate half" second photo to adjust consumed
+portion. *(Features: 1, 2, 3 + edit loop.)*
 
 ### Phase 4 — Memory & reuse
 Personal food memory ("your usual breakfast", one-tap usuals). Custom recipes (photo /
 paste / URL import → per-serving macros). Saved meals. Restaurant mode (chain search +
-AI-matched nutrition, visual-analysis estimate fallback). *(Features: 4, 5, 6.)*
+AI-matched nutrition, visual-analysis estimate fallback). **Zero-open logging**: home /
+lock-screen widgets (jump-to-camera, water quick-add), meal-time notifications with a
+one-tap *Log* action ("Lunch? Your usual chicken wrap →"), and voice-assistant shortcuts —
+"Hey Siri, log a flat white" via iOS App Intents (shared plumbing with widgets/Shortcuts)
+and Google Assistant App Actions on Android, feeding the same chat-parse pipeline — the
+biggest levers on the < 10s time-to-log target. Stretch: leftovers awareness ("You logged half a pizza
+yesterday — having the rest?"). *(Features: 4, 5, 6.)*
 
 ### Phase 5 — Body & habits tracking
 Weight tracking (weight, body fat, muscle, waist, photos) with trend charts and
@@ -211,12 +230,16 @@ shipped; Garmin/Fitbit/Whoop/Oura slot in behind the same interface later. *(Fea
 
 ### Phase 6 — Coaching intelligence
 AI coach (Otto): daily nudges + conversation grounded in the user's actual data. Weekly
-smart insights report (async generated). AI meal planner (budget, cuisine, calories,
-protein, time, available ingredients) + shopping lists. Safety guardrails land with the
-coach. *(Features: 8, 10, 17.)*
+smart insights report (async generated), culminating in a **weekly check-in with adaptive
+targets**: TDEE recomputed from the user's actual weight trend + logged intake (not just
+Mifflin-St Jeor), with coach-explained target adjustments — estimates, never promises.
+AI meal planner (budget, cuisine, calories, protein, time, available ingredients) +
+shopping lists. Safety guardrails land with the coach. *(Features: 8, 10, 17.)*
 
 ### Phase 7 — Engagement
-Gamification: XP, levels, badges, weekly challenges, consistency score. Optional social
+Gamification: XP, levels, badges, weekly challenges, consistency score. **Streak
+forgiveness** by design: one weekly "repair" for a missed day, so a single slip never
+zeroes a long streak — punitive streaks contradict the never-shame ethos. Optional social
 sharing (weight milestone, protein streak, workout streak, recipe — no calorie shaming).
 Push notification system (supplement reminders, coach nudges, streaks). *(Features: 18, 19.)*
 
