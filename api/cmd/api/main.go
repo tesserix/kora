@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tesserix/kora/api/internal/auth"
 	"github.com/tesserix/kora/api/internal/config"
 	"github.com/tesserix/kora/api/internal/database"
 	"github.com/tesserix/kora/api/internal/server"
@@ -35,9 +36,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	verifier, err := auth.NewFirebaseVerifier(context.Background(), cfg.FirebaseProjectID)
+	if err != nil {
+		logger.Error("firebase init failed", "err", err)
+		os.Exit(1)
+	}
+
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,
-		Handler: server.NewRouter(server.Deps{DB: db}),
+		Handler: server.NewRouter(server.Deps{DB: db, Verifier: verifier}),
 	}
 
 	go func() {

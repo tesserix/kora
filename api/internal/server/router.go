@@ -8,6 +8,7 @@ import (
 
 	"github.com/tesserix/kora/api/internal/auth"
 	"github.com/tesserix/kora/api/internal/httpx"
+	"github.com/tesserix/kora/api/internal/user"
 )
 
 // Deps carries the wired dependencies for the router. Fields are added as
@@ -37,6 +38,12 @@ func NewRouter(deps Deps) *gin.Engine {
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "ready"})
 	})
+
+	if deps.DB != nil && deps.Verifier != nil {
+		userHandler := user.NewHandler(user.NewRepository(deps.DB))
+		v1 := r.Group("/v1", auth.Middleware(deps.Verifier))
+		v1.GET("/me", userHandler.Me)
+	}
 
 	r.NoRoute(func(c *gin.Context) {
 		httpx.Error(c, http.StatusNotFound, "not_found", "route not found")
