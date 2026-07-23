@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -32,4 +33,15 @@ func (r Repository) UpsertByFirebaseUID(ctx context.Context, firebaseUID, email 
 		return User{}, fmt.Errorf("user: fetch after upsert: %w", err)
 	}
 	return out, nil
+}
+
+func (r Repository) IDByFirebaseUID(ctx context.Context, firebaseUID string) (uuid.UUID, error) {
+	var u User
+	if err := r.db.WithContext(ctx).
+		Select("id").
+		Where("firebase_uid = ?", firebaseUID).
+		First(&u).Error; err != nil {
+		return uuid.Nil, fmt.Errorf("user: id by firebase uid: %w", err)
+	}
+	return u.ID, nil
 }
