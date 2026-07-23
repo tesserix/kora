@@ -101,7 +101,7 @@ func (s Service) streakDays(ctx context.Context, userID uuid.UUID, day time.Time
 	streak := 0
 	cursor := day
 	for {
-		key := cursor.In(loc).Format("2006-01-02")
+		key := cursor.Format("2006-01-02")
 		if !have[key] {
 			break
 		}

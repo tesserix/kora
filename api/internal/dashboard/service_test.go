@@ -53,3 +53,38 @@ func TestForDayAggregatesConsumedAndSources(t *testing.T) {
 	require.Equal(t, 1, sum.SourceCounts["manual"])
 	require.Equal(t, 1, sum.StreakDays)
 }
+
+// TestForDayStreakNonUTCTimezone guards against the streak walk re-anchoring
+// cursor into loc's wall clock: for negative-UTC-offset zones (e.g.
+// America/New_York) that shifts the calendar-day key back a day, so a user
+// who logged food "today" (in their own timezone) would see streak=0 instead
+// of 1. See internal/dashboard/service.go streakDays.
+func TestForDayStreakNonUTCTimezone(t *testing.T) {
+	db := testDB(t)
+	id := uuid.New()
+	require.NoError(t, db.Exec("INSERT INTO users (id, firebase_uid, email, target_kcal, target_protein_g) VALUES (?, ?, ?, ?, ?)",
+		id, "dash-tz-"+id.String(), "dtz@test.dev", 2000.0, 150.0).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE id = ?", id) })
+
+	item := nutrition.FoodItem{Name: "Dash TZ Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100, ProteinPer100g: 10}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	loc, err := time.LoadLocation("America/New_York")
+	require.NoError(t, err)
+
+	// Logged at 14:00 UTC on 2026-04-10, which is 10:00 EDT the same
+	// calendar day in America/New_York.
+	loggedAt := time.Date(2026, 4, 10, 14, 0, 0, 0, time.UTC)
+	logSvc := foodlog.NewService(foodlog.NewRepository(db), nutrition.NewRepository(db))
+	_, err = logSvc.LogFood(context.Background(), id, foodlog.LogRequest{FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 200, LoggedAt: loggedAt})
+	require.NoError(t, err)
+
+	// day is midnight-UTC-anchored, matching how the handler parses the
+	// `date` query param (time.Parse("2006-01-02", ...) yields midnight UTC).
+	day := time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC)
+	svc := NewService(foodlog.NewRepository(db), tracking.NewRepository(db), db)
+	sum, err := svc.ForDay(context.Background(), id, day, loc)
+	require.NoError(t, err)
+	require.Equal(t, 1, sum.StreakDays, "streak should count today's log even in a negative-UTC-offset timezone")
+}
