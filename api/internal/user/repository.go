@@ -2,6 +2,7 @@ package user
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -33,6 +34,21 @@ func (r Repository) UpsertByFirebaseUID(ctx context.Context, firebaseUID, email 
 		return User{}, fmt.Errorf("user: fetch after upsert: %w", err)
 	}
 	return out, nil
+}
+
+// EnsureUser resolves the user for firebaseUID, provisioning a new row via
+// UpsertByFirebaseUID only when none exists yet. This lets non-/me endpoints
+// safely resolve a user that has never hit /me, instead of 500ing.
+func (r Repository) EnsureUser(ctx context.Context, firebaseUID, email string) (User, error) {
+	var u User
+	err := r.db.WithContext(ctx).Where("firebase_uid = ?", firebaseUID).First(&u).Error
+	if err == nil {
+		return u, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return User{}, fmt.Errorf("user: ensure lookup: %w", err)
+	}
+	return r.UpsertByFirebaseUID(ctx, firebaseUID, email)
 }
 
 func (r Repository) IDByFirebaseUID(ctx context.Context, firebaseUID string) (uuid.UUID, error) {

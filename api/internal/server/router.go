@@ -50,12 +50,13 @@ func NewRouter(deps Deps) *gin.Engine {
 		onboardingHandler := onboarding.NewHandler(userRepo)
 
 		v1 := r.Group("/v1", auth.Middleware(deps.Verifier))
+		v1.Use(user.ResolveMiddleware(userRepo))
 		v1.GET("/me", userHandler.Me)
 		v1.POST("/onboarding", onboardingHandler.Submit)
 
 		foodRepo := nutrition.NewRepository(deps.DB)
 		logRepo := foodlog.NewRepository(deps.DB)
-		logHandler := foodlog.NewHandler(foodlog.NewService(logRepo, foodRepo), logRepo, userRepo)
+		logHandler := foodlog.NewHandler(foodlog.NewService(logRepo, foodRepo), logRepo)
 		v1.POST("/logs", logHandler.Create)
 		v1.GET("/logs", logHandler.List)
 		v1.DELETE("/logs/:id", logHandler.Delete)
@@ -66,11 +67,11 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.GET("/foods", nutritionHandler.Search)
 
 		trackingRepo := tracking.NewRepository(deps.DB)
-		trackingHandler := tracking.NewHandler(trackingRepo, userRepo)
+		trackingHandler := tracking.NewHandler(trackingRepo)
 		v1.POST("/water", trackingHandler.Add)
 		v1.GET("/water", trackingHandler.DayTotal)
 
-		dashboardHandler := dashboard.NewHandler(dashboard.NewService(logRepo, trackingRepo, deps.DB), userRepo)
+		dashboardHandler := dashboard.NewHandler(dashboard.NewService(logRepo, trackingRepo, deps.DB))
 		v1.GET("/dashboard", dashboardHandler.Get)
 	}
 

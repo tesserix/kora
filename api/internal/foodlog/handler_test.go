@@ -33,10 +33,11 @@ func TestCreateAndListLog(t *testing.T) {
 	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
 
 	repo := NewRepository(db)
-	h := NewHandler(NewService(repo, nutrition.NewRepository(db)), repo, uRepo)
+	h := NewHandler(NewService(repo, nutrition.NewRepository(db)), repo)
 
 	r := gin.New()
 	r.Use(func(c *gin.Context) { c.Set("uid", fuid); c.Next() })
+	r.Use(user.ResolveMiddleware(uRepo))
 	r.POST("/v1/logs", h.Create)
 	r.GET("/v1/logs", h.List)
 

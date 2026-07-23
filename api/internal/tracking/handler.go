@@ -12,23 +12,17 @@ import (
 )
 
 type Handler struct {
-	repo  Repository
-	users user.Repository
+	repo Repository
 }
 
-func NewHandler(repo Repository, users user.Repository) Handler {
-	return Handler{repo: repo, users: users}
+func NewHandler(repo Repository) Handler {
+	return Handler{repo: repo}
 }
 
 func (h Handler) resolveUser(c *gin.Context) (uuid.UUID, bool) {
-	uid := c.GetString("uid")
-	if uid == "" {
+	id, ok := user.IDFromContext(c)
+	if !ok {
 		httpx.Error(c, http.StatusUnauthorized, "unauthorized", "invalid or missing token")
-		return uuid.Nil, false
-	}
-	id, err := h.users.IDByFirebaseUID(c.Request.Context(), uid)
-	if err != nil {
-		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not resolve user")
 		return uuid.Nil, false
 	}
 	return id, true

@@ -20,8 +20,8 @@ func NewHandler(users user.Repository) Handler {
 }
 
 func (h Handler) Submit(c *gin.Context) {
-	uid := c.GetString("uid")
-	if uid == "" {
+	userID, ok := user.IDFromContext(c)
+	if !ok {
 		httpx.Error(c, http.StatusUnauthorized, "unauthorized", "invalid or missing token")
 		return
 	}
@@ -33,11 +33,6 @@ func (h Handler) Submit(c *gin.Context) {
 	targets, err := Calculate(in, h.now().Year())
 	if err != nil {
 		httpx.Error(c, http.StatusBadRequest, "invalid_input", err.Error())
-		return
-	}
-	userID, err := h.users.IDByFirebaseUID(c.Request.Context(), uid)
-	if err != nil {
-		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not resolve user")
 		return
 	}
 	saved, err := h.users.SaveOnboarding(c.Request.Context(), userID, user.OnboardingFields{

@@ -50,8 +50,9 @@ func TestSubmitHappyPath(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	h := NewHandler(user.NewRepository(db))
-	r.POST("/v1/onboarding", withUID(fuid), h.Submit)
+	userRepo := user.NewRepository(db)
+	h := NewHandler(userRepo)
+	r.POST("/v1/onboarding", withUID(fuid), user.ResolveMiddleware(userRepo), h.Submit)
 
 	body, err := json.Marshal(map[string]any{
 		"sex":            "male",
@@ -92,8 +93,9 @@ func TestSubmitInvalidEnum(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	h := NewHandler(user.NewRepository(db))
-	r.POST("/v1/onboarding", withUID(fuid), h.Submit)
+	userRepo := user.NewRepository(db)
+	h := NewHandler(userRepo)
+	r.POST("/v1/onboarding", withUID(fuid), user.ResolveMiddleware(userRepo), h.Submit)
 
 	body, err := json.Marshal(map[string]any{
 		"sex":            "male",
