@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tesserix/kora/api/internal/config"
+	"github.com/tesserix/kora/api/internal/database"
 	"github.com/tesserix/kora/api/internal/server"
 )
 
@@ -24,9 +25,19 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := database.Migrate(cfg.DatabaseURL); err != nil {
+		logger.Error("migration failed", "err", err)
+		os.Exit(1)
+	}
+	db, err := database.Connect(cfg.DatabaseURL)
+	if err != nil {
+		logger.Error("db connect failed", "err", err)
+		os.Exit(1)
+	}
+
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,
-		Handler: server.NewRouter(server.Deps{}),
+		Handler: server.NewRouter(server.Deps{DB: db}),
 	}
 
 	go func() {

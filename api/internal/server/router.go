@@ -23,6 +23,19 @@ func NewRouter(deps Deps) *gin.Engine {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
+	r.GET("/ready", func(c *gin.Context) {
+		if deps.DB == nil {
+			httpx.Error(c, http.StatusServiceUnavailable, "not_ready", "database unavailable")
+			return
+		}
+		sqlDB, err := deps.DB.DB()
+		if err != nil || sqlDB.Ping() != nil {
+			httpx.Error(c, http.StatusServiceUnavailable, "not_ready", "database unavailable")
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "ready"})
+	})
+
 	r.NoRoute(func(c *gin.Context) {
 		httpx.Error(c, http.StatusNotFound, "not_found", "route not found")
 	})
