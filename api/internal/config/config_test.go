@@ -19,14 +19,14 @@ func TestLoadConfig(t *testing.T) {
 		expectConfig    Config
 	}{
 		{
-			name:         "DATABASE_URL unset returns error",
-			port:         "",
-			env:          "",
-			databaseURL:  "",
-			redisURL:     "",
+			name:            "DATABASE_URL unset returns error",
+			port:            "",
+			env:             "",
+			databaseURL:     "",
+			redisURL:        "",
 			firebaseProject: "",
-			expectErr:    true,
-			expectConfig: Config{},
+			expectErr:       true,
+			expectConfig:    Config{},
 		},
 		{
 			name:        "DATABASE_URL set with defaults for others",
