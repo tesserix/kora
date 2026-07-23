@@ -62,3 +62,22 @@ func (r Repository) Delete(ctx context.Context, userID, logID uuid.UUID) error {
 	}
 	return nil
 }
+
+// LoggedDaysDesc returns distinct calendar days (YYYY-MM-DD in loc) that have at
+// least one log at or before `notAfter`'s day, most-recent first, capped at limit.
+func (r Repository) LoggedDaysDesc(ctx context.Context, userID uuid.UUID, notAfter time.Time, loc *time.Location, limit int) ([]string, error) {
+	if limit <= 0 || limit > 4000 {
+		limit = 4000
+	}
+	end := time.Date(notAfter.Year(), notAfter.Month(), notAfter.Day(), 0, 0, 0, 0, loc).Add(24 * time.Hour)
+	tz := loc.String()
+	var days []string
+	err := r.db.WithContext(ctx).
+		Raw("SELECT DISTINCT to_char(logged_at AT TIME ZONE ?, 'YYYY-MM-DD') AS day FROM food_logs WHERE user_id = ? AND logged_at < ? ORDER BY day DESC LIMIT ?",
+			tz, userID, end, limit).
+		Scan(&days).Error
+	if err != nil {
+		return nil, fmt.Errorf("foodlog: logged days: %w", err)
+	}
+	return days, nil
+}

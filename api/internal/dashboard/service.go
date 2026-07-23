@@ -90,21 +90,23 @@ func (s Service) ForDay(ctx context.Context, userID uuid.UUID, day time.Time, lo
 
 // streakDays counts consecutive days ending at `day` that have ≥1 food log.
 func (s Service) streakDays(ctx context.Context, userID uuid.UUID, day time.Time, loc *time.Location) (int, error) {
+	days, err := s.logs.LoggedDaysDesc(ctx, userID, day, loc, 4000)
+	if err != nil {
+		return 0, err
+	}
+	have := make(map[string]bool, len(days))
+	for _, d := range days {
+		have[d] = true
+	}
 	streak := 0
 	cursor := day
 	for {
-		logs, err := s.logs.ListByUserAndDay(ctx, userID, cursor, loc)
-		if err != nil {
-			return 0, err
-		}
-		if len(logs) == 0 {
+		key := cursor.In(loc).Format("2006-01-02")
+		if !have[key] {
 			break
 		}
 		streak++
 		cursor = cursor.Add(-24 * time.Hour)
-		if streak > 3650 { // safety cap (10y)
-			break
-		}
 	}
 	return streak, nil
 }
