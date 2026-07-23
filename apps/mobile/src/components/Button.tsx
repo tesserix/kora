@@ -8,7 +8,7 @@ type Props = Omit<PressableProps, "children"> & {
   variant?: Variant;
 };
 
-export function Button({ title, variant = "primary", disabled, ...rest }: Props) {
+export function Button({ title, variant = "primary", disabled, style, ...rest }: Props) {
   const { colors, radius, spacing } = useTheme();
   const bg =
     variant === "primary" ? colors.primary : variant === "secondary" ? colors.secondary : "transparent";
@@ -19,16 +19,19 @@ export function Button({ title, variant = "primary", disabled, ...rest }: Props)
       accessibilityRole="button"
       accessibilityState={{ disabled: !!disabled }}
       disabled={disabled}
-      style={({ pressed }) => ({
-        minHeight: 48,
-        borderRadius: radius.lg,
-        backgroundColor: bg,
-        paddingHorizontal: spacing.lg,
-        alignItems: "center",
-        justifyContent: "center",
-        opacity: disabled ? 0.5 : pressed ? 0.85 : 1,
-      })}
       {...rest}
+      style={(state) => [
+        {
+          minHeight: 48,
+          borderRadius: radius.lg,
+          backgroundColor: bg,
+          paddingHorizontal: spacing.lg,
+          alignItems: "center",
+          justifyContent: "center",
+          opacity: disabled ? 0.5 : state.pressed ? 0.85 : 1,
+        },
+        typeof style === "function" ? style(state) : style,
+      ]}
     >
       <Text style={{ color: fg, fontSize: 16, fontWeight: "600" }}>{title}</Text>
     </Pressable>

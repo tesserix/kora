@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
   api:
@@ -56,6 +55,10 @@ jobs:
     if: github.ref == 'refs/heads/main'
     needs: [api]
     runs-on: ubuntu-latest
+    # Only this job needs WIF; scope the OIDC token grant here (least privilege).
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: google-github-actions/auth@v2
