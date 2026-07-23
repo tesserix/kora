@@ -7,7 +7,9 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/tesserix/kora/api/internal/auth"
+	"github.com/tesserix/kora/api/internal/foodlog"
 	"github.com/tesserix/kora/api/internal/httpx"
+	"github.com/tesserix/kora/api/internal/nutrition"
 	"github.com/tesserix/kora/api/internal/onboarding"
 	"github.com/tesserix/kora/api/internal/user"
 )
@@ -48,6 +50,15 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1 := r.Group("/v1", auth.Middleware(deps.Verifier))
 		v1.GET("/me", userHandler.Me)
 		v1.POST("/onboarding", onboardingHandler.Submit)
+
+		foodRepo := nutrition.NewRepository(deps.DB)
+		logRepo := foodlog.NewRepository(deps.DB)
+		logHandler := foodlog.NewHandler(foodlog.NewService(logRepo, foodRepo), logRepo, userRepo)
+		v1.POST("/logs", logHandler.Create)
+		v1.GET("/logs", logHandler.List)
+		v1.DELETE("/logs/:id", logHandler.Delete)
+		v1.POST("/logs/copy-day", logHandler.CopyDay)
+		v1.POST("/logs/:id/repeat", logHandler.Repeat)
 	}
 
 	r.NoRoute(func(c *gin.Context) {
