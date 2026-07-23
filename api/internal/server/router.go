@@ -6,13 +6,15 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"github.com/tesserix/kora/api/internal/auth"
 	"github.com/tesserix/kora/api/internal/httpx"
 )
 
 // Deps carries the wired dependencies for the router. Fields are added as
 // packages come online (DB in Task 3, Verifier in Task 4).
 type Deps struct {
-	DB *gorm.DB
+	DB       *gorm.DB
+	Verifier auth.TokenVerifier
 }
 
 func NewRouter(deps Deps) *gin.Engine {
