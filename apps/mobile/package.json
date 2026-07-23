@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
+    "@tanstack/react-query": "^5.101.4",
     "expo": "~57.0.8",
     "expo-constants": "~57.0.7",
     "expo-linking": "~57.0.4",
@@ -34,7 +35,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "test": "jest --ci"
+    "test": "jest --ci --forceExit"
   },
   "jest": {
     "preset": "jest-expo"
