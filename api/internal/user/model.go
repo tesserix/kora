@@ -19,6 +19,7 @@ type User struct {
 	WeightKg       float64    `json:"weight_kg"`
 	ActivityLevel  string     `json:"activity_level"`
 	Goal           string     `json:"goal"`
+	Timezone       string     `json:"timezone"`
 	TargetKcal     float64    `json:"target_kcal"`
 	TargetProteinG float64    `json:"target_protein_g"`
 	TargetCarbsG   float64    `json:"target_carbs_g"`

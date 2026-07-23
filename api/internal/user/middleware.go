@@ -2,6 +2,7 @@ package user
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -10,6 +11,7 @@ import (
 )
 
 const contextUserID = "user_id"
+const contextUserLoc = "user_loc"
 
 // ResolveMiddleware provisions-and-resolves the authenticated user once per
 // request, so every downstream handler can read a guaranteed users.id without
@@ -27,6 +29,11 @@ func ResolveMiddleware(repo Repository) gin.HandlerFunc {
 			return
 		}
 		c.Set(contextUserID, u.ID)
+		loc, err := time.LoadLocation(u.Timezone)
+		if err != nil {
+			loc = time.UTC
+		}
+		c.Set(contextUserLoc, loc)
 		c.Next()
 	}
 }
@@ -40,4 +47,18 @@ func IDFromContext(c *gin.Context) (uuid.UUID, bool) {
 	}
 	id, ok := v.(uuid.UUID)
 	return id, ok
+}
+
+// LocFromContext reads the *time.Location resolved by ResolveMiddleware
+// earlier in the request chain, falling back to UTC if unset or invalid.
+func LocFromContext(c *gin.Context) *time.Location {
+	v, ok := c.Get(contextUserLoc)
+	if !ok {
+		return time.UTC
+	}
+	loc, ok := v.(*time.Location)
+	if !ok {
+		return time.UTC
+	}
+	return loc
 }

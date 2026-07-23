@@ -61,7 +61,7 @@ func (h Handler) DayTotal(c *gin.Context) {
 		httpx.Error(c, http.StatusBadRequest, "invalid_input", "date must be YYYY-MM-DD")
 		return
 	}
-	total, err := h.repo.WaterTotalForDay(c.Request.Context(), userID, day, time.UTC)
+	total, err := h.repo.WaterTotalForDay(c.Request.Context(), userID, day, user.LocFromContext(c))
 	if err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not total water")
 		return

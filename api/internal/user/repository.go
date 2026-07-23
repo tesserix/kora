@@ -70,6 +70,7 @@ type OnboardingFields struct {
 	WeightKg       float64
 	ActivityLevel  string
 	Goal           string
+	Timezone       string
 	TargetKcal     float64
 	TargetProteinG float64
 	TargetCarbsG   float64
@@ -84,6 +85,7 @@ func (r Repository) SaveOnboarding(ctx context.Context, userID uuid.UUID, f Onbo
 		"weight_kg":        f.WeightKg,
 		"activity_level":   f.ActivityLevel,
 		"goal":             f.Goal,
+		"timezone":         f.Timezone,
 		"target_kcal":      f.TargetKcal,
 		"target_protein_g": f.TargetProteinG,
 		"target_carbs_g":   f.TargetCarbsG,

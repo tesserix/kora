@@ -57,7 +57,7 @@ func (h Handler) List(c *gin.Context) {
 		httpx.Error(c, http.StatusBadRequest, "invalid_input", "date must be YYYY-MM-DD")
 		return
 	}
-	logs, err := h.repo.ListByUserAndDay(c.Request.Context(), userID, day, time.UTC)
+	logs, err := h.repo.ListByUserAndDay(c.Request.Context(), userID, day, user.LocFromContext(c))
 	if err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not list logs")
 		return
@@ -103,7 +103,7 @@ func (h Handler) CopyDay(c *gin.Context) {
 		httpx.Error(c, http.StatusBadRequest, "invalid_input", "from/to must be YYYY-MM-DD")
 		return
 	}
-	n, err := h.svc.CopyDay(c.Request.Context(), userID, from, to, time.UTC)
+	n, err := h.svc.CopyDay(c.Request.Context(), userID, from, to, user.LocFromContext(c))
 	if err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not copy day")
 		return

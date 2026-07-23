@@ -35,9 +35,13 @@ func (h Handler) Submit(c *gin.Context) {
 		httpx.Error(c, http.StatusBadRequest, "invalid_input", err.Error())
 		return
 	}
+	tz := in.Timezone
+	if tz == "" {
+		tz = "Australia/Sydney"
+	}
 	saved, err := h.users.SaveOnboarding(c.Request.Context(), userID, user.OnboardingFields{
 		Sex: in.Sex, BirthYear: in.BirthYear, HeightCm: in.HeightCm, WeightKg: in.WeightKg,
-		ActivityLevel: in.ActivityLevel, Goal: in.Goal,
+		ActivityLevel: in.ActivityLevel, Goal: in.Goal, Timezone: tz,
 		TargetKcal: targets.Kcal, TargetProteinG: targets.ProteinG,
 		TargetCarbsG: targets.CarbsG, TargetFatG: targets.FatG,
 	})

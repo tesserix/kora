@@ -34,7 +34,7 @@ func (h Handler) Get(c *gin.Context) {
 		}
 		day = parsed
 	}
-	sum, err := h.svc.ForDay(c.Request.Context(), userID, day, time.UTC)
+	sum, err := h.svc.ForDay(c.Request.Context(), userID, day, user.LocFromContext(c))
 	if err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not build dashboard")
 		return

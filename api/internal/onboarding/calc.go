@@ -10,6 +10,7 @@ type Input struct {
 	WeightKg      float64 `json:"weight_kg"`
 	ActivityLevel string  `json:"activity_level"`
 	Goal          string  `json:"goal"`
+	Timezone      string  `json:"timezone"`
 }
 
 type Targets struct {
