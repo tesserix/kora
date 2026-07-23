@@ -1177,7 +1177,9 @@ Run: `cd apps/mobile && npm test` → PASS if generation succeeded (test-first h
 import { useColorScheme } from "react-native";
 import { darkColors, fontSize, lightColors, radius, spacing } from "./tokens";
 
-export type ThemeColors = typeof lightColors;
+// Widen to string values so both lightColors and darkColors (which have
+// distinct literal-hex types under `as const`) are assignable to ThemeColors.
+export type ThemeColors = Record<keyof typeof lightColors, string>;
 
 export function useTheme() {
   const scheme = useColorScheme() ?? "light";
