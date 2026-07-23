@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: kora
+          POSTGRES_USER: kora
+          POSTGRES_PASSWORD: kora_dev
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U kora" --health-interval 5s
+          --health-timeout 3s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: api/go.sum
+      - name: Vet
+        run: cd api && go vet ./...
+      - name: Test
+        env:
+          TEST_DATABASE_URL: postgres://kora:kora_dev@localhost:5432/kora?sslmode=disable
+        run: |
+          cd api
+          TEST_DATABASE_URL=postgres://kora:kora_dev@localhost:5432/kora?sslmode=disable go run ./cmd/migrate
+          go test -race -coverprofile=coverage.out ./...
+
+  mobile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+      - run: cd apps/mobile && npm ci
+      - run: cd apps/mobile && npx tsc --noEmit
+      - run: cd apps/mobile && npm test
+
+  build-image:
+    if: github.ref == 'refs/heads/main'
+    needs: [api]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.CI_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - run: gcloud auth configure-docker asia-south1-docker.pkg.dev --quiet
+      - name: Build and push
+        run: |
+          IMAGE=asia-south1-docker.pkg.dev/tesserix-app/services/kora-api
+          docker build -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" api/
+          docker push "$IMAGE:${{ github.sha }}"
+          docker push "$IMAGE:latest"
