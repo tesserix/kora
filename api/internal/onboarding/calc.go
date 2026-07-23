@@ -34,6 +34,20 @@ var goalAdjustments = map[string]float64{
 	"muscle_gain": 300,
 }
 
+// Mifflin-St Jeor BMR coefficients and macro-split constants.
+const (
+	bmrWeightCoef    = 10.0
+	bmrHeightCoef    = 6.25
+	bmrAgeCoef       = 5.0
+	bmrMaleOffset    = 5.0
+	bmrFemaleOffset  = -161.0
+	maxAgeYears      = 120
+	proteinGPerKg    = 2.0
+	fatCaloriePct    = 0.25
+	kcalPerGramFat   = 9.0
+	kcalPerGramMacro = 4.0 // protein and carbs
+)
+
 func Calculate(in Input, currentYear int) (Targets, error) {
 	if in.Sex != "male" && in.Sex != "female" {
 		return Targets{}, fmt.Errorf("onboarding: sex must be male or female")
@@ -42,7 +56,7 @@ func Calculate(in Input, currentYear int) (Targets, error) {
 		return Targets{}, fmt.Errorf("onboarding: height and weight must be positive")
 	}
 	age := currentYear - in.BirthYear
-	if age <= 0 || age > 120 {
+	if age <= 0 || age > maxAgeYears {
 		return Targets{}, fmt.Errorf("onboarding: birth_year out of range")
 	}
 	factor, ok := activityFactors[in.ActivityLevel]
@@ -54,17 +68,17 @@ func Calculate(in Input, currentYear int) (Targets, error) {
 		return Targets{}, fmt.Errorf("onboarding: invalid goal")
 	}
 
-	bmr := 10*in.WeightKg + 6.25*in.HeightCm - 5*float64(age)
+	bmr := bmrWeightCoef*in.WeightKg + bmrHeightCoef*in.HeightCm - bmrAgeCoef*float64(age)
 	if in.Sex == "male" {
-		bmr += 5
+		bmr += bmrMaleOffset
 	} else {
-		bmr -= 161
+		bmr += bmrFemaleOffset
 	}
 	kcal := bmr*factor + adjust
 
-	proteinG := 2.0 * in.WeightKg // 2 g/kg bodyweight
-	fatG := (kcal * 0.25) / 9     // 25% of calories from fat
-	carbsG := (kcal - proteinG*4 - fatG*9) / 4
+	proteinG := proteinGPerKg * in.WeightKg
+	fatG := (kcal * fatCaloriePct) / kcalPerGramFat
+	carbsG := (kcal - proteinG*kcalPerGramMacro - fatG*kcalPerGramFat) / kcalPerGramMacro
 	if carbsG < 0 {
 		carbsG = 0
 	}
