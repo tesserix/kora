@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -31,6 +32,11 @@ type stubProvider struct {
 	// call that runs past its latency budget.
 	block bool
 
+	// delay, when > 0 and block is false, makes every method sleep for delay
+	// (respecting ctx) before returning its configured result — simulates a
+	// slow-but-succeeding provider (e.g. the NVIDIA fallback's cold start).
+	delay time.Duration
+
 	// calls counts every method invocation, for asserting a provider was
 	// (not) reached.
 	calls int
@@ -38,6 +44,13 @@ type stubProvider struct {
 
 func (s *stubProvider) IdentifyText(ctx context.Context, phrase string) ([]Guess, Usage, error) {
 	s.calls++
+	if s.delay > 0 {
+		select {
+		case <-time.After(s.delay):
+		case <-ctx.Done():
+			return nil, Usage{}, ctx.Err()
+		}
+	}
 	if s.block {
 		<-ctx.Done()
 		return nil, Usage{}, ctx.Err()
@@ -47,6 +60,13 @@ func (s *stubProvider) IdentifyText(ctx context.Context, phrase string) ([]Guess
 
 func (s *stubProvider) IdentifyPhoto(ctx context.Context, image []byte, mime string) ([]Guess, Usage, error) {
 	s.calls++
+	if s.delay > 0 {
+		select {
+		case <-time.After(s.delay):
+		case <-ctx.Done():
+			return nil, Usage{}, ctx.Err()
+		}
+	}
 	if s.block {
 		<-ctx.Done()
 		return nil, Usage{}, ctx.Err()
@@ -56,6 +76,13 @@ func (s *stubProvider) IdentifyPhoto(ctx context.Context, image []byte, mime str
 
 func (s *stubProvider) Decompose(ctx context.Context, dish string) ([]IngredientGuess, Usage, error) {
 	s.calls++
+	if s.delay > 0 {
+		select {
+		case <-time.After(s.delay):
+		case <-ctx.Done():
+			return nil, Usage{}, ctx.Err()
+		}
+	}
 	if s.block {
 		<-ctx.Done()
 		return nil, Usage{}, ctx.Err()
@@ -65,6 +92,13 @@ func (s *stubProvider) Decompose(ctx context.Context, dish string) ([]Ingredient
 
 func (s *stubProvider) Embed(ctx context.Context, text string) ([]float32, Usage, error) {
 	s.calls++
+	if s.delay > 0 {
+		select {
+		case <-time.After(s.delay):
+		case <-ctx.Done():
+			return nil, Usage{}, ctx.Err()
+		}
+	}
 	if s.block {
 		<-ctx.Done()
 		return nil, Usage{}, ctx.Err()

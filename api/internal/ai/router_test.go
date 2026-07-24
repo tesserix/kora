@@ -120,6 +120,29 @@ func TestRouter_PrimaryExceedsBudget_FallsBack_Embed(t *testing.T) {
 	assert.Equal(t, "fallback-stub", usage.Provider)
 }
 
+// TestRouter_FallbackGetsGenerousBudget verifies the fallback is NOT capped at
+// the primary's tight latency budget: primary times out fast (20ms), and the
+// fallback takes longer than that budget (60ms) but well under its own
+// FallbackBudget (500ms), so it must still succeed. Before the dedicated
+// fallback budget, the fallback shared the 20ms cap and would be cancelled.
+func TestRouter_FallbackGetsGenerousBudget(t *testing.T) {
+	primary := &stubProvider{name: "primary-stub", block: true}
+	fallback := &stubProvider{
+		name:       "fallback-stub",
+		delay:      60 * time.Millisecond,
+		guesses:    []Guess{{Food: "slow-but-served"}},
+		guessUsage: Usage{Provider: "fallback-stub"},
+	}
+	r := &Router{Primary: primary, Fallback: fallback, TextBudget: 20 * time.Millisecond, FallbackBudget: 500 * time.Millisecond}
+
+	guesses, usage, err := r.IdentifyText(context.Background(), "slow")
+
+	require.NoError(t, err)
+	assert.Equal(t, []Guess{{Food: "slow-but-served"}}, guesses)
+	assert.Equal(t, "fallback-stub", usage.Provider)
+	assert.Equal(t, 1, fallback.calls)
+}
+
 func TestRouter_BothError_ReturnsFallbackError(t *testing.T) {
 	primaryErr := errors.New("primary exploded")
 	fallbackErr := errors.New("fallback exploded too")

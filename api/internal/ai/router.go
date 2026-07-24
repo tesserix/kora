@@ -11,6 +11,14 @@ import (
 const (
 	photoBudget = 3 * time.Second
 	textBudget  = 1500 * time.Millisecond
+
+	// fallbackBudget is deliberately generous: the fallback provider only runs
+	// after the primary has already failed or timed out, so latency there is a
+	// last-resort cost we accept rather than fail the resolve. It also absorbs
+	// slow cold starts on free-tier fallback endpoints (NVIDIA NIM cold start
+	// was measured at ~75s). Bounded only so a truly hung fallback can't pin a
+	// request forever; the request's own context still applies on top.
+	fallbackBudget = 90 * time.Second
 )
 
 // Router composes a Primary and Fallback Provider. Every call is attempted
@@ -30,6 +38,10 @@ type Router struct {
 	// production budgets.
 	PhotoBudget time.Duration
 	TextBudget  time.Duration
+
+	// FallbackBudget overrides the default fallbackBudget when non-zero. Tests
+	// use it to keep the fallback-latency path fast; production leaves it unset.
+	FallbackBudget time.Duration
 }
 
 func (r *Router) photoBudgetOrDefault() time.Duration {
@@ -46,6 +58,13 @@ func (r *Router) textBudgetOrDefault() time.Duration {
 	return textBudget
 }
 
+func (r *Router) fallbackBudgetOrDefault() time.Duration {
+	if r.FallbackBudget > 0 {
+		return r.FallbackBudget
+	}
+	return fallbackBudget
+}
+
 // withFallback runs primary against a child context bounded by budget. If
 // primary returns an error (including the child context's own deadline
 // being exceeded), fallback is retried against a fresh context derived from
@@ -53,7 +72,7 @@ func (r *Router) textBudgetOrDefault() time.Duration {
 // same budget. The result of whichever call served the request is returned
 // as-is, including its Usage — providers set Usage.Provider themselves, so
 // the caller can tell who served just by inspecting it.
-func withFallback[T any](ctx context.Context, budget time.Duration, primary, fallback func(context.Context) (T, Usage, error)) (T, Usage, error) {
+func withFallback[T any](ctx context.Context, budget, fbBudget time.Duration, primary, fallback func(context.Context) (T, Usage, error)) (T, Usage, error) {
 	primaryCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 
@@ -62,34 +81,34 @@ func withFallback[T any](ctx context.Context, budget time.Duration, primary, fal
 		return result, usage, nil
 	}
 
-	fallbackCtx, fallbackCancel := context.WithTimeout(ctx, budget)
+	fallbackCtx, fallbackCancel := context.WithTimeout(ctx, fbBudget)
 	defer fallbackCancel()
 	return fallback(fallbackCtx)
 }
 
 func (r *Router) IdentifyText(ctx context.Context, phrase string) ([]Guess, Usage, error) {
-	return withFallback(ctx, r.textBudgetOrDefault(),
+	return withFallback(ctx, r.textBudgetOrDefault(), r.fallbackBudgetOrDefault(),
 		func(c context.Context) ([]Guess, Usage, error) { return r.Primary.IdentifyText(c, phrase) },
 		func(c context.Context) ([]Guess, Usage, error) { return r.Fallback.IdentifyText(c, phrase) },
 	)
 }
 
 func (r *Router) IdentifyPhoto(ctx context.Context, image []byte, mime string) ([]Guess, Usage, error) {
-	return withFallback(ctx, r.photoBudgetOrDefault(),
+	return withFallback(ctx, r.photoBudgetOrDefault(), r.fallbackBudgetOrDefault(),
 		func(c context.Context) ([]Guess, Usage, error) { return r.Primary.IdentifyPhoto(c, image, mime) },
 		func(c context.Context) ([]Guess, Usage, error) { return r.Fallback.IdentifyPhoto(c, image, mime) },
 	)
 }
 
 func (r *Router) Decompose(ctx context.Context, dish string) ([]IngredientGuess, Usage, error) {
-	return withFallback(ctx, r.textBudgetOrDefault(),
+	return withFallback(ctx, r.textBudgetOrDefault(), r.fallbackBudgetOrDefault(),
 		func(c context.Context) ([]IngredientGuess, Usage, error) { return r.Primary.Decompose(c, dish) },
 		func(c context.Context) ([]IngredientGuess, Usage, error) { return r.Fallback.Decompose(c, dish) },
 	)
 }
 
 func (r *Router) Embed(ctx context.Context, text string) ([]float32, Usage, error) {
-	return withFallback(ctx, r.textBudgetOrDefault(),
+	return withFallback(ctx, r.textBudgetOrDefault(), r.fallbackBudgetOrDefault(),
 		func(c context.Context) ([]float32, Usage, error) { return r.Primary.Embed(c, text) },
 		func(c context.Context) ([]float32, Usage, error) { return r.Fallback.Embed(c, text) },
 	)
