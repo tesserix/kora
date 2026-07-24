@@ -3,16 +3,20 @@ import { FlatList, Pressable, TextInput, View } from "react-native";
 import { router } from "expo-router";
 import { AppText } from "@/components/Text";
 import { Button } from "@/components/Button";
-import { Card } from "@/components/Card";
+import { Numeral } from "@/components/Numeral";
+import { ScreenHeader } from "@/components/ScreenHeader";
+import { FoodTile } from "@/components/FoodTile";
 import { ProvenanceChip } from "@/components/ProvenanceChip";
 import { useCreateLog, useFoodSearch } from "@/api/hooks";
 import type { FoodItem } from "@/api/types";
+import { foodVisual } from "@/lib/foodVisual";
+import { tileFaint, MACRO } from "@/lib/hue";
 import { useTheme } from "@/theme";
 
 const MEALS = ["breakfast", "lunch", "dinner", "snack"] as const;
 
 export default function LogScreen() {
-  const { colors, spacing, radius } = useTheme();
+  const { colors, spacing, radius, fonts } = useTheme();
   const mountedAt = useRef(Date.now());
   const [q, setQ] = useState("");
   const [selected, setSelected] = useState<FoodItem | null>(null);
@@ -50,10 +54,33 @@ export default function LogScreen() {
   }
 
   if (selected) {
+    const g = Number(grams) || selected.serving_grams || 100;
+    const scale = g / 100;
+    const macros: ReadonlyArray<readonly [string, string, number]> = [
+      ["Protein", `${Math.round(selected.protein_per_100g * scale)}g`, MACRO.protein.hue],
+      ["Carbs", `${Math.round(selected.carbs_per_100g * scale)}g`, MACRO.carbs.hue],
+      ["Fat", `${Math.round(selected.fat_per_100g * scale)}g`, MACRO.fat.hue],
+    ];
+    const vis = foodVisual(selected.name, meal);
     return (
       <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg, gap: spacing.md }}>
-        <AppText variant="h2">{selected.name}</AppText>
-        <ProvenanceChip provenance={selected.provenance} />
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
+          <FoodTile hue={vis.hue} icon={vis.icon} size={64} radius={radius.xl} />
+          <View style={{ flex: 1 }}>
+            <AppText style={{ fontSize: 20, fontWeight: "800", letterSpacing: -0.5 }}>{selected.name}</AppText>
+            <ProvenanceChip provenance={selected.provenance} />
+          </View>
+        </View>
+
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          {macros.map(([label, value, hue]) => (
+            <View key={label} style={{ flex: 1, backgroundColor: tileFaint(hue), borderRadius: radius.lg, padding: 12 }}>
+              <AppText muted style={{ fontSize: 11, fontWeight: "600" }}>{label}</AppText>
+              <Numeral size={16} color={`hsl(${hue}, 55%, 38%)`}>{value}</Numeral>
+            </View>
+          ))}
+        </View>
+
         <TextInput
           accessibilityLabel="Quantity in grams"
           style={inputStyle}
@@ -76,33 +103,43 @@ export default function LogScreen() {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg, gap: spacing.md }}>
-      <AppText variant="h1">Log food</AppText>
-      <TextInput
-        accessibilityLabel="Search foods"
-        style={inputStyle}
-        placeholder="Search foods…"
-        placeholderTextColor={colors.mutedForeground}
-        autoFocus
-        value={q}
-        onChangeText={setQ}
-      />
-      <FlatList
-        data={search.data ?? []}
-        keyExtractor={(item) => item.id}
-        ItemSeparatorComponent={() => <View style={{ height: spacing.sm }} />}
-        renderItem={({ item }) => (
-          <Pressable onPress={() => setSelected(item)}>
-            <Card>
-              <AppText>{item.name}</AppText>
-              <AppText muted>
-                {Math.round(item.kcal_per_100g)} kcal/100g · {item.serving_desc}
-              </AppText>
-            </Card>
-          </Pressable>
-        )}
-        ListEmptyComponent={q.length >= 2 && !search.isLoading ? <AppText muted>No matches.</AppText> : null}
-      />
+    <View style={{ flex: 1, backgroundColor: colors.background, paddingTop: 8 }}>
+      <ScreenHeader overline="Add to diary" title="Log food" />
+      <View style={{ paddingHorizontal: 20, gap: spacing.md, flex: 1 }}>
+        <TextInput
+          accessibilityLabel="Search foods"
+          style={inputStyle}
+          placeholder="Search foods…"
+          placeholderTextColor={colors.mutedForeground}
+          autoFocus
+          value={q}
+          onChangeText={setQ}
+        />
+        <FlatList
+          data={search.data ?? []}
+          keyExtractor={(item) => item.id}
+          ItemSeparatorComponent={() => <View style={{ height: spacing.sm }} />}
+          renderItem={({ item }) => {
+            const vis = foodVisual(item.name);
+            return (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => setSelected(item)}
+                style={{ flexDirection: "row", alignItems: "center", gap: 14, padding: 12, borderRadius: radius.xl, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card }}
+              >
+                <FoodTile hue={vis.hue} icon={vis.icon} size={48} />
+                <View style={{ flex: 1 }}>
+                  <AppText style={{ fontSize: 15, fontWeight: "600" }}>{item.name}</AppText>
+                  <AppText muted style={{ fontSize: 12, fontFamily: fonts.mono }}>
+                    {Math.round(item.kcal_per_100g)} kcal/100g · {item.serving_desc}
+                  </AppText>
+                </View>
+              </Pressable>
+            );
+          }}
+          ListEmptyComponent={q.length >= 2 && !search.isLoading ? <AppText muted>No matches.</AppText> : null}
+        />
+      </View>
     </View>
   );
 }
