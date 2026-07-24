@@ -53,7 +53,7 @@ func TestResolveRoutesRegisteredWhenResolverSet(t *testing.T) {
 	h := resolve.NewHandler(nil, nil) // never invoked — we only inspect registration
 	r := NewRouter(Deps{DB: &gorm.DB{}, Verifier: stubVerifier{}, Resolver: &h})
 	routes := r.Routes()
-	for _, p := range []string{"/v1/resolve/text", "/v1/resolve/photo", "/v1/resolve/barcode"} {
+	for _, p := range []string{"/v1/resolve/text", "/v1/resolve/photo", "/v1/resolve/voice", "/v1/resolve/barcode"} {
 		if !hasRoute(routes, "POST", p) {
 			t.Errorf("expected POST %s to be registered", p)
 		}
@@ -71,5 +71,8 @@ func TestResolveRoutesAbsentWhenResolverNil(t *testing.T) {
 	r := NewRouter(Deps{DB: &gorm.DB{}, Verifier: stubVerifier{}}) // Resolver nil
 	if hasRoute(r.Routes(), "POST", "/v1/resolve/text") {
 		t.Error("resolve routes must not be registered when Resolver is nil")
+	}
+	if hasRoute(r.Routes(), "POST", "/v1/resolve/voice") {
+		t.Error("resolve voice route must not be registered when Resolver is nil")
 	}
 }

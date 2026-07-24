@@ -23,6 +23,7 @@ import (
 type stubTP struct {
 	text    ai.Resolution
 	photo   ai.Resolution
+	voice   ai.Resolution
 	err     error
 	gotMime string
 	gotSize int
@@ -38,6 +39,11 @@ func (s *stubTP) ResolvePhoto(ctx context.Context, uid uuid.UUID, img []byte, mi
 	return s.photo, s.err
 }
 
+func (s *stubTP) ResolveVoice(ctx context.Context, uid uuid.UUID, audio []byte, mime string) (ai.Resolution, error) {
+	s.gotMime = mime
+	return s.voice, s.err
+}
+
 func newEngine(h Handler) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
@@ -45,6 +51,7 @@ func newEngine(h Handler) *gin.Engine {
 	g := r.Group("/resolve")
 	g.POST("/text", h.ResolveText)
 	g.POST("/photo", h.ResolvePhoto)
+	g.POST("/voice", h.ResolveVoice)
 	g.POST("/barcode", h.ResolveBarcode)
 	return r
 }
@@ -59,6 +66,7 @@ func newEngineNoUser(h Handler) *gin.Engine {
 	g := r.Group("/resolve")
 	g.POST("/text", h.ResolveText)
 	g.POST("/photo", h.ResolvePhoto)
+	g.POST("/voice", h.ResolveVoice)
 	g.POST("/barcode", h.ResolveBarcode)
 	return r
 }
@@ -277,6 +285,91 @@ func TestResolvePhoto_BodyExceedsHardCap(t *testing.T) {
 
 	require.Equal(t, http.StatusRequestEntityTooLarge, w.Code, w.Body.String())
 	assert.Contains(t, w.Body.String(), "payload_too_large")
+}
+
+func TestResolveVoice_Success(t *testing.T) {
+	tp := &stubTP{voice: ai.Resolution{
+		Tier:       ai.TierConfirm,
+		Provenance: "afcd",
+		Candidates: []ai.ResolvedCandidate{{Item: nutrition.FoodItem{Name: "Oatmeal"}, MatchScore: 0.9}},
+	}}
+	h := NewHandler(tp, nil)
+	r := newEngine(h)
+
+	content := []byte("fake-audio-bytes")
+	body, contentType := buildMultipart(t, "file", "clip.m4a", "audio/m4a", content)
+
+	req := httptest.NewRequest(http.MethodPost, "/resolve/voice", body)
+	req.Header.Set("Content-Type", contentType)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, "audio/m4a", tp.gotMime)
+
+	var respBody struct {
+		Data ai.Resolution `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &respBody))
+	assert.Equal(t, ai.TierConfirm, respBody.Data.Tier)
+	assert.Equal(t, "afcd", respBody.Data.Provenance)
+	require.Len(t, respBody.Data.Candidates, 1)
+	assert.Equal(t, "Oatmeal", respBody.Data.Candidates[0].Item.Name)
+}
+
+func TestResolveVoice_NoFile(t *testing.T) {
+	h := NewHandler(&stubTP{}, nil)
+	r := newEngine(h)
+
+	body := &bytes.Buffer{}
+	w2 := multipart.NewWriter(body)
+	require.NoError(t, w2.Close())
+
+	req := httptest.NewRequest(http.MethodPost, "/resolve/voice", body)
+	req.Header.Set("Content-Type", w2.FormDataContentType())
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "invalid_input")
+}
+
+// TestResolveVoice_BodyExceedsHardCap sends a request body genuinely larger
+// than maxAudioBodyBytes (not just larger than maxAudioBytes), exercising
+// the http.MaxBytesReader path that rejects the upload while it is still
+// being read — before ParseMultipartForm has a chance to fully buffer it.
+func TestResolveVoice_BodyExceedsHardCap(t *testing.T) {
+	h := NewHandler(&stubTP{}, nil)
+	r := newEngine(h)
+
+	content := bytes.Repeat([]byte{0}, 13<<20) // 13 MiB, well past maxAudioBodyBytes
+	body, contentType := buildMultipart(t, "file", "clip.m4a", "audio/m4a", content)
+	require.Greater(t, body.Len(), maxAudioBodyBytes, "test body must exceed the hard cap to exercise MaxBytesReader")
+
+	req := httptest.NewRequest(http.MethodPost, "/resolve/voice", body)
+	req.Header.Set("Content-Type", contentType)
+	req.ContentLength = int64(body.Len())
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusRequestEntityTooLarge, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), "payload_too_large")
+}
+
+func TestResolveVoice_Unauthorized(t *testing.T) {
+	h := NewHandler(&stubTP{}, nil)
+	r := newEngineNoUser(h)
+
+	content := []byte("fake-audio-bytes")
+	body, contentType := buildMultipart(t, "file", "clip.m4a", "audio/m4a", content)
+
+	req := httptest.NewRequest(http.MethodPost, "/resolve/voice", body)
+	req.Header.Set("Content-Type", contentType)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+	assert.Contains(t, w.Body.String(), "unauthorized")
 }
 
 func TestResolveBarcode_Found(t *testing.T) {

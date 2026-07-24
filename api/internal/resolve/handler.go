@@ -40,6 +40,10 @@ const maxPhotoBytes = 8 << 20 // 8 MiB
 // multipart boundary markers and part headers surrounding the file bytes.
 const maxPhotoBodyBytes = maxPhotoBytes + 1<<10
 
+// maxAudioBytes caps an uploaded voice clip. Audio runs larger than photos.
+const maxAudioBytes = 12 << 20 // 12 MiB
+const maxAudioBodyBytes = maxAudioBytes + 1<<10
+
 // barcodeUnknownQuestion is returned (with no candidates, no fabricated row)
 // when a scanned barcode matches nothing locally or on OpenFoodFacts.
 const barcodeUnknownQuestion = "Barcode not recognized — search and log manually."
@@ -51,6 +55,7 @@ const barcodeDefaultGrams = 100.0
 type TextPhotoResolver interface {
 	ResolveText(ctx context.Context, userID uuid.UUID, phrase string) (ai.Resolution, error)
 	ResolvePhoto(ctx context.Context, userID uuid.UUID, image []byte, mime string) (ai.Resolution, error)
+	ResolveVoice(ctx context.Context, userID uuid.UUID, audio []byte, mime string) (ai.Resolution, error)
 }
 
 type BarcodeResolver func(ctx context.Context, code string) (*nutrition.FoodItem, bool, error)
@@ -126,6 +131,52 @@ func (h Handler) ResolvePhoto(c *gin.Context) {
 		mime = http.DetectContentType(buf)
 	}
 	res, err := h.tp.ResolvePhoto(c.Request.Context(), uid, buf, mime)
+	if err != nil {
+		httpx.RespondServiceError(c, err)
+		return
+	}
+	httpx.OK(c, res)
+}
+
+func (h Handler) ResolveVoice(c *gin.Context) {
+	uid, ok := user.IDFromContext(c)
+	if !ok {
+		httpx.Error(c, http.StatusUnauthorized, "unauthorized", "missing user")
+		return
+	}
+	// Bound the raw body BEFORE multipart parsing so an oversized upload is
+	// rejected while streaming in, not after Gin has fully buffered it.
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxAudioBodyBytes)
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		var mbe *http.MaxBytesError
+		if errors.As(err, &mbe) {
+			httpx.Error(c, http.StatusRequestEntityTooLarge, "payload_too_large", "audio exceeds 12MB limit")
+			return
+		}
+		httpx.Error(c, http.StatusBadRequest, "invalid_input", "file is required")
+		return
+	}
+	if fileHeader.Size > maxAudioBytes {
+		httpx.Error(c, http.StatusRequestEntityTooLarge, "payload_too_large", "audio exceeds 12MB limit")
+		return
+	}
+	f, err := fileHeader.Open()
+	if err != nil {
+		httpx.RespondServiceError(c, err)
+		return
+	}
+	defer f.Close()
+	buf, err := io.ReadAll(f) // bounded by MaxBytesReader above
+	if err != nil {
+		httpx.RespondServiceError(c, err)
+		return
+	}
+	mime := fileHeader.Header.Get("Content-Type")
+	if mime == "" {
+		mime = http.DetectContentType(buf)
+	}
+	res, err := h.tp.ResolveVoice(c.Request.Context(), uid, buf, mime)
 	if err != nil {
 		httpx.RespondServiceError(c, err)
 		return

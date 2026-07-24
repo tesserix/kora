@@ -80,6 +80,7 @@ func NewRouter(deps Deps) *gin.Engine {
 		if deps.Resolver != nil {
 			v1.POST("/resolve/text", deps.Resolver.ResolveText)
 			v1.POST("/resolve/photo", deps.Resolver.ResolvePhoto)
+			v1.POST("/resolve/voice", deps.Resolver.ResolveVoice)
 			v1.POST("/resolve/barcode", deps.Resolver.ResolveBarcode)
 		}
 	}
