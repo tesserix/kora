@@ -57,7 +57,7 @@ export default function Home() {
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingBottom: 16 }}>
         <View>
           <Overline>{dateLabel()}</Overline>
-          <AppText style={{ fontSize: 15, fontWeight: "600" }}>{greeting()}, {profile.data?.display_name?.split(" ")[0] ?? "there"}</AppText>
+          <AppText style={{ fontSize: 15, fontWeight: "600" }}>{greeting()}, {profile.data?.display_name?.trim().split(" ")[0] || "there"}</AppText>
         </View>
         <View style={{ flexDirection: "row", gap: 10, alignItems: "center" }}>
           <Pressable
@@ -92,7 +92,7 @@ export default function Home() {
 
       {/* Capture hero */}
       <View style={{ paddingHorizontal: 20, paddingBottom: 18 }}>
-        <CaptureHero onPress={() => router.push("/log")} />
+        <CaptureHero onPress={() => router.push("/capture")} />
       </View>
 
       {/* Compact fuel summary */}
@@ -113,13 +113,16 @@ export default function Home() {
           {loggedMeals.map((log, i) => (
             <FeedMeal key={log.id} log={log} note={NOTES[i % NOTES.length]} onOpen={() => openMeal(log)} />
           ))}
-          <View
-            style={{ flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderRadius: 16, borderWidth: 1.5, borderStyle: "dashed", borderColor: colors.border }}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Add a meal"
+            onPress={() => router.push("/capture")}
+            style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderRadius: 16, borderWidth: 1.5, borderStyle: "dashed", borderColor: colors.border, opacity: pressed ? 0.7 : 1 })}
           >
             <Icon name="plus" size={20} color={colors.primary} />
             <AppText style={{ fontSize: 14, fontWeight: "600" }}>Add a meal</AppText>
             <AppText muted style={{ marginLeft: "auto", fontSize: 12 }}>Snap · say · scan</AppText>
-          </View>
+          </Pressable>
         </View>
       </View>
     </ScrollView>
