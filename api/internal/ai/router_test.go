@@ -171,14 +171,31 @@ func TestRouter_BothError_ReturnsFallbackError_Embed(t *testing.T) {
 	assert.Nil(t, vec)
 }
 
-func TestRouter_Transcribe_PrimaryErrors_FallsBack(t *testing.T) {
-	primary := &stubProvider{name: "primary-stub", transcriptErr: errors.New("boom")}
-	fallback := &stubProvider{name: "fallback-stub", transcript: "chicken and rice", transcriptUsage: Usage{Provider: "fallback-stub"}}
+// TestRouter_Transcribe_NoFallback_ReturnsPrimaryError proves Transcribe does
+// NOT fall back: audio has no meaningful fallback (only the multimodal
+// primary can transcribe), so a primary error must be surfaced directly
+// instead of being masked behind the fallback's guaranteed "not supported".
+func TestRouter_Transcribe_NoFallback_ReturnsPrimaryError(t *testing.T) {
+	primaryErr := errors.New("gemini transcribe boom")
+	primary := &stubProvider{name: "primary-stub", transcriptErr: primaryErr}
+	fallback := &stubProvider{name: "fallback-stub", transcript: "should not be used"}
+	r := &Router{Primary: primary, Fallback: fallback}
+	_, _, err := r.Transcribe(context.Background(), []byte("audio"), "audio/mp4")
+	require.ErrorIs(t, err, primaryErr)
+	assert.Equal(t, 0, fallback.calls, "Transcribe must not fall back (audio has no text-model fallback)")
+}
+
+// TestRouter_Transcribe_PrimarySucceeds proves the positive path still works
+// now that Transcribe calls the primary directly.
+func TestRouter_Transcribe_PrimarySucceeds(t *testing.T) {
+	primary := &stubProvider{name: "primary-stub", transcript: "chicken and rice", transcriptUsage: Usage{Provider: "primary-stub"}}
+	fallback := &stubProvider{name: "fallback-stub"}
 	r := &Router{Primary: primary, Fallback: fallback}
 	got, usage, err := r.Transcribe(context.Background(), []byte("audio"), "audio/mp4")
 	require.NoError(t, err)
 	assert.Equal(t, "chicken and rice", got)
-	assert.Equal(t, "fallback-stub", usage.Provider)
+	assert.Equal(t, "primary-stub", usage.Provider)
+	assert.Equal(t, 0, fallback.calls)
 }
 
 func TestRouter_Name(t *testing.T) {

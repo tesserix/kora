@@ -19,6 +19,15 @@ const (
 	// was measured at ~75s). Bounded only so a truly hung fallback can't pin a
 	// request forever; the request's own context still applies on top.
 	fallbackBudget = 90 * time.Second
+
+	// transcribeBudget bounds a transcription call. Audio is a recorded note,
+	// not a latency-critical interaction, and can take several seconds, so this
+	// is generous (well above the measured ~3s latency and the 12 MiB cap's
+	// worst case). There is no meaningful fallback for audio — only the
+	// multimodal primary can transcribe — so Transcribe calls the primary
+	// directly and surfaces its real error instead of masking it behind the
+	// fallback's guaranteed "not supported".
+	transcribeBudget = 30 * time.Second
 )
 
 // Router composes a Primary and Fallback Provider. Every call is attempted
@@ -117,10 +126,9 @@ func (r *Router) Embed(ctx context.Context, text string) ([]float32, Usage, erro
 }
 
 func (r *Router) Transcribe(ctx context.Context, audio []byte, mime string) (string, Usage, error) {
-	return withFallback(ctx, r.photoBudgetOrDefault(), r.fallbackBudgetOrDefault(),
-		func(c context.Context) (string, Usage, error) { return r.Primary.Transcribe(c, audio, mime) },
-		func(c context.Context) (string, Usage, error) { return r.Fallback.Transcribe(c, audio, mime) },
-	)
+	tctx, cancel := context.WithTimeout(ctx, transcribeBudget)
+	defer cancel()
+	return r.Primary.Transcribe(tctx, audio, mime)
 }
 
 func (r *Router) Name() string {

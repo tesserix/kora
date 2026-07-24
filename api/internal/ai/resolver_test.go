@@ -283,7 +283,19 @@ func TestResolveVoiceTranscribesThenResolves(t *testing.T) {
 	// 89 kcal/100g * 100g / 100 = 89 — computed from the row, never from the
 	// (kcal-less) transcript or guess.
 	require.Equal(t, 89.0, res.Candidates[0].Kcal)
-	require.NotEmpty(t, meter.records, "provider usage must be metered")
+
+	// The whole point of transcription metering: at least one recorded Usage
+	// row must be the transcribe call itself, alongside the identify/embed
+	// rows from the reused text pipeline.
+	require.GreaterOrEqual(t, len(meter.records), 2, "provider usage must be metered for both transcribe and the text pipeline")
+	var sawTranscribe bool
+	for _, u := range meter.records {
+		if u.CallType == "transcribe" {
+			sawTranscribe = true
+			break
+		}
+	}
+	assert.True(t, sawTranscribe, "a transcribe call_type row must be recorded")
 }
 
 // TestResolveVoiceBlankTranscriptFollowUp proves that when transcription

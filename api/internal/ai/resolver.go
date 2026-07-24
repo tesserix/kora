@@ -195,7 +195,9 @@ func (r Resolver) ResolveVoice(ctx context.Context, userID uuid.UUID, audio []by
 	if err != nil {
 		return Resolution{}, fmt.Errorf("ai: resolve voice: %w", err)
 	}
-	r.cache.Set(ctx, key, res)
+	if res.Tier == TierAuto || res.Tier == TierConfirm {
+		r.cache.Set(ctx, key, res)
+	}
 	return res, nil
 }
 
