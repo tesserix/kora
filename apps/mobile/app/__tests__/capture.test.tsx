@@ -672,7 +672,7 @@ describe("Result tiers", () => {
     const { findByLabelText } = await render(
       <CaptureBody {...noopBodyProps} stage="result" resolution={resolution} onSearchManually={onSearchManually} />,
     );
-    fireEvent.press(await findByLabelText("Search manually"));
+    await fireEvent.press(await findByLabelText("Search manually"));
     expect(onSearchManually).toHaveBeenCalled();
   });
 
