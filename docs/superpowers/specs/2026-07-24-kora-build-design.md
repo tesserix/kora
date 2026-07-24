@@ -256,6 +256,15 @@ hardening, store assets, App Store / Play Store submission.
 - **Testing:** TDD throughout. Go unit + integration tests (≥ 80% coverage), RN component
   tests, Maestro E2E for critical flows (onboarding, log-a-meal, barcode), AI eval harness
   as permanent regression suite.
+- **UI fidelity (GATE):** every frontend screen must match its `design-system/ui_kits/kora/`
+  mockup — layout, hierarchy, and the *intent* in each mockup's header comment (e.g. Home is
+  a "conversational, Otto-led feed, NOT a calorie-tracker dashboard"). Build from the mockup,
+  not a generic interpretation: use the real components it composes (circular ring via
+  `react-native-svg`, `FoodTile`, editorial headline, capture hero, tab bar, `Sheet`,
+  `ScreenHeader`). Every frontend phase is reviewed against its mockup screenshot before
+  merge; a functional-but-off-design screen is a failed review, not a pass. Elements that
+  depend on later-phase features (Otto coaching copy, camera/voice capture) ship as tasteful
+  static placeholders that still match the mockup's shape.
 - **Error handling:** every AI path has a non-AI fallback — manual entry always works.
   Provider down → fallback model → graceful "log it now, I'll fill in details later" queue.
 - **Observability:** structured JSON logs, per-call AI latency/cost metrics from day one.
