@@ -57,6 +57,34 @@ func TestResolveFullTextRanksByName(t *testing.T) {
 	require.Equal(t, MatchFullText, got[0].MatchTier)
 }
 
+func TestResolveFullTextMatchesPluralQueryAgainstSingularizedName(t *testing.T) {
+	db := testDB(t)
+	repo := NewRepository(db)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE brand = 'test2a'") })
+
+	// Insert normalizes "Rolled oats, raw" -> normalized_name "rolled oat".
+	// Querying the plural "oats" normalizes to "oat" on the query side too,
+	// so tier-2 full-text must compare against normalized_name (not the
+	// verbatim, un-singularized fi.name) for the two sides to match.
+	seedFor(t, repo, []FoodItem{
+		{Name: "Rolled oats, raw", Brand: "test2a", Provenance: ProvenanceAFCD, KcalPer100g: 379},
+	})
+
+	got, err := repo.Resolve(context.Background(), "oats", nil, 5)
+	require.NoError(t, err)
+	require.NotEmpty(t, got)
+
+	var found *Candidate
+	for i := range got {
+		if got[i].Item.Brand == "test2a" {
+			found = &got[i]
+			break
+		}
+	}
+	require.NotNil(t, found, "expected the seeded oats row to be resolved")
+	require.Equal(t, MatchFullText, found.MatchTier)
+}
+
 func TestInsertSetsNormalizedName(t *testing.T) {
 	db := testDB(t)
 	repo := NewRepository(db)

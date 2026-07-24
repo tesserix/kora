@@ -126,16 +126,21 @@ func (r Repository) Resolve(ctx context.Context, phrase string, queryVec []float
 	}
 	add(aliasItems, MatchAlias, func(FoodItem) float64 { return 1.0 })
 
-	// Tier 2: full-text on name.
+	// Tier 2: full-text on normalized_name. Both sides must go through
+	// Normalize (which singularizes, e.g. "oats" -> "oat") so a plural query
+	// matches a plural document name: fi.name is stored verbatim, but
+	// normalized_name is Normalize(name) on both Insert and
+	// BackfillNormalizedNames, so comparing norm against normalized_name
+	// keeps the two sides in the same normalized form.
 	type ftRow struct {
 		FoodItem
 		Rank float64 `gorm:"column:rank"`
 	}
 	var ftRows []ftRow
 	if err := r.db.WithContext(ctx).
-		Raw(`SELECT fi.*, ts_rank(to_tsvector('simple', fi.name), plainto_tsquery('simple', ?)) AS rank
+		Raw(`SELECT fi.*, ts_rank(to_tsvector('simple', fi.normalized_name), plainto_tsquery('simple', ?)) AS rank
 		     FROM food_items fi
-		     WHERE to_tsvector('simple', fi.name) @@ plainto_tsquery('simple', ?)
+		     WHERE to_tsvector('simple', fi.normalized_name) @@ plainto_tsquery('simple', ?)
 		     ORDER BY rank DESC LIMIT ?`, norm, norm, limit).
 		Scan(&ftRows).Error; err != nil {
 		return nil, fmt.Errorf("nutrition: resolve fulltext: %w", err)
