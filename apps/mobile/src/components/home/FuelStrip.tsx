@@ -22,8 +22,8 @@ export function FuelStrip({ eaten, goal, macros }: { eaten: number; goal: number
       </CircularProgress>
       <View style={{ flex: 1 }}>
         <View style={{ flexDirection: "row", alignItems: "baseline", gap: 5 }}>
-          <Numeral size={17}>{Math.max(0, goal - eaten).toLocaleString()}</Numeral>
-          <AppText muted style={{ fontSize: 12 }}>kcal left · {eaten.toLocaleString()} of {goal.toLocaleString()}</AppText>
+          <Numeral size={17}>{Math.round(Math.max(0, goal - eaten)).toLocaleString()}</Numeral>
+          <AppText muted style={{ fontSize: 12 }}>kcal left · {Math.round(eaten).toLocaleString()} of {Math.round(goal).toLocaleString()}</AppText>
         </View>
         <View style={{ flexDirection: "row", gap: 12, marginTop: 6 }}>
           {rows.map(([label, v, g, hue]) => (

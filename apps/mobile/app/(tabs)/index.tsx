@@ -42,7 +42,7 @@ export default function Home() {
   const loadError = dashboard.isError || logs.isError;
   const eaten = d?.consumed.kcal ?? 0;
   const goal = d?.targets.kcal ?? 0;
-  const left = Math.max(0, goal - eaten);
+  const left = Math.round(Math.max(0, goal - eaten));
   const loggedMeals = (logs.data ?? []) as FoodLog[];
 
   const openMeal = (log: FoodLog) =>
