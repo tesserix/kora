@@ -26,6 +26,7 @@ export function CircularProgress({ value, max, size = 54, stroke = 6, color, tra
       <Svg width={size} height={size}>
         <Circle cx={half} cy={half} r={r} stroke={trackColor} strokeWidth={stroke} fill="none" />
         <Circle
+          testID="cp-arc"
           cx={half}
           cy={half}
           r={r}
