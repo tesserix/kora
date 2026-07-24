@@ -13,7 +13,14 @@ import { ModePill } from "@/components/capture/ModePill";
 import { Waveform } from "@/components/capture/Waveform";
 import { DetectedCard } from "@/components/capture/DetectedCard";
 import { captureColors } from "@/components/capture/captureTheme";
-import { useProfile, useResolveBarcode, useResolvePhoto, useResolveText, useResolveVoice } from "@/api/hooks";
+import {
+  useCreateLog,
+  useProfile,
+  useResolveBarcode,
+  useResolvePhoto,
+  useResolveText,
+  useResolveVoice,
+} from "@/api/hooks";
 import { ApiError } from "@/lib/api";
 import type { Resolution } from "@/api/types";
 import { mealSlotForHour, type MealSlot } from "@/lib/mealSlot";
@@ -243,6 +250,66 @@ function IdleAffordance({
   );
 }
 
+type ResultView = "card" | "followUp" | "empty";
+
+// Which of the three result presentations applies to a given resolution.
+// A follow-up question always wins when present (the server is explicitly
+// asking for clarification); otherwise an empty candidate list falls back to
+// the generic "couldn't identify that" state; anything else has candidates
+// worth showing in the DetectedCard.
+function resolveResultView(resolution: Resolution): ResultView {
+  if (resolution.tier === "follow_up" && resolution.follow_up_question) {
+    return "followUp";
+  }
+  if (resolution.candidates.length === 0) {
+    return "empty";
+  }
+  return "card";
+}
+
+// The Otto summary bubble shown above the DetectedCard — total kcal is the
+// server-reported estimate range when `is_estimate`, otherwise the sum of
+// the candidates' own kcal (never a client-side recompute of nutrition).
+function resultSummary(resolution: Resolution): string {
+  const count = resolution.candidates.length;
+  const itemWord = count === 1 ? "item" : "items";
+  const kcalText = resolution.is_estimate
+    ? `${Math.round(resolution.kcal_low ?? 0)}–${Math.round(resolution.kcal_high ?? 0)} kcal`
+    : `${Math.round(resolution.candidates.reduce((sum, candidate) => sum + candidate.kcal, 0))} kcal`;
+  return `I found ${count} ${itemWord}, about ${kcalText} — confirm and I'll log it.`;
+}
+
+// Maps a capture mode to the food-log `source` value. "scan" reads as a
+// barcode lookup and "type" as free text; the rest are literally "ai_<mode>".
+function sourceForMode(mode: CaptureMode): string {
+  if (mode === "scan") return "ai_barcode";
+  if (mode === "type") return "ai_text";
+  return `ai_${mode}`;
+}
+
+// The fallback link shown alongside a follow-up question or an unidentified
+// result — routes to the manual search/log screen instead of the AI flow.
+function SearchManuallyLink({ onPress }: { onPress: () => void }) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Search manually"
+      onPress={onPress}
+      style={(state) => ({
+        alignSelf: "flex-start",
+        paddingVertical: 10,
+        paddingHorizontal: 16,
+        borderRadius: 9999,
+        borderWidth: 1,
+        borderColor: captureColors.outlineBorder,
+        opacity: state.pressed ? 0.7 : 1,
+      })}
+    >
+      <AppText style={{ color: captureColors.onSurface, fontSize: 14, fontWeight: "600" }}>Search manually</AppText>
+    </Pressable>
+  );
+}
+
 interface CaptureBodyProps {
   displayName: string;
   insetTop: number;
@@ -255,6 +322,7 @@ interface CaptureBodyProps {
   onChangeMealSlot: (slot: MealSlot) => void;
   onAdd: () => void;
   adding: boolean;
+  onSearchManually: () => void;
   text: string;
   onChangeText: (text: string) => void;
   onSend: () => void;
@@ -281,6 +349,7 @@ export function CaptureBody({
   onChangeMealSlot,
   onAdd,
   adding,
+  onSearchManually,
   text,
   onChangeText,
   onSend,
@@ -292,6 +361,7 @@ export function CaptureBody({
   onClose,
 }: CaptureBodyProps) {
   const scrollViewRef = useRef<ScrollView>(null);
+  const resultView = resolution ? resolveResultView(resolution) : null;
 
   // Bring the newest Otto message (an error bubble or the detected-food
   // result) into view — on short viewports or with the keyboard open, the
@@ -355,12 +425,9 @@ export function CaptureBody({
           </View>
         )}
 
-        {stage === "result" && resolution && (
+        {stage === "result" && resolution && resultView === "card" && (
           <>
-            <OttoBubble>
-              Got it — I found {resolution.candidates.length} item{resolution.candidates.length === 1 ? "" : "s"}.
-              Confirm and I&apos;ll log it to {mealSlot}.
-            </OttoBubble>
+            <OttoBubble>{resultSummary(resolution)}</OttoBubble>
             <DetectedCard
               resolution={resolution}
               mealSlot={mealSlot}
@@ -368,6 +435,20 @@ export function CaptureBody({
               onAdd={onAdd}
               adding={adding}
             />
+          </>
+        )}
+
+        {stage === "result" && resolution && resultView === "followUp" && (
+          <>
+            <OttoBubble>{resolution.follow_up_question}</OttoBubble>
+            <SearchManuallyLink onPress={onSearchManually} />
+          </>
+        )}
+
+        {stage === "result" && resolution && resultView === "empty" && (
+          <>
+            <OttoBubble>I couldn&apos;t identify that — try again or search manually.</OttoBubble>
+            <SearchManuallyLink onPress={onSearchManually} />
           </>
         )}
 
@@ -514,6 +595,7 @@ export default function CaptureScreen() {
   const resolvePhoto = useResolvePhoto();
   const resolveVoice = useResolveVoice();
   const resolveBarcode = useResolveBarcode();
+  const createLog = useCreateLog();
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [mode, setMode] = useState<CaptureMode>("photo");
@@ -523,6 +605,7 @@ export default function CaptureScreen() {
   const [resolution, setResolution] = useState<Resolution | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [mealSlot, setMealSlot] = useState<MealSlot>(() => mealSlotForHour(new Date().getHours()));
+  const [adding, setAdding] = useState(false);
   const [text, setText] = useState("");
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   // Guards a single CameraView against firing onBarcodeScanned repeatedly
@@ -686,6 +769,49 @@ export default function CaptureScreen() {
     });
   }
 
+  // Logs every candidate in the current resolution as its own diary entry.
+  // Only the id/grams/slot/source/timestamp quintet is ever sent — the
+  // backend recomputes kcal/macros from the food_item row. Uses
+  // allSettled (not Promise.all) so a single failing candidate doesn't hide
+  // whether the *other* candidates were logged — required to avoid a
+  // partial silent success per the task's error-handling discipline.
+  async function handleAddToDiary() {
+    if (!resolution || resolution.candidates.length === 0) return;
+    setErrorMsg(null);
+    setAdding(true);
+    const source = sourceForMode(mode);
+    const outcomes = await Promise.allSettled(
+      resolution.candidates.map((candidate) =>
+        createLog.mutateAsync({
+          food_item_id: candidate.item.id,
+          quantity_grams: candidate.portion_grams,
+          meal_slot: mealSlot,
+          source,
+          logged_at: new Date().toISOString(),
+        }),
+      ),
+    );
+    setAdding(false);
+
+    const failedNames = outcomes
+      .map((outcome, index) => ({ outcome, candidate: resolution.candidates[index] }))
+      .filter(({ outcome }) => outcome.status === "rejected")
+      .map(({ candidate }) => candidate?.item.name)
+      .filter((name): name is string => Boolean(name));
+
+    if (failedNames.length > 0) {
+      const loggedCount = resolution.candidates.length - failedNames.length;
+      setErrorMsg(
+        `I logged ${loggedCount} of ${resolution.candidates.length} items, but couldn't log ${failedNames.join(
+          ", ",
+        )}. Please try again.`,
+      );
+      return;
+    }
+
+    router.back();
+  }
+
   return (
     <View style={{ flex: 1, backgroundColor: captureColors.surface }}>
       <CaptureBody
@@ -698,8 +824,9 @@ export default function CaptureScreen() {
         errorMsg={errorMsg}
         mealSlot={mealSlot}
         onChangeMealSlot={setMealSlot}
-        onAdd={() => {}}
-        adding={false}
+        onAdd={handleAddToDiary}
+        adding={adding}
+        onSearchManually={() => router.push("/log")}
         text={text}
         onChangeText={setText}
         onSend={handleSend}

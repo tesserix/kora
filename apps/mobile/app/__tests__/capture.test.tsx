@@ -2,10 +2,11 @@ import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import * as ImagePicker from "expo-image-picker";
 import { useCameraPermissions } from "expo-camera";
 import { requestRecordingPermissionsAsync, useAudioRecorder } from "expo-audio";
+import { router } from "expo-router";
 import { ApiError } from "@/lib/api";
 import type { Resolution } from "@/api/types";
 
-jest.mock("expo-router", () => ({ router: { back: jest.fn() } }));
+jest.mock("expo-router", () => ({ router: { back: jest.fn(), push: jest.fn() } }));
 
 // The real "@/lib/api" pulls in "@/lib/firebase" -> AsyncStorage's native
 // module, which isn't available under Jest. Mock it with a same-shape
@@ -27,6 +28,7 @@ const mockResolveTextMutate = jest.fn();
 const mockResolvePhotoMutate = jest.fn();
 const mockResolveVoiceMutate = jest.fn();
 const mockResolveBarcodeMutate = jest.fn();
+const mockCreateLogMutateAsync = jest.fn();
 let mockResolveTextIsPending = false;
 let mockResolvePhotoIsPending = false;
 let mockResolveVoiceIsPending = false;
@@ -57,6 +59,10 @@ jest.mock("@/api/hooks", () => ({
     get isPending() {
       return mockResolveBarcodeIsPending;
     },
+  }),
+  useCreateLog: () => ({
+    mutateAsync: mockCreateLogMutateAsync,
+    isPending: false,
   }),
 }));
 
@@ -122,6 +128,70 @@ function makeResolution(): Resolution {
   };
 }
 
+function makeCandidate(id: string, name: string, gramsAndKcal: { grams: number; kcal: number }): Resolution["candidates"][number] {
+  return {
+    item: {
+      id,
+      name,
+      brand: "",
+      provenance: "afcd",
+      serving_desc: "1 serving",
+      serving_grams: gramsAndKcal.grams,
+      kcal_per_100g: 100,
+      protein_per_100g: 10,
+      carbs_per_100g: 10,
+      fat_per_100g: 5,
+    },
+    portion_grams: gramsAndKcal.grams,
+    kcal: gramsAndKcal.kcal,
+    match_score: 0.9,
+    match_tier: "auto",
+  };
+}
+
+function makeMultiCandidateResolution(): Resolution {
+  return {
+    candidates: [
+      makeCandidate("1", "Grilled chicken breast", { grams: 140, kcal: 231 }),
+      makeCandidate("2", "Steamed broccoli", { grams: 90, kcal: 32 }),
+      makeCandidate("3", "Brown rice", { grams: 150, kcal: 165 }),
+    ],
+    tier: "confirm",
+    is_estimate: false,
+    provenance: "afcd",
+  };
+}
+
+function makeFollowUpResolution(): Resolution {
+  return {
+    candidates: [],
+    tier: "follow_up",
+    follow_up_question: "Was that grilled or fried chicken?",
+    is_estimate: false,
+    provenance: "afcd",
+  };
+}
+
+function makeEmptyResolution(): Resolution {
+  return {
+    candidates: [],
+    tier: "confirm",
+    is_estimate: false,
+    provenance: "afcd",
+  };
+}
+
+function makeEstimateResolution(): Resolution {
+  return {
+    candidates: [makeCandidate("9", "Mystery stew", { grams: 300, kcal: 420 })],
+    tier: "confirm",
+    is_estimate: true,
+    kcal_low: 350,
+    kcal_high: 500,
+    provenance: "afcd",
+  };
+}
+
 const noopBodyProps = {
   displayName: "Alex",
   insetTop: 0,
@@ -132,6 +202,7 @@ const noopBodyProps = {
   onChangeMealSlot: jest.fn(),
   onAdd: jest.fn(),
   adding: false,
+  onSearchManually: jest.fn(),
   text: "",
   onChangeText: jest.fn(),
   onSend: jest.fn(),
@@ -148,6 +219,9 @@ beforeEach(() => {
   mockResolvePhotoMutate.mockReset();
   mockResolveVoiceMutate.mockReset();
   mockResolveBarcodeMutate.mockReset();
+  mockCreateLogMutateAsync.mockReset().mockResolvedValue({ id: "log-1" });
+  (router.back as jest.Mock).mockReset();
+  (router.push as jest.Mock).mockReset();
   mockResolveTextIsPending = false;
   mockResolvePhotoIsPending = false;
   mockResolveVoiceIsPending = false;
@@ -205,6 +279,7 @@ test("result stage renders DetectedCard when resolution is set", async () => {
   );
   expect(getByText(/Detected · 1 items/i)).toBeTruthy();
   expect(getByText("Grilled chicken breast")).toBeTruthy();
+  expect(getByText(/I found 1 item, about 231 kcal/i)).toBeTruthy();
 });
 
 test("idle stage does not render the analyzing spinner or a result card", async () => {
@@ -560,6 +635,121 @@ describe("Scan mode", () => {
     mockResolveBarcodeIsPending = true;
     const { getByTestId } = await render(<CaptureScreen />);
     expect(getByTestId("capture-analyzing-spinner")).toBeTruthy();
+  });
+});
+
+describe("Result tiers", () => {
+  test("a 'confirm' tier renders DetectedCard the same as 'auto'", async () => {
+    const resolution = makeMultiCandidateResolution();
+    const { getByText } = await render(
+      <CaptureBody {...noopBodyProps} stage="result" resolution={resolution} />,
+    );
+    expect(getByText(/Detected · 3 items/i)).toBeTruthy();
+    expect(getByText(/I found 3 items, about 428 kcal/i)).toBeTruthy();
+  });
+
+  test("an is_estimate resolution shows the kcal range in the Otto summary", async () => {
+    const resolution = makeEstimateResolution();
+    const { getByText } = await render(
+      <CaptureBody {...noopBodyProps} stage="result" resolution={resolution} />,
+    );
+    expect(getByText(/I found 1 item, about 350–500 kcal/i)).toBeTruthy();
+  });
+
+  test("a follow_up tier renders the question and a Search manually link, no DetectedCard", async () => {
+    const resolution = makeFollowUpResolution();
+    const { getByText, queryByText, getByLabelText } = await render(
+      <CaptureBody {...noopBodyProps} stage="result" resolution={resolution} />,
+    );
+    expect(getByText("Was that grilled or fried chicken?")).toBeTruthy();
+    expect(getByLabelText("Search manually")).toBeTruthy();
+    expect(queryByText(/Detected ·/i)).toBeNull();
+  });
+
+  test("pressing Search manually navigates to /log", async () => {
+    const resolution = makeFollowUpResolution();
+    const onSearchManually = jest.fn();
+    const { findByLabelText } = await render(
+      <CaptureBody {...noopBodyProps} stage="result" resolution={resolution} onSearchManually={onSearchManually} />,
+    );
+    fireEvent.press(await findByLabelText("Search manually"));
+    expect(onSearchManually).toHaveBeenCalled();
+  });
+
+  test("the real screen's Search manually link calls router.push('/log')", async () => {
+    const { findByText, findByLabelText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Type"));
+    const input = await findByLabelText("Tell Otto what you ate");
+    await fireEvent.changeText(input, "a mystery bowl");
+    await fireEvent.press(await findByLabelText("Send"));
+
+    const [, options] = mockResolveTextMutate.mock.calls[0];
+    await act(async () => options.onSuccess(makeFollowUpResolution()));
+
+    await fireEvent.press(await findByLabelText("Search manually"));
+    expect(router.push).toHaveBeenCalledWith("/log");
+  });
+
+  test("empty candidates with no follow_up_question renders the generic couldn't-identify message and a link", async () => {
+    const resolution = makeEmptyResolution();
+    const { getByText, getByLabelText, queryByText } = await render(
+      <CaptureBody {...noopBodyProps} stage="result" resolution={resolution} />,
+    );
+    expect(getByText(/I couldn't identify that/i)).toBeTruthy();
+    expect(getByLabelText("Search manually")).toBeTruthy();
+    expect(queryByText(/Detected ·/i)).toBeNull();
+  });
+});
+
+describe("Add to diary", () => {
+  async function resolveWithMultiCandidates(rendered: Awaited<ReturnType<typeof render>>) {
+    const { findByText, findByLabelText } = rendered;
+    await fireEvent.press(await findByText("Type"));
+    const input = await findByLabelText("Tell Otto what you ate");
+    await fireEvent.changeText(input, "big breakfast");
+    await fireEvent.press(await findByLabelText("Send"));
+    const [, options] = mockResolveTextMutate.mock.calls[0];
+    await act(async () => options.onSuccess(makeMultiCandidateResolution()));
+  }
+
+  test("logs each candidate with the correct food_item_id/grams/meal_slot/source, then navigates back", async () => {
+    const rendered = await render(<CaptureScreen />);
+    await resolveWithMultiCandidates(rendered);
+
+    await fireEvent.press(await rendered.findByLabelText("Add to diary"));
+
+    await waitFor(() => expect(mockCreateLogMutateAsync).toHaveBeenCalledTimes(3));
+
+    const calls = mockCreateLogMutateAsync.mock.calls.map(([input]) => input);
+    expect(calls[0]).toEqual(
+      expect.objectContaining({ food_item_id: "1", quantity_grams: 140, source: "ai_text", logged_at: expect.any(String) }),
+    );
+    expect(calls[1]).toEqual(
+      expect.objectContaining({ food_item_id: "2", quantity_grams: 90, source: "ai_text", logged_at: expect.any(String) }),
+    );
+    expect(calls[2]).toEqual(
+      expect.objectContaining({ food_item_id: "3", quantity_grams: 150, source: "ai_text", logged_at: expect.any(String) }),
+    );
+    for (const call of calls) {
+      expect(["breakfast", "lunch", "dinner", "snack"]).toContain(call.meal_slot);
+    }
+
+    await waitFor(() => expect(router.back).toHaveBeenCalled());
+  });
+
+  test("a createLog failure surfaces an Otto error bubble and does not navigate back", async () => {
+    mockCreateLogMutateAsync
+      .mockResolvedValueOnce({ id: "log-1" })
+      .mockRejectedValueOnce(new Error("network error"))
+      .mockResolvedValueOnce({ id: "log-3" });
+
+    const rendered = await render(<CaptureScreen />);
+    await resolveWithMultiCandidates(rendered);
+
+    await fireEvent.press(await rendered.findByLabelText("Add to diary"));
+
+    expect(await rendered.findByText(/couldn't log Steamed broccoli/i)).toBeTruthy();
+    expect(router.back).not.toHaveBeenCalled();
   });
 });
 
