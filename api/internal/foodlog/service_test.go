@@ -11,6 +11,7 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
+	"github.com/tesserix/kora/api/internal/httpx"
 	"github.com/tesserix/kora/api/internal/nutrition"
 )
 
@@ -79,4 +80,107 @@ func TestCopyDayClonesLogsToNewDate(t *testing.T) {
 	logs, err := NewRepository(db).ListByUserAndDay(context.Background(), userID, day2, time.UTC)
 	require.NoError(t, err)
 	require.Len(t, logs, 1)
+}
+
+func TestEditLogGramsChangeRecomputesFromSameFoodRow(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	item := nutrition.FoodItem{Name: "Edit Grams Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 150, ProteinPer100g: 12, CarbsPer100g: 20, FatPer100g: 5, FiberPer100g: 2}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	created, err := svc.LogFood(context.Background(), userID, LogRequest{
+		FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 100, LoggedAt: time.Now(),
+	})
+	require.NoError(t, err)
+	wantDescription := created.Description
+
+	newGrams := 250.0
+	updated, err := svc.EditLog(context.Background(), userID, created.ID, EditRequest{QuantityGrams: &newGrams})
+	require.NoError(t, err)
+	require.Equal(t, newGrams, updated.QuantityGrams)
+	require.InDelta(t, item.KcalPer100g*newGrams/100, updated.Kcal, 0.001)
+	require.InDelta(t, item.ProteinPer100g*newGrams/100, updated.ProteinG, 0.001)
+	require.Equal(t, wantDescription, updated.Description)
+}
+
+func TestEditLogFoodChangeWithCorrectionPhraseRecordsAlias(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	oldItem := nutrition.FoodItem{Name: "Old Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100}
+	require.NoError(t, db.Create(&oldItem).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", oldItem.ID) })
+	newItem := nutrition.FoodItem{Name: "New Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 200, ProteinPer100g: 15}
+	require.NoError(t, db.Create(&newItem).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", newItem.ID) })
+
+	phrase := "my brekkie " + uuid.NewString()
+	t.Cleanup(func() { db.Exec("DELETE FROM food_aliases WHERE lower(alias) = ?", phrase) })
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	created, err := svc.LogFood(context.Background(), userID, LogRequest{
+		FoodItemID: &oldItem.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 100, LoggedAt: time.Now(),
+	})
+	require.NoError(t, err)
+
+	updated, err := svc.EditLog(context.Background(), userID, created.ID, EditRequest{
+		FoodItemID: &newItem.ID, CorrectionPhrase: phrase,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 200.0, updated.Kcal) // recomputed from new item at same 100g
+	require.Equal(t, newItem.Name, updated.Description)
+
+	cands, err := nutriRepo.Resolve(context.Background(), phrase, nil, 5)
+	require.NoError(t, err)
+	require.NotEmpty(t, cands)
+	require.Equal(t, newItem.ID, cands[0].Item.ID)
+	require.Equal(t, nutrition.MatchAlias, cands[0].MatchTier)
+}
+
+func TestEditLogFoodChangeWithoutCorrectionPhraseRecordsNoAlias(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	oldItem := nutrition.FoodItem{Name: "Old Food2 " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100}
+	require.NoError(t, db.Create(&oldItem).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", oldItem.ID) })
+	newItem := nutrition.FoodItem{Name: "New Food2 " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 200}
+	require.NoError(t, db.Create(&newItem).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", newItem.ID) })
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	created, err := svc.LogFood(context.Background(), userID, LogRequest{
+		FoodItemID: &oldItem.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 100, LoggedAt: time.Now(),
+	})
+	require.NoError(t, err)
+
+	_, err = svc.EditLog(context.Background(), userID, created.ID, EditRequest{FoodItemID: &newItem.ID})
+	require.NoError(t, err)
+
+	var n int64
+	db.Raw("SELECT count(*) FROM food_aliases WHERE food_item_id = ?", newItem.ID).Scan(&n)
+	require.Equal(t, int64(0), n)
+}
+
+func TestEditLogInvalidMealSlotReturnsValidationError(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	item := nutrition.FoodItem{Name: "Slot Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	created, err := svc.LogFood(context.Background(), userID, LogRequest{
+		FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 100, LoggedAt: time.Now(),
+	})
+	require.NoError(t, err)
+
+	_, err = svc.EditLog(context.Background(), userID, created.ID, EditRequest{MealSlot: "brunch"})
+	require.Error(t, err)
+	_, ok := httpx.IsValidation(err)
+	require.True(t, ok)
 }

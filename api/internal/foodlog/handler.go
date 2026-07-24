@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 
 	"github.com/tesserix/kora/api/internal/httpx"
 	"github.com/tesserix/kora/api/internal/user"
@@ -65,6 +66,33 @@ func (h Handler) List(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, logs)
+}
+
+func (h Handler) Update(c *gin.Context) {
+	userID, ok := h.resolveUser(c)
+	if !ok {
+		return
+	}
+	logID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		httpx.Error(c, http.StatusBadRequest, "invalid_input", "invalid log id")
+		return
+	}
+	var req EditRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Error(c, http.StatusBadRequest, "invalid_input", "invalid request body")
+		return
+	}
+	updated, err := h.svc.EditLog(c.Request.Context(), userID, logID, req)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			httpx.Error(c, http.StatusNotFound, "not_found", "log not found")
+			return
+		}
+		httpx.RespondServiceError(c, err)
+		return
+	}
+	httpx.OK(c, updated)
 }
 
 func (h Handler) Delete(c *gin.Context) {

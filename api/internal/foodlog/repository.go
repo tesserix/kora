@@ -40,6 +40,35 @@ func (r Repository) ListByUserAndDay(ctx context.Context, userID uuid.UUID, day 
 	return logs, nil
 }
 
+// Update persists changes to an existing log, scoped to its owner. It updates
+// by (id AND user_id) so a user can never edit another user's log; if no row
+// matches, it returns gorm.ErrRecordNotFound wrapped.
+func (r Repository) Update(ctx context.Context, log FoodLog) (FoodLog, error) {
+	res := r.db.WithContext(ctx).
+		Model(&FoodLog{}).
+		Where("id = ? AND user_id = ?", log.ID, log.UserID).
+		Updates(map[string]any{
+			"food_item_id":   log.FoodItemID,
+			"logged_at":      log.LoggedAt,
+			"meal_slot":      log.MealSlot,
+			"description":    log.Description,
+			"quantity_grams": log.QuantityGrams,
+			"kcal":           log.Kcal,
+			"protein_g":      log.ProteinG,
+			"carbs_g":        log.CarbsG,
+			"fat_g":          log.FatG,
+			"fiber_g":        log.FiberG,
+			"provenance":     log.Provenance,
+		})
+	if res.Error != nil {
+		return FoodLog{}, fmt.Errorf("foodlog: update: %w", res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return FoodLog{}, fmt.Errorf("foodlog: update: %w", gorm.ErrRecordNotFound)
+	}
+	return r.GetByID(ctx, log.UserID, log.ID)
+}
+
 func (r Repository) GetByID(ctx context.Context, userID, logID uuid.UUID) (FoodLog, error) {
 	var log FoodLog
 	if err := r.db.WithContext(ctx).

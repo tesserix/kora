@@ -61,6 +61,7 @@ func NewRouter(deps Deps) *gin.Engine {
 		logHandler := foodlog.NewHandler(foodlog.NewService(logRepo, foodRepo), logRepo)
 		v1.POST("/logs", logHandler.Create)
 		v1.GET("/logs", logHandler.List)
+		v1.PATCH("/logs/:id", logHandler.Update)
 		v1.DELETE("/logs/:id", logHandler.Delete)
 		v1.POST("/logs/copy-day", logHandler.CopyDay)
 		v1.POST("/logs/:id/repeat", logHandler.Repeat)

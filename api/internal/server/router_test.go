@@ -60,6 +60,13 @@ func TestResolveRoutesRegisteredWhenResolverSet(t *testing.T) {
 	}
 }
 
+func TestLogUpdateRouteRegistered(t *testing.T) {
+	r := NewRouter(Deps{DB: &gorm.DB{}, Verifier: stubVerifier{}})
+	if !hasRoute(r.Routes(), "PATCH", "/v1/logs/:id") {
+		t.Error("expected PATCH /v1/logs/:id to be registered")
+	}
+}
+
 func TestResolveRoutesAbsentWhenResolverNil(t *testing.T) {
 	r := NewRouter(Deps{DB: &gorm.DB{}, Verifier: stubVerifier{}}) // Resolver nil
 	if hasRoute(r.Routes(), "POST", "/v1/resolve/text") {
