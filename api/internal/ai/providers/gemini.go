@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"google.golang.org/genai"
@@ -35,6 +36,7 @@ const (
 	callTypeIdentifyPhoto = "identify_photo"
 	callTypeDecompose     = "decompose"
 	callTypeEmbed         = "embed"
+	callTypeTranscribe    = "transcribe"
 )
 
 const (
@@ -56,6 +58,12 @@ const (
 		"nutrition values are looked up separately and any number you provide " +
 		"would be ignored and could mislead. Respond with JSON only, matching " +
 		"the provided schema."
+
+	transcribeSystemPrompt = "You transcribe short audio clips of a person " +
+		"describing what they ate. Return ONLY the spoken words as plain text — " +
+		"no commentary, no punctuation cleanup beyond what's spoken, and never " +
+		"any calorie or nutrition number. If the audio contains no discernible " +
+		"speech, return an empty string."
 )
 
 // GeminiProvider implements ai.Provider over the Gemini API via
@@ -185,6 +193,28 @@ func (p GeminiProvider) Embed(ctx context.Context, text string) ([]float32, ai.U
 		return nil, usage, fmt.Errorf("gemini: embed: no embeddings in response")
 	}
 	return resp.Embeddings[0].Values, usage, nil
+}
+
+// Transcribe converts spoken audio to text using the multimodal Flash model.
+// The transcript is later treated as a search phrase, so this returns plain
+// text with no schema — the identity/nutrition invariants are enforced
+// downstream by the identify/decompose schemas, not here.
+func (p GeminiProvider) Transcribe(ctx context.Context, audio []byte, mime string) (string, ai.Usage, error) {
+	start := time.Now()
+	cfg := &genai.GenerateContentConfig{
+		SystemInstruction: &genai.Content{Parts: []*genai.Part{genai.NewPartFromText(transcribeSystemPrompt)}},
+	}
+	resp, err := p.client.Models.GenerateContent(ctx, modelFlash,
+		[]*genai.Content{genai.NewContentFromParts([]*genai.Part{genai.NewPartFromBytes(audio, mime)}, genai.RoleUser)}, cfg)
+	usage := ai.Usage{Provider: p.Name(), Model: modelFlash, CallType: callTypeTranscribe, LatencyMs: int(time.Since(start).Milliseconds())}
+	if resp != nil && resp.UsageMetadata != nil {
+		usage.TokensIn = int(resp.UsageMetadata.PromptTokenCount)
+		usage.TokensOut = int(resp.UsageMetadata.CandidatesTokenCount)
+	}
+	if err != nil {
+		return "", usage, fmt.Errorf("gemini: transcribe: %w", err)
+	}
+	return strings.TrimSpace(resp.Text()), usage, nil
 }
 
 // generateJSON is the shared SDK glue for IdentifyText/IdentifyPhoto/

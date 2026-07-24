@@ -228,6 +228,14 @@ func (p OpenAIProvider) Embed(ctx context.Context, text string) ([]float32, ai.U
 			"to avoid mixing incompatible vector spaces in the nutrition index's cosine search")
 }
 
+// Transcribe is intentionally NOT implemented for the OpenAI-compatible
+// fallback: NVIDIA's llama models are text-only, and transcription stays on
+// Gemini (multimodal). Returning an error keeps the router from ever sending
+// audio to a model that cannot process it.
+func (p OpenAIProvider) Transcribe(ctx context.Context, audio []byte, mime string) (string, ai.Usage, error) {
+	return "", ai.Usage{}, fmt.Errorf("openai: transcribe: not supported — transcription stays on Gemini (multimodal audio)")
+}
+
 // jsonObjectSchemaHint renders a compact description of a JSON schema's shape
 // for embedding in a system prompt when json_object mode can't enforce the
 // schema server-side. It lists the required top-level key and item fields.

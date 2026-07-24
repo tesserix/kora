@@ -171,6 +171,16 @@ func TestRouter_BothError_ReturnsFallbackError_Embed(t *testing.T) {
 	assert.Nil(t, vec)
 }
 
+func TestRouter_Transcribe_PrimaryErrors_FallsBack(t *testing.T) {
+	primary := &stubProvider{name: "primary-stub", transcriptErr: errors.New("boom")}
+	fallback := &stubProvider{name: "fallback-stub", transcript: "chicken and rice", transcriptUsage: Usage{Provider: "fallback-stub"}}
+	r := &Router{Primary: primary, Fallback: fallback}
+	got, usage, err := r.Transcribe(context.Background(), []byte("audio"), "audio/mp4")
+	require.NoError(t, err)
+	assert.Equal(t, "chicken and rice", got)
+	assert.Equal(t, "fallback-stub", usage.Provider)
+}
+
 func TestRouter_Name(t *testing.T) {
 	r := &Router{
 		Primary:  &stubProvider{name: "primary-stub"},

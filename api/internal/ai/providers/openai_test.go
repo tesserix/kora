@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -232,6 +233,14 @@ func TestBuildParamsJSONObjectCompat(t *testing.T) {
 	assert.Contains(t, sys, "sys", "compat system prompt must still include the original prompt")
 	if !strings.Contains(sys, "\"guesses\"") {
 		t.Fatalf("compat system prompt missing envelope shape hint: %q", sys)
+	}
+}
+
+func TestOpenAITranscribeNotSupported(t *testing.T) {
+	p := NewOpenAIProvider("k", "", "", false)
+	_, _, err := p.Transcribe(context.Background(), []byte("x"), "audio/mp4")
+	if err == nil {
+		t.Fatal("expected Transcribe to return an error on the fallback provider")
 	}
 }
 

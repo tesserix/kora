@@ -116,6 +116,13 @@ func (r *Router) Embed(ctx context.Context, text string) ([]float32, Usage, erro
 	)
 }
 
+func (r *Router) Transcribe(ctx context.Context, audio []byte, mime string) (string, Usage, error) {
+	return withFallback(ctx, r.photoBudgetOrDefault(), r.fallbackBudgetOrDefault(),
+		func(c context.Context) (string, Usage, error) { return r.Primary.Transcribe(c, audio, mime) },
+		func(c context.Context) (string, Usage, error) { return r.Fallback.Transcribe(c, audio, mime) },
+	)
+}
+
 func (r *Router) Name() string {
 	return "router(" + r.Primary.Name() + "->" + r.Fallback.Name() + ")"
 }
