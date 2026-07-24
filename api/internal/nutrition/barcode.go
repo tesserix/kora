@@ -3,9 +3,12 @@ package nutrition
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // OFFClient fetches a product from OpenFoodFacts. It returns (nil, nil) when the
@@ -86,6 +89,9 @@ func (r Repository) ResolveBarcode(ctx context.Context, off OFFClient, code stri
 	if err == nil {
 		return &local, true, nil
 	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, false, fmt.Errorf("nutrition: resolve barcode local: %w", err)
+	}
 	item, ferr := off.Fetch(ctx, code)
 	if ferr != nil {
 		return nil, false, fmt.Errorf("nutrition: resolve barcode: %w", ferr)
@@ -98,6 +104,11 @@ func (r Repository) ResolveBarcode(ctx context.Context, off OFFClient, code stri
 	}
 	var cached FoodItem
 	if err := r.db.WithContext(ctx).First(&cached, "barcode = ?", code).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// Insert deduped on name+brand rather than creating a row under
+			// this barcode. The OFF item itself is still valid data.
+			return item, true, nil
+		}
 		return nil, false, fmt.Errorf("nutrition: resolve barcode reload: %w", err)
 	}
 	return &cached, true, nil
