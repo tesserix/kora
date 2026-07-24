@@ -7,27 +7,75 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// stubProvider is a minimal Provider implementation used to verify the
-// interface shape compiles and is satisfiable without live calls.
-type stubProvider struct{}
+// stubProvider is a configurable Provider test double. The zero value
+// behaves like a minimal no-op stub (used to verify the interface shape
+// compiles and is satisfiable without live calls); router_test.go configures
+// its fields to exercise success, error, and latency-fallback paths.
+type stubProvider struct {
+	name string
+
+	guesses    []Guess
+	guessUsage Usage
+	guessErr   error
+
+	ingredients      []IngredientGuess
+	ingredientsUsage Usage
+	ingredientsErr   error
+
+	embedding  []float32
+	embedUsage Usage
+	embedErr   error
+
+	// block, when true, makes every method wait on ctx.Done() and return
+	// ctx.Err() instead of its configured result — simulates a provider
+	// call that runs past its latency budget.
+	block bool
+
+	// calls counts every method invocation, for asserting a provider was
+	// (not) reached.
+	calls int
+}
 
 func (s *stubProvider) IdentifyText(ctx context.Context, phrase string) ([]Guess, Usage, error) {
-	return nil, Usage{}, nil
+	s.calls++
+	if s.block {
+		<-ctx.Done()
+		return nil, Usage{}, ctx.Err()
+	}
+	return s.guesses, s.guessUsage, s.guessErr
 }
 
 func (s *stubProvider) IdentifyPhoto(ctx context.Context, image []byte, mime string) ([]Guess, Usage, error) {
-	return nil, Usage{}, nil
+	s.calls++
+	if s.block {
+		<-ctx.Done()
+		return nil, Usage{}, ctx.Err()
+	}
+	return s.guesses, s.guessUsage, s.guessErr
 }
 
 func (s *stubProvider) Decompose(ctx context.Context, dish string) ([]IngredientGuess, Usage, error) {
-	return nil, Usage{}, nil
+	s.calls++
+	if s.block {
+		<-ctx.Done()
+		return nil, Usage{}, ctx.Err()
+	}
+	return s.ingredients, s.ingredientsUsage, s.ingredientsErr
 }
 
 func (s *stubProvider) Embed(ctx context.Context, text string) ([]float32, Usage, error) {
-	return nil, Usage{}, nil
+	s.calls++
+	if s.block {
+		<-ctx.Done()
+		return nil, Usage{}, ctx.Err()
+	}
+	return s.embedding, s.embedUsage, s.embedErr
 }
 
 func (s *stubProvider) Name() string {
+	if s.name != "" {
+		return s.name
+	}
 	return "stub"
 }
 
