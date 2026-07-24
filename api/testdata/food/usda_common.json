@@ -6,15 +6,9 @@
   {"name": "White rice, long-grain, cooked", "serving_desc": "1 cup (158 g)", "serving_grams": 158, "kcal_per_100g": 130, "protein_per_100g": 2.7, "carbs_per_100g": 28.2, "fat_per_100g": 0.3, "fiber_per_100g": 0.4},
   {"name": "Whole wheat bread", "serving_desc": "1 slice (28 g)", "serving_grams": 28, "kcal_per_100g": 252, "protein_per_100g": 13.0, "carbs_per_100g": 42.7, "fat_per_100g": 3.5, "fiber_per_100g": 7.0},
   {"name": "Oats, rolled, dry", "serving_desc": "1/2 cup (40 g)", "serving_grams": 40, "kcal_per_100g": 389, "protein_per_100g": 16.9, "carbs_per_100g": 66.3, "fat_per_100g": 6.9, "fiber_per_100g": 10.6},
-  {"name": "Banana, raw", "serving_desc": "1 medium (118 g)", "serving_grams": 118, "kcal_per_100g": 89, "protein_per_100g": 1.1, "carbs_per_100g": 22.8, "fat_per_100g": 0.3, "fiber_per_100g": 2.6},
   {"name": "Broccoli, raw", "serving_desc": "1 cup chopped (91 g)", "serving_grams": 91, "kcal_per_100g": 34, "protein_per_100g": 2.8, "carbs_per_100g": 6.6, "fat_per_100g": 0.4, "fiber_per_100g": 2.6},
   {"name": "Peanut butter, smooth", "serving_desc": "2 tbsp (32 g)", "serving_grams": 32, "kcal_per_100g": 588, "protein_per_100g": 25.1, "carbs_per_100g": 20.0, "fat_per_100g": 50.4, "fiber_per_100g": 6.0},
   {"name": "Greek yogurt, plain, nonfat", "serving_desc": "170 g container", "serving_grams": 170, "kcal_per_100g": 59, "protein_per_100g": 10.2, "carbs_per_100g": 3.6, "fat_per_100g": 0.4},
-  {"name": "Cheddar cheese", "serving_desc": "1 oz (28 g)", "serving_grams": 28, "kcal_per_100g": 403, "protein_per_100g": 22.9, "carbs_per_100g": 3.1, "fat_per_100g": 33.1},
-  {"name": "Almonds, raw", "serving_desc": "1 oz (28 g)", "serving_grams": 28, "kcal_per_100g": 579, "protein_per_100g": 21.2, "carbs_per_100g": 21.6, "fat_per_100g": 49.9, "fiber_per_100g": 12.5},
-  {"name": "Avocado, raw", "serving_desc": "1/2 fruit (100 g)", "serving_grams": 100, "kcal_per_100g": 160, "protein_per_100g": 2.0, "carbs_per_100g": 8.5, "fat_per_100g": 14.7, "fiber_per_100g": 6.7},
-  {"name": "Sweet potato, baked", "serving_desc": "1 medium (114 g)", "serving_grams": 114, "kcal_per_100g": 90, "protein_per_100g": 2.0, "carbs_per_100g": 20.7, "fat_per_100g": 0.2, "fiber_per_100g": 3.3},
   {"name": "Black beans, cooked", "serving_desc": "1/2 cup (86 g)", "serving_grams": 86, "kcal_per_100g": 132, "protein_per_100g": 8.9, "carbs_per_100g": 23.7, "fat_per_100g": 0.5, "fiber_per_100g": 8.7},
-  {"name": "Apple, raw, with skin", "serving_desc": "1 medium (182 g)", "serving_grams": 182, "kcal_per_100g": 52, "protein_per_100g": 0.3, "carbs_per_100g": 13.8, "fat_per_100g": 0.2, "fiber_per_100g": 2.4},
   {"name": "2% milk", "serving_desc": "1 cup (244 g)", "serving_grams": 244, "kcal_per_100g": 50, "protein_per_100g": 3.4, "carbs_per_100g": 4.9, "fat_per_100g": 2.0}
 ]

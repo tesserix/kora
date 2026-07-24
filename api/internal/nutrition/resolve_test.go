@@ -41,14 +41,19 @@ func TestResolveFullTextRanksByName(t *testing.T) {
 	repo := NewRepository(db)
 	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE brand = 'test2a'") })
 
+	// "zqxnonce" is a unique token no ambient row (seed data or ingested
+	// AFCD/USDA foods) contains, so this test is deterministic regardless of
+	// what else lives in the DB. plainto_tsquery matches both rows via the
+	// nonce, but the grilled-chicken row matches 2 lexemes (zqxnonce +
+	// chicken) vs 1 for the water row, so ts_rank ranks it first.
 	seedFor(t, repo, []FoodItem{
-		{Name: "Grilled chicken breast", Brand: "test2a", Provenance: ProvenanceAFCD, KcalPer100g: 165},
-		{Name: "Beef mince", Brand: "test2a", Provenance: ProvenanceAFCD, KcalPer100g: 250},
+		{Name: "Zqxnonce grilled chicken", Brand: "test2a", Provenance: ProvenanceAFCD, KcalPer100g: 165},
+		{Name: "Zqxnonce plain water", Brand: "test2a", Provenance: ProvenanceAFCD, KcalPer100g: 0},
 	})
-	got, err := repo.Resolve(context.Background(), "chicken breast", nil, 5)
+	got, err := repo.Resolve(context.Background(), "zqxnonce chicken", nil, 5)
 	require.NoError(t, err)
 	require.NotEmpty(t, got)
-	require.Equal(t, "Grilled chicken breast", got[0].Item.Name)
+	require.Equal(t, "Zqxnonce grilled chicken", got[0].Item.Name)
 	require.Equal(t, MatchFullText, got[0].MatchTier)
 }
 
