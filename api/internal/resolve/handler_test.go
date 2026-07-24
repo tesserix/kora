@@ -356,6 +356,26 @@ func TestResolveVoice_BodyExceedsHardCap(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "payload_too_large")
 }
 
+// TestResolveVoice_TooLarge isolates the fileHeader.Size > maxAudioBytes guard:
+// the body (content + small multipart overhead) stays under maxAudioBodyBytes so
+// MaxBytesReader does not trip, but the part itself exceeds maxAudioBytes, so the
+// size check returns 413. Mirrors TestResolvePhoto_TooLarge.
+func TestResolveVoice_TooLarge(t *testing.T) {
+	h := NewHandler(&stubTP{}, nil)
+	r := newEngine(h)
+
+	content := bytes.Repeat([]byte("a"), maxAudioBytes+1)
+	body, contentType := buildMultipart(t, "file", "clip.m4a", "audio/mp4", content)
+
+	req := httptest.NewRequest(http.MethodPost, "/resolve/voice", body)
+	req.Header.Set("Content-Type", contentType)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
+	assert.Contains(t, w.Body.String(), "payload_too_large")
+}
+
 func TestResolveVoice_Unauthorized(t *testing.T) {
 	h := NewHandler(&stubTP{}, nil)
 	r := newEngineNoUser(h)
