@@ -1,0 +1,4 @@
+[
+  {"name": "Test Oats", "kcal_per_100g": 379, "protein_per_100g": 13.2, "carbs_per_100g": 67.7, "fat_per_100g": 6.5},
+  {"name": "Bad Row", "kcal_per_100g": 0, "protein_per_100g": 1, "carbs_per_100g": 1, "fat_per_100g": 1}
+]
