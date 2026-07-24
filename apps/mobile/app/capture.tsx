@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { AccessibilityInfo, Animated, Easing, Pressable, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
+import * as ImagePicker from "expo-image-picker";
 import { Icon } from "@/components/Icon";
 import { AppText } from "@/components/Text";
 import { OttoBubble } from "@/components/capture/OttoBubble";
@@ -10,7 +11,8 @@ import { ModePill } from "@/components/capture/ModePill";
 import { Waveform } from "@/components/capture/Waveform";
 import { DetectedCard } from "@/components/capture/DetectedCard";
 import { captureColors } from "@/components/capture/captureTheme";
-import { useProfile } from "@/api/hooks";
+import { useProfile, useResolvePhoto, useResolveText } from "@/api/hooks";
+import { ApiError } from "@/lib/api";
 import type { Resolution } from "@/api/types";
 import { mealSlotForHour, type MealSlot } from "@/lib/mealSlot";
 
@@ -77,19 +79,20 @@ function AnalyzingSpinner() {
 
 interface IdleAffordanceProps {
   mode: CaptureMode;
+  onCapturePhoto: () => void;
 }
 
 // The per-mode "empty" affordance shown in the thread before a capture
-// starts. Tapping these is intentionally a no-op in this task — the real
-// camera/mic/scanner triggers are wired by later tasks.
-function IdleAffordance({ mode }: IdleAffordanceProps) {
+// starts. The photo mode wires into the real camera/library flow; voice/scan
+// remain no-ops until Task 6 wires those triggers.
+function IdleAffordance({ mode, onCapturePhoto }: IdleAffordanceProps) {
   if (mode === "photo") {
     return (
       <Pressable
         testID="capture-idle-photo"
         accessibilityRole="button"
         accessibilityLabel="Photo viewfinder"
-        onPress={() => {}}
+        onPress={onCapturePhoto}
         style={{
           height: 200,
           borderRadius: 20,
@@ -218,12 +221,15 @@ interface CaptureBodyProps {
   onModeChange: (mode: CaptureMode) => void;
   stage: CaptureStage;
   resolution: Resolution | null;
+  errorMsg: string | null;
   mealSlot: MealSlot;
   onChangeMealSlot: (slot: MealSlot) => void;
   onAdd: () => void;
   adding: boolean;
   text: string;
   onChangeText: (text: string) => void;
+  onSend: () => void;
+  onCapturePhoto: () => void;
   onClose: () => void;
 }
 
@@ -237,12 +243,15 @@ export function CaptureBody({
   onModeChange,
   stage,
   resolution,
+  errorMsg,
   mealSlot,
   onChangeMealSlot,
   onAdd,
   adding,
   text,
   onChangeText,
+  onSend,
+  onCapturePhoto,
   onClose,
 }: CaptureBodyProps) {
   return (
@@ -279,7 +288,7 @@ export function CaptureBody({
           work too.
         </OttoBubble>
 
-        {stage === "idle" && <IdleAffordance mode={mode} />}
+        {stage === "idle" && <IdleAffordance mode={mode} onCapturePhoto={onCapturePhoto} />}
 
         {stage === "analyzing" && (
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingLeft: 40 }}>
@@ -303,6 +312,8 @@ export function CaptureBody({
             />
           </>
         )}
+
+        {errorMsg ? <OttoBubble>{errorMsg}</OttoBubble> : null}
       </ScrollView>
 
       <View
@@ -333,11 +344,11 @@ export function CaptureBody({
             paddingLeft: 8,
           }}
         >
-          {/* Quick-capture shortcut — no-op until Tasks 5/6 wire the camera. */}
+          {/* Quick-capture shortcut — triggers the same camera/library flow as the idle viewfinder. */}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Quick photo capture"
-            onPress={() => {}}
+            onPress={onCapturePhoto}
             style={{
               width: 38,
               height: 38,
@@ -357,11 +368,11 @@ export function CaptureBody({
             placeholderTextColor={captureColors.onSurfaceFaint}
             style={{ flex: 1, color: captureColors.onSurface, fontSize: 15 }}
           />
-          {/* Send — no-op until a future task wires text resolution. */}
+          {/* Send — resolves the typed phrase via useResolveText. */}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Send"
-            onPress={() => {}}
+            onPress={onSend}
             style={{
               width: 38,
               height: 38,
@@ -379,22 +390,108 @@ export function CaptureBody({
   );
 }
 
+type PhotoFile = { uri: string; name: string; type: string };
+
+type PhotoPickOutcome =
+  | { status: "success"; file: PhotoFile }
+  | { status: "canceled" }
+  | { status: "denied" };
+
+// Camera first, library as fallback — matches the sim (no camera hardware,
+// so launchCameraAsync throws) and a user who denies camera but allows
+// photo library access. Only a genuine permission denial (both camera *and*
+// library) is reported as "denied"; a user-canceled picker is silent.
+async function pickMealPhoto(): Promise<PhotoPickOutcome> {
+  const cameraPermission = await ImagePicker.requestCameraPermissionsAsync();
+  let result: ImagePicker.ImagePickerResult | undefined;
+
+  if (cameraPermission.granted) {
+    try {
+      result = await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.7 });
+    } catch {
+      result = undefined; // no camera hardware available — fall back to the library below
+    }
+  }
+
+  if (!result) {
+    const libraryPermission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!libraryPermission.granted) {
+      return { status: "denied" };
+    }
+    result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.7 });
+  }
+
+  if (result.canceled) {
+    return { status: "canceled" };
+  }
+  const asset = result.assets[0];
+  if (!asset) {
+    return { status: "canceled" };
+  }
+  return {
+    status: "success",
+    file: { uri: asset.uri, name: asset.fileName ?? "meal.jpg", type: asset.mimeType ?? "image/jpeg" },
+  };
+}
+
+function ottoErrorMessage(error: Error): string {
+  if (error instanceof ApiError) {
+    return `Hmm, I couldn't tell — ${error.message}. Mind trying again?`;
+  }
+  return "Something went wrong while I looked at that. Please try again.";
+}
+
 export default function CaptureScreen() {
   const insets = useSafeAreaInsets();
   const profile = useProfile();
+  const resolveText = useResolveText();
+  const resolvePhoto = useResolvePhoto();
   const [mode, setMode] = useState<CaptureMode>("photo");
-  // Tasks 5-7 drive real stage/resolution/error transitions (photo/voice/scan
-  // capture, text send, and the add-to-diary mutation); this task only wires
-  // the shell so those can slot in without restructuring the screen.
+  // Stage 6/7 will add real voice/scan transitions; idle<->result here is
+  // driven by the text/photo flows below, and the "analyzing" stage is
+  // derived from the mutations' isPending rather than tracked separately.
   const [stage, setStage] = useState<CaptureStage>("idle");
   const [resolution, setResolution] = useState<Resolution | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [mealSlot, setMealSlot] = useState<MealSlot>(() => mealSlotForHour(new Date().getHours()));
   const [text, setText] = useState("");
 
+  const displayStage: CaptureStage = resolveText.isPending || resolvePhoto.isPending ? "analyzing" : stage;
+
   function handleModeChange(next: CaptureMode) {
     setMode(next);
     setStage("idle");
+  }
+
+  function handleSend() {
+    const phrase = text.trim();
+    if (!phrase) return;
+    setErrorMsg(null);
+    resolveText.mutate(phrase, {
+      onSuccess: (data) => {
+        setResolution(data);
+        setStage("result");
+        setText("");
+      },
+      onError: (error) => setErrorMsg(ottoErrorMessage(error)),
+    });
+  }
+
+  async function handleCapturePhoto() {
+    setErrorMsg(null);
+    const outcome = await pickMealPhoto();
+    if (outcome.status === "canceled") return;
+    if (outcome.status === "denied") {
+      setErrorMsg("I need camera or photo access to see your meal.");
+      return;
+    }
+    resolvePhoto.mutate(outcome.file, {
+      onSuccess: (data) => {
+        setResolution(data);
+        setStage("result");
+      },
+      onError: (error) => setErrorMsg(ottoErrorMessage(error)),
+    });
   }
 
   return (
@@ -404,21 +501,19 @@ export default function CaptureScreen() {
         insetTop={insets.top}
         mode={mode}
         onModeChange={handleModeChange}
-        stage={stage}
+        stage={displayStage}
         resolution={resolution}
+        errorMsg={errorMsg}
         mealSlot={mealSlot}
         onChangeMealSlot={setMealSlot}
         onAdd={() => {}}
         adding={false}
         text={text}
         onChangeText={setText}
+        onSend={handleSend}
+        onCapturePhoto={handleCapturePhoto}
         onClose={() => router.back()}
       />
-      {errorMsg ? (
-        <View style={{ position: "absolute", bottom: 100, left: 18, right: 18 }}>
-          <AppText style={{ color: captureColors.onSurface, textAlign: "center" }}>{errorMsg}</AppText>
-        </View>
-      ) : null}
     </View>
   );
 }
