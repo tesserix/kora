@@ -553,7 +553,35 @@ export default function CaptureScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 
+  // Mirrors isRecordingVoice into a ref so the unmount-cleanup effect below
+  // (which only runs once, with a closure from mount time) can still read
+  // the *latest* recording state instead of the stale `false` it started with.
+  const isRecordingVoiceRef = useRef(false);
+  useEffect(() => {
+    isRecordingVoiceRef.current = isRecordingVoice;
+  }, [isRecordingVoice]);
+
+  // Best-effort: if the screen unmounts (e.g. the user backs out via Close)
+  // while a voice recording is still live, stop it rather than leaving the
+  // mic recording indefinitely. Never throws — a stop failure on the way out
+  // isn't worth surfacing, there's no screen left to show an Otto bubble on.
+  useEffect(() => {
+    return () => {
+      if (isRecordingVoiceRef.current) {
+        recorder.stop().catch(() => {});
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   function handleModeChange(next: CaptureMode) {
+    // Switching away from Voice mid-recording must not leave the native
+    // recorder running in the background — stop it (best-effort) and reset
+    // the mic button back to its start state.
+    if (next !== "voice" && isRecordingVoice) {
+      recorder.stop().catch(() => {});
+      setIsRecordingVoice(false);
+    }
     setMode(next);
     setStage("idle");
     setErrorMsg(null);

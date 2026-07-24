@@ -462,6 +462,38 @@ describe("Voice mode", () => {
     const { getByTestId } = await render(<CaptureScreen />);
     expect(getByTestId("capture-analyzing-spinner")).toBeTruthy();
   });
+
+  test("switching mode away while recording stops the recorder and resets the mic button", async () => {
+    const recorder = makeRecorder();
+    (useAudioRecorder as jest.Mock).mockReturnValue(recorder);
+
+    const { findByText, findByLabelText, queryByLabelText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Voice"));
+    await fireEvent.press(await findByLabelText("Start recording"));
+    expect(await findByLabelText("Stop recording")).toBeTruthy();
+
+    await fireEvent.press(await findByText("Type"));
+
+    await waitFor(() => expect(recorder.stop).toHaveBeenCalled());
+    expect(mockResolveVoiceMutate).not.toHaveBeenCalled();
+
+    await fireEvent.press(await findByText("Voice"));
+    expect(await findByLabelText("Start recording")).toBeTruthy();
+    expect(queryByLabelText("Stop recording")).toBeNull();
+  });
+
+  test("unmounting the screen while recording stops the recorder", async () => {
+    const recorder = makeRecorder();
+    (useAudioRecorder as jest.Mock).mockReturnValue(recorder);
+
+    const { findByText, findByLabelText, unmount } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Voice"));
+    await fireEvent.press(await findByLabelText("Start recording"));
+
+    unmount();
+
+    await waitFor(() => expect(recorder.stop).toHaveBeenCalled());
+  });
 });
 
 describe("Scan mode", () => {
