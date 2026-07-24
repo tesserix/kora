@@ -119,7 +119,8 @@ func TestEvalChat(t *testing.T) {
 		t.Fatalf("db: %v", err)
 	}
 	foods := nutrition.NewRepository(db)
-	resolver := ai.NewResolver(evalProvider(t, cfg), foods, ai.NoCache{}, unlimitedMeter{})
+	provider := evalProvider(t, cfg)
+	resolver := ai.NewResolver(provider, foods, ai.NoCache{}, unlimitedMeter{})
 
 	cases := loadChatCases(t)
 	if len(cases) == 0 {
@@ -160,7 +161,7 @@ func TestEvalChat(t *testing.T) {
 	resolvedRate := float64(resolved) / n
 	medErr := median(kcalErrs)
 	t.Logf("provider=%s chat: id_acc=%.2f resolved=%.2f median_kcal_err=%.2f hallucinated=%d (n=%d)",
-		cfg.OpenAIModel, idAcc, resolvedRate, medErr, hallucinated, len(cases))
+		provider.Name(), idAcc, resolvedRate, medErr, hallucinated, len(cases))
 
 	if hallucinated != 0 {
 		t.Errorf("hallucinated rows: %d (want 0)", hallucinated)
