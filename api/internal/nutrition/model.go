@@ -17,6 +17,19 @@ const (
 	ProvenanceUserEstimate Provenance = "user_estimate"
 )
 
+const (
+	MatchAlias     = "alias"
+	MatchFullText  = "full_text"
+	MatchEmbedding = "embedding"
+)
+
+// Candidate is a ranked resolution result. MatchScore is normalized 0..1.
+type Candidate struct {
+	Item       FoodItem `json:"item"`
+	MatchScore float64  `json:"match_score"`
+	MatchTier  string   `json:"match_tier"`
+}
+
 type FoodItem struct {
 	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	Name           string    `json:"name"`
