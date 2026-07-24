@@ -15,6 +15,8 @@ func TestLoadConfig(t *testing.T) {
 		databaseURL     string
 		redisURL        string
 		firebaseProject string
+		geminiAPIKey    string
+		openAIAPIKey    string
 		expectErr       bool
 		expectConfig    Config
 	}{
@@ -38,6 +40,8 @@ func TestLoadConfig(t *testing.T) {
 				DatabaseURL:       "postgres://user:pass@localhost/testdb",
 				RedisURL:          "redis://localhost:6379/0",
 				FirebaseProjectID: "",
+				GeminiAPIKey:      "",
+				OpenAIAPIKey:      "",
 			},
 		},
 		{
@@ -47,6 +51,8 @@ func TestLoadConfig(t *testing.T) {
 			databaseURL:     "postgres://prod:secret@host/proddb",
 			redisURL:        "redis://prod-redis:6379/1",
 			firebaseProject: "my-firebase-project",
+			geminiAPIKey:    "gemini-test-key",
+			openAIAPIKey:    "openai-test-key",
 			expectErr:       false,
 			expectConfig: Config{
 				Port:              "9090",
@@ -54,6 +60,8 @@ func TestLoadConfig(t *testing.T) {
 				DatabaseURL:       "postgres://prod:secret@host/proddb",
 				RedisURL:          "redis://prod-redis:6379/1",
 				FirebaseProjectID: "my-firebase-project",
+				GeminiAPIKey:      "gemini-test-key",
+				OpenAIAPIKey:      "openai-test-key",
 			},
 		},
 	}
@@ -76,6 +84,12 @@ func TestLoadConfig(t *testing.T) {
 			if tt.firebaseProject != "" {
 				t.Setenv("FIREBASE_PROJECT_ID", tt.firebaseProject)
 			}
+			if tt.geminiAPIKey != "" {
+				t.Setenv("GEMINI_API_KEY", tt.geminiAPIKey)
+			}
+			if tt.openAIAPIKey != "" {
+				t.Setenv("OPENAI_API_KEY", tt.openAIAPIKey)
+			}
 
 			// Call Load()
 			cfg, err := Load()
@@ -94,6 +108,8 @@ func TestLoadConfig(t *testing.T) {
 				assert.Equal(t, tt.expectConfig.DatabaseURL, cfg.DatabaseURL, "DatabaseURL mismatch")
 				assert.Equal(t, tt.expectConfig.RedisURL, cfg.RedisURL, "RedisURL mismatch")
 				assert.Equal(t, tt.expectConfig.FirebaseProjectID, cfg.FirebaseProjectID, "FirebaseProjectID mismatch")
+				assert.Equal(t, tt.expectConfig.GeminiAPIKey, cfg.GeminiAPIKey, "GeminiAPIKey mismatch")
+				assert.Equal(t, tt.expectConfig.OpenAIAPIKey, cfg.OpenAIAPIKey, "OpenAIAPIKey mismatch")
 			} else {
 				// On error, config should be zero-value
 				assert.Equal(t, Config{}, cfg, "expected zero-value Config on error")
