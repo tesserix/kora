@@ -3,6 +3,8 @@
 // always come from the nutrition index (never from the model).
 package ai
 
+import "github.com/tesserix/kora/api/internal/nutrition"
+
 // Guess is a single food identification from a provider. It carries NO
 // nutrition numbers — only identity + portion + confidence.
 type Guess struct {
@@ -58,4 +60,25 @@ func TierFor(identifyConf, matchScore float64) Tier {
 	default:
 		return TierFollowUp
 	}
+}
+
+// ResolvedCandidate is a resolved food with nutrition taken ONLY from the
+// FoodItem row (never from the LLM).
+type ResolvedCandidate struct {
+	Item         nutrition.FoodItem `json:"item"`
+	PortionGrams float64            `json:"portion_grams"`
+	Kcal         float64            `json:"kcal"`
+	MatchScore   float64            `json:"match_score"`
+	MatchTier    string             `json:"match_tier"`
+}
+
+// Resolution is the engine's answer for one resolve request.
+type Resolution struct {
+	Candidates       []ResolvedCandidate `json:"candidates"`
+	Tier             Tier                `json:"tier"`
+	FollowUpQuestion string              `json:"follow_up_question,omitempty"`
+	IsEstimate       bool                `json:"is_estimate"`
+	KcalLow          float64             `json:"kcal_low,omitempty"`
+	KcalHigh         float64             `json:"kcal_high,omitempty"`
+	Provenance       string              `json:"provenance"`
 }
