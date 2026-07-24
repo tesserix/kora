@@ -31,18 +31,20 @@ jest.mock("expo-image-picker", () => ({
 
 // expo-camera (SDK 57): useCameraPermissions/useMicrophonePermissions return a 3-tuple
 // [permissionResponse, requestPermission, getPermission] — not the 2-tuple older SDKs used.
+// Both hooks are jest.fn()s (not bare arrows) so per-test overrides — e.g. a denied
+// permission — can be applied via `(useCameraPermissions as jest.Mock).mockReturnValue(...)`.
 jest.mock("expo-camera", () => ({
   CameraView: "CameraView",
-  useCameraPermissions: () => [
+  useCameraPermissions: jest.fn(() => [
     { granted: true, status: "granted", canAskAgain: true, expires: "never" },
     jest.fn(async () => ({ granted: true, status: "granted" })),
     jest.fn(async () => ({ granted: true, status: "granted" })),
-  ],
-  useMicrophonePermissions: () => [
+  ]),
+  useMicrophonePermissions: jest.fn(() => [
     { granted: true, status: "granted", canAskAgain: true, expires: "never" },
     jest.fn(async () => ({ granted: true, status: "granted" })),
     jest.fn(async () => ({ granted: true, status: "granted" })),
-  ],
+  ]),
   requestCameraPermissionsAsync: jest.fn(async () => ({ granted: true, status: "granted" })),
   getCameraPermissionsAsync: jest.fn(async () => ({ granted: true, status: "granted" })),
 }));
@@ -50,8 +52,10 @@ jest.mock("expo-camera", () => ({
 // expo-audio (SDK 57 replacement for expo-av): useAudioRecorder returns an AudioRecorder
 // instance (record/pause/stop/prepareToRecordAsync + uri/isRecording state), not a bare
 // { record, stop, uri } shape. useAudioRecorderState mirrors its status for UI polling.
+// useAudioRecorder is a jest.fn() (not a bare arrow) so tests can override the returned
+// recorder — e.g. to make .uri populate once .stop() resolves.
 jest.mock("expo-audio", () => ({
-  useAudioRecorder: () => ({
+  useAudioRecorder: jest.fn(() => ({
     prepareToRecordAsync: jest.fn(async () => {}),
     record: jest.fn(),
     pause: jest.fn(),
@@ -61,7 +65,7 @@ jest.mock("expo-audio", () => ({
     isRecording: false,
     currentTime: 0,
     id: "mock-recorder",
-  }),
+  })),
   useAudioRecorderState: () => ({
     isRecording: false,
     durationMillis: 0,

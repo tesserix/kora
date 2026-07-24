@@ -1,5 +1,7 @@
 import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import * as ImagePicker from "expo-image-picker";
+import { useCameraPermissions } from "expo-camera";
+import { requestRecordingPermissionsAsync, useAudioRecorder } from "expo-audio";
 import { ApiError } from "@/lib/api";
 import type { Resolution } from "@/api/types";
 
@@ -23,8 +25,12 @@ jest.mock("@/lib/api", () => ({
 
 const mockResolveTextMutate = jest.fn();
 const mockResolvePhotoMutate = jest.fn();
+const mockResolveVoiceMutate = jest.fn();
+const mockResolveBarcodeMutate = jest.fn();
 let mockResolveTextIsPending = false;
 let mockResolvePhotoIsPending = false;
+let mockResolveVoiceIsPending = false;
+let mockResolveBarcodeIsPending = false;
 
 jest.mock("@/api/hooks", () => ({
   useProfile: () => ({ data: { display_name: "Alex Stone" } }),
@@ -40,7 +46,51 @@ jest.mock("@/api/hooks", () => ({
       return mockResolvePhotoIsPending;
     },
   }),
+  useResolveVoice: () => ({
+    mutate: mockResolveVoiceMutate,
+    get isPending() {
+      return mockResolveVoiceIsPending;
+    },
+  }),
+  useResolveBarcode: () => ({
+    mutate: mockResolveBarcodeMutate,
+    get isPending() {
+      return mockResolveBarcodeIsPending;
+    },
+  }),
 }));
+
+type MockRecorder = {
+  prepareToRecordAsync: jest.Mock;
+  record: jest.Mock;
+  pause: jest.Mock;
+  stop: jest.Mock;
+  getStatus: jest.Mock;
+  uri: string | null;
+  isRecording: boolean;
+  currentTime: number;
+  id: string;
+};
+
+// A recorder whose `.stop()` populates `.uri` — mirrors the real AudioRecorder,
+// where the URI is only available once the recording is flushed to disk.
+function makeRecorder(): MockRecorder {
+  const recorder: MockRecorder = {
+    prepareToRecordAsync: jest.fn(async () => {}),
+    record: jest.fn(),
+    pause: jest.fn(),
+    stop: jest.fn(),
+    getStatus: jest.fn(async () => ({ isRecording: false })),
+    uri: null,
+    isRecording: false,
+    currentTime: 0,
+    id: "mock-recorder",
+  };
+  recorder.stop = jest.fn(async () => {
+    recorder.uri = "file://mock-recording.m4a";
+  });
+  return recorder;
+}
 
 import CaptureScreen, { CaptureBody } from "../capture";
 
@@ -86,18 +136,33 @@ const noopBodyProps = {
   onChangeText: jest.fn(),
   onSend: jest.fn(),
   onCapturePhoto: jest.fn(),
+  isRecordingVoice: false,
+  onToggleVoice: jest.fn(),
+  cameraPermissionGranted: true,
+  onBarcodeScanned: jest.fn(),
   onClose: jest.fn(),
 };
 
 beforeEach(() => {
   mockResolveTextMutate.mockReset();
   mockResolvePhotoMutate.mockReset();
+  mockResolveVoiceMutate.mockReset();
+  mockResolveBarcodeMutate.mockReset();
   mockResolveTextIsPending = false;
   mockResolvePhotoIsPending = false;
+  mockResolveVoiceIsPending = false;
+  mockResolveBarcodeIsPending = false;
   (ImagePicker.requestCameraPermissionsAsync as jest.Mock).mockReset().mockResolvedValue({ granted: true });
   (ImagePicker.requestMediaLibraryPermissionsAsync as jest.Mock).mockReset().mockResolvedValue({ granted: true });
   (ImagePicker.launchCameraAsync as jest.Mock).mockReset();
   (ImagePicker.launchImageLibraryAsync as jest.Mock).mockReset();
+  (requestRecordingPermissionsAsync as jest.Mock).mockReset().mockResolvedValue({ granted: true, status: "granted" });
+  (useAudioRecorder as jest.Mock).mockReset().mockReturnValue(makeRecorder());
+  (useCameraPermissions as jest.Mock).mockReset().mockReturnValue([
+    { granted: true, status: "granted", canAskAgain: true, expires: "never" },
+    jest.fn(async () => ({ granted: true, status: "granted" })),
+    jest.fn(async () => ({ granted: true, status: "granted" })),
+  ]);
 });
 
 test("renders the Otto greeting and all four mode pills", async () => {
@@ -321,6 +386,148 @@ describe("Photo mode", () => {
 
     expect(await findByText("Something went wrong opening your photos — try again.")).toBeTruthy();
     expect(mockResolvePhotoMutate).not.toHaveBeenCalled();
+  });
+});
+
+describe("Voice mode", () => {
+  test("start then stop recording calls useResolveVoice with the recorded file", async () => {
+    const recorder = makeRecorder();
+    (useAudioRecorder as jest.Mock).mockReturnValue(recorder);
+
+    const { findByText, findByLabelText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Voice"));
+
+    await fireEvent.press(await findByLabelText("Start recording"));
+    expect(recorder.prepareToRecordAsync).toHaveBeenCalled();
+    expect(recorder.record).toHaveBeenCalled();
+
+    await fireEvent.press(await findByLabelText("Stop recording"));
+
+    await waitFor(() =>
+      expect(mockResolveVoiceMutate).toHaveBeenCalledWith(
+        { uri: "file://mock-recording.m4a", name: "clip.m4a", type: "audio/mp4" },
+        expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
+      ),
+    );
+  });
+
+  test("denied mic permission renders the Otto error bubble and never starts recording", async () => {
+    const recorder = makeRecorder();
+    (useAudioRecorder as jest.Mock).mockReturnValue(recorder);
+    (requestRecordingPermissionsAsync as jest.Mock).mockResolvedValueOnce({ granted: false, status: "denied" });
+
+    const { findByText, findByLabelText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Voice"));
+    await fireEvent.press(await findByLabelText("Start recording"));
+
+    expect(await findByText(/i need mic access/i)).toBeTruthy();
+    expect(recorder.record).not.toHaveBeenCalled();
+    expect(mockResolveVoiceMutate).not.toHaveBeenCalled();
+  });
+
+  test("a successful voice resolve renders the DetectedCard", async () => {
+    const recorder = makeRecorder();
+    (useAudioRecorder as jest.Mock).mockReturnValue(recorder);
+
+    const { findByText, findByLabelText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Voice"));
+    await fireEvent.press(await findByLabelText("Start recording"));
+    await fireEvent.press(await findByLabelText("Stop recording"));
+
+    await waitFor(() => expect(mockResolveVoiceMutate).toHaveBeenCalled());
+    const [, options] = mockResolveVoiceMutate.mock.calls[0];
+    await act(async () => options.onSuccess(makeResolution()));
+
+    expect(await findByText("Grilled chicken breast")).toBeTruthy();
+  });
+
+  test("a failed voice resolve renders the Otto error bubble", async () => {
+    const recorder = makeRecorder();
+    (useAudioRecorder as jest.Mock).mockReturnValue(recorder);
+
+    const { findByText, findByLabelText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Voice"));
+    await fireEvent.press(await findByLabelText("Start recording"));
+    await fireEvent.press(await findByLabelText("Stop recording"));
+
+    await waitFor(() => expect(mockResolveVoiceMutate).toHaveBeenCalled());
+    const [, options] = mockResolveVoiceMutate.mock.calls[0];
+    await act(async () => options.onError(new ApiError(422, "no_match", "couldn't make that out")));
+
+    expect(await findByText(/couldn't make that out/i)).toBeTruthy();
+  });
+
+  test("shows the analyzing stage while the voice resolve is pending", async () => {
+    mockResolveVoiceIsPending = true;
+    const { getByTestId } = await render(<CaptureScreen />);
+    expect(getByTestId("capture-analyzing-spinner")).toBeTruthy();
+  });
+});
+
+describe("Scan mode", () => {
+  test("a scanned barcode calls useResolveBarcode with the scanned data", async () => {
+    const { findByText, findByTestId } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Scan"));
+
+    const cameraView = await findByTestId("capture-camera-view");
+    await act(async () => {
+      cameraView.props.onBarcodeScanned({ data: "012345678905", type: "ean13" });
+    });
+
+    expect(mockResolveBarcodeMutate).toHaveBeenCalledWith(
+      "012345678905",
+      expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
+    );
+  });
+
+  test("a duplicate rapid scan only calls useResolveBarcode once", async () => {
+    const { findByText, findByTestId } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Scan"));
+
+    const cameraView = await findByTestId("capture-camera-view");
+    await act(async () => {
+      cameraView.props.onBarcodeScanned({ data: "012345678905", type: "ean13" });
+      cameraView.props.onBarcodeScanned({ data: "012345678905", type: "ean13" });
+    });
+
+    expect(mockResolveBarcodeMutate).toHaveBeenCalledTimes(1);
+  });
+
+  test("denied camera permission renders the Otto error bubble", async () => {
+    const deniedRequest = jest.fn(async () => ({ granted: false, status: "denied" }));
+    (useCameraPermissions as jest.Mock).mockReturnValue([
+      { granted: false, status: "denied", canAskAgain: true, expires: "never" },
+      deniedRequest,
+      jest.fn(),
+    ]);
+
+    const { findByText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Scan"));
+
+    expect(await findByText(/i need camera access/i)).toBeTruthy();
+    expect(mockResolveBarcodeMutate).not.toHaveBeenCalled();
+  });
+
+  test("a successful barcode resolve renders the DetectedCard", async () => {
+    const { findByText, findByTestId } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Scan"));
+
+    const cameraView = await findByTestId("capture-camera-view");
+    await act(async () => {
+      cameraView.props.onBarcodeScanned({ data: "012345678905", type: "ean13" });
+    });
+
+    await waitFor(() => expect(mockResolveBarcodeMutate).toHaveBeenCalled());
+    const [, options] = mockResolveBarcodeMutate.mock.calls[0];
+    await act(async () => options.onSuccess(makeResolution()));
+
+    expect(await findByText("Grilled chicken breast")).toBeTruthy();
+  });
+
+  test("shows the analyzing stage while the barcode resolve is pending", async () => {
+    mockResolveBarcodeIsPending = true;
+    const { getByTestId } = await render(<CaptureScreen />);
+    expect(getByTestId("capture-analyzing-spinner")).toBeTruthy();
   });
 });
 

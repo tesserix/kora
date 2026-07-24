@@ -3,6 +3,8 @@ import { AccessibilityInfo, Animated, Easing, Pressable, ScrollView, TextInput, 
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
+import { CameraView, useCameraPermissions } from "expo-camera";
+import { RecordingPresets, requestRecordingPermissionsAsync, useAudioRecorder } from "expo-audio";
 import { Icon } from "@/components/Icon";
 import { AppText } from "@/components/Text";
 import { OttoBubble } from "@/components/capture/OttoBubble";
@@ -11,7 +13,7 @@ import { ModePill } from "@/components/capture/ModePill";
 import { Waveform } from "@/components/capture/Waveform";
 import { DetectedCard } from "@/components/capture/DetectedCard";
 import { captureColors } from "@/components/capture/captureTheme";
-import { useProfile, useResolvePhoto, useResolveText } from "@/api/hooks";
+import { useProfile, useResolveBarcode, useResolvePhoto, useResolveText, useResolveVoice } from "@/api/hooks";
 import { ApiError } from "@/lib/api";
 import type { Resolution } from "@/api/types";
 import { mealSlotForHour, type MealSlot } from "@/lib/mealSlot";
@@ -80,12 +82,23 @@ function AnalyzingSpinner() {
 interface IdleAffordanceProps {
   mode: CaptureMode;
   onCapturePhoto: () => void;
+  isRecordingVoice: boolean;
+  onToggleVoice: () => void;
+  cameraPermissionGranted: boolean;
+  onBarcodeScanned: (data: string) => void;
 }
 
 // The per-mode "empty" affordance shown in the thread before a capture
-// starts. The photo mode wires into the real camera/library flow; voice/scan
-// remain no-ops until Task 6 wires those triggers.
-function IdleAffordance({ mode, onCapturePhoto }: IdleAffordanceProps) {
+// starts. Photo, voice, and scan all wire into their real capture flows;
+// type falls through to the static prompt bubble below.
+function IdleAffordance({
+  mode,
+  onCapturePhoto,
+  isRecordingVoice,
+  onToggleVoice,
+  cameraPermissionGranted,
+  onBarcodeScanned,
+}: IdleAffordanceProps) {
   if (mode === "photo") {
     return (
       <Pressable
@@ -140,7 +153,10 @@ function IdleAffordance({ mode, onCapturePhoto }: IdleAffordanceProps) {
           gap: 18,
         }}
       >
-        <View
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={isRecordingVoice ? "Stop recording" : "Start recording"}
+          onPress={onToggleVoice}
           style={{
             width: 72,
             height: 72,
@@ -153,10 +169,10 @@ function IdleAffordance({ mode, onCapturePhoto }: IdleAffordanceProps) {
           }}
         >
           <Icon name="mic" size={30} color={captureColors.primaryForeground} />
-        </View>
-        <Waveform active />
+        </Pressable>
+        <Waveform active={isRecordingVoice} />
         <AppText style={{ color: captureColors.onSurfaceMuted, fontSize: 13, fontWeight: "600" }}>
-          Listening… tell Otto what you ate
+          {isRecordingVoice ? "Listening… tell Otto what you ate" : "Tap the mic to start"}
         </AppText>
       </View>
     );
@@ -188,17 +204,30 @@ function IdleAffordance({ mode, onCapturePhoto }: IdleAffordanceProps) {
             overflow: "hidden",
           }}
         >
-          <Icon name="barcode" size={64} color={captureColors.onSurfaceFaint} />
-          <View
-            style={{
-              position: "absolute",
-              left: 0,
-              right: 0,
-              top: "50%",
-              height: 2,
-              backgroundColor: captureColors.primary,
-            }}
-          />
+          {cameraPermissionGranted ? (
+            // No camera on the iOS simulator — this renders but won't scan
+            // there; live barcode detection is device-only (see report).
+            <CameraView
+              testID="capture-camera-view"
+              style={{ width: "100%", height: "100%" }}
+              barcodeScannerSettings={{ barcodeTypes: ["ean13", "ean8", "upc_a", "upc_e"] }}
+              onBarcodeScanned={({ data }) => onBarcodeScanned(data)}
+            />
+          ) : (
+            <>
+              <Icon name="barcode" size={64} color={captureColors.onSurfaceFaint} />
+              <View
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  right: 0,
+                  top: "50%",
+                  height: 2,
+                  backgroundColor: captureColors.primary,
+                }}
+              />
+            </>
+          )}
         </View>
         <AppText style={{ marginTop: 12, color: captureColors.onSurfaceMuted, fontSize: 13, fontWeight: "600" }}>
           Point at a barcode
@@ -230,6 +259,10 @@ interface CaptureBodyProps {
   onChangeText: (text: string) => void;
   onSend: () => void;
   onCapturePhoto: () => void;
+  isRecordingVoice: boolean;
+  onToggleVoice: () => void;
+  cameraPermissionGranted: boolean;
+  onBarcodeScanned: (data: string) => void;
   onClose: () => void;
 }
 
@@ -252,6 +285,10 @@ export function CaptureBody({
   onChangeText,
   onSend,
   onCapturePhoto,
+  isRecordingVoice,
+  onToggleVoice,
+  cameraPermissionGranted,
+  onBarcodeScanned,
   onClose,
 }: CaptureBodyProps) {
   const scrollViewRef = useRef<ScrollView>(null);
@@ -300,7 +337,16 @@ export function CaptureBody({
           work too.
         </OttoBubble>
 
-        {stage === "idle" && <IdleAffordance mode={mode} onCapturePhoto={onCapturePhoto} />}
+        {stage === "idle" && (
+          <IdleAffordance
+            mode={mode}
+            onCapturePhoto={onCapturePhoto}
+            isRecordingVoice={isRecordingVoice}
+            onToggleVoice={onToggleVoice}
+            cameraPermissionGranted={cameraPermissionGranted}
+            onBarcodeScanned={onBarcodeScanned}
+          />
+        )}
 
         {stage === "analyzing" && (
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingLeft: 40 }}>
@@ -466,22 +512,52 @@ export default function CaptureScreen() {
   const profile = useProfile();
   const resolveText = useResolveText();
   const resolvePhoto = useResolvePhoto();
+  const resolveVoice = useResolveVoice();
+  const resolveBarcode = useResolveBarcode();
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [mode, setMode] = useState<CaptureMode>("photo");
-  // Stage 6/7 will add real voice/scan transitions; idle<->result here is
-  // driven by the text/photo flows below, and the "analyzing" stage is
+  // idle<->result is driven by the four capture flows below; "analyzing" is
   // derived from the mutations' isPending rather than tracked separately.
   const [stage, setStage] = useState<CaptureStage>("idle");
   const [resolution, setResolution] = useState<Resolution | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [mealSlot, setMealSlot] = useState<MealSlot>(() => mealSlotForHour(new Date().getHours()));
   const [text, setText] = useState("");
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  // Guards a single CameraView against firing onBarcodeScanned repeatedly
+  // for the same physical scan while the camera keeps detecting the code.
+  const scannedRef = useRef(false);
 
-  const displayStage: CaptureStage = resolveText.isPending || resolvePhoto.isPending ? "analyzing" : stage;
+  const displayStage: CaptureStage =
+    resolveText.isPending || resolvePhoto.isPending || resolveVoice.isPending || resolveBarcode.isPending
+      ? "analyzing"
+      : stage;
+
+  // Request camera access as soon as the user switches into Scan mode; a
+  // denial surfaces as an Otto bubble rather than a silently blank viewfinder.
+  useEffect(() => {
+    if (mode !== "scan" || cameraPermission?.granted) return;
+    requestCameraPermission()
+      .then((result) => {
+        if (!result.granted) {
+          setErrorMsg("I need camera access to scan barcodes.");
+        }
+      })
+      .catch(() => {
+        setErrorMsg("Something went wrong turning on the camera — please try again.");
+      });
+    // Only re-check on a mode change into "scan" — requestCameraPermission's
+    // own hook state (cameraPermission) updates independently and re-running
+    // this on every state change would re-prompt in a loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
 
   function handleModeChange(next: CaptureMode) {
     setMode(next);
     setStage("idle");
     setErrorMsg(null);
+    scannedRef.current = false;
   }
 
   function handleSend() {
@@ -519,6 +595,69 @@ export default function CaptureScreen() {
     });
   }
 
+  // Stop path first (recorder.stop() can throw — a "real" failure, not just
+  // a denial — so both branches surface an Otto bubble rather than failing
+  // silently, mirroring pickMealPhoto's discipline above).
+  async function handleToggleVoice() {
+    setErrorMsg(null);
+
+    if (isRecordingVoice) {
+      try {
+        await recorder.stop();
+      } catch {
+        setIsRecordingVoice(false);
+        setErrorMsg("Something went wrong recording that — please try again.");
+        return;
+      }
+      setIsRecordingVoice(false);
+      const uri = recorder.uri;
+      if (!uri) {
+        setErrorMsg("I didn't catch that — mind trying again?");
+        return;
+      }
+      resolveVoice.mutate(
+        { uri, name: "clip.m4a", type: "audio/mp4" },
+        {
+          onSuccess: (data) => {
+            setResolution(data);
+            setStage("result");
+          },
+          onError: (error) => setErrorMsg(ottoErrorMessage(error)),
+        },
+      );
+      return;
+    }
+
+    try {
+      const permission = await requestRecordingPermissionsAsync();
+      if (!permission.granted) {
+        setErrorMsg("I need mic access to hear what you ate.");
+        return;
+      }
+      await recorder.prepareToRecordAsync();
+      recorder.record();
+      setIsRecordingVoice(true);
+    } catch {
+      setErrorMsg("Something went wrong starting the recording — please try again.");
+    }
+  }
+
+  function handleBarcodeScanned(data: string) {
+    if (scannedRef.current) return;
+    scannedRef.current = true;
+    setErrorMsg(null);
+    resolveBarcode.mutate(data, {
+      onSuccess: (result) => {
+        setResolution(result);
+        setStage("result");
+      },
+      onError: (error) => {
+        setErrorMsg(ottoErrorMessage(error));
+        scannedRef.current = false;
+      },
+    });
+  }
+
   return (
     <View style={{ flex: 1, backgroundColor: captureColors.surface }}>
       <CaptureBody
@@ -537,6 +676,10 @@ export default function CaptureScreen() {
         onChangeText={setText}
         onSend={handleSend}
         onCapturePhoto={handleCapturePhoto}
+        isRecordingVoice={isRecordingVoice}
+        onToggleVoice={handleToggleVoice}
+        cameraPermissionGranted={cameraPermission?.granted ?? false}
+        onBarcodeScanned={handleBarcodeScanned}
         onClose={() => router.back()}
       />
     </View>
