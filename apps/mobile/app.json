@@ -25,12 +25,31 @@
     },
     "plugins": [
       "expo-router",
+      "expo-dev-client",
       [
         "expo-splash-screen",
         {
           "backgroundColor": "#208AEF",
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Kora uses your photos to identify meals you log."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Kora uses the camera to photograph and scan the foods you log."
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Kora uses the microphone so you can describe meals by voice."
         }
       ]
     ],
