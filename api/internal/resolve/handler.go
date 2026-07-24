@@ -8,6 +8,8 @@ package resolve
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -20,8 +22,17 @@ import (
 )
 
 // maxPhotoBytes caps an uploaded resolve photo. Vision models reject huge
-// inputs anyway; this protects the server from oversized uploads.
+// inputs anyway; this protects the server from oversized uploads. The
+// request body is bounded to this limit (plus small headroom for multipart
+// boundary/header overhead) via http.MaxBytesReader BEFORE Gin's
+// ParseMultipartForm buffers it, so an oversized upload is rejected while
+// streaming in rather than after being fully read into memory.
 const maxPhotoBytes = 8 << 20 // 8 MiB
+
+// maxPhotoBodyBytes is the hard cap applied to the raw request body, ahead
+// of multipart parsing. The headroom above maxPhotoBytes covers the
+// multipart boundary markers and part headers surrounding the file bytes.
+const maxPhotoBodyBytes = maxPhotoBytes + 1<<10
 
 // barcodeUnknownQuestion is returned (with no candidates, no fabricated row)
 // when a scanned barcode matches nothing locally or on OpenFoodFacts.
@@ -76,8 +87,16 @@ func (h Handler) ResolvePhoto(c *gin.Context) {
 		httpx.Error(c, http.StatusUnauthorized, "unauthorized", "missing user")
 		return
 	}
+	// Bound the raw body BEFORE multipart parsing so an oversized upload is
+	// rejected while streaming in, not after Gin has fully buffered it.
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxPhotoBodyBytes)
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
+		var mbe *http.MaxBytesError
+		if errors.As(err, &mbe) {
+			httpx.Error(c, http.StatusRequestEntityTooLarge, "payload_too_large", "photo exceeds 8MB limit")
+			return
+		}
 		httpx.Error(c, http.StatusBadRequest, "invalid_input", "file is required")
 		return
 	}
@@ -91,18 +110,10 @@ func (h Handler) ResolvePhoto(c *gin.Context) {
 		return
 	}
 	defer f.Close()
-	buf := make([]byte, 0, fileHeader.Size)
-	tmp := make([]byte, 32<<10)
-	for {
-		n, rerr := f.Read(tmp)
-		buf = append(buf, tmp[:n]...)
-		if rerr != nil {
-			break
-		}
-		if len(buf) > maxPhotoBytes {
-			httpx.Error(c, http.StatusRequestEntityTooLarge, "payload_too_large", "photo exceeds 8MB limit")
-			return
-		}
+	buf, err := io.ReadAll(f) // bounded by MaxBytesReader above
+	if err != nil {
+		httpx.RespondServiceError(c, err)
+		return
 	}
 	mime := fileHeader.Header.Get("Content-Type")
 	if mime == "" {

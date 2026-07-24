@@ -49,6 +49,20 @@ func newEngine(h Handler) *gin.Engine {
 	return r
 }
 
+// newEngineNoUser mounts the same routes but WITHOUT the middleware that
+// sets user_id in context, so IDFromContext fails — matching a request that
+// somehow reached these handlers without the auth/user-resolve middleware
+// chain in front of them.
+func newEngineNoUser(h Handler) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	g := r.Group("/resolve")
+	g.POST("/text", h.ResolveText)
+	g.POST("/photo", h.ResolvePhoto)
+	g.POST("/barcode", h.ResolveBarcode)
+	return r
+}
+
 func doJSON(r *gin.Engine, method, path string, body any) *httptest.ResponseRecorder {
 	var buf bytes.Buffer
 	if body != nil {
@@ -117,6 +131,42 @@ func TestResolveText_InfraErrorMapsTo500(t *testing.T) {
 	assert.JSONEq(t, `{"error":"internal_error","message":"something went wrong"}`, w.Body.String())
 }
 
+func TestResolveText_Unauthorized(t *testing.T) {
+	h := NewHandler(&stubTP{}, nil)
+	r := newEngineNoUser(h)
+
+	w := doJSON(r, http.MethodPost, "/resolve/text", map[string]string{"phrase": "chicken"})
+
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+	assert.Contains(t, w.Body.String(), "unauthorized")
+}
+
+func TestResolvePhoto_Unauthorized(t *testing.T) {
+	h := NewHandler(&stubTP{}, nil)
+	r := newEngineNoUser(h)
+
+	content := []byte("fake-jpeg-bytes")
+	body, contentType := buildMultipart(t, "file", "meal.jpg", "image/jpeg", content)
+
+	req := httptest.NewRequest(http.MethodPost, "/resolve/photo", body)
+	req.Header.Set("Content-Type", contentType)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+	assert.Contains(t, w.Body.String(), "unauthorized")
+}
+
+func TestResolveBarcode_Unauthorized(t *testing.T) {
+	h := NewHandler(&stubTP{}, nil)
+	r := newEngineNoUser(h)
+
+	w := doJSON(r, http.MethodPost, "/resolve/barcode", map[string]string{"barcode": "123"})
+
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+	assert.Contains(t, w.Body.String(), "unauthorized")
+}
+
 func TestResolveText_ValidationErrorMapsTo400(t *testing.T) {
 	tp := &stubTP{err: httpx.ValidationError{Message: "budget exceeded"}}
 	h := NewHandler(tp, nil)
@@ -144,7 +194,11 @@ func buildMultipart(t *testing.T, fieldName, fileName, contentType string, conte
 }
 
 func TestResolvePhoto_Success(t *testing.T) {
-	tp := &stubTP{photo: ai.Resolution{Tier: ai.TierConfirm, Provenance: "off"}}
+	tp := &stubTP{photo: ai.Resolution{
+		Tier:       ai.TierConfirm,
+		Provenance: "off",
+		Candidates: []ai.ResolvedCandidate{{Item: nutrition.FoodItem{Name: "Salad Bowl"}, MatchScore: 0.8}},
+	}}
 	h := NewHandler(tp, nil)
 	r := newEngine(h)
 
@@ -159,6 +213,15 @@ func TestResolvePhoto_Success(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.Equal(t, "image/jpeg", tp.gotMime)
 	assert.Equal(t, len(content), tp.gotSize)
+
+	var respBody struct {
+		Data ai.Resolution `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &respBody))
+	assert.Equal(t, ai.TierConfirm, respBody.Data.Tier)
+	assert.Equal(t, "off", respBody.Data.Provenance)
+	require.Len(t, respBody.Data.Candidates, 1)
+	assert.Equal(t, "Salad Bowl", respBody.Data.Candidates[0].Item.Name)
 }
 
 func TestResolvePhoto_NoFile(t *testing.T) {
@@ -191,6 +254,28 @@ func TestResolvePhoto_TooLarge(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
+	assert.Contains(t, w.Body.String(), "payload_too_large")
+}
+
+// TestResolvePhoto_BodyExceedsHardCap sends a request body genuinely larger
+// than maxPhotoBodyBytes (not just larger than maxPhotoBytes), exercising
+// the http.MaxBytesReader path that rejects the upload while it is still
+// being read — before ParseMultipartForm has a chance to fully buffer it.
+func TestResolvePhoto_BodyExceedsHardCap(t *testing.T) {
+	h := NewHandler(&stubTP{}, nil)
+	r := newEngine(h)
+
+	content := bytes.Repeat([]byte{0}, 9<<20) // 9 MiB, well past maxPhotoBodyBytes
+	body, contentType := buildMultipart(t, "file", "meal.jpg", "image/jpeg", content)
+	require.Greater(t, body.Len(), maxPhotoBodyBytes, "test body must exceed the hard cap to exercise MaxBytesReader")
+
+	req := httptest.NewRequest(http.MethodPost, "/resolve/photo", body)
+	req.Header.Set("Content-Type", contentType)
+	req.ContentLength = int64(body.Len())
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusRequestEntityTooLarge, w.Code, w.Body.String())
 	assert.Contains(t, w.Body.String(), "payload_too_large")
 }
 
