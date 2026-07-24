@@ -2,6 +2,7 @@ package foodlog
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -163,6 +164,29 @@ func TestEditLogFoodChangeWithoutCorrectionPhraseRecordsNoAlias(t *testing.T) {
 	var n int64
 	db.Raw("SELECT count(*) FROM food_aliases WHERE food_item_id = ?", newItem.ID).Scan(&n)
 	require.Equal(t, int64(0), n)
+}
+
+func TestEditLogNonexistentFoodItemIDReturnsValidationError(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	item := nutrition.FoodItem{Name: "Bad FoodID Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	created, err := svc.LogFood(context.Background(), userID, LogRequest{
+		FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 100, LoggedAt: time.Now(),
+	})
+	require.NoError(t, err)
+
+	bogusFoodID := uuid.New()
+	_, err = svc.EditLog(context.Background(), userID, created.ID, EditRequest{FoodItemID: &bogusFoodID})
+	require.Error(t, err)
+	msg, ok := httpx.IsValidation(err)
+	require.True(t, ok, "expected httpx.ValidationError, got: %v", err)
+	require.Equal(t, "food_item_id not found", msg)
+	require.False(t, errors.Is(err, gorm.ErrRecordNotFound), "error must not still satisfy gorm.ErrRecordNotFound (would map to misleading 404)")
 }
 
 func TestEditLogInvalidMealSlotReturnsValidationError(t *testing.T) {

@@ -11,6 +11,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"regexp"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -20,6 +21,11 @@ import (
 	"github.com/tesserix/kora/api/internal/nutrition"
 	"github.com/tesserix/kora/api/internal/user"
 )
+
+// barcodePattern matches a real EAN/UPC barcode: 8-14 digits. Enforced at the
+// HTTP boundary before the value is interpolated into the OpenFoodFacts URL
+// by BarcodeResolver.
+var barcodePattern = regexp.MustCompile(`^\d{8,14}$`)
 
 // maxPhotoBytes caps an uploaded resolve photo. Vision models reject huge
 // inputs anyway; this protects the server from oversized uploads. The
@@ -139,6 +145,10 @@ func (h Handler) ResolveBarcode(c *gin.Context) {
 	var req barcodeRequest
 	if err := c.ShouldBindJSON(&req); err != nil || req.Barcode == "" {
 		httpx.Error(c, http.StatusBadRequest, "invalid_input", "barcode is required")
+		return
+	}
+	if !barcodePattern.MatchString(req.Barcode) {
+		httpx.Error(c, http.StatusBadRequest, "invalid_input", "barcode must be 8-14 digits")
 		return
 	}
 	item, found, err := h.bc(c.Request.Context(), req.Barcode)

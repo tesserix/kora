@@ -2,10 +2,12 @@ package foodlog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 
 	"github.com/tesserix/kora/api/internal/httpx"
 	"github.com/tesserix/kora/api/internal/nutrition"
@@ -125,6 +127,11 @@ func (s Service) EditLog(ctx context.Context, userID, logID uuid.UUID, req EditR
 		}
 		item, err := s.foods.GetByID(ctx, *current.FoodItemID)
 		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				// The LOG exists (loaded above); it's the FOOD that's missing —
+				// a client-supplied bad food_item_id, not a "log not found" case.
+				return FoodLog{}, httpx.ValidationError{Message: "food_item_id not found"}
+			}
 			return FoodLog{}, fmt.Errorf("foodlog: edit: resolve food: %w", err)
 		}
 		f := current.QuantityGrams / 100.0

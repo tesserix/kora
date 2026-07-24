@@ -286,13 +286,13 @@ func TestResolveBarcode_Found(t *testing.T) {
 		KcalPer100g: 42,
 	}
 	bc := func(ctx context.Context, code string) (*nutrition.FoodItem, bool, error) {
-		assert.Equal(t, "123", code)
+		assert.Equal(t, "5449000000123", code)
 		return item, true, nil
 	}
 	h := NewHandler(&stubTP{}, bc)
 	r := newEngine(h)
 
-	w := doJSON(r, http.MethodPost, "/resolve/barcode", map[string]string{"barcode": "123"})
+	w := doJSON(r, http.MethodPost, "/resolve/barcode", map[string]string{"barcode": "5449000000123"})
 
 	require.Equal(t, http.StatusOK, w.Code)
 	var body struct {
@@ -313,7 +313,7 @@ func TestResolveBarcode_Unknown(t *testing.T) {
 	h := NewHandler(&stubTP{}, bc)
 	r := newEngine(h)
 
-	w := doJSON(r, http.MethodPost, "/resolve/barcode", map[string]string{"barcode": "999"})
+	w := doJSON(r, http.MethodPost, "/resolve/barcode", map[string]string{"barcode": "00000000999"})
 
 	require.Equal(t, http.StatusOK, w.Code)
 	var body struct {
@@ -343,8 +343,36 @@ func TestResolveBarcode_InfraError(t *testing.T) {
 	h := NewHandler(&stubTP{}, bc)
 	r := newEngine(h)
 
-	w := doJSON(r, http.MethodPost, "/resolve/barcode", map[string]string{"barcode": "123"})
+	w := doJSON(r, http.MethodPost, "/resolve/barcode", map[string]string{"barcode": "5449000000123"})
 
 	require.Equal(t, http.StatusInternalServerError, w.Code)
 	assert.Contains(t, w.Body.String(), "internal_error")
+}
+
+func TestResolveBarcode_NonDigitFormatIsRejected(t *testing.T) {
+	bc := func(ctx context.Context, code string) (*nutrition.FoodItem, bool, error) {
+		t.Fatal("barcode resolver must not be called for a malformed barcode")
+		return nil, false, nil
+	}
+	h := NewHandler(&stubTP{}, bc)
+	r := newEngine(h)
+
+	w := doJSON(r, http.MethodPost, "/resolve/barcode", map[string]string{"barcode": "abc123"})
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "invalid_input")
+}
+
+func TestResolveBarcode_TooShortIsRejected(t *testing.T) {
+	bc := func(ctx context.Context, code string) (*nutrition.FoodItem, bool, error) {
+		t.Fatal("barcode resolver must not be called for a malformed barcode")
+		return nil, false, nil
+	}
+	h := NewHandler(&stubTP{}, bc)
+	r := newEngine(h)
+
+	w := doJSON(r, http.MethodPost, "/resolve/barcode", map[string]string{"barcode": "123"})
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "invalid_input")
 }
