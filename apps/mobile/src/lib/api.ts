@@ -33,3 +33,22 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<un
   const body = (await res.json()) as { data?: unknown };
   return body.data ?? body;
 }
+
+export async function apiFetchMultipart(path: string, form: FormData): Promise<unknown> {
+  const user = auth?.currentUser;
+  const token = user ? await user.getIdToken() : null;
+
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method: "POST",
+    body: form,
+    // No Content-Type — fetch sets multipart/form-data with the boundary.
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+  });
+
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+    throw new ApiError(res.status, body.error ?? "unknown", body.message ?? "request failed");
+  }
+  const body = (await res.json()) as { data?: unknown };
+  return body.data ?? body;
+}

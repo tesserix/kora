@@ -69,3 +69,23 @@ export type OnboardingInput = {
   activity_level: "sedentary" | "light" | "moderate" | "active" | "very_active";
   goal: "fat_loss" | "maintenance" | "muscle_gain";
 };
+
+export type ResolveTier = "auto" | "confirm" | "follow_up";
+
+export interface ResolvedCandidate {
+  item: FoodItem;
+  portion_grams: number;
+  kcal: number;
+  match_score: number;
+  match_tier: string;
+}
+
+export interface Resolution {
+  candidates: ResolvedCandidate[];
+  tier: ResolveTier;
+  follow_up_question?: string;
+  is_estimate: boolean;
+  kcal_low?: number;
+  kcal_high?: number;
+  provenance: string;
+}

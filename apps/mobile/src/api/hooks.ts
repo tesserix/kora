@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, apiFetchMultipart } from "@/lib/api";
 import type {
   Candidate,
   DashboardSummary,
@@ -7,7 +7,14 @@ import type {
   FoodLog,
   OnboardingInput,
   Profile,
+  Resolution,
 } from "./types";
+
+type ResolveFile = {
+  uri: string;
+  name: string;
+  type: string;
+};
 
 export function useProfile() {
   return useQuery({
@@ -88,6 +95,41 @@ export function useCopyDay() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["logs"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+  });
+}
+
+export function useResolveText() {
+  return useMutation({
+    mutationFn: (phrase: string) =>
+      apiFetch("/v1/resolve/text", { method: "POST", body: JSON.stringify({ phrase }) }) as Promise<Resolution>,
+  });
+}
+
+export function useResolveBarcode() {
+  return useMutation({
+    mutationFn: (barcode: string) =>
+      apiFetch("/v1/resolve/barcode", { method: "POST", body: JSON.stringify({ barcode }) }) as Promise<Resolution>,
+  });
+}
+
+export function useResolvePhoto() {
+  return useMutation({
+    mutationFn: (file: ResolveFile) => {
+      const form = new FormData();
+      // React Native FormData file shape:
+      form.append("file", { uri: file.uri, name: file.name, type: file.type } as unknown as Blob);
+      return apiFetchMultipart("/v1/resolve/photo", form) as Promise<Resolution>;
+    },
+  });
+}
+
+export function useResolveVoice() {
+  return useMutation({
+    mutationFn: (file: ResolveFile) => {
+      const form = new FormData();
+      form.append("file", { uri: file.uri, name: file.name, type: file.type } as unknown as Blob);
+      return apiFetchMultipart("/v1/resolve/voice", form) as Promise<Resolution>;
     },
   });
 }
