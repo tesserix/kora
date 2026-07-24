@@ -21,6 +21,7 @@ type FoodItem struct {
 	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	Name           string    `json:"name"`
 	Brand          string    `json:"brand"`
+	NormalizedName string    `gorm:"column:normalized_name" json:"-"`
 	Provenance     string    `json:"provenance"`
 	Barcode        *string   `json:"barcode,omitempty"`
 	ServingDesc    string    `json:"serving_desc"`
