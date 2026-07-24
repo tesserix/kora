@@ -6,14 +6,15 @@ import { isFirebaseConfigured } from "@/lib/firebase";
 
 export default function RootLayout() {
   useEffect(() => {
-    if (!isFirebaseConfigured) {
-      router.replace("/config-missing");
-    }
+    if (!isFirebaseConfigured) router.replace("/config-missing");
   }, []);
 
   return (
     <QueryClientProvider client={queryClient}>
-      <Stack screenOptions={{ headerShown: false }} />
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="meal" options={{ presentation: "transparentModal", animation: "fade" }} />
+      </Stack>
     </QueryClientProvider>
   );
 }
