@@ -106,7 +106,7 @@ export default function LogScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background, paddingTop: insets.top + 8 }}>
-      <ScreenHeader overline="Add to diary" title="Log food" />
+      <ScreenHeader overline="Add to diary" title="Log food" onBack={() => router.back()} />
       <View style={{ paddingHorizontal: 20, gap: spacing.md, flex: 1 }}>
         <TextInput
           accessibilityLabel="Search foods"

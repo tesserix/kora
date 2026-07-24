@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react-native";
+import { fireEvent, render } from "@testing-library/react-native";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { Avatar } from "@/components/Avatar";
 import { Stat } from "@/components/Stat";
@@ -8,6 +8,20 @@ test("ScreenHeader shows overline and title", async () => {
   const { findByText } = await render(<ScreenHeader overline="This week" title="Diary" />);
   expect(await findByText("This week")).toBeTruthy();
   expect(await findByText("Diary")).toBeTruthy();
+});
+
+test("ScreenHeader renders no back button when onBack is absent", async () => {
+  const { queryByLabelText } = await render(<ScreenHeader overline="This week" title="Diary" />);
+  expect(queryByLabelText("Go back")).toBeNull();
+});
+
+test("ScreenHeader renders a back button and calls onBack when pressed", async () => {
+  const onBack = jest.fn();
+  const { findByLabelText } = await render(<ScreenHeader title="Log food" onBack={onBack} />);
+  const backButton = await findByLabelText("Go back");
+  expect(backButton).toBeTruthy();
+  fireEvent.press(backButton);
+  expect(onBack).toHaveBeenCalledTimes(1);
 });
 
 test("Avatar shows initials", async () => {

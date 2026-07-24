@@ -1,6 +1,7 @@
-import { render } from "@testing-library/react-native";
+import { fireEvent, render } from "@testing-library/react-native";
+import { router } from "expo-router";
 
-jest.mock("expo-router", () => ({ router: { replace: jest.fn() } }));
+jest.mock("expo-router", () => ({ router: { replace: jest.fn(), back: jest.fn() } }));
 jest.mock("@/api/hooks", () => ({
   useFoodSearch: () => ({
     data: [
@@ -28,4 +29,11 @@ test("Log screen shows the editorial header and a food tile result", async () =>
   const { findByText } = await render(<LogScreen />);
   expect(await findByText("Log food")).toBeTruthy();
   expect(await findByText("Grilled chicken breast")).toBeTruthy();
+});
+
+test("Log screen's back button exits the screen via router.back", async () => {
+  const { findByLabelText } = await render(<LogScreen />);
+  const backButton = await findByLabelText("Go back");
+  fireEvent.press(backButton);
+  expect(router.back).toHaveBeenCalledTimes(1);
 });
