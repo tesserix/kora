@@ -108,6 +108,7 @@ func buildResolveHandler(ctx context.Context, cfg config.Config, db *gorm.DB, lo
 			cache = ai.NewRedisCache(client, 24*time.Hour)
 			logger.Info("resolve engine: redis cache enabled")
 		} else {
+			_ = client.Close() // don't leak the pool for an unreachable cache
 			logger.Info("resolve engine: redis unreachable, cache disabled", "err", pingErr)
 		}
 	}
