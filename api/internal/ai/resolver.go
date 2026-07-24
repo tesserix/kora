@@ -65,14 +65,6 @@ func NewResolver(p Provider, foods nutrition.Repository, cache Cache, meter Mete
 	return Resolver{provider: p, foods: foods, cache: cache, meter: meter}
 }
 
-// estimateCostUSD computes the estimated USD cost of one provider call from
-// its token usage. Real per-token pricing lands alongside the concrete
-// provider adapters (Gemini/OpenAI rate tables); until then this
-// deliberately returns 0.0 rather than invent a placeholder price.
-func estimateCostUSD(u Usage) float64 {
-	return 0.0
-}
-
 // ResolveText resolves a free-text food phrase to a Resolution.
 func (r Resolver) ResolveText(ctx context.Context, userID uuid.UUID, phrase string) (Resolution, error) {
 	key := CacheKey("phrase", phrase)
@@ -167,7 +159,7 @@ func (r Resolver) resolve(
 // resolution — a user's food logging cannot depend on the billing table
 // being reachable — so the error is deliberately ignored here.
 func (r Resolver) record(ctx context.Context, userID uuid.UUID, u Usage) {
-	_ = r.meter.Record(ctx, userID, u, estimateCostUSD(u))
+	_ = r.meter.Record(ctx, userID, u, EstimateCostUSD(u))
 }
 
 // tierRank orders tiers from least to most confident so the "best" guess
@@ -196,12 +188,15 @@ func (r Resolver) resolveGuesses(ctx context.Context, userID uuid.UUID, guesses 
 
 	for _, guess := range guesses {
 		vec, embUsage, embErr := r.provider.Embed(ctx, guess.Food)
-		r.record(ctx, userID, embUsage)
 		if embErr != nil {
 			// Embedding is an optional signal-booster (tier 3 in
 			// nutrition.Resolve); a failure here must not fail the whole
-			// resolve, it just means the embedding tier is skipped.
+			// resolve, it just means the embedding tier is skipped. A failed
+			// embed also contributes no real usage, so it must not create a
+			// noise metering row.
 			vec = nil
+		} else {
+			r.record(ctx, userID, embUsage)
 		}
 
 		cands, err := r.foods.Resolve(ctx, guess.Food, vec, resolveTopK)
@@ -262,9 +257,12 @@ func (r Resolver) decomposeAndEstimate(ctx context.Context, userID uuid.UUID, su
 
 	for _, ing := range ingredients {
 		vec, embUsage, embErr := r.provider.Embed(ctx, ing.Ingredient)
-		r.record(ctx, userID, embUsage)
 		if embErr != nil {
+			// A failed embed contributes no real usage and must not create a
+			// noise metering row; the embedding tier is simply skipped.
 			vec = nil
+		} else {
+			r.record(ctx, userID, embUsage)
 		}
 
 		cands, err := r.foods.Resolve(ctx, ing.Ingredient, vec, resolveTopK)

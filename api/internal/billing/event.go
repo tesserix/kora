@@ -10,7 +10,7 @@ import (
 // Event is one metered AI provider call, persisted for cost accounting.
 type Event struct {
 	ID         uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	UserID     uuid.UUID `json:"user_id"`
+	UserID     uuid.UUID `json:"-"`
 	Provider   string    `json:"provider"`
 	Model      string    `json:"model"`
 	CallType   string    `json:"call_type"`

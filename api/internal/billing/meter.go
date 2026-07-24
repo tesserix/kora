@@ -18,6 +18,10 @@ const (
 	// globalMonthlyCostCapUSD is the maximum estimated AI spend across all
 	// users within a calendar month.
 	globalMonthlyCostCapUSD = 500.0
+	// perUserMonthlyCallCap bounds how many AI calls a single user may make in
+	// a calendar month, protecting free-tier provider quota even when the
+	// list-price cost estimate stays under the dollar cap.
+	perUserMonthlyCallCap = 300
 )
 
 // Meter records AI provider usage and enforces monthly cost budgets.
@@ -64,6 +68,17 @@ func (m Meter) WithinBudget(ctx context.Context, userID uuid.UUID) (bool, error)
 		return false, fmt.Errorf("billing: within budget: sum user cost: %w", err)
 	}
 	if userTotal >= perUserMonthlyCostCapUSD {
+		return false, nil
+	}
+
+	var userCalls int64
+	if err := m.db.WithContext(ctx).
+		Model(&Event{}).
+		Where("user_id = ? AND created_at >= ?", userID, monthStart).
+		Count(&userCalls).Error; err != nil {
+		return false, fmt.Errorf("billing: within budget: count user calls: %w", err)
+	}
+	if userCalls >= perUserMonthlyCallCap {
 		return false, nil
 	}
 

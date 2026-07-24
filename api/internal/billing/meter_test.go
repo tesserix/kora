@@ -2,7 +2,9 @@ package billing
 
 import (
 	"context"
+	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -89,4 +91,35 @@ func TestWithinBudgetFalseAfterCrossingPerUserCap(t *testing.T) {
 	ok, err := meter.WithinBudget(context.Background(), userID)
 	require.NoError(t, err)
 	require.False(t, ok)
+}
+
+func TestWithinBudgetCallCountCap(t *testing.T) {
+	db := testDB(t) // existing helper in this test file; it skips if no TEST_DATABASE_URL
+	m := NewMeter(db)
+	ctx := context.Background()
+	uid := seedUser(t, db) // existing helper; creates a users row and returns its id
+
+	// Insert exactly the cap number of zero-cost calls this month.
+	for i := 0; i < perUserMonthlyCallCap; i++ {
+		if err := m.Record(ctx, uid, ai.Usage{Provider: "gemini", Model: "gemini-3.5-flash-lite", CallType: "identify_text"}, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ok, err := m.WithinBudget(ctx, uid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatalf("WithinBudget = true at %d calls, want false (call-count cap)", perUserMonthlyCallCap)
+	}
+}
+
+func TestEventJSONOmitsUserID(t *testing.T) {
+	b, err := json.Marshal(Event{UserID: uuid.New(), Provider: "gemini"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "user_id") {
+		t.Fatalf("Event JSON leaked user_id: %s", b)
+	}
 }
