@@ -1,4 +1,5 @@
 import { Pressable, ScrollView, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { AppText } from "@/components/Text";
@@ -14,8 +15,9 @@ const ROWS = [
 
 export default function More() {
   const { colors, spacing } = useTheme();
+  const insets = useSafeAreaInsets();
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingTop: 8, paddingBottom: 140 }}>
+    <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
       <ScreenHeader overline="Your account" title="More" />
       <View style={{ paddingHorizontal: 20, gap: spacing.sm }}>
         {ROWS.map((r) => (

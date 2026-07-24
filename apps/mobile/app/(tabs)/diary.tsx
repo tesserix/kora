@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { AppText } from "@/components/Text";
 import { ScreenHeader } from "@/components/ScreenHeader";
@@ -31,6 +32,7 @@ const timeOf = (s: string) => new Date(s).toLocaleTimeString([], { hour: "numeri
 
 export default function Diary() {
   const { colors, radius, fonts } = useTheme();
+  const insets = useSafeAreaInsets();
   const week = weekDates();
   const todayIso = iso(new Date());
   const [selected, setSelected] = useState(todayIso);
@@ -47,7 +49,7 @@ export default function Diary() {
     router.push({ pathname: "/meal", params: { name: log.description, mealSlot: log.meal_slot, time: timeOf(log.logged_at), kcal: String(Math.round(log.kcal)), protein: String(Math.round(log.protein_g)), carbs: String(Math.round(log.carbs_g)), fat: String(Math.round(log.fat_g)) } });
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingTop: 8, paddingBottom: 140 }}>
+    <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
       <ScreenHeader overline="This week" title="Diary" />
 
       {/* week strip */}

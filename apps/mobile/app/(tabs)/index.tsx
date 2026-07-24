@@ -1,4 +1,5 @@
 import { Pressable, ScrollView, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { AppText } from "@/components/Text";
 import { Avatar } from "@/components/Avatar";
@@ -31,6 +32,7 @@ const NOTES: Array<string | null> = ["Solid protein start — kept you full till
 
 export default function Home() {
   const { colors, spacing } = useTheme();
+  const insets = useSafeAreaInsets();
   const profile = useProfile();
   const date = today();
   const dashboard = useDashboard(date);
@@ -50,7 +52,7 @@ export default function Home() {
     });
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingTop: spacing.sm, paddingBottom: 130 }}>
+    <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingTop: insets.top + spacing.sm, paddingBottom: 130 }}>
       {/* header */}
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingBottom: 16 }}>
         <View>

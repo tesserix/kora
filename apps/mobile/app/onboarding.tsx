@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Pressable, ScrollView, TextInput, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { AppText } from "@/components/Text";
 import { Button } from "@/components/Button";
@@ -19,6 +20,7 @@ const ACTIVITIES: OnboardingInput["activity_level"][] = ["sedentary", "light", "
 
 export default function Onboarding() {
   const { colors, radius, spacing, shadows } = useTheme();
+  const insets = useSafeAreaInsets();
   const submit = useSubmitOnboarding();
   const [goal, setGoal] = useState<OnboardingInput["goal"]>("fat_loss");
   const [sex, setSex] = useState<OnboardingInput["sex"]>("male");
@@ -61,7 +63,7 @@ export default function Onboarding() {
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={{ padding: 24, paddingTop: 40, gap: spacing.md }}
+      contentContainerStyle={{ padding: 24, paddingTop: insets.top + 24, gap: spacing.md }}
     >
       {/* brand */}
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 6 }}>

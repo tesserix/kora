@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { FlatList, Pressable, TextInput, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { AppText } from "@/components/Text";
 import { Button } from "@/components/Button";
@@ -17,6 +18,7 @@ const MEALS = ["breakfast", "lunch", "dinner", "snack"] as const;
 
 export default function LogScreen() {
   const { colors, spacing, radius, fonts } = useTheme();
+  const insets = useSafeAreaInsets();
   const mountedAt = useRef(Date.now());
   const [q, setQ] = useState("");
   const [selected, setSelected] = useState<FoodItem | null>(null);
@@ -63,7 +65,7 @@ export default function LogScreen() {
     ];
     const vis = foodVisual(selected.name, meal);
     return (
-      <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg, gap: spacing.md }}>
+      <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg, paddingTop: insets.top + spacing.lg, gap: spacing.md }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
           <FoodTile hue={vis.hue} icon={vis.icon} size={64} radius={radius.xl} />
           <View style={{ flex: 1 }}>
@@ -103,7 +105,7 @@ export default function LogScreen() {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background, paddingTop: 8 }}>
+    <View style={{ flex: 1, backgroundColor: colors.background, paddingTop: insets.top + 8 }}>
       <ScreenHeader overline="Add to diary" title="Log food" />
       <View style={{ paddingHorizontal: 20, gap: spacing.md, flex: 1 }}>
         <TextInput

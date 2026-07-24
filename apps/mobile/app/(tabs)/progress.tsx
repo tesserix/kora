@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppText } from "@/components/Text";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { Card } from "@/components/Card";
@@ -22,12 +23,13 @@ function today(): string {
 
 export default function Progress() {
   const { colors, radius, fonts } = useTheme();
+  const insets = useSafeAreaInsets();
   const [range, setRange] = useState<(typeof RANGES)[number]>("1W");
   const dashboard = useDashboard(today());
   const streak = dashboard.data?.streak_days ?? 0;
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingTop: 8, paddingBottom: 140 }}>
+    <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
       <ScreenHeader
         overline="Trends"
         title="Progress"
