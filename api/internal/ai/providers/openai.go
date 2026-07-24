@@ -21,17 +21,37 @@ import (
 // ID string, so this does not block using it.
 const modelGPT5Mini = "gpt-5-mini"
 
-// OpenAIProvider implements ai.Provider as the FALLBACK backend, using
-// GPT-5-mini for IdentifyText/IdentifyPhoto/Decompose. Embed is deliberately
+// OpenAIProvider implements ai.Provider as the OpenAI-COMPATIBLE FALLBACK
+// backend for IdentifyText/IdentifyPhoto/Decompose. Embed is deliberately
 // NOT backed by a live OpenAI call — see Embed's doc comment for why.
 type OpenAIProvider struct {
-	client openai.Client
+	client     openai.Client
+	model      string
+	jsonObject bool
 }
 
-// NewOpenAIProvider builds an OpenAIProvider authenticated with apiKey.
-func NewOpenAIProvider(apiKey string) OpenAIProvider {
-	return OpenAIProvider{client: openai.NewClient(option.WithAPIKey(apiKey))}
+// NewOpenAIProvider builds the OpenAI-compatible FALLBACK provider. baseURL,
+// when non-empty, points the client at any OpenAI-compatible endpoint (e.g.
+// NVIDIA NIM at https://integrate.api.nvidia.com/v1). model overrides the
+// default gpt-5-mini. jsonObject selects response_format:{type:"json_object"}
+// for endpoints that don't support strict json_schema well (NVIDIA's llama
+// models: strict schema is slow (~29s) and yields degenerate values, so the
+// schema shape is instead described in the prompt and enforced by parsing).
+func NewOpenAIProvider(apiKey, baseURL, model string, jsonObject bool) OpenAIProvider {
+	opts := []option.RequestOption{option.WithAPIKey(apiKey)}
+	if baseURL != "" {
+		opts = append(opts, option.WithBaseURL(baseURL))
+	}
+	if model == "" {
+		model = modelGPT5Mini
+	}
+	return OpenAIProvider{client: openai.NewClient(opts...), model: model, jsonObject: jsonObject}
 }
+
+// modelDefault returns p's configured model — a small accessor so tests can
+// build params for the model buildParams' callers would use without
+// duplicating the field access.
+func modelDefault(p OpenAIProvider) string { return p.model }
 
 // Name identifies this provider for Usage records.
 func (OpenAIProvider) Name() string { return "openai" }
@@ -126,9 +146,10 @@ func unwrapIngredients(data []byte) ([]byte, error) {
 	return env.Ingredients, nil
 }
 
-// IdentifyText identifies foods from a free-text phrase using GPT-5-mini.
+// IdentifyText identifies foods from a free-text phrase using the
+// configured model.
 func (p OpenAIProvider) IdentifyText(ctx context.Context, phrase string) ([]ai.Guess, ai.Usage, error) {
-	data, usage, err := p.generateJSON(ctx, modelGPT5Mini, callTypeIdentifyText,
+	data, usage, err := p.generateJSON(ctx, p.model, callTypeIdentifyText,
 		identifySystemPrompt, []openai.ChatCompletionContentPartUnionParam{openai.TextContentPart(phrase)},
 		"food_guesses", guessJSONSchema())
 	if err != nil {
@@ -145,12 +166,11 @@ func (p OpenAIProvider) IdentifyText(ctx context.Context, phrase string) ([]ai.G
 	return guesses, usage, nil
 }
 
-// IdentifyPhoto identifies foods from a photo using GPT-5-mini's vision
-// input (an image_url content part with a base64 data: URL — GPT-5-mini has
-// no separate non-vision endpoint).
+// IdentifyPhoto identifies foods from a photo using the configured model's
+// vision input (an image_url content part with a base64 data: URL).
 func (p OpenAIProvider) IdentifyPhoto(ctx context.Context, image []byte, mime string) ([]ai.Guess, ai.Usage, error) {
 	dataURL := fmt.Sprintf("data:%s;base64,%s", mime, base64.StdEncoding.EncodeToString(image))
-	data, usage, err := p.generateJSON(ctx, modelGPT5Mini, callTypeIdentifyPhoto,
+	data, usage, err := p.generateJSON(ctx, p.model, callTypeIdentifyPhoto,
 		identifySystemPrompt,
 		[]openai.ChatCompletionContentPartUnionParam{
 			openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{URL: dataURL}),
@@ -170,10 +190,10 @@ func (p OpenAIProvider) IdentifyPhoto(ctx context.Context, image []byte, mime st
 	return guesses, usage, nil
 }
 
-// Decompose breaks a dish into its ingredients using GPT-5-mini.
+// Decompose breaks a dish into its ingredients using the configured model.
 func (p OpenAIProvider) Decompose(ctx context.Context, dish string) ([]ai.IngredientGuess, ai.Usage, error) {
 	prompt := fmt.Sprintf(decomposeSystemPromptTmpl, dish)
-	data, usage, err := p.generateJSON(ctx, modelGPT5Mini, callTypeDecompose,
+	data, usage, err := p.generateJSON(ctx, p.model, callTypeDecompose,
 		prompt, []openai.ChatCompletionContentPartUnionParam{openai.TextContentPart(dish)},
 		"dish_ingredients", ingredientJSONSchema())
 	if err != nil {
@@ -208,12 +228,68 @@ func (p OpenAIProvider) Embed(ctx context.Context, text string) ([]float32, ai.U
 			"to avoid mixing incompatible vector spaces in the nutrition index's cosine search")
 }
 
+// jsonObjectSchemaHint renders a compact description of a JSON schema's shape
+// for embedding in a system prompt when json_object mode can't enforce the
+// schema server-side. It lists the required top-level key and item fields.
+func jsonObjectSchemaHint(schema map[string]any) string {
+	b, _ := json.Marshal(schema)
+	return "Respond with a single JSON object matching exactly this JSON Schema " +
+		"(no extra keys, no nutrition/calorie/macro numbers): " + string(b)
+}
+
+// buildParams constructs the Chat Completions request params for a single
+// generateJSON call. It is pure (no network call) so tests can assert on the
+// request shape directly. In strict mode (jsonObject == false) it is
+// byte-for-byte the same request shape as before this adapter became
+// configurable: a json_schema response format with the untouched system
+// prompt. In compat mode (jsonObject == true) it switches to a json_object
+// response format — which does not enforce a schema server-side — and
+// compensates by appending a description of the expected shape to the
+// system prompt; see generateJSON's doc comment for why the schema itself
+// remains the actual invariant boundary regardless of response format.
+func (p OpenAIProvider) buildParams(
+	model, systemPrompt string,
+	userParts []openai.ChatCompletionContentPartUnionParam,
+	schemaName string,
+	schema map[string]any,
+) openai.ChatCompletionNewParams {
+	sys := systemPrompt
+	var rf openai.ChatCompletionNewParamsResponseFormatUnion
+	if p.jsonObject {
+		sys = systemPrompt + " " + jsonObjectSchemaHint(schema)
+		jo := shared.NewResponseFormatJSONObjectParam()
+		rf = openai.ChatCompletionNewParamsResponseFormatUnion{OfJSONObject: &jo}
+	} else {
+		rf = openai.ChatCompletionNewParamsResponseFormatUnion{
+			OfJSONSchema: &shared.ResponseFormatJSONSchemaParam{
+				JSONSchema: shared.ResponseFormatJSONSchemaJSONSchemaParam{
+					Name:   schemaName,
+					Strict: openai.Bool(true),
+					Schema: schema,
+				},
+			},
+		}
+	}
+	return openai.ChatCompletionNewParams{
+		Model: model,
+		Messages: []openai.ChatCompletionMessageParamUnion{
+			openai.SystemMessage(sys),
+			openai.UserMessage(userParts),
+		},
+		ResponseFormat: rf,
+	}
+}
+
 // generateJSON is the shared SDK glue for IdentifyText/IdentifyPhoto/
-// Decompose: it calls Chat Completions with a strict JSON-schema response
-// format and returns the raw response text for the caller's unwrap+parse
-// steps, plus a populated Usage. The schema is the sole invariant boundary —
-// no nutrition field is ever a valid property, so the model structurally
-// cannot return one no matter what the prompt says.
+// Decompose: it calls Chat Completions with a JSON-constrained response
+// format (see buildParams) and returns the raw response text for the
+// caller's unwrap+parse steps, plus a populated Usage. The schema is the
+// sole invariant boundary — no nutrition field is ever a valid property, so
+// the model structurally cannot return one no matter what the prompt says —
+// EXCEPT in compat mode, where json_object does not enforce the schema
+// server-side and the boundary is instead enforced at parse time by
+// parseGuesses/parseIngredients, which decode only identity/portion/
+// confidence fields and silently drop anything else.
 func (p OpenAIProvider) generateJSON(
 	ctx context.Context,
 	model string,
@@ -225,22 +301,7 @@ func (p OpenAIProvider) generateJSON(
 ) ([]byte, ai.Usage, error) {
 	start := time.Now()
 
-	params := openai.ChatCompletionNewParams{
-		Model: model,
-		Messages: []openai.ChatCompletionMessageParamUnion{
-			openai.SystemMessage(systemPrompt),
-			openai.UserMessage(userParts),
-		},
-		ResponseFormat: openai.ChatCompletionNewParamsResponseFormatUnion{
-			OfJSONSchema: &shared.ResponseFormatJSONSchemaParam{
-				JSONSchema: shared.ResponseFormatJSONSchemaJSONSchemaParam{
-					Name:   schemaName,
-					Strict: openai.Bool(true),
-					Schema: schema,
-				},
-			},
-		},
-	}
+	params := p.buildParams(model, systemPrompt, userParts, schemaName, schema)
 
 	resp, err := p.client.Chat.Completions.New(ctx, params)
 

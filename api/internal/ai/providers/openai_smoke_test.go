@@ -21,7 +21,7 @@ func TestOpenAIProvider_IdentifyText_Smoke(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	provider := NewOpenAIProvider(apiKey)
+	provider := NewOpenAIProvider(apiKey, "", "", false)
 
 	guesses, usage, err := provider.IdentifyText(ctx, "a bowl of grilled chicken and white rice")
 	require.NoError(t, err)

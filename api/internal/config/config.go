@@ -14,6 +14,9 @@ type Config struct {
 	FirebaseProjectID string
 	GeminiAPIKey      string
 	OpenAIAPIKey      string
+	OpenAIBaseURL     string
+	OpenAIModel       string
+	OpenAIJSONObject  bool
 }
 
 func Load() (Config, error) {
@@ -25,6 +28,9 @@ func Load() (Config, error) {
 		FirebaseProjectID: os.Getenv("FIREBASE_PROJECT_ID"),
 		GeminiAPIKey:      os.Getenv("GEMINI_API_KEY"),
 		OpenAIAPIKey:      os.Getenv("OPENAI_API_KEY"),
+		OpenAIBaseURL:     os.Getenv("OPENAI_BASE_URL"),
+		OpenAIModel:       os.Getenv("OPENAI_MODEL"),
+		OpenAIJSONObject:  os.Getenv("OPENAI_JSON_OBJECT") == "true",
 	}
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("config: DATABASE_URL is required")

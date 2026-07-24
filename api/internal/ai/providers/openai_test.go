@@ -2,8 +2,10 @@ package providers
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
+	"github.com/openai/openai-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -15,7 +17,7 @@ import (
 var _ ai.Provider = OpenAIProvider{}
 
 func TestNewOpenAIProvider_Name(t *testing.T) {
-	p := NewOpenAIProvider("test-key")
+	p := NewOpenAIProvider("test-key", "", "", false)
 	assert.Equal(t, "openai", p.Name())
 }
 
@@ -189,11 +191,55 @@ func TestUnwrapIngredients_Malformed(t *testing.T) {
 	require.Error(t, err)
 }
 
+// systemTextOf reads back the plain-string content of the first system
+// message in params.Messages, failing the test if none is found or the
+// content isn't a plain string.
+func systemTextOf(t *testing.T, params openai.ChatCompletionNewParams) string {
+	t.Helper()
+	for _, msg := range params.Messages {
+		if msg.OfSystem == nil {
+			continue
+		}
+		content := msg.OfSystem.Content
+		require.True(t, content.OfString.Valid(), "system message content is not a plain string")
+		return content.OfString.Value
+	}
+	t.Fatal("no system message found in params.Messages")
+	return ""
+}
+
+func TestBuildParamsStrictSchemaDefault(t *testing.T) {
+	p := NewOpenAIProvider("k", "", "", false)
+	params := p.buildParams(modelDefault(p), "sys", nil, "food_guesses", guessJSONSchema())
+
+	assert.Equal(t, "gpt-5-mini", params.Model)
+	require.NotNil(t, params.ResponseFormat.OfJSONSchema, "expected strict json_schema response format")
+	assert.Nil(t, params.ResponseFormat.OfJSONObject, "strict mode must not set json_object format")
+	assert.Equal(t, "sys", systemTextOf(t, params), "strict mode must not alter the system prompt")
+}
+
+func TestBuildParamsJSONObjectCompat(t *testing.T) {
+	p := NewOpenAIProvider("k", "https://integrate.api.nvidia.com/v1", "meta/llama-3.3-70b-instruct", true)
+	params := p.buildParams(modelDefault(p), "sys", nil, "food_guesses", guessJSONSchema())
+
+	assert.Equal(t, "meta/llama-3.3-70b-instruct", params.Model, "expected configured model")
+	require.NotNil(t, params.ResponseFormat.OfJSONObject, "expected json_object response format for compat mode")
+	assert.Nil(t, params.ResponseFormat.OfJSONSchema, "compat mode must not set strict json_schema format")
+
+	// The schema is not enforced by json_object, so its shape must be
+	// described to the model in the system message.
+	sys := systemTextOf(t, params)
+	assert.Contains(t, sys, "sys", "compat system prompt must still include the original prompt")
+	if !strings.Contains(sys, "\"guesses\"") {
+		t.Fatalf("compat system prompt missing envelope shape hint: %q", sys)
+	}
+}
+
 func TestOpenAIProvider_Embed_ErrorsNotGemini(t *testing.T) {
 	// Embed intentionally does not call OpenAI at all: mixing embedding
 	// spaces across providers would corrupt cosine search against the
 	// Gemini-populated index, so the router must keep embeddings on Gemini.
-	p := NewOpenAIProvider("test-key")
+	p := NewOpenAIProvider("test-key", "", "", false)
 
 	vec, usage, err := p.Embed(t.Context(), "grilled chicken breast")
 
