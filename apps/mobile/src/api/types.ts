@@ -23,6 +23,12 @@ export type FoodItem = {
   fat_per_100g: number;
 };
 
+export type Candidate = {
+  item: FoodItem;
+  match_score: number;
+  match_tier: string;
+};
+
 export type FoodLog = {
   id: string;
   food_item_id?: string;

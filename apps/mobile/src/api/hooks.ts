@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import type {
+  Candidate,
   DashboardSummary,
   FoodItem,
   FoodLog,
@@ -27,7 +28,10 @@ export function useSubmitOnboarding() {
 export function useFoodSearch(q: string) {
   return useQuery({
     queryKey: ["foods", q],
-    queryFn: () => apiFetch(`/v1/foods?q=${encodeURIComponent(q)}`) as Promise<FoodItem[]>,
+    queryFn: async () => {
+      const candidates = (await apiFetch(`/v1/foods?q=${encodeURIComponent(q)}`)) as Candidate[];
+      return candidates.map((candidate) => candidate.item);
+    },
     enabled: q.trim().length >= 2,
   });
 }
