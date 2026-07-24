@@ -24,10 +24,10 @@ func (h Handler) Search(c *gin.Context) {
 		return
 	}
 	limit, _ := strconv.Atoi(c.Query("limit"))
-	items, err := h.repo.Search(c.Request.Context(), q, limit)
+	candidates, err := h.repo.Resolve(c.Request.Context(), q, nil, limit)
 	if err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "internal_error", "search failed")
 		return
 	}
-	httpx.OK(c, items)
+	httpx.OK(c, candidates)
 }
