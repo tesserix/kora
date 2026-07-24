@@ -107,7 +107,11 @@ export function DetectedCard({ resolution, mealSlot, onChangeMealSlot, onAdd, ad
       </View>
 
       {resolution.candidates.map((candidate, i) => (
-        <CandidateRow key={candidate.item.id} candidate={candidate} isLast={i === resolution.candidates.length - 1} />
+        <CandidateRow
+          key={`${candidate.item.id}-${i}`}
+          candidate={candidate}
+          isLast={i === resolution.candidates.length - 1}
+        />
       ))}
 
       <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>

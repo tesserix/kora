@@ -1,5 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { AccessibilityInfo, Animated, Easing, Pressable, ScrollView, TextInput, View } from "react-native";
+import {
+  AccessibilityInfo,
+  Animated,
+  Easing,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  TextInput,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
@@ -22,7 +33,7 @@ import {
   useResolveVoice,
 } from "@/api/hooks";
 import { ApiError } from "@/lib/api";
-import type { Resolution } from "@/api/types";
+import type { Resolution, ResolvedCandidate } from "@/api/types";
 import { mealSlotForHour, type MealSlot } from "@/lib/mealSlot";
 
 export type CaptureMode = "photo" | "voice" | "scan" | "type";
@@ -287,6 +298,14 @@ function sourceForMode(mode: CaptureMode): string {
   return `ai_${mode}`;
 }
 
+// A stable per-candidate key for tracking add-to-diary success across retry
+// attempts. Combines the candidate's position (stable for the lifetime of a
+// single resolution) with its food_item_id (in case ids ever duplicate) so
+// two candidates never collide.
+function candidateKey(candidate: ResolvedCandidate, index: number): string {
+  return `${index}:${candidate.item.id}`;
+}
+
 // The fallback link shown alongside a follow-up question or an unidentified
 // result — routes to the manual search/log screen instead of the AI flow.
 function SearchManuallyLink({ onPress }: { onPress: () => void }) {
@@ -313,6 +332,7 @@ function SearchManuallyLink({ onPress }: { onPress: () => void }) {
 interface CaptureBodyProps {
   displayName: string;
   insetTop: number;
+  insetBottom: number;
   mode: CaptureMode;
   onModeChange: (mode: CaptureMode) => void;
   stage: CaptureStage;
@@ -340,6 +360,7 @@ interface CaptureBodyProps {
 export function CaptureBody({
   displayName,
   insetTop,
+  insetBottom,
   mode,
   onModeChange,
   stage,
@@ -373,7 +394,10 @@ export function CaptureBody({
   }, [errorMsg, resolution]);
 
   return (
-    <View style={{ flex: 1, backgroundColor: captureColors.surface }}>
+    <KeyboardAvoidingView
+      style={{ flex: 1, backgroundColor: captureColors.surface }}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+    >
       <View
         style={{
           flexDirection: "row",
@@ -391,8 +415,16 @@ export function CaptureBody({
           <Icon name="sparkles" size={17} color={captureColors.primary} />
           <AppText style={{ color: captureColors.onSurface, fontWeight: "700" }}>Ask Otto</AppText>
         </View>
-        {/* Reserved for a future gallery/history view — no-op in this task. */}
-        <Pressable accessibilityRole="button" accessibilityLabel="Photo library" onPress={() => {}} style={ROUND_BUTTON}>
+        {/* Reserved for a future gallery/history view — no-op in this task,
+            hidden from screen readers so they don't focus a dead button. */}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Photo library"
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          onPress={() => {}}
+          style={ROUND_BUTTON}
+        >
           <Icon name="images" size={18} color={captureColors.onSurface} />
         </Pressable>
       </View>
@@ -401,6 +433,7 @@ export function CaptureBody({
         ref={scrollViewRef}
         contentContainerStyle={{ padding: 18, paddingTop: 8, gap: 14 }}
         style={{ flex: 1 }}
+        keyboardShouldPersistTaps="handled"
       >
         <OttoBubble>
           Hi {displayName} — show me your meal or just tell me what you ate. A photo works great. 📷 is optional; words
@@ -459,7 +492,7 @@ export function CaptureBody({
         style={{
           paddingHorizontal: 14,
           paddingTop: 10,
-          paddingBottom: 26,
+          paddingBottom: Math.max(insetBottom, 12),
           backgroundColor: captureColors.composerBg,
           borderTopWidth: 1,
           borderTopColor: captureColors.composerBorder,
@@ -511,6 +544,8 @@ export function CaptureBody({
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Send"
+            accessibilityState={{ disabled: !text.trim() }}
+            disabled={!text.trim()}
             onPress={onSend}
             style={{
               width: 38,
@@ -525,7 +560,7 @@ export function CaptureBody({
           </Pressable>
         </View>
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -606,6 +641,11 @@ export default function CaptureScreen() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [mealSlot, setMealSlot] = useState<MealSlot>(() => mealSlotForHour(new Date().getHours()));
   const [adding, setAdding] = useState(false);
+  // Candidate keys (see candidateKey) already logged successfully across
+  // add-to-diary attempts for the *current* resolution — reset whenever a
+  // fresh resolution replaces it, so a retry only re-submits what actually
+  // failed instead of re-logging (duplicating) the ones that already succeeded.
+  const [loggedCandidateKeys, setLoggedCandidateKeys] = useState<Set<string>>(new Set());
   const [text, setText] = useState("");
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   // Guards a single CameraView against firing onBarcodeScanned repeatedly
@@ -657,6 +697,15 @@ export default function CaptureScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Applies a newly-resolved capture result and clears any add-to-diary
+  // success tracking from a previous resolution — a fresh capture always
+  // starts with a clean retry slate.
+  function applyResolution(data: Resolution) {
+    setResolution(data);
+    setStage("result");
+    setLoggedCandidateKeys(new Set());
+  }
+
   function handleModeChange(next: CaptureMode) {
     // Switching away from Voice mid-recording must not leave the native
     // recorder running in the background — stop it (best-effort) and reset
@@ -675,10 +724,12 @@ export default function CaptureScreen() {
     const phrase = text.trim();
     if (!phrase) return;
     setErrorMsg(null);
+    // Fires right as send is pressed — the composer's own keyboard should
+    // not stay up covering the result thread once a send is in flight.
+    Keyboard.dismiss();
     resolveText.mutate(phrase, {
       onSuccess: (data) => {
-        setResolution(data);
-        setStage("result");
+        applyResolution(data);
         setText("");
       },
       onError: (error) => setErrorMsg(ottoErrorMessage(error)),
@@ -698,10 +749,7 @@ export default function CaptureScreen() {
       return;
     }
     resolvePhoto.mutate(outcome.file, {
-      onSuccess: (data) => {
-        setResolution(data);
-        setStage("result");
-      },
+      onSuccess: (data) => applyResolution(data),
       onError: (error) => setErrorMsg(ottoErrorMessage(error)),
     });
   }
@@ -729,10 +777,7 @@ export default function CaptureScreen() {
       resolveVoice.mutate(
         { uri, name: "clip.m4a", type: "audio/mp4" },
         {
-          onSuccess: (data) => {
-            setResolution(data);
-            setStage("result");
-          },
+          onSuccess: (data) => applyResolution(data),
           onError: (error) => setErrorMsg(ottoErrorMessage(error)),
         },
       );
@@ -758,10 +803,7 @@ export default function CaptureScreen() {
     scannedRef.current = true;
     setErrorMsg(null);
     resolveBarcode.mutate(data, {
-      onSuccess: (result) => {
-        setResolution(result);
-        setStage("result");
-      },
+      onSuccess: (result) => applyResolution(result),
       onError: (error) => {
         setErrorMsg(ottoErrorMessage(error));
         scannedRef.current = false;
@@ -769,19 +811,29 @@ export default function CaptureScreen() {
     });
   }
 
-  // Logs every candidate in the current resolution as its own diary entry.
-  // Only the id/grams/slot/source/timestamp quintet is ever sent — the
-  // backend recomputes kcal/macros from the food_item row. Uses
+  // Logs every not-yet-succeeded candidate in the current resolution as its
+  // own diary entry. Only the id/grams/slot/source/timestamp quintet is ever
+  // sent — the backend recomputes kcal/macros from the food_item row. Uses
   // allSettled (not Promise.all) so a single failing candidate doesn't hide
   // whether the *other* candidates were logged — required to avoid a
   // partial silent success per the task's error-handling discipline.
+  //
+  // Candidates already recorded in `loggedCandidateKeys` (from an earlier
+  // press of this same card) are skipped entirely — otherwise re-pressing
+  // "Add to diary" after a partial failure would re-log the ones that
+  // already succeeded, duplicating diary entries.
   async function handleAddToDiary() {
     if (!resolution || resolution.candidates.length === 0) return;
     setErrorMsg(null);
     setAdding(true);
     const source = sourceForMode(mode);
+
+    const pending = resolution.candidates
+      .map((candidate, index) => ({ candidate, key: candidateKey(candidate, index) }))
+      .filter(({ key }) => !loggedCandidateKeys.has(key));
+
     const outcomes = await Promise.allSettled(
-      resolution.candidates.map((candidate) =>
+      pending.map(({ candidate }) =>
         createLog.mutateAsync({
           food_item_id: candidate.item.id,
           quantity_grams: candidate.portion_grams,
@@ -793,16 +845,19 @@ export default function CaptureScreen() {
     );
     setAdding(false);
 
-    const failedNames = outcomes
-      .map((outcome, index) => ({ outcome, candidate: resolution.candidates[index] }))
-      .filter(({ outcome }) => outcome.status === "rejected")
-      .map(({ candidate }) => candidate?.item.name)
-      .filter((name): name is string => Boolean(name));
+    const newlySucceededKeys = pending
+      .filter((_, index) => outcomes[index]?.status === "fulfilled")
+      .map(({ key }) => key);
+    const failedNames = pending
+      .filter((_, index) => outcomes[index]?.status === "rejected")
+      .map(({ candidate }) => candidate.item.name);
+
+    const updatedKeys = new Set([...loggedCandidateKeys, ...newlySucceededKeys]);
+    setLoggedCandidateKeys(updatedKeys);
 
     if (failedNames.length > 0) {
-      const loggedCount = resolution.candidates.length - failedNames.length;
       setErrorMsg(
-        `I logged ${loggedCount} of ${resolution.candidates.length} items, but couldn't log ${failedNames.join(
+        `I logged ${updatedKeys.size} of ${resolution.candidates.length} items, but couldn't log ${failedNames.join(
           ", ",
         )}. Please try again.`,
       );
@@ -817,6 +872,7 @@ export default function CaptureScreen() {
       <CaptureBody
         displayName={profile.data?.display_name?.split(" ")[0] ?? "there"}
         insetTop={insets.top}
+        insetBottom={insets.bottom}
         mode={mode}
         onModeChange={handleModeChange}
         stage={displayStage}

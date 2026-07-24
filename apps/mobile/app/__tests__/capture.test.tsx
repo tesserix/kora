@@ -195,6 +195,7 @@ function makeEstimateResolution(): Resolution {
 const noopBodyProps = {
   displayName: "Alex",
   insetTop: 0,
+  insetBottom: 0,
   mode: "photo" as const,
   onModeChange: jest.fn(),
   errorMsg: null,
@@ -750,6 +751,35 @@ describe("Add to diary", () => {
 
     expect(await rendered.findByText(/couldn't log Steamed broccoli/i)).toBeTruthy();
     expect(router.back).not.toHaveBeenCalled();
+  });
+
+  test("retrying after a partial failure only re-logs the previously-failed candidate, not the succeeded ones", async () => {
+    mockCreateLogMutateAsync
+      .mockResolvedValueOnce({ id: "log-1" })
+      .mockRejectedValueOnce(new Error("network error"))
+      .mockResolvedValueOnce({ id: "log-3" });
+
+    const rendered = await render(<CaptureScreen />);
+    await resolveWithMultiCandidates(rendered);
+
+    // First press: candidate 2 (Steamed broccoli) fails, 1 and 3 succeed.
+    await fireEvent.press(await rendered.findByLabelText("Add to diary"));
+    expect(await rendered.findByText(/couldn't log Steamed broccoli/i)).toBeTruthy();
+    expect(mockCreateLogMutateAsync).toHaveBeenCalledTimes(3);
+    expect(router.back).not.toHaveBeenCalled();
+
+    mockCreateLogMutateAsync.mockClear();
+    mockCreateLogMutateAsync.mockResolvedValueOnce({ id: "log-2-retry" });
+
+    // Second press: only the previously-failed candidate should be re-submitted.
+    await fireEvent.press(await rendered.findByLabelText("Add to diary"));
+
+    await waitFor(() => expect(mockCreateLogMutateAsync).toHaveBeenCalledTimes(1));
+    expect(mockCreateLogMutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ food_item_id: "2", quantity_grams: 90, source: "ai_text" }),
+    );
+
+    await waitFor(() => expect(router.back).toHaveBeenCalled());
   });
 });
 
