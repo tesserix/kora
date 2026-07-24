@@ -77,37 +77,20 @@ func TestLoadConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Set environment variables using t.Setenv (auto-restored after test)
-			if tt.port != "" {
-				t.Setenv("PORT", tt.port)
-			}
-			if tt.env != "" {
-				t.Setenv("ENV", tt.env)
-			}
-			if tt.databaseURL != "" {
-				t.Setenv("DATABASE_URL", tt.databaseURL)
-			}
-			if tt.redisURL != "" {
-				t.Setenv("REDIS_URL", tt.redisURL)
-			}
-			if tt.firebaseProject != "" {
-				t.Setenv("FIREBASE_PROJECT_ID", tt.firebaseProject)
-			}
-			if tt.geminiAPIKey != "" {
-				t.Setenv("GEMINI_API_KEY", tt.geminiAPIKey)
-			}
-			if tt.openAIAPIKey != "" {
-				t.Setenv("OPENAI_API_KEY", tt.openAIAPIKey)
-			}
-			if tt.openAIBaseURL != "" {
-				t.Setenv("OPENAI_BASE_URL", tt.openAIBaseURL)
-			}
-			if tt.openAIModel != "" {
-				t.Setenv("OPENAI_MODEL", tt.openAIModel)
-			}
-			if tt.openAIJSONObject != "" {
-				t.Setenv("OPENAI_JSON_OBJECT", tt.openAIJSONObject)
-			}
+			// Set every env var unconditionally (t.Setenv sets for the test and
+			// restores afterward). Setting empty values too keeps each case
+			// hermetic — a var left in the ambient environment (e.g. a sourced
+			// .env) can't leak into a case that expects the default/empty value.
+			t.Setenv("PORT", tt.port)
+			t.Setenv("ENV", tt.env)
+			t.Setenv("DATABASE_URL", tt.databaseURL)
+			t.Setenv("REDIS_URL", tt.redisURL)
+			t.Setenv("FIREBASE_PROJECT_ID", tt.firebaseProject)
+			t.Setenv("GEMINI_API_KEY", tt.geminiAPIKey)
+			t.Setenv("OPENAI_API_KEY", tt.openAIAPIKey)
+			t.Setenv("OPENAI_BASE_URL", tt.openAIBaseURL)
+			t.Setenv("OPENAI_MODEL", tt.openAIModel)
+			t.Setenv("OPENAI_JSON_OBJECT", tt.openAIJSONObject)
 
 			// Call Load()
 			cfg, err := Load()
