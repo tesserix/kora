@@ -1,4 +1,4 @@
-import { ScrollView, View } from "react-native";
+import { Pressable, ScrollView, View } from "react-native";
 import { router } from "expo-router";
 import { AppText } from "@/components/Text";
 import { Avatar } from "@/components/Avatar";
@@ -37,6 +37,7 @@ export default function Home() {
   const logs = useDayLogs(date);
 
   const d = dashboard.data;
+  const loadError = dashboard.isError || logs.isError;
   const eaten = d?.consumed.kcal ?? 0;
   const goal = d?.targets.kcal ?? 0;
   const left = Math.max(0, goal - eaten);
@@ -57,19 +58,34 @@ export default function Home() {
           <AppText style={{ fontSize: 15, fontWeight: "600" }}>{greeting()}, {profile.data?.display_name?.split(" ")[0] ?? "there"}</AppText>
         </View>
         <View style={{ flexDirection: "row", gap: 10, alignItems: "center" }}>
-          <View style={{ width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open coach"
+            onPress={() => {}}
+            style={{ width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }}
+          >
             <Icon name="message-circle" size={19} color={colors.foreground} />
-          </View>
+          </Pressable>
           <Avatar initials={initials(profile.data?.display_name)} />
         </View>
       </View>
 
       {/* Otto editorial headline (static copy placeholder) */}
       <View style={{ paddingHorizontal: 20, paddingBottom: 18 }}>
-        <AppText style={{ fontSize: 27, lineHeight: 32, fontWeight: "800", letterSpacing: -0.81 }}>
-          You're <AppText style={{ fontSize: 27, lineHeight: 32, fontWeight: "800", letterSpacing: -0.81, color: colors.primary }}>{left.toLocaleString()} kcal</AppText> from a strong day.
-        </AppText>
-        <AppText muted style={{ marginTop: 8, fontSize: 14.5, lineHeight: 22 }}>Protein's on track. A lean, high-protein dinner and you'll close every ring.</AppText>
+        {loadError ? (
+          <AppText style={{ color: colors.destructive, fontSize: 15, lineHeight: 22 }}>
+            Couldn't load your day. Pull to refresh or try again.
+          </AppText>
+        ) : d ? (
+          <>
+            <AppText style={{ fontSize: 27, lineHeight: 32, fontWeight: "800", letterSpacing: -0.81 }}>
+              You're <AppText style={{ fontSize: 27, lineHeight: 32, fontWeight: "800", letterSpacing: -0.81, color: colors.primary }}>{left.toLocaleString()} kcal</AppText> from a strong day.
+            </AppText>
+            <AppText muted style={{ marginTop: 8, fontSize: 14.5, lineHeight: 22 }}>Protein's on track. A lean, high-protein dinner and you'll close every ring.</AppText>
+          </>
+        ) : (
+          <AppText muted style={{ fontSize: 15, lineHeight: 22 }}>Getting your day ready…</AppText>
+        )}
       </View>
 
       {/* Capture hero */}
