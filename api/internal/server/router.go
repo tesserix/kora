@@ -12,6 +12,7 @@ import (
 	"github.com/tesserix/kora/api/internal/httpx"
 	"github.com/tesserix/kora/api/internal/nutrition"
 	"github.com/tesserix/kora/api/internal/onboarding"
+	"github.com/tesserix/kora/api/internal/resolve"
 	"github.com/tesserix/kora/api/internal/tracking"
 	"github.com/tesserix/kora/api/internal/user"
 )
@@ -21,6 +22,7 @@ import (
 type Deps struct {
 	DB       *gorm.DB
 	Verifier auth.TokenVerifier
+	Resolver *resolve.Handler
 }
 
 func NewRouter(deps Deps) *gin.Engine {
@@ -73,6 +75,12 @@ func NewRouter(deps Deps) *gin.Engine {
 
 		dashboardHandler := dashboard.NewHandler(dashboard.NewService(logRepo, trackingRepo, deps.DB))
 		v1.GET("/dashboard", dashboardHandler.Get)
+
+		if deps.Resolver != nil {
+			v1.POST("/resolve/text", deps.Resolver.ResolveText)
+			v1.POST("/resolve/photo", deps.Resolver.ResolvePhoto)
+			v1.POST("/resolve/barcode", deps.Resolver.ResolveBarcode)
+		}
 	}
 
 	r.NoRoute(func(c *gin.Context) {
