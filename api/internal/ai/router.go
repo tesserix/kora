@@ -68,10 +68,12 @@ func (r *Router) fallbackBudgetOrDefault() time.Duration {
 // withFallback runs primary against a child context bounded by budget. If
 // primary returns an error (including the child context's own deadline
 // being exceeded), fallback is retried against a fresh context derived from
-// the original parent ctx (not the expired child), itself bounded by the
-// same budget. The result of whichever call served the request is returned
-// as-is, including its Usage — providers set Usage.Provider themselves, so
-// the caller can tell who served just by inspecting it.
+// the original parent ctx (not the expired child), bounded by its own
+// fbBudget — deliberately more generous than the primary budget, since the
+// fallback only runs after the fast path already failed. The result of
+// whichever call served the request is returned as-is, including its Usage —
+// providers set Usage.Provider themselves, so the caller can tell who served
+// just by inspecting it.
 func withFallback[T any](ctx context.Context, budget, fbBudget time.Duration, primary, fallback func(context.Context) (T, Usage, error)) (T, Usage, error) {
 	primaryCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
