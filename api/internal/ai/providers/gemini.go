@@ -19,10 +19,15 @@ import (
 // image); Flash handles photo identify (multimodal); the embedding model
 // produces 768-dim vectors used for the nutrition index's similarity tier.
 const (
-	modelFlash     = "gemini-2.5-flash"
-	modelFlashLite = "gemini-2.5-flash-lite"
-	modelEmbed     = "text-embedding-004"
+	modelFlash     = "gemini-3.5-flash"
+	modelFlashLite = "gemini-3.5-flash-lite"
+	modelEmbed     = "gemini-embedding-001"
 )
+
+// embedOutputDimensionality is the embedding vector width requested from
+// modelEmbed. It MUST match the nutrition index's vector(768) column — the
+// SDK truncates the model's native embedding to this length server-side.
+const embedOutputDimensionality int32 = 768
 
 // Call types recorded on ai.Usage, matching the doc comment on Usage.CallType.
 const (
@@ -157,11 +162,16 @@ func (p GeminiProvider) Decompose(ctx context.Context, dish string) ([]ai.Ingred
 	return ingredients, usage, nil
 }
 
-// Embed produces a 768-dim embedding for text using text-embedding-004.
+// Embed produces a 768-dim embedding for text using gemini-embedding-001.
+// OutputDimensionality is set explicitly because the model's native output
+// is wider than 768 dims — without it, values would not match the index's
+// vector(768) column.
 func (p GeminiProvider) Embed(ctx context.Context, text string) ([]float32, ai.Usage, error) {
 	start := time.Now()
+	dim := embedOutputDimensionality
+	cfg := &genai.EmbedContentConfig{OutputDimensionality: &dim}
 	resp, err := p.client.Models.EmbedContent(ctx, modelEmbed,
-		[]*genai.Content{genai.NewContentFromText(text, "")}, nil)
+		[]*genai.Content{genai.NewContentFromText(text, "")}, cfg)
 	usage := ai.Usage{
 		Provider:  p.Name(),
 		Model:     modelEmbed,
