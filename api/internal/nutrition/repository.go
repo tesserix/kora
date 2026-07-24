@@ -186,6 +186,28 @@ func (r Repository) Resolve(ctx context.Context, phrase string, queryVec []float
 	return out, nil
 }
 
+// RowsMissingEmbedding returns food items with no embedding yet (up to limit),
+// oldest-created first, for use by the embedding backfill command.
+func (r Repository) RowsMissingEmbedding(ctx context.Context, limit int) ([]FoodItem, error) {
+	var items []FoodItem
+	err := r.db.WithContext(ctx).Raw(
+		`SELECT * FROM food_items WHERE embedding IS NULL ORDER BY created_at LIMIT ?`, limit).
+		Scan(&items).Error
+	if err != nil {
+		return nil, fmt.Errorf("nutrition: rows missing embedding: %w", err)
+	}
+	return items, nil
+}
+
+// SetEmbedding stores the 768-dim embedding for a food item.
+func (r Repository) SetEmbedding(ctx context.Context, id uuid.UUID, vec []float32) error {
+	if err := r.db.WithContext(ctx).Exec(
+		`UPDATE food_items SET embedding = ? WHERE id = ?`, pgvector.NewVector(vec), id).Error; err != nil {
+		return fmt.Errorf("nutrition: set embedding: %w", err)
+	}
+	return nil
+}
+
 // BackfillNormalizedNames recomputes normalized_name for every row using the
 // Go Normalize function (the migration's SQL backfill is only approximate).
 func (r Repository) BackfillNormalizedNames(ctx context.Context) (int, error) {
