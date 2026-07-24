@@ -1,7 +1,7 @@
-import { tileBg, tileFg, tileFaint, dot, MACRO } from "@/lib/hue";
+import { tileBg, tileFg, tileFaint, dot, tileBgDark, tileFgDark, MACRO } from "@/lib/hue";
 
 test("hue helpers return hsl strings, never oklch", () => {
-  for (const fn of [tileBg, tileFg, tileFaint, dot]) {
+  for (const fn of [tileBg, tileFg, tileFaint, dot, tileBgDark, tileFgDark]) {
     const out = fn(150);
     expect(out.startsWith("hsl(")).toBe(true);
     expect(out).not.toContain("oklch");

@@ -870,7 +870,7 @@ export default function CaptureScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: captureColors.surface }}>
       <CaptureBody
-        displayName={profile.data?.display_name?.split(" ")[0] ?? "there"}
+        displayName={profile.data?.display_name?.trim().split(" ")[0] || "there"}
         insetTop={insets.top}
         insetBottom={insets.bottom}
         mode={mode}

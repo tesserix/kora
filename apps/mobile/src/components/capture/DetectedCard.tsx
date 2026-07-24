@@ -2,7 +2,7 @@ import { ActivityIndicator, Pressable, View } from "react-native";
 import { Icon } from "@/components/Icon";
 import { AppText } from "@/components/Text";
 import { foodVisual } from "@/lib/foodVisual";
-import { tileBg, tileFg } from "@/lib/hue";
+import { tileBgDark, tileFgDark } from "@/lib/hue";
 import type { MealSlot } from "@/lib/mealSlot";
 import type { Resolution, ResolvedCandidate } from "@/api/types";
 import { captureColors } from "./captureTheme";
@@ -54,10 +54,10 @@ function CandidateRow({ candidate, isLast }: { candidate: ResolvedCandidate; isL
           alignItems: "center",
           justifyContent: "center",
           flexShrink: 0,
-          backgroundColor: tileBg(hue),
+          backgroundColor: tileBgDark(hue),
         }}
       >
-        <Icon name={icon} size={18} color={tileFg(hue)} />
+        <Icon name={icon} size={18} color={tileFgDark(hue)} />
       </View>
       <View style={{ flex: 1 }}>
         <AppText style={{ color: captureColors.onSurface, fontSize: 14, fontWeight: "600" }}>
