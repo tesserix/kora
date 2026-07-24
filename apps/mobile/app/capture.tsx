@@ -254,6 +254,17 @@ export function CaptureBody({
   onCapturePhoto,
   onClose,
 }: CaptureBodyProps) {
+  const scrollViewRef = useRef<ScrollView>(null);
+
+  // Bring the newest Otto message (an error bubble or the detected-food
+  // result) into view — on short viewports or with the keyboard open, the
+  // in-thread bubble can otherwise land below the fold with no signal.
+  useEffect(() => {
+    if (errorMsg || resolution) {
+      scrollViewRef.current?.scrollToEnd({ animated: true });
+    }
+  }, [errorMsg, resolution]);
+
   return (
     <View style={{ flex: 1, backgroundColor: captureColors.surface }}>
       <View
@@ -280,6 +291,7 @@ export function CaptureBody({
       </View>
 
       <ScrollView
+        ref={scrollViewRef}
         contentContainerStyle={{ padding: 18, paddingTop: 8, gap: 14 }}
         style={{ flex: 1 }}
       >
@@ -395,43 +407,51 @@ type PhotoFile = { uri: string; name: string; type: string };
 type PhotoPickOutcome =
   | { status: "success"; file: PhotoFile }
   | { status: "canceled" }
-  | { status: "denied" };
+  | { status: "denied" }
+  | { status: "failed" };
 
 // Camera first, library as fallback — matches the sim (no camera hardware,
 // so launchCameraAsync throws) and a user who denies camera but allows
 // photo library access. Only a genuine permission denial (both camera *and*
-// library) is reported as "denied"; a user-canceled picker is silent.
+// library) is reported as "denied"; a user-canceled picker is silent. The
+// outer try/catch is a last-resort net: ANY unexpected throw (e.g. a native
+// error from the library permission check or launch, not just the camera)
+// must still surface an Otto bubble rather than fail silently.
 async function pickMealPhoto(): Promise<PhotoPickOutcome> {
-  const cameraPermission = await ImagePicker.requestCameraPermissionsAsync();
-  let result: ImagePicker.ImagePickerResult | undefined;
+  try {
+    const cameraPermission = await ImagePicker.requestCameraPermissionsAsync();
+    let result: ImagePicker.ImagePickerResult | undefined;
 
-  if (cameraPermission.granted) {
-    try {
-      result = await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.7 });
-    } catch {
-      result = undefined; // no camera hardware available — fall back to the library below
+    if (cameraPermission.granted) {
+      try {
+        result = await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.7 });
+      } catch {
+        result = undefined; // no camera hardware available — fall back to the library below
+      }
     }
-  }
 
-  if (!result) {
-    const libraryPermission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!libraryPermission.granted) {
-      return { status: "denied" };
+    if (!result) {
+      const libraryPermission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!libraryPermission.granted) {
+        return { status: "denied" };
+      }
+      result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.7 });
     }
-    result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.7 });
-  }
 
-  if (result.canceled) {
-    return { status: "canceled" };
+    if (result.canceled) {
+      return { status: "canceled" };
+    }
+    const asset = result.assets[0];
+    if (!asset) {
+      return { status: "canceled" };
+    }
+    return {
+      status: "success",
+      file: { uri: asset.uri, name: asset.fileName ?? "meal.jpg", type: asset.mimeType ?? "image/jpeg" },
+    };
+  } catch {
+    return { status: "failed" };
   }
-  const asset = result.assets[0];
-  if (!asset) {
-    return { status: "canceled" };
-  }
-  return {
-    status: "success",
-    file: { uri: asset.uri, name: asset.fileName ?? "meal.jpg", type: asset.mimeType ?? "image/jpeg" },
-  };
 }
 
 function ottoErrorMessage(error: Error): string {
@@ -461,6 +481,7 @@ export default function CaptureScreen() {
   function handleModeChange(next: CaptureMode) {
     setMode(next);
     setStage("idle");
+    setErrorMsg(null);
   }
 
   function handleSend() {
@@ -483,6 +504,10 @@ export default function CaptureScreen() {
     if (outcome.status === "canceled") return;
     if (outcome.status === "denied") {
       setErrorMsg("I need camera or photo access to see your meal.");
+      return;
+    }
+    if (outcome.status === "failed") {
+      setErrorMsg("Something went wrong opening your photos — try again.");
       return;
     }
     resolvePhoto.mutate(outcome.file, {

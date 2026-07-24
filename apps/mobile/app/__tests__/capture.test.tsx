@@ -275,4 +275,63 @@ describe("Photo mode", () => {
     const { getByTestId } = await render(<CaptureScreen />);
     expect(getByTestId("capture-analyzing-spinner")).toBeTruthy();
   });
+
+  test("camera denied falls back to the library and still resolves the picked asset", async () => {
+    (ImagePicker.requestCameraPermissionsAsync as jest.Mock).mockResolvedValueOnce({ granted: false });
+    (ImagePicker.launchImageLibraryAsync as jest.Mock).mockResolvedValueOnce({
+      canceled: false,
+      assets: [{ uri: "file://library.jpg", fileName: "library.jpg", mimeType: "image/jpeg" }],
+    });
+
+    const { findByLabelText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByLabelText("Photo viewfinder"));
+
+    await waitFor(() =>
+      expect(mockResolvePhotoMutate).toHaveBeenCalledWith(
+        { uri: "file://library.jpg", name: "library.jpg", type: "image/jpeg" },
+        expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
+      ),
+    );
+    expect(ImagePicker.launchCameraAsync).not.toHaveBeenCalled();
+  });
+
+  test("the composer's Quick photo capture button triggers the same photo flow", async () => {
+    (ImagePicker.launchCameraAsync as jest.Mock).mockResolvedValueOnce({
+      canceled: false,
+      assets: [{ uri: "file://quick.jpg", fileName: "quick.jpg", mimeType: "image/jpeg" }],
+    });
+
+    const { findByLabelText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByLabelText("Quick photo capture"));
+
+    await waitFor(() =>
+      expect(mockResolvePhotoMutate).toHaveBeenCalledWith(
+        { uri: "file://quick.jpg", name: "quick.jpg", type: "image/jpeg" },
+        expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
+      ),
+    );
+  });
+
+  test("an unexpected picker failure still renders an Otto error bubble (no silent failure)", async () => {
+    (ImagePicker.requestCameraPermissionsAsync as jest.Mock).mockResolvedValueOnce({ granted: false });
+    (ImagePicker.requestMediaLibraryPermissionsAsync as jest.Mock).mockRejectedValueOnce(new Error("native crash"));
+
+    const { findByLabelText, findByText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByLabelText("Photo viewfinder"));
+
+    expect(await findByText("Something went wrong opening your photos — try again.")).toBeTruthy();
+    expect(mockResolvePhotoMutate).not.toHaveBeenCalled();
+  });
+});
+
+test("switching mode clears a stale error bubble", async () => {
+  (ImagePicker.requestCameraPermissionsAsync as jest.Mock).mockResolvedValueOnce({ granted: false });
+  (ImagePicker.requestMediaLibraryPermissionsAsync as jest.Mock).mockResolvedValueOnce({ granted: false });
+
+  const { findByLabelText, findByText, queryByText } = await render(<CaptureScreen />);
+  await fireEvent.press(await findByLabelText("Photo viewfinder"));
+  expect(await findByText("I need camera or photo access to see your meal.")).toBeTruthy();
+
+  await fireEvent.press(await findByText("Type"));
+  expect(queryByText("I need camera or photo access to see your meal.")).toBeNull();
 });
