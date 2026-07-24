@@ -8,6 +8,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -246,6 +247,61 @@ func TestResolveText_BudgetExceeded_GracefulManualFallback(t *testing.T) {
 	require.Equal(t, "budget", res.Provenance)
 	require.NotEmpty(t, res.FollowUpQuestion)
 	require.Equal(t, 0, provider.calls, "provider must never be called once over budget")
+}
+
+// TestResolveVoiceTranscribesThenResolves proves ResolveVoice transcribes
+// audio then feeds the transcript through the same ResolveText pipeline: the
+// resolved candidate's Kcal must still come only from the seeded row's
+// KcalPer100g, never from the provider's guess or transcript.
+func TestResolveVoiceTranscribesThenResolves(t *testing.T) {
+	db := testDB(t)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE brand = 'test3a'") })
+	repo := nutrition.NewRepository(db)
+
+	item := seedFoodItem(t, repo, nutrition.FoodItem{
+		Name: "Banana", Brand: "test3a",
+		Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 89,
+	})
+	seedAlias(t, db, "banana", item.ID)
+
+	provider := &stubProvider{
+		transcript:      "banana",
+		transcriptUsage: Usage{Provider: "stub", CallType: "transcribe"},
+		guesses: []Guess{
+			{Food: "banana", PortionEstimate: "100 g", Confidence: 0.95},
+		},
+		guessUsage: Usage{Provider: "stub", CallType: "identify_text"},
+	}
+	meter := &stubMeter{withinBudget: true}
+	resolver := NewResolver(provider, repo, NoCache{}, meter)
+
+	res, err := resolver.ResolveVoice(context.Background(), uuid.New(), []byte("audio-bytes"), "audio/mp4")
+
+	require.NoError(t, err)
+	require.Equal(t, TierAuto, res.Tier)
+	require.Len(t, res.Candidates, 1)
+	// 89 kcal/100g * 100g / 100 = 89 — computed from the row, never from the
+	// (kcal-less) transcript or guess.
+	require.Equal(t, 89.0, res.Candidates[0].Kcal)
+	require.NotEmpty(t, meter.records, "provider usage must be metered")
+}
+
+// TestResolveVoiceBlankTranscriptFollowUp proves that when transcription
+// yields no usable speech, ResolveVoice returns a graceful follow-up without
+// ever reaching the foods repository.
+func TestResolveVoiceBlankTranscriptFollowUp(t *testing.T) {
+	db := testDB(t)
+	repo := nutrition.NewRepository(db)
+
+	provider := &stubProvider{transcript: "   "}
+	meter := &stubMeter{withinBudget: true}
+	resolver := NewResolver(provider, repo, NoCache{}, meter)
+
+	res, err := resolver.ResolveVoice(context.Background(), uuid.New(), []byte("audio"), "audio/mp4")
+
+	require.NoError(t, err)
+	assert.Equal(t, TierFollowUp, res.Tier)
+	assert.Empty(t, res.Candidates)
 }
 
 // TestResolveText_CachesResolution_SkipsProviderOnSecondCall proves the

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -33,6 +34,10 @@ const budgetFollowUpQuestion = "You've reached your AI limit this month — sear
 // noResolvableGuessFollowUpQuestion is used when at least one guess was
 // identified but none of them resolved to a confident nutrition-index match.
 const noResolvableGuessFollowUpQuestion = "Which of these best matches what you ate?"
+
+// blankTranscriptFollowUp is returned when transcription yields no usable
+// speech — the user recorded silence or noise.
+const blankTranscriptFollowUp = "I couldn't make out any food from that — try again or type it."
 
 // Meter records AI provider usage and enforces monthly cost budgets.
 //
@@ -153,6 +158,45 @@ func (r Resolver) resolve(
 
 	r.cache.Set(ctx, key, estimate)
 	return estimate, nil
+}
+
+// ResolveVoice transcribes an audio clip and resolves the transcript through
+// the same pipeline as ResolveText. Transcription is metered separately; the
+// transcript is just a search phrase, so the hard invariant and tiers are
+// unchanged. Cached by audio content hash so identical clips don't re-transcribe.
+func (r Resolver) ResolveVoice(ctx context.Context, userID uuid.UUID, audio []byte, mime string) (Resolution, error) {
+	sum := sha256.Sum256(audio)
+	key := CacheKey("voice", hex.EncodeToString(sum[:]))
+	if cached, ok := r.cache.Get(ctx, key); ok {
+		return *cached, nil
+	}
+
+	ok, err := r.meter.WithinBudget(ctx, userID)
+	if err != nil {
+		return Resolution{}, fmt.Errorf("ai: resolve voice: check budget: %w", err)
+	}
+	if !ok {
+		return Resolution{Tier: TierFollowUp, FollowUpQuestion: budgetFollowUpQuestion, Provenance: "budget"}, nil
+	}
+
+	transcript, usage, err := r.provider.Transcribe(ctx, audio, mime)
+	if err != nil {
+		return Resolution{}, fmt.Errorf("ai: resolve voice: transcribe: %w", err)
+	}
+	r.record(ctx, userID, usage)
+
+	transcript = strings.TrimSpace(transcript)
+	if transcript == "" {
+		return Resolution{Tier: TierFollowUp, FollowUpQuestion: blankTranscriptFollowUp, Provenance: "voice"}, nil
+	}
+
+	// Reuse the full text pipeline (identify → resolve → tiers → decompose).
+	res, err := r.ResolveText(ctx, userID, transcript)
+	if err != nil {
+		return Resolution{}, fmt.Errorf("ai: resolve voice: %w", err)
+	}
+	r.cache.Set(ctx, key, res)
+	return res, nil
 }
 
 // record meters one provider call. Metering failures must never break
