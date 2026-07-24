@@ -19,6 +19,12 @@ export const captureColors = {
   composerBg: "rgba(0,0,0,0.25)",
   composerBorder: "rgba(255,255,255,0.1)",
   outlineBorder: "rgba(255,255,255,0.25)",
+  // Photo idle affordance is a deliberately light "viewfinder" placeholder box,
+  // per CaptureScreen.jsx's oklch(0.93 0.03 285) background / oklch(0.52 0.13 285)
+  // icon / oklch(0.4 0.13 285) caption — approximated to hex (RN can't parse oklch).
+  viewfinderBg: "#ECE9F7",
+  viewfinderIcon: "#5B4FBF",
+  viewfinderCaption: "#453592",
 } as const;
 
 export type CaptureColors = typeof captureColors;

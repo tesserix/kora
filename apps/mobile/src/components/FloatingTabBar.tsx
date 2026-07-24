@@ -54,7 +54,7 @@ export function FloatingTabBar({ state, navigation }: FloatingTabBarProps) {
         <Pressable
           accessibilityLabel="Capture"
           accessibilityRole="button"
-          onPress={() => router.push("/log")}
+          onPress={() => router.push("/capture")}
           style={[{ width: 52, height: 52, marginHorizontal: 2, borderRadius: radius.full, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" }, shadows.md]}
         >
           <Icon name="sparkles" size={24} color={colors.primaryForeground} />

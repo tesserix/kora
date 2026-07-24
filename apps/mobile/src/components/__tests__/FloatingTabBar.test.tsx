@@ -16,8 +16,8 @@ test("renders tab labels and a capture button", async () => {
   expect(await findByLabelText("Capture")).toBeTruthy();
 });
 
-test("capture button routes to /log", async () => {
+test("capture button routes to /capture", async () => {
   const { findByLabelText } = await render(<FloatingTabBar {...props} />);
   fireEvent.press(await findByLabelText("Capture"));
-  expect(router.push).toHaveBeenCalledWith("/log");
+  expect(router.push).toHaveBeenCalledWith("/capture");
 });
