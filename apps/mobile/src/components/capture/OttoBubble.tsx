@@ -4,7 +4,9 @@ import { Icon } from "@/components/Icon";
 import { AppText } from "@/components/Text";
 import { captureColors } from "./captureTheme";
 
-type Props = { children: ReactNode };
+interface Props {
+  children: ReactNode;
+}
 
 // Otto's chat bubble — sparkles avatar + translucent bubble, top-left corner
 // squared off (radius 6) to point back at the avatar, per CaptureScreen.jsx.

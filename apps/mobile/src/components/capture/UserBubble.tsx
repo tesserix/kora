@@ -3,7 +3,9 @@ import { View } from "react-native";
 import { AppText } from "@/components/Text";
 import { captureColors } from "./captureTheme";
 
-type Props = { children: ReactNode };
+interface Props {
+  children: ReactNode;
+}
 
 // The user's own message — primary-filled bubble, right-aligned, top-right
 // corner squared off (radius 6), per CaptureScreen.jsx.

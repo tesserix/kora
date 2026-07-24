@@ -8,13 +8,13 @@ import type { Resolution, ResolvedCandidate } from "@/api/types";
 import { captureColors } from "./captureTheme";
 import { ModePill } from "./ModePill";
 
-type Props = {
+interface Props {
   resolution: Resolution;
   mealSlot: MealSlot;
   onChangeMealSlot: (slot: MealSlot) => void;
   onAdd: () => void;
   adding: boolean;
-};
+}
 
 const MEAL_SLOTS: ReadonlyArray<{ slot: MealSlot; label: string; icon: string }> = [
   { slot: "breakfast", label: "Breakfast", icon: "coffee" },
@@ -119,6 +119,7 @@ export function DetectedCard({ resolution, mealSlot, onChangeMealSlot, onAdd, ad
       <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
         <Pressable
           accessibilityRole="button"
+          accessibilityLabel={adding ? "Adding to diary" : "Add to diary"}
           accessibilityState={{ disabled: adding }}
           disabled={adding}
           onPress={onAdd}

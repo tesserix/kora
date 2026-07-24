@@ -3,12 +3,12 @@ import { Icon } from "@/components/Icon";
 import { AppText } from "@/components/Text";
 import { captureColors } from "./captureTheme";
 
-type Props = {
+interface Props {
   icon: string;
   label: string;
   active: boolean;
   onPress: () => void;
-};
+}
 
 // One of the four input-mode chips in the composer bar (Photo/Voice/Scan/Type).
 export function ModePill({ icon, label, active, onPress }: Props) {

@@ -137,7 +137,7 @@ test("pressing add to diary calls onAdd", async () => {
 
 test("shows a spinner and hides the label while adding", async () => {
   const resolution = makeResolution();
-  const { queryByText, getByTestId } = await render(
+  const { queryByText, getByTestId, getByLabelText } = await render(
     <DetectedCard
       resolution={resolution}
       mealSlot="lunch"
@@ -149,4 +149,5 @@ test("shows a spinner and hides the label while adding", async () => {
 
   expect(queryByText("Add to diary")).toBeNull();
   expect(getByTestId("detected-card-adding-spinner")).toBeTruthy();
+  expect(getByLabelText("Adding to diary")).toBeTruthy();
 });
