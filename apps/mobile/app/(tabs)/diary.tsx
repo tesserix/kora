@@ -30,7 +30,7 @@ const iso = (d: Date) => d.toLocaleDateString("en-CA");
 const timeOf = (s: string) => new Date(s).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
 export default function Diary() {
-  const { colors, radius, spacing } = useTheme();
+  const { colors, radius, fonts } = useTheme();
   const week = weekDates();
   const todayIso = iso(new Date());
   const [selected, setSelected] = useState(todayIso);
@@ -91,7 +91,7 @@ export default function Diary() {
                 <View style={{ position: "absolute", left: -18, top: 22, width: 10, height: 10, borderRadius: 999, backgroundColor: colors.primary, borderWidth: 2, borderColor: colors.background }} />
                 <FoodTile hue={vis.hue} icon={vis.icon} size={48} />
                 <View style={{ flex: 1 }}>
-                  <AppText muted style={{ fontSize: 12 }}>{timeOf(log.logged_at)}</AppText>
+                  <AppText muted style={{ fontSize: 12, fontFamily: fonts.mono }}>{timeOf(log.logged_at)}</AppText>
                   <AppText style={{ fontSize: 15, fontWeight: "600" }}>{log.description}</AppText>
                   <AppText muted style={{ fontSize: 12 }}>{log.meal_slot} · {Math.round(log.quantity_grams)}g</AppText>
                 </View>
