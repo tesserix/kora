@@ -1,0 +1,5 @@
+# Real golden dataset is user-provided and not committed.
+*
+!.gitignore
+!README.md
+!chat.sample.jsonl
