@@ -7,6 +7,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/tesserix/kora/api/internal/auth"
+	"github.com/tesserix/kora/api/internal/challenges"
 	"github.com/tesserix/kora/api/internal/compare"
 	"github.com/tesserix/kora/api/internal/dashboard"
 	"github.com/tesserix/kora/api/internal/foodlog"
@@ -109,6 +110,15 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.DELETE("/groups/:id/members/:userId", groupsHandler.RemoveMember)
 		v1.PATCH("/groups/:id", groupsHandler.Rename)
 		v1.DELETE("/groups/:id", groupsHandler.Delete)
+
+		challengesRepo := challenges.NewRepository(deps.DB)
+		challengesHandler := challenges.NewHandler(challenges.NewService(challengesRepo, groupsRepo, logRepo))
+		v1.POST("/groups/:id/challenges", challengesHandler.Create)
+		v1.GET("/groups/:id/challenges", challengesHandler.List)
+		v1.POST("/challenges/:cid/join", challengesHandler.Join)
+		v1.DELETE("/challenges/:cid/join", challengesHandler.Leave)
+		v1.GET("/challenges/:cid", challengesHandler.Detail)
+		v1.DELETE("/challenges/:cid", challengesHandler.Delete)
 
 		if deps.Resolver != nil {
 			v1.POST("/resolve/text", deps.Resolver.ResolveText)
