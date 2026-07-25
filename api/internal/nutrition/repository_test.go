@@ -27,8 +27,17 @@ func testDB(t *testing.T) *gorm.DB {
 
 func TestSeedIsIdempotentAndSearchable(t *testing.T) {
 	db := testDB(t)
-	repo := NewRepository(db)
-	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE provenance IN ('afcd','off','user_estimate')") })
+	tx := db.Begin()
+	require.NoError(t, tx.Error)
+	t.Cleanup(func() { tx.Rollback() })
+
+	// Seed's insert-count assertions require an empty table, but this suite
+	// must not destroy a pre-populated shared food_items. Truncate inside
+	// the transaction: the truncate and every subsequent insert are
+	// transactional and get discarded on rollback, so committed rows
+	// outside this tx are never touched.
+	require.NoError(t, tx.Exec("TRUNCATE food_items CASCADE").Error)
+	repo := NewRepository(tx)
 
 	n1, err := Seed(context.Background(), repo)
 	require.NoError(t, err)
