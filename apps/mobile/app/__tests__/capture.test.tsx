@@ -320,6 +320,21 @@ describe("Type mode", () => {
     expect(mockResolveTextMutate).not.toHaveBeenCalled();
   });
 
+  test("whitespace-only input keeps the send button disabled and inactive-colored", async () => {
+    const { findByText, findByLabelText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Type"));
+
+    const input = await findByLabelText("Tell Otto what you ate");
+    await fireEvent.changeText(input, "   ");
+
+    const sendButton = await findByLabelText("Send");
+    expect(sendButton.props.accessibilityState).toEqual({ disabled: true });
+    expect(sendButton.props.style.backgroundColor).toBe("rgba(255,255,255,0.15)");
+
+    await fireEvent.press(sendButton);
+    expect(mockResolveTextMutate).not.toHaveBeenCalled();
+  });
+
   test("a successful resolve renders the DetectedCard", async () => {
     const { findByText, findByLabelText } = await render(<CaptureScreen />);
     await fireEvent.press(await findByText("Type"));

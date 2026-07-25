@@ -33,6 +33,7 @@ import {
   useResolveVoice,
 } from "@/api/hooks";
 import { ApiError } from "@/lib/api";
+import { kcalTotalLabel } from "@/lib/resolutionKcal";
 import type { Resolution, ResolvedCandidate } from "@/api/types";
 import { mealSlotForHour, type MealSlot } from "@/lib/mealSlot";
 
@@ -284,9 +285,7 @@ function resolveResultView(resolution: Resolution): ResultView {
 function resultSummary(resolution: Resolution): string {
   const count = resolution.candidates.length;
   const itemWord = count === 1 ? "item" : "items";
-  const kcalText = resolution.is_estimate
-    ? `${Math.round(resolution.kcal_low ?? 0)}–${Math.round(resolution.kcal_high ?? 0)} kcal`
-    : `${Math.round(resolution.candidates.reduce((sum, candidate) => sum + candidate.kcal, 0))} kcal`;
+  const kcalText = kcalTotalLabel(resolution);
   return `I found ${count} ${itemWord}, about ${kcalText} — confirm and I'll log it.`;
 }
 
@@ -551,7 +550,7 @@ export function CaptureBody({
               width: 38,
               height: 38,
               borderRadius: 9999,
-              backgroundColor: text ? captureColors.primary : "rgba(255,255,255,0.15)",
+              backgroundColor: text.trim() ? captureColors.primary : "rgba(255,255,255,0.15)",
               alignItems: "center",
               justifyContent: "center",
             }}

@@ -4,6 +4,7 @@ import { AppText } from "@/components/Text";
 import { foodVisual } from "@/lib/foodVisual";
 import { tileBgDark, tileFgDark } from "@/lib/hue";
 import type { MealSlot } from "@/lib/mealSlot";
+import { kcalTotalLabel } from "@/lib/resolutionKcal";
 import type { Resolution, ResolvedCandidate } from "@/api/types";
 import { captureColors } from "./captureTheme";
 import { ModePill } from "./ModePill";
@@ -22,16 +23,6 @@ const MEAL_SLOTS: ReadonlyArray<{ slot: MealSlot; label: string; icon: string }>
   { slot: "dinner", label: "Dinner", icon: "utensils" },
   { slot: "snack", label: "Snack", icon: "apple" },
 ];
-
-function totalLabel(resolution: Resolution): string {
-  if (resolution.is_estimate) {
-    const low = Math.round(resolution.kcal_low ?? 0);
-    const high = Math.round(resolution.kcal_high ?? 0);
-    return `${low}–${high} kcal`;
-  }
-  const sum = resolution.candidates.reduce((total, candidate) => total + candidate.kcal, 0);
-  return `${Math.round(sum)} kcal`;
-}
 
 function CandidateRow({ candidate, isLast }: { candidate: ResolvedCandidate; isLast: boolean }) {
   const { hue, icon } = foodVisual(candidate.item.name);
@@ -102,7 +93,7 @@ export function DetectedCard({ resolution, mealSlot, onChangeMealSlot, onAdd, ad
           {`Detected · ${resolution.candidates.length} items`}
         </AppText>
         <AppText style={{ fontSize: 14, fontWeight: "700", color: captureColors.onSurface }}>
-          {totalLabel(resolution)}
+          {kcalTotalLabel(resolution)}
         </AppText>
       </View>
 
