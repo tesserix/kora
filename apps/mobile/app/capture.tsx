@@ -291,7 +291,7 @@ function resultSummary(resolution: Resolution): string {
 
 // Maps a capture mode to the food-log `source` value. "scan" reads as a
 // barcode lookup and "type" as free text; the rest are literally "ai_<mode>".
-function sourceForMode(mode: CaptureMode): string {
+export function sourceForMode(mode: CaptureMode): string {
   if (mode === "scan") return "ai_barcode";
   if (mode === "type") return "ai_text";
   return `ai_${mode}`;

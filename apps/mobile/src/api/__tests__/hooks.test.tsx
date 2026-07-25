@@ -87,22 +87,28 @@ test("useResolveBarcode posts barcode to /v1/resolve/barcode", async () => {
 
 test("useResolvePhoto builds FormData and posts to /v1/resolve/photo", async () => {
   (apiFetchMultipart as jest.Mock).mockResolvedValueOnce(resolution);
+  const appendSpy = jest.spyOn(FormData.prototype, "append");
 
   const { result } = await renderHook(() => useResolvePhoto(), { wrapper });
   result.current.mutate({ uri: "file:///photo.jpg", name: "photo.jpg", type: "image/jpeg" });
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
   expect(apiFetchMultipart).toHaveBeenCalledWith("/v1/resolve/photo", expect.any(FormData));
+  expect(appendSpy).toHaveBeenCalledWith("file", { uri: "file:///photo.jpg", name: "photo.jpg", type: "image/jpeg" });
   expect(result.current.data).toEqual(resolution);
+  appendSpy.mockRestore();
 });
 
 test("useResolveVoice builds FormData and posts to /v1/resolve/voice", async () => {
   (apiFetchMultipart as jest.Mock).mockResolvedValueOnce(resolution);
+  const appendSpy = jest.spyOn(FormData.prototype, "append");
 
   const { result } = await renderHook(() => useResolveVoice(), { wrapper });
   result.current.mutate({ uri: "file:///voice.m4a", name: "voice.m4a", type: "audio/m4a" });
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
   expect(apiFetchMultipart).toHaveBeenCalledWith("/v1/resolve/voice", expect.any(FormData));
+  expect(appendSpy).toHaveBeenCalledWith("file", { uri: "file:///voice.m4a", name: "voice.m4a", type: "audio/m4a" });
   expect(result.current.data).toEqual(resolution);
+  appendSpy.mockRestore();
 });

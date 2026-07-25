@@ -98,7 +98,7 @@ function makeRecorder(): MockRecorder {
   return recorder;
 }
 
-import CaptureScreen, { CaptureBody } from "../capture";
+import CaptureScreen, { CaptureBody, sourceForMode } from "../capture";
 
 function makeResolution(): Resolution {
   return {
@@ -808,4 +808,15 @@ test("switching mode clears a stale error bubble", async () => {
 
   await fireEvent.press(await findByText("Type"));
   expect(queryByText("I need camera or photo access to see your meal.")).toBeNull();
+});
+
+describe("sourceForMode", () => {
+  test.each([
+    ["photo", "ai_photo"],
+    ["voice", "ai_voice"],
+    ["scan", "ai_barcode"],
+    ["type", "ai_text"],
+  ] as const)("%s -> %s", (mode, expected) => {
+    expect(sourceForMode(mode)).toBe(expected);
+  });
 });
