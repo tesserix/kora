@@ -51,6 +51,37 @@ func (r Repository) EnsureUser(ctx context.Context, firebaseUID, email string) (
 	return r.UpsertByFirebaseUID(ctx, firebaseUID, email)
 }
 
+func (r Repository) ByID(ctx context.Context, id uuid.UUID) (User, error) {
+	var u User
+	if err := r.db.WithContext(ctx).First(&u, "id = ?", id).Error; err != nil {
+		return User{}, fmt.Errorf("user: by id: %w", err)
+	}
+	return u, nil
+}
+
+func (r Repository) FindByEmail(ctx context.Context, email string) (User, error) {
+	var u User
+	if err := r.db.WithContext(ctx).Where("email = ?", email).First(&u).Error; err != nil {
+		return User{}, fmt.Errorf("user: by email: %w", err)
+	}
+	return u, nil
+}
+
+func (r Repository) FindByCode(ctx context.Context, code string) (User, error) {
+	var u User
+	if err := r.db.WithContext(ctx).Where("friend_code = ?", code).First(&u).Error; err != nil {
+		return User{}, fmt.Errorf("user: by code: %w", err)
+	}
+	return u, nil
+}
+
+func (r Repository) SetFriendCode(ctx context.Context, id uuid.UUID, code string) error {
+	if err := r.db.WithContext(ctx).Model(&User{}).Where("id = ?", id).Update("friend_code", code).Error; err != nil {
+		return fmt.Errorf("user: set friend code: %w", err)
+	}
+	return nil
+}
+
 func (r Repository) IDByFirebaseUID(ctx context.Context, firebaseUID string) (uuid.UUID, error) {
 	var u User
 	if err := r.db.WithContext(ctx).
