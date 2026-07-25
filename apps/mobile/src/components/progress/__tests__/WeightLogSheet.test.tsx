@@ -22,3 +22,12 @@ test("Save parses the input and calls useAddWeight; rejects non-positive", async
     expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
   );
 });
+
+test("syncs the input to the current weight when the sheet opens", async () => {
+  const onClose = jest.fn();
+  const { getByLabelText, rerender } = await render(
+    <WeightLogSheet visible={false} initialKg={0} onClose={onClose} />,
+  );
+  await rerender(<WeightLogSheet visible initialKg={80} onClose={onClose} />);
+  expect(getByLabelText("Weight in kilograms").props.value).toBe("80");
+});

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { TextInput, View } from "react-native";
 import { Sheet } from "@/components/Sheet";
 import { Button } from "@/components/Button";
@@ -18,6 +18,13 @@ export function WeightLogSheet({ visible, initialKg, onClose }: WeightLogSheetPr
   const [text, setText] = useState(initialKg > 0 ? String(initialKg) : "");
   const [err, setErr] = useState<string | null>(null);
   const addWeight = useAddWeight();
+
+  useEffect(() => {
+    if (visible) {
+      setText(initialKg > 0 ? String(initialKg) : "");
+      setErr(null);
+    }
+  }, [visible, initialKg]);
 
   const onSave = () => {
     const kg = parseFloat(text);

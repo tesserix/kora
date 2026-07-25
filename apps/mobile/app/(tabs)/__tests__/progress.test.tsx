@@ -18,6 +18,9 @@ test("shows real current weight when entries exist", async () => {
   // 71.9 = latest entry; distinct from the old hardcoded "72.4" placeholder, so
   // this fails on the pre-rewrite screen (real RED) and passes on the new one.
   expect(getByText("71.9")).toBeTruthy();
+  expect(getByText("Progress")).toBeTruthy();
+  expect(getByText("Weight")).toBeTruthy();
+  expect(getByText("Log streak")).toBeTruthy();
 });
 
 test("seeds current weight from profile when the range is empty", async () => {
