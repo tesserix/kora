@@ -120,3 +120,27 @@ func (r Repository) Delete(ctx context.Context, id uuid.UUID) error {
 	}
 	return nil
 }
+
+// CompareRow is an accepted friend plus the fields needed to compute their
+// shared progress (share_progress gates whether metrics are computed at all).
+type CompareRow struct {
+	ID            uuid.UUID
+	DisplayName   string
+	ShareProgress bool
+	TargetKcal    float64
+}
+
+func (r Repository) ListAcceptedForCompare(ctx context.Context, userID uuid.UUID) ([]CompareRow, error) {
+	rows := []CompareRow{}
+	err := r.db.WithContext(ctx).
+		Table("friendships AS f").
+		Select("u.id AS id, u.display_name AS display_name, u.share_progress AS share_progress, u.target_kcal AS target_kcal").
+		Joins("JOIN users u ON u.id = CASE WHEN f.requester_id = ? THEN f.addressee_id ELSE f.requester_id END", userID).
+		Where("f.status = ? AND (f.requester_id = ? OR f.addressee_id = ?)", FriendStatusAccepted, userID, userID).
+		Order("u.display_name ASC").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("social: list accepted for compare: %w", err)
+	}
+	return rows, nil
+}

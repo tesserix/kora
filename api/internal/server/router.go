@@ -7,6 +7,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/tesserix/kora/api/internal/auth"
+	"github.com/tesserix/kora/api/internal/compare"
 	"github.com/tesserix/kora/api/internal/dashboard"
 	"github.com/tesserix/kora/api/internal/foodlog"
 	"github.com/tesserix/kora/api/internal/httpx"
@@ -78,7 +79,8 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.POST("/weight", trackingHandler.AddWeight)
 		v1.GET("/weight", trackingHandler.ListWeight)
 
-		socialHandler := social.NewHandler(social.NewService(social.NewRepository(deps.DB), userRepo))
+		socialRepo := social.NewRepository(deps.DB)
+		socialHandler := social.NewHandler(social.NewService(socialRepo, userRepo))
 		v1.GET("/friends", socialHandler.ListFriends)
 		v1.GET("/friends/requests", socialHandler.ListRequests)
 		v1.POST("/friends/requests", socialHandler.SendRequest)
@@ -86,6 +88,9 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.POST("/friends/requests/:id/decline", socialHandler.Decline)
 		v1.DELETE("/friends/:userId", socialHandler.Unfriend)
 		v1.GET("/friends/code", socialHandler.Code)
+
+		compareHandler := compare.NewHandler(compare.NewService(socialRepo, userRepo, logRepo))
+		v1.GET("/friends/progress", compareHandler.Get)
 
 		dashboardHandler := dashboard.NewHandler(dashboard.NewService(logRepo, trackingRepo, deps.DB))
 		v1.GET("/dashboard", dashboardHandler.Get)
