@@ -15,6 +15,7 @@ jest.mock("@/api/hooks", () => ({
   useRemoveMember: () => ({ mutate: jest.fn(), isPending: false }),
   useDeleteGroup: () => ({ mutate: jest.fn(), isPending: false }),
   useProfile: () => ({ data: { id: "u1" } }),
+  useGroupChallenges: () => ({ data: [{ id: "c1", title: "July streak", metric: "logged", status: "active", start_date: "", end_date: "", participant_count: 2, joined: true }] }),
 }));
 
 import GroupDetail from "../group/[id]";
@@ -26,4 +27,5 @@ test("renders name, roster, leaderboard, and owner-only Delete", async () => {
   expect(getByText("Mate")).toBeTruthy();
   expect(getByText("4/7 on target")).toBeTruthy(); // leaderboard, sharing member
   expect(getByText("Delete group")).toBeTruthy(); // my_role owner
+  expect(getByText("July streak")).toBeTruthy(); // challenges section
 });
