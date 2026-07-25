@@ -22,6 +22,12 @@ function wrapper({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }
 
+// Restore any jest.spyOn (e.g. the FormData.append spies below) even when a test
+// throws before its inline restore — otherwise a spy leaks into later tests.
+afterEach(() => {
+  jest.restoreAllMocks();
+});
+
 test("useProfile fetches /v1/me", async () => {
   const { result } = await renderHook(() => useProfile(), { wrapper });
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
@@ -96,7 +102,6 @@ test("useResolvePhoto builds FormData and posts to /v1/resolve/photo", async () 
   expect(apiFetchMultipart).toHaveBeenCalledWith("/v1/resolve/photo", expect.any(FormData));
   expect(appendSpy).toHaveBeenCalledWith("file", { uri: "file:///photo.jpg", name: "photo.jpg", type: "image/jpeg" });
   expect(result.current.data).toEqual(resolution);
-  appendSpy.mockRestore();
 });
 
 test("useResolveVoice builds FormData and posts to /v1/resolve/voice", async () => {
@@ -110,5 +115,4 @@ test("useResolveVoice builds FormData and posts to /v1/resolve/voice", async () 
   expect(apiFetchMultipart).toHaveBeenCalledWith("/v1/resolve/voice", expect.any(FormData));
   expect(appendSpy).toHaveBeenCalledWith("file", { uri: "file:///voice.m4a", name: "voice.m4a", type: "audio/m4a" });
   expect(result.current.data).toEqual(resolution);
-  appendSpy.mockRestore();
 });
