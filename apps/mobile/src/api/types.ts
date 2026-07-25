@@ -136,3 +136,35 @@ export interface FriendsProgress {
   me: ProgressView;
   friends: FriendProgress[];
 }
+
+export type GroupRole = "owner" | "member";
+
+export interface GroupSummary {
+  id: string;
+  name: string;
+  member_count: number;
+  role: GroupRole;
+}
+
+export interface GroupMemberView {
+  id: string;
+  display_name: string;
+  role: GroupRole;
+}
+
+export interface GroupDetail {
+  id: string;
+  name: string;
+  invite_code: string;
+  my_role: GroupRole;
+  members: GroupMemberView[];
+}
+
+export interface GroupProgress {
+  members: FriendProgress[];
+}
+
+export interface GroupCode {
+  code: string;
+  link: string;
+}

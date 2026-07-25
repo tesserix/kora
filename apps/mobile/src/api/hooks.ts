@@ -9,6 +9,10 @@ import type {
   FriendsProgress,
   FoodItem,
   FoodLog,
+  GroupCode,
+  GroupDetail,
+  GroupProgress,
+  GroupSummary,
   MyFriendCode,
   OnboardingInput,
   Profile,
@@ -280,5 +284,66 @@ export function useSetShareProgress() {
       qc.invalidateQueries({ queryKey: ["profile"] });
       qc.invalidateQueries({ queryKey: ["friends-progress"] });
     },
+  });
+}
+
+export function useGroups() {
+  return useQuery({ queryKey: ["groups"], queryFn: () => apiFetch("/v1/groups") as Promise<GroupSummary[]> });
+}
+
+export function useGroup(id: string) {
+  return useQuery({ queryKey: ["group", id], queryFn: () => apiFetch(`/v1/groups/${id}`) as Promise<GroupDetail>, enabled: !!id });
+}
+
+export function useGroupProgress(id: string) {
+  return useQuery({ queryKey: ["group-progress", id], queryFn: () => apiFetch(`/v1/groups/${id}/progress`) as Promise<GroupProgress>, enabled: !!id });
+}
+
+export function useGroupCode(id: string) {
+  return useQuery({ queryKey: ["group-code", id], queryFn: () => apiFetch(`/v1/groups/${id}/code`) as Promise<GroupCode>, enabled: !!id });
+}
+
+export function useCreateGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => apiFetch("/v1/groups", { method: "POST", body: JSON.stringify({ name }) }) as Promise<GroupSummary>,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["groups"] }),
+  });
+}
+
+export function useJoinGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (code: string) => apiFetch("/v1/groups/join", { method: "POST", body: JSON.stringify({ code }) }) as Promise<GroupSummary>,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["groups"] }),
+  });
+}
+
+export function useLeaveGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ groupId, userId }: { groupId: string; userId: string }) =>
+      apiFetch(`/v1/groups/${groupId}/members/${userId}`, { method: "DELETE" }),
+    onSuccess: (_d, { groupId }) => {
+      qc.invalidateQueries({ queryKey: ["groups"] });
+      qc.invalidateQueries({ queryKey: ["group", groupId] });
+    },
+  });
+}
+
+export function useRemoveMember() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ groupId, userId }: { groupId: string; userId: string }) =>
+      apiFetch(`/v1/groups/${groupId}/members/${userId}`, { method: "DELETE" }),
+    onSuccess: (_d, { groupId }) => qc.invalidateQueries({ queryKey: ["group", groupId] }),
+  });
+}
+
+export function useDeleteGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (groupId: string) => apiFetch(`/v1/groups/${groupId}`, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["groups"] }),
   });
 }

@@ -6,10 +6,13 @@ import {
   useAcceptRequest,
   useAddWater,
   useAddWeight,
+  useCreateGroup,
   useDeleteLog,
   useEditLog,
   useFoodSearch,
   useFriendsProgress,
+  useJoinGroup,
+  useLeaveGroup,
   useProfile,
   useRepeatLog,
   useResolveBarcode,
@@ -249,4 +252,28 @@ test("useSetShareProgress PATCHes /v1/me/share-progress with the flag", async ()
     method: "PATCH",
     body: JSON.stringify({ share_progress: true }),
   });
+});
+
+test("useCreateGroup POSTs the name to /v1/groups", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({ id: "g1", name: "Squad" });
+  const { result } = await renderHook(() => useCreateGroup(), { wrapper });
+  result.current.mutate("Squad");
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(apiFetch).toHaveBeenCalledWith("/v1/groups", { method: "POST", body: JSON.stringify({ name: "Squad" }) });
+});
+
+test("useJoinGroup POSTs the code to /v1/groups/join", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({ id: "g1" });
+  const { result } = await renderHook(() => useJoinGroup(), { wrapper });
+  result.current.mutate("CODE1234");
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(apiFetch).toHaveBeenCalledWith("/v1/groups/join", { method: "POST", body: JSON.stringify({ code: "CODE1234" }) });
+});
+
+test("useLeaveGroup DELETEs /v1/groups/:id/members/:userId", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({ removed: true });
+  const { result } = await renderHook(() => useLeaveGroup(), { wrapper });
+  result.current.mutate({ groupId: "g1", userId: "u1" });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(apiFetch).toHaveBeenCalledWith("/v1/groups/g1/members/u1", { method: "DELETE" });
 });
