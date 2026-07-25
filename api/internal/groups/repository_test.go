@@ -90,3 +90,17 @@ func TestJoinListMembersRemove(t *testing.T) {
 	isMember, _ = repo.IsMember(context.Background(), g.ID, joiner)
 	require.False(t, isMember)
 }
+
+func TestCreateGroupSetsJoinedAt(t *testing.T) {
+	db := testDB(t)
+	owner := seedUser(t, db, "Owner")
+	repo := NewRepository(db)
+	g, err := repo.CreateGroup(context.Background(), owner, "Squad", "JOINEDAT")
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Exec("DELETE FROM groups WHERE id = ?", g.ID) })
+
+	var m GroupMember
+	require.NoError(t, db.Where("group_id = ? AND user_id = ?", g.ID, owner).First(&m).Error)
+	require.False(t, m.JoinedAt.IsZero(), "joined_at should be populated, not the Go zero time")
+	require.Equal(t, RoleOwner, m.Role)
+}
