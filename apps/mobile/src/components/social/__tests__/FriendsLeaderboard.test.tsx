@@ -9,14 +9,14 @@ const data = {
   ],
 };
 
-test("ranks by streak, shows on-target, and groups non-sharing", async () => {
-  const { getByText, queryByText, getAllByText } = await render(<FriendsLeaderboard data={data} />);
+test("ranks by streak, shows on-target in rank order, and groups non-sharing", async () => {
+  const { getByText, getAllByText } = await render(<FriendsLeaderboard data={data} />);
   expect(getByText("You")).toBeTruthy();
   expect(getByText("Ada")).toBeTruthy();
-  // Ada (streak 9) ranks above You (streak 5): rank labels present
-  expect(getByText("4/7 on target")).toBeTruthy(); // your adherence
-  expect(getByText("6/7 on target")).toBeTruthy(); // Ada's adherence
-  // Ben is non-sharing -> under "Not sharing", no on-target line
+  // Ada (streak 9) ranks above You (streak 5): on-target lines appear in rank order.
+  const onTarget = getAllByText(/on target$/).map((n) => n.props.children);
+  expect(onTarget).toEqual(["6/7 on target", "4/7 on target"]);
+  // Ben is non-sharing -> grouped under "Not sharing", no metrics shown.
   expect(getByText("Not sharing")).toBeTruthy();
   expect(getByText("Ben")).toBeTruthy();
 });
