@@ -2,9 +2,23 @@ package groups
 
 import (
 	"context"
+	"crypto/rand"
 
 	"github.com/google/uuid"
 )
+
+// NewCode generates an 8-char Crockford base32 invite code.
+func NewCode() (string, error) {
+	const alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	for i := range b {
+		b[i] = alphabet[int(b[i])%len(alphabet)]
+	}
+	return string(b), nil
+}
 
 type friendChecker interface {
 	AreFriends(ctx context.Context, a, b uuid.UUID) (bool, error)

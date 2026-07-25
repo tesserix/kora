@@ -10,6 +10,7 @@ import (
 	"github.com/tesserix/kora/api/internal/compare"
 	"github.com/tesserix/kora/api/internal/dashboard"
 	"github.com/tesserix/kora/api/internal/foodlog"
+	"github.com/tesserix/kora/api/internal/groups"
 	"github.com/tesserix/kora/api/internal/httpx"
 	"github.com/tesserix/kora/api/internal/nutrition"
 	"github.com/tesserix/kora/api/internal/onboarding"
@@ -94,6 +95,20 @@ func NewRouter(deps Deps) *gin.Engine {
 
 		dashboardHandler := dashboard.NewHandler(dashboard.NewService(logRepo, trackingRepo, deps.DB))
 		v1.GET("/dashboard", dashboardHandler.Get)
+
+		groupsRepo := groups.NewRepository(deps.DB)
+		groupsSvc := groups.NewService(groupsRepo, socialRepo, groups.NewCode)
+		groupsHandler := groups.NewHandler(groupsSvc, groupsRepo, compare.NewService(socialRepo, userRepo, logRepo))
+		v1.POST("/groups", groupsHandler.Create)
+		v1.GET("/groups", groupsHandler.List)
+		v1.POST("/groups/join", groupsHandler.Join)
+		v1.GET("/groups/:id", groupsHandler.Detail)
+		v1.GET("/groups/:id/code", groupsHandler.Code)
+		v1.GET("/groups/:id/progress", groupsHandler.Progress)
+		v1.POST("/groups/:id/invite", groupsHandler.Invite)
+		v1.DELETE("/groups/:id/members/:userId", groupsHandler.RemoveMember)
+		v1.PATCH("/groups/:id", groupsHandler.Rename)
+		v1.DELETE("/groups/:id", groupsHandler.Delete)
 
 		if deps.Resolver != nil {
 			v1.POST("/resolve/text", deps.Resolver.ResolveText)
