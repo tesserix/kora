@@ -9,6 +9,7 @@ import {
   useDeleteLog,
   useEditLog,
   useFoodSearch,
+  useFriendsProgress,
   useProfile,
   useRepeatLog,
   useResolveBarcode,
@@ -16,6 +17,7 @@ import {
   useResolveText,
   useResolveVoice,
   useSendFriendRequest,
+  useSetShareProgress,
   useUnfriend,
   useWeightSeries,
 } from "../hooks";
@@ -229,4 +231,22 @@ test("useUnfriend DELETEs /v1/friends/:userId", async () => {
   result.current.mutate("u9");
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
   expect(apiFetch).toHaveBeenCalledWith("/v1/friends/u9", { method: "DELETE" });
+});
+
+test("useFriendsProgress GETs /v1/friends/progress", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({ me: { streak_days: 3, adherence_days: 4, adherence_window: 7 }, friends: [] });
+  const { result } = await renderHook(() => useFriendsProgress(), { wrapper });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(apiFetch).toHaveBeenCalledWith("/v1/friends/progress");
+});
+
+test("useSetShareProgress PATCHes /v1/me/share-progress with the flag", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({ share_progress: true });
+  const { result } = await renderHook(() => useSetShareProgress(), { wrapper });
+  result.current.mutate(true);
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(apiFetch).toHaveBeenCalledWith("/v1/me/share-progress", {
+    method: "PATCH",
+    body: JSON.stringify({ share_progress: true }),
+  });
 });

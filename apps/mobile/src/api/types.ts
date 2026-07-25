@@ -9,6 +9,7 @@ export type Profile = {
   target_fat_g: number;
   onboarded_at: string | null;
   weight_kg: number;
+  share_progress: boolean;
 };
 
 export type FoodItem = {
@@ -115,4 +116,23 @@ export interface FriendRequests {
 export interface MyFriendCode {
   code: string;
   link: string;
+}
+
+export interface ProgressView {
+  streak_days: number;
+  adherence_days: number;
+  adherence_window: number;
+}
+
+export interface FriendProgress {
+  id: string;
+  display_name: string;
+  sharing: boolean;
+  streak_days?: number;
+  adherence_days?: number;
+}
+
+export interface FriendsProgress {
+  me: ProgressView;
+  friends: FriendProgress[];
 }

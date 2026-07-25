@@ -6,6 +6,7 @@ import type {
   DashboardSummary,
   Friend,
   FriendRequests,
+  FriendsProgress,
   FoodItem,
   FoodLog,
   MyFriendCode,
@@ -260,5 +261,24 @@ export function useMyFriendCode() {
   return useQuery({
     queryKey: ["friend-code"],
     queryFn: () => apiFetch("/v1/friends/code") as Promise<MyFriendCode>,
+  });
+}
+
+export function useFriendsProgress() {
+  return useQuery({
+    queryKey: ["friends-progress"],
+    queryFn: () => apiFetch("/v1/friends/progress") as Promise<FriendsProgress>,
+  });
+}
+
+export function useSetShareProgress() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (share_progress: boolean) =>
+      apiFetch("/v1/me/share-progress", { method: "PATCH", body: JSON.stringify({ share_progress }) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["profile"] });
+      qc.invalidateQueries({ queryKey: ["friends-progress"] });
+    },
   });
 }
