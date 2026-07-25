@@ -1,7 +1,6 @@
 package providers
 
 import (
-	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -238,7 +237,7 @@ func TestBuildParamsJSONObjectCompat(t *testing.T) {
 
 func TestOpenAITranscribeNotSupported(t *testing.T) {
 	p := NewOpenAIProvider("k", "", "", false)
-	_, _, err := p.Transcribe(context.Background(), []byte("x"), "audio/mp4")
+	_, _, err := p.Transcribe(t.Context(), []byte("x"), "audio/mp4")
 	if err == nil {
 		t.Fatal("expected Transcribe to return an error on the fallback provider")
 	}

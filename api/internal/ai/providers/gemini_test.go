@@ -160,9 +160,3 @@ func TestNewGeminiProvider_Name(t *testing.T) {
 	p := GeminiProvider{}
 	assert.Equal(t, "gemini", p.Name())
 }
-
-func TestTranscribeCallTypeConst(t *testing.T) {
-	if callTypeTranscribe != "transcribe" {
-		t.Fatalf("callTypeTranscribe = %q", callTypeTranscribe)
-	}
-}

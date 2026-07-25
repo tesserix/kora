@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -153,8 +154,10 @@ func (s Service) EditLog(ctx context.Context, userID, logID uuid.UUID, req EditR
 	// resolves auto-hit it. Best-effort — an alias write must not fail the edit.
 	if foodChanged && req.CorrectionPhrase != "" && current.FoodItemID != nil {
 		if aerr := s.foods.AddAlias(ctx, req.CorrectionPhrase, *current.FoodItemID); aerr != nil {
-			// Log-and-continue: the edit already succeeded.
-			_ = aerr
+			// Best-effort: the edit already succeeded, so surface the alias
+			// failure for observability but do not fail the request.
+			slog.WarnContext(ctx, "foodlog: correction alias write failed",
+				"error", aerr, "food_item_id", *current.FoodItemID, "user_id", userID)
 		}
 	}
 	return updated, nil
