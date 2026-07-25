@@ -10,6 +10,7 @@ import { useTheme } from "@/theme";
 
 const ROWS = [
   { icon: "users", label: "Friends", route: "/friends" },
+  { icon: "users", label: "Groups", route: "/groups" },
   { icon: "message-circle", label: "Coach" },
   { icon: "trending-up", label: "Insights" },
   { icon: "grid-2x2", label: "Add-ons" },

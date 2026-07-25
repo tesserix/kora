@@ -14,3 +14,9 @@ test("tapping Friends navigates to /friends", async () => {
   await fireEvent.press(getByText("Friends"));
   expect(mockPush).toHaveBeenCalledWith("/friends");
 });
+
+test("tapping Groups navigates to /groups", async () => {
+  const { getByText } = await render(<More />);
+  await fireEvent.press(getByText("Groups"));
+  expect(mockPush).toHaveBeenCalledWith("/groups");
+});
