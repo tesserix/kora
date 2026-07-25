@@ -191,6 +191,7 @@ export interface ChallengeStanding {
 
 export interface ChallengeDetail {
   id: string;
+  group_id: string;
   title: string;
   metric: Metric;
   status: ChallengeStatus;

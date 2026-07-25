@@ -7,7 +7,7 @@ import { AppText } from "@/components/Text";
 import { Overline } from "@/components/Overline";
 import { useCreateChallenge } from "@/api/hooks";
 import { useTheme } from "@/theme";
-import type { ChallengeSummary, Metric } from "@/api/types";
+import type { Metric } from "@/api/types";
 
 interface Props {
   visible: boolean;
@@ -52,7 +52,7 @@ export function CreateChallengeSheet({ visible, groupId, onClose }: Props) {
     create.mutate(
       { groupId, title: v, metric, duration },
       {
-        onSuccess: (c: ChallengeSummary) => {
+        onSuccess: (c: { id: string }) => {
           setTitle("");
           onClose();
           router.push(`/challenge/${c.id}` as Href);

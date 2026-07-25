@@ -21,11 +21,12 @@ export default function ChallengeDetailScreen() {
   const del = useDeleteChallenge();
 
   const d = challenge.data;
+  const groupId = d?.group_id ?? "";
 
   const onDelete = () =>
     Alert.alert("Delete this challenge?", "This removes it for everyone.", [
       { text: "Cancel", style: "cancel" },
-      { text: "Delete", style: "destructive", onPress: () => del.mutate({ challengeId: id, groupId: "" }, { onSuccess: () => router.back() }) },
+      { text: "Delete", style: "destructive", onPress: () => del.mutate({ challengeId: id, groupId }, { onSuccess: () => router.back() }) },
     ]);
 
   return (
@@ -55,9 +56,9 @@ export default function ChallengeDetailScreen() {
 
         {d ? (
           d.joined ? (
-            <Button title="Leave challenge" variant="secondary" onPress={() => leave.mutate({ challengeId: id, groupId: "" })} disabled={leave.isPending} />
+            <Button title="Leave challenge" variant="secondary" onPress={() => leave.mutate({ challengeId: id, groupId })} disabled={leave.isPending} />
           ) : (
-            <Button title="Join challenge" onPress={() => join.mutate({ challengeId: id, groupId: "" })} disabled={join.isPending} />
+            <Button title="Join challenge" onPress={() => join.mutate({ challengeId: id, groupId })} disabled={join.isPending} />
           )
         ) : null}
 

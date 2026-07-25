@@ -137,7 +137,7 @@ func (s Service) Detail(ctx context.Context, userID, challengeID uuid.UUID, now 
 		winner = &w
 	}
 	return ChallengeDetail{
-		ID: ch.ID, Title: ch.Title, Metric: ch.Metric, Status: status,
+		ID: ch.ID, GroupID: ch.GroupID, Title: ch.Title, Metric: ch.Metric, Status: status,
 		StartDate: ch.StartDate, EndDate: ch.EndDate,
 		Joined: joined, CanDelete: userID == ch.CreatorID || owner,
 		Standings: standings, Winner: winner,

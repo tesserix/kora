@@ -72,6 +72,7 @@ type Standing struct {
 
 type ChallengeDetail struct {
 	ID        uuid.UUID  `json:"id"`
+	GroupID   uuid.UUID  `json:"group_id"`
 	Title     string     `json:"title"`
 	Metric    Metric     `json:"metric"`
 	Status    string     `json:"status"`

@@ -6,6 +6,7 @@ jest.mock("expo-router", () => ({ router: { back: mockBack }, useLocalSearchPara
 const mockChallenge = {
   data: {
     id: "c1",
+    group_id: "g1",
     title: "July streak",
     metric: "logged",
     status: "ended",
