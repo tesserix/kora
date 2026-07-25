@@ -30,6 +30,7 @@ func mountFor(caller uuid.UUID, db *gorm.DB) *gin.Engine {
 	r.GET("/v1/groups", h.List)
 	r.POST("/v1/groups/join", h.Join)
 	r.GET("/v1/groups/:id", h.Detail)
+	r.GET("/v1/groups/:id/code", h.Code)
 	r.GET("/v1/groups/:id/progress", h.Progress)
 	r.PATCH("/v1/groups/:id", h.Rename)
 	r.DELETE("/v1/groups/:id", h.Delete)
@@ -70,4 +71,21 @@ func TestCreateThenNonMemberDetailForbidden(t *testing.T) {
 	rStranger := mountFor(stranger, db)
 	wd := doJSON(rStranger, http.MethodGet, "/v1/groups/"+id.String(), "")
 	require.Equal(t, http.StatusForbidden, wd.Code)
+}
+
+func TestCodeAndProgressForbiddenForNonMember(t *testing.T) {
+	db := testDB(t)
+	owner := seedUser(t, db, "Owner")
+	stranger := seedUser(t, db, "Stranger")
+	rOwner := mountFor(owner, db)
+	require.Equal(t, http.StatusCreated, doJSON(rOwner, http.MethodPost, "/v1/groups", `{"name":"Squad"}`).Code)
+	id := extractFirstGroupID(t, db, owner)
+
+	rStranger := mountFor(stranger, db)
+	wc := httptest.NewRecorder()
+	rStranger.ServeHTTP(wc, httptest.NewRequest(http.MethodGet, "/v1/groups/"+id.String()+"/code", nil))
+	require.Equal(t, http.StatusForbidden, wc.Code)
+	wp := httptest.NewRecorder()
+	rStranger.ServeHTTP(wp, httptest.NewRequest(http.MethodGet, "/v1/groups/"+id.String()+"/progress", nil))
+	require.Equal(t, http.StatusForbidden, wp.Code)
 }

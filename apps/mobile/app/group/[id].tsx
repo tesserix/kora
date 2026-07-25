@@ -75,7 +75,7 @@ export default function GroupDetail() {
               <AppText style={{ flex: 1, fontSize: 15 }}>{m.display_name}</AppText>
               <AppText muted style={{ fontSize: 11 }}>{m.role}</AppText>
               {isOwner && m.role !== "owner" ? (
-                <Pressable accessibilityRole="button" accessibilityLabel={`Remove ${m.display_name}`} onPress={() => removeMember.mutate({ groupId: id, userId: m.id })}>
+                <Pressable accessibilityRole="button" accessibilityLabel={`Remove ${m.display_name}`} disabled={removeMember.isPending} onPress={() => removeMember.mutate({ groupId: id, userId: m.id })}>
                   <AppText style={{ color: colors.destructive, fontSize: 13 }}>Remove</AppText>
                 </Pressable>
               ) : null}
@@ -85,9 +85,9 @@ export default function GroupDetail() {
         </View>
 
         {isOwner ? (
-          <Button title="Delete group" variant="ghost" onPress={onDelete} />
+          <Button title="Delete group" variant="ghost" onPress={onDelete} disabled={del.isPending} />
         ) : (
-          <Button title="Leave group" variant="ghost" onPress={onLeave} />
+          <Button title="Leave group" variant="ghost" onPress={onLeave} disabled={!profile.data?.id || leave.isPending} />
         )}
       </View>
     </ScrollView>

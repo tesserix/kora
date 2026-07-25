@@ -69,3 +69,32 @@ func TestInviteRequiresFriendship(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, isM)
 }
+
+func TestOwnerOnlyMutationsRejectMembers(t *testing.T) {
+	db := testDB(t)
+	owner := seedUser(t, db, "Owner")
+	member := seedUser(t, db, "Member")
+	other := seedUser(t, db, "Other")
+	repo := NewRepository(db)
+	svc := NewService(repo, stubFriends{}, seqCode())
+	g, err := svc.Create(context.Background(), owner, "Squad")
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Exec("DELETE FROM groups WHERE id = ?", g.ID) })
+	_, err = svc.JoinByCode(context.Background(), member, g.InviteCode)
+	require.NoError(t, err)
+
+	// a member cannot invite / remove / delete
+	require.ErrorIs(t, svc.InviteFriend(context.Background(), member, g.ID, other), ErrForbidden)
+	require.ErrorIs(t, svc.RemoveMember(context.Background(), member, g.ID, other), ErrForbidden)
+	require.ErrorIs(t, svc.Delete(context.Background(), member, g.ID), ErrForbidden)
+	// the owner cannot remove themselves via RemoveMember (delete instead)
+	require.ErrorIs(t, svc.RemoveMember(context.Background(), owner, g.ID, owner), ErrForbidden)
+}
+
+func TestJoinByCodeUnknownIsNotFound(t *testing.T) {
+	db := testDB(t)
+	joiner := seedUser(t, db, "Joiner")
+	svc := NewService(NewRepository(db), stubFriends{}, seqCode())
+	_, err := svc.JoinByCode(context.Background(), joiner, "NOSUCHCODE")
+	require.ErrorIs(t, err, ErrNotFound)
+}
