@@ -4,8 +4,11 @@ import type { MealSlot } from "@/lib/mealSlot";
 import type {
   Candidate,
   DashboardSummary,
+  Friend,
+  FriendRequests,
   FoodItem,
   FoodLog,
+  MyFriendCode,
   OnboardingInput,
   Profile,
   Resolution,
@@ -197,5 +200,65 @@ export function useResolveVoice() {
       form.append("file", { uri: file.uri, name: file.name, type: file.type } as unknown as Blob);
       return apiFetchMultipart("/v1/resolve/voice", form) as Promise<Resolution>;
     },
+  });
+}
+
+export function useFriends() {
+  return useQuery({
+    queryKey: ["friends"],
+    queryFn: () => apiFetch("/v1/friends") as Promise<Friend[]>,
+  });
+}
+
+export function useFriendRequests() {
+  return useQuery({
+    queryKey: ["friend-requests"],
+    queryFn: () => apiFetch("/v1/friends/requests") as Promise<FriendRequests>,
+  });
+}
+
+export function useSendFriendRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { email?: string; code?: string }) =>
+      apiFetch("/v1/friends/requests", { method: "POST", body: JSON.stringify(input) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["friend-requests"] });
+      qc.invalidateQueries({ queryKey: ["friends"] });
+    },
+  });
+}
+
+export function useAcceptRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiFetch(`/v1/friends/requests/${id}/accept`, { method: "POST" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["friend-requests"] });
+      qc.invalidateQueries({ queryKey: ["friends"] });
+    },
+  });
+}
+
+export function useDeclineRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiFetch(`/v1/friends/requests/${id}/decline`, { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["friend-requests"] }),
+  });
+}
+
+export function useUnfriend() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (userId: string) => apiFetch(`/v1/friends/${userId}`, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["friends"] }),
+  });
+}
+
+export function useMyFriendCode() {
+  return useQuery({
+    queryKey: ["friend-code"],
+    queryFn: () => apiFetch("/v1/friends/code") as Promise<MyFriendCode>,
   });
 }

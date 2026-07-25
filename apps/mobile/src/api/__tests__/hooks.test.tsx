@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { apiFetch, apiFetchMultipart } from "@/lib/api";
 import {
+  useAcceptRequest,
   useAddWater,
   useAddWeight,
   useDeleteLog,
@@ -14,6 +15,8 @@ import {
   useResolvePhoto,
   useResolveText,
   useResolveVoice,
+  useSendFriendRequest,
+  useUnfriend,
   useWeightSeries,
 } from "../hooks";
 
@@ -199,4 +202,31 @@ test("useWeightSeries GETs /v1/weight with a ~30d from/to for 1M", async () => {
   const to = new Date(params.get("to") as string).getTime();
   const days = (to - from) / (24 * 60 * 60 * 1000);
   expect(Math.round(days)).toBe(30);
+});
+
+test("useSendFriendRequest POSTs the body to /v1/friends/requests", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({ id: "f1", status: "pending" });
+  const { result } = await renderHook(() => useSendFriendRequest(), { wrapper });
+  result.current.mutate({ code: "ABC123XY" });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(apiFetch).toHaveBeenCalledWith("/v1/friends/requests", {
+    method: "POST",
+    body: JSON.stringify({ code: "ABC123XY" }),
+  });
+});
+
+test("useAcceptRequest POSTs /v1/friends/requests/:id/accept", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({ accepted: true });
+  const { result } = await renderHook(() => useAcceptRequest(), { wrapper });
+  result.current.mutate("req1");
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(apiFetch).toHaveBeenCalledWith("/v1/friends/requests/req1/accept", { method: "POST" });
+});
+
+test("useUnfriend DELETEs /v1/friends/:userId", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({ removed: true });
+  const { result } = await renderHook(() => useUnfriend(), { wrapper });
+  result.current.mutate("u9");
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(apiFetch).toHaveBeenCalledWith("/v1/friends/u9", { method: "DELETE" });
 });

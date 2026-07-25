@@ -96,3 +96,23 @@ export interface Resolution {
   kcal_high?: number;
   provenance: string;
 }
+
+export interface Friend {
+  id: string;
+  display_name: string;
+}
+
+export interface FriendRequest {
+  id: string;
+  user: Friend;
+}
+
+export interface FriendRequests {
+  incoming: FriendRequest[];
+  outgoing: FriendRequest[];
+}
+
+export interface MyFriendCode {
+  code: string;
+  link: string;
+}
