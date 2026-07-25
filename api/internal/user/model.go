@@ -15,11 +15,12 @@ import (
 const DefaultTimezone = "Australia/Sydney"
 
 type User struct {
-	ID          uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	FirebaseUID string    `gorm:"uniqueIndex" json:"-"`
-	Email       string    `json:"email"`
-	DisplayName string    `json:"display_name"`
-	FriendCode  string    `json:"-"`
+	ID            uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	FirebaseUID   string    `gorm:"uniqueIndex" json:"-"`
+	Email         string    `json:"email"`
+	DisplayName   string    `json:"display_name"`
+	FriendCode    string    `json:"-"`
+	ShareProgress bool      `json:"share_progress"`
 
 	Sex            string     `json:"sex"`
 	BirthYear      int        `json:"birth_year"`

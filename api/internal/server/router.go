@@ -55,6 +55,7 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1 := r.Group("/v1", auth.Middleware(deps.Verifier))
 		v1.Use(user.ResolveMiddleware(userRepo))
 		v1.GET("/me", userHandler.Me)
+		v1.PATCH("/me/share-progress", userHandler.UpdateShareProgress)
 		v1.POST("/onboarding", onboardingHandler.Submit)
 
 		foodRepo := nutrition.NewRepository(deps.DB)

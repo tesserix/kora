@@ -82,6 +82,13 @@ func (r Repository) SetFriendCode(ctx context.Context, id uuid.UUID, code string
 	return nil
 }
 
+func (r Repository) SetShareProgress(ctx context.Context, id uuid.UUID, share bool) error {
+	if err := r.db.WithContext(ctx).Model(&User{}).Where("id = ?", id).Update("share_progress", share).Error; err != nil {
+		return fmt.Errorf("user: set share progress: %w", err)
+	}
+	return nil
+}
+
 func (r Repository) IDByFirebaseUID(ctx context.Context, firebaseUID string) (uuid.UUID, error) {
 	var u User
 	if err := r.db.WithContext(ctx).

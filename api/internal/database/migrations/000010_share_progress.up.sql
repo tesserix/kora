@@ -1,0 +1,1 @@
+ALTER TABLE users ADD COLUMN share_progress BOOLEAN NOT NULL DEFAULT false;
