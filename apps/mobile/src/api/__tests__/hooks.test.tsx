@@ -172,6 +172,20 @@ test("useRepeatLog POSTs /v1/logs/:id/repeat with no body", async () => {
   expect(apiFetch).toHaveBeenCalledWith("/v1/logs/log1/repeat", { method: "POST" });
 });
 
+test("useRepeatLog invalidates logs and dashboard on success", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({ id: "log2" });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const invalidateSpy = jest.spyOn(client, "invalidateQueries");
+  const localWrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+  const { result } = await renderHook(() => useRepeatLog(), { wrapper: localWrapper });
+  result.current.mutate("log1");
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["logs"] });
+  expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["dashboard"] });
+});
+
 test("useWeightSeries GETs /v1/weight with a ~30d from/to for 1M", async () => {
   (apiFetch as jest.Mock).mockResolvedValueOnce([]);
   const { result } = await renderHook(() => useWeightSeries("1M"), { wrapper });

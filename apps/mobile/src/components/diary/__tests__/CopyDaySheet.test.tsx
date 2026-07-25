@@ -2,8 +2,9 @@ import { render, fireEvent } from "@testing-library/react-native";
 import { CopyDaySheet } from "../CopyDaySheet";
 
 const mockCopyMutate = jest.fn();
-jest.mock("@/api/hooks", () => ({ useCopyDay: () => ({ mutate: mockCopyMutate, isPending: false }) }));
-beforeEach(() => mockCopyMutate.mockClear());
+let mockCopyPending = false;
+jest.mock("@/api/hooks", () => ({ useCopyDay: () => ({ mutate: mockCopyMutate, isPending: mockCopyPending }) }));
+beforeEach(() => { mockCopyMutate.mockClear(); mockCopyPending = false; });
 
 const iso = (d: Date) => d.toLocaleDateString("en-CA");
 
@@ -47,4 +48,13 @@ test("copy error shows an inline message", async () => {
   );
   await fireEvent.press(getAllByLabelText(/^Copy from /)[0]);
   expect(await findByText("Couldn't copy. Try again.")).toBeTruthy();
+});
+
+test("chips are disabled while a copy is pending", async () => {
+  mockCopyPending = true;
+  const { getAllByLabelText } = await render(
+    <CopyDaySheet visible targetDate="2000-01-01" onClose={jest.fn()} />,
+  );
+  await fireEvent.press(getAllByLabelText(/^Copy from /)[0]);
+  expect(mockCopyMutate).not.toHaveBeenCalled();
 });

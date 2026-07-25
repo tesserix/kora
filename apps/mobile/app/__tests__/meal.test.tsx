@@ -6,6 +6,7 @@ const mockEditMutate = jest.fn();
 const mockDeleteMutate = jest.fn();
 const mockRepeatMutate = jest.fn();
 const mockBack = jest.fn();
+let mockRepeatPending = false;
 
 jest.mock("expo-router", () => ({
   router: { back: () => mockBack() },
@@ -18,10 +19,10 @@ jest.mock("expo-router", () => ({
 jest.mock("@/api/hooks", () => ({
   useEditLog: () => ({ mutate: mockEditMutate, isPending: false }),
   useDeleteLog: () => ({ mutate: mockDeleteMutate, isPending: false }),
-  useRepeatLog: () => ({ mutate: mockRepeatMutate, isPending: false }),
+  useRepeatLog: () => ({ mutate: mockRepeatMutate, isPending: mockRepeatPending }),
 }));
 
-beforeEach(() => { mockEditMutate.mockClear(); mockDeleteMutate.mockClear(); mockRepeatMutate.mockClear(); mockBack.mockClear(); });
+beforeEach(() => { mockEditMutate.mockClear(); mockDeleteMutate.mockClear(); mockRepeatMutate.mockClear(); mockBack.mockClear(); mockRepeatPending = false; });
 
 test("Save is disabled until something changes, then PATCHes only changed fields", async () => {
   const { getByText, getByLabelText } = await render(<MealDetail />);
@@ -62,4 +63,11 @@ test("Repeat calls useRepeatLog, navigates back and confirms", async () => {
   expect(mockBack).toHaveBeenCalled();
   expect(alertSpy).toHaveBeenCalled();
   alertSpy.mockRestore();
+});
+
+test("Repeat is disabled while a repeat is pending", async () => {
+  mockRepeatPending = true;
+  const { getByLabelText } = await render(<MealDetail />);
+  await fireEvent.press(getByLabelText("Repeat entry"));
+  expect(mockRepeatMutate).not.toHaveBeenCalled();
 });
