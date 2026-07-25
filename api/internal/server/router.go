@@ -73,6 +73,8 @@ func NewRouter(deps Deps) *gin.Engine {
 		trackingHandler := tracking.NewHandler(trackingRepo)
 		v1.POST("/water", trackingHandler.Add)
 		v1.GET("/water", trackingHandler.DayTotal)
+		v1.POST("/weight", trackingHandler.AddWeight)
+		v1.GET("/weight", trackingHandler.ListWeight)
 
 		dashboardHandler := dashboard.NewHandler(dashboard.NewService(logRepo, trackingRepo, deps.DB))
 		v1.GET("/dashboard", dashboardHandler.Get)

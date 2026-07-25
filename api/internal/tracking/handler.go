@@ -68,3 +68,47 @@ func (h Handler) DayTotal(c *gin.Context) {
 	}
 	httpx.OK(c, gin.H{"volume_ml": total})
 }
+
+type addWeightRequest struct {
+	WeightKg float64   `json:"weight_kg"`
+	LoggedAt time.Time `json:"logged_at"`
+}
+
+func (h Handler) AddWeight(c *gin.Context) {
+	userID, ok := h.resolveUser(c)
+	if !ok {
+		return
+	}
+	var req addWeightRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Error(c, http.StatusBadRequest, "invalid_input", "malformed body")
+		return
+	}
+	e, err := h.repo.AddWeight(c.Request.Context(), userID, req.WeightKg, req.LoggedAt)
+	if err != nil {
+		httpx.RespondServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"data": e})
+}
+
+func (h Handler) ListWeight(c *gin.Context) {
+	userID, ok := h.resolveUser(c)
+	if !ok {
+		return
+	}
+	to, err := time.Parse(time.RFC3339, c.Query("to"))
+	if err != nil {
+		to = time.Now()
+	}
+	from, err := time.Parse(time.RFC3339, c.Query("from"))
+	if err != nil {
+		from = to.AddDate(-1, 0, 0)
+	}
+	entries, err := h.repo.WeightSeries(c.Request.Context(), userID, from, to)
+	if err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not load weight series")
+		return
+	}
+	httpx.OK(c, entries)
+}
