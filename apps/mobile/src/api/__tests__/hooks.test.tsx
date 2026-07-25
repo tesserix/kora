@@ -6,12 +6,17 @@ import {
   useAcceptRequest,
   useAddWater,
   useAddWeight,
+  useCreateChallenge,
   useCreateGroup,
+  useDeleteChallenge,
   useDeleteLog,
   useEditLog,
   useFoodSearch,
   useFriendsProgress,
+  useGroupChallenges,
+  useJoinChallenge,
   useJoinGroup,
+  useLeaveChallenge,
   useLeaveGroup,
   useProfile,
   useRepeatLog,
@@ -276,4 +281,46 @@ test("useLeaveGroup DELETEs /v1/groups/:id/members/:userId", async () => {
   result.current.mutate({ groupId: "g1", userId: "u1" });
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
   expect(apiFetch).toHaveBeenCalledWith("/v1/groups/g1/members/u1", { method: "DELETE" });
+});
+
+test("useGroupChallenges fetches /v1/groups/:id/challenges", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce([]);
+  const { result } = await renderHook(() => useGroupChallenges("g1"), { wrapper });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(apiFetch).toHaveBeenCalledWith("/v1/groups/g1/challenges");
+});
+
+test("useCreateChallenge POSTs title/metric/duration", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({ id: "c1" });
+  const { result } = await renderHook(() => useCreateChallenge(), { wrapper });
+  result.current.mutate({ groupId: "g1", title: "Streak", metric: "logged", duration: "1w" });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(apiFetch).toHaveBeenCalledWith("/v1/groups/g1/challenges", {
+    method: "POST",
+    body: JSON.stringify({ title: "Streak", metric: "logged", duration: "1w" }),
+  });
+});
+
+test("useJoinChallenge POSTs to /v1/challenges/:cid/join", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({ joined: true });
+  const { result } = await renderHook(() => useJoinChallenge(), { wrapper });
+  result.current.mutate({ challengeId: "c1", groupId: "g1" });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(apiFetch).toHaveBeenCalledWith("/v1/challenges/c1/join", { method: "POST" });
+});
+
+test("useLeaveChallenge DELETEs /v1/challenges/:cid/join", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({ left: true });
+  const { result } = await renderHook(() => useLeaveChallenge(), { wrapper });
+  result.current.mutate({ challengeId: "c1", groupId: "g1" });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(apiFetch).toHaveBeenCalledWith("/v1/challenges/c1/join", { method: "DELETE" });
+});
+
+test("useDeleteChallenge DELETEs /v1/challenges/:cid", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({ deleted: true });
+  const { result } = await renderHook(() => useDeleteChallenge(), { wrapper });
+  result.current.mutate({ challengeId: "c1", groupId: "g1" });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(apiFetch).toHaveBeenCalledWith("/v1/challenges/c1", { method: "DELETE" });
 });

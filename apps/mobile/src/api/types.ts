@@ -168,3 +168,36 @@ export interface GroupCode {
   code: string;
   link: string;
 }
+
+export type Metric = "on_target" | "logged";
+export type ChallengeStatus = "upcoming" | "active" | "ended";
+
+export interface ChallengeSummary {
+  id: string;
+  title: string;
+  metric: Metric;
+  status: ChallengeStatus;
+  start_date: string;
+  end_date: string;
+  participant_count: number;
+  joined: boolean;
+}
+
+export interface ChallengeStanding {
+  user_id: string;
+  display_name: string;
+  score: number;
+}
+
+export interface ChallengeDetail {
+  id: string;
+  title: string;
+  metric: Metric;
+  status: ChallengeStatus;
+  start_date: string;
+  end_date: string;
+  joined: boolean;
+  can_delete: boolean;
+  standings: ChallengeStanding[];
+  winner?: ChallengeStanding;
+}

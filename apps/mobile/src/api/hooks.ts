@@ -3,6 +3,8 @@ import { apiFetch, apiFetchMultipart } from "@/lib/api";
 import type { MealSlot } from "@/lib/mealSlot";
 import type {
   Candidate,
+  ChallengeDetail,
+  ChallengeSummary,
   DashboardSummary,
   Friend,
   FriendRequests,
@@ -13,6 +15,7 @@ import type {
   GroupDetail,
   GroupProgress,
   GroupSummary,
+  Metric,
   MyFriendCode,
   OnboardingInput,
   Profile,
@@ -345,5 +348,63 @@ export function useDeleteGroup() {
   return useMutation({
     mutationFn: (groupId: string) => apiFetch(`/v1/groups/${groupId}`, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["groups"] }),
+  });
+}
+
+export function useGroupChallenges(groupId: string) {
+  return useQuery({
+    queryKey: ["group-challenges", groupId],
+    queryFn: () => apiFetch(`/v1/groups/${groupId}/challenges`) as Promise<ChallengeSummary[]>,
+    enabled: !!groupId,
+  });
+}
+
+export function useChallenge(cid: string) {
+  return useQuery({
+    queryKey: ["challenge", cid],
+    queryFn: () => apiFetch(`/v1/challenges/${cid}`) as Promise<ChallengeDetail>,
+    enabled: !!cid,
+  });
+}
+
+export function useCreateChallenge() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ groupId, title, metric, duration }: { groupId: string; title: string; metric: Metric; duration: string }) =>
+      apiFetch(`/v1/groups/${groupId}/challenges`, { method: "POST", body: JSON.stringify({ title, metric, duration }) }) as Promise<ChallengeSummary>,
+    onSuccess: (_d, { groupId }) => qc.invalidateQueries({ queryKey: ["group-challenges", groupId] }),
+  });
+}
+
+export function useJoinChallenge() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ challengeId }: { challengeId: string; groupId: string }) =>
+      apiFetch(`/v1/challenges/${challengeId}/join`, { method: "POST" }),
+    onSuccess: (_d, { challengeId, groupId }) => {
+      qc.invalidateQueries({ queryKey: ["challenge", challengeId] });
+      qc.invalidateQueries({ queryKey: ["group-challenges", groupId] });
+    },
+  });
+}
+
+export function useLeaveChallenge() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ challengeId }: { challengeId: string; groupId: string }) =>
+      apiFetch(`/v1/challenges/${challengeId}/join`, { method: "DELETE" }),
+    onSuccess: (_d, { challengeId, groupId }) => {
+      qc.invalidateQueries({ queryKey: ["challenge", challengeId] });
+      qc.invalidateQueries({ queryKey: ["group-challenges", groupId] });
+    },
+  });
+}
+
+export function useDeleteChallenge() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ challengeId }: { challengeId: string; groupId: string }) =>
+      apiFetch(`/v1/challenges/${challengeId}`, { method: "DELETE" }),
+    onSuccess: (_d, { groupId }) => qc.invalidateQueries({ queryKey: ["group-challenges", groupId] }),
   });
 }
