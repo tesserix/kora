@@ -9,7 +9,7 @@ import { Stat } from "@/components/Stat";
 import { Numeral } from "@/components/Numeral";
 import { Overline } from "@/components/Overline";
 import { FoodTile } from "@/components/FoodTile";
-import { useDashboard, useDayLogs } from "@/api/hooks";
+import { useDashboard, useDayLogs, useAddWater } from "@/api/hooks";
 import { foodVisual } from "@/lib/foodVisual";
 import { useTheme } from "@/theme";
 import type { FoodLog } from "@/api/types";
@@ -38,6 +38,15 @@ export default function Diary() {
   const [selected, setSelected] = useState(todayIso);
   const dashboard = useDashboard(selected);
   const logs = useDayLogs(selected);
+  const addWater = useAddWater();
+  const [waterErr, setWaterErr] = useState<string | null>(null);
+  const addWaterMl = (volume_ml: number) => {
+    setWaterErr(null);
+    addWater.mutate(
+      { volume_ml, logged_at: `${selected}T12:00:00Z` },
+      { onError: () => setWaterErr("Couldn't add water. Try again.") },
+    );
+  };
 
   const d = dashboard.data;
   const total = Math.round(d?.consumed.kcal ?? 0);
@@ -81,6 +90,23 @@ export default function Diary() {
           <View style={{ height: 40, width: 1, backgroundColor: colors.border }} />
           <Stat label="Water" value={water} unit="L" />
         </Card>
+
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 16 }}>
+          <AppText muted style={{ fontSize: 12, marginRight: "auto" }}>Add water</AppText>
+          {[250, 500].map((ml) => (
+            <Pressable
+              key={ml}
+              accessibilityRole="button"
+              accessibilityLabel={`Add ${ml} ml water`}
+              disabled={addWater.isPending}
+              onPress={() => addWaterMl(ml)}
+              style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: radius.full, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, opacity: addWater.isPending ? 0.5 : 1 }}
+            >
+              <AppText style={{ fontSize: 12, fontWeight: "600", color: colors.primary }}>{`+${ml} ml`}</AppText>
+            </Pressable>
+          ))}
+        </View>
+        {waterErr ? <AppText style={{ color: colors.destructive, marginBottom: 12 }}>{waterErr}</AppText> : null}
 
         <Overline style={{ fontSize: 13, letterSpacing: 1 }}>Timeline</Overline>
         <View style={{ marginTop: 10, paddingLeft: 20 }}>
