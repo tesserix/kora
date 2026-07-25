@@ -122,7 +122,19 @@ export function useCopyDay() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: { from: string; to: string }) =>
-      apiFetch("/v1/logs/copy-day", { method: "POST", body: JSON.stringify(input) }),
+      apiFetch("/v1/logs/copy-day", { method: "POST", body: JSON.stringify(input) }) as Promise<{ copied: number }>,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["logs"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+  });
+}
+
+export function useRepeatLog() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch(`/v1/logs/${id}/repeat`, { method: "POST" }) as Promise<FoodLog>,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["logs"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });

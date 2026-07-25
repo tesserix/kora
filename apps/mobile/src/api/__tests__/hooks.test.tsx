@@ -9,6 +9,7 @@ import {
   useEditLog,
   useFoodSearch,
   useProfile,
+  useRepeatLog,
   useResolveBarcode,
   useResolvePhoto,
   useResolveText,
@@ -161,6 +162,14 @@ test("useAddWeight POSTs /v1/weight and invalidates weight", async () => {
     method: "POST",
     body: JSON.stringify({ weight_kg: 72.4, logged_at: undefined }),
   });
+});
+
+test("useRepeatLog POSTs /v1/logs/:id/repeat with no body", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({ id: "log2" });
+  const { result } = await renderHook(() => useRepeatLog(), { wrapper });
+  result.current.mutate("log1");
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(apiFetch).toHaveBeenCalledWith("/v1/logs/log1/repeat", { method: "POST" });
 });
 
 test("useWeightSeries GETs /v1/weight with a ~30d from/to for 1M", async () => {
