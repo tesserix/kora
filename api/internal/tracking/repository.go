@@ -48,3 +48,29 @@ func (r Repository) WaterTotalForDay(ctx context.Context, userID uuid.UUID, day 
 	}
 	return *total, nil
 }
+
+func (r Repository) AddWeight(ctx context.Context, userID uuid.UUID, weightKg float64, at time.Time) (WeightEntry, error) {
+	if weightKg <= 0 {
+		return WeightEntry{}, httpx.ValidationError{Message: "weight_kg must be positive"}
+	}
+	if at.IsZero() {
+		at = time.Now()
+	}
+	e := WeightEntry{UserID: userID, WeightKg: weightKg, LoggedAt: at}
+	if err := r.db.WithContext(ctx).Create(&e).Error; err != nil {
+		return WeightEntry{}, fmt.Errorf("tracking: add weight: %w", err)
+	}
+	return e, nil
+}
+
+func (r Repository) WeightSeries(ctx context.Context, userID uuid.UUID, from, to time.Time) ([]WeightEntry, error) {
+	entries := []WeightEntry{}
+	err := r.db.WithContext(ctx).
+		Where("user_id = ? AND logged_at >= ? AND logged_at < ?", userID, from, to).
+		Order("logged_at ASC").
+		Find(&entries).Error
+	if err != nil {
+		return nil, fmt.Errorf("tracking: weight series: %w", err)
+	}
+	return entries, nil
+}
