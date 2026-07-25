@@ -13,4 +13,4 @@ CREATE UNIQUE INDEX ux_friendships_pair ON friendships (
 CREATE INDEX ix_friendships_addressee ON friendships (addressee_id);
 
 ALTER TABLE users ADD COLUMN friend_code TEXT;
-CREATE UNIQUE INDEX ux_users_friend_code ON users (friend_code);
+CREATE UNIQUE INDEX ux_users_friend_code ON users (friend_code) WHERE friend_code <> '';

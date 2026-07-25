@@ -127,3 +127,15 @@ func TestUserLookupsAndFriendCode(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, id, byCode.ID)
 }
+
+func TestTwoUsersWithoutFriendCodeDoNotCollide(t *testing.T) {
+	db := testDB(t)
+	ur := user.NewRepository(db)
+	u1, err := ur.UpsertByFirebaseUID(context.Background(), "fc-a-"+uuid.NewString(), "fc-a@test.dev")
+	require.NoError(t, err)
+	u2, err := ur.UpsertByFirebaseUID(context.Background(), "fc-b-"+uuid.NewString(), "fc-b@test.dev")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		db.Exec("DELETE FROM users WHERE id IN (?, ?)", u1.ID, u2.ID)
+	})
+}
