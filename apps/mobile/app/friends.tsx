@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Alert, Pressable, ScrollView, View } from "react-native";
+import { Alert, Pressable, ScrollView, Switch, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppText } from "@/components/Text";
 import { ScreenHeader } from "@/components/ScreenHeader";
@@ -7,7 +7,17 @@ import { Button } from "@/components/Button";
 import { Icon } from "@/components/Icon";
 import { Overline } from "@/components/Overline";
 import { AddFriendSheet } from "@/components/social/AddFriendSheet";
-import { useFriends, useFriendRequests, useAcceptRequest, useDeclineRequest, useUnfriend } from "@/api/hooks";
+import { FriendsLeaderboard } from "@/components/social/FriendsLeaderboard";
+import {
+  useFriends,
+  useFriendRequests,
+  useAcceptRequest,
+  useDeclineRequest,
+  useUnfriend,
+  useProfile,
+  useSetShareProgress,
+  useFriendsProgress,
+} from "@/api/hooks";
 import { useTheme } from "@/theme";
 
 export default function Friends() {
@@ -18,7 +28,12 @@ export default function Friends() {
   const accept = useAcceptRequest();
   const decline = useDeclineRequest();
   const unfriend = useUnfriend();
+  const profile = useProfile();
+  const setShare = useSetShareProgress();
+  const compare = useFriendsProgress();
   const [addOpen, setAddOpen] = useState(false);
+
+  const shareOn = profile.data?.share_progress ?? false;
 
   const incoming = requests.data?.incoming ?? [];
   const list = friends.data ?? [];
@@ -35,6 +50,20 @@ export default function Friends() {
         <ScreenHeader overline="Your circle" title="Friends" />
         <View style={{ paddingHorizontal: 20, gap: 20 }}>
           <Button title="Add a friend" onPress={() => setAddOpen(true)} />
+
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 4 }}>
+            <View style={{ flex: 1 }}>
+              <AppText style={{ fontSize: 15, fontWeight: "600" }}>Share my progress</AppText>
+              <AppText muted style={{ fontSize: 12 }}>Friends can see your streak and on-target days.</AppText>
+            </View>
+            <Switch
+              accessibilityLabel="Share my progress"
+              value={shareOn}
+              onValueChange={(v) => setShare.mutate(v)}
+            />
+          </View>
+
+          <FriendsLeaderboard data={compare.data} />
 
           {incoming.length > 0 ? (
             <View style={{ gap: 10 }}>
