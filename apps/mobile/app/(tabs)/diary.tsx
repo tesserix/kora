@@ -9,6 +9,7 @@ import { Stat } from "@/components/Stat";
 import { Numeral } from "@/components/Numeral";
 import { Overline } from "@/components/Overline";
 import { FoodTile } from "@/components/FoodTile";
+import { CopyDaySheet } from "@/components/diary/CopyDaySheet";
 import { useDashboard, useDayLogs, useAddWater } from "@/api/hooks";
 import { foodVisual } from "@/lib/foodVisual";
 import { useTheme } from "@/theme";
@@ -40,6 +41,7 @@ export default function Diary() {
   const logs = useDayLogs(selected);
   const addWater = useAddWater();
   const [waterErr, setWaterErr] = useState<string | null>(null);
+  const [copyOpen, setCopyOpen] = useState(false);
   const addWaterMl = (volume_ml: number) => {
     setWaterErr(null);
     addWater.mutate(
@@ -58,6 +60,7 @@ export default function Diary() {
     router.push({ pathname: "/meal", params: { id: log.id, name: log.description, mealSlot: log.meal_slot, time: timeOf(log.logged_at), kcal: String(Math.round(log.kcal)), protein: String(Math.round(log.protein_g)), carbs: String(Math.round(log.carbs_g)), fat: String(Math.round(log.fat_g)), grams: String(Math.round(log.quantity_grams)) } });
 
   return (
+    <>
     <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
       <ScreenHeader overline="This week" title="Diary" />
 
@@ -111,7 +114,14 @@ export default function Diary() {
         <Overline style={{ fontSize: 13, letterSpacing: 1 }}>Timeline</Overline>
         <View style={{ marginTop: 10, paddingLeft: 20 }}>
           <View style={{ position: "absolute", left: 5, top: 6, bottom: 6, width: 2, backgroundColor: colors.border }} />
-          {logged.length === 0 ? <AppText muted style={{ paddingVertical: 12 }}>Nothing logged this day.</AppText> : null}
+          {logged.length === 0 ? (
+            <View style={{ paddingVertical: 12 }}>
+              <AppText muted>Nothing logged this day.</AppText>
+              <Pressable accessibilityRole="button" onPress={() => setCopyOpen(true)} style={{ marginTop: 8 }}>
+                <AppText style={{ color: colors.primary, fontWeight: "600" }}>Copy from another day</AppText>
+              </Pressable>
+            </View>
+          ) : null}
           {logged.map((log) => {
             const vis = foodVisual(log.description, log.meal_slot);
             return (
@@ -130,5 +140,7 @@ export default function Diary() {
         </View>
       </View>
     </ScrollView>
+    {copyOpen ? <CopyDaySheet visible targetDate={selected} onClose={() => setCopyOpen(false)} /> : null}
+    </>
   );
 }

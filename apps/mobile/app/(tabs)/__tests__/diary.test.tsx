@@ -15,3 +15,9 @@ test("Diary shows header, timeline and a logged meal", async () => {
   expect(await findByText("Timeline")).toBeTruthy();
   expect(await findByText("Grilled salmon")).toBeTruthy();
 });
+
+test("a day with logs does not show the Copy CTA", async () => {
+  const { queryByText, findByText } = await render(<Diary />);
+  await findByText("Grilled salmon"); // ensure render settled
+  expect(queryByText("Copy from another day")).toBeNull();
+});
