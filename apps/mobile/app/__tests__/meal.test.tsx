@@ -4,6 +4,7 @@ import MealDetail from "../meal";
 
 const mockEditMutate = jest.fn();
 const mockDeleteMutate = jest.fn();
+const mockRepeatMutate = jest.fn();
 const mockBack = jest.fn();
 
 jest.mock("expo-router", () => ({
@@ -17,9 +18,10 @@ jest.mock("expo-router", () => ({
 jest.mock("@/api/hooks", () => ({
   useEditLog: () => ({ mutate: mockEditMutate, isPending: false }),
   useDeleteLog: () => ({ mutate: mockDeleteMutate, isPending: false }),
+  useRepeatLog: () => ({ mutate: mockRepeatMutate, isPending: false }),
 }));
 
-beforeEach(() => { mockEditMutate.mockClear(); mockDeleteMutate.mockClear(); mockBack.mockClear(); });
+beforeEach(() => { mockEditMutate.mockClear(); mockDeleteMutate.mockClear(); mockRepeatMutate.mockClear(); mockBack.mockClear(); });
 
 test("Save is disabled until something changes, then PATCHes only changed fields", async () => {
   const { getByText, getByLabelText } = await render(<MealDetail />);
@@ -45,5 +47,19 @@ test("Delete confirms then calls useDeleteLog", async () => {
   const { getByLabelText } = await render(<MealDetail />);
   await fireEvent.press(getByLabelText("Delete entry"));
   expect(mockDeleteMutate).toHaveBeenCalledWith("log1", expect.objectContaining({ onSuccess: expect.any(Function) }));
+  alertSpy.mockRestore();
+});
+
+test("Repeat calls useRepeatLog, navigates back and confirms", async () => {
+  const alertSpy = jest.spyOn(Alert, "alert").mockImplementation(() => {});
+  mockRepeatMutate.mockImplementation((_id, opts) => opts.onSuccess?.());
+  const { getByLabelText } = await render(<MealDetail />);
+  await fireEvent.press(getByLabelText("Repeat entry"));
+  expect(mockRepeatMutate).toHaveBeenCalledWith(
+    "log1",
+    expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
+  );
+  expect(mockBack).toHaveBeenCalled();
+  expect(alertSpy).toHaveBeenCalled();
   alertSpy.mockRestore();
 });

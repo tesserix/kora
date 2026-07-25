@@ -11,7 +11,7 @@ import { Numeral } from "@/components/Numeral";
 import { Overline } from "@/components/Overline";
 import { foodVisual } from "@/lib/foodVisual";
 import { tileFaint, MACRO } from "@/lib/hue";
-import { useEditLog, useDeleteLog, type EditLogInput } from "@/api/hooks";
+import { useEditLog, useDeleteLog, useRepeatLog, type EditLogInput } from "@/api/hooks";
 import type { MealSlot } from "@/lib/mealSlot";
 import { useTheme } from "@/theme";
 
@@ -35,7 +35,8 @@ export default function MealDetail() {
 
   const editLog = useEditLog();
   const deleteLog = useDeleteLog();
-  const busy = editLog.isPending || deleteLog.isPending;
+  const repeatLog = useRepeatLog();
+  const busy = editLog.isPending || deleteLog.isPending || repeatLog.isPending;
 
   const scale = (base: number) => (baseGrams > 0 ? Math.round(base * grams / baseGrams) : base);
   const kcal = scale(baseKcal);
@@ -73,6 +74,18 @@ export default function MealDetail() {
           }),
       },
     ]);
+  };
+
+  const onRepeat = () => {
+    if (busy) return;
+    setErr(null);
+    repeatLog.mutate(p.id, {
+      onSuccess: () => {
+        router.back();
+        Alert.alert("Logged again", "Added to today's diary.");
+      },
+      onError: () => setErr("Couldn't repeat. Try again."),
+    });
   };
 
   return (
@@ -133,6 +146,15 @@ export default function MealDetail() {
             style={{ width: 48, height: 48, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center", opacity: busy ? 0.5 : 1 }}
           >
             <Icon name="trash-2" size={18} color={colors.destructive} />
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Repeat entry"
+            disabled={busy}
+            onPress={onRepeat}
+            style={{ width: 48, height: 48, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center", opacity: busy ? 0.5 : 1 }}
+          >
+            <Icon name="repeat" size={18} color={colors.foreground} />
           </Pressable>
           <Button title="Save changes" onPress={onSave} disabled={!dirty || busy} style={{ flex: 1 }} />
         </View>
