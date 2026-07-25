@@ -3,6 +3,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { apiFetch, apiFetchMultipart } from "@/lib/api";
 import {
+  useAddWater,
+  useDeleteLog,
+  useEditLog,
   useFoodSearch,
   useProfile,
   useResolveBarcode,
@@ -115,4 +118,34 @@ test("useResolveVoice builds FormData and posts to /v1/resolve/voice", async () 
   expect(apiFetchMultipart).toHaveBeenCalledWith("/v1/resolve/voice", expect.any(FormData));
   expect(appendSpy).toHaveBeenCalledWith("file", { uri: "file:///voice.m4a", name: "voice.m4a", type: "audio/m4a" });
   expect(result.current.data).toEqual(resolution);
+});
+
+test("useEditLog PATCHes /v1/logs/:id with only the patch fields and invalidates logs+dashboard", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({ id: "log1" });
+  const { result } = await renderHook(() => useEditLog(), { wrapper });
+  result.current.mutate({ id: "log1", quantity_grams: 120, meal_slot: "lunch" });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(apiFetch).toHaveBeenCalledWith("/v1/logs/log1", {
+    method: "PATCH",
+    body: JSON.stringify({ quantity_grams: 120, meal_slot: "lunch" }),
+  });
+});
+
+test("useDeleteLog DELETEs /v1/logs/:id", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({ deleted: true });
+  const { result } = await renderHook(() => useDeleteLog(), { wrapper });
+  result.current.mutate("log9");
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(apiFetch).toHaveBeenCalledWith("/v1/logs/log9", { method: "DELETE" });
+});
+
+test("useAddWater POSTs /v1/water with volume_ml and logged_at", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({});
+  const { result } = await renderHook(() => useAddWater(), { wrapper });
+  result.current.mutate({ volume_ml: 250, logged_at: "2026-07-25T12:00:00Z" });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(apiFetch).toHaveBeenCalledWith("/v1/water", {
+    method: "POST",
+    body: JSON.stringify({ volume_ml: 250, logged_at: "2026-07-25T12:00:00Z" }),
+  });
 });

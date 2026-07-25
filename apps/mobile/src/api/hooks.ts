@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, apiFetchMultipart } from "@/lib/api";
+import type { MealSlot } from "@/lib/mealSlot";
 import type {
   Candidate,
   DashboardSummary,
@@ -81,9 +82,38 @@ export function useDashboard(date: string) {
 export function useAddWater() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (volume_ml: number) =>
-      apiFetch("/v1/water", { method: "POST", body: JSON.stringify({ volume_ml }) }),
+    mutationFn: ({ volume_ml, logged_at }: { volume_ml: number; logged_at?: string }) =>
+      apiFetch("/v1/water", { method: "POST", body: JSON.stringify({ volume_ml, logged_at }) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["dashboard"] }),
+  });
+}
+
+export type EditLogInput = {
+  id: string;
+  meal_slot?: MealSlot;
+  quantity_grams?: number;
+};
+
+export function useEditLog() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...patch }: EditLogInput) =>
+      apiFetch(`/v1/logs/${id}`, { method: "PATCH", body: JSON.stringify(patch) }) as Promise<FoodLog>,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["logs"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+  });
+}
+
+export function useDeleteLog() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiFetch(`/v1/logs/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["logs"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+    },
   });
 }
 
