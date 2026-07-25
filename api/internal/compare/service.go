@@ -45,6 +45,35 @@ type Result struct {
 	Friends []FriendProgress `json:"friends"`
 }
 
+// Member is the minimal per-user input to the consent-gated leaderboard.
+type Member struct {
+	ID            uuid.UUID
+	DisplayName   string
+	ShareProgress bool
+	TargetKcal    float64
+}
+
+// ProgressForMembers is the single consent gate: a member's metrics are
+// computed ONLY when ShareProgress is true; otherwise the metric pointers
+// stay nil and serialize away (omitempty).
+func (s Service) ProgressForMembers(ctx context.Context, day time.Time, loc *time.Location, members []Member) ([]FriendProgress, error) {
+	out := make([]FriendProgress, 0, len(members))
+	for _, m := range members {
+		fp := FriendProgress{ID: m.ID, DisplayName: m.DisplayName, Sharing: m.ShareProgress}
+		if m.ShareProgress {
+			metrics, err := progress.Compute(ctx, s.logs, m.ID, m.TargetKcal, day, loc)
+			if err != nil {
+				return nil, err
+			}
+			streak, adh := metrics.StreakDays, metrics.AdherenceDays
+			fp.StreakDays = &streak
+			fp.AdherenceDays = &adh
+		}
+		out = append(out, fp)
+	}
+	return out, nil
+}
+
 func (s Service) Compare(ctx context.Context, userID uuid.UUID, day time.Time, loc *time.Location) (Result, error) {
 	me, err := s.users.ByID(ctx, userID)
 	if err != nil {
@@ -58,19 +87,13 @@ func (s Service) Compare(ctx context.Context, userID uuid.UUID, day time.Time, l
 	if err != nil {
 		return Result{}, err
 	}
-	friends := make([]FriendProgress, 0, len(rows))
+	members := make([]Member, 0, len(rows))
 	for _, row := range rows {
-		fp := FriendProgress{ID: row.ID, DisplayName: row.DisplayName, Sharing: row.ShareProgress}
-		if row.ShareProgress {
-			m, err := progress.Compute(ctx, s.logs, row.ID, row.TargetKcal, day, loc)
-			if err != nil {
-				return Result{}, err
-			}
-			streak, adh := m.StreakDays, m.AdherenceDays
-			fp.StreakDays = &streak
-			fp.AdherenceDays = &adh
-		}
-		friends = append(friends, fp)
+		members = append(members, Member{ID: row.ID, DisplayName: row.DisplayName, ShareProgress: row.ShareProgress, TargetKcal: row.TargetKcal})
+	}
+	friends, err := s.ProgressForMembers(ctx, day, loc, members)
+	if err != nil {
+		return Result{}, err
 	}
 	return Result{Me: meMetrics, Friends: friends}, nil
 }
