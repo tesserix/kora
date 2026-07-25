@@ -9,6 +9,7 @@ import type {
   OnboardingInput,
   Profile,
   Resolution,
+  WeightEntry,
 } from "./types";
 
 type ResolveFile = {
@@ -150,6 +151,29 @@ export function useResolvePhoto() {
       // React Native FormData file shape:
       form.append("file", { uri: file.uri, name: file.name, type: file.type } as unknown as Blob);
       return apiFetchMultipart("/v1/resolve/photo", form) as Promise<Resolution>;
+    },
+  });
+}
+
+export function useAddWeight() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ weight_kg, logged_at }: { weight_kg: number; logged_at?: string }) =>
+      apiFetch("/v1/weight", { method: "POST", body: JSON.stringify({ weight_kg, logged_at }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["weight"] }),
+  });
+}
+
+const WEIGHT_RANGE_DAYS = { "1W": 7, "1M": 30, "3M": 90, "1Y": 365 } as const;
+export type WeightRange = keyof typeof WEIGHT_RANGE_DAYS;
+
+export function useWeightSeries(range: WeightRange) {
+  return useQuery({
+    queryKey: ["weight", range],
+    queryFn: () => {
+      const to = new Date();
+      const from = new Date(to.getTime() - WEIGHT_RANGE_DAYS[range] * 24 * 60 * 60 * 1000);
+      return apiFetch(`/v1/weight?from=${from.toISOString()}&to=${to.toISOString()}`) as Promise<WeightEntry[]>;
     },
   });
 }

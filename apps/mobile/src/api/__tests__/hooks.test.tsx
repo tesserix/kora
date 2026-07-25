@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { apiFetch, apiFetchMultipart } from "@/lib/api";
 import {
   useAddWater,
+  useAddWeight,
   useDeleteLog,
   useEditLog,
   useFoodSearch,
@@ -12,6 +13,7 @@ import {
   useResolvePhoto,
   useResolveText,
   useResolveVoice,
+  useWeightSeries,
 } from "../hooks";
 
 jest.mock("@/lib/api", () => ({
@@ -148,4 +150,30 @@ test("useAddWater POSTs /v1/water with volume_ml and logged_at", async () => {
     method: "POST",
     body: JSON.stringify({ volume_ml: 250, logged_at: "2026-07-25T12:00:00Z" }),
   });
+});
+
+test("useAddWeight POSTs /v1/weight and invalidates weight", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({ id: "w1" });
+  const { result } = await renderHook(() => useAddWeight(), { wrapper });
+  result.current.mutate({ weight_kg: 72.4 });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(apiFetch).toHaveBeenCalledWith("/v1/weight", {
+    method: "POST",
+    body: JSON.stringify({ weight_kg: 72.4, logged_at: undefined }),
+  });
+});
+
+test("useWeightSeries GETs /v1/weight with a ~30d from/to for 1M", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce([]);
+  const { result } = await renderHook(() => useWeightSeries("1M"), { wrapper });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  // apiFetch is a shared mock across this file's tests (no clearAllMocks between them),
+  // so pull the most recent call rather than assuming index 0.
+  const calls = (apiFetch as jest.Mock).mock.calls;
+  const url = calls[calls.length - 1][0] as string;
+  const params = new URLSearchParams(url.split("?")[1]);
+  const from = new Date(params.get("from") as string).getTime();
+  const to = new Date(params.get("to") as string).getTime();
+  const days = (to - from) / (24 * 60 * 60 * 1000);
+  expect(Math.round(days)).toBe(30);
 });

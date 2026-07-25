@@ -8,6 +8,7 @@ export type Profile = {
   target_carbs_g: number;
   target_fat_g: number;
   onboarded_at: string | null;
+  weight_kg: number;
 };
 
 export type FoodItem = {
@@ -68,6 +69,12 @@ export type OnboardingInput = {
   weight_kg: number;
   activity_level: "sedentary" | "light" | "moderate" | "active" | "very_active";
   goal: "fat_loss" | "maintenance" | "muscle_gain";
+};
+
+export type WeightEntry = {
+  id: string;
+  weight_kg: number;
+  logged_at: string;
 };
 
 export type ResolveTier = "auto" | "confirm" | "follow_up";
