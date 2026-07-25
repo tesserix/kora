@@ -5,6 +5,7 @@ package progress
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"time"
 
@@ -63,4 +64,35 @@ func Compute(ctx context.Context, logs LogSource, userID uuid.UUID, targetKcal f
 		}
 	}
 	return Metrics{StreakDays: streak, AdherenceDays: adherence, AdherenceWindow: adherenceWindow}, nil
+}
+
+// WindowScore counts, over the inclusive local-day window [from, to], either
+// distinct logged days ("logged") or on-target days ("on_target": kcal within
+// ±10% of targetKcal). It reads only DailyKcal aggregates, so no fabricated
+// nutrition can enter the score. from/to are calendar dates (the challenge
+// window); their Y/M/D are re-anchored to loc.
+func WindowScore(ctx context.Context, logs LogSource, userID uuid.UUID, metric string, targetKcal float64, from, to time.Time, loc *time.Location) (int, error) {
+	startLocal := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, loc)
+	endLocal := time.Date(to.Year(), to.Month(), to.Day(), 0, 0, 0, 0, loc)
+	kcalByDay, err := logs.DailyKcal(ctx, userID, startLocal, endLocal.AddDate(0, 0, 1), loc)
+	if err != nil {
+		return 0, err
+	}
+	switch metric {
+	case "logged":
+		return len(kcalByDay), nil
+	case "on_target":
+		count := 0
+		if targetKcal > 0 {
+			for d := startLocal; !d.After(endLocal); d = d.AddDate(0, 0, 1) {
+				key := d.Format("2006-01-02")
+				if math.Abs(kcalByDay[key]-targetKcal) <= adherenceBand*targetKcal {
+					count++
+				}
+			}
+		}
+		return count, nil
+	default:
+		return 0, fmt.Errorf("progress: unknown metric %q", metric)
+	}
 }
