@@ -2,7 +2,7 @@ import {
   House, BookOpen, Camera, LineChart, Grid2x2, Sparkles, MessageCircle, Mic, Plus,
   Utensils, TrendingDown, TrendingUp, Minus, Check, ArrowRight, ArrowLeft, Trash2,
   Drumstick, Leaf, Wheat, Egg, Fish, Apple, Coffee, Soup, Salad, Circle,
-  X, Images, ScanBarcode, Type, Loader, Barcode, ArrowUp, Repeat,
+  X, Images, ScanBarcode, Type, Loader, Barcode, ArrowUp, Repeat, Users,
   type LucideIcon,
 } from "lucide-react-native";
 
@@ -14,7 +14,7 @@ const MAP: Record<string, LucideIcon> = {
   drumstick: Drumstick, leaf: Leaf, wheat: Wheat, egg: Egg, fish: Fish, apple: Apple,
   coffee: Coffee, soup: Soup, salad: Salad,
   x: X, images: Images, "scan-barcode": ScanBarcode, type: Type, loader: Loader,
-  barcode: Barcode, "arrow-up": ArrowUp, repeat: Repeat,
+  barcode: Barcode, "arrow-up": ArrowUp, repeat: Repeat, users: Users,
 };
 
 type Props = { name: string; size?: number; color: string; strokeWidth?: number };
