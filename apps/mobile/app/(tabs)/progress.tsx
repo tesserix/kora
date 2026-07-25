@@ -62,7 +62,7 @@ export default function Progress() {
                 </View>
               </View>
               {delta !== null ? (
-                <Badge variant="success" icon={delta <= 0 ? "trending-down" : "trending-up"}>{`${delta > 0 ? "+" : ""}${delta.toFixed(1)} kg`}</Badge>
+                <Badge variant={delta <= 0 ? "success" : "neutral"} icon={delta <= 0 ? "trending-down" : "trending-up"}>{`${delta > 0 ? "+" : ""}${delta.toFixed(1)} kg`}</Badge>
               ) : null}
             </View>
           </Pressable>
