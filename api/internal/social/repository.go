@@ -121,6 +121,15 @@ func (r Repository) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+// AreFriends reports whether a and b have an accepted friendship.
+func (r Repository) AreFriends(ctx context.Context, a, b uuid.UUID) (bool, error) {
+	f, err := r.FindByPair(ctx, a, b)
+	if err != nil {
+		return false, err
+	}
+	return f != nil && f.Status == FriendStatusAccepted, nil
+}
+
 // CompareRow is an accepted friend plus the fields needed to compute their
 // shared progress (share_progress gates whether metrics are computed at all).
 type CompareRow struct {
