@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/tesserix/kora/api/internal/user"
@@ -90,4 +91,49 @@ func TestMyCodeIsStable(t *testing.T) {
 	code2, _, err := svc.MyCode(context.Background(), me)
 	require.NoError(t, err)
 	require.Equal(t, code1, code2) // stable across calls
+}
+
+func TestSendRequestByCode(t *testing.T) {
+	db := testDB(t)
+	a := seedUser(t, db, "Ada")
+	b := seedUser(t, db, "Ben")
+	svc := NewService(NewRepository(db), user.NewRepository(db))
+	_, _, err := svc.MyCode(context.Background(), b) // give b a friend_code
+	require.NoError(t, err)
+	bUser, err := user.NewRepository(db).ByID(context.Background(), b)
+	require.NoError(t, err)
+	f, err := svc.SendRequest(context.Background(), a, "", bUser.FriendCode)
+	require.NoError(t, err)
+	require.Equal(t, FriendStatusPending, f.Status)
+	require.Equal(t, b, f.AddresseeID)
+}
+
+func TestSendRequestNeitherFieldIsBadInput(t *testing.T) {
+	db := testDB(t)
+	a := seedUser(t, db, "Ada")
+	svc := NewService(NewRepository(db), user.NewRepository(db))
+	_, err := svc.SendRequest(context.Background(), a, "", "")
+	require.ErrorIs(t, err, ErrBadInput)
+}
+
+func TestDeclineDeletesAndAuthorizes(t *testing.T) {
+	db := testDB(t)
+	a := seedUser(t, db, "Ada")
+	b := seedUser(t, db, "Ben")
+	c := seedUser(t, db, "Cy")
+	svc := NewService(NewRepository(db), user.NewRepository(db))
+	f, err := svc.SendRequest(context.Background(), a, "so-"+b.String()+"@test.dev", "")
+	require.NoError(t, err)
+	require.ErrorIs(t, svc.Decline(context.Background(), c, f.ID), ErrForbidden) // non-addressee
+	require.NoError(t, svc.Decline(context.Background(), b, f.ID))               // addressee
+	incoming, _, err := svc.ListRequests(context.Background(), b)
+	require.NoError(t, err)
+	require.Len(t, incoming, 0)
+}
+
+func TestAcceptUnknownRequestIsNotFound(t *testing.T) {
+	db := testDB(t)
+	b := seedUser(t, db, "Ben")
+	svc := NewService(NewRepository(db), user.NewRepository(db))
+	require.ErrorIs(t, svc.Accept(context.Background(), b, uuid.New()), ErrNotFound)
 }

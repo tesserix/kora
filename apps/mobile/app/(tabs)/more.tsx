@@ -1,6 +1,6 @@
 import { Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { router } from "expo-router";
+import { router, type Href } from "expo-router";
 import { signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { AppText } from "@/components/Text";
@@ -26,7 +26,7 @@ export default function More() {
           <Pressable
             key={r.label}
             accessibilityRole="button"
-            onPress={() => r.route && router.push(r.route as any)}
+            onPress={() => r.route && router.push(r.route as Href)}
             style={{ flexDirection: "row", alignItems: "center", gap: 14, padding: spacing.md, borderRadius: 16, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card }}
           >
             <Icon name={r.icon} size={20} color={colors.primary} />

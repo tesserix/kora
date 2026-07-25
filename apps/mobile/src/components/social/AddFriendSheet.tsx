@@ -32,12 +32,15 @@ export function AddFriendSheet({ visible, onClose }: AddFriendSheetProps) {
         setValue("");
         onClose();
       },
-      onError: () => setErr("No Kora account matches that code or email."),
+      onError: (e: unknown) => {
+        const msg = e instanceof Error ? e.message : "";
+        setErr(msg || "Couldn't send request. Try again.");
+      },
     });
   };
 
   const shareCode = () => {
-    if (myCode.data) Share.share({ message: myCode.data.link });
+    if (myCode.data) Share.share({ message: myCode.data.link }).catch(() => {});
   };
 
   return (

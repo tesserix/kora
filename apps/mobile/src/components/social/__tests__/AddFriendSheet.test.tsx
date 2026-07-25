@@ -32,3 +32,11 @@ test("shows my share code", async () => {
   const { getByText } = await render(<AddFriendSheet visible onClose={jest.fn()} />);
   expect(getByText("ABC123XY")).toBeTruthy();
 });
+
+test("surfaces the backend error message on a failed request", async () => {
+  mockSendMutate.mockImplementation((_input, opts) => opts.onError?.(new Error("you can't add yourself")));
+  const { getByLabelText, getByText, findByText } = await render(<AddFriendSheet visible onClose={jest.fn()} />);
+  await fireEvent.changeText(getByLabelText("Friend code or email"), "me@kora.app");
+  await fireEvent.press(getByText("Send request"));
+  expect(await findByText("you can't add yourself")).toBeTruthy();
+});

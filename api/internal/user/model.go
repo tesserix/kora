@@ -19,7 +19,7 @@ type User struct {
 	FirebaseUID string    `gorm:"uniqueIndex" json:"-"`
 	Email       string    `json:"email"`
 	DisplayName string    `json:"display_name"`
-	FriendCode  string    `gorm:"uniqueIndex" json:"-"`
+	FriendCode  string    `json:"-"`
 
 	Sex            string     `json:"sex"`
 	BirthYear      int        `json:"birth_year"`
