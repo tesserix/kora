@@ -110,3 +110,26 @@ func (r Repository) LoggedDaysDesc(ctx context.Context, userID uuid.UUID, notAft
 	}
 	return days, nil
 }
+
+// DailyKcal returns total kcal grouped by local calendar day (YYYY-MM-DD in loc)
+// over [from, to). Days with no logs are simply absent from the map.
+func (r Repository) DailyKcal(ctx context.Context, userID uuid.UUID, from, to time.Time, loc *time.Location) (map[string]float64, error) {
+	tz := loc.String()
+	type row struct {
+		Day  string
+		Kcal float64
+	}
+	var rows []row
+	err := r.db.WithContext(ctx).
+		Raw("SELECT to_char(logged_at AT TIME ZONE ?, 'YYYY-MM-DD') AS day, COALESCE(SUM(kcal), 0) AS kcal FROM food_logs WHERE user_id = ? AND logged_at >= ? AND logged_at < ? GROUP BY day",
+			tz, userID, from, to).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("foodlog: daily kcal: %w", err)
+	}
+	out := make(map[string]float64, len(rows))
+	for _, rw := range rows {
+		out[rw.Day] = rw.Kcal
+	}
+	return out, nil
+}
