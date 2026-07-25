@@ -1,5 +1,6 @@
 import { Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { router } from "expo-router";
 import { signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { AppText } from "@/components/Text";
@@ -8,6 +9,7 @@ import { Icon } from "@/components/Icon";
 import { useTheme } from "@/theme";
 
 const ROWS = [
+  { icon: "users", label: "Friends", route: "/friends" },
   { icon: "message-circle", label: "Coach" },
   { icon: "trending-up", label: "Insights" },
   { icon: "grid-2x2", label: "Add-ons" },
@@ -21,10 +23,15 @@ export default function More() {
       <ScreenHeader overline="Your account" title="More" />
       <View style={{ paddingHorizontal: 20, gap: spacing.sm }}>
         {ROWS.map((r) => (
-          <View key={r.label} style={{ flexDirection: "row", alignItems: "center", gap: 14, padding: spacing.md, borderRadius: 16, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card }}>
+          <Pressable
+            key={r.label}
+            accessibilityRole="button"
+            onPress={() => r.route && router.push(r.route as any)}
+            style={{ flexDirection: "row", alignItems: "center", gap: 14, padding: spacing.md, borderRadius: 16, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card }}
+          >
             <Icon name={r.icon} size={20} color={colors.primary} />
             <AppText style={{ fontSize: 15, fontWeight: "600" }}>{r.label}</AppText>
-          </View>
+          </Pressable>
         ))}
         <Pressable
           accessibilityRole="button"
