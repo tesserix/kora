@@ -13,7 +13,7 @@ interface AddFriendSheetProps {
 }
 
 export function AddFriendSheet({ visible, onClose }: AddFriendSheetProps) {
-  const { colors, fonts, radius } = useTheme();
+  const { colors, radius } = useTheme();
   const [value, setValue] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const send = useSendFriendRequest();
@@ -53,9 +53,9 @@ export function AddFriendSheet({ visible, onClose }: AddFriendSheetProps) {
           autoCapitalize="none"
           autoCorrect={false}
           placeholder="Friend code or email"
-          placeholderTextColor={colors.mutedForeground}
+          placeholderTextColor={colors.secondaryLabel}
           accessibilityLabel="Friend code or email"
-          style={{ marginTop: 12, fontSize: 16, color: colors.foreground, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, paddingHorizontal: 14, paddingVertical: 12 }}
+          style={{ marginTop: 12, fontSize: 16, color: colors.label, backgroundColor: colors.cardSecondary, borderRadius: radius.lg, paddingHorizontal: 14, paddingVertical: 12 }}
         />
         {err ? <AppText style={{ color: colors.destructive, marginTop: 10 }}>{err}</AppText> : null}
         <Button title="Send request" onPress={onSubmit} disabled={send.isPending} style={{ marginTop: 14 }} />
@@ -64,7 +64,7 @@ export function AddFriendSheet({ visible, onClose }: AddFriendSheetProps) {
 
         <Overline>Your code</Overline>
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
-          <AppText style={{ fontSize: 20, fontFamily: fonts.mono, letterSpacing: 2 }}>
+          <AppText variant="title2" rounded style={{ letterSpacing: 2, fontVariant: ["tabular-nums"] }}>
             {myCode.data?.code ?? "········"}
           </AppText>
           <Button title="Share" onPress={shareCode} variant="ghost" disabled={!myCode.data} />
