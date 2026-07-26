@@ -18,6 +18,8 @@ import {
   useJoinGroup,
   useLeaveChallenge,
   useLeaveGroup,
+  useMarkAllRead,
+  useNotifications,
   useProfile,
   useRepeatLog,
   useResolveBarcode,
@@ -27,6 +29,7 @@ import {
   useSendFriendRequest,
   useSetShareProgress,
   useUnfriend,
+  useUnreadCount,
   useWeightSeries,
 } from "../hooks";
 
@@ -323,4 +326,27 @@ test("useDeleteChallenge DELETEs /v1/challenges/:cid", async () => {
   result.current.mutate({ challengeId: "c1", groupId: "g1" });
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
   expect(apiFetch).toHaveBeenCalledWith("/v1/challenges/c1", { method: "DELETE" });
+});
+
+test("useNotifications fetches /v1/notifications", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce([]);
+  const { result } = await renderHook(() => useNotifications(), { wrapper });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(apiFetch).toHaveBeenCalledWith("/v1/notifications");
+});
+
+test("useUnreadCount fetches /v1/notifications/unread-count", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({ count: 3 });
+  const { result } = await renderHook(() => useUnreadCount(), { wrapper });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(apiFetch).toHaveBeenCalledWith("/v1/notifications/unread-count");
+  expect(result.current.data?.count).toBe(3);
+});
+
+test("useMarkAllRead POSTs /v1/notifications/read", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({ marked: 2 });
+  const { result } = await renderHook(() => useMarkAllRead(), { wrapper });
+  result.current.mutate();
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(apiFetch).toHaveBeenCalledWith("/v1/notifications/read", { method: "POST" });
 });

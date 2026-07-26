@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, apiFetchMultipart } from "@/lib/api";
 import type { MealSlot } from "@/lib/mealSlot";
 import type {
+  AppNotification,
   Candidate,
   ChallengeDetail,
   ChallengeSummary,
@@ -406,5 +407,28 @@ export function useDeleteChallenge() {
     mutationFn: ({ challengeId }: { challengeId: string; groupId: string }) =>
       apiFetch(`/v1/challenges/${challengeId}`, { method: "DELETE" }),
     onSuccess: (_d, { groupId }) => qc.invalidateQueries({ queryKey: ["group-challenges", groupId] }),
+  });
+}
+
+export function useNotifications() {
+  return useQuery({ queryKey: ["notifications"], queryFn: () => apiFetch("/v1/notifications") as Promise<AppNotification[]> });
+}
+
+export function useUnreadCount() {
+  return useQuery({
+    queryKey: ["notifications", "unread"],
+    queryFn: () => apiFetch("/v1/notifications/unread-count") as Promise<{ count: number }>,
+    refetchInterval: 60000,
+  });
+}
+
+export function useMarkAllRead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiFetch("/v1/notifications/read", { method: "POST" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["notifications"] });
+      qc.invalidateQueries({ queryKey: ["notifications", "unread"] });
+    },
   });
 }

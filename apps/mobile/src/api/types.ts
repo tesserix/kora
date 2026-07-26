@@ -202,3 +202,15 @@ export interface ChallengeDetail {
   standings: ChallengeStanding[];
   winner?: ChallengeStanding;
 }
+
+export type NotificationType = "friend_request" | "friend_accept" | "group_invite" | "challenge_created";
+
+export interface AppNotification {
+  id: string;
+  type: NotificationType;
+  actor_id: string;
+  actor_name: string;
+  entity_id?: string;
+  read: boolean;
+  created_at: string;
+}
