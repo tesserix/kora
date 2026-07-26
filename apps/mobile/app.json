@@ -59,7 +59,8 @@
         {
           "microphonePermission": "Kora uses the microphone so you can describe meals by voice."
         }
-      ]
+      ],
+      "expo-notifications"
     ],
     "experiments": {
       "typedRoutes": true,

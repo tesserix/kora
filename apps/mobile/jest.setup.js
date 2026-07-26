@@ -80,3 +80,22 @@ jest.mock("expo-audio", () => ({
   requestRecordingPermissionsAsync: jest.fn(async () => ({ granted: true, status: "granted" })),
   getRecordingPermissionsAsync: jest.fn(async () => ({ granted: true, status: "granted" })),
 }));
+
+// expo-notifications (SDK 57): mock the permission/token/listener surface the
+// push registration + responder use. getExpoPushTokenAsync returns { data }.
+jest.mock("expo-notifications", () => ({
+  setNotificationHandler: jest.fn(),
+  getPermissionsAsync: jest.fn(async () => ({ status: "granted" })),
+  requestPermissionsAsync: jest.fn(async () => ({ status: "granted" })),
+  getExpoPushTokenAsync: jest.fn(async () => ({ data: "ExponentPushToken[test]" })),
+  addNotificationResponseReceivedListener: jest.fn(() => ({ remove: jest.fn() })),
+}));
+
+jest.mock("expo-device", () => ({ isDevice: true }));
+
+// expo-constants: default export carries expoConfig. Tests mutate
+// Constants.expoConfig.extra.eas.projectId to exercise the inert (absent) path.
+jest.mock("expo-constants", () => ({
+  __esModule: true,
+  default: { expoConfig: { extra: { eas: { projectId: "test-project" } } } },
+}));
