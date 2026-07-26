@@ -5,10 +5,21 @@ import { Overline } from "./Overline";
 import { Icon } from "./Icon";
 import { PressableScale } from "@/motion";
 import { useTheme } from "@/theme";
+import type { TypeVariant } from "@/theme/palette";
 
-type Props = { overline?: string; title: string; right?: ReactNode; onBack?: () => void };
+type Props = {
+  overline?: string;
+  title: string;
+  right?: ReactNode;
+  onBack?: () => void;
+  // Content headers (e.g. a challenge's dynamic title) sometimes need a
+  // lighter type scale than the default nav-title look. Optional — every
+  // existing call site keeps the default caption overline + large title.
+  overlineVariant?: TypeVariant;
+  titleVariant?: TypeVariant;
+};
 
-export function ScreenHeader({ overline, title, right, onBack }: Props) {
+export function ScreenHeader({ overline, title, right, onBack, overlineVariant, titleVariant }: Props) {
   const { colors } = useTheme();
   return (
     <View
@@ -41,8 +52,16 @@ export function ScreenHeader({ overline, title, right, onBack }: Props) {
           </PressableScale>
         ) : null}
         <View style={{ flex: 1 }}>
-          {overline ? <Overline style={{ marginBottom: 4 }}>{overline}</Overline> : null}
-          <AppText variant="largeTitle">{title}</AppText>
+          {overline ? (
+            overlineVariant ? (
+              <AppText variant={overlineVariant} muted style={{ marginBottom: 4 }}>
+                {overline}
+              </AppText>
+            ) : (
+              <Overline style={{ marginBottom: 4 }}>{overline}</Overline>
+            )
+          ) : null}
+          <AppText variant={titleVariant ?? "largeTitle"}>{title}</AppText>
         </View>
       </View>
       {right}

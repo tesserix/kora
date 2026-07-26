@@ -33,9 +33,13 @@ import ChallengeDetailScreen from "../challenge/[id]";
 test("renders standings, winner banner when ended, and Delete when can_delete", async () => {
   const { getByText } = await render(<ChallengeDetailScreen />);
   expect(getByText("July streak")).toBeTruthy();
-  expect(getByText("1. Alice")).toBeTruthy();
-  expect(getByText("2. Bob")).toBeTruthy();
-  expect(getByText("🏆 Alice wins")).toBeTruthy();
+  expect(getByText("Alice")).toBeTruthy();
+  expect(getByText("Bob")).toBeTruthy();
+  expect(getByText("1")).toBeTruthy(); // rank Numeral
+  expect(getByText("2")).toBeTruthy();
+  expect(getByText("6")).toBeTruthy(); // score Numeral
+  expect(getByText("4")).toBeTruthy();
+  expect(getByText("Alice wins")).toBeTruthy(); // trophy symbol replaces the emoji; text no longer prefixed
   expect(getByText("Leave challenge")).toBeTruthy(); // joined -> Leave
   expect(getByText("Delete challenge")).toBeTruthy(); // can_delete
 });

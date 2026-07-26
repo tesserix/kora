@@ -4,7 +4,10 @@ import { router, useLocalSearchParams } from "expo-router";
 import { AppText } from "@/components/Text";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { Button } from "@/components/Button";
-import { Overline } from "@/components/Overline";
+import { Card } from "@/components/Card";
+import { Icon } from "@/components/Icon";
+import { Numeral } from "@/components/Numeral";
+import { GroupedSection } from "@/components/GroupedList";
 import { useChallenge, useJoinChallenge, useLeaveChallenge, useDeleteChallenge } from "@/api/hooks";
 import { useTheme } from "@/theme";
 
@@ -12,7 +15,7 @@ const METRIC_LABEL: Record<string, string> = { logged: "Logged days", on_target:
 const STATUS_LABEL: Record<string, string> = { upcoming: "Upcoming", active: "Active", ended: "Ended" };
 
 export default function ChallengeDetailScreen() {
-  const { colors, radius } = useTheme();
+  const { colors, spacing } = useTheme();
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
   const challenge = useChallenge(id);
@@ -31,28 +34,46 @@ export default function ChallengeDetailScreen() {
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
-      <ScreenHeader overline={d ? `${STATUS_LABEL[d.status]} · ${METRIC_LABEL[d.metric]}` : "Challenge"} title={d?.title ?? "Challenge"} onBack={() => router.back()} />
-      <View style={{ paddingHorizontal: 20, gap: 20 }}>
+      <ScreenHeader
+        overline={d ? `${STATUS_LABEL[d.status]} · ${METRIC_LABEL[d.metric]}` : "Challenge"}
+        overlineVariant="footnote"
+        title={d?.title ?? "Challenge"}
+        titleVariant="title1"
+        onBack={() => router.back()}
+      />
+      <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>
         {d?.status === "ended" && d.winner ? (
-          <View style={{ padding: 16, borderRadius: radius.lg, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.primary }}>
-            <AppText style={{ fontSize: 16, fontWeight: "700" }}>{`🏆 ${d.winner.display_name} wins`}</AppText>
-            <AppText muted style={{ fontSize: 12 }}>{`${d.winner.score} ${d.metric === "logged" ? "days logged" : "days on target"}`}</AppText>
-          </View>
+          <Card style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+            <Icon name="trophy" size={22} color={colors.accentAmber} />
+            <View style={{ flex: 1 }}>
+              <AppText variant="headline">{`${d.winner.display_name} wins`}</AppText>
+              <AppText variant="footnote" muted>
+                {`${d.winner.score} ${d.metric === "logged" ? "days logged" : "days on target"}`}
+              </AppText>
+            </View>
+          </Card>
         ) : null}
 
-        <View style={{ gap: 10 }}>
-          <Overline>Standings</Overline>
+        <GroupedSection header="Standings">
           {(d?.standings ?? []).length === 0 ? (
-            <AppText muted style={{ fontSize: 12 }}>No one has joined yet.</AppText>
+            <View style={{ minHeight: 44, justifyContent: "center", paddingHorizontal: spacing.md }}>
+              <AppText variant="footnote" muted>No one has joined yet.</AppText>
+            </View>
           ) : (
             (d?.standings ?? []).map((s, i) => (
-              <View key={s.user_id} style={{ flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card }}>
-                <AppText style={{ flex: 1, fontSize: 15, fontWeight: "600" }}>{`${i + 1}. ${s.display_name}`}</AppText>
-                <AppText style={{ fontSize: 16, fontWeight: "700" }}>{s.score}</AppText>
+              <View
+                key={s.user_id}
+                style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, minHeight: 44, paddingHorizontal: spacing.md }}
+              >
+                <Numeral size={14} color={colors.secondaryLabel} style={{ width: 20 }}>
+                  {String(i + 1)}
+                </Numeral>
+                <AppText variant="headline" style={{ flex: 1 }}>{s.display_name}</AppText>
+                <Numeral size={16}>{String(s.score)}</Numeral>
               </View>
             ))
           )}
-        </View>
+        </GroupedSection>
 
         {d ? (
           d.joined ? (
@@ -62,7 +83,7 @@ export default function ChallengeDetailScreen() {
           )
         ) : null}
 
-        {d?.can_delete ? <Button title="Delete challenge" variant="ghost" onPress={onDelete} disabled={del.isPending} /> : null}
+        {d?.can_delete ? <Button title="Delete challenge" variant="destructive" onPress={onDelete} disabled={del.isPending} /> : null}
       </View>
     </ScrollView>
   );
