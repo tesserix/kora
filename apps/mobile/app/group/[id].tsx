@@ -8,6 +8,7 @@ import { Button } from "@/components/Button";
 import { Overline } from "@/components/Overline";
 import { CreateChallengeSheet } from "@/components/social/CreateChallengeSheet";
 import { RenameGroupSheet } from "@/components/social/RenameGroupSheet";
+import { InviteFriendSheet } from "@/components/social/InviteFriendSheet";
 import { useGroup, useGroupProgress, useGroupCode, useLeaveGroup, useRemoveMember, useDeleteGroup, useProfile, useGroupChallenges } from "@/api/hooks";
 import { useTheme } from "@/theme";
 
@@ -27,6 +28,7 @@ export default function GroupDetail() {
   const challenges = useGroupChallenges(id);
   const [sheet, setSheet] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
 
   const profile = useProfile();
   const d = detail.data;
@@ -59,6 +61,7 @@ export default function GroupDetail() {
         <View style={{ paddingHorizontal: 20, gap: 20 }}>
           <Button title="Share invite code" onPress={shareCode} variant="secondary" />
           {isOwner ? <Button title="Rename group" variant="ghost" onPress={() => setRenameOpen(true)} /> : null}
+          {isOwner ? <Button title="Invite a friend" variant="secondary" onPress={() => setInviteOpen(true)} /> : null}
 
           <View style={{ gap: 10 }}>
             <Overline>Leaderboard</Overline>
@@ -128,6 +131,7 @@ export default function GroupDetail() {
       </ScrollView>
       {sheet ? <CreateChallengeSheet visible groupId={id} onClose={() => setSheet(false)} /> : null}
       {renameOpen && d ? <RenameGroupSheet visible groupId={id} currentName={d.name} onClose={() => setRenameOpen(false)} /> : null}
+      {inviteOpen ? <InviteFriendSheet visible groupId={id} memberIds={(d?.members ?? []).map((m) => m.id)} onClose={() => setInviteOpen(false)} /> : null}
     </>
   );
 }
