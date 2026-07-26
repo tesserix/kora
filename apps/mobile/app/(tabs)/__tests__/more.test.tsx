@@ -27,3 +27,8 @@ test("tapping Notifications navigates to /notifications", async () => {
   await fireEvent.press(getByText("Notifications"));
   expect(mockPush).toHaveBeenCalledWith("/notifications");
 });
+
+test("shows unread count badge when count > 0", async () => {
+  const { getByText } = await render(<More />);
+  expect(getByText("2")).toBeTruthy();
+});

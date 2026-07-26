@@ -20,6 +20,7 @@ const SYMBOLS: Record<string, SFSymbol> = {
   "arrow-up": "arrow.up", repeat: "arrow.clockwise", users: "person.2.fill", bell: "bell.fill",
   "chevron-right": "chevron.right", droplet: "drop.fill", person: "person.crop.circle.fill",
   gear: "gearshape.fill", flame: "flame.fill", search: "magnifyingglass",
+  people: "person.3.fill",
 };
 
 const MAP: Record<string, LucideIcon> = {
@@ -31,7 +32,7 @@ const MAP: Record<string, LucideIcon> = {
   coffee: Coffee, soup: Soup, salad: Salad,
   x: X, images: Images, "scan-barcode": ScanBarcode, type: Type, loader: Loader,
   barcode: Barcode, "arrow-up": ArrowUp, repeat: Repeat, users: Users, bell: Bell,
-  search: Search,
+  search: Search, people: Users,
 };
 
 type Props = { name: string; size?: number; color: string; strokeWidth?: number };
