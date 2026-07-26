@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Alert, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { Sheet } from "@/components/Sheet";
-import { FoodTile } from "@/components/FoodTile";
+import { Icon } from "@/components/Icon";
 import { Button } from "@/components/Button";
 import { Stepper } from "@/components/Stepper";
 import { Segmented } from "@/components/Segmented";
@@ -25,7 +25,7 @@ const SLOT_OPTIONS: Array<{ key: MealSlot; label: string }> = [
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 export default function MealDetail() {
-  const { colors, radius } = useTheme();
+  const { colors } = useTheme();
   const p = useLocalSearchParams<{
     id: string; name: string; mealSlot: string; time: string;
     kcal: string; protein: string; carbs: string; fat: string; grams: string;
@@ -102,7 +102,18 @@ export default function MealDetail() {
     <Sheet visible onClose={() => router.back()}>
       <View style={{ paddingHorizontal: 22, paddingBottom: 30 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 14, paddingVertical: 16 }}>
-          <FoodTile hue={vis.hue} icon={vis.icon} size={64} radius={radius.xl} />
+          <View
+            style={{
+              width: 64,
+              height: 64,
+              borderRadius: 14,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: colors.cardSecondary,
+            }}
+          >
+            <Icon name={vis.icon} size={28} color={colors.accent} />
+          </View>
           <View style={{ flex: 1 }}>
             <AppText variant="title2">{name}</AppText>
             <AppText variant="footnote" muted style={{ marginTop: 2 }}>

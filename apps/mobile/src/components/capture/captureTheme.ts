@@ -23,8 +23,7 @@ export const captureColors = {
   composerBorder: "rgba(84,84,88,0.60)",
   outlineBorder: "rgba(255,255,255,0.25)",
   sendInactiveBg: "rgba(255,255,255,0.15)", // disabled Send button fill
-  // DetectedCard item tiles — a fixed dark squircle + green-tinted symbol
-  // (tileBgDark/tileFgDark's per-food hue tint retires with FoodTile, task 13).
+  // DetectedCard item tiles — a fixed dark squircle + green-tinted symbol.
   tileBg: "#2C2C2E",
   tileFg: "#8FE3A6",
   // Photo idle affordance is a deliberately light "viewfinder" placeholder box.

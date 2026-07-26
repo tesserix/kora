@@ -7,7 +7,6 @@ import { AppText } from "@/components/Text";
 import { Button } from "@/components/Button";
 import { Icon } from "@/components/Icon";
 import { ScreenHeader } from "@/components/ScreenHeader";
-import { FoodTile } from "@/components/FoodTile";
 import { ProvenanceChip } from "@/components/ProvenanceChip";
 import { GroupedSection, Row } from "@/components/GroupedList";
 import { Stat } from "@/components/Stat";
@@ -80,7 +79,18 @@ export default function LogScreen() {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg, paddingTop: insets.top + spacing.lg, gap: spacing.md }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
-          <FoodTile hue={vis.hue} icon={vis.icon} size={64} radius={radius.xl} />
+          <View
+            style={{
+              width: 64,
+              height: 64,
+              borderRadius: 14,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: colors.cardSecondary,
+            }}
+          >
+            <Icon name={vis.icon} size={28} color={colors.accent} />
+          </View>
           <View style={{ flex: 1, gap: 4 }}>
             <AppText variant="title2">{selected.name}</AppText>
             <ProvenanceChip provenance={selected.provenance} />
