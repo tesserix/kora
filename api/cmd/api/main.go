@@ -20,10 +20,12 @@ import (
 	"github.com/tesserix/kora/api/internal/challenges"
 	"github.com/tesserix/kora/api/internal/config"
 	"github.com/tesserix/kora/api/internal/database"
+	"github.com/tesserix/kora/api/internal/devices"
 	"github.com/tesserix/kora/api/internal/foodlog"
 	"github.com/tesserix/kora/api/internal/groups"
 	"github.com/tesserix/kora/api/internal/notifications"
 	"github.com/tesserix/kora/api/internal/nutrition"
+	"github.com/tesserix/kora/api/internal/push"
 	"github.com/tesserix/kora/api/internal/resolve"
 	"github.com/tesserix/kora/api/internal/scheduler"
 	"github.com/tesserix/kora/api/internal/server"
@@ -72,6 +74,20 @@ func main() {
 		logger.Info("scheduler started", "interval", cfg.SchedulerInterval.String(), "loc", loc.String())
 	}
 
+	pushCtx, pushCancel := context.WithCancel(context.Background())
+	if cfg.PushEnabled {
+		disp := push.New(
+			notifications.NewRepository(db),
+			devices.NewRepository(db),
+			push.NewExpoSender(cfg.ExpoAccessToken),
+			cfg.PushFreshness,
+			cfg.PushInterval,
+			logger,
+		)
+		go disp.Run(pushCtx)
+		logger.Info("push dispatcher started", "interval", cfg.PushInterval.String(), "freshness", cfg.PushFreshness.String())
+	}
+
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,
 		Handler: server.NewRouter(server.Deps{DB: db, Verifier: verifier, Resolver: resolveHandler}),
@@ -90,6 +106,7 @@ func main() {
 	<-quit
 
 	schedCancel()
+	pushCancel()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {

@@ -141,3 +141,31 @@ func TestLoadSchedulerIntervalDefault(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 5*time.Minute, cfg.SchedulerInterval)
 }
+
+func TestLoadPushDefaults(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
+	t.Setenv("PUSH_ENABLED", "")
+	t.Setenv("PUSH_INTERVAL", "")
+	t.Setenv("PUSH_FRESHNESS", "")
+	t.Setenv("EXPO_ACCESS_TOKEN", "")
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.False(t, cfg.PushEnabled)
+	require.Equal(t, 30*time.Second, cfg.PushInterval)
+	require.Equal(t, 15*time.Minute, cfg.PushFreshness)
+	require.Equal(t, "", cfg.ExpoAccessToken)
+}
+
+func TestLoadPushOverrides(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
+	t.Setenv("PUSH_ENABLED", "true")
+	t.Setenv("PUSH_INTERVAL", "10s")
+	t.Setenv("PUSH_FRESHNESS", "5m")
+	t.Setenv("EXPO_ACCESS_TOKEN", "expo-secret")
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.True(t, cfg.PushEnabled)
+	require.Equal(t, 10*time.Second, cfg.PushInterval)
+	require.Equal(t, 5*time.Minute, cfg.PushFreshness)
+	require.Equal(t, "expo-secret", cfg.ExpoAccessToken)
+}

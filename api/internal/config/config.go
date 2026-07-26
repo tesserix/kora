@@ -19,6 +19,10 @@ type Config struct {
 	OpenAIModel       string
 	OpenAIJSONObject  bool
 	SchedulerInterval time.Duration
+	PushEnabled       bool
+	PushInterval      time.Duration
+	PushFreshness     time.Duration
+	ExpoAccessToken   string
 }
 
 func Load() (Config, error) {
@@ -34,6 +38,10 @@ func Load() (Config, error) {
 		OpenAIModel:       os.Getenv("OPENAI_MODEL"),
 		OpenAIJSONObject:  os.Getenv("OPENAI_JSON_OBJECT") == "true",
 		SchedulerInterval: getdur("SCHEDULER_INTERVAL", 5*time.Minute),
+		PushEnabled:       os.Getenv("PUSH_ENABLED") == "true",
+		PushInterval:      getdur("PUSH_INTERVAL", 30*time.Second),
+		PushFreshness:     getdur("PUSH_FRESHNESS", 15*time.Minute),
+		ExpoAccessToken:   os.Getenv("EXPO_ACCESS_TOKEN"),
 	}
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("config: DATABASE_URL is required")

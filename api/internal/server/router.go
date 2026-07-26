@@ -10,6 +10,7 @@ import (
 	"github.com/tesserix/kora/api/internal/challenges"
 	"github.com/tesserix/kora/api/internal/compare"
 	"github.com/tesserix/kora/api/internal/dashboard"
+	"github.com/tesserix/kora/api/internal/devices"
 	"github.com/tesserix/kora/api/internal/foodlog"
 	"github.com/tesserix/kora/api/internal/groups"
 	"github.com/tesserix/kora/api/internal/httpx"
@@ -66,6 +67,10 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.GET("/notifications", notificationsHandler.List)
 		v1.GET("/notifications/unread-count", notificationsHandler.UnreadCount)
 		v1.POST("/notifications/read", notificationsHandler.MarkAllRead)
+
+		devicesHandler := devices.NewHandler(devices.NewRepository(deps.DB))
+		v1.POST("/devices", devicesHandler.Register)
+		v1.DELETE("/devices/:token", devicesHandler.Delete)
 
 		foodRepo := nutrition.NewRepository(deps.DB)
 		logRepo := foodlog.NewRepository(deps.DB)
