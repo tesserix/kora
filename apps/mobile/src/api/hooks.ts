@@ -370,6 +370,7 @@ export function useInviteToGroup() {
     mutationFn: ({ groupId, userId }: { groupId: string; userId: string }) =>
       apiFetch(`/v1/groups/${groupId}/invite`, { method: "POST", body: JSON.stringify({ user_id: userId }) }),
     onSuccess: (_d, { groupId }) => {
+      qc.invalidateQueries({ queryKey: ["groups"] });
       qc.invalidateQueries({ queryKey: ["group", groupId] });
       qc.invalidateQueries({ queryKey: ["group-progress", groupId] });
     },

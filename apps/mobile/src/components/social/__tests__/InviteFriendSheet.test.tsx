@@ -37,3 +37,14 @@ test("shows an empty state when no friends are eligible", async () => {
   expect(queryByText("Alice")).toBeNull();
   expect(getByText("No friends to invite. Everyone's already in, or add friends first.")).toBeTruthy();
 });
+
+test("shows an inline error and stays open when the invite fails", async () => {
+  mockInvite.mockImplementation((_vars, opts) => opts.onError());
+  const onClose = jest.fn();
+  const { getByText } = await render(
+    <InviteFriendSheet visible groupId="g1" memberIds={[]} onClose={onClose} />,
+  );
+  await fireEvent.press(getByText("Alice"));
+  expect(getByText("Couldn't invite. Try again.")).toBeTruthy();
+  expect(onClose).not.toHaveBeenCalled();
+});
