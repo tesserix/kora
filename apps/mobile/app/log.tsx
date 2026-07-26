@@ -1,23 +1,29 @@
-import { useRef, useState } from "react";
-import { FlatList, Pressable, TextInput, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { ScrollView, TextInput, View } from "react-native";
+import Animated, { FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { AppText } from "@/components/Text";
 import { Button } from "@/components/Button";
-import { Numeral } from "@/components/Numeral";
+import { Icon } from "@/components/Icon";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { FoodTile } from "@/components/FoodTile";
 import { ProvenanceChip } from "@/components/ProvenanceChip";
+import { GroupedSection, Row } from "@/components/GroupedList";
+import { Stat } from "@/components/Stat";
+import { Segmented } from "@/components/Segmented";
+import { Card } from "@/components/Card";
 import { useCreateLog, useFoodSearch } from "@/api/hooks";
 import type { FoodItem } from "@/api/types";
 import { foodVisual } from "@/lib/foodVisual";
-import { tileFaint, MACRO } from "@/lib/hue";
+import { haptics } from "@/motion";
 import { useTheme } from "@/theme";
 
 const MEALS = ["breakfast", "lunch", "dinner", "snack"] as const;
+const MEAL_OPTIONS = MEALS.map((m) => ({ key: m, label: m.charAt(0).toUpperCase() + m.slice(1) }));
 
 export default function LogScreen() {
-  const { colors, spacing, radius, fonts } = useTheme();
+  const { colors, spacing, radius, fontSize } = useTheme();
   const insets = useSafeAreaInsets();
   const mountedAt = useRef(Date.now());
   const [q, setQ] = useState("");
@@ -28,12 +34,21 @@ export default function LogScreen() {
   const search = useFoodSearch(q);
   const createLog = useCreateLog();
 
-  const inputStyle = {
-    borderWidth: 1,
-    borderColor: colors.input,
+  // Entrance stagger runs on first mount only — see app/(tabs)/index.tsx for the
+  // same guard and rationale (refetches update results in place, no re-stagger).
+  const firstMount = useRef(true);
+  useEffect(() => {
+    firstMount.current = false;
+  }, []);
+  const enter = (i: number) => (firstMount.current ? FadeInDown.duration(300).delay(i * 30) : undefined);
+
+  const filledInputStyle = {
+    backgroundColor: colors.cardSecondary,
     borderRadius: radius.lg,
-    padding: spacing.md,
-    color: colors.foreground,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 12,
+    color: colors.label,
+    fontSize: fontSize.base,
     minHeight: 48,
   } as const;
 
@@ -49,7 +64,10 @@ export default function LogScreen() {
         client_log_ms: Date.now() - mountedAt.current,
       },
       {
-        onSuccess: () => router.replace("/"),
+        onSuccess: () => {
+          haptics.success();
+          router.replace("/");
+        },
         onError: () => setError("Couldn't log that. Please try again."),
       },
     );
@@ -58,46 +76,61 @@ export default function LogScreen() {
   if (selected) {
     const g = Number(grams) || selected.serving_grams || 100;
     const scale = g / 100;
-    const macros: ReadonlyArray<readonly [string, string, number]> = [
-      ["Protein", `${Math.round(selected.protein_per_100g * scale)}g`, MACRO.protein.hue],
-      ["Carbs", `${Math.round(selected.carbs_per_100g * scale)}g`, MACRO.carbs.hue],
-      ["Fat", `${Math.round(selected.fat_per_100g * scale)}g`, MACRO.fat.hue],
-    ];
     const vis = foodVisual(selected.name, meal);
     return (
       <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg, paddingTop: insets.top + spacing.lg, gap: spacing.md }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
           <FoodTile hue={vis.hue} icon={vis.icon} size={64} radius={radius.xl} />
-          <View style={{ flex: 1 }}>
-            <AppText style={{ fontSize: 20, fontWeight: "800", letterSpacing: -0.5 }}>{selected.name}</AppText>
+          <View style={{ flex: 1, gap: 4 }}>
+            <AppText variant="title2">{selected.name}</AppText>
             <ProvenanceChip provenance={selected.provenance} />
           </View>
         </View>
 
-        <View style={{ flexDirection: "row", gap: 8 }}>
-          {macros.map(([label, value, hue]) => (
-            <View key={label} style={{ flex: 1, backgroundColor: tileFaint(hue), borderRadius: radius.lg, padding: 12 }}>
-              <AppText muted style={{ fontSize: 11, fontWeight: "600" }}>{label}</AppText>
-              <Numeral size={16} color={`hsl(${hue}, 55%, 38%)`}>{value}</Numeral>
-            </View>
-          ))}
-        </View>
+        <Card style={{ flexDirection: "row" }}>
+          <View style={{ flex: 1 }}>
+            <Stat
+              label="Protein"
+              value={String(Math.round(selected.protein_per_100g * scale))}
+              unit="g"
+              valueColor={colors.accent}
+            />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Stat
+              label="Carbs"
+              value={String(Math.round(selected.carbs_per_100g * scale))}
+              unit="g"
+              valueColor={colors.accentAmber}
+            />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Stat
+              label="Fat"
+              value={String(Math.round(selected.fat_per_100g * scale))}
+              unit="g"
+              valueColor={colors.accentBlue}
+            />
+          </View>
+        </Card>
 
         <TextInput
           accessibilityLabel="Quantity in grams"
-          style={inputStyle}
+          style={filledInputStyle}
           placeholder={`Grams (default ${selected.serving_grams || 100})`}
-          placeholderTextColor={colors.mutedForeground}
+          placeholderTextColor={colors.secondaryLabel}
           keyboardType="decimal-pad"
           value={grams}
           onChangeText={setGrams}
         />
-        <View style={{ flexDirection: "row", gap: spacing.sm, flexWrap: "wrap" }}>
-          {MEALS.map((m) => (
-            <Button key={m} title={m} variant={meal === m ? "primary" : "secondary"} onPress={() => setMeal(m)} />
-          ))}
-        </View>
-        {error ? <AppText style={{ color: colors.destructive }}>{error}</AppText> : null}
+
+        <Segmented options={MEAL_OPTIONS} value={meal} onChange={(key) => setMeal(key as (typeof MEALS)[number])} />
+
+        {error ? (
+          <AppText variant="footnote" style={{ color: colors.destructive }}>
+            {error}
+          </AppText>
+        ) : null}
         <Button title={createLog.isPending ? "Logging…" : "Log it"} onPress={submit} disabled={createLog.isPending} />
         <Button title="Back" variant="ghost" onPress={() => setSelected(null)} />
       </View>
@@ -107,41 +140,49 @@ export default function LogScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background, paddingTop: insets.top + 8 }}>
       <ScreenHeader overline="Add to diary" title="Log food" onBack={() => router.back()} />
-      <View style={{ paddingHorizontal: 20, gap: spacing.md, flex: 1 }}>
-        <TextInput
-          accessibilityLabel="Search foods"
-          style={inputStyle}
-          placeholder="Search foods…"
-          placeholderTextColor={colors.mutedForeground}
-          autoFocus
-          value={q}
-          onChangeText={setQ}
-        />
-        <FlatList
-          data={search.data ?? []}
-          keyExtractor={(item) => item.id}
-          ItemSeparatorComponent={() => <View style={{ height: spacing.sm }} />}
-          renderItem={({ item }) => {
-            const vis = foodVisual(item.name);
-            return (
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => setSelected(item)}
-                style={{ flexDirection: "row", alignItems: "center", gap: 14, padding: 12, borderRadius: radius.xl, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card }}
-              >
-                <FoodTile hue={vis.hue} icon={vis.icon} size={48} />
-                <View style={{ flex: 1 }}>
-                  <AppText style={{ fontSize: 15, fontWeight: "600" }}>{item.name}</AppText>
-                  <AppText muted style={{ fontSize: 12, fontFamily: fonts.mono }}>
-                    {Math.round(item.kcal_per_100g)} kcal/100g · {item.serving_desc}
-                  </AppText>
-                </View>
-              </Pressable>
-            );
+      <ScrollView
+        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40, gap: spacing.md }}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: spacing.sm,
+            backgroundColor: colors.cardSecondary,
+            borderRadius: radius.lg,
+            paddingHorizontal: spacing.md,
           }}
-          ListEmptyComponent={q.length >= 2 && !search.isLoading ? <AppText muted>No matches.</AppText> : null}
-        />
-      </View>
+        >
+          <Icon name="search" size={18} color={colors.secondaryLabel} />
+          <TextInput
+            accessibilityLabel="Search foods"
+            style={{ flex: 1, color: colors.label, fontSize: fontSize.base, paddingVertical: 12 }}
+            placeholder="Search foods…"
+            placeholderTextColor={colors.secondaryLabel}
+            autoFocus
+            value={q}
+            onChangeText={setQ}
+          />
+        </View>
+
+        {search.data && search.data.length > 0 ? (
+          <GroupedSection>
+            {search.data.map((item, i) => (
+              <Animated.View key={item.id} entering={enter(i)}>
+                <Row
+                  title={item.name}
+                  subtitle={item.brand || undefined}
+                  detail={`${Math.round(item.kcal_per_100g)} kcal/100g`}
+                  onPress={() => setSelected(item)}
+                />
+              </Animated.View>
+            ))}
+          </GroupedSection>
+        ) : q.length >= 2 && !search.isLoading ? (
+          <AppText muted>No matches.</AppText>
+        ) : null}
+      </ScrollView>
     </View>
   );
 }

@@ -31,6 +31,11 @@ test("Log screen shows the editorial header and a food tile result", async () =>
   expect(await findByText("Grilled chicken breast")).toBeTruthy();
 });
 
+test("Log screen's search field renders the magnifyingglass glyph", async () => {
+  const { findByTestId } = await render(<LogScreen />);
+  expect(await findByTestId("sf-magnifyingglass")).toBeTruthy();
+});
+
 test("Log screen's back button exits the screen via router.back", async () => {
   const { findByLabelText } = await render(<LogScreen />);
   const backButton = await findByLabelText("Go back");
