@@ -8,7 +8,7 @@ interface Props {
   children: ReactNode;
 }
 
-// Otto's chat bubble — sparkles avatar + translucent bubble, top-left corner
+// Otto's chat bubble — camera avatar + translucent bubble, top-left corner
 // squared off (radius 6) to point back at the avatar, per CaptureScreen.jsx.
 export function OttoBubble({ children }: Props) {
   return (
@@ -26,7 +26,7 @@ export function OttoBubble({ children }: Props) {
           borderColor: captureColors.primaryGlow,
         }}
       >
-        <Icon name="sparkles" size={16} color={captureColors.primaryForeground} />
+        <Icon name="camera" size={16} color={captureColors.primaryForeground} />
       </View>
       <View
         style={{

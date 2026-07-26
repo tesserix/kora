@@ -80,7 +80,7 @@ export default function Onboarding() {
             shadows.md,
           ]}
         >
-          <Icon name="sparkles" size={22} color={colors.primaryForeground} />
+          <Icon name="camera" size={22} color={colors.primaryForeground} />
         </View>
         <AppText style={{ fontSize: 20, fontWeight: "800", letterSpacing: -0.4 }}>Kora</AppText>
       </View>

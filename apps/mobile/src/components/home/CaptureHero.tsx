@@ -16,7 +16,7 @@ export function CaptureHero({ onPress }: { onPress: () => void }) {
       onPress={onPress}
       style={[{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 14, paddingLeft: 18, paddingRight: 14, borderRadius: radius["2xl"], backgroundColor: colors.primary }, shadows.lg]}
     >
-      <Icon name="sparkles" size={22} color={colors.primaryForeground} />
+      <Icon name="camera" size={22} color={colors.primaryForeground} />
       <AppText style={{ flex: 1, fontSize: 15, fontWeight: "600", color: colors.primaryForeground }}>Snap a meal or tell Otto what you ate…</AppText>
       <View style={{ flexDirection: "row", gap: 8 }}>
         {pill("camera")}

@@ -44,7 +44,7 @@ export default function Progress() {
         title="Progress"
         right={
           <Pressable accessibilityRole="button" style={{ flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingHorizontal: 12, paddingVertical: 8 }}>
-            <Icon name="sparkles" size={15} color={colors.foreground} />
+            <Icon name="camera" size={15} color={colors.foreground} />
             <AppText style={{ fontSize: 13, fontWeight: "600" }}>Weekly report</AppText>
           </Pressable>
         }

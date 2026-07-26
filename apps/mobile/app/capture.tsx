@@ -411,7 +411,7 @@ export function CaptureBody({
           <Icon name="x" size={20} color={captureColors.onSurface} />
         </Pressable>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
-          <Icon name="sparkles" size={17} color={captureColors.primary} />
+          <Icon name="camera" size={17} color={captureColors.primary} />
           <AppText style={{ color: captureColors.onSurface, fontWeight: "700" }}>Ask Otto</AppText>
         </View>
         {/* Reserved for a future gallery/history view — no-op in this task,

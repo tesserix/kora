@@ -35,7 +35,7 @@ export function FeedMeal({ log, note, onOpen }: { log: FoodLog; note?: string | 
       </Pressable>
       {note ? (
         <View style={{ flexDirection: "row", gap: 8, alignItems: "flex-start", paddingLeft: 8, paddingRight: 4 }}>
-          <View style={{ marginTop: 2 }}><Icon name="sparkles" size={14} color={colors.primary} /></View>
+          <View style={{ marginTop: 2 }}><Icon name="camera" size={14} color={colors.primary} /></View>
           <AppText muted style={{ flex: 1, fontSize: 12.5, lineHeight: 18 }}>{note}</AppText>
         </View>
       ) : null}

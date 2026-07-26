@@ -156,6 +156,15 @@ jest.mock("react-native-reanimated", () => {
   };
 });
 
+// expo-symbols: native SF Symbols rendering is unavailable under Jest. The mock
+// surfaces the resolved symbol name as a testID (`sf-<name>`) so Icon tests can
+// assert on the SF-Symbol-first render path without a real iOS runtime.
+jest.mock("expo-symbols", () => {
+  const React = require("react");
+  const { View } = require("react-native");
+  return { SymbolView: (props) => React.createElement(View, { testID: `sf-${props.name}` }) };
+});
+
 // expo-haptics: native haptic feedback is unavailable under Jest.
 jest.mock("expo-haptics", () => ({
   selectionAsync: jest.fn(async () => {}),
