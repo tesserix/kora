@@ -207,6 +207,27 @@ jest.mock("react-native-reanimated", () => {
   };
 });
 
+// react-native-gesture-handler/ReanimatedSwipeable: the real component drives its own
+// Gesture.Pan()/GestureDetector worklet plumbing (useDerivedValue, runOnUI, measure, etc.)
+// that the hand-written reanimated mock above doesn't implement, so it crashes under Jest.
+// Component tests only need to render `children` and make the right-action content
+// pressable — not simulate an actual swipe — so this mock renders both directly, letting
+// tests fireEvent.press() straight on whatever `renderRightActions()` returns.
+jest.mock("react-native-gesture-handler/ReanimatedSwipeable", () => {
+  const React = require("react");
+  const { View } = require("react-native");
+  return {
+    __esModule: true,
+    default: ({ children, renderRightActions }) =>
+      React.createElement(
+        View,
+        null,
+        children,
+        renderRightActions ? renderRightActions({ value: 0 }, { value: 0 }, {}) : null,
+      ),
+  };
+});
+
 // expo-symbols: native SF Symbols rendering is unavailable under Jest. The mock
 // surfaces the resolved symbol name as a testID (`sf-<name>`) so Icon tests can
 // assert on the SF-Symbol-first render path without a real iOS runtime.

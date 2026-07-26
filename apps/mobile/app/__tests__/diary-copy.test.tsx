@@ -8,6 +8,7 @@ jest.mock("@/api/hooks", () => ({
   useDashboard: () => ({ data: { consumed: { kcal: 0 }, targets: { kcal: 2000 }, water_ml: 0 } }),
   useDayLogs: () => ({ data: [] }),
   useAddWater: () => ({ mutate: jest.fn(), isPending: false }),
+  useDeleteLog: () => ({ mutate: jest.fn(), isPending: false }),
   useCopyDay: () => ({ mutate: mockCopyMutate, isPending: false }),
 }));
 
