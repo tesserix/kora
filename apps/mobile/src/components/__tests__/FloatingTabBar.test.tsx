@@ -1,6 +1,7 @@
 import { render, fireEvent } from "@testing-library/react-native";
 
 jest.mock("expo-router", () => ({ router: { push: jest.fn() } }));
+jest.mock("@/api/hooks", () => ({ useUnreadCount: () => ({ data: { count: 0 } }) }));
 
 import { router } from "expo-router";
 import { FloatingTabBar } from "@/components/FloatingTabBar";

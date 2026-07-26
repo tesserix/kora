@@ -3,6 +3,7 @@ import { BlurView } from "expo-blur";
 import { router } from "expo-router";
 import { Icon } from "./Icon";
 import { useTheme } from "@/theme";
+import { useUnreadCount } from "@/api/hooks";
 
 const TAB_META: Record<string, { icon: string; label: string }> = {
   index: { icon: "house", label: "Home" },
@@ -22,6 +23,8 @@ type FloatingTabBarProps = {
 export function FloatingTabBar({ state, navigation }: FloatingTabBarProps) {
   const { colors, radius, shadows } = useTheme();
   const activeName = state.routes[state.index]?.name;
+  const unread = useUnreadCount();
+  const unreadCount = unread.data?.count ?? 0;
 
   const tab = (name: string) => {
     const meta = TAB_META[name];
@@ -35,7 +38,12 @@ export function FloatingTabBar({ state, navigation }: FloatingTabBarProps) {
         onPress={() => navigation.navigate(name)}
         style={{ width: 52, height: 52, borderRadius: radius.full, alignItems: "center", justifyContent: "center", backgroundColor: on ? colors.secondary : "transparent" }}
       >
-        <Icon name={meta.icon} size={22} color={on ? colors.primary : colors.mutedForeground} strokeWidth={on ? 2.5 : 2} />
+        <View>
+          <Icon name={meta.icon} size={22} color={on ? colors.primary : colors.mutedForeground} strokeWidth={on ? 2.5 : 2} />
+          {name === "more" && unreadCount > 0 ? (
+            <View style={{ position: "absolute", top: -2, right: -2, width: 9, height: 9, borderRadius: 5, backgroundColor: colors.primary, borderWidth: 1.5, borderColor: colors.card }} />
+          ) : null}
+        </View>
       </Pressable>
     );
   };
