@@ -140,6 +140,9 @@ func (s *Scheduler) Tick(ctx context.Context, now time.Time) error {
 				}
 			}
 		}
+		// Unlike started/ended (which retry on notify failure), the passed
+		// baseline advances every tick regardless of ChallengePassed's result:
+		// a missed pass-notify is intentionally dropped (passed is approximate).
 		if err := s.data.SetLastRanks(ctx, ch.ID, newRanks); err != nil {
 			s.log.WarnContext(ctx, "scheduler: set ranks", "challenge", ch.ID, "err", err)
 		}
