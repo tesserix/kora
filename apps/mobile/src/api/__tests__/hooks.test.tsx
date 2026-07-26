@@ -20,7 +20,9 @@ import {
   useLeaveGroup,
   useMarkAllRead,
   useNotifications,
+  useInviteToGroup,
   useProfile,
+  useRenameGroup,
   useRepeatLog,
   useResolveBarcode,
   useResolvePhoto,
@@ -349,4 +351,24 @@ test("useMarkAllRead POSTs /v1/notifications/read", async () => {
   result.current.mutate();
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
   expect(apiFetch).toHaveBeenCalledWith("/v1/notifications/read", { method: "POST" });
+});
+
+test("useRenameGroup PATCHes /v1/groups/:id with the name", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({ renamed: true });
+  const { result } = await renderHook(() => useRenameGroup(), { wrapper });
+  await result.current.mutateAsync({ groupId: "g1", name: "New Crew" });
+  expect(apiFetch).toHaveBeenCalledWith("/v1/groups/g1", {
+    method: "PATCH",
+    body: JSON.stringify({ name: "New Crew" }),
+  });
+});
+
+test("useInviteToGroup POSTs /v1/groups/:id/invite with user_id", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({ invited: true });
+  const { result } = await renderHook(() => useInviteToGroup(), { wrapper });
+  await result.current.mutateAsync({ groupId: "g1", userId: "f1" });
+  expect(apiFetch).toHaveBeenCalledWith("/v1/groups/g1/invite", {
+    method: "POST",
+    body: JSON.stringify({ user_id: "f1" }),
+  });
 });

@@ -352,6 +352,30 @@ export function useDeleteGroup() {
   });
 }
 
+export function useRenameGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ groupId, name }: { groupId: string; name: string }) =>
+      apiFetch(`/v1/groups/${groupId}`, { method: "PATCH", body: JSON.stringify({ name }) }),
+    onSuccess: (_d, { groupId }) => {
+      qc.invalidateQueries({ queryKey: ["groups"] });
+      qc.invalidateQueries({ queryKey: ["group", groupId] });
+    },
+  });
+}
+
+export function useInviteToGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ groupId, userId }: { groupId: string; userId: string }) =>
+      apiFetch(`/v1/groups/${groupId}/invite`, { method: "POST", body: JSON.stringify({ user_id: userId }) }),
+    onSuccess: (_d, { groupId }) => {
+      qc.invalidateQueries({ queryKey: ["group", groupId] });
+      qc.invalidateQueries({ queryKey: ["group-progress", groupId] });
+    },
+  });
+}
+
 export function useGroupChallenges(groupId: string) {
   return useQuery({
     queryKey: ["group-challenges", groupId],
