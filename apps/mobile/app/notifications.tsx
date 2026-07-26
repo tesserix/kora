@@ -18,6 +18,12 @@ function message(n: AppNotification): string {
       return `${n.actor_name} added you to a group`;
     case "challenge_created":
       return `${n.actor_name} started a challenge`;
+    case "challenge_started":
+      return "A challenge you joined has started";
+    case "challenge_ended":
+      return `${n.actor_name} won a challenge`;
+    case "challenge_passed":
+      return `${n.actor_name} passed you in a challenge`;
     default:
       return n.actor_name;
   }
@@ -31,6 +37,9 @@ function targetFor(n: AppNotification): Href | null {
     case "group_invite":
       return n.entity_id ? (`/group/${n.entity_id}` as Href) : null;
     case "challenge_created":
+    case "challenge_started":
+    case "challenge_ended":
+    case "challenge_passed":
       return n.entity_id ? (`/challenge/${n.entity_id}` as Href) : null;
     default:
       return null;

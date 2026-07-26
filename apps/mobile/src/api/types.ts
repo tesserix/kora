@@ -203,7 +203,7 @@ export interface ChallengeDetail {
   winner?: ChallengeStanding;
 }
 
-export type NotificationType = "friend_request" | "friend_accept" | "group_invite" | "challenge_created";
+export type NotificationType = "friend_request" | "friend_accept" | "group_invite" | "challenge_created" | "challenge_started" | "challenge_ended" | "challenge_passed";
 
 export interface AppNotification {
   id: string;
