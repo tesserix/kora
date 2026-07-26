@@ -10,6 +10,7 @@ jest.mock("@/api/hooks", () => ({
       { id: "n2", type: "challenge_created", actor_id: "u3", actor_name: "Bob", entity_id: "c9", read: true, created_at: "2026-07-25T00:00:00Z" },
       { id: "n3", type: "challenge_ended", actor_id: "u4", actor_name: "Cara", entity_id: "c9", read: true, created_at: "2026-07-24T00:00:00Z" },
       { id: "n4", type: "challenge_passed", actor_id: "u5", actor_name: "Dan", entity_id: "c9", read: false, created_at: "2026-07-23T00:00:00Z" },
+      { id: "n5", type: "challenge_started", actor_id: "u6", actor_name: "Eve", entity_id: "c9", read: false, created_at: "2026-07-22T00:00:00Z" },
     ],
   }),
   useMarkAllRead: () => ({ mutate: mockMarkAll }),
@@ -44,5 +45,12 @@ test("renders challenge time-event messages", async () => {
 test("challenge_passed deep-links to the challenge", async () => {
   const { getByText } = await render(<NotificationsScreen />);
   await fireEvent.press(getByText("Dan passed you in a challenge"));
+  expect(mockPush).toHaveBeenCalledWith("/challenge/c9");
+});
+
+test("renders challenge_started message and deep-links", async () => {
+  const { getByText } = await render(<NotificationsScreen />);
+  expect(getByText("A challenge you joined has started")).toBeTruthy();
+  await fireEvent.press(getByText("A challenge you joined has started"));
   expect(mockPush).toHaveBeenCalledWith("/challenge/c9");
 });
