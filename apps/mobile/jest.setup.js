@@ -5,6 +5,12 @@ jest.mock("react-native-safe-area-context", () =>
   require("react-native-safe-area-context/jest/mock").default,
 );
 
+// @react-native-async-storage/async-storage: the real native module is unavailable
+// under Jest, so we install the package's own official in-memory mock (per its docs).
+jest.mock("@react-native-async-storage/async-storage", () =>
+  require("@react-native-async-storage/async-storage/jest/async-storage-mock"),
+);
+
 // expo-image-picker (SDK 57): MediaTypeOptions is deprecated in favor of the `mediaTypes`
 // array + MediaType string union ("images" | "videos" | "livePhotos"). Both are mocked so
 // either call style resolves during tests.

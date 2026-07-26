@@ -3,6 +3,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, type Href } from "expo-router";
 import { signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase";
+import { unregisterPushToken } from "@/lib/push";
 import { AppText } from "@/components/Text";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { Icon } from "@/components/Icon";
@@ -48,7 +49,15 @@ export default function More() {
         ))}
         <Pressable
           accessibilityRole="button"
-          onPress={() => auth && signOut(auth)}
+          onPress={async () => {
+            if (!auth) return;
+            try {
+              await unregisterPushToken();
+            } catch {
+              // best-effort: still sign out even if de-registration fails
+            }
+            await signOut(auth);
+          }}
           style={{ flexDirection: "row", alignItems: "center", gap: 14, padding: spacing.md, marginTop: spacing.md }}
         >
           <AppText style={{ color: colors.destructive, fontWeight: "600" }}>Sign out</AppText>

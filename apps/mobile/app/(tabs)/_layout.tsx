@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Tabs, router } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, isFirebaseConfigured } from "@/lib/firebase";
+import { usePushRegistration } from "@/lib/push";
 import { useProfile } from "@/api/hooks";
 import { FloatingTabBar } from "@/components/FloatingTabBar";
 import { useTheme } from "@/theme";
@@ -9,6 +10,7 @@ import { useTheme } from "@/theme";
 export default function TabsLayout() {
   const { colors } = useTheme();
   const profile = useProfile();
+  usePushRegistration();
 
   useEffect(() => {
     if (!isFirebaseConfigured || !auth) return;
