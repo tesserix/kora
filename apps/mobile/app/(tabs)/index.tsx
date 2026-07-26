@@ -88,24 +88,26 @@ export default function Home() {
         </View>
       ) : null}
 
-      {/* hero */}
-      <Animated.View entering={enter(1)} style={{ paddingHorizontal: 16, paddingVertical: 12 }}>
-        <Card>
-          <KcalHero left={left} goal={goal} eaten={eaten} loading={!d && !loadError} />
-          {d ? (
-            <MacroBars
-              macros={{
-                p: d.consumed.protein_g,
-                c: d.consumed.carbs_g,
-                f: d.consumed.fat_g,
-                pGoal: d.targets.protein_g,
-                cGoal: d.targets.carbs_g,
-                fGoal: d.targets.fat_g,
-              }}
-            />
-          ) : null}
-        </Card>
-      </Animated.View>
+      {/* hero — hidden entirely on load error so no contradictory "0 calories left" shows */}
+      {!loadError ? (
+        <Animated.View entering={enter(1)} style={{ paddingHorizontal: 16, paddingVertical: 12 }}>
+          <Card>
+            <KcalHero left={left} goal={goal} eaten={eaten} loading={!d} />
+            {d ? (
+              <MacroBars
+                macros={{
+                  p: d.consumed.protein_g,
+                  c: d.consumed.carbs_g,
+                  f: d.consumed.fat_g,
+                  pGoal: d.targets.protein_g,
+                  cGoal: d.targets.carbs_g,
+                  fGoal: d.targets.fat_g,
+                }}
+              />
+            ) : null}
+          </Card>
+        </Animated.View>
+      ) : null}
 
       {/* meals */}
       <Animated.View entering={enter(2)}>

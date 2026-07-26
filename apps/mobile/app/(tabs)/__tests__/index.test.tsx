@@ -54,6 +54,7 @@ test("Home shows an error message when the dashboard fails to load", async () =>
   mockUseDashboard.mockReturnValue({ data: undefined, isError: true });
   mockUseDayLogs.mockReturnValue({ data: [], isError: false });
 
-  const { findByText } = await render(<Home />);
+  const { findByText, queryByText } = await render(<Home />);
   expect(await findByText(/Couldn't load your day/i)).toBeTruthy();
+  expect(queryByText(/calories left/i)).toBeNull();
 });
