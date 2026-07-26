@@ -36,12 +36,17 @@ type Challenge struct {
 	StartDate time.Time `json:"start_date"`
 	EndDate   time.Time `json:"end_date"`
 	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
+
+	StartedNotifiedAt *time.Time `gorm:"column:started_notified_at" json:"-"`
+	EndedNotifiedAt   *time.Time `gorm:"column:ended_notified_at" json:"-"`
 }
 
 type ChallengeParticipant struct {
 	ChallengeID uuid.UUID `gorm:"primaryKey" json:"challenge_id"`
 	UserID      uuid.UUID `gorm:"primaryKey" json:"user_id"`
 	JoinedAt    time.Time `gorm:"autoCreateTime" json:"joined_at"`
+
+	LastRank *int `gorm:"column:last_rank" json:"-"`
 }
 
 // ChallengeSummary is a list row within a group. Status is filled by the service

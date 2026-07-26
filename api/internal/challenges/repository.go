@@ -109,3 +109,95 @@ func (r Repository) Delete(ctx context.Context, challengeID uuid.UUID) error {
 	}
 	return nil
 }
+
+func (r Repository) ListDueForStart(ctx context.Context, today time.Time) ([]Challenge, error) {
+	out := []Challenge{}
+	err := r.db.WithContext(ctx).
+		Where("start_date <= ? AND started_notified_at IS NULL", today.Format("2006-01-02")).
+		Find(&out).Error
+	if err != nil {
+		return nil, fmt.Errorf("challenges: list due for start: %w", err)
+	}
+	return out, nil
+}
+
+func (r Repository) ListDueForEnd(ctx context.Context, today time.Time) ([]Challenge, error) {
+	out := []Challenge{}
+	err := r.db.WithContext(ctx).
+		Where("end_date < ? AND ended_notified_at IS NULL", today.Format("2006-01-02")).
+		Find(&out).Error
+	if err != nil {
+		return nil, fmt.Errorf("challenges: list due for end: %w", err)
+	}
+	return out, nil
+}
+
+func (r Repository) ListActive(ctx context.Context, today time.Time) ([]Challenge, error) {
+	d := today.Format("2006-01-02")
+	out := []Challenge{}
+	err := r.db.WithContext(ctx).
+		Where("start_date <= ? AND end_date >= ?", d, d).
+		Find(&out).Error
+	if err != nil {
+		return nil, fmt.Errorf("challenges: list active: %w", err)
+	}
+	return out, nil
+}
+
+func (r Repository) MarkStartedNotified(ctx context.Context, id uuid.UUID) error {
+	if err := r.db.WithContext(ctx).Model(&Challenge{}).Where("id = ?", id).
+		Update("started_notified_at", gorm.Expr("now()")).Error; err != nil {
+		return fmt.Errorf("challenges: mark started notified: %w", err)
+	}
+	return nil
+}
+
+func (r Repository) MarkEndedNotified(ctx context.Context, id uuid.UUID) error {
+	if err := r.db.WithContext(ctx).Model(&Challenge{}).Where("id = ?", id).
+		Update("ended_notified_at", gorm.Expr("now()")).Error; err != nil {
+		return fmt.Errorf("challenges: mark ended notified: %w", err)
+	}
+	return nil
+}
+
+func (r Repository) ParticipantIDs(ctx context.Context, challengeID uuid.UUID) ([]uuid.UUID, error) {
+	out := []uuid.UUID{}
+	err := r.db.WithContext(ctx).Model(&ChallengeParticipant{}).
+		Where("challenge_id = ?", challengeID).
+		Pluck("user_id", &out).Error
+	if err != nil {
+		return nil, fmt.Errorf("challenges: participant ids: %w", err)
+	}
+	return out, nil
+}
+
+func (r Repository) ParticipantRanks(ctx context.Context, challengeID uuid.UUID) (map[uuid.UUID]*int, error) {
+	type row struct {
+		UserID   uuid.UUID
+		LastRank *int
+	}
+	var rows []row
+	err := r.db.WithContext(ctx).Model(&ChallengeParticipant{}).
+		Select("user_id, last_rank").
+		Where("challenge_id = ?", challengeID).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("challenges: participant ranks: %w", err)
+	}
+	m := make(map[uuid.UUID]*int, len(rows))
+	for _, rw := range rows {
+		m[rw.UserID] = rw.LastRank
+	}
+	return m, nil
+}
+
+func (r Repository) SetLastRanks(ctx context.Context, challengeID uuid.UUID, ranks map[uuid.UUID]int) error {
+	for uid, rank := range ranks {
+		if err := r.db.WithContext(ctx).Model(&ChallengeParticipant{}).
+			Where("challenge_id = ? AND user_id = ?", challengeID, uid).
+			Update("last_rank", rank).Error; err != nil {
+			return fmt.Errorf("challenges: set last ranks: %w", err)
+		}
+	}
+	return nil
+}
