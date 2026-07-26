@@ -105,3 +105,54 @@ jest.mock("expo-constants", () => ({
   __esModule: true,
   default: { expoConfig: { extra: { eas: { projectId: "test-project" } } } },
 }));
+
+// react-native-reanimated: the real native/worklets runtime is unavailable under Jest.
+// jest-expo does not auto-mock reanimated, and reanimated 4's own shipped mock
+// (react-native-reanimated/mock) is NOT usable here: it imports from the package's
+// real "./index", which unconditionally calls into react-native-worklets'
+// NativeWorklets.native.ts at module load time and throws ("Cannot read properties
+// of undefined (reading 'loadUnpackers')") outside a real native runtime. So this is
+// a hand-written mock covering only the API surface src/motion actually calls,
+// mirroring the semantics of reanimated's own mock (synchronous withSpring/withTiming,
+// a NOOP useAnimatedReaction, identity runOnJS) so behavior matches what the shipped
+// mock would do if it were loadable.
+jest.mock("react-native-reanimated", () => {
+  const { View } = require("react-native");
+  const ID = (t) => t;
+  const NOOP = () => {};
+  return {
+    __esModule: true,
+    default: { View },
+    useReducedMotion: jest.fn(() => false),
+    useSharedValue: (init) => ({ value: init }),
+    useAnimatedStyle: (factory) => factory(),
+    useAnimatedReaction: NOOP,
+    withSpring: (toValue, _config, callback) => {
+      callback?.(true);
+      return toValue;
+    },
+    withTiming: (toValue, _config, callback) => {
+      callback?.(true);
+      return toValue;
+    },
+    cancelAnimation: NOOP,
+    runOnJS: ID,
+    Easing: {
+      linear: ID,
+      ease: ID,
+      cubic: ID,
+      out: ID,
+      in: ID,
+      inOut: ID,
+    },
+  };
+});
+
+// expo-haptics: native haptic feedback is unavailable under Jest.
+jest.mock("expo-haptics", () => ({
+  selectionAsync: jest.fn(async () => {}),
+  impactAsync: jest.fn(async () => {}),
+  notificationAsync: jest.fn(async () => {}),
+  ImpactFeedbackStyle: { Light: "light", Medium: "medium", Heavy: "heavy" },
+  NotificationFeedbackType: { Success: "success", Warning: "warning", Error: "error" },
+}));
