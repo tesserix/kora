@@ -149,7 +149,7 @@ Title `"Kora"`; `data: {type, entity_id}` for deep-link.
 | friend_request     | `{actor} sent you a friend request`    |
 | friend_accept      | `{actor} accepted your friend request` |
 | group_invite       | `{actor} added you to a group`         |
-| challenge_created  | `{actor} created a challenge`          |
+| challenge_created  | `{actor} started a challenge`          |
 | challenge_started  | `A challenge you joined has started`   |
 | challenge_ended    | `{actor} won a challenge`              |
 | challenge_passed   | `{actor} passed you in a challenge`    |
