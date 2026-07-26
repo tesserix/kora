@@ -125,24 +125,10 @@ func (s Service) Detail(ctx context.Context, userID, challengeID uuid.UUID, now 
 		return ChallengeDetail{}, err
 	}
 	status := Status(ch.StartDate, ch.EndDate, now, loc)
-	rows, err := s.repo.ListParticipantsForScoring(ctx, ch.ID)
+	standings, err := s.standingsFor(ctx, ch, loc)
 	if err != nil {
 		return ChallengeDetail{}, err
 	}
-	standings := make([]Standing, 0, len(rows))
-	for _, r := range rows {
-		score, err := progress.WindowScore(ctx, s.logs, r.ID, string(ch.Metric), r.TargetKcal, ch.StartDate, ch.EndDate, loc)
-		if err != nil {
-			return ChallengeDetail{}, err
-		}
-		standings = append(standings, Standing{UserID: r.ID, DisplayName: r.DisplayName, Score: score})
-	}
-	sort.SliceStable(standings, func(i, j int) bool {
-		if standings[i].Score != standings[j].Score {
-			return standings[i].Score > standings[j].Score
-		}
-		return standings[i].DisplayName < standings[j].DisplayName
-	})
 	joined, err := s.repo.IsParticipant(ctx, ch.ID, userID)
 	if err != nil {
 		return ChallengeDetail{}, err
@@ -162,6 +148,42 @@ func (s Service) Detail(ctx context.Context, userID, challengeID uuid.UUID, now 
 		Joined: joined, CanDelete: userID == ch.CreatorID || owner,
 		Standings: standings, Winner: winner,
 	}, nil
+}
+
+// standingsFor scores every participant and ranks them (score desc, name asc).
+func (s Service) standingsFor(ctx context.Context, ch *Challenge, loc *time.Location) ([]Standing, error) {
+	rows, err := s.repo.ListParticipantsForScoring(ctx, ch.ID)
+	if err != nil {
+		return nil, err
+	}
+	standings := make([]Standing, 0, len(rows))
+	for _, r := range rows {
+		score, err := progress.WindowScore(ctx, s.logs, r.ID, string(ch.Metric), r.TargetKcal, ch.StartDate, ch.EndDate, loc)
+		if err != nil {
+			return nil, err
+		}
+		standings = append(standings, Standing{UserID: r.ID, DisplayName: r.DisplayName, Score: score})
+	}
+	sort.SliceStable(standings, func(i, j int) bool {
+		if standings[i].Score != standings[j].Score {
+			return standings[i].Score > standings[j].Score
+		}
+		return standings[i].DisplayName < standings[j].DisplayName
+	})
+	return standings, nil
+}
+
+// Standings returns the ranked standings for a challenge (no membership gate;
+// used internally, e.g. by the scheduler).
+func (s Service) Standings(ctx context.Context, challengeID uuid.UUID, loc *time.Location) ([]Standing, error) {
+	ch, err := s.repo.FindByID(ctx, challengeID)
+	if err != nil {
+		return nil, err
+	}
+	if ch == nil {
+		return nil, ErrNotFound
+	}
+	return s.standingsFor(ctx, ch, loc)
 }
 
 func (s Service) Delete(ctx context.Context, userID, challengeID uuid.UUID) error {
