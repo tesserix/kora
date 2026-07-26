@@ -37,6 +37,14 @@ test("PressableScale with haptic none calls no haptics", async () => {
   expect(Haptics.notificationAsync).not.toHaveBeenCalled();
 });
 
+// NOTE: the jest reanimated mock NOOPs useAnimatedReaction, so these tests
+// exercise the initial render / reduced-motion snap paths only. They cannot
+// catch worklet-runtime bugs in the reaction body (e.g. calling a JS-thread
+// `format` function inside the reaction, which crashes on-device with
+// "[Worklets] Tried to synchronously call a Remote Function" on reanimated
+// 4.5 + worklets). That class of bug is device-only-verifiable; the fix is
+// to keep `format` out of the reaction and only apply it at render time on
+// the JS thread.
 test("AnimatedNumber renders the formatted target value", async () => {
   const { findByText } = await render(<AnimatedNumber value={1234} />);
   expect(await findByText("1,234")).toBeTruthy();
