@@ -427,7 +427,6 @@ export function useMarkAllRead() {
   return useMutation({
     mutationFn: () => apiFetch("/v1/notifications/read", { method: "POST" }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["notifications"] });
       qc.invalidateQueries({ queryKey: ["notifications", "unread"] });
     },
   });

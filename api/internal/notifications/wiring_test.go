@@ -72,6 +72,40 @@ func TestSendRequestWritesFriendRequestNotification(t *testing.T) {
 	require.Equal(t, "Sender", list[0].ActorName)
 }
 
+func TestReversePendingAutoAcceptWritesFriendAcceptNotificationToOriginalRequester(t *testing.T) {
+	db := wiringDB(t)
+	userA := seedU(t, db, "Alice", "alice-"+uuid.NewString()+"@t.dev")
+	userB := seedU(t, db, "Bob", "bob-"+uuid.NewString()+"@t.dev")
+
+	notifSvc := notifications.NewService(notifications.NewRepository(db), nil) // nil members ok — no fan-out here
+	svc := social.NewService(social.NewRepository(db), user.NewRepository(db)).WithNotifier(notifSvc)
+
+	var aEmail, bEmail string
+	require.NoError(t, db.Raw("SELECT email FROM users WHERE id = ?", userA).Scan(&aEmail).Error)
+	require.NoError(t, db.Raw("SELECT email FROM users WHERE id = ?", userB).Scan(&bEmail).Error)
+
+	// A sends a friend request to B → pending A->B, friend_request notification to B.
+	_, err := svc.SendRequest(context.Background(), userA, bEmail, "")
+	require.NoError(t, err)
+
+	// B sends a friend request back to A → reverse-pending auto-accept branch,
+	// which must fire FriendAccepted to the ORIGINAL requester (A).
+	_, err = svc.SendRequest(context.Background(), userB, aEmail, "")
+	require.NoError(t, err)
+
+	aNotifs, err := notifications.NewRepository(db).ListForUser(context.Background(), userA, 50)
+	require.NoError(t, err)
+
+	var accept *notifications.NotificationView
+	for i := range aNotifs {
+		if aNotifs[i].Type == notifications.TypeFriendAccept {
+			accept = &aNotifs[i]
+		}
+	}
+	require.NotNil(t, accept, "expected a friend_accept notification for A")
+	require.Equal(t, "Bob", accept.ActorName)
+}
+
 func TestNotifierErrorDoesNotFailAction(t *testing.T) {
 	db := wiringDB(t)
 	sender := seedU(t, db, "Sender", "s2-"+uuid.NewString()+"@t.dev")
