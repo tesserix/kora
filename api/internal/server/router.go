@@ -88,7 +88,7 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.GET("/weight", trackingHandler.ListWeight)
 
 		socialRepo := social.NewRepository(deps.DB)
-		socialHandler := social.NewHandler(social.NewService(socialRepo, userRepo))
+		socialHandler := social.NewHandler(social.NewService(socialRepo, userRepo).WithNotifier(notificationsSvc))
 		v1.GET("/friends", socialHandler.ListFriends)
 		v1.GET("/friends/requests", socialHandler.ListRequests)
 		v1.POST("/friends/requests", socialHandler.SendRequest)
@@ -104,7 +104,7 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.GET("/dashboard", dashboardHandler.Get)
 
 		groupsRepo := groups.NewRepository(deps.DB)
-		groupsSvc := groups.NewService(groupsRepo, socialRepo, groups.NewCode)
+		groupsSvc := groups.NewService(groupsRepo, socialRepo, groups.NewCode).WithNotifier(notificationsSvc)
 		groupsHandler := groups.NewHandler(groupsSvc, groupsRepo, compare.NewService(socialRepo, userRepo, logRepo))
 		v1.POST("/groups", groupsHandler.Create)
 		v1.GET("/groups", groupsHandler.List)
@@ -118,7 +118,7 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.DELETE("/groups/:id", groupsHandler.Delete)
 
 		challengesRepo := challenges.NewRepository(deps.DB)
-		challengesHandler := challenges.NewHandler(challenges.NewService(challengesRepo, groupsRepo, logRepo))
+		challengesHandler := challenges.NewHandler(challenges.NewService(challengesRepo, groupsRepo, logRepo).WithNotifier(notificationsSvc))
 		v1.POST("/groups/:id/challenges", challengesHandler.Create)
 		v1.GET("/groups/:id/challenges", challengesHandler.List)
 		v1.POST("/challenges/:cid/join", challengesHandler.Join)

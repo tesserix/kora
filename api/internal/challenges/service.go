@@ -2,6 +2,7 @@ package challenges
 
 import (
 	"context"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -30,14 +31,24 @@ type groupAccess interface {
 	RoleOf(ctx context.Context, groupID, userID uuid.UUID) (groups.Role, bool, error)
 }
 
+type notifier interface {
+	ChallengeCreated(ctx context.Context, groupID, actorID, challengeID uuid.UUID) error
+}
+
 type Service struct {
-	repo   challengeStore
-	groups groupAccess
-	logs   progress.LogSource
+	repo     challengeStore
+	groups   groupAccess
+	logs     progress.LogSource
+	notifier notifier
 }
 
 func NewService(repo challengeStore, groupAcc groupAccess, logs progress.LogSource) Service {
 	return Service{repo: repo, groups: groupAcc, logs: logs}
+}
+
+func (s Service) WithNotifier(n notifier) Service {
+	s.notifier = n
+	return s
 }
 
 func (s Service) Create(ctx context.Context, userID, groupID uuid.UUID, title string, metric Metric, duration string, now time.Time) (Challenge, error) {
@@ -62,7 +73,16 @@ func (s Service) Create(ctx context.Context, userID, groupID uuid.UUID, title st
 	y, m, d := now.Date()
 	start := time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 	end := start.AddDate(0, 0, days)
-	return s.repo.Create(ctx, groupID, userID, title, metric, start, end)
+	ch, err := s.repo.Create(ctx, groupID, userID, title, metric, start, end)
+	if err != nil {
+		return Challenge{}, err
+	}
+	if s.notifier != nil {
+		if nerr := s.notifier.ChallengeCreated(ctx, groupID, userID, ch.ID); nerr != nil {
+			slog.WarnContext(ctx, "notify challenge created failed", "err", nerr)
+		}
+	}
+	return ch, nil
 }
 
 func (s Service) List(ctx context.Context, userID, groupID uuid.UUID, now time.Time, loc *time.Location) ([]ChallengeSummary, error) {

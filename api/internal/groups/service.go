@@ -3,6 +3,7 @@ package groups
 import (
 	"context"
 	"crypto/rand"
+	"log/slog"
 
 	"github.com/google/uuid"
 )
@@ -24,14 +25,24 @@ type friendChecker interface {
 	AreFriends(ctx context.Context, a, b uuid.UUID) (bool, error)
 }
 
+type notifier interface {
+	AddedToGroup(ctx context.Context, recipientID, actorID, groupID uuid.UUID) error
+}
+
 type Service struct {
-	repo    Repository
-	friends friendChecker
-	newCode func() (string, error)
+	repo     Repository
+	friends  friendChecker
+	newCode  func() (string, error)
+	notifier notifier
 }
 
 func NewService(repo Repository, friends friendChecker, newCode func() (string, error)) Service {
 	return Service{repo: repo, friends: friends, newCode: newCode}
+}
+
+func (s Service) WithNotifier(n notifier) Service {
+	s.notifier = n
+	return s
 }
 
 type GroupDetail struct {
@@ -78,7 +89,15 @@ func (s Service) InviteFriend(ctx context.Context, ownerID, groupID, friendID uu
 	if !ok {
 		return ErrNotFriends
 	}
-	return s.repo.AddMember(ctx, groupID, friendID, RoleMember)
+	if err := s.repo.AddMember(ctx, groupID, friendID, RoleMember); err != nil {
+		return err
+	}
+	if s.notifier != nil {
+		if nerr := s.notifier.AddedToGroup(ctx, friendID, ownerID, groupID); nerr != nil {
+			slog.WarnContext(ctx, "notify added to group failed", "err", nerr)
+		}
+	}
+	return nil
 }
 
 func (s Service) Leave(ctx context.Context, userID, groupID uuid.UUID) error {

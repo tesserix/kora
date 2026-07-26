@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"log/slog"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -11,13 +12,24 @@ import (
 	"github.com/tesserix/kora/api/internal/user"
 )
 
+type notifier interface {
+	FriendRequested(ctx context.Context, recipientID, actorID uuid.UUID) error
+	FriendAccepted(ctx context.Context, recipientID, actorID uuid.UUID) error
+}
+
 type Service struct {
-	repo  Repository
-	users user.Repository
+	repo     Repository
+	users    user.Repository
+	notifier notifier
 }
 
 func NewService(repo Repository, users user.Repository) Service {
 	return Service{repo: repo, users: users}
+}
+
+func (s Service) WithNotifier(n notifier) Service {
+	s.notifier = n
+	return s
 }
 
 // Crockford base32 alphabet (no I, L, O, U to avoid ambiguity).
@@ -66,10 +78,24 @@ func (s Service) SendRequest(ctx context.Context, requesterID uuid.UUID, email, 
 				return Friendship{}, err
 			}
 			existing.Status = FriendStatusAccepted
+			if s.notifier != nil {
+				if nerr := s.notifier.FriendAccepted(ctx, existing.RequesterID, requesterID); nerr != nil {
+					slog.WarnContext(ctx, "notify friend accept failed", "err", nerr)
+				}
+			}
 		}
 		return *existing, nil // accepted or same-direction pending → idempotent
 	}
-	return s.repo.Create(ctx, Friendship{RequesterID: requesterID, AddresseeID: target.ID, Status: FriendStatusPending})
+	created, err := s.repo.Create(ctx, Friendship{RequesterID: requesterID, AddresseeID: target.ID, Status: FriendStatusPending})
+	if err != nil {
+		return Friendship{}, err
+	}
+	if s.notifier != nil {
+		if nerr := s.notifier.FriendRequested(ctx, target.ID, requesterID); nerr != nil {
+			slog.WarnContext(ctx, "notify friend request failed", "err", nerr)
+		}
+	}
+	return created, nil
 }
 
 func (s Service) Accept(ctx context.Context, addresseeID, requestID uuid.UUID) error {
@@ -83,7 +109,15 @@ func (s Service) Accept(ctx context.Context, addresseeID, requestID uuid.UUID) e
 	if f.AddresseeID != addresseeID {
 		return ErrForbidden
 	}
-	return s.repo.UpdateStatus(ctx, f.ID, FriendStatusAccepted)
+	if err := s.repo.UpdateStatus(ctx, f.ID, FriendStatusAccepted); err != nil {
+		return err
+	}
+	if s.notifier != nil {
+		if nerr := s.notifier.FriendAccepted(ctx, f.RequesterID, addresseeID); nerr != nil {
+			slog.WarnContext(ctx, "notify friend accept failed", "err", nerr)
+		}
+	}
+	return nil
 }
 
 func (s Service) Decline(ctx context.Context, addresseeID, requestID uuid.UUID) error {
