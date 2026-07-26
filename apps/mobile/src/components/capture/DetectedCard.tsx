@@ -2,7 +2,6 @@ import { ActivityIndicator, Pressable, View } from "react-native";
 import { Icon } from "@/components/Icon";
 import { AppText } from "@/components/Text";
 import { foodVisual } from "@/lib/foodVisual";
-import { tileBgDark, tileFgDark } from "@/lib/hue";
 import type { MealSlot } from "@/lib/mealSlot";
 import { kcalTotalLabel } from "@/lib/resolutionKcal";
 import type { Resolution, ResolvedCandidate } from "@/api/types";
@@ -25,7 +24,7 @@ const MEAL_SLOTS: ReadonlyArray<{ slot: MealSlot; label: string; icon: string }>
 ];
 
 function CandidateRow({ candidate, isLast }: { candidate: ResolvedCandidate; isLast: boolean }) {
-  const { hue, icon } = foodVisual(candidate.item.name);
+  const { icon } = foodVisual(candidate.item.name);
   return (
     <View
       style={{
@@ -45,10 +44,10 @@ function CandidateRow({ candidate, isLast }: { candidate: ResolvedCandidate; isL
           alignItems: "center",
           justifyContent: "center",
           flexShrink: 0,
-          backgroundColor: tileBgDark(hue),
+          backgroundColor: captureColors.tileBg,
         }}
       >
-        <Icon name={icon} size={18} color={tileFgDark(hue)} />
+        <Icon name={icon} size={18} color={captureColors.tileFg} />
       </View>
       <View style={{ flex: 1 }}>
         <AppText style={{ color: captureColors.onSurface, fontSize: 14, fontWeight: "600" }}>

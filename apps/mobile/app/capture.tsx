@@ -24,6 +24,7 @@ import { ModePill } from "@/components/capture/ModePill";
 import { Waveform } from "@/components/capture/Waveform";
 import { DetectedCard } from "@/components/capture/DetectedCard";
 import { captureColors } from "@/components/capture/captureTheme";
+import { haptics } from "@/motion";
 import {
   useCreateLog,
   useProfile,
@@ -550,7 +551,7 @@ export function CaptureBody({
               width: 38,
               height: 38,
               borderRadius: 9999,
-              backgroundColor: text.trim() ? captureColors.primary : "rgba(255,255,255,0.15)",
+              backgroundColor: text.trim() ? captureColors.primary : captureColors.sendInactiveBg,
               alignItems: "center",
               justifyContent: "center",
             }}
@@ -855,6 +856,7 @@ export default function CaptureScreen() {
     setLoggedCandidateKeys(updatedKeys);
 
     if (failedNames.length > 0) {
+      haptics.error();
       setErrorMsg(
         `I logged ${updatedKeys.size} of ${resolution.candidates.length} items, but couldn't log ${failedNames.join(
           ", ",
@@ -863,6 +865,7 @@ export default function CaptureScreen() {
       return;
     }
 
+    haptics.success();
     router.back();
   }
 

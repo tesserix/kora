@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { View } from "react-native";
+import Animated, { FadeInDown } from "react-native-reanimated";
 import { Icon } from "@/components/Icon";
 import { AppText } from "@/components/Text";
 import { captureColors } from "./captureTheme";
@@ -10,9 +11,13 @@ interface Props {
 
 // Otto's chat bubble — camera avatar + translucent bubble, top-left corner
 // squared off (radius 6) to point back at the avatar, per CaptureScreen.jsx.
+// Springs in on entrance to mark each new Otto message in the thread.
 export function OttoBubble({ children }: Props) {
   return (
-    <View style={{ flexDirection: "row", gap: 10, alignItems: "flex-start" }}>
+    <Animated.View
+      entering={FadeInDown.duration(250)}
+      style={{ flexDirection: "row", gap: 10, alignItems: "flex-start" }}
+    >
       <View
         style={{
           width: 30,
@@ -43,6 +48,6 @@ export function OttoBubble({ children }: Props) {
       >
         <AppText style={{ color: captureColors.onSurface, fontSize: 14, lineHeight: 21 }}>{children}</AppText>
       </View>
-    </View>
+    </Animated.View>
   );
 }

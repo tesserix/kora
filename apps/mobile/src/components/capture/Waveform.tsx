@@ -4,6 +4,10 @@ import { captureColors } from "./captureTheme";
 
 type Props = { active: boolean };
 
+// Animated.Value's current numeric value is only exposed via the (untyped)
+// internal `__getValue` — narrowly typed here rather than reaching for `any`.
+type ReadableAnimatedValue = Animated.Value & { __getValue: () => number };
+
 // Bar heights lifted verbatim from CaptureScreen.jsx's voice-listening waveform.
 const BAR_HEIGHTS = [10, 20, 14, 26, 16, 22, 12, 18, 10] as const;
 const BAR_WIDTH = 3;
@@ -34,7 +38,13 @@ export function Waveform({ active }: Props) {
 
   useEffect(() => {
     if (!active || reducedMotion) {
-      scales.forEach((value) => value.setValue(1));
+      // Skip the imperative write when a bar is already at rest — avoids an
+      // unnecessary AnimatedValue update (and its Jest "not configured for
+      // act()" warning) on the common case of mounting already-inactive,
+      // while still forcing bars back to 1 on an active->inactive transition.
+      scales.forEach((value) => {
+        if ((value as ReadableAnimatedValue).__getValue() !== 1) value.setValue(1);
+      });
       return undefined;
     }
 

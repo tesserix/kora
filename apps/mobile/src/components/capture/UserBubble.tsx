@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { View } from "react-native";
+import Animated, { FadeInDown } from "react-native-reanimated";
 import { AppText } from "@/components/Text";
 import { captureColors } from "./captureTheme";
 
@@ -8,10 +9,11 @@ interface Props {
 }
 
 // The user's own message — primary-filled bubble, right-aligned, top-right
-// corner squared off (radius 6), per CaptureScreen.jsx.
+// corner squared off (radius 6), per CaptureScreen.jsx. Springs in on
+// entrance to mark each new user message in the thread.
 export function UserBubble({ children }: Props) {
   return (
-    <View style={{ flexDirection: "row", justifyContent: "flex-end" }}>
+    <Animated.View entering={FadeInDown.duration(250)} style={{ flexDirection: "row", justifyContent: "flex-end" }}>
       <View
         style={{
           backgroundColor: captureColors.primary,
@@ -26,6 +28,6 @@ export function UserBubble({ children }: Props) {
           {children}
         </AppText>
       </View>
-    </View>
+    </Animated.View>
   );
 }
