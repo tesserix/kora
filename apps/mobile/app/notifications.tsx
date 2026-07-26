@@ -1,11 +1,12 @@
 import { useEffect } from "react";
 import { Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { router, type Href } from "expo-router";
+import { router } from "expo-router";
 import { AppText } from "@/components/Text";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { useNotifications, useMarkAllRead } from "@/api/hooks";
 import { useTheme } from "@/theme";
+import { targetFor } from "@/lib/notificationTarget";
 import type { AppNotification } from "@/api/types";
 
 function message(n: AppNotification): string {
@@ -26,23 +27,6 @@ function message(n: AppNotification): string {
       return `${n.actor_name} passed you in a challenge`;
     default:
       return n.actor_name;
-  }
-}
-
-function targetFor(n: AppNotification): Href | null {
-  switch (n.type) {
-    case "friend_request":
-    case "friend_accept":
-      return "/friends" as Href;
-    case "group_invite":
-      return n.entity_id ? (`/group/${n.entity_id}` as Href) : null;
-    case "challenge_created":
-    case "challenge_started":
-    case "challenge_ended":
-    case "challenge_passed":
-      return n.entity_id ? (`/challenge/${n.entity_id}` as Href) : null;
-    default:
-      return null;
   }
 }
 

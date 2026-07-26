@@ -4,8 +4,11 @@ import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { onAuthStateChanged } from "firebase/auth";
+import { router } from "expo-router";
 import { auth, isFirebaseConfigured } from "@/lib/firebase";
 import { registerDevice, unregisterDevice } from "@/lib/pushApi";
+import { targetFor } from "@/lib/notificationTarget";
+import type { NotificationType } from "@/api/types";
 
 const TOKEN_KEY = "kora.pushToken";
 
@@ -49,5 +52,35 @@ export function usePushRegistration(): void {
       if (user) void registerPushToken();
     });
     return unsub;
+  }, []);
+}
+
+// setupPushHandler configures how foreground notifications are presented.
+// Verified against the installed expo-notifications@57 types and the v57 docs:
+// shouldShowBanner/shouldShowList replaced the deprecated shouldShowAlert in SDK 54+.
+export function setupPushHandler(): void {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    }),
+  });
+}
+
+// usePushResponder deep-links when the user taps a push.
+export function usePushResponder(): void {
+  useEffect(() => {
+    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const data = response.notification.request.content.data as {
+        type?: NotificationType;
+        entity_id?: string;
+      };
+      if (!data?.type) return;
+      const target = targetFor({ type: data.type, entity_id: data.entity_id });
+      if (target) router.push(target);
+    });
+    return () => sub.remove();
   }, []);
 }
