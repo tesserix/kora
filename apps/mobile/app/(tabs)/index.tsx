@@ -1,13 +1,14 @@
-import { Pressable, ScrollView, View } from "react-native";
+import { useEffect, useRef } from "react";
+import { ScrollView, View } from "react-native";
+import Animated, { FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { AppText } from "@/components/Text";
 import { Avatar } from "@/components/Avatar";
-import { Icon } from "@/components/Icon";
-import { Overline } from "@/components/Overline";
-import { CaptureHero } from "@/components/home/CaptureHero";
-import { FuelStrip } from "@/components/home/FuelStrip";
-import { FeedMeal } from "@/components/home/FeedMeal";
+import { Card } from "@/components/Card";
+import { GroupedSection, Row } from "@/components/GroupedList";
+import { KcalHero } from "@/components/home/KcalHero";
+import { MacroBars } from "@/components/home/MacroBars";
 import { useProfile, useDashboard, useDayLogs } from "@/api/hooks";
 import { useTheme } from "@/theme";
 import type { FoodLog } from "@/api/types";
@@ -26,9 +27,9 @@ function initials(name?: string): string {
   if (!name) return "K";
   return name.split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase();
 }
-
-// Static Otto notes — placeholder until Phase 6 coaching.
-const NOTES: Array<string | null> = ["Solid protein start — kept you full till noon.", null, "Smart snack choice.", null];
+function mealTime(log: FoodLog): string {
+  return new Date(log.logged_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
 
 export default function Home() {
   const { colors, spacing } = useTheme();
@@ -38,12 +39,23 @@ export default function Home() {
   const dashboard = useDashboard(date);
   const logs = useDayLogs(date);
 
+  // Entrance stagger runs on first mount only — refetches (e.g. pull-to-refresh,
+  // React Query background revalidation) update `dashboard`/`logs` in place
+  // without unmounting this screen, so `firstMount.current` is already false
+  // by the time those re-renders happen and no re-stagger occurs.
+  const firstMount = useRef(true);
+  useEffect(() => {
+    firstMount.current = false;
+  }, []);
+  const enter = (i: number) => (firstMount.current ? FadeInDown.duration(300).delay(i * 30) : undefined);
+
   const d = dashboard.data;
   const loadError = dashboard.isError || logs.isError;
   const eaten = d?.consumed.kcal ?? 0;
   const goal = d?.targets.kcal ?? 0;
   const left = Math.round(Math.max(0, goal - eaten));
   const loggedMeals = (logs.data ?? []) as FoodLog[];
+  const firstName = profile.data?.display_name?.trim().split(" ")[0] || "there";
 
   const openMeal = (log: FoodLog) =>
     router.push({
@@ -53,78 +65,69 @@ export default function Home() {
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingTop: insets.top + spacing.sm, paddingBottom: 130 }}>
-      {/* header */}
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingBottom: 16 }}>
+      {/* header: large title */}
+      <Animated.View
+        entering={enter(0)}
+        style={{ paddingHorizontal: 16, paddingBottom: 8, flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end" }}
+      >
         <View>
-          <Overline>{dateLabel()}</Overline>
-          <AppText style={{ fontSize: 15, fontWeight: "600" }}>{greeting()}, {profile.data?.display_name?.trim().split(" ")[0] || "there"}</AppText>
+          <AppText variant="subheadline" muted>
+            {dateLabel()} · {greeting()}, {firstName}
+          </AppText>
+          <AppText variant="largeTitle">Today</AppText>
         </View>
-        <View style={{ flexDirection: "row", gap: 10, alignItems: "center" }}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Open coach"
-            onPress={() => {}}
-            style={{ width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }}
-          >
-            <Icon name="message-circle" size={19} color={colors.foreground} />
-          </Pressable>
-          <Avatar initials={initials(profile.data?.display_name)} />
-        </View>
-      </View>
+        <Avatar initials={initials(profile.data?.display_name)} />
+      </Animated.View>
 
-      {/* Otto editorial headline (static copy placeholder) */}
-      <View style={{ paddingHorizontal: 20, paddingBottom: 18 }}>
-        {loadError ? (
-          <AppText style={{ color: colors.destructive, fontSize: 15, lineHeight: 22 }}>
+      {/* error state keeps current copy + destructive color */}
+      {loadError ? (
+        <View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
+          <AppText variant="subheadline" style={{ color: colors.destructive }}>
             Couldn't load your day. Pull to refresh or try again.
           </AppText>
-        ) : d ? (
-          <>
-            <AppText style={{ fontSize: 27, lineHeight: 32, fontWeight: "800", letterSpacing: -0.81 }}>
-              You're <AppText style={{ fontSize: 27, lineHeight: 32, fontWeight: "800", letterSpacing: -0.81, color: colors.primary }}>{left.toLocaleString()} kcal</AppText> from a strong day.
-            </AppText>
-            <AppText muted style={{ marginTop: 8, fontSize: 14.5, lineHeight: 22 }}>Protein's on track. A lean, high-protein dinner and you'll close every ring.</AppText>
-          </>
-        ) : (
-          <AppText muted style={{ fontSize: 15, lineHeight: 22 }}>Getting your day ready…</AppText>
-        )}
-      </View>
-
-      {/* Capture hero */}
-      <View style={{ paddingHorizontal: 20, paddingBottom: 18 }}>
-        <CaptureHero onPress={() => router.push("/capture")} />
-      </View>
-
-      {/* Compact fuel summary */}
-      {d ? (
-        <View style={{ paddingHorizontal: 20, paddingBottom: 20 }}>
-          <FuelStrip
-            eaten={eaten}
-            goal={goal}
-            macros={{ p: d.consumed.protein_g, c: d.consumed.carbs_g, f: d.consumed.fat_g, pGoal: d.targets.protein_g, cGoal: d.targets.carbs_g, fGoal: d.targets.fat_g }}
-          />
         </View>
       ) : null}
 
-      {/* Today feed */}
-      <View style={{ paddingHorizontal: 20 }}>
-        <Overline style={{ fontSize: 13, letterSpacing: 1 }}>Today</Overline>
-        <View style={{ gap: 14, marginTop: 12 }}>
-          {loggedMeals.map((log, i) => (
-            <FeedMeal key={log.id} log={log} note={NOTES[i % NOTES.length]} onOpen={() => openMeal(log)} />
+      {/* hero */}
+      <Animated.View entering={enter(1)} style={{ paddingHorizontal: 16, paddingVertical: 12 }}>
+        <Card>
+          <KcalHero left={left} goal={goal} eaten={eaten} loading={!d && !loadError} />
+          {d ? (
+            <MacroBars
+              macros={{
+                p: d.consumed.protein_g,
+                c: d.consumed.carbs_g,
+                f: d.consumed.fat_g,
+                pGoal: d.targets.protein_g,
+                cGoal: d.targets.carbs_g,
+                fGoal: d.targets.fat_g,
+              }}
+            />
+          ) : null}
+        </Card>
+      </Animated.View>
+
+      {/* meals */}
+      <Animated.View entering={enter(2)}>
+        <GroupedSection header="Meals" style={{ paddingHorizontal: 16, marginTop: 8 }}>
+          {loggedMeals.map((log) => (
+            <Row
+              key={log.id}
+              title={log.description}
+              subtitle={`${log.meal_slot} · ${mealTime(log)}`}
+              detail={`${Math.round(log.kcal)} kcal`}
+              chevron
+              onPress={() => openMeal(log)}
+            />
           ))}
-          <Pressable
-            accessibilityRole="button"
+          <Row
+            title="Log a meal"
+            icon={{ name: "plus", tint: colors.primary }}
             accessibilityLabel="Add a meal"
             onPress={() => router.push("/capture")}
-            style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderRadius: 16, borderWidth: 1.5, borderStyle: "dashed", borderColor: colors.border, opacity: pressed ? 0.7 : 1 })}
-          >
-            <Icon name="plus" size={20} color={colors.primary} />
-            <AppText style={{ fontSize: 14, fontWeight: "600" }}>Add a meal</AppText>
-            <AppText muted style={{ marginLeft: "auto", fontSize: 12 }}>Snap · say · scan</AppText>
-          </Pressable>
-        </View>
-      </View>
+          />
+        </GroupedSection>
+      </Animated.View>
     </ScrollView>
   );
 }

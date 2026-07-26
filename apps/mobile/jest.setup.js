@@ -191,6 +191,19 @@ jest.mock("react-native-reanimated", () => {
       in: ID,
       inOut: ID,
     },
+    // Layout-animation entering builders (FadeInDown, etc.): under Jest there's no
+    // native layout-animation runtime to drive them, so `entering` never actually
+    // animates anything — it's just a prop that must not throw when constructed via
+    // its real chainable API (`FadeInDown.duration(300).delay(30)`). This stub
+    // mirrors that chaining surface, returning itself so any call order resolves.
+    FadeInDown: (() => {
+      const builder = {
+        duration: () => builder,
+        delay: () => builder,
+        springify: () => builder,
+      };
+      return builder;
+    })(),
   };
 });
 

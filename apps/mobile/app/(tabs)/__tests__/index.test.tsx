@@ -1,8 +1,10 @@
-import { render } from "@testing-library/react-native";
+import { render, fireEvent } from "@testing-library/react-native";
 
 jest.mock("@/lib/firebase", () => ({ auth: null, isFirebaseConfigured: true }));
 jest.mock("firebase/auth", () => ({ onAuthStateChanged: () => () => {}, signOut: jest.fn() }));
-jest.mock("expo-router", () => ({ router: { push: jest.fn(), replace: jest.fn() } }));
+
+const mockPush = jest.fn();
+jest.mock("expo-router", () => ({ router: { push: (...a: unknown[]) => mockPush(...a), replace: jest.fn() } }));
 
 const mockUseDashboard = jest.fn();
 const mockUseDayLogs = jest.fn();
@@ -13,14 +15,15 @@ jest.mock("@/api/hooks", () => ({
   useDayLogs: (...args: unknown[]) => mockUseDayLogs(...args),
 }));
 
-import Home from "../(tabs)/index";
+import Home from "../index";
 
 beforeEach(() => {
   mockUseDashboard.mockReset();
   mockUseDayLogs.mockReset();
+  mockPush.mockClear();
 });
 
-test("Home shows the Otto editorial headline with kcal-left and the capture hero", async () => {
+test("Home renders the Today large title with the animated kcal-left number and meal rows", async () => {
   mockUseDashboard.mockReturnValue({
     data: { consumed: { kcal: 1252, protein_g: 96, carbs_g: 140, fat_g: 40 }, targets: { kcal: 2000, protein_g: 140, carbs_g: 220, fat_g: 70 }, water_ml: 1400, streak_days: 12 },
     isError: false,
@@ -31,18 +34,20 @@ test("Home shows the Otto editorial headline with kcal-left and the capture hero
   });
 
   const { findByText } = await render(<Home />);
-  expect(await findByText(/strong day/i)).toBeTruthy();
-  expect(await findByText(/Snap a meal/i)).toBeTruthy();
+  expect(await findByText("Today")).toBeTruthy();
+  expect(await findByText("748")).toBeTruthy(); // 2000 - 1252 kcal left
   expect(await findByText("Greek yogurt bowl")).toBeTruthy();
+  expect(await findByText("320 kcal")).toBeTruthy();
 });
 
-test("Home shows a graceful placeholder instead of a 0 kcal flash while loading", async () => {
+test("tapping Add a meal routes to /capture", async () => {
   mockUseDashboard.mockReturnValue({ data: undefined, isError: false });
   mockUseDayLogs.mockReturnValue({ data: [], isError: false });
 
-  const { queryByText, findByText } = await render(<Home />);
-  expect(queryByText(/0 kcal from a strong day/i)).toBeNull();
-  expect(await findByText(/Getting your day ready/i)).toBeTruthy();
+  const { findByLabelText } = await render(<Home />);
+  const addMeal = await findByLabelText("Add a meal");
+  fireEvent.press(addMeal);
+  expect(mockPush).toHaveBeenCalledWith("/capture");
 });
 
 test("Home shows an error message when the dashboard fails to load", async () => {
