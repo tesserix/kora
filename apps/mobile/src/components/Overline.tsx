@@ -1,17 +1,12 @@
-import { Text, type TextProps } from "react-native";
-import { useTheme } from "@/theme";
+import type { TextProps } from "react-native";
+import { AppText } from "./Text";
 
+// Legacy caption-uppercase label, kept for existing call sites. New code should
+// prefer `GroupedSection`'s `header` prop for the same visual treatment.
 export function Overline({ style, children, ...rest }: TextProps) {
-  const { colors } = useTheme();
   return (
-    <Text
-      {...rest}
-      style={[
-        { fontSize: 11, fontWeight: "700", letterSpacing: 1, textTransform: "uppercase", color: colors.mutedForeground },
-        style,
-      ]}
-    >
+    <AppText variant="caption" muted style={[{ textTransform: "uppercase" }, style]} {...rest}>
       {children}
-    </Text>
+    </AppText>
   );
 }

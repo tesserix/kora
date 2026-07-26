@@ -1,6 +1,8 @@
 import { View, type ViewProps } from "react-native";
 import { useTheme } from "@/theme";
 
+// Borderless card: a flat elevated surface (no border, no shadow by default) —
+// hairline rules between sections carry the visual separation instead.
 export function Card({ style, ...rest }: ViewProps) {
   const { colors, radius, spacing } = useTheme();
   return (
@@ -8,10 +10,8 @@ export function Card({ style, ...rest }: ViewProps) {
       style={[
         {
           backgroundColor: colors.card,
-          borderRadius: radius.xl,
+          borderRadius: radius.lg,
           padding: spacing.md,
-          borderWidth: 1,
-          borderColor: colors.border,
         },
         style,
       ]}

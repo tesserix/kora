@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
-import { Pressable, View } from "react-native";
+import { View } from "react-native";
 import { AppText } from "./Text";
 import { Overline } from "./Overline";
 import { Icon } from "./Icon";
+import { PressableScale } from "@/motion";
 import { useTheme } from "@/theme";
 
 type Props = { overline?: string; title: string; right?: ReactNode; onBack?: () => void };
@@ -10,21 +11,38 @@ type Props = { overline?: string; title: string; right?: ReactNode; onBack?: () 
 export function ScreenHeader({ overline, title, right, onBack }: Props) {
   const { colors } = useTheme();
   return (
-    <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", paddingHorizontal: 20, paddingTop: 4, paddingBottom: 14 }}>
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "flex-start",
+        justifyContent: "space-between",
+        paddingHorizontal: 20,
+        paddingTop: 4,
+        paddingBottom: 14,
+      }}
+    >
       <View style={{ flexDirection: "row", alignItems: "flex-start", flex: 1 }}>
         {onBack ? (
-          <Pressable
+          <PressableScale
             accessibilityRole="button"
             accessibilityLabel="Go back"
+            haptic="selection"
             onPress={onBack}
-            style={{ width: 40, height: 40, alignItems: "center", justifyContent: "center", marginRight: 4, marginLeft: -8 }}
+            style={{
+              width: 36,
+              height: 36,
+              alignItems: "center",
+              justifyContent: "center",
+              marginRight: 4,
+              marginLeft: -6,
+            }}
           >
-            <Icon name="arrow-left" size={22} color={colors.foreground} />
-          </Pressable>
+            <Icon name="arrow-left" size={22} color={colors.label} />
+          </PressableScale>
         ) : null}
         <View style={{ flex: 1 }}>
-          {overline ? <Overline style={{ marginBottom: 3 }}>{overline}</Overline> : null}
-          <AppText style={{ fontSize: 28, fontWeight: "800", letterSpacing: -0.84 }}>{title}</AppText>
+          {overline ? <Overline style={{ marginBottom: 4 }}>{overline}</Overline> : null}
+          <AppText variant="largeTitle">{title}</AppText>
         </View>
       </View>
       {right}

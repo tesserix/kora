@@ -1,7 +1,12 @@
 import type { ReactNode } from "react";
+import { useEffect } from "react";
 import { StyleSheet, View } from "react-native";
 import Svg, { Circle } from "react-native-svg";
+import Animated, { useAnimatedProps, useSharedValue, withSpring } from "react-native-reanimated";
 import { useTheme } from "@/theme";
+import { springs, useMotionPrefs } from "@/motion";
+
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 type Props = {
   value: number;
@@ -15,17 +20,32 @@ type Props = {
 
 export function CircularProgress({ value, max, size = 54, stroke = 6, color, track, children }: Props) {
   const { colors } = useTheme();
+  const { reduceMotion } = useMotionPrefs();
   const arcColor = color ?? colors.primary;
   const trackColor = track ?? colors.muted;
   const pct = max > 0 ? Math.min(1, Math.max(0, value / max)) : 0;
   const r = (size - stroke) / 2;
-  const c = 2 * Math.PI * r;
+  const circumference = 2 * Math.PI * r;
   const half = size / 2;
+  const targetOffset = circumference * (1 - pct);
+
+  // Initialized to the final offset (not 0) so the very first paint shows the
+  // correct arc immediately — only subsequent value changes spring.
+  const offset = useSharedValue(targetOffset);
+
+  useEffect(() => {
+    offset.value = reduceMotion ? targetOffset : withSpring(targetOffset, springs.standard);
+  }, [targetOffset, reduceMotion, offset]);
+
+  const animatedProps = useAnimatedProps(() => ({
+    strokeDashoffset: offset.value,
+  }));
+
   return (
     <View style={{ width: size, height: size }}>
       <Svg width={size} height={size}>
         <Circle cx={half} cy={half} r={r} stroke={trackColor} strokeWidth={stroke} fill="none" />
-        <Circle
+        <AnimatedCircle
           testID="cp-arc"
           cx={half}
           cy={half}
@@ -34,8 +54,8 @@ export function CircularProgress({ value, max, size = 54, stroke = 6, color, tra
           strokeWidth={stroke}
           fill="none"
           strokeLinecap="round"
-          strokeDasharray={c}
-          strokeDashoffset={c * (1 - pct)}
+          strokeDasharray={circumference}
+          animatedProps={animatedProps}
           transform={`rotate(-90 ${half} ${half})`}
         />
       </Svg>

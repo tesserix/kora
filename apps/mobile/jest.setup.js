@@ -130,9 +130,20 @@ jest.mock("react-native-reanimated", () => {
     // react-native-gesture-handler's GestureDetector calls
     // `Reanimated.default.createAnimatedComponent(Wrap)` at module-load time (see its
     // reanimatedWrapper.ts) purely to opt the wrapper view into the animated tree;
-    // under Jest that wrapper is never actually driven, so returning the component
-    // unchanged is a faithful no-op mock.
-    default: { View, createAnimatedComponent: (component) => component },
+    // under Jest that wrapper is never actually driven, so it's otherwise a no-op —
+    // except for the `animatedProps` prop (from `useAnimatedProps`, e.g.
+    // CircularProgress's arc), which real reanimated applies imperatively to the
+    // underlying host component. This mock reproduces that by spreading
+    // `animatedProps` onto the wrapped component's own props (after `...rest`, so
+    // animated values win), so consumers reading e.g. `strokeDashoffset` off the
+    // rendered element under test see the real evaluated number.
+    default: {
+      View,
+      createAnimatedComponent: (Component) =>
+        React.forwardRef(({ animatedProps, ...rest }, ref) =>
+          React.createElement(Component, { ...rest, ...(animatedProps || {}), ref }),
+        ),
+    },
     useReducedMotion: jest.fn(() => false),
     // Backed by a ref (not a plain object literal) so the same mutable
     // instance survives re-renders, matching real reanimated's semantics
@@ -143,6 +154,10 @@ jest.mock("react-native-reanimated", () => {
       return ref.current;
     },
     useAnimatedStyle: (factory) => factory(),
+    // Eagerly evaluates the worklet updater to a plain props object, mirroring
+    // useAnimatedStyle above. Paired with the createAnimatedComponent change so the
+    // resulting values land as real props (numbers) on the rendered host element.
+    useAnimatedProps: (factory) => factory(),
     useAnimatedReaction: NOOP,
     // react-native-gesture-handler's GestureDetector calls Reanimated.useEvent(...) to wire
     // its native event handler; under Jest no native gesture events are ever dispatched
