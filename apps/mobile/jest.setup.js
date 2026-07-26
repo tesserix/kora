@@ -1,3 +1,7 @@
+// react-native-gesture-handler: GestureDetector/Gesture.Pan() need the library's own
+// jest setup (mocks the native gesture-handler view registry) or they crash under Jest.
+require("react-native-gesture-handler/jestSetup");
+
 // Screens now call useSafeAreaInsets() (react-native-safe-area-context), which requires a
 // SafeAreaProvider ancestor. expo-router mounts one at runtime, but component tests render
 // screens in isolation, so we install the library's own official jest mock here.
@@ -123,7 +127,12 @@ jest.mock("react-native-reanimated", () => {
   const NOOP = () => {};
   return {
     __esModule: true,
-    default: { View },
+    // react-native-gesture-handler's GestureDetector calls
+    // `Reanimated.default.createAnimatedComponent(Wrap)` at module-load time (see its
+    // reanimatedWrapper.ts) purely to opt the wrapper view into the animated tree;
+    // under Jest that wrapper is never actually driven, so returning the component
+    // unchanged is a faithful no-op mock.
+    default: { View, createAnimatedComponent: (component) => component },
     useReducedMotion: jest.fn(() => false),
     // Backed by a ref (not a plain object literal) so the same mutable
     // instance survives re-renders, matching real reanimated's semantics
@@ -135,6 +144,20 @@ jest.mock("react-native-reanimated", () => {
     },
     useAnimatedStyle: (factory) => factory(),
     useAnimatedReaction: NOOP,
+    // react-native-gesture-handler's GestureDetector calls Reanimated.useEvent(...) to wire
+    // its native event handler; under Jest no native gesture events are ever dispatched
+    // through it, so a stable no-op handler is a faithful stand-in.
+    useEvent: () => NOOP,
+    // Faithful linear interpolation (clamped to the output range) so scrim-opacity-style
+    // usages (Sheet v2) resolve to real values under test instead of a stubbed constant.
+    interpolate: (value, inputRange, outputRange) => {
+      const [inLo, inHi] = inputRange;
+      const [outLo, outHi] = outputRange;
+      if (inHi === inLo) return outLo;
+      const t = (value - inLo) / (inHi - inLo);
+      const clamped = Math.min(1, Math.max(0, t));
+      return outLo + clamped * (outHi - outLo);
+    },
     withSpring: (toValue, _config, callback) => {
       callback?.(true);
       return toValue;
