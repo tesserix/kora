@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, Pressable, ScrollView, View } from "react-native";
+import { Alert, ScrollView, View } from "react-native";
 import Animated, { FadeInDown, useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
 import Swipeable from "react-native-gesture-handler/ReanimatedSwipeable";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -230,14 +230,15 @@ export default function Diary() {
                     key={log.id}
                     overshootRight={false}
                     renderRightActions={() => (
-                      <Pressable
+                      <PressableScale
                         accessibilityRole="button"
                         accessibilityLabel={`Delete ${log.description}`}
+                        haptic="none"
                         onPress={() => confirmDelete(log.id)}
                         style={{ backgroundColor: colors.destructive, justifyContent: "center", alignItems: "center", width: 74 }}
                       >
                         <Icon name="trash-2" size={20} color={colors.destructiveForeground} />
-                      </Pressable>
+                      </PressableScale>
                     )}
                   >
                     <Row

@@ -5,26 +5,35 @@ jest.mock("expo-router", () => ({ router: { push: jest.fn() } }));
 
 const mockDeleteMutate = jest.fn();
 const mockAddWaterMutate = jest.fn();
+const mockUseDashboard = jest.fn();
+const mockUseDayLogs = jest.fn();
+
+const DASHBOARD_DATA = { consumed: { kcal: 1252 }, targets: { kcal: 2000 }, water_ml: 1400 };
+const LOGS_DATA = [
+  {
+    id: "1",
+    description: "Grilled salmon",
+    meal_slot: "dinner",
+    kcal: 520,
+    protein_g: 40,
+    carbs_g: 10,
+    fat_g: 30,
+    logged_at: "2026-07-24T19:00:00Z",
+    provenance: "manual",
+    quantity_grams: 200,
+    source: "manual",
+  },
+];
 
 jest.mock("@/api/hooks", () => ({
-  useDashboard: () => ({ data: { consumed: { kcal: 1252 }, targets: { kcal: 2000 }, water_ml: 1400 } }),
-  useDayLogs: () => ({
-    data: [
-      {
-        id: "1",
-        description: "Grilled salmon",
-        meal_slot: "dinner",
-        kcal: 520,
-        protein_g: 40,
-        carbs_g: 10,
-        fat_g: 30,
-        logged_at: "2026-07-24T19:00:00Z",
-        provenance: "manual",
-        quantity_grams: 200,
-        source: "manual",
-      },
-    ],
-  }),
+  useDashboard: (date: string) => {
+    mockUseDashboard(date);
+    return { data: DASHBOARD_DATA };
+  },
+  useDayLogs: (date: string) => {
+    mockUseDayLogs(date);
+    return { data: LOGS_DATA };
+  },
   useAddWater: () => ({ mutate: mockAddWaterMutate, isPending: false }),
   useDeleteLog: () => ({ mutate: mockDeleteMutate, isPending: false }),
   useCopyDay: () => ({ mutate: jest.fn(), isPending: false }),
@@ -35,6 +44,8 @@ import Diary from "../diary";
 beforeEach(() => {
   mockDeleteMutate.mockClear();
   mockAddWaterMutate.mockClear();
+  mockUseDashboard.mockClear();
+  mockUseDayLogs.mockClear();
   jest.spyOn(Alert, "alert").mockImplementation(() => {});
 });
 
@@ -55,17 +66,40 @@ test("a day with logs does not show the Copy CTA", async () => {
   expect(queryByText("Copy from another day")).toBeNull();
 });
 
-test("tapping a week-strip day switches the selected date used to fetch data", async () => {
+// Mirrors diary.tsx's own weekDates()/iso() so the target day-cell label and
+// expected ISO argument are computed identically to production, regardless of
+// which day of the week the suite happens to run on.
+const isoOf = (d: Date) => d.toLocaleDateString("en-CA");
+
+function mondayOfThisWeek(): Date {
+  const now = new Date();
+  const day = (now.getDay() + 6) % 7; // 0 = Monday
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - day);
+  return monday;
+}
+
+test("tapping a different week-strip day switches the selected date used to fetch data", async () => {
   const { getByLabelText, findByText } = await render(<Diary />);
   await findByText("Grilled salmon");
 
-  // The week strip renders 7 day cells labelled with their ISO date; tapping one
-  // just needs to not throw — useDashboard/useDayLogs are mocked as constants
-  // here, so the real re-query behavior is covered by the hooks' own tests. This
-  // asserts the day cell is present, selectable, and re-renders without error.
-  const today = new Date().toLocaleDateString("en-CA");
-  await fireEvent.press(getByLabelText(today));
-  expect(await findByText("Grilled salmon")).toBeTruthy();
+  const todayIso = isoOf(new Date());
+  mockUseDashboard.mockClear();
+  mockUseDayLogs.mockClear();
+
+  // Pick a day in the current (Monday-start) week strip that is NOT today —
+  // Monday itself, unless today already is Monday, in which case Tuesday.
+  const monday = mondayOfThisWeek();
+  const target = isoOf(monday) === todayIso ? new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 1) : monday;
+  const targetIso = isoOf(target);
+  expect(targetIso).not.toBe(todayIso);
+
+  await fireEvent.press(getByLabelText(targetIso));
+
+  expect(mockUseDashboard).toHaveBeenCalledWith(targetIso);
+  expect(mockUseDayLogs).toHaveBeenCalledWith(targetIso);
+  expect(mockUseDashboard).not.toHaveBeenCalledWith(todayIso);
+  expect(mockUseDayLogs).not.toHaveBeenCalledWith(todayIso);
 });
 
 test("water buttons call useAddWater with volume_ml and a noon-UTC logged_at for the selected day", async () => {
