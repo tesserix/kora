@@ -21,9 +21,11 @@ jest.mock("@/api/hooks", () => ({
 import GroupDetail from "../group/[id]";
 
 test("renders name, roster, leaderboard, and owner-only Delete", async () => {
-  const { getByText } = await render(<GroupDetail />);
+  const { getByText, getAllByText } = await render(<GroupDetail />);
   expect(getByText("Squad")).toBeTruthy();
-  expect(getByText("Owner")).toBeTruthy();
+  // "Owner" (the sharing member's display_name) renders once in the leaderboard
+  // row and once in the roster row below it.
+  expect(getAllByText("Owner")).toHaveLength(2);
   expect(getByText("Mate")).toBeTruthy();
   expect(getByText("4/7 on target")).toBeTruthy(); // leaderboard, sharing member
   expect(getByText("Delete group")).toBeTruthy(); // my_role owner

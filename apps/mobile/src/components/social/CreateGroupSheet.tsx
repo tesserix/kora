@@ -50,9 +50,9 @@ export function CreateGroupSheet({ visible, mode, onClose }: Props) {
           autoCapitalize={isCreate ? "words" : "characters"}
           autoCorrect={false}
           placeholder={isCreate ? "Group name" : "Group code"}
-          placeholderTextColor={colors.mutedForeground}
+          placeholderTextColor={colors.secondaryLabel}
           accessibilityLabel={isCreate ? "Group name" : "Group code"}
-          style={{ marginTop: 12, fontSize: 16, color: colors.foreground, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, paddingHorizontal: 14, paddingVertical: 12 }}
+          style={{ marginTop: 12, fontSize: 16, color: colors.label, backgroundColor: colors.cardSecondary, borderRadius: radius.lg, paddingHorizontal: 14, paddingVertical: 12 }}
         />
         {err ? <AppText style={{ color: colors.destructive, marginTop: 10 }}>{err}</AppText> : null}
         <Button title={isCreate ? "Create group" : "Join group"} onPress={onSubmit} disabled={pending} style={{ marginTop: 14 }} />

@@ -51,9 +51,9 @@ export function RenameGroupSheet({ visible, groupId, currentName, onClose }: Pro
           autoCapitalize="words"
           autoCorrect={false}
           placeholder="Group name"
-          placeholderTextColor={colors.mutedForeground}
+          placeholderTextColor={colors.secondaryLabel}
           accessibilityLabel="Group name"
-          style={{ marginTop: 12, fontSize: 16, color: colors.foreground, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, paddingHorizontal: 14, paddingVertical: 12 }}
+          style={{ marginTop: 12, fontSize: 16, color: colors.label, backgroundColor: colors.cardSecondary, borderRadius: radius.lg, paddingHorizontal: 14, paddingVertical: 12 }}
         />
         {err ? <AppText style={{ color: colors.destructive, marginTop: 10 }}>{err}</AppText> : null}
         <Button title="Save" onPress={onSubmit} disabled={rename.isPending} style={{ marginTop: 14 }} />
