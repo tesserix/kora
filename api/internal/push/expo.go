@@ -50,7 +50,13 @@ func (s *ExpoSender) Send(ctx context.Context, messages []Message) ([]Receipt, e
 		batch := messages[start:end]
 		batchReceipts, err := s.sendBatch(ctx, batch)
 		if err != nil {
-			return nil, err
+			// Preserve receipts already collected from earlier successful
+			// batches instead of dropping them. The Dispatcher treats any Send
+			// error as "do not mark → retry next tick"; a partial multi-batch
+			// failure therefore re-sends the whole call next tick (an accepted
+			// rare duplicate, consistent with the scheduler's best-effort
+			// semantics). This path only triggers for >100 tokens in one Send.
+			return receipts, err
 		}
 		receipts = append(receipts, batchReceipts...)
 	}
