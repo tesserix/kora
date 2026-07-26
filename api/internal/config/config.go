@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"time"
 )
 
 type Config struct {
@@ -17,6 +18,7 @@ type Config struct {
 	OpenAIBaseURL     string
 	OpenAIModel       string
 	OpenAIJSONObject  bool
+	SchedulerInterval time.Duration
 }
 
 func Load() (Config, error) {
@@ -31,6 +33,7 @@ func Load() (Config, error) {
 		OpenAIBaseURL:     os.Getenv("OPENAI_BASE_URL"),
 		OpenAIModel:       os.Getenv("OPENAI_MODEL"),
 		OpenAIJSONObject:  os.Getenv("OPENAI_JSON_OBJECT") == "true",
+		SchedulerInterval: getdur("SCHEDULER_INTERVAL", 5*time.Minute),
 	}
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("config: DATABASE_URL is required")
@@ -41,6 +44,15 @@ func Load() (Config, error) {
 func getenv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return fallback
+}
+
+func getdur(key string, fallback time.Duration) time.Duration {
+	if v := os.Getenv(key); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
 	}
 	return fallback
 }

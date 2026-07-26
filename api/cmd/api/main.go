@@ -17,11 +17,17 @@ import (
 	"github.com/tesserix/kora/api/internal/ai/providers"
 	"github.com/tesserix/kora/api/internal/auth"
 	"github.com/tesserix/kora/api/internal/billing"
+	"github.com/tesserix/kora/api/internal/challenges"
 	"github.com/tesserix/kora/api/internal/config"
 	"github.com/tesserix/kora/api/internal/database"
+	"github.com/tesserix/kora/api/internal/foodlog"
+	"github.com/tesserix/kora/api/internal/groups"
+	"github.com/tesserix/kora/api/internal/notifications"
 	"github.com/tesserix/kora/api/internal/nutrition"
 	"github.com/tesserix/kora/api/internal/resolve"
+	"github.com/tesserix/kora/api/internal/scheduler"
 	"github.com/tesserix/kora/api/internal/server"
+	"github.com/tesserix/kora/api/internal/user"
 )
 
 func main() {
@@ -52,6 +58,20 @@ func main() {
 
 	resolveHandler := buildResolveHandler(context.Background(), cfg, db, logger)
 
+	schedCtx, schedCancel := context.WithCancel(context.Background())
+	if cfg.SchedulerInterval > 0 {
+		loc, lerr := time.LoadLocation(user.DefaultTimezone)
+		if lerr != nil {
+			loc = time.UTC
+		}
+		challengesRepo := challenges.NewRepository(db)
+		challengesSvc := challenges.NewService(challengesRepo, groups.NewRepository(db), foodlog.NewRepository(db))
+		notifSvc := notifications.NewService(notifications.NewRepository(db), groups.NewRepository(db))
+		sched := scheduler.New(challengesRepo, challengesSvc, notifSvc, loc, cfg.SchedulerInterval, logger)
+		go sched.Run(schedCtx)
+		logger.Info("scheduler started", "interval", cfg.SchedulerInterval.String(), "loc", loc.String())
+	}
+
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,
 		Handler: server.NewRouter(server.Deps{DB: db, Verifier: verifier, Resolver: resolveHandler}),
@@ -69,6 +89,7 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
+	schedCancel()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {

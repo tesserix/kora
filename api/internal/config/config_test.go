@@ -2,6 +2,7 @@ package config
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -120,4 +121,23 @@ func TestLoadConfig(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLoadSchedulerInterval(t *testing.T) {
+	// DATABASE_URL is required by Load(); set it so this test is hermetic
+	// regardless of ambient environment (not in the brief's snippet, but
+	// Load() errors without it).
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
+	t.Setenv("SCHEDULER_INTERVAL", "30s")
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, 30*time.Second, cfg.SchedulerInterval)
+}
+
+func TestLoadSchedulerIntervalDefault(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
+	t.Setenv("SCHEDULER_INTERVAL", "")
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, 5*time.Minute, cfg.SchedulerInterval)
 }
