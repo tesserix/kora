@@ -64,6 +64,33 @@ func (s Service) ChallengeCreated(ctx context.Context, groupID, actorID, challen
 	return firstErr
 }
 
+func (s Service) ChallengeStarted(ctx context.Context, challengeID uuid.UUID, participantIDs []uuid.UUID, creatorID uuid.UUID) error {
+	cid := challengeID
+	var firstErr error
+	for _, uid := range participantIDs {
+		if err := s.store.Create(ctx, Notification{UserID: uid, ActorID: creatorID, Type: TypeChallengeStarted, EntityID: &cid}); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+func (s Service) ChallengeEnded(ctx context.Context, challengeID uuid.UUID, participantIDs []uuid.UUID, winnerID uuid.UUID) error {
+	cid := challengeID
+	var firstErr error
+	for _, uid := range participantIDs {
+		if err := s.store.Create(ctx, Notification{UserID: uid, ActorID: winnerID, Type: TypeChallengeEnded, EntityID: &cid}); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+func (s Service) ChallengePassed(ctx context.Context, challengeID, passedUserID, aheadUserID uuid.UUID) error {
+	cid := challengeID
+	return s.store.Create(ctx, Notification{UserID: passedUserID, ActorID: aheadUserID, Type: TypeChallengePassed, EntityID: &cid})
+}
+
 func (s Service) List(ctx context.Context, userID uuid.UUID) ([]NotificationView, error) {
 	return s.store.ListForUser(ctx, userID, listLimit)
 }

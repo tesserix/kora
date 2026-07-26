@@ -12,6 +12,9 @@ const (
 	TypeFriendAccept     = "friend_accept"
 	TypeGroupInvite      = "group_invite"
 	TypeChallengeCreated = "challenge_created"
+	TypeChallengeStarted = "challenge_started"
+	TypeChallengeEnded   = "challenge_ended"
+	TypeChallengePassed  = "challenge_passed"
 )
 
 type Notification struct {
