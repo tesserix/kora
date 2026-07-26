@@ -117,6 +117,7 @@ jest.mock("expo-constants", () => ({
 // a NOOP useAnimatedReaction, identity runOnJS) so behavior matches what the shipped
 // mock would do if it were loadable.
 jest.mock("react-native-reanimated", () => {
+  const React = require("react");
   const { View } = require("react-native");
   const ID = (t) => t;
   const NOOP = () => {};
@@ -124,7 +125,14 @@ jest.mock("react-native-reanimated", () => {
     __esModule: true,
     default: { View },
     useReducedMotion: jest.fn(() => false),
-    useSharedValue: (init) => ({ value: init }),
+    // Backed by a ref (not a plain object literal) so the same mutable
+    // instance survives re-renders, matching real reanimated's semantics
+    // where sv.value tracks the live animating position across renders.
+    useSharedValue: (init) => {
+      const ref = React.useRef();
+      if (!ref.current) ref.current = { value: init };
+      return ref.current;
+    },
     useAnimatedStyle: (factory) => factory(),
     useAnimatedReaction: NOOP,
     withSpring: (toValue, _config, callback) => {

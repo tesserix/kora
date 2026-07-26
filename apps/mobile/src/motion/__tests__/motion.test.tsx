@@ -1,10 +1,14 @@
 import { render, fireEvent } from "@testing-library/react-native";
 import { Text } from "react-native";
 import * as Haptics from "expo-haptics";
+import * as Reanimated from "react-native-reanimated";
 import { PressableScale, AnimatedNumber, haptics } from "@/motion";
 
 afterEach(() => {
   jest.clearAllMocks();
+  // clearAllMocks resets call history but not a mockReturnValue override, so
+  // restore the default (reduceMotion off) explicitly after every test.
+  (Reanimated.useReducedMotion as jest.Mock).mockReturnValue(false);
 });
 
 test("PressableScale fires onPress and the mapped haptic", async () => {
@@ -43,4 +47,26 @@ test("haptics.success swallows a rejected promise", async () => {
   expect(() => haptics.success()).not.toThrow();
   await Promise.resolve();
   await Promise.resolve();
+});
+
+test("AnimatedNumber snaps to the new value immediately when reduceMotion is true", async () => {
+  (Reanimated.useReducedMotion as jest.Mock).mockReturnValue(true);
+  const { findByText, rerender } = await render(<AnimatedNumber value={100} />);
+  expect(await findByText("100")).toBeTruthy();
+
+  await rerender(<AnimatedNumber value={250} />);
+  expect(await findByText("250")).toBeTruthy();
+});
+
+test("PressableScale still fires its haptic under reduced motion", async () => {
+  (Reanimated.useReducedMotion as jest.Mock).mockReturnValue(true);
+  const onPress = jest.fn();
+  const { findByText } = await render(
+    <PressableScale haptic="selection" onPress={onPress}>
+      <Text>Press me (reduced motion)</Text>
+    </PressableScale>,
+  );
+  fireEvent.press(await findByText("Press me (reduced motion)"));
+  expect(onPress).toHaveBeenCalledTimes(1);
+  expect(Haptics.selectionAsync).toHaveBeenCalledTimes(1);
 });

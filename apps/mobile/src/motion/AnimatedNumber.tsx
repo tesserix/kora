@@ -19,10 +19,21 @@ export function AnimatedNumber({ value, format = defaultFormat, style, duration 
   const [display, setDisplay] = useState(() => format(value));
 
   useEffect(() => {
-    if (reduceMotion) { cancelAnimation(sv); prev.current = value; setDisplay(format(value)); return; }
-    sv.value = prev.current;                         // animate from current presentation, never zero
-    prev.current = value;
+    if (reduceMotion) {
+      // Snap: cancel any in-flight animation and resync the shared value so
+      // the next non-reduced-motion update animates from the right place.
+      cancelAnimation(sv);
+      sv.value = value;
+      setDisplay(format(value));
+      prev.current = value;
+      return;
+    }
+    // Animate from wherever sv.value currently sits (the live presentation
+    // position — including mid-flight if a prior animation hasn't settled),
+    // never reset it to the previous target first: that would snap the
+    // display back on rapid successive value changes.
     sv.value = withTiming(value, { duration, easing: Easing.out(Easing.cubic) });
+    prev.current = value;
   }, [value, reduceMotion]);                          // eslint-disable-line react-hooks/exhaustive-deps
 
   useAnimatedReaction(

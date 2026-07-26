@@ -21,7 +21,7 @@ export function PressableScale({ children, haptic = "none", scaleTo = 0.96, onPr
     <Pressable
       {...rest}
       onPressIn={(e) => { if (!reduceMotion) scale.value = withSpring(scaleTo, springs.instant); onPressIn?.(e); }}
-      onPressOut={(e) => { scale.value = withSpring(1, springs.standard); onPressOut?.(e); }}
+      onPressOut={(e) => { scale.value = reduceMotion ? 1 : withSpring(1, springs.standard); onPressOut?.(e); }}
       onPress={(e) => { if (haptic !== "none") haptics[haptic](); onPress?.(e); }}
     >
       <Animated.View style={animated}>{children}</Animated.View>
