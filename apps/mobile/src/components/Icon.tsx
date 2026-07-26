@@ -1,4 +1,5 @@
 import { SymbolView, type SFSymbol } from "expo-symbols";
+import { Platform } from "react-native";
 import {
   House, BookOpen, Camera, LineChart, Grid2x2, MessageCircle, Mic, Plus,
   Utensils, TrendingDown, TrendingUp, Minus, Check, ArrowRight, ArrowLeft, Trash2,
@@ -35,7 +36,7 @@ type Props = { name: string; size?: number; color: string; strokeWidth?: number 
 
 export function Icon({ name, size = 20, color, strokeWidth = 2 }: Props) {
   const sf = SYMBOLS[name];
-  if (sf) return <SymbolView name={sf} size={size} tintColor={color} />;
+  if (sf && Platform.OS === "ios") return <SymbolView name={sf} size={size} tintColor={color} />;
   const Cmp = MAP[name] ?? Circle;
   return <Cmp size={size} color={color} strokeWidth={strokeWidth} />;
 }
