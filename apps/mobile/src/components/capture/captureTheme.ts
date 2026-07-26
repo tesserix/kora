@@ -13,8 +13,8 @@ export const captureColors = {
   cardDivider: "rgba(255,255,255,0.1)",
   pillBg: "rgba(255,255,255,0.10)",
   pillFg: "rgba(255,255,255,0.75)",
-  primary: "#9c92ff", // matches darkColors.primary in theme/tokens.ts
-  primaryForeground: "#10101e", // matches darkColors.primaryForeground
+  primary: "#9c92ff", // deliberate dark-capture accent, intentionally decoupled from theme/palette.ts
+  primaryForeground: "#10101e", // pairs with the capture surface's dark-mode-only primary above
   primaryGlow: "rgba(156,146,255,0.22)", // oklch color-mix(in oklch, var(--primary) 22%, transparent)
   composerBg: "rgba(0,0,0,0.25)",
   composerBorder: "rgba(255,255,255,0.1)",

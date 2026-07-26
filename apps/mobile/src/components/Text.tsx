@@ -1,30 +1,24 @@
 import { Text, type TextProps } from "react-native";
 import { useTheme } from "@/theme";
+import { type as typeScale, type TypeVariant } from "@/theme/palette";
 
-type Variant = "h1" | "h2" | "h3" | "body" | "caption";
+type LegacyVariant = "h1" | "h2" | "h3";
+type Variant = TypeVariant | LegacyVariant | "caption";
+const legacy: Record<LegacyVariant, TypeVariant> = { h1: "largeTitle", h2: "title1", h3: "title2" };
 
-const presets: Record<Variant, { size: number; weight: "400" | "600" | "700"; letterSpacing?: number }> = {
-  h1: { size: 36, weight: "700", letterSpacing: -0.9 },
-  h2: { size: 30, weight: "700", letterSpacing: -0.75 },
-  h3: { size: 24, weight: "600" },
-  body: { size: 16, weight: "400" },
-  caption: { size: 12, weight: "400" },
-};
+interface Props extends TextProps { variant?: Variant; muted?: boolean; rounded?: boolean }
 
-type Props = TextProps & { variant?: Variant; muted?: boolean };
-
-export function AppText({ variant = "body", muted = false, style, ...rest }: Props) {
-  const { colors } = useTheme();
-  const p = presets[variant];
+export function AppText({ variant = "body", muted = false, rounded = false, style, ...rest }: Props) {
+  const { colors, fonts } = useTheme();
+  const key: TypeVariant =
+    variant in legacy ? legacy[variant as LegacyVariant] : (variant as TypeVariant);
+  const p = typeScale[key] ?? typeScale.body;
   return (
     <Text
       style={[
-        {
-          fontSize: p.size,
-          fontWeight: p.weight,
-          letterSpacing: p.letterSpacing,
-          color: muted ? colors.mutedForeground : colors.foreground,
-        },
+        { fontSize: p.size, fontWeight: p.weight, letterSpacing: p.letterSpacing, lineHeight: p.lineHeight,
+          color: muted ? colors.secondaryLabel : colors.label,
+          ...(rounded && fonts.rounded ? { fontFamily: fonts.rounded } : null) },
         style,
       ]}
       {...rest}
