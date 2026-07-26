@@ -1,6 +1,7 @@
-import type { PressableProps, StyleProp, ViewStyle } from "react-native";
+import { View, type PressableProps, type StyleProp, type ViewStyle } from "react-native";
 import { PressableScale, type haptics } from "@/motion";
 import { AppText } from "./Text";
+import { Icon } from "./Icon";
 import { useTheme } from "@/theme";
 
 type Variant = "primary" | "secondary" | "ghost" | "destructive";
@@ -8,6 +9,7 @@ type Variant = "primary" | "secondary" | "ghost" | "destructive";
 type Props = Omit<PressableProps, "children" | "style"> & {
   title: string;
   variant?: Variant;
+  icon?: string;
   style?: StyleProp<ViewStyle>;
 };
 
@@ -18,7 +20,7 @@ const HAPTIC: Record<Variant, keyof typeof haptics | "none"> = {
   destructive: "none",
 };
 
-export function Button({ title, variant = "primary", disabled, style, onPress, ...rest }: Props) {
+export function Button({ title, variant = "primary", icon, disabled, style, onPress, ...rest }: Props) {
   const { colors, radius, spacing } = useTheme();
   const bg = variant === "primary" ? colors.accent : variant === "secondary" ? colors.cardSecondary : "transparent";
   const fg =
@@ -51,9 +53,18 @@ export function Button({ title, variant = "primary", disabled, style, onPress, .
         style,
       ]}
     >
-      <AppText variant="headline" style={{ color: fg }}>
-        {title}
-      </AppText>
+      {icon ? (
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <Icon name={icon} size={18} color={fg} />
+          <AppText variant="headline" style={{ color: fg }}>
+            {title}
+          </AppText>
+        </View>
+      ) : (
+        <AppText variant="headline" style={{ color: fg }}>
+          {title}
+        </AppText>
+      )}
     </PressableScale>
   );
 }

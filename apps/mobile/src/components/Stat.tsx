@@ -4,10 +4,10 @@ import { Numeral } from "./Numeral";
 import { Icon } from "./Icon";
 import { useTheme } from "@/theme";
 
-type Props = { label: string; value: string; unit?: string; delta?: string; trend?: "up" | "down" };
+type Props = { label: string; value: string; unit?: string; delta?: string; trend?: "up" | "down"; valueColor?: string };
 
 // Bare value/label stack (no bordered box) — composed inside Card / GroupedSection.
-export function Stat({ label, value, unit, delta, trend }: Props) {
+export function Stat({ label, value, unit, delta, trend, valueColor }: Props) {
   const { colors } = useTheme();
   return (
     <View style={{ gap: 2 }}>
@@ -15,7 +15,7 @@ export function Stat({ label, value, unit, delta, trend }: Props) {
         {label}
       </AppText>
       <View style={{ flexDirection: "row", alignItems: "baseline", gap: 4 }}>
-        <Numeral size={22}>{value}</Numeral>
+        <Numeral size={22} color={valueColor}>{value}</Numeral>
         {unit ? (
           <AppText variant="footnote" muted>
             {unit}
