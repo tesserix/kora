@@ -18,13 +18,14 @@ const (
 )
 
 type Notification struct {
-	ID        uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	UserID    uuid.UUID  `json:"user_id"`
-	Type      string     `json:"type"`
-	ActorID   uuid.UUID  `json:"actor_id"`
-	EntityID  *uuid.UUID `json:"entity_id,omitempty"`
-	ReadAt    *time.Time `json:"read_at,omitempty"`
-	CreatedAt time.Time  `gorm:"autoCreateTime" json:"created_at"`
+	ID         uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	UserID     uuid.UUID  `json:"user_id"`
+	Type       string     `json:"type"`
+	ActorID    uuid.UUID  `json:"actor_id"`
+	EntityID   *uuid.UUID `json:"entity_id,omitempty"`
+	ReadAt     *time.Time `json:"read_at,omitempty"`
+	CreatedAt  time.Time  `gorm:"autoCreateTime" json:"created_at"`
+	PushSentAt *time.Time `gorm:"column:push_sent_at" json:"-"`
 }
 
 // NotificationView is a feed row with the actor's display name joined in.
