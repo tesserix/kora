@@ -14,7 +14,7 @@ interface WeightLogSheetProps {
 }
 
 export function WeightLogSheet({ visible, initialKg, onClose }: WeightLogSheetProps) {
-  const { colors, fonts } = useTheme();
+  const { colors, fonts, radius } = useTheme();
   const [text, setText] = useState(initialKg > 0 ? String(initialKg) : "");
   const [err, setErr] = useState<string | null>(null);
   const addWeight = useAddWeight();
@@ -49,9 +49,9 @@ export function WeightLogSheet({ visible, initialKg, onClose }: WeightLogSheetPr
             onChangeText={setText}
             keyboardType="decimal-pad"
             placeholder="0.0"
-            placeholderTextColor={colors.mutedForeground}
+            placeholderTextColor={colors.secondaryLabel}
             accessibilityLabel="Weight in kilograms"
-            style={{ flex: 1, fontSize: 28, fontFamily: fonts.mono, color: colors.foreground, borderBottomWidth: 1, borderBottomColor: colors.border, paddingVertical: 8 }}
+            style={{ flex: 1, fontSize: 28, fontFamily: fonts.mono, color: colors.label, backgroundColor: colors.cardSecondary, borderRadius: radius.lg, paddingHorizontal: 14, paddingVertical: 10 }}
           />
           <AppText muted style={{ fontSize: 16, fontFamily: fonts.mono }}>kg</AppText>
         </View>
