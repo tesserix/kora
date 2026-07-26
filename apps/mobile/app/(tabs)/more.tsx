@@ -6,6 +6,7 @@ import { auth } from "@/lib/firebase";
 import { AppText } from "@/components/Text";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { Icon } from "@/components/Icon";
+import { useUnreadCount } from "@/api/hooks";
 import { useTheme } from "@/theme";
 
 const ROWS = [
@@ -19,10 +20,21 @@ const ROWS = [
 export default function More() {
   const { colors, spacing } = useTheme();
   const insets = useSafeAreaInsets();
+  const unread = useUnreadCount();
+  const count = unread.data?.count ?? 0;
   return (
     <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
       <ScreenHeader overline="Your account" title="More" />
       <View style={{ paddingHorizontal: 20, gap: spacing.sm }}>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => router.push("/notifications" as Href)}
+          style={{ flexDirection: "row", alignItems: "center", gap: 14, padding: spacing.md, borderRadius: 16, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card }}
+        >
+          <Icon name="bell" size={20} color={colors.primary} />
+          <AppText style={{ flex: 1, fontSize: 15, fontWeight: "600" }}>Notifications</AppText>
+          {count > 0 ? <AppText muted style={{ fontSize: 13 }}>{count}</AppText> : null}
+        </Pressable>
         {ROWS.map((r) => (
           <Pressable
             key={r.label}
