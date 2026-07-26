@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { TextInput, View } from "react-native";
+import { KeyboardAvoidingView, TextInput, View } from "react-native";
 import { router } from "expo-router";
 import {
   createUserWithEmailAndPassword,
@@ -13,18 +13,19 @@ import { useTheme } from "@/theme";
 export default function SignIn() {
   if (!isFirebaseConfigured) return null;
 
-  const { colors, spacing, radius } = useTheme();
+  const { colors, spacing, radius, fontSize } = useTheme();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const inputStyle = {
-    borderWidth: 1,
-    borderColor: colors.input,
+  const filledInputStyle = {
+    backgroundColor: colors.cardSecondary,
     borderRadius: radius.lg,
-    padding: spacing.md,
-    color: colors.foreground,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 12,
+    color: colors.label,
+    fontSize: fontSize.base,
     minHeight: 48,
   } as const;
 
@@ -44,13 +45,36 @@ export default function SignIn() {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background, justifyContent: "center", padding: spacing.lg, gap: spacing.md }}>
-      <AppText variant="h1">Welcome to Kora</AppText>
-      <TextInput style={inputStyle} placeholder="Email" placeholderTextColor={colors.mutedForeground} autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} />
-      <TextInput style={inputStyle} placeholder="Password" placeholderTextColor={colors.mutedForeground} secureTextEntry value={password} onChangeText={setPassword} />
-      {error ? <AppText style={{ color: colors.destructive }}>{error}</AppText> : null}
-      <Button title={busy ? "…" : "Sign in"} onPress={() => submit("in")} disabled={busy} />
-      <Button title="Create account" variant="secondary" onPress={() => submit("up")} disabled={busy} />
-    </View>
+    <KeyboardAvoidingView behavior="padding" style={{ flex: 1, backgroundColor: colors.background }}>
+      <View style={{ flex: 1, justifyContent: "center", padding: spacing.lg, gap: spacing.md }}>
+        <AppText variant="title1">Welcome to Kora</AppText>
+        <TextInput
+          accessibilityLabel="Email"
+          style={filledInputStyle}
+          placeholder="Email"
+          placeholderTextColor={colors.secondaryLabel}
+          autoCapitalize="none"
+          keyboardType="email-address"
+          value={email}
+          onChangeText={setEmail}
+        />
+        <TextInput
+          accessibilityLabel="Password"
+          style={filledInputStyle}
+          placeholder="Password"
+          placeholderTextColor={colors.secondaryLabel}
+          secureTextEntry
+          value={password}
+          onChangeText={setPassword}
+        />
+        {error ? (
+          <AppText variant="footnote" style={{ color: colors.destructive }}>
+            {error}
+          </AppText>
+        ) : null}
+        <Button title={busy ? "…" : "Sign in"} onPress={() => submit("in")} disabled={busy} />
+        <Button title="Create account" variant="secondary" onPress={() => submit("up")} disabled={busy} />
+      </View>
+    </KeyboardAvoidingView>
   );
 }

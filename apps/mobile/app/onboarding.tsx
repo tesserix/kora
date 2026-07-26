@@ -1,25 +1,40 @@
 import { useState } from "react";
-import { Pressable, ScrollView, TextInput, View } from "react-native";
+import { ScrollView, TextInput } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { AppText } from "@/components/Text";
 import { Button } from "@/components/Button";
 import { Icon } from "@/components/Icon";
 import { Overline } from "@/components/Overline";
+import { GroupedSection, Row } from "@/components/GroupedList";
+import { Segmented } from "@/components/Segmented";
 import { useSubmitOnboarding } from "@/api/hooks";
 import type { OnboardingInput } from "@/api/types";
 import { useTheme } from "@/theme";
 import { validateOnboardingNumbers } from "@/lib/validateOnboarding";
+import { haptics } from "@/motion";
 
 const GOALS: Array<{ id: OnboardingInput["goal"]; icon: string; title: string; sub: string }> = [
   { id: "fat_loss", icon: "trending-down", title: "Lose weight", sub: "Gentle calorie deficit" },
   { id: "maintenance", icon: "minus", title: "Maintain", sub: "Stay where you are" },
   { id: "muscle_gain", icon: "trending-up", title: "Build muscle", sub: "Lean surplus + protein" },
 ];
-const ACTIVITIES: OnboardingInput["activity_level"][] = ["sedentary", "light", "moderate", "active", "very_active"];
+
+const SEX_OPTIONS: Array<{ key: OnboardingInput["sex"]; label: string }> = [
+  { key: "male", label: "Male" },
+  { key: "female", label: "Female" },
+];
+
+const ACTIVITY_OPTIONS: Array<{ key: OnboardingInput["activity_level"]; label: string }> = [
+  { key: "sedentary", label: "Sedentary" },
+  { key: "light", label: "Light" },
+  { key: "moderate", label: "Moderate" },
+  { key: "active", label: "Active" },
+  { key: "very_active", label: "Very active" },
+];
 
 export default function Onboarding() {
-  const { colors, radius, spacing, shadows } = useTheme();
+  const { colors, spacing, radius, fontSize } = useTheme();
   const insets = useSafeAreaInsets();
   const submit = useSubmitOnboarding();
   const [goal, setGoal] = useState<OnboardingInput["goal"]>("fat_loss");
@@ -30,12 +45,13 @@ export default function Onboarding() {
   const [weightKg, setWeightKg] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  const inputStyle = {
-    borderWidth: 1,
-    borderColor: colors.input,
+  const filledInputStyle = {
+    backgroundColor: colors.cardSecondary,
     borderRadius: radius.lg,
-    padding: spacing.md,
-    color: colors.foreground,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 12,
+    color: colors.label,
+    fontSize: fontSize.base,
     minHeight: 48,
   } as const;
 
@@ -55,7 +71,10 @@ export default function Onboarding() {
       weight_kg: Number(weightKg),
     };
     submit.mutate(input, {
-      onSuccess: () => router.replace("/"),
+      onSuccess: () => {
+        haptics.success();
+        router.replace("/");
+      },
       onError: () => setError("Please check your details and try again."),
     });
   }
@@ -63,145 +82,76 @@ export default function Onboarding() {
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={{ padding: 24, paddingTop: insets.top + 24, gap: spacing.md }}
+      contentContainerStyle={{
+        padding: spacing.lg,
+        paddingTop: insets.top + spacing.lg,
+        paddingBottom: spacing["2xl"],
+        gap: spacing.md,
+      }}
     >
-      {/* brand */}
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 6 }}>
-        <View
-          style={[
-            {
-              width: 40,
-              height: 40,
-              borderRadius: radius.lg,
-              backgroundColor: colors.primary,
-              alignItems: "center",
-              justifyContent: "center",
-            },
-            shadows.md,
-          ]}
-        >
-          <Icon name="camera" size={22} color={colors.primaryForeground} />
-        </View>
-        <AppText style={{ fontSize: 20, fontWeight: "800", letterSpacing: -0.4 }}>Kora</AppText>
-      </View>
-
-      <AppText style={{ fontSize: 32, fontWeight: "800", letterSpacing: -1.12, lineHeight: 34 }}>
+      <AppText variant="title1">
         Snap it.{"\n"}Otto tracks it.
       </AppText>
-      <AppText muted style={{ fontSize: 16, lineHeight: 24, marginBottom: 10 }}>
+      <AppText muted style={{ marginBottom: spacing.xs }}>
         Photo or chat — log meals in seconds and let AI handle the calories and macros.
       </AppText>
 
-      <Overline>What's your goal?</Overline>
-      <View style={{ gap: 10 }}>
-        {GOALS.map((g) => {
-          const on = goal === g.id;
-          return (
-            <Pressable
-              key={g.id}
-              accessibilityRole="button"
-              onPress={() => setGoal(g.id)}
-              style={[
-                {
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 14,
-                  padding: 16,
-                  borderRadius: radius.xl,
-                  backgroundColor: colors.card,
-                  borderWidth: 2,
-                  borderColor: on ? colors.primary : colors.border,
-                },
-                on ? shadows.md : null,
-              ]}
-            >
-              <View
-                style={{
-                  width: 42,
-                  height: 42,
-                  borderRadius: radius.lg,
-                  backgroundColor: on ? colors.primary : colors.secondary,
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <Icon name={g.icon} size={20} color={on ? colors.primaryForeground : colors.primary} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <AppText style={{ fontSize: 16, fontWeight: "700" }}>{g.title}</AppText>
-                <AppText muted style={{ fontSize: 13 }}>
-                  {g.sub}
-                </AppText>
-              </View>
-              <View
-                style={{
-                  width: 22,
-                  height: 22,
-                  borderRadius: 999,
-                  borderWidth: on ? 0 : 2,
-                  borderColor: colors.border,
-                  backgroundColor: on ? colors.primary : "transparent",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                {on ? <Icon name="check" size={14} color={colors.primaryForeground} /> : null}
-              </View>
-            </Pressable>
-          );
-        })}
-      </View>
+      <GroupedSection header="What's your goal?">
+        {GOALS.map((g) => (
+          <Row
+            key={g.id}
+            title={g.title}
+            subtitle={g.sub}
+            icon={{ name: g.icon, tint: colors.accent }}
+            onPress={() => setGoal(g.id)}
+            right={goal === g.id ? <Icon name="check" size={18} color={colors.accent} /> : undefined}
+          />
+        ))}
+      </GroupedSection>
 
-      <Overline style={{ marginTop: 8 }}>About you</Overline>
-      <View style={{ flexDirection: "row", gap: spacing.sm }}>
-        <View style={{ flex: 1 }}>
-          <Button title="Male" variant={sex === "male" ? "primary" : "secondary"} onPress={() => setSex("male")} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Button title="Female" variant={sex === "female" ? "primary" : "secondary"} onPress={() => setSex("female")} />
-        </View>
-      </View>
+      <Overline style={{ marginTop: spacing.xs }}>About you</Overline>
+      <Segmented options={SEX_OPTIONS} value={sex} onChange={(key) => setSex(key as OnboardingInput["sex"])} />
+
       <TextInput
         accessibilityLabel="Birth year"
-        style={inputStyle}
+        style={filledInputStyle}
         placeholder="Birth year (e.g. 1995)"
-        placeholderTextColor={colors.mutedForeground}
+        placeholderTextColor={colors.secondaryLabel}
         keyboardType="number-pad"
         value={birthYear}
         onChangeText={setBirthYear}
       />
       <TextInput
         accessibilityLabel="Height in centimetres"
-        style={inputStyle}
+        style={filledInputStyle}
         placeholder="Height (cm)"
-        placeholderTextColor={colors.mutedForeground}
+        placeholderTextColor={colors.secondaryLabel}
         keyboardType="decimal-pad"
         value={heightCm}
         onChangeText={setHeightCm}
       />
       <TextInput
         accessibilityLabel="Weight in kilograms"
-        style={inputStyle}
+        style={filledInputStyle}
         placeholder="Weight (kg)"
-        placeholderTextColor={colors.mutedForeground}
+        placeholderTextColor={colors.secondaryLabel}
         keyboardType="decimal-pad"
         value={weightKg}
         onChangeText={setWeightKg}
       />
 
-      <Overline style={{ marginTop: 8 }}>Activity</Overline>
-      <View style={{ gap: spacing.sm }}>
-        {ACTIVITIES.map((a) => (
-          <Button
-            key={a}
-            title={a.replace("_", " ")}
-            variant={activity === a ? "primary" : "secondary"}
-            onPress={() => setActivity(a)}
-          />
-        ))}
-      </View>
+      <Overline style={{ marginTop: spacing.xs }}>Activity</Overline>
+      <Segmented
+        options={ACTIVITY_OPTIONS}
+        value={activity}
+        onChange={(key) => setActivity(key as OnboardingInput["activity_level"])}
+      />
 
-      {error ? <AppText style={{ color: colors.destructive }}>{error}</AppText> : null}
+      {error ? (
+        <AppText variant="footnote" style={{ color: colors.destructive }}>
+          {error}
+        </AppText>
+      ) : null}
       <Button title={submit.isPending ? "Saving…" : "Get started"} onPress={onSubmit} disabled={submit.isPending} />
     </ScrollView>
   );
