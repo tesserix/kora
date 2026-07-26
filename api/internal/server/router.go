@@ -13,6 +13,7 @@ import (
 	"github.com/tesserix/kora/api/internal/foodlog"
 	"github.com/tesserix/kora/api/internal/groups"
 	"github.com/tesserix/kora/api/internal/httpx"
+	"github.com/tesserix/kora/api/internal/notifications"
 	"github.com/tesserix/kora/api/internal/nutrition"
 	"github.com/tesserix/kora/api/internal/onboarding"
 	"github.com/tesserix/kora/api/internal/resolve"
@@ -54,12 +55,17 @@ func NewRouter(deps Deps) *gin.Engine {
 		userRepo := user.NewRepository(deps.DB)
 		userHandler := user.NewHandler(userRepo)
 		onboardingHandler := onboarding.NewHandler(userRepo)
+		notificationsSvc := notifications.NewService(notifications.NewRepository(deps.DB), groups.NewRepository(deps.DB))
+		notificationsHandler := notifications.NewHandler(notificationsSvc)
 
 		v1 := r.Group("/v1", auth.Middleware(deps.Verifier))
 		v1.Use(user.ResolveMiddleware(userRepo))
 		v1.GET("/me", userHandler.Me)
 		v1.PATCH("/me/share-progress", userHandler.UpdateShareProgress)
 		v1.POST("/onboarding", onboardingHandler.Submit)
+		v1.GET("/notifications", notificationsHandler.List)
+		v1.GET("/notifications/unread-count", notificationsHandler.UnreadCount)
+		v1.POST("/notifications/read", notificationsHandler.MarkAllRead)
 
 		foodRepo := nutrition.NewRepository(deps.DB)
 		logRepo := foodlog.NewRepository(deps.DB)
