@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ScrollView, TextInput } from "react-native";
+import { ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { AppText } from "@/components/Text";
@@ -8,6 +8,8 @@ import { Icon } from "@/components/Icon";
 import { Overline } from "@/components/Overline";
 import { GroupedSection, Row } from "@/components/GroupedList";
 import { Segmented } from "@/components/Segmented";
+import { Card } from "@/components/Card";
+import { AppBackground } from "@/components/AppBackground";
 import { useSubmitOnboarding } from "@/api/hooks";
 import type { OnboardingInput } from "@/api/types";
 import { useTheme } from "@/theme";
@@ -34,7 +36,7 @@ const ACTIVITY_OPTIONS: Array<{ key: OnboardingInput["activity_level"]; label: s
 ];
 
 export default function Onboarding() {
-  const { colors, spacing, radius, fontSize } = useTheme();
+  const { colors, spacing, fontSize } = useTheme();
   const insets = useSafeAreaInsets();
   const submit = useSubmitOnboarding();
   const [goal, setGoal] = useState<OnboardingInput["goal"]>("fat_loss");
@@ -46,8 +48,6 @@ export default function Onboarding() {
   const [error, setError] = useState<string | null>(null);
 
   const filledInputStyle = {
-    backgroundColor: colors.cardSecondary,
-    borderRadius: radius.lg,
     paddingHorizontal: spacing.md,
     paddingVertical: 12,
     color: colors.label,
@@ -80,79 +80,91 @@ export default function Onboarding() {
   }
 
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={{
-        padding: spacing.lg,
-        paddingTop: insets.top + spacing.lg,
-        paddingBottom: spacing["2xl"],
-        gap: spacing.md,
-      }}
-    >
-      <AppText variant="title1">
-        Snap it.{"\n"}Otto tracks it.
-      </AppText>
-      <AppText muted style={{ marginBottom: spacing.xs }}>
-        Photo or chat — log meals in seconds and let AI handle the calories and macros.
-      </AppText>
-
-      <GroupedSection header="What's your goal?">
-        {GOALS.map((g) => (
-          <Row
-            key={g.id}
-            title={g.title}
-            subtitle={g.sub}
-            icon={{ name: g.icon, tint: colors.accent }}
-            onPress={() => setGoal(g.id)}
-            right={goal === g.id ? <Icon name="check" size={18} color={colors.accent} /> : undefined}
-          />
-        ))}
-      </GroupedSection>
-
-      <Overline style={{ marginTop: spacing.xs }}>About you</Overline>
-      <Segmented options={SEX_OPTIONS} value={sex} onChange={(key) => setSex(key as OnboardingInput["sex"])} />
-
-      <TextInput
-        accessibilityLabel="Birth year"
-        style={filledInputStyle}
-        placeholder="Birth year (e.g. 1995)"
-        placeholderTextColor={colors.secondaryLabel}
-        keyboardType="number-pad"
-        value={birthYear}
-        onChangeText={setBirthYear}
-      />
-      <TextInput
-        accessibilityLabel="Height in centimetres"
-        style={filledInputStyle}
-        placeholder="Height (cm)"
-        placeholderTextColor={colors.secondaryLabel}
-        keyboardType="decimal-pad"
-        value={heightCm}
-        onChangeText={setHeightCm}
-      />
-      <TextInput
-        accessibilityLabel="Weight in kilograms"
-        style={filledInputStyle}
-        placeholder="Weight (kg)"
-        placeholderTextColor={colors.secondaryLabel}
-        keyboardType="decimal-pad"
-        value={weightKg}
-        onChangeText={setWeightKg}
-      />
-
-      <Overline style={{ marginTop: spacing.xs }}>Activity</Overline>
-      <Segmented
-        options={ACTIVITY_OPTIONS}
-        value={activity}
-        onChange={(key) => setActivity(key as OnboardingInput["activity_level"])}
-      />
-
-      {error ? (
-        <AppText variant="footnote" style={{ color: colors.destructive }}>
-          {error}
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <AppBackground />
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{
+          padding: spacing.lg,
+          paddingTop: insets.top + spacing.lg,
+          paddingBottom: spacing["2xl"],
+          gap: spacing.md,
+        }}
+      >
+        <Overline>Getting started</Overline>
+        <AppText variant="title1">
+          Snap it.{"\n"}Otto tracks it.
         </AppText>
-      ) : null}
-      <Button title={submit.isPending ? "Saving…" : "Get started"} onPress={onSubmit} disabled={submit.isPending} />
-    </ScrollView>
+        <AppText muted style={{ marginBottom: spacing.xs }}>
+          Photo or chat — log meals in seconds and let AI handle the calories and macros.
+        </AppText>
+
+        <GroupedSection header="What's your goal?" elevated>
+          {GOALS.map((g) => (
+            <Row
+              key={g.id}
+              title={g.title}
+              subtitle={g.sub}
+              icon={{ name: g.icon, tint: colors.accent }}
+              onPress={() => setGoal(g.id)}
+              right={goal === g.id ? <Icon name="check" size={18} color={colors.accent} /> : undefined}
+            />
+          ))}
+        </GroupedSection>
+
+        <Overline style={{ marginTop: spacing.xs }}>About you</Overline>
+        <Segmented options={SEX_OPTIONS} value={sex} onChange={(key) => setSex(key as OnboardingInput["sex"])} />
+
+        <View style={{ gap: spacing.sm }}>
+          <Card variant="elevated" style={{ padding: 0 }}>
+            <TextInput
+              accessibilityLabel="Birth year"
+              style={filledInputStyle}
+              placeholder="Birth year (e.g. 1995)"
+              placeholderTextColor={colors.secondaryLabel}
+              keyboardType="number-pad"
+              value={birthYear}
+              onChangeText={setBirthYear}
+            />
+          </Card>
+          <Card variant="elevated" style={{ padding: 0 }}>
+            <TextInput
+              accessibilityLabel="Height in centimetres"
+              style={filledInputStyle}
+              placeholder="Height (cm)"
+              placeholderTextColor={colors.secondaryLabel}
+              keyboardType="decimal-pad"
+              value={heightCm}
+              onChangeText={setHeightCm}
+            />
+          </Card>
+          <Card variant="elevated" style={{ padding: 0 }}>
+            <TextInput
+              accessibilityLabel="Weight in kilograms"
+              style={filledInputStyle}
+              placeholder="Weight (kg)"
+              placeholderTextColor={colors.secondaryLabel}
+              keyboardType="decimal-pad"
+              value={weightKg}
+              onChangeText={setWeightKg}
+            />
+          </Card>
+        </View>
+
+        <Overline style={{ marginTop: spacing.xs }}>Activity</Overline>
+        <Segmented
+          options={ACTIVITY_OPTIONS}
+          value={activity}
+          onChange={(key) => setActivity(key as OnboardingInput["activity_level"])}
+        />
+
+        {error ? (
+          <AppText variant="footnote" style={{ color: colors.destructive }}>
+            {error}
+          </AppText>
+        ) : null}
+        <Button title={submit.isPending ? "Saving…" : "Get started"} onPress={onSubmit} disabled={submit.isPending} />
+      </ScrollView>
+    </View>
   );
 }

@@ -8,20 +8,21 @@ import {
 import { auth, isFirebaseConfigured } from "@/lib/firebase";
 import { AppText } from "@/components/Text";
 import { Button } from "@/components/Button";
+import { Card } from "@/components/Card";
+import { Overline } from "@/components/Overline";
+import { AppBackground } from "@/components/AppBackground";
 import { useTheme } from "@/theme";
 
 export default function SignIn() {
   if (!isFirebaseConfigured) return null;
 
-  const { colors, spacing, radius, fontSize } = useTheme();
+  const { colors, spacing, fontSize } = useTheme();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const filledInputStyle = {
-    backgroundColor: colors.cardSecondary,
-    borderRadius: radius.lg,
     paddingHorizontal: spacing.md,
     paddingVertical: 12,
     color: colors.label,
@@ -45,36 +46,50 @@ export default function SignIn() {
   }
 
   return (
-    <KeyboardAvoidingView behavior="padding" style={{ flex: 1, backgroundColor: colors.background }}>
-      <View style={{ flex: 1, justifyContent: "center", padding: spacing.lg, gap: spacing.md }}>
-        <AppText variant="title1">Welcome to Kora</AppText>
-        <TextInput
-          accessibilityLabel="Email"
-          style={filledInputStyle}
-          placeholder="Email"
-          placeholderTextColor={colors.secondaryLabel}
-          autoCapitalize="none"
-          keyboardType="email-address"
-          value={email}
-          onChangeText={setEmail}
-        />
-        <TextInput
-          accessibilityLabel="Password"
-          style={filledInputStyle}
-          placeholder="Password"
-          placeholderTextColor={colors.secondaryLabel}
-          secureTextEntry
-          value={password}
-          onChangeText={setPassword}
-        />
-        {error ? (
-          <AppText variant="footnote" style={{ color: colors.destructive }}>
-            {error}
-          </AppText>
-        ) : null}
-        <Button title={busy ? "…" : "Sign in"} onPress={() => submit("in")} disabled={busy} />
-        <Button title="Create account" variant="secondary" onPress={() => submit("up")} disabled={busy} />
-      </View>
-    </KeyboardAvoidingView>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <AppBackground />
+      <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
+        <View style={{ flex: 1, justifyContent: "center", padding: spacing.lg, gap: spacing.lg }}>
+          <View style={{ gap: spacing.xs }}>
+            <Overline>Welcome back</Overline>
+            <AppText variant="title1">Welcome to Kora</AppText>
+          </View>
+          <View style={{ gap: spacing.sm }}>
+            <Card variant="elevated" style={{ padding: 0 }}>
+              <TextInput
+                accessibilityLabel="Email"
+                style={filledInputStyle}
+                placeholder="Email"
+                placeholderTextColor={colors.secondaryLabel}
+                autoCapitalize="none"
+                keyboardType="email-address"
+                value={email}
+                onChangeText={setEmail}
+              />
+            </Card>
+            <Card variant="elevated" style={{ padding: 0 }}>
+              <TextInput
+                accessibilityLabel="Password"
+                style={filledInputStyle}
+                placeholder="Password"
+                placeholderTextColor={colors.secondaryLabel}
+                secureTextEntry
+                value={password}
+                onChangeText={setPassword}
+              />
+            </Card>
+          </View>
+          {error ? (
+            <AppText variant="footnote" style={{ color: colors.destructive }}>
+              {error}
+            </AppText>
+          ) : null}
+          <View style={{ gap: spacing.sm }}>
+            <Button title={busy ? "…" : "Sign in"} onPress={() => submit("in")} disabled={busy} />
+            <Button title="Create account" variant="secondary" onPress={() => submit("up")} disabled={busy} />
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </View>
   );
 }

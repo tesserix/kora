@@ -12,6 +12,8 @@ import { GroupedSection, Row } from "@/components/GroupedList";
 import { Stat } from "@/components/Stat";
 import { Segmented } from "@/components/Segmented";
 import { Card } from "@/components/Card";
+import { AppBackground } from "@/components/AppBackground";
+import { Overline } from "@/components/Overline";
 import { useCreateLog, useFoodSearch } from "@/api/hooks";
 import type { FoodItem } from "@/api/types";
 import { foodVisual } from "@/lib/foodVisual";
@@ -22,7 +24,7 @@ const MEALS = ["breakfast", "lunch", "dinner", "snack"] as const;
 const MEAL_OPTIONS = MEALS.map((m) => ({ key: m, label: m.charAt(0).toUpperCase() + m.slice(1) }));
 
 export default function LogScreen() {
-  const { colors, spacing, radius, fontSize } = useTheme();
+  const { colors, spacing, fontSize } = useTheme();
   const insets = useSafeAreaInsets();
   const mountedAt = useRef(Date.now());
   const [q, setQ] = useState("");
@@ -42,8 +44,6 @@ export default function LogScreen() {
   const enter = (i: number) => (firstMount.current ? FadeInDown.duration(300).delay(i * 30) : undefined);
 
   const filledInputStyle = {
-    backgroundColor: colors.cardSecondary,
-    borderRadius: radius.lg,
     paddingHorizontal: spacing.md,
     paddingVertical: 12,
     color: colors.label,
@@ -77,122 +77,133 @@ export default function LogScreen() {
     const scale = g / 100;
     const vis = foodVisual(selected.name, meal);
     return (
-      <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg, paddingTop: insets.top + spacing.lg, gap: spacing.md }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
-          <View
-            style={{
-              width: 64,
-              height: 64,
-              borderRadius: 14,
-              alignItems: "center",
-              justifyContent: "center",
-              backgroundColor: colors.cardSecondary,
-            }}
-          >
-            <Icon name={vis.icon} size={28} color={colors.accent} />
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <AppBackground />
+        <View style={{ flex: 1, padding: spacing.lg, paddingTop: insets.top + spacing.lg, gap: spacing.md }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
+            <View
+              style={{
+                width: 64,
+                height: 64,
+                borderRadius: 14,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: colors.cardSecondary,
+              }}
+            >
+              <Icon name={vis.icon} size={28} color={colors.accent} />
+            </View>
+            <View style={{ flex: 1, gap: 4 }}>
+              <AppText variant="title2">{selected.name}</AppText>
+              <ProvenanceChip provenance={selected.provenance} />
+            </View>
           </View>
-          <View style={{ flex: 1, gap: 4 }}>
-            <AppText variant="title2">{selected.name}</AppText>
-            <ProvenanceChip provenance={selected.provenance} />
-          </View>
+
+          <Card variant="elevated" style={{ flexDirection: "row" }}>
+            <View style={{ flex: 1 }}>
+              <Stat
+                label="Protein"
+                value={String(Math.round(selected.protein_per_100g * scale))}
+                unit="g"
+                valueColor={colors.accent}
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Stat
+                label="Carbs"
+                value={String(Math.round(selected.carbs_per_100g * scale))}
+                unit="g"
+                valueColor={colors.accentAmber}
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Stat
+                label="Fat"
+                value={String(Math.round(selected.fat_per_100g * scale))}
+                unit="g"
+                valueColor={colors.accentBlue}
+              />
+            </View>
+          </Card>
+
+          <Overline>Portion</Overline>
+          <Card variant="elevated" style={{ padding: 0 }}>
+            <TextInput
+              accessibilityLabel="Quantity in grams"
+              style={filledInputStyle}
+              placeholder={`Grams (default ${selected.serving_grams || 100})`}
+              placeholderTextColor={colors.secondaryLabel}
+              keyboardType="decimal-pad"
+              value={grams}
+              onChangeText={setGrams}
+            />
+          </Card>
+
+          <Overline>Meal</Overline>
+          <Segmented options={MEAL_OPTIONS} value={meal} onChange={(key) => setMeal(key as (typeof MEALS)[number])} />
+
+          {error ? (
+            <AppText variant="footnote" style={{ color: colors.destructive }}>
+              {error}
+            </AppText>
+          ) : null}
+          <Button title={createLog.isPending ? "Logging…" : "Log it"} onPress={submit} disabled={createLog.isPending} />
+          <Button title="Back" variant="ghost" onPress={() => setSelected(null)} />
         </View>
-
-        <Card style={{ flexDirection: "row" }}>
-          <View style={{ flex: 1 }}>
-            <Stat
-              label="Protein"
-              value={String(Math.round(selected.protein_per_100g * scale))}
-              unit="g"
-              valueColor={colors.accent}
-            />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Stat
-              label="Carbs"
-              value={String(Math.round(selected.carbs_per_100g * scale))}
-              unit="g"
-              valueColor={colors.accentAmber}
-            />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Stat
-              label="Fat"
-              value={String(Math.round(selected.fat_per_100g * scale))}
-              unit="g"
-              valueColor={colors.accentBlue}
-            />
-          </View>
-        </Card>
-
-        <TextInput
-          accessibilityLabel="Quantity in grams"
-          style={filledInputStyle}
-          placeholder={`Grams (default ${selected.serving_grams || 100})`}
-          placeholderTextColor={colors.secondaryLabel}
-          keyboardType="decimal-pad"
-          value={grams}
-          onChangeText={setGrams}
-        />
-
-        <Segmented options={MEAL_OPTIONS} value={meal} onChange={(key) => setMeal(key as (typeof MEALS)[number])} />
-
-        {error ? (
-          <AppText variant="footnote" style={{ color: colors.destructive }}>
-            {error}
-          </AppText>
-        ) : null}
-        <Button title={createLog.isPending ? "Logging…" : "Log it"} onPress={submit} disabled={createLog.isPending} />
-        <Button title="Back" variant="ghost" onPress={() => setSelected(null)} />
       </View>
     );
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background, paddingTop: insets.top + 8 }}>
-      <ScreenHeader overline="Add to diary" title="Log food" onBack={() => router.back()} />
-      <ScrollView
-        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40, gap: spacing.md }}
-        keyboardShouldPersistTaps="handled"
-      >
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            gap: spacing.sm,
-            backgroundColor: colors.cardSecondary,
-            borderRadius: radius.lg,
-            paddingHorizontal: spacing.md,
-          }}
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <AppBackground />
+      <View style={{ flex: 1, paddingTop: insets.top + 8 }}>
+        <ScreenHeader overline="Add to diary" title="Log food" onBack={() => router.back()} />
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40, gap: spacing.md }}
+          keyboardShouldPersistTaps="handled"
         >
-          <Icon name="search" size={18} color={colors.secondaryLabel} />
-          <TextInput
-            accessibilityLabel="Search foods"
-            style={{ flex: 1, color: colors.label, fontSize: fontSize.base, paddingVertical: 12 }}
-            placeholder="Search foods…"
-            placeholderTextColor={colors.secondaryLabel}
-            autoFocus
-            value={q}
-            onChangeText={setQ}
-          />
-        </View>
+          <Card variant="elevated" style={{ padding: 0 }}>
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: spacing.sm,
+                paddingHorizontal: spacing.md,
+              }}
+            >
+              <Icon name="search" size={18} color={colors.secondaryLabel} />
+              <TextInput
+                accessibilityLabel="Search foods"
+                style={{ flex: 1, color: colors.label, fontSize: fontSize.base, paddingVertical: 12 }}
+                placeholder="Search foods…"
+                placeholderTextColor={colors.secondaryLabel}
+                autoFocus
+                value={q}
+                onChangeText={setQ}
+              />
+            </View>
+          </Card>
 
-        {search.data && search.data.length > 0 ? (
-          <GroupedSection>
-            {search.data.map((item, i) => (
-              <Animated.View key={item.id} entering={enter(i)}>
-                <Row
-                  title={item.name}
-                  subtitle={item.brand || undefined}
-                  detail={`${Math.round(item.kcal_per_100g)} kcal/100g`}
-                  onPress={() => setSelected(item)}
-                />
-              </Animated.View>
-            ))}
-          </GroupedSection>
-        ) : q.length >= 2 && !search.isLoading ? (
-          <AppText muted>No matches.</AppText>
-        ) : null}
-      </ScrollView>
+          {search.data && search.data.length > 0 ? (
+            <GroupedSection elevated>
+              {search.data.map((item, i) => (
+                <Animated.View key={item.id} entering={enter(i)}>
+                  <Row
+                    title={item.name}
+                    subtitle={item.brand || undefined}
+                    detail={`${Math.round(item.kcal_per_100g)} kcal/100g`}
+                    onPress={() => setSelected(item)}
+                  />
+                </Animated.View>
+              ))}
+            </GroupedSection>
+          ) : q.length >= 2 && !search.isLoading ? (
+            <AppText muted>No matches.</AppText>
+          ) : null}
+        </ScrollView>
+      </View>
     </View>
   );
 }
