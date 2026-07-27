@@ -170,8 +170,7 @@ export default function Diary() {
 
   const d = dashboard.data;
   const total = Math.round(d?.consumed.kcal ?? 0);
-  const goal = Math.round(d?.targets.kcal ?? 0);
-  const remaining = Math.max(0, Math.round(goal - (d?.consumed.kcal ?? 0)));
+  const remaining = Math.max(0, Math.round((d?.targets.kcal ?? 0) - (d?.consumed.kcal ?? 0)));
   const waterL = (d?.water_ml ?? 0) / 1000;
   const logged = (logs.data ?? []) as FoodLog[];
 
@@ -209,7 +208,7 @@ export default function Diary() {
         <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
           <Animated.View entering={enter(2)}>
             <Card variant="elevated" style={{ flexDirection: "row", alignItems: "center", gap: 16, marginBottom: 16 }}>
-              <GaugeRing value={total} max={goal} size={64} stroke={7} gradient={gradients.green}>
+              <GaugeRing value={total} max={d?.targets.kcal ?? 0} size={64} stroke={7} gradient={gradients.green}>
                 <AppText variant="caption" muted>
                   eaten
                 </AppText>
@@ -245,42 +244,40 @@ export default function Diary() {
 
           {slots.map((group, gi) => (
             <Animated.View key={group.slot} entering={enter(4 + gi)}>
-              <Card variant="elevated" style={{ marginBottom: 16, padding: 0, overflow: "hidden" }}>
-                <GroupedSection header={group.slot.toUpperCase()} style={{ paddingTop: spacing.md }}>
-                  {group.items.map((log) => {
-                    const fv = foodVisual(log.description);
-                    return (
-                      <Swipeable
-                        key={log.id}
-                        overshootRight={false}
-                        renderRightActions={() => (
-                          <PressableScale
-                            accessibilityRole="button"
-                            accessibilityLabel={`Delete ${log.description}`}
-                            haptic="none"
-                            onPress={() => confirmDelete(log.id)}
-                            style={{ backgroundColor: colors.destructive, justifyContent: "center", alignItems: "center", width: 74 }}
-                          >
-                            <Icon name="trash-2" size={20} color={colors.destructiveForeground} />
-                          </PressableScale>
-                        )}
-                      >
-                        <View style={{ paddingHorizontal: spacing.md, backgroundColor: colors.card }}>
-                          <MealRow
-                            name={log.description}
-                            slot={`${Math.round(log.quantity_grams)}g · ${timeOf(log.logged_at)}`}
-                            kcal={log.kcal}
-                            iconName={fv.icon}
-                            tint={hslToHex(fv.hue, 0.5, 0.5)}
-                            onPress={() => openMeal(log)}
-                            accessibilityLabel={log.description}
-                          />
-                        </View>
-                      </Swipeable>
-                    );
-                  })}
-                </GroupedSection>
-              </Card>
+              <GroupedSection elevated header={group.slot.toUpperCase()} style={{ marginBottom: 16 }}>
+                {group.items.map((log) => {
+                  const fv = foodVisual(log.description);
+                  return (
+                    <Swipeable
+                      key={log.id}
+                      overshootRight={false}
+                      renderRightActions={() => (
+                        <PressableScale
+                          accessibilityRole="button"
+                          accessibilityLabel={`Delete ${log.description}`}
+                          haptic="none"
+                          onPress={() => confirmDelete(log.id)}
+                          style={{ backgroundColor: colors.destructive, justifyContent: "center", alignItems: "center", width: 74 }}
+                        >
+                          <Icon name="trash-2" size={20} color={colors.destructiveForeground} />
+                        </PressableScale>
+                      )}
+                    >
+                      <View style={{ paddingHorizontal: spacing.md, backgroundColor: colors.elevated }}>
+                        <MealRow
+                          name={log.description}
+                          slot={`${Math.round(log.quantity_grams)}g · ${timeOf(log.logged_at)}`}
+                          kcal={log.kcal}
+                          iconName={fv.icon}
+                          tint={hslToHex(fv.hue, 0.5, 0.5)}
+                          onPress={() => openMeal(log)}
+                          accessibilityLabel={log.description}
+                        />
+                      </View>
+                    </Swipeable>
+                  );
+                })}
+              </GroupedSection>
             </Animated.View>
           ))}
 
