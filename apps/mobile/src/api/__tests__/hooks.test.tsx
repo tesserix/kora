@@ -394,9 +394,20 @@ it("useAvgIntake7d averages consumed kcal across the last 7 days that have data"
   expect(result.current.avg).toBe(2000);
 });
 
-it("useAvgIntake7d returns avg: null and an empty series when no day has data (never fabricates)", async () => {
+it("useAvgIntake7d returns avg: null and an empty series when every day errors (never fabricates)", async () => {
   (apiFetch as jest.Mock).mockImplementation((url: string) =>
     url.startsWith("/v1/dashboard") ? Promise.reject(new Error("no data for date")) : Promise.resolve({}),
+  );
+
+  const { result } = await renderHook(() => useAvgIntake7d("2026-07-27"), { wrapper });
+  await waitFor(() => expect(result.current.isLoading).toBe(false));
+  expect(result.current.series).toEqual([]);
+  expect(result.current.avg).toBeNull();
+});
+
+it("useAvgIntake7d returns avg: null and an empty series when every day is unlogged (0 kcal, never fabricates)", async () => {
+  (apiFetch as jest.Mock).mockImplementation((url: string) =>
+    url.startsWith("/v1/dashboard") ? Promise.resolve(dashboardSummary(0)) : Promise.resolve({}),
   );
 
   const { result } = await renderHook(() => useAvgIntake7d("2026-07-27"), { wrapper });

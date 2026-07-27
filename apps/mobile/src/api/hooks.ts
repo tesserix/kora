@@ -94,8 +94,12 @@ export function useDashboard(date: string) {
 
 // Client-only 7-day average intake. Reuses the existing /v1/dashboard endpoint
 // per day (same query key as useDashboard, so React Query caches/shares each
-// date) and averages only the days that actually returned data — never
+// date) and averages only the days that actually have logged data — never
 // fabricates a value; returns avg: null when there's no data at all.
+//
+// A day with `consumed.kcal === 0` is treated as unlogged, not "zero calories
+// eaten" — including it would drag the average down and an all-zero week
+// would otherwise render a fabricated-looking "0" instead of an honest "—".
 export function useAvgIntake7d(endDate: string): { avg: number | null; series: number[]; isLoading: boolean } {
   const dates: string[] = [];
   const end = new Date(`${endDate}T00:00:00`);
@@ -113,7 +117,7 @@ export function useAvgIntake7d(endDate: string): { avg: number | null; series: n
 
   const isLoading = results.some((r) => r.isLoading);
   const series = results
-    .filter((r) => r.isSuccess && typeof r.data?.consumed?.kcal === "number")
+    .filter((r) => r.isSuccess && typeof r.data?.consumed?.kcal === "number" && r.data.consumed.kcal > 0)
     .map((r) => r.data!.consumed.kcal);
   const avg = series.length > 0 ? Math.round(series.reduce((sum, kcal) => sum + kcal, 0) / series.length) : null;
 

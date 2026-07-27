@@ -80,35 +80,44 @@ export function useHealth(): HealthData {
       return;
     }
 
-    const granted = await requestAuthorization({
-      toRead: [STEP_COUNT_IDENTIFIER, SLEEP_ANALYSIS_IDENTIFIER],
-    });
-    if (!granted) {
-      setStatus("denied");
+    try {
+      const granted = await requestAuthorization({
+        toRead: [STEP_COUNT_IDENTIFIER, SLEEP_ANALYSIS_IDENTIFIER],
+      });
+      if (!granted) {
+        setStatus("denied");
+        setSteps(null);
+        setSleep(null);
+        return;
+      }
+
+      const dayStart = startOfLocalDay();
+      const now = new Date();
+      const sleepWindowStart = new Date(dayStart.getTime() - SLEEP_WINDOW_LOOKBACK_HOURS * MS_PER_HOUR);
+
+      const [stepSamples, sleepSamples] = await Promise.all([
+        queryQuantitySamples(STEP_COUNT_IDENTIFIER, {
+          filter: { date: { startDate: dayStart, endDate: now } },
+          limit: 0,
+          unit: "count",
+        }),
+        queryCategorySamples(SLEEP_ANALYSIS_IDENTIFIER, {
+          filter: { date: { startDate: sleepWindowStart, endDate: now } },
+          limit: 0,
+        }),
+      ]);
+
+      setSteps({ today: Math.round(sumSteps(stepSamples)), goal: STEP_GOAL });
+      setSleep({ lastNightHours: Math.round((sumAsleepMillis(sleepSamples) / MS_PER_HOUR) * 10) / 10 });
+      setStatus("authorized");
+    } catch {
+      // Any HealthKit call (authorization request or either query) can reject —
+      // e.g. a transient native-bridge error. Degrade honestly instead of
+      // crashing or leaving a stale/fabricated number on screen.
+      setStatus("unavailable");
       setSteps(null);
       setSleep(null);
-      return;
     }
-
-    const dayStart = startOfLocalDay();
-    const now = new Date();
-    const sleepWindowStart = new Date(dayStart.getTime() - SLEEP_WINDOW_LOOKBACK_HOURS * MS_PER_HOUR);
-
-    const [stepSamples, sleepSamples] = await Promise.all([
-      queryQuantitySamples(STEP_COUNT_IDENTIFIER, {
-        filter: { date: { startDate: dayStart, endDate: now } },
-        limit: 0,
-        unit: "count",
-      }),
-      queryCategorySamples(SLEEP_ANALYSIS_IDENTIFIER, {
-        filter: { date: { startDate: sleepWindowStart, endDate: now } },
-        limit: 0,
-      }),
-    ]);
-
-    setSteps({ today: Math.round(sumSteps(stepSamples)), goal: STEP_GOAL });
-    setSleep({ lastNightHours: Math.round((sumAsleepMillis(sleepSamples) / MS_PER_HOUR) * 10) / 10 });
-    setStatus("authorized");
   }, []);
 
   useEffect(() => {

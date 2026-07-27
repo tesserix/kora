@@ -96,6 +96,19 @@ describe("useHealth", () => {
     expect(result.current.sleep).toEqual({ lastNightHours: 3 });
   });
 
+  it("degrades to unavailable when a HealthKit query rejects (never crashes, never fabricates)", async () => {
+    mockIsAvailable.mockReturnValue(true);
+    mockRequestAuthorization.mockResolvedValue(true);
+    mockQueryQuantitySamples.mockRejectedValue(new Error("HealthKit query failed"));
+    mockQueryCategorySamples.mockResolvedValue([]);
+
+    const { result } = await renderHook(() => useHealth());
+
+    await waitFor(() => expect(result.current.status).toBe("unavailable"));
+    expect(result.current.steps).toBeNull();
+    expect(result.current.sleep).toBeNull();
+  });
+
   it("connect() re-requests authorization when not denied", async () => {
     mockIsAvailable.mockReturnValue(true);
     mockRequestAuthorization.mockResolvedValue(true);

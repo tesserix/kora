@@ -14,6 +14,7 @@ import { Icon } from "@/components/Icon";
 import { AppBackground } from "@/components/AppBackground";
 import { PressableScale } from "@/motion";
 import { useProfile, useDashboard, useDayLogs, useUnreadCount } from "@/api/hooks";
+import { useHealth } from "@/health";
 import { useTheme } from "@/theme";
 import { foodVisual } from "@/lib/foodVisual";
 import { hslToHex, withAlpha } from "@/lib/color";
@@ -38,10 +39,11 @@ function mealTime(log: FoodLog): string {
 }
 
 export default function Home() {
-  const { colors, spacing, radius } = useTheme();
+  const { colors, spacing, radius, gradients } = useTheme();
   const insets = useSafeAreaInsets();
   const profile = useProfile();
   const unread = useUnreadCount();
+  const health = useHealth();
   const date = today();
   const dashboard = useDashboard(date);
   const logs = useDayLogs(date);
@@ -145,16 +147,36 @@ export default function Home() {
         </Animated.View>
       ) : null}
 
-      {/* today's vitals — Steps + Sleep, both connect-state (real Health wiring is a later phase) */}
+      {/* today's vitals — Steps + Sleep, both driven live from Apple HealthKit via useHealth() */}
       {!loadError ? (
         <Animated.View entering={enter(2)} style={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 4 }}>
           <Overline style={{ marginBottom: 8 }}>Today's vitals</Overline>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
             <Card variant="elevated" style={{ flexBasis: "48%", flexGrow: 1 }}>
-              <RingStat label="Steps" dotColor={colors.stepsMetric} state="connect" onConnect={() => {}} />
+              <RingStat
+                label="Steps"
+                dotColor={colors.stepsMetric}
+                state={health.status === "authorized" ? "value" : "connect"}
+                value={health.steps ? health.steps.today.toLocaleString() : undefined}
+                meta={health.steps ? `of ${health.steps.goal.toLocaleString()}` : undefined}
+                ringValue={health.steps?.today ?? 0}
+                ringMax={health.steps?.goal ?? 0}
+                ringGradient={gradients.steps}
+                onConnect={health.connect}
+              />
             </Card>
             <Card variant="elevated" style={{ flexBasis: "48%", flexGrow: 1 }}>
-              <RingStat label="Sleep" dotColor={colors.sleepMetric} state="connect" onConnect={() => {}} />
+              <RingStat
+                label="Sleep"
+                dotColor={colors.sleepMetric}
+                state={health.status === "authorized" ? "value" : "connect"}
+                value={health.sleep ? `${health.sleep.lastNightHours}` : undefined}
+                meta={health.sleep ? "last night" : undefined}
+                ringValue={health.sleep?.lastNightHours ?? 0}
+                ringMax={8}
+                ringGradient={gradients.sleep}
+                onConnect={health.connect}
+              />
             </Card>
           </View>
         </Animated.View>

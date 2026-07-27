@@ -16,8 +16,9 @@ import { Overline } from "@/components/Overline";
 import { Segmented } from "@/components/Segmented";
 import { WeightChart } from "@/components/progress/WeightChart";
 import { WeightLogSheet } from "@/components/progress/WeightLogSheet";
-import { useDashboard, useProfile, useWeightSeries } from "@/api/hooks";
+import { useAvgIntake7d, useDashboard, useProfile, useWeightSeries } from "@/api/hooks";
 import type { WeightEntry } from "@/api/types";
+import { useHealth } from "@/health";
 import { AnimatedNumber, PressableScale } from "@/motion";
 import { useTheme } from "@/theme";
 
@@ -31,13 +32,15 @@ const shortDate = (isoStr: string) => new Date(isoStr).toLocaleDateString([], { 
 const weightFormat = (n: number) => n.toFixed(1);
 
 export default function Progress() {
-  const { colors, radius, fonts } = useTheme();
+  const { colors, radius, fonts, gradients } = useTheme();
   const insets = useSafeAreaInsets();
   const [range, setRange] = useState<(typeof RANGES)[number]>("1W");
   const [sheetOpen, setSheetOpen] = useState(false);
   const dashboard = useDashboard(today());
   const profile = useProfile();
   const series = useWeightSeries(range);
+  const health = useHealth();
+  const avgIntake = useAvgIntake7d(today());
   const streak = dashboard.data?.streak_days ?? 0;
 
   // Entrance stagger runs on first mount only — see app/(tabs)/index.tsx for the
@@ -129,8 +132,14 @@ export default function Progress() {
           <Overline style={{ marginBottom: 8 }}>This week</Overline>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
             <Card variant="elevated" style={{ flexGrow: 1, flexBasis: "45%", gap: 8 }}>
-              <RingStat label="Avg intake" dotColor={colors.accent} state="empty" />
-              <Sparkline points={[]} color={colors.accent} />
+              <RingStat
+                label="Avg intake"
+                dotColor={colors.accent}
+                state={avgIntake.avg != null ? "value" : "empty"}
+                value={avgIntake.avg?.toLocaleString()}
+                meta={avgIntake.avg != null ? "7-day avg" : undefined}
+              />
+              <Sparkline points={avgIntake.series} color={colors.accent} />
             </Card>
             <Card variant="elevated" style={{ flexGrow: 1, flexBasis: "45%", gap: 8 }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
@@ -145,10 +154,30 @@ export default function Progress() {
               <AppText variant="caption" muted>keep it going</AppText>
             </Card>
             <Card variant="elevated" style={{ flexGrow: 1, flexBasis: "45%" }}>
-              <RingStat label="Steps" dotColor={colors.stepsMetric} state="connect" onConnect={() => {}} />
+              <RingStat
+                label="Steps"
+                dotColor={colors.stepsMetric}
+                state={health.status === "authorized" ? "value" : "connect"}
+                value={health.steps ? health.steps.today.toLocaleString() : undefined}
+                meta={health.steps ? `of ${health.steps.goal.toLocaleString()}` : undefined}
+                ringValue={health.steps?.today ?? 0}
+                ringMax={health.steps?.goal ?? 0}
+                ringGradient={gradients.steps}
+                onConnect={health.connect}
+              />
             </Card>
             <Card variant="elevated" style={{ flexGrow: 1, flexBasis: "45%" }}>
-              <RingStat label="Sleep" dotColor={colors.sleepMetric} state="connect" onConnect={() => {}} />
+              <RingStat
+                label="Sleep"
+                dotColor={colors.sleepMetric}
+                state={health.status === "authorized" ? "value" : "connect"}
+                value={health.sleep ? `${health.sleep.lastNightHours}` : undefined}
+                meta={health.sleep ? "last night" : undefined}
+                ringValue={health.sleep?.lastNightHours ?? 0}
+                ringMax={8}
+                ringGradient={gradients.sleep}
+                onConnect={health.connect}
+              />
             </Card>
           </View>
         </Animated.View>
