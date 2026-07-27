@@ -1,6 +1,6 @@
 import { View } from "react-native";
 import { AppText } from "@/components/Text";
-import { CircularProgress } from "@/components/CircularProgress";
+import { GaugeRing } from "@/components/GaugeRing";
 import { AnimatedNumber } from "@/motion";
 import { useTheme } from "@/theme";
 
@@ -15,7 +15,7 @@ interface KcalHeroProps {
 // a circular ring showing eaten/goal. `loading` swaps the number for a plain
 // "—" placeholder so a fresh dashboard fetch never flashes "0 kcal left".
 export function KcalHero({ left, goal, eaten, loading = false }: KcalHeroProps) {
-  const { colors, fonts } = useTheme();
+  const { colors, fonts, gradients } = useTheme();
   const numberStyle = { fontSize: 52, fontWeight: "700" as const, fontFamily: fonts.rounded, color: colors.label };
 
   return (
@@ -30,7 +30,7 @@ export function KcalHero({ left, goal, eaten, loading = false }: KcalHeroProps) 
           calories left
         </AppText>
       </View>
-      <CircularProgress value={eaten} max={goal} size={72} stroke={8} />
+      <GaugeRing value={eaten} max={goal} size={72} stroke={8} gradient={gradients.green} />
     </View>
   );
 }

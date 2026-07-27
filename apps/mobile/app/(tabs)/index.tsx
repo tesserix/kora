@@ -9,6 +9,7 @@ import { Card } from "@/components/Card";
 import { GroupedSection, Row } from "@/components/GroupedList";
 import { KcalHero } from "@/components/home/KcalHero";
 import { MacroBars } from "@/components/home/MacroBars";
+import { RingStat } from "@/components/RingStat";
 import { useProfile, useDashboard, useDayLogs } from "@/api/hooks";
 import { useTheme } from "@/theme";
 import type { FoodLog } from "@/api/types";
@@ -91,7 +92,7 @@ export default function Home() {
       {/* hero — hidden entirely on load error so no contradictory "0 calories left" shows */}
       {!loadError ? (
         <Animated.View entering={enter(1)} style={{ paddingHorizontal: 16, paddingVertical: 12 }}>
-          <Card>
+          <Card variant="hero">
             <KcalHero left={left} goal={goal} eaten={eaten} loading={!d} />
             {d ? (
               <MacroBars
@@ -109,8 +110,16 @@ export default function Home() {
         </Animated.View>
       ) : null}
 
+      {!loadError ? (
+        <Animated.View entering={enter(2)} style={{ paddingHorizontal: 16, paddingBottom: 4 }}>
+          <Card variant="elevated">
+            <RingStat label="Steps" dotColor={colors.stepsMetric} state="connect" onConnect={() => {}} />
+          </Card>
+        </Animated.View>
+      ) : null}
+
       {/* meals */}
-      <Animated.View entering={enter(2)}>
+      <Animated.View entering={enter(3)}>
         <GroupedSection header="Meals" style={{ paddingHorizontal: 16, marginTop: 8 }}>
           {loggedMeals.map((log) => (
             <Row
