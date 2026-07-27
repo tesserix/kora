@@ -1,12 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
 import { Linking, Platform } from "react-native";
-import {
-  isHealthDataAvailable,
-  queryCategorySamples,
-  queryQuantitySamples,
-  requestAuthorization,
-} from "@kingstinct/react-native-healthkit";
 import type { HealthData, HealthStatus } from "./types";
+
+// `@kingstinct/react-native-healthkit` is a Nitro native module that throws at
+// IMPORT time on any build where the native side isn't linked (e.g. a dev client
+// built before HealthKit was added). A static top-level import would crash the
+// whole screen before any try/catch can run. Requiring it lazily inside the
+// guarded load() defers that to call time, where the try/catch turns a missing
+// module into an honest "unavailable" state instead of a redbox.
+type HealthKitModule = typeof import("@kingstinct/react-native-healthkit");
+function loadHealthKit(): HealthKitModule {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require("@kingstinct/react-native-healthkit") as HealthKitModule;
+}
 
 const STEP_GOAL = 10000;
 
@@ -78,14 +84,22 @@ export function useHealth(): HealthData {
       // try/catch too: on a build where the native module isn't linked (e.g. a
       // dev-client built before HealthKit was added), it throws — degrade to
       // "unavailable" rather than crashing the screen.
-      if (Platform.OS !== "ios" || !isHealthDataAvailable()) {
+      if (Platform.OS !== "ios") {
         setStatus("unavailable");
         setSteps(null);
         setSleep(null);
         return;
       }
 
-      const granted = await requestAuthorization({
+      const hk = loadHealthKit();
+      if (!hk.isHealthDataAvailable()) {
+        setStatus("unavailable");
+        setSteps(null);
+        setSleep(null);
+        return;
+      }
+
+      const granted = await hk.requestAuthorization({
         toRead: [STEP_COUNT_IDENTIFIER, SLEEP_ANALYSIS_IDENTIFIER],
       });
       if (!granted) {
@@ -100,12 +114,12 @@ export function useHealth(): HealthData {
       const sleepWindowStart = new Date(dayStart.getTime() - SLEEP_WINDOW_LOOKBACK_HOURS * MS_PER_HOUR);
 
       const [stepSamples, sleepSamples] = await Promise.all([
-        queryQuantitySamples(STEP_COUNT_IDENTIFIER, {
+        hk.queryQuantitySamples(STEP_COUNT_IDENTIFIER, {
           filter: { date: { startDate: dayStart, endDate: now } },
           limit: 0,
           unit: "count",
         }),
-        queryCategorySamples(SLEEP_ANALYSIS_IDENTIFIER, {
+        hk.queryCategorySamples(SLEEP_ANALYSIS_IDENTIFIER, {
           filter: { date: { startDate: sleepWindowStart, endDate: now } },
           limit: 0,
         }),
