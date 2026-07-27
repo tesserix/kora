@@ -8,6 +8,7 @@ import { Icon } from "./Icon";
 import { useTheme } from "@/theme";
 import { PressableScale, springs } from "@/motion";
 import { useUnreadCount } from "@/api/hooks";
+import { withAlpha } from "@/lib/color";
 
 const TAB_META: Record<string, { icon: string; label: string }> = {
   index: { icon: "house", label: "Home" },
@@ -59,7 +60,7 @@ function TabButton({ name, meta, active, showBadge, onPress }: TabButtonProps) {
     >
       <View style={{ alignItems: "center", justifyContent: "center" }}>
         <Animated.View style={iconStyle}>
-          <Icon name={meta.icon} size={22} color={active ? colors.primary : colors.secondaryLabel} strokeWidth={active ? 2.5 : 2} />
+          <Icon name={meta.icon} size={24} color={active ? colors.primary : colors.secondaryLabel} strokeWidth={active ? 2.5 : 2} />
         </Animated.View>
         {active ? (
           <View testID={`${name}-active-dot`} style={{ marginTop: 3, width: 4, height: 4, borderRadius: 2, backgroundColor: colors.primary }} />
@@ -105,6 +106,8 @@ function CaptureButton() {
         width: CAMERA_SIZE,
         height: CAMERA_SIZE,
         borderRadius: half,
+        borderWidth: 2,
+        borderColor: withAlpha(colors.label, 0.3),
         shadowColor: colors.accent,
         shadowOpacity: 0.5,
         shadowRadius: 16,
@@ -125,7 +128,7 @@ function CaptureButton() {
         style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center" }}
         pointerEvents="none"
       >
-        <Icon name="camera" size={24} color={colors.primaryForeground} />
+        <Icon name="camera" size={26} color={colors.primaryForeground} />
       </View>
     </PressableScale>
   );
