@@ -5,12 +5,12 @@ import { router } from "expo-router";
 import { AppText } from "@/components/Text";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { GroupedSection } from "@/components/GroupedList";
-import { PressableScale } from "@/motion";
+import { NotifRow } from "@/components/NotifRow";
 import { useNotifications, useMarkAllRead } from "@/api/hooks";
 import { useTheme } from "@/theme";
 import { targetFor } from "@/lib/notificationTarget";
 import { relativeTime } from "@/lib/relativeTime";
-import type { AppNotification } from "@/api/types";
+import type { AppNotification, NotificationType } from "@/api/types";
 
 function message(n: AppNotification): string {
   switch (n.type) {
@@ -33,8 +33,32 @@ function message(n: AppNotification): string {
   }
 }
 
+type NotifIconTint = { icon: string; tint: string };
+
+// Per-type icon + tint for the notification row's colored icon chip. Icons are
+// restricted to glyphs confirmed to exist in Icon's MAP/SYMBOLS tables — an
+// unmapped name silently falls back to a plain Circle, which reads as broken.
+function iconTintFor(type: NotificationType, colors: ReturnType<typeof useTheme>["colors"]): NotifIconTint {
+  switch (type) {
+    case "friend_request":
+      return { icon: "users", tint: colors.accent };
+    case "friend_accept":
+      return { icon: "check", tint: colors.accent };
+    case "group_invite":
+      return { icon: "people", tint: colors.accentBlue };
+    case "challenge_created":
+    case "challenge_started":
+    case "challenge_ended":
+      return { icon: "trophy", tint: colors.accentAmber };
+    case "challenge_passed":
+      return { icon: "check", tint: colors.accent };
+    default:
+      return { icon: "bell", tint: colors.accent };
+  }
+}
+
 export default function NotificationsScreen() {
-  const { colors, spacing } = useTheme();
+  const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const notifications = useNotifications();
   const markAll = useMarkAllRead();
@@ -56,39 +80,21 @@ export default function NotificationsScreen() {
         {list.length === 0 ? (
           <AppText muted style={{ paddingVertical: 12 }}>Nothing yet. Friend requests, group invites, and new challenges show up here.</AppText>
         ) : (
-          <GroupedSection>
+          <GroupedSection elevated>
             {list.map((n) => {
               const target = targetFor(n);
-              const text = message(n);
-              const content = (
-                <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, minHeight: 44, paddingHorizontal: spacing.md }}>
-                  <View
-                    style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: n.read ? "transparent" : colors.accent }}
-                  />
-                  <View style={{ flex: 1 }}>
-                    <AppText variant="subheadline" style={{ fontWeight: n.read ? "400" : "600" }}>
-                      {text}
-                    </AppText>
-                    <AppText variant="footnote" muted>
-                      {relativeTime(n.created_at)}
-                    </AppText>
-                  </View>
-                </View>
-              );
-              return target ? (
-                <PressableScale
+              const { icon, tint } = iconTintFor(n.type, colors);
+              return (
+                <NotifRow
                   key={n.id}
-                  accessibilityRole="button"
-                  accessibilityLabel={text}
-                  haptic="none"
-                  onPress={() => router.push(target)}
-                >
-                  {content}
-                </PressableScale>
-              ) : (
-                <View key={n.id} accessibilityLabel={text}>
-                  {content}
-                </View>
+                  type={n.type}
+                  iconName={icon}
+                  tint={tint}
+                  text={message(n)}
+                  time={relativeTime(n.created_at)}
+                  unread={!n.read}
+                  onPress={target ? () => router.push(target) : undefined}
+                />
               );
             })}
           </GroupedSection>
