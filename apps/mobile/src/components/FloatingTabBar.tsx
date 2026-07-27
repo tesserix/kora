@@ -1,7 +1,8 @@
-import { useEffect } from "react";
+import { useEffect, useId } from "react";
 import { View } from "react-native";
 import { BlurView } from "expo-blur";
 import { router } from "expo-router";
+import Svg, { Circle, Defs, LinearGradient, Stop } from "react-native-svg";
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
 import { Icon } from "./Icon";
 import { useTheme } from "@/theme";
@@ -17,6 +18,12 @@ const TAB_META: Record<string, { icon: string; label: string }> = {
 
 const ORDER_LEFT = ["index", "diary"];
 const ORDER_RIGHT = ["progress", "more"];
+
+// Camera cap is raised above the pill (see CaptureButton) and needs a gap in
+// the pill's row so the left/right tab groups don't sit under it.
+const CAMERA_SIZE = 58;
+const CAMERA_SPACER_WIDTH = 64;
+const CAMERA_RAISE = 16;
 
 type FloatingTabBarProps = {
   state: { index: number; routes: ReadonlyArray<{ key: string; name: string }> };
@@ -80,6 +87,50 @@ function TabButton({ name, meta, active, showBadge, onPress }: TabButtonProps) {
   );
 }
 
+// Raised, glowing camera cap. Rendered as a SIBLING of the glass pill (not a
+// child) — the pill uses overflow:"hidden" for its blur/border-radius, which
+// would clip a button positioned above its top edge.
+function CaptureButton() {
+  const { colors, gradients } = useTheme();
+  const gradientId = useId();
+  const half = CAMERA_SIZE / 2;
+
+  return (
+    <PressableScale
+      accessibilityLabel="Capture"
+      accessibilityRole="button"
+      haptic="impactLight"
+      onPress={() => router.push("/capture")}
+      style={{
+        width: CAMERA_SIZE,
+        height: CAMERA_SIZE,
+        borderRadius: half,
+        shadowColor: colors.accent,
+        shadowOpacity: 0.5,
+        shadowRadius: 16,
+        shadowOffset: { width: 0, height: 10 },
+        elevation: 10,
+      }}
+    >
+      <Svg width={CAMERA_SIZE} height={CAMERA_SIZE}>
+        <Defs>
+          <LinearGradient id={gradientId} x1="0.2" y1="0" x2="0.8" y2="1">
+            <Stop offset="0%" stopColor={gradients.green[0]} />
+            <Stop offset="100%" stopColor={gradients.green[1]} />
+          </LinearGradient>
+        </Defs>
+        <Circle cx={half} cy={half} r={half} fill={`url(#${gradientId})`} />
+      </Svg>
+      <View
+        style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center" }}
+        pointerEvents="none"
+      >
+        <Icon name="camera" size={24} color={colors.primaryForeground} />
+      </View>
+    </PressableScale>
+  );
+}
+
 export function FloatingTabBar({ state, navigation }: FloatingTabBarProps) {
   const { colors, radius, shadows } = useTheme();
   const activeName = state.routes[state.index]?.name;
@@ -103,39 +154,36 @@ export function FloatingTabBar({ state, navigation }: FloatingTabBarProps) {
 
   return (
     <View style={{ position: "absolute", left: 0, right: 0, bottom: 22, alignItems: "center" }} pointerEvents="box-none">
-      <BlurView
-        intensity={40}
-        tint="light"
-        style={[
-          {
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 2,
-            padding: 7,
-            borderRadius: radius.full,
-            borderWidth: 1,
-            borderColor: colors.separator,
-            overflow: "hidden",
-            backgroundColor: colors.card + "AE",
-          },
-          shadows.lg,
-        ]}
-      >
-        {ORDER_LEFT.map(renderTab)}
-        <PressableScale
-          accessibilityLabel="Capture"
-          accessibilityRole="button"
-          haptic="impactLight"
-          onPress={() => router.push("/capture")}
+      <View style={{ position: "relative" }}>
+        <BlurView
+          intensity={40}
+          tint="dark"
           style={[
-            { width: 54, height: 54, marginHorizontal: 2, borderRadius: radius.full, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" },
-            shadows.md,
+            {
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 2,
+              padding: 7,
+              borderRadius: radius.full,
+              borderWidth: 1,
+              borderColor: colors.separator,
+              overflow: "hidden",
+              backgroundColor: colors.card + "C0",
+            },
+            shadows.lg,
           ]}
         >
-          <Icon name="camera" size={24} color={colors.primaryForeground} />
-        </PressableScale>
-        {ORDER_RIGHT.map(renderTab)}
-      </BlurView>
+          {ORDER_LEFT.map(renderTab)}
+          <View style={{ width: CAMERA_SPACER_WIDTH }} />
+          {ORDER_RIGHT.map(renderTab)}
+        </BlurView>
+        <View
+          style={{ position: "absolute", top: -CAMERA_RAISE, left: 0, right: 0, alignItems: "center" }}
+          pointerEvents="box-none"
+        >
+          <CaptureButton />
+        </View>
+      </View>
     </View>
   );
 }
