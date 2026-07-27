@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Pressable } from "react-native";
 import Animated, { FadeInDown, FadeOutDown } from "react-native-reanimated";
 import { AppText } from "./Text";
@@ -27,6 +27,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     setToast(o);
     timer.current = setTimeout(() => setToast(null), o.durationMs ?? 5000);
   }, []);
+
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
   return (
     <Ctx.Provider value={{ show }}>

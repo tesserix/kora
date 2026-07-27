@@ -34,3 +34,23 @@ test("shows a message and fires the action", async () => {
   });
   expect(onUndo).toHaveBeenCalledTimes(1);
 });
+
+test("clears the auto-dismiss timer on unmount (no setState after unmount)", async () => {
+  const { getByText, unmount } = await render(
+    <ToastProvider><Trigger onUndo={() => {}} /></ToastProvider>,
+  );
+  await act(async () => {
+    fireEvent.press(getByText("go"));
+  });
+  await waitFor(() => getByText("Logged"));
+  // RNTL's unmount() is itself async (it wraps renderer.unmount() in its own
+  // act() call), so it must be awaited before advancing timers — otherwise
+  // its internal act() is still pending when ours starts, which trips
+  // React's "overlapping act() calls" warning unrelated to the fix under
+  // test. If the timer weren't cleared on unmount, the pending setState on
+  // the unmounted tree would surface as a console.error below.
+  await unmount();
+  await act(async () => {
+    jest.advanceTimersByTime(6000);
+  });
+});
