@@ -26,13 +26,13 @@ export default function More() {
         <GroupedSection>
           <Row
             title="Profile"
-            icon={{ name: "person", tint: colors.accentBlue }}
+            icon={{ name: "person", tint: colors.accent }}
             chevron
             onPress={() => router.push("/profile" as Href)}
           />
           <Row
             title="Friends"
-            icon={{ name: "users", tint: colors.accentBlue }}
+            icon={{ name: "users", tint: colors.accent }}
             chevron
             onPress={() => router.push("/friends" as Href)}
           />
@@ -44,7 +44,7 @@ export default function More() {
           />
           <Row
             title="Notifications"
-            icon={{ name: "bell", tint: colors.accentAmber }}
+            icon={{ name: "bell", tint: colors.accent }}
             chevron
             right={count > 0 ? (
               <View style={{ marginRight: spacing.xs }}>

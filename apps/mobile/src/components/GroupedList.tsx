@@ -103,13 +103,13 @@ export function Row({ title, subtitle, detail, icon, chevron, destructive, onPre
             width: 29,
             height: 29,
             borderRadius: 6.5,
-            backgroundColor: icon.tint,
+            backgroundColor: colors.muted,
             alignItems: "center",
             justifyContent: "center",
             marginRight: spacing.sm,
           }}
         >
-          <Icon name={icon.name} size={16} color={colors.primaryForeground} />
+          <Icon name={icon.name} size={16} color={icon.tint} />
         </View>
       ) : null}
       <View style={{ flex: 1 }}>

@@ -81,7 +81,7 @@ export default function Progress() {
 
       <View style={{ paddingHorizontal: 16, gap: 16 }}>
         <Animated.View entering={enter(1)}>
-          <Card variant="elevated" style={{ padding: 18 }}>
+          <Card variant="hero" style={{ padding: 18 }}>
             <PressableScale
               accessibilityRole="button"
               accessibilityLabel="Log weight"
