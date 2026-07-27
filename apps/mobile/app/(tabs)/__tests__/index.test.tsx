@@ -13,6 +13,7 @@ jest.mock("@/api/hooks", () => ({
   useProfile: () => ({ data: { display_name: "Alex Stone", onboarded_at: "2026-07-01" } }),
   useDashboard: (...args: unknown[]) => mockUseDashboard(...args),
   useDayLogs: (...args: unknown[]) => mockUseDayLogs(...args),
+  useUnreadCount: () => ({ data: { count: 0 } }),
 }));
 
 import Home from "../index";

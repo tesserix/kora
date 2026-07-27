@@ -3,6 +3,7 @@ import { ScrollView, View } from "react-native";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppText } from "@/components/Text";
+import { AppBackground } from "@/components/AppBackground";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { Card } from "@/components/Card";
 import { Badge } from "@/components/Badge";
@@ -55,7 +56,9 @@ export default function Progress() {
   const delta = hasChart ? points[points.length - 1] - points[0] : null;
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <AppBackground />
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
       <Animated.View entering={enter(0)}>
         <ScreenHeader
           overline="Trends"
@@ -152,6 +155,7 @@ export default function Progress() {
       </View>
 
       <WeightLogSheet visible={sheetOpen} initialKg={current} onClose={() => setSheetOpen(false)} />
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }

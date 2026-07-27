@@ -4,6 +4,7 @@ import { router, type Href } from "expo-router";
 import { signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { unregisterPushToken } from "@/lib/push";
+import { AppBackground } from "@/components/AppBackground";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { GroupedSection, Row } from "@/components/GroupedList";
 import { Badge } from "@/components/Badge";
@@ -17,7 +18,9 @@ export default function More() {
   const count = unread.data?.count ?? 0;
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <AppBackground />
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
       <ScreenHeader overline="Your account" title="More" />
       <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>
         <GroupedSection>
@@ -67,6 +70,7 @@ export default function More() {
           />
         </GroupedSection>
       </View>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }

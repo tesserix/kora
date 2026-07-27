@@ -10,8 +10,10 @@ import { Overline } from "@/components/Overline";
 import { MealRow } from "@/components/MealRow";
 import { KcalHero } from "@/components/home/KcalHero";
 import { RingStat } from "@/components/RingStat";
+import { Icon } from "@/components/Icon";
+import { AppBackground } from "@/components/AppBackground";
 import { PressableScale } from "@/motion";
-import { useProfile, useDashboard, useDayLogs } from "@/api/hooks";
+import { useProfile, useDashboard, useDayLogs, useUnreadCount } from "@/api/hooks";
 import { useTheme } from "@/theme";
 import { foodVisual } from "@/lib/foodVisual";
 import { hslToHex, withAlpha } from "@/lib/color";
@@ -39,6 +41,7 @@ export default function Home() {
   const { colors, spacing, radius } = useTheme();
   const insets = useSafeAreaInsets();
   const profile = useProfile();
+  const unread = useUnreadCount();
   const date = today();
   const dashboard = useDashboard(date);
   const logs = useDayLogs(date);
@@ -60,6 +63,7 @@ export default function Home() {
   const left = Math.round(Math.max(0, goal - eaten));
   const loggedMeals = (logs.data ?? []) as FoodLog[];
   const firstName = profile.data?.display_name?.trim().split(" ")[0] || "there";
+  const hasUnread = (unread.data?.count ?? 0) > 0;
 
   const openMeal = (log: FoodLog) =>
     router.push({
@@ -68,7 +72,9 @@ export default function Home() {
     });
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingTop: insets.top + spacing.sm, paddingBottom: 130 }}>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <AppBackground />
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + spacing.sm, paddingBottom: 130 }}>
       {/* header: large title */}
       <Animated.View
         entering={enter(0)}
@@ -80,7 +86,39 @@ export default function Home() {
           </AppText>
           <AppText variant="largeTitle">Today</AppText>
         </View>
-        <Avatar initials={initials(profile.data?.display_name)} />
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Notifications"
+            haptic="selection"
+            onPress={() => router.push("/notifications")}
+            style={{ width: 40, height: 40, alignItems: "center", justifyContent: "center" }}
+          >
+            <Icon name="bell" size={22} color={colors.label} />
+            {hasUnread ? (
+              <View
+                testID="home-unread-badge"
+                style={{
+                  position: "absolute",
+                  top: 6,
+                  right: 6,
+                  width: 8,
+                  height: 8,
+                  borderRadius: 4,
+                  backgroundColor: colors.accent,
+                }}
+              />
+            ) : null}
+          </PressableScale>
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Profile"
+            haptic="selection"
+            onPress={() => router.push("/profile")}
+          >
+            <Avatar initials={initials(profile.data?.display_name)} />
+          </PressableScale>
+        </View>
       </Animated.View>
 
       {/* error state keeps current copy + destructive color */}
@@ -168,6 +206,7 @@ export default function Home() {
           </PressableScale>
         </Animated.View>
       ) : null}
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }

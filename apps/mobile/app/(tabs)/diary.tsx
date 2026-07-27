@@ -6,6 +6,7 @@ import Svg, { Circle, Defs, LinearGradient, Stop } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { AppText } from "@/components/Text";
+import { AppBackground } from "@/components/AppBackground";
 import { Card } from "@/components/Card";
 import { Numeral } from "@/components/Numeral";
 import { Icon } from "@/components/Icon";
@@ -213,8 +214,9 @@ export default function Diary() {
   );
 
   return (
-    <>
-      <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingTop: insets.top + spacing.sm, paddingBottom: 140 }}>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <AppBackground />
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + spacing.sm, paddingBottom: 140 }}>
         <Animated.View entering={enter(0)} style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
           <AppText variant="largeTitle">Diary</AppText>
         </Animated.View>
@@ -313,6 +315,6 @@ export default function Diary() {
         </View>
       </ScrollView>
       {copyOpen ? <CopyDaySheet visible targetDate={selected} onClose={() => setCopyOpen(false)} /> : null}
-    </>
+    </View>
   );
 }
