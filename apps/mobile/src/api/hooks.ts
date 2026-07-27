@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, apiFetchMultipart } from "@/lib/api";
 import type { MealSlot } from "@/lib/mealSlot";
 import type {
@@ -90,6 +90,34 @@ export function useDashboard(date: string) {
     queryKey: ["dashboard", date],
     queryFn: () => apiFetch(`/v1/dashboard?date=${date}`) as Promise<DashboardSummary>,
   });
+}
+
+// Client-only 7-day average intake. Reuses the existing /v1/dashboard endpoint
+// per day (same query key as useDashboard, so React Query caches/shares each
+// date) and averages only the days that actually returned data — never
+// fabricates a value; returns avg: null when there's no data at all.
+export function useAvgIntake7d(endDate: string): { avg: number | null; series: number[]; isLoading: boolean } {
+  const dates: string[] = [];
+  const end = new Date(`${endDate}T00:00:00`);
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(end.getTime() - i * 24 * 60 * 60 * 1000);
+    dates.push(d.toLocaleDateString("en-CA"));
+  }
+
+  const results = useQueries({
+    queries: dates.map((date) => ({
+      queryKey: ["dashboard", date],
+      queryFn: () => apiFetch(`/v1/dashboard?date=${date}`) as Promise<DashboardSummary>,
+    })),
+  });
+
+  const isLoading = results.some((r) => r.isLoading);
+  const series = results
+    .filter((r) => r.isSuccess && typeof r.data?.consumed?.kcal === "number")
+    .map((r) => r.data!.consumed.kcal);
+  const avg = series.length > 0 ? Math.round(series.reduce((sum, kcal) => sum + kcal, 0) / series.length) : null;
+
+  return { avg, series, isLoading };
 }
 
 export function useAddWater() {

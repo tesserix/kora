@@ -6,6 +6,7 @@ import {
   useAcceptRequest,
   useAddWater,
   useAddWeight,
+  useAvgIntake7d,
   useCreateChallenge,
   useCreateGroup,
   useDeleteChallenge,
@@ -371,4 +372,35 @@ test("useInviteToGroup POSTs /v1/groups/:id/invite with user_id", async () => {
     method: "POST",
     body: JSON.stringify({ user_id: "f1" }),
   });
+});
+
+const dashboardSummary = (kcal: number) => ({
+  date: "2026-07-27",
+  consumed: { kcal, protein_g: 0, carbs_g: 0, fat_g: 0, fiber_g: 0 },
+  targets: { kcal: 2200, protein_g: 0, carbs_g: 0, fat_g: 0, fiber_g: 0 },
+  water_ml: 0,
+  streak_days: 0,
+  source_counts: {},
+});
+
+it("useAvgIntake7d averages consumed kcal across the last 7 days that have data", async () => {
+  (apiFetch as jest.Mock).mockImplementation((url: string) =>
+    url.startsWith("/v1/dashboard") ? Promise.resolve(dashboardSummary(2000)) : Promise.resolve({}),
+  );
+
+  const { result } = await renderHook(() => useAvgIntake7d("2026-07-27"), { wrapper });
+  await waitFor(() => expect(result.current.isLoading).toBe(false));
+  expect(result.current.series.length).toBe(7);
+  expect(result.current.avg).toBe(2000);
+});
+
+it("useAvgIntake7d returns avg: null and an empty series when no day has data (never fabricates)", async () => {
+  (apiFetch as jest.Mock).mockImplementation((url: string) =>
+    url.startsWith("/v1/dashboard") ? Promise.reject(new Error("no data for date")) : Promise.resolve({}),
+  );
+
+  const { result } = await renderHook(() => useAvgIntake7d("2026-07-27"), { wrapper });
+  await waitFor(() => expect(result.current.isLoading).toBe(false));
+  expect(result.current.series).toEqual([]);
+  expect(result.current.avg).toBeNull();
 });
