@@ -49,9 +49,8 @@ test("imperial: seeds the field in lb and converts the saved value back to kg", 
     <WeightLogSheet visible initialKg={78.6} onClose={onClose} />,
   );
   const input = getByLabelText("Weight in pounds");
-  // 78.6 kg -> 173.28... lb, seeded as the raw converted number (no toFixed
-  // rounding is applied by seedText — parity with pre-existing kg seeding).
-  expect(input.props.value).toBe(String(78.6 * 2.2046226218));
+  // 78.6 kg -> 173.28... lb, rounded to one decimal to match display precision.
+  expect(input.props.value).toBe("173.3");
   expect(getByText("lb")).toBeTruthy();
 
   await fireEvent.changeText(input, "150");

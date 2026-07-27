@@ -16,8 +16,8 @@ interface WeightLogSheetProps {
 
 function seedText(initialKg: number, system: UnitSystem): string {
   if (initialKg <= 0) return "";
-  const value = system === "imperial" ? lbFromKg(initialKg) : initialKg;
-  return String(value);
+  if (system === "imperial") return lbFromKg(initialKg).toFixed(1);
+  return String(initialKg);
 }
 
 export function WeightLogSheet({ visible, initialKg, onClose }: WeightLogSheetProps) {
