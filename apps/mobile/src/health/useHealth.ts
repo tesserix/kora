@@ -70,17 +70,21 @@ export function useHealth(): HealthData {
   const [sleep, setSleep] = useState<HealthData["sleep"]>(null);
 
   const load = useCallback(async () => {
-    // TODO(health-connect): Android provider. This hook only supports iOS/HealthKit
-    // today. When Android support lands, branch on Platform.OS === "android" here and
-    // read from Health Connect instead, while keeping the same HealthData contract.
-    if (Platform.OS !== "ios" || !isHealthDataAvailable()) {
-      setStatus("unavailable");
-      setSteps(null);
-      setSleep(null);
-      return;
-    }
-
     try {
+      // TODO(health-connect): Android provider. This hook only supports iOS/HealthKit
+      // today. When Android support lands, branch on Platform.OS === "android" here and
+      // read from Health Connect instead, while keeping the same HealthData contract.
+      // `isHealthDataAvailable()` is a native (Nitro) call, so it lives inside the
+      // try/catch too: on a build where the native module isn't linked (e.g. a
+      // dev-client built before HealthKit was added), it throws — degrade to
+      // "unavailable" rather than crashing the screen.
+      if (Platform.OS !== "ios" || !isHealthDataAvailable()) {
+        setStatus("unavailable");
+        setSteps(null);
+        setSleep(null);
+        return;
+      }
+
       const granted = await requestAuthorization({
         toRead: [STEP_COUNT_IDENTIFIER, SLEEP_ANALYSIS_IDENTIFIER],
       });
