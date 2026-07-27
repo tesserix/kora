@@ -8,7 +8,8 @@ import { Button } from "@/components/Button";
 import { Icon } from "@/components/Icon";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { ProvenanceChip } from "@/components/ProvenanceChip";
-import { GroupedSection, Row } from "@/components/GroupedList";
+import { GroupedSection } from "@/components/GroupedList";
+import { MealRow } from "@/components/MealRow";
 import { Stat } from "@/components/Stat";
 import { Segmented } from "@/components/Segmented";
 import { Card } from "@/components/Card";
@@ -18,6 +19,7 @@ import { useToast } from "@/components/Toast";
 import { useCreateLog, useCreateLogBatch, useDeleteLog, useFoodSearch, useMemory } from "@/api/hooks";
 import type { FoodItem, MemoryFood, MemoryMeal } from "@/api/types";
 import { foodVisual } from "@/lib/foodVisual";
+import { hslToHex } from "@/lib/color";
 import { haptics } from "@/motion";
 import { useTheme } from "@/theme";
 
@@ -257,29 +259,42 @@ export default function LogScreen() {
               ) : memTab === "usual_meals" ? (
                 (memory.data?.usual_meals ?? []).length > 0 ? (
                   <GroupedSection elevated>
-                    {(memory.data?.usual_meals ?? []).map((m) => (
-                      <Row
-                        key={m.id}
-                        title={m.name}
-                        subtitle={m.items.map((i) => i.name).join(" · ")}
-                        detail={`×${m.count}`}
-                        onPress={() => logMeal(m)}
-                      />
-                    ))}
+                    {(memory.data?.usual_meals ?? []).map((m) => {
+                      const fv = foodVisual(m.name);
+                      return (
+                        <MealRow
+                          key={m.id}
+                          name={m.name}
+                          slot={m.items.map((i) => i.name).join(" · ")}
+                          kcal={m.kcal}
+                          iconName={fv.icon}
+                          tint={hslToHex(fv.hue, 0.5, 0.5)}
+                          onPress={() => logMeal(m)}
+                          accessibilityLabel={m.name}
+                        />
+                      );
+                    })}
                   </GroupedSection>
                 ) : (
                   <AppText muted>Log a few meals and they'll show up here.</AppText>
                 )
               ) : (memory.data?.[memTab] ?? []).length > 0 ? (
                 <GroupedSection elevated>
-                  {(memory.data?.[memTab] ?? []).map((f) => (
-                    <Row
-                      key={f.food_item_id}
-                      title={f.name}
-                      subtitle={`${Math.round(f.grams)}g · ${Math.round(f.kcal)} kcal`}
-                      onPress={() => logFood(f)}
-                    />
-                  ))}
+                  {(memory.data?.[memTab] ?? []).map((f) => {
+                    const fv = foodVisual(f.name);
+                    return (
+                      <MealRow
+                        key={f.food_item_id}
+                        name={f.name}
+                        slot={`${Math.round(f.grams)}g`}
+                        kcal={f.kcal}
+                        iconName={fv.icon}
+                        tint={hslToHex(fv.hue, 0.5, 0.5)}
+                        onPress={() => logFood(f)}
+                        accessibilityLabel={f.name}
+                      />
+                    );
+                  })}
                 </GroupedSection>
               ) : (
                 <AppText muted>Log a few meals and they'll show up here.</AppText>
@@ -289,16 +304,22 @@ export default function LogScreen() {
 
           {search.data && search.data.length > 0 ? (
             <GroupedSection elevated>
-              {search.data.map((item, i) => (
-                <Animated.View key={item.id} entering={enter(i)}>
-                  <Row
-                    title={item.name}
-                    subtitle={item.brand || undefined}
-                    detail={`${Math.round(item.kcal_per_100g)} kcal/100g`}
-                    onPress={() => setSelected(item)}
-                  />
-                </Animated.View>
-              ))}
+              {search.data.map((item, i) => {
+                const fv = foodVisual(item.name);
+                return (
+                  <Animated.View key={item.id} entering={enter(i)}>
+                    <MealRow
+                      name={item.name}
+                      slot={item.brand || "per 100g"}
+                      kcal={item.kcal_per_100g}
+                      iconName={fv.icon}
+                      tint={hslToHex(fv.hue, 0.5, 0.5)}
+                      onPress={() => setSelected(item)}
+                      accessibilityLabel={item.name}
+                    />
+                  </Animated.View>
+                );
+              })}
             </GroupedSection>
           ) : q.length >= 2 && !search.isLoading ? (
             <AppText muted>No matches.</AppText>
