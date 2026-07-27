@@ -56,6 +56,14 @@ export default function More() {
         </GroupedSection>
         <GroupedSection>
           <Row
+            title="Settings"
+            icon={{ name: "gear", tint: colors.accent }}
+            chevron
+            onPress={() => router.push("/settings" as Href)}
+          />
+        </GroupedSection>
+        <GroupedSection>
+          <Row
             title="Sign out"
             destructive
             onPress={async () => {
