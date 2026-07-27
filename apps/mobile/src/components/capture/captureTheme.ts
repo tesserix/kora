@@ -32,6 +32,12 @@ export const captureColors = {
   viewfinderBg: "#DCF4E3",
   viewfinderIcon: "#1F8A43",
   viewfinderCaption: "#1B6636",
+  // Full-bleed canvas backdrop (Task 13) — a subtle vertical gradient from a
+  // faint moss-tinted charcoal into true black, echoing the primary green
+  // accent without competing with the thread/composer content on top of it.
+  canvasGradientTop: "#0E1F14",
+  canvasGradientMid: "#08100B",
+  canvasGradientBottom: "#000000",
 } as const;
 
 export type CaptureColors = typeof captureColors;

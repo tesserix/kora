@@ -8,9 +8,11 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  StyleSheet,
   TextInput,
   View,
 } from "react-native";
+import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
@@ -395,7 +397,7 @@ export function CaptureBody({
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: captureColors.surface }}
+      style={{ flex: 1, backgroundColor: "transparent" }}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
       <View
@@ -614,6 +616,33 @@ async function pickMealPhoto(): Promise<PhotoPickOutcome> {
   } catch {
     return { status: "failed" };
   }
+}
+
+// Full-bleed dark canvas backdrop — sits behind the header/thread/composer.
+// Purely decorative (no data, no text), so it carries no nutrition-invariant
+// risk; the composer keeps its own opaque bar on top of it. Uses
+// react-native-svg (expo-linear-gradient isn't installed) with a percentage
+// viewBox so the Rect always fills its container regardless of screen size.
+function CaptureCanvasBackground() {
+  return (
+    <Svg
+      testID="capture-canvas-background"
+      style={StyleSheet.absoluteFill}
+      width="100%"
+      height="100%"
+      viewBox="0 0 100 100"
+      preserveAspectRatio="none"
+    >
+      <Defs>
+        <LinearGradient id="captureCanvas" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0%" stopColor={captureColors.canvasGradientTop} />
+          <Stop offset="45%" stopColor={captureColors.canvasGradientMid} />
+          <Stop offset="100%" stopColor={captureColors.canvasGradientBottom} />
+        </LinearGradient>
+      </Defs>
+      <Rect x={0} y={0} width={100} height={100} fill="url(#captureCanvas)" />
+    </Svg>
+  );
 }
 
 function ottoErrorMessage(error: Error): string {
@@ -871,6 +900,7 @@ export default function CaptureScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: captureColors.surface }}>
+      <CaptureCanvasBackground />
       <CaptureBody
         displayName={profile.data?.display_name?.trim().split(" ")[0] || "there"}
         insetTop={insets.top}
