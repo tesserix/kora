@@ -9,11 +9,11 @@ import { withAlpha } from "@/lib/color";
 type Props = { name: string; slot: string; kcal: number; iconName?: string; tint?: string; onPress?: () => void; accessibilityLabel?: string };
 
 export function MealRow({ name, slot, kcal, iconName = "utensils", tint, onPress, accessibilityLabel }: Props) {
-  const { colors, radius } = useTheme();
+  const { colors, radius, spacing } = useTheme();
   const chip = tint ?? colors.accent;
   return (
     <PressableScale testID="meal-row" accessibilityRole="button" accessibilityLabel={accessibilityLabel ?? name} haptic="selection" onPress={onPress}
-      style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10 }}>
+      style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10, paddingHorizontal: spacing.md }}>
       <View style={{ width: 36, height: 36, borderRadius: radius.md, alignItems: "center", justifyContent: "center", backgroundColor: withAlpha(chip, 0.16) }}>
         <Icon name={iconName} size={18} color={chip} />
       </View>
