@@ -57,7 +57,7 @@ export default function Friends() {
         <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>
           <Button title="Add a friend" onPress={() => setAddOpen(true)} />
 
-          <GroupedSection>
+          <GroupedSection elevated>
             <Row
               title="Share my progress"
               subtitle="Friends can see your streak and on-target days."
@@ -107,7 +107,7 @@ export default function Friends() {
             </GroupedSection>
           ) : null}
 
-          <GroupedSection header="Friends">
+          <GroupedSection header="Friends" elevated>
             {list.length === 0 ? (
               <Row title="No friends yet" subtitle="Share your code to connect." />
             ) : (

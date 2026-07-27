@@ -27,7 +27,7 @@ export default function Groups() {
             <Button title="Join by code" variant="secondary" onPress={() => setSheet("join")} style={{ flex: 1 }} />
           </View>
 
-          <GroupedSection>
+          <GroupedSection elevated>
             {list.length === 0 ? (
               <Row title="No groups yet" subtitle="Create one or join with a code." />
             ) : (
