@@ -189,6 +189,67 @@ func TestEditLogNonexistentFoodItemIDReturnsValidationError(t *testing.T) {
 	require.False(t, errors.Is(err, gorm.ErrRecordNotFound), "error must not still satisfy gorm.ErrRecordNotFound (would map to misleading 404)")
 }
 
+func TestCreateBatchComputesMacrosServerSide(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	item := nutrition.FoodItem{Name: "Batch Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100, ProteinPer100g: 10, CarbsPer100g: 20, FatPer100g: 5, FiberPer100g: 2}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	logs, err := svc.CreateBatch(context.Background(), userID, CreateBatchRequest{
+		LoggedAt: time.Now(), MealSlot: "breakfast",
+		Items: []BatchItem{{FoodItemID: item.ID, QuantityGrams: 200}},
+	})
+	require.NoError(t, err)
+	require.Len(t, logs, 1)
+	require.Equal(t, item.KcalPer100g*2.0, logs[0].Kcal, "kcal must be server-computed from item per-100g * grams")
+	require.Equal(t, item.ProteinPer100g*2.0, logs[0].ProteinG)
+	require.Equal(t, item.CarbsPer100g*2.0, logs[0].CarbsG)
+	require.Equal(t, item.FatPer100g*2.0, logs[0].FatG)
+	require.Equal(t, item.FiberPer100g*2.0, logs[0].FiberG)
+}
+
+func TestCreateBatchRejectsEmptyItems(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	svc := NewService(NewRepository(db), nutrition.NewRepository(db))
+
+	_, err := svc.CreateBatch(context.Background(), userID, CreateBatchRequest{
+		LoggedAt: time.Now(), MealSlot: "breakfast", Items: nil,
+	})
+	require.Error(t, err)
+	_, ok := httpx.IsValidation(err)
+	require.True(t, ok, "want ValidationError on empty items, got: %v", err)
+}
+
+func TestCreateBatchRollsBackWholeBatchOnUnresolvableItem(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	item := nutrition.FoodItem{Name: "Batch Rollback Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	bogusID := uuid.New()
+	since := time.Now().Add(-time.Hour)
+
+	_, err := svc.CreateBatch(context.Background(), userID, CreateBatchRequest{
+		LoggedAt: time.Now(), MealSlot: "breakfast",
+		Items: []BatchItem{
+			{FoodItemID: item.ID, QuantityGrams: 100},
+			{FoodItemID: bogusID, QuantityGrams: 100},
+		},
+	})
+	require.Error(t, err)
+
+	logs, err := NewRepository(db).ListForUserSince(context.Background(), userID, since)
+	require.NoError(t, err)
+	require.Empty(t, logs, "the resolvable item must NOT have been committed — batch must be atomic")
+}
+
 func TestEditLogInvalidMealSlotReturnsValidationError(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db)

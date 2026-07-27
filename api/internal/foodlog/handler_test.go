@@ -61,6 +61,40 @@ func TestCreateAndListLog(t *testing.T) {
 	require.Contains(t, w2.Body.String(), `"meal_slot":"lunch"`)
 }
 
+func TestCreateBatchHandler(t *testing.T) {
+	db := testDB(t)
+	gin.SetMode(gin.TestMode)
+
+	fuid := "batch-" + uuid.NewString()
+	uRepo := user.NewRepository(db)
+	u, err := uRepo.UpsertByFirebaseUID(context.Background(), fuid, "batch@test.dev")
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE id = ?", u.ID) })
+
+	item := nutrition.FoodItem{Name: "Batch Handler Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100, ProteinPer100g: 10}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	repo := NewRepository(db)
+	h := NewHandler(NewService(repo, nutrition.NewRepository(db)), repo)
+
+	r := gin.New()
+	r.Use(func(c *gin.Context) { c.Set("uid", fuid); c.Next() })
+	r.Use(user.ResolveMiddleware(uRepo))
+	r.POST("/v1/logs/batch", h.CreateBatch)
+
+	body, _ := json.Marshal(CreateBatchRequest{
+		MealSlot: "breakfast", LoggedAt: time.Now(),
+		Items: []BatchItem{{FoodItemID: item.ID, QuantityGrams: 200}},
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/v1/logs/batch", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code)
+	require.Contains(t, w.Body.String(), `"kcal":200`) // server-computed: 100 kcal/100g * 200g
+}
+
 func TestUpdateHandler(t *testing.T) {
 	db := testDB(t)
 	gin.SetMode(gin.TestMode)
