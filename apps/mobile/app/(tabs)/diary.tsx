@@ -18,6 +18,7 @@ import { useDashboard, useDayLogs, useAddWater, useDeleteLog } from "@/api/hooks
 import { AnimatedNumber, PressableScale, haptics, springs } from "@/motion";
 import { useTheme } from "@/theme";
 import { hslToHex, withAlpha } from "@/lib/color";
+import { useUnits, mlToFlOz, flOzToMl, type UnitSystem } from "@/units";
 import { foodVisual } from "@/lib/foodVisual";
 import type { FoodLog } from "@/api/types";
 
@@ -127,16 +128,17 @@ function AnimatedStat({ label, value, unit, format }: AnimatedStatProps) {
   );
 }
 
-type WaterPillProps = { ml: number; disabled: boolean; onPress: () => void };
+type WaterPillProps = { label: string; a11yLabel: string; disabled: boolean; onPress: () => void };
 
-// Green pill matching the mock's `.waterbtns` — visible "+NNN ml" text and
-// "Add NNN ml water" a11y label are both load-bearing for existing tests.
-function WaterPill({ ml, disabled, onPress }: WaterPillProps) {
+// Green pill matching the mock's `.waterbtns`. `label` ("+250 ml" / "+8 fl oz")
+// and `a11yLabel` ("Add 250 ml water" / "Add 8 fl oz water") are unit-aware and
+// load-bearing for tests.
+function WaterPill({ label, a11yLabel, disabled, onPress }: WaterPillProps) {
   const { colors } = useTheme();
   return (
     <PressableScale
       accessibilityRole="button"
-      accessibilityLabel={`Add ${ml} ml water`}
+      accessibilityLabel={a11yLabel}
       accessibilityState={{ disabled }}
       haptic="impactLight"
       disabled={disabled}
@@ -151,13 +153,30 @@ function WaterPill({ ml, disabled, onPress }: WaterPillProps) {
         opacity: disabled ? 0.5 : 1,
       }}
     >
-      <AppText style={{ color: colors.accent, fontWeight: "700" }}>{`+${ml} ml`}</AppText>
+      <AppText style={{ color: colors.accent, fontWeight: "700" }}>{label}</AppText>
     </PressableScale>
   );
 }
 
+type WaterQuickAdd = { ml: number; label: string; a11yLabel: string };
+
+// Quick-add amounts per unit system. Metric: 250/500 ml. Imperial: a cup (8 fl oz)
+// and a large glass (16 fl oz), stored as their rounded ml equivalents (the backend
+// is always ml). Metric labels/a11y are preserved verbatim for existing tests.
+const WATER_QUICK_ADDS: Record<UnitSystem, readonly WaterQuickAdd[]> = {
+  metric: [
+    { ml: 250, label: "+250 ml", a11yLabel: "Add 250 ml water" },
+    { ml: 500, label: "+500 ml", a11yLabel: "Add 500 ml water" },
+  ],
+  imperial: [
+    { ml: Math.round(flOzToMl(8)), label: "+8 fl oz", a11yLabel: "Add 8 fl oz water" },
+    { ml: Math.round(flOzToMl(16)), label: "+16 fl oz", a11yLabel: "Add 16 fl oz water" },
+  ],
+};
+
 export default function Diary() {
   const { colors, spacing, gradients } = useTheme();
+  const { system } = useUnits();
   const insets = useSafeAreaInsets();
   const week = weekDates();
   const todayIso = iso(new Date());
@@ -202,7 +221,12 @@ export default function Diary() {
   const goal = d?.targets.kcal ?? 0;
   const total = Math.round(d?.consumed.kcal ?? 0);
   const remaining = Math.max(0, Math.round(goal - (d?.consumed.kcal ?? 0)));
-  const waterL = (d?.water_ml ?? 0) / 1000;
+  const waterMl = d?.water_ml ?? 0;
+  const water =
+    system === "imperial"
+      ? { value: mlToFlOz(waterMl), unit: "fl oz", format: (n: number) => String(Math.round(n)) }
+      : { value: waterMl / 1000, unit: "L", format: (n: number) => n.toFixed(1) };
+  const waterQuickAdds = WATER_QUICK_ADDS[system];
   const pct = goal > 0 ? Math.round((total / goal) * 100) : 0;
   const logged = (logs.data ?? []) as FoodLog[];
 
@@ -248,13 +272,19 @@ export default function Diary() {
                 <View style={{ flex: 1, flexDirection: "row", justifyContent: "space-around", alignItems: "center" }}>
                   <AnimatedStat label="Eaten" value={total} unit="kcal" />
                   <AnimatedStat label="Left" value={remaining} unit="kcal" />
-                  <AnimatedStat label="Water" value={waterL} unit="L" format={(n) => n.toFixed(1)} />
+                  <AnimatedStat label="Water" value={water.value} unit={water.unit} format={water.format} />
                 </View>
               </View>
 
               <View style={{ flexDirection: "row", gap: 8, marginTop: 16 }}>
-                {[250, 500].map((ml) => (
-                  <WaterPill key={ml} ml={ml} disabled={addWater.isPending} onPress={() => addWaterMl(ml)} />
+                {waterQuickAdds.map((qa) => (
+                  <WaterPill
+                    key={qa.ml}
+                    label={qa.label}
+                    a11yLabel={qa.a11yLabel}
+                    disabled={addWater.isPending}
+                    onPress={() => addWaterMl(qa.ml)}
+                  />
                 ))}
               </View>
               {waterErr ? (

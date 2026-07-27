@@ -16,3 +16,17 @@ test("rejects out-of-range", () => {
 test("accepts valid input", () => {
   expect(validateOnboardingNumbers("1995", "180", "80")).toBeNull();
 });
+
+test("range messages default to metric units", () => {
+  expect(validateOnboardingNumbers("1995", "0", "80")).toBe("Please enter a valid height in cm.");
+  expect(validateOnboardingNumbers("1995", "180", "0")).toBe("Please enter a valid weight in kg.");
+});
+
+test("range messages use imperial unit labels when provided", () => {
+  expect(validateOnboardingNumbers("1995", "0", "80", { heightUnit: "ft/in", weightUnit: "lb" })).toBe(
+    "Please enter a valid height in ft/in.",
+  );
+  expect(validateOnboardingNumbers("1995", "180", "0", { heightUnit: "ft/in", weightUnit: "lb" })).toBe(
+    "Please enter a valid weight in lb.",
+  );
+});

@@ -38,3 +38,13 @@ export function parseWeightToKg(text: string, system: UnitSystem): number | null
   if (!Number.isFinite(value) || value <= 0) return null;
   return system === "imperial" ? kgFromLb(value) : value;
 }
+
+export const ML_PER_FL_OZ = 29.5735295625;
+
+export function mlToFlOz(ml: number): number {
+  return ml / ML_PER_FL_OZ;
+}
+
+export function flOzToMl(flOz: number): number {
+  return flOz * ML_PER_FL_OZ;
+}

@@ -1,5 +1,7 @@
 import {
   cmFromFtIn,
+  mlToFlOz,
+  flOzToMl,
   formatWeight,
   kgFromLb,
   lbFromKg,
@@ -71,5 +73,23 @@ describe("parseWeightToKg", () => {
 
   test("returns null for non-numeric text in imperial mode", () => {
     expect(parseWeightToKg("abc", "imperial")).toBeNull();
+  });
+});
+
+describe("volume conversion", () => {
+  test("mlToFlOz converts 1000 ml to ~33.8 fl oz", () => {
+    expect(mlToFlOz(1000)).toBeCloseTo(33.814, 2);
+  });
+
+  test("flOzToMl rounds a cup (8 fl oz) to 237 ml", () => {
+    expect(Math.round(flOzToMl(8))).toBe(237);
+  });
+
+  test("flOzToMl rounds 16 fl oz to 473 ml", () => {
+    expect(Math.round(flOzToMl(16))).toBe(473);
+  });
+
+  test("mlToFlOz / flOzToMl round-trip", () => {
+    expect(flOzToMl(mlToFlOz(500))).toBeCloseTo(500, 6);
   });
 });

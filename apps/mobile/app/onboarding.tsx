@@ -61,9 +61,21 @@ export default function Onboarding() {
 
   function onSubmit() {
     setError(null);
+    // Imperial: a blank ft/in pair converts to "0" (truthy), which would slip
+    // past the validator's presence check into a range error. Catch missing raw
+    // inputs here so the user sees "Please fill in..." instead.
+    if (system === "imperial" && (!birthYear || (!heightFt && !heightIn) || !weightText)) {
+      setError("Please fill in your birth year, height, and weight.");
+      return;
+    }
     const heightCmStr = system === "imperial" ? String(cmFromFtIn(Number(heightFt), Number(heightIn))) : heightCm;
     const weightKgStr = system === "imperial" ? String(kgFromLb(Number(weightText))) : weightText;
-    const validationError = validateOnboardingNumbers(birthYear, heightCmStr, weightKgStr);
+    const validationError = validateOnboardingNumbers(
+      birthYear,
+      heightCmStr,
+      weightKgStr,
+      system === "imperial" ? { heightUnit: "ft/in", weightUnit: "lb" } : undefined,
+    );
     if (validationError) {
       setError(validationError);
       return;
