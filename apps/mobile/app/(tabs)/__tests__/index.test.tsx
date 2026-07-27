@@ -13,6 +13,7 @@ jest.mock("@/api/hooks", () => ({
   useProfile: () => ({ data: { display_name: "Alex Stone", onboarded_at: "2026-07-01" } }),
   useDashboard: (...args: unknown[]) => mockUseDashboard(...args),
   useDayLogs: (...args: unknown[]) => mockUseDayLogs(...args),
+  useUnreadCount: () => ({ data: { count: 0 } }),
 }));
 
 import Home from "../index";
@@ -57,4 +58,15 @@ test("Home shows an error message when the dashboard fails to load", async () =>
   const { findByText, queryByText } = await render(<Home />);
   expect(await findByText(/Couldn't load your day/i)).toBeTruthy();
   expect(queryByText(/calories left/i)).toBeNull();
+});
+
+test("shows a Connect Apple Health affordance for Steps (never a number yet)", async () => {
+  mockUseDashboard.mockReturnValue({
+    data: { consumed: { kcal: 1252, protein_g: 96, carbs_g: 140, fat_g: 40 }, targets: { kcal: 2000, protein_g: 140, carbs_g: 220, fat_g: 70 }, water_ml: 1400, streak_days: 12 },
+    isError: false,
+  });
+  mockUseDayLogs.mockReturnValue({ data: [], isError: false });
+
+  const { getAllByLabelText } = await render(<Home />);
+  expect(getAllByLabelText("Connect Apple Health").length).toBeGreaterThanOrEqual(2);
 });

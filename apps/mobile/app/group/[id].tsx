@@ -4,7 +4,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, useLocalSearchParams, type Href } from "expo-router";
 import { AppText } from "@/components/Text";
 import { Overline } from "@/components/Overline";
-import { Numeral } from "@/components/Numeral";
+import { Icon } from "@/components/Icon";
+import { LeaderRow } from "@/components/LeaderRow";
 import { GroupedSection, Row } from "@/components/GroupedList";
 import { PressableScale } from "@/motion";
 import { CreateChallengeSheet } from "@/components/social/CreateChallengeSheet";
@@ -12,7 +13,6 @@ import { RenameGroupSheet } from "@/components/social/RenameGroupSheet";
 import { InviteFriendSheet } from "@/components/social/InviteFriendSheet";
 import { useGroup, useGroupProgress, useGroupCode, useLeaveGroup, useRemoveMember, useDeleteGroup, useProfile, useGroupChallenges } from "@/api/hooks";
 import { useTheme } from "@/theme";
-import { withAlpha } from "@/lib/color";
 
 const METRIC_LABEL: Record<string, string> = { logged: "Logged days", on_target: "On-target days" };
 
@@ -66,51 +66,43 @@ export default function GroupDetail() {
   return (
     <>
       <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
-        <View style={{ paddingHorizontal: 20, paddingBottom: 14 }}>
-          <Overline>Group</Overline>
-          <AppText variant="title2" style={{ marginTop: 4 }}>{d?.name ?? "Group"}</AppText>
+        <View style={{ flexDirection: "row", alignItems: "flex-start", paddingHorizontal: 20, paddingTop: 4, paddingBottom: 14 }}>
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            haptic="selection"
+            onPress={() => router.back()}
+            style={{ width: 36, height: 36, alignItems: "center", justifyContent: "center", marginRight: 4, marginLeft: -6 }}
+          >
+            <Icon name="arrow-left" size={22} color={colors.label} />
+          </PressableScale>
+          <View style={{ flex: 1 }}>
+            <Overline>Group</Overline>
+            <AppText variant="title2" style={{ marginTop: 4 }}>{d?.name ?? "Group"}</AppText>
+          </View>
         </View>
 
         <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>
-          <GroupedSection>
+          <GroupedSection elevated>
             <Row title="Share invite code" subtitle={code.data?.code} onPress={shareCode} />
             {isOwner ? <Row title="Rename group" chevron onPress={() => setRenameOpen(true)} /> : null}
             {isOwner ? <Row title="Invite a friend" chevron onPress={() => setInviteOpen(true)} /> : null}
           </GroupedSection>
 
-          <GroupedSection header="Leaderboard">
-            {ranked.map((m, i) => {
-              const isMe = m.id === profile.data?.id;
-              return (
-                <View
-                  key={m.id}
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: spacing.sm,
-                    minHeight: 44,
-                    paddingHorizontal: spacing.md,
-                    backgroundColor: isMe ? withAlpha(colors.accent, 0.08) : undefined,
-                  }}
-                >
-                  <Numeral size={14} color={colors.secondaryLabel} style={{ width: 20 }}>
-                    {String(i + 1)}
-                  </Numeral>
-                  <View style={{ flex: 1 }}>
-                    <AppText variant="headline" style={isMe ? { fontWeight: "700" } : undefined}>
-                      {m.display_name}
-                    </AppText>
-                    <AppText variant="footnote" muted style={{ fontVariant: ["tabular-nums"] }}>
-                      {`${m.adherence_days ?? 0}/7 on target`}
-                    </AppText>
-                  </View>
-                  <Numeral size={16}>{String(m.streak_days ?? 0)}</Numeral>
-                </View>
-              );
-            })}
+          <GroupedSection header="Leaderboard" elevated>
+            {ranked.map((m, i) => (
+              <LeaderRow
+                key={m.id}
+                rank={i + 1}
+                name={m.display_name}
+                sub={`${m.adherence_days ?? 0}/7 on target`}
+                metric={`${m.streak_days ?? 0}d`}
+                isYou={m.id === profile.data?.id}
+              />
+            ))}
           </GroupedSection>
 
-          <GroupedSection header="Members" footer={notSharing.length > 0 ? `${notSharing.length} not sharing progress` : undefined}>
+          <GroupedSection header="Members" elevated footer={notSharing.length > 0 ? `${notSharing.length} not sharing progress` : undefined}>
             {(d?.members ?? []).map((m) => (
               <Row
                 key={m.id}

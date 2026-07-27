@@ -3,18 +3,25 @@ import { ScrollView, View } from "react-native";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppText } from "@/components/Text";
+import { AppBackground } from "@/components/AppBackground";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { Card } from "@/components/Card";
-import { Stat } from "@/components/Stat";
 import { Badge } from "@/components/Badge";
 import { Icon } from "@/components/Icon";
+import { RingStat } from "@/components/RingStat";
+import { Sparkline } from "@/components/Sparkline";
+import { StreakBars } from "@/components/StreakBars";
+import { Numeral } from "@/components/Numeral";
+import { Overline } from "@/components/Overline";
 import { Segmented } from "@/components/Segmented";
 import { WeightChart } from "@/components/progress/WeightChart";
 import { WeightLogSheet } from "@/components/progress/WeightLogSheet";
-import { useDashboard, useProfile, useWeightSeries } from "@/api/hooks";
+import { useAvgIntake7d, useDashboard, useProfile, useWeightSeries } from "@/api/hooks";
 import type { WeightEntry } from "@/api/types";
+import { useHealth } from "@/health";
 import { AnimatedNumber, PressableScale } from "@/motion";
 import { useTheme } from "@/theme";
+import { formatWeight, lbFromKg, useUnits, weightUnitLabel } from "@/units";
 
 const RANGES = ["1W", "1M", "3M", "1Y"] as const;
 const RANGE_OPTIONS = RANGES.map((r) => ({ key: r, label: r }));
@@ -26,14 +33,17 @@ const shortDate = (isoStr: string) => new Date(isoStr).toLocaleDateString([], { 
 const weightFormat = (n: number) => n.toFixed(1);
 
 export default function Progress() {
-  const { colors, radius, fonts } = useTheme();
+  const { colors, radius, fonts, gradients } = useTheme();
   const insets = useSafeAreaInsets();
   const [range, setRange] = useState<(typeof RANGES)[number]>("1W");
   const [sheetOpen, setSheetOpen] = useState(false);
   const dashboard = useDashboard(today());
   const profile = useProfile();
   const series = useWeightSeries(range);
+  const health = useHealth();
+  const avgIntake = useAvgIntake7d(today());
   const streak = dashboard.data?.streak_days ?? 0;
+  const { system } = useUnits();
 
   // Entrance stagger runs on first mount only — see app/(tabs)/index.tsx for the
   // same guard and rationale (range switches / refetches update in place here,
@@ -49,9 +59,13 @@ export default function Progress() {
   const hasChart = points.length >= 2;
   const current = entries.length ? entries[entries.length - 1].weight_kg : (profile.data?.weight_kg ?? 0);
   const delta = hasChart ? points[points.length - 1] - points[0] : null;
+  const w = current > 0 ? formatWeight(current, system) : null;
+  const d = delta !== null ? (system === "imperial" ? lbFromKg(delta) : delta) : null;
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <AppBackground />
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
       <Animated.View entering={enter(0)}>
         <ScreenHeader
           overline="Trends"
@@ -71,7 +85,7 @@ export default function Progress() {
 
       <View style={{ paddingHorizontal: 16, gap: 16 }}>
         <Animated.View entering={enter(1)}>
-          <Card style={{ padding: 18 }}>
+          <Card variant="hero" style={{ padding: 18 }}>
             <PressableScale
               accessibilityRole="button"
               accessibilityLabel="Log weight"
@@ -84,18 +98,18 @@ export default function Progress() {
                   <View style={{ flexDirection: "row", alignItems: "baseline", gap: 6 }}>
                     {current > 0 ? (
                       <AnimatedNumber
-                        value={current}
+                        value={system === "imperial" ? lbFromKg(current) : current}
                         format={weightFormat}
                         style={{ fontSize: 40, fontWeight: "700", fontFamily: fonts.rounded, color: colors.label }}
                       />
                     ) : (
                       <AppText style={{ fontSize: 40, fontWeight: "700", fontFamily: fonts.rounded, color: colors.label }}>—</AppText>
                     )}
-                    <AppText variant="subheadline" muted>kg</AppText>
+                    <AppText variant="subheadline" muted>{w ? w.unit : "kg"}</AppText>
                   </View>
                 </View>
-                {delta !== null ? (
-                  <Badge variant={delta <= 0 ? "success" : "neutral"} icon={delta <= 0 ? "trending-down" : "trending-up"}>{`${delta > 0 ? "+" : ""}${delta.toFixed(1)} kg`}</Badge>
+                {d !== null ? (
+                  <Badge variant={d <= 0 ? "success" : "neutral"} icon={d <= 0 ? "trending-down" : "trending-up"}>{`${d > 0 ? "+" : ""}${d.toFixed(1)} ${weightUnitLabel(system)}`}</Badge>
                 ) : null}
               </View>
             </PressableScale>
@@ -118,15 +132,64 @@ export default function Progress() {
           </Card>
         </Animated.View>
 
-        <Animated.View entering={enter(2)} style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
-          <Card style={{ flexGrow: 1, flexBasis: "45%" }}><Stat label="Avg intake" value="1,921" unit="kcal" delta="On target" trend="down" /></Card>
-          <Card style={{ flexGrow: 1, flexBasis: "45%" }}><Stat label="Log streak" value={String(streak)} unit={streak === 1 ? "day" : "days"} delta="Keep it up" trend="up" /></Card>
-          <Card style={{ flexGrow: 1, flexBasis: "45%" }}><Stat label="Avg steps" value="8,240" delta="+6% wk" trend="up" /></Card>
-          <Card style={{ flexGrow: 1, flexBasis: "45%" }}><Stat label="Avg sleep" value="7.1" unit="hrs" /></Card>
+        <Animated.View entering={enter(2)}>
+          <Overline style={{ marginBottom: 8 }}>This week</Overline>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+            <Card variant="elevated" style={{ flexGrow: 1, flexBasis: "45%", gap: 8 }}>
+              <RingStat
+                label="Avg intake"
+                dotColor={colors.accent}
+                state={avgIntake.avg != null ? "value" : "empty"}
+                value={avgIntake.avg?.toLocaleString()}
+                meta={avgIntake.avg != null ? "7-day avg" : undefined}
+                showRing={false}
+              />
+              <Sparkline points={avgIntake.series} color={colors.accent} />
+            </Card>
+            <Card variant="elevated" style={{ flexGrow: 1, flexBasis: "45%", gap: 8 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <View style={{ width: 7, height: 7, borderRadius: 999, backgroundColor: colors.accentAmber }} />
+                <AppText variant="footnote" muted style={{ fontWeight: "600" }}>Log streak</AppText>
+              </View>
+              <View style={{ flexDirection: "row", alignItems: "baseline", gap: 4 }}>
+                <Numeral size={28}>{String(streak)}</Numeral>
+                <AppText variant="footnote" muted>days</AppText>
+              </View>
+              <StreakBars count={streak} color={colors.accentAmber} />
+              <AppText variant="caption" muted>keep it going</AppText>
+            </Card>
+            <Card variant="elevated" style={{ flexGrow: 1, flexBasis: "45%" }}>
+              <RingStat
+                label="Steps"
+                dotColor={colors.stepsMetric}
+                state={health.status === "authorized" ? "value" : "connect"}
+                value={health.steps ? health.steps.today.toLocaleString() : undefined}
+                meta={health.steps ? `of ${health.steps.goal.toLocaleString()}` : undefined}
+                ringValue={health.steps?.today ?? 0}
+                ringMax={health.steps?.goal ?? 0}
+                ringGradient={gradients.steps}
+                onConnect={health.connect}
+              />
+            </Card>
+            <Card variant="elevated" style={{ flexGrow: 1, flexBasis: "45%" }}>
+              <RingStat
+                label="Sleep"
+                dotColor={colors.sleepMetric}
+                state={health.status === "authorized" ? "value" : "connect"}
+                value={health.sleep ? `${health.sleep.lastNightHours}` : undefined}
+                meta={health.sleep ? "last night" : undefined}
+                ringValue={health.sleep?.lastNightHours ?? 0}
+                ringMax={8}
+                ringGradient={gradients.sleep}
+                onConnect={health.connect}
+              />
+            </Card>
+          </View>
         </Animated.View>
       </View>
 
       <WeightLogSheet visible={sheetOpen} initialKg={current} onClose={() => setSheetOpen(false)} />
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }

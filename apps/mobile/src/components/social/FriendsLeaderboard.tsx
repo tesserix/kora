@@ -1,9 +1,8 @@
 import { View } from "react-native";
 import { AppText } from "@/components/Text";
-import { Numeral } from "@/components/Numeral";
+import { LeaderRow } from "@/components/LeaderRow";
 import { GroupedSection } from "@/components/GroupedList";
 import { useTheme } from "@/theme";
-import { withAlpha } from "@/lib/color";
 import type { FriendsProgress } from "@/api/types";
 
 interface Props {
@@ -42,37 +41,16 @@ export function FriendsLeaderboard({ data }: Props) {
 
   return (
     <View style={{ gap: spacing.lg }}>
-      <GroupedSection header="Leaderboard">
+      <GroupedSection header="Leaderboard" elevated>
         {ranked.map((r, i) => (
-          <View
+          <LeaderRow
             key={r.id}
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              gap: spacing.sm,
-              minHeight: 44,
-              paddingHorizontal: spacing.md,
-              backgroundColor: r.me ? withAlpha(colors.accent, 0.08) : undefined,
-            }}
-          >
-            <Numeral size={14} color={colors.secondaryLabel} style={{ width: 20 }}>
-              {String(i + 1)}
-            </Numeral>
-            <View style={{ flex: 1 }}>
-              <AppText variant="headline" style={r.me ? { fontWeight: "700" } : undefined}>
-                {r.name}
-              </AppText>
-              <AppText variant="footnote" muted style={{ fontVariant: ["tabular-nums"] }}>
-                {`${r.adherence}/${window} on target`}
-              </AppText>
-            </View>
-            <View style={{ alignItems: "flex-end" }}>
-              <Numeral size={16}>{String(r.streak)}</Numeral>
-              <AppText variant="footnote" muted>
-                day streak
-              </AppText>
-            </View>
-          </View>
+            rank={i + 1}
+            name={r.name}
+            sub={`${r.adherence}/${window} on target`}
+            metric={`${r.streak}d`}
+            isYou={r.me}
+          />
         ))}
       </GroupedSection>
 

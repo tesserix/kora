@@ -14,6 +14,9 @@ export function Numeral({ size = 16, weight = "700", color, style, children, ...
       style={[
         {
           fontSize: size,
+          // Override AppText's body lineHeight: at large sizes a ~20px line box
+          // clips the top of the glyph (a "0" reads as a "U"). Scale it with size.
+          lineHeight: Math.round(size * 1.25),
           fontWeight: weight,
           letterSpacing: -0.3,
           color: color ?? colors.label,

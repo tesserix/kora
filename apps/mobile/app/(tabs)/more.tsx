@@ -4,6 +4,7 @@ import { router, type Href } from "expo-router";
 import { signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { unregisterPushToken } from "@/lib/push";
+import { AppBackground } from "@/components/AppBackground";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { GroupedSection, Row } from "@/components/GroupedList";
 import { Badge } from "@/components/Badge";
@@ -17,13 +18,21 @@ export default function More() {
   const count = unread.data?.count ?? 0;
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <AppBackground />
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
       <ScreenHeader overline="Your account" title="More" />
       <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>
         <GroupedSection>
           <Row
+            title="Profile"
+            icon={{ name: "person", tint: colors.accent }}
+            chevron
+            onPress={() => router.push("/profile" as Href)}
+          />
+          <Row
             title="Friends"
-            icon={{ name: "users", tint: colors.accentBlue }}
+            icon={{ name: "users", tint: colors.accent }}
             chevron
             onPress={() => router.push("/friends" as Href)}
           />
@@ -35,7 +44,7 @@ export default function More() {
           />
           <Row
             title="Notifications"
-            icon={{ name: "bell", tint: colors.accentAmber }}
+            icon={{ name: "bell", tint: colors.accent }}
             chevron
             right={count > 0 ? (
               <View style={{ marginRight: spacing.xs }}>
@@ -43,6 +52,14 @@ export default function More() {
               </View>
             ) : null}
             onPress={() => router.push("/notifications" as Href)}
+          />
+        </GroupedSection>
+        <GroupedSection>
+          <Row
+            title="Settings"
+            icon={{ name: "gear", tint: colors.accent }}
+            chevron
+            onPress={() => router.push("/settings" as Href)}
           />
         </GroupedSection>
         <GroupedSection>
@@ -61,6 +78,7 @@ export default function More() {
           />
         </GroupedSection>
       </View>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }

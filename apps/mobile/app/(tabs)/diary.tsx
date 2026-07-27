@@ -1,18 +1,25 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Alert, ScrollView, View } from "react-native";
 import Animated, { FadeInDown, useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
 import Swipeable from "react-native-gesture-handler/ReanimatedSwipeable";
+import Svg, { Circle, Defs, LinearGradient, Stop } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { AppText } from "@/components/Text";
+import { AppBackground } from "@/components/AppBackground";
 import { Card } from "@/components/Card";
-import { Button } from "@/components/Button";
+import { Numeral } from "@/components/Numeral";
 import { Icon } from "@/components/Icon";
 import { GroupedSection, Row } from "@/components/GroupedList";
+import { GaugeRing } from "@/components/GaugeRing";
+import { MealRow } from "@/components/MealRow";
 import { CopyDaySheet } from "@/components/diary/CopyDaySheet";
 import { useDashboard, useDayLogs, useAddWater, useDeleteLog } from "@/api/hooks";
 import { AnimatedNumber, PressableScale, haptics, springs } from "@/motion";
 import { useTheme } from "@/theme";
+import { hslToHex, withAlpha } from "@/lib/color";
+import { useUnits, mlToFlOz, flOzToMl, type UnitSystem } from "@/units";
+import { foodVisual } from "@/lib/foodVisual";
 import type { FoodLog } from "@/api/types";
 
 const DOW = ["S", "M", "T", "W", "T", "F", "S"];
@@ -44,8 +51,9 @@ type WeekDayCellProps = {
 // A single week-strip day: accent-filled circle springs in on selection,
 // today (unselected) gets a ring outline, and the loggable dot is preserved.
 function WeekDayCell({ date, dow, selected, today, loggable, onSelect }: WeekDayCellProps) {
-  const { colors } = useTheme();
+  const { colors, gradients } = useTheme();
   const scale = useSharedValue(selected ? 1 : 0);
+  const gradientId = useId();
 
   useEffect(() => {
     scale.value = withSpring(selected ? 1 : 0, springs.lively);
@@ -72,10 +80,17 @@ function WeekDayCell({ date, dow, selected, today, loggable, onSelect }: WeekDay
             style={{ position: "absolute", width: 36, height: 36, borderRadius: 18, borderWidth: 1.5, borderColor: colors.accent }}
           />
         ) : null}
-        <Animated.View
-          pointerEvents="none"
-          style={[{ position: "absolute", width: 36, height: 36, borderRadius: 18, backgroundColor: colors.accent }, circleStyle]}
-        />
+        <Animated.View pointerEvents="none" style={[{ position: "absolute", width: 36, height: 36, borderRadius: 18, overflow: "hidden" }, circleStyle]}>
+          <Svg width={36} height={36}>
+            <Defs>
+              <LinearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1">
+                <Stop offset="0%" stopColor={gradients.green[0]} />
+                <Stop offset="100%" stopColor={gradients.green[1]} />
+              </LinearGradient>
+            </Defs>
+            <Circle cx={18} cy={18} r={18} fill={`url(#${gradientId})`} />
+          </Svg>
+        </Animated.View>
         <AppText variant="headline" style={{ color: selected ? colors.primaryForeground : colors.label }}>
           {date.getDate()}
         </AppText>
@@ -113,8 +128,55 @@ function AnimatedStat({ label, value, unit, format }: AnimatedStatProps) {
   );
 }
 
+type WaterPillProps = { label: string; a11yLabel: string; disabled: boolean; onPress: () => void };
+
+// Green pill matching the mock's `.waterbtns`. `label` ("+250 ml" / "+8 fl oz")
+// and `a11yLabel` ("Add 250 ml water" / "Add 8 fl oz water") are unit-aware and
+// load-bearing for tests.
+function WaterPill({ label, a11yLabel, disabled, onPress }: WaterPillProps) {
+  const { colors } = useTheme();
+  return (
+    <PressableScale
+      accessibilityRole="button"
+      accessibilityLabel={a11yLabel}
+      accessibilityState={{ disabled }}
+      haptic="impactLight"
+      disabled={disabled}
+      onPress={onPress}
+      style={{
+        flex: 1,
+        alignItems: "center",
+        justifyContent: "center",
+        paddingVertical: 13,
+        borderRadius: 16,
+        backgroundColor: withAlpha(colors.accent, 0.16),
+        opacity: disabled ? 0.5 : 1,
+      }}
+    >
+      <AppText style={{ color: colors.accent, fontWeight: "700" }}>{label}</AppText>
+    </PressableScale>
+  );
+}
+
+type WaterQuickAdd = { ml: number; label: string; a11yLabel: string };
+
+// Quick-add amounts per unit system. Metric: 250/500 ml. Imperial: a cup (8 fl oz)
+// and a large glass (16 fl oz), stored as their rounded ml equivalents (the backend
+// is always ml). Metric labels/a11y are preserved verbatim for existing tests.
+const WATER_QUICK_ADDS: Record<UnitSystem, readonly WaterQuickAdd[]> = {
+  metric: [
+    { ml: 250, label: "+250 ml", a11yLabel: "Add 250 ml water" },
+    { ml: 500, label: "+500 ml", a11yLabel: "Add 500 ml water" },
+  ],
+  imperial: [
+    { ml: Math.round(flOzToMl(8)), label: "+8 fl oz", a11yLabel: "Add 8 fl oz water" },
+    { ml: Math.round(flOzToMl(16)), label: "+16 fl oz", a11yLabel: "Add 16 fl oz water" },
+  ],
+};
+
 export default function Diary() {
-  const { colors, spacing, radius } = useTheme();
+  const { colors, spacing, gradients } = useTheme();
+  const { system } = useUnits();
   const insets = useSafeAreaInsets();
   const week = weekDates();
   const todayIso = iso(new Date());
@@ -156,9 +218,16 @@ export default function Diary() {
   };
 
   const d = dashboard.data;
+  const goal = d?.targets.kcal ?? 0;
   const total = Math.round(d?.consumed.kcal ?? 0);
-  const remaining = Math.max(0, Math.round((d?.targets.kcal ?? 0) - (d?.consumed.kcal ?? 0)));
-  const waterL = (d?.water_ml ?? 0) / 1000;
+  const remaining = Math.max(0, Math.round(goal - (d?.consumed.kcal ?? 0)));
+  const waterMl = d?.water_ml ?? 0;
+  const water =
+    system === "imperial"
+      ? { value: mlToFlOz(waterMl), unit: "fl oz", format: (n: number) => String(Math.round(n)) }
+      : { value: waterMl / 1000, unit: "L", format: (n: number) => n.toFixed(1) };
+  const waterQuickAdds = WATER_QUICK_ADDS[system];
+  const pct = goal > 0 ? Math.round((total / goal) * 100) : 0;
   const logged = (logs.data ?? []) as FoodLog[];
 
   const openMeal = (log: FoodLog) =>
@@ -169,8 +238,9 @@ export default function Diary() {
   );
 
   return (
-    <>
-      <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingTop: insets.top + spacing.sm, paddingBottom: 140 }}>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <AppBackground />
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + spacing.sm, paddingBottom: 140 }}>
         <Animated.View entering={enter(0)} style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
           <AppText variant="largeTitle">Diary</AppText>
         </Animated.View>
@@ -194,62 +264,70 @@ export default function Diary() {
 
         <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
           <Animated.View entering={enter(2)}>
-            <Card style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-              <AnimatedStat label="Total" value={total} unit="kcal" />
-              <View style={{ height: 40, width: 1, backgroundColor: colors.separator }} />
-              <AnimatedStat label="Remaining" value={remaining} unit="kcal" />
-              <View style={{ height: 40, width: 1, backgroundColor: colors.separator }} />
-              <AnimatedStat label="Water" value={waterL} unit="L" format={(n) => n.toFixed(1)} />
+            <Card variant="hero" style={{ marginBottom: 16 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 20 }}>
+                <GaugeRing value={total} max={goal} size={96} stroke={11} gradient={gradients.green}>
+                  <Numeral size={24}>{`${pct}%`}</Numeral>
+                </GaugeRing>
+                <View style={{ flex: 1, flexDirection: "row", justifyContent: "space-around", alignItems: "center" }}>
+                  <AnimatedStat label="Eaten" value={total} unit="kcal" />
+                  <AnimatedStat label="Left" value={remaining} unit="kcal" />
+                  <AnimatedStat label="Water" value={water.value} unit={water.unit} format={water.format} />
+                </View>
+              </View>
+
+              <View style={{ flexDirection: "row", gap: 8, marginTop: 16 }}>
+                {waterQuickAdds.map((qa) => (
+                  <WaterPill
+                    key={qa.ml}
+                    label={qa.label}
+                    a11yLabel={qa.a11yLabel}
+                    disabled={addWater.isPending}
+                    onPress={() => addWaterMl(qa.ml)}
+                  />
+                ))}
+              </View>
+              {waterErr ? (
+                <AppText style={{ color: colors.destructive, marginTop: 8 }}>{waterErr}</AppText>
+              ) : null}
             </Card>
           </Animated.View>
 
-          <Animated.View entering={enter(3)} style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 16 }}>
-            <AppText variant="footnote" muted style={{ marginRight: "auto" }}>
-              Add water
-            </AppText>
-            {[250, 500].map((ml) => (
-              <Button
-                key={ml}
-                title={`+${ml} ml`}
-                accessibilityLabel={`Add ${ml} ml water`}
-                disabled={addWater.isPending}
-                onPress={() => addWaterMl(ml)}
-                style={{ minHeight: 36, paddingHorizontal: spacing.md, borderRadius: radius.full }}
-              />
-            ))}
-          </Animated.View>
-          {waterErr ? (
-            <AppText style={{ color: colors.destructive, marginBottom: 12 }}>{waterErr}</AppText>
-          ) : null}
-
           {slots.map((group, gi) => (
             <Animated.View key={group.slot} entering={enter(4 + gi)}>
-              <GroupedSection header={group.slot.toUpperCase()} style={{ marginBottom: 16 }}>
-                {group.items.map((log) => (
-                  <Swipeable
-                    key={log.id}
-                    overshootRight={false}
-                    renderRightActions={() => (
-                      <PressableScale
-                        accessibilityRole="button"
-                        accessibilityLabel={`Delete ${log.description}`}
-                        haptic="none"
-                        onPress={() => confirmDelete(log.id)}
-                        style={{ backgroundColor: colors.destructive, justifyContent: "center", alignItems: "center", width: 74 }}
-                      >
-                        <Icon name="trash-2" size={20} color={colors.destructiveForeground} />
-                      </PressableScale>
-                    )}
-                  >
-                    <Row
-                      title={log.description}
-                      subtitle={`${Math.round(log.quantity_grams)}g · ${timeOf(log.logged_at)}`}
-                      detail={`${Math.round(log.kcal)} kcal`}
-                      chevron
-                      onPress={() => openMeal(log)}
-                    />
-                  </Swipeable>
-                ))}
+              <GroupedSection elevated header={group.slot.toUpperCase()} style={{ marginBottom: 16 }}>
+                {group.items.map((log) => {
+                  const fv = foodVisual(log.description);
+                  return (
+                    <Swipeable
+                      key={log.id}
+                      overshootRight={false}
+                      renderRightActions={() => (
+                        <PressableScale
+                          accessibilityRole="button"
+                          accessibilityLabel={`Delete ${log.description}`}
+                          haptic="none"
+                          onPress={() => confirmDelete(log.id)}
+                          style={{ backgroundColor: colors.destructive, justifyContent: "center", alignItems: "center", width: 74 }}
+                        >
+                          <Icon name="trash-2" size={20} color={colors.destructiveForeground} />
+                        </PressableScale>
+                      )}
+                    >
+                      <View style={{ backgroundColor: colors.elevated }}>
+                        <MealRow
+                          name={log.description}
+                          slot={`${Math.round(log.quantity_grams)}g · ${timeOf(log.logged_at)}`}
+                          kcal={log.kcal}
+                          iconName={fv.icon}
+                          tint={hslToHex(fv.hue, 0.5, 0.5)}
+                          onPress={() => openMeal(log)}
+                          accessibilityLabel={log.description}
+                        />
+                      </View>
+                    </Swipeable>
+                  );
+                })}
               </GroupedSection>
             </Animated.View>
           ))}
@@ -267,6 +345,6 @@ export default function Diary() {
         </View>
       </ScrollView>
       {copyOpen ? <CopyDaySheet visible targetDate={selected} onClose={() => setCopyOpen(false)} /> : null}
-    </>
+    </View>
   );
 }

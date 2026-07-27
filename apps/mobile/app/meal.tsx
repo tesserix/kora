@@ -123,7 +123,7 @@ export default function MealDetail() {
           <Stat label="Calories" value={String(kcal)} unit="kcal" />
         </View>
 
-        <Card style={{ flexDirection: "row", marginBottom: 20 }}>
+        <Card variant="elevated" style={{ flexDirection: "row", marginBottom: 20 }}>
           <View style={{ flex: 1 }}>
             <Stat label="Protein" value={String(scale(Number(p.protein) || 0))} unit="g" valueColor={colors.accent} />
           </View>

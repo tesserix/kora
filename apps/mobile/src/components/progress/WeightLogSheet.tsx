@@ -6,6 +6,7 @@ import { AppText } from "@/components/Text";
 import { Overline } from "@/components/Overline";
 import { useAddWeight } from "@/api/hooks";
 import { useTheme } from "@/theme";
+import { lbFromKg, parseWeightToKg, useUnits, weightUnitLabel, type UnitSystem } from "@/units";
 
 interface WeightLogSheetProps {
   visible: boolean;
@@ -13,23 +14,32 @@ interface WeightLogSheetProps {
   onClose: () => void;
 }
 
+function seedText(initialKg: number, system: UnitSystem): string {
+  if (initialKg <= 0) return "";
+  if (system === "imperial") return lbFromKg(initialKg).toFixed(1);
+  return String(initialKg);
+}
+
 export function WeightLogSheet({ visible, initialKg, onClose }: WeightLogSheetProps) {
   const { colors, fonts, radius } = useTheme();
-  const [text, setText] = useState(initialKg > 0 ? String(initialKg) : "");
+  const { system } = useUnits();
+  const [text, setText] = useState(seedText(initialKg, system));
   const [err, setErr] = useState<string | null>(null);
   const addWeight = useAddWeight();
+  const unit = weightUnitLabel(system);
+  const accessibilityLabel = system === "imperial" ? "Weight in pounds" : "Weight in kilograms";
 
   useEffect(() => {
     if (visible) {
-      setText(initialKg > 0 ? String(initialKg) : "");
+      setText(seedText(initialKg, system));
       setErr(null);
     }
-  }, [visible, initialKg]);
+  }, [visible, initialKg, system]);
 
   const onSave = () => {
-    const kg = parseFloat(text);
-    if (!Number.isFinite(kg) || kg <= 0) {
-      setErr("Enter a weight in kg.");
+    const kg = parseWeightToKg(text, system);
+    if (kg === null) {
+      setErr(`Enter a weight in ${unit}.`);
       return;
     }
     setErr(null);
@@ -50,10 +60,10 @@ export function WeightLogSheet({ visible, initialKg, onClose }: WeightLogSheetPr
             keyboardType="decimal-pad"
             placeholder="0.0"
             placeholderTextColor={colors.secondaryLabel}
-            accessibilityLabel="Weight in kilograms"
+            accessibilityLabel={accessibilityLabel}
             style={{ flex: 1, fontSize: 28, fontFamily: fonts.mono, color: colors.label, backgroundColor: colors.cardSecondary, borderRadius: radius.lg, paddingHorizontal: 14, paddingVertical: 10 }}
           />
-          <AppText muted style={{ fontSize: 16, fontFamily: fonts.mono }}>kg</AppText>
+          <AppText muted style={{ fontSize: 16, fontFamily: fonts.mono }}>{unit}</AppText>
         </View>
         {err ? <AppText style={{ color: colors.destructive, marginBottom: 12 }}>{err}</AppText> : null}
         <Button title="Save" onPress={onSave} disabled={addWeight.isPending} />

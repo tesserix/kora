@@ -20,14 +20,14 @@ export default function Groups() {
   return (
     <>
       <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
-        <ScreenHeader overline="Your groups" title="Groups" />
+        <ScreenHeader overline="Your groups" title="Groups" onBack={() => router.back()} />
         <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>
           <View style={{ flexDirection: "row", gap: spacing.sm }}>
             <Button title="Create group" onPress={() => setSheet("create")} style={{ flex: 1 }} />
             <Button title="Join by code" variant="secondary" onPress={() => setSheet("join")} style={{ flex: 1 }} />
           </View>
 
-          <GroupedSection>
+          <GroupedSection elevated>
             {list.length === 0 ? (
               <Row title="No groups yet" subtitle="Create one or join with a code." />
             ) : (

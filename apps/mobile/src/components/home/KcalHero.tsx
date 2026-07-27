@@ -1,6 +1,7 @@
 import { View } from "react-native";
 import { AppText } from "@/components/Text";
-import { CircularProgress } from "@/components/CircularProgress";
+import { GaugeRing } from "@/components/GaugeRing";
+import { MacroBars, type Macros } from "./MacroBars";
 import { AnimatedNumber } from "@/motion";
 import { useTheme } from "@/theme";
 
@@ -9,28 +10,36 @@ interface KcalHeroProps {
   goal: number;
   eaten: number;
   loading?: boolean;
+  macros?: Macros;
 }
 
-// Hero readout for the Home screen: a large SF-Rounded kcal-left number beside
-// a circular ring showing eaten/goal. `loading` swaps the number for a plain
-// "—" placeholder so a fresh dashboard fetch never flashes "0 kcal left".
-export function KcalHero({ left, goal, eaten, loading = false }: KcalHeroProps) {
-  const { colors, fonts } = useTheme();
-  const numberStyle = { fontSize: 52, fontWeight: "700" as const, fontFamily: fonts.rounded, color: colors.label };
+// Hero readout for the Home screen: a 150pt ring (eaten/goal) with the kcal-left
+// number set INSIDE it, and macro bars beside it (flex:1) when provided.
+// `loading` swaps the number for a plain "—" placeholder so a fresh dashboard
+// fetch never flashes "0 kcal left".
+export function KcalHero({ left, goal, eaten, loading = false, macros }: KcalHeroProps) {
+  const { colors, fonts, gradients } = useTheme();
+  const numberStyle = { fontSize: 40, fontWeight: "800" as const, fontFamily: fonts.rounded, color: colors.label, letterSpacing: -1.5 };
 
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 20 }}>
-      <View style={{ flex: 1 }}>
-        {loading ? (
-          <AppText style={numberStyle}>—</AppText>
-        ) : (
-          <AnimatedNumber value={left} style={numberStyle} />
-        )}
-        <AppText variant="footnote" muted>
-          calories left
-        </AppText>
-      </View>
-      <CircularProgress value={eaten} max={goal} size={72} stroke={8} />
+      <GaugeRing value={eaten} max={goal} size={150} stroke={15} gradient={gradients.green}>
+        <View style={{ alignItems: "center" }}>
+          {loading ? (
+            <AppText style={numberStyle}>—</AppText>
+          ) : (
+            <AnimatedNumber value={left} style={numberStyle} />
+          )}
+          <AppText variant="footnote" muted>
+            kcal left
+          </AppText>
+        </View>
+      </GaugeRing>
+      {macros ? (
+        <View style={{ flex: 1 }}>
+          <MacroBars macros={macros} />
+        </View>
+      ) : null}
     </View>
   );
 }

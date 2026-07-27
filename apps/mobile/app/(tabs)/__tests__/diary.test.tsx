@@ -39,6 +39,12 @@ jest.mock("@/api/hooks", () => ({
   useCopyDay: () => ({ mutate: jest.fn(), isPending: false }),
 }));
 
+const mockUseUnits = jest.fn(() => ({ system: "metric", setSystem: jest.fn() }));
+jest.mock("@/units", () => ({
+  ...jest.requireActual("@/units"),
+  useUnits: () => mockUseUnits(),
+}));
+
 import Diary from "../diary";
 
 beforeEach(() => {
@@ -46,6 +52,7 @@ beforeEach(() => {
   mockAddWaterMutate.mockClear();
   mockUseDashboard.mockClear();
   mockUseDayLogs.mockClear();
+  mockUseUnits.mockReturnValue({ system: "metric", setSystem: jest.fn() });
   jest.spyOn(Alert, "alert").mockImplementation(() => {});
 });
 
@@ -116,6 +123,25 @@ test("water buttons call useAddWater with volume_ml and a noon-UTC logged_at for
   await fireEvent.press(getByLabelText("Add 500 ml water"));
   expect(mockAddWaterMutate).toHaveBeenCalledWith(
     { volume_ml: 500, logged_at: `${today}T12:00:00Z` },
+    expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
+  );
+});
+
+test("imperial water quick-adds show fl oz and still add metric ml (8 fl oz -> 237 ml)", async () => {
+  mockUseUnits.mockReturnValue({ system: "imperial", setSystem: jest.fn() });
+  const { getByLabelText, findByText } = await render(<Diary />);
+  await findByText("Grilled salmon");
+
+  await fireEvent.press(getByLabelText("Add 8 fl oz water"));
+  const today = new Date().toLocaleDateString("en-CA");
+  expect(mockAddWaterMutate).toHaveBeenCalledWith(
+    { volume_ml: 237, logged_at: `${today}T12:00:00Z` },
+    expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
+  );
+
+  await fireEvent.press(getByLabelText("Add 16 fl oz water"));
+  expect(mockAddWaterMutate).toHaveBeenCalledWith(
+    { volume_ml: 473, logged_at: `${today}T12:00:00Z` },
     expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
   );
 });

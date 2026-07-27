@@ -10,6 +10,12 @@ import More from "../more";
 
 beforeEach(() => mockPush.mockClear());
 
+test("tapping Profile navigates to /profile", async () => {
+  const { getByText } = await render(<More />);
+  await fireEvent.press(getByText("Profile"));
+  expect(mockPush).toHaveBeenCalledWith("/profile");
+});
+
 test("tapping Friends navigates to /friends", async () => {
   const { getByText } = await render(<More />);
   await fireEvent.press(getByText("Friends"));

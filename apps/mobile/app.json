@@ -6,10 +6,14 @@
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "mobile",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "dark",
     "ios": {
       "icon": "./assets/expo.icon",
-      "bundleIdentifier": "com.unidevidp.mobile"
+      "bundleIdentifier": "com.tesserix.kora",
+      "entitlements": {
+        "com.apple.developer.healthkit": true,
+        "com.apple.developer.healthkit.access": []
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -60,7 +64,13 @@
           "microphonePermission": "Kora uses the microphone so you can describe meals by voice."
         }
       ],
-      "expo-notifications"
+      "expo-notifications",
+      [
+        "@kingstinct/react-native-healthkit",
+        {
+          "NSHealthShareUsageDescription": "Kora reads your steps and sleep to show real activity alongside your nutrition."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

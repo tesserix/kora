@@ -6,7 +6,7 @@ import { ScreenHeader } from "@/components/ScreenHeader";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { Icon } from "@/components/Icon";
-import { Numeral } from "@/components/Numeral";
+import { LeaderRow } from "@/components/LeaderRow";
 import { GroupedSection } from "@/components/GroupedList";
 import { useChallenge, useJoinChallenge, useLeaveChallenge, useDeleteChallenge } from "@/api/hooks";
 import { useTheme } from "@/theme";
@@ -43,7 +43,7 @@ export default function ChallengeDetailScreen() {
       />
       <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>
         {d?.status === "ended" && d.winner ? (
-          <Card style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+          <Card variant="elevated" style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
             <Icon name="trophy" size={22} color={colors.accentAmber} />
             <View style={{ flex: 1 }}>
               <AppText variant="headline">{`${d.winner.display_name} wins`}</AppText>
@@ -54,23 +54,14 @@ export default function ChallengeDetailScreen() {
           </Card>
         ) : null}
 
-        <GroupedSection header="Standings">
+        <GroupedSection header="Standings" elevated>
           {(d?.standings ?? []).length === 0 ? (
             <View style={{ minHeight: 44, justifyContent: "center", paddingHorizontal: spacing.md }}>
               <AppText variant="footnote" muted>No one has joined yet.</AppText>
             </View>
           ) : (
             (d?.standings ?? []).map((s, i) => (
-              <View
-                key={s.user_id}
-                style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, minHeight: 44, paddingHorizontal: spacing.md }}
-              >
-                <Numeral size={14} color={colors.secondaryLabel} style={{ width: 20 }}>
-                  {String(i + 1)}
-                </Numeral>
-                <AppText variant="headline" style={{ flex: 1 }}>{s.display_name}</AppText>
-                <Numeral size={16}>{String(s.score)}</Numeral>
-              </View>
+              <LeaderRow key={s.user_id} rank={i + 1} name={s.display_name} metric={String(s.score)} />
             ))
           )}
         </GroupedSection>
