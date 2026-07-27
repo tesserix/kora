@@ -204,6 +204,14 @@ jest.mock("react-native-reanimated", () => {
       };
       return builder;
     })(),
+    FadeOutDown: (() => {
+      const builder = {
+        duration: () => builder,
+        delay: () => builder,
+        springify: () => builder,
+      };
+      return builder;
+    })(),
   };
 });
 
