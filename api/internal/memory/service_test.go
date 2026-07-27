@@ -55,3 +55,45 @@ func TestFrequentGatesAndRanksByCountThenRecency(t *testing.T) {
 		t.Fatalf("frequent portion should be the mode (100), got %v", got[0].Grams)
 	}
 }
+
+func TestUsualMealsRequiresRecurringMultiFoodSet(t *testing.T) {
+	loc := time.UTC
+	mk := func(day int, hm int) time.Time { return time.Date(2026, 7, day, hm, 0, 0, 0, time.UTC) }
+	var logs []foodlog.FoodLog
+	// eggs+oats breakfast on 3 distinct days → usual meal
+	for _, d := range []int{1, 2, 3} {
+		logs = append(logs,
+			log(eggs, "Eggs", "breakfast", 100, 155, mk(d, 8)),
+			log(oats, "Oats", "breakfast", 60, 230, mk(d, 8)),
+		)
+	}
+	// a single-food breakfast on 3 days → NOT a usual meal (belongs in Frequent)
+	for _, d := range []int{5, 6, 7} {
+		logs = append(logs, log(eggs, "Eggs", "breakfast", 100, 155, mk(d, 8)))
+	}
+	got := usualMeals(logs, loc)
+	if len(got) != 1 {
+		t.Fatalf("want exactly one usual meal, got %d", len(got))
+	}
+	if got[0].Count != 3 {
+		t.Fatalf("want count 3, got %d", got[0].Count)
+	}
+	if len(got[0].Items) != 2 {
+		t.Fatalf("want 2 component foods, got %d", len(got[0].Items))
+	}
+	if got[0].Kcal != 385 {
+		t.Fatalf("want summed kcal 385, got %v", got[0].Kcal)
+	}
+}
+
+func TestUsualMealsBelowThresholdExcluded(t *testing.T) {
+	loc := time.UTC
+	mk := func(day int) time.Time { return time.Date(2026, 7, day, 8, 0, 0, 0, time.UTC) }
+	var logs []foodlog.FoodLog
+	for _, d := range []int{1, 2} { // only 2 days < 3
+		logs = append(logs, log(eggs, "Eggs", "breakfast", 100, 155, mk(d)), log(oats, "Oats", "breakfast", 60, 230, mk(d)))
+	}
+	if got := usualMeals(logs, loc); len(got) != 0 {
+		t.Fatalf("want 0 usual meals below threshold, got %d", len(got))
+	}
+}
