@@ -250,6 +250,46 @@ func TestCreateBatchRollsBackWholeBatchOnUnresolvableItem(t *testing.T) {
 	require.Empty(t, logs, "the resolvable item must NOT have been committed — batch must be atomic")
 }
 
+func TestCreateBatchUnknownFoodItemIDReturnsValidationError(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	svc := NewService(NewRepository(db), nutrition.NewRepository(db))
+
+	bogusFoodID := uuid.New()
+	_, err := svc.CreateBatch(context.Background(), userID, CreateBatchRequest{
+		LoggedAt: time.Now(), MealSlot: "breakfast",
+		Items: []BatchItem{{FoodItemID: bogusFoodID, QuantityGrams: 100}},
+	})
+	require.Error(t, err)
+	msg, ok := httpx.IsValidation(err)
+	require.True(t, ok, "unknown food_item_id must be a client ValidationError (400), got: %v", err)
+	require.Equal(t, "unknown food_item_id", msg)
+	require.False(t, errors.Is(err, gorm.ErrRecordNotFound), "not-found must be converted, not leaked as gorm.ErrRecordNotFound")
+}
+
+func TestCreateBatchInfraFaultIsNotMisclassifiedAsValidation(t *testing.T) {
+	// Log repo is healthy (transaction begins, cleanups run); the FOODS repo is
+	// broken so GetByID fails with a driver error (not gorm.ErrRecordNotFound).
+	// That infra fault must surface as a 500-class error, never a client 400.
+	db := testDB(t)
+	userID := seedUser(t, db)
+
+	brokenDB := testDB(t)
+	brokenPool, err := brokenDB.DB()
+	require.NoError(t, err)
+	require.NoError(t, brokenPool.Close())
+
+	svc := NewService(NewRepository(db), nutrition.NewRepository(brokenDB))
+	_, err = svc.CreateBatch(context.Background(), userID, CreateBatchRequest{
+		LoggedAt: time.Now(), MealSlot: "breakfast",
+		Items: []BatchItem{{FoodItemID: uuid.New(), QuantityGrams: 100}},
+	})
+	require.Error(t, err)
+	require.False(t, errors.Is(err, gorm.ErrRecordNotFound), "driver fault must not masquerade as record-not-found")
+	_, ok := httpx.IsValidation(err)
+	require.False(t, ok, "infra fault must NOT be a ValidationError, got a 400-class error: %v", err)
+}
+
 func TestEditLogInvalidMealSlotReturnsValidationError(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db)

@@ -205,7 +205,12 @@ func (s Service) CreateBatch(ctx context.Context, userID uuid.UUID, req CreateBa
 			}
 			item, err := s.foods.GetByID(ctx, it.FoodItemID)
 			if err != nil {
-				return httpx.ValidationError{Message: "unknown food_item_id"}
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					// Client supplied a food_item_id that doesn't exist — a 400.
+					return httpx.ValidationError{Message: "unknown food_item_id"}
+				}
+				// Infra/DB fault resolving the food — must not be a client 400.
+				return fmt.Errorf("foodlog: batch: resolve food: %w", err)
 			}
 			fid := it.FoodItemID
 			f := it.QuantityGrams / 100.0
