@@ -21,6 +21,7 @@ import type { WeightEntry } from "@/api/types";
 import { useHealth } from "@/health";
 import { AnimatedNumber, PressableScale } from "@/motion";
 import { useTheme } from "@/theme";
+import { formatWeight, lbFromKg, useUnits, weightUnitLabel } from "@/units";
 
 const RANGES = ["1W", "1M", "3M", "1Y"] as const;
 const RANGE_OPTIONS = RANGES.map((r) => ({ key: r, label: r }));
@@ -42,6 +43,7 @@ export default function Progress() {
   const health = useHealth();
   const avgIntake = useAvgIntake7d(today());
   const streak = dashboard.data?.streak_days ?? 0;
+  const { system } = useUnits();
 
   // Entrance stagger runs on first mount only — see app/(tabs)/index.tsx for the
   // same guard and rationale (range switches / refetches update in place here,
@@ -57,6 +59,8 @@ export default function Progress() {
   const hasChart = points.length >= 2;
   const current = entries.length ? entries[entries.length - 1].weight_kg : (profile.data?.weight_kg ?? 0);
   const delta = hasChart ? points[points.length - 1] - points[0] : null;
+  const w = current > 0 ? formatWeight(current, system) : null;
+  const d = delta !== null ? (system === "imperial" ? lbFromKg(delta) : delta) : null;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -94,18 +98,18 @@ export default function Progress() {
                   <View style={{ flexDirection: "row", alignItems: "baseline", gap: 6 }}>
                     {current > 0 ? (
                       <AnimatedNumber
-                        value={current}
+                        value={system === "imperial" ? lbFromKg(current) : current}
                         format={weightFormat}
                         style={{ fontSize: 40, fontWeight: "700", fontFamily: fonts.rounded, color: colors.label }}
                       />
                     ) : (
                       <AppText style={{ fontSize: 40, fontWeight: "700", fontFamily: fonts.rounded, color: colors.label }}>—</AppText>
                     )}
-                    <AppText variant="subheadline" muted>kg</AppText>
+                    <AppText variant="subheadline" muted>{w ? w.unit : "kg"}</AppText>
                   </View>
                 </View>
-                {delta !== null ? (
-                  <Badge variant={delta <= 0 ? "success" : "neutral"} icon={delta <= 0 ? "trending-down" : "trending-up"}>{`${delta > 0 ? "+" : ""}${delta.toFixed(1)} kg`}</Badge>
+                {d !== null ? (
+                  <Badge variant={d <= 0 ? "success" : "neutral"} icon={d <= 0 ? "trending-down" : "trending-up"}>{`${d > 0 ? "+" : ""}${d.toFixed(1)} ${weightUnitLabel(system)}`}</Badge>
                 ) : null}
               </View>
             </PressableScale>

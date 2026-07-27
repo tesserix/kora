@@ -9,6 +9,7 @@ import { Numeral } from "@/components/Numeral";
 import { useProfile } from "@/api/hooks";
 import type { Profile } from "@/api/types";
 import { useTheme } from "@/theme";
+import { formatWeight, useUnits } from "@/units";
 
 const GOAL_LABELS: Record<Profile["goal"], string> = {
   fat_loss: "Fat loss",
@@ -45,6 +46,8 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const profile = useProfile();
   const data = profile.data;
+  const { system } = useUnits();
+  const fw = data ? formatWeight(data.weight_kg, system) : null;
 
   return (
     <ScrollView
@@ -118,8 +121,8 @@ export default function ProfileScreen() {
           <Card variant="elevated" style={{ flex: 1 }}>
             <AppText variant="footnote" muted>Weight</AppText>
             <View style={{ flexDirection: "row", alignItems: "baseline", gap: spacing.xs, marginTop: spacing.xs }}>
-              <Numeral size={24}>{data ? data.weight_kg.toFixed(1) : "—"}</Numeral>
-              <AppText muted>kg</AppText>
+              <Numeral size={24}>{fw ? fw.value : "—"}</Numeral>
+              <AppText muted>{fw ? fw.unit : "kg"}</AppText>
             </View>
           </Card>
           <Card variant="elevated" style={{ flex: 1 }}>

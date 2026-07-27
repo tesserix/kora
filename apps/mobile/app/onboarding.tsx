@@ -15,6 +15,7 @@ import type { OnboardingInput } from "@/api/types";
 import { useTheme } from "@/theme";
 import { validateOnboardingNumbers } from "@/lib/validateOnboarding";
 import { haptics } from "@/motion";
+import { cmFromFtIn, kgFromLb, useUnits } from "@/units";
 
 const GOALS: Array<{ id: OnboardingInput["goal"]; icon: string; title: string; sub: string }> = [
   { id: "fat_loss", icon: "trending-down", title: "Lose weight", sub: "Gentle calorie deficit" },
@@ -44,8 +45,11 @@ export default function Onboarding() {
   const [activity, setActivity] = useState<OnboardingInput["activity_level"]>("moderate");
   const [birthYear, setBirthYear] = useState("");
   const [heightCm, setHeightCm] = useState("");
-  const [weightKg, setWeightKg] = useState("");
+  const [heightFt, setHeightFt] = useState("");
+  const [heightIn, setHeightIn] = useState("");
+  const [weightText, setWeightText] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const { system } = useUnits();
 
   const filledInputStyle = {
     paddingHorizontal: spacing.md,
@@ -57,7 +61,9 @@ export default function Onboarding() {
 
   function onSubmit() {
     setError(null);
-    const validationError = validateOnboardingNumbers(birthYear, heightCm, weightKg);
+    const heightCmStr = system === "imperial" ? String(cmFromFtIn(Number(heightFt), Number(heightIn))) : heightCm;
+    const weightKgStr = system === "imperial" ? String(kgFromLb(Number(weightText))) : weightText;
+    const validationError = validateOnboardingNumbers(birthYear, heightCmStr, weightKgStr);
     if (validationError) {
       setError(validationError);
       return;
@@ -67,8 +73,8 @@ export default function Onboarding() {
       goal,
       activity_level: activity,
       birth_year: Number(birthYear),
-      height_cm: Number(heightCm),
-      weight_kg: Number(weightKg),
+      height_cm: Number(heightCmStr),
+      weight_kg: Number(weightKgStr),
     };
     submit.mutate(input, {
       onSuccess: () => {
@@ -127,26 +133,53 @@ export default function Onboarding() {
               onChangeText={setBirthYear}
             />
           </Card>
+          {system === "imperial" ? (
+            <View style={{ flexDirection: "row", gap: spacing.sm }}>
+              <Card variant="elevated" style={{ padding: 0, flex: 1 }}>
+                <TextInput
+                  accessibilityLabel="Height in feet"
+                  style={filledInputStyle}
+                  placeholder="Height (ft)"
+                  placeholderTextColor={colors.secondaryLabel}
+                  keyboardType="number-pad"
+                  value={heightFt}
+                  onChangeText={setHeightFt}
+                />
+              </Card>
+              <Card variant="elevated" style={{ padding: 0, flex: 1 }}>
+                <TextInput
+                  accessibilityLabel="Height in inches"
+                  style={filledInputStyle}
+                  placeholder="Height (in)"
+                  placeholderTextColor={colors.secondaryLabel}
+                  keyboardType="number-pad"
+                  value={heightIn}
+                  onChangeText={setHeightIn}
+                />
+              </Card>
+            </View>
+          ) : (
+            <Card variant="elevated" style={{ padding: 0 }}>
+              <TextInput
+                accessibilityLabel="Height in centimetres"
+                style={filledInputStyle}
+                placeholder="Height (cm)"
+                placeholderTextColor={colors.secondaryLabel}
+                keyboardType="decimal-pad"
+                value={heightCm}
+                onChangeText={setHeightCm}
+              />
+            </Card>
+          )}
           <Card variant="elevated" style={{ padding: 0 }}>
             <TextInput
-              accessibilityLabel="Height in centimetres"
+              accessibilityLabel={system === "imperial" ? "Weight in pounds" : "Weight in kilograms"}
               style={filledInputStyle}
-              placeholder="Height (cm)"
+              placeholder={system === "imperial" ? "Weight (lb)" : "Weight (kg)"}
               placeholderTextColor={colors.secondaryLabel}
               keyboardType="decimal-pad"
-              value={heightCm}
-              onChangeText={setHeightCm}
-            />
-          </Card>
-          <Card variant="elevated" style={{ padding: 0 }}>
-            <TextInput
-              accessibilityLabel="Weight in kilograms"
-              style={filledInputStyle}
-              placeholder="Weight (kg)"
-              placeholderTextColor={colors.secondaryLabel}
-              keyboardType="decimal-pad"
-              value={weightKg}
-              onChangeText={setWeightKg}
+              value={weightText}
+              onChangeText={setWeightText}
             />
           </Card>
         </View>

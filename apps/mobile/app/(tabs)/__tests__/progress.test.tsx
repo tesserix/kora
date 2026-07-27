@@ -11,6 +11,12 @@ jest.mock("@/api/hooks", () => ({
   useAvgIntake7d: () => mockAvgIntake7d(),
 }));
 
+const mockUseUnits = jest.fn();
+jest.mock("@/units", () => ({
+  ...jest.requireActual("@/units"),
+  useUnits: () => mockUseUnits(),
+}));
+
 // @/health defaults to the "unavailable"/connect state, mirroring what the real
 // useHealth() resolves to under jest.setup.js's global HealthKit mock — kept
 // mockable per-test (mutable return, not doMock re-require) for the authorized
@@ -23,6 +29,7 @@ jest.mock("@/health", () => ({
 beforeEach(() => {
   mockAvgIntake7d.mockReturnValue({ avg: null, series: [], isLoading: false });
   mockUseHealth.mockReturnValue({ status: "unavailable", steps: null, sleep: null, connect: jest.fn() });
+  mockUseUnits.mockReturnValue({ system: "metric", setSystem: jest.fn() });
 });
 
 test("shows real current weight when entries exist", async () => {
@@ -91,4 +98,20 @@ test("shows real steps, sleep, and 7-day avg intake when Health is authorized an
   expect(getByText("7.1")).toBeTruthy();
   expect(getByText("1,921")).toBeTruthy();
   expect(queryByLabelText("Connect Apple Health")).toBeNull();
+});
+
+test("shows weight in lb and converts the delta badge when the preference is imperial", async () => {
+  mockUseUnits.mockReturnValue({ system: "imperial", setSystem: jest.fn() });
+  mockSeries.mockReturnValue({
+    data: [
+      { id: "1", weight_kg: 80, logged_at: "2026-07-20T08:00:00Z" },
+      { id: "2", weight_kg: 78.6, logged_at: "2026-07-23T08:00:00Z" },
+    ],
+  });
+  const { getByText } = await render(<Progress />);
+  // 78.6 kg -> 173.3 lb (formatWeight / AnimatedNumber's toFixed(1) format).
+  expect(getByText("173.3")).toBeTruthy();
+  expect(getByText("lb")).toBeTruthy();
+  // delta: 78.6 - 80 = -1.4 kg -> -3.1 lb.
+  expect(getByText("-3.1 lb")).toBeTruthy();
 });

@@ -13,6 +13,12 @@ jest.mock("@/motion", () => {
   return { ...actual, haptics: { ...actual.haptics, success: jest.fn() } };
 });
 
+const mockUseUnits = jest.fn();
+jest.mock("@/units", () => ({
+  ...jest.requireActual("@/units"),
+  useUnits: () => mockUseUnits(),
+}));
+
 import Onboarding from "../onboarding";
 import { haptics } from "@/motion";
 
@@ -21,6 +27,7 @@ beforeEach(() => {
   mockIsPending = false;
   (router.replace as jest.Mock).mockClear();
   (haptics.success as jest.Mock).mockClear();
+  mockUseUnits.mockReturnValue({ system: "metric", setSystem: jest.fn() });
 });
 
 test("Onboarding shows the editorial hero and goal cards", async () => {
@@ -74,4 +81,24 @@ test("valid submit sends the byte-identical onboarding payload and fires success
   onSuccess();
   expect(haptics.success).toHaveBeenCalledTimes(1);
   expect(router.replace).toHaveBeenCalledWith("/");
+});
+
+test("imperial: submit converts ft/in + lb inputs to metric height_cm/weight_kg", async () => {
+  mockUseUnits.mockReturnValue({ system: "imperial", setSystem: jest.fn() });
+  const { getByText, getByLabelText } = await render(<Onboarding />);
+
+  await fireEvent.changeText(getByLabelText("Birth year"), "1995");
+  await fireEvent.changeText(getByLabelText("Height in feet"), "5");
+  await fireEvent.changeText(getByLabelText("Height in inches"), "11");
+  await fireEvent.changeText(getByLabelText("Weight in pounds"), "150");
+  await fireEvent.press(getByText("Get started"));
+
+  expect(mockMutate).toHaveBeenCalledWith(
+    expect.objectContaining({
+      birth_year: 1995,
+      height_cm: expect.closeTo(180.34, 2), // 5'11" -> cm
+      weight_kg: expect.closeTo(68.0388555, 4), // 150 lb -> kg
+    }),
+    expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
+  );
 });
