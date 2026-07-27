@@ -22,6 +22,12 @@ export default function More() {
       <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>
         <GroupedSection>
           <Row
+            title="Profile"
+            icon={{ name: "person", tint: colors.accentBlue }}
+            chevron
+            onPress={() => router.push("/profile" as Href)}
+          />
+          <Row
             title="Friends"
             icon={{ name: "users", tint: colors.accentBlue }}
             chevron
