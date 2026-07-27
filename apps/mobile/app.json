@@ -9,7 +9,11 @@
     "userInterfaceStyle": "dark",
     "ios": {
       "icon": "./assets/expo.icon",
-      "bundleIdentifier": "com.unidevidp.mobile"
+      "bundleIdentifier": "com.tesserix.kora",
+      "entitlements": {
+        "com.apple.developer.healthkit": true,
+        "com.apple.developer.healthkit.access": []
+      }
     },
     "android": {
       "adaptiveIcon": {
