@@ -45,3 +45,17 @@ test("range segmented control renders all range labels and re-queries the series
   await fireEvent.press(getByRole("tab", { name: "1M" }));
   expect(mockSeries).toHaveBeenLastCalledWith("1M");
 });
+
+test("never renders the old fabricated metrics", async () => {
+  mockSeries.mockReturnValue({ data: [] });
+  const { queryByText } = await render(<Progress />);
+  expect(queryByText("1,921")).toBeNull();
+  expect(queryByText("8,240")).toBeNull();
+  expect(queryByText("7.1")).toBeNull();
+});
+
+test("offers Connect Apple Health for Steps and Sleep", async () => {
+  mockSeries.mockReturnValue({ data: [] });
+  const { getAllByLabelText } = await render(<Progress />);
+  expect(getAllByLabelText("Connect Apple Health").length).toBeGreaterThanOrEqual(2);
+});
