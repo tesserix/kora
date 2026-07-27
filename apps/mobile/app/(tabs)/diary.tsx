@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { AppText } from "@/components/Text";
 import { Card } from "@/components/Card";
-import { Button } from "@/components/Button";
+import { Numeral } from "@/components/Numeral";
 import { Icon } from "@/components/Icon";
 import { GroupedSection, Row } from "@/components/GroupedList";
 import { GaugeRing } from "@/components/GaugeRing";
@@ -16,7 +16,7 @@ import { CopyDaySheet } from "@/components/diary/CopyDaySheet";
 import { useDashboard, useDayLogs, useAddWater, useDeleteLog } from "@/api/hooks";
 import { AnimatedNumber, PressableScale, haptics, springs } from "@/motion";
 import { useTheme } from "@/theme";
-import { hslToHex } from "@/lib/color";
+import { hslToHex, withAlpha } from "@/lib/color";
 import { foodVisual } from "@/lib/foodVisual";
 import type { FoodLog } from "@/api/types";
 
@@ -126,8 +126,37 @@ function AnimatedStat({ label, value, unit, format }: AnimatedStatProps) {
   );
 }
 
+type WaterPillProps = { ml: number; disabled: boolean; onPress: () => void };
+
+// Green pill matching the mock's `.waterbtns` — visible "+NNN ml" text and
+// "Add NNN ml water" a11y label are both load-bearing for existing tests.
+function WaterPill({ ml, disabled, onPress }: WaterPillProps) {
+  const { colors } = useTheme();
+  return (
+    <PressableScale
+      accessibilityRole="button"
+      accessibilityLabel={`Add ${ml} ml water`}
+      accessibilityState={{ disabled }}
+      haptic="impactLight"
+      disabled={disabled}
+      onPress={onPress}
+      style={{
+        flex: 1,
+        alignItems: "center",
+        justifyContent: "center",
+        paddingVertical: 13,
+        borderRadius: 16,
+        backgroundColor: withAlpha(colors.accent, 0.16),
+        opacity: disabled ? 0.5 : 1,
+      }}
+    >
+      <AppText style={{ color: colors.accent, fontWeight: "700" }}>{`+${ml} ml`}</AppText>
+    </PressableScale>
+  );
+}
+
 export default function Diary() {
-  const { colors, spacing, radius, gradients } = useTheme();
+  const { colors, spacing, gradients } = useTheme();
   const insets = useSafeAreaInsets();
   const week = weekDates();
   const todayIso = iso(new Date());
@@ -169,9 +198,11 @@ export default function Diary() {
   };
 
   const d = dashboard.data;
+  const goal = d?.targets.kcal ?? 0;
   const total = Math.round(d?.consumed.kcal ?? 0);
-  const remaining = Math.max(0, Math.round((d?.targets.kcal ?? 0) - (d?.consumed.kcal ?? 0)));
+  const remaining = Math.max(0, Math.round(goal - (d?.consumed.kcal ?? 0)));
   const waterL = (d?.water_ml ?? 0) / 1000;
+  const pct = goal > 0 ? Math.round((total / goal) * 100) : 0;
   const logged = (logs.data ?? []) as FoodLog[];
 
   const openMeal = (log: FoodLog) =>
@@ -207,40 +238,28 @@ export default function Diary() {
 
         <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
           <Animated.View entering={enter(2)}>
-            <Card variant="elevated" style={{ flexDirection: "row", alignItems: "center", gap: 16, marginBottom: 16 }}>
-              <GaugeRing value={total} max={d?.targets.kcal ?? 0} size={64} stroke={7} gradient={gradients.green}>
-                <AppText variant="caption" muted>
-                  eaten
-                </AppText>
-              </GaugeRing>
-              <View style={{ flex: 1, flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-                <AnimatedStat label="Total" value={total} unit="kcal" />
-                <View style={{ height: 40, width: 1, backgroundColor: colors.separator }} />
-                <AnimatedStat label="Remaining" value={remaining} unit="kcal" />
-                <View style={{ height: 40, width: 1, backgroundColor: colors.separator }} />
-                <AnimatedStat label="Water" value={waterL} unit="L" format={(n) => n.toFixed(1)} />
+            <Card variant="hero" style={{ marginBottom: 16 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 20 }}>
+                <GaugeRing value={total} max={goal} size={96} stroke={11} gradient={gradients.green}>
+                  <Numeral size={24}>{`${pct}%`}</Numeral>
+                </GaugeRing>
+                <View style={{ flex: 1, flexDirection: "row", justifyContent: "space-around", alignItems: "center" }}>
+                  <AnimatedStat label="Eaten" value={total} unit="kcal" />
+                  <AnimatedStat label="Left" value={remaining} unit="kcal" />
+                  <AnimatedStat label="Water" value={waterL} unit="L" format={(n) => n.toFixed(1)} />
+                </View>
               </View>
+
+              <View style={{ flexDirection: "row", gap: 8, marginTop: 16 }}>
+                {[250, 500].map((ml) => (
+                  <WaterPill key={ml} ml={ml} disabled={addWater.isPending} onPress={() => addWaterMl(ml)} />
+                ))}
+              </View>
+              {waterErr ? (
+                <AppText style={{ color: colors.destructive, marginTop: 8 }}>{waterErr}</AppText>
+              ) : null}
             </Card>
           </Animated.View>
-
-          <Animated.View entering={enter(3)} style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 16 }}>
-            <AppText variant="footnote" muted style={{ marginRight: "auto" }}>
-              Add water
-            </AppText>
-            {[250, 500].map((ml) => (
-              <Button
-                key={ml}
-                title={`+${ml} ml`}
-                accessibilityLabel={`Add ${ml} ml water`}
-                disabled={addWater.isPending}
-                onPress={() => addWaterMl(ml)}
-                style={{ minHeight: 36, paddingHorizontal: spacing.md, borderRadius: radius.full }}
-              />
-            ))}
-          </Animated.View>
-          {waterErr ? (
-            <AppText style={{ color: colors.destructive, marginBottom: 12 }}>{waterErr}</AppText>
-          ) : null}
 
           {slots.map((group, gi) => (
             <Animated.View key={group.slot} entering={enter(4 + gi)}>
