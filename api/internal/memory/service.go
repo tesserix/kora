@@ -63,7 +63,10 @@ func recents(logs []foodlog.FoodLog) []Food {
 		if !out[i].LastLoggedAt.Equal(out[j].LastLoggedAt) {
 			return out[i].LastLoggedAt.After(out[j].LastLoggedAt)
 		}
-		return out[i].Name < out[j].Name
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].FoodItemID < out[j].FoodItemID
 	})
 	if len(out) > recentsLimit {
 		out = out[:recentsLimit]
@@ -112,7 +115,10 @@ func frequent(logs []foodlog.FoodLog) []Food {
 		if !out[i].LastLoggedAt.Equal(out[j].LastLoggedAt) {
 			return out[i].LastLoggedAt.After(out[j].LastLoggedAt)
 		}
-		return out[i].Name < out[j].Name
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].FoodItemID < out[j].FoodItemID
 	})
 	if len(out) > frequentLimit {
 		out = out[:frequentLimit]
@@ -231,7 +237,10 @@ func usualMeals(logs []foodlog.FoodLog, loc *time.Location) []Meal {
 		if !out[i].LastLoggedAt.Equal(out[j].LastLoggedAt) {
 			return out[i].LastLoggedAt.After(out[j].LastLoggedAt)
 		}
-		return out[i].Name < out[j].Name
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].ID < out[j].ID
 	})
 	if len(out) > usualMealsLimit {
 		out = out[:usualMealsLimit]

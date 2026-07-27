@@ -86,6 +86,65 @@ func TestUsualMealsRequiresRecurringMultiFoodSet(t *testing.T) {
 	}
 }
 
+// TestUsualMealsDeterministicOrderOnExactTie proves that when two distinct usual
+// meals tie on every ranking key (Count, LastLoggedAt, Name), the final ID
+// tie-break makes ordering deterministic instead of leaking Go's randomized
+// map-iteration order. Without the ID tie-break in usualMeals' sort.Slice,
+// this test would be flaky (order would vary run to run).
+func TestUsualMealsDeterministicOrderOnExactTie(t *testing.T) {
+	loc := time.UTC
+	mk := func(day int) time.Time { return time.Date(2026, 7, day, 8, 0, 0, 0, time.UTC) }
+	var logs []foodlog.FoodLog
+	// Same two foods (eggs+oats), same 3 days, same time-of-day, but two
+	// different meal slots → two distinct usual-meal fingerprints that tie on
+	// Count (3), LastLoggedAt (day-3 08:00), and Name ("Oats & Eggs"), and
+	// differ only in slot (which folds into the fingerprint-derived ID).
+	for _, d := range []int{1, 2, 3} {
+		logs = append(logs,
+			log(eggs, "Eggs", "breakfast", 100, 155, mk(d)),
+			log(oats, "Oats", "breakfast", 60, 230, mk(d)),
+			log(eggs, "Eggs", "lunch", 100, 155, mk(d)),
+			log(oats, "Oats", "lunch", 60, 230, mk(d)),
+		)
+	}
+
+	breakfastFP := "breakfast:" + eggs + "," + oats
+	lunchFP := "lunch:" + eggs + "," + oats
+	breakfastID := hashFingerprint(breakfastFP)
+	lunchID := hashFingerprint(lunchFP)
+	if breakfastID == lunchID {
+		t.Fatalf("test setup invalid: fingerprints collide")
+	}
+	wantFirstID, wantSecondID := breakfastID, lunchID
+	if lunchID < breakfastID {
+		wantFirstID, wantSecondID = lunchID, breakfastID
+	}
+
+	got := usualMeals(logs, loc)
+	if len(got) != 2 {
+		t.Fatalf("want 2 tied usual meals, got %d", len(got))
+	}
+	if got[0].Count != 3 || got[1].Count != 3 {
+		t.Fatalf("want both counts 3, got %d and %d", got[0].Count, got[1].Count)
+	}
+	if !got[0].LastLoggedAt.Equal(got[1].LastLoggedAt) {
+		t.Fatalf("want tied LastLoggedAt, got %v and %v", got[0].LastLoggedAt, got[1].LastLoggedAt)
+	}
+	if got[0].Name != got[1].Name {
+		t.Fatalf("want tied Name, got %q and %q", got[0].Name, got[1].Name)
+	}
+	if got[0].ID != wantFirstID || got[1].ID != wantSecondID {
+		t.Fatalf("want ID-ordered [%s, %s], got [%s, %s]", wantFirstID, wantSecondID, got[0].ID, got[1].ID)
+	}
+
+	// Re-run to guard against map-iteration nondeterminism leaking through.
+	got2 := usualMeals(logs, loc)
+	if len(got2) != 2 || got2[0].ID != got[0].ID || got2[1].ID != got[1].ID {
+		t.Fatalf("non-deterministic ordering across repeated calls: run1=[%s,%s] run2=[%s,%s]",
+			got[0].ID, got[1].ID, got2[0].ID, got2[1].ID)
+	}
+}
+
 func TestUsualMealsBelowThresholdExcluded(t *testing.T) {
 	loc := time.UTC
 	mk := func(day int) time.Time { return time.Date(2026, 7, day, 8, 0, 0, 0, time.UTC) }
