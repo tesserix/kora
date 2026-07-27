@@ -8,7 +8,6 @@ import { Icon } from "./Icon";
 import { useTheme } from "@/theme";
 import { PressableScale, springs } from "@/motion";
 import { useUnreadCount } from "@/api/hooks";
-import { withAlpha } from "@/lib/color";
 
 const TAB_META: Record<string, { icon: string; label: string }> = {
   index: { icon: "house", label: "Home" },
@@ -24,7 +23,12 @@ const ORDER_RIGHT = ["progress", "more"];
 // full width (20px side insets, like the mock) with the tabs in equal flex
 // slots and a flex slot in the middle reserved for the raised camera.
 const CAMERA_SIZE = 58;
-const CAMERA_RAISE = 16;
+const CAMERA_RAISE = 18;
+// Width of the background-colored "seat" ring around the camera. It's the page
+// background color, so it's invisible against the page above the dock (the raised
+// top stays clean) and only reads as a thin gap where the button sinks into the
+// dock. Kept thin so the green — not the ring — stays dominant.
+const CAMERA_RING = 2;
 
 type FloatingTabBarProps = {
   state: { index: number; routes: ReadonlyArray<{ key: string; name: string }> };
@@ -95,6 +99,7 @@ function CaptureButton() {
   const { colors, gradients } = useTheme();
   const gradientId = useId();
   const half = CAMERA_SIZE / 2;
+  const outer = CAMERA_SIZE + CAMERA_RING * 2;
 
   return (
     <PressableScale
@@ -103,11 +108,12 @@ function CaptureButton() {
       haptic="impactLight"
       onPress={() => router.push("/capture")}
       style={{
-        width: CAMERA_SIZE,
-        height: CAMERA_SIZE,
-        borderRadius: half,
-        borderWidth: 2,
-        borderColor: withAlpha(colors.label, 0.3),
+        width: outer,
+        height: outer,
+        borderRadius: outer / 2,
+        backgroundColor: colors.background,
+        alignItems: "center",
+        justifyContent: "center",
         shadowColor: colors.accent,
         shadowOpacity: 0.5,
         shadowRadius: 16,
