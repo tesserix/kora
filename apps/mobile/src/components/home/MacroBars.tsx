@@ -66,7 +66,7 @@ function Bar({ label, value, goal, gradient }: BarProps) {
 export function MacroBars({ macros }: { macros: Macros }) {
   const { gradients } = useTheme();
   return (
-    <View style={{ gap: 12, marginTop: 16 }}>
+    <View style={{ gap: 12, marginTop: 0 }}>
       <Bar label="Protein" value={macros.p} goal={macros.pGoal} gradient={gradients.green} />
       <Bar label="Carbs" value={macros.c} goal={macros.cGoal} gradient={gradients.amber} />
       <Bar label="Fat" value={macros.f} goal={macros.fGoal} gradient={gradients.blue} />

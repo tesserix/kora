@@ -66,6 +66,6 @@ test("shows a Connect Apple Health affordance for Steps (never a number yet)", a
   });
   mockUseDayLogs.mockReturnValue({ data: [], isError: false });
 
-  const { findByLabelText } = await render(<Home />);
-  expect(await findByLabelText("Connect Apple Health")).toBeTruthy();
+  const { getAllByLabelText } = await render(<Home />);
+  expect(getAllByLabelText("Connect Apple Health").length).toBeGreaterThanOrEqual(2);
 });

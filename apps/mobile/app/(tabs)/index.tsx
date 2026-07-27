@@ -1,17 +1,20 @@
 import { useEffect, useRef } from "react";
-import { ScrollView, View } from "react-native";
+import { ScrollView, StyleSheet, View } from "react-native";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { AppText } from "@/components/Text";
 import { Avatar } from "@/components/Avatar";
 import { Card } from "@/components/Card";
-import { GroupedSection, Row } from "@/components/GroupedList";
+import { Overline } from "@/components/Overline";
+import { MealRow } from "@/components/MealRow";
 import { KcalHero } from "@/components/home/KcalHero";
-import { MacroBars } from "@/components/home/MacroBars";
 import { RingStat } from "@/components/RingStat";
+import { PressableScale } from "@/motion";
 import { useProfile, useDashboard, useDayLogs } from "@/api/hooks";
 import { useTheme } from "@/theme";
+import { foodVisual } from "@/lib/foodVisual";
+import { hslToHex, withAlpha } from "@/lib/color";
 import type { FoodLog } from "@/api/types";
 
 function today(): string {
@@ -33,7 +36,7 @@ function mealTime(log: FoodLog): string {
 }
 
 export default function Home() {
-  const { colors, spacing } = useTheme();
+  const { colors, spacing, radius } = useTheme();
   const insets = useSafeAreaInsets();
   const profile = useProfile();
   const date = today();
@@ -93,52 +96,78 @@ export default function Home() {
       {!loadError ? (
         <Animated.View entering={enter(1)} style={{ paddingHorizontal: 16, paddingVertical: 12 }}>
           <Card variant="hero">
-            <KcalHero left={left} goal={goal} eaten={eaten} loading={!d} />
-            {d ? (
-              <MacroBars
-                macros={{
-                  p: d.consumed.protein_g,
-                  c: d.consumed.carbs_g,
-                  f: d.consumed.fat_g,
-                  pGoal: d.targets.protein_g,
-                  cGoal: d.targets.carbs_g,
-                  fGoal: d.targets.fat_g,
-                }}
-              />
-            ) : null}
+            <KcalHero
+              left={left}
+              goal={goal}
+              eaten={eaten}
+              loading={!d}
+              macros={d ? { p: d.consumed.protein_g, c: d.consumed.carbs_g, f: d.consumed.fat_g, pGoal: d.targets.protein_g, cGoal: d.targets.carbs_g, fGoal: d.targets.fat_g } : undefined}
+            />
           </Card>
         </Animated.View>
       ) : null}
 
+      {/* today's vitals — Steps + Sleep, both connect-state (real Health wiring is a later phase) */}
       {!loadError ? (
-        <Animated.View entering={enter(2)} style={{ paddingHorizontal: 16, paddingBottom: 4 }}>
-          <Card variant="elevated">
-            <RingStat label="Steps" dotColor={colors.stepsMetric} state="connect" onConnect={() => {}} />
-          </Card>
+        <Animated.View entering={enter(2)} style={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 4 }}>
+          <Overline style={{ marginBottom: 8 }}>Today's vitals</Overline>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+            <Card variant="elevated" style={{ flexBasis: "48%", flexGrow: 1 }}>
+              <RingStat label="Steps" dotColor={colors.stepsMetric} state="connect" onConnect={() => {}} />
+            </Card>
+            <Card variant="elevated" style={{ flexBasis: "48%", flexGrow: 1 }}>
+              <RingStat label="Sleep" dotColor={colors.sleepMetric} state="connect" onConnect={() => {}} />
+            </Card>
+          </View>
         </Animated.View>
       ) : null}
 
       {/* meals */}
-      <Animated.View entering={enter(3)}>
-        <GroupedSection header="Meals" style={{ paddingHorizontal: 16, marginTop: 8 }}>
-          {loggedMeals.map((log) => (
-            <Row
-              key={log.id}
-              title={log.description}
-              subtitle={`${log.meal_slot} · ${mealTime(log)}`}
-              detail={`${Math.round(log.kcal)} kcal`}
-              chevron
-              onPress={() => openMeal(log)}
-            />
-          ))}
-          <Row
-            title="Log a meal"
-            icon={{ name: "plus", tint: colors.primary }}
+      {!loadError ? (
+        <Animated.View entering={enter(3)} style={{ paddingHorizontal: 16, marginTop: 8 }}>
+          <Overline style={{ marginBottom: 8 }}>Meals</Overline>
+          {loggedMeals.length > 0 ? (
+            <Card variant="elevated" style={{ marginBottom: 12 }}>
+              {loggedMeals.map((log, i) => {
+                const fv = foodVisual(log.description);
+                return (
+                  <View key={log.id}>
+                    <MealRow
+                      name={log.description}
+                      slot={`${log.meal_slot} · ${mealTime(log)}`}
+                      kcal={log.kcal}
+                      iconName={fv.icon}
+                      tint={hslToHex(fv.hue, 0.5, 0.5)}
+                      onPress={() => openMeal(log)}
+                      accessibilityLabel={log.description}
+                    />
+                    {i < loggedMeals.length - 1 ? (
+                      <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: colors.separator }} />
+                    ) : null}
+                  </View>
+                );
+              })}
+            </Card>
+          ) : null}
+          <PressableScale
+            accessibilityRole="button"
             accessibilityLabel="Add a meal"
+            haptic="selection"
             onPress={() => router.push("/capture")}
-          />
-        </GroupedSection>
-      </Animated.View>
+            style={{
+              borderWidth: 1,
+              borderStyle: "dashed",
+              borderColor: withAlpha(colors.primary, 0.4),
+              borderRadius: radius.lg,
+              paddingVertical: 14,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <AppText style={{ color: colors.primary, fontWeight: "600" }}>Log a meal</AppText>
+          </PressableScale>
+        </Animated.View>
+      ) : null}
     </ScrollView>
   );
 }
