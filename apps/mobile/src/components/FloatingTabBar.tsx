@@ -19,10 +19,10 @@ const TAB_META: Record<string, { icon: string; label: string }> = {
 const ORDER_LEFT = ["index", "diary"];
 const ORDER_RIGHT = ["progress", "more"];
 
-// Camera cap is raised above the pill (see CaptureButton) and needs a gap in
-// the pill's row so the left/right tab groups don't sit under it.
+// Camera cap is raised above the pill (see CaptureButton). The pill spans the
+// full width (20px side insets, like the mock) with the tabs in equal flex
+// slots and a flex slot in the middle reserved for the raised camera.
 const CAMERA_SIZE = 58;
-const CAMERA_SPACER_WIDTH = 64;
 const CAMERA_RAISE = 16;
 
 type FloatingTabBarProps = {
@@ -152,8 +152,12 @@ export function FloatingTabBar({ state, navigation }: FloatingTabBarProps) {
     );
   };
 
+  const slot = (name: string) => (
+    <View key={name} style={{ flex: 1, alignItems: "center" }}>{renderTab(name)}</View>
+  );
+
   return (
-    <View style={{ position: "absolute", left: 0, right: 0, bottom: 22, alignItems: "center" }} pointerEvents="box-none">
+    <View style={{ position: "absolute", left: 20, right: 20, bottom: 22 }} pointerEvents="box-none">
       <View style={{ position: "relative" }}>
         <BlurView
           intensity={40}
@@ -162,9 +166,9 @@ export function FloatingTabBar({ state, navigation }: FloatingTabBarProps) {
             {
               flexDirection: "row",
               alignItems: "center",
-              gap: 2,
-              padding: 7,
-              borderRadius: radius.full,
+              paddingVertical: 8,
+              paddingHorizontal: 6,
+              borderRadius: radius["2xl"],
               borderWidth: 1,
               borderColor: colors.separator,
               overflow: "hidden",
@@ -173,9 +177,9 @@ export function FloatingTabBar({ state, navigation }: FloatingTabBarProps) {
             shadows.lg,
           ]}
         >
-          {ORDER_LEFT.map(renderTab)}
-          <View style={{ width: CAMERA_SPACER_WIDTH }} />
-          {ORDER_RIGHT.map(renderTab)}
+          {ORDER_LEFT.map(slot)}
+          <View style={{ flex: 1 }} />
+          {ORDER_RIGHT.map(slot)}
         </BlurView>
         <View
           style={{ position: "absolute", top: -CAMERA_RAISE, left: 0, right: 0, alignItems: "center" }}
