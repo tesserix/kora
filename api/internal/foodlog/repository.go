@@ -40,6 +40,20 @@ func (r Repository) ListByUserAndDay(ctx context.Context, userID uuid.UUID, day 
 	return logs, nil
 }
 
+// ListForUserSince returns the user's logs at or after `since` that resolved to
+// a food item (food_item_id NOT NULL), oldest first. Used by the memory engine.
+func (r Repository) ListForUserSince(ctx context.Context, userID uuid.UUID, since time.Time) ([]FoodLog, error) {
+	var logs []FoodLog
+	err := r.db.WithContext(ctx).
+		Where("user_id = ? AND food_item_id IS NOT NULL AND logged_at >= ?", userID, since).
+		Order("logged_at ASC").
+		Find(&logs).Error
+	if err != nil {
+		return nil, fmt.Errorf("foodlog: list for user since: %w", err)
+	}
+	return logs, nil
+}
+
 // Update persists changes to an existing log, scoped to its owner. It updates
 // by (id AND user_id) so a user can never edit another user's log; if no row
 // matches, it returns gorm.ErrRecordNotFound wrapped.
