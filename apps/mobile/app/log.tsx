@@ -14,14 +14,24 @@ import { Segmented } from "@/components/Segmented";
 import { Card } from "@/components/Card";
 import { AppBackground } from "@/components/AppBackground";
 import { Overline } from "@/components/Overline";
-import { useCreateLog, useFoodSearch } from "@/api/hooks";
-import type { FoodItem } from "@/api/types";
+import { useToast } from "@/components/Toast";
+import { useCreateLog, useCreateLogBatch, useDeleteLog, useFoodSearch, useMemory } from "@/api/hooks";
+import type { FoodItem, MemoryFood, MemoryMeal } from "@/api/types";
 import { foodVisual } from "@/lib/foodVisual";
 import { haptics } from "@/motion";
 import { useTheme } from "@/theme";
 
 const MEALS = ["breakfast", "lunch", "dinner", "snack"] as const;
 const MEAL_OPTIONS = MEALS.map((m) => ({ key: m, label: m.charAt(0).toUpperCase() + m.slice(1) }));
+const MEMORY_TAB_OPTIONS: { key: string; label: string }[] = [
+  { key: "recents", label: "Recents" },
+  { key: "frequent", label: "Frequent" },
+  { key: "usual_meals", label: "Usual meals" },
+];
+
+function today(): string {
+  return new Date().toLocaleDateString("en-CA");
+}
 
 export default function LogScreen() {
   const { colors, spacing, fontSize } = useTheme();
@@ -32,8 +42,13 @@ export default function LogScreen() {
   const [grams, setGrams] = useState("");
   const [meal, setMeal] = useState<(typeof MEALS)[number]>("lunch");
   const [error, setError] = useState<string | null>(null);
+  const [memTab, setMemTab] = useState<"recents" | "frequent" | "usual_meals">("recents");
   const search = useFoodSearch(q);
   const createLog = useCreateLog();
+  const memory = useMemory(today());
+  const batchLog = useCreateLogBatch();
+  const deleteLog = useDeleteLog();
+  const toast = useToast();
 
   // Entrance stagger runs on first mount only — see app/(tabs)/index.tsx for the
   // same guard and rationale (refetches update results in place, no re-stagger).
@@ -68,6 +83,48 @@ export default function LogScreen() {
           router.replace("/");
         },
         onError: () => setError("Couldn't log that. Please try again."),
+      },
+    );
+  }
+
+  function logFood(f: MemoryFood) {
+    createLog.mutate(
+      {
+        food_item_id: f.food_item_id,
+        meal_slot: f.meal_slot,
+        source: "memory",
+        quantity_grams: f.grams,
+        logged_at: new Date().toISOString(),
+      },
+      {
+        onSuccess: (created) => {
+          haptics.success();
+          toast.show({
+            message: `Logged ${f.name}`,
+            actionLabel: "Undo",
+            onAction: () => deleteLog.mutate(created.id),
+          });
+        },
+      },
+    );
+  }
+
+  function logMeal(m: MemoryMeal) {
+    batchLog.mutate(
+      {
+        logged_at: new Date().toISOString(),
+        meal_slot: m.meal_slot,
+        items: m.items.map((i) => ({ food_item_id: i.food_item_id, quantity_grams: i.grams })),
+      },
+      {
+        onSuccess: (created) => {
+          haptics.success();
+          toast.show({
+            message: `Logged ${m.name}`,
+            actionLabel: "Undo",
+            onAction: () => created.forEach((l) => deleteLog.mutate(l.id)),
+          });
+        },
       },
     );
   }
@@ -185,6 +242,50 @@ export default function LogScreen() {
               />
             </View>
           </Card>
+
+          {q.length < 2 ? (
+            <>
+              <Segmented
+                options={MEMORY_TAB_OPTIONS}
+                value={memTab}
+                onChange={(key) => setMemTab(key as typeof memTab)}
+              />
+              {memory.isLoading ? (
+                <AppText muted>Loading…</AppText>
+              ) : memory.isError ? (
+                <AppText muted>Couldn't load your foods.</AppText>
+              ) : memTab === "usual_meals" ? (
+                (memory.data?.usual_meals ?? []).length > 0 ? (
+                  <GroupedSection elevated>
+                    {(memory.data?.usual_meals ?? []).map((m) => (
+                      <Row
+                        key={m.id}
+                        title={m.name}
+                        subtitle={m.items.map((i) => i.name).join(" · ")}
+                        detail={`×${m.count}`}
+                        onPress={() => logMeal(m)}
+                      />
+                    ))}
+                  </GroupedSection>
+                ) : (
+                  <AppText muted>Log a few meals and they'll show up here.</AppText>
+                )
+              ) : (memory.data?.[memTab] ?? []).length > 0 ? (
+                <GroupedSection elevated>
+                  {(memory.data?.[memTab] ?? []).map((f) => (
+                    <Row
+                      key={f.food_item_id}
+                      title={f.name}
+                      subtitle={`${Math.round(f.grams)}g · ${Math.round(f.kcal)} kcal`}
+                      onPress={() => logFood(f)}
+                    />
+                  ))}
+                </GroupedSection>
+              ) : (
+                <AppText muted>Log a few meals and they'll show up here.</AppText>
+              )}
+            </>
+          ) : null}
 
           {search.data && search.data.length > 0 ? (
             <GroupedSection elevated>
