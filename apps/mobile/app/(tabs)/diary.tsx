@@ -284,7 +284,7 @@ export default function Diary() {
                         </PressableScale>
                       )}
                     >
-                      <View style={{ paddingHorizontal: spacing.md, backgroundColor: colors.elevated }}>
+                      <View style={{ backgroundColor: colors.elevated }}>
                         <MealRow
                           name={log.description}
                           slot={`${Math.round(log.quantity_grams)}g · ${timeOf(log.logged_at)}`}

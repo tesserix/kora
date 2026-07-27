@@ -10,7 +10,7 @@ type Props = { type: string; iconName: string; tint: string; text: string; time:
 export function NotifRow({ iconName, tint, text, time, unread, onPress }: Props) {
   const { colors, radius, spacing } = useTheme();
   return (
-    <PressableScale testID="notif-row" accessibilityRole="button" haptic="selection" onPress={onPress}
+    <PressableScale testID="notif-row" accessibilityRole={onPress ? "button" : undefined} haptic={onPress ? "selection" : "none"} onPress={onPress}
       style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12, paddingHorizontal: spacing.md }}>
       <View style={{ width: 36, height: 36, borderRadius: radius.full, alignItems: "center", justifyContent: "center", backgroundColor: withAlpha(tint, 0.16) }}>
         <Icon name={iconName} size={18} color={tint} />

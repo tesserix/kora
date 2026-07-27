@@ -165,7 +165,7 @@ export default function Home() {
         <Animated.View entering={enter(3)} style={{ paddingHorizontal: 16, marginTop: 8 }}>
           <Overline style={{ marginBottom: 8 }}>Meals</Overline>
           {loggedMeals.length > 0 ? (
-            <Card variant="elevated" style={{ marginBottom: 12 }}>
+            <Card variant="elevated" style={{ marginBottom: 12, padding: 0, paddingVertical: spacing.sm }}>
               {loggedMeals.map((log, i) => {
                 const fv = foodVisual(log.description);
                 return (

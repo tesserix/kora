@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { View, type ViewProps } from "react-native";
 import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 import { useTheme } from "@/theme";
@@ -8,6 +9,7 @@ type CardProps = ViewProps & { variant?: "flat" | "elevated" | "hero" };
 // real soft shadow + layered surface. Hero adds a faint green top-gradient tint.
 export function Card({ variant = "flat", style, children, ...rest }: CardProps) {
   const { colors, radius, spacing, shadows, gradients } = useTheme();
+  const gradientId = useId();
   const elevated = variant !== "flat";
   const borderRadius = elevated ? radius.xl : radius.lg;
 
@@ -28,12 +30,12 @@ export function Card({ variant = "flat", style, children, ...rest }: CardProps) 
         <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, height: 96, borderRadius, overflow: "hidden" }}>
           <Svg width="100%" height={96} preserveAspectRatio="none" viewBox="0 0 100 96">
             <Defs>
-              <LinearGradient id="cardHero" x1="0" y1="0" x2="0" y2="1">
+              <LinearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
                 <Stop offset="0%" stopColor={gradients.green[0]} stopOpacity={0.12} />
                 <Stop offset="100%" stopColor={gradients.green[0]} stopOpacity={0} />
               </LinearGradient>
             </Defs>
-            <Rect x={0} y={0} width={100} height={96} fill="url(#cardHero)" />
+            <Rect x={0} y={0} width={100} height={96} fill={`url(#${gradientId})`} />
           </Svg>
         </View>
       ) : null}
