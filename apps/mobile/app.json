@@ -60,7 +60,13 @@
           "microphonePermission": "Kora uses the microphone so you can describe meals by voice."
         }
       ],
-      "expo-notifications"
+      "expo-notifications",
+      [
+        "@kingstinct/react-native-healthkit",
+        {
+          "NSHealthShareUsageDescription": "Kora reads your steps and sleep to show real activity alongside your nutrition."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

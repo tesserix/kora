@@ -245,3 +245,17 @@ jest.mock("expo-haptics", () => ({
   ImpactFeedbackStyle: { Light: "light", Medium: "medium", Heavy: "heavy" },
   NotificationFeedbackType: { Success: "success", Warning: "warning", Error: "error" },
 }));
+
+// @kingstinct/react-native-healthkit (v14, Nitro-modules based): native HealthKit is
+// unavailable under Jest and on the simulator. Export names/signatures below are taken
+// from the installed package's lib/typescript/healthkit.d.ts, not guessed — notably
+// isHealthDataAvailable is SYNCHRONOUS (a direct Nitro binding returning boolean), unlike
+// its isHealthDataAvailableAsync twin. Default mock reports "unavailable" so degraded-state
+// tests pass; individual tests override per-case (authorized/denied) via jest.mock.
+jest.mock("@kingstinct/react-native-healthkit", () => ({
+  isHealthDataAvailable: jest.fn(() => false),
+  isHealthDataAvailableAsync: jest.fn(async () => false),
+  requestAuthorization: jest.fn(async () => false),
+  queryQuantitySamples: jest.fn(async () => []),
+  queryCategorySamples: jest.fn(async () => []),
+}));
