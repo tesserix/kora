@@ -14,7 +14,7 @@ function makeShadows(scheme: "light" | "dark") {
     sm: { shadowColor, shadowOpacity: 0.05, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 2 },
     md: { shadowColor, shadowOpacity: 0.08, shadowRadius: 16, shadowOffset: { width: 0, height: 6 }, elevation: 5 },
     lg: { shadowColor, shadowOpacity: 0.12, shadowRadius: 24, shadowOffset: { width: 0, height: 12 }, elevation: 9 },
-    card: { shadowColor, shadowOpacity: scheme === "dark" ? 0.4 : 0.1, shadowRadius: 20, shadowOffset: { width: 0, height: 8 }, elevation: 6 },
+    card: { shadowColor, shadowOpacity: scheme === "dark" ? 0.55 : 0.12, shadowRadius: 24, shadowOffset: { width: 0, height: 12 }, elevation: 9 },
   } as const;
 }
 
