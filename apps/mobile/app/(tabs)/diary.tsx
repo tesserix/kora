@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Alert, ScrollView, View } from "react-native";
 import Animated, { FadeInDown, useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
 import Swipeable from "react-native-gesture-handler/ReanimatedSwipeable";
+import Svg, { Circle, Defs, LinearGradient, Stop } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { AppText } from "@/components/Text";
@@ -9,10 +10,14 @@ import { Card } from "@/components/Card";
 import { Button } from "@/components/Button";
 import { Icon } from "@/components/Icon";
 import { GroupedSection, Row } from "@/components/GroupedList";
+import { GaugeRing } from "@/components/GaugeRing";
+import { MealRow } from "@/components/MealRow";
 import { CopyDaySheet } from "@/components/diary/CopyDaySheet";
 import { useDashboard, useDayLogs, useAddWater, useDeleteLog } from "@/api/hooks";
 import { AnimatedNumber, PressableScale, haptics, springs } from "@/motion";
 import { useTheme } from "@/theme";
+import { hslToHex } from "@/lib/color";
+import { foodVisual } from "@/lib/foodVisual";
 import type { FoodLog } from "@/api/types";
 
 const DOW = ["S", "M", "T", "W", "T", "F", "S"];
@@ -44,8 +49,9 @@ type WeekDayCellProps = {
 // A single week-strip day: accent-filled circle springs in on selection,
 // today (unselected) gets a ring outline, and the loggable dot is preserved.
 function WeekDayCell({ date, dow, selected, today, loggable, onSelect }: WeekDayCellProps) {
-  const { colors } = useTheme();
+  const { colors, gradients } = useTheme();
   const scale = useSharedValue(selected ? 1 : 0);
+  const gradientId = useId();
 
   useEffect(() => {
     scale.value = withSpring(selected ? 1 : 0, springs.lively);
@@ -72,10 +78,17 @@ function WeekDayCell({ date, dow, selected, today, loggable, onSelect }: WeekDay
             style={{ position: "absolute", width: 36, height: 36, borderRadius: 18, borderWidth: 1.5, borderColor: colors.accent }}
           />
         ) : null}
-        <Animated.View
-          pointerEvents="none"
-          style={[{ position: "absolute", width: 36, height: 36, borderRadius: 18, backgroundColor: colors.accent }, circleStyle]}
-        />
+        <Animated.View pointerEvents="none" style={[{ position: "absolute", width: 36, height: 36, borderRadius: 18, overflow: "hidden" }, circleStyle]}>
+          <Svg width={36} height={36}>
+            <Defs>
+              <LinearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1">
+                <Stop offset="0%" stopColor={gradients.green[0]} />
+                <Stop offset="100%" stopColor={gradients.green[1]} />
+              </LinearGradient>
+            </Defs>
+            <Circle cx={18} cy={18} r={18} fill={`url(#${gradientId})`} />
+          </Svg>
+        </Animated.View>
         <AppText variant="headline" style={{ color: selected ? colors.primaryForeground : colors.label }}>
           {date.getDate()}
         </AppText>
@@ -114,7 +127,7 @@ function AnimatedStat({ label, value, unit, format }: AnimatedStatProps) {
 }
 
 export default function Diary() {
-  const { colors, spacing, radius } = useTheme();
+  const { colors, spacing, radius, gradients } = useTheme();
   const insets = useSafeAreaInsets();
   const week = weekDates();
   const todayIso = iso(new Date());
@@ -157,7 +170,8 @@ export default function Diary() {
 
   const d = dashboard.data;
   const total = Math.round(d?.consumed.kcal ?? 0);
-  const remaining = Math.max(0, Math.round((d?.targets.kcal ?? 0) - (d?.consumed.kcal ?? 0)));
+  const goal = Math.round(d?.targets.kcal ?? 0);
+  const remaining = Math.max(0, Math.round(goal - (d?.consumed.kcal ?? 0)));
   const waterL = (d?.water_ml ?? 0) / 1000;
   const logged = (logs.data ?? []) as FoodLog[];
 
@@ -194,12 +208,19 @@ export default function Diary() {
 
         <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
           <Animated.View entering={enter(2)}>
-            <Card style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-              <AnimatedStat label="Total" value={total} unit="kcal" />
-              <View style={{ height: 40, width: 1, backgroundColor: colors.separator }} />
-              <AnimatedStat label="Remaining" value={remaining} unit="kcal" />
-              <View style={{ height: 40, width: 1, backgroundColor: colors.separator }} />
-              <AnimatedStat label="Water" value={waterL} unit="L" format={(n) => n.toFixed(1)} />
+            <Card variant="elevated" style={{ flexDirection: "row", alignItems: "center", gap: 16, marginBottom: 16 }}>
+              <GaugeRing value={total} max={goal} size={64} stroke={7} gradient={gradients.green}>
+                <AppText variant="caption" muted>
+                  eaten
+                </AppText>
+              </GaugeRing>
+              <View style={{ flex: 1, flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                <AnimatedStat label="Total" value={total} unit="kcal" />
+                <View style={{ height: 40, width: 1, backgroundColor: colors.separator }} />
+                <AnimatedStat label="Remaining" value={remaining} unit="kcal" />
+                <View style={{ height: 40, width: 1, backgroundColor: colors.separator }} />
+                <AnimatedStat label="Water" value={waterL} unit="L" format={(n) => n.toFixed(1)} />
+              </View>
             </Card>
           </Animated.View>
 
@@ -224,33 +245,42 @@ export default function Diary() {
 
           {slots.map((group, gi) => (
             <Animated.View key={group.slot} entering={enter(4 + gi)}>
-              <GroupedSection header={group.slot.toUpperCase()} style={{ marginBottom: 16 }}>
-                {group.items.map((log) => (
-                  <Swipeable
-                    key={log.id}
-                    overshootRight={false}
-                    renderRightActions={() => (
-                      <PressableScale
-                        accessibilityRole="button"
-                        accessibilityLabel={`Delete ${log.description}`}
-                        haptic="none"
-                        onPress={() => confirmDelete(log.id)}
-                        style={{ backgroundColor: colors.destructive, justifyContent: "center", alignItems: "center", width: 74 }}
+              <Card variant="elevated" style={{ marginBottom: 16, padding: 0, overflow: "hidden" }}>
+                <GroupedSection header={group.slot.toUpperCase()} style={{ paddingTop: spacing.md }}>
+                  {group.items.map((log) => {
+                    const fv = foodVisual(log.description);
+                    return (
+                      <Swipeable
+                        key={log.id}
+                        overshootRight={false}
+                        renderRightActions={() => (
+                          <PressableScale
+                            accessibilityRole="button"
+                            accessibilityLabel={`Delete ${log.description}`}
+                            haptic="none"
+                            onPress={() => confirmDelete(log.id)}
+                            style={{ backgroundColor: colors.destructive, justifyContent: "center", alignItems: "center", width: 74 }}
+                          >
+                            <Icon name="trash-2" size={20} color={colors.destructiveForeground} />
+                          </PressableScale>
+                        )}
                       >
-                        <Icon name="trash-2" size={20} color={colors.destructiveForeground} />
-                      </PressableScale>
-                    )}
-                  >
-                    <Row
-                      title={log.description}
-                      subtitle={`${Math.round(log.quantity_grams)}g · ${timeOf(log.logged_at)}`}
-                      detail={`${Math.round(log.kcal)} kcal`}
-                      chevron
-                      onPress={() => openMeal(log)}
-                    />
-                  </Swipeable>
-                ))}
-              </GroupedSection>
+                        <View style={{ paddingHorizontal: spacing.md, backgroundColor: colors.card }}>
+                          <MealRow
+                            name={log.description}
+                            slot={`${Math.round(log.quantity_grams)}g · ${timeOf(log.logged_at)}`}
+                            kcal={log.kcal}
+                            iconName={fv.icon}
+                            tint={hslToHex(fv.hue, 0.5, 0.5)}
+                            onPress={() => openMeal(log)}
+                            accessibilityLabel={log.description}
+                          />
+                        </View>
+                      </Swipeable>
+                    );
+                  })}
+                </GroupedSection>
+              </Card>
             </Animated.View>
           ))}
 
