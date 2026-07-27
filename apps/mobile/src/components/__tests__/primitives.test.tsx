@@ -34,8 +34,15 @@ test("Card renders children", async () => {
 
 describe("Card variants", () => {
   it("defaults to flat (no shadow) and renders children", async () => {
-    const { getByText } = await render(<Card><Text>hi</Text></Card>);
+    const { getByText, getByTestId } = await render(
+      <Card testID="flatcard">
+        <Text>hi</Text>
+      </Card>
+    );
     expect(getByText("hi")).toBeTruthy();
+    const flat = getByTestId("flatcard");
+    const style = Array.isArray(flat.props.style) ? Object.assign({}, ...flat.props.style) : flat.props.style;
+    expect(style.shadowRadius).toBeFalsy();
   });
   it("elevated variant applies a shadow", async () => {
     const { getByTestId } = await render(<Card variant="elevated" testID="c"><Text>x</Text></Card>);
