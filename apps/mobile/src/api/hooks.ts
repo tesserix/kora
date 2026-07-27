@@ -16,6 +16,7 @@ import type {
   GroupDetail,
   GroupProgress,
   GroupSummary,
+  Memory,
   Metric,
   MyFriendCode,
   OnboardingInput,
@@ -75,6 +76,31 @@ export function useCreateLog() {
       qc.invalidateQueries({ queryKey: ["logs"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
     },
+  });
+}
+
+type BatchLogInput = {
+  logged_at: string;
+  meal_slot: string;
+  items: { food_item_id: string; quantity_grams: number }[];
+};
+
+export function useCreateLogBatch() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: BatchLogInput) =>
+      apiFetch("/v1/logs/batch", { method: "POST", body: JSON.stringify(input) }) as Promise<FoodLog[]>,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["logs"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+  });
+}
+
+export function useMemory(date: string) {
+  return useQuery({
+    queryKey: ["memory", date],
+    queryFn: () => apiFetch(`/v1/memory?date=${date}`) as Promise<Memory>,
   });
 }
 
