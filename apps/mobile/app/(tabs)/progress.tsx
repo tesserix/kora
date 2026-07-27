@@ -10,6 +10,8 @@ import { Icon } from "@/components/Icon";
 import { RingStat } from "@/components/RingStat";
 import { Sparkline } from "@/components/Sparkline";
 import { StreakBars } from "@/components/StreakBars";
+import { Numeral } from "@/components/Numeral";
+import { Overline } from "@/components/Overline";
 import { Segmented } from "@/components/Segmented";
 import { WeightChart } from "@/components/progress/WeightChart";
 import { WeightLogSheet } from "@/components/progress/WeightLogSheet";
@@ -120,23 +122,32 @@ export default function Progress() {
           </Card>
         </Animated.View>
 
-        <Animated.View entering={enter(2)} style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
-          <Card variant="elevated" style={{ flexGrow: 1, flexBasis: "45%", gap: 8 }}>
-            <RingStat label="Avg intake" dotColor={colors.accent} state="empty" />
-            <Sparkline points={[]} color={colors.accent} />
-          </Card>
-          <Card variant="elevated" style={{ flexGrow: 1, flexBasis: "45%", gap: 8 }}>
-            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-              <RingStat label="Log streak" dotColor={colors.accent} state="value" value={String(streak)} meta={streak === 1 ? "day" : "days"} />
-            </View>
-            <StreakBars count={streak} />
-          </Card>
-          <Card variant="elevated" style={{ flexGrow: 1, flexBasis: "45%" }}>
-            <RingStat label="Steps" dotColor={colors.stepsMetric} state="connect" onConnect={() => {}} />
-          </Card>
-          <Card variant="elevated" style={{ flexGrow: 1, flexBasis: "45%" }}>
-            <RingStat label="Sleep" dotColor={colors.sleepMetric} state="connect" onConnect={() => {}} />
-          </Card>
+        <Animated.View entering={enter(2)}>
+          <Overline style={{ marginBottom: 8 }}>This week</Overline>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+            <Card variant="elevated" style={{ flexGrow: 1, flexBasis: "45%", gap: 8 }}>
+              <RingStat label="Avg intake" dotColor={colors.accent} state="empty" />
+              <Sparkline points={[]} color={colors.accent} />
+            </Card>
+            <Card variant="elevated" style={{ flexGrow: 1, flexBasis: "45%", gap: 8 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <View style={{ width: 7, height: 7, borderRadius: 999, backgroundColor: colors.accentAmber }} />
+                <AppText variant="footnote" muted style={{ fontWeight: "600" }}>Log streak</AppText>
+              </View>
+              <View style={{ flexDirection: "row", alignItems: "baseline", gap: 4 }}>
+                <Numeral size={28}>{String(streak)}</Numeral>
+                <AppText variant="footnote" muted>days</AppText>
+              </View>
+              <StreakBars count={streak} color={colors.accentAmber} />
+              <AppText variant="caption" muted>keep it going</AppText>
+            </Card>
+            <Card variant="elevated" style={{ flexGrow: 1, flexBasis: "45%" }}>
+              <RingStat label="Steps" dotColor={colors.stepsMetric} state="connect" onConnect={() => {}} />
+            </Card>
+            <Card variant="elevated" style={{ flexGrow: 1, flexBasis: "45%" }}>
+              <RingStat label="Sleep" dotColor={colors.sleepMetric} state="connect" onConnect={() => {}} />
+            </Card>
+          </View>
         </Animated.View>
       </View>
 
