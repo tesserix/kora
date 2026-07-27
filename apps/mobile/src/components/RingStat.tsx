@@ -17,6 +17,7 @@ type RingStatProps = {
   ringGradient?: [string, string];
   onConnect?: () => void;
   emptyText?: string;
+  showRing?: boolean;
 };
 
 function Header({ label, dotColor }: { label: string; dotColor: string }) {
@@ -30,7 +31,7 @@ function Header({ label, dotColor }: { label: string; dotColor: string }) {
 
 // Metric tile with an explicit state machine. INVARIANT: "connect"/"empty"
 // never render a number — only "value" does.
-export function RingStat({ label, dotColor, state = "value", value, meta, ringValue = 0, ringMax = 0, ringGradient, onConnect, emptyText = "—" }: RingStatProps) {
+export function RingStat({ label, dotColor, state = "value", value, meta, ringValue = 0, ringMax = 0, ringGradient, onConnect, emptyText = "—", showRing = true }: RingStatProps) {
   const { colors } = useTheme();
 
   if (state === "connect") {
@@ -74,7 +75,9 @@ export function RingStat({ label, dotColor, state = "value", value, meta, ringVa
         <Numeral size={28}>{value ?? emptyText}</Numeral>
         {meta ? <AppText variant="caption" muted>{meta}</AppText> : null}
       </View>
-      <GaugeRing value={ringValue} max={ringMax} size={44} stroke={5} gradient={ringGradient} color={ringGradient ? undefined : dotColor} />
+      {showRing ? (
+        <GaugeRing value={ringValue} max={ringMax} size={44} stroke={5} gradient={ringGradient} color={ringGradient ? undefined : dotColor} />
+      ) : null}
     </View>
   );
 }

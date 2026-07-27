@@ -138,6 +138,7 @@ export default function Progress() {
                 state={avgIntake.avg != null ? "value" : "empty"}
                 value={avgIntake.avg?.toLocaleString()}
                 meta={avgIntake.avg != null ? "7-day avg" : undefined}
+                showRing={false}
               />
               <Sparkline points={avgIntake.series} color={colors.accent} />
             </Card>
