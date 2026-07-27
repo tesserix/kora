@@ -42,10 +42,17 @@ export function RingStat({ label, dotColor, state = "value", value, meta, ringVa
           accessibilityLabel="Connect Apple Health"
           haptic="selection"
           onPress={onConnect}
-          style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+          style={{ flexDirection: "row", alignItems: "center", gap: 5 }}
         >
-          <Icon name="heart" size={15} color={colors.accent} />
-          <AppText variant="footnote" style={{ color: colors.accent, fontWeight: "600" }}>Connect Apple Health</AppText>
+          <Icon name="heart" size={14} color={colors.accent} />
+          <AppText
+            variant="footnote"
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            style={{ color: colors.accent, fontWeight: "600", flexShrink: 1 }}
+          >
+            Connect Apple Health
+          </AppText>
         </PressableScale>
       </View>
     );

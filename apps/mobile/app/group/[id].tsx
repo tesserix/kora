@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, useLocalSearchParams, type Href } from "expo-router";
 import { AppText } from "@/components/Text";
 import { Overline } from "@/components/Overline";
+import { Icon } from "@/components/Icon";
 import { LeaderRow } from "@/components/LeaderRow";
 import { GroupedSection, Row } from "@/components/GroupedList";
 import { PressableScale } from "@/motion";
@@ -65,9 +66,20 @@ export default function GroupDetail() {
   return (
     <>
       <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
-        <View style={{ paddingHorizontal: 20, paddingBottom: 14 }}>
-          <Overline>Group</Overline>
-          <AppText variant="title2" style={{ marginTop: 4 }}>{d?.name ?? "Group"}</AppText>
+        <View style={{ flexDirection: "row", alignItems: "flex-start", paddingHorizontal: 20, paddingTop: 4, paddingBottom: 14 }}>
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            haptic="selection"
+            onPress={() => router.back()}
+            style={{ width: 36, height: 36, alignItems: "center", justifyContent: "center", marginRight: 4, marginLeft: -6 }}
+          >
+            <Icon name="arrow-left" size={22} color={colors.label} />
+          </PressableScale>
+          <View style={{ flex: 1 }}>
+            <Overline>Group</Overline>
+            <AppText variant="title2" style={{ marginTop: 4 }}>{d?.name ?? "Group"}</AppText>
+          </View>
         </View>
 
         <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>

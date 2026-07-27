@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Alert, ScrollView, Switch, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { router } from "expo-router";
 import { AppText } from "@/components/Text";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { Button } from "@/components/Button";
@@ -53,7 +54,7 @@ export default function Friends() {
   return (
     <>
       <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
-        <ScreenHeader overline="Your circle" title="Friends" />
+        <ScreenHeader overline="Your circle" title="Friends" onBack={() => router.back()} />
         <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>
           <Button title="Add a friend" onPress={() => setAddOpen(true)} />
 
