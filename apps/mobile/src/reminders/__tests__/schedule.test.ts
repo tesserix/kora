@@ -1,4 +1,4 @@
-import { buildSchedule, buildCustomSchedule, applyAllReminders } from "../schedule";
+import { buildSchedule, buildCustomSchedule, applyAllReminders, MAX_SCHEDULED_NOTIFICATIONS } from "../schedule";
 import { DEFAULT_PREFS } from "../prefs";
 import type { CustomReminder } from "../customPrefs";
 import * as Notifications from "expo-notifications";
@@ -62,4 +62,23 @@ test("applyAllReminders cancels once then schedules meals + customs together", a
       trigger: { type: "weekly", weekday: 2, hour: 7, minute: 30 },
     }),
   );
+});
+
+test("applyAllReminders caps total scheduled requests at MAX_SCHEDULED_NOTIFICATIONS (meals scheduled first)", async () => {
+  // 20 weekday-subset customs x 6 days = 120 potential custom notifications, far
+  // over the cap even before the 3 enabled meals from DEFAULT_PREFS are counted.
+  const manyCustoms: CustomReminder[] = Array.from({ length: 20 }, (_, i) => ({
+    id: String(i),
+    label: "R" + i,
+    hour: 9,
+    minute: 0,
+    days: [1, 2, 3, 4, 5, 6],
+    enabled: true,
+  }));
+  expect(buildCustomSchedule(manyCustoms)).toHaveLength(120);
+
+  await applyAllReminders(DEFAULT_PREFS, manyCustoms);
+
+  expect(Notifications.cancelAllScheduledNotificationsAsync).toHaveBeenCalledTimes(1);
+  expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledTimes(MAX_SCHEDULED_NOTIFICATIONS);
 });

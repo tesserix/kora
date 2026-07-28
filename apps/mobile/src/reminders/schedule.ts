@@ -16,6 +16,12 @@ export type ScheduledNotification = {
   trigger: NotificationTrigger;
 };
 
+// iOS allows at most 64 pending local-notification requests app-wide; beyond that
+// scheduleNotificationAsync silently drops requests. Cap our total below that so
+// scheduling degrades deterministically (meals first) instead of iOS dropping
+// arbitrary requests.
+export const MAX_SCHEDULED_NOTIFICATIONS = 60;
+
 const SLOTS: MealSlot[] = ["breakfast", "lunch", "dinner", "snack"];
 const LABEL: Record<MealSlot, string> = { breakfast: "Breakfast", lunch: "Lunch", dinner: "Dinner", snack: "Snack" };
 const ALL_DAYS = 7;
@@ -64,13 +70,19 @@ export function buildCustomSchedule(reminders: CustomReminder[]): ScheduledNotif
 // this is the single entry point every reminder change funnels through.
 export async function applyAllReminders(mealPrefs: ReminderPrefs, customs: CustomReminder[]): Promise<void> {
   await Notifications.cancelAllScheduledNotificationsAsync();
+  let scheduled = 0;
+  // Meals first: they are the baseline and must always win when the total would
+  // otherwise exceed iOS's pending-notification ceiling.
   for (const r of buildSchedule(mealPrefs)) {
+    if (scheduled >= MAX_SCHEDULED_NOTIFICATIONS) return;
     await Notifications.scheduleNotificationAsync({
       content: { title: r.title, body: r.body, data: { kind: "reminder", slot: r.slot } },
       trigger: { type: Notifications.SchedulableTriggerInputTypes.DAILY, hour: r.hour, minute: r.minute },
     });
+    scheduled++;
   }
   for (const n of buildCustomSchedule(customs)) {
+    if (scheduled >= MAX_SCHEDULED_NOTIFICATIONS) return;
     const content = { title: n.title, body: n.body, data: n.data };
     // Split (rather than a shared `trigger` variable) so each object literal is
     // contextually typed at its call site — TS otherwise widens
@@ -93,5 +105,6 @@ export async function applyAllReminders(mealPrefs: ReminderPrefs, customs: Custo
         },
       });
     }
+    scheduled++;
   }
 }
