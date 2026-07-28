@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { View, Switch, Pressable } from "react-native";
-import DateTimePicker from "@react-native-community/datetimepicker";
+import { Platform, View, Switch, Pressable } from "react-native";
+import DateTimePicker, { type DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { AppText } from "@/components/Text";
 import { Overline } from "@/components/Overline";
 import { GroupedSection } from "@/components/GroupedList";
+import { Sheet } from "@/components/Sheet";
+import { Button } from "@/components/Button";
 import { useReminderPrefs } from "@/reminders/useReminderPrefs";
 import type { MealSlot } from "@/lib/mealSlot";
 import { useTheme } from "@/theme";
@@ -21,6 +23,34 @@ export function RemindersSection() {
   const { prefs, setSlot } = useReminderPrefs();
   const { colors, spacing } = useTheme();
   const [editing, setEditing] = useState<MealSlot | null>(null);
+  const [draft, setDraft] = useState<Date | null>(null);
+
+  const openPicker = (slot: MealSlot): void => {
+    setDraft(new Date(2000, 0, 1, prefs[slot].hour, prefs[slot].minute));
+    setEditing(slot);
+  };
+
+  const applyDraft = (): void => {
+    const slot = editing;
+    const date = draft;
+    setEditing(null);
+    setDraft(null);
+    if (slot && date) setSlot(slot, { ...prefs[slot], hour: date.getHours(), minute: date.getMinutes() });
+  };
+
+  const cancel = (): void => {
+    setEditing(null);
+    setDraft(null);
+  };
+
+  const onAndroidChange = (event: DateTimePickerEvent, date?: Date): void => {
+    const slot = editing;
+    setEditing(null);
+    setDraft(null);
+    if (event.type === "set" && date && slot) {
+      setSlot(slot, { ...prefs[slot], hour: date.getHours(), minute: date.getMinutes() });
+    }
+  };
 
   return (
     <View style={{ marginTop: spacing.md }}>
@@ -34,7 +64,7 @@ export function RemindersSection() {
               style={{ flexDirection: "row", alignItems: "center", minHeight: 44, paddingHorizontal: spacing.md, gap: spacing.sm }}
             >
               <AppText variant="headline" style={{ flex: 1 }}>{LABEL[slot]}</AppText>
-              <Pressable accessibilityLabel={`${LABEL[slot]} time`} onPress={() => setEditing(slot)} disabled={!p.enabled}>
+              <Pressable accessibilityLabel={`${LABEL[slot]} time`} onPress={() => openPicker(slot)} disabled={!p.enabled}>
                 <AppText variant="subheadline" muted style={{ opacity: p.enabled ? 1 : 0.4 }}>{fmt(p.hour, p.minute)}</AppText>
               </Pressable>
               <Switch
@@ -47,16 +77,26 @@ export function RemindersSection() {
           );
         })}
       </GroupedSection>
-      {editing ? (
-        <DateTimePicker
-          mode="time"
-          value={new Date(2000, 0, 1, prefs[editing].hour, prefs[editing].minute)}
-          onChange={(_e, date) => {
-            const slot = editing;
-            setEditing(null);
-            if (date) setSlot(slot, { ...prefs[slot], hour: date.getHours(), minute: date.getMinutes() });
-          }}
-        />
+      {Platform.OS === "ios" ? (
+        <Sheet visible={editing !== null} onClose={cancel}>
+          <View style={{ paddingHorizontal: 22, paddingBottom: 30 }}>
+            <Overline>{editing ? `${LABEL[editing]} reminder` : ""}</Overline>
+            {draft ? (
+              <DateTimePicker
+                mode="time"
+                display="spinner"
+                value={draft}
+                onChange={(_e, date) => {
+                  if (date) setDraft(date);
+                }}
+                textColor={colors.label}
+              />
+            ) : null}
+            <Button title="Done" onPress={applyDraft} />
+          </View>
+        </Sheet>
+      ) : editing !== null ? (
+        <DateTimePicker mode="time" value={draft ?? new Date(2000, 0, 1, prefs[editing].hour, prefs[editing].minute)} onChange={onAndroidChange} />
       ) : null}
     </View>
   );

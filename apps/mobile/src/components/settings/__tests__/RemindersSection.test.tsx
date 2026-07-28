@@ -14,6 +14,8 @@ jest.mock("@/reminders/useReminderPrefs", () => ({
   }),
 }));
 
+jest.mock("@react-native-community/datetimepicker", () => "DateTimePicker");
+
 import { RemindersSection } from "../RemindersSection";
 
 beforeEach(() => mockSetSlot.mockReset());
@@ -24,4 +26,12 @@ test("renders a row per meal and toggling calls setSlot with the flipped enabled
   getByText("Lunch");
   fireEvent(getByTestId("reminder-switch-lunch"), "valueChange", true);
   expect(mockSetSlot).toHaveBeenCalledWith("lunch", expect.objectContaining({ enabled: true, hour: 12, minute: 30 }));
+});
+
+test("tapping an enabled meal's time opens the sheet, and Done applies the seeded time", async () => {
+  const { getByLabelText, getByText } = await render(<RemindersSection />);
+  await fireEvent.press(getByLabelText("Breakfast time"));
+  expect(getByText("Done")).toBeTruthy();
+  await fireEvent.press(getByText("Done"));
+  expect(mockSetSlot).toHaveBeenCalledWith("breakfast", expect.objectContaining({ enabled: true, hour: 8, minute: 0 }));
 });
