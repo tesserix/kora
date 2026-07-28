@@ -70,7 +70,8 @@
         {
           "NSHealthShareUsageDescription": "Kora reads your steps and sleep to show real activity alongside your nutrition."
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true,
