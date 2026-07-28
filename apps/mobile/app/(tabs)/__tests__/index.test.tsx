@@ -15,6 +15,9 @@ jest.mock("@/api/hooks", () => ({
   useDayLogs: (...args: unknown[]) => mockUseDayLogs(...args),
   useUnreadCount: () => ({ data: { count: 0 } }),
   useMemory: () => ({ data: { recents: [], frequent: [], usual_meals: [] }, isLoading: false, isError: false }),
+  usePins: () => ({ data: [] }),
+  useCreatePin: () => ({ mutate: jest.fn() }),
+  useDeletePin: () => ({ mutate: jest.fn() }),
 }));
 
 jest.mock("@/api/useInstantLog", () => ({

@@ -1,19 +1,19 @@
 import { useCreateLog, useCreateLogBatch, useDeleteLog } from "@/api/hooks";
 import { useToast } from "@/components/Toast";
 import { haptics } from "@/motion";
-import type { MemoryFood, MemoryMeal } from "@/api/types";
+import type { LoggableFood, MemoryMeal } from "@/api/types";
 
 // useInstantLog centralises the one-tap "log from memory + Undo toast" flow so
 // the Log screen and the Home "Your usual" strip share one implementation.
 // The client never sends macros — only food_item_id + grams + slot + logged_at;
 // nutrition is recomputed server-side.
-export function useInstantLog(): { logFood: (f: MemoryFood) => void; logMeal: (m: MemoryMeal) => void } {
+export function useInstantLog(): { logFood: (f: LoggableFood) => void; logMeal: (m: MemoryMeal) => void } {
   const createLog = useCreateLog();
   const batchLog = useCreateLogBatch();
   const deleteLog = useDeleteLog();
   const toast = useToast();
 
-  const logFood = (f: MemoryFood) => {
+  const logFood = (f: LoggableFood) => {
     createLog.mutate(
       {
         food_item_id: f.food_item_id,

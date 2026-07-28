@@ -7,9 +7,11 @@ jest.mock("expo-router", () => ({ router: { replace: jest.fn(), back: jest.fn() 
 const mockLogMutate = jest.fn();
 const mockBatchMutate = jest.fn();
 const mockDeleteMutate = jest.fn();
+const mockToggle = jest.fn();
 let mockMemoryData: Memory = { recents: [], frequent: [], usual_meals: [] };
 let mockMemoryIsLoading = false;
 let mockMemoryIsError = false;
+let mockPinsData: unknown[] = [];
 
 jest.mock("@/api/hooks", () => ({
   useFoodSearch: () => ({
@@ -33,6 +35,11 @@ jest.mock("@/api/hooks", () => ({
   useCreateLogBatch: () => ({ mutate: mockBatchMutate, isPending: false }),
   useDeleteLog: () => ({ mutate: mockDeleteMutate }),
   useMemory: () => ({ data: mockMemoryData, isLoading: mockMemoryIsLoading, isError: mockMemoryIsError }),
+  usePins: () => ({ data: mockPinsData }),
+}));
+
+jest.mock("@/api/usePinToggle", () => ({
+  usePinToggle: () => ({ pinnedIds: new Set(), toggle: mockToggle }),
 }));
 
 jest.mock("@/components/Toast", () => ({
@@ -45,9 +52,11 @@ beforeEach(() => {
   mockLogMutate.mockClear();
   mockBatchMutate.mockClear();
   mockDeleteMutate.mockClear();
+  mockToggle.mockClear();
   mockMemoryData = { recents: [], frequent: [], usual_meals: [] };
   mockMemoryIsLoading = false;
   mockMemoryIsError = false;
+  mockPinsData = [];
 });
 
 test("Log screen shows the editorial header and a food tile result", async () => {
@@ -177,4 +186,23 @@ test("tapping a usual meal batch-logs its items", async () => {
     }),
     expect.anything(),
   );
+});
+
+test("Pinned tab shows a pinned food", async () => {
+  mockPinsData = [
+    {
+      food_item_id: "eggs-id",
+      name: "Eggs",
+      meal_slot: "breakfast",
+      grams: 100,
+      kcal: 155,
+      protein_g: 13,
+      carbs_g: 1,
+      fat_g: 11,
+      fiber_g: 0,
+    },
+  ];
+  const { findByText, findByLabelText } = await render(<LogScreen />);
+  fireEvent.press(await findByLabelText("Pinned"));
+  expect(await findByText("Eggs")).toBeTruthy();
 });

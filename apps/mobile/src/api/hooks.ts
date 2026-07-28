@@ -20,6 +20,7 @@ import type {
   Metric,
   MyFriendCode,
   OnboardingInput,
+  PinnedFood,
   Profile,
   Resolution,
   WeightEntry,
@@ -101,6 +102,30 @@ export function useMemory(date: string) {
   return useQuery({
     queryKey: ["memory", date],
     queryFn: () => apiFetch("/v1/memory") as Promise<Memory>,
+  });
+}
+
+export function usePins() {
+  return useQuery({
+    queryKey: ["pins"],
+    queryFn: () => apiFetch("/v1/pins") as Promise<PinnedFood[]>,
+  });
+}
+
+export function useCreatePin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { food_item_id: string; grams: number; meal_slot: string }) =>
+      apiFetch("/v1/pins", { method: "POST", body: JSON.stringify(input) }) as Promise<PinnedFood>,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["pins"] }),
+  });
+}
+
+export function useDeletePin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (foodItemId: string) => apiFetch(`/v1/pins/${foodItemId}`, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["pins"] }),
   });
 }
 
