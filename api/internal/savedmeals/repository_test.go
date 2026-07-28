@@ -66,6 +66,12 @@ func TestCreateListReplaceDeleteScoped(t *testing.T) {
 	require.Len(t, rows, 2)
 	require.Equal(t, 0, rows[0].Position) // ordered by position
 	require.Equal(t, 1, rows[1].Position)
+	// Macros must come from the joined food_items row, never fabricated.
+	require.Equal(t, f1.ID, rows[0].FoodItemID)
+	require.Equal(t, 100.0, rows[0].KcalPer100g)
+	require.Equal(t, 10.0, rows[0].ProteinPer100g)
+	require.Equal(t, f2.ID, rows[1].FoodItemID)
+	require.Equal(t, 200.0, rows[1].KcalPer100g)
 
 	// Replace: rename + drop to a single item.
 	require.NoError(t, repo.Replace(ctx, userA, created.ID, "My Bfast", "lunch",
