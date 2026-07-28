@@ -92,20 +92,20 @@ function CandidateRow({ candidate, isLast }: { candidate: ResolvedCandidate; isL
       >
         <Icon name={icon} size={18} color={captureColors.tileFg} />
       </View>
-      <View style={{ flex: 1 }}>
+      <View style={{ flex: 1, minWidth: 0 }}>
         <AppText style={{ color: captureColors.onSurface, fontSize: 14, fontWeight: "600" }}>
           {candidate.item.name}
         </AppText>
         <AppText style={{ color: captureColors.onSurfaceFaint, fontSize: 11 }}>
           {`${Math.round(candidate.portion_grams)}g · ${Math.round(candidate.match_score * 100)}% match`}
         </AppText>
-        <View style={{ flexDirection: "row", gap: 6, marginTop: 5 }}>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 5 }}>
           <MacroChip label="P" per100g={candidate.item.protein_per_100g} tint={gradients.green[0]} />
           <MacroChip label="C" per100g={candidate.item.carbs_per_100g} tint={gradients.amber[0]} />
           <MacroChip label="F" per100g={candidate.item.fat_per_100g} tint={gradients.blue[0]} />
         </View>
       </View>
-      <AppText style={{ color: captureColors.onSurface, fontSize: 13, fontWeight: "700" }}>
+      <AppText style={{ flexShrink: 0, color: captureColors.onSurface, fontSize: 13, fontWeight: "700" }}>
         {Math.round(candidate.kcal)}
       </AppText>
     </View>
@@ -167,7 +167,7 @@ export function DetectedCard({ resolution, mealSlot, onChangeMealSlot, onAdd, ad
         />
       ))}
 
-      <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
         {MEAL_SLOTS.map(({ slot, label, icon }) => (
           <ModePill key={slot} icon={icon} label={label} active={mealSlot === slot} onPress={() => onChangeMealSlot(slot)} />
         ))}
