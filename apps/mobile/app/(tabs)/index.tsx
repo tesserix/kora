@@ -18,6 +18,7 @@ import { useProfile, useDashboard, useDayLogs, useUnreadCount } from "@/api/hook
 import { useHealth } from "@/health";
 import { useTheme } from "@/theme";
 import { foodVisual } from "@/lib/foodVisual";
+import { fibreGoal } from "@/lib/fibreGoal";
 import { hslToHex, withAlpha } from "@/lib/color";
 import type { FoodLog } from "@/api/types";
 
@@ -142,7 +143,20 @@ export default function Home() {
               goal={goal}
               eaten={eaten}
               loading={!d}
-              macros={d ? { p: d.consumed.protein_g, c: d.consumed.carbs_g, f: d.consumed.fat_g, pGoal: d.targets.protein_g, cGoal: d.targets.carbs_g, fGoal: d.targets.fat_g } : undefined}
+              macros={
+                d
+                  ? {
+                      p: d.consumed.protein_g,
+                      c: d.consumed.carbs_g,
+                      f: d.consumed.fat_g,
+                      pGoal: d.targets.protein_g,
+                      cGoal: d.targets.carbs_g,
+                      fGoal: d.targets.fat_g,
+                      fib: d.consumed.fiber_g,
+                      fibGoal: fibreGoal(d.targets.kcal),
+                    }
+                  : undefined
+              }
             />
           </Card>
         </Animated.View>

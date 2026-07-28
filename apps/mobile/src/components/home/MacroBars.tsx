@@ -13,6 +13,8 @@ export interface Macros {
   pGoal: number;
   cGoal: number;
   fGoal: number;
+  fib: number;
+  fibGoal: number;
 }
 
 const AnimatedRect = Animated.createAnimatedComponent(Rect);
@@ -62,7 +64,7 @@ function Bar({ label, value, goal, gradient }: BarProps) {
   );
 }
 
-// Three macro bars (protein/carbs/fat) with SVG gradient fills — tokens only.
+// Four macro bars (protein/carbs/fat/fibre) with SVG gradient fills — tokens only.
 export function MacroBars({ macros }: { macros: Macros }) {
   const { gradients } = useTheme();
   return (
@@ -70,6 +72,7 @@ export function MacroBars({ macros }: { macros: Macros }) {
       <Bar label="Protein" value={macros.p} goal={macros.pGoal} gradient={gradients.green} />
       <Bar label="Carbs" value={macros.c} goal={macros.cGoal} gradient={gradients.amber} />
       <Bar label="Fat" value={macros.f} goal={macros.fGoal} gradient={gradients.blue} />
+      <Bar label="Fibre" value={macros.fib} goal={macros.fibGoal} gradient={gradients.fibre} />
     </View>
   );
 }
