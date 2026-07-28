@@ -14,6 +14,11 @@ jest.mock("@/api/hooks", () => ({
   useDashboard: (...args: unknown[]) => mockUseDashboard(...args),
   useDayLogs: (...args: unknown[]) => mockUseDayLogs(...args),
   useUnreadCount: () => ({ data: { count: 0 } }),
+  useMemory: () => ({ data: { recents: [], frequent: [], usual_meals: [] }, isLoading: false, isError: false }),
+}));
+
+jest.mock("@/api/useInstantLog", () => ({
+  useInstantLog: () => ({ logFood: jest.fn(), logMeal: jest.fn() }),
 }));
 
 import Home from "../index";
