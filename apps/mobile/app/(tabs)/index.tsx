@@ -9,6 +9,7 @@ import { Card } from "@/components/Card";
 import { Overline } from "@/components/Overline";
 import { MealRow } from "@/components/MealRow";
 import { KcalHero } from "@/components/home/KcalHero";
+import { PinnedStrip } from "@/components/home/PinnedStrip";
 import { YourUsualStrip } from "@/components/home/YourUsualStrip";
 import { RingStat } from "@/components/RingStat";
 import { Icon } from "@/components/Icon";
@@ -198,6 +199,7 @@ export default function Home() {
       ) : null}
 
       {/* meals */}
+      <PinnedStrip />
       <YourUsualStrip />
       {!loadError ? (
         <Animated.View entering={enter(3)} style={{ paddingHorizontal: 16, marginTop: 8 }}>
