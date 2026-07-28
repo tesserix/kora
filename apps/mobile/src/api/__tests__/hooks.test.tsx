@@ -9,6 +9,7 @@ import {
   useAvgIntake7d,
   useCreateChallenge,
   useCreateGroup,
+  useCreateLogBatch,
   useDeleteChallenge,
   useDeleteLog,
   useEditLog,
@@ -21,6 +22,7 @@ import {
   useLeaveChallenge,
   useLeaveGroup,
   useMarkAllRead,
+  useMemory,
   useNotifications,
   useProfile,
   useRenameGroup,
@@ -414,4 +416,22 @@ it("useAvgIntake7d returns avg: null and an empty series when every day is unlog
   await waitFor(() => expect(result.current.isLoading).toBe(false));
   expect(result.current.series).toEqual([]);
   expect(result.current.avg).toBeNull();
+});
+
+test("useMemory fetches GET /v1/memory (date is not sent — backend ignores it)", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({ recents: [], frequent: [], usual_meals: [] });
+  const { result } = await renderHook(() => useMemory("2026-07-27"), { wrapper });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(apiFetch).toHaveBeenCalledWith("/v1/memory");
+});
+
+test("useCreateLogBatch posts to /v1/logs/batch", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce([{ id: "1" }]);
+  const { result } = await renderHook(() => useCreateLogBatch(), { wrapper });
+  await result.current.mutateAsync({
+    logged_at: "2026-07-27T12:00:00Z",
+    meal_slot: "breakfast",
+    items: [{ food_item_id: "abc", quantity_grams: 60 }],
+  });
+  expect(apiFetch).toHaveBeenCalledWith("/v1/logs/batch", expect.objectContaining({ method: "POST" }));
 });

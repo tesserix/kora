@@ -14,6 +14,7 @@ import (
 	"github.com/tesserix/kora/api/internal/foodlog"
 	"github.com/tesserix/kora/api/internal/groups"
 	"github.com/tesserix/kora/api/internal/httpx"
+	"github.com/tesserix/kora/api/internal/memory"
 	"github.com/tesserix/kora/api/internal/notifications"
 	"github.com/tesserix/kora/api/internal/nutrition"
 	"github.com/tesserix/kora/api/internal/onboarding"
@@ -81,6 +82,10 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.DELETE("/logs/:id", logHandler.Delete)
 		v1.POST("/logs/copy-day", logHandler.CopyDay)
 		v1.POST("/logs/:id/repeat", logHandler.Repeat)
+		v1.POST("/logs/batch", logHandler.CreateBatch)
+
+		memoryHandler := memory.NewHandler(memory.NewService(logRepo))
+		v1.GET("/memory", memoryHandler.Get)
 
 		nutritionHandler := nutrition.NewHandler(foodRepo)
 		v1.GET("/foods", nutritionHandler.Search)

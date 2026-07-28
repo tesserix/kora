@@ -17,6 +17,16 @@ func NewRepository(db *gorm.DB) Repository {
 	return Repository{db: db}
 }
 
+// Transaction runs fn inside a single DB transaction, passing fn a Repository
+// bound to that transaction. If fn returns an error, every write made through
+// the tx-bound Repository is rolled back; if fn returns nil, the transaction
+// commits. Used by CreateBatch for all-or-nothing batch meal logging.
+func (r Repository) Transaction(ctx context.Context, fn func(Repository) error) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return fn(Repository{db: tx})
+	})
+}
+
 func (r Repository) Create(ctx context.Context, log FoodLog) (FoodLog, error) {
 	created := log
 	if err := r.db.WithContext(ctx).Create(&created).Error; err != nil {
@@ -36,6 +46,20 @@ func (r Repository) ListByUserAndDay(ctx context.Context, userID uuid.UUID, day 
 		Find(&logs).Error
 	if err != nil {
 		return nil, fmt.Errorf("foodlog: list by day: %w", err)
+	}
+	return logs, nil
+}
+
+// ListForUserSince returns the user's logs at or after `since` that resolved to
+// a food item (food_item_id NOT NULL), oldest first. Used by the memory engine.
+func (r Repository) ListForUserSince(ctx context.Context, userID uuid.UUID, since time.Time) ([]FoodLog, error) {
+	var logs []FoodLog
+	err := r.db.WithContext(ctx).
+		Where("user_id = ? AND food_item_id IS NOT NULL AND logged_at >= ?", userID, since).
+		Order("logged_at ASC").
+		Find(&logs).Error
+	if err != nil {
+		return nil, fmt.Errorf("foodlog: list for user since: %w", err)
 	}
 	return logs, nil
 }

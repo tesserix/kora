@@ -46,6 +46,40 @@ export type FoodLog = {
   provenance: string;
 };
 
+export type MemoryFood = {
+  food_item_id: string;
+  name: string;
+  meal_slot: string;
+  grams: number;
+  kcal: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+  fiber_g: number;
+  count: number;
+  last_logged_at: string;
+};
+
+export type MemoryMeal = {
+  id: string;
+  name: string;
+  meal_slot: string;
+  items: MemoryFood[];
+  kcal: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+  fiber_g: number;
+  count: number;
+  last_logged_at: string;
+};
+
+export type Memory = {
+  recents: MemoryFood[];
+  frequent: MemoryFood[];
+  usual_meals: MemoryMeal[];
+};
+
 export type Totals = {
   kcal: number;
   protein_g: number;

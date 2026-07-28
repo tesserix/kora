@@ -163,6 +163,85 @@ func (s Service) EditLog(ctx context.Context, userID, logID uuid.UUID, req EditR
 	return updated, nil
 }
 
+// BatchItem is one food entry within a CreateBatchRequest. Only the food
+// reference and quantity are client-supplied — all nutrition is recomputed
+// server-side from the resolved FoodItem row.
+type BatchItem struct {
+	FoodItemID    uuid.UUID `json:"food_item_id"`
+	QuantityGrams float64   `json:"quantity_grams"`
+}
+
+// CreateBatchRequest logs several foods as a single meal (e.g. all items on a
+// plate) in one atomic call.
+type CreateBatchRequest struct {
+	LoggedAt time.Time   `json:"logged_at"`
+	MealSlot string      `json:"meal_slot"`
+	Items    []BatchItem `json:"items"`
+}
+
+// CreateBatch logs several foods as one meal in a single transaction. Macros
+// are recomputed server-side per item (item per-100g × grams) — identical to
+// the math in LogFood — so no client-supplied nutrition is ever trusted.
+// All-or-nothing: if any item's food_item_id doesn't resolve, or has a
+// non-positive quantity, the entire batch is rolled back and no logs are
+// created.
+func (s Service) CreateBatch(ctx context.Context, userID uuid.UUID, req CreateBatchRequest) ([]FoodLog, error) {
+	if len(req.Items) == 0 {
+		return nil, httpx.ValidationError{Message: "items must not be empty"}
+	}
+	if !validMealSlots[req.MealSlot] {
+		return nil, httpx.ValidationError{Message: "invalid meal_slot"}
+	}
+	loggedAt := req.LoggedAt
+	if loggedAt.IsZero() {
+		loggedAt = time.Now()
+	}
+
+	out := make([]FoodLog, 0, len(req.Items))
+	err := s.logs.Transaction(ctx, func(txLogs Repository) error {
+		for _, it := range req.Items {
+			if it.QuantityGrams <= 0 {
+				return httpx.ValidationError{Message: "quantity_grams must be positive"}
+			}
+			item, err := s.foods.GetByID(ctx, it.FoodItemID)
+			if err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					// Client supplied a food_item_id that doesn't exist — a 400.
+					return httpx.ValidationError{Message: "unknown food_item_id"}
+				}
+				// Infra/DB fault resolving the food — must not be a client 400.
+				return fmt.Errorf("foodlog: batch: resolve food: %w", err)
+			}
+			fid := it.FoodItemID
+			f := it.QuantityGrams / 100.0
+			created, err := txLogs.Create(ctx, FoodLog{
+				UserID:        userID,
+				FoodItemID:    &fid,
+				LoggedAt:      loggedAt,
+				MealSlot:      req.MealSlot,
+				Source:        "memory",
+				Description:   item.Name,
+				QuantityGrams: it.QuantityGrams,
+				Kcal:          item.KcalPer100g * f,
+				ProteinG:      item.ProteinPer100g * f,
+				CarbsG:        item.CarbsPer100g * f,
+				FatG:          item.FatPer100g * f,
+				FiberG:        item.FiberPer100g * f,
+				Provenance:    item.Provenance,
+			})
+			if err != nil {
+				return err
+			}
+			out = append(out, created)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (s Service) CopyDay(ctx context.Context, userID uuid.UUID, from, to time.Time, loc *time.Location) (int, error) {
 	src, err := s.logs.ListByUserAndDay(ctx, userID, from, loc)
 	if err != nil {

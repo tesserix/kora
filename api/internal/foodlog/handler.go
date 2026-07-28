@@ -50,6 +50,24 @@ func (h Handler) Create(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"data": log})
 }
 
+func (h Handler) CreateBatch(c *gin.Context) {
+	userID, ok := h.resolveUser(c)
+	if !ok {
+		return
+	}
+	var req CreateBatchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Error(c, http.StatusBadRequest, "invalid_input", "malformed log body")
+		return
+	}
+	logs, err := h.svc.CreateBatch(c.Request.Context(), userID, req)
+	if err != nil {
+		httpx.RespondServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"data": logs})
+}
+
 func (h Handler) List(c *gin.Context) {
 	userID, ok := h.resolveUser(c)
 	if !ok {

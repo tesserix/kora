@@ -63,3 +63,29 @@ func TestUpdateIsNotFoundForOtherUser(t *testing.T) {
 	require.Error(t, err)
 	require.True(t, errors.Is(err, gorm.ErrRecordNotFound))
 }
+
+func TestListForUserSince(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	item := nutrition.FoodItem{Name: "Since Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100, ProteinPer100g: 10}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	now := time.Now()
+	// in-window
+	inWindow, err := repo.Create(ctx, FoodLog{UserID: userID, FoodItemID: &item.ID, LoggedAt: now.Add(-2 * 24 * time.Hour), MealSlot: "breakfast", QuantityGrams: 60, Kcal: 100})
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_logs WHERE id = ?", inWindow.ID) })
+	// out-of-window
+	outOfWindow, err := repo.Create(ctx, FoodLog{UserID: userID, FoodItemID: &item.ID, LoggedAt: now.Add(-200 * 24 * time.Hour), MealSlot: "breakfast", QuantityGrams: 60, Kcal: 100})
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_logs WHERE id = ?", outOfWindow.ID) })
+
+	got, err := repo.ListForUserSince(ctx, userID, now.Add(-90*24*time.Hour))
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Equal(t, inWindow.ID, got[0].ID)
+}
