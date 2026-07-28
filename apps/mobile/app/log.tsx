@@ -15,8 +15,9 @@ import { Segmented } from "@/components/Segmented";
 import { Card } from "@/components/Card";
 import { AppBackground } from "@/components/AppBackground";
 import { Overline } from "@/components/Overline";
-import { useCreateLog, useFoodSearch, useMemory } from "@/api/hooks";
+import { useCreateLog, useFoodSearch, useMemory, usePins } from "@/api/hooks";
 import { useInstantLog } from "@/api/useInstantLog";
+import { usePinToggle } from "@/api/usePinToggle";
 import type { FoodItem } from "@/api/types";
 import { foodVisual } from "@/lib/foodVisual";
 import { hslToHex } from "@/lib/color";
@@ -26,6 +27,7 @@ import { useTheme } from "@/theme";
 const MEALS = ["breakfast", "lunch", "dinner", "snack"] as const;
 const MEAL_OPTIONS = MEALS.map((m) => ({ key: m, label: m.charAt(0).toUpperCase() + m.slice(1) }));
 const MEMORY_TAB_OPTIONS: { key: string; label: string }[] = [
+  { key: "pinned", label: "Pinned" },
   { key: "recents", label: "Recents" },
   { key: "frequent", label: "Frequent" },
   { key: "usual_meals", label: "Usual meals" },
@@ -44,10 +46,12 @@ export default function LogScreen() {
   const [grams, setGrams] = useState("");
   const [meal, setMeal] = useState<(typeof MEALS)[number]>("lunch");
   const [error, setError] = useState<string | null>(null);
-  const [memTab, setMemTab] = useState<"recents" | "frequent" | "usual_meals">("recents");
+  const [memTab, setMemTab] = useState<"pinned" | "recents" | "frequent" | "usual_meals">("recents");
   const search = useFoodSearch(q);
   const createLog = useCreateLog();
   const memory = useMemory(today());
+  const pins = usePins();
+  const { pinnedIds, toggle } = usePinToggle();
   const { logFood, logMeal } = useInstantLog();
 
   // Entrance stagger runs on first mount only — see app/(tabs)/index.tsx for the
@@ -212,6 +216,30 @@ export default function LogScreen() {
                 <AppText muted>Loading…</AppText>
               ) : memory.isError ? (
                 <AppText muted>Couldn't load your foods.</AppText>
+              ) : memTab === "pinned" ? (
+                (pins.data ?? []).length > 0 ? (
+                  <GroupedSection elevated>
+                    {(pins.data ?? []).map((f) => {
+                      const fv = foodVisual(f.name);
+                      return (
+                        <MealRow
+                          key={f.food_item_id}
+                          name={f.name}
+                          slot={`${Math.round(f.grams)}g`}
+                          kcal={f.kcal}
+                          iconName={fv.icon}
+                          tint={hslToHex(fv.hue, 0.5, 0.5)}
+                          onPress={() => logFood(f)}
+                          pinned
+                          onPinToggle={() => toggle(f)}
+                          accessibilityLabel={f.name}
+                        />
+                      );
+                    })}
+                  </GroupedSection>
+                ) : (
+                  <AppText muted>Star a food to pin it here.</AppText>
+                )
               ) : memTab === "usual_meals" ? (
                 (memory.data?.usual_meals ?? []).length > 0 ? (
                   <GroupedSection elevated>
@@ -234,9 +262,9 @@ export default function LogScreen() {
                 ) : (
                   <AppText muted>Log a few meals and they'll show up here.</AppText>
                 )
-              ) : (memory.data?.[memTab] ?? []).length > 0 ? (
+              ) : (memory.data?.[memTab as "recents" | "frequent"] ?? []).length > 0 ? (
                 <GroupedSection elevated>
-                  {(memory.data?.[memTab] ?? []).map((f) => {
+                  {(memory.data?.[memTab as "recents" | "frequent"] ?? []).map((f) => {
                     const fv = foodVisual(f.name);
                     return (
                       <MealRow
@@ -247,6 +275,8 @@ export default function LogScreen() {
                         iconName={fv.icon}
                         tint={hslToHex(fv.hue, 0.5, 0.5)}
                         onPress={() => logFood(f)}
+                        pinned={pinnedIds.has(f.food_item_id)}
+                        onPinToggle={() => toggle(f)}
                         accessibilityLabel={f.name}
                       />
                     );
