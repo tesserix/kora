@@ -17,16 +17,16 @@ A new **"Your usual" section** on Home shows what the user usually eats **for th
 
 ## Current-slot logic
 
-New pure function `mealSlotForTime(date: Date): MealSlot`, from the device-local hour:
+**Reuse the existing `mealSlotForHour(hour: number): MealSlot`** from `src/lib/mealSlot.ts` (already used by the app for default slot selection) — the strip computes `mealSlotForHour(new Date().getHours())`. Reusing it keeps the strip's slot consistent with the slot a log defaults to, and avoids a near-duplicate. Its boundaries:
 
-| Local time | Slot |
+| Local hour | Slot |
 |---|---|
-| 04:00–10:59 | `breakfast` |
-| 11:00–15:59 | `lunch` |
-| 16:00–21:59 | `dinner` |
-| 22:00–03:59 | `snack` |
+| < 11 | `breakfast` |
+| 11–15 | `lunch` |
+| 16–20 | `dinner` |
+| 21–23 | `snack` |
 
-Device-local time is consistent with how the app already buckets days (en-CA local date).
+(No new `mealSlotForTime` function — this replaces the earlier plan to create one.)
 
 ## Selection logic (pure, testable)
 
