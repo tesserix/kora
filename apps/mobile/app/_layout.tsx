@@ -7,6 +7,7 @@ import { isFirebaseConfigured } from "@/lib/firebase";
 import { setupPushHandler } from "@/lib/push";
 import { UnitsProvider } from "@/units";
 import { ToastProvider } from "@/components/Toast";
+import { SavedMealSheetProvider } from "@/components/meals/SavedMealSheetProvider";
 
 setupPushHandler();
 
@@ -20,11 +21,13 @@ export default function RootLayout() {
       <QueryClientProvider client={queryClient}>
         <UnitsProvider>
           <ToastProvider>
-            <Stack screenOptions={{ headerShown: false }}>
-              <Stack.Screen name="(tabs)" />
-              <Stack.Screen name="meal" options={{ presentation: "transparentModal", animation: "fade" }} />
-              <Stack.Screen name="capture" options={{ presentation: "fullScreenModal", animation: "slide_from_bottom" }} />
-            </Stack>
+            <SavedMealSheetProvider>
+              <Stack screenOptions={{ headerShown: false }}>
+                <Stack.Screen name="(tabs)" />
+                <Stack.Screen name="meal" options={{ presentation: "transparentModal", animation: "fade" }} />
+                <Stack.Screen name="capture" options={{ presentation: "fullScreenModal", animation: "slide_from_bottom" }} />
+              </Stack>
+            </SavedMealSheetProvider>
           </ToastProvider>
         </UnitsProvider>
       </QueryClientProvider>
