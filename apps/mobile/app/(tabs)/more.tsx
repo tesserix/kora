@@ -7,7 +7,6 @@ import { unregisterPushToken } from "@/lib/push";
 import { AppBackground } from "@/components/AppBackground";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { GroupedSection, Row } from "@/components/GroupedList";
-import { RemindersSection } from "@/components/settings/RemindersSection";
 import { Badge } from "@/components/Badge";
 import { useUnreadCount } from "@/api/hooks";
 import { useTheme } from "@/theme";
@@ -62,8 +61,13 @@ export default function More() {
             chevron
             onPress={() => router.push("/settings" as Href)}
           />
+          <Row
+            title="Reminders"
+            icon={{ name: "bell", tint: colors.accent }}
+            chevron
+            onPress={() => router.push("/reminders" as Href)}
+          />
         </GroupedSection>
-        <RemindersSection />
         <GroupedSection>
           <Row
             title="Sign out"
