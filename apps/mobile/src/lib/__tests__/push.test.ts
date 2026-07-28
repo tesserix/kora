@@ -29,7 +29,8 @@ jest.mock("../notificationTarget", () => ({ targetFor: jest.fn() }));
 // (usePushResponder doesn't call it), but push.ts imports both modules at the
 // top level, so they're mocked to keep the import hermetic.
 jest.mock("@/reminders/prefs", () => ({ loadPrefs: jest.fn(async () => ({})) }));
-jest.mock("@/reminders/schedule", () => ({ applyReminders: jest.fn(async () => {}) }));
+jest.mock("@/reminders/schedule", () => ({ applyAllReminders: jest.fn(async () => {}) }));
+jest.mock("@/reminders/customPrefs", () => ({ loadCustom: jest.fn(async () => []) }));
 
 function setProjectId(id: string | undefined): void {
   (Constants as unknown as { expoConfig: { extra: { eas: { projectId: string | undefined } } } }).expoConfig = {
@@ -92,6 +93,16 @@ test("reminder tap routes straight to /capture and skips the targetFor deep-link
   expect(router.push).toHaveBeenCalledWith("/capture");
   expect(router.push).toHaveBeenCalledTimes(1);
   expect(targetFor).not.toHaveBeenCalled();
+});
+
+test("tapping a custom reminder routes to Home", async () => {
+  await renderHook(() => usePushResponder());
+  const callback = (Notifications.addNotificationResponseReceivedListener as jest.Mock).mock.calls[0][0];
+
+  callback(fakeResponse({ kind: "custom", id: "cr_1" }));
+
+  expect(router.push).toHaveBeenCalledWith("/");
+  expect(router.push).toHaveBeenCalledTimes(1);
 });
 
 test("non-reminder tap still routes via the existing targetFor deep-link path, not /capture", async () => {

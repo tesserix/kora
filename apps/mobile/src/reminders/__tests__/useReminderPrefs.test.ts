@@ -2,7 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react-native";
 import * as Notifications from "expo-notifications";
 import { useReminderPrefs } from "../useReminderPrefs";
 import { DEFAULT_PREFS, loadPrefs, savePrefs } from "../prefs";
-import { applyReminders } from "../schedule";
+import { applyAllReminders } from "../schedule";
 
 jest.mock("expo-notifications", () => ({
   getPermissionsAsync: jest.fn(),
@@ -15,21 +15,20 @@ jest.mock("../prefs", () => ({
   savePrefs: jest.fn(),
 }));
 
-jest.mock("../schedule", () => ({
-  applyReminders: jest.fn(),
-}));
+jest.mock("../schedule", () => ({ applyAllReminders: jest.fn(async () => {}) }));
+jest.mock("../customPrefs", () => ({ loadCustom: jest.fn(async () => []) }));
 
 const mockGetPermissions = Notifications.getPermissionsAsync as jest.Mock;
 const mockRequestPermissions = Notifications.requestPermissionsAsync as jest.Mock;
 const mockLoadPrefs = loadPrefs as jest.Mock;
 const mockSavePrefs = savePrefs as jest.Mock;
-const mockApplyReminders = applyReminders as jest.Mock;
+const mockApplyAllReminders = applyAllReminders as jest.Mock;
 
 beforeEach(() => {
   jest.clearAllMocks();
   mockLoadPrefs.mockResolvedValue(DEFAULT_PREFS);
   mockSavePrefs.mockResolvedValue(undefined);
-  mockApplyReminders.mockResolvedValue(undefined);
+  mockApplyAllReminders.mockResolvedValue(undefined);
 });
 
 test("denial path: rejecting the permission prompt leaves the slot disabled and skips persistence", async () => {
@@ -46,7 +45,7 @@ test("denial path: rejecting the permission prompt leaves the slot disabled and 
 
   expect(result.current.prefs.snack.enabled).toBe(false);
   expect(mockSavePrefs).not.toHaveBeenCalled();
-  expect(mockApplyReminders).not.toHaveBeenCalled();
+  expect(mockApplyAllReminders).not.toHaveBeenCalled();
 });
 
 test("latest-value: two concurrent disables both land in the final persisted prefs (no clobbering)", async () => {
@@ -84,5 +83,5 @@ test("grant path: enabling with permission already granted persists and re-sched
   expect(mockRequestPermissions).not.toHaveBeenCalled();
   expect(result.current.prefs.snack.enabled).toBe(true);
   expect(mockSavePrefs).toHaveBeenCalledWith(expect.objectContaining({ snack: { enabled: true, hour: 15, minute: 0 } }));
-  expect(mockApplyReminders).toHaveBeenCalledWith(expect.objectContaining({ snack: { enabled: true, hour: 15, minute: 0 } }));
+  expect(mockApplyAllReminders).toHaveBeenCalledWith(expect.objectContaining({ snack: { enabled: true, hour: 15, minute: 0 } }), []);
 });

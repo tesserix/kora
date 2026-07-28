@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import * as Notifications from "expo-notifications";
 import type { MealSlot } from "@/lib/mealSlot";
 import { DEFAULT_PREFS, loadPrefs, savePrefs, type ReminderPref, type ReminderPrefs } from "./prefs";
-import { applyReminders } from "./schedule";
+import { applyAllReminders } from "./schedule";
+import { loadCustom } from "./customPrefs";
 
 // useReminderPrefs loads persisted reminder prefs and, on every change, persists
 // them and re-syncs the OS schedule. Enabling a reminder first ensures OS
@@ -45,7 +46,8 @@ export function useReminderPrefs() {
       prefsRef.current = next;
       setPrefs(next);
       await savePrefs(next);
-      await applyReminders(next);
+      const customs = await loadCustom();
+      await applyAllReminders(next, customs);
     })();
   };
 
