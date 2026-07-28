@@ -16,9 +16,11 @@ type Props = {
   accessibilityLabel?: string;
   pinned?: boolean;
   onPinToggle?: () => void;
+  bookmarked?: boolean;
+  onBookmark?: () => void;
 };
 
-export function MealRow({ name, slot, kcal, iconName = "utensils", tint, onPress, accessibilityLabel, pinned, onPinToggle }: Props) {
+export function MealRow({ name, slot, kcal, iconName = "utensils", tint, onPress, accessibilityLabel, pinned, onPinToggle, bookmarked, onBookmark }: Props) {
   const { colors, radius, spacing } = useTheme();
   const chip = tint ?? colors.accent;
   return (
@@ -41,6 +43,17 @@ export function MealRow({ name, slot, kcal, iconName = "utensils", tint, onPress
           style={{ paddingLeft: spacing.sm }}
         >
           <Icon name={pinned ? "star-fill" : "star"} size={20} color={pinned ? colors.accent : colors.tertiaryLabel} />
+        </Pressable>
+      ) : null}
+      {onBookmark ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={bookmarked ? `Edit ${name}` : `Save ${name}`}
+          hitSlop={10}
+          onPress={onBookmark}
+          style={{ paddingLeft: spacing.sm }}
+        >
+          <Icon name={bookmarked ? "bookmark-fill" : "bookmark"} size={20} color={bookmarked ? colors.accent : colors.tertiaryLabel} />
         </Pressable>
       ) : null}
     </PressableScale>

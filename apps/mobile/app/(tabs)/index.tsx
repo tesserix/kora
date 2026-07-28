@@ -9,6 +9,7 @@ import { Card } from "@/components/Card";
 import { Overline } from "@/components/Overline";
 import { MealRow } from "@/components/MealRow";
 import { KcalHero } from "@/components/home/KcalHero";
+import { SavedMealsStrip } from "@/components/home/SavedMealsStrip";
 import { PinnedStrip } from "@/components/home/PinnedStrip";
 import { YourUsualStrip } from "@/components/home/YourUsualStrip";
 import { RingStat } from "@/components/RingStat";
@@ -199,6 +200,7 @@ export default function Home() {
       ) : null}
 
       {/* meals */}
+      <SavedMealsStrip />
       <PinnedStrip />
       <YourUsualStrip />
       {!loadError ? (

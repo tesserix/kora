@@ -20,6 +20,7 @@ import (
 	"github.com/tesserix/kora/api/internal/onboarding"
 	"github.com/tesserix/kora/api/internal/pins"
 	"github.com/tesserix/kora/api/internal/resolve"
+	"github.com/tesserix/kora/api/internal/savedmeals"
 	"github.com/tesserix/kora/api/internal/social"
 	"github.com/tesserix/kora/api/internal/tracking"
 	"github.com/tesserix/kora/api/internal/user"
@@ -95,6 +96,12 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.GET("/pins", pinsHandler.List)
 		v1.POST("/pins", pinsHandler.Create)
 		v1.DELETE("/pins/:foodItemId", pinsHandler.Delete)
+
+		smHandler := savedmeals.NewHandler(savedmeals.NewService(savedmeals.NewRepository(deps.DB), foodRepo))
+		v1.GET("/saved-meals", smHandler.List)
+		v1.POST("/saved-meals", smHandler.Create)
+		v1.PUT("/saved-meals/:id", smHandler.Update)
+		v1.DELETE("/saved-meals/:id", smHandler.Delete)
 
 		trackingRepo := tracking.NewRepository(deps.DB)
 		trackingHandler := tracking.NewHandler(trackingRepo)

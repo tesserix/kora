@@ -23,6 +23,7 @@ import type {
   PinnedFood,
   Profile,
   Resolution,
+  SavedMeal,
   WeightEntry,
 } from "./types";
 
@@ -126,6 +127,41 @@ export function useDeletePin() {
   return useMutation({
     mutationFn: (foodItemId: string) => apiFetch(`/v1/pins/${foodItemId}`, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["pins"] }),
+  });
+}
+
+type SaveMealBody = { name: string; meal_slot: string; items: { food_item_id: string; grams: number }[] };
+
+export function useSavedMeals() {
+  return useQuery({
+    queryKey: ["savedMeals"],
+    queryFn: () => apiFetch("/v1/saved-meals") as Promise<SavedMeal[]>,
+  });
+}
+
+export function useCreateSavedMeal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: SaveMealBody) =>
+      apiFetch("/v1/saved-meals", { method: "POST", body: JSON.stringify(body) }) as Promise<SavedMeal>,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["savedMeals"] }),
+  });
+}
+
+export function useUpdateSavedMeal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: SaveMealBody }) =>
+      apiFetch(`/v1/saved-meals/${id}`, { method: "PUT", body: JSON.stringify(body) }) as Promise<SavedMeal>,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["savedMeals"] }),
+  });
+}
+
+export function useDeleteSavedMeal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiFetch(`/v1/saved-meals/${id}`, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["savedMeals"] }),
   });
 }
 

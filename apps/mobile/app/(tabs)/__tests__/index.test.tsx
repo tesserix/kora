@@ -18,10 +18,15 @@ jest.mock("@/api/hooks", () => ({
   usePins: () => ({ data: [] }),
   useCreatePin: () => ({ mutate: jest.fn() }),
   useDeletePin: () => ({ mutate: jest.fn() }),
+  useSavedMeals: () => ({ data: [] }),
 }));
 
 jest.mock("@/api/useInstantLog", () => ({
   useInstantLog: () => ({ logFood: jest.fn(), logMeal: jest.fn() }),
+}));
+
+jest.mock("@/components/meals/SavedMealSheetProvider", () => ({
+  useSavedMealEditor: () => ({ openCreate: jest.fn(), openEdit: jest.fn() }),
 }));
 
 import Home from "../index";

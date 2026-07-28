@@ -1,6 +1,6 @@
 import { fireEvent, render } from "@testing-library/react-native";
 import { router } from "expo-router";
-import type { Memory } from "@/api/types";
+import type { Memory, SavedMeal } from "@/api/types";
 
 jest.mock("expo-router", () => ({ router: { replace: jest.fn(), back: jest.fn() } }));
 
@@ -8,10 +8,13 @@ const mockLogMutate = jest.fn();
 const mockBatchMutate = jest.fn();
 const mockDeleteMutate = jest.fn();
 const mockToggle = jest.fn();
+const mockOpenCreate = jest.fn();
+const mockOpenEdit = jest.fn();
 let mockMemoryData: Memory = { recents: [], frequent: [], usual_meals: [] };
 let mockMemoryIsLoading = false;
 let mockMemoryIsError = false;
 let mockPinsData: unknown[] = [];
+let mockSavedMealsData: SavedMeal[] = [];
 
 jest.mock("@/api/hooks", () => ({
   useFoodSearch: () => ({
@@ -36,10 +39,15 @@ jest.mock("@/api/hooks", () => ({
   useDeleteLog: () => ({ mutate: mockDeleteMutate }),
   useMemory: () => ({ data: mockMemoryData, isLoading: mockMemoryIsLoading, isError: mockMemoryIsError }),
   usePins: () => ({ data: mockPinsData }),
+  useSavedMeals: () => ({ data: mockSavedMealsData }),
 }));
 
 jest.mock("@/api/usePinToggle", () => ({
   usePinToggle: () => ({ pinnedIds: new Set(), toggle: mockToggle }),
+}));
+
+jest.mock("@/components/meals/SavedMealSheetProvider", () => ({
+  useSavedMealEditor: () => ({ openCreate: mockOpenCreate, openEdit: mockOpenEdit }),
 }));
 
 jest.mock("@/components/Toast", () => ({
@@ -53,10 +61,13 @@ beforeEach(() => {
   mockBatchMutate.mockClear();
   mockDeleteMutate.mockClear();
   mockToggle.mockClear();
+  mockOpenCreate.mockClear();
+  mockOpenEdit.mockClear();
   mockMemoryData = { recents: [], frequent: [], usual_meals: [] };
   mockMemoryIsLoading = false;
   mockMemoryIsError = false;
   mockPinsData = [];
+  mockSavedMealsData = [];
 });
 
 test("Log screen shows the editorial header and a food tile result", async () => {
@@ -205,4 +216,34 @@ test("Pinned tab shows a pinned food", async () => {
   const { findByText, findByLabelText } = await render(<LogScreen />);
   fireEvent.press(await findByLabelText("Pinned"));
   expect(await findByText("Eggs")).toBeTruthy();
+});
+
+test("Saved tab shows a saved meal", async () => {
+  mockSavedMealsData = [
+    {
+      id: "sm1",
+      name: "Protein Bowl",
+      meal_slot: "lunch",
+      items: [
+        {
+          food_item_id: "chicken-id",
+          name: "Chicken",
+          grams: 150,
+          kcal: 250,
+          protein_g: 40,
+          carbs_g: 0,
+          fat_g: 8,
+          fiber_g: 0,
+        },
+      ],
+      kcal: 250,
+      protein_g: 40,
+      carbs_g: 0,
+      fat_g: 8,
+      fiber_g: 0,
+    },
+  ];
+  const { findByText, findByLabelText } = await render(<LogScreen />);
+  fireEvent.press(await findByLabelText("Saved"));
+  expect(await findByText("Protein Bowl")).toBeTruthy();
 });
