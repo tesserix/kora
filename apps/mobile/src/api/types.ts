@@ -96,6 +96,37 @@ export type PinnedFood = {
 // and PinnedFood satisfy it.
 export type LoggableFood = Pick<MemoryFood, "food_item_id" | "name" | "meal_slot" | "grams">;
 
+export type SavedMealItem = {
+  food_item_id: string;
+  name: string;
+  grams: number;
+  kcal: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+  fiber_g: number;
+};
+
+export type SavedMeal = {
+  id: string;
+  name: string;
+  meal_slot: string;
+  items: SavedMealItem[];
+  kcal: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+  fiber_g: number;
+};
+
+// LoggableMeal is the minimal shape useInstantLog.logMeal needs; both MemoryMeal
+// and SavedMeal satisfy it.
+export type LoggableMeal = {
+  name: string;
+  meal_slot: string;
+  items: { food_item_id: string; grams: number }[];
+};
+
 export type Totals = {
   kcal: number;
   protein_g: number;
