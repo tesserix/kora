@@ -106,7 +106,7 @@ function CandidateRow({ candidate, isLast }: { candidate: ResolvedCandidate; isL
         </View>
       </View>
       <AppText style={{ flexShrink: 0, color: captureColors.onSurface, fontSize: 13, fontWeight: "700" }}>
-        {Math.round(candidate.kcal)}
+        {`${Math.round(candidate.kcal)} kcal`}
       </AppText>
     </View>
   );
