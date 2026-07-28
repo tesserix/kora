@@ -64,10 +64,10 @@ test("renders candidate rows with row-sourced grams/match/kcal and a header coun
   expect(getByText(/Detected · 2 items/i)).toBeTruthy();
   expect(getByText("Grilled chicken breast")).toBeTruthy();
   expect(getByText("140g · 96% match")).toBeTruthy();
-  expect(getByText("231")).toBeTruthy();
+  expect(getByText("231 kcal")).toBeTruthy();
   expect(getByText("Steamed broccoli")).toBeTruthy();
   expect(getByText("90g · 91% match")).toBeTruthy();
-  expect(getByText("31")).toBeTruthy();
+  expect(getByText("31 kcal")).toBeTruthy();
 });
 
 test("shows the summed kcal when the resolution is not an estimate", async () => {
