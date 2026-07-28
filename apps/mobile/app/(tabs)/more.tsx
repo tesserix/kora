@@ -61,6 +61,12 @@ export default function More() {
             chevron
             onPress={() => router.push("/settings" as Href)}
           />
+          <Row
+            title="Reminders"
+            icon={{ name: "bell", tint: colors.accent }}
+            chevron
+            onPress={() => router.push("/reminders" as Href)}
+          />
         </GroupedSection>
         <GroupedSection>
           <Row
