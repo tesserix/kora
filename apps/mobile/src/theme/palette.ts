@@ -95,6 +95,7 @@ export type GradientSet = {
   blue: [string, string];
   steps: [string, string];
   sleep: [string, string];
+  fibre: [string, string];
 };
 
 // 2-stop [bright, deep] gradient pairs per scheme, tuned so the arc reads as a
@@ -107,6 +108,7 @@ export const gradientStops: { light: GradientSet; dark: GradientSet } = {
     blue: ["#4DA2FF", "#0A63D6"],
     steps: ["#A6E635", "#6FA800"],
     sleep: ["#8E82FF", "#5E4FE0"],
+    fibre: ["#2DD4BF", "#0D9488"],
   },
   dark: {
     green: ["#3DDC6E", "#12A150"],
@@ -114,5 +116,6 @@ export const gradientStops: { light: GradientSet; dark: GradientSet } = {
     blue: ["#6FB6FF", "#0A84FF"],
     steps: ["#C4FF5E", "#8FD400"],
     sleep: ["#9E90FF", "#6E5FE8"],
+    fibre: ["#5EEAD4", "#14B8A6"],
   },
 };
