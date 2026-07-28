@@ -15,10 +15,11 @@ import { Segmented } from "@/components/Segmented";
 import { Card } from "@/components/Card";
 import { AppBackground } from "@/components/AppBackground";
 import { Overline } from "@/components/Overline";
-import { useCreateLog, useFoodSearch, useMemory, usePins } from "@/api/hooks";
+import { useCreateLog, useFoodSearch, useMemory, usePins, useSavedMeals } from "@/api/hooks";
 import { useInstantLog } from "@/api/useInstantLog";
 import { usePinToggle } from "@/api/usePinToggle";
 import type { FoodItem } from "@/api/types";
+import { useSavedMealEditor } from "@/components/meals/SavedMealSheetProvider";
 import { foodVisual } from "@/lib/foodVisual";
 import { hslToHex } from "@/lib/color";
 import { haptics } from "@/motion";
@@ -27,6 +28,7 @@ import { useTheme } from "@/theme";
 const MEALS = ["breakfast", "lunch", "dinner", "snack"] as const;
 const MEAL_OPTIONS = MEALS.map((m) => ({ key: m, label: m.charAt(0).toUpperCase() + m.slice(1) }));
 const MEMORY_TAB_OPTIONS: { key: string; label: string }[] = [
+  { key: "saved", label: "Saved" },
   { key: "pinned", label: "Pinned" },
   { key: "recents", label: "Recents" },
   { key: "frequent", label: "Frequent" },
@@ -46,13 +48,15 @@ export default function LogScreen() {
   const [grams, setGrams] = useState("");
   const [meal, setMeal] = useState<(typeof MEALS)[number]>("lunch");
   const [error, setError] = useState<string | null>(null);
-  const [memTab, setMemTab] = useState<"pinned" | "recents" | "frequent" | "usual_meals">("recents");
+  const [memTab, setMemTab] = useState<"saved" | "pinned" | "recents" | "frequent" | "usual_meals">("recents");
   const search = useFoodSearch(q);
   const createLog = useCreateLog();
   const memory = useMemory(today());
   const pins = usePins();
+  const savedMeals = useSavedMeals();
   const { pinnedIds, toggle } = usePinToggle();
   const { logFood, logMeal } = useInstantLog();
+  const { openCreate, openEdit } = useSavedMealEditor();
 
   // Entrance stagger runs on first mount only — see app/(tabs)/index.tsx for the
   // same guard and rationale (refetches update results in place, no re-stagger).
@@ -216,6 +220,30 @@ export default function LogScreen() {
                 <AppText muted>Loading…</AppText>
               ) : memory.isError ? (
                 <AppText muted>Couldn't load your foods.</AppText>
+              ) : memTab === "saved" ? (
+                (savedMeals.data ?? []).length > 0 ? (
+                  <GroupedSection elevated>
+                    {(savedMeals.data ?? []).map((m) => {
+                      const fv = foodVisual(m.name);
+                      return (
+                        <MealRow
+                          key={m.id}
+                          name={m.name}
+                          slot={m.items.map((i) => i.name).join(" · ")}
+                          kcal={m.kcal}
+                          iconName={fv.icon}
+                          tint={hslToHex(fv.hue, 0.5, 0.5)}
+                          onPress={() => logMeal(m)}
+                          bookmarked
+                          onBookmark={() => openEdit(m)}
+                          accessibilityLabel={m.name}
+                        />
+                      );
+                    })}
+                  </GroupedSection>
+                ) : (
+                  <AppText muted>Save a usual meal to see it here.</AppText>
+                )
               ) : memTab === "pinned" ? (
                 (pins.data ?? []).length > 0 ? (
                   <GroupedSection elevated>
@@ -254,6 +282,7 @@ export default function LogScreen() {
                           iconName={fv.icon}
                           tint={hslToHex(fv.hue, 0.5, 0.5)}
                           onPress={() => logMeal(m)}
+                          onBookmark={() => openCreate(m)}
                           accessibilityLabel={m.name}
                         />
                       );
