@@ -47,6 +47,17 @@ test("empty name blocks save", async () => {
   getByText("Enter a name.");
 });
 
+test("create failure surfaces an error message", async () => {
+  mockCreate.mockImplementationOnce((_body, opts) => opts.onError?.());
+  const { getByText, getByLabelText } = await render(
+    <SavedMealSheet seed={{ mode: "create", meal: usual as any }} onClose={jest.fn()} />,
+  );
+  await fireEvent.changeText(getByLabelText("Meal name"), "Eggs & Oats");
+  await fireEvent.press(getByText("Save"));
+  expect(mockCreate).toHaveBeenCalled();
+  getByText("Couldn't save. Please try again.");
+});
+
 test("edit-seed shows Delete which calls delete", async () => {
   const saved = { id: "s1", name: "My Bfast", meal_slot: "lunch", items: [{ food_item_id: "f1", name: "Eggs", grams: 120, kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0, fiber_g: 0 }], kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0, fiber_g: 0 };
   const { getByText } = await render(<SavedMealSheet seed={{ mode: "edit", meal: saved as any }} onClose={jest.fn()} />);

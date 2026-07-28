@@ -56,14 +56,14 @@ export function SavedMealSheet({ seed, onClose }: Props) {
     if (parsed.length === 0 || parsed.some((p) => !(p.grams > 0))) { setErr("Add at least one item with grams."); return; }
     const body = { name: trimmed, meal_slot: slot, items: parsed };
     if (seed?.mode === "edit") {
-      updateMeal.mutate({ id: seed.meal.id, body }, { onSuccess: onClose });
+      updateMeal.mutate({ id: seed.meal.id, body }, { onSuccess: onClose, onError: () => setErr("Couldn't save. Please try again.") });
     } else {
-      createMeal.mutate(body, { onSuccess: onClose });
+      createMeal.mutate(body, { onSuccess: onClose, onError: () => setErr("Couldn't save. Please try again.") });
     }
   };
 
   const remove = () => {
-    if (seed?.mode === "edit") deleteMeal.mutate(seed.meal.id, { onSuccess: onClose });
+    if (seed?.mode === "edit") deleteMeal.mutate(seed.meal.id, { onSuccess: onClose, onError: () => setErr("Couldn't delete. Please try again.") });
   };
 
   const pending = createMeal.isPending || updateMeal.isPending || deleteMeal.isPending;
