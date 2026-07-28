@@ -15,9 +15,9 @@ import { Segmented } from "@/components/Segmented";
 import { Card } from "@/components/Card";
 import { AppBackground } from "@/components/AppBackground";
 import { Overline } from "@/components/Overline";
-import { useToast } from "@/components/Toast";
-import { useCreateLog, useCreateLogBatch, useDeleteLog, useFoodSearch, useMemory } from "@/api/hooks";
-import type { FoodItem, MemoryFood, MemoryMeal } from "@/api/types";
+import { useCreateLog, useFoodSearch, useMemory } from "@/api/hooks";
+import { useInstantLog } from "@/api/useInstantLog";
+import type { FoodItem } from "@/api/types";
 import { foodVisual } from "@/lib/foodVisual";
 import { hslToHex } from "@/lib/color";
 import { haptics } from "@/motion";
@@ -48,9 +48,7 @@ export default function LogScreen() {
   const search = useFoodSearch(q);
   const createLog = useCreateLog();
   const memory = useMemory(today());
-  const batchLog = useCreateLogBatch();
-  const deleteLog = useDeleteLog();
-  const toast = useToast();
+  const { logFood, logMeal } = useInstantLog();
 
   // Entrance stagger runs on first mount only — see app/(tabs)/index.tsx for the
   // same guard and rationale (refetches update results in place, no re-stagger).
@@ -85,48 +83,6 @@ export default function LogScreen() {
           router.replace("/");
         },
         onError: () => setError("Couldn't log that. Please try again."),
-      },
-    );
-  }
-
-  function logFood(f: MemoryFood) {
-    createLog.mutate(
-      {
-        food_item_id: f.food_item_id,
-        meal_slot: f.meal_slot,
-        source: "memory",
-        quantity_grams: f.grams,
-        logged_at: new Date().toISOString(),
-      },
-      {
-        onSuccess: (created) => {
-          haptics.success();
-          toast.show({
-            message: `Logged ${f.name}`,
-            actionLabel: "Undo",
-            onAction: () => deleteLog.mutate(created.id),
-          });
-        },
-      },
-    );
-  }
-
-  function logMeal(m: MemoryMeal) {
-    batchLog.mutate(
-      {
-        logged_at: new Date().toISOString(),
-        meal_slot: m.meal_slot,
-        items: m.items.map((i) => ({ food_item_id: i.food_item_id, quantity_grams: i.grams })),
-      },
-      {
-        onSuccess: (created) => {
-          haptics.success();
-          toast.show({
-            message: `Logged ${m.name}`,
-            actionLabel: "Undo",
-            onAction: () => created.forEach((l) => deleteLog.mutate(l.id)),
-          });
-        },
       },
     );
   }
