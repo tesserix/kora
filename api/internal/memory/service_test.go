@@ -145,6 +145,35 @@ func TestUsualMealsDeterministicOrderOnExactTie(t *testing.T) {
 	}
 }
 
+// TestNilFoodItemIDIsSkippedNotPanicked proves recents/frequent are panic-safe
+// against logs with a nil FoodItemID (e.g. a freeform/unresolved log) even
+// though ListForUserSince filters those out at the DB layer today — these are
+// reusable pure helpers and shouldn't assume their caller always filters.
+func TestNilFoodItemIDIsSkippedNotPanicked(t *testing.T) {
+	base := time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC)
+	logs := []foodlog.FoodLog{
+		{FoodItemID: nil, Description: "Mystery Snack", MealSlot: "snack", QuantityGrams: 50, Kcal: 90, LoggedAt: base},
+		log(eggs, "Eggs", "breakfast", 100, 155, base.Add(24*time.Hour)),
+		log(eggs, "Eggs", "breakfast", 100, 155, base.Add(48*time.Hour)),
+	}
+
+	gotRecents := recents(logs)
+	if len(gotRecents) != 1 {
+		t.Fatalf("want 1 recent (nil-item log excluded), got %d", len(gotRecents))
+	}
+	if gotRecents[0].FoodItemID != eggs {
+		t.Fatalf("want eggs, got %s", gotRecents[0].FoodItemID)
+	}
+
+	gotFrequent := frequent(logs)
+	if len(gotFrequent) != 1 {
+		t.Fatalf("want 1 frequent (nil-item log excluded), got %d", len(gotFrequent))
+	}
+	if gotFrequent[0].Count != 2 {
+		t.Fatalf("want eggs count 2, got %d", gotFrequent[0].Count)
+	}
+}
+
 func TestUsualMealsBelowThresholdExcluded(t *testing.T) {
 	loc := time.UTC
 	mk := func(day int) time.Time { return time.Date(2026, 7, day, 8, 0, 0, 0, time.UTC) }

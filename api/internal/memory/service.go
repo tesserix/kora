@@ -53,6 +53,9 @@ func foodFrom(l foodlog.FoodLog) Food {
 func recents(logs []foodlog.FoodLog) []Food {
 	latest := map[string]foodlog.FoodLog{}
 	for _, l := range logs { // logs arrive oldest-first, so last write wins = most recent
+		if l.FoodItemID == nil {
+			continue
+		}
 		latest[l.FoodItemID.String()] = l
 	}
 	out := make([]Food, 0, len(latest))
@@ -85,6 +88,9 @@ func frequent(logs []foodlog.FoodLog) []Food {
 	}
 	m := map[string]*agg{}
 	for _, l := range logs {
+		if l.FoodItemID == nil {
+			continue
+		}
 		k := l.FoodItemID.String()
 		a := m[k]
 		if a == nil {
@@ -160,6 +166,9 @@ func usualMeals(logs []foodlog.FoodLog, loc *time.Location) []Meal {
 	}
 	instances := map[string]*inst{}
 	for _, l := range logs {
+		if l.FoodItemID == nil {
+			continue
+		}
 		day := l.LoggedAt.In(loc).Format("2006-01-02")
 		key := day + "|" + l.MealSlot
 		in := instances[key]
