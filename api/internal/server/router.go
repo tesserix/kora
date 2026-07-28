@@ -18,6 +18,7 @@ import (
 	"github.com/tesserix/kora/api/internal/notifications"
 	"github.com/tesserix/kora/api/internal/nutrition"
 	"github.com/tesserix/kora/api/internal/onboarding"
+	"github.com/tesserix/kora/api/internal/pins"
 	"github.com/tesserix/kora/api/internal/resolve"
 	"github.com/tesserix/kora/api/internal/social"
 	"github.com/tesserix/kora/api/internal/tracking"
@@ -89,6 +90,11 @@ func NewRouter(deps Deps) *gin.Engine {
 
 		nutritionHandler := nutrition.NewHandler(foodRepo)
 		v1.GET("/foods", nutritionHandler.Search)
+
+		pinsHandler := pins.NewHandler(pins.NewService(pins.NewRepository(deps.DB), foodRepo))
+		v1.GET("/pins", pinsHandler.List)
+		v1.POST("/pins", pinsHandler.Create)
+		v1.DELETE("/pins/:foodItemId", pinsHandler.Delete)
 
 		trackingRepo := tracking.NewRepository(deps.DB)
 		trackingHandler := tracking.NewHandler(trackingRepo)
