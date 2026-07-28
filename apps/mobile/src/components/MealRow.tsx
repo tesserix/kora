@@ -1,4 +1,4 @@
-import { View } from "react-native";
+import { Pressable, View } from "react-native";
 import { AppText } from "./Text";
 import { Numeral } from "./Numeral";
 import { Icon } from "./Icon";
@@ -6,9 +6,19 @@ import { PressableScale } from "@/motion";
 import { useTheme } from "@/theme";
 import { withAlpha } from "@/lib/color";
 
-type Props = { name: string; slot: string; kcal: number; iconName?: string; tint?: string; onPress?: () => void; accessibilityLabel?: string };
+type Props = {
+  name: string;
+  slot: string;
+  kcal: number;
+  iconName?: string;
+  tint?: string;
+  onPress?: () => void;
+  accessibilityLabel?: string;
+  pinned?: boolean;
+  onPinToggle?: () => void;
+};
 
-export function MealRow({ name, slot, kcal, iconName = "utensils", tint, onPress, accessibilityLabel }: Props) {
+export function MealRow({ name, slot, kcal, iconName = "utensils", tint, onPress, accessibilityLabel, pinned, onPinToggle }: Props) {
   const { colors, radius, spacing } = useTheme();
   const chip = tint ?? colors.accent;
   return (
@@ -22,6 +32,17 @@ export function MealRow({ name, slot, kcal, iconName = "utensils", tint, onPress
         <AppText variant="footnote" muted>{slot}</AppText>
       </View>
       <Numeral size={17}>{`${Math.round(kcal)} kcal`}</Numeral>
+      {onPinToggle ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={pinned ? `Unpin ${name}` : `Pin ${name}`}
+          hitSlop={10}
+          onPress={onPinToggle}
+          style={{ paddingLeft: spacing.sm }}
+        >
+          <Icon name={pinned ? "star-fill" : "star"} size={20} color={pinned ? colors.accent : colors.tertiaryLabel} />
+        </Pressable>
+      ) : null}
     </PressableScale>
   );
 }

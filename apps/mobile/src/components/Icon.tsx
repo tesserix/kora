@@ -5,7 +5,7 @@ import {
   Utensils, TrendingDown, TrendingUp, Minus, Check, ArrowRight, ArrowLeft, Trash2,
   Drumstick, Leaf, Wheat, Egg, Fish, Apple, Coffee, Soup, Salad, Circle,
   X, Images, ScanBarcode, Type, Loader, Barcode, ArrowUp, Repeat, Users, Bell,
-  Search, Trophy, Heart,
+  Search, Trophy, Heart, Star,
   type LucideIcon,
 } from "lucide-react-native";
 
@@ -21,6 +21,7 @@ const SYMBOLS: Record<string, SFSymbol> = {
   "chevron-right": "chevron.right", droplet: "drop.fill", person: "person.crop.circle.fill",
   gear: "gearshape.fill", flame: "flame.fill", search: "magnifyingglass",
   people: "person.3.fill", trophy: "trophy.fill", heart: "heart.fill",
+  "star": "star", "star-fill": "star.fill",
 };
 
 const MAP: Record<string, LucideIcon> = {
@@ -33,6 +34,7 @@ const MAP: Record<string, LucideIcon> = {
   x: X, images: Images, "scan-barcode": ScanBarcode, type: Type, loader: Loader,
   barcode: Barcode, "arrow-up": ArrowUp, repeat: Repeat, users: Users, bell: Bell,
   search: Search, people: Users, trophy: Trophy, heart: Heart,
+  "star": Star, "star-fill": Star,
 };
 
 type Props = { name: string; size?: number; color: string; strokeWidth?: number };
