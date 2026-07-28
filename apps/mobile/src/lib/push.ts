@@ -8,6 +8,8 @@ import { router } from "expo-router";
 import { auth, isFirebaseConfigured } from "@/lib/firebase";
 import { registerDevice, unregisterDevice } from "@/lib/pushApi";
 import { targetFor } from "@/lib/notificationTarget";
+import { loadPrefs } from "@/reminders/prefs";
+import { applyReminders } from "@/reminders/schedule";
 import type { NotificationType } from "@/api/types";
 
 const TOKEN_KEY = "kora.pushToken";
@@ -67,6 +69,10 @@ export function setupPushHandler(): void {
       shouldSetBadge: false,
     }),
   });
+  // Reschedule reminders on every launch so they survive reinstalls and
+  // permission changes. setupPushHandler runs once at module scope
+  // (app/_layout.tsx), so no additional once-guard is needed here.
+  void loadPrefs().then(applyReminders).catch(() => {});
 }
 
 // usePushResponder deep-links when the user taps a push.
@@ -76,7 +82,12 @@ export function usePushResponder(): void {
       const data = response.notification.request.content.data as {
         type?: NotificationType;
         entity_id?: string;
+        kind?: string;
       };
+      if (data?.kind === "reminder") {
+        router.push("/capture");
+        return;
+      }
       if (!data?.type) return;
       const target = targetFor({ type: data.type, entity_id: data.entity_id });
       if (target) router.push(target);
