@@ -1,4 +1,4 @@
-import { fireEvent, render, waitFor } from "@testing-library/react-native";
+import { fireEvent, render } from "@testing-library/react-native";
 
 const mockSetSlot = jest.fn();
 jest.mock("@/reminders/useReminderPrefs", () => ({
