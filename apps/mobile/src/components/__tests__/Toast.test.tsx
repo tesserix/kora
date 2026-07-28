@@ -7,6 +7,16 @@ function Trigger({ onUndo }: { onUndo: () => void }) {
   return <Pressable onPress={() => toast.show({ message: "Logged", actionLabel: "Undo", onAction: onUndo })}><Text>go</Text></Pressable>;
 }
 
+function DurationTrigger({ durationMs }: { durationMs: number }) {
+  const toast = useToast();
+  return <Pressable onPress={() => toast.show({ message: "Logged", durationMs })}><Text>go</Text></Pressable>;
+}
+
+function NoActionTrigger() {
+  const toast = useToast();
+  return <Pressable onPress={() => toast.show({ message: "Logged" })}><Text>go</Text></Pressable>;
+}
+
 beforeEach(() => {
   jest.useFakeTimers();
 });
@@ -53,4 +63,29 @@ test("clears the auto-dismiss timer on unmount (no setState after unmount)", asy
   await act(async () => {
     jest.advanceTimersByTime(6000);
   });
+});
+
+test("auto-dismisses at a custom durationMs instead of the 5000ms default", async () => {
+  const { getByText, queryByText } = await render(
+    <ToastProvider><DurationTrigger durationMs={2000} /></ToastProvider>,
+  );
+  await act(async () => {
+    fireEvent.press(getByText("go"));
+  });
+  await waitFor(() => getByText("Logged"));
+  await act(async () => {
+    jest.advanceTimersByTime(2000);
+  });
+  expect(queryByText("Logged")).toBeNull();
+});
+
+test("renders the message with no action button when actionLabel is omitted", async () => {
+  const { getByText, queryByText } = await render(
+    <ToastProvider><NoActionTrigger /></ToastProvider>,
+  );
+  await act(async () => {
+    fireEvent.press(getByText("go"));
+  });
+  await waitFor(() => getByText("Logged"));
+  expect(queryByText("Undo")).toBeNull();
 });

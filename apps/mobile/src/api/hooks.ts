@@ -100,7 +100,7 @@ export function useCreateLogBatch() {
 export function useMemory(date: string) {
   return useQuery({
     queryKey: ["memory", date],
-    queryFn: () => apiFetch(`/v1/memory?date=${date}`) as Promise<Memory>,
+    queryFn: () => apiFetch("/v1/memory") as Promise<Memory>,
   });
 }
 

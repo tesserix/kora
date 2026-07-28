@@ -418,11 +418,11 @@ it("useAvgIntake7d returns avg: null and an empty series when every day is unlog
   expect(result.current.avg).toBeNull();
 });
 
-test("useMemory fetches GET /v1/memory for the date", async () => {
+test("useMemory fetches GET /v1/memory (date is not sent — backend ignores it)", async () => {
   (apiFetch as jest.Mock).mockResolvedValueOnce({ recents: [], frequent: [], usual_meals: [] });
   const { result } = await renderHook(() => useMemory("2026-07-27"), { wrapper });
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
-  expect(apiFetch).toHaveBeenCalledWith("/v1/memory?date=2026-07-27");
+  expect(apiFetch).toHaveBeenCalledWith("/v1/memory");
 });
 
 test("useCreateLogBatch posts to /v1/logs/batch", async () => {

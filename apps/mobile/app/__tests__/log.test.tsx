@@ -96,6 +96,27 @@ test("tapping a recent food logs it instantly", async () => {
   );
 });
 
+test("shows a loading state while memory is fetching", async () => {
+  mockMemoryIsLoading = true;
+  const { findByText } = await render(<LogScreen />);
+  expect(await findByText("Loading…")).toBeTruthy();
+});
+
+test("shows an error state when memory fails to load", async () => {
+  mockMemoryIsLoading = false;
+  mockMemoryIsError = true;
+  const { findByText } = await render(<LogScreen />);
+  expect(await findByText("Couldn't load your foods.")).toBeTruthy();
+});
+
+test("shows an empty state on the Recents tab when memory has no data", async () => {
+  mockMemoryData = { recents: [], frequent: [], usual_meals: [] };
+  mockMemoryIsLoading = false;
+  mockMemoryIsError = false;
+  const { findByText } = await render(<LogScreen />);
+  expect(await findByText("Log a few meals and they'll show up here.")).toBeTruthy();
+});
+
 test("tapping a usual meal batch-logs its items", async () => {
   mockMemoryData = {
     recents: [],
