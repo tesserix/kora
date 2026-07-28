@@ -55,21 +55,22 @@ jobs:
     if: github.ref == 'refs/heads/main'
     needs: [api]
     runs-on: ubuntu-latest
-    # Only this job needs WIF; scope the OIDC token grant here (least privilege).
+    # Push to GHCR under the tesserix org; the GKE fleet pulls it via the
+    # ghcr-remote pull-through mirror in tesseracthub-480811 (matches every
+    # other service). Needs packages:write on GITHUB_TOKEN.
     permissions:
       contents: read
-      id-token: write
+      packages: write
     steps:
       - uses: actions/checkout@v4
-      - uses: google-github-actions/auth@v2
+      - uses: docker/login-action@v3
         with:
-          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
-          service_account: ${{ vars.CI_SERVICE_ACCOUNT }}
-      - uses: google-github-actions/setup-gcloud@v2
-      - run: gcloud auth configure-docker asia-south1-docker.pkg.dev --quiet
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and push
         run: |
-          IMAGE=asia-south1-docker.pkg.dev/tesserix-app/services/kora-api
+          IMAGE=ghcr.io/tesserix/kora/kora-api
           docker build -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" api/
           docker push "$IMAGE:${{ github.sha }}"
           docker push "$IMAGE:latest"
