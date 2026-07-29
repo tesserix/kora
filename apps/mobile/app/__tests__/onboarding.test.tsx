@@ -1,4 +1,4 @@
-import { fireEvent, render } from "@testing-library/react-native";
+import { fireEvent, render, screen } from "@testing-library/react-native";
 import { router } from "expo-router";
 
 const mockMutate = jest.fn();
@@ -36,6 +36,11 @@ test("Onboarding shows the editorial hero and goal cards", async () => {
   expect(await findByText("Lose weight")).toBeTruthy();
   expect(await findByText("Build muscle")).toBeTruthy();
   expect(await findByText("Get started")).toBeTruthy();
+});
+
+it("shows a non-medical disclaimer at goal setup", async () => {
+  await render(<Onboarding />);
+  expect(screen.getByText(/not medical advice/i)).toBeTruthy();
 });
 
 test("selecting a goal card shows a trailing accent checkmark on that row only", async () => {
