@@ -14,6 +14,7 @@ import { GroupedSection, Row } from "@/components/GroupedList";
 import { GaugeRing } from "@/components/GaugeRing";
 import { MealRow } from "@/components/MealRow";
 import { CopyDaySheet } from "@/components/diary/CopyDaySheet";
+import { EmptyState } from "@/components/common/EmptyState";
 import { useDashboard, useDayLogs, useAddWater, useDeleteLog } from "@/api/hooks";
 import { AnimatedNumber, PressableScale, haptics, springs } from "@/motion";
 import { useTheme } from "@/theme";
@@ -334,9 +335,11 @@ export default function Diary() {
 
           {logged.length === 0 ? (
             <Animated.View entering={enter(4)}>
-              <AppText muted style={{ marginBottom: 8 }}>
-                Nothing logged this day.
-              </AppText>
+              <EmptyState
+                icon="book-open"
+                title="Nothing logged"
+                subtitle="Meals you log on this day appear here."
+              />
               <GroupedSection>
                 <Row title="Copy from another day" icon={{ name: "repeat", tint: colors.accent }} onPress={() => setCopyOpen(true)} />
               </GroupedSection>
