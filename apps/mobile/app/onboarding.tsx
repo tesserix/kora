@@ -208,6 +208,10 @@ export default function Onboarding() {
             {error}
           </AppText>
         ) : null}
+        <AppText variant="footnote" muted style={{ textAlign: "center" }}>
+          Kora gives general nutrition information, not medical advice. For medical concerns, talk
+          to a healthcare professional.
+        </AppText>
         <Button title={submit.isPending ? "Saving…" : "Get started"} onPress={onSubmit} disabled={submit.isPending} />
       </ScrollView>
     </View>
