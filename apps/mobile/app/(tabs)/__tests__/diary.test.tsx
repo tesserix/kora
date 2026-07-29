@@ -25,6 +25,9 @@ const LOGS_DATA = [
   },
 ];
 
+// Mutable holder so a test can supply an empty day; reset in beforeEach.
+let mockDayLogs: typeof LOGS_DATA = LOGS_DATA;
+
 jest.mock("@/api/hooks", () => ({
   useDashboard: (date: string) => {
     mockUseDashboard(date);
@@ -32,7 +35,7 @@ jest.mock("@/api/hooks", () => ({
   },
   useDayLogs: (date: string) => {
     mockUseDayLogs(date);
-    return { data: LOGS_DATA };
+    return { data: mockDayLogs };
   },
   useAddWater: () => ({ mutate: mockAddWaterMutate, isPending: false }),
   useDeleteLog: () => ({ mutate: mockDeleteMutate, isPending: false }),
@@ -48,6 +51,7 @@ jest.mock("@/units", () => ({
 import Diary from "../diary";
 
 beforeEach(() => {
+  mockDayLogs = LOGS_DATA;
   mockDeleteMutate.mockClear();
   mockAddWaterMutate.mockClear();
   mockUseDashboard.mockClear();
@@ -65,6 +69,13 @@ test("Diary shows header, week strip and a logged meal grouped by slot", async (
   expect(await findByText("Diary")).toBeTruthy();
   expect(await findByText("DINNER")).toBeTruthy();
   expect(await findByText("Grilled salmon")).toBeTruthy();
+});
+
+test("a day with zero food logs shows the empty-day EmptyState", async () => {
+  mockDayLogs = [];
+  const { findByText } = await render(<Diary />);
+  expect(await findByText("Nothing logged")).toBeTruthy();
+  expect(await findByText("Meals you log on this day appear here.")).toBeTruthy();
 });
 
 test("a day with logs does not show the Copy CTA", async () => {

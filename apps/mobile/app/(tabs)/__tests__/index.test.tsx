@@ -73,6 +73,39 @@ test("Home shows an error message when the dashboard fails to load", async () =>
   expect(queryByText(/calories left/i)).toBeNull();
 });
 
+test("shows a first-run empty state when no meals are logged, keeping the calorie goal visible", async () => {
+  mockUseDashboard.mockReturnValue({
+    data: { consumed: { kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0 }, targets: { kcal: 2000, protein_g: 140, carbs_g: 220, fat_g: 70 }, water_ml: 0, streak_days: 0 },
+    isError: false,
+  });
+  mockUseDayLogs.mockReturnValue({ data: [], isError: false });
+
+  const { findByText } = await render(<Home />);
+  expect(await findByText("No meals logged yet")).toBeTruthy();
+  expect(await findByText(/log your first meal/i)).toBeTruthy();
+  // the onboarding-computed calorie goal/ring stays visible for a first-run user
+  expect(await findByText("kcal left")).toBeTruthy();
+  expect(await findByText("2,000")).toBeTruthy();
+});
+
+test("first-run: onboarding-computed calorie goal and macro targets still render at zero consumed with no logs", async () => {
+  mockUseDashboard.mockReturnValue({
+    data: { consumed: { kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0, fiber_g: 0 }, targets: { kcal: 2000, protein_g: 140, carbs_g: 220, fat_g: 70 }, water_ml: 0, streak_days: 0 },
+    isError: false,
+  });
+  mockUseDayLogs.mockReturnValue({ data: [], isError: false });
+
+  const { findByText } = await render(<Home />);
+  // empty state present…
+  expect(await findByText("No meals logged yet")).toBeTruthy();
+  // …alongside the calorie goal (not blank) and the macro targets.
+  expect(await findByText("kcal left")).toBeTruthy();
+  expect(await findByText("2,000")).toBeTruthy();
+  expect(await findByText("0g / 140g")).toBeTruthy(); // protein target
+  expect(await findByText("0g / 220g")).toBeTruthy(); // carbs target
+  expect(await findByText("0g / 70g")).toBeTruthy(); // fat target
+});
+
 test("shows a Connect Apple Health affordance for Steps (never a number yet)", async () => {
   mockUseDashboard.mockReturnValue({
     data: { consumed: { kcal: 1252, protein_g: 96, carbs_g: 140, fat_g: 40 }, targets: { kcal: 2000, protein_g: 140, carbs_g: 220, fat_g: 70 }, water_ml: 1400, streak_days: 12 },

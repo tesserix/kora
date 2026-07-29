@@ -13,6 +13,7 @@ import { SavedMealsStrip } from "@/components/home/SavedMealsStrip";
 import { PinnedStrip } from "@/components/home/PinnedStrip";
 import { YourUsualStrip } from "@/components/home/YourUsualStrip";
 import { RingStat } from "@/components/RingStat";
+import { EmptyState } from "@/components/common/EmptyState";
 import { Icon } from "@/components/Icon";
 import { AppBackground } from "@/components/AppBackground";
 import { PressableScale } from "@/motion";
@@ -228,7 +229,13 @@ export default function Home() {
                 );
               })}
             </Card>
-          ) : null}
+          ) : (
+            <EmptyState
+              icon="camera"
+              title="No meals logged yet"
+              subtitle="Tap ✦ to log your first meal."
+            />
+          )}
           <PressableScale
             accessibilityRole="button"
             accessibilityLabel="Add a meal"
