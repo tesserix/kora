@@ -234,7 +234,6 @@ export default function Home() {
               icon="camera"
               title="No meals logged yet"
               subtitle="Tap ✦ to log your first meal."
-              cta={{ label: "Log a meal", onPress: () => router.push("/capture") }}
             />
           )}
           <PressableScale
