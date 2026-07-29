@@ -16,6 +16,7 @@ import { Overline } from "@/components/Overline";
 import { Segmented } from "@/components/Segmented";
 import { WeightChart } from "@/components/progress/WeightChart";
 import { WeightLogSheet } from "@/components/progress/WeightLogSheet";
+import { EmptyState } from "@/components/common/EmptyState";
 import { useAvgIntake7d, useDashboard, useProfile, useWeightSeries } from "@/api/hooks";
 import type { WeightEntry } from "@/api/types";
 import { useHealth } from "@/health";
@@ -122,6 +123,13 @@ export default function Progress() {
                   <AppText variant="footnote" muted style={{ fontVariant: ["tabular-nums"] }}>{shortDate(entries[entries.length - 1].logged_at)}</AppText>
                 </View>
               </>
+            ) : entries.length === 0 ? (
+              <EmptyState
+                icon="chart-line"
+                title="No weigh-ins yet"
+                subtitle="Log your weight to see your trend."
+                cta={{ label: "Log weight", onPress: () => setSheetOpen(true) }}
+              />
             ) : (
               <AppText muted style={{ fontSize: 13, paddingVertical: 16, textAlign: "center" }}>Log your weight to see a trend.</AppText>
             )}

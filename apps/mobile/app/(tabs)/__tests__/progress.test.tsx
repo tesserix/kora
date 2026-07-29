@@ -53,6 +53,16 @@ test("seeds current weight from profile when the range is empty", async () => {
   expect(getByText(/Log your weight/i)).toBeTruthy(); // hint, no chart — the >=2 points guard
 });
 
+test("shows the no-weigh-ins empty state and opens the weight-log sheet from its CTA", async () => {
+  mockSeries.mockReturnValue({ data: [] });
+  const { getByText, findByText } = await render(<Progress />);
+  expect(getByText("No weigh-ins yet")).toBeTruthy();
+  expect(getByText("Log your weight to see your trend.")).toBeTruthy();
+  // CTA reuses the existing WeightLogSheet affordance (setSheetOpen).
+  fireEvent.press(getByText("Log weight"));
+  expect(await findByText("Save")).toBeTruthy();
+});
+
 test("range segmented control renders all range labels and re-queries the series on selection", async () => {
   mockSeries.mockReturnValue({ data: [
     { id: "1", weight_kg: 74.0, logged_at: "2026-07-20T08:00:00Z" },
