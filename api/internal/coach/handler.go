@@ -61,9 +61,24 @@ func logNudgeReasons(ctx context.Context, userID uuid.UUID, nudges []Nudge) {
 	}
 }
 
-// askRequest is the Ask endpoint's request body.
+// maxAskQuestionChars caps a coach question. A few thousand characters is
+// generous for a real nutrition question (multiple paragraphs' worth) while
+// still bounding the permanent, unretained growth of coach_turns.text.
+const maxAskQuestionChars = 4000
+
+// maxAskBodyBytes is the hard cap applied to the raw request body, ahead of
+// JSON parsing, mirroring maxPhotoBodyBytes's role in package resolve. The
+// headroom above maxAskQuestionChars covers a maxAskQuestionChars-rune
+// question that is entirely multi-byte UTF-8 (worst case 4 bytes/rune) plus
+// the small fixed overhead of the JSON wrapper (`{"question":"..."}`) and
+// any character escaping.
+const maxAskBodyBytes = maxAskQuestionChars*4 + 1<<10
+
+// askRequest is the Ask endpoint's request body. The binding tag's numeral
+// must be kept in lockstep with maxAskQuestionChars above (struct tags
+// cannot reference a named constant).
 type askRequest struct {
-	Question string `json:"question"`
+	Question string `json:"question" binding:"max=4000"` // must match maxAskQuestionChars
 }
 
 // Ask answers a free-text question grounded over the authenticated user's
@@ -73,6 +88,10 @@ func (h Handler) Ask(c *gin.Context) {
 	if !ok {
 		return
 	}
+
+	// Bound the raw body BEFORE JSON parsing so an oversized payload is
+	// rejected while streaming in, not after Gin has fully buffered it.
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxAskBodyBytes)
 
 	var req askRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

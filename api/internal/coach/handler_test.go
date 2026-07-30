@@ -148,6 +148,36 @@ func TestHandlerAsk_EmptyQuestionReturns400InvalidInput(t *testing.T) {
 	require.Equal(t, "invalid_input", body.Error)
 }
 
+func TestHandlerAsk_OverlongQuestionReturns400InvalidInput(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	trackingRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackingRepo, db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackingRepo)
+
+	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, nil)
+	router := newTestRouter(userID, NewHandler(svc))
+
+	payload, err := json.Marshal(askRequest{Question: strings.Repeat("a", maxAskQuestionChars+1)})
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/coach/ask", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	var body struct {
+		Error   string `json:"error"`
+		Message string `json:"message"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Equal(t, "invalid_input", body.Error)
+}
+
 func TestHandlerAsk_RealQuestionReturns200WithAnswerAndCitations(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db, 2000, 120)
