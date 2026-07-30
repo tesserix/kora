@@ -68,3 +68,11 @@ func TestEvaluate_JustBelowThresholdsIsNotRisk(t *testing.T) {
 		require.Equal(t, Soften, d.Action)
 	}
 }
+
+// TestAtRisk verifies the AtRisk predicate for coach support surfacing.
+func TestAtRisk(t *testing.T) {
+	require.True(t, AtRisk(Signals{AvgIntakeKcal: 1100}))
+	require.True(t, AtRisk(Signals{FastingStreakDays: 3}))
+	require.False(t, AtRisk(Signals{}))                 // zero value = no data
+	require.False(t, AtRisk(Signals{AvgIntakeKcal: 2000}))
+}
