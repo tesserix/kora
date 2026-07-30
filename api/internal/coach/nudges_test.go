@@ -328,6 +328,26 @@ func TestBuildNudges_NoWeightTrendWhenSpanUnderADay(t *testing.T) {
 	require.False(t, hasKind(r.Nudges, NudgeKindWeightTrend))
 }
 
+// TestNudgeFromDecision_CollapsesKindOnSoften proves the Kind-sanitisation
+// fix at the presentation-channel level. There are no restrictive
+// candidates in production (see candidateNudges), so this drives the
+// kind-collapse logic directly via the unexported nudgeFromDecision helper
+// rather than authoring a restrictive candidate in candidateNudges.
+func TestNudgeFromDecision_CollapsesKindOnSoften(t *testing.T) {
+	d := guardrails.Evaluate(
+		guardrails.Nudge{Title: "Fibre is low", Text: "Under target 4 days running", Restrictive: true},
+		guardrails.Signals{}, // zero Signals == no data == not at risk -> Soften
+	)
+	require.Equal(t, guardrails.Soften, d.Action, "test setup must actually reach Soften")
+
+	n := nudgeFromDecision(NudgeKindFibre, d)
+
+	require.Equal(t, NudgeKindToday, n.Kind)
+	require.Equal(t, guardrails.SoftenedTitle, n.Title)
+	require.Equal(t, d.Text, n.Text, "text must be the softened reframe guardrails.Evaluate produced")
+	require.NotEqual(t, NudgeKindFibre, n.Kind, "the original restrictive-flavoured kind must not survive Soften")
+}
+
 func TestBuildNudges_WeightGainPhrasedAsUp(t *testing.T) {
 	c := weightTrendContext(WeightTrend{DeltaKg: 1.2, Days: 30, Valid: true}, 1800, 0)
 

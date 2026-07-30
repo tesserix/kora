@@ -20,6 +20,10 @@ const (
 	NudgeKindProtein     NudgeKind = "protein"
 	NudgeKindFibre       NudgeKind = "fibre"
 	NudgeKindWeightTrend NudgeKind = "weight_trend"
+	// NudgeKindToday is the neutral kind paired with a softened nudge: it
+	// matches guardrails.SoftenedTitle, so a Softened candidate never
+	// carries its original (now-contradictory) kind through to the client.
+	NudgeKindToday NudgeKind = "today"
 )
 
 // Nudge is a coach message that survived the Protective guardrail policy,
@@ -65,17 +69,29 @@ func BuildNudges(c Context, s guardrails.Signals) NudgeResult {
 		if d.Action == guardrails.Suppress {
 			continue
 		}
-		nudges = append(nudges, Nudge{
-			Kind:   cand.kind,
-			Title:  d.Title,
-			Text:   d.Text,
-			Reason: d.Reason,
-		})
+		nudges = append(nudges, nudgeFromDecision(cand.kind, d))
 	}
 
 	return NudgeResult{
 		Nudges:      nudges,
 		ShowSupport: guardrails.AtRisk(s),
+	}
+}
+
+// nudgeFromDecision converts a surviving (Allow/Soften) candidate and its
+// guardrails.Decision into the Nudge to surface. Kind collapses to the
+// neutral NudgeKindToday on Soften, matching Title's collapse to
+// guardrails.SoftenedTitle inside Evaluate itself — kind is otherwise
+// passed straight through unmodified for Allow.
+func nudgeFromDecision(kind NudgeKind, d guardrails.Decision) Nudge {
+	if d.Action == guardrails.Soften {
+		kind = NudgeKindToday
+	}
+	return Nudge{
+		Kind:   kind,
+		Title:  d.Title,
+		Text:   d.Text,
+		Reason: d.Reason,
 	}
 }
 
