@@ -25,11 +25,13 @@ type Turn struct {
 	Text      string    `gorm:"not null"`
 	CreatedAt time.Time
 	// Seq is database-assigned (BIGSERIAL) and gives a stable, strictly
-	// increasing insertion order for replay — created_at alone can't do
-	// this because a question and its answer are written in the same
-	// transaction and share an identical now(). The "->" tag makes this
-	// field read-only from GORM's perspective so it never sends a value on
-	// insert and always lets the database assign it.
+	// increasing insertion order for replay. created_at cannot do this:
+	// GORM stamps CreatedAt client-side with time.Now(), so the column
+	// DEFAULT never applies and the ordering would rest on two wall-clock
+	// readings taken ~1ms apart — not guaranteed strictly increasing, since
+	// wall-clock time can repeat or step backwards under NTP correction.
+	// The "->" tag makes this field read-only from GORM's perspective so it
+	// never sends a value on insert and always lets the database assign it.
 	Seq int64 `gorm:"->;autoIncrement"`
 }
 
