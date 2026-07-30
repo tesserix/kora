@@ -305,6 +305,29 @@ func TestBuildNudges_NoWeightTrendWhenInvalid(t *testing.T) {
 	require.False(t, hasKind(r.Nudges, NudgeKindWeightTrend))
 }
 
+// TestBuildNudges_NoWeightTrendWhenMagnitudeRoundsToZero covers a valid
+// trend whose magnitude is nonzero but displays as zero at fmtNum's
+// precision (e.g. 0.04kg -> "0.0"). Without the guard this renders the
+// self-contradictory "Down 0.0kg over 30 days".
+func TestBuildNudges_NoWeightTrendWhenMagnitudeRoundsToZero(t *testing.T) {
+	c := weightTrendContext(WeightTrend{DeltaKg: -0.04, Days: 30, Valid: true}, 1800, 0)
+
+	r := BuildNudges(c, SignalsFrom(c))
+
+	require.False(t, hasKind(r.Nudges, NudgeKindWeightTrend))
+}
+
+// TestBuildNudges_NoWeightTrendWhenSpanUnderADay covers a valid trend whose
+// Days truncated to 0 (two entries inside the same 24h window). Without the
+// guard this renders the self-contradictory "Down 0.3kg over 0 days".
+func TestBuildNudges_NoWeightTrendWhenSpanUnderADay(t *testing.T) {
+	c := weightTrendContext(WeightTrend{DeltaKg: -0.3, Days: 0, Valid: true}, 1800, 0)
+
+	r := BuildNudges(c, SignalsFrom(c))
+
+	require.False(t, hasKind(r.Nudges, NudgeKindWeightTrend))
+}
+
 func TestBuildNudges_WeightGainPhrasedAsUp(t *testing.T) {
 	c := weightTrendContext(WeightTrend{DeltaKg: 1.2, Days: 30, Valid: true}, 1800, 0)
 

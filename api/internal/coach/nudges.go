@@ -141,7 +141,7 @@ func fiberLowStreakNudge(c Context) (guardrails.Nudge, bool) {
 // framing. Callers must gate it on !guardrails.AtRisk — see candidateNudges.
 func weightTrendNudge(c Context) (guardrails.Nudge, bool) {
 	tr := c.WeightTrend
-	if !tr.Valid || tr.DeltaKg == 0 {
+	if !tr.Valid {
 		return guardrails.Nudge{}, false
 	}
 	direction := "Up"
@@ -149,6 +149,21 @@ func weightTrendNudge(c Context) (guardrails.Nudge, bool) {
 	if tr.DeltaKg < 0 {
 		direction = "Down"
 		magnitude = -tr.DeltaKg
+	}
+	// Skip when the magnitude would display as zero (e.g. a 0.04kg delta
+	// rounds to "0.0" at fmtNumDisplayPrecision): pairing a direction word
+	// with a zero-looking magnitude reads as self-contradictory ("Down
+	// 0.0kg"), not just uninformative. Deriving the check from fmtNum
+	// itself keeps this correct if the display precision ever changes.
+	if fmtNum(magnitude) == "0" {
+		return guardrails.Nudge{}, false
+	}
+	// Skip when the trend spans less than a day. Days is an elapsed-
+	// hours/24 truncation, so two entries inside the same 24h window
+	// produce Days: 0, which would render the self-contradictory "over 0
+	// days".
+	if tr.Days < 1 {
+		return guardrails.Nudge{}, false
 	}
 	return guardrails.Nudge{
 		Title:       "Weight trend",
