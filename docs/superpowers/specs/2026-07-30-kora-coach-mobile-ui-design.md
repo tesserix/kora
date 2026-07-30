@@ -42,20 +42,24 @@ Delivered as three independently reviewable, independently deployable PRs. If R1
 type NudgeKind string
 
 const (
-    NudgeKindProtein     NudgeKind = "protein"
-    NudgeKindFibre       NudgeKind = "fibre"
-    NudgeKindWeightTrend NudgeKind = "weight_trend"
+    NudgeKindProtein    NudgeKind = "protein"
+    NudgeKindFibre      NudgeKind = "fibre"
+    NudgeKindWeightDown NudgeKind = "weight_down"
+    NudgeKindWeightUp   NudgeKind = "weight_up"
+    NudgeKindToday      NudgeKind = "today" // neutral kind for a Softened nudge
 )
 
 type Nudge struct {
     Kind   NudgeKind `json:"kind"`
     Title  string    `json:"title"`
     Text   string    `json:"text"`
-    Reason string    `json:"reason"` // unchanged — audit only, never rendered
+    Reason string    `json:"-"` // audit only, never rendered, never serialised — logged server-side instead
 }
 ```
 
 The client maps `Kind → icon + hue + variant`. The server ships no presentation details.
+
+**Follow-up hardening (post-PR1):** the single `weight_trend` kind above could not express direction (a gain would render with the client's down-arrow/success styling), and a future `Restrictive: true` candidate would carry its original kind through a `Soften` decision alongside the sanitised title/text. Both are closed: `weight_trend` is split into `weight_down`/`weight_up` by observed direction (neither should be rendered with a celebratory or shaming accent — this stays ED-sensitive for both directions), and any Softened nudge's `Kind` collapses to the neutral `today`, matching `SoftenedTitle`. The weight-trend card also now requires a minimum 7-day span (`minWeightTrendSpanDays`) before it is shown — a shorter span is water-weight noise, not a trend worth stating — and `Reason` is no longer serialised to the client at all (`json:"-"`); the handler logs it server-side per request instead.
 
 ### Safety issue 1 — the weight-trend card is *gated*, not softened
 
@@ -110,9 +114,10 @@ Accepted copy deviation from the mockup:
 |---|---|---|
 | `protein` | `Protein` | `142 / 160g — 18g to go` |
 | `fibre` | `Fibre is low` | `Under target 4 days running` |
-| `weight_trend` | `Weight trend` | `Down 1.8kg over 30 days` |
+| `weight_down` | `Weight trend` | `Down 1.8kg over 30 days` |
+| `weight_up` | `Weight trend` | `Up 1.2kg over 30 days` |
 
-**Weight-trend window is 30 days, not the 7-day nutrition window.** A 7-day weight delta is mostly water-weight noise, and the mockup says "this month". It uses the existing `tracking.Repository.WeightSeries(ctx, userID, from, to)` read, surfaced on `Context` as a new grounded field so the "every value traces back to a repository read" invariant holds. With fewer than two weight entries in the window there is no trend to state and the candidate is omitted rather than guessed.
+**Weight-trend window is 30 days, not the 7-day nutrition window.** A 7-day weight delta is mostly water-weight noise, and the mockup says "this month". It uses the existing `tracking.Repository.WeightSeries(ctx, userID, from, to)` read, surfaced on `Context` as a new grounded field so the "every value traces back to a repository read" invariant holds. With fewer than two weight entries in the window there is no trend to state and the candidate is omitted rather than guessed. The candidate is also omitted when the observed span is under 7 days (`minWeightTrendSpanDays`), even with a valid delta — a shorter span is dominated by the same water-weight noise the 30-day window exists to avoid.
 
 **The mockup's projection is dropped.** *"on pace for 75kg in ~6 weeks"* is a forecast, not a logged number, and it frames a weight-loss goal — both reasons to leave it out. Text states the observed delta only.
 
