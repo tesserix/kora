@@ -12,11 +12,33 @@ import (
 // nudging off a single off day.
 const minFiberBelowTargetStreakDays = 2
 
+// NudgeKind classifies a nudge so the client can pick an icon and accent
+// without the server shipping presentation details.
+type NudgeKind string
+
+const (
+	NudgeKindProtein     NudgeKind = "protein"
+	NudgeKindFibre       NudgeKind = "fibre"
+	NudgeKindWeightTrend NudgeKind = "weight_trend"
+)
+
 // Nudge is a coach message that survived the Protective guardrail policy,
 // ready to show to the user.
 type Nudge struct {
-	Text   string `json:"text"`
+	Kind  NudgeKind `json:"kind"`
+	Title string    `json:"title"`
+	Text  string    `json:"text"`
+	// Reason explains which policy branch fired. It is an internal audit
+	// string — never render it to users.
 	Reason string `json:"reason"`
+}
+
+// candidate pairs a policy-evaluable nudge with the kind it will carry
+// once it survives evaluation. guardrails.Nudge has no notion of kind, so
+// kind is carried alongside the policy input rather than through it.
+type candidate struct {
+	kind  NudgeKind
+	nudge guardrails.Nudge
 }
 
 // NudgeResult is the outcome of BuildNudges: the surviving nudges plus
@@ -35,15 +57,20 @@ type NudgeResult struct {
 // deliberate invariant, not an oversight: see
 // TestBuildNudges_NoSurvivingRestrictiveUnderRisk.
 func BuildNudges(c Context, s guardrails.Signals) NudgeResult {
-	candidates := candidateNudges(c)
+	candidates := candidateNudges(c, s)
 
 	nudges := make([]Nudge, 0, len(candidates))
 	for _, cand := range candidates {
-		d := guardrails.Evaluate(cand, s)
+		d := guardrails.Evaluate(cand.nudge, s)
 		if d.Action == guardrails.Suppress {
 			continue
 		}
-		nudges = append(nudges, Nudge{Text: d.Text, Reason: d.Reason})
+		nudges = append(nudges, Nudge{
+			Kind:   cand.kind,
+			Title:  d.Title,
+			Text:   d.Text,
+			Reason: d.Reason,
+		})
 	}
 
 	return NudgeResult{
@@ -55,14 +82,17 @@ func BuildNudges(c Context, s guardrails.Signals) NudgeResult {
 // candidateNudges builds the ordered set of additive nudge candidates from
 // c. Every candidate has Restrictive: false — this function must never
 // author one that steers toward eating less.
-func candidateNudges(c Context) []guardrails.Nudge {
-	var candidates []guardrails.Nudge
+//
+// s is accepted but not yet used here; a future nudge (weight-trend) gates
+// on it.
+func candidateNudges(c Context, s guardrails.Signals) []candidate {
+	var candidates []candidate
 
 	if n, ok := proteinGapNudge(c); ok {
-		candidates = append(candidates, n)
+		candidates = append(candidates, candidate{kind: NudgeKindProtein, nudge: n})
 	}
 	if n, ok := fiberLowStreakNudge(c); ok {
-		candidates = append(candidates, n)
+		candidates = append(candidates, candidate{kind: NudgeKindFibre, nudge: n})
 	}
 
 	return candidates
@@ -77,7 +107,9 @@ func proteinGapNudge(c Context) (guardrails.Nudge, bool) {
 		return guardrails.Nudge{}, false
 	}
 	return guardrails.Nudge{
-		Text:        fmt.Sprintf("%sg protein to go", fmtNum(gap)),
+		Title: "Protein",
+		Text: fmt.Sprintf("%s / %sg — %sg to go",
+			fmtNum(c.Today.Consumed.ProteinG), fmtNum(c.Today.Targets.ProteinG), fmtNum(gap)),
 		Restrictive: false,
 	}, true
 }
@@ -91,7 +123,8 @@ func fiberLowStreakNudge(c Context) (guardrails.Nudge, bool) {
 		return guardrails.Nudge{}, false
 	}
 	return guardrails.Nudge{
-		Text:        fmt.Sprintf("fibre low %d days", streak),
+		Title:       "Fibre is low",
+		Text:        fmt.Sprintf("Under target %d days running", streak),
 		Restrictive: false,
 	}, true
 }

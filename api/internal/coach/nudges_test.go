@@ -22,10 +22,52 @@ func TestBuildNudges_ProteinGapAdditive(t *testing.T) {
 	r := BuildNudges(c, SignalsFrom(c))
 
 	require.NotEmpty(t, r.Nudges)
-	require.Contains(t, r.Nudges[0].Text, "protein")
+	require.Equal(t, "Protein", r.Nudges[0].Title)
 	require.Contains(t, r.Nudges[0].Text, "55")
 	require.NotEmpty(t, r.Nudges[0].Reason)
 	require.False(t, r.ShowSupport)
+}
+
+func TestBuildNudges_ProteinCarriesKindAndTitle(t *testing.T) {
+	c := Context{
+		Today: dashboard.Summary{
+			Consumed: dashboard.Totals{ProteinG: 65},
+			Targets:  dashboard.Totals{Kcal: 2000, ProteinG: 120},
+		},
+		AvgIntakeKcal: 1800,
+	}
+
+	r := BuildNudges(c, SignalsFrom(c))
+
+	require.NotEmpty(t, r.Nudges)
+	require.Equal(t, NudgeKindProtein, r.Nudges[0].Kind)
+	require.Equal(t, "Protein", r.Nudges[0].Title)
+	require.Contains(t, r.Nudges[0].Text, "55")
+	require.Contains(t, r.Nudges[0].Text, "120")
+}
+
+func TestBuildNudges_FibreCarriesKindAndTitle(t *testing.T) {
+	c := Context{
+		Today: dashboard.Summary{
+			Consumed: dashboard.Totals{ProteinG: 120},
+			Targets:  dashboard.Totals{Kcal: 2000, ProteinG: 120, FiberG: 30},
+		},
+		RecentDaily: []DailyTotal{
+			{FiberG: 10}, {FiberG: 11}, {FiberG: 9},
+		},
+		AvgIntakeKcal: 1800,
+	}
+
+	r := BuildNudges(c, SignalsFrom(c))
+
+	var fibre *Nudge
+	for i := range r.Nudges {
+		if r.Nudges[i].Kind == NudgeKindFibre {
+			fibre = &r.Nudges[i]
+		}
+	}
+	require.NotNil(t, fibre, "expected a fibre nudge")
+	require.Equal(t, "Fibre is low", fibre.Title)
 }
 
 func TestBuildNudges_NoProteinGapWhenTargetMet(t *testing.T) {
@@ -40,7 +82,7 @@ func TestBuildNudges_NoProteinGapWhenTargetMet(t *testing.T) {
 	r := BuildNudges(c, SignalsFrom(c))
 
 	for _, n := range r.Nudges {
-		require.NotContains(t, n.Text, "protein")
+		require.NotEqual(t, NudgeKindProtein, n.Kind)
 	}
 }
 
@@ -61,7 +103,7 @@ func TestBuildNudges_FiberLowStreakAdditive(t *testing.T) {
 
 	found := false
 	for _, n := range r.Nudges {
-		if strings.Contains(n.Text, "fibre low") {
+		if n.Kind == NudgeKindFibre {
 			found = true
 		}
 	}
@@ -84,7 +126,7 @@ func TestBuildNudges_NoFiberStreakBelowThreshold(t *testing.T) {
 	r := BuildNudges(c, SignalsFrom(c))
 
 	for _, n := range r.Nudges {
-		require.NotContains(t, n.Text, "fibre low")
+		require.NotEqual(t, NudgeKindFibre, n.Kind)
 	}
 }
 
@@ -104,7 +146,7 @@ func TestBuildNudges_NoFiberNudgeWhenNoFiberTargetSet(t *testing.T) {
 	r := BuildNudges(c, SignalsFrom(c))
 
 	for _, n := range r.Nudges {
-		require.NotContains(t, n.Text, "fibre low")
+		require.NotEqual(t, NudgeKindFibre, n.Kind)
 	}
 }
 
