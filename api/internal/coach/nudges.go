@@ -82,9 +82,6 @@ func BuildNudges(c Context, s guardrails.Signals) NudgeResult {
 // candidateNudges builds the ordered set of additive nudge candidates from
 // c. Every candidate has Restrictive: false — this function must never
 // author one that steers toward eating less.
-//
-// s is accepted but not yet used here; a future nudge (weight-trend) gates
-// on it.
 func candidateNudges(c Context, s guardrails.Signals) []candidate {
 	var candidates []candidate
 
@@ -93,6 +90,16 @@ func candidateNudges(c Context, s guardrails.Signals) []candidate {
 	}
 	if n, ok := fiberLowStreakNudge(c); ok {
 		candidates = append(candidates, candidate{kind: NudgeKindFibre, nudge: n})
+	}
+	// The weight trend is gated on risk rather than marked Restrictive:
+	// a restrictive candidate would be Softened into the fixed reframe for
+	// every non-at-risk user, destroying the card for its whole audience.
+	// Gating keeps weight-loss framing away from at-risk users while
+	// leaving it intact for everyone else.
+	if !guardrails.AtRisk(s) {
+		if n, ok := weightTrendNudge(c); ok {
+			candidates = append(candidates, candidate{kind: NudgeKindWeightTrend, nudge: n})
+		}
 	}
 
 	return candidates
@@ -125,6 +132,27 @@ func fiberLowStreakNudge(c Context) (guardrails.Nudge, bool) {
 	return guardrails.Nudge{
 		Title:       "Fibre is low",
 		Text:        fmt.Sprintf("Under target %d days running", streak),
+		Restrictive: false,
+	}, true
+}
+
+// weightTrendNudge surfaces the observed weight change over the trailing
+// weightWindowDays. It states only what was logged: no projection, no goal
+// framing. Callers must gate it on !guardrails.AtRisk — see candidateNudges.
+func weightTrendNudge(c Context) (guardrails.Nudge, bool) {
+	tr := c.WeightTrend
+	if !tr.Valid || tr.DeltaKg == 0 {
+		return guardrails.Nudge{}, false
+	}
+	direction := "Up"
+	magnitude := tr.DeltaKg
+	if tr.DeltaKg < 0 {
+		direction = "Down"
+		magnitude = -tr.DeltaKg
+	}
+	return guardrails.Nudge{
+		Title:       "Weight trend",
+		Text:        fmt.Sprintf("%s %skg over %d days", direction, fmtNum(magnitude), tr.Days),
 		Restrictive: false,
 	}, true
 }

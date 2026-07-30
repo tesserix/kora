@@ -194,3 +194,90 @@ func TestBuildNudges_ShowSupportFalseWhenNoRisk(t *testing.T) {
 
 	require.False(t, r.ShowSupport)
 }
+
+func weightTrendContext(trend WeightTrend, avgKcal float64, fastingStreak int) Context {
+	return Context{
+		Today: dashboard.Summary{
+			Consumed: dashboard.Totals{ProteinG: 120},
+			Targets:  dashboard.Totals{Kcal: 2000, ProteinG: 120},
+		},
+		AvgIntakeKcal:     avgKcal,
+		FastingStreakDays: fastingStreak,
+		WeightTrend:       trend,
+	}
+}
+
+func hasKind(nudges []Nudge, k NudgeKind) bool {
+	for _, n := range nudges {
+		if n.Kind == k {
+			return true
+		}
+	}
+	return false
+}
+
+func TestBuildNudges_WeightTrendShownWhenNotAtRisk(t *testing.T) {
+	c := weightTrendContext(WeightTrend{DeltaKg: -1.8, Days: 30, Valid: true}, 1800, 0)
+
+	r := BuildNudges(c, SignalsFrom(c))
+
+	require.True(t, hasKind(r.Nudges, NudgeKindWeightTrend))
+	for _, n := range r.Nudges {
+		if n.Kind == NudgeKindWeightTrend {
+			require.Equal(t, "Weight trend", n.Title)
+			require.Contains(t, n.Text, "1.8")
+			require.Contains(t, strings.ToLower(n.Text), "down")
+		}
+	}
+	require.False(t, r.ShowSupport)
+}
+
+func TestBuildNudges_WeightTrendHiddenWhenAtRisk_FastingStreak(t *testing.T) {
+	c := weightTrendContext(WeightTrend{DeltaKg: -1.8, Days: 30, Valid: true}, 1800, 3)
+
+	r := BuildNudges(c, SignalsFrom(c))
+
+	require.True(t, r.ShowSupport)
+	require.False(t, hasKind(r.Nudges, NudgeKindWeightTrend),
+		"weight-loss framing must never be shown to an at-risk user")
+}
+
+func TestBuildNudges_WeightTrendHiddenWhenAtRisk_LowIntake(t *testing.T) {
+	c := weightTrendContext(WeightTrend{DeltaKg: -1.8, Days: 30, Valid: true}, 1100, 0)
+
+	r := BuildNudges(c, SignalsFrom(c))
+
+	require.True(t, r.ShowSupport)
+	require.False(t, hasKind(r.Nudges, NudgeKindWeightTrend))
+}
+
+func TestBuildNudges_WeightTrendHiddenWhenAtRisk_ObsessiveLogging(t *testing.T) {
+	c := weightTrendContext(WeightTrend{DeltaKg: -1.8, Days: 30, Valid: true}, 1800, 0)
+	c.LogsPerDay = 12
+
+	r := BuildNudges(c, SignalsFrom(c))
+
+	require.True(t, r.ShowSupport)
+	require.False(t, hasKind(r.Nudges, NudgeKindWeightTrend))
+}
+
+func TestBuildNudges_NoWeightTrendWhenInvalid(t *testing.T) {
+	c := weightTrendContext(WeightTrend{}, 1800, 0)
+
+	r := BuildNudges(c, SignalsFrom(c))
+
+	require.False(t, hasKind(r.Nudges, NudgeKindWeightTrend))
+}
+
+func TestBuildNudges_WeightGainPhrasedAsUp(t *testing.T) {
+	c := weightTrendContext(WeightTrend{DeltaKg: 1.2, Days: 30, Valid: true}, 1800, 0)
+
+	r := BuildNudges(c, SignalsFrom(c))
+
+	require.True(t, hasKind(r.Nudges, NudgeKindWeightTrend))
+	for _, n := range r.Nudges {
+		if n.Kind == NudgeKindWeightTrend {
+			require.Contains(t, strings.ToLower(n.Text), "up")
+		}
+	}
+}
