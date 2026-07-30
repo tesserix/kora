@@ -146,13 +146,21 @@ CREATE TABLE coach_turns (
     user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     role       TEXT NOT NULL,                          -- 'user' | 'otto'
     text       TEXT NOT NULL,
-    citations  JSONB NOT NULL DEFAULT '[]'::jsonb,     -- otto turns only
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX ix_coach_turns_user_created ON coach_turns (user_id, created_at);
+
+CREATE TABLE coach_turn_citations (
+    id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    turn_id  UUID NOT NULL REFERENCES coach_turns(id) ON DELETE CASCADE,
+    label    TEXT NOT NULL,
+    value    TEXT NOT NULL,
+    position INT NOT NULL
+);
+CREATE INDEX ix_coach_turn_citations_turn ON coach_turn_citations (turn_id);
 ```
 
-Citations live in `JSONB`, not a child table — display-only, never queried, so a join buys nothing.
+**Citations use a child table, not `JSONB`.** An earlier draft of this spec specified `JSONB` on the reasoning that citations are display-only and never queried, so a join buys nothing. That reasoning still holds in isolation, but the codebase has **zero** `JSONB` usage anywhere, so it would mean introducing a new storage pattern plus either a new dependency (`gorm.io/datatypes`) or a hand-rolled `sql.Scanner`/`driver.Valuer`. Meanwhile `saved_meals` / `saved_meal_items` (migration `000017`) is a direct precedent for "parent row plus ordered children", including the `position` column. Following the established pattern wins here; `position` preserves citation order without relying on insertion order.
 
 **Migration hygiene:** verify `coach_turns` is not already created by an earlier migration before adding this file, and run the full chain against a fresh database. This is exactly the failure PR #56 fixed.
 
