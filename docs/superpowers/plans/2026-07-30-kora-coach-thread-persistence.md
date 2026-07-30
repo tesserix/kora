@@ -356,7 +356,7 @@ func (r ThreadRepository) ListRecent(ctx context.Context, userID uuid.UUID, limi
 	rows := []Turn{}
 	if err := r.db.WithContext(ctx).
 		Where("user_id = ?", userID).
-		Order("created_at DESC, id DESC").
+		Order("seq DESC").
 		Limit(limit).
 		Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("coach: list recent turns: %w", err)
@@ -406,7 +406,7 @@ func (r ThreadRepository) citationsFor(ctx context.Context, turns []Turn) (map[u
 }
 ```
 
-Note the ordering: turns are selected `created_at DESC, id DESC` so the `LIMIT` keeps the newest, then reversed in Go for display. `id DESC` is the tiebreak — two turns in the same transaction can share a `created_at` at microsecond resolution, and without a stable tiebreak the question/answer pair could invert.
+**Order by `seq`, never by `created_at`.** `AppendExchange` writes both turns in one transaction, and Postgres `now()` returns the *transaction-start* timestamp — so a question and its answer get a **byte-identical `created_at`** (verified empirically against this schema). Ordering by `created_at` would leave their relative order undefined, and a UUID `id` tiebreak cannot help because the ids are random. `coach_turns.seq` is a `BIGSERIAL` assigned per insert, so it is strictly increasing and is the only stable ordering key. Turns are selected `seq DESC` so the `LIMIT` keeps the newest, then reversed in Go for display. `created_at` remains what the client shows.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -414,7 +414,9 @@ Run: `cd api && TEST_DATABASE_URL='postgres://kora:kora_dev@localhost:55432/kora
 
 Expected: PASS (4 tests).
 
-**If `TestThreadRepository_AppendAndListRoundTrip` shows the otto turn before the user turn**, the `created_at` tiebreak is failing — both rows were inserted in the same transaction with an identical `now()`. `id DESC` alone will not fix that, since UUIDs are random. In that case add an explicit ordinal: add a `seq INT NOT NULL` column to the migration set per exchange (user=0, otto=1) and order by `created_at DESC, seq DESC`. Report if you hit this rather than reordering the tests to match wrong behaviour.
+**If `TestThreadRepository_AppendAndListRoundTrip` shows the otto turn before the user turn**, the query is ordering by `created_at` somewhere instead of `seq`. Fix the ordering — do NOT reorder the test to match the wrong behaviour. The `seq` column exists precisely because same-transaction rows share a `created_at`; this test is what proves it is being used.
+
+Also note `Turn.Seq` is database-assigned (`gorm:"->;autoIncrement"`, read-only to GORM). Never set it in Go — let the sequence assign it.
 
 - [ ] **Step 5: Commit**
 
