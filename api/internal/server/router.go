@@ -36,8 +36,9 @@ type Deps struct {
 	Verifier auth.TokenVerifier
 	Resolver *resolve.Handler
 	// Provider is the AI backend the coach's Q&A endpoint generates text
-	// with. nil (no GEMINI_API_KEY configured) is only exercised in tests —
-	// production always sets it alongside Resolver.
+	// with. If nil (e.g. GEMINI_API_KEY unset), coach.Service.Ask degrades
+	// gracefully instead of calling it — /coach/nudges is unaffected either
+	// way since it never touches the provider.
 	Provider ai.Provider
 }
 

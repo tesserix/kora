@@ -29,6 +29,11 @@ Rules:
 // budget — Ask degrades gracefully instead of calling the provider.
 const budgetDegradedText = "I've hit today's usage limit — try again later."
 
+// providerUnavailableText is shown when no ai.Provider is configured (e.g.
+// GEMINI_API_KEY unset) — Ask degrades gracefully instead of nil-panicking
+// on the provider call.
+const providerUnavailableText = "Q&A isn't available right now — try again later."
+
 // emptyQuestionMessage is the client-safe message for a blank/whitespace-only
 // question, surfaced via httpx.ValidationError so the HTTP layer maps it to
 // a 400.
@@ -112,6 +117,10 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 		return Answer{}, fmt.Errorf("coach: ask: build context: %w", err)
 	}
 	signals := SignalsFrom(grounded)
+
+	if s.provider == nil {
+		return Answer{Text: providerUnavailableText, ShowSupport: guardrails.AtRisk(signals)}, nil
+	}
 
 	ok, err := s.meter.WithinBudget(ctx, userID)
 	if err != nil {

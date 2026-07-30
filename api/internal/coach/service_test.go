@@ -129,6 +129,26 @@ func TestAsk_OverBudgetDegradesGracefully(t *testing.T) {
 	require.Contains(t, a.Text, "usage limit")
 }
 
+func TestAsk_NilProviderDegradesGracefully(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc)
+
+	meter := &stubMeter{withinBudget: true}
+	svc := NewService(&g, nil, meter)
+
+	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
+	a, err := svc.Ask(context.Background(), userID, now, time.UTC, "how's my protein?")
+
+	require.NoError(t, err, "a nil provider must degrade gracefully, not error or panic")
+	require.Equal(t, providerUnavailableText, a.Text)
+	require.Empty(t, meter.records, "Record must never be called on the nil-provider path")
+}
+
 func TestAsk_EmptyQuestion(t *testing.T) {
 	svc := NewService(nil, &fakeProvider{}, &stubMeter{withinBudget: true})
 
