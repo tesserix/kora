@@ -323,9 +323,15 @@ func TestBuildContextCallsWeightSeriesWithCorrectArguments(t *testing.T) {
 
 	require.Equal(t, userID, calls.userID, "WeightSeries must be called with the same userID passed to BuildContext")
 	require.True(t, calls.to.Equal(now), "WeightSeries's `to` must be the `now` passed to BuildContext, got %v want %v", calls.to, now)
-	wantFrom := windowStartDays(now, loc, weightWindowDays)
+
+	// Computed independently of windowStartDays so this test exercises behavior,
+	// not the helper's own implementation: the local-midnight start of the
+	// trailing 30-day weight window.
+	nowLocal := now.In(loc)
+	wantFrom := time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day(), 0, 0, 0, 0, loc).
+		AddDate(0, 0, -29) // weightWindowDays - 1
 	require.True(t, calls.from.Equal(wantFrom),
-		"WeightSeries's `from` must be 29 days before now's local midnight (windowStartDays(now, loc, weightWindowDays)), got %v want %v",
+		"WeightSeries's `from` must be 29 days before now's local midnight (30-day window), got %v want %v",
 		calls.from, wantFrom)
 }
 
