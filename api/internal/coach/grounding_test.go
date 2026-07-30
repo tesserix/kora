@@ -140,3 +140,69 @@ func TestBuildContextFastingStreakCountsConsecutiveZeroKcalDaysFromToday(t *test
 
 	require.Equal(t, 3, ctx.FastingStreakDays, "today + 2 preceding zero-kcal days")
 }
+
+// TestBuildContextWindowStartMatchesAcrossFetchAndBucketing is a regression
+// test for the day-window boundary drift: the DB fetch's `since` and
+// aggregateDaily's bucketing must use the identical local-midnight boundary,
+// or the oldest day of the window silently loses logs. This is worst when
+// now (typically time.Now().UTC(), per the real call pattern) is in a
+// different Location than loc (the user's zone) — the old
+// `since := now.AddDate(0,0,-(recentWindowDays-1))` kept now's own
+// clock-time and Location, drifting away from the local-midnight-aligned
+// `startDay` aggregateDaily computed from now.In(loc).
+//
+// This test fails against the pre-fix code (the seeded log's day silently
+// drops out, DaysLogged/AvgIntakeKcal undercount, and RecentDeficitPct is
+// spuriously pinned at 1.0) and passes once both boundaries share one
+// windowStart helper.
+func TestBuildContextWindowStartMatchesAcrossFetchAndBucketing(t *testing.T) {
+	db := testDB(t)
+	targetKcal := 1000.0
+	userID := seedUser(t, db, targetKcal, 80)
+
+	logRepo := foodlog.NewRepository(db)
+	item := nutrition.FoodItem{
+		Name: "Coach Window Boundary Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD,
+		KcalPer100g: 100, ProteinPer100g: 10,
+	}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	// now matches the standard call pattern (time.Now().UTC()); loc is a
+	// fixed non-UTC zone distinct from now's Location, so any drift between
+	// the fetch boundary and the bucketing boundary shows up deterministically.
+	now := time.Now().UTC()
+	loc := time.FixedZone("IST", 5*3600+1800)
+
+	// Computed independently of the production windowStart helper (rather
+	// than calling it) so this test exercises behavior, not the helper's
+	// own implementation: the local-midnight start of the trailing window,
+	// mirroring what aggregateDaily's bucketing must align with.
+	nowLocal := now.In(loc)
+	oldestDayStart := time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day(), 0, 0, 0, 0, loc).
+		AddDate(0, 0, -(recentWindowDays - 1))
+	// Seeded just after local midnight on the oldest day of the window —
+	// the log a since/bucket boundary mismatch would drop.
+	seedLog(t, db, logRepo, foodlog.FoodLog{
+		UserID: userID, FoodItemID: &item.ID, LoggedAt: oldestDayStart.Add(time.Minute),
+		MealSlot: "breakfast", Source: "manual", Provenance: nutrition.ProvenanceAFCD,
+		QuantityGrams: 1000, Kcal: targetKcal, ProteinG: 100,
+	})
+
+	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc)
+
+	ctx, err := g.BuildContext(context.Background(), userID, now, loc)
+	require.NoError(t, err)
+
+	require.Equal(t, 1, ctx.DaysLogged,
+		"the oldest window day's log must not be dropped by a since/bucket boundary mismatch")
+	require.InDelta(t, targetKcal, ctx.RecentDaily[0].Kcal, 0.001,
+		"the seeded log must land in the oldest (index 0) day bucket")
+	require.InDelta(t, targetKcal/float64(recentWindowDays), ctx.AvgIntakeKcal, 0.001)
+
+	s := SignalsFrom(ctx)
+	require.Less(t, s.RecentDeficitPct, 0.99,
+		"a logged oldest day must pull RecentDeficitPct below the spurious all-days-deficit ceiling of 1.0")
+}

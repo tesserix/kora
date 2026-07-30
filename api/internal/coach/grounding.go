@@ -9,6 +9,7 @@ package coach
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -81,12 +82,12 @@ func (g Grounder) BuildContext(ctx context.Context, userID uuid.UUID, now time.T
 		return Context{}, fmt.Errorf("coach: build context: today summary: %w", err)
 	}
 
-	since := now.AddDate(0, 0, -(recentWindowDays - 1))
+	since := windowStart(now, loc)
 	logs, err := g.Logs.ListForUserSince(ctx, userID, since)
 	if err != nil {
 		return Context{}, fmt.Errorf("coach: build context: recent logs: %w", err)
 	}
-	recentDaily := aggregateDaily(logs, now, loc)
+	recentDaily := aggregateDaily(logs, since)
 
 	usual, err := g.Mem.Build(ctx, userID, now, loc)
 	if err != nil {
@@ -107,18 +108,28 @@ func (g Grounder) BuildContext(ctx context.Context, userID uuid.UUID, now time.T
 	}, nil
 }
 
-// aggregateDaily buckets logs into local calendar days spanning
-// [now-(recentWindowDays-1), now], oldest first. Days with no logs are
-// present in the result, zero-valued.
-func aggregateDaily(logs []foodlog.FoodLog, now time.Time, loc *time.Location) []DailyTotal {
+// windowStart returns the local-midnight (in loc) start of the trailing
+// recentWindowDays window ending on now's local calendar day. Both the DB
+// fetch (ListForUserSince) and aggregateDaily's bucketing MUST use this same
+// boundary — if they diverge, the oldest day in the window silently drops
+// logs whenever now's clock-time/Location differs from loc (see
+// coach.BuildContext's `now = time.Now().UTC()` + user-loc call pattern).
+func windowStart(now time.Time, loc *time.Location) time.Time {
 	nowLocal := now.In(loc)
-	startDay := time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day(), 0, 0, 0, 0, loc).
+	return time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day(), 0, 0, 0, 0, loc).
 		AddDate(0, 0, -(recentWindowDays - 1))
+}
 
+// aggregateDaily buckets logs into local calendar days spanning
+// [since, since+recentWindowDays-1], oldest first. Days with no logs are
+// present in the result, zero-valued. since must be the local-midnight start
+// produced by windowStart so bucketing lines up with the DB fetch boundary.
+func aggregateDaily(logs []foodlog.FoodLog, since time.Time) []DailyTotal {
+	loc := since.Location()
 	out := make([]DailyTotal, recentWindowDays)
 	index := make(map[string]int, recentWindowDays)
 	for i := 0; i < recentWindowDays; i++ {
-		d := startDay.AddDate(0, 0, i)
+		d := since.AddDate(0, 0, i)
 		out[i] = DailyTotal{Day: d}
 		index[d.Format("2006-01-02")] = i
 	}
@@ -228,8 +239,20 @@ func usualFoodsText(m memory.Memory) string {
 	return strings.Join(names, ", ")
 }
 
-// fmtNum renders a float deterministically without trailing zeros (1450 not
-// 1450.000000; 12.5 stays 12.5), so prose and Facts values match exactly.
+// fmtNumDisplayPrecision is the number of decimal places fmtNum rounds to.
+// This is prompt-hygiene only: full float precision (e.g.
+// "142.857142857143") is noisy and unnecessary in LLM-facing prose/Facts.
+const fmtNumDisplayPrecision = 1
+
+// fmtNum renders a float deterministically, rounded to
+// fmtNumDisplayPrecision decimal places with trailing zeros trimmed (1450
+// not 1450.0; 12.5 stays 12.5; 142.857142857143 becomes 142.9), so prose and
+// Facts values match exactly.
 func fmtNum(v float64) string {
-	return strconv.FormatFloat(v, 'f', -1, 64)
+	scale := math.Pow(10, fmtNumDisplayPrecision)
+	rounded := math.Round(v*scale) / scale
+	if rounded == 0 {
+		rounded = 0 // normalize -0 (e.g. from rounding a tiny negative value) to 0
+	}
+	return strconv.FormatFloat(rounded, 'f', -1, 64)
 }
