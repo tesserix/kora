@@ -558,6 +558,109 @@ func TestServiceThread_ShowSupportReflectsLiveSignalsNotStoredState(t *testing.T
 	require.Len(t, after.Turns, 2, "the stored exchange itself must still replay unchanged")
 }
 
+// TestServiceThread_ReplayedRestrictiveTurnSuppressedForAtRiskUser proves the
+// read-time re-gate: a stored Otto turn whose text is restrictive must not
+// replay verbatim for a user who is currently at-risk, even though nothing
+// re-generated it — Thread must re-run the same Protective policy Ask
+// applied at write time, against the CURRENT signals.
+func TestServiceThread_ReplayedRestrictiveTurnSuppressedForAtRiskUser(t *testing.T) {
+	db := testDB(t)
+	// No logs seeded: a fresh user is fasting the whole window, an ED-risk
+	// signal on its own (see TestAsk_RestrictiveAnswerSuppressedUnderRisk).
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	trackRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackRepo, db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackRepo)
+	threadRepo := NewThreadRepository(db)
+
+	const restrictiveRaw = "You've eaten enough today — try to cut back tomorrow."
+	require.NoError(t, threadRepo.AppendExchange(context.Background(), userID,
+		"how am I doing?", restrictiveRaw, nil))
+
+	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, &threadRepo)
+	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
+
+	result, err := svc.Thread(context.Background(), userID, now, time.UTC)
+	require.NoError(t, err)
+	require.True(t, result.ShowSupport, "fresh user with no logs should be at risk (fasting streak)")
+
+	require.Len(t, result.Turns, 2)
+	require.Equal(t, TurnRoleOtto, result.Turns[1].Role)
+	require.Equal(t, suppressedAnswerMessage, result.Turns[1].Text,
+		"a replayed restrictive Otto turn must be suppressed for an at-risk user, not shown raw")
+	require.NotEqual(t, restrictiveRaw, result.Turns[1].Text)
+}
+
+// TestServiceThread_ReplayedBenignTurnUnchanged proves the re-gate is not
+// overzealous: a stored Otto turn with ordinary supportive text — no
+// restrictive phrase — must replay exactly as stored, regardless of the
+// user's current risk state (Allow and Soften both preserve non-restrictive
+// text unchanged per guardrails.Evaluate).
+func TestServiceThread_ReplayedBenignTurnUnchanged(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	trackRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackRepo, db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackRepo)
+	threadRepo := NewThreadRepository(db)
+
+	const supportiveRaw = "You have 55g protein to go — a yoghurt would help."
+	require.NoError(t, threadRepo.AppendExchange(context.Background(), userID,
+		"how's my protein?", supportiveRaw, nil))
+
+	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, &threadRepo)
+	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
+
+	result, err := svc.Thread(context.Background(), userID, now, time.UTC)
+	require.NoError(t, err)
+
+	require.Len(t, result.Turns, 2)
+	require.Equal(t, TurnRoleOtto, result.Turns[1].Role)
+	require.Equal(t, supportiveRaw, result.Turns[1].Text,
+		"a benign stored turn must replay exactly as stored")
+}
+
+// TestServiceThread_UserTurnsNeverRewritten proves the re-gate only ever
+// touches TurnRoleOtto turns: a user's own words — even ones that happen to
+// contain a restrictivePhrases substring — must replay byte-identical to
+// what was stored. Re-gating a user's own question would be both wrong (the
+// guardrail governs what Otto says, not what the user asks) and unsafe (it
+// would silently alter a user's own words).
+func TestServiceThread_UserTurnsNeverRewritten(t *testing.T) {
+	db := testDB(t)
+	// No logs seeded: a fresh user is fasting the whole window, an ED-risk
+	// signal on its own.
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	trackRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackRepo, db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackRepo)
+	threadRepo := NewThreadRepository(db)
+
+	const userQuestion = "should I eat less?"
+	require.NoError(t, threadRepo.AppendExchange(context.Background(), userID,
+		userQuestion, "an answer", nil))
+
+	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, &threadRepo)
+	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
+
+	result, err := svc.Thread(context.Background(), userID, now, time.UTC)
+	require.NoError(t, err)
+
+	require.Len(t, result.Turns, 2)
+	require.Equal(t, TurnRoleUser, result.Turns[0].Role)
+	require.Equal(t, userQuestion, result.Turns[0].Text,
+		"re-gating must only ever touch TurnRoleOtto turns, never TurnRoleUser turns")
+}
+
 func TestServiceAsk_PersistsNothingOnProviderError(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db, 2000, 120)
