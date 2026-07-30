@@ -30,6 +30,12 @@ const (
 // decisions in this first slice of the policy.
 const softenedText = "Nice work today — you're on track."
 
+// SoftenedTitle is the neutral title paired with softenedText. A Soften
+// decision must replace the candidate's title as well as its text:
+// keeping the original would render a contradiction such as
+// "Fibre is low" above "Nice work today — you're on track."
+const SoftenedTitle = "Today"
+
 // supportReason and allow/soften reasons are short human-readable strings
 // set on Decision.Reason to explain which branch fired.
 const (
@@ -41,6 +47,7 @@ const (
 
 // Nudge is a candidate coach/insight message before it is shown.
 type Nudge struct {
+	Title       string
 	Text        string
 	Restrictive bool // true if it steers toward eating less / stopping (e.g. "you've eaten enough")
 }
@@ -66,19 +73,24 @@ const (
 
 // Decision is the result of applying the Protective policy to a Nudge.
 type Decision struct {
-	Action      Action
+	Action Action
+	// Title is the safe title to show: SoftenedTitle for Soften, the
+	// original for Allow, "" for Suppress. It is sanitised in lockstep
+	// with Text so the two can never contradict each other.
+	Title       string
 	Text        string // the safe text to show (reframed for Soften; original for Allow; "" for Suppress)
 	ShowSupport bool   // surface a supportive resource instead
 	Reason      string
 }
 
 // Evaluate applies the Protective policy to a candidate nudge given a
-// user's signals:
+// user's signals. Title and Text are sanitised together so they can never
+// contradict:
 //
-//   - risk + restrictive  -> Suppress, ShowSupport=true, Text=""
-//   - risk + not restrictive -> Allow, original text
-//   - no risk + restrictive -> Soften, fixed positive reframe
-//   - no risk + not restrictive -> Allow, original text
+//   - risk + restrictive  -> Suppress, ShowSupport=true, Title="", Text=""
+//   - risk + not restrictive -> Allow, original title and text
+//   - no risk + restrictive -> Soften, SoftenedTitle + fixed positive reframe
+//   - no risk + not restrictive -> Allow, original title and text
 func Evaluate(n Nudge, s Signals) Decision {
 	risk := AtRisk(s)
 
@@ -86,6 +98,7 @@ func Evaluate(n Nudge, s Signals) Decision {
 	case risk && n.Restrictive:
 		return Decision{
 			Action:      Suppress,
+			Title:       "",
 			Text:        "",
 			ShowSupport: true,
 			Reason:      reasonSuppressRestrictiveUnderRisk,
@@ -93,18 +106,21 @@ func Evaluate(n Nudge, s Signals) Decision {
 	case risk && !n.Restrictive:
 		return Decision{
 			Action: Allow,
+			Title:  n.Title,
 			Text:   n.Text,
 			Reason: reasonAllowUnderRisk,
 		}
 	case !risk && n.Restrictive:
 		return Decision{
 			Action: Soften,
+			Title:  SoftenedTitle,
 			Text:   softenedText,
 			Reason: reasonSoftenNoRisk,
 		}
 	default:
 		return Decision{
 			Action: Allow,
+			Title:  n.Title,
 			Text:   n.Text,
 			Reason: reasonAllowNoRisk,
 		}

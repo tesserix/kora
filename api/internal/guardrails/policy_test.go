@@ -76,3 +76,35 @@ func TestAtRisk(t *testing.T) {
 	require.False(t, AtRisk(Signals{}))                 // zero value = no data
 	require.False(t, AtRisk(Signals{AvgIntakeKcal: 2000}))
 }
+
+func TestEvaluate_SoftenNeutralisesTitleAndText(t *testing.T) {
+	n := Nudge{Title: "Fibre is low", Text: "under target 4 days", Restrictive: true}
+
+	d := Evaluate(n, Signals{}) // zero Signals == no data == not at risk
+
+	require.Equal(t, Soften, d.Action)
+	require.Equal(t, SoftenedTitle, d.Title)
+	require.NotEqual(t, "Fibre is low", d.Title)
+	require.NotEqual(t, "under target 4 days", d.Text)
+}
+
+func TestEvaluate_SuppressClearsTitleAndText(t *testing.T) {
+	n := Nudge{Title: "Fibre is low", Text: "under target 4 days", Restrictive: true}
+
+	d := Evaluate(n, Signals{FastingStreakDays: 3}) // at risk
+
+	require.Equal(t, Suppress, d.Action)
+	require.Empty(t, d.Title)
+	require.Empty(t, d.Text)
+	require.True(t, d.ShowSupport)
+}
+
+func TestEvaluate_AllowPassesTitleThrough(t *testing.T) {
+	n := Nudge{Title: "Protein", Text: "55g to go", Restrictive: false}
+
+	d := Evaluate(n, Signals{})
+
+	require.Equal(t, Allow, d.Action)
+	require.Equal(t, "Protein", d.Title)
+	require.Equal(t, "55g to go", d.Text)
+}
