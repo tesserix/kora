@@ -337,6 +337,42 @@ func TestBuildNudges_NoWeightTrendWhenSpanUnderADay(t *testing.T) {
 	require.False(t, hasKind(r.Nudges, NudgeKindWeightUp))
 }
 
+// TestBuildNudges_WeightTrendMinimumSpan pins the minWeightTrendSpanDays
+// guard: a span shorter than 7 days is dominated by water-weight noise and
+// must not be shown; 7 days and beyond must be.
+func TestBuildNudges_WeightTrendMinimumSpan(t *testing.T) {
+	tests := []struct {
+		name      string
+		days      int
+		wantShown bool
+	}{
+		{"1 day is below the minimum", 1, false},
+		{"6 days is below the minimum", 6, false},
+		{"7 days meets the minimum", 7, true},
+		{"30 days is well above the minimum", 30, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := weightTrendContext(WeightTrend{DeltaKg: -1.8, Days: tt.days, Valid: true}, 1800, 0)
+
+			r := BuildNudges(c, SignalsFrom(c))
+
+			require.Equal(t, tt.wantShown, hasKind(r.Nudges, NudgeKindWeightDown))
+		})
+	}
+}
+
+// TestDaysPhrase_SingularAndPlural pins the "1 day" vs "N days" grammar
+// directly on the helper: minWeightTrendSpanDays keeps 1-day trends from
+// ever reaching BuildNudges' output today, so the singular case can only be
+// exercised at this level.
+func TestDaysPhrase_SingularAndPlural(t *testing.T) {
+	require.Equal(t, "0 days", daysPhrase(0))
+	require.Equal(t, "1 day", daysPhrase(1))
+	require.Equal(t, "7 days", daysPhrase(7))
+	require.Equal(t, "30 days", daysPhrase(30))
+}
+
 // TestNudgeFromDecision_CollapsesKindOnSoften proves the Kind-sanitisation
 // fix at the presentation-channel level. There are no restrictive
 // candidates in production (see candidateNudges), so this drives the

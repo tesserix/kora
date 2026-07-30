@@ -12,6 +12,14 @@ import (
 // nudging off a single off day.
 const minFiberBelowTargetStreakDays = 2
 
+// minWeightTrendSpanDays is the minimum number of days a weight trend must
+// span before it is stated. A shorter span is dominated by day-to-day
+// water-weight fluctuation (see the weightWindowDays comment in
+// grounding.go), so it is not a trend worth stating — e.g. two weigh-ins 25
+// hours apart would otherwise render "Down 0.9kg over 1 day", which is
+// exactly the noise the 30-day window was chosen to avoid.
+const minWeightTrendSpanDays = 7
+
 // NudgeKind classifies a nudge so the client can pick an icon and accent
 // without the server shipping presentation details.
 type NudgeKind string
@@ -185,18 +193,27 @@ func weightTrendNudge(c Context) (NudgeKind, guardrails.Nudge, bool) {
 	if fmtNum(magnitude) == "0" {
 		return "", guardrails.Nudge{}, false
 	}
-	// Skip when the trend spans less than a day. Days is an elapsed-
-	// hours/24 truncation, so two entries inside the same 24h window
-	// produce Days: 0, which would render the self-contradictory "over 0
-	// days".
-	if tr.Days < 1 {
+	// Skip when the trend spans fewer than minWeightTrendSpanDays: a
+	// shorter span (including Days: 0, an elapsed-hours/24 truncation for
+	// two entries inside the same 24h window) is dominated by water-weight
+	// noise, not a trend worth stating.
+	if tr.Days < minWeightTrendSpanDays {
 		return "", guardrails.Nudge{}, false
 	}
 	return kind, guardrails.Nudge{
 		Title:       "Weight trend",
-		Text:        fmt.Sprintf("%s %skg over %d days", direction, fmtNum(magnitude), tr.Days),
+		Text:        fmt.Sprintf("%s %skg over %s", direction, fmtNum(magnitude), daysPhrase(tr.Days)),
 		Restrictive: false,
 	}, true
+}
+
+// daysPhrase renders an elapsed-days count with correct singular/plural
+// grammar: "1 day" vs "N days".
+func daysPhrase(days int) string {
+	if days == 1 {
+		return "1 day"
+	}
+	return fmt.Sprintf("%d days", days)
 }
 
 // fiberBelowTargetStreak counts consecutive days in c.RecentDaily, most
