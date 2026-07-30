@@ -144,20 +144,21 @@ Follows the `saved_meals` idiom (`gen_random_uuid()`, cascade on user, `ix_` ind
 CREATE TABLE coach_turns (
     id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    role       TEXT NOT NULL,                          -- 'user' | 'otto'
+    role       TEXT NOT NULL,
     text       TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    seq        BIGSERIAL NOT NULL
 );
-CREATE INDEX ix_coach_turns_user_created ON coach_turns (user_id, created_at);
+CREATE INDEX ix_coach_turns_user_seq ON coach_turns (user_id, seq);
 
 CREATE TABLE coach_turn_citations (
     id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     turn_id  UUID NOT NULL REFERENCES coach_turns(id) ON DELETE CASCADE,
     label    TEXT NOT NULL,
     value    TEXT NOT NULL,
-    position INT NOT NULL
+    position INT NOT NULL,
+    UNIQUE (turn_id, position)
 );
-CREATE INDEX ix_coach_turn_citations_turn ON coach_turn_citations (turn_id);
 ```
 
 **Citations use a child table, not `JSONB`.** An earlier draft of this spec specified `JSONB` on the reasoning that citations are display-only and never queried, so a join buys nothing. That reasoning still holds in isolation, but the codebase has **zero** `JSONB` usage anywhere, so it would mean introducing a new storage pattern plus either a new dependency (`gorm.io/datatypes`) or a hand-rolled `sql.Scanner`/`driver.Valuer`. Meanwhile `saved_meals` / `saved_meal_items` (migration `000017`) is a direct precedent for "parent row plus ordered children", including the `position` column. Following the established pattern wins here; `position` preserves citation order without relying on insertion order.
@@ -168,7 +169,7 @@ CREATE INDEX ix_coach_turn_citations_turn ON coach_turn_citations (turn_id);
 
 `GET /v1/coach/thread` → `{turns: [{role, text, citations, created_at}], show_support}`.
 
-Ordering is explicit: select the **50 most recent** turns by `created_at DESC`, then return them **oldest→newest** so the client renders top-to-bottom without reversing. A user with more than 50 turns sees their most recent 50, not their first 50.
+Ordering is explicit: select the **50 most recent** turns by `seq DESC`, then return them **oldest→newest** so the client renders top-to-bottom without reversing. A user with more than 50 turns sees their most recent 50, not their first 50.
 
 ### Behaviour
 

@@ -4,12 +4,12 @@ CREATE TABLE coach_turns (
     role       TEXT NOT NULL,
     text       TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    -- seq exists because a question and its answer are written in the same
-    -- transaction, and Postgres now() returns the transaction-start time for
-    -- both rows, so created_at alone cannot order them. seq is assigned at
-    -- insert time and is strictly increasing regardless of transaction
-    -- timing, giving replay a stable oldest-first order. Gaps from rollbacks
-    -- are fine — only relative order matters.
+    -- seq is the only sound ordering key. Via GORM the two turns' created_at
+    -- values differ by roughly 1ms (client-side clock reads, not a shared
+    -- transaction timestamp). Client-side clock readings are not guaranteed
+    -- strictly increasing (NTP steps, clock resolution), so seq — which the
+    -- database assigns atomically at insert time — gives replay a stable
+    -- ordering. Gaps from rollbacks are fine — only relative order matters.
     seq        BIGSERIAL NOT NULL
 );
 CREATE INDEX ix_coach_turns_user_seq ON coach_turns (user_id, seq);
