@@ -92,6 +92,49 @@ func (e *errorProvider) Name() string { return "error" }
 
 var _ ai.Provider = (*errorProvider)(nil)
 
+// recordingProvider is an ai.Provider test double that records the exact
+// systemPrompt/userPrompt it was called with, used to assert on precisely
+// what the model sees — e.g. that stored thread turns never leak into it.
+type recordingProvider struct {
+	systemPrompt string
+	userPrompt   string
+	answer       string
+}
+
+func (r *recordingProvider) IdentifyText(ctx context.Context, phrase string) ([]ai.Guess, ai.Usage, error) {
+	return nil, ai.Usage{}, nil
+}
+
+func (r *recordingProvider) IdentifyPhoto(ctx context.Context, image []byte, mime string) ([]ai.Guess, ai.Usage, error) {
+	return nil, ai.Usage{}, nil
+}
+
+func (r *recordingProvider) Decompose(ctx context.Context, dish string) ([]ai.IngredientGuess, ai.Usage, error) {
+	return nil, ai.Usage{}, nil
+}
+
+func (r *recordingProvider) Embed(ctx context.Context, text string) ([]float32, ai.Usage, error) {
+	return nil, ai.Usage{}, nil
+}
+
+func (r *recordingProvider) Transcribe(ctx context.Context, audio []byte, mime string) (string, ai.Usage, error) {
+	return "", ai.Usage{}, nil
+}
+
+func (r *recordingProvider) GenerateText(ctx context.Context, systemPrompt, userPrompt string) (string, ai.Usage, error) {
+	r.systemPrompt = systemPrompt
+	r.userPrompt = userPrompt
+	answer := r.answer
+	if answer == "" {
+		answer = "a canned recorded answer"
+	}
+	return answer, ai.Usage{}, nil
+}
+
+func (r *recordingProvider) Name() string { return "recording" }
+
+var _ ai.Provider = (*recordingProvider)(nil)
+
 // stubMeter is a configurable ai.Meter test double, mirroring the shape of
 // ai/resolver_test.go's stubMeter (kept local here since that one is
 // unexported in package ai).
@@ -404,6 +447,42 @@ func TestServiceAsk_DoesNotPersistWhenNoProvider(t *testing.T) {
 	turns, err := threadRepo.ListRecent(context.Background(), userID, maxThreadTurns)
 	require.NoError(t, err)
 	require.Empty(t, turns)
+}
+
+// TestServiceAsk_PriorTurnsNeverEnterThePrompt is the single most important
+// guard in this PR: persisting the thread for replay must never change what
+// the model sees. A prior exchange with a distinctive marker is stored, then
+// Ask is called for a new question — the marker must never appear in the
+// prompt passed to the provider. This must pass on first run: Task 3 wired
+// storage and replay only, it never touched prompt construction. If this
+// test ever fails, prompt construction was changed and must be reverted —
+// this test is the guard, never a target to satisfy by editing the assertion.
+func TestServiceAsk_PriorTurnsNeverEnterThePrompt(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	trackRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackRepo, db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackRepo)
+	threadRepo := NewThreadRepository(db)
+
+	// A prior exchange with a distinctive marker already in the thread.
+	require.NoError(t, threadRepo.AppendExchange(context.Background(), userID,
+		"UNIQUEPRIORQUESTION", "UNIQUEPRIORANSWER", nil))
+
+	rec := &recordingProvider{}
+	svc := NewService(&g, rec, &stubMeter{withinBudget: true}, &threadRepo)
+
+	_, err := svc.Ask(context.Background(), userID, time.Now().UTC(), time.UTC, "today's question")
+	require.NoError(t, err)
+
+	require.NotContains(t, rec.userPrompt, "UNIQUEPRIORQUESTION",
+		"store+replay only: a prior turn must never reach the prompt")
+	require.NotContains(t, rec.userPrompt, "UNIQUEPRIORANSWER",
+		"store+replay only: a prior answer must never reach the prompt")
+	require.Contains(t, rec.userPrompt, "today's question")
 }
 
 func TestServiceAsk_PersistsNothingOnProviderError(t *testing.T) {
