@@ -47,8 +47,9 @@ type Nudge struct {
 	Title string    `json:"title"`
 	Text  string    `json:"text"`
 	// Reason explains which policy branch fired. It is an internal audit
-	// string — never render it to users.
-	Reason string `json:"reason"`
+	// string — never render it to users, and never serialise it to the
+	// client: the handler logs it server-side instead (see handler.go).
+	Reason string `json:"-"`
 }
 
 // candidate pairs a policy-evaluable nudge with the kind it will carry

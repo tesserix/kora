@@ -1,6 +1,8 @@
 package coach
 
 import (
+	"context"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -45,7 +47,18 @@ func (h Handler) Nudges(c *gin.Context) {
 		httpx.RespondServiceError(c, err)
 		return
 	}
+	logNudgeReasons(c.Request.Context(), userID, result.Nudges)
 	httpx.OK(c, gin.H{"nudges": result.Nudges, "show_support": result.ShowSupport})
+}
+
+// logNudgeReasons preserves the guardrail audit trail server-side: Reason
+// is not serialised to the client (see Nudge.Reason), so this is the only
+// place it is recorded now.
+func logNudgeReasons(ctx context.Context, userID uuid.UUID, nudges []Nudge) {
+	for _, n := range nudges {
+		slog.DebugContext(ctx, "coach: nudge decision",
+			"user_id", userID, "kind", n.Kind, "reason", n.Reason)
+	}
 }
 
 // askRequest is the Ask endpoint's request body.
