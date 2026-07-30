@@ -77,10 +77,15 @@ func TestBuildNudges_NoProteinGapWhenTargetMet(t *testing.T) {
 			Targets:  dashboard.Totals{Kcal: 2000, ProteinG: 120},
 		},
 		AvgIntakeKcal: 1800,
+		// A valid weight trend guarantees at least one surviving nudge, so
+		// this loop actually iterates and the NotEqual assertion below is
+		// not vacuously true over an empty slice.
+		WeightTrend: WeightTrend{DeltaKg: -1.8, Days: 30, Valid: true},
 	}
 
 	r := BuildNudges(c, SignalsFrom(c))
 
+	require.NotEmpty(t, r.Nudges, "test setup must produce at least one nudge for this assertion to mean anything")
 	for _, n := range r.Nudges {
 		require.NotEqual(t, NudgeKindProtein, n.Kind)
 	}
@@ -118,13 +123,20 @@ func TestBuildNudges_NoFiberStreakBelowThreshold(t *testing.T) {
 		},
 		AvgIntakeKcal: 1800,
 		RecentDaily: []DailyTotal{
-			{FiberG: 40}, {FiberG: 40}, {FiberG: 40}, {FiberG: 40},
-			{FiberG: 40}, {FiberG: 40}, {FiberG: 5}, // only today is below target
+			// Kcal matches the 2000 target on every day so recentDeficitPct
+			// stays 0 and AtRisk doesn't gate off the weight candidate below.
+			{Kcal: 2000, FiberG: 40}, {Kcal: 2000, FiberG: 40}, {Kcal: 2000, FiberG: 40}, {Kcal: 2000, FiberG: 40},
+			{Kcal: 2000, FiberG: 40}, {Kcal: 2000, FiberG: 40}, {Kcal: 2000, FiberG: 5}, // only today is below target
 		},
+		// A valid weight trend guarantees at least one surviving nudge, so
+		// this loop actually iterates and the NotEqual assertion below is
+		// not vacuously true over an empty slice.
+		WeightTrend: WeightTrend{DeltaKg: -1.8, Days: 30, Valid: true},
 	}
 
 	r := BuildNudges(c, SignalsFrom(c))
 
+	require.NotEmpty(t, r.Nudges, "test setup must produce at least one nudge for this assertion to mean anything")
 	for _, n := range r.Nudges {
 		require.NotEqual(t, NudgeKindFibre, n.Kind)
 	}
@@ -138,13 +150,20 @@ func TestBuildNudges_NoFiberNudgeWhenNoFiberTargetSet(t *testing.T) {
 		},
 		AvgIntakeKcal: 1800,
 		RecentDaily: []DailyTotal{
-			{FiberG: 0}, {FiberG: 0}, {FiberG: 0}, {FiberG: 0},
-			{FiberG: 0}, {FiberG: 0}, {FiberG: 0},
+			// Kcal matches the 2000 target on every day so recentDeficitPct
+			// stays 0 and AtRisk doesn't gate off the weight candidate below.
+			{Kcal: 2000, FiberG: 0}, {Kcal: 2000, FiberG: 0}, {Kcal: 2000, FiberG: 0}, {Kcal: 2000, FiberG: 0},
+			{Kcal: 2000, FiberG: 0}, {Kcal: 2000, FiberG: 0}, {Kcal: 2000, FiberG: 0},
 		},
+		// A valid weight trend guarantees at least one surviving nudge, so
+		// this loop actually iterates and the NotEqual assertion below is
+		// not vacuously true over an empty slice.
+		WeightTrend: WeightTrend{DeltaKg: -1.8, Days: 30, Valid: true},
 	}
 
 	r := BuildNudges(c, SignalsFrom(c))
 
+	require.NotEmpty(t, r.Nudges, "test setup must produce at least one nudge for this assertion to mean anything")
 	for _, n := range r.Nudges {
 		require.NotEqual(t, NudgeKindFibre, n.Kind)
 	}
@@ -404,4 +423,33 @@ func TestBuildNudges_WeightGainPhrasedAsUp(t *testing.T) {
 			require.Contains(t, strings.ToLower(n.Text), "up")
 		}
 	}
+}
+
+// TestBuildNudges_CandidateOrderingWithAllPresent pins the candidate
+// ordering contract documented on candidateNudges: protein, then fibre,
+// then weight, when all three are present simultaneously. The upcoming
+// home-screen entry card uses nudges[0] as the headline, so a silent
+// reordering here would silently change what that card shows.
+func TestBuildNudges_CandidateOrderingWithAllPresent(t *testing.T) {
+	c := Context{
+		Today: dashboard.Summary{
+			Consumed: dashboard.Totals{ProteinG: 65}, // gap vs target -> protein candidate
+			Targets:  dashboard.Totals{Kcal: 2000, ProteinG: 120, FiberG: 30},
+		},
+		AvgIntakeKcal: 1800,
+		RecentDaily: []DailyTotal{
+			// Kcal matches the 2000 target on every day so recentDeficitPct
+			// stays 0 and AtRisk doesn't gate off the weight candidate below.
+			{Kcal: 2000, FiberG: 10}, {Kcal: 2000, FiberG: 12}, {Kcal: 2000, FiberG: 10}, {Kcal: 2000, FiberG: 8},
+			{Kcal: 2000, FiberG: 5}, {Kcal: 2000, FiberG: 5}, {Kcal: 2000, FiberG: 5}, // below-target streak -> fibre candidate
+		},
+		WeightTrend: WeightTrend{DeltaKg: -1.8, Days: 30, Valid: true}, // -> weight candidate
+	}
+
+	r := BuildNudges(c, SignalsFrom(c))
+
+	require.Len(t, r.Nudges, 3, "test setup must produce all three candidates, got %+v", r.Nudges)
+	require.Equal(t, NudgeKindProtein, r.Nudges[0].Kind)
+	require.Equal(t, NudgeKindFibre, r.Nudges[1].Kind)
+	require.Equal(t, NudgeKindWeightDown, r.Nudges[2].Kind)
 }

@@ -73,7 +73,7 @@ func TestEvaluate_JustBelowThresholdsIsNotRisk(t *testing.T) {
 func TestAtRisk(t *testing.T) {
 	require.True(t, AtRisk(Signals{AvgIntakeKcal: 1100}))
 	require.True(t, AtRisk(Signals{FastingStreakDays: 3}))
-	require.False(t, AtRisk(Signals{}))                 // zero value = no data
+	require.False(t, AtRisk(Signals{})) // zero value = no data
 	require.False(t, AtRisk(Signals{AvgIntakeKcal: 2000}))
 }
 
@@ -86,6 +86,7 @@ func TestEvaluate_SoftenNeutralisesTitleAndText(t *testing.T) {
 	require.Equal(t, SoftenedTitle, d.Title)
 	require.NotEqual(t, "Fibre is low", d.Title)
 	require.NotEqual(t, "under target 4 days", d.Text)
+	require.Equal(t, softenedText, d.Text)
 }
 
 func TestEvaluate_SuppressClearsTitleAndText(t *testing.T) {
