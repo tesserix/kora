@@ -87,7 +87,7 @@ func TestBuildContextAggregatesRecentDailyAndRenders(t *testing.T) {
 
 	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
 	memSvc := memory.NewService(logRepo)
-	g := NewGrounder(dashSvc, logRepo, memSvc)
+	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{})
 
 	ctx, err := g.BuildContext(context.Background(), userID, now, loc)
 	require.NoError(t, err)
@@ -133,7 +133,7 @@ func TestBuildContextFastingStreakCountsConsecutiveZeroKcalDaysFromToday(t *test
 
 	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
 	memSvc := memory.NewService(logRepo)
-	g := NewGrounder(dashSvc, logRepo, memSvc)
+	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{})
 
 	ctx, err := g.BuildContext(context.Background(), userID, now, loc)
 	require.NoError(t, err)
@@ -191,7 +191,7 @@ func TestBuildContextWindowStartMatchesAcrossFetchAndBucketing(t *testing.T) {
 
 	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
 	memSvc := memory.NewService(logRepo)
-	g := NewGrounder(dashSvc, logRepo, memSvc)
+	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{})
 
 	ctx, err := g.BuildContext(context.Background(), userID, now, loc)
 	require.NoError(t, err)
@@ -205,4 +205,46 @@ func TestBuildContextWindowStartMatchesAcrossFetchAndBucketing(t *testing.T) {
 	s := SignalsFrom(ctx)
 	require.Less(t, s.RecentDeficitPct, 0.99,
 		"a logged oldest day must pull RecentDeficitPct below the spurious all-days-deficit ceiling of 1.0")
+}
+
+type fakeWeightSource struct {
+	entries []tracking.WeightEntry
+	err     error
+}
+
+func (f fakeWeightSource) WeightSeries(_ context.Context, _ uuid.UUID, _, _ time.Time) ([]tracking.WeightEntry, error) {
+	return f.entries, f.err
+}
+
+func TestWeightTrendFrom_DeltaOverWindow(t *testing.T) {
+	base := time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC)
+	entries := []tracking.WeightEntry{
+		{WeightKg: 80.0, LoggedAt: base},
+		{WeightKg: 79.1, LoggedAt: base.AddDate(0, 0, 10)},
+		{WeightKg: 78.2, LoggedAt: base.AddDate(0, 0, 20)},
+	}
+
+	tr := weightTrendFrom(entries)
+
+	require.True(t, tr.Valid)
+	require.InDelta(t, -1.8, tr.DeltaKg, 0.001)
+	require.Equal(t, 20, tr.Days)
+}
+
+func TestWeightTrendFrom_InvalidBelowTwoEntries(t *testing.T) {
+	require.False(t, weightTrendFrom(nil).Valid)
+	require.False(t, weightTrendFrom([]tracking.WeightEntry{{WeightKg: 80}}).Valid)
+}
+
+func TestWeightTrendFrom_GainIsPositiveDelta(t *testing.T) {
+	base := time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC)
+	entries := []tracking.WeightEntry{
+		{WeightKg: 78.0, LoggedAt: base},
+		{WeightKg: 79.0, LoggedAt: base.AddDate(0, 0, 7)},
+	}
+
+	tr := weightTrendFrom(entries)
+
+	require.True(t, tr.Valid)
+	require.InDelta(t, 1.0, tr.DeltaKg, 0.001)
 }

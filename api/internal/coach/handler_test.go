@@ -41,9 +41,10 @@ func TestHandlerNudges_Returns200WithNudges(t *testing.T) {
 	userID := seedUser(t, db, 2000, 120)
 
 	logRepo := foodlog.NewRepository(db)
-	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
+	trackingRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackingRepo, db)
 	memSvc := memory.NewService(logRepo)
-	g := NewGrounder(dashSvc, logRepo, memSvc)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackingRepo)
 
 	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true})
 	router := newTestRouter(userID, NewHandler(svc))
@@ -77,9 +78,10 @@ func TestHandlerAsk_EmptyQuestionReturns400InvalidInput(t *testing.T) {
 	userID := seedUser(t, db, 2000, 120)
 
 	logRepo := foodlog.NewRepository(db)
-	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
+	trackingRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackingRepo, db)
 	memSvc := memory.NewService(logRepo)
-	g := NewGrounder(dashSvc, logRepo, memSvc)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackingRepo)
 
 	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true})
 	router := newTestRouter(userID, NewHandler(svc))
@@ -106,9 +108,10 @@ func TestHandlerAsk_RealQuestionReturns200WithAnswerAndCitations(t *testing.T) {
 	userID := seedUser(t, db, 2000, 120)
 
 	logRepo := foodlog.NewRepository(db)
-	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
+	trackingRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackingRepo, db)
 	memSvc := memory.NewService(logRepo)
-	g := NewGrounder(dashSvc, logRepo, memSvc)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackingRepo)
 
 	provider := &fakeProvider{text: "You have protein remaining today."}
 	svc := NewService(&g, provider, &stubMeter{withinBudget: true})

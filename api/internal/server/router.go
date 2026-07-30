@@ -166,7 +166,7 @@ func NewRouter(deps Deps) *gin.Engine {
 			v1.POST("/resolve/barcode", deps.Resolver.ResolveBarcode)
 		}
 
-		coachGrounder := coach.NewGrounder(dashSvc, logRepo, memSvc)
+		coachGrounder := coach.NewGrounder(dashSvc, logRepo, memSvc, trackingRepo)
 		coachMeter := billing.NewMeter(deps.DB)
 		coachHandler := coach.NewHandler(coach.NewService(&coachGrounder, deps.Provider, coachMeter))
 		v1.GET("/coach/nudges", coachHandler.Nudges)
