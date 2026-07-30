@@ -17,9 +17,15 @@ const minFiberBelowTargetStreakDays = 2
 type NudgeKind string
 
 const (
-	NudgeKindProtein     NudgeKind = "protein"
-	NudgeKindFibre       NudgeKind = "fibre"
-	NudgeKindWeightTrend NudgeKind = "weight_trend"
+	NudgeKindProtein NudgeKind = "protein"
+	NudgeKindFibre   NudgeKind = "fibre"
+	// NudgeKindWeightDown and NudgeKindWeightUp split the weight-trend card
+	// by observed direction so the client can pick the right arrow/icon
+	// without string-matching server copy. Neither should be rendered with
+	// a celebratory or shaming accent — this is an ED-sensitive surface, and
+	// both a gain and a loss must use the same neutral accent.
+	NudgeKindWeightDown NudgeKind = "weight_down"
+	NudgeKindWeightUp   NudgeKind = "weight_up"
 	// NudgeKindToday is the neutral kind paired with a softened nudge: it
 	// matches guardrails.SoftenedTitle, so a Softened candidate never
 	// carries its original (now-contradictory) kind through to the client.
@@ -113,8 +119,8 @@ func candidateNudges(c Context, s guardrails.Signals) []candidate {
 	// Gating keeps weight-loss framing away from at-risk users while
 	// leaving it intact for everyone else.
 	if !guardrails.AtRisk(s) {
-		if n, ok := weightTrendNudge(c); ok {
-			candidates = append(candidates, candidate{kind: NudgeKindWeightTrend, nudge: n})
+		if kind, n, ok := weightTrendNudge(c); ok {
+			candidates = append(candidates, candidate{kind: kind, nudge: n})
 		}
 	}
 
@@ -155,15 +161,20 @@ func fiberLowStreakNudge(c Context) (guardrails.Nudge, bool) {
 // weightTrendNudge surfaces the observed weight change over the trailing
 // weightWindowDays. It states only what was logged: no projection, no goal
 // framing. Callers must gate it on !guardrails.AtRisk — see candidateNudges.
-func weightTrendNudge(c Context) (guardrails.Nudge, bool) {
+// The returned NudgeKind carries the observed direction (see
+// NudgeKindWeightDown/NudgeKindWeightUp) so candidateNudges can attach it
+// to the candidate.
+func weightTrendNudge(c Context) (NudgeKind, guardrails.Nudge, bool) {
 	tr := c.WeightTrend
 	if !tr.Valid {
-		return guardrails.Nudge{}, false
+		return "", guardrails.Nudge{}, false
 	}
 	direction := "Up"
+	kind := NudgeKindWeightUp
 	magnitude := tr.DeltaKg
 	if tr.DeltaKg < 0 {
 		direction = "Down"
+		kind = NudgeKindWeightDown
 		magnitude = -tr.DeltaKg
 	}
 	// Skip when the magnitude would display as zero (e.g. a 0.04kg delta
@@ -172,16 +183,16 @@ func weightTrendNudge(c Context) (guardrails.Nudge, bool) {
 	// 0.0kg"), not just uninformative. Deriving the check from fmtNum
 	// itself keeps this correct if the display precision ever changes.
 	if fmtNum(magnitude) == "0" {
-		return guardrails.Nudge{}, false
+		return "", guardrails.Nudge{}, false
 	}
 	// Skip when the trend spans less than a day. Days is an elapsed-
 	// hours/24 truncation, so two entries inside the same 24h window
 	// produce Days: 0, which would render the self-contradictory "over 0
 	// days".
 	if tr.Days < 1 {
-		return guardrails.Nudge{}, false
+		return "", guardrails.Nudge{}, false
 	}
-	return guardrails.Nudge{
+	return kind, guardrails.Nudge{
 		Title:       "Weight trend",
 		Text:        fmt.Sprintf("%s %skg over %d days", direction, fmtNum(magnitude), tr.Days),
 		Restrictive: false,

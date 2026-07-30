@@ -221,9 +221,9 @@ func TestBuildNudges_WeightTrendShownWhenNotAtRisk(t *testing.T) {
 
 	r := BuildNudges(c, SignalsFrom(c))
 
-	require.True(t, hasKind(r.Nudges, NudgeKindWeightTrend))
+	require.True(t, hasKind(r.Nudges, NudgeKindWeightDown))
 	for _, n := range r.Nudges {
-		if n.Kind == NudgeKindWeightTrend {
+		if n.Kind == NudgeKindWeightDown {
 			require.Equal(t, "Weight trend", n.Title)
 			require.Contains(t, n.Text, "1.8")
 			require.Contains(t, strings.ToLower(n.Text), "down")
@@ -238,8 +238,10 @@ func TestBuildNudges_WeightTrendHiddenWhenAtRisk_FastingStreak(t *testing.T) {
 	r := BuildNudges(c, SignalsFrom(c))
 
 	require.True(t, r.ShowSupport)
-	require.False(t, hasKind(r.Nudges, NudgeKindWeightTrend),
+	require.False(t, hasKind(r.Nudges, NudgeKindWeightDown),
 		"weight-loss framing must never be shown to an at-risk user")
+	require.False(t, hasKind(r.Nudges, NudgeKindWeightUp),
+		"weight-gain framing must never be shown to an at-risk user")
 }
 
 func TestBuildNudges_WeightTrendHiddenWhenAtRisk_LowIntake(t *testing.T) {
@@ -248,7 +250,8 @@ func TestBuildNudges_WeightTrendHiddenWhenAtRisk_LowIntake(t *testing.T) {
 	r := BuildNudges(c, SignalsFrom(c))
 
 	require.True(t, r.ShowSupport)
-	require.False(t, hasKind(r.Nudges, NudgeKindWeightTrend))
+	require.False(t, hasKind(r.Nudges, NudgeKindWeightDown))
+	require.False(t, hasKind(r.Nudges, NudgeKindWeightUp))
 }
 
 func TestBuildNudges_WeightTrendHiddenWhenAtRisk_ObsessiveLogging(t *testing.T) {
@@ -258,7 +261,8 @@ func TestBuildNudges_WeightTrendHiddenWhenAtRisk_ObsessiveLogging(t *testing.T) 
 	r := BuildNudges(c, SignalsFrom(c))
 
 	require.True(t, r.ShowSupport)
-	require.False(t, hasKind(r.Nudges, NudgeKindWeightTrend))
+	require.False(t, hasKind(r.Nudges, NudgeKindWeightDown))
+	require.False(t, hasKind(r.Nudges, NudgeKindWeightUp))
 }
 
 // TestBuildNudges_WeightTrendHiddenWhenAtRisk_Deficit covers the 7-day
@@ -293,8 +297,10 @@ func TestBuildNudges_WeightTrendHiddenWhenAtRisk_Deficit(t *testing.T) {
 	r := BuildNudges(c, s)
 
 	require.True(t, r.ShowSupport)
-	require.False(t, hasKind(r.Nudges, NudgeKindWeightTrend),
+	require.False(t, hasKind(r.Nudges, NudgeKindWeightDown),
 		"weight-loss framing must never be shown to an at-risk user (deficit threshold)")
+	require.False(t, hasKind(r.Nudges, NudgeKindWeightUp),
+		"weight-gain framing must never be shown to an at-risk user (deficit threshold)")
 }
 
 func TestBuildNudges_NoWeightTrendWhenInvalid(t *testing.T) {
@@ -302,7 +308,8 @@ func TestBuildNudges_NoWeightTrendWhenInvalid(t *testing.T) {
 
 	r := BuildNudges(c, SignalsFrom(c))
 
-	require.False(t, hasKind(r.Nudges, NudgeKindWeightTrend))
+	require.False(t, hasKind(r.Nudges, NudgeKindWeightDown))
+	require.False(t, hasKind(r.Nudges, NudgeKindWeightUp))
 }
 
 // TestBuildNudges_NoWeightTrendWhenMagnitudeRoundsToZero covers a valid
@@ -314,7 +321,8 @@ func TestBuildNudges_NoWeightTrendWhenMagnitudeRoundsToZero(t *testing.T) {
 
 	r := BuildNudges(c, SignalsFrom(c))
 
-	require.False(t, hasKind(r.Nudges, NudgeKindWeightTrend))
+	require.False(t, hasKind(r.Nudges, NudgeKindWeightDown))
+	require.False(t, hasKind(r.Nudges, NudgeKindWeightUp))
 }
 
 // TestBuildNudges_NoWeightTrendWhenSpanUnderADay covers a valid trend whose
@@ -325,7 +333,8 @@ func TestBuildNudges_NoWeightTrendWhenSpanUnderADay(t *testing.T) {
 
 	r := BuildNudges(c, SignalsFrom(c))
 
-	require.False(t, hasKind(r.Nudges, NudgeKindWeightTrend))
+	require.False(t, hasKind(r.Nudges, NudgeKindWeightDown))
+	require.False(t, hasKind(r.Nudges, NudgeKindWeightUp))
 }
 
 // TestNudgeFromDecision_CollapsesKindOnSoften proves the Kind-sanitisation
@@ -353,9 +362,9 @@ func TestBuildNudges_WeightGainPhrasedAsUp(t *testing.T) {
 
 	r := BuildNudges(c, SignalsFrom(c))
 
-	require.True(t, hasKind(r.Nudges, NudgeKindWeightTrend))
+	require.True(t, hasKind(r.Nudges, NudgeKindWeightUp))
 	for _, n := range r.Nudges {
-		if n.Kind == NudgeKindWeightTrend {
+		if n.Kind == NudgeKindWeightUp {
 			require.Contains(t, strings.ToLower(n.Text), "up")
 		}
 	}
