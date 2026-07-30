@@ -58,7 +58,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	resolveHandler := buildResolveHandler(context.Background(), cfg, db, logger)
+	resolveHandler, aiProvider := buildResolveHandler(context.Background(), cfg, db, logger)
 
 	schedCtx, schedCancel := context.WithCancel(context.Background())
 	if cfg.SchedulerInterval > 0 {
@@ -90,7 +90,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,
-		Handler: server.NewRouter(server.Deps{DB: db, Verifier: verifier, Resolver: resolveHandler}),
+		Handler: server.NewRouter(server.Deps{DB: db, Verifier: verifier, Resolver: resolveHandler, Provider: aiProvider}),
 	}
 
 	go func() {
@@ -116,18 +116,21 @@ func main() {
 }
 
 // buildResolveHandler composes the AI resolution engine from config. It
-// returns nil (resolve endpoints stay unmounted) when no Gemini key is set —
-// the rest of the API runs unchanged. The OpenAI-compatible fallback is
-// optional: with no OpenAI key, Gemini serves alone (no Router).
-func buildResolveHandler(ctx context.Context, cfg config.Config, db *gorm.DB, logger *slog.Logger) *resolve.Handler {
+// returns a nil handler (resolve endpoints stay unmounted) and a nil
+// provider when no Gemini key is set — the rest of the API runs unchanged.
+// The OpenAI-compatible fallback is optional: with no OpenAI key, Gemini
+// serves alone (no Router). The returned provider is also threaded into
+// server.Deps.Provider so the coach's Q&A endpoint can generate text without
+// building a second client.
+func buildResolveHandler(ctx context.Context, cfg config.Config, db *gorm.DB, logger *slog.Logger) (*resolve.Handler, ai.Provider) {
 	if cfg.GeminiAPIKey == "" {
 		logger.Info("resolve engine disabled (no GEMINI_API_KEY)")
-		return nil
+		return nil, nil
 	}
 	gemini, err := providers.NewGeminiProvider(ctx, cfg.GeminiAPIKey)
 	if err != nil {
 		logger.Error("gemini provider init failed — resolve engine disabled", "err", err)
-		return nil
+		return nil, nil
 	}
 
 	var provider ai.Provider = gemini
@@ -159,5 +162,5 @@ func buildResolveHandler(ctx context.Context, cfg config.Config, db *gorm.DB, lo
 	h := resolve.NewHandler(resolver, func(c context.Context, code string) (*nutrition.FoodItem, bool, error) {
 		return foods.ResolveBarcode(c, off, code)
 	})
-	return &h
+	return &h, provider
 }

@@ -236,6 +236,41 @@ func (p OpenAIProvider) Transcribe(ctx context.Context, audio []byte, mime strin
 	return "", ai.Usage{}, fmt.Errorf("openai: transcribe: not supported — transcription stays on Gemini (multimodal audio)")
 }
 
+// GenerateText produces a free-form text response (no response_format
+// schema) using the configured model, for conversational/coaching use cases.
+func (p OpenAIProvider) GenerateText(ctx context.Context, systemPrompt, userPrompt string) (string, ai.Usage, error) {
+	start := time.Now()
+
+	params := openai.ChatCompletionNewParams{
+		Model: p.model,
+		Messages: []openai.ChatCompletionMessageParamUnion{
+			openai.SystemMessage(systemPrompt),
+			openai.UserMessage(userPrompt),
+		},
+	}
+
+	resp, err := p.client.Chat.Completions.New(ctx, params)
+
+	usage := ai.Usage{
+		Provider:  p.Name(),
+		Model:     p.model,
+		CallType:  callTypeCoach,
+		LatencyMs: int(time.Since(start).Milliseconds()),
+	}
+	if resp != nil {
+		usage.TokensIn = int(resp.Usage.PromptTokens)
+		usage.TokensOut = int(resp.Usage.CompletionTokens)
+	}
+	if err != nil {
+		return "", usage, fmt.Errorf("openai: chat completion: %w", err)
+	}
+	if len(resp.Choices) == 0 {
+		return "", usage, fmt.Errorf("openai: chat completion: no choices in response")
+	}
+
+	return resp.Choices[0].Message.Content, usage, nil
+}
+
 // jsonObjectSchemaHint renders a compact description of a JSON schema's shape
 // for embedding in a system prompt when json_object mode can't enforce the
 // schema server-side. It lists the required top-level key and item fields.

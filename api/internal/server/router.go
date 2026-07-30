@@ -6,8 +6,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"github.com/tesserix/kora/api/internal/ai"
 	"github.com/tesserix/kora/api/internal/auth"
+	"github.com/tesserix/kora/api/internal/billing"
 	"github.com/tesserix/kora/api/internal/challenges"
+	"github.com/tesserix/kora/api/internal/coach"
 	"github.com/tesserix/kora/api/internal/compare"
 	"github.com/tesserix/kora/api/internal/dashboard"
 	"github.com/tesserix/kora/api/internal/devices"
@@ -32,6 +35,11 @@ type Deps struct {
 	DB       *gorm.DB
 	Verifier auth.TokenVerifier
 	Resolver *resolve.Handler
+	// Provider is the AI backend the coach's Q&A endpoint generates text
+	// with. If nil (e.g. GEMINI_API_KEY unset), coach.Service.Ask degrades
+	// gracefully instead of calling it — /coach/nudges is unaffected either
+	// way since it never touches the provider.
+	Provider ai.Provider
 }
 
 func NewRouter(deps Deps) *gin.Engine {
@@ -86,7 +94,8 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.POST("/logs/:id/repeat", logHandler.Repeat)
 		v1.POST("/logs/batch", logHandler.CreateBatch)
 
-		memoryHandler := memory.NewHandler(memory.NewService(logRepo))
+		memSvc := memory.NewService(logRepo)
+		memoryHandler := memory.NewHandler(memSvc)
 		v1.GET("/memory", memoryHandler.Get)
 
 		nutritionHandler := nutrition.NewHandler(foodRepo)
@@ -123,7 +132,8 @@ func NewRouter(deps Deps) *gin.Engine {
 		compareHandler := compare.NewHandler(compare.NewService(socialRepo, userRepo, logRepo))
 		v1.GET("/friends/progress", compareHandler.Get)
 
-		dashboardHandler := dashboard.NewHandler(dashboard.NewService(logRepo, trackingRepo, deps.DB))
+		dashSvc := dashboard.NewService(logRepo, trackingRepo, deps.DB)
+		dashboardHandler := dashboard.NewHandler(dashSvc)
 		v1.GET("/dashboard", dashboardHandler.Get)
 
 		groupsRepo := groups.NewRepository(deps.DB)
@@ -155,6 +165,12 @@ func NewRouter(deps Deps) *gin.Engine {
 			v1.POST("/resolve/voice", deps.Resolver.ResolveVoice)
 			v1.POST("/resolve/barcode", deps.Resolver.ResolveBarcode)
 		}
+
+		coachGrounder := coach.NewGrounder(dashSvc, logRepo, memSvc)
+		coachMeter := billing.NewMeter(deps.DB)
+		coachHandler := coach.NewHandler(coach.NewService(&coachGrounder, deps.Provider, coachMeter))
+		v1.GET("/coach/nudges", coachHandler.Nudges)
+		v1.POST("/coach/ask", coachHandler.Ask)
 	}
 
 	r.NoRoute(func(c *gin.Context) {

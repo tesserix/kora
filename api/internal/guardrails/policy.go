@@ -14,7 +14,7 @@ const (
 
 	// riskAvgIntakeKcal is the avg daily intake (kcal) over the last 7
 	// days at or below which risk fires. A zero value means "no data"
-	// and must not itself count as risk — see atRisk.
+	// and must not itself count as risk — see AtRisk.
 	riskAvgIntakeKcal = 1200
 
 	// riskLogsPerDay is the avg food logs/day over the last 7 days at or
@@ -80,7 +80,7 @@ type Decision struct {
 //   - no risk + restrictive -> Soften, fixed positive reframe
 //   - no risk + not restrictive -> Allow, original text
 func Evaluate(n Nudge, s Signals) Decision {
-	risk := atRisk(s)
+	risk := AtRisk(s)
 
 	switch {
 	case risk && n.Restrictive:
@@ -111,13 +111,13 @@ func Evaluate(n Nudge, s Signals) Decision {
 	}
 }
 
-// atRisk reports whether any Protective risk threshold fires for s.
+// AtRisk reports whether any Protective risk threshold fires for s.
 //
 // AvgIntakeKcal is only treated as a risk signal when it is strictly
 // positive AND at or below riskAvgIntakeKcal: the zero value of Signals
 // means "no data", not "zero calories consumed", so it must not trigger
 // risk on its own.
-func atRisk(s Signals) bool {
+func AtRisk(s Signals) bool {
 	if s.RecentDeficitPct >= riskDeficitPct {
 		return true
 	}

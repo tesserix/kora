@@ -14,5 +14,10 @@ type Provider interface {
 	// into plain text. Only the primary (Gemini) implements it; the fallback
 	// returns an error, so audio is never sent to a text-only model.
 	Transcribe(ctx context.Context, audio []byte, mime string) (string, Usage, error)
+	// GenerateText produces a free-form text response for the given system
+	// and user prompts — no JSON schema, no structured output. Intended for
+	// conversational/coaching use cases where the answer is prose, not a
+	// parseable food/ingredient shape.
+	GenerateText(ctx context.Context, systemPrompt, userPrompt string) (string, Usage, error)
 	Name() string
 }

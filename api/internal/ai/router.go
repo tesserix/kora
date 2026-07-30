@@ -125,6 +125,17 @@ func (r *Router) Embed(ctx context.Context, text string) ([]float32, Usage, erro
 	)
 }
 
+func (r *Router) GenerateText(ctx context.Context, systemPrompt, userPrompt string) (string, Usage, error) {
+	return withFallback(ctx, r.textBudgetOrDefault(), r.fallbackBudgetOrDefault(),
+		func(c context.Context) (string, Usage, error) {
+			return r.Primary.GenerateText(c, systemPrompt, userPrompt)
+		},
+		func(c context.Context) (string, Usage, error) {
+			return r.Fallback.GenerateText(c, systemPrompt, userPrompt)
+		},
+	)
+}
+
 func (r *Router) Transcribe(ctx context.Context, audio []byte, mime string) (string, Usage, error) {
 	tctx, cancel := context.WithTimeout(ctx, transcribeBudget)
 	defer cancel()
