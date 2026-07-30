@@ -2,6 +2,7 @@ package coach
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -59,6 +60,38 @@ func (f *fakeProvider) Name() string { return "fake" }
 
 var _ ai.Provider = (*fakeProvider)(nil)
 
+// errorProvider is an ai.Provider test double whose GenerateText always
+// fails, used to exercise Ask's provider-error path.
+type errorProvider struct{}
+
+func (e *errorProvider) IdentifyText(ctx context.Context, phrase string) ([]ai.Guess, ai.Usage, error) {
+	return nil, ai.Usage{}, nil
+}
+
+func (e *errorProvider) IdentifyPhoto(ctx context.Context, image []byte, mime string) ([]ai.Guess, ai.Usage, error) {
+	return nil, ai.Usage{}, nil
+}
+
+func (e *errorProvider) Decompose(ctx context.Context, dish string) ([]ai.IngredientGuess, ai.Usage, error) {
+	return nil, ai.Usage{}, nil
+}
+
+func (e *errorProvider) Embed(ctx context.Context, text string) ([]float32, ai.Usage, error) {
+	return nil, ai.Usage{}, nil
+}
+
+func (e *errorProvider) Transcribe(ctx context.Context, audio []byte, mime string) (string, ai.Usage, error) {
+	return "", ai.Usage{}, nil
+}
+
+func (e *errorProvider) GenerateText(ctx context.Context, systemPrompt, userPrompt string) (string, ai.Usage, error) {
+	return "", ai.Usage{}, errors.New("provider boom")
+}
+
+func (e *errorProvider) Name() string { return "error" }
+
+var _ ai.Provider = (*errorProvider)(nil)
+
 // stubMeter is a configurable ai.Meter test double, mirroring the shape of
 // ai/resolver_test.go's stubMeter (kept local here since that one is
 // unexported in package ai).
@@ -95,7 +128,7 @@ func TestAsk_GroundedAnswerReturnsCitations(t *testing.T) {
 		textUsage: ai.Usage{Provider: "stub", Model: "test-model", CallType: "generate_text"},
 	}
 	meter := &stubMeter{withinBudget: true}
-	svc := NewService(&g, provider, meter)
+	svc := NewService(&g, provider, meter, nil)
 
 	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
 	a, err := svc.Ask(context.Background(), userID, now, time.UTC, "how's my protein?")
@@ -118,7 +151,7 @@ func TestAsk_OverBudgetDegradesGracefully(t *testing.T) {
 
 	provider := &fakeProvider{text: "should not be reached"}
 	meter := &stubMeter{withinBudget: false}
-	svc := NewService(&g, provider, meter)
+	svc := NewService(&g, provider, meter, nil)
 
 	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
 	a, err := svc.Ask(context.Background(), userID, now, time.UTC, "how's my protein?")
@@ -139,7 +172,7 @@ func TestAsk_NilProviderDegradesGracefully(t *testing.T) {
 	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{})
 
 	meter := &stubMeter{withinBudget: true}
-	svc := NewService(&g, nil, meter)
+	svc := NewService(&g, nil, meter, nil)
 
 	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
 	a, err := svc.Ask(context.Background(), userID, now, time.UTC, "how's my protein?")
@@ -150,7 +183,7 @@ func TestAsk_NilProviderDegradesGracefully(t *testing.T) {
 }
 
 func TestAsk_EmptyQuestion(t *testing.T) {
-	svc := NewService(nil, &fakeProvider{}, &stubMeter{withinBudget: true})
+	svc := NewService(nil, &fakeProvider{}, &stubMeter{withinBudget: true}, nil)
 
 	_, err := svc.Ask(context.Background(), uuid.New(), time.Now(), time.UTC, "  ")
 
@@ -226,7 +259,7 @@ func TestAsk_RestrictiveAnswerSuppressedUnderRisk(t *testing.T) {
 	const restrictiveRaw = "You've eaten enough today — try to cut back tomorrow."
 	provider := &fakeProvider{text: restrictiveRaw}
 	meter := &stubMeter{withinBudget: true}
-	svc := NewService(&g, provider, meter)
+	svc := NewService(&g, provider, meter, nil)
 
 	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
 	a, err := svc.Ask(context.Background(), userID, now, time.UTC, "how am I doing?")
@@ -253,7 +286,7 @@ func TestAsk_RestrictiveAnswerSoftenedWhenNoRisk(t *testing.T) {
 	const restrictiveRaw = "You've eaten enough today — try to cut back tomorrow."
 	provider := &fakeProvider{text: restrictiveRaw}
 	meter := &stubMeter{withinBudget: true}
-	svc := NewService(&g, provider, meter)
+	svc := NewService(&g, provider, meter, nil)
 
 	a, err := svc.Ask(context.Background(), userID, now, time.UTC, "how am I doing?")
 
@@ -279,7 +312,7 @@ func TestAsk_NonRestrictiveAnswerAllowedUnchanged(t *testing.T) {
 	const supportiveRaw = "You have 55g protein to go — a yoghurt would help."
 	provider := &fakeProvider{text: supportiveRaw}
 	meter := &stubMeter{withinBudget: true}
-	svc := NewService(&g, provider, meter)
+	svc := NewService(&g, provider, meter, nil)
 
 	a, err := svc.Ask(context.Background(), userID, now, time.UTC, "how's my protein?")
 
@@ -296,11 +329,100 @@ func TestNudges_WrapsBuildContextAndBuildNudges(t *testing.T) {
 	memSvc := memory.NewService(logRepo)
 	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{})
 
-	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true})
+	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, nil)
 
 	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
 	r, err := svc.Nudges(context.Background(), userID, now, time.UTC)
 
 	require.NoError(t, err)
 	require.NotEmpty(t, r.Nudges, "a fresh user with no logs should still get a protein-gap nudge")
+}
+
+func TestServiceAsk_PersistsExchange(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	trackRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackRepo, db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackRepo)
+	threadRepo := NewThreadRepository(db)
+
+	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, &threadRepo)
+
+	_, err := svc.Ask(context.Background(), userID, time.Now().UTC(), time.UTC, "what should I eat?")
+	require.NoError(t, err)
+
+	turns, err := threadRepo.ListRecent(context.Background(), userID, maxThreadTurns)
+	require.NoError(t, err)
+	require.Len(t, turns, 2)
+	require.Equal(t, TurnRoleUser, turns[0].Role)
+	require.Equal(t, "what should I eat?", turns[0].Text)
+	require.Equal(t, TurnRoleOtto, turns[1].Role)
+	require.NotEmpty(t, turns[1].Citations, "the answer's grounding facts should be stored")
+}
+
+func TestServiceAsk_DoesNotPersistWhenBudgetExhausted(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	trackRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackRepo, db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackRepo)
+	threadRepo := NewThreadRepository(db)
+
+	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: false}, &threadRepo)
+
+	ans, err := svc.Ask(context.Background(), userID, time.Now().UTC(), time.UTC, "hello")
+	require.NoError(t, err)
+	require.Equal(t, budgetDegradedText, ans.Text)
+
+	turns, err := threadRepo.ListRecent(context.Background(), userID, maxThreadTurns)
+	require.NoError(t, err)
+	require.Empty(t, turns, "a budget-degraded reply is a UI state, not a stored turn")
+}
+
+func TestServiceAsk_DoesNotPersistWhenNoProvider(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	trackRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackRepo, db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackRepo)
+	threadRepo := NewThreadRepository(db)
+
+	svc := NewService(&g, nil, &stubMeter{withinBudget: true}, &threadRepo)
+
+	_, err := svc.Ask(context.Background(), userID, time.Now().UTC(), time.UTC, "hello")
+	require.NoError(t, err)
+
+	turns, err := threadRepo.ListRecent(context.Background(), userID, maxThreadTurns)
+	require.NoError(t, err)
+	require.Empty(t, turns)
+}
+
+func TestServiceAsk_PersistsNothingOnProviderError(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	trackRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackRepo, db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackRepo)
+	threadRepo := NewThreadRepository(db)
+
+	svc := NewService(&g, &errorProvider{}, &stubMeter{withinBudget: true}, &threadRepo)
+
+	_, err := svc.Ask(context.Background(), userID, time.Now().UTC(), time.UTC, "hello")
+	require.Error(t, err)
+
+	turns, err := threadRepo.ListRecent(context.Background(), userID, maxThreadTurns)
+	require.NoError(t, err)
+	require.Empty(t, turns, "a failed generation must not leave an orphaned question")
 }

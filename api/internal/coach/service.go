@@ -3,6 +3,7 @@ package coach
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -95,11 +96,13 @@ type Service struct {
 	g        *Grounder
 	provider ai.Provider
 	meter    ai.Meter
+	thread   *ThreadRepository
 }
 
-// NewService builds a Service over its collaborators.
-func NewService(g *Grounder, p ai.Provider, m ai.Meter) *Service {
-	return &Service{g: g, provider: p, meter: m}
+// NewService builds a Service over its collaborators. thread may be nil, in
+// which case exchanges are answered but not persisted.
+func NewService(g *Grounder, p ai.Provider, m ai.Meter, thread *ThreadRepository) *Service {
+	return &Service{g: g, provider: p, meter: m, thread: thread}
 }
 
 // Ask answers a free-text question grounded over the user's Context. The
@@ -147,11 +150,48 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 		text = suppressedAnswerMessage
 	}
 
-	return Answer{
+	answer := Answer{
 		Text:        text,
 		Citations:   grounded.Facts(),
 		ShowSupport: decision.ShowSupport || guardrails.AtRisk(signals),
-	}, nil
+	}
+
+	// Store the exchange for replay only; prior turns are never fed back
+	// into the prompt. A storage failure must not lose an answer the user
+	// is already owed, so log and continue rather than returning an error.
+	if s.thread != nil {
+		if err := s.thread.AppendExchange(ctx, userID, question, answer.Text, answer.Citations); err != nil {
+			slog.WarnContext(ctx, "coach: failed to persist thread exchange", "err", err, "user_id", userID)
+		}
+	}
+
+	return answer, nil
+}
+
+// ThreadResult is a replayed thread plus the CURRENT support state.
+type ThreadResult struct {
+	Turns       []StoredTurn
+	ShowSupport bool
+}
+
+// Thread replays the user's stored turns. ShowSupport is recomputed from the
+// user's current signals rather than stored per turn: a stale risk flag must
+// not reappear, and a cleared one must not persist.
+func (s *Service) Thread(ctx context.Context, userID uuid.UUID, now time.Time, loc *time.Location) (ThreadResult, error) {
+	grounded, err := s.g.BuildContext(ctx, userID, now, loc)
+	if err != nil {
+		return ThreadResult{}, fmt.Errorf("coach: thread: build context: %w", err)
+	}
+
+	turns := []StoredTurn{}
+	if s.thread != nil {
+		turns, err = s.thread.ListRecent(ctx, userID, maxThreadTurns)
+		if err != nil {
+			return ThreadResult{}, fmt.Errorf("coach: thread: list turns: %w", err)
+		}
+	}
+
+	return ThreadResult{Turns: turns, ShowSupport: guardrails.AtRisk(SignalsFrom(grounded))}, nil
 }
 
 // Nudges is a thin wrapper: build the Context, derive Signals, and run them

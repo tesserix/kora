@@ -89,3 +89,39 @@ func (h Handler) Ask(c *gin.Context) {
 	}
 	httpx.OK(c, gin.H{"answer": answer.Text, "citations": answer.Citations, "show_support": answer.ShowSupport})
 }
+
+// threadTurnResponse is one replayed turn in the wire format. Field names are
+// snake_case because the mobile client codes against them.
+type threadTurnResponse struct {
+	Role      TurnRole  `json:"role"`
+	Text      string    `json:"text"`
+	Citations []Fact    `json:"citations"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// Thread replays the authenticated user's stored coach turns.
+func (h Handler) Thread(c *gin.Context) {
+	userID, ok := h.resolveUser(c)
+	if !ok {
+		return
+	}
+
+	now := time.Now().UTC()
+	loc := user.LocFromContext(c)
+	result, err := h.svc.Thread(c.Request.Context(), userID, now, loc)
+	if err != nil {
+		httpx.RespondServiceError(c, err)
+		return
+	}
+
+	turns := make([]threadTurnResponse, len(result.Turns))
+	for i, t := range result.Turns {
+		cites := t.Citations
+		if cites == nil {
+			cites = []Fact{}
+		}
+		turns[i] = threadTurnResponse{Role: t.Role, Text: t.Text, Citations: cites, CreatedAt: t.CreatedAt}
+	}
+
+	httpx.OK(c, gin.H{"turns": turns, "show_support": result.ShowSupport})
+}

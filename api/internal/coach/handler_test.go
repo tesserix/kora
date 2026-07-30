@@ -2,6 +2,7 @@ package coach
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -33,6 +34,7 @@ func newTestRouter(userID uuid.UUID, h Handler) *gin.Engine {
 	})
 	r.GET("/v1/coach/nudges", h.Nudges)
 	r.POST("/v1/coach/ask", h.Ask)
+	r.GET("/v1/coach/thread", h.Thread)
 	return r
 }
 
@@ -46,7 +48,7 @@ func TestHandlerNudges_Returns200WithNudges(t *testing.T) {
 	memSvc := memory.NewService(logRepo)
 	g := NewGrounder(dashSvc, logRepo, memSvc, trackingRepo)
 
-	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true})
+	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, nil)
 	router := newTestRouter(userID, NewHandler(svc))
 
 	w := httptest.NewRecorder()
@@ -83,7 +85,7 @@ func TestHandlerNudges_ResponseIncludesKindAndTitle(t *testing.T) {
 	memSvc := memory.NewService(logRepo)
 	g := NewGrounder(dashSvc, logRepo, memSvc, trackRepo)
 
-	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true})
+	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, nil)
 	router := newTestRouter(userID, NewHandler(svc))
 
 	w := httptest.NewRecorder()
@@ -126,7 +128,7 @@ func TestHandlerAsk_EmptyQuestionReturns400InvalidInput(t *testing.T) {
 	memSvc := memory.NewService(logRepo)
 	g := NewGrounder(dashSvc, logRepo, memSvc, trackingRepo)
 
-	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true})
+	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, nil)
 	router := newTestRouter(userID, NewHandler(svc))
 
 	payload, err := json.Marshal(askRequest{Question: ""})
@@ -157,7 +159,7 @@ func TestHandlerAsk_RealQuestionReturns200WithAnswerAndCitations(t *testing.T) {
 	g := NewGrounder(dashSvc, logRepo, memSvc, trackingRepo)
 
 	provider := &fakeProvider{text: "You have protein remaining today."}
-	svc := NewService(&g, provider, &stubMeter{withinBudget: true})
+	svc := NewService(&g, provider, &stubMeter{withinBudget: true}, nil)
 	router := newTestRouter(userID, NewHandler(svc))
 
 	payload, err := json.Marshal(askRequest{Question: "how's my protein?"})
@@ -190,4 +192,76 @@ func TestHandlerAsk_RealQuestionReturns200WithAnswerAndCitations(t *testing.T) {
 	require.False(t, strings.Contains(raw, `"showSupport"`), "raw body should not contain camelCase %q key, got: %s", "showSupport", raw)
 	require.False(t, strings.Contains(raw, `"Label"`), "raw body should not contain PascalCase %q key, got: %s", "Label", raw)
 	require.False(t, strings.Contains(raw, `"Value"`), "raw body should not contain PascalCase %q key, got: %s", "Value", raw)
+}
+
+func TestHandlerThread_ReturnsStoredTurnsWithSnakeCaseKeys(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	trackRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackRepo, db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackRepo)
+	threadRepo := NewThreadRepository(db)
+
+	require.NoError(t, threadRepo.AppendExchange(context.Background(), userID,
+		"what should I eat?", "more protein", []Fact{{Label: "Protein today", Value: "65g"}}))
+
+	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, &threadRepo)
+	router := newTestRouter(userID, NewHandler(svc))
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/coach/thread", nil)
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var body struct {
+		Data struct {
+			Turns []struct {
+				Role      string `json:"role"`
+				Text      string `json:"text"`
+				Citations []struct {
+					Label string `json:"label"`
+					Value string `json:"value"`
+				} `json:"citations"`
+			} `json:"turns"`
+			ShowSupport bool `json:"show_support"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Len(t, body.Data.Turns, 2)
+	require.Equal(t, "user", body.Data.Turns[0].Role)
+	require.Equal(t, "otto", body.Data.Turns[1].Role)
+	require.Len(t, body.Data.Turns[1].Citations, 1)
+	require.Equal(t, "Protein today", body.Data.Turns[1].Citations[0].Label)
+
+	raw := w.Body.String()
+	require.True(t, strings.Contains(raw, `"show_support"`), "raw body must use snake_case show_support, got: %s", raw)
+	require.True(t, strings.Contains(raw, `"created_at"`), "raw body must use snake_case created_at, got: %s", raw)
+	require.False(t, strings.Contains(raw, `"showSupport"`), "raw body must not use camelCase, got: %s", raw)
+}
+
+func TestHandlerThread_EmptyThreadReturnsEmptyList(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	trackRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackRepo, db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackRepo)
+	threadRepo := NewThreadRepository(db)
+
+	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, &threadRepo)
+	router := newTestRouter(userID, NewHandler(svc))
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/coach/thread", nil)
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	// turns must serialise as [] not null, so the client can map over it.
+	require.Contains(t, w.Body.String(), `"turns":[]`)
 }
