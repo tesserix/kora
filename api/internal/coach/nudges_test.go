@@ -261,6 +261,42 @@ func TestBuildNudges_WeightTrendHiddenWhenAtRisk_ObsessiveLogging(t *testing.T) 
 	require.False(t, hasKind(r.Nudges, NudgeKindWeightTrend))
 }
 
+// TestBuildNudges_WeightTrendHiddenWhenAtRisk_Deficit covers the 7-day
+// deficit threshold, the only one of the four AtRisk pathways the sibling
+// gating tests above (FastingStreak, LowIntake, ObsessiveLogging) don't
+// exercise. weightTrendContext never sets RecentDaily, so recentDeficitPct
+// is always 0 there — this test builds Context directly so RecentDaily can
+// drive the deficit signal while AvgIntakeKcal/FastingStreakDays/LogsPerDay
+// stay safely below their own thresholds.
+func TestBuildNudges_WeightTrendHiddenWhenAtRisk_Deficit(t *testing.T) {
+	c := Context{
+		Today: dashboard.Summary{
+			Consumed: dashboard.Totals{ProteinG: 120},
+			Targets:  dashboard.Totals{Kcal: 2000, ProteinG: 120},
+		},
+		AvgIntakeKcal:     1800, // above riskAvgIntakeKcal (1200): must not itself trip risk
+		FastingStreakDays: 0,    // below riskFastingStreakDays (3)
+		LogsPerDay:        0,    // below riskLogsPerDay (12)
+		RecentDaily: []DailyTotal{
+			// Each day at 1000/2000 target kcal -> per-day deficit 0.5,
+			// mean recentDeficitPct 0.5, well past the 0.30 threshold.
+			{Kcal: 1000}, {Kcal: 1000}, {Kcal: 1000}, {Kcal: 1000},
+			{Kcal: 1000}, {Kcal: 1000}, {Kcal: 1000},
+		},
+		WeightTrend: WeightTrend{DeltaKg: -1.8, Days: 30, Valid: true},
+	}
+
+	s := SignalsFrom(c)
+	require.GreaterOrEqual(t, s.RecentDeficitPct, 0.30, "test setup must actually trip the deficit threshold")
+	require.True(t, guardrails.AtRisk(s), "test setup must actually trigger risk")
+
+	r := BuildNudges(c, s)
+
+	require.True(t, r.ShowSupport)
+	require.False(t, hasKind(r.Nudges, NudgeKindWeightTrend),
+		"weight-loss framing must never be shown to an at-risk user (deficit threshold)")
+}
+
 func TestBuildNudges_NoWeightTrendWhenInvalid(t *testing.T) {
 	c := weightTrendContext(WeightTrend{}, 1800, 0)
 
