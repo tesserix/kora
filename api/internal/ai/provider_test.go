@@ -31,6 +31,10 @@ type stubProvider struct {
 	transcriptUsage Usage
 	transcriptErr   error
 
+	text      string
+	textUsage Usage
+	textErr   error
+
 	// block, when true, makes every method wait on ctx.Done() and return
 	// ctx.Err() instead of its configured result — simulates a provider
 	// call that runs past its latency budget.
@@ -124,6 +128,22 @@ func (s *stubProvider) Transcribe(ctx context.Context, audio []byte, mime string
 		return "", Usage{}, ctx.Err()
 	}
 	return s.transcript, s.transcriptUsage, s.transcriptErr
+}
+
+func (s *stubProvider) GenerateText(ctx context.Context, systemPrompt, userPrompt string) (string, Usage, error) {
+	s.calls++
+	if s.delay > 0 {
+		select {
+		case <-time.After(s.delay):
+		case <-ctx.Done():
+			return "", Usage{}, ctx.Err()
+		}
+	}
+	if s.block {
+		<-ctx.Done()
+		return "", Usage{}, ctx.Err()
+	}
+	return s.text, s.textUsage, s.textErr
 }
 
 func (s *stubProvider) Name() string {

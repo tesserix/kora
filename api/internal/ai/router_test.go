@@ -198,6 +198,45 @@ func TestRouter_Transcribe_PrimarySucceeds(t *testing.T) {
 	assert.Equal(t, 0, fallback.calls)
 }
 
+// TestRouterGenerateText_PrimarySucceeds proves GenerateText delegates to
+// Primary and never touches Fallback when Primary succeeds.
+func TestRouterGenerateText_PrimarySucceeds(t *testing.T) {
+	primary := &stubProvider{
+		name:      "primary-stub",
+		text:      "hi",
+		textUsage: Usage{Provider: "fake", Model: "m"},
+	}
+	fallback := &stubProvider{name: "fallback-stub"}
+	r := &Router{Primary: primary, Fallback: fallback}
+
+	got, usage, err := r.GenerateText(context.Background(), "sys", "user")
+
+	require.NoError(t, err)
+	assert.Equal(t, "hi", got)
+	assert.Equal(t, "fake", usage.Provider)
+	assert.Equal(t, "m", usage.Model)
+	assert.Equal(t, 0, fallback.calls, "fallback must not be called when primary succeeds")
+}
+
+// TestRouterGenerateText_PrimaryErrors_FallsBack proves GenerateText retries
+// against Fallback when Primary errors, and returns the fallback's text.
+func TestRouterGenerateText_PrimaryErrors_FallsBack(t *testing.T) {
+	primary := &stubProvider{name: "primary-stub", textErr: errors.New("primary exploded")}
+	fallback := &stubProvider{
+		name:      "fallback-stub",
+		text:      "fallback text",
+		textUsage: Usage{Provider: "fallback-stub"},
+	}
+	r := &Router{Primary: primary, Fallback: fallback}
+
+	got, usage, err := r.GenerateText(context.Background(), "sys", "user")
+
+	require.NoError(t, err)
+	assert.Equal(t, "fallback text", got)
+	assert.Equal(t, "fallback-stub", usage.Provider)
+	assert.Equal(t, 1, fallback.calls)
+}
+
 func TestRouter_Name(t *testing.T) {
 	r := &Router{
 		Primary:  &stubProvider{name: "primary-stub"},

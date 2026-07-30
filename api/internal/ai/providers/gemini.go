@@ -37,6 +37,7 @@ const (
 	callTypeDecompose     = "decompose"
 	callTypeEmbed         = "embed"
 	callTypeTranscribe    = "transcribe"
+	callTypeCoach         = "coach"
 )
 
 const (
@@ -213,6 +214,28 @@ func (p GeminiProvider) Transcribe(ctx context.Context, audio []byte, mime strin
 	}
 	if err != nil {
 		return "", usage, fmt.Errorf("gemini: transcribe: %w", err)
+	}
+	return strings.TrimSpace(resp.Text()), usage, nil
+}
+
+// GenerateText produces a free-form text response (no JSON schema) using
+// Flash, for conversational/coaching use cases. Unlike generateJSON's
+// callers, the response is not parsed against any schema — the caller gets
+// the model's prose back as-is.
+func (p GeminiProvider) GenerateText(ctx context.Context, systemPrompt, userPrompt string) (string, ai.Usage, error) {
+	start := time.Now()
+	cfg := &genai.GenerateContentConfig{
+		SystemInstruction: &genai.Content{Parts: []*genai.Part{genai.NewPartFromText(systemPrompt)}},
+	}
+	resp, err := p.client.Models.GenerateContent(ctx, modelFlash,
+		[]*genai.Content{genai.NewContentFromParts([]*genai.Part{genai.NewPartFromText(userPrompt)}, genai.RoleUser)}, cfg)
+	usage := ai.Usage{Provider: p.Name(), Model: modelFlash, CallType: callTypeCoach, LatencyMs: int(time.Since(start).Milliseconds())}
+	if resp != nil && resp.UsageMetadata != nil {
+		usage.TokensIn = int(resp.UsageMetadata.PromptTokenCount)
+		usage.TokensOut = int(resp.UsageMetadata.CandidatesTokenCount)
+	}
+	if err != nil {
+		return "", usage, fmt.Errorf("gemini: generate text: %w", err)
 	}
 	return strings.TrimSpace(resp.Text()), usage, nil
 }
