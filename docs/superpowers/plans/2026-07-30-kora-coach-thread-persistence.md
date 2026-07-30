@@ -406,7 +406,14 @@ func (r ThreadRepository) citationsFor(ctx context.Context, turns []Turn) (map[u
 }
 ```
 
-**Order by `seq`, never by `created_at`.** `AppendExchange` writes both turns in one transaction, and Postgres `now()` returns the *transaction-start* timestamp — so a question and its answer get a **byte-identical `created_at`** (verified empirically against this schema). Ordering by `created_at` would leave their relative order undefined, and a UUID `id` tiebreak cannot help because the ids are random. `coach_turns.seq` is a `BIGSERIAL` assigned per insert, so it is strictly increasing and is the only stable ordering key. Turns are selected `seq DESC` so the `LIMIT` keeps the newest, then reversed in Go for display. `created_at` remains what the client shows.
+**Order by `seq`, never by `created_at`.** Two measurements, both real:
+
+- Inserted via **raw SQL** in one transaction, both rows get a byte-identical `created_at` — Postgres `now()` returns the *transaction-start* timestamp, so the column default cannot separate them at all.
+- Inserted via **GORM**, they differ by only ~1.2ms — GORM auto-populates a `CreatedAt time.Time` field client-side with `time.Now()`, so the column default never applies on this path.
+
+So the GORM path does not collide outright, but its ordering rests entirely on two client-side `time.Now()` readings. That is not a guarantee: wall-clock time can repeat or step backwards under NTP correction and is bounded by clock resolution, so consecutive readings are not reliably strictly increasing. A UUID `id` tiebreak cannot rescue it either, since the ids are random.
+
+`coach_turns.seq` is a `BIGSERIAL` assigned by the database per insert — strictly monotonic, no clock dependency. It is the only sound ordering key here. Turns are selected `seq DESC` so the `LIMIT` keeps the newest, then reversed in Go for display. `created_at` remains what the client shows.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
