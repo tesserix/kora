@@ -194,6 +194,44 @@ func TestHandlerAsk_RealQuestionReturns200WithAnswerAndCitations(t *testing.T) {
 	require.False(t, strings.Contains(raw, `"Value"`), "raw body should not contain PascalCase %q key, got: %s", "Value", raw)
 }
 
+// TestHandlerAsk_BudgetExhaustedSerialisesCitationsAsEmptyArrayNotNull pins
+// the citations wire format when the budget-exhausted path is taken: the
+// upcoming mobile UI maps over the citations array, so a null would crash the
+// client. Decoding into a Go []Fact cannot distinguish "[]" from "null" (both
+// decode to an empty/nil slice), so this must be a raw-string assertion on the
+// response body, not a round-tripped struct comparison — same pattern as
+// TestHandlerThread_CitationsSerialiseAsEmptyArrayNotNull.
+func TestHandlerAsk_BudgetExhaustedSerialisesCitationsAsEmptyArrayNotNull(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	trackingRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackingRepo, db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackingRepo)
+
+	provider := &fakeProvider{text: "should not be reached"}
+	svc := NewService(&g, provider, &stubMeter{withinBudget: false}, nil)
+	router := newTestRouter(userID, NewHandler(svc))
+
+	payload, err := json.Marshal(askRequest{Question: "how's my protein?"})
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/coach/ask", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+
+	raw := w.Body.String()
+	require.Contains(t, raw, `"citations":[]`,
+		"budget-exhausted response must serialise citations as [], got: %s", raw)
+	require.NotContains(t, raw, `"citations":null`,
+		"citations must never serialise as null — the mobile client's map() would crash on it, got: %s", raw)
+}
+
 func TestHandlerThread_ReturnsStoredTurnsWithSnakeCaseKeys(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db, 2000, 120)

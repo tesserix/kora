@@ -87,7 +87,11 @@ func (h Handler) Ask(c *gin.Context) {
 		httpx.RespondServiceError(c, err)
 		return
 	}
-	httpx.OK(c, gin.H{"answer": answer.Text, "citations": answer.Citations, "show_support": answer.ShowSupport})
+	cites := answer.Citations
+	if cites == nil {
+		cites = []Fact{}
+	}
+	httpx.OK(c, gin.H{"answer": answer.Text, "citations": cites, "show_support": answer.ShowSupport})
 }
 
 // threadTurnResponse is one replayed turn in the wire format. Field names are
