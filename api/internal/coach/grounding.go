@@ -26,7 +26,10 @@ import (
 const recentWindowDays = 7
 
 // Fact is one grounding data point suitable for citing in a coach response.
-type Fact struct{ Label, Value string }
+type Fact struct {
+	Label string `json:"label"`
+	Value string `json:"value"`
+}
 
 // DailyTotal is one local calendar day's aggregated intake within the
 // recent window. Days with no logs are zero-valued, not omitted, so

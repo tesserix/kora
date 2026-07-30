@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -60,6 +61,15 @@ func TestHandlerNudges_Returns200WithNudges(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 	require.NotEmpty(t, body.Data.Nudges, "a fresh user with no logs should still get a protein-gap nudge")
+
+	// Round-tripping through the Go types above passes regardless of JSON
+	// casing, so assert the raw wire body directly to catch a PascalCase
+	// regression in the snake_case API contract.
+	raw := w.Body.String()
+	require.True(t, strings.Contains(raw, `"text"`), "raw body should contain snake_case %q key, got: %s", "text", raw)
+	require.True(t, strings.Contains(raw, `"show_support"`), "raw body should contain snake_case %q key, got: %s", "show_support", raw)
+	require.False(t, strings.Contains(raw, `"Text"`), "raw body should not contain PascalCase %q key, got: %s", "Text", raw)
+	require.False(t, strings.Contains(raw, `"showSupport"`), "raw body should not contain camelCase %q key, got: %s", "showSupport", raw)
 }
 
 func TestHandlerAsk_EmptyQuestionReturns400InvalidInput(t *testing.T) {
@@ -123,4 +133,15 @@ func TestHandlerAsk_RealQuestionReturns200WithAnswerAndCitations(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 	require.NotEmpty(t, body.Data.Answer)
 	require.NotEmpty(t, body.Data.Citations)
+
+	// Round-tripping through the Go types above passes regardless of JSON
+	// casing, so assert the raw wire body directly to catch a PascalCase
+	// regression in the snake_case API contract.
+	raw := w.Body.String()
+	for _, key := range []string{`"answer"`, `"citations"`, `"label"`, `"value"`, `"show_support"`} {
+		require.True(t, strings.Contains(raw, key), "raw body should contain snake_case %q, got: %s", key, raw)
+	}
+	require.False(t, strings.Contains(raw, `"showSupport"`), "raw body should not contain camelCase %q key, got: %s", "showSupport", raw)
+	require.False(t, strings.Contains(raw, `"Label"`), "raw body should not contain PascalCase %q key, got: %s", "Label", raw)
+	require.False(t, strings.Contains(raw, `"Value"`), "raw body should not contain PascalCase %q key, got: %s", "Value", raw)
 }

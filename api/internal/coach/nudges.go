@@ -15,8 +15,8 @@ const minFiberBelowTargetStreakDays = 2
 // Nudge is a coach message that survived the Protective guardrail policy,
 // ready to show to the user.
 type Nudge struct {
-	Text   string
-	Reason string
+	Text   string `json:"text"`
+	Reason string `json:"reason"`
 }
 
 // NudgeResult is the outcome of BuildNudges: the surviving nudges plus

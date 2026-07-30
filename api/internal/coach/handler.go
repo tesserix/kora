@@ -45,7 +45,7 @@ func (h Handler) Nudges(c *gin.Context) {
 		httpx.RespondServiceError(c, err)
 		return
 	}
-	httpx.OK(c, gin.H{"nudges": result.Nudges, "showSupport": result.ShowSupport})
+	httpx.OK(c, gin.H{"nudges": result.Nudges, "show_support": result.ShowSupport})
 }
 
 // askRequest is the Ask endpoint's request body.
@@ -74,5 +74,5 @@ func (h Handler) Ask(c *gin.Context) {
 		httpx.RespondServiceError(c, err)
 		return
 	}
-	httpx.OK(c, gin.H{"answer": answer.Text, "citations": answer.Citations, "showSupport": answer.ShowSupport})
+	httpx.OK(c, gin.H{"answer": answer.Text, "citations": answer.Citations, "show_support": answer.ShowSupport})
 }

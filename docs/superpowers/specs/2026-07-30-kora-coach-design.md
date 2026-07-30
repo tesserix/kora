@@ -32,8 +32,8 @@ Reused substrate (no duplication): `ai.Provider`/`ai.Router` (LLM), `ai.Meter` (
 
 ## Endpoints (authed `/v1` group, after `auth.Middleware` + `user.ResolveMiddleware`)
 
-- `GET /v1/coach/nudges` → `{"data": {"nudges": [{"text","reason"}], "showSupport": bool}}`
-- `POST /v1/coach/ask` body `{"question": string}` → `{"data": {"answer": string, "citations": [{"label","value"}], "showSupport": bool}}`
+- `GET /v1/coach/nudges` → `{"data": {"nudges": [{"text","reason"}], "show_support": bool}}`
+- `POST /v1/coach/ask` body `{"question": string}` → `{"data": {"answer": string, "citations": [{"label","value"}], "show_support": bool}}`
 
 Success via `httpx.OK`; errors via `httpx.Error` / `httpx.RespondServiceError`. User via `user.IDFromContext`, timezone via `user.LocFromContext`.
 
