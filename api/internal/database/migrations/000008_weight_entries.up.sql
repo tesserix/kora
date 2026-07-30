@@ -1,8 +1,16 @@
-CREATE TABLE weight_entries (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    weight_kg DOUBLE PRECISION NOT NULL,
-    logged_at TIMESTAMPTZ NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX idx_weight_entries_user_logged ON weight_entries (user_id, logged_at);
+-- Intentionally a no-op.
+--
+-- This migration originally created the `weight_entries` table, but that table is
+-- already created by 000002_phase1_core.up.sql, which is the authoritative
+-- definition (it also carries the `body_fat_pct` column this file lacked).
+--
+-- Because 000002 runs first, the CREATE TABLE here failed on every *fresh*
+-- database with `relation "weight_entries" already exists`, breaking `migrate up`
+-- and therefore CI. Deployed databases are unaffected: they are already past
+-- version 8, so this file never re-runs there — and prod's `weight_entries` has
+-- `body_fat_pct`, confirming 000002 is what actually built the table.
+--
+-- The file is kept rather than deleted so the migration sequence stays contiguous
+-- and version 8 remains a valid, already-applied step for deployed databases.
+-- Do not re-add DDL here; amend 000002 or add a new migration instead.
+SELECT 1;
