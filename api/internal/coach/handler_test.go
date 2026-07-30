@@ -41,9 +41,10 @@ func TestHandlerNudges_Returns200WithNudges(t *testing.T) {
 	userID := seedUser(t, db, 2000, 120)
 
 	logRepo := foodlog.NewRepository(db)
-	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
+	trackingRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackingRepo, db)
 	memSvc := memory.NewService(logRepo)
-	g := NewGrounder(dashSvc, logRepo, memSvc)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackingRepo)
 
 	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true})
 	router := newTestRouter(userID, NewHandler(svc))
@@ -72,14 +73,58 @@ func TestHandlerNudges_Returns200WithNudges(t *testing.T) {
 	require.False(t, strings.Contains(raw, `"showSupport"`), "raw body should not contain camelCase %q key, got: %s", "showSupport", raw)
 }
 
+func TestHandlerNudges_ResponseIncludesKindAndTitle(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	trackRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackRepo, db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackRepo)
+
+	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true})
+	router := newTestRouter(userID, NewHandler(svc))
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/coach/nudges", nil)
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var body struct {
+		Data struct {
+			Nudges []Nudge `json:"nudges"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.NotEmpty(t, body.Data.Nudges,
+		"a fresh user with a protein target and no logs should get a protein-gap nudge")
+
+	first := body.Data.Nudges[0]
+	require.Equal(t, NudgeKindProtein, first.Kind)
+	require.Equal(t, "Protein", first.Title)
+	require.NotEmpty(t, first.Text)
+
+	// Assert the raw wire keys: round-tripping through Go types above would
+	// pass regardless of JSON casing, so this is what actually pins the
+	// snake_case contract the mobile client codes against.
+	raw := w.Body.String()
+	require.True(t, strings.Contains(raw, `"kind"`), "raw body should contain \"kind\", got: %s", raw)
+	require.True(t, strings.Contains(raw, `"title"`), "raw body should contain \"title\", got: %s", raw)
+	require.False(t, strings.Contains(raw, `"Kind"`), "raw body should not contain PascalCase \"Kind\", got: %s", raw)
+	require.False(t, strings.Contains(raw, `"Title"`), "raw body should not contain PascalCase \"Title\", got: %s", raw)
+}
+
 func TestHandlerAsk_EmptyQuestionReturns400InvalidInput(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db, 2000, 120)
 
 	logRepo := foodlog.NewRepository(db)
-	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
+	trackingRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackingRepo, db)
 	memSvc := memory.NewService(logRepo)
-	g := NewGrounder(dashSvc, logRepo, memSvc)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackingRepo)
 
 	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true})
 	router := newTestRouter(userID, NewHandler(svc))
@@ -106,9 +151,10 @@ func TestHandlerAsk_RealQuestionReturns200WithAnswerAndCitations(t *testing.T) {
 	userID := seedUser(t, db, 2000, 120)
 
 	logRepo := foodlog.NewRepository(db)
-	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
+	trackingRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackingRepo, db)
 	memSvc := memory.NewService(logRepo)
-	g := NewGrounder(dashSvc, logRepo, memSvc)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackingRepo)
 
 	provider := &fakeProvider{text: "You have protein remaining today."}
 	svc := NewService(&g, provider, &stubMeter{withinBudget: true})

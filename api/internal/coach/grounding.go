@@ -9,6 +9,7 @@ package coach
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math"
 	"strconv"
 	"strings"
@@ -19,11 +20,17 @@ import (
 	"github.com/tesserix/kora/api/internal/dashboard"
 	"github.com/tesserix/kora/api/internal/foodlog"
 	"github.com/tesserix/kora/api/internal/memory"
+	"github.com/tesserix/kora/api/internal/tracking"
 )
 
 // recentWindowDays is the trailing window (inclusive of today) used to
 // compute averages, logging cadence, and the fasting streak.
 const recentWindowDays = 7
+
+// weightWindowDays is the trailing window used for the weight trend. It is
+// deliberately longer than recentWindowDays: a 7-day weight delta is mostly
+// water-weight noise, so the trend is stated over a month.
+const weightWindowDays = 30
 
 // Fact is one grounding data point suitable for citing in a coach response.
 type Fact struct {
@@ -53,6 +60,21 @@ type Context struct {
 	DaysLogged        int
 	FastingStreakDays int
 	Usual             memory.Memory
+	WeightTrend       WeightTrend
+}
+
+// WeightTrend is the observed change in logged weight across the trailing
+// weightWindowDays. DeltaKg is signed: negative means weight went down.
+// Valid is false when there are too few entries to state a trend at all —
+// callers must not present an invalid trend as a zero change. Days can be 0
+// even when Valid is true: it is an elapsed-hours/24 truncation, so two
+// entries inside the same 24h window produce Days: 0. Future consumers must
+// guard against this before using Days as a rate denominator (e.g.
+// DeltaKg/Days), or a division by zero / inflated rate results.
+type WeightTrend struct {
+	DeltaKg float64
+	Days    int
+	Valid   bool
 }
 
 // LogSource is the read used to aggregate RecentDaily. foodlog.Repository
@@ -61,16 +83,23 @@ type LogSource interface {
 	ListForUserSince(ctx context.Context, userID uuid.UUID, since time.Time) ([]foodlog.FoodLog, error)
 }
 
+// WeightSource is the read used to compute WeightTrend.
+// tracking.Repository satisfies it; tests can supply a fake.
+type WeightSource interface {
+	WeightSeries(ctx context.Context, userID uuid.UUID, from, to time.Time) ([]tracking.WeightEntry, error)
+}
+
 // Grounder wires the read-only sources BuildContext aggregates.
 type Grounder struct {
-	Dash dashboard.Service
-	Logs LogSource
-	Mem  memory.Service
+	Dash    dashboard.Service
+	Logs    LogSource
+	Mem     memory.Service
+	Weights WeightSource
 }
 
 // NewGrounder constructs a Grounder from its concrete dependencies.
-func NewGrounder(dash dashboard.Service, logs LogSource, mem memory.Service) Grounder {
-	return Grounder{Dash: dash, Logs: logs, Mem: mem}
+func NewGrounder(dash dashboard.Service, logs LogSource, mem memory.Service, weights WeightSource) Grounder {
+	return Grounder{Dash: dash, Logs: logs, Mem: mem, Weights: weights}
 }
 
 // BuildContext assembles a Context: today's dashboard summary, the last
@@ -97,6 +126,22 @@ func (g Grounder) BuildContext(ctx context.Context, userID uuid.UUID, now time.T
 		return Context{}, fmt.Errorf("coach: build context: usual foods: %w", err)
 	}
 
+	weightFrom := windowStartDays(now, loc, weightWindowDays)
+	weightTrend := WeightTrend{}
+	if g.Weights != nil {
+		entries, err := g.Weights.WeightSeries(ctx, userID, weightFrom, now)
+		if err == nil {
+			weightTrend = weightTrendFrom(entries)
+		} else {
+			// Best-effort: the weight trend is additive grounding, not a
+			// hard dependency, so BuildContext must still succeed with
+			// WeightTrend left invalid. Log the failure so it isn't
+			// silently swallowed.
+			slog.WarnContext(ctx, "coach: weight trend read failed, omitting trend",
+				"error", err, "user_id", userID)
+		}
+	}
+
 	avgKcal, avgProtein, logsPerDay, daysLogged := summarizeRecent(recentDaily)
 
 	return Context{
@@ -108,6 +153,7 @@ func (g Grounder) BuildContext(ctx context.Context, userID uuid.UUID, now time.T
 		DaysLogged:        daysLogged,
 		FastingStreakDays: fastingStreak(recentDaily),
 		Usual:             usual,
+		WeightTrend:       weightTrend,
 	}, nil
 }
 
@@ -118,9 +164,43 @@ func (g Grounder) BuildContext(ctx context.Context, userID uuid.UUID, now time.T
 // logs whenever now's clock-time/Location differs from loc (see
 // coach.BuildContext's `now = time.Now().UTC()` + user-loc call pattern).
 func windowStart(now time.Time, loc *time.Location) time.Time {
+	return windowStartDays(now, loc, recentWindowDays)
+}
+
+// windowStartDays returns the local-midnight (in loc) start of the trailing
+// days-long window ending on now's local calendar day.
+func windowStartDays(now time.Time, loc *time.Location, days int) time.Time {
 	nowLocal := now.In(loc)
 	return time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day(), 0, 0, 0, 0, loc).
-		AddDate(0, 0, -(recentWindowDays - 1))
+		AddDate(0, 0, -(days - 1))
+}
+
+// weightTrendFrom derives a WeightTrend from entries. Fewer than two
+// entries is not a trend, so it reports Valid: false rather than a
+// misleading zero delta. The caller's WeightSeries read is expected to be
+// ascending by LoggedAt, but this does not trust that ordering: it picks
+// the earliest and latest entries by LoggedAt explicitly, so an
+// out-of-order or unsorted result still yields a correct delta and span
+// rather than a silently wrong one.
+func weightTrendFrom(entries []tracking.WeightEntry) WeightTrend {
+	if len(entries) < 2 {
+		return WeightTrend{}
+	}
+	first, last := entries[0], entries[0]
+	for _, e := range entries[1:] {
+		if e.LoggedAt.Before(first.LoggedAt) {
+			first = e
+		}
+		if e.LoggedAt.After(last.LoggedAt) {
+			last = e
+		}
+	}
+	days := int(last.LoggedAt.Sub(first.LoggedAt).Hours() / 24)
+	return WeightTrend{
+		DeltaKg: last.WeightKg - first.WeightKg,
+		Days:    days,
+		Valid:   true,
+	}
 }
 
 // aggregateDaily buckets logs into local calendar days spanning

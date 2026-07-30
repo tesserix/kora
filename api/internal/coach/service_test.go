@@ -88,7 +88,7 @@ func TestAsk_GroundedAnswerReturnsCitations(t *testing.T) {
 	logRepo := foodlog.NewRepository(db)
 	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
 	memSvc := memory.NewService(logRepo)
-	g := NewGrounder(dashSvc, logRepo, memSvc)
+	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{})
 
 	provider := &fakeProvider{
 		text:      "You have 55g protein to go.",
@@ -114,7 +114,7 @@ func TestAsk_OverBudgetDegradesGracefully(t *testing.T) {
 	logRepo := foodlog.NewRepository(db)
 	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
 	memSvc := memory.NewService(logRepo)
-	g := NewGrounder(dashSvc, logRepo, memSvc)
+	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{})
 
 	provider := &fakeProvider{text: "should not be reached"}
 	meter := &stubMeter{withinBudget: false}
@@ -136,7 +136,7 @@ func TestAsk_NilProviderDegradesGracefully(t *testing.T) {
 	logRepo := foodlog.NewRepository(db)
 	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
 	memSvc := memory.NewService(logRepo)
-	g := NewGrounder(dashSvc, logRepo, memSvc)
+	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{})
 
 	meter := &stubMeter{withinBudget: true}
 	svc := NewService(&g, nil, meter)
@@ -221,7 +221,7 @@ func TestAsk_RestrictiveAnswerSuppressedUnderRisk(t *testing.T) {
 	logRepo := foodlog.NewRepository(db)
 	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
 	memSvc := memory.NewService(logRepo)
-	g := NewGrounder(dashSvc, logRepo, memSvc)
+	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{})
 
 	const restrictiveRaw = "You've eaten enough today — try to cut back tomorrow."
 	provider := &fakeProvider{text: restrictiveRaw}
@@ -245,7 +245,7 @@ func TestAsk_RestrictiveAnswerSoftenedWhenNoRisk(t *testing.T) {
 	logRepo := foodlog.NewRepository(db)
 	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
 	memSvc := memory.NewService(logRepo)
-	g := NewGrounder(dashSvc, logRepo, memSvc)
+	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{})
 
 	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
 	seedSteadyWeek(t, db, logRepo, userID, now, 2000)
@@ -271,7 +271,7 @@ func TestAsk_NonRestrictiveAnswerAllowedUnchanged(t *testing.T) {
 	logRepo := foodlog.NewRepository(db)
 	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
 	memSvc := memory.NewService(logRepo)
-	g := NewGrounder(dashSvc, logRepo, memSvc)
+	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{})
 
 	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
 	seedSteadyWeek(t, db, logRepo, userID, now, 2000)
@@ -294,7 +294,7 @@ func TestNudges_WrapsBuildContextAndBuildNudges(t *testing.T) {
 	logRepo := foodlog.NewRepository(db)
 	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
 	memSvc := memory.NewService(logRepo)
-	g := NewGrounder(dashSvc, logRepo, memSvc)
+	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{})
 
 	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true})
 

@@ -2,6 +2,7 @@ package coach
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -87,7 +88,7 @@ func TestBuildContextAggregatesRecentDailyAndRenders(t *testing.T) {
 
 	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
 	memSvc := memory.NewService(logRepo)
-	g := NewGrounder(dashSvc, logRepo, memSvc)
+	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{})
 
 	ctx, err := g.BuildContext(context.Background(), userID, now, loc)
 	require.NoError(t, err)
@@ -133,7 +134,7 @@ func TestBuildContextFastingStreakCountsConsecutiveZeroKcalDaysFromToday(t *test
 
 	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
 	memSvc := memory.NewService(logRepo)
-	g := NewGrounder(dashSvc, logRepo, memSvc)
+	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{})
 
 	ctx, err := g.BuildContext(context.Background(), userID, now, loc)
 	require.NoError(t, err)
@@ -191,7 +192,7 @@ func TestBuildContextWindowStartMatchesAcrossFetchAndBucketing(t *testing.T) {
 
 	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
 	memSvc := memory.NewService(logRepo)
-	g := NewGrounder(dashSvc, logRepo, memSvc)
+	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{})
 
 	ctx, err := g.BuildContext(context.Background(), userID, now, loc)
 	require.NoError(t, err)
@@ -205,4 +206,157 @@ func TestBuildContextWindowStartMatchesAcrossFetchAndBucketing(t *testing.T) {
 	s := SignalsFrom(ctx)
 	require.Less(t, s.RecentDeficitPct, 0.99,
 		"a logged oldest day must pull RecentDeficitPct below the spurious all-days-deficit ceiling of 1.0")
+}
+
+type fakeWeightSource struct {
+	entries []tracking.WeightEntry
+	err     error
+
+	// calls, when non-nil, records the arguments the most recent
+	// WeightSeries call was invoked with, so tests can assert BuildContext
+	// wires userID/from/to correctly.
+	calls *weightSeriesCall
+}
+
+// weightSeriesCall captures one WeightSeries invocation's arguments.
+type weightSeriesCall struct {
+	userID uuid.UUID
+	from   time.Time
+	to     time.Time
+}
+
+func (f fakeWeightSource) WeightSeries(_ context.Context, userID uuid.UUID, from, to time.Time) ([]tracking.WeightEntry, error) {
+	if f.calls != nil {
+		f.calls.userID = userID
+		f.calls.from = from
+		f.calls.to = to
+	}
+	return f.entries, f.err
+}
+
+func TestWeightTrendFrom_DeltaOverWindow(t *testing.T) {
+	base := time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC)
+	entries := []tracking.WeightEntry{
+		{WeightKg: 80.0, LoggedAt: base},
+		{WeightKg: 79.1, LoggedAt: base.AddDate(0, 0, 10)},
+		{WeightKg: 78.2, LoggedAt: base.AddDate(0, 0, 20)},
+	}
+
+	tr := weightTrendFrom(entries)
+
+	require.True(t, tr.Valid)
+	require.InDelta(t, -1.8, tr.DeltaKg, 0.001)
+	require.Equal(t, 20, tr.Days)
+}
+
+func TestWeightTrendFrom_InvalidBelowTwoEntries(t *testing.T) {
+	require.False(t, weightTrendFrom(nil).Valid)
+	require.False(t, weightTrendFrom([]tracking.WeightEntry{{WeightKg: 80}}).Valid)
+}
+
+func TestWeightTrendFrom_GainIsPositiveDelta(t *testing.T) {
+	base := time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC)
+	entries := []tracking.WeightEntry{
+		{WeightKg: 78.0, LoggedAt: base},
+		{WeightKg: 79.0, LoggedAt: base.AddDate(0, 0, 7)},
+	}
+
+	tr := weightTrendFrom(entries)
+
+	require.True(t, tr.Valid)
+	require.InDelta(t, 1.0, tr.DeltaKg, 0.001)
+}
+
+// TestBuildContextWiresPopulatedWeightTrend closes the gap where every prior
+// BuildContext test used a zero-value fakeWeightSource (nil entries), so
+// Context.WeightTrend was always the zero WeightTrend{} and the assignment
+// from WeightSeries's result into Context.WeightTrend was never actually
+// exercised. A populated, ascending-by-logged_at series must flow through to
+// a non-zero, Valid trend with the expected signed delta and day span.
+func TestBuildContextWiresPopulatedWeightTrend(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
+	memSvc := memory.NewService(logRepo)
+
+	loc := time.UTC
+	now := time.Date(2026, 3, 10, 18, 0, 0, 0, loc)
+
+	weights := fakeWeightSource{entries: []tracking.WeightEntry{
+		{WeightKg: 82.0, LoggedAt: now.AddDate(0, 0, -25)},
+		{WeightKg: 79.0, LoggedAt: now.AddDate(0, 0, -1)},
+	}}
+	g := NewGrounder(dashSvc, logRepo, memSvc, weights)
+
+	ctx, err := g.BuildContext(context.Background(), userID, now, loc)
+	require.NoError(t, err)
+
+	require.True(t, ctx.WeightTrend.Valid, "a populated ascending series must produce a valid trend")
+	require.InDelta(t, -3.0, ctx.WeightTrend.DeltaKg, 0.001, "DeltaKg must be the signed last-minus-first change")
+	require.Equal(t, 24, ctx.WeightTrend.Days)
+}
+
+// TestBuildContextCallsWeightSeriesWithCorrectArguments guards the wiring
+// itself: with a zero-value fakeWeightSource, this test would pass unchanged
+// even if userID/from/to were swapped or scrambled when calling
+// WeightSeries, because no test previously inspected what arguments
+// BuildContext actually passed. This records the call and checks each
+// argument individually against what BuildContext was given.
+func TestBuildContextCallsWeightSeriesWithCorrectArguments(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
+	memSvc := memory.NewService(logRepo)
+
+	loc := time.FixedZone("IST", 5*3600+1800)
+	now := time.Date(2026, 3, 10, 3, 30, 0, 0, time.UTC) // crosses a day boundary in loc
+
+	calls := &weightSeriesCall{}
+	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{calls: calls})
+
+	_, err := g.BuildContext(context.Background(), userID, now, loc)
+	require.NoError(t, err)
+
+	require.Equal(t, userID, calls.userID, "WeightSeries must be called with the same userID passed to BuildContext")
+	require.True(t, calls.to.Equal(now), "WeightSeries's `to` must be the `now` passed to BuildContext, got %v want %v", calls.to, now)
+
+	// Computed independently of windowStartDays so this test exercises behavior,
+	// not the helper's own implementation: the local-midnight start of the
+	// trailing 30-day weight window.
+	nowLocal := now.In(loc)
+	wantFrom := time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day(), 0, 0, 0, 0, loc).
+		AddDate(0, 0, -29) // weightWindowDays - 1
+	require.True(t, calls.from.Equal(wantFrom),
+		"WeightSeries's `from` must be 29 days before now's local midnight (30-day window), got %v want %v",
+		calls.from, wantFrom)
+}
+
+// TestBuildContextSwallowsWeightSourceError proves the documented
+// error-swallowing behavior: a WeightSeries failure must not fail
+// BuildContext (nudges/Q&A keep working without a weight trend) and must
+// leave WeightTrend at its zero value (Valid: false) rather than a
+// misleading zero delta, so a failed read is never mistaken for "no change".
+func TestBuildContextSwallowsWeightSourceError(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
+	memSvc := memory.NewService(logRepo)
+
+	loc := time.UTC
+	now := time.Date(2026, 3, 10, 18, 0, 0, 0, loc)
+
+	weights := fakeWeightSource{err: errors.New("weight source unavailable")}
+	g := NewGrounder(dashSvc, logRepo, memSvc, weights)
+
+	ctx, err := g.BuildContext(context.Background(), userID, now, loc)
+
+	require.NoError(t, err, "a weight source error must not fail BuildContext")
+	require.Equal(t, WeightTrend{}, ctx.WeightTrend, "a failed weight read must leave WeightTrend zero-valued, not a misleading zero-change trend")
+	require.False(t, ctx.WeightTrend.Valid)
 }
