@@ -71,6 +71,11 @@ type NudgeResult struct {
 // through the Protective guardrails.Evaluate policy against s, and returns
 // the surviving (Allow/Soften) nudges. Suppressed candidates are dropped.
 //
+// s must be derived from the same Context as c — i.e. s == SignalsFrom(c).
+// The risk gate in candidateNudges reads s, not c, so passing mismatched
+// signals (computed from a different user's or a different moment's
+// Context) would defeat the gate silently.
+//
 // Every candidate this function authors is additive (Restrictive: false) —
 // it never suggests eating less, stopping, or restricting. That is a
 // deliberate invariant, not an oversight: see
@@ -113,6 +118,11 @@ func nudgeFromDecision(kind NudgeKind, d guardrails.Decision) Nudge {
 // candidateNudges builds the ordered set of additive nudge candidates from
 // c. Every candidate has Restrictive: false — this function must never
 // author one that steers toward eating less.
+//
+// Ordering is a contract, not an accident: protein, then fibre, then
+// weight. Consumers treat nudges[0] in the surviving BuildNudges result as
+// the headline (e.g. the home-screen entry card) — reordering this list
+// changes which nudge that consumer shows first.
 func candidateNudges(c Context, s guardrails.Signals) []candidate {
 	var candidates []candidate
 
@@ -187,10 +197,11 @@ func weightTrendNudge(c Context) (NudgeKind, guardrails.Nudge, bool) {
 		magnitude = -tr.DeltaKg
 	}
 	// Skip when the magnitude would display as zero (e.g. a 0.04kg delta
-	// rounds to "0.0" at fmtNumDisplayPrecision): pairing a direction word
-	// with a zero-looking magnitude reads as self-contradictory ("Down
-	// 0.0kg"), not just uninformative. Deriving the check from fmtNum
-	// itself keeps this correct if the display precision ever changes.
+	// rounds to "0" at fmtNumDisplayPrecision — fmtNum trims trailing
+	// zeros, so it is "0" not "0.0"): pairing a direction word with a
+	// zero-looking magnitude reads as self-contradictory ("Down 0kg"), not
+	// just uninformative. Deriving the check from fmtNum itself keeps this
+	// correct if the display precision ever changes.
 	if fmtNum(magnitude) == "0" {
 		return "", guardrails.Nudge{}, false
 	}

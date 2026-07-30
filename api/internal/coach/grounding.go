@@ -9,6 +9,7 @@ package coach
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math"
 	"strconv"
 	"strings"
@@ -65,7 +66,11 @@ type Context struct {
 // WeightTrend is the observed change in logged weight across the trailing
 // weightWindowDays. DeltaKg is signed: negative means weight went down.
 // Valid is false when there are too few entries to state a trend at all —
-// callers must not present an invalid trend as a zero change.
+// callers must not present an invalid trend as a zero change. Days can be 0
+// even when Valid is true: it is an elapsed-hours/24 truncation, so two
+// entries inside the same 24h window produce Days: 0. Future consumers must
+// guard against this before using Days as a rate denominator (e.g.
+// DeltaKg/Days), or a division by zero / inflated rate results.
 type WeightTrend struct {
 	DeltaKg float64
 	Days    int
@@ -127,6 +132,13 @@ func (g Grounder) BuildContext(ctx context.Context, userID uuid.UUID, now time.T
 		entries, err := g.Weights.WeightSeries(ctx, userID, weightFrom, now)
 		if err == nil {
 			weightTrend = weightTrendFrom(entries)
+		} else {
+			// Best-effort: the weight trend is additive grounding, not a
+			// hard dependency, so BuildContext must still succeed with
+			// WeightTrend left invalid. Log the failure so it isn't
+			// silently swallowed.
+			slog.WarnContext(ctx, "coach: weight trend read failed, omitting trend",
+				"error", err, "user_id", userID)
 		}
 	}
 
@@ -163,14 +175,26 @@ func windowStartDays(now time.Time, loc *time.Location, days int) time.Time {
 		AddDate(0, 0, -(days - 1))
 }
 
-// weightTrendFrom derives a WeightTrend from an ascending-by-logged_at
-// series. Fewer than two entries is not a trend, so it reports Valid:
-// false rather than a misleading zero delta.
+// weightTrendFrom derives a WeightTrend from entries. Fewer than two
+// entries is not a trend, so it reports Valid: false rather than a
+// misleading zero delta. The caller's WeightSeries read is expected to be
+// ascending by LoggedAt, but this does not trust that ordering: it picks
+// the earliest and latest entries by LoggedAt explicitly, so an
+// out-of-order or unsorted result still yields a correct delta and span
+// rather than a silently wrong one.
 func weightTrendFrom(entries []tracking.WeightEntry) WeightTrend {
 	if len(entries) < 2 {
 		return WeightTrend{}
 	}
-	first, last := entries[0], entries[len(entries)-1]
+	first, last := entries[0], entries[0]
+	for _, e := range entries[1:] {
+		if e.LoggedAt.Before(first.LoggedAt) {
+			first = e
+		}
+		if e.LoggedAt.After(last.LoggedAt) {
+			last = e
+		}
+	}
 	days := int(last.LoggedAt.Sub(first.LoggedAt).Hours() / 24)
 	return WeightTrend{
 		DeltaKg: last.WeightKg - first.WeightKg,
