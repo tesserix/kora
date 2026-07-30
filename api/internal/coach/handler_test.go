@@ -243,6 +243,45 @@ func TestHandlerThread_ReturnsStoredTurnsWithSnakeCaseKeys(t *testing.T) {
 	require.False(t, strings.Contains(raw, `"showSupport"`), "raw body must not use camelCase, got: %s", raw)
 }
 
+// TestHandlerThread_CitationsSerialiseAsEmptyArrayNotNull pins the per-turn
+// citations wire format: the upcoming mobile UI maps over this array, so a
+// null would crash the client. Decoding into a Go []Fact cannot distinguish
+// "[]" from "null" (both decode to an empty/nil slice), so this must be a
+// raw-string assertion on the response body, not a round-tripped struct
+// comparison — see TestHandlerThread_ReturnsStoredTurnsWithSnakeCaseKeys and
+// TestHandlerThread_EmptyThreadReturnsEmptyList for the same pattern applied
+// to the outer keys and the outer empty turns array respectively.
+func TestHandlerThread_CitationsSerialiseAsEmptyArrayNotNull(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	trackRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackRepo, db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackRepo)
+	threadRepo := NewThreadRepository(db)
+
+	// nil citations: the stored answer cited nothing.
+	require.NoError(t, threadRepo.AppendExchange(context.Background(), userID,
+		"what should I eat?", "an uncited answer", nil))
+
+	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, &threadRepo)
+	router := newTestRouter(userID, NewHandler(svc))
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/coach/thread", nil)
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+
+	raw := w.Body.String()
+	require.Contains(t, raw, `"citations":[]`,
+		"a turn with no citations must serialise citations as [], got: %s", raw)
+	require.NotContains(t, raw, `"citations":null`,
+		"citations must never serialise as null — the mobile client's map() would crash on it, got: %s", raw)
+}
+
 func TestHandlerThread_EmptyThreadReturnsEmptyList(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db, 2000, 120)

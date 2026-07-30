@@ -485,6 +485,79 @@ func TestServiceAsk_PriorTurnsNeverEnterThePrompt(t *testing.T) {
 	require.Contains(t, rec.userPrompt, "today's question")
 }
 
+// TestServiceThread_NilThreadRepositoryReturnsEmptyTurns proves nil-tolerance
+// on the replay path, mirroring the nil-provider tolerance already covered
+// on the ask path (TestAsk_NilProviderDegradesGracefully). A Service built
+// without a thread repository must still answer Thread() with no error, a
+// non-nil empty Turns slice (so callers/serialisers never have to special-
+// case nil), and ShowSupport still computed from the user's live signals.
+func TestServiceThread_NilThreadRepositoryReturnsEmptyTurns(t *testing.T) {
+	db := testDB(t)
+	// No logs seeded: a fresh user is fasting for the whole recent window,
+	// which trips the FastingStreakDays risk threshold on its own (see
+	// TestAsk_RestrictiveAnswerSuppressedUnderRisk).
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	trackRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackRepo, db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackRepo)
+
+	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, nil)
+
+	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
+	result, err := svc.Thread(context.Background(), userID, now, time.UTC)
+
+	require.NoError(t, err, "a nil thread repository must degrade gracefully, not error or panic")
+	require.NotNil(t, result.Turns, "Turns must be a non-nil empty slice on the nil-thread-repository path")
+	require.Empty(t, result.Turns)
+	require.True(t, result.ShowSupport, "a fresh user with no logs is fasting the whole window, an ED-risk signal")
+}
+
+// TestServiceThread_ShowSupportReflectsLiveSignalsNotStoredState proves
+// GET /v1/coach/thread's show_support tracks the user's CURRENT risk
+// signals, never whatever was true at write time. A turn is stored while
+// the user is at-risk (fasting streak, no logs), which deterministically
+// flips off once a full week of on-target meals — including today, which
+// zeroes FastingStreakDays — is logged (see seedSteadyWeek). ShowSupport
+// must flip with it even though nothing about the stored turn changed.
+func TestServiceThread_ShowSupportReflectsLiveSignalsNotStoredState(t *testing.T) {
+	db := testDB(t)
+	// No logs seeded yet: a fresh user is fasting the whole window, an
+	// ED-risk signal on its own.
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	trackRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackRepo, db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackRepo)
+	threadRepo := NewThreadRepository(db)
+
+	// Store an exchange while the user is still at-risk.
+	require.NoError(t, threadRepo.AppendExchange(context.Background(), userID,
+		"how am I doing?", "an answer", nil))
+
+	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, &threadRepo)
+	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
+
+	before, err := svc.Thread(context.Background(), userID, now, time.UTC)
+	require.NoError(t, err)
+	require.True(t, before.ShowSupport, "fresh user with no logs should be at risk (fasting streak)")
+
+	// Flip the live signal: log a steady week of on-target meals including
+	// today, which zeroes FastingStreakDays and brings AvgIntakeKcal /
+	// RecentDeficitPct / LogsPerDay comfortably out of risk range.
+	seedSteadyWeek(t, db, logRepo, userID, now, 2000)
+
+	after, err := svc.Thread(context.Background(), userID, now, time.UTC)
+	require.NoError(t, err)
+	require.False(t, after.ShowSupport,
+		"show_support must track CURRENT signals, not whatever was true when the turn was stored")
+	require.Len(t, after.Turns, 2, "the stored exchange itself must still replay unchanged")
+}
+
 func TestServiceAsk_PersistsNothingOnProviderError(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db, 2000, 120)
