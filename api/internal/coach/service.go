@@ -34,6 +34,46 @@ const budgetDegradedText = "I've hit today's usage limit — try again later."
 // a 400.
 const emptyQuestionMessage = "question is required"
 
+// suppressedAnswerMessage is returned in place of a raw answer whenever the
+// Protective guardrails policy Suppresses it (ED-risk signal present and the
+// raw text is restrictive). The prompt already asks the provider not to
+// produce this kind of text, but the guardrail is the real backstop, so Ask
+// must never fall back to returning empty text here.
+const suppressedAnswerMessage = "Let's focus on what you're doing well. If food feels stressful, it can help to talk to someone you trust."
+
+// restrictivePhrases are lowercase substrings that mark a Q&A answer as
+// steering the user toward eating less / stopping — the same category the
+// system prompt already asks the provider to avoid. looksRestrictive checks
+// the raw provider answer against this list so guardrails.Evaluate is
+// actually able to Soften/Suppress restrictive answer text instead of always
+// receiving Restrictive: false.
+var restrictivePhrases = []string{
+	"eat less",
+	"eaten enough",
+	"you've had enough",
+	"stop eating",
+	"skip a meal",
+	"skip meals",
+	"cut back",
+	"restrict",
+	"too many calories",
+	"go to bed hungry",
+}
+
+// looksRestrictive reports whether text contains any restrictivePhrases,
+// case-insensitively. It is a pure heuristic over the raw provider answer —
+// no signals, no side effects — used to gate the answer through the
+// Protective guardrails policy for real.
+func looksRestrictive(text string) bool {
+	lower := strings.ToLower(text)
+	for _, phrase := range restrictivePhrases {
+		if strings.Contains(lower, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
 // Answer is the Q&A result: the guardrail-gated text, the grounding facts it
 // can be checked against, and whether a supportive resource should also be
 // surfaced.
@@ -88,9 +128,18 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 	}
 	s.record(ctx, userID, usage)
 
-	decision := guardrails.Evaluate(guardrails.Nudge{Text: raw, Restrictive: false}, signals)
+	restrictive := looksRestrictive(raw)
+	decision := guardrails.Evaluate(guardrails.Nudge{Text: raw, Restrictive: restrictive}, signals)
+
+	text := decision.Text
+	if decision.Action == guardrails.Suppress {
+		// Suppress means Decision.Text is "" — never surface an empty
+		// answer, fall back to a safe supportive message instead.
+		text = suppressedAnswerMessage
+	}
+
 	return Answer{
-		Text:        decision.Text,
+		Text:        text,
 		Citations:   grounded.Facts(),
 		ShowSupport: decision.ShowSupport || guardrails.AtRisk(signals),
 	}, nil
