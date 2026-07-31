@@ -110,7 +110,16 @@ func TestBuildContextAggregatesRecentDailyAndRenders(t *testing.T) {
 	require.Contains(t, rendered, "600", "Render must cite today's consumed kcal")
 }
 
-func TestBuildContextFastingStreakCountsConsecutiveZeroKcalDaysFromToday(t *testing.T) {
+// TestBuildContextFastingStreakExcludesTodayAndRequiresPriorLogging replaces
+// TestBuildContextFastingStreakCountsConsecutiveZeroKcalDaysFromToday, which
+// encoded the old defect: it asserted 3 for "today + 2 preceding zero-kcal
+// days" — counting the always-incomplete today and requiring no prior
+// logging history at all. Under the new contract, today never counts and a
+// day only counts once the user has an established log somewhere earlier in
+// the window. This seeds two logged days, then a genuine 2-day silent gap
+// leading up to (but excluding) today, and asserts the streak counts only
+// those complete, post-logging zero days.
+func TestBuildContextFastingStreakExcludesTodayAndRequiresPriorLogging(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db, 2000, 120)
 
@@ -125,7 +134,14 @@ func TestBuildContextFastingStreakCountsConsecutiveZeroKcalDaysFromToday(t *test
 	loc := time.UTC
 	now := time.Date(2026, 3, 10, 12, 0, 0, 0, loc)
 
-	// Only a log 3 days ago; today and the two days before it have nothing.
+	// Logged 4 and 3 days ago (establishes logging history), then silent
+	// for the 2 days before today, then today itself is also silent but
+	// must be excluded from the count.
+	seedLog(t, db, logRepo, foodlog.FoodLog{
+		UserID: userID, FoodItemID: &item.ID, LoggedAt: now.AddDate(0, 0, -4),
+		MealSlot: "lunch", Source: "manual", Provenance: nutrition.ProvenanceAFCD,
+		QuantityGrams: 100, Kcal: 100, ProteinG: 10,
+	})
 	seedLog(t, db, logRepo, foodlog.FoodLog{
 		UserID: userID, FoodItemID: &item.ID, LoggedAt: now.AddDate(0, 0, -3),
 		MealSlot: "lunch", Source: "manual", Provenance: nutrition.ProvenanceAFCD,
@@ -139,7 +155,89 @@ func TestBuildContextFastingStreakCountsConsecutiveZeroKcalDaysFromToday(t *test
 	ctx, err := g.BuildContext(context.Background(), userID, now, loc)
 	require.NoError(t, err)
 
-	require.Equal(t, 3, ctx.FastingStreakDays, "today + 2 preceding zero-kcal days")
+	require.Equal(t, 2, ctx.FastingStreakDays,
+		"only the 2 complete zero-kcal days after logging began must count; today is excluded")
+}
+
+// day builds one window entry. kcal > 0 implies the user logged food;
+// logCount is stated explicitly so "no logs" and "logged zero kcal" stay
+// distinguishable.
+func day(kcal float64, logCount int) DailyTotal {
+	return DailyTotal{Kcal: kcal, LogCount: logCount}
+}
+
+func TestFastingStreak_ZeroForUserWhoNeverLogged(t *testing.T) {
+	// A brand-new user: seven empty days. This is absent data, not a fast.
+	daily := []DailyTotal{
+		day(0, 0), day(0, 0), day(0, 0), day(0, 0), day(0, 0), day(0, 0), day(0, 0),
+	}
+
+	require.Equal(t, 0, fastingStreak(daily),
+		"a user with no logging history has no data, and no-data must never read as fasting")
+}
+
+func TestFastingStreak_ExcludesTodayBecauseItIsIncomplete(t *testing.T) {
+	// Logged through day 5, then silent. Today (last entry) is incomplete and
+	// must not count, so only day 6 counts.
+	daily := []DailyTotal{
+		day(2000, 3), day(2000, 3), day(2000, 3), day(2000, 3), day(2000, 3),
+		day(0, 0), // yesterday: a real zero-intake day
+		day(0, 0), // today: incomplete, must not count
+	}
+
+	require.Equal(t, 1, fastingStreak(daily),
+		"today is incomplete — counting it makes the signal time-of-day dependent")
+}
+
+func TestFastingStreak_CountsGenuineGapAfterLogging(t *testing.T) {
+	// Logged for four days, then three full silent days, then today.
+	daily := []DailyTotal{
+		day(2000, 3), day(2000, 3), day(2000, 3),
+		day(0, 0), day(0, 0), day(0, 0), // three complete zero days
+		day(0, 0), // today, excluded
+	}
+
+	require.Equal(t, 3, fastingStreak(daily),
+		"a real gap after established logging is exactly what this signal is for")
+}
+
+func TestFastingStreak_StopsAtMostRecentDayWithIntake(t *testing.T) {
+	daily := []DailyTotal{
+		day(2000, 3), day(0, 0), day(0, 0),
+		day(1800, 2), // ate here — the streak must not reach past this
+		day(0, 0), day(0, 0),
+		day(0, 0), // today, excluded
+	}
+
+	require.Equal(t, 2, fastingStreak(daily))
+}
+
+func TestFastingStreak_LoggedButZeroKcalStillCounts(t *testing.T) {
+	// The user logged something that totalled zero kcal (e.g. water). That is
+	// a real zero-intake day, not absent data, so it must still count.
+	daily := []DailyTotal{
+		day(2000, 3), day(2000, 3), day(2000, 3), day(2000, 3),
+		day(0, 1), day(0, 1), // logged, zero kcal
+		day(0, 0), // today, excluded
+	}
+
+	require.Equal(t, 2, fastingStreak(daily))
+}
+
+func TestFastingStreak_ZeroWhenLoggingStartedToday(t *testing.T) {
+	// First ever log is today. The six empty days before it are absent data.
+	daily := []DailyTotal{
+		day(0, 0), day(0, 0), day(0, 0), day(0, 0), day(0, 0), day(0, 0),
+		day(1500, 2), // today, first ever log
+	}
+
+	require.Equal(t, 0, fastingStreak(daily))
+}
+
+func TestFastingStreak_HandlesShortAndEmptyWindows(t *testing.T) {
+	require.Equal(t, 0, fastingStreak(nil))
+	require.Equal(t, 0, fastingStreak([]DailyTotal{}))
+	require.Equal(t, 0, fastingStreak([]DailyTotal{day(0, 0)}), "a single entry is today, which is excluded")
 }
 
 // TestBuildContextWindowStartMatchesAcrossFetchAndBucketing is a regression

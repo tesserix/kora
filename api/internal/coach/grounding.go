@@ -253,12 +253,51 @@ func summarizeRecent(daily []DailyTotal) (avgKcal, avgProtein, logsPerDay float6
 	return sumKcal / nf, sumProtein / nf, float64(totalLogs) / nf, daysLogged
 }
 
-// fastingStreak counts consecutive zero-kcal days ending at the most recent
-// (last) entry of daily, i.e. today backward.
+// fastingStreak counts consecutive zero-intake days ending YESTERDAY, and
+// only within the span in which the user was actually logging.
+//
+// Two rules, both deliberate:
+//
+//   - Today is excluded. It is always incomplete — before the day's first
+//     meal it looks identical to a fast — so counting it would make this
+//     signal, and every risk decision derived from it, depend on the time
+//     of day the request happened to arrive.
+//   - Days before the user's first log in the window do not count. A day
+//     with no logs is absent data, not evidence of not eating. Without this,
+//     a brand-new user's seven empty days read as a seven-day fast and trip
+//     the ED-risk threshold on first use. guardrails.AtRisk already applies
+//     exactly this reasoning to AvgIntakeKcal ("zero means no data"); this
+//     restores the symmetry.
+//
+// A day the user logged on that still totals zero kcal DOES count — that is
+// a real zero-intake day, not missing data.
+//
+// The effect is a strictly less sensitive signal. That is the point: a flag
+// that fires for every user carries no information. A genuine gap after
+// established logging still fires.
 func fastingStreak(daily []DailyTotal) int {
+	// Exclude today (the last entry): it is incomplete.
+	if len(daily) < 2 {
+		return 0
+	}
+	complete := daily[:len(daily)-1]
+
+	// Find the first day the user logged anything. Everything before it is
+	// absent data rather than observed behaviour.
+	firstLogged := -1
+	for i, d := range complete {
+		if d.LogCount > 0 {
+			firstLogged = i
+			break
+		}
+	}
+	if firstLogged < 0 {
+		return 0
+	}
+
 	streak := 0
-	for i := len(daily) - 1; i >= 0; i-- {
-		if daily[i].Kcal > 0 {
+	for i := len(complete) - 1; i >= firstLogged; i-- {
+		if complete[i].Kcal > 0 {
 			break
 		}
 		streak++
