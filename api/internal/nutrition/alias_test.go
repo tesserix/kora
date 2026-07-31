@@ -2,6 +2,7 @@ package nutrition
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -100,6 +101,56 @@ func TestAddAliasIsIdempotent(t *testing.T) {
 		"SELECT count(*) FROM food_aliases WHERE user_id = ? AND lower(alias) = ?",
 		userID, phrase).Scan(&n).Error)
 	require.EqualValues(t, 1, n)
+}
+
+// TestAddAliasNormalizesCaseAndWhitespaceOnWrite is the finding-3 regression
+// test for AddAlias's `key := strings.ToLower(strings.TrimSpace(alias))`
+// line. Every other AddAlias call site in this test file already passes an
+// alias that is lowercase and trimmed, so nothing exercised the write-side
+// normalization until now — mutating that line to `key := alias` still left
+// `go test ./internal/nutrition/ -run Alias` green. This test writes with
+// surrounding whitespace and mixed case, then resolves with a
+// differently-cased/spaced form of the same phrase: if AddAlias stored the
+// alias verbatim, the leading/trailing whitespace would survive into
+// food_aliases.alias, and Resolve's `lower(fa.alias) = ?` comparison — SQL
+// lower() lowercases but does not trim — would never match Resolve's
+// trimmed lookup key, so the alias would be unfindable.
+func TestAddAliasNormalizesCaseAndWhitespaceOnWrite(t *testing.T) {
+	db := testDB(t)
+	repo := NewRepository(db)
+	ctx := context.Background()
+	userID := seedAliasUser(t, db)
+	quinoa := seedAliasFood(t, db, "Quinoa")
+	base := "brekkie bowl " + uuid.NewString()
+
+	require.NoError(t, repo.AddAlias(ctx, userID, "  "+strings.ToUpper(base)+"  ", quinoa.ID))
+
+	got, err := repo.Resolve(ctx, userID, strings.ToLower(base), nil, 5)
+	require.NoError(t, err)
+	require.NotEmpty(t, got, "alias written with whitespace/case must resolve via its normalized form")
+	require.Equal(t, quinoa.ID, got[0].Item.ID)
+	require.Equal(t, MatchAlias, got[0].MatchTier)
+}
+
+// TestAddAliasBlankIsNoOp is the finding-3 regression test for AddAlias's
+// `if key == "" { return nil }` guard. A whitespace-only alias must not
+// insert a row (and must not error) — verified directly against the table
+// rather than through Resolve, since Resolve wouldn't distinguish "no alias
+// row" from "alias row present but this lookup key is wrong".
+func TestAddAliasBlankIsNoOp(t *testing.T) {
+	db := testDB(t)
+	repo := NewRepository(db)
+	ctx := context.Background()
+	userID := seedAliasUser(t, db)
+	quinoa := seedAliasFood(t, db, "Quinoa")
+
+	require.NoError(t, repo.AddAlias(ctx, userID, "   ", quinoa.ID))
+
+	var n int64
+	require.NoError(t, db.Raw(
+		"SELECT count(*) FROM food_aliases WHERE user_id = ? AND food_item_id = ?",
+		userID, quinoa.ID).Scan(&n).Error)
+	require.EqualValues(t, 0, n, "a blank/whitespace-only alias must not insert a row")
 }
 
 func TestRemoveAliasDeletesOnlyTheMatchingRow(t *testing.T) {
