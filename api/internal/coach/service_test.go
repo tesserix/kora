@@ -862,17 +862,22 @@ func TestServiceThread_ReplayedBenignTurnUnchanged(t *testing.T) {
 }
 
 // TestServiceThread_UserTurnsNeverRewritten proves the re-gate only ever
-// touches TurnRoleOtto turns: a user's own words — even ones that happen to
-// contain a restrictivePhrases substring — must replay byte-identical to
-// what was stored. Re-gating a user's own question would be both wrong (the
-// guardrail governs what Otto says, not what the user asks) and unsafe (it
-// would silently alter a user's own words).
+// touches TurnRoleOtto turns, even while it is actively suppressing the
+// Otto turn from the very same exchange: a user's own words — even ones
+// that happen to contain a restrictivePhrases substring — must replay
+// byte-identical to what was stored, regardless of the risk state. Seeds a
+// genuinely at-risk user (seedUnderEatingWeek — real logged under-eating,
+// the same fixture TestServiceNudges_GenuineDeficitStillFlagsAtRisk uses)
+// and stores a restrictive Otto answer alongside the user's question, so
+// the user-turn assertion below is made under ACTIVE suppression, not
+// merely alongside a user who happens to carry no risk signal at all (which
+// would prove nothing about replay under suppression — the risk state IS
+// the point of this test, not incidental to it). Re-gating a user's own
+// question would be both wrong (the guardrail governs what Otto says, not
+// what the user asks) and unsafe (it would silently alter a user's own
+// words).
 func TestServiceThread_UserTurnsNeverRewritten(t *testing.T) {
 	db := testDB(t)
-	// No logs seeded: with the current risk-signal semantics this user
-	// carries no active risk signal at all, but that is irrelevant here —
-	// this test's assertions don't depend on which signal (if any) drives
-	// risk, only that the user turn replays untouched regardless.
 	userID := seedUser(t, db, 2000, 120)
 
 	logRepo := foodlog.NewRepository(db)
@@ -882,20 +887,29 @@ func TestServiceThread_UserTurnsNeverRewritten(t *testing.T) {
 	g := NewGrounder(dashSvc, logRepo, memSvc, trackRepo)
 	threadRepo := NewThreadRepository(db)
 
+	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
+	seedUnderEatingWeek(t, db, logRepo, userID, now, 2000)
+
 	const userQuestion = "should I eat less?"
+	const restrictiveRaw = "You've eaten enough today — try to cut back tomorrow."
 	require.NoError(t, threadRepo.AppendExchange(context.Background(), userID,
-		userQuestion, "an answer", nil))
+		userQuestion, restrictiveRaw, nil))
 
 	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, &threadRepo)
-	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
 
 	result, err := svc.Thread(context.Background(), userID, now, time.UTC)
 	require.NoError(t, err)
+	require.True(t, result.ShowSupport, "test setup must actually be at-risk, or suppression below proves nothing")
 
 	require.Len(t, result.Turns, 2)
 	require.Equal(t, TurnRoleUser, result.Turns[0].Role)
 	require.Equal(t, userQuestion, result.Turns[0].Text,
-		"re-gating must only ever touch TurnRoleOtto turns, never TurnRoleUser turns")
+		"re-gating must only ever touch TurnRoleOtto turns, never TurnRoleUser turns — even while the Otto turn in the same exchange is suppressed")
+
+	require.Equal(t, TurnRoleOtto, result.Turns[1].Role)
+	require.Equal(t, suppressedAnswerMessage, result.Turns[1].Text,
+		"the Otto turn must actually be suppressed here — this is what makes the user-turn assertion above a test of replay under ACTIVE suppression")
+	require.NotEqual(t, restrictiveRaw, result.Turns[1].Text)
 }
 
 func TestServiceAsk_PersistsNothingOnProviderError(t *testing.T) {
