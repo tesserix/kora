@@ -256,6 +256,11 @@ export function useEditLog() {
       // A correction changes what the food index returns for this user, so
       // memory and any cached resolve result are stale too.
       qc.invalidateQueries({ queryKey: ["memory"] });
+      // A food correction teaches the server a new phrase -> food mapping for
+      // this user, so a cached food-search result (e.g. the picker's list)
+      // can serve pre-correction ordering within the same session unless it's
+      // invalidated too.
+      qc.invalidateQueries({ queryKey: ["foods"] });
     },
   });
 }
