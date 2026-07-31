@@ -153,6 +153,39 @@ func TestAddAliasBlankIsNoOp(t *testing.T) {
 	require.EqualValues(t, 0, n, "a blank/whitespace-only alias must not insert a row")
 }
 
+// TestAddAliasSecondCorrectionReplacesFirstForSameUserAndPhrase is the
+// finding-2(a) regression test: correcting the same phrase twice for the same
+// user (rice -> quinoa, then quinoa -> oats) must leave exactly one personal
+// alias for that phrase, pointing at the LATEST food — not two aliases both
+// scoring 1.0 in the alias tier with an arbitrary winner. Verified load-bearing:
+// deleting the "delete this user's other aliases for the same phrase" step
+// from AddAlias makes this test FAIL (two rows, first-written can still win).
+func TestAddAliasSecondCorrectionReplacesFirstForSameUserAndPhrase(t *testing.T) {
+	db := testDB(t)
+	repo := NewRepository(db)
+	ctx := context.Background()
+	userID := seedAliasUser(t, db)
+	rice := seedAliasFood(t, db, "Rice")
+	quinoa := seedAliasFood(t, db, "Quinoa")
+	oats := seedAliasFood(t, db, "Oats")
+	phrase := "the grain thing " + uuid.NewString()
+
+	require.NoError(t, repo.AddAlias(ctx, userID, phrase, rice.ID))
+	require.NoError(t, repo.AddAlias(ctx, userID, phrase, quinoa.ID))
+	require.NoError(t, repo.AddAlias(ctx, userID, phrase, oats.ID))
+
+	var n int64
+	require.NoError(t, db.Raw(
+		"SELECT count(*) FROM food_aliases WHERE user_id = ? AND lower(alias) = ?",
+		userID, phrase).Scan(&n).Error)
+	require.EqualValues(t, 1, n, "a phrase must mean exactly one food per user")
+
+	got, err := repo.Resolve(ctx, userID, phrase, nil, 5)
+	require.NoError(t, err)
+	require.NotEmpty(t, got)
+	require.Equal(t, oats.ID, got[0].Item.ID, "the phrase must resolve to the LATEST correction")
+}
+
 func TestRemoveAliasDeletesOnlyTheMatchingRow(t *testing.T) {
 	db := testDB(t)
 	repo := NewRepository(db)
