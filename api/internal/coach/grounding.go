@@ -231,18 +231,40 @@ func aggregateDaily(logs []foodlog.FoodLog, since time.Time) []DailyTotal {
 	return out
 }
 
-// summarizeRecent computes the window averages (denominator ==
-// recentWindowDays, so zero-log days pull the average down, matching "avg
-// intake over the last 7 days") plus the count of days that had >=1 log.
+// summarizeRecent computes the window's derived aggregates.
+//
+// avgKcal shares the exclude-today / logged-days-only / a-logged-zero-day-
+// counts rule stated in full on fastingStreak's doc comment (also applied by
+// recentDeficitPct in signals.go) — all three are guardrails.Signals inputs
+// derived from RecentDaily and must agree, or a brand-new user's single
+// partial log today can still trip AtRisk via whichever one of the three was
+// left unfixed. See avgKcalExcludingTodayOverLoggedDays.
+//
+// avgProtein and logsPerDay deliberately do NOT follow that rule:
+//
+//   - avgProtein is display-only grounding (cited in Render/Facts), not a
+//     guardrails.Signals input, so it isn't held to the same risk-signal
+//     correctness bar. Its denominator stays the fixed recentWindowDays.
+//   - logsPerDay is a logs-per-CALENDAR-day rate — the obsessive-logging
+//     proxy guardrails.AtRisk checks via riskLogsPerDay. Diluting it to
+//     "logs per logged day" would UNDERSTATE an obsessive logger's real
+//     behaviour (they log many times across all recentWindowDays real
+//     calendar days, logged or not, and today's own partial log count
+//     doesn't inflate the numerator the way a stale zero-kcal reading
+//     inflates a deficit) — the opposite of the problem this rule exists to
+//     fix. Its denominator also stays the fixed recentWindowDays.
+//
+// daysLogged counts every day in the FULL window (today included) with at
+// least one log, for display via Render/Facts; it is not a Signals input
+// either.
 func summarizeRecent(daily []DailyTotal) (avgKcal, avgProtein, logsPerDay float64, daysLogged int) {
 	n := len(daily)
 	if n == 0 {
 		return 0, 0, 0, 0
 	}
-	var sumKcal, sumProtein float64
+	var sumProtein float64
 	var totalLogs int
 	for _, d := range daily {
-		sumKcal += d.Kcal
 		sumProtein += d.ProteinG
 		totalLogs += d.LogCount
 		if d.LogCount > 0 {
@@ -250,27 +272,72 @@ func summarizeRecent(daily []DailyTotal) (avgKcal, avgProtein, logsPerDay float6
 		}
 	}
 	nf := float64(n)
-	return sumKcal / nf, sumProtein / nf, float64(totalLogs) / nf, daysLogged
+	avgKcal = avgKcalExcludingTodayOverLoggedDays(daily)
+	return avgKcal, sumProtein / nf, float64(totalLogs) / nf, daysLogged
+}
+
+// avgKcalExcludingTodayOverLoggedDays derives AvgIntakeKcal by applying the
+// shared today-exclusion / logged-days-only rule (see fastingStreak's doc
+// comment) to kcal. With no logged complete days it reports 0;
+// guardrails.AtRisk already treats a zero AvgIntakeKcal as "no data" and
+// does not fire on it (see riskAvgIntakeKcal's doc comment and
+// TestAtRisk's zero-Signals case), so this composes correctly with the
+// existing guardrails.AtRisk guard without any change there.
+func avgKcalExcludingTodayOverLoggedDays(daily []DailyTotal) float64 {
+	if len(daily) < 2 {
+		return 0
+	}
+	// Exclude today (the last entry): it is incomplete.
+	complete := daily[:len(daily)-1]
+
+	var sum float64
+	var logged int
+	for _, d := range complete {
+		if d.LogCount == 0 {
+			continue
+		}
+		sum += d.Kcal
+		logged++
+	}
+	if logged == 0 {
+		return 0
+	}
+	return sum / float64(logged)
 }
 
 // fastingStreak counts consecutive zero-intake days ending YESTERDAY, and
 // only within the span in which the user was actually logging.
 //
-// Two rules, both deliberate:
+// This comment states, in full, the rule shared by every guardrails.Signals
+// input this package derives from RecentDaily: fastingStreak (here),
+// recentDeficitPct (signals.go), and summarizeRecent's avgKcal (below) all
+// apply the identical core rule; the other two reference this comment
+// rather than restating it.
+//
+// The shared core, all deliberate:
 //
 //   - Today is excluded. It is always incomplete — before the day's first
-//     meal it looks identical to a fast — so counting it would make this
-//     signal, and every risk decision derived from it, depend on the time
-//     of day the request happened to arrive.
-//   - Days before the user's first log in the window do not count. A day
-//     with no logs is absent data, not evidence of not eating. Without this,
-//     a brand-new user's seven empty days read as a seven-day fast and trip
-//     the ED-risk threshold on first use. guardrails.AtRisk already applies
-//     exactly this reasoning to AvgIntakeKcal ("zero means no data"); this
-//     restores the symmetry.
+//     meal it looks identical to a fast — so counting it would make the
+//     derived signal, and every risk decision built on it, depend on the
+//     time of day the request happened to arrive.
+//   - An unlogged day is absent data, not evidence of not eating (zero
+//     intake, a fast, or a zero-kcal average). Scoring it as evidence meant
+//     a brand-new user's empty days alone tripped the ED-risk threshold.
+//     guardrails.AtRisk already applies exactly this reasoning to a zero
+//     AvgIntakeKcal ("zero means no data"); these functions restore the
+//     symmetry for every RecentDaily-derived signal.
+//   - A day the user logged on that still totals zero kcal DOES count —
+//     that is a real zero-intake day (or zero-kcal reading), not missing
+//     data.
 //
-// A day the user logged on that still totals zero kcal DOES count — that is
-// a real zero-intake day, not missing data.
+// fastingStreak alone adds one more rule on top, specific to streak
+// counting: days before the user's first log in the window do not count
+// either, even though they are technically just more "unlogged" days in the
+// same sense as the bullet above. Without this, a brand-new user's several
+// empty days before their first-ever log would read as a fast in progress.
+// recentDeficitPct and avgKcal need no equivalent rule: averaging simply
+// ignores unlogged days wherever they fall, with no need to anchor on where
+// logging began.
 //
 // The effect is a strictly less sensitive signal. That is the point: a flag
 // that fires for every user carries no information. A genuine gap after

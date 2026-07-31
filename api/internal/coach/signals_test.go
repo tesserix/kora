@@ -29,15 +29,15 @@ func TestSignalsFromComputesRecentDeficitPctAgainstTodayTarget(t *testing.T) {
 	c := Context{
 		Today: dashboard.Summary{Targets: dashboard.Totals{Kcal: 2000}},
 		RecentDaily: []DailyTotal{
-			{Kcal: 1000, LogCount: 1}, // deficit 0.5
-			{Kcal: 2000, LogCount: 1}, // deficit 0
-			{Kcal: 2500, LogCount: 1}, // over target -> clamped to 0
+			{Kcal: 1000, LogCount: 1}, // deficit 0.5 -> counted
+			{Kcal: 2000, LogCount: 1}, // deficit 0 -> counted
+			{Kcal: 2500, LogCount: 1}, // today -> excluded regardless of value
 		},
 	}
 
 	s := SignalsFrom(c)
-	// mean(0.5, 0, 0) = 0.1666...
-	require.InDelta(t, 0.16667, s.RecentDeficitPct, 0.001)
+	// today excluded: mean(0.5, 0) = 0.25
+	require.InDelta(t, 0.25, s.RecentDeficitPct, 0.001)
 }
 
 func TestSignalsFromPassesThroughFastingStreak(t *testing.T) {
@@ -76,11 +76,14 @@ func TestRecentDeficitPct_AveragesOnlyLoggedDays(t *testing.T) {
 }
 
 func TestRecentDeficitPct_LoggedZeroKcalDayStillCounts(t *testing.T) {
-	// Logged, and it totalled zero — real evidence of not eating.
+	// Logged, and it totalled zero — real evidence of not eating. Placed
+	// before the last entry: the last entry is today and is excluded
+	// regardless of its value, so the day under test here must not be today.
 	c := Context{
 		Today: dashboard.Summary{Targets: dashboard.Totals{Kcal: 2000}},
 		RecentDaily: []DailyTotal{
 			{Kcal: 2000, LogCount: 3}, {Kcal: 0, LogCount: 1},
+			{Kcal: 999, LogCount: 1}, // today -> excluded regardless of value
 		},
 	}
 

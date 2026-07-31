@@ -15,28 +15,32 @@ func SignalsFrom(c Context) guardrails.Signals {
 }
 
 // recentDeficitPct is the mean clamped shortfall vs today's kcal target
-// across the days in c.RecentDaily the user ACTUALLY LOGGED.
+// across the days in c.RecentDaily the user ACTUALLY LOGGED, excluding
+// today. See fastingStreak's doc comment (grounding.go, same package) for
+// the full shared rationale — this function and summarizeRecent's avgKcal
+// both apply the identical exclude-today / logged-days-only rule stated
+// there.
 //
-// Unlogged days are excluded rather than scored as a full deficit. A day
-// with no logs is absent data, not evidence of not eating — scoring it as a
-// 100% shortfall meant a brand-new user with seven empty days averaged a
-// 1.0 deficit and tripped the ED-risk threshold on first use. guardrails.AtRisk
-// applies the same reasoning to AvgIntakeKcal ("zero means no data").
+// Concretely: without the today-exclusion, a brand-new user whose only log
+// is one partial meal earlier today has exactly one logged day in the
+// window — today — and that partial reading becomes the entire deficit
+// signal (e.g. target 2000, one 450 kcal breakfast: deficit = 1 - 450/2000 =
+// 0.775), tripping the ED-risk threshold on their very first log.
 //
-// A day the user logged on that still totals zero kcal DOES count — that is
-// observed intake, not missing data.
-//
-// If the target is not positive (not onboarded) or nothing was logged in the
-// window, there is nothing to measure a shortfall against, so this reports 0
-// rather than a misleading spike.
+// If the target is not positive (not onboarded) or nothing complete was
+// logged in the window, there is nothing to measure a shortfall against, so
+// this reports 0 rather than a misleading spike.
 func recentDeficitPct(c Context) float64 {
 	target := c.Today.Targets.Kcal
 	if target <= 0 || len(c.RecentDaily) == 0 {
 		return 0
 	}
+	// Exclude today (the last entry): it is incomplete.
+	complete := c.RecentDaily[:len(c.RecentDaily)-1]
+
 	var sum float64
 	var logged int
-	for _, d := range c.RecentDaily {
+	for _, d := range complete {
 		if d.LogCount == 0 {
 			continue
 		}
