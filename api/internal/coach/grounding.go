@@ -52,15 +52,28 @@ type DailyTotal struct {
 // Context is the grounded, deterministic snapshot of a user's state that
 // the coach's prompts and Q&A are built from.
 type Context struct {
-	Today             dashboard.Summary
-	RecentDaily       []DailyTotal // oldest -> newest, len == recentWindowDays
-	AvgIntakeKcal     float64
-	AvgProteinG       float64
-	LogsPerDay        float64
+	Today         dashboard.Summary
+	RecentDaily   []DailyTotal // oldest -> newest, len == recentWindowDays
+	AvgIntakeKcal float64
+	AvgProteinG   float64
+	LogsPerDay    float64
+	// DaysLogged is the number of COMPLETE (non-today) days in RecentDaily
+	// the user actually logged — the same denominator AvgIntakeKcal and
+	// AvgProteinG were averaged over, so Render's "avg intake X kcal over N
+	// logged days" sentence states X and N consistently. See
+	// summarizeRecent's doc comment.
 	DaysLogged        int
 	FastingStreakDays int
-	Usual             memory.Memory
-	WeightTrend       WeightTrend
+	// LoggedBeforeWindow reports whether the user has any log strictly
+	// before the start of RecentDaily's window (see LogSource.HasLoggedBefore).
+	// fastingStreak uses it to tell "never logged" apart from "established
+	// logging history has gone completely silent for the whole window" —
+	// without it, a silence spanning recentWindowDays or longer looks
+	// identical to a brand-new user who has simply never logged, and the
+	// streak resets to 0 exactly when the gap is longest.
+	LoggedBeforeWindow bool
+	Usual              memory.Memory
+	WeightTrend        WeightTrend
 }
 
 // WeightTrend is the observed change in logged weight across the trailing
@@ -81,6 +94,14 @@ type WeightTrend struct {
 // satisfies it; tests can supply a fake.
 type LogSource interface {
 	ListForUserSince(ctx context.Context, userID uuid.UUID, since time.Time) ([]foodlog.FoodLog, error)
+	// HasLoggedBefore reports whether the user has any log strictly before
+	// `before`. BuildContext uses it (with the window's own start as
+	// `before`) to tell "this user has never logged" apart from "this user
+	// has established logging history and has since gone silent" — a
+	// distinction the bounded recentWindowDays window alone cannot make
+	// once a silence outlasts the window itself. See
+	// Context.LoggedBeforeWindow and fastingStreak.
+	HasLoggedBefore(ctx context.Context, userID uuid.UUID, before time.Time) (bool, error)
 }
 
 // WeightSource is the read used to compute WeightTrend.
@@ -121,6 +142,11 @@ func (g Grounder) BuildContext(ctx context.Context, userID uuid.UUID, now time.T
 	}
 	recentDaily := aggregateDaily(logs, since)
 
+	loggedBeforeWindow, err := g.Logs.HasLoggedBefore(ctx, userID, since)
+	if err != nil {
+		return Context{}, fmt.Errorf("coach: build context: logged-before-window check: %w", err)
+	}
+
 	usual, err := g.Mem.Build(ctx, userID, now, loc)
 	if err != nil {
 		return Context{}, fmt.Errorf("coach: build context: usual foods: %w", err)
@@ -145,15 +171,16 @@ func (g Grounder) BuildContext(ctx context.Context, userID uuid.UUID, now time.T
 	avgKcal, avgProtein, logsPerDay, daysLogged := summarizeRecent(recentDaily)
 
 	return Context{
-		Today:             today,
-		RecentDaily:       recentDaily,
-		AvgIntakeKcal:     avgKcal,
-		AvgProteinG:       avgProtein,
-		LogsPerDay:        logsPerDay,
-		DaysLogged:        daysLogged,
-		FastingStreakDays: fastingStreak(recentDaily),
-		Usual:             usual,
-		WeightTrend:       weightTrend,
+		Today:              today,
+		RecentDaily:        recentDaily,
+		AvgIntakeKcal:      avgKcal,
+		AvgProteinG:        avgProtein,
+		LogsPerDay:         logsPerDay,
+		DaysLogged:         daysLogged,
+		FastingStreakDays:  fastingStreak(recentDaily, loggedBeforeWindow),
+		LoggedBeforeWindow: loggedBeforeWindow,
+		Usual:              usual,
+		WeightTrend:        weightTrend,
 	}, nil
 }
 
@@ -231,34 +258,145 @@ func aggregateDaily(logs []foodlog.FoodLog, since time.Time) []DailyTotal {
 	return out
 }
 
-// summarizeRecent computes the window averages (denominator ==
-// recentWindowDays, so zero-log days pull the average down, matching "avg
-// intake over the last 7 days") plus the count of days that had >=1 log.
+// summarizeRecent computes the window's derived aggregates.
+//
+// avgKcal and avgProtein share the exclude-today / logged-days-only /
+// a-logged-zero-day-counts rule stated in full on fastingStreak's doc
+// comment (also applied by recentDeficitPct in signals.go): both are the
+// mean over the COMPLETE (non-today) days the user actually logged.
+// avgProtein is display/citation-only, not a guardrails.Signals input, but
+// is kept on the identical denominator as avgKcal rather than a separate
+// rule — simpler, and there is no reason for the two to disagree about
+// which days count as evidence.
+//
+// daysLogged is that SAME count — the exact denominator avgKcal (and
+// avgProtein) were divided by, not a separate full-window tally. That
+// matters for Render: its prose says "avg intake X kcal over N logged
+// days", and this way X really is the mean of N days' totals, not a
+// 7-day-diluted figure paired with an unrelated N (which is what the old
+// fixed-recentWindowDays divisor produced — the sentence was false whenever
+// N != recentWindowDays).
+//
+// logsPerDay deliberately does NOT follow that rule: it is a logs-per-
+// CALENDAR-day rate — the obsessive-logging proxy guardrails.AtRisk checks
+// via riskLogsPerDay, genuinely a per-calendar-day cadence, not an average
+// over "days with any activity". Diluting it to "logs per logged day" would
+// UNDERSTATE an obsessive logger's real behaviour, the opposite of what
+// this fix is for. Its denominator stays the fixed recentWindowDays, and its
+// numerator still includes today's logs as they happen.
 func summarizeRecent(daily []DailyTotal) (avgKcal, avgProtein, logsPerDay float64, daysLogged int) {
 	n := len(daily)
 	if n == 0 {
 		return 0, 0, 0, 0
 	}
-	var sumKcal, sumProtein float64
+
 	var totalLogs int
 	for _, d := range daily {
+		totalLogs += d.LogCount
+	}
+	logsPerDay = float64(totalLogs) / float64(n)
+
+	if n < 2 {
+		// Only today in the window: nothing complete to average.
+		return 0, 0, logsPerDay, 0
+	}
+	// Exclude today (the last entry): it is incomplete.
+	complete := daily[:n-1]
+
+	var sumKcal, sumProtein float64
+	for _, d := range complete {
+		if d.LogCount == 0 {
+			continue
+		}
 		sumKcal += d.Kcal
 		sumProtein += d.ProteinG
-		totalLogs += d.LogCount
-		if d.LogCount > 0 {
-			daysLogged++
-		}
+		daysLogged++
 	}
-	nf := float64(n)
-	return sumKcal / nf, sumProtein / nf, float64(totalLogs) / nf, daysLogged
+	if daysLogged == 0 {
+		return 0, 0, logsPerDay, 0
+	}
+	nf := float64(daysLogged)
+	return sumKcal / nf, sumProtein / nf, logsPerDay, daysLogged
 }
 
-// fastingStreak counts consecutive zero-kcal days ending at the most recent
-// (last) entry of daily, i.e. today backward.
-func fastingStreak(daily []DailyTotal) int {
+// fastingStreak counts consecutive zero-intake days ending YESTERDAY, and
+// only within the span in which the user was actually logging.
+//
+// This comment states, in full, the rule shared by every guardrails.Signals
+// input this package derives from RecentDaily: fastingStreak (here),
+// recentDeficitPct (signals.go), and summarizeRecent's avgKcal (below) all
+// apply the identical core rule; the other two reference this comment
+// rather than restating it.
+//
+// The shared core, all deliberate:
+//
+//   - Today is excluded. It is always incomplete — before the day's first
+//     meal it looks identical to a fast — so counting it would make the
+//     derived signal, and every risk decision built on it, depend on the
+//     time of day the request happened to arrive.
+//   - An unlogged day is absent data, not evidence of not eating (zero
+//     intake, a fast, or a zero-kcal average). Scoring it as evidence meant
+//     a brand-new user's empty days alone tripped the ED-risk threshold.
+//     guardrails.AtRisk already applies exactly this reasoning to a zero
+//     AvgIntakeKcal ("zero means no data"); these functions restore the
+//     symmetry for every RecentDaily-derived signal.
+//   - A day the user logged on that still totals zero kcal DOES count —
+//     that is a real zero-intake day (or zero-kcal reading), not missing
+//     data.
+//
+// fastingStreak alone adds one more rule on top, specific to streak
+// counting: days before the user's first log IN THE WINDOW do not count as
+// a fast — UNLESS the user has established logging history from before the
+// window (loggedBeforeWindow), in which case the entire complete-day span
+// is countable evidence, not just the days after an in-window first log.
+//
+// That "unless" matters more than it looks. Without it, a silence that
+// outlasts recentWindowDays becomes INVISIBLE: the pre-fix version searched
+// for firstLogged only inside the window, so once the last in-window log
+// aged out, firstLogged went to -1 and the streak reset to 0 — exactly when
+// the gap was longest and protection mattered most. loggedBeforeWindow (see
+// Context.LoggedBeforeWindow) is what distinguishes that established user
+// gone silent from a genuinely brand-new user who has never logged at all;
+// both look identical from inside the window alone.
+//
+// recentDeficitPct and avgKcal need no equivalent rule: averaging simply
+// ignores unlogged days wherever they fall, with no need to anchor on where
+// logging began.
+//
+// The effect is a strictly less sensitive signal than counting every
+// unlogged day. That is the point: a flag that fires for every user carries
+// no information. A genuine gap after established logging still fires — now
+// even when that gap spans the whole window.
+func fastingStreak(daily []DailyTotal, loggedBeforeWindow bool) int {
+	// Exclude today (the last entry): it is incomplete.
+	if len(daily) < 2 {
+		return 0
+	}
+	complete := daily[:len(daily)-1]
+
+	start := -1
+	if loggedBeforeWindow {
+		// Established history predates the window: the whole complete-day
+		// span is countable, not just what follows an in-window first log.
+		start = 0
+	} else {
+		// Find the first day the user logged anything IN the window.
+		// Everything before it is absent data rather than observed
+		// behaviour.
+		for i, d := range complete {
+			if d.LogCount > 0 {
+				start = i
+				break
+			}
+		}
+	}
+	if start < 0 {
+		return 0
+	}
+
 	streak := 0
-	for i := len(daily) - 1; i >= 0; i-- {
-		if daily[i].Kcal > 0 {
+	for i := len(complete) - 1; i >= start; i-- {
+		if complete[i].Kcal > 0 {
 			break
 		}
 		streak++

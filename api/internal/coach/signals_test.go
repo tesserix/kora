@@ -29,19 +29,120 @@ func TestSignalsFromComputesRecentDeficitPctAgainstTodayTarget(t *testing.T) {
 	c := Context{
 		Today: dashboard.Summary{Targets: dashboard.Totals{Kcal: 2000}},
 		RecentDaily: []DailyTotal{
-			{Kcal: 1000}, // deficit 0.5
-			{Kcal: 2000}, // deficit 0
-			{Kcal: 2500}, // over target -> clamped to 0
+			{Kcal: 1000, LogCount: 1}, // deficit 0.5 -> counted
+			{Kcal: 2000, LogCount: 1}, // deficit 0 -> counted
+			{Kcal: 2500, LogCount: 1}, // today -> excluded regardless of value
 		},
 	}
 
 	s := SignalsFrom(c)
-	// mean(0.5, 0, 0) = 0.1666...
-	require.InDelta(t, 0.16667, s.RecentDeficitPct, 0.001)
+	// today excluded: mean(0.5, 0) = 0.25
+	require.InDelta(t, 0.25, s.RecentDeficitPct, 0.001)
 }
 
 func TestSignalsFromPassesThroughFastingStreak(t *testing.T) {
 	c := Context{FastingStreakDays: 4}
 	s := SignalsFrom(c)
 	require.Equal(t, 4, s.FastingStreakDays)
+}
+
+func TestRecentDeficitPct_ZeroWhenNothingLogged(t *testing.T) {
+	c := Context{
+		Today: dashboard.Summary{Targets: dashboard.Totals{Kcal: 2000}},
+		RecentDaily: []DailyTotal{
+			{Kcal: 0, LogCount: 0}, {Kcal: 0, LogCount: 0}, {Kcal: 0, LogCount: 0},
+			{Kcal: 0, LogCount: 0}, {Kcal: 0, LogCount: 0}, {Kcal: 0, LogCount: 0},
+			{Kcal: 0, LogCount: 0},
+		},
+	}
+
+	require.Equal(t, 0.0, recentDeficitPct(c),
+		"no logs is absent data, not a 100% deficit")
+}
+
+func TestRecentDeficitPct_AveragesOnlyLoggedDays(t *testing.T) {
+	// Two logged days at half target; the rest unlogged and ignored.
+	c := Context{
+		Today: dashboard.Summary{Targets: dashboard.Totals{Kcal: 2000}},
+		RecentDaily: []DailyTotal{
+			{Kcal: 1000, LogCount: 2}, {Kcal: 1000, LogCount: 2},
+			{Kcal: 0, LogCount: 0}, {Kcal: 0, LogCount: 0}, {Kcal: 0, LogCount: 0},
+			{Kcal: 0, LogCount: 0}, {Kcal: 0, LogCount: 0},
+		},
+	}
+
+	require.InDelta(t, 0.5, recentDeficitPct(c), 0.001,
+		"only days with evidence should contribute")
+}
+
+func TestRecentDeficitPct_LoggedZeroKcalDayStillCounts(t *testing.T) {
+	// Logged, and it totalled zero — real evidence of not eating. Placed
+	// before the last entry: the last entry is today and is excluded
+	// regardless of its value, so the day under test here must not be today.
+	c := Context{
+		Today: dashboard.Summary{Targets: dashboard.Totals{Kcal: 2000}},
+		RecentDaily: []DailyTotal{
+			{Kcal: 2000, LogCount: 3}, {Kcal: 0, LogCount: 1},
+			{Kcal: 999, LogCount: 1}, // today -> excluded regardless of value
+		},
+	}
+
+	require.InDelta(t, 0.5, recentDeficitPct(c), 0.001)
+}
+
+func TestRecentDeficitPct_StillFiresForRealUnderEating(t *testing.T) {
+	// Consistent logging well under target must still trip the threshold.
+	daily := make([]DailyTotal, 7)
+	for i := range daily {
+		daily[i] = DailyTotal{Kcal: 800, LogCount: 3}
+	}
+	c := Context{
+		Today:       dashboard.Summary{Targets: dashboard.Totals{Kcal: 2000}},
+		RecentDaily: daily,
+	}
+
+	require.Greater(t, recentDeficitPct(c), 0.30,
+		"genuine sustained under-eating must still fire")
+}
+
+// TestRecentDeficitPct_ZeroWithOnlyOneLoggedDay covers FIX 4:
+// minDeficitLoggedDays requires at least 2 complete logged days before the
+// deficit signal can be non-zero. A single logged day — even a real,
+// steep-looking shortfall — is exactly the kind of one-abandoned-day sample
+// the today-exclusion fix already guards against for today specifically;
+// this closes the same hole for a lone logged day anywhere else in the
+// window.
+func TestRecentDeficitPct_ZeroWithOnlyOneLoggedDay(t *testing.T) {
+	c := Context{
+		Today: dashboard.Summary{Targets: dashboard.Totals{Kcal: 2000}},
+		RecentDaily: []DailyTotal{
+			{Kcal: 500, LogCount: 1}, // the ONLY complete logged day: deficit 0.75
+			{Kcal: 0, LogCount: 0}, {Kcal: 0, LogCount: 0}, {Kcal: 0, LogCount: 0},
+			{Kcal: 0, LogCount: 0}, {Kcal: 0, LogCount: 0},
+			{Kcal: 0, LogCount: 0}, // today, excluded
+		},
+	}
+
+	require.Equal(t, 0.0, recentDeficitPct(c),
+		"one logged day is below minDeficitLoggedDays and must read as no data, not a spike")
+}
+
+// TestRecentDeficitPct_ComputesNormallyAtMinimumSampleSize proves the gate
+// is a floor, not a blanket dampener: exactly minDeficitLoggedDays (2)
+// complete logged days is enough sample for the deficit signal to compute
+// and fire normally.
+func TestRecentDeficitPct_ComputesNormallyAtMinimumSampleSize(t *testing.T) {
+	c := Context{
+		Today: dashboard.Summary{Targets: dashboard.Totals{Kcal: 2000}},
+		RecentDaily: []DailyTotal{
+			{Kcal: 500, LogCount: 1},  // deficit 0.75
+			{Kcal: 1000, LogCount: 1}, // deficit 0.5
+			{Kcal: 0, LogCount: 0}, {Kcal: 0, LogCount: 0}, {Kcal: 0, LogCount: 0},
+			{Kcal: 0, LogCount: 0},
+			{Kcal: 0, LogCount: 0}, // today, excluded
+		},
+	}
+
+	require.InDelta(t, 0.625, recentDeficitPct(c), 0.001,
+		"two logged days meets minDeficitLoggedDays: mean(0.75, 0.5) = 0.625")
 }
