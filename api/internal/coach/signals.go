@@ -2,6 +2,16 @@ package coach
 
 import "github.com/tesserix/kora/api/internal/guardrails"
 
+// minDeficitLoggedDays is the fewest COMPLETE (non-today) logged days
+// recentDeficitPct requires before it will report a non-zero deficit. Below
+// this, one abandoned or partial logging day would stand in for the whole
+// window's "average deficit" — the same single-sample-as-signal problem the
+// today-exclusion fixes for today specifically, but that a lone logged day
+// anywhere else in the window still reproduces. Mirrors guardrails.AtRisk's
+// existing AvgIntakeKcal > 0 guard: too little evidence must read as "no
+// data", not as a spike.
+const minDeficitLoggedDays = 2
+
 // SignalsFrom derives guardrails.Signals from a grounded Context. It is a
 // pure computation over already-fetched, real data — no new reads happen
 // here.
@@ -27,9 +37,10 @@ func SignalsFrom(c Context) guardrails.Signals {
 // signal (e.g. target 2000, one 450 kcal breakfast: deficit = 1 - 450/2000 =
 // 0.775), tripping the ED-risk threshold on their very first log.
 //
-// If the target is not positive (not onboarded) or nothing complete was
-// logged in the window, there is nothing to measure a shortfall against, so
-// this reports 0 rather than a misleading spike.
+// If the target is not positive (not onboarded), nothing complete was
+// logged in the window, or fewer than minDeficitLoggedDays complete days
+// were logged, there is not enough evidence to measure a shortfall against,
+// so this reports 0 rather than a misleading spike.
 func recentDeficitPct(c Context) float64 {
 	target := c.Today.Targets.Kcal
 	if target <= 0 || len(c.RecentDaily) == 0 {
@@ -54,7 +65,7 @@ func recentDeficitPct(c Context) float64 {
 		sum += deficit
 		logged++
 	}
-	if logged == 0 {
+	if logged < minDeficitLoggedDays {
 		return 0
 	}
 	return sum / float64(logged)

@@ -104,3 +104,45 @@ func TestRecentDeficitPct_StillFiresForRealUnderEating(t *testing.T) {
 	require.Greater(t, recentDeficitPct(c), 0.30,
 		"genuine sustained under-eating must still fire")
 }
+
+// TestRecentDeficitPct_ZeroWithOnlyOneLoggedDay covers FIX 4:
+// minDeficitLoggedDays requires at least 2 complete logged days before the
+// deficit signal can be non-zero. A single logged day — even a real,
+// steep-looking shortfall — is exactly the kind of one-abandoned-day sample
+// the today-exclusion fix already guards against for today specifically;
+// this closes the same hole for a lone logged day anywhere else in the
+// window.
+func TestRecentDeficitPct_ZeroWithOnlyOneLoggedDay(t *testing.T) {
+	c := Context{
+		Today: dashboard.Summary{Targets: dashboard.Totals{Kcal: 2000}},
+		RecentDaily: []DailyTotal{
+			{Kcal: 500, LogCount: 1}, // the ONLY complete logged day: deficit 0.75
+			{Kcal: 0, LogCount: 0}, {Kcal: 0, LogCount: 0}, {Kcal: 0, LogCount: 0},
+			{Kcal: 0, LogCount: 0}, {Kcal: 0, LogCount: 0},
+			{Kcal: 0, LogCount: 0}, // today, excluded
+		},
+	}
+
+	require.Equal(t, 0.0, recentDeficitPct(c),
+		"one logged day is below minDeficitLoggedDays and must read as no data, not a spike")
+}
+
+// TestRecentDeficitPct_ComputesNormallyAtMinimumSampleSize proves the gate
+// is a floor, not a blanket dampener: exactly minDeficitLoggedDays (2)
+// complete logged days is enough sample for the deficit signal to compute
+// and fire normally.
+func TestRecentDeficitPct_ComputesNormallyAtMinimumSampleSize(t *testing.T) {
+	c := Context{
+		Today: dashboard.Summary{Targets: dashboard.Totals{Kcal: 2000}},
+		RecentDaily: []DailyTotal{
+			{Kcal: 500, LogCount: 1},  // deficit 0.75
+			{Kcal: 1000, LogCount: 1}, // deficit 0.5
+			{Kcal: 0, LogCount: 0}, {Kcal: 0, LogCount: 0}, {Kcal: 0, LogCount: 0},
+			{Kcal: 0, LogCount: 0},
+			{Kcal: 0, LogCount: 0}, // today, excluded
+		},
+	}
+
+	require.InDelta(t, 0.625, recentDeficitPct(c), 0.001,
+		"two logged days meets minDeficitLoggedDays: mean(0.75, 0.5) = 0.625")
+}
