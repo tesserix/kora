@@ -67,6 +67,12 @@ export default function More() {
             chevron
             onPress={() => router.push("/reminders" as Href)}
           />
+          <Row
+            title="Send feedback"
+            icon={{ name: "message-circle", tint: colors.accent }}
+            chevron
+            onPress={() => router.push("/feedback" as Href)}
+          />
         </GroupedSection>
         <GroupedSection>
           <Row

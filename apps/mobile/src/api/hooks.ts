@@ -7,6 +7,7 @@ import type {
   ChallengeDetail,
   ChallengeSummary,
   DashboardSummary,
+  FeedbackCreated,
   Friend,
   FriendRequests,
   FriendsProgress,
@@ -24,6 +25,7 @@ import type {
   Profile,
   Resolution,
   SavedMeal,
+  SubmitFeedbackInput,
   WeightEntry,
 } from "./types";
 
@@ -573,5 +575,15 @@ export function useMarkAllRead() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["notifications", "unread"] });
     },
+  });
+}
+
+export function useSubmitFeedback() {
+  return useMutation({
+    mutationFn: (input: SubmitFeedbackInput) =>
+      apiFetch("/v1/feedback", {
+        method: "POST",
+        body: JSON.stringify(input),
+      }) as Promise<FeedbackCreated>,
   });
 }

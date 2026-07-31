@@ -40,6 +40,12 @@ test("tapping Reminders navigates to /reminders", async () => {
   expect(mockPush).toHaveBeenCalledWith("/reminders");
 });
 
+test("tapping Send feedback navigates to /feedback", async () => {
+  const { getByText } = await render(<More />);
+  await fireEvent.press(getByText("Send feedback"));
+  expect(mockPush).toHaveBeenCalledWith("/feedback");
+});
+
 test("shows unread count badge when count > 0", async () => {
   const { getByText } = await render(<More />);
   expect(getByText("2")).toBeTruthy();

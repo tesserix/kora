@@ -295,3 +295,22 @@ export interface AppNotification {
   read: boolean;
   created_at: string;
 }
+
+export type FeedbackKind = "bug" | "feature";
+
+/** Request body for POST /v1/feedback. Snake_case matches the API contract. */
+export interface SubmitFeedbackInput {
+  kind: FeedbackKind;
+  subject: string;
+  description: string;
+  app_version: string;
+  platform: string;
+  os_version: string;
+  device_model: string;
+}
+
+/** What POST /v1/feedback returns inside the `data` envelope. */
+export interface FeedbackCreated {
+  id: string;
+  status: string;
+}
