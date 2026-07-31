@@ -13,9 +13,24 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
+	"github.com/tesserix/kora/api/internal/ai"
 	"github.com/tesserix/kora/api/internal/httpx"
 	"github.com/tesserix/kora/api/internal/nutrition"
 )
+
+// fakeResolutionCache is a ResolutionCache test double that records every
+// key it was asked to Delete, so tests can assert exactly when (and with
+// what key) EditLog invalidates the AI resolve cache.
+type fakeResolutionCache struct {
+	deleted []string
+}
+
+func (f *fakeResolutionCache) Delete(ctx context.Context, key string) error {
+	f.deleted = append(f.deleted, key)
+	return nil
+}
+
+var _ ResolutionCache = (*fakeResolutionCache)(nil)
 
 func testDB(t *testing.T) *gorm.DB {
 	t.Helper()
@@ -599,4 +614,119 @@ func TestEditLogBareRetractWithNoFoodChangeLeavesAliasIntact(t *testing.T) {
 		"SELECT count(*) FROM food_aliases WHERE user_id = ? AND lower(alias) = ? AND food_item_id = ?",
 		userID, strings.ToLower(phrase), quinoa.ID).Scan(&n).Error)
 	require.EqualValues(t, 1, n, "a bare retract with no food change must not destroy the existing alias")
+}
+
+// TestEditLogFoodChangeInvalidatesResolutionCache is the regression test for
+// the stale-cache bug: EditLog taught the alias but never evicted the AI
+// resolve cache, so a corrected phrase could keep resolving to the old,
+// wrong food out of cache for up to the cache's TTL. This proves a
+// food-changing correction deletes exactly the cache entry the resolver
+// would have used for this user+phrase (ai.CacheKey("phrase", ...)).
+func TestEditLogFoodChangeInvalidatesResolutionCache(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	rice := nutrition.FoodItem{Name: "Rice IC " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 130}
+	quinoa := nutrition.FoodItem{Name: "Quinoa IC " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 120}
+	require.NoError(t, db.Create(&rice).Error)
+	require.NoError(t, db.Create(&quinoa).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id IN (?, ?)", rice.ID, quinoa.ID) })
+
+	phrase := "brekkie bowl " + uuid.NewString()
+	log := seedPhraseLog(t, db, userID, rice, phrase)
+
+	cache := &fakeResolutionCache{}
+	svc := NewService(NewRepository(db), nutriRepo).WithResolutionCache(cache)
+
+	res, err := svc.EditLog(context.Background(), userID, log.ID, EditRequest{FoodItemID: &quinoa.ID})
+	require.NoError(t, err)
+	require.True(t, res.AliasRecorded)
+
+	require.Equal(t, []string{ai.CacheKey("phrase", userID, phrase)}, cache.deleted,
+		"a food-changing correction must evict exactly the cached entry for this user's phrase")
+}
+
+// TestEditLogRetractInvalidatesResolutionCache proves the undo half of a
+// correction also evicts the cache — otherwise a retracted alias could keep
+// serving the (now wrong) corrected resolution out of cache after the
+// correction was undone.
+func TestEditLogRetractInvalidatesResolutionCache(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	rice := nutrition.FoodItem{Name: "Rice ICR " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 130}
+	quinoa := nutrition.FoodItem{Name: "Quinoa ICR " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 120}
+	require.NoError(t, db.Create(&rice).Error)
+	require.NoError(t, db.Create(&quinoa).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id IN (?, ?)", rice.ID, quinoa.ID) })
+
+	phrase := "undo cache " + uuid.NewString()
+	log := seedPhraseLog(t, db, userID, rice, phrase)
+
+	cache := &fakeResolutionCache{}
+	svc := NewService(NewRepository(db), nutriRepo).WithResolutionCache(cache)
+
+	_, err := svc.EditLog(context.Background(), userID, log.ID, EditRequest{FoodItemID: &quinoa.ID})
+	require.NoError(t, err)
+	cache.deleted = nil // reset: only interested in what the retract itself triggers
+
+	_, err = svc.EditLog(context.Background(), userID, log.ID, EditRequest{
+		FoodItemID: &rice.ID, RetractCorrection: true,
+	})
+	require.NoError(t, err)
+
+	require.Equal(t, []string{ai.CacheKey("phrase", userID, phrase)}, cache.deleted,
+		"retracting a correction must evict the cached entry for this user's phrase")
+}
+
+// TestEditLogPortionOnlyChangeDoesNotInvalidateResolutionCache proves the
+// invalidator is NOT called when nothing was taught — a portion-only edit
+// changes no food, so there is no stale cache entry to evict, and calling
+// Delete anyway would just be wasted work on every ordinary edit.
+func TestEditLogPortionOnlyChangeDoesNotInvalidateResolutionCache(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	rice := nutrition.FoodItem{Name: "Rice ICP " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 130}
+	require.NoError(t, db.Create(&rice).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", rice.ID) })
+
+	phrase := "portion only cache " + uuid.NewString()
+	log := seedPhraseLog(t, db, userID, rice, phrase)
+
+	cache := &fakeResolutionCache{}
+	svc := NewService(NewRepository(db), nutriRepo).WithResolutionCache(cache)
+
+	grams := 200.0
+	res, err := svc.EditLog(context.Background(), userID, log.ID, EditRequest{QuantityGrams: &grams})
+	require.NoError(t, err)
+	require.False(t, res.AliasRecorded)
+
+	require.Empty(t, cache.deleted, "a portion-only edit teaches nothing, so nothing should be invalidated")
+}
+
+// TestEditLogWithNilResolutionCacheIsSilentNoOp proves a Service built
+// without WithResolutionCache (i.e. every existing NewService call site) is
+// unaffected by this change — a food-changing correction must still succeed
+// and record the alias exactly as before, with no cache configured at all.
+func TestEditLogWithNilResolutionCacheIsSilentNoOp(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	rice := nutrition.FoodItem{Name: "Rice ICN " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 130}
+	quinoa := nutrition.FoodItem{Name: "Quinoa ICN " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 120}
+	require.NoError(t, db.Create(&rice).Error)
+	require.NoError(t, db.Create(&quinoa).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id IN (?, ?)", rice.ID, quinoa.ID) })
+
+	phrase := "no cache configured " + uuid.NewString()
+	log := seedPhraseLog(t, db, userID, rice, phrase)
+
+	svc := NewService(NewRepository(db), nutriRepo) // no WithResolutionCache call
+
+	require.NotPanics(t, func() {
+		res, err := svc.EditLog(context.Background(), userID, log.ID, EditRequest{FoodItemID: &quinoa.ID})
+		require.NoError(t, err)
+		require.True(t, res.AliasRecorded)
+	})
 }

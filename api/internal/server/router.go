@@ -41,6 +41,14 @@ type Deps struct {
 	// gracefully instead of calling it — /coach/nudges is unaffected either
 	// way since it never touches the provider.
 	Provider ai.Provider
+	// ResolveCache is the SAME cache instance the resolve engine reads
+	// Resolutions from (see cmd/api/main.go's buildResolveHandler). It is
+	// wired into foodlog.Service so a post-log correction can evict the
+	// stale cached Resolution for the corrected phrase immediately, instead
+	// of waiting out the cache's TTL. Nil when the resolve engine is
+	// disabled (no GEMINI_API_KEY) or Redis is unreachable — foodlog.Service
+	// treats a nil cache as a silent no-op.
+	ResolveCache ai.Cache
 }
 
 func NewRouter(deps Deps) *gin.Engine {
@@ -86,7 +94,10 @@ func NewRouter(deps Deps) *gin.Engine {
 
 		foodRepo := nutrition.NewRepository(deps.DB)
 		logRepo := foodlog.NewRepository(deps.DB)
-		logHandler := foodlog.NewHandler(foodlog.NewService(logRepo, foodRepo), logRepo)
+		// deps.ResolveCache may be a nil ai.Cache (resolve engine disabled or
+		// Redis unreachable); WithResolutionCache treats a nil cache as a
+		// silent no-op, so this wiring is safe either way.
+		logHandler := foodlog.NewHandler(foodlog.NewService(logRepo, foodRepo).WithResolutionCache(deps.ResolveCache), logRepo)
 		v1.POST("/logs", logHandler.Create)
 		v1.GET("/logs", logHandler.List)
 		v1.GET("/logs/:id", logHandler.Get)

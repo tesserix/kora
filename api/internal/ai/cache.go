@@ -14,9 +14,18 @@ import (
 // (not cached, cache unavailable, or a decode failure) is reported via the
 // boolean return — implementations must NEVER treat a cache problem as a
 // fatal error, since resolution must work with or without a cache.
+//
+// Delete removes one cached entry. It exists so a correction (foodlog.Service
+// teaching or retracting a food_aliases row) can evict the stale Resolution
+// that was cached BEFORE the correction — without it, a corrected phrase
+// keeps serving the old, wrong resolution out of cache until the entry's TTL
+// expires. Like Get/Set, a Delete failure must never be treated as fatal by
+// callers; implementations report it via the error return so callers can log
+// it, but callers must still proceed (best-effort, same as Set).
 type Cache interface {
 	Get(ctx context.Context, key string) (*Resolution, bool)
 	Set(ctx context.Context, key string, r Resolution)
+	Delete(ctx context.Context, key string) error
 }
 
 // NoCache is a no-op Cache used when caching is disabled or unconfigured.
@@ -29,6 +38,11 @@ func (NoCache) Get(ctx context.Context, key string) (*Resolution, bool) {
 
 // Set is a no-op.
 func (NoCache) Set(ctx context.Context, key string, r Resolution) {}
+
+// Delete is a no-op — there is nothing to evict when caching is disabled.
+func (NoCache) Delete(ctx context.Context, key string) error {
+	return nil
+}
 
 // RedisCache is a Cache backed by Redis, storing resolutions as JSON with a
 // fixed TTL. Any Redis or (de)serialization failure is treated as a miss on
@@ -70,6 +84,13 @@ func (c *RedisCache) Set(ctx context.Context, key string, r Resolution) {
 	}
 
 	_ = c.client.Set(ctx, key, data, c.ttl).Err()
+}
+
+// Delete evicts one cached entry. Deleting a key that isn't there (already
+// expired, never set) is not an error — Redis's DEL simply reports it
+// deleted zero keys, which this treats the same as success.
+func (c *RedisCache) Delete(ctx context.Context, key string) error {
+	return c.client.Del(ctx, key).Err()
 }
 
 // CacheKey builds a stable, normalized cache key from a kind

@@ -27,6 +27,8 @@ func TestNoCache_AlwaysMisses(t *testing.T) {
 	got, ok = c.Get(ctx, "anything")
 	require.False(t, ok)
 	require.Nil(t, got)
+
+	require.NoError(t, c.Delete(ctx, "anything"), "Delete on NoCache must be a no-op, never an error")
 }
 
 func TestCacheKey_StableAndNormalized(t *testing.T) {
@@ -94,6 +96,47 @@ func TestRedisCache_RoundTrip(t *testing.T) {
 	require.Len(t, got.Candidates, 1)
 	require.Equal(t, want.Candidates[0].Kcal, got.Candidates[0].Kcal)
 	require.Equal(t, want.Candidates[0].MatchScore, got.Candidates[0].MatchScore)
+}
+
+// TestRedisCache_Delete_RemovesEntry is the regression test for the
+// foodlog correction-cache invalidation fix: a stale Resolution cached
+// before a correction must actually be gone from Redis after Delete, not
+// just reported as gone.
+func TestRedisCache_Delete_RemovesEntry(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+
+	cache := NewRedisCache(client, time.Minute)
+	ctx := context.Background()
+	key := CacheKey("phrase", uuid.New(), "brekkie bowl")
+
+	cache.Set(ctx, key, Resolution{Provenance: "test"})
+	_, ok := cache.Get(ctx, key)
+	require.True(t, ok, "sanity: entry must be present before Delete")
+
+	require.NoError(t, cache.Delete(ctx, key))
+
+	_, ok = cache.Get(ctx, key)
+	require.False(t, ok, "entry must be gone after Delete")
+}
+
+// TestRedisCache_Delete_MissingKeyIsNotAnError matches Get/Set's contract:
+// deleting a key that was never cached (or already expired) must not be
+// treated as a failure.
+func TestRedisCache_Delete_MissingKeyIsNotAnError(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+
+	cache := NewRedisCache(client, time.Minute)
+	require.NoError(t, cache.Delete(context.Background(), CacheKey("phrase", uuid.New(), "never cached")))
 }
 
 func TestRedisCache_DownRedisIsNilSafe(t *testing.T) {

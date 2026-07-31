@@ -11,9 +11,20 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
+	"github.com/tesserix/kora/api/internal/ai"
 	"github.com/tesserix/kora/api/internal/httpx"
 	"github.com/tesserix/kora/api/internal/nutrition"
 )
+
+// ResolutionCache is the subset of ai.Cache a correction needs: the ability
+// to evict one stale cached Resolution by key. It is declared locally
+// (rather than depending on ai.Cache directly) so foodlog does not take a
+// hard dependency on the concrete cache implementation backing resolution
+// (e.g. Redis) — any type with this one method, including *ai.RedisCache and
+// ai.NoCache, satisfies it structurally.
+type ResolutionCache interface {
+	Delete(ctx context.Context, key string) error
+}
 
 type LogRequest struct {
 	FoodItemID    *uuid.UUID `json:"food_item_id"`
@@ -49,10 +60,41 @@ func phraseForSource(source string, phrase *string) *string {
 type Service struct {
 	logs  Repository
 	foods nutrition.Repository
+	cache ResolutionCache
 }
 
 func NewService(logs Repository, foods nutrition.Repository) Service {
 	return Service{logs: logs, foods: foods}
+}
+
+// WithResolutionCache attaches an optional resolution-cache invalidator,
+// following the same functional-option pattern as social.Service.WithNotifier
+// and groups.Service.WithNotifier — added instead of a third NewService
+// parameter so the ~30 existing call sites across the codebase and tests
+// don't all need updating for an optional dependency. A nil cache (the
+// default — e.g. in every existing NewService call site, and in
+// router.go/main.go when Redis is unreachable or unconfigured) is a silent
+// no-op: see invalidateResolutionCache.
+func (s Service) WithResolutionCache(cache ResolutionCache) Service {
+	s.cache = cache
+	return s
+}
+
+// invalidateResolutionCache evicts the cached AI Resolution for (userID,
+// phrase) after a correction teaches or retracts an alias, so the next
+// resolve of that phrase doesn't keep serving a Resolution that was cached
+// BEFORE the correction. Nil-safe (no-op when no cache is configured) and
+// best-effort, exactly like the alias write/retraction itself — a cache
+// problem must never fail the edit.
+func (s Service) invalidateResolutionCache(ctx context.Context, userID uuid.UUID, phrase string) {
+	if s.cache == nil {
+		return
+	}
+	key := ai.CacheKey("phrase", userID, phrase)
+	if err := s.cache.Delete(ctx, key); err != nil {
+		slog.WarnContext(ctx, "foodlog: resolution cache invalidation failed",
+			"error", err, "user_id", userID)
+	}
 }
 
 func (s Service) LogFood(ctx context.Context, userID uuid.UUID, req LogRequest) (FoodLog, error) {
@@ -112,6 +154,12 @@ func (s Service) LogFood(ctx context.Context, userID uuid.UUID, req LogRequest) 
 // pointed at BEFORE this edit) once the edit has successfully applied and
 // actually changed the food. It is the undo half of a correction, and it
 // never writes an alias of its own.
+//
+// Either half of a correction (teach or retract) also evicts the AI resolve
+// cache entry for (user, log.input_phrase) when a ResolutionCache is
+// configured (see WithResolutionCache) — otherwise the phrase could keep
+// resolving to the pre-correction answer out of cache for up to the cache's
+// TTL, even though food_aliases was updated immediately.
 type EditRequest struct {
 	FoodItemID        *uuid.UUID `json:"food_item_id"`
 	MealSlot          string     `json:"meal_slot"`
@@ -206,6 +254,11 @@ func (s Service) EditLog(ctx context.Context, userID, logID uuid.UUID, req EditR
 				"error", aerr, "food_item_id", *current.FoodItemID, "user_id", userID)
 		} else {
 			aliasRecorded = true
+			// The old resolution for this phrase may still be sitting in the AI
+			// resolve cache (up to 24h TTL) — evict it so the user's next
+			// resolve of the same phrase hits the alias just taught, instead of
+			// serving back the same wrong answer they just corrected.
+			s.invalidateResolutionCache(ctx, userID, *current.InputPhrase)
 		}
 	}
 
@@ -220,6 +273,11 @@ func (s Service) EditLog(ctx context.Context, userID, logID uuid.UUID, req EditR
 		if rerr := s.foods.RemoveAlias(ctx, userID, *current.InputPhrase, *prevFoodID); rerr != nil {
 			slog.WarnContext(ctx, "foodlog: correction alias retraction failed",
 				"error", rerr, "food_item_id", *prevFoodID, "user_id", userID)
+		} else {
+			// The correction's Resolution may still be cached under this
+			// phrase — evict it so a future resolve stops reflecting the
+			// now-retracted alias.
+			s.invalidateResolutionCache(ctx, userID, *current.InputPhrase)
 		}
 	}
 
