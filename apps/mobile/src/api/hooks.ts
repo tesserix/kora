@@ -69,6 +69,8 @@ type CreateLogInput = {
   quantity_grams: number;
   logged_at: string;
   client_log_ms?: number;
+  /** Raw user phrase; the server keeps it only for ai_text / ai_voice sources. */
+  input_phrase?: string;
 };
 
 export function useCreateLog() {

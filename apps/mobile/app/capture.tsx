@@ -676,6 +676,13 @@ export default function CaptureScreen() {
   // failed instead of re-logging (duplicating) the ones that already succeeded.
   const [loggedCandidateKeys, setLoggedCandidateKeys] = useState<Set<string>>(new Set());
   const [text, setText] = useState("");
+  // The phrase that produced the current resolution. `text` is cleared as soon
+  // as the resolve fires, so it cannot be read at add-to-diary time — but the
+  // correction loop needs the exact words the user used, since that is the key
+  // a later correction teaches the food index under. Set (or explicitly
+  // cleared to null) in the same onSuccess handler that calls applyResolution,
+  // so it can never lag behind — and never a later, unrelated resolution.
+  const [resolvedPhrase, setResolvedPhrase] = useState<string | null>(null);
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   // Guards a single CameraView against firing onBarcodeScanned repeatedly
   // for the same physical scan while the camera keeps detecting the code.
@@ -759,6 +766,7 @@ export default function CaptureScreen() {
     resolveText.mutate(phrase, {
       onSuccess: (data) => {
         applyResolution(data);
+        setResolvedPhrase(phrase);
         setText("");
       },
       onError: (error) => setErrorMsg(ottoErrorMessage(error)),
@@ -778,7 +786,10 @@ export default function CaptureScreen() {
       return;
     }
     resolvePhoto.mutate(outcome.file, {
-      onSuccess: (data) => applyResolution(data),
+      onSuccess: (data) => {
+        applyResolution(data);
+        setResolvedPhrase(null);
+      },
       onError: (error) => setErrorMsg(ottoErrorMessage(error)),
     });
   }
@@ -806,7 +817,10 @@ export default function CaptureScreen() {
       resolveVoice.mutate(
         { uri, name: "clip.m4a", type: "audio/mp4" },
         {
-          onSuccess: (data) => applyResolution(data),
+          onSuccess: (data) => {
+            applyResolution(data);
+            setResolvedPhrase(data.transcript ?? null);
+          },
           onError: (error) => setErrorMsg(ottoErrorMessage(error)),
         },
       );
@@ -832,7 +846,10 @@ export default function CaptureScreen() {
     scannedRef.current = true;
     setErrorMsg(null);
     resolveBarcode.mutate(data, {
-      onSuccess: (result) => applyResolution(result),
+      onSuccess: (result) => {
+        applyResolution(result);
+        setResolvedPhrase(null);
+      },
       onError: (error) => {
         setErrorMsg(ottoErrorMessage(error));
         scannedRef.current = false;
@@ -869,6 +886,9 @@ export default function CaptureScreen() {
           meal_slot: mealSlot,
           source,
           logged_at: new Date().toISOString(),
+          ...(resolvedPhrase && (source === "ai_text" || source === "ai_voice")
+            ? { input_phrase: resolvedPhrase }
+            : {}),
         }),
       ),
     );

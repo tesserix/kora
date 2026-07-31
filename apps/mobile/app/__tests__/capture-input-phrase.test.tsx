@@ -1,0 +1,178 @@
+import { act, fireEvent, render } from "@testing-library/react-native";
+import { useCameraPermissions } from "expo-camera";
+import { requestRecordingPermissionsAsync, useAudioRecorder } from "expo-audio";
+import * as ImagePicker from "expo-image-picker";
+import { router } from "expo-router";
+import type { Resolution } from "@/api/types";
+
+jest.mock("expo-router", () => ({ router: { back: jest.fn(), push: jest.fn() } }));
+
+// Same shape as the real "@/lib/api" ApiError — see capture.test.tsx for why
+// this is mocked instead of pulling in the real module under Jest.
+jest.mock("@/lib/api", () => ({
+  ApiError: class ApiError extends Error {
+    status: number;
+    code: string;
+    constructor(status: number, code: string, message: string) {
+      super(message);
+      this.status = status;
+      this.code = code;
+      this.name = "ApiError";
+    }
+  },
+}));
+
+const mockResolveTextMutate = jest.fn();
+const mockResolvePhotoMutate = jest.fn();
+const mockResolveVoiceMutate = jest.fn();
+const mockResolveBarcodeMutate = jest.fn();
+const mockCreateLogMutateAsync = jest.fn();
+
+jest.mock("@/api/hooks", () => ({
+  useProfile: () => ({ data: { display_name: "Alex Stone" } }),
+  useResolveText: () => ({ mutate: mockResolveTextMutate, isPending: false }),
+  useResolvePhoto: () => ({ mutate: mockResolvePhotoMutate, isPending: false }),
+  useResolveVoice: () => ({ mutate: mockResolveVoiceMutate, isPending: false }),
+  useResolveBarcode: () => ({ mutate: mockResolveBarcodeMutate, isPending: false }),
+  useCreateLog: () => ({ mutateAsync: mockCreateLogMutateAsync, isPending: false }),
+}));
+
+type MockRecorder = {
+  prepareToRecordAsync: jest.Mock;
+  record: jest.Mock;
+  pause: jest.Mock;
+  stop: jest.Mock;
+  getStatus: jest.Mock;
+  uri: string | null;
+  isRecording: boolean;
+  currentTime: number;
+  id: string;
+};
+
+// A recorder whose `.stop()` populates `.uri` — mirrors the real AudioRecorder,
+// where the URI is only available once the recording is flushed to disk.
+function makeRecorder(): MockRecorder {
+  const recorder: MockRecorder = {
+    prepareToRecordAsync: jest.fn(async () => {}),
+    record: jest.fn(),
+    pause: jest.fn(),
+    stop: jest.fn(),
+    getStatus: jest.fn(async () => ({ isRecording: false })),
+    uri: null,
+    isRecording: false,
+    currentTime: 0,
+    id: "mock-recorder",
+  };
+  recorder.stop = jest.fn(async () => {
+    recorder.uri = "file://mock-recording.m4a";
+  });
+  return recorder;
+}
+
+import CaptureScreen from "../capture";
+
+function makeResolution(overrides: Partial<Resolution> = {}): Resolution {
+  return {
+    candidates: [
+      {
+        item: {
+          id: "1",
+          name: "Grilled chicken breast",
+          brand: "",
+          provenance: "afcd",
+          serving_desc: "1 breast",
+          serving_grams: 140,
+          kcal_per_100g: 165,
+          protein_per_100g: 31,
+          carbs_per_100g: 0,
+          fat_per_100g: 3.6,
+        },
+        portion_grams: 140,
+        kcal: 231,
+        match_score: 0.96,
+        match_tier: "auto",
+      },
+    ],
+    tier: "auto",
+    is_estimate: false,
+    provenance: "afcd",
+    ...overrides,
+  };
+}
+
+beforeEach(() => {
+  mockResolveTextMutate.mockReset();
+  mockResolvePhotoMutate.mockReset();
+  mockResolveVoiceMutate.mockReset();
+  mockResolveBarcodeMutate.mockReset();
+  mockCreateLogMutateAsync.mockReset().mockResolvedValue({ id: "log-1" });
+  (router.back as jest.Mock).mockReset();
+  (router.push as jest.Mock).mockReset();
+  (ImagePicker.requestCameraPermissionsAsync as jest.Mock).mockReset().mockResolvedValue({ granted: true });
+  (ImagePicker.requestMediaLibraryPermissionsAsync as jest.Mock).mockReset().mockResolvedValue({ granted: true });
+  (ImagePicker.launchCameraAsync as jest.Mock).mockReset();
+  (ImagePicker.launchImageLibraryAsync as jest.Mock).mockReset();
+  (requestRecordingPermissionsAsync as jest.Mock).mockReset().mockResolvedValue({ granted: true, status: "granted" });
+  (useAudioRecorder as jest.Mock).mockReset().mockReturnValue(makeRecorder());
+  (useCameraPermissions as jest.Mock).mockReset().mockReturnValue([
+    { granted: true, status: "granted", canAskAgain: true, expires: "never" },
+    jest.fn(async () => ({ granted: true, status: "granted" })),
+    jest.fn(async () => ({ granted: true, status: "granted" })),
+  ]);
+});
+
+test("a typed resolve logs the phrase the user actually typed", async () => {
+  const { findByText, findByLabelText } = await render(<CaptureScreen />);
+  await fireEvent.press(await findByText("Type"));
+
+  const input = await findByLabelText("Tell Otto what you ate");
+  await fireEvent.changeText(input, "brekkie eggs");
+  await fireEvent.press(await findByLabelText("Send"));
+
+  const [, options] = mockResolveTextMutate.mock.calls[0];
+  await act(async () => options.onSuccess(makeResolution()));
+
+  await fireEvent.press(await findByLabelText("Add to diary"));
+
+  expect(mockCreateLogMutateAsync).toHaveBeenCalledWith(
+    expect.objectContaining({ input_phrase: "brekkie eggs", source: "ai_text" }),
+  );
+});
+
+test("a voice resolve logs the server's transcript", async () => {
+  const recorder = makeRecorder();
+  (useAudioRecorder as jest.Mock).mockReturnValue(recorder);
+
+  const { findByText, findByLabelText } = await render(<CaptureScreen />);
+  await fireEvent.press(await findByText("Voice"));
+  await fireEvent.press(await findByLabelText("Start recording"));
+  await fireEvent.press(await findByLabelText("Stop recording"));
+
+  const [, options] = mockResolveVoiceMutate.mock.calls[0];
+  await act(async () => options.onSuccess(makeResolution({ transcript: "two boiled eggs" })));
+
+  await fireEvent.press(await findByLabelText("Add to diary"));
+
+  expect(mockCreateLogMutateAsync).toHaveBeenCalledWith(
+    expect.objectContaining({ input_phrase: "two boiled eggs", source: "ai_voice" }),
+  );
+});
+
+test("a photo resolve sends no input_phrase", async () => {
+  (ImagePicker.launchCameraAsync as jest.Mock).mockResolvedValueOnce({
+    canceled: false,
+    assets: [{ uri: "file://x.jpg", fileName: "x.jpg", mimeType: "image/jpeg" }],
+  });
+
+  const { findByLabelText } = await render(<CaptureScreen />);
+  await fireEvent.press(await findByLabelText("Photo viewfinder"));
+
+  const [, options] = mockResolvePhotoMutate.mock.calls[0];
+  await act(async () => options.onSuccess(makeResolution()));
+
+  await fireEvent.press(await findByLabelText("Add to diary"));
+
+  expect(mockCreateLogMutateAsync).toHaveBeenCalled();
+  const [payload] = mockCreateLogMutateAsync.mock.calls[0];
+  expect(payload).not.toHaveProperty("input_phrase");
+});
