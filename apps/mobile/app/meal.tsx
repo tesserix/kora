@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Alert, View } from "react-native";
+import { useEffect, useState } from "react";
+import { Alert, Pressable, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { Sheet } from "@/components/Sheet";
 import { Icon } from "@/components/Icon";
@@ -10,9 +10,11 @@ import { Card } from "@/components/Card";
 import { Stat } from "@/components/Stat";
 import { AppText } from "@/components/Text";
 import { Overline } from "@/components/Overline";
+import { FoodPicker } from "@/components/meal/FoodPicker";
 import { foodVisual } from "@/lib/foodVisual";
 import { haptics } from "@/motion";
-import { useEditLog, useDeleteLog, useRepeatLog, type EditLogInput } from "@/api/hooks";
+import { useEditLog, useDeleteLog, useLog, useRepeatLog, type EditLogInput } from "@/api/hooks";
+import type { FoodItem, FoodLog } from "@/api/types";
 import type { MealSlot } from "@/lib/mealSlot";
 import { useTheme } from "@/theme";
 
@@ -30,14 +32,28 @@ export default function MealDetail() {
     id: string; name: string; mealSlot: string; time: string;
     kcal: string; protein: string; carbs: string; fat: string; grams: string;
   }>();
-  const name = p.name ?? "Meal";
+
+  const { data: log } = useLog(p.id);
+  // Overwritten with the PATCH response right after a successful food change,
+  // so the displayed macros come straight from the server — never a local
+  // recomputation off the picker's kcal_per_100g.
+  const [override, setOverride] = useState<FoodLog | null>(null);
+  const effective = override ?? log;
+
+  // Paint instantly from the diary's route params (it already knows the name,
+  // kcal and macros), then prefer the fetched/patched log once it's in.
+  const name = effective?.description ?? p.name ?? "Meal";
   const vis = foodVisual(name, p.mealSlot);
-  const baseGrams = Number(p.grams) || 0;
-  const baseKcal = Number(p.kcal) || 0;
+  const baseGrams = effective?.quantity_grams ?? (Number(p.grams) || 0);
+  const baseKcal = effective?.kcal ?? (Number(p.kcal) || 0);
+  const baseProtein = effective?.protein_g ?? (Number(p.protein) || 0);
+  const baseCarbs = effective?.carbs_g ?? (Number(p.carbs) || 0);
+  const baseFat = effective?.fat_g ?? (Number(p.fat) || 0);
 
   const [grams, setGrams] = useState(baseGrams);
   const [slot, setSlot] = useState<MealSlot>((p.mealSlot as MealSlot) ?? "breakfast");
   const [err, setErr] = useState<string | null>(null);
+  const [pickerVisible, setPickerVisible] = useState(false);
 
   const editLog = useEditLog();
   const deleteLog = useDeleteLog();
@@ -47,6 +63,33 @@ export default function MealDetail() {
   const scale = (base: number) => (baseGrams > 0 ? Math.round(base * grams / baseGrams) : base);
   const kcal = scale(baseKcal);
   const dirty = grams !== baseGrams || slot !== p.mealSlot;
+
+  // A successful food change replaces the food identity but keeps the same
+  // portion/slot, so resync local state to the server's response rather than
+  // leaving Save changes armed for no user-made edit.
+  useEffect(() => {
+    if (!override) return;
+    setGrams(override.quantity_grams);
+    setSlot(override.meal_slot as MealSlot);
+  }, [override]);
+
+  const onSelectFood = (item: FoodItem) => {
+    setPickerVisible(false);
+    setErr(null);
+    editLog.mutate(
+      { id: p.id, food_item_id: item.id },
+      {
+        onSuccess: ({ log: updated }) => {
+          haptics.success();
+          setOverride(updated);
+        },
+        onError: () => {
+          haptics.error();
+          setErr("Couldn't change the food. Try again.");
+        },
+      },
+    );
+  };
 
   const onSave = () => {
     if (!dirty || busy) return;
@@ -125,19 +168,28 @@ export default function MealDetail() {
 
         <Card variant="elevated" style={{ flexDirection: "row", marginBottom: 20 }}>
           <View style={{ flex: 1 }}>
-            <Stat label="Protein" value={String(scale(Number(p.protein) || 0))} unit="g" valueColor={colors.accent} />
+            <Stat label="Protein" value={String(scale(baseProtein))} unit="g" valueColor={colors.accent} />
           </View>
           <View style={{ flex: 1 }}>
-            <Stat label="Carbs" value={String(scale(Number(p.carbs) || 0))} unit="g" valueColor={colors.accentAmber} />
+            <Stat label="Carbs" value={String(scale(baseCarbs))} unit="g" valueColor={colors.accentAmber} />
           </View>
           <View style={{ flex: 1 }}>
-            <Stat label="Fat" value={String(scale(Number(p.fat) || 0))} unit="g" valueColor={colors.accentBlue} />
+            <Stat label="Fat" value={String(scale(baseFat))} unit="g" valueColor={colors.accentBlue} />
           </View>
         </Card>
 
         <Overline>Portion</Overline>
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 12, marginTop: 6 }}>
-          <AppText variant="subheadline" style={{ fontWeight: "600" }}>{name}</AppText>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Change food"
+            disabled={busy}
+            onPress={() => setPickerVisible(true)}
+            style={{ flexDirection: "row", alignItems: "center", gap: 4, flexShrink: 1 }}
+          >
+            <AppText variant="subheadline" style={{ fontWeight: "600" }}>{name}</AppText>
+            <Icon name="chevron-right" size={14} color={colors.tertiaryLabel} />
+          </Pressable>
           <Stepper value={grams} onChange={setGrams} step={10} min={10} />
         </View>
 
@@ -172,6 +224,13 @@ export default function MealDetail() {
           />
         </View>
       </View>
+
+      <FoodPicker
+        visible={pickerVisible}
+        initialQuery={log?.input_phrase ?? name}
+        onSelect={onSelectFood}
+        onClose={() => setPickerVisible(false)}
+      />
     </Sheet>
   );
 }

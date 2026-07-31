@@ -17,6 +17,8 @@ jest.mock("expo-router", () => ({
 }));
 
 jest.mock("@/api/hooks", () => ({
+  useLog: () => ({ data: undefined, isLoading: false }),
+  useFoodSearch: () => ({ data: [], isLoading: false, isError: false }),
   useEditLog: () => ({ mutate: mockEditMutate, isPending: false }),
   useDeleteLog: () => ({ mutate: mockDeleteMutate, isPending: false }),
   useRepeatLog: () => ({ mutate: mockRepeatMutate, isPending: mockRepeatPending }),
