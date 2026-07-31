@@ -52,11 +52,16 @@ type DailyTotal struct {
 // Context is the grounded, deterministic snapshot of a user's state that
 // the coach's prompts and Q&A are built from.
 type Context struct {
-	Today             dashboard.Summary
-	RecentDaily       []DailyTotal // oldest -> newest, len == recentWindowDays
-	AvgIntakeKcal     float64
-	AvgProteinG       float64
-	LogsPerDay        float64
+	Today         dashboard.Summary
+	RecentDaily   []DailyTotal // oldest -> newest, len == recentWindowDays
+	AvgIntakeKcal float64
+	AvgProteinG   float64
+	LogsPerDay    float64
+	// DaysLogged is the number of COMPLETE (non-today) days in RecentDaily
+	// the user actually logged — the same denominator AvgIntakeKcal and
+	// AvgProteinG were averaged over, so Render's "avg intake X kcal over N
+	// logged days" sentence states X and N consistently. See
+	// summarizeRecent's doc comment.
 	DaysLogged        int
 	FastingStreakDays int
 	Usual             memory.Memory
@@ -233,76 +238,63 @@ func aggregateDaily(logs []foodlog.FoodLog, since time.Time) []DailyTotal {
 
 // summarizeRecent computes the window's derived aggregates.
 //
-// avgKcal shares the exclude-today / logged-days-only / a-logged-zero-day-
-// counts rule stated in full on fastingStreak's doc comment (also applied by
-// recentDeficitPct in signals.go) — all three are guardrails.Signals inputs
-// derived from RecentDaily and must agree, or a brand-new user's single
-// partial log today can still trip AtRisk via whichever one of the three was
-// left unfixed. See avgKcalExcludingTodayOverLoggedDays.
+// avgKcal and avgProtein share the exclude-today / logged-days-only /
+// a-logged-zero-day-counts rule stated in full on fastingStreak's doc
+// comment (also applied by recentDeficitPct in signals.go): both are the
+// mean over the COMPLETE (non-today) days the user actually logged.
+// avgProtein is display/citation-only, not a guardrails.Signals input, but
+// is kept on the identical denominator as avgKcal rather than a separate
+// rule — simpler, and there is no reason for the two to disagree about
+// which days count as evidence.
 //
-// avgProtein and logsPerDay deliberately do NOT follow that rule:
+// daysLogged is that SAME count — the exact denominator avgKcal (and
+// avgProtein) were divided by, not a separate full-window tally. That
+// matters for Render: its prose says "avg intake X kcal over N logged
+// days", and this way X really is the mean of N days' totals, not a
+// 7-day-diluted figure paired with an unrelated N (which is what the old
+// fixed-recentWindowDays divisor produced — the sentence was false whenever
+// N != recentWindowDays).
 //
-//   - avgProtein is display-only grounding (cited in Render/Facts), not a
-//     guardrails.Signals input, so it isn't held to the same risk-signal
-//     correctness bar. Its denominator stays the fixed recentWindowDays.
-//   - logsPerDay is a logs-per-CALENDAR-day rate — the obsessive-logging
-//     proxy guardrails.AtRisk checks via riskLogsPerDay. Diluting it to
-//     "logs per logged day" would UNDERSTATE an obsessive logger's real
-//     behaviour (they log many times across all recentWindowDays real
-//     calendar days, logged or not, and today's own partial log count
-//     doesn't inflate the numerator the way a stale zero-kcal reading
-//     inflates a deficit) — the opposite of the problem this rule exists to
-//     fix. Its denominator also stays the fixed recentWindowDays.
-//
-// daysLogged counts every day in the FULL window (today included) with at
-// least one log, for display via Render/Facts; it is not a Signals input
-// either.
+// logsPerDay deliberately does NOT follow that rule: it is a logs-per-
+// CALENDAR-day rate — the obsessive-logging proxy guardrails.AtRisk checks
+// via riskLogsPerDay, genuinely a per-calendar-day cadence, not an average
+// over "days with any activity". Diluting it to "logs per logged day" would
+// UNDERSTATE an obsessive logger's real behaviour, the opposite of what
+// this fix is for. Its denominator stays the fixed recentWindowDays, and its
+// numerator still includes today's logs as they happen.
 func summarizeRecent(daily []DailyTotal) (avgKcal, avgProtein, logsPerDay float64, daysLogged int) {
 	n := len(daily)
 	if n == 0 {
 		return 0, 0, 0, 0
 	}
-	var sumProtein float64
+
 	var totalLogs int
 	for _, d := range daily {
-		sumProtein += d.ProteinG
 		totalLogs += d.LogCount
-		if d.LogCount > 0 {
-			daysLogged++
-		}
 	}
-	nf := float64(n)
-	avgKcal = avgKcalExcludingTodayOverLoggedDays(daily)
-	return avgKcal, sumProtein / nf, float64(totalLogs) / nf, daysLogged
-}
+	logsPerDay = float64(totalLogs) / float64(n)
 
-// avgKcalExcludingTodayOverLoggedDays derives AvgIntakeKcal by applying the
-// shared today-exclusion / logged-days-only rule (see fastingStreak's doc
-// comment) to kcal. With no logged complete days it reports 0;
-// guardrails.AtRisk already treats a zero AvgIntakeKcal as "no data" and
-// does not fire on it (see riskAvgIntakeKcal's doc comment and
-// TestAtRisk's zero-Signals case), so this composes correctly with the
-// existing guardrails.AtRisk guard without any change there.
-func avgKcalExcludingTodayOverLoggedDays(daily []DailyTotal) float64 {
-	if len(daily) < 2 {
-		return 0
+	if n < 2 {
+		// Only today in the window: nothing complete to average.
+		return 0, 0, logsPerDay, 0
 	}
 	// Exclude today (the last entry): it is incomplete.
-	complete := daily[:len(daily)-1]
+	complete := daily[:n-1]
 
-	var sum float64
-	var logged int
+	var sumKcal, sumProtein float64
 	for _, d := range complete {
 		if d.LogCount == 0 {
 			continue
 		}
-		sum += d.Kcal
-		logged++
+		sumKcal += d.Kcal
+		sumProtein += d.ProteinG
+		daysLogged++
 	}
-	if logged == 0 {
-		return 0
+	if daysLogged == 0 {
+		return 0, 0, logsPerDay, 0
 	}
-	return sum / float64(logged)
+	nf := float64(daysLogged)
+	return sumKcal / nf, sumProtein / nf, logsPerDay, daysLogged
 }
 
 // fastingStreak counts consecutive zero-intake days ending YESTERDAY, and
