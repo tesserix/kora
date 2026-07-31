@@ -65,6 +65,10 @@ jest.mock("@/api/hooks", () => ({
   // meal-ask-again.test.tsx's job), but the hook it calls must exist on this
   // mock or rendering throws.
   useResolveText: () => ({ mutate: jest.fn(), isPending: false }),
+  // The delete-undo path re-creates via useCreateLog — not exercised here
+  // (that's meal-undo.test.tsx's job), but the hook must exist on this mock
+  // or rendering throws.
+  useCreateLog: () => ({ mutate: jest.fn(), isPending: false }),
 }));
 
 beforeEach(() => {

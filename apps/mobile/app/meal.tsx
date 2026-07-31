@@ -14,10 +14,11 @@ import { FoodPicker } from "@/components/meal/FoodPicker";
 import { AskAgainSheet } from "@/components/meal/AskAgainSheet";
 import { foodVisual } from "@/lib/foodVisual";
 import { haptics, PressableScale } from "@/motion";
-import { useEditLog, useDeleteLog, useLog, useRepeatLog, type EditLogInput } from "@/api/hooks";
+import { useEditLog, useDeleteLog, useLog, useRepeatLog, useCreateLog, type EditLogInput } from "@/api/hooks";
 import type { FoodItem, FoodLog } from "@/api/types";
 import type { MealSlot } from "@/lib/mealSlot";
 import { useTheme } from "@/theme";
+import { useToast } from "@/components/Toast";
 
 const SLOT_OPTIONS: Array<{ key: MealSlot; label: string }> = [
   { key: "breakfast", label: "Breakfast" },
@@ -60,6 +61,8 @@ export default function MealDetail() {
   const editLog = useEditLog();
   const deleteLog = useDeleteLog();
   const repeatLog = useRepeatLog();
+  const createLog = useCreateLog();
+  const toast = useToast();
   const busy = editLog.isPending || deleteLog.isPending || repeatLog.isPending;
 
   const scale = (base: number) => (baseGrams > 0 ? Math.round(base * grams / baseGrams) : base);
@@ -88,6 +91,17 @@ export default function MealDetail() {
     setPickerVisible(false);
     setAskAgainVisible(false);
     setErr(null);
+    // Freeze what's actually on the server right now, from the fetched/patched
+    // log — not route params, which go stale the moment an earlier correction
+    // in this same session has already changed them. This is what Undo must
+    // restore: the ORIGINAL food/portion/slot, not whatever this correction
+    // is about to write.
+    const prior = {
+      food_item_id: effective?.food_item_id,
+      quantity_grams: baseGrams,
+      meal_slot: baseSlot,
+    };
+    const priorPhrase = effective?.input_phrase;
     // Send the user's current portion/slot alongside the food change so the
     // server applies all three together. Otherwise a PATCH with only
     // food_item_id would echo back the log's ORIGINAL grams/slot, and the
@@ -97,9 +111,41 @@ export default function MealDetail() {
     editLog.mutate(
       { id: p.id, food_item_id: item.id, quantity_grams: grams, meal_slot: slot },
       {
-        onSuccess: ({ log: updated }) => {
+        onSuccess: ({ log: updated, aliasRecorded }) => {
           haptics.success();
           setOverride(updated);
+          toast.show({
+            message:
+              aliasRecorded && priorPhrase
+                ? `Updated · Kora will remember "${priorPhrase}"`
+                : "Updated",
+            actionLabel: "Undo",
+            onAction: () => {
+              editLog.mutate(
+                {
+                  id: p.id,
+                  food_item_id: prior.food_item_id,
+                  quantity_grams: prior.quantity_grams,
+                  meal_slot: prior.meal_slot,
+                  // retract_correction undoes ONLY the alias THIS correction
+                  // taught (aliasRecorded true). Sending it unconditionally,
+                  // or when nothing was taught, would delete an alias a
+                  // different log may have written for this same phrase.
+                  ...(aliasRecorded ? { retract_correction: true } : {}),
+                },
+                {
+                  onSuccess: ({ log: reverted }) => {
+                    haptics.success();
+                    setOverride(reverted);
+                  },
+                  onError: () => {
+                    haptics.error();
+                    setErr("Couldn't undo. Try again.");
+                  },
+                },
+              );
+            },
+          });
         },
         onError: () => {
           haptics.error();
@@ -129,6 +175,20 @@ export default function MealDetail() {
 
   const onDelete = () => {
     if (busy) return;
+    // Freeze the record that's actually about to be deleted — from the
+    // fetched/patched log, not route params — so Undo re-creates exactly
+    // what was on the server, even if an earlier correction this session
+    // already changed the food, portion or slot.
+    const retained = effective
+      ? {
+          food_item_id: effective.food_item_id,
+          quantity_grams: baseGrams,
+          meal_slot: baseSlot,
+          logged_at: effective.logged_at,
+          source: effective.source,
+          input_phrase: effective.input_phrase,
+        }
+      : null;
     Alert.alert("Delete this entry?", "This removes it from your diary.", [
       { text: "Cancel", style: "cancel" },
       {
@@ -136,7 +196,34 @@ export default function MealDetail() {
         style: "destructive",
         onPress: () =>
           deleteLog.mutate(p.id, {
-            onSuccess: () => router.back(),
+            onSuccess: () => {
+              router.back();
+              if (retained?.food_item_id) {
+                const foodItemId = retained.food_item_id;
+                toast.show({
+                  message: "Removed",
+                  actionLabel: "Undo",
+                  onAction: () => {
+                    createLog.mutate(
+                      {
+                        food_item_id: foodItemId,
+                        quantity_grams: retained.quantity_grams,
+                        meal_slot: retained.meal_slot,
+                        source: retained.source,
+                        logged_at: retained.logged_at,
+                        // Preserve the phrase so a later correction on the
+                        // restored log can still teach the food index. This
+                        // mints a NEW log id — a known, accepted limitation.
+                        input_phrase: retained.input_phrase,
+                      },
+                      { onError: () => toast.show({ message: "Couldn't restore. Try again." }) },
+                    );
+                  },
+                });
+              } else {
+                toast.show({ message: "Removed" });
+              }
+            },
             onError: () => setErr("Couldn't delete. Try again."),
           }),
       },

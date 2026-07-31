@@ -40,6 +40,10 @@ jest.mock("@/api/hooks", () => ({
   useDeleteLog: () => ({ mutate: mockDeleteMutate, isPending: false }),
   useRepeatLog: () => ({ mutate: mockRepeatMutate, isPending: false }),
   useResolveText: () => ({ mutate: mockResolveTextMutate, isPending: false }),
+  // The delete-undo path re-creates via useCreateLog — not exercised here
+  // (that's meal-undo.test.tsx's job), but the hook must exist on this mock
+  // or rendering throws.
+  useCreateLog: () => ({ mutate: jest.fn(), isPending: false }),
 }));
 
 beforeEach(() => {
