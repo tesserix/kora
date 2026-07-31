@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/google/uuid"
@@ -283,6 +284,10 @@ func TestResolveVoiceTranscribesThenResolves(t *testing.T) {
 	// 89 kcal/100g * 100g / 100 = 89 — computed from the row, never from the
 	// (kcal-less) transcript or guess.
 	require.Equal(t, 89.0, res.Candidates[0].Kcal)
+	// A successful voice resolve must carry the transcript back to the
+	// caller — a mobile client has nothing else it can put in
+	// FoodLog.InputPhrase for an ai_voice log.
+	require.Equal(t, "banana", res.Transcript)
 
 	// The whole point of transcription metering: at least one recorded Usage
 	// row must be the transcribe call itself, alongside the identify/embed
@@ -314,15 +319,23 @@ func TestResolveVoiceBlankTranscriptFollowUp(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, TierFollowUp, res.Tier)
 	assert.Empty(t, res.Candidates)
+	// A blank/unusable transcript must return the existing follow-up
+	// Resolution unchanged — no transcript for a client to log against.
+	assert.Empty(t, res.Transcript)
 }
 
 // TestResolveText_CachesResolution_SkipsProviderOnSecondCall proves the
-// happy-path result is cached and a repeat request for the same phrase never
-// re-invokes the provider.
+// happy-path result is cached and a repeat request from the SAME user for
+// the same phrase never re-invokes the provider. Both calls deliberately use
+// the same userID: the cache key is user-scoped (finding 1), so two
+// different users would not be expected to share a cache entry — that
+// cross-user behavior is covered separately by
+// TestResolveText_CacheDoesNotLeakAcrossUsers.
 func TestResolveText_CachesResolution_SkipsProviderOnSecondCall(t *testing.T) {
 	db := testDB(t)
 	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE brand = 'test2b'") })
 	repo := nutrition.NewRepository(db)
+	userID := seedTestUser(t, db)
 
 	item := seedFoodItem(t, repo, nutrition.FoodItem{
 		Name: "Cached grilled chicken", Brand: "test2b",
@@ -347,14 +360,74 @@ func TestResolveText_CachesResolution_SkipsProviderOnSecondCall(t *testing.T) {
 	resolver := NewResolver(provider, repo, cache, meter)
 	ctx := context.Background()
 
-	first, err := resolver.ResolveText(ctx, uuid.New(), "cached grilled chicken")
+	first, err := resolver.ResolveText(ctx, userID, "cached grilled chicken")
 	require.NoError(t, err)
 	callsAfterFirst := provider.calls // IdentifyText + Embed(per guess)
 	require.Greater(t, callsAfterFirst, 0)
 
-	second, err := resolver.ResolveText(ctx, uuid.New(), "cached grilled chicken")
+	second, err := resolver.ResolveText(ctx, userID, "cached grilled chicken")
 	require.NoError(t, err)
 	require.Equal(t, callsAfterFirst, provider.calls, "second call must be served from cache")
 	require.Equal(t, first.Tier, second.Tier)
 	require.Equal(t, first.Candidates[0].Kcal, second.Candidates[0].Kcal)
+}
+
+// TestResolveText_CacheDoesNotLeakAcrossUsers is the finding-1 regression
+// test at the full ResolveText/wiring level: it reproduces the exact leak
+// scenario the finding describes. User A personally aliases a phrase to a
+// food item (a real correction, scored 1.0 by the alias tier -> TierAuto ->
+// cached). User B then resolves the identical phrase and must NOT receive
+// user A's cached Resolution — proven two ways: (1) the provider must be
+// re-invoked for user B instead of the request being served from cache, and
+// (2) user B's candidates (B has neither a personal nor a global alias for
+// this nonce phrase) must never contain user A's aliased food item.
+func TestResolveText_CacheDoesNotLeakAcrossUsers(t *testing.T) {
+	db := testDB(t)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE brand = 'test2c'") })
+	repo := nutrition.NewRepository(db)
+	userA := seedTestUser(t, db)
+	userB := seedTestUser(t, db)
+
+	quinoa := seedFoodItem(t, repo, nutrition.FoodItem{
+		Name: "Personally aliased quinoa", Brand: "test2c",
+		Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 120,
+	})
+	phrase := "brekkie bowl " + uuid.NewString()
+	// A real correction: user A's personal alias, scored 1.0 by the alias
+	// tier (see nutrition.Repository.Resolve tier 1), which is enough on its
+	// own to reach TierAuto and get cached.
+	require.NoError(t, repo.AddAlias(context.Background(), userA, phrase, quinoa.ID))
+
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+	cache := NewRedisCache(client, time.Minute)
+
+	provider := &stubProvider{
+		guesses: []Guess{
+			{Food: phrase, PortionEstimate: "100 g", Confidence: 0.95},
+		},
+		guessUsage: Usage{Provider: "stub"},
+	}
+	meter := &stubMeter{withinBudget: true}
+	resolver := NewResolver(provider, repo, cache, meter)
+	ctx := context.Background()
+
+	resA, err := resolver.ResolveText(ctx, userA, phrase)
+	require.NoError(t, err)
+	require.Equal(t, TierAuto, resA.Tier)
+	require.Equal(t, quinoa.ID, resA.Candidates[0].Item.ID)
+	callsAfterA := provider.calls
+	require.Greater(t, callsAfterA, 0)
+
+	resB, err := resolver.ResolveText(ctx, userB, phrase)
+	require.NoError(t, err)
+	require.Greater(t, provider.calls, callsAfterA,
+		"user B must not be served from user A's cache entry — the provider must be reached again")
+	for _, c := range resB.Candidates {
+		require.NotEqual(t, quinoa.ID, c.Item.ID,
+			"user A's personally aliased food item must never leak into user B's resolution via a shared cache key")
+	}
 }

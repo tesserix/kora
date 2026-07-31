@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -13,9 +14,18 @@ import (
 // (not cached, cache unavailable, or a decode failure) is reported via the
 // boolean return — implementations must NEVER treat a cache problem as a
 // fatal error, since resolution must work with or without a cache.
+//
+// Delete removes one cached entry. It exists so a correction (foodlog.Service
+// teaching or retracting a food_aliases row) can evict the stale Resolution
+// that was cached BEFORE the correction — without it, a corrected phrase
+// keeps serving the old, wrong resolution out of cache until the entry's TTL
+// expires. Like Get/Set, a Delete failure must never be treated as fatal by
+// callers; implementations report it via the error return so callers can log
+// it, but callers must still proceed (best-effort, same as Set).
 type Cache interface {
 	Get(ctx context.Context, key string) (*Resolution, bool)
 	Set(ctx context.Context, key string, r Resolution)
+	Delete(ctx context.Context, key string) error
 }
 
 // NoCache is a no-op Cache used when caching is disabled or unconfigured.
@@ -28,6 +38,11 @@ func (NoCache) Get(ctx context.Context, key string) (*Resolution, bool) {
 
 // Set is a no-op.
 func (NoCache) Set(ctx context.Context, key string, r Resolution) {}
+
+// Delete is a no-op — there is nothing to evict when caching is disabled.
+func (NoCache) Delete(ctx context.Context, key string) error {
+	return nil
+}
 
 // RedisCache is a Cache backed by Redis, storing resolutions as JSON with a
 // fixed TTL. Any Redis or (de)serialization failure is treated as a miss on
@@ -71,8 +86,26 @@ func (c *RedisCache) Set(ctx context.Context, key string, r Resolution) {
 	_ = c.client.Set(ctx, key, data, c.ttl).Err()
 }
 
+// Delete evicts one cached entry. Deleting a key that isn't there (already
+// expired, never set) is not an error — Redis's DEL simply reports it
+// deleted zero keys, which this treats the same as success.
+func (c *RedisCache) Delete(ctx context.Context, key string) error {
+	return c.client.Del(ctx, key).Err()
+}
+
 // CacheKey builds a stable, normalized cache key from a kind
-// ("barcode"|"phrase"|"photo") and a value.
-func CacheKey(kind, value string) string {
-	return kind + ":" + strings.ToLower(strings.TrimSpace(value))
+// ("barcode"|"phrase"|"photo"|"voice"), the requesting user's id, and a
+// value.
+//
+// userID is part of the key because resolution is user-dependent:
+// nutrition.Repository.Resolve checks the requesting user's personal
+// food_aliases before curated/global ones (see nutrition/alias.go), so the
+// same phrase can legitimately resolve to different food items for
+// different users. A key that omitted the user id would let one user's
+// personal-alias correction populate a shared cache entry that every other
+// user's identical phrase/photo/voice request then reads back — silently
+// serving that user's correction (and its nutrition numbers) to strangers.
+// There is deliberately no unscoped variant of this function.
+func CacheKey(kind string, userID uuid.UUID, value string) string {
+	return kind + ":" + userID.String() + ":" + strings.ToLower(strings.TrimSpace(value))
 }

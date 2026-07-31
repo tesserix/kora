@@ -86,6 +86,38 @@ func (h Handler) List(c *gin.Context) {
 	httpx.OK(c, logs)
 }
 
+// Get returns one log in full. The diary passes a meal's fields as route
+// params, which cannot carry food_item_id, source or input_phrase — the
+// correction sheet needs all three, so it re-reads the record here.
+//
+// GetByID scopes by (id AND user_id), so a missing log and another user's
+// log both surface as gorm.ErrRecordNotFound — that 404-vs-403 ambiguity is
+// deliberate and must not be resolved. An infrastructure fault (e.g. a DB
+// outage) is a different error and is NOT swallowed into 404: it is
+// reported as a generic 500 via httpx.RespondServiceError so it doesn't
+// masquerade as "log not found" to the client or to 5xx-based alerting.
+func (h Handler) Get(c *gin.Context) {
+	userID, ok := h.resolveUser(c)
+	if !ok {
+		return
+	}
+	logID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		httpx.Error(c, http.StatusBadRequest, "invalid_input", "invalid log id")
+		return
+	}
+	log, err := h.repo.GetByID(c.Request.Context(), userID, logID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			httpx.Error(c, http.StatusNotFound, "not_found", "log not found")
+			return
+		}
+		httpx.RespondServiceError(c, err)
+		return
+	}
+	httpx.OK(c, log)
+}
+
 func (h Handler) Update(c *gin.Context) {
 	userID, ok := h.resolveUser(c)
 	if !ok {
@@ -101,7 +133,7 @@ func (h Handler) Update(c *gin.Context) {
 		httpx.Error(c, http.StatusBadRequest, "invalid_input", "invalid request body")
 		return
 	}
-	updated, err := h.svc.EditLog(c.Request.Context(), userID, logID, req)
+	res, err := h.svc.EditLog(c.Request.Context(), userID, logID, req)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			httpx.Error(c, http.StatusNotFound, "not_found", "log not found")
@@ -110,7 +142,7 @@ func (h Handler) Update(c *gin.Context) {
 		httpx.RespondServiceError(c, err)
 		return
 	}
-	httpx.OK(c, updated)
+	httpx.OKWithMeta(c, res.Log, gin.H{"alias_recorded": res.AliasRecorded})
 }
 
 func (h Handler) Delete(c *gin.Context) {

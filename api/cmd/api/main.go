@@ -58,7 +58,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	resolveHandler, aiProvider := buildResolveHandler(context.Background(), cfg, db, logger)
+	resolveHandler, aiProvider, resolveCache := buildResolveHandler(context.Background(), cfg, db, logger)
 
 	schedCtx, schedCancel := context.WithCancel(context.Background())
 	if cfg.SchedulerInterval > 0 {
@@ -90,7 +90,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,
-		Handler: server.NewRouter(server.Deps{DB: db, Verifier: verifier, Resolver: resolveHandler, Provider: aiProvider}),
+		Handler: server.NewRouter(server.Deps{DB: db, Verifier: verifier, Resolver: resolveHandler, Provider: aiProvider, ResolveCache: resolveCache}),
 	}
 
 	go func() {
@@ -116,21 +116,25 @@ func main() {
 }
 
 // buildResolveHandler composes the AI resolution engine from config. It
-// returns a nil handler (resolve endpoints stay unmounted) and a nil
-// provider when no Gemini key is set — the rest of the API runs unchanged.
-// The OpenAI-compatible fallback is optional: with no OpenAI key, Gemini
-// serves alone (no Router). The returned provider is also threaded into
-// server.Deps.Provider so the coach's Q&A endpoint can generate text without
-// building a second client.
-func buildResolveHandler(ctx context.Context, cfg config.Config, db *gorm.DB, logger *slog.Logger) (*resolve.Handler, ai.Provider) {
+// returns a nil handler (resolve endpoints stay unmounted), a nil provider,
+// and a nil cache when no Gemini key is set — the rest of the API runs
+// unchanged. The OpenAI-compatible fallback is optional: with no OpenAI key,
+// Gemini serves alone (no Router). The returned provider is also threaded
+// into server.Deps.Provider so the coach's Q&A endpoint can generate text
+// without building a second client. The returned cache is threaded into
+// server.Deps.ResolveCache so foodlog.Service can evict a stale cached
+// Resolution after a correction teaches or retracts an alias — it is the
+// SAME cache instance the resolver reads from, so an eviction here is
+// actually visible to the next resolve.
+func buildResolveHandler(ctx context.Context, cfg config.Config, db *gorm.DB, logger *slog.Logger) (*resolve.Handler, ai.Provider, ai.Cache) {
 	if cfg.GeminiAPIKey == "" {
 		logger.Info("resolve engine disabled (no GEMINI_API_KEY)")
-		return nil, nil
+		return nil, nil, nil
 	}
 	gemini, err := providers.NewGeminiProvider(ctx, cfg.GeminiAPIKey)
 	if err != nil {
 		logger.Error("gemini provider init failed — resolve engine disabled", "err", err)
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	var provider ai.Provider = gemini
@@ -162,5 +166,5 @@ func buildResolveHandler(ctx context.Context, cfg config.Config, db *gorm.DB, lo
 	h := resolve.NewHandler(resolver, func(c context.Context, code string) (*nutrition.FoodItem, bool, error) {
 		return foods.ResolveBarcode(c, off, code)
 	})
-	return &h, provider
+	return &h, provider, cache
 }

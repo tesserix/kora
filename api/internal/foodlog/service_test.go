@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,9 +13,24 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
+	"github.com/tesserix/kora/api/internal/ai"
 	"github.com/tesserix/kora/api/internal/httpx"
 	"github.com/tesserix/kora/api/internal/nutrition"
 )
+
+// fakeResolutionCache is a ResolutionCache test double that records every
+// key it was asked to Delete, so tests can assert exactly when (and with
+// what key) EditLog invalidates the AI resolve cache.
+type fakeResolutionCache struct {
+	deleted []string
+}
+
+func (f *fakeResolutionCache) Delete(ctx context.Context, key string) error {
+	f.deleted = append(f.deleted, key)
+	return nil
+}
+
+var _ ResolutionCache = (*fakeResolutionCache)(nil)
 
 func testDB(t *testing.T) *gorm.DB {
 	t.Helper()
@@ -99,12 +115,12 @@ func TestEditLogGramsChangeRecomputesFromSameFoodRow(t *testing.T) {
 	wantDescription := created.Description
 
 	newGrams := 250.0
-	updated, err := svc.EditLog(context.Background(), userID, created.ID, EditRequest{QuantityGrams: &newGrams})
+	res, err := svc.EditLog(context.Background(), userID, created.ID, EditRequest{QuantityGrams: &newGrams})
 	require.NoError(t, err)
-	require.Equal(t, newGrams, updated.QuantityGrams)
-	require.InDelta(t, item.KcalPer100g*newGrams/100, updated.Kcal, 0.001)
-	require.InDelta(t, item.ProteinPer100g*newGrams/100, updated.ProteinG, 0.001)
-	require.Equal(t, wantDescription, updated.Description)
+	require.Equal(t, newGrams, res.Log.QuantityGrams)
+	require.InDelta(t, item.KcalPer100g*newGrams/100, res.Log.Kcal, 0.001)
+	require.InDelta(t, item.ProteinPer100g*newGrams/100, res.Log.ProteinG, 0.001)
+	require.Equal(t, wantDescription, res.Log.Description)
 }
 
 func TestEditLogFoodChangeWithCorrectionPhraseRecordsAlias(t *testing.T) {
@@ -121,20 +137,21 @@ func TestEditLogFoodChangeWithCorrectionPhraseRecordsAlias(t *testing.T) {
 	phrase := "my brekkie " + uuid.NewString()
 	t.Cleanup(func() { db.Exec("DELETE FROM food_aliases WHERE lower(alias) = ?", phrase) })
 
+	// The phrase is now server-derived from the log's own input_phrase (set
+	// only for ai_text/ai_voice sources), not client-supplied — seed the log
+	// with it rather than passing a correction_phrase on the request.
+	created := seedPhraseLog(t, db, userID, oldItem, phrase)
+
 	svc := NewService(NewRepository(db), nutriRepo)
-	created, err := svc.LogFood(context.Background(), userID, LogRequest{
-		FoodItemID: &oldItem.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 100, LoggedAt: time.Now(),
+	res, err := svc.EditLog(context.Background(), userID, created.ID, EditRequest{
+		FoodItemID: &newItem.ID,
 	})
 	require.NoError(t, err)
+	require.True(t, res.AliasRecorded)
+	require.Equal(t, 200.0, res.Log.Kcal) // recomputed from new item at same 100g
+	require.Equal(t, newItem.Name, res.Log.Description)
 
-	updated, err := svc.EditLog(context.Background(), userID, created.ID, EditRequest{
-		FoodItemID: &newItem.ID, CorrectionPhrase: phrase,
-	})
-	require.NoError(t, err)
-	require.Equal(t, 200.0, updated.Kcal) // recomputed from new item at same 100g
-	require.Equal(t, newItem.Name, updated.Description)
-
-	cands, err := nutriRepo.Resolve(context.Background(), phrase, nil, 5)
+	cands, err := nutriRepo.Resolve(context.Background(), userID, phrase, nil, 5)
 	require.NoError(t, err)
 	require.NotEmpty(t, cands)
 	require.Equal(t, newItem.ID, cands[0].Item.ID)
@@ -308,4 +325,408 @@ func TestEditLogInvalidMealSlotReturnsValidationError(t *testing.T) {
 	require.Error(t, err)
 	_, ok := httpx.IsValidation(err)
 	require.True(t, ok)
+}
+
+func TestLogFoodPersistsInputPhraseForTextSource(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	item := nutrition.FoodItem{Name: "Phrase Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	phrase := "brekkie eggs"
+	log, err := svc.LogFood(context.Background(), userID, LogRequest{
+		FoodItemID: &item.ID, MealSlot: "breakfast", Source: "ai_text",
+		QuantityGrams: 100, InputPhrase: &phrase,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, log.InputPhrase)
+	require.Equal(t, "brekkie eggs", *log.InputPhrase)
+	require.Equal(t, item.Name, log.Description, "description stays the RESOLVED name")
+}
+
+func TestLogFoodIgnoresInputPhraseForNonResolveSource(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	item := nutrition.FoodItem{Name: "Phrase Food M " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	phrase := "not from a resolve"
+	// A manual log has no AI guess to correct, so there is nothing to teach
+	// the index with — the phrase must be dropped rather than stored.
+	log, err := svc.LogFood(context.Background(), userID, LogRequest{
+		FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual",
+		QuantityGrams: 100, InputPhrase: &phrase,
+	})
+	require.NoError(t, err)
+	require.Nil(t, log.InputPhrase)
+}
+
+func TestLogFoodPersistsInputPhraseForVoiceSource(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	item := nutrition.FoodItem{Name: "Phrase Food V " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	phrase := "two boiled eggs"
+	log, err := svc.LogFood(context.Background(), userID, LogRequest{
+		FoodItemID: &item.ID, MealSlot: "breakfast", Source: "ai_voice",
+		QuantityGrams: 100, InputPhrase: &phrase,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, log.InputPhrase)
+	require.Equal(t, "two boiled eggs", *log.InputPhrase)
+}
+
+// seedPhraseLog creates an ai_text log for `from` carrying `phrase`.
+func seedPhraseLog(t *testing.T, db *gorm.DB, userID uuid.UUID, from nutrition.FoodItem, phrase string) FoodLog {
+	t.Helper()
+	svc := NewService(NewRepository(db), nutrition.NewRepository(db))
+	log, err := svc.LogFood(context.Background(), userID, LogRequest{
+		FoodItemID: &from.ID, MealSlot: "lunch", Source: "ai_text",
+		QuantityGrams: 100, InputPhrase: &phrase,
+	})
+	require.NoError(t, err)
+	return log
+}
+
+func TestEditLogWritesPersonalAliasWhenFoodChanges(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	rice := nutrition.FoodItem{Name: "Rice C " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 130}
+	quinoa := nutrition.FoodItem{Name: "Quinoa C " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 120}
+	require.NoError(t, db.Create(&rice).Error)
+	require.NoError(t, db.Create(&quinoa).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id IN (?, ?)", rice.ID, quinoa.ID) })
+
+	phrase := "the grain thing " + uuid.NewString()
+	log := seedPhraseLog(t, db, userID, rice, phrase)
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	res, err := svc.EditLog(context.Background(), userID, log.ID, EditRequest{FoodItemID: &quinoa.ID})
+	require.NoError(t, err)
+	require.True(t, res.AliasRecorded)
+	require.Equal(t, quinoa.ID, *res.Log.FoodItemID)
+
+	// The alias must be keyed on the phrase the LOG carries, personal to this user.
+	var n int64
+	require.NoError(t, db.Raw(
+		"SELECT count(*) FROM food_aliases WHERE user_id = ? AND lower(alias) = ? AND food_item_id = ?",
+		userID, strings.ToLower(phrase), quinoa.ID).Scan(&n).Error)
+	require.EqualValues(t, 1, n)
+}
+
+func TestEditLogWritesNoAliasWhenLogHasNoPhrase(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	rice := nutrition.FoodItem{Name: "Rice N " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 130}
+	quinoa := nutrition.FoodItem{Name: "Quinoa N " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 120}
+	require.NoError(t, db.Create(&rice).Error)
+	require.NoError(t, db.Create(&quinoa).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id IN (?, ?)", rice.ID, quinoa.ID) })
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	// A manual log carries no phrase, so there is nothing to teach.
+	log, err := svc.LogFood(context.Background(), userID, LogRequest{
+		FoodItemID: &rice.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 100,
+	})
+	require.NoError(t, err)
+
+	res, err := svc.EditLog(context.Background(), userID, log.ID, EditRequest{FoodItemID: &quinoa.ID})
+	require.NoError(t, err)
+	require.False(t, res.AliasRecorded)
+
+	var n int64
+	require.NoError(t, db.Raw(
+		"SELECT count(*) FROM food_aliases WHERE user_id = ?", userID).Scan(&n).Error)
+	require.EqualValues(t, 0, n)
+}
+
+func TestEditLogWritesNoAliasWhenOnlyPortionChanges(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	rice := nutrition.FoodItem{Name: "Rice P " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 130}
+	require.NoError(t, db.Create(&rice).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", rice.ID) })
+
+	phrase := "portion only " + uuid.NewString()
+	log := seedPhraseLog(t, db, userID, rice, phrase)
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	grams := 200.0
+	res, err := svc.EditLog(context.Background(), userID, log.ID, EditRequest{QuantityGrams: &grams})
+	require.NoError(t, err)
+	require.False(t, res.AliasRecorded, "a portion change teaches the index nothing")
+	require.Equal(t, 200.0, res.Log.QuantityGrams)
+}
+
+func TestEditLogRetractsTheAliasTheCorrectionCreated(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	rice := nutrition.FoodItem{Name: "Rice R " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 130}
+	quinoa := nutrition.FoodItem{Name: "Quinoa R " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 120}
+	require.NoError(t, db.Create(&rice).Error)
+	require.NoError(t, db.Create(&quinoa).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id IN (?, ?)", rice.ID, quinoa.ID) })
+
+	phrase := "undo me " + uuid.NewString()
+	log := seedPhraseLog(t, db, userID, rice, phrase)
+	svc := NewService(NewRepository(db), nutriRepo)
+
+	// Correct rice -> quinoa, which teaches (phrase -> quinoa).
+	_, err := svc.EditLog(context.Background(), userID, log.ID, EditRequest{FoodItemID: &quinoa.ID})
+	require.NoError(t, err)
+
+	// Undo: revert to rice AND un-teach what the correction taught.
+	res, err := svc.EditLog(context.Background(), userID, log.ID, EditRequest{
+		FoodItemID: &rice.ID, RetractCorrection: true,
+	})
+	require.NoError(t, err)
+	require.Equal(t, rice.ID, *res.Log.FoodItemID)
+
+	var n int64
+	require.NoError(t, db.Raw(
+		"SELECT count(*) FROM food_aliases WHERE user_id = ? AND lower(alias) = ? AND food_item_id = ?",
+		userID, strings.ToLower(phrase), quinoa.ID).Scan(&n).Error)
+	require.EqualValues(t, 0, n, "the alias the correction created must be gone")
+}
+
+func TestEditLogRetractDoesNotAliasTheRevertTarget(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	rice := nutrition.FoodItem{Name: "Rice RT " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 130}
+	quinoa := nutrition.FoodItem{Name: "Quinoa RT " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 120}
+	require.NoError(t, db.Create(&rice).Error)
+	require.NoError(t, db.Create(&quinoa).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id IN (?, ?)", rice.ID, quinoa.ID) })
+
+	phrase := "no rebound " + uuid.NewString()
+	log := seedPhraseLog(t, db, userID, rice, phrase)
+	svc := NewService(NewRepository(db), nutriRepo)
+
+	_, err := svc.EditLog(context.Background(), userID, log.ID, EditRequest{FoodItemID: &quinoa.ID})
+	require.NoError(t, err)
+	res, err := svc.EditLog(context.Background(), userID, log.ID, EditRequest{
+		FoodItemID: &rice.ID, RetractCorrection: true,
+	})
+	require.NoError(t, err)
+	require.False(t, res.AliasRecorded, "an undo must not itself teach the index")
+
+	// An undo that taught (phrase -> rice) would make the wrong food sticky
+	// in the opposite direction — the exact trap this flag exists to avoid.
+	var n int64
+	require.NoError(t, db.Raw(
+		"SELECT count(*) FROM food_aliases WHERE user_id = ? AND lower(alias) = ?",
+		userID, strings.ToLower(phrase)).Scan(&n).Error)
+	require.EqualValues(t, 0, n)
+}
+
+// TestEditLogRejectedRetractDoesNotDestroyAlias is the finding-1 regression
+// test: an undo request that fails validation (here, an invalid meal_slot)
+// must leave the taught alias and the log's food untouched. Before the fix,
+// retraction ran before validation, so this exact request deleted the alias
+// and then returned an error — the log stayed pointed at the wrong food AND
+// the correction that fixed it was erased.
+func TestEditLogRejectedRetractDoesNotDestroyAlias(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	rice := nutrition.FoodItem{Name: "Rice RJ " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 130}
+	quinoa := nutrition.FoodItem{Name: "Quinoa RJ " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 120}
+	require.NoError(t, db.Create(&rice).Error)
+	require.NoError(t, db.Create(&quinoa).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id IN (?, ?)", rice.ID, quinoa.ID) })
+
+	phrase := "rejected undo " + uuid.NewString()
+	log := seedPhraseLog(t, db, userID, rice, phrase)
+	svc := NewService(NewRepository(db), nutriRepo)
+
+	// Correct rice -> quinoa, which teaches (phrase -> quinoa).
+	_, err := svc.EditLog(context.Background(), userID, log.ID, EditRequest{FoodItemID: &quinoa.ID})
+	require.NoError(t, err)
+
+	// Attempt an undo carrying an invalid meal_slot — must fail validation.
+	_, err = svc.EditLog(context.Background(), userID, log.ID, EditRequest{
+		FoodItemID: &rice.ID, MealSlot: "brunchtime", RetractCorrection: true,
+	})
+	require.Error(t, err)
+	var verr httpx.ValidationError
+	require.True(t, errors.As(err, &verr), "expected a validation error, got %T: %v", err, err)
+
+	// The taught alias must survive the rejected undo.
+	var n int64
+	require.NoError(t, db.Raw(
+		"SELECT count(*) FROM food_aliases WHERE user_id = ? AND lower(alias) = ? AND food_item_id = ?",
+		userID, strings.ToLower(phrase), quinoa.ID).Scan(&n).Error)
+	require.EqualValues(t, 1, n, "a rejected edit must not destroy the alias it did not successfully retract")
+
+	// The log's food must be unchanged — the rejected edit never applied.
+	reloaded, err := NewRepository(db).GetByID(context.Background(), userID, log.ID)
+	require.NoError(t, err)
+	require.Equal(t, quinoa.ID, *reloaded.FoodItemID, "the log's food must be unchanged by a rejected edit")
+}
+
+// TestEditLogBareRetractWithNoFoodChangeLeavesAliasIntact is the finding-3
+// regression test: a request that sets retract_correction but does not
+// change the food (e.g. a portion-only edit, or a request with nothing else
+// in it) must not delete any alias. Before the fix, the retraction guard was
+// not gated on foodChanged, so a bare {retract_correction: true} silently
+// deleted the user's personal alias for (log.input_phrase, the log's CURRENT
+// food) even though no correction happened in this call.
+func TestEditLogBareRetractWithNoFoodChangeLeavesAliasIntact(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	rice := nutrition.FoodItem{Name: "Rice BR " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 130}
+	quinoa := nutrition.FoodItem{Name: "Quinoa BR " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 120}
+	require.NoError(t, db.Create(&rice).Error)
+	require.NoError(t, db.Create(&quinoa).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id IN (?, ?)", rice.ID, quinoa.ID) })
+
+	phrase := "bare retract " + uuid.NewString()
+	log := seedPhraseLog(t, db, userID, rice, phrase)
+	svc := NewService(NewRepository(db), nutriRepo)
+
+	// Correct rice -> quinoa, which teaches (phrase -> quinoa).
+	_, err := svc.EditLog(context.Background(), userID, log.ID, EditRequest{FoodItemID: &quinoa.ID})
+	require.NoError(t, err)
+
+	// A bare retract_correction with no food change at all.
+	res, err := svc.EditLog(context.Background(), userID, log.ID, EditRequest{RetractCorrection: true})
+	require.NoError(t, err)
+	require.Equal(t, quinoa.ID, *res.Log.FoodItemID, "the log's food must be unaffected")
+
+	var n int64
+	require.NoError(t, db.Raw(
+		"SELECT count(*) FROM food_aliases WHERE user_id = ? AND lower(alias) = ? AND food_item_id = ?",
+		userID, strings.ToLower(phrase), quinoa.ID).Scan(&n).Error)
+	require.EqualValues(t, 1, n, "a bare retract with no food change must not destroy the existing alias")
+}
+
+// TestEditLogFoodChangeInvalidatesResolutionCache is the regression test for
+// the stale-cache bug: EditLog taught the alias but never evicted the AI
+// resolve cache, so a corrected phrase could keep resolving to the old,
+// wrong food out of cache for up to the cache's TTL. This proves a
+// food-changing correction deletes exactly the cache entry the resolver
+// would have used for this user+phrase (ai.CacheKey("phrase", ...)).
+func TestEditLogFoodChangeInvalidatesResolutionCache(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	rice := nutrition.FoodItem{Name: "Rice IC " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 130}
+	quinoa := nutrition.FoodItem{Name: "Quinoa IC " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 120}
+	require.NoError(t, db.Create(&rice).Error)
+	require.NoError(t, db.Create(&quinoa).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id IN (?, ?)", rice.ID, quinoa.ID) })
+
+	phrase := "brekkie bowl " + uuid.NewString()
+	log := seedPhraseLog(t, db, userID, rice, phrase)
+
+	cache := &fakeResolutionCache{}
+	svc := NewService(NewRepository(db), nutriRepo).WithResolutionCache(cache)
+
+	res, err := svc.EditLog(context.Background(), userID, log.ID, EditRequest{FoodItemID: &quinoa.ID})
+	require.NoError(t, err)
+	require.True(t, res.AliasRecorded)
+
+	require.Equal(t, []string{ai.CacheKey("phrase", userID, phrase)}, cache.deleted,
+		"a food-changing correction must evict exactly the cached entry for this user's phrase")
+}
+
+// TestEditLogRetractInvalidatesResolutionCache proves the undo half of a
+// correction also evicts the cache — otherwise a retracted alias could keep
+// serving the (now wrong) corrected resolution out of cache after the
+// correction was undone.
+func TestEditLogRetractInvalidatesResolutionCache(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	rice := nutrition.FoodItem{Name: "Rice ICR " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 130}
+	quinoa := nutrition.FoodItem{Name: "Quinoa ICR " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 120}
+	require.NoError(t, db.Create(&rice).Error)
+	require.NoError(t, db.Create(&quinoa).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id IN (?, ?)", rice.ID, quinoa.ID) })
+
+	phrase := "undo cache " + uuid.NewString()
+	log := seedPhraseLog(t, db, userID, rice, phrase)
+
+	cache := &fakeResolutionCache{}
+	svc := NewService(NewRepository(db), nutriRepo).WithResolutionCache(cache)
+
+	_, err := svc.EditLog(context.Background(), userID, log.ID, EditRequest{FoodItemID: &quinoa.ID})
+	require.NoError(t, err)
+	cache.deleted = nil // reset: only interested in what the retract itself triggers
+
+	_, err = svc.EditLog(context.Background(), userID, log.ID, EditRequest{
+		FoodItemID: &rice.ID, RetractCorrection: true,
+	})
+	require.NoError(t, err)
+
+	require.Equal(t, []string{ai.CacheKey("phrase", userID, phrase)}, cache.deleted,
+		"retracting a correction must evict the cached entry for this user's phrase")
+}
+
+// TestEditLogPortionOnlyChangeDoesNotInvalidateResolutionCache proves the
+// invalidator is NOT called when nothing was taught — a portion-only edit
+// changes no food, so there is no stale cache entry to evict, and calling
+// Delete anyway would just be wasted work on every ordinary edit.
+func TestEditLogPortionOnlyChangeDoesNotInvalidateResolutionCache(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	rice := nutrition.FoodItem{Name: "Rice ICP " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 130}
+	require.NoError(t, db.Create(&rice).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", rice.ID) })
+
+	phrase := "portion only cache " + uuid.NewString()
+	log := seedPhraseLog(t, db, userID, rice, phrase)
+
+	cache := &fakeResolutionCache{}
+	svc := NewService(NewRepository(db), nutriRepo).WithResolutionCache(cache)
+
+	grams := 200.0
+	res, err := svc.EditLog(context.Background(), userID, log.ID, EditRequest{QuantityGrams: &grams})
+	require.NoError(t, err)
+	require.False(t, res.AliasRecorded)
+
+	require.Empty(t, cache.deleted, "a portion-only edit teaches nothing, so nothing should be invalidated")
+}
+
+// TestEditLogWithNilResolutionCacheIsSilentNoOp proves a Service built
+// without WithResolutionCache (i.e. every existing NewService call site) is
+// unaffected by this change — a food-changing correction must still succeed
+// and record the alias exactly as before, with no cache configured at all.
+func TestEditLogWithNilResolutionCacheIsSilentNoOp(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	rice := nutrition.FoodItem{Name: "Rice ICN " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 130}
+	quinoa := nutrition.FoodItem{Name: "Quinoa ICN " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 120}
+	require.NoError(t, db.Create(&rice).Error)
+	require.NoError(t, db.Create(&quinoa).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id IN (?, ?)", rice.ID, quinoa.ID) })
+
+	phrase := "no cache configured " + uuid.NewString()
+	log := seedPhraseLog(t, db, userID, rice, phrase)
+
+	svc := NewService(NewRepository(db), nutriRepo) // no WithResolutionCache call
+
+	require.NotPanics(t, func() {
+		res, err := svc.EditLog(context.Background(), userID, log.ID, EditRequest{FoodItemID: &quinoa.ID})
+		require.NoError(t, err)
+		require.True(t, res.AliasRecorded)
+	})
 }

@@ -22,6 +22,11 @@ type FoodLog struct {
 	FatG          float64    `json:"fat_g"`
 	FiberG        float64    `json:"fiber_g"`
 	Provenance    string     `json:"provenance"`
+	// InputPhrase is the raw text the user said or typed, kept only for
+	// resolve-sourced logs so a later correction can teach the index which
+	// phrase resolved wrong. Description holds the RESOLVED food's name;
+	// these are deliberately different fields.
+	InputPhrase   *string    `json:"input_phrase,omitempty"`
 	ClientLogMs   *int       `json:"client_log_ms,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
 }

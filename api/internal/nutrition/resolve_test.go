@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 
@@ -28,7 +29,7 @@ func TestResolveAliasBeatsFullText(t *testing.T) {
 	require.NoError(t, db.First(&scrambled, "name = ? AND brand = 'test2a'", "Scrambled eggs").Error)
 	db.Exec("INSERT INTO food_aliases (alias, food_item_id) VALUES (?, ?)", "brekkie eggs", scrambled.ID)
 
-	got, err := repo.Resolve(context.Background(), "brekkie eggs", nil, 5)
+	got, err := repo.Resolve(context.Background(), uuid.Nil, "brekkie eggs", nil, 5)
 	require.NoError(t, err)
 	require.NotEmpty(t, got)
 	require.Equal(t, MatchAlias, got[0].MatchTier)
@@ -50,7 +51,7 @@ func TestResolveFullTextRanksByName(t *testing.T) {
 		{Name: "Zqxnonce grilled chicken", Brand: "test2a", Provenance: ProvenanceAFCD, KcalPer100g: 165},
 		{Name: "Zqxnonce plain water", Brand: "test2a", Provenance: ProvenanceAFCD, KcalPer100g: 0},
 	})
-	got, err := repo.Resolve(context.Background(), "zqxnonce chicken", nil, 5)
+	got, err := repo.Resolve(context.Background(), uuid.Nil, "zqxnonce chicken", nil, 5)
 	require.NoError(t, err)
 	require.NotEmpty(t, got)
 	require.Equal(t, "Zqxnonce grilled chicken", got[0].Item.Name)
@@ -70,7 +71,7 @@ func TestResolveFullTextMatchesPluralQueryAgainstSingularizedName(t *testing.T) 
 		{Name: "Rolled oats, raw", Brand: "test2a", Provenance: ProvenanceAFCD, KcalPer100g: 379},
 	})
 
-	got, err := repo.Resolve(context.Background(), "oats", nil, 5)
+	got, err := repo.Resolve(context.Background(), uuid.Nil, "oats", nil, 5)
 	require.NoError(t, err)
 	require.NotEmpty(t, got)
 
