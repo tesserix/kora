@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -99,12 +100,12 @@ func TestEditLogGramsChangeRecomputesFromSameFoodRow(t *testing.T) {
 	wantDescription := created.Description
 
 	newGrams := 250.0
-	updated, err := svc.EditLog(context.Background(), userID, created.ID, EditRequest{QuantityGrams: &newGrams})
+	res, err := svc.EditLog(context.Background(), userID, created.ID, EditRequest{QuantityGrams: &newGrams})
 	require.NoError(t, err)
-	require.Equal(t, newGrams, updated.QuantityGrams)
-	require.InDelta(t, item.KcalPer100g*newGrams/100, updated.Kcal, 0.001)
-	require.InDelta(t, item.ProteinPer100g*newGrams/100, updated.ProteinG, 0.001)
-	require.Equal(t, wantDescription, updated.Description)
+	require.Equal(t, newGrams, res.Log.QuantityGrams)
+	require.InDelta(t, item.KcalPer100g*newGrams/100, res.Log.Kcal, 0.001)
+	require.InDelta(t, item.ProteinPer100g*newGrams/100, res.Log.ProteinG, 0.001)
+	require.Equal(t, wantDescription, res.Log.Description)
 }
 
 func TestEditLogFoodChangeWithCorrectionPhraseRecordsAlias(t *testing.T) {
@@ -121,18 +122,19 @@ func TestEditLogFoodChangeWithCorrectionPhraseRecordsAlias(t *testing.T) {
 	phrase := "my brekkie " + uuid.NewString()
 	t.Cleanup(func() { db.Exec("DELETE FROM food_aliases WHERE lower(alias) = ?", phrase) })
 
-	svc := NewService(NewRepository(db), nutriRepo)
-	created, err := svc.LogFood(context.Background(), userID, LogRequest{
-		FoodItemID: &oldItem.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 100, LoggedAt: time.Now(),
-	})
-	require.NoError(t, err)
+	// The phrase is now server-derived from the log's own input_phrase (set
+	// only for ai_text/ai_voice sources), not client-supplied — seed the log
+	// with it rather than passing a correction_phrase on the request.
+	created := seedPhraseLog(t, db, userID, oldItem, phrase)
 
-	updated, err := svc.EditLog(context.Background(), userID, created.ID, EditRequest{
-		FoodItemID: &newItem.ID, CorrectionPhrase: phrase,
+	svc := NewService(NewRepository(db), nutriRepo)
+	res, err := svc.EditLog(context.Background(), userID, created.ID, EditRequest{
+		FoodItemID: &newItem.ID,
 	})
 	require.NoError(t, err)
-	require.Equal(t, 200.0, updated.Kcal) // recomputed from new item at same 100g
-	require.Equal(t, newItem.Name, updated.Description)
+	require.True(t, res.AliasRecorded)
+	require.Equal(t, 200.0, res.Log.Kcal) // recomputed from new item at same 100g
+	require.Equal(t, newItem.Name, res.Log.Description)
 
 	cands, err := nutriRepo.Resolve(context.Background(), userID, phrase, nil, 5)
 	require.NoError(t, err)
@@ -367,4 +369,152 @@ func TestLogFoodPersistsInputPhraseForVoiceSource(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, log.InputPhrase)
 	require.Equal(t, "two boiled eggs", *log.InputPhrase)
+}
+
+// seedPhraseLog creates an ai_text log for `from` carrying `phrase`.
+func seedPhraseLog(t *testing.T, db *gorm.DB, userID uuid.UUID, from nutrition.FoodItem, phrase string) FoodLog {
+	t.Helper()
+	svc := NewService(NewRepository(db), nutrition.NewRepository(db))
+	log, err := svc.LogFood(context.Background(), userID, LogRequest{
+		FoodItemID: &from.ID, MealSlot: "lunch", Source: "ai_text",
+		QuantityGrams: 100, InputPhrase: &phrase,
+	})
+	require.NoError(t, err)
+	return log
+}
+
+func TestEditLogWritesPersonalAliasWhenFoodChanges(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	rice := nutrition.FoodItem{Name: "Rice C " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 130}
+	quinoa := nutrition.FoodItem{Name: "Quinoa C " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 120}
+	require.NoError(t, db.Create(&rice).Error)
+	require.NoError(t, db.Create(&quinoa).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id IN (?, ?)", rice.ID, quinoa.ID) })
+
+	phrase := "the grain thing " + uuid.NewString()
+	log := seedPhraseLog(t, db, userID, rice, phrase)
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	res, err := svc.EditLog(context.Background(), userID, log.ID, EditRequest{FoodItemID: &quinoa.ID})
+	require.NoError(t, err)
+	require.True(t, res.AliasRecorded)
+	require.Equal(t, quinoa.ID, *res.Log.FoodItemID)
+
+	// The alias must be keyed on the phrase the LOG carries, personal to this user.
+	var n int64
+	require.NoError(t, db.Raw(
+		"SELECT count(*) FROM food_aliases WHERE user_id = ? AND lower(alias) = ? AND food_item_id = ?",
+		userID, strings.ToLower(phrase), quinoa.ID).Scan(&n).Error)
+	require.EqualValues(t, 1, n)
+}
+
+func TestEditLogWritesNoAliasWhenLogHasNoPhrase(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	rice := nutrition.FoodItem{Name: "Rice N " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 130}
+	quinoa := nutrition.FoodItem{Name: "Quinoa N " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 120}
+	require.NoError(t, db.Create(&rice).Error)
+	require.NoError(t, db.Create(&quinoa).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id IN (?, ?)", rice.ID, quinoa.ID) })
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	// A manual log carries no phrase, so there is nothing to teach.
+	log, err := svc.LogFood(context.Background(), userID, LogRequest{
+		FoodItemID: &rice.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 100,
+	})
+	require.NoError(t, err)
+
+	res, err := svc.EditLog(context.Background(), userID, log.ID, EditRequest{FoodItemID: &quinoa.ID})
+	require.NoError(t, err)
+	require.False(t, res.AliasRecorded)
+
+	var n int64
+	require.NoError(t, db.Raw(
+		"SELECT count(*) FROM food_aliases WHERE user_id = ?", userID).Scan(&n).Error)
+	require.EqualValues(t, 0, n)
+}
+
+func TestEditLogWritesNoAliasWhenOnlyPortionChanges(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	rice := nutrition.FoodItem{Name: "Rice P " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 130}
+	require.NoError(t, db.Create(&rice).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", rice.ID) })
+
+	phrase := "portion only " + uuid.NewString()
+	log := seedPhraseLog(t, db, userID, rice, phrase)
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	grams := 200.0
+	res, err := svc.EditLog(context.Background(), userID, log.ID, EditRequest{QuantityGrams: &grams})
+	require.NoError(t, err)
+	require.False(t, res.AliasRecorded, "a portion change teaches the index nothing")
+	require.Equal(t, 200.0, res.Log.QuantityGrams)
+}
+
+func TestEditLogRetractsTheAliasTheCorrectionCreated(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	rice := nutrition.FoodItem{Name: "Rice R " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 130}
+	quinoa := nutrition.FoodItem{Name: "Quinoa R " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 120}
+	require.NoError(t, db.Create(&rice).Error)
+	require.NoError(t, db.Create(&quinoa).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id IN (?, ?)", rice.ID, quinoa.ID) })
+
+	phrase := "undo me " + uuid.NewString()
+	log := seedPhraseLog(t, db, userID, rice, phrase)
+	svc := NewService(NewRepository(db), nutriRepo)
+
+	// Correct rice -> quinoa, which teaches (phrase -> quinoa).
+	_, err := svc.EditLog(context.Background(), userID, log.ID, EditRequest{FoodItemID: &quinoa.ID})
+	require.NoError(t, err)
+
+	// Undo: revert to rice AND un-teach what the correction taught.
+	res, err := svc.EditLog(context.Background(), userID, log.ID, EditRequest{
+		FoodItemID: &rice.ID, RetractCorrection: true,
+	})
+	require.NoError(t, err)
+	require.Equal(t, rice.ID, *res.Log.FoodItemID)
+
+	var n int64
+	require.NoError(t, db.Raw(
+		"SELECT count(*) FROM food_aliases WHERE user_id = ? AND lower(alias) = ? AND food_item_id = ?",
+		userID, strings.ToLower(phrase), quinoa.ID).Scan(&n).Error)
+	require.EqualValues(t, 0, n, "the alias the correction created must be gone")
+}
+
+func TestEditLogRetractDoesNotAliasTheRevertTarget(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	rice := nutrition.FoodItem{Name: "Rice RT " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 130}
+	quinoa := nutrition.FoodItem{Name: "Quinoa RT " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 120}
+	require.NoError(t, db.Create(&rice).Error)
+	require.NoError(t, db.Create(&quinoa).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id IN (?, ?)", rice.ID, quinoa.ID) })
+
+	phrase := "no rebound " + uuid.NewString()
+	log := seedPhraseLog(t, db, userID, rice, phrase)
+	svc := NewService(NewRepository(db), nutriRepo)
+
+	_, err := svc.EditLog(context.Background(), userID, log.ID, EditRequest{FoodItemID: &quinoa.ID})
+	require.NoError(t, err)
+	res, err := svc.EditLog(context.Background(), userID, log.ID, EditRequest{
+		FoodItemID: &rice.ID, RetractCorrection: true,
+	})
+	require.NoError(t, err)
+	require.False(t, res.AliasRecorded, "an undo must not itself teach the index")
+
+	// An undo that taught (phrase -> rice) would make the wrong food sticky
+	// in the opposite direction — the exact trap this flag exists to avoid.
+	var n int64
+	require.NoError(t, db.Raw(
+		"SELECT count(*) FROM food_aliases WHERE user_id = ? AND lower(alias) = ?",
+		userID, strings.ToLower(phrase)).Scan(&n).Error)
+	require.EqualValues(t, 0, n)
 }

@@ -100,28 +100,54 @@ func (s Service) LogFood(ctx context.Context, userID uuid.UUID, req LogRequest) 
 
 // EditRequest carries a partial edit to an existing log. Nil/zero fields mean
 // "leave unchanged", except MealSlot which, when non-empty, is validated.
-// CorrectionPhrase is the original user text that resolved to the WRONG food;
-// when the food is changed and this is set, it is recorded as an alias
-// (lower+trim) mapping the phrase to the corrected item so future resolves hit
-// the alias tier. Nutrition is NEVER taken from the request — it is always
-// recomputed from the (possibly new) food row.
+// Nutrition is NEVER taken from the request — it is always recomputed from the
+// (possibly new) food row.
+//
+// The correction phrase is NOT client-supplied: it is read from the log's own
+// input_phrase, so a client cannot mint an alias for a phrase the user never
+// uttered.
+//
+// RetractCorrection un-teaches what a previous correction on this log taught —
+// it deletes the personal alias (user, log.input_phrase, CURRENT food) before
+// the revert is applied. It is the undo half of a correction, and it never
+// writes an alias of its own.
 type EditRequest struct {
-	FoodItemID       *uuid.UUID `json:"food_item_id"`
-	MealSlot         string     `json:"meal_slot"`
-	QuantityGrams    *float64   `json:"quantity_grams"`
-	LoggedAt         *time.Time `json:"logged_at"`
-	CorrectionPhrase string     `json:"correction_phrase"`
+	FoodItemID        *uuid.UUID `json:"food_item_id"`
+	MealSlot          string     `json:"meal_slot"`
+	QuantityGrams     *float64   `json:"quantity_grams"`
+	LoggedAt          *time.Time `json:"logged_at"`
+	RetractCorrection bool       `json:"retract_correction"`
 }
 
-func (s Service) EditLog(ctx context.Context, userID, logID uuid.UUID, req EditRequest) (FoodLog, error) {
+// EditResult is an edited log plus whether the edit taught the food index.
+// AliasRecorded is reported rather than inferred so the client's confirmation
+// copy ("Kora will remember …") can never claim a best-effort write that
+// actually failed.
+type EditResult struct {
+	Log           FoodLog
+	AliasRecorded bool
+}
+
+func (s Service) EditLog(ctx context.Context, userID, logID uuid.UUID, req EditRequest) (EditResult, error) {
 	current, err := s.logs.GetByID(ctx, userID, logID)
 	if err != nil {
-		return FoodLog{}, fmt.Errorf("foodlog: edit: load: %w", err)
+		return EditResult{}, fmt.Errorf("foodlog: edit: load: %w", err)
+	}
+
+	// Retract FIRST, while current.FoodItemID still names the food the
+	// previous correction taught. Doing this after the revert would delete an
+	// alias for the food being reverted TO, which no correction ever created.
+	if req.RetractCorrection && current.InputPhrase != nil && current.FoodItemID != nil {
+		if rerr := s.foods.RemoveAlias(ctx, userID, *current.InputPhrase, *current.FoodItemID); rerr != nil {
+			// Best-effort: the user's undo must still revert the log.
+			slog.WarnContext(ctx, "foodlog: correction alias retraction failed",
+				"error", rerr, "food_item_id", *current.FoodItemID, "user_id", userID)
+		}
 	}
 
 	if req.MealSlot != "" {
 		if !validMealSlots[req.MealSlot] {
-			return FoodLog{}, httpx.ValidationError{Message: "invalid meal_slot"}
+			return EditResult{}, httpx.ValidationError{Message: "invalid meal_slot"}
 		}
 		current.MealSlot = req.MealSlot
 	}
@@ -134,7 +160,7 @@ func (s Service) EditLog(ctx context.Context, userID, logID uuid.UUID, req EditR
 
 	if req.QuantityGrams != nil {
 		if *req.QuantityGrams <= 0 {
-			return FoodLog{}, httpx.ValidationError{Message: "quantity_grams must be positive"}
+			return EditResult{}, httpx.ValidationError{Message: "quantity_grams must be positive"}
 		}
 		current.QuantityGrams = *req.QuantityGrams
 	}
@@ -145,16 +171,16 @@ func (s Service) EditLog(ctx context.Context, userID, logID uuid.UUID, req EditR
 	// Recompute nutrition from the row whenever food or grams changed.
 	if foodChanged || gramsChanged {
 		if current.FoodItemID == nil {
-			return FoodLog{}, httpx.ValidationError{Message: "food_item_id required to recompute nutrition"}
+			return EditResult{}, httpx.ValidationError{Message: "food_item_id required to recompute nutrition"}
 		}
 		item, err := s.foods.GetByID(ctx, *current.FoodItemID)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				// The LOG exists (loaded above); it's the FOOD that's missing —
 				// a client-supplied bad food_item_id, not a "log not found" case.
-				return FoodLog{}, httpx.ValidationError{Message: "food_item_id not found"}
+				return EditResult{}, httpx.ValidationError{Message: "food_item_id not found"}
 			}
-			return FoodLog{}, fmt.Errorf("foodlog: edit: resolve food: %w", err)
+			return EditResult{}, fmt.Errorf("foodlog: edit: resolve food: %w", err)
 		}
 		f := current.QuantityGrams / 100.0
 		current.Description = item.Name
@@ -168,20 +194,23 @@ func (s Service) EditLog(ctx context.Context, userID, logID uuid.UUID, req EditR
 
 	updated, err := s.logs.Update(ctx, current)
 	if err != nil {
-		return FoodLog{}, err
+		return EditResult{}, err
 	}
 
-	// Correction alias: record the original phrase -> corrected item so future
-	// resolves auto-hit it. Best-effort — an alias write must not fail the edit.
-	if foodChanged && req.CorrectionPhrase != "" && current.FoodItemID != nil {
-		if aerr := s.foods.AddAlias(ctx, userID, req.CorrectionPhrase, *current.FoodItemID); aerr != nil {
-			// Best-effort: the edit already succeeded, so surface the alias
-			// failure for observability but do not fail the request.
+	// Teach the index: map the phrase that resolved wrong to the corrected
+	// item, personal to this user, so their future resolves hit the alias
+	// tier. An undo never teaches. Best-effort — an alias write must not fail
+	// the edit.
+	aliasRecorded := false
+	if foodChanged && !req.RetractCorrection && current.InputPhrase != nil && current.FoodItemID != nil {
+		if aerr := s.foods.AddAlias(ctx, userID, *current.InputPhrase, *current.FoodItemID); aerr != nil {
 			slog.WarnContext(ctx, "foodlog: correction alias write failed",
 				"error", aerr, "food_item_id", *current.FoodItemID, "user_id", userID)
+		} else {
+			aliasRecorded = true
 		}
 	}
-	return updated, nil
+	return EditResult{Log: updated, AliasRecorded: aliasRecorded}, nil
 }
 
 // BatchItem is one food entry within a CreateBatchRequest. Only the food

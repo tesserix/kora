@@ -101,7 +101,7 @@ func (h Handler) Update(c *gin.Context) {
 		httpx.Error(c, http.StatusBadRequest, "invalid_input", "invalid request body")
 		return
 	}
-	updated, err := h.svc.EditLog(c.Request.Context(), userID, logID, req)
+	res, err := h.svc.EditLog(c.Request.Context(), userID, logID, req)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			httpx.Error(c, http.StatusNotFound, "not_found", "log not found")
@@ -110,7 +110,7 @@ func (h Handler) Update(c *gin.Context) {
 		httpx.RespondServiceError(c, err)
 		return
 	}
-	httpx.OK(c, updated)
+	httpx.OK(c, res.Log)
 }
 
 func (h Handler) Delete(c *gin.Context) {
