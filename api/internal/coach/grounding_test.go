@@ -14,6 +14,7 @@ import (
 
 	"github.com/tesserix/kora/api/internal/dashboard"
 	"github.com/tesserix/kora/api/internal/foodlog"
+	"github.com/tesserix/kora/api/internal/guardrails"
 	"github.com/tesserix/kora/api/internal/memory"
 	"github.com/tesserix/kora/api/internal/nutrition"
 	"github.com/tesserix/kora/api/internal/tracking"
@@ -172,12 +173,14 @@ func day(kcal float64, logCount int) DailyTotal {
 }
 
 func TestFastingStreak_ZeroForUserWhoNeverLogged(t *testing.T) {
-	// A brand-new user: seven empty days. This is absent data, not a fast.
+	// A brand-new user: seven empty days, no logging history before the
+	// window either (loggedBeforeWindow: false). This is absent data, not a
+	// fast.
 	daily := []DailyTotal{
 		day(0, 0), day(0, 0), day(0, 0), day(0, 0), day(0, 0), day(0, 0), day(0, 0),
 	}
 
-	require.Equal(t, 0, fastingStreak(daily),
+	require.Equal(t, 0, fastingStreak(daily, false),
 		"a user with no logging history has no data, and no-data must never read as fasting")
 }
 
@@ -190,7 +193,7 @@ func TestFastingStreak_ExcludesTodayBecauseItIsIncomplete(t *testing.T) {
 		day(0, 0), // today: incomplete, must not count
 	}
 
-	require.Equal(t, 1, fastingStreak(daily),
+	require.Equal(t, 1, fastingStreak(daily, false),
 		"today is incomplete — counting it makes the signal time-of-day dependent")
 }
 
@@ -202,7 +205,7 @@ func TestFastingStreak_CountsGenuineGapAfterLogging(t *testing.T) {
 		day(0, 0), // today, excluded
 	}
 
-	require.Equal(t, 3, fastingStreak(daily),
+	require.Equal(t, 3, fastingStreak(daily, false),
 		"a real gap after established logging is exactly what this signal is for")
 }
 
@@ -214,7 +217,7 @@ func TestFastingStreak_StopsAtMostRecentDayWithIntake(t *testing.T) {
 		day(0, 0), // today, excluded
 	}
 
-	require.Equal(t, 2, fastingStreak(daily))
+	require.Equal(t, 2, fastingStreak(daily, false))
 }
 
 func TestFastingStreak_LoggedButZeroKcalStillCounts(t *testing.T) {
@@ -226,23 +229,142 @@ func TestFastingStreak_LoggedButZeroKcalStillCounts(t *testing.T) {
 		day(0, 0), // today, excluded
 	}
 
-	require.Equal(t, 2, fastingStreak(daily))
+	require.Equal(t, 2, fastingStreak(daily, false))
 }
 
 func TestFastingStreak_ZeroWhenLoggingStartedToday(t *testing.T) {
-	// First ever log is today. The six empty days before it are absent data.
+	// First ever log is today. The six empty days before it are absent data,
+	// and there is no logging history before the window either.
 	daily := []DailyTotal{
 		day(0, 0), day(0, 0), day(0, 0), day(0, 0), day(0, 0), day(0, 0),
 		day(1500, 2), // today, first ever log
 	}
 
-	require.Equal(t, 0, fastingStreak(daily))
+	require.Equal(t, 0, fastingStreak(daily, false))
 }
 
 func TestFastingStreak_HandlesShortAndEmptyWindows(t *testing.T) {
-	require.Equal(t, 0, fastingStreak(nil))
-	require.Equal(t, 0, fastingStreak([]DailyTotal{}))
-	require.Equal(t, 0, fastingStreak([]DailyTotal{day(0, 0)}), "a single entry is today, which is excluded")
+	require.Equal(t, 0, fastingStreak(nil, false))
+	require.Equal(t, 0, fastingStreak([]DailyTotal{}, false))
+	require.Equal(t, 0, fastingStreak([]DailyTotal{day(0, 0)}, false), "a single entry is today, which is excluded")
+}
+
+// TestFastingStreak_SilentWholeWindowAfterEstablishedLogging is the direct
+// unit-level proof for FIX 2: a user with established logging history from
+// BEFORE the window (loggedBeforeWindow: true) who is then silent for the
+// entire in-window span — not just a few days, the whole thing — must still
+// register the streak, rather than resetting to 0 because no in-window
+// first log exists to anchor on.
+func TestFastingStreak_SilentWholeWindowAfterEstablishedLogging(t *testing.T) {
+	daily := []DailyTotal{
+		day(0, 0), day(0, 0), day(0, 0), day(0, 0), day(0, 0), day(0, 0),
+		day(0, 0), // today, excluded
+	}
+
+	require.Equal(t, 6, fastingStreak(daily, true),
+		"established logging history before the window means the whole complete-day span counts, even with zero in-window logs")
+}
+
+// TestFastingStreak_NeverLoggedAnywhereStaysZeroEvenWithTheFlag proves the
+// loggedBeforeWindow: true path isn't just "silence always counts" — the
+// flag must be an honest answer to "did this user ever actually log
+// before?", not a free pass. This is redundant with
+// TestFastingStreak_ZeroForUserWhoNeverLogged (which asserts the false
+// case) but pins the true/false split explicitly at the same call site.
+func TestFastingStreak_NeverLoggedAnywhereStaysZeroEvenWithTheFlag(t *testing.T) {
+	daily := []DailyTotal{
+		day(0, 0), day(0, 0), day(0, 0), day(0, 0), day(0, 0), day(0, 0), day(0, 0),
+	}
+
+	require.Equal(t, 0, fastingStreak(daily, false),
+		"a user who has never logged anywhere reports loggedBeforeWindow: false, so this stays absent data, not a fast")
+}
+
+// TestBuildContextFastingStreak_SilentWholeWindowAfterEstablishedLogging is
+// the end-to-end proof of FIX 2, through the real BuildContext + BuildNudges
+// path rather than a narrowed fastingStreak call: an established,
+// previously on-target user who stops logging ENTIRELY for the whole
+// recentWindowDays window must still be flagged at-risk, and the weight-
+// trend nudge (which candidateNudges only shows when !guardrails.AtRisk)
+// must be correctly re-suppressed as a result. Before this fix,
+// fastingStreak's firstLogged search was confined to the window: once the
+// user's last in-window log aged out, firstLogged went to -1 and the streak
+// silently reset to 0 — invisible protection exactly when the gap was
+// longest. A log seeded safely before the window (10 days ago, well past
+// the 7-day recentWindowDays) establishes history without itself entering
+// RecentDaily; nothing at all is logged inside the window.
+func TestBuildContextFastingStreak_SilentWholeWindowAfterEstablishedLogging(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	item := nutrition.FoodItem{
+		Name: "Coach Long Silence Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD,
+		KcalPer100g: 200, ProteinPer100g: 20,
+	}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	loc := time.UTC
+	now := time.Date(2026, 3, 10, 12, 0, 0, 0, loc)
+
+	// Established logging history WELL before the 7-day window (10 days
+	// ago); total silence for the entire window, including today.
+	seedLog(t, db, logRepo, foodlog.FoodLog{
+		UserID: userID, FoodItemID: &item.ID, LoggedAt: now.AddDate(0, 0, -10),
+		MealSlot: "lunch", Source: "manual", Provenance: nutrition.ProvenanceAFCD,
+		QuantityGrams: 200, Kcal: 400, ProteinG: 40,
+	})
+
+	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
+	memSvc := memory.NewService(logRepo)
+	weights := fakeWeightSource{entries: []tracking.WeightEntry{
+		{WeightKg: 80.0, LoggedAt: now.AddDate(0, 0, -25)},
+		{WeightKg: 78.0, LoggedAt: now.AddDate(0, 0, -1)},
+	}}
+	g := NewGrounder(dashSvc, logRepo, memSvc, weights)
+
+	ctx, err := g.BuildContext(context.Background(), userID, now, loc)
+	require.NoError(t, err)
+
+	require.True(t, ctx.LoggedBeforeWindow, "the user has logging history from before the window")
+	require.Equal(t, recentWindowDays-1, ctx.FastingStreakDays,
+		"total silence across the whole window must register once the user has established logging history, not reset to 0")
+
+	s := SignalsFrom(ctx)
+	require.True(t, guardrails.AtRisk(s), "a whole-window silence after established logging must trip ED-risk")
+
+	r := BuildNudges(ctx, s)
+	require.True(t, r.ShowSupport)
+	require.False(t, hasKind(r.Nudges, NudgeKindWeightDown),
+		"weight-loss framing must be re-suppressed for a user flagged at-risk via the long-silence fix")
+	require.False(t, hasKind(r.Nudges, NudgeKindWeightUp))
+}
+
+// TestBuildContextFastingStreak_NeverLoggedStaysNotAtRisk is the "never
+// logged" counterpart to the long-silence test above, run through the same
+// real BuildContext + BuildNudges path: a brand-new user with zero logs
+// anywhere (not even before the window) must have LoggedBeforeWindow false
+// and must not be flagged, proving the FIX 2 existence check doesn't turn
+// every silent window into a false positive.
+func TestBuildContextFastingStreak_NeverLoggedStaysNotAtRisk(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	// No logs at all — a brand-new user.
+
+	logRepo := foodlog.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{})
+
+	ctx, err := g.BuildContext(context.Background(), userID, time.Now().UTC(), time.UTC)
+	require.NoError(t, err)
+
+	require.False(t, ctx.LoggedBeforeWindow, "a user who has never logged has no history before the window either")
+	require.Equal(t, 0, ctx.FastingStreakDays)
+
+	s := SignalsFrom(ctx)
+	require.False(t, guardrails.AtRisk(s), "no logging history anywhere must not read as ED-risk")
 }
 
 // TestBuildContextWindowStartMatchesAcrossFetchAndBucketing is a regression

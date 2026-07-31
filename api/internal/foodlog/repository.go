@@ -64,6 +64,25 @@ func (r Repository) ListForUserSince(ctx context.Context, userID uuid.UUID, sinc
 	return logs, nil
 }
 
+// HasLoggedBefore reports whether the user has any log (resolved to a food
+// item, same definition ListForUserSince uses) strictly before `before`. It
+// exists to answer "has this user ever logged anything?" over an unbounded
+// lookback — distinguishing a user who has simply never logged from one
+// with established history who has since gone silent, which a single
+// bounded-window read can't tell apart (see coach.LogSource). An
+// EXISTS/LIMIT-1 read: only presence matters, so no rows are fetched.
+func (r Repository) HasLoggedBefore(ctx context.Context, userID uuid.UUID, before time.Time) (bool, error) {
+	var exists bool
+	err := r.db.WithContext(ctx).
+		Raw("SELECT EXISTS (SELECT 1 FROM food_logs WHERE user_id = ? AND food_item_id IS NOT NULL AND logged_at < ? LIMIT 1) AS logged_before",
+			userID, before).
+		Scan(&exists).Error
+	if err != nil {
+		return false, fmt.Errorf("foodlog: has logged before: %w", err)
+	}
+	return exists, nil
+}
+
 // Update persists changes to an existing log, scoped to its owner. It updates
 // by (id AND user_id) so a user can never edit another user's log; if no row
 // matches, it returns gorm.ErrRecordNotFound wrapped.
