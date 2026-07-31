@@ -309,3 +309,62 @@ func TestEditLogInvalidMealSlotReturnsValidationError(t *testing.T) {
 	_, ok := httpx.IsValidation(err)
 	require.True(t, ok)
 }
+
+func TestLogFoodPersistsInputPhraseForTextSource(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	item := nutrition.FoodItem{Name: "Phrase Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	phrase := "brekkie eggs"
+	log, err := svc.LogFood(context.Background(), userID, LogRequest{
+		FoodItemID: &item.ID, MealSlot: "breakfast", Source: "ai_text",
+		QuantityGrams: 100, InputPhrase: &phrase,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, log.InputPhrase)
+	require.Equal(t, "brekkie eggs", *log.InputPhrase)
+	require.Equal(t, item.Name, log.Description, "description stays the RESOLVED name")
+}
+
+func TestLogFoodIgnoresInputPhraseForNonResolveSource(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	item := nutrition.FoodItem{Name: "Phrase Food M " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	phrase := "not from a resolve"
+	// A manual log has no AI guess to correct, so there is nothing to teach
+	// the index with — the phrase must be dropped rather than stored.
+	log, err := svc.LogFood(context.Background(), userID, LogRequest{
+		FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual",
+		QuantityGrams: 100, InputPhrase: &phrase,
+	})
+	require.NoError(t, err)
+	require.Nil(t, log.InputPhrase)
+}
+
+func TestLogFoodPersistsInputPhraseForVoiceSource(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	item := nutrition.FoodItem{Name: "Phrase Food V " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	phrase := "two boiled eggs"
+	log, err := svc.LogFood(context.Background(), userID, LogRequest{
+		FoodItemID: &item.ID, MealSlot: "breakfast", Source: "ai_voice",
+		QuantityGrams: 100, InputPhrase: &phrase,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, log.InputPhrase)
+	require.Equal(t, "two boiled eggs", *log.InputPhrase)
+}

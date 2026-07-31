@@ -102,6 +102,7 @@ func (r Repository) Update(ctx context.Context, log FoodLog) (FoodLog, error) {
 			"fat_g":          log.FatG,
 			"fiber_g":        log.FiberG,
 			"provenance":     log.Provenance,
+			"input_phrase":   log.InputPhrase,
 		})
 	if res.Error != nil {
 		return FoodLog{}, fmt.Errorf("foodlog: update: %w", res.Error)

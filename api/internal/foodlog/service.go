@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,9 +23,28 @@ type LogRequest struct {
 	QuantityGrams float64    `json:"quantity_grams"`
 	LoggedAt      time.Time  `json:"logged_at"`
 	ClientLogMs   *int       `json:"client_log_ms"`
+	InputPhrase   *string    `json:"input_phrase"`
 }
 
 var validMealSlots = map[string]bool{"breakfast": true, "lunch": true, "dinner": true, "snack": true}
+
+// resolveSources are the log sources that carry a user phrase worth keeping.
+// A manual, memory, barcode or photo log has no phrase that resolved wrong,
+// so there is nothing a correction could teach the index with.
+var resolveSources = map[string]bool{"ai_text": true, "ai_voice": true}
+
+// phraseForSource keeps a non-blank input phrase only for resolve sources,
+// and only when it has content after trimming.
+func phraseForSource(source string, phrase *string) *string {
+	if !resolveSources[source] || phrase == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*phrase)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
+}
 
 type Service struct {
 	logs  Repository
@@ -73,6 +93,7 @@ func (s Service) LogFood(ctx context.Context, userID uuid.UUID, req LogRequest) 
 		FiberG:        item.FiberPer100g * f,
 		Provenance:    item.Provenance,
 		ClientLogMs:   req.ClientLogMs,
+		InputPhrase:   phraseForSource(source, req.InputPhrase),
 	}
 	return s.logs.Create(ctx, log)
 }
