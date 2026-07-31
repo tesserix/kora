@@ -37,30 +37,44 @@ jest.mock("expo-router", () => ({
   }),
 }));
 
+// Candidates keyed by a lowercase substring of the search query, so a test
+// can drive a SECOND correction (e.g. Quinoa -> Kale) to a distinct result
+// without every search returning the same single item.
+const mockFoodCandidates: Record<string, { id: string; name: string; kcal: number }> = {
+  quinoa: { id: "f2", name: "Quinoa", kcal: 120 },
+  kale: { id: "f3", name: "Kale", kcal: 35 },
+};
+
 jest.mock("@/api/hooks", () => ({
   useLog: () => ({ data: mockLogData, isLoading: false }),
-  useFoodSearch: () => ({
-    data: [
-      {
-        item: {
-          id: "f2",
-          name: "Quinoa",
-          brand: "",
-          provenance: "seed",
-          serving_desc: "1 cup",
-          serving_grams: 185,
-          kcal_per_100g: 120,
-          protein_per_100g: 4.4,
-          carbs_per_100g: 21.3,
-          fat_per_100g: 1.9,
-        },
-        match_score: 1,
-        match_tier: "fulltext",
-      },
-    ],
-    isLoading: false,
-    isError: false,
-  }),
+  useFoodSearch: (query: string) => {
+    const key = Object.keys(mockFoodCandidates).find((k) => query.toLowerCase().includes(k));
+    const match = key ? mockFoodCandidates[key] : undefined;
+    return {
+      data: match
+        ? [
+            {
+              item: {
+                id: match.id,
+                name: match.name,
+                brand: "",
+                provenance: "seed",
+                serving_desc: "1 cup",
+                serving_grams: 185,
+                kcal_per_100g: match.kcal,
+                protein_per_100g: 4.4,
+                carbs_per_100g: 21.3,
+                fat_per_100g: 1.9,
+              },
+              match_score: 1,
+              match_tier: "fulltext",
+            },
+          ]
+        : [],
+      isLoading: false,
+      isError: false,
+    };
+  },
   useEditLog: () => ({ mutate: mockEditMutate, mutateAsync: mockEditMutateAsync, isPending: false }),
   useDeleteLog: () => ({ mutate: mockDeleteMutate, isPending: false }),
   useRepeatLog: () => ({ mutate: mockRepeatMutate, isPending: false }),
@@ -106,7 +120,7 @@ beforeEach(() => {
   };
 });
 
-test("a correction that taught the index offers Undo and retracts on tap", async () => {
+test("a correction that taught the index offers an in-sheet Undo and retracts on tap", async () => {
   // The forward correction (Change food -> Quinoa) resolves with
   // aliasRecorded: true — the server actually wrote the alias.
   mockEditMutate.mockImplementationOnce((patch, opts) => {
@@ -122,19 +136,24 @@ test("a correction that taught the index offers Undo and retracts on tap", async
     });
   });
 
-  const { getByLabelText, getByText } = await render(<MealDetail />);
+  const { getByLabelText, getByText, queryByText } = await render(<MealDetail />);
 
   await fireEvent.press(getByLabelText("Change food"));
   await fireEvent.changeText(getByLabelText("Search foods"), "quinoa");
   await fireEvent.press(getByText("Quinoa"));
 
-  await waitFor(() => expect(mockToastShow).toHaveBeenCalledTimes(1));
-  const [toastArgs] = mockToastShow.mock.calls[0];
-  expect(toastArgs.actionLabel).toBe("Undo");
-  expect(toastArgs.message).toMatch(/remember/i);
-  expect(toastArgs.message).toContain("brekkie eggs");
+  // FIX 1: this confirmation + Undo must live INSIDE the sheet, not in a
+  // toast — a toast renders beneath this still-open native Modal and is
+  // invisible/untappable. Asserting via the toast mock would pass even if
+  // the invisible-toast bug were still present, so this test deliberately
+  // never looks at mockToastShow for the food-correction path.
+  await waitFor(() => expect(getByLabelText("Undo food change")).toBeTruthy());
+  expect(getByText(/Now Quinoa/)).toBeTruthy();
+  expect(queryByText(/remember/i)).toBeTruthy();
+  expect(getByText(/brekkie eggs/)).toBeTruthy();
+  expect(mockToastShow).not.toHaveBeenCalled();
 
-  toastArgs.onAction();
+  await fireEvent.press(getByLabelText("Undo food change"));
 
   // The undo PATCHes back to the ORIGINAL food (f1), not the corrected one
   // (f2) — this is the single most important assertion in this suite. The
@@ -149,6 +168,9 @@ test("a correction that taught the index offers Undo and retracts on tap", async
     meal_slot: "breakfast",
     retract_correction: true,
   });
+
+  // Tapping Undo clears the row.
+  await waitFor(() => expect(queryByText(/Now Quinoa/)).toBeNull());
 });
 
 test("a correction that taught nothing undoes without retract_correction", async () => {
@@ -165,18 +187,16 @@ test("a correction that taught nothing undoes without retract_correction", async
     });
   });
 
-  const { getByLabelText, getByText } = await render(<MealDetail />);
+  const { getByLabelText, getByText, queryByText } = await render(<MealDetail />);
 
   await fireEvent.press(getByLabelText("Change food"));
   await fireEvent.changeText(getByLabelText("Search foods"), "quinoa");
   await fireEvent.press(getByText("Quinoa"));
 
-  await waitFor(() => expect(mockToastShow).toHaveBeenCalledTimes(1));
-  const [toastArgs] = mockToastShow.mock.calls[0];
-  expect(toastArgs.actionLabel).toBe("Undo");
-  expect(toastArgs.message).not.toMatch(/remember/i);
+  await waitFor(() => expect(getByLabelText("Undo food change")).toBeTruthy());
+  expect(queryByText(/remember/i)).toBeNull();
 
-  toastArgs.onAction();
+  await fireEvent.press(getByLabelText("Undo food change"));
 
   await waitFor(() => expect(mockEditMutateAsync).toHaveBeenCalledTimes(1));
   const [undoPatch] = mockEditMutateAsync.mock.calls[0];
@@ -189,7 +209,65 @@ test("a correction that taught nothing undoes without retract_correction", async
   });
 });
 
-test("a food correction undo that fails surfaces a visible error instead of failing silently", async () => {
+test("a second correction's Undo reverts to the SECOND correction's prior food, not the first's", async () => {
+  // First correction: Brown rice (f1) -> Quinoa (f2).
+  mockEditMutate.mockImplementationOnce((patch, opts) => {
+    opts.onSuccess({
+      log: {
+        ...mockLogData,
+        food_item_id: patch.food_item_id,
+        description: "Quinoa",
+        quantity_grams: patch.quantity_grams,
+        meal_slot: patch.meal_slot,
+      },
+      aliasRecorded: true,
+    });
+  });
+
+  const { getByLabelText, getByText, queryByText } = await render(<MealDetail />);
+
+  await fireEvent.press(getByLabelText("Change food"));
+  await fireEvent.changeText(getByLabelText("Search foods"), "quinoa");
+  await fireEvent.press(getByText("Quinoa"));
+
+  await waitFor(() => expect(getByText(/Now Quinoa/)).toBeTruthy());
+
+  // Second correction: Quinoa (f2) -> Kale (f3). The row must now describe
+  // THIS correction, and its Undo must restore f2 (Quinoa) — not f1.
+  mockEditMutate.mockImplementationOnce((patch, opts) => {
+    opts.onSuccess({
+      log: {
+        ...mockLogData,
+        food_item_id: patch.food_item_id,
+        description: "Kale",
+        quantity_grams: patch.quantity_grams,
+        meal_slot: patch.meal_slot,
+      },
+      aliasRecorded: false,
+    });
+  });
+
+  await fireEvent.press(getByLabelText("Change food"));
+  await fireEvent.changeText(getByLabelText("Search foods"), "kale");
+  await fireEvent.press(getByText("Kale"));
+
+  await waitFor(() => expect(getByText(/Now Kale/)).toBeTruthy());
+  expect(queryByText(/Now Quinoa/)).toBeNull();
+
+  await fireEvent.press(getByLabelText("Undo food change"));
+
+  await waitFor(() => expect(mockEditMutateAsync).toHaveBeenCalledTimes(1));
+  const [undoPatch] = mockEditMutateAsync.mock.calls[0];
+  expect(undoPatch).toEqual({
+    id: "log1",
+    // The SECOND correction's prior food was f2 (Quinoa), not f1.
+    food_item_id: "f2",
+    quantity_grams: 200,
+    meal_slot: "breakfast",
+  });
+});
+
+test("a food correction undo that fails surfaces a visible inline error instead of a toast", async () => {
   mockEditMutate.mockImplementationOnce((patch, opts) => {
     opts.onSuccess({
       log: {
@@ -210,14 +288,14 @@ test("a food correction undo that fails surfaces a visible error instead of fail
   await fireEvent.changeText(getByLabelText("Search foods"), "quinoa");
   await fireEvent.press(getByText("Quinoa"));
 
-  await waitFor(() => expect(mockToastShow).toHaveBeenCalledTimes(1));
-  const [toastArgs] = mockToastShow.mock.calls[0];
+  await waitFor(() => expect(getByLabelText("Undo food change")).toBeTruthy());
 
-  toastArgs.onAction();
+  await fireEvent.press(getByLabelText("Undo food change"));
 
-  await waitFor(() => expect(mockToastShow).toHaveBeenCalledTimes(2));
-  const [, secondToastCall] = mockToastShow.mock.calls;
-  expect(secondToastCall[0]).toEqual({ message: "Couldn't undo. Try again." });
+  await waitFor(() => expect(getByText("Couldn't undo. Try again.")).toBeTruthy());
+  // The old (invisible-under-the-modal) toast path must not be used for this
+  // failure either.
+  expect(mockToastShow).not.toHaveBeenCalled();
 });
 
 test("deleting offers Undo which re-creates the log", async () => {
@@ -305,15 +383,13 @@ test("a correction with no prior food_item_id shows the confirmation without an 
     });
   });
 
-  const { getByLabelText, getByText } = await render(<MealDetail />);
+  const { getByLabelText, getByText, queryByLabelText } = await render(<MealDetail />);
 
   await fireEvent.press(getByLabelText("Change food"));
   await fireEvent.changeText(getByLabelText("Search foods"), "quinoa");
   await fireEvent.press(getByText("Quinoa"));
 
-  await waitFor(() => expect(mockToastShow).toHaveBeenCalledTimes(1));
-  const [toastArgs] = mockToastShow.mock.calls[0];
-  expect(toastArgs.message).toBe("Updated");
-  expect(toastArgs.actionLabel).toBeUndefined();
-  expect(toastArgs.onAction).toBeUndefined();
+  await waitFor(() => expect(getByText(/Now Quinoa/)).toBeTruthy());
+  expect(queryByLabelText("Undo food change")).toBeNull();
+  expect(mockToastShow).not.toHaveBeenCalled();
 });

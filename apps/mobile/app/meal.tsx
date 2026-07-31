@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { Sheet } from "@/components/Sheet";
@@ -47,6 +47,19 @@ type RetainedLog = {
   input_phrase?: string;
 };
 
+// Drives the in-sheet Undo row after a food correction. Rendered inside the
+// Sheet itself (not a toast) — a toast is a separate native window on top of
+// this screen's Modal and would be invisible/untappable underneath it. `undo`
+// is present only when there's an actual prior food to restore (mirrors the
+// old toast's `prior.food_item_id` gate); when absent the row still confirms
+// the change but offers no action.
+type PendingFoodUndo = {
+  foodName: string;
+  aliasRecorded: boolean;
+  phrase?: string;
+  undo?: { prior: PriorFoodState };
+};
+
 export default function MealDetail() {
   const { colors } = useTheme();
   const p = useLocalSearchParams<{
@@ -76,6 +89,7 @@ export default function MealDetail() {
   const [err, setErr] = useState<string | null>(null);
   const [pickerVisible, setPickerVisible] = useState(false);
   const [askAgainVisible, setAskAgainVisible] = useState(false);
+  const [pendingFoodUndo, setPendingFoodUndo] = useState<PendingFoodUndo | null>(null);
 
   const editLog = useEditLog();
   const deleteLog = useDeleteLog();
@@ -102,14 +116,36 @@ export default function MealDetail() {
     setSlot(override.meal_slot as MealSlot);
   }, [override]);
 
+  // grams/slot are first seeded from the diary's route params, which pass a
+  // ROUNDED quantity_grams (see app/(tabs)/diary.tsx). Once the fetched log
+  // lands, its exact (possibly fractional) quantity_grams becomes baseGrams,
+  // so without this resync a rounding artifact alone (e.g. 143 vs 142.5)
+  // would make `dirty` true and arm Save changes with no user edit. Guarded
+  // to fire only on the FIRST arrival of the fetched log — syncing on every
+  // change would clobber an edit the user made while the fetch was in
+  // flight.
+  const loggedStateSyncedRef = useRef(false);
+  useEffect(() => {
+    if (!log || loggedStateSyncedRef.current) return;
+    loggedStateSyncedRef.current = true;
+    // A food-change override already landed before this fetch resolved —
+    // its response is more current than the fetch, so don't stomp on it.
+    if (override) return;
+    setGrams(log.quantity_grams);
+    setSlot(log.meal_slot as MealSlot);
+  }, [log]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Undoes a food correction: PATCHes the log back to its prior food/portion/
   // slot, retracting the alias THIS correction taught (never any other).
-  // Uses mutateAsync + .catch rather than mutate's onError callback: the
-  // toast that triggers this can still be on screen after MealDetail has
-  // unmounted (e.g. the user backed out of the sheet), and a mutate() error
-  // callback only fires `if (this.#mutateOptions && this.hasListeners())` —
-  // it goes silently dead once the subscribing component is gone. A
-  // promise's rejection is not gated on listeners, so it surfaces regardless.
+  // Uses mutateAsync + .catch rather than mutate's onError callback so a slow
+  // undo still resolves correctly even if something else re-renders this
+  // component in between — same reasoning as undoSave/restoreDeletedLog
+  // below, though unlike those two this one is triggered from a control that
+  // lives INSIDE this same still-mounted sheet, not a toast that can outlive
+  // it. Its failure is surfaced via the sheet's own inline error line (`err`)
+  // rather than a toast, for the same visibility reason FIX 1 exists at all:
+  // a toast renders beneath this still-open native Modal sheet and is
+  // invisible/untappable.
   const undoCorrection = (prior: PriorFoodState, aliasRecorded: boolean) => {
     editLog
       .mutateAsync({
@@ -129,7 +165,7 @@ export default function MealDetail() {
       })
       .catch(() => {
         haptics.error();
-        toast.show({ message: "Couldn't undo. Try again." });
+        setErr("Couldn't undo. Try again.");
       });
   };
 
@@ -201,21 +237,23 @@ export default function MealDetail() {
         onSuccess: ({ log: updated, aliasRecorded }) => {
           haptics.success();
           setOverride(updated);
-          toast.show({
-            message:
-              aliasRecorded && priorPhrase
-                ? `Updated · Kora will remember "${priorPhrase}"`
-                : "Updated",
-            // Only offer an actionable Undo when there's a prior food to
-            // restore. prior.food_item_id is undefined only in principle
-            // (see PriorFoodState) — if it ever were, PATCHing it back would
-            // drop the key entirely, the server would see foodChanged ===
-            // false, and neither the food nor the alias would revert while
-            // the toast had already promised Kora would remember. Still show
-            // the confirmation, just without a broken action.
-            ...(prior.food_item_id
-              ? { actionLabel: "Undo", onAction: () => undoCorrection(prior, aliasRecorded) }
-              : {}),
+          // Confirmation + Undo render INSIDE the sheet (see PendingFoodUndo)
+          // rather than as a toast: onSelectFood deliberately doesn't
+          // navigate back so the user can see the recomputed macros, which
+          // means a toast would render beneath this still-open native Modal
+          // and be invisible/untappable — the bug FIX 1 exists to close.
+          // Only offer an actionable Undo when there's a prior food to
+          // restore. prior.food_item_id is undefined only in principle (see
+          // PriorFoodState) — if it ever were, PATCHing it back would drop
+          // the key entirely, the server would see foodChanged === false,
+          // and neither the food nor the alias would revert while the row
+          // had already promised Kora would remember. Still show the
+          // confirmation, just without a broken action.
+          setPendingFoodUndo({
+            foodName: updated.description,
+            aliasRecorded,
+            phrase: priorPhrase,
+            ...(prior.food_item_id ? { undo: { prior } } : {}),
           });
         },
         onError: () => {
@@ -347,6 +385,53 @@ export default function MealDetail() {
             <Stat label="Fat" value={String(scale(baseFat))} unit="g" valueColor={colors.accentBlue} />
           </View>
         </Card>
+
+        {pendingFoodUndo ? (
+          <View
+            accessibilityLiveRegion="polite"
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              paddingVertical: 10,
+              paddingHorizontal: 4,
+              marginBottom: 16,
+              borderTopWidth: 1,
+              borderBottomWidth: 1,
+              borderColor: colors.separator,
+            }}
+          >
+            <View style={{ flex: 1 }}>
+              <Overline>Changed</Overline>
+              <AppText variant="subheadline" style={{ fontWeight: "600", marginTop: 2 }}>
+                Now {pendingFoodUndo.foodName}
+              </AppText>
+              {pendingFoodUndo.aliasRecorded && pendingFoodUndo.phrase ? (
+                <AppText variant="footnote" muted style={{ marginTop: 2 }}>
+                  Kora will remember &quot;{pendingFoodUndo.phrase}&quot;
+                </AppText>
+              ) : null}
+            </View>
+            {pendingFoodUndo.undo ? (
+              <PressableScale
+                haptic="selection"
+                accessibilityRole="button"
+                accessibilityLabel="Undo food change"
+                hitSlop={8}
+                onPress={() => {
+                  const { prior } = pendingFoodUndo.undo!;
+                  const { aliasRecorded } = pendingFoodUndo;
+                  setPendingFoodUndo(null);
+                  undoCorrection(prior, aliasRecorded);
+                }}
+                style={{ minHeight: 44, minWidth: 44, alignItems: "center", justifyContent: "center", paddingHorizontal: 8 }}
+              >
+                <AppText style={{ color: colors.accent, fontWeight: "700" }}>Undo</AppText>
+              </PressableScale>
+            ) : null}
+          </View>
+        ) : null}
 
         <Overline>Portion</Overline>
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 12, marginTop: 6 }}>

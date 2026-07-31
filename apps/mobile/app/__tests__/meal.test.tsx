@@ -10,6 +10,24 @@ const mockToastShow = jest.fn();
 const mockBack = jest.fn();
 let mockRepeatPending = false;
 
+let mockLogData:
+  | {
+      id: string;
+      food_item_id?: string;
+      logged_at: string;
+      meal_slot: string;
+      source: string;
+      description: string;
+      quantity_grams: number;
+      kcal: number;
+      protein_g: number;
+      carbs_g: number;
+      fat_g: number;
+      provenance: string;
+      input_phrase?: string;
+    }
+  | undefined;
+
 jest.mock("expo-router", () => ({
   router: { back: () => mockBack() },
   useLocalSearchParams: () => ({
@@ -19,7 +37,7 @@ jest.mock("expo-router", () => ({
 }));
 
 jest.mock("@/api/hooks", () => ({
-  useLog: () => ({ data: undefined, isLoading: false }),
+  useLog: () => ({ data: mockLogData, isLoading: false }),
   useFoodSearch: () => ({ data: [], isLoading: false, isError: false }),
   useEditLog: () => ({ mutate: mockEditMutate, mutateAsync: mockEditMutateAsync, isPending: false }),
   useDeleteLog: () => ({ mutate: mockDeleteMutate, isPending: false }),
@@ -43,6 +61,10 @@ beforeEach(() => {
   mockToastShow.mockClear();
   mockBack.mockClear();
   mockRepeatPending = false;
+  // Existing tests in this file render before the log fetch resolves — keep
+  // that behavior as the default so they're unaffected by this mock gaining
+  // the ability to carry data.
+  mockLogData = undefined;
 });
 
 test("Save is disabled until something changes, then PATCHes only changed fields", async () => {
@@ -117,4 +139,35 @@ test("Repeat is disabled while a repeat is pending", async () => {
   const { getByLabelText } = await render(<MealDetail />);
   await fireEvent.press(getByLabelText("Repeat entry"));
   expect(mockRepeatMutate).not.toHaveBeenCalled();
+});
+
+test("FIX 2: a fractional server quantity_grams does not falsely arm Save changes", async () => {
+  // The diary passes a ROUNDED grams route param (String(Math.round(...))),
+  // but the fetched log's real portion is fractional. Before the fix, grams
+  // stayed seeded from the rounded route param (143) while baseGrams
+  // switched to the server's exact 142.5 the moment the log landed — a
+  // rounding artifact alone, not a user edit, made `dirty` true.
+  mockLogData = {
+    id: "log1",
+    food_item_id: "f1",
+    logged_at: "2026-07-31T08:00:00Z",
+    meal_slot: "breakfast",
+    source: "manual",
+    description: "Brown rice",
+    quantity_grams: 142.5,
+    kcal: 300,
+    protein_g: 6,
+    carbs_g: 64,
+    fat_g: 2,
+    provenance: "manual",
+  };
+
+  const { getByText } = await render(<MealDetail />);
+
+  // grams resynced to the server's exact (fractional) value ...
+  await waitFor(() => expect(getByText("142.5 g")).toBeTruthy());
+
+  // ... so nothing is dirty and Save changes does not arm itself.
+  await fireEvent.press(getByText("Save changes"));
+  expect(mockEditMutate).not.toHaveBeenCalled();
 });
