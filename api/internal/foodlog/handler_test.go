@@ -322,6 +322,27 @@ func TestPatchLogReportsNoAliasForPortionOnlyEdit(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
+
+	// Assert the "meta" key and "alias_recorded" key are actually PRESENT in
+	// the response, not merely absent-and-defaulted-to-false: unmarshaling
+	// into a struct would leave AliasRecorded as its zero value (false) even
+	// if the "meta" object were dropped from the envelope entirely, which
+	// would make that assertion pass vacuously.
+	var envelope map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &envelope))
+	metaRaw, ok := envelope["meta"]
+	require.True(t, ok, "response envelope must contain a \"meta\" key")
+
+	var meta map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(metaRaw, &meta))
+	aliasRaw, ok := meta["alias_recorded"]
+	require.True(t, ok, "meta must contain an \"alias_recorded\" key")
+
+	var aliasRecorded bool
+	require.NoError(t, json.Unmarshal(aliasRaw, &aliasRecorded))
+	require.False(t, aliasRecorded)
+
+	// Keep the original struct-based assertion too.
 	var parsed struct {
 		Meta struct {
 			AliasRecorded bool `json:"alias_recorded"`
