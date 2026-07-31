@@ -10,41 +10,40 @@ R1 puts Kora in the hands of ~10–30 friends and family. When they hit a bug or
 
 ## Decision
 
-**Store feedback in Kora's own database, in a shape that deliberately mirrors the platform `tickets-service` contract.**
+**Store feedback in Kora's own database, in a shape that deliberately mirrors mark8ly's live `marketplace-api` ticket contract.**
 
-`tickets-service` already models exactly this — `TicketTypeBug` / `TicketTypeFeature`, per-application scoping (`platform`, `mark8ly`, `fanzone`) and a `RegisterApplications` hook that would accept `kora`. tesserix-home reads it, which is how mark8ly's tickets surface in admin.
+mark8ly serves its own support tickets from its own `marketplace-api` — `subject`, `description`, `status` (`open` / `in_progress` / `resolved` / `closed`), and a reply thread. `tesserix/tickets-service`, a separate platform-engineering service modelled on the same shape, is deployed nowhere and used by nothing; it does not surface mark8ly's tickets or anyone else's. Kora deliberately follows mark8ly's pattern instead: each product owns its own table, rather than depending on a shared ticket service that does not exist in the running system.
 
-It is **not deployed in the cluster**. Posting to it from Kora would mean standing up the service, its database, a network policy, and cross-namespace service-to-service auth — a large infra lift inside the R1 window, for a feature whose value is simply *capture the signal now*.
+So: capture locally, shaped for a later mechanical mapping to the pattern any future admin integration will most likely mirror, rather than a redesign.
 
-So: capture locally, shaped for a later mechanical mapping rather than a redesign.
+### Field mapping to mark8ly's `marketplace-api` ticket contract
 
-### Field mapping to `tickets-service`
+Every column exists to line up with mark8ly's live `Ticket` model, so integration is a projection:
 
-Every column exists to line up with a `Ticket` field, so integration is a projection:
-
-| Kora `feedback` | `tickets-service` `Ticket` |
+| Kora `feedback` | mark8ly `marketplace-api` `Ticket` |
 |---|---|
 | `id` | `id` |
-| `kind` (`bug` \| `feature`) | `type` (`BUG` \| `FEATURE`) |
-| `title` | `title` |
-| `body` | `description` |
-| `status` (`open`) | `status` (`OPEN`) |
-| `user_id` | `created_by` |
-| `app_version`, `platform`, `os_version`, `device_model` | `metadata` (JSON) |
+| `kind` (`bug` \| `feature`) | — (no mark8ly equivalent; Kora's own) |
+| `subject` | `subject` |
+| `description` | `description` |
+| `status` (`open` \| `pending` \| `resolved` \| `closed`) | `status` (`open` \| `in_progress` \| `resolved` \| `closed`) |
+| `user_id` | — (reporter identity) |
+| `app_version`, `platform`, `os_version`, `device_model` | — (no mark8ly equivalent) |
 | `created_at` | `created_at` |
-| — (constant at integration time) | `application_id = "kora"`, `product_id`, `tenant_id` |
 
-`tenant_id` / `product_id` are deliberately **not** stored. Kora is a single-product consumer app with no tenancy concept; inventing a column now would be speculative. They are constants supplied at integration time.
+`ticket_number`, `submitted_by_name` / `submitted_by_email`, and `replies` all exist on mark8ly's `Ticket` and are deliberately **not** stored here: this table is capture-only, with no ticket numbering, no submitter-identity fields beyond `user_id`, and no reply thread.
 
-`priority` is also not captured. `tickets-service` defaults it to `MEDIUM`, and asking a beta user to self-triage produces noise, not signal.
+`tenant_id` / `product_id` are deliberately **not** stored either. Kora is a single-product consumer app with no tenancy concept; inventing a column now would be speculative. They would be constants supplied at integration time, if one is ever built.
+
+`priority` is also not captured. Asking a beta user to self-triage produces noise, not signal.
 
 ## Scope
 
 **In:** a `POST /v1/feedback` endpoint, the table, and a mobile entry point that lets a user file a bug or a feature request.
 
 **Out (deliberate):**
-- Any tesserix-home / tickets-service integration — that is the later phase this design is shaped for.
-- Comments, attachments, assignees, SLA, status transitions. All exist in `tickets-service`; none belong in a capture-only store.
+- Any tesserix-home / admin integration — that is a later phase this design is shaped for, if it happens at all.
+- Comments, attachments, assignees, SLA, status transitions. All exist on mark8ly's `Ticket`; none belong in a capture-only store.
 - A user-facing list of past submissions. Nice, but it is not what makes the beta useful, and it doubles the UI surface.
 
 ## Client context is captured server-side where possible
@@ -59,9 +58,9 @@ Every column exists to line up with a `Ticket` field, so integration is a projec
 
 ## Testing
 
-- Round-trip: create → row present with the right kind, title, body, status, reporter.
+- Round-trip: create → row present with the right kind, subject, description, status, reporter.
 - `kind` is validated against the allowed set; anything else is a 400 `invalid_input`.
-- Empty or whitespace-only title/body rejected.
+- Empty or whitespace-only subject/description rejected.
 - Over-length input rejected with 400, not truncated silently and not a 500.
-- The reporter always comes from the auth context — a `user_id` in the body is ignored.
+- The reporter always comes from the auth context — a `user_id` in the request body is ignored.
 - Unauthenticated requests get 401.

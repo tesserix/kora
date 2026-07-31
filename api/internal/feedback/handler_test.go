@@ -35,8 +35,8 @@ func newTestRouter(userID uuid.UUID, h Handler, authenticated bool) *gin.Engine 
 func validPayload() map[string]any {
 	return map[string]any{
 		"kind":         "bug",
-		"title":        "Camera freezes on capture",
-		"body":         "Tapping the shutter freezes the app for ~5s.",
+		"subject":      "Camera freezes on capture",
+		"description":  "Tapping the shutter freezes the app for ~5s.",
 		"app_version":  "1.0.0",
 		"platform":     "ios",
 		"os_version":   "26.1",
@@ -86,8 +86,8 @@ func TestHandlerCreate_StoresFeedbackAndReturnsID(t *testing.T) {
 	require.NoError(t, db.First(&got, "id = ?", id).Error)
 	require.Equal(t, userID, got.UserID)
 	require.Equal(t, KindBug, got.Kind)
-	require.Equal(t, "Camera freezes on capture", got.Title)
-	require.Equal(t, "Tapping the shutter freezes the app for ~5s.", got.Body)
+	require.Equal(t, "Camera freezes on capture", got.Subject)
+	require.Equal(t, "Tapping the shutter freezes the app for ~5s.", got.Description)
 	require.Equal(t, StatusOpen, got.Status)
 	require.Equal(t, "1.0.0", got.AppVersion)
 	require.Equal(t, "ios", got.Platform)
@@ -114,16 +114,16 @@ func TestHandlerCreate_RejectsUnknownKind(t *testing.T) {
 	require.Equal(t, "invalid_input", body.Error)
 }
 
-func TestHandlerCreate_RejectsEmptyTitle(t *testing.T) {
-	for _, title := range []string{"", "   "} {
-		t.Run(fmt.Sprintf("title=%q", title), func(t *testing.T) {
+func TestHandlerCreate_RejectsEmptySubject(t *testing.T) {
+	for _, subject := range []string{"", "   "} {
+		t.Run(fmt.Sprintf("subject=%q", subject), func(t *testing.T) {
 			db := testDB(t)
 			userID := seedUser(t, db)
 			repo := NewRepository(db)
 			router := newTestRouter(userID, NewHandler(repo), true)
 
 			payload := validPayload()
-			payload["title"] = title
+			payload["subject"] = subject
 			w := doCreate(router, payload)
 
 			require.Equal(t, http.StatusBadRequest, w.Code)
@@ -136,16 +136,16 @@ func TestHandlerCreate_RejectsEmptyTitle(t *testing.T) {
 	}
 }
 
-func TestHandlerCreate_RejectsEmptyBody(t *testing.T) {
-	for _, feedbackBody := range []string{"", "   "} {
-		t.Run(fmt.Sprintf("body=%q", feedbackBody), func(t *testing.T) {
+func TestHandlerCreate_RejectsEmptyDescription(t *testing.T) {
+	for _, feedbackDescription := range []string{"", "   "} {
+		t.Run(fmt.Sprintf("description=%q", feedbackDescription), func(t *testing.T) {
 			db := testDB(t)
 			userID := seedUser(t, db)
 			repo := NewRepository(db)
 			router := newTestRouter(userID, NewHandler(repo), true)
 
 			payload := validPayload()
-			payload["body"] = feedbackBody
+			payload["description"] = feedbackDescription
 			w := doCreate(router, payload)
 
 			require.Equal(t, http.StatusBadRequest, w.Code)
@@ -158,14 +158,14 @@ func TestHandlerCreate_RejectsEmptyBody(t *testing.T) {
 	}
 }
 
-func TestHandlerCreate_RejectsOverlongTitle(t *testing.T) {
+func TestHandlerCreate_RejectsOverlongSubject(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db)
 	repo := NewRepository(db)
 	router := newTestRouter(userID, NewHandler(repo), true)
 
 	payload := validPayload()
-	payload["title"] = strings.Repeat("a", maxTitleChars+1)
+	payload["subject"] = strings.Repeat("a", maxSubjectChars+1)
 	w := doCreate(router, payload)
 
 	require.Equal(t, http.StatusBadRequest, w.Code, "must reject, not 500, and not silently truncate")
@@ -177,17 +177,17 @@ func TestHandlerCreate_RejectsOverlongTitle(t *testing.T) {
 
 	var count int64
 	require.NoError(t, db.Model(&Feedback{}).Where("user_id = ?", userID).Count(&count).Error)
-	require.Zero(t, count, "an over-length title must not be stored, truncated or otherwise")
+	require.Zero(t, count, "an over-length subject must not be stored, truncated or otherwise")
 }
 
-func TestHandlerCreate_RejectsOverlongBody(t *testing.T) {
+func TestHandlerCreate_RejectsOverlongDescription(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db)
 	repo := NewRepository(db)
 	router := newTestRouter(userID, NewHandler(repo), true)
 
 	payload := validPayload()
-	payload["body"] = strings.Repeat("a", maxBodyChars+1)
+	payload["description"] = strings.Repeat("a", maxDescriptionChars+1)
 	w := doCreate(router, payload)
 
 	require.Equal(t, http.StatusBadRequest, w.Code, "must reject, not 500, and not silently truncate")
@@ -199,7 +199,7 @@ func TestHandlerCreate_RejectsOverlongBody(t *testing.T) {
 
 	var count int64
 	require.NoError(t, db.Model(&Feedback{}).Where("user_id = ?", userID).Count(&count).Error)
-	require.Zero(t, count, "an over-length body must not be stored, truncated or otherwise")
+	require.Zero(t, count, "an over-length description must not be stored, truncated or otherwise")
 }
 
 // TestHandlerCreate_IgnoresUserIDInBody is the security-critical case: the

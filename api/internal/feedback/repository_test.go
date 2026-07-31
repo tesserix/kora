@@ -45,8 +45,8 @@ func TestRepository_CreateRoundTrip(t *testing.T) {
 	saved, err := repo.Create(context.Background(), Feedback{
 		UserID:      userID,
 		Kind:        KindBug,
-		Title:       "Camera freezes on capture",
-		Body:        "Tapping the shutter freezes the app for ~5s.",
+		Subject:     "Camera freezes on capture",
+		Description: "Tapping the shutter freezes the app for ~5s.",
 		Status:      StatusOpen,
 		AppVersion:  "1.0.0",
 		Platform:    "ios",
@@ -61,7 +61,7 @@ func TestRepository_CreateRoundTrip(t *testing.T) {
 	require.NoError(t, db.First(&got, "id = ?", saved.ID).Error)
 	require.Equal(t, userID, got.UserID)
 	require.Equal(t, KindBug, got.Kind)
-	require.Equal(t, "Camera freezes on capture", got.Title)
+	require.Equal(t, "Camera freezes on capture", got.Subject)
 	require.Equal(t, StatusOpen, got.Status)
 	require.Equal(t, "ios", got.Platform)
 	require.Equal(t, "iPhone17,2", got.DeviceModel)
@@ -73,7 +73,7 @@ func TestRepository_CreateDefaultsStatusToOpen(t *testing.T) {
 	repo := NewRepository(db)
 
 	saved, err := repo.Create(context.Background(), Feedback{
-		UserID: userID, Kind: KindFeature, Title: "Dark mode", Body: "Please.",
+		UserID: userID, Kind: KindFeature, Subject: "Dark mode", Description: "Please.",
 	})
 	require.NoError(t, err)
 

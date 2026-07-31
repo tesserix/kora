@@ -10,13 +10,13 @@ import (
 	"github.com/tesserix/kora/api/internal/user"
 )
 
-// maxTitleChars caps the title, a one-line summary of the bug or request.
-const maxTitleChars = 200
+// maxSubjectChars caps the subject, a one-line summary of the bug or request.
+const maxSubjectChars = 200
 
-// maxBodyChars caps the free-text description. Generous enough for a few
-// paragraphs of repro steps or context while bounding the permanent,
+// maxDescriptionChars caps the free-text description. Generous enough for a
+// few paragraphs of repro steps or context while bounding the permanent,
 // unretained growth of the feedback table.
-const maxBodyChars = 4000
+const maxDescriptionChars = 4000
 
 // maxContextFieldChars caps each client-context field (app_version,
 // platform, os_version, device_model). These are short, display-only
@@ -28,7 +28,7 @@ const maxContextFieldChars = 100
 // of JSON parsing, mirroring maxAskBodyBytes in package coach. The headroom
 // above the sum of the char caps covers worst-case 4-byte-per-rune UTF-8
 // across every field plus the JSON wrapper's fixed overhead.
-const maxCreateBodyBytes = (maxTitleChars+maxBodyChars+4*maxContextFieldChars)*4 + 1<<10
+const maxCreateBodyBytes = (maxSubjectChars+maxDescriptionChars+4*maxContextFieldChars)*4 + 1<<10
 
 // Handler exposes feedback capture over HTTP.
 type Handler struct {
@@ -46,8 +46,8 @@ func NewHandler(repo Repository) Handler {
 // read here, not merely overwritten after the fact.
 type createRequest struct {
 	Kind        string `json:"kind"`
-	Title       string `json:"title"`
-	Body        string `json:"body"`
+	Subject     string `json:"subject"`
+	Description string `json:"description"`
 	AppVersion  string `json:"app_version"`
 	Platform    string `json:"platform"`
 	OSVersion   string `json:"os_version"`
@@ -78,25 +78,25 @@ func (h Handler) Create(c *gin.Context) {
 		return
 	}
 
-	// Trim before validating so a title/body of all whitespace is treated
-	// as empty rather than accepted.
-	title := strings.TrimSpace(req.Title)
-	if title == "" {
-		httpx.Error(c, http.StatusBadRequest, "invalid_input", "title is required")
+	// Trim before validating so a subject/description of all whitespace is
+	// treated as empty rather than accepted.
+	subject := strings.TrimSpace(req.Subject)
+	if subject == "" {
+		httpx.Error(c, http.StatusBadRequest, "invalid_input", "subject is required")
 		return
 	}
-	if len(title) > maxTitleChars {
-		httpx.Error(c, http.StatusBadRequest, "invalid_input", "title exceeds maximum length")
+	if len(subject) > maxSubjectChars {
+		httpx.Error(c, http.StatusBadRequest, "invalid_input", "subject exceeds maximum length")
 		return
 	}
 
-	body := strings.TrimSpace(req.Body)
-	if body == "" {
-		httpx.Error(c, http.StatusBadRequest, "invalid_input", "body is required")
+	description := strings.TrimSpace(req.Description)
+	if description == "" {
+		httpx.Error(c, http.StatusBadRequest, "invalid_input", "description is required")
 		return
 	}
-	if len(body) > maxBodyChars {
-		httpx.Error(c, http.StatusBadRequest, "invalid_input", "body exceeds maximum length")
+	if len(description) > maxDescriptionChars {
+		httpx.Error(c, http.StatusBadRequest, "invalid_input", "description exceeds maximum length")
 		return
 	}
 
@@ -115,8 +115,8 @@ func (h Handler) Create(c *gin.Context) {
 	saved, err := h.repo.Create(c.Request.Context(), Feedback{
 		UserID:      uid,
 		Kind:        kind,
-		Title:       title,
-		Body:        body,
+		Subject:     subject,
+		Description: description,
 		AppVersion:  appVersion,
 		Platform:    platform,
 		OSVersion:   osVersion,
