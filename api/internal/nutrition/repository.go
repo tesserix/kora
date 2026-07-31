@@ -126,24 +126,30 @@ func (r Repository) Resolve(ctx context.Context, userID uuid.UUID, phrase string
 	aliasKey := strings.ToLower(strings.TrimSpace(phrase))
 	if userID != uuid.Nil {
 		var personalItems []FoodItem
-		// ORDER BY fa.created_at DESC, fa.id DESC: AddAlias's replace-on-write
-		// keeps this to one row per (user, phrase) in the normal case, but this
-		// ordering is defence in depth — it makes the result deterministic
-		// (newest alias wins) rather than dependent on Postgres's physical row
-		// order, which is unspecified and has been observed to return a stale
-		// alias ahead of a newer one.
+		// No ORDER BY here: idx_food_aliases_unique ON food_aliases (user_id,
+		// lower(alias)) guarantees at most one personal row can ever match
+		// this (user_id, lower(alias)) pair, so there is nothing for an
+		// ordering to disambiguate — LIMIT only ever bounds a result of 0 or 1
+		// rows.
 		if err := r.db.WithContext(ctx).
 			Raw(`SELECT fi.* FROM food_items fi
 			     JOIN food_aliases fa ON fa.food_item_id = fi.id
 			     WHERE fa.user_id = ? AND lower(fa.alias) = ?
-			     ORDER BY fa.created_at DESC, fa.id DESC LIMIT ?`, userID, aliasKey, limit).
+			     LIMIT ?`, userID, aliasKey, limit).
 			Scan(&personalItems).Error; err != nil {
 			return nil, fmt.Errorf("nutrition: resolve personal alias: %w", err)
 		}
 		add(personalItems, MatchAlias, func(FoodItem) float64 { return 1.0 })
 	}
 	var aliasItems []FoodItem
-	// Same defence-in-depth ordering for global aliases — newest first.
+	// ORDER BY fa.created_at DESC, fa.id DESC: unlike the personal query
+	// above, global rows (user_id IS NULL) are NOT deduped by
+	// idx_food_aliases_unique — Postgres treats NULL as distinct from NULL in
+	// a unique index, so more than one global alias row can exist for the
+	// same lower(alias). This ordering keeps the result deterministic
+	// (newest alias wins) rather than dependent on Postgres's physical row
+	// order, which is unspecified and has been observed to return a stale
+	// alias ahead of a newer one.
 	if err := r.db.WithContext(ctx).
 		Raw(`SELECT fi.* FROM food_items fi
 		     JOIN food_aliases fa ON fa.food_item_id = fi.id
