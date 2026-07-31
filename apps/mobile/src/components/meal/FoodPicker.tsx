@@ -32,7 +32,13 @@ export function FoodPicker({ visible, initialQuery, onSelect, onClose }: FoodPic
     if (visible) setQuery(initialQuery);
   }, [visible, initialQuery]);
 
-  const search = useFoodSearch(query);
+  // FoodPicker stays mounted even while its Sheet is closed (only the Sheet
+  // itself returns null), so if we always passed `query` here, every meal
+  // sheet open would fire a real GET /v1/foods in the background — even when
+  // "Change food" is never tapped. Passing "" while closed keeps the existing
+  // `enabled: q.length >= 2` guard in useFoodSearch doing the work, with no
+  // extra visibility plumbing inside the hook itself.
+  const search = useFoodSearch(visible ? query : "");
   const trimmed = query.trim();
 
   return (
