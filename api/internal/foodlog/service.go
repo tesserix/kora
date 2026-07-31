@@ -108,9 +108,10 @@ func (s Service) LogFood(ctx context.Context, userID uuid.UUID, req LogRequest) 
 // uttered.
 //
 // RetractCorrection un-teaches what a previous correction on this log taught —
-// it deletes the personal alias (user, log.input_phrase, CURRENT food) before
-// the revert is applied. It is the undo half of a correction, and it never
-// writes an alias of its own.
+// it deletes the personal alias (user, log.input_phrase, the food the log
+// pointed at BEFORE this edit) once the edit has successfully applied and
+// actually changed the food. It is the undo half of a correction, and it
+// never writes an alias of its own.
 type EditRequest struct {
 	FoodItemID        *uuid.UUID `json:"food_item_id"`
 	MealSlot          string     `json:"meal_slot"`
@@ -134,16 +135,13 @@ func (s Service) EditLog(ctx context.Context, userID, logID uuid.UUID, req EditR
 		return EditResult{}, fmt.Errorf("foodlog: edit: load: %w", err)
 	}
 
-	// Retract FIRST, while current.FoodItemID still names the food the
-	// previous correction taught. Doing this after the revert would delete an
-	// alias for the food being reverted TO, which no correction ever created.
-	if req.RetractCorrection && current.InputPhrase != nil && current.FoodItemID != nil {
-		if rerr := s.foods.RemoveAlias(ctx, userID, *current.InputPhrase, *current.FoodItemID); rerr != nil {
-			// Best-effort: the user's undo must still revert the log.
-			slog.WarnContext(ctx, "foodlog: correction alias retraction failed",
-				"error", rerr, "food_item_id", *current.FoodItemID, "user_id", userID)
-		}
-	}
+	// Capture the food the log pointed at BEFORE this edit, while it's still
+	// current.FoodItemID. We key retraction on this captured value rather than
+	// on ordering: current.FoodItemID is about to be overwritten below, and
+	// retraction itself must not run until AFTER a successful Update (see
+	// below) so a rejected edit (bad meal_slot, non-positive grams, unknown
+	// food) never destroys an alias for a change that didn't happen.
+	prevFoodID := current.FoodItemID
 
 	if req.MealSlot != "" {
 		if !validMealSlots[req.MealSlot] {
@@ -210,6 +208,21 @@ func (s Service) EditLog(ctx context.Context, userID, logID uuid.UUID, req EditR
 			aliasRecorded = true
 		}
 	}
+
+	// Retract: un-teach the alias the earlier correction created, keyed on
+	// prevFoodID (the food this log pointed at before this edit ran) — never
+	// on current.FoodItemID, which now names the food being reverted TO and
+	// was never taught by any correction. Gated on foodChanged AND a
+	// successful Update above, so a bare {retract_correction: true} with no
+	// food change, or an edit that failed validation, never destroys an
+	// alias. Best-effort, same as the teach half.
+	if req.RetractCorrection && foodChanged && current.InputPhrase != nil && prevFoodID != nil {
+		if rerr := s.foods.RemoveAlias(ctx, userID, *current.InputPhrase, *prevFoodID); rerr != nil {
+			slog.WarnContext(ctx, "foodlog: correction alias retraction failed",
+				"error", rerr, "food_item_id", *prevFoodID, "user_id", userID)
+		}
+	}
+
 	return EditResult{Log: updated, AliasRecorded: aliasRecorded}, nil
 }
 

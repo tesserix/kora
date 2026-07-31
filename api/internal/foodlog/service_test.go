@@ -518,3 +518,85 @@ func TestEditLogRetractDoesNotAliasTheRevertTarget(t *testing.T) {
 		userID, strings.ToLower(phrase)).Scan(&n).Error)
 	require.EqualValues(t, 0, n)
 }
+
+// TestEditLogRejectedRetractDoesNotDestroyAlias is the finding-1 regression
+// test: an undo request that fails validation (here, an invalid meal_slot)
+// must leave the taught alias and the log's food untouched. Before the fix,
+// retraction ran before validation, so this exact request deleted the alias
+// and then returned an error — the log stayed pointed at the wrong food AND
+// the correction that fixed it was erased.
+func TestEditLogRejectedRetractDoesNotDestroyAlias(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	rice := nutrition.FoodItem{Name: "Rice RJ " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 130}
+	quinoa := nutrition.FoodItem{Name: "Quinoa RJ " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 120}
+	require.NoError(t, db.Create(&rice).Error)
+	require.NoError(t, db.Create(&quinoa).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id IN (?, ?)", rice.ID, quinoa.ID) })
+
+	phrase := "rejected undo " + uuid.NewString()
+	log := seedPhraseLog(t, db, userID, rice, phrase)
+	svc := NewService(NewRepository(db), nutriRepo)
+
+	// Correct rice -> quinoa, which teaches (phrase -> quinoa).
+	_, err := svc.EditLog(context.Background(), userID, log.ID, EditRequest{FoodItemID: &quinoa.ID})
+	require.NoError(t, err)
+
+	// Attempt an undo carrying an invalid meal_slot — must fail validation.
+	_, err = svc.EditLog(context.Background(), userID, log.ID, EditRequest{
+		FoodItemID: &rice.ID, MealSlot: "brunchtime", RetractCorrection: true,
+	})
+	require.Error(t, err)
+	var verr httpx.ValidationError
+	require.True(t, errors.As(err, &verr), "expected a validation error, got %T: %v", err, err)
+
+	// The taught alias must survive the rejected undo.
+	var n int64
+	require.NoError(t, db.Raw(
+		"SELECT count(*) FROM food_aliases WHERE user_id = ? AND lower(alias) = ? AND food_item_id = ?",
+		userID, strings.ToLower(phrase), quinoa.ID).Scan(&n).Error)
+	require.EqualValues(t, 1, n, "a rejected edit must not destroy the alias it did not successfully retract")
+
+	// The log's food must be unchanged — the rejected edit never applied.
+	reloaded, err := NewRepository(db).GetByID(context.Background(), userID, log.ID)
+	require.NoError(t, err)
+	require.Equal(t, quinoa.ID, *reloaded.FoodItemID, "the log's food must be unchanged by a rejected edit")
+}
+
+// TestEditLogBareRetractWithNoFoodChangeLeavesAliasIntact is the finding-3
+// regression test: a request that sets retract_correction but does not
+// change the food (e.g. a portion-only edit, or a request with nothing else
+// in it) must not delete any alias. Before the fix, the retraction guard was
+// not gated on foodChanged, so a bare {retract_correction: true} silently
+// deleted the user's personal alias for (log.input_phrase, the log's CURRENT
+// food) even though no correction happened in this call.
+func TestEditLogBareRetractWithNoFoodChangeLeavesAliasIntact(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	rice := nutrition.FoodItem{Name: "Rice BR " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 130}
+	quinoa := nutrition.FoodItem{Name: "Quinoa BR " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 120}
+	require.NoError(t, db.Create(&rice).Error)
+	require.NoError(t, db.Create(&quinoa).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id IN (?, ?)", rice.ID, quinoa.ID) })
+
+	phrase := "bare retract " + uuid.NewString()
+	log := seedPhraseLog(t, db, userID, rice, phrase)
+	svc := NewService(NewRepository(db), nutriRepo)
+
+	// Correct rice -> quinoa, which teaches (phrase -> quinoa).
+	_, err := svc.EditLog(context.Background(), userID, log.ID, EditRequest{FoodItemID: &quinoa.ID})
+	require.NoError(t, err)
+
+	// A bare retract_correction with no food change at all.
+	res, err := svc.EditLog(context.Background(), userID, log.ID, EditRequest{RetractCorrection: true})
+	require.NoError(t, err)
+	require.Equal(t, quinoa.ID, *res.Log.FoodItemID, "the log's food must be unaffected")
+
+	var n int64
+	require.NoError(t, db.Raw(
+		"SELECT count(*) FROM food_aliases WHERE user_id = ? AND lower(alias) = ? AND food_item_id = ?",
+		userID, strings.ToLower(phrase), quinoa.ID).Scan(&n).Error)
+	require.EqualValues(t, 1, n, "a bare retract with no food change must not destroy the existing alias")
+}
