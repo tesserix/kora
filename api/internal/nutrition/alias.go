@@ -27,7 +27,17 @@ func aliasOwner(userID uuid.UUID) any {
 //
 // Idempotent per (user_id, lower(alias), food_item_id) via ON CONFLICT against
 // idx_food_aliases_unique — a real constraint rather than the check-then-insert
-// this replaced, which could double-write under concurrency.
+// this replaced, which could double-write under concurrency — but ONLY for
+// personal aliases (non-NULL user_id). Postgres treats NULL as DISTINCT from
+// NULL in a unique index, so ON CONFLICT never fires for global aliases
+// (userID == uuid.Nil, stored as user_id NULL): three identical global
+// AddAlias calls produce three duplicate rows, verified empirically. This is
+// left as-is (no SQL/migration change) because no production code path
+// writes global aliases today — only tests do. The consequence if that ever
+// changes: Resolve's global alias query (tier 1, food_aliases WHERE user_id
+// IS NULL) has no DISTINCT and applies LIMIT, so duplicate global rows for
+// one alias consume LIMIT slots, and genuinely distinct global aliases
+// sorted after the cutoff could be silently missed.
 func (r Repository) AddAlias(ctx context.Context, userID uuid.UUID, alias string, foodItemID uuid.UUID) error {
 	key := strings.ToLower(strings.TrimSpace(alias))
 	if key == "" {
