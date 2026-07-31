@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Alert, Pressable, View } from "react-native";
+import { Alert, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { Sheet } from "@/components/Sheet";
 import { Icon } from "@/components/Icon";
@@ -12,7 +12,7 @@ import { AppText } from "@/components/Text";
 import { Overline } from "@/components/Overline";
 import { FoodPicker } from "@/components/meal/FoodPicker";
 import { foodVisual } from "@/lib/foodVisual";
-import { haptics } from "@/motion";
+import { haptics, PressableScale } from "@/motion";
 import { useEditLog, useDeleteLog, useLog, useRepeatLog, type EditLogInput } from "@/api/hooks";
 import type { FoodItem, FoodLog } from "@/api/types";
 import type { MealSlot } from "@/lib/mealSlot";
@@ -191,7 +191,8 @@ export default function MealDetail() {
 
         <Overline>Portion</Overline>
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 12, marginTop: 6 }}>
-          <Pressable
+          <PressableScale
+            haptic="selection"
             accessibilityRole="button"
             accessibilityLabel="Change food"
             disabled={busy}
@@ -200,7 +201,7 @@ export default function MealDetail() {
           >
             <AppText variant="subheadline" style={{ fontWeight: "600" }}>{name}</AppText>
             <Icon name="chevron-right" size={14} color={colors.tertiaryLabel} />
-          </Pressable>
+          </PressableScale>
           <Stepper value={grams} onChange={setGrams} step={10} min={10} />
         </View>
 

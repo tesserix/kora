@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactElement } from "react";
-import { Pressable, TextInput, View } from "react-native";
+import { TextInput, View } from "react-native";
 import { Sheet } from "@/components/Sheet";
 import { Icon } from "@/components/Icon";
 import { AppText } from "@/components/Text";
@@ -8,6 +8,7 @@ import { Card } from "@/components/Card";
 import { useFoodSearch } from "@/api/hooks";
 import type { FoodItem } from "@/api/types";
 import { foodVisual } from "@/lib/foodVisual";
+import { PressableScale } from "@/motion";
 import { useTheme } from "@/theme";
 
 export interface FoodPickerProps {
@@ -75,8 +76,9 @@ export function FoodPicker({ visible, initialQuery, onSelect, onClose }: FoodPic
               const item = candidate.item;
               const vis = foodVisual(item.name);
               return (
-                <Pressable
+                <PressableScale
                   key={item.id}
+                  haptic="selection"
                   accessibilityRole="button"
                   accessibilityLabel={`Select ${item.name}`}
                   onPress={() => onSelect(item)}
@@ -103,7 +105,7 @@ export function FoodPicker({ visible, initialQuery, onSelect, onClose }: FoodPic
                     ) : null}
                   </View>
                   <AppText variant="subheadline" muted>{`${Math.round(item.kcal_per_100g)} kcal/100g`}</AppText>
-                </Pressable>
+                </PressableScale>
               );
             })}
           </View>
