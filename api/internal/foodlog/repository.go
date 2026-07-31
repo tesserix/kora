@@ -3,6 +3,7 @@ package foodlog
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -81,6 +82,33 @@ func (r Repository) HasLoggedBefore(ctx context.Context, userID uuid.UUID, befor
 		return false, fmt.Errorf("foodlog: has logged before: %w", err)
 	}
 	return exists, nil
+}
+
+// LastPortionForPhrase returns the QuantityGrams from userID's most recent
+// food_logs row whose input_phrase matches phrase (case/whitespace
+// insensitive, same normalization nutrition.AddAlias writes with), or
+// found=false if none exists. It exists so a personal-alias short-circuit
+// (see ai.Resolver.ResolveText) can inherit the portion the user actually
+// logged last time they used this exact phrase — an alias hit only tells the
+// resolver WHICH food, not HOW MUCH, and food_logs.input_phrase is the only
+// place that portion was ever recorded.
+func (r Repository) LastPortionForPhrase(ctx context.Context, userID uuid.UUID, phrase string) (float64, bool, error) {
+	key := strings.ToLower(strings.TrimSpace(phrase))
+	if key == "" {
+		return 0, false, nil
+	}
+	var grams []float64
+	if err := r.db.WithContext(ctx).
+		Raw(`SELECT quantity_grams FROM food_logs
+		     WHERE user_id = ? AND input_phrase IS NOT NULL AND lower(trim(input_phrase)) = ?
+		     ORDER BY logged_at DESC LIMIT 1`, userID, key).
+		Scan(&grams).Error; err != nil {
+		return 0, false, fmt.Errorf("foodlog: last portion for phrase: %w", err)
+	}
+	if len(grams) == 0 {
+		return 0, false, nil
+	}
+	return grams[0], true, nil
 }
 
 // Update persists changes to an existing log, scoped to its owner. It updates

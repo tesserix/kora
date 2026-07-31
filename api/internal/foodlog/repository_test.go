@@ -90,6 +90,105 @@ func TestListForUserSince(t *testing.T) {
 	require.Equal(t, inWindow.ID, got[0].ID)
 }
 
+// TestLastPortionForPhraseReturnsMostRecent proves the most recent matching
+// log's grams wins when the same phrase was logged more than once — the
+// portion the alias short-circuit inherits must reflect what the user most
+// recently ate, not the first time they used this phrase.
+func TestLastPortionForPhraseReturnsMostRecent(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	item := nutrition.FoodItem{Name: "Portion Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+	phrase := "brekkie eggs " + uuid.NewString()
+	now := time.Now()
+
+	older, err := repo.Create(ctx, FoodLog{
+		UserID: userID, FoodItemID: &item.ID, LoggedAt: now.Add(-48 * time.Hour), MealSlot: "breakfast",
+		Source: "ai_text", QuantityGrams: 80, Kcal: 80, InputPhrase: &phrase,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_logs WHERE id = ?", older.ID) })
+
+	newer, err := repo.Create(ctx, FoodLog{
+		UserID: userID, FoodItemID: &item.ID, LoggedAt: now.Add(-1 * time.Hour), MealSlot: "breakfast",
+		Source: "ai_text", QuantityGrams: 150, Kcal: 150, InputPhrase: &phrase,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_logs WHERE id = ?", newer.ID) })
+
+	grams, found, err := repo.LastPortionForPhrase(ctx, userID, phrase)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, 150.0, grams, "the most recently logged portion for this phrase must win")
+}
+
+// TestLastPortionForPhraseIgnoresOtherUsers proves the lookup is per-user:
+// another user's log of the identical phrase must never leak in.
+func TestLastPortionForPhraseIgnoresOtherUsers(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	other := seedUser(t, db)
+	item := nutrition.FoodItem{Name: "Portion Food Other " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+	phrase := "brekkie eggs " + uuid.NewString()
+
+	otherLog, err := repo.Create(ctx, FoodLog{
+		UserID: other, FoodItemID: &item.ID, LoggedAt: time.Now(), MealSlot: "breakfast",
+		Source: "ai_text", QuantityGrams: 300, Kcal: 300, InputPhrase: &phrase,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_logs WHERE id = ?", otherLog.ID) })
+
+	_, found, err := repo.LastPortionForPhrase(ctx, userID, phrase)
+	require.NoError(t, err)
+	require.False(t, found, "another user's log of the same phrase must not be found")
+}
+
+// TestLastPortionForPhraseIgnoresNullInputPhrase proves logs with no
+// input_phrase (manual/barcode/photo logs) never match a phrase lookup.
+func TestLastPortionForPhraseIgnoresNullInputPhrase(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	item := nutrition.FoodItem{Name: "Portion Food Null " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+	phrase := "brekkie eggs " + uuid.NewString()
+
+	manual, err := repo.Create(ctx, FoodLog{
+		UserID: userID, FoodItemID: &item.ID, LoggedAt: time.Now(), MealSlot: "breakfast",
+		Source: "manual", QuantityGrams: 300, Kcal: 300, InputPhrase: nil,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_logs WHERE id = ?", manual.ID) })
+
+	_, found, err := repo.LastPortionForPhrase(ctx, userID, phrase)
+	require.NoError(t, err)
+	require.False(t, found, "a log with a NULL input_phrase must never match a phrase lookup")
+}
+
+// TestLastPortionForPhraseNotFound proves the not-found case is a plain
+// false, not an error.
+func TestLastPortionForPhraseNotFound(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	repo := NewRepository(db)
+
+	_, found, err := repo.LastPortionForPhrase(context.Background(), userID, "never logged "+uuid.NewString())
+	require.NoError(t, err)
+	require.False(t, found)
+}
+
 func TestHasLoggedBefore(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db)

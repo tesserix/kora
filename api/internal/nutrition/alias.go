@@ -62,6 +62,45 @@ func (r Repository) AddAlias(ctx context.Context, userID uuid.UUID, alias string
 	return nil
 }
 
+// LookupPersonalAlias looks up the food item userID has personally
+// corrected `phrase` to resolve to, if any. It is the raw-phrase
+// counterpart to Resolve's alias tier: Resolve is keyed off whatever phrase
+// its caller passes in (which, for an AI resolve, is the model's own guess
+// string — not necessarily the user's original words), whereas this looks
+// up the user's raw phrase directly. That is exactly the primitive
+// ai.Resolver.ResolveText's alias short-circuit needs so a correction takes
+// effect before the model is ever called.
+//
+// found=false (not an error) means no personal alias exists for this
+// (userID, phrase) pair — including when phrase matches a curated/global
+// alias (food_aliases.user_id IS NULL): those are not a personal
+// correction and must never short-circuit resolution. uuid.Nil always
+// returns not-found without querying, mirroring AddAlias/RemoveAlias's
+// zero-value handling — it must never be treated as a wildcard that could
+// match another user's alias.
+func (r Repository) LookupPersonalAlias(ctx context.Context, userID uuid.UUID, phrase string) (FoodItem, bool, error) {
+	if userID == uuid.Nil {
+		return FoodItem{}, false, nil
+	}
+	key := strings.ToLower(strings.TrimSpace(phrase))
+	if key == "" {
+		return FoodItem{}, false, nil
+	}
+	var items []FoodItem
+	if err := r.db.WithContext(ctx).
+		Raw(`SELECT fi.* FROM food_items fi
+		     JOIN food_aliases fa ON fa.food_item_id = fi.id
+		     WHERE fa.user_id = ? AND lower(fa.alias) = ?
+		     LIMIT 1`, userID, key).
+		Scan(&items).Error; err != nil {
+		return FoodItem{}, false, fmt.Errorf("nutrition: lookup personal alias: %w", err)
+	}
+	if len(items) == 0 {
+		return FoodItem{}, false, nil
+	}
+	return items[0], true, nil
+}
+
 // RemoveAlias deletes the personal alias (userID, alias, foodItemID). It is
 // the retraction half of a correction: undoing an edit must un-teach exactly
 // what that edit taught, and nothing else. Deleting a global alias is not
