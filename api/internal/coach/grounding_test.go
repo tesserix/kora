@@ -232,6 +232,28 @@ func TestFastingStreak_LoggedButZeroKcalStillCounts(t *testing.T) {
 	require.Equal(t, 2, fastingStreak(daily, false))
 }
 
+// TestFastingStreak_FirstLoggedKeysOnLogCountNotKcal pins a real fork in
+// fastingStreak's in-window firstLogged search that no existing test
+// distinguishes: whether "has the user logged anything yet" keys on
+// LogCount > 0 (correct — a logged-but-zero-kcal day IS evidence the user
+// was logging that day) or would key on Kcal > 0 instead (wrong — that
+// would treat a water-only first log as if the user hadn't started logging
+// at all). A window whose only log is a water-only (zero-kcal) day at the
+// very start diverges under the two rules: keying on LogCount anchors
+// firstLogged to that day (index 0), so the whole 6-day complete span
+// counts as a streak (6); keying on Kcal never finds a day with Kcal > 0 at
+// all, yielding 0.
+func TestFastingStreak_FirstLoggedKeysOnLogCountNotKcal(t *testing.T) {
+	daily := []DailyTotal{
+		day(0, 1), // water-only: logged, zero kcal — this IS the first log
+		day(0, 0), day(0, 0), day(0, 0), day(0, 0), day(0, 0),
+		day(0, 0), // today, excluded
+	}
+
+	require.Equal(t, 6, fastingStreak(daily, false),
+		"firstLogged must key on LogCount > 0, not Kcal > 0 — a water-only day still marks where logging began")
+}
+
 func TestFastingStreak_ZeroWhenLoggingStartedToday(t *testing.T) {
 	// First ever log is today. The six empty days before it are absent data,
 	// and there is no logging history before the window either.
