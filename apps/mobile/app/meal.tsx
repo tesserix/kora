@@ -28,6 +28,25 @@ const SLOT_OPTIONS: Array<{ key: MealSlot; label: string }> = [
 ];
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
+// The food identity, portion and slot a food-change undo restores. food_item_id
+// is optional here only in principle — the server rejects a nil food_item_id
+// at log creation, so a fetched/patched log always has one in practice.
+type PriorFoodState = {
+  food_item_id: string | undefined;
+  quantity_grams: number;
+  meal_slot: MealSlot;
+};
+
+// What a delete-undo needs to re-create the log exactly as it was.
+type RetainedLog = {
+  food_item_id: string;
+  quantity_grams: number;
+  meal_slot: MealSlot;
+  logged_at: string;
+  source: string;
+  input_phrase?: string;
+};
+
 export default function MealDetail() {
   const { colors } = useTheme();
   const p = useLocalSearchParams<{
@@ -83,6 +102,74 @@ export default function MealDetail() {
     setSlot(override.meal_slot as MealSlot);
   }, [override]);
 
+  // Undoes a food correction: PATCHes the log back to its prior food/portion/
+  // slot, retracting the alias THIS correction taught (never any other).
+  // Uses mutateAsync + .catch rather than mutate's onError callback: the
+  // toast that triggers this can still be on screen after MealDetail has
+  // unmounted (e.g. the user backed out of the sheet), and a mutate() error
+  // callback only fires `if (this.#mutateOptions && this.hasListeners())` —
+  // it goes silently dead once the subscribing component is gone. A
+  // promise's rejection is not gated on listeners, so it surfaces regardless.
+  const undoCorrection = (prior: PriorFoodState, aliasRecorded: boolean) => {
+    editLog
+      .mutateAsync({
+        id: p.id,
+        food_item_id: prior.food_item_id,
+        quantity_grams: prior.quantity_grams,
+        meal_slot: prior.meal_slot,
+        // retract_correction undoes ONLY the alias THIS correction taught
+        // (aliasRecorded true). Sending it unconditionally, or when nothing
+        // was taught, would delete an alias a different log may have
+        // written for this same phrase.
+        ...(aliasRecorded ? { retract_correction: true } : {}),
+      })
+      .then(({ log: reverted }) => {
+        haptics.success();
+        setOverride(reverted);
+      })
+      .catch(() => {
+        haptics.error();
+        toast.show({ message: "Couldn't undo. Try again." });
+      });
+  };
+
+  // Undoes a plain portion/slot save by PATCHing the prior grams and slot
+  // back. Never sends retract_correction: a plain save never touches
+  // food_item_id, so the server never taught anything to retract — sending
+  // the flag here would delete an alias a DIFFERENT log may have taught for
+  // the same phrase. Same mutateAsync/.catch reasoning as undoCorrection:
+  // onSave already navigates back on success, so the triggering toast can
+  // outlive this component.
+  const undoSave = (priorGrams: number, priorSlot: MealSlot) => {
+    editLog
+      .mutateAsync({ id: p.id, quantity_grams: priorGrams, meal_slot: priorSlot })
+      .then(() => haptics.success())
+      .catch(() => {
+        haptics.error();
+        toast.show({ message: "Couldn't undo. Try again." });
+      });
+  };
+
+  // Re-creates a deleted log. Same mutateAsync/.catch reasoning as above:
+  // onDelete's success handler calls router.back() before this can ever
+  // run, so the toast that offers Undo is always shown from an unmounted
+  // MealDetail.
+  const restoreDeletedLog = (retained: RetainedLog) => {
+    createLog
+      .mutateAsync({
+        food_item_id: retained.food_item_id,
+        quantity_grams: retained.quantity_grams,
+        meal_slot: retained.meal_slot,
+        source: retained.source,
+        logged_at: retained.logged_at,
+        // Preserve the phrase so a later correction on the restored log can
+        // still teach the food index. This mints a NEW log id — a known,
+        // accepted limitation.
+        input_phrase: retained.input_phrase,
+      })
+      .catch(() => toast.show({ message: "Couldn't restore. Try again." }));
+  };
+
   const onSelectFood = (item: FoodItem) => {
     // Shared by both the free-index FoodPicker and the AI re-resolve
     // AskAgainSheet — whichever one is open, closing both here keeps this
@@ -96,7 +183,7 @@ export default function MealDetail() {
     // in this same session has already changed them. This is what Undo must
     // restore: the ORIGINAL food/portion/slot, not whatever this correction
     // is about to write.
-    const prior = {
+    const prior: PriorFoodState = {
       food_item_id: effective?.food_item_id,
       quantity_grams: baseGrams,
       meal_slot: baseSlot,
@@ -119,32 +206,16 @@ export default function MealDetail() {
               aliasRecorded && priorPhrase
                 ? `Updated · Kora will remember "${priorPhrase}"`
                 : "Updated",
-            actionLabel: "Undo",
-            onAction: () => {
-              editLog.mutate(
-                {
-                  id: p.id,
-                  food_item_id: prior.food_item_id,
-                  quantity_grams: prior.quantity_grams,
-                  meal_slot: prior.meal_slot,
-                  // retract_correction undoes ONLY the alias THIS correction
-                  // taught (aliasRecorded true). Sending it unconditionally,
-                  // or when nothing was taught, would delete an alias a
-                  // different log may have written for this same phrase.
-                  ...(aliasRecorded ? { retract_correction: true } : {}),
-                },
-                {
-                  onSuccess: ({ log: reverted }) => {
-                    haptics.success();
-                    setOverride(reverted);
-                  },
-                  onError: () => {
-                    haptics.error();
-                    setErr("Couldn't undo. Try again.");
-                  },
-                },
-              );
-            },
+            // Only offer an actionable Undo when there's a prior food to
+            // restore. prior.food_item_id is undefined only in principle
+            // (see PriorFoodState) — if it ever were, PATCHing it back would
+            // drop the key entirely, the server would see foodChanged ===
+            // false, and neither the food nor the alias would revert while
+            // the toast had already promised Kora would remember. Still show
+            // the confirmation, just without a broken action.
+            ...(prior.food_item_id
+              ? { actionLabel: "Undo", onAction: () => undoCorrection(prior, aliasRecorded) }
+              : {}),
           });
         },
         onError: () => {
@@ -158,6 +229,10 @@ export default function MealDetail() {
   const onSave = () => {
     if (!dirty || busy) return;
     setErr(null);
+    // Capture before the PATCH resolves and invalidates the log query —
+    // baseGrams/baseSlot will reflect the NEW values once that refetch lands.
+    const priorGrams = baseGrams;
+    const priorSlot = baseSlot;
     const patch: EditLogInput = { id: p.id };
     if (grams !== baseGrams) patch.quantity_grams = grams;
     if (slot !== baseSlot) patch.meal_slot = slot;
@@ -165,6 +240,11 @@ export default function MealDetail() {
       onSuccess: () => {
         haptics.success();
         router.back();
+        toast.show({
+          message: "Saved",
+          actionLabel: "Undo",
+          onAction: () => undoSave(priorGrams, priorSlot),
+        });
       },
       onError: () => {
         haptics.error();
@@ -203,22 +283,7 @@ export default function MealDetail() {
                 toast.show({
                   message: "Removed",
                   actionLabel: "Undo",
-                  onAction: () => {
-                    createLog.mutate(
-                      {
-                        food_item_id: foodItemId,
-                        quantity_grams: retained.quantity_grams,
-                        meal_slot: retained.meal_slot,
-                        source: retained.source,
-                        logged_at: retained.logged_at,
-                        // Preserve the phrase so a later correction on the
-                        // restored log can still teach the food index. This
-                        // mints a NEW log id — a known, accepted limitation.
-                        input_phrase: retained.input_phrase,
-                      },
-                      { onError: () => toast.show({ message: "Couldn't restore. Try again." }) },
-                    );
-                  },
+                  onAction: () => restoreDeletedLog({ ...retained, food_item_id: foodItemId }),
                 });
               } else {
                 toast.show({ message: "Removed" });
