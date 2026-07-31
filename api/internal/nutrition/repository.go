@@ -113,7 +113,7 @@ func (r Repository) Resolve(ctx context.Context, userID uuid.UUID, phrase string
 	}
 
 	// Tier 1: alias exact match, personal before global. Aliases are stored
-	// verbatim (see idx_food_aliases_user_alias ON food_aliases (user_id,
+	// verbatim (see idx_food_aliases_unique ON food_aliases (user_id,
 	// lower(alias))), so this compares on case/whitespace only — NOT the
 	// fully Normalize()'d form, which also strips punctuation and
 	// singularizes and would falsely miss aliases like "brekkie eggs" when

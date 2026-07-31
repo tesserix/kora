@@ -157,9 +157,11 @@ func TestAddAliasBlankIsNoOp(t *testing.T) {
 // finding-2(a) regression test: correcting the same phrase twice for the same
 // user (rice -> quinoa, then quinoa -> oats) must leave exactly one personal
 // alias for that phrase, pointing at the LATEST food — not two aliases both
-// scoring 1.0 in the alias tier with an arbitrary winner. Verified load-bearing:
-// deleting the "delete this user's other aliases for the same phrase" step
-// from AddAlias makes this test FAIL (two rows, first-written can still win).
+// scoring 1.0 in the alias tier with an arbitrary winner. This is enforced by
+// idx_food_aliases_unique ON food_aliases (user_id, lower(alias)) plus
+// AddAlias's ON CONFLICT ... DO UPDATE upsert. Verified load-bearing:
+// mutating that DO UPDATE into a DO NOTHING makes this test FAIL (the second
+// and third AddAlias calls become no-ops against the first-written row).
 func TestAddAliasSecondCorrectionReplacesFirstForSameUserAndPhrase(t *testing.T) {
 	db := testDB(t)
 	repo := NewRepository(db)
