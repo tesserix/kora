@@ -44,10 +44,13 @@ Success via `httpx.OK`; errors via `httpx.Error` / `httpx.RespondServiceError`. 
 - **Recent (last 7d, configurable const):** `foodlog.DailyKcal` series → avg intake, protein, logs/day, days-logged; `memory.Service.Build` → usual/frequent foods.
 Returns a `Context` struct (structured, for citations) plus a `Render() string` compact text block (for the prompt). Named constants for the window and any thresholds.
 
-**Signals.** `signals.FromContext(Context) guardrails.Signals`:
-- `RecentDeficitPct` = mean over last 7d of `clamp(1 - consumed/targetKcal, 0, 1)` (skip days with no target).
-- `AvgIntakeKcal`, `LogsPerDay` = 7d means.
-- `FastingStreakDays` = consecutive most-recent days with zero logged kcal.
+**Signals.** `signals.FromContext(Context) guardrails.Signals`. Shipped semantics (revised post-launch by the `kora-fasting-signal` branch — the original "consecutive most-recent days with zero logged kcal" description below was ED-risk-unsafe: it read absent/partial data as evidence of fasting or a deficit, so a brand-new user with no logging history, or with only a single partial meal logged today, could be flagged at ED-risk on first use):
+- **Today is always excluded** from every one of these signals — it is incomplete (before the day's first meal it looks identical to a fast), so counting it would make ED-risk depend on the time of day the request happened to arrive.
+- **Unlogged days are absent data, not evidence.** A day with no logs contributes to none of these signals; a day the user logged that still totals zero kcal (e.g. water-only) DOES count — that's a real zero-intake reading, not missing data.
+- `RecentDeficitPct` = mean over the COMPLETE (non-today), logged days of `clamp(1 - consumed/targetKcal, 0, 1)` (0 if no positive target). Requires at least `minDeficitLoggedDays` (2) logged complete days before it reports non-zero — one abandoned/partial logged day cannot stand in for the whole window's deficit.
+- `AvgIntakeKcal` (and the display-only `AvgProteinG`) = mean over the COMPLETE, logged days only — not a fixed 7-day denominator. `DaysLogged` is that same count, so `Context.Render()`'s "avg intake X kcal over N logged days" is literally true.
+- `LogsPerDay` keeps the fixed 7-day (recentWindowDays) denominator and includes today's logs in the numerator — it's a genuine per-calendar-day cadence (the obsessive-logging proxy), not a "days with any activity" average.
+- `FastingStreakDays` = consecutive complete zero-intake days ending yesterday, only within the span the user was actually logging: it anchors on the user's first in-window log — UNLESS the user has logging history from *before* the window (`Context.LoggedBeforeWindow`, backed by `foodlog.Repository.HasLoggedBefore`), in which case the entire complete-day span counts. Without that flag, a silence spanning the whole window (or longer) was invisible: the in-window anchor aged out and the streak silently reset to 0 exactly when the gap was longest.
 
 **Nudges (deterministic).** `nudges.Candidates(Context) []guardrails.Nudge` — additive, real-number rules, e.g.:
 - protein gap today > 0 → `"{gap}g protein to go"` (`Restrictive:false`)
