@@ -15,3 +15,10 @@ func Error(c *gin.Context, status int, code, message string) {
 func OK(c *gin.Context, data any) {
 	c.JSON(200, gin.H{"data": data})
 }
+
+// OKWithMeta responds with the standard data envelope plus a meta object, for
+// the few endpoints that must report something about the operation that is not
+// part of the resource itself. Additive: OK's shape is unchanged.
+func OKWithMeta(c *gin.Context, data any, meta any) {
+	c.JSON(200, gin.H{"data": data, "meta": meta})
+}

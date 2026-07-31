@@ -86,6 +86,29 @@ func (h Handler) List(c *gin.Context) {
 	httpx.OK(c, logs)
 }
 
+// Get returns one log in full. The diary passes a meal's fields as route
+// params, which cannot carry food_item_id, source or input_phrase — the
+// correction sheet needs all three, so it re-reads the record here.
+func (h Handler) Get(c *gin.Context) {
+	userID, ok := h.resolveUser(c)
+	if !ok {
+		return
+	}
+	logID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		httpx.Error(c, http.StatusBadRequest, "invalid_input", "invalid log id")
+		return
+	}
+	log, err := h.repo.GetByID(c.Request.Context(), userID, logID)
+	if err != nil {
+		// GetByID scopes by (id AND user_id), so another user's log is
+		// indistinguishable from a missing one — deliberately, as with Delete.
+		httpx.Error(c, http.StatusNotFound, "not_found", "log not found")
+		return
+	}
+	httpx.OK(c, log)
+}
+
 func (h Handler) Update(c *gin.Context) {
 	userID, ok := h.resolveUser(c)
 	if !ok {
@@ -110,7 +133,7 @@ func (h Handler) Update(c *gin.Context) {
 		httpx.RespondServiceError(c, err)
 		return
 	}
-	httpx.OK(c, res.Log)
+	httpx.OKWithMeta(c, res.Log, gin.H{"alias_recorded": res.AliasRecorded})
 }
 
 func (h Handler) Delete(c *gin.Context) {

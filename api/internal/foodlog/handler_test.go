@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"github.com/tesserix/kora/api/internal/nutrition"
 	"github.com/tesserix/kora/api/internal/user"
@@ -206,4 +208,125 @@ func TestRepeatWithEmptyBodyDefaultsToNow(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodPost, "/v1/logs/"+first.ID.String()+"/repeat", nil)
 	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusCreated, w.Code)
+}
+
+// newAuthedRouter builds a router with the /v1/logs routes under test, with
+// userID already in the Gin context the way user.IDFromContext reads it —
+// the same inline pattern the older tests in this file use, factored out.
+func newAuthedRouter(t *testing.T, db *gorm.DB, userID uuid.UUID) *gin.Engine {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	repo := NewRepository(db)
+	h := NewHandler(NewService(repo, nutrition.NewRepository(db)), repo)
+	r := gin.New()
+	r.Use(func(c *gin.Context) { c.Set("user_id", userID); c.Next() })
+	r.GET("/v1/logs/:id", h.Get)
+	r.PATCH("/v1/logs/:id", h.Update)
+	return r
+}
+
+func TestGetLogReturnsFullRecordIncludingInputPhrase(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	item := nutrition.FoodItem{Name: "Get Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	phrase := "get me " + uuid.NewString()
+	log := seedPhraseLog(t, db, userID, item, phrase)
+
+	r := newAuthedRouter(t, db, userID)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/logs/"+log.ID.String(), nil))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var body struct {
+		Data struct {
+			ID          string  `json:"id"`
+			FoodItemID  *string `json:"food_item_id"`
+			InputPhrase *string `json:"input_phrase"`
+			Source      string  `json:"source"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Equal(t, log.ID.String(), body.Data.ID)
+	require.NotNil(t, body.Data.FoodItemID, "the correction sheet needs food_item_id")
+	require.NotNil(t, body.Data.InputPhrase)
+	require.Equal(t, phrase, *body.Data.InputPhrase)
+	require.Equal(t, "ai_text", body.Data.Source)
+}
+
+func TestGetLogIsNotFoundForAnotherUsersLog(t *testing.T) {
+	db := testDB(t)
+	owner := seedUser(t, db)
+	stranger := seedUser(t, db)
+	item := nutrition.FoodItem{Name: "Get Food O " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	log := seedPhraseLog(t, db, owner, item, "private "+uuid.NewString())
+
+	r := newAuthedRouter(t, db, stranger)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/logs/"+log.ID.String(), nil))
+
+	require.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestPatchLogReportsAliasRecordedInMeta(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	rice := nutrition.FoodItem{Name: "Rice M " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 130}
+	quinoa := nutrition.FoodItem{Name: "Quinoa M " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 120}
+	require.NoError(t, db.Create(&rice).Error)
+	require.NoError(t, db.Create(&quinoa).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id IN (?, ?)", rice.ID, quinoa.ID) })
+
+	log := seedPhraseLog(t, db, userID, rice, "meta phrase "+uuid.NewString())
+
+	r := newAuthedRouter(t, db, userID)
+	w := httptest.NewRecorder()
+	body := `{"food_item_id":"` + quinoa.ID.String() + `"}`
+	req := httptest.NewRequest(http.MethodPatch, "/v1/logs/"+log.ID.String(), strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var parsed struct {
+		Data struct {
+			FoodItemID string `json:"food_item_id"`
+		} `json:"data"`
+		Meta struct {
+			AliasRecorded bool `json:"alias_recorded"`
+		} `json:"meta"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &parsed))
+	require.Equal(t, quinoa.ID.String(), parsed.Data.FoodItemID)
+	require.True(t, parsed.Meta.AliasRecorded)
+}
+
+func TestPatchLogReportsNoAliasForPortionOnlyEdit(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	rice := nutrition.FoodItem{Name: "Rice MP " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 130}
+	require.NoError(t, db.Create(&rice).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", rice.ID) })
+
+	log := seedPhraseLog(t, db, userID, rice, "meta portion "+uuid.NewString())
+
+	r := newAuthedRouter(t, db, userID)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/v1/logs/"+log.ID.String(),
+		strings.NewReader(`{"quantity_grams":250}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var parsed struct {
+		Meta struct {
+			AliasRecorded bool `json:"alias_recorded"`
+		} `json:"meta"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &parsed))
+	require.False(t, parsed.Meta.AliasRecorded)
 }
