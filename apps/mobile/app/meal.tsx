@@ -62,7 +62,12 @@ export default function MealDetail() {
 
   const scale = (base: number) => (baseGrams > 0 ? Math.round(base * grams / baseGrams) : base);
   const kcal = scale(baseKcal);
-  const dirty = grams !== baseGrams || slot !== p.mealSlot;
+  // Same fallback pattern as baseGrams: prefer the effective (fetched/patched)
+  // log's slot, and only fall back to the route param before it lands. Using
+  // p.mealSlot here unconditionally would compare against a baseline that
+  // never updates once the server's slot is known.
+  const baseSlot = (effective?.meal_slot as MealSlot | undefined) ?? (p.mealSlot as MealSlot);
+  const dirty = grams !== baseGrams || slot !== baseSlot;
 
   // A successful food change replaces the food identity but keeps the same
   // portion/slot, so resync local state to the server's response rather than
@@ -76,8 +81,14 @@ export default function MealDetail() {
   const onSelectFood = (item: FoodItem) => {
     setPickerVisible(false);
     setErr(null);
+    // Send the user's current portion/slot alongside the food change so the
+    // server applies all three together. Otherwise a PATCH with only
+    // food_item_id would echo back the log's ORIGINAL grams/slot, and the
+    // effect below would force-resync local state to that echo — silently
+    // discarding any unsaved portion or meal-slot edit the user just made.
+    // A same-value field is a harmless no-op on the server.
     editLog.mutate(
-      { id: p.id, food_item_id: item.id },
+      { id: p.id, food_item_id: item.id, quantity_grams: grams, meal_slot: slot },
       {
         onSuccess: ({ log: updated }) => {
           haptics.success();
@@ -96,7 +107,7 @@ export default function MealDetail() {
     setErr(null);
     const patch: EditLogInput = { id: p.id };
     if (grams !== baseGrams) patch.quantity_grams = grams;
-    if (slot !== p.mealSlot) patch.meal_slot = slot;
+    if (slot !== baseSlot) patch.meal_slot = slot;
     editLog.mutate(patch, {
       onSuccess: () => {
         haptics.success();

@@ -85,7 +85,7 @@ beforeEach(() => {
   mockLogIsLoading = false;
 });
 
-test("tapping the food name opens a picker and selecting PATCHes food_item_id", async () => {
+test("tapping the food name opens a picker and selecting PATCHes food_item_id along with the current portion and slot", async () => {
   const { getByLabelText, getByText } = await render(<MealDetail />);
 
   await fireEvent.press(getByLabelText("Change food"));
@@ -93,12 +93,52 @@ test("tapping the food name opens a picker and selecting PATCHes food_item_id", 
   await fireEvent.press(getByText("Quinoa"));
 
   await waitFor(() => expect(mockEditMutate).toHaveBeenCalled());
+  // The server applies food_item_id, quantity_grams and meal_slot together —
+  // sending the user's current (unedited) portion/slot here is a harmless
+  // no-op, but it means the response legitimately reflects what the user
+  // intended rather than echoing back stale values.
   expect(mockEditMutate).toHaveBeenCalledWith(
-    { id: "log1", food_item_id: "f2" },
+    { id: "log1", food_item_id: "f2", quantity_grams: 200, meal_slot: "breakfast" },
     expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
   );
   const [patch] = mockEditMutate.mock.calls[0];
   expect(patch).not.toHaveProperty("retract_correction");
+});
+
+test("editing the portion before changing the food sends the edited grams, and the edit survives the response", async () => {
+  // Simulate a real PATCH round-trip: the server applies all three fields it
+  // was sent and echoes them back, exactly like the "harmless no-op" comment
+  // above claims — so this also proves that claim, not just the request shape.
+  mockEditMutate.mockImplementationOnce((patch, opts) => {
+    opts.onSuccess({
+      log: {
+        ...mockLogData,
+        food_item_id: patch.food_item_id,
+        description: "Quinoa",
+        quantity_grams: patch.quantity_grams,
+        meal_slot: patch.meal_slot,
+      },
+      aliasRecorded: false,
+    });
+  });
+
+  const { getByLabelText, getByText } = await render(<MealDetail />);
+
+  // Drag the portion from 200g to 210g (Save becomes enabled) ...
+  await fireEvent.press(getByLabelText("Increase"));
+  expect(getByText("210 g")).toBeTruthy();
+
+  // ... then change the food before saving.
+  await fireEvent.press(getByLabelText("Change food"));
+  await fireEvent.changeText(getByLabelText("Search foods"), "quinoa");
+  await fireEvent.press(getByText("Quinoa"));
+
+  await waitFor(() => expect(mockEditMutate).toHaveBeenCalled());
+  const [patch] = mockEditMutate.mock.calls[0];
+  expect(patch).toMatchObject({ id: "log1", food_item_id: "f2", quantity_grams: 210, meal_slot: "breakfast" });
+
+  // The 210g edit must not vanish once the server's response lands.
+  expect(getByText("210 g")).toBeTruthy();
 });
 
 test("the sheet paints from route params before the fetch resolves", async () => {
