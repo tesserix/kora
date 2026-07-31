@@ -57,12 +57,16 @@ is verified clean.
 ```sql
 ALTER TABLE food_logs    ADD COLUMN input_phrase TEXT;
 ALTER TABLE food_aliases ADD COLUMN user_id UUID REFERENCES users(id) ON DELETE CASCADE;
-CREATE INDEX idx_food_aliases_user_alias ON food_aliases (user_id, lower(alias));
-CREATE UNIQUE INDEX idx_food_aliases_unique ON food_aliases (user_id, lower(alias), food_item_id);
+CREATE UNIQUE INDEX idx_food_aliases_unique ON food_aliases (user_id, lower(alias));
 ```
 
-Both columns are additive and nullable — nothing to backfill, and the down
-migration is two `DROP COLUMN`s.
+Both columns are additive and nullable — nothing to backfill.
+
+The down migration deletes personal aliases **before** dropping `user_id`.
+Dropping the column alone would silently turn every personal correction into a
+global one — recreating, with real data, the exact cross-user leak this
+migration exists to fix. A rollback may lose corrections; it must not leak
+them.
 
 - **`food_logs.input_phrase`** — the raw text the user said or typed. Set only
   on resolve-sourced logs (`source` = text/voice). NULL for manual, memory,
@@ -70,11 +74,18 @@ migration is two `DROP COLUMN`s.
   resolved food's name); the two are deliberately different fields.
 - **`food_aliases.user_id`** — NULL = curated/global (none exist today),
   non-NULL = personal.
-- The unique index closes the check-then-insert race in the current
-  `AddAlias`. Postgres treats NULL `user_id` as distinct per row, so global
-  aliases are not deduped by it. Acceptable while zero exist; recorded in the
-  migration rather than reaching for `NULLS NOT DISTINCT` for a case that does
-  not occur.
+- The unique index on `(user_id, lower(alias))` makes **one food per phrase per
+  user** a database constraint rather than an application convention. `AddAlias`
+  is a single `ON CONFLICT … DO UPDATE SET food_item_id` upsert, so the latest
+  correction always wins and two concurrent corrections cannot both survive.
+  An earlier draft indexed `(user_id, lower(alias), food_item_id)` and enforced
+  the rule with a DELETE-then-INSERT transaction — that is not a real invariant
+  under READ COMMITTED, since both callers see zero rows to delete and both
+  insert.
+- Postgres treats NULL `user_id` as distinct per row, so curated/global aliases
+  are **not** deduped by the index. Acceptable while zero exist and no code path
+  writes them; recorded in the migration rather than reaching for
+  `NULLS NOT DISTINCT` for a case that does not occur.
 
 ## API
 
@@ -101,10 +112,21 @@ params. Another user's log returns 404, not 403 — consistent with `Delete`.
 immediate, personal, no threshold. Still best-effort: a failure logs and does
 not fail the edit, as today.
 
-**Alias retraction** — when `retract_correction` is true, delete the personal
-alias `(user_id, current.input_phrase, current.food_item_id)` *before* applying
-the revert. The key is the food being reverted **away from** — that is the one
-the correction taught.
+**Alias retraction** — when `retract_correction` is true **and the food actually
+changed**, delete the personal alias keyed on the food being reverted **away
+from** — that is the one the correction taught. The previous food id is captured
+before `food_item_id` is reassigned, and the delete runs *after* a successful
+update, so a rejected edit (bad meal slot, non-positive grams, unknown food)
+never destroys an alias for a change that did not happen. Requiring a real food
+change also stops a bare `{"retract_correction": true}` from deleting an alias
+taught by a different log.
+
+**Cache invalidation** — a successful teach or retract evicts the resolve
+cache entry for that user and phrase. The cache holds a whole `Resolution` for
+24 hours and is read *before* the alias tier, so without this a correction would
+be invisible to `POST /resolve/text` for up to a day — and "Ask Kora again"
+would replay the same wrong answer without even spending the AI call the user
+asked for. Best-effort and nil-safe, like the alias write itself.
 
 ### `nutrition.Repository.Resolve`
 
@@ -123,7 +145,15 @@ No new endpoint. The client posts the corrected phrase to the existing
 ### `POST /logs`
 
 `LogRequest` gains `input_phrase`, populated by the text and voice capture
-flows.
+flows. The server keeps it only for `source` in (`ai_text`, `ai_voice`) and
+drops it otherwise, so a manual or barcode log can never carry a phrase.
+
+### `ai.Resolution.transcript`
+
+`POST /resolve/voice` now returns the transcript it recognised, additively.
+Without it the voice flow had nothing to put in `input_phrase` — the client
+never sees what was transcribed — so `ai_voice` would have been a source the
+correction loop could never actually reach.
 
 ## Mobile
 
@@ -157,9 +187,14 @@ Button variants) rather than match it pixel-for-pixel.
 - **Photo logs get no re-run and no alias.** A photo carries no user phrase, so
   there is nothing to teach the index with.
 - **Undo is toast-lifetime only.** It does not survive an app restart, and it
-  covers only the immediately preceding edit. Correcting a log twice leaves the
-  first correction's alias in place — the second undo retracts only the second
-  alias. Alias management UI is out of scope for R1.
+  covers only the immediately preceding edit. Alias management UI is out of
+  scope for R1. Note that correcting a log twice no longer leaves a stale alias
+  behind: the unique index means a phrase maps to exactly one food per user, so
+  the second correction replaces the first rather than competing with it.
+- **`retract_correction` must only accompany a genuine undo.** Sent alongside a
+  forward correction to a *third* food it deletes the old alias and teaches
+  nothing, which is a client mistake rather than a server one. PR2 must not send
+  the flag on any path except undo.
 
 ## Error handling
 
