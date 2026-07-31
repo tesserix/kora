@@ -1,4 +1,4 @@
-import { act, fireEvent, render } from "@testing-library/react-native";
+import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { useCameraPermissions } from "expo-camera";
 import { requestRecordingPermissionsAsync, useAudioRecorder } from "expo-audio";
 import * as ImagePicker from "expo-image-picker";
@@ -172,6 +172,90 @@ test("a photo resolve sends no input_phrase", async () => {
 
   await fireEvent.press(await findByLabelText("Add to diary"));
 
+  expect(mockCreateLogMutateAsync).toHaveBeenCalled();
+  const [payload] = mockCreateLogMutateAsync.mock.calls[0];
+  expect(payload).not.toHaveProperty("input_phrase");
+});
+
+// Regression guard: the tests above each render a fresh CaptureScreen, so
+// `resolvedPhrase` starts at its useState default of null regardless of
+// whether the photo/barcode handlers ever call setResolvedPhrase(null). That
+// makes them blind to the actual risk — a phrase left over from an earlier
+// TEXT (or VOICE) resolve leaking into a LATER photo/barcode-sourced log.
+// These chain a real text resolve first, in the same mounted component, so
+// resolvedPhrase is genuinely non-null before the photo/barcode resolve runs.
+//
+// The photo case below deliberately captures via the always-visible "Quick
+// photo capture" composer shortcut (capture.tsx ~line 522) instead of
+// switching the Photo mode pill first. `source` is derived from `mode`
+// (sourceForMode), and switching the mode pill would itself flip `mode` to
+// "photo" — which makes handleAddToDiary's own `source === "ai_text" ||
+// "ai_voice"` gate exclude input_phrase regardless of resolvedPhrase's
+// staleness, masking the exact regression this test exists to catch. The
+// quick-capture shortcut resolves a photo while `mode` is still "type", so
+// `source` stays "ai_text" and the only thing standing between a stale
+// phrase and the payload is setResolvedPhrase(null) inside the photo
+// handler's onSuccess.
+test("a phrase from an earlier text resolve does not leak into a later photo resolve", async () => {
+  const { findByText, findByLabelText } = await render(<CaptureScreen />);
+
+  // 1. Resolve text with a phrase — populates resolvedPhrase, not logged.
+  await fireEvent.press(await findByText("Type"));
+  const input = await findByLabelText("Tell Otto what you ate");
+  await fireEvent.changeText(input, "brekkie eggs");
+  await fireEvent.press(await findByLabelText("Send"));
+
+  const [, textOptions] = mockResolveTextMutate.mock.calls[0];
+  await act(async () => textOptions.onSuccess(makeResolution()));
+
+  // 2. Resolve a photo via the quick-capture shortcut, still in "type" mode.
+  (ImagePicker.launchCameraAsync as jest.Mock).mockResolvedValueOnce({
+    canceled: false,
+    assets: [{ uri: "file://x.jpg", fileName: "x.jpg", mimeType: "image/jpeg" }],
+  });
+  await fireEvent.press(await findByLabelText("Quick photo capture"));
+
+  const [, photoOptions] = mockResolvePhotoMutate.mock.calls[0];
+  await act(async () => photoOptions.onSuccess(makeResolution()));
+
+  // 3. Add to diary.
+  await fireEvent.press(await findByLabelText("Add to diary"));
+
+  // 4. The created log must carry no input_phrase — a photo has no words
+  // the user uttered, and the stale "brekkie eggs" phrase must not leak in.
+  expect(mockCreateLogMutateAsync).toHaveBeenCalled();
+  const [payload] = mockCreateLogMutateAsync.mock.calls[0];
+  expect(payload).not.toHaveProperty("input_phrase");
+});
+
+test("a phrase from an earlier text resolve does not leak into a later barcode resolve", async () => {
+  const { findByText, findByLabelText, findByTestId } = await render(<CaptureScreen />);
+
+  // 1. Resolve text with a phrase — populates resolvedPhrase, not logged.
+  await fireEvent.press(await findByText("Type"));
+  const input = await findByLabelText("Tell Otto what you ate");
+  await fireEvent.changeText(input, "brekkie eggs");
+  await fireEvent.press(await findByLabelText("Send"));
+
+  const [, textOptions] = mockResolveTextMutate.mock.calls[0];
+  await act(async () => textOptions.onSuccess(makeResolution()));
+
+  // 2. Switch to Scan mode and resolve a barcode in the same mounted component.
+  await fireEvent.press(await findByText("Scan"));
+  const cameraView = await findByTestId("capture-camera-view");
+  await act(async () => {
+    cameraView.props.onBarcodeScanned({ data: "012345678905", type: "ean13" });
+  });
+
+  await waitFor(() => expect(mockResolveBarcodeMutate).toHaveBeenCalled());
+  const [, barcodeOptions] = mockResolveBarcodeMutate.mock.calls[0];
+  await act(async () => barcodeOptions.onSuccess(makeResolution()));
+
+  // 3. Add to diary.
+  await fireEvent.press(await findByLabelText("Add to diary"));
+
+  // 4. The created log must carry no input_phrase — a barcode has no words
+  // the user uttered, and the stale "brekkie eggs" phrase must not leak in.
   expect(mockCreateLogMutateAsync).toHaveBeenCalled();
   const [payload] = mockCreateLogMutateAsync.mock.calls[0];
   expect(payload).not.toHaveProperty("input_phrase");
