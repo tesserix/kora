@@ -89,3 +89,31 @@ func TestListForUserSince(t *testing.T) {
 	require.Len(t, got, 1)
 	require.Equal(t, inWindow.ID, got[0].ID)
 }
+
+func TestHasLoggedBefore(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	item := nutrition.FoodItem{Name: "HasLoggedBefore Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100, ProteinPer100g: 10}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+	now := time.Now()
+
+	got, err := repo.HasLoggedBefore(ctx, userID, now)
+	require.NoError(t, err)
+	require.False(t, got, "a user with no logs at all has not logged before anything")
+
+	old, err := repo.Create(ctx, FoodLog{UserID: userID, FoodItemID: &item.ID, LoggedAt: now.Add(-10 * 24 * time.Hour), MealSlot: "breakfast", QuantityGrams: 60, Kcal: 100})
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_logs WHERE id = ?", old.ID) })
+
+	got, err = repo.HasLoggedBefore(ctx, userID, now)
+	require.NoError(t, err, "a log strictly before `before` must be found")
+	require.True(t, got)
+
+	got, err = repo.HasLoggedBefore(ctx, userID, old.LoggedAt.Add(-time.Hour))
+	require.NoError(t, err)
+	require.False(t, got, "nothing was logged before an hour prior to the only seeded log")
+}

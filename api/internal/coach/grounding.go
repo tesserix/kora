@@ -64,8 +64,16 @@ type Context struct {
 	// summarizeRecent's doc comment.
 	DaysLogged        int
 	FastingStreakDays int
-	Usual             memory.Memory
-	WeightTrend       WeightTrend
+	// LoggedBeforeWindow reports whether the user has any log strictly
+	// before the start of RecentDaily's window (see LogSource.HasLoggedBefore).
+	// fastingStreak uses it to tell "never logged" apart from "established
+	// logging history has gone completely silent for the whole window" —
+	// without it, a silence spanning recentWindowDays or longer looks
+	// identical to a brand-new user who has simply never logged, and the
+	// streak resets to 0 exactly when the gap is longest.
+	LoggedBeforeWindow bool
+	Usual              memory.Memory
+	WeightTrend        WeightTrend
 }
 
 // WeightTrend is the observed change in logged weight across the trailing
@@ -86,6 +94,14 @@ type WeightTrend struct {
 // satisfies it; tests can supply a fake.
 type LogSource interface {
 	ListForUserSince(ctx context.Context, userID uuid.UUID, since time.Time) ([]foodlog.FoodLog, error)
+	// HasLoggedBefore reports whether the user has any log strictly before
+	// `before`. BuildContext uses it (with the window's own start as
+	// `before`) to tell "this user has never logged" apart from "this user
+	// has established logging history and has since gone silent" — a
+	// distinction the bounded recentWindowDays window alone cannot make
+	// once a silence outlasts the window itself. See
+	// Context.LoggedBeforeWindow and fastingStreak.
+	HasLoggedBefore(ctx context.Context, userID uuid.UUID, before time.Time) (bool, error)
 }
 
 // WeightSource is the read used to compute WeightTrend.
@@ -126,6 +142,11 @@ func (g Grounder) BuildContext(ctx context.Context, userID uuid.UUID, now time.T
 	}
 	recentDaily := aggregateDaily(logs, since)
 
+	loggedBeforeWindow, err := g.Logs.HasLoggedBefore(ctx, userID, since)
+	if err != nil {
+		return Context{}, fmt.Errorf("coach: build context: logged-before-window check: %w", err)
+	}
+
 	usual, err := g.Mem.Build(ctx, userID, now, loc)
 	if err != nil {
 		return Context{}, fmt.Errorf("coach: build context: usual foods: %w", err)
@@ -150,15 +171,16 @@ func (g Grounder) BuildContext(ctx context.Context, userID uuid.UUID, now time.T
 	avgKcal, avgProtein, logsPerDay, daysLogged := summarizeRecent(recentDaily)
 
 	return Context{
-		Today:             today,
-		RecentDaily:       recentDaily,
-		AvgIntakeKcal:     avgKcal,
-		AvgProteinG:       avgProtein,
-		LogsPerDay:        logsPerDay,
-		DaysLogged:        daysLogged,
-		FastingStreakDays: fastingStreak(recentDaily),
-		Usual:             usual,
-		WeightTrend:       weightTrend,
+		Today:              today,
+		RecentDaily:        recentDaily,
+		AvgIntakeKcal:      avgKcal,
+		AvgProteinG:        avgProtein,
+		LogsPerDay:         logsPerDay,
+		DaysLogged:         daysLogged,
+		FastingStreakDays:  fastingStreak(recentDaily, loggedBeforeWindow),
+		LoggedBeforeWindow: loggedBeforeWindow,
+		Usual:              usual,
+		WeightTrend:        weightTrend,
 	}, nil
 }
 
@@ -323,39 +345,57 @@ func summarizeRecent(daily []DailyTotal) (avgKcal, avgProtein, logsPerDay float6
 //     data.
 //
 // fastingStreak alone adds one more rule on top, specific to streak
-// counting: days before the user's first log in the window do not count
-// either, even though they are technically just more "unlogged" days in the
-// same sense as the bullet above. Without this, a brand-new user's several
-// empty days before their first-ever log would read as a fast in progress.
+// counting: days before the user's first log IN THE WINDOW do not count as
+// a fast — UNLESS the user has established logging history from before the
+// window (loggedBeforeWindow), in which case the entire complete-day span
+// is countable evidence, not just the days after an in-window first log.
+//
+// That "unless" matters more than it looks. Without it, a silence that
+// outlasts recentWindowDays becomes INVISIBLE: the pre-fix version searched
+// for firstLogged only inside the window, so once the last in-window log
+// aged out, firstLogged went to -1 and the streak reset to 0 — exactly when
+// the gap was longest and protection mattered most. loggedBeforeWindow (see
+// Context.LoggedBeforeWindow) is what distinguishes that established user
+// gone silent from a genuinely brand-new user who has never logged at all;
+// both look identical from inside the window alone.
+//
 // recentDeficitPct and avgKcal need no equivalent rule: averaging simply
 // ignores unlogged days wherever they fall, with no need to anchor on where
 // logging began.
 //
-// The effect is a strictly less sensitive signal. That is the point: a flag
-// that fires for every user carries no information. A genuine gap after
-// established logging still fires.
-func fastingStreak(daily []DailyTotal) int {
+// The effect is a strictly less sensitive signal than counting every
+// unlogged day. That is the point: a flag that fires for every user carries
+// no information. A genuine gap after established logging still fires — now
+// even when that gap spans the whole window.
+func fastingStreak(daily []DailyTotal, loggedBeforeWindow bool) int {
 	// Exclude today (the last entry): it is incomplete.
 	if len(daily) < 2 {
 		return 0
 	}
 	complete := daily[:len(daily)-1]
 
-	// Find the first day the user logged anything. Everything before it is
-	// absent data rather than observed behaviour.
-	firstLogged := -1
-	for i, d := range complete {
-		if d.LogCount > 0 {
-			firstLogged = i
-			break
+	start := -1
+	if loggedBeforeWindow {
+		// Established history predates the window: the whole complete-day
+		// span is countable, not just what follows an in-window first log.
+		start = 0
+	} else {
+		// Find the first day the user logged anything IN the window.
+		// Everything before it is absent data rather than observed
+		// behaviour.
+		for i, d := range complete {
+			if d.LogCount > 0 {
+				start = i
+				break
+			}
 		}
 	}
-	if firstLogged < 0 {
+	if start < 0 {
 		return 0
 	}
 
 	streak := 0
-	for i := len(complete) - 1; i >= firstLogged; i-- {
+	for i := len(complete) - 1; i >= start; i-- {
 		if complete[i].Kcal > 0 {
 			break
 		}
