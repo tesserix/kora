@@ -11,6 +11,7 @@ import { Stat } from "@/components/Stat";
 import { AppText } from "@/components/Text";
 import { Overline } from "@/components/Overline";
 import { FoodPicker } from "@/components/meal/FoodPicker";
+import { AskAgainSheet } from "@/components/meal/AskAgainSheet";
 import { foodVisual } from "@/lib/foodVisual";
 import { haptics, PressableScale } from "@/motion";
 import { useEditLog, useDeleteLog, useLog, useRepeatLog, type EditLogInput } from "@/api/hooks";
@@ -54,6 +55,7 @@ export default function MealDetail() {
   const [slot, setSlot] = useState<MealSlot>((p.mealSlot as MealSlot) ?? "breakfast");
   const [err, setErr] = useState<string | null>(null);
   const [pickerVisible, setPickerVisible] = useState(false);
+  const [askAgainVisible, setAskAgainVisible] = useState(false);
 
   const editLog = useEditLog();
   const deleteLog = useDeleteLog();
@@ -79,7 +81,12 @@ export default function MealDetail() {
   }, [override]);
 
   const onSelectFood = (item: FoodItem) => {
+    // Shared by both the free-index FoodPicker and the AI re-resolve
+    // AskAgainSheet — whichever one is open, closing both here keeps this
+    // the single PATCH path for "change the logged food" (closing an
+    // already-closed sheet is a harmless no-op).
     setPickerVisible(false);
+    setAskAgainVisible(false);
     setErr(null);
     // Send the user's current portion/slot alongside the food change so the
     // server applies all three together. Otherwise a PATCH with only
@@ -205,6 +212,29 @@ export default function MealDetail() {
           <Stepper value={grams} onChange={setGrams} step={10} min={10} />
         </View>
 
+        {/*
+          Only a phrase the user actually uttered/typed is something Kora can
+          be re-asked about — a manual, memory, photo or barcode log has no
+          input_phrase, so there is nothing to escalate. This also gates
+          whether AskAgainSheet mounts at all, so useResolveText is never
+          invoked (and no AI call risked) for logs that can't use it.
+        */}
+        {typeof effective?.input_phrase === "string" && effective.input_phrase.length > 0 ? (
+          <PressableScale
+            haptic="selection"
+            accessibilityRole="button"
+            accessibilityLabel="Ask Kora again"
+            disabled={busy}
+            onPress={() => setAskAgainVisible(true)}
+            style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingBottom: 12 }}
+          >
+            <Icon name="sparkles" size={14} color={colors.accent} />
+            <AppText variant="footnote" style={{ color: colors.accent, fontWeight: "600" }}>
+              Ask Kora again
+            </AppText>
+          </PressableScale>
+        ) : null}
+
         <Overline style={{ marginTop: 8 }}>Meal</Overline>
         <View style={{ marginTop: 8, marginBottom: 20 }}>
           <Segmented options={SLOT_OPTIONS} value={slot} onChange={(key) => setSlot(key as MealSlot)} />
@@ -243,6 +273,19 @@ export default function MealDetail() {
         onSelect={onSelectFood}
         onClose={() => setPickerVisible(false)}
       />
+
+      {typeof effective?.input_phrase === "string" && effective.input_phrase.length > 0 ? (
+        <AskAgainSheet
+          visible={askAgainVisible}
+          phrase={effective.input_phrase}
+          onSelect={onSelectFood}
+          onManualSearch={() => {
+            setAskAgainVisible(false);
+            setPickerVisible(true);
+          }}
+          onClose={() => setAskAgainVisible(false)}
+        />
+      ) : null}
     </Sheet>
   );
 }

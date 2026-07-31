@@ -60,6 +60,11 @@ jest.mock("@/api/hooks", () => ({
   useEditLog: () => ({ mutate: mockEditMutate, isPending: false }),
   useDeleteLog: () => ({ mutate: mockDeleteMutate, isPending: false }),
   useRepeatLog: () => ({ mutate: mockRepeatMutate, isPending: false }),
+  // mockLogData defaults to input_phrase: "brekkie eggs", so MealDetail mounts
+  // AskAgainSheet in these tests too — it isn't exercised here (that's
+  // meal-ask-again.test.tsx's job), but the hook it calls must exist on this
+  // mock or rendering throws.
+  useResolveText: () => ({ mutate: jest.fn(), isPending: false }),
 }));
 
 beforeEach(() => {
