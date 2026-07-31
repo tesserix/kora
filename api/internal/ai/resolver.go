@@ -195,6 +195,11 @@ func (r Resolver) ResolveVoice(ctx context.Context, userID uuid.UUID, audio []by
 	if err != nil {
 		return Resolution{}, fmt.Errorf("ai: resolve voice: %w", err)
 	}
+	// Carry the transcript on the returned Resolution so a mobile client has
+	// a server-derived phrase for FoodLog.InputPhrase on an ai_voice log. Set
+	// AFTER the blank-transcript guard above, so that follow-up Resolution
+	// stays exactly as it was (no transcript to carry for silence/noise).
+	res.Transcript = transcript
 	if res.Tier == TierAuto || res.Tier == TierConfirm {
 		r.cache.Set(ctx, key, res)
 	}

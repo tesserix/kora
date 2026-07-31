@@ -81,4 +81,13 @@ type Resolution struct {
 	KcalLow          float64             `json:"kcal_low,omitempty"`
 	KcalHigh         float64             `json:"kcal_high,omitempty"`
 	Provenance       string              `json:"provenance"`
+	// Transcript is the speech-to-text transcript for a voice resolve, set
+	// only by Resolver.ResolveVoice on a successful (non-blank) transcription.
+	// It exists so a mobile client has a SERVER-DERIVED phrase to send back as
+	// FoodLog.InputPhrase on an ai_voice log — without it, a voice log could
+	// never carry the input_phrase a later correction needs to teach the food
+	// index. Every other resolve path (ResolveText, ResolvePhoto) leaves this
+	// blank; a text log already has the client-supplied phrase for
+	// input_phrase, and a photo has no phrase at all.
+	Transcript string `json:"transcript,omitempty"`
 }

@@ -284,6 +284,10 @@ func TestResolveVoiceTranscribesThenResolves(t *testing.T) {
 	// 89 kcal/100g * 100g / 100 = 89 — computed from the row, never from the
 	// (kcal-less) transcript or guess.
 	require.Equal(t, 89.0, res.Candidates[0].Kcal)
+	// A successful voice resolve must carry the transcript back to the
+	// caller — a mobile client has nothing else it can put in
+	// FoodLog.InputPhrase for an ai_voice log.
+	require.Equal(t, "banana", res.Transcript)
 
 	// The whole point of transcription metering: at least one recorded Usage
 	// row must be the transcribe call itself, alongside the identify/embed
@@ -315,6 +319,9 @@ func TestResolveVoiceBlankTranscriptFollowUp(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, TierFollowUp, res.Tier)
 	assert.Empty(t, res.Candidates)
+	// A blank/unusable transcript must return the existing follow-up
+	// Resolution unchanged — no transcript for a client to log against.
+	assert.Empty(t, res.Transcript)
 }
 
 // TestResolveText_CachesResolution_SkipsProviderOnSecondCall proves the
