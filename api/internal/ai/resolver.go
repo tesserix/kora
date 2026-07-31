@@ -72,7 +72,7 @@ func NewResolver(p Provider, foods nutrition.Repository, cache Cache, meter Mete
 
 // ResolveText resolves a free-text food phrase to a Resolution.
 func (r Resolver) ResolveText(ctx context.Context, userID uuid.UUID, phrase string) (Resolution, error) {
-	key := CacheKey("phrase", phrase)
+	key := CacheKey("phrase", userID, phrase)
 	return r.resolve(ctx, userID, key,
 		func(c context.Context) ([]Guess, Usage, error) { return r.provider.IdentifyText(c, phrase) },
 		func(guesses []Guess) string { return phrase },
@@ -84,7 +84,7 @@ func (r Resolver) ResolveText(ctx context.Context, userID uuid.UUID, phrase stri
 // the image's content hash instead of a phrase.
 func (r Resolver) ResolvePhoto(ctx context.Context, userID uuid.UUID, image []byte, mime string) (Resolution, error) {
 	sum := sha256.Sum256(image)
-	key := CacheKey("photo", hex.EncodeToString(sum[:]))
+	key := CacheKey("photo", userID, hex.EncodeToString(sum[:]))
 	return r.resolve(ctx, userID, key,
 		func(c context.Context) ([]Guess, Usage, error) { return r.provider.IdentifyPhoto(c, image, mime) },
 		func(guesses []Guess) string {
@@ -166,7 +166,7 @@ func (r Resolver) resolve(
 // unchanged. Cached by audio content hash so identical clips don't re-transcribe.
 func (r Resolver) ResolveVoice(ctx context.Context, userID uuid.UUID, audio []byte, mime string) (Resolution, error) {
 	sum := sha256.Sum256(audio)
-	key := CacheKey("voice", hex.EncodeToString(sum[:]))
+	key := CacheKey("voice", userID, hex.EncodeToString(sum[:]))
 	if cached, ok := r.cache.Get(ctx, key); ok {
 		return *cached, nil
 	}

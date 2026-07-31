@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
@@ -29,10 +30,31 @@ func TestNoCache_AlwaysMisses(t *testing.T) {
 }
 
 func TestCacheKey_StableAndNormalized(t *testing.T) {
-	require.Equal(t, "phrase:grilled chicken", CacheKey("phrase", "  Grilled Chicken "))
-	require.Equal(t, CacheKey("barcode", "12345"), CacheKey("barcode", "12345"))
-	require.Equal(t, "barcode:12345", CacheKey("barcode", "12345"))
-	require.Equal(t, "photo:abc123", CacheKey("photo", "ABC123"))
+	u := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	require.Equal(t, "phrase:"+u.String()+":grilled chicken", CacheKey("phrase", u, "  Grilled Chicken "))
+	require.Equal(t, CacheKey("barcode", u, "12345"), CacheKey("barcode", u, "12345"))
+	require.Equal(t, "barcode:"+u.String()+":12345", CacheKey("barcode", u, "12345"))
+	require.Equal(t, "photo:"+u.String()+":abc123", CacheKey("photo", u, "ABC123"))
+}
+
+// TestCacheKey_ScopedByUser is the finding-1 regression test: resolution is
+// user-dependent (personal food_aliases outrank curated/global ones), so the
+// cache key must be too. Two different users must never collide on the same
+// key for the same input, and the same user must always produce the same
+// key across calls — otherwise one user's cached Resolution (and its
+// nutrition numbers) could be served to a different user.
+func TestCacheKey_ScopedByUser(t *testing.T) {
+	userA := uuid.New()
+	userB := uuid.New()
+
+	keyA := CacheKey("phrase", userA, "brekkie bowl")
+	keyB := CacheKey("phrase", userB, "brekkie bowl")
+	require.NotEqual(t, keyA, keyB, "different users must not share a cache key for the same value")
+
+	require.Equal(t, keyA, CacheKey("phrase", userA, "brekkie bowl"),
+		"the same user must get a stable key across calls")
+	require.Equal(t, keyA, CacheKey("phrase", userA, "  Brekkie Bowl "),
+		"the same user must get a stable key regardless of case/whitespace")
 }
 
 func TestRedisCache_RoundTrip(t *testing.T) {
@@ -46,7 +68,7 @@ func TestRedisCache_RoundTrip(t *testing.T) {
 	cache := NewRedisCache(client, time.Minute)
 	ctx := context.Background()
 
-	key := CacheKey("phrase", "grilled chicken")
+	key := CacheKey("phrase", uuid.New(), "grilled chicken")
 	want := Resolution{
 		Candidates: []ResolvedCandidate{
 			{PortionGrams: 150, Kcal: 231, MatchScore: 0.95, MatchTier: "auto"},
@@ -90,12 +112,12 @@ func TestRedisCache_DownRedisIsNilSafe(t *testing.T) {
 	// Bring redis down.
 	mr.Close()
 
-	got, ok := cache.Get(ctx, CacheKey("phrase", "grilled chicken"))
+	got, ok := cache.Get(ctx, CacheKey("phrase", uuid.New(), "grilled chicken"))
 	require.False(t, ok)
 	require.Nil(t, got)
 
 	// Set on a down client must not panic either.
 	require.NotPanics(t, func() {
-		cache.Set(ctx, CacheKey("phrase", "grilled chicken"), Resolution{Provenance: "test"})
+		cache.Set(ctx, CacheKey("phrase", uuid.New(), "grilled chicken"), Resolution{Provenance: "test"})
 	})
 }

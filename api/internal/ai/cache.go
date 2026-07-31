@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -72,7 +73,18 @@ func (c *RedisCache) Set(ctx context.Context, key string, r Resolution) {
 }
 
 // CacheKey builds a stable, normalized cache key from a kind
-// ("barcode"|"phrase"|"photo") and a value.
-func CacheKey(kind, value string) string {
-	return kind + ":" + strings.ToLower(strings.TrimSpace(value))
+// ("barcode"|"phrase"|"photo"|"voice"), the requesting user's id, and a
+// value.
+//
+// userID is part of the key because resolution is user-dependent:
+// nutrition.Repository.Resolve checks the requesting user's personal
+// food_aliases before curated/global ones (see nutrition/alias.go), so the
+// same phrase can legitimately resolve to different food items for
+// different users. A key that omitted the user id would let one user's
+// personal-alias correction populate a shared cache entry that every other
+// user's identical phrase/photo/voice request then reads back — silently
+// serving that user's correction (and its nutrition numbers) to strangers.
+// There is deliberately no unscoped variant of this function.
+func CacheKey(kind string, userID uuid.UUID, value string) string {
+	return kind + ":" + userID.String() + ":" + strings.ToLower(strings.TrimSpace(value))
 }
