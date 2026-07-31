@@ -288,13 +288,35 @@ func seedSteadyWeek(t *testing.T, db *gorm.DB, logRepo foodlog.Repository, userI
 	}
 }
 
+// seedUnderEatingWeek seeds one log per day for the trailing recentWindowDays
+// window (today included), each at 40% of targetKcal — a genuine, explicitly
+// logged shortfall (deficit 0.6, well past riskDeficitPct) rather than the
+// mere absence of logs. Days with no logs at all no longer register as a
+// deficit (see recentDeficitPct's doc comment: absent data isn't evidence of
+// not eating), so tests that need a deterministic at-risk fixture via
+// RecentDeficitPct must seed real under-eating like this, not just omit
+// logs.
+func seedUnderEatingWeek(t *testing.T, db *gorm.DB, logRepo foodlog.Repository, userID uuid.UUID, now time.Time, targetKcal float64) {
+	t.Helper()
+	item := nutrition.FoodItem{
+		Name: "Coach Under-Eating Week Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD,
+		KcalPer100g: 200, ProteinPer100g: 20,
+	}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	underEatKcal := 0.4 * targetKcal
+	for i := 0; i < recentWindowDays; i++ {
+		seedLog(t, db, logRepo, foodlog.FoodLog{
+			UserID: userID, FoodItemID: &item.ID, LoggedAt: now.AddDate(0, 0, -i).Add(-time.Hour),
+			MealSlot: "lunch", Source: "manual", Provenance: nutrition.ProvenanceAFCD,
+			QuantityGrams: underEatKcal / 200 * 100, Kcal: underEatKcal, ProteinG: underEatKcal / 10,
+		})
+	}
+}
+
 func TestAsk_RestrictiveAnswerSuppressedUnderRisk(t *testing.T) {
 	db := testDB(t)
-	// No logs seeded: a fresh user with a target set has zero kcal on
-	// every day of the window, so recentDeficitPct is 1.0 across the
-	// board — that alone trips AtRisk (>= riskDeficitPct), independent of
-	// FastingStreakDays (which is 0 for a user with no logging history at
-	// all — see fastingStreak's "absent data, not a fast" doc comment).
 	userID := seedUser(t, db, 2000, 120)
 
 	logRepo := foodlog.NewRepository(db)
@@ -302,12 +324,19 @@ func TestAsk_RestrictiveAnswerSuppressedUnderRisk(t *testing.T) {
 	memSvc := memory.NewService(logRepo)
 	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{})
 
+	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
+	// Genuine, explicitly logged under-eating every day of the window trips
+	// AtRisk via RecentDeficitPct. Unlogged days no longer score as a
+	// deficit (see recentDeficitPct's doc comment) — a fresh user with no
+	// logs at all is no longer at risk by default, so this fixture must
+	// seed real evidence of under-eating, not merely omit logs.
+	seedUnderEatingWeek(t, db, logRepo, userID, now, 2000)
+
 	const restrictiveRaw = "You've eaten enough today — try to cut back tomorrow."
 	provider := &fakeProvider{text: restrictiveRaw}
 	meter := &stubMeter{withinBudget: true}
 	svc := NewService(&g, provider, meter, nil)
 
-	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
 	a, err := svc.Ask(context.Background(), userID, now, time.UTC, "how am I doing?")
 
 	require.NoError(t, err)
@@ -496,10 +525,6 @@ func TestServiceAsk_PriorTurnsNeverEnterThePrompt(t *testing.T) {
 // case nil), and ShowSupport still computed from the user's live signals.
 func TestServiceThread_NilThreadRepositoryReturnsEmptyTurns(t *testing.T) {
 	db := testDB(t)
-	// No logs seeded: a fresh user with a target set has zero kcal on
-	// every day of the window, which trips AtRisk via RecentDeficitPct
-	// (see TestAsk_RestrictiveAnswerSuppressedUnderRisk) — not via
-	// FastingStreakDays, which is 0 for a user with no logging history.
 	userID := seedUser(t, db, 2000, 120)
 
 	logRepo := foodlog.NewRepository(db)
@@ -511,12 +536,18 @@ func TestServiceThread_NilThreadRepositoryReturnsEmptyTurns(t *testing.T) {
 	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, nil)
 
 	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
+	// Genuine, explicitly logged under-eating trips AtRisk via
+	// RecentDeficitPct (see TestAsk_RestrictiveAnswerSuppressedUnderRisk) —
+	// an unlogged window no longer counts as a deficit, so this fixture must
+	// seed real evidence, not just omit logs.
+	seedUnderEatingWeek(t, db, logRepo, userID, now, 2000)
+
 	result, err := svc.Thread(context.Background(), userID, now, time.UTC)
 
 	require.NoError(t, err, "a nil thread repository must degrade gracefully, not error or panic")
 	require.NotNil(t, result.Turns, "Turns must be a non-nil empty slice on the nil-thread-repository path")
 	require.Empty(t, result.Turns)
-	require.True(t, result.ShowSupport, "a fresh user with no logs is at risk via RecentDeficitPct, an ED-risk signal")
+	require.True(t, result.ShowSupport, "a user with a genuine logged deficit is at risk via RecentDeficitPct, an ED-risk signal")
 }
 
 // TestServiceThread_ShowSupportReflectsLiveSignalsNotStoredState proves
@@ -612,9 +643,6 @@ func TestServiceThread_ShowSupportReflectsLiveSignalsNotStoredState(t *testing.T
 // applied at write time, against the CURRENT signals.
 func TestServiceThread_ReplayedRestrictiveTurnSuppressedForAtRiskUser(t *testing.T) {
 	db := testDB(t)
-	// No logs seeded: a fresh user with a target set is at risk via
-	// RecentDeficitPct (see TestAsk_RestrictiveAnswerSuppressedUnderRisk),
-	// not FastingStreakDays, which is 0 with no logging history at all.
 	userID := seedUser(t, db, 2000, 120)
 
 	logRepo := foodlog.NewRepository(db)
@@ -630,10 +658,14 @@ func TestServiceThread_ReplayedRestrictiveTurnSuppressedForAtRiskUser(t *testing
 
 	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, &threadRepo)
 	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
+	// Genuine, explicitly logged under-eating trips AtRisk via
+	// RecentDeficitPct — an unlogged window no longer counts as a deficit,
+	// so this fixture must seed real evidence, not just omit logs.
+	seedUnderEatingWeek(t, db, logRepo, userID, now, 2000)
 
 	result, err := svc.Thread(context.Background(), userID, now, time.UTC)
 	require.NoError(t, err)
-	require.True(t, result.ShowSupport, "fresh user with no logs should be at risk (RecentDeficitPct)")
+	require.True(t, result.ShowSupport, "user with a genuine logged deficit should be at risk (RecentDeficitPct)")
 
 	require.Len(t, result.Turns, 2)
 	require.Equal(t, TurnRoleOtto, result.Turns[1].Role)
@@ -682,10 +714,10 @@ func TestServiceThread_ReplayedBenignTurnUnchanged(t *testing.T) {
 // would silently alter a user's own words).
 func TestServiceThread_UserTurnsNeverRewritten(t *testing.T) {
 	db := testDB(t)
-	// No logs seeded: a fresh user with a target set is at risk via
-	// RecentDeficitPct, an ED-risk signal on its own (this test's
-	// assertions don't depend on which signal drives risk, only that the
-	// user turn replays untouched regardless).
+	// No logs seeded: with the current risk-signal semantics this user
+	// carries no active risk signal at all, but that is irrelevant here —
+	// this test's assertions don't depend on which signal (if any) drives
+	// risk, only that the user turn replays untouched regardless.
 	userID := seedUser(t, db, 2000, 120)
 
 	logRepo := foodlog.NewRepository(db)

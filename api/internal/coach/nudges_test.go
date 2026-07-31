@@ -301,10 +301,11 @@ func TestBuildNudges_WeightTrendHiddenWhenAtRisk_Deficit(t *testing.T) {
 		FastingStreakDays: 0,    // below riskFastingStreakDays (3)
 		LogsPerDay:        0,    // below riskLogsPerDay (12)
 		RecentDaily: []DailyTotal{
-			// Each day at 1000/2000 target kcal -> per-day deficit 0.5,
+			// Each day logged (LogCount > 0, so it counts as evidence, not
+			// absent data) at 1000/2000 target kcal -> per-day deficit 0.5,
 			// mean recentDeficitPct 0.5, well past the 0.30 threshold.
-			{Kcal: 1000}, {Kcal: 1000}, {Kcal: 1000}, {Kcal: 1000},
-			{Kcal: 1000}, {Kcal: 1000}, {Kcal: 1000},
+			{Kcal: 1000, LogCount: 1}, {Kcal: 1000, LogCount: 1}, {Kcal: 1000, LogCount: 1}, {Kcal: 1000, LogCount: 1},
+			{Kcal: 1000, LogCount: 1}, {Kcal: 1000, LogCount: 1}, {Kcal: 1000, LogCount: 1},
 		},
 		WeightTrend: WeightTrend{DeltaKg: -1.8, Days: 30, Valid: true},
 	}

@@ -29,9 +29,9 @@ func TestSignalsFromComputesRecentDeficitPctAgainstTodayTarget(t *testing.T) {
 	c := Context{
 		Today: dashboard.Summary{Targets: dashboard.Totals{Kcal: 2000}},
 		RecentDaily: []DailyTotal{
-			{Kcal: 1000}, // deficit 0.5
-			{Kcal: 2000}, // deficit 0
-			{Kcal: 2500}, // over target -> clamped to 0
+			{Kcal: 1000, LogCount: 1}, // deficit 0.5
+			{Kcal: 2000, LogCount: 1}, // deficit 0
+			{Kcal: 2500, LogCount: 1}, // over target -> clamped to 0
 		},
 	}
 
@@ -44,4 +44,60 @@ func TestSignalsFromPassesThroughFastingStreak(t *testing.T) {
 	c := Context{FastingStreakDays: 4}
 	s := SignalsFrom(c)
 	require.Equal(t, 4, s.FastingStreakDays)
+}
+
+func TestRecentDeficitPct_ZeroWhenNothingLogged(t *testing.T) {
+	c := Context{
+		Today: dashboard.Summary{Targets: dashboard.Totals{Kcal: 2000}},
+		RecentDaily: []DailyTotal{
+			{Kcal: 0, LogCount: 0}, {Kcal: 0, LogCount: 0}, {Kcal: 0, LogCount: 0},
+			{Kcal: 0, LogCount: 0}, {Kcal: 0, LogCount: 0}, {Kcal: 0, LogCount: 0},
+			{Kcal: 0, LogCount: 0},
+		},
+	}
+
+	require.Equal(t, 0.0, recentDeficitPct(c),
+		"no logs is absent data, not a 100% deficit")
+}
+
+func TestRecentDeficitPct_AveragesOnlyLoggedDays(t *testing.T) {
+	// Two logged days at half target; the rest unlogged and ignored.
+	c := Context{
+		Today: dashboard.Summary{Targets: dashboard.Totals{Kcal: 2000}},
+		RecentDaily: []DailyTotal{
+			{Kcal: 1000, LogCount: 2}, {Kcal: 1000, LogCount: 2},
+			{Kcal: 0, LogCount: 0}, {Kcal: 0, LogCount: 0}, {Kcal: 0, LogCount: 0},
+			{Kcal: 0, LogCount: 0}, {Kcal: 0, LogCount: 0},
+		},
+	}
+
+	require.InDelta(t, 0.5, recentDeficitPct(c), 0.001,
+		"only days with evidence should contribute")
+}
+
+func TestRecentDeficitPct_LoggedZeroKcalDayStillCounts(t *testing.T) {
+	// Logged, and it totalled zero — real evidence of not eating.
+	c := Context{
+		Today: dashboard.Summary{Targets: dashboard.Totals{Kcal: 2000}},
+		RecentDaily: []DailyTotal{
+			{Kcal: 2000, LogCount: 3}, {Kcal: 0, LogCount: 1},
+		},
+	}
+
+	require.InDelta(t, 0.5, recentDeficitPct(c), 0.001)
+}
+
+func TestRecentDeficitPct_StillFiresForRealUnderEating(t *testing.T) {
+	// Consistent logging well under target must still trip the threshold.
+	daily := make([]DailyTotal, 7)
+	for i := range daily {
+		daily[i] = DailyTotal{Kcal: 800, LogCount: 3}
+	}
+	c := Context{
+		Today:       dashboard.Summary{Targets: dashboard.Totals{Kcal: 2000}},
+		RecentDaily: daily,
+	}
+
+	require.Greater(t, recentDeficitPct(c), 0.30,
+		"genuine sustained under-eating must still fire")
 }
