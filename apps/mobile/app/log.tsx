@@ -319,7 +319,8 @@ export default function LogScreen() {
 
           {search.data && search.data.length > 0 ? (
             <GroupedSection elevated>
-              {search.data.map((item, i) => {
+              {search.data.map((candidate, i) => {
+                const item = candidate.item;
                 const fv = foodVisual(item.name);
                 return (
                   <Animated.View key={item.id} entering={enter(i)}>

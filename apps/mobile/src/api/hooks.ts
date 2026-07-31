@@ -1,5 +1,5 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiFetch, apiFetchMultipart } from "@/lib/api";
+import { apiFetch, apiFetchEnvelope, apiFetchMultipart } from "@/lib/api";
 import type { MealSlot } from "@/lib/mealSlot";
 import type {
   AppNotification,
@@ -11,7 +11,6 @@ import type {
   Friend,
   FriendRequests,
   FriendsProgress,
-  FoodItem,
   FoodLog,
   GroupCode,
   GroupDetail,
@@ -51,14 +50,15 @@ export function useSubmitOnboarding() {
   });
 }
 
-export function useFoodSearch(q: string) {
+// Index-only search — alias, then full-text, then embedding. No AI cost, so
+// it is safe to call as the user types. Disabled under 2 characters because
+// the server rejects shorter queries with a 400.
+export function useFoodSearch(query: string) {
+  const q = query.trim();
   return useQuery({
     queryKey: ["foods", q],
-    queryFn: async () => {
-      const candidates = (await apiFetch(`/v1/foods?q=${encodeURIComponent(q)}`)) as Candidate[];
-      return candidates.map((candidate) => candidate.item);
-    },
-    enabled: q.trim().length >= 2,
+    queryFn: () => apiFetch(`/v1/foods?q=${encodeURIComponent(q)}`) as Promise<Candidate[]>,
+    enabled: q.length >= 2,
   });
 }
 
@@ -226,17 +226,43 @@ export type EditLogInput = {
   id: string;
   meal_slot?: MealSlot;
   quantity_grams?: number;
+  food_item_id?: string;
+  /**
+   * Undo only. Retracts the alias a previous correction on this log taught.
+   * Never send this alongside a forward correction to a different food — the
+   * server would delete the old alias and teach nothing.
+   */
+  retract_correction?: boolean;
 };
+
+export type EditLogResult = { log: FoodLog; aliasRecorded: boolean };
 
 export function useEditLog() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...patch }: EditLogInput) =>
-      apiFetch(`/v1/logs/${id}`, { method: "PATCH", body: JSON.stringify(patch) }) as Promise<FoodLog>,
-    onSuccess: () => {
+    mutationFn: async ({ id, ...patch }: EditLogInput): Promise<EditLogResult> => {
+      const envelope = await apiFetchEnvelope<FoodLog>(`/v1/logs/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      });
+      return { log: envelope.data, aliasRecorded: envelope.meta?.alias_recorded === true };
+    },
+    onSuccess: (_result, { id }) => {
       qc.invalidateQueries({ queryKey: ["logs"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
+      qc.invalidateQueries({ queryKey: ["log", id] });
+      // A correction changes what the food index returns for this user, so
+      // memory and any cached resolve result are stale too.
+      qc.invalidateQueries({ queryKey: ["memory"] });
     },
+  });
+}
+
+export function useLog(id: string) {
+  return useQuery({
+    queryKey: ["log", id],
+    queryFn: () => apiFetch(`/v1/logs/${id}`) as Promise<FoodLog>,
+    enabled: id.length > 0,
   });
 }
 
