@@ -94,7 +94,7 @@ func TestBuildContextAggregatesRecentDailyAndRenders(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, ctx.RecentDaily, recentWindowDays, "RecentDaily must cover the full window, zero-filling days with no logs")
-	require.Equal(t, 2, ctx.DaysLogged, "only 2 of the 7 days have logs")
+	require.Equal(t, 1, ctx.DaysLogged, "DaysLogged excludes today: only yesterday is a complete, logged day (today's own log doesn't count until tomorrow)")
 
 	require.InDelta(t, 600.0, ctx.Today.Consumed.Kcal, 0.001)
 	require.InDelta(t, 2000.0, ctx.Today.Targets.Kcal, 0.001)
