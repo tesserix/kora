@@ -153,7 +153,7 @@ func (s Service) EditLog(ctx context.Context, userID, logID uuid.UUID, req EditR
 	// Correction alias: record the original phrase -> corrected item so future
 	// resolves auto-hit it. Best-effort — an alias write must not fail the edit.
 	if foodChanged && req.CorrectionPhrase != "" && current.FoodItemID != nil {
-		if aerr := s.foods.AddAlias(ctx, req.CorrectionPhrase, *current.FoodItemID); aerr != nil {
+		if aerr := s.foods.AddAlias(ctx, userID, req.CorrectionPhrase, *current.FoodItemID); aerr != nil {
 			// Best-effort: the edit already succeeded, so surface the alias
 			// failure for observability but do not fail the request.
 			slog.WarnContext(ctx, "foodlog: correction alias write failed",

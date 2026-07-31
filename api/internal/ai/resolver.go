@@ -245,7 +245,7 @@ func (r Resolver) resolveGuesses(ctx context.Context, userID uuid.UUID, guesses 
 			r.record(ctx, userID, embUsage)
 		}
 
-		cands, err := r.foods.Resolve(ctx, guess.Food, vec, resolveTopK)
+		cands, err := r.foods.Resolve(ctx, userID, guess.Food, vec, resolveTopK)
 		if err != nil {
 			return Resolution{}, fmt.Errorf("ai: resolve guesses: %w", err)
 		}
@@ -311,7 +311,7 @@ func (r Resolver) decomposeAndEstimate(ctx context.Context, userID uuid.UUID, su
 			r.record(ctx, userID, embUsage)
 		}
 
-		cands, err := r.foods.Resolve(ctx, ing.Ingredient, vec, resolveTopK)
+		cands, err := r.foods.Resolve(ctx, userID, ing.Ingredient, vec, resolveTopK)
 		if err != nil {
 			return Resolution{}, false, fmt.Errorf("ai: decompose: resolve ingredient: %w", err)
 		}

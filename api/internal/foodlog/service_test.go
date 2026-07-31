@@ -134,7 +134,7 @@ func TestEditLogFoodChangeWithCorrectionPhraseRecordsAlias(t *testing.T) {
 	require.Equal(t, 200.0, updated.Kcal) // recomputed from new item at same 100g
 	require.Equal(t, newItem.Name, updated.Description)
 
-	cands, err := nutriRepo.Resolve(context.Background(), phrase, nil, 5)
+	cands, err := nutriRepo.Resolve(context.Background(), userID, phrase, nil, 5)
 	require.NoError(t, err)
 	require.NotEmpty(t, cands)
 	require.Equal(t, newItem.ID, cands[0].Item.ID)

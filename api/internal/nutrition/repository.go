@@ -91,8 +91,10 @@ func (r Repository) Insert(ctx context.Context, items []FoodItem) (int, error) {
 
 // Resolve ranks food candidates for a phrase across three tiers:
 // alias (exact normalized) > full-text (tsvector) > embedding (cosine).
-// queryVec may be nil to skip the embedding tier (Phase 2a has no embedder).
-func (r Repository) Resolve(ctx context.Context, phrase string, queryVec []float32, limit int) ([]Candidate, error) {
+// queryVec may be nil to skip the embedding tier.
+// userID scopes the alias tier: that user's personal aliases are checked
+// first, then curated/global ones. uuid.Nil means global-only.
+func (r Repository) Resolve(ctx context.Context, userID uuid.UUID, phrase string, queryVec []float32, limit int) ([]Candidate, error) {
 	if limit <= 0 || limit > searchLimitMax {
 		limit = searchLimitMax
 	}
@@ -110,17 +112,34 @@ func (r Repository) Resolve(ctx context.Context, phrase string, queryVec []float
 		}
 	}
 
-	// Tier 1: alias exact match. Aliases are stored verbatim (see
-	// idx_food_aliases_alias ON food_aliases (lower(alias))), so this
-	// compares on case/whitespace only — NOT the fully Normalize()'d form,
-	// which also strips punctuation and singularizes and would falsely
-	// miss aliases like "brekkie eggs" when queried as "brekkie eggs".
+	// Tier 1: alias exact match, personal before global. Aliases are stored
+	// verbatim (see idx_food_aliases_user_alias ON food_aliases (user_id,
+	// lower(alias))), so this compares on case/whitespace only — NOT the
+	// fully Normalize()'d form, which also strips punctuation and
+	// singularizes and would falsely miss aliases like "brekkie eggs" when
+	// queried as "brekkie eggs".
+	//
+	// Personal rows are added first so that when the same phrase is aliased
+	// both personally and globally, `seen` keeps the personal one and drops
+	// the global duplicate. Both score 1.0: within the alias tier, order
+	// carries the precedence, not the score.
 	aliasKey := strings.ToLower(strings.TrimSpace(phrase))
+	if userID != uuid.Nil {
+		var personalItems []FoodItem
+		if err := r.db.WithContext(ctx).
+			Raw(`SELECT fi.* FROM food_items fi
+			     JOIN food_aliases fa ON fa.food_item_id = fi.id
+			     WHERE fa.user_id = ? AND lower(fa.alias) = ? LIMIT ?`, userID, aliasKey, limit).
+			Scan(&personalItems).Error; err != nil {
+			return nil, fmt.Errorf("nutrition: resolve personal alias: %w", err)
+		}
+		add(personalItems, MatchAlias, func(FoodItem) float64 { return 1.0 })
+	}
 	var aliasItems []FoodItem
 	if err := r.db.WithContext(ctx).
 		Raw(`SELECT fi.* FROM food_items fi
 		     JOIN food_aliases fa ON fa.food_item_id = fi.id
-		     WHERE lower(fa.alias) = ? LIMIT ?`, aliasKey, limit).
+		     WHERE fa.user_id IS NULL AND lower(fa.alias) = ? LIMIT ?`, aliasKey, limit).
 		Scan(&aliasItems).Error; err != nil {
 		return nil, fmt.Errorf("nutrition: resolve alias: %w", err)
 	}

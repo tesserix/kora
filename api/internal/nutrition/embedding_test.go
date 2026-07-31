@@ -48,7 +48,7 @@ func TestRowsMissingEmbeddingAndSetEmbedding(t *testing.T) {
 	// vector. The query phrase is deliberately unrelated to the item's name
 	// (no alias/full-text overlap) so a match can only come from the
 	// embedding tier — proving the tier itself, not full-text, found it.
-	got, err := repo.Resolve(context.Background(), "unrelated banana smoothie phrase", fixedVector768(0.5), 5)
+	got, err := repo.Resolve(context.Background(), uuid.Nil, "unrelated banana smoothie phrase", fixedVector768(0.5), 5)
 	require.NoError(t, err)
 
 	var found *Candidate
