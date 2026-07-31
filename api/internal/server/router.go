@@ -14,6 +14,7 @@ import (
 	"github.com/tesserix/kora/api/internal/compare"
 	"github.com/tesserix/kora/api/internal/dashboard"
 	"github.com/tesserix/kora/api/internal/devices"
+	"github.com/tesserix/kora/api/internal/feedback"
 	"github.com/tesserix/kora/api/internal/foodlog"
 	"github.com/tesserix/kora/api/internal/groups"
 	"github.com/tesserix/kora/api/internal/httpx"
@@ -173,6 +174,9 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.GET("/coach/nudges", coachHandler.Nudges)
 		v1.POST("/coach/ask", coachHandler.Ask)
 		v1.GET("/coach/thread", coachHandler.Thread)
+
+		feedbackHandler := feedback.NewHandler(feedback.NewRepository(deps.DB))
+		v1.POST("/feedback", feedbackHandler.Create)
 	}
 
 	r.NoRoute(func(c *gin.Context) {
