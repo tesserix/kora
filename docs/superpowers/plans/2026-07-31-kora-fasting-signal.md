@@ -235,6 +235,163 @@ git commit -m "fix(coach): stop absent logging data reading as a fast in the ED-
 
 ---
 
+### Task 1b: Apply the same no-data rule to `recentDeficitPct`
+
+**Discovered during Task 1.** Fixing `fastingStreak` alone does NOT stop a brand-new user being flagged — `recentDeficitPct` has the identical defect. For a user with a 2000 kcal target and seven unlogged days, every day scores a full 1.0 deficit, averaging to 1.0 against a `riskDeficitPct` threshold of 0.30. So `AtRisk` stays true and the ED support card still shows to every first-time user.
+
+This is the same category error: **a day with no logs is absent data, not a 100% deficit.**
+
+**Files:**
+- Modify: `api/internal/coach/signals.go`
+- Test: `api/internal/coach/signals_test.go`
+
+**Interfaces:**
+- Consumes: `Context.RecentDaily` (`DailyTotal` has `LogCount int`).
+- Produces: `recentDeficitPct(c Context) float64` — same signature, new semantics.
+
+- [ ] **Step 1: Write the failing tests**
+
+```go
+func TestRecentDeficitPct_ZeroWhenNothingLogged(t *testing.T) {
+	c := Context{
+		Today: dashboard.Summary{Targets: dashboard.Totals{Kcal: 2000}},
+		RecentDaily: []DailyTotal{
+			{Kcal: 0, LogCount: 0}, {Kcal: 0, LogCount: 0}, {Kcal: 0, LogCount: 0},
+			{Kcal: 0, LogCount: 0}, {Kcal: 0, LogCount: 0}, {Kcal: 0, LogCount: 0},
+			{Kcal: 0, LogCount: 0},
+		},
+	}
+
+	require.Equal(t, 0.0, recentDeficitPct(c),
+		"no logs is absent data, not a 100% deficit")
+}
+
+func TestRecentDeficitPct_AveragesOnlyLoggedDays(t *testing.T) {
+	// Two logged days at half target; the rest unlogged and ignored.
+	c := Context{
+		Today: dashboard.Summary{Targets: dashboard.Totals{Kcal: 2000}},
+		RecentDaily: []DailyTotal{
+			{Kcal: 1000, LogCount: 2}, {Kcal: 1000, LogCount: 2},
+			{Kcal: 0, LogCount: 0}, {Kcal: 0, LogCount: 0}, {Kcal: 0, LogCount: 0},
+			{Kcal: 0, LogCount: 0}, {Kcal: 0, LogCount: 0},
+		},
+	}
+
+	require.InDelta(t, 0.5, recentDeficitPct(c), 0.001,
+		"only days with evidence should contribute")
+}
+
+func TestRecentDeficitPct_LoggedZeroKcalDayStillCounts(t *testing.T) {
+	// Logged, and it totalled zero — real evidence of not eating.
+	c := Context{
+		Today: dashboard.Summary{Targets: dashboard.Totals{Kcal: 2000}},
+		RecentDaily: []DailyTotal{
+			{Kcal: 2000, LogCount: 3}, {Kcal: 0, LogCount: 1},
+		},
+	}
+
+	require.InDelta(t, 0.5, recentDeficitPct(c), 0.001)
+}
+
+func TestRecentDeficitPct_StillFiresForRealUnderEating(t *testing.T) {
+	// Consistent logging well under target must still trip the threshold.
+	daily := make([]DailyTotal, 7)
+	for i := range daily {
+		daily[i] = DailyTotal{Kcal: 800, LogCount: 3}
+	}
+	c := Context{
+		Today:       dashboard.Summary{Targets: dashboard.Totals{Kcal: 2000}},
+		RecentDaily: daily,
+	}
+
+	require.Greater(t, recentDeficitPct(c), 0.30,
+		"genuine sustained under-eating must still fire")
+}
+```
+
+Create `signals_test.go` if it does not exist; otherwise append, matching the file's idiom.
+
+- [ ] **Step 2: Run to verify they fail**
+
+Run: `cd api && go test ./internal/coach/ -run TestRecentDeficitPct -v`
+
+Expected: FAIL — `ZeroWhenNothingLogged` returns 1.0, `AveragesOnlyLoggedDays` returns ~0.857.
+
+- [ ] **Step 3: Implement**
+
+Average over logged days only:
+
+```go
+// recentDeficitPct is the mean clamped shortfall vs today's kcal target
+// across the days in c.RecentDaily the user ACTUALLY LOGGED.
+//
+// Unlogged days are excluded rather than scored as a full deficit. A day
+// with no logs is absent data, not evidence of not eating — scoring it as a
+// 100% shortfall meant a brand-new user with seven empty days averaged a
+// 1.0 deficit and tripped the ED-risk threshold on first use. guardrails.AtRisk
+// applies the same reasoning to AvgIntakeKcal ("zero means no data").
+//
+// A day the user logged on that still totals zero kcal DOES count — that is
+// observed intake, not missing data.
+//
+// If the target is not positive (not onboarded) or nothing was logged in the
+// window, there is nothing to measure a shortfall against, so this reports 0
+// rather than a misleading spike.
+func recentDeficitPct(c Context) float64 {
+	target := c.Today.Targets.Kcal
+	if target <= 0 || len(c.RecentDaily) == 0 {
+		return 0
+	}
+	var sum float64
+	var logged int
+	for _, d := range c.RecentDaily {
+		if d.LogCount == 0 {
+			continue
+		}
+		deficit := 1 - d.Kcal/target
+		switch {
+		case deficit < 0:
+			deficit = 0
+		case deficit > 1:
+			deficit = 1
+		}
+		sum += deficit
+		logged++
+	}
+	if logged == 0 {
+		return 0
+	}
+	return sum / float64(logged)
+}
+```
+
+- [ ] **Step 4: Run to verify they pass**
+
+Run: `cd api && go test ./internal/coach/ -run TestRecentDeficitPct -v`
+
+Expected: PASS (4 tests).
+
+- [ ] **Step 5: Find every test that relied on the old behaviour**
+
+Run: `cd api && grep -rn "RecentDeficitPct\|recentDeficitPct\|Deficit" internal/ --include="*_test.go"`
+
+Several existing tests establish an at-risk state implicitly via "user has a target and no logs". Those now score 0 and are no longer at risk. Each must be made explicit — seed logged days with a real shortfall — not left silently passing. Report each one you touched and why.
+
+- [ ] **Step 6: Run the coach and guardrails suites**
+
+Run: `cd api && TEST_DATABASE_URL='postgres://kora:kora_dev@localhost:55432/kora?sslmode=disable' go test -count=1 ./internal/coach/ ./internal/guardrails/ 2>&1 | tail -20`
+
+Expected: PASS.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add api/internal/coach/signals.go api/internal/coach/signals_test.go
+git commit -m "fix(coach): exclude unlogged days from the ED-risk deficit signal"
+```
+
+---
+
 ### Task 2: Prove the end-to-end effect and run the full suite
 
 **Files:**
