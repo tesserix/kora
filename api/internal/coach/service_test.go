@@ -438,6 +438,62 @@ func TestServiceNudges_FreshUserIsNotFlaggedAtRisk(t *testing.T) {
 		"a brand-new user has no data, and must not be shown an ED support resource on first use")
 }
 
+// TestServiceNudges_FreshUserWhoLoggedOneMealTodayIsNotFlagged proves the
+// today-exclusion fix end-to-end, against a realistically seeded user, not a
+// narrowed Context/Signals construction: a brand-new user whose only log is
+// a single partial meal logged earlier today must not be shown the ED
+// support card. TestServiceNudges_FreshUserIsNotFlaggedAtRisk (zero logs)
+// cannot see this bug — with zero logs, both RecentDeficitPct and
+// AvgIntakeKcal already short-circuit to 0 ("nothing logged") regardless of
+// today-exclusion. This test seeds exactly one partial log, today, so
+// RecentDaily's last entry (today) is the ONLY logged day in the window.
+// Before the today-exclusion fix, that made today's own partial reading the
+// entire RecentDeficitPct signal (1 - 450/2000 = 0.775, well past the 0.30
+// threshold). Fixing RecentDeficitPct alone was not sufficient, though:
+// AvgIntakeKcal (computed in grounding.go's summarizeRecent) also derives
+// from RecentDaily, and averaged the same lone 450 kcal log over a
+// hard-coded 7-day denominator (450/7 ≈ 64.3 kcal) — positive and far below
+// riskAvgIntakeKcal (1200), independently tripping guardrails.AtRisk. Both
+// signals must exclude today and average only over logged days for this
+// scenario to correctly read as "no data yet", not "at risk".
+func TestServiceNudges_FreshUserWhoLoggedOneMealTodayIsNotFlagged(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{})
+
+	item := nutrition.FoodItem{
+		Name: "Coach Fresh User Breakfast " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD,
+		KcalPer100g: 225, ProteinPer100g: 15,
+	}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	// Fixed, mid-afternoon "now" (not time.Now()): LoggedAt is 2 hours
+	// earlier and must land in the same UTC calendar day as now for this
+	// test to actually exercise today-exclusion. time.Now() would make that
+	// day-boundary alignment flaky depending on wall-clock time at test run.
+	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
+	// One partial meal, a couple hours before now — a brand-new user's first
+	// log of the day, not a full day's intake.
+	seedLog(t, db, logRepo, foodlog.FoodLog{
+		UserID: userID, FoodItemID: &item.ID, LoggedAt: now.Add(-2 * time.Hour),
+		MealSlot: "breakfast", Source: "manual", Provenance: nutrition.ProvenanceAFCD,
+		QuantityGrams: 200, Kcal: 450, ProteinG: 30,
+	})
+
+	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, nil)
+
+	result, err := svc.Nudges(context.Background(), userID, now, time.UTC)
+
+	require.NoError(t, err)
+	require.False(t, result.ShowSupport,
+		"a single partial meal logged today must not be treated as the whole window's deficit or intake signal")
+}
+
 // TestServiceNudges_GenuineDeficitStillFlagsAtRisk proves the fresh-user fix
 // reduced sensitivity deliberately, not accidentally to zero: a user with a
 // real, explicitly logged week-long shortfall (seedUnderEatingWeek logs at

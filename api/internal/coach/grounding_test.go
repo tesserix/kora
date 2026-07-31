@@ -99,8 +99,13 @@ func TestBuildContextAggregatesRecentDailyAndRenders(t *testing.T) {
 	require.InDelta(t, 600.0, ctx.Today.Consumed.Kcal, 0.001)
 	require.InDelta(t, 2000.0, ctx.Today.Targets.Kcal, 0.001)
 
-	wantAvgKcal := (400.0 + 600.0) / float64(recentWindowDays)
-	require.InDelta(t, wantAvgKcal, ctx.AvgIntakeKcal, 0.001, "AvgIntakeKcal must match the seeded totals over the full window")
+	// AvgIntakeKcal excludes today and averages only over logged complete
+	// days (see summarizeRecent's doc comment): today's 600 kcal is
+	// excluded regardless of its value, leaving yesterday (400 kcal,
+	// logged) as the only complete day with evidence, so the average is
+	// yesterday's total, not a 7-day-diluted mean.
+	wantAvgKcal := 400.0
+	require.InDelta(t, wantAvgKcal, ctx.AvgIntakeKcal, 0.001, "AvgIntakeKcal must average only logged complete (non-today) days")
 
 	wantLogsPerDay := 3.0 / float64(recentWindowDays)
 	require.InDelta(t, wantLogsPerDay, ctx.LogsPerDay, 0.001)
@@ -299,7 +304,11 @@ func TestBuildContextWindowStartMatchesAcrossFetchAndBucketing(t *testing.T) {
 		"the oldest window day's log must not be dropped by a since/bucket boundary mismatch")
 	require.InDelta(t, targetKcal, ctx.RecentDaily[0].Kcal, 0.001,
 		"the seeded log must land in the oldest (index 0) day bucket")
-	require.InDelta(t, targetKcal/float64(recentWindowDays), ctx.AvgIntakeKcal, 0.001)
+	// The single seeded log is the oldest window day, which is a complete
+	// (non-today) day and the only one logged, so AvgIntakeKcal now equals
+	// that day's total directly rather than being diluted by the fixed
+	// 7-day denominator.
+	require.InDelta(t, targetKcal, ctx.AvgIntakeKcal, 0.001)
 
 	s := SignalsFrom(ctx)
 	require.Less(t, s.RecentDeficitPct, 0.99,
