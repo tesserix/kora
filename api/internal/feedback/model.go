@@ -34,15 +34,15 @@ func (k Kind) Valid() bool {
 type Status string
 
 const (
-	StatusOpen     Status = "open"
-	StatusPending  Status = "pending"
-	StatusResolved Status = "resolved"
-	StatusClosed   Status = "closed"
+	StatusOpen       Status = "open"
+	StatusInProgress Status = "in_progress"
+	StatusResolved   Status = "resolved"
+	StatusClosed     Status = "closed"
 )
 
 // Valid reports whether s is a recognised status.
 func (s Status) Valid() bool {
-	return s == StatusOpen || s == StatusPending || s == StatusResolved || s == StatusClosed
+	return s == StatusOpen || s == StatusInProgress || s == StatusResolved || s == StatusClosed
 }
 
 // Feedback is one submission.

@@ -26,7 +26,7 @@ Every column exists to line up with mark8ly's live `Ticket` model, so integratio
 | `kind` (`bug` \| `feature`) | — (no mark8ly equivalent; Kora's own) |
 | `subject` | `subject` |
 | `description` | `description` |
-| `status` (`open` \| `pending` \| `resolved` \| `closed`) | `status` (`open` \| `in_progress` \| `resolved` \| `closed`) |
+| `status` (`open` \| `in_progress` \| `resolved` \| `closed`) | `status` (identical) |
 | `user_id` | — (reporter identity) |
 | `app_version`, `platform`, `os_version`, `device_model` | — (no mark8ly equivalent) |
 | `created_at` | `created_at` |
