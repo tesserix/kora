@@ -168,9 +168,11 @@ func NewRouter(deps Deps) *gin.Engine {
 
 		coachGrounder := coach.NewGrounder(dashSvc, logRepo, memSvc, trackingRepo)
 		coachMeter := billing.NewMeter(deps.DB)
-		coachHandler := coach.NewHandler(coach.NewService(&coachGrounder, deps.Provider, coachMeter))
+		coachThread := coach.NewThreadRepository(deps.DB)
+		coachHandler := coach.NewHandler(coach.NewService(&coachGrounder, deps.Provider, coachMeter, &coachThread))
 		v1.GET("/coach/nudges", coachHandler.Nudges)
 		v1.POST("/coach/ask", coachHandler.Ask)
+		v1.GET("/coach/thread", coachHandler.Thread)
 	}
 
 	r.NoRoute(func(c *gin.Context) {

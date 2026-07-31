@@ -2,6 +2,7 @@ package coach
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -59,6 +60,81 @@ func (f *fakeProvider) Name() string { return "fake" }
 
 var _ ai.Provider = (*fakeProvider)(nil)
 
+// errorProvider is an ai.Provider test double whose GenerateText always
+// fails, used to exercise Ask's provider-error path.
+type errorProvider struct{}
+
+func (e *errorProvider) IdentifyText(ctx context.Context, phrase string) ([]ai.Guess, ai.Usage, error) {
+	return nil, ai.Usage{}, nil
+}
+
+func (e *errorProvider) IdentifyPhoto(ctx context.Context, image []byte, mime string) ([]ai.Guess, ai.Usage, error) {
+	return nil, ai.Usage{}, nil
+}
+
+func (e *errorProvider) Decompose(ctx context.Context, dish string) ([]ai.IngredientGuess, ai.Usage, error) {
+	return nil, ai.Usage{}, nil
+}
+
+func (e *errorProvider) Embed(ctx context.Context, text string) ([]float32, ai.Usage, error) {
+	return nil, ai.Usage{}, nil
+}
+
+func (e *errorProvider) Transcribe(ctx context.Context, audio []byte, mime string) (string, ai.Usage, error) {
+	return "", ai.Usage{}, nil
+}
+
+func (e *errorProvider) GenerateText(ctx context.Context, systemPrompt, userPrompt string) (string, ai.Usage, error) {
+	return "", ai.Usage{}, errors.New("provider boom")
+}
+
+func (e *errorProvider) Name() string { return "error" }
+
+var _ ai.Provider = (*errorProvider)(nil)
+
+// recordingProvider is an ai.Provider test double that records the exact
+// systemPrompt/userPrompt it was called with, used to assert on precisely
+// what the model sees — e.g. that stored thread turns never leak into it.
+type recordingProvider struct {
+	systemPrompt string
+	userPrompt   string
+	answer       string
+}
+
+func (r *recordingProvider) IdentifyText(ctx context.Context, phrase string) ([]ai.Guess, ai.Usage, error) {
+	return nil, ai.Usage{}, nil
+}
+
+func (r *recordingProvider) IdentifyPhoto(ctx context.Context, image []byte, mime string) ([]ai.Guess, ai.Usage, error) {
+	return nil, ai.Usage{}, nil
+}
+
+func (r *recordingProvider) Decompose(ctx context.Context, dish string) ([]ai.IngredientGuess, ai.Usage, error) {
+	return nil, ai.Usage{}, nil
+}
+
+func (r *recordingProvider) Embed(ctx context.Context, text string) ([]float32, ai.Usage, error) {
+	return nil, ai.Usage{}, nil
+}
+
+func (r *recordingProvider) Transcribe(ctx context.Context, audio []byte, mime string) (string, ai.Usage, error) {
+	return "", ai.Usage{}, nil
+}
+
+func (r *recordingProvider) GenerateText(ctx context.Context, systemPrompt, userPrompt string) (string, ai.Usage, error) {
+	r.systemPrompt = systemPrompt
+	r.userPrompt = userPrompt
+	answer := r.answer
+	if answer == "" {
+		answer = "a canned recorded answer"
+	}
+	return answer, ai.Usage{}, nil
+}
+
+func (r *recordingProvider) Name() string { return "recording" }
+
+var _ ai.Provider = (*recordingProvider)(nil)
+
 // stubMeter is a configurable ai.Meter test double, mirroring the shape of
 // ai/resolver_test.go's stubMeter (kept local here since that one is
 // unexported in package ai).
@@ -95,7 +171,7 @@ func TestAsk_GroundedAnswerReturnsCitations(t *testing.T) {
 		textUsage: ai.Usage{Provider: "stub", Model: "test-model", CallType: "generate_text"},
 	}
 	meter := &stubMeter{withinBudget: true}
-	svc := NewService(&g, provider, meter)
+	svc := NewService(&g, provider, meter, nil)
 
 	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
 	a, err := svc.Ask(context.Background(), userID, now, time.UTC, "how's my protein?")
@@ -118,7 +194,7 @@ func TestAsk_OverBudgetDegradesGracefully(t *testing.T) {
 
 	provider := &fakeProvider{text: "should not be reached"}
 	meter := &stubMeter{withinBudget: false}
-	svc := NewService(&g, provider, meter)
+	svc := NewService(&g, provider, meter, nil)
 
 	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
 	a, err := svc.Ask(context.Background(), userID, now, time.UTC, "how's my protein?")
@@ -139,7 +215,7 @@ func TestAsk_NilProviderDegradesGracefully(t *testing.T) {
 	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{})
 
 	meter := &stubMeter{withinBudget: true}
-	svc := NewService(&g, nil, meter)
+	svc := NewService(&g, nil, meter, nil)
 
 	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
 	a, err := svc.Ask(context.Background(), userID, now, time.UTC, "how's my protein?")
@@ -150,7 +226,7 @@ func TestAsk_NilProviderDegradesGracefully(t *testing.T) {
 }
 
 func TestAsk_EmptyQuestion(t *testing.T) {
-	svc := NewService(nil, &fakeProvider{}, &stubMeter{withinBudget: true})
+	svc := NewService(nil, &fakeProvider{}, &stubMeter{withinBudget: true}, nil)
 
 	_, err := svc.Ask(context.Background(), uuid.New(), time.Now(), time.UTC, "  ")
 
@@ -226,7 +302,7 @@ func TestAsk_RestrictiveAnswerSuppressedUnderRisk(t *testing.T) {
 	const restrictiveRaw = "You've eaten enough today — try to cut back tomorrow."
 	provider := &fakeProvider{text: restrictiveRaw}
 	meter := &stubMeter{withinBudget: true}
-	svc := NewService(&g, provider, meter)
+	svc := NewService(&g, provider, meter, nil)
 
 	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
 	a, err := svc.Ask(context.Background(), userID, now, time.UTC, "how am I doing?")
@@ -253,7 +329,7 @@ func TestAsk_RestrictiveAnswerSoftenedWhenNoRisk(t *testing.T) {
 	const restrictiveRaw = "You've eaten enough today — try to cut back tomorrow."
 	provider := &fakeProvider{text: restrictiveRaw}
 	meter := &stubMeter{withinBudget: true}
-	svc := NewService(&g, provider, meter)
+	svc := NewService(&g, provider, meter, nil)
 
 	a, err := svc.Ask(context.Background(), userID, now, time.UTC, "how am I doing?")
 
@@ -279,7 +355,7 @@ func TestAsk_NonRestrictiveAnswerAllowedUnchanged(t *testing.T) {
 	const supportiveRaw = "You have 55g protein to go — a yoghurt would help."
 	provider := &fakeProvider{text: supportiveRaw}
 	meter := &stubMeter{withinBudget: true}
-	svc := NewService(&g, provider, meter)
+	svc := NewService(&g, provider, meter, nil)
 
 	a, err := svc.Ask(context.Background(), userID, now, time.UTC, "how's my protein?")
 
@@ -296,11 +372,312 @@ func TestNudges_WrapsBuildContextAndBuildNudges(t *testing.T) {
 	memSvc := memory.NewService(logRepo)
 	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{})
 
-	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true})
+	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, nil)
 
 	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
 	r, err := svc.Nudges(context.Background(), userID, now, time.UTC)
 
 	require.NoError(t, err)
 	require.NotEmpty(t, r.Nudges, "a fresh user with no logs should still get a protein-gap nudge")
+}
+
+func TestServiceAsk_PersistsExchange(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	trackRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackRepo, db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackRepo)
+	threadRepo := NewThreadRepository(db)
+
+	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, &threadRepo)
+
+	_, err := svc.Ask(context.Background(), userID, time.Now().UTC(), time.UTC, "what should I eat?")
+	require.NoError(t, err)
+
+	turns, err := threadRepo.ListRecent(context.Background(), userID, maxThreadTurns)
+	require.NoError(t, err)
+	require.Len(t, turns, 2)
+	require.Equal(t, TurnRoleUser, turns[0].Role)
+	require.Equal(t, "what should I eat?", turns[0].Text)
+	require.Equal(t, TurnRoleOtto, turns[1].Role)
+	require.NotEmpty(t, turns[1].Citations, "the answer's grounding facts should be stored")
+}
+
+func TestServiceAsk_DoesNotPersistWhenBudgetExhausted(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	trackRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackRepo, db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackRepo)
+	threadRepo := NewThreadRepository(db)
+
+	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: false}, &threadRepo)
+
+	ans, err := svc.Ask(context.Background(), userID, time.Now().UTC(), time.UTC, "hello")
+	require.NoError(t, err)
+	require.Equal(t, budgetDegradedText, ans.Text)
+
+	turns, err := threadRepo.ListRecent(context.Background(), userID, maxThreadTurns)
+	require.NoError(t, err)
+	require.Empty(t, turns, "a budget-degraded reply is a UI state, not a stored turn")
+}
+
+func TestServiceAsk_DoesNotPersistWhenNoProvider(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	trackRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackRepo, db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackRepo)
+	threadRepo := NewThreadRepository(db)
+
+	svc := NewService(&g, nil, &stubMeter{withinBudget: true}, &threadRepo)
+
+	_, err := svc.Ask(context.Background(), userID, time.Now().UTC(), time.UTC, "hello")
+	require.NoError(t, err)
+
+	turns, err := threadRepo.ListRecent(context.Background(), userID, maxThreadTurns)
+	require.NoError(t, err)
+	require.Empty(t, turns)
+}
+
+// TestServiceAsk_PriorTurnsNeverEnterThePrompt is the single most important
+// guard in this PR: persisting the thread for replay must never change what
+// the model sees. A prior exchange with a distinctive marker is stored, then
+// Ask is called for a new question — the marker must never appear in the
+// prompt passed to the provider. This must pass on first run: Task 3 wired
+// storage and replay only, it never touched prompt construction. If this
+// test ever fails, prompt construction was changed and must be reverted —
+// this test is the guard, never a target to satisfy by editing the assertion.
+func TestServiceAsk_PriorTurnsNeverEnterThePrompt(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	trackRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackRepo, db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackRepo)
+	threadRepo := NewThreadRepository(db)
+
+	// A prior exchange with a distinctive marker already in the thread.
+	require.NoError(t, threadRepo.AppendExchange(context.Background(), userID,
+		"UNIQUEPRIORQUESTION", "UNIQUEPRIORANSWER", nil))
+
+	rec := &recordingProvider{}
+	svc := NewService(&g, rec, &stubMeter{withinBudget: true}, &threadRepo)
+
+	_, err := svc.Ask(context.Background(), userID, time.Now().UTC(), time.UTC, "today's question")
+	require.NoError(t, err)
+
+	require.NotContains(t, rec.userPrompt, "UNIQUEPRIORQUESTION",
+		"store+replay only: a prior turn must never reach the prompt")
+	require.NotContains(t, rec.userPrompt, "UNIQUEPRIORANSWER",
+		"store+replay only: a prior answer must never reach the prompt")
+	require.Contains(t, rec.userPrompt, "today's question")
+}
+
+// TestServiceThread_NilThreadRepositoryReturnsEmptyTurns proves nil-tolerance
+// on the replay path, mirroring the nil-provider tolerance already covered
+// on the ask path (TestAsk_NilProviderDegradesGracefully). A Service built
+// without a thread repository must still answer Thread() with no error, a
+// non-nil empty Turns slice (so callers/serialisers never have to special-
+// case nil), and ShowSupport still computed from the user's live signals.
+func TestServiceThread_NilThreadRepositoryReturnsEmptyTurns(t *testing.T) {
+	db := testDB(t)
+	// No logs seeded: a fresh user is fasting for the whole recent window,
+	// which trips the FastingStreakDays risk threshold on its own (see
+	// TestAsk_RestrictiveAnswerSuppressedUnderRisk).
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	trackRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackRepo, db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackRepo)
+
+	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, nil)
+
+	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
+	result, err := svc.Thread(context.Background(), userID, now, time.UTC)
+
+	require.NoError(t, err, "a nil thread repository must degrade gracefully, not error or panic")
+	require.NotNil(t, result.Turns, "Turns must be a non-nil empty slice on the nil-thread-repository path")
+	require.Empty(t, result.Turns)
+	require.True(t, result.ShowSupport, "a fresh user with no logs is fasting the whole window, an ED-risk signal")
+}
+
+// TestServiceThread_ShowSupportReflectsLiveSignalsNotStoredState proves
+// GET /v1/coach/thread's show_support tracks the user's CURRENT risk
+// signals, never whatever was true at write time. A turn is stored while
+// the user is at-risk (fasting streak, no logs), which deterministically
+// flips off once a full week of on-target meals — including today, which
+// zeroes FastingStreakDays — is logged (see seedSteadyWeek). ShowSupport
+// must flip with it even though nothing about the stored turn changed.
+func TestServiceThread_ShowSupportReflectsLiveSignalsNotStoredState(t *testing.T) {
+	db := testDB(t)
+	// No logs seeded yet: a fresh user is fasting the whole window, an
+	// ED-risk signal on its own.
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	trackRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackRepo, db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackRepo)
+	threadRepo := NewThreadRepository(db)
+
+	// Store an exchange while the user is still at-risk.
+	require.NoError(t, threadRepo.AppendExchange(context.Background(), userID,
+		"how am I doing?", "an answer", nil))
+
+	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, &threadRepo)
+	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
+
+	before, err := svc.Thread(context.Background(), userID, now, time.UTC)
+	require.NoError(t, err)
+	require.True(t, before.ShowSupport, "fresh user with no logs should be at risk (fasting streak)")
+
+	// Flip the live signal: log a steady week of on-target meals including
+	// today, which zeroes FastingStreakDays and brings AvgIntakeKcal /
+	// RecentDeficitPct / LogsPerDay comfortably out of risk range.
+	seedSteadyWeek(t, db, logRepo, userID, now, 2000)
+
+	after, err := svc.Thread(context.Background(), userID, now, time.UTC)
+	require.NoError(t, err)
+	require.False(t, after.ShowSupport,
+		"show_support must track CURRENT signals, not whatever was true when the turn was stored")
+	require.Len(t, after.Turns, 2, "the stored exchange itself must still replay unchanged")
+}
+
+// TestServiceThread_ReplayedRestrictiveTurnSuppressedForAtRiskUser proves the
+// read-time re-gate: a stored Otto turn whose text is restrictive must not
+// replay verbatim for a user who is currently at-risk, even though nothing
+// re-generated it — Thread must re-run the same Protective policy Ask
+// applied at write time, against the CURRENT signals.
+func TestServiceThread_ReplayedRestrictiveTurnSuppressedForAtRiskUser(t *testing.T) {
+	db := testDB(t)
+	// No logs seeded: a fresh user is fasting the whole window, an ED-risk
+	// signal on its own (see TestAsk_RestrictiveAnswerSuppressedUnderRisk).
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	trackRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackRepo, db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackRepo)
+	threadRepo := NewThreadRepository(db)
+
+	const restrictiveRaw = "You've eaten enough today — try to cut back tomorrow."
+	require.NoError(t, threadRepo.AppendExchange(context.Background(), userID,
+		"how am I doing?", restrictiveRaw, nil))
+
+	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, &threadRepo)
+	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
+
+	result, err := svc.Thread(context.Background(), userID, now, time.UTC)
+	require.NoError(t, err)
+	require.True(t, result.ShowSupport, "fresh user with no logs should be at risk (fasting streak)")
+
+	require.Len(t, result.Turns, 2)
+	require.Equal(t, TurnRoleOtto, result.Turns[1].Role)
+	require.Equal(t, suppressedAnswerMessage, result.Turns[1].Text,
+		"a replayed restrictive Otto turn must be suppressed for an at-risk user, not shown raw")
+	require.NotEqual(t, restrictiveRaw, result.Turns[1].Text)
+}
+
+// TestServiceThread_ReplayedBenignTurnUnchanged proves the re-gate is not
+// overzealous: a stored Otto turn with ordinary supportive text — no
+// restrictive phrase — must replay exactly as stored, regardless of the
+// user's current risk state (Allow and Soften both preserve non-restrictive
+// text unchanged per guardrails.Evaluate).
+func TestServiceThread_ReplayedBenignTurnUnchanged(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	trackRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackRepo, db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackRepo)
+	threadRepo := NewThreadRepository(db)
+
+	const supportiveRaw = "You have 55g protein to go — a yoghurt would help."
+	require.NoError(t, threadRepo.AppendExchange(context.Background(), userID,
+		"how's my protein?", supportiveRaw, nil))
+
+	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, &threadRepo)
+	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
+
+	result, err := svc.Thread(context.Background(), userID, now, time.UTC)
+	require.NoError(t, err)
+
+	require.Len(t, result.Turns, 2)
+	require.Equal(t, TurnRoleOtto, result.Turns[1].Role)
+	require.Equal(t, supportiveRaw, result.Turns[1].Text,
+		"a benign stored turn must replay exactly as stored")
+}
+
+// TestServiceThread_UserTurnsNeverRewritten proves the re-gate only ever
+// touches TurnRoleOtto turns: a user's own words — even ones that happen to
+// contain a restrictivePhrases substring — must replay byte-identical to
+// what was stored. Re-gating a user's own question would be both wrong (the
+// guardrail governs what Otto says, not what the user asks) and unsafe (it
+// would silently alter a user's own words).
+func TestServiceThread_UserTurnsNeverRewritten(t *testing.T) {
+	db := testDB(t)
+	// No logs seeded: a fresh user is fasting the whole window, an ED-risk
+	// signal on its own.
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	trackRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackRepo, db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackRepo)
+	threadRepo := NewThreadRepository(db)
+
+	const userQuestion = "should I eat less?"
+	require.NoError(t, threadRepo.AppendExchange(context.Background(), userID,
+		userQuestion, "an answer", nil))
+
+	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, &threadRepo)
+	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
+
+	result, err := svc.Thread(context.Background(), userID, now, time.UTC)
+	require.NoError(t, err)
+
+	require.Len(t, result.Turns, 2)
+	require.Equal(t, TurnRoleUser, result.Turns[0].Role)
+	require.Equal(t, userQuestion, result.Turns[0].Text,
+		"re-gating must only ever touch TurnRoleOtto turns, never TurnRoleUser turns")
+}
+
+func TestServiceAsk_PersistsNothingOnProviderError(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	trackRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackRepo, db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackRepo)
+	threadRepo := NewThreadRepository(db)
+
+	svc := NewService(&g, &errorProvider{}, &stubMeter{withinBudget: true}, &threadRepo)
+
+	_, err := svc.Ask(context.Background(), userID, time.Now().UTC(), time.UTC, "hello")
+	require.Error(t, err)
+
+	turns, err := threadRepo.ListRecent(context.Background(), userID, maxThreadTurns)
+	require.NoError(t, err)
+	require.Empty(t, turns, "a failed generation must not leave an orphaned question")
 }
