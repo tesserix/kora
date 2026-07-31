@@ -413,6 +413,105 @@ func TestNudges_WrapsBuildContextAndBuildNudges(t *testing.T) {
 	require.NotEmpty(t, r.Nudges, "a fresh user with no logs should still get a protein-gap nudge")
 }
 
+// TestServiceNudges_FreshUserIsNotFlaggedAtRisk is the acceptance test for
+// this branch: a brand-new user with no logs at all must not be shown the
+// ED support card on first use. Uses a realistic positive target_kcal (not
+// 0) specifically so this exercises the recentDeficitPct path for real — a
+// 0 target makes recentDeficitPct short-circuit to 0 regardless of the fix,
+// which would make this assertion pass even against the old buggy code.
+func TestServiceNudges_FreshUserIsNotFlaggedAtRisk(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	// No logs at all — a brand-new user.
+
+	logRepo := foodlog.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{})
+
+	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, nil)
+
+	result, err := svc.Nudges(context.Background(), userID, time.Now().UTC(), time.UTC)
+
+	require.NoError(t, err)
+	require.False(t, result.ShowSupport,
+		"a brand-new user has no data, and must not be shown an ED support resource on first use")
+}
+
+// TestServiceNudges_GenuineDeficitStillFlagsAtRisk proves the fresh-user fix
+// reduced sensitivity deliberately, not accidentally to zero: a user with a
+// real, explicitly logged week-long shortfall (seedUnderEatingWeek logs at
+// 40% of target every day) must still trip ShowSupport via RecentDeficitPct.
+func TestServiceNudges_GenuineDeficitStillFlagsAtRisk(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{})
+
+	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
+	seedUnderEatingWeek(t, db, logRepo, userID, now, 2000)
+
+	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, nil)
+
+	result, err := svc.Nudges(context.Background(), userID, now, time.UTC)
+
+	require.NoError(t, err)
+	require.True(t, result.ShowSupport,
+		"a genuine week of logged under-eating must still trip ED-risk via RecentDeficitPct")
+}
+
+// TestServiceNudges_GenuineFastingGapStillFlagsAtRisk proves the
+// fastingStreak fix also still fires for a real gap: target_kcal is 0 so
+// RecentDeficitPct stays inert (isolating FastingStreakDays as the only
+// signal in play, mirroring
+// TestServiceThread_ShowSupportReflectsLiveSignalsNotStoredState), logging
+// history is established on the 3 oldest days of the window and today, but
+// the 3 days in between are left genuinely silent — a real
+// riskFastingStreakDays-length gap, not merely the absence of a full week
+// of logs.
+func TestServiceNudges_GenuineFastingGapStillFlagsAtRisk(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 0, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{})
+
+	item := nutrition.FoodItem{
+		Name: "Coach Nudges Gap Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD,
+		KcalPer100g: 300, ProteinPer100g: 30,
+	}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
+
+	logDaysAgo := func(daysAgo int) {
+		seedLog(t, db, logRepo, foodlog.FoodLog{
+			UserID: userID, FoodItemID: &item.ID, LoggedAt: now.AddDate(0, 0, -daysAgo).Add(-time.Hour),
+			MealSlot: "lunch", Source: "manual", Provenance: nutrition.ProvenanceAFCD,
+			QuantityGrams: 1000, Kcal: 3000, ProteinG: 100,
+		})
+	}
+	// Established logging on days 6, 5, 4 and today (0), with a genuine
+	// 3-day silent gap on days 3, 2, 1 in between.
+	for _, daysAgo := range []int{6, 5, 4, 0} {
+		logDaysAgo(daysAgo)
+	}
+
+	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, nil)
+
+	result, err := svc.Nudges(context.Background(), userID, now, time.UTC)
+
+	require.NoError(t, err)
+	require.True(t, result.ShowSupport,
+		"a genuine 3-day silent gap earlier in the week must still trip ED-risk via FastingStreakDays, even though today itself is logged")
+}
+
 func TestServiceAsk_PersistsExchange(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db, 2000, 120)
