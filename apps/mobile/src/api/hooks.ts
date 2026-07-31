@@ -261,8 +261,12 @@ export function useEditLog() {
 export function useLog(id: string) {
   return useQuery({
     queryKey: ["log", id],
+    // id is typed as string at call sites (e.g. Expo Router's
+    // useLocalSearchParams), but at runtime it can be undefined — guard with
+    // !! first so an undefined route param disables the query instead of
+    // throwing on `.length`.
     queryFn: () => apiFetch(`/v1/logs/${id}`) as Promise<FoodLog>,
-    enabled: id.length > 0,
+    enabled: !!id && id.length > 0,
   });
 }
 

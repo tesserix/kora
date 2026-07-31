@@ -163,6 +163,24 @@ test("useLog GETs /v1/logs/:id and returns the full record", async () => {
   expect(result.current.data?.input_phrase).toBe("brekkie eggs");
 });
 
+test("useLog stays idle and never fetches for an empty string id", async () => {
+  // apiFetch is a shared mock across this file's tests, so assert against a
+  // call-count delta rather than `not.toHaveBeenCalled()`.
+  const callsBefore = (apiFetch as jest.Mock).mock.calls.length;
+  const { result } = await renderHook(() => useLog(""), { wrapper });
+  expect(result.current.fetchStatus).toBe("idle");
+  expect((apiFetch as jest.Mock).mock.calls.length).toBe(callsBefore);
+});
+
+test("useLog does not throw when id is undefined at runtime despite its string type", async () => {
+  // Expo Router's useLocalSearchParams types a param as `string` but can hand
+  // back `undefined` at runtime — this must disable the query, not throw.
+  const callsBefore = (apiFetch as jest.Mock).mock.calls.length;
+  const { result } = await renderHook(() => useLog(undefined as unknown as string), { wrapper });
+  expect(result.current.fetchStatus).toBe("idle");
+  expect((apiFetch as jest.Mock).mock.calls.length).toBe(callsBefore);
+});
+
 test("useEditLog surfaces meta.alias_recorded alongside the updated log", async () => {
   (apiFetchEnvelope as jest.Mock).mockResolvedValueOnce({
     data: { id: "log1", food_item_id: "f2" },
