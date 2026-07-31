@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/google/uuid"
@@ -24,6 +25,11 @@ const (
 	// decomposition-based estimate is inherently less precise than a direct
 	// food match.
 	estimateBand = 0.15
+
+	// defaultAliasPortionGrams is the last rung of the alias short-circuit's
+	// portion fallback chain (last logged portion -> serving_grams -> this),
+	// matching the 100g convention the barcode resolve path already uses.
+	defaultAliasPortionGrams = 100
 )
 
 // budgetFollowUpQuestion is returned when a user has exhausted their monthly
@@ -53,16 +59,29 @@ type Meter interface {
 	WithinBudget(ctx context.Context, userID uuid.UUID) (bool, error)
 }
 
+// PortionSource is the subset of foodlog.Repository the personal-alias
+// short-circuit needs: the grams from the caller's most recent log of a
+// given phrase. It is declared locally (rather than depending on
+// foodlog.Repository directly) because package foodlog already imports
+// package ai (for ai.CacheKey, used by its resolution-cache invalidation) —
+// importing foodlog from here would be a compile-time import cycle.
+// foodlog.Repository satisfies this interface structurally at the
+// construction site where Resolver is actually built (see cmd/api/main.go).
+type PortionSource interface {
+	LastPortionForPhrase(ctx context.Context, userID uuid.UUID, phrase string) (float64, bool, error)
+}
+
 // Resolver is the resolution engine: it turns a free-text phrase or a photo
 // into a Resolution. All nutrition numbers in the result come from
 // nutrition.FoodItem rows looked up via the foods repository — never from
 // the AI provider, whose Guess/IngredientGuess types structurally carry no
 // nutrition numbers at all.
 type Resolver struct {
-	provider Provider
-	foods    nutrition.Repository
-	cache    Cache
-	meter    Meter
+	provider      Provider
+	foods         nutrition.Repository
+	cache         Cache
+	meter         Meter
+	portionSource PortionSource
 }
 
 // NewResolver builds a Resolver over its collaborators.
@@ -70,13 +89,93 @@ func NewResolver(p Provider, foods nutrition.Repository, cache Cache, meter Mete
 	return Resolver{provider: p, foods: foods, cache: cache, meter: meter}
 }
 
-// ResolveText resolves a free-text food phrase to a Resolution.
+// WithPortionSource attaches an optional source of the caller's last logged
+// portion for a phrase, following the same functional-option pattern as
+// foodlog.Service.WithResolutionCache — added instead of a NewResolver
+// parameter so every existing construction site (production and test) keeps
+// working unchanged. A nil PortionSource (the default) is safe: the
+// personal-alias short-circuit simply falls back to the food's
+// ServingGrams, then defaultAliasPortionGrams — it never panics.
+func (r Resolver) WithPortionSource(ps PortionSource) Resolver {
+	r.portionSource = ps
+	return r
+}
+
+// ResolveText resolves a free-text food phrase to a Resolution. Before
+// touching the LLM at all, it checks whether the caller has personally
+// corrected this exact raw phrase (see nutrition.Repository.AddAlias /
+// LookupPersonalAlias) — the fix for the bug where a correction was keyed on
+// the user's raw wording but only ever looked up under the model's own
+// guess string, so it silently never applied on this path. A hit returns
+// instantly with no provider call and no metering, since no AI work
+// happened; a miss, or any lookup error, falls through to the existing
+// cache -> budget -> identify -> resolve pipeline unchanged.
 func (r Resolver) ResolveText(ctx context.Context, userID uuid.UUID, phrase string) (Resolution, error) {
+	if res, ok := r.aliasShortCircuit(ctx, userID, phrase); ok {
+		return res, nil
+	}
+
 	key := CacheKey("phrase", userID, phrase)
 	return r.resolve(ctx, userID, key,
 		func(c context.Context) ([]Guess, Usage, error) { return r.provider.IdentifyText(c, phrase) },
 		func(guesses []Guess) string { return phrase },
 	)
+}
+
+// aliasShortCircuit checks whether userID has personally corrected phrase to
+// a specific food item. On a hit (ok=true) it returns a complete, one-
+// candidate Resolution built directly from that food row: Tier is always
+// TierAuto (a personal correction is the most confident signal there is) and
+// the candidate's Kcal is computed ONLY from the row — top.KcalPer100g *
+// grams / 100 — never fabricated. ok=false means "no short-circuit, the
+// caller should fall through to the normal LLM pipeline" — covering both a
+// genuine miss and a lookup error, since a lookup failure must never break
+// resolution.
+func (r Resolver) aliasShortCircuit(ctx context.Context, userID uuid.UUID, phrase string) (Resolution, bool) {
+	item, found, err := r.foods.LookupPersonalAlias(ctx, userID, phrase)
+	if err != nil {
+		slog.WarnContext(ctx, "ai: personal alias lookup failed, falling through to LLM path",
+			"error", err, "user_id", userID)
+		return Resolution{}, false
+	}
+	if !found {
+		return Resolution{}, false
+	}
+
+	grams := r.resolveAliasPortion(ctx, userID, phrase, item)
+	return Resolution{
+		Candidates: []ResolvedCandidate{{
+			Item:         item,
+			PortionGrams: grams,
+			Kcal:         item.KcalPer100g * grams / 100,
+			MatchScore:   1.0,
+			MatchTier:    nutrition.MatchAlias,
+		}},
+		Tier:       TierAuto,
+		Provenance: item.Provenance,
+	}, true
+}
+
+// resolveAliasPortion picks the portion (grams) for an alias short-circuit
+// hit: the user's last logged portion for this exact phrase, falling back to
+// the food's ServingGrams, falling back to defaultAliasPortionGrams. A nil
+// portionSource (no PortionSource wired) or a lookup error is treated the
+// same as "no prior log" — logged and folded into the same fallback chain —
+// since an alias hit still deserves an answer even without portion history.
+func (r Resolver) resolveAliasPortion(ctx context.Context, userID uuid.UUID, phrase string, item nutrition.FoodItem) float64 {
+	if r.portionSource != nil {
+		grams, found, err := r.portionSource.LastPortionForPhrase(ctx, userID, phrase)
+		if err != nil {
+			slog.WarnContext(ctx, "ai: last portion lookup failed, falling back to serving size",
+				"error", err, "user_id", userID)
+		} else if found {
+			return grams
+		}
+	}
+	if item.ServingGrams > 0 {
+		return item.ServingGrams
+	}
+	return defaultAliasPortionGrams
 }
 
 // ResolvePhoto resolves a food photo to a Resolution. It shares the exact

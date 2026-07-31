@@ -160,7 +160,11 @@ func buildResolveHandler(ctx context.Context, cfg config.Config, db *gorm.DB, lo
 
 	foods := nutrition.NewRepository(db)
 	meter := billing.NewMeter(db)
-	resolver := ai.NewResolver(provider, foods, cache, meter)
+	// WithPortionSource lets a personal-alias short-circuit in
+	// ai.Resolver.ResolveText inherit the portion from the user's last log of
+	// the same phrase (see foodlog.Repository.LastPortionForPhrase), instead
+	// of always falling back to the food's serving size.
+	resolver := ai.NewResolver(provider, foods, cache, meter).WithPortionSource(foodlog.NewRepository(db))
 	off := nutrition.NewHTTPOFFClient()
 
 	h := resolve.NewHandler(resolver, func(c context.Context, code string) (*nutrition.FoodItem, bool, error) {
