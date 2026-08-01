@@ -79,8 +79,20 @@ the mixed-confidence decision above.
 6. `kcalTotalLabel` (`src/lib/resolutionKcal.ts`) sums only loggable items, so
    the header total never counts something that will not be logged.
 7. The CTA reflects the count: `Add 2 items to diary`.
-8. Tapping an uncertain row opens the existing food-search sheet; picking a food
-   promotes the row to loggable and it joins the total and the count.
+8. Tapping an uncertain row opens the existing `FoodPicker` sheet; picking a
+   food promotes the row to loggable and it joins the CTA count.
+
+   **A promoted row shows no kcal until it is logged.** kcal is computed during
+   resolve (`resolver.go:365`) from the matched row's `kcal_per_100g`; a
+   freshly picked food has no server-computed kcal, and this codebase forbids
+   the client computing nutrition (`DetectedCard` renders every number verbatim;
+   the only sanctioned client math is summing kcal the server already supplied).
+   So a promoted row renders `—` in place of kcal and is excluded from the
+   header total while still counting toward the CTA. The true figure appears in
+   the diary immediately after logging, server-computed. The alternative —
+   `kcal_per_100g × grams / 100` in the client — is the same arithmetic the
+   server does but breaks an invariant the codebase documents in several places,
+   and was rejected for that reason.
 9. All-items-uncertain needs no new work — the existing `follow_up` path already
    renders the question screen.
 
