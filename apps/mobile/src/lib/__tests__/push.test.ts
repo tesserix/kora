@@ -68,6 +68,35 @@ test("registerPushToken registers the token and caches it on the happy path", as
   expect(await AsyncStorage.getItem("kora.pushToken")).toBe("ExponentPushToken[abc]");
 });
 
+// Regression: after `eas init` supplied a projectId, this code path went live
+// and getExpoPushTokenAsync started rejecting wherever no push service exists
+// (every simulator, or an offline device). The floating `void registerPushToken()`
+// in usePushRegistration had no catch, so it surfaced as a red LogBox error on
+// every launch — sitting on top of the footer's primary button.
+test("registerPushToken resolves instead of rejecting when the push service is unreachable", async () => {
+  (Notifications.getExpoPushTokenAsync as jest.Mock).mockRejectedValueOnce(
+    new Error("fetch failed: UnexpectedException: A server with the specified hostname could not be found."),
+  );
+  await expect(registerPushToken()).resolves.toBeUndefined();
+  expect(registerDevice).not.toHaveBeenCalled();
+});
+
+// The permission lookup itself can throw (a wedged notification service). A
+// partial fix that only guarded the token fetch would leave the same crash
+// reachable one line earlier.
+test("registerPushToken resolves instead of rejecting when the permission lookup throws", async () => {
+  (Notifications.getPermissionsAsync as jest.Mock).mockRejectedValueOnce(new Error("notification service unavailable"));
+  await expect(registerPushToken()).resolves.toBeUndefined();
+  expect(registerDevice).not.toHaveBeenCalled();
+});
+
+// Registering the device is a best-effort side effect too: a 500 from the API
+// must not reach the user as a crash on an otherwise successful sign-in.
+test("registerPushToken resolves instead of rejecting when the API refuses the registration", async () => {
+  (registerDevice as jest.Mock).mockRejectedValueOnce(new Error("500 internal_error"));
+  await expect(registerPushToken()).resolves.toBeUndefined();
+});
+
 test("unregisterPushToken deletes and clears the cached token", async () => {
   await AsyncStorage.setItem("kora.pushToken", "ExponentPushToken[abc]");
   await unregisterPushToken();

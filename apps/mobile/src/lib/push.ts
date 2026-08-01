@@ -22,20 +22,34 @@ function projectId(): string | undefined {
 // registerPushToken requests permission, fetches the Expo push token, and
 // registers it with the API. It is a silent no-op until the EAS projectId
 // exists (i.e. before `eas init`) or if the user denies notifications.
+//
+// It never rejects. Push is best-effort, and its only caller is a floating
+// `void registerPushToken()` on sign-in, so anything thrown here would land as
+// an unhandled rejection — a red LogBox box on top of the UI in development,
+// covering the footer's primary button. Every step is genuinely fallible:
+// there is no push service on a simulator, a real device can be offline, and
+// the API can refuse. None of that should disturb an otherwise good sign-in;
+// registration simply retries on the next one.
 export async function registerPushToken(): Promise<void> {
   const pid = projectId();
   if (!pid) return;
 
-  const current = await Notifications.getPermissionsAsync();
-  let status = current.status;
-  if (status !== "granted") {
-    status = (await Notifications.requestPermissionsAsync()).status;
-  }
-  if (status !== "granted") return;
+  try {
+    const current = await Notifications.getPermissionsAsync();
+    let status = current.status;
+    if (status !== "granted") {
+      status = (await Notifications.requestPermissionsAsync()).status;
+    }
+    if (status !== "granted") return;
 
-  const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId: pid });
-  await AsyncStorage.setItem(TOKEN_KEY, token);
-  await registerDevice(token, Platform.OS);
+    const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId: pid });
+    await AsyncStorage.setItem(TOKEN_KEY, token);
+    await registerDevice(token, Platform.OS);
+  } catch {
+    // Deliberately swallowed — see above. There is no logger in this app
+    // (`console` is unused across app/ and src/), and the repo's convention for
+    // best-effort side effects is a commented catch: see src/motion/haptics.ts.
+  }
 }
 
 // unregisterPushToken removes the device binding for the cached token so a
