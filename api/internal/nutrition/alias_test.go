@@ -188,6 +188,99 @@ func TestAddAliasSecondCorrectionReplacesFirstForSameUserAndPhrase(t *testing.T)
 	require.Equal(t, oats.ID, got[0].Item.ID, "the phrase must resolve to the LATEST correction")
 }
 
+// TestLookupPersonalAliasHitsForOwner covers the basic case the alias
+// short-circuit in ai.Resolver.ResolveText depends on: a personal alias for
+// this exact (userID, phrase) pair must resolve to the aliased food item.
+func TestLookupPersonalAliasHitsForOwner(t *testing.T) {
+	db := testDB(t)
+	repo := NewRepository(db)
+	ctx := context.Background()
+	userID := seedAliasUser(t, db)
+	quinoa := seedAliasFood(t, db, "Quinoa")
+	phrase := "brekkie eggs " + uuid.NewString()
+
+	require.NoError(t, repo.AddAlias(ctx, userID, phrase, quinoa.ID))
+
+	item, found, err := repo.LookupPersonalAlias(ctx, userID, phrase)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, quinoa.ID, item.ID)
+}
+
+// TestLookupPersonalAliasNoHitForDifferentUser is the load-bearing
+// cross-user test: a stranger's identical raw phrase must never resolve to
+// the owner's personal correction. This is proven load-bearing in the plan's
+// Task 1 Step 5 by temporarily dropping the user_id predicate.
+func TestLookupPersonalAliasNoHitForDifferentUser(t *testing.T) {
+	db := testDB(t)
+	repo := NewRepository(db)
+	ctx := context.Background()
+	owner := seedAliasUser(t, db)
+	stranger := seedAliasUser(t, db)
+	quinoa := seedAliasFood(t, db, "Quinoa")
+	phrase := "brekkie eggs " + uuid.NewString()
+
+	require.NoError(t, repo.AddAlias(ctx, owner, phrase, quinoa.ID))
+
+	_, found, err := repo.LookupPersonalAlias(ctx, stranger, phrase)
+	require.NoError(t, err)
+	require.False(t, found, "another user's personal alias must never match")
+}
+
+// TestLookupPersonalAliasNoHitForGlobalAlias proves curated/global aliases
+// (user_id IS NULL) are out of scope: they are not a personal correction, so
+// they must never short-circuit resolution for anyone.
+func TestLookupPersonalAliasNoHitForGlobalAlias(t *testing.T) {
+	db := testDB(t)
+	repo := NewRepository(db)
+	ctx := context.Background()
+	userID := seedAliasUser(t, db)
+	quinoa := seedAliasFood(t, db, "Quinoa")
+	phrase := "brekkie eggs " + uuid.NewString()
+
+	require.NoError(t, repo.AddAlias(ctx, uuid.Nil, phrase, quinoa.ID))
+
+	_, found, err := repo.LookupPersonalAlias(ctx, userID, phrase)
+	require.NoError(t, err)
+	require.False(t, found, "a curated/global alias is not a correction and must not short-circuit")
+}
+
+// TestLookupPersonalAliasCaseAndWhitespaceInsensitive proves the lookup
+// matches the same lower+trim normalization AddAlias writes with.
+func TestLookupPersonalAliasCaseAndWhitespaceInsensitive(t *testing.T) {
+	db := testDB(t)
+	repo := NewRepository(db)
+	ctx := context.Background()
+	userID := seedAliasUser(t, db)
+	quinoa := seedAliasFood(t, db, "Quinoa")
+	base := "brekkie eggs " + uuid.NewString()
+
+	require.NoError(t, repo.AddAlias(ctx, userID, base, quinoa.ID))
+
+	item, found, err := repo.LookupPersonalAlias(ctx, userID, "  "+strings.ToUpper(base)+"  ")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, quinoa.ID, item.ID)
+}
+
+// TestLookupPersonalAliasNilUserNotFound proves uuid.Nil never matches
+// another user's alias — it is treated as "no personal identity", not a
+// wildcard, and returns not-found without even querying.
+func TestLookupPersonalAliasNilUserNotFound(t *testing.T) {
+	db := testDB(t)
+	repo := NewRepository(db)
+	ctx := context.Background()
+	owner := seedAliasUser(t, db)
+	quinoa := seedAliasFood(t, db, "Quinoa")
+	phrase := "brekkie eggs " + uuid.NewString()
+
+	require.NoError(t, repo.AddAlias(ctx, owner, phrase, quinoa.ID))
+
+	_, found, err := repo.LookupPersonalAlias(ctx, uuid.Nil, phrase)
+	require.NoError(t, err)
+	require.False(t, found, "uuid.Nil must never match another user's personal alias")
+}
+
 func TestRemoveAliasDeletesOnlyTheMatchingRow(t *testing.T) {
 	db := testDB(t)
 	repo := NewRepository(db)

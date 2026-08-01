@@ -81,6 +81,24 @@ func (m *stubMeter) WithinBudget(ctx context.Context, userID uuid.UUID) (bool, e
 
 var _ Meter = (*stubMeter)(nil)
 
+// fakePortionSource is a configurable PortionSource test double, keyed by
+// (userID, phrase) so tests can assert the alias short-circuit looks up
+// portion history for the CALLER, not just any row matching the phrase.
+type fakePortionSource struct {
+	grams map[string]float64 // key: userID.String()+"|"+phrase
+	err   error
+}
+
+func (f *fakePortionSource) LastPortionForPhrase(ctx context.Context, userID uuid.UUID, phrase string) (float64, bool, error) {
+	if f.err != nil {
+		return 0, false, f.err
+	}
+	g, ok := f.grams[userID.String()+"|"+phrase]
+	return g, ok, nil
+}
+
+var _ PortionSource = (*fakePortionSource)(nil)
+
 func seedFoodItem(t *testing.T, repo nutrition.Repository, item nutrition.FoodItem) nutrition.FoodItem {
 	t.Helper()
 	_, err := repo.Insert(context.Background(), []nutrition.FoodItem{item})
@@ -97,6 +115,210 @@ func seedFoodItem(t *testing.T, repo nutrition.Repository, item nutrition.FoodIt
 	}
 	require.NotEqual(t, uuid.Nil, got.ID, "seeded food item must be findable by Search")
 	return got
+}
+
+// TestResolveText_PersonalAliasShortCircuit_SkipsProviderAndMetering is the
+// main fix under test: a personal alias for the RAW phrase must resolve
+// without ever calling the provider or metering any AI usage, since no AI
+// work happened. It also proves the returned candidate's kcal is computed
+// only from the aliased row (never fabricated) and that the portion comes
+// from the user's last log of this exact phrase.
+func TestResolveText_PersonalAliasShortCircuit_SkipsProviderAndMetering(t *testing.T) {
+	db := testDB(t)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE brand = 'test4a'") })
+	repo := nutrition.NewRepository(db)
+	userID := seedTestUser(t, db)
+
+	item := seedFoodItem(t, repo, nutrition.FoodItem{
+		Name: "Quinoa bowl", Brand: "test4a",
+		Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 120, ServingGrams: 150,
+	})
+	phrase := "brekkie eggs " + uuid.NewString()
+	require.NoError(t, repo.AddAlias(context.Background(), userID, phrase, item.ID))
+
+	portions := &fakePortionSource{grams: map[string]float64{
+		userID.String() + "|" + phrase: 220,
+	}}
+	provider := &stubProvider{
+		guesses:    []Guess{{Food: "should never be reached", Confidence: 0.99}},
+		guessUsage: Usage{Provider: "stub"},
+	}
+	meter := &stubMeter{withinBudget: true}
+	resolver := NewResolver(provider, repo, NoCache{}, meter).WithPortionSource(portions)
+
+	res, err := resolver.ResolveText(context.Background(), userID, phrase)
+
+	require.NoError(t, err)
+	require.Equal(t, 0, provider.calls, "a personal alias hit must never invoke the provider")
+	require.Empty(t, meter.records, "an alias short-circuit did no AI work and must not be metered")
+	require.Equal(t, TierAuto, res.Tier)
+	require.Len(t, res.Candidates, 1)
+	require.Equal(t, item.ID, res.Candidates[0].Item.ID)
+	require.Equal(t, nutrition.MatchAlias, res.Candidates[0].MatchTier)
+	require.Equal(t, 220.0, res.Candidates[0].PortionGrams, "portion must come from the user's last log of this phrase")
+	// 120 kcal/100g * 220g / 100 = 264 — computed from the row, never fabricated.
+	require.Equal(t, 264.0, res.Candidates[0].Kcal)
+}
+
+// TestResolveText_PersonalAliasShortCircuit_FallsBackToServingGrams proves
+// the portion fallback chain's second rung: when there is no prior log of
+// this phrase (found=false from the PortionSource), the food's own
+// ServingGrams is used instead.
+func TestResolveText_PersonalAliasShortCircuit_FallsBackToServingGrams(t *testing.T) {
+	db := testDB(t)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE brand = 'test4b'") })
+	repo := nutrition.NewRepository(db)
+	userID := seedTestUser(t, db)
+
+	item := seedFoodItem(t, repo, nutrition.FoodItem{
+		Name: "Quinoa bowl no history", Brand: "test4b",
+		Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 120, ServingGrams: 180,
+	})
+	phrase := "brekkie eggs " + uuid.NewString()
+	require.NoError(t, repo.AddAlias(context.Background(), userID, phrase, item.ID))
+
+	portions := &fakePortionSource{grams: map[string]float64{}} // no prior log for anyone
+	provider := &stubProvider{}
+	meter := &stubMeter{withinBudget: true}
+	resolver := NewResolver(provider, repo, NoCache{}, meter).WithPortionSource(portions)
+
+	res, err := resolver.ResolveText(context.Background(), userID, phrase)
+
+	require.NoError(t, err)
+	require.Len(t, res.Candidates, 1)
+	require.Equal(t, 180.0, res.Candidates[0].PortionGrams)
+	// 120 kcal/100g * 180g / 100 = 216.
+	require.Equal(t, 216.0, res.Candidates[0].Kcal)
+}
+
+// TestResolveText_PersonalAliasShortCircuit_FallsBackTo100gWhenServingGramsZero
+// proves the final rung of the fallback chain: no prior log AND no
+// ServingGrams on the row falls back to the barcode path's 100g convention.
+func TestResolveText_PersonalAliasShortCircuit_FallsBackTo100gWhenServingGramsZero(t *testing.T) {
+	db := testDB(t)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE brand = 'test4c'") })
+	repo := nutrition.NewRepository(db)
+	userID := seedTestUser(t, db)
+
+	item := seedFoodItem(t, repo, nutrition.FoodItem{
+		Name: "Quinoa bowl zero serving", Brand: "test4c",
+		Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 120, ServingGrams: 0,
+	})
+	phrase := "brekkie eggs " + uuid.NewString()
+	require.NoError(t, repo.AddAlias(context.Background(), userID, phrase, item.ID))
+
+	portions := &fakePortionSource{grams: map[string]float64{}}
+	provider := &stubProvider{}
+	meter := &stubMeter{withinBudget: true}
+	resolver := NewResolver(provider, repo, NoCache{}, meter).WithPortionSource(portions)
+
+	res, err := resolver.ResolveText(context.Background(), userID, phrase)
+
+	require.NoError(t, err)
+	require.Len(t, res.Candidates, 1)
+	require.Equal(t, 100.0, res.Candidates[0].PortionGrams)
+	require.Equal(t, 120.0, res.Candidates[0].Kcal)
+}
+
+// TestResolveText_PersonalAliasShortCircuit_NilPortionSourceFallsBackSafely
+// proves a Resolver built WITHOUT WithPortionSource (nil PortionSource, the
+// default for every existing construction site) never panics on an alias
+// hit and falls back through the same ServingGrams/100g chain.
+func TestResolveText_PersonalAliasShortCircuit_NilPortionSourceFallsBackSafely(t *testing.T) {
+	db := testDB(t)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE brand = 'test4d'") })
+	repo := nutrition.NewRepository(db)
+	userID := seedTestUser(t, db)
+
+	item := seedFoodItem(t, repo, nutrition.FoodItem{
+		Name: "Quinoa bowl nil source", Brand: "test4d",
+		Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 120, ServingGrams: 175,
+	})
+	phrase := "brekkie eggs " + uuid.NewString()
+	require.NoError(t, repo.AddAlias(context.Background(), userID, phrase, item.ID))
+
+	provider := &stubProvider{}
+	meter := &stubMeter{withinBudget: true}
+	resolver := NewResolver(provider, repo, NoCache{}, meter) // no WithPortionSource call
+
+	require.NotPanics(t, func() {
+		res, err := resolver.ResolveText(context.Background(), userID, phrase)
+		require.NoError(t, err)
+		require.Len(t, res.Candidates, 1)
+		require.Equal(t, 175.0, res.Candidates[0].PortionGrams)
+	})
+}
+
+// TestResolveText_NoAlias_LLMPathRunsUnchanged is THE regression guard: a
+// phrase with no personal alias must go through the existing LLM path
+// exactly as before. If this ever breaks, every user who has never made a
+// correction loses food resolution entirely.
+func TestResolveText_NoAlias_LLMPathRunsUnchanged(t *testing.T) {
+	db := testDB(t)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE brand = 'test4e'") })
+	repo := nutrition.NewRepository(db)
+	userID := seedTestUser(t, db)
+
+	item := seedFoodItem(t, repo, nutrition.FoodItem{
+		Name: "Grilled salmon", Brand: "test4e",
+		Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 208,
+	})
+	seedAlias(t, db, "grilled salmon", item.ID) // global alias only — no personal correction
+
+	provider := &stubProvider{
+		guesses: []Guess{
+			{Food: "grilled salmon", PortionEstimate: "100 g", Confidence: 0.95},
+		},
+		guessUsage: Usage{Provider: "stub"},
+	}
+	meter := &stubMeter{withinBudget: true}
+	resolver := NewResolver(provider, repo, NoCache{}, meter)
+
+	res, err := resolver.ResolveText(context.Background(), userID, "grilled salmon")
+
+	require.NoError(t, err)
+	require.Greater(t, provider.calls, 0, "with no personal alias, the provider must still be called")
+	require.NotEmpty(t, meter.records, "the LLM path must still meter usage")
+	require.Equal(t, TierAuto, res.Tier)
+	require.Equal(t, 208.0, res.Candidates[0].Kcal)
+}
+
+// TestResolveText_PersonalAliasShortCircuit_AnotherUsersAliasDoesNotApply
+// proves the per-user scoping survives all the way through ResolveText: a
+// stranger with no personal alias for this phrase must go through the LLM
+// path, never short-circuiting off someone else's correction.
+func TestResolveText_PersonalAliasShortCircuit_AnotherUsersAliasDoesNotApply(t *testing.T) {
+	db := testDB(t)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE brand = 'test4f'") })
+	repo := nutrition.NewRepository(db)
+	owner := seedTestUser(t, db)
+	stranger := seedTestUser(t, db)
+
+	quinoa := seedFoodItem(t, repo, nutrition.FoodItem{
+		Name: "Owner's quinoa", Brand: "test4f",
+		Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 120,
+	})
+	other := seedFoodItem(t, repo, nutrition.FoodItem{
+		Name: "Stranger's actual food", Brand: "test4f",
+		Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 90,
+	})
+	phrase := "brekkie eggs " + uuid.NewString()
+	require.NoError(t, repo.AddAlias(context.Background(), owner, phrase, quinoa.ID))
+	seedAlias(t, db, phrase, other.ID) // global alias so the stranger's LLM path still resolves deterministically
+
+	provider := &stubProvider{
+		guesses:    []Guess{{Food: phrase, PortionEstimate: "100 g", Confidence: 0.95}},
+		guessUsage: Usage{Provider: "stub"},
+	}
+	meter := &stubMeter{withinBudget: true}
+	resolver := NewResolver(provider, repo, NoCache{}, meter)
+
+	res, err := resolver.ResolveText(context.Background(), stranger, phrase)
+
+	require.NoError(t, err)
+	require.Greater(t, provider.calls, 0, "another user's personal alias must not short-circuit this user")
+	require.NotEmpty(t, res.Candidates)
+	require.NotEqual(t, quinoa.ID, res.Candidates[0].Item.ID, "the owner's aliased food must never leak to a stranger")
 }
 
 // TestResolveText_InvariantGuard_KcalComesOnlyFromTheRow is THE hard
@@ -374,13 +596,18 @@ func TestResolveText_CachesResolution_SkipsProviderOnSecondCall(t *testing.T) {
 
 // TestResolveText_CacheDoesNotLeakAcrossUsers is the finding-1 regression
 // test at the full ResolveText/wiring level: it reproduces the exact leak
-// scenario the finding describes. User A personally aliases a phrase to a
-// food item (a real correction, scored 1.0 by the alias tier -> TierAuto ->
-// cached). User B then resolves the identical phrase and must NOT receive
-// user A's cached Resolution — proven two ways: (1) the provider must be
-// re-invoked for user B instead of the request being served from cache, and
-// (2) user B's candidates (B has neither a personal nor a global alias for
-// this nonce phrase) must never contain user A's aliased food item.
+// scenario the finding describes. User A has a personal alias that the
+// MODEL's guess resolves to (scored 1.0 by resolveGuesses's alias tier ->
+// TierAuto -> cached) — deliberately keyed to a different string than the
+// raw phrase A types, so this exercises the pre-existing cache layer rather
+// than the newer personal-alias short-circuit in ResolveText (which only
+// ever checks the raw phrase, see TestResolveText_PersonalAliasShortCircuit_*
+// above for that path). User B then resolves the identical raw phrase and
+// must NOT receive user A's cached Resolution — proven two ways: (1) the
+// provider must be re-invoked for user B instead of the request being served
+// from cache, and (2) user B's candidates (B has neither a personal nor a
+// global alias for this nonce phrase) must never contain user A's aliased
+// food item.
 func TestResolveText_CacheDoesNotLeakAcrossUsers(t *testing.T) {
 	db := testDB(t)
 	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE brand = 'test2c'") })
@@ -393,10 +620,15 @@ func TestResolveText_CacheDoesNotLeakAcrossUsers(t *testing.T) {
 		Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 120,
 	})
 	phrase := "brekkie bowl " + uuid.NewString()
-	// A real correction: user A's personal alias, scored 1.0 by the alias
-	// tier (see nutrition.Repository.Resolve tier 1), which is enough on its
-	// own to reach TierAuto and get cached.
-	require.NoError(t, repo.AddAlias(context.Background(), userA, phrase, quinoa.ID))
+	// What the model calls it — deliberately NOT what the user typed, so the
+	// raw-phrase personal-alias short-circuit (LookupPersonalAlias(userA,
+	// phrase)) finds nothing and this request falls through to the LLM/cache
+	// path under test, exactly as it did before that short-circuit existed.
+	modelFood := "quinoa bowl (model) " + uuid.NewString()
+	// A real correction: user A's personal alias on the MODEL's wording,
+	// scored 1.0 by the alias tier (see nutrition.Repository.Resolve tier 1),
+	// which is enough on its own to reach TierAuto and get cached.
+	require.NoError(t, repo.AddAlias(context.Background(), userA, modelFood, quinoa.ID))
 
 	mr, err := miniredis.Run()
 	require.NoError(t, err)
@@ -407,7 +639,7 @@ func TestResolveText_CacheDoesNotLeakAcrossUsers(t *testing.T) {
 
 	provider := &stubProvider{
 		guesses: []Guess{
-			{Food: phrase, PortionEstimate: "100 g", Confidence: 0.95},
+			{Food: modelFood, PortionEstimate: "100 g", Confidence: 0.95},
 		},
 		guessUsage: Usage{Provider: "stub"},
 	}
