@@ -37,6 +37,7 @@ import {
 } from "@/api/hooks";
 import { ApiError } from "@/lib/api";
 import { kcalTotalLabel } from "@/lib/resolutionKcal";
+import { isLoggable } from "@/lib/candidateTier";
 import type { Resolution, ResolvedCandidate } from "@/api/types";
 import { mealSlotForHour, type MealSlot } from "@/lib/mealSlot";
 
@@ -868,14 +869,22 @@ export default function CaptureScreen() {
   // press of this same card) are skipped entirely — otherwise re-pressing
   // "Add to diary" after a partial failure would re-log the ones that
   // already succeeded, duplicating diary entries.
+  //
+  // Candidates the server flagged as uncertain (`tier: "follow_up"`) are
+  // dropped too: the card shows them without a kcal and excludes them from
+  // its count, so logging them anyway would write a guess the user never
+  // confirmed. The guard below uses the same rule, so an all-uncertain
+  // resolution never spins on an empty batch.
   async function handleAddToDiary() {
-    if (!resolution || resolution.candidates.length === 0) return;
+    const loggableCount = resolution?.candidates.filter(isLoggable).length ?? 0;
+    if (!resolution || loggableCount === 0) return;
     setErrorMsg(null);
     setAdding(true);
     const source = sourceForMode(mode);
 
     const pending = resolution.candidates
       .map((candidate, index) => ({ candidate, key: candidateKey(candidate, index) }))
+      .filter(({ candidate }) => isLoggable(candidate))
       .filter(({ key }) => !loggedCandidateKeys.has(key));
 
     const outcomes = await Promise.allSettled(
@@ -907,7 +916,7 @@ export default function CaptureScreen() {
     if (failedNames.length > 0) {
       haptics.error();
       setErrorMsg(
-        `I logged ${updatedKeys.size} of ${resolution.candidates.length} items, but couldn't log ${failedNames.join(
+        `I logged ${updatedKeys.size} of ${loggableCount} items, but couldn't log ${failedNames.join(
           ", ",
         )}. Please try again.`,
       );

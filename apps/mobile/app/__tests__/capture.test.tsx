@@ -718,14 +718,30 @@ describe("Result tiers", () => {
 });
 
 describe("Add to diary", () => {
-  async function resolveWithMultiCandidates(rendered: Awaited<ReturnType<typeof render>>) {
+  async function resolveWithMultiCandidates(
+    rendered: Awaited<ReturnType<typeof render>>,
+    resolution: Resolution = makeMultiCandidateResolution(),
+  ) {
     const { findByText, findByLabelText } = rendered;
     await fireEvent.press(await findByText("Type"));
     const input = await findByLabelText("Tell Otto what you ate");
     await fireEvent.changeText(input, "big breakfast");
     await fireEvent.press(await findByLabelText("Send"));
     const [, options] = mockResolveTextMutate.mock.calls[0];
-    await act(async () => options.onSuccess(makeMultiCandidateResolution()));
+    await act(async () => options.onSuccess(resolution));
+  }
+
+  // Two candidates, one of which the server flagged as follow_up. The card
+  // already refuses to count it; the batch must refuse to log it, otherwise a
+  // guess the user never confirmed lands in the diary as a real entry.
+  function makeMixedCertaintyResolution(): Resolution {
+    return {
+      ...makeMultiCandidateResolution(),
+      candidates: [
+        { ...makeCandidate("a", "Grilled chicken breast", { grams: 170, kcal: 281 }), tier: "auto" },
+        { ...makeCandidate("b", "Rice dish", { grams: 200, kcal: 260 }), tier: "follow_up" },
+      ],
+    };
   }
 
   test("logs each candidate with the correct food_item_id/grams/meal_slot/source, then navigates back", async () => {
@@ -795,6 +811,48 @@ describe("Add to diary", () => {
     );
 
     await waitFor(() => expect(router.back).toHaveBeenCalled());
+  });
+
+  test("adding to diary skips items the card marked uncertain", async () => {
+    const rendered = await render(<CaptureScreen />);
+    await resolveWithMultiCandidates(rendered, makeMixedCertaintyResolution());
+
+    await fireEvent.press(await rendered.findByLabelText("Add to diary"));
+
+    await waitFor(() => expect(mockCreateLogMutateAsync).toHaveBeenCalledTimes(1));
+    expect(mockCreateLogMutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ food_item_id: "a", quantity_grams: 170 }),
+    );
+  });
+
+  test("a failure message counts the loggable items, not the detected ones", async () => {
+    mockCreateLogMutateAsync.mockReset().mockRejectedValue(new Error("network error"));
+
+    const rendered = await render(<CaptureScreen />);
+    await resolveWithMultiCandidates(rendered, makeMixedCertaintyResolution());
+
+    await fireEvent.press(await rendered.findByLabelText("Add to diary"));
+
+    // One of one loggable item failed — the uncertain second row was never a
+    // candidate for the diary, so counting it here would misreport the batch.
+    expect(await rendered.findByText(/I logged 0 of 1 items/i)).toBeTruthy();
+  });
+
+  test("an all-uncertain resolution logs nothing and never starts the spinner", async () => {
+    const base = makeMultiCandidateResolution();
+    const allUncertain: Resolution = {
+      ...base,
+      candidates: base.candidates.map((candidate) => ({ ...candidate, tier: "follow_up" as const })),
+    };
+
+    const rendered = await render(<CaptureScreen />);
+    await resolveWithMultiCandidates(rendered, allUncertain);
+
+    await fireEvent.press(await rendered.findByLabelText("Add to diary"));
+
+    expect(mockCreateLogMutateAsync).not.toHaveBeenCalled();
+    expect(rendered.queryByTestId("detected-card-adding-spinner")).toBeNull();
+    expect(router.back).not.toHaveBeenCalled();
   });
 });
 
