@@ -15,6 +15,7 @@ import { useSubmitOnboarding } from "@/api/hooks";
 import type { OnboardingInput } from "@/api/types";
 import { useTheme } from "@/theme";
 import { validateOnboardingNumbers } from "@/lib/validateOnboarding";
+import { apiErrorMessage } from "@/lib/apiErrorMessage";
 import { haptics } from "@/motion";
 import { cmFromFtIn, kgFromLb, useUnits } from "@/units";
 
@@ -119,7 +120,9 @@ export default function Onboarding() {
         haptics.success();
         router.replace("/");
       },
-      onError: () => setError("Please check your details and try again."),
+      // Names the actual cause: a 5xx or an offline phone must not tell the
+      // user their details are wrong and send them round a loop.
+      onError: (e: unknown) => setError(apiErrorMessage(e)),
     });
   }
 

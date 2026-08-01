@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react-native";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react-native";
 import { Platform } from "react-native";
 import { router } from "expo-router";
 import {
@@ -222,4 +222,44 @@ test("imperial: submit converts ft/in + lb inputs to metric height_cm/weight_kg"
     }),
     expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
   );
+});
+
+test("a server failure does not tell the user their details are wrong", async () => {
+  // The shipped copy blamed the user's input for every failure, including a
+  // 5xx — sending someone whose details were fine round a loop they cannot
+  // exit by doing what they are told. Reproduced against prod during the
+  // device pass, where onboarding failed while the identical payload
+  // succeeded via curl seconds later.
+  const ui = await render(<Onboarding />);
+  await advance(ui);
+  await fireEvent.changeText(ui.getByLabelText("Birth year"), "1995");
+  await fireEvent.changeText(ui.getByLabelText("Height in centimetres"), "170");
+  await fireEvent.changeText(ui.getByLabelText("Weight in kilograms"), "65");
+  await fireEvent.press(ui.getByText("Get started"));
+
+  const { onError } = mockMutate.mock.calls[0][1];
+  await act(async () => {
+    onError(Object.assign(new Error("down"), { name: "ApiError", status: 503 }));
+  });
+
+  expect(
+    await ui.findByText("Kora is having trouble right now. Please try again in a moment."),
+  ).toBeTruthy();
+  expect(ui.queryByText("Please check your details and try again.")).toBeNull();
+});
+
+test("a validation rejection still asks the user to check their details", async () => {
+  const ui = await render(<Onboarding />);
+  await advance(ui);
+  await fireEvent.changeText(ui.getByLabelText("Birth year"), "1995");
+  await fireEvent.changeText(ui.getByLabelText("Height in centimetres"), "170");
+  await fireEvent.changeText(ui.getByLabelText("Weight in kilograms"), "65");
+  await fireEvent.press(ui.getByText("Get started"));
+
+  const { onError } = mockMutate.mock.calls[0][1];
+  await act(async () => {
+    onError(Object.assign(new Error("bad"), { name: "ApiError", status: 400 }));
+  });
+
+  expect(await ui.findByText("Please check your details and try again.")).toBeTruthy();
 });
