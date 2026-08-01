@@ -1479,6 +1479,39 @@ git commit -m "feat(mobile): give sign-in an explicit mode and real error messag
 
 ---
 
+---
+
+## Tasks 8–10 — activity inference from Health data (added 2026-08-01)
+
+Added after the user observed that the goal and activity questions read as
+MyFitnessPal boilerplate. See the spec's §3a amendment for the design and rationale.
+All three are implemented; recorded here for the branch history.
+
+**Task 8 — `src/health/inferActivity.ts`** (commit `4c54148`). Pure function, no
+HealthKit: step bands → base level, workout load lifts it (+1 at ≥3/wk, +2 at ≥5),
+capped. Returns `null` for insufficient evidence. 19 tests. Mutations caught:
+all-zero steps flooring to `sedentary`; accepting short windows; dropping the workout
+bump; removing the cap.
+
+**Task 9 — `src/health/useActivityHistory.ts`** (commit `8b6d090`). Opt-in hook:
+14-day step window + workouts, lazily requiring the Nitro module so a missing native
+side degrades instead of redboxing. Exports `bucketStepsByDay` / `workoutsPerWeek` so
+the bucketing is testable without HealthKit. 15 tests. Mutations caught: zero-filling
+absent days; treating thin data as `sedentary`; requesting authorization eagerly.
+Also adds `queryWorkoutSamples` to the global mock in `jest.setup.js`.
+
+**Task 10 — `src/components/ActivityFromHealth.tsx` + wiring** (commit `0698921`).
+Opt-in affordance above the card list; on success states the evidence *and* the
+conclusion and requires confirmation. 9 component tests + 2 integration tests in
+`onboarding.test.tsx`. Mutations caught: collapsing the three unusable states into
+one vague message; auto-applying without confirmation; `onAccept` not setting state.
+
+**Device-verified:** the real HealthKit sheet appears only on tap, requests the
+Workouts scope, and a device with no step history shows "There isn't enough recent
+activity yet to tell" with the card list intact — no level invented. Note HealthKit
+read permissions cannot distinguish *denied* from *authorized-but-empty*, so a
+decline surfaces as `insufficient`; both are handled and neither guesses.
+
 ## Final verification (after all tasks)
 
 - [ ] `npx tsc --noEmit` — clean.
