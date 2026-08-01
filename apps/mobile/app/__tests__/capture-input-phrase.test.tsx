@@ -35,6 +35,10 @@ jest.mock("@/api/hooks", () => ({
   useResolveVoice: () => ({ mutate: mockResolveVoiceMutate, isPending: false }),
   useResolveBarcode: () => ({ mutate: mockResolveBarcodeMutate, isPending: false }),
   useCreateLog: () => ({ mutateAsync: mockCreateLogMutateAsync, isPending: false }),
+  // The capture screen now mounts a FoodPicker for resolving uncertain rows.
+  // Nothing here opens it, so an empty result set is enough — but the hook must
+  // exist, or every render in this file throws before reaching its assertions.
+  useFoodSearch: () => ({ data: [], isLoading: false, isError: false }),
 }));
 
 type MockRecorder = {
