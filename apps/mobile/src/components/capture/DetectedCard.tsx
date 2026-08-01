@@ -6,6 +6,7 @@ import { foodVisual } from "@/lib/foodVisual";
 import { withAlpha } from "@/lib/color";
 import type { MealSlot } from "@/lib/mealSlot";
 import { kcalTotalLabel } from "@/lib/resolutionKcal";
+import { contributesKcal, isLoggable, loggableCandidates } from "@/lib/candidateTier";
 import type { Resolution, ResolvedCandidate } from "@/api/types";
 import { useTheme } from "@/theme";
 import { captureColors } from "./captureTheme";
@@ -25,7 +26,9 @@ function kcalTotalValue(resolution: Resolution): number {
   if (resolution.is_estimate) {
     return ((resolution.kcal_low ?? 0) + (resolution.kcal_high ?? 0)) / 2;
   }
-  return resolution.candidates.reduce((total, candidate) => total + candidate.kcal, 0);
+  return resolution.candidates
+    .filter(contributesKcal)
+    .reduce((total, candidate) => total + candidate.kcal, 0);
 }
 
 interface Props {
@@ -34,6 +37,12 @@ interface Props {
   onChangeMealSlot: (slot: MealSlot) => void;
   onAdd: () => void;
   adding: boolean;
+  /**
+   * Asked when the user taps an uncertain row, with that row's index in
+   * `resolution.candidates`. When absent the row still reads as uncertain but
+   * is not pressable — the card never resolves anything on its own.
+   */
+  onResolveUncertain?: (index: number) => void;
 }
 
 const MEAL_SLOTS: ReadonlyArray<{ slot: MealSlot; label: string; icon: string }> = [
@@ -65,10 +74,26 @@ function MacroChip({ label, per100g, tint }: { label: string; per100g: number; t
   );
 }
 
-function CandidateRow({ candidate, isLast }: { candidate: ResolvedCandidate; isLast: boolean }) {
+function CandidateRow({
+  candidate,
+  isLast,
+  onResolve,
+}: {
+  candidate: ResolvedCandidate;
+  isLast: boolean;
+  onResolve?: () => void;
+}) {
   const { icon } = foodVisual(candidate.item.name);
   const { gradients } = useTheme();
-  return (
+  const uncertain = !isLoggable(candidate);
+  // Two different reasons to withhold a number, and they are NOT the same
+  // condition: the item is unresolved (uncertain), or the user picked it by
+  // hand and no server kcal exists yet (kcal_unknown). Both render "—".
+  // Keying this off `uncertain` instead would print a fabricated "0 kcal" for
+  // a hand-picked row, which is the client inventing nutrition.
+  const showsKcal = contributesKcal(candidate);
+
+  const body = (
     <View
       style={{
         flexDirection: "row",
@@ -90,25 +115,48 @@ function CandidateRow({ candidate, isLast }: { candidate: ResolvedCandidate; isL
           backgroundColor: captureColors.tileBg,
         }}
       >
-        <Icon name={icon} size={18} color={captureColors.tileFg} />
+        <Icon name={uncertain ? "help-circle" : icon} size={18} color={captureColors.tileFg} />
       </View>
       <View style={{ flex: 1, minWidth: 0 }}>
         <AppText style={{ color: captureColors.onSurface, fontSize: 14, fontWeight: "600" }}>
           {candidate.item.name}
         </AppText>
+        {/* The confident row keeps its portion but no longer states a raw
+            match percentage — that number was false precision about a score
+            the user cannot act on. */}
         <AppText style={{ color: captureColors.onSurfaceFaint, fontSize: 11 }}>
-          {`${Math.round(candidate.portion_grams)}g · ${Math.round(candidate.match_score * 100)}% match`}
+          {uncertain ? "Not sure which — tap to confirm" : `${Math.round(candidate.portion_grams)}g`}
         </AppText>
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 5 }}>
-          <MacroChip label="P" per100g={candidate.item.protein_per_100g} tint={gradients.green[0]} />
-          <MacroChip label="C" per100g={candidate.item.carbs_per_100g} tint={gradients.amber[0]} />
-          <MacroChip label="F" per100g={candidate.item.fat_per_100g} tint={gradients.blue[0]} />
-        </View>
+        {uncertain ? null : (
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 5 }}>
+            <MacroChip label="P" per100g={candidate.item.protein_per_100g} tint={gradients.green[0]} />
+            <MacroChip label="C" per100g={candidate.item.carbs_per_100g} tint={gradients.amber[0]} />
+            <MacroChip label="F" per100g={candidate.item.fat_per_100g} tint={gradients.blue[0]} />
+          </View>
+        )}
       </View>
-      <AppText style={{ flexShrink: 0, color: captureColors.onSurface, fontSize: 13, fontWeight: "700" }}>
-        {`${Math.round(candidate.kcal)} kcal`}
+      <AppText
+        style={{
+          flexShrink: 0,
+          color: showsKcal ? captureColors.onSurface : captureColors.onSurfaceFaint,
+          fontSize: 13,
+          fontWeight: "700",
+        }}
+      >
+        {showsKcal ? `${Math.round(candidate.kcal)} kcal` : "—"}
       </AppText>
     </View>
+  );
+
+  if (!uncertain || !onResolve) return body;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Confirm ${candidate.item.name}`}
+      onPress={onResolve}
+    >
+      {body}
+    </Pressable>
   );
 }
 
@@ -119,8 +167,20 @@ function CandidateRow({ candidate, isLast }: { candidate: ResolvedCandidate; isL
 // estimate (kcalTotalLabel/kcalTotalValue) and the ring's own fill fraction.
 // The per-candidate macro chips render the FoodItem's own per-100g fields
 // verbatim (never scaled by portion) — see MacroChip above.
-export function DetectedCard({ resolution, mealSlot, onChangeMealSlot, onAdd, adding }: Props) {
+export function DetectedCard({
+  resolution,
+  mealSlot,
+  onChangeMealSlot,
+  onAdd,
+  adding,
+  onResolveUncertain,
+}: Props) {
   const { gradients } = useTheme();
+  // The header states what was seen; the CTA states what will actually be
+  // written to the diary. They deliberately disagree when an item is uncertain.
+  const loggable = loggableCandidates(resolution);
+  const nothingToLog = loggable.length === 0;
+  const ctaLabel = `Add ${loggable.length} item${loggable.length === 1 ? "" : "s"} to diary`;
   return (
     <View
       style={{
@@ -164,6 +224,7 @@ export function DetectedCard({ resolution, mealSlot, onChangeMealSlot, onAdd, ad
           key={`${candidate.item.id}-${i}`}
           candidate={candidate}
           isLast={i === resolution.candidates.length - 1}
+          onResolve={onResolveUncertain ? () => onResolveUncertain(i) : undefined}
         />
       ))}
 
@@ -177,8 +238,8 @@ export function DetectedCard({ resolution, mealSlot, onChangeMealSlot, onAdd, ad
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={adding ? "Adding to diary" : "Add to diary"}
-          accessibilityState={{ disabled: adding }}
-          disabled={adding}
+          accessibilityState={{ disabled: adding || nothingToLog }}
+          disabled={adding || nothingToLog}
           onPress={onAdd}
           style={(state) => ({
             flex: 1,
@@ -198,7 +259,7 @@ export function DetectedCard({ resolution, mealSlot, onChangeMealSlot, onAdd, ad
             <>
               <Icon name="check" size={16} color={captureColors.primaryForeground} />
               <AppText style={{ color: captureColors.primaryForeground, fontSize: 15, fontWeight: "600" }}>
-                Add to diary
+                {ctaLabel}
               </AppText>
             </>
           )}
