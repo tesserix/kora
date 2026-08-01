@@ -153,6 +153,9 @@ func TestResolveText_PersonalAliasShortCircuit_SkipsProviderAndMetering(t *testi
 	require.Empty(t, meter.records, "an alias short-circuit did no AI work and must not be metered")
 	require.Equal(t, TierAuto, res.Tier)
 	require.Len(t, res.Candidates, 1)
+	// The candidate carries its OWN tier too: a personal correction is the
+	// most confident signal there is, so the row is never a follow-up.
+	require.Equal(t, TierAuto, res.Candidates[0].Tier)
 	require.Equal(t, item.ID, res.Candidates[0].Item.ID)
 	require.Equal(t, nutrition.MatchAlias, res.Candidates[0].MatchTier)
 	require.Equal(t, 220.0, res.Candidates[0].PortionGrams, "portion must come from the user's last log of this phrase")
@@ -447,6 +450,51 @@ func TestResolveText_UnknownDish_DecomposesToEstimate(t *testing.T) {
 	require.InDelta(t, wantSum*(1-estimateBand), res.KcalLow, 0.01)
 	require.InDelta(t, wantSum*(1+estimateBand), res.KcalHigh, 0.01)
 	require.Len(t, res.Candidates, 2)
+}
+
+// TestResolveText_EstimatePath_StampsConfirmTierOnEveryCandidate covers the
+// decompose/estimate fallback, which builds candidates by a different path
+// than resolveGuesses. Its items are inherently uncertain — the whole
+// Resolution is TierConfirm and IsEstimate — so each candidate must say so
+// rather than arriving with an empty tier the client has to guess about.
+func TestResolveText_EstimatePath_StampsConfirmTierOnEveryCandidate(t *testing.T) {
+	db := testDB(t)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE brand = 'test2c'") })
+	repo := nutrition.NewRepository(db)
+
+	chicken := seedFoodItem(t, repo, nutrition.FoodItem{
+		Name: "Shredded chicken tier ingredient", Brand: "test2c",
+		Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 165,
+	})
+	seedAlias(t, db, "shredded chicken 2c", chicken.ID)
+
+	rice := seedFoodItem(t, repo, nutrition.FoodItem{
+		Name: "Steamed rice tier ingredient", Brand: "test2c",
+		Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 130,
+	})
+	seedAlias(t, db, "steamed rice 2c", rice.ID)
+
+	provider := &stubProvider{
+		// Nonce token that no seeded or ambient row contains, so the first
+		// pass resolves nothing and the decompose fallback runs.
+		guesses:    []Guess{{Food: "qzzznonce unknown dish 2c", PortionEstimate: "1 serving", Confidence: 0.9}},
+		guessUsage: Usage{Provider: "stub", CallType: "identify_text"},
+		ingredients: []IngredientGuess{
+			{Ingredient: "shredded chicken 2c", PortionEstimate: "150 g", Confidence: 0.8},
+			{Ingredient: "steamed rice 2c", PortionEstimate: "200 g", Confidence: 0.8},
+		},
+		ingredientsUsage: Usage{Provider: "stub", CallType: "decompose"},
+	}
+	resolver := NewResolver(provider, repo, NoCache{}, &stubMeter{withinBudget: true})
+
+	res, err := resolver.ResolveText(context.Background(), uuid.New(), "qzzznonce unknown dish 2c")
+
+	require.NoError(t, err)
+	require.True(t, res.IsEstimate)
+	require.NotEmpty(t, res.Candidates)
+	for i, c := range res.Candidates {
+		require.Equal(t, TierConfirm, c.Tier, "candidate %d", i)
+	}
 }
 
 // TestResolveText_BudgetExceeded_GracefulManualFallback verifies the budget

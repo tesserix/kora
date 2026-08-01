@@ -150,6 +150,7 @@ func (r Resolver) aliasShortCircuit(ctx context.Context, userID uuid.UUID, phras
 			Kcal:         item.KcalPer100g * grams / 100,
 			MatchScore:   1.0,
 			MatchTier:    nutrition.MatchAlias,
+			Tier:         TierAuto,
 		}},
 		Tier:       TierAuto,
 		Provenance: item.Provenance,
@@ -437,6 +438,9 @@ func (r Resolver) decomposeAndEstimate(ctx context.Context, userID uuid.UUID, su
 			Kcal:         kcal,
 			MatchScore:   top.MatchScore,
 			MatchTier:    top.MatchTier,
+			// The whole estimate resolution is TierConfirm; each item inherits
+			// it, since none was individually identified with confidence.
+			Tier: TierConfirm,
 		})
 	}
 

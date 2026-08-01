@@ -224,6 +224,7 @@ func (h Handler) ResolveBarcode(c *gin.Context) {
 			Kcal:         kcal,
 			MatchScore:   1.0,
 			MatchTier:    nutrition.MatchAlias, // exact barcode == exact match
+			Tier:         ai.TierAuto,
 		}},
 		Tier:       ai.TierAuto,
 		Provenance: item.Provenance,

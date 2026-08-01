@@ -416,6 +416,9 @@ func TestResolveBarcode_Found(t *testing.T) {
 	require.Len(t, body.Data.Candidates, 1)
 	c := body.Data.Candidates[0]
 	assert.Equal(t, item.KcalPer100g, c.Kcal)
+	// The candidate carries its own tier: an exact barcode hit is as certain
+	// as resolution gets, so the client must never render it as uncertain.
+	assert.Equal(t, ai.TierAuto, c.Tier)
 	assert.Equal(t, nutrition.ProvenanceOFF, body.Data.Provenance)
 }
 
