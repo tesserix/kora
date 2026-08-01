@@ -169,6 +169,14 @@ export interface ResolvedCandidate {
   kcal: number;
   match_score: number;
   match_tier: string;
+  /** This item's own confidence. Optional: an older server omits it. */
+  tier?: ResolveTier;
+  /**
+   * Client-set only, never sent by the server. Marks a row the user resolved
+   * by hand after capture: it is loggable, but the server has computed no kcal
+   * for it yet, so the card must render "—" rather than invent a figure.
+   */
+  kcal_unknown?: boolean;
 }
 
 export interface Resolution {
