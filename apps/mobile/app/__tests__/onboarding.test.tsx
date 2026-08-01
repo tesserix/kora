@@ -1,5 +1,12 @@
-import { fireEvent, render, screen, within } from "@testing-library/react-native";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react-native";
+import { Platform } from "react-native";
 import { router } from "expo-router";
+import {
+  isHealthDataAvailable,
+  queryQuantitySamples,
+  queryWorkoutSamples,
+  requestAuthorization,
+} from "@kingstinct/react-native-healthkit";
 
 const mockMutate = jest.fn();
 let mockIsPending = false;
@@ -143,6 +150,57 @@ test("going back to step 1 keeps both the goal and what was typed on step 2", as
   // And step 2's entry was not discarded by the round trip.
   await advance(ui);
   expect(ui.getByLabelText("Birth year").props.value).toBe("1988");
+});
+
+test("accepting a Health suggestion changes the activity level that is submitted", async () => {
+  // The load-bearing integration property: the suggestion must reach the payload,
+  // not just the screen. Seeded so the inference (sedentary) differs from the
+  // default (moderate) — otherwise the assertion would pass either way.
+  Object.defineProperty(Platform, "OS", { get: () => "ios", configurable: true });
+  (isHealthDataAvailable as jest.Mock).mockReturnValue(true);
+  (requestAuthorization as jest.Mock).mockResolvedValue(true);
+  (queryQuantitySamples as jest.Mock).mockResolvedValue(
+    Array.from({ length: 14 }, (_, i) => {
+      const d = new Date();
+      d.setHours(9, 0, 0, 0);
+      d.setDate(d.getDate() - i);
+      return { startDate: d, quantity: 3000 };
+    }),
+  );
+  (queryWorkoutSamples as jest.Mock).mockResolvedValue([]);
+
+  const ui = await render(<Onboarding />);
+  await advance(ui);
+
+  await fireEvent.press(ui.getByText("Use my Health data"));
+  await waitFor(() => expect(ui.getByText("That reads as Sedentary.")).toBeTruthy());
+  await fireEvent.press(ui.getByText("Sounds right"));
+
+  await fireEvent.changeText(ui.getByLabelText("Birth year"), "1995");
+  await fireEvent.changeText(ui.getByLabelText("Height in centimetres"), "170");
+  await fireEvent.changeText(ui.getByLabelText("Weight in kilograms"), "65");
+  await fireEvent.press(ui.getByText("Get started"));
+
+  expect(mockMutate).toHaveBeenCalledWith(
+    expect.objectContaining({ activity_level: "sedentary" }),
+    expect.anything(),
+  );
+});
+
+test("declining Health access leaves the manual cards as the way forward", async () => {
+  Object.defineProperty(Platform, "OS", { get: () => "ios", configurable: true });
+  (isHealthDataAvailable as jest.Mock).mockReturnValue(true);
+  (requestAuthorization as jest.Mock).mockResolvedValue(false);
+
+  const ui = await render(<Onboarding />);
+  await advance(ui);
+  await fireEvent.press(ui.getByText("Use my Health data"));
+
+  await waitFor(() => expect(ui.getByText(/can't see your Health data/i)).toBeTruthy());
+  // No level was asserted, and the cards are still there to choose from.
+  expect(ui.queryByText(/That reads as/)).toBeNull();
+  expect(ui.getByText("Sedentary")).toBeTruthy();
+  expect(ui.getByText("Very active")).toBeTruthy();
 });
 
 test("imperial: submit converts ft/in + lb inputs to metric height_cm/weight_kg", async () => {

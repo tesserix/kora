@@ -9,6 +9,8 @@ import { Card } from "@/components/Card";
 import { BrandLockup } from "@/components/BrandLockup";
 import { SelectableCard } from "@/components/SelectableCard";
 import { AuthScaffold } from "@/components/AuthScaffold";
+import { ActivityFromHealth } from "@/components/ActivityFromHealth";
+import { useActivityHistory } from "@/health/useActivityHistory";
 import { useSubmitOnboarding } from "@/api/hooks";
 import type { OnboardingInput } from "@/api/types";
 import { useTheme } from "@/theme";
@@ -42,6 +44,12 @@ const ACTIVITY_OPTIONS: Array<{
   { key: "very_active", label: "Very active", sub: "Physical job or athlete" },
 ];
 
+// Maps a stored activity_level back to its display label, so the Health
+// suggestion names the level using exactly the same words as the cards below it.
+function activityLabel(level: OnboardingInput["activity_level"]): string {
+  return ACTIVITY_OPTIONS.find((a) => a.key === level)?.label ?? String(level);
+}
+
 export default function Onboarding() {
   const { colors, spacing, fontSize } = useTheme();
   const submit = useSubmitOnboarding();
@@ -56,6 +64,7 @@ export default function Onboarding() {
   const [weightText, setWeightText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const { system } = useUnits();
+  const health = useActivityHistory();
 
   // Android's hardware back on step 2 must return to step 1, not pop the route —
   // leaving onboarding would discard everything already entered.
@@ -238,6 +247,13 @@ export default function Onboarding() {
       </View>
 
       <Overline style={{ marginTop: spacing.xs }}>Activity</Overline>
+      <ActivityFromHealth
+        status={health.status}
+        inference={health.inference}
+        levelLabel={activityLabel}
+        onUseHealth={health.request}
+        onAccept={setActivity}
+      />
       <View accessibilityRole="radiogroup" style={{ gap: spacing.sm }}>
         {ACTIVITY_OPTIONS.map((a) => (
           <SelectableCard
