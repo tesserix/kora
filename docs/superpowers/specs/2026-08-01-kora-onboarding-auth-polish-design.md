@@ -140,6 +140,62 @@ prod and is the visible half of the forced-sign-out recovery path — it must ke
 **Also:** `textContentType` / `autoComplete` set per mode (`password` vs `new-password`) so
 the iOS password manager offers the right action.
 
+### 3a. Activity inference from Health data (amendment, 2026-08-01)
+
+**Why:** goal + a five-point Sedentary→Very-active scale is the MyFitnessPal pattern verbatim
+— `api/internal/onboarding/calc.go` is Mifflin–St Jeor with the standard 1.2–1.9 multipliers,
+so the *inputs* are genuinely required, but asking for them in the category's own words is a
+choice. Kora can instead demonstrate on the first screen that it pays attention.
+
+**Correction to an earlier claim:** "HealthKit is already integrated" was true but overstated.
+`useHealth` reads **today's** steps and last night's sleep only — no multi-day window, no
+workouts. This needs new queries and one additional read scope.
+
+**Shape.** Split into a pure function and a thin I/O hook, mirroring `onboarding/calc.go` and
+`validateOnboarding.ts`. The mapping is then unit-testable without HealthKit, which matters
+because HealthKit cannot be exercised in Jest and needs seeded data even on a simulator.
+
+`inferActivityLevel(input)` — pure, in `src/health/inferActivity.ts`:
+
+```
+input:  { dailySteps: number[]; workoutsPerWeek: number; daysObserved: number }
+output: { level: OnboardingInput["activity_level"]; confident: boolean; reason: string }
+       | null   // null = not enough data to say anything
+```
+
+Base level from the 14-day mean daily step count:
+
+| Mean steps/day | Level |
+|---|---|
+| < 5,000 | `sedentary` |
+| 5,000–7,499 | `light` |
+| 7,500–9,999 | `moderate` |
+| 10,000–12,499 | `active` |
+| ≥ 12,500 | `very_active` |
+
+Then bump up for training load, capped at `very_active`: **+1 level at ≥3 workouts/week,
++2 at ≥5**. This is the whole reason workouts are read — a lifter at 3,000 steps and five
+sessions a week is `sedentary` on steps alone, which is exactly wrong for the "Build muscle"
+cohort.
+
+**Insufficient data returns `null`, never a level.** Fewer than 7 days observed, or no step
+samples at all, means the user sees the manual card list unchanged. This repo has already
+spent a PR undoing three signals that treated absent data as evidence (`fastingStreak`,
+`recentDeficitPct`, `AvgIntakeKcal`); a missing-data floor of "sedentary" would be the same
+mistake, and it biases the calorie target downward — the direction that matters most for an
+app with ED guardrails.
+
+**Interaction.** Opt-in, never automatic. Step 2 shows the card list by default with a
+"Use my Health data" affordance; only tapping it requests authorization. This keeps the
+fallback on the default path — which is what Android (`TODO(health-connect)`, `unavailable`
+off iOS) and every declining user gets, so it is the path actually exercised. On a successful
+inference the app states what it saw and what it concluded, and the user confirms or overrides;
+the inferred level is never silently applied.
+
+**Not doing:** `getDateOfBirth` / `getBiologicalSex` also exist and could prefill two more
+fields. Deliberately out of scope — it widens the permission request beyond what the activity
+question justifies.
+
 ### 4. Accessibility
 
 - 44pt minimum hit target on every `SelectableCard` (42px tile + padding clears this).
