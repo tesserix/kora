@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { KeyboardAvoidingView, TextInput, View } from "react-native";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
@@ -17,9 +17,15 @@ export default function SignIn() {
   if (!isFirebaseConfigured) return null;
 
   const { colors, spacing, fontSize } = useTheme();
+  // Set by api.ts's forced sign-out (a 401 that survived a token refresh)
+  // via the redirect (tabs)/_layout.tsx makes when the session becomes
+  // unusable — not present on a manual sign-out.
+  const { reason } = useLocalSearchParams<{ reason?: string }>();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(() =>
+    reason === "expired" ? "Your session expired. Please sign in again." : null,
+  );
   const [busy, setBusy] = useState(false);
 
   const filledInputStyle = {

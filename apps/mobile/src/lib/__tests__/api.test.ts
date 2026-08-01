@@ -4,6 +4,18 @@ jest.mock("../firebase", () => ({
   auth: { currentUser: { getIdToken: jest.fn().mockResolvedValue("test-token") } },
 }));
 
+// This file's requests always resolve to "test-token" on refresh too, so a
+// 401 here never actually recovers — some of the failure-envelope tests
+// below exercise api.ts's retry-then-sign-out path as a side effect. Session
+// recovery itself (retry succeeds, retry still 401, concurrent bursts, 403
+// vs 500, no signed-in user) is covered end to end in
+// api-session-recovery.test.ts, which is why this mock only needs to not
+// crash, not assert call counts.
+jest.mock("firebase/auth", () => ({
+  onAuthStateChanged: jest.fn(),
+  signOut: jest.fn(),
+}));
+
 beforeEach(() => {
   global.fetch = jest.fn();
 });
