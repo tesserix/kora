@@ -9,9 +9,18 @@ import { auth, isFirebaseConfigured } from "@/lib/firebase";
 import { AppText } from "@/components/Text";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
-import { Overline } from "@/components/Overline";
-import { AppBackground } from "@/components/AppBackground";
+import { Segmented } from "@/components/Segmented";
+import { BrandLockup } from "@/components/BrandLockup";
+import { AuthScaffold } from "@/components/AuthScaffold";
+import { firebaseAuthMessage } from "@/lib/firebaseAuthMessage";
 import { useTheme } from "@/theme";
+
+type Mode = "in" | "up";
+
+const MODE_OPTIONS: Array<{ key: Mode; label: string }> = [
+  { key: "in", label: "Sign in" },
+  { key: "up", label: "Create account" },
+];
 
 export default function SignIn() {
   if (!isFirebaseConfigured) return null;
@@ -21,6 +30,10 @@ export default function SignIn() {
   // via the redirect (tabs)/_layout.tsx makes when the session becomes
   // unusable — not present on a manual sign-out.
   const { reason } = useLocalSearchParams<{ reason?: string }>();
+  // Mode is explicit rather than inferred from which of two equally-weighted
+  // buttons was pressed. The old screen greeted brand-new users with "Welcome
+  // back" and had no way to word an error correctly for both paths.
+  const [mode, setMode] = useState<Mode>("in");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(() =>
@@ -36,7 +49,7 @@ export default function SignIn() {
     minHeight: 48,
   } as const;
 
-  async function submit(mode: "in" | "up") {
+  async function submit() {
     if (!auth) return;
     setBusy(true);
     setError(null);
@@ -44,58 +57,90 @@ export default function SignIn() {
       if (mode === "in") await signInWithEmailAndPassword(auth, email, password);
       else await createUserWithEmailAndPassword(auth, email, password);
       router.replace("/");
-    } catch {
-      setError("Sign-in failed. Check your email and password.");
+    } catch (e: unknown) {
+      setError(firebaseAuthMessage(e));
     } finally {
       setBusy(false);
     }
   }
 
+  const cta = mode === "in" ? "Sign in" : "Create account";
+
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppBackground />
-      <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
-        <View style={{ flex: 1, justifyContent: "center", padding: spacing.lg, gap: spacing.lg }}>
-          <View style={{ gap: spacing.xs }}>
-            <Overline>Welcome back</Overline>
-            <AppText variant="title1">Welcome to Kora</AppText>
-          </View>
-          <View style={{ gap: spacing.sm }}>
-            <Card variant="elevated" style={{ padding: 0 }}>
-              <TextInput
-                accessibilityLabel="Email"
-                style={filledInputStyle}
-                placeholder="Email"
-                placeholderTextColor={colors.secondaryLabel}
-                autoCapitalize="none"
-                keyboardType="email-address"
-                value={email}
-                onChangeText={setEmail}
-              />
-            </Card>
-            <Card variant="elevated" style={{ padding: 0 }}>
-              <TextInput
-                accessibilityLabel="Password"
-                style={filledInputStyle}
-                placeholder="Password"
-                placeholderTextColor={colors.secondaryLabel}
-                secureTextEntry
-                value={password}
-                onChangeText={setPassword}
-              />
-            </Card>
-          </View>
-          {error ? (
-            <AppText variant="footnote" style={{ color: colors.destructive }}>
-              {error}
-            </AppText>
-          ) : null}
-          <View style={{ gap: spacing.sm }}>
-            <Button title={busy ? "…" : "Sign in"} onPress={() => submit("in")} disabled={busy} />
-            <Button title="Create account" variant="secondary" onPress={() => submit("up")} disabled={busy} />
-          </View>
+    <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
+      <AuthScaffold
+        footer={
+          <Button
+            testID="auth-submit"
+            title={busy ? "…" : cta}
+            icon="arrow-right"
+            iconPosition="trailing"
+            onPress={submit}
+            disabled={busy}
+          />
+        }
+      >
+        <BrandLockup />
+        <AppText variant="title1" style={{ marginTop: spacing.sm }}>
+          {mode === "in" ? "Welcome back." : "Start with Kora."}
+        </AppText>
+        <AppText muted>
+          {mode === "in"
+            ? "Sign in to pick up where you left off."
+            : "Create an account and log your first meal in seconds."}
+        </AppText>
+
+        <Segmented
+          options={MODE_OPTIONS}
+          value={mode}
+          onChange={(key) => {
+            setMode(key as Mode);
+            // An error raised by the other mode no longer applies, and would
+            // read as a failure of the action just switched to.
+            setError(null);
+          }}
+        />
+
+        <View style={{ gap: spacing.sm }}>
+          <Card variant="elevated" style={{ padding: 0 }}>
+            <TextInput
+              accessibilityLabel="Email"
+              style={filledInputStyle}
+              placeholder="Email"
+              placeholderTextColor={colors.secondaryLabel}
+              autoCapitalize="none"
+              autoComplete="email"
+              textContentType="emailAddress"
+              keyboardType="email-address"
+              value={email}
+              onChangeText={setEmail}
+            />
+          </Card>
+          <Card variant="elevated" style={{ padding: 0 }}>
+            <TextInput
+              accessibilityLabel="Password"
+              style={filledInputStyle}
+              placeholder="Password"
+              placeholderTextColor={colors.secondaryLabel}
+              secureTextEntry
+              autoComplete={mode === "in" ? "current-password" : "new-password"}
+              textContentType={mode === "in" ? "password" : "newPassword"}
+              value={password}
+              onChangeText={setPassword}
+            />
+          </Card>
         </View>
-      </KeyboardAvoidingView>
-    </View>
+
+        {error ? (
+          <AppText
+            variant="footnote"
+            accessibilityLiveRegion="polite"
+            style={{ color: colors.destructive }}
+          >
+            {error}
+          </AppText>
+        ) : null}
+      </AuthScaffold>
+    </KeyboardAvoidingView>
   );
 }

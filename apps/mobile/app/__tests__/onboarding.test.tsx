@@ -1,5 +1,12 @@
-import { fireEvent, render, screen } from "@testing-library/react-native";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react-native";
+import { Platform } from "react-native";
 import { router } from "expo-router";
+import {
+  isHealthDataAvailable,
+  queryQuantitySamples,
+  queryWorkoutSamples,
+  requestAuthorization,
+} from "@kingstinct/react-native-healthkit";
 
 const mockMutate = jest.fn();
 let mockIsPending = false;
@@ -30,46 +37,82 @@ beforeEach(() => {
   mockUseUnits.mockReturnValue({ system: "metric", setSystem: jest.fn() });
 });
 
-test("Onboarding shows the editorial hero and goal cards", async () => {
-  const { findByText } = await render(<Onboarding />);
-  expect(await findByText(/Otto tracks it/i)).toBeTruthy();
-  expect(await findByText("Lose weight")).toBeTruthy();
-  expect(await findByText("Build muscle")).toBeTruthy();
-  expect(await findByText("Get started")).toBeTruthy();
+// Onboarding is two steps: the goal picker, then the body/activity details.
+async function advance(ui: Awaited<ReturnType<typeof render>>) {
+  await fireEvent.press(ui.getByText("Continue"));
+}
+
+test("step 1 shows the brand, the hero and the goal cards", async () => {
+  const ui = await render(<Onboarding />);
+  expect(ui.getByTestId("sf-sparkles")).toBeTruthy();
+  expect(await ui.findByText(/Otto tracks it/i)).toBeTruthy();
+  expect(await ui.findByText("Lose weight")).toBeTruthy();
+  expect(await ui.findByText("Build muscle")).toBeTruthy();
+  expect(await ui.findByText("Continue")).toBeTruthy();
 });
 
-it("shows a non-medical disclaimer at goal setup", async () => {
-  await render(<Onboarding />);
+test("step 1 withholds the detail fields and the final action", async () => {
+  const ui = await render(<Onboarding />);
+  expect(ui.queryByLabelText("Birth year")).toBeNull();
+  expect(ui.queryByText("Get started")).toBeNull();
+});
+
+it("shows a non-medical disclaimer on the details step", async () => {
+  const ui = await render(<Onboarding />);
+  await advance(ui);
   expect(screen.getByText(/not medical advice/i)).toBeTruthy();
 });
 
-test("selecting a goal card shows a trailing accent checkmark on that row only", async () => {
-  const { getByText, queryAllByTestId } = await render(<Onboarding />);
+test("selecting a goal leaves exactly one card selected", async () => {
+  const ui = await render(<Onboarding />);
+  const selected = () =>
+    ui.getAllByRole("radio").filter((n) => n.props.accessibilityState?.selected).length;
   // "Lose weight" (fat_loss) is selected by default.
-  expect(queryAllByTestId("sf-checkmark")).toHaveLength(1);
-  await fireEvent.press(getByText("Build muscle"));
-  expect(queryAllByTestId("sf-checkmark")).toHaveLength(1);
+  expect(selected()).toBe(1);
+  await fireEvent.press(ui.getByText("Build muscle"));
+  expect(selected()).toBe(1);
+});
+
+test("every activity level renders in full, with the descriptor that explains it", async () => {
+  // Under the old equal-split Segmented, five options squeezed "Sedentary" into
+  // "Sedentar/y" and wrapped "Very active" onto two lines. The descriptors are
+  // why cards replaced it — without them the levels are unexplained jargon, so
+  // they are asserted here rather than left as unpinned copy.
+  const ui = await render(<Onboarding />);
+  await advance(ui);
+  const levels: Array<[string, string]> = [
+    ["Sedentary", "Desk job, little walking"],
+    ["Light", "1–2 sessions a week"],
+    ["Moderate", "3–5 sessions a week"],
+    ["Active", "6–7 sessions a week"],
+    ["Very active", "Physical job or athlete"],
+  ];
+  for (const [label, sub] of levels) {
+    expect(ui.getByText(label)).toBeTruthy();
+    expect(ui.getByText(sub)).toBeTruthy();
+  }
 });
 
 test("submit is blocked with an error when the numeric fields fail validation", async () => {
-  const { getByText, findByText } = await render(<Onboarding />);
-  // Birth year / height / weight are left blank.
-  await fireEvent.press(getByText("Get started"));
+  const ui = await render(<Onboarding />);
+  await advance(ui);
+  await fireEvent.press(ui.getByText("Get started"));
   expect(mockMutate).not.toHaveBeenCalled();
-  expect(await findByText("Please fill in your birth year, height, and weight.")).toBeTruthy();
+  expect(await ui.findByText("Please fill in your birth year, height, and weight.")).toBeTruthy();
 });
 
-test("valid submit sends the byte-identical onboarding payload and fires success haptic", async () => {
-  const { getByText, getByLabelText } = await render(<Onboarding />);
+test("the goal chosen on step 1 survives the transition and reaches the payload", async () => {
+  const ui = await render(<Onboarding />);
+  await fireEvent.press(ui.getByText("Build muscle"));
+  await advance(ui);
+  await fireEvent.press(ui.getByText("Female"));
+  await fireEvent.press(ui.getByText("Active"));
+  await fireEvent.changeText(ui.getByLabelText("Birth year"), "1995");
+  await fireEvent.changeText(ui.getByLabelText("Height in centimetres"), "170");
+  await fireEvent.changeText(ui.getByLabelText("Weight in kilograms"), "65");
+  await fireEvent.press(ui.getByText("Get started"));
 
-  await fireEvent.press(getByText("Build muscle"));
-  await fireEvent.press(getByText("Female"));
-  await fireEvent.press(getByText("Active"));
-  await fireEvent.changeText(getByLabelText("Birth year"), "1995");
-  await fireEvent.changeText(getByLabelText("Height in centimetres"), "170");
-  await fireEvent.changeText(getByLabelText("Weight in kilograms"), "65");
-  await fireEvent.press(getByText("Get started"));
-
+  expect(mockMutate).toHaveBeenCalledTimes(1);
   expect(mockMutate).toHaveBeenCalledWith(
     {
       sex: "female",
@@ -88,15 +131,88 @@ test("valid submit sends the byte-identical onboarding payload and fires success
   expect(router.replace).toHaveBeenCalledWith("/");
 });
 
+test("going back to step 1 keeps both the goal and what was typed on step 2", async () => {
+  const ui = await render(<Onboarding />);
+  await fireEvent.press(ui.getByText("Build muscle"));
+  await advance(ui);
+  await fireEvent.changeText(ui.getByLabelText("Birth year"), "1988");
+
+  await fireEvent.press(ui.getByLabelText("Go back"));
+
+  // Back on the goal picker, with the chosen goal still the selected one —
+  // not merely still present on screen.
+  const selectedCards = ui
+    .getAllByRole("radio")
+    .filter((n) => n.props.accessibilityState?.selected);
+  expect(selectedCards).toHaveLength(1);
+  expect(within(selectedCards[0]).getByText("Build muscle")).toBeTruthy();
+
+  // And step 2's entry was not discarded by the round trip.
+  await advance(ui);
+  expect(ui.getByLabelText("Birth year").props.value).toBe("1988");
+});
+
+test("accepting a Health suggestion changes the activity level that is submitted", async () => {
+  // The load-bearing integration property: the suggestion must reach the payload,
+  // not just the screen. Seeded so the inference (sedentary) differs from the
+  // default (moderate) — otherwise the assertion would pass either way.
+  Object.defineProperty(Platform, "OS", { get: () => "ios", configurable: true });
+  (isHealthDataAvailable as jest.Mock).mockReturnValue(true);
+  (requestAuthorization as jest.Mock).mockResolvedValue(true);
+  (queryQuantitySamples as jest.Mock).mockResolvedValue(
+    Array.from({ length: 14 }, (_, i) => {
+      const d = new Date();
+      d.setHours(9, 0, 0, 0);
+      d.setDate(d.getDate() - i);
+      return { startDate: d, quantity: 3000 };
+    }),
+  );
+  (queryWorkoutSamples as jest.Mock).mockResolvedValue([]);
+
+  const ui = await render(<Onboarding />);
+  await advance(ui);
+
+  await fireEvent.press(ui.getByText("Use my Health data"));
+  await waitFor(() => expect(ui.getByText("That reads as Sedentary.")).toBeTruthy());
+  await fireEvent.press(ui.getByText("Sounds right"));
+
+  await fireEvent.changeText(ui.getByLabelText("Birth year"), "1995");
+  await fireEvent.changeText(ui.getByLabelText("Height in centimetres"), "170");
+  await fireEvent.changeText(ui.getByLabelText("Weight in kilograms"), "65");
+  await fireEvent.press(ui.getByText("Get started"));
+
+  expect(mockMutate).toHaveBeenCalledWith(
+    expect.objectContaining({ activity_level: "sedentary" }),
+    expect.anything(),
+  );
+});
+
+test("declining Health access leaves the manual cards as the way forward", async () => {
+  Object.defineProperty(Platform, "OS", { get: () => "ios", configurable: true });
+  (isHealthDataAvailable as jest.Mock).mockReturnValue(true);
+  (requestAuthorization as jest.Mock).mockResolvedValue(false);
+
+  const ui = await render(<Onboarding />);
+  await advance(ui);
+  await fireEvent.press(ui.getByText("Use my Health data"));
+
+  await waitFor(() => expect(ui.getByText(/can't see your Health data/i)).toBeTruthy());
+  // No level was asserted, and the cards are still there to choose from.
+  expect(ui.queryByText(/That reads as/)).toBeNull();
+  expect(ui.getByText("Sedentary")).toBeTruthy();
+  expect(ui.getByText("Very active")).toBeTruthy();
+});
+
 test("imperial: submit converts ft/in + lb inputs to metric height_cm/weight_kg", async () => {
   mockUseUnits.mockReturnValue({ system: "imperial", setSystem: jest.fn() });
-  const { getByText, getByLabelText } = await render(<Onboarding />);
+  const ui = await render(<Onboarding />);
+  await advance(ui);
 
-  await fireEvent.changeText(getByLabelText("Birth year"), "1995");
-  await fireEvent.changeText(getByLabelText("Height in feet"), "5");
-  await fireEvent.changeText(getByLabelText("Height in inches"), "11");
-  await fireEvent.changeText(getByLabelText("Weight in pounds"), "150");
-  await fireEvent.press(getByText("Get started"));
+  await fireEvent.changeText(ui.getByLabelText("Birth year"), "1995");
+  await fireEvent.changeText(ui.getByLabelText("Height in feet"), "5");
+  await fireEvent.changeText(ui.getByLabelText("Height in inches"), "11");
+  await fireEvent.changeText(ui.getByLabelText("Weight in pounds"), "150");
+  await fireEvent.press(ui.getByText("Get started"));
 
   expect(mockMutate).toHaveBeenCalledWith(
     expect.objectContaining({

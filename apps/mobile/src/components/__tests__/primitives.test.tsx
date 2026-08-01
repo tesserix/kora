@@ -23,6 +23,27 @@ test("Button does not fire when disabled", async () => {
   expect(onPress).not.toHaveBeenCalled();
 });
 
+test("Button places a trailing icon after the title", async () => {
+  const { getByTestId, getByText } = await render(
+    <Button title="Get started" icon="arrow-right" iconPosition="trailing" onPress={() => {}} />,
+  );
+  // React keeps the unrendered slot in the children array, so filter before
+  // comparing order: [title, icon] for trailing, [icon, title] for leading.
+  const rendered = getByTestId("button-content").props.children.filter(Boolean);
+  expect(rendered).toHaveLength(2);
+  expect(rendered[0].props.children).toBe("Get started");
+  expect(getByText("Get started")).toBeTruthy();
+  expect(getByTestId("sf-arrow.right")).toBeTruthy();
+});
+
+test("Button keeps the icon leading by default so existing call sites are unchanged", async () => {
+  const { getByTestId } = await render(<Button title="Go" icon="arrow-right" onPress={() => {}} />);
+  const rendered = getByTestId("button-content").props.children.filter(Boolean);
+  expect(rendered).toHaveLength(2);
+  expect(rendered[1].props.children).toBe("Go");
+  expect(getByTestId("sf-arrow.right")).toBeTruthy();
+});
+
 test("Card renders children", async () => {
   const { getByText } = await render(
     <Card>

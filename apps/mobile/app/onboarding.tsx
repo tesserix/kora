@@ -1,15 +1,16 @@
-import { useState } from "react";
-import { ScrollView, TextInput, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useEffect, useState } from "react";
+import { BackHandler, TextInput, View } from "react-native";
 import { router } from "expo-router";
 import { AppText } from "@/components/Text";
 import { Button } from "@/components/Button";
-import { Icon } from "@/components/Icon";
 import { Overline } from "@/components/Overline";
-import { GroupedSection, Row } from "@/components/GroupedList";
 import { Segmented } from "@/components/Segmented";
 import { Card } from "@/components/Card";
-import { AppBackground } from "@/components/AppBackground";
+import { BrandLockup } from "@/components/BrandLockup";
+import { SelectableCard } from "@/components/SelectableCard";
+import { AuthScaffold } from "@/components/AuthScaffold";
+import { ActivityFromHealth } from "@/components/ActivityFromHealth";
+import { useActivityHistory } from "@/health/useActivityHistory";
 import { useSubmitOnboarding } from "@/api/hooks";
 import type { OnboardingInput } from "@/api/types";
 import { useTheme } from "@/theme";
@@ -28,18 +29,31 @@ const SEX_OPTIONS: Array<{ key: OnboardingInput["sex"]; label: string }> = [
   { key: "female", label: "Female" },
 ];
 
-const ACTIVITY_OPTIONS: Array<{ key: OnboardingInput["activity_level"]; label: string }> = [
-  { key: "sedentary", label: "Sedentary" },
-  { key: "light", label: "Light" },
-  { key: "moderate", label: "Moderate" },
-  { key: "active", label: "Active" },
-  { key: "very_active", label: "Very active" },
+// Descriptors do double duty: they explain what each level means, and they let
+// the levels render as cards instead of a five-way Segmented, which divided its
+// width equally and clipped "Sedentary" to "Sedentar/y".
+const ACTIVITY_OPTIONS: Array<{
+  key: OnboardingInput["activity_level"];
+  label: string;
+  sub: string;
+}> = [
+  { key: "sedentary", label: "Sedentary", sub: "Desk job, little walking" },
+  { key: "light", label: "Light", sub: "1–2 sessions a week" },
+  { key: "moderate", label: "Moderate", sub: "3–5 sessions a week" },
+  { key: "active", label: "Active", sub: "6–7 sessions a week" },
+  { key: "very_active", label: "Very active", sub: "Physical job or athlete" },
 ];
+
+// Maps a stored activity_level back to its display label, so the Health
+// suggestion names the level using exactly the same words as the cards below it.
+function activityLabel(level: OnboardingInput["activity_level"]): string {
+  return ACTIVITY_OPTIONS.find((a) => a.key === level)?.label ?? String(level);
+}
 
 export default function Onboarding() {
   const { colors, spacing, fontSize } = useTheme();
-  const insets = useSafeAreaInsets();
   const submit = useSubmitOnboarding();
+  const [step, setStep] = useState<1 | 2>(1);
   const [goal, setGoal] = useState<OnboardingInput["goal"]>("fat_loss");
   const [sex, setSex] = useState<OnboardingInput["sex"]>("male");
   const [activity, setActivity] = useState<OnboardingInput["activity_level"]>("moderate");
@@ -50,6 +64,18 @@ export default function Onboarding() {
   const [weightText, setWeightText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const { system } = useUnits();
+  const health = useActivityHistory();
+
+  // Android's hardware back on step 2 must return to step 1, not pop the route —
+  // leaving onboarding would discard everything already entered.
+  useEffect(() => {
+    if (step !== 2) return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      setStep(1);
+      return true; // handled
+    });
+    return () => sub.remove();
+  }, [step]);
 
   const filledInputStyle = {
     paddingHorizontal: spacing.md,
@@ -97,123 +123,162 @@ export default function Onboarding() {
     });
   }
 
-  return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppBackground />
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={{
-          padding: spacing.lg,
-          paddingTop: insets.top + spacing.lg,
-          paddingBottom: spacing["2xl"],
-          gap: spacing.md,
-        }}
+  if (step === 1) {
+    return (
+      <AuthScaffold
+        progress={{ step: 1, total: 2 }}
+        footer={
+          <Button
+            title="Continue"
+            icon="arrow-right"
+            iconPosition="trailing"
+            onPress={() => setStep(2)}
+          />
+        }
       >
-        <Overline>Getting started</Overline>
-        <AppText variant="title1">
+        <BrandLockup />
+        <AppText variant="title1" style={{ marginTop: spacing.sm }}>
           Snap it.{"\n"}Otto tracks it.
         </AppText>
-        <AppText muted style={{ marginBottom: spacing.xs }}>
+        <AppText muted>
           Photo or chat — log meals in seconds and let AI handle the calories and macros.
         </AppText>
 
-        <GroupedSection header="What's your goal?" elevated>
+        <Overline style={{ marginTop: spacing.xs }}>What&apos;s your goal?</Overline>
+        <View accessibilityRole="radiogroup" style={{ gap: spacing.sm }}>
           {GOALS.map((g) => (
-            <Row
+            <SelectableCard
               key={g.id}
+              icon={g.icon}
               title={g.title}
               subtitle={g.sub}
-              icon={{ name: g.icon, tint: colors.accent }}
+              selected={goal === g.id}
               onPress={() => setGoal(g.id)}
-              right={goal === g.id ? <Icon name="check" size={18} color={colors.accent} /> : undefined}
             />
           ))}
-        </GroupedSection>
+        </View>
+      </AuthScaffold>
+    );
+  }
 
-        <Overline style={{ marginTop: spacing.xs }}>About you</Overline>
-        <Segmented options={SEX_OPTIONS} value={sex} onChange={(key) => setSex(key as OnboardingInput["sex"])} />
+  return (
+    <AuthScaffold
+      onBack={() => setStep(1)}
+      progress={{ step: 2, total: 2 }}
+      footer={
+        <Button
+          title={submit.isPending ? "Saving…" : "Get started"}
+          icon="arrow-right"
+          iconPosition="trailing"
+          onPress={onSubmit}
+          disabled={submit.isPending}
+        />
+      }
+    >
+      <AppText variant="title1">About you</AppText>
 
-        <View style={{ gap: spacing.sm }}>
-          <Card variant="elevated" style={{ padding: 0 }}>
-            <TextInput
-              accessibilityLabel="Birth year"
-              style={filledInputStyle}
-              placeholder="Birth year (e.g. 1995)"
-              placeholderTextColor={colors.secondaryLabel}
-              keyboardType="number-pad"
-              value={birthYear}
-              onChangeText={setBirthYear}
-            />
-          </Card>
-          {system === "imperial" ? (
-            <View style={{ flexDirection: "row", gap: spacing.sm }}>
-              <Card variant="elevated" style={{ padding: 0, flex: 1 }}>
-                <TextInput
-                  accessibilityLabel="Height in feet"
-                  style={filledInputStyle}
-                  placeholder="Height (ft)"
-                  placeholderTextColor={colors.secondaryLabel}
-                  keyboardType="number-pad"
-                  value={heightFt}
-                  onChangeText={setHeightFt}
-                />
-              </Card>
-              <Card variant="elevated" style={{ padding: 0, flex: 1 }}>
-                <TextInput
-                  accessibilityLabel="Height in inches"
-                  style={filledInputStyle}
-                  placeholder="Height (in)"
-                  placeholderTextColor={colors.secondaryLabel}
-                  keyboardType="number-pad"
-                  value={heightIn}
-                  onChangeText={setHeightIn}
-                />
-              </Card>
-            </View>
-          ) : (
-            <Card variant="elevated" style={{ padding: 0 }}>
+      <Segmented
+        options={SEX_OPTIONS}
+        value={sex}
+        onChange={(key) => setSex(key as OnboardingInput["sex"])}
+      />
+
+      <View style={{ gap: spacing.sm }}>
+        <Card variant="elevated" style={{ padding: 0 }}>
+          <TextInput
+            accessibilityLabel="Birth year"
+            style={filledInputStyle}
+            placeholder="Birth year (e.g. 1995)"
+            placeholderTextColor={colors.secondaryLabel}
+            keyboardType="number-pad"
+            value={birthYear}
+            onChangeText={setBirthYear}
+          />
+        </Card>
+        {system === "imperial" ? (
+          <View style={{ flexDirection: "row", gap: spacing.sm }}>
+            <Card variant="elevated" style={{ padding: 0, flex: 1 }}>
               <TextInput
-                accessibilityLabel="Height in centimetres"
+                accessibilityLabel="Height in feet"
                 style={filledInputStyle}
-                placeholder="Height (cm)"
+                placeholder="Height (ft)"
                 placeholderTextColor={colors.secondaryLabel}
-                keyboardType="decimal-pad"
-                value={heightCm}
-                onChangeText={setHeightCm}
+                keyboardType="number-pad"
+                value={heightFt}
+                onChangeText={setHeightFt}
               />
             </Card>
-          )}
+            <Card variant="elevated" style={{ padding: 0, flex: 1 }}>
+              <TextInput
+                accessibilityLabel="Height in inches"
+                style={filledInputStyle}
+                placeholder="Height (in)"
+                placeholderTextColor={colors.secondaryLabel}
+                keyboardType="number-pad"
+                value={heightIn}
+                onChangeText={setHeightIn}
+              />
+            </Card>
+          </View>
+        ) : (
           <Card variant="elevated" style={{ padding: 0 }}>
             <TextInput
-              accessibilityLabel={system === "imperial" ? "Weight in pounds" : "Weight in kilograms"}
+              accessibilityLabel="Height in centimetres"
               style={filledInputStyle}
-              placeholder={system === "imperial" ? "Weight (lb)" : "Weight (kg)"}
+              placeholder="Height (cm)"
               placeholderTextColor={colors.secondaryLabel}
               keyboardType="decimal-pad"
-              value={weightText}
-              onChangeText={setWeightText}
+              value={heightCm}
+              onChangeText={setHeightCm}
             />
           </Card>
-        </View>
+        )}
+        <Card variant="elevated" style={{ padding: 0 }}>
+          <TextInput
+            accessibilityLabel={system === "imperial" ? "Weight in pounds" : "Weight in kilograms"}
+            style={filledInputStyle}
+            placeholder={system === "imperial" ? "Weight (lb)" : "Weight (kg)"}
+            placeholderTextColor={colors.secondaryLabel}
+            keyboardType="decimal-pad"
+            value={weightText}
+            onChangeText={setWeightText}
+          />
+        </Card>
+      </View>
 
-        <Overline style={{ marginTop: spacing.xs }}>Activity</Overline>
-        <Segmented
-          options={ACTIVITY_OPTIONS}
-          value={activity}
-          onChange={(key) => setActivity(key as OnboardingInput["activity_level"])}
-        />
+      <Overline style={{ marginTop: spacing.xs }}>Activity</Overline>
+      <ActivityFromHealth
+        status={health.status}
+        inference={health.inference}
+        levelLabel={activityLabel}
+        onUseHealth={health.request}
+        onAccept={setActivity}
+      />
+      <View accessibilityRole="radiogroup" style={{ gap: spacing.sm }}>
+        {ACTIVITY_OPTIONS.map((a) => (
+          <SelectableCard
+            key={a.key}
+            title={a.label}
+            subtitle={a.sub}
+            selected={activity === a.key}
+            onPress={() => setActivity(a.key)}
+          />
+        ))}
+      </View>
 
-        {error ? (
-          <AppText variant="footnote" style={{ color: colors.destructive }}>
-            {error}
-          </AppText>
-        ) : null}
-        <AppText variant="footnote" muted style={{ textAlign: "center" }}>
-          Kora gives general nutrition information, not medical advice. For medical concerns, talk
-          to a healthcare professional.
+      {error ? (
+        <AppText
+          variant="footnote"
+          accessibilityLiveRegion="polite"
+          style={{ color: colors.destructive }}
+        >
+          {error}
         </AppText>
-        <Button title={submit.isPending ? "Saving…" : "Get started"} onPress={onSubmit} disabled={submit.isPending} />
-      </ScrollView>
-    </View>
+      ) : null}
+      <AppText variant="footnote" muted style={{ textAlign: "center" }}>
+        Kora gives general nutrition information, not medical advice. For medical concerns, talk
+        to a healthcare professional.
+      </AppText>
+    </AuthScaffold>
   );
 }
