@@ -663,3 +663,43 @@ func TestResolveText_CacheDoesNotLeakAcrossUsers(t *testing.T) {
 			"user A's personally aliased food item must never leak into user B's resolution via a shared cache key")
 	}
 }
+
+// A meal whose two items resolve at different confidences must stamp each
+// candidate with its OWN tier. Before per-item tiers, the resolution reported
+// only the best item's tier (tierRank keeps the MAX), so the weak item was
+// indistinguishable from the strong one.
+func TestResolveText_PerItemTiers_WeakItemKeepsItsOwnTier(t *testing.T) {
+	db := testDB(t)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE brand = 'test2b'") })
+	repo := nutrition.NewRepository(db)
+
+	strong := seedFoodItem(t, repo, nutrition.FoodItem{
+		Name: "Grilled chicken breast", Brand: "test2b",
+		Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 165,
+	})
+	seedAlias(t, db, "grilled chicken breast", strong.ID)
+	weak := seedFoodItem(t, repo, nutrition.FoodItem{
+		Name: "White rice, cooked", Brand: "test2b",
+		Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 130,
+	})
+	seedAlias(t, db, "white rice cooked", weak.ID)
+
+	provider := &stubProvider{
+		guesses: []Guess{
+			{Food: "grilled chicken breast", PortionEstimate: "100 g", Confidence: 0.95},
+			{Food: "white rice cooked", PortionEstimate: "150 g", Confidence: 0.40},
+		},
+		guessUsage: Usage{Provider: "stub", CallType: "identify_text"},
+	}
+	resolver := NewResolver(provider, repo, NoCache{}, &stubMeter{withinBudget: true})
+
+	res, err := resolver.ResolveText(context.Background(), uuid.New(), "chicken and rice")
+
+	require.NoError(t, err)
+	require.Len(t, res.Candidates, 2)
+	require.Equal(t, TierAuto, res.Candidates[0].Tier)
+	require.Equal(t, TierFollowUp, res.Candidates[1].Tier)
+	// The aggregate deliberately still reports the BEST item's tier — it
+	// answers "is anything here loggable?", not "is everything certain?".
+	require.Equal(t, TierAuto, res.Tier)
+}

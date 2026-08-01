@@ -70,6 +70,10 @@ type ResolvedCandidate struct {
 	Kcal         float64            `json:"kcal"`
 	MatchScore   float64            `json:"match_score"`
 	MatchTier    string             `json:"match_tier"`
+	// Tier is this item's OWN confidence, not the resolution's. Resolution.Tier
+	// keeps the max across items (it answers "is anything loggable?"), so
+	// without a per-item tier a weak item is invisible beside a strong one.
+	Tier Tier `json:"tier"`
 }
 
 // Resolution is the engine's answer for one resolve request.

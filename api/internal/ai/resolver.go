@@ -363,15 +363,17 @@ func (r Resolver) resolveGuesses(ctx context.Context, userID uuid.UUID, guesses 
 		// never from the guess, which structurally cannot carry one.
 		kcal := top.Item.KcalPer100g * grams / 100
 
+		tier := TierFor(guess.Confidence, top.MatchScore)
+
 		candidates = append(candidates, ResolvedCandidate{
 			Item:         top.Item,
 			PortionGrams: grams,
 			Kcal:         kcal,
 			MatchScore:   top.MatchScore,
 			MatchTier:    top.MatchTier,
+			Tier:         tier,
 		})
 
-		tier := TierFor(guess.Confidence, top.MatchScore)
 		if rank := tierRank(tier); rank > bestRank {
 			bestRank = rank
 			bestTier = tier
