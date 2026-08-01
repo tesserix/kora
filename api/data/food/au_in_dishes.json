@@ -1,0 +1,73 @@
+[
+  {"name": "Dal tadka", "serving_desc": "1 cup (150 g)", "serving_grams": 150, "kcal_per_100g": 115, "protein_per_100g": 5.0, "carbs_per_100g": 13.0, "fat_per_100g": 4.5, "fiber_per_100g": 2.5},
+  {"name": "Dal makhani", "serving_desc": "1 cup (150 g)", "serving_grams": 150, "kcal_per_100g": 145, "protein_per_100g": 5.5, "carbs_per_100g": 12.0, "fat_per_100g": 8.0, "fiber_per_100g": 3.0},
+  {"name": "Chana masala", "serving_desc": "1 cup (150 g)", "serving_grams": 150, "kcal_per_100g": 130, "protein_per_100g": 6.0, "carbs_per_100g": 16.0, "fat_per_100g": 4.5, "fiber_per_100g": 5.0},
+  {"name": "Rajma", "serving_desc": "1 cup (150 g)", "serving_grams": 150, "kcal_per_100g": 125, "protein_per_100g": 6.0, "carbs_per_100g": 16.0, "fat_per_100g": 4.0, "fiber_per_100g": 5.5},
+  {"name": "Khichdi", "serving_desc": "1 bowl (200 g)", "serving_grams": 200, "kcal_per_100g": 130, "protein_per_100g": 4.5, "carbs_per_100g": 20.0, "fat_per_100g": 3.5, "fiber_per_100g": 1.8},
+  {"name": "Sambar", "serving_desc": "1 cup (150 g)", "serving_grams": 150, "kcal_per_100g": 65, "protein_per_100g": 3.0, "carbs_per_100g": 8.0, "fat_per_100g": 2.3, "fiber_per_100g": 2.0},
+  {"name": "Rasam", "serving_desc": "1 cup (150 g)", "serving_grams": 150, "kcal_per_100g": 35, "protein_per_100g": 1.2, "carbs_per_100g": 4.5, "fat_per_100g": 1.3, "fiber_per_100g": 0.8},
+
+  {"name": "Chapati", "serving_desc": "1 chapati (40 g)", "serving_grams": 40, "kcal_per_100g": 270, "protein_per_100g": 9.6, "carbs_per_100g": 54.9, "fat_per_100g": 1.2, "fiber_per_100g": 8.7},
+  {"name": "Roti, wholemeal", "serving_desc": "1 roti (45 g)", "serving_grams": 45, "kcal_per_100g": 270, "protein_per_100g": 9.6, "carbs_per_100g": 54.9, "fat_per_100g": 1.2, "fiber_per_100g": 8.7},
+  {"name": "Paratha, plain", "serving_desc": "1 paratha (60 g)", "serving_grams": 60, "kcal_per_100g": 330, "protein_per_100g": 7.5, "carbs_per_100g": 45.0, "fat_per_100g": 13.0, "fiber_per_100g": 6.0},
+  {"name": "Aloo paratha", "serving_desc": "1 paratha (100 g)", "serving_grams": 100, "kcal_per_100g": 250, "protein_per_100g": 5.5, "carbs_per_100g": 34.0, "fat_per_100g": 10.0, "fiber_per_100g": 3.5},
+  {"name": "Naan, plain", "serving_desc": "1 naan (90 g)", "serving_grams": 90, "kcal_per_100g": 310, "protein_per_100g": 8.5, "carbs_per_100g": 50.0, "fat_per_100g": 8.5, "fiber_per_100g": 2.0},
+  {"name": "Puri, fried", "serving_desc": "1 puri (25 g)", "serving_grams": 25, "kcal_per_100g": 360, "protein_per_100g": 7.0, "carbs_per_100g": 45.0, "fat_per_100g": 17.0, "fiber_per_100g": 4.0},
+
+  {"name": "Plain dosa", "serving_desc": "1 dosa (80 g)", "serving_grams": 80, "kcal_per_100g": 168, "protein_per_100g": 3.9, "carbs_per_100g": 29.0, "fat_per_100g": 4.0, "fiber_per_100g": 1.2},
+  {"name": "Masala dosa", "serving_desc": "1 dosa (150 g)", "serving_grams": 150, "kcal_per_100g": 185, "protein_per_100g": 4.0, "carbs_per_100g": 28.0, "fat_per_100g": 6.5, "fiber_per_100g": 1.8},
+  {"name": "Idli, steamed", "serving_desc": "1 idli (40 g)", "serving_grams": 40, "kcal_per_100g": 130, "protein_per_100g": 3.4, "carbs_per_100g": 28.0, "fat_per_100g": 0.4, "fiber_per_100g": 0.9},
+  {"name": "Medu vada", "serving_desc": "1 vada (45 g)", "serving_grams": 45, "kcal_per_100g": 290, "protein_per_100g": 8.0, "carbs_per_100g": 30.0, "fat_per_100g": 15.0, "fiber_per_100g": 3.0},
+  {"name": "Coconut chutney", "serving_desc": "2 tbsp (30 g)", "serving_grams": 30, "kcal_per_100g": 200, "protein_per_100g": 3.0, "carbs_per_100g": 8.0, "fat_per_100g": 18.0, "fiber_per_100g": 4.5},
+  {"name": "Poha", "serving_desc": "1 bowl (150 g)", "serving_grams": 150, "kcal_per_100g": 145, "protein_per_100g": 2.6, "carbs_per_100g": 25.0, "fat_per_100g": 3.8, "fiber_per_100g": 1.5},
+  {"name": "Upma", "serving_desc": "1 bowl (150 g)", "serving_grams": 150, "kcal_per_100g": 150, "protein_per_100g": 3.5, "carbs_per_100g": 22.0, "fat_per_100g": 5.3, "fiber_per_100g": 1.8},
+
+  {"name": "Jeera rice", "serving_desc": "1 cup (150 g)", "serving_grams": 150, "kcal_per_100g": 170, "protein_per_100g": 3.0, "carbs_per_100g": 30.0, "fat_per_100g": 4.0, "fiber_per_100g": 0.8},
+  {"name": "Vegetable biryani", "serving_desc": "1 plate (250 g)", "serving_grams": 250, "kcal_per_100g": 165, "protein_per_100g": 3.5, "carbs_per_100g": 24.0, "fat_per_100g": 6.0, "fiber_per_100g": 1.8},
+  {"name": "Chicken biryani", "serving_desc": "1 plate (250 g)", "serving_grams": 250, "kcal_per_100g": 180, "protein_per_100g": 8.0, "carbs_per_100g": 22.0, "fat_per_100g": 6.5, "fiber_per_100g": 1.2},
+
+  {"name": "Butter chicken", "serving_desc": "1 serve (200 g)", "serving_grams": 200, "kcal_per_100g": 190, "protein_per_100g": 11.0, "carbs_per_100g": 6.0, "fat_per_100g": 13.0, "fiber_per_100g": 1.0},
+  {"name": "Chicken tikka masala", "serving_desc": "1 serve (200 g)", "serving_grams": 200, "kcal_per_100g": 160, "protein_per_100g": 11.0, "carbs_per_100g": 6.0, "fat_per_100g": 10.0, "fiber_per_100g": 1.0},
+  {"name": "Chicken curry, home-style", "serving_desc": "1 serve (200 g)", "serving_grams": 200, "kcal_per_100g": 150, "protein_per_100g": 12.0, "carbs_per_100g": 4.0, "fat_per_100g": 9.5, "fiber_per_100g": 1.0},
+  {"name": "Tandoori chicken", "serving_desc": "2 pieces (150 g)", "serving_grams": 150, "kcal_per_100g": 175, "protein_per_100g": 24.0, "carbs_per_100g": 2.0, "fat_per_100g": 8.0, "fiber_per_100g": 0.3},
+  {"name": "Egg curry", "serving_desc": "1 serve (180 g)", "serving_grams": 180, "kcal_per_100g": 145, "protein_per_100g": 8.0, "carbs_per_100g": 5.0, "fat_per_100g": 10.0, "fiber_per_100g": 1.0},
+
+  {"name": "Paneer, plain", "serving_desc": "50 g", "serving_grams": 50, "kcal_per_100g": 265, "protein_per_100g": 18.0, "carbs_per_100g": 3.5, "fat_per_100g": 20.0, "fiber_per_100g": 0},
+  {"name": "Palak paneer", "serving_desc": "1 serve (180 g)", "serving_grams": 180, "kcal_per_100g": 180, "protein_per_100g": 7.5, "carbs_per_100g": 6.0, "fat_per_100g": 14.0, "fiber_per_100g": 2.2},
+  {"name": "Paneer butter masala", "serving_desc": "1 serve (180 g)", "serving_grams": 180, "kcal_per_100g": 230, "protein_per_100g": 8.0, "carbs_per_100g": 8.0, "fat_per_100g": 18.0, "fiber_per_100g": 1.2},
+  {"name": "Paneer tikka", "serving_desc": "1 serve (120 g)", "serving_grams": 120, "kcal_per_100g": 250, "protein_per_100g": 15.0, "carbs_per_100g": 6.0, "fat_per_100g": 18.0, "fiber_per_100g": 0.8},
+
+  {"name": "Aloo gobi", "serving_desc": "1 serve (150 g)", "serving_grams": 150, "kcal_per_100g": 105, "protein_per_100g": 2.6, "carbs_per_100g": 12.0, "fat_per_100g": 5.3, "fiber_per_100g": 3.0},
+  {"name": "Baingan bharta", "serving_desc": "1 serve (150 g)", "serving_grams": 150, "kcal_per_100g": 95, "protein_per_100g": 1.8, "carbs_per_100g": 8.0, "fat_per_100g": 6.3, "fiber_per_100g": 3.2},
+  {"name": "Bhindi masala", "serving_desc": "1 serve (150 g)", "serving_grams": 150, "kcal_per_100g": 110, "protein_per_100g": 2.2, "carbs_per_100g": 8.5, "fat_per_100g": 7.3, "fiber_per_100g": 3.5},
+
+  {"name": "Samosa, fried", "serving_desc": "1 samosa (50 g)", "serving_grams": 50, "kcal_per_100g": 300, "protein_per_100g": 5.0, "carbs_per_100g": 32.0, "fat_per_100g": 17.0, "fiber_per_100g": 2.5},
+  {"name": "Pav bhaji", "serving_desc": "1 plate (250 g)", "serving_grams": 250, "kcal_per_100g": 200, "protein_per_100g": 4.5, "carbs_per_100g": 24.0, "fat_per_100g": 9.5, "fiber_per_100g": 3.0},
+  {"name": "Vada pav", "serving_desc": "1 vada pav (120 g)", "serving_grams": 120, "kcal_per_100g": 290, "protein_per_100g": 6.0, "carbs_per_100g": 38.0, "fat_per_100g": 12.5, "fiber_per_100g": 2.5},
+
+  {"name": "Curd, plain", "serving_desc": "1 cup (150 g)", "serving_grams": 150, "kcal_per_100g": 60, "protein_per_100g": 3.4, "carbs_per_100g": 4.7, "fat_per_100g": 3.3, "fiber_per_100g": 0},
+  {"name": "Raita, cucumber", "serving_desc": "1 small bowl (100 g)", "serving_grams": 100, "kcal_per_100g": 55, "protein_per_100g": 2.8, "carbs_per_100g": 4.5, "fat_per_100g": 2.8, "fiber_per_100g": 0.4},
+  {"name": "Lassi, sweet", "serving_desc": "1 glass (250 g)", "serving_grams": 250, "kcal_per_100g": 95, "protein_per_100g": 2.8, "carbs_per_100g": 15.0, "fat_per_100g": 2.5, "fiber_per_100g": 0},
+  {"name": "Masala chai, with milk and sugar", "serving_desc": "1 cup (150 g)", "serving_grams": 150, "kcal_per_100g": 65, "protein_per_100g": 1.6, "carbs_per_100g": 10.0, "fat_per_100g": 1.9, "fiber_per_100g": 0},
+  {"name": "Ghee", "serving_desc": "1 tbsp (13 g)", "serving_grams": 13, "kcal_per_100g": 900, "protein_per_100g": 0, "carbs_per_100g": 0, "fat_per_100g": 99.8, "fiber_per_100g": 0},
+
+  {"name": "Gulab jamun", "serving_desc": "1 piece (40 g)", "serving_grams": 40, "kcal_per_100g": 330, "protein_per_100g": 4.0, "carbs_per_100g": 45.0, "fat_per_100g": 15.0, "fiber_per_100g": 0.4},
+  {"name": "Jalebi", "serving_desc": "1 piece (40 g)", "serving_grams": 40, "kcal_per_100g": 370, "protein_per_100g": 2.0, "carbs_per_100g": 60.0, "fat_per_100g": 14.0, "fiber_per_100g": 0.2},
+  {"name": "Kheer, rice", "serving_desc": "1 small bowl (120 g)", "serving_grams": 120, "kcal_per_100g": 145, "protein_per_100g": 3.5, "carbs_per_100g": 22.0, "fat_per_100g": 4.5, "fiber_per_100g": 0.3},
+
+  {"name": "Lamington", "serving_desc": "1 lamington (60 g)", "serving_grams": 60, "kcal_per_100g": 370, "protein_per_100g": 4.5, "carbs_per_100g": 55.0, "fat_per_100g": 15.0, "fiber_per_100g": 1.5},
+  {"name": "Anzac biscuit", "serving_desc": "1 biscuit (25 g)", "serving_grams": 25, "kcal_per_100g": 460, "protein_per_100g": 5.0, "carbs_per_100g": 63.0, "fat_per_100g": 21.0, "fiber_per_100g": 2.5},
+  {"name": "Tim Tam", "brand": "Arnott's", "serving_desc": "1 biscuit (18 g)", "serving_grams": 18, "kcal_per_100g": 490, "protein_per_100g": 4.5, "carbs_per_100g": 63.0, "fat_per_100g": 24.0, "fiber_per_100g": 2.0},
+  {"name": "Iced VoVo", "brand": "Arnott's", "serving_desc": "1 biscuit (20 g)", "serving_grams": 20, "kcal_per_100g": 405, "protein_per_100g": 3.5, "carbs_per_100g": 70.0, "fat_per_100g": 12.0, "fiber_per_100g": 1.5},
+  {"name": "Milo, powder", "brand": "Nestle", "serving_desc": "3 tsp (20 g)", "serving_grams": 20, "kcal_per_100g": 395, "protein_per_100g": 8.0, "carbs_per_100g": 74.0, "fat_per_100g": 7.0, "fiber_per_100g": 3.0},
+  {"name": "Pavlova, with cream and fruit", "serving_desc": "1 slice (100 g)", "serving_grams": 100, "kcal_per_100g": 280, "protein_per_100g": 3.0, "carbs_per_100g": 45.0, "fat_per_100g": 10.0, "fiber_per_100g": 0.8},
+  {"name": "Vanilla slice", "serving_desc": "1 slice (120 g)", "serving_grams": 120, "kcal_per_100g": 300, "protein_per_100g": 4.0, "carbs_per_100g": 40.0, "fat_per_100g": 14.0, "fiber_per_100g": 0.6},
+  {"name": "Pumpkin scone", "serving_desc": "1 scone (60 g)", "serving_grams": 60, "kcal_per_100g": 300, "protein_per_100g": 6.0, "carbs_per_100g": 50.0, "fat_per_100g": 8.5, "fiber_per_100g": 2.0},
+  {"name": "Fairy bread", "serving_desc": "1 slice (35 g)", "serving_grams": 35, "kcal_per_100g": 340, "protein_per_100g": 6.0, "carbs_per_100g": 55.0, "fat_per_100g": 11.0, "fiber_per_100g": 2.0},
+  {"name": "Damper", "serving_desc": "1 wedge (80 g)", "serving_grams": 80, "kcal_per_100g": 290, "protein_per_100g": 7.0, "carbs_per_100g": 48.0, "fat_per_100g": 8.0, "fiber_per_100g": 2.0},
+  {"name": "Chiko roll", "serving_desc": "1 roll (160 g)", "serving_grams": 160, "kcal_per_100g": 230, "protein_per_100g": 6.0, "carbs_per_100g": 27.0, "fat_per_100g": 10.5, "fiber_per_100g": 2.0},
+  {"name": "Sausage sizzle, sausage in bread", "serving_desc": "1 serve (150 g)", "serving_grams": 150, "kcal_per_100g": 270, "protein_per_100g": 10.0, "carbs_per_100g": 22.0, "fat_per_100g": 15.5, "fiber_per_100g": 1.5},
+  {"name": "Fish and chips, battered flake", "serving_desc": "1 serve (350 g)", "serving_grams": 350, "kcal_per_100g": 230, "protein_per_100g": 10.0, "carbs_per_100g": 22.0, "fat_per_100g": 11.5, "fiber_per_100g": 1.8},
+  {"name": "Barramundi, grilled", "serving_desc": "1 fillet (150 g)", "serving_grams": 150, "kcal_per_100g": 135, "protein_per_100g": 24.0, "carbs_per_100g": 0, "fat_per_100g": 4.0, "fiber_per_100g": 0},
+  {"name": "Kangaroo fillet, grilled", "serving_desc": "1 fillet (150 g)", "serving_grams": 150, "kcal_per_100g": 150, "protein_per_100g": 32.0, "carbs_per_100g": 0, "fat_per_100g": 2.5, "fiber_per_100g": 0}
+]
