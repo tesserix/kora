@@ -1,12 +1,32 @@
-import { render, fireEvent } from "@testing-library/react-native";
+import { render, fireEvent, waitFor } from "@testing-library/react-native";
 import { Alert } from "react-native";
 import MealDetail from "../meal";
 
 const mockEditMutate = jest.fn();
+const mockEditMutateAsync = jest.fn();
 const mockDeleteMutate = jest.fn();
 const mockRepeatMutate = jest.fn();
+const mockToastShow = jest.fn();
 const mockBack = jest.fn();
 let mockRepeatPending = false;
+
+let mockLogData:
+  | {
+      id: string;
+      food_item_id?: string;
+      logged_at: string;
+      meal_slot: string;
+      source: string;
+      description: string;
+      quantity_grams: number;
+      kcal: number;
+      protein_g: number;
+      carbs_g: number;
+      fat_g: number;
+      provenance: string;
+      input_phrase?: string;
+    }
+  | undefined;
 
 jest.mock("expo-router", () => ({
   router: { back: () => mockBack() },
@@ -17,12 +37,35 @@ jest.mock("expo-router", () => ({
 }));
 
 jest.mock("@/api/hooks", () => ({
-  useEditLog: () => ({ mutate: mockEditMutate, isPending: false }),
+  useLog: () => ({ data: mockLogData, isLoading: false }),
+  useFoodSearch: () => ({ data: [], isLoading: false, isError: false }),
+  useEditLog: () => ({ mutate: mockEditMutate, mutateAsync: mockEditMutateAsync, isPending: false }),
   useDeleteLog: () => ({ mutate: mockDeleteMutate, isPending: false }),
   useRepeatLog: () => ({ mutate: mockRepeatMutate, isPending: mockRepeatPending }),
+  // meal.tsx's delete-undo path re-creates via useCreateLog — not exercised
+  // by these tests (that's meal-undo.test.tsx's job), but the hook must
+  // exist on this mock or rendering throws.
+  useCreateLog: () => ({ mutate: jest.fn(), mutateAsync: jest.fn().mockResolvedValue(undefined), isPending: false }),
 }));
 
-beforeEach(() => { mockEditMutate.mockClear(); mockDeleteMutate.mockClear(); mockRepeatMutate.mockClear(); mockBack.mockClear(); mockRepeatPending = false; });
+jest.mock("@/components/Toast", () => ({
+  useToast: () => ({ show: mockToastShow }),
+}));
+
+beforeEach(() => {
+  mockEditMutate.mockClear();
+  mockEditMutateAsync.mockReset();
+  mockEditMutateAsync.mockResolvedValue({ log: undefined, aliasRecorded: false });
+  mockDeleteMutate.mockClear();
+  mockRepeatMutate.mockClear();
+  mockToastShow.mockClear();
+  mockBack.mockClear();
+  mockRepeatPending = false;
+  // Existing tests in this file render before the log fetch resolves — keep
+  // that behavior as the default so they're unaffected by this mock gaining
+  // the ability to carry data.
+  mockLogData = undefined;
+});
 
 test("Save is disabled until something changes, then PATCHes only changed fields", async () => {
   const { getByText, getByLabelText } = await render(<MealDetail />);
@@ -37,6 +80,32 @@ test("Save is disabled until something changes, then PATCHes only changed fields
     { id: "log1", quantity_grams: 210, meal_slot: "lunch" },
     expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
   );
+});
+
+test("Saving a portion/slot change offers Undo that PATCHes back the prior grams and slot, never retract_correction", async () => {
+  mockEditMutate.mockImplementationOnce((_patch, opts) => opts.onSuccess());
+
+  const { getByText, getByLabelText } = await render(<MealDetail />);
+  await fireEvent.press(getByLabelText("Increase"));
+  await fireEvent.press(getByText("Lunch"));
+  await fireEvent.press(getByText("Save changes"));
+
+  await waitFor(() => expect(mockToastShow).toHaveBeenCalledTimes(1));
+  const [toastArgs] = mockToastShow.mock.calls[0];
+  expect(toastArgs.actionLabel).toBe("Undo");
+
+  toastArgs.onAction();
+
+  expect(mockEditMutateAsync).toHaveBeenCalledTimes(1);
+  const [undoPatch] = mockEditMutateAsync.mock.calls[0];
+  // The prior grams (200) and slot ("breakfast") captured before the save,
+  // not the just-saved 210/lunch — and this plain portion/slot path must
+  // NEVER carry retract_correction: onSave never sets food_item_id, so the
+  // server's foodChanged is always false and nothing was ever taught.
+  // Sending the flag here would delete an alias a DIFFERENT log may have
+  // taught for the same phrase.
+  expect(undoPatch).toEqual({ id: "log1", quantity_grams: 200, meal_slot: "breakfast" });
+  expect(undoPatch).not.toHaveProperty("retract_correction");
 });
 
 test("Delete confirms then calls useDeleteLog", async () => {
@@ -70,4 +139,35 @@ test("Repeat is disabled while a repeat is pending", async () => {
   const { getByLabelText } = await render(<MealDetail />);
   await fireEvent.press(getByLabelText("Repeat entry"));
   expect(mockRepeatMutate).not.toHaveBeenCalled();
+});
+
+test("FIX 2: a fractional server quantity_grams does not falsely arm Save changes", async () => {
+  // The diary passes a ROUNDED grams route param (String(Math.round(...))),
+  // but the fetched log's real portion is fractional. Before the fix, grams
+  // stayed seeded from the rounded route param (143) while baseGrams
+  // switched to the server's exact 142.5 the moment the log landed — a
+  // rounding artifact alone, not a user edit, made `dirty` true.
+  mockLogData = {
+    id: "log1",
+    food_item_id: "f1",
+    logged_at: "2026-07-31T08:00:00Z",
+    meal_slot: "breakfast",
+    source: "manual",
+    description: "Brown rice",
+    quantity_grams: 142.5,
+    kcal: 300,
+    protein_g: 6,
+    carbs_g: 64,
+    fat_g: 2,
+    provenance: "manual",
+  };
+
+  const { getByText } = await render(<MealDetail />);
+
+  // grams resynced to the server's exact (fractional) value ...
+  await waitFor(() => expect(getByText("142.5 g")).toBeTruthy());
+
+  // ... so nothing is dirty and Save changes does not arm itself.
+  await fireEvent.press(getByText("Save changes"));
+  expect(mockEditMutate).not.toHaveBeenCalled();
 });

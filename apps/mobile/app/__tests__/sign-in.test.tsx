@@ -1,10 +1,13 @@
 import { fireEvent, render, waitFor } from "@testing-library/react-native";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 
 const mockSignIn = jest.fn();
 const mockCreateUser = jest.fn();
 
-jest.mock("expo-router", () => ({ router: { replace: jest.fn() } }));
+jest.mock("expo-router", () => ({
+  router: { replace: jest.fn() },
+  useLocalSearchParams: jest.fn(() => ({})),
+}));
 jest.mock("firebase/auth", () => ({
   signInWithEmailAndPassword: (...args: unknown[]) => mockSignIn(...args),
   createUserWithEmailAndPassword: (...args: unknown[]) => mockCreateUser(...args),
@@ -20,6 +23,7 @@ beforeEach(() => {
   mockSignIn.mockClear();
   mockCreateUser.mockClear();
   (router.replace as jest.Mock).mockClear();
+  (useLocalSearchParams as jest.Mock).mockReturnValue({});
 });
 
 test("Sign-in shows the editorial title and filled fields", async () => {
@@ -51,4 +55,11 @@ test("a failed sign-in surfaces the error message and does not navigate", async 
 
   expect(await findByText("Sign-in failed. Check your email and password.")).toBeTruthy();
   expect(router.replace).not.toHaveBeenCalled();
+});
+
+test("a ?reason=expired redirect (forced sign-out after an unrecoverable 401) shows why", async () => {
+  (useLocalSearchParams as jest.Mock).mockReturnValue({ reason: "expired" });
+  const { findByText } = await render(<SignIn />);
+
+  expect(await findByText("Your session expired. Please sign in again.")).toBeTruthy();
 });

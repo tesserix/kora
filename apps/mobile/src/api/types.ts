@@ -44,6 +44,8 @@ export type FoodLog = {
   carbs_g: number;
   fat_g: number;
   provenance: string;
+  /** What the user actually said or typed. Present only on ai_text/ai_voice logs. */
+  input_phrase?: string;
 };
 
 export type MemoryFood = {
@@ -177,6 +179,8 @@ export interface Resolution {
   kcal_low?: number;
   kcal_high?: number;
   provenance: string;
+  /** Speech-to-text transcript, present only on a successful voice resolve. */
+  transcript?: string;
 }
 
 export interface Friend {

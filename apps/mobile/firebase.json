@@ -1,0 +1,16 @@
+{
+  "auth": {
+    "authorizedDomains": [
+      "localhost",
+      "kora-app-e6d38.firebaseapp.com",
+      "kora-app-e6d38.web.app"
+    ],
+    "providers": {
+      "emailPassword": true,
+      "googleSignIn": {
+        "oAuthBrandDisplayName": "Kora",
+        "supportEmail": "mahesh.sangawar@gmail.com"
+      }
+    }
+  }
+}

@@ -1,7 +1,7 @@
 import { renderHook, waitFor } from "@testing-library/react-native";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { apiFetch, apiFetchMultipart } from "@/lib/api";
+import { apiFetch, apiFetchEnvelope, apiFetchMultipart } from "@/lib/api";
 import {
   useAcceptRequest,
   useAddWater,
@@ -21,6 +21,7 @@ import {
   useJoinGroup,
   useLeaveChallenge,
   useLeaveGroup,
+  useLog,
   useMarkAllRead,
   useMemory,
   useNotifications,
@@ -40,6 +41,7 @@ import {
 
 jest.mock("@/lib/api", () => ({
   apiFetch: jest.fn().mockResolvedValue({ id: "u1", email: "a@b.c", goal: "", onboarded_at: null }),
+  apiFetchEnvelope: jest.fn(),
   apiFetchMultipart: jest.fn(),
   ApiError: class extends Error {},
 }));
@@ -61,26 +63,17 @@ test("useProfile fetches /v1/me", async () => {
   expect(result.current.data?.email).toBe("a@b.c");
 });
 
-test("useFoodSearch maps Candidate[] response to FoodItem[]", async () => {
-  const foodItem = {
-    id: "f1",
-    name: "Banana",
-    brand: "",
-    provenance: "usda",
-    serving_desc: "1 medium",
-    serving_grams: 118,
-    kcal_per_100g: 89,
-    protein_per_100g: 1.1,
-    carbs_per_100g: 22.8,
-    fat_per_100g: 0.3,
-  };
-  (apiFetch as jest.Mock).mockResolvedValueOnce([
-    { item: foodItem, match_score: 0.9, match_tier: "full_text" },
-  ]);
+test("useFoodSearch hits /v1/foods with the query and stays disabled under 2 chars", async () => {
+  const { result: idle } = await renderHook(() => useFoodSearch("q"), { wrapper });
+  // enabled: false means react-query never runs the queryFn for this query.
+  expect(idle.current.fetchStatus).toBe("idle");
 
-  const { result } = await renderHook(() => useFoodSearch("banana"), { wrapper });
+  const candidates = [{ item: { id: "f2", name: "Quinoa" }, match_score: 0.9, match_tier: "fulltext" }];
+  (apiFetch as jest.Mock).mockResolvedValueOnce(candidates);
+  const { result } = await renderHook(() => useFoodSearch("quinoa"), { wrapper });
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
-  expect(result.current.data).toEqual([foodItem]);
+  expect(apiFetch).toHaveBeenCalledWith("/v1/foods?q=quinoa");
+  expect(result.current.data).toEqual(candidates);
 });
 
 const resolution = {
@@ -145,13 +138,77 @@ test("useResolveVoice builds FormData and posts to /v1/resolve/voice", async () 
 });
 
 test("useEditLog PATCHes /v1/logs/:id with only the patch fields and invalidates logs+dashboard", async () => {
-  (apiFetch as jest.Mock).mockResolvedValueOnce({ id: "log1" });
+  (apiFetchEnvelope as jest.Mock).mockResolvedValueOnce({ data: { id: "log1" } });
   const { result } = await renderHook(() => useEditLog(), { wrapper });
   result.current.mutate({ id: "log1", quantity_grams: 120, meal_slot: "lunch" });
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
-  expect(apiFetch).toHaveBeenCalledWith("/v1/logs/log1", {
+  expect(apiFetchEnvelope).toHaveBeenCalledWith("/v1/logs/log1", {
     method: "PATCH",
     body: JSON.stringify({ quantity_grams: 120, meal_slot: "lunch" }),
+  });
+});
+
+test("useLog GETs /v1/logs/:id and returns the full record", async () => {
+  const log = {
+    id: "log1",
+    food_item_id: "f1",
+    source: "ai_text",
+    input_phrase: "brekkie eggs",
+    description: "Scrambled eggs",
+  };
+  (apiFetch as jest.Mock).mockResolvedValueOnce(log);
+  const { result } = await renderHook(() => useLog("log1"), { wrapper });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(apiFetch).toHaveBeenCalledWith("/v1/logs/log1");
+  expect(result.current.data?.input_phrase).toBe("brekkie eggs");
+});
+
+test("useLog stays idle and never fetches for an empty string id", async () => {
+  // apiFetch is a shared mock across this file's tests, so assert against a
+  // call-count delta rather than `not.toHaveBeenCalled()`.
+  const callsBefore = (apiFetch as jest.Mock).mock.calls.length;
+  const { result } = await renderHook(() => useLog(""), { wrapper });
+  expect(result.current.fetchStatus).toBe("idle");
+  expect((apiFetch as jest.Mock).mock.calls.length).toBe(callsBefore);
+});
+
+test("useLog does not throw when id is undefined at runtime despite its string type", async () => {
+  // Expo Router's useLocalSearchParams types a param as `string` but can hand
+  // back `undefined` at runtime — this must disable the query, not throw.
+  const callsBefore = (apiFetch as jest.Mock).mock.calls.length;
+  const { result } = await renderHook(() => useLog(undefined as unknown as string), { wrapper });
+  expect(result.current.fetchStatus).toBe("idle");
+  expect((apiFetch as jest.Mock).mock.calls.length).toBe(callsBefore);
+});
+
+test("useEditLog surfaces meta.alias_recorded alongside the updated log", async () => {
+  (apiFetchEnvelope as jest.Mock).mockResolvedValueOnce({
+    data: { id: "log1", food_item_id: "f2" },
+    meta: { alias_recorded: true },
+  });
+  const { result } = await renderHook(() => useEditLog(), { wrapper });
+  const out = await result.current.mutateAsync({ id: "log1", food_item_id: "f2" });
+  expect(out.aliasRecorded).toBe(true);
+  expect(out.log.food_item_id).toBe("f2");
+});
+
+test("useEditLog reports aliasRecorded false when the server omits meta", async () => {
+  (apiFetchEnvelope as jest.Mock).mockResolvedValueOnce({ data: { id: "log1" } });
+  const { result } = await renderHook(() => useEditLog(), { wrapper });
+  const out = await result.current.mutateAsync({ id: "log1", quantity_grams: 200 });
+  expect(out.aliasRecorded).toBe(false);
+});
+
+test("useEditLog forwards retract_correction when set", async () => {
+  (apiFetchEnvelope as jest.Mock).mockResolvedValueOnce({
+    data: { id: "log1" },
+    meta: { alias_recorded: false },
+  });
+  const { result } = await renderHook(() => useEditLog(), { wrapper });
+  await result.current.mutateAsync({ id: "log1", food_item_id: "f1", retract_correction: true });
+  expect(apiFetchEnvelope).toHaveBeenCalledWith("/v1/logs/log1", {
+    method: "PATCH",
+    body: JSON.stringify({ food_item_id: "f1", retract_correction: true }),
   });
 });
 
