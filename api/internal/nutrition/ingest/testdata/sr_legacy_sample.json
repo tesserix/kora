@@ -1,0 +1,5 @@
+{"SRLegacyFoods":[
+{"foodClass":"FinalFood","description":"Cheese, cheddar","foodNutrients":[{"nutrient":{"id":1008},"amount":403.0},{"nutrient":{"id":1003},"amount":22.9},{"nutrient":{"id":1005},"amount":3.09},{"nutrient":{"id":1004},"amount":33.1},{"nutrient":{"id":1079},"amount":0.0},{"nutrient":{"id":1062},"amount":1687.0}],"foodPortions":[{"modifier":"cup, diced","gramWeight":132.0,"sequenceNumber":1}]},
+{"foodClass":"FinalFood","description":"Spices, oregano, dried","foodNutrients":[{"nutrient":{"id":1008},"amount":265.0},{"nutrient":{"id":1003},"amount":9.0},{"nutrient":{"id":1005},"amount":68.9},{"nutrient":{"id":1004},"amount":4.28},{"nutrient":{"id":1062},"amount":1109.0}]},
+{"foodClass":"FinalFood","description":"Broken record, no energy","foodNutrients":[{"nutrient":{"id":1003},"amount":1.0},{"nutrient":{"id":1005},"amount":2.0},{"nutrient":{"id":1004},"amount":3.0}]}
+]}
