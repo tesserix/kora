@@ -74,10 +74,13 @@ If the build fails on an unrelated toolchain issue, report it rather than editin
 - [ ] **Step 3: Verify embed's no-key behaviour in the image**
 
 ```bash
-docker run --rm -e DATABASE_URL=postgres://x/y kora-api:embedcheck embed
+docker run --rm -e DATABASE_URL=postgres://x/y --entrypoint embed kora-api:embedcheck
+echo "exit=$?"
 ```
 
 Expected: logs `cmd/embed: GEMINI_API_KEY required to generate embeddings; skipping` and exits **0**. This is the property that makes adding it to the Job safe — a missing secret degrades to "no embeddings", not a crashloop.
+
+`--entrypoint embed` is required. The image sets `ENTRYPOINT ["api"]` with no `CMD`, so passing `embed` as a trailing argument runs `api embed` — the API server — which fails at its migration step with exit 1 and looks like a broken embed. `DATABASE_URL` is also load-bearing: `cmd/embed` checks it *before* the API key, and `log.Fatal`s without it.
 
 - [ ] **Step 4: Commit**
 
