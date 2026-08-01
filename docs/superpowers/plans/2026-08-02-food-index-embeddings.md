@@ -113,7 +113,7 @@ Create `api/internal/nutrition/ingest/testdata/sr_legacy_sample.json` — three 
 ```json
 {"SRLegacyFoods":[
 {"foodClass":"FinalFood","description":"Cheese, cheddar","foodNutrients":[{"nutrient":{"id":1008},"amount":403.0},{"nutrient":{"id":1003},"amount":22.9},{"nutrient":{"id":1005},"amount":3.09},{"nutrient":{"id":1004},"amount":33.1},{"nutrient":{"id":1079},"amount":0.0},{"nutrient":{"id":1062},"amount":1687.0}],"foodPortions":[{"modifier":"cup, diced","gramWeight":132.0,"sequenceNumber":1}]},
-{"foodClass":"FinalFood","description":"Spices, oregano, dried","foodNutrients":[{"nutrient":{"id":1008},"amount":265.0},{"nutrient":{"id":1003},"amount":9.0},{"nutrient":{"id":1005},"amount":68.9},{"nutrient":{"id":1004},"amount":4.28}]},
+{"foodClass":"FinalFood","description":"Spices, oregano, dried","foodNutrients":[{"nutrient":{"id":1008},"amount":265.0},{"nutrient":{"id":1003},"amount":9.0},{"nutrient":{"id":1005},"amount":68.9},{"nutrient":{"id":1004},"amount":4.28},{"nutrient":{"id":1062},"amount":1109.0}]},
 {"foodClass":"FinalFood","description":"Broken record, no energy","foodNutrients":[{"nutrient":{"id":1003},"amount":1.0},{"nutrient":{"id":1005},"amount":2.0},{"nutrient":{"id":1004},"amount":3.0}]}
 ]}
 ```
@@ -307,7 +307,9 @@ Expected: PASS.
 
 - [ ] **Step 6: Mutation-check the kJ trap**
 
-Temporarily change `srNutrientKcal` from `1008` to `1062` and re-run. The test MUST fail on `rows[0].KcalPer100g` (expecting 403, getting 1687). Restore `1008`. If it passes either way, the test is not pinning the unit and must be fixed.
+Temporarily change `srNutrientKcal` from `1008` to `1062` and re-run. The test MUST fail on `rows[0].KcalPer100g` (expecting 403, getting 1687). Restore `1008`.
+
+**Check WHICH assertion fails, not merely that something failed.** Every record in the fixture carries a 1062 entry precisely so the swap changes a *value* rather than making records disappear. If the failure is on `stats.Converted` instead, the fixture is detecting missing kJ data rather than the wrong unit — and against the real file, where all 7,793 records have both 1008 and 1062, nothing would be skipped and the mutation would pass with every calorie inflated 4.184x. That is the catastrophe this step exists to prevent, so a green mutation or a failure on the wrong line both mean the fixture is broken.
 
 - [ ] **Step 7: Add the command**
 
