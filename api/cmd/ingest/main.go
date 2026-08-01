@@ -12,8 +12,8 @@ import (
 )
 
 func main() {
-	afcd := flag.String("afcd", "testdata/food/afcd_staples.json", "AFCD staples JSON path")
-	usda := flag.String("usda", "testdata/food/usda_common.json", "USDA common foods JSON path")
+	afcd := flag.String("afcd", "data/food/afcd_staples.json", "AFCD staples JSON path")
+	usda := flag.String("usda", "data/food/usda_common.json", "USDA common foods JSON path")
 	backfill := flag.Bool("backfill-normalized", false, "recompute normalized_name for all rows")
 	flag.Parse()
 
