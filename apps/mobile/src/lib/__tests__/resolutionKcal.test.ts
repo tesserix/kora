@@ -63,4 +63,15 @@ describe("kcalTotalLabel", () => {
     const resolution = makeResolution({ is_estimate: true, kcal_low: undefined, kcal_high: undefined });
     expect(kcalTotalLabel(resolution)).toBe("0–0 kcal");
   });
+
+  test("the header total ignores items that will not be logged", () => {
+    const resolution = {
+      is_estimate: false,
+      candidates: [
+        { item: { id: "a" }, portion_grams: 100, kcal: 200, match_score: 0.95, match_tier: "alias", tier: "auto" },
+        { item: { id: "b" }, portion_grams: 100, kcal: 500, match_score: 0.3, match_tier: "embedding", tier: "follow_up" },
+      ],
+    } as unknown as Resolution;
+    expect(kcalTotalLabel(resolution)).toBe("200 kcal");
+  });
 });

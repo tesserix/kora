@@ -150,6 +150,7 @@ func (r Resolver) aliasShortCircuit(ctx context.Context, userID uuid.UUID, phras
 			Kcal:         item.KcalPer100g * grams / 100,
 			MatchScore:   1.0,
 			MatchTier:    nutrition.MatchAlias,
+			Tier:         TierAuto,
 		}},
 		Tier:       TierAuto,
 		Provenance: item.Provenance,
@@ -363,15 +364,17 @@ func (r Resolver) resolveGuesses(ctx context.Context, userID uuid.UUID, guesses 
 		// never from the guess, which structurally cannot carry one.
 		kcal := top.Item.KcalPer100g * grams / 100
 
+		tier := TierFor(guess.Confidence, top.MatchScore)
+
 		candidates = append(candidates, ResolvedCandidate{
 			Item:         top.Item,
 			PortionGrams: grams,
 			Kcal:         kcal,
 			MatchScore:   top.MatchScore,
 			MatchTier:    top.MatchTier,
+			Tier:         tier,
 		})
 
-		tier := TierFor(guess.Confidence, top.MatchScore)
 		if rank := tierRank(tier); rank > bestRank {
 			bestRank = rank
 			bestTier = tier
@@ -435,6 +438,9 @@ func (r Resolver) decomposeAndEstimate(ctx context.Context, userID uuid.UUID, su
 			Kcal:         kcal,
 			MatchScore:   top.MatchScore,
 			MatchTier:    top.MatchTier,
+			// The whole estimate resolution is TierConfirm; each item inherits
+			// it, since none was individually identified with confidence.
+			Tier: TierConfirm,
 		})
 	}
 

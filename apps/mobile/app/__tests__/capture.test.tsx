@@ -64,6 +64,31 @@ jest.mock("@/api/hooks", () => ({
     mutateAsync: mockCreateLogMutateAsync,
     isPending: false,
   }),
+  // FoodPicker (opened from an uncertain row) searches the free food index.
+  // Shape mirrors the real useFoodSearch: a Candidate[] under `data`, which
+  // FoodPicker renders one row per, keyed and labelled by `item`.
+  useFoodSearch: () => ({
+    data: [
+      {
+        item: {
+          id: "picked",
+          name: "White rice, cooked",
+          brand: "",
+          provenance: "afcd",
+          serving_desc: "1 cup",
+          serving_grams: 150,
+          kcal_per_100g: 130,
+          protein_per_100g: 2.7,
+          carbs_per_100g: 28,
+          fat_per_100g: 0.3,
+        },
+        match_score: 0.9,
+        match_tier: "full_text",
+      },
+    ],
+    isLoading: false,
+    isError: false,
+  }),
 }));
 
 type MockRecorder = {
@@ -189,6 +214,36 @@ function makeEstimateResolution(): Resolution {
     kcal_low: 350,
     kcal_high: 500,
     provenance: "afcd",
+  };
+}
+
+// Drives a real text capture through to a rendered result. Callers pass the
+// resolution the server "returns"; the mutate mock records its options object
+// and we invoke onSuccess by hand, exactly as the neighbouring tests do.
+async function resolveWithMultiCandidates(
+  rendered: Awaited<ReturnType<typeof render>>,
+  resolution: Resolution = makeMultiCandidateResolution(),
+  callIndex = 0,
+) {
+  const { findByText, findByLabelText } = rendered;
+  await fireEvent.press(await findByText("Type"));
+  const input = await findByLabelText("Tell Otto what you ate");
+  await fireEvent.changeText(input, "big breakfast");
+  await fireEvent.press(await findByLabelText("Send"));
+  const [, options] = mockResolveTextMutate.mock.calls[callIndex];
+  await act(async () => options.onSuccess(resolution));
+}
+
+// Two candidates, one of which the server flagged as follow_up. The card
+// already refuses to count it; the batch must refuse to log it, otherwise a
+// guess the user never confirmed lands in the diary as a real entry.
+function makeMixedCertaintyResolution(): Resolution {
+  return {
+    ...makeMultiCandidateResolution(),
+    candidates: [
+      { ...makeCandidate("a", "Grilled chicken breast", { grams: 170, kcal: 281 }), tier: "auto" },
+      { ...makeCandidate("b", "Rice dish", { grams: 200, kcal: 260 }), tier: "follow_up" },
+    ],
   };
 }
 
@@ -718,16 +773,6 @@ describe("Result tiers", () => {
 });
 
 describe("Add to diary", () => {
-  async function resolveWithMultiCandidates(rendered: Awaited<ReturnType<typeof render>>) {
-    const { findByText, findByLabelText } = rendered;
-    await fireEvent.press(await findByText("Type"));
-    const input = await findByLabelText("Tell Otto what you ate");
-    await fireEvent.changeText(input, "big breakfast");
-    await fireEvent.press(await findByLabelText("Send"));
-    const [, options] = mockResolveTextMutate.mock.calls[0];
-    await act(async () => options.onSuccess(makeMultiCandidateResolution()));
-  }
-
   test("logs each candidate with the correct food_item_id/grams/meal_slot/source, then navigates back", async () => {
     const rendered = await render(<CaptureScreen />);
     await resolveWithMultiCandidates(rendered);
@@ -795,6 +840,97 @@ describe("Add to diary", () => {
     );
 
     await waitFor(() => expect(router.back).toHaveBeenCalled());
+  });
+
+  test("adding to diary skips items the card marked uncertain", async () => {
+    const rendered = await render(<CaptureScreen />);
+    await resolveWithMultiCandidates(rendered, makeMixedCertaintyResolution());
+
+    await fireEvent.press(await rendered.findByLabelText("Add to diary"));
+
+    await waitFor(() => expect(mockCreateLogMutateAsync).toHaveBeenCalledTimes(1));
+    expect(mockCreateLogMutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ food_item_id: "a", quantity_grams: 170 }),
+    );
+  });
+
+  test("a failure message counts the loggable items, not the detected ones", async () => {
+    mockCreateLogMutateAsync.mockReset().mockRejectedValue(new Error("network error"));
+
+    const rendered = await render(<CaptureScreen />);
+    await resolveWithMultiCandidates(rendered, makeMixedCertaintyResolution());
+
+    await fireEvent.press(await rendered.findByLabelText("Add to diary"));
+
+    // One of one loggable item failed — the uncertain second row was never a
+    // candidate for the diary, so counting it here would misreport the batch.
+    expect(await rendered.findByText(/I logged 0 of 1 items/i)).toBeTruthy();
+  });
+
+  test("an all-uncertain resolution logs nothing and never starts the spinner", async () => {
+    const base = makeMultiCandidateResolution();
+    const allUncertain: Resolution = {
+      ...base,
+      candidates: base.candidates.map((candidate) => ({ ...candidate, tier: "follow_up" as const })),
+    };
+
+    const rendered = await render(<CaptureScreen />);
+    await resolveWithMultiCandidates(rendered, allUncertain);
+
+    await fireEvent.press(await rendered.findByLabelText("Add to diary"));
+
+    expect(mockCreateLogMutateAsync).not.toHaveBeenCalled();
+    expect(rendered.queryByTestId("detected-card-adding-spinner")).toBeNull();
+    expect(router.back).not.toHaveBeenCalled();
+  });
+});
+
+describe("Resolving an uncertain item", () => {
+  test("picking a food for an uncertain item makes it loggable without inventing a kcal", async () => {
+    const rendered = await render(<CaptureScreen />);
+    await resolveWithMultiCandidates(rendered, makeMixedCertaintyResolution());
+
+    // The uncertain row is pressable and opens the picker.
+    await fireEvent.press(await rendered.findByLabelText("Confirm Rice dish"));
+    await fireEvent.press(await rendered.findByText("White rice, cooked"));
+
+    // Promoted: counted by the CTA, but still no fabricated kcal — neither a
+    // "0 kcal" from the placeholder nor the stale 260 of the guess it replaced.
+    expect(await rendered.findByText("Add 2 items to diary")).toBeTruthy();
+    expect(rendered.queryByText("0 kcal")).toBeNull();
+    expect(rendered.queryByText("260 kcal")).toBeNull();
+
+    await fireEvent.press(await rendered.findByLabelText("Add to diary"));
+
+    await waitFor(() => expect(mockCreateLogMutateAsync).toHaveBeenCalledTimes(2));
+    expect(mockCreateLogMutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ food_item_id: "picked", quantity_grams: 200 }),
+    );
+  });
+
+  // A promotion belongs to the capture it was made in. If it survived into the
+  // next resolve it would silently relabel a different food — the user would
+  // press "Add to diary" and log something they never picked.
+  test("a promotion does not survive the next resolve", async () => {
+    const rendered = await render(<CaptureScreen />);
+    await resolveWithMultiCandidates(rendered, makeMixedCertaintyResolution());
+
+    await fireEvent.press(await rendered.findByLabelText("Confirm Rice dish"));
+    await fireEvent.press(await rendered.findByText("White rice, cooked"));
+    expect(await rendered.findByText("Add 2 items to diary")).toBeTruthy();
+
+    // A brand-new capture, same shape — the second candidate is uncertain again.
+    await resolveWithMultiCandidates(rendered, makeMixedCertaintyResolution(), 1);
+
+    expect(await rendered.findByText("Add 1 item to diary")).toBeTruthy();
+    expect(rendered.getByText("Rice dish")).toBeTruthy();
+    expect(rendered.queryByText("White rice, cooked")).toBeNull();
+
+    await fireEvent.press(await rendered.findByLabelText("Add to diary"));
+    await waitFor(() => expect(mockCreateLogMutateAsync).toHaveBeenCalledTimes(1));
+    expect(mockCreateLogMutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ food_item_id: "a" }),
+    );
   });
 });
 

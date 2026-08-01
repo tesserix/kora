@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AccessibilityInfo,
   Animated,
@@ -25,6 +25,7 @@ import { UserBubble } from "@/components/capture/UserBubble";
 import { ModePill } from "@/components/capture/ModePill";
 import { Waveform } from "@/components/capture/Waveform";
 import { DetectedCard } from "@/components/capture/DetectedCard";
+import { FoodPicker } from "@/components/meal/FoodPicker";
 import { captureColors } from "@/components/capture/captureTheme";
 import { haptics } from "@/motion";
 import {
@@ -37,7 +38,8 @@ import {
 } from "@/api/hooks";
 import { ApiError } from "@/lib/api";
 import { kcalTotalLabel } from "@/lib/resolutionKcal";
-import type { Resolution, ResolvedCandidate } from "@/api/types";
+import { isLoggable } from "@/lib/candidateTier";
+import type { FoodItem, Resolution, ResolvedCandidate } from "@/api/types";
 import { mealSlotForHour, type MealSlot } from "@/lib/mealSlot";
 
 export type CaptureMode = "photo" | "voice" | "scan" | "type";
@@ -354,6 +356,8 @@ interface CaptureBodyProps {
   cameraPermissionGranted: boolean;
   onBarcodeScanned: (data: string) => void;
   onClose: () => void;
+  /** Forwarded to DetectedCard — asked when the user taps an uncertain row. */
+  onResolveUncertain?: (index: number) => void;
 }
 
 // Presentational capture surface — pure props in, no state, no API calls.
@@ -382,6 +386,7 @@ export function CaptureBody({
   cameraPermissionGranted,
   onBarcodeScanned,
   onClose,
+  onResolveUncertain,
 }: CaptureBodyProps) {
   const scrollViewRef = useRef<ScrollView>(null);
   const resultView = resolution ? resolveResultView(resolution) : null;
@@ -469,6 +474,7 @@ export function CaptureBody({
               onChangeMealSlot={onChangeMealSlot}
               onAdd={onAdd}
               adding={adding}
+              onResolveUncertain={onResolveUncertain}
             />
           </>
         )}
@@ -675,6 +681,12 @@ export default function CaptureScreen() {
   // fresh resolution replaces it, so a retry only re-submits what actually
   // failed instead of re-logging (duplicating) the ones that already succeeded.
   const [loggedCandidateKeys, setLoggedCandidateKeys] = useState<Set<string>>(new Set());
+  // Candidate index -> the food the user hand-picked for an uncertain row, and
+  // the row whose picker is currently open. Both are local to the *current*
+  // resolution and are cleared alongside loggedCandidateKeys — a promotion that
+  // survived into the next capture would silently relabel a different food.
+  const [promoted, setPromoted] = useState<Record<number, FoodItem>>({});
+  const [pickerIndex, setPickerIndex] = useState<number | null>(null);
   const [text, setText] = useState("");
   // The phrase that produced the current resolution. `text` is cleared as soon
   // as the resolve fires, so it cannot be read at add-to-diary time — but the
@@ -692,6 +704,25 @@ export default function CaptureScreen() {
     resolveText.isPending || resolvePhoto.isPending || resolveVoice.isPending || resolveBarcode.isPending
       ? "analyzing"
       : stage;
+
+  // The resolution as the user has amended it: a promoted row carries the food
+  // they picked and becomes loggable, but keeps NO kcal. kcal is only ever
+  // server-computed (see the resolver's invariant guard) and this client is
+  // forbidden from deriving nutrition, so `kcal_unknown` makes the row render
+  // "—" and drop out of the total. The `0` is only there to keep the field a
+  // number; it is never displayed. The real figure lands in the diary the
+  // moment the row is logged and the server recomputes it.
+  const effectiveResolution = useMemo(() => {
+    if (!resolution || Object.keys(promoted).length === 0) return resolution;
+    return {
+      ...resolution,
+      candidates: resolution.candidates.map((candidate, i) =>
+        promoted[i]
+          ? { ...candidate, item: promoted[i], kcal: 0, tier: "confirm" as const, kcal_unknown: true }
+          : candidate,
+      ),
+    };
+  }, [resolution, promoted]);
 
   // Request camera access as soon as the user switches into Scan mode; a
   // denial surfaces as an Otto bubble rather than a silently blank viewfinder.
@@ -733,13 +764,16 @@ export default function CaptureScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Applies a newly-resolved capture result and clears any add-to-diary
-  // success tracking from a previous resolution — a fresh capture always
-  // starts with a clean retry slate.
+  // Applies a newly-resolved capture result and clears every piece of state
+  // that belonged to the previous resolution — add-to-diary success tracking,
+  // hand-picked promotions, and any open picker. A fresh capture always starts
+  // with a clean retry slate and no promotion leaking in from the last one.
   function applyResolution(data: Resolution) {
     setResolution(data);
     setStage("result");
     setLoggedCandidateKeys(new Set());
+    setPromoted({});
+    setPickerIndex(null);
   }
 
   function handleModeChange(next: CaptureMode) {
@@ -868,14 +902,24 @@ export default function CaptureScreen() {
   // press of this same card) are skipped entirely — otherwise re-pressing
   // "Add to diary" after a partial failure would re-log the ones that
   // already succeeded, duplicating diary entries.
+  //
+  // Candidates the server flagged as uncertain (`tier: "follow_up"`) are
+  // dropped too: the card shows them without a kcal and excludes them from
+  // its count, so logging them anyway would write a guess the user never
+  // confirmed. The guard below uses the same rule, so an all-uncertain
+  // resolution never spins on an empty batch.
   async function handleAddToDiary() {
-    if (!resolution || resolution.candidates.length === 0) return;
+    // effectiveResolution, not resolution: a row the user resolved by hand must
+    // log the food they picked, not the guess it replaced.
+    const loggableCount = effectiveResolution?.candidates.filter(isLoggable).length ?? 0;
+    if (!effectiveResolution || loggableCount === 0) return;
     setErrorMsg(null);
     setAdding(true);
     const source = sourceForMode(mode);
 
-    const pending = resolution.candidates
+    const pending = effectiveResolution.candidates
       .map((candidate, index) => ({ candidate, key: candidateKey(candidate, index) }))
+      .filter(({ candidate }) => isLoggable(candidate))
       .filter(({ key }) => !loggedCandidateKeys.has(key));
 
     const outcomes = await Promise.allSettled(
@@ -907,7 +951,7 @@ export default function CaptureScreen() {
     if (failedNames.length > 0) {
       haptics.error();
       setErrorMsg(
-        `I logged ${updatedKeys.size} of ${resolution.candidates.length} items, but couldn't log ${failedNames.join(
+        `I logged ${updatedKeys.size} of ${loggableCount} items, but couldn't log ${failedNames.join(
           ", ",
         )}. Please try again.`,
       );
@@ -928,7 +972,7 @@ export default function CaptureScreen() {
         mode={mode}
         onModeChange={handleModeChange}
         stage={displayStage}
-        resolution={resolution}
+        resolution={effectiveResolution}
         errorMsg={errorMsg}
         mealSlot={mealSlot}
         onChangeMealSlot={setMealSlot}
@@ -944,6 +988,18 @@ export default function CaptureScreen() {
         cameraPermissionGranted={cameraPermission?.granted ?? false}
         onBarcodeScanned={handleBarcodeScanned}
         onClose={() => router.back()}
+        onResolveUncertain={setPickerIndex}
+      />
+      {/* Opened from an uncertain row. Seeded with the phrase the server could
+          not resolve, so the user starts from what they actually said. */}
+      <FoodPicker
+        visible={pickerIndex !== null}
+        initialQuery={pickerIndex !== null ? (resolution?.candidates[pickerIndex]?.item.name ?? "") : ""}
+        onSelect={(item) => {
+          if (pickerIndex !== null) setPromoted((prev) => ({ ...prev, [pickerIndex]: item }));
+          setPickerIndex(null);
+        }}
+        onClose={() => setPickerIndex(null)}
       />
     </View>
   );
