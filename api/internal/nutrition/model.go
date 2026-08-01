@@ -15,6 +15,11 @@ const (
 	ProvenanceUSDA         Provenance = "usda"
 	ProvenanceLabelOCR     Provenance = "label_ocr"
 	ProvenanceUserEstimate Provenance = "user_estimate"
+	// ProvenanceCurated marks hand-authored entries — dishes no public dataset
+	// covers (USDA SR Legacy returns zero hits for dal, dosa, paneer, idli,
+	// samosa, vegemite, weet-bix, lamington). Values are considered estimates
+	// for a home-cooked portion, not lab measurements.
+	ProvenanceCurated Provenance = "curated"
 )
 
 const (

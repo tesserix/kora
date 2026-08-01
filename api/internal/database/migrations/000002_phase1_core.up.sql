@@ -16,7 +16,7 @@ CREATE TABLE food_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL,
     brand TEXT NOT NULL DEFAULT '',
-    provenance TEXT NOT NULL,               -- afcd | off | usda | label_ocr | user_estimate
+    provenance TEXT NOT NULL,               -- afcd | off | usda | label_ocr | user_estimate | curated
     barcode TEXT,
     serving_desc TEXT NOT NULL DEFAULT '',
     serving_grams DOUBLE PRECISION NOT NULL DEFAULT 0,
