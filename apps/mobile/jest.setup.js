@@ -266,4 +266,8 @@ jest.mock("@kingstinct/react-native-healthkit", () => ({
   requestAuthorization: jest.fn(async () => false),
   queryQuantitySamples: jest.fn(async () => []),
   queryCategorySamples: jest.fn(async () => []),
+  // Read by useActivityHistory for onboarding's activity inference. Signature
+  // taken from the installed package's lib/typescript/healthkit.d.ts:
+  // queryWorkoutSamples(options: WorkoutQueryOptions) => Promise<readonly WorkoutProxyTyped[]>
+  queryWorkoutSamples: jest.fn(async () => []),
 }));
