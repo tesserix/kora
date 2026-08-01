@@ -46,7 +46,13 @@ export function useSubmitOnboarding() {
   return useMutation({
     mutationFn: (input: OnboardingInput) =>
       apiFetch("/v1/onboarding", { method: "POST", body: JSON.stringify(input) }) as Promise<Profile>,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["profile"] }),
+    // Seed rather than invalidate. Invalidating marks ["profile"] stale but keeps
+    // serving the cached pre-onboarding profile, so the router.replace("/") that
+    // follows lets (tabs)/_layout read onboarded_at === null and bounce the user
+    // straight back to onboarding — where nothing sends them home again once the
+    // refetch lands. /v1/onboarding returns the same full user row as /v1/me, so
+    // the response is safe to use as the profile outright.
+    onSuccess: (profile) => qc.setQueryData(["profile"], profile),
   });
 }
 
