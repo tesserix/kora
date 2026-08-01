@@ -34,6 +34,7 @@ import {
   useResolveVoice,
   useSendFriendRequest,
   useSetShareProgress,
+  useSubmitOnboarding,
   useUnfriend,
   useUnreadCount,
   useWeightSeries,
@@ -491,4 +492,40 @@ test("useCreateLogBatch posts to /v1/logs/batch", async () => {
     items: [{ food_item_id: "abc", quantity_grams: 60 }],
   });
   expect(apiFetch).toHaveBeenCalledWith("/v1/logs/batch", expect.objectContaining({ method: "POST" }));
+});
+
+// Regression: a brand-new account completed onboarding against prod, the POST
+// succeeded, and the app still bounced them back to onboarding step 1 and left
+// them stuck there. Cause: onSuccess only invalidated ["profile"], which marks
+// the entry stale but keeps serving the cached value, so (tabs)/_layout read
+// the pre-onboarding profile (onboarded_at === null) and redirected. The
+// mutation already returns the fresh Profile, so it must seed the cache.
+test("useSubmitOnboarding replaces the cached profile with the onboarded one", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(["profile"], { id: "u1", email: "a@b.c", goal: "", onboarded_at: null });
+
+  const onboarded = {
+    id: "u1",
+    email: "a@b.c",
+    goal: "maintenance",
+    onboarded_at: "2026-08-01T11:39:23Z",
+  };
+  (apiFetch as jest.Mock).mockResolvedValueOnce(onboarded);
+
+  const { result } = await renderHook(() => useSubmitOnboarding(), {
+    wrapper: ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    ),
+  });
+
+  await result.current.mutateAsync({
+    sex: "male",
+    birth_year: 1990,
+    height_cm: 180,
+    weight_kg: 78,
+    activity_level: "moderate",
+    goal: "maintenance",
+  });
+
+  await waitFor(() => expect(client.getQueryData(["profile"])).toEqual(onboarded));
 });
