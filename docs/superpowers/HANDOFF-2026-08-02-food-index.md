@@ -285,11 +285,27 @@ succeeded. Not reproduced; not dismissed either.
 reporting "it said something went wrong" currently leaves no server-side trace
 at all. Request logging is worth adding before chasing this further.
 
-## Environment left running
+## Environment left behind
 
-Metro is **up** on port 8082 against prod (`npx expo start --port 8082
---dev-client`). Sim `AD109A46-2F99-43C3-8AAA-FEE68DC8499E` has Kora foregrounded
-on the capture screen with an unsaved 4-item detection. Nothing was written to
+Metro is **not** running — it was up on 8082 during the simulator pass and has
+since been stopped. Restart with:
+
+```
+cd apps/mobile && EXPO_PUBLIC_API_URL=https://kora-api.tesserix.app \
+  npx expo start --port 8082 --dev-client
+```
+
+Note `.env` sets `EXPO_PUBLIC_API_URL=http://localhost:8080`, so the shell
+override is what puts the app on prod. Confirm it took by grepping the served
+bundle rather than trusting Metro's startup line:
+
+```
+curl -s "http://localhost:8082/node_modules/expo-router/entry.bundle?platform=ios&dev=true" \
+  | grep -o 'EXPO_PUBLIC_API_URL[^,]*'
+```
+
+Sim `AD109A46-2F99-43C3-8AAA-FEE68DC8499E` was left with Kora foregrounded on
+the capture screen holding an unsaved 4-item detection. Nothing was written to
 the diary — "Add N items" was never pressed.
 
 `idb` notes that held: it lives at `~/Library/Python/3.9/bin` (PATH-hidden),
