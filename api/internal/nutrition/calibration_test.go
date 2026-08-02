@@ -77,10 +77,11 @@ func loadGolden(t *testing.T) []goldenCase {
 }
 
 type goldenResult struct {
-	c     goldenCase
-	score float64
-	top   string
-	tier  string
+	c        goldenCase
+	score    float64
+	top      string
+	tier     string
+	hasMatch bool // false only when Resolve returned zero candidates
 }
 
 func runGolden(t *testing.T) []goldenResult {
@@ -93,6 +94,7 @@ func runGolden(t *testing.T) []goldenResult {
 		require.NoError(t, err)
 		r := goldenResult{c: c, tier: "follow_up"}
 		if len(cands) > 0 {
+			r.hasMatch = true
 			r.score = cands[0].MatchScore
 			r.top = cands[0].Item.Name
 			r.tier = tierOf(r.score)
@@ -203,12 +205,29 @@ func TestNeverConfidentlyWrong(t *testing.T) {
 // TestTiersAreNotDegenerate is the test whose absence let a correct, tested,
 // deployed tier system sit completely inert in production. Every resolve
 // returned match_tier full_text, score 0.717-0.726, tier confirm.
+//
+// It only looks at queries that matched at least one candidate. The
+// "absent" band (queries for foods genuinely not in the index) always
+// returns zero candidates and defaults to tier follow_up / score 0 — that
+// signal comes from the index having nothing to rank, not from the scoring
+// formula, and mixing it in would let a degenerate, constant-scoring
+// formula hide behind those absent-band entries: they alone are enough to
+// make seenTiers["follow_up"] > 0 and to widen the score range past 0.30,
+// even when every *matched* query scores identically. Confirmed by mutation
+// test (Task 5 Step 4): before this exclusion, restoring the old constant
+// score plus removing the ambiguity factor still passed this guard, because
+// the 6 absent-band entries alone satisfied both checks.
 func TestTiersAreNotDegenerate(t *testing.T) {
 	results := runGolden(t)
 
 	seenTiers := map[string]int{}
 	min, max := 1.0, 0.0
+	noMatch := 0
 	for _, r := range results {
+		if !r.hasMatch {
+			noMatch++
+			continue
+		}
 		seenTiers[r.tier]++
 		if r.score < min {
 			min = r.score
@@ -217,7 +236,8 @@ func TestTiersAreNotDegenerate(t *testing.T) {
 			max = r.score
 		}
 	}
-	t.Logf("tier distribution: %v, score range [%.4f, %.4f]", seenTiers, min, max)
+	t.Logf("tier distribution (matched queries only): %v, score range [%.4f, %.4f], %d queries had no candidates",
+		seenTiers, min, max, noMatch)
 
 	require.Greater(t, seenTiers["follow_up"], 0,
 		"no query reached follow_up — the tier system is inert, which is the exact bug this work exists to fix")
@@ -245,4 +265,83 @@ func TestAmbiguousQueriesAskRatherThanGuess(t *testing.T) {
 	require.Greater(t, total, 0, "golden set has no ambiguous band")
 	require.GreaterOrEqual(t, float64(asked)/float64(total), 0.70,
 		"only %d/%d ambiguous queries reached follow_up", asked, total)
+}
+
+// TestGoldenSetTierMatchesExpectation enforces the golden set's expect_tier
+// field, which was advisory (unasserted) until the floors were calibrated.
+//
+// It splits disagreements into two kinds because they carry very different
+// risk:
+//
+//   - Escalation: expect_tier is follow_up (the case was authored as one the
+//     system should hedge on) but the observed tier is confirm or auto. This
+//     is the dangerous direction — the system would commit to or
+//     quick-confirm something its own author expected it to question — so
+//     it is zero-tolerance.
+//   - Other drift: every other disagreement, in either direction (confirm
+//     expected but got auto, confirm expected but got follow_up, etc). None
+//     of these involve a case authored as "hedge" turning confident, so none
+//     carry that risk. This bucket is dominated by a known coarse label:
+//     every unambiguous-band case shipped with expect_tier "confirm" as a
+//     blanket placeholder, without knowing which of those queries would
+//     land an exact 1.0 match (auto) versus a near match below the confirm
+//     floor (follow_up). Measured at calibration time this was 29/54 cases,
+//     entirely accounted for by that placeholder gap (19 unambiguous exact
+//     matches plus cheddar cheese landing in auto instead of confirm; 8
+//     unambiguous plus peanut butter landing in follow_up instead of
+//     confirm). So this side is a logged count against a floor, not
+//     zero-tolerance — the floor exists so a real regression (e.g. the
+//     scorer collapsing back toward constant scores) still trips this test.
+func TestGoldenSetTierMatchesExpectation(t *testing.T) {
+	results := runGolden(t)
+
+	var escalations, other []string
+	matched := 0
+	for _, r := range results {
+		if r.tier == r.c.ExpectTier {
+			matched++
+			continue
+		}
+		msg := fmt.Sprintf("%q (%s): expected %s, got %s (score %.4f)",
+			r.c.Query, r.c.Band, r.c.ExpectTier, r.tier, r.score)
+		if r.c.ExpectTier == "follow_up" {
+			escalations = append(escalations, msg)
+		} else {
+			other = append(other, msg)
+		}
+	}
+
+	t.Logf("expect_tier agreement: %d/%d exact matches", matched, len(results))
+	t.Logf("other drift (non-dangerous direction): %d", len(other))
+	for _, m := range other {
+		t.Logf("  drift: %s", m)
+	}
+	t.Logf("escalations (expected follow_up, observed confident): %d", len(escalations))
+	for _, m := range escalations {
+		t.Logf("  ESCALATION: %s", m)
+	}
+
+	require.Empty(t, escalations,
+		"%d case(s) expected to hedge (follow_up) but the system committed to confirm/auto instead — "+
+			"this is the dangerous direction, never acceptable:\n%s",
+		len(escalations), strings.Join(escalations, "\n"))
+
+	require.LessOrEqual(t, len(other), 35,
+		"%d cases disagreed with expect_tier outside the dangerous direction; that's above the "+
+			"known-label-gap baseline (~29) and may indicate a real scoring regression, not just "+
+			"the coarse blanket-\"confirm\" placeholder on the unambiguous band",
+		len(other))
+}
+
+// TestCalibrationFloorsMatchAI guards the tierOf duplication above. tierOf
+// cannot import ai (internal/ai imports internal/nutrition, so it would be a
+// cycle), and a silent drift between the two would make every calibration
+// number a lie.
+func TestCalibrationFloorsMatchAI(t *testing.T) {
+	raw, err := os.ReadFile("../ai/types.go")
+	require.NoError(t, err)
+	require.Contains(t, string(raw), "tierAutoFloor    = 0.90",
+		"ai.tierAutoFloor changed; update tierOf in this file to match")
+	require.Contains(t, string(raw), "tierConfirmFloor = 0.70",
+		"ai.tierConfirmFloor changed; update tierOf in this file to match")
 }
