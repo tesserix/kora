@@ -159,6 +159,58 @@ test("follow_up tier shows the question and a manual-search fallback, without lo
   expect(mockEditMutate).not.toHaveBeenCalled();
 });
 
+// The API's estimate path (decomposeAndEstimate) returns tier "follow_up" with
+// NO follow_up_question, deliberately: it ships candidates carrying their own
+// per-item tiers so the user can pick one, instead of dead-ending at manual
+// search. Before the per-ingredient tiering change that combination was
+// unreachable (decompose always returned "confirm"), and this sheet branched on
+// the tier alone — so it would have shown a blank question plus "Search
+// manually instead" and thrown the candidates away.
+test("follow_up WITHOUT a question renders the candidates instead of dead-ending", async () => {
+  mockLogData = { ...mockLogData!, source: "ai_text", provenance: "ai", input_phrase: "grilled chicken breast" };
+  mockResolveTextMutate.mockImplementation((_phrase, opts) => {
+    opts.onSuccess({
+      candidates: [
+        {
+          item: {
+            id: "f11",
+            name: "Chicken breast, roasted",
+            brand: "",
+            provenance: "usda",
+            serving_desc: "100 g",
+            serving_grams: 100,
+            kcal_per_100g: 165,
+            protein_per_100g: 31,
+            carbs_per_100g: 0,
+            fat_per_100g: 3.6,
+          },
+          portion_grams: 100,
+          kcal: 165,
+          match_score: 0.497,
+          match_tier: "full_text",
+          tier: "follow_up",
+        },
+      ],
+      tier: "follow_up",
+      is_estimate: true,
+      provenance: "estimate",
+    });
+  });
+
+  const { getByLabelText, getByText, queryByLabelText } = await render(<MealDetail />);
+
+  await fireEvent.press(getByLabelText("Ask Kora again"));
+  await fireEvent.press(getByLabelText("Submit phrase to Kora"));
+
+  // The candidate is offered...
+  await waitFor(() => expect(getByText("Chicken breast, roasted")).toBeTruthy());
+  // ...and the dead-end fallback is NOT what the user is left with.
+  expect(queryByLabelText("Search manually instead")).toBeNull();
+
+  await fireEvent.press(getByLabelText("Select Chicken breast, roasted"));
+  await waitFor(() => expect(mockEditMutate).toHaveBeenCalled());
+});
+
 test("zero candidates shows a couldn't-identify message and the manual-search fallback", async () => {
   mockLogData = { ...mockLogData!, source: "ai_text", provenance: "ai", input_phrase: "brekkie eggs" };
   mockResolveTextMutate.mockImplementation((_phrase, opts) => {

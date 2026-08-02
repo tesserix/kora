@@ -393,6 +393,26 @@ func (r Resolver) resolveGuesses(ctx context.Context, userID uuid.UUID, guesses 
 	return res, nil
 }
 
+// estimateIngredientTier computes a decomposed ingredient's own tier from its
+// nutrition-index match score alone — IngredientGuess carries no LLM
+// identify-confidence to combine it with the way Guess.Confidence does in
+// resolveGuesses, so TierFor is fed the same score twice and only the floor
+// comparisons apply — then caps the result at TierConfirm. The cap exists
+// because a decomposed ingredient (e.g. "olive oil" or "butter", invented by
+// Provider.Decompose for a dish like "grilled chicken breast") is an LLM
+// INFERENCE, not a food the user actually named: even a perfect string match
+// to the index should not become a one-tap TierAuto log. A weak match,
+// though, must still be free to fall all the way to TierFollowUp so the
+// per-item uncertain-row UI can surface it — that's the entire point of this
+// tiering.
+func estimateIngredientTier(matchScore float64) Tier {
+	tier := TierFor(matchScore, matchScore)
+	if tier == TierAuto {
+		return TierConfirm
+	}
+	return tier
+}
+
 // decomposeAndEstimate decomposes subject into ingredients, resolves each
 // ingredient's top candidate, and sums kcal from those resolved rows (never
 // from the LLM) into a ±estimateBand low/high range. The bool return reports
@@ -407,6 +427,8 @@ func (r Resolver) decomposeAndEstimate(ctx context.Context, userID uuid.UUID, su
 
 	var candidates []ResolvedCandidate
 	var totalKcal float64
+	bestTier := TierFollowUp
+	bestRank := -1
 
 	for _, ing := range ingredients {
 		vec, embUsage, embErr := r.provider.Embed(ctx, ing.Ingredient)
@@ -432,25 +454,40 @@ func (r Resolver) decomposeAndEstimate(ctx context.Context, userID uuid.UUID, su
 		kcal := top.Item.KcalPer100g * grams / 100
 		totalKcal += kcal
 
+		tier := estimateIngredientTier(top.MatchScore)
+
 		candidates = append(candidates, ResolvedCandidate{
 			Item:         top.Item,
 			PortionGrams: grams,
 			Kcal:         kcal,
 			MatchScore:   top.MatchScore,
 			MatchTier:    top.MatchTier,
-			// The whole estimate resolution is TierConfirm; each item inherits
-			// it, since none was individually identified with confidence.
-			Tier: TierConfirm,
+			Tier:         tier,
 		})
+
+		if rank := tierRank(tier); rank > bestRank {
+			bestRank = rank
+			bestTier = tier
+		}
 	}
 
 	if len(candidates) == 0 {
 		return Resolution{}, false, nil
 	}
 
+	// FollowUpQuestion is deliberately left empty even when bestTier is
+	// TierFollowUp. apps/mobile/app/capture.tsx only renders its dedicated
+	// follow-up branch when tier == follow_up AND follow_up_question is
+	// non-empty, and that branch discards the candidate list and dead-ends at
+	// "Search manually" — leaving this blank instead makes the client render
+	// the normal detected-card path, with each ingredient's own per-item tier
+	// intact so the uncertain-row UI (tap to pick the right food) is what the
+	// user actually sees. Setting a question here would look like an
+	// oversight fix but would actually regress the whole point of per-item
+	// tiering on this path.
 	return Resolution{
 		Candidates: candidates,
-		Tier:       TierConfirm,
+		Tier:       bestTier,
 		IsEstimate: true,
 		KcalLow:    totalKcal * (1 - estimateBand),
 		KcalHigh:   totalKcal * (1 + estimateBand),
