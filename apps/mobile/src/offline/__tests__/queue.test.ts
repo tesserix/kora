@@ -16,10 +16,28 @@ test("append persists an item as pending and list reads it back", async () => {
 });
 
 test("the queue survives a restart", async () => {
+  // This test specifically verifies durable storage, not just in-memory state.
+  // If the queue used a plain array instead of AsyncStorage, this test would
+  // fail at the getItem assertion or the re-imported module would see an empty
+  // queue — while the append test above would still pass unchanged.
   await append(payload, "id-1");
-  // A fresh read with no in-memory state is exactly what a cold start does.
-  const items = await list();
-  expect(items.map((i) => i.id)).toEqual(["id-1"]);
+
+  // Assert the data really is in AsyncStorage, not just in memory.
+  const raw = await AsyncStorage.getItem("kora.logQueue");
+  expect(raw).not.toBeNull();
+  const stored = JSON.parse(raw!);
+  expect(stored).toHaveLength(1);
+  expect(stored[0].id).toBe("id-1");
+
+  // Simulate a cold start by clearing the queue module from require cache.
+  // This forces a fresh module load, proving that data survives the restart
+  // (not held in module-level state). AsyncStorage is NOT cleared, simulating
+  // how persistent storage survives a real app restart.
+  delete require.cache[require.resolve("../queue")];
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const fresh = require("../queue");
+  const itemsAfterRestart = await fresh.list();
+  expect(itemsAfterRestart.map((i: QueuedLog) => i.id)).toEqual(["id-1"]);
 });
 
 test("drain sends items oldest-first and removes those that succeed", async () => {
