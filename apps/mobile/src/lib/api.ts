@@ -1,4 +1,4 @@
-import { onAuthStateChanged, signOut } from "firebase/auth";
+import { onAuthStateChanged, signOut, type User } from "firebase/auth";
 import { auth } from "./firebase";
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:8080";
@@ -7,10 +7,49 @@ export class ApiError extends Error {
   constructor(
     public readonly status: number,
     public readonly code: string,
-    message: string
+    message: string,
+    // The server's X-Request-Id for this response, when present — lets a
+    // failure the server DID see be correlated with its log line. Absent
+    // for probes and for any response that never carried the header.
+    public readonly requestId?: string
   ) {
     super(message);
     this.name = "ApiError";
+  }
+}
+
+// --- Typed failure modes ---------------------------------------------------
+//
+// Everything below used to surface as an anonymous thrown value, which
+// collapsed three very different failures into one opaque client-side
+// catch-all ("Something went wrong while I looked at that."). Each type
+// preserves the original error as `cause` so nothing is lost, and callers
+// (e.g. capture.tsx's ottoErrorMessage) can tell them apart with `instanceof`.
+
+// user.getIdToken() rejected — this happens BEFORE any HTTP request is
+// built, so nothing ever reached the server.
+export class AuthTokenError extends Error {
+  constructor(cause: unknown) {
+    super("Failed to obtain an auth token", { cause });
+    this.name = "AuthTokenError";
+  }
+}
+
+// fetch() itself rejected — no HTTP response was ever received (offline,
+// DNS failure, TLS failure, request aborted, ...).
+export class NetworkError extends Error {
+  constructor(cause: unknown) {
+    super("Network request failed", { cause });
+    this.name = "NetworkError";
+  }
+}
+
+// The response came back with a 2xx status, but its body did not parse as
+// JSON — the server answered, but the client couldn't read the answer.
+export class ResponseParseError extends Error {
+  constructor(cause: unknown) {
+    super("Failed to parse response body", { cause });
+    this.name = "ResponseParseError";
   }
 }
 
@@ -79,18 +118,42 @@ async function signOutForExpiredSession(): Promise<void> {
 // thrown error, ...) is returned/thrown as-is with no sign-out — only a 401
 // that survives the refresh-and-retry triggers it. With no signed-in user
 // there is no token to refresh, so neither the retry nor the sign-out runs.
+// getToken and doFetch exist purely to translate a rejection into the right
+// typed error at the point it happens — getIdToken() failures become
+// AuthTokenError, fetch() failures become NetworkError. Both are called twice
+// below (initial attempt + 401 retry), so factoring the try/catch out keeps
+// fetchWithRetry's control flow identical to before this change.
+async function getToken(user: User, forceRefresh?: true): Promise<string> {
+  try {
+    // Called with no arguments (not `getIdToken(undefined)`) on the initial
+    // attempt to match the pre-existing call signature exactly — some
+    // callers/tests assert on arg count, not just the resolved value.
+    return await (forceRefresh ? user.getIdToken(true) : user.getIdToken());
+  } catch (err) {
+    throw new AuthTokenError(err);
+  }
+}
+
+async function doFetch(path: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(`${BASE_URL}${path}`, init);
+  } catch (err) {
+    throw new NetworkError(err);
+  }
+}
+
 async function fetchWithRetry(
   path: string,
   buildInit: (token: string | null) => RequestInit,
 ): Promise<Response> {
   const user = auth?.currentUser ?? null;
-  const token = user ? await user.getIdToken() : null;
-  const res = await fetch(`${BASE_URL}${path}`, buildInit(token));
+  const token = user ? await getToken(user) : null;
+  const res = await doFetch(path, buildInit(token));
 
   if (res.status !== 401 || !user) return res;
 
-  const refreshedToken = await user.getIdToken(true);
-  const retryRes = await fetch(`${BASE_URL}${path}`, buildInit(refreshedToken));
+  const refreshedToken = await getToken(user, true);
+  const retryRes = await doFetch(path, buildInit(refreshedToken));
 
   if (retryRes.status === 401) await signOutForExpiredSession();
 
@@ -98,8 +161,21 @@ async function fetchWithRetry(
 }
 
 async function throwApiError(res: Response): Promise<never> {
+  const requestId = res.headers?.get?.("X-Request-Id") ?? undefined;
   const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
-  throw new ApiError(res.status, body.error ?? "unknown", body.message ?? "request failed");
+  throw new ApiError(res.status, body.error ?? "unknown", body.message ?? "request failed", requestId);
+}
+
+// A 2xx response whose body will not parse as JSON means the server
+// answered but the client couldn't read the answer — distinct from both an
+// HTTP error status (ApiError, above) and a request that never got a
+// response at all (NetworkError).
+async function parseJson<T>(res: Response): Promise<T> {
+  try {
+    return (await res.json()) as T;
+  } catch (err) {
+    throw new ResponseParseError(err);
+  }
 }
 
 // apiFetchEnvelope returns the whole `{ data, meta? }` envelope. PATCH
@@ -120,7 +196,7 @@ export async function apiFetchEnvelope<T>(
   }));
 
   if (!res.ok) return throwApiError(res);
-  return (await res.json()) as { data: T; meta?: Record<string, unknown> };
+  return parseJson<{ data: T; meta?: Record<string, unknown> }>(res);
 }
 
 // apiFetch unwraps to `data` and drops everything else, which is right for
@@ -143,6 +219,6 @@ export async function apiFetchMultipart(path: string, form: FormData): Promise<u
   }));
 
   if (!res.ok) return throwApiError(res);
-  const body = (await res.json()) as { data?: unknown };
+  const body = await parseJson<{ data?: unknown }>(res);
   return body.data ?? body;
 }
