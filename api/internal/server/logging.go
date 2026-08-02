@@ -63,6 +63,12 @@ func RequestLogger() gin.HandlerFunc {
 			attrs = append(attrs, slog.String("user_id", id.String()))
 		}
 
+		// Nothing in this codebase calls c.Error() today, so this is always
+		// empty in practice and exists for whatever first does. Note it is
+		// the one field here whose content is not controlled by this file:
+		// if you pass user input to c.Error() — a binding failure echoing a
+		// submitted value, say — it lands in the logs. Wrap such errors so
+		// the message carries the field NAME, never the value.
 		if errs := c.Errors.String(); errs != "" {
 			attrs = append(attrs, slog.String("errors", errs))
 		}
