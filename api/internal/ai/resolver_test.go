@@ -751,3 +751,234 @@ func TestResolveText_PerItemTiers_WeakItemKeepsItsOwnTier(t *testing.T) {
 	// answers "is anything here loggable?", not "is everything certain?".
 	require.Equal(t, TierAuto, res.Tier)
 }
+
+// TestEstimateIngredientTier_CapsScoreAtConfirm is a pure table-driven test of
+// the helper decomposeAndEstimate uses to turn a decomposed ingredient's raw
+// nutrition-index MatchScore into its own Tier. It exercises the function
+// directly (no DB, no provider) so the confirm-cap logic itself — the crux of
+// this whole change — is proven in isolation from the harder-to-control real
+// full-text/trigram scoring exercised by the integration tests below.
+func TestEstimateIngredientTier_CapsScoreAtConfirm(t *testing.T) {
+	tests := []struct {
+		name       string
+		matchScore float64
+		want       Tier
+	}{
+		{"perfect score is capped at confirm, not auto", 1.0, TierConfirm},
+		{"exactly at the auto floor is capped at confirm", 0.90, TierConfirm},
+		{"just above the auto floor is capped at confirm", 0.95, TierConfirm},
+		{"mid score lands on confirm on its own merits", 0.80, TierConfirm},
+		{"exactly at the confirm floor is confirm", 0.70, TierConfirm},
+		{"just below the confirm floor is follow_up", 0.6999, TierFollowUp},
+		{"low score is follow_up", 0.36, TierFollowUp},
+		{"zero score is follow_up", 0.0, TierFollowUp},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := estimateIngredientTier(tt.matchScore)
+			require.Equal(t, tt.want, got, "matchScore=%v", tt.matchScore)
+		})
+	}
+}
+
+// TestDecomposeAndEstimate_LowScoringIngredientBecomesFollowUp covers a
+// decomposed ingredient whose nutrition-index match is weak (real full-text
+// scoring against a diluted, mostly-unrelated row — no alias, no embedding —
+// yields a MatchScore well under the 0.70 confirm floor per score.go's
+// coverage/precision/trigram formula: coverage=1, precision=1/11≈0.09,
+// trigram≈0.17-0.19, lexical≈0.48). The candidate's own Tier must reflect
+// that weakness as TierFollowUp, not the old hardcoded TierConfirm.
+func TestDecomposeAndEstimate_LowScoringIngredientBecomesFollowUp(t *testing.T) {
+	db := testDB(t)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE brand = 'test3a'") })
+	repo := nutrition.NewRepository(db)
+
+	seedFoodItem(t, repo, nutrition.FoodItem{
+		Name:       "Rare zqxmarinade3a blend delta echo foxtrot golf hotel india juliet kilo",
+		Brand:      "test3a",
+		Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 300,
+	})
+
+	provider := &stubProvider{
+		// Nonce dish that resolves to nothing on the first pass, forcing the
+		// decompose fallback.
+		guesses:    []Guess{{Food: "qzzznonce marinade dish 3a", PortionEstimate: "1 serving", Confidence: 0.9}},
+		guessUsage: Usage{Provider: "stub", CallType: "identify_text"},
+		ingredients: []IngredientGuess{
+			{Ingredient: "zqxmarinade3a", PortionEstimate: "50 g", Confidence: 0.8},
+		},
+		ingredientsUsage: Usage{Provider: "stub", CallType: "decompose"},
+	}
+	resolver := NewResolver(provider, repo, NoCache{}, &stubMeter{withinBudget: true})
+
+	res, err := resolver.ResolveText(context.Background(), uuid.New(), "qzzznonce marinade dish 3a")
+
+	require.NoError(t, err)
+	require.True(t, res.IsEstimate)
+	require.Len(t, res.Candidates, 1)
+	require.Less(t, res.Candidates[0].MatchScore, 0.70, "fixture must produce a genuinely weak match")
+	require.Equal(t, TierFollowUp, res.Candidates[0].Tier)
+	require.Equal(t, TierFollowUp, res.Tier)
+}
+
+// TestDecomposeAndEstimate_PerfectScoringIngredientCappedAtConfirm covers a
+// decomposed ingredient that matches the nutrition index perfectly (alias,
+// MatchScore 1.0). Even a perfect string match must NOT become TierAuto here
+// — the ingredient itself is an LLM inference (Decompose invented it), not a
+// food the user named, so a one-tap auto-log would be misplaced confidence.
+func TestDecomposeAndEstimate_PerfectScoringIngredientCappedAtConfirm(t *testing.T) {
+	db := testDB(t)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE brand = 'test3b'") })
+	repo := nutrition.NewRepository(db)
+
+	item := seedFoodItem(t, repo, nutrition.FoodItem{
+		Name: "Grilled tofu ingredient 3b", Brand: "test3b",
+		Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 140,
+	})
+	seedAlias(t, db, "grilled tofu 3b", item.ID)
+
+	provider := &stubProvider{
+		guesses:    []Guess{{Food: "qzzznonce tofu dish 3b", PortionEstimate: "1 serving", Confidence: 0.9}},
+		guessUsage: Usage{Provider: "stub", CallType: "identify_text"},
+		ingredients: []IngredientGuess{
+			{Ingredient: "grilled tofu 3b", PortionEstimate: "100 g", Confidence: 0.8},
+		},
+		ingredientsUsage: Usage{Provider: "stub", CallType: "decompose"},
+	}
+	resolver := NewResolver(provider, repo, NoCache{}, &stubMeter{withinBudget: true})
+
+	res, err := resolver.ResolveText(context.Background(), uuid.New(), "qzzznonce tofu dish 3b")
+
+	require.NoError(t, err)
+	require.True(t, res.IsEstimate)
+	require.Len(t, res.Candidates, 1)
+	require.InDelta(t, 1.0, res.Candidates[0].MatchScore, 0.001, "fixture must produce a perfect match")
+	require.Equal(t, TierConfirm, res.Candidates[0].Tier)
+	require.NotEqual(t, TierAuto, res.Candidates[0].Tier)
+	require.Equal(t, TierConfirm, res.Tier)
+}
+
+// TestDecomposeAndEstimate_MidScoringIngredientIsConfirm covers a decomposed
+// ingredient with a genuine (non-alias) mid-range full-text match: coverage=1,
+// precision=3/4=0.75, trigram≈0.74, lexical≈0.847 — comfortably inside the
+// [0.70, 0.90) confirm band on its own merits, not because of the cap.
+func TestDecomposeAndEstimate_MidScoringIngredientIsConfirm(t *testing.T) {
+	db := testDB(t)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE brand = 'test3c'") })
+	repo := nutrition.NewRepository(db)
+
+	seedFoodItem(t, repo, nutrition.FoodItem{
+		Name: "Seasoned tofu block 3c", Brand: "test3c",
+		Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 150,
+	})
+
+	provider := &stubProvider{
+		guesses:    []Guess{{Food: "qzzznonce seasoned dish 3c", PortionEstimate: "1 serving", Confidence: 0.9}},
+		guessUsage: Usage{Provider: "stub", CallType: "identify_text"},
+		ingredients: []IngredientGuess{
+			{Ingredient: "seasoned tofu 3c", PortionEstimate: "100 g", Confidence: 0.8},
+		},
+		ingredientsUsage: Usage{Provider: "stub", CallType: "decompose"},
+	}
+	resolver := NewResolver(provider, repo, NoCache{}, &stubMeter{withinBudget: true})
+
+	res, err := resolver.ResolveText(context.Background(), uuid.New(), "qzzznonce seasoned dish 3c")
+
+	require.NoError(t, err)
+	require.True(t, res.IsEstimate)
+	require.Len(t, res.Candidates, 1)
+	require.GreaterOrEqual(t, res.Candidates[0].MatchScore, 0.70, "fixture must land inside the confirm band")
+	require.Less(t, res.Candidates[0].MatchScore, 0.90, "fixture must land inside the confirm band")
+	require.Equal(t, TierConfirm, res.Candidates[0].Tier)
+}
+
+// TestDecomposeAndEstimate_ResolutionTierIsMaxAcrossItems covers a decompose
+// result with mixed per-item tiers (one confirm-capped perfect match, one
+// weak follow_up match): the Resolution's own Tier must be the MAX across
+// items via tierRank — the same "is anything loggable?" semantics
+// resolveGuesses already uses — not an average, and not hardcoded.
+func TestDecomposeAndEstimate_ResolutionTierIsMaxAcrossItems(t *testing.T) {
+	db := testDB(t)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE brand = 'test3d'") })
+	repo := nutrition.NewRepository(db)
+
+	strong := seedFoodItem(t, repo, nutrition.FoodItem{
+		Name: "Grilled tofu ingredient 3d", Brand: "test3d",
+		Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 140,
+	})
+	seedAlias(t, db, "grilled tofu 3d", strong.ID)
+	seedFoodItem(t, repo, nutrition.FoodItem{
+		Name:       "Rare zqxmarinade3d blend delta echo foxtrot golf hotel india juliet kilo",
+		Brand:      "test3d",
+		Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 300,
+	})
+
+	provider := &stubProvider{
+		guesses:    []Guess{{Food: "qzzznonce mixed dish 3d", PortionEstimate: "1 serving", Confidence: 0.9}},
+		guessUsage: Usage{Provider: "stub", CallType: "identify_text"},
+		ingredients: []IngredientGuess{
+			{Ingredient: "grilled tofu 3d", PortionEstimate: "100 g", Confidence: 0.8},
+			{Ingredient: "zqxmarinade3d", PortionEstimate: "10 g", Confidence: 0.8},
+		},
+		ingredientsUsage: Usage{Provider: "stub", CallType: "decompose"},
+	}
+	resolver := NewResolver(provider, repo, NoCache{}, &stubMeter{withinBudget: true})
+
+	res, err := resolver.ResolveText(context.Background(), uuid.New(), "qzzznonce mixed dish 3d")
+
+	require.NoError(t, err)
+	require.True(t, res.IsEstimate)
+	require.Len(t, res.Candidates, 2)
+	require.Equal(t, TierConfirm, res.Candidates[0].Tier)
+	require.Equal(t, TierFollowUp, res.Candidates[1].Tier)
+	// The resolution reports the BEST item's tier, exactly like resolveGuesses.
+	require.Equal(t, TierConfirm, res.Tier)
+}
+
+// TestDecomposeAndEstimate_AllFollowUpProducesEmptyFollowUpQuestion covers the
+// all-weak case: every ingredient's own match is below the confirm floor, so
+// the resolution's Tier must be TierFollowUp too (max across items). Critically,
+// FollowUpQuestion must stay EMPTY — apps/mobile/app/capture.tsx only renders
+// its dedicated (candidate-discarding, "search manually") follow-up branch
+// when tier == follow_up AND follow_up_question is non-empty. A non-empty
+// question here would route the user into that dead-end branch instead of the
+// normal detected-card view with tappable per-item uncertain rows, defeating
+// the entire purpose of per-item tiering on the estimate path.
+func TestDecomposeAndEstimate_AllFollowUpProducesEmptyFollowUpQuestion(t *testing.T) {
+	db := testDB(t)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE brand = 'test3e'") })
+	repo := nutrition.NewRepository(db)
+
+	seedFoodItem(t, repo, nutrition.FoodItem{
+		Name:       "Rare zqxweak3e blend delta echo foxtrot golf hotel india juliet kilo",
+		Brand:      "test3e",
+		Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 300,
+	})
+	seedFoodItem(t, repo, nutrition.FoodItem{
+		Name:       "Rare zqxweak3e2 blend delta echo foxtrot golf hotel india juliet kilo",
+		Brand:      "test3e",
+		Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 300,
+	})
+
+	provider := &stubProvider{
+		guesses:    []Guess{{Food: "qzzznonce weak dish 3e", PortionEstimate: "1 serving", Confidence: 0.9}},
+		guessUsage: Usage{Provider: "stub", CallType: "identify_text"},
+		ingredients: []IngredientGuess{
+			{Ingredient: "zqxweak3e", PortionEstimate: "50 g", Confidence: 0.8},
+			{Ingredient: "zqxweak3e2", PortionEstimate: "50 g", Confidence: 0.8},
+		},
+		ingredientsUsage: Usage{Provider: "stub", CallType: "decompose"},
+	}
+	resolver := NewResolver(provider, repo, NoCache{}, &stubMeter{withinBudget: true})
+
+	res, err := resolver.ResolveText(context.Background(), uuid.New(), "qzzznonce weak dish 3e")
+
+	require.NoError(t, err)
+	require.True(t, res.IsEstimate)
+	require.Len(t, res.Candidates, 2)
+	for i, c := range res.Candidates {
+		require.Equal(t, TierFollowUp, c.Tier, "candidate %d", i)
+	}
+	require.Equal(t, TierFollowUp, res.Tier)
+	require.Empty(t, res.FollowUpQuestion)
+}
