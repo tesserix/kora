@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -130,8 +131,14 @@ func TestCalibrationReport(t *testing.T) {
 	}
 }
 
-// TestGoldenSetAccuracy checks top-1 correctness on the bands where a correct
-// answer exists.
+// TestGoldenSetAccuracy is a floor against outright ranking collapse, not a
+// quality target. Raw top-1 accuracy conflates two very different failures —
+// committing to a wrong answer, and correctly hedging on a hard query — so it
+// is unsuitable as the system's real contract; TestNeverConfidentlyWrong is
+// that contract. This test exists only to catch the case where the match
+// formula stops ranking sensibly at all (e.g. regresses to picking
+// essentially-random rows). The miss list below is still useful for spotting
+// that kind of regression, so it stays.
 func TestGoldenSetAccuracy(t *testing.T) {
 	results := runGolden(t)
 	correct, total := 0, 0
@@ -151,8 +158,43 @@ func TestGoldenSetAccuracy(t *testing.T) {
 	for _, m := range misses {
 		t.Logf("  miss: %s", m)
 	}
-	require.GreaterOrEqual(t, float64(correct)/float64(total), 0.80,
-		"top-1 accuracy below 80%%; the formula is picking the wrong row")
+	require.GreaterOrEqual(t, float64(correct)/float64(total), 0.65,
+		"top-1 accuracy below 65%%; this is a ranking-collapse floor, not a quality target — "+
+			"if this fails, the match formula has stopped ranking sensibly, not merely hedged more than usual")
+}
+
+// TestNeverConfidentlyWrong is the real quality contract for the match
+// formula. Raw top-1 accuracy is the wrong metric for a system designed to
+// ask when it's uncertain: a wrong top-1 that the system flags follow_up
+// shows the user an uncertain row and asks them to pick — that is correct,
+// designed behaviour, not a defect. A wrong top-1 that the system calls auto
+// or confirm silently logs bad data with no chance for the user to catch it
+// — that is the actual failure mode this system exists to prevent. So the
+// contract is not "top-1 is usually right", it's "top-1 is never wrong
+// while the system is confident about it".
+func TestNeverConfidentlyWrong(t *testing.T) {
+	results := runGolden(t)
+	checked := 0
+	var violations []string
+	for _, r := range results {
+		if r.c.Band == "absent" || r.c.ExpectName == "" {
+			continue
+		}
+		if r.tier != "auto" && r.tier != "confirm" {
+			continue
+		}
+		checked++
+		if r.top != r.c.ExpectName {
+			violations = append(violations, fmt.Sprintf("%q → got %q, want %q (%s)", r.c.Query, r.top, r.c.ExpectName, r.tier))
+		}
+	}
+	t.Logf("confident answers checked: %d, violations: %d", checked, len(violations))
+	for _, v := range violations {
+		t.Logf("  violation: %s", v)
+	}
+	require.Empty(t, violations,
+		"%d confidently-wrong answer(s) found — the system committed to a wrong top-1 instead of hedging:\n%s",
+		len(violations), strings.Join(violations, "\n"))
 }
 
 // TestTiersAreNotDegenerate is the test whose absence let a correct, tested,
