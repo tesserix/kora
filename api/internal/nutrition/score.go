@@ -20,7 +20,49 @@ const (
 	// separate. A margin of 0.20 or more counts as unambiguous.
 	ambiguityFloor = 0.6
 	ambiguitySlope = 2.0
+
+	// headBonus rewards a candidate whose head noun (see headToken) matches one
+	// of the query's tokens, nudging ranking toward the generic food a user
+	// meant over a derivative product that merely shares more tokens with a
+	// shorter document. It feeds the ranking key ONLY — never the reported
+	// MatchScore — so it cannot inflate a confidence tier; several rows can
+	// share a head noun, which is ambiguity, not confidence. Top-1 accuracy on
+	// the golden set was measured stable across 0.10–0.30, so this is not a
+	// tuned knife-edge; 0.15 sits in the middle of that stable range.
+	headBonus = 0.15
 )
+
+// headToken returns the head noun of a raw (un-normalized) food name — the
+// signal that identifies which candidate is the generic food rather than a
+// derivative product ("Almonds, raw" vs "Oil, almond").
+//
+// Two naming conventions coexist in the index:
+//   - USDA, comma-inverted: "Almonds, raw", "Beef, cured, dried" — the head
+//     noun comes first, with descriptors trailing after the comma.
+//   - Curated/AFCD, natural English: "Wholemeal bread", "Cheddar cheese",
+//     "Chicken biryani" — English noun compounds are head-final, so the head
+//     noun is the LAST word.
+//
+// The rule that covers both conventions: the head is the last token of the
+// segment before the first comma (or of the whole name, when there is no
+// comma).
+//
+// This MUST be derived from FoodItem.Name (the raw name), never from
+// normalized_name: Normalize() replaces punctuation — including the comma
+// that marks the USDA convention — with spaces before this function ever
+// sees it, so deriving the head from normalized_name would silently give the
+// wrong answer for every USDA row (7,695 of 7,848 names in the index).
+func headToken(rawName string) string {
+	segment := rawName
+	if idx := strings.IndexByte(rawName, ','); idx >= 0 {
+		segment = rawName[:idx]
+	}
+	fields := strings.Fields(Normalize(segment))
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[len(fields)-1]
+}
 
 // components are the raw per-candidate signals feeding quality().
 type components struct {
