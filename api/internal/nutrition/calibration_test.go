@@ -192,6 +192,9 @@ func TestNeverConfidentlyWrong(t *testing.T) {
 	for _, v := range violations {
 		t.Logf("  violation: %s", v)
 	}
+	require.Greater(t, checked, 0,
+		"zero confident answers (auto or confirm tier) were found — the tier system has collapsed to always-hedging, "+
+			"and this test verified nothing; if this fails, check that tierOf thresholds are reachable with the golden set scores")
 	require.Empty(t, violations,
 		"%d confidently-wrong answer(s) found — the system committed to a wrong top-1 instead of hedging:\n%s",
 		len(violations), strings.Join(violations, "\n"))

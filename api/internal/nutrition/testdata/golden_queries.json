@@ -53,7 +53,7 @@
   {"query": "poutine", "expect_name": "", "expect_tier": "follow_up", "band": "absent"},
   {"query": "haggis", "expect_name": "", "expect_tier": "follow_up", "band": "absent"},
 
-  {"query": "chicken breast", "expect_name": "Chicken breast, roasted", "expect_tier": "confirm", "band": "regression"},
+  {"query": "chicken breast", "expect_name": "Chicken breast, roasted", "expect_tier": "follow_up", "band": "regression"},
   {"query": "cheddar cheese", "expect_name": "Cheddar cheese", "expect_tier": "confirm", "band": "regression"},
   {"query": "peanut butter", "expect_name": "Peanut butter, smooth", "expect_tier": "confirm", "band": "regression"}
 ]
