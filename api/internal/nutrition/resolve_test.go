@@ -169,15 +169,39 @@ func TestResolveScoreIsNotFloored(t *testing.T) {
 
 // TestResolveDoesNotTruncateBeforeScoring guards against the SQL LIMIT being
 // applied to the full-text candidate fetch before scoring happens in Go.
-// Resolve's full-text query used to fetch only `limit` rows with no ORDER BY,
-// so the rows handed to the scorer were an arbitrary subset of Postgres's scan
-// order — the true best match could be silently excluded from scoring
-// entirely just because it wasn't among the first `limit` rows physically
-// scanned. This test inserts more full-text matches than the caller's limit,
-// deliberately inserting the best match LAST (so an unordered, pre-scoring
-// LIMIT would very likely drop it), and asserts Resolve still returns it as
-// top-1: recall must fetch a generous, ordered pool for the ranker to
-// consider, independent of how many results the caller asked for.
+// Resolve's full-text query used to fetch only `limit` rows before scoring,
+// so the rows handed to the scorer were an arbitrary (or raw-trigram-only)
+// subset — the true best match by final *quality* could be silently excluded
+// entirely just because it did not also happen to be among the top rows by
+// raw trigram alone.
+//
+// A fixture where the winner is simply the best by trigram (as the previous
+// version of this test used, via an exact-match row) does NOT catch that bug:
+// `ORDER BY similarity(...) DESC LIMIT <caller's limit>` ranks it first
+// regardless of whether the scan limit is resolveScanLimit or the caller's
+// limit, so reverting to the caller's limit would still pass. This fixture
+// instead makes the winner best by *quality*
+// (0.4*coverage + 0.3*precision + 0.3*trigram, see score.go) while ranking
+// LAST of four candidates by raw trigram similarity, so it only survives a
+// generous, ordered scan limit — not a scan limit tied to the caller's
+// request size.
+//
+// Values below were verified against the actual pg_trgm extension before
+// writing this test (docker exec kora-pg-test psql -U kora -d kora -c
+// "SELECT similarity(...)"), against the query "zqxwx apple":
+//
+//	winner ("zqxwx apple pineapplecrumble"):      trigram=0.480 precision=2/3=0.667 quality=0.744
+//	competitor ("zqxwx apple ab cd ef"):           trigram=0.600 precision=2/5=0.400 quality=0.700
+//	competitor ("zqxwx apple st tu vw"):           trigram=0.571 precision=2/5=0.400 quality=0.691
+//	competitor ("zqxwx apple ab cd ef gh"):        trigram=0.522 precision=2/6=0.333 quality=0.657
+//
+// All three competitors beat the winner on raw trigram alone (their extra
+// tokens are short, so they dilute the trigram set less than the winner's
+// one long extra token does) but lose on quality, because their extra tokens
+// dilute token precision more. So `ORDER BY similarity(...) DESC LIMIT 3`
+// (the caller's limit) keeps exactly the three competitors and drops the
+// winner — which is exactly what a reintroduced `LIMIT <caller's limit>`
+// bug would do.
 func TestResolveDoesNotTruncateBeforeScoring(t *testing.T) {
 	db := testDB(t)
 	tx := db.Begin()
@@ -186,33 +210,25 @@ func TestResolveDoesNotTruncateBeforeScoring(t *testing.T) {
 	require.NoError(t, tx.Exec("TRUNCATE food_items CASCADE").Error)
 	repo := NewRepository(tx)
 
-	// "zqxscanguard" is a unique token no ambient row contains. The first five
-	// rows are weak matches (the token plus several unrelated words dilutes
-	// both trigram similarity and precision); the sixth, inserted last, is an
-	// exact match on the query and must win on score regardless of insertion
-	// order.
-	weakMatches := []string{
-		"Zqxscanguard fried rice bowl mix",
-		"Zqxscanguard grilled paneer tikka",
-		"Zqxscanguard spicy chicken wrap",
-		"Zqxscanguard baked salmon fillet",
-		"Zqxscanguard roasted veggie medley",
-	}
-	items := make([]FoodItem, 0, len(weakMatches)+1)
-	for _, n := range weakMatches {
-		items = append(items, FoodItem{Name: n, Provenance: ProvenanceUSDA, KcalPer100g: 100})
-	}
-	items = append(items, FoodItem{Name: "Zqxscanguard", Provenance: ProvenanceUSDA, KcalPer100g: 100})
-	_, err := repo.Insert(context.Background(), items)
+	const winnerName = "Zqxwx apple pineapplecrumble"
+	_, err := repo.Insert(context.Background(), []FoodItem{
+		{Name: "Zqxwx apple ab cd ef", Provenance: ProvenanceUSDA, KcalPer100g: 100},
+		{Name: "Zqxwx apple st tu vw", Provenance: ProvenanceUSDA, KcalPer100g: 100},
+		{Name: "Zqxwx apple ab cd ef gh", Provenance: ProvenanceUSDA, KcalPer100g: 100},
+		{Name: winnerName, Provenance: ProvenanceUSDA, KcalPer100g: 100},
+	})
 	require.NoError(t, err)
 
-	// Caller's limit (3) is smaller than the number of matching rows (6), and
-	// smaller than the position of the best match in insertion order (6th).
-	cands, err := repo.Resolve(context.Background(), uuid.Nil, "zqxscanguard", nil, 3)
+	// Caller's limit (3) is smaller than the number of full-text matches (4),
+	// and the winner ranks LAST of the four by raw trigram similarity — so a
+	// pre-scoring SQL LIMIT keyed on the caller's limit would keep the three
+	// higher-trigram competitors and drop the winner before the Go scorer
+	// ever saw it.
+	cands, err := repo.Resolve(context.Background(), uuid.Nil, "zqxwx apple", nil, 3)
 	require.NoError(t, err)
 	require.NotEmpty(t, cands)
-	require.Equal(t, "Zqxscanguard", cands[0].Item.Name,
-		"the exact match must win top-1 even though it was inserted after limit weaker rows")
+	require.Equal(t, winnerName, cands[0].Item.Name,
+		"the quality-best row must win top-1 even though it ranks last of four by raw trigram similarity")
 	require.Equal(t, MatchFullText, cands[0].MatchTier)
 }
 
