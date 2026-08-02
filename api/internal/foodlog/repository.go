@@ -8,6 +8,9 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+
+	"github.com/tesserix/kora/api/internal/httpx"
 )
 
 type Repository struct {
@@ -34,6 +37,37 @@ func (r Repository) Create(ctx context.Context, log FoodLog) (FoodLog, error) {
 		return FoodLog{}, fmt.Errorf("foodlog: create: %w", err)
 	}
 	return created, nil
+}
+
+// CreateIdempotent inserts log, or returns the already-stored row when its ID
+// is taken. The offline queue replays writes whose response was lost, so a
+// replay MUST be indistinguishable from a first delivery — otherwise a flaky
+// reconnect duplicates the user's meal.
+//
+// ON CONFLICT DO NOTHING is used rather than catching a duplicate-key error:
+// gorm.Config here has no TranslateError, so gorm.ErrDuplicatedKey is never
+// returned, and sniffing SQLSTATE 23505 would make pgconn a direct dependency
+// for one branch. RowsAffected == 0 means the row already existed.
+func (r Repository) CreateIdempotent(ctx context.Context, log FoodLog) (FoodLog, error) {
+	created := log
+	res := r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&created)
+	if res.Error != nil {
+		return FoodLog{}, fmt.Errorf("foodlog: create idempotent: %w", res.Error)
+	}
+	if res.RowsAffected > 0 {
+		return created, nil
+	}
+
+	var existing FoodLog
+	if err := r.db.WithContext(ctx).First(&existing, "id = ?", log.ID).Error; err != nil {
+		return FoodLog{}, fmt.Errorf("foodlog: load existing: %w", err)
+	}
+	if existing.UserID != log.UserID {
+		// Deliberately does not name the id: the caller must not learn that
+		// somebody else's log has this id.
+		return FoodLog{}, httpx.ValidationError{Message: "invalid id"}
+	}
+	return existing, nil
 }
 
 // ListByUserAndDay returns logs whose logged_at falls on `day` in location `loc`.

@@ -35,6 +35,10 @@ type LogRequest struct {
 	LoggedAt      time.Time  `json:"logged_at"`
 	ClientLogMs   *int       `json:"client_log_ms"`
 	InputPhrase   *string    `json:"input_phrase"`
+	// ID lets the client mint the log's identity before it has network, so a
+	// queued write replayed after a lost response is idempotent. Optional:
+	// when nil the column default generates one as before.
+	ID *uuid.UUID `json:"id"`
 }
 
 var validMealSlots = map[string]bool{"breakfast": true, "lunch": true, "dinner": true, "snack": true}
@@ -137,7 +141,13 @@ func (s Service) LogFood(ctx context.Context, userID uuid.UUID, req LogRequest) 
 		ClientLogMs:   req.ClientLogMs,
 		InputPhrase:   phraseForSource(source, req.InputPhrase),
 	}
-	return s.logs.Create(ctx, log)
+	// Assigned after construction, not inside the literal: FoodLog.ID is a
+	// value type, so writing uuid.Nil into it when the client sent no id
+	// would defeat the column's gen_random_uuid() default.
+	if req.ID != nil {
+		log.ID = *req.ID
+	}
+	return s.logs.CreateIdempotent(ctx, log)
 }
 
 // EditRequest carries a partial edit to an existing log. Nil/zero fields mean
