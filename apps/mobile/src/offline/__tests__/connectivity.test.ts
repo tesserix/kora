@@ -22,6 +22,22 @@ test("installConnectivity mirrors netinfo state into react-query's onlineManager
   unsubscribe();
 });
 
+// The case that makes the reachability check load-bearing: a captive portal or
+// a dead uplink leaves isConnected true while nothing actually routes. Without
+// this, every other assertion here still passes under a naive
+// `!!state.isConnected` that ignores isInternetReachable entirely — so this is
+// the only test that proves the check exists at all.
+test("a connected interface that is known unreachable counts as offline", () => {
+  installConnectivity();
+  const handler = (NetInfo.addEventListener as jest.Mock).mock.calls.at(-1)![0];
+
+  handler({ isConnected: true, isInternetReachable: true });
+  expect(isOnline()).toBe(true);
+
+  handler({ isConnected: true, isInternetReachable: false });
+  expect(isOnline()).toBe(false);
+});
+
 test("a connected interface with unknown reachability counts as online", () => {
   installConnectivity();
   const handler = (NetInfo.addEventListener as jest.Mock).mock.calls.at(-1)![0];
