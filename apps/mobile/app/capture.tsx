@@ -36,7 +36,7 @@ import {
   useResolveText,
   useResolveVoice,
 } from "@/api/hooks";
-import { ApiError } from "@/lib/api";
+import { ApiError, AuthTokenError, NetworkError, ResponseParseError } from "@/lib/api";
 import { kcalTotalLabel } from "@/lib/resolutionKcal";
 import { isLoggable } from "@/lib/candidateTier";
 import type { FoodItem, Resolution, ResolvedCandidate } from "@/api/types";
@@ -651,9 +651,24 @@ function CaptureCanvasBackground() {
   );
 }
 
+// Three very different failures used to collapse into one opaque sentence
+// here — the server saying no, the request never reaching the server, and
+// the server answering with something unreadable. Each gets its own copy so
+// which one happened is legible from the screen alone, without surfacing
+// raw error text or the request id (that's for logs, via api.ts's
+// ApiError.requestId — not for the user).
 function ottoErrorMessage(error: Error): string {
   if (error instanceof ApiError) {
     return `Hmm, I couldn't tell — ${error.message}. Mind trying again?`;
+  }
+  if (error instanceof AuthTokenError) {
+    return "I couldn't confirm it's you — mind signing in again?";
+  }
+  if (error instanceof NetworkError) {
+    return "I couldn't reach the server. Check your connection and try again.";
+  }
+  if (error instanceof ResponseParseError) {
+    return "The server answered, but I couldn't make sense of it. Mind trying again?";
   }
   return "Something went wrong while I looked at that. Please try again.";
 }

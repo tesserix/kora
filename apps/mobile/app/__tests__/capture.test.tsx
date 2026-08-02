@@ -3,23 +3,44 @@ import * as ImagePicker from "expo-image-picker";
 import { useCameraPermissions } from "expo-camera";
 import { requestRecordingPermissionsAsync, useAudioRecorder } from "expo-audio";
 import { router } from "expo-router";
-import { ApiError } from "@/lib/api";
+import { ApiError, AuthTokenError, NetworkError, ResponseParseError } from "@/lib/api";
 import type { Resolution } from "@/api/types";
 
 jest.mock("expo-router", () => ({ router: { back: jest.fn(), push: jest.fn() } }));
 
 // The real "@/lib/api" pulls in "@/lib/firebase" -> AsyncStorage's native
-// module, which isn't available under Jest. Mock it with a same-shape
-// ApiError so `instanceof ApiError` narrowing in capture.tsx still works.
+// module, which isn't available under Jest. Mock it with same-shape classes
+// so the `instanceof` narrowing in capture.tsx's ottoErrorMessage still works
+// for all four error types it distinguishes.
 jest.mock("@/lib/api", () => ({
   ApiError: class ApiError extends Error {
     status: number;
     code: string;
-    constructor(status: number, code: string, message: string) {
+    requestId?: string;
+    constructor(status: number, code: string, message: string, requestId?: string) {
       super(message);
       this.status = status;
       this.code = code;
+      this.requestId = requestId;
       this.name = "ApiError";
+    }
+  },
+  AuthTokenError: class AuthTokenError extends Error {
+    constructor(cause?: unknown) {
+      super("Failed to obtain an auth token", { cause });
+      this.name = "AuthTokenError";
+    }
+  },
+  NetworkError: class NetworkError extends Error {
+    constructor(cause?: unknown) {
+      super("Network request failed", { cause });
+      this.name = "NetworkError";
+    }
+  },
+  ResponseParseError: class ResponseParseError extends Error {
+    constructor(cause?: unknown) {
+      super("Failed to parse response body", { cause });
+      this.name = "ResponseParseError";
     }
   },
 }));
@@ -416,6 +437,73 @@ describe("Type mode", () => {
     await act(async () => options.onError(new ApiError(422, "no_match", "no confident match")));
 
     expect(await findByText(/no confident match/i)).toBeTruthy();
+  });
+
+  test("a network failure renders copy about not reaching the server, not the generic fallback", async () => {
+    const { findByText, findByLabelText, queryByText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Type"));
+
+    const input = await findByLabelText("Tell Otto what you ate");
+    await fireEvent.changeText(input, "mystery mush");
+    await fireEvent.press(await findByLabelText("Send"));
+
+    const [, options] = mockResolveTextMutate.mock.calls[0];
+    await act(async () => options.onError(new NetworkError(new TypeError("Network request failed"))));
+
+    expect(await findByText(/reach/i)).toBeTruthy();
+    expect(
+      queryByText("Something went wrong while I looked at that. Please try again."),
+    ).toBeNull();
+  });
+
+  test("a response-parse failure renders copy about not understanding the answer, not the generic fallback", async () => {
+    const { findByText, findByLabelText, queryByText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Type"));
+
+    const input = await findByLabelText("Tell Otto what you ate");
+    await fireEvent.changeText(input, "mystery mush");
+    await fireEvent.press(await findByLabelText("Send"));
+
+    const [, options] = mockResolveTextMutate.mock.calls[0];
+    await act(async () => options.onError(new ResponseParseError(new SyntaxError("bad json"))));
+
+    expect(await findByText(/couldn't make sense/i)).toBeTruthy();
+    expect(
+      queryByText("Something went wrong while I looked at that. Please try again."),
+    ).toBeNull();
+  });
+
+  test("an auth-token failure renders its own copy, distinct from network and parse failures", async () => {
+    const { findByText, findByLabelText, queryByText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Type"));
+
+    const input = await findByLabelText("Tell Otto what you ate");
+    await fireEvent.changeText(input, "mystery mush");
+    await fireEvent.press(await findByLabelText("Send"));
+
+    const [, options] = mockResolveTextMutate.mock.calls[0];
+    await act(async () => options.onError(new AuthTokenError(new Error("token unavailable"))));
+
+    expect(await findByText(/sign(ing|ed)? in/i)).toBeTruthy();
+    expect(
+      queryByText("Something went wrong while I looked at that. Please try again."),
+    ).toBeNull();
+  });
+
+  test("an unrecognised error still falls back to the generic message", async () => {
+    const { findByText, findByLabelText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Type"));
+
+    const input = await findByLabelText("Tell Otto what you ate");
+    await fireEvent.changeText(input, "mystery mush");
+    await fireEvent.press(await findByLabelText("Send"));
+
+    const [, options] = mockResolveTextMutate.mock.calls[0];
+    await act(async () => options.onError(new Error("totally unrelated failure")));
+
+    expect(
+      await findByText("Something went wrong while I looked at that. Please try again."),
+    ).toBeTruthy();
   });
 
   test("shows the analyzing stage while the text resolve is pending", async () => {
