@@ -167,8 +167,14 @@ func TestResolveScoreIsNotFloored(t *testing.T) {
 		"near-tied candidates must be able to score below the confirm floor")
 }
 
-// TestResolveAliasKeepsExactScore guards the exemption: an alias is exact
-// intent and must not be dragged down by an equally-scored full-text row.
+// TestResolveAliasKeepsExactScore guards the exemption: when two full-text
+// candidates tie exactly (identical normalized_name, hence identical lexical
+// scores), ambiguityFactor(0) returns 0.6, dragging all non-alias candidates
+// down. Aliases must not be scaled by this factor—they remain 1.0 exact.
+//
+// The fixture uses two rows with identical Name but different Brand (so both
+// insert), creating a genuine score tie. If the alias exemption is broken and
+// aliases are scaled like full-text rows, this test fails with score ~0.6.
 func TestResolveAliasKeepsExactScore(t *testing.T) {
 	db := testDB(t)
 	tx := db.Begin()
@@ -178,13 +184,14 @@ func TestResolveAliasKeepsExactScore(t *testing.T) {
 	repo := NewRepository(tx)
 
 	_, err := repo.Insert(context.Background(), []FoodItem{
-		{Name: "Brekkie eggs", Provenance: ProvenanceCurated, KcalPer100g: 150},
-		{Name: "Brekkie eggs deluxe", Provenance: ProvenanceCurated, KcalPer100g: 150},
+		{Name: "Brekkie eggs", Brand: "brand_a", Provenance: ProvenanceCurated, KcalPer100g: 150},
+		{Name: "Brekkie eggs", Brand: "brand_b", Provenance: ProvenanceCurated, KcalPer100g: 150},
+		{Name: "Brekkie eggs", Brand: "brand_c", Provenance: ProvenanceCurated, KcalPer100g: 150},
 	})
 	require.NoError(t, err)
 
 	var target FoodItem
-	require.NoError(t, tx.First(&target, "name = ?", "Brekkie eggs").Error)
+	require.NoError(t, tx.First(&target, "name = ? AND brand = ?", "Brekkie eggs", "brand_a").Error)
 	require.NoError(t, tx.Exec(
 		`INSERT INTO food_aliases (user_id, alias, food_item_id) VALUES (NULL, ?, ?)`,
 		"brekkie eggs", target.ID).Error)
