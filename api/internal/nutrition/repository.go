@@ -3,7 +3,7 @@ package nutrition
 import (
 	"context"
 	"fmt"
-	"math"
+	"sort"
 	"strings"
 
 	"github.com/google/uuid"
@@ -160,47 +160,68 @@ func (r Repository) Resolve(ctx context.Context, userID uuid.UUID, phrase string
 	}
 	add(aliasItems, MatchAlias, func(FoodItem) float64 { return 1.0 })
 
-	// Tier 2: full-text on normalized_name. Both sides must go through
-	// Normalize (which singularizes, e.g. "oats" -> "oat") so a plural query
-	// matches a plural document name: fi.name is stored verbatim, but
-	// normalized_name is Normalize(name) on both Insert and
-	// BackfillNormalizedNames, so comparing norm against normalized_name
-	// keeps the two sides in the same normalized form.
+	// Non-alias candidates are pooled and scored comparably, then sorted. A
+	// row found by BOTH full-text and embedding contributes its components to
+	// one entry rather than appearing twice.
+	pool := map[uuid.UUID]*scoredItem{}
+	var order []uuid.UUID
+	poolAdd := func(it FoodItem) *scoredItem {
+		if s, ok := pool[it.ID]; ok {
+			return s
+		}
+		s := &scoredItem{item: it}
+		s.comp.Coverage, s.comp.Precision = tokenOverlap(norm, it.NormalizedName)
+		pool[it.ID] = s
+		order = append(order, it.ID)
+		return s
+	}
+
+	// Tier 2: full-text on normalized_name. Both sides go through Normalize
+	// (which singularizes, e.g. "oats" -> "oat") so a plural query matches a
+	// plural document name.
+	//
+	// ts_rank is NOT used for scoring. With the default normalization flag it
+	// ignores document length, and plainto_tsquery ANDs every term, so its
+	// value depends only on how many terms the query had — it is identical for
+	// every candidate and cannot rank them. The predicate is kept for recall;
+	// similarity() supplies the signal.
 	type ftRow struct {
 		FoodItem
-		Rank float64 `gorm:"column:rank"`
+		Trgm float64 `gorm:"column:trgm"`
 	}
 	var ftRows []ftRow
 	if err := r.db.WithContext(ctx).
-		Raw(`SELECT fi.*, ts_rank(to_tsvector('simple', fi.normalized_name), plainto_tsquery('simple', ?)) AS rank
+		Raw(`SELECT fi.*, similarity(fi.normalized_name, ?) AS trgm
 		     FROM food_items fi
 		     WHERE to_tsvector('simple', fi.normalized_name) @@ plainto_tsquery('simple', ?)
-		     ORDER BY rank DESC LIMIT ?`, norm, norm, limit).
+		     LIMIT ?`, norm, norm, limit).
 		Scan(&ftRows).Error; err != nil {
 		return nil, fmt.Errorf("nutrition: resolve fulltext: %w", err)
 	}
-	// Normalize ts_rank (unbounded, typically < 1) into 0..1 via rank/(rank+1), capped below alias.
 	for _, row := range ftRows {
 		if seen[row.FoodItem.ID] {
 			continue
 		}
-		seen[row.FoodItem.ID] = true
-		s := row.Rank / (row.Rank + 1)
-		out = append(out, Candidate{Item: row.FoodItem, MatchScore: 0.7 + 0.29*s, MatchTier: MatchFullText})
+		poolAdd(row.FoodItem).comp.Trigram = row.Trgm
 	}
 
-	// Tier 3: embedding cosine (optional).
+	// Tier 3: embedding cosine (optional). This has always run whenever
+	// queryVec != nil; previously its rows were appended after full-text and
+	// silently cut by the limit, so the scan was paid for and discarded.
 	if queryVec != nil {
 		type embRow struct {
 			FoodItem
 			Distance float64 `gorm:"column:distance"`
+			Trgm     float64 `gorm:"column:trgm"`
 		}
 		var embRows []embRow
 		if err := r.db.WithContext(ctx).
-			Raw(`SELECT fi.*, (fi.embedding <=> ?) AS distance
+			Raw(`SELECT fi.*, (fi.embedding <=> ?) AS distance,
+			            similarity(fi.normalized_name, ?) AS trgm
 			     FROM food_items fi
 			     WHERE fi.embedding IS NOT NULL
-			     ORDER BY distance ASC LIMIT ?`, pgvector.NewVector(queryVec), limit).
+			     ORDER BY distance ASC LIMIT ?`,
+				pgvector.NewVector(queryVec), norm, limit).
 			Scan(&embRows).Error; err != nil {
 			return nil, fmt.Errorf("nutrition: resolve embedding: %w", err)
 		}
@@ -208,16 +229,56 @@ func (r Repository) Resolve(ctx context.Context, userID uuid.UUID, phrase string
 			if seen[row.FoodItem.ID] {
 				continue
 			}
-			seen[row.FoodItem.ID] = true
-			sim := math.Max(0, 1-row.Distance) // cosine distance → similarity
-			out = append(out, Candidate{Item: row.FoodItem, MatchScore: sim * 0.7, MatchTier: MatchEmbedding})
+			s := poolAdd(row.FoodItem)
+			s.comp.Trigram = row.Trgm
+			if sim := 1 - row.Distance; sim > 0 {
+				s.comp.EmbSim = sim
+			}
 		}
+	}
+
+	// Score, sort, then scale by ambiguity. The factor is computed from the
+	// top two NON-alias qualities and applied uniformly to them, which
+	// preserves their relative order while letting a near-tie pull the whole
+	// group below the confirm floor.
+	scoredList := make([]*scoredItem, 0, len(order))
+	for _, id := range order {
+		s := pool[id]
+		s.score = quality(s.comp)
+		scoredList = append(scoredList, s)
+	}
+	sort.SliceStable(scoredList, func(i, j int) bool {
+		return scoredList[i].score > scoredList[j].score
+	})
+
+	factor := 1.0
+	if len(scoredList) > 1 {
+		factor = ambiguityFactor(scoredList[0].score - scoredList[1].score)
+	}
+	for _, s := range scoredList {
+		tier := MatchFullText
+		if embeddingFactor*s.comp.EmbSim > lexical(s.comp) {
+			tier = MatchEmbedding
+		}
+		out = append(out, Candidate{
+			Item:       s.item,
+			MatchScore: s.score * factor,
+			MatchTier:  tier,
+		})
 	}
 
 	if len(out) > limit {
 		out = out[:limit]
 	}
 	return out, nil
+}
+
+// scoredItem accumulates one candidate's signals across the full-text and
+// embedding queries before a single score is computed from them.
+type scoredItem struct {
+	item  FoodItem
+	comp  components
+	score float64
 }
 
 // RowsMissingEmbedding returns food items with no embedding yet (up to limit),
