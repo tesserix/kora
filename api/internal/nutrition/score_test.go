@@ -8,9 +8,9 @@ import (
 
 func TestTokenOverlap(t *testing.T) {
 	tests := []struct {
-		name                string
-		query, doc          string
-		wantCov, wantPrec   float64
+		name              string
+		query, doc        string
+		wantCov, wantPrec float64
 	}{
 		{"exact", "chicken breast", "chicken breast", 1.0, 1.0},
 		{"doc has extra terms", "chicken breast", "fast food fried chicken breast", 1.0, 0.4},
@@ -70,11 +70,11 @@ func TestQualityStaysInUnitInterval(t *testing.T) {
 }
 
 func TestAmbiguityFactor(t *testing.T) {
-	require.InDelta(t, 0.6, ambiguityFactor(0), 0.001)      // dead tie
+	require.InDelta(t, 0.6, ambiguityFactor(0), 0.001)       // dead tie
 	require.InDelta(t, 0.618, ambiguityFactor(0.009), 0.001) // the prod near-tie
-	require.InDelta(t, 1.0, ambiguityFactor(0.2), 0.001)    // clearly separated
-	require.InDelta(t, 1.0, ambiguityFactor(5), 0.001)      // clamped above
-	require.InDelta(t, 0.6, ambiguityFactor(-1), 0.001)     // clamped below
+	require.InDelta(t, 1.0, ambiguityFactor(0.2), 0.001)     // clearly separated
+	require.InDelta(t, 1.0, ambiguityFactor(5), 0.001)       // clamped above
+	require.InDelta(t, 0.6, ambiguityFactor(-1), 0.001)      // clamped below
 }
 
 func TestScoringSeparatesTheAmbiguousFromTheClear(t *testing.T) {
