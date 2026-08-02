@@ -1,0 +1,5 @@
+-- Leave the `pg_trgm` extension installed (other objects may use it), matching
+-- how 000004 treats `vector`. Dropping it would not fail loudly: similarity()
+-- is called from query text rather than from an indexed or dependent object,
+-- so Postgres has nothing to block the drop with and food resolution would
+-- start erroring at runtime instead.

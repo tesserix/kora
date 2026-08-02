@@ -1,0 +1,11 @@
+-- pg_trgm supplies similarity(), the character-level signal that replaces
+-- ts_rank as the match score. ts_rank with the default normalization flag
+-- ignores document length and plainto_tsquery ANDs every term, so its value
+-- depends only on the number of query terms — it is constant across all
+-- candidates for a given query and cannot rank them. See
+-- docs/superpowers/specs/2026-08-02-food-match-scoring-design.md
+--
+-- No trigram index: recall is served by idx_food_items_normalized_name_fts and
+-- similarity() is only computed over the rows that filter already returned, so
+-- a GIN trgm index would never be used.
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
