@@ -326,10 +326,15 @@ func TestGoldenSetTierMatchesExpectation(t *testing.T) {
 			"this is the dangerous direction, never acceptable:\n%s",
 		len(escalations), strings.Join(escalations, "\n"))
 
-	require.LessOrEqual(t, len(other), 35,
-		"%d cases disagreed with expect_tier outside the dangerous direction; that's above the "+
-			"known-label-gap baseline (~29) and may indicate a real scoring regression, not just "+
-			"the coarse blanket-\"confirm\" placeholder on the unambiguous band",
+	require.LessOrEqual(t, len(other), 29,
+		"%d cases disagreed with expect_tier outside the dangerous direction. This is a ratchet "+
+			"against a known expect_tier label-authoring debt: the unambiguous band was authored "+
+			"with a blanket \"confirm\" placeholder rather than per-case consideration, leaving 29 "+
+			"known disagreements (19 unambiguous exact matches that landed in auto, 8 unambiguous "+
+			"queries landing in follow_up instead of confirm, 2 regression-band cases). The correct "+
+			"long-term fix is to author expect_tier values per-case; this ceiling only ever moves "+
+			"downwards as labels get authored, never upwards. Any new disagreement will fail this "+
+			"assertion and indicate a real scoring regression, not label debt.",
 		len(other))
 }
 
