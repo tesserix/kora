@@ -21,6 +21,19 @@ func NewRepository(db *gorm.DB) Repository {
 
 const searchLimitMax = 25
 
+// resolveScanLimit bounds how many ordered candidates the full-text and
+// embedding queries fetch for scoring in Resolve, independent of the
+// caller's requested limit. The caller's limit is how many results it
+// wants back; the scan limit is how many candidates the in-Go ranker gets
+// to consider before truncating to that count. Decoupling them matters
+// because production calls Resolve with a small limit (5) purely to bound
+// the response size — if that same number also bounded the SQL fetch, the
+// scorer would only ever see a handful of rows out of a query that can
+// match hundreds, and the true best match can be silently excluded from
+// scoring entirely. 100 is generous enough to hold the true best row for
+// virtually any query while staying cheap to score in Go.
+const resolveScanLimit = 100
+
 func (r Repository) Search(ctx context.Context, query string, limit int) ([]FoodItem, error) {
 	if limit <= 0 || limit > searchLimitMax {
 		limit = searchLimitMax
@@ -190,11 +203,19 @@ func (r Repository) Resolve(ctx context.Context, userID uuid.UUID, phrase string
 		Trgm float64 `gorm:"column:trgm"`
 	}
 	var ftRows []ftRow
+	// ORDER BY similarity(...) DESC: recall from the tsvector predicate can
+	// vastly exceed resolveScanLimit (hundreds of rows for a common word), so
+	// if the scan limit ever truncates, it must drop the least similar rows
+	// rather than an arbitrary subset of Postgres's unspecified scan order.
+	// This reuses the same similarity() expression already computed for the
+	// trgm column below — same column, same parameter, so the ordering and
+	// the score it feeds are consistent.
 	if err := r.db.WithContext(ctx).
 		Raw(`SELECT fi.*, similarity(fi.normalized_name, ?) AS trgm
 		     FROM food_items fi
 		     WHERE to_tsvector('simple', fi.normalized_name) @@ plainto_tsquery('simple', ?)
-		     LIMIT ?`, norm, norm, limit).
+		     ORDER BY similarity(fi.normalized_name, ?) DESC
+		     LIMIT ?`, norm, norm, norm, resolveScanLimit).
 		Scan(&ftRows).Error; err != nil {
 		return nil, fmt.Errorf("nutrition: resolve fulltext: %w", err)
 	}
@@ -215,13 +236,18 @@ func (r Repository) Resolve(ctx context.Context, userID uuid.UUID, phrase string
 			Trgm     float64 `gorm:"column:trgm"`
 		}
 		var embRows []embRow
+		// resolveScanLimit here too: ORDER BY distance ASC is already a
+		// meaningful ranking (unlike the full-text case above), but pgvector
+		// computes that distance for every embedded row regardless of how
+		// many are returned, so fetching more of an already-ranked result is
+		// nearly free and gives the Go scorer the same generous pool.
 		if err := r.db.WithContext(ctx).
 			Raw(`SELECT fi.*, (fi.embedding <=> ?) AS distance,
 			            similarity(fi.normalized_name, ?) AS trgm
 			     FROM food_items fi
 			     WHERE fi.embedding IS NOT NULL
 			     ORDER BY distance ASC LIMIT ?`,
-				pgvector.NewVector(queryVec), norm, limit).
+				pgvector.NewVector(queryVec), norm, resolveScanLimit).
 			Scan(&embRows).Error; err != nil {
 			return nil, fmt.Errorf("nutrition: resolve embedding: %w", err)
 		}

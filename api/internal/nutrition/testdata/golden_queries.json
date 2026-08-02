@@ -27,6 +27,7 @@
   {"query": "coconut chutney", "expect_name": "Coconut chutney", "expect_tier": "confirm", "band": "unambiguous"},
   {"query": "poha", "expect_name": "Poha", "expect_tier": "confirm", "band": "unambiguous"},
   {"query": "jeera rice", "expect_name": "Jeera rice", "expect_tier": "confirm", "band": "unambiguous"},
+  {"query": "lentils", "expect_name": "Lentils, raw", "expect_tier": "confirm", "band": "unambiguous"},
 
   {"query": "chicken breast", "expect_name": "Chicken breast, roasted", "expect_tier": "follow_up", "band": "ambiguous"},
   {"query": "rice", "expect_name": "", "expect_tier": "follow_up", "band": "ambiguous"},

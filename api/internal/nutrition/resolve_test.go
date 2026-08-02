@@ -167,6 +167,55 @@ func TestResolveScoreIsNotFloored(t *testing.T) {
 		"near-tied candidates must be able to score below the confirm floor")
 }
 
+// TestResolveDoesNotTruncateBeforeScoring guards against the SQL LIMIT being
+// applied to the full-text candidate fetch before scoring happens in Go.
+// Resolve's full-text query used to fetch only `limit` rows with no ORDER BY,
+// so the rows handed to the scorer were an arbitrary subset of Postgres's scan
+// order — the true best match could be silently excluded from scoring
+// entirely just because it wasn't among the first `limit` rows physically
+// scanned. This test inserts more full-text matches than the caller's limit,
+// deliberately inserting the best match LAST (so an unordered, pre-scoring
+// LIMIT would very likely drop it), and asserts Resolve still returns it as
+// top-1: recall must fetch a generous, ordered pool for the ranker to
+// consider, independent of how many results the caller asked for.
+func TestResolveDoesNotTruncateBeforeScoring(t *testing.T) {
+	db := testDB(t)
+	tx := db.Begin()
+	require.NoError(t, tx.Error)
+	t.Cleanup(func() { tx.Rollback() })
+	require.NoError(t, tx.Exec("TRUNCATE food_items CASCADE").Error)
+	repo := NewRepository(tx)
+
+	// "zqxscanguard" is a unique token no ambient row contains. The first five
+	// rows are weak matches (the token plus several unrelated words dilutes
+	// both trigram similarity and precision); the sixth, inserted last, is an
+	// exact match on the query and must win on score regardless of insertion
+	// order.
+	weakMatches := []string{
+		"Zqxscanguard fried rice bowl mix",
+		"Zqxscanguard grilled paneer tikka",
+		"Zqxscanguard spicy chicken wrap",
+		"Zqxscanguard baked salmon fillet",
+		"Zqxscanguard roasted veggie medley",
+	}
+	items := make([]FoodItem, 0, len(weakMatches)+1)
+	for _, n := range weakMatches {
+		items = append(items, FoodItem{Name: n, Provenance: ProvenanceUSDA, KcalPer100g: 100})
+	}
+	items = append(items, FoodItem{Name: "Zqxscanguard", Provenance: ProvenanceUSDA, KcalPer100g: 100})
+	_, err := repo.Insert(context.Background(), items)
+	require.NoError(t, err)
+
+	// Caller's limit (3) is smaller than the number of matching rows (6), and
+	// smaller than the position of the best match in insertion order (6th).
+	cands, err := repo.Resolve(context.Background(), uuid.Nil, "zqxscanguard", nil, 3)
+	require.NoError(t, err)
+	require.NotEmpty(t, cands)
+	require.Equal(t, "Zqxscanguard", cands[0].Item.Name,
+		"the exact match must win top-1 even though it was inserted after limit weaker rows")
+	require.Equal(t, MatchFullText, cands[0].MatchTier)
+}
+
 // TestResolveAliasKeepsExactScore guards the exemption: when two full-text
 // candidates tie exactly (identical normalized_name, hence identical lexical
 // scores), ambiguityFactor(0) returns 0.6, dragging all non-alias candidates
