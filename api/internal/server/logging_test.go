@@ -194,6 +194,53 @@ func TestRequestLogger_HonoursClientSuppliedRequestID(t *testing.T) {
 	assert.Equal(t, clientID, entry["request_id"])
 }
 
+// TestRequestLogger_PanicProducesErrorLogAndPropagates is Finding 1: a
+// panicking handler must still leave exactly one correlatable trace, and the
+// panic must still reach gin.Recovery() (registered outer to RequestLogger,
+// exactly as in router.go) so the client still gets its 500.
+func TestRequestLogger_PanicProducesErrorLogAndPropagates(t *testing.T) {
+	buf := captureLogger(t)
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(gin.Recovery())
+	r.Use(RequestLogger())
+	r.GET("/v1/boom", func(c *gin.Context) {
+		panic("kaboom")
+	})
+
+	var w *httptest.ResponseRecorder
+	require.NotPanics(t, func() {
+		w = doRequest(r, http.MethodGet, "/v1/boom", nil)
+	}, "gin.Recovery() must still catch the panic; RequestLogger must not call recover()")
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+
+	entry := onlyLogLine(t, buf)
+	assert.Equal(t, "ERROR", entry["level"])
+	assert.Equal(t, "/v1/boom", entry["route"])
+	assert.Equal(t, float64(http.StatusInternalServerError), entry["status"],
+		"status must be recorded as 500 (what Recovery will send), not the in-flight default 200")
+	assert.Equal(t, true, entry["panic"], "a panicking request must be marked so it is greppable")
+	assert.NotEmpty(t, entry["request_id"])
+}
+
+// TestRequestLogger_ReadyFailureLogsError is Finding 2: probes are skipped to
+// keep Kubernetes noise out of the logs, but a FAILING readiness probe is an
+// infra signal that must still leave a trace.
+func TestRequestLogger_ReadyFailureLogsError(t *testing.T) {
+	buf := captureLogger(t)
+	r := newLoggedEngine(http.MethodGet, "/ready", func(c *gin.Context) {
+		c.Status(http.StatusServiceUnavailable)
+	})
+
+	doRequest(r, http.MethodGet, "/ready", nil)
+
+	entry := onlyLogLine(t, buf)
+	assert.Equal(t, "ERROR", entry["level"])
+	assert.Equal(t, "/ready", entry["route"])
+	assert.Equal(t, float64(http.StatusServiceUnavailable), entry["status"])
+}
+
 // TestRequestLogger_NeverLeaksSensitiveQueryString is the important test.
 // GET /v1/foods?q=chicken+breast carries the user's search phrase — a food
 // description, which is health data — in the query string. This test
