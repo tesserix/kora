@@ -18,3 +18,18 @@ func TestVectorExtensionAndColumns(t *testing.T) {
 		Scan(&cols).Error)
 	require.Equal(t, 2, cols)
 }
+
+func TestTrigramExtensionAvailable(t *testing.T) {
+	db := testDB(t)
+	var sim float64
+	err := db.Raw(`SELECT similarity('chicken breast', 'chicken breast')`).Scan(&sim).Error
+	require.NoError(t, err)
+	require.InDelta(t, 1.0, sim, 0.001)
+
+	// The discriminating property: a longer, noisier name must score lower
+	// than an exact one. This is precisely what ts_rank could not do.
+	var exact, noisy float64
+	require.NoError(t, db.Raw(`SELECT similarity('chicken breast', 'chicken breast')`).Scan(&exact).Error)
+	require.NoError(t, db.Raw(`SELECT similarity('fast food fried chicken breast wing thigh drumstick nugget', 'chicken breast')`).Scan(&noisy).Error)
+	require.Greater(t, exact, noisy)
+}
