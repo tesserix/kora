@@ -167,3 +167,76 @@ directly was the way through.
   it as #72-verified.
 - Runner-up candidates still never leave the server (`resolver.go` keeps
   `cands[0]`), so the resolution-level `follow_up` question still shows no list.
+
+---
+
+# UPDATE 2 — 2026-08-02: the estimate path now tiers too (#74)
+
+#73 made `match_score` discriminate, but **the estimate path discarded it**.
+`decomposeAndEstimate` hardcoded `Tier: TierConfirm`, and `ResolveText` falls
+through to decompose precisely when `resolveGuesses` returns `follow_up` — so
+every uncertain resolution was relabelled confident on the way out and #71's
+uncertain-row UI still could not appear. The blocker had moved up a layer, not
+gone away.
+
+#74 tiers each decomposed ingredient from its own `MatchScore`, **capped at
+`confirm`** (they are LLM inferences — `Olive oil` and `Butter` were invented by
+the decompose step — so a perfect match must not become a one-tap `auto`, but a
+weak one must be free to fall to `follow_up`). Resolution tier is now the max
+across items.
+
+## Verified live after deploy (digest sha256:329f8f1d)
+
+`grilled chicken breast` — one meal, mixed tiers, which is the whole point:
+
+| ingredient | score | tier |
+|---|---|---|
+| Chicken breast, roasted | 0.4970 | **follow_up** |
+| Olive oil | 1.0000 | confirm *(capped, not auto)* |
+| Butter, without salt | 0.3602 | **follow_up** |
+| Spices, pepper, black | 0.8053 | confirm |
+
+`xylophone stew` (not a food) is now `follow_up` throughout — it previously read
+as `confirm` with banana, fish broth and carrots. `match_tier: embedding` was
+also observed here, so **the embedding tier does fire in prod**; it needs
+lexical to fail first, which is why `/v1/foods` never shows it (that endpoint
+passes a nil vector and structurally cannot).
+
+## Client fix that had to ship with it
+
+`AskAgainSheet.tsx` branched on `tier === "follow_up"` alone. The new
+empty-question resolution would have hit a blank prompt plus "Search manually
+instead" and discarded the candidates — the exact dead-end the server change
+avoids in `capture.tsx`. That combination was unreachable before #74. Now
+guarded by a shared `asksQuestion` predicate and a mutation-verified test.
+
+## Deploy: the stale mirror bit AGAIN, and how it is now pinned
+
+`rollout restart` on `:latest` reported "successfully rolled out" while still
+running #73's digest (`sha256:2b130d26`). Second time in one session. **Verify
+the running digest, never the rollout status.**
+
+Fixed properly: the parent app-of-apps already sets `ignoreDifferences` on
+`/spec/source/helm/parameters` so a promoter can write `image.tag` on the child
+Application without being reverted (intended for Kargo, which is not wired up
+for Kora yet — the parameter was sitting on the `"latest"` placeholder). That
+slot now holds the commit SHA `2847559e…`, so the Deployment, the Application
+parameter and the running pod all agree and `selfHeal` has nothing to revert.
+
+**Next deploy must bump that parameter** (or wire up Kargo / repoint CI, per the
+manifest's own TODO). Leaving it on a commit SHA means `:latest` no longer
+drives Kora.
+
+## Still open
+
+- **Head-noun weakness** — unchanged. `Oil, almond` ties `Almonds, raw`;
+  `Strudel, apple` beats a raw apple; `salmon` → `Fish oil, salmon`. Surfaces as
+  `follow_up`, never as a confident wrong answer.
+- **kcal display inconsistency (new, minor)** — for estimates the headline total
+  uses `kcal_low`/`kcal_high` verbatim, but `DetectedCard` hides a `follow_up`
+  row's kcal while it still counts toward that total, so itemised rows no longer
+  visibly sum. Wrong-looking, not a wrong number.
+- **`cmd/embed` quota bug** — unchanged, 302 of 7,856.
+- **`vegemite`** absent from the index despite being cited as #72-verified.
+- Runner-up candidates still never leave the server.
+- **Simulator pass still not done.** All evidence above is API-level.
