@@ -662,7 +662,15 @@ function ottoErrorMessage(error: Error): string {
     return `Hmm, I couldn't tell — ${error.message}. Mind trying again?`;
   }
   if (error instanceof AuthTokenError) {
-    return "I couldn't confirm it's you — mind signing in again?";
+    // Deliberately does NOT tell the user to sign in again. This wraps
+    // getIdToken() rejecting, whose most common cause is a dropped
+    // connection (auth/network-request-failed), not an unusable session —
+    // and sending someone to re-authenticate over a flaky network costs
+    // them their session for nothing. A session that genuinely cannot be
+    // used already has its own path: a 401 surviving the refresh-and-retry
+    // in api.ts triggers signOutForExpiredSession, which redirects to
+    // /sign-in with an explanation. Keep this copy action-neutral.
+    return "I couldn't confirm your session just then — mind trying again?";
   }
   if (error instanceof NetworkError) {
     return "I couldn't reach the server. Check your connection and try again.";

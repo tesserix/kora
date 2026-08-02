@@ -484,10 +484,18 @@ describe("Type mode", () => {
     const [, options] = mockResolveTextMutate.mock.calls[0];
     await act(async () => options.onError(new AuthTokenError(new Error("token unavailable"))));
 
-    expect(await findByText(/sign(ing|ed)? in/i)).toBeTruthy();
+    // Asserts the property this test is named for — a distinct, non-generic
+    // message — rather than one specific phrase. The earlier version matched
+    // /sign(ing|ed)? in/, which coupled it to copy that told the user to
+    // sign in again; that advice was wrong (this error usually means a
+    // dropped connection, not an unusable session) and the assertion broke
+    // the moment the copy was corrected. Wording is not the contract here.
+    expect(await findByText(/session/i)).toBeTruthy();
     expect(
       queryByText("Something went wrong while I looked at that. Please try again."),
     ).toBeNull();
+    expect(queryByText(/couldn't reach the server/i)).toBeNull();
+    expect(queryByText(/couldn't make sense of it/i)).toBeNull();
   });
 
   test("an unrecognised error still falls back to the generic message", async () => {
