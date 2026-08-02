@@ -240,3 +240,60 @@ drives Kora.
 - **`vegemite`** absent from the index despite being cited as #72-verified.
 - Runner-up candidates still never leave the server.
 - **Simulator pass still not done.** All evidence above is API-level.
+
+---
+
+# UPDATE 3 — 2026-08-02: simulator pass DONE. The uncertain-row UI is real.
+
+The item left undone across three handoffs is now closed. Driven on the iOS sim
+against **prod** (`EXPO_PUBLIC_API_URL` confirmed inlined as
+`https://kora-api.tesserix.app` by grepping the served Metro bundle for
+`Object.defineProperties(process.env, ...)` — more reliable than reading
+Metro's startup env line, and worth doing since `.env` still says
+`http://localhost:8080`).
+
+Typed "grilled chicken breast" into Ask Otto. **#71's per-item uncertain-row UI
+rendered for the first time since it shipped:**
+
+- `Chicken breast, roasted` (0.4970) → hollow circle glyph, "Not sure which —
+  tap to confirm", macro chips suppressed, "—" instead of kcal
+- `Olive oil` (1.0000) → full row, chips, 884 kcal
+- `Butter, without salt` (0.3602) → uncertain row
+- `Spices, pepper, black` (0.8053) → full row, 251 kcal
+- Header reads **DETECTED · 4 ITEMS** while the CTA reads **Add 2 items to
+  diary** — the deliberate mismatch from #71's design
+
+Accessibility is right too: only the uncertain rows expose buttons, labelled
+`Confirm <name>`. The confident rows are inert.
+
+**Full round-trip verified:** tapping an uncertain row opens `FoodPicker`
+seeded with that row's name; selecting a result promotes the row (200g, macro
+chips) and the CTA increments to **Add 3 items to diary**, with `Butter` still
+uncertain. That is the complete loop this whole line of work existed to enable.
+
+## One thing observed that is NOT explained
+
+**The first resolve attempt failed** with capture.tsx's generic
+"Something went wrong while I looked at that" — which `ottoErrorMessage` only
+emits for a **non-`ApiError`**, i.e. `fetch` itself threw or the body would not
+parse. The identical phrase succeeded on retry ~4 min later (HTTP 200 in 3.3s,
+confirmed in the device log), and every curl against the same endpoint
+succeeded. Not reproduced; not dismissed either.
+
+**Why it could not be diagnosed server-side: `kora-api` logs no requests.**
+`kubectl logs` over the failing window shows only startup lines. A user
+reporting "it said something went wrong" currently leaves no server-side trace
+at all. Request logging is worth adding before chasing this further.
+
+## Environment left running
+
+Metro is **up** on port 8082 against prod (`npx expo start --port 8082
+--dev-client`). Sim `AD109A46-2F99-43C3-8AAA-FEE68DC8499E` has Kora foregrounded
+on the capture screen with an unsaved 4-item detection. Nothing was written to
+the diary — "Add N items" was never pressed.
+
+`idb` notes that held: it lives at `~/Library/Python/3.9/bin` (PATH-hidden),
+`idb ui describe-all` gives point frames directly, and `idb ui text` still
+silently drops the last word of a multi-word phrase (typed "grilled chicken
+breast", got "Grilled chicken" — append the remainder and re-verify via the
+TextField's `AXValue`).
