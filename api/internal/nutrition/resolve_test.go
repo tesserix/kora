@@ -44,17 +44,29 @@ func TestResolveFullTextRanksByName(t *testing.T) {
 
 	// "zqxnonce" is a unique token no ambient row (seed data or ingested
 	// AFCD/USDA foods) contains, so this test is deterministic regardless of
-	// what else lives in the DB. plainto_tsquery matches both rows via the
-	// nonce, but the grilled-chicken row matches 2 lexemes (zqxnonce +
-	// chicken) vs 1 for the water row, so ts_rank ranks it first.
+	// what else lives in the DB. Both rows contain BOTH query lexemes
+	// ("zqxnonce" and "chicken"), so plainto_tsquery's AND predicate matches
+	// both — verified via `to_tsvector('simple', ...) @@ plainto_tsquery('simple',
+	// 'zqxnonce chicken')` for the diluted row too — so this is a genuine
+	// two-candidate ranking, unlike the old fixture where the second row
+	// (which shared no token with "chicken") never matched the predicate at
+	// all and the ranking assertion could never fail.
+	//
+	// Scoring is now coverage/precision/trigram, not ts_rank (see score.go
+	// quality()): the exact-match row has coverage=precision=trigram=1.0, the
+	// ceiling. The diluted row shares the same two query tokens but adds four
+	// more (precision=2/6=0.333) and has lower trigram similarity to the
+	// query (0.386, verified via psql) since its token set is a strict
+	// superset — so it scores strictly lower under any coverage/precision
+	// weighting where extra tokens are not free.
 	seedFor(t, repo, []FoodItem{
-		{Name: "Zqxnonce grilled chicken", Brand: "test2a", Provenance: ProvenanceAFCD, KcalPer100g: 165},
-		{Name: "Zqxnonce plain water", Brand: "test2a", Provenance: ProvenanceAFCD, KcalPer100g: 0},
+		{Name: "Zqxnonce chicken", Brand: "test2a", Provenance: ProvenanceAFCD, KcalPer100g: 165},
+		{Name: "Zqxnonce chicken nugget wing thigh drumstick", Brand: "test2a", Provenance: ProvenanceAFCD, KcalPer100g: 165},
 	})
 	got, err := repo.Resolve(context.Background(), uuid.Nil, "zqxnonce chicken", nil, 5)
 	require.NoError(t, err)
 	require.NotEmpty(t, got)
-	require.Equal(t, "Zqxnonce grilled chicken", got[0].Item.Name)
+	require.Equal(t, "Zqxnonce chicken", got[0].Item.Name)
 	require.Equal(t, MatchFullText, got[0].MatchTier)
 }
 
