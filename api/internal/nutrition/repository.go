@@ -273,23 +273,42 @@ func (r Repository) Resolve(ctx context.Context, userID uuid.UUID, phrase string
 		}
 	}
 
-	// Score, sort, then scale by ambiguity. The factor is computed from the
-	// top two NON-alias qualities and applied uniformly to them, which
-	// preserves their relative order while letting a near-tie pull the whole
-	// group below the confirm floor.
+	// Score, sort, then scale by ambiguity. Sorting uses a rank key that adds
+	// headBonus when the candidate's head noun (see headToken) is one of the
+	// query's tokens — this is a RANKING signal only. s.score stays the
+	// unmodified quality() and is what MatchScore is ultimately derived from,
+	// so the head-noun signal can move a row to top-1 without ever inflating
+	// its reported confidence.
+	qTokens := fieldSet(norm)
 	scoredList := make([]*scoredItem, 0, len(order))
 	for _, id := range order {
 		s := pool[id]
 		s.score = quality(s.comp)
+		s.rankKey = s.score
+		if head := headToken(s.item.Name); head != "" && qTokens[head] {
+			s.rankKey += headBonus
+		}
 		scoredList = append(scoredList, s)
 	}
 	sort.SliceStable(scoredList, func(i, j int) bool {
-		return scoredList[i].score > scoredList[j].score
+		return scoredList[i].rankKey > scoredList[j].rankKey
 	})
 
+	// The ambiguity margin is computed from the BASE qualities (not rank keys)
+	// of the top two candidates in the now-ranked order, clamped at >= 0.
+	// Ranking by rankKey can promote a candidate whose base quality is lower
+	// than the one it displaced (that's the whole point of the head-noun
+	// signal), so a naive scoredList[0].score - scoredList[1].score can go
+	// negative post-reorder. A negative margin must not be interpreted as
+	// "more ambiguous than a dead tie" — clamp it at the dead-tie value (0)
+	// instead of letting it feed further below.
 	factor := 1.0
 	if len(scoredList) > 1 {
-		factor = ambiguityFactor(scoredList[0].score - scoredList[1].score)
+		margin := scoredList[0].score - scoredList[1].score
+		if margin < 0 {
+			margin = 0
+		}
+		factor = ambiguityFactor(margin)
 	}
 	for _, s := range scoredList {
 		tier := MatchFullText
@@ -312,9 +331,10 @@ func (r Repository) Resolve(ctx context.Context, userID uuid.UUID, phrase string
 // scoredItem accumulates one candidate's signals across the full-text and
 // embedding queries before a single score is computed from them.
 type scoredItem struct {
-	item  FoodItem
-	comp  components
-	score float64
+	item    FoodItem
+	comp    components
+	score   float64 // unmodified quality() — this, scaled by the ambiguity factor, becomes MatchScore
+	rankKey float64 // score plus headBonus when applicable — sort order ONLY, never reported
 }
 
 // RowsMissingEmbedding returns food items with no embedding yet (up to limit),

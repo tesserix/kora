@@ -77,6 +77,30 @@ func TestAmbiguityFactor(t *testing.T) {
 	require.InDelta(t, 0.6, ambiguityFactor(-1), 0.001)      // clamped below
 }
 
+func TestHeadToken(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"USDA comma name", "Almonds, raw", "almond"},
+		{"USDA multi-descriptor", "Beef, cured, dried", "beef"},
+		{"multi-word pre-comma segment", "Greek yogurt, plain, nonfat", "yogurt"},
+		{"USDA derivative — head is the descriptor, not the food", "Oil, almond", "oil"},
+		{"comma-inverted derivative product", "Strudel, apple", "strudel"},
+		{"no-comma curated name, head-final", "Wholemeal bread", "bread"},
+		{"no-comma curated dish", "Chicken biryani", "biryani"},
+		{"single-word name", "Salmon", "salmon"},
+		{"empty name", "", ""},
+		{"punctuation-only name", ",,,", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, headToken(tt.raw))
+		})
+	}
+}
+
 func TestScoringSeparatesTheAmbiguousFromTheClear(t *testing.T) {
 	// This is the whole point of the change, expressed as one test.
 	exact := quality(components{Coverage: 1, Precision: 1, Trigram: 1.000})
