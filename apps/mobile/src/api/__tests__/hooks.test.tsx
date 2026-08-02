@@ -1,7 +1,9 @@
 import { renderHook, waitFor } from "@testing-library/react-native";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { apiFetch, apiFetchEnvelope, apiFetchMultipart } from "@/lib/api";
+import { list } from "@/offline/queue";
 import {
   useAcceptRequest,
   useAddWater,
@@ -9,6 +11,7 @@ import {
   useAvgIntake7d,
   useCreateChallenge,
   useCreateGroup,
+  useCreateLog,
   useCreateLogBatch,
   useDeleteChallenge,
   useDeleteLog,
@@ -481,6 +484,51 @@ test("useMemory fetches GET /v1/memory (date is not sent — backend ignores it)
   const { result } = await renderHook(() => useMemory("2026-07-27"), { wrapper });
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
   expect(apiFetch).toHaveBeenCalledWith("/v1/memory");
+});
+
+const logInput = {
+  food_item_id: "f1",
+  meal_slot: "lunch",
+  source: "manual",
+  quantity_grams: 100,
+  logged_at: "2026-08-02T12:00:00.000Z",
+};
+
+// The id is minted client-side for EVERY log, online or not, so a queued copy
+// and the server row share one identity and a replay of a write whose response
+// was lost resolves to the same row (api/internal/foodlog CreateIdempotent)
+// instead of duplicating the meal.
+test("useCreateLog POSTs with a client-minted id when online", async () => {
+  await AsyncStorage.clear();
+  (apiFetch as jest.Mock).mockResolvedValueOnce({ id: "log1" });
+  const { result } = await renderHook(() => useCreateLog(), { wrapper });
+  await result.current.mutateAsync(logInput);
+
+  const [path, init] = (apiFetch as jest.Mock).mock.calls.at(-1) as [string, RequestInit];
+  expect(path).toBe("/v1/logs");
+  const body = JSON.parse(init.body as string);
+  expect(body.food_item_id).toBe("f1");
+  expect(typeof body.id).toBe("string");
+  expect(body.id.length).toBeGreaterThan(0);
+  expect(await list()).toHaveLength(0);
+});
+
+test("useCreateLog queues the write instead of POSTing when offline", async () => {
+  await AsyncStorage.clear();
+  onlineManager.setOnline(false);
+  try {
+    const callsBefore = (apiFetch as jest.Mock).mock.calls.length;
+    const { result } = await renderHook(() => useCreateLog(), { wrapper });
+    const queued = await result.current.mutateAsync(logInput);
+
+    expect((apiFetch as jest.Mock).mock.calls.length).toBe(callsBefore);
+    const items = await list();
+    expect(items.map((i) => i.id)).toEqual([queued.id]);
+    expect(items[0].payload.food_item_id).toBe("f1");
+  } finally {
+    onlineManager.setOnline(true);
+    await AsyncStorage.clear();
+  }
 });
 
 test("useCreateLogBatch posts to /v1/logs/batch", async () => {

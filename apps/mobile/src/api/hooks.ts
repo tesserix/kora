@@ -1,5 +1,8 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import * as Crypto from "expo-crypto";
 import { apiFetch, apiFetchEnvelope, apiFetchMultipart } from "@/lib/api";
+import { isOnline } from "@/offline/connectivity";
+import { append, type QueuedLog } from "@/offline/queue";
 import type { MealSlot } from "@/lib/mealSlot";
 import type {
   AppNotification,
@@ -82,8 +85,21 @@ export type CreateLogInput = {
 export function useCreateLog() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: CreateLogInput) =>
-      apiFetch("/v1/logs", { method: "POST", body: JSON.stringify(input) }) as Promise<FoodLog>,
+    // react-query's default networkMode ("online") PAUSES a mutation whenever
+    // onlineManager reports offline — the mutationFn, and with it the whole
+    // enqueue path, would never run in exactly the case the queue exists for.
+    networkMode: "always",
+    mutationFn: async (input: CreateLogInput): Promise<FoodLog | QueuedLog> => {
+      // The id is minted client-side for EVERY log, online or not, so the
+      // server row and any queued copy share one identity and a replay is
+      // idempotent (see api/internal/foodlog CreateIdempotent).
+      const id = Crypto.randomUUID();
+      if (!isOnline()) return append(input, id);
+      return apiFetch("/v1/logs", {
+        method: "POST",
+        body: JSON.stringify({ ...input, id }),
+      }) as Promise<FoodLog>;
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["logs"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });

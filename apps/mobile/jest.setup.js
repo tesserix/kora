@@ -271,3 +271,11 @@ jest.mock("@kingstinct/react-native-healthkit", () => ({
   // queryWorkoutSamples(options: WorkoutQueryOptions) => Promise<readonly WorkoutProxyTyped[]>
   queryWorkoutSamples: jest.fn(async () => []),
 }));
+
+// expo-crypto: jest-expo's automock resolves randomUUID() to undefined, which
+// would hand every log the same empty identity — and the client-minted id is
+// the whole basis of replay idempotency for the offline queue. Delegate to
+// Node's own crypto so tests get real, distinct v4 UUIDs.
+jest.mock("expo-crypto", () => ({
+  randomUUID: jest.fn(() => require("crypto").randomUUID()),
+}));

@@ -21,6 +21,16 @@ function isValid(v: unknown): v is QueuedLog {
   );
 }
 
+// isQueued reports whether a create-log result is a queued item rather than a
+// server row. Both carry an `id: string`, so nothing but the extra queue
+// bookkeeping distinguishes them and `tsc` cannot catch a caller that treats a
+// queued id as a server id. Callers that can receive either — Undo above all —
+// must branch on the VALUE, never on "am I online right now?": connectivity can
+// change between the write and the undo tap.
+export function isQueued(value: { id: string }): value is QueuedLog {
+  return isValid(value);
+}
+
 // list never throws: a corrupt or missing value yields an empty queue and any
 // malformed entry is dropped, so one bad record can never wedge the drain.
 // Mirrors loadCustom in src/reminders/customPrefs.ts.

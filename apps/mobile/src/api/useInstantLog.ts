@@ -1,7 +1,8 @@
 import { useCreateLog, useCreateLogBatch, useDeleteLog } from "@/api/hooks";
 import { useToast } from "@/components/Toast";
 import { haptics } from "@/motion";
-import type { LoggableFood, LoggableMeal } from "@/api/types";
+import { discard, isQueued, type QueuedLog } from "@/offline/queue";
+import type { FoodLog, LoggableFood, LoggableMeal } from "@/api/types";
 
 // useInstantLog centralises the one-tap "log from memory + Undo toast" flow so
 // the Log screen and the Home "Your usual" strip share one implementation.
@@ -12,6 +13,21 @@ export function useInstantLog(): { logFood: (f: LoggableFood) => void; logMeal: 
   const batchLog = useCreateLogBatch();
   const deleteLog = useDeleteLog();
   const toast = useToast();
+
+  // A log written while offline is a queue entry, not a server row: DELETE
+  // /v1/logs/<queued id> would hit nothing, the item would stay queued, and the
+  // next drain would resurrect the very meal the user just undid. Branch on the
+  // value's own shape rather than on current connectivity — the device can come
+  // back online between the log and the Undo tap.
+  const undoLog = (created: FoodLog | QueuedLog) => {
+    if (!isQueued(created)) {
+      deleteLog.mutate(created.id);
+      return;
+    }
+    // Nothing to report to the user if storage itself fails: the log simply
+    // stays queued and drains later, which is the pre-Undo state.
+    void discard(created.id).catch(() => {});
+  };
 
   const logFood = (f: LoggableFood) => {
     createLog.mutate(
@@ -28,7 +44,7 @@ export function useInstantLog(): { logFood: (f: LoggableFood) => void; logMeal: 
           toast.show({
             message: `Logged ${f.name}`,
             actionLabel: "Undo",
-            onAction: () => deleteLog.mutate(created.id),
+            onAction: () => undoLog(created),
           });
         },
       },
