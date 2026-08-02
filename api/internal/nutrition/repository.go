@@ -241,13 +241,23 @@ func (r Repository) Resolve(ctx context.Context, userID uuid.UUID, phrase string
 		// computes that distance for every embedded row regardless of how
 		// many are returned, so fetching more of an already-ranked result is
 		// nearly free and gives the Go scorer the same generous pool.
+		//
+		// similarity() is computed in the OUTER select, over the already
+		// ranked/limited "ranked" subquery — not alongside distance in the
+		// inner one. Unlike distance, similarity() has no index to lean on;
+		// computing it inline with distance would price it in for every
+		// embedded row in the table before ORDER BY ... LIMIT discards most
+		// of them. Computed out here, it only runs for the resolveScanLimit
+		// rows that survive the limit.
 		if err := r.db.WithContext(ctx).
-			Raw(`SELECT fi.*, (fi.embedding <=> ?) AS distance,
-			            similarity(fi.normalized_name, ?) AS trgm
-			     FROM food_items fi
-			     WHERE fi.embedding IS NOT NULL
-			     ORDER BY distance ASC LIMIT ?`,
-				pgvector.NewVector(queryVec), norm, resolveScanLimit).
+			Raw(`SELECT ranked.*, similarity(ranked.normalized_name, ?) AS trgm
+			     FROM (
+			         SELECT fi.*, (fi.embedding <=> ?) AS distance
+			         FROM food_items fi
+			         WHERE fi.embedding IS NOT NULL
+			         ORDER BY distance ASC LIMIT ?
+			     ) ranked`,
+				norm, pgvector.NewVector(queryVec), resolveScanLimit).
 			Scan(&embRows).Error; err != nil {
 			return nil, fmt.Errorf("nutrition: resolve embedding: %w", err)
 		}
