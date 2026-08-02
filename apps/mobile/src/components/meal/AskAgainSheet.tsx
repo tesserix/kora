@@ -95,6 +95,14 @@ export function AskAgainSheet({ visible, phrase, onSelect, onManualSearch, onClo
     });
   };
 
+  // A follow_up WITHOUT a question comes from the API's estimate path
+  // (decomposeAndEstimate): it deliberately ships candidates carrying their own
+  // per-item tiers instead of a question, so the right thing is to render the
+  // candidate list and let the user pick — NOT to dead-end at manual search
+  // with a blank prompt. Only a follow_up that actually asks something gets the
+  // question branch. Mirrors resolveResultView in app/capture.tsx.
+  const asksQuestion = resolution?.tier === "follow_up" && !!resolution.follow_up_question;
+
   return (
     <Sheet visible={visible} onClose={onClose}>
       <View style={{ paddingHorizontal: 22, paddingBottom: 30 }}>
@@ -137,7 +145,7 @@ export function AskAgainSheet({ visible, phrase, onSelect, onManualSearch, onClo
           </AppText>
         ) : null}
 
-        {resolution && resolution.tier === "follow_up" ? (
+        {resolution && asksQuestion ? (
           <View>
             <AppText variant="subheadline" style={{ marginTop: 4, marginBottom: 12 }}>
               {resolution.follow_up_question}
@@ -151,7 +159,7 @@ export function AskAgainSheet({ visible, phrase, onSelect, onManualSearch, onClo
           </View>
         ) : null}
 
-        {resolution && resolution.tier !== "follow_up" && resolution.candidates.length === 0 ? (
+        {resolution && !asksQuestion && resolution.candidates.length === 0 ? (
           <View>
             <AppText variant="subheadline" muted style={{ marginTop: 4, marginBottom: 12 }}>
               Kora couldn't identify that.
@@ -165,7 +173,7 @@ export function AskAgainSheet({ visible, phrase, onSelect, onManualSearch, onClo
           </View>
         ) : null}
 
-        {resolution && resolution.tier !== "follow_up" && resolution.candidates.length > 0 ? (
+        {resolution && !asksQuestion && resolution.candidates.length > 0 ? (
           <View>
             {resolution.candidates.map((candidate, i) => (
               <CandidateRow key={`${candidate.item.id}-${i}`} candidate={candidate} onPress={() => onSelect(candidate.item)} />
