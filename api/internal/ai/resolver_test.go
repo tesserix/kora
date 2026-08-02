@@ -457,7 +457,13 @@ func TestResolveText_UnknownDish_DecomposesToEstimate(t *testing.T) {
 // than resolveGuesses. Its items are inherently uncertain — the whole
 // Resolution is TierConfirm and IsEstimate — so each candidate must say so
 // rather than arriving with an empty tier the client has to guess about.
-func TestResolveText_EstimatePath_StampsConfirmTierOnEveryCandidate(t *testing.T) {
+// TestResolveText_EstimatePath_CapsAliasMatchesAtConfirm is the end-to-end
+// counterpart to TestDecomposeAndEstimate_PerfectScoringIngredientCappedAtConfirm:
+// it drives the whole ResolveText -> decompose path with real alias rows.
+// Both ingredients below resolve by ALIAS, which scores exactly 1.0 — so this
+// asserts the cap, not the old blanket-TierConfirm behaviour the name used to
+// claim. Without estimateIngredientTier's cap these would come back TierAuto.
+func TestResolveText_EstimatePath_CapsAliasMatchesAtConfirm(t *testing.T) {
 	db := testDB(t)
 	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE brand = 'test2c'") })
 	repo := nutrition.NewRepository(db)
