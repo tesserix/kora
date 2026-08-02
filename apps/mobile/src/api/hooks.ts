@@ -68,7 +68,7 @@ export function useFoodSearch(query: string) {
   });
 }
 
-type CreateLogInput = {
+export type CreateLogInput = {
   food_item_id: string;
   meal_slot: string;
   source: string;

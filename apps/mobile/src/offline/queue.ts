@@ -1,0 +1,93 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import type { CreateLogInput } from "@/api/hooks";
+
+const STORAGE_KEY = "kora.logQueue";
+
+export type QueuedLog = {
+  id: string;
+  payload: CreateLogInput;
+  status: "pending" | "failed";
+  attempts: number;
+  lastError?: string;
+  queuedAt: string;
+};
+
+function isValid(v: unknown): v is QueuedLog {
+  const q = v as QueuedLog;
+  return (
+    !!q && typeof q.id === "string" && typeof q.queuedAt === "string" &&
+    (q.status === "pending" || q.status === "failed") &&
+    typeof q.attempts === "number" && !!q.payload
+  );
+}
+
+// list never throws: a corrupt or missing value yields an empty queue and any
+// malformed entry is dropped, so one bad record can never wedge the drain.
+// Mirrors loadCustom in src/reminders/customPrefs.ts.
+export async function list(): Promise<QueuedLog[]> {
+  try {
+    const raw = await AsyncStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(isValid);
+  } catch {
+    return [];
+  }
+}
+
+async function save(items: QueuedLog[]): Promise<void> {
+  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+}
+
+export async function append(payload: CreateLogInput, id: string): Promise<QueuedLog> {
+  const item: QueuedLog = {
+    id, payload, status: "pending", attempts: 0, queuedAt: new Date().toISOString(),
+  };
+  await save([...(await list()), item]);
+  return item;
+}
+
+export async function retry(id: string): Promise<void> {
+  const items = await list();
+  await save(items.map((i) => (i.id === id ? { ...i, status: "pending", lastError: undefined } : i)));
+}
+
+export async function discard(id: string): Promise<void> {
+  await save((await list()).filter((i) => i.id !== id));
+}
+
+// A 4xx will fail identically forever — replaying it just burns battery and
+// keeps a row the user cannot resolve. Anything else (no network, a dropped
+// token, a 5xx) is worth another attempt on the next drain.
+function isPermanent(err: unknown): boolean {
+  const status = (err as { status?: number })?.status;
+  return typeof status === "number" && status >= 400 && status < 500;
+}
+
+// drain sends pending items OLDEST FIRST and sequentially, so the diary fills
+// in the order the food was eaten rather than by whichever request wins a
+// race. `send` is injected so this module never imports the API layer.
+export async function drain(
+  send: (item: QueuedLog) => Promise<void>,
+): Promise<{ sent: number; failed: number; deferred: number }> {
+  let sent = 0, failed = 0, deferred = 0;
+
+  for (const item of await list()) {
+    if (item.status !== "pending") continue;
+    try {
+      await send(item);
+      await discard(item.id);
+      sent++;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const permanent = isPermanent(err);
+      permanent ? failed++ : deferred++;
+      const items = await list();
+      await save(items.map((i) => (i.id === item.id
+        ? { ...i, attempts: i.attempts + 1, lastError: message, status: permanent ? "failed" : "pending" }
+        : i)));
+    }
+  }
+  return { sent, failed, deferred };
+}
