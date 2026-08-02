@@ -83,3 +83,87 @@ korasim3/4 are onboarded.
 
 **Not done:** the simulator pass of Task 6 (log an Indian dish end to end). The
 API-level evidence above is the load-bearing part and it is complete.
+
+---
+
+# UPDATE — 2026-08-02, later: tiers now fire in prod (#73)
+
+## Root cause was not what this handoff assumed
+
+`match_score` was a **constant**. `ts_rank` with the default normalization flag
+ignores document length and `plainto_tsquery` ANDs every term, so the rank
+depended only on **how many terms the query had** — 0.71662 for one, 0.72615 for
+two. The "0.717–0.726 band" was those two numbers, not a distribution. Within a
+query *every candidate tied exactly*, so `ORDER BY rank DESC` was arbitrary.
+
+That means the two "separate" problems above were one bug, and **direction (2) —
+retuning the 0.90/0.70 floors — was a dead end**: you cannot re-threshold a
+constant. Calibration later confirmed the floors were always correct.
+
+It also means SR Legacy's near-duplicates were *not* why "chicken breast"
+resolved wrongly; the tie-break was. A display-vs-search name would not have
+fixed it.
+
+## Measured in prod, same 18 queries, before and after
+
+Before: **every** query `confirm` / `full_text`, three distinct scores.
+After: auto 5 · confirm 1 · follow_up 12, range 0.3885–1.0000.
+
+| query | before | after |
+|---|---|---|
+| `milk` | Potatoes, mashed, dehydrated (0.7205, confirm) | **2% milk** (0.5568, follow_up) |
+| `apple` | Pie, Dutch Apple (0.7166, confirm) | **Apple** (1.0000, auto) |
+| `cheese` | Macaroni and cheese, box mix (0.7205, confirm) | Cheese, colby (0.4350, follow_up) |
+| `chicken breast` | Fast Foods, Fried Chicken, Breast, meat and skin and breading (0.7261, confirm) | **Chicken breast, roasted** (0.4970, follow_up) |
+| `almonds` | Almonds, raw (0.7166, confirm) | **Almonds** (1.0000, auto) |
+| `salmon` | Sushi, salmon roll (0.7166, confirm) | Fish oil, salmon (0.3885, follow_up) |
+
+## Two things that are NOT done — read before assuming this is finished
+
+**1. The estimate path discards all of it.** `decomposeAndEstimate` still
+hardcodes `Tier: TierConfirm` per ingredient regardless of `MatchScore`
+(`ai/resolver.go`). Verified live: `brekkie of two eggs on toast` returns
+`Crackers, rusk toast` at **0.3830 labelled `confirm`**, and `salmon` returns
+`Butter, without salt` at **0.3602 labelled `confirm`**. Bare `chicken breast`
+also takes this path. So on decompose, the fix is not merely inert — it is
+actively misleading, and the uncertain-row UI still never appears. The original
+rationale ("none was individually identified with confidence") is now obsolete:
+per-item confidence exists. Fix is roughly one line — call `TierFor` there too —
+plus a test.
+
+**2. The embedding tier is still unverified in prod.** All calibration ran
+against a DB with **zero** embeddings, and `/v1/foods` passes a nil vector so it
+*structurally cannot* emit `match_tier: embedding`. On `/v1/resolve/text`, which
+does pass a real vector, every candidate still came back `full_text` —
+consistent with only 302/7,856 rows embedded. The "22/22 never confidently
+wrong" result does not cover that path.
+
+## Deploy gotcha that cost a cycle
+
+The `ghcr-remote` GAR **pull-through mirror served a stale `:latest`**. The
+migrate Job reported `Complete` in 10s having pulled the *old* digest
+(`sha256:86d678ba…`), and prod stayed on schema v20 with `pg_trgm` absent —
+another "Complete is not the work happened". Pinning the Job to the immutable
+commit-SHA tag (`d90cc815…`) pulled `sha256:2b130d26…` and applied 000021.
+A later `rollout restart` on `:latest` then picked up the new digest, so the
+staleness is TTL-dependent and intermittent — `imagePullPolicy: Always` is not
+sufficient protection. **Verify the running digest, not the rollout status.**
+Consider pinning `image.tag` to the commit SHA in the ArgoCD app.
+
+Also: ArgoCD reported `Job/kora-api-migrate` **Synced** while `kubectl` showed
+it absent (stale cluster cache); neither a hard refresh nor a sync operation
+recreated it. Rendering the chart's Job with `helm template` and applying it
+directly was the way through.
+
+## Still open (unchanged or newly recorded)
+
+- **Head-noun weakness.** Token precision `|Q∩D|/|D|` rewards short docs, so
+  `Oil, almond` ties `Almonds, raw` and `Strudel, apple` beats a raw apple. USDA
+  puts the head noun first in generics, last in derivatives; a head-token signal
+  would fix almond/banana/beef/apple/salmon. Surfaces as `follow_up`, never as a
+  confident wrong answer — which is why it did not gate #73.
+- **`cmd/embed` quota bug** — unchanged: exits 0 having embedded 302 of 7,856.
+- **`vegemite`** is absent from the ingested index despite this handoff citing
+  it as #72-verified.
+- Runner-up candidates still never leave the server (`resolver.go` keeps
+  `cands[0]`), so the resolution-level `follow_up` question still shows no list.
