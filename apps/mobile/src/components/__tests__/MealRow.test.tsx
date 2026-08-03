@@ -1,5 +1,6 @@
 import { fireEvent, render } from "@testing-library/react-native";
 import { MealRow } from "../MealRow";
+import { AppText } from "../Text";
 
 test("no star is rendered when onPinToggle is absent", async () => {
   const onPress = jest.fn();
@@ -41,4 +42,21 @@ test("no bookmark control when onBookmark is absent", async () => {
   const { queryByLabelText } = await render(<MealRow name="Bfast" slot="x" kcal={1} onPress={jest.fn()} />);
   expect(queryByLabelText("Save Bfast")).toBeNull();
   expect(queryByLabelText("Edit Bfast")).toBeNull();
+});
+
+test("a badge renders alongside the kcal figure", async () => {
+  const { getByText } = await render(
+    <MealRow name="Egg" slot="100g" kcal={143} badge={<AppText>Pending</AppText>} />,
+  );
+  getByText("Pending");
+  getByText("143 kcal");
+});
+
+// A queued log whose food fell out of the offline cache has no kcal to show.
+// Rendering "0 kcal" would be a wrong number rather than an absent one, and a
+// user reading their diary cannot tell the difference.
+test("an unknown kcal renders a dash, not zero", async () => {
+  const { getByText, queryByText } = await render(<MealRow name="Egg" slot="100g" kcal={null} />);
+  getByText("— kcal");
+  expect(queryByText("0 kcal")).toBeNull();
 });

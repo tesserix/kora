@@ -2,6 +2,12 @@ import { render, fireEvent } from "@testing-library/react-native";
 import Diary from "../(tabs)/diary";
 
 jest.mock("expo-router", () => ({ router: { push: jest.fn() } }));
+// The diary now reads the offline queue too; these tests are about water/copy,
+// so the queue is stubbed empty (it has its own tests in src/offline).
+jest.mock("@/offline/useQueuedLogs", () => ({
+  useQueuedLogs: () => ({ rows: [], retryRow: jest.fn(), discardRow: jest.fn() }),
+}));
+
 
 const mockCopyMutate = jest.fn();
 jest.mock("@/api/hooks", () => ({

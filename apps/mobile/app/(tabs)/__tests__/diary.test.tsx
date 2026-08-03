@@ -1,5 +1,6 @@
 import { Alert } from "react-native";
 import { fireEvent, render } from "@testing-library/react-native";
+import type { QueuedRow } from "@/offline/useQueuedLogs";
 
 jest.mock("expo-router", () => ({ router: { push: jest.fn() } }));
 
@@ -25,13 +26,25 @@ const LOGS_DATA = [
   },
 ];
 
-// Mutable holder so a test can supply an empty day; reset in beforeEach.
+// Mutable holders so a test can supply an empty day or a different dashboard;
+// both reset in beforeEach.
 let mockDayLogs: typeof LOGS_DATA = LOGS_DATA;
+let mockDashboardData: typeof DASHBOARD_DATA = DASHBOARD_DATA;
+
+// The queued-row hook is exercised directly in
+// src/offline/__tests__/useQueuedLogs.test.tsx; here it is a fixture so these
+// tests are about what the diary renders from it.
+let mockQueuedRows: QueuedRow[] = [];
+const mockRetryRow = jest.fn(async () => {});
+const mockDiscardRow = jest.fn(async () => {});
+jest.mock("@/offline/useQueuedLogs", () => ({
+  useQueuedLogs: () => ({ rows: mockQueuedRows, retryRow: mockRetryRow, discardRow: mockDiscardRow }),
+}));
 
 jest.mock("@/api/hooks", () => ({
   useDashboard: (date: string) => {
     mockUseDashboard(date);
-    return { data: DASHBOARD_DATA };
+    return { data: mockDashboardData };
   },
   useDayLogs: (date: string) => {
     mockUseDayLogs(date);
@@ -52,6 +65,10 @@ import Diary from "../diary";
 
 beforeEach(() => {
   mockDayLogs = LOGS_DATA;
+  mockDashboardData = DASHBOARD_DATA;
+  mockQueuedRows = [];
+  mockRetryRow.mockClear();
+  mockDiscardRow.mockClear();
   mockDeleteMutate.mockClear();
   mockAddWaterMutate.mockClear();
   mockUseDashboard.mockClear();
@@ -178,4 +195,84 @@ test("swiping a meal row's delete action confirms then deletes that log id", asy
   confirm?.onPress?.();
 
   expect(mockDeleteMutate).toHaveBeenCalledWith("1");
+});
+
+// --- Queued (offline) rows -------------------------------------------------
+
+const queuedRow = (over: Partial<QueuedRow> = {}): QueuedRow => ({
+  id: "q1",
+  description: "Greek yogurt",
+  kcal: 93,
+  mealSlot: "lunch",
+  status: "pending",
+  ...over,
+});
+
+// The only server log in this fixture is dinner, so LUNCH exists purely
+// because of the queued row: a diary that derived its slots from server logs
+// alone would render nothing at all here.
+test("a pending queued row appears in its own slot with a Pending badge", async () => {
+  mockQueuedRows = [queuedRow()];
+  const { findByText, getByText } = await render(<Diary />);
+
+  expect(await findByText("LUNCH")).toBeTruthy();
+  getByText("Greek yogurt");
+  getByText("Pending");
+  getByText("Waiting to sync");
+});
+
+test("a failed queued row is labelled as failed and offers retry and discard", async () => {
+  mockQueuedRows = [queuedRow({ status: "failed", description: "Cold brew" })];
+  const { findByText, getByText, getByLabelText, queryByText } = await render(<Diary />);
+
+  expect(await findByText("Failed")).toBeTruthy();
+  getByText("Couldn't sync");
+  expect(queryByText("Retry")).toBeNull();
+
+  await fireEvent.press(getByLabelText("Cold brew, failed to sync"));
+  await fireEvent.press(getByText("Retry"));
+  expect(mockRetryRow).toHaveBeenCalledWith("q1");
+  expect(mockDiscardRow).not.toHaveBeenCalled();
+});
+
+test("discarding a failed queued row calls discardRow", async () => {
+  mockQueuedRows = [queuedRow({ status: "failed", description: "Cold brew" })];
+  const { getByText, getByLabelText, findByText } = await render(<Diary />);
+  await findByText("Failed");
+
+  await fireEvent.press(getByLabelText("Cold brew, failed to sync"));
+  await fireEvent.press(getByText("Discard"));
+  expect(mockDiscardRow).toHaveBeenCalledWith("q1");
+  expect(mockRetryRow).not.toHaveBeenCalled();
+});
+
+// A pending item is a real food with known nutrition whose upload is merely
+// outstanding, so leaving it out makes remaining-calories wrong exactly when
+// the user is relying on it. A failed item is never landing, so counting it
+// would overstate the day indefinitely.
+test("pending kcal counts toward the day total and failed kcal does not", async () => {
+  mockDashboardData = { consumed: { kcal: 500 }, targets: { kcal: 2000 }, water_ml: 0 };
+  mockQueuedRows = [
+    queuedRow({ id: "pending-1", kcal: 93 }),
+    queuedRow({ id: "failed-1", kcal: 400, status: "failed", description: "Cold brew" }),
+  ];
+  const { findByText, queryByText } = await render(<Diary />);
+
+  // 500 eaten + 93 pending.
+  expect(await findByText("593")).toBeTruthy();
+  // Counting the failed row too would read 993.
+  expect(queryByText("993")).toBeNull();
+  // Counting neither would read 500 — the server figure, unchanged.
+  expect(queryByText("500")).toBeNull();
+});
+
+// A queued row whose food was evicted from the offline cache has no honest
+// calorie figure, so it must not contribute a made-up one to the day.
+test("a queued row with an unknown kcal shows a dash and leaves the total alone", async () => {
+  mockDashboardData = { consumed: { kcal: 500 }, targets: { kcal: 2000 }, water_ml: 0 };
+  mockQueuedRows = [queuedRow({ kcal: null, description: "Queued item" })];
+  const { findByText, getByText } = await render(<Diary />);
+
+  expect(await findByText("— kcal")).toBeTruthy();
+  getByText("500");
 });

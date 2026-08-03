@@ -158,9 +158,18 @@ test("drainLogs invalidates logs and dashboard after sending", async () => {
   expect(spy).toHaveBeenCalledWith({ queryKey: ["dashboard"] });
 });
 
-test("drainLogs does not invalidate when nothing was sent", async () => {
+// The server-backed views cost a network round trip each, so a pass that sent
+// nothing must not refetch them. The queued rows are the exception: they are
+// read straight off local storage, and a pass that sent nothing may still have
+// flipped one pending -> failed, or may simply be the first pass to learn who
+// is signed in (the diary's owner filter returns nothing until then).
+test("a drain that sent nothing refreshes only the queued rows, not the server views", async () => {
   const qc = new QueryClient();
   const spy = jest.spyOn(qc, "invalidateQueries");
+
   await drainLogs(qc);
-  expect(spy).not.toHaveBeenCalled();
+
+  expect(spy).not.toHaveBeenCalledWith({ queryKey: ["logs"] });
+  expect(spy).not.toHaveBeenCalledWith({ queryKey: ["dashboard"] });
+  expect(spy).toHaveBeenCalledWith({ queryKey: ["queuedLogs"] });
 });

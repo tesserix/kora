@@ -1,5 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { apiFetch, currentUserId } from "@/lib/api";
+import { QUEUED_LOGS_KEY } from "./queryKeys";
 import { drain } from "./queue";
 
 // Sends every pending queued log, then refreshes the views that show them.
@@ -26,6 +27,16 @@ async function runDrain(queryClient: QueryClient): Promise<void> {
     queryClient.invalidateQueries({ queryKey: ["logs"] });
     queryClient.invalidateQueries({ queryKey: ["dashboard"] });
   }
+
+  // The diary renders queued rows straight off the queue (useQueuedLogs), so
+  // it has to be refreshed by every pass that got this far — not only a
+  // sending one. A pass that sent removes rows the server row now replaces
+  // (leave them and the user sees the meal twice, counted twice); a pass that
+  // failed flips rows pending -> failed; and a pass that merely proves who is
+  // signed in unblocks the owner filter for a diary that mounted during the
+  // cold-start auth restore. Invalidation of a query nobody is observing is
+  // free, and drains fire on real events only, so this never becomes polling.
+  queryClient.invalidateQueries({ queryKey: [QUEUED_LOGS_KEY] });
 }
 
 // Four triggers fire a drain — cold start, sign-in, reconnect and return to

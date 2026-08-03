@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Pressable, View } from "react-native";
 import { AppText } from "./Text";
 import { Numeral } from "./Numeral";
@@ -9,7 +10,8 @@ import { withAlpha } from "@/lib/color";
 type Props = {
   name: string;
   slot: string;
-  kcal: number;
+  /** null when the calorie figure is genuinely unknown — renders "— kcal". */
+  kcal: number | null;
   iconName?: string;
   tint?: string;
   onPress?: () => void;
@@ -18,9 +20,13 @@ type Props = {
   onPinToggle?: () => void;
   bookmarked?: boolean;
   onBookmark?: () => void;
+  /** Status capsule shown before the kcal figure (e.g. a sync Badge). */
+  badge?: ReactNode;
+  /** Fades the kcal figure for a row that is not (yet) part of the day. */
+  dimmed?: boolean;
 };
 
-export function MealRow({ name, slot, kcal, iconName = "utensils", tint, onPress, accessibilityLabel, pinned, onPinToggle, bookmarked, onBookmark }: Props) {
+export function MealRow({ name, slot, kcal, iconName = "utensils", tint, onPress, accessibilityLabel, pinned, onPinToggle, bookmarked, onBookmark, badge, dimmed }: Props) {
   const { colors, radius, spacing } = useTheme();
   const chip = tint ?? colors.accent;
   return (
@@ -33,7 +39,10 @@ export function MealRow({ name, slot, kcal, iconName = "utensils", tint, onPress
         <AppText variant="headline">{name}</AppText>
         <AppText variant="footnote" muted>{slot}</AppText>
       </View>
-      <Numeral size={17}>{`${Math.round(kcal)} kcal`}</Numeral>
+      {badge}
+      <View style={{ opacity: dimmed ? 0.5 : 1 }}>
+        <Numeral size={17}>{kcal === null ? "— kcal" : `${Math.round(kcal)} kcal`}</Numeral>
+      </View>
       {onPinToggle ? (
         <Pressable
           accessibilityRole="button"
