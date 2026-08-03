@@ -191,7 +191,8 @@ export async function drain(
       // Two independent routes to `failed`: one refusal that will never change
       // (a 4xx), or enough refusals that will not change in practice.
       const done = isPermanent(err) || attempts >= MAX_DELIVERY_ATTEMPTS;
-      done ? failed++ : deferred++;
+      if (done) failed++;
+      else deferred++;
       await update((items) => items.map((i) => (i.id === item.id
         ? { ...i, attempts, lastError: message, status: done ? "failed" : "pending" }
         : i)));
