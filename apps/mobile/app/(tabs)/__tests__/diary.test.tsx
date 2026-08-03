@@ -37,8 +37,15 @@ let mockDashboardData: typeof DASHBOARD_DATA = DASHBOARD_DATA;
 let mockQueuedRows: QueuedRow[] = [];
 const mockRetryRow = jest.fn(async () => {});
 const mockDiscardRow = jest.fn(async () => {});
+// Records the date exactly as the useDayLogs mock above does — the queued rows
+// are day-scoped too, and a hook asked for the wrong day would otherwise show
+// today's offline meals on every date the user browses.
+const mockUseQueuedLogs = jest.fn();
 jest.mock("@/offline/useQueuedLogs", () => ({
-  useQueuedLogs: () => ({ rows: mockQueuedRows, retryRow: mockRetryRow, discardRow: mockDiscardRow }),
+  useQueuedLogs: (date: string) => {
+    mockUseQueuedLogs(date);
+    return { rows: mockQueuedRows, retryRow: mockRetryRow, discardRow: mockDiscardRow };
+  },
 }));
 
 jest.mock("@/api/hooks", () => ({
@@ -73,6 +80,7 @@ beforeEach(() => {
   mockAddWaterMutate.mockClear();
   mockUseDashboard.mockClear();
   mockUseDayLogs.mockClear();
+  mockUseQueuedLogs.mockClear();
   mockUseUnits.mockReturnValue({ system: "metric", setSystem: jest.fn() });
   jest.spyOn(Alert, "alert").mockImplementation(() => {});
 });
@@ -121,6 +129,7 @@ test("tapping a different week-strip day switches the selected date used to fetc
   const todayIso = isoOf(new Date());
   mockUseDashboard.mockClear();
   mockUseDayLogs.mockClear();
+  mockUseQueuedLogs.mockClear();
 
   // Pick a day in the current (Monday-start) week strip that is NOT today —
   // Monday itself, unless today already is Monday, in which case Tuesday.
@@ -133,8 +142,10 @@ test("tapping a different week-strip day switches the selected date used to fetc
 
   expect(mockUseDashboard).toHaveBeenCalledWith(targetIso);
   expect(mockUseDayLogs).toHaveBeenCalledWith(targetIso);
+  expect(mockUseQueuedLogs).toHaveBeenCalledWith(targetIso);
   expect(mockUseDashboard).not.toHaveBeenCalledWith(todayIso);
   expect(mockUseDayLogs).not.toHaveBeenCalledWith(todayIso);
+  expect(mockUseQueuedLogs).not.toHaveBeenCalledWith(todayIso);
 });
 
 test("water buttons call useAddWater with volume_ml and a noon-UTC logged_at for the selected day", async () => {
