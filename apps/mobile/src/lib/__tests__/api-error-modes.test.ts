@@ -112,6 +112,30 @@ describe("network/transport failure", () => {
     expect(caught).toBeInstanceOf(api.NetworkError);
     expect((caught as Error).cause).toBe(original);
   });
+
+  // One discriminant for the whole codebase. The class is what api.ts throws,
+  // but the offline queue's tests and its fake server reproduce this failure
+  // the way errors are named elsewhere — `{ name: "NetworkError" }` — and a
+  // caller that recognised only the class would take the rethrow path on those
+  // and lose the write. Both shapes, one predicate.
+  test("isNetworkError recognises the class", () => {
+    loadApiWithAuth(mockUser(jest.fn()));
+    expect(api.isNetworkError(new api.NetworkError(new TypeError("boom")))).toBe(true);
+  });
+
+  test("isNetworkError recognises a duck-typed NetworkError", () => {
+    loadApiWithAuth(mockUser(jest.fn()));
+    const ducked = Object.assign(new Error("Network request failed"), { name: "NetworkError" });
+    expect(api.isNetworkError(ducked)).toBe(true);
+  });
+
+  test("isNetworkError rejects other failures and non-errors", () => {
+    loadApiWithAuth(mockUser(jest.fn()));
+    expect(api.isNetworkError(new api.ApiError(400, "bad_request", "nope"))).toBe(false);
+    expect(api.isNetworkError(new api.AuthTokenError(new Error("no token")))).toBe(false);
+    expect(api.isNetworkError(null)).toBe(false);
+    expect(api.isNetworkError(undefined)).toBe(false);
+  });
 });
 
 describe("response-parse failure", () => {

@@ -43,14 +43,22 @@ import {
   useWeightSeries,
 } from "../hooks";
 
-jest.mock("@/lib/api", () => ({
-  apiFetch: jest.fn().mockResolvedValue({ id: "u1", email: "a@b.c", goal: "", onboarded_at: null }),
-  currentUserId: jest.fn(() => "user-a"),
-  apiFetchEnvelope: jest.fn(),
-  apiFetchMultipart: jest.fn(),
-  ApiError: class extends Error {},
-  NetworkError: class NetworkError extends Error {},
-}));
+jest.mock("@/lib/api", () => {
+  // Deliberately does NOT set `name`, so the class instance is recognisable
+  // only by identity and the duck-typed object only by name — each branch of
+  // isNetworkError is then exercised by exactly one test.
+  class MockNetworkError extends Error {}
+  return {
+    apiFetch: jest.fn().mockResolvedValue({ id: "u1", email: "a@b.c", goal: "", onboarded_at: null }),
+    currentUserId: jest.fn(() => "user-a"),
+    apiFetchEnvelope: jest.fn(),
+    apiFetchMultipart: jest.fn(),
+    ApiError: class extends Error {},
+    NetworkError: MockNetworkError,
+    isNetworkError: (e: unknown) =>
+      e instanceof MockNetworkError || (e as { name?: string } | null)?.name === "NetworkError",
+  };
+});
 
 function wrapper({ children }: { children: ReactNode }) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -564,6 +572,23 @@ test("useCreateLog queues the log when the POST dies mid-flight", async () => {
   const sentId = JSON.parse((apiFetch as jest.Mock).mock.calls.at(-1)![1].body).id;
   expect(items[0].id).toBe(sentId);
   expect(items[0]).toMatchObject({ status: "pending", ownerId: "user-a" });
+  await AsyncStorage.clear();
+});
+
+// The offline feature has two ways of naming this failure: hooks.ts narrows on
+// the class, while queue.ts's fixtures and drainLogs's fake server build it as
+// `Object.assign(new Error(...), { name: "NetworkError" })`. One shared
+// predicate has to accept both, or a duck-typed one silently takes the rethrow
+// path and the log is lost.
+test("useCreateLog queues a duck-typed NetworkError too, not just the class", async () => {
+  await AsyncStorage.clear();
+  (apiFetch as jest.Mock).mockRejectedValueOnce(
+    Object.assign(new Error("Network request failed"), { name: "NetworkError" }),
+  );
+
+  const { result } = await renderHook(() => useCreateLog(), { wrapper });
+  await expect(result.current.mutateAsync(logInput)).resolves.toMatchObject({ status: "pending" });
+  expect(await list()).toHaveLength(1);
   await AsyncStorage.clear();
 });
 

@@ -44,6 +44,19 @@ export class NetworkError extends Error {
   }
 }
 
+// isNetworkError is the single discriminant for "the request never reached a
+// response", so the offline feature stops naming this failure two ways.
+// `instanceof` is the precise check; the `name` branch is what catches a value
+// whose class identity did not survive — the queue's test fixtures and fake
+// server build one by hand, and a jest module mock gives a different class
+// object entirely. A caller recognising only the class takes the rethrow path
+// on those and loses the write. Note the real NetworkError sets `name` too, so
+// the second branch alone would cover it: the first is a precise fast path,
+// not the only guard.
+export function isNetworkError(err: unknown): boolean {
+  return err instanceof NetworkError || (err as { name?: string } | null)?.name === "NetworkError";
+}
+
 // The response came back with a 2xx status, but its body did not parse as
 // JSON — the server answered, but the client couldn't read the answer.
 export class ResponseParseError extends Error {

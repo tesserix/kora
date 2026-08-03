@@ -1,6 +1,6 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Crypto from "expo-crypto";
-import { NetworkError, apiFetch, apiFetchEnvelope, apiFetchMultipart, currentUserId } from "@/lib/api";
+import { apiFetch, apiFetchEnvelope, apiFetchMultipart, currentUserId, isNetworkError } from "@/lib/api";
 import { isOnline } from "@/offline/connectivity";
 import { append, type QueuedLog } from "@/offline/queue";
 import type { MealSlot } from "@/lib/mealSlot";
@@ -111,7 +111,7 @@ export function useCreateLog() {
         // already travelled, so the replay resolves to that same row.
         // Everything else (a 4xx, a bad token, an unparseable body) is a real
         // failure the caller must see.
-        if (err instanceof NetworkError) return append(input, id, ownerId);
+        if (isNetworkError(err)) return append(input, id, ownerId);
         throw err;
       }
     },
