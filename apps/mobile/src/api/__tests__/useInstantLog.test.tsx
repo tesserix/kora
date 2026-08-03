@@ -13,6 +13,9 @@ jest.mock("@/lib/api", () => ({
   apiFetchEnvelope: jest.fn(),
   apiFetchMultipart: jest.fn(),
   ApiError: class extends Error {},
+  // useCreateLog does `err instanceof NetworkError`; without it here the class
+  // is undefined and any rejecting apiFetch throws a TypeError instead.
+  NetworkError: class NetworkError extends Error {},
 }));
 
 type ToastOptions = { message: string; actionLabel?: string; onAction?: () => void };
