@@ -730,3 +730,42 @@ func TestEditLogWithNilResolutionCacheIsSilentNoOp(t *testing.T) {
 		require.True(t, res.AliasRecorded)
 	})
 }
+
+// The client-supplied id reaches the row through exactly ONE line in LogFood:
+// `if req.ID != nil { log.ID = *req.ID }`. Both idempotency tests in
+// repository_test.go call repo.CreateIdempotent directly with an id already
+// set, so deleting that line leaves the whole suite green while every replay
+// inserts a duplicate meal — the single outcome the offline queue exists to
+// prevent. This test is the only thing connecting the wire format to the row.
+func TestLogFoodUsesClientSuppliedIDSoAReplayStaysOneRow(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	item := nutrition.FoodItem{Name: "Replay Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100, ProteinPer100g: 10}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+	t.Cleanup(func() { db.Exec("DELETE FROM food_logs WHERE user_id = ?", userID) })
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	id := uuid.New()
+	req := LogRequest{
+		ID: &id, FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual",
+		QuantityGrams: 150, LoggedAt: time.Now(),
+	}
+
+	first, err := svc.LogFood(context.Background(), userID, req)
+	require.NoError(t, err)
+	require.Equal(t, id, first.ID, "LogFood must persist the client's id, not let the column default mint one")
+
+	// Exactly what a queue drain replays after a response was lost.
+	second, err := svc.LogFood(context.Background(), userID, req)
+	require.NoError(t, err)
+	require.Equal(t, id, second.ID)
+
+	// Counted across the whole (freshly seeded) user rather than by id: if the
+	// id never reached the row, both writes land under generated ids and a
+	// count filtered by `id` would report 0 and look like a pass.
+	var count int64
+	require.NoError(t, db.Model(&FoodLog{}).Where("user_id = ?", userID).Count(&count).Error)
+	require.Equal(t, int64(1), count, "a replay through LogFood must not create a second meal")
+}
