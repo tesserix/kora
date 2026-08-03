@@ -31,6 +31,11 @@ const yogurt = {
   fat_per_100g: 0.4,
 } as FoodItem;
 
+// A UTC instant that lands at midday on the given LOCAL calendar day. Written
+// this way rather than as a "...T12:00:00Z" literal so the fixtures mean the
+// same day in every timezone the suite might run in.
+const atLocalNoon = (y: number, m: number, d: number) => new Date(y, m - 1, d, 12).toISOString();
+
 const payloadOn = (iso: string, foodItemId = "f1") => ({
   food_item_id: foodItemId,
   meal_slot: "lunch",
@@ -62,7 +67,7 @@ beforeEach(async () => {
 });
 
 test("returns queued rows for the requested day, with kcal from the cached food", async () => {
-  await append(payloadOn("2026-08-02T12:00:00.000Z"), "q1", "user-a");
+  await append(payloadOn(atLocalNoon(2026, 8, 2)), "q1", "user-a");
 
   const { result } = await renderQueued("2026-08-02");
 
@@ -80,13 +85,35 @@ test("returns queued rows for the requested day, with kcal from the cached food"
 // Paired with a same-day item on purpose: asserting only that the other day is
 // absent would pass just as well against a hook that always returns nothing.
 test("excludes queued rows belonging to another day while keeping that day's own", async () => {
-  await append(payloadOn("2026-08-01T12:00:00.000Z"), "yesterday", "user-a");
-  await append(payloadOn("2026-08-02T12:00:00.000Z"), "today", "user-a");
+  await append(payloadOn(atLocalNoon(2026, 8, 1)), "yesterday", "user-a");
+  await append(payloadOn(atLocalNoon(2026, 8, 2)), "today", "user-a");
 
   const { result } = await renderQueued("2026-08-02");
 
   await waitFor(() => expect(result.current.rows).toHaveLength(1));
   expect(result.current.rows.map((r) => r.id)).toEqual(["today"]);
+});
+
+// The diary's `date` is the DEVICE's calendar day (diary.tsx's `iso()`), and
+// the server files a log under the user's own timezone too (see
+// LocFromContext in api/internal/user/middleware.go). `logged_at`, though, is
+// a bare UTC instant — `new Date().toISOString()` at capture. Comparing its
+// UTC date prefix therefore files an early-morning log east of UTC, or a
+// late-evening one west of it, under the wrong day, where it sits until a
+// drain silently moves it.
+//
+// Both fixtures are built from LOCAL components, so on any device not running
+// in UTC at least one of them has a UTC date that differs from its local one.
+// On a UTC machine the two notions coincide and this degrades to the plain
+// day filter above.
+test("files a queued row under the device's calendar day, not its UTC one", async () => {
+  await append(payloadOn(new Date(2026, 7, 2, 0, 30).toISOString()), "just-after-midnight", "user-a");
+  await append(payloadOn(new Date(2026, 7, 2, 23, 30).toISOString()), "just-before-midnight", "user-a");
+
+  const { result } = await renderQueued("2026-08-02");
+
+  await waitFor(() => expect(result.current.rows).toHaveLength(2));
+  expect(result.current.rows.map((r) => r.id)).toEqual(["just-after-midnight", "just-before-midnight"]);
 });
 
 // The queue's storage key is device-wide but accounts are not, so `list()`
@@ -95,8 +122,8 @@ test("excludes queued rows belonging to another day while keeping that day's own
 // and its calories — in their day. Paired with an own item for the same reason
 // as the day test above.
 test("excludes queued rows belonging to another user while keeping this user's own", async () => {
-  await append(payloadOn("2026-08-02T12:00:00.000Z"), "mine", "user-a");
-  await append(payloadOn("2026-08-02T12:00:00.000Z"), "theirs", "user-b");
+  await append(payloadOn(atLocalNoon(2026, 8, 2)), "mine", "user-a");
+  await append(payloadOn(atLocalNoon(2026, 8, 2)), "theirs", "user-b");
 
   const { result } = await renderQueued("2026-08-02");
 
@@ -108,7 +135,7 @@ test("excludes queued rows belonging to another user while keeping this user's o
 // a log and looking at the diary. There is no honest kcal to show then — `0`
 // would be a wrong number the day total would silently believe.
 test("reports an unknown kcal rather than zero when the food is no longer cached", async () => {
-  await append(payloadOn("2026-08-02T12:00:00.000Z", "evicted"), "q1", "user-a");
+  await append(payloadOn(atLocalNoon(2026, 8, 2), "evicted"), "q1", "user-a");
 
   const { result } = await renderQueued("2026-08-02");
 
@@ -117,7 +144,7 @@ test("reports an unknown kcal rather than zero when the food is no longer cached
 });
 
 test("discardRow removes the row", async () => {
-  await append(payloadOn("2026-08-02T12:00:00.000Z"), "q1", "user-a");
+  await append(payloadOn(atLocalNoon(2026, 8, 2)), "q1", "user-a");
   const { result } = await renderQueued("2026-08-02");
   await waitFor(() => expect(result.current.rows).toHaveLength(1));
 
@@ -130,7 +157,7 @@ test("discardRow removes the row", async () => {
 });
 
 test("retryRow returns a failed row to pending", async () => {
-  await append(payloadOn("2026-08-02T12:00:00.000Z"), "q1", "user-a");
+  await append(payloadOn(atLocalNoon(2026, 8, 2)), "q1", "user-a");
   // The real way an item becomes "failed": a drain that hits a permanent 4xx.
   await drain(async () => {
     throw Object.assign(new Error("bad request"), { status: 400 });
@@ -152,7 +179,7 @@ test("retryRow returns a failed row to pending", async () => {
 test("a queued row disappears from the hook once a real drain sends it", async () => {
   const client = newClient();
   (apiFetch as jest.Mock).mockResolvedValue({ id: "q1" });
-  await append(payloadOn("2026-08-02T12:00:00.000Z"), "q1", "user-a");
+  await append(payloadOn(atLocalNoon(2026, 8, 2)), "q1", "user-a");
 
   const { result } = await renderQueued("2026-08-02", client);
   await waitFor(() => expect(result.current.rows).toHaveLength(1));

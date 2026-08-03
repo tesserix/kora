@@ -31,6 +31,14 @@ async function toRow(q: QueuedLog): Promise<QueuedRow> {
   };
 }
 
+// The diary's `date` is the device's calendar day (app/(tabs)/diary.tsx's
+// `iso()`), and the server files a log under the user's own timezone as well
+// (api/internal/user/middleware.go LocFromContext). `logged_at` is a bare UTC
+// instant, so its "YYYY-MM-DD" prefix is a different day from either whenever
+// the device is not on UTC — which would put a late-night meal on the wrong
+// page until a drain silently moved it.
+const localDay = (loggedAt: string) => new Date(loggedAt).toLocaleDateString("en-CA");
+
 async function queuedRowsFor(date: string): Promise<QueuedRow[]> {
   // The same accessor drainLogs uses, so the diary shows exactly the rows that
   // will actually be sent. The queue is one device-wide list but accounts are
@@ -40,7 +48,7 @@ async function queuedRowsFor(date: string): Promise<QueuedRow[]> {
   if (!ownerId) return [];
 
   const mine = (await list()).filter(
-    (q) => q.ownerId === ownerId && q.payload.logged_at.slice(0, 10) === date,
+    (q) => q.ownerId === ownerId && localDay(q.payload.logged_at) === date,
   );
   return Promise.all(mine.map(toRow));
 }
