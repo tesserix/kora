@@ -1,7 +1,7 @@
 import { useCreateLog, useCreateLogBatch, useDeleteLog } from "@/api/hooks";
 import { useToast } from "@/components/Toast";
 import { haptics } from "@/motion";
-import { discard, isQueued, type QueuedLog } from "@/offline/queue";
+import { discard, isQueued, list, type QueuedLog } from "@/offline/queue";
 import type { FoodLog, LoggableFood, LoggableMeal } from "@/api/types";
 
 // useInstantLog centralises the one-tap "log from memory + Undo toast" flow so
@@ -14,19 +14,29 @@ export function useInstantLog(): { logFood: (f: LoggableFood) => void; logMeal: 
   const deleteLog = useDeleteLog();
   const toast = useToast();
 
-  // A log written while offline is a queue entry, not a server row: DELETE
-  // /v1/logs/<queued id> would hit nothing, the item would stay queued, and the
-  // next drain would resurrect the very meal the user just undid. Branch on the
-  // value's own shape rather than on current connectivity — the device can come
-  // back online between the log and the Undo tap.
-  const undoLog = (created: FoodLog | QueuedLog) => {
+  // Undo has to answer one question: does this log exist on the server yet?
+  // A queued log has no server row, so DELETE /v1/logs/<queued id> would hit
+  // nothing and — worse — leave the item queued for the next drain to
+  // resurrect. A sent log has one, and only DELETE removes it.
+  //
+  // The answer is MEMBERSHIP AT TAP TIME, not the shape of the value captured
+  // when the toast was created. The toast lives for seconds, and a reconnect
+  // drain inside that window sends the item and removes it from the queue: the
+  // captured value still looks queued, but discarding it would remove nothing
+  // and Undo would silently do nothing at all.
+  const undoLog = async (created: FoodLog | QueuedLog) => {
+    // Cheap narrowing first: a value that never had queue shape came straight
+    // back from the server, so there is nothing to look up.
     if (!isQueued(created)) {
       deleteLog.mutate(created.id);
       return;
     }
-    // Nothing to report to the user if storage itself fails: the log simply
-    // stays queued and drains later, which is the pre-Undo state.
-    void discard(created.id).catch(() => {});
+    const stillQueued = (await list()).some((i) => i.id === created.id);
+    if (!stillQueued) {
+      deleteLog.mutate(created.id);
+      return;
+    }
+    await discard(created.id);
   };
 
   const logFood = (f: LoggableFood) => {
@@ -44,7 +54,9 @@ export function useInstantLog(): { logFood: (f: LoggableFood) => void; logMeal: 
           toast.show({
             message: `Logged ${f.name}`,
             actionLabel: "Undo",
-            onAction: () => undoLog(created),
+            // Fire-and-forget: a storage failure here leaves the log exactly
+            // where it was before the tap, which is the honest fallback.
+            onAction: () => { void undoLog(created).catch(() => {}); },
           });
         },
       },
