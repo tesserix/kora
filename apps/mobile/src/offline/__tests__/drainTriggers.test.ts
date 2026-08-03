@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { QueryClient } from "@tanstack/react-query";
+import { AppState } from "react-native";
+import { QueryClient, onlineManager } from "@tanstack/react-query";
 import { onAuthStateChanged } from "firebase/auth";
 import { apiFetch, currentUserId } from "@/lib/api";
 import { append, list } from "../queue";
@@ -65,11 +66,35 @@ test("a queued log drains when sign-in completes, not on the signed-out cold sta
   uninstall();
 });
 
-test("uninstall detaches the sign-in listener", () => {
-  const unsubscribe = jest.fn();
-  (onAuthStateChanged as jest.Mock).mockReturnValueOnce(unsubscribe);
+// All three listeners, not just one: a teardown that forgets any of them leaks
+// a subscription per mount, and every leaked one keeps firing drains for a
+// query client the app has moved on from.
+test("uninstall detaches every listener it installed", async () => {
+  // Signed out, so the synchronous cold-start drain this install fires is a
+  // no-op and cannot land after the test ends.
+  (currentUserId as jest.Mock).mockReturnValue(null);
 
-  installDrainTriggers(new QueryClient())();
+  const unsubscribeAuth = jest.fn();
+  const unsubscribeOnline = jest.fn();
+  const removeAppState = jest.fn();
+  (onAuthStateChanged as jest.Mock).mockReturnValueOnce(unsubscribeAuth);
+  const onlineSpy = jest.spyOn(onlineManager, "subscribe").mockReturnValue(unsubscribeOnline);
+  const appStateSpy = jest
+    .spyOn(AppState, "addEventListener")
+    .mockReturnValue({ remove: removeAppState } as ReturnType<typeof AppState.addEventListener>);
 
-  expect(unsubscribe).toHaveBeenCalled();
+  try {
+    installDrainTriggers(new QueryClient())();
+
+    expect(unsubscribeAuth).toHaveBeenCalled();
+    expect(unsubscribeOnline).toHaveBeenCalled();
+    expect(removeAppState).toHaveBeenCalled();
+  } finally {
+    onlineSpy.mockRestore();
+    appStateSpy.mockRestore();
+  }
+
+  // Settle the cold-start drain's promise before the test ends.
+  await new Promise((r) => setTimeout(r, 0));
+  expect(apiFetch).not.toHaveBeenCalled();
 });
