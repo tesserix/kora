@@ -839,7 +839,14 @@ describe("Scan mode", () => {
     // stops being the shape the screen can recognise.
     await act(async () => options.onSuccess(resolutionFromCachedFood(cachedBarcodeFood)));
 
-    expect(await findByText(/from a scan you.{0,3}ve done before/i)).toBeTruthy();
+    const bubble = await findByText(/from a scan you.{0,3}ve done before/i);
+    expect(bubble).toBeTruthy();
+    // It must NOT promise a future calorie fill-in. useQueuedLogs.toRow derives
+    // the kcal from the very same cached record a second later and counts it in
+    // the day total, so "once you're back online" describes an event that has
+    // already happened by the time the user reaches the diary.
+    expect(bubble.props.children).not.toMatch(/back online/i);
+    expect(bubble.props.children).not.toMatch(/fill in the calories/i);
     // Still a normal, loggable result card — the food is named and confirmable.
     expect(await findByText("Choc protein bar")).toBeTruthy();
     // And it must not claim a calorie figure it does not have — in the row OR

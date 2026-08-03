@@ -294,9 +294,16 @@ function resultSummary(resolution: Resolution): string {
   // one: nothing was resolved just now, the device recognised a barcode it had
   // already seen. It also has no server-computed kcal, so the usual
   // "about N kcal" would be "about — kcal". Say what actually happened.
+  //
+  // Deliberately says NOTHING about when the calories arrive. This card shows
+  // "—" because the client is forbidden from deriving nutrition here, but the
+  // diary's own queued row (useQueuedLogs.toRow) derives a figure from the very
+  // same cached record moments later and counts it in the day total — so any
+  // promise of a later fill-in would describe an event that has already
+  // happened by the time the user sees it.
   if (isCachedResult({ match_tier: resolution.provenance })) {
     const name = resolution.candidates[0]?.item.name ?? "that";
-    return `You're offline — that's ${name}, from a scan you've done before. Confirm and I'll log it; I'll fill in the calories once you're back online.`;
+    return `You're offline — that's ${name}, from a scan you've done before. Confirm and I'll log it.`;
   }
   const count = resolution.candidates.length;
   const itemWord = count === 1 ? "item" : "items";
