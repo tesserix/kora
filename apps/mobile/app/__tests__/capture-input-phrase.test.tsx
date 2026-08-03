@@ -189,17 +189,24 @@ test("a photo resolve sends no input_phrase", async () => {
 // These chain a real text resolve first, in the same mounted component, so
 // resolvedPhrase is genuinely non-null before the photo/barcode resolve runs.
 //
-// The photo case below deliberately captures via the always-visible "Quick
-// photo capture" composer shortcut (capture.tsx ~line 522) instead of
-// switching the Photo mode pill first. `source` is derived from `mode`
-// (sourceForMode), and switching the mode pill would itself flip `mode` to
-// "photo" — which makes handleAddToDiary's own `source === "ai_text" ||
-// "ai_voice"` gate exclude input_phrase regardless of resolvedPhrase's
-// staleness, masking the exact regression this test exists to catch. The
-// quick-capture shortcut resolves a photo while `mode` is still "type", so
-// `source` stays "ai_text" and the only thing standing between a stale
-// phrase and the payload is setResolvedPhrase(null) inside the photo
-// handler's onSuccess.
+// Both cases below are now double-guarded, but they got there differently —
+// neither case's *assertion* (no input_phrase leak) was ever wrong, but only
+// the photo case's *bindingness* ever depended on the tab-vs-modality bug
+// fixed in capture.tsx. The photo case captures via the quick-capture
+// shortcut while `mode` is still "type": under the old (now-deleted)
+// `sourceForMode(mode)`, that was the one way to make `source` read
+// "ai_text" for a photo resolve, so the input_phrase gate below actually
+// depended on setResolvedPhrase(null) rather than excluding input_phrase for
+// a reason unrelated to resolvedPhrase. The barcode case never had that
+// bindingness to begin with: reaching the camera view at all requires
+// switching to "Scan" mode, so `source` was "ai_barcode" — and the gate
+// excluded input_phrase — under the old mode-derived code too. Today,
+// `source` is stamped by applyResolution from the resolve that actually ran,
+// never from `mode` (see capture.tsx), so both cases are excluded by the
+// `source === "ai_text" || "ai_voice"` gate on their own. The
+// setResolvedPhrase(null) call in each handler's onSuccess is therefore
+// defense-in-depth, not the sole guard — it only matters if the gate is ever
+// keyed off something other than `source`.
 test("a phrase from an earlier text resolve does not leak into a later photo resolve", async () => {
   const { findByText, findByLabelText } = await render(<CaptureScreen />);
 

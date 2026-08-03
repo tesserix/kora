@@ -159,7 +159,7 @@ function makeRecorder(): MockRecorder {
   return recorder;
 }
 
-import CaptureScreen, { CaptureBody, sourceForMode } from "../capture";
+import CaptureScreen, { CaptureBody } from "../capture";
 
 function makeResolution(): Resolution {
   return {
@@ -1086,6 +1086,160 @@ describe("Add to diary", () => {
   });
 });
 
+// `source` must record which modality actually resolved the food, not which
+// capture tab happened to be open — the composer ("Tell Otto what you ate")
+// and the "Quick photo capture" shortcut are both rendered on every tab, so
+// a user can type or snap a photo while a *different* tab is active, and the
+// log must still read the modality that actually ran.
+//
+// Not every test below can catch a regression to reading `source` off
+// `mode` — only the ones where `mode` and the resolve it drives disagree.
+// Three do:
+//   - "typing on the Photo tab" — mode stays "photo" (its default), the
+//     resolve is text; a mode-derived source would read "ai_photo".
+//   - "a photo capture via the quick-capture shortcut, from the Type tab" —
+//     mode is switched to "type" first, the resolve is a photo; a
+//     mode-derived source would read "ai_text".
+//   - "last-resolve-wins" — mode stays "photo" throughout (a photo capture
+//     never touches it), but the resolve that lands is text; a mode-derived
+//     source would read "ai_photo" and never notice the second resolve.
+// All three fail on the `source` field of the real createLog payload under
+// a reverted `sourceForMode(mode)` — mutation-verified against a reverted
+// `sourceForMode(mode)`, see the PR that introduced this block.
+//
+// The remaining three (voice, fresh barcode, cached-fallback barcode) can't
+// be built to disagree: "Start/Stop recording" only exists once `mode` is
+// "voice", and "capture-camera-view" only exists once `mode` is "scan" — so
+// `mode` and the resolve necessarily match in those tests, and they stay
+// green under the old `sourceForMode(mode)` too. They still earn their
+// place here: each pins its handler to stamping the correct literal via
+// applyResolution — rather than nothing, a typo, or the wrong modality —
+// just not specifically the tab-vs-modality confusion this file is named
+// for.
+describe("Add to diary — source follows the resolve, not the tab", () => {
+  test("typing on the Photo tab (the default) logs ai_text, not ai_photo", async () => {
+    // CaptureScreen mounts with mode="photo" and this test never switches
+    // away from it — the composer is used exactly as it sits on that tab.
+    const rendered = await render(<CaptureScreen />);
+    const input = await rendered.findByLabelText("Tell Otto what you ate");
+    await fireEvent.changeText(input, "a bowl of oats");
+    await fireEvent.press(await rendered.findByLabelText("Send"));
+
+    const [, options] = mockResolveTextMutate.mock.calls[0];
+    await act(async () => options.onSuccess(makeResolution()));
+
+    await fireEvent.press(await rendered.findByLabelText("Add to diary"));
+
+    await waitFor(() => expect(mockCreateLogMutateAsync).toHaveBeenCalled());
+    expect(mockCreateLogMutateAsync).toHaveBeenCalledWith(expect.objectContaining({ source: "ai_text" }));
+  });
+
+  test("a photo capture via the quick-capture shortcut, from the Type tab, logs ai_photo", async () => {
+    (ImagePicker.launchCameraAsync as jest.Mock).mockResolvedValueOnce({
+      canceled: false,
+      assets: [{ uri: "file://x.jpg", fileName: "x.jpg", mimeType: "image/jpeg" }],
+    });
+
+    // Mode is switched to "type" first — the resolve is still a photo, so a
+    // mode-derived source would read "ai_text" here, not "ai_photo".
+    const rendered = await render(<CaptureScreen />);
+    await fireEvent.press(await rendered.findByText("Type"));
+    await fireEvent.press(await rendered.findByLabelText("Quick photo capture"));
+
+    await waitFor(() => expect(mockResolvePhotoMutate).toHaveBeenCalled());
+    const [, options] = mockResolvePhotoMutate.mock.calls[0];
+    await act(async () => options.onSuccess(makeResolution()));
+
+    await fireEvent.press(await rendered.findByLabelText("Add to diary"));
+
+    await waitFor(() => expect(mockCreateLogMutateAsync).toHaveBeenCalled());
+    expect(mockCreateLogMutateAsync).toHaveBeenCalledWith(expect.objectContaining({ source: "ai_photo" }));
+  });
+
+  test("a voice resolve logs ai_voice", async () => {
+    const recorder = makeRecorder();
+    (useAudioRecorder as jest.Mock).mockReturnValue(recorder);
+
+    const rendered = await render(<CaptureScreen />);
+    await fireEvent.press(await rendered.findByText("Voice"));
+    await fireEvent.press(await rendered.findByLabelText("Start recording"));
+    await fireEvent.press(await rendered.findByLabelText("Stop recording"));
+
+    await waitFor(() => expect(mockResolveVoiceMutate).toHaveBeenCalled());
+    const [, options] = mockResolveVoiceMutate.mock.calls[0];
+    await act(async () => options.onSuccess(makeResolution()));
+
+    await fireEvent.press(await rendered.findByLabelText("Add to diary"));
+
+    await waitFor(() => expect(mockCreateLogMutateAsync).toHaveBeenCalled());
+    expect(mockCreateLogMutateAsync).toHaveBeenCalledWith(expect.objectContaining({ source: "ai_voice" }));
+  });
+
+  test("a fresh barcode resolve logs ai_barcode", async () => {
+    const rendered = await render(<CaptureScreen />);
+    await fireEvent.press(await rendered.findByText("Scan"));
+    const cameraView = await rendered.findByTestId("capture-camera-view");
+    await act(async () => {
+      cameraView.props.onBarcodeScanned({ data: "012345678905", type: "ean13" });
+    });
+
+    await waitFor(() => expect(mockResolveBarcodeMutate).toHaveBeenCalled());
+    const [, options] = mockResolveBarcodeMutate.mock.calls[0];
+    await act(async () => options.onSuccess(makeResolution()));
+
+    await fireEvent.press(await rendered.findByLabelText("Add to diary"));
+
+    await waitFor(() => expect(mockCreateLogMutateAsync).toHaveBeenCalled());
+    expect(mockCreateLogMutateAsync).toHaveBeenCalledWith(expect.objectContaining({ source: "ai_barcode" }));
+  });
+
+  // A cache hit means no AI ran, but the modality was still a barcode scan —
+  // and barcode is already classified zero-COGS in #43, so it keeps ai_barcode.
+  test("a cached-fallback barcode resolve still logs ai_barcode", async () => {
+    const rendered = await render(<CaptureScreen />);
+    await fireEvent.press(await rendered.findByText("Scan"));
+    const cameraView = await rendered.findByTestId("capture-camera-view");
+    await act(async () => {
+      cameraView.props.onBarcodeScanned({ data: "012345678905", type: "ean13" });
+    });
+
+    const [, options] = mockResolveBarcodeMutate.mock.calls[0];
+    await act(async () => options.onSuccess(resolutionFromCachedFood(cachedBarcodeFood)));
+
+    await fireEvent.press(await rendered.findByLabelText("Add to diary"));
+
+    await waitFor(() => expect(mockCreateLogMutateAsync).toHaveBeenCalled());
+    expect(mockCreateLogMutateAsync).toHaveBeenCalledWith(expect.objectContaining({ source: "ai_barcode" }));
+  });
+
+  // Last-resolve-wins: a photo resolve followed by a typed refinement must
+  // replace the source with ai_text, not keep (or blend with) ai_photo.
+  test("last-resolve-wins: a photo resolve followed by a typed send logs ai_text", async () => {
+    (ImagePicker.launchCameraAsync as jest.Mock).mockResolvedValueOnce({
+      canceled: false,
+      assets: [{ uri: "file://x.jpg", fileName: "x.jpg", mimeType: "image/jpeg" }],
+    });
+
+    const rendered = await render(<CaptureScreen />);
+    await fireEvent.press(await rendered.findByLabelText("Photo viewfinder"));
+
+    await waitFor(() => expect(mockResolvePhotoMutate).toHaveBeenCalled());
+    const [, photoOptions] = mockResolvePhotoMutate.mock.calls[0];
+    await act(async () => photoOptions.onSuccess(makeResolution()));
+
+    const input = await rendered.findByLabelText("Tell Otto what you ate");
+    await fireEvent.changeText(input, "actually it was toast");
+    await fireEvent.press(await rendered.findByLabelText("Send"));
+    const [, textOptions] = mockResolveTextMutate.mock.calls[0];
+    await act(async () => textOptions.onSuccess(makeResolution()));
+
+    await fireEvent.press(await rendered.findByLabelText("Add to diary"));
+
+    await waitFor(() => expect(mockCreateLogMutateAsync).toHaveBeenCalled());
+    expect(mockCreateLogMutateAsync).toHaveBeenCalledWith(expect.objectContaining({ source: "ai_text" }));
+  });
+});
+
 describe("Resolving an uncertain item", () => {
   test("picking a food for an uncertain item makes it loggable without inventing a kcal", async () => {
     const rendered = await render(<CaptureScreen />);
@@ -1147,13 +1301,3 @@ test("switching mode clears a stale error bubble", async () => {
   expect(queryByText("I need camera or photo access to see your meal.")).toBeNull();
 });
 
-describe("sourceForMode", () => {
-  test.each([
-    ["photo", "ai_photo"],
-    ["voice", "ai_voice"],
-    ["scan", "ai_barcode"],
-    ["type", "ai_text"],
-  ] as const)("%s -> %s", (mode, expected) => {
-    expect(sourceForMode(mode)).toBe(expected);
-  });
-});

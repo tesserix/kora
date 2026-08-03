@@ -47,6 +47,12 @@ import { mealSlotForHour, type MealSlot } from "@/lib/mealSlot";
 export type CaptureMode = "photo" | "voice" | "scan" | "type";
 export type CaptureStage = "idle" | "analyzing" | "result";
 
+// The food-log `source` value. Stamped from whichever resolve actually
+// produced the current resolution (see applyResolution) — never from the
+// capture tab that happened to be open, since the composer is reachable from
+// every tab and a user can type on the Photo tab, etc.
+export type ResolutionSource = "ai_photo" | "ai_text" | "ai_voice" | "ai_barcode";
+
 const MODE_PILLS: ReadonlyArray<{ mode: CaptureMode; icon: string; label: string }> = [
   { mode: "photo", icon: "camera", label: "Photo" },
   { mode: "voice", icon: "mic", label: "Voice" },
@@ -309,14 +315,6 @@ function resultSummary(resolution: Resolution): string {
   const itemWord = count === 1 ? "item" : "items";
   const kcalText = kcalTotalLabel(resolution);
   return `I found ${count} ${itemWord}, about ${kcalText} — confirm and I'll log it.`;
-}
-
-// Maps a capture mode to the food-log `source` value. "scan" reads as a
-// barcode lookup and "type" as free text; the rest are literally "ai_<mode>".
-export function sourceForMode(mode: CaptureMode): string {
-  if (mode === "scan") return "ai_barcode";
-  if (mode === "type") return "ai_text";
-  return `ai_${mode}`;
 }
 
 // A stable per-candidate key for tracking add-to-diary success across retry
@@ -721,6 +719,12 @@ export default function CaptureScreen() {
   // derived from the mutations' isPending rather than tracked separately.
   const [stage, setStage] = useState<CaptureStage>("idle");
   const [resolution, setResolution] = useState<Resolution | null>(null);
+  // Which modality actually produced `resolution` — set alongside it in
+  // applyResolution, never derived from `mode`. The tab a user has open says
+  // nothing about which resolve fired; the composer is reachable from every
+  // tab, so a user can type while on the Photo tab and the log must still
+  // read `ai_text`.
+  const [resolutionSource, setResolutionSource] = useState<ResolutionSource | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [mealSlot, setMealSlot] = useState<MealSlot>(() => mealSlotForHour(new Date().getHours()));
   const [adding, setAdding] = useState(false);
@@ -816,8 +820,9 @@ export default function CaptureScreen() {
   // that belonged to the previous resolution — add-to-diary success tracking,
   // hand-picked promotions, and any open picker. A fresh capture always starts
   // with a clean retry slate and no promotion leaking in from the last one.
-  function applyResolution(data: Resolution) {
+  function applyResolution(data: Resolution, source: ResolutionSource) {
     setResolution(data);
+    setResolutionSource(source);
     setStage("result");
     setLoggedCandidateKeys(new Set());
     setPromoted({});
@@ -847,7 +852,7 @@ export default function CaptureScreen() {
     Keyboard.dismiss();
     resolveText.mutate(phrase, {
       onSuccess: (data) => {
-        applyResolution(data);
+        applyResolution(data, "ai_text");
         setResolvedPhrase(phrase);
         setText("");
       },
@@ -869,7 +874,7 @@ export default function CaptureScreen() {
     }
     resolvePhoto.mutate(outcome.file, {
       onSuccess: (data) => {
-        applyResolution(data);
+        applyResolution(data, "ai_photo");
         setResolvedPhrase(null);
       },
       onError: (error) => setErrorMsg(ottoErrorMessage(error)),
@@ -900,7 +905,7 @@ export default function CaptureScreen() {
         { uri, name: "clip.m4a", type: "audio/mp4" },
         {
           onSuccess: (data) => {
-            applyResolution(data);
+            applyResolution(data, "ai_voice");
             setResolvedPhrase(data.transcript ?? null);
           },
           onError: (error) => setErrorMsg(ottoErrorMessage(error)),
@@ -929,7 +934,9 @@ export default function CaptureScreen() {
     setErrorMsg(null);
     resolveBarcode.mutate(data, {
       onSuccess: (result) => {
-        applyResolution(result);
+        // A cache hit still means the modality was a barcode scan — no AI
+        // ran, but that's a COGS distinction (see #43), not a modality one.
+        applyResolution(result, "ai_barcode");
         setResolvedPhrase(null);
       },
       onError: (error) => {
@@ -960,10 +967,14 @@ export default function CaptureScreen() {
     // effectiveResolution, not resolution: a row the user resolved by hand must
     // log the food they picked, not the guess it replaced.
     const loggableCount = effectiveResolution?.candidates.filter(isLoggable).length ?? 0;
-    if (!effectiveResolution || loggableCount === 0) return;
+    // resolutionSource is set by applyResolution in the same call that sets
+    // resolution/effectiveResolution, so a truthy effectiveResolution always
+    // implies a truthy resolutionSource — the null check here is just to
+    // narrow the type, not a reachable early-return.
+    if (!effectiveResolution || loggableCount === 0 || !resolutionSource) return;
     setErrorMsg(null);
     setAdding(true);
-    const source = sourceForMode(mode);
+    const source = resolutionSource;
 
     const pending = effectiveResolution.candidates
       .map((candidate, index) => ({ candidate, key: candidateKey(candidate, index) }))
