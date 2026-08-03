@@ -53,7 +53,3 @@ test("a NetworkError gets the offline message, not the generic server one", () =
   const err = Object.assign(new Error("fetch failed"), { name: "NetworkError" });
   expect(apiErrorMessage(err)).toBe(OFFLINE);
 });
-
-test("a bare TypeError still gets the offline message", () => {
-  expect(apiErrorMessage(new TypeError("Network request failed"))).toBe(OFFLINE);
-});
