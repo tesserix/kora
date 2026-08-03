@@ -8,6 +8,7 @@ import type { FoodItem } from "@/api/types";
 import { append, drain, list } from "../queue";
 import { upsertFoods } from "../foodCache";
 import { drainLogs } from "../drainLogs";
+import { QUEUED_LOGS_KEY } from "../queryKeys";
 import { useQueuedLogs } from "../useQueuedLogs";
 
 // Mirrors every member of @/lib/api that useQueuedLogs OR useCreateLog reaches
@@ -221,6 +222,35 @@ test("an account switch never renders the previous user's queued rows", async ()
 
   await waitFor(() => expect(result.current.rows.map((r) => r.id)).toEqual(["b-row"]));
   expect(seen.slice(switchedAt).flat()).not.toContain("a-row");
+});
+
+// The key is computed from the render read of currentUserId, and react-query
+// runs the queryFn after that render. Flipping the mock at the END of the
+// render callback therefore builds the key as user-a and runs the fetch while
+// auth says user-b — the mid-flight session change that would otherwise file
+// one account's meals under another's cache entry.
+//
+// Asserted against the cache rather than `rows`, because the settled `rows`
+// converge on user-b either way once the key catches up; the question is what
+// is sitting under user-a's key. Relies only on react-query's
+// render-before-fetch ordering, never on counting renders.
+test("the rows cached under an owner's key are that owner's, whatever auth says later", async () => {
+  const client = newClient();
+  await append(payloadOn(atLocalNoon(2026, 8, 2)), "a-row", "user-a");
+  await append(payloadOn(atLocalNoon(2026, 8, 2)), "b-row", "user-b");
+
+  await renderHook(
+    () => {
+      const q = useQueuedLogs("2026-08-02");
+      (currentUserId as jest.Mock).mockReturnValue("user-b");
+      return q;
+    },
+    { wrapper: wrap(client) },
+  );
+
+  const aKey = [QUEUED_LOGS_KEY, "user-a", "2026-08-02"];
+  await waitFor(() => expect(client.getQueryData(aKey)).toBeDefined());
+  expect(client.getQueryData(aKey)).toEqual([expect.objectContaining({ id: "a-row" })]);
 });
 
 // The food cache is a 300-entry LRU, so a food can be evicted between queueing
