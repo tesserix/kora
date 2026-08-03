@@ -160,16 +160,18 @@ async function fetchWithRetry(
   return retryRes;
 }
 
-// isAuthenticated reports whether a request built right now would carry a
-// Bearer token. fetchWithRetry attaches one only when auth.currentUser exists,
-// and with no user it also skips the refresh-and-retry — so an unauthenticated
-// call comes straight back as ApiError(401). Background work that can simply
-// wait (the offline log queue's drain, which races Firebase restoring the
-// session on cold start) should check this rather than spend its payload on a
-// 401. Interactive requests should NOT: they belong to a screen that already
-// requires a signed-in user.
-export function isAuthenticated(): boolean {
-  return !!auth?.currentUser;
+// currentUserId returns the uid a request built right now would authenticate
+// as, or null when there is none. fetchWithRetry attaches a Bearer token only
+// when auth.currentUser exists, and with no user it also skips the
+// refresh-and-retry — so an unauthenticated call comes straight back as
+// ApiError(401). Background work that can simply wait (the offline log queue's
+// drain, which races Firebase restoring the session on cold start) checks this
+// rather than spending its payload on a 401, and the queue uses the uid to keep
+// one user's logs out of another's diary on a shared device. Interactive
+// requests should NOT check it: they belong to a screen that already requires a
+// signed-in user.
+export function currentUserId(): string | null {
+  return auth?.currentUser?.uid ?? null;
 }
 
 async function throwApiError(res: Response): Promise<never> {

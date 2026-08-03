@@ -10,6 +10,12 @@ export type QueuedLog = {
   attempts: number;
   lastError?: string;
   queuedAt: string;
+  /**
+   * uid of the user who wrote this log. Absent on items queued before ownership
+   * existed, and on the (unreachable in the app, but typed) case of a write
+   * with no signed-in user. An item with no owner is never auto-sent.
+   */
+  ownerId?: string;
 };
 
 function isValid(v: unknown): v is QueuedLog {
@@ -17,7 +23,8 @@ function isValid(v: unknown): v is QueuedLog {
   return (
     !!q && typeof q.id === "string" && typeof q.queuedAt === "string" &&
     (q.status === "pending" || q.status === "failed") &&
-    typeof q.attempts === "number" && !!q.payload
+    typeof q.attempts === "number" && !!q.payload &&
+    (q.ownerId === undefined || typeof q.ownerId === "string")
   );
 }
 
@@ -50,9 +57,17 @@ async function save(items: QueuedLog[]): Promise<void> {
   await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(items));
 }
 
-export async function append(payload: CreateLogInput, id: string): Promise<QueuedLog> {
+// ownerId is required rather than optional so no call site can forget it: an
+// unowned item is one that will never be sent automatically. It is nullable
+// because the caller reads it from auth state, which is typed as nullable.
+export async function append(
+  payload: CreateLogInput,
+  id: string,
+  ownerId: string | null,
+): Promise<QueuedLog> {
   const item: QueuedLog = {
     id, payload, status: "pending", attempts: 0, queuedAt: new Date().toISOString(),
+    ...(ownerId ? { ownerId } : {}),
   };
   await save([...(await list()), item]);
   return item;
@@ -91,14 +106,23 @@ function isPermanent(err: unknown): boolean {
 
 // drain sends pending items OLDEST FIRST and sequentially, so the diary fills
 // in the order the food was eaten rather than by whichever request wins a
-// race. `send` is injected so this module never imports the API layer.
+// race. `send` and `ownerId` are both injected so this module never imports
+// the API layer or Firebase.
 export async function drain(
   send: (item: QueuedLog) => Promise<void>,
+  ownerId: string,
 ): Promise<{ sent: number; failed: number; deferred: number }> {
   let sent = 0, failed = 0, deferred = 0;
 
   for (const item of await list()) {
     if (item.status !== "pending") continue;
+    // The queue is one device-wide list; accounts are not. Replaying another
+    // user's log would write their meal into this user's diary, and the server
+    // would accept it — the client-minted id is unused, so CreateIdempotent
+    // just inserts. An item with no owner (queued before ownership existed)
+    // belongs to nobody and is skipped rather than adopted.
+    if (item.ownerId !== ownerId) continue;
+
     try {
       await send(item);
       await discard(item.id);

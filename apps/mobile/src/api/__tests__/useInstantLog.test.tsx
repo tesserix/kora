@@ -8,6 +8,7 @@ import { useInstantLog } from "../useInstantLog";
 
 jest.mock("@/lib/api", () => ({
   apiFetch: jest.fn(),
+  currentUserId: jest.fn(() => "user-a"),
   apiFetchEnvelope: jest.fn(),
   apiFetchMultipart: jest.fn(),
   ApiError: class extends Error {},

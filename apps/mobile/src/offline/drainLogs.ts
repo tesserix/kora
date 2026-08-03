@@ -1,5 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { apiFetch, isAuthenticated } from "@/lib/api";
+import { apiFetch, currentUserId } from "@/lib/api";
 import { drain } from "./queue";
 
 // Sends every pending queued log, then refreshes the views that show them.
@@ -11,14 +11,16 @@ async function runDrain(queryClient: QueryClient): Promise<void> {
   // with no Authorization header and come back 401 — burning the item's one
   // clean shot for nothing. The queue is durable and installDrainTriggers
   // drains again the moment sign-in completes, so waiting costs nothing.
-  if (!isAuthenticated()) return;
+  // The uid doubles as the ownership filter: drain sends only this user's logs.
+  const ownerId = currentUserId();
+  if (!ownerId) return;
 
   const result = await drain(async (item) => {
     await apiFetch("/v1/logs", {
       method: "POST",
       body: JSON.stringify({ ...item.payload, id: item.id }),
     });
-  });
+  }, ownerId);
 
   if (result.sent > 0) {
     queryClient.invalidateQueries({ queryKey: ["logs"] });

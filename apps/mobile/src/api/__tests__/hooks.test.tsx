@@ -45,6 +45,7 @@ import {
 
 jest.mock("@/lib/api", () => ({
   apiFetch: jest.fn().mockResolvedValue({ id: "u1", email: "a@b.c", goal: "", onboarded_at: null }),
+  currentUserId: jest.fn(() => "user-a"),
   apiFetchEnvelope: jest.fn(),
   apiFetchMultipart: jest.fn(),
   ApiError: class extends Error {},
@@ -525,6 +526,9 @@ test("useCreateLog queues the write instead of POSTing when offline", async () =
     const items = await list();
     expect(items.map((i) => i.id)).toEqual([queued.id]);
     expect(items[0].payload.food_item_id).toBe("f1");
+    // Stamped with the writer's uid, so a later sign-in by somebody else on
+    // this device cannot drain this meal into their diary.
+    expect(items[0].ownerId).toBe("user-a");
   } finally {
     onlineManager.setOnline(true);
     await AsyncStorage.clear();

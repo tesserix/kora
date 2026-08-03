@@ -2,11 +2,11 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { QueryClient } from "@tanstack/react-query";
 import { append, list } from "../queue";
 import { drainLogs } from "../drainLogs";
-import { apiFetch, isAuthenticated } from "@/lib/api";
+import { apiFetch, currentUserId } from "@/lib/api";
 
 jest.mock("@/lib/api", () => ({
   apiFetch: jest.fn(),
-  isAuthenticated: jest.fn(() => true),
+  currentUserId: jest.fn(() => "user-a"),
   ApiError: class ApiError extends Error {},
 }));
 
@@ -21,7 +21,7 @@ const sentIds = () =>
 beforeEach(async () => {
   await AsyncStorage.clear();
   jest.clearAllMocks();
-  (isAuthenticated as jest.Mock).mockReturnValue(true);
+  (currentUserId as jest.Mock).mockReturnValue("user-a");
 });
 
 // The cold-start trigger fires before Firebase has restored the session from
@@ -29,12 +29,12 @@ beforeEach(async () => {
 // straight back 401 (api.ts skips refresh-and-retry when there is no user), and
 // would strand every queued log. So a signed-out drain must not send at all.
 test("drainLogs sends nothing while signed out and leaves the item untouched", async () => {
-  (isAuthenticated as jest.Mock).mockReturnValue(false);
+  (currentUserId as jest.Mock).mockReturnValue(null);
   // What the server really answers an unauthenticated POST with.
   (apiFetch as jest.Mock).mockRejectedValue(
     Object.assign(new Error("unauthenticated"), { name: "ApiError", status: 401 }),
   );
-  await append(payload, "id-1");
+  await append(payload, "id-1", "user-a");
 
   await drainLogs(new QueryClient());
 
@@ -48,7 +48,7 @@ test("drainLogs sends nothing while signed out and leaves the item untouched", a
 
 test("drainLogs POSTs each queued item with its id and clears the queue", async () => {
   (apiFetch as jest.Mock).mockResolvedValue({ id: "id-1" });
-  await append(payload, "id-1");
+  await append(payload, "id-1", "user-a");
 
   await drainLogs(new QueryClient());
 
@@ -98,7 +98,7 @@ test("a replay after a lost response converges on one server row rather than dup
   (apiFetch as jest.Mock).mockImplementation((path: string, init: RequestInit) => server.handle(path, init));
   server.loseNextResponse();
 
-  await append(payload, "id-1");
+  await append(payload, "id-1", "user-a");
 
   await drainLogs(new QueryClient());
   expect(server.rows.size).toBe(1);      // the write DID land server-side
@@ -118,8 +118,8 @@ test("two overlapping drains send each queued item exactly once", async () => {
   const gate = new Promise<void>((resolve) => { release = resolve; });
   (apiFetch as jest.Mock).mockImplementation(async () => { await gate; return {}; });
 
-  await append(payload, "id-1");
-  await append(payload, "id-2");
+  await append(payload, "id-1", "user-a");
+  await append(payload, "id-2", "user-a");
 
   const first = drainLogs(new QueryClient());
   const second = drainLogs(new QueryClient());
@@ -132,7 +132,7 @@ test("two overlapping drains send each queued item exactly once", async () => {
 
 test("the in-flight guard clears after a drain that rejects", async () => {
   (apiFetch as jest.Mock).mockResolvedValue({});
-  await append(payload, "id-1");
+  await append(payload, "id-1", "user-a");
 
   const failing = new QueryClient();
   jest.spyOn(failing, "invalidateQueries").mockImplementation(() => { throw new Error("boom"); });
@@ -141,14 +141,14 @@ test("the in-flight guard clears after a drain that rejects", async () => {
   // A guard that only cleared on success would wedge the queue forever: this
   // second drain would hand back the first one's rejected promise and send
   // nothing.
-  await append(payload, "id-2");
+  await append(payload, "id-2", "user-a");
   await expect(drainLogs(new QueryClient())).resolves.toBeUndefined();
   expect(sentIds()).toEqual(["id-1", "id-2"]);
 });
 
 test("drainLogs invalidates logs and dashboard after sending", async () => {
   (apiFetch as jest.Mock).mockResolvedValue({ id: "id-1" });
-  await append(payload, "id-1");
+  await append(payload, "id-1", "user-a");
 
   const qc = new QueryClient();
   const spy = jest.spyOn(qc, "invalidateQueries");

@@ -1,6 +1,6 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Crypto from "expo-crypto";
-import { apiFetch, apiFetchEnvelope, apiFetchMultipart } from "@/lib/api";
+import { apiFetch, apiFetchEnvelope, apiFetchMultipart, currentUserId } from "@/lib/api";
 import { isOnline } from "@/offline/connectivity";
 import { append, type QueuedLog } from "@/offline/queue";
 import type { MealSlot } from "@/lib/mealSlot";
@@ -94,7 +94,10 @@ export function useCreateLog() {
       // server row and any queued copy share one identity and a replay is
       // idempotent (see api/internal/foodlog CreateIdempotent).
       const id = Crypto.randomUUID();
-      if (!isOnline()) return append(input, id);
+      // Stamped so a queued log is only ever replayed into the diary of the
+      // user who wrote it — the queue is one device-wide list, accounts are not.
+      const ownerId = currentUserId();
+      if (!isOnline()) return append(input, id, ownerId);
       return apiFetch("/v1/logs", {
         method: "POST",
         body: JSON.stringify({ ...input, id }),

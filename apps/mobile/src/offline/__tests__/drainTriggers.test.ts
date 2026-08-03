@@ -1,13 +1,13 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { QueryClient } from "@tanstack/react-query";
 import { onAuthStateChanged } from "firebase/auth";
-import { apiFetch, isAuthenticated } from "@/lib/api";
+import { apiFetch, currentUserId } from "@/lib/api";
 import { append, list } from "../queue";
 import { installDrainTriggers } from "../drainTriggers";
 
 jest.mock("@/lib/api", () => ({
   apiFetch: jest.fn(),
-  isAuthenticated: jest.fn(() => true),
+  currentUserId: jest.fn(() => "user-a"),
   ApiError: class ApiError extends Error {},
 }));
 
@@ -33,16 +33,16 @@ async function eventually(check: () => Promise<void>): Promise<void> {
 beforeEach(async () => {
   await AsyncStorage.clear();
   jest.clearAllMocks();
-  (isAuthenticated as jest.Mock).mockReturnValue(true);
+  (currentUserId as jest.Mock).mockReturnValue("user-a");
 });
 
 // The cold-start drain almost always loses the race against Firebase restoring
 // the session, so without a sign-in trigger a queue built up offline would sit
 // there until the user happened to background and foreground the app.
 test("a queued log drains when sign-in completes, not on the signed-out cold start", async () => {
-  (isAuthenticated as jest.Mock).mockReturnValue(false);
+  (currentUserId as jest.Mock).mockReturnValue(null);
   (apiFetch as jest.Mock).mockResolvedValue({});
-  await append(payload, "id-1");
+  await append(payload, "id-1", "user-a");
 
   const uninstall = installDrainTriggers(new QueryClient());
   await new Promise((r) => setTimeout(r, 10));
@@ -54,7 +54,7 @@ test("a queued log drains when sign-in completes, not on the signed-out cold sta
   expect(authCalls).toHaveLength(1);
 
   // Firebase restores the session.
-  (isAuthenticated as jest.Mock).mockReturnValue(true);
+  (currentUserId as jest.Mock).mockReturnValue("user-a");
   authCalls[0][1]({ uid: "u1" });
 
   await eventually(async () => {
