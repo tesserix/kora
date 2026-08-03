@@ -28,12 +28,18 @@ function isValid(v: unknown): v is QueuedLog {
   );
 }
 
-// isQueued reports whether a create-log result is a queued item rather than a
-// server row. Both carry an `id: string`, so nothing but the extra queue
-// bookkeeping distinguishes them and `tsc` cannot catch a caller that treats a
-// queued id as a server id. Callers that can receive either — Undo above all —
-// must branch on the VALUE, never on "am I online right now?": connectivity can
-// change between the write and the undo tap.
+// isQueued reports whether a create-log RESULT was a queued item at the moment
+// it was produced. Both it and a server FoodLog carry an `id: string`, so
+// nothing but the extra queue bookkeeping distinguishes them and `tsc` cannot
+// catch a caller that treats a queued id as a server id.
+//
+// It answers "was this queued when it was written", NOT "is it queued now" —
+// a drain between then and now sends the item and removes it, leaving a value
+// that still has queue shape but no queue entry. So this is only ever safe as
+// a one-way narrowing: false means definitively a server row, true means
+// only "check the queue". Anything acting on the answer — Undo above all —
+// must confirm with `list()` at the moment it acts. See undoLog in
+// src/api/useInstantLog.ts.
 export function isQueued(value: { id: string }): value is QueuedLog {
   return isValid(value);
 }

@@ -54,9 +54,15 @@ export function useInstantLog(): { logFood: (f: LoggableFood) => void; logMeal: 
           toast.show({
             message: `Logged ${f.name}`,
             actionLabel: "Undo",
-            // Fire-and-forget: a storage failure here leaves the log exactly
-            // where it was before the tap, which is the honest fallback.
-            onAction: () => { void undoLog(created).catch(() => {}); },
+            // Undo exists to reverse something; if it cannot, say so rather
+            // than leaving the user believing a meal they cancelled is gone.
+            // The log stays exactly where it was, which is what this promises.
+            onAction: () => {
+              void undoLog(created).catch(() => {
+                haptics.error();
+                toast.show({ message: "Couldn't undo. Try again." });
+              });
+            },
           });
         },
       },

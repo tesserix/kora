@@ -3,7 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { apiFetch } from "@/lib/api";
-import { append, list } from "@/offline/queue";
+import { append, discard, list } from "@/offline/queue";
 import { drainLogs } from "@/offline/drainLogs";
 import { useInstantLog } from "../useInstantLog";
 
@@ -20,6 +20,12 @@ jest.mock("@/lib/api", () => ({
 
 type ToastOptions = { message: string; actionLabel?: string; onAction?: () => void };
 const mockToast: { shown: ToastOptions | null } = { shown: null };
+// The real queue, with discard wrapped so one test can make it fail.
+jest.mock("@/offline/queue", () => {
+  const actual = jest.requireActual("@/offline/queue");
+  return { ...actual, discard: jest.fn(actual.discard) };
+});
+
 jest.mock("@/components/Toast", () => ({
   useToast: () => ({ show: (o: ToastOptions) => { mockToast.shown = o; } }),
 }));
@@ -83,6 +89,28 @@ test("undoing a still-queued log removes it from the queue and sends no DELETE",
 
   await waitFor(async () => expect(await list()).toHaveLength(0));
   expect(apiFetch).not.toHaveBeenCalled();
+});
+
+// Undo's whole job is to reverse something. If it can't, saying nothing leaves
+// the user believing a meal they cancelled is gone when it is still logged.
+test("an undo that fails tells the user instead of failing silently", async () => {
+  onlineManager.setOnline(false);
+
+  const { result } = await renderHook(() => useInstantLog(), { wrapper });
+  await act(async () => { result.current.logFood(food); });
+  await waitFor(() => expect(mockToast.shown).not.toBeNull());
+
+  // Storage refuses the write the discard needs. (Injected at the queue
+  // boundary rather than by spying on AsyncStorage: jest.spyOn().mockRestore()
+  // on the async-storage jest mock resets its methods to no-ops and silently
+  // breaks every later test in the file.)
+  (discard as jest.Mock).mockRejectedValueOnce(new Error("disk full"));
+
+  await act(async () => { mockToast.shown!.onAction!(); });
+  await waitFor(() => expect(mockToast.shown!.message).toBe("Couldn't undo. Try again."));
+
+  // And the log is still queued, which is what the message now promises.
+  expect(await list()).toHaveLength(1);
 });
 
 // The toast lives for five seconds; a reconnect drain can easily land inside
