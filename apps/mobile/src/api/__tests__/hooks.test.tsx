@@ -2,7 +2,7 @@ import { renderHook, waitFor } from "@testing-library/react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { apiFetch, apiFetchEnvelope, apiFetchMultipart } from "@/lib/api";
+import { NetworkError, apiFetch, apiFetchEnvelope, apiFetchMultipart } from "@/lib/api";
 import { list } from "@/offline/queue";
 import {
   useAcceptRequest,
@@ -49,6 +49,7 @@ jest.mock("@/lib/api", () => ({
   apiFetchEnvelope: jest.fn(),
   apiFetchMultipart: jest.fn(),
   ApiError: class extends Error {},
+  NetworkError: class NetworkError extends Error {},
 }));
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -512,6 +513,14 @@ test("useCreateLog POSTs with a client-minted id when online", async () => {
   expect(typeof body.id).toBe("string");
   expect(body.id.length).toBeGreaterThan(0);
   expect(await list()).toHaveLength(0);
+
+  // A FIXED id would satisfy every assertion above and is the catastrophic
+  // case: CreateIdempotent resolves the second write to the first one's row, so
+  // every meal the user ever logs collapses into a single server row.
+  (apiFetch as jest.Mock).mockResolvedValueOnce({ id: "log2" });
+  await result.current.mutateAsync(logInput);
+  const secondId = JSON.parse((apiFetch as jest.Mock).mock.calls.at(-1)![1].body).id;
+  expect(secondId).not.toBe(body.id);
 });
 
 test("useCreateLog queues the write instead of POSTing when offline", async () => {
@@ -533,6 +542,43 @@ test("useCreateLog queues the write instead of POSTing when offline", async () =
     onlineManager.setOnline(true);
     await AsyncStorage.clear();
   }
+});
+
+// isOnline() is only a snapshot taken before the request leaves. The commonest
+// mobile failure is the connection dying WHILE the POST is in flight: fetch
+// rejects, apiFetch turns it into NetworkError, and without this the log
+// vanishes — logFood has no onError, so the user is told nothing. The
+// client-minted id makes the replay safe even if the server did receive it.
+test("useCreateLog queues the log when the POST dies mid-flight", async () => {
+  await AsyncStorage.clear();
+  (apiFetch as jest.Mock).mockRejectedValueOnce(new NetworkError(new Error("socket closed")));
+
+  const { result } = await renderHook(() => useCreateLog(), { wrapper });
+  // Must RESOLVE: a rejection here is the log disappearing with no error shown.
+  await expect(result.current.mutateAsync(logInput)).resolves.toMatchObject({ status: "pending" });
+
+  const items = await list();
+  expect(items).toHaveLength(1);
+  // Same id the POST carried, so a replay resolves to that row rather than a
+  // second copy of the meal.
+  const sentId = JSON.parse((apiFetch as jest.Mock).mock.calls.at(-1)![1].body).id;
+  expect(items[0].id).toBe(sentId);
+  expect(items[0]).toMatchObject({ status: "pending", ownerId: "user-a" });
+  await AsyncStorage.clear();
+});
+
+// Only a lost connection earns a retry. A 400 is the server saying the write
+// itself is wrong; queueing it would replay a request that fails identically
+// forever, and swallowing the rejection would hide a real bug from the caller.
+test("useCreateLog rethrows a 4xx and queues nothing", async () => {
+  await AsyncStorage.clear();
+  (apiFetch as jest.Mock).mockRejectedValueOnce(
+    Object.assign(new Error("bad request"), { name: "ApiError", status: 400 }),
+  );
+
+  const { result } = await renderHook(() => useCreateLog(), { wrapper });
+  await expect(result.current.mutateAsync(logInput)).rejects.toThrow("bad request");
+  expect(await list()).toHaveLength(0);
 });
 
 test("useCreateLogBatch posts to /v1/logs/batch", async () => {

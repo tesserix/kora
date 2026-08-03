@@ -1,6 +1,6 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Crypto from "expo-crypto";
-import { apiFetch, apiFetchEnvelope, apiFetchMultipart, currentUserId } from "@/lib/api";
+import { NetworkError, apiFetch, apiFetchEnvelope, apiFetchMultipart, currentUserId } from "@/lib/api";
 import { isOnline } from "@/offline/connectivity";
 import { append, type QueuedLog } from "@/offline/queue";
 import type { MealSlot } from "@/lib/mealSlot";
@@ -98,10 +98,22 @@ export function useCreateLog() {
       // user who wrote it — the queue is one device-wide list, accounts are not.
       const ownerId = currentUserId();
       if (!isOnline()) return append(input, id, ownerId);
-      return apiFetch("/v1/logs", {
-        method: "POST",
-        body: JSON.stringify({ ...input, id }),
-      }) as Promise<FoodLog>;
+      try {
+        return (await apiFetch("/v1/logs", {
+          method: "POST",
+          body: JSON.stringify({ ...input, id }),
+        })) as FoodLog;
+      } catch (err) {
+        // isOnline() was only a snapshot taken before the request left. The
+        // commonest mobile failure is the connection dying mid-flight, and
+        // without this the log would simply vanish — logFood has no onError.
+        // Queueing is safe even if the server did apply the write: the id
+        // already travelled, so the replay resolves to that same row.
+        // Everything else (a 4xx, a bad token, an unparseable body) is a real
+        // failure the caller must see.
+        if (err instanceof NetworkError) return append(input, id, ownerId);
+        throw err;
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["logs"] });
