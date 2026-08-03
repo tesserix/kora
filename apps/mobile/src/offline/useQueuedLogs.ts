@@ -39,12 +39,10 @@ async function toRow(q: QueuedLog): Promise<QueuedRow> {
 // page until a drain silently moved it.
 const localDay = (loggedAt: string) => new Date(loggedAt).toLocaleDateString("en-CA");
 
-async function queuedRowsFor(date: string): Promise<QueuedRow[]> {
-  // The same accessor drainLogs uses, so the diary shows exactly the rows that
-  // will actually be sent. The queue is one device-wide list but accounts are
-  // not, and `list()` returns every item on the device: without this filter
-  // one user's queued meals — and their calories — appear in another's diary.
-  const ownerId = currentUserId();
+async function queuedRowsFor(ownerId: string | null, date: string): Promise<QueuedRow[]> {
+  // The queue is one device-wide list but accounts are not, and `list()`
+  // returns every item on the device: without this filter one user's queued
+  // meals — and their calories — appear in another's diary.
   if (!ownerId) return [];
 
   const mine = (await list()).filter(
@@ -67,9 +65,23 @@ const NO_ROWS: QueuedRow[] = [];
 // mechanism — there is no polling.
 export function useQueuedLogs(date: string) {
   const qc = useQueryClient();
+  // The same accessor drainLogs uses, so the diary shows exactly the rows that
+  // will actually be sent. It is a synchronous read of auth.currentUser, so the
+  // key below is always a concrete `string | null` — never an undefined key
+  // waiting on a promise.
+  //
+  // It is IN the key, not just applied inside the queryFn, because react-query
+  // serves a key it has seen before its cached data synchronously: with one
+  // shared key, the frame after an account switch paints the previous user's
+  // meals into this one's diary before any refetch runs. Nothing calls
+  // queryClient.clear() on sign-out, so the key is the only structural
+  // defence. The queryFn filters by this same value rather than re-reading
+  // live auth, so the data under a key can never belong to a different owner
+  // than the key names.
+  const ownerId = currentUserId();
   const query = useQuery({
-    queryKey: [QUEUED_LOGS_KEY, date],
-    queryFn: () => queuedRowsFor(date),
+    queryKey: [QUEUED_LOGS_KEY, ownerId, date],
+    queryFn: () => queuedRowsFor(ownerId, date),
   });
 
   // Every mutation of the queue goes through the same invalidation as a drain,

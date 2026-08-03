@@ -138,6 +138,41 @@ test("excludes queued rows belonging to another user while keeping this user's o
   expect(result.current.rows.map((r) => r.id)).toEqual(["mine"]);
 });
 
+// The owner filter keeps another user's rows out of the STORAGE read, but
+// react-query hands a query whose key it has seen before that key's cached
+// data synchronously, before any refetch runs. So with the owner absent from
+// the key, the first frame after an account switch paints user A's queued
+// meals into user B's diary — the same leak, arriving through the cache
+// instead. Nothing in the app calls queryClient.clear() on sign-out, so the
+// key is the only structural defence.
+//
+// Asserting on the settled state alone would not catch this: the refetch
+// resolves to B's rows either way. Every frame from the switch onward has to
+// be clean, so the render callback records them all.
+test("an account switch never renders the previous user's queued rows", async () => {
+  const client = newClient();
+  await append(payloadOn(atLocalNoon(2026, 8, 2)), "a-row", "user-a");
+  await append(payloadOn(atLocalNoon(2026, 8, 2)), "b-row", "user-b");
+
+  const seen: string[][] = [];
+  const { result, rerender } = await renderHook(
+    () => {
+      const q = useQueuedLogs("2026-08-02");
+      seen.push(q.rows.map((r) => r.id));
+      return q;
+    },
+    { wrapper: wrap(client) },
+  );
+  await waitFor(() => expect(result.current.rows.map((r) => r.id)).toEqual(["a-row"]));
+
+  const switchedAt = seen.length;
+  (currentUserId as jest.Mock).mockReturnValue("user-b");
+  await rerender(undefined);
+
+  await waitFor(() => expect(result.current.rows.map((r) => r.id)).toEqual(["b-row"]));
+  expect(seen.slice(switchedAt).flat()).not.toContain("a-row");
+});
+
 // The food cache is a 300-entry LRU, so a food can be evicted between queueing
 // a log and looking at the diary. There is no honest kcal to show then — `0`
 // would be a wrong number the day total would silently believe.
