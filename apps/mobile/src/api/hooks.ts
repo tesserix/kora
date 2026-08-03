@@ -3,7 +3,7 @@ import * as Crypto from "expo-crypto";
 import { apiFetch, apiFetchEnvelope, apiFetchMultipart, isNetworkError } from "@/lib/api";
 import { isOnline } from "@/offline/connectivity";
 import { append, type QueuedLog } from "@/offline/queue";
-import { resolveOwnerId } from "@/offline/owner";
+import { NoOwnerError, resolveOwnerId } from "@/offline/owner";
 import type { MealSlot } from "@/lib/mealSlot";
 import type {
   AppNotification,
@@ -102,7 +102,7 @@ export function useCreateLog() {
       // drained. With no owner at all there is nothing honest to do but refuse:
       // queueing would swallow the meal into a black hole.
       const ownerId = await resolveOwnerId();
-      if (!ownerId) throw new Error("Can't save this log — please sign in and try again.");
+      if (!ownerId) throw new NoOwnerError();
       if (!isOnline()) return append(input, id, ownerId);
       try {
         return (await apiFetch("/v1/logs", {

@@ -2,21 +2,28 @@ import { act, renderHook, waitFor } from "@testing-library/react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { apiFetch } from "@/lib/api";
+import { NetworkError, apiFetch, currentUserId } from "@/lib/api";
 import { append, discard, list } from "@/offline/queue";
 import { drainLogs } from "@/offline/drainLogs";
 import { useInstantLog } from "../useInstantLog";
 
-jest.mock("@/lib/api", () => ({
-  apiFetch: jest.fn(),
-  currentUserId: jest.fn(() => "user-a"),
-  apiFetchEnvelope: jest.fn(),
-  apiFetchMultipart: jest.fn(),
-  ApiError: class extends Error {},
-  // useCreateLog does `err instanceof NetworkError`; without it here the class
-  // is undefined and any rejecting apiFetch throws a TypeError instead.
-  NetworkError: class NetworkError extends Error {},
-}));
+// Must mirror every member of @/lib/api that useCreateLog reaches for. It
+// narrows a failed POST with `isNetworkError(err)`; if that key is missing the
+// import is `undefined` and any rejecting apiFetch dies with
+// "isNetworkError is not a function" instead of queueing the log.
+jest.mock("@/lib/api", () => {
+  class MockNetworkError extends Error {}
+  return {
+    apiFetch: jest.fn(),
+    currentUserId: jest.fn(() => "user-a"),
+    apiFetchEnvelope: jest.fn(),
+    apiFetchMultipart: jest.fn(),
+    ApiError: class extends Error {},
+    NetworkError: MockNetworkError,
+    isNetworkError: (e: unknown) =>
+      e instanceof MockNetworkError || (e as { name?: string } | null)?.name === "NetworkError",
+  };
+});
 
 type ToastOptions = { message: string; actionLabel?: string; onAction?: () => void };
 const mockToast: { shown: ToastOptions | null } = { shown: null };
@@ -42,6 +49,7 @@ beforeEach(async () => {
   jest.clearAllMocks();
   mockToast.shown = null;
   onlineManager.setOnline(true);
+  (currentUserId as jest.Mock).mockReturnValue("user-a");
 });
 
 afterEach(() => onlineManager.setOnline(true));
@@ -91,6 +99,47 @@ test("undoing a still-queued log removes it from the queue and sends no DELETE",
   expect(apiFetch).not.toHaveBeenCalled();
 });
 
+// The refusal useCreateLog throws when a log cannot be attributed is written as
+// user-facing copy, but logFood had no onError — so the user tapped "Your
+// usual" and the app did nothing at all. A crafted message nobody reads is
+// false confidence.
+test("a log that cannot be attributed to anyone tells the user why", async () => {
+  (currentUserId as jest.Mock).mockReturnValue(null);
+  await AsyncStorage.clear();
+
+  const { result } = await renderHook(() => useInstantLog(), { wrapper });
+  await act(async () => { result.current.logFood(food); });
+
+  await waitFor(() =>
+    expect(mockToast.shown?.message).toBe("Can't save this log — please sign in and try again."),
+  );
+});
+
+// Anything else that goes wrong gets copy that does not pretend to know the
+// cause — the same shape app/log.tsx already shows.
+test("any other failed log shows generic copy rather than a server string", async () => {
+  (apiFetch as jest.Mock).mockRejectedValueOnce(
+    Object.assign(new Error("request failed"), { name: "ApiError", status: 500 }),
+  );
+
+  const { result } = await renderHook(() => useInstantLog(), { wrapper });
+  await act(async () => { result.current.logFood(food); });
+
+  await waitFor(() => expect(mockToast.shown?.message).toBe("Couldn't log that. Please try again."));
+});
+
+// Exercises the isNetworkError seam through the instant-log path, so this
+// file's api mock cannot drift out of step with hooks.ts unnoticed again.
+test("a log whose POST dies mid-flight is queued and still offers Undo", async () => {
+  (apiFetch as jest.Mock).mockRejectedValueOnce(new NetworkError("socket closed"));
+
+  const { result } = await renderHook(() => useInstantLog(), { wrapper });
+  await act(async () => { result.current.logFood(food); });
+
+  await waitFor(() => expect(mockToast.shown?.message).toBe("Logged Oats"));
+  expect(await list()).toHaveLength(1);
+});
+
 // Undo's whole job is to reverse something. If it can't, saying nothing leaves
 // the user believing a meal they cancelled is gone when it is still logged.
 test("an undo that fails tells the user instead of failing silently", async () => {
@@ -111,6 +160,24 @@ test("an undo that fails tells the user instead of failing silently", async () =
 
   // And the log is still queued, which is what the message now promises.
   expect(await list()).toHaveLength(1);
+});
+
+// deleteLog.mutate is fire-and-forget inside React Query, so undoLog used to
+// resolve whatever the DELETE did and the catch never ran: undo of a log the
+// server already has failed just as silently as the discard branch did.
+test("an undo whose DELETE fails also tells the user", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({ id: "server-1" });
+
+  const { result } = await renderHook(() => useInstantLog(), { wrapper });
+  await act(async () => { result.current.logFood(food); });
+  await waitFor(() => expect(mockToast.shown!.actionLabel).toBe("Undo"));
+
+  (apiFetch as jest.Mock).mockRejectedValueOnce(
+    Object.assign(new Error("request failed"), { name: "ApiError", status: 500 }),
+  );
+  await act(async () => { mockToast.shown!.onAction!(); });
+
+  await waitFor(() => expect(mockToast.shown!.message).toBe("Couldn't undo. Try again."));
 });
 
 // The toast lives for five seconds; a reconnect drain can easily land inside

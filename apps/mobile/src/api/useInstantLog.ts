@@ -8,6 +8,19 @@ import type { FoodLog, LoggableFood, LoggableMeal } from "@/api/types";
 // the Log screen and the Home "Your usual" strip share one implementation.
 // The client never sends macros — only food_item_id + grams + slot + logged_at;
 // nutrition is recomputed server-side.
+// Every failure that is not "we could not attribute this log" resolves to copy
+// that does not pretend to know the cause — a raw server string ("request
+// failed") is not something to show a user. Mirrors app/log.tsx's onError.
+const LOG_FAILED = "Couldn't log that. Please try again.";
+
+// Duck-typed on `name` rather than `instanceof`, the way apiErrorMessage.ts
+// already discriminates: NoOwnerError's message IS the user-facing copy.
+function logFailureMessage(error: unknown): string {
+  return (error as { name?: string } | null)?.name === "NoOwnerError" && error instanceof Error
+    ? error.message
+    : LOG_FAILED;
+}
+
 export function useInstantLog(): { logFood: (f: LoggableFood) => void; logMeal: (m: LoggableMeal) => void } {
   const createLog = useCreateLog();
   const batchLog = useCreateLogBatch();
@@ -27,13 +40,16 @@ export function useInstantLog(): { logFood: (f: LoggableFood) => void; logMeal: 
   const undoLog = async (created: FoodLog | QueuedLog) => {
     // Cheap narrowing first: a value that never had queue shape came straight
     // back from the server, so there is nothing to look up.
+    // mutateAsync, not mutate: `mutate` swallows the rejection inside React
+    // Query, so undoLog would resolve however the DELETE went and the caller's
+    // catch could never fire — the silent failure this handler exists to end.
     if (!isQueued(created)) {
-      deleteLog.mutate(created.id);
+      await deleteLog.mutateAsync(created.id);
       return;
     }
     const stillQueued = (await list()).some((i) => i.id === created.id);
     if (!stillQueued) {
-      deleteLog.mutate(created.id);
+      await deleteLog.mutateAsync(created.id);
       return;
     }
     await discard(created.id);
@@ -64,6 +80,12 @@ export function useInstantLog(): { logFood: (f: LoggableFood) => void; logMeal: 
               });
             },
           });
+        },
+        // Without this the mutation's rejection lands in state nobody reads:
+        // the user taps "Your usual" and the app does nothing at all.
+        onError: (error) => {
+          haptics.error();
+          toast.show({ message: logFailureMessage(error) });
         },
       },
     );
