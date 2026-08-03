@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { append, list, retry, discard, drain, type QueuedLog } from "../queue";
+import { append, list, retry, discard, drain, MAX_DELIVERY_ATTEMPTS, type QueuedLog } from "../queue";
 
 const payload = {
   food_item_id: "f1", meal_slot: "lunch", source: "manual",
@@ -68,13 +68,17 @@ test("a permanent failure marks the item failed and stops auto-retrying", async 
 
 test("a transient failure leaves the item pending for the next drain", async () => {
   await append(payload, "id-1", "user-a");
-  const err = Object.assign(new Error("offline"), { name: "NetworkError" });
+  const err = Object.assign(new Error("server error"), { name: "ApiError", status: 500 });
   const result = await drain(async () => { throw err; }, "user-a");
   expect(result.deferred).toBe(1);
 
   const items = await list();
   expect(items[0].status).toBe("pending");
+  // A 500 is a REFUSAL — the request reached the server and came back with a
+  // verdict — so it spends one of the item's attempts (MAX_DELIVERY_ATTEMPTS).
+  // A failure that never reached the server does not; see the ceiling tests.
   expect(items[0].attempts).toBe(1);
+  expect(items[0].lastError).toContain("server error");
 });
 
 // AuthTokenError must be treated as transient, not permanent. Per PR #77 it
@@ -89,6 +93,9 @@ test("an auth-token failure is transient, not permanent", async () => {
   expect(result.deferred).toBe(1);
   expect(result.failed).toBe(0);
   expect((await list())[0].status).toBe("pending");
+  // And it must not age toward the ceiling either: no token means the request
+  // never left, so there is no refusal to count.
+  expect((await list())[0].attempts).toBe(0);
 });
 
 // A 401 must not be lumped in with the other 4xx. It means "not authenticated
@@ -104,13 +111,16 @@ test("a 401 is transient, not permanent", async () => {
   expect(result.deferred).toBe(1);
   expect(result.failed).toBe(0);
   expect((await list())[0].status).toBe("pending");
+  // It DOES count toward the ceiling, though: unlike a dropped connection, a
+  // 401 is the server having answered. One is "not authenticated yet"; five in
+  // a row, with drainLogs refusing to send while signed out, is not.
+  expect((await list())[0].attempts).toBe(1);
 });
 
 // A 403 is the opposite animal: authenticated, but not allowed. api.ts only
-// force-refreshes the token on a 401, so nothing about a 403 changes by itself,
-// and drain has no attempt ceiling — leaving it pending would replay it on every
-// cold start, reconnect and foreground, forever, with no failed state for a
-// retry UI to surface.
+// force-refreshes the token on a 401, so nothing about a 403 changes by itself
+// — leaving it pending would spend the whole attempt budget before the retry
+// UI ever saw it, when it can be surfaced on the very first refusal.
 test("a 403 is permanent — authenticated but not allowed will not self-heal", async () => {
   await append(payload, "id-1", "user-a");
   const err = Object.assign(new Error("forbidden"), { name: "ApiError", status: 403 });
@@ -189,4 +199,69 @@ test("an append and a discard issued concurrently do not lose each other's write
   await Promise.all([discard("id-1"), append(payload, "id-2", "user-a")]);
 
   expect((await list()).map((i) => i.id)).toEqual(["id-2"]);
+});
+
+// Without a ceiling an item that never succeeds replays on every cold start,
+// reconnect and foreground forever; it is visible only on the calendar day it
+// was logged, counts toward that day's total indefinitely, and there is no UI
+// that can retry or discard it (diary.tsx gives onPress to `failed` rows only).
+// A bounded number of refusals routes it into that existing sheet.
+test("an item the server keeps refusing eventually becomes failed", async () => {
+  await append(payload, "id-1", "user-a");
+  const err = Object.assign(new Error("server error"), { name: "ApiError", status: 500 });
+
+  for (let i = 1; i < MAX_DELIVERY_ATTEMPTS; i++) {
+    const r = await drain(async () => { throw err; }, "user-a");
+    expect(r.deferred).toBe(1);
+    expect((await list())[0].status).toBe("pending");
+    expect((await list())[0].attempts).toBe(i);
+  }
+
+  const last = await drain(async () => { throw err; }, "user-a");
+  expect(last.failed).toBe(1);
+  expect(last.deferred).toBe(0);
+  expect((await list())[0].status).toBe("failed");
+
+  // And it must stop being auto-sent, like any other failed item.
+  let called = false;
+  await drain(async () => { called = true; }, "user-a");
+  expect(called).toBe(false);
+});
+
+// The trap the ceiling must not fall into. Offline is the normal state for a
+// queued log, drains fire on every foreground, and a request that never reached
+// the server was never REFUSED — the item is waiting, not stuck. Ageing it here
+// would mark a perfectly good meal "Failed" after five app launches on a plane.
+test("a failure that never reached the server does not age the item toward the ceiling", async () => {
+  await append(payload, "id-1", "user-a");
+  const err = Object.assign(new Error("offline"), { name: "NetworkError" });
+
+  for (let i = 0; i < MAX_DELIVERY_ATTEMPTS + 3; i++) {
+    const r = await drain(async () => { throw err; }, "user-a");
+    expect(r.deferred).toBe(1);
+    expect(r.failed).toBe(0);
+  }
+
+  const item = (await list())[0];
+  expect(item.status).toBe("pending");
+  expect(item.attempts).toBe(0);
+});
+
+// Retry is the user saying "try this again". Carrying the old count over would
+// spend the whole budget on the first press and re-fail the item instantly,
+// making the button look broken.
+test("retry resets the attempt count so a retried item gets a full budget", async () => {
+  await append(payload, "id-1", "user-a");
+  const err = Object.assign(new Error("server error"), { name: "ApiError", status: 500 });
+  for (let i = 0; i < MAX_DELIVERY_ATTEMPTS; i++) {
+    await drain(async () => { throw err; }, "user-a");
+  }
+  expect((await list())[0].status).toBe("failed");
+
+  await retry("id-1");
+  expect((await list())[0].attempts).toBe(0);
+
+  const after = await drain(async () => { throw err; }, "user-a");
+  expect(after.deferred).toBe(1);
+  expect((await list())[0].status).toBe("pending");
 });

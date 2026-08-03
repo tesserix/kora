@@ -92,9 +92,12 @@ export async function append(
   return item;
 }
 
+// attempts is reset, not carried: retry is the user saying "try this again",
+// and an item that returned with its whole budget already spent would re-fail
+// on the very next drain and make the button look broken.
 export async function retry(id: string): Promise<void> {
   await update((items) =>
-    items.map((i) => (i.id === id ? { ...i, status: "pending", lastError: undefined } : i)),
+    items.map((i) => (i.id === id ? { ...i, status: "pending", attempts: 0, lastError: undefined } : i)),
   );
 }
 
@@ -115,13 +118,48 @@ export async function discard(id: string): Promise<void> {
 // word on the session.
 //
 // 403 is NOT included: authenticated-but-not-permitted does not change by
-// itself (api.ts force-refreshes the token only on a 401), and drain has no
-// attempt ceiling, so leaving it pending would replay it on every trigger
-// forever with no failed state for a retry UI to surface.
+// itself (api.ts force-refreshes the token only on a 401), so leaving it
+// pending would spend the whole attempt budget below before the retry UI ever
+// saw it, when it could have been surfaced on the first refusal.
 function isPermanent(err: unknown): boolean {
-  const status = (err as { status?: number })?.status;
+  const status = statusOf(err);
   if (status === 401) return false;
   return typeof status === "number" && status >= 400 && status < 500;
+}
+
+function statusOf(err: unknown): number | undefined {
+  return (err as { status?: number } | null)?.status;
+}
+
+// How many REFUSALS an item may collect before it stops auto-retrying and
+// becomes `failed`, which routes it into the retry/discard sheet the diary
+// already renders for failed rows (QueuedFailedSheet). Without a ceiling a log
+// the server will never accept replays on every cold start, reconnect and
+// foreground forever, counts toward its day's total indefinitely, and — being
+// `pending` — has no press handler, so the user cannot resolve it at all.
+export const MAX_DELIVERY_ATTEMPTS = 5;
+
+// Only a reply from the server counts as an attempt.
+//
+// A failure carrying no HTTP status never got a verdict: the request did not
+// arrive (NetworkError), or the token could not be fetched to send it
+// (AuthTokenError, whose usual cause is the same dropped connection). Such an
+// item is WAITING, not being refused, and must not age. This is the ceiling's
+// central hazard: offline is the normal state for a queued log and drains fire
+// on every foreground, so counting those would mark a perfectly good meal
+// "Failed" after five app launches on a plane — the exact opposite of what the
+// queue is for.
+//
+// A 401 DOES carry a status and so does count, which is compatible with
+// treating it as transient rather than permanent. It stays transient (one 401
+// is genuinely "not authenticated yet"), but five of them are not: drainLogs
+// refuses to send at all while signed out, so a 401 here means Firebase
+// reported a user whose token the server still rejected, and api.ts escalates a
+// session that survives a forced refresh to a sign-out — after which the drain
+// stops entirely and no further attempts accrue. Five refusals with a live
+// session is a state the user needs to be told about, not replayed forever.
+function countsAsAttempt(err: unknown): boolean {
+  return typeof statusOf(err) === "number";
 }
 
 // drain sends pending items OLDEST FIRST and sequentially, so the diary fills
@@ -149,10 +187,13 @@ export async function drain(
       sent++;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      const permanent = isPermanent(err);
-      permanent ? failed++ : deferred++;
+      const attempts = item.attempts + (countsAsAttempt(err) ? 1 : 0);
+      // Two independent routes to `failed`: one refusal that will never change
+      // (a 4xx), or enough refusals that will not change in practice.
+      const done = isPermanent(err) || attempts >= MAX_DELIVERY_ATTEMPTS;
+      done ? failed++ : deferred++;
       await update((items) => items.map((i) => (i.id === item.id
-        ? { ...i, attempts: i.attempts + 1, lastError: message, status: permanent ? "failed" : "pending" }
+        ? { ...i, attempts, lastError: message, status: done ? "failed" : "pending" }
         : i)));
     }
   }
