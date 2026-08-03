@@ -41,13 +41,18 @@ async function load(): Promise<Entry[]> {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    // Entries persisted before fidelity tracking existed (or a corrupt
-    // `fidelity` value caught above) have no valid `fidelity`. Every writer
-    // that predates this field was the summary path (usePins/useSavedMeals
-    // shipped first), so those records carry `provenance: "cached"` and a
-    // fabricated serving — defaulting to "full" would freeze those defects
-    // in place forever. "summary" is the honest default: self-healing, and a
-    // later full write (e.g. a barcode scan) can still upgrade it.
+    // The `?? "summary"` below covers exactly one case: entries persisted
+    // before fidelity tracking existed, whose `fidelity` is absent. A corrupt
+    // `fidelity` — a string that is not "full" or "summary" — does NOT reach
+    // it: isEntry rejects the whole entry and it is dropped here, which is the
+    // stricter of the two behaviours and the one to rely on.
+    //
+    // Every writer that predates this field was the summary path
+    // (usePins/useSavedMeals shipped first), so those records carry
+    // `provenance: "cached"` and a fabricated serving — defaulting to "full"
+    // would freeze those defects in place forever. "summary" is the honest
+    // default: self-healing, and a later full write (e.g. a barcode scan) can
+    // still upgrade it.
     return parsed.filter(isEntry).map((e) => ({ ...e, fidelity: e.fidelity ?? "summary" }));
   } catch {
     return [];
