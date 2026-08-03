@@ -27,6 +27,16 @@ export type FoodItem = {
   barcode?: string;
 };
 
+// Sentinel `provenance` for "we deliberately don't know the source" — e.g. a
+// FoodItem synthesized in the offline cache from a gram-scaled serving
+// summary rather than received whole from the server (see
+// src/offline/foodCache.ts foodsFromPins/foodsFromSavedMeals).
+// ProvenanceChip renders nothing for this value rather than falling through
+// to its default "AI estimate ±15%" copy, which specifically means a
+// model's own guess — not a fact whose original source just wasn't carried
+// through.
+export const UNKNOWN_PROVENANCE = "unknown";
+
 export type Candidate = {
   item: FoodItem;
   match_score: number;

@@ -1,6 +1,15 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { upsertFoods, getFoodById, getFoodByBarcode, searchCachedFoods, FOOD_CACHE_LIMIT } from "../foodCache";
-import type { FoodItem } from "@/api/types";
+import {
+  upsertFoods,
+  getFoodById,
+  getFoodByBarcode,
+  searchCachedFoods,
+  foodsFromPins,
+  foodsFromSavedMeals,
+  FOOD_CACHE_LIMIT,
+} from "../foodCache";
+import type { FoodItem, PinnedFood, SavedMeal } from "@/api/types";
+import { UNKNOWN_PROVENANCE } from "@/api/types";
 
 function food(id: string, name: string, barcode?: string): FoodItem {
   return {
@@ -98,4 +107,101 @@ test("re-upserting a food refreshes its recency and protects it from eviction", 
 test("a corrupt stored value yields an empty cache instead of throwing", async () => {
   await AsyncStorage.setItem("kora.foodCache", "{not json");
   await expect(getFoodById("f1")).resolves.toBeNull();
+});
+
+// --- foodsFromPins / foodsFromSavedMeals: the conversion logic that used to
+// live in api/hooks.ts as a duck-typed extractFoods(data: unknown). That
+// version silently produced [] for every real /v1/pins response (PinnedFood
+// has `food_item_id`, never `id`) and could have mis-cached a saved meal
+// under its OWN id. These are now typed against the real PinnedFood/SavedMeal
+// shapes and unit-tested directly, per code review.
+
+function pin(overrides: Partial<PinnedFood> = {}): PinnedFood {
+  return {
+    food_item_id: "f1", name: "Greek yogurt", meal_slot: "breakfast",
+    grams: 150, kcal: 150, protein_g: 15, carbs_g: 6, fat_g: 3, fiber_g: 0,
+    ...overrides,
+  };
+}
+
+test("foodsFromPins reverses a pin's gram-scaled totals into exact per-100g macros", () => {
+  const [item] = foodsFromPins([pin()]);
+  expect(item.id).toBe("f1");
+  expect(item.name).toBe("Greek yogurt");
+  // 150 kcal / 15 g protein / 6 g carbs / 3 g fat for a 150g serving scales
+  // back to exactly 100 / 10 / 4 / 2 per 100g — this is the reverse of the
+  // server's own forward scaling, not an approximation.
+  expect(item.kcal_per_100g).toBeCloseTo(100);
+  expect(item.protein_per_100g).toBeCloseTo(10);
+  expect(item.carbs_per_100g).toBeCloseTo(4);
+  expect(item.fat_per_100g).toBeCloseTo(2);
+});
+
+test("foodsFromPins never fabricates serving info or a known provenance", () => {
+  const [item] = foodsFromPins([pin()]);
+  // The pin's 150g serving is NOT this food's canonical serving — asserting
+  // something false about it would be worse than saying nothing.
+  expect(item.serving_desc).toBe("");
+  expect(item.serving_grams).toBe(0);
+  expect(item.brand).toBe("");
+  expect(item.provenance).toBe(UNKNOWN_PROVENANCE);
+  expect(item.barcode).toBeUndefined();
+});
+
+test("foodsFromPins rejects a zero-gram entry rather than dividing by zero", () => {
+  expect(foodsFromPins([pin({ grams: 0 })])).toEqual([]);
+});
+
+test("foodsFromSavedMeals flattens each meal's nested items and ignores the meal's own id", () => {
+  const meal: SavedMeal = {
+    id: "meal1",
+    name: "My lunch",
+    meal_slot: "lunch",
+    items: [{ food_item_id: "f2", name: "Cheddar cheese", grams: 50, kcal: 200, protein_g: 12, carbs_g: 1, fat_g: 16, fiber_g: 0 }],
+    kcal: 200, protein_g: 12, carbs_g: 1, fat_g: 16, fiber_g: 0,
+  };
+  const items = foodsFromSavedMeals([meal]);
+  expect(items.map((i) => i.id)).toEqual(["f2"]);
+  expect(items[0].kcal_per_100g).toBeCloseTo(400);
+});
+
+// --- Fidelity: a "summary" write (pins/saved-meals) must never clobber a
+// "full" record (a real barcode-resolved FoodItem) already cached for the
+// same id. Without this, a barcode scan's real barcode/provenance/serving
+// would be silently overwritten the next time usePins/useSavedMeals refetch.
+test("a summary-fidelity upsert never downgrades an existing full-fidelity record", async () => {
+  const full: FoodItem = {
+    id: "f1", name: "Real food", brand: "Acme", provenance: "usda",
+    serving_desc: "1 bar (40 g)", serving_grams: 40,
+    kcal_per_100g: 250, protein_per_100g: 20, carbs_per_100g: 30, fat_per_100g: 5,
+    barcode: "0123456789",
+  };
+  await upsertFoods([full], "full");
+
+  const synthesized: FoodItem = {
+    ...full, name: "Pinned name", provenance: UNKNOWN_PROVENANCE,
+    serving_desc: "", serving_grams: 0, kcal_per_100g: 999, barcode: undefined,
+  };
+  await upsertFoods([synthesized], "summary");
+
+  expect(await getFoodById("f1")).toEqual(full);
+});
+
+test("a full-fidelity upsert DOES overwrite an existing summary-fidelity record", async () => {
+  const summary: FoodItem = {
+    id: "f1", name: "Pinned name", brand: "", provenance: UNKNOWN_PROVENANCE,
+    serving_desc: "", serving_grams: 0,
+    kcal_per_100g: 999, protein_per_100g: 1, carbs_per_100g: 1, fat_per_100g: 1,
+  };
+  await upsertFoods([summary], "summary");
+
+  const full: FoodItem = {
+    id: "f1", name: "Real food", brand: "Acme", provenance: "usda",
+    serving_desc: "1 bar (40 g)", serving_grams: 40,
+    kcal_per_100g: 250, protein_per_100g: 20, carbs_per_100g: 30, fat_per_100g: 5,
+    barcode: "0123456789",
+  };
+  await upsertFoods([full], "full");
+
+  expect(await getFoodById("f1")).toEqual(full);
 });

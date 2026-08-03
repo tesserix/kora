@@ -4,7 +4,8 @@ import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react
 import type { ReactNode } from "react";
 import { NetworkError, apiFetch, apiFetchEnvelope, apiFetchMultipart, currentUserId } from "@/lib/api";
 import { drain, list } from "@/offline/queue";
-import { getFoodById } from "@/offline/foodCache";
+import { getFoodById, getFoodByBarcode } from "@/offline/foodCache";
+import * as foodCache from "@/offline/foodCache";
 import { rememberOwner } from "@/offline/owner";
 import {
   useAcceptRequest,
@@ -127,6 +128,107 @@ test("useResolveBarcode posts barcode to /v1/resolve/barcode", async () => {
     body: JSON.stringify({ barcode: "0123456789012" }),
   });
   expect(result.current.data).toEqual(resolution);
+});
+
+// getFoodByBarcode had no reachable writer before this: usePins/useSavedMeals
+// only ever produce "summary" records (no barcode field at all), so a repeat
+// scan could never find anything. useResolveBarcode is the one path that
+// hands back a genuine server FoodItem, including its barcode.
+test("useResolveBarcode caches the resolved food for an offline repeat scan", async () => {
+  await AsyncStorage.clear();
+  const barcodeResolution = {
+    candidates: [
+      {
+        item: {
+          id: "f9", name: "Protein bar", brand: "Acme", provenance: "off",
+          serving_desc: "1 bar (40 g)", serving_grams: 40,
+          kcal_per_100g: 250, protein_per_100g: 20, carbs_per_100g: 30, fat_per_100g: 5,
+          barcode: "0123456789012",
+        },
+        portion_grams: 40, kcal: 100, match_score: 1, match_tier: "auto",
+      },
+    ],
+    tier: "auto" as const,
+    is_estimate: false,
+    provenance: "off",
+  };
+  (apiFetch as jest.Mock).mockResolvedValueOnce(barcodeResolution);
+
+  const { result } = await renderHook(() => useResolveBarcode(), { wrapper });
+  await result.current.mutateAsync("0123456789012");
+
+  await waitFor(async () => expect(await getFoodByBarcode("0123456789012")).not.toBeNull());
+  const cached = await getFoodByBarcode("0123456789012");
+  expect(cached?.id).toBe("f9");
+  expect(cached?.provenance).toBe("off");
+});
+
+// Once a barcode scan has cached a full FoodItem, a later usePins/useSavedMeals
+// refetch of the SAME food (a "summary" write — see foodsFromPins) must not
+// clobber it: it would silently drop the barcode, replace the real
+// provenance, and swap the canonical serving for whatever gram amount the
+// user happened to pin.
+test("a pins refetch does not overwrite a food already cached at full fidelity from a barcode scan", async () => {
+  await AsyncStorage.clear();
+  const barcodeResolution = {
+    candidates: [
+      {
+        item: {
+          id: "f9", name: "Protein bar", brand: "Acme", provenance: "off",
+          serving_desc: "1 bar (40 g)", serving_grams: 40,
+          kcal_per_100g: 250, protein_per_100g: 20, carbs_per_100g: 30, fat_per_100g: 5,
+          barcode: "0123456789012",
+        },
+        portion_grams: 40, kcal: 100, match_score: 1, match_tier: "auto",
+      },
+    ],
+    tier: "auto" as const,
+    is_estimate: false,
+    provenance: "off",
+  };
+  (apiFetch as jest.Mock).mockResolvedValueOnce(barcodeResolution);
+  const barcodeHook = await renderHook(() => useResolveBarcode(), { wrapper });
+  await barcodeHook.result.current.mutateAsync("0123456789012");
+  await waitFor(async () => expect(await getFoodById("f9")).not.toBeNull());
+
+  // The user then pins the SAME food. The server's pins summary carries no
+  // barcode/provenance/serving info at all — only a gram-scaled total.
+  const pins = [
+    { food_item_id: "f9", name: "Protein bar", meal_slot: "snack", grams: 40, kcal: 100, protein_g: 8, carbs_g: 12, fat_g: 2, fiber_g: 0 },
+  ];
+  (apiFetch as jest.Mock).mockResolvedValueOnce(pins);
+  const { result } = await renderHook(() => usePins(), { wrapper });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+  const cached = await getFoodById("f9");
+  // The barcode scan's full record must survive the pins refetch untouched.
+  expect(cached?.barcode).toBe("0123456789012");
+  expect(cached?.provenance).toBe("off");
+  expect(cached?.serving_grams).toBe(40);
+});
+
+// A cache write is a by-product of a query the user did not ask for; a
+// storage failure (quota, corrupt device state) must be visible in logs, not
+// left as an unhandled promise rejection nor silently swallowed.
+test("a cache-write failure from usePins is caught and logged, never left unhandled", async () => {
+  await AsyncStorage.clear();
+  const pins = [
+    { food_item_id: "f1", name: "Greek yogurt", meal_slot: "breakfast", grams: 150, kcal: 150, protein_g: 15, carbs_g: 6, fat_g: 3, fiber_g: 0 },
+  ];
+  (apiFetch as jest.Mock).mockResolvedValueOnce(pins);
+  const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+  // Spies on upsertFoods itself rather than the shared AsyncStorage.setItem —
+  // narrower blast radius: this only ever affects usePins's one call within
+  // this test, never any other test's unrelated AsyncStorage writes.
+  const upsertSpy = jest.spyOn(foodCache, "upsertFoods").mockRejectedValueOnce(new Error("quota exceeded"));
+  try {
+    const { result } = await renderHook(() => usePins(), { wrapper });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => expect(warnSpy).toHaveBeenCalledWith("foodCache: upsertFoods failed", expect.any(Error)));
+  } finally {
+    upsertSpy.mockRestore();
+    warnSpy.mockRestore();
+  }
 });
 
 test("useResolvePhoto builds FormData and posts to /v1/resolve/photo", async () => {

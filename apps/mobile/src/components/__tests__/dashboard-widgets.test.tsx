@@ -1,12 +1,23 @@
 import { render } from "@testing-library/react-native";
 import { ProvenanceChip } from "../ProvenanceChip";
 import { MacroBars } from "@/components/home/MacroBars";
+import { UNKNOWN_PROVENANCE } from "@/api/types";
 
 test("ProvenanceChip labels verified vs estimate", async () => {
   const verified = await render(<ProvenanceChip provenance="afcd" />);
   expect(verified.getByText(/verified/i)).toBeTruthy();
   const estimate = await render(<ProvenanceChip provenance="user_estimate" />);
   expect(estimate.getByText(/estimate/i)).toBeTruthy();
+});
+
+// An offline-cache-synthesized food (see foodsFromPins/foodsFromSavedMeals in
+// src/offline/foodCache.ts) has exact macros reverse-scaled from real
+// numbers — it is not a model's guess, so it must not carry the "AI estimate
+// ±15%" disclaimer that every OTHER unverified provenance gets.
+test("ProvenanceChip renders nothing for an unknown/synthesized provenance", async () => {
+  const { queryByText, toJSON } = await render(<ProvenanceChip provenance={UNKNOWN_PROVENANCE} />);
+  expect(queryByText(/estimate/i)).toBeNull();
+  expect(toJSON()).toBeNull();
 });
 
 describe("MacroBars v2", () => {
