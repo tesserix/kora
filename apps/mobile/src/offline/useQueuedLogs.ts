@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { currentUserId } from "@/lib/api";
+import { drainLogs } from "./drainLogs";
 import { getFoodById } from "./foodCache";
 import { QUEUED_LOGS_KEY } from "./queryKeys";
 import { discard, list, retry, type QueuedLog } from "./queue";
@@ -100,8 +101,18 @@ export function useQueuedLogs(date: string) {
     async (id: string) => {
       await retry(id);
       await invalidate();
+      // Flipping the status back to pending is not sending it. Nothing else
+      // drains until the app is backgrounded, reconnects or cold-starts, so
+      // online — where the retry would succeed at once — tapping Retry looks
+      // like it did nothing.
+      //
+      // Fire-and-forget, for the same reason installDrainTriggers is: the queue
+      // is durable, so a failed pass loses nothing. Awaiting it would also let a
+      // drain failure reach the diary's catch, which says "Couldn't update that
+      // item" — untrue, since the retry itself succeeded above.
+      void drainLogs(qc).catch(() => {});
     },
-    [invalidate],
+    [invalidate, qc],
   );
 
   const discardRow = useCallback(

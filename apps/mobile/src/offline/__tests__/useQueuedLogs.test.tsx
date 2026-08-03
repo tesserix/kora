@@ -294,6 +294,14 @@ test("retryRow returns a failed row to pending", async () => {
   const { result } = await renderQueued("2026-08-02");
   await waitFor(() => expect(result.current.rows[0]?.status).toBe("failed"));
 
+  // retryRow now fires a drain of its own (see the test below), so the send has
+  // to be held off for "pending" to be observable at all: a connection failure
+  // defers the item without ageing it, leaving exactly the state this test is
+  // about. Letting the send succeed would remove the row entirely.
+  (apiFetch as jest.Mock).mockRejectedValue(
+    Object.assign(new Error("offline"), { name: "NetworkError" }),
+  );
+
   await act(async () => {
     await result.current.retryRow("q1");
   });
@@ -320,4 +328,30 @@ test("a queued row disappears from the hook once a real drain sends it", async (
   // only mean the hook noticed — not that the drain quietly did nothing.
   expect(await list()).toHaveLength(0);
   await waitFor(() => expect(result.current.rows).toEqual([]));
+});
+
+// retryRow flips the status and refreshes the view, but flipping a status is
+// not sending. Nothing else drains until the app is backgrounded or the network
+// changes, so online — where the retry would succeed immediately — the button
+// appears to do nothing at all for as long as the user keeps looking at it.
+test("retryRow actually sends the item, not just flips its status", async () => {
+  await append(payloadOn(atLocalNoon(2026, 8, 2)), "q1", "user-a");
+  await drain(async () => {
+    throw Object.assign(new Error("bad request"), { status: 400 });
+  }, "user-a");
+
+  const { result } = await renderQueued("2026-08-02");
+  await waitFor(() => expect(result.current.rows[0]?.status).toBe("failed"));
+
+  (apiFetch as jest.Mock).mockResolvedValue({ id: "q1" });
+  await act(async () => {
+    await result.current.retryRow("q1");
+  });
+
+  await waitFor(() =>
+    expect(apiFetch).toHaveBeenCalledWith("/v1/logs", expect.objectContaining({ method: "POST" })),
+  );
+  // Sent means gone: the item leaves the queue and the row leaves the diary.
+  await waitFor(async () => expect(await list()).toHaveLength(0));
+  await waitFor(() => expect(result.current.rows).toHaveLength(0));
 });
