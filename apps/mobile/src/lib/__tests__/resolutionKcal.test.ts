@@ -75,3 +75,22 @@ describe("kcalTotalLabel", () => {
     expect(kcalTotalLabel(resolution)).toBe("200 kcal");
   });
 });
+
+// Reachable two ways: every uncertain row resolved by hand (capture.tsx's
+// `promoted` path), and — always — a barcode answered from the offline cache,
+// where no server-computed kcal exists for the portion at all. Summing an
+// empty set gave "0 kcal", which is not "we don't know", it is a number the
+// user can read off the card and believe. The per-row rendering already says
+// "—" for exactly this; the total has to agree with its own rows.
+test("a resolution whose every candidate has an unknown kcal shows a dash, not a fabricated zero", () => {
+  const resolution = makeResolution({
+    candidates: makeResolution().candidates.map((c) => ({ ...c, kcal: 0, kcal_unknown: true })),
+  });
+  expect(kcalTotalLabel(resolution)).toBe("—");
+});
+
+test("a genuine zero-kcal resolution still reads as 0, not unknown", () => {
+  // No candidates at all is a different thing from candidates we cannot price;
+  // this guards the dash from swallowing the empty case.
+  expect(kcalTotalLabel(makeResolution({ candidates: [] }))).toBe("0 kcal");
+});

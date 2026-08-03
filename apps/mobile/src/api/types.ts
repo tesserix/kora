@@ -23,7 +23,36 @@ export type FoodItem = {
   protein_per_100g: number;
   carbs_per_100g: number;
   fat_per_100g: number;
+  /** Present on barcode-sourced foods; enables an offline repeat scan. */
+  barcode?: string;
 };
+
+// Sentinel `provenance` for "we deliberately don't know the source" — e.g. a
+// FoodItem synthesized in the offline cache from a gram-scaled serving
+// summary rather than received whole from the server (see
+// src/offline/foodCache.ts foodsFromPins/foodsFromSavedMeals).
+// ProvenanceChip renders nothing for this value rather than falling through
+// to its default "AI estimate ±15%" copy, which specifically means a
+// model's own guess — not a fact whose original source just wasn't carried
+// through.
+export const UNKNOWN_PROVENANCE = "unknown";
+
+// Sentinel `match_tier` (and `Resolution.provenance`) for a result the device
+// produced from its own offline cache rather than receiving from the server.
+//
+// It exists for the same reason UNKNOWN_PROVENANCE does: a cache hit is a
+// genuinely different kind of answer from a live one — a food this user has
+// encountered before, with no fresh server data and no server-computed kcal
+// behind it — and nothing in the `Candidate`/`ResolvedCandidate` shape would
+// otherwise distinguish the two. Without a marker a cached guess renders
+// identically to a fresh AI resolution, which is the honesty problem this
+// branch keeps having to fix.
+//
+// Set ONLY by src/offline/cachedResolution.ts. The server never sends it.
+export const CACHED_MATCH_TIER = "cached";
+
+export const isCachedResult = (v: { match_tier?: string } | null | undefined): boolean =>
+  v?.match_tier === CACHED_MATCH_TIER;
 
 export type Candidate = {
   item: FoodItem;
@@ -180,6 +209,15 @@ export interface ResolvedCandidate {
 }
 
 export interface Resolution {
+  /**
+   * The server can send `null` here (a Go nil slice with no `omitempty` —
+   * api/internal/ai/types.go:81 — on several no-result paths, including
+   * barcode's "not recognized" branch). Every resolve mutation in
+   * src/api/hooks.ts (normalizeResolution) coerces that to `[]` before
+   * returning, so every consumer of a `Resolution` value in this app can
+   * trust this field is always a real array. Do not bypass that
+   * normalization by calling apiFetch directly for a new resolve endpoint.
+   */
   candidates: ResolvedCandidate[];
   tier: ResolveTier;
   follow_up_question?: string;

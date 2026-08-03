@@ -216,3 +216,63 @@ func TestHasLoggedBefore(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, got, "nothing was logged before an hour prior to the only seeded log")
 }
+
+// TestCreateIdempotentReplayReturnsExistingRow is the core safety property of
+// the offline queue: a write whose response was lost must be replayable
+// without creating a second meal. Duplication is worse than loss — a missing
+// log is visible, a duplicated one silently inflates the day.
+func TestCreateIdempotentReplayReturnsExistingRow(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	tx := db.Begin()
+	require.NoError(t, tx.Error)
+	t.Cleanup(func() { tx.Rollback() })
+	repo := NewRepository(tx)
+
+	id := uuid.New()
+	log := FoodLog{ID: id, UserID: userID, LoggedAt: time.Now(), MealSlot: "lunch",
+		Source: "manual", Description: "Test food", QuantityGrams: 100, Kcal: 200}
+
+	first, err := repo.CreateIdempotent(context.Background(), log)
+	require.NoError(t, err)
+	require.Equal(t, id, first.ID)
+
+	// Replay the identical write — as a queue drain would after a lost response.
+	second, err := repo.CreateIdempotent(context.Background(), log)
+	require.NoError(t, err)
+	require.Equal(t, id, second.ID)
+
+	var count int64
+	require.NoError(t, tx.Model(&FoodLog{}).Where("id = ?", id).Count(&count).Error)
+	require.Equal(t, int64(1), count, "replay must not create a second row")
+}
+
+// TestCreateIdempotentRejectsAnotherUsersID stops a client probing for, or
+// colliding with, an id that belongs to somebody else. The error must not
+// confirm that the id exists.
+func TestCreateIdempotentRejectsAnotherUsersID(t *testing.T) {
+	db := testDB(t)
+	ownerID := seedUser(t, db)
+	intruderID := seedUser(t, db)
+	tx := db.Begin()
+	require.NoError(t, tx.Error)
+	t.Cleanup(func() { tx.Rollback() })
+	repo := NewRepository(tx)
+
+	id := uuid.New()
+	owner := FoodLog{ID: id, UserID: ownerID, LoggedAt: time.Now(), MealSlot: "lunch",
+		Source: "manual", Description: "Owner food", QuantityGrams: 100, Kcal: 200}
+	_, err := repo.CreateIdempotent(context.Background(), owner)
+	require.NoError(t, err)
+
+	intruder := owner
+	intruder.UserID = intruderID
+	intruder.Description = "Intruder food"
+	_, err = repo.CreateIdempotent(context.Background(), intruder)
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), id.String(), "must not disclose the id")
+
+	var got FoodLog
+	require.NoError(t, tx.First(&got, "id = ?", id).Error)
+	require.Equal(t, "Owner food", got.Description, "the owner's row must be untouched")
+}

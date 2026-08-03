@@ -4,6 +4,12 @@ import Diary from "../(tabs)/diary";
 const mockAddWaterMutate = jest.fn();
 
 jest.mock("expo-router", () => ({ router: { push: jest.fn() } }));
+// The diary now reads the offline queue too; these tests are about water/copy,
+// so the queue is stubbed empty (it has its own tests in src/offline).
+jest.mock("@/offline/useQueuedLogs", () => ({
+  useQueuedLogs: () => ({ rows: [], retryRow: jest.fn(), discardRow: jest.fn() }),
+}));
+
 jest.mock("@/api/hooks", () => ({
   useDashboard: () => ({ data: { consumed: { kcal: 0 }, targets: { kcal: 2000 }, water_ml: 500 } }),
   useDayLogs: () => ({ data: [] }),

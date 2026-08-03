@@ -48,3 +48,8 @@ test("a 404 is a server-side problem from the user's point of view", () => {
 test("the three messages are distinct, so the cause is always distinguishable", () => {
   expect(new Set([CHECK_DETAILS, SERVER, OFFLINE]).size).toBe(3);
 });
+
+test("a NetworkError gets the offline message, not the generic server one", () => {
+  const err = Object.assign(new Error("fetch failed"), { name: "NetworkError" });
+  expect(apiErrorMessage(err)).toBe(OFFLINE);
+});

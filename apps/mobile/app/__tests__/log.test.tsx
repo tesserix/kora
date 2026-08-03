@@ -16,28 +16,30 @@ let mockMemoryIsError = false;
 let mockPinsData: unknown[] = [];
 let mockSavedMealsData: SavedMeal[] = [];
 
+const chickenCandidate = {
+  item: {
+    id: "f1",
+    name: "Grilled chicken breast",
+    brand: "",
+    provenance: "seed",
+    serving_desc: "1 breast",
+    serving_grams: 140,
+    kcal_per_100g: 165,
+    protein_per_100g: 31,
+    carbs_per_100g: 0,
+    fat_per_100g: 3.6,
+  },
+  match_score: 1,
+  match_tier: "fulltext",
+};
+let mockSearch: { data: unknown[]; isLoading: boolean; isOfflineCache: boolean } = {
+  data: [chickenCandidate],
+  isLoading: false,
+  isOfflineCache: false,
+};
+
 jest.mock("@/api/hooks", () => ({
-  useFoodSearch: () => ({
-    data: [
-      {
-        item: {
-          id: "f1",
-          name: "Grilled chicken breast",
-          brand: "",
-          provenance: "seed",
-          serving_desc: "1 breast",
-          serving_grams: 140,
-          kcal_per_100g: 165,
-          protein_per_100g: 31,
-          carbs_per_100g: 0,
-          fat_per_100g: 3.6,
-        },
-        match_score: 1,
-        match_tier: "fulltext",
-      },
-    ],
-    isLoading: false,
-  }),
+  useFoodSearch: () => mockSearch,
   useCreateLog: () => ({ mutate: mockLogMutate, isPending: false }),
   useCreateLogBatch: () => ({ mutate: mockBatchMutate, isPending: false }),
   useDeleteLog: () => ({ mutate: mockDeleteMutate }),
@@ -67,6 +69,7 @@ beforeEach(() => {
   mockToggle.mockClear();
   mockOpenCreate.mockClear();
   mockOpenEdit.mockClear();
+  mockSearch = { data: [chickenCandidate], isLoading: false, isOfflineCache: false };
   mockMemoryData = { recents: [], frequent: [], usual_meals: [] };
   mockMemoryIsLoading = false;
   mockMemoryIsError = false;
@@ -250,4 +253,47 @@ test("Saved tab shows a saved meal", async () => {
   const { findByText, findByLabelText } = await render(<LogScreen />);
   fireEvent.press(await findByLabelText("Saved"));
   expect(await findByText("Protein Bowl")).toBeTruthy();
+});
+
+
+// --- Offline manual search -------------------------------------------------
+//
+// Search falls back to the offline food cache (useFoodSearch), so results can
+// arrive with no network. Those results are a genuinely narrower thing than a
+// server search — only foods this device has already seen — and the screen has
+// to say so, or the user reads a short list as "the index barely has anything".
+
+async function typeSearch(ui: Awaited<ReturnType<typeof render>>, term: string) {
+  await fireEvent.changeText(ui.getByLabelText("Search foods"), term);
+}
+
+test("offline results say they are limited to foods already logged", async () => {
+  mockSearch = { data: [chickenCandidate], isLoading: false, isOfflineCache: true };
+  const ui = await render(<LogScreen />);
+  await typeSearch(ui, "chicken");
+
+  expect(ui.getByText(/offline/i)).toBeTruthy();
+  expect(ui.getByText(/logged before/i)).toBeTruthy();
+  // The result itself still renders and stays selectable.
+  expect(ui.getByText("Grilled chicken breast")).toBeTruthy();
+});
+
+test("an offline search with no cached match explains why, instead of 'No matches.'", async () => {
+  mockSearch = { data: [], isLoading: false, isOfflineCache: true };
+  const ui = await render(<LogScreen />);
+  await typeSearch(ui, "sushi");
+
+  // "No matches." asserts the food does not exist. Offline we simply cannot
+  // see the index — a different claim, and the only honest one.
+  expect(ui.queryByText("No matches.")).toBeNull();
+  expect(ui.getByText(/offline/i)).toBeTruthy();
+});
+
+test("an ONLINE search with no results still says plainly that nothing matched", async () => {
+  mockSearch = { data: [], isLoading: false, isOfflineCache: false };
+  const ui = await render(<LogScreen />);
+  await typeSearch(ui, "sushi");
+
+  expect(ui.getByText("No matches.")).toBeTruthy();
+  expect(ui.queryByText(/offline/i)).toBeNull();
 });

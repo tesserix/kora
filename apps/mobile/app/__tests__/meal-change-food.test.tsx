@@ -33,30 +33,32 @@ jest.mock("expo-router", () => ({
   }),
 }));
 
+const quinoaCandidate = {
+  item: {
+    id: "f2",
+    name: "Quinoa",
+    brand: "",
+    provenance: "seed",
+    serving_desc: "1 cup",
+    serving_grams: 185,
+    kcal_per_100g: 120,
+    protein_per_100g: 4.4,
+    carbs_per_100g: 21.3,
+    fat_per_100g: 1.9,
+  },
+  match_score: 1,
+  match_tier: "fulltext",
+};
+let mockSearch: { data: unknown[]; isLoading: boolean; isError: boolean; isOfflineCache: boolean } = {
+  data: [quinoaCandidate],
+  isLoading: false,
+  isError: false,
+  isOfflineCache: false,
+};
+
 jest.mock("@/api/hooks", () => ({
   useLog: () => ({ data: mockLogData, isLoading: mockLogIsLoading }),
-  useFoodSearch: () => ({
-    data: [
-      {
-        item: {
-          id: "f2",
-          name: "Quinoa",
-          brand: "",
-          provenance: "seed",
-          serving_desc: "1 cup",
-          serving_grams: 185,
-          kcal_per_100g: 120,
-          protein_per_100g: 4.4,
-          carbs_per_100g: 21.3,
-          fat_per_100g: 1.9,
-        },
-        match_score: 1,
-        match_tier: "fulltext",
-      },
-    ],
-    isLoading: false,
-    isError: false,
-  }),
+  useFoodSearch: () => mockSearch,
   useEditLog: () => ({ mutate: mockEditMutate, isPending: false }),
   useDeleteLog: () => ({ mutate: mockDeleteMutate, isPending: false }),
   useRepeatLog: () => ({ mutate: mockRepeatMutate, isPending: false }),
@@ -72,6 +74,7 @@ jest.mock("@/api/hooks", () => ({
 }));
 
 beforeEach(() => {
+  mockSearch = { data: [quinoaCandidate], isLoading: false, isError: false, isOfflineCache: false };
   mockEditMutate.mockClear();
   mockDeleteMutate.mockClear();
   mockRepeatMutate.mockClear();
@@ -158,4 +161,30 @@ test("the sheet paints from route params before the fetch resolves", async () =>
 
   expect(getAllByText("Brown rice").length).toBeGreaterThan(0);
   expect(queryByText("Loading…")).toBeNull();
+});
+
+
+// The picker is the second consumer of useFoodSearch, which is why the offline
+// fallback lives in the hook rather than in app/log.tsx. It needs the same
+// honesty about what an offline result set actually is.
+test("the food picker says when its results are limited to the offline cache", async () => {
+  mockSearch = { data: [quinoaCandidate], isLoading: false, isError: false, isOfflineCache: true };
+  const { getByLabelText, getByText } = await render(<MealDetail />);
+
+  await fireEvent.press(getByLabelText("Change food"));
+  await fireEvent.changeText(getByLabelText("Search foods"), "quinoa");
+
+  expect(getByText(/offline/i)).toBeTruthy();
+  expect(getByLabelText("Select Quinoa")).toBeTruthy();
+});
+
+test("an empty offline picker search does not claim the food does not exist", async () => {
+  mockSearch = { data: [], isLoading: false, isError: false, isOfflineCache: true };
+  const { getByLabelText, getByText, queryByText } = await render(<MealDetail />);
+
+  await fireEvent.press(getByLabelText("Change food"));
+  await fireEvent.changeText(getByLabelText("Search foods"), "sushi");
+
+  expect(queryByText("No match — try another word.")).toBeNull();
+  expect(getByText(/offline/i)).toBeTruthy();
 });

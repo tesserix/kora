@@ -5,6 +5,8 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { isFirebaseConfigured } from "@/lib/firebase";
 import { setupPushHandler } from "@/lib/push";
+import { installConnectivity } from "@/offline/connectivity";
+import { installDrainTriggers } from "@/offline/drainTriggers";
 import { UnitsProvider } from "@/units";
 import { ToastProvider } from "@/components/Toast";
 import { SavedMealSheetProvider } from "@/components/meals/SavedMealSheetProvider";
@@ -15,6 +17,10 @@ export default function RootLayout() {
   useEffect(() => {
     if (!isFirebaseConfigured) router.replace("/config-missing");
   }, []);
+
+  useEffect(() => installConnectivity(), []);
+
+  useEffect(() => installDrainTriggers(queryClient), []);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

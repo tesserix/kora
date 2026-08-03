@@ -32,8 +32,11 @@ function isApiError(e: unknown): e is { name: string; status: number } {
  * someone their details are wrong when we do not know that.
  */
 export function apiErrorMessage(error: unknown): string {
-  // fetch rejects with a TypeError when the request never reached a server.
-  if (error instanceof TypeError) return OFFLINE;
+  // fetch rejects with a TypeError when the request never reached a server,
+  // and api.ts wraps that in a NetworkError (which extends Error, NOT
+  // TypeError). Matched by name rather than by importing api.ts — this module
+  // is deliberately duck-typed so it stays free of that dependency.
+  if (error instanceof TypeError || (error as Error)?.name === "NetworkError") return OFFLINE;
   if (isApiError(error)) {
     return error.status === 400 || error.status === 422 ? CHECK_DETAILS : SERVER;
   }

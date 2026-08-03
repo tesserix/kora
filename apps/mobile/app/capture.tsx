@@ -38,7 +38,9 @@ import {
 } from "@/api/hooks";
 import { ApiError, AuthTokenError, NetworkError, ResponseParseError } from "@/lib/api";
 import { kcalTotalLabel } from "@/lib/resolutionKcal";
+import { OfflineUnknownBarcodeError } from "@/offline/cachedResolution";
 import { isLoggable } from "@/lib/candidateTier";
+import { isCachedResult } from "@/api/types";
 import type { FoodItem, Resolution, ResolvedCandidate } from "@/api/types";
 import { mealSlotForHour, type MealSlot } from "@/lib/mealSlot";
 
@@ -288,6 +290,21 @@ function resolveResultView(resolution: Resolution): ResultView {
 // server-reported estimate range when `is_estimate`, otherwise the sum of
 // the candidates' own kcal (never a client-side recompute of nutrition).
 function resultSummary(resolution: Resolution): string {
+  // A cache hit is a different kind of answer and must not read like a fresh
+  // one: nothing was resolved just now, the device recognised a barcode it had
+  // already seen. It also has no server-computed kcal, so the usual
+  // "about N kcal" would be "about — kcal". Say what actually happened.
+  //
+  // Deliberately says NOTHING about when the calories arrive. This card shows
+  // "—" because the client is forbidden from deriving nutrition here, but the
+  // diary's own queued row (useQueuedLogs.toRow) derives a figure from the very
+  // same cached record moments later and counts it in the day total — so any
+  // promise of a later fill-in would describe an event that has already
+  // happened by the time the user sees it.
+  if (isCachedResult({ match_tier: resolution.provenance })) {
+    const name = resolution.candidates[0]?.item.name ?? "that";
+    return `You're offline — that's ${name}, from a scan you've done before. Confirm and I'll log it.`;
+  }
   const count = resolution.candidates.length;
   const itemWord = count === 1 ? "item" : "items";
   const kcalText = kcalTotalLabel(resolution);
@@ -658,6 +675,14 @@ function CaptureCanvasBackground() {
 // raw error text or the request id (that's for logs, via api.ts's
 // ApiError.requestId — not for the user).
 function ottoErrorMessage(error: Error): string {
+  // Checked before NetworkError below: this is not "the request failed", it is
+  // "we looked, and this device has no answer". Telling the user to try again
+  // would be advice that cannot work until the network returns, and "I couldn't
+  // identify that" would claim the food does not exist when we simply cannot
+  // see the index from here.
+  if (error instanceof OfflineUnknownBarcodeError) {
+    return "You're offline, and this isn't a barcode you've scanned before. I'll recognise it once you're back online.";
+  }
   if (error instanceof ApiError) {
     return `Hmm, I couldn't tell — ${error.message}. Mind trying again?`;
   }

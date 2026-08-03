@@ -44,6 +44,19 @@ export class NetworkError extends Error {
   }
 }
 
+// isNetworkError is the single discriminant for "the request never reached a
+// response", so the offline feature stops naming this failure two ways.
+// `instanceof` is the precise check; the `name` branch is what catches a value
+// whose class identity did not survive — the queue's test fixtures and fake
+// server build one by hand, and a jest module mock gives a different class
+// object entirely. A caller recognising only the class takes the rethrow path
+// on those and loses the write. Note the real NetworkError sets `name` too, so
+// the second branch alone would cover it: the first is a precise fast path,
+// not the only guard.
+export function isNetworkError(err: unknown): boolean {
+  return err instanceof NetworkError || (err as { name?: string } | null)?.name === "NetworkError";
+}
+
 // The response came back with a 2xx status, but its body did not parse as
 // JSON — the server answered, but the client couldn't read the answer.
 export class ResponseParseError extends Error {
@@ -158,6 +171,20 @@ async function fetchWithRetry(
   if (retryRes.status === 401) await signOutForExpiredSession();
 
   return retryRes;
+}
+
+// currentUserId returns the uid a request built right now would authenticate
+// as, or null when there is none. fetchWithRetry attaches a Bearer token only
+// when auth.currentUser exists, and with no user it also skips the
+// refresh-and-retry — so an unauthenticated call comes straight back as
+// ApiError(401). Background work that can simply wait (the offline log queue's
+// drain, which races Firebase restoring the session on cold start) checks this
+// rather than spending its payload on a 401, and the queue uses the uid to keep
+// one user's logs out of another's diary on a shared device. Interactive
+// requests should NOT check it: they belong to a screen that already requires a
+// signed-in user.
+export function currentUserId(): string | null {
+  return auth?.currentUser?.uid ?? null;
 }
 
 async function throwApiError(res: Response): Promise<never> {

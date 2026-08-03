@@ -907,16 +907,26 @@ export async function searchCachedFoods(q: string): Promise<FoodItem[]> {
 
 - [ ] **Step 5: Populate the cache from existing queries**
 
-In `apps/mobile/src/api/hooks.ts`, import `upsertFoods` from `@/offline/foodCache`, and in `useDayLogs` add a `select` that harvests food items as they arrive. `FoodLog` carries no nested item, so populate from the endpoints that do return `FoodItem`s — `usePins` and `useSavedMeals`. For each, add to the `useQuery` options:
+In `apps/mobile/src/api/hooks.ts`, import `upsertFoods` from `@/offline/foodCache` and `useEffect` from `react`.
+
+`FoodLog` carries no nested item, so populate from the endpoints that do return `FoodItem`s — `usePins` and `useSavedMeals`.
+
+**Do not put the cache write in `select`.** `select` must be pure: it re-runs on every access, not once per fetch, so the write would fire repeatedly. React Query v5 also removed `onSuccess` from `useQuery`. Use an effect keyed on the query's data instead — add to each of the two hooks:
 
 ```ts
-    select: (data) => {
-      void upsertFoods(extractFoods(data));
-      return data;
-    },
+export function usePins() {
+  const query = useQuery({ /* ...existing options, unchanged... */ });
+  // Fills the offline cache as a by-product of a query the app already runs.
+  // In an effect rather than `select` (which must stay pure and re-runs on
+  // every access) or `onSuccess` (removed from useQuery in v5).
+  useEffect(() => {
+    if (query.data) void upsertFoods(extractFoods(query.data));
+  }, [query.data]);
+  return query;
+}
 ```
 
-and define once near the top of the file:
+Apply the identical shape to `useSavedMeals`. Define once near the top of the file:
 
 ```ts
 // Harvests FoodItems out of a response so the offline cache fills from normal

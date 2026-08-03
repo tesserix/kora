@@ -13,9 +13,12 @@ import { Icon } from "@/components/Icon";
 import { GroupedSection, Row } from "@/components/GroupedList";
 import { GaugeRing } from "@/components/GaugeRing";
 import { MealRow } from "@/components/MealRow";
+import { Badge } from "@/components/Badge";
 import { CopyDaySheet } from "@/components/diary/CopyDaySheet";
+import { QueuedFailedSheet } from "@/components/diary/QueuedFailedSheet";
 import { EmptyState } from "@/components/common/EmptyState";
 import { useDashboard, useDayLogs, useAddWater, useDeleteLog } from "@/api/hooks";
+import { useQueuedLogs } from "@/offline/useQueuedLogs";
 import { AnimatedNumber, PressableScale, haptics, springs } from "@/motion";
 import { useTheme } from "@/theme";
 import { hslToHex, withAlpha } from "@/lib/color";
@@ -184,10 +187,15 @@ export default function Diary() {
   const [selected, setSelected] = useState(todayIso);
   const dashboard = useDashboard(selected);
   const logs = useDayLogs(selected);
+  // Writes made offline live only on this device until a drain lands, so the
+  // diary reads them straight off the queue and renders them beside the
+  // server's own rows.
+  const queued = useQueuedLogs(selected);
   const addWater = useAddWater();
   const deleteLog = useDeleteLog();
   const [waterErr, setWaterErr] = useState<string | null>(null);
   const [copyOpen, setCopyOpen] = useState(false);
+  const [failedRowId, setFailedRowId] = useState<string | null>(null);
 
   // Entrance stagger runs on first mount only — see app/(tabs)/index.tsx for the
   // same guard and rationale (refetches update data in place, no re-stagger).
@@ -214,14 +222,68 @@ export default function Diary() {
   const confirmDelete = (id: string) => {
     Alert.alert("Delete this entry?", "This removes it from your diary.", [
       { text: "Cancel", style: "cancel" },
-      { text: "Delete", style: "destructive", onPress: () => deleteLog.mutate(id) },
+      {
+        text: "Delete",
+        style: "destructive",
+        // This was the one delete in the app with no error surface — meal.tsx's
+        // identical flow has had one all along. It fails by leaving the row
+        // exactly where it was, which the user cannot tell apart from nothing
+        // having happened; and a delete that failed also leaves any queued copy
+        // of this id in place (see useDeleteLog), so the meal is still live.
+        onPress: () =>
+          deleteLog.mutate(id, {
+            onError: () => Alert.alert("Couldn't delete", "Please try again."),
+          }),
+      },
     ]);
+  };
+
+  const logged = (logs.data ?? []) as FoodLog[];
+
+  // The client mints ONE id and uses it as both the queue item id and the
+  // server row id (see useCreateLog), so a queued item the server has already
+  // applied shares its id with the row that came back. Two ordinary paths
+  // leave the queue in that state: a POST that died after the server wrote the
+  // row, and a drain whose response was lost. Both stay that way until the
+  // next drain replays the id idempotently and clears the queue — and in the
+  // meantime the meal is in BOTH lists. Showing it twice, and counting it
+  // twice, is exactly what this feature exists to prevent, so the shared id is
+  // used to drop the queued copy the moment the server row exists.
+  //
+  // Everything below reads this list rather than queued.rows, so the rendered
+  // rows and the day total can never disagree about which meals are pending.
+  const serverLogIds = new Set(logged.map((l) => l.id));
+  const queuedNotOnServer = queued.rows.filter((r) => !serverLogIds.has(r.id));
+
+  // A queued row the user tapped, resolved from the live rows rather than
+  // captured on tap, so a drain that lands mid-sheet cannot leave stale copy
+  // on screen.
+  const failedRow = queuedNotOnServer.find((r) => r.id === failedRowId) ?? null;
+
+  // Retry and Discard both dismiss the sheet immediately, so a rejected
+  // storage write would otherwise look exactly like a successful one — the row
+  // simply unchanged, with nothing said. Same confirm-Alert surface the delete
+  // flow above uses.
+  const runQueueAction = (action: () => Promise<void>) => {
+    setFailedRowId(null);
+    action().catch(() => Alert.alert("Couldn't update that item", "Please try again."));
   };
 
   const d = dashboard.data;
   const goal = d?.targets.kcal ?? 0;
-  const total = Math.round(d?.consumed.kcal ?? 0);
-  const remaining = Math.max(0, Math.round(goal - (d?.consumed.kcal ?? 0)));
+  // Pending only. A pending item is a real food with known nutrition whose
+  // upload is merely outstanding, so leaving it out makes remaining-calories
+  // wrong exactly when the user is relying on it; a failed item is never
+  // landing, so counting it would overstate the day indefinitely. A null kcal
+  // (food evicted from the offline cache) contributes nothing — it is unknown,
+  // not zero, and the row says so.
+  const queuedKcal = queuedNotOnServer.reduce(
+    (sum, r) => (r.status === "pending" ? sum + (r.kcal ?? 0) : sum),
+    0,
+  );
+  const consumedKcal = (d?.consumed.kcal ?? 0) + queuedKcal;
+  const total = Math.round(consumedKcal);
+  const remaining = Math.max(0, Math.round(goal - consumedKcal));
   const waterMl = d?.water_ml ?? 0;
   const water =
     system === "imperial"
@@ -229,14 +291,17 @@ export default function Diary() {
       : { value: waterMl / 1000, unit: "L", format: (n: number) => n.toFixed(1) };
   const waterQuickAdds = WATER_QUICK_ADDS[system];
   const pct = goal > 0 ? Math.round((total / goal) * 100) : 0;
-  const logged = (logs.data ?? []) as FoodLog[];
 
   const openMeal = (log: FoodLog) =>
     router.push({ pathname: "/meal", params: { id: log.id, name: log.description, mealSlot: log.meal_slot, time: timeOf(log.logged_at), kcal: String(Math.round(log.kcal)), protein: String(Math.round(log.protein_g)), carbs: String(Math.round(log.carbs_g)), fat: String(Math.round(log.fat_g)), grams: String(Math.round(log.quantity_grams)) } });
 
-  const slots = SLOT_ORDER.map((slot) => ({ slot, items: logged.filter((l) => l.meal_slot === slot) })).filter(
-    (group) => group.items.length > 0,
-  );
+  // A slot can be present because of a queued row alone — logging the day's
+  // only lunch offline must still produce a LUNCH section.
+  const slots = SLOT_ORDER.map((slot) => ({
+    slot,
+    items: logged.filter((l) => l.meal_slot === slot),
+    queued: queuedNotOnServer.filter((r) => r.mealSlot.toLowerCase() === slot),
+  })).filter((group) => group.items.length > 0 || group.queued.length > 0);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -297,6 +362,24 @@ export default function Diary() {
           {slots.map((group, gi) => (
             <Animated.View key={group.slot} entering={enter(4 + gi)}>
               <GroupedSection elevated header={group.slot.toUpperCase()} style={{ marginBottom: 16 }}>
+                {group.queued.map((r) => {
+                  const fv = foodVisual(r.description);
+                  const failed = r.status === "failed";
+                  return (
+                    <MealRow
+                      key={r.id}
+                      name={r.description}
+                      slot={failed ? "Couldn't sync" : "Waiting to sync"}
+                      kcal={r.kcal}
+                      iconName={fv.icon}
+                      tint={hslToHex(fv.hue, 0.5, 0.5)}
+                      dimmed={failed}
+                      badge={<Badge variant="neutral">{failed ? "Failed" : "Pending"}</Badge>}
+                      accessibilityLabel={`${r.description}, ${failed ? "failed to sync" : "waiting to sync"}`}
+                      onPress={failed ? () => setFailedRowId(r.id) : undefined}
+                    />
+                  );
+                })}
                 {group.items.map((log) => {
                   const fv = foodVisual(log.description);
                   return (
@@ -333,7 +416,7 @@ export default function Diary() {
             </Animated.View>
           ))}
 
-          {logged.length === 0 ? (
+          {logged.length === 0 && queuedNotOnServer.length === 0 ? (
             <Animated.View entering={enter(4)}>
               <EmptyState
                 icon="book-open"
@@ -348,6 +431,15 @@ export default function Diary() {
         </View>
       </ScrollView>
       {copyOpen ? <CopyDaySheet visible targetDate={selected} onClose={() => setCopyOpen(false)} /> : null}
+      {failedRow ? (
+        <QueuedFailedSheet
+          visible
+          description={failedRow.description}
+          onRetry={() => runQueueAction(() => queued.retryRow(failedRow.id))}
+          onDiscard={() => runQueueAction(() => queued.discardRow(failedRow.id))}
+          onClose={() => setFailedRowId(null)}
+        />
+      ) : null}
     </View>
   );
 }

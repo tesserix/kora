@@ -1,5 +1,25 @@
+import { useEffect } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiFetch, apiFetchEnvelope, apiFetchMultipart } from "@/lib/api";
+import * as Crypto from "expo-crypto";
+import { apiFetch, apiFetchEnvelope, apiFetchMultipart, isNetworkError } from "@/lib/api";
+import { isOnline } from "@/offline/connectivity";
+import {
+  foodsFromMemory,
+  foodsFromPins,
+  foodsFromSavedMeals,
+  getFoodByBarcode,
+  searchCachedFoods,
+  upsertFoods,
+  type FoodFidelity,
+} from "@/offline/foodCache";
+import {
+  OfflineUnknownBarcodeError,
+  candidatesFromCachedFoods,
+  resolutionFromCachedFood,
+} from "@/offline/cachedResolution";
+import { append, discard, isQueued, type QueuedLog } from "@/offline/queue";
+import { QUEUED_LOGS_KEY } from "@/offline/queryKeys";
+import { NoOwnerError, resolveOwnerId } from "@/offline/owner";
 import type { MealSlot } from "@/lib/mealSlot";
 import type {
   AppNotification,
@@ -8,6 +28,7 @@ import type {
   ChallengeSummary,
   DashboardSummary,
   FeedbackCreated,
+  FoodItem,
   Friend,
   FriendRequests,
   FriendsProgress,
@@ -23,10 +44,35 @@ import type {
   PinnedFood,
   Profile,
   Resolution,
+  ResolvedCandidate,
   SavedMeal,
   SubmitFeedbackInput,
   WeightEntry,
 } from "./types";
+
+// upsertFoods is a best-effort cache fill: a failure (e.g. AsyncStorage
+// quota) must never surface to the user, and — this codebase has no logging
+// library to route it through — must never become a silent, unhandled
+// promise rejection either. Logged and dropped.
+function cacheFoodsQuietly(items: FoodItem[], fidelity?: FoodFidelity): void {
+  void upsertFoods(items, fidelity).catch((err) => console.warn("foodCache: upsertFoods failed", err));
+}
+
+// The server's ai.Resolution.Candidates field has no `omitempty`
+// (api/internal/ai/types.go:81), and several resolver paths never populate it
+// — budget-exceeded, zero-guess, and barcode's own "not recognized" branch
+// (api/internal/resolve/handler.go:210-217) — leaving it Go's nil slice,
+// which json.Marshal sends over the wire as `candidates: null`, not `[]`.
+// Every existing consumer (AskAgainSheet, DetectedCard, capture.tsx) already
+// treats an EMPTY array as "no results" and none of them expect `null`, so
+// this normalizes the response ONCE, right where it enters the app, rather
+// than pushing a null check onto every future caller — the barcode cache
+// writer below almost shipped a crash on the server's designed "barcode not
+// recognized" response for exactly that reason.
+function normalizeResolution(raw: unknown): Resolution {
+  const r = raw as Omit<Resolution, "candidates"> & { candidates: ResolvedCandidate[] | null };
+  return { ...r, candidates: r.candidates ?? [] };
+}
 
 type ResolveFile = {
   uri: string;
@@ -56,19 +102,73 @@ export function useSubmitOnboarding() {
   });
 }
 
+// The offline decision, in one place for both lookups below: try the network
+// only when there is one, and treat a request that dies mid-flight the same as
+// having been offline all along. isOnline() is only a snapshot taken before the
+// request leaves, and the commonest mobile failure is the connection dropping
+// after that — so the pre-flight check and the isNetworkError catch are two
+// different rules and BOTH are needed. Exactly the pair useCreateLog applies to
+// the write path.
+//
+// Anything that is not a network failure (a 4xx, a bad token, an unparseable
+// body) rethrows: masking a real server rejection behind a stale local answer
+// would be worse than failing.
+async function withCacheFallback<T>(live: () => Promise<T>, cached: () => Promise<T>): Promise<T> {
+  if (!isOnline()) return cached();
+  try {
+    return await live();
+  } catch (err) {
+    if (isNetworkError(err)) return cached();
+    throw err;
+  }
+}
+
+type FoodSearchResult = { candidates: Candidate[]; fromCache: boolean };
+
 // Index-only search — alias, then full-text, then embedding. No AI cost, so
 // it is safe to call as the user types. Disabled under 2 characters because
 // the server rejects shorter queries with a 400.
+//
+// Offline it falls back to a name-substring scan of the food cache, so a food
+// the device has seen before is still findable and loggable. The fallback lives
+// in the hook rather than at the call sites because there are two of them
+// (app/log.tsx and src/components/meal/FoodPicker.tsx) and the offline-vs-online
+// decision must not be duplicated into either.
 export function useFoodSearch(query: string) {
   const q = query.trim();
-  return useQuery({
+  const result = useQuery({
     queryKey: ["foods", q],
-    queryFn: () => apiFetch(`/v1/foods?q=${encodeURIComponent(q)}`) as Promise<Candidate[]>,
+    // Without this react-query PAUSES the query while offline and the queryFn
+    // never runs at all — the cache fallback below would be unreachable in
+    // precisely the state it exists for. The app-wide default in
+    // src/lib/queryClient covers mutations only; pausing reads offline is
+    // deliberate everywhere except the reads that have a local answer.
+    networkMode: "always",
+    queryFn: (): Promise<FoodSearchResult> =>
+      withCacheFallback<FoodSearchResult>(
+        async () => ({
+          candidates: (await apiFetch(`/v1/foods?q=${encodeURIComponent(q)}`)) as Candidate[],
+          fromCache: false,
+        }),
+        async () => ({ candidates: candidatesFromCachedFoods(await searchCachedFoods(q)), fromCache: true }),
+      ),
     enabled: q.length >= 2,
   });
+
+  // `data` keeps the Candidate[] shape both call sites already render, so
+  // neither changes for the happy path. `isOfflineCache` is reported separately
+  // because an EMPTY cached result is indistinguishable from an empty server
+  // result by inspection — and those two need to say very different things to
+  // the user ("nothing matches" vs "you're offline, so only foods you've logged
+  // before are searchable").
+  return {
+    ...result,
+    data: result.data?.candidates,
+    isOfflineCache: result.data?.fromCache ?? false,
+  };
 }
 
-type CreateLogInput = {
+export type CreateLogInput = {
   food_item_id: string;
   meal_slot: string;
   source: string;
@@ -82,11 +182,66 @@ type CreateLogInput = {
 export function useCreateLog() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: CreateLogInput) =>
-      apiFetch("/v1/logs", { method: "POST", body: JSON.stringify(input) }) as Promise<FoodLog>,
-    onSuccess: () => {
+    // react-query's default networkMode ("online") PAUSES a mutation whenever
+    // onlineManager reports offline — the mutationFn, and with it the whole
+    // enqueue path, would never run in exactly the case the queue exists for.
+    //
+    // src/lib/queryClient now sets this app-wide, so on the real client this
+    // line is redundant. It is kept deliberately, and it is NOT dead: for
+    // every other mutation "always" only restores fail-fast ergonomics, but
+    // here the mutationFn IS the enqueue path, so pausing loses the meal. The
+    // invariant belongs next to the code that depends on it rather than in a
+    // shared default a later change could quietly narrow. Removing it fails
+    // 23 existing tests, which build their own QueryClient without the app's
+    // defaults — the shortest proof that this is load-bearing.
+    networkMode: "always",
+    mutationFn: async (input: CreateLogInput): Promise<FoodLog | QueuedLog> => {
+      // The id is minted client-side for EVERY log, online or not, so the
+      // server row and any queued copy share one identity and a replay is
+      // idempotent (see api/internal/foodlog CreateIdempotent).
+      const id = Crypto.randomUUID();
+      // Stamped so a queued log is only ever replayed into the diary of the
+      // user who wrote it — the queue is one device-wide list, accounts are not.
+      // resolveOwnerId falls back to the last remembered uid while Firebase is
+      // still restoring the session, because a write with no owner can never be
+      // drained. With no owner at all there is nothing honest to do but refuse:
+      // queueing would swallow the meal into a black hole.
+      const ownerId = await resolveOwnerId();
+      if (!ownerId) throw new NoOwnerError();
+      if (!isOnline()) return append(input, id, ownerId);
+      try {
+        return (await apiFetch("/v1/logs", {
+          method: "POST",
+          body: JSON.stringify({ ...input, id }),
+        })) as FoodLog;
+      } catch (err) {
+        // isOnline() was only a snapshot taken before the request left. The
+        // commonest mobile failure is the connection dying mid-flight, and
+        // without this the log would simply vanish — logFood has no onError.
+        // Queueing is safe even if the server did apply the write: the id
+        // already travelled, so the replay resolves to that same row.
+        // Everything else (a 4xx, a bad token, an unparseable body) is a real
+        // failure the caller must see.
+        if (isNetworkError(err)) return append(input, id, ownerId);
+        throw err;
+      }
+    },
+    onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: ["logs"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
+      // A write that was QUEUED rather than sent produces no server row, so
+      // the two invalidations above have nothing to fetch — and offline they
+      // cannot fetch anyway, since queries default to networkMode "online" and
+      // are paused rather than refetched. The diary's queued rows are the only
+      // thing that will show this meal, and every log entry point is presented
+      // OVER a mounted Diary (capture is a fullScreenModal, meal a
+      // transparentModal), so its observer survives with an unchanged key and
+      // nothing refetches unless it is invalidated here.
+      //
+      // Gated for the same reason drainLogs leaves ["logs"] alone when it sent
+      // nothing: a genuine server row cannot have changed the queue. isQueued
+      // is safe in this direction — false means definitively a server row.
+      if (isQueued(result)) qc.invalidateQueries({ queryKey: [QUEUED_LOGS_KEY] });
     },
   });
 }
@@ -110,17 +265,38 @@ export function useCreateLogBatch() {
 }
 
 export function useMemory(date: string) {
-  return useQuery({
+  const query = useQuery({
     queryKey: ["memory", date],
     queryFn: () => apiFetch("/v1/memory") as Promise<Memory>,
   });
+  // Same by-product cache fill as usePins/useSavedMeals below, same "summary"
+  // fidelity, same reason for an effect. This is the one that matters most
+  // offline: memory backs Home's "Your usual" strip and the Log screen's
+  // default Recents tab — the two primary one-tap surfaces. Without it the
+  // commonest offline log has no cached food, so the diary renders it as an
+  // unnamed "Queued item" with a null kcal and the day total counts nothing.
+  useEffect(() => {
+    if (query.data) cacheFoodsQuietly(foodsFromMemory(query.data), "summary");
+  }, [query.data]);
+  return query;
 }
 
 export function usePins() {
-  return useQuery({
+  const query = useQuery({
     queryKey: ["pins"],
     queryFn: () => apiFetch("/v1/pins") as Promise<PinnedFood[]>,
   });
+  // Fills the offline cache as a by-product of a query the app already runs.
+  // In an effect rather than `select` (which must stay pure and re-runs on
+  // every access) or `onSuccess` (removed from useQuery in v5). "summary"
+  // fidelity: a pin is a gram-scaled serving, never a full FoodItem (see
+  // foodsFromPins) — it must never clobber a higher-fidelity record already
+  // cached for the same food (e.g. from a real barcode scan, see
+  // useResolveBarcode below).
+  useEffect(() => {
+    if (query.data) cacheFoodsQuietly(foodsFromPins(query.data), "summary");
+  }, [query.data]);
+  return query;
 }
 
 export function useCreatePin() {
@@ -143,10 +319,16 @@ export function useDeletePin() {
 type SaveMealBody = { name: string; meal_slot: string; items: { food_item_id: string; grams: number }[] };
 
 export function useSavedMeals() {
-  return useQuery({
+  const query = useQuery({
     queryKey: ["savedMeals"],
     queryFn: () => apiFetch("/v1/saved-meals") as Promise<SavedMeal[]>,
   });
+  // See usePins above: same by-product cache fill, same "summary" fidelity,
+  // same reason for an effect.
+  useEffect(() => {
+    if (query.data) cacheFoodsQuietly(foodsFromSavedMeals(query.data), "summary");
+  }, [query.data]);
+  return query;
 }
 
 export function useCreateSavedMeal() {
@@ -287,9 +469,31 @@ export function useDeleteLog() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => apiFetch(`/v1/logs/${id}`, { method: "DELETE" }),
-    onSuccess: () => {
+    // The client mints ONE id for both the queue item and the server row, so a
+    // row can exist WHILE its queue item is still pending — a POST that died
+    // after the server applied it, or a drain whose response was lost. The
+    // diary hides the queued copy while the row is present (see diary.tsx), so
+    // the user only ever sees, and deletes, the row. Leave the queue item and
+    // the next drain replays that id into a now-empty primary key: the meal the
+    // user deleted comes back.
+    //
+    // onSuccess, NOT onSettled: a DELETE that failed leaves the server row in
+    // place, so the queue item is still an accurate duplicate of something real
+    // and dropping it would discard state the user has not actually undone.
+    // Nor inside mutationFn: a storage failure there would surface as
+    // "couldn't delete" for a row the server genuinely did delete.
+    onSuccess: async (_data, id) => {
+      // Best-effort for the same reason cacheFoodsQuietly is: reporting the
+      // delete as failed because a local write failed would be a lie about
+      // what the server did, and would send the user round a retry loop whose
+      // DELETE now 404s.
+      await discard(id).catch((err) => console.warn("queue: discard after delete failed", err));
       qc.invalidateQueries({ queryKey: ["logs"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
+      // The diary reads queued rows straight off the queue, so without this the
+      // deleted row stays on screen — and counted — until something else
+      // invalidates.
+      qc.invalidateQueries({ queryKey: [QUEUED_LOGS_KEY] });
     },
   });
 }
@@ -321,14 +525,58 @@ export function useRepeatLog() {
 export function useResolveText() {
   return useMutation({
     mutationFn: (phrase: string) =>
-      apiFetch("/v1/resolve/text", { method: "POST", body: JSON.stringify({ phrase }) }) as Promise<Resolution>,
+      apiFetch("/v1/resolve/text", { method: "POST", body: JSON.stringify({ phrase }) }).then(normalizeResolution),
   });
+}
+
+// A barcode the device has resolved once already is answerable with no
+// network — that is the whole reason getFoodByBarcode and the "full" fidelity
+// tier exist. The adapter marks the result as cache-sourced so it can never be
+// mistaken for a fresh resolve; see src/offline/cachedResolution.ts.
+async function barcodeFromCache(barcode: string): Promise<Resolution> {
+  const cached = await getFoodByBarcode(barcode);
+  // A distinct error, not an empty Resolution: "I couldn't identify that — try
+  // again" is advice that cannot work until the network returns, whereas this
+  // is a fact we positively established. capture.tsx turns it into copy that
+  // says so.
+  if (!cached) throw new OfflineUnknownBarcodeError();
+  return resolutionFromCachedFood(cached);
 }
 
 export function useResolveBarcode() {
   return useMutation({
-    mutationFn: (barcode: string) =>
-      apiFetch("/v1/resolve/barcode", { method: "POST", body: JSON.stringify({ barcode }) }) as Promise<Resolution>,
+    // Same reason useCreateLog carries this locally: the mutationFn IS the
+    // offline path, so a paused mutation does not merely delay the feature, it
+    // removes it. Kept next to the code that depends on it rather than relying
+    // on the app-wide default a later change could narrow.
+    networkMode: "always",
+    mutationFn: (barcode: string): Promise<Resolution> =>
+      withCacheFallback(
+        async () =>
+          normalizeResolution(
+            await apiFetch("/v1/resolve/barcode", { method: "POST", body: JSON.stringify({ barcode }) }),
+          ),
+        () => barcodeFromCache(barcode),
+      ),
+    // The one path that hands back genuine server FoodItems — brand,
+    // provenance, canonical serving, and (the whole point) a barcode.
+    // Caching them at "full" fidelity (the default) is what makes a repeat
+    // scan of the same item work offline via getFoodByBarcode: usePins and
+    // useSavedMeals only ever produce "summary" records, which can never
+    // reach getFoodByBarcode's writer path.
+    //
+    // Barcode resolves zero or exactly one candidate (never a ranked list —
+    // api/internal/resolve/handler.go:212-231), so caching everything here is
+    // safe. Do NOT copy this into useResolveText/useResolvePhoto below: those
+    // return ranked, multi-candidate lists, and caching every candidate would
+    // pollute the offline cache with low-tier guesses under ids the user
+    // never actually chose.
+    onSuccess: (resolution) => {
+      const items = resolution.candidates
+        .map((c) => c.item)
+        .filter((item): item is FoodItem => !!item && typeof item.id === "string" && item.id.length > 0);
+      cacheFoodsQuietly(items);
+    },
   });
 }
 
@@ -338,7 +586,7 @@ export function useResolvePhoto() {
       const form = new FormData();
       // React Native FormData file shape:
       form.append("file", { uri: file.uri, name: file.name, type: file.type } as unknown as Blob);
-      return apiFetchMultipart("/v1/resolve/photo", form) as Promise<Resolution>;
+      return apiFetchMultipart("/v1/resolve/photo", form).then(normalizeResolution);
     },
   });
 }
@@ -371,7 +619,7 @@ export function useResolveVoice() {
     mutationFn: (file: ResolveFile) => {
       const form = new FormData();
       form.append("file", { uri: file.uri, name: file.name, type: file.type } as unknown as Blob);
-      return apiFetchMultipart("/v1/resolve/voice", form) as Promise<Resolution>;
+      return apiFetchMultipart("/v1/resolve/voice", form).then(normalizeResolution);
     },
   });
 }
