@@ -158,26 +158,32 @@ test("excludes queued rows belonging to another user while keeping this user's o
 // default to networkMode "online", so offline that query is marked stale and
 // PAUSED rather than refetched.
 //
-// The initial waitFor is load-bearing: it proves the query already resolved
-// once, so a row appearing afterwards can only be an invalidation and not a
-// first fetch. Remounting the hook here would test nothing — that path is
-// already covered by every other test in this file.
+// The hook is seeded with a row BEFORE rendering so the first waitFor can
+// prove the query resolved. An empty expectation could not: `rows` is the same
+// NO_ROWS constant before the first fetch and after one that found nothing, so
+// waiting for [] would be satisfied by a query that had not run at all — and
+// the row appearing later could then be a late first fetch rather than the
+// invalidation under test. Remounting the hook here would test nothing; that
+// path is already covered by every other test in this file.
 test("a log queued while the diary is already mounted appears without a remount", async () => {
   const client = newClient();
   onlineManager.setOnline(false);
   try {
+    await append(payloadOn(atLocalNoon(2026, 8, 2)), "already-here", "user-a");
+
     const { result } = await renderHook(
       () => ({ queued: useQueuedLogs("2026-08-02"), create: useCreateLog() }),
       { wrapper: wrap(client) },
     );
-    await waitFor(() => expect(result.current.queued.rows).toEqual([]));
+    await waitFor(() => expect(result.current.queued.rows).toHaveLength(1));
 
     await act(async () => {
       await result.current.create.mutateAsync(payloadOn(atLocalNoon(2026, 8, 2)));
     });
 
-    await waitFor(() => expect(result.current.queued.rows).toHaveLength(1));
-    expect(result.current.queued.rows[0]).toMatchObject({
+    await waitFor(() => expect(result.current.queued.rows).toHaveLength(2));
+    const fresh = result.current.queued.rows.find((r) => r.id !== "already-here");
+    expect(fresh).toMatchObject({
       description: "Greek yogurt",
       status: "pending",
       mealSlot: "lunch",
