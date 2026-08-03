@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Crypto from "expo-crypto";
+import { File } from "expo-file-system";
 import { apiFetch, apiFetchEnvelope, apiFetchMultipart, isNetworkError } from "@/lib/api";
 import { isOnline } from "@/offline/connectivity";
 import {
@@ -74,7 +75,7 @@ function normalizeResolution(raw: unknown): Resolution {
   return { ...r, candidates: r.candidates ?? [] };
 }
 
-type ResolveFile = {
+export type ResolveFile = {
   uri: string;
   name: string;
   type: string;
@@ -580,14 +581,59 @@ export function useResolveBarcode() {
   });
 }
 
+// buildFileForm makes the one multipart body shape Expo SDK 57 can actually send.
+//
+// Global `fetch` is Expo's winter-runtime implementation, and its FormData converter
+// (expo/src/winter/fetch/convertFormData.ts) accepts exactly three part shapes: a
+// string, a real `Blob`, or an object exposing `bytes()`. React Native's legacy
+// `{ uri, name, type }` file part is NOT one of them — it throws "Unsupported
+// FormDataPart implementation" before any I/O, which is why photo and voice capture
+// had never once worked in production (#82).
+//
+// A hand-built `Blob` is not an option either: React Native's Blob cannot be
+// constructed from binary data in JS (BlobManager.createFromParts throws on
+// ArrayBuffer/ArrayBufferView). That leaves expo-file-system's `File`, which
+// implements Blob and exposes bytes()/name/type — the shape Expo's own converter
+// test blesses.
+//
+// WHY THE CALLER STILL DECLARES name/type, instead of letting the File supply them:
+// expo-file-system derives `type` from the filename extension via
+// UTType(filenameExtension:).preferredMIMEType, and on iOS ".m4a" maps to
+// "audio/x-m4a" — NOT the "audio/mp4" this app has always declared for recordings.
+// That MIME is not cosmetic: the server forwards it straight to the model
+// (genai.NewPartFromBytes(audio, mime) in api/internal/ai/providers/gemini.go), and
+// voice cannot currently be exercised end to end (#79 kills the request at Istio's
+// 30s perTryTimeout). Taking the OS value would therefore silently change the wire
+// format of a path nobody can verify, so the declared value wins and this fix changes
+// nothing observable about voice except that the body now sends at all.
+//
+// The cast is unavoidable — TypeScript's FormData.append only admits string | Blob,
+// while the converter's third branch is structural (`'bytes' in entry`). It is
+// confined here, aimed at a named type rather than a blind `as unknown as Blob`, and
+// unlike the code it replaces it is covered by a test that encodes the resulting body
+// with Expo's real converter, so a wrong shape fails loudly instead of silently.
+type MultipartFilePart = {
+  bytes: () => Promise<Uint8Array>;
+  name: string;
+  type: string;
+};
+
+function buildFileForm(file: ResolveFile): FormData {
+  const source = new File(file.uri);
+  const part: MultipartFilePart = {
+    bytes: () => source.bytes(),
+    name: file.name,
+    type: file.type,
+  };
+  const form = new FormData();
+  form.append("file", part as unknown as Blob);
+  return form;
+}
+
 export function useResolvePhoto() {
   return useMutation({
-    mutationFn: (file: ResolveFile) => {
-      const form = new FormData();
-      // React Native FormData file shape:
-      form.append("file", { uri: file.uri, name: file.name, type: file.type } as unknown as Blob);
-      return apiFetchMultipart("/v1/resolve/photo", form).then(normalizeResolution);
-    },
+    mutationFn: (file: ResolveFile) =>
+      apiFetchMultipart("/v1/resolve/photo", buildFileForm(file)).then(normalizeResolution),
   });
 }
 
@@ -616,11 +662,8 @@ export function useWeightSeries(range: WeightRange) {
 
 export function useResolveVoice() {
   return useMutation({
-    mutationFn: (file: ResolveFile) => {
-      const form = new FormData();
-      form.append("file", { uri: file.uri, name: file.name, type: file.type } as unknown as Blob);
-      return apiFetchMultipart("/v1/resolve/voice", form).then(normalizeResolution);
-    },
+    mutationFn: (file: ResolveFile) =>
+      apiFetchMultipart("/v1/resolve/voice", buildFileForm(file)).then(normalizeResolution),
   });
 }
 
