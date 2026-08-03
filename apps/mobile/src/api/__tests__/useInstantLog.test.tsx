@@ -207,3 +207,38 @@ test("undoing after a reconnect drain has already sent the log DELETEs the serve
     expect(apiFetch).toHaveBeenCalledWith(`/v1/logs/${queuedId}`, { method: "DELETE" }),
   );
 });
+
+const meal = { name: "Usual lunch", meal_slot: "lunch", items: [{ food_item_id: "f1", grams: 120 }] };
+
+// logMeal is the saved-meal / "usual meal" tap. Its sibling logFood grew an
+// onError; logMeal never did, so a failure landed in mutation state nobody
+// reads and the tap did nothing at all. Wiring connectivity into onlineManager
+// used to hide this behind a permanent pause; now the mutation rejects, so the
+// silence is the whole user experience.
+test("a saved meal that fails to log tells the user instead of doing nothing", async () => {
+  (apiFetch as jest.Mock).mockRejectedValueOnce(
+    Object.assign(new Error("request failed"), { name: "ApiError", status: 500 }),
+  );
+
+  const { result } = await renderHook(() => useInstantLog(), { wrapper });
+  await act(async () => { result.current.logMeal(meal); });
+
+  await waitFor(() => expect(mockToast.shown?.message).toBe("Couldn't log that. Please try again."));
+});
+
+// Same reasoning as logFood's Undo above: an Undo that cannot reverse anything
+// must say so, or the user believes a meal they cancelled is gone.
+test("an undo of a saved meal whose DELETE fails tells the user", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce([{ id: "batch-1" }, { id: "batch-2" }]);
+
+  const { result } = await renderHook(() => useInstantLog(), { wrapper });
+  await act(async () => { result.current.logMeal(meal); });
+  await waitFor(() => expect(mockToast.shown?.actionLabel).toBe("Undo"));
+
+  (apiFetch as jest.Mock).mockRejectedValue(
+    Object.assign(new Error("request failed"), { name: "ApiError", status: 500 }),
+  );
+  await act(async () => { mockToast.shown!.onAction!(); });
+
+  await waitFor(() => expect(mockToast.shown!.message).toBe("Couldn't undo. Try again."));
+});

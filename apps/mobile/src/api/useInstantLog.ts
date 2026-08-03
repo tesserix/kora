@@ -55,6 +55,25 @@ export function useInstantLog(): { logFood: (f: LoggableFood) => void; logMeal: 
     await discard(created.id);
   };
 
+  // A batch log has no queued form (useCreateLogBatch posts straight to
+  // /v1/logs/batch), so undoing one is purely DELETEs — but there are several,
+  // and they must ALL be attempted: stopping at the first failure would leave
+  // part of the meal logged while the toast claimed the whole thing was
+  // reversed. allSettled, then report if any row survived.
+  //
+  // mutateAsync, not mutate: `mutate` swallows the rejection inside React
+  // Query, which is exactly how this path used to fail in silence.
+  const undoMeal = async (created: FoodLog[]) => {
+    const outcomes = await Promise.allSettled(created.map((l) => deleteLog.mutateAsync(l.id)));
+    if (outcomes.some((o) => o.status === "rejected")) throw new Error("undo: some rows survived");
+  };
+
+  // One surface for both Undo paths, so they can never drift apart.
+  const reportUndoFailed = () => {
+    haptics.error();
+    toast.show({ message: "Couldn't undo. Try again." });
+  };
+
   const logFood = (f: LoggableFood) => {
     createLog.mutate(
       {
@@ -74,10 +93,7 @@ export function useInstantLog(): { logFood: (f: LoggableFood) => void; logMeal: 
             // than leaving the user believing a meal they cancelled is gone.
             // The log stays exactly where it was, which is what this promises.
             onAction: () => {
-              void undoLog(created).catch(() => {
-                haptics.error();
-                toast.show({ message: "Couldn't undo. Try again." });
-              });
+              void undoLog(created).catch(reportUndoFailed);
             },
           });
         },
@@ -104,8 +120,17 @@ export function useInstantLog(): { logFood: (f: LoggableFood) => void; logMeal: 
           toast.show({
             message: `Logged ${m.name}`,
             actionLabel: "Undo",
-            onAction: () => created.forEach((l) => deleteLog.mutate(l.id)),
+            onAction: () => {
+              void undoMeal(created).catch(reportUndoFailed);
+            },
           });
+        },
+        // Symmetrical with logFood above, and for the same reason: without it
+        // the rejection lands in state nobody reads and tapping a saved meal
+        // does nothing at all.
+        onError: (error) => {
+          haptics.error();
+          toast.show({ message: logFailureMessage(error) });
         },
       },
     );

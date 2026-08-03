@@ -118,6 +118,15 @@ export function useCreateLog() {
     // react-query's default networkMode ("online") PAUSES a mutation whenever
     // onlineManager reports offline — the mutationFn, and with it the whole
     // enqueue path, would never run in exactly the case the queue exists for.
+    //
+    // src/lib/queryClient now sets this app-wide, so on the real client this
+    // line is redundant. It is kept deliberately, and it is NOT dead: for
+    // every other mutation "always" only restores fail-fast ergonomics, but
+    // here the mutationFn IS the enqueue path, so pausing loses the meal. The
+    // invariant belongs next to the code that depends on it rather than in a
+    // shared default a later change could quietly narrow. Removing it fails
+    // 23 existing tests, which build their own QueryClient without the app's
+    // defaults — the shortest proof that this is load-bearing.
     networkMode: "always",
     mutationFn: async (input: CreateLogInput): Promise<FoodLog | QueuedLog> => {
       // The id is minted client-side for EVERY log, online or not, so the

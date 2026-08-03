@@ -803,6 +803,34 @@ describe("Scan mode", () => {
     const { getByTestId } = await render(<CaptureScreen />);
     expect(getByTestId("capture-analyzing-spinner")).toBeTruthy();
   });
+
+  // The scanner is guarded by a one-shot ref so one physical barcode does not
+  // fire the resolve repeatedly. A resolve that FAILS has to release that
+  // guard, or the viewfinder is dead for the rest of the session — the user
+  // sees the error and can do nothing about it. This matters more now that
+  // mutations reject offline instead of hanging in "analyzing" forever (see
+  // src/lib/queryClient), because failing is the common offline outcome.
+  test("a failed barcode resolve releases the scanner so the user can scan again", async () => {
+    const { findByText, findByTestId } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Scan"));
+    const cameraView = await findByTestId("capture-camera-view");
+
+    await act(async () => {
+      cameraView.props.onBarcodeScanned({ data: "012345678905", type: "ean13" });
+    });
+    expect(mockResolveBarcodeMutate).toHaveBeenCalledTimes(1);
+
+    const [, options] = mockResolveBarcodeMutate.mock.calls[0];
+    await act(async () => options.onError(new Error("boom")));
+    expect(await findByText(/something went wrong while i looked at that/i)).toBeTruthy();
+
+    // The same code again: without the reset this second scan is swallowed by
+    // the guard and the count stays at 1.
+    await act(async () => {
+      cameraView.props.onBarcodeScanned({ data: "012345678905", type: "ean13" });
+    });
+    expect(mockResolveBarcodeMutate).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("Result tiers", () => {
