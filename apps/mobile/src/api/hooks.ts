@@ -30,6 +30,7 @@ import type {
   PinnedFood,
   Profile,
   Resolution,
+  ResolvedCandidate,
   SavedMeal,
   SubmitFeedbackInput,
   WeightEntry,
@@ -41,6 +42,22 @@ import type {
 // promise rejection either. Logged and dropped.
 function cacheFoodsQuietly(items: FoodItem[], fidelity?: FoodFidelity): void {
   void upsertFoods(items, fidelity).catch((err) => console.warn("foodCache: upsertFoods failed", err));
+}
+
+// The server's ai.Resolution.Candidates field has no `omitempty`
+// (api/internal/ai/types.go:81), and several resolver paths never populate it
+// — budget-exceeded, zero-guess, and barcode's own "not recognized" branch
+// (api/internal/resolve/handler.go:210-217) — leaving it Go's nil slice,
+// which json.Marshal sends over the wire as `candidates: null`, not `[]`.
+// Every existing consumer (AskAgainSheet, DetectedCard, capture.tsx) already
+// treats an EMPTY array as "no results" and none of them expect `null`, so
+// this normalizes the response ONCE, right where it enters the app, rather
+// than pushing a null check onto every future caller — the barcode cache
+// writer below almost shipped a crash on the server's designed "barcode not
+// recognized" response for exactly that reason.
+function normalizeResolution(raw: unknown): Resolution {
+  const r = raw as Omit<Resolution, "candidates"> & { candidates: ResolvedCandidate[] | null };
+  return { ...r, candidates: r.candidates ?? [] };
 }
 
 type ResolveFile = {
@@ -386,20 +403,27 @@ export function useRepeatLog() {
 export function useResolveText() {
   return useMutation({
     mutationFn: (phrase: string) =>
-      apiFetch("/v1/resolve/text", { method: "POST", body: JSON.stringify({ phrase }) }) as Promise<Resolution>,
+      apiFetch("/v1/resolve/text", { method: "POST", body: JSON.stringify({ phrase }) }).then(normalizeResolution),
   });
 }
 
 export function useResolveBarcode() {
   return useMutation({
     mutationFn: (barcode: string) =>
-      apiFetch("/v1/resolve/barcode", { method: "POST", body: JSON.stringify({ barcode }) }) as Promise<Resolution>,
+      apiFetch("/v1/resolve/barcode", { method: "POST", body: JSON.stringify({ barcode }) }).then(normalizeResolution),
     // The one path that hands back genuine server FoodItems — brand,
     // provenance, canonical serving, and (the whole point) a barcode.
     // Caching them at "full" fidelity (the default) is what makes a repeat
     // scan of the same item work offline via getFoodByBarcode: usePins and
     // useSavedMeals only ever produce "summary" records, which can never
     // reach getFoodByBarcode's writer path.
+    //
+    // Barcode resolves zero or exactly one candidate (never a ranked list —
+    // api/internal/resolve/handler.go:212-231), so caching everything here is
+    // safe. Do NOT copy this into useResolveText/useResolvePhoto below: those
+    // return ranked, multi-candidate lists, and caching every candidate would
+    // pollute the offline cache with low-tier guesses under ids the user
+    // never actually chose.
     onSuccess: (resolution) => {
       const items = resolution.candidates
         .map((c) => c.item)
@@ -415,7 +439,7 @@ export function useResolvePhoto() {
       const form = new FormData();
       // React Native FormData file shape:
       form.append("file", { uri: file.uri, name: file.name, type: file.type } as unknown as Blob);
-      return apiFetchMultipart("/v1/resolve/photo", form) as Promise<Resolution>;
+      return apiFetchMultipart("/v1/resolve/photo", form).then(normalizeResolution);
     },
   });
 }
@@ -448,7 +472,7 @@ export function useResolveVoice() {
     mutationFn: (file: ResolveFile) => {
       const form = new FormData();
       form.append("file", { uri: file.uri, name: file.name, type: file.type } as unknown as Blob);
-      return apiFetchMultipart("/v1/resolve/voice", form) as Promise<Resolution>;
+      return apiFetchMultipart("/v1/resolve/voice", form).then(normalizeResolution);
     },
   });
 }

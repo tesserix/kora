@@ -130,6 +130,30 @@ test("useResolveBarcode posts barcode to /v1/resolve/barcode", async () => {
   expect(result.current.data).toEqual(resolution);
 });
 
+// The server's designed response for an unrecognised barcode omits
+// `candidates` entirely (api/internal/resolve/handler.go:210-217), which Go
+// marshals as `"candidates": null` because the field has no `omitempty`
+// (api/internal/ai/types.go:81) — this is the MOST COMMON real scan outcome,
+// not an edge case. Before normalizeResolution, `resolution.candidates.map(...)`
+// in useResolveBarcode's onSuccess threw on exactly this response, breaking
+// the very "search and log manually" fallback the server designed for it.
+test("useResolveBarcode succeeds on the server's real not-found response (candidates: null)", async () => {
+  const notFound = {
+    candidates: null,
+    tier: "follow_up" as const,
+    follow_up_question: "Barcode not recognized — search and log manually.",
+    is_estimate: false,
+    provenance: "barcode",
+  };
+  (apiFetch as jest.Mock).mockResolvedValueOnce(notFound);
+
+  const { result } = await renderHook(() => useResolveBarcode(), { wrapper });
+  await expect(result.current.mutateAsync("0000000000000")).resolves.toMatchObject({
+    candidates: [],
+    tier: "follow_up",
+  });
+});
+
 // getFoodByBarcode had no reachable writer before this: usePins/useSavedMeals
 // only ever produce "summary" records (no barcode field at all), so a repeat
 // scan could never find anything. useResolveBarcode is the one path that

@@ -15,15 +15,16 @@ export const FOOD_CACHE_LIMIT = 300;
 // "summary": synthesized from a gram-scaled serving total (a pin or saved
 // meal item) via foodsFromPins/foodsFromSavedMeals below — exact per-100g
 // macros, but no serving/provenance/barcode. upsertFoods uses this so a
-// summary write can never clobber a full record already cached for the
-// same id.
+// summary write can never blank a field a full record already had.
 export type FoodFidelity = "full" | "summary";
+const FIDELITIES: FoodFidelity[] = ["full", "summary"];
 
 type Entry = { item: FoodItem; lastUsedAt: number; fidelity: FoodFidelity };
 
 function isEntry(e: unknown): e is Entry {
   const entry = e as Entry;
-  return !!entry && !!entry.item && typeof entry.item.id === "string";
+  return !!entry && !!entry.item && typeof entry.item.id === "string" &&
+    (entry.fidelity === undefined || FIDELITIES.includes(entry.fidelity));
 }
 
 async function load(): Promise<Entry[]> {
@@ -32,38 +33,54 @@ async function load(): Promise<Entry[]> {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    // Entries persisted before fidelity tracking existed have no `fidelity`
-    // field; treat them as "full" so old cached data is never retroactively
-    // treated as downgradable.
-    return parsed.filter(isEntry).map((e) => ({ ...e, fidelity: e.fidelity ?? "full" }));
+    // Entries persisted before fidelity tracking existed (or a corrupt
+    // `fidelity` value caught above) have no valid `fidelity`. Every writer
+    // that predates this field was the summary path (usePins/useSavedMeals
+    // shipped first), so those records carry `provenance: "cached"` and a
+    // fabricated serving — defaulting to "full" would freeze those defects
+    // in place forever. "summary" is the honest default: self-healing, and a
+    // later full write (e.g. a barcode scan) can still upgrade it.
+    return parsed.filter(isEntry).map((e) => ({ ...e, fidelity: e.fidelity ?? "summary" }));
   } catch {
     return [];
   }
 }
 
+// A "summary" write into an id that already holds a "full" record MERGES
+// rather than replaces or refuses: it takes what a summary genuinely knows
+// (name — the server may have corrected it — and per-100g macros, an exact
+// reverse-scale of a fresh total) but keeps what it cannot know (barcode,
+// real provenance, canonical serving) from the full record. This is
+// deliberately not a "refuse" rule: refusing a downgrade also means refusing
+// to touch `lastUsedAt`, which sinks the full record's recency every time
+// something ELSE gets touched — the exact records this fidelity system
+// exists to protect would be the first evicted at the cap.
+function mergeSummaryIntoFull(existingItem: FoodItem, incoming: FoodItem): FoodItem {
+  return {
+    ...existingItem,
+    name: incoming.name,
+    kcal_per_100g: incoming.kcal_per_100g,
+    protein_per_100g: incoming.protein_per_100g,
+    carbs_per_100g: incoming.carbs_per_100g,
+    fat_per_100g: incoming.fat_per_100g,
+  };
+}
+
 // upsertFoods is called from an effect keyed on query data (fidelity:
 // "summary") or a mutation's onSuccess (fidelity: "full", the default), so it
 // is a by-product of normal use — no sync job, no index versioning, nothing
-// to go stale. Re-upserting an already-cached id at the SAME fidelity
-// refreshes its lastUsedAt, which is what makes eviction below genuinely
+// to go stale. EVERY touch — full or summary, merged or not — refreshes
+// lastUsedAt, which is what makes eviction below genuinely
 // least-recently-USED rather than a simple truncation of insertion order.
-//
-// A "summary" write is refused outright when a "full" record already exists
-// for that id: a real barcode scan carries a barcode, real provenance, and
-// the canonical serving, and a later pins/saved-meals refetch synthesizing
-// the SAME food from a gram-scaled total must not destroy that. Refusing to
-// downgrade (rather than merging field-by-field) is the simpler rule to
-// reason about, and it can never lose information a full record already had
-// — the cost is that such a record's recency is not refreshed by a
-// subsequent summary-only touch, which is an acceptable trade since nothing
-// evicts a food the user keeps actually resolving at full fidelity.
 export async function upsertFoods(items: FoodItem[], fidelity: FoodFidelity = "full"): Promise<void> {
   if (items.length === 0) return;
   const byId = new Map((await load()).map((e) => [e.item.id, e]));
   const now = Date.now();
   items.forEach((item, i) => {
-    if (byId.get(item.id)?.fidelity === "full" && fidelity === "summary") return;
-    byId.set(item.id, { item, lastUsedAt: now + i, fidelity });
+    const existing = byId.get(item.id);
+    const keepsFull = fidelity === "summary" && existing?.fidelity === "full";
+    const mergedItem = keepsFull ? mergeSummaryIntoFull(existing.item, item) : item;
+    byId.set(item.id, { item: mergedItem, lastUsedAt: now + i, fidelity: keepsFull ? "full" : fidelity });
   });
 
   const trimmed = [...byId.values()]
@@ -125,12 +142,21 @@ function foodFromServingSummary(f: ServingSummary): FoodItem | null {
   };
 }
 
+// query.data is typed as PinnedFood[]/SavedMeal[] only via an unvalidated
+// `apiFetch(...) as Promise<...>` cast at the call site — a truthy non-array
+// response, or a meal missing `items`, would throw synchronously inside the
+// effect that calls this, OUTSIDE cacheFoodsQuietly's `.catch`, breaking the
+// screen rather than just the cache fill. Both Go handlers do initialize
+// these as real (possibly empty) arrays in practice, but these guards are the
+// cost of not trusting that across a service boundary.
 export function foodsFromPins(pins: PinnedFood[]): FoodItem[] {
+  if (!Array.isArray(pins)) return [];
   return pins.map(foodFromServingSummary).filter((f): f is FoodItem => f !== null);
 }
 
 // The saved meal's OWN id/name (e.g. "My lunch") must never be mistaken for
 // a food — only what's nested inside `items` belongs in the cache.
 export function foodsFromSavedMeals(meals: SavedMeal[]): FoodItem[] {
-  return meals.flatMap((m) => m.items.map(foodFromServingSummary).filter((f): f is FoodItem => f !== null));
+  if (!Array.isArray(meals)) return [];
+  return meals.flatMap((m) => (Array.isArray(m?.items) ? m.items : []).map(foodFromServingSummary).filter((f): f is FoodItem => f !== null));
 }

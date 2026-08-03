@@ -20,6 +20,16 @@ test("ProvenanceChip renders nothing for an unknown/synthesized provenance", asy
   expect(toJSON()).toBeNull();
 });
 
+// A plain empty string is a different claim than the UNKNOWN_PROVENANCE
+// sentinel: FoodItem.provenance is an unconstrained server column, so an
+// empty value there could just be a data gap, not a deliberate "we don't
+// know". Silencing the disclaimer for it would be an accidental loss of a
+// warning a nutrition app should err on the side of keeping.
+test("ProvenanceChip still shows the estimate disclaimer for a plain empty provenance", async () => {
+  const { getByText } = await render(<ProvenanceChip provenance="" />);
+  expect(getByText(/estimate/i)).toBeTruthy();
+});
+
 describe("MacroBars v2", () => {
   it("renders three gradient fills sized to each macro percent", async () => {
     const { getByTestId } = await render(
