@@ -11,9 +11,9 @@ export type QueuedLog = {
   lastError?: string;
   queuedAt: string;
   /**
-   * uid of the user who wrote this log. Absent on items queued before ownership
-   * existed, and on the (unreachable in the app, but typed) case of a write
-   * with no signed-in user. An item with no owner is never auto-sent.
+   * uid of the user who wrote this log. `append` requires one, so every item
+   * this branch writes has it; the field stays optional only because items
+   * persisted before ownership existed do not, and those are never auto-sent.
    */
   ownerId?: string;
 };
@@ -63,17 +63,17 @@ async function save(items: QueuedLog[]): Promise<void> {
   await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(items));
 }
 
-// ownerId is required rather than optional so no call site can forget it: an
-// unowned item is one that will never be sent automatically. It is nullable
-// because the caller reads it from auth state, which is typed as nullable.
+// ownerId is a required, non-nullable string: an item with no owner is one no
+// drain will ever send, so the type system refuses to create one. Callers
+// resolve the uid first (see src/offline/owner.ts) and fail the write outright
+// if there is none.
 export async function append(
   payload: CreateLogInput,
   id: string,
-  ownerId: string | null,
+  ownerId: string,
 ): Promise<QueuedLog> {
   const item: QueuedLog = {
-    id, payload, status: "pending", attempts: 0, queuedAt: new Date().toISOString(),
-    ...(ownerId ? { ownerId } : {}),
+    id, payload, ownerId, status: "pending", attempts: 0, queuedAt: new Date().toISOString(),
   };
   await save([...(await list()), item]);
   return item;

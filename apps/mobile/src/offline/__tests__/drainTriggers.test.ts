@@ -4,6 +4,7 @@ import { QueryClient, onlineManager } from "@tanstack/react-query";
 import { onAuthStateChanged } from "firebase/auth";
 import { apiFetch, currentUserId } from "@/lib/api";
 import { append, list } from "../queue";
+import { resolveOwnerId } from "../owner";
 import { installDrainTriggers } from "../drainTriggers";
 
 jest.mock("@/lib/api", () => ({
@@ -24,7 +25,7 @@ const payload = {
 // A tiny poller: the triggers fire drains fire-and-forget, so there is no
 // promise to await. Nothing here is React, so RNTL's waitFor would only add an
 // act() environment this test does not need.
-async function eventually(check: () => Promise<void>): Promise<void> {
+async function eventually(check: () => Promise<unknown>): Promise<void> {
   for (let i = 0; i < 50; i++) {
     try { await check(); return; } catch { await new Promise((r) => setTimeout(r, 5)); }
   }
@@ -63,6 +64,20 @@ test("a queued log drains when sign-in completes, not on the signed-out cold sta
     expect(await list()).toHaveLength(0);
   });
 
+  uninstall();
+});
+
+// The fallback in owner.ts is only worth anything if something records the uid.
+// Sign-in is the one moment the app reliably learns it, so a write during the
+// NEXT launch's restore window can be attributed to the right account.
+test("sign-in records the uid so the next launch can attribute writes", async () => {
+  (currentUserId as jest.Mock).mockReturnValue(null);
+  expect(await resolveOwnerId()).toBeNull();
+
+  const uninstall = installDrainTriggers(new QueryClient());
+  (onAuthStateChanged as jest.Mock).mock.calls[0][1]({ uid: "user-b" });
+
+  await eventually(async () => expect(await resolveOwnerId()).toBe("user-b"));
   uninstall();
 });
 

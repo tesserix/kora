@@ -1,8 +1,9 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Crypto from "expo-crypto";
-import { apiFetch, apiFetchEnvelope, apiFetchMultipart, currentUserId, isNetworkError } from "@/lib/api";
+import { apiFetch, apiFetchEnvelope, apiFetchMultipart, isNetworkError } from "@/lib/api";
 import { isOnline } from "@/offline/connectivity";
 import { append, type QueuedLog } from "@/offline/queue";
+import { resolveOwnerId } from "@/offline/owner";
 import type { MealSlot } from "@/lib/mealSlot";
 import type {
   AppNotification,
@@ -96,7 +97,12 @@ export function useCreateLog() {
       const id = Crypto.randomUUID();
       // Stamped so a queued log is only ever replayed into the diary of the
       // user who wrote it — the queue is one device-wide list, accounts are not.
-      const ownerId = currentUserId();
+      // resolveOwnerId falls back to the last remembered uid while Firebase is
+      // still restoring the session, because a write with no owner can never be
+      // drained. With no owner at all there is nothing honest to do but refuse:
+      // queueing would swallow the meal into a black hole.
+      const ownerId = await resolveOwnerId();
+      if (!ownerId) throw new Error("Can't save this log — please sign in and try again.");
       if (!isOnline()) return append(input, id, ownerId);
       try {
         return (await apiFetch("/v1/logs", {

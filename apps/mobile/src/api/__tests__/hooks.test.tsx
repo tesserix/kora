@@ -2,8 +2,9 @@ import { renderHook, waitFor } from "@testing-library/react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { NetworkError, apiFetch, apiFetchEnvelope, apiFetchMultipart } from "@/lib/api";
-import { list } from "@/offline/queue";
+import { NetworkError, apiFetch, apiFetchEnvelope, apiFetchMultipart, currentUserId } from "@/lib/api";
+import { drain, list } from "@/offline/queue";
+import { rememberOwner } from "@/offline/owner";
 import {
   useAcceptRequest,
   useAddWater,
@@ -529,6 +530,53 @@ test("useCreateLog POSTs with a client-minted id when online", async () => {
   await result.current.mutateAsync(logInput);
   const secondId = JSON.parse((apiFetch as jest.Mock).mock.calls.at(-1)![1].body).id;
   expect(secondId).not.toBe(body.id);
+});
+
+// The cold-start window this whole task has been fighting, on the WRITE side:
+// app/_layout.tsx has no auth gate and (tabs)/_layout.tsx only redirects to
+// /sign-in from inside the onAuthStateChanged callback, so Home is tappable
+// while auth.currentUser is still null. Before this, such a write was stamped
+// with no owner and drain skipped it forever — the user got a "Logged Oats"
+// toast for a meal that could never be sent.
+test("useCreateLog stamps the remembered uid when auth has not restored yet", async () => {
+  await AsyncStorage.clear();
+  await rememberOwner("user-a");
+  (currentUserId as jest.Mock).mockReturnValue(null);
+  onlineManager.setOnline(false);
+  try {
+    const { result } = await renderHook(() => useCreateLog(), { wrapper });
+    // Must RESOLVE, and resolve to an OWNED item: refusing the write here would
+    // be as wrong as queueing it unowned — the user is signed in, Firebase just
+    // has not said so yet.
+    await expect(result.current.mutateAsync(logInput)).resolves.toMatchObject({ ownerId: "user-a" });
+
+    const items = await list();
+    expect(items).toHaveLength(1);
+    expect(items[0].ownerId).toBe("user-a");
+    // And that stamp is what makes it sendable once Firebase restores that user.
+    expect(await drain(async () => {}, "user-a")).toMatchObject({ sent: 1 });
+  } finally {
+    onlineManager.setOnline(true);
+    (currentUserId as jest.Mock).mockReturnValue("user-a");
+    await AsyncStorage.clear();
+  }
+});
+
+// Nobody has ever signed in on this device, so there is no honest owner to
+// stamp. Queueing anyway would produce an item no drain will ever send and no
+// screen will ever show — fail loudly instead.
+test("useCreateLog refuses the write when no owner can be resolved at all", async () => {
+  await AsyncStorage.clear();
+  (currentUserId as jest.Mock).mockReturnValue(null);
+  onlineManager.setOnline(false);
+  try {
+    const { result } = await renderHook(() => useCreateLog(), { wrapper });
+    await expect(result.current.mutateAsync(logInput)).rejects.toThrow(/sign/i);
+    expect(await list()).toHaveLength(0);
+  } finally {
+    onlineManager.setOnline(true);
+    (currentUserId as jest.Mock).mockReturnValue("user-a");
+  }
 });
 
 test("useCreateLog queues the write instead of POSTing when offline", async () => {
