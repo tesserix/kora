@@ -102,13 +102,20 @@ test("excludes queued rows belonging to another day while keeping that day's own
 // late-evening one west of it, under the wrong day, where it sits until a
 // drain silently moves it.
 //
-// Both fixtures are built from LOCAL components, so on any device not running
-// in UTC at least one of them has a UTC date that differs from its local one.
-// On a UTC machine the two notions coincide and this degrades to the plain
-// day filter above.
+// Both fixtures are built from LOCAL components. In a UTC run their UTC
+// prefixes would equal their local dates and this test would silently become a
+// duplicate of the plain day filter above — passing against either
+// implementation. jest.globalSetup.js pins the suite to Asia/Kolkata (+05:30)
+// so that cannot happen, and the guard below fails loudly if the pin ever
+// stops taking effect.
 test("files a queued row under the device's calendar day, not its UTC one", async () => {
-  await append(payloadOn(new Date(2026, 7, 2, 0, 30).toISOString()), "just-after-midnight", "user-a");
-  await append(payloadOn(new Date(2026, 7, 2, 23, 30).toISOString()), "just-before-midnight", "user-a");
+  const justAfterMidnight = new Date(2026, 7, 2, 0, 30).toISOString();
+  const justBeforeMidnight = new Date(2026, 7, 2, 23, 30).toISOString();
+  // The whole point of the fixture: local 2nd, UTC 1st.
+  expect(justAfterMidnight.slice(0, 10)).not.toBe("2026-08-02");
+
+  await append(payloadOn(justAfterMidnight), "just-after-midnight", "user-a");
+  await append(payloadOn(justBeforeMidnight), "just-before-midnight", "user-a");
 
   const { result } = await renderQueued("2026-08-02");
 
