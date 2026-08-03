@@ -1088,12 +1088,34 @@ describe("Add to diary", () => {
 
 // `source` must record which modality actually resolved the food, not which
 // capture tab happened to be open — the composer ("Tell Otto what you ate")
-// is rendered on every tab, so a user can type while Photo is the active
-// mode, and the log must still read `ai_text`. Every test below leaves (or
-// puts) `mode` at a value that does NOT match the resolve it drives, so a
-// regression to reading `source` off `mode` fails these on the `source`
-// field of the real createLog payload, not on an intermediate variable or a
-// mock's mere invocation.
+// and the "Quick photo capture" shortcut are both rendered on every tab, so
+// a user can type or snap a photo while a *different* tab is active, and the
+// log must still read the modality that actually ran.
+//
+// Not every test below can catch a regression to reading `source` off
+// `mode` — only the ones where `mode` and the resolve it drives disagree.
+// Three do:
+//   - "typing on the Photo tab" — mode stays "photo" (its default), the
+//     resolve is text; a mode-derived source would read "ai_photo".
+//   - "a photo capture via the quick-capture shortcut, from the Type tab" —
+//     mode is switched to "type" first, the resolve is a photo; a
+//     mode-derived source would read "ai_text".
+//   - "last-resolve-wins" — mode stays "photo" throughout (a photo capture
+//     never touches it), but the resolve that lands is text; a mode-derived
+//     source would read "ai_photo" and never notice the second resolve.
+// All three fail on the `source` field of the real createLog payload under
+// a reverted `sourceForMode(mode)` — verified by actually reverting it (see
+// the mutation-verify evidence in the fix report).
+//
+// The remaining three (voice, fresh barcode, cached-fallback barcode) can't
+// be built to disagree: "Start/Stop recording" only exists once `mode` is
+// "voice", and "capture-camera-view" only exists once `mode` is "scan" — so
+// `mode` and the resolve necessarily match in those tests, and they stay
+// green under the old `sourceForMode(mode)` too. They still earn their
+// place here: each pins its handler to stamping the correct literal via
+// applyResolution — rather than nothing, a typo, or the wrong modality —
+// just not specifically the tab-vs-modality confusion this file is named
+// for.
 describe("Add to diary — source follows the resolve, not the tab", () => {
   test("typing on the Photo tab (the default) logs ai_text, not ai_photo", async () => {
     // CaptureScreen mounts with mode="photo" and this test never switches
@@ -1112,14 +1134,17 @@ describe("Add to diary — source follows the resolve, not the tab", () => {
     expect(mockCreateLogMutateAsync).toHaveBeenCalledWith(expect.objectContaining({ source: "ai_text" }));
   });
 
-  test("a photo capture on the Photo tab logs ai_photo", async () => {
+  test("a photo capture via the quick-capture shortcut, from the Type tab, logs ai_photo", async () => {
     (ImagePicker.launchCameraAsync as jest.Mock).mockResolvedValueOnce({
       canceled: false,
       assets: [{ uri: "file://x.jpg", fileName: "x.jpg", mimeType: "image/jpeg" }],
     });
 
+    // Mode is switched to "type" first — the resolve is still a photo, so a
+    // mode-derived source would read "ai_text" here, not "ai_photo".
     const rendered = await render(<CaptureScreen />);
-    await fireEvent.press(await rendered.findByLabelText("Photo viewfinder"));
+    await fireEvent.press(await rendered.findByText("Type"));
+    await fireEvent.press(await rendered.findByLabelText("Quick photo capture"));
 
     await waitFor(() => expect(mockResolvePhotoMutate).toHaveBeenCalled());
     const [, options] = mockResolvePhotoMutate.mock.calls[0];
