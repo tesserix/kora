@@ -189,17 +189,29 @@ test("a photo resolve sends no input_phrase", async () => {
 // These chain a real text resolve first, in the same mounted component, so
 // resolvedPhrase is genuinely non-null before the photo/barcode resolve runs.
 //
-// The photo case below deliberately captures via the always-visible "Quick
-// photo capture" composer shortcut (capture.tsx ~line 522) instead of
-// switching the Photo mode pill first. `source` is derived from `mode`
-// (sourceForMode), and switching the mode pill would itself flip `mode` to
-// "photo" — which makes handleAddToDiary's own `source === "ai_text" ||
-// "ai_voice"` gate exclude input_phrase regardless of resolvedPhrase's
-// staleness, masking the exact regression this test exists to catch. The
-// quick-capture shortcut resolves a photo while `mode` is still "type", so
-// `source` stays "ai_text" and the only thing standing between a stale
-// phrase and the payload is setResolvedPhrase(null) inside the photo
-// handler's onSuccess.
+// The photo case below captures via the always-visible "Quick photo capture"
+// composer shortcut (capture.tsx ~line 522) while `mode` is still "type",
+// rather than switching the Photo mode pill first. That distinction used to
+// matter: `source` was once derived from `mode` (the now-deleted
+// `sourceForMode`), so resolving a photo while stuck in "type" mode was the
+// one way to make `source` read "ai_text" and actually exercise the
+// input_phrase gate below — switching to the Photo pill first would have
+// given "ai_photo" and made the gate exclude input_phrase for a reason
+// unrelated to resolvedPhrase, silently passing even if the photo handler
+// forgot to clear it.
+//
+// That bug is now fixed: `source` is stamped by applyResolution from the
+// resolve that actually ran (see capture.tsx), never from `mode`. A photo
+// resolve is unconditionally "ai_photo" regardless of which pill is active,
+// so the `source === "ai_text" || "ai_voice"` gate already excludes
+// input_phrase for this case on its own — this test's own scenario (still
+// "type" mode) no longer forces anything, it merely happens to match how a
+// real user would trigger the quick-capture shortcut. The setResolvedPhrase
+// (null) call in the photo handler's onSuccess is therefore defense-in-depth,
+// not the sole guard: it stops a phrase from lingering if the gate ever
+// changes to key off something other than `source`. The assertion below is
+// left in place for exactly that reason, with this comment updated so it no
+// longer claims a mode/source coupling that doesn't exist anymore.
 test("a phrase from an earlier text resolve does not leak into a later photo resolve", async () => {
   const { findByText, findByLabelText } = await render(<CaptureScreen />);
 
