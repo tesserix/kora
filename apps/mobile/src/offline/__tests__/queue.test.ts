@@ -91,6 +91,21 @@ test("an auth-token failure is transient, not permanent", async () => {
   expect((await list())[0].status).toBe("pending");
 });
 
+// A 401/403 must not be lumped in with the other 4xx. It almost always means
+// "not authenticated YET" — a drain that raced Firebase restoring the session
+// on cold start — and it is recoverable by signing back in, unlike a 400 or a
+// 422 which will fail identically forever. Marking it failed strands a
+// perfectly good log behind a manual retry that has no UI.
+test.each([401, 403])("a %i is transient, not permanent", async (status) => {
+  await append(payload, "id-1");
+  const err = Object.assign(new Error("unauthenticated"), { name: "ApiError", status });
+  const result = await drain(async () => { throw err; });
+
+  expect(result.deferred).toBe(1);
+  expect(result.failed).toBe(0);
+  expect((await list())[0].status).toBe("pending");
+});
+
 test("retry flips a failed item back to pending; discard removes it", async () => {
   await append(payload, "id-1");
   await append(payload, "id-2");

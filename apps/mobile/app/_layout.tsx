@@ -1,13 +1,12 @@
 import { useEffect } from "react";
-import { AppState } from "react-native";
 import { Stack, router } from "expo-router";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { QueryClientProvider, onlineManager } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { isFirebaseConfigured } from "@/lib/firebase";
 import { setupPushHandler } from "@/lib/push";
 import { installConnectivity } from "@/offline/connectivity";
-import { drainLogs } from "@/offline/drainLogs";
+import { installDrainTriggers } from "@/offline/drainTriggers";
 import { UnitsProvider } from "@/units";
 import { ToastProvider } from "@/components/Toast";
 import { SavedMealSheetProvider } from "@/components/meals/SavedMealSheetProvider";
@@ -21,24 +20,7 @@ export default function RootLayout() {
 
   useEffect(() => installConnectivity(), []);
 
-  useEffect(() => {
-    // Fire-and-forget: the queue is durable, so a drain that fails loses
-    // nothing — the items simply wait for the next trigger. drainLogs holds an
-    // in-flight guard, so these three triggers overlapping on launch still
-    // produce exactly one pass.
-    const drain = () => { void drainLogs(queryClient).catch(() => {}); };
-    // Cold start.
-    drain();
-    // Reconnect.
-    const unsubscribe = onlineManager.subscribe((online) => {
-      if (online) drain();
-    });
-    // Return to foreground — a drain may have been interrupted by a swipe-away.
-    const sub = AppState.addEventListener("change", (s) => {
-      if (s === "active") drain();
-    });
-    return () => { unsubscribe(); sub.remove(); };
-  }, []);
+  useEffect(() => installDrainTriggers(queryClient), []);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

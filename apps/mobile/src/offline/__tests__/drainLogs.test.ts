@@ -2,10 +2,11 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { QueryClient } from "@tanstack/react-query";
 import { append, list } from "../queue";
 import { drainLogs } from "../drainLogs";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, isAuthenticated } from "@/lib/api";
 
 jest.mock("@/lib/api", () => ({
   apiFetch: jest.fn(),
+  isAuthenticated: jest.fn(() => true),
   ApiError: class ApiError extends Error {},
 }));
 
@@ -17,7 +18,33 @@ const payload = {
 const sentIds = () =>
   (apiFetch as jest.Mock).mock.calls.map((c) => JSON.parse(c[1].body).id);
 
-beforeEach(async () => { await AsyncStorage.clear(); jest.clearAllMocks(); });
+beforeEach(async () => {
+  await AsyncStorage.clear();
+  jest.clearAllMocks();
+  (isAuthenticated as jest.Mock).mockReturnValue(true);
+});
+
+// The cold-start trigger fires before Firebase has restored the session from
+// AsyncStorage. An unauthenticated POST carries no Authorization header, comes
+// straight back 401 (api.ts skips refresh-and-retry when there is no user), and
+// would strand every queued log. So a signed-out drain must not send at all.
+test("drainLogs sends nothing while signed out and leaves the item untouched", async () => {
+  (isAuthenticated as jest.Mock).mockReturnValue(false);
+  // What the server really answers an unauthenticated POST with.
+  (apiFetch as jest.Mock).mockRejectedValue(
+    Object.assign(new Error("unauthenticated"), { name: "ApiError", status: 401 }),
+  );
+  await append(payload, "id-1");
+
+  await drainLogs(new QueryClient());
+
+  expect(apiFetch).not.toHaveBeenCalled();
+  // Not merely "no POST": the item must still be a candidate for the next
+  // drain, untouched — same status, same attempt count.
+  const items = await list();
+  expect(items).toHaveLength(1);
+  expect(items[0]).toMatchObject({ id: "id-1", status: "pending", attempts: 0 });
+});
 
 test("drainLogs POSTs each queued item with its id and clears the queue", async () => {
   (apiFetch as jest.Mock).mockResolvedValue({ id: "id-1" });

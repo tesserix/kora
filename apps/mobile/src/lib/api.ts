@@ -160,6 +160,18 @@ async function fetchWithRetry(
   return retryRes;
 }
 
+// isAuthenticated reports whether a request built right now would carry a
+// Bearer token. fetchWithRetry attaches one only when auth.currentUser exists,
+// and with no user it also skips the refresh-and-retry — so an unauthenticated
+// call comes straight back as ApiError(401). Background work that can simply
+// wait (the offline log queue's drain, which races Firebase restoring the
+// session on cold start) should check this rather than spend its payload on a
+// 401. Interactive requests should NOT: they belong to a screen that already
+// requires a signed-in user.
+export function isAuthenticated(): boolean {
+  return !!auth?.currentUser;
+}
+
 async function throwApiError(res: Response): Promise<never> {
   const requestId = res.headers?.get?.("X-Request-Id") ?? undefined;
   const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
