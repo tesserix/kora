@@ -27,7 +27,14 @@ test("upsert then look up by id", async () => {
   expect(await getFoodById("nope")).toBeNull();
 });
 
-test("look up by barcode — a repeat scan works offline", async () => {
+// A unit test of the LOOKUP only. The title used to be the whole claim, for a
+// journey the app could not actually perform: nothing outside this file called
+// getFoodByBarcode. The journey itself — scan online, scan again offline, log
+// it, see it named in the diary — is covered end to end by "scan online, then
+// offline: the repeat scan is logged and lands in the diary named" in
+// src/api/__tests__/hooks.test.tsx. Keep both: this one localises a lookup
+// regression, that one proves the capability exists.
+test("look up by barcode — the lookup a repeat offline scan is built on", async () => {
   await upsertFoods([food("f1", "Greek yogurt", "12345")]);
   expect((await getFoodByBarcode("12345"))?.id).toBe("f1");
   expect(await getFoodByBarcode("99999")).toBeNull();

@@ -37,6 +37,23 @@ export type FoodItem = {
 // through.
 export const UNKNOWN_PROVENANCE = "unknown";
 
+// Sentinel `match_tier` (and `Resolution.provenance`) for a result the device
+// produced from its own offline cache rather than receiving from the server.
+//
+// It exists for the same reason UNKNOWN_PROVENANCE does: a cache hit is a
+// genuinely different kind of answer from a live one — a food this user has
+// encountered before, with no fresh server data and no server-computed kcal
+// behind it — and nothing in the `Candidate`/`ResolvedCandidate` shape would
+// otherwise distinguish the two. Without a marker a cached guess renders
+// identically to a fresh AI resolution, which is the honesty problem this
+// branch keeps having to fix.
+//
+// Set ONLY by src/offline/cachedResolution.ts. The server never sends it.
+export const CACHED_MATCH_TIER = "cached";
+
+export const isCachedResult = (v: { match_tier?: string } | null | undefined): boolean =>
+  v?.match_tier === CACHED_MATCH_TIER;
+
 export type Candidate = {
   item: FoodItem;
   match_score: number;

@@ -4,7 +4,22 @@ import { useCameraPermissions } from "expo-camera";
 import { requestRecordingPermissionsAsync, useAudioRecorder } from "expo-audio";
 import { router } from "expo-router";
 import { ApiError, AuthTokenError, NetworkError, ResponseParseError } from "@/lib/api";
-import type { Resolution } from "@/api/types";
+import type { FoodItem, Resolution } from "@/api/types";
+import { OfflineUnknownBarcodeError, resolutionFromCachedFood } from "@/offline/cachedResolution";
+
+const cachedBarcodeFood: FoodItem = {
+  id: "f-bar",
+  name: "Choc protein bar",
+  brand: "Kora",
+  provenance: "openfoodfacts",
+  serving_desc: "1 bar (60 g)",
+  serving_grams: 60,
+  kcal_per_100g: 400,
+  protein_per_100g: 30,
+  carbs_per_100g: 40,
+  fat_per_100g: 12,
+  barcode: "012345678905",
+};
 
 jest.mock("expo-router", () => ({ router: { back: jest.fn(), push: jest.fn() } }));
 
@@ -802,6 +817,61 @@ describe("Scan mode", () => {
     mockResolveBarcodeIsPending = true;
     const { getByTestId } = await render(<CaptureScreen />);
     expect(getByTestId("capture-analyzing-spinner")).toBeTruthy();
+  });
+
+  // --- Offline barcode fallback -------------------------------------------
+  //
+  // The hook-level tests in src/api/__tests__/hooks.test.tsx own the fallback
+  // LOGIC (with onlineManager genuinely offline). These own the COPY: a cache
+  // hit and a fresh AI resolve must not read the same, and a cache miss while
+  // offline must not read as "this food does not exist".
+
+  test("a barcode answered from the offline cache says so, instead of posing as a fresh resolve", async () => {
+    const { findByText, findAllByText, findByTestId, queryByText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Scan"));
+    const cameraView = await findByTestId("capture-camera-view");
+
+    await act(async () => {
+      cameraView.props.onBarcodeScanned({ data: "012345678905", type: "ean13" });
+    });
+    const [, options] = mockResolveBarcodeMutate.mock.calls[0];
+    // Built by the real adapter, so this test breaks if the shape it produces
+    // stops being the shape the screen can recognise.
+    await act(async () => options.onSuccess(resolutionFromCachedFood(cachedBarcodeFood)));
+
+    expect(await findByText(/from a scan you.{0,3}ve done before/i)).toBeTruthy();
+    // Still a normal, loggable result card — the food is named and confirmable.
+    expect(await findByText("Choc protein bar")).toBeTruthy();
+    // And it must not claim a calorie figure it does not have — in the row OR
+    // in the card's running total, which used to sum an empty set to "0 kcal".
+    expect(await findAllByText("\u2014")).toHaveLength(2);
+    expect(queryByText("0 kcal")).toBeNull();
+  });
+
+  test("an unscanned barcode offline explains why, and leaves the scanner usable", async () => {
+    const { findByText, findByTestId } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Scan"));
+    const cameraView = await findByTestId("capture-camera-view");
+
+    await act(async () => {
+      cameraView.props.onBarcodeScanned({ data: "999999999999", type: "ean13" });
+    });
+    expect(mockResolveBarcodeMutate).toHaveBeenCalledTimes(1);
+
+    const [, options] = mockResolveBarcodeMutate.mock.calls[0];
+    await act(async () => options.onError(new OfflineUnknownBarcodeError()));
+
+    // Not "I couldn't identify that — try again", which is advice that cannot
+    // work until the network returns.
+    const bubble = await findByText(/offline/i);
+    expect(bubble).toBeTruthy();
+    expect(bubble.props.children).not.toMatch(/couldn.{0,3}t identify/i);
+
+    // The guard released, so the user can scan something else.
+    await act(async () => {
+      cameraView.props.onBarcodeScanned({ data: "888888888888", type: "ean13" });
+    });
+    expect(mockResolveBarcodeMutate).toHaveBeenCalledTimes(2);
   });
 
   // The scanner is guarded by a one-shot ref so one physical barcode does not

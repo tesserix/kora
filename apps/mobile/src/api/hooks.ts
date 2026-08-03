@@ -3,7 +3,20 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import * as Crypto from "expo-crypto";
 import { apiFetch, apiFetchEnvelope, apiFetchMultipart, isNetworkError } from "@/lib/api";
 import { isOnline } from "@/offline/connectivity";
-import { foodsFromMemory, foodsFromPins, foodsFromSavedMeals, upsertFoods, type FoodFidelity } from "@/offline/foodCache";
+import {
+  foodsFromMemory,
+  foodsFromPins,
+  foodsFromSavedMeals,
+  getFoodByBarcode,
+  searchCachedFoods,
+  upsertFoods,
+  type FoodFidelity,
+} from "@/offline/foodCache";
+import {
+  OfflineUnknownBarcodeError,
+  candidatesFromCachedFoods,
+  resolutionFromCachedFood,
+} from "@/offline/cachedResolution";
 import { append, discard, isQueued, type QueuedLog } from "@/offline/queue";
 import { QUEUED_LOGS_KEY } from "@/offline/queryKeys";
 import { NoOwnerError, resolveOwnerId } from "@/offline/owner";
@@ -89,16 +102,70 @@ export function useSubmitOnboarding() {
   });
 }
 
+// The offline decision, in one place for both lookups below: try the network
+// only when there is one, and treat a request that dies mid-flight the same as
+// having been offline all along. isOnline() is only a snapshot taken before the
+// request leaves, and the commonest mobile failure is the connection dropping
+// after that — so the pre-flight check and the isNetworkError catch are two
+// different rules and BOTH are needed. Exactly the pair useCreateLog applies to
+// the write path.
+//
+// Anything that is not a network failure (a 4xx, a bad token, an unparseable
+// body) rethrows: masking a real server rejection behind a stale local answer
+// would be worse than failing.
+async function withCacheFallback<T>(live: () => Promise<T>, cached: () => Promise<T>): Promise<T> {
+  if (!isOnline()) return cached();
+  try {
+    return await live();
+  } catch (err) {
+    if (isNetworkError(err)) return cached();
+    throw err;
+  }
+}
+
+type FoodSearchResult = { candidates: Candidate[]; fromCache: boolean };
+
 // Index-only search — alias, then full-text, then embedding. No AI cost, so
 // it is safe to call as the user types. Disabled under 2 characters because
 // the server rejects shorter queries with a 400.
+//
+// Offline it falls back to a name-substring scan of the food cache, so a food
+// the device has seen before is still findable and loggable. The fallback lives
+// in the hook rather than at the call sites because there are two of them
+// (app/log.tsx and src/components/meal/FoodPicker.tsx) and the offline-vs-online
+// decision must not be duplicated into either.
 export function useFoodSearch(query: string) {
   const q = query.trim();
-  return useQuery({
+  const result = useQuery({
     queryKey: ["foods", q],
-    queryFn: () => apiFetch(`/v1/foods?q=${encodeURIComponent(q)}`) as Promise<Candidate[]>,
+    // Without this react-query PAUSES the query while offline and the queryFn
+    // never runs at all — the cache fallback below would be unreachable in
+    // precisely the state it exists for. The app-wide default in
+    // src/lib/queryClient covers mutations only; pausing reads offline is
+    // deliberate everywhere except the reads that have a local answer.
+    networkMode: "always",
+    queryFn: (): Promise<FoodSearchResult> =>
+      withCacheFallback<FoodSearchResult>(
+        async () => ({
+          candidates: (await apiFetch(`/v1/foods?q=${encodeURIComponent(q)}`)) as Candidate[],
+          fromCache: false,
+        }),
+        async () => ({ candidates: candidatesFromCachedFoods(await searchCachedFoods(q)), fromCache: true }),
+      ),
     enabled: q.length >= 2,
   });
+
+  // `data` keeps the Candidate[] shape both call sites already render, so
+  // neither changes for the happy path. `isOfflineCache` is reported separately
+  // because an EMPTY cached result is indistinguishable from an empty server
+  // result by inspection — and those two need to say very different things to
+  // the user ("nothing matches" vs "you're offline, so only foods you've logged
+  // before are searchable").
+  return {
+    ...result,
+    data: result.data?.candidates,
+    isOfflineCache: result.data?.fromCache ?? false,
+  };
 }
 
 export type CreateLogInput = {
@@ -462,10 +529,35 @@ export function useResolveText() {
   });
 }
 
+// A barcode the device has resolved once already is answerable with no
+// network — that is the whole reason getFoodByBarcode and the "full" fidelity
+// tier exist. The adapter marks the result as cache-sourced so it can never be
+// mistaken for a fresh resolve; see src/offline/cachedResolution.ts.
+async function barcodeFromCache(barcode: string): Promise<Resolution> {
+  const cached = await getFoodByBarcode(barcode);
+  // A distinct error, not an empty Resolution: "I couldn't identify that — try
+  // again" is advice that cannot work until the network returns, whereas this
+  // is a fact we positively established. capture.tsx turns it into copy that
+  // says so.
+  if (!cached) throw new OfflineUnknownBarcodeError();
+  return resolutionFromCachedFood(cached);
+}
+
 export function useResolveBarcode() {
   return useMutation({
-    mutationFn: (barcode: string) =>
-      apiFetch("/v1/resolve/barcode", { method: "POST", body: JSON.stringify({ barcode }) }).then(normalizeResolution),
+    // Same reason useCreateLog carries this locally: the mutationFn IS the
+    // offline path, so a paused mutation does not merely delay the feature, it
+    // removes it. Kept next to the code that depends on it rather than relying
+    // on the app-wide default a later change could narrow.
+    networkMode: "always",
+    mutationFn: (barcode: string): Promise<Resolution> =>
+      withCacheFallback(
+        async () =>
+          normalizeResolution(
+            await apiFetch("/v1/resolve/barcode", { method: "POST", body: JSON.stringify({ barcode }) }),
+          ),
+        () => barcodeFromCache(barcode),
+      ),
     // The one path that hands back genuine server FoodItems — brand,
     // provenance, canonical serving, and (the whole point) a barcode.
     // Caching them at "full" fidelity (the default) is what makes a repeat

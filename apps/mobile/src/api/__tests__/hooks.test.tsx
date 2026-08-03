@@ -2,6 +2,9 @@ import { act, renderHook, waitFor } from "@testing-library/react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+import { CACHED_MATCH_TIER } from "@/api/types";
+import type { FoodItem } from "@/api/types";
+import { OfflineUnknownBarcodeError } from "@/offline/cachedResolution";
 import { NetworkError, apiFetch, apiFetchEnvelope, apiFetchMultipart, currentUserId } from "@/lib/api";
 import { drain, list } from "@/offline/queue";
 import { getFoodById, getFoodByBarcode } from "@/offline/foodCache";
@@ -76,6 +79,9 @@ function wrapper({ children }: { children: ReactNode }) {
 // throws before its inline restore — otherwise a spy leaks into later tests.
 afterEach(() => {
   jest.restoreAllMocks();
+  // Offline is a PROCESS-WIDE flag on onlineManager. A test that leaves it set
+  // silently pauses every query in every test after it.
+  onlineManager.setOnline(true);
 });
 
 test("useProfile fetches /v1/me", async () => {
@@ -1005,4 +1011,218 @@ test("deleting a server row also discards the queued copy that shares its id", a
   // And the diary's own view of the queue has to refresh, or the deleted row
   // sits on screen — still counted — until something else invalidates.
   await waitFor(() => expect(result.current.queued.rows.map((r) => r.id)).toEqual(["bystander-1"]));
+});
+
+// --- Offline lookups: barcode + manual search ------------------------------
+//
+// Every test below puts onlineManager in the OFFLINE state for real. That is
+// the whole point: this branch previously shipped fourteen green tests that
+// nominally covered offline behaviour while onlineManager reported online the
+// entire time, so the feature was dead in the only state it exists for.
+//
+// Note the `wrapper` these use is the plain one at the top of this file — no
+// app defaults, react-query's stock networkMode. So they also prove the hooks
+// work regardless of how the QueryClient is configured, rather than leaning on
+// src/lib/queryClient's mutation default.
+
+const BARCODE = "012345678905";
+const barcodeFood = {
+  id: "f-bar",
+  name: "Choc protein bar",
+  brand: "Kora",
+  provenance: "openfoodfacts",
+  serving_desc: "1 bar (60 g)",
+  serving_grams: 60,
+  kcal_per_100g: 400,
+  protein_per_100g: 30,
+  carbs_per_100g: 40,
+  fat_per_100g: 12,
+  barcode: BARCODE,
+};
+const serverBarcodeResolution = {
+  candidates: [
+    { item: barcodeFood, portion_grams: 60, kcal: 240, match_score: 0.99, match_tier: "barcode", tier: "auto" },
+  ],
+  tier: "auto",
+  is_estimate: false,
+  provenance: "openfoodfacts",
+};
+
+test("a barcode resolved online is found again offline, from the cache", async () => {
+  await AsyncStorage.clear();
+  (apiFetch as jest.Mock).mockResolvedValueOnce(serverBarcodeResolution);
+
+  const { result } = await renderHook(() => useResolveBarcode(), { wrapper });
+  await act(async () => { await result.current.mutateAsync(BARCODE); });
+  await waitFor(async () => expect(await getFoodByBarcode(BARCODE)).not.toBeNull());
+
+  // Genuinely offline, and apiFetch would now reject if anything reached it.
+  onlineManager.setOnline(false);
+  (apiFetch as jest.Mock).mockReset();
+  (apiFetch as jest.Mock).mockRejectedValue(new NetworkError("no network"));
+
+  let offline!: Awaited<ReturnType<typeof result.current.mutateAsync>>;
+  await act(async () => { offline = await result.current.mutateAsync(BARCODE); });
+
+  expect(apiFetch).not.toHaveBeenCalled();
+  expect(offline.candidates).toHaveLength(1);
+  expect(offline.candidates[0].item.name).toBe("Choc protein bar");
+  // The portion comes from the cached record's real serving, so the row is
+  // loggable without the user typing grams.
+  expect(offline.candidates[0].portion_grams).toBe(60);
+  // A cache hit must never be mistakable for a fresh server resolution.
+  expect(offline.candidates[0].match_tier).toBe(CACHED_MATCH_TIER);
+  expect(offline.provenance).toBe(CACHED_MATCH_TIER);
+  // No server-computed kcal exists for this portion, and the client is
+  // forbidden from deriving nutrition — so it says so rather than inventing.
+  expect(offline.candidates[0].kcal_unknown).toBe(true);
+});
+
+test("a barcode the device has never resolved is refused offline, with a reason", async () => {
+  await AsyncStorage.clear();
+  onlineManager.setOnline(false);
+
+  const { result } = await renderHook(() => useResolveBarcode(), { wrapper });
+
+  await expect(
+    act(async () => { await result.current.mutateAsync("999999999999"); }),
+  ).rejects.toBeInstanceOf(OfflineUnknownBarcodeError);
+  expect(apiFetch).not.toHaveBeenCalled();
+});
+
+// isOnline() is only a snapshot taken before the request leaves; the commonest
+// mobile failure is the connection dying mid-flight. Same rule useCreateLog
+// already applies to the write path.
+test("a connection that dies mid-resolve still falls back to the cache", async () => {
+  await AsyncStorage.clear();
+  await foodCache.upsertFoods([barcodeFood as FoodItem]);
+
+  // Reported online, so the pre-flight check passes and the request is made.
+  onlineManager.setOnline(true);
+  (apiFetch as jest.Mock).mockReset();
+  (apiFetch as jest.Mock).mockRejectedValue(new NetworkError("socket closed"));
+
+  const { result } = await renderHook(() => useResolveBarcode(), { wrapper });
+  let out!: Awaited<ReturnType<typeof result.current.mutateAsync>>;
+  await act(async () => { out = await result.current.mutateAsync(BARCODE); });
+
+  expect(apiFetch).toHaveBeenCalled();
+  expect(out.candidates[0].item.name).toBe("Choc protein bar");
+  expect(out.candidates[0].match_tier).toBe(CACHED_MATCH_TIER);
+});
+
+// A 4xx is a real failure the user must see — falling back to the cache there
+// would hide a genuine server rejection behind a stale local answer.
+test("a server rejection is NOT masked by the cache", async () => {
+  await AsyncStorage.clear();
+  await foodCache.upsertFoods([barcodeFood as FoodItem]);
+  onlineManager.setOnline(true);
+  (apiFetch as jest.Mock).mockReset();
+  (apiFetch as jest.Mock).mockRejectedValue(
+    Object.assign(new Error("bad barcode"), { name: "ApiError", status: 400 }),
+  );
+
+  const { result } = await renderHook(() => useResolveBarcode(), { wrapper });
+  await expect(
+    act(async () => { await result.current.mutateAsync(BARCODE); }),
+  ).rejects.toThrow("bad barcode");
+});
+
+test("useFoodSearch returns cached matches while offline, without touching the network", async () => {
+  await AsyncStorage.clear();
+  await foodCache.upsertFoods([barcodeFood as FoodItem]);
+  onlineManager.setOnline(false);
+  (apiFetch as jest.Mock).mockReset();
+  (apiFetch as jest.Mock).mockRejectedValue(new NetworkError("no network"));
+
+  const { result } = await renderHook(() => useFoodSearch("protein"), { wrapper });
+
+  // Under react-query's stock networkMode a query is PAUSED while offline and
+  // the queryFn never runs at all — data would stay undefined forever. This
+  // waitFor is the guard against exactly that.
+  await waitFor(() => expect(result.current.data).toBeDefined());
+  expect(result.current.data).toHaveLength(1);
+  expect(result.current.data![0].item.name).toBe("Choc protein bar");
+  expect(result.current.data![0].match_tier).toBe(CACHED_MATCH_TIER);
+  expect(result.current.isOfflineCache).toBe(true);
+  expect(apiFetch).not.toHaveBeenCalled();
+});
+
+test("useFoodSearch offline with nothing cached is an honest empty result, not an error", async () => {
+  await AsyncStorage.clear();
+  await foodCache.upsertFoods([barcodeFood as FoodItem]);
+  onlineManager.setOnline(false);
+
+  const { result } = await renderHook(() => useFoodSearch("sushi"), { wrapper });
+
+  await waitFor(() => expect(result.current.data).toBeDefined());
+  expect(result.current.data).toEqual([]);
+  expect(result.current.isError).toBe(false);
+  expect(result.current.isOfflineCache).toBe(true);
+});
+
+test("useFoodSearch online is unchanged — server results, not flagged as cached", async () => {
+  await AsyncStorage.clear();
+  onlineManager.setOnline(true);
+  (apiFetch as jest.Mock).mockReset();
+  (apiFetch as jest.Mock).mockResolvedValue([
+    { item: barcodeFood, match_score: 0.9, match_tier: "fulltext" },
+  ]);
+
+  const { result } = await renderHook(() => useFoodSearch("protein"), { wrapper });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+  expect(apiFetch).toHaveBeenCalledWith("/v1/foods?q=protein");
+  expect(result.current.data![0].match_tier).toBe("fulltext");
+  expect(result.current.isOfflineCache).toBe(false);
+});
+
+// The journey the shipped test title at foodCache.test.ts:30 has been claiming
+// all along — "a repeat scan works offline" — end to end, not just the lookup
+// function: scan online once, go offline, scan again, log it, and see it in
+// the diary as a named row with a real kcal.
+test("scan online, then offline: the repeat scan is logged and lands in the diary named", async () => {
+  await AsyncStorage.clear();
+  await rememberOwner("user-a");
+  (apiFetch as jest.Mock).mockResolvedValueOnce(serverBarcodeResolution);
+
+  const { result } = await renderHook(
+    () => ({
+      barcode: useResolveBarcode(),
+      create: useCreateLog(),
+      diary: useQueuedLogs("2026-08-02"),
+    }),
+    { wrapper },
+  );
+
+  await act(async () => { await result.current.barcode.mutateAsync(BARCODE); });
+  await waitFor(async () => expect(await getFoodByBarcode(BARCODE)).not.toBeNull());
+
+  onlineManager.setOnline(false);
+  (apiFetch as jest.Mock).mockReset();
+  (apiFetch as jest.Mock).mockRejectedValue(new NetworkError("no network"));
+
+  let scanned!: Awaited<ReturnType<typeof result.current.barcode.mutateAsync>>;
+  await act(async () => { scanned = await result.current.barcode.mutateAsync(BARCODE); });
+  const candidate = scanned.candidates[0];
+
+  await act(async () => {
+    await result.current.create.mutateAsync({
+      food_item_id: candidate.item.id,
+      meal_slot: "lunch",
+      source: "ai_barcode",
+      quantity_grams: candidate.portion_grams,
+      logged_at: "2026-08-02T12:00:00.000Z",
+    });
+  });
+
+  // Queued, not sent — there is no network.
+  expect(await list()).toHaveLength(1);
+
+  // And the diary shows it as a real food, not "Queued item": 400 kcal/100g at
+  // the cached 60 g serving is 240 kcal.
+  await waitFor(() => expect(result.current.diary.rows).toHaveLength(1));
+  expect(result.current.diary.rows[0].description).toBe("Choc protein bar");
+  expect(result.current.diary.rows[0].description).not.toBe("Queued item");
+  expect(result.current.diary.rows[0].kcal).toBeCloseTo(240);
 });

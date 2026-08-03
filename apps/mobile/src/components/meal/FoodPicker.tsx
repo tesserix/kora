@@ -62,6 +62,18 @@ export function FoodPicker({ visible, initialQuery, onSelect, onClose }: FoodPic
           </View>
         </Card>
 
+        {/* Same honesty the Log screen owes: an offline result set can only
+            contain foods this device has already seen, so a short list is not
+            evidence the index is thin and an empty one is not evidence the food
+            does not exist. */}
+        {search.isOfflineCache && trimmed.length >= 2 ? (
+          <AppText variant="footnote" muted style={{ marginBottom: 8 }}>
+            {search.data && search.data.length > 0
+              ? "You're offline — showing foods you've logged before."
+              : "You're offline, and you haven't logged anything matching that before."}
+          </AppText>
+        ) : null}
+
         {trimmed.length < 2 ? (
           <AppText variant="footnote" muted>
             Keep typing — 2+ characters to search.
@@ -109,7 +121,7 @@ export function FoodPicker({ visible, initialQuery, onSelect, onClose }: FoodPic
               );
             })}
           </View>
-        ) : !search.isLoading ? (
+        ) : !search.isLoading && !search.isOfflineCache ? (
           <AppText variant="footnote" muted>
             No match — try another word.
           </AppText>

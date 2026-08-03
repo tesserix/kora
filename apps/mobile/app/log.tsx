@@ -317,6 +317,18 @@ export default function LogScreen() {
             </>
           ) : null}
 
+          {/* An offline search is a narrower thing than a server search: it can
+              only find foods this device has already seen. Without saying so, a
+              short list reads as "the food index barely has anything" and an
+              empty one reads as "this food does not exist". */}
+          {search.isOfflineCache && q.length >= 2 ? (
+            <AppText variant="footnote" muted style={{ marginBottom: 8 }}>
+              {search.data && search.data.length > 0
+                ? "You're offline — showing foods you've logged before."
+                : "You're offline, and you haven't logged anything matching that before."}
+            </AppText>
+          ) : null}
+
           {search.data && search.data.length > 0 ? (
             <GroupedSection elevated>
               {search.data.map((candidate, i) => {
@@ -338,7 +350,11 @@ export default function LogScreen() {
               })}
             </GroupedSection>
           ) : q.length >= 2 && !search.isLoading ? (
-            <AppText muted>No matches.</AppText>
+            // "No matches." asserts the food is not in the index. Offline we
+            // cannot see the index at all, so the only honest thing to report
+            // is the limitation — said above, which is why nothing is repeated
+            // here.
+            search.isOfflineCache ? null : <AppText muted>No matches.</AppText>
           ) : null}
         </ScrollView>
       </View>
