@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from "@testing-library/react-native";
+import { act, renderHook, waitFor } from "@testing-library/react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -976,4 +976,33 @@ test("a log queued from a memory food renders a named diary row with a real kcal
   expect(diary.current.rows[0].description).toBe("Overnight oats");
   expect(diary.current.rows[0].description).not.toBe("Queued item");
   expect(diary.current.rows[0].kcal).toBeCloseTo(300);
+});
+
+// The client mints ONE id for both the queue item and the server row, so a row
+// can exist WHILE its queue item is still pending: a POST that died after the
+// server applied it, or a drain whose response was lost. The diary hides the
+// queued copy while the server row is present, so the user only ever sees — and
+// swipe-deletes — the row. Leave the queue item behind and the next drain
+// replays that id into a now-empty primary key, resurrecting a meal the user
+// deleted.
+test("deleting a server row also discards the queued copy that shares its id", async () => {
+  await AsyncStorage.clear();
+  await append({ ...logInput, food_item_id: "f-del" }, "shared-1", "user-a");
+  // A second item that must survive, so "discards the queued copy" is a claim
+  // that can fail: against a one-item queue, discarding everything would pass.
+  await append({ ...logInput, food_item_id: "f-keep" }, "bystander-1", "user-a");
+
+  const { result } = await renderHook(
+    () => ({ del: useDeleteLog(), queued: useQueuedLogs("2026-08-02") }),
+    { wrapper },
+  );
+  await waitFor(() => expect(result.current.queued.rows).toHaveLength(2));
+
+  (apiFetch as jest.Mock).mockResolvedValueOnce({});
+  await act(async () => { await result.current.del.mutateAsync("shared-1"); });
+
+  expect((await list()).map((i) => i.id)).toEqual(["bystander-1"]);
+  // And the diary's own view of the queue has to refresh, or the deleted row
+  // sits on screen — still counted — until something else invalidates.
+  await waitFor(() => expect(result.current.queued.rows.map((r) => r.id)).toEqual(["bystander-1"]));
 });

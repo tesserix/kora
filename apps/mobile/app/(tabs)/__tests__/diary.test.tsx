@@ -205,7 +205,13 @@ test("swiping a meal row's delete action confirms then deletes that log id", asy
   const confirm = buttons.find((b) => b.text === "Delete");
   confirm?.onPress?.();
 
-  expect(mockDeleteMutate).toHaveBeenCalledWith("1");
+  // The second argument is the per-call onError that surfaces a failed delete
+  // (see diary.tsx). Asserted as present rather than ignored: without it the
+  // row silently stays in the diary.
+  expect(mockDeleteMutate).toHaveBeenCalledWith(
+    "1",
+    expect.objectContaining({ onError: expect.any(Function) }),
+  );
 });
 
 // --- Queued (offline) rows -------------------------------------------------

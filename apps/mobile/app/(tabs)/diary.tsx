@@ -222,7 +222,19 @@ export default function Diary() {
   const confirmDelete = (id: string) => {
     Alert.alert("Delete this entry?", "This removes it from your diary.", [
       { text: "Cancel", style: "cancel" },
-      { text: "Delete", style: "destructive", onPress: () => deleteLog.mutate(id) },
+      {
+        text: "Delete",
+        style: "destructive",
+        // This was the one delete in the app with no error surface — meal.tsx's
+        // identical flow has had one all along. It fails by leaving the row
+        // exactly where it was, which the user cannot tell apart from nothing
+        // having happened; and a delete that failed also leaves any queued copy
+        // of this id in place (see useDeleteLog), so the meal is still live.
+        onPress: () =>
+          deleteLog.mutate(id, {
+            onError: () => Alert.alert("Couldn't delete", "Please try again."),
+          }),
+      },
     ]);
   };
 

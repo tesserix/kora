@@ -4,7 +4,7 @@ import * as Crypto from "expo-crypto";
 import { apiFetch, apiFetchEnvelope, apiFetchMultipart, isNetworkError } from "@/lib/api";
 import { isOnline } from "@/offline/connectivity";
 import { foodsFromMemory, foodsFromPins, foodsFromSavedMeals, upsertFoods, type FoodFidelity } from "@/offline/foodCache";
-import { append, isQueued, type QueuedLog } from "@/offline/queue";
+import { append, discard, isQueued, type QueuedLog } from "@/offline/queue";
 import { QUEUED_LOGS_KEY } from "@/offline/queryKeys";
 import { NoOwnerError, resolveOwnerId } from "@/offline/owner";
 import type { MealSlot } from "@/lib/mealSlot";
@@ -402,9 +402,31 @@ export function useDeleteLog() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => apiFetch(`/v1/logs/${id}`, { method: "DELETE" }),
-    onSuccess: () => {
+    // The client mints ONE id for both the queue item and the server row, so a
+    // row can exist WHILE its queue item is still pending — a POST that died
+    // after the server applied it, or a drain whose response was lost. The
+    // diary hides the queued copy while the row is present (see diary.tsx), so
+    // the user only ever sees, and deletes, the row. Leave the queue item and
+    // the next drain replays that id into a now-empty primary key: the meal the
+    // user deleted comes back.
+    //
+    // onSuccess, NOT onSettled: a DELETE that failed leaves the server row in
+    // place, so the queue item is still an accurate duplicate of something real
+    // and dropping it would discard state the user has not actually undone.
+    // Nor inside mutationFn: a storage failure there would surface as
+    // "couldn't delete" for a row the server genuinely did delete.
+    onSuccess: async (_data, id) => {
+      // Best-effort for the same reason cacheFoodsQuietly is: reporting the
+      // delete as failed because a local write failed would be a lie about
+      // what the server did, and would send the user round a retry loop whose
+      // DELETE now 404s.
+      await discard(id).catch((err) => console.warn("queue: discard after delete failed", err));
       qc.invalidateQueries({ queryKey: ["logs"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
+      // The diary reads queued rows straight off the queue, so without this the
+      // deleted row stays on screen — and counted — until something else
+      // invalidates.
+      qc.invalidateQueries({ queryKey: [QUEUED_LOGS_KEY] });
     },
   });
 }
