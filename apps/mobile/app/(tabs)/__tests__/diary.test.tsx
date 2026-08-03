@@ -277,6 +277,55 @@ test("pending kcal counts toward the day total and failed kcal does not", async 
   expect(queryByText("500")).toBeNull();
 });
 
+// The client mints ONE id and uses it as both the queue item id and the server
+// row id (useCreateLog mints it, queue.ts stores it as item.id, drainLogs
+// replays it), so a meal the server has already applied appears under the same
+// id in both lists. Two ordinary paths leave the queue holding such an item:
+// a POST that died after the server wrote the row, and a drain whose response
+// was lost. Until the next drain replays the id idempotently and clears the
+// queue, the meal is in both lists — and showing it twice is the one thing
+// this whole feature must never do.
+const drainedMeal = {
+  ...LOGS_DATA[0],
+  id: "dup",
+  description: "Greek yogurt",
+  meal_slot: "lunch",
+  kcal: 93,
+};
+
+test("a queued row the server already has is rendered once, not twice", async () => {
+  mockDayLogs = [drainedMeal];
+  mockQueuedRows = [queuedRow({ id: "dup", description: "Greek yogurt", kcal: 93 })];
+
+  const { findByText, getAllByText, queryByText } = await render(<Diary />);
+  await findByText("LUNCH");
+
+  expect(getAllByText("Greek yogurt")).toHaveLength(1);
+  // And the survivor is the SERVER row, not the queued copy.
+  expect(queryByText("Pending")).toBeNull();
+  expect(queryByText("Waiting to sync")).toBeNull();
+});
+
+test("a queued row the server already has is counted once in the day total", async () => {
+  // The dashboard figure is the server's, so it already contains the 93.
+  mockDashboardData = { consumed: { kcal: 500 }, targets: { kcal: 2000 }, water_ml: 0 };
+  mockDayLogs = [drainedMeal];
+  mockQueuedRows = [
+    queuedRow({ id: "dup", description: "Greek yogurt", kcal: 93 }),
+    queuedRow({ id: "not-yet", description: "Cold brew", kcal: 40 }),
+  ];
+
+  const { findByText, queryByText } = await render(<Diary />);
+
+  // 500 already includes the drained meal; only the genuinely unsent 40 is added.
+  expect(await findByText("540")).toBeTruthy();
+  // Counting the drained meal a second time would read 633.
+  expect(queryByText("633")).toBeNull();
+  // Dropping every queued row would read 500 — the row that has NOT landed
+  // still has to count.
+  expect(queryByText("500")).toBeNull();
+});
+
 // A queued row whose food was evicted from the offline cache has no honest
 // calorie figure, so it must not contribute a made-up one to the day.
 test("a queued row with an unknown kcal shows a dash and leaves the total alone", async () => {

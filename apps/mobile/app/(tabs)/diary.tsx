@@ -226,10 +226,27 @@ export default function Diary() {
     ]);
   };
 
+  const logged = (logs.data ?? []) as FoodLog[];
+
+  // The client mints ONE id and uses it as both the queue item id and the
+  // server row id (see useCreateLog), so a queued item the server has already
+  // applied shares its id with the row that came back. Two ordinary paths
+  // leave the queue in that state: a POST that died after the server wrote the
+  // row, and a drain whose response was lost. Both stay that way until the
+  // next drain replays the id idempotently and clears the queue — and in the
+  // meantime the meal is in BOTH lists. Showing it twice, and counting it
+  // twice, is exactly what this feature exists to prevent, so the shared id is
+  // used to drop the queued copy the moment the server row exists.
+  //
+  // Everything below reads this list rather than queued.rows, so the rendered
+  // rows and the day total can never disagree about which meals are pending.
+  const serverLogIds = new Set(logged.map((l) => l.id));
+  const queuedNotOnServer = queued.rows.filter((r) => !serverLogIds.has(r.id));
+
   // A queued row the user tapped, resolved from the live rows rather than
   // captured on tap, so a drain that lands mid-sheet cannot leave stale copy
   // on screen.
-  const failedRow = queued.rows.find((r) => r.id === failedRowId) ?? null;
+  const failedRow = queuedNotOnServer.find((r) => r.id === failedRowId) ?? null;
 
   // Retry and Discard both dismiss the sheet immediately, so a rejected
   // storage write would otherwise look exactly like a successful one — the row
@@ -248,7 +265,7 @@ export default function Diary() {
   // landing, so counting it would overstate the day indefinitely. A null kcal
   // (food evicted from the offline cache) contributes nothing — it is unknown,
   // not zero, and the row says so.
-  const queuedKcal = queued.rows.reduce(
+  const queuedKcal = queuedNotOnServer.reduce(
     (sum, r) => (r.status === "pending" ? sum + (r.kcal ?? 0) : sum),
     0,
   );
@@ -262,7 +279,6 @@ export default function Diary() {
       : { value: waterMl / 1000, unit: "L", format: (n: number) => n.toFixed(1) };
   const waterQuickAdds = WATER_QUICK_ADDS[system];
   const pct = goal > 0 ? Math.round((total / goal) * 100) : 0;
-  const logged = (logs.data ?? []) as FoodLog[];
 
   const openMeal = (log: FoodLog) =>
     router.push({ pathname: "/meal", params: { id: log.id, name: log.description, mealSlot: log.meal_slot, time: timeOf(log.logged_at), kcal: String(Math.round(log.kcal)), protein: String(Math.round(log.protein_g)), carbs: String(Math.round(log.carbs_g)), fat: String(Math.round(log.fat_g)), grams: String(Math.round(log.quantity_grams)) } });
@@ -272,7 +288,7 @@ export default function Diary() {
   const slots = SLOT_ORDER.map((slot) => ({
     slot,
     items: logged.filter((l) => l.meal_slot === slot),
-    queued: queued.rows.filter((r) => r.mealSlot.toLowerCase() === slot),
+    queued: queuedNotOnServer.filter((r) => r.mealSlot.toLowerCase() === slot),
   })).filter((group) => group.items.length > 0 || group.queued.length > 0);
 
   return (
@@ -388,7 +404,7 @@ export default function Diary() {
             </Animated.View>
           ))}
 
-          {logged.length === 0 && queued.rows.length === 0 ? (
+          {logged.length === 0 && queuedNotOnServer.length === 0 ? (
             <Animated.View entering={enter(4)}>
               <EmptyState
                 icon="book-open"
