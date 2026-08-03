@@ -272,6 +272,74 @@ jest.mock("@kingstinct/react-native-healthkit", () => ({
   queryWorkoutSamples: jest.fn(async () => []),
 }));
 
+// FormData: make the global the SAME implementation the app has at runtime.
+//
+// This matters more than it looks, and #82 is the proof. Jest's default global
+// FormData is the WHATWG/undici one, which per spec coerces any non-Blob value with
+// String(value) — so a broken file part silently encodes as the text
+// "[object Object]" and NOTHING ever throws. On a device the global is React Native's
+// FormData (getParts()/_parts, no entries()), which Expo's winter runtime then
+// patches to add the iteration methods its fetch converter reads. Only on THAT
+// implementation does an unsupported part surface as
+// "Unsupported FormDataPart implementation".
+//
+// Testing multipart against the WHATWG global therefore verifies nothing about this
+// app: the broken and fixed forms both "pass". Installing the real pair here is what
+// makes src/api/__tests__/resolve-upload-multipart.test.tsx a binding test rather
+// than a decorative one. The patch adds methods, so it is a superset of what the
+// WHATWG global offered — existing suites keep working.
+// requireActual is REQUIRED here, not stylistic: jest-expo automocks modules under
+// expo/, which turns installFormDataPatch into a stub that returns undefined and
+// silently leaves the global unpatched. Expo's own converter test does the same thing
+// for the same reason.
+const { installFormDataPatch } = jest.requireActual("expo/src/winter/FormData");
+global.FormData = installFormDataPatch(
+  jest.requireActual("react-native/Libraries/Network/FormData").default,
+);
+
+// expo-file-system (SDK 57): `new File(uri)` is a native SharedObject whose bytes()/
+// name/type read the real filesystem, none of which exists under Jest. This stand-in
+// keeps the three members Expo's FormData converter actually consumes
+// (expo/src/winter/fetch/convertFormData.ts): it dispatches on `'bytes' in entry`,
+// then reads `name` for the filename and `type` for the part's content-type.
+//
+// The `type` values below are the REAL iOS ones, measured rather than assumed:
+// expo-file-system computes type as UTType(filenameExtension:).preferredMIMEType
+// (ios/FileSystemFile.swift), which on this machine returns image/png, image/jpeg
+// and — note — audio/x-m4a, NOT the audio/mp4 the app declares for recordings.
+// Keeping the discrepancy in the mock is deliberate: it is what makes the voice test
+// able to prove the CALLER's declared MIME wins over the file-derived one, so nobody
+// can "simplify" buildFileForm into using File.type without a test failing.
+jest.mock("expo-file-system", () => {
+  const contents = new Map();
+  const MIME = {
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    m4a: "audio/x-m4a",
+  };
+  class File {
+    constructor(uri) {
+      this.uri = String(uri);
+    }
+    get name() {
+      return this.uri.split("/").pop() ?? "";
+    }
+    get type() {
+      return MIME[this.name.split(".").pop()?.toLowerCase() ?? ""] ?? "";
+    }
+    async bytes() {
+      const seeded = contents.get(this.uri);
+      if (!seeded) throw new Error(`expo-file-system mock: no contents seeded for ${this.uri}`);
+      return seeded;
+    }
+  }
+  // Tests seed the bytes a given uri should read back as.
+  File.__seed = (uri, bytes) => contents.set(String(uri), bytes);
+  File.__reset = () => contents.clear();
+  return { __esModule: true, File };
+});
+
 // expo-crypto: jest-expo's automock resolves randomUUID() to undefined, which
 // would hand every log the same empty identity — and the client-minted id is
 // the whole basis of replay idempotency for the offline queue. Delegate to

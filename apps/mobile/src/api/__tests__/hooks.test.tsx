@@ -263,29 +263,32 @@ test("a cache-write failure from usePins is caught and logged, never left unhand
   }
 });
 
-test("useResolvePhoto builds FormData and posts to /v1/resolve/photo", async () => {
+// These two cover only routing and the unwrapped result. They deliberately do NOT
+// assert the shape of the appended part any more: their previous versions asserted
+// the exact legacy `{ uri, name, type }` object, which Expo SDK 57's fetch rejects
+// outright — so they PINNED #82 as correct behaviour and stayed green for the entire
+// life of a feature that had never worked. Whether the body is actually sendable is
+// now proven where it can be proven, by encoding it with Expo's real converter, in
+// src/api/__tests__/resolve-upload-multipart.test.tsx.
+test("useResolvePhoto posts to /v1/resolve/photo and returns the normalized resolution", async () => {
   (apiFetchMultipart as jest.Mock).mockResolvedValueOnce(resolution);
-  const appendSpy = jest.spyOn(FormData.prototype, "append");
 
   const { result } = await renderHook(() => useResolvePhoto(), { wrapper });
   result.current.mutate({ uri: "file:///photo.jpg", name: "photo.jpg", type: "image/jpeg" });
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
   expect(apiFetchMultipart).toHaveBeenCalledWith("/v1/resolve/photo", expect.any(FormData));
-  expect(appendSpy).toHaveBeenCalledWith("file", { uri: "file:///photo.jpg", name: "photo.jpg", type: "image/jpeg" });
   expect(result.current.data).toEqual(resolution);
 });
 
-test("useResolveVoice builds FormData and posts to /v1/resolve/voice", async () => {
+test("useResolveVoice posts to /v1/resolve/voice and returns the normalized resolution", async () => {
   (apiFetchMultipart as jest.Mock).mockResolvedValueOnce(resolution);
-  const appendSpy = jest.spyOn(FormData.prototype, "append");
 
   const { result } = await renderHook(() => useResolveVoice(), { wrapper });
-  result.current.mutate({ uri: "file:///voice.m4a", name: "voice.m4a", type: "audio/m4a" });
+  result.current.mutate({ uri: "file:///voice.m4a", name: "clip.m4a", type: "audio/mp4" });
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
   expect(apiFetchMultipart).toHaveBeenCalledWith("/v1/resolve/voice", expect.any(FormData));
-  expect(appendSpy).toHaveBeenCalledWith("file", { uri: "file:///voice.m4a", name: "voice.m4a", type: "audio/m4a" });
   expect(result.current.data).toEqual(resolution);
 });
 
