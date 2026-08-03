@@ -66,6 +66,62 @@ test("AnimatedNumber snaps to the new value immediately when reduceMotion is tru
   expect(await findByText("250")).toBeTruthy();
 });
 
+// The press-scale is observed through withSpring rather than the rendered
+// transform: the reanimated mock mutates a shared value that does not trigger
+// a re-render, so reading the transform back cannot distinguish "did not
+// animate" from "has not re-rendered" — it reports scale 1 either way.
+
+// A PressableScale with no handler at all is decoration. Springing under the
+// finger is the same false affordance as announcing it a button or buzzing:
+// the touch says "this does something" and nothing happens. MealRow renders
+// exactly this way for a pending queued row.
+test("PressableScale does not start the press-scale when it has no handler", async () => {
+  const spy = jest.spyOn(Reanimated, "withSpring");
+  const { getByTestId } = await render(
+    <PressableScale testID="inert-row">
+      <Text>Inert</Text>
+    </PressableScale>,
+  );
+  spy.mockClear();
+
+  fireEvent(getByTestId("inert-row"), "pressIn");
+
+  expect(spy).not.toHaveBeenCalled();
+  spy.mockRestore();
+});
+
+test("PressableScale starts the press-scale when it has an onPress", async () => {
+  const spy = jest.spyOn(Reanimated, "withSpring");
+  const { getByTestId } = await render(
+    <PressableScale testID="live-row" onPress={jest.fn()}>
+      <Text>Live</Text>
+    </PressableScale>,
+  );
+  spy.mockClear();
+
+  fireEvent(getByTestId("live-row"), "pressIn");
+
+  expect(spy).toHaveBeenCalledWith(0.96, expect.anything());
+  spy.mockRestore();
+});
+
+// app/friends.tsx has a row whose only interaction is a long press. Gating
+// purely on onPress would wrongly silence a genuinely interactive control.
+test("PressableScale starts the press-scale for a long-press-only row", async () => {
+  const spy = jest.spyOn(Reanimated, "withSpring");
+  const { getByTestId } = await render(
+    <PressableScale testID="hold-row" onLongPress={jest.fn()}>
+      <Text>Hold me</Text>
+    </PressableScale>,
+  );
+  spy.mockClear();
+
+  fireEvent(getByTestId("hold-row"), "pressIn");
+
+  expect(spy).toHaveBeenCalledWith(0.96, expect.anything());
+  spy.mockRestore();
+});
+
 test("PressableScale still fires its haptic under reduced motion", async () => {
   (Reanimated.useReducedMotion as jest.Mock).mockReturnValue(true);
   const onPress = jest.fn();
