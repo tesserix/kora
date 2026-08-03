@@ -1,17 +1,25 @@
 import type { ReactNode } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react-native";
 import { apiFetch, currentUserId } from "@/lib/api";
+import { useCreateLog } from "@/api/hooks";
 import type { FoodItem } from "@/api/types";
 import { append, drain, list } from "../queue";
 import { upsertFoods } from "../foodCache";
 import { drainLogs } from "../drainLogs";
 import { useQueuedLogs } from "../useQueuedLogs";
 
+// Mirrors every member of @/lib/api that useQueuedLogs OR useCreateLog reaches
+// for — the enqueue path is exercised end to end below.
 jest.mock("@/lib/api", () => ({
   apiFetch: jest.fn(),
+  apiFetchEnvelope: jest.fn(),
+  apiFetchMultipart: jest.fn(),
   currentUserId: jest.fn(() => "user-a"),
+  isNetworkError: () => false,
+  ApiError: class ApiError extends Error {},
+  NetworkError: class NetworkError extends Error {},
 }));
 
 // 62 kcal/100 g logged at 150 g is 93 kcal — a number that shares no digits
@@ -136,6 +144,48 @@ test("excludes queued rows belonging to another user while keeping this user's o
 
   await waitFor(() => expect(result.current.rows).toHaveLength(1));
   expect(result.current.rows.map((r) => r.id)).toEqual(["mine"]);
+});
+
+// THE thing this task exists for, in the state a real user is in.
+//
+// Every log entry point is presented OVER the Diary — capture.tsx is a
+// fullScreenModal, meal.tsx a transparentModal pushed from the diary itself,
+// plus log.tsx and useInstantLog — so the Diary is not remounted when the meal
+// is written. Its observer survives with an unchanged key, and by the same
+// mechanism as the account switch above, an unchanged key means nothing
+// refetches. The ["logs"] invalidation cannot rescue it either: queries
+// default to networkMode "online", so offline that query is marked stale and
+// PAUSED rather than refetched.
+//
+// The initial waitFor is load-bearing: it proves the query already resolved
+// once, so a row appearing afterwards can only be an invalidation and not a
+// first fetch. Remounting the hook here would test nothing — that path is
+// already covered by every other test in this file.
+test("a log queued while the diary is already mounted appears without a remount", async () => {
+  const client = newClient();
+  onlineManager.setOnline(false);
+  try {
+    const { result } = await renderHook(
+      () => ({ queued: useQueuedLogs("2026-08-02"), create: useCreateLog() }),
+      { wrapper: wrap(client) },
+    );
+    await waitFor(() => expect(result.current.queued.rows).toEqual([]));
+
+    await act(async () => {
+      await result.current.create.mutateAsync(payloadOn(atLocalNoon(2026, 8, 2)));
+    });
+
+    await waitFor(() => expect(result.current.queued.rows).toHaveLength(1));
+    expect(result.current.queued.rows[0]).toMatchObject({
+      description: "Greek yogurt",
+      status: "pending",
+      mealSlot: "lunch",
+      kcal: 93,
+    });
+    expect(apiFetch).not.toHaveBeenCalled();
+  } finally {
+    onlineManager.setOnline(true);
+  }
 });
 
 // The owner filter keeps another user's rows out of the STORAGE read, but

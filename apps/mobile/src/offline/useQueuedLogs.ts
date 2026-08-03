@@ -82,6 +82,11 @@ export function useQueuedLogs(date: string) {
   const query = useQuery({
     queryKey: [QUEUED_LOGS_KEY, ownerId, date],
     queryFn: () => queuedRowsFor(ownerId, date),
+    // This query reads AsyncStorage, not the network. Under react-query's
+    // default networkMode ("online") every refetch would be PAUSED while
+    // offline — which is the only time these rows exist. The same trap
+    // useCreateLog's mutation documents above, on the read side.
+    networkMode: "always",
   });
 
   // Every mutation of the queue goes through the same invalidation as a drain,

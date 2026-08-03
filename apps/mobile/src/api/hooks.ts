@@ -4,7 +4,8 @@ import * as Crypto from "expo-crypto";
 import { apiFetch, apiFetchEnvelope, apiFetchMultipart, isNetworkError } from "@/lib/api";
 import { isOnline } from "@/offline/connectivity";
 import { foodsFromPins, foodsFromSavedMeals, upsertFoods, type FoodFidelity } from "@/offline/foodCache";
-import { append, type QueuedLog } from "@/offline/queue";
+import { append, isQueued, type QueuedLog } from "@/offline/queue";
+import { QUEUED_LOGS_KEY } from "@/offline/queryKeys";
 import { NoOwnerError, resolveOwnerId } from "@/offline/owner";
 import type { MealSlot } from "@/lib/mealSlot";
 import type {
@@ -149,9 +150,22 @@ export function useCreateLog() {
         throw err;
       }
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: ["logs"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
+      // A write that was QUEUED rather than sent produces no server row, so
+      // the two invalidations above have nothing to fetch — and offline they
+      // cannot fetch anyway, since queries default to networkMode "online" and
+      // are paused rather than refetched. The diary's queued rows are the only
+      // thing that will show this meal, and every log entry point is presented
+      // OVER a mounted Diary (capture is a fullScreenModal, meal a
+      // transparentModal), so its observer survives with an unchanged key and
+      // nothing refetches unless it is invalidated here.
+      //
+      // Gated for the same reason drainLogs leaves ["logs"] alone when it sent
+      // nothing: a genuine server row cannot have changed the queue. isQueued
+      // is safe in this direction — false means definitively a server row.
+      if (isQueued(result)) qc.invalidateQueries({ queryKey: [QUEUED_LOGS_KEY] });
     },
   });
 }

@@ -729,6 +729,37 @@ test("useCreateLog queues the write instead of POSTing when offline", async () =
   }
 });
 
+// The guard mirrors the drain side (src/offline/__tests__/drainLogs.test.ts):
+// the queued rows must be refreshed by a write that was QUEUED — nothing else
+// will ever show that meal, and offline the two server-backed invalidations
+// are paused rather than fetched — and left alone by a write the server
+// accepted, since a genuine server row cannot have changed the queue.
+test("a queued write refreshes the queued rows; a write the server accepted does not", async () => {
+  await AsyncStorage.clear();
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  function stableWrapper({ children }: { children: ReactNode }) {
+    return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  }
+  const spy = jest.spyOn(client, "invalidateQueries");
+  const { result } = await renderHook(() => useCreateLog(), { wrapper: stableWrapper });
+
+  (apiFetch as jest.Mock).mockResolvedValueOnce({ id: "log1" });
+  await result.current.mutateAsync(logInput);
+  expect(spy).toHaveBeenCalledWith({ queryKey: ["logs"] });
+  expect(spy).toHaveBeenCalledWith({ queryKey: ["dashboard"] });
+  expect(spy).not.toHaveBeenCalledWith({ queryKey: ["queuedLogs"] });
+
+  spy.mockClear();
+  onlineManager.setOnline(false);
+  try {
+    await result.current.mutateAsync(logInput);
+    expect(spy).toHaveBeenCalledWith({ queryKey: ["queuedLogs"] });
+  } finally {
+    onlineManager.setOnline(true);
+    await AsyncStorage.clear();
+  }
+});
+
 // isOnline() is only a snapshot taken before the request leaves. The commonest
 // mobile failure is the connection dying WHILE the POST is in flight: fetch
 // rejects, apiFetch turns it into NetworkError, and without this the log
