@@ -328,3 +328,18 @@ test("a stored entry with an invalid fidelity value is dropped rather than trust
   expect(await getFoodById("f1")).toBeNull();
   expect((await getFoodById("f2"))?.name).toBe("Fine entry");
 });
+
+// usePins and useSavedMeals resolve independently and their cache-fill effects
+// can land in the same tick. upsertFoods is a read-modify-write over the whole
+// cache, so unserialised the second write clobbers the first and one of the two
+// screens' foods is simply absent offline.
+test("two concurrent upsertFoods calls do not clobber each other", async () => {
+  // No await between them: both load the same (empty) cache before either saves.
+  await Promise.all([
+    upsertFoods([food("f1", "Greek yogurt")]),
+    upsertFoods([food("f2", "Cheddar cheese")]),
+  ]);
+
+  expect((await getFoodById("f1"))?.name).toBe("Greek yogurt");
+  expect((await getFoodById("f2"))?.name).toBe("Cheddar cheese");
+});

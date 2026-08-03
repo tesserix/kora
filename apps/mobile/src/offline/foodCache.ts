@@ -1,8 +1,16 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { FoodItem, PinnedFood, SavedMeal } from "@/api/types";
 import { UNKNOWN_PROVENANCE } from "@/api/types";
+import { createLock } from "./lock";
 
 const STORAGE_KEY = "kora.foodCache";
+
+// upsertFoods is a read-modify-write over the whole cache and its callers are
+// effects on independent queries — usePins and useSavedMeals routinely resolve
+// in the same tick. Unserialised, one fill clobbers the other and half the
+// user's foods are simply missing offline. Its own lock, independent of the
+// queue's: the two have no ordering relationship. See src/offline/lock.ts.
+const withCacheLock = createLock();
 
 // A person's food vocabulary is small and highly repetitive, so a few hundred
 // entries covers the overwhelming majority of repeat logging at trivial cost
@@ -72,21 +80,23 @@ function mergeSummaryIntoFull(existingItem: FoodItem, incoming: FoodItem): FoodI
 // to go stale. EVERY touch — full or summary, merged or not — refreshes
 // lastUsedAt, which is what makes eviction below genuinely
 // least-recently-USED rather than a simple truncation of insertion order.
-export async function upsertFoods(items: FoodItem[], fidelity: FoodFidelity = "full"): Promise<void> {
-  if (items.length === 0) return;
-  const byId = new Map((await load()).map((e) => [e.item.id, e]));
-  const now = Date.now();
-  items.forEach((item, i) => {
-    const existing = byId.get(item.id);
-    const keepsFull = fidelity === "summary" && existing?.fidelity === "full";
-    const mergedItem = keepsFull ? mergeSummaryIntoFull(existing.item, item) : item;
-    byId.set(item.id, { item: mergedItem, lastUsedAt: now + i, fidelity: keepsFull ? "full" : fidelity });
-  });
+export function upsertFoods(items: FoodItem[], fidelity: FoodFidelity = "full"): Promise<void> {
+  if (items.length === 0) return Promise.resolve();
+  return withCacheLock(async () => {
+    const byId = new Map((await load()).map((e) => [e.item.id, e]));
+    const now = Date.now();
+    items.forEach((item, i) => {
+      const existing = byId.get(item.id);
+      const keepsFull = fidelity === "summary" && existing?.fidelity === "full";
+      const mergedItem = keepsFull ? mergeSummaryIntoFull(existing.item, item) : item;
+      byId.set(item.id, { item: mergedItem, lastUsedAt: now + i, fidelity: keepsFull ? "full" : fidelity });
+    });
 
-  const trimmed = [...byId.values()]
-    .sort((a, b) => b.lastUsedAt - a.lastUsedAt)
-    .slice(0, FOOD_CACHE_LIMIT);
-  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed));
+    const trimmed = [...byId.values()]
+      .sort((a, b) => b.lastUsedAt - a.lastUsedAt)
+      .slice(0, FOOD_CACHE_LIMIT);
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed));
+  });
 }
 
 export async function getFoodById(id: string): Promise<FoodItem | null> {

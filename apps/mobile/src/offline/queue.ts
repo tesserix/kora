@@ -1,7 +1,14 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { CreateLogInput } from "@/api/hooks";
+import { createLock } from "./lock";
 
 const STORAGE_KEY = "kora.logQueue";
+
+// Every read-modify-write below runs through this one chain. See src/offline/
+// lock.ts: an unserialised discard racing an append drops the appended item.
+// Only the leaf writers take it — `drain` must not, or the discard/failure
+// write it makes per item would deadlock behind its own lock.
+const withQueueLock = createLock();
 
 export type QueuedLog = {
   id: string;
@@ -63,6 +70,12 @@ async function save(items: QueuedLog[]): Promise<void> {
   await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(items));
 }
 
+// The one serialised read-modify-write. Every mutation of the stored list goes
+// through this, so no two of them can interleave their load and their save.
+function update(fn: (items: QueuedLog[]) => QueuedLog[]): Promise<void> {
+  return withQueueLock(async () => { await save(fn(await list())); });
+}
+
 // ownerId is a required, non-nullable string: an item with no owner is one no
 // drain will ever send, so the type system refuses to create one. Callers
 // resolve the uid first (see src/offline/owner.ts) and fail the write outright
@@ -75,17 +88,18 @@ export async function append(
   const item: QueuedLog = {
     id, payload, ownerId, status: "pending", attempts: 0, queuedAt: new Date().toISOString(),
   };
-  await save([...(await list()), item]);
+  await update((items) => [...items, item]);
   return item;
 }
 
 export async function retry(id: string): Promise<void> {
-  const items = await list();
-  await save(items.map((i) => (i.id === id ? { ...i, status: "pending", lastError: undefined } : i)));
+  await update((items) =>
+    items.map((i) => (i.id === id ? { ...i, status: "pending", lastError: undefined } : i)),
+  );
 }
 
 export async function discard(id: string): Promise<void> {
-  await save((await list()).filter((i) => i.id !== id));
+  await update((items) => items.filter((i) => i.id !== id));
 }
 
 // A 4xx will fail identically forever — replaying it just burns battery and
@@ -137,8 +151,7 @@ export async function drain(
       const message = err instanceof Error ? err.message : String(err);
       const permanent = isPermanent(err);
       permanent ? failed++ : deferred++;
-      const items = await list();
-      await save(items.map((i) => (i.id === item.id
+      await update((items) => items.map((i) => (i.id === item.id
         ? { ...i, attempts: i.attempts + 1, lastError: message, status: permanent ? "failed" : "pending" }
         : i)));
     }

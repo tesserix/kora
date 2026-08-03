@@ -176,3 +176,17 @@ test("a corrupt stored value yields an empty queue instead of throwing", async (
   await AsyncStorage.setItem("kora.logQueue", "{not json");
   await expect(list()).resolves.toEqual([]);
 });
+
+// AsyncStorage has no transactions, so every queue write is a read-modify-write
+// over the whole list. Two of them in flight at once both read the same list and
+// the later save silently drops the earlier one's change. Drains fire on
+// foreground and reconnect — exactly while the user is logging — so the meal
+// that vanishes is the one the "Logged X" toast just promised was saved.
+test("an append and a discard issued concurrently do not lose each other's write", async () => {
+  await append(payload, "id-1", "user-a");
+
+  // No await between them: both read the stored list before either saves.
+  await Promise.all([discard("id-1"), append(payload, "id-2", "user-a")]);
+
+  expect((await list()).map((i) => i.id)).toEqual(["id-2"]);
+});
