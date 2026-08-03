@@ -247,3 +247,61 @@ func TestRouter_Name(t *testing.T) {
 }
 
 var _ Provider = (*Router)(nil)
+
+// TestRouter_IdentifyPhoto_DoesNotFallBack pins the deliberate absence of a
+// photo fallback, mirroring Transcribe.
+//
+// This is not a style choice, it is a production finding. The fallback is an
+// OpenAI-compatible endpoint driven by ONE configured model (OpenAIProvider
+// uses p.model for text and vision alike), and prod sets that to
+// meta/llama-3.3-70b-instruct — text-only. So every photo resolve did this:
+// Gemini got photoBudget to answer, timed out, and the call fell through to a
+// model that cannot see the image, which then burned ~27s before failing.
+// Observed as POST /v1/resolve/photo -> 500 in latency_ms 30450, and it is why
+// identify_photo has never recorded a successful call.
+//
+// A fallback that cannot serve the request is strictly worse than none: it
+// costs a paid call, adds ~27s of latency, and MASKS the primary's real error
+// behind a guaranteed failure. Transcribe already reasons this way in its own
+// comment. If a vision-capable fallback is ever configured, restore it
+// deliberately — and delete this test on purpose, not by accident.
+func TestRouter_IdentifyPhoto_DoesNotFallBack(t *testing.T) {
+	primary := &stubProvider{name: "primary-stub", guessErr: errors.New("gemini exploded")}
+	fallback := &stubProvider{
+		name:       "fallback-stub",
+		guesses:    []Guess{{Food: "blind-fallback-guess", Confidence: 0.9}},
+		guessUsage: Usage{Provider: "fallback-stub"},
+	}
+	r := &Router{Primary: primary, Fallback: fallback}
+
+	_, _, err := r.IdentifyPhoto(context.Background(), []byte("jpeg-bytes"), "image/jpeg")
+
+	require.Error(t, err, "the primary's real error must surface, not be masked by a blind fallback")
+	assert.Contains(t, err.Error(), "gemini exploded")
+	assert.Equal(t, 1, primary.calls)
+	assert.Equal(t, 0, fallback.calls, "a text-only fallback must never be handed a photo")
+}
+
+// TestRouter_IdentifyPhoto_GivesPrimaryTheFullPhotoBudget guards the budget
+// itself. photoBudget was 3s — far too short for a multimodal call, which is
+// what forced every photo resolve onto the fallback in the first place. The
+// stub sleeps past the old 3s value; if photoBudget regresses to anything at
+// or below it, this fails.
+func TestRouter_IdentifyPhoto_GivesPrimaryTheFullPhotoBudget(t *testing.T) {
+	assert.Greater(t, photoBudget, 3*time.Second,
+		"3s cannot accommodate a vision call; that budget is what starved the primary")
+
+	primary := &stubProvider{
+		name:       "primary-stub",
+		guesses:    []Guess{{Food: "omelette", Confidence: 0.9}},
+		guessUsage: Usage{Provider: "primary-stub"},
+		delay:      50 * time.Millisecond,
+	}
+	r := &Router{Primary: primary, Fallback: &stubProvider{name: "fallback-stub"}}
+
+	guesses, usage, err := r.IdentifyPhoto(context.Background(), []byte("jpeg-bytes"), "image/jpeg")
+
+	require.NoError(t, err)
+	assert.Equal(t, []Guess{{Food: "omelette", Confidence: 0.9}}, guesses)
+	assert.Equal(t, "primary-stub", usage.Provider)
+}

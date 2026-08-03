@@ -9,7 +9,13 @@ import (
 // than the smaller text-oriented calls (identify, decompose, embed) because
 // vision models are inherently slower.
 const (
-	photoBudget = 3 * time.Second
+	// photoBudget bounds the vision call. This was 3s, which no multimodal
+	// model could meet — so in practice EVERY photo resolve timed out here and
+	// fell through to the fallback, which could not serve it either (see
+	// IdentifyPhoto). identify_photo has never recorded a successful call.
+	// 20s is generous but this is a one-shot user-initiated capture, not a
+	// latency-critical interaction, and the gateway now allows 100s per try.
+	photoBudget = 20 * time.Second
 	textBudget  = 1500 * time.Millisecond
 
 	// fallbackBudget is deliberately generous: the fallback provider only runs
@@ -104,11 +110,23 @@ func (r *Router) IdentifyText(ctx context.Context, phrase string) ([]Guess, Usag
 	)
 }
 
+// IdentifyPhoto calls the primary DIRECTLY — no fallback — for the same
+// reason Transcribe does.
+//
+// OpenAIProvider drives text and vision from ONE configured model (p.model),
+// and the deployed fallback is meta/llama-3.3-70b-instruct: text-only. Handing
+// it a base64 image guaranteed a failure, so the old fallback path did nothing
+// but spend a paid call and ~27s of latency to replace the primary's real
+// error with a meaningless one. Surfacing the primary's error is strictly more
+// useful, and cheaper.
+//
+// Restore the fallback only alongside a vision-capable fallback model — and if
+// so, give it its own model config rather than reusing p.model, which the text
+// paths depend on.
 func (r *Router) IdentifyPhoto(ctx context.Context, image []byte, mime string) ([]Guess, Usage, error) {
-	return withFallback(ctx, r.photoBudgetOrDefault(), r.fallbackBudgetOrDefault(),
-		func(c context.Context) ([]Guess, Usage, error) { return r.Primary.IdentifyPhoto(c, image, mime) },
-		func(c context.Context) ([]Guess, Usage, error) { return r.Fallback.IdentifyPhoto(c, image, mime) },
-	)
+	pctx, cancel := context.WithTimeout(ctx, r.photoBudgetOrDefault())
+	defer cancel()
+	return r.Primary.IdentifyPhoto(pctx, image, mime)
 }
 
 func (r *Router) Decompose(ctx context.Context, dish string) ([]IngredientGuess, Usage, error) {
