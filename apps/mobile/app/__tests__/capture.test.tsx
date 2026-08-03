@@ -1104,8 +1104,8 @@ describe("Add to diary", () => {
 //     never touches it), but the resolve that lands is text; a mode-derived
 //     source would read "ai_photo" and never notice the second resolve.
 // All three fail on the `source` field of the real createLog payload under
-// a reverted `sourceForMode(mode)` — verified by actually reverting it (see
-// the mutation-verify evidence in the fix report).
+// a reverted `sourceForMode(mode)` — mutation-verified against a reverted
+// `sourceForMode(mode)`, see the PR that introduced this block.
 //
 // The remaining three (voice, fresh barcode, cached-fallback barcode) can't
 // be built to disagree: "Start/Stop recording" only exists once `mode` is

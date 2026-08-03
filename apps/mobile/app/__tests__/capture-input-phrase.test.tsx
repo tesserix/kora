@@ -189,19 +189,20 @@ test("a photo resolve sends no input_phrase", async () => {
 // These chain a real text resolve first, in the same mounted component, so
 // resolvedPhrase is genuinely non-null before the photo/barcode resolve runs.
 //
-// Both cases below are now double-guarded, and neither ever depended on the
-// tab-vs-modality bug fixed in capture.tsx for its own validity — for two
-// different reasons. The photo case captures via the quick-capture shortcut
-// while `mode` is still "type": under the old (now-deleted)
+// Both cases below are now double-guarded, but they got there differently —
+// neither case's *assertion* (no input_phrase leak) was ever wrong, but only
+// the photo case's *bindingness* ever depended on the tab-vs-modality bug
+// fixed in capture.tsx. The photo case captures via the quick-capture
+// shortcut while `mode` is still "type": under the old (now-deleted)
 // `sourceForMode(mode)`, that was the one way to make `source` read
 // "ai_text" for a photo resolve, so the input_phrase gate below actually
 // depended on setResolvedPhrase(null) rather than excluding input_phrase for
 // a reason unrelated to resolvedPhrase. The barcode case never had that
-// ambiguity: reaching the camera view at all requires switching to "Scan"
-// mode, so `source` was "ai_barcode" — and the gate excluded input_phrase —
-// under the old mode-derived code too. Today, `source` is stamped by
-// applyResolution from the resolve that actually ran, never from `mode`
-// (see capture.tsx), so both cases are excluded by the
+// bindingness to begin with: reaching the camera view at all requires
+// switching to "Scan" mode, so `source` was "ai_barcode" — and the gate
+// excluded input_phrase — under the old mode-derived code too. Today,
+// `source` is stamped by applyResolution from the resolve that actually ran,
+// never from `mode` (see capture.tsx), so both cases are excluded by the
 // `source === "ai_text" || "ai_voice"` gate on their own. The
 // setResolvedPhrase(null) call in each handler's onSuccess is therefore
 // defense-in-depth, not the sole guard — it only matters if the gate is ever
