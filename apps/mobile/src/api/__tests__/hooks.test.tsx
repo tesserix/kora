@@ -7,6 +7,8 @@ import { drain, list } from "@/offline/queue";
 import { getFoodById, getFoodByBarcode } from "@/offline/foodCache";
 import * as foodCache from "@/offline/foodCache";
 import { rememberOwner } from "@/offline/owner";
+import { append } from "@/offline/queue";
+import { useQueuedLogs } from "@/offline/useQueuedLogs";
 import {
   useAcceptRequest,
   useAddWater,
@@ -909,4 +911,69 @@ test("useSavedMeals fills the offline food cache with the foods nested inside ea
   // The SAVED MEAL's own id ("meal1") must never be mistaken for a food id —
   // only what is nested inside `items` belongs in the cache.
   expect(await getFoodById("meal1")).toBeNull();
+});
+
+// useMemory is the third read hook whose response nests food summaries, and it
+// is the one that matters most offline: it backs Home's "Your usual" strip and
+// the Log screen's default Recents tab — the two primary one-tap surfaces. All
+// three of its collections are filled, because a food is only ever in one of
+// them and any of them can be the thing the user taps.
+const MEMORY_FIXTURE = {
+  recents: [
+    { food_item_id: "f-recent", name: "Overnight oats", meal_slot: "breakfast", grams: 150, kcal: 300, protein_g: 12, carbs_g: 45, fat_g: 8, fiber_g: 6, count: 3, last_logged_at: "2026-08-01T07:00:00.000Z" },
+  ],
+  frequent: [
+    { food_item_id: "f-frequent", name: "Flat white", meal_slot: "snack", grams: 200, kcal: 120, protein_g: 6, carbs_g: 10, fat_g: 6, fiber_g: 0, count: 40, last_logged_at: "2026-08-01T09:00:00.000Z" },
+  ],
+  usual_meals: [
+    {
+      id: "usual1", name: "Usual lunch", meal_slot: "lunch",
+      items: [
+        { food_item_id: "f-usual-item", name: "Chicken salad", meal_slot: "lunch", grams: 250, kcal: 400, protein_g: 35, carbs_g: 12, fat_g: 22, fiber_g: 4, count: 9, last_logged_at: "2026-08-01T13:00:00.000Z" },
+      ],
+      kcal: 400, protein_g: 35, carbs_g: 12, fat_g: 22, fiber_g: 4, count: 9, last_logged_at: "2026-08-01T13:00:00.000Z",
+    },
+  ],
+};
+
+test("useMemory fills the offline food cache from recents, frequent AND the items inside usual meals", async () => {
+  await AsyncStorage.clear();
+  (apiFetch as jest.Mock).mockResolvedValueOnce(MEMORY_FIXTURE);
+
+  const { result } = await renderHook(() => useMemory("2026-08-02"), { wrapper });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+  // Asserted against the cache itself, not a spy on upsertFoods: a spy proves
+  // only that something was passed, never that a loggable entry landed.
+  await waitFor(async () => expect(await getFoodById("f-recent")).not.toBeNull());
+  expect((await getFoodById("f-recent"))?.name).toBe("Overnight oats");
+  expect((await getFoodById("f-frequent"))?.name).toBe("Flat white");
+  expect((await getFoodById("f-usual-item"))?.name).toBe("Chicken salad");
+
+  // 300 kcal for 150g reverses to exactly 200 kcal/100g.
+  expect((await getFoodById("f-recent"))?.kcal_per_100g).toBeCloseTo(200);
+  // The usual MEAL's own id is not a food — only what is nested in `items` is.
+  expect(await getFoodById("usual1")).toBeNull();
+});
+
+// The end-to-end consequence, and the reason this is not merely a cache-warming
+// nicety: without the fill, tapping "Your usual" offline queues a log whose
+// food is unknown to the device, so the diary renders "Queued item" with a null
+// kcal and the day total counts nothing — breaking "pending counts toward the
+// day total" on the most-used logging path there is.
+test("a log queued from a memory food renders a named diary row with a real kcal", async () => {
+  await AsyncStorage.clear();
+  (apiFetch as jest.Mock).mockResolvedValueOnce(MEMORY_FIXTURE);
+
+  const { result } = await renderHook(() => useMemory("2026-08-02"), { wrapper });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  await waitFor(async () => expect(await getFoodById("f-recent")).not.toBeNull());
+
+  await append({ ...logInput, food_item_id: "f-recent", quantity_grams: 150 }, "q-1", "user-a");
+
+  const { result: diary } = await renderHook(() => useQueuedLogs("2026-08-02"), { wrapper });
+  await waitFor(() => expect(diary.current.rows).toHaveLength(1));
+  expect(diary.current.rows[0].description).toBe("Overnight oats");
+  expect(diary.current.rows[0].description).not.toBe("Queued item");
+  expect(diary.current.rows[0].kcal).toBeCloseTo(300);
 });

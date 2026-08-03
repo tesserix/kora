@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import type { FoodItem, PinnedFood, SavedMeal } from "@/api/types";
+import type { FoodItem, Memory, PinnedFood, SavedMeal } from "@/api/types";
 import { UNKNOWN_PROVENANCE } from "@/api/types";
 import { createLock } from "./lock";
 
@@ -169,4 +169,25 @@ export function foodsFromPins(pins: PinnedFood[]): FoodItem[] {
 export function foodsFromSavedMeals(meals: SavedMeal[]): FoodItem[] {
   if (!Array.isArray(meals)) return [];
   return meals.flatMap((m) => (Array.isArray(m?.items) ? m.items : []).map(foodFromServingSummary).filter((f): f is FoodItem => f !== null));
+}
+
+// MemoryFood is not declared here because it is structurally the same
+// ServingSummary shape: food_item_id + name + the gram-scaled totals. A rename
+// on either side stops this compiling rather than silently caching nothing.
+//
+// All THREE collections are flattened, not just recents: a food appears in
+// exactly one of them, and any of them can be the row the user taps. The usual
+// MEAL's own id/name ("Usual lunch") is not a food, same rule as saved meals.
+export function foodsFromMemory(memory: Memory): FoodItem[] {
+  if (!memory) return [];
+  const nested = (Array.isArray(memory.usual_meals) ? memory.usual_meals : []).flatMap((m) =>
+    Array.isArray(m?.items) ? m.items : [],
+  );
+  return [
+    ...(Array.isArray(memory.recents) ? memory.recents : []),
+    ...(Array.isArray(memory.frequent) ? memory.frequent : []),
+    ...nested,
+  ]
+    .map(foodFromServingSummary)
+    .filter((f): f is FoodItem => f !== null);
 }

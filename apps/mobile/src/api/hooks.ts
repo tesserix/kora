@@ -3,7 +3,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import * as Crypto from "expo-crypto";
 import { apiFetch, apiFetchEnvelope, apiFetchMultipart, isNetworkError } from "@/lib/api";
 import { isOnline } from "@/offline/connectivity";
-import { foodsFromPins, foodsFromSavedMeals, upsertFoods, type FoodFidelity } from "@/offline/foodCache";
+import { foodsFromMemory, foodsFromPins, foodsFromSavedMeals, upsertFoods, type FoodFidelity } from "@/offline/foodCache";
 import { append, isQueued, type QueuedLog } from "@/offline/queue";
 import { QUEUED_LOGS_KEY } from "@/offline/queryKeys";
 import { NoOwnerError, resolveOwnerId } from "@/offline/owner";
@@ -189,10 +189,20 @@ export function useCreateLogBatch() {
 }
 
 export function useMemory(date: string) {
-  return useQuery({
+  const query = useQuery({
     queryKey: ["memory", date],
     queryFn: () => apiFetch("/v1/memory") as Promise<Memory>,
   });
+  // Same by-product cache fill as usePins/useSavedMeals below, same "summary"
+  // fidelity, same reason for an effect. This is the one that matters most
+  // offline: memory backs Home's "Your usual" strip and the Log screen's
+  // default Recents tab — the two primary one-tap surfaces. Without it the
+  // commonest offline log has no cached food, so the diary renders it as an
+  // unnamed "Queued item" with a null kcal and the day total counts nothing.
+  useEffect(() => {
+    if (query.data) cacheFoodsQuietly(foodsFromMemory(query.data), "summary");
+  }, [query.data]);
+  return query;
 }
 
 export function usePins() {
