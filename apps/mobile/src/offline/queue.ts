@@ -71,17 +71,21 @@ export async function discard(id: string): Promise<void> {
 // keeps a row the user cannot resolve. Anything else (no network, a dropped
 // token, a 5xx) is worth another attempt on the next drain.
 //
-// 401 and 403 are the exception, for the same reason AuthTokenError is treated
-// as transient: an auth failure means "not authenticated YET", not "never will
-// be". Its usual cause here is a drain that raced Firebase restoring the
-// session on cold start, and it is recoverable by signing back in. api.ts
-// already handles a genuinely unusable session — a 401 that survives a forced
-// token refresh — by signing the user out, so a 401 reaching this classifier is
-// never the last word on the session. Marking it failed would strand a
-// perfectly good log behind a manual retry the user never asked for.
+// 401 is the one exception, for the same reason AuthTokenError is treated as
+// transient: it means "not authenticated YET", not "never will be". Its usual
+// cause here is a drain that raced Firebase restoring the session on cold
+// start, and it self-heals the moment a token exists. api.ts already handles a
+// genuinely unusable session — a 401 that survives a forced token refresh — by
+// signing the user out, so a 401 reaching this classifier is never the last
+// word on the session.
+//
+// 403 is NOT included: authenticated-but-not-permitted does not change by
+// itself (api.ts force-refreshes the token only on a 401), and drain has no
+// attempt ceiling, so leaving it pending would replay it on every trigger
+// forever with no failed state for a retry UI to surface.
 function isPermanent(err: unknown): boolean {
   const status = (err as { status?: number })?.status;
-  if (status === 401 || status === 403) return false;
+  if (status === 401) return false;
   return typeof status === "number" && status >= 400 && status < 500;
 }
 

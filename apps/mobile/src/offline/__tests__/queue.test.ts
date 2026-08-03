@@ -91,19 +91,34 @@ test("an auth-token failure is transient, not permanent", async () => {
   expect((await list())[0].status).toBe("pending");
 });
 
-// A 401/403 must not be lumped in with the other 4xx. It almost always means
-// "not authenticated YET" — a drain that raced Firebase restoring the session
-// on cold start — and it is recoverable by signing back in, unlike a 400 or a
-// 422 which will fail identically forever. Marking it failed strands a
-// perfectly good log behind a manual retry that has no UI.
-test.each([401, 403])("a %i is transient, not permanent", async (status) => {
+// A 401 must not be lumped in with the other 4xx. It means "not authenticated
+// YET" — usually a drain that raced Firebase restoring the session on cold
+// start — and it self-heals as soon as a token exists, unlike a 400 or a 422
+// which will fail identically forever. Marking it failed strands a perfectly
+// good log behind a manual retry that has no UI.
+test("a 401 is transient, not permanent", async () => {
   await append(payload, "id-1");
-  const err = Object.assign(new Error("unauthenticated"), { name: "ApiError", status });
+  const err = Object.assign(new Error("unauthenticated"), { name: "ApiError", status: 401 });
   const result = await drain(async () => { throw err; });
 
   expect(result.deferred).toBe(1);
   expect(result.failed).toBe(0);
   expect((await list())[0].status).toBe("pending");
+});
+
+// A 403 is the opposite animal: authenticated, but not allowed. api.ts only
+// force-refreshes the token on a 401, so nothing about a 403 changes by itself,
+// and drain has no attempt ceiling — leaving it pending would replay it on every
+// cold start, reconnect and foreground, forever, with no failed state for a
+// retry UI to surface.
+test("a 403 is permanent — authenticated but not allowed will not self-heal", async () => {
+  await append(payload, "id-1");
+  const err = Object.assign(new Error("forbidden"), { name: "ApiError", status: 403 });
+  const result = await drain(async () => { throw err; });
+
+  expect(result.failed).toBe(1);
+  expect(result.deferred).toBe(0);
+  expect((await list())[0].status).toBe("failed");
 });
 
 test("retry flips a failed item back to pending; discard removes it", async () => {
