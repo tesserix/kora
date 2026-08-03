@@ -3,7 +3,7 @@ import { onlineManager, type QueryClient } from "@tanstack/react-query";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, isFirebaseConfigured } from "@/lib/firebase";
 import { drainLogs } from "./drainLogs";
-import { rememberOwner } from "./owner";
+import { forgetOwner, rememberOwner } from "./owner";
 
 // installDrainTriggers wires every moment a queued log could become sendable.
 // Mirrors installConnectivity: one install call from the root layout, one
@@ -37,7 +37,10 @@ export function installDrainTriggers(queryClient: QueryClient): () => void {
   const unsubscribeAuth =
     isFirebaseConfigured && auth
       ? onAuthStateChanged(auth, (user) => {
-          if (!user) return;
+          if (!user) {
+            void forgetOwner().catch(() => {});
+            return;
+          }
           void rememberOwner(user.uid).catch(() => {});
           drain();
         })

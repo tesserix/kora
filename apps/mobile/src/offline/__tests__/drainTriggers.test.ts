@@ -4,7 +4,7 @@ import { QueryClient, onlineManager } from "@tanstack/react-query";
 import { onAuthStateChanged } from "firebase/auth";
 import { apiFetch, currentUserId } from "@/lib/api";
 import { append, list } from "../queue";
-import { resolveOwnerId } from "../owner";
+import { rememberOwner, resolveOwnerId } from "../owner";
 import { installDrainTriggers } from "../drainTriggers";
 
 jest.mock("@/lib/api", () => ({
@@ -78,6 +78,23 @@ test("sign-in records the uid so the next launch can attribute writes", async ()
   (onAuthStateChanged as jest.Mock).mock.calls[0][1]({ uid: "user-b" });
 
   await eventually(async () => expect(await resolveOwnerId()).toBe("user-b"));
+  uninstall();
+});
+
+// Signing out has to forget the uid too. Otherwise the next cold start, in the
+// window before (tabs)/_layout.tsx redirects to /sign-in, still resolves the
+// departed user as the owner — so a tap by whoever is now holding the phone is
+// stamped with their uid and drains into their diary at their next sign-in.
+// Nobody else's data leaks, but it is attribution the device cannot justify.
+test("signing out forgets the uid", async () => {
+  (currentUserId as jest.Mock).mockReturnValue(null);
+  await rememberOwner("user-a");
+  expect(await resolveOwnerId()).toBe("user-a");
+
+  const uninstall = installDrainTriggers(new QueryClient());
+  (onAuthStateChanged as jest.Mock).mock.calls[0][1](null);
+
+  await eventually(async () => expect(await resolveOwnerId()).toBeNull());
   uninstall();
 });
 
