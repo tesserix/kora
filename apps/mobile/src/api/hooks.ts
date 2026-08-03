@@ -1,7 +1,9 @@
+import { useEffect } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Crypto from "expo-crypto";
 import { apiFetch, apiFetchEnvelope, apiFetchMultipart, isNetworkError } from "@/lib/api";
 import { isOnline } from "@/offline/connectivity";
+import { upsertFoods } from "@/offline/foodCache";
 import { append, type QueuedLog } from "@/offline/queue";
 import { NoOwnerError, resolveOwnerId } from "@/offline/owner";
 import type { MealSlot } from "@/lib/mealSlot";
@@ -12,6 +14,7 @@ import type {
   ChallengeSummary,
   DashboardSummary,
   FeedbackCreated,
+  FoodItem,
   Friend,
   FriendRequests,
   FriendsProgress,
@@ -31,6 +34,60 @@ import type {
   SubmitFeedbackInput,
   WeightEntry,
 } from "./types";
+
+// usePins/useSavedMeals never return a full FoodItem: the server (see
+// api/internal/pins/service.go PinnedFood, api/internal/savedmeals/service.go
+// SavedMealItemView) sends only a gram-scaled summary for that one serving —
+// food_item_id + name + totals for `grams`, never a `id` field, never
+// per-100g macros, never brand/provenance/serving info.
+type FlatFoodSummary = {
+  food_item_id: string;
+  name: string;
+  grams: number;
+  kcal: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+};
+
+function isFlatFoodSummary(d: unknown): d is FlatFoodSummary {
+  const f = d as FlatFoodSummary;
+  return !!f && typeof f.food_item_id === "string" && typeof f.name === "string" &&
+    typeof f.grams === "number" && f.grams > 0;
+}
+
+// Reverses the server's own per-100g -> per-grams scaling exactly (division,
+// not an estimate) so the cached entry can price ANY quantity offline, not
+// just the pinned/saved one. brand/provenance/serving_desc are unknown at
+// this shape, so they get honest placeholders rather than fabricated values.
+function fromFlatSummary(f: FlatFoodSummary): FoodItem {
+  const scale = 100 / f.grams;
+  return {
+    id: f.food_item_id,
+    name: f.name,
+    brand: "",
+    provenance: "cached",
+    serving_desc: `${f.grams} g`,
+    serving_grams: f.grams,
+    kcal_per_100g: f.kcal * scale,
+    protein_per_100g: f.protein_g * scale,
+    carbs_per_100g: f.carbs_g * scale,
+    fat_per_100g: f.fat_g * scale,
+  };
+}
+
+// Harvests FoodItems out of a response so the offline cache fills from normal
+// use. Deliberately tolerant: usePins returns flat summaries directly,
+// useSavedMeals nests them one level inside `items`, and a miss on either
+// shape must never break the query it is piggybacking on.
+function extractFoods(data: unknown): FoodItem[] {
+  if (!Array.isArray(data)) return [];
+  return data.flatMap((d): FoodItem[] => {
+    if (isFlatFoodSummary(d)) return [fromFlatSummary(d)];
+    const nested = (d as { items?: unknown }).items;
+    return Array.isArray(nested) ? nested.filter(isFlatFoodSummary).map(fromFlatSummary) : [];
+  });
+}
 
 type ResolveFile = {
   uri: string;
@@ -154,10 +211,17 @@ export function useMemory(date: string) {
 }
 
 export function usePins() {
-  return useQuery({
+  const query = useQuery({
     queryKey: ["pins"],
     queryFn: () => apiFetch("/v1/pins") as Promise<PinnedFood[]>,
   });
+  // Fills the offline cache as a by-product of a query the app already runs.
+  // In an effect rather than `select` (which must stay pure and re-runs on
+  // every access) or `onSuccess` (removed from useQuery in v5).
+  useEffect(() => {
+    if (query.data) void upsertFoods(extractFoods(query.data));
+  }, [query.data]);
+  return query;
 }
 
 export function useCreatePin() {
@@ -180,10 +244,15 @@ export function useDeletePin() {
 type SaveMealBody = { name: string; meal_slot: string; items: { food_item_id: string; grams: number }[] };
 
 export function useSavedMeals() {
-  return useQuery({
+  const query = useQuery({
     queryKey: ["savedMeals"],
     queryFn: () => apiFetch("/v1/saved-meals") as Promise<SavedMeal[]>,
   });
+  // See usePins above: same by-product cache fill, same reason for an effect.
+  useEffect(() => {
+    if (query.data) void upsertFoods(extractFoods(query.data));
+  }, [query.data]);
+  return query;
 }
 
 export function useCreateSavedMeal() {

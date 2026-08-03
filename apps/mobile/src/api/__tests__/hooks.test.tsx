@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react
 import type { ReactNode } from "react";
 import { NetworkError, apiFetch, apiFetchEnvelope, apiFetchMultipart, currentUserId } from "@/lib/api";
 import { drain, list } from "@/offline/queue";
+import { getFoodById } from "@/offline/foodCache";
 import { rememberOwner } from "@/offline/owner";
 import {
   useAcceptRequest,
@@ -29,6 +30,7 @@ import {
   useMarkAllRead,
   useMemory,
   useNotifications,
+  usePins,
   useProfile,
   useRenameGroup,
   useRepeatLog,
@@ -36,6 +38,7 @@ import {
   useResolvePhoto,
   useResolveText,
   useResolveVoice,
+  useSavedMeals,
   useSendFriendRequest,
   useSetShareProgress,
   useSubmitOnboarding,
@@ -699,4 +702,54 @@ test("useSubmitOnboarding replaces the cached profile with the onboarded one", a
   });
 
   await waitFor(() => expect(client.getQueryData(["profile"])).toEqual(onboarded));
+});
+
+// usePins/useSavedMeals are the only two read hooks with a nested food
+// summary in their response, so they are what fills the offline food cache
+// (see src/offline/foodCache.ts and extractFoods in ../hooks.ts). This test
+// asserts against the CACHE ITSELF via getFoodById, not against a spy on
+// upsertFoods — a spy would prove the function was called with something,
+// never that a real, subsequently-loggable entry landed in storage.
+test("usePins fills the offline food cache with what it fetches", async () => {
+  await AsyncStorage.clear();
+  const pins = [
+    { food_item_id: "f1", name: "Greek yogurt", meal_slot: "breakfast", grams: 150, kcal: 150, protein_g: 15, carbs_g: 6, fat_g: 3, fiber_g: 0 },
+  ];
+  (apiFetch as jest.Mock).mockResolvedValueOnce(pins);
+
+  const { result } = await renderHook(() => usePins(), { wrapper });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+  await waitFor(async () => expect(await getFoodById("f1")).not.toBeNull());
+  const cached = await getFoodById("f1");
+  expect(cached?.name).toBe("Greek yogurt");
+  // 150 kcal for 150g scales back to exactly 100 kcal/100g — this is the
+  // reverse of the scaling the server applied, not an approximation.
+  expect(cached?.kcal_per_100g).toBeCloseTo(100);
+});
+
+test("useSavedMeals fills the offline food cache with the foods nested inside each meal", async () => {
+  await AsyncStorage.clear();
+  const meals = [
+    {
+      id: "meal1",
+      name: "My lunch",
+      meal_slot: "lunch",
+      items: [
+        { food_item_id: "f2", name: "Cheddar cheese", grams: 50, kcal: 200, protein_g: 12, carbs_g: 1, fat_g: 16, fiber_g: 0 },
+      ],
+      kcal: 200, protein_g: 12, carbs_g: 1, fat_g: 16, fiber_g: 0,
+    },
+  ];
+  (apiFetch as jest.Mock).mockResolvedValueOnce(meals);
+
+  const { result } = await renderHook(() => useSavedMeals(), { wrapper });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+  await waitFor(async () => expect(await getFoodById("f2")).not.toBeNull());
+  const cached = await getFoodById("f2");
+  expect(cached?.name).toBe("Cheddar cheese");
+  // The SAVED MEAL's own id ("meal1") must never be mistaken for a food id —
+  // only what is nested inside `items` belongs in the cache.
+  expect(await getFoodById("meal1")).toBeNull();
 });

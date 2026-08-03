@@ -23,6 +23,8 @@ export type FoodItem = {
   protein_per_100g: number;
   carbs_per_100g: number;
   fat_per_100g: number;
+  /** Present on barcode-sourced foods; enables an offline repeat scan. */
+  barcode?: string;
 };
 
 export type Candidate = {
