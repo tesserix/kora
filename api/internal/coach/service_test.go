@@ -183,6 +183,36 @@ func TestAsk_GroundedAnswerReturnsCitations(t *testing.T) {
 	require.Len(t, meter.records, 1, "usage must be recorded")
 }
 
+// A successful GenerateText call that leaves Usage.Outcome unset (exactly
+// what providers/gemini.go does — it never sets Outcome) must still be
+// recorded with outcome "ok", not left blank. A blank Outcome normalizes to
+// "other" in the meter, which would silently exclude every coach call from
+// sum(kora_ai_calls_total{outcome="ok"}) — the product-view query
+// docs/ai-usage-queries.md mandates.
+func TestAsk_SuccessDefaultsBlankOutcomeToOK(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{})
+
+	provider := &fakeProvider{
+		text:      "You have 55g protein to go.",
+		textUsage: ai.Usage{Provider: "stub", Model: "test-model", CallType: "generate_text"}, // Outcome deliberately blank
+	}
+	meter := &stubMeter{withinBudget: true}
+	svc := NewService(&g, provider, meter, nil)
+
+	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
+	_, err := svc.Ask(context.Background(), userID, now, time.UTC, "how's my protein?")
+
+	require.NoError(t, err)
+	require.Len(t, meter.records, 1, "usage must be recorded")
+	require.Equal(t, ai.OutcomeOK, meter.records[0].Outcome, "a successful call with no provider-set Outcome must be recorded as ok")
+}
+
 func TestAsk_OverBudgetDegradesGracefully(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db, 2000, 120)

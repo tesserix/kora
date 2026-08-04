@@ -11,10 +11,16 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/tesserix/kora/api/internal/httpx"
+	"github.com/tesserix/kora/api/internal/metrics"
 )
 
 type Repository struct {
 	db *gorm.DB
+	// pendingMetrics, when non-nil, redirects Create's metric recording into
+	// this slice instead of incrementing the counter immediately. Only the
+	// tx-bound Repository handed to Transaction's fn has this set — see
+	// Transaction for why.
+	pendingMetrics *[]string
 }
 
 func NewRepository(db *gorm.DB) Repository {
@@ -25,16 +31,37 @@ func NewRepository(db *gorm.DB) Repository {
 // bound to that transaction. If fn returns an error, every write made through
 // the tx-bound Repository is rolled back; if fn returns nil, the transaction
 // commits. Used by CreateBatch for all-or-nothing batch meal logging.
+//
+// Create, called through the tx-bound Repository, does NOT record the
+// kora_food_logs_total metric as each row is inserted — an insert made inside
+// an open transaction isn't durable until commit, and a later item in the
+// same batch can still roll the whole thing back. Instead, each created row's
+// source is collected here and only recorded once db.Transaction returns nil,
+// i.e. once postgres has actually committed. A rollback (fn returns an error)
+// discards the collected sources along with the rows, so nothing is counted
+// for logs that don't exist.
 func (r Repository) Transaction(ctx context.Context, fn func(Repository) error) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		return fn(Repository{db: tx})
-	})
+	var pending []string
+	if err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return fn(Repository{db: tx, pendingMetrics: &pending})
+	}); err != nil {
+		return err
+	}
+	for _, source := range pending {
+		metrics.RecordFoodLog(source)
+	}
+	return nil
 }
 
 func (r Repository) Create(ctx context.Context, log FoodLog) (FoodLog, error) {
 	created := log
 	if err := r.db.WithContext(ctx).Create(&created).Error; err != nil {
 		return FoodLog{}, fmt.Errorf("foodlog: create: %w", err)
+	}
+	if r.pendingMetrics != nil {
+		*r.pendingMetrics = append(*r.pendingMetrics, created.Source)
+	} else {
+		metrics.RecordFoodLog(created.Source)
 	}
 	return created, nil
 }
@@ -55,6 +82,11 @@ func (r Repository) CreateIdempotent(ctx context.Context, log FoodLog) (FoodLog,
 		return FoodLog{}, fmt.Errorf("foodlog: create idempotent: %w", res.Error)
 	}
 	if res.RowsAffected > 0 {
+		// Only a real insert counts. RowsAffected == 0 below means the offline
+		// queue replayed a write whose response was lost — that is the same
+		// meal, not a new one, and counting it would inflate the photo-share
+		// metric in proportion to connection flakiness.
+		metrics.RecordFoodLog(created.Source)
 		return created, nil
 	}
 

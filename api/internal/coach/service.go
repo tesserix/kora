@@ -244,6 +244,14 @@ func (s *Service) Nudges(ctx context.Context, userID uuid.UUID, now time.Time, l
 // Q&A response — a user's answer cannot depend on the billing table being
 // reachable — so the error is deliberately ignored here, matching
 // ai.Resolver.record's rationale.
+//
+// Mirrors ai.Resolver.record's Outcome defaulting: a provider that succeeded
+// without setting Usage.Outcome (e.g. providers/gemini.go, which never sets
+// it) must still be recorded as "ok" — not left blank, which the meter
+// normalizes to "other" and hides from every {outcome="ok"} product query.
 func (s *Service) record(ctx context.Context, userID uuid.UUID, u ai.Usage) {
+	if u.Outcome == "" {
+		u.Outcome = ai.OutcomeOK
+	}
 	_ = s.meter.Record(ctx, userID, u, ai.EstimateCostUSD(u))
 }

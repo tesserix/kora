@@ -23,6 +23,7 @@ import (
 	"github.com/tesserix/kora/api/internal/devices"
 	"github.com/tesserix/kora/api/internal/foodlog"
 	"github.com/tesserix/kora/api/internal/groups"
+	"github.com/tesserix/kora/api/internal/metrics"
 	"github.com/tesserix/kora/api/internal/notifications"
 	"github.com/tesserix/kora/api/internal/nutrition"
 	"github.com/tesserix/kora/api/internal/push"
@@ -101,6 +102,20 @@ func main() {
 		}
 	}()
 
+	// Metrics listen on their own port, which is NOT routed through the Istio
+	// gateway — the catch-all VirtualService rule sends / to the API's main
+	// port only, so /metrics is unreachable from outside the cluster and needs
+	// no auth of its own.
+	metricsSrv := &http.Server{Addr: ":" + cfg.MetricsPort, Handler: metrics.Handler()}
+	go func() {
+		logger.Info("metrics listening", "port", cfg.MetricsPort)
+		// Deliberately does NOT os.Exit on failure, unlike the API server
+		// above: losing observability must never take down the product.
+		if err := metricsSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("metrics server error", "err", err)
+		}
+	}()
+
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
@@ -109,6 +124,9 @@ func main() {
 	pushCancel()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	if err := metricsSrv.Shutdown(ctx); err != nil {
+		logger.Error("metrics shutdown error", "err", err)
+	}
 	if err := srv.Shutdown(ctx); err != nil {
 		logger.Error("shutdown error", "err", err)
 	}
