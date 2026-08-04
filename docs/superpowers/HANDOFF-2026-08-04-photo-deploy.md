@@ -44,6 +44,8 @@ see OPEN below. Do not assume it works because photo does; they share
 | #88 | composer showed a camera in every mode | merged `2882149` |
 | #81 | meter dropped failed calls + abandoned legs | merged `8b6e961`, **deployed + migration applied + verified** |
 | #90 | Type and Photo shared the `camera` icon | merged `7b11e3c` |
+| #91 | Type composer now a keyboard that focuses the field | merged `4f27386` |
+| #92 | `outcome` query semantics pinned + documented | merged `1c8832c` |
 
 ### Photo was broken by THREE stacked bugs
 
@@ -98,10 +100,15 @@ assume any 500 on an AI route is opaque.
     deliberately in `buildFileForm` — see #87's sibling note in `hooks.ts`.
 - **#81 is DONE and deployed.** Failures and abandoned fallback legs are now
   metered, with an `outcome` column (`ok` | `error` | `timeout`, migration
-  `000022`). ⚠️ **Every cost query must now filter `outcome = 'ok'`** — the data
-  contains failures as of 2026-08-04, so an unfiltered query flips from
-  under-counting to OVER-counting. That includes dashboards and ad-hoc queries
-  living outside this repo.
+  `000022`).
+  ⚠️ **Read `docs/ai-usage-queries.md` before writing ANY query over
+  `ai_usage_events`.** An earlier version of this handoff said "every cost query
+  must filter `outcome = 'ok'`" — that is **wrong for half of them** and #92
+  corrected it. Resource questions (spend, remaining quota) count EVERY row,
+  because providers return billed tokens alongside errors and quota is consumed
+  by any request that reaches them. Product questions (calls/user, photo share)
+  must filter. `WithinBudget` is deliberately unfiltered and two tests fail if
+  you "fix" it.
 - **#43 exporter — now unblocked** by #81 and safe to cut correctly the first
   time. Taxonomy already decided (two counters: `resolution` =
   identify_photo|identify_text|transcribe|coach; `derived` = decompose|embed;
