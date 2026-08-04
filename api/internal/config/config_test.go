@@ -203,6 +203,22 @@ func TestLoadRejectsMetricsPortEqualToPort(t *testing.T) {
 	require.Contains(t, err.Error(), "METRICS_PORT")
 }
 
+func TestLoadDefaultsFoodIndexRefreshIntervalTo60s(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
+	t.Setenv("FOOD_INDEX_REFRESH_INTERVAL", "")
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, 60*time.Second, cfg.FoodIndexRefreshInterval)
+}
+
+func TestLoadReadsFoodIndexRefreshIntervalFromEnv(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
+	t.Setenv("FOOD_INDEX_REFRESH_INTERVAL", "5m")
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, 5*time.Minute, cfg.FoodIndexRefreshInterval)
+}
+
 // The likeliest way to hit the collision in practice: move the API to 9090 in a
 // manifest and never think about METRICS_PORT, which defaults to 9090. The
 // guard has to compare the RESOLVED values, not just the two env vars, or this

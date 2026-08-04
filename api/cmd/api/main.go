@@ -89,6 +89,18 @@ func main() {
 		logger.Info("push dispatcher started", "interval", cfg.PushInterval.String(), "freshness", cfg.PushFreshness.String())
 	}
 
+	fiCtx, fiCancel := context.WithCancel(context.Background())
+	if cfg.FoodIndexRefreshInterval > 0 {
+		// logger is guaranteed non-nil here: it is constructed unconditionally
+		// at the top of main() (slog.New(...)) and never reset to nil on any
+		// path that reaches this point. FoodIndexRefresher.refreshLogging
+		// dereferences it on every query failure with no nil-check of its own,
+		// so this invariant must hold for the whole lifetime of the refresher.
+		refresher := metrics.NewFoodIndexRefresher(db, metrics.Default(), cfg.FoodIndexRefreshInterval, logger)
+		go refresher.Run(fiCtx)
+		logger.Info("food index gauge refresher started", "interval", cfg.FoodIndexRefreshInterval.String())
+	}
+
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,
 		Handler: server.NewRouter(server.Deps{DB: db, Verifier: verifier, Resolver: resolveHandler, Provider: aiProvider, ResolveCache: resolveCache}),
@@ -122,6 +134,7 @@ func main() {
 
 	schedCancel()
 	pushCancel()
+	fiCancel()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := metricsSrv.Shutdown(ctx); err != nil {

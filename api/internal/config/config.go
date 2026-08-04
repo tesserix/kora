@@ -24,26 +24,31 @@ type Config struct {
 	PushInterval      time.Duration
 	PushFreshness     time.Duration
 	ExpoAccessToken   string
+	// FoodIndexRefreshInterval is how often the food-index completeness gauges
+	// are re-read from the database. The value only changes when the embed job
+	// runs, so this is deliberately slow. 0 disables the refresher.
+	FoodIndexRefreshInterval time.Duration
 }
 
 func Load() (Config, error) {
 	cfg := Config{
-		Port:              getenv("PORT", "8080"),
-		MetricsPort:       getenv("METRICS_PORT", "9090"),
-		Env:               getenv("ENV", "development"),
-		DatabaseURL:       os.Getenv("DATABASE_URL"),
-		RedisURL:          getenv("REDIS_URL", "redis://localhost:6379/0"),
-		FirebaseProjectID: os.Getenv("FIREBASE_PROJECT_ID"),
-		GeminiAPIKey:      os.Getenv("GEMINI_API_KEY"),
-		OpenAIAPIKey:      os.Getenv("OPENAI_API_KEY"),
-		OpenAIBaseURL:     os.Getenv("OPENAI_BASE_URL"),
-		OpenAIModel:       os.Getenv("OPENAI_MODEL"),
-		OpenAIJSONObject:  os.Getenv("OPENAI_JSON_OBJECT") == "true",
-		SchedulerInterval: getdur("SCHEDULER_INTERVAL", 5*time.Minute),
-		PushEnabled:       os.Getenv("PUSH_ENABLED") == "true",
-		PushInterval:      getdur("PUSH_INTERVAL", 30*time.Second),
-		PushFreshness:     getdur("PUSH_FRESHNESS", 15*time.Minute),
-		ExpoAccessToken:   os.Getenv("EXPO_ACCESS_TOKEN"),
+		Port:                     getenv("PORT", "8080"),
+		MetricsPort:              getenv("METRICS_PORT", "9090"),
+		Env:                      getenv("ENV", "development"),
+		DatabaseURL:              os.Getenv("DATABASE_URL"),
+		RedisURL:                 getenv("REDIS_URL", "redis://localhost:6379/0"),
+		FirebaseProjectID:        os.Getenv("FIREBASE_PROJECT_ID"),
+		GeminiAPIKey:             os.Getenv("GEMINI_API_KEY"),
+		OpenAIAPIKey:             os.Getenv("OPENAI_API_KEY"),
+		OpenAIBaseURL:            os.Getenv("OPENAI_BASE_URL"),
+		OpenAIModel:              os.Getenv("OPENAI_MODEL"),
+		OpenAIJSONObject:         os.Getenv("OPENAI_JSON_OBJECT") == "true",
+		SchedulerInterval:        getdur("SCHEDULER_INTERVAL", 5*time.Minute),
+		PushEnabled:              os.Getenv("PUSH_ENABLED") == "true",
+		PushInterval:             getdur("PUSH_INTERVAL", 30*time.Second),
+		PushFreshness:            getdur("PUSH_FRESHNESS", 15*time.Minute),
+		ExpoAccessToken:          os.Getenv("EXPO_ACCESS_TOKEN"),
+		FoodIndexRefreshInterval: getdur("FOOD_INDEX_REFRESH_INTERVAL", 60*time.Second),
 	}
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("config: DATABASE_URL is required")
