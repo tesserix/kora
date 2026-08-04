@@ -29,7 +29,21 @@ type Usage struct {
 	TokensIn  int
 	TokensOut int
 	LatencyMs int
+	// Outcome distinguishes "this call happened" from "this call answered".
+	// Before #81 only successes were recorded at all, so a never-working path
+	// and a never-attempted path were indistinguishable in ai_usage_events —
+	// which is how three stacked photo bugs stayed invisible. Failures are now
+	// recorded too, which means cost queries MUST filter on this or they will
+	// over-count instead of the old under-count.
+	Outcome string
 }
+
+// Usage.Outcome values.
+const (
+	OutcomeOK      = "ok"
+	OutcomeError   = "error"
+	OutcomeTimeout = "timeout"
+)
 
 // Tier classifies resolution confidence.
 type Tier string

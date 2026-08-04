@@ -45,6 +45,7 @@ func (m Meter) Record(ctx context.Context, userID uuid.UUID, u ai.Usage, costUSD
 		TokensOut:  u.TokensOut,
 		LatencyMs:  u.LatencyMs,
 		CostUSDEst: costUSD,
+		Outcome:    u.Outcome,
 	}
 	if err := m.db.WithContext(ctx).Create(&event).Error; err != nil {
 		return fmt.Errorf("billing: record: %w", err)
