@@ -710,9 +710,9 @@ func TestCreateIdempotentDoesNotCountAReplay(t *testing.T) {
 }
 ```
 
-Imports for the file: `"context"`, `"testing"`, `"time"`, `"github.com/google/uuid"`, `"github.com/stretchr/testify/require"`, `"github.com/prometheus/client_golang/prometheus/testutil"`, `"github.com/tesserix/kora/api/internal/metrics"`.
-
-`seedFoodItem(t, db)` must insert one `nutrition.FoodItem` and return its `uuid.UUID`. If an equivalent helper already exists in the package's test files, use that one instead of adding a second — check `service_test.go` first.
+The file already imports everything else these tests need; the only two new
+imports are `"github.com/prometheus/client_golang/prometheus/testutil"` and
+`"github.com/tesserix/kora/api/internal/metrics"`, as noted above Step 2.
 
 - [ ] **Step 3: Run the tests to verify they fail**
 
