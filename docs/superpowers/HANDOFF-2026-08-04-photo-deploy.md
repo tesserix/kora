@@ -41,6 +41,9 @@ see OPEN below. Do not assume it works because photo does; they share
 | #82 | client never sent the multipart body | merged `7708627`, deployed, device-verified |
 | #79 | gateway killed the request at 30s | merged `0259d80d` (infra), deployed, verified |
 | #87 | 3s vision budget + a blind fallback | merged `3dbd69b`, deployed (digest-verified), **photo confirmed working** |
+| #88 | composer showed a camera in every mode | merged `2882149` |
+| #81 | meter dropped failed calls + abandoned legs | merged `8b6e961`, **deployed + migration applied + verified** |
+| #90 | Type and Photo shared the `camera` icon | merged `7b11e3c` |
 
 ### Photo was broken by THREE stacked bugs
 
@@ -93,14 +96,16 @@ assume any 500 on an AI route is opaque.
     would derive from the `.m4a` extension; measured via
     `UTType(filenameExtension:).preferredMIMEType`). The declared value is kept
     deliberately in `buildFileForm` — see #87's sibling note in `hooks.ts`.
-- **#81 — `ai_usage_events` records only successes.** `withFallback` also drops
-  the primary leg. `ai_usage_events` has **no outcome column**, so metering
-  failures needs a migration; deliberately not bundled into #87. Until it lands,
-  **zero rows never means "unused"** — a never-working path and a
-  never-attempted path are indistinguishable.
-- **#43 exporter.** Taxonomy decided (two counters: `resolution` =
+- **#81 is DONE and deployed.** Failures and abandoned fallback legs are now
+  metered, with an `outcome` column (`ok` | `error` | `timeout`, migration
+  `000022`). ⚠️ **Every cost query must now filter `outcome = 'ok'`** — the data
+  contains failures as of 2026-08-04, so an unfiltered query flips from
+  under-counting to OVER-counting. That includes dashboards and ad-hoc queries
+  living outside this repo.
+- **#43 exporter — now unblocked** by #81 and safe to cut correctly the first
+  time. Taxonomy already decided (two counters: `resolution` =
   identify_photo|identify_text|transcribe|coach; `derived` = decompose|embed;
-  COGS is the sum). Deliberately unbuilt until #81 lands, or it ships wrong.
+  COGS is the sum). Emit `kora_ai_calls_total{class,call_type,model,outcome}`.
 - **CI gap in `tesserix-k8s`.** `.github/workflows/pr-validation.yaml` filters on
   `charts/**`, `argocd/**`, `.github/workflows/**` — **`manifests/**` is not
   covered.** The kora VirtualService gets no CI validation at all; only
