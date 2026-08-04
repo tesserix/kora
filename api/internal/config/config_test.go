@@ -169,3 +169,19 @@ func TestLoadPushOverrides(t *testing.T) {
 	require.Equal(t, 5*time.Minute, cfg.PushFreshness)
 	require.Equal(t, "expo-secret", cfg.ExpoAccessToken)
 }
+
+func TestLoadDefaultsMetricsPortTo9090(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
+	t.Setenv("METRICS_PORT", "")
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, "9090", cfg.MetricsPort)
+}
+
+func TestLoadReadsMetricsPortFromEnv(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
+	t.Setenv("METRICS_PORT", "9187")
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, "9187", cfg.MetricsPort)
+}

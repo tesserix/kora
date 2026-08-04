@@ -9,6 +9,7 @@ import (
 
 type Config struct {
 	Port              string
+	MetricsPort       string
 	Env               string
 	DatabaseURL       string
 	RedisURL          string
@@ -28,6 +29,7 @@ type Config struct {
 func Load() (Config, error) {
 	cfg := Config{
 		Port:              getenv("PORT", "8080"),
+		MetricsPort:       getenv("METRICS_PORT", "9090"),
 		Env:               getenv("ENV", "development"),
 		DatabaseURL:       os.Getenv("DATABASE_URL"),
 		RedisURL:          getenv("REDIS_URL", "redis://localhost:6379/0"),
