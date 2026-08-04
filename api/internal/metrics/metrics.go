@@ -42,7 +42,13 @@ func New() *Collectors {
 		registry: prometheus.NewRegistry(),
 		aiCalls: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "kora_ai_calls_total",
-			Help: "AI provider calls, including failed and abandoned fallback legs.",
+			// This guarantee is call-type-specific, not exporter-wide — do not
+			// broaden it back to "including failed and abandoned fallback legs"
+			// without also closing the metering gaps below, or class="derived"
+			// and call_type="coach" will keep reporting a 100% success rate
+			// that is an artefact of what never got recorded, not of what
+			// actually happened. See docs/ai-usage-queries.md.
+			Help: "AI provider calls. identify_photo, identify_text, and transcribe include failed and abandoned fallback legs. coach, decompose, and embed record ONLY successful calls; their failures and any abandoned legs are not observed here.",
 		}, []string{"class", "call_type", "model", "outcome"}),
 		aiCostUSD: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "kora_ai_cost_usd_total",
