@@ -63,10 +63,22 @@ const MODE_PILLS: ReadonlyArray<{ mode: CaptureMode; icon: string; label: string
 
 // The composer's left control, per mode. Voice is absent because it renders
 // VoiceComposer instead of a plain Pressable.
-const COMPOSER_BUTTON: Record<Exclude<CaptureMode, "voice">, { icon: string; label: string }> = {
+//
+// `type` keeps the photo action but under a DISTINCT icon. Two reasons it is
+// not simply dropped to match voice/scan: attaching a photo mid-sentence is the
+// messaging convention, and — load-bearing — the only test that proves
+// food_logs.source follows the RESOLVE rather than the open tab captures a
+// photo from the Type tab ("a photo capture via the quick-capture shortcut,
+// from the Type tab, logs ai_photo", #80). Remove this affordance and that test
+// has to switch to Photo first, at which point mode and modality agree and it
+// stops discriminating anything.
+//
+// It previously shared `camera` with photo, which read as a duplicate icon;
+// `images` says "attach a photo" and is distinguishable at a glance.
+export const COMPOSER_BUTTON: Record<Exclude<CaptureMode, "voice">, { icon: string; label: string }> = {
   photo: { icon: "camera", label: "Quick photo capture" },
   scan: { icon: "scan-barcode", label: "Scan a barcode" },
-  type: { icon: "camera", label: "Quick photo capture" },
+  type: { icon: "images", label: "Quick photo capture" },
 };
 
 const ROUND_BUTTON = {
