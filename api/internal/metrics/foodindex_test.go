@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pgvector/pgvector-go"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/tesserix/kora/api/internal/nutrition"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -33,19 +35,76 @@ func quietLogger() *slog.Logger {
 // The positive twin. Reads the REAL count from food_items and asserts the
 // gauges carry exactly it — so a RefreshOnce that queries correctly but never
 // publishes, or publishes constants, fails here.
+//
+// The whole test runs inside a transaction seeded with one embedded and one
+// unembedded row, then rolls back. This guarantees the baseline is
+// discriminating on the embedded axis regardless of what the fixture
+// database happens to hold: without a seeded row that HAS an embedding, a
+// fixture with zero embedded rows (as kora-pg-test's food_items is today)
+// makes want.Embedded always 0, and the embedded assertion degrades to
+// `0 == 0` — passing even if RefreshOnce hardcoded the embedded gauge to 0.
+// Rolling back leaves food_items exactly as this test found it.
 func TestRefreshOncePublishesTheQueriedCounts(t *testing.T) {
 	db := testDB(t)
 	c := New()
-	r := NewFoodIndexRefresher(db, c, time.Minute, quietLogger())
+
+	tx := db.Begin()
+	if tx.Error != nil {
+		t.Fatalf("begin tx: %v", tx.Error)
+	}
+	t.Cleanup(func() {
+		if err := tx.Rollback().Error; err != nil {
+			t.Errorf("rollback: %v", err)
+		}
+	})
+
+	embeddedItem := nutrition.FoodItem{
+		Name:           "metrics-test embedded food item",
+		Provenance:     nutrition.ProvenanceCurated,
+		KcalPer100g:    100,
+		ProteinPer100g: 1,
+		CarbsPer100g:   1,
+		FatPer100g:     1,
+	}
+	if err := tx.Create(&embeddedItem).Error; err != nil {
+		t.Fatalf("seed embedded row: %v", err)
+	}
+	// food_items.embedding is vector(768) (migration 000004_nutrition_index):
+	// match the dimension or the UPDATE fails.
+	vec := pgvector.NewVector(make([]float32, 768))
+	if err := tx.Exec("UPDATE food_items SET embedding = ? WHERE id = ?", vec, embeddedItem.ID).Error; err != nil {
+		t.Fatalf("set embedding on seeded row: %v", err)
+	}
+
+	unembeddedItem := nutrition.FoodItem{
+		Name:           "metrics-test unembedded food item",
+		Provenance:     nutrition.ProvenanceCurated,
+		KcalPer100g:    100,
+		ProteinPer100g: 1,
+		CarbsPer100g:   1,
+		FatPer100g:     1,
+	}
+	if err := tx.Create(&unembeddedItem).Error; err != nil {
+		t.Fatalf("seed unembedded row: %v", err)
+	}
+
+	r := NewFoodIndexRefresher(tx, c, time.Minute, quietLogger())
 
 	var want struct {
 		Total    int64
 		Embedded int64
 	}
-	if err := db.Raw(
+	if err := tx.Raw(
 		"SELECT count(*) AS total, count(*) FILTER (WHERE embedding IS NOT NULL) AS embedded FROM food_items",
 	).Scan(&want).Error; err != nil {
 		t.Fatalf("baseline query: %v", err)
+	}
+	// Guard against the exact vacuity this test exists to close: if the
+	// baseline it's about to trust isn't discriminating on the embedded
+	// axis, fail loudly rather than let the assertions below pass
+	// meaninglessly.
+	if want.Embedded <= 0 || want.Embedded >= want.Total {
+		t.Fatalf("baseline not discriminating: total=%d embedded=%d, want 0 < embedded < total", want.Total, want.Embedded)
 	}
 
 	if err := r.RefreshOnce(context.Background()); err != nil {
