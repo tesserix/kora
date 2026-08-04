@@ -159,7 +159,7 @@ function makeRecorder(): MockRecorder {
   return recorder;
 }
 
-import CaptureScreen, { CaptureBody } from "../capture";
+import CaptureScreen, { CaptureBody, COMPOSER_BUTTON } from "../capture";
 
 function makeResolution(): Resolution {
   return {
@@ -1326,6 +1326,17 @@ describe("Composer follows the selected mode", () => {
     expect(await findByLabelText("Scan a barcode")).toBeTruthy();
     expect(queryByLabelText("Tell Otto what you ate")).toBeNull();
     expect(queryByLabelText("Hold to record")).toBeNull();
+  });
+
+  // Photo and Type both expose a photo shortcut, so their composer buttons must
+  // not look identical — sharing the `camera` icon read as a duplicated control.
+  // Asserted on the constant rather than the rendered glyph: Icon only renders
+  // an identifiable SF symbol on iOS, and Jest does not run as iOS, so a
+  // render-level assertion here would pass no matter what the icons were.
+  test("no two composer modes share an icon", async () => {
+    const icons = Object.values(COMPOSER_BUTTON).map((b) => b.icon);
+    expect(new Set(icons).size).toBe(icons.length);
+    expect(COMPOSER_BUTTON.photo.icon).not.toBe(COMPOSER_BUTTON.type.icon);
   });
 
   test("photo and type modes keep the text field and the quick-capture camera", async () => {
