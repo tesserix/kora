@@ -48,6 +48,15 @@ func Load() (Config, error) {
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("config: DATABASE_URL is required")
 	}
+	// Compared AFTER defaults are applied, so that moving the API to 9090 and
+	// leaving METRICS_PORT unset is caught too. main() runs the API and the
+	// metrics endpoint as two servers; sharing a port makes them race to bind,
+	// and the API's goroutine exits the process when it loses — letting an
+	// observability misconfiguration take down the product. Fail loudly here
+	// instead.
+	if cfg.MetricsPort == cfg.Port {
+		return Config{}, fmt.Errorf("config: METRICS_PORT (%s) must differ from PORT (%s)", cfg.MetricsPort, cfg.Port)
+	}
 	return cfg, nil
 }
 

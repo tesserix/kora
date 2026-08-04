@@ -12,6 +12,7 @@ func TestLoadConfig(t *testing.T) {
 	tests := []struct {
 		name             string
 		port             string
+		metricsPort      string
 		env              string
 		databaseURL      string
 		redisURL         string
@@ -51,6 +52,7 @@ func TestLoadConfig(t *testing.T) {
 		{
 			name:             "All environment variables set",
 			port:             "9090",
+			metricsPort:      "9091",
 			env:              "production",
 			databaseURL:      "postgres://prod:secret@host/proddb",
 			redisURL:         "redis://prod-redis:6379/1",
@@ -83,6 +85,7 @@ func TestLoadConfig(t *testing.T) {
 			// hermetic — a var left in the ambient environment (e.g. a sourced
 			// .env) can't leak into a case that expects the default/empty value.
 			t.Setenv("PORT", tt.port)
+			t.Setenv("METRICS_PORT", tt.metricsPort)
 			t.Setenv("ENV", tt.env)
 			t.Setenv("DATABASE_URL", tt.databaseURL)
 			t.Setenv("REDIS_URL", tt.redisURL)
@@ -184,4 +187,30 @@ func TestLoadReadsMetricsPortFromEnv(t *testing.T) {
 	cfg, err := Load()
 	require.NoError(t, err)
 	require.Equal(t, "9187", cfg.MetricsPort)
+}
+
+// PORT and METRICS_PORT must differ. main() runs two http.Servers; if they are
+// given the same port they race to bind it, and the API server's goroutine
+// calls os.Exit(1) when it loses. That would let a metrics misconfiguration
+// take down the product — exactly inverting the reason metrics were put on
+// their own port. Failing at config load turns a race into a clear message.
+func TestLoadRejectsMetricsPortEqualToPort(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
+	t.Setenv("PORT", "8080")
+	t.Setenv("METRICS_PORT", "8080")
+	_, err := Load()
+	require.Error(t, err, "a colliding METRICS_PORT must be rejected at startup")
+	require.Contains(t, err.Error(), "METRICS_PORT")
+}
+
+// The likeliest way to hit the collision in practice: move the API to 9090 in a
+// manifest and never think about METRICS_PORT, which defaults to 9090. The
+// guard has to compare the RESOLVED values, not just the two env vars, or this
+// case slips through with both unset-vs-set.
+func TestLoadRejectsPortCollidingWithTheMetricsDefault(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
+	t.Setenv("PORT", "9090")
+	t.Setenv("METRICS_PORT", "")
+	_, err := Load()
+	require.Error(t, err, "PORT=9090 collides with the METRICS_PORT default and must be rejected")
 }
