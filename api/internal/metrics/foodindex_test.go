@@ -157,9 +157,17 @@ func TestRefreshOnceLeavesGaugesOnQueryFailure(t *testing.T) {
 
 // Run must publish IMMEDIATELY rather than waiting out the first tick —
 // otherwise a pod that restarts every few minutes never reports at all.
+//
+// The readiness signal can't be "the items gauge is non-zero": CI runs
+// against a freshly migrated, empty food_items table, where a real refresh
+// legitimately publishes 0 and that condition would never become true. This
+// test instead primes the gauge to an impossible sentinel (-1) before
+// starting Run and waits for it to change AWAY from -1 — which proves a
+// refresh landed regardless of whether the real count is 0, 85, or 7898.
 func TestRunRefreshesImmediatelyAndStopsOnContextCancel(t *testing.T) {
 	db := testDB(t)
 	c := New()
+	c.SetFoodIndex(-1, -1)
 	r := NewFoodIndexRefresher(db, c, time.Hour, quietLogger())
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -171,11 +179,11 @@ func TestRunRefreshesImmediatelyAndStopsOnContextCancel(t *testing.T) {
 
 	deadline := time.After(5 * time.Second)
 	items, _, _ := c.FoodIndexGauges()
-	for testutil.ToFloat64(items) == 0 {
+	for testutil.ToFloat64(items) == -1 {
 		select {
 		case <-deadline:
 			cancel()
-			t.Fatal("Run did not publish within 5s despite a 1h interval — it is waiting for the first tick")
+			t.Fatal("Run did not publish within 5s despite a 1h interval — the items gauge is still the -1 sentinel, so it never performed its initial refresh")
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
