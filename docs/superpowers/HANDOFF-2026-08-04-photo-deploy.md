@@ -13,30 +13,26 @@ it describes is **fixed and deployed**.
                                       this file.
     ~/.claude/projects/.../memory/MEMORY.md   ← durable gotchas
 
-## THE ONE THING TO DO NEXT
+## PHOTO WORKS. VOICE IS NEXT.
 
-**Merge PR #87, deploy it, and re-drive a photo capture.** It is CI-green and
-is the last known blocker on the photo path.
+**All three photo fixes are merged, deployed, and verified end to end on
+2026-08-04.** Photo capture succeeded against prod for the first time in this
+project's history:
 
-    gh pr merge 87 --squash --delete-branch
+    "route":"/v1/resolve/photo","status":200,"latency_ms":14568
 
-Then deploy — this one is Go, so unlike the last two it **needs an image**.
-`build-image` is gated `if: github.ref == 'refs/heads/main'`, so the image is
-built on merge, not on the PR. Wait for that job, then:
+and the app rendered real candidates from a seeded photo — "I found 5 items,
+about 102 kcal", including Parsnips/Garlic actually present in the image,
+resolved against the nutrition index with per-100g macros.
 
-    # currently deployed: image.tag=104b6ded7735… (commit 104b6de) — OLD
-    kubectl -n argocd patch application kora-api --type=json \
-      -p='[{"op":"replace","path":"/spec/source/helm/parameters/0/value","value":"<merge-sha>"}]'
-    kubectl -n kora get pod -l 'app.kubernetes.io/name=kora-api' \
-      --field-selector=status.phase=Running \
-      -o jsonpath='{.items[0].status.containerStatuses[0].imageID}'
+**14.5s is the number to remember**: it is why `photoBudget = 3s` could never
+have worked, and it is the evidence that 20s was sized correctly rather than
+guessed. Deployed digest was verified equal to what CI printed
+(`sha256:012df731…`, commit `3dbd69b`).
 
-**Verify the running digest against what CI printed.** `:latest` is a GAR
-pull-through mirror of GHCR and serves stale — "successfully rolled out" has
-twice meant old code.
-
-Then re-run the capture (recipe under SIMULATOR below). That will be the first
-genuine end-to-end photo resolve this project has ever had.
+**The next task is VOICE**, which has still never been exercised by anyone —
+see OPEN below. Do not assume it works because photo does; they share
+`buildFileForm` but nothing else about the voice path has ever run.
 
 ## WHAT SHIPPED TODAY
 
@@ -44,7 +40,7 @@ genuine end-to-end photo resolve this project has ever had.
 |---|---|---|
 | #82 | client never sent the multipart body | merged `7708627`, deployed, device-verified |
 | #79 | gateway killed the request at 30s | merged `0259d80d` (infra), deployed, verified |
-| — | 3s vision budget + a blind fallback | **PR #87 — green, NOT merged, NOT deployed** |
+| #87 | 3s vision budget + a blind fallback | merged `3dbd69b`, deployed (digest-verified), **photo confirmed working** |
 
 ### Photo was broken by THREE stacked bugs
 
@@ -167,9 +163,9 @@ after running it. Baseline is 106 problems / 53 errors — unchanged means clean
 
 ### Metro
 
-**Metro is NOT running as of this handoff** — the process on 8083 was killed at
-the end of the session. Start it before touching the simulator; the installed
-app will fail to load its bundle until you do.
+**Metro IS running on 8083** against prod as of this handoff (restarted after an
+earlier kill). Verify before trusting it — `lsof -nP -iTCP:8083 -sTCP:LISTEN` —
+and restart with the command below if not.
 
 8081/8082 belong to Home-Chef-App. Use 8083:
 
