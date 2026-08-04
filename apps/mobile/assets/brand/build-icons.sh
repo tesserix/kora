@@ -51,7 +51,14 @@ magick "$tmp/icon.png" -resize 48x48 "$OUT/favicon.png"
 
 # Small mark for the tesserix-home admin rail (kept beside the sources so it can
 # be copied into that repo deliberately, not picked up by the mobile bundler).
-magick "$tmp/icon.png" -resize 64x64 "$BRAND/kora-rail-64.png"
+#
+# Derived from the MONOCHROME layer, not icon.png. The rail renders this with
+# Tailwind's `brightness-0 invert`, which flattens every visible pixel to white
+# and preserves only ALPHA — so a source with an opaque background renders as a
+# flat white square, not a mark. icon.png has exactly that opaque background,
+# and shipping it produced precisely that blank square. PNG32: forces RGBA out;
+# an indexed PNG with no tRNS chunk is fully opaque and reintroduces the bug.
+magick "$tmp/monochrome.png" -resize 64x64 PNG32:"$BRAND/kora-rail-64.png"
 
 echo "Wrote:"
 for f in icon android-icon-foreground android-icon-monochrome android-icon-background splash-icon favicon; do
