@@ -24,6 +24,7 @@ import { OttoBubble } from "@/components/capture/OttoBubble";
 import { UserBubble } from "@/components/capture/UserBubble";
 import { ModePill } from "@/components/capture/ModePill";
 import { Waveform } from "@/components/capture/Waveform";
+import { VoiceComposer } from "@/components/capture/VoiceComposer";
 import { DetectedCard } from "@/components/capture/DetectedCard";
 import { FoodPicker } from "@/components/meal/FoodPicker";
 import { captureColors } from "@/components/capture/captureTheme";
@@ -59,6 +60,14 @@ const MODE_PILLS: ReadonlyArray<{ mode: CaptureMode; icon: string; label: string
   { mode: "scan", icon: "scan-barcode", label: "Scan" },
   { mode: "type", icon: "type", label: "Type" },
 ];
+
+// The composer's left control, per mode. Voice is absent because it renders
+// VoiceComposer instead of a plain Pressable.
+const COMPOSER_BUTTON: Record<Exclude<CaptureMode, "voice">, { icon: string; label: string }> = {
+  photo: { icon: "camera", label: "Quick photo capture" },
+  scan: { icon: "scan-barcode", label: "Scan a barcode" },
+  type: { icon: "camera", label: "Quick photo capture" },
+};
 
 const ROUND_BUTTON = {
   width: 36,
@@ -115,7 +124,6 @@ interface IdleAffordanceProps {
   mode: CaptureMode;
   onCapturePhoto: () => void;
   isRecordingVoice: boolean;
-  onToggleVoice: () => void;
   cameraPermissionGranted: boolean;
   onBarcodeScanned: (data: string) => void;
 }
@@ -127,7 +135,6 @@ function IdleAffordance({
   mode,
   onCapturePhoto,
   isRecordingVoice,
-  onToggleVoice,
   cameraPermissionGranted,
   onBarcodeScanned,
 }: IdleAffordanceProps) {
@@ -185,10 +192,10 @@ function IdleAffordance({
           gap: 18,
         }}
       >
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={isRecordingVoice ? "Stop recording" : "Start recording"}
-          onPress={onToggleVoice}
+        {/* Display only. This used to be a second, competing record button;
+            the composer's mic below now owns starting and stopping, so a
+            single control means a single mental model. */}
+        <View
           style={{
             width: 72,
             height: 72,
@@ -201,10 +208,10 @@ function IdleAffordance({
           }}
         >
           <Icon name="mic" size={30} color={captureColors.primaryForeground} />
-        </Pressable>
+        </View>
         <Waveform active={isRecordingVoice} />
         <AppText style={{ color: captureColors.onSurfaceMuted, fontSize: 13, fontWeight: "600" }}>
-          {isRecordingVoice ? "Listening… tell Otto what you ate" : "Tap the mic to start"}
+          {isRecordingVoice ? "Listening… tell Otto what you ate" : "Hold the mic below to record"}
         </AppText>
       </View>
     );
@@ -367,7 +374,9 @@ interface CaptureBodyProps {
   onSend: () => void;
   onCapturePhoto: () => void;
   isRecordingVoice: boolean;
-  onToggleVoice: () => void;
+  onStartVoice: () => void;
+  onFinishVoice: () => void;
+  onCancelVoice: () => void;
   cameraPermissionGranted: boolean;
   onBarcodeScanned: (data: string) => void;
   onClose: () => void;
@@ -397,13 +406,18 @@ export function CaptureBody({
   onSend,
   onCapturePhoto,
   isRecordingVoice,
-  onToggleVoice,
+  onStartVoice,
+  onFinishVoice,
+  onCancelVoice,
   cameraPermissionGranted,
   onBarcodeScanned,
   onClose,
   onResolveUncertain,
 }: CaptureBodyProps) {
   const scrollViewRef = useRef<ScrollView>(null);
+  // Typing is an input only where it is the point. In voice and scan the
+  // middle of the composer is static guidance, so there is no dead field.
+  const showsTextField = mode === "photo" || mode === "type";
   const resultView = resolution ? resolveResultView(resolution) : null;
 
   // Bring the newest Otto message (an error bubble or the detected-food
@@ -467,7 +481,6 @@ export function CaptureBody({
             mode={mode}
             onCapturePhoto={onCapturePhoto}
             isRecordingVoice={isRecordingVoice}
-            onToggleVoice={onToggleVoice}
             cameraPermissionGranted={cameraPermissionGranted}
             onBarcodeScanned={onBarcodeScanned}
           />
@@ -539,31 +552,53 @@ export function CaptureBody({
             paddingLeft: 8,
           }}
         >
-          {/* Quick-capture shortcut — triggers the same camera/library flow as the idle viewfinder. */}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Quick photo capture"
-            onPress={onCapturePhoto}
-            style={{
-              width: 38,
-              height: 38,
-              borderRadius: 9999,
-              backgroundColor: captureColors.primary,
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <Icon name="camera" size={19} color={captureColors.primaryForeground} />
-          </Pressable>
-          <TextInput
-            accessibilityLabel="Tell Otto what you ate"
-            value={text}
-            onChangeText={onChangeText}
-            placeholder="Tell Otto what you ate…"
-            placeholderTextColor={captureColors.onSurfaceFaint}
-            style={{ flex: 1, color: captureColors.onSurface, fontSize: 15 }}
-          />
+          {/* Mode-aware primary control. This was a camera icon in EVERY mode,
+              which is what made Voice read as a photo capture: selecting Voice
+              changed the pills and the thread affordance but left a camera
+              button and a text field sitting in the composer. Voice owns its
+              own control (hold-to-record); the others share one Pressable. */}
+          {mode === "voice" ? (
+            <VoiceComposer
+              isRecording={isRecordingVoice}
+              onStart={onStartVoice}
+              onFinish={onFinishVoice}
+              onCancel={onCancelVoice}
+            />
+          ) : (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={COMPOSER_BUTTON[mode].label}
+              onPress={onCapturePhoto}
+              style={{
+                width: 38,
+                height: 38,
+                borderRadius: 9999,
+                backgroundColor: captureColors.primary,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Icon name={COMPOSER_BUTTON[mode].icon} size={19} color={captureColors.primaryForeground} />
+            </Pressable>
+          )}
+          {/* Typing is only an input in photo/type. In voice and scan the middle
+              is static guidance, so there is no dead field to tab into. */}
+          {showsTextField ? (
+            <TextInput
+              accessibilityLabel="Tell Otto what you ate"
+              value={text}
+              onChangeText={onChangeText}
+              placeholder="Tell Otto what you ate…"
+              placeholderTextColor={captureColors.onSurfaceFaint}
+              style={{ flex: 1, color: captureColors.onSurface, fontSize: 15 }}
+            />
+          ) : (
+            <AppText style={{ flex: 1, color: captureColors.onSurfaceFaint, fontSize: 15 }}>
+              {mode === "voice" ? "Hold the mic to record" : "Point at a barcode"}
+            </AppText>
+          )}
           {/* Send — resolves the typed phrase via useResolveText. */}
+          {showsTextField ? (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Send"
@@ -581,6 +616,7 @@ export function CaptureBody({
           >
             <Icon name="arrow-up" size={19} color={captureColors.onSurface} />
           </Pressable>
+          ) : null}
         </View>
       </View>
     </KeyboardAvoidingView>
@@ -884,35 +920,9 @@ export default function CaptureScreen() {
   // Stop path first (recorder.stop() can throw — a "real" failure, not just
   // a denial — so both branches surface an Otto bubble rather than failing
   // silently, mirroring pickMealPhoto's discipline above).
-  async function handleToggleVoice() {
+  async function handleStartVoice() {
     setErrorMsg(null);
-
-    if (isRecordingVoice) {
-      try {
-        await recorder.stop();
-      } catch {
-        setIsRecordingVoice(false);
-        setErrorMsg("Something went wrong recording that — please try again.");
-        return;
-      }
-      setIsRecordingVoice(false);
-      const uri = recorder.uri;
-      if (!uri) {
-        setErrorMsg("I didn't catch that — mind trying again?");
-        return;
-      }
-      resolveVoice.mutate(
-        { uri, name: "clip.m4a", type: "audio/mp4" },
-        {
-          onSuccess: (data) => {
-            applyResolution(data, "ai_voice");
-            setResolvedPhrase(data.transcript ?? null);
-          },
-          onError: (error) => setErrorMsg(ottoErrorMessage(error)),
-        },
-      );
-      return;
-    }
+    if (isRecordingVoice) return;
 
     try {
       const permission = await requestRecordingPermissionsAsync();
@@ -926,6 +936,52 @@ export default function CaptureScreen() {
     } catch {
       setErrorMsg("Something went wrong starting the recording — please try again.");
     }
+  }
+
+  async function handleFinishVoice() {
+    if (!isRecordingVoice) return;
+    setErrorMsg(null);
+
+    try {
+      await recorder.stop();
+    } catch {
+      setIsRecordingVoice(false);
+      setErrorMsg("Something went wrong recording that — please try again.");
+      return;
+    }
+    setIsRecordingVoice(false);
+
+    const uri = recorder.uri;
+    if (!uri) {
+      setErrorMsg("I didn't catch that — mind trying again?");
+      return;
+    }
+    resolveVoice.mutate(
+      { uri, name: "clip.m4a", type: "audio/mp4" },
+      {
+        onSuccess: (data) => {
+          applyResolution(data, "ai_voice");
+          setResolvedPhrase(data.transcript ?? null);
+        },
+        onError: (error) => setErrorMsg(ottoErrorMessage(error)),
+      },
+    );
+  }
+
+  // Abandon the clip. This is the ONE voice transition with a direct cost
+  // consequence if it is wrong: the recorder is stopped and its uri is dropped
+  // on the floor, so nothing reaches resolveVoice and no transcription is
+  // billed. A stop() failure is swallowed rather than surfaced — the user asked
+  // to discard, so there is nothing to tell them.
+  async function handleCancelVoice() {
+    if (!isRecordingVoice) return;
+    setErrorMsg(null);
+    try {
+      await recorder.stop();
+    } catch {
+      // deliberately ignored — see above
+    }
+    setIsRecordingVoice(false);
   }
 
   function handleBarcodeScanned(data: string) {
@@ -1043,7 +1099,9 @@ export default function CaptureScreen() {
         onSend={handleSend}
         onCapturePhoto={handleCapturePhoto}
         isRecordingVoice={isRecordingVoice}
-        onToggleVoice={handleToggleVoice}
+        onStartVoice={handleStartVoice}
+        onFinishVoice={handleFinishVoice}
+        onCancelVoice={handleCancelVoice}
         cameraPermissionGranted={cameraPermission?.granted ?? false}
         onBarcodeScanned={handleBarcodeScanned}
         onClose={() => router.back()}

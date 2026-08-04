@@ -146,11 +146,21 @@ function CaptureScreen({ mode, onNav, onLog, initialStage }) {
           })}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, background: "rgba(255,255,255,0.1)", borderRadius: "var(--radius-full)", padding: "6px 6px 6px 8px" }}>
-          <button onClick={analyze} style={{ width: 38, height: 38, borderRadius: "var(--radius-full)", background: "var(--primary)", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
-            <DS.Icon name="camera" size={19} color="var(--primary-foreground)" />
+          {/* Mode-aware. A camera icon in EVERY mode is what made Voice read as a
+              photo capture in the shipped app: selecting Voice changed the pills
+              but left a camera button over a text field that did nothing for
+              voice. Keep this in step with apps/mobile/app/capture.tsx. */}
+          <button onClick={input === "voice" ? undefined : analyze} style={{ width: 38, height: 38, borderRadius: "var(--radius-full)", background: "var(--primary)", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
+            <DS.Icon name={input === "voice" ? "mic" : input === "scan" ? "scan-barcode" : "camera"} size={19} color="var(--primary-foreground)" />
           </button>
-          <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Tell Otto what you ate…"
-            style={{ flex: 1, background: "none", border: "none", outline: "none", color: "#fff", fontSize: 15, fontFamily: "var(--font-sans)" }} />
+          {(input === "photo" || input === "type") ? (
+            <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Tell Otto what you ate…"
+              style={{ flex: 1, background: "none", border: "none", outline: "none", color: "#fff", fontSize: 15, fontFamily: "var(--font-sans)" }} />
+          ) : (
+            <span style={{ flex: 1, color: "rgba(255,255,255,0.45)", fontSize: 15, fontFamily: "var(--font-sans)" }}>
+              {input === "voice" ? "Hold the mic to record" : "Point at a barcode"}
+            </span>
+          )}
           <button onClick={analyze} style={{ width: 38, height: 38, borderRadius: "var(--radius-full)", background: text ? "var(--primary)" : "rgba(255,255,255,0.15)", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
             <DS.Icon name="arrow-up" size={19} color="#fff" />
           </button>
