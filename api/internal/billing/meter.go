@@ -57,6 +57,24 @@ func (m Meter) Record(ctx context.Context, userID uuid.UUID, u ai.Usage, costUSD
 // whether the platform as a whole is still within its global monthly cap.
 // It returns false if either the user's or the global calendar-month spend
 // is at or above its respective cap.
+// NOTE ON `outcome` (added in #81): this function deliberately does NOT filter
+// it. Both caps guard a resource that a FAILED call still consumes — providers
+// return token usage alongside an error, and provider quota is spent by any
+// request that reaches them. Filtering to outcome = 'ok' here would silently
+// under-protect both. See the two TestWithinBudgetCountsFailedCalls… tests,
+// which fail if someone adds that filter.
+//
+// The distinction that matters when writing any query over ai_usage_events:
+//
+//	RESOURCE questions ("what did we spend?", "how much quota is left?")
+//	  -> count every row, no outcome filter.
+//	PRODUCT questions ("AI calls per active user", "photo share", "median
+//	  calls per log")
+//	  -> filter outcome = 'ok', or failures and retries inflate the number.
+//
+// Before #81 the table held only successes, so every query was implicitly a
+// product query. That is no longer true, and an unfiltered product metric now
+// over-counts where it used to under-count.
 func (m Meter) WithinBudget(ctx context.Context, userID uuid.UUID) (bool, error) {
 	monthStart := startOfMonthUTC(time.Now())
 
