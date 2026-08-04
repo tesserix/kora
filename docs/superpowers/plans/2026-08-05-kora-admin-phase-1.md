@@ -199,7 +199,8 @@ Do these one at a time, reverting between each. Read the failure message every t
 1. Change `c.foodIndexMissing.Set(float64(total - embedded))` to `c.foodIndexMissing.Set(float64(embedded))`.
    Expected: `TestSetFoodIndexSetsAllThreeGaugesFromOneCall` fails on `missing gauge = 3820, want 4078`, and `TestFoodIndexMissingIsAlwaysItemsMinusEmbedded` fails on its own message. Revert.
 2. Change `c.foodIndexEmbedded.Set(float64(embedded))` to `c.foodIndexEmbedded.Set(0)`.
-   Expected: `TestSetFoodIndexSetsAllThreeGaugesFromOneCall` fails on `embedded gauge = 0, want 3820`. This is the mutation the invariant test alone would NOT catch — confirm the invariant test still passes under it, which is precisely why the positive twin exists. Revert.
+   Expected: `TestSetFoodIndexSetsAllThreeGaugesFromOneCall` fails on `embedded gauge = 0, want 3820`.
+   **Corrected 2026-08-05 against what actually happens:** the invariant test also fails here, on 2 of its 4 table rows (`{7898,3820}` and `{100,100}`). It is blind only on the rows where the true `embedded` is already 0, because there the mutation coincides with the correct value. The point still stands but is narrower than first written: the invariant test checks the three read-back gauges for self-consistency, not against ground truth, so it would stop being a safety net for this class of bug if the table were ever pared down to zero-embedded rows. The positive twin catches it unconditionally, which is why both exist. Revert.
 3. Change all three `.Set(` calls to `.Add(`.
    Expected: `TestSetFoodIndexReplacesRatherThanAccumulates` fails on `embedded gauge after second set = 11718, want 7898`. Revert.
 
