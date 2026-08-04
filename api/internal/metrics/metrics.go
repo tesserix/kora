@@ -1,8 +1,13 @@
 // Package metrics exposes the Kora API's Prometheus instrumentation.
 //
-// It deliberately accepts only primitives, so it imports nothing from ai,
-// billing or foodlog and can be tested entirely on its own. Every label passes
+// The recording seams accept only primitives, so this package imports nothing
+// from ai, billing or foodlog and can be tested on its own. Every label passes
 // through a closed allowlist (labels.go) before it reaches a collector.
+//
+// foodindex.go is the one exception and imports gorm: the food-index gauges
+// describe database STATE rather than events this process observed, so they
+// need a poller instead of a recording seam. It still imports no domain
+// package — it holds its own SQL.
 //
 // The registry is dedicated rather than prometheus.DefaultRegisterer, and the
 // Go/process collectors are deliberately NOT registered: scraping is done by
