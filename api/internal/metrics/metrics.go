@@ -85,6 +85,12 @@ func (c *Collectors) AICallsCounter(class, callType, model, outcome string) prom
 	return c.aiCalls.WithLabelValues(class, callType, model, outcome)
 }
 
+// FoodLogsCounter exposes one labelled food-log counter for assertions in other
+// packages' tests. Not used by production code.
+func (c *Collectors) FoodLogsCounter(source string) prometheus.Counter {
+	return c.foodLogs.WithLabelValues(source)
+}
+
 // Handler serves this collector set in the Prometheus text format.
 func (c *Collectors) Handler() http.Handler {
 	return promhttp.HandlerFor(c.registry, promhttp.HandlerOpts{})

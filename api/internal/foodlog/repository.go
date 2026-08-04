@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/tesserix/kora/api/internal/httpx"
+	"github.com/tesserix/kora/api/internal/metrics"
 )
 
 type Repository struct {
@@ -36,6 +37,7 @@ func (r Repository) Create(ctx context.Context, log FoodLog) (FoodLog, error) {
 	if err := r.db.WithContext(ctx).Create(&created).Error; err != nil {
 		return FoodLog{}, fmt.Errorf("foodlog: create: %w", err)
 	}
+	metrics.RecordFoodLog(created.Source)
 	return created, nil
 }
 
@@ -55,6 +57,11 @@ func (r Repository) CreateIdempotent(ctx context.Context, log FoodLog) (FoodLog,
 		return FoodLog{}, fmt.Errorf("foodlog: create idempotent: %w", res.Error)
 	}
 	if res.RowsAffected > 0 {
+		// Only a real insert counts. RowsAffected == 0 below means the offline
+		// queue replayed a write whose response was lost — that is the same
+		// meal, not a new one, and counting it would inflate the photo-share
+		// metric in proportion to connection flakiness.
+		metrics.RecordFoodLog(created.Source)
 		return created, nil
 	}
 

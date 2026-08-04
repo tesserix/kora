@@ -7,9 +7,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
+	"github.com/tesserix/kora/api/internal/metrics"
 	"github.com/tesserix/kora/api/internal/nutrition"
 )
 
@@ -275,4 +277,59 @@ func TestCreateIdempotentRejectsAnotherUsersID(t *testing.T) {
 	var got FoodLog
 	require.NoError(t, tx.First(&got, "id = ?", id).Error)
 	require.Equal(t, "Owner food", got.Description, "the owner's row must be untouched")
+}
+
+func TestCreateCountsTheLogBySource(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	item := nutrition.FoodItem{Name: "Metrics Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	repo := NewRepository(db)
+	before := testutil.ToFloat64(metrics.Default().FoodLogsCounter("ai_photo"))
+
+	_, err := repo.Create(context.Background(), FoodLog{
+		UserID: userID, FoodItemID: &item.ID, LoggedAt: time.Now(), MealSlot: "lunch",
+		Source: "ai_photo", Description: item.Name, QuantityGrams: 100, Kcal: 100,
+		Provenance: item.Provenance,
+	})
+	require.NoError(t, err)
+
+	after := testutil.ToFloat64(metrics.Default().FoodLogsCounter("ai_photo"))
+	require.Equal(t, before+1, after)
+}
+
+// THE REPLAY INVARIANT. The offline queue (#22) replays writes whose response
+// was lost, and CreateIdempotent returns the already-stored row with
+// RowsAffected == 0. Counting that replay would inflate precisely the
+// photo-share number this instrumentation exists to produce — and it would do
+// so invisibly, in proportion to how flaky the user's connection is.
+func TestCreateIdempotentDoesNotCountAReplay(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	item := nutrition.FoodItem{Name: "Replay Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	repo := NewRepository(db)
+	log := FoodLog{
+		ID: uuid.New(), UserID: userID, FoodItemID: &item.ID, LoggedAt: time.Now(),
+		MealSlot: "lunch", Source: "ai_voice", Description: item.Name, QuantityGrams: 100,
+		Kcal: 100, Provenance: item.Provenance,
+	}
+
+	before := testutil.ToFloat64(metrics.Default().FoodLogsCounter("ai_voice"))
+
+	first, err := repo.CreateIdempotent(context.Background(), log)
+	require.NoError(t, err)
+	afterFirst := testutil.ToFloat64(metrics.Default().FoodLogsCounter("ai_voice"))
+	require.Equal(t, before+1, afterFirst, "a first delivery must count")
+
+	replay, err := repo.CreateIdempotent(context.Background(), log)
+	require.NoError(t, err)
+	require.Equal(t, first.ID, replay.ID, "a replay must return the same row")
+
+	afterReplay := testutil.ToFloat64(metrics.Default().FoodLogsCounter("ai_voice"))
+	require.Equal(t, afterFirst, afterReplay, "a replay must NOT count a second time")
 }
