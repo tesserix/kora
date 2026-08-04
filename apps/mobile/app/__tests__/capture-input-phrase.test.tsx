@@ -149,7 +149,7 @@ test("a voice resolve logs the server's transcript", async () => {
 
   const { findByText, findByLabelText } = await render(<CaptureScreen />);
   await fireEvent.press(await findByText("Voice"));
-  await fireEvent.press(await findByLabelText("Start recording"));
+  await fireEvent.press(await findByLabelText("Hold to record"));
   await fireEvent.press(await findByLabelText("Stop recording"));
 
   const [, options] = mockResolveVoiceMutate.mock.calls[0];

@@ -300,7 +300,9 @@ const noopBodyProps = {
   onSend: jest.fn(),
   onCapturePhoto: jest.fn(),
   isRecordingVoice: false,
-  onToggleVoice: jest.fn(),
+  onStartVoice: jest.fn(),
+  onFinishVoice: jest.fn(),
+  onCancelVoice: jest.fn(),
   cameraPermissionGranted: true,
   onBarcodeScanned: jest.fn(),
   onClose: jest.fn(),
@@ -654,7 +656,7 @@ describe("Voice mode", () => {
     const { findByText, findByLabelText } = await render(<CaptureScreen />);
     await fireEvent.press(await findByText("Voice"));
 
-    await fireEvent.press(await findByLabelText("Start recording"));
+    await fireEvent.press(await findByLabelText("Hold to record"));
     expect(recorder.prepareToRecordAsync).toHaveBeenCalled();
     expect(recorder.record).toHaveBeenCalled();
 
@@ -675,7 +677,7 @@ describe("Voice mode", () => {
 
     const { findByText, findByLabelText } = await render(<CaptureScreen />);
     await fireEvent.press(await findByText("Voice"));
-    await fireEvent.press(await findByLabelText("Start recording"));
+    await fireEvent.press(await findByLabelText("Hold to record"));
 
     expect(await findByText(/i need mic access/i)).toBeTruthy();
     expect(recorder.record).not.toHaveBeenCalled();
@@ -688,7 +690,7 @@ describe("Voice mode", () => {
 
     const { findByText, findByLabelText } = await render(<CaptureScreen />);
     await fireEvent.press(await findByText("Voice"));
-    await fireEvent.press(await findByLabelText("Start recording"));
+    await fireEvent.press(await findByLabelText("Hold to record"));
     await fireEvent.press(await findByLabelText("Stop recording"));
 
     await waitFor(() => expect(mockResolveVoiceMutate).toHaveBeenCalled());
@@ -704,7 +706,7 @@ describe("Voice mode", () => {
 
     const { findByText, findByLabelText } = await render(<CaptureScreen />);
     await fireEvent.press(await findByText("Voice"));
-    await fireEvent.press(await findByLabelText("Start recording"));
+    await fireEvent.press(await findByLabelText("Hold to record"));
     await fireEvent.press(await findByLabelText("Stop recording"));
 
     await waitFor(() => expect(mockResolveVoiceMutate).toHaveBeenCalled());
@@ -726,7 +728,7 @@ describe("Voice mode", () => {
 
     const { findByText, findByLabelText, queryByLabelText } = await render(<CaptureScreen />);
     await fireEvent.press(await findByText("Voice"));
-    await fireEvent.press(await findByLabelText("Start recording"));
+    await fireEvent.press(await findByLabelText("Hold to record"));
     expect(await findByLabelText("Stop recording")).toBeTruthy();
 
     await fireEvent.press(await findByText("Type"));
@@ -735,7 +737,7 @@ describe("Voice mode", () => {
     expect(mockResolveVoiceMutate).not.toHaveBeenCalled();
 
     await fireEvent.press(await findByText("Voice"));
-    expect(await findByLabelText("Start recording")).toBeTruthy();
+    expect(await findByLabelText("Hold to record")).toBeTruthy();
     expect(queryByLabelText("Stop recording")).toBeNull();
   });
 
@@ -745,7 +747,7 @@ describe("Voice mode", () => {
 
     const { findByText, findByLabelText, unmount } = await render(<CaptureScreen />);
     await fireEvent.press(await findByText("Voice"));
-    await fireEvent.press(await findByLabelText("Start recording"));
+    await fireEvent.press(await findByLabelText("Hold to record"));
 
     unmount();
 
@@ -1108,7 +1110,7 @@ describe("Add to diary", () => {
 // `sourceForMode(mode)`, see the PR that introduced this block.
 //
 // The remaining three (voice, fresh barcode, cached-fallback barcode) can't
-// be built to disagree: "Start/Stop recording" only exists once `mode` is
+// be built to disagree: "Hold to record"/"Stop recording" only exists once `mode` is
 // "voice", and "capture-camera-view" only exists once `mode` is "scan" — so
 // `mode` and the resolve necessarily match in those tests, and they stay
 // green under the old `sourceForMode(mode)` too. They still earn their
@@ -1162,7 +1164,7 @@ describe("Add to diary — source follows the resolve, not the tab", () => {
 
     const rendered = await render(<CaptureScreen />);
     await fireEvent.press(await rendered.findByText("Voice"));
-    await fireEvent.press(await rendered.findByLabelText("Start recording"));
+    await fireEvent.press(await rendered.findByLabelText("Hold to record"));
     await fireEvent.press(await rendered.findByLabelText("Stop recording"));
 
     await waitFor(() => expect(mockResolveVoiceMutate).toHaveBeenCalled());
@@ -1301,3 +1303,80 @@ test("switching mode clears a stale error bubble", async () => {
   expect(queryByText("I need camera or photo access to see your meal.")).toBeNull();
 });
 
+
+// The composer used to render a camera icon and a text field in EVERY mode, so
+// selecting Voice left a photo button under a "Tell Otto what you ate…" field
+// that did nothing for voice. These pin the composer to the selected mode.
+describe("Composer follows the selected mode", () => {
+  test("voice mode shows a hold-to-record control and no camera or text field", async () => {
+    const { findByText, findByLabelText, queryByLabelText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Voice"));
+
+    expect(await findByLabelText("Hold to record")).toBeTruthy();
+    // The camera button is precisely what made Voice read as a photo capture.
+    expect(queryByLabelText("Quick photo capture")).toBeNull();
+    expect(queryByLabelText("Tell Otto what you ate")).toBeNull();
+    expect(queryByLabelText("Send")).toBeNull();
+  });
+
+  test("scan mode shows a barcode control and no text field", async () => {
+    const { findByText, findByLabelText, queryByLabelText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Scan"));
+
+    expect(await findByLabelText("Scan a barcode")).toBeTruthy();
+    expect(queryByLabelText("Tell Otto what you ate")).toBeNull();
+    expect(queryByLabelText("Hold to record")).toBeNull();
+  });
+
+  test("photo and type modes keep the text field and the quick-capture camera", async () => {
+    const { findByText, findByLabelText, queryByLabelText } = await render(<CaptureScreen />);
+
+    expect(await findByLabelText("Quick photo capture")).toBeTruthy();
+    expect(await findByLabelText("Tell Otto what you ate")).toBeTruthy();
+    expect(queryByLabelText("Hold to record")).toBeNull();
+
+    await fireEvent.press(await findByText("Type"));
+    expect(await findByLabelText("Tell Otto what you ate")).toBeTruthy();
+    expect(queryByLabelText("Hold to record")).toBeNull();
+  });
+});
+
+describe("Voice cancel", () => {
+  // The one voice transition with a direct cost consequence if it is wrong: a
+  // clip the user explicitly abandoned must never reach the paid transcription
+  // endpoint. The pan gesture that triggers this in real use cannot be
+  // simulated (gesture-handler is mocked, so a synthesised pan would exercise
+  // the mock, not the app — the vacuous-green pattern that let #82 ship). The
+  // gesture's DECISIONS are tested against the pure reducer in
+  // src/capture/__tests__/voiceRecording.test.ts; this covers the accessible
+  // Cancel control, which reaches the same handler.
+  test("cancelling stops the recorder and never calls the resolve mutation", async () => {
+    const recorder = makeRecorder();
+    (useAudioRecorder as jest.Mock).mockReturnValue(recorder);
+
+    const { findByText, findByLabelText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Voice"));
+    await fireEvent.press(await findByLabelText("Hold to record"));
+
+    // Cancel only renders while recording, so finding it proves we started.
+    await fireEvent.press(await findByLabelText("Cancel recording"));
+
+    await waitFor(() => expect(recorder.stop).toHaveBeenCalled());
+    // Binding: the recorder exposes a real uri, so an implementation that
+    // forwarded it would upload. Nothing may be sent.
+    expect(recorder.uri).toBeTruthy();
+    expect(mockResolveVoiceMutate).not.toHaveBeenCalled();
+  });
+
+  test("the idle voice affordance is a display, not a second record button", async () => {
+    (useAudioRecorder as jest.Mock).mockReturnValue(makeRecorder());
+    const { findByText, findByTestId, queryAllByLabelText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Voice"));
+
+    expect(await findByTestId("capture-idle-voice")).toBeTruthy();
+    // Exactly one control starts a recording — the composer's. The 72px mic in
+    // the thread used to be a competing button with the same job.
+    expect(queryAllByLabelText("Hold to record")).toHaveLength(1);
+    expect(queryAllByLabelText("Start recording")).toHaveLength(0);
+  });
+});
