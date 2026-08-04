@@ -181,3 +181,61 @@ func TestLatencyBucketsCoverTheBudgetThresholds(t *testing.T) {
 		}
 	}
 }
+
+func TestSetFoodIndexSetsAllThreeGaugesFromOneCall(t *testing.T) {
+	c := New()
+	c.SetFoodIndex(7898, 3820)
+
+	items, embedded, missing := c.FoodIndexGauges()
+	if got := testutil.ToFloat64(items); got != 7898 {
+		t.Errorf("items gauge = %v, want 7898", got)
+	}
+	if got := testutil.ToFloat64(embedded); got != 3820 {
+		t.Errorf("embedded gauge = %v, want 3820", got)
+	}
+	if got := testutil.ToFloat64(missing); got != 4078 {
+		t.Errorf("missing gauge = %v, want 4078", got)
+	}
+}
+
+// missing is DERIVED, never queried, so the three can never disagree with
+// each other. Checked across several shapes including the boundaries.
+func TestFoodIndexMissingIsAlwaysItemsMinusEmbedded(t *testing.T) {
+	cases := []struct{ total, embedded int64 }{
+		{7898, 3820},
+		{0, 0},
+		{100, 100}, // fully embedded — missing must be 0, not absent
+		{100, 0},   // nothing embedded
+	}
+	for _, tc := range cases {
+		c := New()
+		c.SetFoodIndex(tc.total, tc.embedded)
+		items, embedded, missing := c.FoodIndexGauges()
+		gotItems := testutil.ToFloat64(items)
+		gotEmb := testutil.ToFloat64(embedded)
+		gotMiss := testutil.ToFloat64(missing)
+		if gotMiss != gotItems-gotEmb {
+			t.Errorf("SetFoodIndex(%d,%d): missing=%v, want items(%v)-embedded(%v)=%v",
+				tc.total, tc.embedded, gotMiss, gotItems, gotEmb, gotItems-gotEmb)
+		}
+	}
+}
+
+// Gauges are Set, not Add: a restart re-reads truth from the database, so a
+// second refresh must REPLACE the previous reading, not accumulate onto it.
+func TestSetFoodIndexReplacesRatherThanAccumulates(t *testing.T) {
+	c := New()
+	c.SetFoodIndex(7898, 3820)
+	c.SetFoodIndex(7898, 7898)
+
+	items, embedded, missing := c.FoodIndexGauges()
+	if got := testutil.ToFloat64(embedded); got != 7898 {
+		t.Errorf("embedded gauge after second set = %v, want 7898 (Set, not Add)", got)
+	}
+	if got := testutil.ToFloat64(missing); got != 0 {
+		t.Errorf("missing gauge after second set = %v, want 0", got)
+	}
+	if got := testutil.ToFloat64(items); got != 7898 {
+		t.Errorf("items gauge after second set = %v, want 7898", got)
+	}
+}

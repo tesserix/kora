@@ -33,6 +33,10 @@ type Collectors struct {
 	aiCostUSD *prometheus.CounterVec
 	aiLatency *prometheus.HistogramVec
 	foodLogs  *prometheus.CounterVec
+
+	foodIndexItems    prometheus.Gauge
+	foodIndexEmbedded prometheus.Gauge
+	foodIndexMissing  prometheus.Gauge
 }
 
 // New builds an independent set of collectors on their own registry. Tests use
@@ -63,8 +67,21 @@ func New() *Collectors {
 			Name: "kora_food_logs_total",
 			Help: "Food logs created, by resolution source.",
 		}, []string{"source"}),
+		foodIndexItems: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "kora_food_index_items",
+			Help: "Rows in food_items. A gauge, not a counter: refreshed from the database on a timer, so a restart re-reads truth rather than resetting to zero.",
+		}),
+		foodIndexEmbedded: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "kora_food_index_embedded",
+			Help: "Rows in food_items with a non-NULL embedding. Resolution quality degrades silently as this falls behind kora_food_index_items — cmd/embed exits 0 when it gives up, so the Job reports Complete having done none of the work (#97).",
+		}),
+		foodIndexMissing: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "kora_food_index_missing",
+			Help: "Rows in food_items with a NULL embedding. Derived as items-embedded from the same query, never counted separately, so the three can never disagree.",
+		}),
 	}
-	c.registry.MustRegister(c.aiCalls, c.aiCostUSD, c.aiLatency, c.foodLogs)
+	c.registry.MustRegister(c.aiCalls, c.aiCostUSD, c.aiLatency, c.foodLogs,
+		c.foodIndexItems, c.foodIndexEmbedded, c.foodIndexMissing)
 	return c
 }
 
@@ -83,6 +100,21 @@ func (c *Collectors) RecordAICall(callType, model, outcome string, costUSD float
 // RecordFoodLog records one newly created food log.
 func (c *Collectors) RecordFoodLog(source string) {
 	c.foodLogs.WithLabelValues(normalizeSource(source)).Inc()
+}
+
+// SetFoodIndex publishes the food-index completeness gauges from ONE database
+// reading. missing is derived rather than queried so the three can never
+// disagree with each other.
+func (c *Collectors) SetFoodIndex(total, embedded int64) {
+	c.foodIndexItems.Set(float64(total))
+	c.foodIndexEmbedded.Set(float64(embedded))
+	c.foodIndexMissing.Set(float64(total - embedded))
+}
+
+// FoodIndexGauges exposes the three gauges for assertions in tests. Not used by
+// production code.
+func (c *Collectors) FoodIndexGauges() (items, embedded, missing prometheus.Gauge) {
+	return c.foodIndexItems, c.foodIndexEmbedded, c.foodIndexMissing
 }
 
 // AICallsCounter exposes one labelled call counter for assertions in other
@@ -127,6 +159,9 @@ func RecordAICall(callType, model, outcome string, costUSD float64, latency time
 
 // RecordFoodLog records one newly created food log on the default collectors.
 func RecordFoodLog(source string) { defaultCollectors.RecordFoodLog(source) }
+
+// SetFoodIndex publishes the food-index gauges on the default collectors.
+func SetFoodIndex(total, embedded int64) { defaultCollectors.SetFoodIndex(total, embedded) }
 
 // Handler serves the default collectors.
 func Handler() http.Handler { return defaultCollectors.Handler() }
