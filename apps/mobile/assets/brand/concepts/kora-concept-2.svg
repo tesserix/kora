@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Concept 2: "Resolve" — a messy organic blob (the photo of food) beside
+       the three crisp macro bars it becomes. Blob centred near (320,512),
+       bars left-aligned at x=580, pill height 88 (rx=44). -->
+  <rect width="1024" height="1024" fill="#F2F2F7"/>
+  <path d="M 310 336
+           C 430 320 500 430 468 520
+           C 500 610 420 700 320 688
+           C 230 700 160 610 176 512
+           C 150 420 210 348 310 336 Z" fill="#34C759"/>
+  <rect x="580" y="356" width="300" height="88" rx="44" fill="#34C759"/>
+  <rect x="580" y="470" width="220" height="88" rx="44" fill="#FF9500"/>
+  <rect x="580" y="584" width="260" height="88" rx="44" fill="#007AFF"/>
+</svg>

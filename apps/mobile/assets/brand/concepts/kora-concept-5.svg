@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Concept 5: "Signal" — a noisy line (the messy real world: a photo, a
+       spoken phrase) settles into a perfectly straight line and ends in one
+       logged dot. Wave amplitude decays 124 -> 84 -> 58 -> ~23 -> 0.
+       Stroke 108, round caps; joins are mirrored-handle cubics. -->
+  <rect width="1024" height="1024" fill="#F2F2F7"/>
+  <path d="M 130 512
+           C 178 388 226 388 274 512
+           C 322 636 370 636 418 512
+           C 454 428 490 428 526 512
+           C 554 570 582 570 610 512
+           C 632 466 654 512 676 512
+           L 760 512"
+        fill="none" stroke="#34C759" stroke-width="108"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="908" cy="512" r="54" fill="#34C759"/>
+</svg>
