@@ -5,7 +5,7 @@ import {
   Utensils, TrendingDown, TrendingUp, Minus, Check, ArrowRight, ArrowLeft, Trash2,
   Drumstick, Leaf, Wheat, Egg, Fish, Apple, Coffee, Soup, Salad, Circle,
   X, Images, ScanBarcode, Type, Loader, Barcode, ArrowUp, Repeat, Users, Bell,
-  Search, Trophy, Heart, Star, Bookmark, Sparkles,
+  Search, Trophy, Heart, Star, Bookmark, Sparkles, Keyboard,
   type LucideIcon,
 } from "lucide-react-native";
 
@@ -17,6 +17,7 @@ const SYMBOLS: Record<string, SFSymbol> = {
   minus: "minus", check: "checkmark", "arrow-right": "arrow.right", "arrow-left": "chevron.left",
   "trash-2": "trash.fill", x: "xmark", images: "photo.on.rectangle",
   "scan-barcode": "barcode.viewfinder", type: "character.cursor.ibeam", barcode: "barcode",
+  keyboard: "keyboard",
   "arrow-up": "arrow.up", repeat: "arrow.clockwise", users: "person.2.fill", bell: "bell.fill",
   "chevron-right": "chevron.right", droplet: "drop.fill", person: "person.crop.circle.fill",
   gear: "gearshape.fill", flame: "flame.fill", search: "magnifyingglass",
@@ -33,7 +34,7 @@ const MAP: Record<string, LucideIcon> = {
   minus: Minus, check: Check, "arrow-right": ArrowRight, "arrow-left": ArrowLeft, "trash-2": Trash2,
   drumstick: Drumstick, leaf: Leaf, wheat: Wheat, egg: Egg, fish: Fish, apple: Apple,
   coffee: Coffee, soup: Soup, salad: Salad,
-  x: X, images: Images, "scan-barcode": ScanBarcode, type: Type, loader: Loader,
+  x: X, images: Images, "scan-barcode": ScanBarcode, type: Type, loader: Loader, keyboard: Keyboard,
   barcode: Barcode, "arrow-up": ArrowUp, repeat: Repeat, users: Users, bell: Bell,
   search: Search, people: Users, trophy: Trophy, heart: Heart,
   "star": Star, "star-fill": Star,
