@@ -79,6 +79,12 @@ func (c *Collectors) RecordFoodLog(source string) {
 	c.foodLogs.WithLabelValues(normalizeSource(source)).Inc()
 }
 
+// AICallsCounter exposes one labelled call counter for assertions in other
+// packages' tests. Not used by production code.
+func (c *Collectors) AICallsCounter(class, callType, model, outcome string) prometheus.Counter {
+	return c.aiCalls.WithLabelValues(class, callType, model, outcome)
+}
+
 // Handler serves this collector set in the Prometheus text format.
 func (c *Collectors) Handler() http.Handler {
 	return promhttp.HandlerFor(c.registry, promhttp.HandlerOpts{})

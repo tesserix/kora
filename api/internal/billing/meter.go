@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/tesserix/kora/api/internal/ai"
+	"github.com/tesserix/kora/api/internal/metrics"
 )
 
 const (
@@ -36,6 +37,11 @@ func NewMeter(db *gorm.DB) Meter {
 
 // Record persists one metered AI provider call.
 func (m Meter) Record(ctx context.Context, userID uuid.UUID, u ai.Usage, costUSD float64) error {
+	// Instrumented BEFORE the insert and independently of its result: the
+	// provider call already happened and was already billed upstream, whether
+	// or not this row lands. See #43.
+	metrics.RecordAICall(u.CallType, u.Model, u.Outcome, costUSD, time.Duration(u.LatencyMs)*time.Millisecond)
+
 	event := Event{
 		UserID:     userID,
 		Provider:   u.Provider,

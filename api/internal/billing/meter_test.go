@@ -8,11 +8,13 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
 	"github.com/tesserix/kora/api/internal/ai"
+	"github.com/tesserix/kora/api/internal/metrics"
 )
 
 func testDB(t *testing.T) *gorm.DB {
@@ -173,4 +175,27 @@ func TestWithinBudgetCountsFailedCallsTowardTheCallCap(t *testing.T) {
 	ok, err := meter.WithinBudget(context.Background(), userID)
 	require.NoError(t, err)
 	require.False(t, ok, "failed calls consume free-tier provider quota, which is exactly what the call cap guards")
+}
+
+// The provider call happened — and was billed by the provider — whether or not
+// our ai_usage_events row lands. So the counter must move even when the insert
+// fails. Metering the ROW and metering the CALL are different questions, and
+// conflating them would silently under-report COGS in exactly the situation
+// where something is already going wrong.
+func TestRecordIncrementsTheCounterEvenWhenTheInsertFails(t *testing.T) {
+	db := testDB(t)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, sqlDB.Close()) // every subsequent query now errors
+
+	m := NewMeter(db)
+	collectors := metrics.Default()
+	before := testutil.ToFloat64(collectors.AICallsCounter("resolution", "identify_text", "test-model", "ok"))
+
+	err = m.Record(context.Background(), uuid.New(),
+		ai.Usage{Provider: "test", Model: "test-model", CallType: "identify_text", LatencyMs: 884, Outcome: "ok"}, 0.0004)
+
+	require.Error(t, err, "insert against a closed DB must still return an error")
+	after := testutil.ToFloat64(collectors.AICallsCounter("resolution", "identify_text", "test-model", "ok"))
+	require.Equal(t, before+1, after, "counter must increment even though the insert failed")
 }
