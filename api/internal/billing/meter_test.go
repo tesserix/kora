@@ -123,3 +123,54 @@ func TestEventJSONOmitsUserID(t *testing.T) {
 		t.Fatalf("Event JSON leaked user_id: %s", b)
 	}
 }
+
+// WithinBudget deliberately does NOT filter on outcome. Both caps protect a
+// real resource that a FAILED call still consumes:
+//
+//   - the cost cap, because providers return token usage alongside an error
+//     (see openai.go: a response that arrived but failed to parse carries real
+//     billed tokens), so excluding failures under-counts actual spend;
+//   - the call cap, whose own comment says it exists to protect free-tier
+//     provider quota — and quota is spent by any request that reaches the
+//     provider, answered or not.
+//
+// These two tests exist because the `outcome` column added in #81 invites the
+// opposite conclusion. Anyone "fixing" WithinBudget to filter outcome = 'ok'
+// will fail here and read why. Product metrics are the ones that must filter;
+// resource protection is not.
+func TestWithinBudgetCountsFailedCallsTowardTheCostCap(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	meter := NewMeter(db)
+
+	// A call that reached the model, burned tokens, then failed. Real money.
+	failed := ai.Usage{
+		Provider: "openai", Model: "gpt-4o", CallType: "identify_text",
+		TokensIn: 10, TokensOut: 10, LatencyMs: 100, Outcome: ai.OutcomeError,
+	}
+	require.NoError(t, meter.Record(context.Background(), userID, failed, perUserMonthlyCostCapUSD))
+
+	ok, err := meter.WithinBudget(context.Background(), userID)
+	require.NoError(t, err)
+	require.False(t, ok, "a failed call that consumed tokens still spent money and must count")
+}
+
+func TestWithinBudgetCountsFailedCallsTowardTheCallCap(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	meter := NewMeter(db)
+
+	// Zero-cost failures — e.g. timeouts — so ONLY the call cap can trip.
+	// Each still consumed provider quota, which is what that cap guards.
+	timedOut := ai.Usage{
+		Provider: "openai", Model: "gpt-4o", CallType: "identify_photo",
+		LatencyMs: 30000, Outcome: ai.OutcomeTimeout,
+	}
+	for i := 0; i < perUserMonthlyCallCap; i++ {
+		require.NoError(t, meter.Record(context.Background(), userID, timedOut, 0))
+	}
+
+	ok, err := meter.WithinBudget(context.Background(), userID)
+	require.NoError(t, err)
+	require.False(t, ok, "failed calls consume free-tier provider quota, which is exactly what the call cap guards")
+}
