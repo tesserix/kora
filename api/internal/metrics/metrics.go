@@ -91,6 +91,14 @@ func (c *Collectors) FoodLogsCounter(source string) prometheus.Counter {
 	return c.foodLogs.WithLabelValues(source)
 }
 
+// AILatencyHistogram exposes one labelled latency histogram for assertions in
+// other packages' tests — e.g. billing.Meter's ms→Duration conversion seam,
+// where dropping the `* time.Millisecond` would silently shove every
+// observation into the smallest bucket. Not used by production code.
+func (c *Collectors) AILatencyHistogram(callType, outcome string) prometheus.Histogram {
+	return c.aiLatency.WithLabelValues(callType, outcome).(prometheus.Histogram)
+}
+
 // Handler serves this collector set in the Prometheus text format.
 func (c *Collectors) Handler() http.Handler {
 	return promhttp.HandlerFor(c.registry, promhttp.HandlerOpts{})

@@ -6,8 +6,32 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	dto "github.com/prometheus/client_model/go"
 )
+
+// bucketCount reads the cumulative count of histogram h's bucket whose upper
+// bound is le, via the Prometheus wire representation (Write) rather than any
+// convenience helper — testutil has nothing that reads a single bucket's
+// value, only series counts (CollectAndCount) or single-float metrics
+// (ToFloat64), neither of which can tell an observation's VALUE from its mere
+// existence. That gap is exactly what let `Observe(0)` sail through here
+// undetected before this test existed.
+func bucketCount(t *testing.T, h prometheus.Histogram, le float64) uint64 {
+	t.Helper()
+	var m dto.Metric
+	if err := h.Write(&m); err != nil {
+		t.Fatalf("write histogram metric: %v", err)
+	}
+	for _, b := range m.GetHistogram().GetBucket() {
+		if b.GetUpperBound() == le {
+			return b.GetCumulativeCount()
+		}
+	}
+	t.Fatalf("no bucket with le=%v in histogram (buckets: %v)", le, latencyBuckets)
+	return 0
+}
 
 func TestRecordAICallIncrementsCallsCostAndLatency(t *testing.T) {
 	c := New()
@@ -23,6 +47,30 @@ func TestRecordAICallIncrementsCallsCostAndLatency(t *testing.T) {
 	}
 	if got := testutil.CollectAndCount(c.aiLatency); got != 1 {
 		t.Errorf("latency series = %d, want 1", got)
+	}
+}
+
+// THE VALUE, not just the series. CollectAndCount (above) only proves an
+// observation happened, not what it observed — a reviewer proved this by
+// swapping the real `Observe(latency.Seconds())` for `Observe(0)` and finding
+// the package suite still green. A 20s call must land at/under the 20s
+// bucket and strictly above the 10s bucket; if the value collapses to 0 (or
+// to nanoseconds, per the ms→Duration bug this guards in billing.Meter), it
+// lands in every bucket including 10s, and this test catches that.
+func TestRecordAICallLatencyObservesTheActualDuration(t *testing.T) {
+	c := New()
+	c.RecordAICall("identify_photo", "gemini-3.5-flash", "ok", 0.002, 20*time.Second)
+
+	hist, ok := c.aiLatency.WithLabelValues("identify_photo", "ok").(prometheus.Histogram)
+	if !ok {
+		t.Fatalf("WithLabelValues did not return a prometheus.Histogram")
+	}
+
+	if got := bucketCount(t, hist, 20); got != 1 {
+		t.Errorf("le=20 bucket count = %d, want 1 (a 20s observation must land at/under the 20s bucket)", got)
+	}
+	if got := bucketCount(t, hist, 10); got != 0 {
+		t.Errorf("le=10 bucket count = %d, want 0 (a 20s observation must NOT be visible from the 10s bucket)", got)
 	}
 }
 
