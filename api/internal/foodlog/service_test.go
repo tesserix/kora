@@ -299,6 +299,37 @@ func TestCreateBatchRollbackDoesNotCountFoodLogMetric(t *testing.T) {
 	require.Equal(t, before, after, "a rolled-back batch must not increment kora_food_logs_total for the item that inserted before the rollback")
 }
 
+// The mirror of the rollback test above, and it is not redundant with it: the
+// rollback test only proves the counter does NOT move, so deleting the entire
+// post-commit recording loop in Repository.Transaction leaves it green. That
+// failure would deflate the total-logs denominator and INFLATE photo share —
+// the exact mirror of the over-count the deferred recording was added to fix,
+// and equally corrupting to the number #41 gates on.
+func TestCreateBatchSuccessCountsEachCommittedLog(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	item := nutrition.FoodItem{Name: "Batch Metric Commit Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	before := testutil.ToFloat64(metrics.Default().FoodLogsCounter("memory"))
+
+	created, err := svc.CreateBatch(context.Background(), userID, CreateBatchRequest{
+		LoggedAt: time.Now(), MealSlot: "breakfast",
+		Items: []BatchItem{
+			{FoodItemID: item.ID, QuantityGrams: 100},
+			{FoodItemID: item.ID, QuantityGrams: 150},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, created, 2)
+
+	after := testutil.ToFloat64(metrics.Default().FoodLogsCounter("memory"))
+	require.Equal(t, before+2, after, "a committed batch must count every row it inserted")
+}
+
 func TestCreateBatchUnknownFoodItemIDReturnsValidationError(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db)
