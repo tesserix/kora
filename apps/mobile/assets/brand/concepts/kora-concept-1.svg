@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Concept 1: "Constellation K" — a K emerges from a 3x3 memory grid.
+       Grid centers: x,y in {292, 512, 732}, spacing 220.
+       Lit dots (r=100) trace a K; unlit dots (r=56) are the rest of the grid. -->
+  <rect width="1024" height="1024" fill="#0A0D0B"/>
+  <!-- unlit memory dots -->
+  <circle cx="512" cy="292" r="56" fill="#26402E"/>
+  <circle cx="732" cy="512" r="56" fill="#26402E"/>
+  <circle cx="512" cy="732" r="56" fill="#26402E"/>
+  <!-- lit dots: left column, centre, top-right, bottom-right = K -->
+  <circle cx="292" cy="292" r="100" fill="#3DDC6E"/>
+  <circle cx="292" cy="512" r="100" fill="#3DDC6E"/>
+  <circle cx="292" cy="732" r="100" fill="#3DDC6E"/>
+  <circle cx="512" cy="512" r="100" fill="#3DDC6E"/>
+  <circle cx="732" cy="292" r="100" fill="#3DDC6E"/>
+  <circle cx="732" cy="732" r="100" fill="#3DDC6E"/>
+</svg>

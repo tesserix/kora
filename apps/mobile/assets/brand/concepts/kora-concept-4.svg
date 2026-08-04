@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Concept 4: "Autocomplete" — three log rows resolving over time:
+       dots (guessing) -> dot + partial bar -> one full instant bar.
+       Row height 96, left edge x=200, row centres y = 320, 512, 704.
+       Brightness ramps as Kora learns. -->
+  <rect width="1024" height="1024" fill="#0A0D0B"/>
+  <g fill="#2C6B41">
+    <circle cx="248" cy="320" r="48"/>
+    <circle cx="392" cy="320" r="48"/>
+    <circle cx="536" cy="320" r="48"/>
+  </g>
+  <g fill="#35A356">
+    <circle cx="248" cy="512" r="48"/>
+    <rect x="344" y="464" width="320" height="96" rx="48"/>
+  </g>
+  <rect x="200" y="656" width="624" height="96" rx="48" fill="#3DDC6E"/>
+</svg>

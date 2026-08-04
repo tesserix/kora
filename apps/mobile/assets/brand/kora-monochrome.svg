@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="Kora">
+  <title>Kora</title>
+  <!-- Android 13+ themed-icon MONOCHROME layer. The system discards colour and
+       tints the alpha channel, so lit and unlit dots cannot be told apart by
+       colour here — only by RADIUS, which is why the unlit dots were drawn
+       smaller in the first place rather than merely dimmer.
+       Same 0.78 safe-zone scale as the foreground. -->
+  <g transform="translate(512 512) scale(0.78) translate(-512 -512)" fill="#FFFFFF">
+    <circle cx="512" cy="292" r="56"/>
+    <circle cx="732" cy="512" r="56"/>
+    <circle cx="512" cy="732" r="56"/>
+    <circle cx="292" cy="292" r="100"/>
+    <circle cx="292" cy="512" r="100"/>
+    <circle cx="292" cy="732" r="100"/>
+    <circle cx="512" cy="512" r="100"/>
+    <circle cx="732" cy="292" r="100"/>
+    <circle cx="732" cy="732" r="100"/>
+  </g>
+</svg>

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Concept 3: "Forkchart" — a fork whose four tines are a macro bar chart.
+       Tines: width 88, gap 36, all bottoms at y=596 hidden under the collar.
+       Collar y=548..644, stem y=600..850. Glyph centred on x=512. -->
+  <rect width="1024" height="1024" fill="#34C759"/>
+  <g fill="#F2F2F7">
+    <rect x="282" y="450" width="88" height="146" rx="44"/>
+    <rect x="406" y="380" width="88" height="216" rx="44"/>
+    <rect x="530" y="300" width="88" height="296" rx="44"/>
+    <rect x="654" y="230" width="88" height="366" rx="44"/>
+    <rect x="282" y="548" width="460" height="96" rx="48"/>
+    <rect x="460" y="600" width="104" height="250" rx="52"/>
+  </g>
+</svg>
