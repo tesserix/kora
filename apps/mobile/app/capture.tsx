@@ -64,21 +64,18 @@ const MODE_PILLS: ReadonlyArray<{ mode: CaptureMode; icon: string; label: string
 // The composer's left control, per mode. Voice is absent because it renders
 // VoiceComposer instead of a plain Pressable.
 //
-// `type` keeps the photo action but under a DISTINCT icon. Two reasons it is
-// not simply dropped to match voice/scan: attaching a photo mid-sentence is the
-// messaging convention, and — load-bearing — the only test that proves
-// food_logs.source follows the RESOLVE rather than the open tab captures a
-// photo from the Type tab ("a photo capture via the quick-capture shortcut,
-// from the Type tab, logs ai_photo", #80). Remove this affordance and that test
-// has to switch to Photo first, at which point mode and modality agree and it
-// stops discriminating anything.
+// One rule, no exceptions: the button mirrors the active mode and does what
+// that mode's icon implies. Photo captures, Scan scans, Type focuses the field.
 //
-// It previously shared `camera` with photo, which read as a duplicate icon;
-// `images` says "attach a photo" and is distinguishable at a glance.
+// This went through two wrong answers first. `camera` in Type duplicated the
+// Photo icon; `images` was distinguishable but still promised a photo action in
+// a text mode. Both were attempts to preserve a quick-capture shortcut that
+// simply does not belong under a keyboard glyph — an icon that lies about its
+// behaviour is worse than a lost shortcut.
 export const COMPOSER_BUTTON: Record<Exclude<CaptureMode, "voice">, { icon: string; label: string }> = {
   photo: { icon: "camera", label: "Quick photo capture" },
   scan: { icon: "scan-barcode", label: "Scan a barcode" },
-  type: { icon: "images", label: "Quick photo capture" },
+  type: { icon: "keyboard", label: "Focus the message field" },
 };
 
 const ROUND_BUTTON = {
@@ -427,6 +424,7 @@ export function CaptureBody({
   onResolveUncertain,
 }: CaptureBodyProps) {
   const scrollViewRef = useRef<ScrollView>(null);
+  const composerFieldRef = useRef<TextInput>(null);
   // Typing is an input only where it is the point. In voice and scan the
   // middle of the composer is static guidance, so there is no dead field.
   const showsTextField = mode === "photo" || mode === "type";
@@ -580,7 +578,7 @@ export function CaptureBody({
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={COMPOSER_BUTTON[mode].label}
-              onPress={onCapturePhoto}
+              onPress={mode === "type" ? () => composerFieldRef.current?.focus() : onCapturePhoto}
               style={{
                 width: 38,
                 height: 38,
@@ -597,6 +595,7 @@ export function CaptureBody({
               is static guidance, so there is no dead field to tab into. */}
           {showsTextField ? (
             <TextInput
+              ref={composerFieldRef}
               accessibilityLabel="Tell Otto what you ate"
               value={text}
               onChangeText={onChangeText}

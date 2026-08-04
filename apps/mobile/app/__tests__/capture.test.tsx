@@ -1136,16 +1136,25 @@ describe("Add to diary — source follows the resolve, not the tab", () => {
     expect(mockCreateLogMutateAsync).toHaveBeenCalledWith(expect.objectContaining({ source: "ai_text" }));
   });
 
-  test("a photo capture via the quick-capture shortcut, from the Type tab, logs ai_photo", async () => {
+  // NOTE: this one no longer DISCRIMINATES tab-vs-modality, and says so rather
+  // than pretending. It used to capture from the Type tab, a route removed when
+  // the Type composer button became a keyboard that focuses the field. The
+  // obvious replacement — resolve as a photo, then switch tabs before logging —
+  // is impossible: handleModeChange calls setStage("idle"), which discards the
+  // result. So mode and modality necessarily agree here.
+  //
+  // It still earns its place by pinning the photo handler to stamping the
+  // correct literal (rather than nothing, a typo, or the wrong modality). The
+  // tab-vs-modality property itself is still guarded, by the two tests in this
+  // block that DO discriminate: "typing on the Photo tab ... logs ai_text" and
+  // "last-resolve-wins ...".
+  test("a photo resolve logs ai_photo", async () => {
     (ImagePicker.launchCameraAsync as jest.Mock).mockResolvedValueOnce({
       canceled: false,
       assets: [{ uri: "file://x.jpg", fileName: "x.jpg", mimeType: "image/jpeg" }],
     });
 
-    // Mode is switched to "type" first — the resolve is still a photo, so a
-    // mode-derived source would read "ai_text" here, not "ai_photo".
     const rendered = await render(<CaptureScreen />);
-    await fireEvent.press(await rendered.findByText("Type"));
     await fireEvent.press(await rendered.findByLabelText("Quick photo capture"));
 
     await waitFor(() => expect(mockResolvePhotoMutate).toHaveBeenCalled());
@@ -1339,7 +1348,22 @@ describe("Composer follows the selected mode", () => {
     expect(COMPOSER_BUTTON.photo.icon).not.toBe(COMPOSER_BUTTON.type.icon);
   });
 
-  test("photo and type modes keep the text field and the quick-capture camera", async () => {
+  // Binding on BEHAVIOUR, not just the glyph. Without this, changing the icon to
+  // a keyboard while leaving onPress wired to the camera passes every other
+  // test in this file — an icon that lies about what the button does, shipped
+  // green. (Verified: that exact mutation was undetected until this existed.)
+  test("the Type composer button does not start a photo capture", async () => {
+    const { findByText, findByLabelText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Type"));
+
+    await fireEvent.press(await findByLabelText("Focus the message field"));
+
+    expect(ImagePicker.launchCameraAsync).not.toHaveBeenCalled();
+    expect(ImagePicker.launchImageLibraryAsync).not.toHaveBeenCalled();
+    expect(mockResolvePhotoMutate).not.toHaveBeenCalled();
+  });
+
+  test("photo captures, type focuses the field, and both keep the text field", async () => {
     const { findByText, findByLabelText, queryByLabelText } = await render(<CaptureScreen />);
 
     expect(await findByLabelText("Quick photo capture")).toBeTruthy();
@@ -1347,8 +1371,11 @@ describe("Composer follows the selected mode", () => {
     expect(queryByLabelText("Hold to record")).toBeNull();
 
     await fireEvent.press(await findByText("Type"));
+    // A keyboard glyph must not fire a camera: the button changes behaviour
+    // with the mode, not just appearance.
+    expect(await findByLabelText("Focus the message field")).toBeTruthy();
+    expect(queryByLabelText("Quick photo capture")).toBeNull();
     expect(await findByLabelText("Tell Otto what you ate")).toBeTruthy();
-    expect(queryByLabelText("Hold to record")).toBeNull();
   });
 });
 

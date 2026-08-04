@@ -211,7 +211,10 @@ test("a phrase from an earlier text resolve does not leak into a later photo res
   const { findByText, findByLabelText } = await render(<CaptureScreen />);
 
   // 1. Resolve text with a phrase — populates resolvedPhrase, not logged.
-  await fireEvent.press(await findByText("Type"));
+  // Stays on the default Photo tab: the composer's field and Send are
+  // available there too, and the property under test keys off `source`, not
+  // `mode`. (It used to switch to Type and capture via the quick-capture
+  // shortcut, a route removed when the Type button became a keyboard.)
   const input = await findByLabelText("Tell Otto what you ate");
   await fireEvent.changeText(input, "brekkie eggs");
   await fireEvent.press(await findByLabelText("Send"));
@@ -219,7 +222,7 @@ test("a phrase from an earlier text resolve does not leak into a later photo res
   const [, textOptions] = mockResolveTextMutate.mock.calls[0];
   await act(async () => textOptions.onSuccess(makeResolution()));
 
-  // 2. Resolve a photo via the quick-capture shortcut, still in "type" mode.
+  // 2. Resolve a photo via the quick-capture shortcut, same session.
   (ImagePicker.launchCameraAsync as jest.Mock).mockResolvedValueOnce({
     canceled: false,
     assets: [{ uri: "file://x.jpg", fileName: "x.jpg", mimeType: "image/jpeg" }],
@@ -243,7 +246,10 @@ test("a phrase from an earlier text resolve does not leak into a later barcode r
   const { findByText, findByLabelText, findByTestId } = await render(<CaptureScreen />);
 
   // 1. Resolve text with a phrase — populates resolvedPhrase, not logged.
-  await fireEvent.press(await findByText("Type"));
+  // Stays on the default Photo tab: the composer's field and Send are
+  // available there too, and the property under test keys off `source`, not
+  // `mode`. (It used to switch to Type and capture via the quick-capture
+  // shortcut, a route removed when the Type button became a keyboard.)
   const input = await findByLabelText("Tell Otto what you ate");
   await fireEvent.changeText(input, "brekkie eggs");
   await fireEvent.press(await findByLabelText("Send"));
