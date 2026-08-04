@@ -95,12 +95,31 @@ func withFallback[T any](ctx context.Context, budget, fbBudget time.Duration, pr
 
 	result, usage, err := primary(primaryCtx)
 	if err == nil && primaryCtx.Err() == nil {
+		usage.Outcome = OutcomeOK
 		return result, usage, nil
 	}
 
+	// The primary ran and was billed upstream even though its answer is being
+	// thrown away — cancelling a client context does not stop the provider
+	// from processing or charging for the request. Dropping it here is what
+	// made COGS a one-directional undercount even on SUCCESSFUL resolves
+	// (#81). Deposit it so the Resolver meters both legs.
+	if primaryCtx.Err() != nil {
+		usage.Outcome = OutcomeTimeout
+	} else {
+		usage.Outcome = OutcomeError
+	}
+	addUsage(ctx, usage)
+
 	fallbackCtx, fallbackCancel := context.WithTimeout(ctx, fbBudget)
 	defer fallbackCancel()
-	return fallback(fallbackCtx)
+	result, fbUsage, fbErr := fallback(fallbackCtx)
+	if fbErr != nil {
+		fbUsage.Outcome = OutcomeError
+	} else {
+		fbUsage.Outcome = OutcomeOK
+	}
+	return result, fbUsage, fbErr
 }
 
 func (r *Router) IdentifyText(ctx context.Context, phrase string) ([]Guess, Usage, error) {

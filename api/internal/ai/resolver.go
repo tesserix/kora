@@ -227,11 +227,19 @@ func (r Resolver) resolve(
 		}, nil
 	}
 
-	guesses, usage, err := identify(ctx)
+	// A provider call is billed upstream whether or not it produces a usable
+	// answer, so it is metered on BOTH paths. Recording only successes made
+	// COGS a one-directional undercount and left failing AI paths with no
+	// trace at all — so a never-working path and a never-attempted path could
+	// not be told apart (#81).
+	sinkCtx, sink := withUsageSink(ctx)
+	guesses, usage, err := identify(sinkCtx)
 	if err != nil {
+		usage.Outcome = OutcomeError
+		r.recordAll(ctx, userID, sink.drain(), usage)
 		return Resolution{}, fmt.Errorf("ai: resolve: identify: %w", err)
 	}
-	r.record(ctx, userID, usage)
+	r.recordAll(ctx, userID, sink.drain(), usage)
 
 	res, err := r.resolveGuesses(ctx, userID, guesses)
 	if err != nil {
@@ -279,11 +287,17 @@ func (r Resolver) ResolveVoice(ctx context.Context, userID uuid.UUID, audio []by
 		return Resolution{Tier: TierFollowUp, FollowUpQuestion: budgetFollowUpQuestion, Provenance: "budget"}, nil
 	}
 
-	transcript, usage, err := r.provider.Transcribe(ctx, audio, mime)
+	// Same both-paths metering as `resolve` above — see #81. Transcribe has no
+	// fallback (router.go), so the sink is normally empty here, but it is
+	// drained anyway rather than assuming that stays true.
+	sinkCtx, sink := withUsageSink(ctx)
+	transcript, usage, err := r.provider.Transcribe(sinkCtx, audio, mime)
 	if err != nil {
+		usage.Outcome = OutcomeError
+		r.recordAll(ctx, userID, sink.drain(), usage)
 		return Resolution{}, fmt.Errorf("ai: resolve voice: transcribe: %w", err)
 	}
-	r.record(ctx, userID, usage)
+	r.recordAll(ctx, userID, sink.drain(), usage)
 
 	transcript = strings.TrimSpace(transcript)
 	if transcript == "" {
@@ -310,7 +324,28 @@ func (r Resolver) ResolveVoice(ctx context.Context, userID uuid.UUID, audio []by
 // resolution — a user's food logging cannot depend on the billing table
 // being reachable — so the error is deliberately ignored here.
 func (r Resolver) record(ctx context.Context, userID uuid.UUID, u Usage) {
+	if u.Outcome == "" {
+		u.Outcome = OutcomeOK
+	}
 	_ = r.meter.Record(ctx, userID, u, EstimateCostUSD(u))
+}
+
+// recordAll meters every provider call a resolve actually made: the legs the
+// router abandoned (drained from the request's usage sink) plus the one whose
+// result was returned. A leg with no Provider is one that never ran — a stub
+// or an empty zero value — and is skipped so the meter is not padded with
+// phantom calls.
+func (r Resolver) recordAll(ctx context.Context, userID uuid.UUID, abandoned []Usage, returned Usage) {
+	for _, u := range abandoned {
+		if u.Provider == "" {
+			continue
+		}
+		r.record(ctx, userID, u)
+	}
+	if returned.Provider == "" {
+		return
+	}
+	r.record(ctx, userID, returned)
 }
 
 // tierRank orders tiers from least to most confident so the "best" guess
