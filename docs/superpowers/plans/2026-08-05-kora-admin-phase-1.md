@@ -734,7 +734,7 @@ name: gmp-frontend
 description: Google Managed Prometheus frontend — serves the Prometheus HTTP API over Cloud Monitoring so in-cluster consumers (the tesserix-home admin portal) can run PromQL against GMP.
 type: application
 version: 0.1.0
-appVersion: "0.15.3"
+appVersion: "0.18.1"
 ```
 
 `charts/apps/gmp-frontend/values.yaml`:
@@ -747,7 +747,12 @@ appVersion: "0.15.3"
 # portal rendered "—" for every product.
 image:
   repository: gke.gcr.io/prometheus-engine/frontend
-  tag: v0.15.3-gke.0
+  # Verified 2026-08-05: this multi-arch tag resolves to
+  # sha256:36169e33043eb60fd992023894c89ee9bdf084d0bc6bbc496c6b3e45b934ccfb.
+  # Use the UNPREFIXED tag, not amd64-/arm64- — those are per-arch manifests,
+  # and pinning one silently breaks the day an arm node pool appears. Cluster
+  # nodes are all amd64 today.
+  tag: v0.18.1-gke.2
   pullPolicy: IfNotPresent
 
 projectID: tesseracthub-480811
@@ -769,7 +774,7 @@ resources:
     memory: 512Mi
 ```
 
-Confirm the image tag is real before applying — `gcloud container images list-tags gke.gcr.io/prometheus-engine/frontend --limit=10` — and pin to whatever current version that returns rather than trusting the value written here.
+The tag above was verified on 2026-08-05 and needs no re-checking. Note that `gcloud container images list-tags` for this repository shows only the `amd64-`/`arm64-` prefixed tags; the unprefixed multi-arch tag exists regardless and is confirmed by `gcloud container images describe gke.gcr.io/prometheus-engine/frontend:v0.18.1-gke.2`.
 
 `templates/serviceaccount.yaml`:
 
