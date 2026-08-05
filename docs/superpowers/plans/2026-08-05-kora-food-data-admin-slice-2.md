@@ -307,6 +307,27 @@ git commit -m "feat(api): audited food create, update and soft delete"
 
 **PATH ENCODING — this is where slice 1's latent trap becomes live.** `:id` is the first path parameter on the admin surface. The TypeScript client signs the raw path string while `fetch` percent-encodes on the wire, and Go's `URL.Path` percent-*decodes*. A UUID is ASCII-safe so the normal case is fine, but the client's JSDoc already names the traps. Add a test that a signed request carrying a well-formed UUID verifies, and note in your report whether a malformed id can produce a 400 before gin rather than a clean 404.
 
+**FOUR RIDERS CARRIED FROM TASK 4'S REVIEW — each is a handler-layer concern that Task 4
+deliberately did not solve:**
+
+1. **Optimistic concurrency.** `UpdateFood` is a full-row map-form update, so two admins editing
+   different fields of the same food silently clobber each other with no conflict signal. The row
+   lock added in Task 4 protects the *audit chain* (B's `before` chains from A's committed
+   `after`) but cannot prevent the clobber — that needs a field on the wire. Echo `updated_at` in
+   the edit payload and add `AND updated_at = ?` to the update, so a stale submit affects 0 rows
+   and becomes a **409**. The clobber is at least reconstructable from `kora_admin_events` today,
+   but it should not happen silently.
+2. **Duplicate barcode is currently a raw 500.** `idx_food_items_barcode` is UNIQUE (partial on
+   `barcode IS NOT NULL`, and NOT filtered on `deleted_at`), and `CreateFood` does no dedup. An
+   operator creating a food whose barcode collides with an existing — or an already-retired — row
+   gets an opaque 500. Map Postgres `23505` to a **409** with a message naming the collision.
+3. **`SoftDeleteFood` returns a `nutrition.FoodItem`**, which has no `DeletedAt` or `UpdatedAt`
+   field — so the response body cannot convey that the food is now retired. Decide the response
+   shape deliberately rather than returning something that cannot express the outcome.
+4. **`UpdateFood` returns `(updated, err)` when only the POST-COMMIT cache bump failed.** The edit
+   committed. The handler must NOT render that as "your edit failed" — it is at worst a stale
+   cache, and telling an operator their edit failed when it succeeded will make them do it again.
+
 - [ ] Tests first; confirm failure; implement; confirm pass; mutation-verify that each route is actually behind `bffauth` (an unsigned DELETE must 401, not 404 and not 200); commit.
 
 ```bash
