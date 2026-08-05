@@ -164,3 +164,197 @@ func TestRedisCache_DownRedisIsNilSafe(t *testing.T) {
 		cache.Set(ctx, CacheKey("phrase", uuid.New(), "grilled chicken"), Resolution{Provenance: "test"})
 	})
 }
+
+// --- generation counter ---
+//
+// These tests cover the mechanism a food mutation (Task 4) uses to
+// invalidate every cache entry that might embed a given food's macros in one
+// O(1) operation: bumping a generation counter that every physical cache key
+// is scoped by. Cache keys carry no food id (see CacheKey's doc), so there is
+// no reverse index to walk instead.
+
+// TestGenerationScopedKey_DiffersAcrossGenerations pins the low-level
+// building block: the same logical key produces a different physical key
+// under a different generation, and the same physical key under a repeated
+// call with the same generation (stability within one generation).
+func TestGenerationScopedKey_DiffersAcrossGenerations(t *testing.T) {
+	key := CacheKey("phrase", uuid.New(), "grilled chicken")
+
+	require.NotEqual(t, generationScopedKey(key, 0), generationScopedKey(key, 1),
+		"two keys built under different generations must differ")
+	require.Equal(t, generationScopedKey(key, 3), generationScopedKey(key, 3),
+		"the same key under the same generation must be stable across calls")
+}
+
+// TestRedisCache_Generation_KeyStableWithinOneGeneration is the positive
+// counterpart to the invalidation test below: as long as nobody bumps the
+// generation, repeated Get calls for the same logical key must keep hitting
+// the same entry — the generation scoping must not itself cause spurious
+// misses.
+func TestRedisCache_Generation_KeyStableWithinOneGeneration(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+
+	cache := NewRedisCache(client, time.Minute)
+	ctx := context.Background()
+	key := CacheKey("phrase", uuid.New(), "brekkie bowl")
+
+	cache.Set(ctx, key, Resolution{Provenance: "stable"})
+
+	for i := 0; i < 3; i++ {
+		got, ok := cache.Get(ctx, key)
+		require.True(t, ok, "call %d: entry must still be reachable within the same generation", i)
+		require.Equal(t, "stable", got.Provenance)
+	}
+}
+
+// TestRedisCache_BumpGeneration_MakesPriorEntryUnreadable is the actual
+// point of the feature: after BumpGeneration, a value written before the
+// bump is no longer readable via a freshly built key for the exact same
+// logical (kind, user, value) — not merely "the strings differ", but the
+// entry is genuinely gone from the caller's perspective. It ages out on its
+// own TTL rather than being actively deleted.
+func TestRedisCache_BumpGeneration_MakesPriorEntryUnreadable(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+
+	cache := NewRedisCache(client, time.Minute)
+	ctx := context.Background()
+	userID := uuid.New()
+	key := CacheKey("phrase", userID, "grilled chicken")
+
+	cache.Set(ctx, key, Resolution{Provenance: "pre-bump"})
+
+	// Sanity: the entry is reachable before the bump.
+	got, ok := cache.Get(ctx, key)
+	require.True(t, ok, "sanity: entry must be present before the bump")
+	require.Equal(t, "pre-bump", got.Provenance)
+
+	require.NoError(t, cache.BumpGeneration(ctx))
+
+	// A freshly built key for the identical (kind, user, value) must now
+	// miss — the mutation that bumped the generation had no way to know
+	// which specific cache keys reference the food it just edited (keys
+	// carry no food id), so invalidation works by making every key built
+	// under the old generation unreachable, not by targeting this one.
+	freshKey := CacheKey("phrase", userID, "grilled chicken")
+	require.Equal(t, key, freshKey, "sanity: CacheKey itself is generation-agnostic and stays stable")
+
+	got, ok = cache.Get(ctx, freshKey)
+	require.False(t, ok, "a value written before a generation bump must not be readable via a fresh key")
+	require.Nil(t, got)
+}
+
+// TestRedisCache_BumpGeneration_IsMonotonicallyIncrementing exercises
+// CurrentGeneration/BumpGeneration directly: repeated bumps strictly
+// increase the counter, and it starts at the baseline (0) before any bump
+// has ever happened.
+func TestRedisCache_BumpGeneration_IsMonotonicallyIncrementing(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+
+	cache := NewRedisCache(client, time.Minute)
+	ctx := context.Background()
+
+	baseline, err := cache.CurrentGeneration(ctx)
+	require.NoError(t, err)
+	require.Equal(t, int64(0), baseline, "an un-bumped cache must report the baseline generation")
+
+	require.NoError(t, cache.BumpGeneration(ctx))
+	first, err := cache.CurrentGeneration(ctx)
+	require.NoError(t, err)
+	require.Equal(t, baseline+1, first)
+
+	require.NoError(t, cache.BumpGeneration(ctx))
+	second, err := cache.CurrentGeneration(ctx)
+	require.NoError(t, err)
+	require.Equal(t, first+1, second)
+}
+
+// TestRedisCache_GenerationReadFailure_NeverFallsBackToCollidingGeneration
+// is the regression test for the failure mode this design was chosen
+// against: a FIXED fallback generation would be wrong specifically because
+// generation 0 is not a made-up placeholder — it is the real, valid
+// generation every entry was written under before the very first bump ever
+// happened. If a failed generation read fell back to a fixed value that
+// collided with a real past generation, it would silently serve back a
+// stale, pre-bump entry the moment Redis's generation counter becomes
+// unreadable while the rest of Redis (and that stale entry's TTL) is still
+// live. This test reproduces exactly that: it corrupts ONLY the generation
+// counter key (leaving the rest of Redis healthy, unlike a full outage) and
+// asserts the read failure is instead treated as "cache absent" — a
+// guaranteed miss, never a stale hit.
+func TestRedisCache_GenerationReadFailure_NeverFallsBackToCollidingGeneration(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+
+	cache := NewRedisCache(client, time.Minute)
+	ctx := context.Background()
+	key := CacheKey("phrase", uuid.New(), "grilled chicken")
+
+	// Written under the baseline generation (0), before any bump has ever
+	// happened — this is the entry a fixed fallback-to-0 would wrongly
+	// resurrect.
+	cache.Set(ctx, key, Resolution{Provenance: "stale-pre-bump"})
+
+	require.NoError(t, cache.BumpGeneration(ctx))
+
+	// Corrupt just the generation counter so reading it fails while the
+	// rest of Redis — including the stale entry above — stays reachable.
+	require.NoError(t, mr.Set(resolveCacheGenerationKey, "not-an-integer"))
+
+	_, err = cache.CurrentGeneration(ctx)
+	require.Error(t, err, "a corrupted generation counter must surface as a read failure, not a silently-wrong value")
+
+	got, ok := cache.Get(ctx, key)
+	require.False(t, ok, "a generation read failure must never fall back to a generation that could collide with a real past one")
+	require.Nil(t, got)
+
+	// Set must degrade the same way: it must not write under a guessed
+	// generation while the counter is unreadable.
+	require.NotPanics(t, func() {
+		cache.Set(ctx, key, Resolution{Provenance: "written-during-corruption"})
+	})
+
+	// Delete must report the failure (so the one real caller,
+	// foodlog.Service's correction invalidation, can log it) rather than
+	// claiming success while doing nothing.
+	require.Error(t, cache.Delete(ctx, key))
+}
+
+// TestNoCache_GenerationIsInertNoOp pins NoCache's contract for the new
+// surface: a fixed, meaningless generation and a silent no-op bump, so
+// nothing on the admin mutation path has to special-case "caching is off".
+func TestNoCache_GenerationIsInertNoOp(t *testing.T) {
+	c := NoCache{}
+	ctx := context.Background()
+
+	gen, err := c.CurrentGeneration(ctx)
+	require.NoError(t, err)
+	require.Equal(t, int64(0), gen)
+
+	require.NotPanics(t, func() {
+		require.NoError(t, c.BumpGeneration(ctx))
+	})
+
+	// Bumping must not change NoCache's always-miss behaviour.
+	got, ok := c.Get(ctx, "anything")
+	require.False(t, ok)
+	require.Nil(t, got)
+}
