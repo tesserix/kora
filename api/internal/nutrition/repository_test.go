@@ -81,26 +81,33 @@ func TestGetByIDExcludesSoftDeleted(t *testing.T) {
 }
 
 // TestCountExcludesSoftDeleted proves the index-size gauge does not count
-// retired rows. The table is truncated inside the transaction (as in
-// TestSeedIsIdempotentAndSearchable above) so the assertion is an exact
-// count, not a >= that a bug could satisfy by accident.
+// retired rows. Uses a before/after DELTA rather than TRUNCATE food_items
+// CASCADE (the shape this test used before this fix): a table-wide TRUNCATE
+// takes an ACCESS EXCLUSIVE lock held until this transaction rolls back, and
+// `go test ./...` runs packages concurrently — admin, metrics, savedmeals,
+// pins and foodlog all read food_items too, so that lock can stall or
+// deadlock against them. The same assertion is reachable without it: read
+// Count() before seeding, add one live and one retired row, and check the
+// count moved by exactly 1 — the live row only.
 func TestCountExcludesSoftDeleted(t *testing.T) {
 	db := testDB(t)
 	tx := db.Begin()
 	require.NoError(t, tx.Error)
 	t.Cleanup(func() { tx.Rollback() })
-	require.NoError(t, tx.Exec("TRUNCATE food_items CASCADE").Error)
 	repo := NewRepository(tx)
 
-	live := FoodItem{Name: "Live Count Food", Provenance: ProvenanceCurated, KcalPer100g: 100}
+	before, err := repo.Count(context.Background())
+	require.NoError(t, err)
+
+	live := FoodItem{Name: "Live Count Food " + uuid.NewString(), Provenance: ProvenanceCurated, KcalPer100g: 100}
 	require.NoError(t, tx.Create(&live).Error)
-	retired := FoodItem{Name: "Retired Count Food", Provenance: ProvenanceCurated, KcalPer100g: 100}
+	retired := FoodItem{Name: "Retired Count Food " + uuid.NewString(), Provenance: ProvenanceCurated, KcalPer100g: 100}
 	require.NoError(t, tx.Create(&retired).Error)
 	require.NoError(t, tx.Exec("UPDATE food_items SET deleted_at = now() WHERE id = ?", retired.ID).Error)
 
-	n, err := repo.Count(context.Background())
+	after, err := repo.Count(context.Background())
 	require.NoError(t, err)
-	require.EqualValues(t, 1, n, "count must include the live row and exclude the retired one")
+	require.Equal(t, before+1, after, "count must move by exactly 1 for the live row; the retired row must not be counted")
 }
 
 // TestSearchExcludesSoftDeleted covers the mobile picker: a retired food must

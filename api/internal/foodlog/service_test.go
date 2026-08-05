@@ -78,6 +78,54 @@ func TestLogFoodComputesMacrosFromGrams(t *testing.T) {
 	require.Equal(t, nutrition.ProvenanceAFCD, log.Provenance)
 }
 
+// TestLogFoodRetiredFoodReturnsValidationError proves that logging a food
+// whose GetByID now filters retired rows is a 400, not the 500 a bare
+// fmt.Errorf("resolve food: %w", err) wrap would produce. This case was
+// effectively unreachable before soft delete (a hard delete CASCADEd, so the
+// client's food_item_id vanished with the row) — filtering GetByID is what
+// turns it into a normal occurrence: a client's food picker cache can
+// predate a retire, or an offline-queued log can be replayed after one. A
+// 500 here would be treated as retryable by the offline queue and replayed
+// forever against a log that can never succeed.
+func TestLogFoodRetiredFoodReturnsValidationError(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	item := nutrition.FoodItem{Name: "Retired LogFood Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+	require.NoError(t, db.Exec("UPDATE food_items SET deleted_at = now() WHERE id = ?", item.ID).Error)
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	_, err := svc.LogFood(context.Background(), userID, LogRequest{
+		FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 100, LoggedAt: time.Now(),
+	})
+	require.Error(t, err)
+	msg, ok := httpx.IsValidation(err)
+	require.True(t, ok, "a retired food_item_id must be a client ValidationError (400), not a 500 the offline queue would retry forever; got: %v", err)
+	require.Equal(t, "food_item_id not found", msg)
+	require.False(t, errors.Is(err, gorm.ErrRecordNotFound), "error must not still satisfy gorm.ErrRecordNotFound (would map to a misleading 404 upstream)")
+}
+
+// The live twin of TestLogFoodRetiredFoodReturnsValidationError: a
+// non-retired food must still log successfully through the same GetByID call
+// path.
+func TestLogFoodLiveFoodStillLogsSuccessfully(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	item := nutrition.FoodItem{Name: "Live LogFood Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100, ProteinPer100g: 10}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	log, err := svc.LogFood(context.Background(), userID, LogRequest{
+		FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 100, LoggedAt: time.Now(),
+	})
+	require.NoError(t, err)
+	require.Equal(t, item.Name, log.Description)
+}
+
 func TestCopyDayClonesLogsToNewDate(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db)
@@ -345,6 +393,33 @@ func TestCreateBatchUnknownFoodItemIDReturnsValidationError(t *testing.T) {
 	require.True(t, ok, "unknown food_item_id must be a client ValidationError (400), got: %v", err)
 	require.Equal(t, "unknown food_item_id", msg)
 	require.False(t, errors.Is(err, gorm.ErrRecordNotFound), "not-found must be converted, not leaked as gorm.ErrRecordNotFound")
+}
+
+// TestCreateBatchRetiredFoodItemNamesTheUnavailableFood covers the saved-meal
+// case: savedmeals.Repository.ItemsForMeals deliberately keeps an unfiltered
+// JOIN, so a user can still see a saved meal containing a retired item, tap
+// "log", and hit this batch path. The user never chose the food_item_id
+// (it came from the meal, not their own typing), so the error must name the
+// FOOD that's unavailable, not a bare id they wouldn't recognize.
+func TestCreateBatchRetiredFoodItemNamesTheUnavailableFood(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	item := nutrition.FoodItem{Name: "Retired Batch Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+	require.NoError(t, db.Exec("UPDATE food_items SET deleted_at = now() WHERE id = ?", item.ID).Error)
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	_, err := svc.CreateBatch(context.Background(), userID, CreateBatchRequest{
+		LoggedAt: time.Now(), MealSlot: "breakfast",
+		Items: []BatchItem{{FoodItemID: item.ID, QuantityGrams: 100}},
+	})
+	require.Error(t, err)
+	msg, ok := httpx.IsValidation(err)
+	require.True(t, ok, "a retired food_item_id must still be a client ValidationError (400), got: %v", err)
+	require.Contains(t, msg, item.Name, "the error must name the unavailable FOOD, not a bare id the user never chose")
+	require.NotEqual(t, "unknown food_item_id", msg, "a retired item is a known food with a name — must not fall back to the truly-unknown-id message")
 }
 
 func TestCreateBatchInfraFaultIsNotMisclassifiedAsValidation(t *testing.T) {

@@ -52,6 +52,20 @@ func (r Repository) ListForUser(ctx context.Context, userID uuid.UUID) ([]SavedM
 
 // ItemsForMeals returns items for the given meals, joined to food_items for
 // name + per-100g macros, ordered by (meal, position).
+//
+// DELIBERATE ASYMMETRY: unlike every read path in the nutrition package,
+// this JOIN deliberately does NOT filter fi.deleted_at. It is an INNER
+// JOIN — adding `AND fi.deleted_at IS NULL` here would silently drop a
+// retired item's row from the result, which would shrink the meal's
+// rendered item list and macro totals with no error and no indication to
+// the user that anything is missing. That silent shrinkage is exactly the
+// destruction soft delete exists to prevent (see migration 000023): a user
+// must still see the meal they saved, name and macros intact, even after
+// the underlying food has been retired from the index. Do not add a
+// `fi.deleted_at IS NULL` predicate to this query. (The batch log path a
+// saved meal is logged through DOES reject a retired item — see
+// foodlog.Service.CreateBatch — but that is a separate, later concern from
+// what this read returns.)
 func (r Repository) ItemsForMeals(ctx context.Context, mealIDs []uuid.UUID) ([]ItemRow, error) {
 	out := []ItemRow{}
 	if len(mealIDs) == 0 {

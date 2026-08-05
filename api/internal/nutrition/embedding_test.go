@@ -60,6 +60,33 @@ func TestRowsMissingEmbeddingAndSetEmbedding(t *testing.T) {
 	require.NotNil(t, found, "expected the seeded row to be resolved via the embedding tier")
 }
 
+// TestRowsMissingEmbeddingExcludesSoftDeleted proves a retired row never
+// occupies a slot in the embedding backfill's worklist. Ordering is
+// oldest-created-first, so an old retired row that was never embedded would
+// otherwise sit permanently at the head of this queue, burning one of
+// Gemini's ~1000 free-tier requests/day on every single cmd/embed run
+// forever. Seeds a live and a retired row inside a rolled-back transaction
+// and asserts both halves: the live one is still returned, the retired one
+// is not.
+func TestRowsMissingEmbeddingExcludesSoftDeleted(t *testing.T) {
+	db := testDB(t)
+	tx := db.Begin()
+	require.NoError(t, tx.Error)
+	t.Cleanup(func() { tx.Rollback() })
+	repo := NewRepository(tx)
+
+	live := FoodItem{Name: "Live Missing-Embedding Food " + uuid.NewString(), Provenance: ProvenanceCurated, KcalPer100g: 100}
+	require.NoError(t, tx.Create(&live).Error)
+	retired := FoodItem{Name: "Retired Missing-Embedding Food " + uuid.NewString(), Provenance: ProvenanceCurated, KcalPer100g: 100}
+	require.NoError(t, tx.Create(&retired).Error)
+	require.NoError(t, tx.Exec("UPDATE food_items SET deleted_at = now() WHERE id = ?", retired.ID).Error)
+
+	missing, err := repo.RowsMissingEmbedding(context.Background(), 1000)
+	require.NoError(t, err)
+	require.True(t, containsID(missing, live.ID), "a live unembedded row must still be queued for embedding")
+	require.False(t, containsID(missing, retired.ID), "a retired row must not consume a scarce embedding-backfill slot")
+}
+
 func containsID(items []FoodItem, id uuid.UUID) bool {
 	for _, it := range items {
 		if it.ID == id {

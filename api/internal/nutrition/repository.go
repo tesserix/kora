@@ -60,6 +60,26 @@ func (r Repository) GetByID(ctx context.Context, id uuid.UUID) (FoodItem, error)
 	return item, nil
 }
 
+// NameForID returns a food_items row's name REGARDLESS of retirement status
+// (it does not filter deleted_at), or ("", false) if no row with that id
+// exists at all. It exists solely so a caller whose filtered lookup
+// (GetByID) came back not-found can tell "this id never existed" apart from
+// "this food was retired" and surface a diagnosable message — e.g.
+// foodlog.Service.CreateBatch naming the unavailable food in its batch
+// error, rather than a bare id the user never chose. Do not use this as a
+// substitute for GetByID in any path that serves nutrition data to a
+// client: it deliberately bypasses the soft-delete filter every other read
+// path enforces.
+func (r Repository) NameForID(ctx context.Context, id uuid.UUID) (string, bool) {
+	var rows []struct{ Name string }
+	if err := r.db.WithContext(ctx).
+		Raw(`SELECT name FROM food_items WHERE id = ?`, id).
+		Scan(&rows).Error; err != nil || len(rows) == 0 {
+		return "", false
+	}
+	return rows[0].Name, true
+}
+
 func (r Repository) Count(ctx context.Context) (int64, error) {
 	var n int64
 	if err := r.db.WithContext(ctx).Model(&FoodItem{}).Where("deleted_at IS NULL").Count(&n).Error; err != nil {
@@ -258,6 +278,29 @@ func (r Repository) Resolve(ctx context.Context, userID uuid.UUID, phrase string
 		// embedded row in the table before ORDER BY ... LIMIT discards most
 		// of them. Computed out here, it only runs for the resolveScanLimit
 		// rows that survive the limit.
+		//
+		// RECALL TRAP (documented, not yet a bug): the inner ORDER BY distance
+		// ASC LIMIT resolveScanLimit is meant to fetch a generous candidate
+		// pool, but that guarantee depends on the planner choosing a seq scan
+		// over the HNSW index at today's retire ratio. Swept up to a 95%
+		// retire ratio at production scale, Postgres still chose a seq scan
+		// every time and returned the full 100 rows — so there is no bug
+		// today. But forcing the HNSW index at that same 95% ratio returned
+		// only 24 of 100: the graph traversal exhausts its internal queue
+		// before LIMIT is satisfied, because hnsw.iterative_scan is 'off' (the
+		// default) and the index has no way to keep walking past exhausted
+		// neighbourhoods to backfill the difference. If food_items grows past
+		// the planner's flip point (~40k rows in these measurements) — or if
+		// the partial index migration 000023 deliberately deferred is later
+		// added — this tier can silently hand the Go scorer a quarter of its
+		// intended candidate pool, and it will be exactly the neighbourhoods
+		// clustered around retired rows that go missing. Mitigation, if it is
+		// ever needed: turn hnsw.iterative_scan on (relaxed_order or
+		// strict_order) so the index keeps scanning past exhausted
+		// neighbourhoods instead of giving up short of LIMIT. No test guards
+		// this — it requires embedded rows and a retire ratio high enough to
+		// flip the planner, and both the local and CI databases have zero
+		// embedded rows.
 		if err := r.db.WithContext(ctx).
 			Raw(`SELECT ranked.*, similarity(ranked.normalized_name, ?) AS trgm
 			     FROM (
@@ -356,10 +399,22 @@ type scoredItem struct {
 
 // RowsMissingEmbedding returns food items with no embedding yet (up to limit),
 // oldest-created first, for use by the embedding backfill command.
+//
+// deleted_at IS NULL is filtered here for a reason beyond the usual
+// read-path consistency: the embedding backfill (cmd/embed) burns against
+// Gemini's free tier (~1000 requests/day) and the index is only ~61%
+// embedded, so every row this returns spends a scarce daily slot. Ordering
+// is oldest-created-first, which means an old retired row that was never
+// embedded would sit permanently at the head of this queue, consuming a
+// slot on every single run forever (retiring it doesn't change created_at).
+// Filtering it out also keeps this worklist in sync with the
+// kora_food_index_missing gauge (internal/metrics/foodindex.go), which
+// already counts only live rows — without this filter the two would
+// describe different sets of "still needs an embedding".
 func (r Repository) RowsMissingEmbedding(ctx context.Context, limit int) ([]FoodItem, error) {
 	var items []FoodItem
 	err := r.db.WithContext(ctx).Raw(
-		`SELECT * FROM food_items WHERE embedding IS NULL ORDER BY created_at LIMIT ?`, limit).
+		`SELECT * FROM food_items WHERE embedding IS NULL AND deleted_at IS NULL ORDER BY created_at LIMIT ?`, limit).
 		Scan(&items).Error
 	if err != nil {
 		return nil, fmt.Errorf("nutrition: rows missing embedding: %w", err)
