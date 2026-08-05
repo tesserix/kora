@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/tesserix/kora/api/internal/ai"
 	"github.com/tesserix/kora/api/internal/nutrition"
@@ -93,11 +94,50 @@ func loadFoodSnapshot(tx *gorm.DB, id uuid.UUID) (foodSnapshot, error) {
 	return snapshotQuery(tx, id, false)
 }
 
-// loadLiveFoodSnapshot loads a food_items row only if it is not (yet)
-// retired — for capturing a "before" snapshot, and for refusing to mutate a
-// food that is already soft-deleted.
-func loadLiveFoodSnapshot(tx *gorm.DB, id uuid.UUID) (foodSnapshot, error) {
-	return snapshotQuery(tx, id, true)
+// loadLiveFoodSnapshotForUpdate loads a food_items row only if it is not
+// (yet) retired, taking a `FOR UPDATE` row lock in the same statement — for
+// capturing a "before" snapshot ahead of a write, and for refusing to mutate
+// a food that is already soft-deleted. The lock, not just the liveOnly
+// filter, is what makes two concurrent admin edits on the same row
+// serialise instead of race: without it, two SELECTs can both read the same
+// pre-edit "before" while neither write has landed yet, the second UPDATE
+// then overwrites the first (the map-form Updates below writes every
+// column), and the audit chain breaks — the second event's `before` shows
+// the row as it was before EITHER edit, never becoming the first edit's
+// `after`. It also closes the specific hole where a macro change goes
+// unnoticed: if admin B's "before" is stale, a real edit (e.g. kcal
+// 100->200 by A, then 200->100 by B reading the stale 100) is judged a
+// no-op and the resolve cache is never invalidated even though the stored
+// value changed twice. applyLiveOnlyUpdate below is the second, independent
+// half of the same protection, for a caller that only has this lock
+// weakened or removed.
+func loadLiveFoodSnapshotForUpdate(tx *gorm.DB, id uuid.UUID) (foodSnapshot, error) {
+	return snapshotQuery(tx.Clauses(clause.Locking{Strength: "UPDATE"}), id, true)
+}
+
+// applyLiveOnlyUpdate applies values to the food_items row identified by id,
+// but ONLY if it is still live (deleted_at IS NULL) at the moment this
+// UPDATE itself executes — not merely at the moment of an earlier read. This
+// is what stops an edit from landing on a food that was retired after this
+// mutation's before-load, and stops a second soft delete from overwriting
+// the first one's deleted_at, independently of the row lock taken by
+// loadLiveFoodSnapshotForUpdate. Shared by UpdateFood and SoftDeleteFood so
+// there is exactly one place this guard could be dropped from, not two.
+func applyLiveOnlyUpdate(tx *gorm.DB, id uuid.UUID, values map[string]any) (rowsAffected int64, err error) {
+	res := tx.Model(&nutrition.FoodItem{}).
+		Where("id = ? AND deleted_at IS NULL", id).
+		Updates(values)
+	return res.RowsAffected, res.Error
+}
+
+// barcodeEqual compares two nullable barcodes for the "did anything actually
+// change" check in UpdateFood: two nils are equal, a nil and a non-nil are
+// never equal, and two non-nils are equal iff their values match.
+func barcodeEqual(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
 
 // MutationRepository is the write surface for the admin food index: create,
@@ -167,32 +207,45 @@ func (r MutationRepository) CreateFood(ctx context.Context, actor Actor, in Food
 // UpdateFood applies an edit, records the audit event, and — in the same
 // transaction — clears the embedding if the edit renamed the food. After the
 // transaction commits, it bumps the resolve cache's invalidation generation
-// if the edit changed any macro, so every cached resolution that could have
-// embedded this food's old numbers becomes unreachable (see ai.Generation's
-// doc comment).
+// if the edit ACTUALLY CHANGED anything on the row — any field, not only a
+// macro — so every cached resolution that could have embedded this food's
+// old name or numbers becomes unreachable (see ai.Generation's doc comment).
+// This is deliberately broad: a cached ai.Resolution embeds the whole
+// nutrition.FoodItem, so a rename left uninvalidated keeps serving the old
+// name from cache for up to the resolve cache's 24h TTL, exactly like a
+// macro change would. A genuine no-op edit (every field identical to what's
+// already stored) still does not bump — see
+// TestUpdateFoodBumpsCacheGenerationOnAnyChangeButNotOnNoOp.
 func (r MutationRepository) UpdateFood(ctx context.Context, actor Actor, id uuid.UUID, in FoodInput) (nutrition.FoodItem, error) {
 	var (
-		updated       nutrition.FoodItem
-		macrosChanged bool
+		updated nutrition.FoodItem
+		changed bool
 	)
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		before, err := loadLiveFoodSnapshot(tx, id)
+		before, err := loadLiveFoodSnapshotForUpdate(tx, id)
 		if err != nil {
 			return fmt.Errorf("admin: update food: load: %w", err)
 		}
 
 		normalized := nutrition.Normalize(in.Name)
-		// Compared as two FRESHLY computed normalizations, not against
-		// before.NormalizedName as stored: a stored normalized_name can be
-		// stale (that's the entire reason BackfillNormalizedNames exists),
-		// so trusting it here could either miss a real rename or flag one
-		// that never happened, depending on which direction the drift went.
-		renamed := normalized != nutrition.Normalize(before.Name)
-		macrosChanged = in.KcalPer100g != before.KcalPer100g ||
+		// Compared against the RAW stored name, not a normalized form on
+		// either side: cmd/embed embeds row.Name verbatim, not
+		// normalized_name, so a punctuation-only rename that normalizes
+		// identically ("Coca-Cola X" -> "Coca Cola X") still changes what
+		// gets embedded and must still clear the stale vector. Comparing
+		// normalized forms (on either side) would miss exactly that case.
+		nameChanged := in.Name != before.Name
+		macrosChanged := in.KcalPer100g != before.KcalPer100g ||
 			in.ProteinPer100g != before.ProteinPer100g ||
 			in.CarbsPer100g != before.CarbsPer100g ||
 			in.FatPer100g != before.FatPer100g ||
 			in.FiberPer100g != before.FiberPer100g
+		otherFieldsChanged := in.Brand != before.Brand ||
+			in.Provenance != before.Provenance ||
+			!barcodeEqual(in.Barcode, before.Barcode) ||
+			in.ServingDesc != before.ServingDesc ||
+			in.ServingGrams != before.ServingGrams
+		changed = nameChanged || macrosChanged || otherFieldsChanged
 
 		now := time.Now().UTC()
 		values := map[string]any{
@@ -208,14 +261,16 @@ func (r MutationRepository) UpdateFood(ctx context.Context, actor Actor, id uuid
 			"carbs_per_100g":   in.CarbsPer100g,
 			"fat_per_100g":     in.FatPer100g,
 			"fiber_per_100g":   in.FiberPer100g,
-			// There are no triggers in this schema (migration 000023); GORM's
-			// map-form Updates bypasses autoUpdateTime hooks entirely even if
-			// FoodItem had one, so updated_at MUST be set explicitly here or
-			// it silently goes stale. See the package doc comment on the
-			// updated_at mechanism choice.
+			// There are no triggers in this schema (migration 000023), and
+			// GORM's map-form Updates bypasses autoUpdateTime hooks entirely
+			// even if FoodItem had one, so updated_at MUST be set explicitly
+			// here or it silently goes stale on every edit — see migration
+			// 000023's backfill comment for why that would be an
+			// unrecoverable lie once shipped (a "last edited" column reading
+			// "never edited" forever).
 			"updated_at": now,
 		}
-		if renamed {
+		if nameChanged {
 			// A stale embedding is worse than a missing one: kora_food_index_embedded
 			// still counts this row as done, so nothing ever re-queues it (task-4
 			// brief, invariant 2). Clearing it in the SAME statement as the rename
@@ -224,13 +279,11 @@ func (r MutationRepository) UpdateFood(ctx context.Context, actor Actor, id uuid
 			values["embedding"] = nil
 		}
 
-		res := tx.Model(&nutrition.FoodItem{}).
-			Where("id = ? AND deleted_at IS NULL", id).
-			Updates(values)
-		if res.Error != nil {
-			return fmt.Errorf("admin: update food: %w", res.Error)
+		rows, err := applyLiveOnlyUpdate(tx, id, values)
+		if err != nil {
+			return fmt.Errorf("admin: update food: %w", err)
 		}
-		if res.RowsAffected == 0 {
+		if rows == 0 {
 			return fmt.Errorf("admin: update food: %w", gorm.ErrRecordNotFound)
 		}
 
@@ -253,7 +306,7 @@ func (r MutationRepository) UpdateFood(ctx context.Context, actor Actor, id uuid
 		return nutrition.FoodItem{}, err
 	}
 
-	if macrosChanged {
+	if changed {
 		if err := r.cache.BumpGeneration(ctx); err != nil {
 			// The DB write already committed; a failed bump means stale
 			// cache entries can survive, so this is surfaced as an error
@@ -270,23 +323,27 @@ func (r MutationRepository) UpdateFood(ctx context.Context, actor Actor, id uuid
 // food_items.id (see migration 000023's comment), so a real DELETE here
 // would silently destroy a user's taught corrections, pins and saved meals
 // along with the food row; deleted_at exists specifically so those three
-// survive.
+// survive. After the transaction commits, it unconditionally bumps the
+// resolve cache's invalidation generation: the deleted_at IS NULL guard on
+// the write means a successful soft delete is always a real state change
+// (there is no no-op case to skip, unlike UpdateFood), and without the bump
+// an operator retiring a wrong food would keep having it served from cache
+// for up to the resolve cache's 24h TTL, with no way to tell whether the
+// retirement worked.
 func (r MutationRepository) SoftDeleteFood(ctx context.Context, actor Actor, id uuid.UUID) (nutrition.FoodItem, error) {
 	var deleted nutrition.FoodItem
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		before, err := loadLiveFoodSnapshot(tx, id)
+		before, err := loadLiveFoodSnapshotForUpdate(tx, id)
 		if err != nil {
 			return fmt.Errorf("admin: soft delete food: load: %w", err)
 		}
 
 		now := time.Now().UTC()
-		res := tx.Model(&nutrition.FoodItem{}).
-			Where("id = ? AND deleted_at IS NULL", id).
-			Updates(map[string]any{"deleted_at": now, "updated_at": now})
-		if res.Error != nil {
-			return fmt.Errorf("admin: soft delete food: %w", res.Error)
+		rows, err := applyLiveOnlyUpdate(tx, id, map[string]any{"deleted_at": now, "updated_at": now})
+		if err != nil {
+			return fmt.Errorf("admin: soft delete food: %w", err)
 		}
-		if res.RowsAffected == 0 {
+		if rows == 0 {
 			return fmt.Errorf("admin: soft delete food: %w", gorm.ErrRecordNotFound)
 		}
 
@@ -309,6 +366,14 @@ func (r MutationRepository) SoftDeleteFood(ctx context.Context, actor Actor, id 
 	})
 	if err != nil {
 		return nutrition.FoodItem{}, err
+	}
+
+	if err := r.cache.BumpGeneration(ctx); err != nil {
+		// Same trade-off as UpdateFood's post-commit bump: the DB write
+		// already committed, so this is surfaced as an error rather than
+		// swallowed, even though the retirement itself succeeded (deleted
+		// is still returned, not zeroed).
+		return deleted, fmt.Errorf("admin: soft delete food: bump cache generation: %w", err)
 	}
 	return deleted, nil
 }

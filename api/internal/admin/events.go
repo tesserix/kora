@@ -90,7 +90,10 @@ func recordEvent(tx *gorm.DB, actor Actor, action, targetType string, targetID u
 	// transaction, exactly the backstop the migration's comment describes.
 	// Do not add a Go-side guard that would short-circuit before this
 	// statement runs; that would remove the DB's ability to prove atomicity
-	// (see TestUpdateFoodAuditFailureRollsBackMutation).
+	// (see mutations_test.go's TestCreateFoodAuditFailureRollsBackMutation,
+	// TestUpdateFoodAuditFailureRollsBackMutation and
+	// TestSoftDeleteFoodAuditFailureRollsBackMutation, all of which force
+	// this exact failure).
 	if err := tx.Create(&event).Error; err != nil {
 		return fmt.Errorf("admin: record event: %w", err)
 	}

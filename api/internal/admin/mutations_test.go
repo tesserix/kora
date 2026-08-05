@@ -2,8 +2,12 @@ package admin
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -92,6 +96,46 @@ func seedFoodTx(t *testing.T, tx *gorm.DB, name, brand string) nutrition.FoodIte
 	return item
 }
 
+// seedFoodCommitted inserts a food row as a genuinely COMMITTED write, not
+// inside a transaction later rolled back — used only by the row-lock
+// concurrency test below, which needs the row visible to TWO independently
+// opened transactions. seedTx's rolled-back transaction would be invisible
+// to a second connection under READ COMMITTED, so it cannot be used there.
+// Cleans up after itself with a direct hard delete (there is no FK from
+// kora_admin_events.target_id to food_items, so the audit rows a test
+// writes against this id must be cleaned up separately too).
+func seedFoodCommitted(t *testing.T, db *gorm.DB, name, brand string) nutrition.FoodItem {
+	t.Helper()
+	item := food(name, brand)
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() {
+		db.Exec("DELETE FROM kora_admin_events WHERE target_id = ?", item.ID)
+		db.Exec("DELETE FROM food_items WHERE id = ?", item.ID)
+	})
+	return item
+}
+
+// loadUpdatedAt reads food_items.updated_at directly, bypassing
+// nutrition.FoodItem (which deliberately has no UpdatedAt field — see
+// foodSnapshot's doc comment).
+func loadUpdatedAt(t *testing.T, tx *gorm.DB, id uuid.UUID) time.Time {
+	t.Helper()
+	var ts time.Time
+	require.NoError(t, tx.Raw("SELECT updated_at FROM food_items WHERE id = ?", id).Scan(&ts).Error)
+	return ts
+}
+
+// loadDeletedAt reads food_items.deleted_at directly; nil means still live.
+func loadDeletedAt(t *testing.T, tx *gorm.DB, id uuid.UUID) *time.Time {
+	t.Helper()
+	var ts sql.NullTime
+	require.NoError(t, tx.Raw("SELECT deleted_at FROM food_items WHERE id = ?", id).Scan(&ts).Error)
+	if !ts.Valid {
+		return nil
+	}
+	return &ts.Time
+}
+
 // TestCreateFoodWritesRowAndAuditEvent is a basic sanity check, NOT the
 // atomicity proof — see its doc comment on
 // TestCreateFoodAuditFailureRollsBackMutation for why "both rows exist after
@@ -155,6 +199,67 @@ func TestCreateFoodAuditFailureRollsBackMutation(t *testing.T) {
 	assert.Equal(t, int64(0), eventCount, "the failed audit insert itself must not have persisted either")
 }
 
+// TestUpdateFoodAuditFailureRollsBackMutation is invariant 1's atomicity
+// proof for UpdateFood — the same shape as
+// TestCreateFoodAuditFailureRollsBackMutation. A blank/whitespace actor
+// email fails the audit INSERT's CHECK constraint inside the SAME
+// transaction as the food UPDATE. If the two writes were two independent
+// commits — e.g. the audit insert moved into its own savepoint with the
+// error swallowed — the food row would show the EDITED values here despite
+// UpdateFood returning an error. This test proves the negative: after a
+// forced audit failure, the food row must still hold its PRE-EDIT values.
+func TestUpdateFoodAuditFailureRollsBackMutation(t *testing.T) {
+	db := testDB(t)
+	tx := seedTx(t, db)
+	original := seedFoodTx(t, tx, "zzz-admin-upd-atomicity-"+uuid.NewString(), "")
+
+	repo := NewMutationRepository(tx, ai.NoCache{})
+	badActor := Actor{ID: "admin-1", Email: "   "} // whitespace-only -> CHECK fails
+
+	in := inputFrom(original)
+	in.Name = "zzz-admin-upd-atomicity-renamed-" + uuid.NewString()
+	in.KcalPer100g = original.KcalPer100g + 500
+
+	_, err := repo.UpdateFood(context.Background(), badActor, original.ID, in)
+	require.Error(t, err, "the audit insert must fail for a blank actor email")
+
+	var got struct {
+		Name        string
+		KcalPer100g float64 `gorm:"column:kcal_per_100g"`
+	}
+	require.NoError(t, tx.Raw("SELECT name, kcal_per_100g FROM food_items WHERE id = ?", original.ID).Scan(&got).Error)
+	assert.Equal(t, original.Name, got.Name,
+		"a rolled-back mutation must leave the food row's PRE-EDIT name — two independent commits would show the rename")
+	assert.Equal(t, original.KcalPer100g, got.KcalPer100g,
+		"a rolled-back mutation must leave the food row's PRE-EDIT kcal — two independent commits would show the edit")
+
+	var eventCount int64
+	require.NoError(t, tx.Model(&AdminEvent{}).Where("target_id = ? AND action = ?", original.ID, ActionFoodUpdated).Count(&eventCount).Error)
+	assert.Equal(t, int64(0), eventCount, "the failed audit insert itself must not have persisted either")
+}
+
+// TestSoftDeleteFoodAuditFailureRollsBackMutation is invariant 1's atomicity
+// proof for SoftDeleteFood, the same shape again: a forced audit failure
+// must leave deleted_at NULL, not just return an error.
+func TestSoftDeleteFoodAuditFailureRollsBackMutation(t *testing.T) {
+	db := testDB(t)
+	tx := seedTx(t, db)
+	target := seedFoodTx(t, tx, "zzz-admin-del-atomicity-"+uuid.NewString(), "")
+
+	repo := NewMutationRepository(tx, ai.NoCache{})
+	badActor := Actor{ID: "admin-1", Email: "   "}
+
+	_, err := repo.SoftDeleteFood(context.Background(), badActor, target.ID)
+	require.Error(t, err, "the audit insert must fail for a blank actor email")
+
+	assert.Nil(t, loadDeletedAt(t, tx, target.ID),
+		"a rolled-back soft delete must leave deleted_at NULL — two independent commits would show it retired")
+
+	var eventCount int64
+	require.NoError(t, tx.Model(&AdminEvent{}).Where("target_id = ? AND action = ?", target.ID, ActionFoodDeleted).Count(&eventCount).Error)
+	assert.Equal(t, int64(0), eventCount, "the failed audit insert itself must not have persisted either")
+}
+
 // TestUpdateFoodRenameClearsEmbeddingButMacrosOnlyEditPreservesIt is
 // invariant 2 and its twin, in one test so the "clears" half can't pass by
 // virtue of ALWAYS nulling the embedding regardless of what changed.
@@ -189,29 +294,358 @@ func TestUpdateFoodRenameClearsEmbeddingButMacrosOnlyEditPreservesIt(t *testing.
 	assert.False(t, hasEmbedding(t, tx, original.ID), "a rename must null the embedding in the same statement")
 }
 
-// TestUpdateFoodBumpsCacheGenerationOnMacrosChangeButNotOnNoOp is invariant 3
-// and its twin: a macros edit must bump, an edit that changes nothing about
-// the macros must not.
-func TestUpdateFoodBumpsCacheGenerationOnMacrosChangeButNotOnNoOp(t *testing.T) {
+// TestUpdateFoodClearsEmbeddingOnPunctuationOnlyRenameThatNormalizesIdentically
+// is invariant 2's minor fix (task-4 fix round 1): the embedding-clear
+// decision compares in.Name against the RAW before.Name, not two freshly
+// normalized forms. "Coca-Cola X" and "Coca Cola X" normalize identically
+// (Normalize maps punctuation to a space), so a normalized-form comparison
+// would miss this rename — but cmd/embed embeds the raw name, so the stored
+// vector IS stale here and must still be cleared.
+func TestUpdateFoodClearsEmbeddingOnPunctuationOnlyRenameThatNormalizesIdentically(t *testing.T) {
 	db := testDB(t)
 	tx := seedTx(t, db)
-	original := seedFoodTx(t, tx, "zzz-cachebump-"+uuid.NewString(), "")
+	original := seedFoodTx(t, tx, "Coca-Cola X "+uuid.NewString(), "")
+
+	vec := make([]float32, 768)
+	for i := range vec {
+		vec[i] = 0.01
+	}
+	require.NoError(t, nutrition.NewRepository(tx).SetEmbedding(context.Background(), original.ID, vec))
+	require.True(t, hasEmbedding(t, tx, original.ID), "fixture must start embedded or the NULL assertion below proves nothing")
+
+	renamedName := strings.ReplaceAll(original.Name, "-", " ")
+	require.NotEqual(t, original.Name, renamedName, "fixture's rename must actually change the raw name")
+	require.Equal(t, nutrition.Normalize(original.Name), nutrition.Normalize(renamedName),
+		"fixture's whole point: normalization must collapse the two names identically")
+
+	repo := NewMutationRepository(tx, ai.NoCache{})
+	actor := Actor{ID: "admin-1", Email: "ops@kora.test"}
+
+	in := inputFrom(original)
+	in.Name = renamedName
+	_, err := repo.UpdateFood(context.Background(), actor, original.ID, in)
+	require.NoError(t, err)
+	assert.False(t, hasEmbedding(t, tx, original.ID),
+		"a raw-name-only rename must still clear the stale embedding even though normalization is unchanged")
+}
+
+// TestUpdateFoodBumpsCacheGenerationOnAnyChangeButNotOnNoOp is invariant 3
+// (DELIBERATE DESIGN CHANGE, task-4 fix round 1): the cache generation must
+// bump on ANY actual change to the row — not just a macros edit, see the
+// rename subtest — and must NOT bump for a genuine no-op. Each subtest seeds
+// its own row so an earlier subtest's write can't leak into a later
+// subtest's "before" and change what counts as a no-op.
+func TestUpdateFoodBumpsCacheGenerationOnAnyChangeButNotOnNoOp(t *testing.T) {
+	db := testDB(t)
+	actor := Actor{ID: "admin-1", Email: "ops@kora.test"}
+
+	t.Run("no-op edit does not bump", func(t *testing.T) {
+		tx := seedTx(t, db)
+		original := seedFoodTx(t, tx, "zzz-cachebump-noop-"+uuid.NewString(), "")
+		cache := &fakeGeneration{}
+		repo := NewMutationRepository(tx, cache)
+
+		_, err := repo.UpdateFood(context.Background(), actor, original.ID, inputFrom(original))
+		require.NoError(t, err)
+		assert.Equal(t, 0, cache.Bumps(), "an edit that changes nothing must not bump the cache generation")
+	})
+
+	t.Run("rename-only edit bumps", func(t *testing.T) {
+		tx := seedTx(t, db)
+		original := seedFoodTx(t, tx, "zzz-cachebump-rename-"+uuid.NewString(), "")
+		cache := &fakeGeneration{}
+		repo := NewMutationRepository(tx, cache)
+
+		in := inputFrom(original)
+		in.Name = "zzz-cachebump-renamed-" + uuid.NewString()
+		_, err := repo.UpdateFood(context.Background(), actor, original.ID, in)
+		require.NoError(t, err)
+		assert.Equal(t, 1, cache.Bumps(),
+			"a rename must bump the cache generation even though no macro changed — a cached ai.Resolution embeds the whole FoodItem, name included")
+	})
+
+	t.Run("macros-only edit bumps", func(t *testing.T) {
+		tx := seedTx(t, db)
+		original := seedFoodTx(t, tx, "zzz-cachebump-macros-"+uuid.NewString(), "")
+		cache := &fakeGeneration{}
+		repo := NewMutationRepository(tx, cache)
+
+		in := inputFrom(original)
+		in.ProteinPer100g = original.ProteinPer100g + 5
+		_, err := repo.UpdateFood(context.Background(), actor, original.ID, in)
+		require.NoError(t, err)
+		assert.Equal(t, 1, cache.Bumps(), "a macros edit must bump the cache generation exactly once")
+	})
+}
+
+// TestSoftDeleteFoodAlwaysBumpsCacheGeneration is invariant 3 for
+// SoftDeleteFood (task-4 fix round 1): unlike UpdateFood there is no no-op
+// case here — the deleted_at IS NULL guard on the write means a successful
+// soft delete is always a real state change, so the bump is unconditional.
+// Without it, an operator retiring a wrong food would keep having it served
+// from cache for up to the resolve cache's 24h TTL, with no way to tell
+// whether the retirement worked.
+func TestSoftDeleteFoodAlwaysBumpsCacheGeneration(t *testing.T) {
+	db := testDB(t)
+	tx := seedTx(t, db)
+	target := seedFoodTx(t, tx, "zzz-cachebump-delete-"+uuid.NewString(), "")
 
 	cache := &fakeGeneration{}
 	repo := NewMutationRepository(tx, cache)
 	actor := Actor{ID: "admin-1", Email: "ops@kora.test"}
 
-	// No-op edit: every field identical to what's already stored.
-	_, err := repo.UpdateFood(context.Background(), actor, original.ID, inputFrom(original))
+	_, err := repo.SoftDeleteFood(context.Background(), actor, target.ID)
 	require.NoError(t, err)
-	assert.Equal(t, 0, cache.Bumps(), "an edit that changes nothing about the macros must not bump the cache generation")
+	assert.Equal(t, 1, cache.Bumps(), "retiring a food must bump the cache generation")
+}
 
-	// Macros edit.
-	macrosChanged := inputFrom(original)
-	macrosChanged.ProteinPer100g = original.ProteinPer100g + 5
-	_, err = repo.UpdateFood(context.Background(), actor, original.ID, macrosChanged)
+// TestUpdateFoodAdvancesUpdatedAtForTheEditedRowOnly is invariant 2 (the
+// updated_at column, task-4 fix round 1): an edit must advance updated_at
+// for the row it actually touched, and must NOT touch an unrelated
+// sibling's updated_at. Migration 000023 backfilled updated_at = created_at
+// specifically so this column tells the truth from row one; a missing
+// assertion here would let a future edit to mutations.go silently drop the
+// "updated_at": now key from the map and leave every edited row reading
+// "never edited" forever.
+func TestUpdateFoodAdvancesUpdatedAtForTheEditedRowOnly(t *testing.T) {
+	db := testDB(t)
+	tx := seedTx(t, db)
+	edited := seedFoodTx(t, tx, "zzz-updatedat-edit-"+uuid.NewString(), "")
+	sibling := seedFoodTx(t, tx, "zzz-updatedat-sibling-"+uuid.NewString(), "")
+
+	beforeEdited := loadUpdatedAt(t, tx, edited.ID)
+	beforeSibling := loadUpdatedAt(t, tx, sibling.ID)
+
+	repo := NewMutationRepository(tx, ai.NoCache{})
+	actor := Actor{ID: "admin-1", Email: "ops@kora.test"}
+
+	time.Sleep(5 * time.Millisecond) // ensure a wall-clock-observable gap
+	in := inputFrom(edited)
+	in.KcalPer100g = edited.KcalPer100g + 1
+	_, err := repo.UpdateFood(context.Background(), actor, edited.ID, in)
 	require.NoError(t, err)
-	assert.Equal(t, 1, cache.Bumps(), "a macros edit must bump the cache generation exactly once")
+
+	afterEdited := loadUpdatedAt(t, tx, edited.ID)
+	afterSibling := loadUpdatedAt(t, tx, sibling.ID)
+
+	assert.True(t, afterEdited.After(beforeEdited), "updated_at must advance for the row that was actually edited")
+	assert.True(t, afterSibling.Equal(beforeSibling), "an untouched sibling row's updated_at must not move")
+}
+
+// TestSoftDeleteFoodAdvancesUpdatedAt is TestUpdateFoodAdvancesUpdatedAtForTheEditedRowOnly's
+// twin for SoftDeleteFood.
+func TestSoftDeleteFoodAdvancesUpdatedAt(t *testing.T) {
+	db := testDB(t)
+	tx := seedTx(t, db)
+	target := seedFoodTx(t, tx, "zzz-updatedat-delete-"+uuid.NewString(), "")
+
+	before := loadUpdatedAt(t, tx, target.ID)
+
+	repo := NewMutationRepository(tx, ai.NoCache{})
+	actor := Actor{ID: "admin-1", Email: "ops@kora.test"}
+
+	time.Sleep(5 * time.Millisecond)
+	_, err := repo.SoftDeleteFood(context.Background(), actor, target.ID)
+	require.NoError(t, err)
+
+	after := loadUpdatedAt(t, tx, target.ID)
+	assert.True(t, after.After(before), "updated_at must advance when a food is soft-deleted")
+}
+
+// TestLoadLiveFoodSnapshotForUpdateRejectsRetiredButLoadsLiveFood is
+// invariant 5's guard on the before-load (mutations.go's use of
+// loadLiveFoodSnapshotForUpdate in both UpdateFood and SoftDeleteFood): an
+// already-retired food must not load as a "before" snapshot, and a live one
+// must still load fine. Tested directly against the loader — not through
+// the full UpdateFood/SoftDeleteFood call — because the UPDATE-time guard
+// (applyLiveOnlyUpdate, tested separately below) would independently reject
+// an already-retired food too, so a black-box "editing a retired food
+// fails" test alone cannot tell which of the two guards caught it.
+func TestLoadLiveFoodSnapshotForUpdateRejectsRetiredButLoadsLiveFood(t *testing.T) {
+	db := testDB(t)
+	tx := seedTx(t, db)
+	live := seedFoodTx(t, tx, "zzz-liveload-live-"+uuid.NewString(), "")
+	retired := seedFoodTx(t, tx, "zzz-liveload-retired-"+uuid.NewString(), "")
+	require.NoError(t, tx.Exec("UPDATE food_items SET deleted_at = now() WHERE id = ?", retired.ID).Error)
+
+	_, err := loadLiveFoodSnapshotForUpdate(tx, retired.ID)
+	assert.ErrorIs(t, err, gorm.ErrRecordNotFound, "an already-retired food must not be loadable as a 'before' snapshot")
+
+	got, err := loadLiveFoodSnapshotForUpdate(tx, live.ID)
+	require.NoError(t, err, "a live food must still load fine")
+	assert.Equal(t, live.ID, got.ID)
+}
+
+// TestApplyLiveOnlyUpdateRejectsRetiredButUpdatesLiveFood is invariant 5's
+// guard on the write itself (mutations.go's use of applyLiveOnlyUpdate in
+// both UpdateFood's edit and SoftDeleteFood's retire): an already-retired
+// row must not be touched — this is what stops an edit from landing on a
+// retired food, and stops a second soft delete from overwriting the first
+// one's deleted_at — and a live row must still be updatable. Tested
+// directly against the guarded write, independent of the before-load guard
+// above.
+func TestApplyLiveOnlyUpdateRejectsRetiredButUpdatesLiveFood(t *testing.T) {
+	db := testDB(t)
+	tx := seedTx(t, db)
+	live := seedFoodTx(t, tx, "zzz-applyupdate-live-"+uuid.NewString(), "")
+	retired := seedFoodTx(t, tx, "zzz-applyupdate-retired-"+uuid.NewString(), "")
+	require.NoError(t, tx.Exec("UPDATE food_items SET deleted_at = now() WHERE id = ?", retired.ID).Error)
+
+	rows, err := applyLiveOnlyUpdate(tx, retired.ID, map[string]any{"kcal_per_100g": 999.0})
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), rows, "an already-retired row must not be touched by the guarded update")
+
+	var retiredKcal float64
+	require.NoError(t, tx.Raw("SELECT kcal_per_100g FROM food_items WHERE id = ?", retired.ID).Scan(&retiredKcal).Error)
+	assert.NotEqual(t, 999.0, retiredKcal, "the guarded update must not have applied its values to the retired row")
+
+	rows, err = applyLiveOnlyUpdate(tx, live.ID, map[string]any{"kcal_per_100g": 999.0})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), rows, "a live row must still be updatable")
+
+	var liveKcal float64
+	require.NoError(t, tx.Raw("SELECT kcal_per_100g FROM food_items WHERE id = ?", live.ID).Scan(&liveKcal).Error)
+	assert.Equal(t, 999.0, liveKcal)
+}
+
+// TestUpdateFoodRejectsAlreadyRetiredFoodAndLeavesItUnchanged is the
+// end-to-end (black-box) shape of invariant 5 for UpdateFood: editing an
+// already-retired food must fail, and must leave it unchanged.
+func TestUpdateFoodRejectsAlreadyRetiredFoodAndLeavesItUnchanged(t *testing.T) {
+	db := testDB(t)
+	tx := seedTx(t, db)
+	target := seedFoodTx(t, tx, "zzz-editretired-"+uuid.NewString(), "")
+	require.NoError(t, tx.Exec("UPDATE food_items SET deleted_at = now() WHERE id = ?", target.ID).Error)
+
+	repo := NewMutationRepository(tx, ai.NoCache{})
+	actor := Actor{ID: "admin-1", Email: "ops@kora.test"}
+
+	in := inputFrom(target)
+	in.KcalPer100g = 999
+	_, err := repo.UpdateFood(context.Background(), actor, target.ID, in)
+	require.Error(t, err, "editing an already-retired food must fail")
+	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
+
+	var kcal float64
+	require.NoError(t, tx.Raw("SELECT kcal_per_100g FROM food_items WHERE id = ?", target.ID).Scan(&kcal).Error)
+	assert.NotEqual(t, 999.0, kcal, "a rejected edit must not have applied")
+}
+
+// TestSoftDeleteFoodSecondAttemptFailsAndPreservesOriginalDeletedAt is the
+// end-to-end (black-box) shape of invariant 5 for SoftDeleteFood: a second
+// soft delete on an already-retired food must fail, and — more importantly
+// than the failure itself — must NOT overwrite deleted_at with a later
+// timestamp, or the audit trail's answer to "when was this actually
+// retired" would silently become wrong.
+func TestSoftDeleteFoodSecondAttemptFailsAndPreservesOriginalDeletedAt(t *testing.T) {
+	db := testDB(t)
+	tx := seedTx(t, db)
+	target := seedFoodTx(t, tx, "zzz-doubledelete-"+uuid.NewString(), "")
+	repo := NewMutationRepository(tx, ai.NoCache{})
+	actor := Actor{ID: "admin-1", Email: "ops@kora.test"}
+
+	_, err := repo.SoftDeleteFood(context.Background(), actor, target.ID)
+	require.NoError(t, err)
+	firstDeletedAt := loadDeletedAt(t, tx, target.ID)
+	require.NotNil(t, firstDeletedAt, "the first soft delete must have set deleted_at")
+
+	time.Sleep(5 * time.Millisecond)
+	_, err = repo.SoftDeleteFood(context.Background(), actor, target.ID)
+	require.Error(t, err, "soft-deleting an already-retired food must fail")
+	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
+
+	secondDeletedAt := loadDeletedAt(t, tx, target.ID)
+	require.NotNil(t, secondDeletedAt)
+	assert.True(t, secondDeletedAt.Equal(*firstDeletedAt),
+		"a second soft delete attempt must not overwrite the original deleted_at")
+}
+
+// TestUpdateFoodConcurrentEditsSerializeAndChainBeforeAfter is invariant 4's
+// atomicity-under-contention proof, scoped to what the row lock actually
+// guarantees: the ORDER the two before-loads observe the row in, not
+// field-level merging of the two edits (UpdateFood is a full-row replace —
+// B's own FoodInput, loaded before A's edit landed, still carries B's stale
+// copy of every field B didn't intend to touch, so B's write legitimately
+// reverts A's kcal change to B's stale value; that is a separate, known
+// last-writer-wins property of the form-submit pattern, not what this test
+// or the row lock is about).
+//
+// Without the lock on loadLiveFoodSnapshotForUpdate, two admins editing the
+// same food can both read the SAME pre-A "before" while A's write hasn't
+// landed yet, so B's audit `before` would show the row as it was before
+// EITHER edit — never becoming A's `after`. With the lock, B's before-load
+// blocks until A commits, then re-reads A's committed values, so B's audit
+// `before` chains from A's `after`. That chaining is the one thing this test
+// asserts.
+//
+// Goroutine A bypasses the full UpdateFood call and drives
+// loadLiveFoodSnapshotForUpdate/applyLiveOnlyUpdate directly so the test can
+// hold the lock open on a channel for a controlled window; goroutine B goes
+// through the real, public UpdateFood, exactly as a second admin's request
+// would.
+func TestUpdateFoodConcurrentEditsSerializeAndChainBeforeAfter(t *testing.T) {
+	db := testDB(t)
+	original := seedFoodCommitted(t, db, "zzz-lock-"+uuid.NewString(), "")
+	repo := NewMutationRepository(db, ai.NoCache{})
+	actor := Actor{ID: "admin-1", Email: "ops@kora.test"}
+
+	aHasLock := make(chan struct{})
+	aMayCommit := make(chan struct{})
+	aDone := make(chan error, 1)
+
+	go func() {
+		aDone <- db.Transaction(func(tx *gorm.DB) error {
+			if _, err := loadLiveFoodSnapshotForUpdate(tx, original.ID); err != nil {
+				return err
+			}
+			close(aHasLock)
+			<-aMayCommit
+			_, err := applyLiveOnlyUpdate(tx, original.ID, map[string]any{
+				"kcal_per_100g": 555.0,
+				"updated_at":    time.Now().UTC(),
+			})
+			return err
+		})
+	}()
+
+	<-aHasLock // A now holds the row lock and has not committed.
+
+	bStarted := make(chan struct{})
+	bUpdated := make(chan nutrition.FoodItem, 1)
+	bErr := make(chan error, 1)
+	go func() {
+		close(bStarted)
+		in := inputFrom(original)
+		in.ProteinPer100g = original.ProteinPer100g + 9
+		updated, err := repo.UpdateFood(context.Background(), actor, original.ID, in)
+		bUpdated <- updated
+		bErr <- err
+	}()
+	<-bStarted
+	// Best-effort: give B a moment to actually reach and block on the row
+	// lock before A releases it. The assertions below hold regardless of
+	// exact scheduling, because they check the OUTCOME (what B's
+	// before/after actually contain), not the interleaving itself — if B
+	// somehow raced ahead of A here, B's kcal assertion below would simply
+	// fail, which is exactly the regression this test exists to catch.
+	time.Sleep(50 * time.Millisecond)
+
+	close(aMayCommit)
+	require.NoError(t, <-aDone, "A's update must commit")
+	require.NoError(t, <-bErr, "B's update must succeed once A releases the lock")
+	updated := <-bUpdated
+
+	// B's own edit did land (proves B's UPDATE ran after A released the
+	// lock, not that it was silently dropped).
+	assert.Equal(t, original.ProteinPer100g+9, updated.ProteinPer100g, "B's own edit must have applied")
+
+	var bEvent AdminEvent
+	require.NoError(t, db.Where("target_id = ? AND action = ?", original.ID, ActionFoodUpdated).
+		Order("created_at DESC").First(&bEvent).Error)
+	var bBefore map[string]any
+	require.NoError(t, json.Unmarshal(bEvent.Before, &bBefore))
+	assert.Equal(t, 555.0, bBefore["kcal_per_100g"],
+		"B's audit `before` must chain from A's `after` — proving the two edits serialised rather than both reading the same pre-A snapshot")
 }
 
 // TestSoftDeleteFoodPreservesCascadingRowsAndNeverIssuesHardDelete is
