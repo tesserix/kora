@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -116,6 +117,15 @@ func (NoCache) BumpGeneration(ctx context.Context) error {
 // misconfiguration, not a substitute for configuring the policy correctly.
 const resolveCacheGenerationKey = "ai:resolve-cache:generation"
 
+// generationGuardWarnInterval rate-limits the high-water-mark guard's warning
+// (see readGeneration and generationGuardWarnGate): at most one log line per
+// interval for however long the guard stays tripped, rather than one per
+// resolve request. The guard trips only on an eviction, a flush, or a stale
+// replica read — all rare and all operator-actionable — but it sits on the
+// hot resolve path, so even a rare-in-principle trip must not turn into a
+// per-request log storm once it starts happening.
+const generationGuardWarnInterval = time.Minute
+
 // RedisCache is a Cache backed by Redis, storing resolutions as JSON with a
 // fixed TTL. Any Redis or (de)serialization failure is treated as a miss on
 // Get, or silently dropped on Set — a cache problem must never break a
@@ -132,6 +142,14 @@ type RedisCache struct {
 	// to close a hole that a bare read of resolveCacheGenerationKey cannot
 	// close on its own — see readGeneration.
 	generationHWM atomic.Int64
+
+	// generationGuardWarnGate rate-limits the guard's log line (see
+	// readGeneration and generationGuardWarnInterval): the unix-nanosecond
+	// timestamp of the next moment a warning is allowed to fire. Read and
+	// advanced with a compare-and-swap, the same lock-free pattern as
+	// generationHWM, so the rare-but-hot trip path never serializes
+	// concurrent callers behind a lock either.
+	generationGuardWarnGate atomic.Int64
 }
 
 var (
@@ -192,6 +210,7 @@ func (c *RedisCache) readGeneration(ctx context.Context) (int64, error) {
 	for {
 		hwm := c.generationHWM.Load()
 		if n < hwm {
+			c.warnGenerationGuardTripped(ctx, n, hwm)
 			return 0, fmt.Errorf("ai: observed generation %d below high-water mark %d (counter key evicted or stale replica read)", n, hwm)
 		}
 		if n == hwm {
@@ -203,6 +222,39 @@ func (c *RedisCache) readGeneration(ctx context.Context) (int64, error) {
 		// Lost the race to another goroutine observing a newer generation
 		// concurrently; retry against the updated high-water mark.
 	}
+}
+
+// warnGenerationGuardTripped emits a rate-limited warning when the
+// high-water-mark guard rejects an observed generation. This is the ONLY
+// observable signal an operator gets for the guard tripping: Get and Set
+// both swallow the resulting error by contract (a cache problem must never
+// break a resolve), and Delete's error only surfaces through the one caller
+// that logs it (foodlog's correction path), which most requests never hit.
+// Without this, an eviction, a flush, or a stale replica read degrades every
+// Get to an unconditional miss and every Set to a no-op — silently, for the
+// rest of the process's life or until enough generation bumps climb back
+// past the stale high-water mark — and the only symptom an operator sees is
+// a step-change in resolve latency and LLM spend, with no log line pointing
+// at the cause.
+//
+// It fires at most once per generationGuardWarnInterval, gated by
+// generationGuardWarnGate via compare-and-swap, so it cannot turn into a
+// per-request log storm while the guard stays tripped — this check sits on
+// the hot resolve path, executed by every concurrent caller of Get/Set/
+// Delete. Losing the CAS race just means another goroutine already claimed
+// this window; the caller still gets the correct error back regardless of
+// whether it won the race to log.
+func (c *RedisCache) warnGenerationGuardTripped(ctx context.Context, observed, hwm int64) {
+	now := time.Now().UnixNano()
+	next := c.generationGuardWarnGate.Load()
+	if now < next {
+		return
+	}
+	if !c.generationGuardWarnGate.CompareAndSwap(next, now+generationGuardWarnInterval.Nanoseconds()) {
+		return
+	}
+	slog.WarnContext(ctx, "ai: resolve cache generation high-water-mark guard tripped; cache degraded to unconditional miss until it recovers",
+		"observed_generation", observed, "high_water_mark", hwm)
 }
 
 // generationScopedKey combines a logical cache key (see CacheKey) with the
@@ -282,6 +334,14 @@ func (c *RedisCache) Delete(ctx context.Context, key string) error {
 
 // CurrentGeneration reports the generation Get/Set/Delete are currently
 // scoping their physical keys by, or the error that made a fresh read fail.
+//
+// SIDE EFFECT: this shares readGeneration with Get/Set/Delete, so a call here
+// can advance generationHWM exactly like a real cache read would. That is
+// correct and intended today — there is only one high-water mark, not one
+// per caller — but it means any future caller of this method (e.g. a metrics
+// exporter polling it for observability) participates in the guard too, and
+// could move the mark. If that ever needs to change, give the guard a
+// read-only variant instead of quietly special-casing this method.
 func (c *RedisCache) CurrentGeneration(ctx context.Context) (int64, error) {
 	return c.readGeneration(ctx)
 }

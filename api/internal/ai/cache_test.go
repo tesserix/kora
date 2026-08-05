@@ -1,8 +1,11 @@
 package ai
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -514,4 +517,153 @@ func TestRedisCache_ConcurrentGenerationReads_AreRaceFree(t *testing.T) {
 	got, ok := cache.Get(ctx, key)
 	require.True(t, ok, "concurrent reads must not corrupt the high-water mark for a still-valid generation")
 	require.Equal(t, "concurrent", got.Provenance)
+}
+
+// --- generation counter eviction observability (rate-limited warning) ---
+//
+// The high-water-mark guard closes the eviction hole silently: Get and Set
+// both swallow the resulting error by contract, so a tripped guard has no
+// symptom other than a step-change in resolve latency and LLM spend, with
+// the bill as the only diagnostic. warnGenerationGuardTripped exists to give
+// an operator a log line the moment that happens.
+
+// captureSlogWarnings temporarily redirects the process-wide slog default to
+// a text handler writing into the returned buffer, restoring the previous
+// default via t.Cleanup. No test in this package runs in parallel, so
+// mutating the global default for the duration of one test is safe.
+func captureSlogWarnings(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return &buf
+}
+
+// TestRedisCache_GenerationGuardTripped_LogsWarning proves the guard's trip
+// is observable: it reproduces the eviction hole (Set, Bump, evict the
+// counter key) and asserts a warning is logged when the resulting Get trips
+// the high-water-mark guard.
+func TestRedisCache_GenerationGuardTripped_LogsWarning(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+
+	cache := NewRedisCache(client, time.Minute)
+	ctx := context.Background()
+	key := CacheKey("phrase", uuid.New(), "grilled chicken")
+
+	cache.Set(ctx, key, Resolution{Provenance: "pre-bump"})
+	require.NoError(t, cache.BumpGeneration(ctx))
+
+	// Sanity: the bump alone already hides the entry, before any eviction.
+	// This read is also what makes the guard observe generation 1 in the
+	// first place — BumpGeneration itself never calls readGeneration, so
+	// without this the high-water mark would still be 0 and the eviction
+	// below would not be a regression at all.
+	_, ok := cache.Get(ctx, key)
+	require.False(t, ok, "sanity: bump must hide the pre-bump entry on its own")
+
+	buf := captureSlogWarnings(t)
+
+	// Simulate a maxmemory-policy eviction of the (persistent, no-TTL)
+	// generation counter after the legitimate bump above.
+	require.True(t, mr.Del(resolveCacheGenerationKey), "sanity: counter key must have existed to evict")
+
+	_, ok = cache.Get(ctx, key)
+	require.False(t, ok, "sanity: the guard must still trip and hide the pre-bump entry")
+
+	require.Contains(t, buf.String(), "high-water-mark guard tripped",
+		"the guard tripping must be logged — Get/Set swallow the error, so this is the only observable signal")
+}
+
+// TestRedisCache_GenerationGuardNotTripped_NoWarning is the twin of the test
+// above: ordinary cache traffic — misses, hits, and legitimate generation
+// bumps — must never log anything. Without this test, a change that logged
+// on every ordinary read (or every miss, or every bump) would still pass the
+// trip test alone.
+func TestRedisCache_GenerationGuardNotTripped_NoWarning(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+
+	cache := NewRedisCache(client, time.Minute)
+	ctx := context.Background()
+	key := CacheKey("phrase", uuid.New(), "grilled chicken")
+
+	buf := captureSlogWarnings(t)
+
+	// An ordinary miss before anything is cached.
+	_, ok := cache.Get(ctx, key)
+	require.False(t, ok)
+
+	// An ordinary write and hit.
+	cache.Set(ctx, key, Resolution{Provenance: "ordinary"})
+	got, ok := cache.Get(ctx, key)
+	require.True(t, ok)
+	require.Equal(t, "ordinary", got.Provenance)
+
+	// A legitimate bump followed by a read/write under the new, higher
+	// generation — this must NOT look like a regression to the guard.
+	require.NoError(t, cache.BumpGeneration(ctx))
+	cache.Set(ctx, key, Resolution{Provenance: "post-bump"})
+	got, ok = cache.Get(ctx, key)
+	require.True(t, ok)
+	require.Equal(t, "post-bump", got.Provenance)
+
+	_, err = cache.CurrentGeneration(ctx)
+	require.NoError(t, err)
+
+	require.Empty(t, buf.String(), "ordinary cache operations must never log the high-water-mark guard warning")
+}
+
+// TestRedisCache_GenerationGuardTripped_WarningIsRateLimitedUnderConcurrency
+// exercises the rate limit's concurrency-safety requirement directly: many
+// goroutines tripping the guard at once (the hot resolve path's real shape)
+// must still produce only a bounded, small number of log lines — never one
+// per caller — and the CAS-based gate must not race under `go test -race`.
+func TestRedisCache_GenerationGuardTripped_WarningIsRateLimitedUnderConcurrency(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+
+	cache := NewRedisCache(client, time.Minute)
+	ctx := context.Background()
+	key := CacheKey("phrase", uuid.New(), "grilled chicken")
+
+	cache.Set(ctx, key, Resolution{Provenance: "pre-bump"})
+	require.NoError(t, cache.BumpGeneration(ctx))
+
+	// See TestRedisCache_GenerationGuardTripped_LogsWarning: this read is
+	// what makes the guard observe generation 1 before the eviction below,
+	// since BumpGeneration alone never advances the high-water mark.
+	_, ok := cache.Get(ctx, key)
+	require.False(t, ok, "sanity: bump must hide the pre-bump entry on its own")
+
+	require.True(t, mr.Del(resolveCacheGenerationKey))
+
+	buf := captureSlogWarnings(t)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = cache.Get(ctx, key)
+		}()
+	}
+	wg.Wait()
+
+	count := strings.Count(buf.String(), "high-water-mark guard tripped")
+	require.Equal(t, 1, count,
+		"50 concurrent trips within one rate-limit window must produce exactly one warning, not 50")
 }
