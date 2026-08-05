@@ -41,14 +41,31 @@ type Repository struct {
 	db *gorm.DB
 }
 
+// Compile-time assertion that Repository satisfies FoodLister. Without this,
+// a signature drift between the two compiles clean here and only surfaces
+// when the next task wires Repository into NewHandler.
+var _ FoodLister = Repository{}
+
 func NewRepository(db *gorm.DB) Repository { return Repository{db: db} }
 
 // ListFoods returns one page of the food index plus the total number of rows
 // matching the filter. Total counts MATCHES, not the page, so the caller can
 // render "showing 50 of 7,898".
 func (r Repository) ListFoods(ctx context.Context, p ListParams) (ListResult, error) {
-	if p.Limit <= 0 || p.Limit > MaxLimit {
+	switch {
+	case p.Limit <= 0:
 		p.Limit = DefaultLimit
+	case p.Limit > MaxLimit:
+		// Clamp to MaxLimit, NOT DefaultLimit. The portal's pager computes
+		// offset = page * requestedLimit using the limit IT asked for. If an
+		// over-max request silently fell back to a smaller DefaultLimit, the
+		// next page's offset would jump past rows the previous page never
+		// returned — silently skipping them, even though Total truthfully
+		// reports they exist. Nothing in the response echoes the effective
+		// limit, so the client has no way to detect a fallback to a
+		// different value than what it requested; MaxLimit at least honours
+		// the client's intent to get "a lot," bounded to what we allow.
+		p.Limit = MaxLimit
 	}
 	if p.Offset < 0 {
 		p.Offset = 0

@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 
@@ -107,14 +108,55 @@ func TestListFoodsPagesWithStableOrderAndReportsTotal(t *testing.T) {
 
 func TestListFoodsWithNoQueryReturnsEverythingItCanSee(t *testing.T) {
 	db := testDB(t)
-	tx := seedTx(t, db, food("zzz-all-one", ""), food("zzz-all-two", ""))
+	tx := seedTx(t, db, food("zzz-all-one", ""), food("zzz-all-two", ""), food("zzz-all-three", ""))
 	repo := NewRepository(tx)
 
-	// Baseline must be discriminating: inside this transaction the unfiltered
-	// total has to exceed the two rows we seeded, or "no filter" and "filter
-	// matched everything" would be indistinguishable.
-	got, err := repo.ListFoods(context.Background(), ListParams{Limit: 5})
+	// This must hold whether the table under it is empty (a freshly migrated
+	// CI database) or holds thousands of ambient rows (this shared local
+	// database, or production): at least the seeded rows are visible, and the
+	// page itself — not just Total — actually contains rows.
+	got, err := repo.ListFoods(context.Background(), ListParams{Limit: MaxLimit})
 	require.NoError(t, err)
-	require.Greater(t, got.Total, int64(2), "shared table must hold more than the seeded rows for this to discriminate")
-	assert.LessOrEqual(t, len(got.Items), 5, "limit must bound the page")
+	require.GreaterOrEqual(t, got.Total, int64(3), "at least the three seeded rows must be visible")
+	assert.Len(t, got.Items, int(min(got.Total, int64(MaxLimit))),
+		"the page must actually be populated, not just report a correct Total")
+}
+
+// TestListFoodsClampsLimitByCase pins the three-way limit branch: unset falls
+// back to DefaultLimit, an in-range limit is honoured exactly, and — the case
+// the review found unpinned — an over-max limit clamps to MaxLimit, NOT
+// DefaultLimit. 60 seeded rows sit strictly between DefaultLimit (50) and
+// MaxLimit (200), so a page of 50 vs a page of 60 is what tells "clamped to
+// max" and "silently fell back to default" apart.
+func TestListFoodsClampsLimitByCase(t *testing.T) {
+	db := testDB(t)
+	const seeded = 60
+	rows := make([]nutrition.FoodItem, seeded)
+	for i := range rows {
+		rows[i] = food(fmt.Sprintf("zzz-clamp-%02d", i), "")
+	}
+	tx := seedTx(t, db, rows...)
+	repo := NewRepository(tx)
+
+	t.Run("unset limit falls back to DefaultLimit", func(t *testing.T) {
+		got, err := repo.ListFoods(context.Background(), ListParams{Query: "zzz-clamp-", Limit: 0})
+		require.NoError(t, err)
+		assert.Len(t, got.Items, DefaultLimit)
+	})
+
+	t.Run("over-max limit clamps to MaxLimit, not DefaultLimit", func(t *testing.T) {
+		got, err := repo.ListFoods(context.Background(), ListParams{Query: "zzz-clamp-", Limit: MaxLimit + 800})
+		require.NoError(t, err)
+		// All 60 seeded rows fit under MaxLimit (200). A fallback to
+		// DefaultLimit (50) instead of MaxLimit would return 50 here, not
+		// 60 — this is the discriminating assertion the review flagged as
+		// missing.
+		assert.Len(t, got.Items, seeded)
+	})
+
+	t.Run("in-range limit is honoured exactly", func(t *testing.T) {
+		got, err := repo.ListFoods(context.Background(), ListParams{Query: "zzz-clamp-", Limit: 10})
+		require.NoError(t, err)
+		assert.Len(t, got.Items, 10)
+	})
 }

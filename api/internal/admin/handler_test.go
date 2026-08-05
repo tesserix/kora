@@ -48,6 +48,11 @@ func TestListFoodsHandlerPassesQueryAndPagingThrough(t *testing.T) {
 	assert.Equal(t, int64(1), body.Data.Total)
 	require.Len(t, body.Data.Items, 1)
 	assert.Equal(t, "oats", body.Data.Items[0].Name)
+
+	// Unmarshalling into ListResult round-trips the "total" JSON tag
+	// invisibly even if the tag were renamed — the portal reads data.total
+	// directly off the wire, so pin the literal key here.
+	assert.Contains(t, w.Body.String(), `"total":1`)
 }
 
 // The twin for the test above: absent params must NOT silently become the
@@ -93,8 +98,14 @@ func TestListFoodsHandlerReportsRepositoryFailureAs500(t *testing.T) {
 }
 
 // The twin: an EMPTY index is a legitimate 200 with an empty list, not a 500.
+// The fixture uses a nil slice (not an already-non-nil empty one) because
+// GORM isn't the only thing that can produce a ListResult: a future
+// FoodLister — a cache decorator, a stub, a hand-built ListResult{} — can
+// leave Items nil, and Go's encoding/json serialises a nil slice as `null`,
+// which would crash the portal page that maps over it. This is what
+// actually exercises the handler's nil-to-[] guard.
 func TestListFoodsHandlerReturns200ForAnEmptyIndex(t *testing.T) {
-	l := &fakeLister{result: ListResult{Items: []nutrition.FoodItem{}, Total: 0}}
+	l := &fakeLister{result: ListResult{Items: nil, Total: 0}}
 	w := httptest.NewRecorder()
 	handlerRouter(l).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/admin/foods", nil))
 
