@@ -41,6 +41,7 @@ func (r Repository) Search(ctx context.Context, query string, limit int) ([]Food
 	pattern := "%" + query + "%"
 	var items []FoodItem
 	err := r.db.WithContext(ctx).
+		Where("deleted_at IS NULL").
 		Where("name ILIKE ? OR brand ILIKE ?", pattern, pattern).
 		Order("name ASC").
 		Limit(limit).
@@ -53,7 +54,7 @@ func (r Repository) Search(ctx context.Context, query string, limit int) ([]Food
 
 func (r Repository) GetByID(ctx context.Context, id uuid.UUID) (FoodItem, error) {
 	var item FoodItem
-	if err := r.db.WithContext(ctx).First(&item, "id = ?", id).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("deleted_at IS NULL").First(&item, "id = ?", id).Error; err != nil {
 		return FoodItem{}, fmt.Errorf("nutrition: get by id: %w", err)
 	}
 	return item, nil
@@ -61,7 +62,7 @@ func (r Repository) GetByID(ctx context.Context, id uuid.UUID) (FoodItem, error)
 
 func (r Repository) Count(ctx context.Context) (int64, error) {
 	var n int64
-	if err := r.db.WithContext(ctx).Model(&FoodItem{}).Count(&n).Error; err != nil {
+	if err := r.db.WithContext(ctx).Model(&FoodItem{}).Where("deleted_at IS NULL").Count(&n).Error; err != nil {
 		return 0, fmt.Errorf("nutrition: count: %w", err)
 	}
 	return n, nil
@@ -69,6 +70,13 @@ func (r Repository) Count(ctx context.Context) (int64, error) {
 
 // Insert adds items that are not already present (matched by barcode when
 // present, falling back to name+brand for barcodeless items).
+//
+// DELIBERATE ASYMMETRY: unlike every read path in this package, the two dedup
+// counts below (barcode, then name+brand) deliberately do NOT filter out
+// soft-deleted rows. A food an admin retires stays counted here on purpose —
+// re-ingesting/re-seeding a name that was deliberately retired must remain a
+// no-op, not a back-door resurrection of a row someone chose to hide. Do not
+// add a `deleted_at IS NULL` predicate to these two counts.
 func (r Repository) Insert(ctx context.Context, items []FoodItem) (int, error) {
 	inserted := 0
 	for _, item := range items {
@@ -147,7 +155,7 @@ func (r Repository) Resolve(ctx context.Context, userID uuid.UUID, phrase string
 		if err := r.db.WithContext(ctx).
 			Raw(`SELECT fi.* FROM food_items fi
 			     JOIN food_aliases fa ON fa.food_item_id = fi.id
-			     WHERE fa.user_id = ? AND lower(fa.alias) = ?
+			     WHERE fa.user_id = ? AND lower(fa.alias) = ? AND fi.deleted_at IS NULL
 			     LIMIT ?`, userID, aliasKey, limit).
 			Scan(&personalItems).Error; err != nil {
 			return nil, fmt.Errorf("nutrition: resolve personal alias: %w", err)
@@ -166,7 +174,7 @@ func (r Repository) Resolve(ctx context.Context, userID uuid.UUID, phrase string
 	if err := r.db.WithContext(ctx).
 		Raw(`SELECT fi.* FROM food_items fi
 		     JOIN food_aliases fa ON fa.food_item_id = fi.id
-		     WHERE fa.user_id IS NULL AND lower(fa.alias) = ?
+		     WHERE fa.user_id IS NULL AND lower(fa.alias) = ? AND fi.deleted_at IS NULL
 		     ORDER BY fa.created_at DESC, fa.id DESC LIMIT ?`, aliasKey, limit).
 		Scan(&aliasItems).Error; err != nil {
 		return nil, fmt.Errorf("nutrition: resolve alias: %w", err)
@@ -214,6 +222,7 @@ func (r Repository) Resolve(ctx context.Context, userID uuid.UUID, phrase string
 		Raw(`SELECT fi.*, similarity(fi.normalized_name, ?) AS trgm
 		     FROM food_items fi
 		     WHERE to_tsvector('simple', fi.normalized_name) @@ plainto_tsquery('simple', ?)
+		     AND fi.deleted_at IS NULL
 		     ORDER BY similarity(fi.normalized_name, ?) DESC
 		     LIMIT ?`, norm, norm, norm, resolveScanLimit).
 		Scan(&ftRows).Error; err != nil {
@@ -254,7 +263,7 @@ func (r Repository) Resolve(ctx context.Context, userID uuid.UUID, phrase string
 			     FROM (
 			         SELECT fi.*, (fi.embedding <=> ?) AS distance
 			         FROM food_items fi
-			         WHERE fi.embedding IS NOT NULL
+			         WHERE fi.embedding IS NOT NULL AND fi.deleted_at IS NULL
 			         ORDER BY distance ASC LIMIT ?
 			     ) ranked`,
 				norm, pgvector.NewVector(queryVec), resolveScanLimit).

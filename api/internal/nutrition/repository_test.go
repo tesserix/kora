@@ -54,6 +54,82 @@ func TestSeedIsIdempotentAndSearchable(t *testing.T) {
 	require.Contains(t, strings.ToLower(results[0].Name), "chicken")
 }
 
+// TestGetByIDExcludesSoftDeleted seeds a live row and a soft-deleted row
+// inside a rolled-back transaction and asserts GetByID resolves the live one
+// while erroring (not found) on the retired one. Both halves are required: an
+// assertion that only checks the retired row is unreachable would pass
+// against a GetByID that returned an error for every id.
+func TestGetByIDExcludesSoftDeleted(t *testing.T) {
+	db := testDB(t)
+	tx := db.Begin()
+	require.NoError(t, tx.Error)
+	t.Cleanup(func() { tx.Rollback() })
+	repo := NewRepository(tx)
+
+	live := FoodItem{Name: "Live GetByID Food " + uuid.NewString(), Provenance: ProvenanceCurated, KcalPer100g: 100}
+	require.NoError(t, tx.Create(&live).Error)
+	retired := FoodItem{Name: "Retired GetByID Food " + uuid.NewString(), Provenance: ProvenanceCurated, KcalPer100g: 100}
+	require.NoError(t, tx.Create(&retired).Error)
+	require.NoError(t, tx.Exec("UPDATE food_items SET deleted_at = now() WHERE id = ?", retired.ID).Error)
+
+	got, err := repo.GetByID(context.Background(), live.ID)
+	require.NoError(t, err, "the live row must still resolve by id")
+	require.Equal(t, live.ID, got.ID)
+
+	_, err = repo.GetByID(context.Background(), retired.ID)
+	require.Error(t, err, "a retired row must not resolve by id")
+}
+
+// TestCountExcludesSoftDeleted proves the index-size gauge does not count
+// retired rows. The table is truncated inside the transaction (as in
+// TestSeedIsIdempotentAndSearchable above) so the assertion is an exact
+// count, not a >= that a bug could satisfy by accident.
+func TestCountExcludesSoftDeleted(t *testing.T) {
+	db := testDB(t)
+	tx := db.Begin()
+	require.NoError(t, tx.Error)
+	t.Cleanup(func() { tx.Rollback() })
+	require.NoError(t, tx.Exec("TRUNCATE food_items CASCADE").Error)
+	repo := NewRepository(tx)
+
+	live := FoodItem{Name: "Live Count Food", Provenance: ProvenanceCurated, KcalPer100g: 100}
+	require.NoError(t, tx.Create(&live).Error)
+	retired := FoodItem{Name: "Retired Count Food", Provenance: ProvenanceCurated, KcalPer100g: 100}
+	require.NoError(t, tx.Create(&retired).Error)
+	require.NoError(t, tx.Exec("UPDATE food_items SET deleted_at = now() WHERE id = ?", retired.ID).Error)
+
+	n, err := repo.Count(context.Background())
+	require.NoError(t, err)
+	require.EqualValues(t, 1, n, "count must include the live row and exclude the retired one")
+}
+
+// TestSearchExcludesSoftDeleted covers the mobile picker: a retired food must
+// not be a candidate a user can log.
+func TestSearchExcludesSoftDeleted(t *testing.T) {
+	db := testDB(t)
+	tx := db.Begin()
+	require.NoError(t, tx.Error)
+	t.Cleanup(func() { tx.Rollback() })
+	repo := NewRepository(tx)
+
+	unique := uuid.NewString()
+	live := FoodItem{Name: "Zzsearch Live " + unique, Provenance: ProvenanceCurated, KcalPer100g: 100}
+	require.NoError(t, tx.Create(&live).Error)
+	retired := FoodItem{Name: "Zzsearch Retired " + unique, Provenance: ProvenanceCurated, KcalPer100g: 100}
+	require.NoError(t, tx.Create(&retired).Error)
+	require.NoError(t, tx.Exec("UPDATE food_items SET deleted_at = now() WHERE id = ?", retired.ID).Error)
+
+	got, err := repo.Search(context.Background(), "Zzsearch", 10)
+	require.NoError(t, err)
+
+	var ids []uuid.UUID
+	for _, it := range got {
+		ids = append(ids, it.ID)
+	}
+	require.Contains(t, ids, live.ID, "the live row must still be searchable")
+	require.NotContains(t, ids, retired.ID, "a retired row must not be searchable")
+}
+
 func TestInsertDedupsOnBarcode(t *testing.T) {
 	db := testDB(t)
 	repo := NewRepository(db)
