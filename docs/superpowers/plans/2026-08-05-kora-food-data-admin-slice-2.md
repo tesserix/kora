@@ -321,6 +321,8 @@ git commit -m "feat(api): admin food mutation endpoints"
 
 Thread the cache into the admin mutation path the same way `buildResolveHandler` already threads it into `foodlog.Service` — it must be the SAME instance the resolver reads from, or an eviction is invisible to the next resolve. `main.go` already passes one variable to both `NewResolver` and `Deps.ResolveCache`; follow that exactly and assert it in a test if you can.
 
+**A specific hazard the Task 3 reviewer flagged for this task.** The generation lives on `RedisCache`, exposed through a separate small interface, so *nothing structurally forces* the admin bump path and the resolve path onto the same Redis client and DB index. `main.go` declares `var cache ai.Cache`, so this task must **type-assert that same value** to the generation interface — it must NOT construct a second `RedisCache`. A second instance, especially on a different DB index, makes every bump invisible to the resolver, and no existing test would catch it. Assert the identity in a test if the wiring allows.
+
 Run the full suite, `go vet`, push, open a PR. Do not merge.
 
 ---
