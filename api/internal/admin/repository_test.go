@@ -122,13 +122,37 @@ func TestListFoodsWithNoQueryReturnsEverythingItCanSee(t *testing.T) {
 		"the page must actually be populated, not just report a correct Total")
 }
 
-// TestListFoodsClampsLimitByCase pins the three-way limit branch: unset falls
-// back to DefaultLimit, an in-range limit is honoured exactly, and — the case
-// the review found unpinned — an over-max limit clamps to MaxLimit, NOT
-// DefaultLimit. 60 seeded rows sit strictly between DefaultLimit (50) and
-// MaxLimit (200), so a page of 50 vs a page of 60 is what tells "clamped to
-// max" and "silently fell back to default" apart.
+// TestClampLimitBounds is the load-bearing pin for the limit clamp: it tests
+// clampLimit directly, with NO database, so it cannot be defeated by ambient
+// row count the way a ListFoods-level, row-count-based assertion can (see
+// TestListFoodsClampsLimitByCase's doc comment). It passes identically
+// against a freshly migrated empty database and this shared local one,
+// because it never touches either. This is what actually catches the
+// `p.Limit > MaxLimit` -> `p.Limit > 1<<30` mutation: clampLimit(MaxLimit +
+// 800) would return MaxLimit+800 unclamped, not MaxLimit, and the assertion
+// below goes red.
+func TestClampLimitBounds(t *testing.T) {
+	assert.Equal(t, DefaultLimit, clampLimit(0), "unset (zero) must fall back to DefaultLimit")
+	assert.Equal(t, DefaultLimit, clampLimit(-5), "negative must fall back to DefaultLimit, same as unset")
+	assert.Equal(t, 10, clampLimit(10), "an in-range limit must be honoured exactly")
+	assert.Equal(t, MaxLimit, clampLimit(MaxLimit), "exactly MaxLimit must pass through unclamped")
+	assert.Equal(t, MaxLimit, clampLimit(MaxLimit+1), "one over MaxLimit must clamp to MaxLimit, not fall back to DefaultLimit")
+	assert.Equal(t, MaxLimit, clampLimit(MaxLimit+800), "far over MaxLimit must still clamp to MaxLimit")
+}
+
+// TestListFoodsClampsLimitByCase pins the three-way limit branch end-to-end
+// through ListFoods and real SQL: unset falls back to DefaultLimit, an
+// in-range limit is honoured exactly, and an over-max limit clamps to
+// MaxLimit, NOT DefaultLimit. 60 seeded rows sit strictly between
+// DefaultLimit (50) and MaxLimit (200), so a page of 50 vs a page of 60 is
+// what tells "clamped to max" and "silently fell back to default" apart —
+// but NOTE this framing cannot tell "clamped to MaxLimit" apart from "not
+// clamped at all", because 60 seeded rows is under MaxLimit either way; that
+// gap is what TestClampLimitBounds above exists to close.
 func TestListFoodsClampsLimitByCase(t *testing.T) {
+	require.Less(t, DefaultLimit, 60, "fixture assumes DefaultLimit < 60 seeded rows")
+	require.Less(t, 60, MaxLimit, "fixture assumes 60 seeded rows < MaxLimit")
+
 	db := testDB(t)
 	const seeded = 60
 	rows := make([]nutrition.FoodItem, seeded)

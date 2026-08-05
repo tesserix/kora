@@ -1,7 +1,10 @@
 package bffauth
 
 import (
+	"bytes"
 	"encoding/base64"
+	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -411,4 +414,91 @@ func TestMiddlewareAcceptsBodyJustUnderHardCap(t *testing.T) {
 	w := httptest.NewRecorder()
 	router(key).ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+}
+
+// captureLogger installs a JSON slog handler over a buffer as the process
+// default logger for the duration of the test, and restores the previous
+// default on cleanup. Mirrors internal/server/logging_test.go's helper of
+// the same name; duplicated locally rather than imported so this package's
+// tests don't reach across a package boundary for a five-line helper.
+func captureLogger(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	buf := &bytes.Buffer{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return buf
+}
+
+// rejectReason runs req through a fresh router, requires a 401, and returns
+// the "reason" field of the single log line the rejection produced along
+// with the raw line, so callers can also assert on what the line does NOT
+// contain.
+func rejectReason(t *testing.T, key []byte, req *http.Request) (reason, rawLine string) {
+	t.Helper()
+	buf := captureLogger(t)
+
+	w := httptest.NewRecorder()
+	router(key).ServeHTTP(w, req)
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	require.Len(t, lines, 1, "expected exactly one log line, got: %q", buf.String())
+	rawLine = lines[0]
+
+	var entry map[string]any
+	require.NoError(t, json.Unmarshal([]byte(rawLine), &entry))
+	got, ok := entry["reason"].(string)
+	require.True(t, ok, "log line missing string \"reason\" field: %v", entry)
+	return got, rawLine
+}
+
+// TestMiddlewareLogsADistinctReasonPerRejectionCause is IMPORTANT 1's fix: a
+// wrong key, a clock-skewed timestamp, and a missing/malformed timestamp all
+// answer the client with the identical vague 401 (and must keep doing so —
+// the wire contract is pinned cross-repo), but an operator reading
+// `kubectl logs` needs to tell them apart. This test proves the server-side
+// log line actually distinguishes all three, and — just as importantly —
+// that the log line never echoes the header values that caused the
+// rejection (the actual bad signature, the actual stale timestamp).
+func TestMiddlewareLogsADistinctReasonPerRejectionCause(t *testing.T) {
+	key := testKey(t)
+	const forgedSig = "0000000000000000000000000000000000000000000000000000000000000000"
+
+	wrongKeyReq := signedRequest(t, key, http.MethodGet, "/v1/admin/foods", "", adminIdentity(), time.Now())
+	wrongKeyReq.Header.Set(HdrSignature, forgedSig)
+
+	staleTs := time.Now().Add(-90 * time.Second)
+	staleReq := signedRequest(t, key, http.MethodGet, "/v1/admin/foods", "", adminIdentity(), staleTs)
+
+	// Deleted AFTER signing: the timestamp parse failure must be caught
+	// before the signature is even compared, so what was signed over is
+	// irrelevant here — only the header's absence matters.
+	missingTsReq := signedRequest(t, key, http.MethodGet, "/v1/admin/foods", "", adminIdentity(), time.Now())
+	missingTsReq.Header.Del(HdrAuthTs)
+
+	wrongKeyReason, wrongKeyLine := rejectReason(t, key, wrongKeyReq)
+	staleReason, staleLine := rejectReason(t, key, staleReq)
+	missingTsReason, missingTsLine := rejectReason(t, key, missingTsReq)
+
+	assert.Equal(t, "signature_mismatch", wrongKeyReason)
+	assert.Equal(t, "stale_timestamp", staleReason)
+	assert.Equal(t, "bad_timestamp", missingTsReason)
+
+	// Belt-and-suspenders: even if the exact reason strings above ever
+	// change, the three causes must never collapse back into one value.
+	assert.NotEqual(t, wrongKeyReason, staleReason)
+	assert.NotEqual(t, wrongKeyReason, missingTsReason)
+	assert.NotEqual(t, staleReason, missingTsReason)
+
+	// The log must not leak what caused the rejection: neither the forged
+	// signature value nor the actual stale timestamp value appears anywhere
+	// in the line — only the category. Also check the admin identity
+	// (carried in plain headers on every one of these requests, including
+	// the missing-timestamp one) never leaks into any of the three lines.
+	assert.NotContains(t, wrongKeyLine, forgedSig)
+	assert.NotContains(t, staleLine, strconv.FormatInt(staleTs.Unix(), 10))
+	for _, line := range []string{wrongKeyLine, staleLine, missingTsLine} {
+		assert.NotContains(t, line, adminIdentity().Email)
+	}
 }

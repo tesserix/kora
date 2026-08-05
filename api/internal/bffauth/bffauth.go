@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -60,15 +61,25 @@ const DefaultWindow = 60 * time.Second
 // verified, mirroring maxPhotoBodyBytes's role in package resolve and
 // maxAskBodyBytes's role in package coach. Without a cap, an unauthenticated
 // caller could make kora-api buffer an arbitrary body with no credential at
-// all. Slice 1's admin routes are read-only; later slices POST a single food
-// record (a handful of strings and floats — see nutrition.FoodItem), never a
-// bulk upload, so 16 KiB is generous headroom while still bounding memory.
+// all. This cap is GLOBAL: every route mounted behind Middleware inherits
+// it, not just the read-only listing Slice 1 ships. The design spec's Slice
+// 4 is a bulk CSV upload of "tens to low hundreds of rows" — roughly 100
+// foods of JSON is already ~20 KB, over this cap — so that endpoint will
+// need either its own larger limit or a streaming/chunked upload path; it
+// cannot reuse this middleware's body read unmodified. Do not raise this
+// constant to accommodate it without re-checking every other route behind
+// this middleware, since they would all inherit the increase too.
 const maxAdminBodyBytes = 16 << 10 // 16 KiB
 
 var (
 	errSignatureMismatch = errors.New("signature mismatch")
 	errStaleTimestamp    = errors.New("stale timestamp")
 	errBodyRead          = errors.New("body read failed")
+	// errBadTimestamp covers both an absent X-Auth-Ts header and one that
+	// fails to parse as an integer — strconv.ParseInt treats "" the same as
+	// any other malformed input, so these two causes are indistinguishable
+	// upstream of this point and share one sentinel.
+	errBadTimestamp = errors.New("bad or missing timestamp")
 )
 
 // Identity is the caller the signature attests to. Every field is bound into
@@ -112,6 +123,27 @@ func Middleware(key []byte, window time.Duration) gin.HandlerFunc {
 				httpx.Error(c, http.StatusBadRequest, "invalid_input", "could not read request body")
 				return
 			}
+
+			// The wire response stays the deliberately vague "invalid or
+			// missing signature" for every cause below — that contract is
+			// pinned cross-repo and must not change. But a wrong key, a
+			// malformed/missing timestamp, and a clock skew are three
+			// different operator actions, and without a server-side trace an
+			// operator who has already confirmed the keys match has nowhere
+			// left to look. Log which sentinel fired so `kubectl logs` can
+			// recover the cause; log nothing else about the request — no
+			// header values, no signature, no timestamp — beyond that.
+			reason := "unknown"
+			switch {
+			case errors.Is(err, errSignatureMismatch):
+				reason = "signature_mismatch"
+			case errors.Is(err, errStaleTimestamp):
+				reason = "stale_timestamp"
+			case errors.Is(err, errBadTimestamp):
+				reason = "bad_timestamp"
+			}
+			slog.WarnContext(c.Request.Context(), "bffauth: rejected request", "reason", reason)
+
 			httpx.Error(c, http.StatusUnauthorized, "unauthorized", "invalid or missing signature")
 			return
 		}
@@ -156,7 +188,10 @@ func verify(c *gin.Context, key []byte, window time.Duration) (Identity, error) 
 	ts := c.GetHeader(HdrAuthTs)
 	tsInt, err := strconv.ParseInt(ts, 10, 64)
 	if err != nil {
-		return Identity{}, fmt.Errorf("bad timestamp: %w", err)
+		// Deliberately does not wrap the strconv error: its message quotes
+		// the raw header value back verbatim, which would leak request
+		// content into whatever eventually logs this sentinel.
+		return Identity{}, errBadTimestamp
 	}
 
 	id := Identity{
