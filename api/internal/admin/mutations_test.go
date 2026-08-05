@@ -376,6 +376,135 @@ func TestUpdateFoodBumpsCacheGenerationOnAnyChangeButNotOnNoOp(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 1, cache.Bumps(), "a macros edit must bump the cache generation exactly once")
 	})
+
+	// brand-only and serving-grams-only edits pin the `otherFieldsChanged`
+	// half of the `changed` expression (mutations.go's UpdateFood). Without
+	// this subtest, dropping `otherFieldsChanged` from `changed` leaves every
+	// other test in this file green: none of them edits brand, provenance,
+	// barcode, serving_desc or serving_grams in isolation from a name or
+	// macro change. An operator fixing a wrong brand or serving size would
+	// then keep serving the stale cached ai.Resolution for up to 24h with no
+	// way to tell the fix took.
+	t.Run("brand-only edit bumps", func(t *testing.T) {
+		tx := seedTx(t, db)
+		original := seedFoodTx(t, tx, "zzz-cachebump-brand-"+uuid.NewString(), "original-brand")
+		cache := &fakeGeneration{}
+		repo := NewMutationRepository(tx, cache)
+
+		in := inputFrom(original)
+		in.Brand = "corrected-brand"
+		_, err := repo.UpdateFood(context.Background(), actor, original.ID, in)
+		require.NoError(t, err)
+		assert.Equal(t, 1, cache.Bumps(),
+			"a brand-only edit must bump the cache generation — dropping otherFieldsChanged from `changed` would miss this")
+	})
+
+	t.Run("serving-grams-only edit bumps", func(t *testing.T) {
+		tx := seedTx(t, db)
+		original := seedFoodTx(t, tx, "zzz-cachebump-servinggrams-"+uuid.NewString(), "")
+		cache := &fakeGeneration{}
+		repo := NewMutationRepository(tx, cache)
+
+		in := inputFrom(original)
+		in.ServingGrams = original.ServingGrams + 50
+		_, err := repo.UpdateFood(context.Background(), actor, original.ID, in)
+		require.NoError(t, err)
+		assert.Equal(t, 1, cache.Bumps(),
+			"a serving-grams-only edit must bump the cache generation — dropping otherFieldsChanged from `changed` would miss this")
+	})
+}
+
+// TestBarcodeEqualHandlesAllNilCombinations pins barcodeEqual across all four
+// nil-ness combinations (both nil, left nil, right nil, neither nil), with
+// the neither-nil case split into equal and differing values. Every existing
+// fixture in this package seeds a nil barcode, so without this test
+// barcodeEqual's nil-handling — the exact thing that lets UpdateFood decide
+// whether a barcode edit actually changed the row — is entirely uncovered:
+// stubbing it to `return true` unconditionally leaves all other tests green.
+func TestBarcodeEqualHandlesAllNilCombinations(t *testing.T) {
+	x := "111"
+	xSame := "111"
+	y := "222"
+
+	cases := []struct {
+		name string
+		a, b *string
+		want bool
+	}{
+		{"both nil are equal", nil, nil, true},
+		{"left nil, right non-nil are never equal", nil, &x, false},
+		{"left non-nil, right nil are never equal", &x, nil, false},
+		{"neither nil, equal values are equal", &x, &xSame, true},
+		{"neither nil, differing values are not equal", &x, &y, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, barcodeEqual(tc.a, tc.b))
+		})
+	}
+}
+
+// TestCreateFoodSetsNormalizedNameFromNormalizedInput pins invariant: the
+// normalized_name column must be derived via nutrition.Normalize(Name), not
+// written as the raw input. That column backs the resolve full-text and
+// trigram tiers (nutrition/repository.go), so a raw write here would leave a
+// newly created food correctly visible in the admin table and audit trail
+// while being unfindable by any user phrase that doesn't match it verbatim.
+// The expectation is computed from nutrition.Normalize directly, not read
+// back from the food() fixture — food()/seedFoodTx set NormalizedName to the
+// raw name literally (see repository_test.go), so a fixture-derived
+// expectation here would be self-fulfilling.
+func TestCreateFoodSetsNormalizedNameFromNormalizedInput(t *testing.T) {
+	db := testDB(t)
+	tx := seedTx(t, db)
+	repo := NewMutationRepository(tx, ai.NoCache{})
+	actor := Actor{ID: "admin-1", Email: "ops@kora.test"}
+
+	name := "Zzz Admin Normalize Create Oats-" + uuid.NewString()
+	want := nutrition.Normalize(name)
+	require.NotEqual(t, name, want,
+		"fixture name must genuinely differ from its normalized form or this assertion cannot discriminate raw-write from normalized-write")
+
+	got, err := repo.CreateFood(context.Background(), actor, FoodInput{
+		Name: name, Provenance: nutrition.ProvenanceCurated,
+		ServingDesc: "1 serve", ServingGrams: 100, KcalPer100g: 120,
+	})
+	require.NoError(t, err)
+
+	var normalizedName string
+	require.NoError(t, tx.Raw("SELECT normalized_name FROM food_items WHERE id = ?", got.ID).Scan(&normalizedName).Error)
+	assert.Equal(t, want, normalizedName,
+		"CreateFood must write nutrition.Normalize(Name) into normalized_name, not the raw input — otherwise the food is unfindable by full-text/trigram match")
+	assert.NotEqual(t, name, normalizedName, "the raw name must not have been written verbatim")
+}
+
+// TestUpdateFoodSetsNormalizedNameFromNormalizedInput is
+// TestCreateFoodSetsNormalizedNameFromNormalizedInput's twin for the rename
+// path (mutations.go's UpdateFood): the same silent-unfindability failure
+// mode applies to a rename as to a create.
+func TestUpdateFoodSetsNormalizedNameFromNormalizedInput(t *testing.T) {
+	db := testDB(t)
+	tx := seedTx(t, db)
+	original := seedFoodTx(t, tx, "zzz-admin-normalize-upd-orig-"+uuid.NewString(), "")
+
+	repo := NewMutationRepository(tx, ai.NoCache{})
+	actor := Actor{ID: "admin-1", Email: "ops@kora.test"}
+
+	newName := "Zzz Admin Normalize Renamed Oats-" + uuid.NewString()
+	want := nutrition.Normalize(newName)
+	require.NotEqual(t, newName, want,
+		"fixture rename must genuinely differ from its normalized form or this assertion cannot discriminate raw-write from normalized-write")
+
+	in := inputFrom(original)
+	in.Name = newName
+	_, err := repo.UpdateFood(context.Background(), actor, original.ID, in)
+	require.NoError(t, err)
+
+	var normalizedName string
+	require.NoError(t, tx.Raw("SELECT normalized_name FROM food_items WHERE id = ?", original.ID).Scan(&normalizedName).Error)
+	assert.Equal(t, want, normalizedName,
+		"UpdateFood must write nutrition.Normalize(Name) into normalized_name on rename, not the raw input")
+	assert.NotEqual(t, newName, normalizedName, "the raw renamed name must not have been written verbatim")
 }
 
 // TestSoftDeleteFoodAlwaysBumpsCacheGeneration is invariant 3 for
