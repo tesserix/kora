@@ -155,7 +155,15 @@ func Middleware(key []byte, window time.Duration) gin.HandlerFunc {
 		// checking it here is belt-and-suspenders, not the only thing standing
 		// between an unrelated pool and an admin route — but it must actually be
 		// checked, or the PoolInternal constant is a lie.
-		if id.Role != RoleAdmin || id.UserID == "" || id.Pool != PoolInternal {
+		//
+		// id.Email == "" is guarded here alongside UserID for the same reason:
+		// Email is bound into the MAC (see Compute), so a correctly-signed
+		// request can still carry X-User-Email: "". kora_admin_events.actor_email
+		// has a CHECK rejecting an empty/whitespace value, but that insert
+		// happens INSIDE the mutation's transaction — without this guard, a
+		// missing-attribution request would abort the whole mutation with a 500
+		// instead of failing cleanly here with a 403.
+		if id.Role != RoleAdmin || id.UserID == "" || id.Email == "" || id.Pool != PoolInternal {
 			httpx.Error(c, http.StatusForbidden, "forbidden", "admin identity required")
 			return
 		}
