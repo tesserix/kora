@@ -2,6 +2,8 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
+	"sync"
 	"testing"
 	"time"
 
@@ -186,12 +188,20 @@ func TestGenerationScopedKey_DiffersAcrossGenerations(t *testing.T) {
 		"the same key under the same generation must be stable across calls")
 }
 
-// TestRedisCache_Generation_KeyStableWithinOneGeneration is the positive
-// counterpart to the invalidation test below: as long as nobody bumps the
-// generation, repeated Get calls for the same logical key must keep hitting
-// the same entry — the generation scoping must not itself cause spurious
-// misses.
-func TestRedisCache_Generation_KeyStableWithinOneGeneration(t *testing.T) {
+// TestRedisCache_KeyIsGenerationScoped_NotBareLogicalKey replaces the former
+// TestRedisCache_Generation_KeyStableWithinOneGeneration, which — despite its
+// name — proved nothing generation-specific: it only asserted that repeated
+// Get calls after one Set kept succeeding, which TestRedisCache_RoundTrip
+// already covers, and it stayed green even against a generationScopedKey
+// stub that ignored its generation argument entirely (e.g. `return key`).
+// Renaming alone would have fixed the misleading name but left the test
+// still vacuous, so this version also strengthens it: it asserts the entry
+// physically lives under the generation-0 SCOPED key and is NOT reachable
+// under the bare, unscoped logical key — the one property a stubbed
+// generationScopedKey would violate. It keeps the original repeated-Get
+// stability check too, since that's still a real (if weaker) property worth
+// pinning.
+func TestRedisCache_KeyIsGenerationScoped_NotBareLogicalKey(t *testing.T) {
 	mr, err := miniredis.Run()
 	require.NoError(t, err)
 	defer mr.Close()
@@ -204,6 +214,19 @@ func TestRedisCache_Generation_KeyStableWithinOneGeneration(t *testing.T) {
 	key := CacheKey("phrase", uuid.New(), "brekkie bowl")
 
 	cache.Set(ctx, key, Resolution{Provenance: "stable"})
+
+	// The entry must live under the generation-0 scoped physical key...
+	scoped, err := client.Get(ctx, generationScopedKey(key, 0)).Bytes()
+	require.NoError(t, err, "the entry must be stored under the generation-0 scoped key")
+	var r Resolution
+	require.NoError(t, json.Unmarshal(scoped, &r))
+	require.Equal(t, "stable", r.Provenance)
+
+	// ...and NEVER under the bare, unscoped logical key — otherwise
+	// generation scoping isn't actually happening, and a later bump could
+	// never hide this entry.
+	_, err = client.Get(ctx, key).Result()
+	require.ErrorIs(t, err, redis.Nil, "the entry must not be reachable under the bare, unscoped logical key")
 
 	for i := 0; i < 3; i++ {
 		got, ok := cache.Get(ctx, key)
@@ -327,7 +350,11 @@ func TestRedisCache_GenerationReadFailure_NeverFallsBackToCollidingGeneration(t 
 	require.Nil(t, got)
 
 	// Set must degrade the same way: it must not write under a guessed
-	// generation while the counter is unreadable.
+	// generation while the counter is unreadable. require.NotPanics alone
+	// does not pin this — it also passes against a Set that falls back to
+	// writing under a fixed generation 0, which is exactly the bug this
+	// design decision was made against (see the corresponding assertion
+	// below, which does pin it).
 	require.NotPanics(t, func() {
 		cache.Set(ctx, key, Resolution{Provenance: "written-during-corruption"})
 	})
@@ -336,6 +363,22 @@ func TestRedisCache_GenerationReadFailure_NeverFallsBackToCollidingGeneration(t 
 	// foodlog.Service's correction invalidation, can log it) rather than
 	// claiming success while doing nothing.
 	require.Error(t, cache.Delete(ctx, key))
+
+	// Restore the counter to its real, post-bump value and directly inspect
+	// the physical generation-0 key the corrupted Set above would have
+	// written to had it (wrongly) fallen back to a fixed generation 0. It
+	// must still hold only the original pre-bump write ("stale-pre-bump"),
+	// never "written-during-corruption" — proving Set actually skipped the
+	// write during the read failure, not just that it avoided panicking.
+	require.NoError(t, mr.Set(resolveCacheGenerationKey, "1"))
+
+	rawAtGenerationZero, err := client.Get(ctx, generationScopedKey(key, 0)).Bytes()
+	require.NoError(t, err, "the original pre-bump entry must still be the only thing at the generation-0 key")
+	var r Resolution
+	require.NoError(t, json.Unmarshal(rawAtGenerationZero, &r))
+	require.NotEqual(t, "written-during-corruption", r.Provenance,
+		"Set must never have fallen back to writing under a guessed generation 0 during the read failure")
+	require.Equal(t, "stale-pre-bump", r.Provenance)
 }
 
 // TestNoCache_GenerationIsInertNoOp pins NoCache's contract for the new
@@ -357,4 +400,118 @@ func TestNoCache_GenerationIsInertNoOp(t *testing.T) {
 	got, ok := c.Get(ctx, "anything")
 	require.False(t, ok)
 	require.Nil(t, got)
+}
+
+// --- generation counter eviction (high-water-mark guard) ---
+//
+// The generation counter key is deliberately persistent — no TTL, and INCR
+// attaches none — so its own expiry can never be the failure vector. But
+// allkeys-lru and allkeys-random, the conventional maxmemory-policy choices
+// for a Redis used purely as a cache, evict keys under memory pressure
+// regardless of TTL. No Redis configuration exists anywhere in this repo yet
+// (see resolveCacheGenerationKey's doc comment), so nothing stops whoever
+// enables Redis from choosing one of those. If the counter key is evicted
+// after a real bump, a bare re-read reports the same redis.Nil it would for
+// "never bumped" — resetting the effective generation back to 0 and
+// resurrecting every pre-bump entry until its TTL happens to expire, with no
+// error anywhere. RedisCache.generationHWM (see readGeneration) closes this
+// by treating an observed generation lower than any generation this process
+// has already seen as a read failure instead of a valid value.
+
+// TestRedisCache_GenerationCounterEvicted_PreBumpEntryStaysHidden is the
+// reviewer's repro for the eviction hole, end to end: Set, Bump, confirm the
+// entry is hidden, delete the counter key (simulating eviction under
+// allkeys-lru/allkeys-random), and confirm the pre-bump entry is STILL not
+// served.
+func TestRedisCache_GenerationCounterEvicted_PreBumpEntryStaysHidden(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+
+	cache := NewRedisCache(client, time.Minute)
+	ctx := context.Background()
+	key := CacheKey("phrase", uuid.New(), "grilled chicken")
+
+	cache.Set(ctx, key, Resolution{Provenance: "pre-bump"})
+
+	require.NoError(t, cache.BumpGeneration(ctx))
+
+	// Sanity: the bump alone already hides the entry, before any eviction.
+	_, ok := cache.Get(ctx, key)
+	require.False(t, ok, "sanity: bump must hide the pre-bump entry on its own")
+
+	// Simulate a maxmemory-policy eviction of the (persistent, no-TTL)
+	// generation counter.
+	require.True(t, mr.Del(resolveCacheGenerationKey), "sanity: counter key must have existed to evict")
+
+	got, ok := cache.Get(ctx, key)
+	require.False(t, ok, "an evicted generation counter must never resurrect a pre-bump entry")
+	require.Nil(t, got)
+}
+
+// TestRedisCache_GenerationRead_StillSucceedsWhenCounterIntact is the twin
+// of the eviction test above: the high-water-mark guard must only reject a
+// generation that has genuinely regressed, never an ordinary read of an
+// intact counter. Without this test, a change that made every generation
+// read fail (not just regressed ones) would pass the eviction test alone.
+func TestRedisCache_GenerationRead_StillSucceedsWhenCounterIntact(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+
+	cache := NewRedisCache(client, time.Minute)
+	ctx := context.Background()
+	key := CacheKey("phrase", uuid.New(), "grilled chicken")
+
+	cache.Set(ctx, key, Resolution{Provenance: "current"})
+	got, ok := cache.Get(ctx, key)
+	require.True(t, ok, "an ordinary, non-evicted read must still succeed")
+	require.Equal(t, "current", got.Provenance)
+
+	require.NoError(t, cache.BumpGeneration(ctx))
+	cache.Set(ctx, key, Resolution{Provenance: "post-bump"})
+
+	got, ok = cache.Get(ctx, key)
+	require.True(t, ok, "a fresh write under an intact, higher generation must still be reachable")
+	require.Equal(t, "post-bump", got.Provenance)
+}
+
+// TestRedisCache_ConcurrentGenerationReads_AreRaceFree exercises the
+// high-water-mark guard's concurrency requirement directly: the hot resolve
+// path calls Get from many goroutines at once, so the guard must be safe
+// under concurrent access without serializing every cache read behind a
+// lock. Meaningful under `go test -race`.
+func TestRedisCache_ConcurrentGenerationReads_AreRaceFree(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+
+	cache := NewRedisCache(client, time.Minute)
+	ctx := context.Background()
+	key := CacheKey("phrase", uuid.New(), "grilled chicken")
+	cache.Set(ctx, key, Resolution{Provenance: "concurrent"})
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = cache.Get(ctx, key)
+			_, _ = cache.CurrentGeneration(ctx)
+		}()
+	}
+	wg.Wait()
+
+	got, ok := cache.Get(ctx, key)
+	require.True(t, ok, "concurrent reads must not corrupt the high-water mark for a still-valid generation")
+	require.Equal(t, "concurrent", got.Provenance)
 }

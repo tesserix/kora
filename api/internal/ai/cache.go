@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -101,6 +103,17 @@ func (NoCache) BumpGeneration(ctx context.Context) error {
 // Resolution under any kind (phrase, photo, voice) and any user's key —
 // bumping this one counter invalidates all of them at once, which is the
 // entire point.
+//
+// OPS PRECONDITION: whoever configures the Redis instance this cache runs
+// against MUST set maxmemory-policy to a TTL-respecting eviction policy
+// (e.g. volatile-lru or noeviction) — NOT allkeys-lru or allkeys-random. This
+// key is deliberately persistent (no TTL; INCR attaches none), so under
+// allkeys-lru/allkeys-random Redis is free to evict it under memory pressure
+// exactly like any other key, even though it never expires. RedisCache's
+// high-water-mark guard (see generationHWM) closes the resulting hole —
+// treating a post-eviction re-read as a failure rather than silently
+// resetting to the pre-bump baseline — but that guard is a safety net for a
+// misconfiguration, not a substitute for configuring the policy correctly.
 const resolveCacheGenerationKey = "ai:resolve-cache:generation"
 
 // RedisCache is a Cache backed by Redis, storing resolutions as JSON with a
@@ -113,6 +126,12 @@ const resolveCacheGenerationKey = "ai:resolve-cache:generation"
 type RedisCache struct {
 	client *redis.Client
 	ttl    time.Duration
+
+	// generationHWM is a process-local high-water mark: the highest
+	// generation this RedisCache has ever observed from Redis. It exists
+	// to close a hole that a bare read of resolveCacheGenerationKey cannot
+	// close on its own — see readGeneration.
+	generationHWM atomic.Int64
 }
 
 var (
@@ -146,15 +165,44 @@ func NewRedisCache(client *redis.Client, ttl time.Duration) *RedisCache {
 // nothing but the cache hit that would have happened anyway — a cache is a
 // cost optimisation here, never a correctness mechanism, so a guaranteed miss
 // is always an acceptable degradation and an occasional stale hit is not.
+//
+// A "missing key" read alone is not enough to tell a legitimate un-bumped
+// baseline apart from resolveCacheGenerationKey having been EVICTED after a
+// real bump already happened — Redis reports both as redis.Nil identically,
+// and the key is deliberately persistent (see its doc comment on
+// maxmemory-policy) so this is not a TTL expiry, only an eviction. To tell
+// them apart, readGeneration keeps a process-local high-water mark
+// (generationHWM) of the highest generation it has ever actually observed:
+// any newly read generation LOWER than that high-water mark — including the
+// re-synthesized 0 from a re-missing key — is treated as a read FAILURE, the
+// same as any other Redis error, rather than as a valid (if stale) value.
+// This also incidentally guards against a Redis replica serving a
+// lagging/stale counter value. generationHWM is read and updated with a
+// compare-and-swap loop so concurrent callers on the hot resolve path never
+// serialize behind a lock for this check.
 func (c *RedisCache) readGeneration(ctx context.Context) (int64, error) {
 	n, err := c.client.Get(ctx, resolveCacheGenerationKey).Int64()
 	if err != nil {
-		if errors.Is(err, redis.Nil) {
-			return 0, nil
+		if !errors.Is(err, redis.Nil) {
+			return 0, err
 		}
-		return 0, err
+		n = 0
 	}
-	return n, nil
+
+	for {
+		hwm := c.generationHWM.Load()
+		if n < hwm {
+			return 0, fmt.Errorf("ai: observed generation %d below high-water mark %d (counter key evicted or stale replica read)", n, hwm)
+		}
+		if n == hwm {
+			return n, nil
+		}
+		if c.generationHWM.CompareAndSwap(hwm, n) {
+			return n, nil
+		}
+		// Lost the race to another goroutine observing a newer generation
+		// concurrently; retry against the updated high-water mark.
+	}
 }
 
 // generationScopedKey combines a logical cache key (see CacheKey) with the
