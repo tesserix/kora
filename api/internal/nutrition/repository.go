@@ -433,6 +433,12 @@ func (r Repository) SetEmbedding(ctx context.Context, id uuid.UUID, vec []float3
 
 // BackfillNormalizedNames recomputes normalized_name for every row using the
 // Go Normalize function (the migration's SQL backfill is only approximate).
+//
+// DELIBERATE ASYMMETRY: unlike every read path in this package, this
+// maintenance backfill deliberately does NOT filter out soft-deleted rows.
+// A retired food's normalized_name should be kept current so that if the food
+// is ever restored, its data is correct rather than stale. Do not add a
+// `deleted_at IS NULL` predicate to the Find call.
 func (r Repository) BackfillNormalizedNames(ctx context.Context) (int, error) {
 	var items []FoodItem
 	if err := r.db.WithContext(ctx).Find(&items).Error; err != nil {

@@ -118,8 +118,9 @@ func (s Service) LogFood(ctx context.Context, userID uuid.UUID, req LogRequest) 
 			// GetByID now filters deleted_at, so this is reachable whenever a
 			// client's food picker cache predates a retire, or an
 			// offline-queued log is replayed after one. Must be a 400, not a
-			// 500 — the offline queue treats a 500 as retryable and would
-			// keep replaying a log that can never succeed.
+			// 500 — a 400 is permanent and fails on the first refusal with a
+			// legible message, whereas a 500 costs five wasted replays across
+			// drain triggers before the entry moves to failed.
 			return FoodLog{}, httpx.ValidationError{Message: "food_item_id not found"}
 		}
 		return FoodLog{}, fmt.Errorf("foodlog: resolve food: %w", err)

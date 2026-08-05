@@ -85,8 +85,9 @@ func TestLogFoodComputesMacrosFromGrams(t *testing.T) {
 // client's food_item_id vanished with the row) — filtering GetByID is what
 // turns it into a normal occurrence: a client's food picker cache can
 // predate a retire, or an offline-queued log can be replayed after one. A
-// 500 here would be treated as retryable by the offline queue and replayed
-// forever against a log that can never succeed.
+// 500 here costs five wasted replays across drain triggers before the item
+// moves to failed, whereas a 400 fails on the first refusal with a legible
+// message the user can act on.
 func TestLogFoodRetiredFoodReturnsValidationError(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db)
@@ -102,7 +103,7 @@ func TestLogFoodRetiredFoodReturnsValidationError(t *testing.T) {
 	})
 	require.Error(t, err)
 	msg, ok := httpx.IsValidation(err)
-	require.True(t, ok, "a retired food_item_id must be a client ValidationError (400), not a 500 the offline queue would retry forever; got: %v", err)
+	require.True(t, ok, "a retired food_item_id must be a client ValidationError (400), not a 500 that costs five wasted replays; got: %v", err)
 	require.Equal(t, "food_item_id not found", msg)
 	require.False(t, errors.Is(err, gorm.ErrRecordNotFound), "error must not still satisfy gorm.ErrRecordNotFound (would map to a misleading 404 upstream)")
 }
