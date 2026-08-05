@@ -58,18 +58,21 @@ func TestComputePinsTheCanonicalString(t *testing.T) {
 // used by both the test's signing helper and the verifier, so a symmetric
 // change to the body-hashing step (e.g. hashing something derived from the
 // body instead of the body itself) is invisible to every other test in this
-// file. Signing a non-empty, non-trivial body here closes that gap. The
-// expected value is a fixed vector shared with tesserix-home's
-// kora-admin.test.ts — if either side changes field order, separators, or
-// the body hash encoding, one of the two tests goes red instead of the whole
-// admin surface silently 401ing in production.
+// file. Signing a non-empty, non-trivial body here closes that gap. The body
+// uses non-ASCII characters to pin UTF-8 byte encoding: a client that hashed
+// the string as latin-1 would produce digest 4a2998d2265e54286e1f76af69455861d80411a2f4cff7f3ca2954102b3117d4,
+// completely different, and fail here rather than 401ing in production on the
+// first food with an accent. The expected value is a fixed vector shared with
+// tesserix-home's kora-admin.test.ts — if either side changes field order,
+// separators, or the body hash encoding, one of the two tests goes red instead
+// of the whole admin surface silently 401ing in production.
 func TestComputePinsTheCanonicalStringWithBody(t *testing.T) {
 	got := Compute(
-		http.MethodPost, "/v1/admin/foods", []byte(`{"name":"oats"}`), "1735689600",
+		http.MethodPost, "/v1/admin/foods", []byte(`{"name":"crème brûlée","kcal":257}`), "1735689600",
 		testKey(t), adminIdentity(),
 	)
 	assert.Equal(t,
-		"de2dea3fd6b5ad4d037b436e99d2e5f9f4ef8d8effec93aeae305ad738608ea5",
+		"c0328fe10ebf9e64f71f51d007abd65eb0b902bdefab3279033c1cb1d4019ac3",
 		got,
 	)
 }
