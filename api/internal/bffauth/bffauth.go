@@ -56,8 +56,16 @@ const (
 // direction. Matches HomeChef's 60s.
 const DefaultWindow = 60 * time.Second
 
+// maxAdminBodyBytes caps the raw request body read BEFORE the signature is
+// verified, mirroring maxPhotoBodyBytes's role in package resolve and
+// maxAskBodyBytes's role in package coach. Without a cap, an unauthenticated
+// caller could make kora-api buffer an arbitrary body with no credential at
+// all. Slice 1's admin routes are read-only; later slices POST a single food
+// record (a handful of strings and floats — see nutrition.FoodItem), never a
+// bulk upload, so 16 KiB is generous headroom while still bounding memory.
+const maxAdminBodyBytes = 16 << 10 // 16 KiB
+
 var (
-	errMissingSignature  = errors.New("missing signature")
 	errSignatureMismatch = errors.New("signature mismatch")
 	errStaleTimestamp    = errors.New("stale timestamp")
 	errBodyRead          = errors.New("body read failed")
@@ -111,8 +119,11 @@ func Middleware(key []byte, window time.Duration) gin.HandlerFunc {
 		// Authorization, distinct from authentication. The signature proved the
 		// caller holds the key; these guards pin WHO the key may act as. 403
 		// keeps "not an admin" distinguishable from "bad key or skewed clock"
-		// in production logs.
-		if id.Role != RoleAdmin || id.UserID == "" {
+		// in production logs. Pool is bound into the MAC (see Compute), so
+		// checking it here is belt-and-suspenders, not the only thing standing
+		// between an unrelated pool and an admin route — but it must actually be
+		// checked, or the PoolInternal constant is a lie.
+		if id.Role != RoleAdmin || id.UserID == "" || id.Pool != PoolInternal {
 			httpx.Error(c, http.StatusForbidden, "forbidden", "admin identity required")
 			return
 		}
@@ -124,14 +135,16 @@ func Middleware(key []byte, window time.Duration) gin.HandlerFunc {
 }
 
 func verify(c *gin.Context, key []byte, window time.Duration) (Identity, error) {
+	// No dedicated empty-signature guard: an absent signature never matches
+	// Compute's output, so hmac.Equal below rejects it regardless.
 	sig := c.GetHeader(HdrSignature)
-	if sig == "" {
-		return Identity{}, errMissingSignature
-	}
 
 	// Read the body so it can be re-hashed, then restore it for the handler.
+	// Bounded by maxAdminBodyBytes BEFORE the signature is checked, so an
+	// unauthenticated caller cannot make kora-api buffer an arbitrary body.
 	var body []byte
 	if c.Request.Body != nil {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxAdminBodyBytes)
 		b, err := io.ReadAll(c.Request.Body)
 		if err != nil {
 			return Identity{}, fmt.Errorf("%w: %v", errBodyRead, err)

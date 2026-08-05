@@ -52,6 +52,28 @@ func TestComputePinsTheCanonicalString(t *testing.T) {
 	)
 }
 
+// TestComputePinsTheCanonicalStringWithBody is the second half of the
+// cross-repo drift guard. TestComputePinsTheCanonicalString above signs a nil
+// body, so it cannot catch a change to HOW the body is hashed: Compute is
+// used by both the test's signing helper and the verifier, so a symmetric
+// change to the body-hashing step (e.g. hashing something derived from the
+// body instead of the body itself) is invisible to every other test in this
+// file. Signing a non-empty, non-trivial body here closes that gap. The
+// expected value is a fixed vector shared with tesserix-home's
+// kora-admin.test.ts — if either side changes field order, separators, or
+// the body hash encoding, one of the two tests goes red instead of the whole
+// admin surface silently 401ing in production.
+func TestComputePinsTheCanonicalStringWithBody(t *testing.T) {
+	got := Compute(
+		http.MethodPost, "/v1/admin/foods", []byte(`{"name":"oats"}`), "1735689600",
+		testKey(t), adminIdentity(),
+	)
+	assert.Equal(t,
+		"de2dea3fd6b5ad4d037b436e99d2e5f9f4ef8d8effec93aeae305ad738608ea5",
+		got,
+	)
+}
+
 // signedRequest builds a request signed over exactly the values it carries, so
 // each tampering test below can change one thing and be sure that one thing is
 // what broke it.
@@ -94,6 +116,10 @@ func TestMiddlewareAcceptsAValidSignatureAndExposesTheIdentity(t *testing.T) {
 	assert.JSONEq(t, `{"id":"admin-uid-1","email":"admin@tesserix.app"}`, w.Body.String())
 }
 
+// There is no dedicated "missing signature" guard in verify(): an absent
+// signature is simply the empty string, which never equals Compute's output,
+// so hmac.Equal below rejects it the same way it rejects any other wrong
+// signature.
 func TestMiddlewareRejectsMissingSignature(t *testing.T) {
 	key := testKey(t)
 	req := signedRequest(t, key, http.MethodGet, "/v1/admin/foods", "", adminIdentity(), time.Now())
@@ -206,14 +232,74 @@ func TestMiddlewareAcceptsTimestampInsideWindow(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
+// TestMiddlewareStopsTheChainOnRejection is the CRITICAL abort-path guard.
+// httpx.Error happens to call gin's AbortWithStatusJSON internally, but this
+// package neither states nor tests that anywhere else: every other rejection
+// test in this file only asserts the response status code, so a
+// c.JSON(...)+return that forgot to abort would still return 401 while the
+// downstream handler ran anyway. A later slice mounts writes and deletes
+// behind this middleware, so that gap would mean every unsigned request
+// reaches the admin handler with CI green. This test proves the chain
+// actually stops by asserting a probe handler never runs.
+func TestMiddlewareStopsTheChainOnRejection(t *testing.T) {
+	key := testKey(t)
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(Middleware(key, 60*time.Second))
+	reached := false
+	r.GET("/v1/admin/foods", func(c *gin.Context) {
+		reached = true
+		c.Status(http.StatusOK)
+	})
+
+	req := signedRequest(t, key, http.MethodGet, "/v1/admin/foods", "", adminIdentity(), time.Now())
+	req.Header.Del(HdrSignature)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	assert.False(t, reached, "handler ran despite an unsigned request: the middleware answered 401 without aborting the chain")
+}
+
 // A CORRECTLY SIGNED non-admin is 403, not 401 — the signature verified, the
 // authorization did not. Distinct codes keep the two failures distinguishable
 // in production, where 401 means "key or clock problem" and 403 means "this
-// caller is not an admin".
+// caller is not an admin". This is also the SECOND abort path (alongside
+// TestMiddlewareStopsTheChainOnRejection above): the 403 guard must stop the
+// chain too, since a later slice's writes/deletes sit behind it.
 func TestMiddlewareRejectsCorrectlySignedNonAdmin(t *testing.T) {
 	key := testKey(t)
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(Middleware(key, 60*time.Second))
+	reached := false
+	r.GET("/v1/admin/foods", func(c *gin.Context) {
+		reached = true
+		c.Status(http.StatusOK)
+	})
+
 	id := adminIdentity()
 	id.Role = "customer"
+	req := signedRequest(t, key, http.MethodGet, "/v1/admin/foods", "", id, time.Now())
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusForbidden, w.Code)
+	assert.False(t, reached, "handler ran despite a non-admin identity: the 403 guard did not abort the chain")
+}
+
+// TestMiddlewareRejectsCorrectlySignedWrongPool proves PoolInternal is
+// enforced, not just documented. Pool is bound into the MAC, so this isn't a
+// security hole either way — but before this fix, the guard checked Role and
+// UserID only, so a reader could believe Pool was enforced when it was not.
+// TestMiddlewareAcceptsAValidSignatureAndExposesTheIdentity (pool "internal")
+// is this test's twin: it must keep passing, or this guard would reject
+// every pool, not just the wrong one.
+func TestMiddlewareRejectsCorrectlySignedWrongPool(t *testing.T) {
+	key := testKey(t)
+	id := adminIdentity()
+	id.Pool = "mp-internal"
 	req := signedRequest(t, key, http.MethodGet, "/v1/admin/foods", "", id, time.Now())
 
 	w := httptest.NewRecorder()
@@ -252,4 +338,74 @@ func TestMiddlewareRestoresTheBodyForDownstreamHandlers(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, body, seen)
+}
+
+// TestMiddlewareWithZeroWindowUsesDefaultWindow pins that window<=0 means
+// DefaultWindow, not "no window" or "zero tolerance". Every other test in
+// this file passes 60*time.Second explicitly, so deleting the fallback in
+// Middleware would leave the rest of the suite green — but the router task
+// that mounts this middleware calls Middleware(key, 0) deliberately, making
+// this fallback load-bearing in production. A recent timestamp must succeed
+// under window 0.
+func TestMiddlewareWithZeroWindowUsesDefaultWindow(t *testing.T) {
+	key := testKey(t)
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(Middleware(key, 0))
+	r.GET("/v1/admin/foods", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	req := signedRequest(t, key, http.MethodGet, "/v1/admin/foods", "", adminIdentity(), time.Now().Add(-30*time.Second))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+// The twin: a timestamp outside DefaultWindow (60s) must still be rejected
+// under window 0. Without this, the test above would also pass against a
+// "0 means no freshness check at all" interpretation of the fallback.
+// Together the pair pin window<=0 to DefaultWindow specifically.
+func TestMiddlewareWithZeroWindowRejectsStaleTimestamp(t *testing.T) {
+	key := testKey(t)
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(Middleware(key, 0))
+	r.GET("/v1/admin/foods", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	req := signedRequest(t, key, http.MethodGet, "/v1/admin/foods", "", adminIdentity(), time.Now().Add(-90*time.Second))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+// TestMiddlewareRejectsBodyExceedingHardCap proves the pre-authentication
+// body read is bounded: a body larger than maxAdminBodyBytes must trip
+// http.MaxBytesReader and land on the existing errBodyRead -> 400 branch, not
+// 401. A 401 here would send an operator hunting a key mismatch that does
+// not exist, when in fact no credential was ever assessed. The signature
+// header value is irrelevant since the body read fails before verification.
+func TestMiddlewareRejectsBodyExceedingHardCap(t *testing.T) {
+	key := testKey(t)
+	oversized := strings.Repeat("a", maxAdminBodyBytes+1)
+	req := httptest.NewRequest(http.MethodPost, "/v1/admin/foods", strings.NewReader(oversized))
+	req.Header.Set(HdrAuthTs, strconv.FormatInt(time.Now().Unix(), 10))
+	req.Header.Set(HdrSignature, "irrelevant-body-read-fails-first")
+
+	w := httptest.NewRecorder()
+	router(key).ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "invalid_input")
+}
+
+// The twin: a body just under maxAdminBodyBytes must still be accepted, or
+// the test above would also pass against a middleware that rejected every
+// body regardless of size.
+func TestMiddlewareAcceptsBodyJustUnderHardCap(t *testing.T) {
+	key := testKey(t)
+	body := strings.Repeat("a", maxAdminBodyBytes-1)
+	req := signedRequest(t, key, http.MethodPost, "/v1/admin/foods", body, adminIdentity(), time.Now())
+
+	w := httptest.NewRecorder()
+	router(key).ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
 }
