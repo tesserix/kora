@@ -33,3 +33,18 @@ func TestTrigramExtensionAvailable(t *testing.T) {
 	require.NoError(t, db.Raw(`SELECT similarity('fast food fried chicken breast wing thigh drumstick nugget', 'chicken breast')`).Scan(&noisy).Error)
 	require.Greater(t, exact, noisy)
 }
+
+func TestAdminMutationsColumnsAndTable(t *testing.T) {
+	db := testDB(t)
+	var cols int
+	require.NoError(t, db.Raw(
+		"SELECT count(*) FROM information_schema.columns WHERE table_name='food_items' AND column_name IN ('deleted_at','updated_at')").
+		Scan(&cols).Error)
+	require.Equal(t, 2, cols, "food_items must have deleted_at and updated_at (migration 000023)")
+
+	var tables int
+	require.NoError(t, db.Raw(
+		"SELECT count(*) FROM information_schema.tables WHERE table_name='kora_admin_events'").
+		Scan(&tables).Error)
+	require.Equal(t, 1, tables, "kora_admin_events must exist (migration 000023)")
+}
