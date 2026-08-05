@@ -1570,6 +1570,13 @@ including its error class and its `cache: "no-store"`. The one structural differ
 **`ADMIN_PREFIX` is `/v1/admin`, not `/api/v1/admin`** — kora-api mounts its routes under
 `/v1`, HomeChef under `/api/v1`. Getting this wrong is a 404 that looks like a routing bug.
 
+**Two literals kora's middleware now enforces as a hard 403, so they are not free choices:**
+`X-User-Role` must be exactly `admin` and `X-Auth-Pool` must be exactly `internal`. Note that
+this org's *GIP tenant pools* are named `platform`, `mp-internal` and `mp-customer` — none of
+which is `internal`. Signing with a GIP pool name would 403 every admin request with
+"admin identity required" and no signature problem anywhere to find. These are BFF identity
+values, not GIP pool names; `internal` is the literal, matching HomeChef.
+
 - [ ] **Step 1: Write the failing test**
 
 Create `apps/web/lib/api/kora-admin.test.ts`:
@@ -1586,6 +1593,16 @@ import { buildSignedHeaders, computeSignature } from "./kora-admin";
 // silently in production.
 const KEY_B64 = "a29yYS10ZXN0LWhtYWMta2V5LTEyMzQ1Ng==";
 const EXPECTED = "592716969fc5d8c9c0b8013ca2027ae3318d02dd31a59868749a7d2dc2aa3ac7";
+
+// Second vector, with a NON-ASCII body. Kora is a food index, so accented
+// names are ordinary. Node's createHash().update(string) defaults to UTF-8 but
+// silently accepts 'latin1', and the two digests are completely unrelated —
+// latin-1 would give 4a2998d2265e54286e1f76af69455861d80411a2f4cff7f3ca2954102b3117d4.
+// Without this vector the client signs ASCII foods correctly and 401s on the
+// first `crème brûlée`. The Go side pins the identical constant in
+// api/internal/bffauth/bffauth_test.go.
+const BODY = '{"name":"crème brûlée","kcal":257}';
+const EXPECTED_WITH_BODY = "c0328fe10ebf9e64f71f51d007abd65eb0b902bdefab3279033c1cb1d4019ac3";
 
 describe("computeSignature", () => {
   it("matches the Go implementation's fixed vector", () => {
@@ -1623,6 +1640,23 @@ describe("computeSignature", () => {
     expect(sign({ ...base, pool: "customer" })).not.toBe(EXPECTED);
     expect(sign({ ...base, userId: "someone-else" })).not.toBe(EXPECTED);
     expect(sign({ ...base, email: "other@tesserix.app" })).not.toBe(EXPECTED);
+  });
+
+  it("matches the Go implementation on a UTF-8 body", () => {
+    const sig = computeSignature(
+      "POST",
+      "/v1/admin/foods",
+      Buffer.from(BODY, "utf8"),
+      "1735689600",
+      Buffer.from(KEY_B64, "base64"),
+      {
+        userId: "admin-uid-1",
+        email: "admin@tesserix.app",
+        role: "admin",
+        pool: "internal",
+      },
+    );
+    expect(sig).toBe(EXPECTED_WITH_BODY);
   });
 
   it("binds the body", () => {
