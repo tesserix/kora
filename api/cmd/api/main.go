@@ -101,9 +101,15 @@ func main() {
 		logger.Info("food index gauge refresher started", "interval", cfg.FoodIndexRefreshInterval.String())
 	}
 
+	if len(cfg.BFFHMACKey) > 0 {
+		logger.Info("admin surface enabled", "routes", "/v1/admin/*")
+	} else {
+		logger.Info("admin surface disabled (no KORA_BFF_HMAC_KEY)")
+	}
+
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,
-		Handler: server.NewRouter(server.Deps{DB: db, Verifier: verifier, Resolver: resolveHandler, Provider: aiProvider, ResolveCache: resolveCache}),
+		Handler: server.NewRouter(server.Deps{DB: db, Verifier: verifier, Resolver: resolveHandler, Provider: aiProvider, ResolveCache: resolveCache, BFFHMACKey: cfg.BFFHMACKey}),
 	}
 
 	go func() {

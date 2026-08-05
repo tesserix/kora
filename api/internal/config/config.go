@@ -2,6 +2,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
 	"time"
@@ -28,6 +29,17 @@ type Config struct {
 	// are re-read from the database. The value only changes when the embed job
 	// runs, so this is deliberately slow. 0 disables the refresher.
 	FoodIndexRefreshInterval time.Duration
+	// BFFHMACKey is the shared secret the tesserix-home admin portal signs its
+	// requests to /v1/admin/* with. Nil when KORA_BFF_HMAC_KEY is unset, which
+	// leaves the admin routes unmounted — a valid deployment (dev, CI, any
+	// environment with no portal). A key that is SET but unusable is a hard
+	// error instead: silently disabling admin would surface as an unexplained
+	// 404 rather than a startup failure.
+	//
+	// The env var is base64 (matching HomeChef's BFF_INTERNAL_HMAC_KEY); the
+	// MAC is computed over the DECODED bytes. Using the encoded form on either
+	// side produces signatures that never verify.
+	BFFHMACKey []byte
 }
 
 func Load() (Config, error) {
@@ -61,6 +73,16 @@ func Load() (Config, error) {
 	// instead.
 	if cfg.MetricsPort == cfg.Port {
 		return Config{}, fmt.Errorf("config: METRICS_PORT (%s) must differ from PORT (%s)", cfg.MetricsPort, cfg.Port)
+	}
+	if raw := os.Getenv("KORA_BFF_HMAC_KEY"); raw != "" {
+		key, err := base64.StdEncoding.DecodeString(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("config: KORA_BFF_HMAC_KEY must be valid base64: %w", err)
+		}
+		if len(key) < 16 {
+			return Config{}, fmt.Errorf("config: KORA_BFF_HMAC_KEY must decode to at least 16 bytes, got %d", len(key))
+		}
+		cfg.BFFHMACKey = key
 	}
 	return cfg, nil
 }

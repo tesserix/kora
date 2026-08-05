@@ -6,8 +6,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"github.com/tesserix/kora/api/internal/admin"
 	"github.com/tesserix/kora/api/internal/ai"
 	"github.com/tesserix/kora/api/internal/auth"
+	"github.com/tesserix/kora/api/internal/bffauth"
 	"github.com/tesserix/kora/api/internal/billing"
 	"github.com/tesserix/kora/api/internal/challenges"
 	"github.com/tesserix/kora/api/internal/coach"
@@ -49,6 +51,11 @@ type Deps struct {
 	// disabled (no GEMINI_API_KEY) or Redis is unreachable — foodlog.Service
 	// treats a nil cache as a silent no-op.
 	ResolveCache ai.Cache
+	// BFFHMACKey is the shared secret the tesserix-home admin portal signs
+	// /v1/admin/* requests with. When nil the admin routes are not mounted
+	// at all, so an unconfigured environment answers 404 rather than 401 —
+	// the difference matters when diagnosing a deployment.
+	BFFHMACKey []byte
 }
 
 func NewRouter(deps Deps) *gin.Engine {
@@ -114,6 +121,17 @@ func NewRouter(deps Deps) *gin.Engine {
 
 		nutritionHandler := nutrition.NewHandler(foodRepo)
 		v1.GET("/foods", nutritionHandler.Search)
+
+		// Admin surface. A SEPARATE group from v1: /v1 carries
+		// auth.Middleware (Firebase end-user tokens) and these callers are
+		// platform admins with no Firebase identity and no Kora user row.
+		// Gin's radix tree keeps /v1/foods and /v1/admin/foods distinct, so
+		// the two groups never collide.
+		if len(deps.BFFHMACKey) > 0 {
+			adminHandler := admin.NewHandler(admin.NewRepository(deps.DB))
+			adminGroup := r.Group("/v1/admin", bffauth.Middleware(deps.BFFHMACKey, 0))
+			adminGroup.GET("/foods", adminHandler.ListFoods)
+		}
 
 		pinsHandler := pins.NewHandler(pins.NewService(pins.NewRepository(deps.DB), foodRepo))
 		v1.GET("/pins", pinsHandler.List)

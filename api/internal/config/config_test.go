@@ -230,3 +230,41 @@ func TestLoadRejectsPortCollidingWithTheMetricsDefault(t *testing.T) {
 	_, err := Load()
 	require.Error(t, err, "PORT=9090 collides with the METRICS_PORT default and must be rejected")
 }
+
+func TestLoadDecodesBFFHMACKey(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://x/y")
+	t.Setenv("KORA_BFF_HMAC_KEY", "a29yYS10ZXN0LWhtYWMta2V5LTEyMzQ1Ng==")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, []byte("kora-test-hmac-key-123456"), cfg.BFFHMACKey,
+		"the env var is base64; the MAC needs the decoded bytes")
+}
+
+func TestLoadLeavesBFFHMACKeyNilWhenUnset(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://x/y")
+	t.Setenv("KORA_BFF_HMAC_KEY", "")
+
+	cfg, err := Load()
+	require.NoError(t, err, "an absent key is a valid deployment, not an error")
+	assert.Nil(t, cfg.BFFHMACKey)
+}
+
+func TestLoadRejectsMalformedBFFHMACKey(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://x/y")
+	t.Setenv("KORA_BFF_HMAC_KEY", "not!valid!base64!")
+
+	_, err := Load()
+	require.Error(t, err, "a set-but-unusable key must fail loudly, not disable admin silently")
+	assert.Contains(t, err.Error(), "KORA_BFF_HMAC_KEY")
+}
+
+func TestLoadRejectsShortBFFHMACKey(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://x/y")
+	// "short" -> 5 decoded bytes, under the 16-byte floor.
+	t.Setenv("KORA_BFF_HMAC_KEY", "c2hvcnQ=")
+
+	_, err := Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "16")
+}
