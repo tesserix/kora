@@ -198,6 +198,14 @@ referencing across repos.
 
 ## Phase 2 — Logs
 
+> **SUPERSEDED 2026-08-05 — this section's premise is factually wrong.**
+> GKE logging is **disabled** on the cluster (`loggingConfig.componentConfig: {}`),
+> and Cloud Logging has never ingested a container log line from it. The deep
+> links below would have pointed at an empty dataset. Decision recorded in
+> `2026-08-05-kora-logs-not-building-decision.md`: not building this; audit
+> events (`kora_admin_events`, from the food-data design) serve the need
+> instead. The rest of this section is retained only as the original reasoning.
+
 **Recommendation: deep links into Cloud Logging, pre-filtered.** GKE already
 ships container logs there, the API logs structured JSON, and a link costs
 almost nothing to build. An in-portal viewer with search and tailing is a real
