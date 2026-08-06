@@ -6,6 +6,7 @@ import { router } from "expo-router";
 import { ApiError, NetworkError } from "@/lib/api";
 import { CaptureQueueFullError } from "@/offline/captureQueue";
 import { NoOwnerError } from "@/offline/owner";
+import { mealSlotForHour } from "@/lib/mealSlot";
 import { QUEUED_CAPTURES_KEY } from "@/offline/queryKeys";
 
 jest.mock("expo-router", () => ({ router: { back: jest.fn(), push: jest.fn() } }));
@@ -45,6 +46,14 @@ jest.mock("@/lib/api", () => ({
     }
   },
 }));
+
+// The slot capture.tsx seeds itself with (mealSlotForHour(new Date().getHours())),
+// derived the same way production does rather than pinned to a literal, so the
+// assertion stays correct whatever hour the suite runs at. Asserting
+// `expect.any(String)` here was worthless: passing `kind`, `fileName`, or any
+// other string as the slot stayed green, and the slot is what decides which
+// diary section the meal lands in.
+const expectedMealSlot = () => mealSlotForHour(new Date().getHours());
 
 const mockResolveTextMutate = jest.fn();
 const mockResolvePhotoMutate = jest.fn();
@@ -151,7 +160,7 @@ describe("Photo capture goes offline", () => {
     expect(mockEnqueueCapture()).toHaveBeenCalledWith(
       { uri: "file://x.jpg", name: "x.jpg", type: "image/jpeg" },
       "photo",
-      expect.any(String),
+      expectedMealSlot(),
     );
   });
 
@@ -216,7 +225,7 @@ describe("Voice capture goes offline", () => {
     expect(mockEnqueueCapture()).toHaveBeenCalledWith(
       { uri: "file://mock-recording.m4a", name: "clip.m4a", type: "audio/mp4" },
       "voice",
-      expect.any(String),
+      expectedMealSlot(),
     );
     expect(await rendered.findByText(/you.{0,3}re offline/i)).toBeTruthy();
   });

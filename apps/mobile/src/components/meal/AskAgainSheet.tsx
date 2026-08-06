@@ -100,7 +100,8 @@ export function AskAgainSheet({ visible, phrase, onSelect, onManualSearch, onClo
   // per-item tiers instead of a question, so the right thing is to render the
   // candidate list and let the user pick — NOT to dead-end at manual search
   // with a blank prompt. Only a follow_up that actually asks something gets the
-  // question branch. Mirrors resolveResultView in app/capture.tsx.
+  // question branch. Mirrors resolveResultView in
+  // src/components/ResolutionResult.tsx.
   const asksQuestion = resolution?.tier === "follow_up" && !!resolution.follow_up_question;
 
   return (

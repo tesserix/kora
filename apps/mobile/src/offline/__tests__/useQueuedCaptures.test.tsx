@@ -23,7 +23,34 @@ const RESOLUTION = { tier: "confirm", candidates: [] } as unknown as Resolution;
 // A UTC instant that lands at midday on the given LOCAL calendar day. Written
 // this way rather than as a "...T12:00:00Z" literal so the fixtures mean the
 // same day in every timezone the suite might run in.
-const atLocalNoon = (y: number, m: number, d: number) => new Date(y, m - 1, d, 12).toISOString();
+const atLocalNoon = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12).toISOString();
+
+// The clock is FROZEN, and every fixture day is derived from it by offset —
+// never written as a literal date.
+//
+// `queuedAt` is stamped at append() time, i.e. "now", so an implementation
+// that read `queuedAt` instead of `capturedAt` would look at TODAY. A fixture
+// day that happens to equal today therefore cannot tell that bug from correct
+// behaviour, and the previous version of this file claimed its fixtures were
+// "deliberately NOT today" while three of five tests used 2026-08-06 — which
+// WAS today when it was written. Deriving from a frozen clock makes that
+// impossible to get wrong again: a fixture that IS today would have to be
+// written as daysAgo(0), which is a deliberate choice rather than an accident
+// of the calendar.
+const FROZEN_NOW = new Date(2026, 0, 15, 9, 30);
+
+function daysAgo(n: number): Date {
+  const d = new Date(FROZEN_NOW);
+  d.setDate(d.getDate() - n);
+  return d;
+}
+const localDayOf = (d: Date) => d.toLocaleDateString("en-CA");
+
+beforeAll(() => {
+  jest.useFakeTimers({ doNotFake: ["nextTick", "queueMicrotask", "setTimeout", "setInterval", "clearTimeout", "clearInterval", "setImmediate", "clearImmediate"] });
+  jest.setSystemTime(FROZEN_NOW);
+});
+afterAll(() => { jest.useRealTimers(); });
 
 // retry: false so a queryFn that throws surfaces immediately rather than
 // stalling the test behind react-query's backoff.
@@ -43,15 +70,11 @@ async function seed(id: string, capturedAt: string, ownerId = "uid-1") {
 
 beforeEach(async () => { await AsyncStorage.clear(); });
 
-// The fixture day is deliberately NOT today (see the current system date at
-// the top of this suite's run): `queuedAt` is stamped at append() time, i.e.
-// "now", so an implementation that read `queuedAt` instead of `capturedAt`
-// would look at today's date and find nothing here. Picking a fixture day
-// that happens to equal today would let that bug hide behind the coincidence
-// — as it did before this fix.
+// TWO days before the frozen "now", so an implementation reading `queuedAt`
+// (stamped at append() time, i.e. the frozen now) finds nothing here.
 it("shows a capture on the day it was CAPTURED", async () => {
-  await seed("c1", atLocalNoon(2026, 8, 1));
-  const { result } = await renderHook(() => useQueuedCaptures("2026-08-01"), { wrapper: wrap(newClient()) });
+  await seed("c1", atLocalNoon(daysAgo(2)));
+  const { result } = await renderHook(() => useQueuedCaptures(localDayOf(daysAgo(2))), { wrapper: wrap(newClient()) });
   await waitFor(() => expect(result.current.rows).toHaveLength(1));
   expect(result.current.rows[0]).toMatchObject({ id: "c1", status: "pending", kcal: null });
 });
@@ -67,8 +90,8 @@ it("shows a capture on the day it was CAPTURED", async () => {
 it("resolves rows even while the device is offline", async () => {
   onlineManager.setOnline(false);
   try {
-    await seed("c1", atLocalNoon(2026, 8, 1));
-    const { result } = await renderHook(() => useQueuedCaptures("2026-08-01"), { wrapper: wrap(newClient()) });
+    await seed("c1", atLocalNoon(daysAgo(2)));
+    const { result } = await renderHook(() => useQueuedCaptures(localDayOf(daysAgo(2))), { wrapper: wrap(newClient()) });
     await waitFor(() => expect(result.current.rows).toHaveLength(1));
     expect(result.current.rows[0]).toMatchObject({ id: "c1" });
   } finally {
@@ -79,9 +102,9 @@ it("resolves rows even while the device is offline", async () => {
 // A review row has macros but the user has not accepted them. Counting them
 // would make the day total MOVE when the user REJECTS a suggestion.
 it("reports kcal null for a review row so it cannot enter day totals", async () => {
-  await seed("c1", atLocalNoon(2026, 8, 6));
+  await seed("c1", atLocalNoon(daysAgo(3)));
   await markReview("c1", RESOLUTION);
-  const { result } = await renderHook(() => useQueuedCaptures("2026-08-06"), { wrapper: wrap(newClient()) });
+  const { result } = await renderHook(() => useQueuedCaptures(localDayOf(daysAgo(3))), { wrapper: wrap(newClient()) });
   await waitFor(() => expect(result.current.rows).toHaveLength(1));
   expect(result.current.rows[0]).toMatchObject({ status: "review", kcal: null });
 });
@@ -95,9 +118,9 @@ it("reports kcal null for a review row so it cannot enter day totals", async () 
 // query to genuinely resolve — the initial `[]` state fails `toHaveLength(1)`
 // — and asserting on the returned id confirms the RIGHT one survived.
 it("never shows another user's capture", async () => {
-  await seed("mine", atLocalNoon(2026, 8, 6), "uid-1");
-  await seed("theirs", atLocalNoon(2026, 8, 6), "uid-2");
-  const { result } = await renderHook(() => useQueuedCaptures("2026-08-06"), { wrapper: wrap(newClient()) });
+  await seed("mine", atLocalNoon(daysAgo(3)), "uid-1");
+  await seed("theirs", atLocalNoon(daysAgo(3)), "uid-2");
+  const { result } = await renderHook(() => useQueuedCaptures(localDayOf(daysAgo(3))), { wrapper: wrap(newClient()) });
   await waitFor(() => expect(result.current.rows).toHaveLength(1));
   expect(result.current.rows.map((r) => r.id)).toEqual(["mine"]);
 });
@@ -108,9 +131,9 @@ it("never shows another user's capture", async () => {
 // device appears on every day the user views. Seeding a same-day row too
 // means only a real, correct filter produces exactly one row.
 it("excludes captures from other days", async () => {
-  await seed("today", atLocalNoon(2026, 8, 6));
-  await seed("yesterday", atLocalNoon(2026, 8, 5));
-  const { result } = await renderHook(() => useQueuedCaptures("2026-08-06"), { wrapper: wrap(newClient()) });
+  await seed("selectedDay", atLocalNoon(daysAgo(3)));
+  await seed("dayBefore", atLocalNoon(daysAgo(4)));
+  const { result } = await renderHook(() => useQueuedCaptures(localDayOf(daysAgo(3))), { wrapper: wrap(newClient()) });
   await waitFor(() => expect(result.current.rows).toHaveLength(1));
-  expect(result.current.rows.map((r) => r.id)).toEqual(["today"]);
+  expect(result.current.rows.map((r) => r.id)).toEqual(["selectedDay"]);
 });
