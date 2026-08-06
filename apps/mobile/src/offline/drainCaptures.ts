@@ -1,5 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
-import type { Resolution } from "@/api/types";
+import type { Resolution, ResolutionSource } from "@/api/types";
 import { apiFetchMultipart, currentUserId } from "@/lib/api";
 import { buildCaptureForm, normalizeResolution } from "@/api/resolveWire";
 import { deleteQueuedMedia, mediaExists, queuedMediaUri } from "./captureMedia";
@@ -42,6 +42,14 @@ function firstCandidate(resolution: Resolution) {
   return resolution.candidates?.[0];
 }
 
+// Typed against ResolutionSource (src/api/types.ts) rather than a bare string
+// literal, so the compiler — not a human re-reading api/internal/metrics/
+// labels.go's allowlist — rejects a value the server would silently bucket
+// into "other" and corrupt the by-source share metric.
+function sourceOf(kind: QueuedCapture["kind"]): ResolutionSource {
+  return kind === "photo" ? "ai_photo" : "ai_voice";
+}
+
 export async function drainCaptureQueue(deps: DrainDeps) {
   let logged = 0, review = 0, failed = 0, deferred = 0;
 
@@ -73,7 +81,7 @@ export async function drainCaptureQueue(deps: DrainDeps) {
             meal_slot: item.mealSlot ?? "snack",
             // Decision 2: capture time, always.
             logged_at: item.capturedAt,
-            source: item.kind === "photo" ? "photo" : "voice",
+            source: sourceOf(item.kind),
           },
           item.id,
           item.ownerId,

@@ -59,8 +59,24 @@ describe("drainCaptureQueue", () => {
     expect(logs).toHaveLength(1);
     // Decision 2: the log is stamped when the photo was TAKEN, not when it resolved.
     expect(logs[0].payload.logged_at).toBe(atLocalNoon(2026, 8, 6));
+    // The server's source allowlist (api/internal/metrics/labels.go:44-47) has
+    // no "photo" or "voice" entry — only "ai_photo" and "ai_voice". Anything
+    // else is silently bucketed into "other" (labels.go:16-19), corrupting the
+    // by-source share metric with no error anywhere.
+    expect(logs[0].payload.source).toBe("ai_photo");
     expect(await listCaptures()).toEqual([]);
     expect(d.deleteMedia).toHaveBeenCalledWith("c1.jpg");
+  });
+
+  it("stamps a voice capture's handoff with the ai_voice source, not a raw 'voice'", async () => {
+    await seed("c1", { kind: "voice", storedName: "c1.m4a" });
+    const d = deps();
+
+    await drainCaptureQueue(d);
+
+    const logs = await listLogs();
+    expect(logs).toHaveLength(1);
+    expect(logs[0].payload.source).toBe("ai_voice");
   });
 
   it("routes confirm and follow_up to review, keeping the media", async () => {

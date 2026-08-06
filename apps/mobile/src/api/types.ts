@@ -192,6 +192,14 @@ export type WeightEntry = {
 
 export type ResolveTier = "auto" | "confirm" | "follow_up";
 
+// The food-log `source` value the server actually accepts — its allowlist is
+// api/internal/metrics/labels.go:44-47. Anything outside it is bucketed into
+// "other" by labels.go:16-19, silently corrupting the by-source share metric
+// rather than erroring. Moved here (out of app/capture.tsx, where it
+// originated) so a leaf module like src/offline/drainCaptures.ts can type a
+// handoff source against it without importing from the app/ directory.
+export type ResolutionSource = "ai_photo" | "ai_text" | "ai_voice" | "ai_barcode";
+
 export interface ResolvedCandidate {
   item: FoodItem;
   portion_grams: number;

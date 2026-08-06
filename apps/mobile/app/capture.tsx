@@ -42,7 +42,7 @@ import { kcalTotalLabel } from "@/lib/resolutionKcal";
 import { OfflineUnknownBarcodeError } from "@/offline/cachedResolution";
 import { isLoggable } from "@/lib/candidateTier";
 import { isCachedResult } from "@/api/types";
-import type { FoodItem, Resolution, ResolvedCandidate } from "@/api/types";
+import type { FoodItem, Resolution, ResolvedCandidate, ResolutionSource } from "@/api/types";
 import { mealSlotForHour, type MealSlot } from "@/lib/mealSlot";
 
 export type CaptureMode = "photo" | "voice" | "scan" | "type";
@@ -52,7 +52,11 @@ export type CaptureStage = "idle" | "analyzing" | "result";
 // produced the current resolution (see applyResolution) — never from the
 // capture tab that happened to be open, since the composer is reachable from
 // every tab and a user can type on the Photo tab, etc.
-export type ResolutionSource = "ai_photo" | "ai_text" | "ai_voice" | "ai_barcode";
+//
+// Defined in src/api/types.ts (the server's actual allowlist) and re-exported
+// here so every existing importer of `ResolutionSource` from this module
+// keeps working unchanged.
+export type { ResolutionSource };
 
 const MODE_PILLS: ReadonlyArray<{ mode: CaptureMode; icon: string; label: string }> = [
   { mode: "photo", icon: "camera", label: "Photo" },
