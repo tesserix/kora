@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/pgvector/pgvector-go"
 	"github.com/stretchr/testify/require"
 )
 
@@ -353,6 +354,151 @@ func TestResolveMatchScoreUnaffectedByHeadBonus(t *testing.T) {
 	require.False(t, floatsClose(scoreWithBonusFolded, cands[0].MatchScore, 0.0001),
 		"MatchScore (%v) must not include the head bonus (would be %v if it did)",
 		cands[0].MatchScore, scoreWithBonusFolded)
+}
+
+// TestResolvePersonalAliasExcludesSoftDeleted is the regression guard for the
+// personal-alias raw SQL join in Resolve's tier 1: a taught personal
+// correction must not resurrect a food an admin has retired.
+func TestResolvePersonalAliasExcludesSoftDeleted(t *testing.T) {
+	db := testDB(t)
+	tx := db.Begin()
+	require.NoError(t, tx.Error)
+	t.Cleanup(func() { tx.Rollback() })
+	repo := NewRepository(tx)
+	ctx := context.Background()
+
+	userID := uuid.New()
+	require.NoError(t, tx.Exec(
+		"INSERT INTO users (id, firebase_uid, email) VALUES (?, ?, ?)",
+		userID, "resolve-retired-"+userID.String(), "resolve-retired@test.dev").Error)
+
+	retired := FoodItem{Name: "Retired Personal Alias Food " + uuid.NewString(), Provenance: ProvenanceCurated, KcalPer100g: 100}
+	require.NoError(t, tx.Create(&retired).Error)
+	require.NoError(t, tx.Exec("UPDATE food_items SET deleted_at = now() WHERE id = ?", retired.ID).Error)
+
+	live := FoodItem{Name: "Live Personal Alias Food " + uuid.NewString(), Provenance: ProvenanceCurated, KcalPer100g: 100}
+	require.NoError(t, tx.Create(&live).Error)
+
+	retiredPhrase := "retired personal phrase " + uuid.NewString()
+	livePhrase := "live personal phrase " + uuid.NewString()
+	require.NoError(t, repo.AddAlias(ctx, userID, retiredPhrase, retired.ID))
+	require.NoError(t, repo.AddAlias(ctx, userID, livePhrase, live.ID))
+
+	gotRetired, err := repo.Resolve(ctx, userID, retiredPhrase, nil, 5)
+	require.NoError(t, err)
+	for _, c := range gotRetired {
+		require.NotEqual(t, retired.ID, c.Item.ID, "a personal alias must not resurrect a retired food")
+	}
+
+	gotLive, err := repo.Resolve(ctx, userID, livePhrase, nil, 5)
+	require.NoError(t, err)
+	require.NotEmpty(t, gotLive, "the live food must still resolve via personal alias")
+	require.Equal(t, live.ID, gotLive[0].Item.ID)
+	require.Equal(t, MatchAlias, gotLive[0].MatchTier)
+}
+
+// TestResolveGlobalAliasExcludesSoftDeleted is the regression guard for the
+// global/curated-alias raw SQL join in Resolve's tier 1.
+func TestResolveGlobalAliasExcludesSoftDeleted(t *testing.T) {
+	db := testDB(t)
+	tx := db.Begin()
+	require.NoError(t, tx.Error)
+	t.Cleanup(func() { tx.Rollback() })
+	repo := NewRepository(tx)
+	ctx := context.Background()
+
+	retired := FoodItem{Name: "Retired Global Alias Food " + uuid.NewString(), Provenance: ProvenanceCurated, KcalPer100g: 100}
+	require.NoError(t, tx.Create(&retired).Error)
+	require.NoError(t, tx.Exec("UPDATE food_items SET deleted_at = now() WHERE id = ?", retired.ID).Error)
+
+	live := FoodItem{Name: "Live Global Alias Food " + uuid.NewString(), Provenance: ProvenanceCurated, KcalPer100g: 100}
+	require.NoError(t, tx.Create(&live).Error)
+
+	retiredPhrase := "retired global phrase " + uuid.NewString()
+	livePhrase := "live global phrase " + uuid.NewString()
+	require.NoError(t, repo.AddAlias(ctx, uuid.Nil, retiredPhrase, retired.ID))
+	require.NoError(t, repo.AddAlias(ctx, uuid.Nil, livePhrase, live.ID))
+
+	gotRetired, err := repo.Resolve(ctx, uuid.Nil, retiredPhrase, nil, 5)
+	require.NoError(t, err)
+	for _, c := range gotRetired {
+		require.NotEqual(t, retired.ID, c.Item.ID, "a global alias must not resurrect a retired food")
+	}
+
+	gotLive, err := repo.Resolve(ctx, uuid.Nil, livePhrase, nil, 5)
+	require.NoError(t, err)
+	require.NotEmpty(t, gotLive, "the live food must still resolve via global alias")
+	require.Equal(t, live.ID, gotLive[0].Item.ID)
+	require.Equal(t, MatchAlias, gotLive[0].MatchTier)
+}
+
+// TestResolveFullTextExcludesSoftDeleted is the regression guard for the
+// full-text (tsvector) raw SQL tier in Resolve.
+func TestResolveFullTextExcludesSoftDeleted(t *testing.T) {
+	db := testDB(t)
+	tx := db.Begin()
+	require.NoError(t, tx.Error)
+	t.Cleanup(func() { tx.Rollback() })
+	repo := NewRepository(tx)
+	ctx := context.Background()
+
+	token := "zqxretired" + uuid.New().String()[:8]
+	_, err := repo.Insert(ctx, []FoodItem{
+		{Name: token + " live", Provenance: ProvenanceUSDA, KcalPer100g: 100},
+		{Name: token + " retired", Provenance: ProvenanceUSDA, KcalPer100g: 100},
+	})
+	require.NoError(t, err)
+
+	var retiredRow FoodItem
+	require.NoError(t, tx.First(&retiredRow, "name = ?", token+" retired").Error)
+	retiredID := retiredRow.ID
+	require.NoError(t, tx.Exec("UPDATE food_items SET deleted_at = now() WHERE id = ?", retiredID).Error)
+
+	got, err := repo.Resolve(ctx, uuid.Nil, token, nil, 10)
+	require.NoError(t, err)
+	require.NotEmpty(t, got, "the live row must still resolve via full text")
+	for _, c := range got {
+		require.NotEqual(t, retiredID, c.Item.ID, "full-text tier must not return a retired food")
+	}
+}
+
+// TestResolveEmbeddingExcludesSoftDeleted is the regression guard for the
+// HNSW vector raw SQL tier in Resolve. Both seeded rows get identical
+// synthetic embeddings and names that share no lexeme with the query phrase,
+// so the tsvector tier never fires and only the embedding tier can be
+// responsible for either row appearing.
+func TestResolveEmbeddingExcludesSoftDeleted(t *testing.T) {
+	db := testDB(t)
+	tx := db.Begin()
+	require.NoError(t, tx.Error)
+	t.Cleanup(func() { tx.Rollback() })
+	repo := NewRepository(tx)
+	ctx := context.Background()
+
+	suffix := uuid.New().String()[:8]
+	live := FoodItem{Name: "Zqxembliveunrelatedname" + suffix, Provenance: ProvenanceUSDA, KcalPer100g: 100}
+	retired := FoodItem{Name: "Zqxembretiredunrelatedname" + suffix, Provenance: ProvenanceUSDA, KcalPer100g: 100}
+	require.NoError(t, tx.Create(&live).Error)
+	require.NoError(t, tx.Create(&retired).Error)
+
+	vec := make([]float32, 768)
+	vec[0] = 1
+	pgVec := pgvector.NewVector(vec)
+	require.NoError(t, tx.Exec("UPDATE food_items SET embedding = ? WHERE id = ?", pgVec, live.ID).Error)
+	require.NoError(t, tx.Exec("UPDATE food_items SET embedding = ? WHERE id = ?", pgVec, retired.ID).Error)
+	require.NoError(t, tx.Exec("UPDATE food_items SET deleted_at = now() WHERE id = ?", retired.ID).Error)
+
+	got, err := repo.Resolve(ctx, uuid.Nil, "zzqueryphraseunrelated"+suffix, vec, 10)
+	require.NoError(t, err)
+	require.NotEmpty(t, got, "the live row must still resolve via embedding")
+	var foundLive bool
+	for _, c := range got {
+		require.NotEqual(t, retired.ID, c.Item.ID, "embedding tier must not return a retired food")
+		if c.Item.ID == live.ID {
+			foundLive = true
+		}
+	}
+	require.True(t, foundLive, "the live row must be among the embedding candidates")
 }
 
 func floatsClose(a, b, delta float64) bool {

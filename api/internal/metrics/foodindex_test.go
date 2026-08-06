@@ -123,6 +123,118 @@ func TestRefreshOncePublishesTheQueriedCounts(t *testing.T) {
 	}
 }
 
+// TestRefreshOnceExcludesSoftDeletedFromGauges proves the gauge query excludes
+// retired food_items rows, on ALL THREE published gauges — items, embedded,
+// AND missing — not just items. embedded and missing come from the exact
+// same query (see foodIndexQuery) and are equally affected by the
+// soft-delete filter: the retired row is given an embedding specifically so
+// a bug that filtered items but not embedded (or vice versa) is caught here
+// rather than passing on an unseeded axis. Seeds one live (unembedded) and
+// one soft-deleted (embedded) row inside a rolled-back transaction and
+// asserts EXCLUDES the retired row on every axis while still counting the
+// live one — both halves are required, or a query returning nothing at all
+// could pass this test.
+func TestRefreshOnceExcludesSoftDeletedFromGauges(t *testing.T) {
+	db := testDB(t)
+	c := New()
+
+	tx := db.Begin()
+	if tx.Error != nil {
+		t.Fatalf("begin tx: %v", tx.Error)
+	}
+	t.Cleanup(func() {
+		if err := tx.Rollback().Error; err != nil {
+			t.Errorf("rollback: %v", err)
+		}
+	})
+
+	liveItem := nutrition.FoodItem{
+		Name:           "metrics-test soft-delete live item",
+		Provenance:     nutrition.ProvenanceCurated,
+		KcalPer100g:    100,
+		ProteinPer100g: 1,
+		CarbsPer100g:   1,
+		FatPer100g:     1,
+	}
+	if err := tx.Create(&liveItem).Error; err != nil {
+		t.Fatalf("seed live row: %v", err)
+	}
+
+	retiredItem := nutrition.FoodItem{
+		Name:           "metrics-test soft-delete retired item",
+		Provenance:     nutrition.ProvenanceCurated,
+		KcalPer100g:    100,
+		ProteinPer100g: 1,
+		CarbsPer100g:   1,
+		FatPer100g:     1,
+	}
+	if err := tx.Create(&retiredItem).Error; err != nil {
+		t.Fatalf("seed retired row: %v", err)
+	}
+	// Give the retired row an embedding too, so the embedded/missing gauges
+	// are discriminating on the soft-delete filter exactly like items is —
+	// without this, both seeded rows would be unembedded and a bug that
+	// filtered items but forgot embedded/missing would still pass on those
+	// two axes (0 == 0 either way).
+	vec := pgvector.NewVector(make([]float32, 768))
+	if err := tx.Exec("UPDATE food_items SET embedding = ? WHERE id = ?", vec, retiredItem.ID).Error; err != nil {
+		t.Fatalf("set embedding on retired row: %v", err)
+	}
+	if err := tx.Exec("UPDATE food_items SET deleted_at = now() WHERE id = ?", retiredItem.ID).Error; err != nil {
+		t.Fatalf("soft-delete seeded row: %v", err)
+	}
+
+	r := NewFoodIndexRefresher(tx, c, time.Minute, quietLogger())
+
+	// Baseline: how many LIVE rows / embedded LIVE rows food_items actually
+	// holds right now, independent of the code under test.
+	var want struct {
+		Total    int64
+		Embedded int64
+	}
+	if err := tx.Raw(
+		"SELECT count(*) AS total, count(*) FILTER (WHERE embedding IS NOT NULL) AS embedded FROM food_items WHERE deleted_at IS NULL",
+	).Scan(&want).Error; err != nil {
+		t.Fatalf("baseline query: %v", err)
+	}
+
+	// Guard against the exact vacuity this test exists to close: the raw
+	// (unfiltered) counts must differ from the filtered baseline on BOTH
+	// axes, or the retired row isn't actually being excluded by anything and
+	// the assertions below would pass even against a query with no filter at
+	// all.
+	var raw struct {
+		Total    int64
+		Embedded int64
+	}
+	if err := tx.Raw(
+		"SELECT count(*) AS total, count(*) FILTER (WHERE embedding IS NOT NULL) AS embedded FROM food_items",
+	).Scan(&raw).Error; err != nil {
+		t.Fatalf("raw counts query: %v", err)
+	}
+	if raw.Total == want.Total {
+		t.Fatalf("fixture not discriminating on total: raw (%d) equals filtered (%d)", raw.Total, want.Total)
+	}
+	if raw.Embedded == want.Embedded {
+		t.Fatalf("fixture not discriminating on embedded: raw (%d) equals filtered (%d)", raw.Embedded, want.Embedded)
+	}
+
+	if err := r.RefreshOnce(context.Background()); err != nil {
+		t.Fatalf("RefreshOnce: %v", err)
+	}
+
+	items, embedded, missing := c.FoodIndexGauges()
+	if got := int64(testutil.ToFloat64(items)); got != want.Total {
+		t.Errorf("items gauge = %d, want %d (retired rows must be excluded, live rows must still be counted)", got, want.Total)
+	}
+	if got := int64(testutil.ToFloat64(embedded)); got != want.Embedded {
+		t.Errorf("embedded gauge = %d, want %d (a retired-but-embedded row must not be counted as embedded)", got, want.Embedded)
+	}
+	if got := int64(testutil.ToFloat64(missing)); got != want.Total-want.Embedded {
+		t.Errorf("missing gauge = %d, want %d", got, want.Total-want.Embedded)
+	}
+}
+
 // The negative twin. Observability failing must never take the product down,
 // and must never publish a LIE — a failed query leaves the last good reading
 // standing rather than zeroing the gauges, which would look exactly like an

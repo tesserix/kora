@@ -122,6 +122,29 @@ func TestListFoodsWithNoQueryReturnsEverythingItCanSee(t *testing.T) {
 		"the page must actually be populated, not just report a correct Total")
 }
 
+// TestListFoodsExcludesSoftDeleted proves a retired food never appears in the
+// admin browse — neither in the returned page nor in Total, which is what
+// tells an operator whether a "delete" actually did anything.
+func TestListFoodsExcludesSoftDeleted(t *testing.T) {
+	db := testDB(t)
+	tx := seedTx(t, db, food("zzz-admin-live", ""), food("zzz-admin-retired", ""))
+	var retiredRow nutrition.FoodItem
+	require.NoError(t, tx.First(&retiredRow, "name = ?", "zzz-admin-retired").Error)
+	require.NoError(t, tx.Exec("UPDATE food_items SET deleted_at = now() WHERE id = ?", retiredRow.ID).Error)
+	repo := NewRepository(tx)
+
+	got, err := repo.ListFoods(context.Background(), ListParams{Query: "zzz-admin-", Limit: 10})
+	require.NoError(t, err)
+
+	names := map[string]bool{}
+	for _, it := range got.Items {
+		names[it.Name] = true
+	}
+	assert.True(t, names["zzz-admin-live"], "the live row must still be listed")
+	assert.False(t, names["zzz-admin-retired"], "a retired row must not be listed")
+	assert.Equal(t, int64(1), got.Total, "Total must exclude the retired row too")
+}
+
 // TestClampLimitBounds is the load-bearing pin for the limit clamp: it tests
 // clampLimit directly, with NO database, so it cannot be defeated by ambient
 // row count the way a ListFoods-level, row-count-based assertion can (see

@@ -113,6 +113,16 @@ func (s Service) LogFood(ctx context.Context, userID uuid.UUID, req LogRequest) 
 	}
 	item, err := s.foods.GetByID(ctx, *req.FoodItemID)
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// Mirrors EditLog's and CreateBatch's mapping of the same error:
+			// GetByID now filters deleted_at, so this is reachable whenever a
+			// client's food picker cache predates a retire, or an
+			// offline-queued log is replayed after one. Must be a 400, not a
+			// 500 — a 400 is permanent and fails on the first refusal with a
+			// legible message, whereas a 500 costs five wasted replays across
+			// drain triggers before the entry moves to failed.
+			return FoodLog{}, httpx.ValidationError{Message: "food_item_id not found"}
+		}
 		return FoodLog{}, fmt.Errorf("foodlog: resolve food: %w", err)
 	}
 	f := req.QuantityGrams / 100.0
@@ -337,7 +347,18 @@ func (s Service) CreateBatch(ctx context.Context, userID uuid.UUID, req CreateBa
 			item, err := s.foods.GetByID(ctx, it.FoodItemID)
 			if err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
-					// Client supplied a food_item_id that doesn't exist — a 400.
+					// Client supplied a food_item_id that doesn't resolve — a
+					// 400. This item most commonly arrived from a saved meal
+					// (savedmeals.Repository.ItemsForMeals deliberately keeps
+					// an unfiltered JOIN, so a meal can still display a
+					// retired item) — the user never typed this id and can't
+					// recognize it, so name the FOOD that's unavailable when
+					// we can. NameForID bypasses the soft-delete filter
+					// purely to look up the name for this message; it does
+					// not change the all-or-nothing failure of the batch.
+					if name, ok := s.foods.NameForID(ctx, it.FoodItemID); ok {
+						return httpx.ValidationError{Message: fmt.Sprintf("food no longer available: %s", name)}
+					}
 					return httpx.ValidationError{Message: "unknown food_item_id"}
 				}
 				// Infra/DB fault resolving the food — must not be a client 400.

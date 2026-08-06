@@ -57,7 +57,7 @@ func (r Repository) ListFoods(ctx context.Context, p ListParams) (ListResult, er
 		p.Offset = 0
 	}
 
-	q := r.db.WithContext(ctx).Model(&nutrition.FoodItem{})
+	q := r.db.WithContext(ctx).Model(&nutrition.FoodItem{}).Where("deleted_at IS NULL")
 	if p.Query != "" {
 		pattern := "%" + p.Query + "%"
 		q = q.Where("name ILIKE ? OR brand ILIKE ?", pattern, pattern)

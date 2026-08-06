@@ -3,7 +3,12 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -28,8 +33,46 @@ type Cache interface {
 	Delete(ctx context.Context, key string) error
 }
 
-// NoCache is a no-op Cache used when caching is disabled or unconfigured.
+// Generation is the cache's invalidation-epoch surface, kept as its own
+// small interface separate from Cache (rather than folded into it) so a
+// caller that only needs to invalidate everything at once — the admin food
+// mutation path — never has to depend on Get/Set/Delete, and so NoCache's
+// generation methods can be trivial, silent no-ops with nothing to keep in
+// sync.
+//
+// Bumping the generation invalidates every cache entry that could reference
+// a given food's macros in one O(1), atomic operation, with no scan and no
+// reverse index from food id back to cache keys. Cache keys are built from
+// (kind, user, phrase/hash) — see CacheKey — and structurally carry no food
+// id, so there is nothing to look up "every entry that might reference food
+// X" against directly; the generation counter sidesteps needing one.
+type Generation interface {
+	// CurrentGeneration reports the cache's current invalidation
+	// generation. A read failure is reported via the error return (rather
+	// than folded into a zero value) so a caller — including a mutation's
+	// own test — can distinguish "read failed" from "read succeeded and
+	// returned 0", which is also the real baseline generation before any
+	// bump has ever happened.
+	CurrentGeneration(ctx context.Context) (int64, error)
+
+	// BumpGeneration atomically increments the generation. Every cache
+	// entry written before the bump becomes permanently unreachable via Get
+	// from this point on. Bumping does not delete anything — entries simply
+	// age out on their own TTL, the same as any other miss.
+	BumpGeneration(ctx context.Context) error
+}
+
+// NoCache is a no-op Cache used when caching is disabled or unconfigured. It
+// also satisfies Generation trivially: there is no real cache to invalidate,
+// so CurrentGeneration is a fixed, meaningless 0 and BumpGeneration is a
+// silent no-op — callers on the admin mutation path never need to
+// special-case "caching is off".
 type NoCache struct{}
+
+var (
+	_ Cache      = NoCache{}
+	_ Generation = NoCache{}
+)
 
 // Get always misses.
 func (NoCache) Get(ctx context.Context, key string) (*Resolution, bool) {
@@ -44,14 +87,75 @@ func (NoCache) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
+// CurrentGeneration always reports the baseline 0 — there is no real counter
+// to read.
+func (NoCache) CurrentGeneration(ctx context.Context) (int64, error) {
+	return 0, nil
+}
+
+// BumpGeneration is a no-op — there is nothing to invalidate.
+func (NoCache) BumpGeneration(ctx context.Context) error {
+	return nil
+}
+
+// resolveCacheGenerationKey is the single Redis key holding the resolve
+// cache's invalidation generation counter. It is process-wide (not scoped by
+// kind or user) because a food's macros can be embedded in a cached
+// Resolution under any kind (phrase, photo, voice) and any user's key —
+// bumping this one counter invalidates all of them at once, which is the
+// entire point.
+//
+// OPS PRECONDITION: whoever configures the Redis instance this cache runs
+// against MUST set maxmemory-policy to a TTL-respecting eviction policy
+// (e.g. volatile-lru or noeviction) — NOT allkeys-lru or allkeys-random. This
+// key is deliberately persistent (no TTL; INCR attaches none), so under
+// allkeys-lru/allkeys-random Redis is free to evict it under memory pressure
+// exactly like any other key, even though it never expires. RedisCache's
+// high-water-mark guard (see generationHWM) closes the resulting hole —
+// treating a post-eviction re-read as a failure rather than silently
+// resetting to the pre-bump baseline — but that guard is a safety net for a
+// misconfiguration, not a substitute for configuring the policy correctly.
+const resolveCacheGenerationKey = "ai:resolve-cache:generation"
+
+// generationGuardWarnInterval rate-limits the high-water-mark guard's warning
+// (see readGeneration and generationGuardWarnGate): at most one log line per
+// interval for however long the guard stays tripped, rather than one per
+// resolve request. The guard trips only on an eviction, a flush, or a stale
+// replica read — all rare and all operator-actionable — but it sits on the
+// hot resolve path, so even a rare-in-principle trip must not turn into a
+// per-request log storm once it starts happening.
+const generationGuardWarnInterval = time.Minute
+
 // RedisCache is a Cache backed by Redis, storing resolutions as JSON with a
 // fixed TTL. Any Redis or (de)serialization failure is treated as a miss on
 // Get, or silently dropped on Set — a cache problem must never break a
-// resolve request.
+// resolve request. It also satisfies Generation: every physical Redis key it
+// reads or writes is scoped by the current generation (see
+// generationScopedKey), so RedisCache.BumpGeneration makes every previously
+// written entry unreachable in one atomic INCR, with no scan.
 type RedisCache struct {
 	client *redis.Client
 	ttl    time.Duration
+
+	// generationHWM is a process-local high-water mark: the highest
+	// generation this RedisCache has ever observed from Redis. It exists
+	// to close a hole that a bare read of resolveCacheGenerationKey cannot
+	// close on its own — see readGeneration.
+	generationHWM atomic.Int64
+
+	// generationGuardWarnGate rate-limits the guard's log line (see
+	// readGeneration and generationGuardWarnInterval): the unix-nanosecond
+	// timestamp of the next moment a warning is allowed to fire. Read and
+	// advanced with a compare-and-swap, the same lock-free pattern as
+	// generationHWM, so the rare-but-hot trip path never serializes
+	// concurrent callers behind a lock either.
+	generationGuardWarnGate atomic.Int64
 }
+
+var (
+	_ Cache      = (*RedisCache)(nil)
+	_ Generation = (*RedisCache)(nil)
+)
 
 // NewRedisCache builds a RedisCache over an existing client with the given
 // entry TTL.
@@ -59,10 +163,121 @@ func NewRedisCache(client *redis.Client, ttl time.Duration) *RedisCache {
 	return &RedisCache{client: client, ttl: ttl}
 }
 
+// readGeneration is the single place RedisCache reads the invalidation
+// generation from Redis. A missing key (redis.Nil) is the normal baseline —
+// this cache has never been bumped yet — and reports generation 0 with no
+// error. Any other error (most importantly: Redis unreachable, which is
+// production's current state today — REDIS_URL is unset, so buildResolveHandler
+// falls back to NoCache at startup, but this path matters for Redis dying
+// AFTER startup, once it's actually wired) is returned as-is.
+//
+// Get/Set/Delete below all make the same choice about what a failed read
+// means: treat the cache as absent for that one call, rather than falling
+// back to a fixed generation number. A fixed fallback was rejected because it
+// can collide: generation 0 is not a made-up placeholder, it is the real,
+// valid generation every entry was written under before the very first bump
+// ever happens — so a fixed fallback of 0 would silently serve back a
+// pre-bump entry the instant it is still physically present (before its TTL
+// expires), which is exactly the cross-generation collision this whole
+// mechanism exists to prevent. Treating the cache as absent instead costs
+// nothing but the cache hit that would have happened anyway — a cache is a
+// cost optimisation here, never a correctness mechanism, so a guaranteed miss
+// is always an acceptable degradation and an occasional stale hit is not.
+//
+// A "missing key" read alone is not enough to tell a legitimate un-bumped
+// baseline apart from resolveCacheGenerationKey having been EVICTED after a
+// real bump already happened — Redis reports both as redis.Nil identically,
+// and the key is deliberately persistent (see its doc comment on
+// maxmemory-policy) so this is not a TTL expiry, only an eviction. To tell
+// them apart, readGeneration keeps a process-local high-water mark
+// (generationHWM) of the highest generation it has ever actually observed:
+// any newly read generation LOWER than that high-water mark — including the
+// re-synthesized 0 from a re-missing key — is treated as a read FAILURE, the
+// same as any other Redis error, rather than as a valid (if stale) value.
+// This also incidentally guards against a Redis replica serving a
+// lagging/stale counter value. generationHWM is read and updated with a
+// compare-and-swap loop so concurrent callers on the hot resolve path never
+// serialize behind a lock for this check.
+func (c *RedisCache) readGeneration(ctx context.Context) (int64, error) {
+	n, err := c.client.Get(ctx, resolveCacheGenerationKey).Int64()
+	if err != nil {
+		if !errors.Is(err, redis.Nil) {
+			return 0, err
+		}
+		n = 0
+	}
+
+	for {
+		hwm := c.generationHWM.Load()
+		if n < hwm {
+			c.warnGenerationGuardTripped(ctx, n, hwm)
+			return 0, fmt.Errorf("ai: observed generation %d below high-water mark %d (counter key evicted or stale replica read)", n, hwm)
+		}
+		if n == hwm {
+			return n, nil
+		}
+		if c.generationHWM.CompareAndSwap(hwm, n) {
+			return n, nil
+		}
+		// Lost the race to another goroutine observing a newer generation
+		// concurrently; retry against the updated high-water mark.
+	}
+}
+
+// warnGenerationGuardTripped emits a rate-limited warning when the
+// high-water-mark guard rejects an observed generation. This is the ONLY
+// observable signal an operator gets for the guard tripping: Get and Set
+// both swallow the resulting error by contract (a cache problem must never
+// break a resolve), and Delete's error only surfaces through the one caller
+// that logs it (foodlog's correction path), which most requests never hit.
+// Without this, an eviction, a flush, or a stale replica read degrades every
+// Get to an unconditional miss and every Set to a no-op — silently, for the
+// rest of the process's life or until enough generation bumps climb back
+// past the stale high-water mark — and the only symptom an operator sees is
+// a step-change in resolve latency and LLM spend, with no log line pointing
+// at the cause.
+//
+// It fires at most once per generationGuardWarnInterval, gated by
+// generationGuardWarnGate via compare-and-swap, so it cannot turn into a
+// per-request log storm while the guard stays tripped — this check sits on
+// the hot resolve path, executed by every concurrent caller of Get/Set/
+// Delete. Losing the CAS race just means another goroutine already claimed
+// this window; the caller still gets the correct error back regardless of
+// whether it won the race to log.
+func (c *RedisCache) warnGenerationGuardTripped(ctx context.Context, observed, hwm int64) {
+	now := time.Now().UnixNano()
+	next := c.generationGuardWarnGate.Load()
+	if now < next {
+		return
+	}
+	if !c.generationGuardWarnGate.CompareAndSwap(next, now+generationGuardWarnInterval.Nanoseconds()) {
+		return
+	}
+	slog.WarnContext(ctx, "ai: resolve cache generation high-water-mark guard tripped; cache degraded to unconditional miss until it recovers",
+		"observed_generation", observed, "high_water_mark", hwm)
+}
+
+// generationScopedKey combines a logical cache key (see CacheKey) with the
+// generation it was built under into the physical key actually stored in
+// Redis. CacheKey itself stays generation-agnostic — normalization and
+// per-user scoping are a property of the DATA (which phrase, whose alias
+// table), while the generation is a property of the CACHE'S LIFECYCLE (which
+// epoch is currently valid) — so every existing CacheKey caller keeps
+// working unchanged; only RedisCache needs to know generations exist at all.
+func generationScopedKey(key string, generation int64) string {
+	return key + ":g" + strconv.FormatInt(generation, 10)
+}
+
 // Get fetches and decodes a cached Resolution. Any error (miss, Redis down,
-// bad JSON) results in (nil, false) — never an error, never a panic.
+// bad JSON, or a failed generation read — see readGeneration) results in
+// (nil, false) — never an error, never a panic.
 func (c *RedisCache) Get(ctx context.Context, key string) (*Resolution, bool) {
-	data, err := c.client.Get(ctx, key).Bytes()
+	generation, err := c.readGeneration(ctx)
+	if err != nil {
+		return nil, false
+	}
+
+	data, err := c.client.Get(ctx, generationScopedKey(key, generation)).Bytes()
 	if err != nil {
 		return nil, false
 	}
@@ -75,22 +290,68 @@ func (c *RedisCache) Get(ctx context.Context, key string) (*Resolution, bool) {
 	return &r, true
 }
 
-// Set marshals and stores a Resolution with the cache's TTL. Failures are
-// swallowed (best-effort) — a cache write must never break a resolve.
+// Set marshals and stores a Resolution with the cache's TTL, under the
+// current generation. Failures — including a failed generation read — are
+// swallowed (best-effort): a cache write must never break a resolve. A
+// failed generation read specifically skips the write entirely rather than
+// writing under a guessed generation, for the same collision reason
+// documented on readGeneration.
 func (c *RedisCache) Set(ctx context.Context, key string, r Resolution) {
+	generation, err := c.readGeneration(ctx)
+	if err != nil {
+		return
+	}
+
 	data, err := json.Marshal(r)
 	if err != nil {
 		return
 	}
 
-	_ = c.client.Set(ctx, key, data, c.ttl).Err()
+	_ = c.client.Set(ctx, generationScopedKey(key, generation), data, c.ttl).Err()
 }
 
-// Delete evicts one cached entry. Deleting a key that isn't there (already
-// expired, never set) is not an error — Redis's DEL simply reports it
-// deleted zero keys, which this treats the same as success.
+// Delete evicts one cached entry, scoped by the SAME generation Get/Set
+// would currently use. This is correct for its one real caller
+// (foodlog.Service's correction-invalidation, which deletes shortly after
+// the entry could have been cached, with no bump in between): the physical
+// key it computes matches the one Set would have written. If a generation
+// bump DID happen in between, the entry Delete is trying to reach is already
+// unreachable via Get regardless, so this becomes a harmless no-op — deleting
+// a key that isn't there (already expired, never set, or already orphaned by
+// a bump) is not an error; Redis's DEL simply reports it deleted zero keys.
+//
+// A failed generation read IS reported as an error here (unlike Get/Set,
+// which swallow it), so it surfaces through the one caller that already logs
+// Delete errors — but exactly like every other Cache failure, it must never
+// be treated as fatal by that caller.
 func (c *RedisCache) Delete(ctx context.Context, key string) error {
-	return c.client.Del(ctx, key).Err()
+	generation, err := c.readGeneration(ctx)
+	if err != nil {
+		return err
+	}
+	return c.client.Del(ctx, generationScopedKey(key, generation)).Err()
+}
+
+// CurrentGeneration reports the generation Get/Set/Delete are currently
+// scoping their physical keys by, or the error that made a fresh read fail.
+//
+// SIDE EFFECT: this shares readGeneration with Get/Set/Delete, so a call here
+// can advance generationHWM exactly like a real cache read would. That is
+// correct and intended today — there is only one high-water mark, not one
+// per caller — but it means any future caller of this method (e.g. a metrics
+// exporter polling it for observability) participates in the guard too, and
+// could move the mark. If that ever needs to change, give the guard a
+// read-only variant instead of quietly special-casing this method.
+func (c *RedisCache) CurrentGeneration(ctx context.Context) (int64, error) {
+	return c.readGeneration(ctx)
+}
+
+// BumpGeneration atomically increments the generation counter. Redis's INCR
+// is atomic and self-initializing (a missing key is treated as 0 before
+// incrementing), so this needs no read-modify-write, and no prior
+// BumpGeneration call ever has to have happened.
+func (c *RedisCache) BumpGeneration(ctx context.Context) error {
+	return c.client.Incr(ctx, resolveCacheGenerationKey).Err()
 }
 
 // CacheKey builds a stable, normalized cache key from a kind

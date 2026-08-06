@@ -281,6 +281,46 @@ func TestLookupPersonalAliasNilUserNotFound(t *testing.T) {
 	require.False(t, found, "uuid.Nil must never match another user's personal alias")
 }
 
+// TestLookupPersonalAliasExcludesSoftDeleted is the regression guard for
+// LookupPersonalAlias's raw SQL join: this is the primitive
+// ai.Resolver.ResolveText's alias short-circuit depends on, so a retired food
+// resurrected here would resolve from the AI capture path directly, bypassing
+// Resolve entirely.
+func TestLookupPersonalAliasExcludesSoftDeleted(t *testing.T) {
+	db := testDB(t)
+	tx := db.Begin()
+	require.NoError(t, tx.Error)
+	t.Cleanup(func() { tx.Rollback() })
+	repo := NewRepository(tx)
+	ctx := context.Background()
+
+	userID := uuid.New()
+	require.NoError(t, tx.Exec(
+		"INSERT INTO users (id, firebase_uid, email) VALUES (?, ?, ?)",
+		userID, "lookup-retired-"+userID.String(), "lookup-retired@test.dev").Error)
+
+	retired := FoodItem{Name: "Retired Lookup Food " + uuid.NewString(), Provenance: ProvenanceCurated, KcalPer100g: 100}
+	require.NoError(t, tx.Create(&retired).Error)
+	require.NoError(t, tx.Exec("UPDATE food_items SET deleted_at = now() WHERE id = ?", retired.ID).Error)
+
+	live := FoodItem{Name: "Live Lookup Food " + uuid.NewString(), Provenance: ProvenanceCurated, KcalPer100g: 100}
+	require.NoError(t, tx.Create(&live).Error)
+
+	retiredPhrase := "retired lookup phrase " + uuid.NewString()
+	livePhrase := "live lookup phrase " + uuid.NewString()
+	require.NoError(t, repo.AddAlias(ctx, userID, retiredPhrase, retired.ID))
+	require.NoError(t, repo.AddAlias(ctx, userID, livePhrase, live.ID))
+
+	_, found, err := repo.LookupPersonalAlias(ctx, userID, retiredPhrase)
+	require.NoError(t, err)
+	require.False(t, found, "a personal alias must not resurrect a retired food")
+
+	item, found, err := repo.LookupPersonalAlias(ctx, userID, livePhrase)
+	require.NoError(t, err)
+	require.True(t, found, "a personal alias for a live food must still resolve")
+	require.Equal(t, live.ID, item.ID)
+}
+
 func TestRemoveAliasDeletesOnlyTheMatchingRow(t *testing.T) {
 	db := testDB(t)
 	repo := NewRepository(db)

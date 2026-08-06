@@ -13,7 +13,8 @@ import (
 // total, which is not a state the database is ever actually in.
 const foodIndexQuery = `SELECT count(*) AS total,
        count(*) FILTER (WHERE embedding IS NOT NULL) AS embedded
-FROM food_items`
+FROM food_items
+WHERE deleted_at IS NULL`
 
 // FoodIndexRefresher publishes food-index completeness gauges from the
 // database on a timer. This answers a question about database STATE rather

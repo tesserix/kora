@@ -83,9 +83,21 @@ func (c HTTPOFFClient) Fetch(ctx context.Context, barcode string) (*FoodItem, er
 
 // ResolveBarcode returns a FoodItem for a barcode: local index first, then the
 // OFF client on a miss (caching the hit). Never fabricates a row.
+//
+// A row an admin has retired (deleted_at set) is treated as if it were not
+// there: the local lookup is filtered to deleted_at IS NULL, so a retired
+// row falls through to the OFF fetch and a scan returns fresh third-party
+// data instead of auto-logging the retired record at maximum confidence.
+// Insert's barcode dedup count is deliberately unfiltered (see the
+// DELIBERATE ASYMMETRY comment on Insert in repository.go), so re-fetching
+// the same barcode from OFF finds the retired row and no-ops rather than
+// resurrecting it — the reload below then also misses under the same
+// deleted_at filter and falls into the existing "insert deduped, return the
+// fetched item directly" branch, same as the pre-existing name+brand dedup
+// case.
 func (r Repository) ResolveBarcode(ctx context.Context, off OFFClient, code string) (*FoodItem, bool, error) {
 	var local FoodItem
-	err := r.db.WithContext(ctx).First(&local, "barcode = ?", code).Error
+	err := r.db.WithContext(ctx).Where("deleted_at IS NULL").First(&local, "barcode = ?", code).Error
 	if err == nil {
 		return &local, true, nil
 	}
@@ -103,10 +115,13 @@ func (r Repository) ResolveBarcode(ctx context.Context, off OFFClient, code stri
 		return nil, false, fmt.Errorf("nutrition: resolve barcode cache: %w", ierr)
 	}
 	var cached FoodItem
-	if err := r.db.WithContext(ctx).First(&cached, "barcode = ?", code).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("deleted_at IS NULL").First(&cached, "barcode = ?", code).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			// Insert deduped on name+brand rather than creating a row under
-			// this barcode. The OFF item itself is still valid data.
+			// Insert deduped on name+brand, or found an existing (possibly
+			// retired) row under this barcode, rather than creating a new
+			// row. Either way no live row exists to reload here — return
+			// the freshly fetched OFF item directly. The OFF item itself is
+			// still valid, current data.
 			return item, true, nil
 		}
 		return nil, false, fmt.Errorf("nutrition: resolve barcode reload: %w", err)

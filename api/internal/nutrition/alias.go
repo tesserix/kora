@@ -90,7 +90,7 @@ func (r Repository) LookupPersonalAlias(ctx context.Context, userID uuid.UUID, p
 	if err := r.db.WithContext(ctx).
 		Raw(`SELECT fi.* FROM food_items fi
 		     JOIN food_aliases fa ON fa.food_item_id = fi.id
-		     WHERE fa.user_id = ? AND lower(fa.alias) = ?
+		     WHERE fa.user_id = ? AND lower(fa.alias) = ? AND fi.deleted_at IS NULL
 		     LIMIT 1`, userID, key).
 		Scan(&items).Error; err != nil {
 		return FoodItem{}, false, fmt.Errorf("nutrition: lookup personal alias: %w", err)

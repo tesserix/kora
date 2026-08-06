@@ -324,6 +324,40 @@ func TestMiddlewareRejectsCorrectlySignedEmptyUserID(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, w.Code)
 }
 
+// TestMiddlewareRejectsCorrectlySignedEmptyEmail is IMPORTANT 3's fix: Email
+// is bound into the MAC (see Compute), so a correctly-signed request can
+// still carry X-User-Email: "". Before this guard, that request authenticated
+// cleanly and only failed later when kora_admin_events' actor_email CHECK
+// aborted the mutation transaction with a 500 — fail-closed and correct, but
+// a much worse failure than rejecting the unattributable caller here with a
+// clear 403, the same way the empty-UserID guard above already does.
+func TestMiddlewareRejectsCorrectlySignedEmptyEmail(t *testing.T) {
+	key := testKey(t)
+	id := adminIdentity()
+	id.Email = ""
+	req := signedRequest(t, key, http.MethodGet, "/v1/admin/foods", "", id, time.Now())
+
+	w := httptest.NewRecorder()
+	router(key).ServeHTTP(w, req)
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+// The twin: a request with a non-empty email must still succeed, or the test
+// above would also pass against a guard that rejected every request
+// regardless of Email. Uses the same adminIdentity() as
+// TestMiddlewareAcceptsAValidSignatureAndExposesTheIdentity, restated here so
+// this test stays meaningful even if that one is ever changed or removed.
+func TestMiddlewareAcceptsCorrectlySignedNonEmptyEmail(t *testing.T) {
+	key := testKey(t)
+	id := adminIdentity()
+	require.NotEmpty(t, id.Email)
+	req := signedRequest(t, key, http.MethodGet, "/v1/admin/foods", "", id, time.Now())
+
+	w := httptest.NewRecorder()
+	router(key).ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
 // The body must survive verification: the middleware reads it to re-hash it,
 // so a handler downstream must still be able to read it in full.
 func TestMiddlewareRestoresTheBodyForDownstreamHandlers(t *testing.T) {

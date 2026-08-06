@@ -1,6 +1,8 @@
 package server
 
 import (
+	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -128,9 +130,17 @@ func NewRouter(deps Deps) *gin.Engine {
 		// Gin's radix tree keeps /v1/foods and /v1/admin/foods distinct, so
 		// the two groups never collide.
 		if len(deps.BFFHMACKey) > 0 {
-			adminHandler := admin.NewHandler(admin.NewRepository(deps.DB))
+			adminHandler := admin.NewHandler(
+				admin.NewRepository(deps.DB),
+				admin.NewMutationRepository(deps.DB, resolveGeneration(deps.ResolveCache)),
+			)
 			adminGroup := r.Group("/v1/admin", bffauth.Middleware(deps.BFFHMACKey, 0))
 			adminGroup.GET("/foods", adminHandler.ListFoods)
+			adminGroup.GET("/foods/:id", adminHandler.GetFood)
+			adminGroup.GET("/events", adminHandler.ListEvents)
+			adminGroup.POST("/foods", adminHandler.CreateFood)
+			adminGroup.PATCH("/foods/:id", adminHandler.UpdateFood)
+			adminGroup.DELETE("/foods/:id", adminHandler.SoftDeleteFood)
 		}
 
 		pinsHandler := pins.NewHandler(pins.NewService(pins.NewRepository(deps.DB), foodRepo))
@@ -215,4 +225,43 @@ func NewRouter(deps Deps) *gin.Engine {
 	})
 
 	return r
+}
+
+// resolveGeneration narrows the SAME ai.Cache instance the resolve engine
+// reads from to its generation surface. It deliberately type-asserts rather
+// than constructing a cache of its own: the generation counter lives on
+// RedisCache and is exposed through a separate small interface (ai.Generation),
+// so nothing structurally forces the admin bump path and the resolve path onto
+// the same Redis client and DB index. A second RedisCache — especially one on
+// a different DB index — would make every admin bump invisible to the
+// resolver, silently, with the mutation still reporting success to the
+// operator. The identity this preserves is pinned end-to-end by
+// TestAdminMutationBumpsTheSameCacheInstanceWiredIntoDeps.
+//
+// The two degradation paths are NOT the same event and are deliberately
+// logged differently:
+//
+//   - cache == nil — the resolve engine is disabled (no GEMINI_API_KEY) or
+//     Redis was unreachable at startup, so buildResolveHandler returned no
+//     cache at all. There is nothing to invalidate and nothing is wrong; INFO.
+//   - cache is non-nil but does NOT implement ai.Generation — a real cache is
+//     serving reads that this path cannot invalidate. That is the silent-drift
+//     fault this whole function exists to prevent, and it would otherwise only
+//     surface as users being served stale macros for up to the resolve cache's
+//     24h TTL; WARN.
+//
+// Either way the admin surface still mounts, backed by ai.NoCache{}, whose
+// BumpGeneration is a silent no-op — an unbumpable cache must not take the
+// food editor offline.
+func resolveGeneration(cache ai.Cache) ai.Generation {
+	if cache == nil {
+		slog.Info("admin mutations: no resolve cache configured; nothing to invalidate")
+		return ai.NoCache{}
+	}
+	if g, ok := cache.(ai.Generation); ok {
+		return g
+	}
+	slog.Warn("admin mutations: resolve cache exposes no generation counter; food edits will NOT invalidate cached resolutions",
+		"cache_type", fmt.Sprintf("%T", cache))
+	return ai.NoCache{}
 }
