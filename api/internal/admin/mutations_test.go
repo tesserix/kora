@@ -3,7 +3,8 @@ package admin
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -220,7 +221,7 @@ func TestUpdateFoodAuditFailureRollsBackMutation(t *testing.T) {
 	in.Name = "zzz-admin-upd-atomicity-renamed-" + uuid.NewString()
 	in.KcalPer100g = original.KcalPer100g + 500
 
-	_, err := repo.UpdateFood(context.Background(), badActor, original.ID, in)
+	_, err := repo.UpdateFood(context.Background(), badActor, original.ID, in, loadUpdatedAt(t, tx, original.ID))
 	require.Error(t, err, "the audit insert must fail for a blank actor email")
 
 	var got struct {
@@ -281,7 +282,7 @@ func TestUpdateFoodRenameClearsEmbeddingButMacrosOnlyEditPreservesIt(t *testing.
 	// Macros-only edit: name (and therefore normalized_name) unchanged.
 	macrosOnly := inputFrom(original)
 	macrosOnly.KcalPer100g = 999
-	_, err := repo.UpdateFood(context.Background(), actor, original.ID, macrosOnly)
+	_, err := repo.UpdateFood(context.Background(), actor, original.ID, macrosOnly, loadUpdatedAt(t, tx, original.ID))
 	require.NoError(t, err)
 	assert.True(t, hasEmbedding(t, tx, original.ID), "a macros-only edit must NOT null the embedding")
 
@@ -289,7 +290,7 @@ func TestUpdateFoodRenameClearsEmbeddingButMacrosOnlyEditPreservesIt(t *testing.
 	renamed := inputFrom(original)
 	renamed.Name = "zzz-embed-renamed-" + uuid.NewString()
 	renamed.KcalPer100g = 999
-	_, err = repo.UpdateFood(context.Background(), actor, original.ID, renamed)
+	_, err = repo.UpdateFood(context.Background(), actor, original.ID, renamed, loadUpdatedAt(t, tx, original.ID))
 	require.NoError(t, err)
 	assert.False(t, hasEmbedding(t, tx, original.ID), "a rename must null the embedding in the same statement")
 }
@@ -323,7 +324,7 @@ func TestUpdateFoodClearsEmbeddingOnPunctuationOnlyRenameThatNormalizesIdentical
 
 	in := inputFrom(original)
 	in.Name = renamedName
-	_, err := repo.UpdateFood(context.Background(), actor, original.ID, in)
+	_, err := repo.UpdateFood(context.Background(), actor, original.ID, in, loadUpdatedAt(t, tx, original.ID))
 	require.NoError(t, err)
 	assert.False(t, hasEmbedding(t, tx, original.ID),
 		"a raw-name-only rename must still clear the stale embedding even though normalization is unchanged")
@@ -345,7 +346,7 @@ func TestUpdateFoodBumpsCacheGenerationOnAnyChangeButNotOnNoOp(t *testing.T) {
 		cache := &fakeGeneration{}
 		repo := NewMutationRepository(tx, cache)
 
-		_, err := repo.UpdateFood(context.Background(), actor, original.ID, inputFrom(original))
+		_, err := repo.UpdateFood(context.Background(), actor, original.ID, inputFrom(original), loadUpdatedAt(t, tx, original.ID))
 		require.NoError(t, err)
 		assert.Equal(t, 0, cache.Bumps(), "an edit that changes nothing must not bump the cache generation")
 	})
@@ -358,7 +359,7 @@ func TestUpdateFoodBumpsCacheGenerationOnAnyChangeButNotOnNoOp(t *testing.T) {
 
 		in := inputFrom(original)
 		in.Name = "zzz-cachebump-renamed-" + uuid.NewString()
-		_, err := repo.UpdateFood(context.Background(), actor, original.ID, in)
+		_, err := repo.UpdateFood(context.Background(), actor, original.ID, in, loadUpdatedAt(t, tx, original.ID))
 		require.NoError(t, err)
 		assert.Equal(t, 1, cache.Bumps(),
 			"a rename must bump the cache generation even though no macro changed — a cached ai.Resolution embeds the whole FoodItem, name included")
@@ -372,7 +373,7 @@ func TestUpdateFoodBumpsCacheGenerationOnAnyChangeButNotOnNoOp(t *testing.T) {
 
 		in := inputFrom(original)
 		in.ProteinPer100g = original.ProteinPer100g + 5
-		_, err := repo.UpdateFood(context.Background(), actor, original.ID, in)
+		_, err := repo.UpdateFood(context.Background(), actor, original.ID, in, loadUpdatedAt(t, tx, original.ID))
 		require.NoError(t, err)
 		assert.Equal(t, 1, cache.Bumps(), "a macros edit must bump the cache generation exactly once")
 	})
@@ -393,7 +394,7 @@ func TestUpdateFoodBumpsCacheGenerationOnAnyChangeButNotOnNoOp(t *testing.T) {
 
 		in := inputFrom(original)
 		in.Brand = "corrected-brand"
-		_, err := repo.UpdateFood(context.Background(), actor, original.ID, in)
+		_, err := repo.UpdateFood(context.Background(), actor, original.ID, in, loadUpdatedAt(t, tx, original.ID))
 		require.NoError(t, err)
 		assert.Equal(t, 1, cache.Bumps(),
 			"a brand-only edit must bump the cache generation — dropping otherFieldsChanged from `changed` would miss this")
@@ -407,7 +408,7 @@ func TestUpdateFoodBumpsCacheGenerationOnAnyChangeButNotOnNoOp(t *testing.T) {
 
 		in := inputFrom(original)
 		in.ServingGrams = original.ServingGrams + 50
-		_, err := repo.UpdateFood(context.Background(), actor, original.ID, in)
+		_, err := repo.UpdateFood(context.Background(), actor, original.ID, in, loadUpdatedAt(t, tx, original.ID))
 		require.NoError(t, err)
 		assert.Equal(t, 1, cache.Bumps(),
 			"a serving-grams-only edit must bump the cache generation — dropping otherFieldsChanged from `changed` would miss this")
@@ -497,7 +498,7 @@ func TestUpdateFoodSetsNormalizedNameFromNormalizedInput(t *testing.T) {
 
 	in := inputFrom(original)
 	in.Name = newName
-	_, err := repo.UpdateFood(context.Background(), actor, original.ID, in)
+	_, err := repo.UpdateFood(context.Background(), actor, original.ID, in, loadUpdatedAt(t, tx, original.ID))
 	require.NoError(t, err)
 
 	var normalizedName string
@@ -551,7 +552,7 @@ func TestUpdateFoodAdvancesUpdatedAtForTheEditedRowOnly(t *testing.T) {
 	time.Sleep(5 * time.Millisecond) // ensure a wall-clock-observable gap
 	in := inputFrom(edited)
 	in.KcalPer100g = edited.KcalPer100g + 1
-	_, err := repo.UpdateFood(context.Background(), actor, edited.ID, in)
+	_, err := repo.UpdateFood(context.Background(), actor, edited.ID, in, beforeEdited)
 	require.NoError(t, err)
 
 	afterEdited := loadUpdatedAt(t, tx, edited.ID)
@@ -620,7 +621,7 @@ func TestApplyLiveOnlyUpdateRejectsRetiredButUpdatesLiveFood(t *testing.T) {
 	retired := seedFoodTx(t, tx, "zzz-applyupdate-retired-"+uuid.NewString(), "")
 	require.NoError(t, tx.Exec("UPDATE food_items SET deleted_at = now() WHERE id = ?", retired.ID).Error)
 
-	rows, err := applyLiveOnlyUpdate(tx, retired.ID, map[string]any{"kcal_per_100g": 999.0})
+	rows, err := applyLiveOnlyUpdate(tx, retired.ID, map[string]any{"kcal_per_100g": 999.0}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), rows, "an already-retired row must not be touched by the guarded update")
 
@@ -628,7 +629,7 @@ func TestApplyLiveOnlyUpdateRejectsRetiredButUpdatesLiveFood(t *testing.T) {
 	require.NoError(t, tx.Raw("SELECT kcal_per_100g FROM food_items WHERE id = ?", retired.ID).Scan(&retiredKcal).Error)
 	assert.NotEqual(t, 999.0, retiredKcal, "the guarded update must not have applied its values to the retired row")
 
-	rows, err = applyLiveOnlyUpdate(tx, live.ID, map[string]any{"kcal_per_100g": 999.0})
+	rows, err = applyLiveOnlyUpdate(tx, live.ID, map[string]any{"kcal_per_100g": 999.0}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), rows, "a live row must still be updatable")
 
@@ -651,7 +652,10 @@ func TestUpdateFoodRejectsAlreadyRetiredFoodAndLeavesItUnchanged(t *testing.T) {
 
 	in := inputFrom(target)
 	in.KcalPer100g = 999
-	_, err := repo.UpdateFood(context.Background(), actor, target.ID, in)
+	// expectedUpdatedAt is irrelevant here: loadLiveFoodSnapshotForUpdate's
+	// before-load rejects an already-retired row before applyLiveOnlyUpdate
+	// (and therefore this precondition) is ever reached — any value works.
+	_, err := repo.UpdateFood(context.Background(), actor, target.ID, in, time.Now().UTC())
 	require.Error(t, err, "editing an already-retired food must fail")
 	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
 
@@ -689,34 +693,34 @@ func TestSoftDeleteFoodSecondAttemptFailsAndPreservesOriginalDeletedAt(t *testin
 		"a second soft delete attempt must not overwrite the original deleted_at")
 }
 
-// TestUpdateFoodConcurrentEditsSerializeAndChainBeforeAfter is invariant 4's
-// atomicity-under-contention proof, scoped to what the row lock actually
-// guarantees: the ORDER the two before-loads observe the row in, not
-// field-level merging of the two edits (UpdateFood is a full-row replace —
-// B's own FoodInput, loaded before A's edit landed, still carries B's stale
-// copy of every field B didn't intend to touch, so B's write legitimately
-// reverts A's kcal change to B's stale value; that is a separate, known
-// last-writer-wins property of the form-submit pattern, not what this test
-// or the row lock is about).
-//
-// Without the lock on loadLiveFoodSnapshotForUpdate, two admins editing the
-// same food can both read the SAME pre-A "before" while A's write hasn't
-// landed yet, so B's audit `before` would show the row as it was before
-// EITHER edit — never becoming A's `after`. With the lock, B's before-load
-// blocks until A commits, then re-reads A's committed values, so B's audit
-// `before` chains from A's `after`. That chaining is the one thing this test
-// asserts.
+// TestUpdateFoodConcurrentStaleEditIsRejectedAfterRowLockReleases is
+// invariant 4's atomicity-under-contention proof, now adapted for Rider 1's
+// optimistic-concurrency precondition (task-5 brief): once the row lock on
+// loadLiveFoodSnapshotForUpdate forces B's before-load to wait for A's
+// commit, B's PATCH carries the updated_at IT read before A ever wrote —
+// genuinely stale the moment A commits — so B's own UPDATE must now affect 0
+// rows and B must get ErrStaleUpdate, not silently win a last-writer-wins
+// overwrite of A's edit. This is the exact hazard optimistic concurrency
+// exists to close: without the row lock, B could have read the SAME pre-A
+// row and still raced to a stale write; WITH the lock but WITHOUT this
+// precondition, B's before-load would simply re-read A's committed values
+// and let B unconditionally clobber them with B's own stale FoodInput. Only
+// the two together (this test proves both) leave A's edit standing.
 //
 // Goroutine A bypasses the full UpdateFood call and drives
 // loadLiveFoodSnapshotForUpdate/applyLiveOnlyUpdate directly so the test can
 // hold the lock open on a channel for a controlled window; goroutine B goes
 // through the real, public UpdateFood, exactly as a second admin's request
 // would.
-func TestUpdateFoodConcurrentEditsSerializeAndChainBeforeAfter(t *testing.T) {
+func TestUpdateFoodConcurrentStaleEditIsRejectedAfterRowLockReleases(t *testing.T) {
 	db := testDB(t)
 	original := seedFoodCommitted(t, db, "zzz-lock-"+uuid.NewString(), "")
 	repo := NewMutationRepository(db, ai.NoCache{})
 	actor := Actor{ID: "admin-1", Email: "ops@kora.test"}
+
+	// B's stale precondition: the updated_at as committed by the seed,
+	// before A ever writes.
+	staleUpdatedAt := loadUpdatedAt(t, db, original.ID)
 
 	aHasLock := make(chan struct{})
 	aMayCommit := make(chan struct{})
@@ -732,7 +736,7 @@ func TestUpdateFoodConcurrentEditsSerializeAndChainBeforeAfter(t *testing.T) {
 			_, err := applyLiveOnlyUpdate(tx, original.ID, map[string]any{
 				"kcal_per_100g": 555.0,
 				"updated_at":    time.Now().UTC(),
-			})
+			}, nil)
 			return err
 		})
 	}()
@@ -740,41 +744,42 @@ func TestUpdateFoodConcurrentEditsSerializeAndChainBeforeAfter(t *testing.T) {
 	<-aHasLock // A now holds the row lock and has not committed.
 
 	bStarted := make(chan struct{})
-	bUpdated := make(chan nutrition.FoodItem, 1)
+	bUpdated := make(chan FoodSnapshot, 1)
 	bErr := make(chan error, 1)
 	go func() {
 		close(bStarted)
 		in := inputFrom(original)
 		in.ProteinPer100g = original.ProteinPer100g + 9
-		updated, err := repo.UpdateFood(context.Background(), actor, original.ID, in)
+		updated, err := repo.UpdateFood(context.Background(), actor, original.ID, in, staleUpdatedAt)
 		bUpdated <- updated
 		bErr <- err
 	}()
 	<-bStarted
 	// Best-effort: give B a moment to actually reach and block on the row
 	// lock before A releases it. The assertions below hold regardless of
-	// exact scheduling, because they check the OUTCOME (what B's
-	// before/after actually contain), not the interleaving itself — if B
-	// somehow raced ahead of A here, B's kcal assertion below would simply
-	// fail, which is exactly the regression this test exists to catch.
+	// exact scheduling, because they check the OUTCOME (what actually landed
+	// in the row), not the interleaving itself.
 	time.Sleep(50 * time.Millisecond)
 
 	close(aMayCommit)
 	require.NoError(t, <-aDone, "A's update must commit")
-	require.NoError(t, <-bErr, "B's update must succeed once A releases the lock")
-	updated := <-bUpdated
+	err := <-bErr
+	require.Error(t, err, "B's update must be rejected: its updated_at precondition is stale once A has committed")
+	assert.ErrorIs(t, err, ErrStaleUpdate)
+	<-bUpdated
 
-	// B's own edit did land (proves B's UPDATE ran after A released the
-	// lock, not that it was silently dropped).
-	assert.Equal(t, original.ProteinPer100g+9, updated.ProteinPer100g, "B's own edit must have applied")
+	var kcal, protein float64
+	require.NoError(t, db.Raw("SELECT kcal_per_100g, protein_per_100g FROM food_items WHERE id = ?", original.ID).
+		Row().Scan(&kcal, &protein))
+	assert.Equal(t, 555.0, kcal, "A's committed edit must survive B's rejected stale write")
+	assert.Equal(t, original.ProteinPer100g, protein, "B's rejected edit must never have applied")
 
-	var bEvent AdminEvent
-	require.NoError(t, db.Where("target_id = ? AND action = ?", original.ID, ActionFoodUpdated).
-		Order("created_at DESC").First(&bEvent).Error)
-	var bBefore map[string]any
-	require.NoError(t, json.Unmarshal(bEvent.Before, &bBefore))
-	assert.Equal(t, 555.0, bBefore["kcal_per_100g"],
-		"B's audit `before` must chain from A's `after` — proving the two edits serialised rather than both reading the same pre-A snapshot")
+	var updateEventCount int64
+	require.NoError(t, db.Model(&AdminEvent{}).
+		Where("target_id = ? AND action = ?", original.ID, ActionFoodUpdated).
+		Count(&updateEventCount).Error)
+	assert.Equal(t, int64(0), updateEventCount,
+		"neither A (bypassing UpdateFood/recordEvent entirely) nor B (rejected before recordEvent runs) should have written a food.updated audit row")
 }
 
 // TestSoftDeleteFoodPreservesCascadingRowsAndNeverIssuesHardDelete is
@@ -824,4 +829,298 @@ func TestSoftDeleteFoodPreservesCascadingRowsAndNeverIssuesHardDelete(t *testing
 	assert.Equal(t, int64(1), aliasCount, "a hard delete would have CASCADE-destroyed this taught correction")
 	assert.Equal(t, int64(1), pinCount, "a hard delete would have CASCADE-destroyed this pin")
 	assert.Equal(t, int64(1), itemCount, "a hard delete would have CASCADE-destroyed this saved-meal item")
+}
+
+// fakeFailingGeneration is an ai.Generation double whose BumpGeneration
+// always fails, for Rider 4's "the DB write committed but the post-commit
+// cache bump did not" tests. CurrentGeneration is never exercised by these
+// tests and simply returns a fixed value.
+type fakeFailingGeneration struct{}
+
+func (fakeFailingGeneration) CurrentGeneration(context.Context) (int64, error) { return 1, nil }
+func (fakeFailingGeneration) BumpGeneration(context.Context) error {
+	return fmt.Errorf("fake: redis unreachable")
+}
+
+var _ ai.Generation = fakeFailingGeneration{}
+
+// TestUpdateFoodRoundTripsCommittedUpdatedAtAcrossTwoSequentialEdits is
+// Rider 1's round-trip proof: an updated_at handed back by one UpdateFood
+// call is valid input to the NEXT UpdateFood call on the same row — exactly
+// the read-then-PATCH cycle a real admin UI performs. Without this, a caller
+// that always resubmits the FIRST updated_at it ever saw could never edit a
+// row twice in a row.
+func TestUpdateFoodRoundTripsCommittedUpdatedAtAcrossTwoSequentialEdits(t *testing.T) {
+	db := testDB(t)
+	tx := seedTx(t, db)
+	original := seedFoodTx(t, tx, "zzz-roundtrip-updatedat-"+uuid.NewString(), "")
+	repo := NewMutationRepository(tx, ai.NoCache{})
+	actor := Actor{ID: "admin-1", Email: "ops@kora.test"}
+
+	in := inputFrom(original)
+	in.KcalPer100g = original.KcalPer100g + 1
+	first, err := repo.UpdateFood(context.Background(), actor, original.ID, in, loadUpdatedAt(t, tx, original.ID))
+	require.NoError(t, err, "the first edit, using the row's true current updated_at, must succeed")
+
+	in2 := inputFrom(original)
+	in2.KcalPer100g = original.KcalPer100g + 2
+	second, err := repo.UpdateFood(context.Background(), actor, original.ID, in2, first.UpdatedAt)
+	require.NoError(t, err, "the second edit, using the FIRST edit's own returned updated_at, must also succeed")
+	assert.Equal(t, original.KcalPer100g+2, second.KcalPer100g)
+}
+
+// TestUpdateFoodStaleUpdatedAtIsRejectedAndLeavesTheRowAndAuditUntouched is
+// TestUpdateFoodRoundTripsCommittedUpdatedAtAcrossTwoSequentialEdits's twin
+// (Rider 1): a PATCH carrying an updated_at that is no longer current — a
+// pre-edit value, because a second edit landed on the row in between — must
+// be rejected with ErrStaleUpdate (mapped to 409 by the handler), and must
+// leave BOTH the row and the audit trail exactly as the intervening edit
+// left them.
+func TestUpdateFoodStaleUpdatedAtIsRejectedAndLeavesTheRowAndAuditUntouched(t *testing.T) {
+	db := testDB(t)
+	tx := seedTx(t, db)
+	original := seedFoodTx(t, tx, "zzz-stale-updatedat-"+uuid.NewString(), "")
+	repo := NewMutationRepository(tx, ai.NoCache{})
+	actor := Actor{ID: "admin-1", Email: "ops@kora.test"}
+
+	staleUpdatedAt := loadUpdatedAt(t, tx, original.ID)
+
+	in := inputFrom(original)
+	in.KcalPer100g = original.KcalPer100g + 1
+	_, err := repo.UpdateFood(context.Background(), actor, original.ID, in, staleUpdatedAt)
+	require.NoError(t, err, "the first, genuinely current-at-the-time edit must succeed")
+
+	var eventCountBeforeStaleAttempt int64
+	require.NoError(t, tx.Model(&AdminEvent{}).Where("target_id = ? AND action = ?", original.ID, ActionFoodUpdated).
+		Count(&eventCountBeforeStaleAttempt).Error)
+
+	staleIn := inputFrom(original)
+	staleIn.KcalPer100g = original.KcalPer100g + 999
+	_, err = repo.UpdateFood(context.Background(), actor, original.ID, staleIn, staleUpdatedAt)
+	require.Error(t, err, "reusing the PRE-first-edit updated_at for a second PATCH must fail")
+	assert.ErrorIs(t, err, ErrStaleUpdate)
+	assert.NotErrorIs(t, err, gorm.ErrRecordNotFound,
+		"a stale precondition on a row proven live and locked is never the missing/retired case")
+
+	var kcal float64
+	require.NoError(t, tx.Raw("SELECT kcal_per_100g FROM food_items WHERE id = ?", original.ID).Scan(&kcal).Error)
+	assert.Equal(t, original.KcalPer100g+1, kcal, "the rejected stale PATCH must not have applied its values")
+
+	var eventCountAfterStaleAttempt int64
+	require.NoError(t, tx.Model(&AdminEvent{}).Where("target_id = ? AND action = ?", original.ID, ActionFoodUpdated).
+		Count(&eventCountAfterStaleAttempt).Error)
+	assert.Equal(t, eventCountBeforeStaleAttempt, eventCountAfterStaleAttempt,
+		"the rejected stale PATCH must not have recorded a second audit event")
+}
+
+// TestUpdateFoodMissingUpdatedAtPreconditionIsRequired404sBeforeStaleCheck
+// separates ErrRecordNotFound (missing/retired row) from ErrStaleUpdate
+// (live row, wrong updated_at) at the repository layer — the handler is what
+// turns the former into 404 and the latter into 409, but that mapping can
+// only be correct if the two really are distinguishable here.
+func TestUpdateFoodMissingRowIsRecordNotFoundNeverStaleUpdate(t *testing.T) {
+	db := testDB(t)
+	tx := seedTx(t, db)
+	repo := NewMutationRepository(tx, ai.NoCache{})
+	actor := Actor{ID: "admin-1", Email: "ops@kora.test"}
+
+	_, err := repo.UpdateFood(context.Background(), actor, uuid.New(), FoodInput{
+		Name: "does-not-exist", ServingGrams: 1, KcalPer100g: 1,
+	}, time.Now().UTC())
+	require.Error(t, err)
+	assert.ErrorIs(t, err, gorm.ErrRecordNotFound, "a nonexistent id must 404, never 409")
+	assert.NotErrorIs(t, err, ErrStaleUpdate)
+}
+
+// TestCreateFoodRejectsDuplicateBarcodeIncludingAnAlreadyRetiredRow is
+// Rider 2's in-transaction pre-check proof: idx_food_items_barcode
+// (migration 000002) is NOT filtered on deleted_at, so a barcode belonging
+// to an already soft-deleted row is still taken, and CreateFood must say so
+// rather than silently creating a second row with a barcode the unique index
+// will reject anyway with an opaque constraint error.
+func TestCreateFoodRejectsDuplicateBarcodeIncludingAnAlreadyRetiredRow(t *testing.T) {
+	db := testDB(t)
+	tx := seedTx(t, db)
+	barcode := "012345678905-" + uuid.NewString()
+	existing := food("zzz-barcode-retired-owner-"+uuid.NewString(), "")
+	existing.Barcode = &barcode
+	require.NoError(t, tx.Create(&existing).Error)
+	require.NoError(t, tx.Exec("UPDATE food_items SET deleted_at = now() WHERE id = ?", existing.ID).Error)
+
+	repo := NewMutationRepository(tx, ai.NoCache{})
+	actor := Actor{ID: "admin-1", Email: "ops@kora.test"}
+
+	_, err := repo.CreateFood(context.Background(), actor, FoodInput{
+		Name: "zzz-barcode-collider-" + uuid.NewString(), Provenance: nutrition.ProvenanceCurated,
+		ServingDesc: "1 serve", ServingGrams: 100, KcalPer100g: 100, Barcode: &barcode,
+	})
+	require.Error(t, err, "a barcode already owned by a retired row must still be rejected")
+	assert.ErrorIs(t, err, ErrDuplicateBarcode)
+
+	var foodCount int64
+	require.NoError(t, tx.Model(&nutrition.FoodItem{}).Where("barcode = ?", barcode).Count(&foodCount).Error)
+	assert.Equal(t, int64(1), foodCount, "the rejected create must not have inserted a second row")
+}
+
+// TestCreateFoodAcceptsAUniqueBarcode is the accept twin of
+// TestCreateFoodRejectsDuplicateBarcodeIncludingAnAlreadyRetiredRow: a
+// barcode nobody else owns must create successfully.
+func TestCreateFoodAcceptsAUniqueBarcode(t *testing.T) {
+	db := testDB(t)
+	tx := seedTx(t, db)
+	repo := NewMutationRepository(tx, ai.NoCache{})
+	actor := Actor{ID: "admin-1", Email: "ops@kora.test"}
+
+	barcode := "unique-barcode-" + uuid.NewString()
+	got, err := repo.CreateFood(context.Background(), actor, FoodInput{
+		Name: "zzz-barcode-unique-" + uuid.NewString(), Provenance: nutrition.ProvenanceCurated,
+		ServingDesc: "1 serve", ServingGrams: 100, KcalPer100g: 100, Barcode: &barcode,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, got.Barcode)
+	assert.Equal(t, barcode, *got.Barcode)
+}
+
+// TestCreateFoodConcurrentInsertsWithTheSameBarcodeRaceToOneWinner is
+// Rider 2's SQLSTATE 23505 backstop proof: the in-transaction pre-check
+// cannot see another transaction's uncommitted insert, so two concurrent
+// creates for the same never-before-seen barcode can both pass the
+// pre-check and then race at the INSERT itself. Exactly one must succeed;
+// the other must come back as ErrDuplicateBarcode via the unwrapped
+// *pgconn.PgError 23505, not an opaque 500.
+func TestCreateFoodConcurrentInsertsWithTheSameBarcodeRaceToOneWinner(t *testing.T) {
+	db := testDB(t)
+	repo := NewMutationRepository(db, ai.NoCache{})
+	actor := Actor{ID: "admin-1", Email: "ops@kora.test"}
+	barcode := "race-barcode-" + uuid.NewString()
+
+	results := make(chan error, 2)
+	ids := make(chan uuid.UUID, 2)
+	run := func(name string) {
+		got, err := repo.CreateFood(context.Background(), actor, FoodInput{
+			Name: name, Provenance: nutrition.ProvenanceCurated,
+			ServingDesc: "1 serve", ServingGrams: 100, KcalPer100g: 100, Barcode: &barcode,
+		})
+		results <- err
+		if err == nil {
+			ids <- got.ID
+		}
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); run("zzz-barcode-race-a-" + uuid.NewString()) }()
+	go func() { defer wg.Done(); run("zzz-barcode-race-b-" + uuid.NewString()) }()
+	wg.Wait()
+	close(results)
+	close(ids)
+
+	t.Cleanup(func() {
+		db.Exec("DELETE FROM kora_admin_events WHERE target_id IN (SELECT id FROM food_items WHERE barcode = ?)", barcode)
+		db.Exec("DELETE FROM food_items WHERE barcode = ?", barcode)
+	})
+
+	var succeeded, duplicateRejected int
+	for err := range results {
+		switch {
+		case err == nil:
+			succeeded++
+		case errors.Is(err, ErrDuplicateBarcode):
+			duplicateRejected++
+		default:
+			t.Errorf("unexpected error from a concurrent create: %v", err)
+		}
+	}
+	assert.Equal(t, 1, succeeded, "exactly one concurrent create for the same barcode must win")
+	assert.Equal(t, 1, duplicateRejected, "the loser must be reported as ErrDuplicateBarcode, not an opaque failure")
+
+	var barcodeCount int64
+	require.NoError(t, db.Model(&nutrition.FoodItem{}).Where("barcode = ?", barcode).Count(&barcodeCount).Error)
+	assert.Equal(t, int64(1), barcodeCount, "only the winner's row may exist")
+}
+
+// TestSoftDeleteFoodResponseCarriesRetirementFields is Rider 3's proof: the
+// value SoftDeleteFood returns must be able to express that the food is now
+// retired — id, name and a non-nil deleted_at at minimum — which
+// nutrition.FoodItem (no DeletedAt field) could never do.
+func TestSoftDeleteFoodResponseCarriesRetirementFields(t *testing.T) {
+	db := testDB(t)
+	tx := seedTx(t, db)
+	target := seedFoodTx(t, tx, "zzz-response-shape-"+uuid.NewString(), "")
+	repo := NewMutationRepository(tx, ai.NoCache{})
+	actor := Actor{ID: "admin-1", Email: "ops@kora.test"}
+
+	got, err := repo.SoftDeleteFood(context.Background(), actor, target.ID)
+	require.NoError(t, err)
+	assert.Equal(t, target.ID, got.ID)
+	assert.Equal(t, target.Name, got.Name)
+	require.NotNil(t, got.DeletedAt, "a soft-deleted food's response must show it retired")
+	assert.False(t, got.UpdatedAt.IsZero())
+}
+
+// TestUpdateFoodRendersSuccessDespiteCacheBumpFailureButSentinelIsDetectable
+// is Rider 4's proof for UpdateFood: a post-commit cache-generation bump
+// failure must not read as "the edit failed" — the DB write already
+// committed — so UpdateFood still returns the updated FoodSnapshot (not a
+// zero value) alongside an error the handler can recognise via
+// errors.Is(err, ErrCacheGenerationBump) and render as a 2xx while logging
+// server-side.
+func TestUpdateFoodRendersSuccessDespiteCacheBumpFailureButSentinelIsDetectable(t *testing.T) {
+	db := testDB(t)
+	tx := seedTx(t, db)
+	original := seedFoodTx(t, tx, "zzz-cachebumpfail-update-"+uuid.NewString(), "")
+	repo := NewMutationRepository(tx, fakeFailingGeneration{})
+	actor := Actor{ID: "admin-1", Email: "ops@kora.test"}
+
+	in := inputFrom(original)
+	in.KcalPer100g = original.KcalPer100g + 1
+	got, err := repo.UpdateFood(context.Background(), actor, original.ID, in, loadUpdatedAt(t, tx, original.ID))
+	require.Error(t, err, "a failed cache bump must still be surfaced as an error server-side")
+	assert.ErrorIs(t, err, ErrCacheGenerationBump)
+	assert.Equal(t, original.KcalPer100g+1, got.KcalPer100g,
+		"the mutation itself committed — the returned snapshot must reflect the real, applied edit, not a zero value")
+
+	var kcal float64
+	require.NoError(t, tx.Raw("SELECT kcal_per_100g FROM food_items WHERE id = ?", original.ID).Scan(&kcal).Error)
+	assert.Equal(t, original.KcalPer100g+1, kcal, "the DB write must have committed despite the cache bump failing")
+}
+
+// TestUpdateFoodGenuineTransactionFailureIsNotMistakenForACacheBumpFailure
+// is the previous test's twin: when the TRANSACTION itself fails (audit
+// CHECK violation), the error must NOT be ErrCacheGenerationBump, and the
+// returned snapshot must be the zero value — the cache is never even reached
+// because the transaction never committed.
+func TestUpdateFoodGenuineTransactionFailureIsNotMistakenForACacheBumpFailure(t *testing.T) {
+	db := testDB(t)
+	tx := seedTx(t, db)
+	original := seedFoodTx(t, tx, "zzz-realtxnfail-update-"+uuid.NewString(), "")
+	repo := NewMutationRepository(tx, fakeFailingGeneration{})
+	badActor := Actor{ID: "admin-1", Email: "   "}
+
+	in := inputFrom(original)
+	in.KcalPer100g = original.KcalPer100g + 1
+	got, err := repo.UpdateFood(context.Background(), badActor, original.ID, in, loadUpdatedAt(t, tx, original.ID))
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, ErrCacheGenerationBump,
+		"a transaction that never committed must not be reported as a cache-bump failure")
+	assert.Equal(t, FoodSnapshot{}, got, "a genuine transaction failure must return the zero value, not a partial snapshot")
+}
+
+// TestSoftDeleteFoodRendersSuccessDespiteCacheBumpFailureButSentinelIsDetectable
+// is Rider 4's proof for SoftDeleteFood, the same shape as UpdateFood's.
+func TestSoftDeleteFoodRendersSuccessDespiteCacheBumpFailureButSentinelIsDetectable(t *testing.T) {
+	db := testDB(t)
+	tx := seedTx(t, db)
+	target := seedFoodTx(t, tx, "zzz-cachebumpfail-delete-"+uuid.NewString(), "")
+	repo := NewMutationRepository(tx, fakeFailingGeneration{})
+	actor := Actor{ID: "admin-1", Email: "ops@kora.test"}
+
+	got, err := repo.SoftDeleteFood(context.Background(), actor, target.ID)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrCacheGenerationBump)
+	require.NotNil(t, got.DeletedAt, "the retirement itself committed — the returned snapshot must show it retired, not a zero value")
+
+	var deletedAtIsSet bool
+	require.NoError(t, tx.Raw("SELECT deleted_at IS NOT NULL FROM food_items WHERE id = ?", target.ID).Scan(&deletedAtIsSet).Error)
+	assert.True(t, deletedAtIsSet, "the DB write must have committed despite the cache bump failing")
 }
