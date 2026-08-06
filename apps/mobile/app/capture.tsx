@@ -825,15 +825,34 @@ export default function CaptureScreen() {
     });
   }
 
-  // A NetworkError means the request never arrived — the capture is still good,
+  // Both of these mean the request never arrived — the capture is still good,
   // so queue it rather than telling the user it failed. Any other error is a
   // genuine refusal and keeps the existing message.
+  //
+  // AuthTokenError belongs here, and leaving it out very nearly made this whole
+  // feature dead in the only condition it exists for. api.ts's fetchWithRetry
+  // awaits getToken(user) BEFORE it ever calls fetch (src/lib/api.ts), and
+  // src/lib/__tests__/api-error-modes.test.ts pins that ordering: when
+  // getIdToken rejects, fetch is never attempted, so NO NetworkError is ever
+  // produced. Firebase serves getIdToken() from cache while the ID token is
+  // still valid — roughly an hour — but the moment it needs refreshing it goes
+  // to the network, and offline that rejects with auth/network-request-failed.
+  // So a user offline for more than an hour (a flight, a hike: precisely the
+  // scenario this queue was designed for) hit AuthTokenError, fell through to
+  // the plain-message branch, and lost the capture entirely.
+  //
+  // The same reasoning the log queue already records for its own classifier
+  // (see countsAsAttempt in src/offline/queue.ts, which groups NetworkError and
+  // AuthTokenError for exactly this cause) — this path had simply not adopted
+  // it. Treating a genuinely broken session as "offline" is the safe direction
+  // of error: the capture is preserved rather than discarded, and api.ts still
+  // owns real session expiry via signOutForExpiredSession.
   async function handleResolveFailure(
     error: Error,
     file: CaptureFile,
     kind: "photo" | "voice",
   ) {
-    if (!(error instanceof NetworkError)) {
+    if (!(error instanceof NetworkError) && !(error instanceof AuthTokenError)) {
       setErrorMsg(ottoErrorMessage(error));
       return;
     }
