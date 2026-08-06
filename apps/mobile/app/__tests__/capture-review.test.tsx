@@ -167,17 +167,26 @@ describe("a follow_up capture parked in review", () => {
     );
   });
 
-  // The dead end: Confirm is disabled for a question, so before this change
-  // the only exit was Discard — a user who logged the food manually kept a
-  // "Tap to confirm" row sitting over the meal they had just written.
-  it("resolves the capture rather than leaving a review row over the manual log", async () => {
+  // The row and its media must SURVIVE. Asserting presence, not absence: a
+  // test that only checked navigation happened would pass either way.
+  //
+  // "Search manually" is a plain link with no confirmation step, so resolving
+  // the capture here would destroy the photo before /log even mounted — a
+  // misdirected tap, a back-out, or the app being killed on that screen would
+  // lose the meal with nothing written. handleLogManually (the FAILED path)
+  // keeps both for exactly this reason and this handler must agree with it.
+  // Discard is the deliberate exit.
+  it("keeps the capture and its media so a misdirected tap loses nothing", async () => {
     await render(<CaptureReviewScreen />, { wrapper: wrap(newClient()) });
     fireEvent.press(await screen.findByLabelText("Search manually"));
 
-    await waitFor(async () => expect(await listCaptures()).toEqual([]));
-    expect(mediaExists(storedName)).toBe(false);
-    // Taking the meal over manually must not ALSO queue an automatic log, or
-    // the user would end up with two.
+    await waitFor(() => expect(router.push).toHaveBeenCalled());
+
+    const rows = await listCaptures();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: CAPTURE_ID, status: "review" });
+    expect(mediaExists(storedName)).toBe(true);
+    // And nothing was auto-logged: the user is doing that themselves on /log.
     await expect(listLogs()).resolves.toEqual([]);
   });
 });
@@ -188,8 +197,8 @@ describe("a follow_up capture parked in review", () => {
 // that would delete their media.
 //
 // Seeding ONLY the other user's row and asserting "not found" would also pass
-// against a screen that simply never loaded anything, so the own-user case
-// above (which renders Confirm) is what proves the reader works at all; this
+// against a screen that simply never loaded anything, so the own-user cases
+// above (which render Confirm) are what prove the reader works at all; this
 // test proves it discriminates.
 it("treats another account's capture as not found", async () => {
   await AsyncStorage.clear();

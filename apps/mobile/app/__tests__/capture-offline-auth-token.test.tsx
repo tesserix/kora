@@ -19,6 +19,7 @@ import { act, fireEvent, render as rtlRender, waitFor } from "@testing-library/r
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as ImagePicker from "expo-image-picker";
 import { AuthTokenError, NetworkError, apiFetchMultipart } from "@/lib/api";
+import { mealSlotForHour } from "@/lib/mealSlot";
 
 jest.mock("expo-router", () => ({ router: { back: jest.fn(), push: jest.fn() } }));
 
@@ -56,6 +57,13 @@ jest.mock("@/api/hooks", () => ({
 }));
 
 jest.mock("@/offline/enqueueCapture", () => ({ enqueueCapture: jest.fn() }));
+
+// The slot capture.tsx seeds itself with, derived the same way production does
+// rather than pinned to a literal, so the assertion holds whatever hour the
+// suite runs at. Never `expect.any(String)`: passing `kind` or `fileName` as
+// the slot would stay green, and the slot decides which diary section the
+// meal lands in.
+const expectedMealSlot = () => mealSlotForHour(new Date().getHours());
 
 import CaptureScreen from "../capture";
 
@@ -116,7 +124,7 @@ test("a photo whose resolve dies on the token fetch is queued, not lost", async 
   expect(mockEnqueueCapture()).toHaveBeenCalledWith(
     { uri: "file://x.jpg", name: "x.jpg", type: "image/jpeg" },
     "photo",
-    expect.any(String),
+    expectedMealSlot(),
   );
   // And the user is told it was saved, not that their session is in doubt.
   expect(await rendered.findByText(/you.{0,3}re offline/i)).toBeTruthy();

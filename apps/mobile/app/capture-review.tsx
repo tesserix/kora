@@ -169,37 +169,33 @@ export default function CaptureReviewScreen() {
     }
   };
 
-  // "Search manually" from a REVIEWED capture (tier confirm/follow_up).
+  // "Search manually" from a REVIEWED capture.
   //
-  // Two bugs met here. First, this handler used to push "/log" bare, so
-  // log.tsx fell back to `new Date()` and the entry landed on the day the
-  // user got round to it rather than the day the food was eaten — the one
-  // log-creating path that broke decision 2 (capture time, always).
+  // It used to push "/log" bare, so log.tsx fell back to `new Date()` and the
+  // entry landed on the day the user got round to it rather than the day the
+  // food was eaten — the one log-creating path that broke decision 2 (capture
+  // time, always). Seeding `loggedAt` is the whole of the fix.
   //
-  // Second, and worse for a `follow_up`: Confirm is disabled when the result
-  // is a question rather than a card, so before this change the ONLY exit
-  // from such a row was Discard. A user who took this route and logged the
-  // food kept a "Tap to confirm" review row sitting over the meal they had
-  // just written, forever.
+  // It deliberately does NOT delete the media or drop the row, for three
+  // reasons:
   //
-  // So this treats the press as what it is — the user rejecting the AI's
-  // reading and taking the meal over themselves — and resolves the capture on
-  // exactly the terms "Not right" already does: media deleted, row dropped.
-  // The AI has already rendered its verdict on this media, so unlike the
-  // FAILED path (handleLogManually below, decision 3) there is nothing left
-  // for the file to be retried against.
-  const handleSearchManually = async () => {
+  //  1. Neither branch that renders this link is a verdict. ResolutionResult
+  //     shows it under a follow-up QUESTION and under "I couldn't identify
+  //     that" — the AI asking something back, or declining to answer. Decision
+  //     3's "the user's own record of the meal must survive the AI's failure"
+  //     applies here exactly as it does to a failed capture.
+  //  2. handleLogManually below does the same user-facing thing — push /log
+  //     with the same loggedAt — and keeps both media and row. Two handlers
+  //     with one meaning must not disagree about whether the capture survives.
+  //  3. This is a plain link with no confirmation, and a deletion here lands
+  //     BEFORE navigation. A misdirected tap, a back-out of /log, or the app
+  //     being killed on that screen would destroy the photo with no log
+  //     written — precisely the outcome this queue exists to prevent.
+  //
+  // Discard remains the explicit, deliberate exit for removing a capture.
+  const handleSearchManually = () => {
     if (!capture) return;
-    setBusy(true);
-    try {
-      await deleteQueuedMedia(capture.storedName);
-      await discard(capture.id);
-      invalidate();
-      router.push({ pathname: "/log", params: { loggedAt: capture.capturedAt } });
-    } catch {
-      setBusy(false);
-      Alert.alert("Couldn't open manual logging", "Please try again.");
-    }
+    router.push({ pathname: "/log", params: { loggedAt: capture.capturedAt } });
   };
 
   const handleReject = async () => {
