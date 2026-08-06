@@ -404,6 +404,17 @@ Server component listing `kora_admin_events` newest-first: when, who, what actio
 
 **Add the nav entry to `koraNav`.** `/admin/apps/kora` is already in `EXACT_MATCH_ROOTS`, so the Overview active-state bug will not recur — but confirm rather than assume.
 
+- [x] **Tasks 8 and 9 done — commit `9bebe97`, PR https://github.com/tesserix/tesserix-home/pull/71 (open, not merged).**
+  - **BOTH FLAGGED DEPENDENCIES WERE UNBUILT AND HAD TO BE ADDED FIRST** (kora commit `16ba8dd`, pushed to the existing unmerged PR #103 rather than a second PR):
+    - `GET /v1/admin/events` — task 9's dependency, which task 5 was supposed to add and did not.
+    - `GET /v1/admin/foods/:id` → `{food, log_count}` — **the answer to task 8's "decide which and say so"**. The count needed an ENDPOINT, not a field. And the edit form could not be built without the same endpoint either: PATCH needs an `updated_at` precondition (rider 1) and the food INDEX returns `nutrition.FoodItem`, which has no `updated_at` at all — there was nothing to read, not merely something awkward to read.
+  - **`log_count` is a WEIGHT, not a blocker.** `food_logs.food_item_id` is ON DELETE SET NULL, but a SOFT delete never triggers that, so logs keep their reference and their denormalised macros and historical days render unchanged. The number exists so an operator retiring a food with 4,000 logs knows before clicking.
+  - **Mutations go through SERVER ACTIONS, not route handlers.** `kora-admin.ts` is server-only (reads `KORA_BFF_HMAC_KEY`, calls `getCurrentSession()` to bind the acting admin into the HMAC — that identity is what kora writes to `actor_email`). A route handler would be a second HTTP surface re-proxying three calls, each needing its own authorization reasoning. Both are session-gated by `middleware.ts`; the action is less surface.
+  - **Rider 4 honoured end to end:** a committed edit whose cache bump failed renders as SUCCESS with a warning. The form also swaps in the fresh `updated_at` from the response, so a second edit in the same session does not 409 against the operator's own write.
+  - **Nav active-state CONFIRMED, not assumed:** Overview does not stay lit on `/audit`; Food index stays active on `/foods/[id]` and `/foods/new` without lighting up Audit trail; `/audit` does not light up Food index.
+  - Verified: 99 vitest tests pass (was 79); `eslint --max-warnings 0` clean; `tsc --noEmit` introduces zero new errors.
+  - **`next build` is ALREADY RED on `main`** — `app/admin/apps/homechef/payment-gateway/page.tsx` imports `CashfreeGatewayStatus`, which `@tesserix/homechef-shared` no longer exports. Confirmed by stashing and running tsc against clean main. Unrelated to Kora and left alone, but this branch cannot produce a green production build until it is fixed separately.
+
 ---
 
 ## Final verification, after all three PRs merge
