@@ -44,6 +44,22 @@ describe("captureMedia", () => {
     expect(new File(queuedMediaUri(b)).textSync()).toBe("B");
   });
 
+  // The stored name is derived from the capture id, so a retry (or a crash
+  // between copy and append, followed by the same id being reused) can copy
+  // onto a destination that already exists. expo-file-system's RelocationOptions
+  // default `overwrite` to FALSE and the native copy THROWS in that case, so the
+  // delete-if-exists guard in copyIntoQueue is load-bearing on device — this
+  // test is what stops it being "simplified" away.
+  it("overwrites an existing stored file rather than throwing", async () => {
+    const first = await copyIntoQueue(makeSourceFile("s-dup-1.jpg", "OLD"), "cap-dup", "meal.jpg");
+    expect(new File(queuedMediaUri(first)).textSync()).toBe("OLD");
+
+    const second = await copyIntoQueue(makeSourceFile("s-dup-2.jpg", "NEW"), "cap-dup", "meal.jpg");
+
+    expect(second).toBe(first);
+    expect(new File(queuedMediaUri(second)).textSync()).toBe("NEW");
+  });
+
   it("deleteQueuedMedia removes the file and never throws on a missing one", async () => {
     const stored = await copyIntoQueue(makeSourceFile("src-3.jpg"), "cap-3", "meal.jpg");
     await deleteQueuedMedia(stored);

@@ -515,13 +515,21 @@ jest.mock("expo-file-system", () => {
       fs.delete(this.uri);
     }
 
-    async copy(destination) {
+    // Faithful to RelocationOptions: `overwrite` defaults to FALSE, and the
+    // native module throws when the destination already exists. The mock used
+    // to overwrite unconditionally, which made captureMedia.ts's
+    // delete-if-exists guard look redundant — deleting it stayed green here
+    // and threw on device the second time a capture id was reused.
+    async copy(destination, { overwrite = false } = {}) {
       const source = fs.get(this.uri);
       if (!source || source.type !== "file") {
         throw new Error(`Source file not found: ${this.uri}`);
       }
 
       const destUri = destination.uri;
+      if (fs.has(destUri) && !overwrite) {
+        throw new Error(`Destination already exists: ${destUri}`);
+      }
       fs.set(destUri, { type: "file", content: source.content });
     }
   }
@@ -555,3 +563,4 @@ jest.mock("expo-file-system", () => {
 jest.mock("expo-crypto", () => ({
   randomUUID: jest.fn(() => require("crypto").randomUUID()),
 }));
+
