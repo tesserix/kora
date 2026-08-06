@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { list } from "../captureQueue";
+import { MAX_CAPTURES, append, list } from "../captureQueue";
 import { enqueueCapture } from "../enqueueCapture";
 
 jest.mock("@/lib/api", () => ({
@@ -7,6 +7,7 @@ jest.mock("@/lib/api", () => ({
 }));
 jest.mock("../captureMedia", () => ({
   copyIntoQueue: jest.fn(async (_uri: string, id: string) => `${id}.jpg`),
+  deleteQueuedMedia: jest.fn(async () => {}),
 }));
 jest.mock("../owner", () => {
   const actual = jest.requireActual("../owner");
@@ -60,4 +61,35 @@ it("refuses to queue when nobody is signed in", async () => {
     enqueueCapture({ uri: "file:///cache/x.jpg", name: "m.jpg", type: "image/jpeg" }, "photo"),
   ).rejects.toMatchObject({ name: "NoOwnerError" });
   await expect(list()).resolves.toEqual([]);
+});
+
+// The queue's cap is enforced by `append`, which runs AFTER the media has been
+// copied — so a refusal at MAX_CAPTURES used to leave 1-3 MB of photo on disk
+// with no row referencing it, reclaimed only by the NEXT launch's orphan
+// sweep. A user retrying against a full queue could add tens of MB in one
+// session.
+it("deletes the copied media when the queue refuses the row", async () => {
+  const { copyIntoQueue, deleteQueuedMedia } = jest.requireMock("../captureMedia");
+  copyIntoQueue.mockClear();
+  deleteQueuedMedia.mockClear();
+
+  // Fill the queue to its cap so the next append is refused.
+  for (let i = 0; i < MAX_CAPTURES; i++) {
+    await append({
+      id: `seed-${i}`, kind: "photo", storedName: `seed-${i}.jpg`, fileName: "m.jpg",
+      mimeType: "image/jpeg", capturedAt: new Date(2026, 7, 1, 12).toISOString(), ownerId: "uid-1",
+    } as Parameters<typeof append>[0]);
+  }
+
+  await expect(
+    enqueueCapture({ uri: "file:///cache/x.jpg", name: "meal.jpg", type: "image/jpeg" }, "photo", "lunch"),
+  ).rejects.toThrow(/too many captures/i);
+
+  // The copy DID happen (the cap is only knowable inside append's lock), and
+  // the file it wrote must be gone again.
+  expect(copyIntoQueue).toHaveBeenCalledTimes(1);
+  const storedName = await copyIntoQueue.mock.results[0].value;
+  expect(deleteQueuedMedia).toHaveBeenCalledWith(storedName);
+  // And no row leaked past the cap.
+  expect(await list()).toHaveLength(MAX_CAPTURES);
 });
