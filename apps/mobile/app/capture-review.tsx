@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Alert, ScrollView, View } from "react-native";
+import { ActivityIndicator, Alert, Image, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
+import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
 import { AppText } from "@/components/Text";
 import { Button } from "@/components/Button";
 import { ScreenHeader } from "@/components/ScreenHeader";
@@ -10,11 +11,20 @@ import { AppBackground } from "@/components/AppBackground";
 import { ResolutionResult, resolveResultView } from "@/components/ResolutionResult";
 import { useTheme } from "@/theme";
 import { list as listCaptures, discard, type QueuedCapture } from "@/offline/captureQueue";
-import { deleteQueuedMedia } from "@/offline/captureMedia";
+import { deleteQueuedMedia, queuedMediaUri } from "@/offline/captureMedia";
 import { append as appendLog } from "@/offline/queue";
 import { QUEUED_CAPTURES_KEY, QUEUED_LOGS_KEY } from "@/offline/queryKeys";
 import type { MealSlot } from "@/lib/mealSlot";
 import type { ResolutionSource } from "@/api/types";
+
+// mm:ss, rounding down — a partial second reading "0:12" while playback is
+// mid-second is expected, never "0:12.4".
+function formatDuration(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
 
 // Typed against ResolutionSource, the same pattern drainCaptures.ts's private
 // sourceOf follows (not exported, so this is a deliberate re-derivation, not
@@ -40,6 +50,13 @@ export default function CaptureReviewScreen() {
   const [capture, setCapture] = useState<QueuedCapture | null | undefined>(undefined);
   const [mealSlot, setMealSlot] = useState<MealSlot>("snack");
   const [busy, setBusy] = useState(false);
+
+  // Always called, never conditionally — the source is null until a voice
+  // capture is loaded, so a photo capture (or the loading/not-found states)
+  // simply never gets a real source and the player stays idle.
+  const audioSource = capture && capture.kind === "voice" ? queuedMediaUri(capture.storedName) : null;
+  const player = useAudioPlayer(audioSource);
+  const playerStatus = useAudioPlayerStatus(player);
 
   useEffect(() => {
     let cancelled = false;
@@ -112,6 +129,30 @@ export default function CaptureReviewScreen() {
     }
   };
 
+  // A capture the AI genuinely could not identify, or that exhausted its
+  // resolve attempts, is kept WITH its media rather than discarded — the
+  // user's own record of the meal must survive the AI's failure. Manual
+  // logging is seeded with the CAPTURE time, never now, for the same reason
+  // handleConfirm seeds logged_at from capture.capturedAt above.
+  const handleLogManually = () => {
+    if (!capture) return;
+    router.push({ pathname: "/log", params: { loggedAt: capture.capturedAt } });
+  };
+
+  const handleDiscardFailed = async () => {
+    if (!capture) return;
+    setBusy(true);
+    try {
+      await deleteQueuedMedia(capture.storedName);
+      await discard(capture.id);
+      invalidate();
+      router.back();
+    } catch {
+      setBusy(false);
+      Alert.alert("Couldn't discard that", "Please try again.");
+    }
+  };
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppBackground />
@@ -124,7 +165,70 @@ export default function CaptureReviewScreen() {
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
           <ActivityIndicator color={colors.tertiaryLabel} />
         </View>
-      ) : capture === null || !resolution ? (
+      ) : capture === null ? (
+        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}>
+          <AppText muted style={{ textAlign: "center" }}>
+            This capture is no longer waiting on review.
+          </AppText>
+        </View>
+      ) : capture.status === "failed" ? (
+        // Decision 3: a permanently failed capture is kept WITH its media and
+        // offers manual logging, never discarded on its own — the user's own
+        // record of the meal must survive the AI's failure. Voice has no
+        // thumbnail, so duration + capture time + playback is the direct
+        // analogue of showing the photo (see task-8 brief).
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ padding: 18, paddingTop: 8, paddingBottom: insets.bottom + 24, gap: 14 }}
+        >
+          {capture.kind === "photo" ? (
+            <Image
+              accessibilityLabel="Captured photo"
+              source={{ uri: queuedMediaUri(capture.storedName) }}
+              style={{ width: "100%", height: 220, borderRadius: 16, backgroundColor: colors.cardSecondary }}
+              resizeMode="cover"
+            />
+          ) : (
+            <View
+              style={{
+                borderRadius: 16,
+                backgroundColor: colors.cardSecondary,
+                padding: 18,
+                gap: 12,
+              }}
+            >
+              <AppText muted style={{ fontSize: 13 }}>
+                Recorded {new Date(capture.capturedAt).toLocaleString()}
+              </AppText>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
+                <Button
+                  title={playerStatus.playing ? "Pause" : "Play"}
+                  variant="secondary"
+                  onPress={() => (playerStatus.playing ? player.pause() : player.play())}
+                  style={{ minWidth: 100 }}
+                />
+                <AppText variant="headline">{formatDuration(playerStatus.duration)}</AppText>
+              </View>
+            </View>
+          )}
+          <AppText muted>{capture.lastError ?? "Couldn't identify that."}</AppText>
+          <View style={{ flexDirection: "row", gap: spacing.sm }}>
+            <Button
+              title="Discard"
+              variant="secondary"
+              onPress={handleDiscardFailed}
+              disabled={busy}
+              style={{ flex: 1 }}
+            />
+            <Button
+              title="Log it manually"
+              onPress={handleLogManually}
+              disabled={busy}
+              style={{ flex: 1 }}
+            />
+          </View>
+        </ScrollView>
+      ) : !resolution ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}>
           <AppText muted style={{ textAlign: "center" }}>
             This capture is no longer waiting on review.

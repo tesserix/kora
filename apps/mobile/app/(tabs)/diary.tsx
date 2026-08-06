@@ -203,7 +203,6 @@ export default function Diary() {
   const [waterErr, setWaterErr] = useState<string | null>(null);
   const [copyOpen, setCopyOpen] = useState(false);
   const [failedRowId, setFailedRowId] = useState<string | null>(null);
-  const [failedCaptureId, setFailedCaptureId] = useState<string | null>(null);
 
   // Entrance stagger runs on first mount only — see app/(tabs)/index.tsx for the
   // same guard and rationale (refetches update data in place, no re-stagger).
@@ -267,7 +266,6 @@ export default function Diary() {
   // captured on tap, so a drain that lands mid-sheet cannot leave stale copy
   // on screen.
   const failedRow = queuedNotOnServer.find((r) => r.id === failedRowId) ?? null;
-  const failedCapture = captures.rows.find((r) => r.id === failedCaptureId) ?? null;
 
   // Retry and Discard both dismiss the sheet immediately, so a rejected
   // storage write would otherwise look exactly like a successful one — the row
@@ -275,11 +273,6 @@ export default function Diary() {
   // flow above uses.
   const runQueueAction = (action: () => Promise<void>) => {
     setFailedRowId(null);
-    action().catch(() => Alert.alert("Couldn't update that item", "Please try again."));
-  };
-
-  const runCaptureAction = (action: () => Promise<void>) => {
-    setFailedCaptureId(null);
     action().catch(() => Alert.alert("Couldn't update that item", "Please try again."));
   };
 
@@ -402,12 +395,15 @@ export default function Diary() {
                         )
                       }
                       accessibilityLabel={`${name}, ${statusText}`}
+                      // Failed and review both point at capture-review now: a
+                      // failed capture is kept WITH its media there (thumbnail
+                      // or playback, the failure reason, manual logging, and
+                      // discard) rather than a retry/discard-only sheet, so
+                      // the media never vanishes without the user seeing it.
                       onPress={
-                        failed
-                          ? () => setFailedCaptureId(c.id)
-                          : c.status === "review"
-                            ? () => router.push({ pathname: "/capture-review", params: { id: c.id } })
-                            : undefined
+                        failed || c.status === "review"
+                          ? () => router.push({ pathname: "/capture-review", params: { id: c.id } })
+                          : undefined
                       }
                     />
                   );
@@ -488,15 +484,6 @@ export default function Diary() {
           onRetry={() => runQueueAction(() => queued.retryRow(failedRow.id))}
           onDiscard={() => runQueueAction(() => queued.discardRow(failedRow.id))}
           onClose={() => setFailedRowId(null)}
-        />
-      ) : null}
-      {failedCapture ? (
-        <QueuedFailedSheet
-          visible
-          description={failedCapture.kind === "photo" ? "This photo" : "This voice note"}
-          onRetry={() => runCaptureAction(() => captures.retryRow(failedCapture.id))}
-          onDiscard={() => runCaptureAction(() => captures.discardRow(failedCapture.id))}
-          onClose={() => setFailedCaptureId(null)}
         />
       ) : null}
     </View>

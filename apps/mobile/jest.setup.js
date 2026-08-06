@@ -89,6 +89,24 @@ jest.mock("expo-audio", () => ({
   },
   requestRecordingPermissionsAsync: jest.fn(async () => ({ granted: true, status: "granted" })),
   getRecordingPermissionsAsync: jest.fn(async () => ({ granted: true, status: "granted" })),
+  // useAudioPlayer/useAudioPlayerStatus back the failed-voice-capture playback
+  // in capture-review.tsx (task 8). Kept minimal — no real decoding happens
+  // under Jest, so duration/playing stay at their defaults unless a test
+  // overrides the mocks itself.
+  useAudioPlayer: jest.fn(() => ({
+    play: jest.fn(),
+    pause: jest.fn(),
+    seekTo: jest.fn(async () => {}),
+    remove: jest.fn(),
+    playing: false,
+    id: "mock-player",
+  })),
+  useAudioPlayerStatus: jest.fn(() => ({
+    playing: false,
+    duration: 0,
+    currentTime: 0,
+    isLoaded: true,
+  })),
 }));
 
 // expo-notifications (SDK 57): mock the permission/token/listener surface the
