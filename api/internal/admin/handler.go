@@ -11,10 +11,17 @@ import (
 )
 
 type Handler struct {
-	foods FoodLister
+	foods     FoodLister
+	mutations FoodMutator
 }
 
-func NewHandler(foods FoodLister) Handler { return Handler{foods: foods} }
+// NewHandler takes both surfaces rather than exposing a second constructor
+// for the mutation half: two constructors would let router.go wire the read
+// side and forget the write side, and the resulting 500s would only appear
+// on the first mutation attempt in production.
+func NewHandler(foods FoodLister, mutations FoodMutator) Handler {
+	return Handler{foods: foods, mutations: mutations}
+}
 
 // ListFoods serves GET /v1/admin/foods?q=&limit=&offset=.
 //

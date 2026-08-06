@@ -29,7 +29,7 @@ func (f *fakeLister) ListFoods(_ context.Context, p ListParams) (ListResult, err
 func handlerRouter(l FoodLister) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	r.GET("/v1/admin/foods", NewHandler(l).ListFoods)
+	r.GET("/v1/admin/foods", NewHandler(l, nil).ListFoods)
 	return r
 }
 

@@ -1,6 +1,8 @@
 package server
 
 import (
+	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -128,9 +130,15 @@ func NewRouter(deps Deps) *gin.Engine {
 		// Gin's radix tree keeps /v1/foods and /v1/admin/foods distinct, so
 		// the two groups never collide.
 		if len(deps.BFFHMACKey) > 0 {
-			adminHandler := admin.NewHandler(admin.NewRepository(deps.DB))
+			adminHandler := admin.NewHandler(
+				admin.NewRepository(deps.DB),
+				admin.NewMutationRepository(deps.DB, resolveGeneration(deps.ResolveCache)),
+			)
 			adminGroup := r.Group("/v1/admin", bffauth.Middleware(deps.BFFHMACKey, 0))
 			adminGroup.GET("/foods", adminHandler.ListFoods)
+			adminGroup.POST("/foods", adminHandler.CreateFood)
+			adminGroup.PATCH("/foods/:id", adminHandler.UpdateFood)
+			adminGroup.DELETE("/foods/:id", adminHandler.SoftDeleteFood)
 		}
 
 		pinsHandler := pins.NewHandler(pins.NewService(pins.NewRepository(deps.DB), foodRepo))
@@ -215,4 +223,29 @@ func NewRouter(deps Deps) *gin.Engine {
 	})
 
 	return r
+}
+
+// resolveGeneration narrows the SAME ai.Cache instance the resolve engine
+// reads from to its generation surface. It deliberately type-asserts rather
+// than constructing a cache of its own: the generation counter lives on
+// RedisCache and is exposed through a separate small interface, so nothing
+// structurally forces the admin bump path and the resolve path onto the same
+// Redis client and DB index. A second RedisCache — especially one on a
+// different DB index — would make every admin bump invisible to the
+// resolver, silently, with the mutation still reporting success.
+//
+// A nil or non-generational cache degrades to ai.NoCache{}, whose
+// BumpGeneration is a silent no-op, so the admin surface still mounts when
+// the resolve engine is disabled or Redis is unreachable. That degradation
+// is logged at WARN rather than passed over: "mutations succeed but never
+// invalidate the cache" is exactly the kind of fault that otherwise only
+// surfaces as users being served stale macros for up to the resolve cache's
+// 24h TTL.
+func resolveGeneration(cache ai.Cache) ai.Generation {
+	if g, ok := cache.(ai.Generation); ok && g != nil {
+		return g
+	}
+	slog.Warn("admin mutations: resolve cache exposes no generation counter; food edits will not invalidate cached resolutions",
+		"cache_type", fmt.Sprintf("%T", cache))
+	return ai.NoCache{}
 }
