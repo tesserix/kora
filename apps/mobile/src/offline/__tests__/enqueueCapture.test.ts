@@ -38,6 +38,21 @@ it("copies the media BEFORE appending, so no row can reference a missing file", 
   }
 });
 
+// The prose test above ("copies the media BEFORE appending...") only checks
+// that copyIntoQueue was called and that the resulting row has the right
+// shape — both hold identically regardless of which happens first, since the
+// mocked copy always succeeds. This test binds the actual invariant: when the
+// copy fails, no row may ever have been appended.
+it("leaves the queue empty when the copy fails, so no row can outlive its file", async () => {
+  const { copyIntoQueue } = jest.requireMock("../captureMedia");
+  copyIntoQueue.mockRejectedValueOnce(new Error("disk full"));
+
+  await expect(
+    enqueueCapture({ uri: "file:///cache/x.jpg", name: "meal.jpg", type: "image/jpeg" }, "photo", "lunch"),
+  ).rejects.toThrow("disk full");
+  await expect(list()).resolves.toEqual([]);
+});
+
 it("refuses to queue when nobody is signed in", async () => {
   const { resolveOwnerId } = jest.requireMock("../owner");
   resolveOwnerId.mockResolvedValueOnce(null);
