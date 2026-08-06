@@ -373,6 +373,15 @@ Mirror `deny-ops-endpoints-main`: a DENY action, selecting the **istio-ingressga
 
 Note this repo's CI is billing-blocked (private repo); its checks will not run and that does not gate ArgoCD.
 
+- [x] **Done — commit `b06e5ea5`, PR https://github.com/tesserix/tesserix-k8s/pull/167 (open, not merged).**
+  - **THE PLAN'S FILE PATH WAS WRONG.** `deny-ops-endpoints-main` does not live in `charts/thirdparty/istio-config/templates/authorization-policies.yaml`; it lives in `charts/infrastructure/istio-auth-policies/templates/ops-endpoints-deny.yaml`, values-driven off `opsEndpointDeny.gateways`. The new policy went in the same chart as the thing it mirrors: new template `admin-surface-deny.yaml` + an `adminSurfaceDeny` values block.
+  - **The actual exposure, now named precisely:** `api-authz.yaml` grants `hosts: [kora-api.tesserix.app], paths: ["/v1/*"]` so the Go backend can verify Firebase tokens itself. That grant is by PREFIX, so it also admits `/v1/admin/*` — which Firebase does not gate at all, only the bffauth HMAC does. Slice 2 turned that surface from read-only into create/edit/retire, which is what makes the edge grant worth withdrawing.
+  - **Host-scoped**, not just path-scoped: an unscoped `/v1/admin/*` DENY would withdraw every other app's admin path on the same gateway.
+  - **Two traps found while writing it:** `"/v1/admin/*"` does NOT match the bare `"/v1/admin"` in Istio (both listed); and Istio matches `hosts` against the Host/Authority header, which can carry an explicit port — **a DENY that fails to match fails OPEN**, so `kora-api.tesserix.app:*` is listed alongside the bare host.
+  - **Verified the in-cluster path survives BEFORE writing the policy:** `charts/apps/company/values-prod.yaml` sets `KORA_API_URL: http://kora-api-direct.kora.svc.cluster.local:8080`, so the portal's signed traffic never traverses a gateway. That dependency is recorded in the template header, since changing that URL to the public host would silently 403 the portal.
+  - Verified: `helm lint` clean; `helm template` with default AND `values-prod.yaml` renders valid YAML with the expected selector/hosts/paths; no new name collisions.
+  - **NOT verified (needs cluster access):** the by-traffic checks. They are PR checklist items with exact curls, including the control cases (`/health` still 200, ordinary `/v1/*` still 401-from-app not 403-at-edge) and confirming which enforcement point picked the policy up.
+
 ---
 
 ## Task 8: portal — mutation client and UI
