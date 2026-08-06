@@ -402,7 +402,13 @@ export default function Diary() {
                         )
                       }
                       accessibilityLabel={`${name}, ${statusText}`}
-                      onPress={failed ? () => setFailedCaptureId(c.id) : undefined}
+                      onPress={
+                        failed
+                          ? () => setFailedCaptureId(c.id)
+                          : c.status === "review"
+                            ? () => router.push({ pathname: "/capture-review", params: { id: c.id } })
+                            : undefined
+                      }
                     />
                   );
                 })}
