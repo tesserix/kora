@@ -156,6 +156,39 @@ export default function CaptureReviewScreen() {
     }
   };
 
+  // "Search manually" from a REVIEWED capture (tier confirm/follow_up).
+  //
+  // Two bugs met here. First, this handler used to push "/log" bare, so
+  // log.tsx fell back to `new Date()` and the entry landed on the day the
+  // user got round to it rather than the day the food was eaten — the one
+  // log-creating path that broke decision 2 (capture time, always).
+  //
+  // Second, and worse for a `follow_up`: Confirm is disabled when the result
+  // is a question rather than a card, so before this change the ONLY exit
+  // from such a row was Discard. A user who took this route and logged the
+  // food kept a "Tap to confirm" review row sitting over the meal they had
+  // just written, forever.
+  //
+  // So this treats the press as what it is — the user rejecting the AI's
+  // reading and taking the meal over themselves — and resolves the capture on
+  // exactly the terms "Not right" already does: media deleted, row dropped.
+  // The AI has already rendered its verdict on this media, so unlike the
+  // FAILED path (handleLogManually below, decision 3) there is nothing left
+  // for the file to be retried against.
+  const handleSearchManually = async () => {
+    if (!capture) return;
+    setBusy(true);
+    try {
+      await deleteQueuedMedia(capture.storedName);
+      await discard(capture.id);
+      invalidate();
+      router.push({ pathname: "/log", params: { loggedAt: capture.capturedAt } });
+    } catch {
+      setBusy(false);
+      Alert.alert("Couldn't open manual logging", "Please try again.");
+    }
+  };
+
   const handleReject = async () => {
     if (!capture) return;
     setBusy(true);
@@ -313,7 +346,7 @@ export default function CaptureReviewScreen() {
             onChangeMealSlot={setMealSlot}
             onAdd={handleConfirm}
             adding={busy}
-            onSearchManually={() => router.push("/log")}
+            onSearchManually={handleSearchManually}
           />
           <View style={{ flexDirection: "row", gap: spacing.sm }}>
             <Button

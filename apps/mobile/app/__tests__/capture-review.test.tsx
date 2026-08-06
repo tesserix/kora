@@ -2,7 +2,10 @@ import type { ReactNode } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react-native";
+import { File, Paths } from "expo-file-system";
+import { router } from "expo-router";
 import { append, list as listCaptures, markReview } from "@/offline/captureQueue";
+import { copyIntoQueue, mediaExists } from "@/offline/captureMedia";
 import { list as listLogs } from "@/offline/queue";
 import CaptureReviewScreen from "../capture-review";
 import type { Resolution } from "@/api/types";
@@ -116,4 +119,65 @@ it("confirming logs the reviewed candidate's identity and source, not a placehol
   expect(log.payload.food_item_id).toBe("food-1");
   expect(log.payload.quantity_grams).toBe(100);
   expect(log.payload.source).toBe("ai_photo");
+});
+
+// A follow_up resolution that actually ASKS something: resolveResultView sends
+// it to the question branch, where the only controls are "Search manually" and
+// Discard — Confirm is disabled because a question names no food to log.
+const FOLLOW_UP = {
+  tier: "follow_up",
+  follow_up_question: "Was that with or without dressing?",
+  candidates: [],
+} as unknown as Resolution;
+
+function makeSourceFile(name: string, contents = "meal-bytes"): string {
+  const f = new File(Paths.cache, name);
+  f.create({ overwrite: true });
+  f.write(contents);
+  return f.uri;
+}
+
+describe("a follow_up capture parked in review", () => {
+  let storedName: string;
+
+  beforeEach(async () => {
+    await AsyncStorage.clear();
+    (router.push as jest.Mock).mockClear();
+    storedName = await copyIntoQueue(makeSourceFile("fu-src.jpg"), CAPTURE_ID, "m.jpg");
+    await append({
+      id: CAPTURE_ID, kind: "photo", storedName, fileName: "m.jpg", mimeType: "image/jpeg",
+      capturedAt: atLocalNoon(2026, 8, 6), ownerId: "uid-1",
+    } as Parameters<typeof append>[0]);
+    await markReview(CAPTURE_ID, FOLLOW_UP);
+  });
+
+  // Decision 2 on the fourth and last log-creating path. Pushing "/log" bare
+  // makes log.tsx fall back to `new Date()`, so a capture taken yesterday
+  // would be logged against today.
+  it("seeds manual logging with the CAPTURE time, not now", async () => {
+    await render(<CaptureReviewScreen />, { wrapper: wrap(newClient()) });
+    fireEvent.press(await screen.findByLabelText("Search manually"));
+
+    await waitFor(() => expect(router.push).toHaveBeenCalled());
+    expect(router.push).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pathname: "/log",
+        params: expect.objectContaining({ loggedAt: atLocalNoon(2026, 8, 6) }),
+      }),
+    );
+  });
+
+  // The dead end: Confirm is disabled for a question, so before this change
+  // the only exit was Discard — a user who logged the food manually kept a
+  // "Tap to confirm" row sitting over the meal they had just written.
+  it("resolves the capture rather than leaving a review row over the manual log", async () => {
+    await render(<CaptureReviewScreen />, { wrapper: wrap(newClient()) });
+    fireEvent.press(await screen.findByLabelText("Search manually"));
+
+    await waitFor(async () => expect(await listCaptures()).toEqual([]));
+    expect(mediaExists(storedName)).toBe(false);
+    // Taking the meal over manually must not ALSO queue an automatic log, or
+    // the user would end up with two.
+    await expect(listLogs()).resolves.toEqual([]);
+  });
 });
