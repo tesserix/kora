@@ -48,6 +48,12 @@ jest.mock("@/offline/useQueuedLogs", () => ({
   },
 }));
 
+// Not under test here (see useQueuedCaptures.test.tsx); stubbed with no rows
+// so importing diary.tsx does not pull in @/lib/api's firebase/auth ESM.
+jest.mock("@/offline/useQueuedCaptures", () => ({
+  useQueuedCaptures: () => ({ rows: [], retryRow: jest.fn(), discardRow: jest.fn() }),
+}));
+
 jest.mock("@/api/hooks", () => ({
   useDashboard: (date: string) => {
     mockUseDashboard(date);

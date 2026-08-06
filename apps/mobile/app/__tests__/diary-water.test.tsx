@@ -9,6 +9,9 @@ jest.mock("expo-router", () => ({ router: { push: jest.fn() } }));
 jest.mock("@/offline/useQueuedLogs", () => ({
   useQueuedLogs: () => ({ rows: [], retryRow: jest.fn(), discardRow: jest.fn() }),
 }));
+jest.mock("@/offline/useQueuedCaptures", () => ({
+  useQueuedCaptures: () => ({ rows: [], retryRow: jest.fn(), discardRow: jest.fn() }),
+}));
 
 jest.mock("@/api/hooks", () => ({
   useDashboard: () => ({ data: { consumed: { kcal: 0 }, targets: { kcal: 2000 }, water_ml: 500 } }),

@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { Alert, ScrollView, View } from "react-native";
+import { ActivityIndicator, Alert, ScrollView, View } from "react-native";
 import Animated, { FadeInDown, useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
 import Swipeable from "react-native-gesture-handler/ReanimatedSwipeable";
 import Svg, { Circle, Defs, LinearGradient, Stop } from "react-native-svg";
@@ -19,6 +19,7 @@ import { QueuedFailedSheet } from "@/components/diary/QueuedFailedSheet";
 import { EmptyState } from "@/components/common/EmptyState";
 import { useDashboard, useDayLogs, useAddWater, useDeleteLog } from "@/api/hooks";
 import { useQueuedLogs } from "@/offline/useQueuedLogs";
+import { useQueuedCaptures } from "@/offline/useQueuedCaptures";
 import { AnimatedNumber, PressableScale, haptics, springs } from "@/motion";
 import { useTheme } from "@/theme";
 import { hslToHex, withAlpha } from "@/lib/color";
@@ -191,11 +192,18 @@ export default function Diary() {
   // diary reads them straight off the queue and renders them beside the
   // server's own rows.
   const queued = useQueuedLogs(selected);
+  // Photo/voice captures still waiting on identification. Distinct from
+  // `queued` above: a capture has no macros of its own until a drain
+  // resolves it (or the user confirms a review suggestion), so it never
+  // contributes to the day total — see the `kcal: null` invariant on
+  // useQueuedCaptures.
+  const captures = useQueuedCaptures(selected);
   const addWater = useAddWater();
   const deleteLog = useDeleteLog();
   const [waterErr, setWaterErr] = useState<string | null>(null);
   const [copyOpen, setCopyOpen] = useState(false);
   const [failedRowId, setFailedRowId] = useState<string | null>(null);
+  const [failedCaptureId, setFailedCaptureId] = useState<string | null>(null);
 
   // Entrance stagger runs on first mount only — see app/(tabs)/index.tsx for the
   // same guard and rationale (refetches update data in place, no re-stagger).
@@ -259,6 +267,7 @@ export default function Diary() {
   // captured on tap, so a drain that lands mid-sheet cannot leave stale copy
   // on screen.
   const failedRow = queuedNotOnServer.find((r) => r.id === failedRowId) ?? null;
+  const failedCapture = captures.rows.find((r) => r.id === failedCaptureId) ?? null;
 
   // Retry and Discard both dismiss the sheet immediately, so a rejected
   // storage write would otherwise look exactly like a successful one — the row
@@ -266,6 +275,11 @@ export default function Diary() {
   // flow above uses.
   const runQueueAction = (action: () => Promise<void>) => {
     setFailedRowId(null);
+    action().catch(() => Alert.alert("Couldn't update that item", "Please try again."));
+  };
+
+  const runCaptureAction = (action: () => Promise<void>) => {
+    setFailedCaptureId(null);
     action().catch(() => Alert.alert("Couldn't update that item", "Please try again."));
   };
 
@@ -301,7 +315,8 @@ export default function Diary() {
     slot,
     items: logged.filter((l) => l.meal_slot === slot),
     queued: queuedNotOnServer.filter((r) => r.mealSlot.toLowerCase() === slot),
-  })).filter((group) => group.items.length > 0 || group.queued.length > 0);
+    captures: captures.rows.filter((r) => r.mealSlot.toLowerCase() === slot),
+  })).filter((group) => group.items.length > 0 || group.queued.length > 0 || group.captures.length > 0);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -362,6 +377,35 @@ export default function Diary() {
           {slots.map((group, gi) => (
             <Animated.View key={group.slot} entering={enter(4 + gi)}>
               <GroupedSection elevated header={group.slot.toUpperCase()} style={{ marginBottom: 16 }}>
+                {group.captures.map((c) => {
+                  const failed = c.status === "failed";
+                  const pending = c.status === "pending";
+                  const statusText = pending
+                    ? "Identifying when you're back online"
+                    : c.status === "review"
+                      ? "Tap to confirm"
+                      : "Couldn't identify";
+                  const name = c.kind === "photo" ? "Photo" : "Voice note";
+                  return (
+                    <MealRow
+                      key={c.id}
+                      name={name}
+                      slot={statusText}
+                      kcal={c.kcal}
+                      iconName={c.kind === "photo" ? "camera" : "mic"}
+                      dimmed={failed}
+                      badge={
+                        pending ? (
+                          <ActivityIndicator size="small" color={colors.tertiaryLabel} />
+                        ) : (
+                          <Badge variant="neutral">{failed ? "Failed" : "Review"}</Badge>
+                        )
+                      }
+                      accessibilityLabel={`${name}, ${statusText}`}
+                      onPress={failed ? () => setFailedCaptureId(c.id) : undefined}
+                    />
+                  );
+                })}
                 {group.queued.map((r) => {
                   const fv = foodVisual(r.description);
                   const failed = r.status === "failed";
@@ -416,7 +460,7 @@ export default function Diary() {
             </Animated.View>
           ))}
 
-          {logged.length === 0 && queuedNotOnServer.length === 0 ? (
+          {logged.length === 0 && queuedNotOnServer.length === 0 && captures.rows.length === 0 ? (
             <Animated.View entering={enter(4)}>
               <EmptyState
                 icon="book-open"
@@ -438,6 +482,15 @@ export default function Diary() {
           onRetry={() => runQueueAction(() => queued.retryRow(failedRow.id))}
           onDiscard={() => runQueueAction(() => queued.discardRow(failedRow.id))}
           onClose={() => setFailedRowId(null)}
+        />
+      ) : null}
+      {failedCapture ? (
+        <QueuedFailedSheet
+          visible
+          description={failedCapture.kind === "photo" ? "This photo" : "This voice note"}
+          onRetry={() => runCaptureAction(() => captures.retryRow(failedCapture.id))}
+          onDiscard={() => runCaptureAction(() => captures.discardRow(failedCapture.id))}
+          onClose={() => setFailedCaptureId(null)}
         />
       ) : null}
     </View>

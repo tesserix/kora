@@ -7,6 +7,9 @@ jest.mock("expo-router", () => ({ router: { push: jest.fn() } }));
 jest.mock("@/offline/useQueuedLogs", () => ({
   useQueuedLogs: () => ({ rows: [], retryRow: jest.fn(), discardRow: jest.fn() }),
 }));
+jest.mock("@/offline/useQueuedCaptures", () => ({
+  useQueuedCaptures: () => ({ rows: [], retryRow: jest.fn(), discardRow: jest.fn() }),
+}));
 
 
 const mockCopyMutate = jest.fn();
