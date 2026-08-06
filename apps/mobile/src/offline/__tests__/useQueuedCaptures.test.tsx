@@ -8,9 +8,7 @@ import type { Resolution } from "@/api/types";
 
 // Full mock, not a spread over jest.requireActual: @/lib/api imports
 // firebase/auth, which ships ESM that jest cannot parse without a real
-// transform. useQueuedCaptures pulls in drainCaptures (for retryRow), which
-// reaches apiFetchMultipart, so that has to be mocked too even though these
-// tests never call it.
+// transform. useQueuedCaptures reads currentUserId from it.
 jest.mock("@/lib/api", () => ({
   apiFetch: jest.fn(),
   apiFetchMultipart: jest.fn(),

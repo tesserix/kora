@@ -10,7 +10,7 @@ jest.mock("@/offline/useQueuedLogs", () => ({
   useQueuedLogs: () => ({ rows: [], retryRow: jest.fn(), discardRow: jest.fn() }),
 }));
 jest.mock("@/offline/useQueuedCaptures", () => ({
-  useQueuedCaptures: () => ({ rows: [], retryRow: jest.fn(), discardRow: jest.fn() }),
+  useQueuedCaptures: () => ({ rows: [] }),
 }));
 
 jest.mock("@/api/hooks", () => ({

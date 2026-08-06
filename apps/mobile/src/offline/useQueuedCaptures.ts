@@ -1,9 +1,7 @@
-import { useCallback } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { currentUserId } from "@/lib/api";
 import { queuedMediaUri } from "./captureMedia";
-import { discard, list, retry, type QueuedCapture } from "./captureQueue";
-import { drainCaptures } from "./drainCaptures";
+import { list, type QueuedCapture } from "./captureQueue";
 import { QUEUED_CAPTURES_KEY } from "./queryKeys";
 
 export type QueuedCaptureRow = {
@@ -48,7 +46,6 @@ const NO_ROWS: QueuedCaptureRow[] = [];
 // for the full rationale behind the two decisions repeated here:
 // `networkMode: "always"` and `ownerId` living IN the query key.
 export function useQueuedCaptures(date: string) {
-  const qc = useQueryClient();
   // Same accessor drainCaptures uses, so the diary shows exactly the rows a
   // drain will actually act on. It is a synchronous read of auth.currentUser,
   // so the key below is always a concrete `string | null` — never an
@@ -69,31 +66,15 @@ export function useQueuedCaptures(date: string) {
     networkMode: "always",
   });
 
-  const invalidate = useCallback(
-    () => qc.invalidateQueries({ queryKey: [QUEUED_CAPTURES_KEY] }),
-    [qc],
-  );
-
-  const retryRow = useCallback(
-    async (id: string) => {
-      await retry(id);
-      await invalidate();
-      // Fire-and-forget, same reasoning as useQueuedLogs.retryRow: the queue
-      // is durable, so a failed pass loses nothing, and awaiting it would let
-      // a drain failure surface through this call's own error path even
-      // though the retry itself succeeded.
-      void drainCaptures(qc).catch(() => {});
-    },
-    [invalidate, qc],
-  );
-
-  const discardRow = useCallback(
-    async (id: string) => {
-      await discard(id);
-      await invalidate();
-    },
-    [invalidate],
-  );
-
-  return { rows: query.data ?? NO_ROWS, retryRow, discardRow };
+  // Rows only, deliberately.
+  //
+  // This hook used to also return `retryRow`/`discardRow`, mirroring
+  // useQueuedLogs. Neither was ever wired: diary.tsx's QueuedFailedSheet is
+  // driven by the LOG queue's handlers, and task 8 rerouted a failed capture
+  // to /capture-review, which owns Retry, Discard and manual logging itself
+  // (and, unlike the deleted `discardRow`, deletes the media alongside the
+  // row — that handler was the one row-removal path on this branch that
+  // leaked its file). Dead code with a data-loss bug in it is worse than no
+  // code, so it is gone rather than fixed; re-add it only with a caller.
+  return { rows: query.data ?? NO_ROWS };
 }
