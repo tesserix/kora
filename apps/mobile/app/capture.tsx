@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import { CameraView, useCameraPermissions } from "expo-camera";
@@ -40,6 +41,10 @@ import {
 import { ApiError, AuthTokenError, NetworkError, ResponseParseError } from "@/lib/api";
 import { kcalTotalLabel } from "@/lib/resolutionKcal";
 import { OfflineUnknownBarcodeError } from "@/offline/cachedResolution";
+import { CaptureQueueFullError } from "@/offline/captureQueue";
+import { enqueueCapture, type CaptureFile } from "@/offline/enqueueCapture";
+import { NoOwnerError } from "@/offline/owner";
+import { QUEUED_CAPTURES_KEY } from "@/offline/queryKeys";
 import { isLoggable } from "@/lib/candidateTier";
 import { isCachedResult } from "@/api/types";
 import type { FoodItem, Resolution, ResolvedCandidate, ResolutionSource } from "@/api/types";
@@ -757,6 +762,7 @@ function ottoErrorMessage(error: Error): string {
 
 export default function CaptureScreen() {
   const insets = useSafeAreaInsets();
+  const queryClient = useQueryClient();
   const profile = useProfile();
   const resolveText = useResolveText();
   const resolvePhoto = useResolvePhoto();
@@ -911,6 +917,37 @@ export default function CaptureScreen() {
     });
   }
 
+  // A NetworkError means the request never arrived — the capture is still good,
+  // so queue it rather than telling the user it failed. Any other error is a
+  // genuine refusal and keeps the existing message.
+  async function handleResolveFailure(
+    error: Error,
+    file: CaptureFile,
+    kind: "photo" | "voice",
+  ) {
+    if (!(error instanceof NetworkError)) {
+      setErrorMsg(ottoErrorMessage(error));
+      return;
+    }
+    try {
+      await enqueueCapture(file, kind, mealSlot);
+      // Generalises the promise the barcode path already makes at :729.
+      setErrorMsg(
+        "You're offline — I've saved that, and I'll identify it as soon as you're back online.",
+      );
+      void queryClient.invalidateQueries({ queryKey: [QUEUED_CAPTURES_KEY] });
+    } catch (queueError) {
+      // The queue itself refused (full, or nobody signed in). Both carry
+      // user-facing copy on `message`, so surface it verbatim rather than
+      // collapsing to a generic failure.
+      setErrorMsg(
+        queueError instanceof CaptureQueueFullError || queueError instanceof NoOwnerError
+          ? queueError.message
+          : ottoErrorMessage(error),
+      );
+    }
+  }
+
   async function handleCapturePhoto() {
     setErrorMsg(null);
     const outcome = await pickMealPhoto();
@@ -928,7 +965,7 @@ export default function CaptureScreen() {
         applyResolution(data, "ai_photo");
         setResolvedPhrase(null);
       },
-      onError: (error) => setErrorMsg(ottoErrorMessage(error)),
+      onError: (error) => { void handleResolveFailure(error, outcome.file, "photo"); },
     });
   }
 
@@ -971,16 +1008,14 @@ export default function CaptureScreen() {
       setErrorMsg("I didn't catch that — mind trying again?");
       return;
     }
-    resolveVoice.mutate(
-      { uri, name: "clip.m4a", type: "audio/mp4" },
-      {
-        onSuccess: (data) => {
-          applyResolution(data, "ai_voice");
-          setResolvedPhrase(data.transcript ?? null);
-        },
-        onError: (error) => setErrorMsg(ottoErrorMessage(error)),
+    const file = { uri, name: "clip.m4a", type: "audio/mp4" };
+    resolveVoice.mutate(file, {
+      onSuccess: (data) => {
+        applyResolution(data, "ai_voice");
+        setResolvedPhrase(data.transcript ?? null);
       },
-    );
+      onError: (error) => { void handleResolveFailure(error, file, "voice"); },
+    });
   }
 
   // Abandon the clip. This is the ONE voice transition with a direct cost

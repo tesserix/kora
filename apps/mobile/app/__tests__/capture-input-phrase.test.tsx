@@ -1,4 +1,5 @@
-import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, render as rtlRender, waitFor } from "@testing-library/react-native";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useCameraPermissions } from "expo-camera";
 import { requestRecordingPermissionsAsync, useAudioRecorder } from "expo-audio";
 import * as ImagePicker from "expo-image-picker";
@@ -74,6 +75,14 @@ function makeRecorder(): MockRecorder {
 }
 
 import CaptureScreen from "../capture";
+
+// CaptureScreen now holds its own query client (useQueryClient, for
+// invalidating the queued-captures view after an offline enqueue), so every
+// render needs a provider in the tree.
+function render(ui: React.ReactElement, options?: Parameters<typeof rtlRender>[1]) {
+  const queryClient = new QueryClient();
+  return rtlRender(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>, options);
+}
 
 function makeResolution(overrides: Partial<Resolution> = {}): Resolution {
   return {
