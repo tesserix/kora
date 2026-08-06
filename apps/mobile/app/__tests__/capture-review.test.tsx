@@ -181,3 +181,30 @@ describe("a follow_up capture parked in review", () => {
     await expect(listLogs()).resolves.toEqual([]);
   });
 });
+
+// The capture queue is one device-wide list; accounts are not. A deep link
+// `/capture-review?id=…` naming another account's row must behave exactly as
+// if the row did not exist — no photo, no playback, and no Discard button
+// that would delete their media.
+//
+// Seeding ONLY the other user's row and asserting "not found" would also pass
+// against a screen that simply never loaded anything, so the own-user case
+// above (which renders Confirm) is what proves the reader works at all; this
+// test proves it discriminates.
+it("treats another account's capture as not found", async () => {
+  await AsyncStorage.clear();
+  await append({
+    id: CAPTURE_ID, kind: "photo", storedName: "c1.jpg", fileName: "m.jpg", mimeType: "image/jpeg",
+    capturedAt: atLocalNoon(2026, 8, 6), ownerId: "uid-2",
+  } as Parameters<typeof append>[0]);
+  await markReview(CAPTURE_ID, RESOLUTION);
+
+  await render(<CaptureReviewScreen />, { wrapper: wrap(newClient()) });
+
+  expect(await screen.findByText(/no longer waiting on review/i)).toBeTruthy();
+  expect(screen.queryByText("Confirm")).toBeNull();
+  expect(screen.queryByLabelText("Captured photo")).toBeNull();
+  // And the row survives untouched — nothing on this screen could have
+  // reached it.
+  expect(await listCaptures()).toHaveLength(1);
+});

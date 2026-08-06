@@ -10,6 +10,7 @@ import { ScreenHeader } from "@/components/ScreenHeader";
 import { AppBackground } from "@/components/AppBackground";
 import { ResolutionResult, resolveResultView } from "@/components/ResolutionResult";
 import { useTheme } from "@/theme";
+import { currentUserId } from "@/lib/api";
 import { list as listCaptures, discard, retry as retryCapture, type QueuedCapture } from "@/offline/captureQueue";
 import { deleteQueuedMedia, queuedMediaUri } from "@/offline/captureMedia";
 import { append as appendLog, newLogId } from "@/offline/queue";
@@ -95,18 +96,30 @@ export default function CaptureReviewScreen() {
   const player = useAudioPlayer(audioSource);
   const playerStatus = useAudioPlayerStatus(player);
 
+  // The same accessor drainCaptures and useQueuedCaptures read, so this screen
+  // shows exactly the rows those two agree belong to the signed-in user. The
+  // capture queue is one device-wide list; accounts are not.
+  const ownerId = currentUserId();
+
   useEffect(() => {
     let cancelled = false;
     listCaptures().then((items) => {
       if (cancelled) return;
-      const found = items.find((c) => c.id === id) ?? null;
+      // Gated on ownerId as well as id — this was the ONLY reader on the
+      // branch that was not (cf. useQueuedCaptures.ts and drainCaptures.ts).
+      // Without it a deep link `/capture-review?id=…` rendered another
+      // account's photo, played their voice note, and let Discard delete it.
+      // A row that exists but belongs to someone else is `null` here, i.e.
+      // indistinguishable from one that does not exist — a match that leaked
+      // "wrong owner" as its own state would confirm the id is real.
+      const found = items.find((c) => c.id === id && !!ownerId && c.ownerId === ownerId) ?? null;
       setCapture(found);
       if (found?.mealSlot) setMealSlot(found.mealSlot as MealSlot);
     });
     return () => {
       cancelled = true;
     };
-  }, [id]);
+  }, [id, ownerId]);
 
   const resolution = capture?.resolution;
   const resultView = resolution ? resolveResultView(resolution) : null;
