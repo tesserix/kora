@@ -352,6 +352,13 @@ Thread the cache into the admin mutation path the same way `buildResolveHandler`
 
 Run the full suite, `go vet`, push, open a PR. Do not merge.
 
+- [x] **Done — commit `2d18d55`, PR https://github.com/tesserix/kora/pull/103 (open, not merged).**
+  - `main.go` needed no wiring change: it already passed ONE `cache` variable to both `ai.NewResolver` and `Deps.ResolveCache`. Its `buildResolveHandler` comment was stale (it named only foodlog's alias eviction) and now states both writers and why the variable must stay single.
+  - `server.resolveGeneration` **type-asserts that same instance** rather than constructing a second `RedisCache` — the hazard this task flagged. Identity pinned END-TO-END by `TestAdminMutationBumpsTheSameCacheInstanceWiredIntoDeps`: a real signed DELETE through the real router against a real row, asserting **pointer identity** (a second instance would satisfy the type perfectly and differ only in identity).
+  - Degradation logging split: nil cache → INFO (nothing to invalidate, nothing wrong); non-nil cache with no generation surface → WARN (the real silent-drift fault).
+  - **Mutation-testing found a fixture bug of my own:** `nonGenerationalCache` embedded `ai.NoCache`, which DOES implement `ai.Generation`, so both degradation tests passed through the branch they existed to bypass — a mutation making that path `panic` went undetected. Fixture now implements `ai.Cache` by hand, guarded by `TestNonGenerationalCacheFixtureReallyHasNoGenerationSurface`.
+  - Verified: full suite `-race -p 1` green against a migrated Postgres, **zero skips** in `admin`/`server`; `go vet` and `gofmt` clean; 3/3 wiring mutations caught.
+
 ---
 
 ## Task 7: close the gateway exposure (tesserix-k8s)
