@@ -12,6 +12,20 @@ jest.mock("expo-router", () => ({
   router: { back: jest.fn(), push: jest.fn() },
 }));
 
+// capture-review.tsx now pulls in drainCaptures.ts (task 8's Retry action),
+// which imports @/lib/api — and that transitively pulls in firebase/auth's
+// ESM build, which crashes the Jest transform unmocked. Mirrors the mock
+// shape src/offline/__tests__/useQueuedLogs.test.tsx uses for the same reason.
+jest.mock("@/lib/api", () => ({
+  apiFetch: jest.fn(),
+  apiFetchEnvelope: jest.fn(),
+  apiFetchMultipart: jest.fn(),
+  currentUserId: jest.fn(() => "uid-1"),
+  isNetworkError: () => false,
+  ApiError: class ApiError extends Error {},
+  NetworkError: class NetworkError extends Error {},
+}));
+
 const RESOLUTION = {
   tier: "confirm",
   candidates: [{ item: { id: "food-1", name: "Oats", kcal_per_100g: 389 }, portion_grams: 100 }],

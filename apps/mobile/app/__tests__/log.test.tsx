@@ -1,8 +1,11 @@
 import { fireEvent, render } from "@testing-library/react-native";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import type { Memory, SavedMeal } from "@/api/types";
 
-jest.mock("expo-router", () => ({ router: { replace: jest.fn(), back: jest.fn() } }));
+jest.mock("expo-router", () => ({
+  router: { replace: jest.fn(), back: jest.fn() },
+  useLocalSearchParams: jest.fn(() => ({})),
+}));
 
 const mockLogMutate = jest.fn();
 const mockBatchMutate = jest.fn();
@@ -75,6 +78,7 @@ beforeEach(() => {
   mockMemoryIsError = false;
   mockPinsData = [];
   mockSavedMealsData = [];
+  (useLocalSearchParams as jest.Mock).mockReturnValue({});
 });
 
 test("Log screen shows the editorial header and a food tile result", async () => {
@@ -119,6 +123,22 @@ test("tapping a recent food logs it instantly", async () => {
   fireEvent.press(await findByText("Eggs"));
   expect(mockLogMutate).toHaveBeenCalledWith(
     expect.objectContaining({ food_item_id: "eggs-id", quantity_grams: 100, meal_slot: "breakfast" }),
+    expect.anything(),
+  );
+});
+
+// A failed capture's "Log it manually" seeds this screen with the capture's
+// OWN time via a `loggedAt` route param (app/capture-review.tsx) — never
+// the moment the user gets around to finishing the manual log. This is the
+// same #84-adjacent invariant the automatic confirm path enforces.
+test("logging from a seeded route stamps the SEEDED time, not now", async () => {
+  (useLocalSearchParams as jest.Mock).mockReturnValue({ loggedAt: "2026-08-06T06:30:00.000Z" });
+  const { findByText } = await render(<LogScreen />);
+  fireEvent.press(await findByText("Grilled chicken breast"));
+  fireEvent.press(await findByText("Log it"));
+
+  expect(mockLogMutate).toHaveBeenCalledWith(
+    expect.objectContaining({ logged_at: "2026-08-06T06:30:00.000Z" }),
     expect.anything(),
   );
 });

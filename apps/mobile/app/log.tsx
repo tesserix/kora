@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ScrollView, TextInput, View } from "react-native";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { AppText } from "@/components/Text";
 import { Button } from "@/components/Button";
 import { Icon } from "@/components/Icon";
@@ -39,9 +39,30 @@ function today(): string {
   return new Date().toLocaleDateString("en-CA");
 }
 
+// expo-router hands back an array when a query key repeats — take the first
+// value, same as every other multi-param screen in this app.
+function firstParam(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+// A capture's seeded `loggedAt` is a route param, not a trusted server value —
+// validate it parses to a real instant before trusting it for logged_at, so a
+// malformed or missing deep link falls back to now rather than sending the
+// server an Invalid Date string.
+function parseSeededLoggedAt(raw: string | undefined): string | null {
+  if (!raw) return null;
+  return Number.isNaN(Date.parse(raw)) ? null : raw;
+}
+
 export default function LogScreen() {
   const { colors, spacing, fontSize } = useTheme();
   const insets = useSafeAreaInsets();
+  const { loggedAt } = useLocalSearchParams<{ loggedAt?: string | string[] }>();
+  // Seeded from a failed capture's own capture time (app/capture-review.tsx's
+  // "Log it manually") so the entry lands on the day the meal actually
+  // happened, never the day it was cleaned up — the same #84-adjacent
+  // invariant handleConfirm's logged_at enforces for the automatic path.
+  const seededLoggedAt = parseSeededLoggedAt(firstParam(loggedAt));
   const mountedAt = useRef(Date.now());
   const [q, setQ] = useState("");
   const [selected, setSelected] = useState<FoodItem | null>(null);
@@ -82,7 +103,7 @@ export default function LogScreen() {
         meal_slot: meal,
         source: "manual",
         quantity_grams: Number(grams) || selected.serving_grams || 100,
-        logged_at: new Date().toISOString(),
+        logged_at: seededLoggedAt ?? new Date().toISOString(),
         client_log_ms: Date.now() - mountedAt.current,
       },
       {

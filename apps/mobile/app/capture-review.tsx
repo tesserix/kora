@@ -10,9 +10,12 @@ import { ScreenHeader } from "@/components/ScreenHeader";
 import { AppBackground } from "@/components/AppBackground";
 import { ResolutionResult, resolveResultView } from "@/components/ResolutionResult";
 import { useTheme } from "@/theme";
-import { list as listCaptures, discard, type QueuedCapture } from "@/offline/captureQueue";
+import {
+  list as listCaptures, discard, retry as retryCapture, MAX_RESOLVE_ATTEMPTS, type QueuedCapture,
+} from "@/offline/captureQueue";
 import { deleteQueuedMedia, queuedMediaUri } from "@/offline/captureMedia";
 import { append as appendLog } from "@/offline/queue";
+import { drainCaptures } from "@/offline/drainCaptures";
 import { QUEUED_CAPTURES_KEY, QUEUED_LOGS_KEY } from "@/offline/queryKeys";
 import type { MealSlot } from "@/lib/mealSlot";
 import type { ResolutionSource } from "@/api/types";
@@ -33,6 +36,22 @@ function formatDuration(seconds: number): string {
 // metric.
 function sourceOf(kind: QueuedCapture["kind"]): ResolutionSource {
   return kind === "photo" ? "ai_photo" : "ai_voice";
+}
+
+// captureQueue.ts's recordAttempt is the ONLY path that can drive `attempts`
+// up to MAX_RESOLVE_ATTEMPTS while flipping status to "failed" — every other
+// failure (CaptureUnidentifiedError, missing media, a permanent 4xx) calls
+// markFailed directly and never touches attempts (see drainCaptures.ts's
+// catch block). So `attempts >= MAX_RESOLVE_ATTEMPTS` reliably means the AI
+// never actually returned a verdict here: DELIVERY itself failed repeatedly
+// against a transient network/HTTP error, and `lastError` in that case is the
+// RAW `err.message` from that failed call — a diagnostic string, not
+// something to present as if the AI had looked at the photo and refused it.
+function failureMessage(capture: QueuedCapture): string {
+  if (capture.attempts >= MAX_RESOLVE_ATTEMPTS) {
+    return "I couldn't reach Kora to identify this — try again.";
+  }
+  return capture.lastError ?? "Couldn't identify that.";
 }
 
 // The confirmation surface for a capture that resolved in the background to
@@ -153,6 +172,27 @@ export default function CaptureReviewScreen() {
     }
   };
 
+  // Rescues exactly the case handleDiscardFailed's media-deleting Discard
+  // cannot: attempts exhausted against a transient server/network error, where
+  // the AI never actually returned a verdict. Mirrors useQueuedLogs.retryRow —
+  // reset to pending, then kick a drain fire-and-forget (the queue is durable,
+  // so a failed pass here loses nothing, and awaiting it would let a drain
+  // failure surface through this handler's own catch even though the retry
+  // itself already succeeded).
+  const handleRetryFailed = async () => {
+    if (!capture) return;
+    setBusy(true);
+    try {
+      await retryCapture(capture.id);
+      invalidate();
+      void drainCaptures(qc).catch(() => {});
+      router.back();
+    } catch {
+      setBusy(false);
+      Alert.alert("Couldn't retry that", "Please try again.");
+    }
+  };
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppBackground />
@@ -211,8 +251,15 @@ export default function CaptureReviewScreen() {
               </View>
             </View>
           )}
-          <AppText muted>{capture.lastError ?? "Couldn't identify that."}</AppText>
+          <AppText muted>{failureMessage(capture)}</AppText>
           <View style={{ flexDirection: "row", gap: spacing.sm }}>
+            <Button
+              title="Retry"
+              variant="secondary"
+              onPress={handleRetryFailed}
+              disabled={busy}
+              style={{ flex: 1 }}
+            />
             <Button
               title="Discard"
               variant="secondary"
@@ -220,13 +267,8 @@ export default function CaptureReviewScreen() {
               disabled={busy}
               style={{ flex: 1 }}
             />
-            <Button
-              title="Log it manually"
-              onPress={handleLogManually}
-              disabled={busy}
-              style={{ flex: 1 }}
-            />
           </View>
+          <Button title="Log it manually" onPress={handleLogManually} disabled={busy} />
         </ScrollView>
       ) : !resolution ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}>
