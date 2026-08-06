@@ -213,7 +213,7 @@ export interface Resolution {
    * The server can send `null` here (a Go nil slice with no `omitempty` —
    * api/internal/ai/types.go:81 — on several no-result paths, including
    * barcode's "not recognized" branch). Every resolve mutation in
-   * src/api/hooks.ts (normalizeResolution) coerces that to `[]` before
+   * src/api/resolveWire.ts (normalizeResolution) coerces that to `[]` before
    * returning, so every consumer of a `Resolution` value in this app can
    * trust this field is always a real array. Do not bypass that
    * normalization by calling apiFetch directly for a new resolve endpoint.
