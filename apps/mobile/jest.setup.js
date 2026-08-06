@@ -324,6 +324,9 @@ jest.mock("expo-file-system", () => {
   // Seeded files for the multipart test (bypasses fs storage)
   const seededContents = new Map();
 
+  // URIs that should fail on delete (for testing error handling)
+  const failDeleteSet = new Set();
+
   // Initialize root directories
   const initFS = () => {
     fs.clear();
@@ -407,7 +410,9 @@ jest.mock("expo-file-system", () => {
 
     list() {
       const entry = fs.get(this.uri);
-      if (!entry || entry.type !== "dir") return [];
+      if (!entry || entry.type !== "dir") {
+        throw new Error(`Directory not found: ${this.uri}`);
+      }
 
       const result = [];
       const dirUriPrefix = `${this.uri}/`;
@@ -486,6 +491,9 @@ jest.mock("expo-file-system", () => {
 
     delete() {
       if (!this.exists) throw new Error(`File not found: ${this.uri}`);
+      if (failDeleteSet.has(this.uri)) {
+        throw new Error(`Permission denied: cannot delete ${this.uri}`);
+      }
       fs.delete(this.uri);
     }
 
@@ -502,8 +510,10 @@ jest.mock("expo-file-system", () => {
 
   // Test isolation: reset filesystem between tests, preserve seeded contents
   File.__seed = (uri, bytes) => seededContents.set(String(uri), bytes);
+  File.__failDelete = (uri) => failDeleteSet.add(String(uri));
   File.__reset = () => {
     seededContents.clear();
+    failDeleteSet.clear();
     initFS();
   };
 

@@ -52,6 +52,15 @@ describe("captureMedia", () => {
     await expect(deleteQueuedMedia("never-existed.jpg")).resolves.toBeUndefined();
   });
 
+  it("deleteQueuedMedia never throws even when delete fails", async () => {
+    const stored = await copyIntoQueue(makeSourceFile("src-4.jpg"), "cap-4", "meal.jpg");
+    const uri = queuedMediaUri(stored);
+    // Simulate a permission error on this file
+    (File as any).__failDelete(uri);
+    // Should not throw despite the permission error
+    await expect(deleteQueuedMedia(stored)).resolves.toBeUndefined();
+  });
+
   // Without this, every crash between "file written" and "row appended" leaks
   // megabytes permanently — the app has no other way to reclaim them.
   it("sweepOrphans deletes unreferenced files and keeps referenced ones", async () => {
