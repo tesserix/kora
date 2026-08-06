@@ -158,11 +158,25 @@ func main() {
 // unchanged. The OpenAI-compatible fallback is optional: with no OpenAI key,
 // Gemini serves alone (no Router). The returned provider is also threaded
 // into server.Deps.Provider so the coach's Q&A endpoint can generate text
-// without building a second client. The returned cache is threaded into
-// server.Deps.ResolveCache so foodlog.Service can evict a stale cached
-// Resolution after a correction teaches or retracts an alias — it is the
-// SAME cache instance the resolver reads from, so an eviction here is
-// actually visible to the next resolve.
+// without building a second client.
+//
+// THE `cache` VARIABLE BELOW IS DELIBERATELY SINGLE, AND MUST STAY THAT WAY.
+// It is passed to ai.NewResolver (the reader) and returned for
+// server.Deps.ResolveCache, which now feeds TWO writers:
+//
+//   - foodlog.Service, which evicts one stale cached Resolution after a
+//     correction teaches or retracts an alias; and
+//   - the admin food mutation path, which bumps the cache's invalidation
+//     GENERATION after an edit or a retirement (see
+//     server.resolveGeneration, which narrows this exact instance rather
+//     than building its own).
+//
+// Both are invisible to the resolver unless they act on the instance it
+// reads from. Constructing a second RedisCache here — especially on a
+// different Redis DB index — would type-check everywhere and silently break
+// both: corrections and retirements would keep reporting success while users
+// were served the stale food for up to the cache's 24h TTL. The identity is
+// pinned by server.TestAdminMutationBumpsTheSameCacheInstanceWiredIntoDeps.
 func buildResolveHandler(ctx context.Context, cfg config.Config, db *gorm.DB, logger *slog.Logger) (*resolve.Handler, ai.Provider, ai.Cache) {
 	if cfg.GeminiAPIKey == "" {
 		logger.Info("resolve engine disabled (no GEMINI_API_KEY)")
