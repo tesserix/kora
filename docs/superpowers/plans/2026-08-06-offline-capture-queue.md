@@ -579,7 +579,7 @@ Expected: PASS, 10 tests.
 | Mutation | Test that must fail |
 |---|---|
 | `append` evicts the oldest instead of throwing | "refuses a capture past the cap instead of evicting the oldest" |
-| `update` drops `withCaptureLock` (plain load/save) | "serialises concurrent appends so none is lost" |
+| `append` drops `withCaptureLock` (plain load/save — note: `append` takes the lock DIRECTLY, not via `update`, so mutating `update` does not exercise this test) | "serialises concurrent appends so none is lost" |
 | `list` drops `.filter(isValid)` | "drops malformed entries instead of throwing" |
 | `recordAttempt` always increments (ignore `counts`) | "recordAttempt only increments when the failure carried a verdict" |
 | `retry` keeps `attempts` instead of resetting | "retry resets attempts and clears the error" |
