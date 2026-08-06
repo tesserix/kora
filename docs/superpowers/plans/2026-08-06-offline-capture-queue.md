@@ -774,6 +774,7 @@ Expected: FAIL — `Cannot find module '../drainCaptures'`.
 import type { QueryClient } from "@tanstack/react-query";
 import type { Resolution } from "@/api/types";
 import { apiFetchMultipart, currentUserId } from "@/lib/api";
+import { buildCaptureForm, normalizeResolution } from "@/api/resolveWire";
 import { deleteQueuedMedia, mediaExists, queuedMediaUri } from "./captureMedia";
 import {
   discard, list, markFailed, markReview, recordAttempt, type QueuedCapture,
@@ -877,7 +878,6 @@ export async function drainCaptureQueue(deps: DrainDeps) {
 }
 
 async function resolveCapture(capture: QueuedCapture): Promise<Resolution> {
-  const { buildCaptureForm, normalizeResolution } = await import("@/api/hooks");
   const path = capture.kind === "photo" ? "/v1/resolve/photo" : "/v1/resolve/voice";
   const form = buildCaptureForm({
     uri: queuedMediaUri(capture.storedName),
@@ -916,9 +916,30 @@ export function drainCaptures(queryClient: QueryClient): Promise<void> {
 }
 ```
 
-- [ ] **Step 4: Export what this task needs from `hooks.ts` and add the query key**
+- [ ] **Step 4: Extract the resolve wire helpers into a leaf module, and add the query key**
 
-`buildFileForm` and `normalizeResolution` are currently private in `src/api/hooks.ts`. Rename `buildFileForm` → `buildCaptureForm` and export both, plus export `normalizeResolution`. Do not change their bodies — this is a visibility change only, and the existing `resolve-upload-multipart.test.tsx` must stay green.
+`buildFileForm` and `normalizeResolution` are private in `src/api/hooks.ts`. `drainCaptures`
+needs both — but it must NOT import `@/api/hooks`, because `hooks.ts` already imports
+from `@/offline/*` (`connectivity`, `foodCache`, `cachedResolution`, `queue`,
+`queryKeys`). Importing it back from the offline layer inverts that dependency: today
+`api` depends on `offline`, and `offline` is the leaf. Reversing it for one helper
+would make the two directories mutually dependent.
+
+So MOVE both functions, bodies unchanged, into a new leaf module
+`apps/mobile/src/api/resolveWire.ts`:
+
+- `buildFileForm` → exported as **`buildCaptureForm`** (rename; nothing outside
+  `hooks.ts` referenced the old name, verified).
+- `normalizeResolution` → exported unchanged.
+
+**Move the long explanatory comment above `buildFileForm` with it, verbatim.** It
+documents why the `{uri,name,type}` FormData part is forbidden and why the caller's
+declared MIME must win — the reasoning behind production bug #82. Detaching the code
+from that comment is how the lesson gets lost.
+
+`hooks.ts` then imports both from `./resolveWire`. This is a move plus a rename, not a
+rewrite: `src/api/__tests__/resolve-upload-multipart.test.tsx` must stay green with an
+unchanged test count, and that is the check that the move was faithful.
 
 ```ts
 // apps/mobile/src/offline/queryKeys.ts — append
