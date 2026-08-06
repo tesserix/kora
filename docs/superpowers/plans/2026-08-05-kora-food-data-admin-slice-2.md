@@ -328,7 +328,13 @@ deliberately did not solve:**
    committed. The handler must NOT render that as "your edit failed" — it is at worst a stale
    cache, and telling an operator their edit failed when it succeeded will make them do it again.
 
-- [ ] Tests first; confirm failure; implement; confirm pass; mutation-verify that each route is actually behind `bffauth` (an unsigned DELETE must 401, not 404 and not 200); commit.
+- [x] Tests first; confirm failure; implement; confirm pass; mutation-verify that each route is actually behind `bffauth` (an unsigned DELETE must 401, not 404 and not 200); commit.
+
+**Report (task 5, commit `4847fed`):**
+- **Path encoding, the question the brief asked about:** a MALFORMED id produces a clean **400 from our handler**, not a 400 before gin and not a 404. Gin has no opinion about UUID shape, so `/v1/admin/foods/not-a-uuid` routes normally as a valid `:id` segment and reaches `pathID`, which rejects it. Signature verification is unaffected — the client signs the raw path, Go signs `URL.Path`, and both agree for any ASCII segment. Pinned by `TestAdminFoodDeleteWithAMalformedIDIs400NotAServerError` and `TestAdminFoodDeleteWithAWellFormedUUIDVerifies`.
+- **Rider 4's response shape:** PATCH/DELETE return `httpx.OKWithMeta` with `meta.cache_bump_failed` (always present, `false` on the happy path) so the portal reads one predictable shape. The real cache error goes to the request log via `c.Error`, never to the client.
+- **`ai.Cache` → `ai.Generation`:** `router.go` **type-asserts the same instance** `deps.ResolveCache` already carries rather than constructing a second `RedisCache` — the hazard task 6 flags. A nil or non-generational cache degrades to `ai.NoCache{}` and logs a WARN. Task 6 still owns `main.go` and the same-instance identity test.
+- **Mutation-verified (10, each individually, each caught):** bffauth removed from the admin group; `updated_at` precondition dropped; cache-bump case falling through to 500; duplicate-barcode not mapped to 409; stale-update not mapped to 409; empty actor allowed; per-100g magnitude bound removed; missing-macro check removed; malformed id no longer 400; actor readable from the body.
 
 ```bash
 git commit -m "feat(api): admin food mutation endpoints"
