@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import { CameraView, useCameraPermissions } from "expo-camera";
@@ -25,7 +26,7 @@ import { UserBubble } from "@/components/capture/UserBubble";
 import { ModePill } from "@/components/capture/ModePill";
 import { Waveform } from "@/components/capture/Waveform";
 import { VoiceComposer } from "@/components/capture/VoiceComposer";
-import { DetectedCard } from "@/components/capture/DetectedCard";
+import { ResolutionResult, candidateKey } from "@/components/ResolutionResult";
 import { FoodPicker } from "@/components/meal/FoodPicker";
 import { captureColors } from "@/components/capture/captureTheme";
 import { haptics } from "@/motion";
@@ -38,11 +39,13 @@ import {
   useResolveVoice,
 } from "@/api/hooks";
 import { ApiError, AuthTokenError, NetworkError, ResponseParseError } from "@/lib/api";
-import { kcalTotalLabel } from "@/lib/resolutionKcal";
 import { OfflineUnknownBarcodeError } from "@/offline/cachedResolution";
+import { CaptureQueueFullError } from "@/offline/captureQueue";
+import { enqueueCapture, type CaptureFile } from "@/offline/enqueueCapture";
+import { NoOwnerError } from "@/offline/owner";
+import { QUEUED_CAPTURES_KEY } from "@/offline/queryKeys";
 import { isLoggable } from "@/lib/candidateTier";
-import { isCachedResult } from "@/api/types";
-import type { FoodItem, Resolution, ResolvedCandidate } from "@/api/types";
+import type { FoodItem, Resolution, ResolutionSource } from "@/api/types";
 import { mealSlotForHour, type MealSlot } from "@/lib/mealSlot";
 
 export type CaptureMode = "photo" | "voice" | "scan" | "type";
@@ -52,7 +55,11 @@ export type CaptureStage = "idle" | "analyzing" | "result";
 // produced the current resolution (see applyResolution) — never from the
 // capture tab that happened to be open, since the composer is reachable from
 // every tab and a user can type on the Photo tab, etc.
-export type ResolutionSource = "ai_photo" | "ai_text" | "ai_voice" | "ai_barcode";
+//
+// Defined in src/api/types.ts (the server's actual allowlist) and re-exported
+// here so every existing importer of `ResolutionSource` from this module
+// keeps working unchanged.
+export type { ResolutionSource };
 
 const MODE_PILLS: ReadonlyArray<{ mode: CaptureMode; icon: string; label: string }> = [
   { mode: "photo", icon: "camera", label: "Photo" },
@@ -291,79 +298,6 @@ function IdleAffordance({
   );
 }
 
-type ResultView = "card" | "followUp" | "empty";
-
-// Which of the three result presentations applies to a given resolution.
-// A follow-up question always wins when present (the server is explicitly
-// asking for clarification); otherwise an empty candidate list falls back to
-// the generic "couldn't identify that" state; anything else has candidates
-// worth showing in the DetectedCard.
-function resolveResultView(resolution: Resolution): ResultView {
-  if (resolution.tier === "follow_up" && resolution.follow_up_question) {
-    return "followUp";
-  }
-  if (resolution.candidates.length === 0) {
-    return "empty";
-  }
-  return "card";
-}
-
-// The Otto summary bubble shown above the DetectedCard — total kcal is the
-// server-reported estimate range when `is_estimate`, otherwise the sum of
-// the candidates' own kcal (never a client-side recompute of nutrition).
-function resultSummary(resolution: Resolution): string {
-  // A cache hit is a different kind of answer and must not read like a fresh
-  // one: nothing was resolved just now, the device recognised a barcode it had
-  // already seen. It also has no server-computed kcal, so the usual
-  // "about N kcal" would be "about — kcal". Say what actually happened.
-  //
-  // Deliberately says NOTHING about when the calories arrive. This card shows
-  // "—" because the client is forbidden from deriving nutrition here, but the
-  // diary's own queued row (useQueuedLogs.toRow) derives a figure from the very
-  // same cached record moments later and counts it in the day total — so any
-  // promise of a later fill-in would describe an event that has already
-  // happened by the time the user sees it.
-  if (isCachedResult({ match_tier: resolution.provenance })) {
-    const name = resolution.candidates[0]?.item.name ?? "that";
-    return `You're offline — that's ${name}, from a scan you've done before. Confirm and I'll log it.`;
-  }
-  const count = resolution.candidates.length;
-  const itemWord = count === 1 ? "item" : "items";
-  const kcalText = kcalTotalLabel(resolution);
-  return `I found ${count} ${itemWord}, about ${kcalText} — confirm and I'll log it.`;
-}
-
-// A stable per-candidate key for tracking add-to-diary success across retry
-// attempts. Combines the candidate's position (stable for the lifetime of a
-// single resolution) with its food_item_id (in case ids ever duplicate) so
-// two candidates never collide.
-function candidateKey(candidate: ResolvedCandidate, index: number): string {
-  return `${index}:${candidate.item.id}`;
-}
-
-// The fallback link shown alongside a follow-up question or an unidentified
-// result — routes to the manual search/log screen instead of the AI flow.
-function SearchManuallyLink({ onPress }: { onPress: () => void }) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel="Search manually"
-      onPress={onPress}
-      style={(state) => ({
-        alignSelf: "flex-start",
-        paddingVertical: 10,
-        paddingHorizontal: 16,
-        borderRadius: 9999,
-        borderWidth: 1,
-        borderColor: captureColors.outlineBorder,
-        opacity: state.pressed ? 0.7 : 1,
-      })}
-    >
-      <AppText style={{ color: captureColors.onSurface, fontSize: 14, fontWeight: "600" }}>Search manually</AppText>
-    </Pressable>
-  );
-}
-
 interface CaptureBodyProps {
   displayName: string;
   insetTop: number;
@@ -428,7 +362,6 @@ export function CaptureBody({
   // Typing is an input only where it is the point. In voice and scan the
   // middle of the composer is static guidance, so there is no dead field.
   const showsTextField = mode === "photo" || mode === "type";
-  const resultView = resolution ? resolveResultView(resolution) : null;
 
   // Bring the newest Otto message (an error bubble or the detected-food
   // result) into view — on short viewports or with the keyboard open, the
@@ -503,32 +436,16 @@ export function CaptureBody({
           </View>
         )}
 
-        {stage === "result" && resolution && resultView === "card" && (
-          <>
-            <OttoBubble>{resultSummary(resolution)}</OttoBubble>
-            <DetectedCard
-              resolution={resolution}
-              mealSlot={mealSlot}
-              onChangeMealSlot={onChangeMealSlot}
-              onAdd={onAdd}
-              adding={adding}
-              onResolveUncertain={onResolveUncertain}
-            />
-          </>
-        )}
-
-        {stage === "result" && resolution && resultView === "followUp" && (
-          <>
-            <OttoBubble>{resolution.follow_up_question}</OttoBubble>
-            <SearchManuallyLink onPress={onSearchManually} />
-          </>
-        )}
-
-        {stage === "result" && resolution && resultView === "empty" && (
-          <>
-            <OttoBubble>I couldn&apos;t identify that — try again or search manually.</OttoBubble>
-            <SearchManuallyLink onPress={onSearchManually} />
-          </>
+        {stage === "result" && resolution && (
+          <ResolutionResult
+            resolution={resolution}
+            mealSlot={mealSlot}
+            onChangeMealSlot={onChangeMealSlot}
+            onAdd={onAdd}
+            adding={adding}
+            onSearchManually={onSearchManually}
+            onResolveUncertain={onResolveUncertain}
+          />
         )}
 
         {errorMsg ? <OttoBubble>{errorMsg}</OttoBubble> : null}
@@ -753,6 +670,7 @@ function ottoErrorMessage(error: Error): string {
 
 export default function CaptureScreen() {
   const insets = useSafeAreaInsets();
+  const queryClient = useQueryClient();
   const profile = useProfile();
   const resolveText = useResolveText();
   const resolvePhoto = useResolvePhoto();
@@ -907,6 +825,56 @@ export default function CaptureScreen() {
     });
   }
 
+  // Both of these mean the request never arrived — the capture is still good,
+  // so queue it rather than telling the user it failed. Any other error is a
+  // genuine refusal and keeps the existing message.
+  //
+  // AuthTokenError belongs here, and leaving it out very nearly made this whole
+  // feature dead in the only condition it exists for. api.ts's fetchWithRetry
+  // awaits getToken(user) BEFORE it ever calls fetch (src/lib/api.ts), and
+  // src/lib/__tests__/api-error-modes.test.ts pins that ordering: when
+  // getIdToken rejects, fetch is never attempted, so NO NetworkError is ever
+  // produced. Firebase serves getIdToken() from cache while the ID token is
+  // still valid — roughly an hour — but the moment it needs refreshing it goes
+  // to the network, and offline that rejects with auth/network-request-failed.
+  // So a user offline for more than an hour (a flight, a hike: precisely the
+  // scenario this queue was designed for) hit AuthTokenError, fell through to
+  // the plain-message branch, and lost the capture entirely.
+  //
+  // The same reasoning the log queue already records for its own classifier
+  // (see countsAsAttempt in src/offline/queue.ts, which groups NetworkError and
+  // AuthTokenError for exactly this cause) — this path had simply not adopted
+  // it. Treating a genuinely broken session as "offline" is the safe direction
+  // of error: the capture is preserved rather than discarded, and api.ts still
+  // owns real session expiry via signOutForExpiredSession.
+  async function handleResolveFailure(
+    error: Error,
+    file: CaptureFile,
+    kind: "photo" | "voice",
+  ) {
+    if (!(error instanceof NetworkError) && !(error instanceof AuthTokenError)) {
+      setErrorMsg(ottoErrorMessage(error));
+      return;
+    }
+    try {
+      await enqueueCapture(file, kind, mealSlot);
+      // Generalises the promise the barcode path already makes at :729.
+      setErrorMsg(
+        "You're offline — I've saved that, and I'll identify it as soon as you're back online.",
+      );
+      void queryClient.invalidateQueries({ queryKey: [QUEUED_CAPTURES_KEY] });
+    } catch (queueError) {
+      // The queue itself refused (full, or nobody signed in). Both carry
+      // user-facing copy on `message`, so surface it verbatim rather than
+      // collapsing to a generic failure.
+      setErrorMsg(
+        queueError instanceof CaptureQueueFullError || queueError instanceof NoOwnerError
+          ? queueError.message
+          : ottoErrorMessage(error),
+      );
+    }
+  }
+
   async function handleCapturePhoto() {
     setErrorMsg(null);
     const outcome = await pickMealPhoto();
@@ -924,7 +892,7 @@ export default function CaptureScreen() {
         applyResolution(data, "ai_photo");
         setResolvedPhrase(null);
       },
-      onError: (error) => setErrorMsg(ottoErrorMessage(error)),
+      onError: (error) => { void handleResolveFailure(error, outcome.file, "photo"); },
     });
   }
 
@@ -967,16 +935,14 @@ export default function CaptureScreen() {
       setErrorMsg("I didn't catch that — mind trying again?");
       return;
     }
-    resolveVoice.mutate(
-      { uri, name: "clip.m4a", type: "audio/mp4" },
-      {
-        onSuccess: (data) => {
-          applyResolution(data, "ai_voice");
-          setResolvedPhrase(data.transcript ?? null);
-        },
-        onError: (error) => setErrorMsg(ottoErrorMessage(error)),
+    const file = { uri, name: "clip.m4a", type: "audio/mp4" };
+    resolveVoice.mutate(file, {
+      onSuccess: (data) => {
+        applyResolution(data, "ai_voice");
+        setResolvedPhrase(data.transcript ?? null);
       },
-    );
+      onError: (error) => { void handleResolveFailure(error, file, "voice"); },
+    });
   }
 
   // Abandon the clip. This is the ONE voice transition with a direct cost

@@ -89,6 +89,24 @@ jest.mock("expo-audio", () => ({
   },
   requestRecordingPermissionsAsync: jest.fn(async () => ({ granted: true, status: "granted" })),
   getRecordingPermissionsAsync: jest.fn(async () => ({ granted: true, status: "granted" })),
+  // useAudioPlayer/useAudioPlayerStatus back the failed-voice-capture playback
+  // in capture-review.tsx (task 8). Kept minimal — no real decoding happens
+  // under Jest, so duration/playing stay at their defaults unless a test
+  // overrides the mocks itself.
+  useAudioPlayer: jest.fn(() => ({
+    play: jest.fn(),
+    pause: jest.fn(),
+    seekTo: jest.fn(async () => {}),
+    remove: jest.fn(),
+    playing: false,
+    id: "mock-player",
+  })),
+  useAudioPlayerStatus: jest.fn(() => ({
+    playing: false,
+    duration: 0,
+    currentTime: 0,
+    isLoaded: true,
+  })),
 }));
 
 // expo-notifications (SDK 57): mock the permission/token/listener surface the
@@ -311,33 +329,231 @@ global.FormData = installFormDataPatch(
 // able to prove the CALLER's declared MIME wins over the file-derived one, so nobody
 // can "simplify" buildFileForm into using File.type without a test failing.
 jest.mock("expo-file-system", () => {
-  const contents = new Map();
   const MIME = {
     png: "image/png",
     jpg: "image/jpeg",
     jpeg: "image/jpeg",
     m4a: "audio/x-m4a",
   };
-  class File {
-    constructor(uri) {
-      this.uri = String(uri);
+
+  // In-memory filesystem: map of uri -> { type: "file"|"dir", content: string|Map }
+  const fs = new Map();
+
+  // Seeded files for the multipart test (bypasses fs storage)
+  const seededContents = new Map();
+
+  // URIs that should fail on delete (for testing error handling)
+  const failDeleteSet = new Set();
+
+  // Initialize root directories
+  const initFS = () => {
+    fs.clear();
+    fs.set("file:///document", { type: "dir", content: new Map() });
+    fs.set("file:///cache", { type: "dir", content: new Map() });
+  };
+  initFS();
+
+  class Directory {
+    constructor(parentOrUri, name) {
+      // Support: new Directory(Paths.document, "captures") or new Directory(uri)
+      if (typeof parentOrUri === "string") {
+        // Direct URI
+        this.uri = String(parentOrUri);
+      } else if (parentOrUri && parentOrUri.uri) {
+        // Directory parent
+        const parentUri = parentOrUri.uri;
+        this.uri = `${parentUri}${parentUri.endsWith("/") ? "" : "/"}${name}`;
+      } else {
+        throw new Error("Invalid Directory constructor arguments");
+      }
     }
+
     get name() {
       return this.uri.split("/").pop() ?? "";
     }
+
+    get exists() {
+      const entry = fs.get(this.uri);
+      return !!(entry && entry.type === "dir");
+    }
+
+    create({ intermediates = false } = {}) {
+      if (this.exists) return; // idempotent
+
+      if (intermediates) {
+        // Create all parent directories up to this one
+        // Build a list of all paths: ["file:///", "file:///document", "file:///document/captures"]
+        const uri = this.uri;
+        const uriParts = uri.split("/");
+        let currentPath = "";
+
+        for (let i = 0; i < uriParts.length; i++) {
+          if (i < 3) {
+            // Handle "file:" and "" and ""
+            if (i === 0) {
+              currentPath = uriParts[0]; // "file:"
+            } else if (i === 1) {
+              currentPath += "/" + uriParts[1]; // "file:/"
+            } else if (i === 2) {
+              currentPath += "/" + uriParts[2]; // "file://"
+            }
+          } else {
+            // Now we're at the directory names
+            currentPath += "/" + uriParts[i];
+            if (!fs.has(currentPath)) {
+              fs.set(currentPath, { type: "dir", content: new Map() });
+            }
+          }
+        }
+      } else {
+        // Create just this directory
+        fs.set(this.uri, { type: "dir", content: new Map() });
+      }
+    }
+
+    delete() {
+      // Recursively delete this directory
+      const entry = fs.get(this.uri);
+      if (!entry || entry.type !== "dir") return;
+
+      // Delete all children
+      for (const [key] of fs) {
+        if (key.startsWith(this.uri + "/")) {
+          fs.delete(key);
+        }
+      }
+
+      fs.delete(this.uri);
+    }
+
+    list() {
+      const entry = fs.get(this.uri);
+      if (!entry || entry.type !== "dir") {
+        throw new Error(`Directory not found: ${this.uri}`);
+      }
+
+      const result = [];
+      const dirUriPrefix = `${this.uri}/`;
+
+      for (const [key, value] of fs) {
+        if (key.startsWith(dirUriPrefix) && key.slice(dirUriPrefix.length).indexOf("/") === -1) {
+          const name = key.split("/").pop();
+          if (value.type === "dir") {
+            result.push(new Directory(key));
+          } else {
+            result.push(new File(key));
+          }
+        }
+      }
+
+      return result;
+    }
+  }
+
+  class File {
+    constructor(dirOrUri, name) {
+      if (typeof dirOrUri === "string") {
+        // Direct URI: new File(uri)
+        this.uri = String(dirOrUri);
+      } else if (dirOrUri && dirOrUri.uri) {
+        // Directory + name: new File(directory, "filename")
+        const dirUri = dirOrUri.uri;
+        this.uri = `${dirUri}${dirUri.endsWith("/") ? "" : "/"}${name}`;
+      } else {
+        throw new Error("Invalid File constructor arguments");
+      }
+    }
+
+    get name() {
+      return this.uri.split("/").pop() ?? "";
+    }
+
     get type() {
       return MIME[this.name.split(".").pop()?.toLowerCase() ?? ""] ?? "";
     }
+
+    get exists() {
+      const entry = fs.get(this.uri);
+      return !!(entry && entry.type === "file");
+    }
+
+    create({ overwrite = false } = {}) {
+      if (this.exists && !overwrite) return;
+      fs.set(this.uri, { type: "file", content: "" });
+    }
+
+    write(content) {
+      fs.set(this.uri, { type: "file", content: String(content) });
+    }
+
+    textSync() {
+      const entry = fs.get(this.uri);
+      if (!entry || entry.type !== "file") {
+        throw new Error(`File not found: ${this.uri}`);
+      }
+      return entry.content;
+    }
+
     async bytes() {
-      const seeded = contents.get(this.uri);
-      if (!seeded) throw new Error(`expo-file-system mock: no contents seeded for ${this.uri}`);
-      return seeded;
+      // First check if this was seeded (for multipart test)
+      const seeded = seededContents.get(this.uri);
+      if (seeded) return seeded;
+
+      // Otherwise read from fs
+      const entry = fs.get(this.uri);
+      if (!entry || entry.type !== "file") {
+        throw new Error(`expo-file-system mock: no contents seeded for ${this.uri}`);
+      }
+      return Buffer.from(entry.content);
+    }
+
+    delete() {
+      if (!this.exists) throw new Error(`File not found: ${this.uri}`);
+      if (failDeleteSet.has(this.uri)) {
+        throw new Error(`Permission denied: cannot delete ${this.uri}`);
+      }
+      fs.delete(this.uri);
+    }
+
+    // Faithful to RelocationOptions: `overwrite` defaults to FALSE, and the
+    // native module throws when the destination already exists. The mock used
+    // to overwrite unconditionally, which made captureMedia.ts's
+    // delete-if-exists guard look redundant — deleting it stayed green here
+    // and threw on device the second time a capture id was reused.
+    async copy(destination, { overwrite = false } = {}) {
+      const source = fs.get(this.uri);
+      if (!source || source.type !== "file") {
+        throw new Error(`Source file not found: ${this.uri}`);
+      }
+
+      const destUri = destination.uri;
+      if (fs.has(destUri) && !overwrite) {
+        throw new Error(`Destination already exists: ${destUri}`);
+      }
+      fs.set(destUri, { type: "file", content: source.content });
     }
   }
-  // Tests seed the bytes a given uri should read back as.
-  File.__seed = (uri, bytes) => contents.set(String(uri), bytes);
-  File.__reset = () => contents.clear();
-  return { __esModule: true, File };
+
+  // Test isolation: reset filesystem between tests, preserve seeded contents
+  File.__seed = (uri, bytes) => seededContents.set(String(uri), bytes);
+  File.__failDelete = (uri) => failDeleteSet.add(String(uri));
+  File.__reset = () => {
+    seededContents.clear();
+    failDeleteSet.clear();
+    initFS();
+  };
+
+  // Paths: singleton directory instances
+  const Paths = {
+    get document() {
+      return new Directory("file:///document");
+    },
+    get cache() {
+      return new Directory("file:///cache");
+    },
+  };
+
+  return { __esModule: true, File, Directory, Paths };
 });
 
 // expo-crypto: jest-expo's automock resolves randomUUID() to undefined, which
@@ -347,3 +563,4 @@ jest.mock("expo-file-system", () => {
 jest.mock("expo-crypto", () => ({
   randomUUID: jest.fn(() => require("crypto").randomUUID()),
 }));
+

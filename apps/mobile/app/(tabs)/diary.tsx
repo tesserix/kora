@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { Alert, ScrollView, View } from "react-native";
+import { ActivityIndicator, Alert, ScrollView, View } from "react-native";
 import Animated, { FadeInDown, useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
 import Swipeable from "react-native-gesture-handler/ReanimatedSwipeable";
 import Svg, { Circle, Defs, LinearGradient, Stop } from "react-native-svg";
@@ -19,6 +19,7 @@ import { QueuedFailedSheet } from "@/components/diary/QueuedFailedSheet";
 import { EmptyState } from "@/components/common/EmptyState";
 import { useDashboard, useDayLogs, useAddWater, useDeleteLog } from "@/api/hooks";
 import { useQueuedLogs } from "@/offline/useQueuedLogs";
+import { useQueuedCaptures } from "@/offline/useQueuedCaptures";
 import { AnimatedNumber, PressableScale, haptics, springs } from "@/motion";
 import { useTheme } from "@/theme";
 import { hslToHex, withAlpha } from "@/lib/color";
@@ -191,6 +192,12 @@ export default function Diary() {
   // diary reads them straight off the queue and renders them beside the
   // server's own rows.
   const queued = useQueuedLogs(selected);
+  // Photo/voice captures still waiting on identification. Distinct from
+  // `queued` above: a capture has no macros of its own until a drain
+  // resolves it (or the user confirms a review suggestion), so it never
+  // contributes to the day total — see the `kcal: null` invariant on
+  // useQueuedCaptures.
+  const captures = useQueuedCaptures(selected);
   const addWater = useAddWater();
   const deleteLog = useDeleteLog();
   const [waterErr, setWaterErr] = useState<string | null>(null);
@@ -301,7 +308,8 @@ export default function Diary() {
     slot,
     items: logged.filter((l) => l.meal_slot === slot),
     queued: queuedNotOnServer.filter((r) => r.mealSlot.toLowerCase() === slot),
-  })).filter((group) => group.items.length > 0 || group.queued.length > 0);
+    captures: captures.rows.filter((r) => r.mealSlot.toLowerCase() === slot),
+  })).filter((group) => group.items.length > 0 || group.queued.length > 0 || group.captures.length > 0);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -362,6 +370,44 @@ export default function Diary() {
           {slots.map((group, gi) => (
             <Animated.View key={group.slot} entering={enter(4 + gi)}>
               <GroupedSection elevated header={group.slot.toUpperCase()} style={{ marginBottom: 16 }}>
+                {group.captures.map((c) => {
+                  const failed = c.status === "failed";
+                  const pending = c.status === "pending";
+                  const statusText = pending
+                    ? "Identifying when you're back online"
+                    : c.status === "review"
+                      ? "Tap to confirm"
+                      : "Couldn't identify";
+                  const name = c.kind === "photo" ? "Photo" : "Voice note";
+                  return (
+                    <MealRow
+                      key={c.id}
+                      name={name}
+                      slot={statusText}
+                      kcal={c.kcal}
+                      iconName={c.kind === "photo" ? "camera" : "mic"}
+                      dimmed={failed}
+                      badge={
+                        pending ? (
+                          <ActivityIndicator size="small" color={colors.tertiaryLabel} />
+                        ) : (
+                          <Badge variant="neutral">{failed ? "Failed" : "Review"}</Badge>
+                        )
+                      }
+                      accessibilityLabel={`${name}, ${statusText}`}
+                      // Failed and review both point at capture-review now: a
+                      // failed capture is kept WITH its media there (thumbnail
+                      // or playback, the failure reason, manual logging, and
+                      // discard) rather than a retry/discard-only sheet, so
+                      // the media never vanishes without the user seeing it.
+                      onPress={
+                        failed || c.status === "review"
+                          ? () => router.push({ pathname: "/capture-review", params: { id: c.id } })
+                          : undefined
+                      }
+                    />
+                  );
+                })}
                 {group.queued.map((r) => {
                   const fv = foodVisual(r.description);
                   const failed = r.status === "failed";
@@ -416,7 +462,7 @@ export default function Diary() {
             </Animated.View>
           ))}
 
-          {logged.length === 0 && queuedNotOnServer.length === 0 ? (
+          {logged.length === 0 && queuedNotOnServer.length === 0 && captures.rows.length === 0 ? (
             <Animated.View entering={enter(4)}>
               <EmptyState
                 icon="book-open"

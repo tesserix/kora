@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Crypto from "expo-crypto";
 import type { CreateLogInput } from "@/api/hooks";
 import { createLock } from "./lock";
 
@@ -74,6 +75,30 @@ async function save(items: QueuedLog[]): Promise<void> {
 // through this, so no two of them can interleave their load and their save.
 function update(fn: (items: QueuedLog[]) => QueuedLog[]): Promise<void> {
   return withQueueLock(async () => { await save(fn(await list())); });
+}
+
+// newLogId mints the id a queued log is APPENDED with, and it is the only
+// sanctioned way to produce one.
+//
+// This id is not decorative bookkeeping: drainLogs sends it as the request
+// body's `id`, and the server binds that field as `ID *uuid.UUID`
+// (api/internal/foodlog/service.go). Anything that is not a v4 UUID fails
+// binding and comes back 400 — which `isPermanent` below treats as terminal,
+// so the item is dropped rather than retried. The capture queue's own key
+// (`cap_<millis>_<rand>`, src/offline/enqueueCapture.ts) is exactly such a
+// value, and reusing it here lost every auto-tier capture AFTER its photo had
+// already been deleted.
+//
+// It must also be FRESH at each handoff rather than derived from the source
+// row's id: the server treats it as the replay idempotency key
+// (CreateIdempotent), so two different meals must never present the same one.
+//
+// `append` still types `id` as a bare string — brands were considered and
+// rejected because `append`'s other callers are slice 1's, and tsconfig type-
+// checks the test files that pass literals. This function plus the tests that
+// assert a v4 shape on both handoff paths are the guard instead.
+export function newLogId(): string {
+  return Crypto.randomUUID();
 }
 
 // ownerId is a required, non-nullable string: an item with no owner is one no

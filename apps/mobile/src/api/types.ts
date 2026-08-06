@@ -192,6 +192,14 @@ export type WeightEntry = {
 
 export type ResolveTier = "auto" | "confirm" | "follow_up";
 
+// The food-log `source` value the server actually accepts — its allowlist is
+// api/internal/metrics/labels.go:44-47. Anything outside it is bucketed into
+// "other" by labels.go:16-19, silently corrupting the by-source share metric
+// rather than erroring. Moved here (out of app/capture.tsx, where it
+// originated) so a leaf module like src/offline/drainCaptures.ts can type a
+// handoff source against it without importing from the app/ directory.
+export type ResolutionSource = "ai_photo" | "ai_text" | "ai_voice" | "ai_barcode";
+
 export interface ResolvedCandidate {
   item: FoodItem;
   portion_grams: number;
@@ -213,7 +221,7 @@ export interface Resolution {
    * The server can send `null` here (a Go nil slice with no `omitempty` —
    * api/internal/ai/types.go:81 — on several no-result paths, including
    * barcode's "not recognized" branch). Every resolve mutation in
-   * src/api/hooks.ts (normalizeResolution) coerces that to `[]` before
+   * src/api/resolveWire.ts (normalizeResolution) coerces that to `[]` before
    * returning, so every consumer of a `Resolution` value in this app can
    * trust this field is always a real array. Do not bypass that
    * normalization by calling apiFetch directly for a new resolve endpoint.

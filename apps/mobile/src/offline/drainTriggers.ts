@@ -2,21 +2,34 @@ import { AppState } from "react-native";
 import { onlineManager, type QueryClient } from "@tanstack/react-query";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, isFirebaseConfigured } from "@/lib/firebase";
+import { sweepOrphans } from "./captureMedia";
+import { list as listCaptures } from "./captureQueue";
+import { drainCaptures } from "./drainCaptures";
 import { drainLogs } from "./drainLogs";
 import { forgetOwner, rememberOwner } from "./owner";
 
-// installDrainTriggers wires every moment a queued log could become sendable.
-// Mirrors installConnectivity: one install call from the root layout, one
-// teardown function back. drainLogs holds an in-flight guard, so triggers that
-// overlap on launch still produce exactly one pass.
+// installDrainTriggers wires every moment a queued log or capture could
+// become sendable. Mirrors installConnectivity: one install call from the
+// root layout, one teardown function back. drainLogs and drainCaptures each
+// hold their own in-flight guard, so triggers that overlap on launch still
+// produce exactly one pass per queue.
 export function installDrainTriggers(queryClient: QueryClient): () => void {
-  // Fire-and-forget: the queue is durable, so a drain that fails loses nothing
-  // — the items simply wait for the next trigger.
-  const drain = () => { void drainLogs(queryClient).catch(() => {}); };
+  // Fire-and-forget: both queues are durable, so a drain that fails loses
+  // nothing — the items simply wait for the next trigger.
+  const drain = () => {
+    void drainLogs(queryClient).catch(() => {});
+    void drainCaptures(queryClient).catch(() => {});
+  };
 
   // Cold start. Usually a no-op: Firebase has not restored the session yet, and
-  // drainLogs declines to send while signed out.
+  // drainLogs/drainCaptures decline to send while signed out.
   drain();
+
+  // Reclaim media left behind by a crash between the copy and the append. Runs
+  // once per launch; a failure is ignored because the next launch retries.
+  void listCaptures()
+    .then((items) => sweepOrphans(items.map((i) => i.storedName)))
+    .catch(() => {});
 
   // Reconnect.
   const unsubscribeOnline = onlineManager.subscribe((online) => {
