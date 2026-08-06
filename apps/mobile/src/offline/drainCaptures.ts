@@ -6,7 +6,7 @@ import { deleteQueuedMedia, mediaExists, queuedMediaUri } from "./captureMedia";
 import {
   discard, list, markFailed, markReview, recordAttempt, type QueuedCapture,
 } from "./captureQueue";
-import { append as appendLog } from "./queue";
+import { append as appendLog, newLogId } from "./queue";
 import { QUEUED_CAPTURES_KEY, QUEUED_LOGS_KEY } from "./queryKeys";
 
 // A resolve that SUCCEEDED but produced no usable food. Distinct from a
@@ -83,7 +83,11 @@ export async function drainCaptureQueue(deps: DrainDeps) {
             logged_at: item.capturedAt,
             source: sourceOf(item.kind),
           },
-          item.id,
+          // A FRESH log id, never `item.id`. The capture queue's key is
+          // `cap_<millis>_<rand>`, which the server cannot bind into
+          // `ID *uuid.UUID` — it 400s, the log queue calls that permanent,
+          // and the row below has already deleted the media. See newLogId.
+          newLogId(),
           item.ownerId,
         );
         await deps.deleteMedia(item.storedName);

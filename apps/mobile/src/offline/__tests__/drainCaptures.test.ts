@@ -17,6 +17,13 @@ jest.mock("@/lib/api", () => ({
 
 const atLocalNoon = (y: number, m: number, d: number) => new Date(y, m - 1, d, 12).toISOString();
 
+// A v4 UUID, the ONLY id shape api/internal/foodlog/service.go can bind into
+// its `ID *uuid.UUID` field. Deliberately not `expect.any(String)`: the bug
+// this pins handed the capture queue's own `cap_<millis>_<rand>` key over,
+// which is a string too, and the 400 it produced is classified as permanent —
+// so the log was dropped after drainCaptures had already deleted the photo.
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 const OWNER = "uid-1";
 
 function res(tier: "auto" | "confirm" | "follow_up"): Resolution {
@@ -66,6 +73,33 @@ describe("drainCaptureQueue", () => {
     expect(logs[0].payload.source).toBe("ai_photo");
     expect(await listCaptures()).toEqual([]);
     expect(d.deleteMedia).toHaveBeenCalledWith("c1.jpg");
+  });
+
+  // The id handed to the log queue is what drainLogs sends as the request
+  // body's `id`, and the server binds it as a uuid. The capture id is NOT one.
+  it("mints a fresh v4 UUID for the log, never reusing the capture id", async () => {
+    await seed("cap_1754476800000_a1b2c3");
+
+    await drainCaptureQueue(deps());
+
+    const [log] = await listLogs();
+    expect(log.id).toMatch(UUID_V4);
+    expect(log.id).not.toBe("cap_1754476800000_a1b2c3");
+  });
+
+  // Idempotency: the id is the server's replay key, so two captures must never
+  // present the same one.
+  it("gives each handed-off capture its own distinct log id", async () => {
+    await seed("cap_1754476800000_aaaaaa");
+    await seed("cap_1754476800001_bbbbbb");
+
+    await drainCaptureQueue(deps());
+
+    const logs = await listLogs();
+    expect(logs).toHaveLength(2);
+    expect(logs[0].id).toMatch(UUID_V4);
+    expect(logs[1].id).toMatch(UUID_V4);
+    expect(logs[0].id).not.toBe(logs[1].id);
   });
 
   it("stamps a voice capture's handoff with the ai_voice source, not a raw 'voice'", async () => {

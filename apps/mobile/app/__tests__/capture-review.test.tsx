@@ -7,8 +7,17 @@ import { list as listLogs } from "@/offline/queue";
 import CaptureReviewScreen from "../capture-review";
 import type { Resolution } from "@/api/types";
 
+// A realistic capture-queue key (src/offline/enqueueCapture.ts mints exactly
+// this shape), so the id the log queue is handed cannot accidentally look like
+// a UUID just because the fixture was short.
+const CAPTURE_ID = "cap_1754476800000_a1b2c3";
+
 jest.mock("expo-router", () => ({
-  useLocalSearchParams: () => ({ id: "c1" }),
+  // The literal, not the CAPTURE_ID const above: a jest.mock factory is
+  // hoisted above const initialisation and may execute before it (the same
+  // hazard capture-offline-queue.test.tsx documents). beforeEach asserts the
+  // two still agree.
+  useLocalSearchParams: () => ({ id: "cap_1754476800000_a1b2c3" }),
   router: { back: jest.fn(), push: jest.fn() },
 }));
 
@@ -37,6 +46,11 @@ const RESOLUTION = {
 // passes.
 const atLocalNoon = (y: number, m: number, d: number) => new Date(y, m - 1, d, 12).toISOString();
 
+// See the identical constant in src/offline/__tests__/drainCaptures.test.ts:
+// the log-queue id travels to the server as `ID *uuid.UUID`, so the capture's
+// own `cap_<millis>_<rand>` key cannot stand in for it.
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 // retry: false so a queryFn that throws surfaces immediately.
 const newClient = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
@@ -46,12 +60,16 @@ const wrap = (client: QueryClient) =>
   };
 
 beforeEach(async () => {
+  // The route param is a literal inside the hoisted mock factory; if these
+  // ever drift the screen would render "not found" and every assertion below
+  // would fail confusingly instead of here.
+  expect(CAPTURE_ID).toBe("cap_1754476800000_a1b2c3");
   await AsyncStorage.clear();
   await append({
-    id: "c1", kind: "photo", storedName: "c1.jpg", fileName: "m.jpg", mimeType: "image/jpeg",
+    id: CAPTURE_ID, kind: "photo", storedName: "c1.jpg", fileName: "m.jpg", mimeType: "image/jpeg",
     capturedAt: atLocalNoon(2026, 8, 6), ownerId: "uid-1",
   } as Parameters<typeof append>[0]);
-  await markReview("c1", RESOLUTION);
+  await markReview(CAPTURE_ID, RESOLUTION);
 });
 
 it("confirming hands the capture to the log queue at its capture time", async () => {
@@ -70,6 +88,20 @@ it("rejecting discards the capture without logging anything", async () => {
 
   await waitFor(async () => expect(await listCaptures()).toEqual([]));
   await expect(listLogs()).resolves.toEqual([]);
+});
+
+// The id drainLogs will send as the request body's `id`. The server binds it
+// as `ID *uuid.UUID` (api/internal/foodlog/service.go), so handing over the
+// capture's own key 400s — and the log queue calls a 400 permanent, after
+// handleConfirm has already deleted the media.
+it("confirming mints a fresh v4 UUID for the log, never reusing the capture id", async () => {
+  await render(<CaptureReviewScreen />, { wrapper: wrap(newClient()) });
+  fireEvent.press(await screen.findByText("Confirm"));
+
+  await waitFor(async () => expect(await listLogs()).toHaveLength(1));
+  const [log] = await listLogs();
+  expect(log.id).toMatch(UUID_V4);
+  expect(log.id).not.toBe(CAPTURE_ID);
 });
 
 // A confirmed row's food identity, portion, and source must survive intact —

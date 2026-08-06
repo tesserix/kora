@@ -12,7 +12,7 @@ import { ResolutionResult, resolveResultView } from "@/components/ResolutionResu
 import { useTheme } from "@/theme";
 import { list as listCaptures, discard, retry as retryCapture, type QueuedCapture } from "@/offline/captureQueue";
 import { deleteQueuedMedia, queuedMediaUri } from "@/offline/captureMedia";
-import { append as appendLog } from "@/offline/queue";
+import { append as appendLog, newLogId } from "@/offline/queue";
 import { drainCaptures } from "@/offline/drainCaptures";
 import { QUEUED_CAPTURES_KEY, QUEUED_LOGS_KEY } from "@/offline/queryKeys";
 import type { MealSlot } from "@/lib/mealSlot";
@@ -137,7 +137,12 @@ export default function CaptureReviewScreen() {
           logged_at: capture.capturedAt,
           source: sourceOf(capture.kind),
         },
-        capture.id,
+        // A FRESH log id, never `capture.id`: the capture queue's key is
+        // `cap_<millis>_<rand>` and the server binds this field as
+        // `ID *uuid.UUID`, so reusing it 400s — and the log queue treats a
+        // 400 as terminal, after the media below is already gone. See
+        // newLogId in src/offline/queue.ts.
+        newLogId(),
         capture.ownerId,
       );
       await deleteQueuedMedia(capture.storedName);
