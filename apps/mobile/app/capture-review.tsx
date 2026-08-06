@@ -10,9 +10,7 @@ import { ScreenHeader } from "@/components/ScreenHeader";
 import { AppBackground } from "@/components/AppBackground";
 import { ResolutionResult, resolveResultView } from "@/components/ResolutionResult";
 import { useTheme } from "@/theme";
-import {
-  list as listCaptures, discard, retry as retryCapture, MAX_RESOLVE_ATTEMPTS, type QueuedCapture,
-} from "@/offline/captureQueue";
+import { list as listCaptures, discard, retry as retryCapture, type QueuedCapture } from "@/offline/captureQueue";
 import { deleteQueuedMedia, queuedMediaUri } from "@/offline/captureMedia";
 import { append as appendLog } from "@/offline/queue";
 import { drainCaptures } from "@/offline/drainCaptures";
@@ -38,20 +36,30 @@ function sourceOf(kind: QueuedCapture["kind"]): ResolutionSource {
   return kind === "photo" ? "ai_photo" : "ai_voice";
 }
 
-// captureQueue.ts's recordAttempt is the ONLY path that can drive `attempts`
-// up to MAX_RESOLVE_ATTEMPTS while flipping status to "failed" — every other
-// failure (CaptureUnidentifiedError, missing media, a permanent 4xx) calls
-// markFailed directly and never touches attempts (see drainCaptures.ts's
-// catch block). So `attempts >= MAX_RESOLVE_ATTEMPTS` reliably means the AI
-// never actually returned a verdict here: DELIVERY itself failed repeatedly
-// against a transient network/HTTP error, and `lastError` in that case is the
-// RAW `err.message` from that failed call — a diagnostic string, not
-// something to present as if the AI had looked at the photo and refused it.
+// Switches on the EXPLICIT `failureKind` drainCaptures.ts tags every failed
+// capture with — never on `attempts`. `attempts` cannot distinguish these:
+// a permanent 4xx (a delivery failure — the server refused the request, so
+// the AI never rendered a verdict) calls markFailed directly and leaves
+// attempts untouched, exactly like an identification failure does. Only the
+// site that actually catches the error (drainCaptures.ts) knows which of the
+// three happened, so that is where the tag is set. A row persisted before
+// this field existed has no `failureKind` — treated the same as
+// "identification" below, the safest copy (it never claims a technical
+// reachability problem that may not be true of an old row).
 function failureMessage(capture: QueuedCapture): string {
-  if (capture.attempts >= MAX_RESOLVE_ATTEMPTS) {
-    return "I couldn't reach Kora to identify this — try again.";
+  switch (capture.failureKind) {
+    case "delivery":
+      // lastError here is the RAW err.message from a failed network/HTTP
+      // call (drainCaptures.ts's catch block) — a diagnostic string, never
+      // something to present as if the AI had looked at the photo and
+      // refused it.
+      return "I couldn't reach Kora to identify this — try again.";
+    case "missing-media":
+      return capture.lastError ?? "The photo or recording is no longer on this device.";
+    case "identification":
+    default:
+      return capture.lastError ?? "Couldn't identify that.";
   }
-  return capture.lastError ?? "Couldn't identify that.";
 }
 
 // The confirmation surface for a capture that resolved in the background to

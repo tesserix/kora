@@ -56,7 +56,7 @@ beforeEach(async () => {
     id: "c1", kind: "photo", storedName, fileName: "m.jpg", mimeType: "image/jpeg",
     capturedAt: atLocalNoon(2026, 8, 6), ownerId: "uid-1",
   } as Parameters<typeof append>[0]);
-  await markFailed("c1", "I couldn't identify that.");
+  await markFailed("c1", "I couldn't identify that.", "identification");
 });
 
 it("keeps the failed capture and its media rather than discarding it", async () => {
@@ -117,6 +117,29 @@ it("shows a friendly message for a delivery failure instead of the raw error", a
   expect(screen.queryByText(/typeerror/i)).toBeNull();
 });
 
+// THE misclassified case: a permanent 4xx (drainCaptures.ts's isPermanent
+// branch) calls markFailed directly — attempts stays at 0, exactly like an
+// identification failure — so classifying by `attempts` would show the raw
+// HTTP error as if the AI had refused the photo. failureKind is the only
+// thing that separates it from an identification failure here, and it must
+// be "delivery" even though attempts never moved.
+it("shows a friendly message for a permanent delivery refusal (4xx), not the raw HTTP error", async () => {
+  await AsyncStorage.clear();
+  const storedName = await copyIntoQueue(makeSourceFile("c1-src-3.jpg"), "c1", "m.jpg");
+  await append({
+    id: "c1", kind: "photo", storedName, fileName: "m.jpg", mimeType: "image/jpeg",
+    capturedAt: atLocalNoon(2026, 8, 6), ownerId: "uid-1",
+  } as Parameters<typeof append>[0]);
+  // What drainCaptures.ts's isPermanent(err) branch actually does: markFailed
+  // with the raw err.message, attempts untouched (still 0).
+  await markFailed("c1", "ApiError: 422 Unprocessable Entity", "delivery");
+
+  await render(<CaptureReviewScreen />, { wrapper: wrap(newClient()) });
+  expect((await list())[0]?.attempts).toBe(0);
+  expect(await screen.findByText(/couldn't reach kora/i)).toBeTruthy();
+  expect(screen.queryByText(/unprocessable/i)).toBeNull();
+});
+
 describe("a failed voice capture", () => {
   beforeEach(async () => {
     // useLocalSearchParams above is fixed to id "c1" for the whole file, so
@@ -128,7 +151,7 @@ describe("a failed voice capture", () => {
       id: "c1", kind: "voice", storedName: "c1.m4a", fileName: "clip.m4a", mimeType: "audio/mp4",
       capturedAt: atLocalNoon(2026, 8, 6), ownerId: "uid-1",
     } as Parameters<typeof append>[0]);
-    await markFailed("c1", "I couldn't make that out.");
+    await markFailed("c1", "I couldn't make that out.", "identification");
   });
 
   it("shows the failure reason and offers manual logging without a photo thumbnail", async () => {

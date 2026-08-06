@@ -25,6 +25,14 @@ export class CaptureQueueFullError extends Error {
   }
 }
 
+// Why a capture is "failed", set at the one place (drainCaptures.ts) that
+// actually knows the cause — never inferred from `attempts` in the UI.
+// `attempts` conflates "never delivered" (a permanent 4xx lands here with
+// attempts untouched, same as an identification failure) with "delivered and
+// exhausted its retries", so no threshold on attempts can separate the three
+// causes; only the site that catches the error can.
+export type CaptureFailureKind = "delivery" | "identification" | "missing-media";
+
 export type QueuedCapture = {
   id: string;
   kind: "photo" | "voice";
@@ -36,6 +44,9 @@ export type QueuedCapture = {
   status: "pending" | "review" | "failed";
   attempts: number;
   lastError?: string;
+  // Optional: a row persisted before this field existed has none, and must
+  // still be accepted by isValid below rather than dropped from the queue.
+  failureKind?: CaptureFailureKind;
   resolution?: Resolution;
   ownerId: string;
   queuedAt: string;
@@ -94,9 +105,12 @@ export async function markReview(id: string, resolution: Resolution): Promise<vo
     i.id === id ? { ...i, status: "review", resolution, lastError: undefined } : i));
 }
 
-export async function markFailed(id: string, reason: string): Promise<void> {
+// `failureKind` is supplied by the caller (drainCaptures.ts), which is the
+// only place that actually knows why the resolve failed — never inferred
+// here, and never left for the UI to guess from `attempts`.
+export async function markFailed(id: string, reason: string, failureKind: CaptureFailureKind): Promise<void> {
   await update((items) => items.map((i) =>
-    i.id === id ? { ...i, status: "failed", lastError: reason } : i));
+    i.id === id ? { ...i, status: "failed", lastError: reason, failureKind } : i));
 }
 
 // `counts` comes from the caller's verdict classifier, not from this module:
@@ -108,13 +122,21 @@ export async function recordAttempt(id: string, message: string, counts: boolean
     if (i.id !== id) return i;
     const attempts = i.attempts + (counts ? 1 : 0);
     const done = attempts >= MAX_RESOLVE_ATTEMPTS;
-    return { ...i, attempts, lastError: message, status: done ? "failed" : "pending" };
+    return {
+      ...i,
+      attempts,
+      lastError: message,
+      status: done ? "failed" : "pending",
+      // Exhausting retries against a transient error is itself a delivery
+      // failure — the AI never returned a verdict here either.
+      ...(done ? { failureKind: "delivery" as const } : {}),
+    };
   }));
 }
 
 export async function retry(id: string): Promise<void> {
   await update((items) => items.map((i) =>
-    i.id === id ? { ...i, status: "pending", attempts: 0, lastError: undefined } : i));
+    i.id === id ? { ...i, status: "pending", attempts: 0, lastError: undefined, failureKind: undefined } : i));
 }
 
 export async function discard(id: string): Promise<void> {

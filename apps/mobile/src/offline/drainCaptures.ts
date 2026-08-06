@@ -61,7 +61,7 @@ export async function drainCaptureQueue(deps: DrainDeps) {
     // append and copy. Terminal, and handled per item so one missing file
     // cannot strand the rest of the pass.
     if (!deps.mediaExists(item.storedName)) {
-      await markFailed(item.id, "The photo or recording is no longer on this device.");
+      await markFailed(item.id, "The photo or recording is no longer on this device.", "missing-media");
       failed++;
       continue;
     }
@@ -95,13 +95,19 @@ export async function drainCaptureQueue(deps: DrainDeps) {
       }
     } catch (err) {
       if (err instanceof CaptureUnidentifiedError) {
-        await markFailed(item.id, err.message);
+        await markFailed(item.id, err.message, "identification");
         failed++;
         continue;
       }
       const message = err instanceof Error ? err.message : String(err);
       if (isPermanent(err)) {
-        await markFailed(item.id, message);
+        // A permanent 4xx is a DELIVERY failure — the server refused the
+        // request itself, so the AI never rendered a verdict on the photo or
+        // recording. Must not be classified as "identification", or
+        // failureMessage() in capture-review.tsx would present a raw HTTP
+        // error as if it were an AI judgment (the exact leak this field
+        // exists to close).
+        await markFailed(item.id, message, "delivery");
         failed++;
       } else {
         await recordAttempt(item.id, message, countsAsAttempt(err));

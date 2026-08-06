@@ -62,11 +62,37 @@ describe("captureQueue", () => {
     expect(item.resolution).toEqual(RESOLUTION);
   });
 
-  it("markFailed records a reason", async () => {
+  it("markFailed records a reason and the caller's failureKind", async () => {
     await append(input("c1"));
-    await markFailed("c1", "I couldn't identify that");
+    await markFailed("c1", "I couldn't identify that", "identification");
     const [item] = await list();
-    expect(item).toMatchObject({ status: "failed", lastError: "I couldn't identify that" });
+    expect(item).toMatchObject({
+      status: "failed", lastError: "I couldn't identify that", failureKind: "identification",
+    });
+  });
+
+  // attempts hitting the cap is ITSELF a delivery failure (the AI never
+  // returned a verdict — the request just never got through), so recordAttempt
+  // must tag it "delivery" the same way a permanent 4xx does, without a caller
+  // having to pass it in explicitly.
+  it("recordAttempt tags the row 'delivery' the moment attempts exhaust", async () => {
+    await append(input("c1"));
+    for (let i = 0; i < 4; i++) await recordAttempt("c1", "server said 500", true);
+    expect((await list())[0]).toMatchObject({ status: "pending" });
+    expect((await list())[0].failureKind).toBeUndefined();
+    await recordAttempt("c1", "server said 500", true);
+    expect((await list())[0]).toMatchObject({ status: "failed", failureKind: "delivery" });
+  });
+
+  // A row written before this field existed has no failureKind at all — it
+  // must still be accepted by isValid (list()'s filter), not silently dropped
+  // from the queue.
+  it("list accepts a legacy row with no failureKind", async () => {
+    const legacy = { ...input("c1"), status: "failed", attempts: 1, lastError: "boom", queuedAt: atLocalNoon(2026, 8, 6) };
+    await AsyncStorage.setItem("kora.captureQueue", JSON.stringify([legacy]));
+    const [item] = await list();
+    expect(item).toMatchObject({ id: "c1", status: "failed" });
+    expect(item.failureKind).toBeUndefined();
   });
 
   // counts=false is the offline case: the request never got a verdict, so the
@@ -79,14 +105,15 @@ describe("captureQueue", () => {
     expect((await list())[0]).toMatchObject({ attempts: 1, status: "pending" });
   });
 
-  it("retry resets attempts and clears the error", async () => {
+  it("retry resets attempts and clears the error and failureKind", async () => {
     await append(input("c1"));
-    await markFailed("c1", "boom");
+    await markFailed("c1", "boom", "identification");
     await recordAttempt("c1", "boom", true);
     await retry("c1");
     const item = (await list())[0];
     expect(item).toMatchObject({ status: "pending", attempts: 0 });
     expect(item.lastError).toBeUndefined();
+    expect(item.failureKind).toBeUndefined();
   });
 
   it("discard removes the row", async () => {

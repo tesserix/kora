@@ -107,6 +107,7 @@ describe("drainCaptureQueue", () => {
     const [item] = await listCaptures();
     expect(item.status).toBe("failed");
     expect(item.attempts).toBe(0);
+    expect(item.failureKind).toBe("identification");
   });
 
   // A failure with no HTTP status never got a verdict — offline is the NORMAL
@@ -122,14 +123,22 @@ describe("drainCaptureQueue", () => {
     expect((await listCaptures())[0]).toMatchObject({ status: "pending", attempts: 0 });
   });
 
-  it("fails a capture permanently on a 4xx", async () => {
+  // The case task-8's review caught: a permanent 4xx is a DELIVERY failure —
+  // the server refused the request, so the AI never rendered a verdict — and
+  // must be tagged "delivery", not left to fall through as "identification"
+  // (attempts stays at 0 here too, same as CaptureUnidentifiedError, so
+  // failureKind is the only thing that can tell these two apart).
+  it("fails a capture permanently on a 4xx, tagged as a delivery failure", async () => {
     await seed("c1");
 
     await drainCaptureQueue(deps({
       resolve: jest.fn(async () => { throw Object.assign(new Error("bad"), { status: 400 }); }),
     }));
 
-    expect((await listCaptures())[0].status).toBe("failed");
+    const [item] = await listCaptures();
+    expect(item.status).toBe("failed");
+    expect(item.attempts).toBe(0);
+    expect(item.failureKind).toBe("delivery");
   });
 
   it("keeps a 401 retryable — it means 'not authenticated YET'", async () => {
@@ -152,6 +161,7 @@ describe("drainCaptureQueue", () => {
 
     const items = await listCaptures();
     expect(items.find((i) => i.id === "c1")?.status).toBe("failed");
+    expect(items.find((i) => i.id === "c1")?.failureKind).toBe("missing-media");
     expect(items.find((i) => i.id === "c2")).toBeUndefined(); // c2 still drained
   });
 
