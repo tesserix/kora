@@ -90,11 +90,8 @@ export async function append(input: AppendCaptureInput): Promise<QueuedCapture> 
 }
 
 export async function markReview(id: string, resolution: Resolution): Promise<void> {
-  await update((items) => items.map((i) => {
-    if (i.id !== id) return i;
-    const { lastError, ...rest } = i;
-    return { ...rest, status: "review", resolution };
-  }));
+  await update((items) => items.map((i) =>
+    i.id === id ? { ...i, status: "review", resolution, lastError: undefined } : i));
 }
 
 export async function markFailed(id: string, reason: string): Promise<void> {
@@ -116,11 +113,8 @@ export async function recordAttempt(id: string, message: string, counts: boolean
 }
 
 export async function retry(id: string): Promise<void> {
-  await update((items) => items.map((i) => {
-    if (i.id !== id) return i;
-    const { lastError, ...rest } = i;
-    return { ...rest, status: "pending", attempts: 0 };
-  }));
+  await update((items) => items.map((i) =>
+    i.id === id ? { ...i, status: "pending", attempts: 0, lastError: undefined } : i));
 }
 
 export async function discard(id: string): Promise<void> {
