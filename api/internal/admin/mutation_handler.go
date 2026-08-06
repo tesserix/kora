@@ -194,6 +194,14 @@ func pathID(c *gin.Context) (uuid.UUID, bool) {
 	return id, true
 }
 
+// isRecordNotFound is the single place "the row is not there" is recognised,
+// shared by the read and write handlers so the two can never disagree about
+// what a 404 is. errors.Is (not ==) because repository code wraps the
+// sentinel with %w for context.
+func isRecordNotFound(err error) bool {
+	return errors.Is(err, gorm.ErrRecordNotFound)
+}
+
 // respondMutation renders the outcome of an UpdateFood/SoftDeleteFood call,
 // which is where the four riders' error taxonomy actually pays off:
 //
@@ -224,7 +232,7 @@ func respondMutation(c *gin.Context, snap FoodSnapshot, err error) {
 			"this food was changed by someone else since you loaded it — reload and reapply your edit")
 	case errors.Is(err, ErrDuplicateBarcode):
 		httpx.Error(c, http.StatusConflict, "duplicate_barcode", err.Error())
-	case errors.Is(err, gorm.ErrRecordNotFound):
+	case isRecordNotFound(err):
 		httpx.Error(c, http.StatusNotFound, "not_found", "food not found")
 	default:
 		httpx.RespondServiceError(c, err)

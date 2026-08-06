@@ -136,6 +136,8 @@ func NewRouter(deps Deps) *gin.Engine {
 			)
 			adminGroup := r.Group("/v1/admin", bffauth.Middleware(deps.BFFHMACKey, 0))
 			adminGroup.GET("/foods", adminHandler.ListFoods)
+			adminGroup.GET("/foods/:id", adminHandler.GetFood)
+			adminGroup.GET("/events", adminHandler.ListEvents)
 			adminGroup.POST("/foods", adminHandler.CreateFood)
 			adminGroup.PATCH("/foods/:id", adminHandler.UpdateFood)
 			adminGroup.DELETE("/foods/:id", adminHandler.SoftDeleteFood)

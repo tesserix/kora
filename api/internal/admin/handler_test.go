@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -26,7 +27,18 @@ func (f *fakeLister) ListFoods(_ context.Context, p ListParams) (ListResult, err
 	return f.result, f.err
 }
 
-func handlerRouter(l FoodLister) *gin.Engine {
+// fakeLister satisfies the whole FoodReader surface so the list tests below
+// keep exercising ONLY ListFoods. These two are never called by them; they
+// exist because Handler depends on the full read interface.
+func (f *fakeLister) GetFood(context.Context, uuid.UUID) (FoodDetail, error) {
+	return FoodDetail{}, errors.New("fakeLister: GetFood is not part of these tests")
+}
+
+func (f *fakeLister) ListEvents(context.Context, EventListParams) (EventListResult, error) {
+	return EventListResult{}, errors.New("fakeLister: ListEvents is not part of these tests")
+}
+
+func handlerRouter(l FoodReader) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.GET("/v1/admin/foods", NewHandler(l, nil).ListFoods)

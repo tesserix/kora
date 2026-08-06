@@ -156,6 +156,52 @@ func TestAdminFoodDeleteWithAMalformedIDIs400NotAServerError(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+// The two reads slice 2 added — the food detail and the AUDIT TRAIL — are
+// behind bffauth too. The audit trail is the more sensitive of the pair: it
+// carries every admin's email alongside before/after snapshots of what they
+// changed, so an unauthenticated GET would leak both the operator roster and
+// the full edit history. 401, not 404 (never mounted) and not 200 (open).
+func TestAdminReadRoutesRejectUnsignedRequests(t *testing.T) {
+	r := NewRouter(Deps{DB: &gorm.DB{}, Verifier: stubVerifier{}, BFFHMACKey: []byte(adminTestKey)})
+
+	for _, path := range []string{
+		"/v1/admin/foods/" + uuid.New().String(),
+		"/v1/admin/events",
+		"/v1/admin/events?target_id=" + uuid.New().String(),
+	} {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		assert.Equal(t, http.StatusUnauthorized, w.Code, "GET %s", path)
+	}
+}
+
+// The signed twin, end-to-end through the real router. Asserts only that the
+// requests got PAST the middleware — the audit list is a legitimate 200 even
+// when empty, and the detail 404s for a random UUID.
+func TestAdminReadRoutesAreReachableWithAValidSignature(t *testing.T) {
+	key := []byte(adminTestKey)
+	r := NewRouter(Deps{DB: testDB(t), Verifier: stubVerifier{}, BFFHMACKey: key})
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, signedAdminRequest(t, key, http.MethodGet, "/v1/admin/events", ""))
+	assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	// The query string is EXCLUDED from the signature, so signing the bare
+	// path must still verify a request carrying one. This is the only place
+	// that is pinned for the events route.
+	w = httptest.NewRecorder()
+	req := signedAdminRequest(t, key, http.MethodGet, "/v1/admin/events", "")
+	req.URL.RawQuery = "limit=5"
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code, "the signature covers the path only, never the query string")
+
+	w = httptest.NewRecorder()
+	path := "/v1/admin/foods/" + uuid.New().String()
+	r.ServeHTTP(w, signedAdminRequest(t, key, http.MethodGet, path, ""))
+	require.NotEqual(t, http.StatusUnauthorized, w.Code, "a signed, well-formed UUID path must verify")
+	assert.Equal(t, http.StatusNotFound, w.Code, "a random UUID is not a food that exists")
+}
+
 // With no key configured the MUTATION routes must not exist either — 404,
 // not 401. The read surface already pins this; the write surface is where it
 // actually matters, because a mounted-but-unauthenticated DELETE is

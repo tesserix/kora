@@ -11,7 +11,7 @@ import (
 )
 
 type Handler struct {
-	foods     FoodLister
+	foods     FoodReader
 	mutations FoodMutator
 }
 
@@ -19,7 +19,7 @@ type Handler struct {
 // for the mutation half: two constructors would let router.go wire the read
 // side and forget the write side, and the resulting 500s would only appear
 // on the first mutation attempt in production.
-func NewHandler(foods FoodLister, mutations FoodMutator) Handler {
+func NewHandler(foods FoodReader, mutations FoodMutator) Handler {
 	return Handler{foods: foods, mutations: mutations}
 }
 
