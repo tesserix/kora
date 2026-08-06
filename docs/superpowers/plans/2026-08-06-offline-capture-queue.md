@@ -1095,7 +1095,7 @@ async function handleResolveFailure(
     return;
   }
   try {
-    await enqueueCapture(file, kind, selectedMealSlot);
+    await enqueueCapture(file, kind, mealSlot);
     // Generalises the promise the barcode path already makes at :729.
     setErrorMsg(
       "You're offline — I've saved that, and I'll identify it as soon as you're back online.",
@@ -1120,9 +1120,9 @@ Imports to add: `enqueueCapture`, `type CaptureFile` from `@/offline/enqueueCapt
 `useQueryClient` from `@tanstack/react-query` if the component does not already
 hold a client.
 
-**Check `selectedMealSlot` exists** in this component before using it; if the
-capture screen does not track a meal slot, pass `undefined` and let
-`drainCaptures` apply its `"snack"` default rather than inventing a value here.
+`mealSlot` is the component's existing state (`app/capture.tsx:776`,
+`useState<MealSlot>(() => mealSlotForHour(new Date().getHours()))`) — use it
+directly. Do not introduce a new variable for it.
 
 - [ ] **Step 6: Run and confirm PASS**
 
