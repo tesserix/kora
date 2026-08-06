@@ -152,6 +152,41 @@ describe("captureMedia", () => {
 });
 ```
 
+- [ ] **Step 1b: Extend the expo-file-system jest mock to a real in-memory filesystem**
+
+`jest.setup.js:313` already mocks `expo-file-system`, but only `File` with
+`uri`/`name`/`type`/`bytes()` — enough for the #82 multipart guard, not for this
+task. Under `jest-expo` the native module is absent, so `Paths.document` is
+`undefined` and nothing here can run.
+
+Extend that mock into an in-memory filesystem backing `Paths`, `Directory` and
+`File`. This mocks the PLATFORM, not the logic under test: `captureMedia`'s real
+decisions — which directory, how the stored name is derived, which files the
+sweep keeps — all still execute. Device-only facts (that a picker URI really
+reads, what MIME iOS reports) stay device-verified, exactly as the multipart
+test documents for itself.
+
+Members needed: `Paths.document`, `Paths.cache`; `Directory(parent, name)` with
+`.uri`, `.name`, `.exists`, `.create({ intermediates })`, `.list()`, `.delete()`;
+`File(dirOrUri, name?)` with `.uri`, `.name`, `.type`, `.exists`,
+`.create({ overwrite })`, `.write(string)`, `.textSync()`, `.bytes()`,
+`.delete()`, `.copy(destination)`.
+
+**PRESERVE, do not rewrite away:**
+- `File.__seed(uri, bytes)` and `File.__reset()` — the multipart test uses them.
+- `type` derived from the extension, **including `m4a` → `audio/x-m4a`**. That
+  value is deliberately the real iOS one and differs from the `audio/mp4` the app
+  declares. It is what proves the caller's declared MIME wins in `buildFileForm`.
+  Losing it silently weakens the #82 regression guard.
+- Add a reset of the in-memory tree between tests so files do not leak across them.
+
+**Verification that the mock did not regress the existing guard:**
+
+```bash
+cd apps/mobile && npx jest src/api/__tests__/resolve-upload-multipart.test.tsx --ci --forceExit
+```
+Expected: still PASS, same test count as before your change.
+
 - [ ] **Step 2: Run the test and confirm it FAILS**
 
 Run: `cd apps/mobile && npx jest src/offline/__tests__/captureMedia.test.ts --ci --forceExit`
