@@ -140,6 +140,32 @@ it("shows a friendly message for a permanent delivery refusal (4xx), not the raw
   expect(screen.queryByText(/unprocessable/i)).toBeNull();
 });
 
+// An UNTAGGED row (no `failureKind` at all — this feature has never shipped,
+// so the only such rows are from an earlier commit of this same branch on a
+// developer's simulator, not a live migration concern). Its `lastError` may
+// be a raw HTTP/network string written before `failureKind` existed, so the
+// screen must never render it — not even as a fallback alongside safe copy.
+// Asserting only that generic copy is present would pass even if the raw
+// string were ALSO rendered somewhere on screen; the real assertion is that
+// the distinctive raw fixture is absent.
+it("shows generic copy for an untagged legacy row, never the raw lastError", async () => {
+  await AsyncStorage.clear();
+  const storedName = await copyIntoQueue(makeSourceFile("c1-src-4.jpg"), "c1", "m.jpg");
+  const legacyRow = {
+    id: "c1", kind: "photo", storedName, fileName: "m.jpg", mimeType: "image/jpeg",
+    capturedAt: atLocalNoon(2026, 8, 6), ownerId: "uid-1", queuedAt: atLocalNoon(2026, 8, 6),
+    status: "failed", attempts: 0,
+    // Deliberately no `failureKind` key — and a raw-looking lastError that
+    // must never reach the screen.
+    lastError: "ApiError: 422 Unprocessable Entity",
+  };
+  await AsyncStorage.setItem("kora.captureQueue", JSON.stringify([legacyRow]));
+
+  await render(<CaptureReviewScreen />, { wrapper: wrap(newClient()) });
+  expect(await screen.findByText(/couldn't identify that/i)).toBeTruthy();
+  expect(screen.queryByText(/unprocessable/i)).toBeNull();
+});
+
 describe("a failed voice capture", () => {
   beforeEach(async () => {
     // useLocalSearchParams above is fixed to id "c1" for the whole file, so

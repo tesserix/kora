@@ -42,10 +42,16 @@ function sourceOf(kind: QueuedCapture["kind"]): ResolutionSource {
 // the AI never rendered a verdict) calls markFailed directly and leaves
 // attempts untouched, exactly like an identification failure does. Only the
 // site that actually catches the error (drainCaptures.ts) knows which of the
-// three happened, so that is where the tag is set. A row persisted before
-// this field existed has no `failureKind` — treated the same as
-// "identification" below, the safest copy (it never claims a technical
-// reachability problem that may not be true of an old row).
+// three happened, so that is where the tag is set.
+//
+// The `undefined` case (a row persisted before this field existed — this
+// feature has never shipped, so the only such rows are from an earlier
+// commit of this same branch on a developer's simulator) is deliberately its
+// OWN branch, not folded into "identification": we do not know why an
+// untagged row failed, so its `lastError` might be a raw HTTP/network string
+// from before failureKind existed. Rendering it would be exactly the leak
+// this field was added to close, reached by a different route. Fixed, safe
+// copy only — never `lastError` — for an unknown cause.
 function failureMessage(capture: QueuedCapture): string {
   switch (capture.failureKind) {
     case "delivery":
@@ -57,8 +63,12 @@ function failureMessage(capture: QueuedCapture): string {
     case "missing-media":
       return capture.lastError ?? "The photo or recording is no longer on this device.";
     case "identification":
-    default:
+      // lastError here is CaptureUnidentifiedError's own friendly message —
+      // safe to show, and safe to fall back on.
       return capture.lastError ?? "Couldn't identify that.";
+    default:
+      // Untagged: cause unknown, so lastError is untrusted. Fixed copy only.
+      return "Couldn't identify that.";
   }
 }
 
