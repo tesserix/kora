@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { KeyboardAvoidingView, Platform, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import {
   createUserWithEmailAndPassword,
@@ -9,12 +9,14 @@ import {
 import { auth, isFirebaseConfigured } from "@/lib/firebase";
 import { AppText } from "@/components/Text";
 import { Button } from "@/components/Button";
-import { Card } from "@/components/Card";
-import { Segmented } from "@/components/Segmented";
+import { Field } from "@/components/Field";
 import { BrandLockup } from "@/components/BrandLockup";
 import { AuthScaffold } from "@/components/AuthScaffold";
+import { AppleSignInButton } from "@/components/auth/AppleSignInButton";
+import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
 import { firebaseAuthMessage } from "@/lib/firebaseAuthMessage";
 import { useTheme } from "@/theme";
+import { PressableScale } from "@/motion";
 import {
   signInWithAppleCredential,
   signInWithGoogleCredential,
@@ -29,15 +31,10 @@ import { LinkAccountPrompt } from "@/components/auth/LinkAccountPrompt";
 
 type Mode = "in" | "up";
 
-const MODE_OPTIONS: Array<{ key: Mode; label: string }> = [
-  { key: "in", label: "Sign in" },
-  { key: "up", label: "Create account" },
-];
-
 export default function SignIn() {
   if (!isFirebaseConfigured) return null;
 
-  const { colors, spacing, fontSize } = useTheme();
+  const { colors, spacing } = useTheme();
   // Set by api.ts's forced sign-out (a 401 that survived a token refresh)
   // via the redirect (tabs)/_layout.tsx makes when the session becomes
   // unusable — not present on a manual sign-out.
@@ -55,14 +52,7 @@ export default function SignIn() {
   const [pendingLink, setPendingLink] = useState<
     Extract<SocialSignInOutcome, { status: "needs-link" }> | null
   >(null);
-
-  const filledInputStyle = {
-    paddingHorizontal: spacing.md,
-    paddingVertical: 12,
-    color: colors.label,
-    fontSize: fontSize.base,
-    minHeight: 48,
-  } as const;
+  const [showEmail, setShowEmail] = useState(false);
 
   async function submit() {
     if (!auth) return;
@@ -129,14 +119,27 @@ export default function SignIn() {
     <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
       <AuthScaffold
         footer={
-          <Button
-            testID="auth-submit"
-            title={busy ? "…" : cta}
-            icon="arrow-right"
-            iconPosition="trailing"
-            onPress={submit}
-            disabled={busy}
-          />
+          <View style={{ flexDirection: "row", justifyContent: "center", gap: 6 }}>
+            <AppText muted variant="footnote">
+              {mode === "in" ? "New here?" : "Already have an account?"}
+            </AppText>
+            <PressableScale
+              accessibilityRole="button"
+              accessibilityLabel={mode === "in" ? "Create an account" : "Sign in"}
+              haptic="selection"
+              hitSlop={12}
+              onPress={() => {
+                setMode(mode === "in" ? "up" : "in");
+                // An error raised by the other mode no longer applies, and would
+                // read as a failure of the action just switched to.
+                setError(null);
+              }}
+            >
+              <AppText variant="footnote" style={{ color: colors.primary, fontWeight: "600" }}>
+                {mode === "in" ? "Create an account" : "Sign in"}
+              </AppText>
+            </PressableScale>
+          </View>
         }
       >
         <BrandLockup />
@@ -150,65 +153,66 @@ export default function SignIn() {
         </AppText>
 
         <View style={{ gap: spacing.sm }}>
-          {Platform.OS === "ios" ? (
-            <Button
-              accessibilityLabel="Continue with Apple"
-              title="Continue with Apple"
-              disabled={busy}
-              onPress={signInApple}
-            />
-          ) : null}
+          <AppleSignInButton
+            accessibilityLabel="Sign in with Apple"
+            disabled={busy}
+            onPress={signInApple}
+          />
           {googleConfigured ? (
-            <Button
-              accessibilityLabel="Continue with Google"
-              title="Continue with Google"
-              variant="secondary"
+            <GoogleSignInButton
+              accessibilityLabel="Sign in with Google"
               disabled={busy}
               onPress={signInGoogle}
             />
           ) : null}
         </View>
 
-        <Segmented
-          options={MODE_OPTIONS}
-          value={mode}
-          onChange={(key) => {
-            setMode(key as Mode);
-            // An error raised by the other mode no longer applies, and would
-            // read as a failure of the action just switched to.
-            setError(null);
-          }}
-        />
-
-        <View style={{ gap: spacing.sm }}>
-          <Card variant="elevated" style={{ padding: 0 }}>
-            <TextInput
-              accessibilityLabel="Email"
-              style={filledInputStyle}
-              placeholder="Email"
-              placeholderTextColor={colors.secondaryLabel}
+        {showEmail ? (
+          <View style={{ gap: spacing.sm }}>
+            <Field
+              label="Email"
+              value={email}
+              onChangeText={setEmail}
               autoCapitalize="none"
               autoComplete="email"
               textContentType="emailAddress"
               keyboardType="email-address"
-              value={email}
-              onChangeText={setEmail}
             />
-          </Card>
-          <Card variant="elevated" style={{ padding: 0 }}>
-            <TextInput
-              accessibilityLabel="Password"
-              style={filledInputStyle}
-              placeholder="Password"
-              placeholderTextColor={colors.secondaryLabel}
+            <Field
+              label="Password"
+              value={password}
+              onChangeText={setPassword}
               secureTextEntry
               autoComplete={mode === "in" ? "current-password" : "new-password"}
               textContentType={mode === "in" ? "password" : "newPassword"}
-              value={password}
-              onChangeText={setPassword}
             />
-          </Card>
-        </View>
+            {/* The submit sits next to its own fields. AuthScaffold's sticky
+                footer no longer carries it, which is what fixes the stranded
+                primary action. */}
+            <Button
+              testID="auth-submit"
+              accessibilityLabel={cta}
+              title={busy ? "…" : cta}
+              icon="arrow-right"
+              iconPosition="trailing"
+              onPress={submit}
+              disabled={busy}
+            />
+          </View>
+        ) : (
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Use email instead"
+            haptic="selection"
+            hitSlop={12}
+            onPress={() => setShowEmail(true)}
+            style={{ alignItems: "center", paddingVertical: spacing.sm }}
+          >
+            <AppText variant="footnote" style={{ color: colors.primary, fontWeight: "600" }}>
+              Use email instead
+            </AppText>
+          </PressableScale>
+        )}
 
         {error ? (
           <AppText
