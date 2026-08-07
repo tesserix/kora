@@ -12,8 +12,7 @@
       "bundleIdentifier": "com.tesserix.kora",
       "usesAppleSignIn": true,
       "entitlements": {
-        "com.apple.developer.healthkit": true,
-        "com.apple.developer.healthkit.access": []
+        "com.apple.developer.healthkit": true
       }
     },
     "android": {
