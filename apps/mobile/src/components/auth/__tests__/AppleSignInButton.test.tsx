@@ -29,7 +29,7 @@ test("uses the WHITE style and the theme's corner radius", async () => {
   );
   const button = getByLabelText("Sign in with Apple");
   expect(button.props.buttonStyle).toBe(0); // WHITE
-  expect(button.props.buttonType).toBe(0); // SIGN_IN
+  expect(button.props.buttonType).toBe(1); // CONTINUE
   expect(button.props.cornerRadius).toBe(radius.lg);
 });
 

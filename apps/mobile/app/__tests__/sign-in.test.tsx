@@ -53,7 +53,7 @@ test("Sign-in shows the brand, the editorial title and filled fields", async () 
   expect(ui.getByTestId("brand-dot-0-0")).toBeTruthy();
   expect(await ui.findByText("Welcome back.")).toBeTruthy();
   await act(async () => {
-    fireEvent.press(ui.getByText("Use email instead"));
+    fireEvent.press(ui.getByLabelText("Continue with email"));
   });
   expect(await ui.findByLabelText("Email")).toBeTruthy();
   expect(await ui.findByLabelText("Password")).toBeTruthy();
@@ -64,7 +64,7 @@ test("successful sign-in calls firebase and navigates home", async () => {
   const ui = await render(<SignIn />);
 
   await act(async () => {
-    fireEvent.press(ui.getByText("Use email instead"));
+    fireEvent.press(ui.getByLabelText("Continue with email"));
   });
   await fireEvent.changeText(ui.getByLabelText("Email"), "person@example.com");
   await fireEvent.changeText(ui.getByLabelText("Password"), "hunter2");
@@ -84,9 +84,13 @@ test("switching to create-account mode calls createUserWithEmailAndPassword inst
   await act(async () => {
     fireEvent.press(ui.getByText("Create an account"));
   });
-  await act(async () => {
-    fireEvent.press(ui.getByText("Use email instead"));
-  });
+  // The footer link reveals the email form itself; this guards the setup
+  // step so the test still works if that changes.
+  if (ui.queryByLabelText("Continue with email")) {
+    await act(async () => {
+      fireEvent.press(ui.getByLabelText("Continue with email"));
+    });
+  }
   await fireEvent.changeText(ui.getByLabelText("Email"), "new@example.com");
   await fireEvent.changeText(ui.getByLabelText("Password"), "hunter2000");
   await fireEvent.press(submit(ui));
@@ -112,7 +116,7 @@ test("a failed sign-in surfaces a specific message and does not navigate", async
   const ui = await render(<SignIn />);
 
   await act(async () => {
-    fireEvent.press(ui.getByText("Use email instead"));
+    fireEvent.press(ui.getByLabelText("Continue with email"));
   });
   await fireEvent.changeText(ui.getByLabelText("Email"), "person@example.com");
   await fireEvent.changeText(ui.getByLabelText("Password"), "wrong");
@@ -138,9 +142,13 @@ test("a weak password reports the real reason, not a generic check-your-password
   await act(async () => {
     fireEvent.press(ui.getByText("Create an account"));
   });
-  await act(async () => {
-    fireEvent.press(ui.getByText("Use email instead"));
-  });
+  // The footer link reveals the email form itself; this guards the setup
+  // step so the test still works if that changes.
+  if (ui.queryByLabelText("Continue with email")) {
+    await act(async () => {
+      fireEvent.press(ui.getByLabelText("Continue with email"));
+    });
+  }
   await fireEvent.press(submit(ui));
 
   expect(await ui.findByText("Choose a password of at least 6 characters.")).toBeTruthy();
@@ -153,9 +161,13 @@ test("an already-registered email is reported as such", async () => {
   await act(async () => {
     fireEvent.press(ui.getByText("Create an account"));
   });
-  await act(async () => {
-    fireEvent.press(ui.getByText("Use email instead"));
-  });
+  // The footer link reveals the email form itself; this guards the setup
+  // step so the test still works if that changes.
+  if (ui.queryByLabelText("Continue with email")) {
+    await act(async () => {
+      fireEvent.press(ui.getByLabelText("Continue with email"));
+    });
+  }
   await fireEvent.press(submit(ui));
 
   expect(await ui.findByText("That email already has an account. Try signing in.")).toBeTruthy();
@@ -166,7 +178,7 @@ test("switching mode clears a stale error from the previous mode", async () => {
   const ui = await render(<SignIn />);
 
   await act(async () => {
-    fireEvent.press(ui.getByText("Use email instead"));
+    fireEvent.press(ui.getByLabelText("Continue with email"));
   });
   await fireEvent.press(submit(ui));
   expect(await ui.findByText("Email or password is incorrect.")).toBeTruthy();
