@@ -106,8 +106,8 @@ export default function SignIn() {
 
   function signInApple() {
     void runSocial(async () => {
-      const { idToken, rawNonce, fullName } = await signInWithAppleNative();
-      return signInWithAppleCredential(idToken, rawNonce, fullName);
+      const { idToken, rawNonce, fullName, authorizationCode } = await signInWithAppleNative();
+      return signInWithAppleCredential(idToken, rawNonce, fullName, authorizationCode);
     }, "apple.com");
   }
 

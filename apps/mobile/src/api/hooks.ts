@@ -680,6 +680,15 @@ export function setDisplayName(display_name: string): Promise<unknown> {
   return apiFetch("/v1/me", { method: "PATCH", body: JSON.stringify({ display_name }) });
 }
 
+// Plain function, not a hook: called from the sign-in flow, outside any
+// component that could hold a mutation.
+export function storeAppleAuthorization(authorization_code: string): Promise<unknown> {
+  return apiFetch("/v1/me/apple-authorization", {
+    method: "POST",
+    body: JSON.stringify({ authorization_code }),
+  });
+}
+
 export function useGroups() {
   return useQuery({ queryKey: ["groups"], queryFn: () => apiFetch("/v1/groups") as Promise<GroupSummary[]> });
 }

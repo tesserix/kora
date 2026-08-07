@@ -63,6 +63,7 @@ export async function signInWithAppleNative(): Promise<{
   idToken: string;
   rawNonce: string;
   fullName: AppleFullName | null;
+  authorizationCode: string | null;
 }> {
   const rawNonce = randomNonce();
   const hashedNonce = await Crypto.digestStringAsync(
@@ -85,5 +86,13 @@ export async function signInWithAppleNative(): Promise<{
     throw e;
   }
   if (!cred.identityToken) throw new Error("Apple sign-in failed: no identity token");
-  return { idToken: cred.identityToken, rawNonce, fullName: cred.fullName };
+  return {
+    idToken: cred.identityToken,
+    rawNonce,
+    fullName: cred.fullName,
+    // Apple returns this ONLY at sign-in, and it is the only route to the
+    // refresh token account deletion must revoke. Dropping it makes the user
+    // permanently unrevokable.
+    authorizationCode: cred.authorizationCode ?? null,
+  };
 }

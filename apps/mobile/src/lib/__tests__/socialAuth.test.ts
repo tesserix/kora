@@ -82,6 +82,26 @@ describe("signInWithAppleNative", () => {
     signInAsync.mockResolvedValue({ identityToken: null, fullName: null });
     await expect(signInWithAppleNative()).rejects.toThrow("no identity token");
   });
+
+  it("returns the authorizationCode Apple supplied", async () => {
+    signInAsync.mockResolvedValue({
+      identityToken: "t",
+      authorizationCode: "auth-code-123",
+      fullName: null,
+    });
+    const result = await signInWithAppleNative();
+    // Apple returns this ONLY at sign-in; dropping it here makes the user
+    // permanently unrevokable.
+    expect(result.authorizationCode).toBe("auth-code-123");
+  });
+
+  it("tolerates Apple omitting the authorizationCode", async () => {
+    signInAsync.mockResolvedValue({ identityToken: "t", fullName: null });
+    const result = await signInWithAppleNative();
+    expect(result.authorizationCode).toBeNull();
+    // Sign-in must still succeed — the token is a nice-to-have at this point.
+    expect(result.idToken).toBe("t");
+  });
 });
 
 describe("signInWithGoogleNative", () => {

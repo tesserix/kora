@@ -25,6 +25,7 @@ jest.mock("@/lib/socialAuth", () => ({
     idToken: "a-token",
     rawNonce: "raw",
     fullName: { givenName: "Ada" },
+    authorizationCode: "auth-code-xyz",
   })),
 }));
 
@@ -56,9 +57,12 @@ describe("sign-in social providers", () => {
       fireEvent.press(getByLabelText("Continue with Apple"));
     });
     await waitFor(() =>
-      expect(mockSignInWithAppleCredential).toHaveBeenCalledWith("a-token", "raw", {
-        givenName: "Ada",
-      }),
+      expect(mockSignInWithAppleCredential).toHaveBeenCalledWith(
+        "a-token",
+        "raw",
+        { givenName: "Ada" },
+        "auth-code-xyz",
+      ),
     );
   });
 
