@@ -108,13 +108,23 @@ func TestAppleStoreRejectsAnEmptyCodeWithoutCallingApple(t *testing.T) {
 func TestAppleStoreReportsAnExchangeFailureAndStoresNothing(t *testing.T) {
 	db := testDB(t)
 	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", "apple-uid-4") })
-	ex := &fakeExchanger{err: errors.New("appleid: status 400: invalid_client")}
+	ex := &fakeExchanger{token: "rt-seeded"}
 	r := newAppleRouter(t, db, ex, "apple-uid-4")
+	// Seed a real token so "nothing was stored" is a PRESENCE that survives,
+	// not the row's initial zero value — otherwise a handler that fell through
+	// and wrote "" would pass this test.
+	require.Equal(t, http.StatusNoContent, postApple(t, r, `{"authorization_code":"good"}`).Code)
 
+	// appleid.Client returns "" alongside an error on every failure path, so
+	// the fake mirrors that: without this, a handler that forgot the `return`
+	// after the error branch would re-store the SAME seeded value, and this
+	// test would pass against that bug.
+	ex.token = ""
+	ex.err = errors.New("appleid: status 400: invalid_client")
 	w := postApple(t, r, `{"authorization_code":"code"}`)
 
 	assert.Equal(t, http.StatusBadGateway, w.Code)
-	assert.Equal(t, "", storedToken(t, db, "apple-uid-4"))
+	assert.Equal(t, "rt-seeded", storedToken(t, db, "apple-uid-4"))
 	// Apple's diagnostic must not reach the client.
 	assert.NotContains(t, w.Body.String(), "invalid_client")
 }
