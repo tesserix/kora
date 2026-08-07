@@ -22,6 +22,10 @@ type User struct {
 	FriendCode    string    `json:"-"`
 	ShareProgress bool      `json:"share_progress"`
 
+	// AppleRefreshToken is a credential and must never be serialised to a
+	// client; the json:"-" tag is load-bearing.
+	AppleRefreshToken string `gorm:"column:apple_refresh_token" json:"-"`
+
 	Sex            string     `json:"sex"`
 	BirthYear      int        `json:"birth_year"`
 	HeightCm       float64    `json:"height_cm"`

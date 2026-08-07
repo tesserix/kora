@@ -58,6 +58,11 @@ type Deps struct {
 	// at all, so an unconfigured environment answers 404 rather than 401 —
 	// the difference matters when diagnosing a deployment.
 	BFFHMACKey []byte
+	// AppleExchanger trades Apple authorization codes for refresh tokens.
+	// Nil when the Apple credentials are unset, in which case the endpoint is
+	// not mounted at all — an unconfigured environment answers 404 rather
+	// than 500, the same choice BFFHMACKey makes above.
+	AppleExchanger user.AppleExchanger
 }
 
 func NewRouter(deps Deps) *gin.Engine {
@@ -94,6 +99,10 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.GET("/me", userHandler.Me)
 		v1.PATCH("/me/share-progress", userHandler.UpdateShareProgress)
 		v1.PATCH("/me", userHandler.UpdateProfile)
+		if deps.AppleExchanger != nil {
+			appleHandler := user.NewAppleHandler(userRepo, deps.AppleExchanger)
+			v1.POST("/me/apple-authorization", appleHandler.Store)
+		}
 		v1.POST("/onboarding", onboardingHandler.Submit)
 		v1.GET("/notifications", notificationsHandler.List)
 		v1.GET("/notifications/unread-count", notificationsHandler.UnreadCount)
