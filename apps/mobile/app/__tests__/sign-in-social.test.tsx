@@ -1,4 +1,5 @@
 import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
+import { StyleSheet } from "react-native";
 import { router } from "expo-router";
 import SignIn from "../sign-in";
 
@@ -255,6 +256,36 @@ describe("sign-in composition", () => {
     expect(getByText("Start with Kora.")).toBeTruthy();
   });
 
+  // The crowding fix is a viewport problem, not a presence problem: the Email
+  // field should grab focus (and thus scroll into view) the moment it appears,
+  // regardless of which control revealed it. Absence-then-presence proves this
+  // is the reveal wiring up autoFocus, not a field that was mounted all along.
+  it("autofocuses the Email field when revealed via 'Continue with email'", async () => {
+    const { getByLabelText, queryByLabelText } = await render(<SignIn />);
+    expect(queryByLabelText("Email")).toBeNull();
+
+    await act(async () => {
+      fireEvent.press(getByLabelText("Continue with email"));
+    });
+
+    const email = getByLabelText("Email");
+    expect(email).toBeTruthy();
+    expect(email.props.autoFocus).toBe(true);
+  });
+
+  it("autofocuses the Email field when revealed via the 'Create an account' footer link", async () => {
+    const { getByLabelText, queryByLabelText, getByText } = await render(<SignIn />);
+    expect(queryByLabelText("Email")).toBeNull();
+
+    await act(async () => {
+      fireEvent.press(getByText("Create an account"));
+    });
+
+    const email = getByLabelText("Email");
+    expect(email).toBeTruthy();
+    expect(email.props.autoFocus).toBe(true);
+  });
+
   // A social failure belongs under the providers it came from, not beneath
   // the unrelated email button. toJSON() serialises the tree in render order
   // for this single-column layout (no absolute positioning, no reordering),
@@ -284,5 +315,18 @@ describe("sign-in composition", () => {
     walk(toJSON());
 
     expect(order).toEqual(["error", "email-button"]);
+  });
+
+  // AppleSignInButton is height: 48, GoogleSignInButton is minHeight: 48; the
+  // email button reuses the shared Button component (minHeight: 50), so
+  // without an override it stands 2pt taller than its peers.
+  it("matches the height of its peer provider buttons", async () => {
+    const { getByLabelText } = await render(<SignIn />);
+    // Button.tsx wraps PressableScale, which nests the caller's style array
+    // inside its own ([style, animated]) — StyleSheet.flatten resolves that
+    // nesting where a single Object.assign spread would not.
+    const style = getByLabelText("Continue with email").props.style;
+    const flat = StyleSheet.flatten(style);
+    expect(flat.minHeight).toBe(48);
   });
 });

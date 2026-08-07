@@ -200,6 +200,7 @@ export default function SignIn() {
               autoComplete="email"
               textContentType="emailAddress"
               keyboardType="email-address"
+              autoFocus
             />
             <Field
               label="Password"
@@ -237,11 +238,12 @@ export default function SignIn() {
               borderWidth: 1,
               borderColor: colors.border,
               opacity: busy ? 0.6 : 1,
+              minHeight: 48,
             }}
           />
         )}
 
-        <View style={{ flex: 0.5, minHeight: spacing.md }} />
+        <View style={{ minHeight: spacing.sm }} />
 
         {pendingLink ? (
           <LinkAccountPrompt

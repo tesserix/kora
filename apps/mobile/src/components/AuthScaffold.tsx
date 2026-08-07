@@ -85,6 +85,7 @@ export function AuthScaffold({ children, footer, onBack, progress }: Props) {
       <ScrollView
         style={{ flex: 1 }}
         keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets
         contentContainerStyle={{
           flexGrow: 1,
           paddingTop: hasHeader ? spacing.sm : insets.top + spacing.xl,
