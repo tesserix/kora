@@ -1,0 +1,23 @@
+-- Apple has required since June 2022 that an app offering Sign in with Apple
+-- revoke the user's refresh token when their account is deleted. Firebase never
+-- exposes that refresh token, so it has to be obtained by exchanging the
+-- authorization code the native sign-in returns -- and that code is returned
+-- ONLY at sign-in. Capturing it late is not possible: a user who signed in
+-- before this column existed can never be revoked without signing out and back
+-- in.
+--
+-- Nullable because email/password and Google users have no Apple relationship,
+-- and because an exchange failure is deliberately non-fatal to sign-in.
+--
+-- BUT: Repository.UpsertByFirebaseUID provisions every new row via GORM's
+-- Create(&User{...}) with the full struct, and this column carries no Go
+-- zero-value override -- so every row created after this migration gets ''
+-- (empty string), NOT SQL NULL. A revocation check written as `IS NULL` will
+-- never match a real row. Check `apple_refresh_token != ''` instead.
+--
+-- Stored in plaintext. The token permits refreshing or revoking THIS app's Sign
+-- in with Apple relationship for this user -- it grants no access to their
+-- Apple account or their Kora account -- and kora_db is owned by the `kora`
+-- role, so it sits no more exposed than any other column in the same row.
+-- Encryption at rest is a recorded follow-up, not an oversight.
+ALTER TABLE users ADD COLUMN apple_refresh_token text;

@@ -268,3 +268,69 @@ func TestLoadRejectsShortBFFHMACKey(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "16")
 }
+
+// Same philosophy as the BFFHMACKey tests above: a partially configured Apple
+// integration must fail at startup, not mount a route that silently fails
+// every exchange with invalid_client (empty iss/kid in the client_secret JWT).
+func TestLoadValidatesAppleConfig(t *testing.T) {
+	tests := []struct {
+		name       string
+		privateKey string
+		teamID     string
+		keyID      string
+		expectErr  bool
+		errSubstr  string
+	}{
+		{
+			name:       "all three set is valid",
+			privateKey: "fake-pem-key",
+			teamID:     "TEAM123",
+			keyID:      "KEY456",
+			expectErr:  false,
+		},
+		{
+			name:       "key set with team missing is an error",
+			privateKey: "fake-pem-key",
+			teamID:     "",
+			keyID:      "KEY456",
+			expectErr:  true,
+			errSubstr:  "APPLE_TEAM_ID",
+		},
+		{
+			name:       "key set with key id missing is an error",
+			privateKey: "fake-pem-key",
+			teamID:     "TEAM123",
+			keyID:      "",
+			expectErr:  true,
+			errSubstr:  "APPLE_KEY_ID",
+		},
+		{
+			name:       "all three empty means Apple is simply disabled",
+			privateKey: "",
+			teamID:     "",
+			keyID:      "",
+			expectErr:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
+			t.Setenv("APPLE_PRIVATE_KEY", tt.privateKey)
+			t.Setenv("APPLE_TEAM_ID", tt.teamID)
+			t.Setenv("APPLE_KEY_ID", tt.keyID)
+
+			cfg, err := Load()
+
+			if tt.expectErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errSubstr)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.privateKey, cfg.ApplePrivateKeyPEM)
+				assert.Equal(t, tt.teamID, cfg.AppleTeamID)
+				assert.Equal(t, tt.keyID, cfg.AppleKeyID)
+			}
+		})
+	}
+}

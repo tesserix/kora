@@ -14,7 +14,11 @@ jest.mock("firebase/auth", () => ({
 jest.mock("@/lib/firebase", () => ({ auth: {}, isFirebaseConfigured: true }));
 
 const mockSetDisplayName = jest.fn(async (..._a: unknown[]) => ({}));
-jest.mock("@/api/hooks", () => ({ setDisplayName: (...a: unknown[]) => mockSetDisplayName(...a) }));
+const mockStoreAppleAuthorization = jest.fn(async (..._a: unknown[]) => ({}));
+jest.mock("@/api/hooks", () => ({
+  setDisplayName: (...a: unknown[]) => mockSetDisplayName(...a),
+  storeAppleAuthorization: (...a: unknown[]) => mockStoreAppleAuthorization(...a),
+}));
 
 // A JWT whose payload is {"email":"sam@example.com"}.
 const TOKEN_WITH_EMAIL =
@@ -30,6 +34,7 @@ function conflict(extra: Record<string, unknown> = {}) {
 beforeEach(() => {
   jest.clearAllMocks();
   mockSignInWithCredential.mockResolvedValue({ user: { displayName: null } });
+  mockStoreAppleAuthorization.mockImplementation(async () => ({}));
 });
 
 describe("signInWithGoogleCredential", () => {
@@ -113,5 +118,39 @@ describe("signInWithAppleCredential name capture", () => {
     if (outcome.status !== "needs-link") throw new Error("unreachable");
     expect(outcome.provider).toBe("apple.com");
     expect(outcome.pendingCredential).toBe(appleCredential);
+  });
+});
+
+describe("signInWithAppleCredential authorization capture", () => {
+  it("forwards the authorization code to the server", async () => {
+    await signInWithAppleCredential("tok", "nonce", null, "auth-code-123");
+    expect(mockStoreAppleAuthorization).toHaveBeenCalledWith("auth-code-123");
+  });
+
+  it("does not call the server when Apple supplied no code", async () => {
+    await signInWithAppleCredential("tok", "nonce", null, null);
+    expect(mockStoreAppleAuthorization).not.toHaveBeenCalled();
+  });
+
+  it("stays signed in when the capture call fails", async () => {
+    mockStoreAppleAuthorization.mockRejectedValue(new Error("offline"));
+    await expect(
+      signInWithAppleCredential("tok", "nonce", null, "auth-code-123"),
+    ).resolves.toEqual({ status: "signed-in" });
+  });
+
+  it("does not attempt capture on a link conflict", async () => {
+    mockSignInWithCredential.mockRejectedValue(
+      Object.assign(new Error("exists"), {
+        code: "auth/account-exists-with-different-credential",
+      }),
+    );
+    const outcome = await signInWithAppleCredential("tok", "nonce", null, "auth-code-123");
+    expect(outcome.status).toBe("needs-link");
+    // No session exists yet at conflict time, so the authenticated capture
+    // call would 401 — capture is skipped here, not lost: it is supplied
+    // instead by LinkAccountPrompt's Apple branch (a fresh code from the link
+    // itself) or, failing that, by the user's next Apple sign-in.
+    expect(mockStoreAppleAuthorization).not.toHaveBeenCalled();
   });
 });

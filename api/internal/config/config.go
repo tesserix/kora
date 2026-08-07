@@ -40,6 +40,14 @@ type Config struct {
 	// MAC is computed over the DECODED bytes. Using the encoded form on either
 	// side produces signatures that never verify.
 	BFFHMACKey []byte
+	// Sign in with Apple credentials, used to exchange authorization codes and
+	// to revoke refresh tokens on account deletion. When ApplePrivateKeyPEM is
+	// empty the Apple endpoints are not mounted at all, so an unconfigured
+	// environment answers 404 rather than 500.
+	AppleTeamID        string
+	AppleKeyID         string
+	AppleBundleID      string
+	ApplePrivateKeyPEM string
 }
 
 func Load() (Config, error) {
@@ -61,6 +69,10 @@ func Load() (Config, error) {
 		PushFreshness:            getdur("PUSH_FRESHNESS", 15*time.Minute),
 		ExpoAccessToken:          os.Getenv("EXPO_ACCESS_TOKEN"),
 		FoodIndexRefreshInterval: getdur("FOOD_INDEX_REFRESH_INTERVAL", 60*time.Second),
+		AppleTeamID:              os.Getenv("APPLE_TEAM_ID"),
+		AppleKeyID:               os.Getenv("APPLE_KEY_ID"),
+		AppleBundleID:            getenv("APPLE_BUNDLE_ID", "com.tesserix.kora"),
+		ApplePrivateKeyPEM:       os.Getenv("APPLE_PRIVATE_KEY"),
 	}
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("config: DATABASE_URL is required")
@@ -83,6 +95,20 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("config: KORA_BFF_HMAC_KEY must decode to at least 16 bytes, got %d", len(key))
 		}
 		cfg.BFFHMACKey = key
+	}
+	// Same philosophy as BFFHMACKey above: a partially configured Apple
+	// integration is worse than a disabled one. With the .p8 key set but
+	// AppleTeamID or AppleKeyID empty, appleid.Client signs a client_secret
+	// with an empty iss/kid, the route still mounts, and every exchange fails
+	// with invalid_client — permanently, silently, and indistinguishable from
+	// success to the app. Fail at startup instead.
+	if cfg.ApplePrivateKeyPEM != "" {
+		if cfg.AppleTeamID == "" {
+			return Config{}, fmt.Errorf("config: APPLE_TEAM_ID is required when APPLE_PRIVATE_KEY is set")
+		}
+		if cfg.AppleKeyID == "" {
+			return Config{}, fmt.Errorf("config: APPLE_KEY_ID is required when APPLE_PRIVATE_KEY is set")
+		}
 	}
 	return cfg, nil
 }

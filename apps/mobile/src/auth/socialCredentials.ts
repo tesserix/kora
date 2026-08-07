@@ -8,7 +8,7 @@ import {
 } from "firebase/auth";
 import { toByteArray } from "base64-js";
 import { auth } from "@/lib/firebase";
-import { setDisplayName } from "@/api/hooks";
+import { setDisplayName, storeAppleAuthorization } from "@/api/hooks";
 import type { AppleFullName } from "@/lib/socialAuth";
 
 /**
@@ -104,6 +104,7 @@ export async function signInWithAppleCredential(
   idToken: string,
   rawNonce: string,
   fullName?: AppleFullName | null,
+  authorizationCode?: string | null,
 ): Promise<SocialSignInOutcome> {
   const cred = new OAuthProvider("apple.com").credential({ idToken, rawNonce });
   let result: UserCredential;
@@ -135,6 +136,17 @@ export async function signInWithAppleCredential(
       await setDisplayName(displayName);
     } catch {
       // Non-fatal: the name survives on the Firebase profile for a later re-sync.
+    }
+  }
+
+  // Non-fatal, exactly like the display-name write above: a failed capture must
+  // never block sign-in. The cost of failure is deferred, not immediate — the
+  // user simply cannot be revoked until they sign in again.
+  if (authorizationCode) {
+    try {
+      await storeAppleAuthorization(authorizationCode);
+    } catch {
+      // Swallowed deliberately; the user stays signed in.
     }
   }
   return { status: "signed-in" };

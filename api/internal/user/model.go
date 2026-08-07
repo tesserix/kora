@@ -22,6 +22,16 @@ type User struct {
 	FriendCode    string    `json:"-"`
 	ShareProgress bool      `json:"share_progress"`
 
+	// AppleRefreshToken is a credential and must never be serialised to a
+	// client; the json:"-" tag is load-bearing.
+	//
+	// The column is nullable, but rows created via
+	// Repository.UpsertByFirebaseUID (every new user) get '' (empty string),
+	// not SQL NULL -- GORM's Create writes the Go zero value for an untouched
+	// string field. A presence check MUST be `!= ""`; `IS NULL` matches
+	// nothing.
+	AppleRefreshToken string `gorm:"column:apple_refresh_token" json:"-"`
+
 	Sex            string     `json:"sex"`
 	BirthYear      int        `json:"birth_year"`
 	HeightCm       float64    `json:"height_cm"`

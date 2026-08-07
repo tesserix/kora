@@ -15,6 +15,7 @@ import (
 
 	"github.com/tesserix/kora/api/internal/ai"
 	"github.com/tesserix/kora/api/internal/ai/providers"
+	"github.com/tesserix/kora/api/internal/appleid"
 	"github.com/tesserix/kora/api/internal/auth"
 	"github.com/tesserix/kora/api/internal/billing"
 	"github.com/tesserix/kora/api/internal/challenges"
@@ -107,9 +108,27 @@ func main() {
 		logger.Info("admin surface disabled (no KORA_BFF_HMAC_KEY)")
 	}
 
+	var appleExchanger user.AppleExchanger
+	if cfg.ApplePrivateKeyPEM != "" {
+		key, err := appleid.ParsePrivateKey([]byte(cfg.ApplePrivateKeyPEM))
+		if err != nil {
+			logger.Error("apple: parse private key failed", "err", err)
+			os.Exit(1)
+		}
+		appleExchanger = appleid.NewClient(appleid.Config{
+			TeamID:     cfg.AppleTeamID,
+			KeyID:      cfg.AppleKeyID,
+			BundleID:   cfg.AppleBundleID,
+			PrivateKey: key,
+		}, nil)
+		logger.Info("apple authorization exchange enabled")
+	} else {
+		logger.Info("apple authorization exchange disabled (no APPLE_PRIVATE_KEY)")
+	}
+
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,
-		Handler: server.NewRouter(server.Deps{DB: db, Verifier: verifier, Resolver: resolveHandler, Provider: aiProvider, ResolveCache: resolveCache, BFFHMACKey: cfg.BFFHMACKey}),
+		Handler: server.NewRouter(server.Deps{DB: db, Verifier: verifier, Resolver: resolveHandler, Provider: aiProvider, ResolveCache: resolveCache, BFFHMACKey: cfg.BFFHMACKey, AppleExchanger: appleExchanger}),
 	}
 
 	go func() {

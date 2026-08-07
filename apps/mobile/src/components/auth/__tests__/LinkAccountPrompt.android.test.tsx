@@ -45,6 +45,13 @@ jest.mock("@/lib/socialAuth", () => ({
   signInWithGoogleNative: jest.fn(async () => "g-token"),
   signInWithAppleNative: jest.fn(async () => ({ idToken: "a", rawNonce: "n", fullName: null })),
 }));
+// LinkAccountPrompt now imports @/api/hooks for storeAppleAuthorization; the
+// real module pulls in firebase/auth (ESM), which this project's Jest config
+// cannot parse outside a mock (see LinkAccountPrompt.test.tsx for the same
+// requirement).
+jest.mock("@/api/hooks", () => ({
+  storeAppleAuthorization: jest.fn(async (..._a: unknown[]) => ({})),
+}));
 
 const pending = { provider: "google.com" } as never;
 
