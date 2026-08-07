@@ -9,16 +9,16 @@
       "distribution": "internal",
       "env": {
         "EXPO_PUBLIC_API_URL": "http://localhost:8080",
-        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "",
-        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": ""
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "564299717841-45p3feut4bgauj6e2k4hijtcm5b5u72l.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "564299717841-k80q23k7nouu7525plsjb812gn5bajm7.apps.googleusercontent.com"
       }
     },
     "preview": {
       "distribution": "internal",
       "env": {
         "EXPO_PUBLIC_API_URL": "https://kora-api.tesserix.app",
-        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "",
-        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": ""
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "564299717841-45p3feut4bgauj6e2k4hijtcm5b5u72l.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "564299717841-k80q23k7nouu7525plsjb812gn5bajm7.apps.googleusercontent.com"
       }
     },
     "production": {
@@ -28,8 +28,8 @@
       },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://kora-api.tesserix.app",
-        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "",
-        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": ""
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "564299717841-45p3feut4bgauj6e2k4hijtcm5b5u72l.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "564299717841-k80q23k7nouu7525plsjb812gn5bajm7.apps.googleusercontent.com"
       }
     }
   },
