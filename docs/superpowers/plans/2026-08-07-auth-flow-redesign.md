@@ -67,7 +67,14 @@ Kora's real mark is `apps/mobile/assets/images/icon.png`: a 3×3 grid, six large
 - Create: `apps/mobile/src/components/__tests__/BrandMark.test.tsx`
 - Modify: `apps/mobile/src/components/BrandLockup.tsx`
 - Modify: `apps/mobile/src/components/__tests__/BrandLockup.test.tsx`
+- Modify: `apps/mobile/app/__tests__/onboarding.test.tsx:47` — asserts `sf-sparkles` via `BrandLockup`
+- Modify: `apps/mobile/app/__tests__/sign-in.test.tsx:53` — same assertion
 - Modify: `design-system/ui_kits/kora/Chrome.jsx:34`, `Onboarding.jsx:18`, `HomeScreen.jsx:93`
+
+**Do NOT touch `apps/mobile/src/components/__tests__/Icon.test.tsx:15`.** It also
+asserts `sf-sparkles`, but it tests the `Icon` component directly — `Icon` still
+supports the sparkles glyph and that test stays true. Changing it would be
+collateral damage from a careless grep.
 
 **Interfaces:**
 - Consumes: `useTheme()` from `@/theme` → `{ colors }`.
@@ -285,6 +292,26 @@ test("no longer renders the sparkles glyph or its tile", async () => {
   expect(queryByTestId("brand-mark-tile")).toBeNull();
 });
 ```
+
+- [ ] **Step 6b: Update the two screen tests that assert the old mark**
+
+Both screens render `BrandLockup`, so both suites assert the sparkles testID and both go red on Step 5. This is expected — the mark deliberately changed.
+
+In `apps/mobile/app/__tests__/onboarding.test.tsx:47`, inside `step 1 shows the brand, the hero and the goal cards`, replace:
+
+```tsx
+  expect(ui.getByTestId("sf-sparkles")).toBeTruthy();
+```
+
+with:
+
+```tsx
+  expect(ui.getByTestId("brand-dot-0-0")).toBeTruthy();
+```
+
+Make the identical replacement in `apps/mobile/app/__tests__/sign-in.test.tsx:53`.
+
+Again: leave `src/components/__tests__/Icon.test.tsx:15` alone.
 
 - [ ] **Step 7: Correct the three kit brand tiles**
 
@@ -985,10 +1012,15 @@ describe("sign-in first paint", () => {
   });
 
   it("no longer renders the ambiguous Sign in / Create account segmented control", async () => {
-    const { getByLabelText, queryByTestId } = await render(<SignIn />);
+    const { getByLabelText, queryAllByRole } = await render(<SignIn />);
     // Presence first: the screen rendered.
     expect(getByLabelText("Sign in with Google")).toBeTruthy();
-    expect(queryByTestId("segmented")).toBeNull();
+    // Segmented renders each option with accessibilityRole="tab"
+    // (src/components/Segmented.tsx:61) and carries no testID. Role is the
+    // unambiguous discriminator here: the new footer link reuses the strings
+    // "Sign in" and "Create an account", so a label-based assertion would be
+    // satisfied by the very control that replaced it.
+    expect(queryAllByRole("tab")).toHaveLength(0);
   });
 });
 
@@ -1009,7 +1041,7 @@ describe("sign-in mode toggle", () => {
 });
 ```
 
-> If `Segmented` renders no `testID="segmented"`, open `src/components/Segmented.tsx`, find what it does render (a testID or a stable accessibility label), and assert on that instead. Do not add a testID to `Segmented` purely for this assertion — the component is being removed from this screen, not changed.
+Do not add a testID to `Segmented` for this assertion — the component is being removed from this screen, not changed, and it is still used elsewhere in the app.
 
 - [ ] **Step 3: Run tests to verify they fail**
 
@@ -1597,33 +1629,56 @@ A sharpening pass. Steps, copy, goal cards and progress dots are unchanged.
 
 **Files:**
 - Modify: `apps/mobile/app/onboarding.tsx` (the five `TextInput`s at lines ~191-248)
-- Test: `apps/mobile/app/__tests__/onboarding*.test.tsx` (find them first)
+- Modify: `apps/mobile/app/__tests__/onboarding.test.tsx` (the only onboarding suite)
 
 **Interfaces:**
 - Consumes: `Field` (Task 4). `BrandLockup` on step 1 picks up `BrandMark` automatically from Task 1 — no call-site change.
 
 **Accessible names must not change**, or the existing onboarding suites break: `"Birth year"`, `"Height in feet"`, `"Height in inches"`, `"Height in centimetres"`, and the weight input's unit-dependent `"Weight in pounds"` / `"Weight in kilograms"`. The weight field is exactly why `Field` supports an `accessibilityLabel` override (Task 4).
 
-- [ ] **Step 1: Find and read the onboarding suites**
+- [ ] **Step 1: Read the existing suite**
 
-Run: `cd apps/mobile && ls app/__tests__/ | grep -i onboard && grep -rn "Birth year\|Height in\|Weight in" app/__tests__/`
+The only onboarding suite is `apps/mobile/app/__tests__/onboarding.test.tsx`. Read it. Two things matter:
 
-Note every accessible name asserted. These are the contract.
+- It already asserts every accessible name this task must preserve: `"Birth year"`, `"Height in centimetres"`, `"Height in feet"`, `"Height in inches"`, `"Weight in kilograms"`, `"Weight in pounds"` (lines 110-112, 179-181, 211-214, 235-237). **That existing coverage is the regression net for this task** — if any name drifts, those tests go red.
+- Line 56 asserts `queryByLabelText("Birth year")` is `null` on **step 1**. `Field` must not leak the label outside step 2.
+- It reaches step 2 via the local helper `advance(ui)` (line 41), which presses "Continue". `mockUseUnits` is set to `{ system: "metric" }` in `beforeEach` (line 37).
 
 - [ ] **Step 2: Write the failing test**
 
-Add to the onboarding suite found above (create `app/__tests__/onboarding-fields.test.tsx` mirroring that file's mocks if none covers step 2):
+Append to `apps/mobile/app/__tests__/onboarding.test.tsx`, reusing its existing mocks and the `advance` helper:
 
 ```tsx
+// The point of Field: the label is real text above the input, so it survives
+// typing. A placeholder-only input loses it the moment the user types.
 test("step 2's inputs carry persistent labels, not just placeholders", async () => {
-  // Navigate to step 2 the same way the existing suite does, then:
-  expect(getByText("Birth year")).toBeTruthy();
-  expect(getByLabelText("Birth year")).toBeTruthy();
+  const ui = await render(<Onboarding />);
+  await advance(ui);
+
+  expect(ui.getByText("Birth year")).toBeTruthy();
+  expect(ui.getByText("Height (cm)")).toBeTruthy();
+  expect(ui.getByText("Weight (kg)")).toBeTruthy();
 });
 
+test("the labels survive typing", async () => {
+  const ui = await render(<Onboarding />);
+  await advance(ui);
+
+  await fireEvent.changeText(ui.getByLabelText("Birth year"), "1995");
+
+  expect(ui.getByText("Birth year")).toBeTruthy();
+  expect(ui.getByLabelText("Birth year").props.value).toBe("1995");
+});
+
+// The weight field's visible label is unit-shorthand while its accessible name
+// spells the unit out. That divergence is exactly why Field takes an
+// accessibilityLabel override.
 test("the weight field keeps its unit-specific accessible name", async () => {
-  // With the metric system selected:
-  expect(getByLabelText("Weight in kilograms")).toBeTruthy();
+  const ui = await render(<Onboarding />);
+  await advance(ui);
+
+  expect(ui.getByLabelText("Weight in kilograms")).toBeTruthy();
+  expect(ui.getByText("Weight (kg)")).toBeTruthy();
 });
 ```
 
