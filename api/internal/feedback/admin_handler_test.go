@@ -286,3 +286,81 @@ func TestAdminUpdateStatus_NonUUIDIdIs400NotNotFound(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 	require.NotEqual(t, http.StatusNotFound, w.Code)
 }
+
+// ---------------------------------------------------------------------------
+// Wire-format casing — Feedback embeds into Item alongside Email/DisplayName,
+// which already carry snake_case tags. Without matching tags on Feedback
+// itself, the emitted object mixes PascalCase (Feedback's default field
+// names) with snake_case (Item's own tags) in a single JSON object.
+// ---------------------------------------------------------------------------
+
+// TestAdminList_EmitsSnakeCaseKeys asserts presence first: a handler that
+// emitted nothing (or an empty object) would trivially pass an absence-only
+// check, so the snake_case keys the TypeScript client depends on must be
+// shown to actually be there before asserting the PascalCase ones are not.
+func TestAdminList_EmitsSnakeCaseKeys(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	seedAdminFeedback(t, db, userID, KindBug, StatusOpen)
+	repo := NewRepository(db)
+	router := adminRouter(NewAdminHandler(repo))
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/admin/feedback", nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var body struct {
+		Data struct {
+			Items []map[string]any `json:"items"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.NotEmpty(t, body.Data.Items)
+	item := body.Data.Items[0]
+
+	// Presence: the snake_case keys Task 3's TypeScript client reads.
+	for _, key := range []string{"id", "user_id", "kind", "subject", "description", "status", "app_version", "platform", "os_version", "device_model", "created_at", "email", "display_name"} {
+		_, ok := item[key]
+		require.True(t, ok, "response item must contain snake_case key %q, got: %s", key, w.Body.String())
+	}
+
+	// Absence: the Go default PascalCase field names that json struct tags
+	// on Feedback exist specifically to suppress.
+	for _, key := range []string{"Status", "AppVersion", "CreatedAt", "UserID", "OSVersion", "DeviceModel"} {
+		_, ok := item[key]
+		require.False(t, ok, "response item must NOT contain PascalCase key %q (mixed casing), got: %s", key, w.Body.String())
+	}
+}
+
+// TestHandlerCreate_ResponseShapeIsUnchanged pins the existing mobile
+// contract: POST /v1/feedback returns exactly {"id":..., "status":...}, a
+// hand-built gin.H in handler.go untouched by the Feedback struct tags added
+// here. This is asserted directly rather than by reasoning about which code
+// path serialises Feedback.
+func TestHandlerCreate_ResponseShapeIsUnchanged(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	repo := NewRepository(db)
+	router := newTestRouter(userID, NewHandler(repo), true)
+
+	w := doCreate(router, validPayload())
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	var envelope struct {
+		Data map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &envelope))
+
+	require.ElementsMatch(t, []string{"id", "status"}, keysOf(envelope.Data),
+		"POST /v1/feedback must return exactly {\"id\":..., \"status\":...}, unchanged by the Feedback struct tags")
+}
+
+func keysOf(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
