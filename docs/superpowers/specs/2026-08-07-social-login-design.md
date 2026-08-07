@@ -108,8 +108,11 @@ the only name Apple will ever offer, for every R1 Apple signup.
 So: add `PATCH /v1/me` taking `display_name`, alongside the existing
 `PATCH /me/share-progress`, and call it after a first-authorization Apple
 sign-in. The value is trimmed, must be non-empty after trimming, and is bounded
-at **100 characters** — long enough for any real name, short enough that the
-friends list and leaderboard cannot be broken by a pathological one. It writes
+at **100 characters, counted in runes rather than bytes** — long enough for any
+real name, short enough that the friends list and leaderboard cannot be broken
+by a pathological one. Runes matter because the only caller is the Apple
+sign-in flow, which returns whatever name is on the user's Apple ID; a byte
+bound would reject a 40-character CJK name. It writes
 only the caller's own row, resolved from `user.IDFromContext`; there is no
 user-id parameter to forge.
 
@@ -248,8 +251,10 @@ broken implementation produces a **presence**, not the initial state:
 - **Tag disambiguation.** The same Firebase code thrown from the re-auth step and
   from the link step yields different copy.
 - **Server.** Table test on `PATCH /v1/me`: trimming, rejection of
-  empty-after-trim, the 100-character bound, and that a request cannot write
-  another user's row.
+  empty-after-trim, the 100-character bound **counted in runes** (a multi-byte
+  name under 100 characters but over 100 bytes must be accepted — an
+  ASCII-only fixture cannot catch a byte-counting bound), and that a request
+  cannot write another user's row.
 
 Suites must stay green: `cd apps/mobile && npx tsc --noEmit && npx jest --ci
 --forceExit` (122 suites / 809 tests at time of writing) and `cd api && go test

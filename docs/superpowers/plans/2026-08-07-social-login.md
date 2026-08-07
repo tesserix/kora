@@ -172,11 +172,14 @@ func (r Repository) SetDisplayName(ctx context.Context, id uuid.UUID, name strin
 
 - [ ] **Step 4: Add the handler**
 
-In `api/internal/user/handler.go`, after `UpdateShareProgress`. Add `"strings"` to the imports.
+In `api/internal/user/handler.go`, after `UpdateShareProgress`. Add `"strings"` and `"unicode/utf8"` to the imports.
 
 ```go
 // MaxDisplayNameLen bounds the name at a length no real name exceeds, so a
 // pathological value cannot break the friends list or leaderboard layouts.
+// Counted in RUNES, not bytes: the only caller is the Apple sign-in flow, which
+// returns whatever name the user set on their Apple ID, so non-ASCII input is
+// expected. A byte bound would reject a 40-character CJK name as "too long".
 const MaxDisplayNameLen = 100
 
 type updateProfileBody struct {
@@ -202,7 +205,7 @@ func (h Handler) UpdateProfile(c *gin.Context) {
 		httpx.Error(c, http.StatusBadRequest, "invalid_input", "display name is required")
 		return
 	}
-	if len(name) > MaxDisplayNameLen {
+	if utf8.RuneCountInString(name) > MaxDisplayNameLen {
 		httpx.Error(c, http.StatusBadRequest, "invalid_input", "display name is too long")
 		return
 	}
