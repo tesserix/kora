@@ -48,3 +48,63 @@ test("a non-Firebase value does not throw and still yields the fallback", () => 
   expect(firebaseAuthMessage({})).toBe("Something went wrong. Please try again.");
   expect(firebaseAuthMessage({ code: 42 })).toBe("Something went wrong. Please try again.");
 });
+
+import { AuthCancelledError, LastSignInMethodError } from "@/auth/errors";
+
+test("returns null for a cancelled sign-in so callers render nothing", () => {
+  expect(firebaseAuthMessage(new AuthCancelledError())).toBeNull();
+});
+
+test("returns null for Apple's raw cancellation code that bypassed the wrapper", () => {
+  expect(firebaseAuthMessage({ code: "ERR_REQUEST_CANCELED" })).toBeNull();
+});
+
+test("explains the iCloud precondition for ERR_REQUEST_UNKNOWN", () => {
+  expect(firebaseAuthMessage({ code: "ERR_REQUEST_UNKNOWN" })).toContain("iCloud");
+});
+
+test("names the last-sign-in-method refusal", () => {
+  expect(firebaseAuthMessage(new LastSignInMethodError())).toBe(
+    "You can't remove your only sign-in method.",
+  );
+});
+
+// The tag test. auth/reauth-failed and auth/invalid-credential are produced by
+// DIFFERENT steps; the same raw code cannot distinguish them, so the copy must
+// differ by tag. Three distinct outputs, asserted as mutually distinct rather
+// than against one literal, so a stub returning a constant fails.
+test("distinguishes the re-auth failure by context", () => {
+  const password = firebaseAuthMessage({ code: "auth/reauth-failed" }, { method: "password" });
+  const social = firebaseAuthMessage(
+    { code: "auth/reauth-failed" },
+    { method: "social", provider: "google.com" },
+  );
+  const untagged = firebaseAuthMessage({ code: "auth/reauth-failed" });
+
+  expect(password).toBe("That password is incorrect.");
+  expect(social).not.toBe(password);
+  expect(untagged).not.toBe(password);
+  expect(untagged).not.toBe(social);
+});
+
+test("never claims 'password' when no context was supplied", () => {
+  expect(firebaseAuthMessage({ code: "auth/reauth-failed" })).not.toContain("password");
+});
+
+test("maps the link-specific codes", () => {
+  expect(firebaseAuthMessage({ code: "auth/credential-already-in-use" })).toContain("already linked");
+  expect(firebaseAuthMessage({ code: "auth/provider-already-linked" })).toContain("already linked");
+  expect(firebaseAuthMessage({ code: "auth/requires-recent-login" })).toContain("sign in again");
+});
+
+test("keeps the existing enumeration-safe grouping", () => {
+  const invalid = firebaseAuthMessage({ code: "auth/invalid-credential" });
+  expect(firebaseAuthMessage({ code: "auth/wrong-password" })).toBe(invalid);
+  expect(firebaseAuthMessage({ code: "auth/user-not-found" })).toBe(invalid);
+});
+
+test("never returns a raw message from an unknown error", () => {
+  const msg = firebaseAuthMessage({ code: "auth/nope", message: "/Users/x/Native.swift:42 boom" });
+  expect(msg).toBe("Something went wrong. Please try again.");
+  expect(msg).not.toContain("Native.swift");
+});
