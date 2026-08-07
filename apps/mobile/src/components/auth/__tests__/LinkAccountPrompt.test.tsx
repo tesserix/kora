@@ -1,4 +1,4 @@
-import { fireEvent, render, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { LinkAccountPrompt } from "@/components/auth/LinkAccountPrompt";
 
 const mockExistingSignInMethods = jest.fn();
@@ -80,7 +80,10 @@ describe("LinkAccountPrompt", () => {
   it("links with the pending credential and reports success", async () => {
     const { findByLabelText, getByLabelText, onLinked } = await renderPrompt();
     fireEvent.changeText(getByLabelText("Password"), "hunter2");
-    fireEvent.press(await findByLabelText("Sign in and link"));
+    const signInButton = await findByLabelText("Sign in and link");
+    await act(async () => {
+      fireEvent.press(signInButton);
+    });
     await waitFor(() => expect(onLinked).toHaveBeenCalled());
     expect(mockCompleteLinkWithPassword).toHaveBeenCalledWith("sam@example.com", "hunter2", pending);
   });
@@ -88,7 +91,10 @@ describe("LinkAccountPrompt", () => {
   it("shows mapped copy on failure and does not report success", async () => {
     mockCompleteLinkWithPassword.mockRejectedValue({ code: "auth/reauth-failed" });
     const { findByLabelText, findByText, onLinked } = await renderPrompt();
-    fireEvent.press(await findByLabelText("Sign in and link"));
+    const signInButton = await findByLabelText("Sign in and link");
+    await act(async () => {
+      fireEvent.press(signInButton);
+    });
     expect(await findByText("That password is incorrect.")).toBeTruthy();
     expect(onLinked).not.toHaveBeenCalled();
   });
@@ -99,7 +105,10 @@ describe("LinkAccountPrompt", () => {
       message: "/Users/x/Native.swift:42 boom",
     });
     const { findByLabelText, queryByText, findByText } = await renderPrompt();
-    fireEvent.press(await findByLabelText("Sign in and link"));
+    const signInButton = await findByLabelText("Sign in and link");
+    await act(async () => {
+      fireEvent.press(signInButton);
+    });
     await findByText("Something went wrong. Please try again.");
     expect(queryByText(/Native.swift/)).toBeNull();
   });
@@ -110,12 +119,18 @@ describe("LinkAccountPrompt", () => {
     mockExistingSignInMethods.mockResolvedValue([]);
     mockCompleteLinkWithPassword.mockRejectedValue({ code: "auth/reauth-failed" });
     const { findByLabelText, findByText, queryByText } = await renderPrompt();
-    fireEvent.press(await findByLabelText("Sign in and link"));
+    const signInButton = await findByLabelText("Sign in and link");
+    await act(async () => {
+      fireEvent.press(signInButton);
+    });
     expect(await findByText("That password is incorrect.")).toBeTruthy();
 
     const { AuthCancelledError } = jest.requireActual("@/auth/errors");
     mockCompleteLinkWithGoogle.mockRejectedValue(new AuthCancelledError());
-    fireEvent.press(await findByLabelText("Continue with Google to link"));
+    const googleButton = await findByLabelText("Continue with Google to link");
+    await act(async () => {
+      fireEvent.press(googleButton);
+    });
     await waitFor(() => expect(queryByText("That password is incorrect.")).toBeNull());
   });
 });
