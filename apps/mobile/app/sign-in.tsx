@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { KeyboardAvoidingView, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, Platform, TextInput, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  type AuthCredential,
 } from "firebase/auth";
 import { auth, isFirebaseConfigured } from "@/lib/firebase";
 import { AppText } from "@/components/Text";
@@ -14,6 +15,17 @@ import { BrandLockup } from "@/components/BrandLockup";
 import { AuthScaffold } from "@/components/AuthScaffold";
 import { firebaseAuthMessage } from "@/lib/firebaseAuthMessage";
 import { useTheme } from "@/theme";
+import {
+  signInWithAppleCredential,
+  signInWithGoogleCredential,
+  type SocialSignInOutcome,
+} from "@/auth/socialCredentials";
+import {
+  configureGoogleSignin,
+  signInWithAppleNative,
+  signInWithGoogleNative,
+} from "@/lib/socialAuth";
+import { LinkAccountPrompt } from "@/components/auth/LinkAccountPrompt";
 
 type Mode = "in" | "up";
 
@@ -40,6 +52,9 @@ export default function SignIn() {
     reason === "expired" ? "Your session expired. Please sign in again." : null,
   );
   const [busy, setBusy] = useState(false);
+  const [pendingLink, setPendingLink] = useState<
+    Extract<SocialSignInOutcome, { status: "needs-link" }> | null
+  >(null);
 
   const filledInputStyle = {
     paddingHorizontal: spacing.md,
@@ -62,6 +77,39 @@ export default function SignIn() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function runSocial(fn: () => Promise<SocialSignInOutcome>) {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const outcome = await fn();
+      if (outcome.status === "needs-link") {
+        setPendingLink(outcome);
+        return;
+      }
+      router.replace("/");
+    } catch (e: unknown) {
+      // null means cancelled — clears any stale error and shows nothing new.
+      setError(firebaseAuthMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function signInApple() {
+    void runSocial(async () => {
+      const { idToken, rawNonce, fullName } = await signInWithAppleNative();
+      return signInWithAppleCredential(idToken, rawNonce, fullName);
+    });
+  }
+
+  function signInGoogle() {
+    void runSocial(async () => {
+      configureGoogleSignin();
+      return signInWithGoogleCredential(await signInWithGoogleNative());
+    });
   }
 
   const cta = mode === "in" ? "Sign in" : "Create account";
@@ -89,6 +137,24 @@ export default function SignIn() {
             ? "Sign in to pick up where you left off."
             : "Create an account and log your first meal in seconds."}
         </AppText>
+
+        <View style={{ gap: spacing.sm }}>
+          {Platform.OS === "ios" ? (
+            <Button
+              accessibilityLabel="Continue with Apple"
+              title="Continue with Apple"
+              disabled={busy}
+              onPress={signInApple}
+            />
+          ) : null}
+          <Button
+            accessibilityLabel="Continue with Google"
+            title="Continue with Google"
+            variant="secondary"
+            disabled={busy}
+            onPress={signInGoogle}
+          />
+        </View>
 
         <Segmented
           options={MODE_OPTIONS}
@@ -139,6 +205,20 @@ export default function SignIn() {
           >
             {error}
           </AppText>
+        ) : null}
+
+        {pendingLink ? (
+          <LinkAccountPrompt
+            visible
+            email={pendingLink.email}
+            provider={pendingLink.provider}
+            pendingCredential={pendingLink.pendingCredential as AuthCredential}
+            onCancel={() => setPendingLink(null)}
+            onLinked={() => {
+              setPendingLink(null);
+              router.replace("/");
+            }}
+          />
         ) : null}
       </AuthScaffold>
     </KeyboardAvoidingView>
