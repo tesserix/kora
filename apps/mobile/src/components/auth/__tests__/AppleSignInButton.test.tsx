@@ -42,6 +42,17 @@ test("calls onPress when tapped", async () => {
   expect(onPress).toHaveBeenCalledTimes(1);
 });
 
+// Asserted enabled first so the disabled assertion below can distinguish
+// "correctly disabled" from "always disabled".
+test("is not marked disabled and is not dimmed when enabled", async () => {
+  const { getByLabelText } = await render(
+    <AppleSignInButton accessibilityLabel="Sign in with Apple" onPress={jest.fn()} />,
+  );
+  const button = getByLabelText("Sign in with Apple");
+  expect(button.props.accessibilityState?.disabled).toBe(false);
+  expect(button.props.style?.opacity).toBe(1);
+});
+
 test("does not call onPress while disabled", async () => {
   const onPress = jest.fn();
   const { getByLabelText } = await render(
@@ -49,4 +60,13 @@ test("does not call onPress while disabled", async () => {
   );
   fireEvent.press(getByLabelText("Sign in with Apple"));
   expect(onPress).not.toHaveBeenCalled();
+});
+
+test("is marked disabled and dimmed when disabled", async () => {
+  const { getByLabelText } = await render(
+    <AppleSignInButton accessibilityLabel="Sign in with Apple" onPress={jest.fn()} disabled />,
+  );
+  const button = getByLabelText("Sign in with Apple");
+  expect(button.props.accessibilityState?.disabled).toBe(true);
+  expect(button.props.style?.opacity).toBe(0.6);
 });

@@ -47,6 +47,18 @@ test("calls onPress when tapped", async () => {
   expect(onPress).toHaveBeenCalledTimes(1);
 });
 
+// Asserted enabled first so the disabled assertion below can distinguish
+// "correctly forwarded" from "always disabled".
+test("does not forward disabled to the pressable when enabled", async () => {
+  const { getByLabelText } = await render(
+    <GoogleSignInButton accessibilityLabel="Sign in with Google" onPress={jest.fn()} />,
+  );
+  // Pressable encodes `disabled` into its responder gate rather than exposing
+  // a plain `disabled` prop on the rendered host node.
+  const node = getByLabelText("Sign in with Google");
+  expect(node.props.onStartShouldSetResponder?.()).toBe(true);
+});
+
 test("does not call onPress while disabled", async () => {
   const onPress = jest.fn();
   const { getByLabelText } = await render(
@@ -54,4 +66,12 @@ test("does not call onPress while disabled", async () => {
   );
   fireEvent.press(getByLabelText("Sign in with Google"));
   expect(onPress).not.toHaveBeenCalled();
+});
+
+test("forwards disabled to the pressable so it does not spring or haptic under the finger", async () => {
+  const { getByLabelText } = await render(
+    <GoogleSignInButton accessibilityLabel="Sign in with Google" onPress={jest.fn()} disabled />,
+  );
+  const node = getByLabelText("Sign in with Google");
+  expect(node.props.onStartShouldSetResponder?.()).toBe(false);
 });

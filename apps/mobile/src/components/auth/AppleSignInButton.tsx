@@ -32,12 +32,13 @@ export function AppleSignInButton({ onPress, accessibilityLabel, disabled }: App
   return (
     <AppleAuthentication.AppleAuthenticationButton
       accessibilityLabel={accessibilityLabel}
+      accessibilityState={{ disabled: Boolean(disabled) }}
       buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
       // WHITE, not BLACK: the app's background is #0A0D0B, where a black
       // button with a black mark disappears.
       buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
       cornerRadius={radius.lg}
-      style={{ height: 48 }}
+      style={{ height: 48, opacity: disabled ? 0.6 : 1 }}
       onPress={() => {
         if (disabled) return;
         onPress();

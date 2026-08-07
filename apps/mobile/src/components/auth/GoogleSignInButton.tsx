@@ -34,6 +34,7 @@ export function GoogleSignInButton({
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
       accessibilityState={{ disabled: Boolean(disabled) }}
+      disabled={disabled}
       haptic="selection"
       onPress={() => {
         if (disabled) return;
