@@ -188,3 +188,21 @@ func TestUpdateStatusUnknownIDReturnsErrNotFound(t *testing.T) {
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrNotFound))
 }
+
+// TestClampLimitBounds is the load-bearing pin for the limit clamp: it tests
+// clampLimit directly, with no database, so an over-max request seeding an
+// empty (or ambient) table can never make this pass vacuously the way
+// TestAdminList_OversizedLimitClampsNotErrors does. It specifically catches
+// clampLimit's over-max branch returning DefaultLimit instead of MaxLimit —
+// the distinction this handler's callers depend on: the portal computes
+// offset = page * the limit IT ASKED FOR, so silently falling back to a
+// smaller page would make the next offset skip rows that Total truthfully
+// says exist. Mirrors admin/repository_test.go's TestClampLimitBounds.
+func TestClampLimitBounds(t *testing.T) {
+	require.Equal(t, DefaultLimit, clampLimit(0), "unset (zero) must fall back to DefaultLimit")
+	require.Equal(t, DefaultLimit, clampLimit(-5), "negative must fall back to DefaultLimit, same as unset")
+	require.Equal(t, 10, clampLimit(10), "an in-range limit must be honoured exactly")
+	require.Equal(t, MaxLimit, clampLimit(MaxLimit), "exactly MaxLimit must pass through unclamped")
+	require.Equal(t, MaxLimit, clampLimit(MaxLimit+1), "one over MaxLimit must clamp to MaxLimit, not fall back to DefaultLimit")
+	require.Equal(t, MaxLimit, clampLimit(MaxLimit+800), "far over MaxLimit must still clamp to MaxLimit")
+}
