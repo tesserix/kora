@@ -1,4 +1,4 @@
-import { fireEvent, render, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { router } from "expo-router";
 import SignIn from "../sign-in";
 
@@ -43,7 +43,9 @@ describe("sign-in social providers", () => {
 
   it("passes the RAW nonce and token from the native sheet through to Firebase", async () => {
     const { getByLabelText } = await render(<SignIn />);
-    fireEvent.press(getByLabelText("Continue with Apple"));
+    await act(async () => {
+      fireEvent.press(getByLabelText("Continue with Apple"));
+    });
     await waitFor(() =>
       expect(mockSignInWithAppleCredential).toHaveBeenCalledWith("a-token", "raw", {
         givenName: "Ada",
@@ -53,13 +55,17 @@ describe("sign-in social providers", () => {
 
   it("navigates to the app on a successful Apple sign-in", async () => {
     const { getByLabelText } = await render(<SignIn />);
-    fireEvent.press(getByLabelText("Continue with Apple"));
+    await act(async () => {
+      fireEvent.press(getByLabelText("Continue with Apple"));
+    });
     await waitFor(() => expect(router.replace).toHaveBeenCalledWith("/"));
   });
 
   it("navigates to the app on a successful Google sign-in", async () => {
     const { getByLabelText } = await render(<SignIn />);
-    fireEvent.press(getByLabelText("Continue with Google"));
+    await act(async () => {
+      fireEvent.press(getByLabelText("Continue with Google"));
+    });
     await waitFor(() => expect(mockSignInWithGoogleCredential).toHaveBeenCalledWith("g-token"));
     expect(router.replace).toHaveBeenCalledWith("/");
   });
@@ -72,7 +78,9 @@ describe("sign-in social providers", () => {
       pendingCredential: {},
     });
     const { getByLabelText, findByText } = await render(<SignIn />);
-    fireEvent.press(getByLabelText("Continue with Apple"));
+    await act(async () => {
+      fireEvent.press(getByLabelText("Continue with Apple"));
+    });
     expect(await findByText(/Link your account/)).toBeTruthy();
     expect(router.replace).not.toHaveBeenCalled();
   });
@@ -80,7 +88,9 @@ describe("sign-in social providers", () => {
   it("shows mapped copy when a provider sign-in fails", async () => {
     mockSignInWithGoogleCredential.mockRejectedValue({ code: "auth/network-request-failed" });
     const { getByLabelText, findByText } = await render(<SignIn />);
-    fireEvent.press(getByLabelText("Continue with Google"));
+    await act(async () => {
+      fireEvent.press(getByLabelText("Continue with Google"));
+    });
     expect(await findByText("Couldn't reach Kora. Check your connection.")).toBeTruthy();
   });
 
@@ -88,12 +98,16 @@ describe("sign-in social providers", () => {
   it("shows nothing when the user cancels the native sheet", async () => {
     mockSignInWithGoogleCredential.mockRejectedValue({ code: "auth/network-request-failed" });
     const { getByLabelText, findByText, queryByText } = await render(<SignIn />);
-    fireEvent.press(getByLabelText("Continue with Google"));
+    await act(async () => {
+      fireEvent.press(getByLabelText("Continue with Google"));
+    });
     await findByText("Couldn't reach Kora. Check your connection.");
 
     const { AuthCancelledError } = jest.requireActual("@/auth/errors");
     mockSignInWithGoogleCredential.mockRejectedValue(new AuthCancelledError());
-    fireEvent.press(getByLabelText("Continue with Google"));
+    await act(async () => {
+      fireEvent.press(getByLabelText("Continue with Google"));
+    });
     await waitFor(() =>
       expect(queryByText("Couldn't reach Kora. Check your connection.")).toBeNull(),
     );
