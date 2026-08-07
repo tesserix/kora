@@ -35,6 +35,25 @@ export default function TabsLayout() {
     return unsub;
   }, []);
 
+  // `profile.data?.onboarded_at === null` is deliberate: when data is undefined
+  // this is `undefined === null`, i.e. false, so a still-loading profile never
+  // routes anywhere.
+  const needsOnboarding = profile.data?.onboarded_at === null;
+
+  // The navigation MUST happen in an effect, not during render. Calling
+  // router.replace() in the render path updates expo-router's navigation store
+  // while React is rendering this component, which React reports as "Cannot
+  // update a component (NavigationContainerInner) while rendering a different
+  // component (TabsLayout)". Confirmed on the simulator; the unit tests cannot
+  // catch it because they mock router.replace, so no store update ever occurs.
+  //
+  // Declared above the early returns below, because hooks cannot run
+  // conditionally. The render path still returns <Splash /> for this case, so
+  // <Tabs> is never reachable while onboarding is pending.
+  useEffect(() => {
+    if (needsOnboarding) router.replace("/onboarding");
+  }, [needsOnboarding]);
+
   // Resolved BEFORE <Tabs> renders. The old code redirected from an effect that
   // fired only once profile.data existed, which produced two defects: a flash
   // of empty app while GET /v1/me was in flight, and — if the request failed —
@@ -91,10 +110,7 @@ export default function TabsLayout() {
     );
   }
 
-  if (profile.data && profile.data.onboarded_at === null) {
-    router.replace("/onboarding");
-    return <Splash />;
-  }
+  if (needsOnboarding) return <Splash />;
 
   return (
     <Tabs
