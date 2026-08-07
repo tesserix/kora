@@ -24,6 +24,8 @@
 - Never disambiguate auth errors by Firebase code alone where two steps share a code. Tag at the throw site.
 - Test rule, from the #110 review: **an assertion whose expected value equals the initial state cannot distinguish "it worked" from "nothing ran".** Every absence assertion must first reach a state where a wrong implementation would produce a presence.
 - Kora's design system: `AppText`, `Button`, `Card`, `Segmented`, `useTheme` from `@/components/*` and `@/theme`. Do not introduce NativeWind classes (mark8ly uses them; Kora does not).
+- **Jest mock declarations**: write them as `jest.fn(async (..._a: unknown[]) => …)`, not `jest.fn(async () => …)`. A no-parameter async arrow makes TypeScript infer a zero-argument signature, and this project's strict `tsc` then rejects the `(...a: unknown[]) => mock(...a)` wiring these suites use.
+- **Jest mock lifecycle**: `jest.clearAllMocks()` clears recorded calls but does **not** remove implementations. Any mock that a later test overrides with `mockRejectedValue`/`mockImplementation` must be restored in `beforeEach`, or the override leaks into every test that follows and fails them for reasons unrelated to their subject.
 
 ---
 
@@ -1212,10 +1214,15 @@ jest.mock("@/lib/firebase", () => ({ auth: {}, isFirebaseConfigured: true }));
 const reauthedUser = { uid: "u1" };
 const pending = { provider: "pending.example" } as never;
 
+// `jest.clearAllMocks()` clears recorded calls but does NOT remove
+// implementations. Every mock a later test overrides must be restored here, or
+// its override leaks into every test that follows it — `linkWithCredential`
+// especially, which one test makes reject.
 beforeEach(() => {
   jest.clearAllMocks();
-  mockSignInWithEmailAndPassword.mockResolvedValue({ user: reauthedUser });
-  mockSignInWithCredential.mockResolvedValue({ user: reauthedUser });
+  mockSignInWithEmailAndPassword.mockImplementation(async () => ({ user: reauthedUser }));
+  mockSignInWithCredential.mockImplementation(async () => ({ user: reauthedUser }));
+  mockLinkWithCredential.mockImplementation(async () => ({}));
 });
 
 describe("completeLinkWithPassword", () => {
@@ -1493,9 +1500,15 @@ function renderPrompt(overrides: Record<string, unknown> = {}) {
   return { ...utils, onLinked, onCancel };
 }
 
+// `jest.clearAllMocks()` clears recorded calls but does NOT remove
+// implementations, so every mock a later test overrides must be restored here
+// or the override leaks forward. `mockCompleteLinkWith*` are made to reject by
+// the failure tests.
 beforeEach(() => {
   jest.clearAllMocks();
   mockExistingSignInMethods.mockResolvedValue(["password"]);
+  mockCompleteLinkWithPassword.mockImplementation(async () => {});
+  mockCompleteLinkWithGoogle.mockImplementation(async () => {});
 });
 
 describe("LinkAccountPrompt", () => {
