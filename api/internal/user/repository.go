@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"unicode/utf8"
 
@@ -84,9 +85,17 @@ func (r Repository) EnsureUser(ctx context.Context, firebaseUID, email, name str
 
 	if seed := seedableDisplayName(name); u.DisplayName == "" && seed != "" {
 		if err := r.SetDisplayName(ctx, u.ID, seed); err != nil {
-			return User{}, fmt.Errorf("user: seed display name: %w", err)
+			// A failed seed write is not fatal: EnsureUser exists so
+			// non-/me endpoints can resolve a user instead of 500ing, and
+			// it sits on the hot path of nearly every authenticated
+			// request. Taking down a user's entire API access because a
+			// cosmetic display name couldn't be written is disproportionate
+			// -- the seed is self-healing, since the next authenticated
+			// request will simply retry it while display_name is still ''.
+			slog.WarnContext(ctx, "user: seed display name failed", "err", err, "user_id", u.ID)
+		} else {
+			u.DisplayName = seed
 		}
-		u.DisplayName = seed
 	}
 	return u, nil
 }
