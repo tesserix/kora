@@ -24,6 +24,7 @@ func Middleware(v TokenVerifier) gin.HandlerFunc {
 		}
 		c.Set("uid", claims.UID)
 		c.Set("email", claims.Email)
+		c.Set("name", claims.Name)
 		c.Next()
 	}
 }

@@ -12,6 +12,7 @@ import (
 type Claims struct {
 	UID   string
 	Email string
+	Name  string
 }
 
 type TokenVerifier interface {
@@ -39,6 +40,19 @@ func (v firebaseVerifier) Verify(ctx context.Context, idToken string) (Claims, e
 	if err != nil {
 		return Claims{}, fmt.Errorf("auth: verify token: %w", err)
 	}
+	return claimsFromToken(tok), nil
+}
+
+// claimsFromToken extracts the identity fields this package cares about from
+// a verified Firebase token. Pulled out of Verify so it can be unit tested
+// against a hand-built *fbauth.Token without a real Firebase client, which
+// VerifyIDToken requires and cannot be faked in-process.
+//
+// Non-string or missing claims (e.g. a JSON number, or a token that never
+// carried the claim) yield the zero value rather than panicking: a failed
+// type assertion with the ", ok" form never panics, it just reports false.
+func claimsFromToken(tok *fbauth.Token) Claims {
 	email, _ := tok.Claims["email"].(string)
-	return Claims{UID: tok.UID, Email: email}, nil
+	name, _ := tok.Claims["name"].(string)
+	return Claims{UID: tok.UID, Email: email, Name: name}
 }
