@@ -46,21 +46,26 @@ func (s Status) Valid() bool {
 }
 
 // Feedback is one submission.
+//
+// json tags mirror the DB column names (snake_case) so the wire format is
+// consistent with Item's Email/DisplayName tags: without them, Go's default
+// field-name marshalling would emit PascalCase here alongside Item's
+// snake_case, producing one JSON object with two casing conventions.
 type Feedback struct {
-	ID          uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
-	UserID      uuid.UUID `gorm:"type:uuid;not null;index"`
-	Kind        Kind      `gorm:"not null"`
-	Subject     string    `gorm:"not null"`
-	Description string    `gorm:"not null"`
-	Status      Status    `gorm:"not null;default:open"`
+	ID          uuid.UUID `json:"id" gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
+	UserID      uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index"`
+	Kind        Kind      `json:"kind" gorm:"not null"`
+	Subject     string    `json:"subject" gorm:"not null"`
+	Description string    `json:"description" gorm:"not null"`
+	Status      Status    `json:"status" gorm:"not null;default:open"`
 	// Client context, sent by the app. It is display-only — never trusted for
 	// authorisation — and makes a bug report actionable ("crashed on iOS 26.1,
 	// app 1.0.0" rather than "it crashed").
-	AppVersion  string `gorm:"not null;default:''"`
-	Platform    string `gorm:"not null;default:''"`
-	OSVersion   string `gorm:"not null;default:''"`
-	DeviceModel string `gorm:"not null;default:''"`
-	CreatedAt   time.Time
+	AppVersion  string    `json:"app_version" gorm:"not null;default:''"`
+	Platform    string    `json:"platform" gorm:"not null;default:''"`
+	OSVersion   string    `json:"os_version" gorm:"not null;default:''"`
+	DeviceModel string    `json:"device_model" gorm:"not null;default:''"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 func (Feedback) TableName() string { return "feedback" }

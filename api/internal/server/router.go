@@ -151,6 +151,10 @@ func NewRouter(deps Deps) *gin.Engine {
 			adminGroup.POST("/foods", adminHandler.CreateFood)
 			adminGroup.PATCH("/foods/:id", adminHandler.UpdateFood)
 			adminGroup.DELETE("/foods/:id", adminHandler.SoftDeleteFood)
+
+			feedbackAdmin := feedback.NewAdminHandler(feedback.NewRepository(deps.DB))
+			adminGroup.GET("/feedback", feedbackAdmin.List)
+			adminGroup.PATCH("/feedback/:id", feedbackAdmin.UpdateStatus)
 		}
 
 		pinsHandler := pins.NewHandler(pins.NewService(pins.NewRepository(deps.DB), foodRepo))
