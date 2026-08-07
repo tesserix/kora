@@ -10,6 +10,7 @@
     "userInterfaceStyle": "dark",
     "ios": {
       "bundleIdentifier": "com.tesserix.kora",
+      "usesAppleSignIn": true,
       "entitlements": {
         "com.apple.developer.healthkit": true,
         "com.apple.developer.healthkit.access": []
@@ -72,7 +73,8 @@
           "NSHealthShareUsageDescription": "Kora reads your steps and sleep to show real activity alongside your nutrition."
         }
       ],
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "expo-apple-authentication"
     ],
     "experiments": {
       "typedRoutes": true,

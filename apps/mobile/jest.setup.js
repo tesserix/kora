@@ -560,7 +560,15 @@ jest.mock("expo-file-system", () => {
 // would hand every log the same empty identity — and the client-minted id is
 // the whole basis of replay idempotency for the offline queue. Delegate to
 // Node's own crypto so tests get real, distinct v4 UUIDs.
+// getRandomBytes/digestStringAsync/CryptoDigestAlgorithm back the Apple sign-in
+// nonce (socialAuth.ts): a real implementation so tests exercise real random
+// bytes and a real SHA-256 digest rather than an undefined stub.
 jest.mock("expo-crypto", () => ({
   randomUUID: jest.fn(() => require("crypto").randomUUID()),
+  getRandomBytes: jest.fn((byteCount) => require("crypto").randomBytes(byteCount)),
+  digestStringAsync: jest.fn(async (algorithm, data) =>
+    require("crypto").createHash("sha256").update(data).digest("hex"),
+  ),
+  CryptoDigestAlgorithm: { SHA256: "SHA-256" },
 }));
 
