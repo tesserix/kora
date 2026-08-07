@@ -29,6 +29,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockSignInWithEmailAndPassword.mockImplementation(async () => ({ user: reauthedUser }));
   mockSignInWithCredential.mockImplementation(async () => ({ user: reauthedUser }));
+  mockLinkWithCredential.mockImplementation(async () => ({}));
 });
 
 describe("completeLinkWithPassword", () => {
