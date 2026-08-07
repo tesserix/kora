@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { BackHandler, TextInput, View } from "react-native";
+import { BackHandler, View } from "react-native";
 import { router } from "expo-router";
 import { AppText } from "@/components/Text";
 import { Button } from "@/components/Button";
 import { Overline } from "@/components/Overline";
 import { Segmented } from "@/components/Segmented";
-import { Card } from "@/components/Card";
+import { Field } from "@/components/Field";
 import { BrandLockup } from "@/components/BrandLockup";
 import { SelectableCard } from "@/components/SelectableCard";
 import { AuthScaffold } from "@/components/AuthScaffold";
@@ -52,7 +52,7 @@ function activityLabel(level: OnboardingInput["activity_level"]): string {
 }
 
 export default function Onboarding() {
-  const { colors, spacing, fontSize } = useTheme();
+  const { colors, spacing } = useTheme();
   const submit = useSubmitOnboarding();
   const [step, setStep] = useState<1 | 2>(1);
   const [goal, setGoal] = useState<OnboardingInput["goal"]>("fat_loss");
@@ -77,14 +77,6 @@ export default function Onboarding() {
     });
     return () => sub.remove();
   }, [step]);
-
-  const filledInputStyle = {
-    paddingHorizontal: spacing.md,
-    paddingVertical: 12,
-    color: colors.label,
-    fontSize: fontSize.base,
-    minHeight: 48,
-  } as const;
 
   function onSubmit() {
     setError(null);
@@ -186,67 +178,51 @@ export default function Onboarding() {
         onChange={(key) => setSex(key as OnboardingInput["sex"])}
       />
 
-      <View style={{ gap: spacing.sm }}>
-        <Card variant="elevated" style={{ padding: 0 }}>
-          <TextInput
-            accessibilityLabel="Birth year"
-            style={filledInputStyle}
-            placeholder="Birth year (e.g. 1995)"
-            placeholderTextColor={colors.secondaryLabel}
-            keyboardType="number-pad"
-            value={birthYear}
-            onChangeText={setBirthYear}
-          />
-        </Card>
+      <View style={{ gap: spacing.md }}>
+        <Field
+          label="Birth year"
+          placeholder="e.g. 1995"
+          keyboardType="number-pad"
+          value={birthYear}
+          onChangeText={setBirthYear}
+        />
         {system === "imperial" ? (
           <View style={{ flexDirection: "row", gap: spacing.sm }}>
-            <Card variant="elevated" style={{ padding: 0, flex: 1 }}>
-              <TextInput
+            <View style={{ flex: 1 }}>
+              <Field
+                label="Height (ft)"
                 accessibilityLabel="Height in feet"
-                style={filledInputStyle}
-                placeholder="Height (ft)"
-                placeholderTextColor={colors.secondaryLabel}
                 keyboardType="number-pad"
                 value={heightFt}
                 onChangeText={setHeightFt}
               />
-            </Card>
-            <Card variant="elevated" style={{ padding: 0, flex: 1 }}>
-              <TextInput
+            </View>
+            <View style={{ flex: 1 }}>
+              <Field
+                label="Height (in)"
                 accessibilityLabel="Height in inches"
-                style={filledInputStyle}
-                placeholder="Height (in)"
-                placeholderTextColor={colors.secondaryLabel}
                 keyboardType="number-pad"
                 value={heightIn}
                 onChangeText={setHeightIn}
               />
-            </Card>
+            </View>
           </View>
         ) : (
-          <Card variant="elevated" style={{ padding: 0 }}>
-            <TextInput
-              accessibilityLabel="Height in centimetres"
-              style={filledInputStyle}
-              placeholder="Height (cm)"
-              placeholderTextColor={colors.secondaryLabel}
-              keyboardType="decimal-pad"
-              value={heightCm}
-              onChangeText={setHeightCm}
-            />
-          </Card>
-        )}
-        <Card variant="elevated" style={{ padding: 0 }}>
-          <TextInput
-            accessibilityLabel={system === "imperial" ? "Weight in pounds" : "Weight in kilograms"}
-            style={filledInputStyle}
-            placeholder={system === "imperial" ? "Weight (lb)" : "Weight (kg)"}
-            placeholderTextColor={colors.secondaryLabel}
+          <Field
+            label="Height (cm)"
+            accessibilityLabel="Height in centimetres"
             keyboardType="decimal-pad"
-            value={weightText}
-            onChangeText={setWeightText}
+            value={heightCm}
+            onChangeText={setHeightCm}
           />
-        </Card>
+        )}
+        <Field
+          label={system === "imperial" ? "Weight (lb)" : "Weight (kg)"}
+          accessibilityLabel={system === "imperial" ? "Weight in pounds" : "Weight in kilograms"}
+          keyboardType="decimal-pad"
+          value={weightText}
+          onChangeText={setWeightText}
+        />
       </View>
 
       <Overline style={{ marginTop: spacing.xs }}>Activity</Overline>

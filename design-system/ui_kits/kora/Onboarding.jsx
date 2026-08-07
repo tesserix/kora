@@ -15,7 +15,20 @@ function Onboarding({ onStart }) {
       <div style={{ flex: 1, overflowY: "auto", padding: "8px 24px 24px", display: "flex", flexDirection: "column" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 22 }}>
           <span style={{ width: 40, height: 40, borderRadius: "var(--radius-lg)", background: "var(--primary)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "var(--shadow-md)" }}>
-            <DS.Icon name="sparkles" size={22} color="var(--primary-foreground)" />
+            {/* Kora's mark: a 3x3 dot grid (see apps/mobile/assets/images/icon.png and
+                apps/mobile/src/components/BrandMark.tsx). NOT the Lucide AI-affordance glyph, which
+                must stay everywhere else in this kit. */}
+            <span style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 2, width: 22, height: 22 }}>
+              {[[0,0],[0,1],[0,2],[1,0],[1,1],[1,2],[2,0],[2,1],[2,2]].map(([r, c]) => {
+                const muted = `${r}-${c}` === "0-1" || `${r}-${c}` === "1-2" || `${r}-${c}` === "2-1";
+                const d = muted ? 3.5 : 6;
+                return (
+                  <span key={`${r}-${c}`} style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <span style={{ width: d, height: d, borderRadius: "50%", background: muted ? "var(--card-secondary)" : "var(--primary-foreground)" }} />
+                  </span>
+                );
+              })}
+            </span>
           </span>
           <span style={{ fontSize: 20, fontWeight: 800, letterSpacing: "-0.02em", color: "var(--foreground)" }}>Kora</span>
         </div>

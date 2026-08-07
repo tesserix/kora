@@ -27,6 +27,17 @@ jest.mock("@/api/hooks", () => ({
   storeAppleAuthorization: (...a: unknown[]) => mockStoreAppleAuthorization(...a),
 }));
 
+// jest-expo's default platform is ios, so AppleSignInButton renders its real
+// (mocked) native button here. See AppleSignInButton.test.tsx for the same mock.
+jest.mock("expo-apple-authentication", () => {
+  const { Pressable } = require("react-native");
+  return {
+    AppleAuthenticationButtonType: { SIGN_IN: 0, CONTINUE: 1 },
+    AppleAuthenticationButtonStyle: { WHITE: 0, WHITE_OUTLINE: 1, BLACK: 2 },
+    AppleAuthenticationButton: (props: Record<string, unknown>) => <Pressable {...props} />,
+  };
+});
+
 const pending = { provider: "apple.com" } as never;
 
 // This project's installed @testing-library/react-native (v14) has an async
@@ -177,5 +188,37 @@ describe("LinkAccountPrompt", () => {
       fireEvent.press(appleButton);
     });
     await waitFor(() => expect(onLinked).toHaveBeenCalled());
+  });
+});
+
+describe("link prompt copy", () => {
+  it("leads with what happened, naming the email, and does not read as an error", async () => {
+    mockExistingSignInMethods.mockResolvedValue([]);
+    const { findByText } = await render(
+      <LinkAccountPrompt
+        visible
+        email="sam@example.com"
+        provider="apple.com"
+        pendingCredential={pending}
+        onCancel={jest.fn()}
+        onLinked={jest.fn()}
+      />,
+    );
+    expect(await findByText(/You already have a Kora account for sam@example.com/)).toBeTruthy();
+  });
+
+  it("states that linking is one-time", async () => {
+    mockExistingSignInMethods.mockResolvedValue([]);
+    const { findByText } = await render(
+      <LinkAccountPrompt
+        visible
+        email="sam@example.com"
+        provider="apple.com"
+        pendingCredential={pending}
+        onCancel={jest.fn()}
+        onLinked={jest.fn()}
+      />,
+    );
+    expect(await findByText(/Once connected, either one will sign you in/)).toBeTruthy();
   });
 });

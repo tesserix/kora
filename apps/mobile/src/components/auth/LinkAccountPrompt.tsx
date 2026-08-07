@@ -18,6 +18,8 @@ import { storeAppleAuthorization } from "@/api/hooks";
 import { AppText } from "@/components/Text";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
+import { AppleSignInButton } from "@/components/auth/AppleSignInButton";
+import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
 import { useTheme } from "@/theme";
 
 export interface LinkAccountPromptProps {
@@ -99,9 +101,10 @@ export function LinkAccountPrompt({
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onCancel}>
       <View style={{ flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.4)" }}>
         <Card variant="elevated" style={{ padding: spacing.lg, gap: spacing.sm }}>
-          <AppText variant="title2">Link your account</AppText>
+          <AppText variant="title2">Connect {PROVIDER_LABEL[provider]}</AppText>
           <AppText muted>
-            An account already exists for {email}. Sign in to connect {PROVIDER_LABEL[provider]}.
+            You already have a Kora account for {email}. Sign in once to connect{" "}
+            {PROVIDER_LABEL[provider]}. Once connected, either one will sign you in.
           </AppText>
 
           {showPassword ? (
@@ -139,10 +142,9 @@ export function LinkAccountPrompt({
           ) : null}
 
           {showGoogle ? (
-            <Button
+            <GoogleSignInButton
               accessibilityLabel="Continue with Google to link"
               title="Continue with Google to link"
-              variant="secondary"
               disabled={busy}
               onPress={() =>
                 void run(
@@ -158,10 +160,8 @@ export function LinkAccountPrompt({
           ) : null}
 
           {showApple ? (
-            <Button
+            <AppleSignInButton
               accessibilityLabel="Continue with Apple to link"
-              title="Continue with Apple to link"
-              variant="secondary"
               disabled={busy}
               onPress={() =>
                 void run(

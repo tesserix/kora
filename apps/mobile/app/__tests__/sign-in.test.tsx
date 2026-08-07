@@ -1,4 +1,4 @@
-import { fireEvent, render, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { router, useLocalSearchParams } from "expo-router";
 
 const mockSignIn = jest.fn();
@@ -50,8 +50,11 @@ const submit = (ui: Awaited<ReturnType<typeof render>>) => ui.getByTestId("auth-
 
 test("Sign-in shows the brand, the editorial title and filled fields", async () => {
   const ui = await render(<SignIn />);
-  expect(ui.getByTestId("sf-sparkles")).toBeTruthy();
+  expect(ui.getByTestId("brand-dot-0-0")).toBeTruthy();
   expect(await ui.findByText("Welcome back.")).toBeTruthy();
+  await act(async () => {
+    fireEvent.press(ui.getByText("Use email instead"));
+  });
   expect(await ui.findByLabelText("Email")).toBeTruthy();
   expect(await ui.findByLabelText("Password")).toBeTruthy();
 });
@@ -60,6 +63,9 @@ test("successful sign-in calls firebase and navigates home", async () => {
   mockSignIn.mockResolvedValueOnce(undefined);
   const ui = await render(<SignIn />);
 
+  await act(async () => {
+    fireEvent.press(ui.getByText("Use email instead"));
+  });
   await fireEvent.changeText(ui.getByLabelText("Email"), "person@example.com");
   await fireEvent.changeText(ui.getByLabelText("Password"), "hunter2");
   await fireEvent.press(submit(ui));
@@ -75,7 +81,12 @@ test("switching to create-account mode calls createUserWithEmailAndPassword inst
   mockCreateUser.mockResolvedValueOnce(undefined);
   const ui = await render(<SignIn />);
 
-  await fireEvent.press(ui.getByText("Create account"));
+  await act(async () => {
+    fireEvent.press(ui.getByText("Create an account"));
+  });
+  await act(async () => {
+    fireEvent.press(ui.getByText("Use email instead"));
+  });
   await fireEvent.changeText(ui.getByLabelText("Email"), "new@example.com");
   await fireEvent.changeText(ui.getByLabelText("Password"), "hunter2000");
   await fireEvent.press(submit(ui));
@@ -89,7 +100,9 @@ test("switching to create-account mode calls createUserWithEmailAndPassword inst
 test("the heading tracks the mode, so a new user is not greeted 'welcome back'", async () => {
   const ui = await render(<SignIn />);
   expect(ui.getByText("Welcome back.")).toBeTruthy();
-  await fireEvent.press(ui.getByText("Create account"));
+  await act(async () => {
+    fireEvent.press(ui.getByText("Create an account"));
+  });
   expect(ui.queryByText("Welcome back.")).toBeNull();
   expect(ui.getByText("Start with Kora.")).toBeTruthy();
 });
@@ -98,6 +111,9 @@ test("a failed sign-in surfaces a specific message and does not navigate", async
   mockSignIn.mockRejectedValueOnce({ code: "auth/invalid-credential" });
   const ui = await render(<SignIn />);
 
+  await act(async () => {
+    fireEvent.press(ui.getByText("Use email instead"));
+  });
   await fireEvent.changeText(ui.getByLabelText("Email"), "person@example.com");
   await fireEvent.changeText(ui.getByLabelText("Password"), "wrong");
   await fireEvent.press(submit(ui));
@@ -119,7 +135,12 @@ test("a weak password reports the real reason, not a generic check-your-password
   mockCreateUser.mockRejectedValueOnce({ code: "auth/weak-password" });
   const ui = await render(<SignIn />);
 
-  await fireEvent.press(ui.getByText("Create account"));
+  await act(async () => {
+    fireEvent.press(ui.getByText("Create an account"));
+  });
+  await act(async () => {
+    fireEvent.press(ui.getByText("Use email instead"));
+  });
   await fireEvent.press(submit(ui));
 
   expect(await ui.findByText("Choose a password of at least 6 characters.")).toBeTruthy();
@@ -129,7 +150,12 @@ test("an already-registered email is reported as such", async () => {
   mockCreateUser.mockRejectedValueOnce({ code: "auth/email-already-in-use" });
   const ui = await render(<SignIn />);
 
-  await fireEvent.press(ui.getByText("Create account"));
+  await act(async () => {
+    fireEvent.press(ui.getByText("Create an account"));
+  });
+  await act(async () => {
+    fireEvent.press(ui.getByText("Use email instead"));
+  });
   await fireEvent.press(submit(ui));
 
   expect(await ui.findByText("That email already has an account. Try signing in.")).toBeTruthy();
@@ -139,9 +165,14 @@ test("switching mode clears a stale error from the previous mode", async () => {
   mockSignIn.mockRejectedValueOnce({ code: "auth/invalid-credential" });
   const ui = await render(<SignIn />);
 
+  await act(async () => {
+    fireEvent.press(ui.getByText("Use email instead"));
+  });
   await fireEvent.press(submit(ui));
   expect(await ui.findByText("Email or password is incorrect.")).toBeTruthy();
 
-  await fireEvent.press(ui.getByText("Create account"));
+  await act(async () => {
+    fireEvent.press(ui.getByText("Create an account"));
+  });
   expect(ui.queryByText("Email or password is incorrect.")).toBeNull();
 });

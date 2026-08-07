@@ -44,7 +44,7 @@ async function advance(ui: Awaited<ReturnType<typeof render>>) {
 
 test("step 1 shows the brand, the hero and the goal cards", async () => {
   const ui = await render(<Onboarding />);
-  expect(ui.getByTestId("sf-sparkles")).toBeTruthy();
+  expect(ui.getByTestId("brand-dot-0-0")).toBeTruthy();
   expect(await ui.findByText(/Otto tracks it/i)).toBeTruthy();
   expect(await ui.findByText("Lose weight")).toBeTruthy();
   expect(await ui.findByText("Build muscle")).toBeTruthy();
@@ -262,4 +262,36 @@ test("a validation rejection still asks the user to check their details", async 
   });
 
   expect(await ui.findByText("Please check your details and try again.")).toBeTruthy();
+});
+
+// The point of Field: the label is real text above the input, so it survives
+// typing. A placeholder-only input loses it the moment the user types.
+test("step 2's inputs carry persistent labels, not just placeholders", async () => {
+  const ui = await render(<Onboarding />);
+  await advance(ui);
+
+  expect(ui.getByText("Birth year")).toBeTruthy();
+  expect(ui.getByText("Height (cm)")).toBeTruthy();
+  expect(ui.getByText("Weight (kg)")).toBeTruthy();
+});
+
+test("the labels survive typing", async () => {
+  const ui = await render(<Onboarding />);
+  await advance(ui);
+
+  await fireEvent.changeText(ui.getByLabelText("Birth year"), "1995");
+
+  expect(ui.getByText("Birth year")).toBeTruthy();
+  expect(ui.getByLabelText("Birth year").props.value).toBe("1995");
+});
+
+// The weight field's visible label is unit-shorthand while its accessible name
+// spells the unit out. That divergence is exactly why Field takes an
+// accessibilityLabel override.
+test("the weight field keeps its unit-specific accessible name", async () => {
+  const ui = await render(<Onboarding />);
+  await advance(ui);
+
+  expect(ui.getByLabelText("Weight in kilograms")).toBeTruthy();
+  expect(ui.getByText("Weight (kg)")).toBeTruthy();
 });

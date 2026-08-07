@@ -35,6 +35,14 @@ jest.mock("@/lib/socialAuth", () => ({
     authorizationCode: "auth-code-xyz",
   })),
 }));
+jest.mock("expo-apple-authentication", () => {
+  const { Pressable } = require("react-native");
+  return {
+    AppleAuthenticationButtonType: { SIGN_IN: 0, CONTINUE: 1 },
+    AppleAuthenticationButtonStyle: { WHITE: 0, WHITE_OUTLINE: 1, BLACK: 2 },
+    AppleAuthenticationButton: (props: Record<string, unknown>) => <Pressable {...props} />,
+  };
+});
 
 const ORIGINAL_GOOGLE_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID;
 
@@ -54,14 +62,14 @@ afterEach(() => {
 describe("sign-in social providers", () => {
   it("offers both providers", async () => {
     const { getByLabelText } = await render(<SignIn />);
-    expect(getByLabelText("Continue with Apple")).toBeTruthy();
-    expect(getByLabelText("Continue with Google")).toBeTruthy();
+    expect(getByLabelText("Sign in with Apple")).toBeTruthy();
+    expect(getByLabelText("Sign in with Google")).toBeTruthy();
   });
 
   it("passes the RAW nonce and token from the native sheet through to Firebase", async () => {
     const { getByLabelText } = await render(<SignIn />);
     await act(async () => {
-      fireEvent.press(getByLabelText("Continue with Apple"));
+      fireEvent.press(getByLabelText("Sign in with Apple"));
     });
     await waitFor(() =>
       expect(mockSignInWithAppleCredential).toHaveBeenCalledWith(
@@ -76,7 +84,7 @@ describe("sign-in social providers", () => {
   it("navigates to the app on a successful Apple sign-in", async () => {
     const { getByLabelText } = await render(<SignIn />);
     await act(async () => {
-      fireEvent.press(getByLabelText("Continue with Apple"));
+      fireEvent.press(getByLabelText("Sign in with Apple"));
     });
     await waitFor(() => expect(router.replace).toHaveBeenCalledWith("/"));
   });
@@ -84,7 +92,7 @@ describe("sign-in social providers", () => {
   it("navigates to the app on a successful Google sign-in", async () => {
     const { getByLabelText } = await render(<SignIn />);
     await act(async () => {
-      fireEvent.press(getByLabelText("Continue with Google"));
+      fireEvent.press(getByLabelText("Sign in with Google"));
     });
     await waitFor(() => expect(mockSignInWithGoogleCredential).toHaveBeenCalledWith("g-token"));
     expect(router.replace).toHaveBeenCalledWith("/");
@@ -99,9 +107,9 @@ describe("sign-in social providers", () => {
     });
     const { getByLabelText, findByText } = await render(<SignIn />);
     await act(async () => {
-      fireEvent.press(getByLabelText("Continue with Apple"));
+      fireEvent.press(getByLabelText("Sign in with Apple"));
     });
-    expect(await findByText(/Link your account/)).toBeTruthy();
+    expect(await findByText(/Connect Apple/)).toBeTruthy();
     expect(router.replace).not.toHaveBeenCalled();
   });
 
@@ -109,7 +117,7 @@ describe("sign-in social providers", () => {
     mockSignInWithGoogleCredential.mockRejectedValue({ code: "auth/network-request-failed" });
     const { getByLabelText, findByText } = await render(<SignIn />);
     await act(async () => {
-      fireEvent.press(getByLabelText("Continue with Google"));
+      fireEvent.press(getByLabelText("Sign in with Google"));
     });
     expect(await findByText("Couldn't reach Kora. Check your connection.")).toBeTruthy();
   });
@@ -119,14 +127,14 @@ describe("sign-in social providers", () => {
     mockSignInWithGoogleCredential.mockRejectedValue({ code: "auth/network-request-failed" });
     const { getByLabelText, findByText, queryByText } = await render(<SignIn />);
     await act(async () => {
-      fireEvent.press(getByLabelText("Continue with Google"));
+      fireEvent.press(getByLabelText("Sign in with Google"));
     });
     await findByText("Couldn't reach Kora. Check your connection.");
 
     const { AuthCancelledError } = jest.requireActual("@/auth/errors");
     mockSignInWithGoogleCredential.mockRejectedValue(new AuthCancelledError());
     await act(async () => {
-      fireEvent.press(getByLabelText("Continue with Google"));
+      fireEvent.press(getByLabelText("Sign in with Google"));
     });
     await waitFor(() =>
       expect(queryByText("Couldn't reach Kora. Check your connection.")).toBeNull(),
@@ -141,7 +149,7 @@ describe("sign-in social providers", () => {
     mockSignInWithAppleCredential.mockRejectedValue({ code: "auth/invalid-credential" });
     const { getByLabelText, findByText, queryByText } = await render(<SignIn />);
     await act(async () => {
-      fireEvent.press(getByLabelText("Continue with Apple"));
+      fireEvent.press(getByLabelText("Sign in with Apple"));
     });
     expect(await findByText("Couldn't verify that account. Try again.")).toBeTruthy();
     expect(queryByText("Email or password is incorrect.")).toBeNull();
@@ -154,9 +162,63 @@ describe("sign-in social providers", () => {
 
     it("does not render a Google button that can only fail", async () => {
       const { queryByLabelText, getByLabelText } = await render(<SignIn />);
-      expect(queryByLabelText("Continue with Google")).toBeNull();
+      expect(queryByLabelText("Sign in with Google")).toBeNull();
       // Apple is unaffected — this is a Google-specific gap.
-      expect(getByLabelText("Continue with Apple")).toBeTruthy();
+      expect(getByLabelText("Sign in with Apple")).toBeTruthy();
     });
+  });
+});
+
+describe("sign-in first paint", () => {
+  it("shows both provider buttons and no email fields", async () => {
+    const { getByLabelText, queryByLabelText } = await render(<SignIn />);
+    expect(getByLabelText("Sign in with Apple")).toBeTruthy();
+    expect(getByLabelText("Sign in with Google")).toBeTruthy();
+    // The reveal is the behaviour: absent now, present after the tap below.
+    expect(queryByLabelText("Email")).toBeNull();
+    expect(queryByLabelText("Password")).toBeNull();
+  });
+
+  it("reveals the email form in place when 'Use email instead' is pressed", async () => {
+    const { getByText, getByLabelText, queryByLabelText } = await render(<SignIn />);
+    expect(queryByLabelText("Email")).toBeNull();
+
+    await act(async () => {
+      fireEvent.press(getByText("Use email instead"));
+    });
+
+    expect(getByLabelText("Email")).toBeTruthy();
+    expect(getByLabelText("Password")).toBeTruthy();
+    expect(getByLabelText("Sign in")).toBeTruthy();
+    // The provider buttons stay visible — the form joins them, not replaces them.
+    expect(getByLabelText("Sign in with Apple")).toBeTruthy();
+  });
+
+  it("no longer renders the ambiguous Sign in / Create account segmented control", async () => {
+    const { getByLabelText, queryAllByRole } = await render(<SignIn />);
+    // Presence first: the screen rendered.
+    expect(getByLabelText("Sign in with Google")).toBeTruthy();
+    // Segmented renders each option with accessibilityRole="tab"
+    // (src/components/Segmented.tsx:61) and carries no testID. Role is the
+    // unambiguous discriminator here: the new footer link reuses the strings
+    // "Sign in" and "Create an account", so a label-based assertion would be
+    // satisfied by the very control that replaced it.
+    expect(queryAllByRole("tab")).toHaveLength(0);
+  });
+});
+
+describe("sign-in mode toggle", () => {
+  it("flips heading, CTA and footer link together", async () => {
+    const { getByText, queryByText } = await render(<SignIn />);
+    expect(getByText("Welcome back.")).toBeTruthy();
+    expect(getByText("Create an account")).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.press(getByText("Create an account"));
+    });
+
+    expect(getByText("Start with Kora.")).toBeTruthy();
+    expect(getByText("Sign in")).toBeTruthy();
+    expect(queryByText("Welcome back.")).toBeNull();
   });
 });

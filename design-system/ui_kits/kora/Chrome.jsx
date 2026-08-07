@@ -31,7 +31,20 @@ function TabBar({ active, onNav }) {
     if (t.id === "capture") {
       return (
         <button key={t.id} onClick={() => onNav("capture")} aria-label="Capture" style={{ width: 52, height: 52, margin: "0 2px", borderRadius: "var(--radius-full)", border: "none", background: "var(--primary)", color: "var(--primary-foreground)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 6px 16px -4px color-mix(in oklch, var(--primary) 60%, transparent)", cursor: "pointer" }}>
-          <Icon name="sparkles" size={24} color="var(--primary-foreground)" />
+          {/* Kora's mark: a 3x3 dot grid (see apps/mobile/assets/images/icon.png and
+              apps/mobile/src/components/BrandMark.tsx). NOT the Lucide AI-affordance glyph, which
+              must stay everywhere else in this kit. */}
+          <span style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 2, width: 22, height: 22 }}>
+            {[[0,0],[0,1],[0,2],[1,0],[1,1],[1,2],[2,0],[2,1],[2,2]].map(([r, c]) => {
+              const muted = `${r}-${c}` === "0-1" || `${r}-${c}` === "1-2" || `${r}-${c}` === "2-1";
+              const d = muted ? 3.5 : 6;
+              return (
+                <span key={`${r}-${c}`} style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <span style={{ width: d, height: d, borderRadius: "50%", background: muted ? "var(--card-secondary)" : "var(--primary-foreground)" }} />
+                </span>
+              );
+            })}
+          </span>
         </button>
       );
     }
