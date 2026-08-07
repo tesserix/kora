@@ -1,35 +1,29 @@
 import { View } from "react-native";
 import { AppText } from "./Text";
-import { Icon } from "./Icon";
+import { BrandMark } from "./BrandMark";
 import { useTheme } from "@/theme";
 
-// The Kora brand lockup from design-system/ui_kits/kora/Onboarding.jsx: a filled
-// primary tile carrying the sparkles mark, beside the wordmark. Shown at the top
-// of the pre-app screens (sign-in and onboarding step 1) so the flow is
-// recognisably Kora before the user has an account — the shipped screens carried
-// no brand mark at all.
+// The Kora brand lockup: the dot-grid mark beside the wordmark. Shown at the
+// top of the pre-app screens (sign-in and onboarding step 1).
+//
+// The mark's source of truth is assets/images/icon.png, NOT
+// design-system/ui_kits/kora/Onboarding.jsx — that kit rendered a Lucide
+// `sparkles` glyph in a filled tile, which was never Kora's mark. The kit has
+// been corrected to match; if the two ever disagree again, the icon wins.
+//
+// There is no filled tile any more: icon.png is dots on a near-black field,
+// and `background` is exactly that field, so a tile would be invisible at best
+// and would fight the mark's own green at worst.
 export function BrandLockup() {
-  const { colors, radius, shadows } = useTheme();
+  const { spacing } = useTheme();
 
   return (
     <View
       accessibilityRole="header"
-      style={{ flexDirection: "row", alignItems: "center", gap: 10 }}
+      accessibilityLabel="Kora"
+      style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm + 2 }}
     >
-      <View
-        testID="brand-mark-tile"
-        style={{
-          width: 40,
-          height: 40,
-          borderRadius: radius.lg,
-          backgroundColor: colors.primary,
-          alignItems: "center",
-          justifyContent: "center",
-          ...shadows.md,
-        }}
-      >
-        <Icon name="sparkles" size={22} color={colors.primaryForeground} />
-      </View>
+      <BrandMark size={40} />
       <AppText variant="title2" style={{ letterSpacing: -0.4 }}>
         Kora
       </AppText>

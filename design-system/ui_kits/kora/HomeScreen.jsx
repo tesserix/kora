@@ -90,7 +90,20 @@ function HomeScreen({ data, onNav, onOpenMeal }) {
       {/* Capture hero — conversation-first */}
       <div style={{ padding: "0 20px 18px" }}>
         <button onClick={() => onNav("capture")} style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "14px 14px 14px 18px", borderRadius: "var(--radius-2xl)", border: "none", cursor: "pointer", background: "var(--primary)", color: "var(--primary-foreground)", boxShadow: "var(--shadow-lg)", textAlign: "left" }}>
-          <DS.Icon name="sparkles" size={22} color="var(--primary-foreground)" />
+          {/* Kora's mark: a 3x3 dot grid (see apps/mobile/assets/images/icon.png and
+              apps/mobile/src/components/BrandMark.tsx). NOT the Lucide AI-affordance glyph, which
+              must stay everywhere else in this kit. */}
+          <span style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 2, width: 22, height: 22 }}>
+            {[[0,0],[0,1],[0,2],[1,0],[1,1],[1,2],[2,0],[2,1],[2,2]].map(([r, c]) => {
+              const muted = `${r}-${c}` === "0-1" || `${r}-${c}` === "1-2" || `${r}-${c}` === "2-1";
+              const d = muted ? 3.5 : 6;
+              return (
+                <span key={`${r}-${c}`} style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <span style={{ width: d, height: d, borderRadius: "50%", background: muted ? "var(--card-secondary)" : "var(--primary-foreground)" }} />
+                </span>
+              );
+            })}
+          </span>
           <span style={{ flex: 1, fontSize: 15, fontWeight: 600 }}>Snap a meal or tell Otto what you ate…</span>
           <span style={{ display: "flex", gap: 8 }}>
             <span style={{ width: 34, height: 34, borderRadius: "var(--radius-full)", background: "rgba(255,255,255,0.18)", display: "flex", alignItems: "center", justifyContent: "center" }}><DS.Icon name="camera" size={17} color="var(--primary-foreground)" /></span>

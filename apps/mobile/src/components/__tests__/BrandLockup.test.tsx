@@ -1,21 +1,19 @@
 import { render } from "@testing-library/react-native";
 import { BrandLockup } from "../BrandLockup";
 
-test("renders the Kora wordmark beside a sparkles mark", async () => {
+test("renders the Kora wordmark beside the dot-grid mark", async () => {
   const { getByText, getByTestId } = await render(<BrandLockup />);
   expect(getByText("Kora")).toBeTruthy();
-  expect(getByTestId("sf-sparkles")).toBeTruthy();
+  expect(getByTestId("brand-dot-0-0")).toBeTruthy();
+  expect(getByTestId("brand-dot-2-2")).toBeTruthy();
 });
 
-test("the mark is a filled tile, not a bare icon", async () => {
-  const { getByTestId } = await render(<BrandLockup />);
-  const tile = getByTestId("brand-mark-tile");
-  const style = Array.isArray(tile.props.style)
-    ? Object.assign({}, ...tile.props.style.filter(Boolean))
-    : tile.props.style;
-  expect(style.width).toBe(40);
-  expect(style.height).toBe(40);
-  // Themed fill, not a transparent wrapper around the glyph.
-  expect(style.backgroundColor).toBeTruthy();
-  expect(style.borderRadius).toBeGreaterThan(0);
+// The old lockup rendered a Lucide sparkles glyph in a primary-filled tile.
+// Asserting the wordmark still renders first means this is a disappearance,
+// not a component that failed to mount at all.
+test("no longer renders the sparkles glyph or its tile", async () => {
+  const { getByText, queryByTestId } = await render(<BrandLockup />);
+  expect(getByText("Kora")).toBeTruthy();
+  expect(queryByTestId("sf-sparkles")).toBeNull();
+  expect(queryByTestId("brand-mark-tile")).toBeNull();
 });

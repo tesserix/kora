@@ -44,7 +44,7 @@ async function advance(ui: Awaited<ReturnType<typeof render>>) {
 
 test("step 1 shows the brand, the hero and the goal cards", async () => {
   const ui = await render(<Onboarding />);
-  expect(ui.getByTestId("sf-sparkles")).toBeTruthy();
+  expect(ui.getByTestId("brand-dot-0-0")).toBeTruthy();
   expect(await ui.findByText(/Otto tracks it/i)).toBeTruthy();
   expect(await ui.findByText("Lose weight")).toBeTruthy();
   expect(await ui.findByText("Build muscle")).toBeTruthy();
