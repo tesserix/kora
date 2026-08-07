@@ -133,6 +133,10 @@ export default function SignIn() {
                 // An error raised by the other mode no longer applies, and would
                 // read as a failure of the action just switched to.
                 setError(null);
+                // On first paint, with the email form hidden, this link only
+                // moved a heading ~400px above the tap — the tap appeared to do
+                // nothing. Revealing the form gives feedback at the touch point.
+                setShowEmail(true);
               }}
             >
               <AppText variant="footnote" style={{ color: colors.primary, fontWeight: "600" }}>
@@ -152,20 +156,39 @@ export default function SignIn() {
             : "Create an account and log your first meal in seconds."}
         </AppText>
 
+        {/* Collapsible: the email reveal grows downward, so the lockup stays
+            top-anchored and this spacer shrinks instead of the lockup jumping
+            to stay centred. minHeight is what lets it collapse once content
+            (the form, the keyboard) needs the room. */}
+        <View style={{ flex: 1, minHeight: spacing.xl }} />
+
         <View style={{ gap: spacing.sm }}>
           <AppleSignInButton
-            accessibilityLabel="Sign in with Apple"
+            accessibilityLabel="Continue with Apple"
             disabled={busy}
             onPress={signInApple}
           />
           {googleConfigured ? (
             <GoogleSignInButton
-              accessibilityLabel="Sign in with Google"
+              accessibilityLabel="Continue with Google"
+              title="Continue with Google"
               disabled={busy}
               onPress={signInGoogle}
             />
           ) : null}
         </View>
+
+        {/* A social failure belongs under the providers it came from, not
+            beneath the unrelated email affordance below. */}
+        {error ? (
+          <AppText
+            variant="footnote"
+            accessibilityLiveRegion="polite"
+            style={{ color: colors.destructive }}
+          >
+            {error}
+          </AppText>
+        ) : null}
 
         {showEmail ? (
           <View style={{ gap: spacing.sm }}>
@@ -177,6 +200,7 @@ export default function SignIn() {
               autoComplete="email"
               textContentType="emailAddress"
               keyboardType="email-address"
+              autoFocus
             />
             <Field
               label="Password"
@@ -200,29 +224,35 @@ export default function SignIn() {
             />
           </View>
         ) : (
-          <PressableScale
-            accessibilityRole="button"
-            accessibilityLabel="Use email instead"
-            haptic="selection"
-            hitSlop={12}
+          // A peer of the two provider buttons, not an escape hatch — same
+          // width and height, but the secondary/outline treatment (no green)
+          // since the accent is reserved for the action Kora wants taken.
+          <Button
+            accessibilityLabel="Continue with email"
+            title="Continue with email"
+            variant="secondary"
+            disabled={busy}
             onPress={() => setShowEmail(true)}
-            style={{ alignItems: "center", paddingVertical: spacing.sm }}
-          >
-            <AppText variant="footnote" style={{ color: colors.primary, fontWeight: "600" }}>
-              Use email instead
-            </AppText>
-          </PressableScale>
+            style={{
+              backgroundColor: colors.card,
+              borderWidth: 1,
+              borderColor: colors.border,
+              opacity: busy ? 0.6 : 1,
+              minHeight: 48,
+            }}
+          />
         )}
 
-        {error ? (
-          <AppText
-            variant="footnote"
-            accessibilityLiveRegion="polite"
-            style={{ color: colors.destructive }}
-          >
-            {error}
-          </AppText>
-        ) : null}
+        {/* Paired with the flex:1 spacer above, this 2:1 split lands the action
+            cluster around 55-60% of the screen — low enough for the thumb,
+            asymmetric rather than centred. Without a flex here the upper spacer
+            takes ALL the slack and bottom-anchors the cluster against the
+            footer rule, which is what shipped and read as unbalanced.
+
+            The floor tightens once the form is revealed, so the slack the
+            keyboard forces out goes to the form rather than to dead space
+            below the submit. */}
+        <View style={{ flex: 0.5, minHeight: showEmail ? spacing.sm : spacing.md }} />
 
         {pendingLink ? (
           <LinkAccountPrompt
