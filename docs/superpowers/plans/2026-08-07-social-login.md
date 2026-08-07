@@ -25,6 +25,7 @@
 - Test rule, from the #110 review: **an assertion whose expected value equals the initial state cannot distinguish "it worked" from "nothing ran".** Every absence assertion must first reach a state where a wrong implementation would produce a presence.
 - Kora's design system: `AppText`, `Button`, `Card`, `Segmented`, `useTheme` from `@/components/*` and `@/theme`. Do not introduce NativeWind classes (mark8ly uses them; Kora does not).
 - **Jest mock declarations**: write them as `jest.fn(async (..._a: unknown[]) => …)`, not `jest.fn(async () => …)`. A no-parameter async arrow makes TypeScript infer a zero-argument signature, and this project's strict `tsc` then rejects the `(...a: unknown[]) => mock(...a)` wiring these suites use.
+- **`render` is async here.** This project is on `@testing-library/react-native` **14.0.1**, whose `render` returns a Promise, and every existing suite writes `await render(<X />)`. Omitting the await spreads an unresolved Promise into `{}`, and every query helper comes back `undefined` ("findByText is not a function").
 - **Jest mock lifecycle**: `jest.clearAllMocks()` clears recorded calls but does **not** remove implementations. Any mock that a later test overrides with `mockRejectedValue`/`mockImplementation` must be restored in `beforeEach`, or the override leaks into every test that follows and fails them for reasons unrelated to their subject.
 
 ---
@@ -1862,14 +1863,14 @@ beforeEach(() => {
 });
 
 describe("sign-in social providers", () => {
-  it("offers both providers", () => {
-    const { getByLabelText } = render(<SignIn />);
+  it("offers both providers", async () => {
+    const { getByLabelText } = await render(<SignIn />);
     expect(getByLabelText("Continue with Apple")).toBeTruthy();
     expect(getByLabelText("Continue with Google")).toBeTruthy();
   });
 
   it("passes the RAW nonce and token from the native sheet through to Firebase", async () => {
-    const { getByLabelText } = render(<SignIn />);
+    const { getByLabelText } = await render(<SignIn />);
     fireEvent.press(getByLabelText("Continue with Apple"));
     await waitFor(() =>
       expect(mockSignInWithAppleCredential).toHaveBeenCalledWith("a-token", "raw", {
@@ -1879,13 +1880,13 @@ describe("sign-in social providers", () => {
   });
 
   it("navigates to the app on a successful Apple sign-in", async () => {
-    const { getByLabelText } = render(<SignIn />);
+    const { getByLabelText } = await render(<SignIn />);
     fireEvent.press(getByLabelText("Continue with Apple"));
     await waitFor(() => expect(router.replace).toHaveBeenCalledWith("/"));
   });
 
   it("navigates to the app on a successful Google sign-in", async () => {
-    const { getByLabelText } = render(<SignIn />);
+    const { getByLabelText } = await render(<SignIn />);
     fireEvent.press(getByLabelText("Continue with Google"));
     await waitFor(() => expect(mockSignInWithGoogleCredential).toHaveBeenCalledWith("g-token"));
     expect(router.replace).toHaveBeenCalledWith("/");
@@ -1898,7 +1899,7 @@ describe("sign-in social providers", () => {
       provider: "apple.com",
       pendingCredential: {},
     });
-    const { getByLabelText, findByText } = render(<SignIn />);
+    const { getByLabelText, findByText } = await render(<SignIn />);
     fireEvent.press(getByLabelText("Continue with Apple"));
     expect(await findByText(/Link your account/)).toBeTruthy();
     expect(router.replace).not.toHaveBeenCalled();
@@ -1906,7 +1907,7 @@ describe("sign-in social providers", () => {
 
   it("shows mapped copy when a provider sign-in fails", async () => {
     mockSignInWithGoogleCredential.mockRejectedValue({ code: "auth/network-request-failed" });
-    const { getByLabelText, findByText } = render(<SignIn />);
+    const { getByLabelText, findByText } = await render(<SignIn />);
     fireEvent.press(getByLabelText("Continue with Google"));
     expect(await findByText("Couldn't reach Kora. Check your connection.")).toBeTruthy();
   });
@@ -1914,7 +1915,7 @@ describe("sign-in social providers", () => {
   // Absence made meaningful: an error is on screen first.
   it("shows nothing when the user cancels the native sheet", async () => {
     mockSignInWithGoogleCredential.mockRejectedValue({ code: "auth/network-request-failed" });
-    const { getByLabelText, findByText, queryByText } = render(<SignIn />);
+    const { getByLabelText, findByText, queryByText } = await render(<SignIn />);
     fireEvent.press(getByLabelText("Continue with Google"));
     await findByText("Couldn't reach Kora. Check your connection.");
 
