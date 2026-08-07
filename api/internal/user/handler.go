@@ -3,6 +3,7 @@ package user
 import (
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 
@@ -86,7 +87,7 @@ func (h Handler) UpdateProfile(c *gin.Context) {
 		httpx.Error(c, http.StatusBadRequest, "invalid_input", "display name is required")
 		return
 	}
-	if len(name) > MaxDisplayNameLen {
+	if utf8.RuneCountInString(name) > MaxDisplayNameLen {
 		httpx.Error(c, http.StatusBadRequest, "invalid_input", "display name is too long")
 		return
 	}

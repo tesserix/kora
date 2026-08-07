@@ -157,3 +157,48 @@ func TestUpdateProfileWritesOnlyTheCallersRow(t *testing.T) {
 	db.Raw("SELECT display_name FROM users WHERE firebase_uid = ?", "test-uid-b").Scan(&bName)
 	assert.Equal(t, "Bob", bName)
 }
+
+func TestUpdateProfileAcceptsMultibyteUnder100Chars(t *testing.T) {
+	db := testDB(t)
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", "test-uid-cjk") })
+	r := newProfileRouter(t, db, "test-uid-cjk", "cjk@test.dev")
+
+	// 40 CJK characters: each is ~3 UTF-8 bytes, so ~120 bytes total,
+	// but only 40 characters (runes). Should be accepted with character-based check,
+	// rejected with byte-based check.
+	cjkName := strings.Repeat("中", 40)
+	body := `{"display_name":"` + cjkName + `"}`
+
+	w := patchProfile(t, r, body)
+
+	require.Equal(t, http.StatusOK, w.Code, "40-character CJK name should be accepted (character-based check)")
+	assert.Contains(t, w.Body.String(), cjkName)
+
+	var got string
+	db.Raw("SELECT display_name FROM users WHERE firebase_uid = ?", "test-uid-cjk").Scan(&got)
+	assert.Equal(t, cjkName, got, "40-character CJK name should round-trip unchanged")
+}
+
+func TestUpdateProfileMultibyteBoundary(t *testing.T) {
+	db := testDB(t)
+	t.Cleanup(func() {
+		db.Exec("DELETE FROM users WHERE firebase_uid IN (?, ?)", "test-uid-mb-100", "test-uid-mb-101")
+	})
+
+	// 100-rune multi-byte name should be accepted
+	r100 := newProfileRouter(t, db, "test-uid-mb-100", "mb100@test.dev")
+	name100 := strings.Repeat("é", 100) // é is 2 bytes, 1 rune
+	w100 := patchProfile(t, r100, `{"display_name":"`+name100+`"}`)
+
+	assert.Equal(t, http.StatusOK, w100.Code, "exactly 100 characters should be accepted")
+	var got100 string
+	db.Raw("SELECT display_name FROM users WHERE firebase_uid = ?", "test-uid-mb-100").Scan(&got100)
+	assert.Equal(t, name100, got100)
+
+	// 101-rune multi-byte name should be rejected
+	r101 := newProfileRouter(t, db, "test-uid-mb-101", "mb101@test.dev")
+	name101 := strings.Repeat("é", 101)
+	w101 := patchProfile(t, r101, `{"display_name":"`+name101+`"}`)
+
+	assert.Equal(t, http.StatusBadRequest, w101.Code, "101 characters should be rejected")
+}
