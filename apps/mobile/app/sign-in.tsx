@@ -243,7 +243,16 @@ export default function SignIn() {
           />
         )}
 
-        <View style={{ minHeight: spacing.sm }} />
+        {/* Paired with the flex:1 spacer above, this 2:1 split lands the action
+            cluster around 55-60% of the screen — low enough for the thumb,
+            asymmetric rather than centred. Without a flex here the upper spacer
+            takes ALL the slack and bottom-anchors the cluster against the
+            footer rule, which is what shipped and read as unbalanced.
+
+            The floor tightens once the form is revealed, so the slack the
+            keyboard forces out goes to the form rather than to dead space
+            below the submit. */}
+        <View style={{ flex: 0.5, minHeight: showEmail ? spacing.sm : spacing.md }} />
 
         {pendingLink ? (
           <LinkAccountPrompt
