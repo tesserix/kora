@@ -96,6 +96,20 @@ func Load() (Config, error) {
 		}
 		cfg.BFFHMACKey = key
 	}
+	// Same philosophy as BFFHMACKey above: a partially configured Apple
+	// integration is worse than a disabled one. With the .p8 key set but
+	// AppleTeamID or AppleKeyID empty, appleid.Client signs a client_secret
+	// with an empty iss/kid, the route still mounts, and every exchange fails
+	// with invalid_client — permanently, silently, and indistinguishable from
+	// success to the app. Fail at startup instead.
+	if cfg.ApplePrivateKeyPEM != "" {
+		if cfg.AppleTeamID == "" {
+			return Config{}, fmt.Errorf("config: APPLE_TEAM_ID is required when APPLE_PRIVATE_KEY is set")
+		}
+		if cfg.AppleKeyID == "" {
+			return Config{}, fmt.Errorf("config: APPLE_KEY_ID is required when APPLE_PRIVATE_KEY is set")
+		}
+	}
 	return cfg, nil
 }
 

@@ -9,6 +9,12 @@
 -- Nullable because email/password and Google users have no Apple relationship,
 -- and because an exchange failure is deliberately non-fatal to sign-in.
 --
+-- BUT: Repository.UpsertByFirebaseUID provisions every new row via GORM's
+-- Create(&User{...}) with the full struct, and this column carries no Go
+-- zero-value override -- so every row created after this migration gets ''
+-- (empty string), NOT SQL NULL. A revocation check written as `IS NULL` will
+-- never match a real row. Check `apple_refresh_token != ''` instead.
+--
 -- Stored in plaintext. The token permits refreshing or revoking THIS app's Sign
 -- in with Apple relationship for this user -- it grants no access to their
 -- Apple account or their Kora account -- and kora_db is owned by the `kora`

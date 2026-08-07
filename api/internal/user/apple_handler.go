@@ -54,7 +54,12 @@ func (h AppleHandler) Store(c *gin.Context) {
 	token, err := h.exchanger.ExchangeAuthorizationCode(c.Request.Context(), code)
 	if err != nil {
 		// Apple's diagnostic is useful in logs and useless (or misleading) to
-		// a client, so it stays server-side.
+		// a client, so it stays server-side: attach it to the gin context so
+		// RequestLogger's `errors` field carries it. The error text is only
+		// the endpoint path and Apple's response body (appleid.Client.post) —
+		// never the authorization code, which travels in the form body, not
+		// the URL — so this does not violate RequestLogger's no-user-input rule.
+		_ = c.Error(err)
 		httpx.Error(c, http.StatusBadGateway, "upstream_error", "could not verify with Apple")
 		return
 	}
@@ -62,5 +67,5 @@ func (h AppleHandler) Store(c *gin.Context) {
 		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not store authorization")
 		return
 	}
-	c.Status(http.StatusNoContent)
+	httpx.OK(c, gin.H{"stored": true})
 }

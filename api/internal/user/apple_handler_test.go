@@ -17,10 +17,10 @@ import (
 )
 
 type fakeExchanger struct {
-	code    string
-	token   string
-	err     error
-	calls   int
+	code  string
+	token string
+	err   error
+	calls int
 }
 
 func (f *fakeExchanger) ExchangeAuthorizationCode(_ context.Context, code string) (string, error) {
@@ -68,7 +68,7 @@ func TestAppleStorePersistsTheExchangedRefreshToken(t *testing.T) {
 
 	w := postApple(t, r, `{"authorization_code":"code-123"}`)
 
-	require.Equal(t, http.StatusNoContent, w.Code)
+	require.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "code-123", ex.code)
 	assert.Equal(t, "rt-stored", storedToken(t, db, "apple-uid-1"))
 }
@@ -78,10 +78,10 @@ func TestAppleStoreOverwritesAnEarlierToken(t *testing.T) {
 	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", "apple-uid-2") })
 	ex := &fakeExchanger{token: "rt-first"}
 	r := newAppleRouter(t, db, ex, "apple-uid-2")
-	require.Equal(t, http.StatusNoContent, postApple(t, r, `{"authorization_code":"c1"}`).Code)
+	require.Equal(t, http.StatusOK, postApple(t, r, `{"authorization_code":"c1"}`).Code)
 
 	ex.token = "rt-second"
-	require.Equal(t, http.StatusNoContent, postApple(t, r, `{"authorization_code":"c2"}`).Code)
+	require.Equal(t, http.StatusOK, postApple(t, r, `{"authorization_code":"c2"}`).Code)
 
 	// Apple issues a fresh code per authorization; the newest is the one still
 	// valid at deletion time. Seeded with a real first value so "unchanged"
@@ -96,7 +96,7 @@ func TestAppleStoreRejectsAnEmptyCodeWithoutCallingApple(t *testing.T) {
 	r := newAppleRouter(t, db, ex, "apple-uid-3")
 	// Seed a real token first, so an implementation that clobbers on a bad
 	// request fails visibly instead of matching the initial NULL.
-	require.Equal(t, http.StatusNoContent, postApple(t, r, `{"authorization_code":"good"}`).Code)
+	require.Equal(t, http.StatusOK, postApple(t, r, `{"authorization_code":"good"}`).Code)
 
 	w := postApple(t, r, `{"authorization_code":"   "}`)
 
@@ -113,7 +113,7 @@ func TestAppleStoreReportsAnExchangeFailureAndStoresNothing(t *testing.T) {
 	// Seed a real token so "nothing was stored" is a PRESENCE that survives,
 	// not the row's initial zero value — otherwise a handler that fell through
 	// and wrote "" would pass this test.
-	require.Equal(t, http.StatusNoContent, postApple(t, r, `{"authorization_code":"good"}`).Code)
+	require.Equal(t, http.StatusOK, postApple(t, r, `{"authorization_code":"good"}`).Code)
 
 	// appleid.Client returns "" alongside an error on every failure path, so
 	// the fake mirrors that: without this, a handler that forgot the `return`
@@ -127,6 +127,39 @@ func TestAppleStoreReportsAnExchangeFailureAndStoresNothing(t *testing.T) {
 	assert.Equal(t, "rt-seeded", storedToken(t, db, "apple-uid-4"))
 	// Apple's diagnostic must not reach the client.
 	assert.NotContains(t, w.Body.String(), "invalid_client")
+}
+
+func TestAppleStoreAttachesTheExchangeErrorToTheGinContext(t *testing.T) {
+	// The point of this test: RequestLogger only ever forwards c.Errors, so an
+	// Apple diagnostic that never reaches c.Errors is invisible in production
+	// logs no matter how carefully appleid.Client's error string is built.
+	db := testDB(t)
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", "apple-uid-6") })
+	wantErr := errors.New("appleid: /auth/token: status 400: invalid_client")
+	ex := &fakeExchanger{err: wantErr}
+
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	repo := NewRepository(db)
+	h := NewAppleHandler(repo, ex)
+	v := staticVerifier{claims: auth.Claims{UID: "apple-uid-6", Email: "apple-uid-6@test.dev"}}
+	// httpx.Error calls c.AbortWithStatusJSON, which stops handlers LATER in
+	// the chain from running -- so a handler placed after h.Store would never
+	// see c.Errors. Placed BEFORE it instead: c.Next() still returns control
+	// here once the (aborted) chain unwinds, and c.Errors is populated by then.
+	var capturedErrors []error
+	engine.POST("/v1/me/apple-authorization", auth.Middleware(v), ResolveMiddleware(repo), func(c *gin.Context) {
+		c.Next()
+		for _, e := range c.Errors {
+			capturedErrors = append(capturedErrors, e.Err)
+		}
+	}, h.Store)
+
+	w := postApple(t, engine, `{"authorization_code":"code"}`)
+
+	assert.Equal(t, http.StatusBadGateway, w.Code)
+	require.Len(t, capturedErrors, 1)
+	assert.ErrorIs(t, capturedErrors[0], wantErr)
 }
 
 func TestAppleStoreRejectsAMalformedBody(t *testing.T) {

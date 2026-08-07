@@ -192,6 +192,20 @@ func TestRevokeRefreshTokenPostsTheRightForm(t *testing.T) {
 	assert.NotEmpty(t, captured.form.Get("client_secret"))
 }
 
+// A slice-2 caller that checks `apple_refresh_token IS NULL` instead of
+// `!= ""` (see model.go's AppleRefreshToken doc) would pass an empty string
+// here. Refusing it prevents a wasted/confusing token= POST to Apple.
+func TestRevokeRefreshTokenRejectsAnEmptyToken(t *testing.T) {
+	captured := &capturedRequest{}
+	c := newTestClient(t, &fakeTransport{captured: captured})
+
+	err := c.RevokeRefreshToken(context.Background(), "")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "empty")
+	assert.Empty(t, captured.method, "must not make an HTTP request for an empty token")
+}
+
 func TestRevokeRefreshTokenErrorsOnNonOK(t *testing.T) {
 	captured := &capturedRequest{}
 	c := newTestClient(t, &fakeTransport{captured: captured, status: http.StatusUnauthorized, body: `{"error":"invalid_grant"}`})

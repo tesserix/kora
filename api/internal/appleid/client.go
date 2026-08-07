@@ -147,6 +147,15 @@ func (c *Client) ExchangeAuthorizationCode(ctx context.Context, code string) (st
 
 // RevokeRefreshToken is consumed by account deletion (slice 2).
 func (c *Client) RevokeRefreshToken(ctx context.Context, refreshToken string) error {
+	if refreshToken == "" {
+		// Every row provisioned by Repository.UpsertByFirebaseUID starts with
+		// '' rather than SQL NULL in apple_refresh_token (see the migration
+		// and model.go comments), so a caller that checks `IS NULL` instead
+		// of `!= ""` will pass an empty token here. POSTing token= to Apple
+		// would be a wasted call at best and a confusing error at worst;
+		// refuse it before it leaves the process.
+		return fmt.Errorf("appleid: refresh token is empty")
+	}
 	_, err := c.post(ctx, "/auth/revoke", url.Values{
 		"token":           {refreshToken},
 		"token_type_hint": {"refresh_token"},
