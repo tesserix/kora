@@ -23,7 +23,7 @@ func ResolveMiddleware(repo Repository) gin.HandlerFunc {
 			httpx.Error(c, http.StatusUnauthorized, "unauthorized", "invalid or missing token")
 			return
 		}
-		u, err := repo.EnsureUser(c.Request.Context(), uid, c.GetString("email"))
+		u, err := repo.EnsureUser(c.Request.Context(), uid, c.GetString("email"), c.GetString("name"))
 		if err != nil {
 			httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not resolve user")
 			return
