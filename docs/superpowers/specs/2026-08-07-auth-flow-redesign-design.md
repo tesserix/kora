@@ -63,6 +63,27 @@ and follows the theme rather than baking in hex. `BrandLockup` composes it
 beside the wordmark, replacing the `Icon name="sparkles"` tile. Sign-in and
 onboarding step 1 both pick it up with no change at their call sites.
 
+**The kit keeps the wrong mark, and is cited as the authority for it.**
+`BrandLockup`'s comment names `design-system/ui_kits/kora/Onboarding.jsx` as its
+source, and the kit still renders the sparkles tile at three brand sites:
+`Chrome.jsx:34`, `Onboarding.jsx:18`, `HomeScreen.jsx:93`. Left alone, the app
+becomes right while its stated reference stays wrong — which reads as drift and
+invites someone to "restore fidelity" back to the sparkle later. This pass
+corrects those three kit sites and re-points `BrandLockup`'s comment at
+`assets/images/icon.png` as the source of truth.
+
+**The kit's other ten `sparkles` must survive.** (Thirteen in the kit total;
+three are the brand tile.) They are an AI affordance,
+not a brand mark — "Otto's take", "AI logged", "AI-matched", "Regenerate",
+"Weekly report" — as is `app/meal.tsx:468` in the app itself. A blanket
+find-and-replace would destroy the AI iconography. In scope are only the tiles
+rendering the mark at 22–24px in `primary-foreground` on a `primary` fill.
+
+*(Judgment call, not a locked decision: correcting the kit is cheap and prevents
+reintroduction, but it is prototype JSX with no tests. Say so if you would
+rather declare it out of scope — in that case `BrandLockup`'s comment must still
+be re-pointed, or the divergence stays invisible.)*
+
 ### `AppleSignInButton`
 
 Wraps `AppleAuthentication.AppleAuthenticationButton`, which renders Apple's
@@ -217,9 +238,27 @@ cheapest path to a new account is also the likeliest to hit this.
   `colors.background`. Not a spinner over an empty app; the app genuinely has
   not started yet, and the splash says so honestly.
 - **Error** → "Couldn't load your profile" with a Retry that refetches. This is
-  the state that currently strands people silently.
+  the state that currently strands people silently. **A 401 is excluded** — see
+  below.
 - **Resolved** → `onboarded_at === null` routes to `/onboarding`; otherwise
   `<Tabs>`.
+
+**A 401 must not reach the error state.** `src/lib/api.ts` retries once on a
+401; if the retry also comes back 401 it sets the expired notice, calls
+`signOut`, and *still throws* `ApiError(401)` to the caller. So `profile.isError`
+goes true at the very moment a redirect to `/sign-in?reason=expired` is already
+in flight. Rendering "Couldn't load your profile" there is both wrong and
+misleadingly actionable: Retry cannot succeed, because the session is gone.
+
+The gate renders the **splash** when `profile.error` is an `ApiError` with
+`status === 401`, and lets the existing `onAuthStateChanged` effect perform the
+redirect.
+
+**Do not discriminate using `takeSessionExpiredNotice()`.** It is a one-shot
+that the sign-out effect consumes in order to attach `reason=expired`. Reading
+it from the gate would steal the flag and silently drop the explanation on the
+sign-in screen — turning a "your session expired" message into an unexplained
+bounce. Discriminate on the error's status instead.
 
 `TabsLayout` is the right place because it is the single chokepoint every entry
 path crosses — fresh sign-in *and* cold start with an existing session. Routing
@@ -264,6 +303,18 @@ presence.
   Retry and not `<Tabs>`; `onboarded_at: null` navigates to `/onboarding`;
   a populated profile renders `<Tabs>`. The loading and error cases are the two
   that do not exist today.
+- **Entry gate, 401**: an `ApiError(401)` renders the splash and **not** the
+  Retry affordance. Assert Retry is present for a non-401 error *first*, in the
+  same suite, so its absence under a 401 is a disappearance rather than a
+  control that never rendered. Assert too that the expired notice is left
+  unconsumed, since consuming it is the failure mode that costs the sign-in
+  screen its explanation.
+The kit is prototype JSX and is **not** under jest, so its correction is
+verified by inspection rather than asserted: after the change,
+`grep -rc sparkles design-system/ui_kits/kora/` totals **10**, down from 13, and
+the three removed are exactly `Chrome.jsx`, `Onboarding.jsx`, `HomeScreen.jsx`'s
+brand tile. A blanket replace would drive that to 0 and is the failure this
+check exists to catch.
 - **Link prompt** keeps its existing fail-open coverage; new assertions cover
   the reframed copy naming the email.
 - Suites stay green: `npx tsc --noEmit && npx jest --ci --forceExit`.
