@@ -150,6 +150,9 @@ func TestClientSecretCarriesAppleRequiredClaims(t *testing.T) {
 	secret, err := c.clientSecret()
 	require.NoError(t, err)
 
+	// ParseUnverified skips both signature and claim checks — correct here,
+	// because this test is about the header and claim VALUES. The signature is
+	// the subject of the next test.
 	parsed, _, err := jwt.NewParser().ParseUnverified(secret, jwt.MapClaims{})
 	require.NoError(t, err)
 
@@ -172,13 +175,24 @@ func TestClientSecretIsSignedWithTheConfiguredKey(t *testing.T) {
 	secret, err := c.clientSecret()
 	require.NoError(t, err)
 
+	// Claim validation is OFF deliberately. `Now` is pinned to a fixed instant,
+	// so the token's `exp` is always in the past by the time the suite runs and
+	// a validating parse fails with "Token is expired" regardless of whether
+	// the signature is correct. Expiry is pinned separately by
+	// TestClientSecretCarriesAppleRequiredClaims; this test is about the key.
+	//
+	// jwt/v4.5.2 has no WithTimeFunc parser option — only WithValidMethods,
+	// WithJSONNumber, and WithoutClaimsValidation. The package-level
+	// jwt.TimeFunc global would work but is unsafe to mutate under -race.
+	parser := jwt.NewParser(jwt.WithoutClaimsValidation())
+
 	// Verifies against the REAL key, then against a DIFFERENT key. Without the
 	// second half this passes against an unsigned or wrongly-signed token.
-	_, err = jwt.Parse(secret, func(*jwt.Token) (any, error) { return &c.cfg.PrivateKey.PublicKey, nil })
+	_, err = parser.Parse(secret, func(*jwt.Token) (any, error) { return &c.cfg.PrivateKey.PublicKey, nil })
 	assert.NoError(t, err)
 
 	other := testKey(t)
-	_, err = jwt.Parse(secret, func(*jwt.Token) (any, error) { return &other.PublicKey, nil })
+	_, err = parser.Parse(secret, func(*jwt.Token) (any, error) { return &other.PublicKey, nil })
 	assert.Error(t, err)
 }
 
@@ -280,7 +294,9 @@ func TestParsePrivateKeyRoundTripsAPKCS8Key(t *testing.T) {
 	parsed, err := ParsePrivateKey(pemBytes)
 
 	require.NoError(t, err)
-	assert.Equal(t, key.D, parsed.D)
+	// `Equal` rather than comparing `.D`: Go 1.26 deprecates direct access to
+	// the raw scalar, and `Equal` is the supported identity check.
+	assert.True(t, key.Equal(parsed))
 }
 ```
 
@@ -675,13 +691,19 @@ func TestAppleStoreRejectsAnEmptyCodeWithoutCallingApple(t *testing.T) {
 func TestAppleStoreReportsAnExchangeFailureAndStoresNothing(t *testing.T) {
 	db := testDB(t)
 	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", "apple-uid-4") })
-	ex := &fakeExchanger{err: errors.New("appleid: status 400: invalid_client")}
+	ex := &fakeExchanger{token: "rt-seeded"}
 	r := newAppleRouter(t, db, ex, "apple-uid-4")
+	// Seed a real token first. ResolveMiddleware auto-creates the row with
+	// AppleRefreshToken at its zero value, so asserting "" would be asserting
+	// the INITIAL STATE — and a handler that forgot the `return` after the
+	// exchange-failure branch and fell through to storing "" would pass.
+	require.Equal(t, http.StatusNoContent, postApple(t, r, `{"authorization_code":"good"}`).Code)
 
+	ex.err = errors.New("appleid: status 400: invalid_client")
 	w := postApple(t, r, `{"authorization_code":"code"}`)
 
 	assert.Equal(t, http.StatusBadGateway, w.Code)
-	assert.Equal(t, "", storedToken(t, db, "apple-uid-4"))
+	assert.Equal(t, "rt-seeded", storedToken(t, db, "apple-uid-4"))
 	// Apple's diagnostic must not reach the client.
 	assert.NotContains(t, w.Body.String(), "invalid_client")
 }
@@ -878,7 +900,15 @@ Expected: all five PASS.
 
 - [ ] **Step 10: Prove the overwrite test is load-bearing**
 
-Temporarily make `SetAppleRefreshToken` skip the write when the column is already non-empty (`Where("id = ? AND apple_refresh_token IS NULL", id)`). `TestAppleStoreOverwritesAnEarlierToken` must FAIL. Restore.
+Temporarily make `SetAppleRefreshToken` skip the write when a value is already present:
+
+```go
+Where("id = ? AND (apple_refresh_token IS NULL OR apple_refresh_token = '')", id)
+```
+
+**Exactly one test — `TestAppleStoreOverwritesAnEarlierToken` — must FAIL.** Restore afterwards.
+
+Guard on the **value**, not on nullity. The field carries no `gorm:"default:"` tag, so GORM writes `''` rather than SQL `NULL` when the row is created — an `IS NULL`-only guard therefore never matches, blocks *every* write, and fails three tests instead of one. A mutation that breaks everything it touches has no discriminating power: it cannot distinguish "the overwrite works" from "no write ever lands", which is the same result `WHERE 1=0` would give. If more than one test fails here, the mutation is still too blunt — report it rather than accepting it.
 
 - [ ] **Step 11: Full Go suite**
 
