@@ -699,6 +699,13 @@ func TestAppleStoreReportsAnExchangeFailureAndStoresNothing(t *testing.T) {
 	// exchange-failure branch and fell through to storing "" would pass.
 	require.Equal(t, http.StatusNoContent, postApple(t, r, `{"authorization_code":"good"}`).Code)
 
+	// Clear the token as well as setting the error. `fakeExchanger` returns
+	// `f.token, f.err` unconditionally, so leaving it seeded would make a
+	// fall-through write back the SAME value the assertion expects — the test
+	// would pass against the very bug it exists to catch. Clearing it also
+	// mirrors the real client, which returns ("", err) on all three of its
+	// failure paths.
+	ex.token = ""
 	ex.err = errors.New("appleid: status 400: invalid_client")
 	w := postApple(t, r, `{"authorization_code":"code"}`)
 
