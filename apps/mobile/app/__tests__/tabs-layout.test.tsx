@@ -21,7 +21,14 @@ jest.mock("@/components/FloatingTabBar", () => ({ FloatingTabBar: () => null }))
 const mockUseProfile = jest.fn();
 jest.mock("@/api/hooks", () => ({ useProfile: () => mockUseProfile() }));
 
-const LOADING = { data: undefined, isLoading: true, isError: false, error: null, refetch: jest.fn() };
+const LOADING = {
+  data: undefined,
+  isLoading: true,
+  isPending: true,
+  isError: false,
+  error: null,
+  refetch: jest.fn(),
+};
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -57,6 +64,43 @@ test("routes a never-onboarded profile to onboarding instead of the tabs", async
   const { queryByTestId } = await render(<TabsLayout />);
   expect(router.replace).toHaveBeenCalledWith("/onboarding");
   expect(queryByTestId("tabs")).toBeNull();
+});
+
+// Offline first-run: onlineManager pauses the query before it ever reaches
+// isLoading. status is "pending" with fetchStatus "paused" — isPending is
+// true, but isLoading, isError are both false and data is undefined. Gating
+// on isLoading alone lets this fall through to <Tabs> with no data, which is
+// the exact empty-shell stranding this task exists to eliminate.
+test("renders the splash, not the tabs, when the query is paused offline", async () => {
+  mockUseProfile.mockReturnValue({
+    data: undefined,
+    isPending: true,
+    isLoading: false,
+    isError: false,
+    error: null,
+    refetch: jest.fn(),
+  });
+  const { getByTestId, queryByTestId } = await render(<TabsLayout />);
+  expect(getByTestId("brand-dot-0-0")).toBeTruthy();
+  expect(queryByTestId("tabs")).toBeNull();
+});
+
+// Counterweight to the paused-query test above: a background refetch on an
+// already-resolved, onboarded profile must NOT flash the splash over a
+// working app. isPending is false here because data is already present.
+test("renders the tabs, not the splash, during a background refetch of a cached profile", async () => {
+  mockUseProfile.mockReturnValue({
+    data: { onboarded_at: "2026-01-01T00:00:00Z" },
+    isPending: false,
+    isLoading: false,
+    isFetching: true,
+    isError: false,
+    error: null,
+    refetch: jest.fn(),
+  });
+  const { getByTestId, queryByTestId } = await render(<TabsLayout />);
+  expect(getByTestId("tabs")).toBeTruthy();
+  expect(queryByTestId("brand-dot-0-0")).toBeNull();
 });
 
 // The state that currently strands people silently.

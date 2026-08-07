@@ -44,7 +44,15 @@ export default function TabsLayout() {
   // TabsLayout is the right chokepoint because every entry path crosses it —
   // fresh sign-in AND cold start with an existing session. Routing from
   // sign-in.tsx instead would miss relaunches entirely.
-  if (profile.isLoading) return <Splash />;
+  //
+  // isPending, not isLoading: react-query leaves queries on the default
+  // networkMode "online" (src/lib/queryClient.ts), so with no connectivity
+  // on a cold start the profile query is status "pending" with fetchStatus
+  // "paused" — isPending is true but isLoading is false. Gating on isLoading
+  // alone let that state fall through to <Tabs> with no data, which is the
+  // exact empty-shell stranding this task exists to eliminate. isPending is
+  // false once data is cached, so a background refetch still renders <Tabs>.
+  if (profile.isPending) return <Splash />;
 
   if (profile.isError) {
     // A 401 means api.ts already forced a sign-out and the onAuthStateChanged
