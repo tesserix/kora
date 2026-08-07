@@ -11,10 +11,28 @@ jest.mock("expo-router", () => ({
 jest.mock("firebase/auth", () => ({
   signInWithEmailAndPassword: (...args: unknown[]) => mockSignIn(...args),
   createUserWithEmailAndPassword: (...args: unknown[]) => mockCreateUser(...args),
+  // sign-in.tsx now transitively imports @/auth/socialCredentials -> @/api/hooks
+  // -> src/lib/api.ts, which calls onAuthStateChanged(auth, ...) and imports
+  // signOut at module load — both must exist on this mock or the module fails
+  // to load, unrelated to anything this suite exercises.
+  onAuthStateChanged: jest.fn(() => jest.fn()),
+  signOut: jest.fn(async () => {}),
 }));
 jest.mock("@/lib/firebase", () => ({
   isFirebaseConfigured: true,
   auth: { name: "mock-auth" },
+}));
+// sign-in.tsx now also imports @/lib/socialAuth (native Apple/Google sheets)
+// and @/components/auth/LinkAccountPrompt for the social sign-in buttons added
+// alongside the email/password path this suite exercises — neither native
+// module is available under Jest, so both are stubbed out here.
+jest.mock("@/lib/socialAuth", () => ({
+  configureGoogleSignin: jest.fn(),
+  signInWithGoogleNative: jest.fn(),
+  signInWithAppleNative: jest.fn(),
+}));
+jest.mock("@/components/auth/LinkAccountPrompt", () => ({
+  LinkAccountPrompt: () => null,
 }));
 
 import SignIn from "../sign-in";

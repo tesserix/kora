@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { KeyboardAvoidingView, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, Platform, TextInput, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  type AuthCredential,
 } from "firebase/auth";
 import { auth, isFirebaseConfigured } from "@/lib/firebase";
 import { AppText } from "@/components/Text";
@@ -14,6 +15,17 @@ import { BrandLockup } from "@/components/BrandLockup";
 import { AuthScaffold } from "@/components/AuthScaffold";
 import { firebaseAuthMessage } from "@/lib/firebaseAuthMessage";
 import { useTheme } from "@/theme";
+import {
+  signInWithAppleCredential,
+  signInWithGoogleCredential,
+  type SocialSignInOutcome,
+} from "@/auth/socialCredentials";
+import {
+  configureGoogleSignin,
+  signInWithAppleNative,
+  signInWithGoogleNative,
+} from "@/lib/socialAuth";
+import { LinkAccountPrompt } from "@/components/auth/LinkAccountPrompt";
 
 type Mode = "in" | "up";
 
@@ -40,6 +52,9 @@ export default function SignIn() {
     reason === "expired" ? "Your session expired. Please sign in again." : null,
   );
   const [busy, setBusy] = useState(false);
+  const [pendingLink, setPendingLink] = useState<
+    Extract<SocialSignInOutcome, { status: "needs-link" }> | null
+  >(null);
 
   const filledInputStyle = {
     paddingHorizontal: spacing.md,
@@ -64,7 +79,51 @@ export default function SignIn() {
     }
   }
 
+  async function runSocial(
+    fn: () => Promise<SocialSignInOutcome>,
+    provider: "google.com" | "apple.com",
+  ) {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const outcome = await fn();
+      if (outcome.status === "needs-link") {
+        setPendingLink(outcome);
+        return;
+      }
+      router.replace("/");
+    } catch (e: unknown) {
+      // null means cancelled — clears any stale error and shows nothing new.
+      // Tagged "social" so firebaseAuthMessage never renders password copy for
+      // a screen where no password was entered (e.g. auth/invalid-credential,
+      // which is what a not-yet-enabled provider throws).
+      setError(firebaseAuthMessage(e, { method: "social", provider }));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function signInApple() {
+    void runSocial(async () => {
+      const { idToken, rawNonce, fullName } = await signInWithAppleNative();
+      return signInWithAppleCredential(idToken, rawNonce, fullName);
+    }, "apple.com");
+  }
+
+  function signInGoogle() {
+    void runSocial(async () => {
+      configureGoogleSignin();
+      return signInWithGoogleCredential(await signInWithGoogleNative());
+    }, "google.com");
+  }
+
   const cta = mode === "in" ? "Sign in" : "Create account";
+  // Firebase/Apple console setup for this branch hasn't happened yet: no Google
+  // OAuth client IDs exist, and configureGoogleSignin() throws when this is
+  // empty. Rendering the button anyway would ship a control that can only
+  // fail — same precedent as the `!isFirebaseConfigured` guard above.
+  const googleConfigured = Boolean(process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID);
 
   return (
     <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
@@ -89,6 +148,26 @@ export default function SignIn() {
             ? "Sign in to pick up where you left off."
             : "Create an account and log your first meal in seconds."}
         </AppText>
+
+        <View style={{ gap: spacing.sm }}>
+          {Platform.OS === "ios" ? (
+            <Button
+              accessibilityLabel="Continue with Apple"
+              title="Continue with Apple"
+              disabled={busy}
+              onPress={signInApple}
+            />
+          ) : null}
+          {googleConfigured ? (
+            <Button
+              accessibilityLabel="Continue with Google"
+              title="Continue with Google"
+              variant="secondary"
+              disabled={busy}
+              onPress={signInGoogle}
+            />
+          ) : null}
+        </View>
 
         <Segmented
           options={MODE_OPTIONS}
@@ -139,6 +218,20 @@ export default function SignIn() {
           >
             {error}
           </AppText>
+        ) : null}
+
+        {pendingLink ? (
+          <LinkAccountPrompt
+            visible
+            email={pendingLink.email}
+            provider={pendingLink.provider}
+            pendingCredential={pendingLink.pendingCredential as AuthCredential}
+            onCancel={() => setPendingLink(null)}
+            onLinked={() => {
+              setPendingLink(null);
+              router.replace("/");
+            }}
+          />
         ) : null}
       </AuthScaffold>
     </KeyboardAvoidingView>
