@@ -674,6 +674,12 @@ export function useSetShareProgress() {
   });
 }
 
+// Plain function, not a hook: it is called from the sign-in flow, outside any
+// component that could hold a mutation.
+export function setDisplayName(display_name: string): Promise<unknown> {
+  return apiFetch("/v1/me", { method: "PATCH", body: JSON.stringify({ display_name }) });
+}
+
 export function useGroups() {
   return useQuery({ queryKey: ["groups"], queryFn: () => apiFetch("/v1/groups") as Promise<GroupSummary[]> });
 }
