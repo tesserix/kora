@@ -4,16 +4,27 @@ import { LinkAccountPrompt } from "@/components/auth/LinkAccountPrompt";
 const mockExistingSignInMethods = jest.fn();
 const mockCompleteLinkWithPassword = jest.fn(async (..._a: unknown[]) => {});
 const mockCompleteLinkWithGoogle = jest.fn(async (..._a: unknown[]) => {});
+const mockCompleteLinkWithApple = jest.fn(async (..._a: unknown[]) => {});
 jest.mock("@/auth/link", () => ({
   existingSignInMethods: (...a: unknown[]) => mockExistingSignInMethods(...a),
   completeLinkWithPassword: (...a: unknown[]) => mockCompleteLinkWithPassword(...a),
   completeLinkWithGoogle: (...a: unknown[]) => mockCompleteLinkWithGoogle(...a),
-  completeLinkWithApple: jest.fn(async () => {}),
+  completeLinkWithApple: (...a: unknown[]) => mockCompleteLinkWithApple(...a),
+}));
+const mockSignInWithAppleNative = jest.fn(async (..._a: unknown[]) => ({
+  idToken: "a",
+  rawNonce: "n",
+  fullName: null,
+  authorizationCode: "auth-code-xyz" as string | null,
 }));
 jest.mock("@/lib/socialAuth", () => ({
   configureGoogleSignin: jest.fn(),
   signInWithGoogleNative: jest.fn(async () => "g-token"),
-  signInWithAppleNative: jest.fn(async () => ({ idToken: "a", rawNonce: "n", fullName: null })),
+  signInWithAppleNative: (...a: unknown[]) => mockSignInWithAppleNative(...a),
+}));
+const mockStoreAppleAuthorization = jest.fn(async (..._a: unknown[]) => ({}));
+jest.mock("@/api/hooks", () => ({
+  storeAppleAuthorization: (...a: unknown[]) => mockStoreAppleAuthorization(...a),
 }));
 
 const pending = { provider: "apple.com" } as never;
@@ -47,6 +58,14 @@ beforeEach(() => {
   mockExistingSignInMethods.mockResolvedValue(["password"]);
   mockCompleteLinkWithPassword.mockImplementation(async () => {});
   mockCompleteLinkWithGoogle.mockImplementation(async () => {});
+  mockCompleteLinkWithApple.mockImplementation(async () => {});
+  mockStoreAppleAuthorization.mockResolvedValue({});
+  mockSignInWithAppleNative.mockResolvedValue({
+    idToken: "a",
+    rawNonce: "n",
+    fullName: null,
+    authorizationCode: "auth-code-xyz",
+  });
 });
 
 describe("LinkAccountPrompt", () => {
@@ -132,5 +151,31 @@ describe("LinkAccountPrompt", () => {
       fireEvent.press(googleButton);
     });
     await waitFor(() => expect(queryByText("That password is incorrect.")).toBeNull());
+  });
+
+  // Finding 3: the Apple link path fetches a FRESH authorizationCode from
+  // signInWithAppleNative and must forward it, or the user linking to a
+  // password/Google account this way never gets a token captured.
+  it("captures the Apple authorization code obtained while linking", async () => {
+    mockExistingSignInMethods.mockResolvedValue([]);
+    const { findByLabelText, onLinked } = await renderPrompt({ provider: "google.com" });
+    const appleButton = await findByLabelText("Continue with Apple to link");
+    await act(async () => {
+      fireEvent.press(appleButton);
+    });
+    await waitFor(() => expect(onLinked).toHaveBeenCalled());
+    expect(mockCompleteLinkWithApple).toHaveBeenCalled();
+    expect(mockStoreAppleAuthorization).toHaveBeenCalledWith("auth-code-xyz");
+  });
+
+  it("still reports success when the authorization capture fails", async () => {
+    mockExistingSignInMethods.mockResolvedValue([]);
+    mockStoreAppleAuthorization.mockRejectedValue(new Error("offline"));
+    const { findByLabelText, onLinked } = await renderPrompt({ provider: "google.com" });
+    const appleButton = await findByLabelText("Continue with Apple to link");
+    await act(async () => {
+      fireEvent.press(appleButton);
+    });
+    await waitFor(() => expect(onLinked).toHaveBeenCalled());
   });
 });

@@ -14,6 +14,7 @@ import {
   signInWithAppleNative,
   signInWithGoogleNative,
 } from "@/lib/socialAuth";
+import { storeAppleAuthorization } from "@/api/hooks";
 import { AppText } from "@/components/Text";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
@@ -165,8 +166,21 @@ export function LinkAccountPrompt({
               onPress={() =>
                 void run(
                   async () => {
-                    const { idToken, rawNonce } = await signInWithAppleNative();
+                    const { idToken, rawNonce, authorizationCode } = await signInWithAppleNative();
                     await completeLinkWithApple(idToken, rawNonce, pendingCredential);
+                    // Non-fatal, same reasoning as the sign-in path
+                    // (socialCredentials.ts): a failed capture must never
+                    // undo a link that already succeeded. Without this call,
+                    // this fresh code — the only one this flow will ever see
+                    // — is fetched from Apple and discarded, leaving the user
+                    // unrevokable until their next Apple sign-in.
+                    if (authorizationCode) {
+                      try {
+                        await storeAppleAuthorization(authorizationCode);
+                      } catch {
+                        // Swallowed deliberately; the link itself already succeeded.
+                      }
+                    }
                   },
                   { method: "social", provider: "apple.com" },
                 )

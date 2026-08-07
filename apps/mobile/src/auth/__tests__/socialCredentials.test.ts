@@ -147,8 +147,10 @@ describe("signInWithAppleCredential authorization capture", () => {
     );
     const outcome = await signInWithAppleCredential("tok", "nonce", null, "auth-code-123");
     expect(outcome.status).toBe("needs-link");
-    // No session exists yet, so the authenticated call would 401 — and the
-    // code will be re-supplied when the link completes.
+    // No session exists yet at conflict time, so the authenticated capture
+    // call would 401 — capture is skipped here, not lost: it is supplied
+    // instead by LinkAccountPrompt's Apple branch (a fresh code from the link
+    // itself) or, failing that, by the user's next Apple sign-in.
     expect(mockStoreAppleAuthorization).not.toHaveBeenCalled();
   });
 });

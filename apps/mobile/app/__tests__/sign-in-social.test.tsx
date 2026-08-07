@@ -11,6 +11,13 @@ jest.mock("firebase/auth", () => ({
   signInWithEmailAndPassword: jest.fn(async () => ({})),
   createUserWithEmailAndPassword: jest.fn(async () => ({})),
 }));
+// sign-in.tsx renders LinkAccountPrompt, which imports @/api/hooks for
+// storeAppleAuthorization; the real module pulls in @/lib/api, which calls
+// firebase/auth's onAuthStateChanged at import time — not stubbed above,
+// since this suite mocks firebase/auth minimally for its own needs.
+jest.mock("@/api/hooks", () => ({
+  storeAppleAuthorization: jest.fn(async (..._a: unknown[]) => ({})),
+}));
 
 const mockSignInWithAppleCredential = jest.fn();
 const mockSignInWithGoogleCredential = jest.fn();
