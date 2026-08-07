@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Modal, TextInput, View } from "react-native";
+import { Modal, Platform, TextInput, View } from "react-native";
 import type { AuthCredential } from "firebase/auth";
 import {
   completeLinkWithApple,
@@ -73,7 +73,11 @@ export function LinkAccountPrompt({
   const unknown = methods !== null && !anyControlWouldRender;
   const showPassword = methods === null || unknown || passwordMatches;
   const showGoogle = provider !== "google.com" && (unknown || googleMatches);
-  const showApple = provider !== "apple.com" && (unknown || appleMatches);
+  // Apple's native sheet does not exist on Android — without this guard, the
+  // fail-open path above (`unknown === true` under email-enumeration
+  // protection) offers "Continue with Apple to link" on Android routinely,
+  // and tapping it calls an API that isn't there.
+  const showApple = Platform.OS === "ios" && provider !== "apple.com" && (unknown || appleMatches);
 
   async function run(fn: () => Promise<void>, ctx?: AuthErrorContext) {
     if (busy) return;
