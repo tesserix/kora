@@ -79,7 +79,10 @@ export default function SignIn() {
     }
   }
 
-  async function runSocial(fn: () => Promise<SocialSignInOutcome>) {
+  async function runSocial(
+    fn: () => Promise<SocialSignInOutcome>,
+    provider: "google.com" | "apple.com",
+  ) {
     if (busy) return;
     setBusy(true);
     setError(null);
@@ -92,7 +95,10 @@ export default function SignIn() {
       router.replace("/");
     } catch (e: unknown) {
       // null means cancelled — clears any stale error and shows nothing new.
-      setError(firebaseAuthMessage(e));
+      // Tagged "social" so firebaseAuthMessage never renders password copy for
+      // a screen where no password was entered (e.g. auth/invalid-credential,
+      // which is what a not-yet-enabled provider throws).
+      setError(firebaseAuthMessage(e, { method: "social", provider }));
     } finally {
       setBusy(false);
     }
@@ -102,17 +108,22 @@ export default function SignIn() {
     void runSocial(async () => {
       const { idToken, rawNonce, fullName } = await signInWithAppleNative();
       return signInWithAppleCredential(idToken, rawNonce, fullName);
-    });
+    }, "apple.com");
   }
 
   function signInGoogle() {
     void runSocial(async () => {
       configureGoogleSignin();
       return signInWithGoogleCredential(await signInWithGoogleNative());
-    });
+    }, "google.com");
   }
 
   const cta = mode === "in" ? "Sign in" : "Create account";
+  // Firebase/Apple console setup for this branch hasn't happened yet: no Google
+  // OAuth client IDs exist, and configureGoogleSignin() throws when this is
+  // empty. Rendering the button anyway would ship a control that can only
+  // fail — same precedent as the `!isFirebaseConfigured` guard above.
+  const googleConfigured = Boolean(process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID);
 
   return (
     <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
@@ -147,13 +158,15 @@ export default function SignIn() {
               onPress={signInApple}
             />
           ) : null}
-          <Button
-            accessibilityLabel="Continue with Google"
-            title="Continue with Google"
-            variant="secondary"
-            disabled={busy}
-            onPress={signInGoogle}
-          />
+          {googleConfigured ? (
+            <Button
+              accessibilityLabel="Continue with Google"
+              title="Continue with Google"
+              variant="secondary"
+              disabled={busy}
+              onPress={signInGoogle}
+            />
+          ) : null}
         </View>
 
         <Segmented

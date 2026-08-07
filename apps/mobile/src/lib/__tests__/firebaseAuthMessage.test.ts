@@ -108,3 +108,46 @@ test("never returns a raw message from an unknown error", () => {
   expect(msg).toBe("Something went wrong. Please try again.");
   expect(msg).not.toContain("Native.swift");
 });
+
+// auth/invalid-credential is what Firebase throws when a provider ID token is
+// rejected — including when the provider is not yet enabled on the project,
+// which is this branch's actual pre-configuration state. Untagged and
+// password-tagged callers must keep the exact existing enumeration-safe copy;
+// only a social tag may change the wording, and it must not mention a password.
+describe("auth/invalid-credential branches on context", () => {
+  const untagged = firebaseAuthMessage({ code: "auth/invalid-credential" });
+  const password = firebaseAuthMessage({ code: "auth/invalid-credential" }, { method: "password" });
+  const social = firebaseAuthMessage(
+    { code: "auth/invalid-credential" },
+    { method: "social", provider: "apple.com" },
+  );
+
+  test("untagged keeps today's exact enumeration-safe copy", () => {
+    expect(untagged).toBe("Email or password is incorrect.");
+  });
+
+  test("password-tagged keeps today's exact enumeration-safe copy", () => {
+    expect(password).toBe("Email or password is incorrect.");
+  });
+
+  test("social-tagged does not mention a password and differs from the password copy", () => {
+    expect(social).not.toContain("password");
+    expect(social).not.toBe(untagged);
+    expect(social).not.toBe(password);
+  });
+});
+
+test("auth/operation-not-allowed gets its own copy, not the generic fallback", () => {
+  const msg = firebaseAuthMessage({ code: "auth/operation-not-allowed" });
+  expect(msg).not.toBe("Something went wrong. Please try again.");
+  expect(msg).not.toBe("Email or password is incorrect.");
+});
+
+// src/lib/api.ts documents this exact hazard for NetworkError: a class-identity
+// mismatch across module realms means `instanceof` alone can miss a real
+// cancellation. Google's cancellation produces ONLY AuthCancelledError with no
+// code-based safety net, so the `name` check matters here specifically.
+test("recognises a cancellation by name even without the class's prototype", () => {
+  const fakeCancellation = { name: "AuthCancelledError" };
+  expect(firebaseAuthMessage(fakeCancellation)).toBeNull();
+});

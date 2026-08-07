@@ -22,6 +22,9 @@ const MESSAGES: Record<string, string> = {
   "auth/provider-already-linked": "That's already linked to your account.",
   "auth/requires-recent-login": "For security, sign out and sign in again, then retry.",
   "auth/user-disabled": "That account has been disabled. Contact support.",
+  // The literal Firebase error for a provider not yet enabled on the project —
+  // the exact state this branch ships in before Firebase/Apple console setup.
+  "auth/operation-not-allowed": "That sign-in method isn't available yet.",
   "ERR_REQUEST_UNKNOWN":
     "Couldn't complete Apple sign-in. Make sure you're signed in to iCloud on this device.",
 };
@@ -46,7 +49,16 @@ function reauthFailedMessage(ctx?: AuthErrorContext): string {
  * paths and internals that must not reach a user.
  */
 export function firebaseAuthMessage(error: unknown, ctx?: AuthErrorContext): string | null {
-  if (error instanceof AuthCancelledError) return null;
+  // `instanceof` is the precise check; the `name` branch is what catches a value
+  // whose class identity did not survive a module realm boundary (same hazard
+  // documented for NetworkError in src/lib/api.ts). Google's cancellation
+  // produces ONLY AuthCancelledError with no code-based safety net.
+  if (
+    error instanceof AuthCancelledError ||
+    (typeof error === "object" && error !== null && (error as { name?: unknown }).name === "AuthCancelledError")
+  ) {
+    return null;
+  }
   if (error instanceof LastSignInMethodError) return "You can't remove your only sign-in method.";
   if (typeof error !== "object" || error === null) return FALLBACK;
   const code = (error as { code?: unknown }).code;
@@ -54,5 +66,14 @@ export function firebaseAuthMessage(error: unknown, ctx?: AuthErrorContext): str
   // Safety net for a raw Apple cancellation that bypassed the socialAuth wrapper.
   if (code === "ERR_REQUEST_CANCELED") return null;
   if (code === "auth/reauth-failed") return reauthFailedMessage(ctx);
+  // auth/invalid-credential is exactly what Firebase throws when a provider ID
+  // token is rejected — including when the provider is not enabled on the
+  // project. Untagged and password contexts keep the deliberate enumeration-safe
+  // copy; only a social tag gets neutral, provider-agnostic wording, since
+  // telling a social sign-in attempt that its PASSWORD was wrong is actively
+  // false — no password was ever entered.
+  if (code === "auth/invalid-credential" && ctx?.method === "social") {
+    return "Couldn't verify that account. Try again.";
+  }
   return MESSAGES[code] ?? FALLBACK;
 }

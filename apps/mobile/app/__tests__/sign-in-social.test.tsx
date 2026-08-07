@@ -28,10 +28,19 @@ jest.mock("@/lib/socialAuth", () => ({
   })),
 }));
 
+const ORIGINAL_GOOGLE_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID;
+
 beforeEach(() => {
   jest.clearAllMocks();
   mockSignInWithAppleCredential.mockResolvedValue({ status: "signed-in" });
   mockSignInWithGoogleCredential.mockResolvedValue({ status: "signed-in" });
+  // Configured by default so the pre-existing tests below (which press the
+  // Google button) keep passing; the unconfigured case is its own describe.
+  process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID = "web-client-id";
+});
+
+afterEach(() => {
+  process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID = ORIGINAL_GOOGLE_CLIENT_ID;
 });
 
 describe("sign-in social providers", () => {
@@ -111,5 +120,32 @@ describe("sign-in social providers", () => {
     await waitFor(() =>
       expect(queryByText("Couldn't reach Kora. Check your connection.")).toBeNull(),
     );
+  });
+
+  // The defect this whole wave exists to fix: auth/invalid-credential is what
+  // Firebase throws when a provider isn't enabled yet (this branch's actual
+  // pre-configuration state), and the untagged mapping is "Email or password
+  // is incorrect." — actively wrong on a screen where no password was typed.
+  it("does not blame a password when Apple sign-in is rejected as invalid-credential", async () => {
+    mockSignInWithAppleCredential.mockRejectedValue({ code: "auth/invalid-credential" });
+    const { getByLabelText, findByText, queryByText } = await render(<SignIn />);
+    await act(async () => {
+      fireEvent.press(getByLabelText("Continue with Apple"));
+    });
+    expect(await findByText("Couldn't verify that account. Try again.")).toBeTruthy();
+    expect(queryByText("Email or password is incorrect.")).toBeNull();
+  });
+
+  describe("when Google is not yet configured", () => {
+    beforeEach(() => {
+      process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID = "";
+    });
+
+    it("does not render a Google button that can only fail", async () => {
+      const { queryByLabelText, getByLabelText } = await render(<SignIn />);
+      expect(queryByLabelText("Continue with Google")).toBeNull();
+      // Apple is unaffected — this is a Google-specific gap.
+      expect(getByLabelText("Continue with Apple")).toBeTruthy();
+    });
   });
 });
