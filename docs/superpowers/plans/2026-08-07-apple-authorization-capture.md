@@ -949,6 +949,7 @@ git commit -m "feat(api): exchange and store the Apple authorization code"
 - Modify: `apps/mobile/src/auth/socialCredentials.ts`
 - Modify: `apps/mobile/src/lib/__tests__/socialAuth.test.ts`
 - Modify: `apps/mobile/src/auth/__tests__/socialCredentials.test.ts`
+- Modify: `apps/mobile/app/__tests__/sign-in-social.test.tsx` — Step 6's fourth argument to `signInWithAppleCredential` breaks this pre-existing file's `toHaveBeenCalledWith`, which is a strict arity match. Update its `signInWithAppleNative` mock to return an `authorizationCode` and add that value as the assertion's fourth argument. The assertion must get **stricter**, never relaxed to `expect.anything()`.
 
 **Interfaces:**
 - Consumes: `POST /v1/me/apple-authorization` (Task 2).
