@@ -52,6 +52,18 @@ jest.mock("@/lib/socialAuth", () => ({
 jest.mock("@/api/hooks", () => ({
   storeAppleAuthorization: jest.fn(async (..._a: unknown[]) => ({})),
 }));
+// LinkAccountPrompt now statically imports AppleSignInButton, which imports
+// expo-apple-authentication at module scope — that import happens regardless
+// of showApple, so this mock is required even though Apple never renders here.
+// See AppleSignInButton.android.test.tsx for the same mock.
+jest.mock("expo-apple-authentication", () => {
+  const { Pressable } = require("react-native");
+  return {
+    AppleAuthenticationButtonType: { SIGN_IN: 0, CONTINUE: 1 },
+    AppleAuthenticationButtonStyle: { WHITE: 0, WHITE_OUTLINE: 1, BLACK: 2 },
+    AppleAuthenticationButton: (props: Record<string, unknown>) => <Pressable {...props} />,
+  };
+});
 
 const pending = { provider: "google.com" } as never;
 

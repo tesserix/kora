@@ -109,7 +109,7 @@ describe("sign-in social providers", () => {
     await act(async () => {
       fireEvent.press(getByLabelText("Sign in with Apple"));
     });
-    expect(await findByText(/Link your account/)).toBeTruthy();
+    expect(await findByText(/Connect Apple/)).toBeTruthy();
     expect(router.replace).not.toHaveBeenCalled();
   });
 
