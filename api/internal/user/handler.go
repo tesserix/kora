@@ -2,6 +2,7 @@ package user
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -48,6 +49,49 @@ func (h Handler) UpdateShareProgress(c *gin.Context) {
 	}
 	if err := h.repo.SetShareProgress(c.Request.Context(), id, req.ShareProgress); err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not update sharing")
+		return
+	}
+	u, err := h.repo.ByID(c.Request.Context(), id)
+	if err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not load profile")
+		return
+	}
+	httpx.OK(c, u)
+}
+
+// MaxDisplayNameLen bounds the name at a length no real name exceeds, so a
+// pathological value cannot break the friends list or leaderboard layouts.
+const MaxDisplayNameLen = 100
+
+type updateProfileBody struct {
+	DisplayName string `json:"display_name"`
+}
+
+// UpdateProfile writes the caller's own display name. The row is resolved from
+// the auth context by ResolveMiddleware — there is no user id in the request to
+// forge.
+func (h Handler) UpdateProfile(c *gin.Context) {
+	id, ok := IDFromContext(c)
+	if !ok {
+		httpx.Error(c, http.StatusUnauthorized, "unauthorized", "invalid or missing token")
+		return
+	}
+	var req updateProfileBody
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Error(c, http.StatusBadRequest, "invalid_input", "malformed body")
+		return
+	}
+	name := strings.TrimSpace(req.DisplayName)
+	if name == "" {
+		httpx.Error(c, http.StatusBadRequest, "invalid_input", "display name is required")
+		return
+	}
+	if len(name) > MaxDisplayNameLen {
+		httpx.Error(c, http.StatusBadRequest, "invalid_input", "display name is too long")
+		return
+	}
+	if err := h.repo.SetDisplayName(c.Request.Context(), id, name); err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not update profile")
 		return
 	}
 	u, err := h.repo.ByID(c.Request.Context(), id)

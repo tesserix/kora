@@ -89,6 +89,13 @@ func (r Repository) SetShareProgress(ctx context.Context, id uuid.UUID, share bo
 	return nil
 }
 
+func (r Repository) SetDisplayName(ctx context.Context, id uuid.UUID, name string) error {
+	if err := r.db.WithContext(ctx).Model(&User{}).Where("id = ?", id).Update("display_name", name).Error; err != nil {
+		return fmt.Errorf("user: set display name: %w", err)
+	}
+	return nil
+}
+
 func (r Repository) IDByFirebaseUID(ctx context.Context, firebaseUID string) (uuid.UUID, error) {
 	var u User
 	if err := r.db.WithContext(ctx).

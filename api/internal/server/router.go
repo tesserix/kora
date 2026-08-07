@@ -93,6 +93,7 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.Use(user.ResolveMiddleware(userRepo))
 		v1.GET("/me", userHandler.Me)
 		v1.PATCH("/me/share-progress", userHandler.UpdateShareProgress)
+		v1.PATCH("/me", userHandler.UpdateProfile)
 		v1.POST("/onboarding", onboardingHandler.Submit)
 		v1.GET("/notifications", notificationsHandler.List)
 		v1.GET("/notifications/unread-count", notificationsHandler.UnreadCount)
