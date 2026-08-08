@@ -31,6 +31,11 @@ type Cache interface {
 	Get(ctx context.Context, key string) (*Resolution, bool)
 	Set(ctx context.Context, key string, r Resolution)
 	Delete(ctx context.Context, key string) error
+
+	// DeleteByUser removes every cached resolution belonging to userID,
+	// across all kinds AND all generations. Used only by account deletion.
+	// Like Delete, a failure must never be treated as fatal by the caller.
+	DeleteByUser(ctx context.Context, userID uuid.UUID) error
 }
 
 // Generation is the cache's invalidation-epoch surface, kept as its own
@@ -84,6 +89,11 @@ func (NoCache) Set(ctx context.Context, key string, r Resolution) {}
 
 // Delete is a no-op — there is nothing to evict when caching is disabled.
 func (NoCache) Delete(ctx context.Context, key string) error {
+	return nil
+}
+
+// DeleteByUser is a no-op — there is nothing to evict when caching is disabled.
+func (NoCache) DeleteByUser(ctx context.Context, userID uuid.UUID) error {
 	return nil
 }
 
@@ -330,6 +340,42 @@ func (c *RedisCache) Delete(ctx context.Context, key string) error {
 		return err
 	}
 	return c.client.Del(ctx, generationScopedKey(key, generation)).Err()
+}
+
+// cacheKinds are the three CacheKey prefixes. Listed explicitly rather than
+// scanned as "*:<uuid>:*" because a bare wildcard prefix would also match any
+// future non-resolution key that happens to embed a uuid.
+var cacheKinds = []string{"phrase", "photo", "voice"}
+
+// DeleteByUser sweeps every generation, not just the current one. Physical
+// keys are "<kind>:<uuid>:<value>:g<N>" (generationScopedKey appends the
+// generation as a SUFFIX), so "<kind>:<uuid>:*" matches them all. Delete()
+// cannot be reused here: it scopes to the current generation only, and it
+// needs the logical key, which we cannot reconstruct without knowing every
+// phrase the user ever resolved.
+//
+// SCAN, never KEYS: KEYS blocks the server for the whole sweep.
+func (c *RedisCache) DeleteByUser(ctx context.Context, userID uuid.UUID) error {
+	for _, kind := range cacheKinds {
+		pattern := kind + ":" + userID.String() + ":*"
+		var cursor uint64
+		for {
+			keys, next, err := c.client.Scan(ctx, cursor, pattern, 256).Result()
+			if err != nil {
+				return fmt.Errorf("ai: scan %s: %w", pattern, err)
+			}
+			if len(keys) > 0 {
+				if err := c.client.Del(ctx, keys...).Err(); err != nil {
+					return fmt.Errorf("ai: delete %s: %w", pattern, err)
+				}
+			}
+			if next == 0 {
+				break
+			}
+			cursor = next
+		}
+	}
+	return nil
 }
 
 // CurrentGeneration reports the generation Get/Set/Delete are currently

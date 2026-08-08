@@ -13,6 +13,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -62,6 +63,53 @@ func TestCacheKey_ScopedByUser(t *testing.T) {
 		"the same user must get a stable key across calls")
 	require.Equal(t, keyA, CacheKey("phrase", userA, "  Brekkie Bowl "),
 		"the same user must get a stable key regardless of case/whitespace")
+}
+
+// newTestRedisCache builds a RedisCache backed by a fresh miniredis instance,
+// closing both the miniredis server and the redis client via t.Cleanup. The
+// *miniredis.Miniredis handle is returned alongside the cache so tests can
+// reach in and manipulate/inspect physical keys directly (e.g. mr.Set,
+// mr.Exists) the way the generation-counter-eviction tests already do below.
+func newTestRedisCache(t *testing.T) (*RedisCache, *miniredis.Miniredis) {
+	t.Helper()
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	t.Cleanup(mr.Close)
+
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+
+	return NewRedisCache(client, time.Minute), mr
+}
+
+// TestRedisCacheDeleteByUserRemovesAllKindsAndGenerations is the regression
+// test for account deletion's Redis eviction: DeleteByUser must sweep every
+// kind (phrase/photo/voice) AND every generation for the victim user, while
+// leaving another user's entries under the same kinds completely untouched —
+// the survivor assertions are what catch an over-broad sweep that deletes
+// everything instead of scoping to userID.
+func TestRedisCacheDeleteByUserRemovesAllKindsAndGenerations(t *testing.T) {
+	c, mr := newTestRedisCache(t)
+	ctx := context.Background()
+	victim, survivor := uuid.New(), uuid.New()
+
+	for _, kind := range []string{"phrase", "photo", "voice"} {
+		c.Set(ctx, CacheKey(kind, victim, "x"), Resolution{})
+		c.Set(ctx, CacheKey(kind, survivor, "x"), Resolution{})
+	}
+	// A key left behind from an older generation must go too.
+	require.NoError(t, mr.Set("phrase:"+victim.String()+":stale:g0", "{}"))
+
+	require.NoError(t, c.DeleteByUser(ctx, victim))
+
+	for _, kind := range []string{"phrase", "photo", "voice"} {
+		_, ok := c.Get(ctx, CacheKey(kind, victim, "x"))
+		assert.False(t, ok, "victim %s entry must be gone", kind)
+		_, ok = c.Get(ctx, CacheKey(kind, survivor, "x"))
+		assert.True(t, ok, "survivor %s entry must remain", kind)
+	}
+	assert.False(t, mr.Exists("phrase:"+victim.String()+":stale:g0"),
+		"older-generation key must be swept too")
 }
 
 func TestRedisCache_RoundTrip(t *testing.T) {
