@@ -1,11 +1,14 @@
 package server
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 
 	"github.com/tesserix/kora/api/internal/admin"
@@ -63,6 +66,22 @@ type Deps struct {
 	// not mounted at all — an unconfigured environment answers 404 rather
 	// than 500, the same choice BFFHMACKey makes above.
 	AppleExchanger user.AppleExchanger
+	// IdentityDeleter removes the caller's Firebase identity during account
+	// deletion. It is the SAME Firebase client the verifier is built from
+	// (see cmd/api/main.go), narrowed to its delete surface — verification
+	// needs only Google's public keys, deletion needs Admin privileges, so
+	// auth keeps them as two interfaces.
+	//
+	// Nil is tolerated rather than fatal: the identity step runs AFTER the DB
+	// delete has committed, so a nil here must degrade to a logged
+	// "NEEDS MANUAL CLEANUP" (see unwiredIdentityDeleter), never to a panic
+	// that turns a completed deletion into a 500.
+	IdentityDeleter user.IdentityDeleter
+	// AppleRevoker revokes the user's Apple refresh token before the row that
+	// holds it is destroyed. Nil whenever AppleExchanger is nil — Apple is
+	// not configured in every environment — and user.Service.Delete skips
+	// revocation rather than failing when it is.
+	AppleRevoker user.AppleRevoker
 }
 
 func NewRouter(deps Deps) *gin.Engine {
@@ -89,7 +108,19 @@ func NewRouter(deps Deps) *gin.Engine {
 
 	if deps.DB != nil && deps.Verifier != nil {
 		userRepo := user.NewRepository(deps.DB)
-		userHandler := user.NewHandler(userRepo)
+		// One Service instance backs BOTH DELETE /v1/me and (later) the admin
+		// delete endpoint: two implementations of an 18-table cascade is the
+		// failure that design exists to prevent. It is built here rather than
+		// in main.go because this is the composition root for every other
+		// service in the app; main.go builds only external clients.
+		userSvc := user.NewService(
+			deps.DB,
+			deletionCache(deps.ResolveCache),
+			identityDeleter(deps.IdentityDeleter),
+			deps.AppleRevoker, // may legitimately be nil; Delete tolerates it
+			auditDeletion,
+		)
+		userHandler := user.NewHandler(userRepo, userSvc)
 		onboardingHandler := onboarding.NewHandler(userRepo)
 		notificationsSvc := notifications.NewService(notifications.NewRepository(deps.DB), groups.NewRepository(deps.DB))
 		notificationsHandler := notifications.NewHandler(notificationsSvc)
@@ -99,6 +130,10 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.GET("/me", userHandler.Me)
 		v1.PATCH("/me/share-progress", userHandler.UpdateShareProgress)
 		v1.PATCH("/me", userHandler.UpdateProfile)
+		// Mounted unconditionally, unlike the Apple exchange below: Apple
+		// requires in-app account deletion, so this route must never be
+		// silently absent in any environment.
+		v1.DELETE("/me", userHandler.DeleteMe)
 		if deps.AppleExchanger != nil {
 			appleHandler := user.NewAppleHandler(userRepo, deps.AppleExchanger)
 			v1.POST("/me/apple-authorization", appleHandler.Store)
@@ -239,6 +274,56 @@ func NewRouter(deps Deps) *gin.Engine {
 	})
 
 	return r
+}
+
+// auditDeletion is the AuditRecorder user.Service writes its admin audit row
+// with. It is a closure rather than a direct admin.RecordEvent call because
+// internal/user cannot import internal/admin (admin -> ai -> nutrition ->
+// user is an import cycle); this package imports both, so the adaptation
+// belongs here.
+//
+// It writes on the tx it is handed, which is load-bearing: the audit row and
+// the DELETE must commit or roll back together. An audit trail that survives
+// a rolled-back delete is worse than none.
+//
+// Wired unconditionally even though SELF-deletion never uses it — only
+// actor.IsAdmin deletions do. Leaving it nil would compile and pass every
+// DELETE /v1/me test, then fail the admin endpoint with ErrNoAuditRecorder
+// the first time an operator used it.
+func auditDeletion(tx *gorm.DB, actorID, actorEmail string, targetID uuid.UUID) error {
+	return admin.RecordEvent(tx, admin.Actor{ID: actorID, Email: actorEmail},
+		admin.ActionUserDeleted, admin.TargetTypeUser, targetID, nil, nil)
+}
+
+// deletionCache narrows the resolve cache to the eviction surface account
+// deletion needs. A nil ai.Cache (resolve engine disabled, or Redis
+// unreachable at startup) becomes ai.NoCache{} rather than being passed
+// through: user.Service.Delete calls DeleteByUser unconditionally, and a nil
+// interface there would panic AFTER the row was already destroyed.
+func deletionCache(cache ai.Cache) user.CacheEvicter {
+	if cache == nil {
+		return ai.NoCache{}
+	}
+	return cache
+}
+
+// unwiredIdentityDeleter stands in when Deps.IdentityDeleter is nil. It
+// deliberately returns an error instead of succeeding silently: Service.Delete
+// treats a Firebase failure as non-fatal and logs it as "firebase identity
+// survived deletion; NEEDS MANUAL CLEANUP", which is exactly the truth here.
+// A no-op that returned nil would report the identity as removed when it was
+// never touched.
+type unwiredIdentityDeleter struct{}
+
+func (unwiredIdentityDeleter) DeleteIdentity(context.Context, string) error {
+	return errors.New("server: no identity deleter wired; firebase identity not removed")
+}
+
+func identityDeleter(d user.IdentityDeleter) user.IdentityDeleter {
+	if d == nil {
+		return unwiredIdentityDeleter{}
+	}
+	return d
 }
 
 // resolveGeneration narrows the SAME ai.Cache instance the resolve engine

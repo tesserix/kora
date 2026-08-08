@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/postgres"
@@ -43,7 +44,7 @@ func TestMeCreatesUserOnFirstCall(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	v := staticVerifier{claims: auth.Claims{UID: "test-uid-me", Email: "me@test.dev"}}
-	h := NewHandler(NewRepository(db))
+	h := NewHandler(NewRepository(db), Service{})
 	r.GET("/v1/me", auth.Middleware(v), h.Me)
 
 	w := httptest.NewRecorder()
@@ -65,7 +66,7 @@ func newProfileRouter(t *testing.T, db *gorm.DB, uid, email string) *gin.Engine 
 	r := gin.New()
 	v := staticVerifier{claims: auth.Claims{UID: uid, Email: email}}
 	repo := NewRepository(db)
-	h := NewHandler(repo)
+	h := NewHandler(repo, Service{})
 	r.PATCH("/v1/me", auth.Middleware(v), ResolveMiddleware(repo), h.UpdateProfile)
 	return r
 }
@@ -177,6 +178,82 @@ func TestUpdateProfileAcceptsMultibyteUnder100Chars(t *testing.T) {
 	var got string
 	db.Raw("SELECT display_name FROM users WHERE firebase_uid = ?", "test-uid-cjk").Scan(&got)
 	assert.Equal(t, cjkName, got, "40-character CJK name should round-trip unchanged")
+}
+
+// newDeleteMeRouter mounts DELETE /v1/me with the same middleware chain
+// router.go uses (auth.Middleware then ResolveMiddleware), so the id the
+// handler reads comes from the real resolution path and not a hand-set
+// context key. uid must be the seeded user's firebase_uid, otherwise
+// ResolveMiddleware provisions a DIFFERENT row and the test would delete
+// something it never seeded.
+func newDeleteMeRouter(t *testing.T, db *gorm.DB, uid string, svc Service) *gin.Engine {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	repo := NewRepository(db)
+	h := NewHandler(repo, svc)
+	v := staticVerifier{claims: auth.Claims{UID: uid, Email: uid + "@test.dev"}}
+	r.DELETE("/v1/me", auth.Middleware(v), ResolveMiddleware(repo), h.DeleteMe)
+	return r
+}
+
+func deleteMe(t *testing.T, r *gin.Engine) *httptest.ResponseRecorder {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodDelete, "/v1/me", nil)
+	req.Header.Set("Authorization", "Bearer anything")
+	r.ServeHTTP(w, req)
+	return w
+}
+
+// countUsers is the only honest way to assert a deletion happened: a 204
+// proves the handler returned, not that any row was destroyed.
+func countUsers(t *testing.T, db *gorm.DB, id uuid.UUID) int64 {
+	t.Helper()
+	var n int64
+	require.NoError(t, db.Raw(`SELECT count(*) FROM users WHERE id = ?`, id).Scan(&n).Error)
+	return n
+}
+
+func TestDeleteMeReturns204AndRemovesTheCaller(t *testing.T) {
+	db := testDB(t)
+	victim, survivor := seedUser(t, db), seedUser(t, db)
+	r := newDeleteMeRouter(t, db, victim.FirebaseUID, newTestService(t, db))
+
+	w := deleteMe(t, r)
+
+	require.Equal(t, http.StatusNoContent, w.Code)
+	assert.Zero(t, countUsers(t, db, victim.ID), "the caller's row must be gone")
+	// A cascade that took the whole table would also leave the caller gone.
+	assert.Equal(t, int64(1), countUsers(t, db, survivor.ID), "only the caller may be deleted")
+}
+
+func TestDeleteMeReturns204EvenWhenFirebaseFails(t *testing.T) {
+	db := testDB(t)
+	victim := seedUser(t, db)
+	r := newDeleteMeRouter(t, db, victim.FirebaseUID, newTestServiceWithFailingFirebase(t, db))
+
+	w := deleteMe(t, r)
+
+	// 204, not 500: the data IS gone, and a self-deleting user's path
+	// self-heals (sign in, EnsureUser makes a fresh empty row, delete again).
+	// Reporting 500 would tell them nothing happened when everything did.
+	require.Equal(t, http.StatusNoContent, w.Code)
+	assert.Zero(t, countUsers(t, db, victim.ID), "the row must be gone despite the Firebase failure")
+}
+
+// The handler is mounted behind ResolveMiddleware in router.go, so an
+// unresolved caller should be impossible — but DeleteMe destroys data, and a
+// missing id must never fall through to a zero uuid.
+func TestDeleteMeWithoutAResolvedUserIs401(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request, _ = http.NewRequest(http.MethodDelete, "/v1/me", nil)
+
+	Handler{}.DeleteMe(c)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }
 
 func TestUpdateProfileMultibyteBoundary(t *testing.T) {
