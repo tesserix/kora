@@ -19,6 +19,14 @@ type TokenVerifier interface {
 	Verify(ctx context.Context, idToken string) (Claims, error)
 }
 
+// IdentityDeleter removes a Firebase identity. Deliberately a separate
+// interface from TokenVerifier: verification needs only Google's public
+// keys, while deletion needs Firebase Admin privileges. A consumer that only
+// deletes should not have to depend on Verify, and vice versa.
+type IdentityDeleter interface {
+	DeleteIdentity(ctx context.Context, firebaseUID string) error
+}
+
 type firebaseVerifier struct {
 	client *fbauth.Client
 }
@@ -55,4 +63,20 @@ func claimsFromToken(tok *fbauth.Token) Claims {
 	email, _ := tok.Claims["email"].(string)
 	name, _ := tok.Claims["name"].(string)
 	return Claims{UID: tok.UID, Email: email, Name: name}
+}
+
+// DeleteIdentity removes the Firebase identity for firebaseUID.
+//
+// An empty uid is rejected rather than passed through: Firebase would reject
+// it anyway, but the account-deletion caller treats a Firebase failure as
+// NON-fatal, so a silent no-op here would leave a live identity behind while
+// reporting success. Failing loudly gives the caller something to log.
+func (v firebaseVerifier) DeleteIdentity(ctx context.Context, firebaseUID string) error {
+	if firebaseUID == "" {
+		return fmt.Errorf("auth: delete identity: empty firebase uid")
+	}
+	if err := v.client.DeleteUser(ctx, firebaseUID); err != nil {
+		return fmt.Errorf("auth: delete identity: %w", err)
+	}
+	return nil
 }

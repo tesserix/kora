@@ -1,10 +1,12 @@
 package auth
 
 import (
+	"context"
 	"testing"
 
 	fbauth "firebase.google.com/go/v4/auth"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // buildToken constructs a *fbauth.Token with arbitrary claims for unit
@@ -75,4 +77,14 @@ func TestClaimsFromTokenNonStringEmailClaimYieldsEmptyStringWithoutPanic(t *test
 		claims = claimsFromToken(tok)
 	})
 	assert.Empty(t, claims.Email)
+}
+
+func TestFirebaseVerifierImplementsIdentityDeleter(t *testing.T) {
+	var _ IdentityDeleter = firebaseVerifier{}
+}
+
+func TestDeleteIdentityRejectsEmptyUID(t *testing.T) {
+	err := firebaseVerifier{}.DeleteIdentity(context.Background(), "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "empty firebase uid")
 }

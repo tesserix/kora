@@ -50,6 +50,7 @@ type nonGenerationalCache struct{}
 func (nonGenerationalCache) Get(context.Context, string) (*ai.Resolution, bool) { return nil, false }
 func (nonGenerationalCache) Set(context.Context, string, ai.Resolution)         {}
 func (nonGenerationalCache) Delete(context.Context, string) error               { return nil }
+func (nonGenerationalCache) DeleteByUser(context.Context, uuid.UUID) error      { return nil }
 
 var (
 	_ ai.Cache = nonGenerationalCache{}

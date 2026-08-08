@@ -39,7 +39,7 @@ func TestUpdateShareProgressTogglesAndPersists(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(func(c *gin.Context) { c.Set("user_id", id); c.Next() })
-	h := NewHandler(NewRepository(db))
+	h := NewHandler(NewRepository(db), Service{})
 	r.PATCH("/v1/me/share-progress", h.UpdateShareProgress)
 
 	req := httptest.NewRequest(http.MethodPatch, "/v1/me/share-progress", strings.NewReader(`{"share_progress":true}`))

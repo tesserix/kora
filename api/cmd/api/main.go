@@ -60,6 +60,20 @@ func main() {
 		os.Exit(1)
 	}
 
+	// The same Firebase client, narrowed to its identity-DELETE surface.
+	// auth keeps Verify and DeleteIdentity as two interfaces (verification
+	// needs only Google's public keys; deletion needs Admin privileges), so
+	// the concrete verifier has to be asserted back to the second one.
+	//
+	// Fatal rather than degraded: DELETE /v1/me is Apple-mandated, and a
+	// deployment that silently leaves live Firebase identities behind after
+	// every account deletion must not start.
+	identityDeleter, ok := verifier.(auth.IdentityDeleter)
+	if !ok {
+		logger.Error("firebase verifier cannot delete identities; account deletion would orphan them")
+		os.Exit(1)
+	}
+
 	resolveHandler, aiProvider, resolveCache := buildResolveHandler(context.Background(), cfg, db, logger)
 
 	schedCtx, schedCancel := context.WithCancel(context.Background())
@@ -108,27 +122,45 @@ func main() {
 		logger.Info("admin surface disabled (no KORA_BFF_HMAC_KEY)")
 	}
 
+	// One appleid.Client serves two narrow interfaces: AppleExchanger for
+	// POST /v1/me/apple-authorization and AppleRevoker for account deletion.
+	// Both stay nil when Apple is unconfigured — the exchange endpoint is
+	// then not mounted at all, and user.Service.Delete skips revocation
+	// rather than failing.
 	var appleExchanger user.AppleExchanger
+	var appleRevoker user.AppleRevoker
 	if cfg.ApplePrivateKeyPEM != "" {
 		key, err := appleid.ParsePrivateKey([]byte(cfg.ApplePrivateKeyPEM))
 		if err != nil {
 			logger.Error("apple: parse private key failed", "err", err)
 			os.Exit(1)
 		}
-		appleExchanger = appleid.NewClient(appleid.Config{
+		appleClient := appleid.NewClient(appleid.Config{
 			TeamID:     cfg.AppleTeamID,
 			KeyID:      cfg.AppleKeyID,
 			BundleID:   cfg.AppleBundleID,
 			PrivateKey: key,
 		}, nil)
+		appleExchanger = appleClient
+		appleRevoker = appleClient
 		logger.Info("apple authorization exchange enabled")
 	} else {
 		logger.Info("apple authorization exchange disabled (no APPLE_PRIVATE_KEY)")
 	}
 
 	srv := &http.Server{
-		Addr:    ":" + cfg.Port,
-		Handler: server.NewRouter(server.Deps{DB: db, Verifier: verifier, Resolver: resolveHandler, Provider: aiProvider, ResolveCache: resolveCache, BFFHMACKey: cfg.BFFHMACKey, AppleExchanger: appleExchanger}),
+		Addr: ":" + cfg.Port,
+		Handler: server.NewRouter(server.Deps{
+			DB:              db,
+			Verifier:        verifier,
+			Resolver:        resolveHandler,
+			Provider:        aiProvider,
+			ResolveCache:    resolveCache,
+			BFFHMACKey:      cfg.BFFHMACKey,
+			AppleExchanger:  appleExchanger,
+			IdentityDeleter: identityDeleter,
+			AppleRevoker:    appleRevoker,
+		}),
 	}
 
 	go func() {

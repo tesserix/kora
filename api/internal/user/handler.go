@@ -1,6 +1,7 @@
 package user
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"unicode/utf8"
@@ -12,10 +13,14 @@ import (
 
 type Handler struct {
 	repo Repository
+	svc  Service
 }
 
-func NewHandler(repo Repository) Handler {
-	return Handler{repo: repo}
+// NewHandler takes the deletion Service as a REQUIRED argument rather than an
+// optional builder: DELETE /v1/me is Apple-mandated, so a wiring site that
+// forgets it must fail to compile, not silently serve a handler that panics.
+func NewHandler(repo Repository, svc Service) Handler {
+	return Handler{repo: repo, svc: svc}
 }
 
 func (h Handler) Me(c *gin.Context) {
@@ -101,4 +106,32 @@ func (h Handler) UpdateProfile(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, u)
+}
+
+// DeleteMe serves DELETE /v1/me — the caller deletes their own account. The
+// row comes from IDFromContext (set by ResolveMiddleware), so there is no
+// user id in the request to forge.
+//
+// Returns 204 even when the Firebase identity survived: from the user's
+// perspective their data genuinely IS gone, and the path self-heals — they
+// sign in, EnsureUser provisions a fresh empty row, they delete again.
+// Returning 500 would tell them nothing happened when everything did. The
+// ADMIN endpoint reports that case instead, because an admin has no
+// self-healing retry.
+func (h Handler) DeleteMe(c *gin.Context) {
+	id, ok := IDFromContext(c)
+	if !ok {
+		httpx.Error(c, http.StatusUnauthorized, "unauthorized", "invalid or missing token")
+		return
+	}
+	if _, err := h.svc.Delete(c.Request.Context(), id, DeleteActor{IsAdmin: false}); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			// Already gone; deletion is idempotent from the caller's side.
+			c.Status(http.StatusNoContent)
+			return
+		}
+		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not delete account")
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
