@@ -190,6 +190,9 @@ func NewRouter(deps Deps) *gin.Engine {
 			feedbackAdmin := feedback.NewAdminHandler(feedback.NewRepository(deps.DB))
 			adminGroup.GET("/feedback", feedbackAdmin.List)
 			adminGroup.PATCH("/feedback/:id", feedbackAdmin.UpdateStatus)
+
+			usersAdmin := user.NewAdminHandler(userRepo, userSvc)
+			adminGroup.GET("/users", usersAdmin.List)
 		}
 
 		pinsHandler := pins.NewHandler(pins.NewService(pins.NewRepository(deps.DB), foodRepo))
