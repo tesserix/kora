@@ -80,3 +80,22 @@ func TestRecordEventRejectsBlankActorEmail(t *testing.T) {
 	err := recordEvent(tx, Actor{ID: "admin-1", Email: "   "}, ActionFoodCreated, TargetTypeFood, uuid.New(), nil, nil)
 	require.Error(t, err, "a whitespace-only actor email must violate the actor_email CHECK constraint")
 }
+
+// TestRecordEventIsExportedAndWritesUserTarget pins RecordEvent as a thin
+// exported wrapper over recordEvent, callable from package user for the
+// account-deletion audit row, and exercises the new user-target vocabulary
+// (TargetTypeUser, ActionUserDeleted) end-to-end.
+func TestRecordEventIsExportedAndWritesUserTarget(t *testing.T) {
+	db := testDB(t)
+	target := uuid.New()
+
+	err := RecordEvent(db, Actor{ID: "admin-1", Email: "a@b.com"},
+		ActionUserDeleted, TargetTypeUser, target, nil, nil)
+	require.NoError(t, err)
+
+	var got AdminEvent
+	require.NoError(t, db.Where("target_id = ?", target).First(&got).Error)
+	assert.Equal(t, "user.deleted", got.Action)
+	assert.Equal(t, "user", got.TargetType)
+	assert.Equal(t, "admin-1", got.ActorID)
+}

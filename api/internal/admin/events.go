@@ -34,6 +34,16 @@ const (
 // on target_type must match this exactly.
 const TargetTypeFood = "food_item"
 
+// TargetTypeUser is the kora_admin_events.target_type for admin actions on a
+// user row. Distinct from TargetTypeFood so a portal query can filter one
+// without matching the other.
+const TargetTypeUser = "user"
+
+// ActionUserDeleted records an ADMIN-initiated account deletion. A user
+// deleting their own account writes NO row here: kora_admin_events is scoped
+// to admin actions, and self-deletion is not one.
+const ActionUserDeleted = "user.deleted"
+
 // AdminEvent is the Go-side shape of kora_admin_events (migration 000023).
 // actor_id/actor_email are attribution columns, kept separate from
 // before/after: the snapshots below describe the MUTATED ROW, never the
@@ -98,6 +108,15 @@ func recordEvent(tx *gorm.DB, actor Actor, action, targetType string, targetID u
 		return fmt.Errorf("admin: record event: %w", err)
 	}
 	return nil
+}
+
+// RecordEvent is recordEvent's exported form, for audit writes originating
+// outside this package — specifically user.Service.Delete, which must write
+// its audit row on the SAME transaction as the delete so the two commit or
+// roll back together. Callers outside this package have no other way to
+// satisfy that invariant.
+func RecordEvent(tx *gorm.DB, actor Actor, action, targetType string, targetID uuid.UUID, before, after any) error {
+	return recordEvent(tx, actor, action, targetType, targetID, before, after)
 }
 
 // marshalSnapshot serialises v to jsonb, or returns a nil RawMessage (SQL
