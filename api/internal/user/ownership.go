@@ -36,6 +36,32 @@ type Transfer struct {
 // challenge ownership is out of scope for this task -- deliberately not
 // handled here.
 func transferOwnership(tx *gorm.DB, userID uuid.UUID) ([]Transfer, error) {
+	out, err := previewTransfers(tx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, t := range out {
+		if err := tx.Exec(`UPDATE groups SET owner_id = ? WHERE id = ?`,
+			t.NewOwnerID, t.ID).Error; err != nil {
+			return nil, fmt.Errorf("user: transfer group %s: %w", t.ID, err)
+		}
+	}
+	return out, nil
+}
+
+// previewTransfers is transferOwnership's SELECT without the UPDATE: exactly
+// which groups deleting userID would hand to somebody else, and to whom.
+//
+// It exists so the admin detail panel's preview and the deletion itself run
+// the SAME query. A hand-written second copy of this SELECT would drift from
+// the behaviour it claims to predict, and the operator would be shown a
+// preview of a deletion that never happens that way -- on an irreversible
+// action.
+//
+// Read-only: it changes nothing, so it is safe on a plain session outside any
+// transaction.
+func previewTransfers(tx *gorm.DB, userID uuid.UUID) ([]Transfer, error) {
 	var out []Transfer
 
 	rows, err := tx.Raw(`
@@ -63,13 +89,6 @@ func transferOwnership(tx *gorm.DB, userID uuid.UUID) ([]Transfer, error) {
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("user: iterate group transfers: %w", err)
-	}
-
-	for _, t := range out {
-		if err := tx.Exec(`UPDATE groups SET owner_id = ? WHERE id = ?`,
-			t.NewOwnerID, t.ID).Error; err != nil {
-			return nil, fmt.Errorf("user: transfer group %s: %w", t.ID, err)
-		}
 	}
 	return out, nil
 }

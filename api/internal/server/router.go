@@ -193,6 +193,11 @@ func NewRouter(deps Deps) *gin.Engine {
 
 			usersAdmin := user.NewAdminHandler(userRepo, userSvc)
 			adminGroup.GET("/users", usersAdmin.List)
+			adminGroup.GET("/users/:id", usersAdmin.Get)
+			// Irreversible. It shares userSvc with DELETE /v1/me, so both
+			// paths run the one 18-table cascade, and auditDeletion below
+			// writes the kora_admin_events row inside the same transaction.
+			adminGroup.DELETE("/users/:id", usersAdmin.Delete)
 		}
 
 		pinsHandler := pins.NewHandler(pins.NewService(pins.NewRepository(deps.DB), foodRepo))

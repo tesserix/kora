@@ -46,6 +46,87 @@ type AdminListResult struct {
 	Summary AdminSummary `json:"summary"`
 }
 
+// AdminDetail is one user's activation row plus a DELETION PREVIEW: how much
+// of their data exists, and what deleting them hands to somebody else.
+//
+// Counts only. A user's actual food logs, weights and coach turns are their
+// own history, not an admin surface -- and AdminRow, which this embeds,
+// already carries no firebase_uid, no apple_refresh_token and no target_*
+// value. HasAppleToken is a boolean derived from the token's PRESENCE; the
+// token itself never leaves the API.
+type AdminDetail struct {
+	AdminRow
+	Counts        map[string]int64 `json:"counts"`
+	Transfers     []Transfer       `json:"transfers"`
+	HasAppleToken bool             `json:"has_apple_token"`
+}
+
+// adminCountTables are the per-user tables whose row counts the detail panel
+// shows. Every entry must have a user_id column; the names are interpolated
+// into the query (they are compile-time constants from this slice, never
+// request input, so there is nothing user-controlled to inject).
+var adminCountTables = []string{
+	"food_logs", "weight_entries", "water_entries", "saved_meals",
+	"food_aliases", "pins", "device_tokens", "coach_turns",
+	"group_members", "challenge_participants", "feedback", "ai_usage_events",
+}
+
+// GetForAdmin returns one user's activation row plus a deletion preview: what
+// exists, and what deleting them will hand to somebody else.
+//
+// The row is taken from ListForAdmin rather than re-derived, so the detail
+// panel and the table it was opened from can never disagree -- including on
+// has_targets, which is target_kcal > 0 and NOT "IS NOT NULL" (the column is
+// NOT NULL DEFAULT 0, so IS NOT NULL is a constant true).
+func (r Repository) GetForAdmin(ctx context.Context, id uuid.UUID) (AdminDetail, error) {
+	var d AdminDetail
+
+	list, err := r.ListForAdmin(ctx)
+	if err != nil {
+		return d, err
+	}
+	found := false
+	for _, row := range list.Items {
+		if row.ID == id {
+			d.AdminRow, found = row, true
+			break
+		}
+	}
+	if !found {
+		return d, ErrNotFound
+	}
+
+	d.Counts = map[string]int64{}
+	for _, table := range adminCountTables {
+		var n int64
+		if err := r.db.WithContext(ctx).
+			Raw(`SELECT count(*) FROM `+table+` WHERE user_id = ?`, id).Scan(&n).Error; err != nil {
+			return AdminDetail{}, fmt.Errorf("user: count %s: %w", table, err)
+		}
+		d.Counts[table] = n
+	}
+
+	// The SAME query the deletion runs, minus the UPDATEs, so the preview
+	// cannot drift from the behaviour it predicts.
+	transfers, err := previewTransfers(r.db.WithContext(ctx), id)
+	if err != nil {
+		return AdminDetail{}, err
+	}
+	d.Transfers = transfers
+
+	// Presence only. COALESCE because the column is '' for rows created via
+	// UpsertByFirebaseUID but NULL is still representable.
+	var token string
+	if err := r.db.WithContext(ctx).
+		Raw(`SELECT COALESCE(apple_refresh_token, '') FROM users WHERE id = ?`, id).
+		Scan(&token).Error; err != nil {
+		return AdminDetail{}, fmt.Errorf("user: read apple token presence: %w", err)
+	}
+	d.HasAppleToken = token != ""
+
+	return d, nil
+}
+
 // ListForAdmin returns every user with their activation facts, newest signup
 // first, plus the summary strip's four counts.
 //

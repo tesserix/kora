@@ -3,6 +3,7 @@ package user
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -92,6 +93,58 @@ func TestListForAdminCountsFailedAICallsToo(t *testing.T) {
 	// Filtering outcome='ok' here would erase the tried-and-failed cohort.
 	assert.Equal(t, int64(1), byID[u.ID].AICalls)
 	assert.Zero(t, byID[u.ID].LogCount)
+}
+
+// TestGetForAdminPreviewsWhatDeletionDestroys is the detail view's reason to
+// exist: before an irreversible deletion an operator must see both what will
+// be destroyed (counts) and what will be handed to somebody else (transfers).
+//
+// Scoped entirely to ids this test seeded -- the shared database carries rows
+// from other packages and earlier tasks, so counts are read off THIS user's
+// detail payload, never a global total.
+func TestGetForAdminPreviewsWhatDeletionDestroys(t *testing.T) {
+	db := testDB(t)
+	repo := NewRepository(db)
+	owner, member := seedUser(t, db), seedUser(t, db)
+	g := seedGroup(t, db, owner.ID)
+	seedMember(t, db, g.ID, member.ID, time.Now())
+	seedFoodLog(t, db, owner.ID)
+
+	d, err := repo.GetForAdmin(context.Background(), owner.ID)
+	require.NoError(t, err)
+
+	assert.Equal(t, owner.ID, d.ID)
+	assert.Equal(t, int64(1), d.Counts["food_logs"])
+	assert.Equal(t, int64(0), d.Counts["weight_entries"])
+	require.Len(t, d.Transfers, 1, "the operator must see the group changes hands")
+	assert.Equal(t, member.ID, d.Transfers[0].NewOwnerID)
+	assert.Equal(t, g.ID, d.Transfers[0].ID)
+	assert.Equal(t, "group", d.Transfers[0].Kind)
+	assert.False(t, d.HasAppleToken, "a seeded user has no Apple refresh token")
+}
+
+// The preview MUST NOT be a dry run that actually transfers. GetForAdmin runs
+// the same SELECT the deletion runs, so this pins that it stops there: the
+// group is still owned by the user afterwards.
+func TestGetForAdminPreviewDoesNotActuallyTransfer(t *testing.T) {
+	db := testDB(t)
+	repo := NewRepository(db)
+	owner, member := seedUser(t, db), seedUser(t, db)
+	g := seedGroup(t, db, owner.ID)
+	seedMember(t, db, g.ID, member.ID, time.Now())
+
+	_, err := repo.GetForAdmin(context.Background(), owner.ID)
+	require.NoError(t, err)
+
+	var stillOwned uuid.UUID
+	require.NoError(t, db.Raw(`SELECT owner_id FROM groups WHERE id = ?`, g.ID).Row().Scan(&stillOwned))
+	assert.Equal(t, owner.ID, stillOwned, "a preview must change nothing")
+}
+
+func TestGetForAdminUnknownIsNotFound(t *testing.T) {
+	db := testDB(t)
+	_, err := NewRepository(db).GetForAdmin(context.Background(), uuid.New())
+	assert.ErrorIs(t, err, ErrNotFound)
 }
 
 // TestListForAdminHasTargetsReflectsOnboarding pins HasTargets against the
