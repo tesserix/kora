@@ -2,6 +2,7 @@ package user
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -80,6 +81,41 @@ func TestTransferOwnershipPassesToEarliestJoiner(t *testing.T) {
 	var got uuid.UUID
 	require.NoError(t, db.Raw(`SELECT owner_id FROM groups WHERE id = ?`, g.ID).Row().Scan(&got))
 	assert.Equal(t, early.ID, got)
+}
+
+// TestTransfersSerialiseAsEmptyArrayNotNull asserts on the SERIALISED body,
+// not the Go slice, because that is the only place the bug is visible: a nil
+// []Transfer and an empty one are both len 0 in Go, but encoding/json writes
+// the first as `null` and the second as `[]`.
+//
+// The portal's runtime type guards (tesserix-home, lib/api/kora-admin.ts)
+// require Array.isArray(transfers), and Array.isArray(null) is false. A nil
+// here therefore turns a perfectly good 200 into "unexpected_response_shape"
+// for any user who owns no multi-member group -- which is most of them. On
+// the DELETE path that is worse than a broken panel: the account IS gone and
+// the transaction HAS committed, while the operator is told an irreversible
+// destruction failed and a retry answers 404.
+//
+// Both payloads that carry transfers are covered here, since both are fed by
+// the same previewTransfers/transferOwnership pair.
+func TestTransfersSerialiseAsEmptyArrayNotNull(t *testing.T) {
+	db := testDB(t)
+	u := seedUser(t, db) // owns no groups at all, so the SELECT matches no rows
+
+	detail, err := NewRepository(db).GetForAdmin(context.Background(), u.ID)
+	require.NoError(t, err)
+	detailBody, err := json.Marshal(detail)
+	require.NoError(t, err)
+	assert.Contains(t, string(detailBody), `"transfers":[]`, "AdminDetail must serialise an empty array")
+	assert.NotContains(t, string(detailBody), `"transfers":null`, "a nil slice breaks the portal's detail panel")
+
+	res, err := newTestService(t, db).Delete(context.Background(), u.ID, DeleteActor{})
+	require.NoError(t, err)
+	deleteBody, err := json.Marshal(res)
+	require.NoError(t, err)
+	assert.Contains(t, string(deleteBody), `"transfers":[]`, "DeleteResult must serialise an empty array")
+	assert.NotContains(t, string(deleteBody), `"transfers":null`,
+		"a nil slice makes the portal report a committed, irreversible deletion as a failure")
 }
 
 func TestTransferOwnershipLeavesSoloGroupToCascade(t *testing.T) {

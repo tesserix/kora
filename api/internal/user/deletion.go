@@ -10,8 +10,12 @@ import (
 	"gorm.io/gorm"
 )
 
-// ErrNotFound is returned by Delete when no user row has the id. Handlers
-// map it to 404; every other error is a 500.
+// ErrNotFound is returned by Delete when no user row has the id. The two
+// handlers map it DIFFERENTLY on purpose: DeleteMe answers 204, because
+// self-deletion is idempotent and "your account is already gone" is the
+// outcome the caller asked for; the admin handler answers 404, because an
+// operator acting on a specific id needs to know that id no longer exists.
+// Every other error is a 500 on both.
 var ErrNotFound = errors.New("user: not found")
 
 // CacheEvicter is the one method Delete needs from ai.Cache.

@@ -115,7 +115,7 @@ inherited from the visibility spec:
 | Last write | `max(food_logs.logged_at, ai_usage_events.created_at)` |
 | Logs | `count(food_logs)` |
 | AI calls attempted | `count(ai_usage_events)` |
-| Has targets | `target_kcal IS NOT NULL` — boolean, never the value |
+| Has targets | `target_kcal > 0` — boolean, never the value. NOT `IS NOT NULL`: the column is `NOT NULL DEFAULT 0` (`000002_phase1_core.up.sql`), so `IS NOT NULL` is a constant `true` and could never report "no targets". An un-onboarded user sits at the default 0; the onboarding handler writes a nonzero value. |
 | Timezone | `users.timezone` |
 
 ### The query
@@ -125,7 +125,7 @@ Lives in kora-api's repository layer, not the portal.
 ```sql
 SELECT u.id, u.email, u.display_name, u.created_at, u.onboarded_at,
        u.timezone,
-       (u.target_kcal IS NOT NULL) AS has_targets,
+       (u.target_kcal > 0) AS has_targets,  -- NOT "IS NOT NULL": see above
        l.log_count, l.first_log, l.last_log,
        a.ai_calls, a.last_ai_call
 FROM users u

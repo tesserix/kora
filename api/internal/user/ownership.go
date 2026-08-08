@@ -62,7 +62,15 @@ func transferOwnership(tx *gorm.DB, userID uuid.UUID) ([]Transfer, error) {
 // Read-only: it changes nothing, so it is safe on a plain session outside any
 // transaction.
 func previewTransfers(tx *gorm.DB, userID uuid.UUID) ([]Transfer, error) {
-	var out []Transfer
+	// Initialised, NOT declared nil: encoding/json marshals a nil slice as
+	// `null` and an empty one as `[]`. Both AdminDetail.Transfers and
+	// DeleteResult.Transfers are fed from here, and the portal's runtime type
+	// guards require Array.isArray(transfers) -- Array.isArray(null) is false.
+	// A nil therefore fails a perfectly good 200 for any user who owns no
+	// multi-member group: the detail panel shows an error, and on DELETE the
+	// account is already destroyed and committed while the operator is told
+	// the irreversible deletion failed.
+	out := []Transfer{}
 
 	rows, err := tx.Raw(`
 		SELECT g.id, g.name, m.user_id
