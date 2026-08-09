@@ -6,6 +6,7 @@ import { useMemory } from "@/api/hooks";
 import { useInstantLog } from "@/api/useInstantLog";
 import { yourUsual } from "@/lib/yourUsual";
 import { mealSlotForHour } from "@/lib/mealSlot";
+import { formatPortion } from "@/units/portion";
 import { foodVisual } from "@/lib/foodVisual";
 import { hslToHex } from "@/lib/color";
 
@@ -54,7 +55,7 @@ export function YourUsualStrip() {
             <MealRow
               key={`food-${f.food_item_id}`}
               name={f.name}
-              slot={`${Math.round(f.grams)}g`}
+              slot={formatPortion({ quantity_grams: f.grams })}
               kcal={f.kcal}
               iconName={fv.icon}
               tint={hslToHex(fv.hue, 0.5, 0.5)}

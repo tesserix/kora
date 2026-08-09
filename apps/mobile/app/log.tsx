@@ -20,6 +20,7 @@ import { useInstantLog } from "@/api/useInstantLog";
 import { usePinToggle } from "@/api/usePinToggle";
 import type { FoodItem } from "@/api/types";
 import { useSavedMealEditor } from "@/components/meals/SavedMealSheetProvider";
+import { formatPortion } from "@/units/portion";
 import { foodVisual } from "@/lib/foodVisual";
 import { hslToHex } from "@/lib/color";
 import { haptics } from "@/motion";
@@ -274,7 +275,7 @@ export default function LogScreen() {
                         <MealRow
                           key={f.food_item_id}
                           name={f.name}
-                          slot={`${Math.round(f.grams)}g`}
+                          slot={formatPortion({ quantity_grams: f.grams })}
                           kcal={f.kcal}
                           iconName={fv.icon}
                           tint={hslToHex(fv.hue, 0.5, 0.5)}
@@ -320,7 +321,7 @@ export default function LogScreen() {
                       <MealRow
                         key={f.food_item_id}
                         name={f.name}
-                        slot={`${Math.round(f.grams)}g`}
+                        slot={formatPortion({ quantity_grams: f.grams })}
                         kcal={f.kcal}
                         iconName={fv.icon}
                         tint={hslToHex(fv.hue, 0.5, 0.5)}

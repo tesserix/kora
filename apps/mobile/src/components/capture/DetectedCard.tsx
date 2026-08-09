@@ -2,6 +2,7 @@ import { ActivityIndicator, Pressable, View } from "react-native";
 import { Icon } from "@/components/Icon";
 import { AppText } from "@/components/Text";
 import { GaugeRing } from "@/components/GaugeRing";
+import { formatPortion } from "@/units/portion";
 import { foodVisual } from "@/lib/foodVisual";
 import { withAlpha } from "@/lib/color";
 import type { MealSlot } from "@/lib/mealSlot";
@@ -130,8 +131,8 @@ function CandidateRow({
             be logged on the user's behalf unless they intervene. */}
         <AppText style={{ color: captureColors.onSurfaceFaint, fontSize: 11 }}>
           {uncertain
-            ? `${Math.round(candidate.portion_grams)}g · Best guess — tap to change`
-            : `${Math.round(candidate.portion_grams)}g`}
+            ? `${formatPortion({ quantity_grams: candidate.portion_grams, base_unit: candidate.item.base_unit })} · Best guess — tap to change`
+            : formatPortion({ quantity_grams: candidate.portion_grams, base_unit: candidate.item.base_unit })}
         </AppText>
         {uncertain ? null : (
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 5 }}>

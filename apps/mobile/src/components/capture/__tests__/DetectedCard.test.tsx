@@ -77,11 +77,11 @@ test("renders candidate rows with row-sourced grams/kcal and a header count", as
   expect(getByText(/Detected · 2 items/i)).toBeTruthy();
   expect(getByText("Grilled chicken breast")).toBeTruthy();
   // The portion stays; the raw "% match" is gone — it was false precision.
-  expect(getByText("140g")).toBeTruthy();
+  expect(getByText("140.4 g")).toBeTruthy();
   expect(queryByText(/% match/)).toBeNull();
   expect(getByText("231 kcal")).toBeTruthy();
   expect(getByText("Steamed broccoli")).toBeTruthy();
-  expect(getByText("90g")).toBeTruthy();
+  expect(getByText("90.2 g")).toBeTruthy();
   expect(getByText("31 kcal")).toBeTruthy();
 });
 
@@ -209,9 +209,9 @@ test("a preselected uncertain row still reads as a changeable guess", async () =
   const { queryByText } = await renderCard(makeMixedResolution());
 
   // Portion, provenance of the choice, and the affordance, on one line.
-  expect(queryByText("90g · Best guess — tap to change")).toBeTruthy();
+  expect(queryByText("90.2 g · Best guess — tap to change")).toBeTruthy();
   // The confident row keeps its plain portion caption.
-  expect(queryByText("140g")).toBeTruthy();
+  expect(queryByText("140.4 g")).toBeTruthy();
   // Macro chips stay off the weak row — fewer numbers asserted for a match we
   // are not confident in, and a second visual cue that the rows differ.
   expect(queryByText("P 31g/100g")).toBeTruthy();
@@ -277,4 +277,21 @@ test("a hand-picked row is loggable but still shows no kcal", async () => {
   expect(queryByText("0 kcal")).toBeNull();
   expect(queryByText("—")).toBeTruthy();
   expect(getAllByText("231 kcal")).toHaveLength(2);
+});
+
+test("a liquid candidate renders its portion in ml, not grams", async () => {
+  const base = makeResolution();
+  const resolution = {
+    ...base,
+    candidates: base.candidates.map((c) => ({
+      ...c,
+      portion_grams: 200,
+      item: { ...c.item, base_unit: "ml" },
+    })),
+  };
+
+  const { getAllByText, queryByText } = await renderCard(resolution);
+
+  expect(getAllByText("200 ml")).toHaveLength(2);
+  expect(queryByText("200g")).toBeNull();
 });

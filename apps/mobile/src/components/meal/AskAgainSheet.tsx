@@ -8,6 +8,7 @@ import { Card } from "@/components/Card";
 import { Button } from "@/components/Button";
 import { useResolveText } from "@/api/hooks";
 import type { FoodItem, Resolution, ResolvedCandidate } from "@/api/types";
+import { formatPortion } from "@/units/portion";
 import { foodVisual } from "@/lib/foodVisual";
 import { PressableScale } from "@/motion";
 import { useTheme } from "@/theme";
@@ -55,7 +56,7 @@ function CandidateRow({ candidate, onPress }: { candidate: ResolvedCandidate; on
       <View style={{ flex: 1 }}>
         <AppText variant="headline">{candidate.item.name}</AppText>
         <AppText variant="footnote" muted>
-          {`${Math.round(candidate.portion_grams)}g · ${Math.round(candidate.match_score * 100)}% match`}
+          {`${formatPortion({ quantity_grams: candidate.portion_grams, base_unit: candidate.item.base_unit })} · ${Math.round(candidate.match_score * 100)}% match`}
         </AppText>
       </View>
       <AppText variant="subheadline" muted>{`${Math.round(candidate.kcal)} kcal`}</AppText>
