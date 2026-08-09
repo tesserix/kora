@@ -45,8 +45,8 @@ type FoodItem struct {
 	Barcode        *string         `json:"barcode,omitempty"`
 	ServingDesc    string          `json:"serving_desc"`
 	ServingGrams   float64         `json:"serving_grams"`
-	BaseUnit       string          `gorm:"column:base_unit" json:"base_unit"`
-	ServingUnits   json.RawMessage `gorm:"column:serving_units;type:jsonb" json:"serving_units,omitempty"`
+	BaseUnit       string          `gorm:"column:base_unit;default:g" json:"base_unit"`
+	ServingUnits   json.RawMessage `gorm:"column:serving_units;type:jsonb;default:'[]'" json:"serving_units,omitempty"`
 	KcalPer100g    float64         `gorm:"column:kcal_per_100g" json:"kcal_per_100g"`
 	ProteinPer100g float64         `gorm:"column:protein_per_100g" json:"protein_per_100g"`
 	CarbsPer100g   float64         `gorm:"column:carbs_per_100g" json:"carbs_per_100g"`
