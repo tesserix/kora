@@ -101,11 +101,19 @@ export default function LogScreen() {
   // and base unit, resetting any previous selection's serving-mode edit —
   // otherwise a "2 sachet" entry for one food could silently survive onto a
   // food with no such serving at all.
+  //
+  // A food that HAS a named serving opens on it — one portion, shown as a
+  // stepper — because that is the amount the user is overwhelmingly likely to
+  // mean and the only entry mode that needs no arithmetic from them. Seeding
+  // in exact mode instead put the serving's gram figure in the field, one tap
+  // away from being reread as a serving count. A food with no named serving
+  // falls back to raw base-unit entry, as before.
   function selectFood(item: FoodItem) {
+    const defaultServing = (item.serving_units ?? [])[0] ?? null;
     setSelected(item);
     setGrams(item.serving_grams || 100);
-    setEnteredAmount(null);
-    setEnteredUnit(null);
+    setEnteredAmount(defaultServing ? defaultServing.amount : null);
+    setEnteredUnit(defaultServing ? defaultServing.name : null);
   }
 
   function submit() {
@@ -139,8 +147,15 @@ export default function LogScreen() {
     const portionUnit = enteredUnit ?? baseUnit;
     const portionAmount = enteredUnit !== null ? (enteredAmount ?? grams) : grams;
     const onPortionChange = (amount: number, unit: string) => {
-      if (unit === baseUnit) {
-        setGrams(amount);
+      // An entry IN the food's own base unit is already the base-unit figure,
+      // so the macro preview can follow it — no conversion is involved.
+      if (unit === baseUnit) setGrams(amount);
+      // Only a GRAM entry may drop the entered pair. For a millilitre-based
+      // food, "300 ml" entered as bare grams would be stored with a NULL unit
+      // and read back as "300 g" forever. units.ToBase resolves ml→ml 1:1
+      // server-side, so sending the pair costs nothing and keeps the row
+      // honest about what the user meant.
+      if (unit === "g") {
         setEnteredAmount(null);
         setEnteredUnit(null);
       } else {

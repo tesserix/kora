@@ -170,8 +170,15 @@ export default function MealDetail() {
   const portionUnit = enteredUnit ?? baseUnit;
   const portionAmount = enteredUnit !== null ? (enteredAmount ?? grams) : grams;
   const onPortionChange = (amount: number, unit: string) => {
-    if (unit === baseUnit) {
-      setGrams(amount);
+    // An entry IN the food's own base unit is already the base-unit figure,
+    // so the macro preview can follow it — no conversion is involved.
+    if (unit === baseUnit) setGrams(amount);
+    // Only a GRAM entry may drop the entered pair. For a millilitre-based
+    // food, "300 ml" entered as bare grams would be stored with a NULL unit
+    // and read back as "300 g" forever. units.ToBase resolves ml→ml 1:1
+    // server-side, so sending the pair costs nothing and keeps the row honest
+    // about what the user meant.
+    if (unit === "g") {
       setEnteredAmount(null);
       setEnteredUnit(null);
     } else {

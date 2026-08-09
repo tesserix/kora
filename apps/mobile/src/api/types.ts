@@ -90,10 +90,13 @@ export type FoodLog = {
   /** The unit entered by the user (e.g. "sachet", "cup", "g", "ml"). Null for legacy logs. */
   entered_unit?: string | null;
   /**
-   * The logged food's base unit ("g" or "ml"). Not currently returned by the
-   * log-fetch endpoint (it isn't joined against the food item) — present
-   * only for forward compatibility. Callers must treat its absence as
-   * "unknown, assume g", never as "the food is gram-based".
+   * The logged food's base unit ("g" or "ml"), joined in from the food item.
+   * It is a LABEL only — nutrition is computed server-side and nothing here
+   * converts anything — but without it a LEGACY liquid row (no entered pair,
+   * so quantity_grams is all there is) renders as grams.
+   *
+   * Absent when the log resolved to no food item. Callers must treat its
+   * absence as "unknown, assume g", never as "the food is gram-based".
    */
   base_unit?: string;
   /**

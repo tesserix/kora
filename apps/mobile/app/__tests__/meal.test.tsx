@@ -72,11 +72,11 @@ beforeEach(() => {
 });
 
 // Seeds a fetched log (overriding the route-param-only defaults) and renders
-// MealDetail. `item` carries the food's own base_unit/serving_units — the
-// log-fetch endpoint doesn't actually return these today, but the mock
-// carries them the same way a future response could, and meal.tsx falls
-// back to synthesizing a single serving from entered_amount/entered_unit
-// when they're absent (see servingUnitsFor in app/meal.tsx).
+// MealDetail. `item` carries the food's own base_unit/serving_units. The
+// log-fetch endpoint joins base_unit in from the food row; serving_units it
+// does not, and meal.tsx falls back to synthesizing a single serving from
+// entered_amount/entered_unit when they're absent (see servingUnitsFor in
+// app/meal.tsx).
 async function renderMeal(overrides: {
   quantity_grams?: number;
   entered_amount?: number;
@@ -230,4 +230,23 @@ test("FIX 2: a fractional server quantity_grams does not falsely arm Save change
   // ... so nothing is dirty and Save changes does not arm itself.
   await fireEvent.press(getByText("Save changes"));
   expect(mockEditMutate).not.toHaveBeenCalled();
+});
+
+// A legacy millilitre log carries no entered pair, so editing its amount is
+// the first time a unit is recorded for it. Nulling the pair because "the
+// unit equals the base unit" filed 300 ml as bare grams, and every later read
+// called it "300 g".
+test("editing a millilitre log sends the entered unit, not bare grams", async () => {
+  const { getByLabelText, getByText } = await renderMeal({
+    quantity_grams: 250,
+    item: { base_unit: "ml" },
+  });
+
+  await fireEvent.changeText(getByLabelText("Amount"), "300");
+  await fireEvent.press(getByText("Save changes"));
+
+  expect(mockEditMutate).toHaveBeenCalledWith(
+    expect.objectContaining({ entered_amount: 300, entered_unit: "ml" }),
+    expect.anything(),
+  );
 });
