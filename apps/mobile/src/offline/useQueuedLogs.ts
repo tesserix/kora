@@ -10,13 +10,22 @@ export type QueuedRow = {
   id: string;
   description: string;
   /**
-   * null when the food is no longer in the offline cache. `0` would be a wrong
+   * null when no real figure can be computed — the food is no longer in the
+   * offline cache, or the payload carries no grams because it entered a UNIT
+   * and only the server can resolve that into grams. `0` would be a wrong
    * number rather than an absent one, and the day total would believe it.
    */
   kcal: number | null;
   mealSlot: string;
   status: "pending" | "failed";
 };
+
+// A serving-mode log is queued with quantity_grams 0 and an entered
+// (amount, unit) pair, because resolving a unit into grams is the SERVER's
+// job and happens exactly once, at write time. There is therefore no grams
+// figure here to scale the food's per-100 numbers by, and inventing one
+// client-side is precisely what this app must not do.
+const gramsKnown = (q: QueuedLog) => q.payload.quantity_grams > 0;
 
 async function toRow(q: QueuedLog): Promise<QueuedRow> {
   const food = await getFoodById(q.payload.food_item_id);
@@ -26,7 +35,7 @@ async function toRow(q: QueuedLog): Promise<QueuedRow> {
     // offline at all. The fallback only shows if the cache (a 300-entry LRU)
     // evicted it between queueing and draining.
     description: food?.name ?? "Queued item",
-    kcal: food ? (food.kcal_per_100g * q.payload.quantity_grams) / 100 : null,
+    kcal: food && gramsKnown(q) ? (food.kcal_per_100g * q.payload.quantity_grams) / 100 : null,
     mealSlot: q.payload.meal_slot,
     status: q.status,
   };
