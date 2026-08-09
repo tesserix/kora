@@ -10,23 +10,27 @@ const mockToastShow = jest.fn();
 const mockBack = jest.fn();
 let mockRepeatPending = false;
 
-let mockLogData:
-  | {
-      id: string;
-      food_item_id?: string;
-      logged_at: string;
-      meal_slot: string;
-      source: string;
-      description: string;
-      quantity_grams: number;
-      kcal: number;
-      protein_g: number;
-      carbs_g: number;
-      fat_g: number;
-      provenance: string;
-      input_phrase?: string;
-    }
-  | undefined;
+type MockLog = {
+  id: string;
+  food_item_id?: string;
+  logged_at: string;
+  meal_slot: string;
+  source: string;
+  description: string;
+  quantity_grams: number;
+  entered_amount?: number | null;
+  entered_unit?: string | null;
+  base_unit?: string;
+  serving_units?: { name: string; amount: number; base_amount: number }[];
+  kcal: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+  provenance: string;
+  input_phrase?: string;
+};
+
+let mockLogData: MockLog | undefined;
 
 jest.mock("expo-router", () => ({
   router: { back: () => mockBack() },
@@ -67,13 +71,69 @@ beforeEach(() => {
   mockLogData = undefined;
 });
 
+// Seeds a fetched log (overriding the route-param-only defaults) and renders
+// MealDetail. `item` carries the food's own base_unit/serving_units — the
+// log-fetch endpoint doesn't actually return these today, but the mock
+// carries them the same way a future response could, and meal.tsx falls
+// back to synthesizing a single serving from entered_amount/entered_unit
+// when they're absent (see servingUnitsFor in app/meal.tsx).
+async function renderMeal(overrides: {
+  quantity_grams?: number;
+  entered_amount?: number;
+  entered_unit?: string;
+  item?: { base_unit?: string; serving_units?: { name: string; amount: number; base_amount: number }[] };
+} = {}) {
+  const { item, ...rest } = overrides;
+  mockLogData = {
+    id: "log1",
+    food_item_id: "f1",
+    logged_at: "2026-07-31T08:00:00Z",
+    meal_slot: "breakfast",
+    source: "manual",
+    description: "Brown rice",
+    quantity_grams: 200,
+    kcal: 300,
+    protein_g: 6,
+    carbs_g: 64,
+    fat_g: 2,
+    provenance: "manual",
+    base_unit: item?.base_unit,
+    serving_units: item?.serving_units,
+    ...rest,
+  };
+  return render(<MealDetail />);
+}
+
+test("editing a sachet log sends the entered unit, not grams", async () => {
+  const { getByLabelText, getByText } = await renderMeal({
+    quantity_grams: 16.5,
+    entered_amount: 1,
+    entered_unit: "sachet",
+    item: { base_unit: "g", serving_units: [{ name: "sachet", amount: 1, base_amount: 16.5 }] },
+  });
+
+  await fireEvent.press(getByLabelText("Increase amount"));
+  await fireEvent.press(getByText("Save changes"));
+
+  // The client sends what the user entered; the SERVER derives the grams.
+  expect(mockEditMutate).toHaveBeenCalledWith(
+    expect.objectContaining({ entered_amount: 2, entered_unit: "sachet" }),
+    expect.anything(),
+  );
+  expect(mockEditMutate).not.toHaveBeenCalledWith(
+    expect.objectContaining({ quantity_grams: 33 }),
+    expect.anything(),
+  );
+});
+
 test("Save is disabled until something changes, then PATCHes only changed fields", async () => {
   const { getByText, getByLabelText } = await render(<MealDetail />);
   // clean form: Save disabled -> pressing it does not mutate
   await fireEvent.press(getByText("Save changes"));
   expect(mockEditMutate).not.toHaveBeenCalled();
-  // bump grams 200 -> 210 and move to lunch
-  await fireEvent.press(getByLabelText("Increase"));
+  // bump grams 200 -> 210 (legacy log: PortionField renders the exact-mode
+  // amount field, no named serving to step through) and move to lunch
+  await fireEvent.changeText(getByLabelText("Amount"), "210");
   await fireEvent.press(getByText("Lunch"));
   await fireEvent.press(getByText("Save changes"));
   expect(mockEditMutate).toHaveBeenCalledWith(
@@ -86,7 +146,7 @@ test("Saving a portion/slot change offers Undo that PATCHes back the prior grams
   mockEditMutate.mockImplementationOnce((_patch, opts) => opts.onSuccess());
 
   const { getByText, getByLabelText } = await render(<MealDetail />);
-  await fireEvent.press(getByLabelText("Increase"));
+  await fireEvent.changeText(getByLabelText("Amount"), "210");
   await fireEvent.press(getByText("Lunch"));
   await fireEvent.press(getByText("Save changes"));
 
@@ -162,10 +222,10 @@ test("FIX 2: a fractional server quantity_grams does not falsely arm Save change
     provenance: "manual",
   };
 
-  const { getByText } = await render(<MealDetail />);
+  const { getByText, getByDisplayValue } = await render(<MealDetail />);
 
   // grams resynced to the server's exact (fractional) value ...
-  await waitFor(() => expect(getByText("142.5 g")).toBeTruthy());
+  await waitFor(() => expect(getByDisplayValue("142.5")).toBeTruthy());
 
   // ... so nothing is dirty and Save changes does not arm itself.
   await fireEvent.press(getByText("Save changes"));

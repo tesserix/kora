@@ -6,8 +6,10 @@ import { AppText } from "@/components/Text";
 import { Overline } from "@/components/Overline";
 import { Segmented } from "@/components/Segmented";
 import { Icon } from "@/components/Icon";
+import { PortionField } from "@/components/units/PortionField";
 import { useCreateSavedMeal, useUpdateSavedMeal, useDeleteSavedMeal } from "@/api/hooks";
-import type { MemoryMeal, SavedMeal } from "@/api/types";
+import type { MemoryFood, MemoryMeal, SavedMeal, SavedMealItem } from "@/api/types";
+import type { ServingUnit } from "@/units/portion";
 import { useTheme } from "@/theme";
 
 const SLOT_OPTIONS = [
@@ -17,7 +19,40 @@ const SLOT_OPTIONS = [
   { key: "snack", label: "Snack" },
 ];
 
-type EditItem = { food_item_id: string; name: string; grams: string };
+// `grams` is the base-unit (server) figure and only changes when the user
+// edits the exact-mode field in grams. `enteredAmount`/`enteredUnit` track a
+// named-serving entry (e.g. "2 sachet") separately — when `enteredUnit` is
+// set, THAT pair is what gets sent on save, never `grams`, matching the
+// server-resolves-grams contract meal.tsx follows for a single log.
+type EditItem = {
+  food_item_id: string;
+  name: string;
+  grams: number;
+  enteredAmount: number | null;
+  enteredUnit: string | null;
+};
+
+// A saved-meal item carries the user's entered pair when it has one
+// (MemoryFood — the "usual meal" aggregate a create-seed comes from — never
+// does; only a real SavedMealItem can). The "in" checks are what let this
+// read either union member without a false type error.
+function enteredPairOf(i: MemoryFood | SavedMealItem): { amount: number | null; unit: string | null } {
+  const amount = "entered_amount" in i && typeof i.entered_amount === "number" ? i.entered_amount : null;
+  const unit = "entered_unit" in i && i.entered_unit ? i.entered_unit : null;
+  return { amount, unit };
+}
+
+// Neither MemoryFood nor SavedMealItem carries the food's base unit or full
+// serving catalog (that isn't joined into the saved-meals response) — same
+// limitation as meal.tsx's servingUnitsFor, and the same fix: synthesize the
+// single serving actually in use from the entered pair and the resolved
+// grams, so PortionField can still render the stepper for it.
+function servingUnitsFor(item: EditItem): ServingUnit[] {
+  if (item.enteredUnit && item.enteredAmount && item.enteredAmount > 0) {
+    return [{ name: item.enteredUnit, amount: 1, base_amount: item.grams / item.enteredAmount }];
+  }
+  return [];
+}
 
 // seed is either a usual meal to save (create) or an existing saved meal (edit).
 export type Seed = { mode: "create"; meal: MemoryMeal } | { mode: "edit"; meal: SavedMeal };
@@ -28,7 +63,7 @@ interface Props {
 }
 
 export function SavedMealSheet({ seed, onClose }: Props) {
-  const { colors, spacing, radius, fonts } = useTheme();
+  const { colors, spacing, radius } = useTheme();
   const createMeal = useCreateSavedMeal();
   const updateMeal = useUpdateSavedMeal();
   const deleteMeal = useDeleteSavedMeal();
@@ -42,18 +77,47 @@ export function SavedMealSheet({ seed, onClose }: Props) {
     if (!seed) return;
     setName(seed.meal.name);
     setSlot(seed.meal.meal_slot);
-    setItems(seed.meal.items.map((i) => ({ food_item_id: i.food_item_id, name: i.name, grams: String(Math.round(i.grams)) })));
+    setItems(
+      seed.meal.items.map((i) => {
+        const { amount, unit } = enteredPairOf(i);
+        return { food_item_id: i.food_item_id, name: i.name, grams: i.grams, enteredAmount: amount, enteredUnit: unit };
+      }),
+    );
     setErr(null);
   }, [seed]);
 
   const removeItem = (idx: number) => setItems((cur) => cur.filter((_, i) => i !== idx));
-  const setGrams = (idx: number, g: string) => setItems((cur) => cur.map((it, i) => (i === idx ? { ...it, grams: g } : it)));
+  const setPortion = (idx: number, amount: number, unit: string) =>
+    setItems((cur) =>
+      cur.map((it, i) =>
+        i !== idx
+          ? it
+          : unit === "g"
+            ? { ...it, grams: amount, enteredAmount: null, enteredUnit: null }
+            : { ...it, enteredAmount: amount, enteredUnit: unit },
+      ),
+    );
 
   const save = () => {
     const trimmed = name.trim();
     if (!trimmed) { setErr("Enter a name."); return; }
-    const parsed = items.map((it) => ({ food_item_id: it.food_item_id, grams: Number(it.grams) }));
-    if (parsed.length === 0 || parsed.some((p) => !(p.grams > 0))) { setErr("Add at least one item with grams."); return; }
+    const parsed = items.map((it) =>
+      it.enteredUnit !== null
+        ? {
+            food_item_id: it.food_item_id,
+            // The server resolves grams from the entered pair — this 0 is a
+            // required-field placeholder, never used as-is (see
+            // savedmeals/service.go validate()).
+            grams: 0,
+            entered_amount: it.enteredAmount ?? undefined,
+            entered_unit: it.enteredUnit,
+          }
+        : { food_item_id: it.food_item_id, grams: it.grams },
+    );
+    const invalid = parsed.some((p) =>
+      "entered_unit" in p ? !((p.entered_amount ?? 0) > 0) : !(p.grams > 0),
+    );
+    if (parsed.length === 0 || invalid) { setErr("Add at least one item with grams."); return; }
     const body = { name: trimmed, meal_slot: slot, items: parsed };
     if (seed?.mode === "edit") {
       updateMeal.mutate({ id: seed.meal.id, body }, { onSuccess: onClose, onError: () => setErr("Couldn't save. Please try again.") });
@@ -85,19 +149,20 @@ export function SavedMealSheet({ seed, onClose }: Props) {
         </View>
         <View style={{ marginTop: spacing.md, gap: spacing.sm }}>
           {items.map((it, idx) => (
-            <View key={it.food_item_id} style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
-              <AppText style={{ flex: 1 }}>{it.name}</AppText>
-              <TextInput
-                value={it.grams}
-                onChangeText={(g) => setGrams(idx, g)}
-                keyboardType="decimal-pad"
-                accessibilityLabel={`${it.name} grams`}
-                style={{ width: 72, textAlign: "right", color: colors.label, backgroundColor: colors.cardSecondary, borderRadius: radius.md, paddingHorizontal: 10, paddingVertical: 8, fontFamily: fonts.mono }}
+            <View key={it.food_item_id} style={{ gap: spacing.xs }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+                <AppText style={{ flex: 1 }}>{it.name}</AppText>
+                <Pressable accessibilityLabel={`Remove ${it.name}`} hitSlop={8} onPress={() => removeItem(idx)}>
+                  <Icon name="minus" size={20} color={colors.destructive} />
+                </Pressable>
+              </View>
+              <PortionField
+                baseUnit="g"
+                servingUnits={servingUnitsFor(it)}
+                amount={it.enteredUnit !== null ? (it.enteredAmount ?? it.grams) : it.grams}
+                unit={it.enteredUnit ?? "g"}
+                onChange={(amount, unit) => setPortion(idx, amount, unit)}
               />
-              <AppText muted>g</AppText>
-              <Pressable accessibilityLabel={`Remove ${it.name}`} hitSlop={8} onPress={() => removeItem(idx)}>
-                <Icon name="minus" size={20} color={colors.destructive} />
-              </Pressable>
             </View>
           ))}
         </View>

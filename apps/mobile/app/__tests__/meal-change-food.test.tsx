@@ -134,11 +134,11 @@ test("editing the portion before changing the food sends the edited grams, and t
     });
   });
 
-  const { getByLabelText, getByText } = await render(<MealDetail />);
+  const { getByLabelText, getByText, getByDisplayValue } = await render(<MealDetail />);
 
   // Drag the portion from 200g to 210g (Save becomes enabled) ...
-  await fireEvent.press(getByLabelText("Increase"));
-  expect(getByText("210 g")).toBeTruthy();
+  await fireEvent.changeText(getByLabelText("Amount"), "210");
+  expect(getByDisplayValue("210")).toBeTruthy();
 
   // ... then change the food before saving.
   await fireEvent.press(getByLabelText("Change food"));
@@ -150,7 +150,7 @@ test("editing the portion before changing the food sends the edited grams, and t
   expect(patch).toMatchObject({ id: "log1", food_item_id: "f2", quantity_grams: 210, meal_slot: "breakfast" });
 
   // The 210g edit must not vanish once the server's response lands.
-  expect(getByText("210 g")).toBeTruthy();
+  expect(getByDisplayValue("210")).toBeTruthy();
 });
 
 test("the sheet paints from route params before the fetch resolves", async () => {

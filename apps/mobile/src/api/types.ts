@@ -89,6 +89,18 @@ export type FoodLog = {
   entered_amount?: number | null;
   /** The unit entered by the user (e.g. "sachet", "cup", "g", "ml"). Null for legacy logs. */
   entered_unit?: string | null;
+  /**
+   * The logged food's base unit ("g" or "ml"). Not currently returned by the
+   * log-fetch endpoint (it isn't joined against the food item) — present
+   * only for forward compatibility. Callers must treat its absence as
+   * "unknown, assume g", never as "the food is gram-based".
+   */
+  base_unit?: string;
+  /**
+   * The logged food's named serving units, same caveat as base_unit: not
+   * currently returned by the log-fetch endpoint.
+   */
+  serving_units?: ServingUnit[];
 };
 
 export type MemoryFood = {
@@ -145,6 +157,10 @@ export type SavedMealItem = {
   food_item_id: string;
   name: string;
   grams: number;
+  /** What the user entered for this item (e.g. 1, 2, 0.5). Null for a legacy gram-entered item. */
+  entered_amount?: number | null;
+  /** The unit entered alongside entered_amount (e.g. "sachet", "g", "ml"). Null for a legacy item. */
+  entered_unit?: string | null;
   kcal: number;
   protein_g: number;
   carbs_g: number;

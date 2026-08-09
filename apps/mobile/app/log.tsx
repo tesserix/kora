@@ -15,6 +15,7 @@ import { Segmented } from "@/components/Segmented";
 import { Card } from "@/components/Card";
 import { AppBackground } from "@/components/AppBackground";
 import { Overline } from "@/components/Overline";
+import { PortionField } from "@/components/units/PortionField";
 import { useCreateLog, useFoodSearch, useMemory, usePins, useSavedMeals } from "@/api/hooks";
 import { useInstantLog } from "@/api/useInstantLog";
 import { usePinToggle } from "@/api/usePinToggle";
@@ -67,7 +68,15 @@ export default function LogScreen() {
   const mountedAt = useRef(Date.now());
   const [q, setQ] = useState("");
   const [selected, setSelected] = useState<FoodItem | null>(null);
-  const [grams, setGrams] = useState("");
+  // `grams` is the base-unit figure and is the ONLY thing the macro preview
+  // below reads — it only changes when the user edits the exact-mode field
+  // in the food's base unit. `enteredAmount`/`enteredUnit` track a named
+  // serving entry (e.g. "1 sachet") separately; when `enteredUnit` is set
+  // that pair — not `grams` — is what gets sent on submit, and the SERVER
+  // resolves quantity_grams from it.
+  const [grams, setGrams] = useState(100);
+  const [enteredAmount, setEnteredAmount] = useState<number | null>(null);
+  const [enteredUnit, setEnteredUnit] = useState<string | null>(null);
   const [meal, setMeal] = useState<(typeof MEALS)[number]>("lunch");
   const [error, setError] = useState<string | null>(null);
   const [memTab, setMemTab] = useState<"saved" | "pinned" | "recents" | "frequent" | "usual_meals">("recents");
@@ -88,38 +97,61 @@ export default function LogScreen() {
   }, []);
   const enter = (i: number) => (firstMount.current ? FadeInDown.duration(300).delay(i * 30) : undefined);
 
-  const filledInputStyle = {
-    paddingHorizontal: spacing.md,
-    paddingVertical: 12,
-    color: colors.label,
-    fontSize: fontSize.base,
-    minHeight: 48,
-  } as const;
+  // Selecting a food seeds the portion from that food's own default serving
+  // and base unit, resetting any previous selection's serving-mode edit —
+  // otherwise a "2 sachet" entry for one food could silently survive onto a
+  // food with no such serving at all.
+  function selectFood(item: FoodItem) {
+    setSelected(item);
+    setGrams(item.serving_grams || 100);
+    setEnteredAmount(null);
+    setEnteredUnit(null);
+  }
 
   function submit() {
     if (!selected) return;
-    createLog.mutate(
-      {
-        food_item_id: selected.id,
-        meal_slot: meal,
-        source: "manual",
-        quantity_grams: Number(grams) || selected.serving_grams || 100,
-        logged_at: seededLoggedAt ?? new Date().toISOString(),
-        client_log_ms: Date.now() - mountedAt.current,
+    const base = {
+      food_item_id: selected.id,
+      meal_slot: meal,
+      source: "manual",
+      logged_at: seededLoggedAt ?? new Date().toISOString(),
+      client_log_ms: Date.now() - mountedAt.current,
+    };
+    // The client sends what the user entered; the SERVER resolves it into
+    // quantity_grams. In exact/base-unit mode `grams` already IS that
+    // figure, computed by nothing more than the user's own typed value.
+    const input =
+      enteredUnit !== null
+        ? { ...base, quantity_grams: 0, entered_amount: enteredAmount ?? undefined, entered_unit: enteredUnit }
+        : { ...base, quantity_grams: grams };
+    createLog.mutate(input, {
+      onSuccess: () => {
+        haptics.success();
+        router.replace("/");
       },
-      {
-        onSuccess: () => {
-          haptics.success();
-          router.replace("/");
-        },
-        onError: () => setError("Couldn't log that. Please try again."),
-      },
-    );
+      onError: () => setError("Couldn't log that. Please try again."),
+    });
   }
 
   if (selected) {
-    const g = Number(grams) || selected.serving_grams || 100;
-    const scale = g / 100;
+    const baseUnit: "g" | "ml" = selected.base_unit === "ml" ? "ml" : "g";
+    const servingUnits = selected.serving_units ?? [];
+    const portionUnit = enteredUnit ?? baseUnit;
+    const portionAmount = enteredUnit !== null ? (enteredAmount ?? grams) : grams;
+    const onPortionChange = (amount: number, unit: string) => {
+      if (unit === baseUnit) {
+        setGrams(amount);
+        setEnteredAmount(null);
+        setEnteredUnit(null);
+      } else {
+        setEnteredAmount(amount);
+        setEnteredUnit(unit);
+      }
+    };
+    // Display-only preview — see the comment on `grams` above. It must never
+    // be driven by enteredAmount/enteredUnit: the client cannot compute what
+    // those resolve to in grams, only the server can.
+    const scale = grams / 100;
     const vis = foodVisual(selected.name, meal);
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -172,17 +204,13 @@ export default function LogScreen() {
           </Card>
 
           <Overline>Portion</Overline>
-          <Card variant="elevated" style={{ padding: 0 }}>
-            <TextInput
-              accessibilityLabel="Quantity in grams"
-              style={filledInputStyle}
-              placeholder={`Grams (default ${selected.serving_grams || 100})`}
-              placeholderTextColor={colors.secondaryLabel}
-              keyboardType="decimal-pad"
-              value={grams}
-              onChangeText={setGrams}
-            />
-          </Card>
+          <PortionField
+            baseUnit={baseUnit}
+            servingUnits={servingUnits}
+            amount={portionAmount}
+            unit={portionUnit}
+            onChange={onPortionChange}
+          />
 
           <Overline>Meal</Overline>
           <Segmented options={MEAL_OPTIONS} value={meal} onChange={(key) => setMeal(key as (typeof MEALS)[number])} />
@@ -364,7 +392,7 @@ export default function LogScreen() {
                       kcal={item.kcal_per_100g}
                       iconName={fv.icon}
                       tint={hslToHex(fv.hue, 0.5, 0.5)}
-                      onPress={() => setSelected(item)}
+                      onPress={() => selectFood(item)}
                       accessibilityLabel={item.name}
                     />
                   </Animated.View>
