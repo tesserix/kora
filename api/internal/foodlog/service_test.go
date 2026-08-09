@@ -2,6 +2,7 @@ package foodlog
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"strings"
@@ -18,6 +19,8 @@ import (
 	"github.com/tesserix/kora/api/internal/httpx"
 	"github.com/tesserix/kora/api/internal/metrics"
 	"github.com/tesserix/kora/api/internal/nutrition"
+
+	"github.com/stretchr/testify/assert"
 )
 
 // fakeResolutionCache is a ResolutionCache test double that records every
@@ -907,4 +910,207 @@ func TestLogFoodUsesClientSuppliedIDSoAReplayStaysOneRow(t *testing.T) {
 	var count int64
 	require.NoError(t, db.Model(&FoodLog{}).Where("user_id = ?", userID).Count(&count).Error)
 	require.Equal(t, int64(1), count, "a replay through LogFood must not create a second meal")
+}
+
+// TestLogFoodResolvesEnteredUnitToGrams proves the server, not the client,
+// resolves an entered unit into grams — and that the resolution happens
+// exactly once, at write time: quantity_grams is what every nutrition figure
+// on this row is (and will remain) derived from, while entered_amount/
+// entered_unit are stored verbatim beside it purely so the diary can read
+// back what the user actually typed ("2 sachet").
+func TestLogFoodResolvesEnteredUnitToGrams(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+
+	// One sachet is 16.5g, base unit grams.
+	item := nutrition.FoodItem{
+		Name: "Sachet Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD,
+		BaseUnit:     "g",
+		ServingUnits: json.RawMessage(`[{"name":"sachet","amount":1,"base_amount":16.5}]`),
+		KcalPer100g:  545.45,
+	}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	amount := 2.0
+	unit := "sachet"
+	got, err := svc.LogFood(context.Background(), userID, LogRequest{
+		FoodItemID: &item.ID, MealSlot: "snack", Source: "manual",
+		EnteredAmount: &amount, EnteredUnit: &unit, LoggedAt: time.Now(),
+	})
+	require.NoError(t, err)
+
+	// Two sachets = 33g, resolved server-side.
+	assert.InDelta(t, 33.0, got.QuantityGrams, 1e-9)
+	require.NotNil(t, got.EnteredAmount)
+	assert.InDelta(t, 2.0, *got.EnteredAmount, 1e-9)
+	require.NotNil(t, got.EnteredUnit)
+	assert.Equal(t, "sachet", *got.EnteredUnit)
+	// Nutrition must be computed from the resolved grams, not the entered pair.
+	assert.InDelta(t, item.KcalPer100g*33.0/100.0, got.Kcal, 1e-6)
+}
+
+// TestLogFoodRejectsUnknownUnit proves units.ErrNoConversion surfaces as a
+// client validation error rather than silently falling back to a default —
+// a fabricated conversion would silently corrupt every total derived from it.
+func TestLogFoodRejectsUnknownUnit(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+
+	item := nutrition.FoodItem{
+		Name: "No Servings Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD,
+		BaseUnit: "g", ServingUnits: json.RawMessage(`[]`), KcalPer100g: 100,
+	}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	amount := 1.0
+	unit := "cup"
+	_, err := svc.LogFood(context.Background(), userID, LogRequest{
+		FoodItemID: &item.ID, MealSlot: "snack", Source: "manual",
+		EnteredAmount: &amount, EnteredUnit: &unit, LoggedAt: time.Now(),
+	})
+	var verr httpx.ValidationError
+	require.ErrorAs(t, err, &verr)
+	assert.Contains(t, verr.Message, "unit")
+}
+
+// TestLogFoodWithoutEnteredUnitIsUnchanged is the legacy-path regression: a
+// gram-entered log (no entered_amount/entered_unit) must keep working exactly
+// as before, with both fields left NULL.
+func TestLogFoodWithoutEnteredUnitIsUnchanged(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+
+	item := nutrition.FoodItem{
+		Name: "Legacy Grams Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD,
+		ServingUnits: json.RawMessage(`[]`), KcalPer100g: 100,
+	}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	got, err := svc.LogFood(context.Background(), userID, LogRequest{
+		FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual",
+		QuantityGrams: 140, LoggedAt: time.Now(),
+	})
+	require.NoError(t, err)
+	assert.InDelta(t, 140.0, got.QuantityGrams, 1e-9)
+	assert.Nil(t, got.EnteredAmount)
+	assert.Nil(t, got.EnteredUnit)
+}
+
+// TestEditLogReResolvesGramsFromEnteredUnit proves an edit that supplies a
+// new entered pair re-resolves quantity_grams from it — the entered unit is
+// still resolved server-side, not trusted from the client, on the update path
+// too.
+func TestEditLogReResolvesGramsFromEnteredUnit(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+
+	item := nutrition.FoodItem{
+		Name: "Edit Sachet Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD,
+		BaseUnit:     "g",
+		ServingUnits: json.RawMessage(`[{"name":"sachet","amount":1,"base_amount":16.5}]`),
+		KcalPer100g:  545.45,
+	}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	created, err := svc.LogFood(context.Background(), userID, LogRequest{
+		FoodItemID: &item.ID, MealSlot: "snack", Source: "manual",
+		QuantityGrams: 100, LoggedAt: time.Now(),
+	})
+	require.NoError(t, err)
+
+	amount := 3.0
+	unit := "sachet"
+	res, err := svc.EditLog(context.Background(), userID, created.ID, EditRequest{
+		EnteredAmount: &amount, EnteredUnit: &unit,
+	})
+	require.NoError(t, err)
+	assert.InDelta(t, 49.5, res.Log.QuantityGrams, 1e-9)
+	require.NotNil(t, res.Log.EnteredAmount)
+	assert.InDelta(t, 3.0, *res.Log.EnteredAmount, 1e-9)
+	require.NotNil(t, res.Log.EnteredUnit)
+	assert.Equal(t, "sachet", *res.Log.EnteredUnit)
+	assert.InDelta(t, item.KcalPer100g*49.5/100.0, res.Log.Kcal, 1e-6)
+}
+
+// TestEditLogGramsOnlyClearsEnteredPair proves that when an edit supplies
+// ONLY quantity_grams (not a new entered pair), the previously-stored entered
+// pair is nulled out rather than left stale — the stored pair no longer
+// describes the amount once grams have been overwritten directly.
+func TestEditLogGramsOnlyClearsEnteredPair(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+
+	item := nutrition.FoodItem{
+		Name: "Clear Entered Pair Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD,
+		BaseUnit:     "g",
+		ServingUnits: json.RawMessage(`[{"name":"sachet","amount":1,"base_amount":16.5}]`),
+		KcalPer100g:  545.45,
+	}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	amount := 2.0
+	unit := "sachet"
+	created, err := svc.LogFood(context.Background(), userID, LogRequest{
+		FoodItemID: &item.ID, MealSlot: "snack", Source: "manual",
+		EnteredAmount: &amount, EnteredUnit: &unit, LoggedAt: time.Now(),
+	})
+	require.NoError(t, err)
+	require.NotNil(t, created.EnteredAmount)
+	require.NotNil(t, created.EnteredUnit)
+
+	newGrams := 200.0
+	res, err := svc.EditLog(context.Background(), userID, created.ID, EditRequest{
+		QuantityGrams: &newGrams,
+	})
+	require.NoError(t, err)
+	assert.InDelta(t, 200.0, res.Log.QuantityGrams, 1e-9)
+	assert.Nil(t, res.Log.EnteredAmount, "stale entered pair must be nulled once grams no longer describe it")
+	assert.Nil(t, res.Log.EnteredUnit, "stale entered pair must be nulled once grams no longer describe it")
+}
+
+// TestEditLogUnknownEnteredUnitReturnsValidationError proves the update path
+// also surfaces units.ErrNoConversion as a validation error rather than
+// substituting a default.
+func TestEditLogUnknownEnteredUnitReturnsValidationError(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+
+	item := nutrition.FoodItem{
+		Name: "Edit No Servings Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD,
+		BaseUnit: "g", ServingUnits: json.RawMessage(`[]`), KcalPer100g: 100,
+	}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	created, err := svc.LogFood(context.Background(), userID, LogRequest{
+		FoodItemID: &item.ID, MealSlot: "snack", Source: "manual",
+		QuantityGrams: 100, LoggedAt: time.Now(),
+	})
+	require.NoError(t, err)
+
+	amount := 1.0
+	unit := "cup"
+	_, err = svc.EditLog(context.Background(), userID, created.ID, EditRequest{
+		EnteredAmount: &amount, EnteredUnit: &unit,
+	})
+	var verr httpx.ValidationError
+	require.ErrorAs(t, err, &verr)
+	assert.Contains(t, verr.Message, "unit")
 }

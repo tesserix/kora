@@ -190,6 +190,8 @@ func (r Repository) Update(ctx context.Context, log FoodLog) (FoodLog, error) {
 			"meal_slot":      log.MealSlot,
 			"description":    log.Description,
 			"quantity_grams": log.QuantityGrams,
+			"entered_amount": log.EnteredAmount,
+			"entered_unit":   log.EnteredUnit,
 			"kcal":           log.Kcal,
 			"protein_g":      log.ProteinG,
 			"carbs_g":        log.CarbsG,
