@@ -2,6 +2,7 @@ package savedmeals
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/tesserix/kora/api/internal/httpx"
 	"github.com/tesserix/kora/api/internal/nutrition"
+	"github.com/tesserix/kora/api/internal/units"
 )
 
 const (
@@ -24,11 +26,16 @@ type SavedMealItemView struct {
 	FoodItemID string  `json:"food_item_id"`
 	Name       string  `json:"name"`
 	Grams      float64 `json:"grams"`
-	Kcal       float64 `json:"kcal"`
-	ProteinG   float64 `json:"protein_g"`
-	CarbsG     float64 `json:"carbs_g"`
-	FatG       float64 `json:"fat_g"`
-	FiberG     float64 `json:"fiber_g"`
+	// EnteredAmount/EnteredUnit echo back what the user actually typed
+	// ("1 sachet"); nil for a legacy gram-entered item. Grams (above) is
+	// always what every nutrition figure on this item is computed from.
+	EnteredAmount *float64 `json:"entered_amount"`
+	EnteredUnit   *string  `json:"entered_unit"`
+	Kcal          float64  `json:"kcal"`
+	ProteinG      float64  `json:"protein_g"`
+	CarbsG        float64  `json:"carbs_g"`
+	FatG          float64  `json:"fat_g"`
+	FiberG        float64  `json:"fiber_g"`
 }
 
 type SavedMealView struct {
@@ -49,6 +56,13 @@ type SaveMealRequest struct {
 	Items    []struct {
 		FoodItemID string  `json:"food_item_id"`
 		Grams      float64 `json:"grams"`
+		// EnteredAmount/EnteredUnit carry what the user actually typed ("1
+		// sachet"). When both are set, the server resolves them into Grams
+		// exactly once here — the client never converts, and the resolved
+		// grams (not the entered pair) drive every nutrition figure. Nil
+		// means a legacy gram-entered item; Grams is used as-is.
+		EnteredAmount *float64 `json:"entered_amount"`
+		EnteredUnit   *string  `json:"entered_unit"`
 	} `json:"items"`
 }
 
@@ -88,6 +102,7 @@ func (s *Service) List(ctx context.Context, userID uuid.UUID) ([]SavedMealView, 
 			f := it.Grams / 100.0
 			iv := SavedMealItemView{
 				FoodItemID: it.FoodItemID.String(), Name: it.Name, Grams: it.Grams,
+				EnteredAmount: it.EnteredAmount, EnteredUnit: it.EnteredUnit,
 				Kcal: it.KcalPer100g * f, ProteinG: it.ProteinPer100g * f, CarbsG: it.CarbsPer100g * f,
 				FatG: it.FatPer100g * f, FiberG: it.FiberPer100g * f,
 			}
@@ -101,6 +116,33 @@ func (s *Service) List(ctx context.Context, userID uuid.UUID) ([]SavedMealView, 
 		out = append(out, v)
 	}
 	return out, nil
+}
+
+// decodeServingUnits mirrors foodlog.decodeServingUnits exactly (unexported
+// there, so replicated here rather than imported): it decodes a FoodItem's
+// stored ServingUnits JSON, degrading a decode error to an empty slice
+// (no named servings resolve) rather than surfacing it as a failure.
+func decodeServingUnits(raw json.RawMessage) []units.ServingUnit {
+	if len(raw) == 0 {
+		return nil
+	}
+	var out []units.ServingUnit
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil
+	}
+	return out
+}
+
+// resolveEnteredUnit mirrors foodlog.resolveEnteredUnit exactly (unexported
+// there, so replicated here rather than imported — see that function's doc
+// for the write-once-server-side rationale). It reuses the identical
+// validation message so both surfaces read the same to a client.
+func resolveEnteredUnit(amount float64, unit string, item nutrition.FoodItem) (float64, error) {
+	grams, err := units.ToBase(amount, unit, item.BaseUnit, decodeServingUnits(item.ServingUnits))
+	if err != nil {
+		return 0, httpx.ValidationError{Message: "unrecognised unit for this food"}
+	}
+	return grams, nil
 }
 
 // validate checks the request and resolves each food item, returning the parsed
@@ -122,9 +164,6 @@ func (s *Service) validate(ctx context.Context, req SaveMealRequest) (string, []
 	items := make([]SavedMealItem, 0, len(req.Items))
 	views := make([]SavedMealItemView, 0, len(req.Items))
 	for _, it := range req.Items {
-		if it.Grams <= 0 {
-			return "", nil, nil, httpx.ValidationError{Message: "grams must be positive"}
-		}
 		fid, err := uuid.Parse(it.FoodItemID)
 		if err != nil {
 			return "", nil, nil, httpx.ValidationError{Message: "invalid food_item_id"}
@@ -136,10 +175,30 @@ func (s *Service) validate(ctx context.Context, req SaveMealRequest) (string, []
 			}
 			return "", nil, nil, fmt.Errorf("savedmeals: resolve food: %w", err)
 		}
-		items = append(items, SavedMealItem{FoodItemID: fid, Grams: it.Grams})
-		f := it.Grams / 100.0
+
+		// When the caller entered a unit, the SERVER derives grams from it —
+		// the client never converts. Resolution happens exactly once, here,
+		// and the result (never the entered pair) is what every nutrition
+		// figure on the item is computed from.
+		grams := it.Grams
+		if it.EnteredAmount != nil && it.EnteredUnit != nil {
+			grams, err = resolveEnteredUnit(*it.EnteredAmount, *it.EnteredUnit, food)
+			if err != nil {
+				return "", nil, nil, err
+			}
+		}
+		if grams <= 0 {
+			return "", nil, nil, httpx.ValidationError{Message: "grams must be positive"}
+		}
+
+		items = append(items, SavedMealItem{
+			FoodItemID: fid, Grams: grams,
+			EnteredAmount: it.EnteredAmount, EnteredUnit: it.EnteredUnit,
+		})
+		f := grams / 100.0
 		views = append(views, SavedMealItemView{
-			FoodItemID: fid.String(), Name: food.Name, Grams: it.Grams,
+			FoodItemID: fid.String(), Name: food.Name, Grams: grams,
+			EnteredAmount: it.EnteredAmount, EnteredUnit: it.EnteredUnit,
 			Kcal: food.KcalPer100g * f, ProteinG: food.ProteinPer100g * f, CarbsG: food.CarbsPer100g * f,
 			FatG: food.FatPer100g * f, FiberG: food.FiberPer100g * f,
 		})
