@@ -1,6 +1,7 @@
 package units
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 )
@@ -48,4 +49,40 @@ func ToBase(amount float64, unit string, baseUnit string, servingUnits []Serving
 	}
 
 	return 0, ErrNoConversion
+}
+
+// UnrecognisedUnitMessage is the client-facing validation message every
+// caller must use, verbatim, when ResolveEntered (or ToBase directly) fails
+// to resolve an entered unit. It lives here — not as an httpx.ValidationError
+// itself, since this package stays free of the httpx/nutrition dependency —
+// so foodlog and savedmeals both wrap the same constant into their own
+// validation-error type and read identically to a client.
+const UnrecognisedUnitMessage = "unrecognised unit for this food"
+
+// DecodeServingUnits decodes a food row's stored ServingUnits JSON (its raw
+// serialized form, e.g. straight from a `serving_units jsonb` column). A
+// decode error must never break the caller — it just means no named
+// servings resolve for this row, so it degrades to an empty slice rather
+// than surfacing as a failure.
+func DecodeServingUnits(raw json.RawMessage) []ServingUnit {
+	if len(raw) == 0 {
+		return nil
+	}
+	var out []ServingUnit
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil
+	}
+	return out
+}
+
+// ResolveEntered resolves an entered (amount, unit) pair into the food's
+// base unit (grams or millilitres), exactly once, against baseUnit and the
+// food's raw ServingUnits JSON. It is the single shared entry point foodlog
+// and savedmeals both call so an entered unit resolves identically on every
+// surface — deliberately just ToBase + DecodeServingUnits, so this package
+// stays free of any dependency beyond what it already has (no httpx, no
+// nutrition, no foodlog): a caller translates a non-nil error into its own
+// validation-error type using UnrecognisedUnitMessage.
+func ResolveEntered(amount float64, unit, baseUnit string, servingUnitsRaw json.RawMessage) (float64, error) {
+	return ToBase(amount, unit, baseUnit, DecodeServingUnits(servingUnitsRaw))
 }

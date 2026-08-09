@@ -1,6 +1,7 @@
 package units
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -118,6 +119,49 @@ func TestFallbackMultipleMatches(t *testing.T) {
 			assert.Equal(t, tt.wantBaseUnit, got[0].BaseAmount)
 		})
 	}
+}
+
+// TestResolveEnteredNamedServing proves ResolveEntered resolves a valid
+// named serving straight from raw ServingUnits JSON, exactly like ToBase
+// would given the already-decoded slice — this is the entry point foodlog
+// and savedmeals both call so an entered unit resolves identically on every
+// surface.
+func TestResolveEnteredNamedServing(t *testing.T) {
+	raw := json.RawMessage(`[{"name":"sachet","amount":1,"base_amount":16.5}]`)
+
+	got, err := ResolveEntered(2, "sachet", "g", raw)
+	require.NoError(t, err)
+	assert.InDelta(t, 33.0, got, 1e-9)
+}
+
+// TestResolveEnteredUnknownUnit proves an unresolvable unit surfaces
+// ErrNoConversion rather than a guessed default — the same failure ToBase
+// itself returns, unwrapped, so callers can httpx.ValidationError it with
+// UnrecognisedUnitMessage.
+func TestResolveEnteredUnknownUnit(t *testing.T) {
+	raw := json.RawMessage(`[]`)
+
+	got, err := ResolveEntered(1, "handful", "g", raw)
+	assert.ErrorIs(t, err, ErrNoConversion)
+	assert.Zero(t, got)
+}
+
+// TestResolveEnteredMalformedServingUnits proves a malformed serving_units
+// JSON degrades to an empty slice rather than failing the resolution outright
+// — a decode error must never break entry, it just means no named serving
+// resolves for this row.
+func TestResolveEnteredMalformedServingUnits(t *testing.T) {
+	raw := json.RawMessage(`not valid json`)
+
+	got, err := ResolveEntered(1, "sachet", "g", raw)
+	assert.ErrorIs(t, err, ErrNoConversion)
+	assert.Zero(t, got)
+}
+
+func TestDecodeServingUnitsMalformedYieldsEmpty(t *testing.T) {
+	assert.Empty(t, DecodeServingUnits(json.RawMessage(`not valid json`)))
+	assert.Empty(t, DecodeServingUnits(nil))
+	assert.Empty(t, DecodeServingUnits(json.RawMessage(``)))
 }
 
 func TestFallbackDeterministic(t *testing.T) {

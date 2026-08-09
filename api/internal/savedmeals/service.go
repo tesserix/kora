@@ -2,7 +2,6 @@ package savedmeals
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -118,29 +117,19 @@ func (s *Service) List(ctx context.Context, userID uuid.UUID) ([]SavedMealView, 
 	return out, nil
 }
 
-// decodeServingUnits mirrors foodlog.decodeServingUnits exactly (unexported
-// there, so replicated here rather than imported): it decodes a FoodItem's
-// stored ServingUnits JSON, degrading a decode error to an empty slice
-// (no named servings resolve) rather than surfacing it as a failure.
-func decodeServingUnits(raw json.RawMessage) []units.ServingUnit {
-	if len(raw) == 0 {
-		return nil
-	}
-	var out []units.ServingUnit
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil
-	}
-	return out
-}
-
-// resolveEnteredUnit mirrors foodlog.resolveEnteredUnit exactly (unexported
-// there, so replicated here rather than imported — see that function's doc
-// for the write-once-server-side rationale). It reuses the identical
-// validation message so both surfaces read the same to a client.
-func resolveEnteredUnit(amount float64, unit string, item nutrition.FoodItem) (float64, error) {
-	grams, err := units.ToBase(amount, unit, item.BaseUnit, decodeServingUnits(item.ServingUnits))
+// resolveEnteredUnit resolves an entered (amount, unit) pair into grams
+// against food, exactly once, mirroring foodlog.resolveEnteredUnit (see that
+// function's doc for the write-once-server-side rationale). The actual
+// resolution (decode ServingUnits + ToBase) lives in units.ResolveEntered,
+// shared with foodlog, so both surfaces resolve identically — this wrapper
+// only extracts the fields units.ResolveEntered needs from a
+// nutrition.FoodItem and translates its error into an httpx.ValidationError
+// using units.UnrecognisedUnitMessage, since the units package itself stays
+// free of both the nutrition and httpx dependencies.
+func resolveEnteredUnit(amount float64, unit string, food nutrition.FoodItem) (float64, error) {
+	grams, err := units.ResolveEntered(amount, unit, food.BaseUnit, food.ServingUnits)
 	if err != nil {
-		return 0, httpx.ValidationError{Message: "unrecognised unit for this food"}
+		return 0, httpx.ValidationError{Message: units.UnrecognisedUnitMessage}
 	}
 	return grams, nil
 }

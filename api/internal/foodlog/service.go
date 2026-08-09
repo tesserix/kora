@@ -2,7 +2,6 @@ package foodlog
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -18,21 +17,6 @@ import (
 	"github.com/tesserix/kora/api/internal/units"
 )
 
-// decodeServingUnits decodes a FoodItem's stored ServingUnits JSON. A decode
-// error must never break logging — it just means no named servings resolve
-// for this row, so it degrades to an empty slice rather than surfacing as a
-// failure.
-func decodeServingUnits(raw json.RawMessage) []units.ServingUnit {
-	if len(raw) == 0 {
-		return nil
-	}
-	var out []units.ServingUnit
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil
-	}
-	return out
-}
-
 // resolveEnteredUnit resolves an entered (amount, unit) pair into grams
 // against item, exactly once, at write time. The SERVER derives
 // quantity_grams here — the client never converts — and the result is what
@@ -41,10 +25,17 @@ func decodeServingUnits(raw json.RawMessage) []units.ServingUnit {
 // rewrites what a past day's totals said. units.ErrNoConversion (and any
 // other resolution error) surfaces as a validation error; it is never
 // swallowed into a default.
+//
+// The actual resolution (decode ServingUnits + ToBase) lives in
+// units.ResolveEntered, shared with savedmeals, so both surfaces resolve
+// identically — this wrapper only extracts the fields units.ResolveEntered
+// needs from a nutrition.FoodItem and translates its error into an
+// httpx.ValidationError using units.UnrecognisedUnitMessage, since the units
+// package itself stays free of both the nutrition and httpx dependencies.
 func resolveEnteredUnit(amount float64, unit string, item nutrition.FoodItem) (float64, error) {
-	grams, err := units.ToBase(amount, unit, item.BaseUnit, decodeServingUnits(item.ServingUnits))
+	grams, err := units.ResolveEntered(amount, unit, item.BaseUnit, item.ServingUnits)
 	if err != nil {
-		return 0, httpx.ValidationError{Message: "unrecognised unit for this food"}
+		return 0, httpx.ValidationError{Message: units.UnrecognisedUnitMessage}
 	}
 	return grams, nil
 }
