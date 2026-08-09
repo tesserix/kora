@@ -1,5 +1,5 @@
 ---
-status: awaiting_human_verify
+status: resolved
 trigger: "Capture card: when Otto returns 2-3 weakly-matched items (per-ingredient tier follow_up from decomposeAndEstimate), every row renders \"Not sure which — tap to confirm\" with no kcal, is filtered out of loggableCandidates, and the CTA becomes a disabled \"Add 0 items to diary\" — the user cannot log at all. Root cause already identified: estimateIngredientTier (api/internal/ai/resolver.go:443) drops ingredients under the 0.70 match floor to TierFollowUp; isLoggable (apps/mobile/src/lib/candidateTier.ts:6) excludes them; DetectedCard.tsx:181-183,241-242 disables the CTA. Chosen fix: preselect Otto's top match on each uncertain row (selected by default, clearly changeable via the existing FoodPicker), so the log button is live immediately. Write the failing test first."
 created: 2026-08-09
 updated: 2026-08-09
