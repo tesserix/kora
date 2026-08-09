@@ -69,10 +69,20 @@ export function PortionField({ baseUnit, servingUnits, amount, unit, onChange }:
   // portion. This is a quantity the food row already carries — no nutrition
   // is derived, and nothing is reported until the user actually edits, so the
   // pending entry is still the named serving the server will resolve.
+  //
+  // exactUnit is independent state and can still be holding a serving NAME
+  // from an earlier exact-mode selection. Left alone, the field would open
+  // showing the serving's GRAM figure with the serving chip highlighted, and
+  // tapping the base chip would reread 16.5 g as 16.5 sachets — 272 g, the
+  // original bug verbatim. Only the call sites keeping `unit` and
+  // `servingUnits` in lockstep make that unreachable today, and that is an
+  // invariant this component cannot enforce, so it resets the unit here to
+  // match the base-unit figure it just seeded.
   const enterExactMode = () => {
     if (matchingServing && matchingServing.amount > 0) {
       setExactText(formatDisplay((matchingServing.base_amount / matchingServing.amount) * amount));
     }
+    setExactUnit(baseUnit);
     setEnteredExactMode(true);
   };
 

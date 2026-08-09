@@ -137,6 +137,38 @@ test("switching from a named serving chip to the base unit converts the count", 
   expect(onChange).toHaveBeenLastCalledWith(16.5, "g");
 });
 
+// The 272 g trap, re-armed from the other side. `exactUnit` is independent
+// state: if the escape hatch runs while it still holds a serving NAME, the
+// field shows the serving's GRAM figure with the serving chip highlighted, and
+// tapping the base chip rereads 16.5 g as 16.5 sachets. It is unreachable
+// today only because every call site keeps `unit` and `servingUnits` in
+// lockstep — an invariant this component cannot enforce, and one that
+// returning serving_units on food-log reads would break. Reproduced here by
+// letting servingUnits arrive after the unit, exactly as an async read would.
+test("the escape hatch cannot leave a serving name selected on the gram figure", async () => {
+  const onChange = jest.fn();
+  const { getByText, getByLabelText, rerender } = await render(
+    <PortionField baseUnit="g" servingUnits={[]} amount={1} unit="sachet" onChange={onChange} />,
+  );
+  await rerender(
+    <PortionField baseUnit="g" servingUnits={SACHET} amount={1} unit="sachet" onChange={onChange} />,
+  );
+
+  await fireEvent.press(getByText("Enter exact amount"));
+  expect(getByLabelText("Amount").props.value).toBe("16.5");
+
+  // The seeded figure is grams, so the gram chip is the selected one and
+  // re-tapping it changes nothing.
+  await fireEvent.press(getByText("g"));
+  expect(onChange).not.toHaveBeenCalled();
+
+  // And the serving chip is a real transition again: one sachet, not 16.5.
+  await fireEvent.press(getByText("sachet"));
+  expect(onChange).toHaveBeenLastCalledWith(1, "sachet");
+  // 16.5 sachets of 16.5 g, displayed-rounded — what the trap used to report.
+  expect(onChange).not.toHaveBeenCalledWith(272.3, "g");
+});
+
 // Re-tapping the unit already selected must not disturb an in-progress entry.
 test("reselecting the current unit reports nothing", async () => {
   const onChange = jest.fn();
