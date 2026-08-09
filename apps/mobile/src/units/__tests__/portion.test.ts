@@ -1,4 +1,41 @@
-import { formatPortion } from "../portion";
+import { baseQuantityFor, defaultServingCount, formatPortion } from "../portion";
+
+describe("defaultServingCount", () => {
+  it("recovers a multi-count label's own count", () => {
+    // Weet-Bix: "2 biscuits (30g)" parses to one 15 g biscuit, serving_grams 30.
+    expect(defaultServingCount(30, { name: "biscuit", amount: 1, base_amount: 15 })).toBe(2);
+  });
+
+  it("is one for a single-count label", () => {
+    expect(defaultServingCount(16.5, { name: "sachet", amount: 1, base_amount: 16.5 })).toBe(1);
+  });
+
+  it("survives binary floating point on an exact multiple", () => {
+    expect(defaultServingCount(49.5, { name: "sachet", amount: 1, base_amount: 16.5 })).toBe(3);
+  });
+
+  it("falls back to one serving rather than seeding a fraction", () => {
+    expect(defaultServingCount(40, { name: "biscuit", amount: 1, base_amount: 15 })).toBe(1);
+  });
+
+  it("falls back to one serving rather than seeding zero", () => {
+    expect(defaultServingCount(0, { name: "biscuit", amount: 1, base_amount: 15 })).toBe(1);
+    expect(defaultServingCount(30, { name: "biscuit", amount: 1, base_amount: 0 })).toBe(1);
+  });
+});
+
+describe("baseQuantityFor", () => {
+  const units = [{ name: "biscuit", amount: 1, base_amount: 15 }];
+
+  it("converts a serving count using the row's own base amount", () => {
+    expect(baseQuantityFor(2, "biscuit", units)).toBe(30);
+  });
+
+  it("refuses to guess for a unit the row does not carry", () => {
+    expect(baseQuantityFor(2, "cup", units)).toBeNull();
+    expect(baseQuantityFor(2, "biscuit", [{ name: "biscuit", amount: 0, base_amount: 15 }])).toBeNull();
+  });
+});
 
 describe("formatPortion", () => {
   it("shows a named serving as entered", () => {

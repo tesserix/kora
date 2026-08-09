@@ -31,6 +31,49 @@ function formatAmount(amount: number): string {
   return Number.isInteger(amount) ? String(amount) : String(Math.round(amount * 10) / 10);
 }
 
+// How close a computed count has to be to a whole number to count as one.
+// serving_grams / base_amount is exact arithmetic on figures the row already
+// carries, but 49.5 / 16.5 is 2.9999999999999996 in binary floating point.
+const COUNT_EPSILON = 1e-9;
+
+/**
+ * How many of a food's own named serving make up its default portion.
+ *
+ * The server's units.Parse deliberately normalises a multi-count label so the
+ * unit describes ONE of the thing: "2 biscuits (30g)" yields
+ * {biscuit, amount 1, base_amount 15}, while the food row's serving_grams
+ * keeps the FULL label serving of 30. Seeding a portion field from the unit's
+ * own `amount` therefore opens on half a portion.
+ *
+ * This recovers the label's count. It is a QUANTITY the food row already
+ * carries — no nutrition is derived. A count that is not a clean positive
+ * integer is not a count a stepper can honestly show, so it falls back to one
+ * serving rather than seeding a fractional or zero portion.
+ */
+export function defaultServingCount(servingGrams: number, serving: ServingUnit): number {
+  if (!(servingGrams > 0) || !(serving.base_amount > 0)) return 1;
+  const count = servingGrams / serving.base_amount;
+  const rounded = Math.round(count);
+  return rounded > 0 && Math.abs(count - rounded) < COUNT_EPSILON ? rounded : 1;
+}
+
+/**
+ * The base-unit quantity an (amount, unit) entry describes, using only the
+ * conversion the food row itself supplies. Returns null when `unit` is not one
+ * of the row's named servings — there is nothing to convert with, and guessing
+ * is exactly what this module refuses to do.
+ *
+ * Display only. The SERVER still resolves the authoritative quantity_grams
+ * from the entered pair, once, at write time; this exists so a macro preview
+ * cannot describe a different portion from the one that will actually be
+ * logged.
+ */
+export function baseQuantityFor(amount: number, unit: string, servingUnits: ServingUnit[]): number | null {
+  const serving = servingUnits.find((s) => s.name === unit);
+  if (!serving || !(serving.amount > 0)) return null;
+  return (serving.base_amount / serving.amount) * amount;
+}
+
 export function formatPortion(entry: PortionEntry): string {
   const { entered_amount, entered_unit } = entry;
 

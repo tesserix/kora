@@ -21,7 +21,7 @@ import { useInstantLog } from "@/api/useInstantLog";
 import { usePinToggle } from "@/api/usePinToggle";
 import type { FoodItem } from "@/api/types";
 import { useSavedMealEditor } from "@/components/meals/SavedMealSheetProvider";
-import { formatPortion } from "@/units/portion";
+import { baseQuantityFor, defaultServingCount, formatPortion } from "@/units/portion";
 import { foodVisual } from "@/lib/foodVisual";
 import { hslToHex } from "@/lib/color";
 import { haptics } from "@/motion";
@@ -69,11 +69,15 @@ export default function LogScreen() {
   const [q, setQ] = useState("");
   const [selected, setSelected] = useState<FoodItem | null>(null);
   // `grams` is the base-unit figure and is the ONLY thing the macro preview
-  // below reads — it only changes when the user edits the exact-mode field
-  // in the food's base unit. `enteredAmount`/`enteredUnit` track a named
-  // serving entry (e.g. "1 sachet") separately; when `enteredUnit` is set
-  // that pair — not `grams` — is what gets sent on submit, and the SERVER
-  // resolves quantity_grams from it.
+  // below reads. It tracks the CURRENT portion whichever way it was entered:
+  // a base-unit figure verbatim, or a named serving count multiplied by that
+  // serving's own base_amount (the same conversion PortionField's "(30 g)"
+  // hint shows). Letting it lag behind a serving entry is what made the card
+  // preview one portion while a different one got logged.
+  // `enteredAmount`/`enteredUnit` track a named serving entry (e.g. "1
+  // sachet") separately; when `enteredUnit` is set that pair — not `grams` —
+  // is what gets sent on submit, and the SERVER resolves quantity_grams from
+  // it.
   const [grams, setGrams] = useState(100);
   const [enteredAmount, setEnteredAmount] = useState<number | null>(null);
   const [enteredUnit, setEnteredUnit] = useState<string | null>(null);
@@ -108,12 +112,25 @@ export default function LogScreen() {
   // in exact mode instead put the serving's gram figure in the field, one tap
   // away from being reread as a serving count. A food with no named serving
   // falls back to raw base-unit entry, as before.
+  //
+  // The COUNT is not the unit's own `amount`: units.Parse normalises that to 1
+  // so the unit describes ONE of the thing, while serving_grams keeps the full
+  // label serving. Weet-Bix's "2 biscuits (30g)" would otherwise open on one
+  // 15 g biscuit — half the portion the label describes.
   function selectFood(item: FoodItem) {
-    const defaultServing = (item.serving_units ?? [])[0] ?? null;
+    const servingUnits = item.serving_units ?? [];
+    const defaultServing = servingUnits[0] ?? null;
     setSelected(item);
-    setGrams(item.serving_grams || 100);
-    setEnteredAmount(defaultServing ? defaultServing.amount : null);
-    setEnteredUnit(defaultServing ? defaultServing.name : null);
+    if (!defaultServing) {
+      setGrams(item.serving_grams || 100);
+      setEnteredAmount(null);
+      setEnteredUnit(null);
+      return;
+    }
+    const count = defaultServingCount(item.serving_grams, defaultServing);
+    setEnteredAmount(count);
+    setEnteredUnit(defaultServing.name);
+    setGrams((baseQuantityFor(count, defaultServing.name, servingUnits) ?? item.serving_grams) || 100);
   }
 
   function submit() {
@@ -149,7 +166,18 @@ export default function LogScreen() {
     const onPortionChange = (amount: number, unit: string) => {
       // An entry IN the food's own base unit is already the base-unit figure,
       // so the macro preview can follow it — no conversion is involved.
-      if (unit === baseUnit) setGrams(amount);
+      if (unit === baseUnit) {
+        setGrams(amount);
+      } else {
+        // A named serving: the row's own base_amount says what that portion is
+        // in the base unit, and PortionField already shows exactly that figure
+        // in its "(30 g)" hint. Keeping `grams` on it is what stops the macro
+        // card describing one portion while a different one is logged. Still
+        // no nutrition derived here — the SERVER resolves quantity_grams from
+        // the entered pair.
+        const base = baseQuantityFor(amount, unit, servingUnits);
+        if (base !== null) setGrams(base);
+      }
       // Only a GRAM entry may drop the entered pair. For a millilitre-based
       // food, "300 ml" entered as bare grams would be stored with a NULL unit
       // and read back as "300 g" forever. units.ToBase resolves ml→ml 1:1
@@ -163,9 +191,9 @@ export default function LogScreen() {
         setEnteredUnit(unit);
       }
     };
-    // Display-only preview — see the comment on `grams` above. It must never
-    // be driven by enteredAmount/enteredUnit: the client cannot compute what
-    // those resolve to in grams, only the server can.
+    // Display-only preview — see the comment on `grams` above. The scaling
+    // itself is never the client's business to persist: whatever this shows,
+    // the SERVER recomputes nutrition from its own resolved quantity_grams.
     const scale = grams / 100;
     const vis = foodVisual(selected.name, meal);
     return (
