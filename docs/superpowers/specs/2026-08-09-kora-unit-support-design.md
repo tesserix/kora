@@ -142,7 +142,10 @@ Backfill is trivial at current scale — production holds 7,900 `food_items` (on
 2. A one-off re-fetch of the 6 OFF-provenance rows picks up their true `serving_quantity_unit`
    and populates `serving_units`.
 3. `serving_units` is populated for seeded rows by running `Parse` over their existing
-   `serving_desc` as part of the migration's data step.
+   `serving_desc`, falling back to `Table` on a parse miss. This runs as a Go command
+   (`cmd/backfillunits`) rather than a migration data step, because migration SQL cannot call
+   `Parse`. It mirrors the existing `cmd/seed` job already deployed as `kora-api-seed`, and is
+   idempotent — a row that already has units is skipped, so re-running is safe.
 4. `entered_amount`/`entered_unit` stay null on the 6 existing logs. `formatPortion` handles null.
 
 The down migration drops all six columns. Lossless, because `quantity_grams` is never modified.
