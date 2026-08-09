@@ -1,5 +1,5 @@
 ---
-status: investigating
+status: awaiting_human_verify
 trigger: "Capture card: when Otto returns 2-3 weakly-matched items (per-ingredient tier follow_up from decomposeAndEstimate), every row renders \"Not sure which — tap to confirm\" with no kcal, is filtered out of loggableCandidates, and the CTA becomes a disabled \"Add 0 items to diary\" — the user cannot log at all. Root cause already identified: estimateIngredientTier (api/internal/ai/resolver.go:443) drops ingredients under the 0.70 match floor to TierFollowUp; isLoggable (apps/mobile/src/lib/candidateTier.ts:6) excludes them; DetectedCard.tsx:181-183,241-242 disables the CTA. Chosen fix: preselect Otto's top match on each uncertain row (selected by default, clearly changeable via the existing FoodPicker), so the log button is live immediately. Write the failing test first."
 created: 2026-08-09
 updated: 2026-08-09
@@ -39,20 +39,79 @@ Two separate barcode logs — the multi-item capture path was not usable.
 
 ## Current Focus
 
-hypothesis: Ingredients from `decomposeAndEstimate` scoring under the 0.70 floor are assigned
-`TierFollowUp` by `estimateIngredientTier` (api/internal/ai/resolver.go:443). `isLoggable`
-(apps/mobile/src/lib/candidateTier.ts:6) treats any `follow_up` candidate as non-loggable, so
-`loggableCandidates` returns empty, `nothingToLog` is true, and the CTA is disabled
-(DetectedCard.tsx:181-183, 241-242). Nothing preselects the top match, so an all-weak resolution
-is unloggable without one manual FoodPicker round-trip per row.
+status: GREEN. Fix implemented, four target suites pass, full mobile suite green, tsc clean.
 
-test: Render DetectedCard with a resolution whose candidates all carry `tier: "follow_up"`;
-assert the CTA is enabled and labelled for the full candidate count, and that each row shows its
-top-match name as the selected default rather than a bare "tap to confirm" placeholder.
+next_action: Human verification — run a multi-item capture whose ingredients fall below the 0.70
+match floor and confirm the card preselects each row, reads "{grams}g · Best guess — tap to change",
+and logs in one tap.
 
-expecting: Test fails on current main — CTA is disabled and labelled "Add 0 items to diary".
+reasoning_checkpoint:
+  hypothesis: "A `follow_up` candidate is a WEAK match, not an absent one — decomposeAndEstimate
+    (resolver.go:485-500) populates Item, PortionGrams and Kcal on every candidate it emits,
+    including the ones estimateIngredientTier drops to TierFollowUp. The client nevertheless
+    treats `follow_up` as unloggable (candidateTier.ts:6), which is what empties
+    loggableCandidates, sets nothingToLog, and disables the CTA. The defect is the client
+    conflating 'weak' with 'unusable'."
+  confirming_evidence:
+    - "resolver.go:490-500 — kcal is computed as top.Item.KcalPer100g * grams / 100 and set on
+      the candidate BEFORE estimateIngredientTier runs; the tier never nils out the payload.
+      So the data needed to preselect is already on the wire."
+    - "resolver.go:511-521 — FollowUpQuestion is deliberately left empty on this path precisely
+      so the client renders the detected-card and uses per-item tiers. The server's intent was
+      per-row disambiguation, not a dead end."
+    - "DetectedCard.tsx:181-183,241-242 — nothingToLog/ctaLabel/disabled all derive from
+      loggableCandidates, so an all-follow_up resolution yields a disabled 'Add 0 items'."
+    - "Test run 2026-08-09: 18 tests fail on current main against the new spec across
+      candidateTier, resolutionKcal, DetectedCard and capture suites. The all-uncertain
+      DetectedCard render printed 'Add 1 item to diary' with no 'Change …' affordance."
+  falsification_test: "If the server omitted item/kcal/portion_grams on follow_up candidates,
+    preselection would require the client to invent nutrition and the hypothesis would be dead.
+    Checked resolver.go:485-500 directly — it does not omit them."
+  fix_rationale: "Split the single overloaded predicate in two. `isLoggable` stops meaning
+    'confident enough' (it now covers every candidate, because every candidate carries a real
+    server-priced item) and a new `isUncertain` (tier === 'follow_up') carries the presentation
+    concern alone. That addresses the root cause — the conflation — rather than special-casing
+    the disabled button. `contributesKcal` keys off `kcal_unknown` only, so a preselected row
+    contributes the server's own kcal and the header total agrees with its own rows, while a
+    hand-picked row still shows '—'."
+  blind_spots:
+    - "Not tested: whether the server ever emits a follow_up candidate with kcal 0 from a real
+      index row. If so a legitimate 0 would render as '0 kcal' — but that is pre-existing
+      behaviour for auto/confirm rows too, not introduced here."
+    - "The unit defect (300 ml stored as 300 g, barcode.go:75) is untouched and out of scope;
+      a preselected liquid row will still say 'g'."
+    - "Preselection is a product-risk change, not just a rendering one: a weak guess can now be
+      logged in one tap. Mitigated by the visual treatment below, but only real usage confirms
+      the caption is loud enough."
 
-next_action: Write the failing test first (TDD), then implement preselect-top-match.
+## Design judgement (recorded per the fix brief)
+
+Preselecting means a weak match can be logged without the user reading it. The uncertain row is
+therefore kept deliberately distinguishable from a confident one, on three axes:
+
+1. Caption reads `{grams}g · Best guess — tap to change` instead of the confident row's bare
+   `{grams}g`. It states the portion, that this is a guess, and the affordance, in one line —
+   the previous rows gave no hint they were tappable at all, which is part of why the card read
+   as broken.
+2. The tile keeps the `help-circle` icon rather than the food icon.
+3. Macro chips stay OFF the weak row. Fewer asserted numbers for a match we are not confident
+   in, and a second, non-textual cue that the two rows are not the same kind of thing.
+
+What it does NOT do: invent nutrition. The row's kcal and portion_grams are the server's own
+values for its top match, rendered verbatim. The `kcal_unknown` "—" path is untouched and still
+applies only to rows the user replaced by hand via FoodPicker (capture.tsx:732-742).
+
+## TDD
+
+tdd_checkpoint:
+  status: green
+  test_files:
+    - apps/mobile/src/lib/__tests__/candidateTier.test.ts
+    - apps/mobile/src/lib/__tests__/resolutionKcal.test.ts
+    - apps/mobile/src/components/capture/__tests__/DetectedCard.test.tsx
+    - apps/mobile/app/__tests__/capture.test.tsx
+  result: "RED: 18 failed / 13+62 passed. GREEN: 93 passed / 0 failed across the four suites;
+    full mobile suite 939 passed / 135 suites, no regression."
 
 ## Decision (pre-agreed with user)
 
@@ -107,7 +166,47 @@ Schema-wide there is no unit column: `food_items` has only `serving_grams` + `*_
 
 ## Resolution
 
-root_cause:
-fix:
-verification:
+root_cause: The client conflates "weak match" with "unusable". decomposeAndEstimate emits fully
+  priced candidates (item + portion_grams + kcal) even when estimateIngredientTier drops them to
+  TierFollowUp, but apps/mobile/src/lib/candidateTier.ts:6 `isLoggable` excludes every follow_up
+  row. loggableCandidates therefore returns empty for an all-weak capture, DetectedCard.tsx:181-183
+  sets nothingToLog and "Add 0 items to diary", and :241-242 disables the CTA — the capture cannot
+  be logged at all despite the server having sent a usable answer for every row.
+fix: Split the one overloaded predicate into two, so "can this be logged" and "how confident is
+  it" stop being the same question.
+  - `candidateTier.ts` — `isLoggable` now returns true for every candidate (the server prices
+    every row it emits, including follow_up ones); new `isUncertain(candidate)` carries the
+    presentation concern alone (`tier === "follow_up"`, so an absent tier reads as confident);
+    `contributesKcal` keys off `kcal_unknown` alone, so a preselected row contributes the server's
+    own kcal and a hand-picked one still contributes nothing.
+  - `DetectedCard.tsx` — the row's uncertain treatment derives from `isUncertain`, not from
+    `!isLoggable`. The weak row keeps its help-circle tile and its macro chips stay off, and its
+    caption now reads `{grams}g · Best guess — tap to change` (portion, provenance of the choice
+    and the affordance in one line) instead of "Not sure which — tap to confirm". Its
+    accessibility label became `Change {name}`. Because `showsKcal` is now `contributesKcal`
+    alone, the preselected row prints the server's own kcal verbatim and the header total agrees
+    with its own rows.
+  - `capture.tsx` — refreshed the stale handleAddToDiary comment that documented dropping
+    follow_up rows from the batch.
+  No client-side nutrition was introduced: every kcal and portion on a preselected row is the
+  server's own value for its top match, and the `kcal_unknown` "—" path still applies only to rows
+  the user replaced by hand via FoodPicker. No Go code and no server tier threshold was touched.
+verification: |
+  - Four target suites: 93 passed / 0 failed (were 18 failed at RED).
+  - Full apps/mobile suite: 939 passed / 135 suites, 0 failed — no regression.
+  - The hand-picked guard tests still pass specifically: "a hand-picked row is loggable but
+    contributes no kcal" (candidateTier), "a hand-picked row is loggable but still shows no kcal"
+    (DetectedCard — asserts "0 kcal" absent and "—" present), "a resolution whose every candidate
+    has an unknown kcal shows a dash, not a fabricated zero" (resolutionKcal), and "picking a food
+    for an uncertain item replaces the guess without inventing a kcal" (capture).
+  - `npx tsc --noEmit` clean. `npm run lint` cannot run in this checkout (eslint is not installed
+    — pre-existing, unrelated to this change).
+  - Not yet verified by a human against a real weak-match capture on device.
 files_changed:
+  - apps/mobile/src/lib/candidateTier.ts
+  - apps/mobile/src/components/capture/DetectedCard.tsx
+  - apps/mobile/app/capture.tsx
+  - apps/mobile/src/lib/__tests__/candidateTier.test.ts
+  - apps/mobile/src/lib/__tests__/resolutionKcal.test.ts
+  - apps/mobile/src/components/capture/__tests__/DetectedCard.test.tsx
+  - apps/mobile/app/__tests__/capture.test.tsx
