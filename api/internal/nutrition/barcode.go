@@ -5,10 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
+
+	"github.com/tesserix/kora/api/internal/units"
 )
 
 // OFFClient fetches a product from OpenFoodFacts. It returns (nil, nil) when the
@@ -31,7 +35,7 @@ func NewHTTPOFFClient() HTTPOFFClient {
 }
 
 func (c HTTPOFFClient) Fetch(ctx context.Context, barcode string) (*FoodItem, error) {
-	url := fmt.Sprintf("%s/api/v2/product/%s.json?fields=product_name,brands,nutriments,serving_quantity", c.BaseURL, barcode)
+	url := fmt.Sprintf("%s/api/v2/product/%s.json?fields=product_name,brands,nutriments,serving_quantity,serving_quantity_unit,serving_size", c.BaseURL, barcode)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("nutrition: off request: %w", err)
@@ -57,7 +61,9 @@ func (c HTTPOFFClient) Fetch(ctx context.Context, barcode string) (*FoodItem, er
 				Fat100g        float64 `json:"fat_100g"`
 				Fiber100g      float64 `json:"fiber_100g"`
 			} `json:"nutriments"`
-			ServingQuantity float64 `json:"serving_quantity"`
+			ServingQuantity     float64 `json:"serving_quantity"`
+			ServingQuantityUnit string  `json:"serving_quantity_unit"`
+			ServingSize         string  `json:"serving_size"`
 		} `json:"product"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
@@ -67,18 +73,45 @@ func (c HTTPOFFClient) Fetch(ctx context.Context, barcode string) (*FoodItem, er
 		return nil, nil // unknown or unusable
 	}
 	code := barcode
-	return &FoodItem{
+	item := &FoodItem{
 		Name:           body.Product.ProductName,
 		Brand:          body.Product.Brands,
 		Provenance:     ProvenanceOFF,
 		Barcode:        &code,
+		ServingDesc:    body.Product.ServingSize,
 		ServingGrams:   body.Product.ServingQuantity,
+		BaseUnit:       baseUnitFor(body.Product.ServingQuantityUnit),
 		KcalPer100g:    body.Product.Nutriments.EnergyKcal100g,
 		ProteinPer100g: body.Product.Nutriments.Protein100g,
 		CarbsPer100g:   body.Product.Nutriments.Carbs100g,
 		FatPer100g:     body.Product.Nutriments.Fat100g,
 		FiberPer100g:   body.Product.Nutriments.Fiber100g,
-	}, nil
+	}
+	// A parse miss is not a failure — the product simply has no named serving
+	// and the client falls back to raw base-unit entry. Logged so the curated
+	// table can be grown from real observed text rather than guesswork.
+	if parsed, err := units.Parse(body.Product.ServingSize); err == nil {
+		if encoded, mErr := json.Marshal(parsed); mErr == nil {
+			item.ServingUnits = encoded
+		}
+	} else {
+		slog.DebugContext(ctx, "nutrition: no serving unit parsed from OFF label",
+			"barcode", barcode, "serving_size", body.Product.ServingSize)
+	}
+	return item, nil
+}
+
+// baseUnitFor maps OpenFoodFacts' serving_quantity_unit onto our two-value
+// base unit. OFF reports a liquid's nutriments per 100 ml already, so this is
+// purely a labelling decision — no numeric conversion is implied. Anything
+// unrecognised falls back to grams, which is what every pre-000026 row is.
+func baseUnitFor(offUnit string) string {
+	switch strings.ToLower(strings.TrimSpace(offUnit)) {
+	case "ml", "l":
+		return "ml"
+	default:
+		return "g"
+	}
 }
 
 // ResolveBarcode returns a FoodItem for a barcode: local index first, then the
