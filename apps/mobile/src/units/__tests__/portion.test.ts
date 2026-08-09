@@ -9,8 +9,17 @@ describe("formatPortion", () => {
     expect(formatPortion({ quantity_grams: 33, entered_amount: 2, entered_unit: "sachet" })).toBe("2 sachets");
   });
 
+  it("does not double-pluralise an already-plural serving name", () => {
+    expect(formatPortion({ quantity_grams: 80, entered_amount: 2, entered_unit: "slices" })).toBe("2 slices");
+  });
+
   it("keeps a fractional amount readable", () => {
     expect(formatPortion({ quantity_grams: 79, entered_amount: 0.5, entered_unit: "cup" })).toBe("0.5 cup");
+  });
+
+  it("renders fractional amounts above one correctly", () => {
+    expect(formatPortion({ quantity_grams: 135, entered_amount: 1.5, entered_unit: "sachet" })).toBe("1.5 sachets");
+    expect(formatPortion({ quantity_grams: 197, entered_amount: 2.5, entered_unit: "cup" })).toBe("2.5 cups");
   });
 
   it("shows a volume in ml for a liquid row", () => {
@@ -25,11 +34,23 @@ describe("formatPortion", () => {
     expect(formatPortion({ quantity_grams: 140 })).toBe("140 g");
   });
 
+  it("renders fractional legacy gram values with one decimal preserved", () => {
+    expect(formatPortion({ quantity_grams: 16.5 })).toBe("16.5 g");
+  });
+
+  it("renders whole legacy gram values without a trailing decimal", () => {
+    expect(formatPortion({ quantity_grams: 140 })).toBe("140 g");
+  });
+
   it("falls back to the base unit for a legacy liquid log", () => {
     expect(formatPortion({ quantity_grams: 200, base_unit: "ml" })).toBe("200 ml");
   });
 
-  it("rounds a legacy gram figure for display", () => {
-    expect(formatPortion({ quantity_grams: 16.5 })).toBe("17 g");
+  it("falls back to legacy path when amount is present but unit is null", () => {
+    expect(formatPortion({ quantity_grams: 140, entered_amount: 140, entered_unit: null })).toBe("140 g");
+  });
+
+  it("falls back to legacy path when unit is present but amount is null", () => {
+    expect(formatPortion({ quantity_grams: 140, entered_amount: null, entered_unit: "g" })).toBe("140 g");
   });
 });

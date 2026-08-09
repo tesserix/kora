@@ -38,13 +38,14 @@ export function formatPortion(entry: PortionEntry): string {
   // food's own base unit — that is all the information there is.
   if (entered_amount == null || !entered_unit) {
     const unit = entry.base_unit === "ml" ? "ml" : "g";
-    return `${Math.round(entry.quantity_grams)} ${unit}`;
+    return `${formatAmount(entry.quantity_grams)} ${unit}`;
   }
 
   const unit = entered_unit.toLowerCase();
   if (BULK_UNITS.has(unit)) {
     return `${formatAmount(entered_amount)} ${unit}`;
   }
-  const plural = entered_amount > 1 ? `${entered_unit}s` : entered_unit;
+  // Pluralise only if amount > 1, and only if the name doesn't already end in "s"
+  const plural = entered_amount > 1 && !entered_unit.endsWith("s") ? `${entered_unit}s` : entered_unit;
   return `${formatAmount(entered_amount)} ${plural}`;
 }
