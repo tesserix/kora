@@ -97,37 +97,50 @@ func TestNeedsBaseUnitRefetch(t *testing.T) {
 
 func TestBaseUnitPlan(t *testing.T) {
 	t.Run("a millilitre product corrects a gram row", func(t *testing.T) {
-		got, ok := baseUnitPlan(nutrition.FoodItem{BaseUnit: "g"}, &nutrition.FoodItem{BaseUnit: "ml"})
+		got, ok := baseUnitPlan(nutrition.FoodItem{BaseUnit: "g"}, "ml")
 		assert.True(t, ok)
 		assert.Equal(t, "ml", got)
 	})
 	t.Run("an already-correct row is not rewritten", func(t *testing.T) {
-		_, ok := baseUnitPlan(nutrition.FoodItem{BaseUnit: "ml"}, &nutrition.FoodItem{BaseUnit: "ml"})
+		_, ok := baseUnitPlan(nutrition.FoodItem{BaseUnit: "ml"}, "ml")
 		assert.False(t, ok)
 	})
-	t.Run("an absent fetch writes nothing", func(t *testing.T) {
-		_, ok := baseUnitPlan(nutrition.FoodItem{BaseUnit: "g"}, nil)
+	// The residual this signature exists for: nutrition.BaseUnitFor maps "" to
+	// "g", so planning off the already-defaulted BaseUnit turned "OFF publishes
+	// no unit" into "OFF says grams" and downgraded correct ml rows.
+	t.Run("an absent serving unit never downgrades a millilitre row", func(t *testing.T) {
+		_, ok := baseUnitPlan(nutrition.FoodItem{BaseUnit: "ml"}, "")
 		assert.False(t, ok)
+		_, ok = baseUnitPlan(nutrition.FoodItem{BaseUnit: "ml"}, "   ")
+		assert.False(t, ok)
+	})
+	t.Run("an explicit gram unit still corrects a millilitre row", func(t *testing.T) {
+		got, ok := baseUnitPlan(nutrition.FoodItem{BaseUnit: "ml"}, "g")
+		assert.True(t, ok)
+		assert.Equal(t, "g", got)
 	})
 }
 
-// fakeOFF is an OFFClient double: it answers from a barcode map and can be
-// made to fail, so the job's skip-and-continue behaviour is testable.
+// fakeOFF is a ServingUnitFetcher double: it answers raw serving units from a
+// barcode map and can be made to fail or to forget a product, so the job's
+// skip-and-continue behaviour is testable. A barcode present in byCode with an
+// empty string is a product OFF still knows but publishes no unit for.
 type fakeOFF struct {
-	byCode map[string]*nutrition.FoodItem
+	byCode map[string]string
 	fail   map[string]bool
 	calls  []string
 }
 
-func (f *fakeOFF) Fetch(ctx context.Context, barcode string) (*nutrition.FoodItem, error) {
+func (f *fakeOFF) FetchServingUnit(ctx context.Context, barcode string) (string, bool, error) {
 	f.calls = append(f.calls, barcode)
 	if f.fail[barcode] {
-		return nil, errors.New("off unreachable")
+		return "", false, errors.New("off unreachable")
 	}
-	return f.byCode[barcode], nil
+	raw, found := f.byCode[barcode]
+	return raw, found, nil
 }
 
-var _ nutrition.OFFClient = (*fakeOFF)(nil)
+var _ nutrition.ServingUnitFetcher = (*fakeOFF)(nil)
 
 func testDB(t *testing.T) *gorm.DB {
 	t.Helper()
@@ -170,7 +183,7 @@ func TestRunCorrectsBaseUnitForOFFRows(t *testing.T) {
 		Barcode: &code, BaseUnit: "g", ServingDesc: "1 portion (300 ml)", KcalPer100g: 52,
 	})
 
-	off := &fakeOFF{byCode: map[string]*nutrition.FoodItem{code: {BaseUnit: "ml"}}}
+	off := &fakeOFF{byCode: map[string]string{code: "ml"}}
 	_, err := run(context.Background(), db.Where("id = ?", item.ID), options{OFF: off})
 	require.NoError(t, err)
 
@@ -187,7 +200,7 @@ func TestRunSkipsRowsWhoseBaseUnitIsAlreadyRight(t *testing.T) {
 		Barcode: &code, BaseUnit: "ml", ServingDesc: "per serving", KcalPer100g: 30,
 	})
 
-	off := &fakeOFF{byCode: map[string]*nutrition.FoodItem{code: {BaseUnit: "ml"}}}
+	off := &fakeOFF{byCode: map[string]string{code: "ml"}}
 	s, err := run(context.Background(), db.Where("id = ?", item.ID), options{OFF: off})
 	require.NoError(t, err)
 
@@ -224,7 +237,7 @@ func TestRunDryRunWritesNothing(t *testing.T) {
 		Barcode: &code, BaseUnit: "g", ServingDesc: "1 portion (300 ml)", KcalPer100g: 52,
 	})
 
-	off := &fakeOFF{byCode: map[string]*nutrition.FoodItem{code: {BaseUnit: "ml"}}}
+	off := &fakeOFF{byCode: map[string]string{code: "ml"}}
 	s, err := run(context.Background(), db.Where("id = ?", item.ID), options{DryRun: true, OFF: off})
 	require.NoError(t, err)
 
@@ -235,6 +248,74 @@ func TestRunDryRunWritesNothing(t *testing.T) {
 	got := reload(t, db, item.ID)
 	assert.Equal(t, "g", got.BaseUnit, "a dry run must not write base_unit")
 	assert.Empty(t, units.DecodeServingUnits(got.ServingUnits), "a dry run must not write serving_units")
+}
+
+// TestRunLeavesAMillilitreRowAloneWhenOFFPublishesNoUnit is the regression pin
+// for the residual: nutrition.BaseUnitFor maps an absent serving_quantity_unit
+// to "g", so planning off the already-defaulted BaseUnit made "OFF no longer
+// publishes a unit" indistinguishable from "OFF says grams" — and the job
+// would have written g over this correctly-ml row, re-creating the exact bug
+// it exists to undo.
+func TestRunLeavesAMillilitreRowAloneWhenOFFPublishesNoUnit(t *testing.T) {
+	db := testDB(t)
+	code := "no-unit-" + uuid.NewString()
+	item := seedItem(t, db, nutrition.FoodItem{
+		Name: "Drink OFF forgot the unit for", Provenance: nutrition.ProvenanceOFF,
+		Barcode: &code, BaseUnit: "ml", ServingDesc: "per serving", KcalPer100g: 40,
+	})
+
+	// OFF still knows the product; it just publishes no serving_quantity_unit.
+	off := &fakeOFF{byCode: map[string]string{code: ""}}
+	s, err := run(context.Background(), db.Where("id = ?", item.ID), options{OFF: off})
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, s.BaseUnitAbsent)
+	assert.Equal(t, 0, s.BaseUnitWritten)
+	assert.Equal(t, 0, s.BaseUnitFailed, "an absent unit is not a fetch failure")
+	assert.Equal(t, "ml", reload(t, db, item.ID).BaseUnit, "absent evidence must never downgrade a correct row")
+}
+
+// TestRunDryRunNamesBaseUnitTransitions makes a dry run reviewable: a bare
+// count of base_unit changes tells nobody WHICH rows would be rewritten.
+func TestRunDryRunNamesBaseUnitTransitions(t *testing.T) {
+	db := testDB(t)
+	code := "named-" + uuid.NewString()
+	item := seedItem(t, db, nutrition.FoodItem{
+		Name: "Correctable drink", Provenance: nutrition.ProvenanceOFF,
+		Barcode: &code, BaseUnit: "g", ServingDesc: "per serving", KcalPer100g: 40,
+	})
+
+	off := &fakeOFF{byCode: map[string]string{code: "ml"}}
+	s, err := run(context.Background(), db.Where("id = ?", item.ID), options{DryRun: true, OFF: off})
+	require.NoError(t, err)
+
+	require.Len(t, s.BaseUnitSamples, 1)
+	assert.Contains(t, s.BaseUnitSamples[0], "Correctable drink")
+	assert.Contains(t, s.BaseUnitSamples[0], "g → ml")
+	assert.Empty(t, s.BaseUnitDowngrades, "a g → ml correction is not a downgrade")
+}
+
+// TestRunReportsAMillilitreDowngradeSeparately keeps the one change that must
+// never slip past a dry run unseen out of the capped sample list.
+func TestRunReportsAMillilitreDowngradeSeparately(t *testing.T) {
+	db := testDB(t)
+	code := "downgrade-" + uuid.NewString()
+	item := seedItem(t, db, nutrition.FoodItem{
+		Name: "Relabelled drink", Provenance: nutrition.ProvenanceOFF,
+		Barcode: &code, BaseUnit: "ml", ServingDesc: "per serving", KcalPer100g: 40,
+	})
+
+	// OFF explicitly says grams — the only basis on which a downgrade is
+	// allowed to happen at all.
+	off := &fakeOFF{byCode: map[string]string{code: "g"}}
+	s, err := run(context.Background(), db.Where("id = ?", item.ID), options{DryRun: true, OFF: off})
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, s.BaseUnitWritten)
+	require.Len(t, s.BaseUnitDowngrades, 1)
+	assert.Contains(t, s.BaseUnitDowngrades[0], "Relabelled drink")
+	assert.Contains(t, s.BaseUnitDowngrades[0], "ml → g")
+	assert.Empty(t, s.BaseUnitSamples, "a downgrade is reported louder, not twice")
 }
 
 // TestRunDryRunSamplesCuratedGuesses proves the curated-table guesses — the

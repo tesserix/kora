@@ -26,9 +26,11 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"log"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -49,6 +51,10 @@ const offPause = 1200 * time.Millisecond
 // fallbackSampleLimit caps how many curated-table matches a dry run prints.
 // The point is to make the guesses inspectable, not to dump the table.
 const fallbackSampleLimit = 25
+
+// baseUnitSampleLimit caps how many base_unit transitions a run names. ml → g
+// downgrades bypass this cap entirely — see stats.BaseUnitDowngrades.
+const baseUnitSampleLimit = 50
 
 // Sources of a serving_units payload, reported separately by a dry run: a
 // row's own label is evidence, the curated name table is a category-level
@@ -101,17 +107,26 @@ func needsBaseUnitRefetch(item nutrition.FoodItem) bool {
 	return item.Provenance == nutrition.ProvenanceOFF && item.Barcode != nil && *item.Barcode != ""
 }
 
-// baseUnitPlan reports the corrected base unit for a row given the freshly
-// fetched product, or ok=false when nothing should be written. A row whose
-// base_unit is already right is left alone, so re-running the job is a no-op.
-func baseUnitPlan(item nutrition.FoodItem, fetched *nutrition.FoodItem) (string, bool) {
-	if fetched == nil || fetched.BaseUnit == "" {
+// baseUnitPlan reports the corrected base unit for a row given the raw
+// serving_quantity_unit OpenFoodFacts currently publishes, or ok=false when
+// nothing should be written. A row whose base_unit is already right is left
+// alone, so re-running the job is a no-op.
+//
+// The raw field is deliberately what this takes. nutrition.BaseUnitFor maps
+// ANYTHING unrecognised — an absent unit included — onto "g", so a fetched
+// FoodItem's BaseUnit can never be empty and "OFF no longer publishes a unit"
+// is indistinguishable from "OFF says grams". Correcting on that would write g
+// over a row that is already correctly ml, silently re-creating the very bug
+// this job exists to fix. Absent evidence is not evidence of grams.
+func baseUnitPlan(item nutrition.FoodItem, rawServingUnit string) (string, bool) {
+	if strings.TrimSpace(rawServingUnit) == "" {
 		return "", false
 	}
-	if fetched.BaseUnit == item.BaseUnit {
+	base := nutrition.BaseUnitFor(rawServingUnit)
+	if base == item.BaseUnit {
 		return "", false
 	}
-	return fetched.BaseUnit, true
+	return base, true
 }
 
 // stats is what one pass of the job did (or, in a dry run, would have done).
@@ -124,14 +139,24 @@ type stats struct {
 	BaseUnitWritten int
 	BaseUnitFetched int
 	BaseUnitFailed  int
+	// BaseUnitAbsent counts rows OFF still knows but publishes no
+	// serving_quantity_unit for. These are deliberately left alone.
+	BaseUnitAbsent int
+	// BaseUnitSamples names base_unit transitions ("Milk: g → ml") so a dry
+	// run is inspectable rather than a bare count. Capped.
+	BaseUnitSamples []string
+	// BaseUnitDowngrades names every ml → g transition, uncapped. A drink
+	// being relabelled a solid is the one change that must never slip past a
+	// dry run unseen, and it should be vanishingly rare.
+	BaseUnitDowngrades []string
 }
 
 type options struct {
 	DryRun bool
-	// OFF is the client used to re-read base_unit for OFF-provenance rows.
+	// OFF re-reads the RAW serving_quantity_unit for OFF-provenance rows.
 	// Nil disables the base_unit half entirely (used by tests that only
 	// exercise the serving_units half).
-	OFF nutrition.OFFClient
+	OFF nutrition.ServingUnitFetcher
 	// Pause between OFF requests. Zero in tests.
 	Pause time.Duration
 }
@@ -167,9 +192,20 @@ func report(dryRun bool, s stats) {
 		"base_unit_rows", s.BaseUnitWritten,
 		"off_fetched", s.BaseUnitFetched,
 		"off_failed", s.BaseUnitFailed,
+		"off_unit_absent", s.BaseUnitAbsent,
 	)
 	for _, sample := range s.FallbackSamples {
 		slog.Info("backfillunits: curated-table guess", "food", sample)
+	}
+	// A count alone makes a dry run unreviewable — the whole point is to see
+	// WHICH rows change before thousands are rewritten.
+	for _, sample := range s.BaseUnitSamples {
+		slog.Info("backfillunits: base_unit change", "change", sample)
+	}
+	// Louder, and never truncated: relabelling a millilitre row as grams is
+	// exactly the corruption this job was written to undo.
+	for _, sample := range s.BaseUnitDowngrades {
+		slog.Warn("backfillunits: base_unit DOWNGRADE ml → g, review before applying", "change", sample)
 	}
 }
 
@@ -222,9 +258,11 @@ func run(ctx context.Context, db *gorm.DB, opts options) (stats, error) {
 	return s, nil
 }
 
-// refetchBaseUnit asks OpenFoodFacts for the row's product and reports the
-// corrected base unit. A fetch failure is counted and swallowed: one
-// unreachable product must never fail a job that spans thousands of rows.
+// refetchBaseUnit asks OpenFoodFacts for the row's raw serving_quantity_unit
+// and reports the corrected base unit. A fetch failure is counted and
+// swallowed: one unreachable product must never fail a job that spans
+// thousands of rows. So is an absent unit — with nothing published there is
+// nothing to correct against, and defaulting would downgrade a correct row.
 func (s *stats) refetchBaseUnit(ctx context.Context, opts options, item nutrition.FoodItem) (string, bool) {
 	if opts.Pause > 0 {
 		select {
@@ -234,18 +272,41 @@ func (s *stats) refetchBaseUnit(ctx context.Context, opts options, item nutritio
 		}
 	}
 	s.BaseUnitFetched++
-	fetched, err := opts.OFF.Fetch(ctx, *item.Barcode)
+	raw, found, err := opts.OFF.FetchServingUnit(ctx, *item.Barcode)
 	if err != nil {
 		s.BaseUnitFailed++
 		slog.WarnContext(ctx, "backfillunits: OFF fetch failed, leaving base_unit alone",
 			"error", err, "barcode", *item.Barcode, "food", item.Name)
 		return "", false
 	}
-	if fetched == nil {
+	if !found {
 		s.BaseUnitFailed++
 		slog.WarnContext(ctx, "backfillunits: OFF no longer knows this product",
 			"barcode", *item.Barcode, "food", item.Name)
 		return "", false
 	}
-	return baseUnitPlan(item, fetched)
+	if strings.TrimSpace(raw) == "" {
+		s.BaseUnitAbsent++
+		slog.InfoContext(ctx, "backfillunits: OFF publishes no serving unit, leaving base_unit alone",
+			"barcode", *item.Barcode, "food", item.Name, "base_unit", item.BaseUnit)
+		return "", false
+	}
+	base, ok := baseUnitPlan(item, raw)
+	if ok {
+		s.recordBaseUnitChange(item, base)
+	}
+	return base, ok
+}
+
+// recordBaseUnitChange makes a transition inspectable by name, which a bare
+// count never is.
+func (s *stats) recordBaseUnitChange(item nutrition.FoodItem, to string) {
+	change := fmt.Sprintf("%s (%s): %s → %s", item.Name, *item.Barcode, item.BaseUnit, to)
+	if item.BaseUnit == "ml" && to == "g" {
+		s.BaseUnitDowngrades = append(s.BaseUnitDowngrades, change)
+		return
+	}
+	if len(s.BaseUnitSamples) < baseUnitSampleLimit {
+		s.BaseUnitSamples = append(s.BaseUnitSamples, change)
+	}
 }

@@ -319,3 +319,39 @@ func TestResolveBarcodeRetiredLocalRowUnknownToOFFReturnsCleanNotFound(t *testin
 	require.NoError(t, tx.Raw("SELECT deleted_at IS NOT NULL FROM food_items WHERE id = ?", retired.ID).Scan(&deletedAtSet).Error)
 	require.True(t, deletedAtSet, "the retired row must remain retired")
 }
+
+// TestFetchServingUnitReportsTheRawField pins the distinction Fetch cannot
+// make: BaseUnitFor defaults an absent serving_quantity_unit to "g", so a
+// caller correcting an existing row needs the raw field to tell "OFF publishes
+// nothing" apart from "OFF says grams".
+func TestFetchServingUnitReportsTheRawField(t *testing.T) {
+	t.Run("a published unit comes back verbatim", func(t *testing.T) {
+		srv := offStubServer(t, offProduct{ProductName: "Milk", ServingQuantityUnit: "ml", EnergyKcal100g: 52})
+		c := HTTPOFFClient{BaseURL: srv.URL, Client: srv.Client()}
+		raw, found, err := c.FetchServingUnit(context.Background(), "123")
+		require.NoError(t, err)
+		assert.True(t, found)
+		assert.Equal(t, "ml", raw)
+	})
+
+	t.Run("an absent unit is empty, not grams", func(t *testing.T) {
+		srv := offStubServer(t, offProduct{ProductName: "Mystery", EnergyKcal100g: 52})
+		c := HTTPOFFClient{BaseURL: srv.URL, Client: srv.Client()}
+		raw, found, err := c.FetchServingUnit(context.Background(), "123")
+		require.NoError(t, err)
+		assert.True(t, found, "OFF still knows the product")
+		assert.Empty(t, raw)
+		assert.Equal(t, "g", BaseUnitFor(raw), "and this is precisely why the raw field is needed")
+	})
+
+	t.Run("an unknown product is not found", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		t.Cleanup(srv.Close)
+		c := HTTPOFFClient{BaseURL: srv.URL, Client: srv.Client()}
+		_, found, err := c.FetchServingUnit(context.Background(), "123")
+		require.NoError(t, err)
+		assert.False(t, found)
+	})
+}
