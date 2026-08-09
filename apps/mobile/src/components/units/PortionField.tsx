@@ -62,7 +62,19 @@ export function PortionField({ baseUnit, servingUnits, amount, unit, onChange }:
     onChange(amount - 1, unit);
   };
 
-  const enterExactMode = () => setEnteredExactMode(true);
+  // Leaving a named serving for exact entry must not relabel the COUNT as a
+  // base-unit figure: "2" sachets becoming "2 g" is the same reinterpretation
+  // the unit chips make, seen from the other side. Seed the field from the
+  // serving's own base amount instead, so it keeps describing the same
+  // portion. This is a quantity the food row already carries — no nutrition
+  // is derived, and nothing is reported until the user actually edits, so the
+  // pending entry is still the named serving the server will resolve.
+  const enterExactMode = () => {
+    if (matchingServing && matchingServing.amount > 0) {
+      setExactText(formatDisplay((matchingServing.base_amount / matchingServing.amount) * amount));
+    }
+    setEnteredExactMode(true);
+  };
 
   const reportExact = (text: string, selectedUnit: string) => {
     const parsed = Number(text);
@@ -77,9 +89,35 @@ export function PortionField({ baseUnit, servingUnits, amount, unit, onChange }:
     reportExact(text, exactUnit);
   };
 
+  // Switching the unit must never REINTERPRET the current figure under the
+  // new unit. "16.5" typed as grams is not 16.5 sachets — carrying the number
+  // across turned one 16.5 g sachet into 272 g of it. So the count is
+  // recomputed for the unit being selected, and only ever as a QUANTITY (the
+  // serving's own base amount, which the food row already carries); no
+  // nutrition is derived here, and the server still resolves the authoritative
+  // grams from the reported pair.
+  const countForUnit = (from: string, to: string): number => {
+    const fromServing = servingUnits.find((s) => s.name === from);
+    const toServing = servingUnits.find((s) => s.name === to);
+    const current = Number(exactText);
+    // Bulk → named serving, or one named serving → another: there is no
+    // meaningful count to carry, so start at one of the new thing.
+    if (toServing) return 1;
+    // Named serving → the base unit: the serving's own base amount IS the
+    // equivalent quantity, so the field keeps describing the same portion.
+    if (fromServing && fromServing.amount > 0 && Number.isFinite(current) && current > 0) {
+      return (fromServing.base_amount / fromServing.amount) * current;
+    }
+    return Number.isFinite(current) && current > 0 ? current : 1;
+  };
+
   const onExactUnitChange = (selectedUnit: string) => {
+    if (selectedUnit === exactUnit) return;
+    const nextAmount = countForUnit(exactUnit, selectedUnit);
+    const nextText = formatDisplay(nextAmount);
     setExactUnit(selectedUnit);
-    reportExact(exactText, selectedUnit);
+    setExactText(nextText);
+    reportExact(nextText, selectedUnit);
   };
 
   const stepButtonStyle = {

@@ -89,3 +89,60 @@ test("a subsequent increase after a prop change reports from the new amount, not
   await fireEvent.press(getByLabelText("Increase amount"));
   expect(onChange).toHaveBeenCalledWith(6, "sachet");
 });
+
+// The NESCAFÉ Mocha failure: the field opens in exact mode showing the
+// serving's GRAM figure (16.5 g), the user taps the "sachet" chip, and the
+// gram figure is reread as a serving count — 16.5 sachets, 272 g, ~1500 kcal
+// instead of 90.
+test("selecting a named serving from exact mode does not carry the gram figure across", async () => {
+  const onChange = jest.fn();
+  const { getByText } = await render(
+    <PortionField baseUnit="g" servingUnits={SACHET} amount={16.5} unit="g" onChange={onChange} />,
+  );
+  await fireEvent.press(getByText("sachet"));
+  expect(onChange).toHaveBeenCalledWith(1, "sachet");
+  expect(onChange).not.toHaveBeenCalledWith(16.5, "sachet");
+});
+
+// The other direction is a quantity conversion the food row itself supplies,
+// so the field can keep describing the same portion rather than reinterpreting
+// the count as grams.
+test("leaving a named serving for the base unit seeds the serving's own base amount", async () => {
+  const onChange = jest.fn();
+  const { getByText, getByLabelText } = await render(
+    <PortionField baseUnit="g" servingUnits={SACHET} amount={2} unit="sachet" onChange={onChange} />,
+  );
+  await fireEvent.press(getByText("Enter exact amount"));
+  // 2 sachets is 33 g, not "2 g".
+  expect(getByLabelText("Amount").props.value).toBe("33");
+  // Merely looking at the exact field is not an edit — the pending entry is
+  // still the named serving, which the server resolves to the same figure.
+  expect(onChange).not.toHaveBeenCalled();
+});
+
+// Same reinterpretation seen from a unit chip, for a food carrying more than
+// one named serving so the base-unit chip is a real transition.
+test("switching from a named serving chip to the base unit converts the count", async () => {
+  const onChange = jest.fn();
+  const units = [
+    { name: "sachet", amount: 1, base_amount: 16.5 },
+    { name: "box", amount: 1, base_amount: 165 },
+  ];
+  const { getByText } = await render(
+    <PortionField baseUnit="g" servingUnits={units} amount={140} unit="g" onChange={onChange} />,
+  );
+  await fireEvent.press(getByText("sachet"));
+  expect(onChange).toHaveBeenLastCalledWith(1, "sachet");
+  await fireEvent.press(getByText("g"));
+  expect(onChange).toHaveBeenLastCalledWith(16.5, "g");
+});
+
+// Re-tapping the unit already selected must not disturb an in-progress entry.
+test("reselecting the current unit reports nothing", async () => {
+  const onChange = jest.fn();
+  const { getByText } = await render(
+    <PortionField baseUnit="g" servingUnits={[]} amount={140} unit="g" onChange={onChange} />,
+  );
+  await fireEvent.press(getByText("g"));
+  expect(onChange).not.toHaveBeenCalled();
+});

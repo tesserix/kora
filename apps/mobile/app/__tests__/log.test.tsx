@@ -317,3 +317,75 @@ test("an ONLINE search with no results still says plainly that nothing matched",
   expect(ui.getByText("No matches.")).toBeTruthy();
   expect(ui.queryByText(/offline/i)).toBeNull();
 });
+
+const mochaCandidate = {
+  item: {
+    id: "f2",
+    name: "NESCAFÉ Mocha",
+    brand: "Nestlé",
+    provenance: "off",
+    serving_desc: "1 portion (16.5 g)",
+    serving_grams: 16.5,
+    base_unit: "g",
+    serving_units: [{ name: "portion", amount: 1, base_amount: 16.5 }],
+    kcal_per_100g: 545,
+    protein_per_100g: 9,
+    carbs_per_100g: 70,
+    fat_per_100g: 25,
+  },
+  match_score: 1,
+  match_tier: "fulltext",
+};
+
+const milkCandidate = {
+  item: {
+    id: "f3",
+    name: "High protein low fat milk",
+    brand: "",
+    provenance: "off",
+    serving_desc: "",
+    serving_grams: 250,
+    base_unit: "ml",
+    kcal_per_100g: 52,
+    protein_per_100g: 5.6,
+    carbs_per_100g: 5,
+    fat_per_100g: 0.4,
+  },
+  match_score: 1,
+  match_tier: "fulltext",
+};
+
+// The spec's default state for a food with a named serving is a stepper
+// reading "1 portion (16.5 g)". Opening in exact mode instead put the
+// serving's GRAM figure in the field, one chip-tap away from being reread as
+// a serving count.
+test("selecting a food with a named serving opens on that serving, not raw grams", async () => {
+  mockSearch = { data: [mochaCandidate], isLoading: false, isOfflineCache: false };
+  const { findByText } = await render(<LogScreen />);
+  fireEvent.press(await findByText("NESCAFÉ Mocha"));
+
+  expect(await findByText("1 portion (16.5 g)")).toBeTruthy();
+
+  fireEvent.press(await findByText("Log it"));
+  expect(mockLogMutate).toHaveBeenCalledWith(
+    expect.objectContaining({ food_item_id: "f2", entered_amount: 1, entered_unit: "portion" }),
+    expect.anything(),
+  );
+});
+
+// A millilitre-based food entered in its own base unit must still report the
+// unit. Nulling the entered pair because "the unit equals the base unit"
+// stored 300 ml as bare grams, and the diary then read it back as "300 g".
+test("an amount entered in millilitres is sent as a unit, not as bare grams", async () => {
+  mockSearch = { data: [milkCandidate], isLoading: false, isOfflineCache: false };
+  const { findByText, findByLabelText } = await render(<LogScreen />);
+  fireEvent.press(await findByText("High protein low fat milk"));
+
+  fireEvent.changeText(await findByLabelText("Amount"), "300");
+  fireEvent.press(await findByText("Log it"));
+
+  expect(mockLogMutate).toHaveBeenCalledWith(
+    expect.objectContaining({ food_item_id: "f3", entered_amount: 300, entered_unit: "ml", quantity_grams: 0 }),
+    expect.anything(),
+  );
+});
