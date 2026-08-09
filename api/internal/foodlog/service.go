@@ -201,7 +201,16 @@ func (s Service) LogFood(ctx context.Context, userID uuid.UUID, req LogRequest) 
 	if req.ID != nil {
 		log.ID = *req.ID
 	}
-	return s.logs.CreateIdempotent(ctx, log)
+	created, err := s.logs.CreateIdempotent(ctx, log)
+	if err != nil {
+		return FoodLog{}, err
+	}
+	// The create path does not go through the joined read scope, so carry the
+	// food's base unit onto the response by hand — a client that renders the
+	// row it just created must label it the same way the diary will. It is a
+	// label only; nothing is computed from it.
+	created.BaseUnit = item.BaseUnit
+	return created, nil
 }
 
 // EditRequest carries a partial edit to an existing log. Nil/zero fields mean

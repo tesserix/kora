@@ -333,3 +333,61 @@ func TestCreateIdempotentDoesNotCountAReplay(t *testing.T) {
 	afterReplay := testutil.ToFloat64(metrics.Default().FoodLogsCounter("ai_voice"))
 	require.Equal(t, afterFirst, afterReplay, "a replay must NOT count a second time")
 }
+
+// TestReadsCarryTheFoodsBaseUnit pins the diary's only way of labelling a
+// LEGACY liquid row. Such a row has no entered pair at all, so quantity_grams
+// is the only figure there is; without the joined base unit a 300 ml drink
+// renders as "300 g", which is the bug this branch set out to fix.
+func TestReadsCarryTheFoodsBaseUnit(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	item := nutrition.FoodItem{
+		Name: "Base Unit Milk " + uuid.NewString(), Provenance: nutrition.ProvenanceOFF,
+		BaseUnit: "ml", KcalPer100g: 52,
+	}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	day := time.Date(2026, 3, 4, 9, 0, 0, 0, time.UTC)
+	repo := NewRepository(db)
+	created, err := repo.Create(context.Background(), FoodLog{
+		UserID: userID, FoodItemID: &item.ID, LoggedAt: day, MealSlot: "breakfast",
+		Source: "manual", Description: item.Name, QuantityGrams: 300, Kcal: 156,
+		Provenance: item.Provenance,
+	})
+	require.NoError(t, err)
+
+	fetched, err := repo.GetByID(context.Background(), userID, created.ID)
+	require.NoError(t, err)
+	require.Equal(t, "ml", fetched.BaseUnit)
+	require.Equal(t, 300.0, fetched.QuantityGrams, "the stored grams figure is never re-resolved on read")
+
+	listed, err := repo.ListByUserAndDay(context.Background(), userID, day, time.UTC)
+	require.NoError(t, err)
+	require.Len(t, listed, 1)
+	require.Equal(t, "ml", listed[0].BaseUnit)
+}
+
+// TestReadsTolerateALogWithNoFoodItem proves the LEFT JOIN really is left: a
+// log that resolved to no food row must still be readable, with an empty base
+// unit rather than a dropped row.
+func TestReadsTolerateALogWithNoFoodItem(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	day := time.Date(2026, 3, 5, 9, 0, 0, 0, time.UTC)
+
+	repo := NewRepository(db)
+	created, err := repo.Create(context.Background(), FoodLog{
+		UserID: userID, LoggedAt: day, MealSlot: "snack", Source: "manual",
+		Description: "Unresolved snack", QuantityGrams: 50, Kcal: 60, Provenance: "user_estimate",
+	})
+	require.NoError(t, err)
+
+	fetched, err := repo.GetByID(context.Background(), userID, created.ID)
+	require.NoError(t, err)
+	require.Empty(t, fetched.BaseUnit)
+
+	listed, err := repo.ListByUserAndDay(context.Background(), userID, day, time.UTC)
+	require.NoError(t, err)
+	require.Len(t, listed, 1)
+}

@@ -102,14 +102,29 @@ func (r Repository) CreateIdempotent(ctx context.Context, log FoodLog) (FoodLog,
 	return existing, nil
 }
 
+// withFoodUnit is the read scope that carries the logged food's base unit
+// alongside the log itself. food_logs has no base_unit column of its own —
+// the log stores the RESOLVED quantity_grams and nothing re-resolves on read
+// — but a client cannot label a legacy row (one with no entered pair) without
+// knowing whether the food is measured in grams or millilitres.
+//
+// LEFT JOIN, because a log need not resolve to a food item; such a row simply
+// gets an empty base unit, which clients already treat as "assume grams".
+func (r Repository) withFoodUnit(ctx context.Context) *gorm.DB {
+	return r.db.WithContext(ctx).
+		Model(&FoodLog{}).
+		Select("food_logs.*, food_items.base_unit AS base_unit").
+		Joins("LEFT JOIN food_items ON food_items.id = food_logs.food_item_id")
+}
+
 // ListByUserAndDay returns logs whose logged_at falls on `day` in location `loc`.
 func (r Repository) ListByUserAndDay(ctx context.Context, userID uuid.UUID, day time.Time, loc *time.Location) ([]FoodLog, error) {
 	start := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
 	end := start.Add(24 * time.Hour)
 	var logs []FoodLog
-	err := r.db.WithContext(ctx).
-		Where("user_id = ? AND logged_at >= ? AND logged_at < ?", userID, start, end).
-		Order("logged_at ASC").
+	err := r.withFoodUnit(ctx).
+		Where("food_logs.user_id = ? AND food_logs.logged_at >= ? AND food_logs.logged_at < ?", userID, start, end).
+		Order("food_logs.logged_at ASC").
 		Find(&logs).Error
 	if err != nil {
 		return nil, fmt.Errorf("foodlog: list by day: %w", err)
@@ -211,8 +226,8 @@ func (r Repository) Update(ctx context.Context, log FoodLog) (FoodLog, error) {
 
 func (r Repository) GetByID(ctx context.Context, userID, logID uuid.UUID) (FoodLog, error) {
 	var log FoodLog
-	if err := r.db.WithContext(ctx).
-		Where("id = ? AND user_id = ?", logID, userID).
+	if err := r.withFoodUnit(ctx).
+		Where("food_logs.id = ? AND food_logs.user_id = ?", logID, userID).
 		First(&log).Error; err != nil {
 		return FoodLog{}, fmt.Errorf("foodlog: get by id: %w", err)
 	}

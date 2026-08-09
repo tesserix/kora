@@ -31,4 +31,18 @@ type FoodLog struct {
 	InputPhrase *string   `json:"input_phrase,omitempty"`
 	ClientLogMs *int      `json:"client_log_ms,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
+	// BaseUnit is the LOGGED FOOD's base unit ("g" or "ml"), joined in from
+	// food_items — it is not a column on food_logs, which is why it is
+	// read-only to gorm ("->") and excluded from migration.
+	//
+	// It exists so a client can label a LEGACY row correctly. A legacy log
+	// carries no entered pair at all, so quantity_grams is the only figure
+	// there is, and without the food's base unit a 300 ml drink renders as
+	// "300 g". It is a LABEL, never an input to arithmetic: nutrition is
+	// computed server-side from quantity_grams and the food's per-100
+	// figures, and no client converts anything with this.
+	//
+	// Empty when the log resolved to no food item, or was read through a path
+	// that does not join (e.g. the idempotent-replay reload).
+	BaseUnit string `gorm:"->;-:migration" json:"base_unit,omitempty"`
 }
