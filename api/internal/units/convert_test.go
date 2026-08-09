@@ -164,6 +164,47 @@ func TestDecodeServingUnitsMalformedYieldsEmpty(t *testing.T) {
 	assert.Empty(t, DecodeServingUnits(json.RawMessage(``)))
 }
 
+// TestFallbackMatchesWholeWordsOnly pins the word-boundary rule. A bare
+// substring match wrote densities that contradicted the row's own label — the
+// seeded "Rolled oats, dry" says "1/2 cup (40g)" and would have inherited
+// cup = 90 g from the "oat" keyword.
+func TestFallbackMatchesWholeWordsOnly(t *testing.T) {
+	tests := []struct {
+		name     string
+		foodName string
+	}{
+		{name: "a plural is not the keyword", foodName: "Rolled oats, dry"},
+		{name: "breadcrumbs are not bread", foodName: "Breadcrumbs, dried"},
+		{name: "flourless cake is not flour", foodName: "Flourless chocolate cake"},
+		{name: "milkshake powder is not milk", foodName: "Milkshake powder"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Empty(t, Fallback(tt.foodName))
+		})
+	}
+}
+
+// TestFallbackStillMatchesRealWords guards the other direction: tightening to
+// word boundaries must not stop the curated table from firing at all.
+func TestFallbackStillMatchesRealWords(t *testing.T) {
+	tests := []struct {
+		foodName string
+		wantUnit string
+	}{
+		{foodName: "White rice, cooked", wantUnit: "cup"},
+		{foodName: "Rice (basmati)", wantUnit: "cup"},
+		{foodName: "Wholemeal bread", wantUnit: "slice"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.foodName, func(t *testing.T) {
+			got := Fallback(tt.foodName)
+			require.Len(t, got, 1)
+			assert.Equal(t, tt.wantUnit, got[0].Name)
+		})
+	}
+}
+
 func TestFallbackDeterministic(t *testing.T) {
 	// Repeated calls for the same multi-match food must return the same result.
 	// Go randomizes map iteration order, so this test ensures we're not picking

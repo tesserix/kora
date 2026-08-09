@@ -1,6 +1,9 @@
 package units
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // Table is the curated fallback consulted only when a food row carries no
 // parseable serving unit of its own. It is deliberately small.
@@ -23,19 +26,42 @@ var Table = map[string][]ServingUnit{
 	"bread": {{Name: "slice", Amount: 1, BaseAmount: 35}},
 }
 
+// wordSeparator splits a food name into its words. Anything that is not a
+// letter or digit is a boundary, so "White rice, cooked" yields
+// ["white", "rice", "cooked"].
+var wordSeparator = regexp.MustCompile(`[^a-z0-9]+`)
+
+// words returns the set of lowercase words in a food name.
+func words(foodName string) map[string]bool {
+	out := map[string]bool{}
+	for _, w := range wordSeparator.Split(strings.ToLower(foodName), -1) {
+		if w != "" {
+			out[w] = true
+		}
+	}
+	return out
+}
+
 // Fallback returns the curated serving units for a food name, or nil when the
 // food is not in the table. Consulted ONLY after Parse has failed on the row's
 // own label text — the row's own serving description is always better evidence
 // than a category-level guess.
 //
+// A keyword must appear as a WHOLE WORD of the name, never as a bare
+// substring. The substring form silently contradicted rows' own labels: the
+// seeded "Rolled oats, dry" carries the label "1/2 cup (40g)", which Parse
+// cannot read, and a substring match on "oat" would then persist cup = 90 g
+// against a row that says 40 g. A word match declines instead, and an absent
+// conversion is recoverable by the user where a fabricated one is not.
+//
 // When a food name matches multiple keywords, the longest keyword wins,
 // deterministically. On length tie, the lexicographically smallest keyword wins,
 // so the result is stable regardless of Go's randomized map iteration order.
 func Fallback(foodName string) []ServingUnit {
-	lowered := strings.ToLower(foodName)
+	nameWords := words(foodName)
 	var longest string
 	for keyword := range Table {
-		if strings.Contains(lowered, keyword) {
+		if nameWords[keyword] {
 			// Prefer longer keywords, or lexicographically smaller on tie.
 			if len(keyword) > len(longest) || (len(keyword) == len(longest) && keyword < longest) {
 				longest = keyword
