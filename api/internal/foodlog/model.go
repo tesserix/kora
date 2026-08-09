@@ -16,6 +16,8 @@ type FoodLog struct {
 	Source        string     `json:"source"`
 	Description   string     `json:"description"`
 	QuantityGrams float64    `json:"quantity_grams"`
+	EnteredAmount *float64   `gorm:"column:entered_amount" json:"entered_amount,omitempty"`
+	EnteredUnit   *string    `gorm:"column:entered_unit" json:"entered_unit,omitempty"`
 	Kcal          float64    `json:"kcal"`
 	ProteinG      float64    `json:"protein_g"`
 	CarbsG        float64    `json:"carbs_g"`
@@ -26,7 +28,7 @@ type FoodLog struct {
 	// resolve-sourced logs so a later correction can teach the index which
 	// phrase resolved wrong. Description holds the RESOLVED food's name;
 	// these are deliberately different fields.
-	InputPhrase   *string    `json:"input_phrase,omitempty"`
-	ClientLogMs   *int       `json:"client_log_ms,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
+	InputPhrase *string   `json:"input_phrase,omitempty"`
+	ClientLogMs *int      `json:"client_log_ms,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
 }
