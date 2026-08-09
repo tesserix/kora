@@ -12,6 +12,12 @@ export type Profile = {
   share_progress: boolean;
 };
 
+export type ServingUnit = {
+  name: string;
+  amount: number;
+  base_amount: number;
+};
+
 export type FoodItem = {
   id: string;
   name: string;
@@ -25,6 +31,10 @@ export type FoodItem = {
   fat_per_100g: number;
   /** Present on barcode-sourced foods; enables an offline repeat scan. */
   barcode?: string;
+  /** The base unit of measurement for this food ("g" or "ml"). */
+  base_unit?: string;
+  /** Available serving units for this food (name, amount, base_amount). */
+  serving_units?: ServingUnit[];
 };
 
 // Sentinel `provenance` for "we deliberately don't know the source" — e.g. a
@@ -75,6 +85,10 @@ export type FoodLog = {
   provenance: string;
   /** What the user actually said or typed. Present only on ai_text/ai_voice logs. */
   input_phrase?: string;
+  /** The amount entered by the user (e.g. 1, 0.5, 200). Null for legacy logs. */
+  entered_amount?: number | null;
+  /** The unit entered by the user (e.g. "sachet", "cup", "g", "ml"). Null for legacy logs. */
+  entered_unit?: string | null;
 };
 
 export type MemoryFood = {
