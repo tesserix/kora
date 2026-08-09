@@ -48,9 +48,23 @@ const maxAudioBodyBytes = maxAudioBytes + 1<<10
 // when a scanned barcode matches nothing locally or on OpenFoodFacts.
 const barcodeUnknownQuestion = "Barcode not recognized — search and log manually."
 
-// barcodeDefaultGrams is the portion assumed for a barcode hit, which carries
-// no portion signal. Nutrition is still row-sourced: kcal = KcalPer100g * 1.
+// barcodeDefaultGrams is the portion assumed for a barcode hit whose row
+// carries no serving size. Nutrition is still row-sourced:
+// kcal = KcalPer100g * 1.
 const barcodeDefaultGrams = 100.0
+
+// barcodePortionGrams picks the portion for a barcode hit. A packaged product
+// scanned off the shelf is almost always eaten one serving at a time, and
+// OpenFoodFacts usually reports that serving size, so prefer the row's own
+// ServingGrams and fall back to barcodeDefaultGrams only when it is absent.
+// This mirrors resolveAliasPortion's fallback chain in package ai, so both
+// short-circuit paths agree on what "one portion" of a known food means.
+func barcodePortionGrams(item nutrition.FoodItem) float64 {
+	if item.ServingGrams > 0 {
+		return item.ServingGrams
+	}
+	return barcodeDefaultGrams
+}
 
 type TextPhotoResolver interface {
 	ResolveText(ctx context.Context, userID uuid.UUID, phrase string) (ai.Resolution, error)
@@ -216,11 +230,12 @@ func (h Handler) ResolveBarcode(c *gin.Context) {
 		return
 	}
 	// Nutrition is row-sourced: kcal = KcalPer100g * (grams/100).
-	kcal := item.KcalPer100g * barcodeDefaultGrams / 100
+	grams := barcodePortionGrams(*item)
+	kcal := item.KcalPer100g * grams / 100
 	httpx.OK(c, ai.Resolution{
 		Candidates: []ai.ResolvedCandidate{{
 			Item:         *item,
-			PortionGrams: barcodeDefaultGrams,
+			PortionGrams: grams,
 			Kcal:         kcal,
 			MatchScore:   1.0,
 			MatchTier:    nutrition.MatchAlias, // exact barcode == exact match
