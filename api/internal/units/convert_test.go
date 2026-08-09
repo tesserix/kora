@@ -96,3 +96,41 @@ func TestFallback(t *testing.T) {
 		})
 	}
 }
+
+func TestFallbackMultipleMatches(t *testing.T) {
+	// When a food name matches multiple keywords, the longest wins.
+	// "oat milk" matches both "oat" (3 chars) and "milk" (4 chars) → "milk" (250).
+	// "rice milk" matches both "rice" (4 chars) and "milk" (4 chars) → "milk" (lexicographically smaller).
+	tests := []struct {
+		name         string
+		foodName     string
+		wantBaseUnit float64
+	}{
+		{name: "oat milk matches milk not oat", foodName: "Oat milk", wantBaseUnit: 250},
+		{name: "rice milk tie breaks to milk (longer than rice by lex)", foodName: "rice milk", wantBaseUnit: 250},
+		{name: "sugar bread matches bread not sugar", foodName: "sugar bread", wantBaseUnit: 35},
+		{name: "single keyword still works", foodName: "Plain rice", wantBaseUnit: 158},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Fallback(tt.foodName)
+			require.Len(t, got, 1)
+			assert.Equal(t, tt.wantBaseUnit, got[0].BaseAmount)
+		})
+	}
+}
+
+func TestFallbackDeterministic(t *testing.T) {
+	// Repeated calls for the same multi-match food must return the same result.
+	// Go randomizes map iteration order, so this test ensures we're not picking
+	// whichever keyword the range happens to visit first.
+	const iterations = 50
+	expected := Fallback("oat milk")
+	for i := 0; i < iterations; i++ {
+		got := Fallback("oat milk")
+		require.Len(t, expected, 1)
+		require.Len(t, got, 1)
+		assert.Equal(t, expected[0].BaseAmount, got[0].BaseAmount, "iteration %d returned different result", i)
+		assert.Equal(t, expected[0].Name, got[0].Name, "iteration %d returned different unit name", i)
+	}
+}

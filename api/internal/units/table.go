@@ -27,12 +27,23 @@ var Table = map[string][]ServingUnit{
 // food is not in the table. Consulted ONLY after Parse has failed on the row's
 // own label text — the row's own serving description is always better evidence
 // than a category-level guess.
+//
+// When a food name matches multiple keywords, the longest keyword wins,
+// deterministically. On length tie, the lexicographically smallest keyword wins,
+// so the result is stable regardless of Go's randomized map iteration order.
 func Fallback(foodName string) []ServingUnit {
 	lowered := strings.ToLower(foodName)
-	for keyword, servings := range Table {
+	var longest string
+	for keyword := range Table {
 		if strings.Contains(lowered, keyword) {
-			return servings
+			// Prefer longer keywords, or lexicographically smaller on tie.
+			if len(keyword) > len(longest) || (len(keyword) == len(longest) && keyword < longest) {
+				longest = keyword
+			}
 		}
 	}
-	return nil
+	if longest == "" {
+		return nil
+	}
+	return Table[longest]
 }
