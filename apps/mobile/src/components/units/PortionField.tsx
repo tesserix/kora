@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Pressable, TextInput, View } from "react-native";
 import { AppText } from "@/components/Text";
 import { Icon } from "@/components/Icon";
@@ -25,32 +25,49 @@ export function PortionField({ baseUnit, servingUnits, amount, unit, onChange }:
 
   const matchingServing = servingUnits.find((s) => s.name === unit);
 
-  const [mode, setMode] = useState<"stepper" | "exact">(matchingServing ? "stepper" : "exact");
-  const [servingAmount, setServingAmount] = useState(amount);
-  const [exactUnit, setExactUnit] = useState<string>(matchingServing ? baseUnit : unit);
-  const [exactText, setExactText] = useState<string>(matchingServing ? "" : String(amount));
+  // Escape hatch is a one-way UI choice, not data — it's fine as local state.
+  // The stepper's amount/unit are never mirrored into local state below: they
+  // come straight from props on every render, so a parent that reseeds
+  // `amount` (e.g. once an async fetch lands) is reflected immediately
+  // instead of being shadowed by a stale copy.
+  const [enteredExactMode, setEnteredExactMode] = useState(false);
+  const mode: "stepper" | "exact" = matchingServing && !enteredExactMode ? "stepper" : "exact";
+
+  // Exact-mode text is local (so an in-progress edit like "1." isn't
+  // clobbered on every keystroke) but reconciled below whenever the parent
+  // passes a genuinely new (amount, unit) — as opposed to the echo of our
+  // own last onChange call.
+  const [exactText, setExactText] = useState(() => String(amount));
+  const [exactUnit, setExactUnit] = useState(() => (matchingServing ? baseUnit : unit));
+  const lastReported = useRef<{ amount: number; unit: string } | null>(null);
+
+  useEffect(() => {
+    const isEcho = lastReported.current?.amount === amount && lastReported.current?.unit === unit;
+    if (isEcho) return;
+    setExactText(String(amount));
+    // While a named serving is active, `unit` is the serving name, not a
+    // valid exact-mode unit — leave the baseUnit default in place for when
+    // the escape hatch is used.
+    if (!matchingServing) setExactUnit(unit);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [amount, unit]);
 
   const unitOptions = [baseUnit, ...servingUnits.map((s) => s.name)];
 
-  const increase = () => {
-    const next = servingAmount + 1;
-    setServingAmount(next);
-    onChange(next, unit);
-  };
+  const increase = () => onChange(amount + 1, unit);
 
   const decrease = () => {
     // Zero servings is not a portion, so decrementing at 1 does nothing.
-    if (servingAmount <= 1) return;
-    const next = servingAmount - 1;
-    setServingAmount(next);
-    onChange(next, unit);
+    if (amount <= 1) return;
+    onChange(amount - 1, unit);
   };
 
-  const enterExactMode = () => setMode("exact");
+  const enterExactMode = () => setEnteredExactMode(true);
 
   const reportExact = (text: string, selectedUnit: string) => {
     const parsed = Number(text);
     if (Number.isFinite(parsed) && parsed > 0) {
+      lastReported.current = { amount: parsed, unit: selectedUnit };
       onChange(parsed, selectedUnit);
     }
   };
@@ -74,12 +91,12 @@ export function PortionField({ baseUnit, servingUnits, amount, unit, onChange }:
     justifyContent: "center" as const,
   };
 
-  const baseTotal = matchingServing ? formatDisplay(matchingServing.base_amount * servingAmount) : null;
+  const baseTotal = matchingServing ? formatDisplay(matchingServing.base_amount * amount) : null;
   const stepperLabel = matchingServing
-    ? `${servingAmount} ${unit}${servingAmount === 1 ? "" : "s"} (${baseTotal} ${baseUnit})`
+    ? `${amount} ${unit}${amount === 1 ? "" : "s"} (${baseTotal} ${baseUnit})`
     : "";
 
-  if (mode === "stepper" && matchingServing) {
+  if (mode === "stepper") {
     return (
       <View style={{ gap: spacing.sm }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md }}>
