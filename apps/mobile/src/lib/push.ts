@@ -8,10 +8,7 @@ import { router } from "expo-router";
 import { auth, isFirebaseConfigured } from "@/lib/firebase";
 import { registerDevice, unregisterDevice } from "@/lib/pushApi";
 import { targetFor } from "@/lib/notificationTarget";
-import { loadPrefs } from "@/reminders/prefs";
-import { loadCustom } from "@/reminders/customPrefs";
-import { applyAllReminders } from "@/reminders/schedule";
-import { loadWeightPref } from "@/reminders/weightPrefs";
+import { reconcileWeightReminder } from "@/reminders/reconcileWeightReminder";
 import type { NotificationType } from "@/api/types";
 
 const TOKEN_KEY = "kora.pushToken";
@@ -87,12 +84,11 @@ export function setupPushHandler(): void {
   });
   // Reschedule reminders on every launch so they survive reinstalls and
   // permission changes. setupPushHandler runs once at module scope
-  // (app/_layout.tsx), so no additional once-guard is needed here.
-  void Promise.all([loadPrefs(), loadCustom(), loadWeightPref()])
-    .then(([mealPrefs, customs, weightPref]) =>
-      applyAllReminders(mealPrefs, customs, { pref: weightPref, lastWeighedAt: null, now: new Date() }),
-    )
-    .catch(() => {});
+  // (app/_layout.tsx), so no additional once-guard is needed here. There is no
+  // known last weigh-in at launch, so a failed weight fetch would be treated
+  // the same way anyway — reconcileWeightReminder(null) is correct here, not
+  // just convenient.
+  void reconcileWeightReminder(null).catch(() => {});
 }
 
 // usePushResponder deep-links when the user taps a push.
