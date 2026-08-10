@@ -44,10 +44,10 @@ export default function SettingsScreen() {
           </Card>
           <GroupedSection elevated>
             <Row
-              title="Notifications"
+              title="Reminders"
               icon={{ name: "bell", tint: colors.accent }}
               chevron
-              accessibilityLabel="Notifications"
+              accessibilityLabel="Reminders"
               onPress={() => router.push("/reminders" as Href)}
             />
           </GroupedSection>

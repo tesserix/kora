@@ -37,6 +37,6 @@ test("tapping Imperial calls setSystem with imperial", async () => {
 
 test("settings offers a route to the reminders screen", async () => {
   const { getByLabelText } = await render(<Settings />);
-  fireEvent.press(getByLabelText("Notifications"));
+  fireEvent.press(getByLabelText("Reminders"));
   expect(mockPush).toHaveBeenCalledWith("/reminders");
 });
