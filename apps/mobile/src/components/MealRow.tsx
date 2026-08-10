@@ -15,6 +15,7 @@ type Props = {
   iconName?: string;
   tint?: string;
   onPress?: () => void;
+  onLongPress?: () => void;
   accessibilityLabel?: string;
   pinned?: boolean;
   onPinToggle?: () => void;
@@ -26,14 +27,14 @@ type Props = {
   dimmed?: boolean;
 };
 
-export function MealRow({ name, slot, kcal, iconName = "utensils", tint, onPress, accessibilityLabel, pinned, onPinToggle, bookmarked, onBookmark, badge, dimmed }: Props) {
+export function MealRow({ name, slot, kcal, iconName = "utensils", tint, onPress, onLongPress, accessibilityLabel, pinned, onPinToggle, bookmarked, onBookmark, badge, dimmed }: Props) {
   const { colors, radius, spacing } = useTheme();
   const chip = tint ?? colors.accent;
   return (
     // Not every row is interactive — a pending queued log has nothing to open.
     // Role and haptic follow the handler so a row that does nothing is neither
     // announced as a button nor buzzes under the finger.
-    <PressableScale testID="meal-row" accessibilityRole={onPress ? "button" : undefined} accessibilityLabel={accessibilityLabel ?? name} haptic={onPress ? "selection" : "none"} onPress={onPress}
+    <PressableScale testID="meal-row" accessibilityRole={onPress ? "button" : undefined} accessibilityLabel={accessibilityLabel ?? name} haptic={onPress ? "selection" : "none"} onPress={onPress} onLongPress={onLongPress}
       style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10, paddingHorizontal: spacing.md }}>
       <View style={{ width: 36, height: 36, borderRadius: radius.md, alignItems: "center", justifyContent: "center", backgroundColor: withAlpha(chip, 0.16) }}>
         <Icon name={iconName} size={18} color={chip} />
