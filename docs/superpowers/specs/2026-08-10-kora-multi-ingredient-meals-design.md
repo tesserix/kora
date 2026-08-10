@@ -65,11 +65,16 @@ type Seed =
 `quantity_grams`, `entered_amount`, `entered_unit`, and `base_unit`.
 
 It deliberately does **not** carry `serving_units` — food-log reads do not return them (a known
-follow-up from the unit work). A composed item therefore opens in `PortionField`'s exact-amount
-mode rather than a stepper, showing the right number in the right unit but without +/- controls.
-The alternative — fetching each food to hydrate its servings — is a request per selected row for a
-control the user may never touch. When `serving_units` does land on log reads, composed items get
-their steppers with no change to this design.
+follow-up from the unit work). Fetching each food to hydrate its full serving catalogue would be a
+request per selected row, for a control the user may never touch.
+
+That costs less than it sounds, because `SavedMealSheet` already handles this exact case:
+`servingUnitsFor` synthesises the single serving actually in use from the entered pair and the
+resolved grams, precisely so `PortionField` can still render a stepper without the catalogue. So a
+row composed from a log entered as "1 portion" **does** get a working stepper for portions; only a
+row with no entered pair opens in exact-amount mode. What is unavailable is the food's *other*
+servings — you can step portions, but you cannot switch that row to "cup" until `serving_units`
+lands on log reads.
 
 ## Blank-slate creation
 
