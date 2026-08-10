@@ -37,14 +37,18 @@ test("create-seed prefills name + items, removing one and saving calls create wi
   );
 });
 
-test("empty name blocks save", async () => {
-  const { getByText, getByLabelText } = await render(
+// Save is now gated on readiness (see canSave in SavedMealSheet), so a
+// whitespace-only name disables the button instead of allowing a press that
+// surfaces "Enter a name." — the gate stops the invalid submission before it
+// happens rather than after. save()'s own name check remains as a backstop
+// for any state the gate doesn't cover.
+test("empty name disables save", async () => {
+  const { getByLabelText } = await render(
     <SavedMealSheet seed={{ mode: "create", meal: usual as any }} onClose={jest.fn()} />,
   );
   await fireEvent.changeText(getByLabelText("Meal name"), "   ");
-  await fireEvent.press(getByText("Save"));
+  expect(getByLabelText("Save").props.accessibilityState.disabled).toBe(true);
   expect(mockCreate).not.toHaveBeenCalled();
-  getByText("Enter a name.");
 });
 
 test("create failure surfaces an error message", async () => {
@@ -63,4 +67,27 @@ test("edit-seed shows Delete which calls delete", async () => {
   const { getByText } = await render(<SavedMealSheet seed={{ mode: "edit", meal: saved as any }} onClose={jest.fn()} />);
   await fireEvent.press(getByText("Delete saved meal"));
   expect(mockDelete).toHaveBeenCalledWith("s1", expect.any(Object));
+});
+
+test("a blank seed opens an empty sheet with save disabled", async () => {
+  const { getByLabelText, queryByText } = await render(<SavedMealSheet seed={{ mode: "blank" }} onClose={() => {}} />);
+
+  expect(getByLabelText("Meal name").props.value).toBe("");
+  // Nothing to save yet — this must read as not-ready, not as an error the
+  // user caused by opening the sheet.
+  expect(getByLabelText("Save").props.accessibilityState.disabled).toBe(true);
+  expect(queryByText("Add at least one item with grams.")).toBeNull();
+});
+
+test("a compose seed carries each row's entered unit into the sheet", async () => {
+  const items = [
+    { food_item_id: "f1", name: "NESCAFÉ Mocha", quantity_grams: 16.5, entered_amount: 1, entered_unit: "portion" },
+    { food_item_id: "f2", name: "Milk", quantity_grams: 200, entered_amount: null, entered_unit: null },
+  ];
+  const { getByText, queryByText } = await render(<SavedMealSheet seed={{ mode: "compose", items }} onClose={() => {}} />);
+
+  expect(getByText("NESCAFÉ Mocha")).toBeTruthy();
+  expect(getByText("Milk")).toBeTruthy();
+  // Name pre-filled from the first item so the user edits rather than types.
+  expect(queryByText("Add at least one item with grams.")).toBeNull();
 });

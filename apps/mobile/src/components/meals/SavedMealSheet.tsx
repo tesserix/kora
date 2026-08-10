@@ -54,8 +54,27 @@ function servingUnitsFor(item: EditItem): ServingUnit[] {
   return [];
 }
 
-// seed is either a usual meal to save (create) or an existing saved meal (edit).
-export type Seed = { mode: "create"; meal: MemoryMeal } | { mode: "edit"; meal: SavedMeal };
+// A composed row is seeded from selected diary entries — quantity_grams is
+// the diary row's resolved grams, and entered_amount/entered_unit carry that
+// row's original entered pair (if any) so the sheet's stepper opens on the
+// same unit the user logged in, per servingUnitsFor's synthesis above.
+export type ComposedItem = {
+  food_item_id: string;
+  name: string;
+  quantity_grams: number;
+  entered_amount: number | null;
+  entered_unit: string | null;
+  base_unit?: string | null;
+};
+
+// seed is a usual meal to save (create), an existing saved meal (edit), a
+// blank sheet (new meal from scratch), or a set of diary rows to compose
+// into a new meal (compose).
+export type Seed =
+  | { mode: "create"; meal: MemoryMeal }
+  | { mode: "edit"; meal: SavedMeal }
+  | { mode: "blank" }
+  | { mode: "compose"; items: ComposedItem[] };
 
 interface Props {
   seed: Seed | null;
@@ -75,6 +94,28 @@ export function SavedMealSheet({ seed, onClose }: Props) {
 
   useEffect(() => {
     if (!seed) return;
+    if (seed.mode === "blank") {
+      setName("");
+      setSlot("breakfast");
+      setItems([]);
+      setErr(null);
+      return;
+    }
+    if (seed.mode === "compose") {
+      setName(seed.items[0]?.name ?? "");
+      setSlot("breakfast");
+      setItems(
+        seed.items.map((i) => ({
+          food_item_id: i.food_item_id,
+          name: i.name,
+          grams: i.quantity_grams,
+          enteredAmount: i.entered_amount,
+          enteredUnit: i.entered_unit,
+        })),
+      );
+      setErr(null);
+      return;
+    }
     setName(seed.meal.name);
     setSlot(seed.meal.meal_slot);
     setItems(
@@ -131,6 +172,11 @@ export function SavedMealSheet({ seed, onClose }: Props) {
   };
 
   const pending = createMeal.isPending || updateMeal.isPending || deleteMeal.isPending;
+  // Mirrors save()'s validation so an empty/blank sheet reads as "not ready
+  // yet" rather than surfacing the "Add at least one item with grams." error
+  // the user hasn't actually caused. save() keeps its own check as a
+  // backstop for any state this gate doesn't cover.
+  const canSave = name.trim().length > 0 && items.length > 0 && items.every((it) => it.grams > 0 || (it.enteredAmount ?? 0) > 0);
 
   return (
     <Sheet visible={seed !== null} onClose={onClose}>
@@ -168,7 +214,7 @@ export function SavedMealSheet({ seed, onClose }: Props) {
         </View>
         {err ? <AppText style={{ color: colors.destructive, marginTop: spacing.sm }}>{err}</AppText> : null}
         <View style={{ marginTop: spacing.lg }}>
-          <Button title="Save" onPress={save} disabled={pending} />
+          <Button accessibilityLabel="Save" title="Save" onPress={save} disabled={pending || !canSave} />
         </View>
         {seed?.mode === "edit" ? (
           <Pressable onPress={remove} disabled={pending} style={{ marginTop: spacing.md, alignItems: "center" }}>
