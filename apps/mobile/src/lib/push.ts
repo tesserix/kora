@@ -8,9 +8,7 @@ import { router } from "expo-router";
 import { auth, isFirebaseConfigured } from "@/lib/firebase";
 import { registerDevice, unregisterDevice } from "@/lib/pushApi";
 import { targetFor } from "@/lib/notificationTarget";
-import { loadPrefs } from "@/reminders/prefs";
-import { loadCustom } from "@/reminders/customPrefs";
-import { applyAllReminders } from "@/reminders/schedule";
+import { reconcileWeightReminder } from "@/reminders/reconcileWeightReminder";
 import type { NotificationType } from "@/api/types";
 
 const TOKEN_KEY = "kora.pushToken";
@@ -87,9 +85,13 @@ export function setupPushHandler(): void {
   // Reschedule reminders on every launch so they survive reinstalls and
   // permission changes. setupPushHandler runs once at module scope
   // (app/_layout.tsx), so no additional once-guard is needed here.
-  void Promise.all([loadPrefs(), loadCustom()])
-    .then(([mealPrefs, customs]) => applyAllReminders(mealPrefs, customs))
-    .catch(() => {});
+  //
+  // No argument: this launch witnessed no weigh-in, but the user may well have
+  // logged one before swiping the app away. Passing a placeholder `null` here
+  // used to re-arm today's reminder on every relaunch — weigh in at 06:40,
+  // reopen at 06:50, buzz at 07:00. reconcileWeightReminder now looks the real
+  // date up itself.
+  void reconcileWeightReminder().catch(() => {});
 }
 
 // usePushResponder deep-links when the user taps a push.
@@ -107,6 +109,14 @@ export function usePushResponder(): void {
       }
       if (data?.kind === "custom") {
         router.push("/");
+        return;
+      }
+      // Weight check-in reminders land on Progress, where WeightLogSheet lives —
+      // the only place in the app a weight can be logged. Falling through to the
+      // targetFor path (which has no "weight" case) would drop the user wherever
+      // the app happened to be, which is not a deep link at all.
+      if (data?.kind === "weight") {
+        router.push("/progress");
         return;
       }
       if (!data?.type) return;

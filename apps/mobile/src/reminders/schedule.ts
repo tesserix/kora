@@ -2,6 +2,9 @@ import * as Notifications from "expo-notifications";
 import type { MealSlot } from "@/lib/mealSlot";
 import type { ReminderPrefs } from "./prefs";
 import type { CustomReminder, Weekday } from "./customPrefs";
+import { nextWeightReminderAt, type WeightReminderPref } from "./weightPrefs";
+
+export type WeightReminderInput = { pref: WeightReminderPref; lastWeighedAt: Date | null; now: Date };
 
 export type ScheduledReminder = { slot: MealSlot; hour: number; minute: number; title: string; body: string };
 
@@ -68,7 +71,42 @@ export function buildCustomSchedule(reminders: CustomReminder[]): ScheduledNotif
 // reminders. cancelAllScheduledNotificationsAsync clears every scheduled local
 // notification, so meals and customs must be re-scheduled together in one pass —
 // this is the single entry point every reminder change funnels through.
-export async function applyAllReminders(mealPrefs: ReminderPrefs, customs: CustomReminder[]): Promise<void> {
+//
+// `weight` is REQUIRED, not optional. A call site that forgot it was already
+// shipped once (and caught only in review): because this function opens by
+// cancelling everything, omitting the weight reminder does not merely skip it,
+// it DESTROYS the user's existing one until something else reschedules it.
+// Making the parameter mandatory hands that invariant to the type checker
+// instead of to reviewers.
+export function applyAllReminders(
+  mealPrefs: ReminderPrefs,
+  customs: CustomReminder[],
+  weight: WeightReminderInput,
+): Promise<void> {
+  // Serialised, not concurrent. Five call sites reach this function — two hooks
+  // (useReminderPrefs.setSlot, useCustomReminders.commit) call it directly and
+  // three go through reconcileWeightReminder's queue — and the common iOS
+  // permission flow drives them into each other: the permission alert takes the
+  // app active→inactive→active, so the foreground reconcile fires while the
+  // hook's own permission continuation is still pending. Two interleaved
+  // cancel-and-reschedules leave duplicated or missing notifications. The mutex
+  // lives HERE rather than in the reconcile queue because this is the only
+  // point all five share, and routing the hooks through the reconcile queue
+  // would couple them to a re-read of prefs they have not finished writing.
+  const run = applyTail.catch(() => {}).then(() => applyOnce(mealPrefs, customs, weight));
+  applyTail = run.catch(() => {});
+  return run;
+}
+
+// applyTail must never hold a rejection: one failed apply must not prevent the
+// next from running.
+let applyTail: Promise<void> = Promise.resolve();
+
+async function applyOnce(
+  mealPrefs: ReminderPrefs,
+  customs: CustomReminder[],
+  weight: WeightReminderInput,
+): Promise<void> {
   await Notifications.cancelAllScheduledNotificationsAsync();
   let scheduled = 0;
   // Meals first: they are the baseline and must always win when the total would
@@ -105,6 +143,17 @@ export async function applyAllReminders(mealPrefs: ReminderPrefs, customs: Custo
         },
       });
     }
+    scheduled++;
+  }
+  // Scheduled LAST and counted against the same budget: meals are the baseline
+  // and must win. Unlike the others this is a one-shot DATE trigger, because a
+  // repeating trigger cannot be skipped when the user has already weighed in.
+  const at = nextWeightReminderAt(weight.pref, weight.lastWeighedAt, weight.now);
+  if (at && scheduled < MAX_SCHEDULED_NOTIFICATIONS) {
+    await Notifications.scheduleNotificationAsync({
+      content: { title: "Weigh-in time", body: "Log today's weight in Kora.", data: { kind: "weight" } },
+      trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: at },
+    });
     scheduled++;
   }
 }

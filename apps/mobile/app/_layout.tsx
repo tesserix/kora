@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { AppState } from "react-native";
 import { Stack, router } from "expo-router";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -10,6 +11,7 @@ import { installDrainTriggers } from "@/offline/drainTriggers";
 import { UnitsProvider } from "@/units";
 import { ToastProvider } from "@/components/Toast";
 import { SavedMealSheetProvider } from "@/components/meals/SavedMealSheetProvider";
+import { reconcileWeightReminder } from "@/reminders/reconcileWeightReminder";
 
 setupPushHandler();
 
@@ -21,6 +23,23 @@ export default function RootLayout() {
   useEffect(() => installConnectivity(), []);
 
   useEffect(() => installDrainTriggers(queryClient), []);
+
+  // Re-arm the weight reminder's one-shot trigger on foreground: the user may
+  // have weighed in (or the day may have rolled over) while the app was
+  // backgrounded, and a stale trigger would either nag or stay silently
+  // suppressed. Mirrors installDrainTriggers' AppState pattern.
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        // No argument: this listener witnessed no weigh-in, so the reconcile
+        // looks the real date up itself rather than guessing.
+        void reconcileWeightReminder().catch((err) =>
+          console.warn("reminders: foreground reconciliation failed", err),
+        );
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

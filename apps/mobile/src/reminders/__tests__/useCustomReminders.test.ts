@@ -3,6 +3,8 @@ import * as Notifications from "expo-notifications";
 import { useCustomReminders } from "../useCustomReminders";
 import { loadCustom, saveCustom, MAX_CUSTOM_REMINDERS, type CustomReminder } from "../customPrefs";
 import { applyAllReminders } from "../schedule";
+import { DEFAULT_WEIGHT_PREF } from "../weightPrefs";
+import { fetchLatestWeighInDate } from "../lastWeighIn";
 
 jest.mock("expo-notifications", () => ({
   getPermissionsAsync: jest.fn(async () => ({ granted: true })),
@@ -14,10 +16,12 @@ jest.mock("../customPrefs", () => {
 });
 jest.mock("../prefs", () => ({ loadPrefs: jest.fn(async () => ({})) }));
 jest.mock("../schedule", () => ({ applyAllReminders: jest.fn(async () => {}) }));
+jest.mock("../lastWeighIn", () => ({ fetchLatestWeighInDate: jest.fn() }));
 
 const mockLoad = loadCustom as jest.Mock;
 const mockSave = saveCustom as jest.Mock;
 const mockApply = applyAllReminders as jest.Mock;
+const mockFetchLatestWeighInDate = fetchLatestWeighInDate as jest.Mock;
 const draft = { label: "Drink water", hour: 15, minute: 0, days: [0, 1, 2, 3, 4, 5, 6] as CustomReminder["days"], enabled: true };
 
 beforeEach(() => {
@@ -25,6 +29,7 @@ beforeEach(() => {
   (Notifications.getPermissionsAsync as jest.Mock).mockResolvedValue({ granted: true });
   (Notifications.requestPermissionsAsync as jest.Mock).mockResolvedValue({ granted: true });
   mockLoad.mockResolvedValue([]);
+  mockFetchLatestWeighInDate.mockResolvedValue(null);
 });
 
 test("addReminder persists + re-syncs, assigning an id", async () => {
@@ -36,7 +41,11 @@ test("addReminder persists + re-syncs, assigning an id", async () => {
   expect(saved).toHaveLength(1);
   expect(saved[0].id.length).toBeGreaterThan(0);
   expect(saved[0].label).toBe("Drink water");
-  expect(mockApply).toHaveBeenCalledWith({}, saved);
+  expect(mockApply).toHaveBeenCalledWith(
+    {},
+    saved,
+    expect.objectContaining({ pref: DEFAULT_WEIGHT_PREF, lastWeighedAt: null, now: expect.any(Date) }),
+  );
 });
 
 test("addReminder is a no-op at the cap", async () => {
@@ -74,5 +83,9 @@ test("removeReminder drops it and re-syncs", async () => {
   await waitFor(() => expect(result.current.reminders).toHaveLength(1));
   await act(async () => { await result.current.removeReminder("a"); });
   expect(mockSave).toHaveBeenCalledWith([]);
-  expect(mockApply).toHaveBeenCalledWith({}, []);
+  expect(mockApply).toHaveBeenCalledWith(
+    {},
+    [],
+    expect.objectContaining({ pref: DEFAULT_WEIGHT_PREF, lastWeighedAt: null, now: expect.any(Date) }),
+  );
 });

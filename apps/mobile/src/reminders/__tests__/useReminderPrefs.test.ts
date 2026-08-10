@@ -3,6 +3,8 @@ import * as Notifications from "expo-notifications";
 import { useReminderPrefs } from "../useReminderPrefs";
 import { DEFAULT_PREFS, loadPrefs, savePrefs } from "../prefs";
 import { applyAllReminders } from "../schedule";
+import { DEFAULT_WEIGHT_PREF } from "../weightPrefs";
+import { fetchLatestWeighInDate } from "../lastWeighIn";
 
 jest.mock("expo-notifications", () => ({
   getPermissionsAsync: jest.fn(),
@@ -17,18 +19,21 @@ jest.mock("../prefs", () => ({
 
 jest.mock("../schedule", () => ({ applyAllReminders: jest.fn(async () => {}) }));
 jest.mock("../customPrefs", () => ({ loadCustom: jest.fn(async () => []) }));
+jest.mock("../lastWeighIn", () => ({ fetchLatestWeighInDate: jest.fn() }));
 
 const mockGetPermissions = Notifications.getPermissionsAsync as jest.Mock;
 const mockRequestPermissions = Notifications.requestPermissionsAsync as jest.Mock;
 const mockLoadPrefs = loadPrefs as jest.Mock;
 const mockSavePrefs = savePrefs as jest.Mock;
 const mockApplyAllReminders = applyAllReminders as jest.Mock;
+const mockFetchLatestWeighInDate = fetchLatestWeighInDate as jest.Mock;
 
 beforeEach(() => {
   jest.clearAllMocks();
   mockLoadPrefs.mockResolvedValue(DEFAULT_PREFS);
   mockSavePrefs.mockResolvedValue(undefined);
   mockApplyAllReminders.mockResolvedValue(undefined);
+  mockFetchLatestWeighInDate.mockResolvedValue(null);
 });
 
 test("denial path: rejecting the permission prompt leaves the slot disabled and skips persistence", async () => {
@@ -83,5 +88,32 @@ test("grant path: enabling with permission already granted persists and re-sched
   expect(mockRequestPermissions).not.toHaveBeenCalled();
   expect(result.current.prefs.snack.enabled).toBe(true);
   expect(mockSavePrefs).toHaveBeenCalledWith(expect.objectContaining({ snack: { enabled: true, hour: 15, minute: 0 } }));
-  expect(mockApplyAllReminders).toHaveBeenCalledWith(expect.objectContaining({ snack: { enabled: true, hour: 15, minute: 0 } }), []);
+  expect(mockApplyAllReminders).toHaveBeenCalledWith(
+    expect.objectContaining({ snack: { enabled: true, hour: 15, minute: 0 } }),
+    [],
+    expect.objectContaining({ pref: DEFAULT_WEIGHT_PREF, lastWeighedAt: null, now: expect.any(Date) }),
+  );
+});
+
+// Regression: Task 3 shipped this call site with a placeholder `lastWeighedAt:
+// null`, which forgets a real weigh-in the user just logged. Toggling a meal
+// slot minutes after weighing in must not un-arm the "already weighed in
+// today" skip — that's the reminder's one distinguishing behaviour.
+test("toggling a meal slot preserves the fetched last weigh-in date, not null", async () => {
+  mockGetPermissions.mockResolvedValue({ granted: true });
+  const weighedInAt = new Date(2026, 7, 9, 6, 45);
+  mockFetchLatestWeighInDate.mockResolvedValue(weighedInAt);
+
+  const { result } = await renderHook(() => useReminderPrefs());
+  await waitFor(() => expect(result.current.ready).toBe(true));
+
+  await act(async () => {
+    result.current.setSlot("snack", { enabled: true, hour: 15, minute: 0 });
+  });
+
+  expect(mockApplyAllReminders).toHaveBeenCalledWith(
+    expect.anything(),
+    expect.anything(),
+    expect.objectContaining({ lastWeighedAt: weighedInAt }),
+  );
 });

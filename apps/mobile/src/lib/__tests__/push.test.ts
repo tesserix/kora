@@ -1,11 +1,14 @@
-import { renderHook } from "@testing-library/react-native";
+import { renderHook, waitFor } from "@testing-library/react-native";
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import { router } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { registerPushToken, unregisterPushToken, usePushResponder } from "../push";
+import { registerPushToken, unregisterPushToken, setupPushHandler, usePushResponder } from "../push";
 import { registerDevice, unregisterDevice } from "../pushApi";
 import { targetFor } from "../notificationTarget";
+import { applyAllReminders } from "@/reminders/schedule";
+import { DEFAULT_WEIGHT_PREF } from "@/reminders/weightPrefs";
+import { fetchLatestWeighInDate } from "@/reminders/lastWeighIn";
 
 jest.mock("../pushApi", () => ({
   registerDevice: jest.fn(async () => {}),
@@ -31,6 +34,11 @@ jest.mock("../notificationTarget", () => ({ targetFor: jest.fn() }));
 jest.mock("@/reminders/prefs", () => ({ loadPrefs: jest.fn(async () => ({})) }));
 jest.mock("@/reminders/schedule", () => ({ applyAllReminders: jest.fn(async () => {}) }));
 jest.mock("@/reminders/customPrefs", () => ({ loadCustom: jest.fn(async () => []) }));
+jest.mock("@/reminders/weightPrefs", () => {
+  const actual = jest.requireActual("@/reminders/weightPrefs");
+  return { ...actual, loadWeightPref: jest.fn(async () => actual.DEFAULT_WEIGHT_PREF) };
+});
+jest.mock("@/reminders/lastWeighIn", () => ({ fetchLatestWeighInDate: jest.fn(async () => null) }));
 
 function setProjectId(id: string | undefined): void {
   (Constants as unknown as { expoConfig: { extra: { eas: { projectId: string | undefined } } } }).expoConfig = {
@@ -97,6 +105,54 @@ test("registerPushToken resolves instead of rejecting when the API refuses the r
   await expect(registerPushToken()).resolves.toBeUndefined();
 });
 
+// Regression: setupPushHandler runs on every app launch and re-syncs the whole
+// OS notification schedule via applyAllReminders, which starts by cancelling
+// every pending notification. If this call site omitted the weight argument
+// (as it briefly did), a user's weight reminder would be silently destroyed on
+// the next launch and never rescheduled. Asserting call count alone would not
+// catch a missing/wrong third argument, so this asserts the actual argument.
+//
+// Re-specced: this used to assert `lastWeighedAt: null`, which cemented a bug.
+// The launch pass hard-coded "I don't know" as "never weighed in", so weighing
+// in at 06:40 and merely reopening the app at 06:50 re-armed the 07:00
+// reminder — exactly the nag the feature exists to prevent. The launch pass
+// must consult the REAL last weigh-in, so the assertion now pins the fetched
+// date reaching the scheduler.
+test("setupPushHandler re-syncs reminders on every launch using the real last weigh-in, not a null placeholder", async () => {
+  const alreadyWeighedToday = new Date(2026, 7, 17, 6, 40);
+  (fetchLatestWeighInDate as jest.Mock).mockResolvedValue(alreadyWeighedToday);
+
+  setupPushHandler();
+
+  await waitFor(() =>
+    expect(applyAllReminders).toHaveBeenCalledWith(
+      {},
+      [],
+      expect.objectContaining({
+        pref: DEFAULT_WEIGHT_PREF,
+        lastWeighedAt: alreadyWeighedToday,
+        now: expect.any(Date),
+      }),
+    ),
+  );
+});
+
+// The invariant the old assertion was really protecting: a failed lookup must
+// resolve to null so the reminder still FIRES. Ignorance never suppresses.
+test("setupPushHandler still arms the reminder when the last weigh-in cannot be fetched", async () => {
+  (fetchLatestWeighInDate as jest.Mock).mockResolvedValue(null);
+
+  setupPushHandler();
+
+  await waitFor(() =>
+    expect(applyAllReminders).toHaveBeenCalledWith(
+      {},
+      [],
+      expect.objectContaining({ pref: DEFAULT_WEIGHT_PREF, lastWeighedAt: null, now: expect.any(Date) }),
+    ),
+  );
+});
+
 test("unregisterPushToken deletes and clears the cached token", async () => {
   await AsyncStorage.setItem("kora.pushToken", "ExponentPushToken[abc]");
   await unregisterPushToken();
@@ -132,6 +188,21 @@ test("tapping a custom reminder routes to Home", async () => {
 
   expect(router.push).toHaveBeenCalledWith("/");
   expect(router.push).toHaveBeenCalledTimes(1);
+});
+
+// Regression: the weight reminder's payload is { kind: "weight" }, which had no
+// branch here. It fell through to the targetFor path, which has no "weight"
+// case either, so tapping the notification opened the app wherever it last was
+// — no deep link at all. Weight logging lives in WeightLogSheet on Progress.
+test("tapping a weight check-in reminder routes to Progress, where weight is logged", async () => {
+  await renderHook(() => usePushResponder());
+  const callback = (Notifications.addNotificationResponseReceivedListener as jest.Mock).mock.calls[0][0];
+
+  callback(fakeResponse({ kind: "weight" }));
+
+  expect(router.push).toHaveBeenCalledWith("/progress");
+  expect(router.push).toHaveBeenCalledTimes(1);
+  expect(targetFor).not.toHaveBeenCalled();
 });
 
 test("non-reminder tap still routes via the existing targetFor deep-link path, not /capture", async () => {

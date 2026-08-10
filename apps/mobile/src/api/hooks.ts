@@ -4,6 +4,7 @@ import * as Crypto from "expo-crypto";
 import { apiFetch, apiFetchEnvelope, apiFetchMultipart, isNetworkError } from "@/lib/api";
 import { buildCaptureForm, normalizeResolution, type ResolveFile } from "./resolveWire";
 import { isOnline } from "@/offline/connectivity";
+import { reconcileWeightReminder } from "@/reminders/reconcileWeightReminder";
 import {
   foodsFromMemory,
   foodsFromPins,
@@ -589,7 +590,16 @@ export function useAddWeight() {
   return useMutation({
     mutationFn: ({ weight_kg, logged_at }: { weight_kg: number; logged_at?: string }) =>
       apiFetch("/v1/weight", { method: "POST", body: JSON.stringify({ weight_kg, logged_at }) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["weight"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["weight"] });
+      // The user just weighed in — re-arm the one-shot weight reminder trigger
+      // against that fact so it doesn't fire again for a weigh-in already logged.
+      // Best-effort: a failure here must not surface as an unhandled rejection
+      // on top of an otherwise successful weight log.
+      void reconcileWeightReminder(new Date()).catch((err) =>
+        console.warn("reminders: weight reconciliation failed after add-weight", err),
+      );
+    },
   });
 }
 

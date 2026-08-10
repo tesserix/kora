@@ -1,11 +1,12 @@
 import { ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { router } from "expo-router";
+import { router, type Href } from "expo-router";
 import { AppText } from "@/components/Text";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { AppBackground } from "@/components/AppBackground";
 import { Card } from "@/components/Card";
 import { Segmented } from "@/components/Segmented";
+import { GroupedSection, Row } from "@/components/GroupedList";
 import { useUnits, type UnitSystem } from "@/units";
 import { useTheme } from "@/theme";
 
@@ -41,6 +42,15 @@ export default function SettingsScreen() {
               Weight and height display.
             </AppText>
           </Card>
+          <GroupedSection elevated>
+            <Row
+              title="Reminders"
+              icon={{ name: "bell", tint: colors.accent }}
+              chevron
+              accessibilityLabel="Reminders"
+              onPress={() => router.push("/reminders" as Href)}
+            />
+          </GroupedSection>
         </View>
       </ScrollView>
     </View>
