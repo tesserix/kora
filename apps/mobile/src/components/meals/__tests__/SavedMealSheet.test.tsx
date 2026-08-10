@@ -48,6 +48,7 @@ test("empty name disables save", async () => {
   );
   await fireEvent.changeText(getByLabelText("Meal name"), "   ");
   expect(getByLabelText("Save").props.accessibilityState.disabled).toBe(true);
+  await fireEvent.press(getByLabelText("Save"));
   expect(mockCreate).not.toHaveBeenCalled();
 });
 
@@ -76,6 +77,8 @@ test("a blank seed opens an empty sheet with save disabled", async () => {
   // Nothing to save yet — this must read as not-ready, not as an error the
   // user caused by opening the sheet.
   expect(getByLabelText("Save").props.accessibilityState.disabled).toBe(true);
+  await fireEvent.press(getByLabelText("Save"));
+  expect(mockCreate).not.toHaveBeenCalled();
   expect(queryByText("Add at least one item with grams.")).toBeNull();
 });
 
