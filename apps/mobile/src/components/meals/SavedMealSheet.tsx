@@ -26,13 +26,30 @@ const SLOT_OPTIONS = [
 // named-serving entry (e.g. "2 sachet") separately — when `enteredUnit` is
 // set, THAT pair is what gets sent on save, never `grams`, matching the
 // server-resolves-grams contract meal.tsx follows for a single log.
+//
+// `rowId` is CLIENT-ONLY identity for React's list reconciliation — never
+// sent to the server (save() builds its own payload shape and never spreads
+// an EditItem into it). Two rows can legitimately share the same
+// food_item_id (two different portions of the same food logged separately),
+// so food_item_id alone is not a safe key: with duplicate keys, React can
+// reattribute PortionField's local exact-mode state from one row to another
+// when a sibling row is removed. rowId is generated once, when the row is
+// created (seeded or added), and never regenerated on re-render.
 type EditItem = {
+  rowId: string;
   food_item_id: string;
   name: string;
   grams: number;
   enteredAmount: number | null;
   enteredUnit: string | null;
 };
+
+// Collision-improbable local id — these ids never leave the device (they
+// exist only for React list keys), so a uuid dependency is unnecessary. Same
+// scheme as src/reminders/customPrefs.ts's newId().
+function newRowId(): string {
+  return `row_${Date.now().toString(36)}${Math.floor(Math.random() * 1e9).toString(36)}`;
+}
 
 // A saved-meal item carries the user's entered pair when it has one
 // (MemoryFood — the "usual meal" aggregate a create-seed comes from — never
@@ -109,6 +126,7 @@ export function SavedMealSheet({ seed, onClose }: Props) {
       setSlot("breakfast");
       setItems(
         seed.items.map((i) => ({
+          rowId: newRowId(),
           food_item_id: i.food_item_id,
           name: i.name,
           grams: i.quantity_grams,
@@ -124,7 +142,7 @@ export function SavedMealSheet({ seed, onClose }: Props) {
     setItems(
       seed.meal.items.map((i) => {
         const { amount, unit } = enteredPairOf(i);
-        return { food_item_id: i.food_item_id, name: i.name, grams: i.grams, enteredAmount: amount, enteredUnit: unit };
+        return { rowId: newRowId(), food_item_id: i.food_item_id, name: i.name, grams: i.grams, enteredAmount: amount, enteredUnit: unit };
       }),
     );
     setErr(null);
@@ -146,6 +164,7 @@ export function SavedMealSheet({ seed, onClose }: Props) {
     if (defaultServing) {
       const count = defaultServingCount(food.serving_grams, defaultServing);
       newItem = {
+        rowId: newRowId(),
         food_item_id: food.id,
         name: food.name,
         grams: (baseQuantityFor(count, defaultServing.name, servingUnits) ?? food.serving_grams) || 100,
@@ -154,6 +173,7 @@ export function SavedMealSheet({ seed, onClose }: Props) {
       };
     } else {
       newItem = {
+        rowId: newRowId(),
         food_item_id: food.id,
         name: food.name,
         grams: food.serving_grams || 100,
@@ -230,7 +250,7 @@ export function SavedMealSheet({ seed, onClose }: Props) {
         </View>
         <View style={{ marginTop: spacing.md, gap: spacing.sm }}>
           {items.map((it, idx) => (
-            <View key={it.food_item_id} style={{ gap: spacing.xs }}>
+            <View key={it.rowId} style={{ gap: spacing.xs }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
                 <AppText style={{ flex: 1 }}>{it.name}</AppText>
                 <Pressable accessibilityLabel={`Remove ${it.name}`} hitSlop={8} onPress={() => removeItem(idx)}>

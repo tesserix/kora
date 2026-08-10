@@ -154,3 +154,44 @@ test("adding an ingredient to an existing meal appends rather than replaces", as
   expect(getByText("Milk")).toBeTruthy();
   expect(getByText("NESCAFÉ Mocha")).toBeTruthy();
 });
+
+// Regression for fix-round-1 finding: rows used to be keyed by food_item_id,
+// which collides the moment the same food is added twice (a legitimate case
+// — e.g. two different portions of the same milk logged separately). With a
+// colliding key, when the FIRST of two same-keyed rows is removed, React's
+// array reconciler matches the sole surviving element positionally against
+// the OLD position-0 fiber — i.e. the REMOVED row's own fiber — and reuses
+// its hooks. PortionField's `enteredExactMode` (see PortionField.tsx) is
+// genuinely local-only, never resynced from props (unlike exactText, which a
+// resync effect keeps in step with amount/unit and would mask this), so a
+// toggle made on the second row before the first is removed would otherwise
+// silently vanish — the survivor renders back in stepper mode. This never
+// touches the entered data, only the UI mode, and reuses the SAME food both
+// times, so no props-only diff between the two rows could tell them apart —
+// only two robustly distinct client identities can.
+test("adding the same food twice keeps each row's own exact-mode toggle when the OTHER row is removed", async () => {
+  const { getByText, getAllByText, getAllByLabelText, getByLabelText, queryByText } = await render(
+    <SavedMealSheet seed={{ mode: "blank" }} onClose={() => {}} />,
+  );
+
+  await fireEvent.press(getByText("+ Add ingredient"));
+  await fireEvent.press(getByLabelText("Select NESCAFÉ Mocha"));
+  await fireEvent.press(getByText("+ Add ingredient"));
+  await fireEvent.press(getByLabelText("Select NESCAFÉ Mocha"));
+
+  // Both rows render — same food, two independent rows.
+  expect(getAllByText("NESCAFÉ Mocha")).toHaveLength(2);
+  expect(getAllByText("1 portion (16.5 g)")).toHaveLength(2);
+
+  // Toggle the SECOND row into exact mode — a pure local UI change, no data
+  // mutation, so the two rows' entered pairs stay identical.
+  await fireEvent.press(getAllByText("Enter exact amount")[1]);
+
+  // Remove the FIRST row (still in stepper mode).
+  await fireEvent.press(getAllByLabelText("Remove NESCAFÉ Mocha")[0]);
+
+  // The survivor is the second row, which was switched to exact mode — it
+  // must still show that entry field, not the stepper it never displayed.
+  expect(getByLabelText("Amount")).toBeTruthy();
+  expect(queryByText("1 portion (16.5 g)")).toBeNull();
+});
