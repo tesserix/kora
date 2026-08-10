@@ -5,6 +5,7 @@ import { DEFAULT_PREFS, loadPrefs, savePrefs, type ReminderPref, type ReminderPr
 import { applyAllReminders } from "./schedule";
 import { loadCustom } from "./customPrefs";
 import { loadWeightPref } from "./weightPrefs";
+import { fetchLatestWeighInDate } from "./lastWeighIn";
 
 // useReminderPrefs loads persisted reminder prefs and, on every change, persists
 // them and re-syncs the OS schedule. Enabling a reminder first ensures OS
@@ -49,7 +50,11 @@ export function useReminderPrefs() {
       await savePrefs(next);
       const customs = await loadCustom();
       const weightPref = await loadWeightPref();
-      await applyAllReminders(next, customs, { pref: weightPref, lastWeighedAt: null, now: new Date() });
+      // Not `null`: the user may have already weighed in today, and passing
+      // null here would forget that and re-arm the weight reminder to fire
+      // anyway — the one behaviour that distinguishes it from a plain timer.
+      const lastWeighedAt = await fetchLatestWeighInDate();
+      await applyAllReminders(next, customs, { pref: weightPref, lastWeighedAt, now: new Date() });
     })();
   };
 

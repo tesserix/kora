@@ -4,6 +4,7 @@ import { loadPrefs } from "./prefs";
 import { applyAllReminders } from "./schedule";
 import { loadCustom, saveCustom, newId, MAX_CUSTOM_REMINDERS, type CustomReminder } from "./customPrefs";
 import { loadWeightPref } from "./weightPrefs";
+import { fetchLatestWeighInDate } from "./lastWeighIn";
 
 // ensurePermission returns whether OS notification permission is (or becomes)
 // granted, prompting once if undetermined.
@@ -37,7 +38,11 @@ export function useCustomReminders() {
     await saveCustom(next);
     const mealPrefs = await loadPrefs();
     const weightPref = await loadWeightPref();
-    await applyAllReminders(mealPrefs, next, { pref: weightPref, lastWeighedAt: null, now: new Date() });
+    // Not `null`: the user may have already weighed in today, and passing
+    // null here would forget that and re-arm the weight reminder to fire
+    // anyway — the one behaviour that distinguishes it from a plain timer.
+    const lastWeighedAt = await fetchLatestWeighInDate();
+    await applyAllReminders(mealPrefs, next, { pref: weightPref, lastWeighedAt, now: new Date() });
   };
 
   const addReminder = async (draft: Omit<CustomReminder, "id">): Promise<void> => {

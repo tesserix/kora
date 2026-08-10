@@ -596,7 +596,9 @@ export function useAddWeight() {
       // against that fact so it doesn't fire again for a weigh-in already logged.
       // Best-effort: a failure here must not surface as an unhandled rejection
       // on top of an otherwise successful weight log.
-      void reconcileWeightReminder(new Date()).catch(() => {});
+      void reconcileWeightReminder(new Date()).catch((err) =>
+        console.warn("reminders: weight reconciliation failed after add-weight", err),
+      );
     },
   });
 }
