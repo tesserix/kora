@@ -41,9 +41,20 @@ export function WeightReminderSection(): ReactElement {
     });
   }, []);
 
-  const commit = (next: WeightReminderPref): void => {
+  // commit applies a partial change (the field the caller is editing) rather
+  // than a whole new object. Two edits can be in flight at once — e.g. a day
+  // change fired while the enabling permission dialog is still pending — and
+  // `next` is built from `prefRef.current` AFTER the permission await
+  // resolves, not from a pre-await snapshot, so a slower call can never
+  // clobber a faster one. This mirrors useReminderPrefs.setSlot's
+  // recompute-after-await safeguard.
+  //
+  // Permission is only (re-)checked on the off→on transition: editing the
+  // time or days of an already-enabled reminder can't need a fresh prompt.
+  const commit = (patch: Partial<WeightReminderPref>): void => {
     void (async () => {
-      if (next.enabled) {
+      const turningOn = patch.enabled === true && !prefRef.current.enabled;
+      if (turningOn) {
         const perm = await Notifications.getPermissionsAsync();
         if (!perm.granted) {
           const req = await Notifications.requestPermissionsAsync();
@@ -55,6 +66,7 @@ export function WeightReminderSection(): ReactElement {
           }
         }
       }
+      const next = { ...prefRef.current, ...patch };
       prefRef.current = next;
       setPref(next);
       await saveWeightPref(next);
@@ -71,7 +83,7 @@ export function WeightReminderSection(): ReactElement {
     const date = draft;
     setEditing(false);
     setDraft(null);
-    if (date) commit({ ...prefRef.current, hour: date.getHours(), minute: date.getMinutes() });
+    if (date) commit({ hour: date.getHours(), minute: date.getMinutes() });
   };
 
   const cancel = (): void => {
@@ -83,7 +95,7 @@ export function WeightReminderSection(): ReactElement {
     setEditing(false);
     setDraft(null);
     if (event.type === "set" && date) {
-      commit({ ...prefRef.current, hour: date.getHours(), minute: date.getMinutes() });
+      commit({ hour: date.getHours(), minute: date.getMinutes() });
     }
   };
 
@@ -105,12 +117,12 @@ export function WeightReminderSection(): ReactElement {
           <Switch
             accessibilityLabel="Weight check-in reminder"
             value={pref.enabled}
-            onValueChange={(enabled) => commit({ ...prefRef.current, enabled })}
+            onValueChange={(enabled) => commit({ enabled })}
             trackColor={{ true: colors.accent, false: colors.muted }}
           />
         </View>
       </GroupedSection>
-      <WeekdayPicker days={pref.days} onChange={(days) => commit({ ...prefRef.current, days })} />
+      <WeekdayPicker days={pref.days} onChange={(days) => commit({ days })} />
       {Platform.OS === "ios" ? (
         <Sheet visible={editing} onClose={cancel}>
           <View style={{ paddingHorizontal: 22, paddingBottom: 30 }}>

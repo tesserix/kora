@@ -23,7 +23,7 @@ test("every day selects all seven", async () => {
   const onChange = jest.fn();
   const { getByText } = await render(<WeekdayPicker days={[1]} onChange={onChange} />);
 
-  await fireEvent.press(getByText("Every day"));
+  await fireEvent.press(getByText("Select all days"));
 
   expect(onChange).toHaveBeenCalledWith([0, 1, 2, 3, 4, 5, 6]);
 });

@@ -40,7 +40,7 @@ export function WeekdayPicker({ days, onChange }: Props) {
         })}
       </View>
       <Pressable onPress={() => onChange(ALL)} style={{ marginTop: spacing.sm }}>
-        <AppText variant="footnote" muted>Every day</AppText>
+        <AppText variant="footnote" muted>Select all days</AppText>
       </Pressable>
     </>
   );

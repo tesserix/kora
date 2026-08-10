@@ -2,7 +2,10 @@ import { render, waitFor } from "@testing-library/react-native";
 
 jest.mock("@react-native-community/datetimepicker", () => "DateTimePicker");
 jest.mock("@/components/settings/RemindersSection", () => ({ RemindersSection: () => null }));
-jest.mock("@/components/settings/WeightReminderSection", () => ({ WeightReminderSection: () => null }));
+jest.mock("expo-notifications", () => ({
+  getPermissionsAsync: jest.fn(() => Promise.resolve({ granted: true })),
+  requestPermissionsAsync: jest.fn(() => Promise.resolve({ granted: true })),
+}));
 
 const reminders = [
   { id: "a", label: "Drink water", hour: 15, minute: 0, days: [0, 1, 2, 3, 4, 5, 6], enabled: true },
