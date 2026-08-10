@@ -1,11 +1,13 @@
-import { renderHook } from "@testing-library/react-native";
+import { renderHook, waitFor } from "@testing-library/react-native";
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import { router } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { registerPushToken, unregisterPushToken, usePushResponder } from "../push";
+import { registerPushToken, unregisterPushToken, setupPushHandler, usePushResponder } from "../push";
 import { registerDevice, unregisterDevice } from "../pushApi";
 import { targetFor } from "../notificationTarget";
+import { applyAllReminders } from "@/reminders/schedule";
+import { DEFAULT_WEIGHT_PREF } from "@/reminders/weightPrefs";
 
 jest.mock("../pushApi", () => ({
   registerDevice: jest.fn(async () => {}),
@@ -31,6 +33,10 @@ jest.mock("../notificationTarget", () => ({ targetFor: jest.fn() }));
 jest.mock("@/reminders/prefs", () => ({ loadPrefs: jest.fn(async () => ({})) }));
 jest.mock("@/reminders/schedule", () => ({ applyAllReminders: jest.fn(async () => {}) }));
 jest.mock("@/reminders/customPrefs", () => ({ loadCustom: jest.fn(async () => []) }));
+jest.mock("@/reminders/weightPrefs", () => {
+  const actual = jest.requireActual("@/reminders/weightPrefs");
+  return { ...actual, loadWeightPref: jest.fn(async () => actual.DEFAULT_WEIGHT_PREF) };
+});
 
 function setProjectId(id: string | undefined): void {
   (Constants as unknown as { expoConfig: { extra: { eas: { projectId: string | undefined } } } }).expoConfig = {
@@ -95,6 +101,23 @@ test("registerPushToken resolves instead of rejecting when the permission lookup
 test("registerPushToken resolves instead of rejecting when the API refuses the registration", async () => {
   (registerDevice as jest.Mock).mockRejectedValueOnce(new Error("500 internal_error"));
   await expect(registerPushToken()).resolves.toBeUndefined();
+});
+
+// Regression: setupPushHandler runs on every app launch and re-syncs the whole
+// OS notification schedule via applyAllReminders, which starts by cancelling
+// every pending notification. If this call site omitted the weight argument
+// (as it briefly did), a user's weight reminder would be silently destroyed on
+// the next launch and never rescheduled. Asserting call count alone would not
+// catch a missing/wrong third argument, so this asserts the actual argument.
+test("setupPushHandler re-syncs reminders including the weight reminder on every launch", async () => {
+  setupPushHandler();
+  await waitFor(() =>
+    expect(applyAllReminders).toHaveBeenCalledWith(
+      {},
+      [],
+      expect.objectContaining({ pref: DEFAULT_WEIGHT_PREF, lastWeighedAt: null, now: expect.any(Date) }),
+    ),
+  );
 });
 
 test("unregisterPushToken deletes and clears the cached token", async () => {

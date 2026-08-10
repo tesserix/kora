@@ -11,6 +11,7 @@ import { targetFor } from "@/lib/notificationTarget";
 import { loadPrefs } from "@/reminders/prefs";
 import { loadCustom } from "@/reminders/customPrefs";
 import { applyAllReminders } from "@/reminders/schedule";
+import { loadWeightPref } from "@/reminders/weightPrefs";
 import type { NotificationType } from "@/api/types";
 
 const TOKEN_KEY = "kora.pushToken";
@@ -87,8 +88,10 @@ export function setupPushHandler(): void {
   // Reschedule reminders on every launch so they survive reinstalls and
   // permission changes. setupPushHandler runs once at module scope
   // (app/_layout.tsx), so no additional once-guard is needed here.
-  void Promise.all([loadPrefs(), loadCustom()])
-    .then(([mealPrefs, customs]) => applyAllReminders(mealPrefs, customs))
+  void Promise.all([loadPrefs(), loadCustom(), loadWeightPref()])
+    .then(([mealPrefs, customs, weightPref]) =>
+      applyAllReminders(mealPrefs, customs, { pref: weightPref, lastWeighedAt: null, now: new Date() }),
+    )
     .catch(() => {});
 }
 
