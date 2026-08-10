@@ -8,6 +8,7 @@ import { Overline } from "@/components/Overline";
 import { GroupedSection, Row } from "@/components/GroupedList";
 import { AppText } from "@/components/Text";
 import { RemindersSection } from "@/components/settings/RemindersSection";
+import { WeightReminderSection } from "@/components/settings/WeightReminderSection";
 import { CustomReminderSheet } from "@/components/reminders/CustomReminderSheet";
 import { useCustomReminders } from "@/reminders/useCustomReminders";
 import { MAX_CUSTOM_REMINDERS, type CustomReminder, type Weekday } from "@/reminders/customPrefs";
@@ -56,6 +57,7 @@ export default function Reminders() {
         <ScreenHeader title="Reminders" onBack={() => router.back()} />
         <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>
           <RemindersSection />
+          <WeightReminderSection />
 
           <View>
             <Overline style={{ marginLeft: spacing.md, marginBottom: spacing.xs }}>Custom</Overline>
