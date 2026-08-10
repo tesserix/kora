@@ -190,6 +190,21 @@ test("tapping a custom reminder routes to Home", async () => {
   expect(router.push).toHaveBeenCalledTimes(1);
 });
 
+// Regression: the weight reminder's payload is { kind: "weight" }, which had no
+// branch here. It fell through to the targetFor path, which has no "weight"
+// case either, so tapping the notification opened the app wherever it last was
+// — no deep link at all. Weight logging lives in WeightLogSheet on Progress.
+test("tapping a weight check-in reminder routes to Progress, where weight is logged", async () => {
+  await renderHook(() => usePushResponder());
+  const callback = (Notifications.addNotificationResponseReceivedListener as jest.Mock).mock.calls[0][0];
+
+  callback(fakeResponse({ kind: "weight" }));
+
+  expect(router.push).toHaveBeenCalledWith("/progress");
+  expect(router.push).toHaveBeenCalledTimes(1);
+  expect(targetFor).not.toHaveBeenCalled();
+});
+
 test("non-reminder tap still routes via the existing targetFor deep-link path, not /capture", async () => {
   (targetFor as jest.Mock).mockReturnValue("/friends");
   await renderHook(() => usePushResponder());

@@ -111,6 +111,14 @@ export function usePushResponder(): void {
         router.push("/");
         return;
       }
+      // Weight check-in reminders land on Progress, where WeightLogSheet lives —
+      // the only place in the app a weight can be logged. Falling through to the
+      // targetFor path (which has no "weight" case) would drop the user wherever
+      // the app happened to be, which is not a deep link at all.
+      if (data?.kind === "weight") {
+        router.push("/progress");
+        return;
+      }
       if (!data?.type) return;
       const target = targetFor({ type: data.type, entity_id: data.entity_id });
       if (target) router.push(target);
