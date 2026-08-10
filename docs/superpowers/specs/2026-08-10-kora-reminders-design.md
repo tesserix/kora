@@ -75,10 +75,16 @@ nextWeightReminderAt(
 ): Date | null
 ```
 
-It returns the next selected weekday-and-time strictly after `now`, **skipping that occurrence
-when `lastWeighedAt` falls within the current period** — where a period runs from the previous
-selected occurrence up to the next one. It returns `null` when the reminder is disabled or no days
-are selected.
+It returns the next selected weekday-and-time strictly after `now`, **skipping that occurrence when
+the user already weighed in on that same calendar day** (or later). It returns `null` when the
+reminder is disabled or no days are selected.
+
+Same-calendar-day, deliberately, rather than occurrence-to-occurrence periods. For a Monday 07:00
+reminder: weighing in Monday 06:45 skips it, weighing in Sunday evening still lets Monday fire, and
+weighing in last Tuesday lets it fire. A period-based rule would suppress all three, which reads as
+a broken reminder — the user set a Monday reminder because they want to be asked on Monday, and a
+weigh-in six days earlier is not a reason to stay silent. The narrow case this protects is the real
+one: you weighed in, then the reminder fires minutes later.
 
 `applyWeightReminder(pref, lastWeighedAt)` is the thin Expo wrapper: cancel the existing weight
 notification by its identifier, and schedule a one-shot at the returned date (or nothing, on
