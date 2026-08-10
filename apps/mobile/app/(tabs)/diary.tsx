@@ -214,6 +214,15 @@ export default function Diary() {
   const toggleSelected = (id: string) =>
     setSelectedIds((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
 
+  // Selection holds log ids from the day it was made, and only that day's rows
+  // are on screen — carrying it across a day change leaves a header claiming
+  // "1 selected" with nothing selected in front of the user, and a "Save as
+  // meal" that filters to zero rows and opens a blank sheet.
+  const selectDay = (day: string) => {
+    setSelected(day);
+    setSelectedIds([]);
+  };
+
   // Entrance stagger runs on first mount only — see app/(tabs)/index.tsx for the
   // same guard and rationale (refetches update data in place, no re-stagger).
   const firstMount = useRef(true);
@@ -270,6 +279,10 @@ export default function Diary() {
         entered_amount: l.entered_amount ?? null,
         entered_unit: l.entered_unit ?? null,
         base_unit: l.base_unit ?? null,
+        // The slot these rows were eaten in — composing two dinner entries and
+        // saving them under Breakfast is a silent mislabel the user only ever
+        // sees later, when the saved meal logs itself into the wrong slot.
+        meal_slot: l.meal_slot,
       })),
     );
   };
@@ -371,7 +384,7 @@ export default function Diary() {
                 selected={dISO === selected}
                 today={dISO === todayIso}
                 loggable={dISO <= todayIso}
-                onSelect={() => setSelected(dISO)}
+                onSelect={() => selectDay(dISO)}
               />
             );
           })}
@@ -469,6 +482,10 @@ export default function Diary() {
                 })}
                 {group.items.map((log) => {
                   const fv = foodVisual(log.description);
+                  // Always a boolean (never undefined) on these rows: this
+                  // screen HAS a selection mode, so an unselected row has to
+                  // say so rather than stay silent.
+                  const rowSelected = selectedIds.includes(log.id);
                   return (
                     <Swipeable
                       key={log.id}
@@ -494,6 +511,7 @@ export default function Diary() {
                           tint={hslToHex(fv.hue, 0.5, 0.5)}
                           onPress={() => (selecting ? toggleSelected(log.id) : openMeal(log))}
                           onLongPress={() => toggleSelected(log.id)}
+                          selected={rowSelected}
                           accessibilityLabel={log.description}
                         />
                       </View>

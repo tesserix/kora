@@ -94,6 +94,10 @@ beforeEach(() => {
   mockUseDayLogs.mockClear();
   mockUseQueuedLogs.mockClear();
   mockOpenCompose.mockClear();
+  // Created inside the jest.mock factory above, so neither jest.clearAllMocks
+  // in a config nor restoreAllMocks below resets it — a "does not navigate"
+  // assertion would otherwise be satisfied by an earlier test's push.
+  (router.push as jest.Mock).mockClear();
   mockUseUnits.mockReturnValue({ system: "metric", setSystem: jest.fn() });
   jest.spyOn(Alert, "alert").mockImplementation(() => {});
 });
@@ -408,6 +412,18 @@ test("long-pressing a diary row enters selection mode", async () => {
   expect(getByText("1 selected")).toBeTruthy();
 });
 
+// Without this the only feedback in selection mode is the "N selected"
+// counter: a mis-tap and the tap undoing it both look identical on the row.
+test("a selected row is announced as selected and an unselected one is not", async () => {
+  mockDayLogs = SELECTABLE_LOGS;
+  const { getByLabelText } = await render(<Diary />);
+
+  await fireEvent(getByLabelText("NESCAFÉ Mocha"), "longPress");
+
+  expect(getByLabelText("NESCAFÉ Mocha").props.accessibilityState.selected).toBe(true);
+  expect(getByLabelText("Milk").props.accessibilityState.selected).toBe(false);
+});
+
 test("a plain tap toggles selection while selecting, and composes only the chosen rows", async () => {
   mockDayLogs = SELECTABLE_LOGS;
   const { getByLabelText, getByText } = await render(<Diary />);
@@ -433,6 +449,24 @@ test("saving a selection clears it and does not navigate or delete the original 
   expect(queryByText("1 selected")).toBeNull();
   expect((router.push as jest.Mock)).not.toHaveBeenCalled();
   expect(mockDeleteMutate).not.toHaveBeenCalled();
+});
+
+// Selection is scoped to the day it was made on, and only that day's rows are
+// loaded — a selection that survived the switch would claim "1 selected" with
+// nothing selected on screen, and compose zero rows into a blank sheet.
+test("switching to another day clears the selection", async () => {
+  mockDayLogs = SELECTABLE_LOGS;
+  const { getByLabelText, getByText, queryByText } = await render(<Diary />);
+
+  await fireEvent(getByLabelText("NESCAFÉ Mocha"), "longPress");
+  expect(getByText("1 selected")).toBeTruthy();
+
+  const todayIso = isoOf(new Date());
+  const monday = mondayOfThisWeek();
+  const target = isoOf(monday) === todayIso ? new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 1) : monday;
+  await fireEvent.press(getByLabelText(isoOf(target)));
+
+  expect(queryByText("1 selected")).toBeNull();
 });
 
 test("cancelling selection leaves the diary untouched", async () => {
