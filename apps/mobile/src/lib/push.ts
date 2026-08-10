@@ -84,11 +84,14 @@ export function setupPushHandler(): void {
   });
   // Reschedule reminders on every launch so they survive reinstalls and
   // permission changes. setupPushHandler runs once at module scope
-  // (app/_layout.tsx), so no additional once-guard is needed here. There is no
-  // known last weigh-in at launch, so a failed weight fetch would be treated
-  // the same way anyway — reconcileWeightReminder(null) is correct here, not
-  // just convenient.
-  void reconcileWeightReminder(null).catch(() => {});
+  // (app/_layout.tsx), so no additional once-guard is needed here.
+  //
+  // No argument: this launch witnessed no weigh-in, but the user may well have
+  // logged one before swiping the app away. Passing a placeholder `null` here
+  // used to re-arm today's reminder on every relaunch — weigh in at 06:40,
+  // reopen at 06:50, buzz at 07:00. reconcileWeightReminder now looks the real
+  // date up itself.
+  void reconcileWeightReminder().catch(() => {});
 }
 
 // usePushResponder deep-links when the user taps a push.

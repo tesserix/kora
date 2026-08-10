@@ -1,12 +1,30 @@
 import { loadPrefs } from "./prefs";
 import { loadCustom } from "./customPrefs";
 import { loadWeightPref } from "./weightPrefs";
+import { fetchLatestWeighInDate } from "./lastWeighIn";
 import { applyAllReminders } from "./schedule";
 
 // run does one full reconcile pass: fresh reads of everything from storage,
-// then a single applyAllReminders call with the caller's lastWeighedAt.
-async function run(lastWeighedAt: Date | null): Promise<void> {
-  const [mealPrefs, customs, pref] = await Promise.all([loadPrefs(), loadCustom(), loadWeightPref()]);
+// then a single applyAllReminders call.
+//
+// `justWeighedAt` is a weigh-in the CALLER witnessed (useAddWeight, right after
+// a successful POST). Every other caller is editing the schedule, not recording
+// a weigh-in, and passes nothing — meaning "I don't know", not "never weighed
+// in". Those two must never be conflated: passing a placeholder `null` for
+// "I don't know" re-arms the reminder for a day the user has already logged,
+// which is precisely the nag this feature exists to prevent.
+//
+// So when the caller didn't witness one, run goes and finds out.
+// fetchLatestWeighInDate never rejects and resolves to null when the fetch
+// fails, so an unknown weigh-in still lets the reminder FIRE — a redundant
+// reminder is a nuisance, a silently suppressed one defeats the feature.
+async function run(justWeighedAt: Date | null): Promise<void> {
+  const [mealPrefs, customs, pref, lastWeighedAt] = await Promise.all([
+    loadPrefs(),
+    loadCustom(),
+    loadWeightPref(),
+    justWeighedAt ? Promise.resolve(justWeighedAt) : fetchLatestWeighInDate(),
+  ]);
   await applyAllReminders(mealPrefs, customs, { pref, lastWeighedAt, now: new Date() });
 }
 
@@ -23,18 +41,22 @@ async function run(lastWeighedAt: Date | null): Promise<void> {
 //   - A call that arrives while one is already running or already queued
 //     behind the running one is coalesced onto that same queued slot rather
 //     than starting a second one in parallel.
-//   - Coalescing never drops information: `nextLastWeighedAt` is overwritten
-//     by every call while queued, so the queued run always uses the NEWEST
-//     lastWeighedAt at the moment it actually executes — a later call may
-//     carry a just-logged weigh-in that an earlier queued call doesn't know
-//     about, and silently keeping the older value would leave the schedule
-//     stale.
+//   - Coalescing is BIASED TOWARDS KNOWLEDGE, not towards recency. A witnessed
+//     weigh-in is a fact; a no-argument call is an absence of information.
+//     "Newest wins" would let an ignorant call queued behind a weigh-in discard
+//     it, so instead the queued slot keeps any explicit date (the latest one,
+//     if several arrive) and only falls back to fetching when no caller
+//     witnessed anything. Nothing is lost either way: a no-argument call
+//     coalesced onto a slot holding a just-logged weigh-in would have fetched
+//     that very weigh-in anyway.
 let tail: Promise<void> = Promise.resolve();
 let queued = false;
-let nextLastWeighedAt: Date | null = null;
+let queuedWeighedAt: Date | null = null;
 
-export function reconcileWeightReminder(lastWeighedAt: Date | null): Promise<void> {
-  nextLastWeighedAt = lastWeighedAt;
+export function reconcileWeightReminder(justWeighedAt?: Date): Promise<void> {
+  if (justWeighedAt && (!queuedWeighedAt || justWeighedAt.getTime() > queuedWeighedAt.getTime())) {
+    queuedWeighedAt = justWeighedAt;
+  }
   if (queued) return tail;
   queued = true;
   // .catch(() => {}) on the link into the chain, not on `tail` itself: a
@@ -43,8 +65,11 @@ export function reconcileWeightReminder(lastWeighedAt: Date | null): Promise<voi
   // on this run's own outcome, so callers can still observe their own failure.
   tail = tail.catch(() => {}).then(() => {
     queued = false;
-    const arg = nextLastWeighedAt;
-    return run(arg);
+    const known = queuedWeighedAt;
+    // Cleared as the slot is consumed so a later, unrelated reconcile does not
+    // inherit a stale weigh-in from a run that has already happened.
+    queuedWeighedAt = null;
+    return run(known);
   });
   return tail;
 }

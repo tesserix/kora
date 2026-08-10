@@ -24,9 +24,11 @@ function fmt(hour: number, minute: number): string {
 // permission first, and denial reverts the toggle by forcing a fresh object
 // reference into state so the controlled Switch re-renders back to off.
 //
-// Every committed change is persisted then reconciled with `lastWeighedAt:
-// null` — correct here because the user is editing the SCHEDULE, not
-// recording a weigh-in; the app's foreground pass supplies the real date.
+// Every committed change is persisted then reconciled with no argument: the
+// user is editing the SCHEDULE, not recording a weigh-in, so the reconcile
+// looks up the real last weigh-in itself. Passing a placeholder `null` here
+// used to re-arm a reminder for a day already logged — weigh in at 06:40, add
+// a day to the chips at 06:50, get nagged at 07:00.
 export function WeightReminderSection(): ReactElement {
   const { colors, spacing } = useTheme();
   const [pref, setPref] = useState<WeightReminderPref>(DEFAULT_WEIGHT_PREF);
@@ -70,7 +72,7 @@ export function WeightReminderSection(): ReactElement {
       prefRef.current = next;
       setPref(next);
       await saveWeightPref(next);
-      await reconcileWeightReminder(null);
+      await reconcileWeightReminder();
     })();
   };
 

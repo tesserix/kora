@@ -8,6 +8,7 @@ import { registerDevice, unregisterDevice } from "../pushApi";
 import { targetFor } from "../notificationTarget";
 import { applyAllReminders } from "@/reminders/schedule";
 import { DEFAULT_WEIGHT_PREF } from "@/reminders/weightPrefs";
+import { fetchLatestWeighInDate } from "@/reminders/lastWeighIn";
 
 jest.mock("../pushApi", () => ({
   registerDevice: jest.fn(async () => {}),
@@ -37,6 +38,7 @@ jest.mock("@/reminders/weightPrefs", () => {
   const actual = jest.requireActual("@/reminders/weightPrefs");
   return { ...actual, loadWeightPref: jest.fn(async () => actual.DEFAULT_WEIGHT_PREF) };
 });
+jest.mock("@/reminders/lastWeighIn", () => ({ fetchLatestWeighInDate: jest.fn(async () => null) }));
 
 function setProjectId(id: string | undefined): void {
   (Constants as unknown as { expoConfig: { extra: { eas: { projectId: string | undefined } } } }).expoConfig = {
@@ -109,8 +111,39 @@ test("registerPushToken resolves instead of rejecting when the API refuses the r
 // (as it briefly did), a user's weight reminder would be silently destroyed on
 // the next launch and never rescheduled. Asserting call count alone would not
 // catch a missing/wrong third argument, so this asserts the actual argument.
-test("setupPushHandler re-syncs reminders including the weight reminder on every launch", async () => {
+//
+// Re-specced: this used to assert `lastWeighedAt: null`, which cemented a bug.
+// The launch pass hard-coded "I don't know" as "never weighed in", so weighing
+// in at 06:40 and merely reopening the app at 06:50 re-armed the 07:00
+// reminder — exactly the nag the feature exists to prevent. The launch pass
+// must consult the REAL last weigh-in, so the assertion now pins the fetched
+// date reaching the scheduler.
+test("setupPushHandler re-syncs reminders on every launch using the real last weigh-in, not a null placeholder", async () => {
+  const alreadyWeighedToday = new Date(2026, 7, 17, 6, 40);
+  (fetchLatestWeighInDate as jest.Mock).mockResolvedValue(alreadyWeighedToday);
+
   setupPushHandler();
+
+  await waitFor(() =>
+    expect(applyAllReminders).toHaveBeenCalledWith(
+      {},
+      [],
+      expect.objectContaining({
+        pref: DEFAULT_WEIGHT_PREF,
+        lastWeighedAt: alreadyWeighedToday,
+        now: expect.any(Date),
+      }),
+    ),
+  );
+});
+
+// The invariant the old assertion was really protecting: a failed lookup must
+// resolve to null so the reminder still FIRES. Ignorance never suppresses.
+test("setupPushHandler still arms the reminder when the last weigh-in cannot be fetched", async () => {
+  (fetchLatestWeighInDate as jest.Mock).mockResolvedValue(null);
+
+  setupPushHandler();
+
   await waitFor(() =>
     expect(applyAllReminders).toHaveBeenCalledWith(
       {},

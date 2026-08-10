@@ -7,6 +7,15 @@ jest.mock("expo-notifications", () => ({
   requestPermissionsAsync: jest.fn(() => Promise.resolve({ granted: true })),
 }));
 
+// WeightReminderSection (rendered for real by this screen) reaches
+// reconcileWeightReminder, which now looks the last weigh-in up through the API
+// client — and firebase/auth ships ESM that Jest can't transform out of the box
+// (the repo mocks it directly elsewhere for the same reason). Reconciliation is
+// an inert side effect for these tests, so the module is stubbed at its edge.
+jest.mock("@/reminders/reconcileWeightReminder", () => ({
+  reconcileWeightReminder: jest.fn(async () => {}),
+}));
+
 const reminders = [
   { id: "a", label: "Drink water", hour: 15, minute: 0, days: [0, 1, 2, 3, 4, 5, 6], enabled: true },
   { id: "b", label: "Workout", hour: 7, minute: 30, days: [1, 3, 5], enabled: false },

@@ -18,6 +18,23 @@ jest.mock("@/reminders/reconcileWeightReminder", () => ({
   reconcileWeightReminder: jest.fn(),
 }));
 
+// WeekdayPicker is wrapped (not replaced) so its real chips still render for the
+// day-selection tests, while every render of the section is counted. That count
+// is what makes the permission-denial revert observable: the revert's whole
+// purpose is to force a re-render with a fresh pref object, because the native
+// Switch has already flipped itself ON and only a re-render moves it back.
+const mockWeekdayRender = jest.fn();
+jest.mock("@/components/reminders/WeekdayPicker", () => {
+  const React = jest.requireActual("react");
+  const actual = jest.requireActual("@/components/reminders/WeekdayPicker");
+  return {
+    WeekdayPicker: (props: Record<string, unknown>) => {
+      mockWeekdayRender();
+      return React.createElement(actual.WeekdayPicker, props);
+    },
+  };
+});
+
 import { WeightReminderSection } from "../WeightReminderSection";
 import { DEFAULT_WEIGHT_PREF, loadWeightPref, saveWeightPref } from "@/reminders/weightPrefs";
 import { reconcileWeightReminder } from "@/reminders/reconcileWeightReminder";
@@ -48,9 +65,18 @@ test("enabling persists the pref and re-arms the schedule", async () => {
   expect(reconcileWeightReminder).toHaveBeenCalled();
 });
 
-test("denied permission leaves the toggle off", async () => {
+// Re-specced. The previous version asserted only `props.value === false` after
+// a denial, which the switch already satisfies before the commit even starts —
+// it passed identically with the revert line deleted, so it tested nothing.
+// The behaviour that actually matters is that denial pushes a FRESH pref object
+// into state: the native Switch has already animated itself ON, and only a
+// re-render drags it back. So this asserts the re-render happened.
+test("denied permission reverts the toggle by forcing a fresh render", async () => {
   (Notifications.requestPermissionsAsync as jest.Mock).mockResolvedValue({ granted: false });
   const { getByLabelText } = await render(<WeightReminderSection />);
+  await act(async () => {});
+
+  const rendersBeforeToggle = mockWeekdayRender.mock.calls.length;
 
   await act(async () => {
     fireEvent(getByLabelText("Weight check-in reminder"), "valueChange", true);
@@ -58,7 +84,24 @@ test("denied permission leaves the toggle off", async () => {
   });
 
   expect(saveWeightPref).not.toHaveBeenCalled();
+  expect(reconcileWeightReminder).not.toHaveBeenCalled();
+  expect(mockWeekdayRender.mock.calls.length).toBeGreaterThan(rendersBeforeToggle);
   expect(getByLabelText("Weight check-in reminder").props.value).toBe(false);
+});
+
+// The section is editing the SCHEDULE, not recording a weigh-in. Passing an
+// explicit `null` here used to mean "never weighed in", so weighing in at 06:40
+// and adding a day chip at 06:50 re-armed the 07:00 reminder. Calling with no
+// argument makes the reconcile look the real date up instead.
+test("committing a change reconciles with no argument, so the real weigh-in is looked up", async () => {
+  const { getByLabelText } = await render(<WeightReminderSection />);
+
+  await act(async () => {
+    fireEvent(getByLabelText("Weight check-in reminder"), "valueChange", true);
+    await waitFor(() => expect(reconcileWeightReminder).toHaveBeenCalled());
+  });
+
+  expect((reconcileWeightReminder as jest.Mock).mock.calls[0]).toEqual([]);
 });
 
 // Regression: commit() used to compute `next` from a pre-await snapshot, so a

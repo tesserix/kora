@@ -12,7 +12,6 @@ import { UnitsProvider } from "@/units";
 import { ToastProvider } from "@/components/Toast";
 import { SavedMealSheetProvider } from "@/components/meals/SavedMealSheetProvider";
 import { reconcileWeightReminder } from "@/reminders/reconcileWeightReminder";
-import { fetchLatestWeighInDate } from "@/reminders/lastWeighIn";
 
 setupPushHandler();
 
@@ -32,9 +31,11 @@ export default function RootLayout() {
   useEffect(() => {
     const sub = AppState.addEventListener("change", (state) => {
       if (state === "active") {
-        void fetchLatestWeighInDate()
-          .then(reconcileWeightReminder)
-          .catch((err) => console.warn("reminders: foreground reconciliation failed", err));
+        // No argument: this listener witnessed no weigh-in, so the reconcile
+        // looks the real date up itself rather than guessing.
+        void reconcileWeightReminder().catch((err) =>
+          console.warn("reminders: foreground reconciliation failed", err),
+        );
       }
     });
     return () => sub.remove();
