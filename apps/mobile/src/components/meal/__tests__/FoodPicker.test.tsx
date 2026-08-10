@@ -34,3 +34,19 @@ test("queries with the real text once the picker opens", async () => {
 
   expect(mockUseFoodSearch).toHaveBeenLastCalledWith("Brown rice");
 });
+
+// The picker is also used to ADD a food (to a saved meal's ingredients), where
+// the original "Change food" overline is simply untrue. Existing callers keep
+// the default.
+test("the overline defaults to Change food and can be overridden by the caller", async () => {
+  const { getByText, queryByText } = await render(
+    <FoodPicker visible onSelect={jest.fn()} onClose={jest.fn()} initialQuery="" />,
+  );
+  expect(getByText("Change food")).toBeTruthy();
+
+  const other = await render(
+    <FoodPicker visible title="Add ingredient" onSelect={jest.fn()} onClose={jest.fn()} initialQuery="" />,
+  );
+  expect(other.getByText("Add ingredient")).toBeTruthy();
+  expect(queryByText("Change food")).toBeTruthy(); // first render untouched
+});
