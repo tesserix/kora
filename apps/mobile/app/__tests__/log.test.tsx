@@ -218,8 +218,8 @@ test("tapping a usual meal batch-logs its items", async () => {
     expect.objectContaining({
       meal_slot: "breakfast",
       items: [
-        { food_item_id: "eggs-id", quantity_grams: 100 },
-        { food_item_id: "oats-id", quantity_grams: 60 },
+        { food_item_id: "eggs-id", quantity_grams: 100, entered_amount: null, entered_unit: null },
+        { food_item_id: "oats-id", quantity_grams: 60, entered_amount: null, entered_unit: null },
       ],
     }),
     expect.anything(),

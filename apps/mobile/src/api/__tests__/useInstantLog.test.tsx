@@ -226,6 +226,38 @@ test("a saved meal that fails to log tells the user instead of doing nothing", a
   await waitFor(() => expect(mockToast.shown?.message).toBe("Couldn't log that. Please try again."));
 });
 
+// The server resolves entered_amount/entered_unit into grams (see api's batch
+// handler); the client must forward the pair it has and never do that
+// conversion itself. Without this, logging a saved meal item entered as
+// "1 portion" would show "16.5 g" — quantity_grams sent instead of the pair.
+test("logging a saved meal sends each item's entered unit, not its grams", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce([{ id: "batch-1" }, { id: "batch-2" }]);
+
+  const mealWithUnits = {
+    name: "Usual breakfast",
+    meal_slot: "snack",
+    items: [
+      { food_item_id: "f1", name: "NESCAFÉ Mocha", grams: 16.5, entered_amount: 1, entered_unit: "portion" },
+      { food_item_id: "f2", name: "Milk", grams: 200, entered_amount: null, entered_unit: null },
+    ],
+  };
+
+  const { result } = await renderHook(() => useInstantLog(), { wrapper });
+  await act(async () => { result.current.logMeal(mealWithUnits); });
+
+  await waitFor(() => expect(apiFetch).toHaveBeenCalledWith("/v1/logs/batch", expect.objectContaining({ method: "POST" })));
+  const [, init] = (apiFetch as jest.Mock).mock.calls[0];
+  expect(JSON.parse(init.body as string)).toEqual({
+    logged_at: expect.any(String),
+    meal_slot: "snack",
+    items: [
+      // The server resolves the pair; grams is a placeholder it ignores.
+      { food_item_id: "f1", quantity_grams: 0, entered_amount: 1, entered_unit: "portion" },
+      { food_item_id: "f2", quantity_grams: 200, entered_amount: null, entered_unit: null },
+    ],
+  });
+});
+
 // Same reasoning as logFood's Undo above: an Undo that cannot reverse anything
 // must say so, or the user believes a meal they cancelled is gone.
 test("an undo of a saved meal whose DELETE fails tells the user", async () => {
