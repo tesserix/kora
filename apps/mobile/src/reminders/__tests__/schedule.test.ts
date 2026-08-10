@@ -1,17 +1,24 @@
 import { buildSchedule, buildCustomSchedule, applyAllReminders, MAX_SCHEDULED_NOTIFICATIONS } from "../schedule";
 import { DEFAULT_PREFS } from "../prefs";
-import type { CustomReminder } from "../customPrefs";
+import type { CustomReminder, Weekday } from "../customPrefs";
 import * as Notifications from "expo-notifications";
 
 jest.mock("expo-notifications", () => ({
   cancelAllScheduledNotificationsAsync: jest.fn(),
   scheduleNotificationAsync: jest.fn(),
-  SchedulableTriggerInputTypes: { DAILY: "daily", WEEKLY: "weekly" },
+  SchedulableTriggerInputTypes: { DAILY: "daily", WEEKLY: "weekly", DATE: "date" },
 }));
 
 const everyDay: CustomReminder = { id: "w", label: "Drink water", hour: 15, minute: 0, days: [0, 1, 2, 3, 4, 5, 6], enabled: true };
 const mwf: CustomReminder = { id: "g", label: "Workout", hour: 7, minute: 30, days: [1, 3, 5], enabled: true };
 const off: CustomReminder = { id: "x", label: "Off one", hour: 9, minute: 0, days: [2], enabled: false };
+
+const DEFAULT_PREFS_ALL_OFF = {
+  breakfast: { enabled: false, hour: 8, minute: 0 },
+  lunch: { enabled: false, hour: 12, minute: 30 },
+  dinner: { enabled: false, hour: 18, minute: 30 },
+  snack: { enabled: false, hour: 15, minute: 0 },
+};
 
 beforeEach(() => {
   (Notifications.cancelAllScheduledNotificationsAsync as jest.Mock).mockReset();
@@ -81,4 +88,51 @@ test("applyAllReminders caps total scheduled requests at MAX_SCHEDULED_NOTIFICAT
 
   expect(Notifications.cancelAllScheduledNotificationsAsync).toHaveBeenCalledTimes(1);
   expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledTimes(MAX_SCHEDULED_NOTIFICATIONS);
+});
+
+test("the weight reminder is scheduled as a one-shot date trigger", async () => {
+  const scheduleSpy = jest.spyOn(Notifications, "scheduleNotificationAsync").mockResolvedValue("id");
+
+  await applyAllReminders(
+    { breakfast: { enabled: false, hour: 8, minute: 0 }, lunch: { enabled: false, hour: 12, minute: 30 },
+      dinner: { enabled: false, hour: 18, minute: 30 }, snack: { enabled: false, hour: 15, minute: 0 } },
+    [],
+    { pref: { enabled: true, hour: 7, minute: 0, days: [1] }, lastWeighedAt: null, now: new Date(2026, 7, 12, 9, 0) },
+  );
+
+  expect(scheduleSpy).toHaveBeenCalledWith(
+    expect.objectContaining({
+      content: expect.objectContaining({ data: { kind: "weight" } }),
+      trigger: expect.objectContaining({ type: Notifications.SchedulableTriggerInputTypes.DATE }),
+    }),
+  );
+});
+
+test("a disabled weight reminder schedules nothing", async () => {
+  const scheduleSpy = jest.spyOn(Notifications, "scheduleNotificationAsync").mockResolvedValue("id");
+
+  await applyAllReminders(DEFAULT_PREFS_ALL_OFF, [], {
+    pref: { enabled: false, hour: 7, minute: 0, days: [1] }, lastWeighedAt: null, now: new Date(2026, 7, 12, 9, 0),
+  });
+
+  expect(scheduleSpy).not.toHaveBeenCalled();
+});
+
+test("the weight reminder is dropped when the notification budget is exhausted", async () => {
+  // 60 custom reminders on all seven days collapse to 60 daily triggers,
+  // filling MAX_SCHEDULED_NOTIFICATIONS exactly. Meals-first ordering means the
+  // weight reminder is the one that loses, which is the intended degradation.
+  const scheduleSpy = jest.spyOn(Notifications, "scheduleNotificationAsync").mockResolvedValue("id");
+  const many = Array.from({ length: MAX_SCHEDULED_NOTIFICATIONS }, (_, i) => ({
+    id: `c${i}`, label: `R${i}`, hour: 9, minute: 0, days: [0, 1, 2, 3, 4, 5, 6] as Weekday[], enabled: true,
+  }));
+
+  await applyAllReminders(DEFAULT_PREFS_ALL_OFF, many, {
+    pref: { enabled: true, hour: 7, minute: 0, days: [1] }, lastWeighedAt: null, now: new Date(2026, 7, 12, 9, 0),
+  });
+
+  const weightCalls = scheduleSpy.mock.calls.filter(
+    ([arg]) => (arg as { content: { data?: { kind?: string } } }).content.data?.kind === "weight",
+  );
+  expect(weightCalls).toHaveLength(0);
 });

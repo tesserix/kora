@@ -3,6 +3,7 @@ import * as Notifications from "expo-notifications";
 import { useReminderPrefs } from "../useReminderPrefs";
 import { DEFAULT_PREFS, loadPrefs, savePrefs } from "../prefs";
 import { applyAllReminders } from "../schedule";
+import { DEFAULT_WEIGHT_PREF } from "../weightPrefs";
 
 jest.mock("expo-notifications", () => ({
   getPermissionsAsync: jest.fn(),
@@ -83,5 +84,9 @@ test("grant path: enabling with permission already granted persists and re-sched
   expect(mockRequestPermissions).not.toHaveBeenCalled();
   expect(result.current.prefs.snack.enabled).toBe(true);
   expect(mockSavePrefs).toHaveBeenCalledWith(expect.objectContaining({ snack: { enabled: true, hour: 15, minute: 0 } }));
-  expect(mockApplyAllReminders).toHaveBeenCalledWith(expect.objectContaining({ snack: { enabled: true, hour: 15, minute: 0 } }), []);
+  expect(mockApplyAllReminders).toHaveBeenCalledWith(
+    expect.objectContaining({ snack: { enabled: true, hour: 15, minute: 0 } }),
+    [],
+    expect.objectContaining({ pref: DEFAULT_WEIGHT_PREF, lastWeighedAt: null, now: expect.any(Date) }),
+  );
 });

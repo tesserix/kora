@@ -2,6 +2,9 @@ import * as Notifications from "expo-notifications";
 import type { MealSlot } from "@/lib/mealSlot";
 import type { ReminderPrefs } from "./prefs";
 import type { CustomReminder, Weekday } from "./customPrefs";
+import { nextWeightReminderAt, type WeightReminderPref } from "./weightPrefs";
+
+export type WeightReminderInput = { pref: WeightReminderPref; lastWeighedAt: Date | null; now: Date };
 
 export type ScheduledReminder = { slot: MealSlot; hour: number; minute: number; title: string; body: string };
 
@@ -68,7 +71,11 @@ export function buildCustomSchedule(reminders: CustomReminder[]): ScheduledNotif
 // reminders. cancelAllScheduledNotificationsAsync clears every scheduled local
 // notification, so meals and customs must be re-scheduled together in one pass —
 // this is the single entry point every reminder change funnels through.
-export async function applyAllReminders(mealPrefs: ReminderPrefs, customs: CustomReminder[]): Promise<void> {
+export async function applyAllReminders(
+  mealPrefs: ReminderPrefs,
+  customs: CustomReminder[],
+  weight?: WeightReminderInput,
+): Promise<void> {
   await Notifications.cancelAllScheduledNotificationsAsync();
   let scheduled = 0;
   // Meals first: they are the baseline and must always win when the total would
@@ -106,5 +113,18 @@ export async function applyAllReminders(mealPrefs: ReminderPrefs, customs: Custo
       });
     }
     scheduled++;
+  }
+  // Scheduled LAST and counted against the same budget: meals are the baseline
+  // and must win. Unlike the others this is a one-shot DATE trigger, because a
+  // repeating trigger cannot be skipped when the user has already weighed in.
+  if (weight) {
+    const at = nextWeightReminderAt(weight.pref, weight.lastWeighedAt, weight.now);
+    if (at && scheduled < MAX_SCHEDULED_NOTIFICATIONS) {
+      await Notifications.scheduleNotificationAsync({
+        content: { title: "Weigh-in time", body: "Log today's weight in Kora.", data: { kind: "weight" } },
+        trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: at },
+      });
+      scheduled++;
+    }
   }
 }

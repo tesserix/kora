@@ -3,6 +3,7 @@ import * as Notifications from "expo-notifications";
 import { loadPrefs } from "./prefs";
 import { applyAllReminders } from "./schedule";
 import { loadCustom, saveCustom, newId, MAX_CUSTOM_REMINDERS, type CustomReminder } from "./customPrefs";
+import { loadWeightPref } from "./weightPrefs";
 
 // ensurePermission returns whether OS notification permission is (or becomes)
 // granted, prompting once if undetermined.
@@ -35,7 +36,8 @@ export function useCustomReminders() {
     setReminders(next);
     await saveCustom(next);
     const mealPrefs = await loadPrefs();
-    await applyAllReminders(mealPrefs, next);
+    const weightPref = await loadWeightPref();
+    await applyAllReminders(mealPrefs, next, { pref: weightPref, lastWeighedAt: null, now: new Date() });
   };
 
   const addReminder = async (draft: Omit<CustomReminder, "id">): Promise<void> => {

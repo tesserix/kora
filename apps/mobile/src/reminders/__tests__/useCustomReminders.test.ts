@@ -3,6 +3,7 @@ import * as Notifications from "expo-notifications";
 import { useCustomReminders } from "../useCustomReminders";
 import { loadCustom, saveCustom, MAX_CUSTOM_REMINDERS, type CustomReminder } from "../customPrefs";
 import { applyAllReminders } from "../schedule";
+import { DEFAULT_WEIGHT_PREF } from "../weightPrefs";
 
 jest.mock("expo-notifications", () => ({
   getPermissionsAsync: jest.fn(async () => ({ granted: true })),
@@ -36,7 +37,11 @@ test("addReminder persists + re-syncs, assigning an id", async () => {
   expect(saved).toHaveLength(1);
   expect(saved[0].id.length).toBeGreaterThan(0);
   expect(saved[0].label).toBe("Drink water");
-  expect(mockApply).toHaveBeenCalledWith({}, saved);
+  expect(mockApply).toHaveBeenCalledWith(
+    {},
+    saved,
+    expect.objectContaining({ pref: DEFAULT_WEIGHT_PREF, lastWeighedAt: null, now: expect.any(Date) }),
+  );
 });
 
 test("addReminder is a no-op at the cap", async () => {
@@ -74,5 +79,9 @@ test("removeReminder drops it and re-syncs", async () => {
   await waitFor(() => expect(result.current.reminders).toHaveLength(1));
   await act(async () => { await result.current.removeReminder("a"); });
   expect(mockSave).toHaveBeenCalledWith([]);
-  expect(mockApply).toHaveBeenCalledWith({}, []);
+  expect(mockApply).toHaveBeenCalledWith(
+    {},
+    [],
+    expect.objectContaining({ pref: DEFAULT_WEIGHT_PREF, lastWeighedAt: null, now: expect.any(Date) }),
+  );
 });

@@ -4,6 +4,7 @@ import type { MealSlot } from "@/lib/mealSlot";
 import { DEFAULT_PREFS, loadPrefs, savePrefs, type ReminderPref, type ReminderPrefs } from "./prefs";
 import { applyAllReminders } from "./schedule";
 import { loadCustom } from "./customPrefs";
+import { loadWeightPref } from "./weightPrefs";
 
 // useReminderPrefs loads persisted reminder prefs and, on every change, persists
 // them and re-syncs the OS schedule. Enabling a reminder first ensures OS
@@ -47,7 +48,8 @@ export function useReminderPrefs() {
       setPrefs(next);
       await savePrefs(next);
       const customs = await loadCustom();
-      await applyAllReminders(next, customs);
+      const weightPref = await loadWeightPref();
+      await applyAllReminders(next, customs, { pref: weightPref, lastWeighedAt: null, now: new Date() });
     })();
   };
 
