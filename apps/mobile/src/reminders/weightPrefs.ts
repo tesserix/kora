@@ -81,10 +81,16 @@ export function nextWeightReminderAt(
     return occurrenceOn(new Date(from.getFullYear(), from.getMonth(), from.getDate() + 8), pref);
   };
 
-  const next = upcoming(now);
-  if (!lastWeighedAt) return next;
-  if (sameCalendarDay(lastWeighedAt, next) || lastWeighedAt.getTime() >= next.getTime()) {
-    return upcoming(next);
+  let next = upcoming(now);
+  if (lastWeighedAt) {
+    // Loop, not a single step: a far-future or backdated lastWeighedAt can
+    // cover several occurrences at once, and each stepped-to candidate must be
+    // re-checked against the same rule. Terminates because upcoming() always
+    // returns a strictly later date, so the candidate eventually clears any
+    // fixed lastWeighedAt.
+    while (sameCalendarDay(lastWeighedAt, next) || lastWeighedAt.getTime() >= next.getTime()) {
+      next = upcoming(next);
+    }
   }
   return next;
 }

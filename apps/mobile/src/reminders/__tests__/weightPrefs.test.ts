@@ -55,3 +55,26 @@ test("a multi-day selection picks the nearest upcoming day", () => {
 test("the default pref is disabled at 07:00 on Mondays", () => {
   expect(DEFAULT_WEIGHT_PREF).toEqual({ enabled: false, hour: 7, minute: 0, days: [1] });
 });
+
+test("a future weigh-in one occurrence ahead skips past that occurrence too", () => {
+  // lastWeighedAt lands on what would be the SECOND candidate (Aug 24), so a
+  // single-step skip that stops after advancing past the first candidate
+  // (Aug 17 -> Aug 24) is not enough — Aug 24 is still covered by the same
+  // calendar-day rule and must also be skipped, landing on Aug 31.
+  const got = nextWeightReminderAt(MON_0700, new Date(2026, 7, 24, 10, 0), new Date(2026, 7, 12, 9, 0));
+  expect(got).toEqual(new Date(2026, 7, 31, 7, 0, 0, 0));
+});
+
+test("a far-future weigh-in skips every occurrence it covers", () => {
+  // Weighed in (or backdated) to Mon 2026-08-31, several weeks out from `now`.
+  // The candidate must advance past every intervening Monday, not just one.
+  const got = nextWeightReminderAt(MON_0700, new Date(2026, 7, 31, 10, 0), new Date(2026, 7, 12, 9, 0));
+  expect(got).toEqual(new Date(2026, 8, 7, 7, 0, 0, 0));
+});
+
+test("a same-day future weigh-in still skips today's occurrence", () => {
+  // Weighed in at 08:00, after the 07:00 slot, on the very day of the next
+  // occurrence — still the same calendar day, so today is skipped.
+  const got = nextWeightReminderAt(MON_0700, new Date(2026, 7, 17, 8, 0), new Date(2026, 7, 17, 6, 0));
+  expect(got).toEqual(new Date(2026, 7, 24, 7, 0, 0, 0));
+});
