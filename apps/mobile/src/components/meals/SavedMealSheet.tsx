@@ -7,9 +7,11 @@ import { Overline } from "@/components/Overline";
 import { Segmented } from "@/components/Segmented";
 import { Icon } from "@/components/Icon";
 import { PortionField } from "@/components/units/PortionField";
+import { FoodPicker } from "@/components/meal/FoodPicker";
 import { useCreateSavedMeal, useUpdateSavedMeal, useDeleteSavedMeal } from "@/api/hooks";
-import type { MemoryFood, MemoryMeal, SavedMeal, SavedMealItem } from "@/api/types";
+import type { FoodItem, MemoryFood, MemoryMeal, SavedMeal, SavedMealItem } from "@/api/types";
 import type { ServingUnit } from "@/units/portion";
+import { baseQuantityFor, defaultServingCount } from "@/units/portion";
 import { useTheme } from "@/theme";
 
 const SLOT_OPTIONS = [
@@ -91,6 +93,7 @@ export function SavedMealSheet({ seed, onClose }: Props) {
   const [slot, setSlot] = useState("breakfast");
   const [items, setItems] = useState<EditItem[]>([]);
   const [err, setErr] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   useEffect(() => {
     if (!seed) return;
@@ -128,6 +131,38 @@ export function SavedMealSheet({ seed, onClose }: Props) {
   }, [seed]);
 
   const removeItem = (idx: number) => setItems((cur) => cur.filter((_, i) => i !== idx));
+
+  // Seeded exactly as app/log.tsx's selectFood seeds its own selection, so a
+  // picked sachet lands as "1 portion" rather than "16.5 g" — a QUANTITY
+  // derived from figures the food row already carries, never a unit
+  // conversion or a computed nutrition value. Appends rather than replaces:
+  // adding to an existing saved meal (edit/compose seeds) is a real case,
+  // not just building a blank one from scratch.
+  const addItem = (food: FoodItem) => {
+    setPickerOpen(false);
+    const servingUnits = food.serving_units ?? [];
+    const defaultServing = servingUnits[0] ?? null;
+    let newItem: EditItem;
+    if (defaultServing) {
+      const count = defaultServingCount(food.serving_grams, defaultServing);
+      newItem = {
+        food_item_id: food.id,
+        name: food.name,
+        grams: (baseQuantityFor(count, defaultServing.name, servingUnits) ?? food.serving_grams) || 100,
+        enteredAmount: count,
+        enteredUnit: defaultServing.name,
+      };
+    } else {
+      newItem = {
+        food_item_id: food.id,
+        name: food.name,
+        grams: food.serving_grams || 100,
+        enteredAmount: null,
+        enteredUnit: null,
+      };
+    }
+    setItems((cur) => [...cur, newItem]);
+  };
   const setPortion = (idx: number, amount: number, unit: string) =>
     setItems((cur) =>
       cur.map((it, i) =>
@@ -212,6 +247,10 @@ export function SavedMealSheet({ seed, onClose }: Props) {
             </View>
           ))}
         </View>
+        <Pressable accessibilityRole="button" accessibilityLabel="Add ingredient" onPress={() => setPickerOpen(true)}>
+          <AppText style={{ color: colors.accent, marginTop: spacing.sm }}>+ Add ingredient</AppText>
+        </Pressable>
+        <FoodPicker visible={pickerOpen} initialQuery="" onSelect={addItem} onClose={() => setPickerOpen(false)} />
         {err ? <AppText style={{ color: colors.destructive, marginTop: spacing.sm }}>{err}</AppText> : null}
         <View style={{ marginTop: spacing.lg }}>
           <Button accessibilityLabel="Save" title="Save" onPress={save} disabled={pending || !canSave} />

@@ -11,6 +11,43 @@ jest.mock("@/api/hooks", () => ({
 jest.mock("@/components/Sheet", () => ({ Sheet: ({ visible, children }: { visible: boolean; children: React.ReactNode }) => (visible ? children : null) }));
 jest.mock("@/components/Segmented", () => ({ Segmented: () => null }));
 
+// FoodPicker itself is a real search UI backed by useFoodSearch — irrelevant
+// to what this suite is testing (the seeding math in SavedMealSheet's own
+// addItem handler). Stubbed the way other suites stub a heavy child
+// component (see sign-in.test.tsx's LinkAccountPrompt mock): a single
+// pressable, gated on `visible`, that fires onSelect with a fixed food —
+// a 16.5 g sachet with one named serving {portion, amount 1, base_amount
+// 16.5} — so addItem's derivation is what the test actually exercises.
+jest.mock("@/components/meal/FoodPicker", () => {
+  const { Pressable, Text } = require("react-native");
+  return {
+    FoodPicker: ({ visible, onSelect }: { visible: boolean; onSelect: (item: unknown) => void }) =>
+      visible ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Select NESCAFÉ Mocha"
+          onPress={() =>
+            onSelect({
+              id: "sachet1",
+              name: "NESCAFÉ Mocha",
+              brand: "Nescafé",
+              provenance: "afcd",
+              serving_desc: "1 portion",
+              serving_grams: 16.5,
+              kcal_per_100g: 400,
+              protein_per_100g: 10,
+              carbs_per_100g: 60,
+              fat_per_100g: 12,
+              serving_units: [{ name: "portion", amount: 1, base_amount: 16.5 }],
+            })
+          }
+        >
+          <Text>Select NESCAFÉ Mocha</Text>
+        </Pressable>
+      ) : null,
+  };
+});
+
 import { SavedMealSheet } from "../SavedMealSheet";
 
 const usual = {
@@ -93,4 +130,27 @@ test("a compose seed carries each row's entered unit into the sheet", async () =
   expect(getByText("Milk")).toBeTruthy();
   // Name pre-filled from the first item so the user edits rather than types.
   expect(queryByText("Add at least one item with grams.")).toBeNull();
+});
+
+test("adding an ingredient seeds it as a named serving, not raw grams", async () => {
+  const { getByText, getByLabelText } = await render(<SavedMealSheet seed={{ mode: "blank" }} onClose={() => {}} />);
+
+  await fireEvent.press(getByText("+ Add ingredient"));
+  // FoodPicker is mocked in this suite to select a fixed food — a sachet whose
+  // serving_grams is 16.5 with one named serving {portion, 1, 16.5}.
+  await fireEvent.press(getByLabelText("Select NESCAFÉ Mocha"));
+
+  // Seeded as one portion, NOT as "16.5 g" — the whole point of the unit work.
+  expect(getByText("1 portion (16.5 g)")).toBeTruthy();
+});
+
+test("adding an ingredient to an existing meal appends rather than replaces", async () => {
+  const items = [{ food_item_id: "f2", name: "Milk", quantity_grams: 200, entered_amount: null, entered_unit: null }];
+  const { getByText, getByLabelText } = await render(<SavedMealSheet seed={{ mode: "compose", items }} onClose={() => {}} />);
+
+  await fireEvent.press(getByText("+ Add ingredient"));
+  await fireEvent.press(getByLabelText("Select NESCAFÉ Mocha"));
+
+  expect(getByText("Milk")).toBeTruthy();
+  expect(getByText("NESCAFÉ Mocha")).toBeTruthy();
 });
