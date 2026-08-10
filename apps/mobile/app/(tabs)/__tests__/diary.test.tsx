@@ -1,5 +1,6 @@
 import { Alert } from "react-native";
 import { fireEvent, render } from "@testing-library/react-native";
+import { router } from "expo-router";
 import type { QueuedRow } from "@/offline/useQueuedLogs";
 
 jest.mock("expo-router", () => ({ router: { push: jest.fn() } }));
@@ -74,6 +75,11 @@ jest.mock("@/units", () => ({
   useUnits: () => mockUseUnits(),
 }));
 
+const mockOpenCompose = jest.fn();
+jest.mock("@/components/meals/SavedMealSheetProvider", () => ({
+  useSavedMealEditor: () => ({ openCreate: jest.fn(), openEdit: jest.fn(), openBlank: jest.fn(), openCompose: mockOpenCompose }),
+}));
+
 import Diary from "../diary";
 
 beforeEach(() => {
@@ -87,6 +93,11 @@ beforeEach(() => {
   mockUseDashboard.mockClear();
   mockUseDayLogs.mockClear();
   mockUseQueuedLogs.mockClear();
+  mockOpenCompose.mockClear();
+  // Created inside the jest.mock factory above, so neither jest.clearAllMocks
+  // in a config nor restoreAllMocks below resets it — a "does not navigate"
+  // assertion would otherwise be satisfied by an earlier test's push.
+  (router.push as jest.Mock).mockClear();
   mockUseUnits.mockReturnValue({ system: "metric", setSystem: jest.fn() });
   jest.spyOn(Alert, "alert").mockImplementation(() => {});
 });
@@ -347,4 +358,137 @@ test("a queued row with an unknown kcal shows a dash and leaves the total alone"
 
   expect(await findByText("— kcal")).toBeTruthy();
   getByText("500");
+});
+
+// --- Multi-select compose ---------------------------------------------------
+
+// Two rows in the same slot so a selection can span more than one entry.
+// f1 carries an entered pair ("1 portion"); f2 has none, so formatPortion
+// falls back to its base unit — the composed items must carry each row's
+// own entered_amount/entered_unit verbatim, not a converted or derived one.
+const SELECTABLE_LOGS = [
+  {
+    id: "1",
+    food_item_id: "f1",
+    description: "NESCAFÉ Mocha",
+    meal_slot: "breakfast",
+    kcal: 120,
+    protein_g: 2,
+    carbs_g: 20,
+    fat_g: 3,
+    logged_at: "2026-07-24T08:00:00Z",
+    provenance: "manual",
+    quantity_grams: 30,
+    entered_amount: 1,
+    entered_unit: "portion",
+    base_unit: null,
+    source: "manual",
+  },
+  {
+    id: "2",
+    food_item_id: "f2",
+    description: "Milk",
+    meal_slot: "breakfast",
+    kcal: 60,
+    protein_g: 3,
+    carbs_g: 5,
+    fat_g: 2,
+    logged_at: "2026-07-24T08:05:00Z",
+    provenance: "manual",
+    quantity_grams: 200,
+    entered_amount: null,
+    entered_unit: null,
+    base_unit: "ml",
+    source: "manual",
+  },
+];
+
+test("long-pressing a diary row enters selection mode", async () => {
+  mockDayLogs = SELECTABLE_LOGS;
+  const { getByLabelText, getByText } = await render(<Diary />);
+
+  await fireEvent(getByLabelText("NESCAFÉ Mocha"), "longPress");
+
+  expect(getByText("1 selected")).toBeTruthy();
+});
+
+// Without this the only feedback in selection mode is the "N selected"
+// counter: a mis-tap and the tap undoing it both look identical on the row.
+test("a selected row is announced as selected and an unselected one is not", async () => {
+  mockDayLogs = SELECTABLE_LOGS;
+  const { getByLabelText } = await render(<Diary />);
+
+  await fireEvent(getByLabelText("NESCAFÉ Mocha"), "longPress");
+
+  expect(getByLabelText("NESCAFÉ Mocha").props.accessibilityState.selected).toBe(true);
+  expect(getByLabelText("Milk").props.accessibilityState.selected).toBe(false);
+});
+
+test("a plain tap toggles selection while selecting, and composes only the chosen rows", async () => {
+  mockDayLogs = SELECTABLE_LOGS;
+  const { getByLabelText, getByText } = await render(<Diary />);
+
+  await fireEvent(getByLabelText("NESCAFÉ Mocha"), "longPress");
+  await fireEvent.press(getByLabelText("Milk"));
+  await fireEvent.press(getByText("Save as meal"));
+
+  // Entered units travel with the rows so the sheet opens on "1 portion".
+  expect(mockOpenCompose).toHaveBeenCalledWith([
+    expect.objectContaining({ food_item_id: "f1", entered_unit: "portion", entered_amount: 1 }),
+    expect.objectContaining({ food_item_id: "f2", entered_unit: null }),
+  ]);
+});
+
+test("saving a selection clears it and does not navigate or delete the original rows", async () => {
+  mockDayLogs = SELECTABLE_LOGS;
+  const { getByLabelText, getByText, queryByText } = await render(<Diary />);
+
+  await fireEvent(getByLabelText("NESCAFÉ Mocha"), "longPress");
+  await fireEvent.press(getByText("Save as meal"));
+
+  expect(queryByText("1 selected")).toBeNull();
+  expect((router.push as jest.Mock)).not.toHaveBeenCalled();
+  expect(mockDeleteMutate).not.toHaveBeenCalled();
+});
+
+// Selection is scoped to the day it was made on, and only that day's rows are
+// loaded — a selection that survived the switch would claim "1 selected" with
+// nothing selected on screen, and compose zero rows into a blank sheet.
+test("switching to another day clears the selection", async () => {
+  mockDayLogs = SELECTABLE_LOGS;
+  const { getByLabelText, getByText, queryByText } = await render(<Diary />);
+
+  await fireEvent(getByLabelText("NESCAFÉ Mocha"), "longPress");
+  expect(getByText("1 selected")).toBeTruthy();
+
+  const todayIso = isoOf(new Date());
+  const monday = mondayOfThisWeek();
+  const target = isoOf(monday) === todayIso ? new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 1) : monday;
+  await fireEvent.press(getByLabelText(isoOf(target)));
+
+  expect(queryByText("1 selected")).toBeNull();
+});
+
+test("cancelling selection leaves the diary untouched", async () => {
+  mockDayLogs = SELECTABLE_LOGS;
+  const { getByLabelText, getByText, queryByText } = await render(<Diary />);
+
+  await fireEvent(getByLabelText("NESCAFÉ Mocha"), "longPress");
+  await fireEvent.press(getByText("Cancel"));
+
+  expect(queryByText("1 selected")).toBeNull();
+  expect(mockDeleteMutate).not.toHaveBeenCalled();
+  expect(mockOpenCompose).not.toHaveBeenCalled();
+});
+
+test("a plain tap when not selecting still navigates to the meal screen as before", async () => {
+  mockDayLogs = SELECTABLE_LOGS;
+  const { getByLabelText, findByText } = await render(<Diary />);
+  await findByText("NESCAFÉ Mocha");
+
+  await fireEvent.press(getByLabelText("NESCAFÉ Mocha"));
+
+  expect(router.push).toHaveBeenCalledWith(
+    expect.objectContaining({ pathname: "/meal", params: expect.objectContaining({ id: "1" }) }),
+  );
 });

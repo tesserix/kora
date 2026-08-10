@@ -112,7 +112,15 @@ export function useInstantLog(): { logFood: (f: LoggableFood) => void; logMeal: 
       {
         logged_at: new Date().toISOString(),
         meal_slot: m.meal_slot,
-        items: m.items.map((i) => ({ food_item_id: i.food_item_id, quantity_grams: i.grams })),
+        items: m.items.map((i) => ({
+          food_item_id: i.food_item_id,
+          // A placeholder when the pair is present: the SERVER resolves the unit
+          // into grams, exactly as it does for a single log. Sending our own
+          // grams here would put the conversion back on the client.
+          quantity_grams: i.entered_unit ? 0 : i.grams,
+          entered_amount: i.entered_amount ?? null,
+          entered_unit: i.entered_unit ?? null,
+        })),
       },
       {
         onSuccess: (created) => {

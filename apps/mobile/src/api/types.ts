@@ -188,7 +188,14 @@ export type SavedMeal = {
 export type LoggableMeal = {
   name: string;
   meal_slot: string;
-  items: { food_item_id: string; grams: number }[];
+  items: {
+    food_item_id: string;
+    grams: number;
+    /** What the user entered for this item (e.g. 1, 2, 0.5). Null/absent for a legacy gram-entered item. */
+    entered_amount?: number | null;
+    /** The unit entered alongside entered_amount (e.g. "sachet", "g", "ml"). Null/absent for a legacy item. */
+    entered_unit?: string | null;
+  }[];
 };
 
 export type Totals = {

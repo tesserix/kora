@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ScrollView, TextInput, View } from "react-native";
+import { Pressable, ScrollView, TextInput, View } from "react-native";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
@@ -91,7 +91,7 @@ export default function LogScreen() {
   const savedMeals = useSavedMeals();
   const { pinnedIds, toggle } = usePinToggle();
   const { logFood, logMeal } = useInstantLog();
-  const { openCreate, openEdit } = useSavedMealEditor();
+  const { openCreate, openEdit, openBlank } = useSavedMealEditor();
 
   // Entrance stagger runs on first mount only — see app/(tabs)/index.tsx for the
   // same guard and rationale (refetches update results in place, no re-stagger).
@@ -314,29 +314,37 @@ export default function LogScreen() {
               ) : memory.isError ? (
                 <AppText muted>Couldn't load your foods.</AppText>
               ) : memTab === "saved" ? (
-                (savedMeals.data ?? []).length > 0 ? (
-                  <GroupedSection elevated>
-                    {(savedMeals.data ?? []).map((m) => {
-                      const fv = foodVisual(m.name);
-                      return (
-                        <MealRow
-                          key={m.id}
-                          name={m.name}
-                          slot={m.items.map((i) => i.name).join(" · ")}
-                          kcal={m.kcal}
-                          iconName={fv.icon}
-                          tint={hslToHex(fv.hue, 0.5, 0.5)}
-                          onPress={() => logMeal(m)}
-                          bookmarked
-                          onBookmark={() => openEdit(m)}
-                          accessibilityLabel={m.name}
-                        />
-                      );
-                    })}
-                  </GroupedSection>
-                ) : (
-                  <AppText muted>Save a usual meal to see it here.</AppText>
-                )
+                <>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                    <Overline>Saved</Overline>
+                    <Pressable accessibilityRole="button" accessibilityLabel="New meal" onPress={openBlank}>
+                      <AppText style={{ color: colors.accent }}>+ New meal</AppText>
+                    </Pressable>
+                  </View>
+                  {(savedMeals.data ?? []).length > 0 ? (
+                    <GroupedSection elevated>
+                      {(savedMeals.data ?? []).map((m) => {
+                        const fv = foodVisual(m.name);
+                        return (
+                          <MealRow
+                            key={m.id}
+                            name={m.name}
+                            slot={m.items.map((i) => i.name).join(" · ")}
+                            kcal={m.kcal}
+                            iconName={fv.icon}
+                            tint={hslToHex(fv.hue, 0.5, 0.5)}
+                            onPress={() => logMeal(m)}
+                            bookmarked
+                            onBookmark={() => openEdit(m)}
+                            accessibilityLabel={m.name}
+                          />
+                        );
+                      })}
+                    </GroupedSection>
+                  ) : (
+                    <AppText muted>Save a usual meal to see it here.</AppText>
+                  )}
+                </>
               ) : memTab === "pinned" ? (
                 (pins.data ?? []).length > 0 ? (
                   <GroupedSection elevated>

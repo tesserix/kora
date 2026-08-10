@@ -232,7 +232,14 @@ export function useCreateLog() {
 type BatchLogInput = {
   logged_at: string;
   meal_slot: string;
-  items: { food_item_id: string; quantity_grams: number }[];
+  items: {
+    food_item_id: string;
+    quantity_grams: number;
+    /** What the user entered (e.g. 1, 2, 0.5); when set with entered_unit the SERVER resolves quantity_grams from it. */
+    entered_amount?: number | null;
+    /** The unit entered alongside entered_amount (e.g. "sachet", "g", "ml"). */
+    entered_unit?: string | null;
+  }[];
 };
 
 export function useCreateLogBatch() {

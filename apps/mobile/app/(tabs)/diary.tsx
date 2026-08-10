@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { ActivityIndicator, Alert, ScrollView, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, View } from "react-native";
 import Animated, { FadeInDown, useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
 import Swipeable from "react-native-gesture-handler/ReanimatedSwipeable";
 import Svg, { Circle, Defs, LinearGradient, Stop } from "react-native-svg";
@@ -17,6 +17,7 @@ import { Badge } from "@/components/Badge";
 import { CopyDaySheet } from "@/components/diary/CopyDaySheet";
 import { QueuedFailedSheet } from "@/components/diary/QueuedFailedSheet";
 import { EmptyState } from "@/components/common/EmptyState";
+import { useSavedMealEditor } from "@/components/meals/SavedMealSheetProvider";
 import { useDashboard, useDayLogs, useAddWater, useDeleteLog } from "@/api/hooks";
 import { useQueuedLogs } from "@/offline/useQueuedLogs";
 import { useQueuedCaptures } from "@/offline/useQueuedCaptures";
@@ -201,9 +202,26 @@ export default function Diary() {
   const captures = useQueuedCaptures(selected);
   const addWater = useAddWater();
   const deleteLog = useDeleteLog();
+  const { openCompose } = useSavedMealEditor();
   const [waterErr, setWaterErr] = useState<string | null>(null);
   const [copyOpen, setCopyOpen] = useState(false);
   const [failedRowId, setFailedRowId] = useState<string | null>(null);
+  // Selection is scoped to the day on screen, which is also the only day this
+  // screen has loaded. Composing NEVER edits the underlying logs — it
+  // bookmarks a combination for future logging.
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const selecting = selectedIds.length > 0;
+  const toggleSelected = (id: string) =>
+    setSelectedIds((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
+
+  // Selection holds log ids from the day it was made, and only that day's rows
+  // are on screen — carrying it across a day change leaves a header claiming
+  // "1 selected" with nothing selected in front of the user, and a "Save as
+  // meal" that filters to zero rows and opens a blank sheet.
+  const selectDay = (day: string) => {
+    setSelected(day);
+    setSelectedIds([]);
+  };
 
   // Entrance stagger runs on first mount only — see app/(tabs)/index.tsx for the
   // same guard and rationale (refetches update data in place, no re-stagger).
@@ -247,6 +265,27 @@ export default function Diary() {
   };
 
   const logged = (logs.data ?? []) as FoodLog[];
+
+  // Reads the already-logged rows and seeds the compose sheet — no delete, no
+  // edit, no navigation on the selected rows themselves.
+  const saveSelectionAsMeal = () => {
+    const chosen = logged.filter((l) => selectedIds.includes(l.id));
+    setSelectedIds([]);
+    openCompose(
+      chosen.map((l) => ({
+        food_item_id: l.food_item_id ?? "",
+        name: l.description,
+        quantity_grams: l.quantity_grams,
+        entered_amount: l.entered_amount ?? null,
+        entered_unit: l.entered_unit ?? null,
+        base_unit: l.base_unit ?? null,
+        // The slot these rows were eaten in — composing two dinner entries and
+        // saving them under Breakfast is a silent mislabel the user only ever
+        // sees later, when the saved meal logs itself into the wrong slot.
+        meal_slot: l.meal_slot,
+      })),
+    );
+  };
 
   // The client mints ONE id and uses it as both the queue item id and the
   // server row id (see useCreateLog), so a queued item the server has already
@@ -320,6 +359,20 @@ export default function Diary() {
           <AppText variant="largeTitle">Diary</AppText>
         </Animated.View>
 
+        {selecting ? (
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 10 }}>
+            <AppText>{`${selectedIds.length} selected`}</AppText>
+            <View style={{ flexDirection: "row", gap: 16 }}>
+              <Pressable accessibilityRole="button" onPress={() => setSelectedIds([])}>
+                <AppText>Cancel</AppText>
+              </Pressable>
+              <Pressable accessibilityRole="button" onPress={saveSelectionAsMeal}>
+                <AppText style={{ color: colors.accent }}>Save as meal</AppText>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
+
         <Animated.View entering={enter(1)} style={{ flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingBottom: 8 }}>
           {week.map((date) => {
             const dISO = iso(date);
@@ -331,7 +384,7 @@ export default function Diary() {
                 selected={dISO === selected}
                 today={dISO === todayIso}
                 loggable={dISO <= todayIso}
-                onSelect={() => setSelected(dISO)}
+                onSelect={() => selectDay(dISO)}
               />
             );
           })}
@@ -429,6 +482,10 @@ export default function Diary() {
                 })}
                 {group.items.map((log) => {
                   const fv = foodVisual(log.description);
+                  // Always a boolean (never undefined) on these rows: this
+                  // screen HAS a selection mode, so an unselected row has to
+                  // say so rather than stay silent.
+                  const rowSelected = selectedIds.includes(log.id);
                   return (
                     <Swipeable
                       key={log.id}
@@ -452,7 +509,9 @@ export default function Diary() {
                           kcal={log.kcal}
                           iconName={fv.icon}
                           tint={hslToHex(fv.hue, 0.5, 0.5)}
-                          onPress={() => openMeal(log)}
+                          onPress={() => (selecting ? toggleSelected(log.id) : openMeal(log))}
+                          onLongPress={() => toggleSelected(log.id)}
+                          selected={rowSelected}
                           accessibilityLabel={log.description}
                         />
                       </View>

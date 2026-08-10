@@ -16,6 +16,13 @@ export interface FoodPickerProps {
   initialQuery: string;
   onSelect: (item: FoodItem) => void;
   onClose: () => void;
+  /**
+   * Overline shown above the search field. Defaults to the original
+   * replace-a-logged-food wording; callers adding a food to something (e.g.
+   * a saved meal's ingredient list) pass their own, since "Change food" is a
+   * plain lie there.
+   */
+  title?: string;
 }
 
 // Lets the user replace a logged food with a different one. Search is the
@@ -23,7 +30,7 @@ export interface FoodPickerProps {
 // safe to query on every keystroke once 2+ characters are typed. Results show
 // each candidate's kcal_per_100g verbatim — never a portion-scaled number,
 // which would be a client-computed nutrition value.
-export function FoodPicker({ visible, initialQuery, onSelect, onClose }: FoodPickerProps): ReactElement {
+export function FoodPicker({ visible, initialQuery, onSelect, onClose, title = "Change food" }: FoodPickerProps): ReactElement {
   const { colors, spacing, fontSize } = useTheme();
   const [query, setQuery] = useState(initialQuery);
 
@@ -45,7 +52,7 @@ export function FoodPicker({ visible, initialQuery, onSelect, onClose }: FoodPic
   return (
     <Sheet visible={visible} onClose={onClose}>
       <View style={{ paddingHorizontal: 22, paddingBottom: 30 }}>
-        <Overline style={{ marginTop: 8, marginBottom: 8 }}>Change food</Overline>
+        <Overline style={{ marginTop: 8, marginBottom: 8 }}>{title}</Overline>
 
         <Card variant="elevated" style={{ padding: 0, marginBottom: 14 }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: spacing.md }}>

@@ -7,9 +7,11 @@ import { Overline } from "@/components/Overline";
 import { Segmented } from "@/components/Segmented";
 import { Icon } from "@/components/Icon";
 import { PortionField } from "@/components/units/PortionField";
+import { FoodPicker } from "@/components/meal/FoodPicker";
 import { useCreateSavedMeal, useUpdateSavedMeal, useDeleteSavedMeal } from "@/api/hooks";
-import type { MemoryFood, MemoryMeal, SavedMeal, SavedMealItem } from "@/api/types";
+import type { FoodItem, MemoryFood, MemoryMeal, SavedMeal, SavedMealItem } from "@/api/types";
 import type { ServingUnit } from "@/units/portion";
+import { baseQuantityFor, defaultServingCount } from "@/units/portion";
 import { useTheme } from "@/theme";
 
 const SLOT_OPTIONS = [
@@ -24,13 +26,44 @@ const SLOT_OPTIONS = [
 // named-serving entry (e.g. "2 sachet") separately — when `enteredUnit` is
 // set, THAT pair is what gets sent on save, never `grams`, matching the
 // server-resolves-grams contract meal.tsx follows for a single log.
+//
+// `rowId` is CLIENT-ONLY identity for React's list reconciliation — never
+// sent to the server (save() builds its own payload shape and never spreads
+// an EditItem into it). Two rows can legitimately share the same
+// food_item_id (two different portions of the same food logged separately),
+// so food_item_id alone is not a safe key: with duplicate keys, React can
+// reattribute PortionField's local exact-mode state from one row to another
+// when a sibling row is removed. rowId is generated once, when the row is
+// created (seeded or added), and never regenerated on re-render.
+//
+// `baseUnit` is the food's OWN base unit ("g" or "ml"). It is what `grams`
+// counts in — a 200 ml milk carries grams: 200 and baseUnit: "ml" — so it
+// drives both the chip PortionField shows and what setPortion treats as an
+// exact base-unit entry. Defaults to "g" for the seeds that don't carry one
+// (a saved meal's items and the usual-meal aggregate aren't joined to the
+// food row), which is the same assumption formatPortion already makes.
 type EditItem = {
+  rowId: string;
   food_item_id: string;
   name: string;
   grams: number;
+  baseUnit: "g" | "ml";
   enteredAmount: number | null;
   enteredUnit: string | null;
 };
+
+// The only two base units the app models (see PortionField and formatPortion);
+// anything else is treated as grams rather than shown to the user verbatim.
+function baseUnitOf(unit: string | null | undefined): "g" | "ml" {
+  return unit === "ml" ? "ml" : "g";
+}
+
+// Collision-improbable local id — these ids never leave the device (they
+// exist only for React list keys), so a uuid dependency is unnecessary. Same
+// scheme as src/reminders/customPrefs.ts's newId().
+function newRowId(): string {
+  return `row_${Date.now().toString(36)}${Math.floor(Math.random() * 1e9).toString(36)}`;
+}
 
 // A saved-meal item carries the user's entered pair when it has one
 // (MemoryFood — the "usual meal" aggregate a create-seed comes from — never
@@ -48,14 +81,39 @@ function enteredPairOf(i: MemoryFood | SavedMealItem): { amount: number | null; 
 // single serving actually in use from the entered pair and the resolved
 // grams, so PortionField can still render the stepper for it.
 function servingUnitsFor(item: EditItem): ServingUnit[] {
+  // An entry already in the row's base unit is not a named serving: synthesising
+  // one would put "200 mls (200 ml)" in a stepper and make setPortion's
+  // base-unit branch unreachable from the UI.
+  if (item.enteredUnit === item.baseUnit) return [];
   if (item.enteredUnit && item.enteredAmount && item.enteredAmount > 0) {
     return [{ name: item.enteredUnit, amount: 1, base_amount: item.grams / item.enteredAmount }];
   }
   return [];
 }
 
-// seed is either a usual meal to save (create) or an existing saved meal (edit).
-export type Seed = { mode: "create"; meal: MemoryMeal } | { mode: "edit"; meal: SavedMeal };
+// A composed row is seeded from selected diary entries — quantity_grams is
+// the diary row's resolved grams, and entered_amount/entered_unit carry that
+// row's original entered pair (if any) so the sheet's stepper opens on the
+// same unit the user logged in, per servingUnitsFor's synthesis above.
+export type ComposedItem = {
+  food_item_id: string;
+  name: string;
+  quantity_grams: number;
+  entered_amount: number | null;
+  entered_unit: string | null;
+  base_unit?: string | null;
+  /** The slot the composed row was logged in; seeds the sheet's own slot. */
+  meal_slot?: string | null;
+};
+
+// seed is a usual meal to save (create), an existing saved meal (edit), a
+// blank sheet (new meal from scratch), or a set of diary rows to compose
+// into a new meal (compose).
+export type Seed =
+  | { mode: "create"; meal: MemoryMeal }
+  | { mode: "edit"; meal: SavedMeal }
+  | { mode: "blank" }
+  | { mode: "compose"; items: ComposedItem[] };
 
 interface Props {
   seed: Seed | null;
@@ -72,30 +130,105 @@ export function SavedMealSheet({ seed, onClose }: Props) {
   const [slot, setSlot] = useState("breakfast");
   const [items, setItems] = useState<EditItem[]>([]);
   const [err, setErr] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   useEffect(() => {
     if (!seed) return;
+    if (seed.mode === "blank") {
+      setName("");
+      setSlot("breakfast");
+      setItems([]);
+      setErr(null);
+      return;
+    }
+    if (seed.mode === "compose") {
+      setName(seed.items[0]?.name ?? "");
+      // The composed rows all came from the diary, where each one already has
+      // a slot; the first row's is the honest default. Breakfast only survives
+      // as the fallback for a row that somehow carries none.
+      setSlot(seed.items[0]?.meal_slot || "breakfast");
+      setItems(
+        seed.items.map((i) => ({
+          rowId: newRowId(),
+          food_item_id: i.food_item_id,
+          name: i.name,
+          grams: i.quantity_grams,
+          baseUnit: baseUnitOf(i.base_unit),
+          enteredAmount: i.entered_amount,
+          enteredUnit: i.entered_unit,
+        })),
+      );
+      setErr(null);
+      return;
+    }
     setName(seed.meal.name);
     setSlot(seed.meal.meal_slot);
     setItems(
       seed.meal.items.map((i) => {
         const { amount, unit } = enteredPairOf(i);
-        return { food_item_id: i.food_item_id, name: i.name, grams: i.grams, enteredAmount: amount, enteredUnit: unit };
+        return { rowId: newRowId(), food_item_id: i.food_item_id, name: i.name, grams: i.grams, baseUnit: baseUnitOf(null), enteredAmount: amount, enteredUnit: unit };
       }),
     );
     setErr(null);
   }, [seed]);
 
   const removeItem = (idx: number) => setItems((cur) => cur.filter((_, i) => i !== idx));
+
+  // Seeded exactly as app/log.tsx's selectFood seeds its own selection, so a
+  // picked sachet lands as "1 portion" rather than "16.5 g" — a QUANTITY
+  // derived from figures the food row already carries, never a unit
+  // conversion or a computed nutrition value. Appends rather than replaces:
+  // adding to an existing saved meal (edit/compose seeds) is a real case,
+  // not just building a blank one from scratch.
+  const addItem = (food: FoodItem) => {
+    setPickerOpen(false);
+    const servingUnits = food.serving_units ?? [];
+    const defaultServing = servingUnits[0] ?? null;
+    const baseUnit = baseUnitOf(food.base_unit);
+    let newItem: EditItem;
+    if (defaultServing) {
+      const count = defaultServingCount(food.serving_grams, defaultServing);
+      newItem = {
+        rowId: newRowId(),
+        food_item_id: food.id,
+        name: food.name,
+        grams: (baseQuantityFor(count, defaultServing.name, servingUnits) ?? food.serving_grams) || 100,
+        baseUnit,
+        enteredAmount: count,
+        enteredUnit: defaultServing.name,
+      };
+    } else {
+      newItem = {
+        rowId: newRowId(),
+        food_item_id: food.id,
+        name: food.name,
+        grams: food.serving_grams || 100,
+        baseUnit,
+        enteredAmount: null,
+        enteredUnit: null,
+      };
+    }
+    setItems((cur) => [...cur, newItem]);
+  };
+  // An entry in the row's OWN base unit ("200 ml" on a millilitre food is
+  // exactly what "200 g" is on a gram one) is the canonical figure: it clears
+  // the entered pair so save() sends grams. Anything else is a named serving,
+  // and its count and base-unit figure must move together — servingUnitsFor
+  // re-derives the per-unit base amount as grams/enteredAmount, so leaving
+  // grams behind when the count changes shrinks the synthesised serving and
+  // freezes the "(16.5 g)" hint while the count climbs. The per-unit figure is
+  // taken from the row BEFORE the overwrite; it is a QUANTITY the row already
+  // carries, never a nutrition value, and the server still resolves the
+  // authoritative grams from the entered pair at write time.
   const setPortion = (idx: number, amount: number, unit: string) =>
     setItems((cur) =>
-      cur.map((it, i) =>
-        i !== idx
-          ? it
-          : unit === "g"
-            ? { ...it, grams: amount, enteredAmount: null, enteredUnit: null }
-            : { ...it, enteredAmount: amount, enteredUnit: unit },
-      ),
+      cur.map((it, i) => {
+        if (i !== idx) return it;
+        if (unit === it.baseUnit) return { ...it, grams: amount, enteredAmount: null, enteredUnit: null };
+        const perUnit =
+          it.enteredUnit === unit && (it.enteredAmount ?? 0) > 0 ? it.grams / (it.enteredAmount as number) : it.grams;
+        return { ...it, grams: perUnit * amount, enteredAmount: amount, enteredUnit: unit };
+      }),
     );
 
   const save = () => {
@@ -131,6 +264,11 @@ export function SavedMealSheet({ seed, onClose }: Props) {
   };
 
   const pending = createMeal.isPending || updateMeal.isPending || deleteMeal.isPending;
+  // Mirrors save()'s validation so an empty/blank sheet reads as "not ready
+  // yet" rather than surfacing the "Add at least one item with grams." error
+  // the user hasn't actually caused. save() keeps its own check as a
+  // backstop for any state this gate doesn't cover.
+  const canSave = name.trim().length > 0 && items.length > 0 && items.every((it) => it.grams > 0 || (it.enteredAmount ?? 0) > 0);
 
   return (
     <Sheet visible={seed !== null} onClose={onClose}>
@@ -149,7 +287,7 @@ export function SavedMealSheet({ seed, onClose }: Props) {
         </View>
         <View style={{ marginTop: spacing.md, gap: spacing.sm }}>
           {items.map((it, idx) => (
-            <View key={it.food_item_id} style={{ gap: spacing.xs }}>
+            <View key={it.rowId} style={{ gap: spacing.xs }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
                 <AppText style={{ flex: 1 }}>{it.name}</AppText>
                 <Pressable accessibilityLabel={`Remove ${it.name}`} hitSlop={8} onPress={() => removeItem(idx)}>
@@ -157,18 +295,22 @@ export function SavedMealSheet({ seed, onClose }: Props) {
                 </Pressable>
               </View>
               <PortionField
-                baseUnit="g"
+                baseUnit={it.baseUnit}
                 servingUnits={servingUnitsFor(it)}
                 amount={it.enteredUnit !== null ? (it.enteredAmount ?? it.grams) : it.grams}
-                unit={it.enteredUnit ?? "g"}
+                unit={it.enteredUnit ?? it.baseUnit}
                 onChange={(amount, unit) => setPortion(idx, amount, unit)}
               />
             </View>
           ))}
         </View>
+        <Pressable accessibilityRole="button" accessibilityLabel="Add ingredient" onPress={() => setPickerOpen(true)}>
+          <AppText style={{ color: colors.accent, marginTop: spacing.sm }}>+ Add ingredient</AppText>
+        </Pressable>
+        <FoodPicker title="Add ingredient" visible={pickerOpen} initialQuery="" onSelect={addItem} onClose={() => setPickerOpen(false)} />
         {err ? <AppText style={{ color: colors.destructive, marginTop: spacing.sm }}>{err}</AppText> : null}
         <View style={{ marginTop: spacing.lg }}>
-          <Button title="Save" onPress={save} disabled={pending} />
+          <Button accessibilityLabel="Save" title="Save" onPress={save} disabled={pending || !canSave} />
         </View>
         {seed?.mode === "edit" ? (
           <Pressable onPress={remove} disabled={pending} style={{ marginTop: spacing.md, alignItems: "center" }}>
