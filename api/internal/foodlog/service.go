@@ -397,9 +397,18 @@ func (s Service) EditLog(ctx context.Context, userID, logID uuid.UUID, req EditR
 // BatchItem is one food entry within a CreateBatchRequest. Only the food
 // reference and quantity are client-supplied — all nutrition is recomputed
 // server-side from the resolved FoodItem row.
+//
+// EnteredAmount/EnteredUnit carry what a saved meal's item was actually
+// saved in ("2 sachet"). When both are set, the server resolves them into
+// QuantityGrams exactly once, here — the client never converts, and the
+// resolved grams (not the entered pair) drive every nutrition figure. A
+// client sends QuantityGrams: 0 as a placeholder when an entered pair is
+// present. Nil means a legacy gram-entered item; QuantityGrams is used as-is.
 type BatchItem struct {
 	FoodItemID    uuid.UUID `json:"food_item_id"`
 	QuantityGrams float64   `json:"quantity_grams"`
+	EnteredAmount *float64  `json:"entered_amount"`
+	EnteredUnit   *string   `json:"entered_unit"`
 }
 
 // CreateBatchRequest logs several foods as a single meal (e.g. all items on a
@@ -431,9 +440,9 @@ func (s Service) CreateBatch(ctx context.Context, userID uuid.UUID, req CreateBa
 	out := make([]FoodLog, 0, len(req.Items))
 	err := s.logs.Transaction(ctx, func(txLogs Repository) error {
 		for _, it := range req.Items {
-			if it.QuantityGrams <= 0 {
-				return httpx.ValidationError{Message: "quantity_grams must be positive"}
-			}
+			// The food row is loaded BEFORE the quantity guard (unlike the
+			// original ordering) because unit resolution below needs it —
+			// exactly how LogFood orders these two steps.
 			item, err := s.foods.GetByID(ctx, it.FoodItemID)
 			if err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -454,8 +463,32 @@ func (s Service) CreateBatch(ctx context.Context, userID uuid.UUID, req CreateBa
 				// Infra/DB fault resolving the food — must not be a client 400.
 				return fmt.Errorf("foodlog: batch: resolve food: %w", err)
 			}
+
+			// A saved meal logs each item in the unit it was saved in. The
+			// SERVER resolves it, once, here — the client sends
+			// quantity_grams: 0 as a placeholder when an entered pair is
+			// present, so the positive-quantity guard below must run against
+			// the RESOLVED figure, not the client's placeholder zero.
+			grams := it.QuantityGrams
+			if it.EnteredAmount != nil && it.EnteredUnit != nil {
+				resolved, rerr := resolveEnteredUnit(*it.EnteredAmount, *it.EnteredUnit, item)
+				if rerr != nil {
+					// Name the ingredient. The user picked a meal, not an id —
+					// the unresolvable-food path above already reasons this
+					// way.
+					if name, ok := s.foods.NameForID(ctx, it.FoodItemID); ok {
+						return httpx.ValidationError{Message: fmt.Sprintf("%s: %s", name, units.UnrecognisedUnitMessage)}
+					}
+					return httpx.ValidationError{Message: units.UnrecognisedUnitMessage}
+				}
+				grams = resolved
+			}
+			if grams <= 0 {
+				return httpx.ValidationError{Message: "quantity_grams must be positive"}
+			}
+
 			fid := it.FoodItemID
-			f := it.QuantityGrams / 100.0
+			f := grams / 100.0
 			created, err := txLogs.Create(ctx, FoodLog{
 				UserID:        userID,
 				FoodItemID:    &fid,
@@ -463,7 +496,9 @@ func (s Service) CreateBatch(ctx context.Context, userID uuid.UUID, req CreateBa
 				MealSlot:      req.MealSlot,
 				Source:        "memory",
 				Description:   item.Name,
-				QuantityGrams: it.QuantityGrams,
+				QuantityGrams: grams,
+				EnteredAmount: it.EnteredAmount,
+				EnteredUnit:   it.EnteredUnit,
 				Kcal:          item.KcalPer100g * f,
 				ProteinG:      item.ProteinPer100g * f,
 				CarbsG:        item.CarbsPer100g * f,

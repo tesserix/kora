@@ -19,6 +19,7 @@ import (
 	"github.com/tesserix/kora/api/internal/httpx"
 	"github.com/tesserix/kora/api/internal/metrics"
 	"github.com/tesserix/kora/api/internal/nutrition"
+	"github.com/tesserix/kora/api/internal/units"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -447,6 +448,113 @@ func TestCreateBatchInfraFaultIsNotMisclassifiedAsValidation(t *testing.T) {
 	require.False(t, errors.Is(err, gorm.ErrRecordNotFound), "driver fault must not masquerade as record-not-found")
 	_, ok := httpx.IsValidation(err)
 	require.False(t, ok, "infra fault must NOT be a ValidationError, got a 400-class error: %v", err)
+}
+
+// TestCreateBatchResolvesEnteredUnits proves a saved meal logs each item in
+// the unit it was saved in: the SERVER resolves the entered (amount, unit)
+// pair into quantity_grams here, exactly once, and stores the entered pair
+// beside the resolved figure. The client sends quantity_grams: 0 as a
+// placeholder for the entered-pair item, so the positive-quantity guard must
+// run against the RESOLVED grams, not that placeholder.
+func TestCreateBatchResolvesEnteredUnits(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+
+	// One sachet is 16.5g, base unit grams.
+	sachet := nutrition.FoodItem{
+		Name: "Batch Sachet Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD,
+		BaseUnit:     "g",
+		ServingUnits: json.RawMessage(`[{"name":"sachet","amount":1,"base_amount":16.5}]`),
+		KcalPer100g:  100,
+	}
+	require.NoError(t, db.Create(&sachet).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", sachet.ID) })
+
+	milk := nutrition.FoodItem{
+		Name: "Batch Milk Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD,
+		BaseUnit: "ml", ServingUnits: json.RawMessage(`[]`), KcalPer100g: 60,
+	}
+	require.NoError(t, db.Create(&milk).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", milk.ID) })
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	amount := 2.0
+	unit := "sachet"
+
+	got, err := svc.CreateBatch(context.Background(), userID, CreateBatchRequest{
+		LoggedAt: time.Now(), MealSlot: "snack",
+		Items: []BatchItem{
+			{FoodItemID: sachet.ID, EnteredAmount: &amount, EnteredUnit: &unit},
+			{FoodItemID: milk.ID, QuantityGrams: 200},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+
+	// 2 sachets x 16.5g = 33g, resolved server-side, entered pair stored beside it.
+	assert.InDelta(t, 33.0, got[0].QuantityGrams, 1e-9)
+	require.NotNil(t, got[0].EnteredUnit)
+	assert.Equal(t, "sachet", *got[0].EnteredUnit)
+	require.NotNil(t, got[0].EnteredAmount)
+	assert.InDelta(t, 2.0, *got[0].EnteredAmount, 1e-9)
+	assert.InDelta(t, sachet.KcalPer100g*0.33, got[0].Kcal, 1e-9, "nutrition must be computed from the RESOLVED grams")
+
+	// The gram-entered item is untouched and keeps a null pair.
+	assert.InDelta(t, 200.0, got[1].QuantityGrams, 1e-9)
+	assert.Nil(t, got[1].EnteredUnit)
+	assert.Nil(t, got[1].EnteredAmount)
+}
+
+// TestCreateBatchRejectsUnknownUnitAndLogsNothing proves an unresolvable
+// entered unit joins CreateBatch's existing all-or-nothing failure path: it
+// names the ingredient (mirroring the unresolvable-food_item_id case) and
+// rolls back every item in the batch, including ones that resolved fine.
+func TestCreateBatchRejectsUnknownUnitAndLogsNothing(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+
+	milk := nutrition.FoodItem{
+		Name: "Batch Unknown Unit Milk " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD,
+		BaseUnit: "ml", ServingUnits: json.RawMessage(`[]`), KcalPer100g: 60,
+	}
+	require.NoError(t, db.Create(&milk).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", milk.ID) })
+
+	sachet := nutrition.FoodItem{
+		Name: "Batch Unknown Unit Sachet " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD,
+		BaseUnit:     "g",
+		ServingUnits: json.RawMessage(`[{"name":"sachet","amount":1,"base_amount":16.5}]`),
+		KcalPer100g:  100,
+	}
+	require.NoError(t, db.Create(&sachet).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", sachet.ID) })
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	since := time.Now().Add(-time.Hour)
+	amount := 1.0
+	unit := "bucket"
+
+	_, err := svc.CreateBatch(context.Background(), userID, CreateBatchRequest{
+		LoggedAt: time.Now(), MealSlot: "snack",
+		Items: []BatchItem{
+			{FoodItemID: milk.ID, QuantityGrams: 200},
+			{FoodItemID: sachet.ID, EnteredAmount: &amount, EnteredUnit: &unit},
+		},
+	})
+	require.Error(t, err)
+	msg, ok := httpx.IsValidation(err)
+	require.True(t, ok, "unresolvable entered unit must be a client ValidationError (400), got: %v", err)
+	// The message must name the ingredient, the way the unresolvable-id path
+	// already does — an opaque "unrecognised unit" tells the user nothing
+	// about WHICH item of their saved meal is the problem.
+	assert.Contains(t, msg, units.UnrecognisedUnitMessage)
+	assert.Contains(t, msg, sachet.Name)
+
+	logs, listErr := NewRepository(db).ListForUserSince(context.Background(), userID, since)
+	require.NoError(t, listErr)
+	assert.Empty(t, logs, "all-or-nothing: the VALID first item must not have been logged either")
 }
 
 func TestEditLogInvalidMealSlotReturnsValidationError(t *testing.T) {
