@@ -13,6 +13,7 @@ const mockDeleteMutate = jest.fn();
 const mockToggle = jest.fn();
 const mockOpenCreate = jest.fn();
 const mockOpenEdit = jest.fn();
+const mockOpenBlank = jest.fn();
 let mockMemoryData: Memory = { recents: [], frequent: [], usual_meals: [] };
 let mockMemoryIsLoading = false;
 let mockMemoryIsError = false;
@@ -56,7 +57,7 @@ jest.mock("@/api/usePinToggle", () => ({
 }));
 
 jest.mock("@/components/meals/SavedMealSheetProvider", () => ({
-  useSavedMealEditor: () => ({ openCreate: mockOpenCreate, openEdit: mockOpenEdit }),
+  useSavedMealEditor: () => ({ openCreate: mockOpenCreate, openEdit: mockOpenEdit, openBlank: mockOpenBlank }),
 }));
 
 jest.mock("@/components/Toast", () => ({
@@ -72,6 +73,7 @@ beforeEach(() => {
   mockToggle.mockClear();
   mockOpenCreate.mockClear();
   mockOpenEdit.mockClear();
+  mockOpenBlank.mockClear();
   mockSearch = { data: [chickenCandidate], isLoading: false, isOfflineCache: false };
   mockMemoryData = { recents: [], frequent: [], usual_meals: [] };
   mockMemoryIsLoading = false;
@@ -273,6 +275,16 @@ test("Saved tab shows a saved meal", async () => {
   const { findByText, findByLabelText } = await render(<LogScreen />);
   fireEvent.press(await findByLabelText("Saved"));
   expect(await findByText("Protein Bowl")).toBeTruthy();
+});
+
+test("the log screen can start a new meal from scratch", async () => {
+  const { findByLabelText } = await render(<LogScreen />);
+
+  fireEvent.press(await findByLabelText("Saved"));
+  const newMealButton = await findByLabelText("New meal");
+  fireEvent.press(newMealButton);
+
+  expect(mockOpenBlank).toHaveBeenCalled();
 });
 
 
