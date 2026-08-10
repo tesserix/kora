@@ -4,7 +4,6 @@ import { router, useLocalSearchParams } from "expo-router";
 import { Sheet } from "@/components/Sheet";
 import { Icon } from "@/components/Icon";
 import { Button } from "@/components/Button";
-import { Stepper } from "@/components/Stepper";
 import { Segmented } from "@/components/Segmented";
 import { Card } from "@/components/Card";
 import { Stat } from "@/components/Stat";
@@ -12,13 +11,31 @@ import { AppText } from "@/components/Text";
 import { Overline } from "@/components/Overline";
 import { FoodPicker } from "@/components/meal/FoodPicker";
 import { AskAgainSheet } from "@/components/meal/AskAgainSheet";
+import { PortionField } from "@/components/units/PortionField";
 import { foodVisual } from "@/lib/foodVisual";
 import { haptics, PressableScale } from "@/motion";
 import { useEditLog, useDeleteLog, useLog, useRepeatLog, useCreateLog, type EditLogInput } from "@/api/hooks";
 import type { FoodItem, FoodLog } from "@/api/types";
 import type { MealSlot } from "@/lib/mealSlot";
+import type { ServingUnit } from "@/units/portion";
 import { useTheme } from "@/theme";
 import { useToast } from "@/components/Toast";
+
+// A fetched log carries the user's entered (amount, unit) pair, but the
+// log-fetch endpoint does not currently embed the food's own base unit or
+// full serving catalog. When only the entered pair is known, synthesize the
+// single serving actually in use — its base_amount is exactly
+// quantity_grams / entered_amount, no client-side conversion involved — so
+// PortionField can still render the stepper for it. A legacy log (no
+// entered pair) has no named serving to offer at all.
+function servingUnitsFor(entry: FoodLog | null | undefined): ServingUnit[] {
+  if (!entry) return [];
+  if (entry.serving_units && entry.serving_units.length > 0) return entry.serving_units;
+  if (entry.entered_amount && entry.entered_unit && entry.entered_amount > 0) {
+    return [{ name: entry.entered_unit, amount: 1, base_amount: entry.quantity_grams / entry.entered_amount }];
+  }
+  return [];
+}
 
 const SLOT_OPTIONS: Array<{ key: MealSlot; label: string }> = [
   { key: "breakfast", label: "Breakfast" },
@@ -34,8 +51,24 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 type PriorFoodState = {
   food_item_id: string | undefined;
   quantity_grams: number;
+  entered_amount: number | null;
+  entered_unit: string | null;
   meal_slot: MealSlot;
 };
+
+// Builds the portion half of an edit/undo PATCH: the entered pair when the
+// portion is serving-based, quantity_grams otherwise. The single place this
+// branch is expressed so every mutate call site (save, undo, food-swap,
+// undo-food-swap) agrees on it.
+function portionPatchFor(
+  grams: number,
+  enteredAmount: number | null,
+  enteredUnit: string | null,
+): { quantity_grams: number } | { entered_amount?: number; entered_unit: string } {
+  return enteredUnit !== null
+    ? { entered_amount: enteredAmount ?? undefined, entered_unit: enteredUnit }
+    : { quantity_grams: grams };
+}
 
 // What a delete-undo needs to re-create the log exactly as it was.
 type RetainedLog = {
@@ -84,7 +117,17 @@ export default function MealDetail() {
   const baseCarbs = effective?.carbs_g ?? (Number(p.carbs) || 0);
   const baseFat = effective?.fat_g ?? (Number(p.fat) || 0);
 
+  // `grams` is the base-unit (server quantity_grams) figure. It is the ONLY
+  // thing the macro preview (`scale` below) ever reads, and it only changes
+  // when the user edits the exact-mode field in the food's base unit —
+  // never as a side effect of a serving-mode edit, which the client cannot
+  // convert to grams itself. `enteredAmount`/`enteredUnit` track a serving
+  // entry (e.g. "2 sachet") separately; when `enteredUnit` is set that pair
+  // — not `grams` — is what gets sent on save, and the SERVER resolves the
+  // grams.
   const [grams, setGrams] = useState(baseGrams);
+  const [enteredAmount, setEnteredAmount] = useState<number | null>(effective?.entered_amount ?? null);
+  const [enteredUnit, setEnteredUnit] = useState<string | null>(effective?.entered_unit ?? null);
   const [slot, setSlot] = useState<MealSlot>((p.mealSlot as MealSlot) ?? "breakfast");
   const [err, setErr] = useState<string | null>(null);
   const [pickerVisible, setPickerVisible] = useState(false);
@@ -98,6 +141,10 @@ export default function MealDetail() {
   const toast = useToast();
   const busy = editLog.isPending || deleteLog.isPending || repeatLog.isPending;
 
+  // Display-only preview of the server's own figures — see the comment on
+  // `grams` above. It must never be driven by `enteredAmount`/`enteredUnit`:
+  // the client cannot compute what those resolve to in grams, only the
+  // server can.
   const scale = (base: number) => (baseGrams > 0 ? Math.round(base * grams / baseGrams) : base);
   const kcal = scale(baseKcal);
   // Same fallback pattern as baseGrams: prefer the effective (fetched/patched)
@@ -105,7 +152,40 @@ export default function MealDetail() {
   // p.mealSlot here unconditionally would compare against a baseline that
   // never updates once the server's slot is known.
   const baseSlot = (effective?.meal_slot as MealSlot | undefined) ?? (p.mealSlot as MealSlot);
-  const dirty = grams !== baseGrams || slot !== baseSlot;
+  const baseEnteredAmount = effective?.entered_amount ?? null;
+  const baseEnteredUnit = effective?.entered_unit ?? null;
+  // In serving mode (enteredUnit set) the entered pair alone decides
+  // dirtiness — `grams` never changed. Out of serving mode, `grams` decides
+  // it, UNLESS the baseline itself was a named serving (the user switched
+  // OUT of it via the escape hatch), which is a real edit even if `grams`
+  // happens to still equal baseGrams.
+  const portionDirty =
+    enteredUnit !== null
+      ? enteredAmount !== baseEnteredAmount || enteredUnit !== baseEnteredUnit
+      : grams !== baseGrams || baseEnteredUnit !== null;
+  const dirty = portionDirty || slot !== baseSlot;
+
+  const baseUnit: "g" | "ml" = effective?.base_unit === "ml" ? "ml" : "g";
+  const servingUnits = servingUnitsFor(effective);
+  const portionUnit = enteredUnit ?? baseUnit;
+  const portionAmount = enteredUnit !== null ? (enteredAmount ?? grams) : grams;
+  const onPortionChange = (amount: number, unit: string) => {
+    // An entry IN the food's own base unit is already the base-unit figure,
+    // so the macro preview can follow it — no conversion is involved.
+    if (unit === baseUnit) setGrams(amount);
+    // Only a GRAM entry may drop the entered pair. For a millilitre-based
+    // food, "300 ml" entered as bare grams would be stored with a NULL unit
+    // and read back as "300 g" forever. units.ToBase resolves ml→ml 1:1
+    // server-side, so sending the pair costs nothing and keeps the row honest
+    // about what the user meant.
+    if (unit === "g") {
+      setEnteredAmount(null);
+      setEnteredUnit(null);
+    } else {
+      setEnteredAmount(amount);
+      setEnteredUnit(unit);
+    }
+  };
 
   // A successful food change replaces the food identity but keeps the same
   // portion/slot, so resync local state to the server's response rather than
@@ -114,6 +194,8 @@ export default function MealDetail() {
     if (!override) return;
     setGrams(override.quantity_grams);
     setSlot(override.meal_slot as MealSlot);
+    setEnteredAmount(override.entered_amount ?? null);
+    setEnteredUnit(override.entered_unit ?? null);
   }, [override]);
 
   // grams/slot are first seeded from the diary's route params, which pass a
@@ -133,6 +215,8 @@ export default function MealDetail() {
     if (override) return;
     setGrams(log.quantity_grams);
     setSlot(log.meal_slot as MealSlot);
+    setEnteredAmount(log.entered_amount ?? null);
+    setEnteredUnit(log.entered_unit ?? null);
   }, [log]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Undoes a food correction: PATCHes the log back to its prior food/portion/
@@ -151,8 +235,8 @@ export default function MealDetail() {
       .mutateAsync({
         id: p.id,
         food_item_id: prior.food_item_id,
-        quantity_grams: prior.quantity_grams,
         meal_slot: prior.meal_slot,
+        ...portionPatchFor(prior.quantity_grams, prior.entered_amount, prior.entered_unit),
         // retract_correction undoes ONLY the alias THIS correction taught
         // (aliasRecorded true). Sending it unconditionally, or when nothing
         // was taught, would delete an alias a different log may have
@@ -176,9 +260,18 @@ export default function MealDetail() {
   // the same phrase. Same mutateAsync/.catch reasoning as undoCorrection:
   // onSave already navigates back on success, so the triggering toast can
   // outlive this component.
-  const undoSave = (priorGrams: number, priorSlot: MealSlot) => {
+  const undoSave = (
+    priorGrams: number,
+    priorSlot: MealSlot,
+    priorEnteredAmount: number | null,
+    priorEnteredUnit: string | null,
+  ) => {
     editLog
-      .mutateAsync({ id: p.id, quantity_grams: priorGrams, meal_slot: priorSlot })
+      .mutateAsync({
+        id: p.id,
+        meal_slot: priorSlot,
+        ...portionPatchFor(priorGrams, priorEnteredAmount, priorEnteredUnit),
+      })
       .then(() => haptics.success())
       .catch(() => {
         haptics.error();
@@ -222,6 +315,8 @@ export default function MealDetail() {
     const prior: PriorFoodState = {
       food_item_id: effective?.food_item_id,
       quantity_grams: baseGrams,
+      entered_amount: baseEnteredAmount,
+      entered_unit: baseEnteredUnit,
       meal_slot: baseSlot,
     };
     const priorPhrase = effective?.input_phrase;
@@ -232,7 +327,7 @@ export default function MealDetail() {
     // discarding any unsaved portion or meal-slot edit the user just made.
     // A same-value field is a harmless no-op on the server.
     editLog.mutate(
-      { id: p.id, food_item_id: item.id, quantity_grams: grams, meal_slot: slot },
+      { id: p.id, food_item_id: item.id, meal_slot: slot, ...portionPatchFor(grams, enteredAmount, enteredUnit) },
       {
         onSuccess: ({ log: updated, aliasRecorded }) => {
           haptics.success();
@@ -271,9 +366,11 @@ export default function MealDetail() {
     // baseGrams/baseSlot will reflect the NEW values once that refetch lands.
     const priorGrams = baseGrams;
     const priorSlot = baseSlot;
-    const patch: EditLogInput = { id: p.id };
-    if (grams !== baseGrams) patch.quantity_grams = grams;
-    if (slot !== baseSlot) patch.meal_slot = slot;
+    const priorEnteredAmount = baseEnteredAmount;
+    const priorEnteredUnit = baseEnteredUnit;
+    const portionUpdate = portionDirty ? portionPatchFor(grams, enteredAmount, enteredUnit) : {};
+    const slotUpdate = slot !== baseSlot ? { meal_slot: slot } : {};
+    const patch: EditLogInput = { id: p.id, ...portionUpdate, ...slotUpdate };
     editLog.mutate(patch, {
       onSuccess: () => {
         haptics.success();
@@ -281,7 +378,7 @@ export default function MealDetail() {
         toast.show({
           message: "Saved",
           actionLabel: "Undo",
-          onAction: () => undoSave(priorGrams, priorSlot),
+          onAction: () => undoSave(priorGrams, priorSlot, priorEnteredAmount, priorEnteredUnit),
         });
       },
       onError: () => {
@@ -434,19 +531,25 @@ export default function MealDetail() {
         ) : null}
 
         <Overline>Portion</Overline>
-        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 12, marginTop: 6 }}>
+        <View style={{ paddingVertical: 12, marginTop: 6, gap: 12 }}>
           <PressableScale
             haptic="selection"
             accessibilityRole="button"
             accessibilityLabel="Change food"
             disabled={busy}
             onPress={() => setPickerVisible(true)}
-            style={{ flexDirection: "row", alignItems: "center", gap: 4, flexShrink: 1 }}
+            style={{ flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-start" }}
           >
             <AppText variant="subheadline" style={{ fontWeight: "600" }}>{name}</AppText>
             <Icon name="chevron-right" size={14} color={colors.tertiaryLabel} />
           </PressableScale>
-          <Stepper value={grams} onChange={setGrams} step={10} min={10} />
+          <PortionField
+            baseUnit={baseUnit}
+            servingUnits={servingUnits}
+            amount={portionAmount}
+            unit={portionUnit}
+            onChange={onPortionChange}
+          />
         </View>
 
         {/*

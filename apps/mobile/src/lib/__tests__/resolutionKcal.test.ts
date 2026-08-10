@@ -64,7 +64,11 @@ describe("kcalTotalLabel", () => {
     expect(kcalTotalLabel(resolution)).toBe("0–0 kcal");
   });
 
-  test("the header total ignores items that will not be logged", () => {
+  // A follow_up row is a weak match, not a missing one — the card preselects
+  // the server's top guess for it, so it WILL be logged and its server-sent
+  // kcal belongs in the total. Excluding it here would make the header
+  // disagree with the very rows printed underneath it.
+  test("the header total includes a preselected uncertain row's server kcal", () => {
     const resolution = {
       is_estimate: false,
       candidates: [
@@ -72,7 +76,7 @@ describe("kcalTotalLabel", () => {
         { item: { id: "b" }, portion_grams: 100, kcal: 500, match_score: 0.3, match_tier: "embedding", tier: "follow_up" },
       ],
     } as unknown as Resolution;
-    expect(kcalTotalLabel(resolution)).toBe("200 kcal");
+    expect(kcalTotalLabel(resolution)).toBe("700 kcal");
   });
 });
 

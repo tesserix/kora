@@ -16,6 +16,8 @@ type FoodLog struct {
 	Source        string     `json:"source"`
 	Description   string     `json:"description"`
 	QuantityGrams float64    `json:"quantity_grams"`
+	EnteredAmount *float64   `gorm:"column:entered_amount" json:"entered_amount,omitempty"`
+	EnteredUnit   *string    `gorm:"column:entered_unit" json:"entered_unit,omitempty"`
 	Kcal          float64    `json:"kcal"`
 	ProteinG      float64    `json:"protein_g"`
 	CarbsG        float64    `json:"carbs_g"`
@@ -26,7 +28,21 @@ type FoodLog struct {
 	// resolve-sourced logs so a later correction can teach the index which
 	// phrase resolved wrong. Description holds the RESOLVED food's name;
 	// these are deliberately different fields.
-	InputPhrase   *string    `json:"input_phrase,omitempty"`
-	ClientLogMs   *int       `json:"client_log_ms,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
+	InputPhrase *string   `json:"input_phrase,omitempty"`
+	ClientLogMs *int      `json:"client_log_ms,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	// BaseUnit is the LOGGED FOOD's base unit ("g" or "ml"), joined in from
+	// food_items — it is not a column on food_logs, which is why it is
+	// read-only to gorm ("->") and excluded from migration.
+	//
+	// It exists so a client can label a LEGACY row correctly. A legacy log
+	// carries no entered pair at all, so quantity_grams is the only figure
+	// there is, and without the food's base unit a 300 ml drink renders as
+	// "300 g". It is a LABEL, never an input to arithmetic: nutrition is
+	// computed server-side from quantity_grams and the food's per-100
+	// figures, and no client converts anything with this.
+	//
+	// Empty when the log resolved to no food item, or was read through a path
+	// that does not join (e.g. the idempotent-replay reload).
+	BaseUnit string `gorm:"->;-:migration" json:"base_unit,omitempty"`
 }

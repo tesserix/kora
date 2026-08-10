@@ -2,11 +2,12 @@ import { ActivityIndicator, Pressable, View } from "react-native";
 import { Icon } from "@/components/Icon";
 import { AppText } from "@/components/Text";
 import { GaugeRing } from "@/components/GaugeRing";
+import { formatPortion } from "@/units/portion";
 import { foodVisual } from "@/lib/foodVisual";
 import { withAlpha } from "@/lib/color";
 import type { MealSlot } from "@/lib/mealSlot";
 import { kcalTotalLabel } from "@/lib/resolutionKcal";
-import { contributesKcal, isLoggable, loggableCandidates } from "@/lib/candidateTier";
+import { contributesKcal, isUncertain, loggableCandidates } from "@/lib/candidateTier";
 import type { Resolution, ResolvedCandidate } from "@/api/types";
 import { useTheme } from "@/theme";
 import { captureColors } from "./captureTheme";
@@ -85,12 +86,14 @@ function CandidateRow({
 }) {
   const { icon } = foodVisual(candidate.item.name);
   const { gradients } = useTheme();
-  const uncertain = !isLoggable(candidate);
-  // Two different reasons to withhold a number, and they are NOT the same
-  // condition: the item is unresolved (uncertain), or the user picked it by
-  // hand and no server kcal exists yet (kcal_unknown). Both render "—".
-  // Keying this off `uncertain` instead would print a fabricated "0 kcal" for
-  // a hand-picked row, which is the client inventing nutrition.
+  // Uncertainty is a presentation concern here and nothing else — an uncertain
+  // row is preselected and logged like any other, it just has to keep reading
+  // as a guess.
+  const uncertain = isUncertain(candidate);
+  // Withholding the number is a SEPARATE condition: only a row the user picked
+  // by hand has no server kcal yet (kcal_unknown), and only it renders "—".
+  // Keying this off `uncertain` instead would blank the server's own kcal on a
+  // preselected row, and print a fabricated "0 kcal" for a hand-picked one.
   const showsKcal = contributesKcal(candidate);
 
   const body = (
@@ -123,9 +126,13 @@ function CandidateRow({
         </AppText>
         {/* The confident row keeps its portion but no longer states a raw
             match percentage — that number was false precision about a score
-            the user cannot act on. */}
+            the user cannot act on. The weak row states the same portion plus
+            where it came from and what to do about it, because it is about to
+            be logged on the user's behalf unless they intervene. */}
         <AppText style={{ color: captureColors.onSurfaceFaint, fontSize: 11 }}>
-          {uncertain ? "Not sure which — tap to confirm" : `${Math.round(candidate.portion_grams)}g`}
+          {uncertain
+            ? `${formatPortion({ quantity_grams: candidate.portion_grams, base_unit: candidate.item.base_unit })} · Best guess — tap to change`
+            : formatPortion({ quantity_grams: candidate.portion_grams, base_unit: candidate.item.base_unit })}
         </AppText>
         {uncertain ? null : (
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 5 }}>
@@ -152,7 +159,7 @@ function CandidateRow({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Confirm ${candidate.item.name}`}
+      accessibilityLabel={`Change ${candidate.item.name}`}
       onPress={onResolve}
     >
       {body}
@@ -176,8 +183,10 @@ export function DetectedCard({
   onResolveUncertain,
 }: Props) {
   const { gradients } = useTheme();
-  // The header states what was seen; the CTA states what will actually be
-  // written to the diary. They deliberately disagree when an item is uncertain.
+  // The CTA states what will actually be written to the diary. Every detected
+  // row is written — the uncertain ones as the server's preselected top match
+  // — so this now agrees with the header count; the guard below only survives
+  // for a resolution with no candidates at all.
   const loggable = loggableCandidates(resolution);
   const nothingToLog = loggable.length === 0;
   const ctaLabel = `Add ${loggable.length} item${loggable.length === 1 ? "" : "s"} to diary`;

@@ -34,7 +34,10 @@ func insertItems(tx *gorm.DB, mealID uuid.UUID, items []SavedMealItem) error {
 	}
 	rows := make([]SavedMealItem, len(items))
 	for i, it := range items {
-		rows[i] = SavedMealItem{SavedMealID: mealID, FoodItemID: it.FoodItemID, Grams: it.Grams, Position: i}
+		rows[i] = SavedMealItem{
+			SavedMealID: mealID, FoodItemID: it.FoodItemID, Grams: it.Grams, Position: i,
+			EnteredAmount: it.EnteredAmount, EnteredUnit: it.EnteredUnit,
+		}
 	}
 	return tx.Create(&rows).Error
 }
@@ -73,7 +76,7 @@ func (r Repository) ItemsForMeals(ctx context.Context, mealIDs []uuid.UUID) ([]I
 	}
 	err := r.db.WithContext(ctx).
 		Table("saved_meal_items AS smi").
-		Select("smi.saved_meal_id, smi.food_item_id, smi.grams, smi.position, fi.name, fi.kcal_per_100g AS kcal_per100g, fi.protein_per_100g AS protein_per100g, fi.carbs_per_100g AS carbs_per100g, fi.fat_per_100g AS fat_per100g, fi.fiber_per_100g AS fiber_per100g").
+		Select("smi.saved_meal_id, smi.food_item_id, smi.grams, smi.position, smi.entered_amount, smi.entered_unit, fi.name, fi.kcal_per_100g AS kcal_per100g, fi.protein_per_100g AS protein_per100g, fi.carbs_per_100g AS carbs_per100g, fi.fat_per_100g AS fat_per100g, fi.fiber_per_100g AS fiber_per100g").
 		Joins("JOIN food_items fi ON fi.id = smi.food_item_id").
 		Where("smi.saved_meal_id IN ?", mealIDs).
 		Order("smi.saved_meal_id, smi.position").

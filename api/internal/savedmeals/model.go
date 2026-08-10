@@ -22,6 +22,12 @@ type SavedMealItem struct {
 	FoodItemID  uuid.UUID `gorm:"type:uuid;not null"`
 	Grams       float64   `gorm:"not null"`
 	Position    int       `gorm:"not null"`
+	// EnteredAmount/EnteredUnit carry what the user actually typed ("1
+	// sachet") beside the resolved Grams. Nil means a legacy gram-entered
+	// item — Grams is used as-is and nothing here ever gets re-resolved on
+	// read.
+	EnteredAmount *float64 `gorm:"column:entered_amount"`
+	EnteredUnit   *string  `gorm:"column:entered_unit"`
 }
 
 func (SavedMealItem) TableName() string { return "saved_meal_items" }
@@ -33,6 +39,8 @@ type ItemRow struct {
 	FoodItemID     uuid.UUID
 	Grams          float64
 	Position       int
+	EnteredAmount  *float64
+	EnteredUnit    *string
 	Name           string
 	KcalPer100g    float64
 	ProteinPer100g float64

@@ -12,6 +12,12 @@ export type Profile = {
   share_progress: boolean;
 };
 
+export type ServingUnit = {
+  name: string;
+  amount: number;
+  base_amount: number;
+};
+
 export type FoodItem = {
   id: string;
   name: string;
@@ -25,6 +31,10 @@ export type FoodItem = {
   fat_per_100g: number;
   /** Present on barcode-sourced foods; enables an offline repeat scan. */
   barcode?: string;
+  /** The base unit of measurement for this food ("g" or "ml"). */
+  base_unit?: string;
+  /** Available serving units for this food (name, amount, base_amount). */
+  serving_units?: ServingUnit[];
 };
 
 // Sentinel `provenance` for "we deliberately don't know the source" — e.g. a
@@ -75,6 +85,25 @@ export type FoodLog = {
   provenance: string;
   /** What the user actually said or typed. Present only on ai_text/ai_voice logs. */
   input_phrase?: string;
+  /** The amount entered by the user (e.g. 1, 0.5, 200). Null for legacy logs. */
+  entered_amount?: number | null;
+  /** The unit entered by the user (e.g. "sachet", "cup", "g", "ml"). Null for legacy logs. */
+  entered_unit?: string | null;
+  /**
+   * The logged food's base unit ("g" or "ml"), joined in from the food item.
+   * It is a LABEL only — nutrition is computed server-side and nothing here
+   * converts anything — but without it a LEGACY liquid row (no entered pair,
+   * so quantity_grams is all there is) renders as grams.
+   *
+   * Absent when the log resolved to no food item. Callers must treat its
+   * absence as "unknown, assume g", never as "the food is gram-based".
+   */
+  base_unit?: string;
+  /**
+   * The logged food's named serving units, same caveat as base_unit: not
+   * currently returned by the log-fetch endpoint.
+   */
+  serving_units?: ServingUnit[];
 };
 
 export type MemoryFood = {
@@ -131,6 +160,10 @@ export type SavedMealItem = {
   food_item_id: string;
   name: string;
   grams: number;
+  /** What the user entered for this item (e.g. 1, 2, 0.5). Null for a legacy gram-entered item. */
+  entered_amount?: number | null;
+  /** The unit entered alongside entered_amount (e.g. "sachet", "g", "ml"). Null for a legacy item. */
+  entered_unit?: string | null;
   kcal: number;
   protein_g: number;
   carbs_g: number;

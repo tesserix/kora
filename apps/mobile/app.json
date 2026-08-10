@@ -11,6 +11,9 @@
     "ios": {
       "bundleIdentifier": "com.tesserix.kora",
       "usesAppleSignIn": true,
+      "config": {
+        "usesNonExemptEncryption": false
+      },
       "entitlements": {
         "com.apple.developer.healthkit": true
       }

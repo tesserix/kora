@@ -15,11 +15,13 @@ import { Segmented } from "@/components/Segmented";
 import { Card } from "@/components/Card";
 import { AppBackground } from "@/components/AppBackground";
 import { Overline } from "@/components/Overline";
+import { PortionField } from "@/components/units/PortionField";
 import { useCreateLog, useFoodSearch, useMemory, usePins, useSavedMeals } from "@/api/hooks";
 import { useInstantLog } from "@/api/useInstantLog";
 import { usePinToggle } from "@/api/usePinToggle";
 import type { FoodItem } from "@/api/types";
 import { useSavedMealEditor } from "@/components/meals/SavedMealSheetProvider";
+import { baseQuantityFor, defaultServingCount, formatPortion } from "@/units/portion";
 import { foodVisual } from "@/lib/foodVisual";
 import { hslToHex } from "@/lib/color";
 import { haptics } from "@/motion";
@@ -66,7 +68,19 @@ export default function LogScreen() {
   const mountedAt = useRef(Date.now());
   const [q, setQ] = useState("");
   const [selected, setSelected] = useState<FoodItem | null>(null);
-  const [grams, setGrams] = useState("");
+  // `grams` is the base-unit figure and is the ONLY thing the macro preview
+  // below reads. It tracks the CURRENT portion whichever way it was entered:
+  // a base-unit figure verbatim, or a named serving count multiplied by that
+  // serving's own base_amount (the same conversion PortionField's "(30 g)"
+  // hint shows). Letting it lag behind a serving entry is what made the card
+  // preview one portion while a different one got logged.
+  // `enteredAmount`/`enteredUnit` track a named serving entry (e.g. "1
+  // sachet") separately; when `enteredUnit` is set that pair — not `grams` —
+  // is what gets sent on submit, and the SERVER resolves quantity_grams from
+  // it.
+  const [grams, setGrams] = useState(100);
+  const [enteredAmount, setEnteredAmount] = useState<number | null>(null);
+  const [enteredUnit, setEnteredUnit] = useState<string | null>(null);
   const [meal, setMeal] = useState<(typeof MEALS)[number]>("lunch");
   const [error, setError] = useState<string | null>(null);
   const [memTab, setMemTab] = useState<"saved" | "pinned" | "recents" | "frequent" | "usual_meals">("recents");
@@ -87,38 +101,100 @@ export default function LogScreen() {
   }, []);
   const enter = (i: number) => (firstMount.current ? FadeInDown.duration(300).delay(i * 30) : undefined);
 
-  const filledInputStyle = {
-    paddingHorizontal: spacing.md,
-    paddingVertical: 12,
-    color: colors.label,
-    fontSize: fontSize.base,
-    minHeight: 48,
-  } as const;
+  // Selecting a food seeds the portion from that food's own default serving
+  // and base unit, resetting any previous selection's serving-mode edit —
+  // otherwise a "2 sachet" entry for one food could silently survive onto a
+  // food with no such serving at all.
+  //
+  // A food that HAS a named serving opens on it — one portion, shown as a
+  // stepper — because that is the amount the user is overwhelmingly likely to
+  // mean and the only entry mode that needs no arithmetic from them. Seeding
+  // in exact mode instead put the serving's gram figure in the field, one tap
+  // away from being reread as a serving count. A food with no named serving
+  // falls back to raw base-unit entry, as before.
+  //
+  // The COUNT is not the unit's own `amount`: units.Parse normalises that to 1
+  // so the unit describes ONE of the thing, while serving_grams keeps the full
+  // label serving. Weet-Bix's "2 biscuits (30g)" would otherwise open on one
+  // 15 g biscuit — half the portion the label describes.
+  function selectFood(item: FoodItem) {
+    const servingUnits = item.serving_units ?? [];
+    const defaultServing = servingUnits[0] ?? null;
+    setSelected(item);
+    if (!defaultServing) {
+      setGrams(item.serving_grams || 100);
+      setEnteredAmount(null);
+      setEnteredUnit(null);
+      return;
+    }
+    const count = defaultServingCount(item.serving_grams, defaultServing);
+    setEnteredAmount(count);
+    setEnteredUnit(defaultServing.name);
+    setGrams((baseQuantityFor(count, defaultServing.name, servingUnits) ?? item.serving_grams) || 100);
+  }
 
   function submit() {
     if (!selected) return;
-    createLog.mutate(
-      {
-        food_item_id: selected.id,
-        meal_slot: meal,
-        source: "manual",
-        quantity_grams: Number(grams) || selected.serving_grams || 100,
-        logged_at: seededLoggedAt ?? new Date().toISOString(),
-        client_log_ms: Date.now() - mountedAt.current,
+    const base = {
+      food_item_id: selected.id,
+      meal_slot: meal,
+      source: "manual",
+      logged_at: seededLoggedAt ?? new Date().toISOString(),
+      client_log_ms: Date.now() - mountedAt.current,
+    };
+    // The client sends what the user entered; the SERVER resolves it into
+    // quantity_grams. In exact/base-unit mode `grams` already IS that
+    // figure, computed by nothing more than the user's own typed value.
+    const input =
+      enteredUnit !== null
+        ? { ...base, quantity_grams: 0, entered_amount: enteredAmount ?? undefined, entered_unit: enteredUnit }
+        : { ...base, quantity_grams: grams };
+    createLog.mutate(input, {
+      onSuccess: () => {
+        haptics.success();
+        router.replace("/");
       },
-      {
-        onSuccess: () => {
-          haptics.success();
-          router.replace("/");
-        },
-        onError: () => setError("Couldn't log that. Please try again."),
-      },
-    );
+      onError: () => setError("Couldn't log that. Please try again."),
+    });
   }
 
   if (selected) {
-    const g = Number(grams) || selected.serving_grams || 100;
-    const scale = g / 100;
+    const baseUnit: "g" | "ml" = selected.base_unit === "ml" ? "ml" : "g";
+    const servingUnits = selected.serving_units ?? [];
+    const portionUnit = enteredUnit ?? baseUnit;
+    const portionAmount = enteredUnit !== null ? (enteredAmount ?? grams) : grams;
+    const onPortionChange = (amount: number, unit: string) => {
+      // An entry IN the food's own base unit is already the base-unit figure,
+      // so the macro preview can follow it — no conversion is involved.
+      if (unit === baseUnit) {
+        setGrams(amount);
+      } else {
+        // A named serving: the row's own base_amount says what that portion is
+        // in the base unit, and PortionField already shows exactly that figure
+        // in its "(30 g)" hint. Keeping `grams` on it is what stops the macro
+        // card describing one portion while a different one is logged. Still
+        // no nutrition derived here — the SERVER resolves quantity_grams from
+        // the entered pair.
+        const base = baseQuantityFor(amount, unit, servingUnits);
+        if (base !== null) setGrams(base);
+      }
+      // Only a GRAM entry may drop the entered pair. For a millilitre-based
+      // food, "300 ml" entered as bare grams would be stored with a NULL unit
+      // and read back as "300 g" forever. units.ToBase resolves ml→ml 1:1
+      // server-side, so sending the pair costs nothing and keeps the row
+      // honest about what the user meant.
+      if (unit === "g") {
+        setEnteredAmount(null);
+        setEnteredUnit(null);
+      } else {
+        setEnteredAmount(amount);
+        setEnteredUnit(unit);
+      }
+    };
+    // Display-only preview — see the comment on `grams` above. The scaling
+    // itself is never the client's business to persist: whatever this shows,
+    // the SERVER recomputes nutrition from its own resolved quantity_grams.
+    const scale = grams / 100;
     const vis = foodVisual(selected.name, meal);
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -171,17 +247,13 @@ export default function LogScreen() {
           </Card>
 
           <Overline>Portion</Overline>
-          <Card variant="elevated" style={{ padding: 0 }}>
-            <TextInput
-              accessibilityLabel="Quantity in grams"
-              style={filledInputStyle}
-              placeholder={`Grams (default ${selected.serving_grams || 100})`}
-              placeholderTextColor={colors.secondaryLabel}
-              keyboardType="decimal-pad"
-              value={grams}
-              onChangeText={setGrams}
-            />
-          </Card>
+          <PortionField
+            baseUnit={baseUnit}
+            servingUnits={servingUnits}
+            amount={portionAmount}
+            unit={portionUnit}
+            onChange={onPortionChange}
+          />
 
           <Overline>Meal</Overline>
           <Segmented options={MEAL_OPTIONS} value={meal} onChange={(key) => setMeal(key as (typeof MEALS)[number])} />
@@ -274,7 +346,7 @@ export default function LogScreen() {
                         <MealRow
                           key={f.food_item_id}
                           name={f.name}
-                          slot={`${Math.round(f.grams)}g`}
+                          slot={formatPortion({ quantity_grams: f.grams })}
                           kcal={f.kcal}
                           iconName={fv.icon}
                           tint={hslToHex(fv.hue, 0.5, 0.5)}
@@ -320,7 +392,7 @@ export default function LogScreen() {
                       <MealRow
                         key={f.food_item_id}
                         name={f.name}
-                        slot={`${Math.round(f.grams)}g`}
+                        slot={formatPortion({ quantity_grams: f.grams })}
                         kcal={f.kcal}
                         iconName={fv.icon}
                         tint={hslToHex(fv.hue, 0.5, 0.5)}
@@ -363,7 +435,7 @@ export default function LogScreen() {
                       kcal={item.kcal_per_100g}
                       iconName={fv.icon}
                       tint={hslToHex(fv.hue, 0.5, 0.5)}
-                      onPress={() => setSelected(item)}
+                      onPress={() => selectFood(item)}
                       accessibilityLabel={item.name}
                     />
                   </Animated.View>

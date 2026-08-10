@@ -5,16 +5,36 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
+
+	"github.com/tesserix/kora/api/internal/units"
 )
 
 // OFFClient fetches a product from OpenFoodFacts. It returns (nil, nil) when the
 // product is unknown, and an error only on transport/decode failure.
 type OFFClient interface {
 	Fetch(ctx context.Context, barcode string) (*FoodItem, error)
+}
+
+// ServingUnitFetcher reports OpenFoodFacts' serving_quantity_unit for a
+// barcode exactly as published, with no defaulting applied.
+//
+// Fetch cannot express this: BaseUnitFor maps anything unrecognised — an
+// absent unit included — onto "g", so a FoodItem's BaseUnit makes "OFF
+// publishes no unit" indistinguishable from "OFF says grams". That difference
+// matters to any caller CORRECTING an existing row: writing "g" on absent
+// evidence downgrades a row that is already correctly ml. Such callers read
+// the raw field through this instead.
+//
+// found is false when OFF does not know the product at all; raw is "" when it
+// knows the product but publishes no serving_quantity_unit.
+type ServingUnitFetcher interface {
+	FetchServingUnit(ctx context.Context, barcode string) (raw string, found bool, err error)
 }
 
 // HTTPOFFClient calls the OpenFoodFacts v2 product API.
@@ -31,7 +51,7 @@ func NewHTTPOFFClient() HTTPOFFClient {
 }
 
 func (c HTTPOFFClient) Fetch(ctx context.Context, barcode string) (*FoodItem, error) {
-	url := fmt.Sprintf("%s/api/v2/product/%s.json?fields=product_name,brands,nutriments,serving_quantity", c.BaseURL, barcode)
+	url := fmt.Sprintf("%s/api/v2/product/%s.json?fields=product_name,brands,nutriments,serving_quantity,serving_quantity_unit,serving_size", c.BaseURL, barcode)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("nutrition: off request: %w", err)
@@ -57,7 +77,9 @@ func (c HTTPOFFClient) Fetch(ctx context.Context, barcode string) (*FoodItem, er
 				Fat100g        float64 `json:"fat_100g"`
 				Fiber100g      float64 `json:"fiber_100g"`
 			} `json:"nutriments"`
-			ServingQuantity float64 `json:"serving_quantity"`
+			ServingQuantity     float64 `json:"serving_quantity"`
+			ServingQuantityUnit string  `json:"serving_quantity_unit"`
+			ServingSize         string  `json:"serving_size"`
 		} `json:"product"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
@@ -67,18 +89,85 @@ func (c HTTPOFFClient) Fetch(ctx context.Context, barcode string) (*FoodItem, er
 		return nil, nil // unknown or unusable
 	}
 	code := barcode
-	return &FoodItem{
+	item := &FoodItem{
 		Name:           body.Product.ProductName,
 		Brand:          body.Product.Brands,
 		Provenance:     ProvenanceOFF,
 		Barcode:        &code,
+		ServingDesc:    body.Product.ServingSize,
 		ServingGrams:   body.Product.ServingQuantity,
+		BaseUnit:       BaseUnitFor(body.Product.ServingQuantityUnit),
 		KcalPer100g:    body.Product.Nutriments.EnergyKcal100g,
 		ProteinPer100g: body.Product.Nutriments.Protein100g,
 		CarbsPer100g:   body.Product.Nutriments.Carbs100g,
 		FatPer100g:     body.Product.Nutriments.Fat100g,
 		FiberPer100g:   body.Product.Nutriments.Fiber100g,
-	}, nil
+	}
+	// A parse miss is not a failure — the product simply has no named serving
+	// and the client falls back to raw base-unit entry. Logged so the curated
+	// table can be grown from real observed text rather than guesswork.
+	if parsed, err := units.Parse(body.Product.ServingSize); err == nil {
+		if encoded, mErr := json.Marshal(parsed); mErr == nil {
+			item.ServingUnits = encoded
+		}
+	} else {
+		slog.DebugContext(ctx, "nutrition: no serving unit parsed from OFF label",
+			"barcode", barcode, "serving_size", body.Product.ServingSize)
+	}
+	return item, nil
+}
+
+// FetchServingUnit reads only the product's serving_quantity_unit, verbatim.
+// See ServingUnitFetcher for why a caller would want the raw field rather than
+// the already-defaulted BaseUnit Fetch produces.
+func (c HTTPOFFClient) FetchServingUnit(ctx context.Context, barcode string) (string, bool, error) {
+	url := fmt.Sprintf("%s/api/v2/product/%s.json?fields=serving_quantity_unit", c.BaseURL, barcode)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", false, fmt.Errorf("nutrition: off serving unit request: %w", err)
+	}
+	req.Header.Set("User-Agent", "Kora/1.0 (nutrition index)")
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return "", false, fmt.Errorf("nutrition: off serving unit fetch: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", false, nil // treat non-200 as unknown, same as Fetch
+	}
+	var body struct {
+		Status  int `json:"status"`
+		Product struct {
+			ServingQuantityUnit string `json:"serving_quantity_unit"`
+		} `json:"product"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return "", false, fmt.Errorf("nutrition: off serving unit decode: %w", err)
+	}
+	if body.Status != 1 {
+		return "", false, nil
+	}
+	return strings.TrimSpace(body.Product.ServingQuantityUnit), true, nil
+}
+
+var _ ServingUnitFetcher = HTTPOFFClient{}
+
+// BaseUnitFor maps OpenFoodFacts' serving_quantity_unit onto our two-value
+// base unit. OFF reports a liquid's nutriments per 100 ml already, so this is
+// purely a labelling decision — no numeric conversion is implied. Anything
+// unrecognised falls back to grams, which is what every pre-000026 row is.
+//
+// That default is right for INGEST, where a row has to be given some base unit
+// and grams is the safe assumption. It is wrong for CORRECTION: a caller
+// rewriting an existing row must first establish that OFF published a unit at
+// all (see ServingUnitFetcher), because "" arriving here silently becomes "g".
+func BaseUnitFor(offUnit string) string {
+	switch strings.ToLower(strings.TrimSpace(offUnit)) {
+	case "ml", "l":
+		return "ml"
+	default:
+		return "g"
+	}
 }
 
 // ResolveBarcode returns a FoodItem for a barcode: local index first, then the

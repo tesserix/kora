@@ -14,7 +14,31 @@ import (
 	"github.com/tesserix/kora/api/internal/ai"
 	"github.com/tesserix/kora/api/internal/httpx"
 	"github.com/tesserix/kora/api/internal/nutrition"
+	"github.com/tesserix/kora/api/internal/units"
 )
+
+// resolveEnteredUnit resolves an entered (amount, unit) pair into grams
+// against item, exactly once, at write time. The SERVER derives
+// quantity_grams here — the client never converts — and the result is what
+// every nutrition figure on the row is computed from thereafter. A later
+// correction to a serving mass therefore changes future logs only, and never
+// rewrites what a past day's totals said. units.ErrNoConversion (and any
+// other resolution error) surfaces as a validation error; it is never
+// swallowed into a default.
+//
+// The actual resolution (decode ServingUnits + ToBase) lives in
+// units.ResolveEntered, shared with savedmeals, so both surfaces resolve
+// identically — this wrapper only extracts the fields units.ResolveEntered
+// needs from a nutrition.FoodItem and translates its error into an
+// httpx.ValidationError using units.UnrecognisedUnitMessage, since the units
+// package itself stays free of both the nutrition and httpx dependencies.
+func resolveEnteredUnit(amount float64, unit string, item nutrition.FoodItem) (float64, error) {
+	grams, err := units.ResolveEntered(amount, unit, item.BaseUnit, item.ServingUnits)
+	if err != nil {
+		return 0, httpx.ValidationError{Message: units.UnrecognisedUnitMessage}
+	}
+	return grams, nil
+}
 
 // ResolutionCache is the subset of ai.Cache a correction needs: the ability
 // to evict one stale cached Resolution by key. It is declared locally
@@ -32,9 +56,16 @@ type LogRequest struct {
 	MealSlot      string     `json:"meal_slot"`
 	Source        string     `json:"source"`
 	QuantityGrams float64    `json:"quantity_grams"`
-	LoggedAt      time.Time  `json:"logged_at"`
-	ClientLogMs   *int       `json:"client_log_ms"`
-	InputPhrase   *string    `json:"input_phrase"`
+	// EnteredAmount/EnteredUnit carry what the user actually typed ("2
+	// sachet"). When both are set, the server resolves them into
+	// QuantityGrams exactly once, here — the client never converts, and the
+	// resolved grams (not the entered pair) drive every nutrition figure. Nil
+	// means a legacy gram-entered log; QuantityGrams is used as-is.
+	EnteredAmount *float64  `json:"entered_amount"`
+	EnteredUnit   *string   `json:"entered_unit"`
+	LoggedAt      time.Time `json:"logged_at"`
+	ClientLogMs   *int      `json:"client_log_ms"`
+	InputPhrase   *string   `json:"input_phrase"`
 	// ID lets the client mint the log's identity before it has network, so a
 	// queued write replayed after a lost response is idempotent. Optional:
 	// when nil the column default generates one as before.
@@ -105,9 +136,6 @@ func (s Service) LogFood(ctx context.Context, userID uuid.UUID, req LogRequest) 
 	if !validMealSlots[req.MealSlot] {
 		return FoodLog{}, httpx.ValidationError{Message: "invalid meal_slot"}
 	}
-	if req.QuantityGrams <= 0 {
-		return FoodLog{}, httpx.ValidationError{Message: "quantity_grams must be positive"}
-	}
 	if req.FoodItemID == nil {
 		return FoodLog{}, httpx.ValidationError{Message: "food_item_id is required"}
 	}
@@ -124,6 +152,20 @@ func (s Service) LogFood(ctx context.Context, userID uuid.UUID, req LogRequest) 
 			return FoodLog{}, httpx.ValidationError{Message: "food_item_id not found"}
 		}
 		return FoodLog{}, fmt.Errorf("foodlog: resolve food: %w", err)
+	}
+	// When the caller entered a unit, the SERVER derives quantity_grams from
+	// it — the client never converts. Resolution happens exactly once, here,
+	// and the result is what every nutrition figure is computed from
+	// thereafter.
+	if req.EnteredAmount != nil && req.EnteredUnit != nil {
+		grams, err := resolveEnteredUnit(*req.EnteredAmount, *req.EnteredUnit, item)
+		if err != nil {
+			return FoodLog{}, err
+		}
+		req.QuantityGrams = grams
+	}
+	if req.QuantityGrams <= 0 {
+		return FoodLog{}, httpx.ValidationError{Message: "quantity_grams must be positive"}
 	}
 	f := req.QuantityGrams / 100.0
 	source := req.Source
@@ -142,6 +184,8 @@ func (s Service) LogFood(ctx context.Context, userID uuid.UUID, req LogRequest) 
 		Source:        source,
 		Description:   item.Name,
 		QuantityGrams: req.QuantityGrams,
+		EnteredAmount: req.EnteredAmount,
+		EnteredUnit:   req.EnteredUnit,
 		Kcal:          item.KcalPer100g * f,
 		ProteinG:      item.ProteinPer100g * f,
 		CarbsG:        item.CarbsPer100g * f,
@@ -157,7 +201,16 @@ func (s Service) LogFood(ctx context.Context, userID uuid.UUID, req LogRequest) 
 	if req.ID != nil {
 		log.ID = *req.ID
 	}
-	return s.logs.CreateIdempotent(ctx, log)
+	created, err := s.logs.CreateIdempotent(ctx, log)
+	if err != nil {
+		return FoodLog{}, err
+	}
+	// The create path does not go through the joined read scope, so carry the
+	// food's base unit onto the response by hand — a client that renders the
+	// row it just created must label it the same way the diary will. It is a
+	// label only; nothing is computed from it.
+	created.BaseUnit = item.BaseUnit
+	return created, nil
 }
 
 // EditRequest carries a partial edit to an existing log. Nil/zero fields mean
@@ -181,9 +234,16 @@ func (s Service) LogFood(ctx context.Context, userID uuid.UUID, req LogRequest) 
 // resolving to the pre-correction answer out of cache for up to the cache's
 // TTL, even though food_aliases was updated immediately.
 type EditRequest struct {
-	FoodItemID        *uuid.UUID `json:"food_item_id"`
-	MealSlot          string     `json:"meal_slot"`
-	QuantityGrams     *float64   `json:"quantity_grams"`
+	FoodItemID    *uuid.UUID `json:"food_item_id"`
+	MealSlot      string     `json:"meal_slot"`
+	QuantityGrams *float64   `json:"quantity_grams"`
+	// EnteredAmount/EnteredUnit, when both supplied, re-resolve
+	// quantity_grams from the new entered pair (server-side, exactly like
+	// LogFood). When only QuantityGrams is supplied, the previously-stored
+	// entered pair is nulled — it no longer describes the amount once grams
+	// were overwritten directly.
+	EnteredAmount     *float64   `json:"entered_amount"`
+	EnteredUnit       *string    `json:"entered_unit"`
 	LoggedAt          *time.Time `json:"logged_at"`
 	RetractCorrection bool       `json:"retract_correction"`
 }
@@ -222,16 +282,46 @@ func (s Service) EditLog(ctx context.Context, userID, logID uuid.UUID, req EditR
 	}
 
 	foodChanged := req.FoodItemID != nil && (current.FoodItemID == nil || *req.FoodItemID != *current.FoodItemID)
-	gramsChanged := req.QuantityGrams != nil && *req.QuantityGrams != current.QuantityGrams
 
-	if req.QuantityGrams != nil {
+	if req.FoodItemID != nil {
+		current.FoodItemID = req.FoodItemID
+	}
+
+	// When the caller supplies a new entered pair, re-resolve quantity_grams
+	// from it server-side, exactly like LogFood — the client never converts,
+	// and this is the ONLY point at which the new grams figure is derived.
+	// When only QuantityGrams is supplied directly, the previously-stored
+	// entered pair is nulled: it no longer describes the amount once grams
+	// were overwritten without going through a unit.
+	gramsChanged := false
+	switch {
+	case req.EnteredAmount != nil && req.EnteredUnit != nil:
+		if current.FoodItemID == nil {
+			return EditResult{}, httpx.ValidationError{Message: "food_item_id required to resolve unit"}
+		}
+		item, err := s.foods.GetByID(ctx, *current.FoodItemID)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return EditResult{}, httpx.ValidationError{Message: "food_item_id not found"}
+			}
+			return EditResult{}, fmt.Errorf("foodlog: edit: resolve food: %w", err)
+		}
+		grams, err := resolveEnteredUnit(*req.EnteredAmount, *req.EnteredUnit, item)
+		if err != nil {
+			return EditResult{}, err
+		}
+		gramsChanged = grams != current.QuantityGrams
+		current.QuantityGrams = grams
+		current.EnteredAmount = req.EnteredAmount
+		current.EnteredUnit = req.EnteredUnit
+	case req.QuantityGrams != nil:
 		if *req.QuantityGrams <= 0 {
 			return EditResult{}, httpx.ValidationError{Message: "quantity_grams must be positive"}
 		}
+		gramsChanged = *req.QuantityGrams != current.QuantityGrams
 		current.QuantityGrams = *req.QuantityGrams
-	}
-	if req.FoodItemID != nil {
-		current.FoodItemID = req.FoodItemID
+		current.EnteredAmount = nil
+		current.EnteredUnit = nil
 	}
 
 	// Recompute nutrition from the row whenever food or grams changed.

@@ -991,11 +991,11 @@ export default function CaptureScreen() {
   // "Add to diary" after a partial failure would re-log the ones that
   // already succeeded, duplicating diary entries.
   //
-  // Candidates the server flagged as uncertain (`tier: "follow_up"`) are
-  // dropped too: the card shows them without a kcal and excludes them from
-  // its count, so logging them anyway would write a guess the user never
-  // confirmed. The guard below uses the same rule, so an all-uncertain
-  // resolution never spins on an empty batch.
+  // Candidates the server flagged as uncertain (`tier: "follow_up"`) ARE
+  // logged: the server priced them like any other row and the card preselected
+  // that top match, captioned as a guess with "tap to change", so the user has
+  // already been shown exactly what this writes. Dropping them instead is what
+  // left an all-uncertain capture with nothing to log at all.
   async function handleAddToDiary() {
     // effectiveResolution, not resolution: a row the user resolved by hand must
     // log the food they picked, not the guess it replaced.

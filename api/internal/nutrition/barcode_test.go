@@ -2,11 +2,53 @@ package nutrition
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/tesserix/kora/api/internal/units"
 )
+
+// offProduct is the subset of the OpenFoodFacts v2 product payload these
+// tests need to construct. offStubServer wraps it in the {status, product}
+// envelope HTTPOFFClient.Fetch expects.
+type offProduct struct {
+	ProductName         string  `json:"product_name"`
+	Brands              string  `json:"brands"`
+	EnergyKcal100g      float64 `json:"-"`
+	ServingQuantity     float64 `json:"serving_quantity"`
+	ServingQuantityUnit string  `json:"serving_quantity_unit"`
+	ServingSize         string  `json:"serving_size"`
+}
+
+// offStubServer starts an httptest server that returns p as an OFF v2
+// product lookup response, regardless of the requested barcode.
+func offStubServer(t *testing.T, p offProduct) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": 1,
+			"product": map[string]any{
+				"product_name":          p.ProductName,
+				"brands":                p.Brands,
+				"serving_quantity":      p.ServingQuantity,
+				"serving_quantity_unit": p.ServingQuantityUnit,
+				"serving_size":          p.ServingSize,
+				"nutriments": map[string]any{
+					"energy-kcal_100g": p.EnergyKcal100g,
+				},
+			},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
 
 type stubOFF struct {
 	item   *FoodItem
@@ -62,6 +104,64 @@ func TestResolveBarcodeUnknownNoRow(t *testing.T) {
 	var count int64
 	db.Model(&FoodItem{}).Where("barcode = ?", code).Count(&count)
 	require.Equal(t, int64(0), count)
+}
+
+func TestFetchByBarcodeSetsBaseUnitFromServingUnit(t *testing.T) {
+	tests := []struct {
+		name         string
+		servingUnit  string
+		servingSize  string
+		wantBaseUnit string
+		wantServing  string // the serving unit name expected in ServingUnits, "" for none
+	}{
+		{
+			name:         "millilitre serving marks the row as a liquid",
+			servingUnit:  "ml",
+			servingSize:  "1 glass (250ml)",
+			wantBaseUnit: "ml",
+			wantServing:  "glass",
+		},
+		{
+			name:         "gram serving stays a mass row",
+			servingUnit:  "g",
+			servingSize:  "1 sachet (16.5g)",
+			wantBaseUnit: "g",
+			wantServing:  "sachet",
+		},
+		{
+			name:         "absent unit defaults to grams",
+			servingUnit:  "",
+			servingSize:  "",
+			wantBaseUnit: "g",
+			wantServing:  "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := offStubServer(t, offProduct{
+				ProductName:         "Test product",
+				EnergyKcal100g:      100,
+				ServingQuantity:     250,
+				ServingQuantityUnit: tt.servingUnit,
+				ServingSize:         tt.servingSize,
+			})
+
+			client := HTTPOFFClient{BaseURL: srv.URL, Client: http.DefaultClient}
+			item, err := client.Fetch(context.Background(), "9310232956596")
+			require.NoError(t, err)
+			require.NotNil(t, item)
+
+			assert.Equal(t, tt.wantBaseUnit, item.BaseUnit)
+			if tt.wantServing == "" {
+				assert.Empty(t, string(item.ServingUnits))
+				return
+			}
+			var got []units.ServingUnit
+			require.NoError(t, json.Unmarshal(item.ServingUnits, &got))
+			require.Len(t, got, 1)
+			assert.Equal(t, tt.wantServing, got[0].Name)
+		})
+	}
 }
 
 // assertNoCall returns an error the stub would surface if Fetch is called; the
@@ -218,4 +318,40 @@ func TestResolveBarcodeRetiredLocalRowUnknownToOFFReturnsCleanNotFound(t *testin
 	var deletedAtSet bool
 	require.NoError(t, tx.Raw("SELECT deleted_at IS NOT NULL FROM food_items WHERE id = ?", retired.ID).Scan(&deletedAtSet).Error)
 	require.True(t, deletedAtSet, "the retired row must remain retired")
+}
+
+// TestFetchServingUnitReportsTheRawField pins the distinction Fetch cannot
+// make: BaseUnitFor defaults an absent serving_quantity_unit to "g", so a
+// caller correcting an existing row needs the raw field to tell "OFF publishes
+// nothing" apart from "OFF says grams".
+func TestFetchServingUnitReportsTheRawField(t *testing.T) {
+	t.Run("a published unit comes back verbatim", func(t *testing.T) {
+		srv := offStubServer(t, offProduct{ProductName: "Milk", ServingQuantityUnit: "ml", EnergyKcal100g: 52})
+		c := HTTPOFFClient{BaseURL: srv.URL, Client: srv.Client()}
+		raw, found, err := c.FetchServingUnit(context.Background(), "123")
+		require.NoError(t, err)
+		assert.True(t, found)
+		assert.Equal(t, "ml", raw)
+	})
+
+	t.Run("an absent unit is empty, not grams", func(t *testing.T) {
+		srv := offStubServer(t, offProduct{ProductName: "Mystery", EnergyKcal100g: 52})
+		c := HTTPOFFClient{BaseURL: srv.URL, Client: srv.Client()}
+		raw, found, err := c.FetchServingUnit(context.Background(), "123")
+		require.NoError(t, err)
+		assert.True(t, found, "OFF still knows the product")
+		assert.Empty(t, raw)
+		assert.Equal(t, "g", BaseUnitFor(raw), "and this is precisely why the raw field is needed")
+	})
+
+	t.Run("an unknown product is not found", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		t.Cleanup(srv.Close)
+		c := HTTPOFFClient{BaseURL: srv.URL, Client: srv.Client()}
+		_, found, err := c.FetchServingUnit(context.Background(), "123")
+		require.NoError(t, err)
+		assert.False(t, found)
+	})
 }

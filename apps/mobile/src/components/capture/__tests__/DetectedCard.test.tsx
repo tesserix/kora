@@ -77,11 +77,11 @@ test("renders candidate rows with row-sourced grams/kcal and a header count", as
   expect(getByText(/Detected · 2 items/i)).toBeTruthy();
   expect(getByText("Grilled chicken breast")).toBeTruthy();
   // The portion stays; the raw "% match" is gone — it was false precision.
-  expect(getByText("140g")).toBeTruthy();
+  expect(getByText("140.4 g")).toBeTruthy();
   expect(queryByText(/% match/)).toBeNull();
   expect(getByText("231 kcal")).toBeTruthy();
   expect(getByText("Steamed broccoli")).toBeTruthy();
-  expect(getByText("90g")).toBeTruthy();
+  expect(getByText("90.2 g")).toBeTruthy();
   expect(getByText("31 kcal")).toBeTruthy();
 });
 
@@ -179,48 +179,81 @@ function makeMixedResolution(): Resolution {
   };
 }
 
-test("an uncertain item shows a prompt instead of a kcal figure", async () => {
-  const { getAllByText, queryByText } = await renderCard(makeMixedResolution());
-
-  expect(queryByText("Not sure which — tap to confirm")).toBeTruthy();
-  // 30.6 rounds to 31 — the uncertain row must not print it.
-  expect(queryByText("31 kcal")).toBeNull();
-  expect(queryByText("—")).toBeTruthy();
-  // The confident row still shows its own kcal; the header total matches it.
-  expect(getAllByText("231 kcal")).toHaveLength(2);
-});
-
-test("the header total counts only what will be logged", async () => {
-  const { getAllByText, queryByText } = await renderCard(makeMixedResolution());
-
-  // 231.2 alone, not 231.2 + 30.6 (which would be 262).
-  expect(getAllByText("231 kcal")).toHaveLength(2);
-  expect(queryByText("262 kcal")).toBeNull();
-});
-
-test("the CTA counts loggable items, not detected ones", async () => {
-  const { getByText } = await renderCard(makeMixedResolution());
-
-  expect(getByText("Detected · 2 items")).toBeTruthy();
-  expect(getByText("Add 1 item to diary")).toBeTruthy();
-});
-
-test("the CTA is disabled when every item is uncertain", async () => {
+function makeAllUncertainResolution(): Resolution {
   const base = makeResolution();
-  const allUncertain = {
+  return {
     ...base,
     candidates: base.candidates.map((c) => ({ ...c, tier: "follow_up" as const })),
   };
-  const { getByLabelText } = await renderCard(allUncertain);
+}
 
-  expect(getByLabelText("Add to diary").props.accessibilityState.disabled).toBe(true);
+// The bug this whole block pins: a weak match is still a match. The server
+// ships the row's own item/portion/kcal even at tier follow_up, so the card
+// preselects that top guess rather than presenting an unloggable placeholder.
+// Withholding it produced a disabled "Add 0 items to diary" and no way to log.
+test("an uncertain item is preselected with its top match's server kcal", async () => {
+  const { getAllByText, queryByText } = await renderCard(makeMixedResolution());
+
+  expect(getAllByText("Steamed broccoli")).toHaveLength(1);
+  // 30.6 rounds to 31 — the preselected row prints the SERVER's figure, not a
+  // placeholder and not anything the client derived.
+  expect(queryByText("31 kcal")).toBeTruthy();
+  expect(queryByText("—")).toBeNull();
+  expect(queryByText("Not sure which — tap to confirm")).toBeNull();
 });
 
-test("tapping an uncertain row asks to resolve it by index", async () => {
+// Preselected is not the same as confident. The row must still read as a
+// guess the user can override, or a weak match gets logged in one tap without
+// the user ever registering that it was a guess.
+test("a preselected uncertain row still reads as a changeable guess", async () => {
+  const { queryByText } = await renderCard(makeMixedResolution());
+
+  // Portion, provenance of the choice, and the affordance, on one line.
+  expect(queryByText("90.2 g · Best guess — tap to change")).toBeTruthy();
+  // The confident row keeps its plain portion caption.
+  expect(queryByText("140.4 g")).toBeTruthy();
+  // Macro chips stay off the weak row — fewer numbers asserted for a match we
+  // are not confident in, and a second visual cue that the rows differ.
+  expect(queryByText("P 31g/100g")).toBeTruthy();
+  expect(queryByText("P 3g/100g")).toBeNull();
+});
+
+test("the header total includes the preselected uncertain row", async () => {
+  const { getByText, getAllByText } = await renderCard(makeMixedResolution());
+
+  // 231.2 + 30.6 = 261.8 -> 262. The total describes what will be logged, and
+  // the uncertain row WILL be logged.
+  expect(getByText("262 kcal")).toBeTruthy();
+  expect(getAllByText("231 kcal")).toHaveLength(1);
+});
+
+test("the CTA counts every row once uncertain ones are preselected", async () => {
+  const { getByText } = await renderCard(makeMixedResolution());
+
+  expect(getByText("Detected · 2 items")).toBeTruthy();
+  expect(getByText("Add 2 items to diary")).toBeTruthy();
+});
+
+test("the CTA is live when every item is uncertain", async () => {
+  const { getByLabelText, getByText } = await renderCard(makeAllUncertainResolution());
+
+  expect(getByText("Add 2 items to diary")).toBeTruthy();
+  expect(getByLabelText("Add to diary").props.accessibilityState.disabled).toBe(false);
+});
+
+test("an all-uncertain resolution prices every row from the server", async () => {
+  const { getByText, queryByText } = await renderCard(makeAllUncertainResolution());
+
+  expect(getByText("231 kcal")).toBeTruthy();
+  expect(getByText("31 kcal")).toBeTruthy();
+  expect(queryByText("—")).toBeNull();
+});
+
+test("tapping a preselected uncertain row opens the picker by index", async () => {
   const onResolveUncertain = jest.fn();
   const { getByLabelText } = await renderCard(makeMixedResolution(), onResolveUncertain);
 
-  fireEvent.press(getByLabelText("Confirm Steamed broccoli"));
+  fireEvent.press(getByLabelText("Change Steamed broccoli"));
 
   expect(onResolveUncertain).toHaveBeenCalledWith(1);
 });
@@ -244,4 +277,21 @@ test("a hand-picked row is loggable but still shows no kcal", async () => {
   expect(queryByText("0 kcal")).toBeNull();
   expect(queryByText("—")).toBeTruthy();
   expect(getAllByText("231 kcal")).toHaveLength(2);
+});
+
+test("a liquid candidate renders its portion in ml, not grams", async () => {
+  const base = makeResolution();
+  const resolution = {
+    ...base,
+    candidates: base.candidates.map((c) => ({
+      ...c,
+      portion_grams: 200,
+      item: { ...c.item, base_unit: "ml" },
+    })),
+  };
+
+  const { getAllByText, queryByText } = await renderCard(resolution);
+
+  expect(getAllByText("200 ml")).toHaveLength(2);
+  expect(queryByText("200g")).toBeNull();
 });

@@ -317,3 +317,150 @@ test("an ONLINE search with no results still says plainly that nothing matched",
   expect(ui.getByText("No matches.")).toBeTruthy();
   expect(ui.queryByText(/offline/i)).toBeNull();
 });
+
+const mochaCandidate = {
+  item: {
+    id: "f2",
+    name: "NESCAFÉ Mocha",
+    brand: "Nestlé",
+    provenance: "off",
+    serving_desc: "1 portion (16.5 g)",
+    serving_grams: 16.5,
+    base_unit: "g",
+    serving_units: [{ name: "portion", amount: 1, base_amount: 16.5 }],
+    kcal_per_100g: 545,
+    protein_per_100g: 9,
+    carbs_per_100g: 70,
+    fat_per_100g: 25,
+  },
+  match_score: 1,
+  match_tier: "fulltext",
+};
+
+const milkCandidate = {
+  item: {
+    id: "f3",
+    name: "High protein low fat milk",
+    brand: "",
+    provenance: "off",
+    serving_desc: "",
+    serving_grams: 250,
+    base_unit: "ml",
+    kcal_per_100g: 52,
+    protein_per_100g: 5.6,
+    carbs_per_100g: 5,
+    fat_per_100g: 0.4,
+  },
+  match_score: 1,
+  match_tier: "fulltext",
+};
+
+// The spec's default state for a food with a named serving is a stepper
+// reading "1 portion (16.5 g)". Opening in exact mode instead put the
+// serving's GRAM figure in the field, one chip-tap away from being reread as
+// a serving count.
+test("selecting a food with a named serving opens on that serving, not raw grams", async () => {
+  mockSearch = { data: [mochaCandidate], isLoading: false, isOfflineCache: false };
+  const { findByText } = await render(<LogScreen />);
+  fireEvent.press(await findByText("NESCAFÉ Mocha"));
+
+  expect(await findByText("1 portion (16.5 g)")).toBeTruthy();
+
+  fireEvent.press(await findByText("Log it"));
+  expect(mockLogMutate).toHaveBeenCalledWith(
+    expect.objectContaining({ food_item_id: "f2", entered_amount: 1, entered_unit: "portion" }),
+    expect.anything(),
+  );
+});
+
+// Weet-Bix's label reads "2 biscuits (30g)", and units.Parse normalises that
+// to {biscuit, amount 1, base_amount 15} so the unit describes ONE biscuit.
+// Seeding the stepper from the unit's own `amount` opened on "1 biscuit
+// (15 g)" — half the label serving — while the macro card kept showing
+// serving_grams (30 g). The user read one portion's macros and logged half.
+const weetbixCandidate = {
+  item: {
+    id: "f4",
+    name: "Weet-Bix",
+    brand: "Sanitarium",
+    provenance: "off",
+    serving_desc: "2 biscuits (30g)",
+    serving_grams: 30,
+    base_unit: "g",
+    serving_units: [{ name: "biscuit", amount: 1, base_amount: 15 }],
+    kcal_per_100g: 349,
+    protein_per_100g: 12,
+    carbs_per_100g: 67,
+    fat_per_100g: 1.3,
+  },
+  match_score: 1,
+  match_tier: "fulltext",
+};
+
+test("a multi-count label opens on the whole label serving, not half of it", async () => {
+  mockSearch = { data: [weetbixCandidate], isLoading: false, isOfflineCache: false };
+  const { findByText } = await render(<LogScreen />);
+  fireEvent.press(await findByText("Weet-Bix"));
+
+  expect(await findByText("2 biscuits (30 g)")).toBeTruthy();
+
+  fireEvent.press(await findByText("Log it"));
+  expect(mockLogMutate).toHaveBeenCalledWith(
+    expect.objectContaining({ food_item_id: "f4", entered_amount: 2, entered_unit: "biscuit" }),
+    expect.anything(),
+  );
+});
+
+test("the macro preview describes the same portion the entry will log", async () => {
+  mockSearch = { data: [weetbixCandidate], isLoading: false, isOfflineCache: false };
+  const { findByText, getByText, getByLabelText } = await render(<LogScreen />);
+  fireEvent.press(await findByText("Weet-Bix"));
+
+  // 2 biscuits is 30 g: protein 12 × 0.30 = 3.6 → 4. Half a portion would
+  // have shown 2, and half a portion is what used to be logged.
+  expect(await findByText("2 biscuits (30 g)")).toBeTruthy();
+  expect(getByText("4")).toBeTruthy();
+
+  // Stepping the count must not let the two drift apart either: 3 biscuits is
+  // 45 g, protein 12 × 0.45 = 5.4 → 5.
+  fireEvent.press(getByLabelText("Increase amount"));
+  expect(await findByText("3 biscuits (45 g)")).toBeTruthy();
+  expect(getByText("5")).toBeTruthy();
+});
+
+test("a serving count that is not a clean integer falls back to one serving", async () => {
+  // 40 g of serving against a 15 g biscuit is 2.67 biscuits — not a count a
+  // stepper can honestly show, so it opens on one rather than a fraction.
+  const odd = {
+    ...weetbixCandidate,
+    item: { ...weetbixCandidate.item, id: "f5", name: "Odd biscuits", serving_grams: 40 },
+  };
+  mockSearch = { data: [odd], isLoading: false, isOfflineCache: false };
+  const { findByText } = await render(<LogScreen />);
+  fireEvent.press(await findByText("Odd biscuits"));
+
+  expect(await findByText("1 biscuit (15 g)")).toBeTruthy();
+
+  fireEvent.press(await findByText("Log it"));
+  expect(mockLogMutate).toHaveBeenCalledWith(
+    expect.objectContaining({ food_item_id: "f5", entered_amount: 1, entered_unit: "biscuit" }),
+    expect.anything(),
+  );
+});
+
+// A millilitre-based food entered in its own base unit must still report the
+// unit. Nulling the entered pair because "the unit equals the base unit"
+// stored 300 ml as bare grams, and the diary then read it back as "300 g".
+test("an amount entered in millilitres is sent as a unit, not as bare grams", async () => {
+  mockSearch = { data: [milkCandidate], isLoading: false, isOfflineCache: false };
+  const { findByText, findByLabelText } = await render(<LogScreen />);
+  fireEvent.press(await findByText("High protein low fat milk"));
+
+  fireEvent.changeText(await findByLabelText("Amount"), "300");
+  fireEvent.press(await findByText("Log it"));
+
+  expect(mockLogMutate).toHaveBeenCalledWith(
+    expect.objectContaining({ food_item_id: "f3", entered_amount: 300, entered_unit: "ml", quantity_grams: 0 }),
+    expect.anything(),
+  );
+});

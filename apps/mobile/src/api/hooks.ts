@@ -151,6 +151,10 @@ export type CreateLogInput = {
   meal_slot: string;
   source: string;
   quantity_grams: number;
+  /** What the user entered (e.g. 1, 2, 0.5); when set with entered_unit the SERVER resolves quantity_grams from it. */
+  entered_amount?: number;
+  /** The unit entered alongside entered_amount (e.g. "sachet", "g", "ml"). */
+  entered_unit?: string;
   logged_at: string;
   client_log_ms?: number;
   /** Raw user phrase; the server keeps it only for ai_text / ai_voice sources. */
@@ -294,7 +298,18 @@ export function useDeletePin() {
   });
 }
 
-type SaveMealBody = { name: string; meal_slot: string; items: { food_item_id: string; grams: number }[] };
+type SaveMealBody = {
+  name: string;
+  meal_slot: string;
+  items: {
+    food_item_id: string;
+    grams: number;
+    /** What the user entered (e.g. 1, 2); when set with entered_unit the SERVER resolves grams from it. */
+    entered_amount?: number;
+    /** The unit entered alongside entered_amount (e.g. "sachet", "g", "ml"). */
+    entered_unit?: string;
+  }[];
+};
 
 export function useSavedMeals() {
   const query = useQuery({
@@ -394,6 +409,10 @@ export type EditLogInput = {
   id: string;
   meal_slot?: MealSlot;
   quantity_grams?: number;
+  /** What the user entered (e.g. 1, 2, 0.5) — the server resolves this into quantity_grams. */
+  entered_amount?: number;
+  /** The unit the user entered (e.g. "sachet", "g", "ml") alongside entered_amount. */
+  entered_unit?: string;
   food_item_id?: string;
   /**
    * Undo only. Retracts the alias a previous correction on this log taught.

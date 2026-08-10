@@ -355,3 +355,26 @@ test("retryRow actually sends the item, not just flips its status", async () => 
   await waitFor(async () => expect(await list()).toHaveLength(0));
   await waitFor(() => expect(result.current.rows).toHaveLength(0));
 });
+
+// A serving-mode log ("1 portion") is queued with quantity_grams 0 and an
+// entered pair, because only the SERVER can resolve a unit into grams. The
+// row is still the user's real meal and must appear — but scaling the food's
+// per-100g figures by 0 reports 0 kcal, which the diary folds into the day
+// total as though the meal were calorie-free.
+test("reports an unknown kcal rather than zero for a unit-entered queued log", async () => {
+  await append(
+    {
+      ...payloadOn(atLocalNoon(2026, 8, 2)),
+      quantity_grams: 0,
+      entered_amount: 1,
+      entered_unit: "portion",
+    },
+    "q1",
+    "user-a",
+  );
+
+  const { result } = await renderQueued("2026-08-02");
+
+  await waitFor(() => expect(result.current.rows).toHaveLength(1));
+  expect(result.current.rows[0]).toMatchObject({ description: "Greek yogurt", kcal: null });
+});

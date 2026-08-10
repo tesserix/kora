@@ -422,6 +422,71 @@ func TestResolveBarcode_Found(t *testing.T) {
 	assert.Equal(t, nutrition.ProvenanceOFF, body.Data.Provenance)
 }
 
+// TestResolveBarcode_PortionPrefersServingGrams pins the portion a barcode hit
+// resolves to. A packaged product carries its own serving size from
+// OpenFoodFacts (a 16.5 g NESCAFÉ sachet, a 300 g milk serve); the scan must
+// log one serving of THAT product, not a generic 100 g. Only when the row has
+// no serving size does the 100 g fallback apply. In every case kcal stays
+// row-derived: KcalPer100g * grams / 100 — never fabricated.
+func TestResolveBarcode_PortionPrefersServingGrams(t *testing.T) {
+	tests := []struct {
+		name         string
+		servingGrams float64
+		kcalPer100g  float64
+		wantPortion  float64
+		wantKcal     float64
+	}{
+		{
+			name:         "single-serve sachet uses its own serving size",
+			servingGrams: 16.5,
+			kcalPer100g:  545.45,
+			wantPortion:  16.5,
+			wantKcal:     545.45 * 16.5 / 100,
+		},
+		{
+			name:         "larger serve uses its own serving size",
+			servingGrams: 300,
+			kcalPer100g:  55,
+			wantPortion:  300,
+			wantKcal:     55 * 300 / 100,
+		},
+		{
+			name:         "no serving size falls back to 100g",
+			servingGrams: 0,
+			kcalPer100g:  42,
+			wantPortion:  100,
+			wantKcal:     42,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			item := &nutrition.FoodItem{
+				Name:         "Packaged Product",
+				Provenance:   nutrition.ProvenanceOFF,
+				KcalPer100g:  tt.kcalPer100g,
+				ServingGrams: tt.servingGrams,
+			}
+			bc := func(ctx context.Context, code string) (*nutrition.FoodItem, bool, error) {
+				return item, true, nil
+			}
+			r := newEngine(NewHandler(&stubTP{}, bc))
+
+			w := doJSON(r, http.MethodPost, "/resolve/barcode", map[string]string{"barcode": "9300605158641"})
+
+			require.Equal(t, http.StatusOK, w.Code)
+			var body struct {
+				Data ai.Resolution `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+			require.Len(t, body.Data.Candidates, 1)
+			c := body.Data.Candidates[0]
+			assert.InDelta(t, tt.wantPortion, c.PortionGrams, 1e-9)
+			assert.InDelta(t, tt.wantKcal, c.Kcal, 1e-9)
+		})
+	}
+}
+
 func TestResolveBarcode_Unknown(t *testing.T) {
 	bc := func(ctx context.Context, code string) (*nutrition.FoodItem, bool, error) {
 		return nil, false, nil

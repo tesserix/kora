@@ -24,6 +24,7 @@ import { AnimatedNumber, PressableScale, haptics, springs } from "@/motion";
 import { useTheme } from "@/theme";
 import { hslToHex, withAlpha } from "@/lib/color";
 import { useUnits, mlToFlOz, flOzToMl, type UnitSystem } from "@/units";
+import { formatPortion } from "@/units/portion";
 import { foodVisual } from "@/lib/foodVisual";
 import type { FoodLog } from "@/api/types";
 
@@ -447,7 +448,7 @@ export default function Diary() {
                       <View style={{ backgroundColor: colors.elevated }}>
                         <MealRow
                           name={log.description}
-                          slot={`${Math.round(log.quantity_grams)}g · ${timeOf(log.logged_at)}`}
+                          slot={`${formatPortion({ quantity_grams: log.quantity_grams, entered_amount: log.entered_amount, entered_unit: log.entered_unit, base_unit: log.base_unit })} · ${timeOf(log.logged_at)}`}
                           kcal={log.kcal}
                           iconName={fv.icon}
                           tint={hslToHex(fv.hue, 0.5, 0.5)}
