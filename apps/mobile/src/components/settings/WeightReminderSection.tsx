@@ -35,6 +35,7 @@ export function WeightReminderSection(): ReactElement {
   const prefRef = useRef<WeightReminderPref>(DEFAULT_WEIGHT_PREF);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<Date | null>(null);
+  const [daysError, setDaysError] = useState<string | null>(null);
 
   useEffect(() => {
     loadWeightPref().then((p) => {
@@ -73,7 +74,20 @@ export function WeightReminderSection(): ReactElement {
       setPref(next);
       await saveWeightPref(next);
       await reconcileWeightReminder();
-    })();
+    })().catch((err) => console.warn("reminders: weight reminder commit failed", err));
+  };
+
+  // onDaysChange refuses an empty selection instead of committing it. With no
+  // days selected nextWeightReminderAt returns null, so nothing is ever
+  // scheduled while the switch still reads ON — a dead state with no signal to
+  // the user. CustomReminderSheet guards the same case with the same wording.
+  const onDaysChange = (days: WeightReminderPref["days"]): void => {
+    if (days.length === 0) {
+      setDaysError("Pick at least one day.");
+      return;
+    }
+    setDaysError(null);
+    commit({ days });
   };
 
   const openPicker = (): void => {
@@ -124,7 +138,12 @@ export function WeightReminderSection(): ReactElement {
           />
         </View>
       </GroupedSection>
-      <WeekdayPicker days={pref.days} onChange={(days) => commit({ days })} />
+      <WeekdayPicker days={pref.days} onChange={onDaysChange} />
+      {daysError ? (
+        <AppText style={{ color: colors.destructive, marginLeft: spacing.md, marginTop: spacing.xs }}>
+          {daysError}
+        </AppText>
+      ) : null}
       {Platform.OS === "ios" ? (
         <Sheet visible={editing} onClose={cancel}>
           <View style={{ paddingHorizontal: 22, paddingBottom: 30 }}>

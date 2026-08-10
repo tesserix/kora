@@ -104,6 +104,58 @@ test("committing a change reconciles with no argument, so the real weigh-in is l
   expect((reconcileWeightReminder as jest.Mock).mock.calls[0]).toEqual([]);
 });
 
+// A rejected commit must not escape into the render path as an unhandled
+// rejection (a red LogBox over the settings screen in development).
+test("a failing commit is caught, not left as an unhandled rejection", async () => {
+  const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+  (saveWeightPref as jest.Mock).mockRejectedValue(new Error("storage full"));
+  const { getByLabelText } = await render(<WeightReminderSection />);
+
+  await act(async () => {
+    fireEvent(getByLabelText("Weight check-in reminder"), "valueChange", true);
+    await waitFor(() => expect(warn).toHaveBeenCalled());
+  });
+
+  expect(warn).toHaveBeenCalledWith("reminders: weight reminder commit failed", expect.any(Error));
+  warn.mockRestore();
+});
+
+// Deselecting every chip while the switch still reads ON is dead state:
+// nextWeightReminderAt returns null so nothing is ever scheduled, with no
+// signal to the user. CustomReminderSheet guards this with the same wording.
+test("deselecting the last day is refused with a message instead of committing dead state", async () => {
+  (loadWeightPref as jest.Mock).mockResolvedValue({ ...DEFAULT_WEIGHT_PREF, enabled: true, days: [1] });
+  const { getByTestId, getByText, queryByText } = await render(<WeightReminderSection />);
+  await act(async () => {});
+
+  expect(queryByText("Pick at least one day.")).toBeNull();
+
+  await act(async () => {
+    fireEvent.press(getByTestId("day-1"));
+  });
+
+  expect(getByText("Pick at least one day.")).toBeTruthy();
+  expect(saveWeightPref).not.toHaveBeenCalled();
+  expect(reconcileWeightReminder).not.toHaveBeenCalled();
+});
+
+test("selecting a different day clears the empty-selection message and commits", async () => {
+  (loadWeightPref as jest.Mock).mockResolvedValue({ ...DEFAULT_WEIGHT_PREF, enabled: true, days: [1] });
+  const { getByTestId, queryByText } = await render(<WeightReminderSection />);
+  await act(async () => {});
+
+  await act(async () => {
+    fireEvent.press(getByTestId("day-1"));
+  });
+  await act(async () => {
+    fireEvent.press(getByTestId("day-3"));
+    await waitFor(() => expect(saveWeightPref).toHaveBeenCalled());
+  });
+
+  expect(queryByText("Pick at least one day.")).toBeNull();
+  expect(saveWeightPref).toHaveBeenCalledWith(expect.objectContaining({ days: [1, 3] }));
+});
+
 // Regression: commit() used to compute `next` from a pre-await snapshot, so a
 // day-change resolving while the enabling permission dialog was still pending
 // would get silently overwritten once the toggle's stale snapshot landed.
