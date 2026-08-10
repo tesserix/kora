@@ -35,14 +35,28 @@ const SLOT_OPTIONS = [
 // reattribute PortionField's local exact-mode state from one row to another
 // when a sibling row is removed. rowId is generated once, when the row is
 // created (seeded or added), and never regenerated on re-render.
+//
+// `baseUnit` is the food's OWN base unit ("g" or "ml"). It is what `grams`
+// counts in — a 200 ml milk carries grams: 200 and baseUnit: "ml" — so it
+// drives both the chip PortionField shows and what setPortion treats as an
+// exact base-unit entry. Defaults to "g" for the seeds that don't carry one
+// (a saved meal's items and the usual-meal aggregate aren't joined to the
+// food row), which is the same assumption formatPortion already makes.
 type EditItem = {
   rowId: string;
   food_item_id: string;
   name: string;
   grams: number;
+  baseUnit: "g" | "ml";
   enteredAmount: number | null;
   enteredUnit: string | null;
 };
+
+// The only two base units the app models (see PortionField and formatPortion);
+// anything else is treated as grams rather than shown to the user verbatim.
+function baseUnitOf(unit: string | null | undefined): "g" | "ml" {
+  return unit === "ml" ? "ml" : "g";
+}
 
 // Collision-improbable local id — these ids never leave the device (they
 // exist only for React list keys), so a uuid dependency is unnecessary. Same
@@ -67,6 +81,10 @@ function enteredPairOf(i: MemoryFood | SavedMealItem): { amount: number | null; 
 // single serving actually in use from the entered pair and the resolved
 // grams, so PortionField can still render the stepper for it.
 function servingUnitsFor(item: EditItem): ServingUnit[] {
+  // An entry already in the row's base unit is not a named serving: synthesising
+  // one would put "200 mls (200 ml)" in a stepper and make setPortion's
+  // base-unit branch unreachable from the UI.
+  if (item.enteredUnit === item.baseUnit) return [];
   if (item.enteredUnit && item.enteredAmount && item.enteredAmount > 0) {
     return [{ name: item.enteredUnit, amount: 1, base_amount: item.grams / item.enteredAmount }];
   }
@@ -84,6 +102,8 @@ export type ComposedItem = {
   entered_amount: number | null;
   entered_unit: string | null;
   base_unit?: string | null;
+  /** The slot the composed row was logged in; seeds the sheet's own slot. */
+  meal_slot?: string | null;
 };
 
 // seed is a usual meal to save (create), an existing saved meal (edit), a
@@ -123,13 +143,17 @@ export function SavedMealSheet({ seed, onClose }: Props) {
     }
     if (seed.mode === "compose") {
       setName(seed.items[0]?.name ?? "");
-      setSlot("breakfast");
+      // The composed rows all came from the diary, where each one already has
+      // a slot; the first row's is the honest default. Breakfast only survives
+      // as the fallback for a row that somehow carries none.
+      setSlot(seed.items[0]?.meal_slot || "breakfast");
       setItems(
         seed.items.map((i) => ({
           rowId: newRowId(),
           food_item_id: i.food_item_id,
           name: i.name,
           grams: i.quantity_grams,
+          baseUnit: baseUnitOf(i.base_unit),
           enteredAmount: i.entered_amount,
           enteredUnit: i.entered_unit,
         })),
@@ -142,7 +166,7 @@ export function SavedMealSheet({ seed, onClose }: Props) {
     setItems(
       seed.meal.items.map((i) => {
         const { amount, unit } = enteredPairOf(i);
-        return { rowId: newRowId(), food_item_id: i.food_item_id, name: i.name, grams: i.grams, enteredAmount: amount, enteredUnit: unit };
+        return { rowId: newRowId(), food_item_id: i.food_item_id, name: i.name, grams: i.grams, baseUnit: baseUnitOf(null), enteredAmount: amount, enteredUnit: unit };
       }),
     );
     setErr(null);
@@ -160,6 +184,7 @@ export function SavedMealSheet({ seed, onClose }: Props) {
     setPickerOpen(false);
     const servingUnits = food.serving_units ?? [];
     const defaultServing = servingUnits[0] ?? null;
+    const baseUnit = baseUnitOf(food.base_unit);
     let newItem: EditItem;
     if (defaultServing) {
       const count = defaultServingCount(food.serving_grams, defaultServing);
@@ -168,6 +193,7 @@ export function SavedMealSheet({ seed, onClose }: Props) {
         food_item_id: food.id,
         name: food.name,
         grams: (baseQuantityFor(count, defaultServing.name, servingUnits) ?? food.serving_grams) || 100,
+        baseUnit,
         enteredAmount: count,
         enteredUnit: defaultServing.name,
       };
@@ -177,21 +203,32 @@ export function SavedMealSheet({ seed, onClose }: Props) {
         food_item_id: food.id,
         name: food.name,
         grams: food.serving_grams || 100,
+        baseUnit,
         enteredAmount: null,
         enteredUnit: null,
       };
     }
     setItems((cur) => [...cur, newItem]);
   };
+  // An entry in the row's OWN base unit ("200 ml" on a millilitre food is
+  // exactly what "200 g" is on a gram one) is the canonical figure: it clears
+  // the entered pair so save() sends grams. Anything else is a named serving,
+  // and its count and base-unit figure must move together — servingUnitsFor
+  // re-derives the per-unit base amount as grams/enteredAmount, so leaving
+  // grams behind when the count changes shrinks the synthesised serving and
+  // freezes the "(16.5 g)" hint while the count climbs. The per-unit figure is
+  // taken from the row BEFORE the overwrite; it is a QUANTITY the row already
+  // carries, never a nutrition value, and the server still resolves the
+  // authoritative grams from the entered pair at write time.
   const setPortion = (idx: number, amount: number, unit: string) =>
     setItems((cur) =>
-      cur.map((it, i) =>
-        i !== idx
-          ? it
-          : unit === "g"
-            ? { ...it, grams: amount, enteredAmount: null, enteredUnit: null }
-            : { ...it, enteredAmount: amount, enteredUnit: unit },
-      ),
+      cur.map((it, i) => {
+        if (i !== idx) return it;
+        if (unit === it.baseUnit) return { ...it, grams: amount, enteredAmount: null, enteredUnit: null };
+        const perUnit =
+          it.enteredUnit === unit && (it.enteredAmount ?? 0) > 0 ? it.grams / (it.enteredAmount as number) : it.grams;
+        return { ...it, grams: perUnit * amount, enteredAmount: amount, enteredUnit: unit };
+      }),
     );
 
   const save = () => {
@@ -258,10 +295,10 @@ export function SavedMealSheet({ seed, onClose }: Props) {
                 </Pressable>
               </View>
               <PortionField
-                baseUnit="g"
+                baseUnit={it.baseUnit}
                 servingUnits={servingUnitsFor(it)}
                 amount={it.enteredUnit !== null ? (it.enteredAmount ?? it.grams) : it.grams}
-                unit={it.enteredUnit ?? "g"}
+                unit={it.enteredUnit ?? it.baseUnit}
                 onChange={(amount, unit) => setPortion(idx, amount, unit)}
               />
             </View>
@@ -270,7 +307,7 @@ export function SavedMealSheet({ seed, onClose }: Props) {
         <Pressable accessibilityRole="button" accessibilityLabel="Add ingredient" onPress={() => setPickerOpen(true)}>
           <AppText style={{ color: colors.accent, marginTop: spacing.sm }}>+ Add ingredient</AppText>
         </Pressable>
-        <FoodPicker visible={pickerOpen} initialQuery="" onSelect={addItem} onClose={() => setPickerOpen(false)} />
+        <FoodPicker title="Add ingredient" visible={pickerOpen} initialQuery="" onSelect={addItem} onClose={() => setPickerOpen(false)} />
         {err ? <AppText style={{ color: colors.destructive, marginTop: spacing.sm }}>{err}</AppText> : null}
         <View style={{ marginTop: spacing.lg }}>
           <Button accessibilityLabel="Save" title="Save" onPress={save} disabled={pending || !canSave} />

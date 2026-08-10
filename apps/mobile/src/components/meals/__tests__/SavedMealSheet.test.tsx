@@ -119,6 +119,10 @@ test("a blank seed opens an empty sheet with save disabled", async () => {
   expect(queryByText("Add at least one item with grams.")).toBeNull();
 });
 
+// Previously this asserted only that two names rendered and no error string
+// appeared — it would have passed identically had the entered units been
+// dropped on the way in, which is the one thing it exists to pin. It now
+// asserts the rendered unit, and the payload that unit produces.
 test("a compose seed carries each row's entered unit into the sheet", async () => {
   const items = [
     { food_item_id: "f1", name: "NESCAFÉ Mocha", quantity_grams: 16.5, entered_amount: 1, entered_unit: "portion" },
@@ -128,8 +132,137 @@ test("a compose seed carries each row's entered unit into the sheet", async () =
 
   expect(getByText("NESCAFÉ Mocha")).toBeTruthy();
   expect(getByText("Milk")).toBeTruthy();
+  // The row opens on the unit it was logged in, not on its resolved grams.
+  expect(getByText("1 portion (16.5 g)")).toBeTruthy();
   // Name pre-filled from the first item so the user edits rather than types.
   expect(queryByText("Add at least one item with grams.")).toBeNull();
+});
+
+// The round trip's central claim: a unit-entered row is saved as the PAIR,
+// with grams left as the placeholder the server overwrites when it resolves
+// the pair (see savedmeals/service.go validate()). A gram-entered row is saved
+// as grams. Nothing pinned either before this.
+test("saving a composed meal sends the entered pair for a unit row and grams for a gram row", async () => {
+  const items = [
+    { food_item_id: "f1", name: "NESCAFÉ Mocha", quantity_grams: 16.5, entered_amount: 1, entered_unit: "portion" },
+    { food_item_id: "f2", name: "Milk", quantity_grams: 200, entered_amount: null, entered_unit: null },
+  ];
+  const { getByLabelText } = await render(<SavedMealSheet seed={{ mode: "compose", items }} onClose={() => {}} />);
+
+  await fireEvent.press(getByLabelText("Save"));
+
+  expect(mockCreate).toHaveBeenCalledWith(
+    expect.objectContaining({
+      name: "NESCAFÉ Mocha",
+      items: [
+        { food_item_id: "f1", grams: 0, entered_amount: 1, entered_unit: "portion" },
+        { food_item_id: "f2", grams: 200 },
+      ],
+    }),
+    expect.any(Object),
+  );
+});
+
+test("saving a blank meal with an added ingredient sends that ingredient's entered pair", async () => {
+  const { getByText, getByLabelText } = await render(<SavedMealSheet seed={{ mode: "blank" }} onClose={() => {}} />);
+
+  await fireEvent.changeText(getByLabelText("Meal name"), "Morning coffee");
+  await fireEvent.press(getByText("+ Add ingredient"));
+  await fireEvent.press(getByLabelText("Select NESCAFÉ Mocha"));
+  await fireEvent.press(getByLabelText("Save"));
+
+  expect(mockCreate).toHaveBeenCalledWith(
+    {
+      name: "Morning coffee",
+      // Blank slate keeps its breakfast default — there is no row to infer from.
+      meal_slot: "breakfast",
+      items: [{ food_item_id: "sachet1", grams: 0, entered_amount: 1, entered_unit: "portion" }],
+    },
+    expect.any(Object),
+  );
+});
+
+// The sheet used to hardcode baseUnit="g" on every PortionField, so the spec's
+// own example — 200 ml of milk — offered a "g" chip.
+test("an ml row offers its own base unit, not grams", async () => {
+  const items = [{ food_item_id: "f2", name: "Milk", quantity_grams: 200, entered_amount: null, entered_unit: null, base_unit: "ml" }];
+  const { getByText, queryByText } = await render(<SavedMealSheet seed={{ mode: "compose", items }} onClose={() => {}} />);
+
+  expect(getByText("ml")).toBeTruthy();
+  expect(queryByText("g")).toBeNull();
+});
+
+test("a gram row still offers g", async () => {
+  const items = [{ food_item_id: "f1", name: "Oats", quantity_grams: 60, entered_amount: null, entered_unit: null, base_unit: null }];
+  const { getByText, queryByText } = await render(<SavedMealSheet seed={{ mode: "compose", items }} onClose={() => {}} />);
+
+  expect(getByText("g")).toBeTruthy();
+  expect(queryByText("ml")).toBeNull();
+});
+
+// setPortion's base-unit branch (clear the entered pair, keep the figure as
+// the canonical one) has to key off the ROW's base unit: for an ml food, ml is
+// exactly what g is for a gram food.
+test("entering an amount in the row's own base unit saves it as the canonical figure", async () => {
+  const items = [{ food_item_id: "f2", name: "Milk", quantity_grams: 200, entered_amount: null, entered_unit: null, base_unit: "ml" }];
+  const { getByLabelText } = await render(<SavedMealSheet seed={{ mode: "compose", items }} onClose={() => {}} />);
+
+  await fireEvent.changeText(getByLabelText("Amount"), "250");
+  await fireEvent.press(getByLabelText("Save"));
+
+  expect(mockCreate).toHaveBeenCalledWith(
+    expect.objectContaining({ items: [{ food_item_id: "f2", grams: 250 }] }),
+    expect.any(Object),
+  );
+});
+
+test("entering an amount in grams on a gram row saves it as the canonical figure", async () => {
+  const items = [{ food_item_id: "f1", name: "Oats", quantity_grams: 60, entered_amount: null, entered_unit: null, base_unit: null }];
+  const { getByLabelText } = await render(<SavedMealSheet seed={{ mode: "compose", items }} onClose={() => {}} />);
+
+  await fireEvent.changeText(getByLabelText("Amount"), "80");
+  await fireEvent.press(getByLabelText("Save"));
+
+  expect(mockCreate).toHaveBeenCalledWith(
+    expect.objectContaining({ items: [{ food_item_id: "f1", grams: 80 }] }),
+    expect.any(Object),
+  );
+});
+
+// servingUnitsFor synthesises the row's serving as base_amount =
+// grams / enteredAmount, so a count that moves without its grams shrinks the
+// serving and freezes the hint: stepping 1 -> 2 used to relabel a 16.5 g
+// sachet as 8.25 g and keep showing "(16.5 g)". The escape hatch then seeded
+// from that stale product, halving the portion on the way into exact entry.
+test("stepping a portion moves its base-unit figure with it, and exact mode seeds the stepped figure", async () => {
+  const { getByText, getByLabelText } = await render(<SavedMealSheet seed={{ mode: "blank" }} onClose={() => {}} />);
+
+  await fireEvent.press(getByText("+ Add ingredient"));
+  await fireEvent.press(getByLabelText("Select NESCAFÉ Mocha"));
+  expect(getByText("1 portion (16.5 g)")).toBeTruthy();
+
+  await fireEvent.press(getByLabelText("Increase amount"));
+  expect(getByText("2 portions (33 g)")).toBeTruthy();
+
+  await fireEvent.press(getByText("Enter exact amount"));
+  expect(getByLabelText("Amount").props.value).toBe("33");
+});
+
+// Composing two dinner rows and saving them under Breakfast is a mislabel the
+// user only discovers later, when the saved meal logs into the wrong slot.
+test("a composed meal takes its slot from the rows it was composed from", async () => {
+  const items = [
+    { food_item_id: "f1", name: "Steak", quantity_grams: 200, entered_amount: null, entered_unit: null, meal_slot: "dinner" },
+    { food_item_id: "f2", name: "Potatoes", quantity_grams: 150, entered_amount: null, entered_unit: null, meal_slot: "dinner" },
+  ];
+  const { getByLabelText } = await render(<SavedMealSheet seed={{ mode: "compose", items }} onClose={() => {}} />);
+
+  await fireEvent.press(getByLabelText("Save"));
+
+  expect(mockCreate).toHaveBeenCalledWith(
+    expect.objectContaining({ meal_slot: "dinner" }),
+    expect.any(Object),
+  );
 });
 
 test("adding an ingredient seeds it as a named serving, not raw grams", async () => {
