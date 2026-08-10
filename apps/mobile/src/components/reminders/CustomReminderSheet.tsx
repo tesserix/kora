@@ -6,14 +6,10 @@ import { Button } from "@/components/Button";
 import { AppText } from "@/components/Text";
 import { Overline } from "@/components/Overline";
 import { useTheme } from "@/theme";
+import { WeekdayPicker } from "@/components/reminders/WeekdayPicker";
 import { NEW_REMINDER_DEFAULT, type CustomReminder, type Weekday } from "@/reminders/customPrefs";
 
-const DAY_CHIPS: { day: Weekday; label: string }[] = [
-  { day: 0, label: "S" }, { day: 1, label: "M" }, { day: 2, label: "T" },
-  { day: 3, label: "W" }, { day: 4, label: "T" }, { day: 5, label: "F" }, { day: 6, label: "S" },
-];
 const PRESETS = ["Drink water", "Workout", "Vitamins", "Weigh-in"];
-const ALL: Weekday[] = [0, 1, 2, 3, 4, 5, 6];
 
 function fmt(hour: number, minute: number): string {
   const h12 = hour % 12 === 0 ? 12 : hour % 12;
@@ -54,9 +50,6 @@ export function CustomReminderSheet({ visible, editing, onClose, onSave, onDelet
     setErr(null);
     setShowPicker(false);
   }, [visible, editing]);
-
-  const toggleDay = (d: Weekday) =>
-    setDays((cur) => (cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d].sort((a, b) => a - b)));
 
   const save = () => {
     const trimmed = label.trim();
@@ -111,19 +104,7 @@ export function CustomReminderSheet({ visible, editing, onClose, onSave, onDelet
           />
         ) : null}
 
-        <View style={{ flexDirection: "row", gap: spacing.xs, marginTop: spacing.md }}>
-          {DAY_CHIPS.map(({ day, label: l }) => {
-            const on = days.includes(day);
-            return (
-              <Pressable key={day} testID={`day-${day}`} onPress={() => toggleDay(day)} style={[chip(on), { minWidth: 40, alignItems: "center" }]}>
-                <AppText variant="subheadline" style={{ color: on ? colors.accentForeground : colors.label }}>{l}</AppText>
-              </Pressable>
-            );
-          })}
-        </View>
-        <Pressable onPress={() => setDays(ALL)} style={{ marginTop: spacing.sm }}>
-          <AppText variant="footnote" muted>Every day</AppText>
-        </Pressable>
+        <WeekdayPicker days={days} onChange={setDays} />
 
         {err ? <AppText style={{ color: colors.destructive, marginTop: spacing.sm }}>{err}</AppText> : null}
 
