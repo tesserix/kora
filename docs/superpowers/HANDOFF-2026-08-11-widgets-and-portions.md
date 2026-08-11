@@ -73,6 +73,12 @@ today is empty.
 **2. The whole-branch review never ran.** Per-task reviews all passed; the final
 cross-cutting one was not dispatched.
 
+**3. Two manual gates were never verified** (issue #135 has the detail). The
+sign-out fallback — both widgets reverting to "Open Kora" so the previous user's
+calories leave the home screen — has never been observed end to end. It is unit
+tested, but it is also the most privacy-sensitive state in the feature, and the
+dev-client's floating menu bubble sits over the sign-out control.
+
 ### A shipped bug this work uncovered and fixed
 
 `useHealth` derived its status from `requestAuthorization`, which reports only
