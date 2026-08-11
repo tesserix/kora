@@ -28,7 +28,8 @@ import { Waveform } from "@/components/capture/Waveform";
 import { VoiceComposer } from "@/components/capture/VoiceComposer";
 import { ResolutionResult, candidateKey } from "@/components/ResolutionResult";
 import { FoodPicker } from "@/components/meal/FoodPicker";
-import { captureColors } from "@/components/capture/captureTheme";
+import { withAlpha } from "@/lib/color";
+import { INSTRUMENT_DARK_FIXED } from "@/theme";
 import { haptics } from "@/motion";
 import {
   useCreateLog,
@@ -62,6 +63,15 @@ export type CaptureStage = "idle" | "analyzing" | "result";
 // keeps working unchanged.
 export type { ResolutionSource };
 
+// Instrument Glass, dark-fixed. Capture is exempt from theming (spec: "Dark
+// capture screen is exempt from theming: camera surfaces are always dark"),
+// so every chrome color below comes from the INSTRUMENT_DARK_FIXED constant
+// — never from useTheme().instrument, which would follow the device's
+// light/dark scheme and go light. `captureColors` (a separate, older fixed
+// palette) still styles the chat bubbles/waveform/voice composer, which are
+// out of scope for this restyle and already dark on their own terms.
+const T = INSTRUMENT_DARK_FIXED;
+
 const MODE_PILLS: ReadonlyArray<{ mode: CaptureMode; icon: string; label: string }> = [
   { mode: "photo", icon: "camera", label: "Photo" },
   { mode: "voice", icon: "mic", label: "Voice" },
@@ -90,7 +100,9 @@ const ROUND_BUTTON = {
   width: 36,
   height: 36,
   borderRadius: 9999,
-  backgroundColor: captureColors.pillBg,
+  backgroundColor: T.glass,
+  borderWidth: 1,
+  borderColor: T.glassBorder,
   alignItems: "center" as const,
   justifyContent: "center" as const,
 };
@@ -132,8 +144,50 @@ function AnalyzingSpinner() {
 
   return (
     <Animated.View testID="capture-analyzing-spinner" style={{ transform: [{ rotate: spin }] }}>
-      <Icon name="loader" size={16} color={captureColors.primary} />
+      <Icon name="loader" size={16} color={T.accent} />
     </Animated.View>
+  );
+}
+
+// Lume reticle corners + a static accent scan line over the photo viewfinder
+// (spec: Screens.3, Capture — "Lume reticle corners + accent scan line over
+// the viewfinder"). Four 34pt corner Views, each showing only its two outer
+// edges (a 2.5px border on those two sides, radius 10 on the outer corner),
+// plus one 1.5px horizontal accent line at the vertical center. No
+// animation — this is a static instrument marking, not a scanning effect.
+function ViewfinderReticle() {
+  const CORNER = 34;
+  const BORDER = 2.5;
+  const RADIUS = 10;
+  const corner = {
+    position: "absolute" as const,
+    width: CORNER,
+    height: CORNER,
+    borderColor: withAlpha(T.ink, 0.9),
+  };
+  return (
+    <>
+      <View
+        testID="viewfinder-corner-tl"
+        style={[corner, { top: 10, left: 10, borderTopWidth: BORDER, borderLeftWidth: BORDER, borderTopLeftRadius: RADIUS }]}
+      />
+      <View
+        testID="viewfinder-corner-tr"
+        style={[corner, { top: 10, right: 10, borderTopWidth: BORDER, borderRightWidth: BORDER, borderTopRightRadius: RADIUS }]}
+      />
+      <View
+        testID="viewfinder-corner-bl"
+        style={[corner, { bottom: 10, left: 10, borderBottomWidth: BORDER, borderLeftWidth: BORDER, borderBottomLeftRadius: RADIUS }]}
+      />
+      <View
+        testID="viewfinder-corner-br"
+        style={[corner, { bottom: 10, right: 10, borderBottomWidth: BORDER, borderRightWidth: BORDER, borderBottomRightRadius: RADIUS }]}
+      />
+      <View
+        testID="viewfinder-scan-line"
+        style={{ position: "absolute", left: 0, right: 0, top: "50%", height: 1.5, backgroundColor: T.accent }}
+      />
+    </>
   );
 }
 
@@ -166,27 +220,17 @@ function IdleAffordance({
           height: 200,
           borderRadius: 20,
           overflow: "hidden",
-          backgroundColor: captureColors.viewfinderBg,
+          backgroundColor: T.glass,
+          borderWidth: 1,
+          borderColor: T.glassBorder,
           alignItems: "center",
           justifyContent: "center",
         }}
       >
-        <Icon name="utensils" size={54} color={captureColors.viewfinderIcon} />
-        <View
-          style={{
-            position: "absolute",
-            top: 10,
-            left: 10,
-            right: 10,
-            bottom: 10,
-            borderWidth: 2,
-            borderStyle: "dashed",
-            borderColor: "rgba(0,0,0,0.12)",
-            borderRadius: 20,
-          }}
-        />
+        <Icon name="utensils" size={54} color={T.mut} />
+        <ViewfinderReticle />
         <View style={{ position: "absolute", bottom: 12, left: 0, right: 0 }}>
-          <AppText style={{ textAlign: "center", color: captureColors.viewfinderCaption, fontSize: 13, fontWeight: "600" }}>
+          <AppText style={{ textAlign: "center", color: T.mut, fontSize: 13, fontWeight: "600" }}>
             Tap the viewfinder to capture
           </AppText>
         </View>
@@ -201,9 +245,9 @@ function IdleAffordance({
         style={{
           height: 200,
           borderRadius: 20,
-          backgroundColor: captureColors.bubbleBg,
+          backgroundColor: T.glass,
           borderWidth: 1,
-          borderColor: captureColors.bubbleBorder,
+          borderColor: T.glassBorder,
           alignItems: "center",
           justifyContent: "center",
           gap: 18,
@@ -217,17 +261,17 @@ function IdleAffordance({
             width: 72,
             height: 72,
             borderRadius: 9999,
-            backgroundColor: captureColors.primary,
+            backgroundColor: T.accent,
             alignItems: "center",
             justifyContent: "center",
             borderWidth: 10,
-            borderColor: captureColors.primaryGlow,
+            borderColor: withAlpha(T.accent, 0.22),
           }}
         >
-          <Icon name="mic" size={30} color={captureColors.primaryForeground} />
+          <Icon name="mic" size={30} color={T.accentOn} />
         </View>
         <Waveform active={isRecordingVoice} />
-        <AppText style={{ color: captureColors.onSurfaceMuted, fontSize: 13, fontWeight: "600" }}>
+        <AppText style={{ color: T.mut, fontSize: 13, fontWeight: "600" }}>
           {isRecordingVoice ? "Listening… tell Otto what you ate" : "Hold the mic below to record"}
         </AppText>
       </View>
@@ -241,9 +285,9 @@ function IdleAffordance({
         style={{
           height: 200,
           borderRadius: 20,
-          backgroundColor: captureColors.bubbleBg,
+          backgroundColor: T.glass,
           borderWidth: 1,
-          borderColor: captureColors.bubbleBorder,
+          borderColor: T.glassBorder,
           alignItems: "center",
           justifyContent: "center",
         }}
@@ -254,7 +298,7 @@ function IdleAffordance({
             height: 110,
             borderRadius: 12,
             borderWidth: 2,
-            borderColor: captureColors.outlineBorder,
+            borderColor: T.glassBorder,
             alignItems: "center",
             justifyContent: "center",
             overflow: "hidden",
@@ -271,21 +315,21 @@ function IdleAffordance({
             />
           ) : (
             <>
-              <Icon name="barcode" size={64} color={captureColors.onSurfaceFaint} />
+              <Icon name="barcode" size={64} color={T.mut} />
               <View
                 style={{
                   position: "absolute",
                   left: 0,
                   right: 0,
                   top: "50%",
-                  height: 2,
-                  backgroundColor: captureColors.primary,
+                  height: 1.5,
+                  backgroundColor: T.accent,
                 }}
               />
             </>
           )}
         </View>
-        <AppText style={{ marginTop: 12, color: captureColors.onSurfaceMuted, fontSize: 13, fontWeight: "600" }}>
+        <AppText style={{ marginTop: 12, color: T.mut, fontSize: 13, fontWeight: "600" }}>
           Point at a barcode
         </AppText>
       </View>
@@ -389,11 +433,11 @@ export function CaptureBody({
         }}
       >
         <Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={onClose} style={ROUND_BUTTON}>
-          <Icon name="x" size={20} color={captureColors.onSurface} />
+          <Icon name="x" size={20} color={T.ink} />
         </Pressable>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
-          <Icon name="camera" size={17} color={captureColors.primary} />
-          <AppText style={{ color: captureColors.onSurface, fontWeight: "700" }}>Ask Otto</AppText>
+          <Icon name="camera" size={17} color={T.accent} />
+          <AppText style={{ color: T.ink, fontWeight: "700" }}>Ask Otto</AppText>
         </View>
         {/* Reserved for a future gallery/history view — no-op in this task,
             hidden from screen readers so they don't focus a dead button. */}
@@ -405,7 +449,7 @@ export function CaptureBody({
           onPress={() => {}}
           style={ROUND_BUTTON}
         >
-          <Icon name="images" size={18} color={captureColors.onSurface} />
+          <Icon name="images" size={18} color={T.ink} />
         </Pressable>
       </View>
 
@@ -433,7 +477,7 @@ export function CaptureBody({
         {stage === "analyzing" && (
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingLeft: 40 }}>
             <AnalyzingSpinner />
-            <AppText style={{ color: captureColors.onSurfaceMuted, fontSize: 13 }}>Otto is analyzing…</AppText>
+            <AppText style={{ color: T.mut, fontSize: 13 }}>Otto is analyzing…</AppText>
           </View>
         )}
 
@@ -457,9 +501,9 @@ export function CaptureBody({
           paddingHorizontal: 14,
           paddingTop: 10,
           paddingBottom: Math.max(insetBottom, 12),
-          backgroundColor: captureColors.composerBg,
+          backgroundColor: T.glass,
           borderTopWidth: 1,
-          borderTopColor: captureColors.composerBorder,
+          borderTopColor: T.glassBorder,
         }}
       >
         <View style={{ flexDirection: "row", gap: 8, marginBottom: 10 }}>
@@ -473,7 +517,7 @@ export function CaptureBody({
             flexDirection: "row",
             alignItems: "center",
             gap: 10,
-            backgroundColor: captureColors.pillBg,
+            backgroundColor: T.inset,
             borderRadius: 9999,
             paddingVertical: 6,
             paddingHorizontal: 6,
@@ -501,12 +545,12 @@ export function CaptureBody({
                 width: 38,
                 height: 38,
                 borderRadius: 9999,
-                backgroundColor: captureColors.primary,
+                backgroundColor: T.accent,
                 alignItems: "center",
                 justifyContent: "center",
               }}
             >
-              <Icon name={COMPOSER_BUTTON[mode].icon} size={19} color={captureColors.primaryForeground} />
+              <Icon name={COMPOSER_BUTTON[mode].icon} size={19} color={T.accentOn} />
             </Pressable>
           )}
           {/* Typing is only an input in photo/type. In voice and scan the middle
@@ -518,11 +562,11 @@ export function CaptureBody({
               value={text}
               onChangeText={onChangeText}
               placeholder="Tell Otto what you ate…"
-              placeholderTextColor={captureColors.onSurfaceFaint}
-              style={{ flex: 1, color: captureColors.onSurface, fontSize: 15 }}
+              placeholderTextColor={T.mut}
+              style={{ flex: 1, color: T.ink, fontSize: 15 }}
             />
           ) : (
-            <AppText style={{ flex: 1, color: captureColors.onSurfaceFaint, fontSize: 15 }}>
+            <AppText style={{ flex: 1, color: T.mut, fontSize: 15 }}>
               {mode === "voice" ? "Hold the mic to record" : "Point at a barcode"}
             </AppText>
           )}
@@ -538,12 +582,12 @@ export function CaptureBody({
               width: 38,
               height: 38,
               borderRadius: 9999,
-              backgroundColor: text.trim() ? captureColors.primary : captureColors.sendInactiveBg,
+              backgroundColor: text.trim() ? T.accent : withAlpha(T.ink, 0.15),
               alignItems: "center",
               justifyContent: "center",
             }}
           >
-            <Icon name="arrow-up" size={19} color={captureColors.onSurface} />
+            <Icon name="arrow-up" size={19} color={text.trim() ? T.accentOn : T.ink} />
           </Pressable>
           ) : null}
         </View>
@@ -609,6 +653,10 @@ async function pickMealPhoto(): Promise<PhotoPickOutcome> {
 // risk; the composer keeps its own opaque bar on top of it. Uses
 // react-native-svg (expo-linear-gradient isn't installed) with a percentage
 // viewBox so the Rect always fills its container regardless of screen size.
+//
+// Instrument Glass: a faint accent-tinted ambient pool fading into the fixed
+// dark `bg`, echoing the spec's ambient-pool treatment (orange upper-left,
+// static, no parallax) without competing with the thread/composer on top.
 function CaptureCanvasBackground() {
   return (
     <Svg
@@ -621,9 +669,9 @@ function CaptureCanvasBackground() {
     >
       <Defs>
         <LinearGradient id="captureCanvas" x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0%" stopColor={captureColors.canvasGradientTop} />
-          <Stop offset="45%" stopColor={captureColors.canvasGradientMid} />
-          <Stop offset="100%" stopColor={captureColors.canvasGradientBottom} />
+          <Stop offset="0%" stopColor={withAlpha(T.accent, 0.08)} />
+          <Stop offset="45%" stopColor={T.bg} />
+          <Stop offset="100%" stopColor={T.bg} />
         </LinearGradient>
       </Defs>
       <Rect x={0} y={0} width={100} height={100} fill="url(#captureCanvas)" />
@@ -1067,7 +1115,7 @@ export default function CaptureScreen() {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: captureColors.surface }}>
+    <View testID="capture-screen-root" style={{ flex: 1, backgroundColor: T.bg }}>
       <CaptureCanvasBackground />
       <CaptureBody
         displayName={profile.data?.display_name?.trim().split(" ")[0] || "there"}

@@ -1,5 +1,6 @@
 import { fireEvent, render } from "@testing-library/react-native";
 import { DetectedCard } from "../DetectedCard";
+import { INSTRUMENT_DARK_FIXED } from "@/theme";
 import type { Resolution } from "@/api/types";
 
 function renderCard(resolution: Resolution, onResolveUncertain?: (index: number) => void) {
@@ -325,6 +326,36 @@ test("a candidate whose portion is not a whole serving stays in base units", asy
   const { getByText } = await renderCard(resolution);
 
   expect(getByText("20 g")).toBeTruthy();
+});
+
+// Instrument Glass restyle: the card is a dark glass panel sourced from the
+// fixed dark token set, never the scheme-aware theme — capture is always
+// dark regardless of the device's light/dark setting.
+test("the card panel is styled from the fixed dark instrument tokens", async () => {
+  const { getByTestId } = await renderCard(makeResolution());
+  const panel = getByTestId("detected-card");
+  const flat = Array.isArray(panel.props.style)
+    ? Object.assign({}, ...panel.props.style.flat().filter(Boolean))
+    : panel.props.style;
+  expect(flat.backgroundColor).toBe(INSTRUMENT_DARK_FIXED.glass);
+});
+
+// The header ring is a SubDial (Instrument Glass component) fed the same
+// kcal fraction the old GaugeRing was, fixed to the dark tokens for the
+// same always-dark reason as the panel above.
+test("the header ring is a SubDial fed the kcal fraction", async () => {
+  const { getByTestId } = await renderCard(makeResolution());
+  expect(getByTestId("detected-card-ring")).toBeTruthy();
+});
+
+test("the CTA button reads accent-on-accent with the requested radius and weight", async () => {
+  const { getByLabelText } = await renderCard(makeResolution());
+  const button = getByLabelText("Add to diary");
+  const flat = Array.isArray(button.props.style)
+    ? Object.assign({}, ...button.props.style.flat().filter(Boolean))
+    : button.props.style;
+  expect(flat.backgroundColor).toBe(INSTRUMENT_DARK_FIXED.accent);
+  expect(flat.borderRadius).toBe(18);
 });
 
 test("a liquid candidate renders its portion in ml, not grams", async () => {

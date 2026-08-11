@@ -7,6 +7,7 @@ import { router } from "expo-router";
 import { ApiError, AuthTokenError, NetworkError, ResponseParseError } from "@/lib/api";
 import type { FoodItem, Resolution } from "@/api/types";
 import { OfflineUnknownBarcodeError, resolutionFromCachedFood } from "@/offline/cachedResolution";
+import { INSTRUMENT_DARK_FIXED } from "@/theme";
 
 const cachedBarcodeFood: FoodItem = {
   id: "f-bar",
@@ -353,6 +354,31 @@ test("renders the Otto greeting and all four mode pills", async () => {
   expect(await findByText("Type")).toBeTruthy();
 });
 
+// Capture is a fixed-dark surface — it must ignore the device's light/dark
+// scheme entirely, so its background is sourced from INSTRUMENT_DARK_FIXED
+// (a static constant) rather than useTheme().instrument (which would follow
+// the system scheme and go light).
+test("the screen background is sourced from the fixed dark instrument tokens", async () => {
+  const { getByTestId } = await render(<CaptureScreen />);
+  const root = getByTestId("capture-screen-root");
+  const flat = Array.isArray(root.props.style)
+    ? Object.assign({}, ...root.props.style.flat().filter(Boolean))
+    : root.props.style;
+  expect(flat.backgroundColor).toBe(INSTRUMENT_DARK_FIXED.bg);
+});
+
+// Lume reticle corners + a static accent scan line over the photo viewfinder
+// (spec: Screens.3, Capture). Four corner Views, each showing only its two
+// outer edges, plus one horizontal scan line — no animation.
+test("the photo viewfinder shows lume reticle corners and a static scan line", async () => {
+  const { getByTestId } = await render(<CaptureScreen />);
+  expect(getByTestId("viewfinder-corner-tl")).toBeTruthy();
+  expect(getByTestId("viewfinder-corner-tr")).toBeTruthy();
+  expect(getByTestId("viewfinder-corner-bl")).toBeTruthy();
+  expect(getByTestId("viewfinder-corner-br")).toBeTruthy();
+  expect(getByTestId("viewfinder-scan-line")).toBeTruthy();
+});
+
 test("tapping a mode pill switches mode and changes the idle affordance", async () => {
   const { findByText, findByTestId, getByTestId, queryByTestId } = await render(<CaptureScreen />);
   expect(getByTestId("capture-idle-photo")).toBeTruthy();
@@ -433,7 +459,9 @@ describe("Type mode", () => {
 
     const sendButton = await findByLabelText("Send");
     expect(sendButton.props.accessibilityState).toEqual({ disabled: true });
-    expect(sendButton.props.style.backgroundColor).toBe("rgba(255,255,255,0.15)");
+    // Instrument Glass: inactive-send fill is 15%-alpha `ink` on the fixed
+    // dark tokens now, not a hardcoded white rgba.
+    expect(sendButton.props.style.backgroundColor).toBe("rgba(237, 230, 212, 0.15)");
 
     await fireEvent.press(sendButton);
     expect(mockResolveTextMutate).not.toHaveBeenCalled();
