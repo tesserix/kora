@@ -5,12 +5,12 @@ import { router } from "expo-router";
 import { AppText } from "@/components/Text";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { AppBackground } from "@/components/AppBackground";
-import { Button } from "@/components/Button";
 import { Icon } from "@/components/Icon";
 import { Avatar } from "@/components/Avatar";
 import { GroupedSection, Row } from "@/components/GroupedList";
 import { AddFriendSheet } from "@/components/social/AddFriendSheet";
 import { FriendsLeaderboard } from "@/components/social/FriendsLeaderboard";
+import { EmptyState } from "@/components/common/EmptyState";
 import { PressableScale } from "@/motion";
 import {
   useFriends,
@@ -59,8 +59,6 @@ export default function Friends() {
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
           <ScreenHeader overline="Your circle" title="Friends" onBack={() => router.back()} />
           <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>
-            <Button title="Add a friend" onPress={() => setAddOpen(true)} />
-
             <GroupedSection>
               <Row
                 title="Share my progress"
@@ -75,6 +73,28 @@ export default function Friends() {
                 }
               />
             </GroupedSection>
+
+            <PressableScale
+              accessibilityRole="button"
+              accessibilityLabel="Add a friend"
+              haptic="selection"
+              onPress={() => setAddOpen(true)}
+              style={{
+                borderWidth: 1.5,
+                borderStyle: "dashed",
+                borderColor: instrument.tick,
+                borderRadius: 24,
+                paddingVertical: 16,
+                paddingHorizontal: 16,
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+              }}
+            >
+              <Icon name="plus" size={16} color={instrument.accent} />
+              <AppText style={{ fontSize: 15, fontWeight: "600", color: instrument.ink }}>Add a friend</AppText>
+            </PressableScale>
 
             <FriendsLeaderboard data={compare.data} />
 
@@ -120,11 +140,16 @@ export default function Friends() {
               </GroupedSection>
             ) : null}
 
-            <GroupedSection header="Friends">
-              {list.length === 0 ? (
-                <Row title="No friends yet" subtitle="Share your code to connect." />
-              ) : (
-                list.map((f) => (
+            {list.length === 0 ? (
+              <EmptyState
+                variant="instrument"
+                icon="users"
+                title="No friends yet"
+                subtitle="Share your code to connect."
+              />
+            ) : (
+              <GroupedSection header="Friends">
+                {list.map((f) => (
                   <PressableScale
                     key={f.id}
                     accessibilityRole="button"
@@ -137,9 +162,9 @@ export default function Friends() {
                       <AppText style={{ fontSize: 17, fontWeight: "600", color: instrument.ink }}>{f.display_name}</AppText>
                     </View>
                   </PressableScale>
-                ))
-              )}
-            </GroupedSection>
+                ))}
+              </GroupedSection>
+            )}
           </View>
         </ScrollView>
       </View>

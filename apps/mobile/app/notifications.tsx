@@ -2,11 +2,11 @@ import { useEffect } from "react";
 import { ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
-import { AppText } from "@/components/Text";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { AppBackground } from "@/components/AppBackground";
 import { GroupedSection } from "@/components/GroupedList";
 import { NotifRow } from "@/components/NotifRow";
+import { EmptyState } from "@/components/common/EmptyState";
 import { useNotifications, useMarkAllRead } from "@/api/hooks";
 import { useTheme } from "@/theme";
 import { targetFor } from "@/lib/notificationTarget";
@@ -81,9 +81,12 @@ export default function NotificationsScreen() {
         <ScreenHeader overline="Recent" title="Notifications" onBack={() => router.back()} />
         <View style={{ paddingHorizontal: 20 }}>
           {list.length === 0 ? (
-            <AppText style={{ fontSize: 15, color: instrument.mut, paddingVertical: 12 }}>
-              Nothing yet. Friend requests, group invites, and new challenges show up here.
-            </AppText>
+            <EmptyState
+              variant="instrument"
+              icon="bell"
+              title="Nothing yet"
+              subtitle="Friend requests, group invites, and new challenges show up here."
+            />
           ) : (
             <GroupedSection>
               {list.map((n) => {
