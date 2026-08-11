@@ -1,4 +1,5 @@
-import { ScrollView, View } from "react-native";
+import type { ReactNode } from "react";
+import { ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, type Href } from "expo-router";
 import { signOut } from "firebase/auth";
@@ -6,78 +7,156 @@ import { auth } from "@/lib/firebase";
 import { unregisterPushToken } from "@/lib/push";
 import { AppBackground } from "@/components/AppBackground";
 import { ScreenHeader } from "@/components/ScreenHeader";
-import { GroupedSection, Row } from "@/components/GroupedList";
+import { GlassPanel } from "@/components/instrument/GlassPanel";
+import { AppText } from "@/components/Text";
+import { Icon } from "@/components/Icon";
 import { Badge } from "@/components/Badge";
+import { PressableScale } from "@/motion";
 import { useUnreadCount } from "@/api/hooks";
 import { useTheme } from "@/theme";
 
+// More tab, restyled to the Instrument Glass language (spec:
+// docs/superpowers/specs/2026-08-11-kora-instrument-glass-design.md). Rows are
+// composed inline rather than through GroupedList's Row/GroupedSection —
+// those are still the shared legacy (colors.card / colors.accent-tinted)
+// components used by ~10 other screens, and this task only covers More, so
+// touching them would drag every other caller into the new palette. The
+// unread-count Badge is the one accent element this screen is allowed.
+type MoreRowKey = "profile" | "friends" | "groups" | "notifications" | "settings" | "reminders" | "feedback";
+
+type MoreRowProps = {
+  rowKey: MoreRowKey;
+  title: string;
+  icon: string;
+  right?: ReactNode;
+  onPress: () => void;
+};
+
+function MoreRow({ rowKey, title, icon, right, onPress }: MoreRowProps) {
+  const { instrument, spacing } = useTheme();
+  return (
+    <PressableScale
+      accessibilityRole="button"
+      accessibilityLabel={title}
+      haptic="none"
+      onPress={onPress}
+      style={{ flexDirection: "row", alignItems: "center", minHeight: 44, paddingHorizontal: spacing.md }}
+    >
+      <View
+        testID={`more-icon-${rowKey}`}
+        style={{
+          width: 34,
+          height: 34,
+          borderRadius: 10,
+          backgroundColor: instrument.inset,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: instrument.glassBorder,
+          alignItems: "center",
+          justifyContent: "center",
+          marginRight: spacing.sm,
+        }}
+      >
+        <Icon name={icon} size={17} color={instrument.mut} />
+      </View>
+      <AppText style={{ flex: 1, fontSize: 15, fontWeight: "500", color: instrument.ink }}>{title}</AppText>
+      {right}
+      <Icon name="chevron-right" size={14} color={instrument.mut} />
+    </PressableScale>
+  );
+}
+
+function MoreGroup({ children }: { children: ReactNode }) {
+  const { instrument, spacing } = useTheme();
+  const rows = Array.isArray(children) ? children.filter(Boolean) : [children];
+  return (
+    <GlassPanel radius={22}>
+      {rows.map((row, index) => (
+        <View key={index}>
+          {row}
+          {index < rows.length - 1 ? (
+            <View
+              style={{
+                marginLeft: spacing.md + 34 + spacing.sm,
+                height: StyleSheet.hairlineWidth,
+                backgroundColor: instrument.hairline,
+              }}
+            />
+          ) : null}
+        </View>
+      ))}
+    </GlassPanel>
+  );
+}
+
 export default function More() {
-  const { colors, spacing } = useTheme();
+  const { spacing, instrument } = useTheme();
   const insets = useSafeAreaInsets();
   const unread = useUnreadCount();
   const count = unread.data?.count ?? 0;
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
+    <View style={{ flex: 1, backgroundColor: instrument.bg }}>
       <AppBackground />
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
       <ScreenHeader overline="Your account" title="More" />
       <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>
-        <GroupedSection>
-          <Row
+        <MoreGroup>
+          <MoreRow
+            rowKey="profile"
             title="Profile"
-            icon={{ name: "person", tint: colors.accent }}
-            chevron
+            icon="person"
             onPress={() => router.push("/profile" as Href)}
           />
-          <Row
+          <MoreRow
+            rowKey="friends"
             title="Friends"
-            icon={{ name: "users", tint: colors.accent }}
-            chevron
+            icon="users"
             onPress={() => router.push("/friends" as Href)}
           />
-          <Row
+          <MoreRow
+            rowKey="groups"
             title="Groups"
-            icon={{ name: "people", tint: colors.accent }}
-            chevron
+            icon="people"
             onPress={() => router.push("/groups" as Href)}
           />
-          <Row
+          <MoreRow
+            rowKey="notifications"
             title="Notifications"
-            icon={{ name: "bell", tint: colors.accent }}
-            chevron
+            icon="bell"
             right={count > 0 ? (
               <View style={{ marginRight: spacing.xs }}>
-                <Badge variant="accent">{count}</Badge>
+                <Badge variant="instrument">{count}</Badge>
               </View>
             ) : null}
             onPress={() => router.push("/notifications" as Href)}
           />
-        </GroupedSection>
-        <GroupedSection>
-          <Row
+        </MoreGroup>
+        <MoreGroup>
+          <MoreRow
+            rowKey="settings"
             title="Settings"
-            icon={{ name: "gear", tint: colors.accent }}
-            chevron
+            icon="gear"
             onPress={() => router.push("/settings" as Href)}
           />
-          <Row
+          <MoreRow
+            rowKey="reminders"
             title="Reminders"
-            icon={{ name: "bell", tint: colors.accent }}
-            chevron
+            icon="bell"
             onPress={() => router.push("/reminders" as Href)}
           />
-          <Row
+          <MoreRow
+            rowKey="feedback"
             title="Send feedback"
-            icon={{ name: "message-circle", tint: colors.accent }}
-            chevron
+            icon="message-circle"
             onPress={() => router.push("/feedback" as Href)}
           />
-        </GroupedSection>
-        <GroupedSection>
-          <Row
-            title="Sign out"
-            destructive
+        </MoreGroup>
+        <GlassPanel radius={22}>
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Sign out"
+            haptic="none"
+            style={{ flexDirection: "row", alignItems: "center", minHeight: 44, paddingHorizontal: spacing.md }}
             onPress={async () => {
               if (!auth) return;
               try {
@@ -87,8 +166,12 @@ export default function More() {
               }
               await signOut(auth);
             }}
-          />
-        </GroupedSection>
+          >
+            <AppText style={{ flex: 1, fontSize: 15, fontWeight: "500", color: instrument.danger }}>
+              Sign out
+            </AppText>
+          </PressableScale>
+        </GlassPanel>
       </View>
       </ScrollView>
     </View>
