@@ -21,6 +21,7 @@ import {
   useCreateGroup,
   useCreateLog,
   useCreateLogBatch,
+  useDashboard,
   useDeleteChallenge,
   useDeleteLog,
   useEditLog,
@@ -628,6 +629,28 @@ it("useAvgIntake7d returns avg: null and an empty series when every day is unlog
   await waitFor(() => expect(result.current.isLoading).toBe(false));
   expect(result.current.series).toEqual([]);
   expect(result.current.avg).toBeNull();
+});
+
+// Mirrors src/offline/useQueuedLogs.ts's ownerId key, and the whole-branch
+// review fix for the same class of leak in useWidgetSync: the query key
+// carries who asked, so react-query can never hand user B a synchronous
+// cache hit that was fetched for user A. Asserted against the cache directly
+// — the settled `data` converges on B's figures either way once the key
+// catches up, so the cache entry is the only place a leak would actually show.
+test("useDashboard's cache entry is keyed by the signed-in owner", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrap = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+  (currentUserId as jest.Mock).mockReturnValue("user-a");
+  (apiFetch as jest.Mock).mockResolvedValue(dashboardSummary(1200));
+
+  const { result } = await renderHook(() => useDashboard("2026-07-27"), { wrapper: wrap });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+  const aKey = ["dashboard", "user-a", "2026-07-27"];
+  expect(client.getQueryData(aKey)).toEqual(dashboardSummary(1200));
+  expect(client.getQueryData(["dashboard", "user-b", "2026-07-27"])).toBeUndefined();
 });
 
 test("useMemory fetches GET /v1/memory (date is not sent — backend ignores it)", async () => {

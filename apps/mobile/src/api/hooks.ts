@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Crypto from "expo-crypto";
-import { apiFetch, apiFetchEnvelope, apiFetchMultipart, isNetworkError } from "@/lib/api";
+import { apiFetch, apiFetchEnvelope, apiFetchMultipart, currentUserId, isNetworkError } from "@/lib/api";
 import { buildCaptureForm, normalizeResolution, type ResolveFile } from "./resolveWire";
 import { isOnline } from "@/offline/connectivity";
 import { reconcileWeightReminder } from "@/reminders/reconcileWeightReminder";
@@ -365,9 +365,19 @@ export function useDayLogs(date: string) {
   });
 }
 
+// The same accessor useQueuedLogs keys by (src/offline/useQueuedLogs.ts) and
+// for the same reason: it is IN the key, not just applied inside the queryFn,
+// because react-query serves a key it has seen before synchronously, on the
+// very first render. With an unscoped ["dashboard", date] key, the frame
+// after an account switch — and any query that resolves from cache before a
+// refetch lands — would serve the previous user's calories under the new
+// user's session. A synchronous read of auth.currentUser, so the key is
+// always a concrete `string | null`, never an undefined key waiting on a
+// promise.
 export function useDashboard(date: string) {
+  const ownerId = currentUserId();
   return useQuery({
-    queryKey: ["dashboard", date],
+    queryKey: ["dashboard", ownerId, date],
     queryFn: () => apiFetch(`/v1/dashboard?date=${date}`) as Promise<DashboardSummary>,
   });
 }
@@ -388,9 +398,10 @@ export function useAvgIntake7d(endDate: string): { avg: number | null; series: n
     dates.push(d.toLocaleDateString("en-CA"));
   }
 
+  const ownerId = currentUserId();
   const results = useQueries({
     queries: dates.map((date) => ({
-      queryKey: ["dashboard", date],
+      queryKey: ["dashboard", ownerId, date],
       queryFn: () => apiFetch(`/v1/dashboard?date=${date}`) as Promise<DashboardSummary>,
     })),
   });
