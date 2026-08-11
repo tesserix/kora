@@ -1,19 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { ScrollView, View } from "react-native";
+import { ScrollView, StyleSheet, View } from "react-native";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppText } from "@/components/Text";
 import { AppBackground } from "@/components/AppBackground";
 import { ScreenHeader } from "@/components/ScreenHeader";
-import { Card } from "@/components/Card";
-import { Badge } from "@/components/Badge";
 import { Icon } from "@/components/Icon";
-import { RingStat } from "@/components/RingStat";
-import { Sparkline } from "@/components/Sparkline";
-import { StreakBars } from "@/components/StreakBars";
-import { Numeral } from "@/components/Numeral";
-import { Overline } from "@/components/Overline";
-import { Segmented } from "@/components/Segmented";
+import { GlassPanel } from "@/components/instrument/GlassPanel";
+import { EnergyBars, type EnergyBarsDay } from "@/components/instrument/EnergyBars";
+import { StreakCells } from "@/components/instrument/StreakCells";
 import { WeightChart } from "@/components/progress/WeightChart";
 import { WeightLogSheet } from "@/components/progress/WeightLogSheet";
 import { EmptyState } from "@/components/common/EmptyState";
@@ -27,14 +22,130 @@ import { formatWeight, lbFromKg, useUnits, weightUnitLabel } from "@/units";
 const RANGES = ["1W", "1M", "3M", "1Y"] as const;
 const RANGE_OPTIONS = RANGES.map((r) => ({ key: r, label: r }));
 
+// Same weekday-letter convention as Diary's week strip (app/(tabs)/diary.tsx).
+const DOW = ["S", "M", "T", "W", "T", "F", "S"];
+
+// EnergyBars' own default `targetFraction` is 0.74 — bars are scaled to that
+// same headroom (target sits at 74% of the bar's max) so a day exactly at
+// budget lands its bar top right on the dashed target line, and an over-budget
+// day visibly pokes past it. Keeping this in lockstep with the component's
+// default (rather than overriding targetFraction here) is what makes the two
+// numbers agree.
+const ENERGY_TARGET_FRACTION = 0.74;
+const SLEEP_TARGET_HOURS = 7;
+
 function today(): string {
   return new Date().toLocaleDateString("en-CA");
 }
 const shortDate = (isoStr: string) => new Date(isoStr).toLocaleDateString([], { month: "short", day: "numeric" });
 const weightFormat = (n: number) => n.toFixed(1);
 
+function last7WeekdayLabels(): string[] {
+  const now = new Date();
+  return Array.from({ length: 7 }, (_, idx) => {
+    const dt = new Date(now.getTime() - (6 - idx) * 24 * 60 * 60 * 1000);
+    return DOW[dt.getDay()];
+  });
+}
+
+// useAvgIntake7d's `series` (src/api/hooks.ts) only includes the days in the
+// trailing week that actually have logged data, in chronological order, with
+// no dates attached (see its "never fabricates" filter) — an unlogged day is
+// dropped rather than represented as a zero. Left-padding with "no data" (0
+// kcal, in-budget) days is the closest honest alignment onto a fixed 7-slot
+// week strip without re-deriving a new dated per-day fetch, which is out of
+// scope for this presentation-only rebuild.
+function buildEnergyDays(series: number[], targetKcal: number): EnergyBarsDay[] {
+  const labels = last7WeekdayLabels();
+  const padded = Array(Math.max(0, 7 - series.length)).fill(0).concat(series).slice(-7);
+  const maxRef = targetKcal > 0 ? targetKcal / ENERGY_TARGET_FRACTION : 0;
+  return labels.map((label, i) => {
+    const kcal = padded[i] ?? 0;
+    const fraction = maxRef > 0 ? Math.min(kcal / maxRef, 1) : 0;
+    return { label, fraction, over: targetKcal > 0 && kcal > targetKcal };
+  });
+}
+
+// Trailing-fill transform: same one src/components/StreakBars.tsx used to turn
+// a scalar streak count into a row of cells, now feeding StreakCells instead.
+function trailingStreakHits(count: number, window = 7): boolean[] {
+  const filled = Math.min(Math.max(0, count), window);
+  return Array.from({ length: window }, (_, i) => i >= window - filled);
+}
+
+// HealthKit (useHealth) only ever reports *today's* sleep — there is no
+// history — so every cell but today intentionally stays unlit ("no data")
+// rather than fabricating a multi-day streak.
+function sleepStreakHits(lastNightHours: number | null): boolean[] {
+  const hits = Array(7).fill(false);
+  if (lastNightHours !== null) hits[6] = lastNightHours >= SLEEP_TARGET_HOURS;
+  return hits;
+}
+
+type RangeOption = { key: string; label: string };
+
+// Instrument-glass segmented control (spec §Screens.4): the track carries the
+// panel's glass tint, the active segment gets an `inset` well + `glassBorder`
+// ring + `ink` text, inactive segments are `mut`, labels are the 11px
+// uppercase/tracked engraved treatment reserved for instrument zones. It's a
+// plain View (not a second `GlassPanel`) — glass never stacks on glass, and
+// this control already lives inside the Weight panel's GlassPanel.
+function RangeSegmented({ options, value, onChange }: { options: RangeOption[]; value: string; onChange: (key: string) => void }) {
+  const { instrument } = useTheme();
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        backgroundColor: instrument.glass,
+        borderRadius: 12,
+        padding: 3,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: instrument.glassBorder,
+      }}
+    >
+      {options.map((opt) => {
+        const selected = opt.key === value;
+        return (
+          <PressableScale
+            key={opt.key}
+            accessibilityRole="tab"
+            accessibilityLabel={opt.label}
+            accessibilityState={{ selected }}
+            haptic="selection"
+            onPress={() => {
+              if (opt.key !== value) onChange(opt.key);
+            }}
+            style={{
+              flex: 1,
+              paddingVertical: 7,
+              borderRadius: 9,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: selected ? instrument.inset : "transparent",
+              borderWidth: selected ? StyleSheet.hairlineWidth : 0,
+              borderColor: instrument.glassBorder,
+            }}
+          >
+            <AppText
+              style={{
+                fontSize: 11,
+                letterSpacing: 1.4,
+                textTransform: "uppercase",
+                fontWeight: "600",
+                color: selected ? instrument.ink : instrument.mut,
+              }}
+            >
+              {opt.label}
+            </AppText>
+          </PressableScale>
+        );
+      })}
+    </View>
+  );
+}
+
 export default function Progress() {
-  const { colors, radius, fonts, gradients } = useTheme();
+  const { colors, instrument, fonts } = useTheme();
   const insets = useSafeAreaInsets();
   const [range, setRange] = useState<(typeof RANGES)[number]>("1W");
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -43,7 +154,6 @@ export default function Progress() {
   const series = useWeightSeries(range);
   const health = useHealth();
   const avgIntake = useAvgIntake7d(today());
-  const streak = dashboard.data?.streak_days ?? 0;
   const { system } = useUnits();
 
   // Entrance stagger runs on first mount only — see app/(tabs)/index.tsx for the
@@ -55,6 +165,12 @@ export default function Progress() {
   }, []);
   const enter = (i: number) => (firstMount.current ? FadeInDown.duration(300).delay(i * 30) : undefined);
 
+  const mono = { fontFamily: fonts.mono, fontVariant: ["tabular-nums" as const] };
+  // Sentence case, not engraved — same convention as Diary's "Day total"/"Water"
+  // captions and Home's MacroWide caption (engraving is reserved for inside the
+  // gauge instruments themselves).
+  const mutedLabel = { fontSize: 11, color: instrument.mut };
+
   const entries = (series.data ?? []) as WeightEntry[];
   const points = entries.map((e) => e.weight_kg);
   const hasChart = points.length >= 2;
@@ -62,6 +178,21 @@ export default function Progress() {
   const delta = hasChart ? points[points.length - 1] - points[0] : null;
   const w = current > 0 ? formatWeight(current, system) : null;
   const d = delta !== null ? (system === "imperial" ? lbFromKg(delta) : delta) : null;
+  // Accent, always — instrument glass has no separate "good"/"bad" color for
+  // this, only the arrow direction (spec's accent-budget rule: weight delta is
+  // one of the handful of things allowed to carry the accent).
+  const deltaText = d !== null ? `${d <= 0 ? "▾" : "▴"} ${Math.abs(d).toFixed(1)} ${weightUnitLabel(system)}` : null;
+
+  const dash = dashboard.data;
+  const dashPending = !dash && !dashboard.isError;
+  const streakDays = dash?.streak_days ?? 0;
+  const proteinValue = Math.round(dash?.consumed?.protein_g ?? 0);
+  const proteinGoal = Math.round(dash?.targets?.protein_g ?? 0);
+  const targetKcal = dash?.targets?.kcal ?? 0;
+
+  const energyDays = buildEnergyDays(avgIntake.series, targetKcal);
+  const proteinHits = trailingStreakHits(streakDays);
+  const sleepHits = sleepStreakHits(health.sleep?.lastNightHours ?? null);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -69,16 +200,24 @@ export default function Progress() {
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
       <Animated.View entering={enter(0)}>
         <ScreenHeader
-          overline="Trends"
-          title="Progress"
+          title="Trends"
           right={
             <PressableScale
               accessibilityRole="button"
               haptic="selection"
-              style={{ flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingHorizontal: 12, paddingVertical: 8 }}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6,
+                borderWidth: StyleSheet.hairlineWidth,
+                borderColor: instrument.glassBorder,
+                borderRadius: 10,
+                paddingHorizontal: 12,
+                paddingVertical: 8,
+              }}
             >
-              <Icon name="camera" size={15} color={colors.label} />
-              <AppText variant="footnote" style={{ fontWeight: "600" }}>Weekly report</AppText>
+              <Icon name="camera" size={15} color={instrument.mut} />
+              <AppText style={{ fontSize: 13, fontWeight: "600", color: instrument.ink }}>Weekly report</AppText>
             </PressableScale>
           }
         />
@@ -86,7 +225,7 @@ export default function Progress() {
 
       <View style={{ paddingHorizontal: 16, gap: 16 }}>
         <Animated.View entering={enter(1)}>
-          <Card variant="hero" style={{ padding: 18 }}>
+          <GlassPanel radius={24} style={{ padding: 18 }}>
             <PressableScale
               accessibilityRole="button"
               accessibilityLabel="Log weight"
@@ -95,22 +234,22 @@ export default function Progress() {
             >
               <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
                 <View>
-                  <AppText variant="footnote" muted style={{ fontWeight: "600" }}>Weight</AppText>
-                  <View style={{ flexDirection: "row", alignItems: "baseline", gap: 6 }}>
+                  <AppText style={mutedLabel}>Weight</AppText>
+                  <View style={{ flexDirection: "row", alignItems: "baseline", gap: 6, marginTop: 2 }}>
                     {current > 0 ? (
                       <AnimatedNumber
                         value={system === "imperial" ? lbFromKg(current) : current}
                         format={weightFormat}
-                        style={{ fontSize: 40, fontWeight: "700", fontFamily: fonts.rounded, color: colors.label }}
+                        style={{ fontSize: 34, fontWeight: "700", fontFamily: fonts.mono, color: instrument.ink }}
                       />
                     ) : (
-                      <AppText style={{ fontSize: 40, fontWeight: "700", fontFamily: fonts.rounded, color: colors.label }}>—</AppText>
+                      <AppText style={{ fontSize: 34, fontWeight: "700", fontFamily: fonts.mono, color: instrument.ink }}>—</AppText>
                     )}
-                    <AppText variant="subheadline" muted>{w ? w.unit : "kg"}</AppText>
+                    <AppText style={{ fontSize: 14, color: instrument.mut }}>{w ? w.unit : "kg"}</AppText>
                   </View>
                 </View>
-                {d !== null ? (
-                  <Badge variant={d <= 0 ? "success" : "neutral"} icon={d <= 0 ? "trending-down" : "trending-up"}>{`${d > 0 ? "+" : ""}${d.toFixed(1)} ${weightUnitLabel(system)}`}</Badge>
+                {deltaText ? (
+                  <AppText style={[{ fontSize: 13, fontWeight: "700", color: instrument.accent }, mono]}>{deltaText}</AppText>
                 ) : null}
               </View>
             </PressableScale>
@@ -119,8 +258,8 @@ export default function Progress() {
               <>
                 <WeightChart points={points} />
                 <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 4 }}>
-                  <AppText variant="footnote" muted style={{ fontVariant: ["tabular-nums"] }}>{shortDate(entries[0].logged_at)}</AppText>
-                  <AppText variant="footnote" muted style={{ fontVariant: ["tabular-nums"] }}>{shortDate(entries[entries.length - 1].logged_at)}</AppText>
+                  <AppText style={[mutedLabel, mono]}>{shortDate(entries[0].logged_at)}</AppText>
+                  <AppText style={[mutedLabel, mono]}>{shortDate(entries[entries.length - 1].logged_at)}</AppText>
                 </View>
               </>
             ) : entries.length === 0 ? (
@@ -131,68 +270,70 @@ export default function Progress() {
                 cta={{ label: "Log weight", onPress: () => setSheetOpen(true) }}
               />
             ) : (
-              <AppText muted style={{ fontSize: 13, paddingVertical: 16, textAlign: "center" }}>Log your weight to see a trend.</AppText>
+              <AppText style={[mutedLabel, { fontSize: 13, paddingVertical: 16, textAlign: "center" }]}>Log your weight to see a trend.</AppText>
             )}
 
             <View style={{ marginTop: 14 }}>
-              <Segmented options={RANGE_OPTIONS} value={range} onChange={(key) => setRange(key as (typeof RANGES)[number])} />
+              <RangeSegmented options={RANGE_OPTIONS} value={range} onChange={(key) => setRange(key as (typeof RANGES)[number])} />
             </View>
-          </Card>
+          </GlassPanel>
         </Animated.View>
 
         <Animated.View entering={enter(2)}>
-          <Overline style={{ marginBottom: 8 }}>This week</Overline>
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
-            <Card variant="elevated" style={{ flexGrow: 1, flexBasis: "45%", gap: 8 }}>
-              <RingStat
-                label="Avg intake"
-                dotColor={colors.accent}
-                state={avgIntake.avg != null ? "value" : "empty"}
-                value={avgIntake.avg?.toLocaleString()}
-                meta={avgIntake.avg != null ? "7-day avg" : undefined}
-                showRing={false}
-              />
-              <Sparkline points={avgIntake.series} color={colors.accent} />
-            </Card>
-            <Card variant="elevated" style={{ flexGrow: 1, flexBasis: "45%", gap: 8 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                <View style={{ width: 7, height: 7, borderRadius: 999, backgroundColor: colors.accentAmber }} />
-                <AppText variant="footnote" muted style={{ fontWeight: "600" }}>Log streak</AppText>
+          <GlassPanel radius={22} style={{ padding: 16 }}>
+            <AppText style={mutedLabel}>Energy vs budget</AppText>
+            <View style={{ marginTop: 10 }}>
+              <EnergyBars days={energyDays} />
+            </View>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 14, marginTop: 10 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: instrument.tickLit, opacity: 0.72 }} />
+                <AppText style={{ fontSize: 10, color: instrument.mut }}>In-budget</AppText>
               </View>
-              <View style={{ flexDirection: "row", alignItems: "baseline", gap: 4 }}>
-                <Numeral size={28}>{String(streak)}</Numeral>
-                <AppText variant="footnote" muted>days</AppText>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: instrument.accent }} />
+                <AppText style={{ fontSize: 10, color: instrument.mut }}>Over</AppText>
               </View>
-              <StreakBars count={streak} color={colors.accentAmber} />
-              <AppText variant="caption" muted>keep it going</AppText>
-            </Card>
-            <Card variant="elevated" style={{ flexGrow: 1, flexBasis: "45%" }}>
-              <RingStat
-                label="Steps"
-                dotColor={colors.stepsMetric}
-                state={health.status === "authorized" ? "value" : "connect"}
-                value={health.steps ? health.steps.today.toLocaleString() : undefined}
-                meta={health.steps ? `of ${health.steps.goal.toLocaleString()}` : undefined}
-                ringValue={health.steps?.today ?? 0}
-                ringMax={health.steps?.goal ?? 0}
-                ringGradient={gradients.steps}
-                onConnect={health.connect}
-              />
-            </Card>
-            <Card variant="elevated" style={{ flexGrow: 1, flexBasis: "45%" }}>
-              <RingStat
-                label="Sleep"
-                dotColor={colors.sleepMetric}
-                state={health.status === "authorized" ? "value" : "connect"}
-                value={health.sleep ? `${health.sleep.lastNightHours}` : undefined}
-                meta={health.sleep ? "last night" : undefined}
-                ringValue={health.sleep?.lastNightHours ?? 0}
-                ringMax={8}
-                ringGradient={gradients.sleep}
-                onConnect={health.connect}
-              />
-            </Card>
-          </View>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+                <View style={{ width: 10, height: 0, borderTopWidth: 1.5, borderStyle: "dashed", borderColor: instrument.tick }} />
+                <AppText style={{ fontSize: 10, color: instrument.mut }}>Target</AppText>
+              </View>
+            </View>
+          </GlassPanel>
+        </Animated.View>
+
+        <Animated.View entering={enter(3)} style={{ flexDirection: "row", gap: 12 }}>
+          <GlassPanel radius={20} style={{ flex: 1, padding: 14 }}>
+            <AppText style={mutedLabel}>Protein goal</AppText>
+            <AppText style={[{ fontSize: 15, fontWeight: "600", color: instrument.ink, marginTop: 2 }, mono]}>
+              {dashPending ? "—" : `${proteinValue}/${proteinGoal}g`}
+            </AppText>
+            <View style={{ marginTop: 10 }}>
+              <StreakCells hits={proteinHits} testIDPrefix="protein-streak" />
+            </View>
+          </GlassPanel>
+          <GlassPanel radius={20} style={{ flex: 1, padding: 14 }}>
+            <AppText style={mutedLabel}>Avg sleep</AppText>
+            {health.sleep ? (
+              <AppText style={[{ fontSize: 15, fontWeight: "600", color: instrument.ink, marginTop: 2 }, mono]}>
+                {`${health.sleep.lastNightHours}h`}
+              </AppText>
+            ) : (
+              <PressableScale
+                accessibilityRole="button"
+                accessibilityLabel="Connect Apple Health"
+                haptic="selection"
+                onPress={health.connect}
+                style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 }}
+              >
+                <Icon name="heart" size={14} color={instrument.mut} />
+                <AppText style={{ fontSize: 12, color: instrument.mut }}>Connect Apple Health</AppText>
+              </PressableScale>
+            )}
+            <View style={{ marginTop: 10 }}>
+              <StreakCells hits={sleepHits} testIDPrefix="sleep-streak" />
+            </View>
+          </GlassPanel>
         </Animated.View>
       </View>
 

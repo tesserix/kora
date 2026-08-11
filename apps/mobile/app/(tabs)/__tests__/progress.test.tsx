@@ -41,9 +41,15 @@ test("shows real current weight when entries exist", async () => {
   // 71.9 = latest entry; distinct from the old hardcoded "72.4" placeholder, so
   // this fails on the pre-rewrite screen (real RED) and passes on the new one.
   expect(getByText("71.9")).toBeTruthy();
-  expect(getByText("Progress")).toBeTruthy();
+  // In-page header retitled to match the tab (was "Progress").
+  expect(getByText("Trends")).toBeTruthy();
   expect(getByText("Weight")).toBeTruthy();
-  expect(getByText("Log streak")).toBeTruthy();
+  // Weight lost across the range shows the accent down-arrow delta, not the
+  // old success/neutral Badge — instrument glass has one accent, not a
+  // separate "good" color for this.
+  expect(getByText("▾ 2.1 kg")).toBeTruthy();
+  expect(getByText("Protein goal")).toBeTruthy();
+  expect(getByText("Avg sleep")).toBeTruthy();
 });
 
 test("seeds current weight from profile when the range is empty", async () => {
@@ -87,13 +93,16 @@ test("never renders the old fabricated metrics", async () => {
   expect(queryByText("7.1")).toBeNull();
 });
 
-test("offers Connect Apple Health for Steps and Sleep", async () => {
+test("offers Connect Apple Health for the Avg sleep panel", async () => {
   mockSeries.mockReturnValue({ data: [] });
   const { getAllByLabelText } = await render(<Progress />);
-  expect(getAllByLabelText("Connect Apple Health").length).toBeGreaterThanOrEqual(2);
+  // Trends has no Steps widget (spec §Screens.4 lists only Weight, Energy vs
+  // budget, and the Protein-goal/Avg-sleep duo) — only the sleep panel offers
+  // the connect prompt.
+  expect(getAllByLabelText("Connect Apple Health").length).toBeGreaterThanOrEqual(1);
 });
 
-test("shows real steps, sleep, and 7-day avg intake when Health is authorized and avg data exists", async () => {
+test("shows real sleep and renders the energy-vs-budget bars when Health is authorized and avg data exists", async () => {
   mockSeries.mockReturnValue({ data: [] });
   mockUseHealth.mockReturnValue({
     status: "authorized",
@@ -103,11 +112,20 @@ test("shows real steps, sleep, and 7-day avg intake when Health is authorized an
   });
   mockAvgIntake7d.mockReturnValue({ avg: 1921, series: [1900, 1950, 1921], isLoading: false });
 
-  const { getByText, queryByLabelText } = await render(<Progress />);
-  expect(getByText("8,240")).toBeTruthy();
-  expect(getByText("7.1")).toBeTruthy();
-  expect(getByText("1,921")).toBeTruthy();
+  const { getByText, getByTestId, queryByLabelText } = await render(<Progress />);
+  expect(getByText("7.1h")).toBeTruthy();
   expect(queryByLabelText("Connect Apple Health")).toBeNull();
+  for (let i = 0; i < 7; i++) expect(getByTestId(`ebar-${i}`)).toBeTruthy();
+  expect(getByTestId("ebar-target")).toBeTruthy();
+});
+
+test("renders the protein-goal and avg-sleep streak cell duo", async () => {
+  mockSeries.mockReturnValue({ data: [] });
+  const { getByTestId } = await render(<Progress />);
+  for (let i = 0; i < 7; i++) {
+    expect(getByTestId(`protein-streak-${i}`)).toBeTruthy();
+    expect(getByTestId(`sleep-streak-${i}`)).toBeTruthy();
+  }
 });
 
 test("shows weight in lb and converts the delta badge when the preference is imperial", async () => {
@@ -122,6 +140,6 @@ test("shows weight in lb and converts the delta badge when the preference is imp
   // 78.6 kg -> 173.3 lb (formatWeight / AnimatedNumber's toFixed(1) format).
   expect(getByText("173.3")).toBeTruthy();
   expect(getByText("lb")).toBeTruthy();
-  // delta: 78.6 - 80 = -1.4 kg -> -3.1 lb.
-  expect(getByText("-3.1 lb")).toBeTruthy();
+  // delta: 78.6 - 80 = -1.4 kg -> -3.1 lb, accent down-arrow delta (magnitude only).
+  expect(getByText("▾ 3.1 lb")).toBeTruthy();
 });

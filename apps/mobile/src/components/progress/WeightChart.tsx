@@ -16,7 +16,7 @@ const DRAW_DURATION = 700;
 // component assumes points.length >= 2 and does no internal guarding, exactly
 // as before.
 export function WeightChart({ points }: Props) {
-  const { colors } = useTheme();
+  const { instrument } = useTheme();
   const { reduceMotion } = useMotionPrefs();
   const w = 300;
   const h = 130;
@@ -67,9 +67,11 @@ export function WeightChart({ points }: Props) {
     <View>
       <Svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`}>
         <Defs>
+          {/* Instrument glass: accent stroke, subtle 10% area fill fading to nothing —
+              spec's "accent sparkline + subtle area fill + end dot" for the Weight panel. */}
           <LinearGradient id="wg" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0%" stopColor={colors.accent} stopOpacity={0.12} />
-            <Stop offset="100%" stopColor={colors.accent} stopOpacity={0} />
+            <Stop offset="0%" stopColor={instrument.accent} stopOpacity={0.1} />
+            <Stop offset="100%" stopColor={instrument.accent} stopOpacity={0} />
           </LinearGradient>
         </Defs>
         <AnimatedPolygon testID="weight-chart-area" points={area} fill="url(#wg)" animatedProps={areaAnimatedProps} />
@@ -77,7 +79,7 @@ export function WeightChart({ points }: Props) {
           testID="weight-chart-line"
           points={line}
           fill="none"
-          stroke={colors.primary}
+          stroke={instrument.accent}
           strokeWidth={2.5}
           strokeLinecap="round"
           strokeLinejoin="round"
@@ -85,7 +87,15 @@ export function WeightChart({ points }: Props) {
           animatedProps={lineAnimatedProps}
         />
         {points.map((v, i) => (
-          <Circle key={i} cx={x(i)} cy={y(v)} r={i === points.length - 1 ? 4.5 : 2.5} fill={colors.primary} stroke={colors.background} strokeWidth={1.5} />
+          <Circle
+            key={i}
+            cx={x(i)}
+            cy={y(v)}
+            r={i === points.length - 1 ? 4.5 : 2.5}
+            fill={instrument.accent}
+            stroke={instrument.glass}
+            strokeWidth={1.5}
+          />
         ))}
       </Svg>
     </View>
