@@ -1,7 +1,17 @@
+import { useEffect } from "react";
 import { View } from "react-native";
 import Svg, { Circle, Line, Text as SvgText } from "react-native-svg";
+import Animated, {
+  cancelAnimation,
+  useAnimatedProps,
+  useReducedMotion,
+  useSharedValue,
+  withSpring,
+  type SharedValue,
+} from "react-native-reanimated";
 import { AppText } from "@/components/Text";
 import { useTheme } from "@/theme";
+import type { InstrumentTokens } from "@/theme";
 import {
   buildGaugeTicks,
   needleFor,
@@ -10,7 +20,58 @@ import {
   GAUGE_VIEW_W,
   GAUGE_CENTER_X,
   GAUGE_CENTER_Y,
+  type GaugeTick,
 } from "./gauge";
+
+// Critically damped (no overshoot) per spec: Motion > "damping ratio 1.0 ...
+// response ~0.35" translated to reanimated's damping/stiffness pair.
+const NEEDLE_SPRING = { damping: 30, stiffness: 250 };
+
+const AnimatedLine = Animated.createAnimatedComponent(Line);
+
+function tickColorFor(
+  t: Pick<GaugeTick, "lit" | "red" | "major">,
+  instrument: InstrumentTokens,
+): string {
+  if (t.red) return t.lit ? instrument.accent : `${instrument.accent}73`; // 45% alpha suffix on hex
+  if (!t.lit) return instrument.tick;
+  return t.major ? instrument.tickLit : `${instrument.tickLit}8C`; // 55% alpha on minor lit ticks
+}
+
+// One tick's stroke color reacts live to the animated fraction as it springs
+// from the previous value to the new one, so the lit/dimmed boundary visibly
+// sweeps across the arc instead of jump-cutting (spec: Motion > "lit-tick
+// fraction animate on data change"). Geometry (position/width) never depends
+// on fraction — only color does — so only the animated prop needs a worklet.
+interface AnimatedTickProps {
+  index: number;
+  geom: GaugeTick;
+  fractionSV: SharedValue<number>;
+  instrument: InstrumentTokens;
+  testID: string;
+}
+
+function AnimatedGaugeTick({ index, geom, fractionSV, instrument, testID }: AnimatedTickProps) {
+  const t = index / 40; // TICKS constant in gauge.ts
+  const red = t > 0.9;
+  const animatedProps = useAnimatedProps(() => {
+    "worklet";
+    const lit = t <= fractionSV.value;
+    return { stroke: tickColorFor({ lit, red, major: geom.major }, instrument) };
+  });
+  return (
+    <AnimatedLine
+      testID={testID}
+      x1={geom.x1}
+      y1={geom.y1}
+      x2={geom.x2}
+      y2={geom.y2}
+      strokeWidth={geom.width}
+      strokeLinecap="round"
+      animatedProps={animatedProps}
+    />
+  );
+}
 
 // The hub dot sits at GAUGE_CENTER_Y; keep this much vertical clearance above it
 // so the center overlay's label never descends into the hub/needle-tail zone.
@@ -38,14 +99,32 @@ export function GaugeDial({
   const { instrument, fonts } = useTheme();
   const fraction = target > 0 ? Math.min(value / target, 1) : 0;
   const remaining = Math.max(0, Math.round(target - value));
-  const needle = needleFor(fraction);
   const mono = { fontFamily: fonts.mono, fontVariant: ["tabular-nums" as const] };
+  const reduceMotion = useReducedMotion();
 
-  const tickColor = (t: { lit: boolean; red: boolean; major: boolean }) => {
-    if (t.red) return t.lit ? instrument.accent : `${instrument.accent}73`; // 45% alpha suffix on hex
-    if (!t.lit) return instrument.tick;
-    return t.major ? instrument.tickLit : `${instrument.tickLit}8C`; // 55% alpha on minor lit ticks
-  };
+  // Static geometry (position/width/major/red never depend on fraction — see
+  // AnimatedGaugeTick); the argument here is arbitrary, only `.lit` (unused
+  // below) would differ by it.
+  const tickGeometry = buildGaugeTicks(0);
+
+  // Springs from the current live position to the new fraction on every data
+  // change; reduced motion snaps instead (spec: Motion > prefers-reduced-motion
+  // "needle sweeps become cross-fades" — here, an instant jump with no sweep).
+  const fractionSV = useSharedValue(fraction);
+  useEffect(() => {
+    if (reduceMotion) {
+      cancelAnimation(fractionSV);
+      fractionSV.value = fraction;
+      return;
+    }
+    fractionSV.value = withSpring(fraction, NEEDLE_SPRING);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fraction, reduceMotion]);
+
+  const needleAnimatedProps = useAnimatedProps(() => {
+    "worklet";
+    return needleFor(fractionSV.value);
+  });
 
   const footer: Array<[number, string]> = [
     [value, "Eaten"],
@@ -61,17 +140,14 @@ export function GaugeDial({
     <View testID={testID} accessible accessibilityLabel={accessibilityLabel}>
       <View style={{ alignItems: "center" }}>
         <Svg width={GAUGE_VIEW_W} height={GAUGE_VIEW_H} viewBox={`0 0 ${GAUGE_VIEW_W} ${GAUGE_VIEW_H}`}>
-          {buildGaugeTicks(fraction).map((t, i) => (
-            <Line
+          {tickGeometry.map((geom, i) => (
+            <AnimatedGaugeTick
               key={i}
+              index={i}
+              geom={geom}
+              fractionSV={fractionSV}
+              instrument={instrument}
               testID={`gauge-tick-${i}`}
-              x1={t.x1}
-              y1={t.y1}
-              x2={t.x2}
-              y2={t.y2}
-              stroke={tickColor(t)}
-              strokeWidth={t.width}
-              strokeLinecap="round"
             />
           ))}
           {[0, 0.5, 1].map((t) => {
@@ -83,15 +159,12 @@ export function GaugeDial({
               </SvgText>
             );
           })}
-          <Line
+          <AnimatedLine
             testID="gauge-needle"
-            x1={needle.x1}
-            y1={needle.y1}
-            x2={needle.x2}
-            y2={needle.y2}
             stroke={instrument.accent}
             strokeWidth={3}
             strokeLinecap="round"
+            animatedProps={needleAnimatedProps}
           />
           <Circle cx={GAUGE_CENTER_X} cy={GAUGE_CENTER_Y} r={4.5} fill={instrument.accent} />
         </Svg>

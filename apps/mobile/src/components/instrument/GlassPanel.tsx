@@ -30,7 +30,10 @@ export function GlassPanel({ children, style, radius = 24, testID }: GlassPanelP
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: instrument.glassBorder,
     overflow: "hidden",
-    backgroundColor: reduced ? (scheme === "dark" ? "#14171C" : "#F7F7F8") : "transparent",
+    // Reduced-transparency fallback: opaque bg-derived card color, not a hardcoded
+    // hex (spec: Shape and material > Reduced transparency) — instrument.bg already
+    // swaps per theme, so deriving from it keeps this in sync with the token table.
+    backgroundColor: reduced ? instrument.bg : "transparent",
   };
   return (
     <View testID={testID} style={[shell, shadows.card, style]}>

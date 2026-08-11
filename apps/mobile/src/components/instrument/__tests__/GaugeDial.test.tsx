@@ -1,6 +1,14 @@
 import { render } from "@testing-library/react-native";
+import * as Reanimated from "react-native-reanimated";
 import { buildGaugeTicks, needleFor, GAUGE_VIEW_H, GAUGE_CENTER_Y } from "../gauge";
 import { GaugeDial } from "../GaugeDial";
+
+afterEach(() => {
+  jest.clearAllMocks();
+  // clearAllMocks resets call history but not a mockReturnValue override — restore
+  // the default (reduced motion off) so it doesn't bleed into the next test.
+  (Reanimated.useReducedMotion as jest.Mock).mockReturnValue(false);
+});
 
 const flattenStyle = (style: unknown): Record<string, unknown> =>
   Array.isArray(style) ? Object.assign({}, ...style.flat().filter(Boolean)) : (style as Record<string, unknown>);
@@ -46,6 +54,33 @@ test("the center reserve numeral carries an explicit lineHeight so it can't clip
   expect(flat.fontSize).toBe(44);
   expect(flat.lineHeight).toBe(50);
   expect(flat.lineHeight as number).toBeGreaterThanOrEqual((flat.fontSize as number) * 1.1);
+});
+
+// Reduced Motion (spec: Motion > prefers-reduced-motion) means the needle and
+// lit-tick boundary jump straight to the new fraction — no spring sweep.
+test("under reduced motion, the needle renders statically at the target fraction with no spring", async () => {
+  (Reanimated.useReducedMotion as jest.Mock).mockReturnValue(true);
+  const spy = jest.spyOn(Reanimated, "withSpring");
+
+  const { getByTestId } = await render(<GaugeDial value={1100} target={2200} />);
+
+  expect(spy).not.toHaveBeenCalled();
+  const needle = getByTestId("gauge-needle").props;
+  const expected = needleFor(0.5);
+  expect(needle.x2).toBeCloseTo(expected.x2);
+  expect(needle.y2).toBeCloseTo(expected.y2);
+
+  spy.mockRestore();
+});
+
+test("outside reduced motion, the needle springs via withSpring toward the target fraction", async () => {
+  const spy = jest.spyOn(Reanimated, "withSpring");
+
+  await render(<GaugeDial value={1100} target={2200} />);
+
+  expect(spy).toHaveBeenCalledWith(0.5, { damping: 30, stiffness: 250 });
+
+  spy.mockRestore();
 });
 
 test("the center overlay is bounded above the hub dot, derived from the gauge geometry", async () => {

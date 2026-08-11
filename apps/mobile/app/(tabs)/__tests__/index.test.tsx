@@ -1,4 +1,5 @@
 import { render, fireEvent } from "@testing-library/react-native";
+import * as RN from "react-native";
 
 jest.mock("@/lib/firebase", () => ({ auth: null, isFirebaseConfigured: true }));
 jest.mock("firebase/auth", () => ({ onAuthStateChanged: () => () => {}, signOut: jest.fn() }));
@@ -117,4 +118,27 @@ test("shows a Connect Apple Health affordance for Steps and Sleep (never a numbe
 
   const { getAllByLabelText } = await render(<Home />);
   expect(getAllByLabelText("Connect Apple Health").length).toBeGreaterThanOrEqual(2);
+});
+
+// app.json now ships userInterfaceStyle: "automatic" (task 13), so Home must render
+// correctly under an explicit light scheme, not just whatever the test environment
+// defaults to. Pins useColorScheme to "light" via spyOn rather than relying on the
+// jest default so this keeps testing what it says even if that default ever changes.
+test("renders the light theme: app-background is the light instrument ground and the gauge still renders", async () => {
+  const schemeSpy = jest.spyOn(RN, "useColorScheme").mockReturnValue("light");
+  mockUseDashboard.mockReturnValue({
+    data: { consumed: { kcal: 1252, protein_g: 96, carbs_g: 140, fat_g: 40 }, targets: { kcal: 2000, protein_g: 140, carbs_g: 220, fat_g: 70 }, water_ml: 1400, streak_days: 12 },
+    isError: false,
+  });
+  mockUseDayLogs.mockReturnValue({ data: [], isError: false });
+
+  const { findByTestId } = await render(<Home />);
+  const bg = await findByTestId("app-background");
+  const flat = Array.isArray(bg.props.style)
+    ? Object.assign({}, ...bg.props.style.flat().filter(Boolean))
+    : bg.props.style;
+  expect(flat.backgroundColor).toBe("#ECEDEF");
+  expect(await findByTestId("gauge-dial")).toBeTruthy();
+
+  schemeSpy.mockRestore();
 });
