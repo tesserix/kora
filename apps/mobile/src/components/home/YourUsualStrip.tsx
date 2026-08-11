@@ -1,7 +1,8 @@
 import { View } from "react-native";
-import { Overline } from "@/components/Overline";
-import { GroupedSection } from "@/components/GroupedList";
+import { AppText } from "@/components/Text";
+import { GlassPanel } from "@/components/instrument/GlassPanel";
 import { MealRow } from "@/components/MealRow";
+import { useTheme } from "@/theme";
 import { useMemory } from "@/api/hooks";
 import { useInstantLog } from "@/api/useInstantLog";
 import { yourUsual } from "@/lib/yourUsual";
@@ -19,8 +20,11 @@ function today(): string {
 // YourUsualStrip: a contextual "one-tap log" section on Home showing the user's
 // usual meals/foods for the current meal slot. Renders nothing while loading,
 // on error, or when there is nothing to show (keeps Home uncluttered for new
-// users and off-hours).
+// users and off-hours). Instrument Glass (I1): a sentence-case muted caption
+// over a single GlassPanel, replacing the legacy Overline + GroupedSection —
+// pure restyle, props/behavior unchanged.
 export function YourUsualStrip() {
+  const { instrument } = useTheme();
   const memory = useMemory(today());
   const { logFood, logMeal } = useInstantLog();
   const slot = mealSlotForHour(new Date().getHours());
@@ -30,8 +34,8 @@ export function YourUsualStrip() {
 
   return (
     <View style={{ paddingHorizontal: 16, marginTop: 8 }}>
-      <Overline style={{ marginBottom: 8 }}>{`Your usual ${slot}`}</Overline>
-      <GroupedSection elevated>
+      <AppText style={{ fontSize: 11, color: instrument.mut, marginBottom: 8 }}>{`Your usual ${slot}`}</AppText>
+      <GlassPanel radius={20}>
         {rows.map((row) => {
           if (row.kind === "meal") {
             const m = row.meal;
@@ -64,7 +68,7 @@ export function YourUsualStrip() {
             />
           );
         })}
-      </GroupedSection>
+      </GlassPanel>
     </View>
   );
 }
