@@ -45,6 +45,7 @@ import { enqueueCapture, type CaptureFile } from "@/offline/enqueueCapture";
 import { NoOwnerError } from "@/offline/owner";
 import { QUEUED_CAPTURES_KEY } from "@/offline/queryKeys";
 import { isLoggable } from "@/lib/candidateTier";
+import { servingEntryFor } from "@/units/portion";
 import type { FoodItem, Resolution, ResolutionSource } from "@/api/types";
 import { mealSlotForHour, type MealSlot } from "@/lib/mealSlot";
 
@@ -1015,18 +1016,29 @@ export default function CaptureScreen() {
       .filter(({ key }) => !loggedCandidateKeys.has(key));
 
     const outcomes = await Promise.allSettled(
-      pending.map(({ candidate }) =>
-        createLog.mutateAsync({
+      pending.map(({ candidate }) => {
+        // Record the portion as one of the food's own named servings when one
+        // describes it exactly, so the diary reads "1 portion" instead of
+        // "16.5 g" — the same entry the card just showed the user.
+        //
+        // quantity_grams is still sent. The server prefers the entered pair
+        // and re-resolves grams from it (foodlog.resolveEnteredUnit), and
+        // because servingEntryFor accepts only exact multiples the two figures
+        // are the same number; keeping it means a server that ignores the pair
+        // still logs the portion the engine resolved.
+        const serving = servingEntryFor(candidate.portion_grams, candidate.item.serving_units ?? []);
+        return createLog.mutateAsync({
           food_item_id: candidate.item.id,
           quantity_grams: candidate.portion_grams,
           meal_slot: mealSlot,
           source,
           logged_at: new Date().toISOString(),
+          ...(serving ? { entered_amount: serving.amount, entered_unit: serving.unit } : {}),
           ...(resolvedPhrase && (source === "ai_text" || source === "ai_voice")
             ? { input_phrase: resolvedPhrase }
             : {}),
-        }),
-      ),
+        });
+      }),
     );
     setAdding(false);
 

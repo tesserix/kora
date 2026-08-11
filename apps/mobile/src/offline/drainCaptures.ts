@@ -8,6 +8,7 @@ import {
 } from "./captureQueue";
 import { append as appendLog, newLogId } from "./queue";
 import { QUEUED_CAPTURES_KEY, QUEUED_LOGS_KEY } from "./queryKeys";
+import { servingEntryFor } from "@/units/portion";
 
 // A resolve that SUCCEEDED but produced no usable food. Distinct from a
 // transport failure: retrying will produce the same nothing, so it is terminal.
@@ -72,12 +73,18 @@ export async function drainCaptureQueue(deps: DrainDeps) {
       if (!candidate?.item) throw new CaptureUnidentifiedError();
 
       if (resolution.tier === "auto") {
+        // Name the portion as one of the food's own servings where one fits
+        // exactly, as the online path does (app/capture.tsx). Without this the
+        // same photo yields "1 portion" online and "16.5 g" when it drains
+        // from the offline queue.
+        const serving = servingEntryFor(candidate.portion_grams, candidate.item.serving_units ?? []);
         // Hand off. This module never calls /v1/logs — the log queue owns
         // delivery, exactly as it does for slice 1's rows.
         await appendLog(
           {
             food_item_id: candidate.item.id,
             quantity_grams: candidate.portion_grams,
+            ...(serving ? { entered_amount: serving.amount, entered_unit: serving.unit } : {}),
             meal_slot: item.mealSlot ?? "snack",
             // Decision 2: capture time, always.
             logged_at: item.capturedAt,

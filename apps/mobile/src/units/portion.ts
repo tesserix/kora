@@ -74,6 +74,63 @@ export function baseQuantityFor(amount: number, unit: string, servingUnits: Serv
   return (serving.base_amount / serving.amount) * amount;
 }
 
+/**
+ * The named serving that exactly describes a base-unit quantity, or null when
+ * no serving does.
+ *
+ * This is what lets an AI-resolved capture say "1 portion" instead of
+ * "16.5 g". The resolve endpoint returns a portion in the food's base unit and
+ * the food's own `serving_units` alongside it, so the pair can be recovered
+ * on the client — no new server field, and no nutrition derived here.
+ *
+ * EXACT multiples only, and that restriction is the whole safety argument.
+ * Logging an (amount, unit) pair makes the SERVER re-resolve quantity_grams
+ * from the serving's mass (foodlog.resolveEnteredUnit). If the count were
+ * rounded, the amount written would differ from the one the engine resolved
+ * and the one the card showed the user. Requiring exactness makes the
+ * substitution a pure relabelling of an identical quantity — never a
+ * different portion.
+ *
+ * The first serving that divides exactly wins, matching the precedence
+ * everywhere else that `serving_units[0]` is treated as a food's default.
+ */
+export function servingEntryFor(
+  baseQuantity: number,
+  servingUnits: ServingUnit[],
+): { amount: number; unit: string } | null {
+  if (!(baseQuantity > 0)) return null;
+  for (const serving of servingUnits) {
+    if (!(serving.base_amount > 0)) continue;
+    const count = baseQuantity / serving.base_amount;
+    const rounded = Math.round(count);
+    if (rounded > 0 && Math.abs(count - rounded) < COUNT_EPSILON) {
+      return { amount: rounded, unit: serving.name };
+    }
+  }
+  return null;
+}
+
+/**
+ * The PortionEntry describing a resolved base-unit quantity, naming it as one
+ * of the food's own servings where one fits exactly.
+ *
+ * The single place the AI capture path turns a resolved portion into something
+ * both displayable and loggable, so the card, the re-ask sheet and the log
+ * request cannot disagree about what the portion is. Where no serving fits,
+ * the entered pair is simply absent and every caller falls back to the base
+ * unit — the same shape a legacy row has.
+ */
+export function portionEntryFor(
+  baseQuantity: number,
+  baseUnit: string | null | undefined,
+  servingUnits: ServingUnit[] | undefined,
+): PortionEntry {
+  const entry: PortionEntry = { quantity_grams: baseQuantity, base_unit: baseUnit ?? null };
+  const serving = servingEntryFor(baseQuantity, servingUnits ?? []);
+  if (!serving) return entry;
+  return { ...entry, entered_amount: serving.amount, entered_unit: serving.unit };
+}
+
 export function formatPortion(entry: PortionEntry): string {
   const { entered_amount, entered_unit } = entry;
 

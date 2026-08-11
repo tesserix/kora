@@ -279,6 +279,54 @@ test("a hand-picked row is loggable but still shows no kcal", async () => {
   expect(getAllByText("231 kcal")).toHaveLength(2);
 });
 
+// Before this, a scanned food always rendered raw base units — "16.5 g" for a
+// NESCAFÉ sachet — because the capture path never looked at the food's own
+// serving_units, even though the resolve endpoint returns them on the item.
+test("a candidate whose portion is exactly one named serving renders that serving", async () => {
+  const base = makeResolution();
+  const resolution = {
+    ...base,
+    candidates: [
+      {
+        ...base.candidates[0],
+        portion_grams: 16.5,
+        item: {
+          ...base.candidates[0].item,
+          serving_units: [{ name: "portion", amount: 1, base_amount: 16.5 }],
+        },
+      },
+    ],
+  };
+
+  const { getByText, queryByText } = await renderCard(resolution);
+
+  expect(getByText("1 portion")).toBeTruthy();
+  expect(queryByText("16.5 g")).toBeNull();
+});
+
+// The relabelling must be exact. A portion the servings cannot describe stays
+// in base units rather than being rounded into a serving count.
+test("a candidate whose portion is not a whole serving stays in base units", async () => {
+  const base = makeResolution();
+  const resolution = {
+    ...base,
+    candidates: [
+      {
+        ...base.candidates[0],
+        portion_grams: 20,
+        item: {
+          ...base.candidates[0].item,
+          serving_units: [{ name: "portion", amount: 1, base_amount: 16.5 }],
+        },
+      },
+    ],
+  };
+
+  const { getByText } = await renderCard(resolution);
+
+  expect(getByText("20 g")).toBeTruthy();
+});
+
 test("a liquid candidate renders its portion in ml, not grams", async () => {
   const base = makeResolution();
   const resolution = {

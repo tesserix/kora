@@ -1056,6 +1056,56 @@ describe("Add to diary", () => {
     await waitFor(() => expect(router.back).toHaveBeenCalled());
   });
 
+  // A scanned food whose portion is exactly one of its own named servings is
+  // logged AS that serving, so the diary records "1 portion" rather than a bare
+  // gram figure. The server re-resolves the pair into quantity_grams, and the
+  // exactness requirement in servingEntryFor is what makes that safe: the
+  // resolved grams are identical either way.
+  test("logs a whole named serving as an entered amount and unit", async () => {
+    const rendered = await render(<CaptureScreen />);
+    const candidate = makeCandidate("1", "NESCAFE Mocha", { grams: 16.5, kcal: 90 });
+    await resolveWithMultiCandidates(rendered, {
+      ...makeMultiCandidateResolution(),
+      candidates: [
+        {
+          ...candidate,
+          item: { ...candidate.item, serving_units: [{ name: "portion", amount: 1, base_amount: 16.5 }] },
+        },
+      ],
+    });
+
+    await fireEvent.press(await rendered.findByLabelText("Add to diary"));
+
+    await waitFor(() => expect(mockCreateLogMutateAsync).toHaveBeenCalledTimes(1));
+    expect(mockCreateLogMutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ food_item_id: "1", entered_amount: 1, entered_unit: "portion" }),
+    );
+  });
+
+  // No serving describes the portion, so nothing is sent that would make the
+  // server re-resolve it into a different number.
+  test("omits the entered pair when no named serving describes the portion", async () => {
+    const rendered = await render(<CaptureScreen />);
+    const candidate = makeCandidate("1", "NESCAFE Mocha", { grams: 20, kcal: 109 });
+    await resolveWithMultiCandidates(rendered, {
+      ...makeMultiCandidateResolution(),
+      candidates: [
+        {
+          ...candidate,
+          item: { ...candidate.item, serving_units: [{ name: "portion", amount: 1, base_amount: 16.5 }] },
+        },
+      ],
+    });
+
+    await fireEvent.press(await rendered.findByLabelText("Add to diary"));
+
+    await waitFor(() => expect(mockCreateLogMutateAsync).toHaveBeenCalledTimes(1));
+    const [input] = mockCreateLogMutateAsync.mock.calls[0];
+    expect(input.quantity_grams).toBe(20);
+    expect(input.entered_amount).toBeUndefined();
+    expect(input.entered_unit).toBeUndefined();
+  });
+
   test("adding to diary logs the preselected guess for an uncertain row", async () => {
     const rendered = await render(<CaptureScreen />);
     await resolveWithMultiCandidates(rendered, makeMixedCertaintyResolution());
