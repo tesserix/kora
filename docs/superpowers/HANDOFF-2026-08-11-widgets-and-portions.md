@@ -46,7 +46,7 @@ Restricting it to head nouns was measured and rejected: 60 of the 244 survivors
 
 ## Part 2 — `feat/ios-widgets`, pushed, NOT merged
 
-17 commits. Nine of ten planned tasks implemented, each individually reviewed
+19 commits. Nine of ten planned tasks implemented, each individually reviewed
 clean. **Do not merge before reading issue #135.**
 
 Design: `docs/superpowers/specs/2026-08-11-kora-ios-widgets-design.md`
@@ -88,6 +88,35 @@ confident **"Steps 0 of 10,000"** for unknown data, and gated the reconnect
 affordance on a `"denied"` state that could never occur. Deny once and you were
 stuck on a false zero with no way back. Fixed in `38ad2e9`, verified on device:
 the card now reads "Connect Apple Health".
+
+## Three mistakes I made, and what they cost
+
+Recorded because each one would have shipped, and because the next person will
+be working against the same conditions that produced them.
+
+**1. The spec asserted something I never checked.** It said "the app does know:
+`useHealth` already resolves a `HealthStatus`". I read the type signature and
+believed it. The implementation derives that status from `requestAuthorization`,
+which Apple documents as reporting only that the prompt was shown. The whole
+"Connect Health" widget state rested on that, and so did a live bug in the
+shipped app. **Read the implementation, not the type, before building on a
+guarantee.**
+
+**2. The fix for it was validated somewhere it could not fail.** Treating "no
+step samples today" as "access unknown" looked right on the simulator, because
+no read succeeds there and every day is empty. On a real device that logic nags
+every healthy user every morning. Task 10 exists only because a human mentioned
+the TestFlight build in passing.
+
+**3. I reported a false finding from a bad measurement.** I copied
+`healthdb_secure.sqlite` without its `-wal` file, saw zero samples, and told the
+user the store was empty and the implementer's "3,500 steps" claim was wrong.
+The implementer was right. **SQLite in WAL mode is not in the `.sqlite` file
+yet — copy the `-wal` and `-shm` alongside it, or query in place.** I only
+caught it because the Health app UI plainly contradicted me.
+
+The pattern in all three: I trusted a signal without checking what it was
+actually made of — a type, a simulator, a file copy.
 
 ## The trap that caught me twice
 
