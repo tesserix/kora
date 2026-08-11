@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { onAuthStateChanged } from "firebase/auth";
 import { clearSnapshot, setSnapshot } from "../../modules/widget-bridge";
 import { useDashboard } from "@/api/hooks";
@@ -23,6 +24,7 @@ function today(): string {
  * would be a downgrade, not a correction.
  */
 export function useWidgetSync(): void {
+  const qc = useQueryClient();
   const dashboard = useDashboard(today());
   const summary = dashboard.data;
 
@@ -49,10 +51,20 @@ export function useWidgetSync(): void {
       // nothing stale to protect against yet.
       if (uid === null || (prev !== undefined && prev !== uid)) {
         clearSnapshot();
+        // useDashboard's key is owner-scoped (src/api/hooks.ts), which is the
+        // structural fix — but that alone only stops a NEW query from
+        // crossing accounts. staleTime is 30s, so an already-cached
+        // ["dashboard", A, date] entry is still fair game to be served
+        // synchronously if anything ever re-keys or re-reads it during the
+        // switch window. Clearing the whole client on every uid transition
+        // is the defense-in-depth twin of that fix: no cached response from
+        // any account can outlive the account it was fetched for. Mirrors
+        // the ownerId key fix in src/offline/useQueuedLogs.ts.
+        qc.clear();
       }
       lastUid.current = uid;
     });
-  }, []);
+  }, [qc]);
 
   useEffect(() => {
     if (!summary) return;

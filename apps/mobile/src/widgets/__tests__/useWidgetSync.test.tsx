@@ -7,6 +7,16 @@ jest.mock("../../../modules/widget-bridge", () => ({
   clearSnapshot: () => mockClearSnapshot(),
 }));
 
+// useDashboard is mocked below (not react-query itself), so there is no real
+// QueryClient in this tree for the hook to pull from context — a bare
+// useQueryClient() would throw "No QueryClient set". qc.clear is the only
+// method under test; mocking useQueryClient directly keeps the assertion on
+// that call instead of on cache internals a real client would hide.
+const mockQcClear = jest.fn();
+jest.mock("@tanstack/react-query", () => ({
+  useQueryClient: () => ({ clear: mockQcClear }),
+}));
+
 let mockDashboard: { data: unknown; isError: boolean } = { data: undefined, isError: false };
 jest.mock("@/api/hooks", () => ({
   useDashboard: () => mockDashboard,
@@ -49,6 +59,7 @@ const summary = {
 beforeEach(() => {
   mockSetSnapshot.mockClear();
   mockClearSnapshot.mockClear();
+  mockQcClear.mockClear();
   mockDashboard = { data: undefined, isError: false };
   authCallback = null;
 });
@@ -85,6 +96,11 @@ test("clears the snapshot when the user signs out", async () => {
 
   authCallback?.(null);
   expect(mockClearSnapshot).toHaveBeenCalledTimes(1);
+  // Same-day resurrection guard: useDashboard's key is owner-scoped, but a
+  // cached ["dashboard", A, date] entry can still be sitting in the shared
+  // QueryClient. Clearing the whole client on sign-out is the defense-in-depth
+  // twin of that key fix — belt AND braces, not either/or.
+  expect(mockQcClear).toHaveBeenCalledTimes(1);
 });
 
 // The first auth event of a fresh mount has nothing prior to compare
@@ -95,6 +111,7 @@ test("does not clear on the first sign-in or on same-uid re-emissions", async ()
   authCallback?.({ uid: "u1" });
   authCallback?.({ uid: "u1" });
   expect(mockClearSnapshot).not.toHaveBeenCalled();
+  expect(mockQcClear).not.toHaveBeenCalled();
 });
 
 // A DIFFERENT uid replacing a known previous one is a user switch — user B
@@ -104,6 +121,32 @@ test("clears when a different uid replaces the previous one", async () => {
   await render(<Harness />);
   authCallback?.({ uid: "u1" });
   expect(mockClearSnapshot).not.toHaveBeenCalled();
+  expect(mockQcClear).not.toHaveBeenCalled();
   authCallback?.({ uid: "u2" });
+  expect(mockClearSnapshot).toHaveBeenCalledTimes(1);
+  expect(mockQcClear).toHaveBeenCalledTimes(1);
+});
+
+// The resurrection case the re-review flagged: useDashboard's react-query
+// cache is a SEPARATE store from the native snapshot, on its own 30s
+// staleTime. Scoping the dashboard key by owner (src/api/hooks.ts) stops a
+// NEW query from ever reading across accounts, but nothing about that key
+// change stops a component from synchronously reading an already-cached
+// entry for the outgoing user during the same tick a switch is observed.
+// qc.clear() removing every entry — not just the one under the previous
+// key — is what closes that window; asserting it fires in the same
+// transition that clears the snapshot is the regression test for it.
+test("clears the query cache (not just the snapshot) on a same-day account switch", async () => {
+  mockDashboard = { data: summary, isError: false };
+  await render(<Harness />);
+  authCallback?.({ uid: "u1" });
+  mockQcClear.mockClear();
+  mockClearSnapshot.mockClear();
+
+  authCallback?.({ uid: "u2" });
+  // Both scrubs fire in the SAME transition, from the SAME condition — the
+  // structural (owner-scoped key) and defense-in-depth (whole-client clear)
+  // fixes are not alternatives, they run together.
+  expect(mockQcClear).toHaveBeenCalledTimes(1);
   expect(mockClearSnapshot).toHaveBeenCalledTimes(1);
 });
