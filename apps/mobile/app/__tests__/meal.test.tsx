@@ -1,6 +1,7 @@
 import { render, fireEvent, waitFor } from "@testing-library/react-native";
 import { Alert } from "react-native";
 import MealDetail from "../meal";
+import { instrumentDark, instrumentLight } from "@/theme/palette";
 
 const mockEditMutate = jest.fn();
 const mockEditMutateAsync = jest.fn();
@@ -81,6 +82,8 @@ async function renderMeal(overrides: {
   quantity_grams?: number;
   entered_amount?: number;
   entered_unit?: string;
+  source?: string;
+  provenance?: string;
   item?: { base_unit?: string; serving_units?: { name: string; amount: number; base_amount: number }[] };
 } = {}) {
   const { item, ...rest } = overrides;
@@ -113,7 +116,7 @@ test("editing a sachet log sends the entered unit, not grams", async () => {
   });
 
   await fireEvent.press(getByLabelText("Increase amount"));
-  await fireEvent.press(getByText("Save changes"));
+  await fireEvent.press(getByText("Looks right — keep it"));
 
   // The client sends what the user entered; the SERVER derives the grams.
   expect(mockEditMutate).toHaveBeenCalledWith(
@@ -129,13 +132,13 @@ test("editing a sachet log sends the entered unit, not grams", async () => {
 test("Save is disabled until something changes, then PATCHes only changed fields", async () => {
   const { getByText, getByLabelText } = await render(<MealDetail />);
   // clean form: Save disabled -> pressing it does not mutate
-  await fireEvent.press(getByText("Save changes"));
+  await fireEvent.press(getByText("Looks right — keep it"));
   expect(mockEditMutate).not.toHaveBeenCalled();
   // bump grams 200 -> 210 (legacy log: PortionField renders the exact-mode
   // amount field, no named serving to step through) and move to lunch
   await fireEvent.changeText(getByLabelText("Amount"), "210");
   await fireEvent.press(getByText("Lunch"));
-  await fireEvent.press(getByText("Save changes"));
+  await fireEvent.press(getByText("Looks right — keep it"));
   expect(mockEditMutate).toHaveBeenCalledWith(
     { id: "log1", quantity_grams: 210, meal_slot: "lunch" },
     expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
@@ -148,7 +151,7 @@ test("Saving a portion/slot change offers Undo that PATCHes back the prior grams
   const { getByText, getByLabelText } = await render(<MealDetail />);
   await fireEvent.changeText(getByLabelText("Amount"), "210");
   await fireEvent.press(getByText("Lunch"));
-  await fireEvent.press(getByText("Save changes"));
+  await fireEvent.press(getByText("Looks right — keep it"));
 
   await waitFor(() => expect(mockToastShow).toHaveBeenCalledTimes(1));
   const [toastArgs] = mockToastShow.mock.calls[0];
@@ -228,7 +231,7 @@ test("FIX 2: a fractional server quantity_grams does not falsely arm Save change
   await waitFor(() => expect(getByDisplayValue("142.5")).toBeTruthy());
 
   // ... so nothing is dirty and Save changes does not arm itself.
-  await fireEvent.press(getByText("Save changes"));
+  await fireEvent.press(getByText("Looks right — keep it"));
   expect(mockEditMutate).not.toHaveBeenCalled();
 });
 
@@ -243,10 +246,50 @@ test("editing a millilitre log sends the entered unit, not bare grams", async ()
   });
 
   await fireEvent.changeText(getByLabelText("Amount"), "300");
-  await fireEvent.press(getByText("Save changes"));
+  await fireEvent.press(getByText("Looks right — keep it"));
 
   expect(mockEditMutate).toHaveBeenCalledWith(
     expect.objectContaining({ entered_amount: 300, entered_unit: "ml" }),
     expect.anything(),
   );
+});
+
+// Instrument-glass rebuild (task 12): kcal hero numeral, provenance chip,
+// and the three macro rows all render from route-param data alone, before
+// the log fetch resolves — same "paint instantly" contract the rest of the
+// screen already relies on.
+test("renders the kcal hero numeral and macro rows from route params", async () => {
+  const { getByText } = await render(<MealDetail />);
+  expect(getByText("300")).toBeTruthy();
+  expect(getByText("kcal · this meal")).toBeTruthy();
+  expect(getByText("6g")).toBeTruthy();
+  expect(getByText("64g")).toBeTruthy();
+  expect(getByText("2g")).toBeTruthy();
+});
+
+// The provenance chip combines the log's source ("Photo") with its
+// provenance descriptor ("AI estimate" for anything not in the verified
+// source set) into the single "◉ Photo · AI estimate" reading the spec
+// calls for, and only shows the accent ◉ marker for an AI-resolved source.
+test("provenance chip shows the source and AI-estimate descriptor for an AI-resolved log", async () => {
+  const { getByText } = await renderMeal({ source: "ai_photo", provenance: "user_estimate" });
+  expect(getByText("Photo · AI estimate")).toBeTruthy();
+  expect(getByText("◉")).toBeTruthy();
+});
+
+// A verified provenance (the food-database sources ProvenanceChip already
+// treats as verified) never carries the AI-estimate disclaimer, and a
+// manually-logged entry is never marked with the accent AI dot.
+test("provenance chip shows Verified (no accent dot) for a manually-logged, verified-source entry", async () => {
+  const { getByText, queryByText } = await renderMeal({ source: "manual", provenance: "afcd" });
+  expect(getByText("Manual · Verified")).toBeTruthy();
+  expect(queryByText("◉")).toBeNull();
+});
+
+test("the Delete action renders in the instrument danger color", async () => {
+  const { getByText } = await render(<MealDetail />);
+  const node = getByText("Delete");
+  const flat = [node.props.style].flat(Infinity).filter(Boolean);
+  const color = Object.assign({}, ...flat).color;
+  expect([instrumentLight.danger, instrumentDark.danger]).toContain(color);
 });

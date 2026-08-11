@@ -1,24 +1,19 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, View } from "react-native";
+import { Alert, StyleSheet, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { Sheet } from "@/components/Sheet";
 import { Icon } from "@/components/Icon";
-import { Button } from "@/components/Button";
-import { Segmented } from "@/components/Segmented";
-import { Card } from "@/components/Card";
-import { Stat } from "@/components/Stat";
 import { AppText } from "@/components/Text";
-import { Overline } from "@/components/Overline";
+import { GlassPanel } from "@/components/instrument/GlassPanel";
 import { FoodPicker } from "@/components/meal/FoodPicker";
 import { AskAgainSheet } from "@/components/meal/AskAgainSheet";
 import { PortionField } from "@/components/units/PortionField";
-import { foodVisual } from "@/lib/foodVisual";
 import { haptics, PressableScale } from "@/motion";
 import { useEditLog, useDeleteLog, useLog, useRepeatLog, useCreateLog, type EditLogInput } from "@/api/hooks";
-import type { FoodItem, FoodLog } from "@/api/types";
+import { UNKNOWN_PROVENANCE, type FoodItem, type FoodLog } from "@/api/types";
 import type { MealSlot } from "@/lib/mealSlot";
 import type { ServingUnit } from "@/units/portion";
-import { useTheme } from "@/theme";
+import { useTheme, type InstrumentTokens } from "@/theme";
 import { useToast } from "@/components/Toast";
 
 // A fetched log carries the user's entered (amount, unit) pair, but the
@@ -44,6 +39,164 @@ const SLOT_OPTIONS: Array<{ key: MealSlot; label: string }> = [
   { key: "snack", label: "Snack" },
 ];
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+// Same verified-source set ProvenanceChip (src/components/ProvenanceChip.tsx)
+// uses for its "verified" vs "AI estimate ±15%" split. Duplicated here rather
+// than importing ProvenanceChip and restyling it in place: that component is
+// also used by app/log.tsx (a food-SEARCH result, a different shape of claim)
+// and is asserted against directly by
+// src/components/__tests__/dashboard-widgets.test.tsx, so changing its
+// rendering would change behavior for those other callers. This screen's
+// chip is composed inline instead — see task-12 report for the tradeoff.
+const VERIFIED_PROVENANCE = new Set(["afcd", "off", "usda"]);
+
+function provenanceDescriptor(provenance: string | undefined): string | null {
+  if (!provenance || provenance === UNKNOWN_PROVENANCE) return null;
+  return VERIFIED_PROVENANCE.has(provenance) ? "Verified" : "AI estimate";
+}
+
+const SOURCE_LABELS: Record<string, string> = {
+  ai_photo: "Photo",
+  ai_voice: "Voice",
+  ai_text: "Text",
+  ai_barcode: "Barcode",
+  barcode: "Barcode",
+  manual: "Manual",
+  saved_meal: "Saved meal",
+};
+
+function sourceLabel(source: string | undefined): string | null {
+  if (!source) return null;
+  return SOURCE_LABELS[source] ?? cap(source.replace(/_/g, " "));
+}
+
+// Engraved caption treatment (spec: 10px uppercase, ls 1.4, mut) — the one
+// non-accent engraved zone this screen reuses across the chip, the hero
+// caption and the macro-row labels.
+function engravedStyle(instrument: InstrumentTokens, color: string = instrument.mut) {
+  return {
+    fontSize: 10,
+    letterSpacing: 1.4,
+    textTransform: "uppercase" as const,
+    fontWeight: "600" as const,
+    color,
+  };
+}
+
+// One row of the macro breakdown panel: a 70pt engraved-label column, a 5px
+// inset track with an accent fill, and the mono gram value + "· N%" mut
+// share of this meal's macro calories (Atwater factors — protein/carbs 4
+// kcal/g, fat 9 kcal/g — computed from figures this screen already has, no
+// extra fetch required).
+function MacroRow({ label, grams, pct }: { label: string; grams: number; pct: number }) {
+  const { instrument, fonts } = useTheme();
+  const mono = { fontFamily: fonts.mono, fontVariant: ["tabular-nums" as const] };
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+      <View style={{ width: 70 }}>
+        <AppText style={engravedStyle(instrument)}>{label}</AppText>
+      </View>
+      <View style={{ flex: 1, height: 5, borderRadius: 3, backgroundColor: instrument.inset, overflow: "hidden" }}>
+        <View style={{ height: "100%", width: `${Math.min(Math.max(pct, 0), 100)}%`, backgroundColor: instrument.accent, borderRadius: 3 }} />
+      </View>
+      <View style={{ flexDirection: "row", alignItems: "baseline", gap: 4, minWidth: 64, justifyContent: "flex-end" }}>
+        <AppText style={[{ fontSize: 13, fontWeight: "600", color: instrument.ink }, mono]}>{grams}g</AppText>
+        <AppText style={[{ fontSize: 11, color: instrument.mut }, mono]}>{`· ${pct}%`}</AppText>
+      </View>
+    </View>
+  );
+}
+
+// Instrument-glass meal-slot control — same track/inset/glassBorder pattern
+// as progress.tsx's RangeSegmented, kept local since its options (the four
+// meal slots) are specific to this screen.
+function SlotSegmented({ value, onChange }: { value: MealSlot; onChange: (key: MealSlot) => void }) {
+  const { instrument } = useTheme();
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        backgroundColor: instrument.glass,
+        borderRadius: 12,
+        padding: 3,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: instrument.glassBorder,
+      }}
+    >
+      {SLOT_OPTIONS.map((opt) => {
+        const selected = opt.key === value;
+        return (
+          <PressableScale
+            key={opt.key}
+            accessibilityRole="tab"
+            accessibilityLabel={opt.label}
+            accessibilityState={{ selected }}
+            haptic="selection"
+            onPress={() => onChange(opt.key)}
+            style={{
+              flex: 1,
+              paddingVertical: 8,
+              borderRadius: 9,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: selected ? instrument.inset : "transparent",
+              borderWidth: selected ? StyleSheet.hairlineWidth : 0,
+              borderColor: instrument.glassBorder,
+            }}
+          >
+            <AppText style={{ fontSize: 12, fontWeight: "600", color: selected ? instrument.ink : instrument.mut }}>
+              {opt.label}
+            </AppText>
+          </PressableScale>
+        );
+      })}
+    </View>
+  );
+}
+
+// Edit/Duplicate/Delete actions row — bordered glass pills, Delete alone in
+// instrument.danger (the accent budget's one exception: danger is a
+// separate, non-accent signal color, same as elsewhere in the uplift).
+function ActionButton({
+  label,
+  accessibilityLabel,
+  onPress,
+  disabled,
+  danger,
+}: {
+  label: string;
+  accessibilityLabel: string;
+  onPress: () => void;
+  disabled?: boolean;
+  danger?: boolean;
+}) {
+  const { instrument } = useTheme();
+  return (
+    <PressableScale
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityState={{ disabled: !!disabled }}
+      haptic="selection"
+      disabled={disabled}
+      onPress={onPress}
+      style={{
+        flex: 1,
+        alignItems: "center",
+        justifyContent: "center",
+        paddingVertical: 13,
+        borderRadius: 16,
+        backgroundColor: instrument.glass,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: instrument.glassBorder,
+        opacity: disabled ? 0.5 : 1,
+      }}
+    >
+      <AppText style={{ color: danger ? instrument.danger : instrument.ink, fontWeight: "600", fontSize: 14 }}>
+        {label}
+      </AppText>
+    </PressableScale>
+  );
+}
 
 // The food identity, portion and slot a food-change undo restores. food_item_id
 // is optional here only in principle — the server rejects a nil food_item_id
@@ -94,7 +247,8 @@ type PendingFoodUndo = {
 };
 
 export default function MealDetail() {
-  const { colors } = useTheme();
+  const { instrument, fonts } = useTheme();
+  const mono = { fontFamily: fonts.mono, fontVariant: ["tabular-nums" as const] };
   const p = useLocalSearchParams<{
     id: string; name: string; mealSlot: string; time: string;
     kcal: string; protein: string; carbs: string; fat: string; grams: string;
@@ -110,7 +264,6 @@ export default function MealDetail() {
   // Paint instantly from the diary's route params (it already knows the name,
   // kcal and macros), then prefer the fetched/patched log once it's in.
   const name = effective?.description ?? p.name ?? "Meal";
-  const vis = foodVisual(name, p.mealSlot);
   const baseGrams = effective?.quantity_grams ?? (Number(p.grams) || 0);
   const baseKcal = effective?.kcal ?? (Number(p.kcal) || 0);
   const baseProtein = effective?.protein_g ?? (Number(p.protein) || 0);
@@ -446,42 +599,122 @@ export default function MealDetail() {
     });
   };
 
+  // Chip label: source ("Photo") + provenance descriptor ("AI estimate" /
+  // "Verified"), joined only when both are known. Neither is on the route
+  // params — both come from the fetched/patched log, so the chip is simply
+  // absent until that lands (same "unknown until fetched" convention as the
+  // Ask-Kora-again link below), rather than a fabricated placeholder value.
+  const chipSource = sourceLabel(effective?.source);
+  const chipProvenance = provenanceDescriptor(effective?.provenance);
+  const provenanceLabel = [chipSource, chipProvenance].filter((v): v is string => Boolean(v)).join(" · ") || null;
+  const isAiSource = typeof effective?.source === "string" && effective.source.startsWith("ai_");
+
+  // Macro-row share of THIS meal's calories, via Atwater factors (protein/
+  // carbs 4 kcal/g, fat 9 kcal/g) — a figure this screen already has all the
+  // inputs for, unlike a "% of today's budget" line (see the hero panel
+  // below, which omits that line for the same reason).
+  const proteinG = scale(baseProtein);
+  const carbsG = scale(baseCarbs);
+  const fatG = scale(baseFat);
+  const macroKcalTotal = proteinG * 4 + carbsG * 4 + fatG * 9;
+  const macroPct = (g: number, kcalPerG: number) =>
+    macroKcalTotal > 0 ? Math.round((g * kcalPerG * 100) / macroKcalTotal) : 0;
+
   return (
     <Sheet visible onClose={() => router.back()}>
       <View style={{ paddingHorizontal: 22, paddingBottom: 30 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 14, paddingVertical: 16 }}>
-          <View
+          <PressableScale
+            haptic="selection"
+            accessibilityRole="button"
+            accessibilityLabel="Back"
+            onPress={() => router.back()}
             style={{
-              width: 64,
-              height: 64,
-              borderRadius: 14,
+              width: 38,
+              height: 38,
+              borderRadius: 19,
               alignItems: "center",
               justifyContent: "center",
-              backgroundColor: colors.cardSecondary,
+              backgroundColor: instrument.glass,
+              borderWidth: StyleSheet.hairlineWidth,
+              borderColor: instrument.glassBorder,
             }}
           >
-            <Icon name={vis.icon} size={28} color={colors.accent} />
-          </View>
+            <AppText style={{ fontSize: 20, fontWeight: "600", color: instrument.ink }}>‹</AppText>
+          </PressableScale>
           <View style={{ flex: 1 }}>
-            <AppText variant="title2">{name}</AppText>
-            <AppText variant="footnote" muted style={{ marginTop: 2 }}>
+            <AppText style={{ fontSize: 12, color: instrument.mut }}>
               {cap(p.mealSlot)} · {p.time}
             </AppText>
+            <AppText style={{ fontSize: 22, fontWeight: "700", color: instrument.ink, marginTop: 2 }}>
+              {name}
+            </AppText>
           </View>
-          <Stat label="Calories" value={String(kcal)} unit="kcal" />
         </View>
 
-        <Card variant="elevated" style={{ flexDirection: "row", marginBottom: 20 }}>
-          <View style={{ flex: 1 }}>
-            <Stat label="Protein" value={String(scale(baseProtein))} unit="g" valueColor={colors.accent} />
+        {/* chips row — provenance (accent ◉ only for an AI-resolved source) + mono grams */}
+        <View style={{ flexDirection: "row", gap: 8, marginBottom: 16 }}>
+          {provenanceLabel ? (
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 5,
+                borderRadius: 999,
+                paddingHorizontal: 10,
+                paddingVertical: 6,
+                backgroundColor: instrument.glass,
+                borderWidth: StyleSheet.hairlineWidth,
+                borderColor: instrument.glassBorder,
+              }}
+            >
+              {isAiSource ? <AppText style={{ fontSize: 9, color: instrument.accent }}>◉</AppText> : null}
+              <AppText style={engravedStyle(instrument)}>{provenanceLabel}</AppText>
+            </View>
+          ) : null}
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              borderRadius: 999,
+              paddingHorizontal: 10,
+              paddingVertical: 6,
+              backgroundColor: instrument.glass,
+              borderWidth: StyleSheet.hairlineWidth,
+              borderColor: instrument.glassBorder,
+            }}
+          >
+            <AppText style={[{ fontSize: 12, fontWeight: "600", color: instrument.ink }, mono]}>
+              {`${Math.round(grams)}${baseUnit}`}
+            </AppText>
           </View>
-          <View style={{ flex: 1 }}>
-            <Stat label="Carbs" value={String(scale(baseCarbs))} unit="g" valueColor={colors.accentAmber} />
+        </View>
+
+        {/* kcal hero. lineHeight is set well above fontSize (72 for a 64px
+            numeral) so the numeral's own descenders/ascenders never clip —
+            the same fix the GaugeDial center overlay needed. "N% of today's
+            budget" is omitted: that figure needs the day's dashboard target,
+            which this screen has no fetch for and no mocked test data for —
+            per the spec, omit rather than fabricate. */}
+        <GlassPanel radius={24} style={{ marginBottom: 16 }}>
+          <View style={{ padding: 20 }}>
+            <AppText style={[{ fontSize: 64, lineHeight: 72, letterSpacing: -2, color: instrument.ink }, mono]}>
+              {kcal.toLocaleString()}
+            </AppText>
+            <AppText style={[engravedStyle(instrument, instrument.accent), { fontSize: 11, letterSpacing: 2, marginTop: 4 }]}>
+              kcal · this meal
+            </AppText>
           </View>
-          <View style={{ flex: 1 }}>
-            <Stat label="Fat" value={String(scale(baseFat))} unit="g" valueColor={colors.accentBlue} />
+        </GlassPanel>
+
+        {/* macro rows */}
+        <GlassPanel radius={22} style={{ marginBottom: 16 }}>
+          <View style={{ padding: 16, gap: 14 }}>
+            <MacroRow label="Protein" grams={proteinG} pct={macroPct(proteinG, 4)} />
+            <MacroRow label="Carbs" grams={carbsG} pct={macroPct(carbsG, 4)} />
+            <MacroRow label="Fat" grams={fatG} pct={macroPct(fatG, 9)} />
           </View>
-        </Card>
+        </GlassPanel>
 
         {pendingFoodUndo ? (
           <View
@@ -494,18 +727,18 @@ export default function MealDetail() {
               paddingVertical: 10,
               paddingHorizontal: 4,
               marginBottom: 16,
-              borderTopWidth: 1,
-              borderBottomWidth: 1,
-              borderColor: colors.separator,
+              borderTopWidth: StyleSheet.hairlineWidth,
+              borderBottomWidth: StyleSheet.hairlineWidth,
+              borderColor: instrument.hairline,
             }}
           >
             <View style={{ flex: 1 }}>
-              <Overline>Changed</Overline>
-              <AppText variant="subheadline" style={{ fontWeight: "600", marginTop: 2 }}>
+              <AppText style={engravedStyle(instrument)}>Changed</AppText>
+              <AppText style={{ fontSize: 14, fontWeight: "600", color: instrument.ink, marginTop: 2 }}>
                 Now {pendingFoodUndo.foodName}
               </AppText>
               {pendingFoodUndo.aliasRecorded && pendingFoodUndo.phrase ? (
-                <AppText variant="footnote" muted style={{ marginTop: 2 }}>
+                <AppText style={{ fontSize: 12, color: instrument.mut, marginTop: 2 }}>
                   Kora will remember &quot;{pendingFoodUndo.phrase}&quot;
                 </AppText>
               ) : null}
@@ -524,33 +757,50 @@ export default function MealDetail() {
                 }}
                 style={{ minHeight: 44, minWidth: 44, alignItems: "center", justifyContent: "center", paddingHorizontal: 8 }}
               >
-                <AppText style={{ color: colors.accent, fontWeight: "700" }}>Undo</AppText>
+                <AppText style={{ color: instrument.accent, fontWeight: "700" }}>Undo</AppText>
               </PressableScale>
             ) : null}
           </View>
         ) : null}
 
-        <Overline>Portion</Overline>
-        <View style={{ paddingVertical: 12, marginTop: 6, gap: 12 }}>
-          <PressableScale
-            haptic="selection"
-            accessibilityRole="button"
-            accessibilityLabel="Change food"
-            disabled={busy}
-            onPress={() => setPickerVisible(true)}
-            style={{ flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-start" }}
-          >
-            <AppText variant="subheadline" style={{ fontWeight: "600" }}>{name}</AppText>
-            <Icon name="chevron-right" size={14} color={colors.tertiaryLabel} />
-          </PressableScale>
-          <PortionField
-            baseUnit={baseUnit}
-            servingUnits={servingUnits}
-            amount={portionAmount}
-            unit={portionUnit}
-            onChange={onPortionChange}
-          />
-        </View>
+        {/* portion panel */}
+        <GlassPanel radius={22} style={{ marginBottom: 16 }}>
+          <View style={{ padding: 16, gap: 12 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              <AppText style={engravedStyle(instrument)}>Portion</AppText>
+              <AppText style={[{ fontSize: 15, fontWeight: "600", color: instrument.ink }, mono]}>
+                {`${Math.round(grams)}${baseUnit}`}
+              </AppText>
+            </View>
+            <PressableScale
+              haptic="selection"
+              accessibilityRole="button"
+              accessibilityLabel="Change food"
+              disabled={busy}
+              onPress={() => setPickerVisible(true)}
+              style={{ flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-start" }}
+            >
+              <AppText style={{ fontSize: 14, fontWeight: "600", color: instrument.ink }}>{name}</AppText>
+              <Icon name="chevron-right" size={14} color={instrument.mut} />
+            </PressableScale>
+            {/*
+              PortionField (src/components/units/PortionField.tsx) is left
+              functionally and visually as-is here: it also renders inside
+              app/log.tsx and src/components/meals/SavedMealSheet.tsx, and
+              this task's file scope is app/meal.tsx only, so its internal
+              stepper buttons don't carry the glassBorder-pill/accent -+
+              treatment the visual spec describes for them. See task-12
+              report.
+            */}
+            <PortionField
+              baseUnit={baseUnit}
+              servingUnits={servingUnits}
+              amount={portionAmount}
+              unit={portionUnit}
+              onChange={onPortionChange}
+            />
+          </View>
+        </GlassPanel>
 
         {/*
           Only a phrase the user actually uttered/typed is something Kora can
@@ -568,42 +818,48 @@ export default function MealDetail() {
             onPress={() => setAskAgainVisible(true)}
             style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingBottom: 12 }}
           >
-            <Icon name="sparkles" size={14} color={colors.accent} />
-            <AppText variant="footnote" style={{ color: colors.accent, fontWeight: "600" }}>
+            <Icon name="sparkles" size={14} color={instrument.accent} />
+            <AppText style={{ fontSize: 12, color: instrument.accent, fontWeight: "600" }}>
               Ask Kora again
             </AppText>
           </PressableScale>
         ) : null}
 
-        <Overline style={{ marginTop: 8 }}>Meal</Overline>
-        <View style={{ marginTop: 8, marginBottom: 20 }}>
-          <Segmented options={SLOT_OPTIONS} value={slot} onChange={(key) => setSlot(key as MealSlot)} />
+        <AppText style={[engravedStyle(instrument), { marginTop: 8, marginBottom: 8 }]}>Meal</AppText>
+        <View style={{ marginBottom: 20 }}>
+          <SlotSegmented value={slot} onChange={setSlot} />
         </View>
 
         {err ? (
-          <AppText variant="footnote" style={{ color: colors.destructive, marginBottom: 12 }}>
-            {err}
-          </AppText>
+          <AppText style={{ fontSize: 13, color: instrument.danger, marginBottom: 12 }}>{err}</AppText>
         ) : null}
 
-        <View style={{ gap: 10 }}>
-          <Button title="Save changes" onPress={onSave} disabled={!dirty || busy} />
-          <Button
-            title="Repeat"
-            variant="secondary"
-            icon="repeat"
-            accessibilityLabel="Repeat entry"
-            disabled={busy}
-            onPress={onRepeat}
-          />
-          <Button
-            title="Remove"
-            variant="destructive"
-            icon="trash-2"
-            accessibilityLabel="Delete entry"
-            disabled={busy}
-            onPress={onDelete}
-          />
+        <PressableScale
+          haptic="selection"
+          accessibilityRole="button"
+          accessibilityLabel="Looks right — keep it"
+          accessibilityState={{ disabled: !dirty || busy }}
+          disabled={!dirty || busy}
+          onPress={onSave}
+          style={{
+            backgroundColor: instrument.accent,
+            borderRadius: 22,
+            paddingVertical: 15,
+            alignItems: "center",
+            justifyContent: "center",
+            opacity: !dirty || busy ? 0.5 : 1,
+            marginBottom: 10,
+          }}
+        >
+          <AppText style={{ color: instrument.accentOn, fontSize: 15, fontWeight: "700" }}>
+            Looks right — keep it
+          </AppText>
+        </PressableScale>
+
+        <View style={{ flexDirection: "row", gap: 10 }}>
+          <ActionButton label="Edit" accessibilityLabel="Edit meal" disabled={busy} onPress={() => setPickerVisible(true)} />
+          <ActionButton label="Duplicate" accessibilityLabel="Repeat entry" disabled={busy} onPress={onRepeat} />
+          <ActionButton label="Delete" accessibilityLabel="Delete entry" disabled={busy} danger onPress={onDelete} />
         </View>
       </View>
 
