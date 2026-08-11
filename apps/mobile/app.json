@@ -15,7 +15,8 @@
         "usesNonExemptEncryption": false
       },
       "entitlements": {
-        "com.apple.developer.healthkit": true
+        "com.apple.developer.healthkit": true,
+        "com.apple.security.application-groups": ["group.com.tesserix.kora"]
       }
     },
     "android": {
@@ -82,7 +83,8 @@
         {
           "iosUrlScheme": "com.googleusercontent.apps.564299717841-k80q23k7nouu7525plsjb812gn5bajm7"
         }
-      ]
+      ],
+      "@bacons/apple-targets"
     ],
     "experiments": {
       "typedRoutes": true,
