@@ -87,9 +87,23 @@ test("clears the snapshot when the user signs out", async () => {
   expect(mockClearSnapshot).toHaveBeenCalledTimes(1);
 });
 
-// Signing back IN must not clear — only the transition to null does.
-test("does not clear when a user signs in", async () => {
+// The first auth event of a fresh mount has nothing prior to compare
+// against, and repeat events for the SAME uid (token refresh, etc.) are not
+// a user switch — neither should scrub the snapshot.
+test("does not clear on the first sign-in or on same-uid re-emissions", async () => {
   await render(<Harness />);
-  authCallback?.({ uid: "u2" });
+  authCallback?.({ uid: "u1" });
+  authCallback?.({ uid: "u1" });
   expect(mockClearSnapshot).not.toHaveBeenCalled();
+});
+
+// A DIFFERENT uid replacing a known previous one is a user switch — user B
+// must never see user A's cached calories, even for the moment before B's
+// own dashboard fetch resolves.
+test("clears when a different uid replaces the previous one", async () => {
+  await render(<Harness />);
+  authCallback?.({ uid: "u1" });
+  expect(mockClearSnapshot).not.toHaveBeenCalled();
+  authCallback?.({ uid: "u2" });
+  expect(mockClearSnapshot).toHaveBeenCalledTimes(1);
 });
