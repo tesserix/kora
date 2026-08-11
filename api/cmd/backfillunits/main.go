@@ -16,10 +16,21 @@
 // change, so the job is safe to re-run. An OFF fetch that fails is logged and
 // skipped — one unreachable product never fails the whole job.
 //
-// Run with -dry-run first. This job has never been run against production and
-// touches thousands of rows; the dry run reports exactly what it would write,
+// Run with -dry-run first. The dry run reports exactly what it would write,
 // including how many serving_units came from a row's own label versus the
 // curated name table, and a sample of the latter.
+//
+// -no-fallback declines units.Fallback entirely, so only evidence is written:
+// a row's own parsed label, and base_unit from OpenFoodFacts. Prefer it. The
+// 2026-08-11 production dry run planned 762 serving_units writes of which 639
+// came from the curated table, and 395 of those matched a keyword that is not
+// the food's head noun — "Apples, dried, stewed, WITHOUT added sugar" took
+// sugar's 200 g cup, fried chicken "with flour" took flour's 125 g cup, and
+// "Alcoholic beverage, rice (sake)" took rice's 158 g cup despite being a
+// liquid. units.Fallback matches a keyword anywhere in a name and cannot read
+// negation, so a USDA-style compound name is routinely claimed by an
+// ingredient it merely mentions. An absent conversion is recoverable by the
+// user; a fabricated one silently corrupts every total that uses it.
 package main
 
 import (
@@ -73,7 +84,7 @@ type unitPlan struct {
 
 // backfillItem computes the serving_units payload for a single food item,
 // or reports false when the row should be left untouched.
-func backfillItem(item nutrition.FoodItem) (unitPlan, bool) {
+func backfillItem(item nutrition.FoodItem, noFallback bool) (unitPlan, bool) {
 	// Never clobber units a row already has — those came from OFF or an admin
 	// and are better evidence than a re-parse of the description text.
 	if len(item.ServingUnits) > 0 && string(item.ServingUnits) != "[]" && string(item.ServingUnits) != "null" {
@@ -86,6 +97,12 @@ func backfillItem(item nutrition.FoodItem) (unitPlan, bool) {
 	source := sourceParse
 	parsed, err := units.Parse(item.ServingDesc)
 	if err != nil {
+		// With noFallback set the row simply has no named serving. That is the
+		// recoverable outcome — the client falls back to raw base-unit entry —
+		// where a category-level guess is not.
+		if noFallback {
+			return unitPlan{}, false
+		}
 		source = sourceFallback
 		parsed = units.Fallback(item.Name)
 		if len(parsed) == 0 {
@@ -159,10 +176,14 @@ type options struct {
 	OFF nutrition.ServingUnitFetcher
 	// Pause between OFF requests. Zero in tests.
 	Pause time.Duration
+	// NoFallback declines units.Fallback entirely, so only evidence is
+	// written: a row's own parsed label, and base_unit from OFF.
+	NoFallback bool
 }
 
 func main() {
 	dryRun := flag.Bool("dry-run", false, "report what would be written without writing anything")
+	noFallback := flag.Bool("no-fallback", false, "write only evidence: skip the curated name table entirely")
 	flag.Parse()
 
 	url := os.Getenv("DATABASE_URL")
@@ -175,16 +196,22 @@ func main() {
 	}
 
 	off := nutrition.NewHTTPOFFClient()
-	result, err := run(context.Background(), db, options{DryRun: *dryRun, OFF: off, Pause: offPause})
+	result, err := run(context.Background(), db, options{
+		DryRun:     *dryRun,
+		NoFallback: *noFallback,
+		OFF:        off,
+		Pause:      offPause,
+	})
 	if err != nil {
 		log.Fatal(err)
 	}
-	report(*dryRun, result)
+	report(*dryRun, *noFallback, result)
 }
 
-func report(dryRun bool, s stats) {
+func report(dryRun, noFallback bool, s stats) {
 	slog.Info("backfillunits: complete",
 		"dry_run", dryRun,
+		"no_fallback", noFallback,
 		"serving_units_rows", s.UnitsWritten,
 		"from_label_parse", s.FromParse,
 		"from_curated_table", s.FromFallback,
@@ -219,7 +246,7 @@ func run(ctx context.Context, db *gorm.DB, opts options) (stats, error) {
 		for _, item := range batch {
 			changes := map[string]any{}
 
-			if plan, ok := backfillItem(item); ok {
+			if plan, ok := backfillItem(item, opts.NoFallback); ok {
 				changes["serving_units"] = plan.Encoded
 				s.UnitsWritten++
 				if plan.Source == sourceFallback {
