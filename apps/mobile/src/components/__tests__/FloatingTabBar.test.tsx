@@ -14,8 +14,20 @@ const props = {
 
 test("renders tab labels and a capture button", async () => {
   const { findByLabelText } = await render(<FloatingTabBar {...props} />);
-  expect(await findByLabelText("Home")).toBeTruthy();
+  expect(await findByLabelText("Today")).toBeTruthy();
   expect(await findByLabelText("Capture")).toBeTruthy();
+});
+
+// Instrument Glass rename: Home -> Today, Progress -> Trends. The active tab
+// (index, per `props` above) carries a shared accent-dot testID rather than a
+// per-route one, since only one tab is ever active at a time.
+test("the active tab carries the accent dot and tabs use the new names", async () => {
+  const { getByText, queryByText, findByTestId } = await render(<FloatingTabBar {...props} />);
+  expect(getByText("Today")).toBeTruthy();
+  expect(getByText("Trends")).toBeTruthy();
+  expect(queryByText("Progress")).toBeNull();
+  expect(queryByText("Home")).toBeNull();
+  expect(await findByTestId("tab-dot-active")).toBeTruthy();
 });
 
 test("capture button routes to /capture", async () => {
@@ -34,9 +46,10 @@ test("tab press navigates to the tapped route", async () => {
 });
 
 test("shows the active tint dot only on the currently active tab", async () => {
-  const { findByTestId, queryByTestId } = await render(<FloatingTabBar {...props} />);
-  expect(await findByTestId("index-active-dot")).toBeTruthy();
-  expect(queryByTestId("diary-active-dot")).toBeNull();
+  // getByTestId throws if more than one match exists, so this alone proves
+  // the dot renders exactly once even though every tab shares the testID.
+  const { findByTestId } = await render(<FloatingTabBar {...props} />);
+  expect(await findByTestId("tab-dot-active")).toBeTruthy();
 });
 
 test("shows an unread accent dot on More when count > 0", async () => {

@@ -119,10 +119,10 @@ export default function TabsLayout() {
       tabBar={(props) => <FloatingTabBar {...props} />}
       screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: colors.background } }}
     >
-      <Tabs.Screen name="index" />
-      <Tabs.Screen name="diary" />
-      <Tabs.Screen name="progress" />
-      <Tabs.Screen name="more" />
+      <Tabs.Screen name="index" options={{ title: "Today" }} />
+      <Tabs.Screen name="diary" options={{ title: "Diary" }} />
+      <Tabs.Screen name="progress" options={{ title: "Trends" }} />
+      <Tabs.Screen name="more" options={{ title: "More" }} />
     </Tabs>
   );
 }
