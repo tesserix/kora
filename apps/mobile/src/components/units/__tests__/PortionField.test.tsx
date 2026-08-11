@@ -1,5 +1,6 @@
 import { fireEvent, render } from "@testing-library/react-native";
 import { PortionField } from "../PortionField";
+import { instrumentLight, lightColors } from "@/theme/palette";
 
 const SACHET = [{ name: "sachet", amount: 1, base_amount: 16.5 }];
 
@@ -177,4 +178,39 @@ test("reselecting the current unit reports nothing", async () => {
   );
   await fireEvent.press(getByText("g"));
   expect(onChange).not.toHaveBeenCalled();
+});
+
+function flattenStyle(style: unknown) {
+  return Object.assign({}, ...[style].flat(Infinity).filter(Boolean));
+}
+
+// Backward compatibility: omitting `variant` (the default used by
+// app/log.tsx and src/components/meals/SavedMealSheet.tsx) must render
+// exactly as it always has, not the instrument-glass pill.
+test("default variant (omitted) keeps the legacy cardSecondary stepper styling", async () => {
+  const { getByLabelText } = await render(
+    <PortionField baseUnit="g" servingUnits={SACHET} amount={1} unit="sachet" onChange={() => {}} />,
+  );
+  const flat = flattenStyle(getByLabelText("Increase amount").props.style);
+  expect(flat.backgroundColor).toBe(lightColors.cardSecondary);
+  expect(flat.borderColor).toBeUndefined();
+});
+
+test('variant="instrument" styles the stepper as a glassBorder pill on an inset well', async () => {
+  const { getByLabelText, getByText } = await render(
+    <PortionField
+      baseUnit="g"
+      servingUnits={SACHET}
+      amount={1}
+      unit="sachet"
+      onChange={() => {}}
+      variant="instrument"
+    />,
+  );
+  const flat = flattenStyle(getByLabelText("Increase amount").props.style);
+  expect(flat.backgroundColor).toBe(instrumentLight.inset);
+  expect(flat.borderColor).toBe(instrumentLight.glassBorder);
+  // The center stepper value is mono/tabular-nums in the instrument variant.
+  const valueStyle = flattenStyle(getByText("1 sachet (16.5 g)").props.style);
+  expect(valueStyle.fontVariant).toEqual(["tabular-nums"]);
 });

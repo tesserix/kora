@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Pressable, TextInput, View } from "react-native";
+import { Pressable, StyleSheet, TextInput, View } from "react-native";
 import { AppText } from "@/components/Text";
 import { Icon } from "@/components/Icon";
 import { useTheme } from "@/theme";
@@ -11,6 +11,16 @@ interface PortionFieldProps {
   amount: number;
   unit: string;
   onChange: (amount: number, unit: string) => void;
+  /**
+   * Visual variant. Backward-compatible: omitted (or "default") renders
+   * exactly as before — the legacy cardSecondary stepper buttons used by
+   * app/log.tsx and src/components/meals/SavedMealSheet.tsx. "instrument"
+   * restyles the stepper mode's -/+ buttons and center value for the
+   * instrument-glass meal detail screen (app/meal.tsx): a glassBorder pill
+   * on an inset well, accent glyphs, and a mono tabular-nums value. Exact
+   * mode (the TextInput + unit chips) is unchanged in both variants.
+   */
+  variant?: "default" | "instrument";
 }
 
 // Display-only rounding for the "(16.5 g)" stepper hint. This figure never
@@ -20,8 +30,8 @@ function formatDisplay(value: number): string {
   return Number.isInteger(value) ? String(value) : String(Math.round(value * 10) / 10);
 }
 
-export function PortionField({ baseUnit, servingUnits, amount, unit, onChange }: PortionFieldProps) {
-  const { colors, spacing, radius, fonts } = useTheme();
+export function PortionField({ baseUnit, servingUnits, amount, unit, onChange, variant = "default" }: PortionFieldProps) {
+  const { colors, spacing, radius, fonts, instrument } = useTheme();
 
   const matchingServing = servingUnits.find((s) => s.name === unit);
 
@@ -130,14 +140,40 @@ export function PortionField({ baseUnit, servingUnits, amount, unit, onChange }:
     reportExact(nextText, selectedUnit);
   };
 
-  const stepButtonStyle = {
-    width: 32,
-    height: 32,
-    borderRadius: radius.full,
-    backgroundColor: colors.cardSecondary,
-    alignItems: "center" as const,
-    justifyContent: "center" as const,
-  };
+  // "instrument" pill: glassBorder ring on an inset well, matching the
+  // meal-detail spec's stepper treatment; "default" keeps the original
+  // cardSecondary circle used by every other caller.
+  const stepButtonStyle =
+    variant === "instrument"
+      ? {
+          width: 32,
+          height: 32,
+          borderRadius: radius.full,
+          backgroundColor: instrument.inset,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: instrument.glassBorder,
+          alignItems: "center" as const,
+          justifyContent: "center" as const,
+        }
+      : {
+          width: 32,
+          height: 32,
+          borderRadius: radius.full,
+          backgroundColor: colors.cardSecondary,
+          alignItems: "center" as const,
+          justifyContent: "center" as const,
+        };
+  const stepIconColor = variant === "instrument" ? instrument.accent : colors.label;
+  const stepperValueStyle =
+    variant === "instrument"
+      ? {
+          flex: 1,
+          textAlign: "center" as const,
+          color: instrument.ink,
+          fontFamily: fonts.mono,
+          fontVariant: ["tabular-nums" as const],
+        }
+      : { flex: 1, textAlign: "center" as const };
 
   const baseTotal = matchingServing ? formatDisplay(matchingServing.base_amount * amount) : null;
   const stepperLabel = matchingServing
@@ -149,11 +185,11 @@ export function PortionField({ baseUnit, servingUnits, amount, unit, onChange }:
       <View style={{ gap: spacing.sm }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md }}>
           <Pressable accessibilityLabel="Decrease amount" hitSlop={8} onPress={decrease} style={stepButtonStyle}>
-            <Icon name="minus" size={16} color={colors.label} />
+            <Icon name="minus" size={16} color={stepIconColor} />
           </Pressable>
-          <AppText style={{ flex: 1, textAlign: "center" }}>{stepperLabel}</AppText>
+          <AppText style={stepperValueStyle}>{stepperLabel}</AppText>
           <Pressable accessibilityLabel="Increase amount" hitSlop={8} onPress={increase} style={stepButtonStyle}>
-            <Icon name="plus" size={16} color={colors.label} />
+            <Icon name="plus" size={16} color={stepIconColor} />
           </Pressable>
         </View>
         <Pressable onPress={enterExactMode}>

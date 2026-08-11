@@ -7,13 +7,18 @@ import { AppText } from "@/components/Text";
 import { GlassPanel } from "@/components/instrument/GlassPanel";
 import { FoodPicker } from "@/components/meal/FoodPicker";
 import { AskAgainSheet } from "@/components/meal/AskAgainSheet";
+import { MacroRow } from "@/components/meal/MacroRow";
+import { SlotSegmented } from "@/components/meal/SlotSegmented";
+import { ActionButton } from "@/components/meal/ActionButton";
+import { engravedStyle } from "@/components/meal/mealStyles";
+import { provenanceDescriptor, sourceLabel } from "@/components/meal/mealProvenance";
 import { PortionField } from "@/components/units/PortionField";
 import { haptics, PressableScale } from "@/motion";
 import { useEditLog, useDeleteLog, useLog, useRepeatLog, useCreateLog, type EditLogInput } from "@/api/hooks";
-import { UNKNOWN_PROVENANCE, type FoodItem, type FoodLog } from "@/api/types";
+import type { FoodItem, FoodLog } from "@/api/types";
 import type { MealSlot } from "@/lib/mealSlot";
 import type { ServingUnit } from "@/units/portion";
-import { useTheme, type InstrumentTokens } from "@/theme";
+import { useTheme } from "@/theme";
 import { useToast } from "@/components/Toast";
 
 // A fetched log carries the user's entered (amount, unit) pair, but the
@@ -32,171 +37,7 @@ function servingUnitsFor(entry: FoodLog | null | undefined): ServingUnit[] {
   return [];
 }
 
-const SLOT_OPTIONS: Array<{ key: MealSlot; label: string }> = [
-  { key: "breakfast", label: "Breakfast" },
-  { key: "lunch", label: "Lunch" },
-  { key: "dinner", label: "Dinner" },
-  { key: "snack", label: "Snack" },
-];
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-
-// Same verified-source set ProvenanceChip (src/components/ProvenanceChip.tsx)
-// uses for its "verified" vs "AI estimate ±15%" split. Duplicated here rather
-// than importing ProvenanceChip and restyling it in place: that component is
-// also used by app/log.tsx (a food-SEARCH result, a different shape of claim)
-// and is asserted against directly by
-// src/components/__tests__/dashboard-widgets.test.tsx, so changing its
-// rendering would change behavior for those other callers. This screen's
-// chip is composed inline instead — see task-12 report for the tradeoff.
-const VERIFIED_PROVENANCE = new Set(["afcd", "off", "usda"]);
-
-function provenanceDescriptor(provenance: string | undefined): string | null {
-  if (!provenance || provenance === UNKNOWN_PROVENANCE) return null;
-  return VERIFIED_PROVENANCE.has(provenance) ? "Verified" : "AI estimate";
-}
-
-const SOURCE_LABELS: Record<string, string> = {
-  ai_photo: "Photo",
-  ai_voice: "Voice",
-  ai_text: "Text",
-  ai_barcode: "Barcode",
-  barcode: "Barcode",
-  manual: "Manual",
-  saved_meal: "Saved meal",
-};
-
-function sourceLabel(source: string | undefined): string | null {
-  if (!source) return null;
-  return SOURCE_LABELS[source] ?? cap(source.replace(/_/g, " "));
-}
-
-// Engraved caption treatment (spec: 10px uppercase, ls 1.4, mut) — the one
-// non-accent engraved zone this screen reuses across the chip, the hero
-// caption and the macro-row labels.
-function engravedStyle(instrument: InstrumentTokens, color: string = instrument.mut) {
-  return {
-    fontSize: 10,
-    letterSpacing: 1.4,
-    textTransform: "uppercase" as const,
-    fontWeight: "600" as const,
-    color,
-  };
-}
-
-// One row of the macro breakdown panel: a 70pt engraved-label column, a 5px
-// inset track with an accent fill, and the mono gram value + "· N%" mut
-// share of this meal's macro calories (Atwater factors — protein/carbs 4
-// kcal/g, fat 9 kcal/g — computed from figures this screen already has, no
-// extra fetch required).
-function MacroRow({ label, grams, pct }: { label: string; grams: number; pct: number }) {
-  const { instrument, fonts } = useTheme();
-  const mono = { fontFamily: fonts.mono, fontVariant: ["tabular-nums" as const] };
-  return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-      <View style={{ width: 70 }}>
-        <AppText style={engravedStyle(instrument)}>{label}</AppText>
-      </View>
-      <View style={{ flex: 1, height: 5, borderRadius: 3, backgroundColor: instrument.inset, overflow: "hidden" }}>
-        <View style={{ height: "100%", width: `${Math.min(Math.max(pct, 0), 100)}%`, backgroundColor: instrument.accent, borderRadius: 3 }} />
-      </View>
-      <View style={{ flexDirection: "row", alignItems: "baseline", gap: 4, minWidth: 64, justifyContent: "flex-end" }}>
-        <AppText style={[{ fontSize: 13, fontWeight: "600", color: instrument.ink }, mono]}>{grams}g</AppText>
-        <AppText style={[{ fontSize: 11, color: instrument.mut }, mono]}>{`· ${pct}%`}</AppText>
-      </View>
-    </View>
-  );
-}
-
-// Instrument-glass meal-slot control — same track/inset/glassBorder pattern
-// as progress.tsx's RangeSegmented, kept local since its options (the four
-// meal slots) are specific to this screen.
-function SlotSegmented({ value, onChange }: { value: MealSlot; onChange: (key: MealSlot) => void }) {
-  const { instrument } = useTheme();
-  return (
-    <View
-      style={{
-        flexDirection: "row",
-        backgroundColor: instrument.glass,
-        borderRadius: 12,
-        padding: 3,
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: instrument.glassBorder,
-      }}
-    >
-      {SLOT_OPTIONS.map((opt) => {
-        const selected = opt.key === value;
-        return (
-          <PressableScale
-            key={opt.key}
-            accessibilityRole="tab"
-            accessibilityLabel={opt.label}
-            accessibilityState={{ selected }}
-            haptic="selection"
-            onPress={() => onChange(opt.key)}
-            style={{
-              flex: 1,
-              paddingVertical: 8,
-              borderRadius: 9,
-              alignItems: "center",
-              justifyContent: "center",
-              backgroundColor: selected ? instrument.inset : "transparent",
-              borderWidth: selected ? StyleSheet.hairlineWidth : 0,
-              borderColor: instrument.glassBorder,
-            }}
-          >
-            <AppText style={{ fontSize: 12, fontWeight: "600", color: selected ? instrument.ink : instrument.mut }}>
-              {opt.label}
-            </AppText>
-          </PressableScale>
-        );
-      })}
-    </View>
-  );
-}
-
-// Edit/Duplicate/Delete actions row — bordered glass pills, Delete alone in
-// instrument.danger (the accent budget's one exception: danger is a
-// separate, non-accent signal color, same as elsewhere in the uplift).
-function ActionButton({
-  label,
-  accessibilityLabel,
-  onPress,
-  disabled,
-  danger,
-}: {
-  label: string;
-  accessibilityLabel: string;
-  onPress: () => void;
-  disabled?: boolean;
-  danger?: boolean;
-}) {
-  const { instrument } = useTheme();
-  return (
-    <PressableScale
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel}
-      accessibilityState={{ disabled: !!disabled }}
-      haptic="selection"
-      disabled={disabled}
-      onPress={onPress}
-      style={{
-        flex: 1,
-        alignItems: "center",
-        justifyContent: "center",
-        paddingVertical: 13,
-        borderRadius: 16,
-        backgroundColor: instrument.glass,
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: instrument.glassBorder,
-        opacity: disabled ? 0.5 : 1,
-      }}
-    >
-      <AppText style={{ color: danger ? instrument.danger : instrument.ink, fontWeight: "600", fontSize: 14 }}>
-        {label}
-      </AppText>
-    </PressableScale>
-  );
-}
 
 // The food identity, portion and slot a food-change undo restores. food_item_id
 // is optional here only in principle — the server rejects a nil food_item_id
@@ -643,10 +484,10 @@ export default function MealDetail() {
             <AppText style={{ fontSize: 20, fontWeight: "600", color: instrument.ink }}>‹</AppText>
           </PressableScale>
           <View style={{ flex: 1 }}>
-            <AppText style={{ fontSize: 12, color: instrument.mut }}>
-              {cap(p.mealSlot)} · {p.time}
+            <AppText style={engravedStyle(instrument)}>
+              {`${cap(p.mealSlot)} · ${p.time}`}
             </AppText>
-            <AppText style={{ fontSize: 22, fontWeight: "700", color: instrument.ink, marginTop: 2 }}>
+            <AppText style={{ fontSize: 22, fontWeight: "700", color: instrument.ink, marginTop: 4 }}>
               {name}
             </AppText>
           </View>
@@ -757,7 +598,9 @@ export default function MealDetail() {
                 }}
                 style={{ minHeight: 44, minWidth: 44, alignItems: "center", justifyContent: "center", paddingHorizontal: 8 }}
               >
-                <AppText style={{ color: instrument.accent, fontWeight: "700" }}>Undo</AppText>
+                {/* Secondary action, demoted from accent: the screen's one
+                    accent CTA is "Looks right — keep it" below. */}
+                <AppText style={{ color: instrument.ink, fontWeight: "600" }}>Undo</AppText>
               </PressableScale>
             ) : null}
           </View>
@@ -784,13 +627,10 @@ export default function MealDetail() {
               <Icon name="chevron-right" size={14} color={instrument.mut} />
             </PressableScale>
             {/*
-              PortionField (src/components/units/PortionField.tsx) is left
-              functionally and visually as-is here: it also renders inside
-              app/log.tsx and src/components/meals/SavedMealSheet.tsx, and
-              this task's file scope is app/meal.tsx only, so its internal
-              stepper buttons don't carry the glassBorder-pill/accent -+
-              treatment the visual spec describes for them. See task-12
-              report.
+              variant="instrument" restyles PortionField's stepper mode
+              (glassBorder pill on an inset well, accent -/+, mono value)
+              without touching its default rendering, which app/log.tsx and
+              src/components/meals/SavedMealSheet.tsx still rely on.
             */}
             <PortionField
               baseUnit={baseUnit}
@@ -798,6 +638,7 @@ export default function MealDetail() {
               amount={portionAmount}
               unit={portionUnit}
               onChange={onPortionChange}
+              variant="instrument"
             />
           </View>
         </GlassPanel>
@@ -818,8 +659,10 @@ export default function MealDetail() {
             onPress={() => setAskAgainVisible(true)}
             style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingBottom: 12 }}
           >
-            <Icon name="sparkles" size={14} color={instrument.accent} />
-            <AppText style={{ fontSize: 12, color: instrument.accent, fontWeight: "600" }}>
+            {/* Secondary action, demoted from accent: the screen's one
+                accent CTA is "Looks right — keep it" below. */}
+            <Icon name="sparkles" size={14} color={instrument.ink} />
+            <AppText style={{ fontSize: 12, color: instrument.ink, fontWeight: "600" }}>
               Ask Kora again
             </AppText>
           </PressableScale>
