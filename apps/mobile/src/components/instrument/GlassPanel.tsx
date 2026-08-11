@@ -3,6 +3,15 @@ import { AccessibilityInfo, StyleSheet, View, type StyleProp, type ViewStyle } f
 import { BlurView } from "expo-blur";
 import { useTheme } from "@/theme";
 
+// Reduced-transparency fallback fill — deliberately distinct from
+// `instrument.bg` (the screen ground under the ambient pools). Using `bg`
+// itself made a fallback panel invisible: identical color to the screen
+// behind it, so the "card" vanished entirely for anyone with Reduce
+// Transparency on (I4). These are near-opaque card tones, one step lighter
+// (dark) / one step off-white (light) than the ground, so the panel still
+// reads as an elevated surface without any blur.
+export const REDUCED_TRANSPARENCY_FALLBACK = { dark: "#14171C", light: "#F7F7F8" } as const;
+
 // One elevation level; glass never stacks on glass (spec: Shape and material).
 export function useReducedTransparency(): boolean {
   const [reduced, setReduced] = useState(false);
@@ -30,10 +39,10 @@ export function GlassPanel({ children, style, radius = 24, testID }: GlassPanelP
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: instrument.glassBorder,
     overflow: "hidden",
-    // Reduced-transparency fallback: opaque bg-derived card color, not a hardcoded
-    // hex (spec: Shape and material > Reduced transparency) — instrument.bg already
-    // swaps per theme, so deriving from it keeps this in sync with the token table.
-    backgroundColor: reduced ? instrument.bg : "transparent",
+    // Reduced-transparency fallback (spec: Shape and material > Reduced
+    // transparency): a near-opaque card tone distinct from `instrument.bg`
+    // — see REDUCED_TRANSPARENCY_FALLBACK above for why `bg` itself doesn't work.
+    backgroundColor: reduced ? REDUCED_TRANSPARENCY_FALLBACK[scheme] : "transparent",
   };
   return (
     <View testID={testID} style={[shell, shadows.card, style]}>

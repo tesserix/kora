@@ -1,4 +1,5 @@
-import { render, fireEvent } from "@testing-library/react-native";
+import { AccessibilityInfo } from "react-native";
+import { render, fireEvent, waitFor } from "@testing-library/react-native";
 
 jest.mock("expo-router", () => ({ router: { push: jest.fn() } }));
 jest.mock("@/api/hooks", () => ({ useUnreadCount: jest.fn(() => ({ data: { count: 0 } })) }));
@@ -61,4 +62,18 @@ test("shows an unread accent dot on More when count > 0", async () => {
 test("hides the unread accent dot on More when count is 0", async () => {
   const { queryByTestId } = await render(<FloatingTabBar {...props} />);
   expect(queryByTestId("more-unread-badge")).toBeNull();
+});
+
+// I3: the tab bar's BlurView must honor Reduce Transparency, same as GlassPanel.
+test("swaps the pill's BlurView for the opaque fallback when Reduce Transparency is on", async () => {
+  jest.spyOn(AccessibilityInfo, "isReduceTransparencyEnabled").mockResolvedValue(true);
+
+  const { getByTestId, queryByTestId } = await render(<FloatingTabBar {...props} />);
+
+  await waitFor(() => {
+    expect(queryByTestId("tab-bar-pill-blur")).toBeNull();
+  });
+  expect(getByTestId("tab-bar-pill")).toBeTruthy();
+
+  jest.restoreAllMocks();
 });

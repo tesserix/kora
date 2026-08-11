@@ -5,6 +5,7 @@ import { router } from "expo-router";
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
 import { Icon } from "./Icon";
 import { useTheme } from "@/theme";
+import { useReducedTransparency, REDUCED_TRANSPARENCY_FALLBACK } from "./instrument/GlassPanel";
 import { PressableScale, springs } from "@/motion";
 import { useUnreadCount } from "@/api/hooks";
 
@@ -39,7 +40,7 @@ type TabButtonProps = {
 };
 
 function TabButton({ name, meta, active, showBadge, onPress }: TabButtonProps) {
-  const { colors, instrument, radius } = useTheme();
+  const { instrument, radius } = useTheme();
   const scale = useSharedValue(active ? 1.08 : 1);
 
   useEffect(() => {
@@ -91,9 +92,9 @@ function TabButton({ name, meta, active, showBadge, onPress }: TabButtonProps) {
               width: 9,
               height: 9,
               borderRadius: 5,
-              backgroundColor: colors.primary,
+              backgroundColor: instrument.accent,
               borderWidth: 1.5,
-              borderColor: colors.card,
+              borderColor: instrument.bg,
             }}
           />
         ) : null}
@@ -135,6 +136,7 @@ function CaptureButton() {
 
 export function FloatingTabBar({ state, navigation }: FloatingTabBarProps) {
   const { instrument, scheme } = useTheme();
+  const reduced = useReducedTransparency();
   const activeName = state.routes[state.index]?.name;
   const unread = useUnreadCount();
   const unreadCount = unread.data?.count ?? 0;
@@ -161,25 +163,49 @@ export function FloatingTabBar({ state, navigation }: FloatingTabBarProps) {
   return (
     <View style={{ position: "absolute", left: 24, right: 24, bottom: 24 }} pointerEvents="box-none">
       <View style={{ position: "relative" }}>
-        <BlurView
-          intensity={scheme === "dark" ? 25 : 40}
-          tint={scheme === "dark" ? "dark" : "light"}
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            paddingHorizontal: 6,
-            height: 64,
-            borderRadius: 32,
-            borderWidth: 1,
-            borderColor: instrument.glassBorder,
-            overflow: "hidden",
-            backgroundColor: instrument.glass,
-          }}
-        >
-          {ORDER_LEFT.map(slot)}
-          <View style={{ flex: 1 }} />
-          {ORDER_RIGHT.map(slot)}
-        </BlurView>
+        {reduced ? (
+          // Reduce Transparency fallback (I3, same recipe as GlassPanel):
+          // an opaque pill instead of a live BlurView.
+          <View
+            testID="tab-bar-pill"
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              paddingHorizontal: 6,
+              height: 64,
+              borderRadius: 32,
+              borderWidth: 1,
+              borderColor: instrument.glassBorder,
+              overflow: "hidden",
+              backgroundColor: REDUCED_TRANSPARENCY_FALLBACK[scheme],
+            }}
+          >
+            {ORDER_LEFT.map(slot)}
+            <View style={{ flex: 1 }} />
+            {ORDER_RIGHT.map(slot)}
+          </View>
+        ) : (
+          <BlurView
+            testID="tab-bar-pill-blur"
+            intensity={scheme === "dark" ? 25 : 40}
+            tint={scheme === "dark" ? "dark" : "light"}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              paddingHorizontal: 6,
+              height: 64,
+              borderRadius: 32,
+              borderWidth: 1,
+              borderColor: instrument.glassBorder,
+              overflow: "hidden",
+              backgroundColor: instrument.glass,
+            }}
+          >
+            {ORDER_LEFT.map(slot)}
+            <View style={{ flex: 1 }} />
+            {ORDER_RIGHT.map(slot)}
+          </BlurView>
+        )}
         <View
           style={{ position: "absolute", top: -CAMERA_RAISE, left: 0, right: 0, alignItems: "center" }}
           pointerEvents="box-none"
