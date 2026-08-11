@@ -20,7 +20,7 @@ import { useQueuedLogs } from "@/offline/useQueuedLogs";
 import { useQueuedCaptures } from "@/offline/useQueuedCaptures";
 import { PressableScale, haptics } from "@/motion";
 import { useTheme } from "@/theme";
-import { hslToHex, withAlpha } from "@/lib/color";
+import { hslToHex } from "@/lib/color";
 import { useUnits, mlToFlOz, flOzToMl, type UnitSystem } from "@/units";
 import { formatPortion } from "@/units/portion";
 import { foodVisual } from "@/lib/foodVisual";
@@ -113,11 +113,13 @@ function WaterPill({ label, a11yLabel, disabled, onPress }: WaterPillProps) {
         justifyContent: "center",
         paddingVertical: 13,
         borderRadius: 16,
-        backgroundColor: withAlpha(instrument.accent, 0.16),
+        backgroundColor: instrument.inset,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: instrument.glassBorder,
         opacity: disabled ? 0.5 : 1,
       }}
     >
-      <AppText style={{ color: instrument.accent, fontWeight: "700" }}>{label}</AppText>
+      <AppText style={{ color: instrument.ink, fontWeight: "700" }}>{label}</AppText>
     </PressableScale>
   );
 }
@@ -357,7 +359,7 @@ export default function Diary() {
                 <AppText>Cancel</AppText>
               </Pressable>
               <Pressable accessibilityRole="button" onPress={saveSelectionAsMeal}>
-                <AppText style={{ color: instrument.accent }}>Save as meal</AppText>
+                <AppText style={{ color: instrument.ink, fontWeight: "600" }}>Save as meal</AppText>
               </Pressable>
             </View>
           </View>
