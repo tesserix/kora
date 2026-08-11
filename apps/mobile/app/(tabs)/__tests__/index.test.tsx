@@ -56,6 +56,21 @@ test("Home renders the Today large title, the gauge dial reserve numeral, protei
   expect(await findByText("Logged today")).toBeTruthy();
   expect(await findByText("Greek yogurt bowl")).toBeTruthy();
   expect(await findByText("320 kcal")).toBeTruthy();
+  // meal-row slot is sentence case, not an engraved uppercase label (spec's ~4-label budget)
+  expect(await findByText("Breakfast")).toBeTruthy();
+});
+
+test("shows a placeholder, not a fabricated zero, while the dashboard fetch is pending", async () => {
+  mockUseDashboard.mockReturnValue({ data: undefined, isError: false });
+  mockUseDayLogs.mockReturnValue({ data: [], isError: false });
+
+  const { findByTestId, queryByTestId, queryByText, getAllByText } = await render(<Home />);
+  expect(await findByTestId("gauge-dial-placeholder")).toBeTruthy();
+  expect(queryByTestId("gauge-dial")).toBeNull();
+  expect(queryByTestId("macro-wide")).toBeNull();
+  expect(getAllByText("—").length).toBeGreaterThan(0);
+  // No fabricated "0" reserve/macro figures anywhere while pending.
+  expect(queryByText("0")).toBeNull();
 });
 
 test("tapping Add a meal routes to /capture", async () => {

@@ -13,6 +13,7 @@ import { EmptyState } from "@/components/common/EmptyState";
 import { AppBackground } from "@/components/AppBackground";
 import { PressableScale } from "@/motion";
 import { GaugeDial } from "@/components/instrument/GaugeDial";
+import { GAUGE_VIEW_H } from "@/components/instrument/gauge";
 import { MacroWide } from "@/components/instrument/MacroWide";
 import { SubDial } from "@/components/instrument/SubDial";
 import { TeleStrip, type TeleStripCell } from "@/components/instrument/TeleStrip";
@@ -39,6 +40,11 @@ function initials(name?: string): string {
 }
 function mealTime(log: FoodLog): string {
   return new Date(log.logged_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+// Meal-row slot label is sentence case, not engraved (see spec's ~4-engraved-label
+// budget) — the raw meal_slot value is lowercase ("breakfast"), so capitalize it.
+function sentenceCase(s: string): string {
+  return s.length > 0 ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 }
 
 export default function Home() {
@@ -68,9 +74,18 @@ export default function Home() {
     textTransform: "uppercase" as const,
     color: instrument.mut,
   };
+  // Sentence-case demotion for labels that would otherwise push the screen past
+  // the spec's ~4-visible-engraved-label budget (Energy reserve caption + the
+  // GaugeDial footer group + MacroWide's own label + TeleStrip's own labels
+  // already account for that budget — see task-8 fix report).
+  const mutedLabel = { fontSize: 11, color: instrument.mut };
 
   const d = dashboard.data;
   const loadError = dashboard.isError || logs.isError;
+  // No dashboard data yet and no error means the query hasn't resolved — distinct
+  // from a resolved dashboard with genuinely zero consumption (first-run day),
+  // which must still show real "0" values, not a placeholder.
+  const pending = !d && !loadError;
   const eaten = d?.consumed.kcal ?? 0;
   const goal = d?.targets.kcal ?? 0;
   const loggedMeals = (logs.data ?? []) as FoodLog[];
@@ -184,39 +199,59 @@ export default function Home() {
         </View>
       ) : null}
 
-      {/* energy reserve dial — hidden entirely on load error so no contradictory reserve figure shows */}
+      {/* energy reserve dial — hidden entirely on load error so no contradictory reserve figure shows.
+          While pending, a same-height "—" placeholder stands in so a fresh fetch never flashes
+          a fabricated "0 in reserve" / "0 of 0" before real targets are known. */}
       {!loadError ? (
         <Animated.View entering={enter(1)} style={{ paddingHorizontal: 16, paddingVertical: 12 }}>
           <GlassPanel radius={24} style={{ padding: 16 }}>
             <AppText style={[engraved, { marginBottom: 8 }]}>Energy reserve</AppText>
-            <GaugeDial value={eaten} target={goal} />
+            {pending ? (
+              <View
+                testID="gauge-dial-placeholder"
+                style={{ height: GAUGE_VIEW_H + 60, alignItems: "center", justifyContent: "center" }}
+              >
+                <AppText style={[{ fontSize: 54, color: instrument.mut, letterSpacing: -1.5 }, mono]}>—</AppText>
+              </View>
+            ) : (
+              <GaugeDial value={eaten} target={goal} />
+            )}
           </GlassPanel>
         </Animated.View>
       ) : null}
 
-      {/* macros — protein full-width, carbs/fat compact pair (deliberate asymmetry) */}
+      {/* macros — protein full-width, carbs/fat compact pair (deliberate asymmetry).
+          Same pending guard as the gauge: no fabricated 0/0 before the dashboard resolves. */}
       {!loadError ? (
         <Animated.View entering={enter(2)} style={{ paddingHorizontal: 16, gap: 12 }}>
-          <MacroWide label="Protein" value={proteinValue} goal={proteinGoal} unit="g" />
+          {pending ? (
+            <GlassPanel radius={22} testID="macro-wide-placeholder">
+              <View style={{ padding: 14 }}>
+                <AppText style={[mutedLabel, mono]}>—</AppText>
+              </View>
+            </GlassPanel>
+          ) : (
+            <MacroWide label="Protein" value={proteinValue} goal={proteinGoal} unit="g" />
+          )}
           <View style={{ flexDirection: "row", gap: 12 }}>
             <GlassPanel radius={20} style={{ flex: 1 }}>
               <View style={{ flexDirection: "row", alignItems: "center", padding: 12, gap: 10 }}>
-                <SubDial fraction={carbsGoal > 0 ? carbsValue / carbsGoal : 0} testID="carbs-subdial" />
+                <SubDial fraction={pending || carbsGoal === 0 ? 0 : carbsValue / carbsGoal} testID="carbs-subdial" />
                 <View>
-                  <AppText style={engraved}>Carbs</AppText>
+                  <AppText style={mutedLabel}>Carbs</AppText>
                   <AppText style={[{ fontSize: 13, fontWeight: "600", color: instrument.ink, marginTop: 2 }, mono]}>
-                    {carbsValue}/{carbsGoal}g
+                    {pending ? "—" : `${carbsValue}/${carbsGoal}g`}
                   </AppText>
                 </View>
               </View>
             </GlassPanel>
             <GlassPanel radius={20} style={{ flex: 1 }}>
               <View style={{ flexDirection: "row", alignItems: "center", padding: 12, gap: 10 }}>
-                <SubDial fraction={fatGoal > 0 ? fatValue / fatGoal : 0} testID="fat-subdial" />
+                <SubDial fraction={pending || fatGoal === 0 ? 0 : fatValue / fatGoal} testID="fat-subdial" />
                 <View>
-                  <AppText style={engraved}>Fat</AppText>
+                  <AppText style={mutedLabel}>Fat</AppText>
                   <AppText style={[{ fontSize: 13, fontWeight: "600", color: instrument.ink, marginTop: 2 }, mono]}>
-                    {fatValue}/{fatGoal}g
+                    {pending ? "—" : `${fatValue}/${fatGoal}g`}
                   </AppText>
                 </View>
               </View>
@@ -265,7 +300,7 @@ export default function Home() {
                       <AppText style={{ fontSize: 15, fontWeight: "600", color: instrument.ink }}>
                         {log.description}
                       </AppText>
-                      <AppText style={[engraved, { marginTop: 2 }]}>{log.meal_slot}</AppText>
+                      <AppText style={[mutedLabel, { marginTop: 2 }]}>{sentenceCase(log.meal_slot)}</AppText>
                     </View>
                     <AppText style={[{ fontSize: 15, fontWeight: "600", color: instrument.ink }, mono]}>
                       {Math.round(log.kcal)} kcal
