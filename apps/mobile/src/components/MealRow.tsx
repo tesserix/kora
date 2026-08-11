@@ -1,11 +1,11 @@
 import type { ReactNode } from "react";
 import { Pressable, View } from "react-native";
 import { AppText } from "./Text";
-import { Numeral } from "./Numeral";
 import { Icon } from "./Icon";
 import { PressableScale } from "@/motion";
 import { useTheme } from "@/theme";
 import { withAlpha } from "@/lib/color";
+import { monoStyle } from "./instrument/typography";
 
 type Props = {
   name: string;
@@ -34,25 +34,45 @@ type Props = {
   selected?: boolean;
 };
 
+// Instrument Glass restyle (C2): mono time/kcal, ink name, mut secondary
+// text, an instrument.inset + instrument.glassBorder selection wash (not an
+// accent wash — accent stays reserved for the primary CTA/gauge/redline
+// elsewhere), and star/bookmark glyphs tinted from instrument.ink at reduced
+// opacity rather than accent. Pure restyle — props/behavior unchanged.
 export function MealRow({ name, slot, kcal, iconName = "utensils", tint, onPress, onLongPress, accessibilityLabel, pinned, onPinToggle, bookmarked, onBookmark, badge, dimmed, selected }: Props) {
-  const { colors, radius, spacing } = useTheme();
-  const chip = tint ?? colors.accent;
+  const { radius, spacing, instrument, fonts } = useTheme();
+  const mono = monoStyle(fonts);
+  const chip = tint ?? instrument.mut;
+  const glyphOn = instrument.ink;
+  const glyphOff = withAlpha(instrument.ink, 0.35);
   return (
     // Not every row is interactive — a pending queued log has nothing to open.
     // Role and haptic follow the handler so a row that does nothing is neither
     // announced as a button nor buzzes under the finger.
     <PressableScale testID="meal-row" accessibilityRole={onPress ? "button" : undefined} accessibilityLabel={accessibilityLabel ?? name} accessibilityState={{ selected }} haptic={onPress ? "selection" : "none"} onPress={onPress} onLongPress={onLongPress}
-      style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10, paddingHorizontal: spacing.md, backgroundColor: selected ? withAlpha(colors.accent, 0.14) : undefined }}>
-      <View style={{ width: 36, height: 36, borderRadius: radius.md, alignItems: "center", justifyContent: "center", backgroundColor: withAlpha(selected ? colors.accent : chip, 0.16) }}>
-        <Icon name={selected ? "check" : iconName} size={18} color={selected ? colors.accent : chip} />
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
+        paddingVertical: 10,
+        paddingHorizontal: spacing.md,
+        borderRadius: radius.md,
+        borderWidth: selected ? 1 : 0,
+        borderColor: selected ? instrument.glassBorder : "transparent",
+        backgroundColor: selected ? instrument.inset : undefined,
+      }}>
+      <View style={{ width: 36, height: 36, borderRadius: radius.md, alignItems: "center", justifyContent: "center", backgroundColor: selected ? instrument.inset : withAlpha(chip, 0.16) }}>
+        <Icon name={selected ? "check" : iconName} size={18} color={selected ? glyphOn : chip} />
       </View>
       <View style={{ flex: 1 }}>
-        <AppText variant="headline">{name}</AppText>
-        <AppText variant="footnote" muted>{slot}</AppText>
+        <AppText variant="headline" style={{ color: instrument.ink }}>{name}</AppText>
+        <AppText variant="footnote" style={[{ color: instrument.mut }, mono]}>{slot}</AppText>
       </View>
       {badge}
       <View style={{ opacity: dimmed ? 0.5 : 1 }}>
-        <Numeral size={17}>{kcal === null ? "— kcal" : `${Math.round(kcal)} kcal`}</Numeral>
+        <AppText style={[{ fontSize: 17, fontWeight: "700", color: instrument.ink }, mono]}>
+          {kcal === null ? "— kcal" : `${Math.round(kcal)} kcal`}
+        </AppText>
       </View>
       {onPinToggle ? (
         <Pressable
@@ -62,7 +82,7 @@ export function MealRow({ name, slot, kcal, iconName = "utensils", tint, onPress
           onPress={onPinToggle}
           style={{ paddingLeft: spacing.sm }}
         >
-          <Icon name={pinned ? "star-fill" : "star"} size={20} color={pinned ? colors.accent : colors.tertiaryLabel} />
+          <Icon name={pinned ? "star-fill" : "star"} size={20} color={pinned ? glyphOn : glyphOff} />
         </Pressable>
       ) : null}
       {onBookmark ? (
@@ -73,7 +93,7 @@ export function MealRow({ name, slot, kcal, iconName = "utensils", tint, onPress
           onPress={onBookmark}
           style={{ paddingLeft: spacing.sm }}
         >
-          <Icon name={bookmarked ? "bookmark-fill" : "bookmark"} size={20} color={bookmarked ? colors.accent : colors.tertiaryLabel} />
+          <Icon name={bookmarked ? "bookmark-fill" : "bookmark"} size={20} color={bookmarked ? glyphOn : glyphOff} />
         </Pressable>
       ) : null}
     </PressableScale>
