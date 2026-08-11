@@ -102,7 +102,7 @@ export default function Home() {
   // Dashboard `Totals` (src/api/types.ts) has no burned/active-energy field —
   // GaugeDial's `burned` prop is intentionally omitted rather than guessed.
   const stepsCell: TeleStripCell = health.steps
-    ? { icon: <Icon name="trending-up" size={16} color={instrument.ink} />, value: health.steps.today.toLocaleString(), label: "Steps" }
+    ? { icon: <Icon name="footprints" size={16} color={instrument.mut} />, value: health.steps.today.toLocaleString(), label: "Steps" }
     : {
         icon: (
           <PressableScale
@@ -111,14 +111,14 @@ export default function Home() {
             haptic="selection"
             onPress={health.connect}
           >
-            <Icon name="trending-up" size={16} color={instrument.mut} />
+            <Icon name="footprints" size={16} color={instrument.mut} />
           </PressableScale>
         ),
         value: "—",
         label: "Steps",
       };
   const sleepCell: TeleStripCell = health.sleep
-    ? { icon: <Icon name="heart" size={16} color={instrument.ink} />, value: `${health.sleep.lastNightHours}h`, label: "Sleep" }
+    ? { icon: <Icon name="moon" size={16} color={instrument.mut} />, value: `${health.sleep.lastNightHours}h`, label: "Sleep" }
     : {
         icon: (
           <PressableScale
@@ -127,7 +127,7 @@ export default function Home() {
             haptic="selection"
             onPress={health.connect}
           >
-            <Icon name="heart" size={16} color={instrument.mut} />
+            <Icon name="moon" size={16} color={instrument.mut} />
           </PressableScale>
         ),
         value: "—",
