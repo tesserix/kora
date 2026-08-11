@@ -73,7 +73,7 @@ func TestResolveBarcodeLocalHit(t *testing.T) {
 	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE barcode = ?", code) })
 	seedFor(t, repo, []FoodItem{{Name: "Local bar", Brand: "test2a", Provenance: ProvenanceOFF, Barcode: &code, KcalPer100g: 400}})
 
-	item, found, err := repo.ResolveBarcode(context.Background(), stubOFF{err: assertNoCall(t)}, code)
+	item, found, err := repo.ResolveBarcode(context.Background(), noCallOFF(t), code)
 	require.NoError(t, err)
 	require.True(t, found)
 	require.Equal(t, "Local bar", item.Name)
@@ -167,9 +167,22 @@ func TestFetchByBarcodeSetsBaseUnitFromServingUnit(t *testing.T) {
 	}
 }
 
-// assertNoCall returns an error the stub would surface if Fetch is called; the
-// local-hit test must not reach the OFF client.
-func assertNoCall(t *testing.T) error { return nil }
+// noCallOFF returns a stubOFF that FAILS the test if Fetch is ever called. The
+// assertion is registered as a cleanup, so it fires even if the test returns
+// early. It replaces an earlier assertNoCall helper that returned a nil error
+// and never touched t — a no-op whose name claimed an assertion it did not
+// make, so a regression that started calling OFF on the local-hit path would
+// have gone unnoticed.
+func noCallOFF(t *testing.T) stubOFF {
+	t.Helper()
+	called := false
+	t.Cleanup(func() {
+		if called {
+			t.Errorf("OFF client was called: the local-hit path was not taken")
+		}
+	})
+	return stubOFF{called: &called}
+}
 
 func TestResolveBarcodeLocalErrorSurfacedNoOFFCall(t *testing.T) {
 	db := testDB(t)
@@ -371,12 +384,15 @@ type fakeEmbedder struct {
 func (f *fakeEmbedder) Embed(_ context.Context, text string) ([]float32, error) {
 	f.mu.Lock()
 	f.calls = append(f.calls, text)
-	f.mu.Unlock()
+	// The close stays INSIDE the lock: check-then-close is not atomic, so two
+	// concurrent Embed calls could both take the default branch and
+	// double-close, panicking the test binary.
 	select {
 	case <-f.called:
 	default:
 		close(f.called)
 	}
+	f.mu.Unlock()
 	return f.vec, f.err
 }
 
@@ -489,9 +505,10 @@ func TestResolveBarcodeLocalHitDoesNotEmbed(t *testing.T) {
 	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE barcode = ?", code) })
 	seedFor(t, repo, []FoodItem{{Name: "Repeat scan bar", Brand: "test2a", Provenance: ProvenanceOFF, Barcode: &code, KcalPer100g: 400}})
 
-	// stubOFF{err: assertNoCall(t)} proves the local-hit path was taken at
-	// all: the OFF client must never even be reached for a known barcode.
-	item, found, err := repo.ResolveBarcode(context.Background(), stubOFF{err: assertNoCall(t)}, code)
+	// noCallOFF proves the local-hit path was taken at all: it records whether
+	// Fetch was called and fails the test if it was, so this test cannot pass
+	// by accident on a path that goes out to OFF.
+	item, found, err := repo.ResolveBarcode(context.Background(), noCallOFF(t), code)
 	require.NoError(t, err)
 	require.True(t, found)
 	require.NotNil(t, item)
