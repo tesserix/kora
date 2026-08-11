@@ -32,8 +32,6 @@ export const lightColors = {
   warning: "#FF9500",
   error: "#FF3B30",
   info: "#007AFF",
-  stepsMetric: "#8FD400",
-  sleepMetric: "#7A6BFF",
   elevated: "#FFFFFF",
 } as const;
 
@@ -66,8 +64,6 @@ export const darkColors: Record<keyof typeof lightColors, string> = {
   warning: "#FF9F0A",
   error: "#FF453A",
   info: "#0A84FF",
-  stepsMetric: "#B6FF3D",
-  sleepMetric: "#8B7CFF",
   elevated: "#1C231D",
 };
 

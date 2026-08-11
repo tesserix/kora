@@ -33,10 +33,8 @@ test("spacing and radius match the design system scale", () => {
 import { gradientStops } from "../palette";
 
 describe("elevated tokens", () => {
-  it("adds metric hues + elevated surface to both schemes", () => {
+  it("adds elevated surface to both schemes", () => {
     for (const c of [lightColors, darkColors]) {
-      expect(c.stepsMetric).toMatch(/^#/);
-      expect(c.sleepMetric).toMatch(/^#/);
       expect(c.elevated).toMatch(/^#/);
     }
   });
