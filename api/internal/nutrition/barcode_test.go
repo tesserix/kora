@@ -132,11 +132,14 @@ func TestFetchByBarcodeSetsBaseUnitFromServingUnit(t *testing.T) {
 			wantServing:  "sachet",
 		},
 		{
+			// serving_quantity is still 250 here, so the row does have a
+			// serving mass to name even with no serving_size text — see
+			// TestFetchByBarcodeSynthesisesAPortionFromServingQuantity.
 			name:         "absent unit defaults to grams",
 			servingUnit:  "",
 			servingSize:  "",
 			wantBaseUnit: "g",
-			wantServing:  "",
+			wantServing:  "portion",
 		},
 	}
 	for _, tt := range tests {
@@ -163,6 +166,78 @@ func TestFetchByBarcodeSetsBaseUnitFromServingUnit(t *testing.T) {
 			require.NoError(t, json.Unmarshal(item.ServingUnits, &got))
 			require.Len(t, got, 1)
 			assert.Equal(t, tt.wantServing, got[0].Name)
+		})
+	}
+}
+
+// TestFetchByBarcodeSynthesisesAPortionFromServingQuantity covers the shape
+// OpenFoodFacts publishes far more often than a parseable label: a numeric
+// serving_quantity with no serving_size TEXT at all. Both barcodes from the
+// 2026-08-11 verification are like this — NESCAFÉ Mocha (16.5) and the milk
+// row (300) each carry a serving mass and an empty serving_size — so the scan
+// produced no named serving and the client could only offer raw gram entry.
+//
+// The synthesised figure is the row's OWN serving mass, not a density looked
+// up from anywhere, so this invents nothing: it names a quantity OFF already
+// published. That is the distinction from the curated table that used to sit
+// behind units.Fallback, which guessed a mass from a word in the food's name.
+func TestFetchByBarcodeSynthesisesAPortionFromServingQuantity(t *testing.T) {
+	tests := []struct {
+		name            string
+		servingQuantity float64
+		servingSize     string
+		wantName        string
+		wantBaseAmount  float64
+	}{
+		{
+			name:            "a serving mass with no label text becomes one portion",
+			servingQuantity: 16.5,
+			servingSize:     "",
+			wantName:        "portion",
+			wantBaseAmount:  16.5,
+		},
+		{
+			// A parseable label is better evidence than a generic "portion":
+			// it carries the serving's real NAME, which the user recognises.
+			name:            "a parseable label still wins over the generic portion",
+			servingQuantity: 16.5,
+			servingSize:     "1 sachet (16.5g)",
+			wantName:        "sachet",
+			wantBaseAmount:  16.5,
+		},
+		{
+			// Nothing published, nothing to name. A zero-gram serving unit
+			// would divide into every total that used it.
+			name:            "no serving mass and no label yields no unit at all",
+			servingQuantity: 0,
+			servingSize:     "",
+			wantName:        "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := offStubServer(t, offProduct{
+				ProductName:     "Test product",
+				EnergyKcal100g:  100,
+				ServingQuantity: tt.servingQuantity,
+				ServingSize:     tt.servingSize,
+			})
+
+			client := HTTPOFFClient{BaseURL: srv.URL, Client: http.DefaultClient}
+			item, err := client.Fetch(context.Background(), "9300605158641")
+			require.NoError(t, err)
+			require.NotNil(t, item)
+
+			if tt.wantName == "" {
+				assert.Empty(t, units.DecodeServingUnits(item.ServingUnits))
+				return
+			}
+			var got []units.ServingUnit
+			require.NoError(t, json.Unmarshal(item.ServingUnits, &got))
+			require.Len(t, got, 1)
+			assert.Equal(t, tt.wantName, got[0].Name)
+			assert.InDelta(t, tt.wantBaseAmount, got[0].BaseAmount, 1e-9)
+			assert.InDelta(t, 1, got[0].Amount, 1e-9, "a portion describes ONE serving")
 		})
 	}
 }
