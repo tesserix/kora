@@ -26,7 +26,7 @@ interface Props {
 }
 
 export function CustomReminderSheet({ visible, editing, onClose, onSave, onDelete }: Props) {
-  const { colors, spacing, radius } = useTheme();
+  const { instrument, spacing, radius } = useTheme();
   const [label, setLabel] = useState("");
   const [hour, setHour] = useState(NEW_REMINDER_DEFAULT.hour);
   const [minute, setMinute] = useState(NEW_REMINDER_DEFAULT.minute);
@@ -62,7 +62,7 @@ export function CustomReminderSheet({ visible, editing, onClose, onSave, onDelet
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
     borderRadius: radius.full,
-    backgroundColor: selected ? colors.accent : colors.cardSecondary,
+    backgroundColor: selected ? instrument.accent : instrument.inset,
   });
 
   return (
@@ -74,29 +74,29 @@ export function CustomReminderSheet({ visible, editing, onClose, onSave, onDelet
           value={label}
           onChangeText={setLabel}
           placeholder="Reminder label"
-          placeholderTextColor={colors.secondaryLabel}
+          placeholderTextColor={instrument.mut}
           accessibilityLabel="Reminder label"
-          style={{ fontSize: 20, color: colors.label, backgroundColor: colors.cardSecondary, borderRadius: radius.lg, paddingHorizontal: 14, paddingVertical: 12, marginTop: spacing.md }}
+          style={{ fontSize: 20, color: instrument.ink, backgroundColor: instrument.inset, borderRadius: radius.lg, paddingHorizontal: 14, paddingVertical: 12, marginTop: spacing.md }}
         />
 
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.xs, marginTop: spacing.sm }}>
           {PRESETS.map((p) => (
             <Pressable key={p} onPress={() => setLabel(p)} style={chip(false)}>
-              <AppText variant="footnote" muted>{p}</AppText>
+              <AppText style={{ fontSize: 13, color: instrument.mut }}>{p}</AppText>
             </Pressable>
           ))}
         </View>
 
         <Pressable accessibilityLabel="Reminder time" onPress={() => setShowPicker((s) => !s)} style={{ marginTop: spacing.md, flexDirection: "row", justifyContent: "space-between" }}>
-          <AppText variant="headline">Time</AppText>
-          <AppText variant="headline" style={{ color: colors.accent }}>{fmt(hour, minute)}</AppText>
+          <AppText style={{ fontSize: 17, fontWeight: "600", color: instrument.ink }}>Time</AppText>
+          <AppText style={{ fontSize: 17, fontWeight: "600", color: instrument.accent }}>{fmt(hour, minute)}</AppText>
         </Pressable>
         {showPicker ? (
           <DateTimePicker
             mode="time"
             display={Platform.OS === "ios" ? "spinner" : "default"}
             value={new Date(2000, 0, 1, hour, minute)}
-            textColor={colors.label}
+            textColor={instrument.ink}
             onChange={(_e, date) => {
               if (Platform.OS !== "ios") setShowPicker(false);
               if (date) { setHour(date.getHours()); setMinute(date.getMinutes()); }
@@ -106,14 +106,14 @@ export function CustomReminderSheet({ visible, editing, onClose, onSave, onDelet
 
         <WeekdayPicker days={days} onChange={setDays} />
 
-        {err ? <AppText style={{ color: colors.destructive, marginTop: spacing.sm }}>{err}</AppText> : null}
+        {err ? <AppText style={{ color: instrument.danger, marginTop: spacing.sm }}>{err}</AppText> : null}
 
         <View style={{ marginTop: spacing.lg }}>
           <Button title="Save" onPress={save} />
         </View>
         {editing ? (
           <Pressable onPress={() => onDelete(editing.id)} style={{ marginTop: spacing.md, alignItems: "center" }}>
-            <AppText style={{ color: colors.destructive }}>Delete reminder</AppText>
+            <AppText style={{ color: instrument.danger }}>Delete reminder</AppText>
           </Pressable>
         ) : null}
       </View>

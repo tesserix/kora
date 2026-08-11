@@ -16,12 +16,15 @@ import { useUnreadCount } from "@/api/hooks";
 import { useTheme } from "@/theme";
 
 // More tab, restyled to the Instrument Glass language (spec:
-// docs/superpowers/specs/2026-08-11-kora-instrument-glass-design.md). Rows are
-// composed inline rather than through GroupedList's Row/GroupedSection —
-// those are still the shared legacy (colors.card / colors.accent-tinted)
-// components used by ~10 other screens, and this task only covers More, so
-// touching them would drag every other caller into the new palette. The
-// unread-count Badge is the one accent element this screen is allowed.
+// docs/superpowers/specs/2026-08-11-kora-instrument-glass-design.md). Rows
+// are composed inline rather than through GroupedList's Row/GroupedSection —
+// that was true when More alone was in scope; the More-subscreens uplift
+// (docs/superpowers/sdd/2026-08-11-kora-instrument-glass/) later restyled
+// GroupedList itself to these same Instrument Glass tokens, so this file's
+// bespoke MoreRow/MoreGroup and GroupedList's Row/GroupedSection now render
+// near-identically — MoreRow is kept as-is rather than migrated to avoid
+// churn on an already-shipped screen. The unread-count Badge is the one
+// accent element this screen is allowed.
 type MoreRowKey = "profile" | "friends" | "groups" | "notifications" | "settings" | "reminders" | "feedback";
 
 type MoreRowProps = {

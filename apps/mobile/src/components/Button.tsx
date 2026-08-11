@@ -22,6 +22,14 @@ const HAPTIC: Record<Variant, keyof typeof haptics | "none"> = {
   destructive: "none",
 };
 
+// Restyled to Instrument Glass tokens: the old `colors.accent`/`colors.primary`
+// was green, and this is the one shared CTA component every in-scope
+// More-subscreen relies on for its primary action (friends/groups/challenge/
+// reminders/feedback). `instrument.accent` is the single universal accent
+// (#FF4A00, same value in both themes), so this swap holds even for the
+// remaining legacy call sites (sign-in, onboarding) that haven't migrated
+// their surrounding chrome yet — it's a move toward the spec's end state,
+// never away from it.
 export function Button({
   title,
   variant = "primary",
@@ -32,16 +40,16 @@ export function Button({
   onPress,
   ...rest
 }: Props) {
-  const { colors, radius, spacing } = useTheme();
-  const bg = variant === "primary" ? colors.accent : variant === "secondary" ? colors.cardSecondary : "transparent";
+  const { instrument, radius, spacing } = useTheme();
+  const bg = variant === "primary" ? instrument.accent : variant === "secondary" ? instrument.inset : "transparent";
   const fg =
     variant === "primary"
-      ? colors.primaryForeground
+      ? instrument.accentOn
       : variant === "destructive"
-        ? colors.destructive
+        ? instrument.danger
         : variant === "ghost"
-          ? colors.accent
-          : colors.label;
+          ? instrument.accent
+          : instrument.ink;
 
   return (
     <PressableScale

@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { AppText } from "@/components/Text";
 import { ScreenHeader } from "@/components/ScreenHeader";
+import { AppBackground } from "@/components/AppBackground";
 import { GroupedSection } from "@/components/GroupedList";
 import { NotifRow } from "@/components/NotifRow";
 import { useNotifications, useMarkAllRead } from "@/api/hooks";
@@ -58,7 +59,7 @@ function iconTintFor(type: NotificationType, colors: ReturnType<typeof useTheme>
 }
 
 export default function NotificationsScreen() {
-  const { colors } = useTheme();
+  const { colors, instrument } = useTheme();
   const insets = useSafeAreaInsets();
   const notifications = useNotifications();
   const markAll = useMarkAllRead();
@@ -74,32 +75,40 @@ export default function NotificationsScreen() {
   const list = notifications.data ?? [];
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
-      <ScreenHeader overline="Recent" title="Notifications" onBack={() => router.back()} />
-      <View style={{ paddingHorizontal: 20 }}>
-        {list.length === 0 ? (
-          <AppText muted style={{ paddingVertical: 12 }}>Nothing yet. Friend requests, group invites, and new challenges show up here.</AppText>
-        ) : (
-          <GroupedSection elevated>
-            {list.map((n) => {
-              const target = targetFor(n);
-              const { icon, tint } = iconTintFor(n.type, colors);
-              return (
-                <NotifRow
-                  key={n.id}
-                  type={n.type}
-                  iconName={icon}
-                  tint={tint}
-                  text={message(n)}
-                  time={relativeTime(n.created_at)}
-                  unread={!n.read}
-                  onPress={target ? () => router.push(target) : undefined}
-                />
-              );
-            })}
-          </GroupedSection>
-        )}
-      </View>
-    </ScrollView>
+    <View style={{ flex: 1, backgroundColor: instrument.bg }}>
+      <AppBackground />
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
+        <ScreenHeader overline="Recent" title="Notifications" onBack={() => router.back()} />
+        <View style={{ paddingHorizontal: 20 }}>
+          {list.length === 0 ? (
+            <AppText style={{ fontSize: 15, color: instrument.mut, paddingVertical: 12 }}>
+              Nothing yet. Friend requests, group invites, and new challenges show up here.
+            </AppText>
+          ) : (
+            <GroupedSection>
+              {list.map((n) => {
+                const target = targetFor(n);
+                // NotifRow no longer paints per-type tints on its icon tile
+                // (spec: "instrument tokens; any green/legacy accent →
+                // ink/mut") — `iconTintFor` still supplies the glyph name.
+                const { icon, tint } = iconTintFor(n.type, colors);
+                return (
+                  <NotifRow
+                    key={n.id}
+                    type={n.type}
+                    iconName={icon}
+                    tint={tint}
+                    text={message(n)}
+                    time={relativeTime(n.created_at)}
+                    unread={!n.read}
+                    onPress={target ? () => router.push(target) : undefined}
+                  />
+                );
+              })}
+            </GroupedSection>
+          )}
+        </View>
+      </ScrollView>
+    </View>
   );
 }

@@ -4,7 +4,7 @@ import { router, type Href } from "expo-router";
 import { AppText } from "@/components/Text";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { AppBackground } from "@/components/AppBackground";
-import { Card } from "@/components/Card";
+import { GlassPanel } from "@/components/instrument/GlassPanel";
 import { Segmented } from "@/components/Segmented";
 import { GroupedSection, Row } from "@/components/GroupedList";
 import { useUnits, type UnitSystem } from "@/units";
@@ -16,12 +16,12 @@ const UNIT_OPTIONS = [
 ];
 
 export default function SettingsScreen() {
-  const { colors, spacing } = useTheme();
+  const { instrument, spacing } = useTheme();
   const insets = useSafeAreaInsets();
   const { system, setSystem } = useUnits();
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
+    <View style={{ flex: 1, backgroundColor: instrument.bg }}>
       <AppBackground />
       <ScrollView
         style={{ flex: 1 }}
@@ -29,8 +29,8 @@ export default function SettingsScreen() {
       >
         <ScreenHeader overline="Preferences" title="Settings" onBack={() => router.back()} />
         <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>
-          <Card variant="elevated">
-            <AppText variant="footnote" muted style={{ marginBottom: spacing.sm }}>
+          <GlassPanel radius={22} style={{ padding: spacing.md }}>
+            <AppText style={{ fontSize: 13, color: instrument.mut, marginBottom: spacing.sm }}>
               Units
             </AppText>
             <Segmented
@@ -38,14 +38,14 @@ export default function SettingsScreen() {
               value={system}
               onChange={(key) => setSystem(key as UnitSystem)}
             />
-            <AppText variant="caption" muted style={{ marginTop: spacing.sm }}>
+            <AppText style={{ fontSize: 11, color: instrument.mut, marginTop: spacing.sm }}>
               Weight and height display.
             </AppText>
-          </Card>
-          <GroupedSection elevated>
+          </GlassPanel>
+          <GroupedSection>
             <Row
               title="Reminders"
-              icon={{ name: "bell", tint: colors.accent }}
+              icon={{ name: "bell", tint: instrument.mut }}
               chevron
               accessibilityLabel="Reminders"
               onPress={() => router.push("/reminders" as Href)}

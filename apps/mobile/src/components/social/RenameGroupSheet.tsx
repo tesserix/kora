@@ -15,7 +15,7 @@ interface Props {
 }
 
 export function RenameGroupSheet({ visible, groupId, currentName, onClose }: Props) {
-  const { colors, radius } = useTheme();
+  const { instrument, radius } = useTheme();
   const [value, setValue] = useState(currentName);
   const [err, setErr] = useState<string | null>(null);
   const rename = useRenameGroup();
@@ -51,11 +51,11 @@ export function RenameGroupSheet({ visible, groupId, currentName, onClose }: Pro
           autoCapitalize="words"
           autoCorrect={false}
           placeholder="Group name"
-          placeholderTextColor={colors.secondaryLabel}
+          placeholderTextColor={instrument.mut}
           accessibilityLabel="Group name"
-          style={{ marginTop: 12, fontSize: 16, color: colors.label, backgroundColor: colors.cardSecondary, borderRadius: radius.lg, paddingHorizontal: 14, paddingVertical: 12 }}
+          style={{ marginTop: 12, fontSize: 16, color: instrument.ink, backgroundColor: instrument.inset, borderRadius: radius.lg, paddingHorizontal: 14, paddingVertical: 12 }}
         />
-        {err ? <AppText style={{ color: colors.destructive, marginTop: 10 }}>{err}</AppText> : null}
+        {err ? <AppText style={{ color: instrument.danger, marginTop: 10 }}>{err}</AppText> : null}
         <Button title="Save" onPress={onSubmit} disabled={rename.isPending} style={{ marginTop: 14 }} />
       </View>
     </Sheet>

@@ -13,7 +13,7 @@ interface AddFriendSheetProps {
 }
 
 export function AddFriendSheet({ visible, onClose }: AddFriendSheetProps) {
-  const { colors, radius } = useTheme();
+  const { instrument, radius } = useTheme();
   const [value, setValue] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const send = useSendFriendRequest();
@@ -53,18 +53,18 @@ export function AddFriendSheet({ visible, onClose }: AddFriendSheetProps) {
           autoCapitalize="none"
           autoCorrect={false}
           placeholder="Friend code or email"
-          placeholderTextColor={colors.secondaryLabel}
+          placeholderTextColor={instrument.mut}
           accessibilityLabel="Friend code or email"
-          style={{ marginTop: 12, fontSize: 16, color: colors.label, backgroundColor: colors.cardSecondary, borderRadius: radius.lg, paddingHorizontal: 14, paddingVertical: 12 }}
+          style={{ marginTop: 12, fontSize: 16, color: instrument.ink, backgroundColor: instrument.inset, borderRadius: radius.lg, paddingHorizontal: 14, paddingVertical: 12 }}
         />
-        {err ? <AppText style={{ color: colors.destructive, marginTop: 10 }}>{err}</AppText> : null}
+        {err ? <AppText style={{ color: instrument.danger, marginTop: 10 }}>{err}</AppText> : null}
         <Button title="Send request" onPress={onSubmit} disabled={send.isPending} style={{ marginTop: 14 }} />
 
-        <View style={{ height: 1, backgroundColor: colors.border, marginVertical: 22 }} />
+        <View style={{ height: 1, backgroundColor: instrument.hairline, marginVertical: 22 }} />
 
         <Overline>Your code</Overline>
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
-          <AppText variant="title2" rounded style={{ letterSpacing: 2, fontVariant: ["tabular-nums"] }}>
+          <AppText rounded style={{ fontSize: 22, fontWeight: "700", color: instrument.ink, letterSpacing: 2, fontVariant: ["tabular-nums"] }}>
             {myCode.data?.code ?? "········"}
           </AppText>
           <Button title="Share" onPress={shareCode} variant="ghost" disabled={!myCode.data} />

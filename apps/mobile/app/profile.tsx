@@ -3,7 +3,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { AppText } from "@/components/Text";
 import { ScreenHeader } from "@/components/ScreenHeader";
-import { Card } from "@/components/Card";
+import { AppBackground } from "@/components/AppBackground";
+import { GlassPanel } from "@/components/instrument/GlassPanel";
 import { Avatar } from "@/components/Avatar";
 import { Numeral } from "@/components/Numeral";
 import { useProfile } from "@/api/hooks";
@@ -42,7 +43,7 @@ function formatMemberSince(iso: string | null | undefined): string {
 }
 
 export default function ProfileScreen() {
-  const { colors, spacing, gradients } = useTheme();
+  const { instrument, spacing } = useTheme();
   const insets = useSafeAreaInsets();
   const profile = useProfile();
   const data = profile.data;
@@ -50,89 +51,94 @@ export default function ProfileScreen() {
   const fw = data ? formatWeight(data.weight_kg, system) : null;
 
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}
-    >
-      <ScreenHeader overline="Your account" title="Profile" onBack={() => router.back()} />
-      <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>
-        <Card variant="hero" style={{ alignItems: "center", paddingVertical: spacing.lg }}>
-          <Avatar initials={data ? initials(data.display_name) : "—"} size={72} />
-          <AppText variant="title2" style={{ marginTop: spacing.sm }}>
-            {data ? data.display_name : "Loading…"}
-          </AppText>
-          <AppText muted style={{ marginTop: spacing.xs }}>
-            {data ? data.email : "—"}
-          </AppText>
-        </Card>
+    <View style={{ flex: 1, backgroundColor: instrument.bg }}>
+      <AppBackground />
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}
+      >
+        <ScreenHeader overline="Your account" title="Profile" onBack={() => router.back()} />
+        <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>
+          <GlassPanel radius={24} style={{ alignItems: "center", paddingVertical: spacing.lg }}>
+            <Avatar initials={data ? initials(data.display_name) : "—"} size={72} />
+            <AppText style={{ fontSize: 22, fontWeight: "700", color: instrument.ink, marginTop: spacing.sm }}>
+              {data ? data.display_name : "Loading…"}
+            </AppText>
+            <AppText style={{ fontSize: 15, color: instrument.mut, marginTop: spacing.xs }}>
+              {data ? data.email : "—"}
+            </AppText>
+          </GlassPanel>
 
-        <Card variant="elevated">
-          <View
-            style={{
-              flexDirection: "row",
-              justifyContent: "space-between",
-              alignItems: "center",
-              marginBottom: spacing.sm,
-            }}
-          >
-            <AppText variant="headline">Daily targets</AppText>
+          <GlassPanel radius={22} style={{ padding: spacing.md }}>
             <View
               style={{
-                paddingHorizontal: spacing.sm,
-                paddingVertical: spacing.xs / 2,
-                borderRadius: 999,
-                backgroundColor: colors.cardSecondary,
+                flexDirection: "row",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: spacing.sm,
               }}
             >
-              <AppText variant="footnote" style={{ fontWeight: "700" }}>
-                {humanizeGoal(data?.goal)}
+              <AppText style={{ fontSize: 17, fontWeight: "600", color: instrument.ink }}>Daily targets</AppText>
+              <View
+                style={{
+                  paddingHorizontal: spacing.sm,
+                  paddingVertical: spacing.xs / 2,
+                  borderRadius: 999,
+                  backgroundColor: instrument.inset,
+                  borderWidth: 1,
+                  borderColor: instrument.glassBorder,
+                }}
+              >
+                <AppText style={{ fontSize: 13, fontWeight: "700", color: instrument.mut }}>
+                  {humanizeGoal(data?.goal)}
+                </AppText>
+              </View>
+            </View>
+
+            <View style={{ flexDirection: "row", alignItems: "baseline", gap: spacing.xs, marginBottom: spacing.md }}>
+              <Numeral size={40} color={instrument.ink}>{data ? Math.round(data.target_kcal) : "—"}</Numeral>
+              <AppText style={{ fontSize: 15, color: instrument.mut }}>kcal / day</AppText>
+            </View>
+
+            <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+              <View>
+                <AppText style={{ fontSize: 13, color: instrument.mut }}>Protein</AppText>
+                <Numeral size={17} color={instrument.ink}>
+                  {data ? `${Math.round(data.target_protein_g)}g` : "—"}
+                </Numeral>
+              </View>
+              <View>
+                <AppText style={{ fontSize: 13, color: instrument.mut }}>Carbs</AppText>
+                <Numeral size={17} color={instrument.ink}>
+                  {data ? `${Math.round(data.target_carbs_g)}g` : "—"}
+                </Numeral>
+              </View>
+              <View>
+                <AppText style={{ fontSize: 13, color: instrument.mut }}>Fat</AppText>
+                <Numeral size={17} color={instrument.ink}>
+                  {data ? `${Math.round(data.target_fat_g)}g` : "—"}
+                </Numeral>
+              </View>
+            </View>
+          </GlassPanel>
+
+          <View style={{ flexDirection: "row", gap: spacing.lg }}>
+            <GlassPanel radius={22} style={{ flex: 1, padding: spacing.md }}>
+              <AppText style={{ fontSize: 13, color: instrument.mut }}>Weight</AppText>
+              <View style={{ flexDirection: "row", alignItems: "baseline", gap: spacing.xs, marginTop: spacing.xs }}>
+                <Numeral size={24} color={instrument.ink}>{fw ? fw.value : "—"}</Numeral>
+                <AppText style={{ fontSize: 15, color: instrument.mut }}>{fw ? fw.unit : "kg"}</AppText>
+              </View>
+            </GlassPanel>
+            <GlassPanel radius={22} style={{ flex: 1, padding: spacing.md }}>
+              <AppText style={{ fontSize: 13, color: instrument.mut }}>Member since</AppText>
+              <AppText style={{ fontSize: 17, fontWeight: "600", color: instrument.ink, marginTop: spacing.xs }}>
+                {data ? formatMemberSince(data.onboarded_at) : "—"}
               </AppText>
-            </View>
+            </GlassPanel>
           </View>
-
-          <View style={{ flexDirection: "row", alignItems: "baseline", gap: spacing.xs, marginBottom: spacing.md }}>
-            <Numeral size={40}>{data ? Math.round(data.target_kcal) : "—"}</Numeral>
-            <AppText muted>kcal / day</AppText>
-          </View>
-
-          <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-            <View>
-              <AppText variant="footnote" muted>Protein</AppText>
-              <Numeral size={17} color={gradients.green[0]}>
-                {data ? `${Math.round(data.target_protein_g)}g` : "—"}
-              </Numeral>
-            </View>
-            <View>
-              <AppText variant="footnote" muted>Carbs</AppText>
-              <Numeral size={17} color={gradients.amber[0]}>
-                {data ? `${Math.round(data.target_carbs_g)}g` : "—"}
-              </Numeral>
-            </View>
-            <View>
-              <AppText variant="footnote" muted>Fat</AppText>
-              <Numeral size={17} color={gradients.blue[0]}>
-                {data ? `${Math.round(data.target_fat_g)}g` : "—"}
-              </Numeral>
-            </View>
-          </View>
-        </Card>
-
-        <View style={{ flexDirection: "row", gap: spacing.lg }}>
-          <Card variant="elevated" style={{ flex: 1 }}>
-            <AppText variant="footnote" muted>Weight</AppText>
-            <View style={{ flexDirection: "row", alignItems: "baseline", gap: spacing.xs, marginTop: spacing.xs }}>
-              <Numeral size={24}>{fw ? fw.value : "—"}</Numeral>
-              <AppText muted>{fw ? fw.unit : "kg"}</AppText>
-            </View>
-          </Card>
-          <Card variant="elevated" style={{ flex: 1 }}>
-            <AppText variant="footnote" muted>Member since</AppText>
-            <AppText variant="headline" style={{ marginTop: spacing.xs }}>
-              {data ? formatMemberSince(data.onboarded_at) : "—"}
-            </AppText>
-          </Card>
         </View>
-      </View>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }

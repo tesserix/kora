@@ -15,13 +15,13 @@ interface Props {
 }
 
 export function WeekdayPicker({ days, onChange }: Props) {
-  const { colors, spacing, radius } = useTheme();
+  const { instrument, spacing, radius } = useTheme();
 
   const chip = (selected: boolean) => ({
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
     borderRadius: radius.full,
-    backgroundColor: selected ? colors.accent : colors.cardSecondary,
+    backgroundColor: selected ? instrument.accent : instrument.inset,
   });
 
   const toggleDay = (d: Weekday) =>
@@ -34,13 +34,13 @@ export function WeekdayPicker({ days, onChange }: Props) {
           const on = days.includes(day);
           return (
             <Pressable key={day} testID={`day-${day}`} onPress={() => toggleDay(day)} style={[chip(on), { minWidth: 40, alignItems: "center" }]}>
-              <AppText variant="subheadline" style={{ color: on ? colors.accentForeground : colors.label }}>{l}</AppText>
+              <AppText style={{ fontSize: 15, color: on ? instrument.accentOn : instrument.ink }}>{l}</AppText>
             </Pressable>
           );
         })}
       </View>
       <Pressable onPress={() => onChange(ALL)} style={{ marginTop: spacing.sm }}>
-        <AppText variant="footnote" muted>Select all days</AppText>
+        <AppText style={{ fontSize: 13, color: instrument.mut }}>Select all days</AppText>
       </Pressable>
     </>
   );

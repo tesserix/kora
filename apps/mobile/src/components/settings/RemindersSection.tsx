@@ -21,7 +21,7 @@ function fmt(hour: number, minute: number): string {
 
 export function RemindersSection() {
   const { prefs, setSlot } = useReminderPrefs();
-  const { colors, spacing } = useTheme();
+  const { instrument, spacing } = useTheme();
   const [editing, setEditing] = useState<MealSlot | null>(null);
   const [draft, setDraft] = useState<Date | null>(null);
 
@@ -63,15 +63,15 @@ export function RemindersSection() {
               key={slot}
               style={{ flexDirection: "row", alignItems: "center", minHeight: 44, paddingHorizontal: spacing.md, gap: spacing.sm }}
             >
-              <AppText variant="headline" style={{ flex: 1 }}>{LABEL[slot]}</AppText>
+              <AppText style={{ flex: 1, fontSize: 17, fontWeight: "600", color: instrument.ink }}>{LABEL[slot]}</AppText>
               <Pressable accessibilityLabel={`${LABEL[slot]} time`} onPress={() => openPicker(slot)} disabled={!p.enabled}>
-                <AppText variant="subheadline" muted style={{ opacity: p.enabled ? 1 : 0.4 }}>{fmt(p.hour, p.minute)}</AppText>
+                <AppText style={{ fontSize: 15, color: instrument.mut, opacity: p.enabled ? 1 : 0.4 }}>{fmt(p.hour, p.minute)}</AppText>
               </Pressable>
               <Switch
                 testID={`reminder-switch-${slot}`}
                 value={p.enabled}
                 onValueChange={(enabled) => setSlot(slot, { ...p, enabled })}
-                trackColor={{ true: colors.accent, false: colors.muted }}
+                trackColor={{ true: instrument.accent, false: instrument.inset }}
               />
             </View>
           );
@@ -89,7 +89,7 @@ export function RemindersSection() {
                 onChange={(_e, date) => {
                   if (date) setDraft(date);
                 }}
-                textColor={colors.label}
+                textColor={instrument.ink}
               />
             ) : null}
             <Button title="Done" onPress={applyDraft} />

@@ -5,11 +5,20 @@ import Animated, { interpolate, runOnJS, useAnimatedStyle, useSharedValue, withS
 import { springs } from "@/motion/springs";
 import { useMotionPrefs } from "@/motion/useMotionPrefs";
 import { useTheme } from "@/theme";
+import { REDUCED_TRANSPARENCY_FALLBACK } from "@/components/instrument/GlassPanel";
 
 interface Props { visible: boolean; onClose: () => void; children: ReactNode }
 
+// Instrument Glass surface (spec: Sheet.tsx > "surface from colors.card
+// (green-tinted) → dark-elevated instrument surface"). Shares the exact
+// scheme-aware fallback tones GlassPanel uses for reduced transparency —
+// they read as "elevated instrument surface" whether or not the sheet is
+// blurred, so a plain (non-blurred) sheet and a reduced-transparency glass
+// panel look like the same material. This closes review finding I7 (meal
+// detail's sheet was the last surface still on the old green card color).
 export function Sheet({ visible, onClose, children }: Props) {
-  const { colors, radius } = useTheme();
+  const { radius, scheme, instrument } = useTheme();
+  const surface = REDUCED_TRANSPARENCY_FALLBACK[scheme];
   const { reduceMotion } = useMotionPrefs();
   const { height: screenH } = useWindowDimensions();
   const translateY = useSharedValue(screenH);
@@ -53,12 +62,12 @@ export function Sheet({ visible, onClose, children }: Props) {
         <GestureDetector gesture={pan}>
           <Animated.View
             style={[
-              { maxHeight: "82%", backgroundColor: colors.card, borderTopLeftRadius: radius["2xl"], borderTopRightRadius: radius["2xl"] },
+              { maxHeight: "82%", backgroundColor: surface, borderTopLeftRadius: radius["2xl"], borderTopRightRadius: radius["2xl"] },
               sheetStyle,
             ]}
           >
             <View style={{ alignItems: "center", paddingTop: 8, paddingBottom: 4 }}>
-              <View style={{ width: 36, height: 5, borderRadius: 999, backgroundColor: colors.tertiaryLabel }} />
+              <View style={{ width: 36, height: 5, borderRadius: 999, backgroundColor: instrument.mut }} />
             </View>
             <ScrollView keyboardShouldPersistTaps="handled">{children}</ScrollView>
           </Animated.View>

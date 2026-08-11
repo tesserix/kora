@@ -1,6 +1,6 @@
-import { TextInput, View, type TextInputProps } from "react-native";
+import { useState } from "react";
+import { StyleSheet, TextInput, View, type TextInputProps } from "react-native";
 import { AppText } from "./Text";
-import { Card } from "./Card";
 import { useTheme } from "@/theme";
 
 export interface FieldProps extends TextInputProps {
@@ -17,24 +17,43 @@ export interface FieldProps extends TextInputProps {
 // The error slot is deliberately unused by every screen in this pass: sign-in
 // keeps a single screen-level error and onboarding validates on submit.
 // Wiring per-field errors would change validation behaviour.
-export function Field({ label, error, accessibilityLabel, style, ...inputProps }: FieldProps) {
-  const { colors, spacing, fontSize } = useTheme();
+//
+// Restyled to Instrument Glass: an inset "well" (recessed track background)
+// with a glassBorder edge, ink text, mut placeholder, and an accent-colored
+// border while focused (spec: Field.tsx > "inset well bg, glassBorder
+// border, ink text, mut placeholder, accent focus ring").
+export function Field({ label, error, accessibilityLabel, style, onFocus, onBlur, ...inputProps }: FieldProps) {
+  const { instrument, spacing, fontSize } = useTheme();
+  const [focused, setFocused] = useState(false);
 
   return (
     <View style={{ gap: 6 }}>
-      <AppText variant="footnote" muted>
-        {label}
-      </AppText>
+      <AppText style={{ fontSize: 13, color: instrument.mut }}>{label}</AppText>
 
-      <Card variant="elevated" style={{ padding: 0 }}>
+      <View
+        style={{
+          borderRadius: 12,
+          backgroundColor: instrument.inset,
+          borderWidth: focused ? 1.5 : StyleSheet.hairlineWidth,
+          borderColor: focused ? instrument.accent : instrument.glassBorder,
+        }}
+      >
         <TextInput
           accessibilityLabel={accessibilityLabel ?? label}
-          placeholderTextColor={colors.secondaryLabel}
+          placeholderTextColor={instrument.mut}
+          onFocus={(e) => {
+            setFocused(true);
+            onFocus?.(e);
+          }}
+          onBlur={(e) => {
+            setFocused(false);
+            onBlur?.(e);
+          }}
           style={[
             {
               paddingHorizontal: spacing.md,
               paddingVertical: 12,
-              color: colors.label,
+              color: instrument.ink,
               fontSize: fontSize.base,
               minHeight: 48,
             },
@@ -42,15 +61,10 @@ export function Field({ label, error, accessibilityLabel, style, ...inputProps }
           ]}
           {...inputProps}
         />
-      </Card>
+      </View>
 
       {error ? (
-        <AppText
-          testID="field-error"
-          variant="footnote"
-          accessibilityLiveRegion="polite"
-          style={{ color: colors.destructive }}
-        >
+        <AppText testID="field-error" accessibilityLiveRegion="polite" style={{ fontSize: 13, color: instrument.danger }}>
           {error}
         </AppText>
       ) : null}

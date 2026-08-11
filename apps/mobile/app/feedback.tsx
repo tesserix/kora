@@ -6,7 +6,7 @@ import { AppBackground } from "@/components/AppBackground";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { Segmented } from "@/components/Segmented";
 import { Button } from "@/components/Button";
-import { Card } from "@/components/Card";
+import { GlassPanel } from "@/components/instrument/GlassPanel";
 import { AppText } from "@/components/Text";
 import { useSubmitFeedback } from "@/api/hooks";
 import { deviceContext } from "@/lib/deviceContext";
@@ -35,7 +35,7 @@ function errorMessageFor(error: unknown): string {
 
 export default function Feedback() {
   const insets = useSafeAreaInsets();
-  const { colors, spacing, radius } = useTheme();
+  const { instrument, spacing, radius } = useTheme();
   const submitFeedback = useSubmitFeedback();
 
   const [kind, setKind] = useState<FeedbackKind>("bug");
@@ -71,15 +71,15 @@ export default function Feedback() {
 
   const inputStyle = {
     fontSize: 16,
-    color: colors.label,
-    backgroundColor: colors.cardSecondary,
+    color: instrument.ink,
+    backgroundColor: instrument.inset,
     borderRadius: radius.lg,
     paddingHorizontal: 14,
     paddingVertical: 12,
   } as const;
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
+    <View style={{ flex: 1, backgroundColor: instrument.bg }}>
       <AppBackground />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
         <ScrollView
@@ -90,16 +90,18 @@ export default function Feedback() {
           <ScreenHeader title="Send feedback" onBack={() => router.back()} />
           <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>
             {submitted ? (
-              <Card variant="elevated" style={{ gap: spacing.sm, alignItems: "flex-start" }}>
-                <AppText variant="title2">Thanks — got it.</AppText>
-                <AppText muted>We read every note. If yours needs a reply, we'll be in touch.</AppText>
+              <GlassPanel radius={22} style={{ padding: spacing.md, gap: spacing.sm, alignItems: "flex-start" }}>
+                <AppText style={{ fontSize: 22, fontWeight: "700", color: instrument.ink }}>Thanks — got it.</AppText>
+                <AppText style={{ fontSize: 15, color: instrument.mut }}>
+                  We read every note. If yours needs a reply, we'll be in touch.
+                </AppText>
                 <Button
                   title="Done"
                   accessibilityLabel="Done"
                   onPress={() => router.back()}
                   style={{ alignSelf: "stretch", marginTop: spacing.sm }}
                 />
-              </Card>
+              </GlassPanel>
             ) : (
               <>
                 <Segmented options={KIND_OPTIONS} value={kind} onChange={onChangeKind} />
@@ -109,7 +111,7 @@ export default function Feedback() {
                   onChangeText={setSubject}
                   maxLength={SUBJECT_MAX}
                   placeholder="What's it about?"
-                  placeholderTextColor={colors.secondaryLabel}
+                  placeholderTextColor={instrument.mut}
                   accessibilityLabel="Subject"
                   style={inputStyle}
                 />
@@ -122,19 +124,19 @@ export default function Feedback() {
                     multiline
                     textAlignVertical="top"
                     placeholder={descriptionPlaceholder(kind)}
-                    placeholderTextColor={colors.secondaryLabel}
+                    placeholderTextColor={instrument.mut}
                     accessibilityLabel="Description"
                     style={[inputStyle, { minHeight: 140 }]}
                   />
                   {showDescriptionHint ? (
-                    <AppText variant="footnote" muted style={{ marginTop: spacing.xs }}>
+                    <AppText style={{ fontSize: 13, color: instrument.mut, marginTop: spacing.xs }}>
                       {descriptionRemaining} characters left
                     </AppText>
                   ) : null}
                 </View>
 
                 {errorMessage ? (
-                  <AppText style={{ color: colors.destructive }}>{errorMessage}</AppText>
+                  <AppText style={{ color: instrument.danger }}>{errorMessage}</AppText>
                 ) : null}
 
                 <Button

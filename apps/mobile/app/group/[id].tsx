@@ -3,8 +3,8 @@ import { Alert, ScrollView, Share, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, useLocalSearchParams, type Href } from "expo-router";
 import { AppText } from "@/components/Text";
-import { Overline } from "@/components/Overline";
-import { Icon } from "@/components/Icon";
+import { ScreenHeader } from "@/components/ScreenHeader";
+import { AppBackground } from "@/components/AppBackground";
 import { LeaderRow } from "@/components/LeaderRow";
 import { GroupedSection, Row } from "@/components/GroupedList";
 import { PressableScale } from "@/motion";
@@ -20,7 +20,7 @@ const METRIC_LABEL: Record<string, string> = { logged: "Logged days", on_target:
 // renders its own ranked list rather than reusing FriendsLeaderboard.
 
 export default function GroupDetail() {
-  const { colors, spacing } = useTheme();
+  const { instrument, spacing } = useTheme();
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
   const detail = useGroup(id);
@@ -65,133 +65,122 @@ export default function GroupDetail() {
 
   return (
     <>
-      <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
-        <View style={{ flexDirection: "row", alignItems: "flex-start", paddingHorizontal: 20, paddingTop: 4, paddingBottom: 14 }}>
-          <PressableScale
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-            haptic="selection"
-            onPress={() => router.back()}
-            style={{ width: 36, height: 36, alignItems: "center", justifyContent: "center", marginRight: 4, marginLeft: -6 }}
-          >
-            <Icon name="arrow-left" size={22} color={colors.label} />
-          </PressableScale>
-          <View style={{ flex: 1 }}>
-            <Overline>Group</Overline>
-            <AppText variant="title2" style={{ marginTop: 4 }}>{d?.name ?? "Group"}</AppText>
-          </View>
-        </View>
+      <View style={{ flex: 1, backgroundColor: instrument.bg }}>
+        <AppBackground />
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
+          <ScreenHeader overline="Group" title={d?.name ?? "Group"} onBack={() => router.back()} />
 
-        <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>
-          <GroupedSection elevated>
-            <Row title="Share invite code" subtitle={code.data?.code} onPress={shareCode} />
-            {isOwner ? <Row title="Rename group" chevron onPress={() => setRenameOpen(true)} /> : null}
-            {isOwner ? <Row title="Invite a friend" chevron onPress={() => setInviteOpen(true)} /> : null}
-          </GroupedSection>
-
-          <GroupedSection header="Leaderboard" elevated>
-            {ranked.map((m, i) => (
-              <LeaderRow
-                key={m.id}
-                rank={i + 1}
-                name={m.display_name}
-                sub={`${m.adherence_days ?? 0}/7 on target`}
-                metric={`${m.streak_days ?? 0}d`}
-                isYou={m.id === profile.data?.id}
-              />
-            ))}
-          </GroupedSection>
-
-          <GroupedSection header="Members" elevated footer={notSharing.length > 0 ? `${notSharing.length} not sharing progress` : undefined}>
-            {(d?.members ?? []).map((m) => (
-              <Row
-                key={m.id}
-                title={m.display_name}
-                subtitle={m.role}
-                right={
-                  isOwner && m.role !== "owner" ? (
-                    <PressableScale
-                      accessibilityRole="button"
-                      accessibilityLabel={`Remove ${m.display_name}`}
-                      haptic="none"
-                      disabled={removeMember.isPending}
-                      onPress={() => removeMember.mutate({ groupId: id, userId: m.id })}
-                      style={{ opacity: removeMember.isPending ? 0.5 : 1 }}
-                    >
-                      <AppText variant="footnote" style={{ color: colors.destructive, fontWeight: "600" }}>
-                        Remove
-                      </AppText>
-                    </PressableScale>
-                  ) : undefined
-                }
-              />
-            ))}
-          </GroupedSection>
-
-          <View style={{ gap: spacing.sm }}>
-            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginLeft: spacing.md }}>
-              <AppText variant="caption" muted style={{ textTransform: "uppercase" }}>
-                Challenges
-              </AppText>
-              <PressableScale accessibilityRole="button" accessibilityLabel="New challenge" haptic="none" onPress={() => setSheet(true)}>
-                <AppText variant="footnote" style={{ color: colors.accent, fontWeight: "600" }}>
-                  New challenge
-                </AppText>
-              </PressableScale>
-            </View>
+          <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>
             <GroupedSection>
-              {(challenges.data ?? []).length === 0 ? (
-                <Row title="No challenges yet" subtitle="Start one." />
+              <Row title="Share invite code" subtitle={code.data?.code} onPress={shareCode} />
+              {isOwner ? <Row title="Rename group" chevron onPress={() => setRenameOpen(true)} /> : null}
+              {isOwner ? <Row title="Invite a friend" chevron onPress={() => setInviteOpen(true)} /> : null}
+            </GroupedSection>
+
+            <GroupedSection header="Leaderboard">
+              {ranked.map((m, i) => (
+                <LeaderRow
+                  key={m.id}
+                  rank={i + 1}
+                  name={m.display_name}
+                  sub={`${m.adherence_days ?? 0}/7 on target`}
+                  metric={`${m.streak_days ?? 0}d`}
+                  isYou={m.id === profile.data?.id}
+                />
+              ))}
+            </GroupedSection>
+
+            <GroupedSection header="Members" footer={notSharing.length > 0 ? `${notSharing.length} not sharing progress` : undefined}>
+              {(d?.members ?? []).map((m) => (
+                <Row
+                  key={m.id}
+                  title={m.display_name}
+                  subtitle={m.role}
+                  right={
+                    isOwner && m.role !== "owner" ? (
+                      <PressableScale
+                        accessibilityRole="button"
+                        accessibilityLabel={`Remove ${m.display_name}`}
+                        haptic="none"
+                        disabled={removeMember.isPending}
+                        onPress={() => removeMember.mutate({ groupId: id, userId: m.id })}
+                        style={{ opacity: removeMember.isPending ? 0.5 : 1 }}
+                      >
+                        <AppText style={{ fontSize: 13, color: instrument.danger, fontWeight: "600" }}>
+                          Remove
+                        </AppText>
+                      </PressableScale>
+                    ) : undefined
+                  }
+                />
+              ))}
+            </GroupedSection>
+
+            <View style={{ gap: spacing.sm }}>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginLeft: spacing.md }}>
+                <AppText style={{ fontSize: 11, letterSpacing: 0.5, textTransform: "uppercase", color: instrument.mut, fontWeight: "500" }}>
+                  Challenges
+                </AppText>
+                <PressableScale accessibilityRole="button" accessibilityLabel="New challenge" haptic="none" onPress={() => setSheet(true)}>
+                  <AppText style={{ fontSize: 13, color: instrument.accent, fontWeight: "600" }}>
+                    New challenge
+                  </AppText>
+                </PressableScale>
+              </View>
+              <GroupedSection>
+                {(challenges.data ?? []).length === 0 ? (
+                  <Row title="No challenges yet" subtitle="Start one." />
+                ) : (
+                  (challenges.data ?? []).map((ch) => (
+                    <Row
+                      key={ch.id}
+                      title={ch.title}
+                      subtitle={`${ch.status} · ${METRIC_LABEL[ch.metric] ?? ch.metric} · ${ch.participant_count} in`}
+                      detail={ch.joined ? "Joined" : undefined}
+                      chevron
+                      onPress={() => router.push(`/challenge/${ch.id}` as Href)}
+                    />
+                  ))
+                )}
+              </GroupedSection>
+            </View>
+
+            <GroupedSection>
+              {isOwner ? (
+                <PressableScale
+                  accessibilityRole="button"
+                  accessibilityLabel="Delete group"
+                  haptic="none"
+                  disabled={del.isPending}
+                  onPress={onDelete}
+                  style={{ opacity: del.isPending ? 0.5 : 1 }}
+                >
+                  <View style={{ minHeight: 44, justifyContent: "center", paddingHorizontal: spacing.md }}>
+                    <AppText style={{ fontSize: 17, fontWeight: "600", color: instrument.danger }}>
+                      Delete group
+                    </AppText>
+                  </View>
+                </PressableScale>
               ) : (
-                (challenges.data ?? []).map((ch) => (
-                  <Row
-                    key={ch.id}
-                    title={ch.title}
-                    subtitle={`${ch.status} · ${METRIC_LABEL[ch.metric] ?? ch.metric} · ${ch.participant_count} in`}
-                    detail={ch.joined ? "Joined" : undefined}
-                    chevron
-                    onPress={() => router.push(`/challenge/${ch.id}` as Href)}
-                  />
-                ))
+                <PressableScale
+                  accessibilityRole="button"
+                  accessibilityLabel="Leave group"
+                  haptic="none"
+                  disabled={leaveDisabled}
+                  onPress={onLeave}
+                  style={{ opacity: leaveDisabled ? 0.5 : 1 }}
+                >
+                  <View style={{ minHeight: 44, justifyContent: "center", paddingHorizontal: spacing.md }}>
+                    <AppText style={{ fontSize: 17, fontWeight: "600", color: instrument.danger }}>
+                      Leave group
+                    </AppText>
+                  </View>
+                </PressableScale>
               )}
             </GroupedSection>
           </View>
-
-          <GroupedSection>
-            {isOwner ? (
-              <PressableScale
-                accessibilityRole="button"
-                accessibilityLabel="Delete group"
-                haptic="none"
-                disabled={del.isPending}
-                onPress={onDelete}
-                style={{ opacity: del.isPending ? 0.5 : 1 }}
-              >
-                <View style={{ minHeight: 44, justifyContent: "center", paddingHorizontal: spacing.md }}>
-                  <AppText variant="headline" style={{ color: colors.destructive }}>
-                    Delete group
-                  </AppText>
-                </View>
-              </PressableScale>
-            ) : (
-              <PressableScale
-                accessibilityRole="button"
-                accessibilityLabel="Leave group"
-                haptic="none"
-                disabled={leaveDisabled}
-                onPress={onLeave}
-                style={{ opacity: leaveDisabled ? 0.5 : 1 }}
-              >
-                <View style={{ minHeight: 44, justifyContent: "center", paddingHorizontal: spacing.md }}>
-                  <AppText variant="headline" style={{ color: colors.destructive }}>
-                    Leave group
-                  </AppText>
-                </View>
-              </PressableScale>
-            )}
-          </GroupedSection>
-        </View>
-      </ScrollView>
+        </ScrollView>
+      </View>
       {sheet ? <CreateChallengeSheet visible groupId={id} onClose={() => setSheet(false)} /> : null}
       {renameOpen && d ? <RenameGroupSheet visible groupId={id} currentName={d.name} onClose={() => setRenameOpen(false)} /> : null}
       {inviteOpen ? <InviteFriendSheet visible groupId={id} memberIds={(d?.members ?? []).map((m) => m.id)} onClose={() => setInviteOpen(false)} /> : null}

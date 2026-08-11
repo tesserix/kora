@@ -4,7 +4,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { AppBackground } from "@/components/AppBackground";
 import { ScreenHeader } from "@/components/ScreenHeader";
-import { Overline } from "@/components/Overline";
 import { GroupedSection, Row } from "@/components/GroupedList";
 import { AppText } from "@/components/Text";
 import { RemindersSection } from "@/components/settings/RemindersSection";
@@ -32,7 +31,7 @@ function fmt(hour: number, minute: number): string {
 
 export default function Reminders() {
   const insets = useSafeAreaInsets();
-  const { colors, spacing } = useTheme();
+  const { instrument, spacing } = useTheme();
   const { reminders, addReminder, updateReminder, removeReminder, toggleReminder } = useCustomReminders();
   const [editing, setEditing] = useState<CustomReminder | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -48,7 +47,7 @@ export default function Reminders() {
   const atCap = reminders.length >= MAX_CUSTOM_REMINDERS;
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
+    <View style={{ flex: 1, backgroundColor: instrument.bg }}>
       <AppBackground />
       <ScrollView
         style={{ flex: 1 }}
@@ -60,8 +59,7 @@ export default function Reminders() {
           <WeightReminderSection />
 
           <View>
-            <Overline style={{ marginLeft: spacing.md, marginBottom: spacing.xs }}>Custom</Overline>
-            <GroupedSection>
+            <GroupedSection header="Custom">
               {reminders.map((r) => (
                 <Row
                   key={r.id}
@@ -74,19 +72,19 @@ export default function Reminders() {
                       testID={`custom-switch-${r.id}`}
                       value={r.enabled}
                       onValueChange={(enabled) => toggleReminder(r.id, enabled)}
-                      trackColor={{ true: colors.accent, false: colors.muted }}
+                      trackColor={{ true: instrument.accent, false: instrument.inset }}
                     />
                   }
                 />
               ))}
               <Row
                 title="Add reminder"
-                icon={{ name: "bell", tint: colors.accent }}
+                icon={{ name: "bell", tint: instrument.mut }}
                 onPress={atCap ? undefined : openAdd}
               />
             </GroupedSection>
             {atCap ? (
-              <AppText variant="footnote" muted style={{ marginLeft: spacing.md, marginTop: spacing.xs }}>
+              <AppText style={{ fontSize: 13, color: instrument.mut, marginLeft: spacing.md, marginTop: spacing.xs }}>
                 You’ve reached the {MAX_CUSTOM_REMINDERS}-reminder limit.
               </AppText>
             ) : null}

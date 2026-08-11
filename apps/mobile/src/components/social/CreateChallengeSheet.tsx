@@ -27,7 +27,7 @@ const DURATIONS: { key: string; label: string }[] = [
 ];
 
 export function CreateChallengeSheet({ visible, groupId, onClose }: Props) {
-  const { colors, radius, spacing } = useTheme();
+  const { instrument, radius, spacing } = useTheme();
   const [title, setTitle] = useState("");
   const [metric, setMetric] = useState<Metric>("on_target");
   const [duration, setDuration] = useState("1w");
@@ -63,12 +63,12 @@ export function CreateChallengeSheet({ visible, groupId, onClose }: Props) {
           onChangeText={setTitle}
           autoCapitalize="sentences"
           placeholder="Challenge title"
-          placeholderTextColor={colors.secondaryLabel}
+          placeholderTextColor={instrument.mut}
           accessibilityLabel="Challenge title"
           style={{
             fontSize: 16,
-            color: colors.label,
-            backgroundColor: colors.cardSecondary,
+            color: instrument.ink,
+            backgroundColor: instrument.inset,
             borderRadius: radius.lg,
             paddingHorizontal: 14,
             paddingVertical: 12,
@@ -85,7 +85,7 @@ export function CreateChallengeSheet({ visible, groupId, onClose }: Props) {
           <Segmented options={DURATIONS} value={duration} onChange={setDuration} />
         </View>
 
-        {err ? <AppText style={{ color: colors.destructive }}>{err}</AppText> : null}
+        {err ? <AppText style={{ color: instrument.danger }}>{err}</AppText> : null}
         <Button title="Create challenge" onPress={onSubmit} disabled={create.isPending} />
       </View>
     </Sheet>

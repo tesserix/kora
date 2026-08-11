@@ -16,7 +16,7 @@ interface Props {
 }
 
 export function InviteFriendSheet({ visible, groupId, memberIds, onClose }: Props) {
-  const { colors, spacing } = useTheme();
+  const { instrument, spacing } = useTheme();
   const [err, setErr] = useState<string | null>(null);
   const friends = useFriends();
   const invite = useInviteToGroup();
@@ -36,7 +36,7 @@ export function InviteFriendSheet({ visible, groupId, memberIds, onClose }: Prop
       <View style={{ paddingHorizontal: 22, paddingBottom: 30, gap: spacing.sm }}>
         <Overline>Invite a friend</Overline>
         {eligible.length === 0 ? (
-          <AppText muted style={{ fontSize: 13, paddingVertical: 8 }}>
+          <AppText style={{ fontSize: 13, color: instrument.mut, paddingVertical: 8 }}>
             No friends to invite. Everyone's already in, or add friends first.
           </AppText>
         ) : (
@@ -52,14 +52,14 @@ export function InviteFriendSheet({ visible, groupId, memberIds, onClose }: Prop
                 style={{ opacity: invite.isPending ? 0.5 : 1 }}
               >
                 <View style={{ flexDirection: "row", alignItems: "center", minHeight: 44, paddingHorizontal: spacing.md }}>
-                  <AppText variant="headline" style={{ flex: 1 }}>{f.display_name}</AppText>
-                  <AppText variant="subheadline" style={{ color: colors.accent, fontWeight: "600" }}>Invite</AppText>
+                  <AppText style={{ flex: 1, fontSize: 17, fontWeight: "600", color: instrument.ink }}>{f.display_name}</AppText>
+                  <AppText style={{ fontSize: 15, color: instrument.accent, fontWeight: "600" }}>Invite</AppText>
                 </View>
               </PressableScale>
             ))}
           </GroupedSection>
         )}
-        {err ? <AppText style={{ color: colors.destructive, marginTop: 6 }}>{err}</AppText> : null}
+        {err ? <AppText style={{ color: instrument.danger, marginTop: 6 }}>{err}</AppText> : null}
       </View>
     </Sheet>
   );

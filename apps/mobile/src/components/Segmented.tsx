@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Pressable, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
 import { AppText } from "./Text";
 import { haptics, springs } from "@/motion";
@@ -13,11 +13,13 @@ type Props = {
   onChange: (key: string) => void;
 };
 
-// iOS segmented control: a `cardSecondary` track holding a sliding elevated pill
-// behind the selected label. The pill's position springs between segments;
-// selecting a new segment fires the selection haptic.
+// iOS segmented control, restyled to Instrument Glass: an inset track holding
+// a sliding glassBorder-edged pill behind the selected label. The old
+// `cardSecondary`/`card` pairing carried a faint green tint in dark mode
+// (spec: "any green/legacy accent → ink/mut"). The pill's position springs
+// between segments; selecting a new segment fires the selection haptic.
 export function Segmented({ options, value, onChange }: Props) {
-  const { colors, shadows } = useTheme();
+  const { instrument, shadows } = useTheme();
   const selectedIndex = Math.max(0, options.findIndex((option) => option.key === value));
   const indicatorPosition = useSharedValue(selectedIndex);
 
@@ -33,7 +35,7 @@ export function Segmented({ options, value, onChange }: Props) {
     <View
       style={{
         flexDirection: "row",
-        backgroundColor: colors.cardSecondary,
+        backgroundColor: instrument.inset,
         borderRadius: 9,
         padding: 2,
       }}
@@ -47,7 +49,9 @@ export function Segmented({ options, value, onChange }: Props) {
             left: 2,
             width: `${100 / options.length}%`,
             borderRadius: 7,
-            backgroundColor: colors.card,
+            backgroundColor: instrument.glass,
+            borderWidth: StyleSheet.hairlineWidth,
+            borderColor: instrument.glassBorder,
           },
           shadows.sm,
           indicatorStyle,
@@ -77,11 +81,10 @@ export function Segmented({ options, value, onChange }: Props) {
               row's rhythm.
             */}
             <AppText
-              variant="subheadline"
               numberOfLines={1}
               adjustsFontSizeToFit
               minimumFontScale={0.85}
-              style={{ fontWeight: selected ? "600" : "400" }}
+              style={{ fontSize: 15, fontWeight: selected ? "600" : "400", color: instrument.ink }}
             >
               {option.label}
             </AppText>

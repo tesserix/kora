@@ -18,7 +18,7 @@ interface Rankable {
 }
 
 export function FriendsLeaderboard({ data }: Props) {
-  const { colors, spacing } = useTheme();
+  const { instrument, spacing } = useTheme();
   if (!data) return null;
 
   const window = data.me.adherence_window;
@@ -41,7 +41,7 @@ export function FriendsLeaderboard({ data }: Props) {
 
   return (
     <View style={{ gap: spacing.lg }}>
-      <GroupedSection header="Leaderboard" elevated>
+      <GroupedSection header="Leaderboard">
         {ranked.map((r, i) => (
           <LeaderRow
             key={r.id}
@@ -58,7 +58,7 @@ export function FriendsLeaderboard({ data }: Props) {
         <GroupedSection header="Not sharing">
           {notSharing.map((f) => (
             <View key={f.id} style={{ minHeight: 44, justifyContent: "center", paddingHorizontal: spacing.md }}>
-              <AppText variant="headline" style={{ color: colors.tertiaryLabel }}>
+              <AppText style={{ fontSize: 17, fontWeight: "600", color: instrument.mut }}>
                 {f.display_name}
               </AppText>
             </View>

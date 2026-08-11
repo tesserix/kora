@@ -30,7 +30,7 @@ function fmt(hour: number, minute: number): string {
 // used to re-arm a reminder for a day already logged — weigh in at 06:40, add
 // a day to the chips at 06:50, get nagged at 07:00.
 export function WeightReminderSection(): ReactElement {
-  const { colors, spacing } = useTheme();
+  const { instrument, spacing } = useTheme();
   const [pref, setPref] = useState<WeightReminderPref>(DEFAULT_WEIGHT_PREF);
   const prefRef = useRef<WeightReminderPref>(DEFAULT_WEIGHT_PREF);
   const [editing, setEditing] = useState(false);
@@ -122,11 +122,11 @@ export function WeightReminderSection(): ReactElement {
         <View
           style={{ flexDirection: "row", alignItems: "center", minHeight: 44, paddingHorizontal: spacing.md, gap: spacing.sm }}
         >
-          <AppText variant="headline" style={{ flex: 1 }}>
+          <AppText style={{ flex: 1, fontSize: 17, fontWeight: "600", color: instrument.ink }}>
             Weight check-in reminder
           </AppText>
           <Pressable accessibilityLabel="Weight check-in time" onPress={openPicker} disabled={!pref.enabled}>
-            <AppText variant="subheadline" muted style={{ opacity: pref.enabled ? 1 : 0.4 }}>
+            <AppText style={{ fontSize: 15, color: instrument.mut, opacity: pref.enabled ? 1 : 0.4 }}>
               {fmt(pref.hour, pref.minute)}
             </AppText>
           </Pressable>
@@ -134,13 +134,13 @@ export function WeightReminderSection(): ReactElement {
             accessibilityLabel="Weight check-in reminder"
             value={pref.enabled}
             onValueChange={(enabled) => commit({ enabled })}
-            trackColor={{ true: colors.accent, false: colors.muted }}
+            trackColor={{ true: instrument.accent, false: instrument.inset }}
           />
         </View>
       </GroupedSection>
       <WeekdayPicker days={pref.days} onChange={onDaysChange} />
       {daysError ? (
-        <AppText style={{ color: colors.destructive, marginLeft: spacing.md, marginTop: spacing.xs }}>
+        <AppText style={{ color: instrument.danger, marginLeft: spacing.md, marginTop: spacing.xs }}>
           {daysError}
         </AppText>
       ) : null}
@@ -156,7 +156,7 @@ export function WeightReminderSection(): ReactElement {
                 onChange={(_e, date) => {
                   if (date) setDraft(date);
                 }}
-                textColor={colors.label}
+                textColor={instrument.ink}
               />
             ) : null}
             <Button title="Done" onPress={applyDraft} />

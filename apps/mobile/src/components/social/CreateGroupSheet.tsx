@@ -16,7 +16,7 @@ interface Props {
 }
 
 export function CreateGroupSheet({ visible, mode, onClose }: Props) {
-  const { colors, radius } = useTheme();
+  const { instrument, radius } = useTheme();
   const [value, setValue] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const create = useCreateGroup();
@@ -50,11 +50,11 @@ export function CreateGroupSheet({ visible, mode, onClose }: Props) {
           autoCapitalize={isCreate ? "words" : "characters"}
           autoCorrect={false}
           placeholder={isCreate ? "Group name" : "Group code"}
-          placeholderTextColor={colors.secondaryLabel}
+          placeholderTextColor={instrument.mut}
           accessibilityLabel={isCreate ? "Group name" : "Group code"}
-          style={{ marginTop: 12, fontSize: 16, color: colors.label, backgroundColor: colors.cardSecondary, borderRadius: radius.lg, paddingHorizontal: 14, paddingVertical: 12 }}
+          style={{ marginTop: 12, fontSize: 16, color: instrument.ink, backgroundColor: instrument.inset, borderRadius: radius.lg, paddingHorizontal: 14, paddingVertical: 12 }}
         />
-        {err ? <AppText style={{ color: colors.destructive, marginTop: 10 }}>{err}</AppText> : null}
+        {err ? <AppText style={{ color: instrument.danger, marginTop: 10 }}>{err}</AppText> : null}
         <Button title={isCreate ? "Create group" : "Join group"} onPress={onSubmit} disabled={pending} style={{ marginTop: 14 }} />
       </View>
     </Sheet>
