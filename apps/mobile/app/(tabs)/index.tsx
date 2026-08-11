@@ -171,10 +171,15 @@ export default function Home() {
           <Overline style={{ marginBottom: 8 }}>Today's vitals</Overline>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
             <Card variant="elevated" style={{ flexBasis: "48%", flexGrow: 1 }}>
+              {/* Gated on `health.steps`, not `health.status`: HealthKit never discloses
+                  whether READ access was actually granted, so "authorized" status alone
+                  cannot tell a real 0 from a denial. A user who has genuinely taken no
+                  steps yet today will see the connect prompt too — accepted, since the
+                  alternative (a denied user stuck on a false "0" with no way back) is worse. */}
               <RingStat
                 label="Steps"
                 dotColor={colors.stepsMetric}
-                state={health.status === "authorized" ? "value" : "connect"}
+                state={health.steps ? "value" : "connect"}
                 value={health.steps ? health.steps.today.toLocaleString() : undefined}
                 meta={health.steps ? `of ${health.steps.goal.toLocaleString()}` : undefined}
                 ringValue={health.steps?.today ?? 0}
@@ -187,7 +192,7 @@ export default function Home() {
               <RingStat
                 label="Sleep"
                 dotColor={colors.sleepMetric}
-                state={health.status === "authorized" ? "value" : "connect"}
+                state={health.sleep ? "value" : "connect"}
                 value={health.sleep ? `${health.sleep.lastNightHours}` : undefined}
                 meta={health.sleep ? "last night" : undefined}
                 ringValue={health.sleep?.lastNightHours ?? 0}

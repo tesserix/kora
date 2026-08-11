@@ -62,13 +62,18 @@ function sumAsleepMillis(
  * read directly from Apple HealthKit on-device. No backend call, no persistence — this
  * hook only ever reflects live HealthKit state for the current session.
  *
- * Degrades honestly through three states, and the `steps`/`sleep` fields are non-null
- * ONLY when `status === "authorized"` — never a fabricated or cached number:
+ * Degrades honestly through three `status` states, but `status` alone cannot be trusted
+ * to gate the UI: HealthKit's `requestAuthorization` resolves successfully once the
+ * READ prompt was merely *presented*, never disclosing whether the user actually granted
+ * read access. So `status === "authorized"` means only "the prompt was shown, and the
+ * WRITE half (if any) succeeded" — a denied read looks identical and still queries
+ * successfully, just returning an empty array indistinguishable from "genuinely no data
+ * yet". Callers must therefore treat `steps`/`sleep` themselves — non-null only when a
+ * sample was actually readable — as the source of truth, not `status`:
  * - "unavailable": non-iOS device, or HealthKit itself isn't available (e.g. simulator).
- * - "denied": the user declined the HealthKit read-authorization request. HealthKit gives
- *   apps no way to distinguish "denied" from "authorized but no data" for read-only
- *   permissions, so a decline is reported as-is rather than guessed at.
- * - "authorized": permission granted; `steps`/`sleep` reflect summed real samples.
+ * - "denied": `requestAuthorization` itself rejected/returned false — rare, but handled.
+ * - "authorized": the request resolved; `steps`/`sleep` are set from real samples when
+ *   any were readable, and left `null` (never a fabricated `0`) otherwise.
  */
 export function useHealth(): HealthData {
   const [status, setStatus] = useState<HealthStatus>("unavailable");
@@ -125,8 +130,13 @@ export function useHealth(): HealthData {
         }),
       ]);
 
-      setSteps({ today: Math.round(sumSteps(stepSamples)), goal: STEP_GOAL });
-      setSleep({ lastNightHours: Math.round((sumAsleepMillis(sleepSamples) / MS_PER_HOUR) * 10) / 10 });
+      // An empty sample array is ambiguous: no movement, or no read access —
+      // HealthKit will not say which. Reporting 0 would assert the first on no
+      // evidence, so report "unknown" and let the UI offer a way to check.
+      const stepTotal = sumSteps(stepSamples);
+      setSteps(stepSamples.length > 0 ? { today: Math.round(stepTotal), goal: STEP_GOAL } : null);
+      const sleepMillis = sumAsleepMillis(sleepSamples);
+      setSleep(sleepSamples.length > 0 ? { lastNightHours: Math.round((sleepMillis / MS_PER_HOUR) * 10) / 10 } : null);
       setStatus("authorized");
     } catch {
       // Any HealthKit call (authorization request or either query) can reject —
@@ -142,13 +152,12 @@ export function useHealth(): HealthData {
     void load();
   }, [load]);
 
+  // Always route to Health. The old `status === "denied"` guard was unreachable
+  // (see the spec), which left a denied user with no way to grant access.
   const connect = useCallback(() => {
-    if (status === "denied") {
-      void Linking.openURL("x-apple-health://");
-      return;
-    }
+    void Linking.openURL("x-apple-health://");
     void load();
-  }, [status, load]);
+  }, [load]);
 
   return { status, steps, sleep, connect };
 }

@@ -139,4 +139,43 @@ describe("useHealth", () => {
     await waitFor(() => expect(openURLSpy).toHaveBeenCalledWith("x-apple-health://"));
     openURLSpy.mockRestore();
   });
+
+  // HealthKit returns an empty sample array both when the user has genuinely not
+  // moved and when read access was denied — the two are indistinguishable. The
+  // app must therefore report "unknown" (null), never a confident 0.
+  it("reports null steps when no samples are readable", async () => {
+    mockIsAvailable.mockReturnValue(true);
+    mockRequestAuthorization.mockResolvedValue(true);
+    mockQueryQuantitySamples.mockResolvedValue([]);
+    mockQueryCategorySamples.mockResolvedValue([]);
+
+    const { result } = await renderHook(() => useHealth());
+    await waitFor(() => expect(result.current.steps).toBeNull());
+  });
+
+  it("reports a real count when samples are readable", async () => {
+    mockIsAvailable.mockReturnValue(true);
+    mockRequestAuthorization.mockResolvedValue(true);
+    mockQueryQuantitySamples.mockResolvedValue([{ quantity: 3500 }]);
+    mockQueryCategorySamples.mockResolvedValue([]);
+
+    const { result } = await renderHook(() => useHealth());
+    await waitFor(() => expect(result.current.steps).toEqual({ today: 3500, goal: 10000 }));
+  });
+
+  // The old connect() only opened Health when status === "denied", a state that
+  // cannot occur — so a user who denied had no route back.
+  it("connect always opens Health settings", async () => {
+    mockIsAvailable.mockReturnValue(true);
+    mockRequestAuthorization.mockResolvedValue(true);
+    mockQueryQuantitySamples.mockResolvedValue([]);
+    mockQueryCategorySamples.mockResolvedValue([]);
+    const openURLSpy = jest.spyOn(Linking, "openURL").mockResolvedValue(true as unknown as void);
+
+    const { result } = await renderHook(() => useHealth());
+    await waitFor(() => expect(result.current.steps).toBeNull());
+    result.current.connect();
+    await waitFor(() => expect(openURLSpy).toHaveBeenCalledWith("x-apple-health://"));
+    openURLSpy.mockRestore();
+  });
 });
