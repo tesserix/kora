@@ -38,9 +38,9 @@ describe("elevated tokens", () => {
       expect(c.elevated).toMatch(/^#/);
     }
   });
-  it("exposes 2-stop gradient sets per scheme", () => {
+  it("exposes 2-stop gradient sets per scheme, none of them violet/purple", () => {
     for (const scheme of [gradientStops.light, gradientStops.dark]) {
-      for (const pair of [scheme.green, scheme.amber, scheme.blue, scheme.steps, scheme.sleep]) {
+      for (const pair of [scheme.green, scheme.amber, scheme.blue]) {
         expect(pair).toHaveLength(2);
         expect(pair[0]).toMatch(/^#/);
         expect(pair[1]).toMatch(/^#/);

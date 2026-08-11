@@ -1,14 +1,5 @@
 import { render } from "@testing-library/react-native";
-import { processColor } from "react-native";
 import { SubDial } from "../SubDial";
-
-// react-native-svg processes color props into native color objects before they
-// reach the host component, so compare payloads against processColor(), not
-// hex strings.
-function expectColor(prop: unknown, hex: string) {
-  const payload = (prop as { payload?: unknown })?.payload ?? prop;
-  expect(payload).toBe(processColor(hex));
-}
 
 test("lights segments up to the fraction in accent", async () => {
   const { getByTestId } = await render(<SubDial fraction={0.5} testID="sub" />);

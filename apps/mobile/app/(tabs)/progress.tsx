@@ -59,8 +59,9 @@ function buildEnergyDays(series: number[], targetKcal: number): EnergyBarsDay[] 
   });
 }
 
-// Trailing-fill transform: same one src/components/StreakBars.tsx used to turn
-// a scalar streak count into a row of cells, now feeding StreakCells instead.
+// Trailing-fill transform: turns a scalar streak count into a row of cells
+// feeding StreakCells (the instrument-glass replacement for the deleted
+// legacy StreakBars component).
 function trailingStreakHits(count: number, window = 7): boolean[] {
   const filled = Math.min(Math.max(0, count), window);
   return Array.from({ length: window }, (_, i) => i >= window - filled);
@@ -196,28 +197,7 @@ export default function Progress() {
       <AppBackground />
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
       <Animated.View entering={enter(0)}>
-        <ScreenHeader
-          title="Trends"
-          right={
-            <PressableScale
-              accessibilityRole="button"
-              haptic="selection"
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 6,
-                borderWidth: StyleSheet.hairlineWidth,
-                borderColor: instrument.glassBorder,
-                borderRadius: 10,
-                paddingHorizontal: 12,
-                paddingVertical: 8,
-              }}
-            >
-              <Icon name="camera" size={15} color={instrument.mut} />
-              <AppText style={{ fontSize: 13, fontWeight: "600", color: instrument.ink }}>Weekly report</AppText>
-            </PressableScale>
-          }
-        />
+        <ScreenHeader title="Trends" />
       </Animated.View>
 
       <View style={{ paddingHorizontal: 16, gap: 16 }}>

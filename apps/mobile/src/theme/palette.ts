@@ -89,30 +89,24 @@ export type GradientSet = {
   green: [string, string];
   amber: [string, string];
   blue: [string, string];
-  steps: [string, string];
-  sleep: [string, string];
-  fibre: [string, string];
 };
 
 // 2-stop [bright, deep] gradient pairs per scheme, tuned so the arc reads as a
-// filled sweep. Green stays the hero; amber/blue power the carbs/fat macro
-// fills; steps=lime, sleep=violet mirror the metric hues above.
+// filled sweep. Still used by out-of-scope legacy screens (profile.tsx,
+// Card.tsx) that keep the old green/amber/blue palette; the former
+// steps/sleep/fibre keys were dropped as dead code (M10) once every in-scope
+// surface migrated to instrument tokens — `sleep` was also a banned violet
+// hue the Instrument Glass spec prohibits.
 export const gradientStops: { light: GradientSet; dark: GradientSet } = {
   light: {
     green: ["#34C759", "#1E9E4A"],
     amber: ["#FFB340", "#F08C00"],
     blue: ["#4DA2FF", "#0A63D6"],
-    steps: ["#A6E635", "#6FA800"],
-    sleep: ["#8E82FF", "#5E4FE0"],
-    fibre: ["#2DD4BF", "#0D9488"],
   },
   dark: {
     green: ["#3DDC6E", "#12A150"],
     amber: ["#FFC15E", "#FF9F0A"],
     blue: ["#6FB6FF", "#0A84FF"],
-    steps: ["#C4FF5E", "#8FD400"],
-    sleep: ["#9E90FF", "#6E5FE8"],
-    fibre: ["#5EEAD4", "#14B8A6"],
   },
 };
 
