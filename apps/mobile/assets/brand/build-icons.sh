@@ -34,13 +34,13 @@ render "$BRAND/kora-foreground.svg" "$tmp/foreground.png"
 render "$BRAND/kora-monochrome.svg" "$tmp/monochrome.png"
 
 # iOS app icon: no alpha channel — the App Store rejects icons with one.
-magick "$tmp/icon.png" -background "#0A0D0B" -alpha remove -alpha off \
+magick "$tmp/icon.png" -background "#0B0D10" -alpha remove -alpha off \
   "$OUT/icon.png"
 
 # Android adaptive layers. Foreground and monochrome keep their alpha.
 magick "$tmp/foreground.png" "$OUT/android-icon-foreground.png"
 magick "$tmp/monochrome.png" "$OUT/android-icon-monochrome.png"
-magick -size 1024x1024 "xc:#0A0D0B" "$OUT/android-icon-background.png"
+magick -size 1024x1024 "xc:#0B0D10" "$OUT/android-icon-background.png"
 
 # Splash: the mark on transparency, composited by expo-splash-screen over the
 # configured backgroundColor.

@@ -50,7 +50,7 @@ const submit = (ui: Awaited<ReturnType<typeof render>>) => ui.getByTestId("auth-
 
 test("Sign-in shows the brand, the editorial title and filled fields", async () => {
   const ui = await render(<SignIn />);
-  expect(ui.getByTestId("brand-dot-0-0")).toBeTruthy();
+  expect(ui.getByTestId("brand-mark")).toBeTruthy();
   expect(await ui.findByText("Welcome back.")).toBeTruthy();
   await act(async () => {
     fireEvent.press(ui.getByLabelText("Continue with email"));

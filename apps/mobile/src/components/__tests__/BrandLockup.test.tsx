@@ -1,11 +1,10 @@
 import { render } from "@testing-library/react-native";
 import { BrandLockup } from "../BrandLockup";
 
-test("renders the Kora wordmark beside the dot-grid mark", async () => {
+test("renders the Kora wordmark beside the dial-K mark", async () => {
   const { getByText, getByTestId } = await render(<BrandLockup />);
   expect(getByText("Kora")).toBeTruthy();
-  expect(getByTestId("brand-dot-0-0")).toBeTruthy();
-  expect(getByTestId("brand-dot-2-2")).toBeTruthy();
+  expect(getByTestId("brand-mark")).toBeTruthy();
 });
 
 // The old lockup rendered a Lucide sparkles glyph in a primary-filled tile.

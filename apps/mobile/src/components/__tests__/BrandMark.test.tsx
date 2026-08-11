@@ -1,75 +1,65 @@
 import { render } from "@testing-library/react-native";
-import { BrandMark } from "../BrandMark";
-import { darkColors } from "@/theme/palette";
+import { processColor } from "react-native";
+import { BrandMark, BRAND_LUME, BRAND_NEEDLE } from "../BrandMark";
 
-// Kora is dark-only (app.json: userInterfaceStyle "dark"). @react-native/jest-preset
-// hard-mocks `useColorScheme` to always return "light" (jest/mocks/useColorScheme.js),
-// so `useTheme()` resolves to the light palette under every test unless overridden.
-// Force "dark" here, scoped to this file, so the assertions against darkColors
-// reflect the theme the app actually ships. Mocking this single leaf module (not
-// react-native itself, and not Platform) keeps everything else intact.
-jest.mock("react-native/Libraries/Utilities/useColorScheme", () => ({
-  __esModule: true,
-  default: () => "dark",
-}));
-
-// The three muted positions, as row/col. Everything else is a large primary dot.
-const MUTED = [
-  [0, 1], // top-centre
-  [1, 2], // middle-right
-  [2, 1], // bottom-centre
-] as const;
-
-function styleOf(node: { props: Record<string, unknown> }) {
-  const s = node.props.style;
-  return Array.isArray(s) ? Object.assign({}, ...s.filter(Boolean)) : s;
+// react-native-svg processes color props into native color objects before they
+// reach the host component, so compare payloads against processColor(), not
+// hex strings.
+function expectColor(prop: unknown, hex: string) {
+  const payload = (prop as { payload?: unknown })?.payload ?? prop;
+  expect(payload).toBe(processColor(hex));
 }
 
-test("renders a 3x3 grid of nine dots", async () => {
+// The dial K: an open 230° arc of 41 ticks (lit to 65%, dimmed past it) with
+// the orange needle as the K's upper arm. Geometry and brand rules live in
+// BrandMark.tsx; these tests pin the parts a regression would silently break.
+
+test("renders all 41 ticks of the open gauge arc", async () => {
   const { getByTestId } = await render(<BrandMark />);
-  for (let r = 0; r < 3; r++) {
-    for (let c = 0; c < 3; c++) {
-      expect(getByTestId(`brand-dot-${r}-${c}`)).toBeTruthy();
-    }
+  for (let i = 0; i <= 40; i++) {
+    expect(getByTestId(`brand-tick-${i}`)).toBeTruthy();
   }
 });
 
-// A test that only counted nine dots would pass against a uniform grid, which
-// is the wrong mark. Position and colour are the whole point.
-test("the three muted dots sit at top-centre, middle-right and bottom-centre", async () => {
+// A full ring would read as a clock. The arc is the mark's identity: ticks up
+// to 65% are lit, the rest are dimmed — a fill level, which no clock has.
+test("ticks are lit up to the needle at 65% and dimmed past it", async () => {
   const { getByTestId } = await render(<BrandMark />);
-
-  for (const [r, c] of MUTED) {
-    const style = styleOf(getByTestId(`brand-dot-${r}-${c}`));
-    expect(style.backgroundColor).toBe(darkColors.cardSecondary);
-  }
-
-  const mutedKeys = new Set(MUTED.map(([r, c]) => `${r}-${c}`));
-  let large = 0;
-  for (let r = 0; r < 3; r++) {
-    for (let c = 0; c < 3; c++) {
-      if (mutedKeys.has(`${r}-${c}`)) continue;
-      const style = styleOf(getByTestId(`brand-dot-${r}-${c}`));
-      expect(style.backgroundColor).toBe(darkColors.primary);
-      large++;
-    }
-  }
-  expect(large).toBe(6);
+  const litMinor = getByTestId("brand-tick-1").props.strokeOpacity;
+  const dimMinor = getByTestId("brand-tick-39").props.strokeOpacity;
+  expect(litMinor).toBeGreaterThan(dimMinor);
+  // boundary: tick 26 (26/40 = 0.65) is the last lit tick
+  expect(getByTestId("brand-tick-26").props.strokeOpacity).toBeGreaterThan(
+    getByTestId("brand-tick-27").props.strokeOpacity,
+  );
 });
 
-test("the muted dots are visibly smaller than the primary ones", async () => {
+test("the needle and hub are the only orange elements", async () => {
   const { getByTestId } = await render(<BrandMark />);
-  const largeStyle = styleOf(getByTestId("brand-dot-0-0"));
-  const mutedStyle = styleOf(getByTestId("brand-dot-0-1"));
-  expect(mutedStyle.width).toBeLessThan(largeStyle.width);
-  // ~60% of the large diameter, matching icon.png.
-  expect(mutedStyle.width / largeStyle.width).toBeCloseTo(0.6, 1);
+  expectColor(getByTestId("brand-needle").props.stroke, BRAND_NEEDLE);
+  expectColor(getByTestId("brand-hub").props.fill, BRAND_NEEDLE);
+  expectColor(getByTestId("brand-stem").props.fill, BRAND_LUME);
+  expectColor(getByTestId("brand-arm").props.stroke, BRAND_LUME);
+  for (const i of [0, 13, 26, 40]) {
+    expectColor(getByTestId(`brand-tick-${i}`).props.stroke, BRAND_LUME);
+  }
 });
 
-test("dots scale with the size prop and stay circular", async () => {
-  const { getByTestId } = await render(<BrandMark size={80} />);
-  const style = styleOf(getByTestId("brand-dot-0-0"));
-  expect(style.width).toBe(style.height);
-  expect(style.borderRadius).toBeCloseTo(style.width / 2, 5);
-  expect(style.width).toBeGreaterThan(20);
+// The needle always points "10 past" — up and to the right. If someone
+// flips the geometry the K stops reading and the mark depicts decline.
+test("the needle points up-right from its counterweight tail", async () => {
+  const { getByTestId } = await render(<BrandMark />);
+  const needle = getByTestId("brand-needle").props;
+  expect(needle.x2).toBeGreaterThan(needle.x1);
+  expect(needle.y2).toBeLessThan(needle.y1);
+});
+
+test("scales via the size prop while keeping geometry in the 240 viewBox space", async () => {
+  const { getByTestId } = await render(<BrandMark size={64} />);
+  const svg = getByTestId("brand-mark").props;
+  expect(svg.width).toBe(64);
+  expect(svg.height).toBe(64);
+  // geometry stays in viewBox units — a tick reaches past the rendered size,
+  // which only works if the 240-unit viewBox is doing the scaling
+  expect(getByTestId("brand-tick-40").props.x2).toBeGreaterThan(64);
 });

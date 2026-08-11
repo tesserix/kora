@@ -41,7 +41,7 @@ beforeEach(() => {
 test("renders the branded splash and NOT the tabs while the profile loads", async () => {
   mockUseProfile.mockReturnValue(LOADING);
   const { getByTestId, queryByTestId } = await render(<TabsLayout />);
-  expect(getByTestId("brand-dot-0-0")).toBeTruthy();
+  expect(getByTestId("brand-mark")).toBeTruthy();
   expect(queryByTestId("tabs")).toBeNull();
 });
 
@@ -100,7 +100,7 @@ test("renders the splash, not the tabs, when the query is paused offline", async
     refetch: jest.fn(),
   });
   const { getByTestId, queryByTestId } = await render(<TabsLayout />);
-  expect(getByTestId("brand-dot-0-0")).toBeTruthy();
+  expect(getByTestId("brand-mark")).toBeTruthy();
   expect(queryByTestId("tabs")).toBeNull();
 });
 
@@ -119,7 +119,7 @@ test("renders the tabs, not the splash, during a background refetch of a cached 
   });
   const { getByTestId, queryByTestId } = await render(<TabsLayout />);
   expect(getByTestId("tabs")).toBeTruthy();
-  expect(queryByTestId("brand-dot-0-0")).toBeNull();
+  expect(queryByTestId("brand-mark")).toBeNull();
 });
 
 // The state that currently strands people silently.
@@ -150,7 +150,7 @@ test("a 401 renders the splash, not the retry", async () => {
     refetch: jest.fn(),
   });
   const { getByTestId, queryByLabelText, queryByTestId } = await render(<TabsLayout />);
-  expect(getByTestId("brand-dot-0-0")).toBeTruthy();
+  expect(getByTestId("brand-mark")).toBeTruthy();
   expect(queryByLabelText("Retry")).toBeNull();
   expect(queryByTestId("tabs")).toBeNull();
 });
