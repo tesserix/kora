@@ -48,7 +48,11 @@ test("shows real current weight when entries exist", async () => {
   // old success/neutral Badge — instrument glass has one accent, not a
   // separate "good" color for this.
   expect(getByText("▾ 2.1 kg")).toBeTruthy();
-  expect(getByText("Protein goal")).toBeTruthy();
+  // Driven by dashboard.streak_days (a general logging streak, not a per-day
+  // protein-goal hit — the dashboard has no such history), so the panel is
+  // labeled for what the data actually is.
+  expect(getByText("Logging streak")).toBeTruthy();
+  expect(getByText("3/7 days")).toBeTruthy(); // mocked streak_days: 3
   expect(getByText("Avg sleep")).toBeTruthy();
 });
 
@@ -112,18 +116,24 @@ test("shows real sleep and renders the energy-vs-budget bars when Health is auth
   });
   mockAvgIntake7d.mockReturnValue({ avg: 1921, series: [1900, 1950, 1921], isLoading: false });
 
-  const { getByText, getByTestId, queryByLabelText } = await render(<Progress />);
+  const { getByText, getByTestId, getAllByText, queryByLabelText } = await render(<Progress />);
   expect(getByText("7.1h")).toBeTruthy();
   expect(queryByLabelText("Connect Apple Health")).toBeNull();
   for (let i = 0; i < 7; i++) expect(getByTestId(`ebar-${i}`)).toBeTruthy();
   expect(getByTestId("ebar-target")).toBeTruthy();
+  // useAvgIntake7d's series carries no dates (only the trailing days that had
+  // logged data, in order), so bars can't be attributed to real weekdays —
+  // only the most recent bar is labeled ("today"); the rest are unlabeled
+  // rather than misattributed to the wrong day.
+  expect(getByText("today")).toBeTruthy();
+  expect(getAllByText("—").length).toBe(6);
 });
 
-test("renders the protein-goal and avg-sleep streak cell duo", async () => {
+test("renders the logging-streak and avg-sleep streak cell duo", async () => {
   mockSeries.mockReturnValue({ data: [] });
   const { getByTestId } = await render(<Progress />);
   for (let i = 0; i < 7; i++) {
-    expect(getByTestId(`protein-streak-${i}`)).toBeTruthy();
+    expect(getByTestId(`logging-streak-${i}`)).toBeTruthy();
     expect(getByTestId(`sleep-streak-${i}`)).toBeTruthy();
   }
 });

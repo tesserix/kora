@@ -22,9 +22,6 @@ import { formatWeight, lbFromKg, useUnits, weightUnitLabel } from "@/units";
 const RANGES = ["1W", "1M", "3M", "1Y"] as const;
 const RANGE_OPTIONS = RANGES.map((r) => ({ key: r, label: r }));
 
-// Same weekday-letter convention as Diary's week strip (app/(tabs)/diary.tsx).
-const DOW = ["S", "M", "T", "W", "T", "F", "S"];
-
 // EnergyBars' own default `targetFraction` is 0.74 — bars are scaled to that
 // same headroom (target sits at 74% of the bar's max) so a day exactly at
 // budget lands its bar top right on the dashed target line, and an over-budget
@@ -40,29 +37,25 @@ function today(): string {
 const shortDate = (isoStr: string) => new Date(isoStr).toLocaleDateString([], { month: "short", day: "numeric" });
 const weightFormat = (n: number) => n.toFixed(1);
 
-function last7WeekdayLabels(): string[] {
-  const now = new Date();
-  return Array.from({ length: 7 }, (_, idx) => {
-    const dt = new Date(now.getTime() - (6 - idx) * 24 * 60 * 60 * 1000);
-    return DOW[dt.getDay()];
-  });
-}
-
-// useAvgIntake7d's `series` (src/api/hooks.ts) only includes the days in the
-// trailing week that actually have logged data, in chronological order, with
-// no dates attached (see its "never fabricates" filter) — an unlogged day is
-// dropped rather than represented as a zero. Left-padding with "no data" (0
-// kcal, in-budget) days is the closest honest alignment onto a fixed 7-slot
-// week strip without re-deriving a new dated per-day fetch, which is out of
-// scope for this presentation-only rebuild.
+// Data-honesty fix (task-11 review, finding 2): useAvgIntake7d's `series`
+// (src/api/hooks.ts) is `number[]` — it carries NO dates, and only includes
+// the days in the trailing week that actually have logged data (an unlogged
+// day is dropped entirely, not represented as a zero; see its own
+// never-fabricate filter/comment). Left-padding those values onto real
+// weekday letters, as the first pass here did, silently misattributed a kcal
+// total to the wrong day whenever the gap was mid-week rather than at the
+// start of the window — e.g. a week logged Mon/Wed/Fri would have rendered as
+// if Mon/Tue/Wed were logged and Thu–Sun were empty. Since the series has no
+// dates to map by, the only honest label is "no day attribution": every bar
+// but the most recent (rightmost, chronologically last) is unlabeled, and
+// only that last one is marked "today" — the one position the series' own
+// chronological ordering actually guarantees.
 function buildEnergyDays(series: number[], targetKcal: number): EnergyBarsDay[] {
-  const labels = last7WeekdayLabels();
   const padded = Array(Math.max(0, 7 - series.length)).fill(0).concat(series).slice(-7);
   const maxRef = targetKcal > 0 ? targetKcal / ENERGY_TARGET_FRACTION : 0;
-  return labels.map((label, i) => {
-    const kcal = padded[i] ?? 0;
+  return padded.map((kcal, i) => {
     const fraction = maxRef > 0 ? Math.min(kcal / maxRef, 1) : 0;
-    return { label, fraction, over: targetKcal > 0 && kcal > targetKcal };
+    return { label: i === padded.length - 1 ? "today" : "—", fraction, over: targetKcal > 0 && kcal > targetKcal };
   });
 }
 
@@ -186,12 +179,16 @@ export default function Progress() {
   const dash = dashboard.data;
   const dashPending = !dash && !dashboard.isError;
   const streakDays = dash?.streak_days ?? 0;
-  const proteinValue = Math.round(dash?.consumed?.protein_g ?? 0);
-  const proteinGoal = Math.round(dash?.targets?.protein_g ?? 0);
   const targetKcal = dash?.targets?.kcal ?? 0;
 
   const energyDays = buildEnergyDays(avgIntake.series, targetKcal);
-  const proteinHits = trailingStreakHits(streakDays);
+  // Data-honesty fix (task-11 review, finding 1): `streak_days` is the general
+  // logging streak (any day with a logged entry), not a per-day protein-goal
+  // hit — the dashboard has no such history. Labeling the panel "Protein
+  // goal" while driving it off this scalar overclaimed what the cells show.
+  // Relabeled to say what the data actually is.
+  const loggingStreakDays = Math.min(Math.max(0, streakDays), 7);
+  const loggingStreakHits = trailingStreakHits(streakDays);
   const sleepHits = sleepStreakHits(health.sleep?.lastNightHours ?? null);
 
   return (
@@ -304,12 +301,12 @@ export default function Progress() {
 
         <Animated.View entering={enter(3)} style={{ flexDirection: "row", gap: 12 }}>
           <GlassPanel radius={20} style={{ flex: 1, padding: 14 }}>
-            <AppText style={mutedLabel}>Protein goal</AppText>
+            <AppText style={mutedLabel}>Logging streak</AppText>
             <AppText style={[{ fontSize: 15, fontWeight: "600", color: instrument.ink, marginTop: 2 }, mono]}>
-              {dashPending ? "—" : `${proteinValue}/${proteinGoal}g`}
+              {dashPending ? "—" : `${loggingStreakDays}/7 days`}
             </AppText>
             <View style={{ marginTop: 10 }}>
-              <StreakCells hits={proteinHits} testIDPrefix="protein-streak" />
+              <StreakCells hits={loggingStreakHits} testIDPrefix="logging-streak" />
             </View>
           </GlassPanel>
           <GlassPanel radius={20} style={{ flex: 1, padding: 14 }}>
