@@ -1,5 +1,4 @@
 import type { DashboardSummary } from "@/api/types";
-import type { HealthStatus } from "@/health/types";
 
 /**
  * What the app hands the widget. Field names are mirrored verbatim by
@@ -22,17 +21,14 @@ export type WidgetSnapshot = {
   fatTarget: number;
   /** Step goal, which lives in the app (useHealth's STEP_GOAL) and is invisible to the widget. */
   stepGoal: number;
-  /** HealthKit never discloses READ authorization, so the widget cannot resolve this itself. */
-  healthStatus: HealthStatus;
 };
 
 export type BuildSnapshotInput = {
   summary: DashboardSummary;
   stepGoal: number;
-  healthStatus: HealthStatus;
 };
 
-export function buildSnapshot({ summary, stepGoal, healthStatus }: BuildSnapshotInput): WidgetSnapshot {
+export function buildSnapshot({ summary, stepGoal }: BuildSnapshotInput): WidgetSnapshot {
   return {
     date: summary.date,
     kcalConsumed: Math.round(summary.consumed.kcal),
@@ -44,6 +40,5 @@ export function buildSnapshot({ summary, stepGoal, healthStatus }: BuildSnapshot
     fatConsumed: Math.round(summary.consumed.fat_g),
     fatTarget: Math.round(summary.targets.fat_g),
     stepGoal,
-    healthStatus,
   };
 }

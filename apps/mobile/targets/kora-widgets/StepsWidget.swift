@@ -43,12 +43,15 @@ struct StepsEntry: TimelineEntry {
   let date: Date
   let steps: Int?
   let goal: Double
-  let healthStatus: String?
+  /// Whether a snapshot exists at all. nil here means "no snapshot" → "Open
+  /// Kora"; a snapshot present but the read yielding nothing is a separate,
+  /// later fact carried by `steps` being nil — see StepReader.todaySteps.
+  let hasSnapshot: Bool
 }
 
 struct StepsProvider: TimelineProvider {
   func placeholder(in context: Context) -> StepsEntry {
-    StepsEntry(date: Date(), steps: 0, goal: 10000, healthStatus: "authorized")
+    StepsEntry(date: Date(), steps: 0, goal: 10000, hasSnapshot: true)
   }
 
   func getSnapshot(in context: Context, completion: @escaping (StepsEntry) -> Void) {
@@ -67,16 +70,14 @@ struct StepsProvider: TimelineProvider {
   }
 
   private func entry() async -> StepsEntry {
-    // Deliberately raw(), not current(): the goal and the authorization status
-    // do not go stale the way a day's figures do, and expiring them at midnight
-    // would flip a working widget into a "connect" prompt.
+    // Deliberately raw(), not current(): the goal does not go stale the way a
+    // day's figures do, and expiring it at midnight would blank a working widget.
     let snapshot = SnapshotStore.raw()
-    let status = snapshot?.healthStatus
     let goal = snapshot?.stepGoal ?? 10000
-    guard status == "authorized" else {
-      return StepsEntry(date: Date(), steps: nil, goal: goal, healthStatus: status)
+    guard snapshot != nil else {
+      return StepsEntry(date: Date(), steps: nil, goal: goal, hasSnapshot: false)
     }
-    return StepsEntry(date: Date(), steps: await StepReader.todaySteps(), goal: goal, healthStatus: status)
+    return StepsEntry(date: Date(), steps: await StepReader.todaySteps(), goal: goal, hasSnapshot: true)
   }
 }
 
@@ -91,12 +92,14 @@ struct StepsWidgetView: View {
   }
 
   @ViewBuilder private var content: some View {
-    if entry.healthStatus == nil {
+    if !entry.hasSnapshot {
       message(title: "Open Kora", detail: "to see your steps")
-    } else if entry.healthStatus != "authorized" {
-      message(title: "Connect Health", detail: "in Kora to see steps")
     } else {
       VStack(alignment: .leading, spacing: 6) {
+        // nil and 0 are DIFFERENT facts: nil means the HealthKit read yielded
+        // nothing (no claim made about why — see StepReader.todaySteps), 0
+        // means it succeeded and found no steps. "—" is what guards against
+        // rendering the former as a confident zero.
         Text(entry.steps.map { "\($0)" } ?? "—")
           .font(.system(size: family == .systemSmall ? 34 : 40, weight: .bold))
           .monospacedDigit()

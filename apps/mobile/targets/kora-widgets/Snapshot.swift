@@ -14,7 +14,6 @@ struct NutritionSnapshot: Codable {
   let fatConsumed: Double
   let fatTarget: Double
   let stepGoal: Double
-  let healthStatus: String
 }
 
 // Pure logic, deliberately free of UserDefaults so widget-core-tests can
@@ -49,7 +48,7 @@ enum SnapshotStore {
   static let key = "nutritionSnapshot"
 
   /// The raw snapshot, whatever day it describes. Use for values that do not
-  /// go stale — the step goal and the health status.
+  /// go stale — the step goal.
   static func raw() -> NutritionSnapshot? {
     guard let defaults = UserDefaults(suiteName: appGroup),
           let json = defaults.string(forKey: key)

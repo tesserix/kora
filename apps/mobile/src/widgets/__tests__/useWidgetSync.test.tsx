@@ -12,9 +12,7 @@ jest.mock("@/api/hooks", () => ({
   useDashboard: () => mockDashboard,
 }));
 
-let mockHealth = { status: "authorized" };
 jest.mock("@/health/useHealth", () => ({
-  useHealth: () => mockHealth,
   STEP_GOAL: 10000,
 }));
 
@@ -52,7 +50,6 @@ beforeEach(() => {
   mockSetSnapshot.mockClear();
   mockClearSnapshot.mockClear();
   mockDashboard = { data: undefined, isError: false };
-  mockHealth = { status: "authorized" };
   authCallback = null;
 });
 
@@ -63,7 +60,6 @@ test("writes a snapshot once the dashboard resolves", async () => {
   const written = JSON.parse(mockSetSnapshot.mock.calls[0][0]);
   expect(written.kcalConsumed).toBe(1200);
   expect(written.stepGoal).toBe(10000);
-  expect(written.healthStatus).toBe("authorized");
 });
 
 test("writes nothing while the dashboard has no data", async () => {

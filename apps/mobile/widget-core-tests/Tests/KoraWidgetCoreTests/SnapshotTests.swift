@@ -11,7 +11,7 @@ private func json(date: String) -> String {
   {"date":"\(date)","kcalConsumed":1200,"kcalTarget":2451,
    "proteinConsumed":60,"proteinTarget":156,"carbsConsumed":130,
    "carbsTarget":337,"fatConsumed":40,"fatTarget":73,
-   "stepGoal":10000,"healthStatus":"authorized"}
+   "stepGoal":10000}
   """
 }
 
@@ -22,7 +22,6 @@ final class SnapshotTests: XCTestCase {
     XCTAssertEqual(snapshot?.kcalConsumed, 1200)
     XCTAssertEqual(snapshot?.kcalTarget, 2451)
     XCTAssertEqual(snapshot?.stepGoal, 10000)
-    XCTAssertEqual(snapshot?.healthStatus, "authorized")
   }
 
   func testDecodeReturnsNilOnGarbage() {

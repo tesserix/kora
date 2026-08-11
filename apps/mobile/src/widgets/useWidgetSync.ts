@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import { clearSnapshot, setSnapshot } from "../../modules/widget-bridge";
 import { useDashboard } from "@/api/hooks";
-import { STEP_GOAL, useHealth } from "@/health/useHealth";
+import { STEP_GOAL } from "@/health/useHealth";
 import { auth, isFirebaseConfigured } from "@/lib/firebase";
 import { buildSnapshot } from "./snapshot";
 
@@ -24,7 +24,6 @@ function today(): string {
  */
 export function useWidgetSync(): void {
   const dashboard = useDashboard(today());
-  const health = useHealth();
   const summary = dashboard.data;
 
   // Sign-out is SUBSCRIBED to, not read. currentUserId() would be a snapshot
@@ -40,6 +39,6 @@ export function useWidgetSync(): void {
 
   useEffect(() => {
     if (!summary) return;
-    setSnapshot(JSON.stringify(buildSnapshot({ summary, stepGoal: STEP_GOAL, healthStatus: health.status })));
-  }, [summary, health.status]);
+    setSnapshot(JSON.stringify(buildSnapshot({ summary, stepGoal: STEP_GOAL })));
+  }, [summary]);
 }
