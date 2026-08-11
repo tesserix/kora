@@ -29,6 +29,7 @@ import { VoiceComposer } from "@/components/capture/VoiceComposer";
 import { ResolutionResult, candidateKey } from "@/components/ResolutionResult";
 import { FoodPicker } from "@/components/meal/FoodPicker";
 import { withAlpha } from "@/lib/color";
+import { useToast } from "@/components/Toast";
 import { INSTRUMENT_DARK_FIXED } from "@/theme";
 import { haptics } from "@/motion";
 import {
@@ -727,6 +728,7 @@ function ottoErrorMessage(error: Error): string {
 export default function CaptureScreen() {
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
+  const toast = useToast();
   const profile = useProfile();
   const resolveText = useResolveText();
   const resolvePhoto = useResolvePhoto();
@@ -1118,6 +1120,12 @@ export default function CaptureScreen() {
     }
 
     haptics.success();
+    // The root ToastProvider outlives this screen, so the confirmation
+    // survives the router.back() — without it the only success signal is a
+    // haptic, and the user lands on whichever tab they came from with no
+    // visible evidence the log happened.
+    const count = newlySucceededKeys.length;
+    toast.show({ message: `Logged ${count} ${count === 1 ? "item" : "items"} to your diary` });
     router.back();
   }
 

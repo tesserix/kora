@@ -167,3 +167,27 @@ describe("portionEntryFor", () => {
     expect(formatPortion(portionEntryFor(140, "g", undefined))).toBe("140 g");
   });
 });
+
+// Size descriptors are adjectives — "2 large", never "2 larges" (live bug
+// caught on-device 2026-08-12). Noun units still pluralize, with -es where
+// English demands it.
+describe("formatPortion pluralization", () => {
+  const entry = (amount: number, unit: string) => ({
+    quantity_grams: 100,
+    base_unit: "g",
+    entered_amount: amount,
+    entered_unit: unit,
+  });
+  const { formatPortion } = require("../portion");
+
+  test("size descriptors never pluralize", () => {
+    expect(formatPortion(entry(2, "large"))).toBe("2 large");
+    expect(formatPortion(entry(3, "medium"))).toBe("3 medium");
+  });
+
+  test("noun units pluralize, with -es for sibilant endings", () => {
+    expect(formatPortion(entry(2, "slice"))).toBe("2 slices");
+    expect(formatPortion(entry(2, "bunch"))).toBe("2 bunches");
+    expect(formatPortion(entry(1, "slice"))).toBe("1 slice");
+  });
+});

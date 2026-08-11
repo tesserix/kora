@@ -145,7 +145,16 @@ export function formatPortion(entry: PortionEntry): string {
   if (BULK_UNITS.has(unit)) {
     return `${formatAmount(entered_amount)} ${unit}`;
   }
-  // Pluralise only if amount > 1, and only if the name doesn't already end in "s"
-  const plural = entered_amount > 1 && !entered_unit.endsWith("s") ? `${entered_unit}s` : entered_unit;
-  return `${formatAmount(entered_amount)} ${plural}`;
+  return `${formatAmount(entered_amount)} ${pluralizeUnit(entered_unit, entered_amount)}`;
+}
+
+// Size descriptors read as adjectives, not nouns — "2 large", never "2 larges".
+const UNPLURALIZABLE_UNITS = new Set(["large", "medium", "small", "extra large", "extra-large", "jumbo", "mini", "regular"]);
+
+function pluralizeUnit(unit: string, amount: number): string {
+  if (amount <= 1 || unit.endsWith("s")) return unit;
+  if (UNPLURALIZABLE_UNITS.has(unit.toLowerCase())) return unit;
+  // bunch → bunches, dish → dishes, box → boxes
+  if (/(ch|sh|x|z)$/i.test(unit)) return `${unit}es`;
+  return `${unit}s`;
 }
