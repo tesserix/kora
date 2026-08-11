@@ -104,20 +104,47 @@ func (c HTTPOFFClient) Fetch(ctx context.Context, barcode string) (*FoodItem, er
 		FatPer100g:     body.Product.Nutriments.Fat100g,
 		FiberPer100g:   body.Product.Nutriments.Fiber100g,
 	}
-	// A parse miss is not a failure — the product simply has no named serving
-	// and the client falls back to raw base-unit entry. Logged so the shapes
-	// OFF actually publishes can be read off real traffic; note that many
-	// products carry serving_quantity (which lands in ServingGrams) but no
-	// serving_size text at all, so there is nothing here to name.
+	// The row's own label first: it carries the serving's real NAME ("sachet",
+	// "glass"), which a user recognises and a generic word never will.
+	//
+	// Failing that, OFF very often publishes a numeric serving_quantity with no
+	// serving_size text at all — both barcodes from the 2026-08-11 verification
+	// are like this. Naming that mass "1 portion" is not a guess: it is the
+	// serving OFF already published, relabelled. Nothing is derived from the
+	// food's name or from any density table, which is exactly what separates
+	// this from the curated fallback that used to live in units.Fallback.
 	if parsed, err := units.Parse(body.Product.ServingSize); err == nil {
 		if encoded, mErr := json.Marshal(parsed); mErr == nil {
 			item.ServingUnits = encoded
 		}
+	} else if portion, ok := portionFromServingGrams(item.ServingGrams); ok {
+		if encoded, mErr := json.Marshal(portion); mErr == nil {
+			item.ServingUnits = encoded
+		}
 	} else {
-		slog.DebugContext(ctx, "nutrition: no serving unit parsed from OFF label",
+		slog.DebugContext(ctx, "nutrition: no serving unit parsed and no serving quantity to name",
 			"barcode", barcode, "serving_size", body.Product.ServingSize)
 	}
 	return item, nil
+}
+
+// GenericPortionName is what a serving gets called when the source published a
+// serving mass but no name for it. Deliberately generic: it makes no claim
+// about the food's form, only that this is one serving of it.
+const GenericPortionName = "portion"
+
+// portionFromServingGrams names a row's own serving mass as a single generic
+// portion, or reports false when there is no mass to name.
+//
+// The guard is not cosmetic. A zero — OFF omitting serving_quantity, which is
+// common — would otherwise become a serving unit whose base_amount is 0, and
+// every log entered against it would resolve to zero grams and silently
+// contribute nothing to the day's totals.
+func portionFromServingGrams(servingGrams float64) ([]units.ServingUnit, bool) {
+	if servingGrams <= 0 {
+		return nil, false
+	}
+	return []units.ServingUnit{{Name: GenericPortionName, Amount: 1, BaseAmount: servingGrams}}, true
 }
 
 // FetchServingUnit reads only the product's serving_quantity_unit, verbatim.
