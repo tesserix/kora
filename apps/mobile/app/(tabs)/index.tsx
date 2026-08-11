@@ -5,24 +5,22 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { AppText } from "@/components/Text";
 import { Avatar } from "@/components/Avatar";
-import { Card } from "@/components/Card";
-import { Overline } from "@/components/Overline";
-import { MealRow } from "@/components/MealRow";
-import { KcalHero } from "@/components/home/KcalHero";
+import { Icon } from "@/components/Icon";
 import { SavedMealsStrip } from "@/components/home/SavedMealsStrip";
 import { PinnedStrip } from "@/components/home/PinnedStrip";
 import { YourUsualStrip } from "@/components/home/YourUsualStrip";
-import { RingStat } from "@/components/RingStat";
 import { EmptyState } from "@/components/common/EmptyState";
-import { Icon } from "@/components/Icon";
 import { AppBackground } from "@/components/AppBackground";
 import { PressableScale } from "@/motion";
+import { GaugeDial } from "@/components/instrument/GaugeDial";
+import { MacroWide } from "@/components/instrument/MacroWide";
+import { SubDial } from "@/components/instrument/SubDial";
+import { TeleStrip, type TeleStripCell } from "@/components/instrument/TeleStrip";
+import { GlassPanel } from "@/components/instrument/GlassPanel";
 import { useProfile, useDashboard, useDayLogs, useUnreadCount } from "@/api/hooks";
 import { useHealth } from "@/health";
 import { useTheme } from "@/theme";
-import { foodVisual } from "@/lib/foodVisual";
-import { fibreGoal } from "@/lib/fibreGoal";
-import { hslToHex, withAlpha } from "@/lib/color";
+import { withAlpha } from "@/lib/color";
 import type { FoodLog } from "@/api/types";
 
 function today(): string {
@@ -44,7 +42,7 @@ function mealTime(log: FoodLog): string {
 }
 
 export default function Home() {
-  const { colors, spacing, radius, gradients } = useTheme();
+  const { colors, spacing, radius, instrument, fonts } = useTheme();
   const insets = useSafeAreaInsets();
   const profile = useProfile();
   const unread = useUnreadCount();
@@ -63,14 +61,63 @@ export default function Home() {
   }, []);
   const enter = (i: number) => (firstMount.current ? FadeInDown.duration(300).delay(i * 30) : undefined);
 
+  const mono = { fontFamily: fonts.mono, fontVariant: ["tabular-nums" as const] };
+  const engraved = {
+    fontSize: 9,
+    letterSpacing: 1.4,
+    textTransform: "uppercase" as const,
+    color: instrument.mut,
+  };
+
   const d = dashboard.data;
   const loadError = dashboard.isError || logs.isError;
   const eaten = d?.consumed.kcal ?? 0;
   const goal = d?.targets.kcal ?? 0;
-  const left = Math.round(Math.max(0, goal - eaten));
   const loggedMeals = (logs.data ?? []) as FoodLog[];
   const firstName = profile.data?.display_name?.trim().split(" ")[0] || "there";
   const hasUnread = (unread.data?.count ?? 0) > 0;
+
+  const proteinValue = Math.round(d?.consumed.protein_g ?? 0);
+  const proteinGoal = Math.round(d?.targets.protein_g ?? 0);
+  const carbsValue = Math.round(d?.consumed.carbs_g ?? 0);
+  const carbsGoal = Math.round(d?.targets.carbs_g ?? 0);
+  const fatValue = Math.round(d?.consumed.fat_g ?? 0);
+  const fatGoal = Math.round(d?.targets.fat_g ?? 0);
+
+  // Dashboard `Totals` (src/api/types.ts) has no burned/active-energy field —
+  // GaugeDial's `burned` prop is intentionally omitted rather than guessed.
+  const stepsCell: TeleStripCell = health.steps
+    ? { icon: <Icon name="trending-up" size={16} color={instrument.ink} />, value: health.steps.today.toLocaleString(), label: "Steps" }
+    : {
+        icon: (
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Connect Apple Health"
+            haptic="selection"
+            onPress={health.connect}
+          >
+            <Icon name="trending-up" size={16} color={instrument.mut} />
+          </PressableScale>
+        ),
+        value: "—",
+        label: "Steps",
+      };
+  const sleepCell: TeleStripCell = health.sleep
+    ? { icon: <Icon name="heart" size={16} color={instrument.ink} />, value: `${health.sleep.lastNightHours}h`, label: "Sleep" }
+    : {
+        icon: (
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Connect Apple Health"
+            haptic="selection"
+            onPress={health.connect}
+          >
+            <Icon name="heart" size={16} color={instrument.mut} />
+          </PressableScale>
+        ),
+        value: "—",
+        label: "Sleep",
+      };
 
   const openMeal = (log: FoodLog) =>
     router.push({
@@ -82,7 +129,7 @@ export default function Home() {
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppBackground />
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + spacing.sm, paddingBottom: 130 }}>
-      {/* header: large title */}
+      {/* header: date sentence-case · greeting, avatar, bell */}
       <Animated.View
         entering={enter(0)}
         style={{ paddingHorizontal: 16, paddingBottom: 8, flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end" }}
@@ -137,71 +184,56 @@ export default function Home() {
         </View>
       ) : null}
 
-      {/* hero — hidden entirely on load error so no contradictory "0 calories left" shows */}
+      {/* energy reserve dial — hidden entirely on load error so no contradictory reserve figure shows */}
       {!loadError ? (
         <Animated.View entering={enter(1)} style={{ paddingHorizontal: 16, paddingVertical: 12 }}>
-          <Card variant="hero">
-            <KcalHero
-              left={left}
-              goal={goal}
-              eaten={eaten}
-              loading={!d}
-              macros={
-                d
-                  ? {
-                      p: d.consumed.protein_g,
-                      c: d.consumed.carbs_g,
-                      f: d.consumed.fat_g,
-                      pGoal: d.targets.protein_g,
-                      cGoal: d.targets.carbs_g,
-                      fGoal: d.targets.fat_g,
-                      fib: d.consumed.fiber_g,
-                      fibGoal: fibreGoal(d.targets.kcal),
-                    }
-                  : undefined
-              }
-            />
-          </Card>
+          <GlassPanel radius={24} style={{ padding: 16 }}>
+            <AppText style={[engraved, { marginBottom: 8 }]}>Energy reserve</AppText>
+            <GaugeDial value={eaten} target={goal} />
+          </GlassPanel>
+        </Animated.View>
+      ) : null}
+
+      {/* macros — protein full-width, carbs/fat compact pair (deliberate asymmetry) */}
+      {!loadError ? (
+        <Animated.View entering={enter(2)} style={{ paddingHorizontal: 16, gap: 12 }}>
+          <MacroWide label="Protein" value={proteinValue} goal={proteinGoal} unit="g" />
+          <View style={{ flexDirection: "row", gap: 12 }}>
+            <GlassPanel radius={20} style={{ flex: 1 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", padding: 12, gap: 10 }}>
+                <SubDial fraction={carbsGoal > 0 ? carbsValue / carbsGoal : 0} testID="carbs-subdial" />
+                <View>
+                  <AppText style={engraved}>Carbs</AppText>
+                  <AppText style={[{ fontSize: 13, fontWeight: "600", color: instrument.ink, marginTop: 2 }, mono]}>
+                    {carbsValue}/{carbsGoal}g
+                  </AppText>
+                </View>
+              </View>
+            </GlassPanel>
+            <GlassPanel radius={20} style={{ flex: 1 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", padding: 12, gap: 10 }}>
+                <SubDial fraction={fatGoal > 0 ? fatValue / fatGoal : 0} testID="fat-subdial" />
+                <View>
+                  <AppText style={engraved}>Fat</AppText>
+                  <AppText style={[{ fontSize: 13, fontWeight: "600", color: instrument.ink, marginTop: 2 }, mono]}>
+                    {fatValue}/{fatGoal}g
+                  </AppText>
+                </View>
+              </View>
+            </GlassPanel>
+          </View>
         </Animated.View>
       ) : null}
 
       {/* today's vitals — Steps + Sleep, both driven live from Apple HealthKit via useHealth() */}
       {!loadError ? (
-        <Animated.View entering={enter(2)} style={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 4 }}>
-          <Overline style={{ marginBottom: 8 }}>Today's vitals</Overline>
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
-            <Card variant="elevated" style={{ flexBasis: "48%", flexGrow: 1 }}>
-              {/* Gated on `health.steps`, not `health.status`: HealthKit never discloses
-                  whether READ access was actually granted, so "authorized" status alone
-                  cannot tell a real 0 from a denial. A user who has genuinely taken no
-                  steps yet today will see the connect prompt too — accepted, since the
-                  alternative (a denied user stuck on a false "0" with no way back) is worse. */}
-              <RingStat
-                label="Steps"
-                dotColor={colors.stepsMetric}
-                state={health.steps ? "value" : "connect"}
-                value={health.steps ? health.steps.today.toLocaleString() : undefined}
-                meta={health.steps ? `of ${health.steps.goal.toLocaleString()}` : undefined}
-                ringValue={health.steps?.today ?? 0}
-                ringMax={health.steps?.goal ?? 0}
-                ringGradient={gradients.steps}
-                onConnect={health.connect}
-              />
-            </Card>
-            <Card variant="elevated" style={{ flexBasis: "48%", flexGrow: 1 }}>
-              <RingStat
-                label="Sleep"
-                dotColor={colors.sleepMetric}
-                state={health.sleep ? "value" : "connect"}
-                value={health.sleep ? `${health.sleep.lastNightHours}` : undefined}
-                meta={health.sleep ? "last night" : undefined}
-                ringValue={health.sleep?.lastNightHours ?? 0}
-                ringMax={8}
-                ringGradient={gradients.sleep}
-                onConnect={health.connect}
-              />
-            </Card>
-          </View>
+        <Animated.View entering={enter(3)} style={{ paddingHorizontal: 16, paddingTop: 12 }}>
+          {/* Gated on `health.steps`/`health.sleep`, not `health.status`: HealthKit never
+              discloses whether READ access was actually granted, so "authorized" status
+              alone cannot tell a real 0 from a denial. A user who has genuinely logged no
+              steps/sleep yet today will see the connect prompt too — accepted, since the
+              alternative (a denied user stuck on a false "0" with no way back) is worse. */}
+          <TeleStrip cells={[stepsCell, sleepCell]} />
         </Animated.View>
       ) : null}
 
@@ -210,30 +242,41 @@ export default function Home() {
       <PinnedStrip />
       <YourUsualStrip />
       {!loadError ? (
-        <Animated.View entering={enter(3)} style={{ paddingHorizontal: 16, marginTop: 8 }}>
-          <Overline style={{ marginBottom: 8 }}>Meals</Overline>
+        <Animated.View entering={enter(4)} style={{ paddingHorizontal: 16, marginTop: 16 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 }}>
+            <AppText style={{ fontSize: 14, fontWeight: "600", color: instrument.ink }}>Logged today</AppText>
+            <View style={{ flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: instrument.hairline }} />
+          </View>
           {loggedMeals.length > 0 ? (
-            <Card variant="elevated" style={{ marginBottom: 12, padding: 0, paddingVertical: spacing.sm }}>
-              {loggedMeals.map((log, i) => {
-                const fv = foodVisual(log.description);
-                return (
-                  <View key={log.id}>
-                    <MealRow
-                      name={log.description}
-                      slot={`${log.meal_slot} · ${mealTime(log)}`}
-                      kcal={log.kcal}
-                      iconName={fv.icon}
-                      tint={hslToHex(fv.hue, 0.5, 0.5)}
-                      onPress={() => openMeal(log)}
-                      accessibilityLabel={log.description}
-                    />
-                    {i < loggedMeals.length - 1 ? (
-                      <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: colors.separator }} />
-                    ) : null}
-                  </View>
-                );
-              })}
-            </Card>
+            <View style={{ marginBottom: 12 }}>
+              {loggedMeals.map((log, i) => (
+                <View key={log.id}>
+                  <PressableScale
+                    accessibilityRole="button"
+                    accessibilityLabel={log.description}
+                    haptic="selection"
+                    onPress={() => openMeal(log)}
+                    style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10 }}
+                  >
+                    <AppText style={[{ fontSize: 12, color: instrument.mut, width: 60 }, mono]}>
+                      {mealTime(log)}
+                    </AppText>
+                    <View style={{ flex: 1 }}>
+                      <AppText style={{ fontSize: 15, fontWeight: "600", color: instrument.ink }}>
+                        {log.description}
+                      </AppText>
+                      <AppText style={[engraved, { marginTop: 2 }]}>{log.meal_slot}</AppText>
+                    </View>
+                    <AppText style={[{ fontSize: 15, fontWeight: "600", color: instrument.ink }, mono]}>
+                      {Math.round(log.kcal)} kcal
+                    </AppText>
+                  </PressableScale>
+                  {i < loggedMeals.length - 1 ? (
+                    <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: instrument.hairline }} />
+                  ) : null}
+                </View>
+              ))}
+            </View>
           ) : (
             <EmptyState
               icon="camera"

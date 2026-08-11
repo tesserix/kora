@@ -37,7 +37,7 @@ beforeEach(() => {
   mockPush.mockClear();
 });
 
-test("Home renders the Today large title with the animated kcal-left number and meal rows", async () => {
+test("Home renders the Today large title, the gauge dial reserve numeral, protein macro, and meal rows", async () => {
   mockUseDashboard.mockReturnValue({
     data: { consumed: { kcal: 1252, protein_g: 96, carbs_g: 140, fat_g: 40 }, targets: { kcal: 2000, protein_g: 140, carbs_g: 220, fat_g: 70 }, water_ml: 1400, streak_days: 12 },
     isError: false,
@@ -47,9 +47,13 @@ test("Home renders the Today large title with the animated kcal-left number and 
     isError: false,
   });
 
-  const { findByText } = await render(<Home />);
+  const { findByText, findByTestId } = await render(<Home />);
   expect(await findByText("Today")).toBeTruthy();
-  expect(await findByText("748")).toBeTruthy(); // 2000 - 1252 kcal left
+  expect(await findByTestId("gauge-dial")).toBeTruthy();
+  expect(await findByText("748")).toBeTruthy(); // 2000 - 1252 kcal in reserve
+  expect(await findByText("96/140")).toBeTruthy(); // protein value/goal
+  expect(await findByText("44g to go")).toBeTruthy(); // 140 - 96
+  expect(await findByText("Logged today")).toBeTruthy();
   expect(await findByText("Greek yogurt bowl")).toBeTruthy();
   expect(await findByText("320 kcal")).toBeTruthy();
 });
@@ -64,49 +68,32 @@ test("tapping Add a meal routes to /capture", async () => {
   expect(mockPush).toHaveBeenCalledWith("/capture");
 });
 
-test("Home shows an error message when the dashboard fails to load", async () => {
+test("Home shows an error message when the dashboard fails to load, and hides the gauge dial", async () => {
   mockUseDashboard.mockReturnValue({ data: undefined, isError: true });
   mockUseDayLogs.mockReturnValue({ data: [], isError: false });
 
-  const { findByText, queryByText } = await render(<Home />);
+  const { findByText, queryByTestId } = await render(<Home />);
   expect(await findByText(/Couldn't load your day/i)).toBeTruthy();
-  expect(queryByText(/calories left/i)).toBeNull();
+  expect(queryByTestId("gauge-dial")).toBeNull();
 });
 
-test("shows a first-run empty state when no meals are logged, keeping the calorie goal visible", async () => {
+test("shows a first-run empty state when no meals are logged, keeping the gauge dial and macro targets visible", async () => {
   mockUseDashboard.mockReturnValue({
     data: { consumed: { kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0 }, targets: { kcal: 2000, protein_g: 140, carbs_g: 220, fat_g: 70 }, water_ml: 0, streak_days: 0 },
     isError: false,
   });
   mockUseDayLogs.mockReturnValue({ data: [], isError: false });
 
-  const { findByText } = await render(<Home />);
+  const { findByText, findByTestId } = await render(<Home />);
   expect(await findByText("No meals logged yet")).toBeTruthy();
-  expect(await findByText(/log your first meal/i)).toBeTruthy();
-  // the onboarding-computed calorie goal/ring stays visible for a first-run user
-  expect(await findByText("kcal left")).toBeTruthy();
-  expect(await findByText("2,000")).toBeTruthy();
+  expect(await findByTestId("gauge-dial")).toBeTruthy();
+  expect(await findByText("0/140")).toBeTruthy(); // protein target
+  expect(await findByText("140g to go")).toBeTruthy();
+  expect(await findByText("0/220g")).toBeTruthy(); // carbs target
+  expect(await findByText("0/70g")).toBeTruthy(); // fat target
 });
 
-test("first-run: onboarding-computed calorie goal and macro targets still render at zero consumed with no logs", async () => {
-  mockUseDashboard.mockReturnValue({
-    data: { consumed: { kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0, fiber_g: 0 }, targets: { kcal: 2000, protein_g: 140, carbs_g: 220, fat_g: 70 }, water_ml: 0, streak_days: 0 },
-    isError: false,
-  });
-  mockUseDayLogs.mockReturnValue({ data: [], isError: false });
-
-  const { findByText } = await render(<Home />);
-  // empty state present…
-  expect(await findByText("No meals logged yet")).toBeTruthy();
-  // …alongside the calorie goal (not blank) and the macro targets.
-  expect(await findByText("kcal left")).toBeTruthy();
-  expect(await findByText("2,000")).toBeTruthy();
-  expect(await findByText("0g / 140g")).toBeTruthy(); // protein target
-  expect(await findByText("0g / 220g")).toBeTruthy(); // carbs target
-  expect(await findByText("0g / 70g")).toBeTruthy(); // fat target
-});
-
-test("shows a Connect Apple Health affordance for Steps (never a number yet)", async () => {
+test("shows a Connect Apple Health affordance for Steps and Sleep (never a number yet)", async () => {
   mockUseDashboard.mockReturnValue({
     data: { consumed: { kcal: 1252, protein_g: 96, carbs_g: 140, fat_g: 40 }, targets: { kcal: 2000, protein_g: 140, carbs_g: 220, fat_g: 70 }, water_ml: 1400, streak_days: 12 },
     isError: false,
