@@ -37,8 +37,12 @@ export function GaugeDial({
     [target, "Budget"],
   ];
 
+  const accessibilityLabel = `${Math.round(remaining).toLocaleString()} calories in reserve of ${Math.round(
+    target,
+  ).toLocaleString()}`;
+
   return (
-    <View testID={testID} accessible accessibilityLabel={`${remaining} calories in reserve of ${target}`}>
+    <View testID={testID} accessible accessibilityLabel={accessibilityLabel}>
       <View style={{ alignItems: "center" }}>
         <Svg width={GAUGE_VIEW_W} height={GAUGE_VIEW_H} viewBox={`0 0 ${GAUGE_VIEW_W} ${GAUGE_VIEW_H}`}>
           {buildGaugeTicks(fraction).map((t, i) => (
@@ -58,6 +62,7 @@ export function GaugeDial({
             const a = scaleAnchor(t);
             return (
               <SvgText key={t} x={a.x} y={a.y} textAnchor={a.anchor} fontSize={9} fill={instrument.mut}>
+                {/* explicit rounding — scale numerals must never show API float noise */}
                 {Math.round(target * t).toLocaleString()}
               </SvgText>
             );
@@ -74,8 +79,23 @@ export function GaugeDial({
           />
           <Circle cx={132} cy={146} r={4.5} fill={instrument.accent} />
         </Svg>
-        <View style={{ position: "absolute", top: "46%", alignItems: "center" }}>
-          <AppText variant="body" style={[{ fontSize: 54, color: instrument.ink, letterSpacing: -1.5 }, mono]}>
+        <View
+          style={{
+            position: "absolute",
+            // top/bottom (not a bare top%) bound the overlay inside the Svg's own
+            // height so the numeral's line box has room to breathe and can't clip —
+            // top starts below the scale-numeral band (~y 61) with margin to spare.
+            top: "40%",
+            bottom: 0,
+            left: 0,
+            right: 0,
+            alignItems: "center",
+          }}
+        >
+          <AppText
+            variant="body"
+            style={[{ fontSize: 54, lineHeight: 60, color: instrument.ink, letterSpacing: -1.5 }, mono]}
+          >
             {remaining.toLocaleString()}
           </AppText>
           <AppText
@@ -105,7 +125,7 @@ export function GaugeDial({
         {footer.map(([v, k]) => (
           <View key={k} style={{ flex: 1, alignItems: "center" }}>
             <AppText variant="body" style={[{ fontSize: 15, fontWeight: "600", color: instrument.ink }, mono]}>
-              {v.toLocaleString()}
+              {Math.round(Number(v)).toLocaleString()}
             </AppText>
             <AppText
               variant="body"

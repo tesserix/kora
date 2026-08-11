@@ -26,3 +26,21 @@ test("never renders a negative reserve", async () => {
   const { getByText } = await render(<GaugeDial value={2500} target={2200} />);
   expect(getByText("0")).toBeTruthy();
 });
+
+test("rounds raw API floats in the footer instead of showing decimals", async () => {
+  const { getByText, queryByText } = await render(
+    <GaugeDial value={105.02} target={1794.531} burned={42.9} />,
+  );
+  expect(getByText("105")).toBeTruthy(); // eaten, footer — rounded, not "105.02"
+  expect(getByText("43")).toBeTruthy(); // burned, footer — rounded, not "42.9"
+  expect(queryByText("105.02")).toBeNull();
+  expect(queryByText("1,794.531")).toBeNull();
+});
+
+test("the center reserve numeral carries an explicit lineHeight so it can't clip", async () => {
+  const { getByText } = await render(<GaugeDial value={1430} target={2200} burned={304} />);
+  const node = getByText("770");
+  const style = node.props.style;
+  const flat = Array.isArray(style) ? Object.assign({}, ...style.flat().filter(Boolean)) : style;
+  expect(flat.lineHeight).toBeGreaterThanOrEqual(flat.fontSize * 1.1);
+});
