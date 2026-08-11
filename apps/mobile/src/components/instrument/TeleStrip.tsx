@@ -17,10 +17,12 @@ export interface TeleStripProps {
 export function TeleStrip({ cells }: TeleStripProps) {
   const { instrument, fonts } = useTheme();
   const mono = { fontFamily: fonts.mono, fontVariant: ["tabular-nums" as const] };
-  const engraved = {
-    fontSize: 9,
-    letterSpacing: 1.4,
-    textTransform: "uppercase" as const,
+  // Sentence case, not engraved: engraving is reserved for inside the gauge
+  // instruments themselves (GaugeDial caption/footer, SubDial context) — a
+  // metric caption like "Steps"/"Sleep" is not an engraving.
+  const captionLabel = {
+    fontSize: 11,
+    fontWeight: "600" as const,
     color: instrument.mut,
   };
 
@@ -53,7 +55,7 @@ export function TeleStrip({ cells }: TeleStripProps) {
                 <AppText style={[{ fontSize: 17, fontWeight: "600", color: instrument.ink }, mono]}>
                   {c.value}
                 </AppText>
-                <AppText style={engraved}>{c.label}</AppText>
+                <AppText style={captionLabel}>{c.label}</AppText>
               </View>
             </View>
           </Fragment>
