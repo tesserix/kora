@@ -1366,3 +1366,180 @@ git commit -m "test(mobile): guard the widget deep links against route renames"
 - If the extension fails to sign, set `ios.appleTeamId` in `app.json`. The simulator does not need a real team, but a stale value can break the build.
 - `@bacons/apple-targets` ships an agent skill (`npx skills add EvanBacon/expo-apple-targets`) with per-target reference docs. Worth installing if a target-level problem resists the docs above.
 - The Swift in Tasks 5 and 6 has no automated tests, by the decision recorded in the spec. Treat the manual verification steps as the gate they are, and do not mark those tasks complete on a build success alone.
+
+---
+
+### Task 8: Make the app honest about unreadable health data
+
+Fixes a live bug in the shipped app, found while verifying Task 6. HealthKit
+never discloses read authorization, so `useHealth`'s `"authorized"` means only
+"the prompt was shown". With access actually denied the app renders a confident
+`0` steps and, because the connect affordance is gated on a status that is
+never `"denied"`, offers no way back. Verified 2026-08-11: 3,500 steps in
+HealthKit, Kora absent from Health → Profile → Apps, app showing "0 of 10,000".
+
+**Files:**
+- Modify: `apps/mobile/src/health/useHealth.ts`
+- Modify: `apps/mobile/app/(tabs)/index.tsx:177` and the matching Sleep line
+- Modify: `apps/mobile/src/health/__tests__/useHealth.test.tsx`
+
+**Interfaces:**
+- Consumes: nothing new.
+- Produces: `useHealth()` returning `steps: null` when no samples are readable;
+  `connect()` always routing to Health.
+
+- [ ] **Step 1: Write the failing tests**
+
+Add to `apps/mobile/src/health/__tests__/useHealth.test.tsx`, following the
+mocking already used in that file:
+
+```tsx
+// HealthKit returns an empty sample array both when the user has genuinely not
+// moved and when read access was denied — the two are indistinguishable. The
+// app must therefore report "unknown" (null), never a confident 0.
+test("reports null steps when no samples are readable", async () => {
+  mockQueryQuantitySamples.mockResolvedValue([]);
+  const { result } = renderHook(() => useHealth());
+  await waitFor(() => expect(result.current.steps).toBeNull());
+});
+
+test("reports a real count when samples are readable", async () => {
+  mockQueryQuantitySamples.mockResolvedValue([{ quantity: 3500 }]);
+  const { result } = renderHook(() => useHealth());
+  await waitFor(() => expect(result.current.steps).toEqual({ today: 3500, goal: 10000 }));
+});
+
+// The old connect() only opened Health when status === "denied", a state that
+// cannot occur — so a user who denied had no route back.
+test("connect always opens Health settings", async () => {
+  mockQueryQuantitySamples.mockResolvedValue([]);
+  const { result } = renderHook(() => useHealth());
+  await waitFor(() => expect(result.current.steps).toBeNull());
+  result.current.connect();
+  expect(Linking.openURL).toHaveBeenCalledWith("x-apple-health://");
+});
+```
+
+- [ ] **Step 2: Run them and confirm they fail**
+
+`cd apps/mobile && npx jest src/health/__tests__/useHealth.test.tsx`
+Expected: the null-steps and connect tests fail (current code yields
+`{today: 0}` and never calls `openURL`).
+
+- [ ] **Step 3: Make steps honest**
+
+In `useHealth.ts`, replace the unconditional `setSteps({...})` with a null when
+nothing was readable. Same treatment for sleep:
+
+```ts
+      // An empty sample array is ambiguous: no movement, or no read access —
+      // HealthKit will not say which. Reporting 0 would assert the first on no
+      // evidence, so report "unknown" and let the UI offer a way to check.
+      const stepTotal = sumSteps(stepSamples);
+      setSteps(stepSamples.length > 0 ? { today: Math.round(stepTotal), goal: STEP_GOAL } : null);
+      const sleepMillis = sumAsleepMillis(sleepSamples);
+      setSleep(sleepSamples.length > 0 ? { lastNightHours: Math.round((sleepMillis / MS_PER_HOUR) * 10) / 10 } : null);
+```
+
+- [ ] **Step 4: Make connect always work**
+
+```ts
+  // Always route to Health. The old `status === "denied"` guard was unreachable
+  // (see the spec), which left a denied user with no way to grant access.
+  const connect = useCallback(() => {
+    void Linking.openURL("x-apple-health://");
+    void load();
+  }, [load]);
+```
+
+- [ ] **Step 5: Drive the UI off data, not the meaningless status**
+
+In `app/(tabs)/index.tsx`, both vitals cards currently read
+`state={health.status === "authorized" ? "value" : "connect"}`. Replace the
+Steps one with `state={health.steps ? "value" : "connect"}` and the Sleep one
+with `state={health.sleep ? "value" : "connect"}`.
+
+A user who has genuinely taken no steps yet today will see the connect prompt.
+That is the accepted trade: we cannot distinguish that case from denial, and a
+denied user with no route back is the worse failure.
+
+- [ ] **Step 6: Verify**
+
+`cd apps/mobile && npx jest && npx tsc --noEmit` — all green. Fix any existing
+home-screen test that assumed a `0`.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add apps/mobile/src/health apps/mobile/app/\(tabs\)/index.tsx
+git commit -m "fix(mobile): stop reporting unreadable health data as zero"
+```
+
+---
+
+### Task 9: Remove healthStatus from the widget pipeline
+
+The spec's "Connect Health in Kora" widget state is unreachable (see Task 8).
+Remove the field and the branch rather than ship a state that cannot occur.
+
+**Files:**
+- Modify: `apps/mobile/src/widgets/snapshot.ts`, `__tests__/snapshot.test.ts`
+- Modify: `apps/mobile/src/widgets/useWidgetSync.ts`, `__tests__/useWidgetSync.test.tsx`
+- Modify: `apps/mobile/targets/kora-widgets/Snapshot.swift`
+- Modify: `apps/mobile/targets/kora-widgets/StepsWidget.swift`
+- Modify: `apps/mobile/widget-core-tests/Tests/KoraWidgetCoreTests/SnapshotTests.swift`
+
+**Interfaces:**
+- Produces: `WidgetSnapshot` and `NutritionSnapshot` without `healthStatus`;
+  `buildSnapshot({ summary, stepGoal })`.
+
+- [ ] **Step 1: Drop the field from the TypeScript side**
+
+Remove `healthStatus` from the `WidgetSnapshot` type, from `BuildSnapshotInput`,
+and from the object `buildSnapshot` returns. Remove the `HealthStatus` import.
+Update `snapshot.test.ts`: delete the `healthStatus` assertion, keep the
+`stepGoal` one, and drop `healthStatus` from every `buildSnapshot` call.
+
+- [ ] **Step 2: Drop it from the sync hook**
+
+In `useWidgetSync.ts` remove `healthStatus: health.status` from the
+`buildSnapshot` call. `useHealth()` is still needed for `STEP_GOAL`? No — that
+constant is imported directly. If `health` becomes unused after this, remove the
+`useHealth()` call and its import entirely, and drop the now-dead `health.status`
+from the effect's dependency array. Update `useWidgetSync.test.tsx` accordingly,
+keeping every existing assertion.
+
+- [ ] **Step 3: Drop it from Swift**
+
+Remove `let healthStatus: String` from `NutritionSnapshot` in `Snapshot.swift`.
+
+In `SnapshotTests.swift`, remove `"healthStatus":"authorized"` from the `json`
+fixture and delete the assertion on it. The other five tests stay unchanged.
+
+- [ ] **Step 4: Simplify StepsWidget**
+
+Remove `healthStatus` from `StepsEntry`, remove the "Connect Health" branch from
+`StepsWidgetView`, and remove the `guard status == "authorized"` from the
+provider so it always attempts the read. The remaining states are: no snapshot →
+"Open Kora"; snapshot present → the step count, or `"—"` when the read yields
+nothing. Keep `stepGoal` sourced from `SnapshotStore.raw()`.
+
+Keep the comment explaining that `nil` and `0` are different facts — it is the
+reason `"—"` exists and is now the only guard against unknown-as-zero.
+
+- [ ] **Step 5: Verify**
+
+```bash
+cd apps/mobile && npx jest && npx tsc --noEmit
+cd apps/mobile/widget-core-tests && swift test
+xcodebuild -workspace apps/mobile/ios/Kora.xcworkspace -scheme kora-widgets -sdk iphonesimulator -destination 'platform=iOS Simulator,id=AD109A46-2F99-43C3-8AAA-FEE68DC8499E' build
+```
+
+Expected: jest green, tsc silent, `Executed 5 tests, with 0 failures`, BUILD SUCCEEDED.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add apps/mobile/src/widgets apps/mobile/targets apps/mobile/widget-core-tests
+git commit -m "refactor(mobile): drop the unreachable health status from the widget pipeline"
+```

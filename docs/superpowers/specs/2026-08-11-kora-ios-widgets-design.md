@@ -95,8 +95,8 @@ security surface for no benefit the snapshot does not already provide.
 
 1. On a successful dashboard fetch, the app serialises the current day to JSON:
    `{ date, kcalConsumed, kcalTarget, protein, carbs, fat }` (each macro
-   carrying consumed and target), plus `stepGoal` and `healthStatus` — see
-   "Why the snapshot carries health state" below.
+   carrying consumed and target), plus `stepGoal`. There is no `healthStatus` —
+   see "Nobody knows the health status" below.
 2. `widget-bridge` writes that JSON into the App Group `UserDefaults` and calls
    `WidgetCenter.shared.reloadAllTimelines()`.
 3. The widget's `TimelineProvider` reads and decodes the snapshot.
@@ -114,30 +114,46 @@ A widget extension **cannot request** HealthKit authorization — there is no UI
 in which to present the prompt. It reads only what the app has already been
 granted.
 
-### Why the snapshot carries health state
+### Nobody knows the health status — corrected 2026-08-11
+
+An earlier revision of this spec had the snapshot carry a `healthStatus` so the
+widget could show a "Connect Health in Kora" prompt. **That was wrong, and
+verification proved it.**
 
 HealthKit deliberately does not disclose **read** authorization:
 `authorizationStatus(for:)` reports sharing permission only, and an
-unauthorized read returns no data rather than an error. So the widget, on its
-own, cannot tell "Health access was denied" apart from "you have genuinely
-walked 0 steps today" — and rendering the wrong one is precisely the
-unknown-as-zero mistake this design forbids elsewhere.
+unauthorized read returns no data rather than an error. The spec accepted that,
+then claimed the *app* knows because `useHealth` resolves a `HealthStatus`.
 
-The app does know: `useHealth` already resolves a `HealthStatus` of
-`authorized | denied | unavailable`. So the snapshot carries that status, and
-the step goal (`STEP_GOAL = 10000`, currently app-side only in
-`src/health/useHealth.ts`).
+It does not. `useHealth` derives that status from
+`requestAuthorization({ toRead: … })`, whose success means **the prompt was
+presented**, not that access was granted. Deny the prompt and the app still
+records `"authorized"`. Verified on device 2026-08-11: with 3,500 steps present
+in HealthKit and Kora absent from Health → Profile → Apps, the app reported
+`authorized` and rendered "Steps 0 of 10,000".
 
-This gives a clean split. The snapshot is the channel for anything the app
-knows and the widget cannot discover: nutrition figures, step goal, health
-status. Only the step *count* — the one value that must move without the app —
-is read live.
+So no layer can distinguish "denied" from "genuinely zero", and a
+"Connect Health" state cannot be reached honestly. It is removed, along with
+the `healthStatus` field.
 
-The status field is deliberately exempt from the staleness rule that governs
-the nutrition figures. Authorization changes rarely, and treating a
-day-old "authorized" as unknown would flip a working widget into a "connect"
-prompt at midnight. A stale *number* misleads; a stale *permission flag* does
-not.
+**What the widget does instead:** it shows the step count when a read returns
+one, and `"—"` when it does not, making no claim about why. `stepGoal` is still
+carried in the snapshot, because the widget genuinely cannot discover it.
+
+This costs a nudge for a user who has actually denied access. That is the
+honest price: the alternative is a prompt shown to everyone who simply has no
+step data today, which trades one false claim for another.
+
+### The app-side bug this exposed
+
+The same root cause is a live defect in the shipped app, fixed on this branch:
+
+- `useHealth` asserts `"authorized"` from a prompt that discloses nothing.
+- With no readable samples it renders **`0` steps**, the precise unknown-as-zero
+  error this design forbids in the widget.
+- `connect()` only offers a route to Health settings when `status === "denied"`
+  (`useHealth.ts:145`) — a state now known to be unreachable. **So a user who
+  denies once sees a false 0 forever with no way to reconnect from the UI.**
 
 iOS budgets widget refreshes (roughly tens per day), so the count is near-live,
 not live. The provider returns a single entry with
@@ -152,9 +168,8 @@ a request, not a guarantee, and may refresh later than asked.
 | Normal | kcal left (small); kcal + macros (medium) | steps + goal ring |
 | No snapshot yet | "Open Kora" | n/a |
 | Snapshot stale (date ≠ today) | treated as absent → "Open Kora" | n/a — read is live |
-| Health not authorised (per snapshot) | n/a | "Connect Health in Kora" |
-| HealthKit read fails / unavailable | n/a | "—" with goal still shown |
-| No snapshot, so status unknown | "Open Kora" | "Open Kora" |
+| HealthKit read returns nothing or fails | n/a | "—" with goal still shown, no claim about why |
+| No snapshot at all | "Open Kora" | "Open Kora" |
 
 Two of these rows encode decisions worth keeping:
 
