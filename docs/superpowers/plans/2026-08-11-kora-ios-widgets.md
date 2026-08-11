@@ -1543,3 +1543,116 @@ Expected: jest green, tsc silent, `Executed 5 tests, with 0 failures`, BUILD SUC
 git add apps/mobile/src/widgets apps/mobile/targets apps/mobile/widget-core-tests
 git commit -m "refactor(mobile): drop the unreachable health status from the widget pipeline"
 ```
+
+---
+
+### Task 10: Distinguish an empty day from no access
+
+Task 8 treated "no step samples today" as "access unknown". That is wrong on
+real hardware: HealthKit reads are confirmed working in TestFlight builds, and
+an empty sample array is simply what every morning looks like before the user
+walks anywhere. As written, the app would show "Connect Apple Health" daily to
+users whose access works — a false prompt replacing a false zero.
+
+"No samples today" proves nothing. "No samples in seven days" is evidence.
+
+**Files:**
+- Modify: `apps/mobile/src/health/useHealth.ts`
+- Modify: `apps/mobile/src/health/__tests__/useHealth.test.tsx`
+
+**Interfaces:**
+- Produces: `useHealth()` returning `steps: { today: 0, goal }` for a genuinely
+  empty day when the week has data, and `steps: null` only when the whole week
+  is empty.
+
+- [ ] **Step 1: Write the failing tests**
+
+Add to `apps/mobile/src/health/__tests__/useHealth.test.tsx`, matching the
+`mockIsAvailable` / `mockRequestAuthorization` / `await renderHook` setup the
+neighbouring tests already use:
+
+```tsx
+// 7am on a real device with access granted: no steps yet today, but the week
+// has data. This is a REAL zero and must render as 0 — showing the connect
+// prompt here would nag every user every morning.
+test("reports zero for an empty day when the week has data", async () => {
+  mockQueryQuantitySamples
+    .mockResolvedValueOnce([])                 // today
+    .mockResolvedValueOnce([{ quantity: 3500 }]); // last 7 days
+  const { result } = await renderHook(() => useHealth());
+  await waitFor(() => expect(result.current.steps).toEqual({ today: 0, goal: 10000 }));
+});
+
+// A whole week with nothing is the honest signal that reads are not working.
+test("reports unknown steps when the whole week is empty", async () => {
+  mockQueryQuantitySamples
+    .mockResolvedValueOnce([])  // today
+    .mockResolvedValueOnce([]); // last 7 days
+  const { result } = await renderHook(() => useHealth());
+  await waitFor(() => expect(result.current.steps).toBeNull());
+});
+
+// The probe is a fallback, not the primary path: a day WITH data must not
+// trigger a second query.
+test("does not probe the week when today already has data", async () => {
+  mockQueryQuantitySamples.mockResolvedValue([{ quantity: 1200 }]);
+  const { result } = await renderHook(() => useHealth());
+  await waitFor(() => expect(result.current.steps).toEqual({ today: 1200, goal: 10000 }));
+  expect(mockQueryQuantitySamples).toHaveBeenCalledTimes(1);
+});
+```
+
+- [ ] **Step 2: Run them and confirm they fail**
+
+`cd apps/mobile && npx jest src/health/__tests__/useHealth.test.tsx`
+Expected: the empty-day test fails (currently yields `null`, expected
+`{today: 0, goal: 10000}`).
+
+- [ ] **Step 3: Add the probe**
+
+In `useHealth.ts`, add the lookback constant beside the existing ones:
+
+```ts
+// How far back to look for ANY step sample before concluding reads are not
+// working. "No steps today" is normal every morning; "no steps in a week" is
+// evidence. See the spec's "empty-day trap".
+const READABLE_PROBE_DAYS = 7;
+```
+
+Then, where steps are resolved, fall back to the probe only when today is empty:
+
+```ts
+      const stepTotal = sumSteps(stepSamples);
+      if (stepSamples.length > 0) {
+        setSteps({ today: Math.round(stepTotal), goal: STEP_GOAL });
+      } else {
+        // Today is empty. Probe a wider window to tell "hasn't walked yet"
+        // from "cannot read" — HealthKit will not tell us which directly.
+        const probeStart = new Date(dayStart.getTime() - READABLE_PROBE_DAYS * 24 * MS_PER_HOUR);
+        const weekSamples = await hk.queryQuantitySamples(STEP_COUNT_IDENTIFIER, {
+          filter: { date: { startDate: probeStart, endDate: now } },
+          limit: 0,
+          unit: "count",
+        });
+        setSteps(weekSamples.length > 0 ? { today: 0, goal: STEP_GOAL } : null);
+      }
+```
+
+Leave the sleep handling exactly as Task 8 left it: sleep is absent far more
+often than steps are, and a nightly probe would add a query for a signal the
+step probe already provides.
+
+- [ ] **Step 4: Run the tests and confirm they pass**
+
+`cd apps/mobile && npx jest src/health/__tests__/useHealth.test.tsx`
+
+- [ ] **Step 5: Full verification**
+
+`cd apps/mobile && npx jest && npx tsc --noEmit` — all green.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add apps/mobile/src/health
+git commit -m "fix(mobile): tell an empty step day apart from unreadable health data"
+```

@@ -137,7 +137,9 @@ So no layer can distinguish "denied" from "genuinely zero", and a
 the `healthStatus` field.
 
 **What the widget does instead:** it shows the step count when a read returns
-one, and `"—"` when it does not, making no claim about why. `stepGoal` is still
+one, and `"—"` when it does not, making no claim about why. `"—"` is never
+wrong — only less informative than a real zero — which is why the widget needs
+no further signal. See "The empty-day trap" below for why the APP does. `stepGoal` is still
 carried in the snapshot, because the widget genuinely cannot discover it.
 
 This costs a nudge for a user who has actually denied access. That is the
@@ -154,6 +156,29 @@ The same root cause is a live defect in the shipped app, fixed on this branch:
 - `connect()` only offers a route to Health settings when `status === "denied"`
   (`useHealth.ts:145`) — a state now known to be unreachable. **So a user who
   denies once sees a false 0 forever with no way to reconnect from the UI.**
+
+### The empty-day trap — corrected 2026-08-11
+
+The first fix treated "no step samples today" as "access unknown". On the
+simulator that read correctly, because no read ever succeeded there. **On real
+hardware it is wrong**: HealthKit reads are confirmed working in TestFlight
+builds, and an empty sample array is simply what every morning looks like
+before the user has walked anywhere. That fix would have shown
+"Connect Apple Health" daily to users whose access works perfectly — trading a
+false zero for a false prompt.
+
+"No samples today" is not evidence of anything. **"No samples in the last
+seven days" is.** So the app probes a wider window when today is empty:
+
+- Samples exist in the last 7 days → access demonstrably works → today's zero
+  is a REAL zero, rendered as `0`.
+- The whole week is empty → access is genuinely in doubt → render unknown and
+  offer the connect route.
+
+This is evidence the app actually has, unlike the authorization flag the
+original design wrongly assumed it could read. A brand-new user with a week of
+no data sees the connect prompt, which is the right thing to show someone who
+has never successfully synced anything.
 
 iOS budgets widget refreshes (roughly tens per day), so the count is near-live,
 not live. The provider returns a single entry with
