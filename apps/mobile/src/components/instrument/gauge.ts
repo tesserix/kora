@@ -26,11 +26,16 @@ export interface GaugeTick {
 }
 
 // "worklet" directive required: needleFor (below) runs on the UI thread inside
-// GaugeDial's useAnimatedProps, and reanimated's babel plugin only
-// auto-workletizes helpers declared in the SAME file as the worklet call site —
-// gauge.ts is a different file from GaugeDial.tsx, so toXY needs its own
-// directive too (same crash class as e557c50 / AnimatedNumber's remote-call
-// crash: a plain JS function invoked from UI-thread code). Do not remove.
+// GaugeDial's useAnimatedProps. Reanimated's babel plugin only auto-workletizes
+// the function literal passed directly to a hook (useAnimatedProps/useAnimatedStyle/
+// etc.) — any NAMED function that worklet then calls, in this file or any other,
+// is a captured closure value and crosses to the UI runtime as a remote function
+// reference unless it carries its own directive (confirmed on-device: this class
+// hit both toXY/needleFor here and tickColorFor in GaugeDial.tsx, despite the
+// latter being in the SAME file as its call site — "same file" does not save
+// you). Same underlying crash class as AnimatedNumber's remote-call crash
+// (e557c50): "[Worklets] Tried to synchronously call a Remote Function". Do not
+// remove.
 const toXY = (deg: number, rad: number): [number, number] => {
   "worklet";
   const a = (deg * Math.PI) / 180;
@@ -51,10 +56,12 @@ export function buildGaugeTicks(fraction: number): GaugeTick[] {
 }
 
 // "worklet" directive required: called from GaugeDial's useAnimatedProps on the
-// UI thread. reanimated only auto-workletizes same-file helpers — this is a
-// cross-file call (GaugeDial.tsx -> gauge.ts) — so without this directive the
-// worklet would crash on-device the same way AnimatedNumber's did (e557c50)
-// even though it passes fine under the jest reanimated mock. Do not remove.
+// UI thread — a named function referenced from inside a worklet, not the
+// worklet literal itself, so it must carry its own directive (see toXY's
+// comment above for the full explanation). Without it this crashes on-device
+// the same way AnimatedNumber's did (e557c50), even though it passes fine
+// under the jest reanimated mock, which evaluates worklet factories as plain
+// synchronous JS regardless of worklet-ness. Do not remove.
 export function needleFor(fraction: number) {
   "worklet";
   const deg = START + Math.min(Math.max(fraction, 0), 1) * (END - START);

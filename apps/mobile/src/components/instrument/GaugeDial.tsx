@@ -29,10 +29,23 @@ const NEEDLE_SPRING = { damping: 30, stiffness: 250 };
 
 const AnimatedLine = Animated.createAnimatedComponent(Line);
 
+// "worklet" directive required: called from AnimatedGaugeTick's useAnimatedProps
+// on the UI thread. Module scope alone (or same-file-ness) is NOT enough —
+// reanimated's babel plugin only auto-workletizes the function literal passed
+// directly to the hook; a *named function referenced inside* that worklet is a
+// captured closure value, which crosses to the UI runtime as a remote function
+// reference and crashes on-device with "[Worklets] Tried to synchronously call
+// a Remote Function" — this hit exactly here (GaugeDial.tsx tickColorFor) and
+// is the same underlying class as the AnimatedNumber crash (e557c50) and the
+// gauge.ts needleFor/toXY fix. Every function called *from inside* a worklet
+// needs its own "worklet" directive, full stop — do not remove this one.
+// Only closes over plain serializable values (strings from InstrumentTokens,
+// booleans), so it's safe to run on the UI thread as-is.
 function tickColorFor(
   t: Pick<GaugeTick, "lit" | "red" | "major">,
   instrument: InstrumentTokens,
 ): string {
+  "worklet";
   if (t.red) return t.lit ? instrument.accent : `${instrument.accent}73`; // 45% alpha suffix on hex
   if (!t.lit) return instrument.tick;
   return t.major ? instrument.tickLit : `${instrument.tickLit}8C`; // 55% alpha on minor lit ticks
