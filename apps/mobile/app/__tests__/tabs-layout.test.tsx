@@ -16,7 +16,10 @@ jest.mock("expo-router", () => ({
 jest.mock("@/lib/firebase", () => ({ auth: null, isFirebaseConfigured: false }));
 jest.mock("firebase/auth", () => ({ onAuthStateChanged: jest.fn(() => jest.fn()) }));
 jest.mock("@/lib/push", () => ({ usePushRegistration: jest.fn(), usePushResponder: jest.fn() }));
-jest.mock("@/widgets/useWidgetSync", () => ({ useWidgetSync: jest.fn() }));
+const mockUseWidgetSync = jest.fn();
+jest.mock("@/widgets/useWidgetSync", () => ({
+  useWidgetSync: () => mockUseWidgetSync(),
+}));
 jest.mock("@/components/FloatingTabBar", () => ({ FloatingTabBar: () => null }));
 
 const mockUseProfile = jest.fn();
@@ -52,6 +55,21 @@ test("renders the tabs once an onboarded profile resolves", async () => {
   });
   const { getByTestId } = await render(<TabsLayout />);
   expect(getByTestId("tabs")).toBeTruthy();
+});
+
+// Guards against the widget silently stopping updates: if useWidgetSync() were
+// ever removed from the layout, the widget would keep showing stale data with
+// no error anywhere to surface it.
+test("mounts the widget sync hook", async () => {
+  mockUseProfile.mockReturnValue({
+    data: { onboarded_at: "2026-01-01T00:00:00Z" },
+    isLoading: false,
+    isError: false,
+    error: null,
+    refetch: jest.fn(),
+  });
+  await render(<TabsLayout />);
+  expect(mockUseWidgetSync).toHaveBeenCalled();
 });
 
 test("routes a never-onboarded profile to onboarding instead of the tabs", async () => {
