@@ -43,12 +43,9 @@ func TestBackfillItem(t *testing.T) {
 			wantAmount: 16.5,
 		},
 		{
-			name:       "unparseable description falls back to the curated table",
-			item:       nutrition.FoodItem{Name: "White rice, cooked", ServingDesc: "per serving"},
-			wantOK:     true,
-			wantSource: sourceFallback,
-			wantName:   "cup",
-			wantAmount: 158,
+			name:   "unparseable description is skipped rather than guessed at",
+			item:   nutrition.FoodItem{Name: "White rice, cooked", ServingDesc: "per serving"},
+			wantOK: false,
 		},
 		{
 			name:   "unparseable description with no curated entry is skipped",
@@ -63,7 +60,7 @@ func TestBackfillItem(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, ok := backfillItem(tt.item, false)
+			got, ok := backfillItem(tt.item)
 			assert.Equal(t, tt.wantOK, ok)
 			if !tt.wantOK {
 				return
@@ -82,42 +79,41 @@ func TestBackfillItem(t *testing.T) {
 // the word-boundary rule: "Rolled oats, dry" says 40 g on its own label, and a
 // substring match on "oat" would have written cup = 90 g against it.
 func TestBackfillItemDoesNotContradictOwnLabel(t *testing.T) {
-	_, ok := backfillItem(nutrition.FoodItem{Name: "Rolled oats, dry", ServingDesc: "1/2 cup (40g)"}, false)
+	_, ok := backfillItem(nutrition.FoodItem{Name: "Rolled oats, dry", ServingDesc: "1/2 cup (40g)"})
 	assert.False(t, ok, "a row whose own label cannot be parsed must not inherit a contradicting density")
 }
 
-// TestBackfillItemNoFallbackDeclinesCuratedGuesses pins the opt-out that makes
-// an evidence-only backfill possible. The curated table matches a keyword
-// anywhere in a food's name, so a USDA-style compound name is claimed by an
-// ingredient it merely mentions — or, worse, by one it explicitly negates.
-// A production dry run planned 639 such writes, 395 of them on names where the
-// keyword is not the head noun at all.
-func TestBackfillItemNoFallbackDeclinesCuratedGuesses(t *testing.T) {
+// TestBackfillItemDeclinesCuratedGuesses pins the rule that replaced the
+// curated name table: a serving unit is written only where there is evidence
+// for it. The table matched a keyword anywhere in a food's name, so a
+// USDA-style compound name was claimed by an ingredient it merely mentioned —
+// or, worse, by one it explicitly negated. A production dry run planned 639
+// such writes, 395 of them on names where the keyword was not the head noun.
+func TestBackfillItemDeclinesCuratedGuesses(t *testing.T) {
 	guesses := []string{
 		"Apples, dried, sulfured, stewed, without added sugar",
 		"Chicken, broilers or fryers, breast, meat and skin, cooked, fried, flour",
 		"Alcoholic beverage, rice (sake)",
 		"Fast foods, submarine sandwich, meatball marinara on white bread",
+		// Head-noun matches were no better: restricting the table to these
+		// still left 24% of survivors wrong, which is why it is gone entirely.
+		"Pork sausage rice links, brown and serve, cooked",
+		"Bread, chapati or roti, plain, commercially prepared",
+		"Sugar-apples, (sweetsop), raw",
 	}
 	for _, name := range guesses {
 		t.Run(name, func(t *testing.T) {
-			item := nutrition.FoodItem{Name: name, ServingDesc: "per serving"}
-
-			_, ok := backfillItem(item, false)
-			require.True(t, ok, "precondition: the curated table claims this row today")
-
-			_, ok = backfillItem(item, true)
-			assert.False(t, ok, "no-fallback must decline a category-level guess")
+			_, ok := backfillItem(nutrition.FoodItem{Name: name, ServingDesc: "per serving"})
+			assert.False(t, ok, "a category-level guess must never be written")
 		})
 	}
 }
 
-// TestBackfillItemNoFallbackKeepsParsedEvidence guards against the opt-out
-// being too blunt: a row's own label is evidence, not a guess, and must still
-// be written.
-func TestBackfillItemNoFallbackKeepsParsedEvidence(t *testing.T) {
-	got, ok := backfillItem(nutrition.FoodItem{Name: "White rice, cooked", ServingDesc: "1 cup (158g)"}, true)
-	require.True(t, ok, "a parsed label is evidence and must survive no-fallback")
+// TestBackfillItemKeepsParsedEvidence guards the other direction: a row's own
+// label is evidence, not a guess, and must still be written.
+func TestBackfillItemKeepsParsedEvidence(t *testing.T) {
+	got, ok := backfillItem(nutrition.FoodItem{Name: "White rice, cooked", ServingDesc: "1 cup (158g)"})
+	require.True(t, ok, "a parsed label is evidence and must be written")
 	assert.Equal(t, sourceParse, got.Source)
 
 	var parsed []units.ServingUnit
@@ -127,43 +123,40 @@ func TestBackfillItemNoFallbackKeepsParsedEvidence(t *testing.T) {
 	assert.InDelta(t, 158, parsed[0].BaseAmount, 1e-9)
 }
 
-// TestRunNoFallbackWritesNoCuratedGuesses is the end-to-end pin: with the
-// opt-out set, a row the curated table would have claimed keeps empty
-// serving_units after a real (non-dry) pass.
-func TestRunNoFallbackWritesNoCuratedGuesses(t *testing.T) {
+// TestRunWritesNoCuratedGuesses is the end-to-end pin: a row the curated table
+// would have claimed keeps empty serving_units after a real (non-dry) pass.
+func TestRunWritesNoCuratedGuesses(t *testing.T) {
 	db := testDB(t)
 	item := seedItem(t, db, nutrition.FoodItem{
 		Name: "Basmati rice", Provenance: nutrition.ProvenanceAFCD,
 		ServingDesc: "per serving", KcalPer100g: 130,
 	})
 
-	s, err := run(context.Background(), db.Where("id = ?", item.ID), options{NoFallback: true})
+	s, err := run(context.Background(), db.Where("id = ?", item.ID), options{})
 	require.NoError(t, err)
 
-	assert.Equal(t, 0, s.FromFallback)
 	assert.Equal(t, 0, s.UnitsWritten)
-	assert.Empty(t, s.FallbackSamples)
 	assert.Empty(t, units.DecodeServingUnits(reload(t, db, item.ID).ServingUnits),
-		"no-fallback must leave a curated-table row untouched")
+		"a curated-table name must be left untouched")
 }
 
-// TestRunNoFallbackStillCorrectsBaseUnit proves the opt-out narrows only the
-// serving_units guesswork. base_unit comes from OpenFoodFacts, which is
-// evidence, and correcting it is the whole reason the milk row is wrong.
-func TestRunNoFallbackStillCorrectsBaseUnit(t *testing.T) {
+// TestRunStillCorrectsBaseUnit proves dropping the curated table narrowed only
+// the serving_units guesswork. base_unit comes from OpenFoodFacts, which is
+// evidence, and correcting it is the whole reason the milk row was wrong.
+func TestRunStillCorrectsBaseUnit(t *testing.T) {
 	db := testDB(t)
-	code := "nofallback-milk-" + uuid.NewString()
+	code := "milk-evidence-" + uuid.NewString()
 	item := seedItem(t, db, nutrition.FoodItem{
 		Name: "HIGH PROTEIN LOW FAT MILK", Provenance: nutrition.ProvenanceOFF,
 		Barcode: &code, BaseUnit: "g", ServingDesc: "per serving", KcalPer100g: 52,
 	})
 
 	off := &fakeOFF{byCode: map[string]string{code: "ml"}}
-	s, err := run(context.Background(), db.Where("id = ?", item.ID), options{NoFallback: true, OFF: off})
+	s, err := run(context.Background(), db.Where("id = ?", item.ID), options{OFF: off})
 	require.NoError(t, err)
 
 	assert.Equal(t, 1, s.BaseUnitWritten)
-	assert.Equal(t, 0, s.FromFallback, "the milk row's own name is a curated-table match and must be declined")
+	assert.Equal(t, 0, s.UnitsWritten, "the milk row's own name was a curated-table match and must be declined")
 	assert.Equal(t, "ml", reload(t, db, item.ID).BaseUnit)
 }
 
@@ -399,11 +392,10 @@ func TestRunReportsAMillilitreDowngradeSeparately(t *testing.T) {
 	assert.Empty(t, s.BaseUnitSamples, "a downgrade is reported louder, not twice")
 }
 
-// TestRunDryRunSamplesCuratedGuesses proves the curated-table guesses — the
-// ones that are a category-level assumption rather than the row's own label —
-// are reported by name so a human can veto them before ~7,900 rows are
-// rewritten.
-func TestRunDryRunSamplesCuratedGuesses(t *testing.T) {
+// TestRunDryRunPlansNothingForACuratedName is the counterpart to the old
+// curated-guess sampling: there is no longer anything to sample, because a
+// name the table would have claimed now plans no write at all.
+func TestRunDryRunPlansNothingForACuratedName(t *testing.T) {
 	db := testDB(t)
 	item := seedItem(t, db, nutrition.FoodItem{
 		Name: "Basmati rice", Provenance: nutrition.ProvenanceAFCD,
@@ -413,9 +405,8 @@ func TestRunDryRunSamplesCuratedGuesses(t *testing.T) {
 	s, err := run(context.Background(), db.Where("id = ?", item.ID), options{DryRun: true})
 	require.NoError(t, err)
 
-	assert.Equal(t, 1, s.FromFallback)
+	assert.Equal(t, 0, s.UnitsWritten)
 	assert.Equal(t, 0, s.FromParse)
-	require.Len(t, s.FallbackSamples, 1)
-	assert.Contains(t, s.FallbackSamples[0], "Basmati rice")
+	assert.Equal(t, 1, s.Skipped)
 	assert.Empty(t, units.DecodeServingUnits(reload(t, db, item.ID).ServingUnits))
 }
