@@ -15,10 +15,9 @@ type Props = {
 
 // Shared layout for the pre-app screens (sign-in and both onboarding steps).
 //
-// The primary action lives in a sticky footer OUTSIDE the scroll view, as in
-// design-system/ui_kits/kora/Onboarding.jsx. The shipped screens put it inline
-// at the end of the scroll, where a long form plus an open keyboard can push it
-// out of reach.
+// The primary action lives in a sticky footer OUTSIDE the scroll view. Putting
+// it inline at the end of the scroll means a long form plus an open keyboard
+// can push it out of reach.
 //
 // Not built on ScreenHeader: that component forces a title into the header and
 // has no progress affordance, whereas this design keeps the title in the body.

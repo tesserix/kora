@@ -12,8 +12,7 @@ type Props = {
   onPress: () => void;
 };
 
-// The selectable card from design-system/ui_kits/kora/Onboarding.jsx. Selection
-// is carried by three signals at once — border, tile fill and the radio —
+// Selection is carried by three signals at once — border, tile fill and the radio —
 // because a single accent-coloured cue is easy to miss and conveys nothing to a
 // colour-blind user.
 //

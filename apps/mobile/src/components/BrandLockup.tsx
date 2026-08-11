@@ -3,17 +3,13 @@ import { AppText } from "./Text";
 import { BrandMark } from "./BrandMark";
 import { useTheme } from "@/theme";
 
-// The Kora brand lockup: the dot-grid mark beside the wordmark. Shown at the
+// The Kora brand lockup: the dial-K mark beside the wordmark. Shown at the
 // top of the pre-app screens (sign-in and onboarding step 1).
 //
-// The mark's source of truth is assets/images/icon.png, NOT
-// design-system/ui_kits/kora/Onboarding.jsx — that kit rendered a Lucide
-// `sparkles` glyph in a filled tile, which was never Kora's mark. The kit has
-// been corrected to match; if the two ever disagree again, the icon wins.
-//
-// There is no filled tile any more: icon.png is dots on a near-black field,
-// and `background` is exactly that field, so a tile would be invisible at best
-// and would fight the mark's own green at worst.
+// The mark's source of truth is the geometry in BrandMark.tsx, shared with the
+// generated assets in assets/brand/. The mark sits directly on the screen
+// background — no filled tile; the brand rules keep the needle and hub as the
+// only accent-colored elements.
 export function BrandLockup() {
   const { spacing } = useTheme();
 

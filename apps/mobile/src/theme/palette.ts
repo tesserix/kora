@@ -1,4 +1,4 @@
-// Hand-authored iOS-native palette. Light/dark pairs. Do NOT regenerate from design-system.
+// Hand-authored iOS-native palette. Light/dark pairs.
 const shared = {
   primaryForeground: "#FFFFFF",
   destructiveForeground: "#FFFFFF",
