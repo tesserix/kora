@@ -5,6 +5,7 @@ import { onAuthStateChanged } from "firebase/auth";
 import { auth, isFirebaseConfigured } from "@/lib/firebase";
 import { ApiError, takeSessionExpiredNotice } from "@/lib/api";
 import { usePushRegistration, usePushResponder } from "@/lib/push";
+import { useWidgetSync } from "@/widgets/useWidgetSync";
 import { useProfile } from "@/api/hooks";
 import { FloatingTabBar } from "@/components/FloatingTabBar";
 import { BrandMark } from "@/components/BrandMark";
@@ -17,6 +18,7 @@ export default function TabsLayout() {
   const profile = useProfile();
   usePushRegistration();
   usePushResponder();
+  useWidgetSync();
 
   useEffect(() => {
     if (!isFirebaseConfigured || !auth) return;

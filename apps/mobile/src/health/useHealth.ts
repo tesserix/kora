@@ -14,7 +14,7 @@ function loadHealthKit(): HealthKitModule {
   return require("@kingstinct/react-native-healthkit") as HealthKitModule;
 }
 
-const STEP_GOAL = 10000;
+export const STEP_GOAL = 10000;
 
 // HealthKit type identifiers this hook reads. Declared as bare `const` (no type
 // annotation) so TypeScript infers the narrow string-literal type each HealthKit call
