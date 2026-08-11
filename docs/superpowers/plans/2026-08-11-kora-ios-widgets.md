@@ -740,6 +740,9 @@ git commit -m "feat(mobile): sync a widget snapshot on dashboard refresh and sig
 - Create: `apps/mobile/targets/kora-widgets/Snapshot.swift`
 - Create: `apps/mobile/targets/kora-widgets/NutritionWidget.swift`
 - Modify: `apps/mobile/targets/kora-widgets/index.swift`
+- Create: `apps/mobile/widget-core-tests/Package.swift`
+- Create: `apps/mobile/widget-core-tests/Sources/KoraWidgetCore/Snapshot.swift` (symlink)
+- Create: `apps/mobile/widget-core-tests/Tests/KoraWidgetCoreTests/SnapshotTests.swift`
 
 **Interfaces:**
 - Consumes: the JSON written by Task 4, in the App Group from Task 1.
@@ -769,40 +772,173 @@ struct NutritionSnapshot: Codable {
   let healthStatus: String
 }
 
-enum SnapshotStore {
-  static let appGroup = "group.com.tesserix.kora"
-  static let key = "nutritionSnapshot"
+// Pure logic, deliberately free of UserDefaults so widget-core-tests can
+// exercise it with `swift test`. `now` and `timeZone` are injected so the
+// midnight rollover is testable instead of depending on when the suite runs.
+enum SnapshotLogic {
+  static func decode(_ json: String) -> NutritionSnapshot? {
+    guard let data = json.data(using: .utf8) else { return nil }
+    return try? JSONDecoder().decode(NutritionSnapshot.self, from: data)
+  }
 
-  static func localDayString(_ now: Date) -> String {
+  static func localDayString(_ now: Date, timeZone: TimeZone) -> String {
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.timeZone = TimeZone.current
+    formatter.timeZone = timeZone
     formatter.dateFormat = "yyyy-MM-dd"
     return formatter.string(from: now)
   }
+
+  /// Whether a snapshot describes the day `now` falls on.
+  ///
+  /// Without this guard a widget waking at 00:05 would render yesterday's
+  /// calories as today's — the same invariant the food log enforces around
+  /// logged_at. A figure must describe the day it claims to.
+  static func isCurrent(_ snapshot: NutritionSnapshot, now: Date, timeZone: TimeZone) -> Bool {
+    snapshot.date == localDayString(now, timeZone: timeZone)
+  }
+}
+
+enum SnapshotStore {
+  static let appGroup = "group.com.tesserix.kora"
+  static let key = "nutritionSnapshot"
 
   /// The raw snapshot, whatever day it describes. Use for values that do not
   /// go stale — the step goal and the health status.
   static func raw() -> NutritionSnapshot? {
     guard let defaults = UserDefaults(suiteName: appGroup),
-          let json = defaults.string(forKey: key),
-          let data = json.data(using: .utf8),
-          let snapshot = try? JSONDecoder().decode(NutritionSnapshot.self, from: data)
+          let json = defaults.string(forKey: key)
     else { return nil }
-    return snapshot
+    return SnapshotLogic.decode(json)
   }
 
   /// The snapshot ONLY when it describes today.
-  ///
-  /// Without this guard a widget waking at 00:05 would render yesterday's
-  /// calories as today's — the same invariant the food log enforces around
-  /// logged_at. A figure must describe the day it claims to.
   static func current(now: Date = Date()) -> NutritionSnapshot? {
     guard let snapshot = raw() else { return nil }
-    return snapshot.date == localDayString(now) ? snapshot : nil
+    return SnapshotLogic.isCurrent(snapshot, now: now, timeZone: .current) ? snapshot : nil
   }
 }
 ```
+
+- [ ] **Step 1b: Create the Swift test package**
+
+`@bacons/apple-targets` has no XCTest target type, so the tests live in a
+standalone Swift package that symlinks the **real** shipped source. Verified
+working on Swift 6.3.2 — SPM follows the symlink and compiles the actual file,
+so the tests cannot drift from what ships.
+
+```bash
+cd apps/mobile
+mkdir -p widget-core-tests/Sources/KoraWidgetCore widget-core-tests/Tests/KoraWidgetCoreTests
+ln -s ../../../targets/kora-widgets/Snapshot.swift \
+  widget-core-tests/Sources/KoraWidgetCore/Snapshot.swift
+```
+
+Verify the symlink resolves before going further:
+
+```bash
+head -3 apps/mobile/widget-core-tests/Sources/KoraWidgetCore/Snapshot.swift
+```
+
+Expected: the `import Foundation` line from the real file. A "No such file"
+means the relative depth is wrong.
+
+Create `apps/mobile/widget-core-tests/Package.swift`:
+
+```swift
+// swift-tools-version:5.9
+import PackageDescription
+
+// Tests for the widget's pure logic. Sources/KoraWidgetCore/Snapshot.swift is a
+// SYMLINK to targets/kora-widgets/Snapshot.swift — the file the widget target
+// actually compiles. Nothing is copied, so the tests cannot drift from what
+// ships.
+let package = Package(
+  name: "KoraWidgetCore",
+  platforms: [.macOS(.v13)],
+  targets: [
+    .target(name: "KoraWidgetCore"),
+    .testTarget(name: "KoraWidgetCoreTests", dependencies: ["KoraWidgetCore"]),
+  ]
+)
+```
+
+- [ ] **Step 1c: Write the failing Swift tests**
+
+Create `apps/mobile/widget-core-tests/Tests/KoraWidgetCoreTests/SnapshotTests.swift`:
+
+```swift
+import XCTest
+@testable import KoraWidgetCore
+
+// Fixed instants so the midnight rollover is deterministic rather than
+// dependent on when the suite runs. 1786406400 = 2026-08-11T00:00:00Z.
+private let aug11 = Date(timeIntervalSince1970: 1786406400)
+private let utc = TimeZone(identifier: "UTC")!
+
+private func json(date: String) -> String {
+  """
+  {"date":"\(date)","kcalConsumed":1200,"kcalTarget":2451,
+   "proteinConsumed":60,"proteinTarget":156,"carbsConsumed":130,
+   "carbsTarget":337,"fatConsumed":40,"fatTarget":73,
+   "stepGoal":10000,"healthStatus":"authorized"}
+  """
+}
+
+final class SnapshotTests: XCTestCase {
+  func testDecodesEveryFieldTheAppWrites() {
+    let snapshot = SnapshotLogic.decode(json(date: "2026-08-11"))
+    XCTAssertNotNil(snapshot)
+    XCTAssertEqual(snapshot?.kcalConsumed, 1200)
+    XCTAssertEqual(snapshot?.kcalTarget, 2451)
+    XCTAssertEqual(snapshot?.stepGoal, 10000)
+    XCTAssertEqual(snapshot?.healthStatus, "authorized")
+  }
+
+  func testDecodeReturnsNilOnGarbage() {
+    XCTAssertNil(SnapshotLogic.decode("not json"))
+    XCTAssertNil(SnapshotLogic.decode(""))
+  }
+
+  // A field renamed on the TypeScript side must fail decoding loudly here
+  // rather than silently producing a zeroed snapshot.
+  func testDecodeReturnsNilWhenAFieldIsMissing() {
+    XCTAssertNil(SnapshotLogic.decode(#"{"date":"2026-08-11"}"#))
+  }
+
+  func testTodaysSnapshotIsCurrent() {
+    let snapshot = SnapshotLogic.decode(json(date: "2026-08-11"))!
+    XCTAssertTrue(SnapshotLogic.isCurrent(snapshot, now: aug11, timeZone: utc))
+  }
+
+  // The bug this rule exists for: a widget waking after midnight must not
+  // render yesterday's calories as today's.
+  func testYesterdaysSnapshotIsNotCurrent() {
+    let snapshot = SnapshotLogic.decode(json(date: "2026-08-10"))!
+    XCTAssertFalse(SnapshotLogic.isCurrent(snapshot, now: aug11, timeZone: utc))
+  }
+
+  // Staleness is judged in the USER'S timezone. At 00:30 UTC on the 11th it is
+  // still the 10th in New York, so a snapshot dated the 10th is current there.
+  func testStalenessIsJudgedInTheGivenTimezone() {
+    let snapshot = SnapshotLogic.decode(json(date: "2026-08-10"))!
+    let justAfterMidnightUTC = Date(timeIntervalSince1970: 1786406400 + 1800)
+    let newYork = TimeZone(identifier: "America/New_York")!
+    XCTAssertTrue(SnapshotLogic.isCurrent(snapshot, now: justAfterMidnightUTC, timeZone: newYork))
+    XCTAssertFalse(SnapshotLogic.isCurrent(snapshot, now: justAfterMidnightUTC, timeZone: utc))
+  }
+}
+```
+
+- [ ] **Step 1d: Run the Swift tests to verify they fail, then pass**
+
+```bash
+cd apps/mobile/widget-core-tests && swift test
+```
+
+Before `Snapshot.swift` has `SnapshotLogic`, expect a compile error naming
+`SnapshotLogic`. Once Step 1's file is in place, expect: `Executed 6 tests,
+with 0 failures`.
 
 - [ ] **Step 2: Write the nutrition widget**
 
@@ -935,8 +1071,8 @@ Do not proceed until all three hold.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add apps/mobile/targets
-git commit -m "feat(mobile): add the nutrition widget"
+git add apps/mobile/targets apps/mobile/widget-core-tests
+git commit -m "feat(mobile): add the nutrition widget and Snapshot tests"
 ```
 
 ---
@@ -1202,9 +1338,11 @@ Expected: PASS, 2 tests.
 
 ```bash
 cd apps/mobile && npx jest && npx tsc --noEmit
+cd apps/mobile/widget-core-tests && swift test
 ```
 
-Expected: all suites pass (1068 existing tests plus the ~14 added here), tsc silent.
+Expected: all jest suites pass (1068 existing tests plus the ~15 added here),
+tsc silent, and `Executed 6 tests, with 0 failures` from swift test.
 
 - [ ] **Step 5: Final manual pass**
 
