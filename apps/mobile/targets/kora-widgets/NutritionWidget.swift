@@ -11,12 +11,21 @@ struct NutritionProvider: TimelineProvider {
     NutritionEntry(date: Date(), snapshot: nil)
   }
 
+  // Builds an entry from a fresh SnapshotStore.current() read. getSnapshot and
+  // getTimeline are separate WidgetKit entry points invoked at different times
+  // (gallery preview vs. real timeline), so each caller must trigger its own
+  // fresh read through here rather than sharing a cached result — caching
+  // across callbacks would render stale data.
+  private func makeEntry() -> NutritionEntry {
+    NutritionEntry(date: Date(), snapshot: SnapshotStore.current())
+  }
+
   func getSnapshot(in context: Context, completion: @escaping (NutritionEntry) -> Void) {
-    completion(NutritionEntry(date: Date(), snapshot: SnapshotStore.current()))
+    completion(makeEntry())
   }
 
   func getTimeline(in context: Context, completion: @escaping (Timeline<NutritionEntry>) -> Void) {
-    let entry = NutritionEntry(date: Date(), snapshot: SnapshotStore.current())
+    let entry = makeEntry()
     // The app pushes a reload whenever the dashboard changes, so this cadence
     // only has to catch the midnight rollover that invalidates the snapshot.
     let refresh = Calendar.current.date(byAdding: .minute, value: 30, to: Date()) ?? Date()
