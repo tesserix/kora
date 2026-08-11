@@ -1,0 +1,92 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/tesserix/kora/api/internal/ai"
+	"github.com/tesserix/kora/api/internal/ai/providers"
+)
+
+// stubProvider is a minimal ai.Provider whose Embed fails with a recognisable
+// error, standing in for Gemini returning (say) a 429. Only Embed is
+// exercised; the rest satisfy the interface.
+type stubProvider struct{ embedErr error }
+
+func (s stubProvider) IdentifyText(context.Context, string) ([]ai.Guess, ai.Usage, error) {
+	return nil, ai.Usage{}, errors.New("not used")
+}
+
+func (s stubProvider) IdentifyPhoto(context.Context, []byte, string) ([]ai.Guess, ai.Usage, error) {
+	return nil, ai.Usage{}, errors.New("not used")
+}
+
+func (s stubProvider) Decompose(context.Context, string) ([]ai.IngredientGuess, ai.Usage, error) {
+	return nil, ai.Usage{}, errors.New("not used")
+}
+
+func (s stubProvider) Embed(context.Context, string) ([]float32, ai.Usage, error) {
+	return nil, ai.Usage{}, s.embedErr
+}
+
+func (s stubProvider) Transcribe(context.Context, []byte, string) (string, ai.Usage, error) {
+	return "", ai.Usage{}, errors.New("not used")
+}
+
+func (s stubProvider) GenerateText(context.Context, string, string) (string, ai.Usage, error) {
+	return "", ai.Usage{}, errors.New("not used")
+}
+
+func (s stubProvider) Name() string { return "stub" }
+
+// TestIngestEmbedderStaysOnGemini pins the wiring: the ingest-time embedder
+// must wrap the raw Gemini provider, never the configured provider (an
+// *ai.Router in production, since the OpenAI-compatible fallback key is set).
+//
+// A previous round wired this to the Router on the false premise that
+// embeddings inherit the text path's Gemini→OpenAI fallback. They do not:
+// providers.OpenAIProvider.Embed never calls OpenAI and always errors, so the
+// Router leg can only ever make things worse. ingestEmbedder's parameter type
+// makes the mistake a compile error; this test states the intent in words so
+// the constraint is not silently loosened to ai.Provider later.
+func TestIngestEmbedderStaysOnGemini(t *testing.T) {
+	e := ingestEmbedder(providers.GeminiProvider{})
+
+	_, isRouter := e.p.(*ai.Router)
+	assert.False(t, isRouter, "ingest embeds must not go through ai.Router: it has no embedding fallback, only error-masking and a 1.5s budget")
+	assert.IsType(t, providers.GeminiProvider{}, e.p, "ingest embeds must go straight to Gemini")
+}
+
+// TestRouterBackedEmbedderMasksTheRealError is the observable difference that
+// makes the wiring above load-bearing rather than stylistic. It demonstrates on
+// live code — not by assertion about comments — that routing an embed through
+// ai.Router replaces the primary's error with OpenAI's "not supported" string.
+//
+// That is exactly the error-masking this review wave exists to remove: a Gemini
+// 429 logged by nutrition's embedAsync would read as an OpenAI capability
+// error, and nobody would ever see the rate limit.
+func TestRouterBackedEmbedderMasksTheRealError(t *testing.T) {
+	geminiErr := errors.New("gemini: embed: Error 429, Status: RESOURCE_EXHAUSTED")
+	primary := stubProvider{embedErr: geminiErr}
+
+	// The direct wiring surfaces the real error verbatim.
+	direct := providerEmbedder{p: primary}
+	_, err := direct.Embed(context.Background(), "oat milk")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, geminiErr, "the direct embedder must surface the provider's own error")
+
+	// The Router wiring swallows it and reports OpenAI's refusal instead.
+	routed := providerEmbedder{p: &ai.Router{
+		Primary:  primary,
+		Fallback: providers.NewOpenAIProvider("test-key", "https://example.invalid/v1", "test-model", false),
+	}}
+	_, routedErr := routed.Embed(context.Background(), "oat milk")
+	require.Error(t, routedErr)
+	assert.NotErrorIs(t, routedErr, geminiErr, "the Router drops the primary's error — this is the masking that must not reach ingest")
+	assert.Contains(t, routedErr.Error(), "openai: embed: not supported",
+		"a Router-backed ingest embed reports OpenAI's refusal, hiding the real Gemini failure")
+}
