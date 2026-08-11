@@ -5,5 +5,6 @@ import WidgetKit
 struct KoraWidgetBundle: WidgetBundle {
   var body: some Widget {
     NutritionWidget()
+    StepsWidget()
   }
 }
