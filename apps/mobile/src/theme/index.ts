@@ -1,7 +1,12 @@
 import { Platform, useColorScheme } from "react-native";
-import { darkColors, fontSize, gradientStops, lightColors, radius, spacing, type } from "./palette";
+import {
+  darkColors, fontSize, gradientStops, lightColors, radius, spacing, type,
+  instrumentDark, instrumentLight, type InstrumentTokens, INSTRUMENT_DARK_FIXED,
+} from "./palette";
 
 export type ThemeColors = Record<keyof typeof lightColors, string>;
+export type { InstrumentTokens };
+export { INSTRUMENT_DARK_FIXED };
 
 const fonts = {
   mono: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }) as string,
@@ -22,5 +27,6 @@ export function useTheme() {
   const scheme = useColorScheme() === "dark" ? "dark" : "light";
   const colors = scheme === "dark" ? darkColors : lightColors;
   const gradients = scheme === "dark" ? gradientStops.dark : gradientStops.light;
-  return { colors, spacing, radius, fontSize, fonts, shadows: makeShadows(scheme), scheme, type, gradients } as const;
+  const instrument = (scheme === "dark" ? instrumentDark : instrumentLight) as InstrumentTokens;
+  return { colors, spacing, radius, fontSize, fonts, shadows: makeShadows(scheme), scheme, type, gradients, instrument } as const;
 }

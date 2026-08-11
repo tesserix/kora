@@ -119,3 +119,42 @@ export const gradientStops: { light: GradientSet; dark: GradientSet } = {
     fibre: ["#5EEAD4", "#14B8A6"],
   },
 };
+
+// Instrument Glass tokens (spec: docs/superpowers/specs/2026-08-11-kora-instrument-glass-design.md).
+// Lives beside the legacy palette during migration; new code uses these.
+export const instrumentDark = {
+  bg: "#0B0D10",
+  ink: "#EDE6D4",
+  mut: "#89929D",
+  glass: "rgba(24,28,35,0.55)",
+  glassBorder: "rgba(237,230,212,0.10)",
+  glassHighlight: "rgba(237,230,212,0.07)",
+  inset: "rgba(11,13,16,0.50)",
+  hairline: "rgba(237,230,212,0.08)",
+  tick: "rgba(237,230,212,0.15)",
+  tickLit: "#EDE6D4",
+  accent: "#FF4A00",
+  accentOn: "#0B0D10",
+  danger: "#E23B2E",
+  teal: "#48A89E",
+} as const;
+
+export const instrumentLight = {
+  bg: "#ECEDEF",
+  ink: "#16181C",
+  mut: "#6D7580",
+  glass: "rgba(255,255,255,0.60)",
+  glassBorder: "rgba(255,255,255,0.85)",
+  glassHighlight: "rgba(255,255,255,0.95)",
+  inset: "rgba(255,255,255,0.40)",
+  hairline: "rgba(22,24,28,0.09)",
+  tick: "rgba(22,24,28,0.14)",
+  tickLit: "#16181C",
+  accent: "#FF4A00",
+  accentOn: "#FFFFFF",
+  danger: "#D32F23",
+  teal: "#48A89E",
+} as const satisfies Record<keyof typeof instrumentDark, string>;
+
+export type InstrumentTokens = typeof instrumentDark;
+export const INSTRUMENT_DARK_FIXED = instrumentDark;
