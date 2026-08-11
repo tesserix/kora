@@ -233,10 +233,30 @@ export function PortionField({ baseUnit, servingUnits, amount, unit, onChange, v
                   paddingHorizontal: spacing.sm,
                   paddingVertical: 6,
                   borderRadius: radius.md,
-                  backgroundColor: selected ? colors.accent : colors.cardSecondary,
+                  backgroundColor:
+                    variant === "instrument"
+                      ? selected
+                        ? instrument.accent
+                        : instrument.inset
+                      : selected
+                        ? colors.accent
+                        : colors.cardSecondary,
                 }}
               >
-                <AppText style={{ color: selected ? colors.accentForeground : colors.label }}>{option}</AppText>
+                <AppText
+                  style={{
+                    color:
+                      variant === "instrument"
+                        ? selected
+                          ? instrument.accentOn
+                          : instrument.ink
+                        : selected
+                          ? colors.accentForeground
+                          : colors.label,
+                  }}
+                >
+                  {option}
+                </AppText>
               </Pressable>
             );
           })}

@@ -22,7 +22,6 @@ import { monoStyle } from "@/components/instrument/typography";
 import { useProfile, useDashboard, useDayLogs, useUnreadCount } from "@/api/hooks";
 import { useHealth } from "@/health";
 import { useTheme } from "@/theme";
-import { withAlpha } from "@/lib/color";
 import type { FoodLog } from "@/api/types";
 
 function today(): string {
@@ -175,7 +174,7 @@ export default function Home() {
                   width: 8,
                   height: 8,
                   borderRadius: 4,
-                  backgroundColor: colors.accent,
+                  backgroundColor: instrument.accent,
                 }}
               />
             ) : null}
@@ -320,22 +319,28 @@ export default function Home() {
               subtitle="Tap ✦ to log your first meal."
             />
           )}
+          {/* Dashed ghost-slot CTA — same recipe as Diary's "Add {slot} · N
+              kcal in reserve" row (instrument.tick dashed border, accent
+              icon, mut label; the icon is the one accent element here). */}
           <PressableScale
             accessibilityRole="button"
             accessibilityLabel="Add a meal"
             haptic="selection"
             onPress={() => router.push("/capture")}
             style={{
-              borderWidth: 1,
+              borderWidth: 1.5,
               borderStyle: "dashed",
-              borderColor: withAlpha(colors.primary, 0.4),
+              borderColor: instrument.tick,
               borderRadius: radius.lg,
               paddingVertical: 14,
+              flexDirection: "row",
               alignItems: "center",
               justifyContent: "center",
+              gap: 8,
             }}
           >
-            <AppText style={{ color: colors.primary, fontWeight: "600" }}>Log a meal</AppText>
+            <Icon name="plus" size={16} color={instrument.accent} />
+            <AppText style={{ color: instrument.mut, fontWeight: "600" }}>Log a meal</AppText>
           </PressableScale>
         </Animated.View>
       ) : null}
