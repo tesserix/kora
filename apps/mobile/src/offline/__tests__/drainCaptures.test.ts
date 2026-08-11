@@ -26,6 +26,28 @@ const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f
 
 const OWNER = "uid-1";
 
+// A candidate whose portion is exactly one of the food's own named servings.
+// The online capture path records this as "1 portion"; a drained offline
+// capture must record the identical entry, or the same photo produces a
+// different diary row depending on whether it happened to be online.
+function resWithServing(): Resolution {
+  return {
+    tier: "auto",
+    candidates: [
+      {
+        item: {
+          id: "food-1",
+          name: "NESCAFE Mocha",
+          kcal_per_100g: 545,
+          base_unit: "g",
+          serving_units: [{ name: "portion", amount: 1, base_amount: 16.5 }],
+        },
+        portion_grams: 16.5,
+      },
+    ],
+  } as unknown as Resolution;
+}
+
 function res(tier: "auto" | "confirm" | "follow_up"): Resolution {
   return {
     tier,
@@ -217,4 +239,18 @@ describe("drainCaptureQueue", () => {
     await drainCaptureQueue(d);
     expect(d.resolve).toHaveBeenCalledTimes(1);
   });
+});
+
+test("a drained capture records a whole named serving as an entered amount and unit", async () => {
+  await seed("c1");
+  const d = deps({ resolve: async () => resWithServing() });
+
+  const result = await drainCaptureQueue(d);
+
+  expect(result.logged).toBe(1);
+  const logs = await listLogs();
+  expect(logs).toHaveLength(1);
+  expect(logs[0].payload.entered_amount).toBe(1);
+  expect(logs[0].payload.entered_unit).toBe("portion");
+  expect(logs[0].payload.quantity_grams).toBe(16.5);
 });
