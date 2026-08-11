@@ -203,6 +203,47 @@ func main() {
 	logger.Info("api stopped")
 }
 
+// providerEmbedder adapts an ai.Provider's three-value Embed to the narrower
+// two-value shape nutrition.Embedder needs (nutrition cannot import ai — see
+// the interface's own comment; ai imports nutrition, so the reverse would be a
+// cycle).
+type providerEmbedder struct{ p ai.Provider }
+
+func (e providerEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
+	vec, _, err := e.p.Embed(ctx, text)
+	return vec, err
+}
+
+// ingestEmbedder builds the embedder wired into the nutrition repository for
+// ingest-time (barcode-scan) embeds.
+//
+// EMBEDDINGS DELIBERATELY STAY ON GEMINI. There is no fallback for them, and
+// this must NOT be handed the configured provider, which is an *ai.Router in
+// production. The parameter type is concrete precisely so that mistake cannot
+// compile.
+//
+// Three reasons, in order of severity:
+//
+//  1. There is nothing to fall back TO. providers.OpenAIProvider.Embed
+//     (internal/ai/providers/openai.go:225) never calls OpenAI at all — it
+//     returns "openai: embed: not supported" unconditionally, because two
+//     models' vectors are not comparable by cosine similarity just for sharing
+//     a length, and mixing vector spaces would poison the nutrition index.
+//  2. So a Router-backed embedder MASKS THE REAL ERROR. withFallback
+//     (internal/ai/router.go:118) returns the fallback's error, so the failure
+//     logged by nutrition's embedAsync would always read "openai: embed: not
+//     supported" — swallowing the actual Gemini error, including the 429 that
+//     the rest of this review wave exists to surface.
+//  3. Router.Embed bounds the primary leg to textBudget (1500ms,
+//     internal/ai/router.go:20), where embedAsync deliberately gives the call
+//     a 15s context of its own. Any ingest embed slower than 1.5s would be
+//     discarded.
+//
+// Pinned by TestIngestEmbedderStaysOnGemini.
+func ingestEmbedder(gemini providers.GeminiProvider) providerEmbedder {
+	return providerEmbedder{p: gemini}
+}
+
 // buildResolveHandler composes the AI resolution engine from config. It
 // returns a nil handler (resolve endpoints stay unmounted), a nil provider,
 // and a nil cache when no Gemini key is set — the rest of the API runs
@@ -260,7 +301,8 @@ func buildResolveHandler(ctx context.Context, cfg config.Config, db *gorm.DB, lo
 		}
 	}
 
-	foods := nutrition.NewRepository(db)
+	// gemini, NOT provider: embeddings have no fallback — see ingestEmbedder.
+	foods := nutrition.NewRepository(db).WithEmbedder(ingestEmbedder(gemini))
 	meter := billing.NewMeter(db)
 	// WithPortionSource lets a personal-alias short-circuit in
 	// ai.Resolver.ResolveText inherit the portion from the user's last log of

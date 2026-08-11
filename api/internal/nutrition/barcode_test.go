@@ -3,9 +3,12 @@ package nutrition
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -70,7 +73,7 @@ func TestResolveBarcodeLocalHit(t *testing.T) {
 	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE barcode = ?", code) })
 	seedFor(t, repo, []FoodItem{{Name: "Local bar", Brand: "test2a", Provenance: ProvenanceOFF, Barcode: &code, KcalPer100g: 400}})
 
-	item, found, err := repo.ResolveBarcode(context.Background(), stubOFF{err: assertNoCall(t)}, code)
+	item, found, err := repo.ResolveBarcode(context.Background(), noCallOFF(t), code)
 	require.NoError(t, err)
 	require.True(t, found)
 	require.Equal(t, "Local bar", item.Name)
@@ -164,9 +167,22 @@ func TestFetchByBarcodeSetsBaseUnitFromServingUnit(t *testing.T) {
 	}
 }
 
-// assertNoCall returns an error the stub would surface if Fetch is called; the
-// local-hit test must not reach the OFF client.
-func assertNoCall(t *testing.T) error { return nil }
+// noCallOFF returns a stubOFF that FAILS the test if Fetch is ever called. The
+// assertion is registered as a cleanup, so it fires even if the test returns
+// early. It replaces an earlier assertNoCall helper that returned a nil error
+// and never touched t — a no-op whose name claimed an assertion it did not
+// make, so a regression that started calling OFF on the local-hit path would
+// have gone unnoticed.
+func noCallOFF(t *testing.T) stubOFF {
+	t.Helper()
+	called := false
+	t.Cleanup(func() {
+		if called {
+			t.Errorf("OFF client was called: the local-hit path was not taken")
+		}
+	})
+	return stubOFF{called: &called}
+}
 
 func TestResolveBarcodeLocalErrorSurfacedNoOFFCall(t *testing.T) {
 	db := testDB(t)
@@ -354,4 +370,182 @@ func TestFetchServingUnitReportsTheRawField(t *testing.T) {
 		require.NoError(t, err)
 		assert.False(t, found)
 	})
+}
+
+// fakeEmbedder records calls and returns a canned vector or error.
+type fakeEmbedder struct {
+	mu     sync.Mutex
+	calls  []string
+	vec    []float32
+	err    error
+	called chan struct{} // closed after the first call, so tests can await the goroutine
+}
+
+func (f *fakeEmbedder) Embed(_ context.Context, text string) ([]float32, error) {
+	f.mu.Lock()
+	f.calls = append(f.calls, text)
+	// The close stays INSIDE the lock: check-then-close is not atomic, so two
+	// concurrent Embed calls could both take the default branch and
+	// double-close, panicking the test binary.
+	select {
+	case <-f.called:
+	default:
+		close(f.called)
+	}
+	f.mu.Unlock()
+	return f.vec, f.err
+}
+
+// callCount reads the number of recorded calls under the same mutex Embed
+// writes with, since a goroutine could in principle still be calling in.
+func (f *fakeEmbedder) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.calls)
+}
+
+func TestResolveBarcodeEmbedsNewlyInsertedFood(t *testing.T) {
+	db := testDB(t)
+	emb := &fakeEmbedder{vec: make([]float32, 768), called: make(chan struct{})}
+	repo := NewRepository(db).WithEmbedder(emb)
+	code := "9310232956596"
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE barcode = ?", code) })
+
+	srv := offStubServer(t, offProduct{ProductName: "Test drink", EnergyKcal100g: 42, ServingQuantity: 250, ServingQuantityUnit: "ml"})
+	off := HTTPOFFClient{BaseURL: srv.URL, Client: srv.Client()}
+
+	item, found, err := repo.ResolveBarcode(context.Background(), off, code)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.NotNil(t, item)
+
+	// The embed runs in a goroutine, so wait for it rather than sleeping.
+	select {
+	case <-emb.called:
+	case <-time.After(2 * time.Second):
+		t.Fatal("embedder was never called")
+	}
+
+	require.Eventually(t, func() bool {
+		var embedded bool
+		if err := db.Raw("SELECT embedding IS NOT NULL FROM food_items WHERE id = ?", item.ID).Scan(&embedded).Error; err != nil {
+			return false
+		}
+		return embedded
+	}, 2*time.Second, 20*time.Millisecond, "embedding was never stored")
+}
+
+func TestResolveBarcodeLeavesEmbeddingNullWhenEmbedFails(t *testing.T) {
+	// THE LOAD-BEARING TEST. A failed ingest embed must leave the column NULL
+	// so the row stays in RowsMissingEmbedding and cmd/embed retries it. If
+	// this ever stores a zero vector or otherwise marks the row done, the
+	// whole async design silently loses rows.
+	db := testDB(t)
+	emb := &fakeEmbedder{err: errors.New("boom"), called: make(chan struct{})}
+	repo := NewRepository(db).WithEmbedder(emb)
+	code := "9300605158641"
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE barcode = ?", code) })
+
+	srv := offStubServer(t, offProduct{ProductName: "Test drink 2", EnergyKcal100g: 42})
+	off := HTTPOFFClient{BaseURL: srv.URL, Client: srv.Client()}
+
+	item, found, err := repo.ResolveBarcode(context.Background(), off, code)
+	// The SCAN must still succeed — a failed embedding is not the user's problem.
+	require.NoError(t, err)
+	require.True(t, found)
+	require.NotNil(t, item)
+
+	select {
+	case <-emb.called:
+	case <-time.After(2 * time.Second):
+		t.Fatal("embedder was never called")
+	}
+
+	// Deterministically prove the column stays NULL for a bounded window, rather
+	// than a bare sleep-then-check that only ever samples once (and could get
+	// unlucky on a slow runner). require.Never polls repeatedly and fails the
+	// instant the condition ever goes true, so it is racing against the
+	// (incorrect) write rather than hoping it lands before a single check.
+	require.Never(t, func() bool {
+		var embedded bool
+		if err := db.Raw("SELECT embedding IS NOT NULL FROM food_items WHERE id = ?", item.ID).Scan(&embedded).Error; err != nil {
+			return false
+		}
+		return embedded
+	}, 200*time.Millisecond, 20*time.Millisecond, "embedding column must stay NULL when the embed call failed")
+}
+
+func TestResolveBarcodeWithoutEmbedderInsertsNormally(t *testing.T) {
+	db := testDB(t)
+	repo := NewRepository(db) // no WithEmbedder — nil Embedder
+	code := "9300605158642"
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE barcode = ?", code) })
+
+	srv := offStubServer(t, offProduct{ProductName: "Test drink 3", EnergyKcal100g: 42})
+	off := HTTPOFFClient{BaseURL: srv.URL, Client: srv.Client()}
+
+	item, found, err := repo.ResolveBarcode(context.Background(), off, code)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.NotNil(t, item)
+}
+
+// TestResolveBarcodeLocalHitDoesNotEmbed guards against a regression that
+// would silently burn Gemini quota on every repeat scan: today embedAsync is
+// only reachable from the genuine-new-row path, verified by review, but that
+// property was previously unguarded by any test. If a future edit ever moved
+// the embedAsync call above (or removed) the local-hit early return in
+// ResolveBarcode, this is the test that would catch it — a known barcode must
+// resolve entirely from the local index and never touch the embedder.
+func TestResolveBarcodeLocalHitDoesNotEmbed(t *testing.T) {
+	db := testDB(t)
+	emb := &fakeEmbedder{vec: make([]float32, 768), called: make(chan struct{})}
+	repo := NewRepository(db).WithEmbedder(emb)
+	code := "0000000002a06"
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE barcode = ?", code) })
+	seedFor(t, repo, []FoodItem{{Name: "Repeat scan bar", Brand: "test2a", Provenance: ProvenanceOFF, Barcode: &code, KcalPer100g: 400}})
+
+	// noCallOFF proves the local-hit path was taken at all: it records whether
+	// Fetch was called and fails the test if it was, so this test cannot pass
+	// by accident on a path that goes out to OFF.
+	item, found, err := repo.ResolveBarcode(context.Background(), noCallOFF(t), code)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.NotNil(t, item)
+
+	// Give a wrongly-placed embedAsync call room to fire, then assert it
+	// never did. callCount reads under fakeEmbedder's own mutex since a
+	// goroutine could in principle still be writing.
+	require.Never(t, func() bool {
+		return emb.callCount() > 0
+	}, 200*time.Millisecond, 20*time.Millisecond, "a repeat scan of a known barcode must never call the embedder")
+}
+
+// TestResolveBarcodeDedupeBranchDoesNotEmbed covers the other non-insert
+// path: Insert dedupes the OFF item against an existing row by name+brand, so
+// ResolveBarcode's reload-by-barcode misses and it returns the freshly
+// fetched OFF item directly without ever persisting a new row under this
+// barcode (see the "Insert deduped ... return the freshly fetched OFF item
+// directly" comment in ResolveBarcode). That returned item's ID was never
+// stored under this barcode, so embedding it would be pointless at best and
+// wrong at worst — this pins that the embedder is never called on this path.
+func TestResolveBarcodeDedupeBranchDoesNotEmbed(t *testing.T) {
+	db := testDB(t)
+	emb := &fakeEmbedder{vec: make([]float32, 768), called: make(chan struct{})}
+	repo := NewRepository(db).WithEmbedder(emb)
+	code := "0000000002a07"
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE brand = 'test2a' AND name = 'Dedupe Bar'") })
+
+	seedFor(t, repo, []FoodItem{{Name: "Dedupe Bar", Brand: "test2a", Provenance: ProvenanceAFCD, KcalPer100g: 100}})
+
+	off := stubOFF{item: &FoodItem{Name: "Dedupe Bar", Brand: "test2a", Provenance: ProvenanceOFF, Barcode: &code, KcalPer100g: 100}}
+	item, found, err := repo.ResolveBarcode(context.Background(), off, code)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.NotNil(t, item)
+	require.Equal(t, "Dedupe Bar", item.Name)
+
+	require.Never(t, func() bool {
+		return emb.callCount() > 0
+	}, 200*time.Millisecond, 20*time.Millisecond, "the dedupe branch's returned item was never persisted under this barcode and must never be embedded")
 }

@@ -11,12 +11,29 @@ import (
 	"gorm.io/gorm"
 )
 
+// Embedder generates a vector for a food name. Declared HERE rather than
+// imported from package ai because ai imports nutrition — taking the
+// dependency the other way would be an import cycle. cmd/api adapts the real
+// provider (which also returns a Usage) to this narrower shape.
+type Embedder interface {
+	Embed(ctx context.Context, text string) ([]float32, error)
+}
+
 type Repository struct {
-	db *gorm.DB
+	db       *gorm.DB
+	embedder Embedder
 }
 
 func NewRepository(db *gorm.DB) Repository {
 	return Repository{db: db}
+}
+
+// WithEmbedder returns a copy of the repository that embeds a food as soon as
+// it is ingested. A nil embedder (the default) simply skips that step, so every
+// existing construction site keeps working unchanged.
+func (r Repository) WithEmbedder(e Embedder) Repository {
+	r.embedder = e
+	return r
 }
 
 const searchLimitMax = 25
