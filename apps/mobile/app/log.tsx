@@ -29,13 +29,46 @@ import { useTheme } from "@/theme";
 
 const MEALS = ["breakfast", "lunch", "dinner", "snack"] as const;
 const MEAL_OPTIONS = MEALS.map((m) => ({ key: m, label: m.charAt(0).toUpperCase() + m.slice(1) }));
-const MEMORY_TAB_OPTIONS: { key: string; label: string }[] = [
-  { key: "saved", label: "Saved" },
-  { key: "pinned", label: "Pinned" },
+// The food-memory tabs carry two independent axes: what a row IS (a single
+// food, or a meal made of several) and how it GOT there (you chose it, or the
+// app inferred it). A single five-segment row stated neither, so every
+// adjacent pair read as a synonym — "Pinned" beside "Saved", "Frequent" beside
+// "Usual meals" — when each pair actually differs on the axis the label left
+// out. Five segments was also past what the control holds at phone width;
+// "Usual meals" wrapped to two lines and grew the row.
+//
+// So the food/meal axis moves up a tier where it is named, and each tier holds
+// a comfortable number of tabs on the remaining axis.
+const MEMORY_KIND_OPTIONS: { key: string; label: string }[] = [
+  { key: "foods", label: "Foods" },
+  { key: "meals", label: "Meals" },
+];
+
+// Single foods: pinned by hand, or inferred by recency and by count.
+const FOOD_TAB_OPTIONS: { key: string; label: string }[] = [
   { key: "recents", label: "Recents" },
   { key: "frequent", label: "Frequent" },
-  { key: "usual_meals", label: "Usual meals" },
+  { key: "pinned", label: "Pinned" },
 ];
+
+// Several foods together: built by hand, or inferred from foods repeatedly
+// logged in the same day|slot. "Combos" rather than "Usual meals" — the
+// grouping is what distinguishes it from Frequent, not the repetition they
+// both share.
+const MEAL_TAB_OPTIONS: { key: string; label: string }[] = [
+  { key: "saved", label: "Saved" },
+  { key: "usual_meals", label: "Combos" },
+];
+
+type MemoryKind = "foods" | "meals";
+type MemoryTab = "saved" | "pinned" | "recents" | "frequent" | "usual_meals";
+
+// The tab a tier lands on when selected. Keeping this beside the option lists
+// makes it a visible invariant that it is one of that tier's own tabs.
+const FIRST_TAB_FOR_KIND: Record<MemoryKind, MemoryTab> = {
+  foods: "recents",
+  meals: "saved",
+};
 
 function today(): string {
   return new Date().toLocaleDateString("en-CA");
@@ -83,7 +116,8 @@ export default function LogScreen() {
   const [enteredUnit, setEnteredUnit] = useState<string | null>(null);
   const [meal, setMeal] = useState<(typeof MEALS)[number]>("lunch");
   const [error, setError] = useState<string | null>(null);
-  const [memTab, setMemTab] = useState<"saved" | "pinned" | "recents" | "frequent" | "usual_meals">("recents");
+  const [memKind, setMemKind] = useState<MemoryKind>("foods");
+  const [memTab, setMemTab] = useState<MemoryTab>(FIRST_TAB_FOR_KIND.foods);
   const search = useFoodSearch(q);
   const createLog = useCreateLog();
   const memory = useMemory(today());
@@ -304,11 +338,24 @@ export default function LogScreen() {
 
           {q.length < 2 ? (
             <>
-              <Segmented
-                options={MEMORY_TAB_OPTIONS}
-                value={memTab}
-                onChange={(key) => setMemTab(key as typeof memTab)}
-              />
+              <View style={{ gap: spacing.sm }}>
+                <Segmented
+                  options={MEMORY_KIND_OPTIONS}
+                  value={memKind}
+                  onChange={(key) => {
+                    const kind = key as MemoryKind;
+                    setMemKind(kind);
+                    // Never leave the selection pointing into the tier we just
+                    // left — that would render a meal list under Foods.
+                    setMemTab(FIRST_TAB_FOR_KIND[kind]);
+                  }}
+                />
+                <Segmented
+                  options={memKind === "foods" ? FOOD_TAB_OPTIONS : MEAL_TAB_OPTIONS}
+                  value={memTab}
+                  onChange={(key) => setMemTab(key as MemoryTab)}
+                />
+              </View>
               {memory.isLoading ? (
                 <AppText muted>Loading…</AppText>
               ) : memory.isError ? (

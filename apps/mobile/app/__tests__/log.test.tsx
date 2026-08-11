@@ -145,6 +145,52 @@ test("logging from a seeded route stamps the SEEDED time, not now", async () => 
   );
 });
 
+// The food-memory tabs carry two independent axes — food vs meal, and chosen
+// vs inferred — and a single five-segment row labelled neither. That made every
+// adjacent pair read as a synonym ("Pinned" vs "Saved", "Frequent" vs "Usual")
+// when they in fact differ on the unlabelled axis. Splitting the axes puts the
+// food/meal distinction in the tier above, where it is stated rather than
+// implied.
+test("splits the memory tabs into a Foods tier and a Meals tier", async () => {
+  const { findByLabelText, queryByLabelText } = await render(<LogScreen />);
+  expect(await findByLabelText("Foods")).toBeTruthy();
+  expect(await findByLabelText("Meals")).toBeTruthy();
+
+  // Foods is the default tier: its three tabs are reachable, the meal tabs are not.
+  expect(await findByLabelText("Recents")).toBeTruthy();
+  expect(await findByLabelText("Frequent")).toBeTruthy();
+  expect(await findByLabelText("Pinned")).toBeTruthy();
+  expect(queryByLabelText("Saved")).toBeNull();
+  expect(queryByLabelText("Combos")).toBeNull();
+});
+
+test("switching to the Meals tier swaps in the meal tabs and hides the food tabs", async () => {
+  const { findByLabelText, queryByLabelText } = await render(<LogScreen />);
+  fireEvent.press(await findByLabelText("Meals"));
+
+  expect(await findByLabelText("Saved")).toBeTruthy();
+  expect(await findByLabelText("Combos")).toBeTruthy();
+  expect(queryByLabelText("Recents")).toBeNull();
+  expect(queryByLabelText("Frequent")).toBeNull();
+  expect(queryByLabelText("Pinned")).toBeNull();
+});
+
+// Switching tiers must land on a tab that belongs to the tier. Leaving memTab
+// pointing at the old tier's selection would render a meal list under Foods.
+test("switching tiers selects that tier's first tab", async () => {
+  mockSavedMealsData = [];
+  const { findByLabelText, findByText } = await render(<LogScreen />);
+
+  // Assert on content unique to each tier's first tab: "+ New meal" belongs to
+  // Saved, and the recents empty state to Recents. The tab labels themselves
+  // are ambiguous — "Saved" is also the section's Overline heading.
+  fireEvent.press(await findByLabelText("Meals"));
+  expect(await findByText("+ New meal")).toBeTruthy();
+
+  fireEvent.press(await findByLabelText("Foods"));
+  expect(await findByText("Log a few meals and they'll show up here.")).toBeTruthy();
+});
+
 test("shows a loading state while memory is fetching", async () => {
   mockMemoryIsLoading = true;
   const { findByText } = await render(<LogScreen />);
@@ -214,7 +260,8 @@ test("tapping a usual meal batch-logs its items", async () => {
     ],
   };
   const { findByText, findByLabelText } = await render(<LogScreen />);
-  fireEvent.press(await findByLabelText("Usual meals"));
+  fireEvent.press(await findByLabelText("Meals"));
+  fireEvent.press(await findByLabelText("Combos"));
   fireEvent.press(await findByText(/Eggs & Oats/));
   expect(mockBatchMutate).toHaveBeenCalledWith(
     expect.objectContaining({
@@ -273,6 +320,7 @@ test("Saved tab shows a saved meal", async () => {
     },
   ];
   const { findByText, findByLabelText } = await render(<LogScreen />);
+  fireEvent.press(await findByLabelText("Meals"));
   fireEvent.press(await findByLabelText("Saved"));
   expect(await findByText("Protein Bowl")).toBeTruthy();
 });
@@ -280,6 +328,7 @@ test("Saved tab shows a saved meal", async () => {
 test("the log screen can start a new meal from scratch", async () => {
   const { findByLabelText } = await render(<LogScreen />);
 
+  fireEvent.press(await findByLabelText("Meals"));
   fireEvent.press(await findByLabelText("Saved"));
   const newMealButton = await findByLabelText("New meal");
   fireEvent.press(newMealButton);
