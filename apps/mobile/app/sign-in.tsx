@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { KeyboardAvoidingView, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import {
@@ -7,6 +7,7 @@ import {
   type AuthCredential,
 } from "firebase/auth";
 import { auth, isFirebaseConfigured } from "@/lib/firebase";
+import { clearSnapshot } from "../modules/widget-bridge";
 import { AppText } from "@/components/Text";
 import { Button } from "@/components/Button";
 import { Field } from "@/components/Field";
@@ -53,6 +54,19 @@ export default function SignIn() {
     Extract<SocialSignInOutcome, { status: "needs-link" }> | null
   >(null);
   const [showEmail, setShowEmail] = useState(false);
+
+  // Belt-and-braces: useWidgetSync clears the snapshot on sign-out, but that
+  // relies on the tabs layout being mounted to observe the auth transition.
+  // A dead-app auth drop or a swallowed Firebase signOut() never fires that
+  // path, so the previous user's calories can persist in the widget past
+  // sign-out. Landing here means whatever session existed is over one way or
+  // another, so scrub on mount as a second, independent guarantee. Guarded
+  // for module availability the same way modules/widget-bridge itself is
+  // (absent on Android, absent in jest) — fire-and-forget, nothing here
+  // should block or fail the sign-in screen.
+  useEffect(() => {
+    clearSnapshot();
+  }, []);
 
   async function submit() {
     if (!auth) return;
