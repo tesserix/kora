@@ -314,9 +314,10 @@ export default function Home() {
             </View>
           ) : (
             <EmptyState
+              variant="instrument"
               icon="camera"
               title="No meals logged yet"
-              subtitle="Tap ✦ to log your first meal."
+              subtitle="Tap the camera button to log your first meal."
             />
           )}
           {/* Dashed ghost-slot CTA — same recipe as Diary's "Add {slot} · N

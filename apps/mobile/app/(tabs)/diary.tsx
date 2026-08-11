@@ -565,6 +565,7 @@ export default function Diary() {
           {isEmptyDay ? (
             <Animated.View entering={enter(4)}>
               <EmptyState
+                variant="instrument"
                 icon="book-open"
                 title="Nothing logged"
                 subtitle="Meals you log on this day appear here."
