@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 
 	"github.com/tesserix/kora/api/internal/units"
@@ -215,5 +216,36 @@ func (r Repository) ResolveBarcode(ctx context.Context, off OFFClient, code stri
 		}
 		return nil, false, fmt.Errorf("nutrition: resolve barcode reload: %w", err)
 	}
+	r.embedAsync(cached.ID, cached.Name)
 	return &cached, true, nil
+}
+
+// embedAsync fills a freshly ingested food's embedding in the background.
+//
+// Deliberately fire-and-forget with its own context: the caller's context is
+// cancelled the moment the scan response is written, and a scan must never
+// fail — or wait — because an embedding did.
+//
+// On failure it logs and leaves the column NULL, which puts the row straight
+// back into RowsMissingEmbedding for the next cmd/embed pass. That is the
+// whole safety argument for doing this asynchronously, and it is why there is
+// no retry here: cmd/embed already retries properly.
+func (r Repository) embedAsync(id uuid.UUID, name string) {
+	if r.embedder == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		vec, err := r.embedder.Embed(ctx, name)
+		if err != nil {
+			slog.WarnContext(ctx, "nutrition: ingest-time embed failed; row left for cmd/embed",
+				"error", err, "food_item_id", id, "name", name)
+			return
+		}
+		if err := r.SetEmbedding(ctx, id, vec); err != nil {
+			slog.WarnContext(ctx, "nutrition: storing ingest-time embedding failed; row left for cmd/embed",
+				"error", err, "food_item_id", id)
+		}
+	}()
 }

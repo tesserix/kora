@@ -3,9 +3,12 @@ package nutrition
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -354,4 +357,104 @@ func TestFetchServingUnitReportsTheRawField(t *testing.T) {
 		require.NoError(t, err)
 		assert.False(t, found)
 	})
+}
+
+// fakeEmbedder records calls and returns a canned vector or error.
+type fakeEmbedder struct {
+	mu     sync.Mutex
+	calls  []string
+	vec    []float32
+	err    error
+	called chan struct{} // closed after the first call, so tests can await the goroutine
+}
+
+func (f *fakeEmbedder) Embed(_ context.Context, text string) ([]float32, error) {
+	f.mu.Lock()
+	f.calls = append(f.calls, text)
+	f.mu.Unlock()
+	select {
+	case <-f.called:
+	default:
+		close(f.called)
+	}
+	return f.vec, f.err
+}
+
+func TestResolveBarcodeEmbedsNewlyInsertedFood(t *testing.T) {
+	db := testDB(t)
+	emb := &fakeEmbedder{vec: make([]float32, 768), called: make(chan struct{})}
+	repo := NewRepository(db).WithEmbedder(emb)
+	code := "9310232956596"
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE barcode = ?", code) })
+
+	srv := offStubServer(t, offProduct{ProductName: "Test drink", EnergyKcal100g: 42, ServingQuantity: 250, ServingQuantityUnit: "ml"})
+	off := HTTPOFFClient{BaseURL: srv.URL, Client: srv.Client()}
+
+	item, found, err := repo.ResolveBarcode(context.Background(), off, code)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.NotNil(t, item)
+
+	// The embed runs in a goroutine, so wait for it rather than sleeping.
+	select {
+	case <-emb.called:
+	case <-time.After(2 * time.Second):
+		t.Fatal("embedder was never called")
+	}
+
+	require.Eventually(t, func() bool {
+		var embedded bool
+		if err := db.Raw("SELECT embedding IS NOT NULL FROM food_items WHERE id = ?", item.ID).Scan(&embedded).Error; err != nil {
+			return false
+		}
+		return embedded
+	}, 2*time.Second, 20*time.Millisecond, "embedding was never stored")
+}
+
+func TestResolveBarcodeLeavesEmbeddingNullWhenEmbedFails(t *testing.T) {
+	// THE LOAD-BEARING TEST. A failed ingest embed must leave the column NULL
+	// so the row stays in RowsMissingEmbedding and cmd/embed retries it. If
+	// this ever stores a zero vector or otherwise marks the row done, the
+	// whole async design silently loses rows.
+	db := testDB(t)
+	emb := &fakeEmbedder{err: errors.New("boom"), called: make(chan struct{})}
+	repo := NewRepository(db).WithEmbedder(emb)
+	code := "9300605158641"
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE barcode = ?", code) })
+
+	srv := offStubServer(t, offProduct{ProductName: "Test drink 2", EnergyKcal100g: 42})
+	off := HTTPOFFClient{BaseURL: srv.URL, Client: srv.Client()}
+
+	item, found, err := repo.ResolveBarcode(context.Background(), off, code)
+	// The SCAN must still succeed — a failed embedding is not the user's problem.
+	require.NoError(t, err)
+	require.True(t, found)
+	require.NotNil(t, item)
+
+	select {
+	case <-emb.called:
+	case <-time.After(2 * time.Second):
+		t.Fatal("embedder was never called")
+	}
+
+	// Give the goroutine room to (incorrectly) write, then assert it did not.
+	time.Sleep(100 * time.Millisecond)
+	var embedded bool
+	require.NoError(t, db.Raw("SELECT embedding IS NOT NULL FROM food_items WHERE id = ?", item.ID).Scan(&embedded).Error)
+	assert.False(t, embedded, "embedding column must stay NULL when the embed call failed")
+}
+
+func TestResolveBarcodeWithoutEmbedderInsertsNormally(t *testing.T) {
+	db := testDB(t)
+	repo := NewRepository(db) // no WithEmbedder — nil Embedder
+	code := "9300605158642"
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE barcode = ?", code) })
+
+	srv := offStubServer(t, offProduct{ProductName: "Test drink 3", EnergyKcal100g: 42})
+	off := HTTPOFFClient{BaseURL: srv.URL, Client: srv.Client()}
+
+	item, found, err := repo.ResolveBarcode(context.Background(), off, code)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.NotNil(t, item)
 }

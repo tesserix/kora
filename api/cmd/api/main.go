@@ -228,6 +228,16 @@ func main() {
 // both: corrections and retirements would keep reporting success while users
 // were served the stale food for up to the cache's 24h TTL. The identity is
 // pinned by server.TestAdminMutationBumpsTheSameCacheInstanceWiredIntoDeps.
+// geminiEmbedder adapts the AI provider's three-value Embed to the narrower
+// shape nutrition.Embedder needs (nutrition cannot import ai — see the
+// interface's own comment).
+type geminiEmbedder struct{ p providers.GeminiProvider }
+
+func (g geminiEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
+	vec, _, err := g.p.Embed(ctx, text)
+	return vec, err
+}
+
 func buildResolveHandler(ctx context.Context, cfg config.Config, db *gorm.DB, logger *slog.Logger) (*resolve.Handler, ai.Provider, ai.Cache) {
 	if cfg.GeminiAPIKey == "" {
 		logger.Info("resolve engine disabled (no GEMINI_API_KEY)")
@@ -260,7 +270,7 @@ func buildResolveHandler(ctx context.Context, cfg config.Config, db *gorm.DB, lo
 		}
 	}
 
-	foods := nutrition.NewRepository(db)
+	foods := nutrition.NewRepository(db).WithEmbedder(geminiEmbedder{p: gemini})
 	meter := billing.NewMeter(db)
 	// WithPortionSource lets a personal-alias short-circuit in
 	// ai.Resolver.ResolveText inherit the portion from the user's last log of
