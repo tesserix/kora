@@ -4,8 +4,9 @@
 // It does two things:
 //
 //  1. serving_units — populated by parsing the serving_desc text the row
-//     already carries, falling back to the curated table keyed on the food's
-//     name. A row that already has units is never touched.
+//     already carries, and only that. A row that already has units is never
+//     touched, and a row whose label yields nothing is left without a named
+//     serving rather than given a guessed one.
 //  2. base_unit — corrected for OpenFoodFacts-provenance rows by re-fetching
 //     the product and reading its true serving_quantity_unit. Without this a
 //     drink stays base_unit = 'g' forever: nutrition.ResolveBarcode
@@ -16,21 +17,26 @@
 // change, so the job is safe to re-run. An OFF fetch that fails is logged and
 // skipped — one unreachable product never fails the whole job.
 //
-// Run with -dry-run first. The dry run reports exactly what it would write,
-// including how many serving_units came from a row's own label versus the
-// curated name table, and a sample of the latter.
+// Run with -dry-run first. The dry run reports exactly what it would write.
 //
-// -no-fallback declines units.Fallback entirely, so only evidence is written:
-// a row's own parsed label, and base_unit from OpenFoodFacts. Prefer it. The
-// 2026-08-11 production dry run planned 762 serving_units writes of which 639
-// came from the curated table, and 395 of those matched a keyword that is not
-// the food's head noun — "Apples, dried, stewed, WITHOUT added sugar" took
-// sugar's 200 g cup, fried chicken "with flour" took flour's 125 g cup, and
-// "Alcoholic beverage, rice (sake)" took rice's 158 g cup despite being a
-// liquid. units.Fallback matches a keyword anywhere in a name and cannot read
-// negation, so a USDA-style compound name is routinely claimed by an
-// ingredient it merely mentions. An absent conversion is recoverable by the
-// user; a fabricated one silently corrupts every total that uses it.
+// This command used to consult units.Fallback, a curated table keyed on words
+// in the food's name, whenever the label would not parse. That table is gone,
+// and this is the record of why. The 2026-08-11 production dry run planned 762
+// serving_units writes, of which only 123 came from a row's own label; the
+// other 639 came from the table, and 395 of those matched a keyword that was
+// not the food's head noun at all. "Apples, dried, stewed, WITHOUT added
+// sugar" took sugar's 200 g cup, fried chicken "with flour" took flour's 125 g
+// cup, and "Alcoholic beverage, rice (sake)" took rice's 158 g cup despite
+// being a liquid — the matcher read a keyword anywhere in the name and could
+// not read negation, so a USDA-style compound name was routinely claimed by an
+// ingredient it merely mentioned.
+//
+// Restricting it to head nouns was measured and rejected: 60 of the 244
+// surviving rows (24%) were still wrong, "Pork sausage rice links" and
+// "RICE-A-RONI" among them, before counting intra-category density spread
+// (chickpea flour ~92 g/cup against the table's assumed 125 g). The upside was
+// 244 of 7,900 rows. An absent conversion is recoverable by the user; a
+// fabricated one silently corrupts every total that uses it.
 package main
 
 import (
@@ -59,21 +65,14 @@ const batchSize = 500
 // enough and needs no token bucket.
 const offPause = 1200 * time.Millisecond
 
-// fallbackSampleLimit caps how many curated-table matches a dry run prints.
-// The point is to make the guesses inspectable, not to dump the table.
-const fallbackSampleLimit = 25
-
 // baseUnitSampleLimit caps how many base_unit transitions a run names. ml → g
 // downgrades bypass this cap entirely — see stats.BaseUnitDowngrades.
 const baseUnitSampleLimit = 50
 
-// Sources of a serving_units payload, reported separately by a dry run: a
-// row's own label is evidence, the curated name table is a category-level
-// guess and is the one a reviewer needs to eyeball.
-const (
-	sourceParse    = "parse"
-	sourceFallback = "fallback"
-)
+// sourceParse is the only provenance a serving_units payload can now have: the
+// row's own label. The curated name table that used to supply a second,
+// category-level source is gone — see the package comment.
+const sourceParse = "parse"
 
 // unitPlan is the serving_units payload a single row would receive, and where
 // the figures came from.
@@ -84,36 +83,24 @@ type unitPlan struct {
 
 // backfillItem computes the serving_units payload for a single food item,
 // or reports false when the row should be left untouched.
-func backfillItem(item nutrition.FoodItem, noFallback bool) (unitPlan, bool) {
+func backfillItem(item nutrition.FoodItem) (unitPlan, bool) {
 	// Never clobber units a row already has — those came from OFF or an admin
 	// and are better evidence than a re-parse of the description text.
 	if len(item.ServingUnits) > 0 && string(item.ServingUnits) != "[]" && string(item.ServingUnits) != "null" {
 		return unitPlan{}, false
 	}
-	// The row's own label first — it is always better evidence than a
-	// category-level guess. Only when it yields nothing do we fall back to the
-	// curated table, and when that is empty too the food simply has no named
-	// serving and the client uses raw base-unit entry.
-	source := sourceParse
+	// The row's own label is the only evidence there is. When it yields nothing
+	// the food simply has no named serving and the client uses raw base-unit
+	// entry — the recoverable outcome, where a guessed density is not.
 	parsed, err := units.Parse(item.ServingDesc)
 	if err != nil {
-		// With noFallback set the row simply has no named serving. That is the
-		// recoverable outcome — the client falls back to raw base-unit entry —
-		// where a category-level guess is not.
-		if noFallback {
-			return unitPlan{}, false
-		}
-		source = sourceFallback
-		parsed = units.Fallback(item.Name)
-		if len(parsed) == 0 {
-			return unitPlan{}, false
-		}
+		return unitPlan{}, false
 	}
 	encoded, err := json.Marshal(parsed)
 	if err != nil {
 		return unitPlan{}, false
 	}
-	return unitPlan{Encoded: encoded, Source: source}, true
+	return unitPlan{Encoded: encoded, Source: sourceParse}, true
 }
 
 // needsBaseUnitRefetch reports whether a row's base_unit can only be settled
@@ -151,8 +138,6 @@ type stats struct {
 	UnitsWritten    int
 	Skipped         int
 	FromParse       int
-	FromFallback    int
-	FallbackSamples []string
 	BaseUnitWritten int
 	BaseUnitFetched int
 	BaseUnitFailed  int
@@ -176,14 +161,10 @@ type options struct {
 	OFF nutrition.ServingUnitFetcher
 	// Pause between OFF requests. Zero in tests.
 	Pause time.Duration
-	// NoFallback declines units.Fallback entirely, so only evidence is
-	// written: a row's own parsed label, and base_unit from OFF.
-	NoFallback bool
 }
 
 func main() {
 	dryRun := flag.Bool("dry-run", false, "report what would be written without writing anything")
-	noFallback := flag.Bool("no-fallback", false, "write only evidence: skip the curated name table entirely")
 	flag.Parse()
 
 	url := os.Getenv("DATABASE_URL")
@@ -196,34 +177,24 @@ func main() {
 	}
 
 	off := nutrition.NewHTTPOFFClient()
-	result, err := run(context.Background(), db, options{
-		DryRun:     *dryRun,
-		NoFallback: *noFallback,
-		OFF:        off,
-		Pause:      offPause,
-	})
+	result, err := run(context.Background(), db, options{DryRun: *dryRun, OFF: off, Pause: offPause})
 	if err != nil {
 		log.Fatal(err)
 	}
-	report(*dryRun, *noFallback, result)
+	report(*dryRun, result)
 }
 
-func report(dryRun, noFallback bool, s stats) {
+func report(dryRun bool, s stats) {
 	slog.Info("backfillunits: complete",
 		"dry_run", dryRun,
-		"no_fallback", noFallback,
 		"serving_units_rows", s.UnitsWritten,
 		"from_label_parse", s.FromParse,
-		"from_curated_table", s.FromFallback,
 		"skipped", s.Skipped,
 		"base_unit_rows", s.BaseUnitWritten,
 		"off_fetched", s.BaseUnitFetched,
 		"off_failed", s.BaseUnitFailed,
 		"off_unit_absent", s.BaseUnitAbsent,
 	)
-	for _, sample := range s.FallbackSamples {
-		slog.Info("backfillunits: curated-table guess", "food", sample)
-	}
 	// A count alone makes a dry run unreviewable — the whole point is to see
 	// WHICH rows change before thousands are rewritten.
 	for _, sample := range s.BaseUnitSamples {
@@ -246,17 +217,10 @@ func run(ctx context.Context, db *gorm.DB, opts options) (stats, error) {
 		for _, item := range batch {
 			changes := map[string]any{}
 
-			if plan, ok := backfillItem(item, opts.NoFallback); ok {
+			if plan, ok := backfillItem(item); ok {
 				changes["serving_units"] = plan.Encoded
 				s.UnitsWritten++
-				if plan.Source == sourceFallback {
-					s.FromFallback++
-					if len(s.FallbackSamples) < fallbackSampleLimit {
-						s.FallbackSamples = append(s.FallbackSamples, item.Name)
-					}
-				} else {
-					s.FromParse++
-				}
+				s.FromParse++
 			} else {
 				s.Skipped++
 			}

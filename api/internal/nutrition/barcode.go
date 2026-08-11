@@ -105,8 +105,10 @@ func (c HTTPOFFClient) Fetch(ctx context.Context, barcode string) (*FoodItem, er
 		FiberPer100g:   body.Product.Nutriments.Fiber100g,
 	}
 	// A parse miss is not a failure — the product simply has no named serving
-	// and the client falls back to raw base-unit entry. Logged so the curated
-	// table can be grown from real observed text rather than guesswork.
+	// and the client falls back to raw base-unit entry. Logged so the shapes
+	// OFF actually publishes can be read off real traffic; note that many
+	// products carry serving_quantity (which lands in ServingGrams) but no
+	// serving_size text at all, so there is nothing here to name.
 	if parsed, err := units.Parse(body.Product.ServingSize); err == nil {
 		if encoded, mErr := json.Marshal(parsed); mErr == nil {
 			item.ServingUnits = encoded
