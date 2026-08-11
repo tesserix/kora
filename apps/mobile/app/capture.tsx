@@ -461,8 +461,7 @@ export function CaptureBody({
         keyboardShouldPersistTaps="handled"
       >
         <OttoBubble>
-          Hi {displayName} — show me your meal or just tell me what you ate. A photo works great. 📷 is optional; words
-          work too.
+          Hi {displayName} — show me your meal or just tell me what you ate. A photo works great — words work too.
         </OttoBubble>
 
         {stage === "idle" && (
@@ -658,6 +657,12 @@ async function pickMealPhoto(): Promise<PhotoPickOutcome> {
 // Instrument Glass: a faint accent-tinted ambient pool fading into the fixed
 // dark `bg`, echoing the spec's ambient-pool treatment (orange upper-left,
 // static, no parallax) without competing with the thread/composer on top.
+//
+// The alpha MUST come from a separate `stopOpacity` prop, not baked into an
+// rgba() `stopColor` string (see AppBackground's pools for the same
+// pattern) — react-native-svg does not reliably honor the alpha channel of
+// an rgba() stopColor, which previously rendered this as a full-saturation
+// orange wall instead of a faint pool.
 function CaptureCanvasBackground() {
   return (
     <Svg
@@ -670,11 +675,12 @@ function CaptureCanvasBackground() {
     >
       <Defs>
         <LinearGradient id="captureCanvas" x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0%" stopColor={withAlpha(T.accent, 0.08)} />
-          <Stop offset="45%" stopColor={T.bg} />
-          <Stop offset="100%" stopColor={T.bg} />
+          <Stop offset="0%" stopColor={T.accent} stopOpacity={0.14} />
+          <Stop offset="30%" stopColor={T.accent} stopOpacity={0} />
+          <Stop offset="100%" stopColor={T.accent} stopOpacity={0} />
         </LinearGradient>
       </Defs>
+      <Rect x={0} y={0} width={100} height={100} fill={T.bg} />
       <Rect x={0} y={0} width={100} height={100} fill="url(#captureCanvas)" />
     </Svg>
   );
