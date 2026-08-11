@@ -7,5 +7,7 @@
     <key>NSExtensionPointIdentifier</key>
     <string>com.apple.widgetkit-extension</string>
   </dict>
+  <key>NSHealthShareUsageDescription</key>
+  <string>Kora reads your steps and sleep to show real activity alongside your nutrition.</string>
 </dict>
 </plist>
