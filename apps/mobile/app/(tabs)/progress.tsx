@@ -246,6 +246,7 @@ export default function Progress() {
                 title="No weigh-ins yet"
                 subtitle="Log your weight to see your trend."
                 cta={{ label: "Log weight", onPress: () => setSheetOpen(true) }}
+                variant="instrument"
               />
             ) : (
               <AppText style={[mutedLabel, { fontSize: 13, paddingVertical: 16, textAlign: "center" }]}>Log your weight to see a trend.</AppText>
