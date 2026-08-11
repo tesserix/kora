@@ -570,7 +570,7 @@ export default function Diary() {
                 subtitle="Meals you log on this day appear here."
               />
               <GroupedSection>
-                <Row title="Copy from another day" icon={{ name: "repeat", tint: instrument.inset }} onPress={() => setCopyOpen(true)} />
+                <Row title="Copy from another day" icon={{ name: "repeat", tint: instrument.mut }} onPress={() => setCopyOpen(true)} />
               </GroupedSection>
             </Animated.View>
           ) : null}
