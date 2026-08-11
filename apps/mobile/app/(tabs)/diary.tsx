@@ -393,7 +393,7 @@ export default function Diary() {
                 ) : (
                   <View style={{ flexDirection: "row", alignItems: "baseline", marginTop: 4 }}>
                     <AppText style={[{ fontSize: 17, fontWeight: "600", color: instrument.ink }, mono]}>{total}</AppText>
-                    <AppText style={[{ fontSize: 13, color: instrument.mut }, mono]}>{` / ${goal} kcal`}</AppText>
+                    <AppText style={[{ fontSize: 13, color: instrument.mut }, mono]}>{` / ${Math.round(goal).toLocaleString()} kcal`}</AppText>
                   </View>
                 )}
                 <View style={{ height: 6, borderRadius: 3, backgroundColor: instrument.inset, overflow: "hidden", marginTop: 10 }}>
@@ -556,7 +556,7 @@ export default function Diary() {
               >
                 <Icon name="plus" size={16} color={instrument.accent} />
                 <AppText style={{ color: instrument.mut }}>
-                  {`Add ${missingSlot} · ${remaining} kcal in reserve`}
+                  {`Add ${missingSlot} · ${remaining.toLocaleString()} kcal in reserve`}
                 </AppText>
               </PressableScale>
             </Animated.View>
