@@ -117,7 +117,7 @@ func (c HTTPOFFClient) Fetch(ctx context.Context, barcode string) (*FoodItem, er
 		if encoded, mErr := json.Marshal(parsed); mErr == nil {
 			item.ServingUnits = encoded
 		}
-	} else if portion, ok := portionFromServingGrams(item.ServingGrams); ok {
+	} else if portion, ok := PortionFromServingGrams(item.ServingGrams); ok {
 		if encoded, mErr := json.Marshal(portion); mErr == nil {
 			item.ServingUnits = encoded
 		}
@@ -133,14 +133,14 @@ func (c HTTPOFFClient) Fetch(ctx context.Context, barcode string) (*FoodItem, er
 // about the food's form, only that this is one serving of it.
 const GenericPortionName = "portion"
 
-// portionFromServingGrams names a row's own serving mass as a single generic
+// PortionFromServingGrams names a row's own serving mass as a single generic
 // portion, or reports false when there is no mass to name.
 //
 // The guard is not cosmetic. A zero — OFF omitting serving_quantity, which is
 // common — would otherwise become a serving unit whose base_amount is 0, and
 // every log entered against it would resolve to zero grams and silently
 // contribute nothing to the day's totals.
-func portionFromServingGrams(servingGrams float64) ([]units.ServingUnit, bool) {
+func PortionFromServingGrams(servingGrams float64) ([]units.ServingUnit, bool) {
 	if servingGrams <= 0 {
 		return nil, false
 	}

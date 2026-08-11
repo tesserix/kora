@@ -109,6 +109,50 @@ func TestBackfillItemDeclinesCuratedGuesses(t *testing.T) {
 	}
 }
 
+// TestBackfillItemNamesAServingMassAsAPortion mirrors the ingest rule in
+// nutrition.Fetch: a row whose label will not parse but which carries its own
+// serving mass gets that mass named as one generic portion. All 7,777
+// unit-less production rows have serving_grams > 0, and the figures are real
+// reference servings (garlic 2.8 g, English muffin 57 g, canned soup 305 g),
+// so this gives the whole catalogue a one-tap serving without inventing a
+// single number.
+func TestBackfillItemNamesAServingMassAsAPortion(t *testing.T) {
+	got, ok := backfillItem(nutrition.FoodItem{
+		Name: "Garlic, raw", ServingDesc: "per serving", ServingGrams: 2.8,
+	})
+	require.True(t, ok)
+	assert.Equal(t, sourcePortion, got.Source)
+
+	var parsed []units.ServingUnit
+	require.NoError(t, json.Unmarshal(got.Encoded, &parsed))
+	require.Len(t, parsed, 1)
+	assert.Equal(t, nutrition.GenericPortionName, parsed[0].Name)
+	assert.InDelta(t, 2.8, parsed[0].BaseAmount, 1e-9)
+	assert.InDelta(t, 1, parsed[0].Amount, 1e-9)
+}
+
+// A zero serving mass must never become a serving unit: every log entered
+// against a 0 g portion would resolve to zero grams and contribute nothing.
+func TestBackfillItemDeclinesAZeroServingMass(t *testing.T) {
+	_, ok := backfillItem(nutrition.FoodItem{Name: "Mystery food", ServingDesc: "per serving", ServingGrams: 0})
+	assert.False(t, ok)
+}
+
+// A parsed label still wins: it carries the serving's real name, which a
+// generic "portion" never will.
+func TestBackfillItemPrefersAParsedLabelOverAPortion(t *testing.T) {
+	got, ok := backfillItem(nutrition.FoodItem{
+		Name: "NESCAFÉ", ServingDesc: "1 sachet (16.5g)", ServingGrams: 16.5,
+	})
+	require.True(t, ok)
+	assert.Equal(t, sourceParse, got.Source)
+
+	var parsed []units.ServingUnit
+	require.NoError(t, json.Unmarshal(got.Encoded, &parsed))
+	require.Len(t, parsed, 1)
+	assert.Equal(t, "sachet", parsed[0].Name)
+}
+
 // TestBackfillItemKeepsParsedEvidence guards the other direction: a row's own
 // label is evidence, not a guess, and must still be written.
 func TestBackfillItemKeepsParsedEvidence(t *testing.T) {

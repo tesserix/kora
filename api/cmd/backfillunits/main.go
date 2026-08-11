@@ -3,10 +3,13 @@
 //
 // It does two things:
 //
-//  1. serving_units — populated by parsing the serving_desc text the row
-//     already carries, and only that. A row that already has units is never
-//     touched, and a row whose label yields nothing is left without a named
-//     serving rather than given a guessed one.
+//  1. serving_units — populated from the row's own evidence, and only that:
+//     the serving_desc text where it parses, otherwise the row's own
+//     serving_grams named as one generic portion (the same rule the ingest
+//     path applies, so a backfilled row and a freshly scanned one agree). A
+//     row that already has units is never touched, and a row with neither a
+//     parseable label nor a serving mass is left without a named serving
+//     rather than given a guessed one.
 //  2. base_unit — corrected for OpenFoodFacts-provenance rows by re-fetching
 //     the product and reading its true serving_quantity_unit. Without this a
 //     drink stays base_unit = 'g' forever: nutrition.ResolveBarcode
@@ -69,10 +72,14 @@ const offPause = 1200 * time.Millisecond
 // downgrades bypass this cap entirely — see stats.BaseUnitDowngrades.
 const baseUnitSampleLimit = 50
 
-// sourceParse is the only provenance a serving_units payload can now have: the
-// row's own label. The curated name table that used to supply a second,
-// category-level source is gone — see the package comment.
-const sourceParse = "parse"
+// Where a serving_units payload came from. Both are evidence carried by the
+// row itself — its label text, or its own serving mass. The curated name table
+// that used to supply a third, category-level source is gone; see the package
+// comment for why.
+const (
+	sourceParse   = "parse"
+	sourcePortion = "portion"
+)
 
 // unitPlan is the serving_units payload a single row would receive, and where
 // the figures came from.
@@ -89,18 +96,28 @@ func backfillItem(item nutrition.FoodItem) (unitPlan, bool) {
 	if len(item.ServingUnits) > 0 && string(item.ServingUnits) != "[]" && string(item.ServingUnits) != "null" {
 		return unitPlan{}, false
 	}
-	// The row's own label is the only evidence there is. When it yields nothing
-	// the food simply has no named serving and the client uses raw base-unit
-	// entry — the recoverable outcome, where a guessed density is not.
+	// The row's own label first: it carries the serving's real NAME, which a
+	// generic word never will.
+	//
+	// Failing that, the row's own serving mass — the same rule the ingest path
+	// applies in nutrition.Fetch, so a backfilled row and a freshly scanned one
+	// end up identical. Both are evidence the row already carries. A food with
+	// neither keeps raw base-unit entry, which is the recoverable outcome where
+	// a guessed density is not.
+	source := sourceParse
 	parsed, err := units.Parse(item.ServingDesc)
 	if err != nil {
-		return unitPlan{}, false
+		portion, ok := nutrition.PortionFromServingGrams(item.ServingGrams)
+		if !ok {
+			return unitPlan{}, false
+		}
+		source, parsed = sourcePortion, portion
 	}
 	encoded, err := json.Marshal(parsed)
 	if err != nil {
 		return unitPlan{}, false
 	}
-	return unitPlan{Encoded: encoded, Source: sourceParse}, true
+	return unitPlan{Encoded: encoded, Source: source}, true
 }
 
 // needsBaseUnitRefetch reports whether a row's base_unit can only be settled
@@ -135,9 +152,12 @@ func baseUnitPlan(item nutrition.FoodItem, rawServingUnit string) (string, bool)
 
 // stats is what one pass of the job did (or, in a dry run, would have done).
 type stats struct {
-	UnitsWritten    int
-	Skipped         int
-	FromParse       int
+	UnitsWritten int
+	Skipped      int
+	FromParse    int
+	// FromPortion counts rows given a generic portion named from their own
+	// serving mass, as distinct from a serving read off their label text.
+	FromPortion     int
 	BaseUnitWritten int
 	BaseUnitFetched int
 	BaseUnitFailed  int
@@ -189,6 +209,7 @@ func report(dryRun bool, s stats) {
 		"dry_run", dryRun,
 		"serving_units_rows", s.UnitsWritten,
 		"from_label_parse", s.FromParse,
+		"from_serving_mass", s.FromPortion,
 		"skipped", s.Skipped,
 		"base_unit_rows", s.BaseUnitWritten,
 		"off_fetched", s.BaseUnitFetched,
@@ -220,7 +241,11 @@ func run(ctx context.Context, db *gorm.DB, opts options) (stats, error) {
 			if plan, ok := backfillItem(item); ok {
 				changes["serving_units"] = plan.Encoded
 				s.UnitsWritten++
-				s.FromParse++
+				if plan.Source == sourcePortion {
+					s.FromPortion++
+				} else {
+					s.FromParse++
+				}
 			} else {
 				s.Skipped++
 			}
