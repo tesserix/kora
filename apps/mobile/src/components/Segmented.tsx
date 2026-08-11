@@ -68,7 +68,21 @@ export function Segmented({ options, value, onChange }: Props) {
             }}
             style={{ flex: 1, paddingVertical: 6, alignItems: "center", justifyContent: "center" }}
           >
-            <AppText variant="subheadline" style={{ fontWeight: selected ? "600" : "400" }}>
+            {/*
+              Segments are equal-width, so a label wider than its share of the
+              track has nowhere to go. Left to reflow it wraps and grows the
+              whole control's height, which is what "Usual meals" did to the
+              five-tab food-memory row. Shrink first and truncate as a floor —
+              the same order iOS uses — so one long label can never disturb the
+              row's rhythm.
+            */}
+            <AppText
+              variant="subheadline"
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.85}
+              style={{ fontWeight: selected ? "600" : "400" }}
+            >
               {option.label}
             </AppText>
           </Pressable>
