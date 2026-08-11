@@ -34,6 +34,7 @@ export function MacroWide({ label, value, goal, unit = "g" }: MacroWideProps) {
           <AppText style={captionLabel}>{label}</AppText>
           <AppText style={[{ fontSize: 15, fontWeight: "600", color: instrument.ink }, mono]}>
             {value}/{goal}
+            {unit}
           </AppText>
           <View
             style={{
