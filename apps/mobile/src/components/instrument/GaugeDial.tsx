@@ -2,7 +2,23 @@ import { View } from "react-native";
 import Svg, { Circle, Line, Text as SvgText } from "react-native-svg";
 import { AppText } from "@/components/Text";
 import { useTheme } from "@/theme";
-import { buildGaugeTicks, needleFor, scaleAnchor, GAUGE_VIEW_H, GAUGE_VIEW_W } from "./gauge";
+import {
+  buildGaugeTicks,
+  needleFor,
+  scaleAnchor,
+  GAUGE_VIEW_H,
+  GAUGE_VIEW_W,
+  GAUGE_CENTER_X,
+  GAUGE_CENTER_Y,
+} from "./gauge";
+
+// The hub dot sits at GAUGE_CENTER_Y; keep this much vertical clearance above it
+// so the center overlay's label never descends into the hub/needle-tail zone.
+const HUB_CLEARANCE = 18;
+// Distance, in SVG units, from the bottom of the viewBox up to the clearance
+// line above the hub — used as the overlay's `bottom` inset so its content
+// area ends above the hub instead of an eyeballed percentage.
+const OVERLAY_BOTTOM = GAUGE_VIEW_H - (GAUGE_CENTER_Y - HUB_CLEARANCE);
 
 export interface GaugeDialProps {
   value: number; // eaten kcal
@@ -77,16 +93,19 @@ export function GaugeDial({
             strokeWidth={3}
             strokeLinecap="round"
           />
-          <Circle cx={132} cy={146} r={4.5} fill={instrument.accent} />
+          <Circle cx={GAUGE_CENTER_X} cy={GAUGE_CENTER_Y} r={4.5} fill={instrument.accent} />
         </Svg>
         <View
+          testID="gauge-center-overlay"
           style={{
             position: "absolute",
-            // top/bottom (not a bare top%) bound the overlay inside the Svg's own
-            // height so the numeral's line box has room to breathe and can't clip —
-            // top starts below the scale-numeral band (~y 61) with margin to spare.
-            top: "40%",
-            bottom: 0,
+            // top/bottom bound the overlay inside the Svg's own height so the
+            // numeral's line box has room to breathe and can't clip — top clears
+            // the scale-numeral band (~y 61), bottom (OVERLAY_BOTTOM, derived from
+            // GAUGE_CENTER_Y and HUB_CLEARANCE) keeps the label above the hub dot
+            // and the needle tail instead of an eyeballed percentage.
+            top: "38%",
+            bottom: OVERLAY_BOTTOM,
             left: 0,
             right: 0,
             alignItems: "center",
@@ -94,7 +113,7 @@ export function GaugeDial({
         >
           <AppText
             variant="body"
-            style={[{ fontSize: 54, lineHeight: 60, color: instrument.ink, letterSpacing: -1.5 }, mono]}
+            style={[{ fontSize: 44, lineHeight: 50, color: instrument.ink, letterSpacing: -1.2 }, mono]}
           >
             {remaining.toLocaleString()}
           </AppText>

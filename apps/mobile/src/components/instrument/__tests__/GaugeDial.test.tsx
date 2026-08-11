@@ -1,6 +1,9 @@
 import { render } from "@testing-library/react-native";
-import { buildGaugeTicks, needleFor } from "../gauge";
+import { buildGaugeTicks, needleFor, GAUGE_VIEW_H, GAUGE_CENTER_Y } from "../gauge";
 import { GaugeDial } from "../GaugeDial";
+
+const flattenStyle = (style: unknown): Record<string, unknown> =>
+  Array.isArray(style) ? Object.assign({}, ...style.flat().filter(Boolean)) : (style as Record<string, unknown>);
 
 test("builds 41 ticks with the redline in the last tenth", () => {
   const ticks = buildGaugeTicks(0.65);
@@ -39,8 +42,19 @@ test("rounds raw API floats in the footer instead of showing decimals", async ()
 
 test("the center reserve numeral carries an explicit lineHeight so it can't clip", async () => {
   const { getByText } = await render(<GaugeDial value={1430} target={2200} burned={304} />);
-  const node = getByText("770");
-  const style = node.props.style;
-  const flat = Array.isArray(style) ? Object.assign({}, ...style.flat().filter(Boolean)) : style;
-  expect(flat.lineHeight).toBeGreaterThanOrEqual(flat.fontSize * 1.1);
+  const flat = flattenStyle(getByText("770").props.style);
+  expect(flat.fontSize).toBe(44);
+  expect(flat.lineHeight).toBe(50);
+  expect(flat.lineHeight as number).toBeGreaterThanOrEqual((flat.fontSize as number) * 1.1);
+});
+
+test("the center overlay is bounded above the hub dot, derived from the gauge geometry", async () => {
+  const { getByTestId } = await render(<GaugeDial value={1430} target={2200} burned={304} />);
+  const flat = flattenStyle(getByTestId("gauge-center-overlay").props.style);
+  // The overlay's content area must end (bottom inset from the SVG's bottom
+  // edge) above the hub dot's top edge, not just above its center — leaves
+  // room for the "kcal in reserve" label and the needle tail that pivots there.
+  const hubTopEdge = GAUGE_CENTER_Y - 4.5; // hub circle radius, GaugeDial.tsx
+  const overlayContentBottomY = GAUGE_VIEW_H - (flat.bottom as number);
+  expect(overlayContentBottomY).toBeLessThan(hubTopEdge);
 });

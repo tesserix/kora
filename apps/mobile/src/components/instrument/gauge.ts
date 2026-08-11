@@ -2,8 +2,12 @@
 // spec: docs/superpowers/specs/2026-08-11-kora-instrument-glass-design.md
 export const GAUGE_VIEW_W = 264;
 export const GAUGE_VIEW_H = 178;
-const CX = 132;
-const CY = 146;
+// Hub/needle-pivot coordinates, exported so consumers (e.g. GaugeDial's center
+// overlay) can derive layout from the same geometry instead of hardcoding it.
+export const GAUGE_CENTER_X = 132;
+export const GAUGE_CENTER_Y = 146;
+const CX = GAUGE_CENTER_X;
+const CY = GAUGE_CENTER_Y;
 const R = 114;
 const START = -205;
 const END = 25;
