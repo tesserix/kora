@@ -394,7 +394,7 @@ func (r Resolver) resolveGuesses(ctx context.Context, userID uuid.UUID, guesses 
 		}
 
 		top := cands[0]
-		grams := parsePortionGrams(guess.PortionEstimate)
+		grams := portionGramsFor(guess.PortionEstimate, top.Item)
 		// Kcal comes ONLY from the nutrition-index row's per-100g value —
 		// never from the guess, which structurally cannot carry one.
 		kcal := top.Item.KcalPer100g * grams / 100
@@ -484,7 +484,7 @@ func (r Resolver) decomposeAndEstimate(ctx context.Context, userID uuid.UUID, su
 		}
 
 		top := cands[0]
-		grams := parsePortionGrams(ing.PortionEstimate)
+		grams := portionGramsFor(ing.PortionEstimate, top.Item)
 		// Kcal comes ONLY from the row — same invariant as resolveGuesses.
 		kcal := top.Item.KcalPer100g * grams / 100
 		totalKcal += kcal

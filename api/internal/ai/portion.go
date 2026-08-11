@@ -4,6 +4,9 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/tesserix/kora/api/internal/nutrition"
+	"github.com/tesserix/kora/api/internal/units"
 )
 
 // defaultPortionGrams is used when a portion phrase is empty or doesn't
@@ -51,4 +54,106 @@ func parsePortionGrams(s string) float64 {
 	}
 
 	return defaultPortionGrams
+}
+
+// wordCounts covers the small counts a model actually writes out. Anything
+// larger arrives as a numeral.
+var wordCounts = map[string]float64{
+	"one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+	"six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+}
+
+// singular trims one trailing plural "s" so "portions" and "portion" name the
+// same serving. Deliberately naive, matching units.singular: the vocabulary is
+// small and closed, and "ss" endings ("glass") are left alone.
+func singular(name string) string {
+	if strings.HasSuffix(name, "s") && !strings.HasSuffix(name, "ss") && len(name) > 2 {
+		return strings.TrimSuffix(name, "s")
+	}
+	return name
+}
+
+// splitCountAndUnit reads "2 portions", "one sachet" or a bare "sachet" into a
+// count and a unit name. A phrase with no leading count means one of the thing.
+func splitCountAndUnit(norm string) (float64, string) {
+	fields := strings.Fields(norm)
+	if len(fields) == 0 {
+		return 0, ""
+	}
+	if len(fields) == 1 {
+		return 1, fields[0]
+	}
+	if n, err := strconv.ParseFloat(fields[0], 64); err == nil && n > 0 {
+		return n, strings.Join(fields[1:], " ")
+	}
+	if n, ok := wordCounts[fields[0]]; ok {
+		return n, strings.Join(fields[1:], " ")
+	}
+	return 1, norm
+}
+
+// servingGramsFromPhrase resolves a phrase against the food's OWN named
+// servings. A row's own serving is better evidence than the generic table:
+// a "cup" of one product is not a cup of another.
+func servingGramsFromPhrase(norm string, item nutrition.FoodItem) (float64, bool) {
+	servings := units.DecodeServingUnits(item.ServingUnits)
+	if len(servings) == 0 {
+		return 0, false
+	}
+	count, name := splitCountAndUnit(norm)
+	if count <= 0 || name == "" {
+		return 0, false
+	}
+	for _, serving := range servings {
+		if serving.Amount > 0 && singular(serving.Name) == singular(name) {
+			return (serving.BaseAmount / serving.Amount) * count, true
+		}
+	}
+	return 0, false
+}
+
+// portionGramsFor is parsePortionGrams with the resolved food in hand.
+//
+// The AI path previously multiplied every unrecognised phrase by a flat 100 g,
+// which is the same defect afe2db0 fixed for barcode scans: one 16.5 g NESCAFÉ
+// sachet was filed as 545 kcal instead of ~90. That fix never reached the
+// text, photo and voice paths, because the portion was computed from the
+// model's phrase alone while the food it had resolved to sat unused beside it.
+//
+// Precedence, most specific first:
+//
+//  1. An explicit mass ("45 g"). Nothing is more specific than a stated figure.
+//  2. One of the FOOD'S OWN named servings ("2 portions"), resolved against
+//     that row's mass rather than a generic one.
+//  3. The curated phrase table ("1 cup" → 240 g), for foods that name no such
+//     serving of their own.
+//  4. A branded food's own serving mass. OpenFoodFacts' serving_quantity is a
+//     real package serving — what a person actually consumes — so it is a far
+//     better default than 100 g when nothing else matched.
+//  5. The flat default.
+//
+// Step 4 is restricted to OFF provenance ON PURPOSE. A USDA reference serving
+// is not a portion anyone eats: "Turkey, whole, meat and skin, raw" carries
+// 5717 g. Falling back to that would turn an unrecognised phrase into a whole
+// bird, which is far worse than the 100 g it replaces.
+func portionGramsFor(phrase string, item nutrition.FoodItem) float64 {
+	norm := strings.ToLower(strings.TrimSpace(phrase))
+
+	if m := gramsPattern.FindStringSubmatch(norm); m != nil {
+		if grams, err := strconv.ParseFloat(m[1], 64); err == nil {
+			return grams
+		}
+	}
+	if grams, ok := servingGramsFromPhrase(norm, item); ok {
+		return grams
+	}
+	if grams, ok := namedPortionGrams[norm]; ok {
+		return grams
+	}
+	if item.Provenance == nutrition.ProvenanceOFF && item.ServingGrams > 0 {
+		return item.ServingGrams
+	}
+	// Nothing food-specific applied; fall through to the phrase-only mapping so
+	// the flat default lives in exactly one place.
+	return parsePortionGrams(norm)
 }
