@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, TextInput, View } from "react-native";
 import { AppText } from "@/components/Text";
 import { Icon } from "@/components/Icon";
 import { useTheme } from "@/theme";
-import type { ServingUnit } from "@/units/portion";
+import { pluralizeUnit, type ServingUnit } from "@/units/portion";
 
 interface PortionFieldProps {
   baseUnit: "g" | "ml";
@@ -177,7 +177,7 @@ export function PortionField({ baseUnit, servingUnits, amount, unit, onChange, v
 
   const baseTotal = matchingServing ? formatDisplay(matchingServing.base_amount * amount) : null;
   const stepperLabel = matchingServing
-    ? `${amount} ${unit}${amount === 1 ? "" : "s"} (${baseTotal} ${baseUnit})`
+    ? `${amount} ${pluralizeUnit(unit, amount)} (${baseTotal} ${baseUnit})`
     : "";
 
   if (mode === "stepper") {

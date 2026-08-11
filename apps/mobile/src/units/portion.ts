@@ -151,7 +151,7 @@ export function formatPortion(entry: PortionEntry): string {
 // Size descriptors read as adjectives, not nouns — "2 large", never "2 larges".
 const UNPLURALIZABLE_UNITS = new Set(["large", "medium", "small", "extra large", "extra-large", "jumbo", "mini", "regular"]);
 
-function pluralizeUnit(unit: string, amount: number): string {
+export function pluralizeUnit(unit: string, amount: number): string {
   if (amount <= 1 || unit.endsWith("s")) return unit;
   if (UNPLURALIZABLE_UNITS.has(unit.toLowerCase())) return unit;
   // bunch → bunches, dish → dishes, box → boxes
