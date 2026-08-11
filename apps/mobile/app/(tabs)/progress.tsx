@@ -9,6 +9,7 @@ import { Icon } from "@/components/Icon";
 import { GlassPanel } from "@/components/instrument/GlassPanel";
 import { EnergyBars, type EnergyBarsDay } from "@/components/instrument/EnergyBars";
 import { StreakCells } from "@/components/instrument/StreakCells";
+import { monoStyle } from "@/components/instrument/typography";
 import { WeightChart } from "@/components/progress/WeightChart";
 import { WeightLogSheet } from "@/components/progress/WeightLogSheet";
 import { EmptyState } from "@/components/common/EmptyState";
@@ -159,7 +160,7 @@ export default function Progress() {
   }, []);
   const enter = (i: number) => (firstMount.current ? FadeInDown.duration(300).delay(i * 30) : undefined);
 
-  const mono = { fontFamily: fonts.mono, fontVariant: ["tabular-nums" as const] };
+  const mono = monoStyle(fonts);
   // Sentence case, not engraved — same convention as Diary's "Day total"/"Water"
   // captions and Home's MacroWide caption (engraving is reserved for inside the
   // gauge instruments themselves).

@@ -21,6 +21,7 @@ import { useQueuedCaptures } from "@/offline/useQueuedCaptures";
 import { PressableScale, haptics } from "@/motion";
 import { useTheme } from "@/theme";
 import { hslToHex } from "@/lib/color";
+import { monoStyle } from "@/components/instrument/typography";
 import { useUnits, mlToFlOz, flOzToMl, type UnitSystem } from "@/units";
 import { formatPortion } from "@/units/portion";
 import { foodVisual } from "@/lib/foodVisual";
@@ -58,7 +59,7 @@ type WeekDayCellProps = {
 // affordance distinguishes it, so this is load-bearing, not decorative.
 function WeekDayCell({ date, dow, selected, today, hitGoal, onSelect }: WeekDayCellProps) {
   const { instrument, fonts } = useTheme();
-  const mono = { fontFamily: fonts.mono, fontVariant: ["tabular-nums" as const] };
+  const mono = monoStyle(fonts);
   const dISO = iso(date);
 
   return (
@@ -330,7 +331,7 @@ export default function Diary() {
   // reserve figure before the dashboard has resolved.
   const missingSlot = !pending && !isEmptyDay ? SLOT_ORDER.find((slot) => !slots.some((g) => g.slot === slot)) : undefined;
 
-  const mono = { fontFamily: fonts.mono, fontVariant: ["tabular-nums" as const] };
+  const mono = monoStyle(fonts);
   // The four slot headers below (Breakfast/Lunch/Dinner/Snack, at most) ARE
   // this screen's engraved zone (spec's ~4-visible-label budget) — every other
   // caption on this screen is sentence-case muted text, not engraved.

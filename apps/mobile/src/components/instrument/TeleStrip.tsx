@@ -3,6 +3,7 @@ import { View } from "react-native";
 import { AppText } from "@/components/Text";
 import { useTheme } from "@/theme";
 import { GlassPanel } from "./GlassPanel";
+import { monoStyle } from "./typography";
 
 export interface TeleStripCell {
   icon: ReactNode;
@@ -16,7 +17,7 @@ export interface TeleStripProps {
 
 export function TeleStrip({ cells }: TeleStripProps) {
   const { instrument, fonts } = useTheme();
-  const mono = { fontFamily: fonts.mono, fontVariant: ["tabular-nums" as const] };
+  const mono = monoStyle(fonts);
   // Sentence case, not engraved: engraving is reserved for inside the gauge
   // instruments themselves (GaugeDial caption/footer, SubDial context) — a
   // metric caption like "Steps"/"Sleep" is not an engraving.

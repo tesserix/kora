@@ -18,6 +18,7 @@ import { MacroWide } from "@/components/instrument/MacroWide";
 import { SubDial } from "@/components/instrument/SubDial";
 import { TeleStrip, type TeleStripCell } from "@/components/instrument/TeleStrip";
 import { GlassPanel } from "@/components/instrument/GlassPanel";
+import { monoStyle } from "@/components/instrument/typography";
 import { useProfile, useDashboard, useDayLogs, useUnreadCount } from "@/api/hooks";
 import { useHealth } from "@/health";
 import { useTheme } from "@/theme";
@@ -67,7 +68,7 @@ export default function Home() {
   }, []);
   const enter = (i: number) => (firstMount.current ? FadeInDown.duration(300).delay(i * 30) : undefined);
 
-  const mono = { fontFamily: fonts.mono, fontVariant: ["tabular-nums" as const] };
+  const mono = monoStyle(fonts);
   const engraved = {
     fontSize: 9,
     letterSpacing: 1.4,

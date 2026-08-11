@@ -12,6 +12,7 @@ import { AppText } from "@/components/Text";
 import { useMotionPrefs } from "@/motion";
 import { useTheme } from "@/theme";
 import type { InstrumentTokens } from "@/theme";
+import { monoStyle } from "./typography";
 import {
   buildGaugeTicks,
   needleFor,
@@ -113,7 +114,7 @@ export function GaugeDial({
   const { instrument, fonts } = useTheme();
   const fraction = target > 0 ? Math.min(value / target, 1) : 0;
   const remaining = Math.max(0, Math.round(target - value));
-  const mono = { fontFamily: fonts.mono, fontVariant: ["tabular-nums" as const] };
+  const mono = monoStyle(fonts);
   const { reduceMotion } = useMotionPrefs();
 
   // Static geometry (position/width/major/red never depend on fraction — see
@@ -204,6 +205,10 @@ export function GaugeDial({
           >
             {remaining.toLocaleString()}
           </AppText>
+          {/* Bespoke engraved caption (T6 exception): the dial's center label
+              is literally part of the instrument face and keeps its own
+              wider tracking (3 vs the shared recipe's 1.5) rather than
+              routing through engravedStyle() — see typography.ts. */}
           <AppText
             variant="body"
             style={{
@@ -233,6 +238,10 @@ export function GaugeDial({
             <AppText variant="body" style={[{ fontSize: 15, fontWeight: "600", color: instrument.ink }, mono]}>
               {Math.round(Number(v)).toLocaleString()}
             </AppText>
+            {/* Bespoke engraved caption (T6 exception): the footer row's
+                Eaten/Burned/Budget labels keep their own size/tracking
+                (9px/2 vs the shared recipe's 10px/1.5) as part of the dial
+                face — see typography.ts. */}
             <AppText
               variant="body"
               style={{ fontSize: 9, letterSpacing: 2, textTransform: "uppercase", color: instrument.mut, marginTop: 3 }}

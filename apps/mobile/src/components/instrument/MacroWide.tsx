@@ -3,6 +3,7 @@ import { AppText } from "@/components/Text";
 import { useTheme } from "@/theme";
 import { GlassPanel } from "./GlassPanel";
 import { SubDial } from "./SubDial";
+import { monoStyle } from "./typography";
 
 export interface MacroWideProps {
   label: string;
@@ -13,7 +14,7 @@ export interface MacroWideProps {
 
 export function MacroWide({ label, value, goal, unit = "g" }: MacroWideProps) {
   const { instrument, fonts } = useTheme();
-  const mono = { fontFamily: fonts.mono, fontVariant: ["tabular-nums" as const] };
+  const mono = monoStyle(fonts);
   // Sentence case, not engraved: engraving is reserved for inside the gauge
   // instruments themselves (GaugeDial caption/footer, SubDial context) — a
   // macro caption like "Protein" is not an engraving.

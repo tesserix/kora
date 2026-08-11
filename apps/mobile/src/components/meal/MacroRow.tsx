@@ -2,6 +2,7 @@ import { View } from "react-native";
 import { AppText } from "@/components/Text";
 import { useTheme } from "@/theme";
 import { engravedStyle } from "./mealStyles";
+import { monoStyle } from "@/components/instrument/typography";
 
 export interface MacroRowProps {
   label: string;
@@ -16,7 +17,7 @@ export interface MacroRowProps {
 // already has, no extra fetch required).
 export function MacroRow({ label, grams, pct }: MacroRowProps) {
   const { instrument, fonts } = useTheme();
-  const mono = { fontFamily: fonts.mono, fontVariant: ["tabular-nums" as const] };
+  const mono = monoStyle(fonts);
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
       <View style={{ width: 70 }}>

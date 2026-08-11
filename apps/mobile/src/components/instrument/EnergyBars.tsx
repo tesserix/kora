@@ -14,12 +14,11 @@ export interface EnergyBarsProps {
 }
 
 export function EnergyBars({ days, targetFraction = 0.74 }: EnergyBarsProps) {
-  const { instrument, fonts } = useTheme();
-  const mono = { fontFamily: fonts.mono, fontVariant: ["tabular-nums" as const] };
-  const engraved = {
-    fontSize: 9,
-    letterSpacing: 1.4,
-    textTransform: "uppercase" as const,
+  const { instrument } = useTheme();
+  // Plain, sentence-case day labels ("today"/"—") — not mono, not engraved.
+  // These are calendar labels, not instrument numerals or engravings (M4).
+  const dayLabel = {
+    fontSize: 10,
     color: instrument.mut,
   };
 
@@ -54,7 +53,7 @@ export function EnergyBars({ days, targetFraction = 0.74 }: EnergyBarsProps) {
       </View>
       <View style={{ flexDirection: "row", gap: 6, marginTop: 6 }}>
         {days.map((d, i) => (
-          <AppText key={i} style={[engraved, { flex: 1, textAlign: "center" }, mono]}>
+          <AppText key={i} style={[dayLabel, { flex: 1, textAlign: "center" }]}>
             {d.label}
           </AppText>
         ))}

@@ -10,6 +10,7 @@ import { contributesKcal, isUncertain, loggableCandidates } from "@/lib/candidat
 import type { Resolution, ResolvedCandidate } from "@/api/types";
 import { useTheme, INSTRUMENT_DARK_FIXED } from "@/theme";
 import { ModePill } from "./ModePill";
+import { monoStyle } from "@/components/instrument/typography";
 
 // Instrument Glass, dark-fixed. Capture is exempt from theming (spec: "Dark
 // capture screen is exempt from theming: camera surfaces are always dark"),
@@ -94,7 +95,7 @@ function CandidateRow({
 }) {
   const { icon } = foodVisual(candidate.item.name);
   const { fonts } = useTheme();
-  const mono = { fontFamily: fonts.mono, fontVariant: ["tabular-nums" as const] };
+  const mono = monoStyle(fonts);
   // Uncertainty is a presentation concern here and nothing else — an uncertain
   // row is preselected and logged like any other, it just has to keep reading
   // as a guess.
@@ -200,7 +201,7 @@ export function DetectedCard({
   onResolveUncertain,
 }: Props) {
   const { fonts } = useTheme();
-  const mono = { fontFamily: fonts.mono, fontVariant: ["tabular-nums" as const] };
+  const mono = monoStyle(fonts);
   // The CTA states what will actually be written to the diary. Every detected
   // row is written — the uncertain ones as the server's preselected top match
   // — so this now agrees with the header count; the guard below only survives

@@ -11,6 +11,7 @@ import { MacroRow } from "@/components/meal/MacroRow";
 import { SlotSegmented } from "@/components/meal/SlotSegmented";
 import { ActionButton } from "@/components/meal/ActionButton";
 import { engravedStyle } from "@/components/meal/mealStyles";
+import { monoStyle } from "@/components/instrument/typography";
 import { provenanceDescriptor, sourceLabel } from "@/components/meal/mealProvenance";
 import { PortionField } from "@/components/units/PortionField";
 import { haptics, PressableScale } from "@/motion";
@@ -89,7 +90,7 @@ type PendingFoodUndo = {
 
 export default function MealDetail() {
   const { instrument, fonts } = useTheme();
-  const mono = { fontFamily: fonts.mono, fontVariant: ["tabular-nums" as const] };
+  const mono = monoStyle(fonts);
   const p = useLocalSearchParams<{
     id: string; name: string; mealSlot: string; time: string;
     kcal: string; protein: string; carbs: string; fat: string; grams: string;
@@ -542,7 +543,12 @@ export default function MealDetail() {
             <AppText style={[{ fontSize: 64, lineHeight: 72, letterSpacing: -2, color: instrument.ink }, mono]}>
               {kcal.toLocaleString()}
             </AppText>
-            <AppText style={[engravedStyle(instrument, instrument.accent), { fontSize: 11, letterSpacing: 2, marginTop: 4 }]}>
+            <AppText
+              style={[
+                engravedStyle(instrument),
+                { color: instrument.accent, fontSize: 11, letterSpacing: 2, marginTop: 4 },
+              ]}
+            >
               kcal · this meal
             </AppText>
           </View>
