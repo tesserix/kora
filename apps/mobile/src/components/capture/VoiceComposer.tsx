@@ -3,7 +3,7 @@ import { Pressable, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { Icon } from "@/components/Icon";
 import { AppText } from "@/components/Text";
-import { captureColors } from "@/components/capture/captureTheme";
+import { INSTRUMENT_DARK_FIXED } from "@/theme";
 import {
   PRESS_ARM_MS,
   initialVoiceState,
@@ -11,6 +11,8 @@ import {
   shouldUpload,
   type VoiceState,
 } from "@/capture/voiceRecording";
+
+const T = INSTRUMENT_DARK_FIXED;
 
 interface VoiceComposerProps {
   isRecording: boolean;
@@ -95,12 +97,14 @@ export function VoiceComposer({ isRecording, onStart, onFinish, onCancel }: Voic
             width: 38,
             height: 38,
             borderRadius: 9999,
-            backgroundColor: captureColors.primary,
+            // The mic button is this surface's single primary action — the
+            // one place accent orange is allowed here.
+            backgroundColor: T.accent,
             alignItems: "center",
             justifyContent: "center",
           }}
         >
-          <Icon name="mic" size={19} color={captureColors.primaryForeground} />
+          <Icon name="mic" size={19} color={T.accentOn} />
         </Pressable>
       </GestureDetector>
 
@@ -113,7 +117,7 @@ export function VoiceComposer({ isRecording, onStart, onFinish, onCancel }: Voic
             onCancel();
           }}
         >
-          <AppText style={{ color: captureColors.onSurfaceMuted, fontSize: 13, fontWeight: "600" }}>Cancel</AppText>
+          <AppText style={{ color: T.mut, fontSize: 13, fontWeight: "600" }}>Cancel</AppText>
         </Pressable>
       ) : null}
     </View>

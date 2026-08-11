@@ -67,9 +67,10 @@ export type { ResolutionSource };
 // capture screen is exempt from theming: camera surfaces are always dark"),
 // so every chrome color below comes from the INSTRUMENT_DARK_FIXED constant
 // — never from useTheme().instrument, which would follow the device's
-// light/dark scheme and go light. `captureColors` (a separate, older fixed
-// palette) still styles the chat bubbles/waveform/voice composer, which are
-// out of scope for this restyle and already dark on their own terms.
+// light/dark scheme and go light. The chat bubbles/waveform/voice composer
+// are now also migrated to INSTRUMENT_DARK_FIXED (see OttoBubble, UserBubble,
+// Waveform, VoiceComposer) rather than the older fixed capture palette,
+// which has been deleted now that nothing references it.
 const T = INSTRUMENT_DARK_FIXED;
 
 const MODE_PILLS: ReadonlyArray<{ mode: CaptureMode; icon: string; label: string }> = [
@@ -1154,6 +1155,7 @@ export default function CaptureScreen() {
           setPickerIndex(null);
         }}
         onClose={() => setPickerIndex(null)}
+        forceDark
       />
     </View>
   );

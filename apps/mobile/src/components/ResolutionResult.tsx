@@ -2,11 +2,13 @@ import { Pressable } from "react-native";
 import { AppText } from "@/components/Text";
 import { OttoBubble } from "@/components/capture/OttoBubble";
 import { DetectedCard } from "@/components/capture/DetectedCard";
-import { captureColors } from "@/components/capture/captureTheme";
+import { INSTRUMENT_DARK_FIXED } from "@/theme";
 import { kcalTotalLabel } from "@/lib/resolutionKcal";
 import { isCachedResult } from "@/api/types";
 import type { Resolution, ResolvedCandidate } from "@/api/types";
 import type { MealSlot } from "@/lib/mealSlot";
+
+const T = INSTRUMENT_DARK_FIXED;
 
 export type ResultView = "card" | "followUp" | "empty";
 
@@ -72,11 +74,11 @@ function SearchManuallyLink({ onPress }: { onPress: () => void }) {
         paddingHorizontal: 16,
         borderRadius: 9999,
         borderWidth: 1,
-        borderColor: captureColors.outlineBorder,
+        borderColor: T.glassBorder,
         opacity: state.pressed ? 0.7 : 1,
       })}
     >
-      <AppText style={{ color: captureColors.onSurface, fontSize: 14, fontWeight: "600" }}>Search manually</AppText>
+      <AppText style={{ color: T.ink, fontSize: 14, fontWeight: "600" }}>Search manually</AppText>
     </Pressable>
   );
 }

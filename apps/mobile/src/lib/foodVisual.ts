@@ -1,4 +1,5 @@
-const HUES = [30, 70, 150, 200, 285, 340];
+// Warm food-centric oranges/ambers/greens/teals — no purple/magenta (Instrument Glass spec).
+const HUES = [20, 35, 45, 90, 160, 200];
 
 const KEYWORDS: ReadonlyArray<readonly [RegExp, string]> = [
   [/chicken|beef|steak|pork|drumstick|meat|lamb|turkey/i, "drumstick"],

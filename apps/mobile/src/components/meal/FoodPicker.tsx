@@ -10,6 +10,7 @@ import type { FoodItem } from "@/api/types";
 import { foodVisual } from "@/lib/foodVisual";
 import { PressableScale } from "@/motion";
 import { useTheme } from "@/theme";
+import { darkColors } from "@/theme/palette";
 
 export interface FoodPickerProps {
   visible: boolean;
@@ -23,6 +24,15 @@ export interface FoodPickerProps {
    * plain lie there.
    */
   title?: string;
+  /**
+   * Forces the picker to render with the fixed dark palette regardless of the
+   * device's light/dark setting. The always-dark capture flow (`app/capture.tsx`)
+   * is exempt from light/dark theming — mounting FoodPicker there with
+   * `useTheme().colors` would otherwise flip it light when the device is in
+   * light mode. Other callers (meal detail, saved meals) omit this and keep
+   * following the system theme as before.
+   */
+  forceDark?: boolean;
 }
 
 // Lets the user replace a logged food with a different one. Search is the
@@ -30,8 +40,17 @@ export interface FoodPickerProps {
 // safe to query on every keystroke once 2+ characters are typed. Results show
 // each candidate's kcal_per_100g verbatim — never a portion-scaled number,
 // which would be a client-computed nutrition value.
-export function FoodPicker({ visible, initialQuery, onSelect, onClose, title = "Change food" }: FoodPickerProps): ReactElement {
-  const { colors, spacing, fontSize } = useTheme();
+export function FoodPicker({
+  visible,
+  initialQuery,
+  onSelect,
+  onClose,
+  title = "Change food",
+  forceDark = false,
+}: FoodPickerProps): ReactElement {
+  const theme = useTheme();
+  const { spacing, fontSize } = theme;
+  const colors = forceDark ? darkColors : theme.colors;
   const [query, setQuery] = useState(initialQuery);
 
   // Reset the field to the log's phrase (or current name) every time the

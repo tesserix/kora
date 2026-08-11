@@ -4,23 +4,19 @@ import { AppText } from "@/components/Text";
 import { SubDial } from "@/components/instrument/SubDial";
 import { formatPortion, portionEntryFor } from "@/units/portion";
 import { foodVisual } from "@/lib/foodVisual";
-import { withAlpha } from "@/lib/color";
 import type { MealSlot } from "@/lib/mealSlot";
 import { kcalTotalLabel } from "@/lib/resolutionKcal";
 import { contributesKcal, isUncertain, loggableCandidates } from "@/lib/candidateTier";
 import type { Resolution, ResolvedCandidate } from "@/api/types";
 import { useTheme, INSTRUMENT_DARK_FIXED } from "@/theme";
-import { gradientStops } from "@/theme/palette";
 import { ModePill } from "./ModePill";
 
 // Instrument Glass, dark-fixed. Capture is exempt from theming (spec: "Dark
 // capture screen is exempt from theming: camera surfaces are always dark"),
 // so every color here comes from the INSTRUMENT_DARK_FIXED constant — never
 // from useTheme().instrument, which would follow the device's light/dark
-// scheme and go light. `gradientStops.dark` (not useTheme().gradients) is
-// used for the same reason for the macro-chip tints below.
+// scheme and go light.
 const T = INSTRUMENT_DARK_FIXED;
-const macroTints = gradientStops.dark;
 
 // A UI-only reference scale for the header SubDial's fill proportion — not
 // a nutrition claim or a goal, just a sensible upper bound so a single-item
@@ -67,17 +63,20 @@ const MEAL_SLOTS: ReadonlyArray<{ slot: MealSlot; label: string; icon: string }>
 // treatment already applied to kcal/portion/match above) straight from the
 // FoodItem the server resolved. Never scaled by portion — that would be a
 // derived nutrition number this card doesn't sanction.
-function MacroChip({ label, per100g, tint }: { label: string; per100g: number; tint: string }) {
+// Neutral instrument styling — P/C/F are distinguished by their label, not by
+// decorative per-macro hues (the accent rule reserves orange for the CTA and
+// header flame, and the spec bans new green/purple as data-series color).
+function MacroChip({ label, per100g }: { label: string; per100g: number }) {
   return (
     <View
       style={{
         paddingHorizontal: 7,
         paddingVertical: 3,
         borderRadius: 9999,
-        backgroundColor: withAlpha(tint, 0.18),
+        backgroundColor: T.inset,
       }}
     >
-      <AppText style={{ fontSize: 10, fontWeight: "700", color: tint }}>
+      <AppText style={{ fontSize: 10, fontWeight: "700", color: T.mut }}>
         {`${label} ${Math.round(per100g)}g/100g`}
       </AppText>
     </View>
@@ -146,9 +145,9 @@ function CandidateRow({
         </AppText>
         {uncertain ? null : (
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 5 }}>
-            <MacroChip label="P" per100g={candidate.item.protein_per_100g} tint={macroTints.green[0]} />
-            <MacroChip label="C" per100g={candidate.item.carbs_per_100g} tint={macroTints.amber[0]} />
-            <MacroChip label="F" per100g={candidate.item.fat_per_100g} tint={macroTints.blue[0]} />
+            <MacroChip label="P" per100g={candidate.item.protein_per_100g} />
+            <MacroChip label="C" per100g={candidate.item.carbs_per_100g} />
+            <MacroChip label="F" per100g={candidate.item.fat_per_100g} />
           </View>
         )}
       </View>

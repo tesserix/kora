@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { AccessibilityInfo, Animated, View } from "react-native";
-import { captureColors } from "./captureTheme";
+import { INSTRUMENT_DARK_FIXED } from "@/theme";
+
+const T = INSTRUMENT_DARK_FIXED;
 
 type Props = { active: boolean };
 
@@ -76,7 +78,7 @@ export function Waveform({ active }: Props) {
             width: BAR_WIDTH,
             height,
             borderRadius: BAR_WIDTH,
-            backgroundColor: captureColors.primary,
+            backgroundColor: T.ink,
             transform: [{ scaleY: scales[i] }],
           }}
         />
