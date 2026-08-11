@@ -380,6 +380,14 @@ func (f *fakeEmbedder) Embed(_ context.Context, text string) ([]float32, error) 
 	return f.vec, f.err
 }
 
+// callCount reads the number of recorded calls under the same mutex Embed
+// writes with, since a goroutine could in principle still be calling in.
+func (f *fakeEmbedder) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.calls)
+}
+
 func TestResolveBarcodeEmbedsNewlyInsertedFood(t *testing.T) {
 	db := testDB(t)
 	emb := &fakeEmbedder{vec: make([]float32, 768), called: make(chan struct{})}
@@ -437,11 +445,18 @@ func TestResolveBarcodeLeavesEmbeddingNullWhenEmbedFails(t *testing.T) {
 		t.Fatal("embedder was never called")
 	}
 
-	// Give the goroutine room to (incorrectly) write, then assert it did not.
-	time.Sleep(100 * time.Millisecond)
-	var embedded bool
-	require.NoError(t, db.Raw("SELECT embedding IS NOT NULL FROM food_items WHERE id = ?", item.ID).Scan(&embedded).Error)
-	assert.False(t, embedded, "embedding column must stay NULL when the embed call failed")
+	// Deterministically prove the column stays NULL for a bounded window, rather
+	// than a bare sleep-then-check that only ever samples once (and could get
+	// unlucky on a slow runner). require.Never polls repeatedly and fails the
+	// instant the condition ever goes true, so it is racing against the
+	// (incorrect) write rather than hoping it lands before a single check.
+	require.Never(t, func() bool {
+		var embedded bool
+		if err := db.Raw("SELECT embedding IS NOT NULL FROM food_items WHERE id = ?", item.ID).Scan(&embedded).Error; err != nil {
+			return false
+		}
+		return embedded
+	}, 200*time.Millisecond, 20*time.Millisecond, "embedding column must stay NULL when the embed call failed")
 }
 
 func TestResolveBarcodeWithoutEmbedderInsertsNormally(t *testing.T) {
@@ -457,4 +472,63 @@ func TestResolveBarcodeWithoutEmbedderInsertsNormally(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, found)
 	require.NotNil(t, item)
+}
+
+// TestResolveBarcodeLocalHitDoesNotEmbed guards against a regression that
+// would silently burn Gemini quota on every repeat scan: today embedAsync is
+// only reachable from the genuine-new-row path, verified by review, but that
+// property was previously unguarded by any test. If a future edit ever moved
+// the embedAsync call above (or removed) the local-hit early return in
+// ResolveBarcode, this is the test that would catch it — a known barcode must
+// resolve entirely from the local index and never touch the embedder.
+func TestResolveBarcodeLocalHitDoesNotEmbed(t *testing.T) {
+	db := testDB(t)
+	emb := &fakeEmbedder{vec: make([]float32, 768), called: make(chan struct{})}
+	repo := NewRepository(db).WithEmbedder(emb)
+	code := "0000000002a06"
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE barcode = ?", code) })
+	seedFor(t, repo, []FoodItem{{Name: "Repeat scan bar", Brand: "test2a", Provenance: ProvenanceOFF, Barcode: &code, KcalPer100g: 400}})
+
+	// stubOFF{err: assertNoCall(t)} proves the local-hit path was taken at
+	// all: the OFF client must never even be reached for a known barcode.
+	item, found, err := repo.ResolveBarcode(context.Background(), stubOFF{err: assertNoCall(t)}, code)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.NotNil(t, item)
+
+	// Give a wrongly-placed embedAsync call room to fire, then assert it
+	// never did. callCount reads under fakeEmbedder's own mutex since a
+	// goroutine could in principle still be writing.
+	require.Never(t, func() bool {
+		return emb.callCount() > 0
+	}, 200*time.Millisecond, 20*time.Millisecond, "a repeat scan of a known barcode must never call the embedder")
+}
+
+// TestResolveBarcodeDedupeBranchDoesNotEmbed covers the other non-insert
+// path: Insert dedupes the OFF item against an existing row by name+brand, so
+// ResolveBarcode's reload-by-barcode misses and it returns the freshly
+// fetched OFF item directly without ever persisting a new row under this
+// barcode (see the "Insert deduped ... return the freshly fetched OFF item
+// directly" comment in ResolveBarcode). That returned item's ID was never
+// stored under this barcode, so embedding it would be pointless at best and
+// wrong at worst — this pins that the embedder is never called on this path.
+func TestResolveBarcodeDedupeBranchDoesNotEmbed(t *testing.T) {
+	db := testDB(t)
+	emb := &fakeEmbedder{vec: make([]float32, 768), called: make(chan struct{})}
+	repo := NewRepository(db).WithEmbedder(emb)
+	code := "0000000002a07"
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE brand = 'test2a' AND name = 'Dedupe Bar'") })
+
+	seedFor(t, repo, []FoodItem{{Name: "Dedupe Bar", Brand: "test2a", Provenance: ProvenanceAFCD, KcalPer100g: 100}})
+
+	off := stubOFF{item: &FoodItem{Name: "Dedupe Bar", Brand: "test2a", Provenance: ProvenanceOFF, Barcode: &code, KcalPer100g: 100}}
+	item, found, err := repo.ResolveBarcode(context.Background(), off, code)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.NotNil(t, item)
+	require.Equal(t, "Dedupe Bar", item.Name)
+
+	require.Never(t, func() bool {
+		return emb.callCount() > 0
+	}, 200*time.Millisecond, 20*time.Millisecond, "the dedupe branch's returned item was never persisted under this barcode and must never be embedded")
 }
