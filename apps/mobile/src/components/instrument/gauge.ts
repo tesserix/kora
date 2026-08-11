@@ -25,7 +25,14 @@ export interface GaugeTick {
   red: boolean;
 }
 
+// "worklet" directive required: needleFor (below) runs on the UI thread inside
+// GaugeDial's useAnimatedProps, and reanimated's babel plugin only
+// auto-workletizes helpers declared in the SAME file as the worklet call site —
+// gauge.ts is a different file from GaugeDial.tsx, so toXY needs its own
+// directive too (same crash class as e557c50 / AnimatedNumber's remote-call
+// crash: a plain JS function invoked from UI-thread code). Do not remove.
 const toXY = (deg: number, rad: number): [number, number] => {
+  "worklet";
   const a = (deg * Math.PI) / 180;
   return [CX + rad * Math.cos(a), CY + rad * Math.sin(a)];
 };
@@ -43,7 +50,13 @@ export function buildGaugeTicks(fraction: number): GaugeTick[] {
   return out;
 }
 
+// "worklet" directive required: called from GaugeDial's useAnimatedProps on the
+// UI thread. reanimated only auto-workletizes same-file helpers — this is a
+// cross-file call (GaugeDial.tsx -> gauge.ts) — so without this directive the
+// worklet would crash on-device the same way AnimatedNumber's did (e557c50)
+// even though it passes fine under the jest reanimated mock. Do not remove.
 export function needleFor(fraction: number) {
+  "worklet";
   const deg = START + Math.min(Math.max(fraction, 0), 1) * (END - START);
   const [x1, y1] = toXY(deg, 26);
   const [x2, y2] = toXY(deg, R - 20);

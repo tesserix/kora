@@ -4,12 +4,12 @@ import Svg, { Circle, Line, Text as SvgText } from "react-native-svg";
 import Animated, {
   cancelAnimation,
   useAnimatedProps,
-  useReducedMotion,
   useSharedValue,
   withSpring,
   type SharedValue,
 } from "react-native-reanimated";
 import { AppText } from "@/components/Text";
+import { useMotionPrefs } from "@/motion";
 import { useTheme } from "@/theme";
 import type { InstrumentTokens } from "@/theme";
 import {
@@ -52,12 +52,13 @@ interface AnimatedTickProps {
 }
 
 function AnimatedGaugeTick({ index, geom, fractionSV, instrument, testID }: AnimatedTickProps) {
-  const t = index / 40; // TICKS constant in gauge.ts
-  const red = t > 0.9;
+  const t = index / 40; // TICKS constant in gauge.ts — only used for the lit threshold below
   const animatedProps = useAnimatedProps(() => {
     "worklet";
     const lit = t <= fractionSV.value;
-    return { stroke: tickColorFor({ lit, red, major: geom.major }, instrument) };
+    // geom.red is already computed by buildGaugeTicks (t > 0.9) — reuse it
+    // instead of re-deriving from index, so there's one source of truth.
+    return { stroke: tickColorFor({ lit, red: geom.red, major: geom.major }, instrument) };
   });
   return (
     <AnimatedLine
@@ -100,7 +101,7 @@ export function GaugeDial({
   const fraction = target > 0 ? Math.min(value / target, 1) : 0;
   const remaining = Math.max(0, Math.round(target - value));
   const mono = { fontFamily: fonts.mono, fontVariant: ["tabular-nums" as const] };
-  const reduceMotion = useReducedMotion();
+  const { reduceMotion } = useMotionPrefs();
 
   // Static geometry (position/width/major/red never depend on fraction — see
   // AnimatedGaugeTick); the argument here is arbitrary, only `.lit` (unused
