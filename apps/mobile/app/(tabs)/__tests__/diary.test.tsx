@@ -531,7 +531,7 @@ test("a week-strip day under its kcal goal shows a tick (non-accent) pip", async
 test("the day-total row shows mono eaten / target", async () => {
   const { findByText } = await render(<Diary />);
   expect(await findByText("1252")).toBeTruthy();
-  expect(await findByText(" / 2000 kcal")).toBeTruthy();
+  expect(await findByText(" / 2,000 kcal")).toBeTruthy();
 });
 
 test("while the dashboard fetch is pending, the day total shows a dash, not a fabricated 0 / 0", async () => {

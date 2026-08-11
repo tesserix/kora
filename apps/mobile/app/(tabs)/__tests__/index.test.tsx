@@ -52,7 +52,7 @@ test("Home renders the Today large title, the gauge dial reserve numeral, protei
   expect(await findByText("Today")).toBeTruthy();
   expect(await findByTestId("gauge-dial")).toBeTruthy();
   expect(await findByText("748")).toBeTruthy(); // 2000 - 1252 kcal in reserve
-  expect(await findByText("96/140")).toBeTruthy(); // protein value/goal
+  expect(await findByText("96/140g")).toBeTruthy(); // protein value/goal
   expect(await findByText("44g to go")).toBeTruthy(); // 140 - 96
   expect(await findByText("Logged today")).toBeTruthy();
   expect(await findByText("Greek yogurt bowl")).toBeTruthy();
@@ -103,7 +103,7 @@ test("shows a first-run empty state when no meals are logged, keeping the gauge 
   const { findByText, findByTestId } = await render(<Home />);
   expect(await findByText("No meals logged yet")).toBeTruthy();
   expect(await findByTestId("gauge-dial")).toBeTruthy();
-  expect(await findByText("0/140")).toBeTruthy(); // protein target
+  expect(await findByText("0/140g")).toBeTruthy(); // protein target
   expect(await findByText("140g to go")).toBeTruthy();
   expect(await findByText("0/220g")).toBeTruthy(); // carbs target
   expect(await findByText("0/70g")).toBeTruthy(); // fat target
