@@ -203,6 +203,23 @@ func main() {
 	logger.Info("api stopped")
 }
 
+// providerEmbedder adapts an ai.Provider's three-value Embed to the narrower
+// two-value shape nutrition.Embedder needs (nutrition cannot import ai — see
+// the interface's own comment; ai imports nutrition, so the reverse would be a
+// cycle).
+//
+// It wraps the CONFIGURED provider, not the raw Gemini client, so an
+// ingest-time embed follows the same Gemini→OpenAI fallback the text path
+// does. Wrapping gemini directly would mean that during a Gemini outage the
+// resolver kept working via the fallback while every barcode-scan embed
+// silently failed.
+type providerEmbedder struct{ p ai.Provider }
+
+func (e providerEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
+	vec, _, err := e.p.Embed(ctx, text)
+	return vec, err
+}
+
 // buildResolveHandler composes the AI resolution engine from config. It
 // returns a nil handler (resolve endpoints stay unmounted), a nil provider,
 // and a nil cache when no Gemini key is set — the rest of the API runs
@@ -228,16 +245,6 @@ func main() {
 // both: corrections and retirements would keep reporting success while users
 // were served the stale food for up to the cache's 24h TTL. The identity is
 // pinned by server.TestAdminMutationBumpsTheSameCacheInstanceWiredIntoDeps.
-// geminiEmbedder adapts the AI provider's three-value Embed to the narrower
-// shape nutrition.Embedder needs (nutrition cannot import ai — see the
-// interface's own comment).
-type geminiEmbedder struct{ p providers.GeminiProvider }
-
-func (g geminiEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
-	vec, _, err := g.p.Embed(ctx, text)
-	return vec, err
-}
-
 func buildResolveHandler(ctx context.Context, cfg config.Config, db *gorm.DB, logger *slog.Logger) (*resolve.Handler, ai.Provider, ai.Cache) {
 	if cfg.GeminiAPIKey == "" {
 		logger.Info("resolve engine disabled (no GEMINI_API_KEY)")
@@ -270,7 +277,7 @@ func buildResolveHandler(ctx context.Context, cfg config.Config, db *gorm.DB, lo
 		}
 	}
 
-	foods := nutrition.NewRepository(db).WithEmbedder(geminiEmbedder{p: gemini})
+	foods := nutrition.NewRepository(db).WithEmbedder(providerEmbedder{p: provider})
 	meter := billing.NewMeter(db)
 	// WithPortionSource lets a personal-alias short-circuit in
 	// ai.Resolver.ResolveText inherit the portion from the user's last log of
