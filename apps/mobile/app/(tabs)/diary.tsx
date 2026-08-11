@@ -1,19 +1,16 @@
-import { useEffect, useId, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, View } from "react-native";
-import Animated, { FadeInDown, useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
+import { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import Animated, { FadeInDown } from "react-native-reanimated";
 import Swipeable from "react-native-gesture-handler/ReanimatedSwipeable";
-import Svg, { Circle, Defs, LinearGradient, Stop } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { AppText } from "@/components/Text";
 import { AppBackground } from "@/components/AppBackground";
-import { Card } from "@/components/Card";
-import { Numeral } from "@/components/Numeral";
 import { Icon } from "@/components/Icon";
 import { GroupedSection, Row } from "@/components/GroupedList";
-import { GaugeRing } from "@/components/GaugeRing";
 import { MealRow } from "@/components/MealRow";
 import { Badge } from "@/components/Badge";
+import { GlassPanel } from "@/components/instrument/GlassPanel";
 import { CopyDaySheet } from "@/components/diary/CopyDaySheet";
 import { QueuedFailedSheet } from "@/components/diary/QueuedFailedSheet";
 import { EmptyState } from "@/components/common/EmptyState";
@@ -21,7 +18,7 @@ import { useSavedMealEditor } from "@/components/meals/SavedMealSheetProvider";
 import { useDashboard, useDayLogs, useAddWater, useDeleteLog } from "@/api/hooks";
 import { useQueuedLogs } from "@/offline/useQueuedLogs";
 import { useQueuedCaptures } from "@/offline/useQueuedCaptures";
-import { AnimatedNumber, PressableScale, haptics, springs } from "@/motion";
+import { PressableScale, haptics } from "@/motion";
 import { useTheme } from "@/theme";
 import { hslToHex, withAlpha } from "@/lib/color";
 import { useUnits, mlToFlOz, flOzToMl, type UnitSystem } from "@/units";
@@ -51,97 +48,57 @@ type WeekDayCellProps = {
   dow: string;
   selected: boolean;
   today: boolean;
-  loggable: boolean;
+  hitGoal: boolean;
   onSelect: () => void;
 };
 
-// A single week-strip day: accent-filled circle springs in on selection,
-// today (unselected) gets a ring outline, and the loggable dot is preserved.
-function WeekDayCell({ date, dow, selected, today, loggable, onSelect }: WeekDayCellProps) {
-  const { colors, gradients } = useTheme();
-  const scale = useSharedValue(selected ? 1 : 0);
-  const gradientId = useId();
-
-  useEffect(() => {
-    scale.value = withSpring(selected ? 1 : 0, springs.lively);
-  }, [selected]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const circleStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+// A single week-strip day per the instrument-glass spec (§Screens.2): weekday
+// caption + mono day number + a 4pt goal-hit pip. The selected day gets the
+// "glass cell" look (instrument.glass fill + glassBorder ring) — no other
+// affordance distinguishes it, so this is load-bearing, not decorative.
+function WeekDayCell({ date, dow, selected, today, hitGoal, onSelect }: WeekDayCellProps) {
+  const { instrument, fonts } = useTheme();
+  const mono = { fontFamily: fonts.mono, fontVariant: ["tabular-nums" as const] };
+  const dISO = iso(date);
 
   return (
     <PressableScale
       accessibilityRole="button"
-      accessibilityLabel={iso(date)}
+      accessibilityLabel={dISO}
       accessibilityState={{ selected }}
       haptic="selection"
       onPress={onSelect}
-      style={{ flex: 1, alignItems: "center", gap: 4, paddingVertical: 4 }}
+      testID={`week-cell-${dISO}`}
+      style={{
+        flex: 1,
+        alignItems: "center",
+        gap: 5,
+        paddingVertical: 8,
+        borderRadius: 14,
+        backgroundColor: selected ? instrument.glass : "transparent",
+        borderWidth: selected ? StyleSheet.hairlineWidth : 0,
+        borderColor: instrument.glassBorder,
+      }}
     >
-      <AppText variant="caption" muted>
-        {dow}
+      <AppText style={{ fontSize: 11, color: instrument.mut }}>{dow}</AppText>
+      <AppText style={[{ fontSize: 15, fontWeight: "600", color: today || selected ? instrument.ink : instrument.mut }, mono]}>
+        {date.getDate()}
       </AppText>
-      <View style={{ width: 36, height: 36, alignItems: "center", justifyContent: "center" }}>
-        {today && !selected ? (
-          <View
-            pointerEvents="none"
-            style={{ position: "absolute", width: 36, height: 36, borderRadius: 18, borderWidth: 1.5, borderColor: colors.accent }}
-          />
-        ) : null}
-        <Animated.View pointerEvents="none" style={[{ position: "absolute", width: 36, height: 36, borderRadius: 18, overflow: "hidden" }, circleStyle]}>
-          <Svg width={36} height={36}>
-            <Defs>
-              <LinearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1">
-                <Stop offset="0%" stopColor={gradients.green[0]} />
-                <Stop offset="100%" stopColor={gradients.green[1]} />
-              </LinearGradient>
-            </Defs>
-            <Circle cx={18} cy={18} r={18} fill={`url(#${gradientId})`} />
-          </Svg>
-        </Animated.View>
-        <AppText variant="headline" style={{ color: selected ? colors.primaryForeground : colors.label }}>
-          {date.getDate()}
-        </AppText>
-      </View>
       <View
-        style={{
-          width: 5,
-          height: 5,
-          borderRadius: 999,
-          backgroundColor: loggable ? (selected ? colors.primaryForeground : colors.accent) : "transparent",
-        }}
+        testID={`week-pip-${dISO}`}
+        style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: hitGoal ? instrument.accent : instrument.tick }}
       />
     </PressableScale>
   );
 }
 
-type AnimatedStatProps = { label: string; value: number; unit: string; format?: (n: number) => string };
-
-// Stat-shaped layout (label / value+unit) but the value animates via AnimatedNumber —
-// the shared Stat component renders a static Numeral, so this is a local composition.
-function AnimatedStat({ label, value, unit, format }: AnimatedStatProps) {
-  const { colors } = useTheme();
-  return (
-    <View style={{ gap: 2 }}>
-      <AppText variant="footnote" muted>
-        {label}
-      </AppText>
-      <View style={{ flexDirection: "row", alignItems: "baseline", gap: 4 }}>
-        <AnimatedNumber value={value} format={format} style={{ fontSize: 22, fontWeight: "700", letterSpacing: -0.3, color: colors.label }} />
-        <AppText variant="footnote" muted>
-          {unit}
-        </AppText>
-      </View>
-    </View>
-  );
-}
-
 type WaterPillProps = { label: string; a11yLabel: string; disabled: boolean; onPress: () => void };
 
-// Green pill matching the mock's `.waterbtns`. `label` ("+250 ml" / "+8 fl oz")
-// and `a11yLabel` ("Add 250 ml water" / "Add 8 fl oz water") are unit-aware and
-// load-bearing for tests.
+// Green-turned-accent pill matching the mock's `.waterbtns`. `label` ("+250 ml"
+// / "+8 fl oz") and `a11yLabel` ("Add 250 ml water" / "Add 8 fl oz water") are
+// unit-aware and load-bearing for tests.
 function WaterPill({ label, a11yLabel, disabled, onPress }: WaterPillProps) {
-  const { colors } = useTheme();
+  const { instrument } = useTheme();
   return (
     <PressableScale
       accessibilityRole="button"
@@ -156,11 +113,11 @@ function WaterPill({ label, a11yLabel, disabled, onPress }: WaterPillProps) {
         justifyContent: "center",
         paddingVertical: 13,
         borderRadius: 16,
-        backgroundColor: withAlpha(colors.accent, 0.16),
+        backgroundColor: withAlpha(instrument.accent, 0.16),
         opacity: disabled ? 0.5 : 1,
       }}
     >
-      <AppText style={{ color: colors.accent, fontWeight: "700" }}>{label}</AppText>
+      <AppText style={{ color: instrument.accent, fontWeight: "700" }}>{label}</AppText>
     </PressableScale>
   );
 }
@@ -182,7 +139,7 @@ const WATER_QUICK_ADDS: Record<UnitSystem, readonly WaterQuickAdd[]> = {
 };
 
 export default function Diary() {
-  const { colors, spacing, gradients } = useTheme();
+  const { colors, spacing, instrument, fonts } = useTheme();
   const { system } = useUnits();
   const insets = useSafeAreaInsets();
   const week = weekDates();
@@ -317,6 +274,10 @@ export default function Diary() {
   };
 
   const d = dashboard.data;
+  // No dashboard data yet and no error means the query hasn't resolved — distinct
+  // from a resolved dashboard with genuinely zero consumption, which must still
+  // show real "0" figures, not a placeholder. Same guard as Home (index.tsx).
+  const pending = !d && !dashboard.isError;
   const goal = d?.targets.kcal ?? 0;
   // Pending only. A pending item is a real food with known nutrition whose
   // upload is merely outstanding, so leaving it out makes remaining-calories
@@ -334,10 +295,14 @@ export default function Diary() {
   const waterMl = d?.water_ml ?? 0;
   const water =
     system === "imperial"
-      ? { value: mlToFlOz(waterMl), unit: "fl oz", format: (n: number) => String(Math.round(n)) }
-      : { value: waterMl / 1000, unit: "L", format: (n: number) => n.toFixed(1) };
+      ? { value: mlToFlOz(waterMl), unit: "fl oz" }
+      : { value: waterMl / 1000, unit: "L" };
   const waterQuickAdds = WATER_QUICK_ADDS[system];
-  const pct = goal > 0 ? Math.round((total / goal) * 100) : 0;
+  const pct = goal > 0 ? Math.min(100, Math.round((total / goal) * 100)) : 0;
+  // Only the day actually on screen has real consumed/target data — the other
+  // six week-strip cells have none of it loaded (this screen fetches one day
+  // at a time, unchanged), so their pip stays unlit rather than guessing.
+  const hitGoal = !pending && goal > 0 && total >= goal;
 
   const openMeal = (log: FoodLog) =>
     router.push({ pathname: "/meal", params: { id: log.id, name: log.description, mealSlot: log.meal_slot, time: timeOf(log.logged_at), kcal: String(Math.round(log.kcal)), protein: String(Math.round(log.protein_g)), carbs: String(Math.round(log.carbs_g)), fat: String(Math.round(log.fat_g)), grams: String(Math.round(log.quantity_grams)) } });
@@ -350,6 +315,31 @@ export default function Diary() {
     queued: queuedNotOnServer.filter((r) => r.mealSlot.toLowerCase() === slot),
     captures: captures.rows.filter((r) => r.mealSlot.toLowerCase() === slot),
   })).filter((group) => group.items.length > 0 || group.queued.length > 0 || group.captures.length > 0);
+
+  const slotKcal = (group: (typeof slots)[number]) =>
+    Math.round(
+      group.items.reduce((sum, l) => sum + l.kcal, 0) +
+        group.queued.reduce((sum, r) => sum + (r.status === "pending" ? (r.kcal ?? 0) : 0), 0),
+    );
+
+  const isEmptyDay = logged.length === 0 && queuedNotOnServer.length === 0 && captures.rows.length === 0;
+  // The ghost row nudges toward the next unlogged slot, in canonical order —
+  // it never appears once every slot has something, and never fabricates a
+  // reserve figure before the dashboard has resolved.
+  const missingSlot = !pending && !isEmptyDay ? SLOT_ORDER.find((slot) => !slots.some((g) => g.slot === slot)) : undefined;
+
+  const mono = { fontFamily: fonts.mono, fontVariant: ["tabular-nums" as const] };
+  // The four slot headers below (Breakfast/Lunch/Dinner/Snack, at most) ARE
+  // this screen's engraved zone (spec's ~4-visible-label budget) — every other
+  // caption on this screen is sentence-case muted text, not engraved.
+  const engraved = {
+    fontSize: 10,
+    letterSpacing: 1.4,
+    textTransform: "uppercase" as const,
+    fontWeight: "600" as const,
+    color: instrument.mut,
+  };
+  const mutedLabel = { fontSize: 11, color: instrument.mut };
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -367,7 +357,7 @@ export default function Diary() {
                 <AppText>Cancel</AppText>
               </Pressable>
               <Pressable accessibilityRole="button" onPress={saveSelectionAsMeal}>
-                <AppText style={{ color: colors.accent }}>Save as meal</AppText>
+                <AppText style={{ color: instrument.accent }}>Save as meal</AppText>
               </Pressable>
             </View>
           </View>
@@ -383,7 +373,7 @@ export default function Diary() {
                 dow={DOW[date.getDay()]}
                 selected={dISO === selected}
                 today={dISO === todayIso}
-                loggable={dISO <= todayIso}
+                hitGoal={dISO === selected && hitGoal}
                 onSelect={() => selectDay(dISO)}
               />
             );
@@ -392,42 +382,60 @@ export default function Diary() {
 
         <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
           <Animated.View entering={enter(2)}>
-            <Card variant="hero" style={{ marginBottom: 16 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 20 }}>
-                <GaugeRing value={total} max={goal} size={96} stroke={11} gradient={gradients.green}>
-                  <Numeral size={24}>{`${pct}%`}</Numeral>
-                </GaugeRing>
-                <View style={{ flex: 1, flexDirection: "row", justifyContent: "space-around", alignItems: "center" }}>
-                  <AnimatedStat label="Eaten" value={total} unit="kcal" />
-                  <AnimatedStat label="Left" value={remaining} unit="kcal" />
-                  <AnimatedStat label="Water" value={water.value} unit={water.unit} format={water.format} />
+            <GlassPanel radius={20} style={{ marginBottom: 16 }} testID="day-total">
+              <View style={{ padding: 16 }}>
+                <AppText style={mutedLabel}>Day total</AppText>
+                {pending ? (
+                  <AppText style={[{ fontSize: 22, color: instrument.mut, marginTop: 4 }, mono]}>—</AppText>
+                ) : (
+                  <View style={{ flexDirection: "row", alignItems: "baseline", marginTop: 4 }}>
+                    <AppText style={[{ fontSize: 17, fontWeight: "600", color: instrument.ink }, mono]}>{total}</AppText>
+                    <AppText style={[{ fontSize: 13, color: instrument.mut }, mono]}>{` / ${goal} kcal`}</AppText>
+                  </View>
+                )}
+                <View style={{ height: 6, borderRadius: 3, backgroundColor: instrument.inset, overflow: "hidden", marginTop: 10 }}>
+                  <View style={{ height: "100%", width: `${pending ? 0 : pct}%`, backgroundColor: instrument.accent, borderRadius: 3 }} />
                 </View>
-              </View>
 
-              <View style={{ flexDirection: "row", gap: 8, marginTop: 16 }}>
-                {waterQuickAdds.map((qa) => (
-                  <WaterPill
-                    key={qa.ml}
-                    label={qa.label}
-                    a11yLabel={qa.a11yLabel}
-                    disabled={addWater.isPending}
-                    onPress={() => addWaterMl(qa.ml)}
-                  />
-                ))}
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 16 }}>
+                  <View>
+                    <AppText style={mutedLabel}>Water</AppText>
+                    <AppText style={[{ fontSize: 15, fontWeight: "600", color: instrument.ink, marginTop: 2 }, mono]}>
+                      {pending ? "—" : `${system === "imperial" ? Math.round(water.value) : water.value.toFixed(1)} ${water.unit}`}
+                    </AppText>
+                  </View>
+                  <View style={{ flexDirection: "row", gap: 8, flex: 1, marginLeft: 16 }}>
+                    {waterQuickAdds.map((qa) => (
+                      <WaterPill
+                        key={qa.ml}
+                        label={qa.label}
+                        a11yLabel={qa.a11yLabel}
+                        disabled={addWater.isPending}
+                        onPress={() => addWaterMl(qa.ml)}
+                      />
+                    ))}
+                  </View>
+                </View>
+                {waterErr ? (
+                  <AppText style={{ color: colors.destructive, marginTop: 8 }}>{waterErr}</AppText>
+                ) : null}
               </View>
-              {waterErr ? (
-                <AppText style={{ color: colors.destructive, marginTop: 8 }}>{waterErr}</AppText>
-              ) : null}
-            </Card>
+            </GlassPanel>
           </Animated.View>
 
           {slots.map((group, gi) => (
             <Animated.View key={group.slot} entering={enter(4 + gi)}>
-              <GroupedSection elevated header={group.slot.toUpperCase()} style={{ marginBottom: 16 }}>
+              <GlassPanel radius={20} style={{ marginBottom: 16 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 14, paddingBottom: 8 }}>
+                  <AppText style={engraved}>{group.slot.toUpperCase()}</AppText>
+                  <AppText style={[{ fontSize: 13, fontWeight: "600", color: instrument.ink }, mono]}>
+                    {`${slotKcal(group)} kcal`}
+                  </AppText>
+                </View>
                 {group.captures.map((c) => {
                   const failed = c.status === "failed";
-                  const pending = c.status === "pending";
-                  const statusText = pending
+                  const pendingCapture = c.status === "pending";
+                  const statusText = pendingCapture
                     ? "Identifying when you're back online"
                     : c.status === "review"
                       ? "Tap to confirm"
@@ -442,7 +450,7 @@ export default function Diary() {
                       iconName={c.kind === "photo" ? "camera" : "mic"}
                       dimmed={failed}
                       badge={
-                        pending ? (
+                        pendingCapture ? (
                           <ActivityIndicator size="small" color={colors.tertiaryLabel} />
                         ) : (
                           <Badge variant="neutral">{failed ? "Failed" : "Review"}</Badge>
@@ -502,7 +510,7 @@ export default function Diary() {
                         </PressableScale>
                       )}
                     >
-                      <View style={{ backgroundColor: colors.elevated }}>
+                      <View>
                         <MealRow
                           name={log.description}
                           slot={`${formatPortion({ quantity_grams: log.quantity_grams, entered_amount: log.entered_amount, entered_unit: log.entered_unit, base_unit: log.base_unit })} · ${timeOf(log.logged_at)}`}
@@ -518,11 +526,40 @@ export default function Diary() {
                     </Swipeable>
                   );
                 })}
-              </GroupedSection>
+              </GlassPanel>
             </Animated.View>
           ))}
 
-          {logged.length === 0 && queuedNotOnServer.length === 0 && captures.rows.length === 0 ? (
+          {missingSlot ? (
+            <Animated.View entering={enter(4 + slots.length)}>
+              <PressableScale
+                accessibilityRole="button"
+                accessibilityLabel={`Add ${missingSlot}`}
+                haptic="selection"
+                onPress={() => router.push("/capture")}
+                style={{
+                  borderWidth: 1.5,
+                  borderStyle: "dashed",
+                  borderColor: instrument.tick,
+                  borderRadius: 24,
+                  paddingVertical: 16,
+                  paddingHorizontal: 16,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
+                  marginBottom: 16,
+                }}
+              >
+                <Icon name="plus" size={16} color={instrument.accent} />
+                <AppText style={{ color: instrument.mut }}>
+                  {`Add ${missingSlot} · ${remaining} kcal in reserve`}
+                </AppText>
+              </PressableScale>
+            </Animated.View>
+          ) : null}
+
+          {isEmptyDay ? (
             <Animated.View entering={enter(4)}>
               <EmptyState
                 icon="book-open"

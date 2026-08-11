@@ -1,5 +1,5 @@
 import { Alert } from "react-native";
-import { fireEvent, render } from "@testing-library/react-native";
+import { fireEvent, render, within } from "@testing-library/react-native";
 import { router } from "expo-router";
 import type { QueuedRow } from "@/offline/useQueuedLogs";
 
@@ -30,7 +30,7 @@ const LOGS_DATA = [
 // Mutable holders so a test can supply an empty day or a different dashboard;
 // both reset in beforeEach.
 let mockDayLogs: typeof LOGS_DATA = LOGS_DATA;
-let mockDashboardData: typeof DASHBOARD_DATA = DASHBOARD_DATA;
+let mockDashboardData: typeof DASHBOARD_DATA | undefined = DASHBOARD_DATA;
 
 // The queued-row hook is exercised directly in
 // src/offline/__tests__/useQueuedLogs.test.tsx; here it is a fixture so these
@@ -58,7 +58,7 @@ jest.mock("@/offline/useQueuedCaptures", () => ({
 jest.mock("@/api/hooks", () => ({
   useDashboard: (date: string) => {
     mockUseDashboard(date);
-    return { data: mockDashboardData };
+    return { data: mockDashboardData, isError: false };
   },
   useDayLogs: (date: string) => {
     mockUseDayLogs(date);
@@ -491,4 +491,72 @@ test("a plain tap when not selecting still navigates to the meal screen as befor
   expect(router.push).toHaveBeenCalledWith(
     expect.objectContaining({ pathname: "/meal", params: expect.objectContaining({ id: "1" }) }),
   );
+});
+
+// --- Instrument Glass rebuild ------------------------------------------------
+
+const flatten = (style: unknown) =>
+  Array.isArray(style) ? Object.assign({}, ...style.flat().filter(Boolean)) : (style ?? {});
+
+test("the selected week-strip day gets the glass-cell look and others do not", async () => {
+  const { getByTestId } = await render(<Diary />);
+
+  const todayIso = isoOf(new Date());
+  const selectedStyle = flatten(getByTestId(`week-cell-${todayIso}`).props.style);
+  expect(selectedStyle.borderWidth).toBeGreaterThan(0);
+
+  const monday = mondayOfThisWeek();
+  const other = isoOf(monday) === todayIso ? new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 1) : monday;
+  const otherStyle = flatten(getByTestId(`week-cell-${isoOf(other)}`).props.style);
+  expect(otherStyle.borderWidth ?? 0).toBe(0);
+});
+
+test("a week-strip day that hit its kcal goal shows an accent pip", async () => {
+  mockDashboardData = { consumed: { kcal: 2000 }, targets: { kcal: 2000 }, water_ml: 0 };
+  const { getByTestId } = await render(<Diary />);
+
+  const todayIso = isoOf(new Date());
+  const pipStyle = flatten(getByTestId(`week-pip-${todayIso}`).props.style);
+  expect(pipStyle.backgroundColor).toBe("#FF4A00");
+});
+
+test("a week-strip day under its kcal goal shows a tick (non-accent) pip", async () => {
+  const { getByTestId } = await render(<Diary />);
+
+  const todayIso = isoOf(new Date());
+  const pipStyle = flatten(getByTestId(`week-pip-${todayIso}`).props.style);
+  expect(pipStyle.backgroundColor).not.toBe("#FF4A00");
+});
+
+test("the day-total row shows mono eaten / target", async () => {
+  const { findByText } = await render(<Diary />);
+  expect(await findByText("1252")).toBeTruthy();
+  expect(await findByText(" / 2000 kcal")).toBeTruthy();
+});
+
+test("while the dashboard fetch is pending, the day total shows a dash, not a fabricated 0 / 0", async () => {
+  mockDashboardData = undefined;
+  const { findByTestId, queryByText } = await render(<Diary />);
+  const panel = await findByTestId("day-total");
+  expect(within(panel).getAllByText("—").length).toBeGreaterThan(0);
+  expect(queryByText(" / 0 kcal")).toBeNull();
+});
+
+// Only dinner is logged in the base fixture, so breakfast is the first empty
+// slot in canonical order — the ghost row should offer to add it, with the
+// day's real remaining-kcal figure (2000 target - 1252 eaten = 748).
+test("a ghost row offers to add the first empty slot, with the reserve figure, and routes to capture", async () => {
+  const { findByText } = await render(<Diary />);
+
+  const ghost = await findByText("Add breakfast · 748 kcal in reserve");
+  await fireEvent.press(ghost);
+
+  expect(router.push).toHaveBeenCalledWith("/capture");
+});
+
+test("no ghost row appears while the dashboard fetch is pending", async () => {
+  mockDashboardData = undefined;
+  const { queryByText, findByText } = await render(<Diary />);
+  await findByText("Grilled salmon");
+  expect(queryByText(/Add .* kcal in reserve/)).toBeNull();
 });
