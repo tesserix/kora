@@ -163,6 +163,47 @@ describe("useHealth", () => {
     await waitFor(() => expect(result.current.steps).toEqual({ today: 3500, goal: 10000 }));
   });
 
+  // 7am on a real device with access granted: no steps yet today, but the week
+  // has data. This is a REAL zero and must render as 0 — showing the connect
+  // prompt here would nag every user every morning.
+  it("reports zero for an empty day when the week has data", async () => {
+    mockIsAvailable.mockReturnValue(true);
+    mockRequestAuthorization.mockResolvedValue(true);
+    mockQueryQuantitySamples
+      .mockResolvedValueOnce([]) // today
+      .mockResolvedValueOnce([{ quantity: 3500 }]); // last 7 days
+    mockQueryCategorySamples.mockResolvedValue([]);
+
+    const { result } = await renderHook(() => useHealth());
+    await waitFor(() => expect(result.current.steps).toEqual({ today: 0, goal: 10000 }));
+  });
+
+  // A whole week with nothing is the honest signal that reads are not working.
+  it("reports unknown steps when the whole week is empty", async () => {
+    mockIsAvailable.mockReturnValue(true);
+    mockRequestAuthorization.mockResolvedValue(true);
+    mockQueryQuantitySamples
+      .mockResolvedValueOnce([]) // today
+      .mockResolvedValueOnce([]); // last 7 days
+    mockQueryCategorySamples.mockResolvedValue([]);
+
+    const { result } = await renderHook(() => useHealth());
+    await waitFor(() => expect(result.current.steps).toBeNull());
+  });
+
+  // The probe is a fallback, not the primary path: a day WITH data must not
+  // trigger a second query.
+  it("does not probe the week when today already has data", async () => {
+    mockIsAvailable.mockReturnValue(true);
+    mockRequestAuthorization.mockResolvedValue(true);
+    mockQueryQuantitySamples.mockResolvedValue([{ quantity: 1200 }]);
+    mockQueryCategorySamples.mockResolvedValue([]);
+
+    const { result } = await renderHook(() => useHealth());
+    await waitFor(() => expect(result.current.steps).toEqual({ today: 1200, goal: 10000 }));
+    expect(mockQueryQuantitySamples).toHaveBeenCalledTimes(1);
+  });
+
   // The old connect() only opened Health when status === "denied", a state that
   // cannot occur — so a user who denied had no route back.
   it("connect always opens Health settings", async () => {

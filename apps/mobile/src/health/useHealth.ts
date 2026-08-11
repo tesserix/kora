@@ -31,6 +31,11 @@ const ASLEEP_CATEGORY_VALUES = new Set<number>([1, 3, 4, 5]);
 const SLEEP_WINDOW_LOOKBACK_HOURS = 16;
 const MS_PER_HOUR = 60 * 60 * 1000;
 
+// How far back to look for ANY step sample before concluding reads are not
+// working. "No steps today" is normal every morning; "no steps in a week" is
+// evidence. See the spec's "empty-day trap".
+const READABLE_PROBE_DAYS = 7;
+
 function startOfLocalDay(): Date {
   const start = new Date();
   start.setHours(0, 0, 0, 0);
@@ -130,11 +135,24 @@ export function useHealth(): HealthData {
         }),
       ]);
 
-      // An empty sample array is ambiguous: no movement, or no read access —
-      // HealthKit will not say which. Reporting 0 would assert the first on no
-      // evidence, so report "unknown" and let the UI offer a way to check.
+      // An empty sample array for today alone is ambiguous: no movement yet, or
+      // no read access — HealthKit will not say which, and "no steps today" is
+      // simply what every morning looks like before the user walks. Probe a
+      // wider window before concluding access is broken.
       const stepTotal = sumSteps(stepSamples);
-      setSteps(stepSamples.length > 0 ? { today: Math.round(stepTotal), goal: STEP_GOAL } : null);
+      if (stepSamples.length > 0) {
+        setSteps({ today: Math.round(stepTotal), goal: STEP_GOAL });
+      } else {
+        // Today is empty. Probe a wider window to tell "hasn't walked yet"
+        // from "cannot read" — HealthKit will not tell us which directly.
+        const probeStart = new Date(dayStart.getTime() - READABLE_PROBE_DAYS * 24 * MS_PER_HOUR);
+        const weekSamples = await hk.queryQuantitySamples(STEP_COUNT_IDENTIFIER, {
+          filter: { date: { startDate: probeStart, endDate: now } },
+          limit: 0,
+          unit: "count",
+        });
+        setSteps(weekSamples.length > 0 ? { today: 0, goal: STEP_GOAL } : null);
+      }
       const sleepMillis = sumAsleepMillis(sleepSamples);
       setSleep(sleepSamples.length > 0 ? { lastNightHours: Math.round((sleepMillis / MS_PER_HOUR) * 10) / 10 } : null);
       setStatus("authorized");
