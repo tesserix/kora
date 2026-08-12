@@ -103,3 +103,28 @@ func TestDecodeServingUnitsMalformedYieldsEmpty(t *testing.T) {
 	assert.Empty(t, DecodeServingUnits(nil))
 	assert.Empty(t, DecodeServingUnits(json.RawMessage(``)))
 }
+
+func TestParsePhrase(t *testing.T) {
+	tests := []struct {
+		phrase     string
+		wantAmount float64
+		wantUnit   string
+		wantOK     bool
+	}{
+		{phrase: "150g", wantAmount: 150, wantUnit: "g", wantOK: true},
+		{phrase: "1 tbsp", wantAmount: 1, wantUnit: "tbsp", wantOK: true},
+		{phrase: "2 sachets", wantAmount: 2, wantUnit: "sachets", wantOK: true},
+		{phrase: "", wantOK: false},
+		{phrase: "a pinch", wantOK: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.phrase, func(t *testing.T) {
+			amount, unit, ok := ParsePhrase(tt.phrase)
+			require.Equal(t, tt.wantOK, ok)
+			if tt.wantOK {
+				assert.InDelta(t, tt.wantAmount, amount, 1e-9)
+				assert.Equal(t, tt.wantUnit, unit)
+			}
+		})
+	}
+}

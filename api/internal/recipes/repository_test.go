@@ -42,6 +42,12 @@ func seedFood(t *testing.T, db *gorm.DB, kcal float64) nutrition.FoodItem {
 		Name: "RC Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD,
 		KcalPer100g: kcal, ProteinPer100g: 10,
 	}
+	// normalized_name is app-managed (no DB trigger backfills it — see
+	// migration 000004) and is what nutrition.Repository.Resolve's full-text
+	// tier matches against. Setting it here mirrors what
+	// nutrition.Repository.Insert does on the real write path, so a seeded
+	// food actually resolves instead of silently matching nothing.
+	item.NormalizedName = nutrition.Normalize(item.Name)
 	require.NoError(t, db.Create(&item).Error)
 	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
 	return item
