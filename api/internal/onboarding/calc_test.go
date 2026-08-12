@@ -64,8 +64,8 @@ func TestCalculateMatchesGoldenVectors(t *testing.T) {
 	}
 }
 
-// The floor is the safety-critical line: without it a 40kg user asking for
-// 0.4kg/week is handed a negative target.
+// The floor is the safety-critical line: without it this 40kg user's
+// target computes to 431.8 kcal, well under her 726.5 resting burn.
 func TestCalculateNeverReturnsBelowRestingBurn(t *testing.T) {
 	got, err := Calculate(Input{
 		Sex: "female", BirthYear: 1936, HeightCm: 150, WeightKg: 40,
@@ -86,7 +86,13 @@ func TestCalculateMaintenanceIgnoresPace(t *testing.T) {
 		ActivityLevel: "moderate", Goal: "maintenance",
 	}, 2025)
 	require.NoError(t, err)
+	withNegativePace, err := Calculate(Input{
+		Sex: "male", BirthYear: 1995, HeightCm: 180, WeightKg: 80,
+		ActivityLevel: "moderate", Goal: "maintenance", PaceKgPerWeek: -1,
+	}, 2025)
+	require.NoError(t, err)
 	require.Equal(t, withoutPace.Kcal, withPace.Kcal)
+	require.Equal(t, withoutPace.Kcal, withNegativePace.Kcal)
 	approx(t, 2759, withPace.Kcal, 1)
 }
 
@@ -144,7 +150,7 @@ func TestSplitMacrosClampsCarbsToZero(t *testing.T) {
 
 func TestSplitMacrosSplitsNormally(t *testing.T) {
 	protein, carbs, fat := SplitMacros(2000, 80)
-	approx(t, 160, protein, 0.001)   // 2g/kg
-	approx(t, 55.5555, fat, 0.001)   // 25% of 2000 / 9
-	approx(t, 215, carbs, 0.001)     // (2000 - 640 - 500) / 4
+	approx(t, 160, protein, 0.001) // 2g/kg
+	approx(t, 55.5555, fat, 0.001) // 25% of 2000 / 9
+	approx(t, 215, carbs, 0.001)   // (2000 - 640 - 500) / 4
 }

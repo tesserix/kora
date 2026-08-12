@@ -97,13 +97,16 @@ func Calculate(in Input, currentYear int) (Targets, error) {
 	if !validGoals[in.Goal] {
 		return Targets{}, fmt.Errorf("onboarding: invalid goal")
 	}
-	if in.PaceKgPerWeek < 0 {
-		return Targets{}, fmt.Errorf("onboarding: pace_kg_per_week must not be negative")
-	}
-	// Maintenance has no destination, so its pace is ignored rather than
-	// validated — the client does not render the control for that goal.
-	if in.Goal != "maintenance" && in.PaceKgPerWeek > in.WeightKg*maxPaceFractionOfBodyweight {
-		return Targets{}, fmt.Errorf("onboarding: pace_kg_per_week exceeds 1%% of bodyweight")
+	// Maintenance has no destination, so pace is ignored rather than
+	// validated — the client does not render the control for that goal,
+	// and the adjustment below is zero whatever the value holds.
+	if in.Goal != "maintenance" {
+		if in.PaceKgPerWeek < 0 {
+			return Targets{}, fmt.Errorf("onboarding: pace_kg_per_week must not be negative")
+		}
+		if in.PaceKgPerWeek > in.WeightKg*maxPaceFractionOfBodyweight {
+			return Targets{}, fmt.Errorf("onboarding: pace_kg_per_week exceeds 1%% of bodyweight")
+		}
 	}
 
 	bmr := bmrWeightCoef*in.WeightKg + bmrHeightCoef*in.HeightCm - bmrAgeCoef*float64(age)
