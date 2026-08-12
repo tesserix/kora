@@ -46,8 +46,11 @@ function toIngredientInputs(ingredients: RecipeIngredient[]): RecipeIngredientIn
   }));
 }
 
-function macroStat(label: string, grams: number) {
-  return <Stat label={label} value={String(Math.round(grams))} unit="g" />;
+// Energy is not a mass. The unit is passed rather than hardcoded because the
+// same card carries kcal alongside three gram figures, and "Kcal / 165 g" is
+// wrong about the primary number on the primary screen of a nutrition app.
+function macroStat(label: string, value: number, unit: string = "g") {
+  return <Stat label={label} value={String(Math.round(value))} unit={unit} />;
 }
 
 interface IngredientRowProps {
@@ -181,11 +184,24 @@ export default function RecipeDetail() {
     );
   };
 
+  // Matching a food for a previously unresolved line. That line was stored
+  // with grams 0 (the server has nothing to measure an unmatched ingredient
+  // against), so a portion has to come from somewhere — the matched food's own
+  // serving size, else the same 100 g the parser falls back to. It is a guess,
+  // so portion_assumed goes with it (#138); the server applies exactly this
+  // default too, and the API rejected the bare zero before it did.
   const resolveIngredient = (index: number, item: FoodItem) => {
     if (!r) return;
-    const ingredients = toIngredientInputs(r.ingredients).map((ing, i) =>
-      i === index ? { ...ing, food_item_id: item.id } : ing,
-    );
+    const ingredients = toIngredientInputs(r.ingredients).map((ing, i) => {
+      if (i !== index) return ing;
+      if (ing.grams > 0) return { ...ing, food_item_id: item.id };
+      return {
+        ...ing,
+        food_item_id: item.id,
+        grams: item.serving_grams > 0 ? item.serving_grams : 100,
+        portion_assumed: true,
+      };
+    });
     updateRecipe.mutate(
       { id: r.id, body: { name: r.name, servings: r.servings, source: r.source, ingredients } },
       { onError: () => toast.show({ message: "Couldn't update that ingredient. Try again." }) },
@@ -197,9 +213,16 @@ export default function RecipeDetail() {
   // is sent back with only this one ingredient's grams changed, and the
   // server recomputes kcal/protein/carbs/fat/per-serving figures from it —
   // nothing here is computed locally, matching the servings stepper's rule.
+  //
+  // portion_assumed is CLEARED here: this figure was typed by hand into
+  // EditAmountSheet, so it is a measurement, and leaving the flag set would
+  // keep rendering "PORTION IS A GUESS" over a number the user chose (#138 in
+  // the other direction).
   const saveIngredientGrams = (index: number, grams: number) => {
     if (!r) return;
-    const ingredients = toIngredientInputs(r.ingredients).map((ing, i) => (i === index ? { ...ing, grams } : ing));
+    const ingredients = toIngredientInputs(r.ingredients).map((ing, i) =>
+      i === index ? { ...ing, grams, portion_assumed: false } : ing,
+    );
     updateRecipe.mutate(
       { id: r.id, body: { name: r.name, servings: r.servings, source: r.source, ingredients } },
       { onError: () => toast.show({ message: "Couldn't update that ingredient's amount. Try again." }) },
@@ -230,10 +253,14 @@ export default function RecipeDetail() {
         food_item_id: item.id,
         raw_text: item.name,
         name: item.name,
-        grams: item.serving_grams || 100,
+        // serving_grams is 0 for any food without a real serving size —
+        // foodCache.foodFromServingSummary synthesises that as a matter of
+        // course — so the 100 below is a SYSTEM GUESS and has to say so.
+        // portion_assumed is false only when the food carries a real serving.
+        grams: item.serving_grams > 0 ? item.serving_grams : 100,
         entered_amount: null,
         entered_unit: null,
-        portion_assumed: false,
+        portion_assumed: !(item.serving_grams > 0),
         match_score: null,
         match_tier: null,
       },
@@ -362,7 +389,7 @@ export default function RecipeDetail() {
               <View style={{ gap: spacing.sm }}>
                 <Overline>Per serving</Overline>
                 <Card variant="elevated" style={{ flexDirection: "row" }}>
-                  <View style={{ flex: 1 }}>{macroStat("Kcal", r.per_serving_kcal)}</View>
+                  <View style={{ flex: 1 }}>{macroStat("Kcal", r.per_serving_kcal, "kcal")}</View>
                   <View style={{ flex: 1 }}>{macroStat("Protein", r.per_serving_protein_g)}</View>
                   <View style={{ flex: 1 }}>{macroStat("Carbs", r.per_serving_carbs_g)}</View>
                   <View style={{ flex: 1 }}>{macroStat("Fat", r.per_serving_fat_g)}</View>
