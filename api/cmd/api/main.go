@@ -163,6 +163,7 @@ func main() {
 			Verifier:        verifier,
 			Resolver:        resolveHandler,
 			Provider:        aiProvider,
+			AIProvider:      aiProvider,
 			ResolveCache:    resolveCache,
 			BFFHMACKey:      cfg.BFFHMACKey,
 			AppleExchanger:  appleExchanger,

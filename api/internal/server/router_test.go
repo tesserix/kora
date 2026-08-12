@@ -83,6 +83,42 @@ func TestResolveRoutesAbsentWhenResolverNil(t *testing.T) {
 	}
 }
 
+// recipeRoutes is the full set of recipe routes; used to confirm they are
+// always registered regardless of AIProvider.
+var recipeRoutes = []struct{ method, path string }{
+	{"GET", "/v1/recipes"},
+	{"POST", "/v1/recipes"},
+	{"POST", "/v1/recipes/parse"},
+	{"GET", "/v1/recipes/:id"},
+	{"PUT", "/v1/recipes/:id"},
+	{"DELETE", "/v1/recipes/:id"},
+	{"POST", "/v1/recipes/:id/log"},
+}
+
+func TestRecipeRoutesRegistered(t *testing.T) {
+	r := NewRouter(Deps{DB: &gorm.DB{}, Verifier: stubVerifier{}})
+	routes := r.Routes()
+	for _, rt := range recipeRoutes {
+		if !hasRoute(routes, rt.method, rt.path) {
+			t.Errorf("expected %s %s to be registered", rt.method, rt.path)
+		}
+	}
+}
+
+// TestRecipeRoutesRegisteredWhenAIProviderNil pins the degrade-not-disappear
+// contract: recipes must stay fully usable — list/get/create/update/delete/log
+// all work — even when no AI provider key is configured. Only Handler.Parse's
+// BEHAVIOR (not its registration) changes when AIProvider is nil.
+func TestRecipeRoutesRegisteredWhenAIProviderNil(t *testing.T) {
+	r := NewRouter(Deps{DB: &gorm.DB{}, Verifier: stubVerifier{}}) // AIProvider nil
+	routes := r.Routes()
+	for _, rt := range recipeRoutes {
+		if !hasRoute(routes, rt.method, rt.path) {
+			t.Errorf("expected %s %s to still be registered with AIProvider nil", rt.method, rt.path)
+		}
+	}
+}
+
 // testDB opens a real connection to the local test database, mirroring
 // internal/admin/repository_test.go's helper. Route-registration tests above
 // use a bare &gorm.DB{} because they never execute a query — but the
