@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Crypto from "expo-crypto";
-import { apiFetch, apiFetchEnvelope, apiFetchMultipart, currentUserId, isNetworkError } from "@/lib/api";
+import { apiFetch, apiFetchEnvelope, apiFetchMultipart, currentUserId, isNetworkError, TimeoutError } from "@/lib/api";
 import { buildCaptureForm, normalizeResolution, type ResolveFile } from "./resolveWire";
 import { isOnline } from "@/offline/connectivity";
 import { reconcileWeightReminder } from "@/reminders/reconcileWeightReminder";
@@ -97,7 +97,11 @@ async function withCacheFallback<T>(live: () => Promise<T>, cached: () => Promis
   try {
     return await live();
   } catch (err) {
-    if (isNetworkError(err)) return cached();
+    // TimeoutError joins isNetworkError here for the same reason it joins it
+    // in useCreateLog below: the 25s client deadline (REQUEST_TIMEOUT_MS) is a
+    // distinct class from NetworkError, and a slow-but-alive connection that
+    // times out is exactly the case this fallback exists for.
+    if (isNetworkError(err) || err instanceof TimeoutError) return cached();
     throw err;
   }
 }
@@ -204,8 +208,11 @@ export function useCreateLog() {
         // Queueing is safe even if the server did apply the write: the id
         // already travelled, so the replay resolves to that same row.
         // Everything else (a 4xx, a bad token, an unparseable body) is a real
-        // failure the caller must see.
-        if (isNetworkError(err)) return append(input, id, ownerId);
+        // failure the caller must see. TimeoutError joins isNetworkError here:
+        // the 25s client deadline (REQUEST_TIMEOUT_MS) throws a distinct class,
+        // and a write that times out on slow-but-alive cellular must still be
+        // queued rather than rethrown — the whole reason this catch exists.
+        if (isNetworkError(err) || err instanceof TimeoutError) return append(input, id, ownerId);
         throw err;
       }
     },

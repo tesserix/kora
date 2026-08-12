@@ -255,9 +255,9 @@ export interface ResolvedCandidate {
    */
   kcal_unknown?: boolean;
   /**
-   * True when the server had no serving size for this food and fell back to a
-   * 100g assumption. The portion is a guess, not a measurement, and must never
-   * be rendered as an exact figure without saying so.
+   * True when the server had no serving size for this food, so the portion is
+   * a system estimate, not a measurement. It is a guess and must never be
+   * rendered as an exact figure without saying so.
    */
   portion_assumed?: boolean;
 }
