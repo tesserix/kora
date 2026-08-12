@@ -1,0 +1,3 @@
+ALTER TABLE users DROP COLUMN IF EXISTS target_date;
+ALTER TABLE users DROP COLUMN IF EXISTS pace_kg_per_week;
+ALTER TABLE users DROP COLUMN IF EXISTS goal_weight_kg;

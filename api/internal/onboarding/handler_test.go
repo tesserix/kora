@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -140,4 +141,66 @@ func TestSubmitMissingUID(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+// referenceNow is the fixed clock handed to the Handler under test so that
+// derived-date assertions (e.g. target_date) are deterministic.
+func referenceNow(t *testing.T) time.Time {
+	t.Helper()
+	return time.Date(2026, 8, 12, 0, 0, 0, 0, time.UTC)
+}
+
+// submitOnboarding posts body to a freshly provisioned user via a Handler
+// wired to referenceNow, and returns the saved user.User row.
+func submitOnboarding(t *testing.T, body string) user.User {
+	t.Helper()
+	db := handlerTestDB(t)
+	fuid := uuid.NewString()
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", fuid) })
+
+	userRepo := user.NewRepository(db)
+	_, err := userRepo.UpsertByFirebaseUID(t.Context(), fuid, fuid+"@test.dev")
+	require.NoError(t, err)
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	h := Handler{users: userRepo, now: func() time.Time { return referenceNow(t) }}
+	r.POST("/v1/onboarding", withUID(fuid), user.ResolveMiddleware(userRepo), h.Submit)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/v1/onboarding", bytes.NewReader([]byte(body)))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	uid, err := userRepo.IDByFirebaseUID(t.Context(), fuid)
+	require.NoError(t, err)
+	saved, err := userRepo.ByID(t.Context(), uid)
+	require.NoError(t, err)
+	return saved
+}
+
+func TestSubmitPersistsDestination(t *testing.T) {
+	body := `{"sex":"male","birth_year":1995,"height_cm":178,"weight_kg":84,` +
+		`"activity_level":"moderate","goal":"fat_loss",` +
+		`"goal_weight_kg":78,"pace_kg_per_week":0.5}`
+
+	saved := submitOnboarding(t, body) // returns the user.User the handler saved
+
+	require.Equal(t, 78.0, saved.GoalWeightKg)
+	require.Equal(t, 0.5, saved.PaceKgPerWeek)
+	require.NotNil(t, saved.TargetDate)
+	// 6kg at 0.5kg/week is 12 weeks — 84 days from the handler's clock.
+	require.Equal(t, 84, int(saved.TargetDate.Sub(referenceNow(t)).Hours()/24))
+}
+
+func TestSubmitAcceptsMaintenanceWithoutDestination(t *testing.T) {
+	body := `{"sex":"female","birth_year":2000,"height_cm":165,"weight_kg":65,` +
+		`"activity_level":"light","goal":"maintenance"}`
+
+	saved := submitOnboarding(t, body)
+
+	require.Equal(t, 0.0, saved.GoalWeightKg)
+	require.Nil(t, saved.TargetDate)
 }
