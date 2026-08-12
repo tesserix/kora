@@ -562,7 +562,7 @@ func (r Repository) CountForUser(ctx context.Context, userID uuid.UUID) (int64, 
 }
 ```
 
-Note on `Replace`: `updated_at` is set explicitly with `gorm.Expr("now()")` because a map-based `Updates` bypasses GORM's `autoUpdateTime` hook.
+Note on `Replace`: an earlier draft of this plan set `updated_at` explicitly with `gorm.Expr("now()")`, on the belief that a map-based `Updates` bypasses GORM's `autoUpdateTime` hook. **That is false on gorm v1.31.2** — verified during Task 2 by removing the explicit entry and confirming `TestReplaceAdvancesUpdatedAt` still passes. Do not add it: the `autoUpdateTime` tag on `Recipe.UpdatedAt` covers the map-update path, and the explicit entry is redundant with a misleading comment attached. The test guards the real property either way.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
