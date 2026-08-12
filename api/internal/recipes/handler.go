@@ -60,7 +60,7 @@ func (h Handler) List(c *gin.Context) {
 	}
 	out, err := h.svc.List(c.Request.Context(), userID)
 	if err != nil {
-		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not list recipes")
+		httpx.RespondServiceError(c, err)
 		return
 	}
 	httpx.OK(c, out)

@@ -83,10 +83,6 @@ type Deps struct {
 	// not configured in every environment — and user.Service.Delete skips
 	// revocation rather than failing when it is.
 	AppleRevoker user.AppleRevoker
-	// AIProvider is the same provider instance the resolve engine uses. It is
-	// nil when no provider key is configured, which disables recipe parsing
-	// (not recipes themselves).
-	AIProvider ai.Provider
 }
 
 func NewRouter(deps Deps) *gin.Engine {
@@ -216,14 +212,17 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.PUT("/saved-meals/:id", smHandler.Update)
 		v1.DELETE("/saved-meals/:id", smHandler.Delete)
 
-		// Recipes. The parser is nil when the resolve engine is disabled (no
-		// provider key) — Handler.Parse then returns 503 and the manual
-		// editor still works, so recipes degrade rather than disappear.
+		// Recipes. Reuses the same ai.Provider instance the coach handler and
+		// resolve engine already use — there is no reason recipe parsing
+		// would ever need a different one. The parser is nil when that
+		// provider is unset (no provider key configured) — Handler.Parse
+		// then returns 503 and the manual editor still works, so recipes
+		// degrade rather than disappear.
 		recipeSvc := recipes.NewService(recipes.NewRepository(deps.DB), foodRepo).
 			WithBatchLogger(foodlog.NewService(logRepo, foodRepo))
 		var recipeParser *recipes.Parser
-		if deps.AIProvider != nil {
-			recipeParser = recipes.NewParser(deps.AIProvider, foodRepo)
+		if deps.Provider != nil {
+			recipeParser = recipes.NewParser(deps.Provider, foodRepo)
 		}
 		recipeHandler := recipes.NewHandler(recipeSvc, recipeParser)
 		v1.GET("/recipes", recipeHandler.List)

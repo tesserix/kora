@@ -15,10 +15,35 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
+	"github.com/tesserix/kora/api/internal/ai"
 	"github.com/tesserix/kora/api/internal/auth"
 	"github.com/tesserix/kora/api/internal/bffauth"
 	"github.com/tesserix/kora/api/internal/resolve"
 )
+
+// stubProvider is a minimal ai.Provider — never invoked, only used to prove a
+// non-nil Provider is wired into the router the same way as a nil one.
+type stubProvider struct{}
+
+func (stubProvider) IdentifyText(context.Context, string) ([]ai.Guess, ai.Usage, error) {
+	return nil, ai.Usage{}, nil
+}
+func (stubProvider) IdentifyPhoto(context.Context, []byte, string) ([]ai.Guess, ai.Usage, error) {
+	return nil, ai.Usage{}, nil
+}
+func (stubProvider) Decompose(context.Context, string) ([]ai.IngredientGuess, ai.Usage, error) {
+	return nil, ai.Usage{}, nil
+}
+func (stubProvider) Embed(context.Context, string) ([]float32, ai.Usage, error) {
+	return nil, ai.Usage{}, nil
+}
+func (stubProvider) Transcribe(context.Context, []byte, string) (string, ai.Usage, error) {
+	return "", ai.Usage{}, nil
+}
+func (stubProvider) GenerateText(context.Context, string, string) (string, ai.Usage, error) {
+	return "", ai.Usage{}, nil
+}
+func (stubProvider) Name() string { return "stub" }
 
 func TestHealthEndpoint(t *testing.T) {
 	r := NewRouter(Deps{})
@@ -84,7 +109,7 @@ func TestResolveRoutesAbsentWhenResolverNil(t *testing.T) {
 }
 
 // recipeRoutes is the full set of recipe routes; used to confirm they are
-// always registered regardless of AIProvider.
+// always registered regardless of Deps.Provider.
 var recipeRoutes = []struct{ method, path string }{
 	{"GET", "/v1/recipes"},
 	{"POST", "/v1/recipes"},
@@ -95,8 +120,13 @@ var recipeRoutes = []struct{ method, path string }{
 	{"POST", "/v1/recipes/:id/log"},
 }
 
-func TestRecipeRoutesRegistered(t *testing.T) {
-	r := NewRouter(Deps{DB: &gorm.DB{}, Verifier: stubVerifier{}})
+// TestRecipeRoutesRegisteredWithProvider proves recipe routes register the
+// same way with a real (non-nil) ai.Provider wired in — the counterpart to
+// TestRecipeRoutesRegisteredWithoutProvider below. Route registration is
+// static regardless of Provider, so this is deliberately the same assertion
+// as the nil case; see that test's comment for why both are kept.
+func TestRecipeRoutesRegisteredWithProvider(t *testing.T) {
+	r := NewRouter(Deps{DB: &gorm.DB{}, Verifier: stubVerifier{}, Provider: stubProvider{}})
 	routes := r.Routes()
 	for _, rt := range recipeRoutes {
 		if !hasRoute(routes, rt.method, rt.path) {
@@ -105,16 +135,16 @@ func TestRecipeRoutesRegistered(t *testing.T) {
 	}
 }
 
-// TestRecipeRoutesRegisteredWhenAIProviderNil pins the degrade-not-disappear
+// TestRecipeRoutesRegisteredWithoutProvider pins the degrade-not-disappear
 // contract: recipes must stay fully usable — list/get/create/update/delete/log
 // all work — even when no AI provider key is configured. Only Handler.Parse's
-// BEHAVIOR (not its registration) changes when AIProvider is nil.
-func TestRecipeRoutesRegisteredWhenAIProviderNil(t *testing.T) {
-	r := NewRouter(Deps{DB: &gorm.DB{}, Verifier: stubVerifier{}}) // AIProvider nil
+// BEHAVIOR (not its registration) changes when Provider is nil.
+func TestRecipeRoutesRegisteredWithoutProvider(t *testing.T) {
+	r := NewRouter(Deps{DB: &gorm.DB{}, Verifier: stubVerifier{}}) // Provider nil
 	routes := r.Routes()
 	for _, rt := range recipeRoutes {
 		if !hasRoute(routes, rt.method, rt.path) {
-			t.Errorf("expected %s %s to still be registered with AIProvider nil", rt.method, rt.path)
+			t.Errorf("expected %s %s to still be registered with Provider nil", rt.method, rt.path)
 		}
 	}
 }
