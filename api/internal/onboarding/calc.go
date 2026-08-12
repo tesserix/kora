@@ -58,6 +58,16 @@ const (
 	kcalPerGramFat   = 9.0
 	kcalPerGramMacro = 4.0 // protein and carbs
 
+	// Plausibility bounds mirroring the client's own ruler and validation
+	// limits (apps/mobile/src/lib/validateOnboarding.ts). The client copy
+	// exists for message quality, not trust — these bounds are what actually
+	// stop a physically incoherent measurement from reaching the calorie and
+	// macro math below.
+	minWeightKg = 20.0
+	maxWeightKg = 500.0
+	minHeightCm = 50.0
+	maxHeightCm = 260.0
+
 	// KcalPerKg is the energy density of body mass used to turn a weekly
 	// rate of change into a daily calorie adjustment.
 	KcalPerKg = 7700.0
@@ -88,8 +98,11 @@ func Calculate(in Input, currentYear int) (Targets, error) {
 	if in.Sex != "male" && in.Sex != "female" {
 		return Targets{}, fmt.Errorf("onboarding: sex must be male or female")
 	}
-	if in.HeightCm <= 0 || in.WeightKg <= 0 {
-		return Targets{}, fmt.Errorf("onboarding: height and weight must be positive")
+	if in.WeightKg < minWeightKg || in.WeightKg > maxWeightKg {
+		return Targets{}, fmt.Errorf("onboarding: weight_kg out of range")
+	}
+	if in.HeightCm < minHeightCm || in.HeightCm > maxHeightCm {
+		return Targets{}, fmt.Errorf("onboarding: height_cm out of range")
 	}
 	age := currentYear - in.BirthYear
 	if age <= 0 || age > maxAgeYears {
@@ -112,6 +125,22 @@ func Calculate(in Input, currentYear int) (Targets, error) {
 		if in.PaceKgPerWeek > in.WeightKg*maxPaceFractionOfBodyweight {
 			return Targets{}, fmt.Errorf("onboarding: pace_kg_per_week exceeds 1%% of bodyweight")
 		}
+		// GoalWeightKg stays optional (see the Input doc comment), but once
+		// supplied it must be a plausible body weight and must point the
+		// direction the goal actually moves — otherwise a target_date gets
+		// derived and stored for a journey the calorie target moves away
+		// from (handler.go takes math.Abs, so it never notices on its own).
+		if in.GoalWeightKg > 0 {
+			if in.GoalWeightKg < minWeightKg || in.GoalWeightKg > maxWeightKg {
+				return Targets{}, fmt.Errorf("onboarding: goal_weight_kg out of range")
+			}
+			if in.Goal == "fat_loss" && in.GoalWeightKg > in.WeightKg {
+				return Targets{}, fmt.Errorf("onboarding: goal_weight_kg is above weight_kg for a fat_loss goal")
+			}
+			if in.Goal == "muscle_gain" && in.GoalWeightKg < in.WeightKg {
+				return Targets{}, fmt.Errorf("onboarding: goal_weight_kg is below weight_kg for a muscle_gain goal")
+			}
+		}
 	}
 
 	bmr := bmrWeightCoef*in.WeightKg + bmrHeightCoef*in.HeightCm - bmrAgeCoef*float64(age)
@@ -119,6 +148,13 @@ func Calculate(in Input, currentYear int) (Targets, error) {
 		bmr += bmrMaleOffset
 	} else {
 		bmr += bmrFemaleOffset
+	}
+	if bmr <= 0 {
+		// Each input passed its own range check, but the combination is
+		// still physically incoherent (e.g. a very old, very light, very
+		// short body) — this must never reach the macro split, which
+		// assumes a positive calorie budget.
+		return Targets{}, fmt.Errorf("onboarding: computed bmr is not positive")
 	}
 	tdee := bmr * factor
 
