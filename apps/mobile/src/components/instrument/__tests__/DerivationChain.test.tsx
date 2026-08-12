@@ -31,4 +31,14 @@ describe("DerivationChain", () => {
     expect(r.getByTestId("chain-row-0-was")).toHaveTextContent("0.5 kg/wk");
     expect(r.getByText("0.25 kg/wk")).toBeTruthy();
   });
+
+  // A proposal identical to the current value isn't a change. Rendering a
+  // strikethrough for it would claim something happened when it didn't.
+  it("treats a proposal equal to the current value as no proposal at all", async () => {
+    const r = await render(
+      <DerivationChain rows={[{ label: "Pace", value: "0.5 kg/wk", proposed: "0.5 kg/wk" }]} testID="chain" />,
+    );
+    expect(r.queryByTestId("chain-row-0-was")).toBeNull();
+    expect(r.getAllByText("0.5 kg/wk")).toHaveLength(1);
+  });
 });

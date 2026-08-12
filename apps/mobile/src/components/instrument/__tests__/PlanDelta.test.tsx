@@ -83,6 +83,36 @@ describe("PlanDelta", () => {
     expect(r.getByTestId("delta-text")).toHaveTextContent("+140 kcal from that change");
   });
 
+  // Deleting `return () => clearTimeout(timer)` would let a superseded timer
+  // fire alongside the surviving one. Both write to the same `message`
+  // state, so a "both fired" assertion made only after the fact can't tell
+  // the difference — the second write silently overwrites the first and the
+  // final DOM looks correct either way. The only way to catch a leaked timer
+  // is to look at a moment BETWEEN the two firings: with cleanup, nothing has
+  // been said yet; without it, the stale announcement is already on screen.
+  it("cancels a superseded announcement rather than letting both fire", async () => {
+    const r = await render(<PlanDelta kcal={2000} floored={false} revision={0} testID="delta" />);
+    // revision 1 at t=0 schedules "+100" for t=600
+    await r.rerender(<PlanDelta kcal={2100} floored={false} revision={1} testID="delta" />);
+    await act(async () => {
+      jest.advanceTimersByTime(300);
+    });
+    // revision 2 at t=300 supersedes it and schedules "+40" for t=900
+    await r.rerender(<PlanDelta kcal={2140} floored={false} revision={2} testID="delta" />);
+    await act(async () => {
+      jest.advanceTimersByTime(350);
+    });
+    // t=650. Without the cleanup, the superseded t=600 timer has already
+    // fired and "+100 kcal from that change" is on screen. With it, nothing
+    // has been announced yet.
+    expect(r.queryByTestId("delta-text")).toBeNull();
+    await act(async () => {
+      jest.advanceTimersByTime(300);
+    });
+    // t=950: only the surviving announcement lands.
+    expect(r.getByTestId("delta-text")).toHaveTextContent("+40 kcal from that change");
+  });
+
   it("announces politely so a drag does not interrupt the screen reader", async () => {
     const r = await render(<PlanDelta kcal={2244} floored={false} revision={0} testID="delta" />);
     await r.rerender(<PlanDelta kcal={2484} floored={false} revision={1} testID="delta" />);

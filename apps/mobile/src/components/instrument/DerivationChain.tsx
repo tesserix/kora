@@ -20,38 +20,44 @@ export function DerivationChain({ rows, testID = "derivation-chain" }: Derivatio
 
   return (
     <View testID={testID}>
-      {rows.map((row, i) => (
-        <View
-          key={row.label}
-          testID={`${testID}-row-${i}`}
-          style={{
-            flexDirection: "row",
-            justifyContent: "space-between",
-            alignItems: "baseline",
-            gap: spacing.sm,
-            paddingVertical: spacing.xs + 2,
-            borderBottomWidth: i === rows.length - 1 ? 0 : 1,
-            borderBottomColor: instrument.hairline,
-          }}
-        >
-          <AppText variant="footnote" muted>
-            {row.label}
-          </AppText>
-          <View style={{ flexDirection: "row", alignItems: "baseline", gap: spacing.xs }}>
-            {row.proposed ? (
-              <AppText
-                testID={`${testID}-row-${i}-was`}
-                variant="footnote"
-                muted
-                style={{ textDecorationLine: "line-through" }}
-              >
-                {row.value}
-              </AppText>
-            ) : null}
-            <Numeral>{row.proposed ?? row.value}</Numeral>
+      {rows.map((row, i) => {
+        // A proposal equal to the current value isn't a change — showing a
+        // strikethrough diff for it would claim something happened when it
+        // didn't.
+        const hasProposal = row.proposed !== undefined && row.proposed !== row.value;
+        return (
+          <View
+            key={row.label}
+            testID={`${testID}-row-${i}`}
+            style={{
+              flexDirection: "row",
+              justifyContent: "space-between",
+              alignItems: "baseline",
+              gap: spacing.sm,
+              paddingVertical: spacing.xs + 2,
+              borderBottomWidth: i === rows.length - 1 ? 0 : 1,
+              borderBottomColor: instrument.hairline,
+            }}
+          >
+            <AppText variant="footnote" muted>
+              {row.label}
+            </AppText>
+            <View style={{ flexDirection: "row", alignItems: "baseline", gap: spacing.xs }}>
+              {hasProposal ? (
+                <AppText
+                  testID={`${testID}-row-${i}-was`}
+                  variant="footnote"
+                  muted
+                  style={{ textDecorationLine: "line-through" }}
+                >
+                  {row.value}
+                </AppText>
+              ) : null}
+              <Numeral>{hasProposal ? row.proposed : row.value}</Numeral>
+            </View>
           </View>
-        </View>
-      ))}
+        );
+      })}
     </View>
   );
 }
