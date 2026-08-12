@@ -25,12 +25,12 @@ type Props = {
 // The back control still matches ScreenHeader's conventions ("Go back",
 // selection haptic, arrow-left) so the two feel identical in use.
 export function AuthScaffold({ children, footer, header, onBack, progress }: Props) {
-  const { colors, spacing } = useTheme();
+  const { colors, instrument, spacing } = useTheme();
   const insets = useSafeAreaInsets();
   const hasNavRow = Boolean(onBack || progress);
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
+    <View style={{ flex: 1, backgroundColor: instrument.bg }}>
       <AppBackground />
 
       {hasNavRow ? (

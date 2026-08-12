@@ -1,4 +1,5 @@
 import { fireEvent, render } from "@testing-library/react-native";
+import { StyleSheet } from "react-native";
 import { Field } from "../Field";
 
 test("renders a persistent label above the input", async () => {
@@ -52,4 +53,17 @@ test("renders the error slot only when an error is supplied", async () => {
 
   const withoutError = await render(<Field label="Email" value="" onChangeText={jest.fn()} />);
   expect(withoutError.queryByTestId("field-error")).toBeNull();
+});
+
+// Instrument Glass: the label is engraved — uppercase via style (the text
+// node itself stays sentence case, "Weight"; textTransform is a rendering
+// style, not a text-content change) at the 9px/mut engraved-label size.
+test("renders its label engraved and its input on an inset well", async () => {
+  const { getByText } = await render(
+    <Field label="Weight" value="84" onChangeText={jest.fn()} testID="field" />,
+  );
+  const label = getByText("Weight");
+  const flattened = StyleSheet.flatten(label.props.style);
+  expect(flattened.textTransform).toBe("uppercase");
+  expect(flattened.fontSize).toBe(9);
 });

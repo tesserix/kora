@@ -4,7 +4,7 @@ import { router } from "expo-router";
 import { AppText } from "@/components/Text";
 import { Button } from "@/components/Button";
 import { Overline } from "@/components/Overline";
-import { Segmented } from "@/components/Segmented";
+import { SegmentedGlass } from "@/components/instrument/SegmentedGlass";
 import { Numeral } from "@/components/Numeral";
 import { AuthScaffold } from "@/components/AuthScaffold";
 import { ActivityFromHealth } from "@/components/ActivityFromHealth";
@@ -318,7 +318,7 @@ export default function Onboarding() {
       </AppText>
 
       <Overline style={{ marginTop: spacing.sm }}>You</Overline>
-      <Segmented options={SEX_OPTIONS} value={sex} onChange={onSexChange} />
+      <SegmentedGlass options={SEX_OPTIONS} value={sex} onChange={onSexChange} />
 
       <View style={{ gap: spacing.md }}>
         <View>
