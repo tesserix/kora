@@ -41,7 +41,7 @@ const READABLE_PROBE_DAYS = 7;
 // queryQuantitySamples returns every source's samples — iPhone, Apple Watch, and any
 // third-party app — with no deduplication, so a Watch user's total came out inflated
 // and disagreed both with the Health app and with Kora's own widget. Only a statistics
-// query applies HealthKit's source-priority dedup. targets/kora-widgets/StepsWidget.swift
+// query applies HealthKit's source-priority dedup. targets/kora-widgets/HealthReader.swift
 // already does exactly this (HKStatisticsQuery with .cumulativeSum); this mirrors it.
 const CUMULATIVE_SUM: readonly ["cumulativeSum"] = ["cumulativeSum"];
 

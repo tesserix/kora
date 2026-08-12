@@ -121,10 +121,12 @@ Typographic, so it survives the white mask.
 
 `widgetURL` by configured metric: Reserve and Protein → `mobile:///` (Today),
 Steps → `mobile:///progress` (Trends — the URL the existing `StepsWidget` already
-uses; expo-router route groups such as `(tabs)` do not appear in the URL). On
-`systemLarge`, meal rows get their own
-`Link` destinations into `mobile:///meal?id=…` — large is the only family with room
-for distinct tap regions.
+uses; expo-router route groups such as `(tabs)` do not appear in the URL).
+
+Every family uses that single `widgetURL` destination. An earlier draft gave
+`systemLarge`'s meal rows their own `Link` destinations into `mobile:///meal?id=…`;
+that died with the meal list, for the same reason (the wire format carries no meal
+ids). With no per-row targets left, large has nothing to distinguish from the others.
 
 ## States
 
@@ -209,3 +211,45 @@ returning to the home screen.
 - `useActivityHistory` still sums raw `queryQuantitySamples` for per-day bucketing
   and inherits the multi-source inflation this spec fixes elsewhere, skewing the
   inferred activity level and therefore the calorie target. Own task.
+
+## Verification
+
+Recorded 2026-08-12 on branch `feat/kora-configurable-widget` (commits `919c042`..`f4fde4e`).
+
+### Automated — passed
+
+| Check | Result |
+| --- | --- |
+| `swift test` (widget-core-tests) | 40 tests, 0 failures |
+| `npm test` (apps/mobile) | 149 suites / 1181 tests, 0 failures |
+| `npx tsc --noEmit` | clean |
+| `npx expo prebuild --platform ios` | succeeded |
+| Deployment targets after prebuild | app `16.4`, `korawidgets` extension `17.0` — as designed |
+| `xcodebuild` Debug, iPhone 17 Pro simulator | **BUILD SUCCEEDED** — first compile of all 11 widget Swift files, zero errors |
+| Widget extension embedded | `Kora.app/PlugIns/korawidgets.appex` present |
+| App writes the App Group snapshot | `group.com.tesserix.kora` → `nutritionSnapshot`, all 10 fields, today's date |
+| Live wire format vs `NutritionSnapshot` | exact key match, both directions — nothing would fail decode |
+
+The Xcode build is the significant one: `swift test` only ever compiles the four pure
+Foundation files, so every SwiftUI view, the AppIntents configuration, the HealthKit
+reader and the timeline provider were unverified by any compiler until this point.
+
+### Manual gates — NOT yet run
+
+Widget placement cannot be automated in this environment (macOS accessibility
+permission is not granted to the shell, so no tap driver is available), and gate 2
+cannot be reproduced on a simulator at all.
+
+| # | Gate | Where | Status |
+| --- | --- | --- | --- |
+| 1 | Steps with Health granted: widget matches the Health app AND matches Home | device | not run |
+| 2 | **Steps with Health denied: renders `—`, not `0`** | **physical device only** | **not run — BLOCKING** |
+| 3 | Sign out → widget reverts to "Open Kora" (issue #135) | simulator or device | not run |
+| 4 | Midnight rollover: stale snapshot does not render yesterday as today | either | not run |
+| 5 | Lock Screen rectangular + inline legible under the white mask | either | not run |
+| 6 | iOS 18 tinted home screen | either | not run |
+| 7 | Long-press → Edit switches metric across all families | either | not run |
+| 8 | Unknown-day vs real-zero-day bars in the 7-day strip are visually distinguishable (they differ by fill opacity, only 1pt in height) | either | not run |
+
+**Gate 2 remains the blocking condition.** If it cannot be run, apply this spec's
+stated fallback: ship with Reserve and Protein only and hold Steps back until it can.

@@ -1,0 +1,1 @@
+../../../targets/kora-widgets/EmptyStateCopy.swift
