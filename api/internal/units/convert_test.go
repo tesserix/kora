@@ -112,8 +112,15 @@ func TestParsePhrase(t *testing.T) {
 		wantOK     bool
 	}{
 		{phrase: "150g", wantAmount: 150, wantUnit: "g", wantOK: true},
+		{phrase: "400 ml", wantAmount: 400, wantUnit: "ml", wantOK: true},
 		{phrase: "1 tbsp", wantAmount: 1, wantUnit: "tbsp", wantOK: true},
-		{phrase: "2 sachets", wantAmount: 2, wantUnit: "sachets", wantOK: true},
+		// Plurals singularise so they match a serving unit's singular name —
+		// an AI extractor emits "2 cloves", "3 eggs" constantly, and without
+		// this a stated quantity silently falls back to a one-serving guess.
+		{phrase: "2 sachets", wantAmount: 2, wantUnit: "sachet", wantOK: true},
+		{phrase: "2 cloves", wantAmount: 2, wantUnit: "clove", wantOK: true},
+		{phrase: "1 clove", wantAmount: 1, wantUnit: "clove", wantOK: true},
+		{phrase: "3 eggs", wantAmount: 3, wantUnit: "egg", wantOK: true},
 		{phrase: "", wantOK: false},
 		{phrase: "a pinch", wantOK: false},
 	}

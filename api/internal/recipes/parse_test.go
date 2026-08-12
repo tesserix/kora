@@ -2,6 +2,7 @@ package recipes
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -196,6 +197,42 @@ func TestParseMarksPortionAssumedWhenNoPortionPhrase(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, d.Ingredients[0].PortionAssumed)
 	require.Greater(t, d.Ingredients[0].Grams, 0.0)
+}
+
+// TestParseSingularisesPluralUnitAgainstServingUnit is the regression guard
+// for the live-smoke defect: a Gemini extraction of "2 cloves garlic" was
+// silently understated 2x because the food's serving unit is singular
+// ("clove") while the model's stated unit is plural ("cloves"), and exact
+// matching let the stated quantity fall through to a one-serving guess. The
+// fix lives in units.ParsePhrase; this test proves it end-to-end through the
+// parser, which a units-level test alone would not catch.
+func TestParseSingularisesPluralUnitAgainstServingUnit(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+
+	garlic := nutrition.FoodItem{
+		Name: "RC Garlic " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD,
+		BaseUnit:     "g",
+		ServingUnits: json.RawMessage(`[{"name":"clove","amount":1,"base_amount":3}]`),
+		KcalPer100g:  100,
+	}
+	garlic.NormalizedName = nutrition.Normalize(garlic.Name)
+	require.NoError(t, db.Create(&garlic).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", garlic.ID) })
+
+	p := NewParser(&stubProvider{generated: `{
+		"name": "Test",
+		"servings": 1,
+		"ingredients": [
+			{"text": "` + garlic.Name + `", "amount": 2, "unit": "cloves"}
+		]
+	}`}, nutrition.NewRepository(db))
+
+	d, err := p.ParseText(context.Background(), userID, "…pasted recipe…")
+	require.NoError(t, err)
+	require.Len(t, d.Ingredients, 1)
+	require.Equal(t, 6.0, d.Ingredients[0].Grams, "2 cloves against a 3g clove serving must resolve to 6g, not a 3g one-serving guess")
+	require.False(t, d.Ingredients[0].PortionAssumed, "a stated quantity that resolved against a real serving unit must never be reported as a guess")
 }
 
 func TestDraftIsNeverPersisted(t *testing.T) {

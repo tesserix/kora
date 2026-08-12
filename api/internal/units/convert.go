@@ -112,5 +112,11 @@ func ParsePhrase(phrase string) (amount float64, unit string, ok bool) {
 	if err != nil || amt <= 0 {
 		return 0, "", false
 	}
-	return amt, strings.ToLower(m[2]), true
+	// Singularise so a plural like "cloves" matches a serving unit named
+	// "clove" — an AI extractor emits plurals ("2 cloves", "3 eggs") as the
+	// common case, not the exception, and ResolveEntered's match is exact.
+	// singular() is a no-op for short base units (g, ml, kg, oz, tbsp, tsp)
+	// since none of them end in a bare "s", so "150g", "400 ml", and "1
+	// tbsp" resolve exactly as before.
+	return amt, singular(strings.ToLower(m[2])), true
 }
