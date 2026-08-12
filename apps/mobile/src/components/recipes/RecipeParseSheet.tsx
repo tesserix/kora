@@ -14,7 +14,6 @@ import { useToast } from "@/components/Toast";
 import { useCreateRecipe, useParseRecipe } from "@/api/hooks";
 import { ApiError } from "@/lib/api";
 import { buildCaptureForm } from "@/api/resolveWire";
-import { getFoodById } from "@/offline/foodCache";
 import type { FoodItem, Recipe, RecipeDraft, RecipeIngredientInput, SaveRecipeBody } from "@/api/types";
 import { ServingsStepper } from "./ServingsStepper";
 import { useTheme } from "@/theme";
@@ -115,7 +114,6 @@ function parseErrorMessage(error: unknown): string {
 
 interface ParsedIngredientRowProps {
   ingredient: RecipeIngredientInput;
-  resolvedName: string | null;
   onFindMatch: () => void;
   onRemove: () => void;
 }
@@ -124,13 +122,21 @@ interface ParsedIngredientRowProps {
 // further back, capture/DetectedCard's confidence/assumed-portion treatment)
 // — italic/mut raw text plus an uppercase engraved tag for an unresolved row,
 // the same engraved "portion is a guess" tag for portion_assumed (#138). Kept
-// as its own component (RecipeIngredientInput has no `resolved`/`name` field
-// the way the server-computed RecipeIngredient does) rather than importing
-// IngredientRow, which is a private, unexported function in a route file.
-function ParsedIngredientRow({ ingredient, resolvedName, onFindMatch, onRemove }: ParsedIngredientRowProps) {
+// as its own component (RecipeIngredientInput's `resolved` state is derived
+// from food_item_id here, rather than a boolean the server-computed
+// RecipeIngredient carries) rather than importing IngredientRow, which is a
+// private, unexported function in a route file.
+//
+// A resolved row shows BOTH sides of the match: `ingredient.name` (the
+// matched food's own canonical name, server-populated — see
+// IngredientInput.Name on the Go side) as the primary label, and raw_text
+// (what was actually searched for) as a secondary line — that's what makes
+// the confirmation meaningful; showing only one side would hide either what
+// the AI read or what it matched it to.
+function ParsedIngredientRow({ ingredient, onFindMatch, onRemove }: ParsedIngredientRowProps) {
   const { instrument, spacing } = useTheme();
   const resolved = ingredient.food_item_id !== null;
-  const label = resolved ? (resolvedName ?? ingredient.raw_text) : ingredient.raw_text;
+  const label = resolved ? (ingredient.name || ingredient.raw_text) : ingredient.raw_text;
   return (
     <View style={{ paddingHorizontal: spacing.md, paddingVertical: 10, gap: 2 }}>
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
@@ -149,6 +155,9 @@ function ParsedIngredientRow({ ingredient, resolvedName, onFindMatch, onRemove }
           {Math.round(ingredient.grams)} g
         </AppText>
       </View>
+      {resolved && ingredient.name && ingredient.name !== ingredient.raw_text ? (
+        <AppText style={{ color: instrument.mut, fontSize: 12 }}>Matched from "{ingredient.raw_text}"</AppText>
+      ) : null}
       {!resolved ? (
         <AppText
           style={{ color: instrument.mut, fontSize: 9, fontWeight: "700", textTransform: "uppercase", letterSpacing: 1 }}
@@ -208,7 +217,6 @@ export function RecipeParseSheet({ visible, onClose, initialMode }: RecipeParseS
   const [draftServings, setDraftServings] = useState(1);
   const [draftSource, setDraftSource] = useState<"paste" | "photo">("paste");
   const [draftIngredients, setDraftIngredients] = useState<RecipeIngredientInput[]>([]);
-  const [resolvedNames, setResolvedNames] = useState<Record<string, string>>({});
   const [matchTargetIndex, setMatchTargetIndex] = useState<number | null>(null);
 
   // Reseed everything on every open — this sheet stays mounted (only Sheet's
@@ -223,27 +231,9 @@ export function RecipeParseSheet({ visible, onClose, initialMode }: RecipeParseS
     setDraftName("");
     setDraftServings(1);
     setDraftIngredients([]);
-    setResolvedNames({});
     setMatchTargetIndex(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
-
-  // Best-effort: a resolved ingredient's matched name is not on the wire
-  // (RecipeIngredientInput carries food_item_id, never a name — only the
-  // full server-computed RecipeIngredient does, post-save). The offline food
-  // cache may already have it from a prior search/log; when it doesn't, the
-  // row falls back to raw_text, which is still a legible label.
-  async function hydrateResolvedNames(ingredients: RecipeIngredientInput[]) {
-    const ids = ingredients.map((i) => i.food_item_id).filter((id): id is string => id !== null);
-    const entries = await Promise.all(ids.map(async (id) => [id, await getFoodById(id)] as const));
-    setResolvedNames((prev) => {
-      const next = { ...prev };
-      for (const [id, item] of entries) {
-        if (item) next[id] = item.name;
-      }
-      return next;
-    });
-  }
 
   function applyDraft(draft: RecipeDraft) {
     setDraftName(draft.name);
@@ -252,7 +242,6 @@ export function RecipeParseSheet({ visible, onClose, initialMode }: RecipeParseS
     setDraftIngredients(draft.ingredients);
     setFallbackNotice(null);
     setStage("review");
-    void hydrateResolvedNames(draft.ingredients);
   }
 
   // The spec's explicit rule: a 502 parse_failed is never a dead end. Drops
@@ -309,9 +298,10 @@ export function RecipeParseSheet({ visible, onClose, initialMode }: RecipeParseS
 
   function resolveIngredientAt(index: number, item: FoodItem) {
     setDraftIngredients((prev) =>
-      prev.map((ing, i) => (i === index ? { ...ing, food_item_id: item.id, match_score: 1, match_tier: "manual" } : ing)),
+      prev.map((ing, i) =>
+        i === index ? { ...ing, food_item_id: item.id, name: item.name, match_score: 1, match_tier: "manual" } : ing,
+      ),
     );
-    setResolvedNames((prev) => ({ ...prev, [item.id]: item.name }));
     setMatchTargetIndex(null);
   }
 
@@ -417,7 +407,6 @@ export function RecipeParseSheet({ visible, onClose, initialMode }: RecipeParseS
                       <ParsedIngredientRow
                         key={`${ing.raw_text}-${ing.food_item_id ?? "unresolved"}-${index}`}
                         ingredient={ing}
-                        resolvedName={ing.food_item_id ? (resolvedNames[ing.food_item_id] ?? null) : null}
                         onFindMatch={() => setMatchTargetIndex(index)}
                         onRemove={() => removeIngredientAt(index)}
                       />

@@ -116,6 +116,42 @@ func TestParseTextDiscardsModelSuppliedMacros(t *testing.T) {
 	require.Equal(t, 200.0, d.Ingredients[0].Grams, "grams come from the portion, not the model's kcal")
 }
 
+// TestParseSetsMatchedFoodNameOnResolvedIngredient: the review sheet needs
+// the matched food's own canonical name to show what a resolved ingredient
+// actually matched — not just echo back the phrase it was searched for. An
+// alias is used (rather than passing the food's own name as the phrase, the
+// way the other tests here do) so the phrase and the matched food's Name are
+// GENUINELY different strings, proving Name came from the food row and not
+// merely from copying the search phrase back.
+func TestParseSetsMatchedFoodNameOnResolvedIngredient(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	foods := nutrition.NewRepository(db)
+	f := seedFood(t, db, 100)
+	phrase := "rc-alias-" + uuid.NewString()
+	require.NoError(t, foods.AddAlias(context.Background(), userID, phrase, f.ID))
+
+	p := NewParser(&stubProvider{generated: `{
+		"name": "Test Bowl",
+		"servings": 1,
+		"ingredients": [
+			{"text": "` + phrase + `", "amount": 100, "unit": "g"},
+			{"text": "an unmatchable ingredient", "amount": 1, "unit": "pinch"}
+		]
+	}`}, foods)
+
+	d, err := p.ParseText(context.Background(), userID, "…pasted recipe…")
+	require.NoError(t, err)
+	require.Len(t, d.Ingredients, 2)
+
+	require.NotNil(t, d.Ingredients[0].FoodItemID)
+	require.Equal(t, f.Name, d.Ingredients[0].Name, "the resolved ingredient's Name is the matched food's canonical name")
+	require.NotEqual(t, d.Ingredients[0].RawText, d.Ingredients[0].Name, "RawText (what was searched) and Name (what matched) must be visibly distinct")
+
+	require.Nil(t, d.Ingredients[1].FoodItemID)
+	require.Empty(t, d.Ingredients[1].Name, "an unresolved ingredient carries no matched name")
+}
+
 func TestParsePhotoDefaultsServingsAndNamesFromGuess(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db)

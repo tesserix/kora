@@ -37,10 +37,6 @@ jest.mock("@/api/hooks", () => ({
   useFoodSearch: () => ({ data: [], isLoading: false, isError: false, isOfflineCache: false }),
 }));
 
-jest.mock("@/offline/foodCache", () => ({
-  getFoodById: jest.fn(async () => null),
-}));
-
 jest.mock("@/components/Toast", () => ({
   useToast: () => ({ show: mockToastShow }),
 }));
@@ -49,6 +45,11 @@ import { RecipeParseSheet } from "../RecipeParseSheet";
 
 // One resolved ingredient, one unresolved, one portion_assumed — covers all
 // three row states the review stage renders in a single successful parse.
+// The resolved ingredients' `name` is deliberately DIFFERENT from their
+// `raw_text` (mirroring what the server actually sends: `name` is the
+// matched food's own canonical name, `raw_text` is the phrase that was
+// searched for) so a test asserting on `name` actually proves the row reads
+// the server-populated field rather than just echoing raw_text back.
 const draft: RecipeDraft = {
   name: "Omelette",
   servings: 2,
@@ -57,6 +58,7 @@ const draft: RecipeDraft = {
     {
       food_item_id: "egg-id",
       raw_text: "eggs",
+      name: "Free Range Eggs",
       grams: 100,
       entered_amount: null,
       entered_unit: null,
@@ -77,6 +79,7 @@ const draft: RecipeDraft = {
     {
       food_item_id: "butter-id",
       raw_text: "butter",
+      name: "Salted Butter",
       grams: 10,
       entered_amount: null,
       entered_unit: null,
@@ -108,9 +111,24 @@ test("a successful parse renders each extracted ingredient", async () => {
   fireEvent.changeText(await findByLabelText("Paste recipe text"), "2 eggs, butter");
   fireEvent.press(await findByText("Parse recipe"));
 
-  expect(await findByText("eggs")).toBeTruthy();
   expect(await findByText("mystery spice")).toBeTruthy();
-  expect(await findByText("butter")).toBeTruthy();
+  // Resolved rows label with a matched food's name, not the search phrase.
+  expect(await findByText("Free Range Eggs")).toBeTruthy();
+  expect(await findByText("Salted Butter")).toBeTruthy();
+});
+
+// The whole point of a confirmation row is showing both what was read AND
+// what it matched to — a resolved row that only ever showed one of the two
+// (either the search phrase, forever, or the matched name with no way to
+// see what it was matched FROM) would make the confirmation meaningless.
+test("a resolved ingredient shows the matched name AND what it was matched from", async () => {
+  mockParseMutate.mockImplementation((_input, { onSuccess }) => onSuccess(draft));
+  const { findByLabelText, findByText } = await render(<RecipeParseSheet visible onClose={() => {}} />);
+  fireEvent.changeText(await findByLabelText("Paste recipe text"), "2 eggs, butter");
+  fireEvent.press(await findByText("Parse recipe"));
+
+  expect(await findByText("Free Range Eggs")).toBeTruthy();
+  expect(await findByText('Matched from "eggs"')).toBeTruthy();
 });
 
 test("an unresolved ingredient is marked as needing a match", async () => {
@@ -158,7 +176,7 @@ test("saving posts the edited draft to /v1/recipes", async () => {
   const { findByLabelText, findByText } = await render(<RecipeParseSheet visible onClose={() => {}} />);
   fireEvent.changeText(await findByLabelText("Paste recipe text"), "2 eggs, butter");
   fireEvent.press(await findByText("Parse recipe"));
-  await findByText("eggs");
+  await findByText("Free Range Eggs");
 
   fireEvent.press(await findByText("Save recipe"));
 

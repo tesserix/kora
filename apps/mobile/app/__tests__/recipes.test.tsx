@@ -58,10 +58,6 @@ jest.mock("@/api/hooks", () => ({
   useFoodSearch: () => ({ data: [{ item: chickenBreast, match_score: 1, match_tier: "fulltext" }], isLoading: false, isError: false, isOfflineCache: false }),
 }));
 
-jest.mock("@/offline/foodCache", () => ({
-  getFoodById: jest.fn(async () => null),
-}));
-
 jest.mock("@/components/Toast", () => ({
   useToast: () => ({ show: mockToastShow }),
 }));

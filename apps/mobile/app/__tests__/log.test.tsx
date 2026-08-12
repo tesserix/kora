@@ -86,10 +86,6 @@ jest.mock("@/components/meals/SavedMealSheetProvider", () => ({
   useSavedMealEditor: () => ({ openCreate: mockOpenCreate, openEdit: mockOpenEdit, openBlank: mockOpenBlank }),
 }));
 
-jest.mock("@/offline/foodCache", () => ({
-  getFoodById: jest.fn(async () => null),
-}));
-
 jest.mock("@/components/Toast", () => ({
   useToast: () => ({ show: (o: { onAction?: () => void }) => o.onAction?.() }),
 }));

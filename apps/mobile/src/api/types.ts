@@ -473,6 +473,11 @@ export interface RecipeIngredientInput {
   portion_assumed?: boolean;
   match_score?: number | null;
   match_tier?: string | null;
+  /** SERVER-POPULATED on a parse draft only (the matched food's canonical
+   *  name, for display) — absent otherwise, and IGNORED by the server on
+   *  create/update, which re-derives the name from food_item_id. Never set
+   *  this from the client. */
+  name?: string;
 }
 
 export interface RecipeDraft {

@@ -86,6 +86,13 @@ type IngredientInput struct {
 	PortionAssumed bool     `json:"portion_assumed"`
 	MatchScore     *float64 `json:"match_score"`
 	MatchTier      *string  `json:"match_tier"`
+	// Name is SERVER-POPULATED on a parse draft (parse.go's resolveIngredient
+	// copies it from the matched food row) so the review sheet can show what
+	// a resolved ingredient actually matched, without a second round trip.
+	// Display only: IGNORED on create/update — validate() below re-derives
+	// the canonical name from FoodItemID via the food row every time, so a
+	// client-supplied value here is never trusted or validated.
+	Name string `json:"name,omitempty"`
 }
 
 type SaveRecipeRequest struct {

@@ -177,6 +177,9 @@ func (p *Parser) resolveIngredient(ctx context.Context, userID uuid.UUID, name, 
 	in.MatchScore = &top.MatchScore
 	tier := top.MatchTier
 	in.MatchTier = &tier
+	// Display-only, for the review sheet — see IngredientInput.Name's own
+	// comment. Left empty for the unresolved branch above.
+	in.Name = top.Item.Name
 
 	grams, assumed := portionGrams(portion, top.Item)
 	in.Grams = grams
