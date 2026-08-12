@@ -41,6 +41,11 @@ export function resolutionFromCachedFood(item: FoodItem): Resolution {
         // serving is genuine. The 100g floor is for a record whose serving
         // was never populated — a portion of 0 would log nothing.
         portion_grams: item.serving_grams > 0 ? item.serving_grams : 100,
+        // Mirrors the server's `barcodeCandidate` rule (`item.ServingGrams <= 0`
+        // in api/internal/resolve/handler.go) so a cache-fallback assumed
+        // portion is flagged exactly like a live one — unknown must never
+        // render like known.
+        portion_assumed: item.serving_grams <= 0,
         kcal: 0,
         kcal_unknown: true,
         match_score: 1,
