@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -152,4 +153,38 @@ func TestDeleteScopedAndCascades(t *testing.T) {
 	var n int64
 	require.NoError(t, db.Table("recipe_ingredients").Where("recipe_id = ?", r.ID).Count(&n).Error)
 	require.Zero(t, n, "ingredients must cascade with the recipe")
+}
+
+// TestReplaceAdvancesUpdatedAt verifies that the explicit gorm.Expr("now()")
+// in Replace actually advances updated_at. The map-based Updates bypasses
+// GORM's autoUpdateTime hook, so this explicit handling is load-bearing.
+func TestReplaceAdvancesUpdatedAt(t *testing.T) {
+	db := testDB(t)
+	repo := NewRepository(db)
+	owner := seedUser(t, db)
+	f1 := seedFood(t, db, 100)
+	f2 := seedFood(t, db, 200)
+	ctx := context.Background()
+
+	r, err := repo.Create(ctx,
+		Recipe{UserID: owner, Name: "Original", Servings: 2, Source: SourceManual},
+		[]Ingredient{{FoodItemID: &f1.ID, RawText: "a", Grams: 100}},
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Exec("DELETE FROM recipes WHERE id = ?", r.ID) })
+
+	initialUpdatedAt := r.UpdatedAt
+
+	// Sleep to ensure timestamp is genuinely different (Postgres now() is
+	// transaction-start time, so without this the timestamps could be equal
+	// within the same second).
+	time.Sleep(10 * time.Millisecond)
+
+	require.NoError(t, repo.Replace(ctx, owner, r.ID, "Modified", 6,
+		[]Ingredient{{FoodItemID: &f2.ID, RawText: "b", Grams: 50}}))
+
+	updated, err := repo.GetForUser(ctx, owner, r.ID)
+	require.NoError(t, err)
+	require.True(t, updated.UpdatedAt.After(initialUpdatedAt),
+		"updated_at must advance: was %v, now %v", initialUpdatedAt, updated.UpdatedAt)
 }
