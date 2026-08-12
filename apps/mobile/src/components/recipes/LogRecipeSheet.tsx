@@ -1,11 +1,10 @@
 import { useState } from "react";
-import { Pressable, View } from "react-native";
+import { View } from "react-native";
 import { Sheet } from "@/components/Sheet";
 import { Button } from "@/components/Button";
-import { AppText } from "@/components/Text";
 import { Overline } from "@/components/Overline";
 import { Segmented } from "@/components/Segmented";
-import { Icon } from "@/components/Icon";
+import { ServingsStepper } from "./ServingsStepper";
 import { useLogRecipe } from "@/api/hooks";
 import { useToast } from "@/components/Toast";
 import { useTheme } from "@/theme";
@@ -36,7 +35,7 @@ function logResultMessage(logged: number, skipped: string[]): string {
 }
 
 export function LogRecipeSheet({ visible, recipeId, defaultServings, onClose }: Props) {
-  const { instrument, spacing } = useTheme();
+  const { spacing } = useTheme();
   const [servings, setServings] = useState(defaultServings);
   const [mealSlot, setMealSlot] = useState<string>("lunch");
   const logRecipe = useLogRecipe();
@@ -67,43 +66,7 @@ export function LogRecipeSheet({ visible, recipeId, defaultServings, onClose }: 
 
         <View style={{ gap: spacing.xs }}>
           <Overline>Servings</Overline>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md }}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Decrease servings"
-              hitSlop={8}
-              onPress={() => setServings((s) => Math.max(1, s - 1))}
-              style={{
-                width: 32,
-                height: 32,
-                borderRadius: 16,
-                backgroundColor: instrument.inset,
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <Icon name="minus" size={16} color={instrument.accent} />
-            </Pressable>
-            <AppText style={{ fontSize: 17, fontWeight: "600", color: instrument.ink, minWidth: 32, textAlign: "center" }}>
-              {servings}
-            </AppText>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Increase servings"
-              hitSlop={8}
-              onPress={() => setServings((s) => s + 1)}
-              style={{
-                width: 32,
-                height: 32,
-                borderRadius: 16,
-                backgroundColor: instrument.inset,
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <Icon name="plus" size={16} color={instrument.accent} />
-            </Pressable>
-          </View>
+          <ServingsStepper value={servings} onChange={setServings} />
         </View>
 
         <Button title={logRecipe.isPending ? "Logging…" : "Log it"} onPress={onSubmit} disabled={logRecipe.isPending} />

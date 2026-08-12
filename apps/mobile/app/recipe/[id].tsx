@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Alert, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, useLocalSearchParams, type Href } from "expo-router";
@@ -12,8 +12,12 @@ import { Stat } from "@/components/Stat";
 import { Overline } from "@/components/Overline";
 import { Icon } from "@/components/Icon";
 import { PressableScale } from "@/motion";
+import { Sheet } from "@/components/Sheet";
+import { Button } from "@/components/Button";
+import { PortionField } from "@/components/units/PortionField";
 import { FoodPicker } from "@/components/meal/FoodPicker";
 import { LogRecipeSheet } from "@/components/recipes/LogRecipeSheet";
+import { ServingsStepper } from "@/components/recipes/ServingsStepper";
 import { useToast } from "@/components/Toast";
 import { useRecipe, useUpdateRecipe, useDeleteRecipe, useCreateRecipe } from "@/api/hooks";
 import type { FoodItem, Recipe, RecipeIngredient, RecipeIngredientInput } from "@/api/types";
@@ -49,6 +53,7 @@ function macroStat(label: string, grams: number) {
 interface IngredientRowProps {
   ingredient: RecipeIngredient;
   onFindMatch: () => void;
+  onEditAmount: () => void;
 }
 
 // An unresolved ingredient contributes zero macros and must show the raw
@@ -57,7 +62,11 @@ interface IngredientRowProps {
 // grams figure — issue #138's rule: that guess must never render as fact.
 // Same "engraved, mut, no accent" treatment DetectedCard.tsx uses for the
 // identical claim on the capture-review path, so the two surfaces agree.
-function IngredientRow({ ingredient, onFindMatch }: IngredientRowProps) {
+//
+// "Edit amount" is offered on every row, resolved or not — a wrong gram
+// figure (e.g. the manual editor's serving_grams default) is fixable
+// regardless of whether the food itself has been matched yet.
+function IngredientRow({ ingredient, onFindMatch, onEditAmount }: IngredientRowProps) {
   const { instrument, spacing } = useTheme();
   const label = ingredient.resolved ? ingredient.name : ingredient.raw_text;
   return (
@@ -91,43 +100,53 @@ function IngredientRow({ ingredient, onFindMatch }: IngredientRowProps) {
           portion is a guess
         </AppText>
       ) : null}
-      {!ingredient.resolved ? (
-        <PressableScale accessibilityRole="button" accessibilityLabel={`Find a match for ${ingredient.raw_text}`} haptic="selection" onPress={onFindMatch}>
-          <AppText style={{ fontSize: 13, fontWeight: "600", color: instrument.accent, marginTop: 2 }}>
-            Find a match
-          </AppText>
+      <View style={{ flexDirection: "row", gap: spacing.md, marginTop: 2 }}>
+        {!ingredient.resolved ? (
+          <PressableScale accessibilityRole="button" accessibilityLabel={`Find a match for ${ingredient.raw_text}`} haptic="selection" onPress={onFindMatch}>
+            <AppText style={{ fontSize: 13, fontWeight: "600", color: instrument.accent }}>Find a match</AppText>
+          </PressableScale>
+        ) : null}
+        <PressableScale accessibilityRole="button" accessibilityLabel={`Edit amount for ${label}`} haptic="selection" onPress={onEditAmount}>
+          <AppText style={{ fontSize: 13, fontWeight: "600", color: instrument.accent }}>Edit amount</AppText>
         </PressableScale>
-      ) : null}
+      </View>
     </View>
   );
 }
 
-function Stepper({ value, onChange, min = 1 }: { value: number; onChange: (next: number) => void; min?: number }) {
-  const { instrument } = useTheme();
+interface EditAmountSheetProps {
+  visible: boolean;
+  label: string;
+  grams: number;
+  onSave: (grams: number) => void;
+  onClose: () => void;
+}
+
+// Grams editor for a single ingredient, reusing PortionField (the same
+// component app/log.tsx and app/meal.tsx use for portion entry) rather than
+// a bespoke input. A recipe ingredient carries no `serving_units` of its
+// own, so this always renders PortionField's plain exact-entry mode — a
+// grams TextInput plus a single "g" chip — never the named-serving stepper
+// mode, which needs units this type doesn't have.
+function EditAmountSheet({ visible, label, grams, onSave, onClose }: EditAmountSheetProps) {
+  const { spacing } = useTheme();
+  const [pending, setPending] = useState(grams);
+
+  // Reseed from the ingredient's current grams every time the sheet opens —
+  // otherwise a previous edit's pending value would leak into the next
+  // ingredient this sheet is reused for.
+  useEffect(() => {
+    if (visible) setPending(grams);
+  }, [visible, grams]);
+
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 16 }}>
-      <PressableScale
-        accessibilityRole="button"
-        accessibilityLabel="Decrease servings"
-        haptic="selection"
-        onPress={() => onChange(Math.max(min, value - 1))}
-        style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: instrument.inset, alignItems: "center", justifyContent: "center" }}
-      >
-        <Icon name="minus" size={16} color={instrument.accent} />
-      </PressableScale>
-      <AppText style={{ fontSize: 17, fontWeight: "600", color: instrument.ink, minWidth: 24, textAlign: "center" }}>
-        {value}
-      </AppText>
-      <PressableScale
-        accessibilityRole="button"
-        accessibilityLabel="Increase servings"
-        haptic="selection"
-        onPress={() => onChange(value + 1)}
-        style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: instrument.inset, alignItems: "center", justifyContent: "center" }}
-      >
-        <Icon name="plus" size={16} color={instrument.accent} />
-      </PressableScale>
-    </View>
+    <Sheet visible={visible} onClose={onClose}>
+      <View style={{ paddingHorizontal: 22, paddingBottom: 30, gap: spacing.md }}>
+        <Overline>{`Edit amount — ${label}`}</Overline>
+        <PortionField baseUnit="g" servingUnits={[]} amount={pending} unit="g" onChange={(amount) => setPending(amount)} />
+        <Button title="Save" onPress={() => onSave(pending)} />
+      </View>
+    </Sheet>
   );
 }
 
@@ -143,6 +162,7 @@ export default function RecipeDetail() {
   const toast = useToast();
 
   const [matchTargetIndex, setMatchTargetIndex] = useState<number | null>(null);
+  const [gramsEditIndex, setGramsEditIndex] = useState<number | null>(null);
   const [logOpen, setLogOpen] = useState(false);
 
   // Manual-editor local state — only meaningful when isNew.
@@ -171,6 +191,20 @@ export default function RecipeDetail() {
       { onError: () => toast.show({ message: "Couldn't update that ingredient. Try again." }) },
     );
     setMatchTargetIndex(null);
+  };
+
+  // Same shape as resolveIngredient/saveServings: the FULL ingredient list
+  // is sent back with only this one ingredient's grams changed, and the
+  // server recomputes kcal/protein/carbs/fat/per-serving figures from it —
+  // nothing here is computed locally, matching the servings stepper's rule.
+  const saveIngredientGrams = (index: number, grams: number) => {
+    if (!r) return;
+    const ingredients = toIngredientInputs(r.ingredients).map((ing, i) => (i === index ? { ...ing, grams } : ing));
+    updateRecipe.mutate(
+      { id: r.id, body: { name: r.name, servings: r.servings, source: r.source, ingredients } },
+      { onError: () => toast.show({ message: "Couldn't update that ingredient's amount. Try again." }) },
+    );
+    setGramsEditIndex(null);
   };
 
   const onDelete = () => {
@@ -248,7 +282,7 @@ export default function RecipeDetail() {
 
               <View style={{ gap: spacing.xs }}>
                 <Overline>Servings</Overline>
-                <Stepper value={draftServings} onChange={setDraftServings} />
+                <ServingsStepper value={draftServings} onChange={setDraftServings} />
               </View>
 
               <View style={{ gap: spacing.xs }}>
@@ -344,14 +378,19 @@ export default function RecipeDetail() {
 
               <View style={{ gap: spacing.xs }}>
                 <Overline>Servings</Overline>
-                <Stepper value={r.servings} onChange={saveServings} />
+                <ServingsStepper value={r.servings} onChange={saveServings} />
               </View>
 
               <View style={{ gap: spacing.xs }}>
                 <Overline>Ingredients</Overline>
                 <GroupedSection>
                   {r.ingredients.map((ing, index) => (
-                    <IngredientRow key={index} ingredient={ing} onFindMatch={() => setMatchTargetIndex(index)} />
+                    <IngredientRow
+                      key={`${ing.raw_text}-${ing.food_item_id ?? "unresolved"}-${ing.grams}`}
+                      ingredient={ing}
+                      onFindMatch={() => setMatchTargetIndex(index)}
+                      onEditAmount={() => setGramsEditIndex(index)}
+                    />
                   ))}
                 </GroupedSection>
               </View>
@@ -406,6 +445,18 @@ export default function RecipeDetail() {
       ) : null}
 
       {r ? <LogRecipeSheet visible={logOpen} recipeId={r.id} defaultServings={r.servings} onClose={() => setLogOpen(false)} /> : null}
+
+      {r ? (
+        <EditAmountSheet
+          visible={gramsEditIndex !== null}
+          label={gramsEditIndex !== null ? (r.ingredients[gramsEditIndex].resolved ? r.ingredients[gramsEditIndex].name : r.ingredients[gramsEditIndex].raw_text) : ""}
+          grams={gramsEditIndex !== null ? r.ingredients[gramsEditIndex].grams : 0}
+          onSave={(grams) => {
+            if (gramsEditIndex !== null) saveIngredientGrams(gramsEditIndex, grams);
+          }}
+          onClose={() => setGramsEditIndex(null)}
+        />
+      ) : null}
     </>
   );
 }

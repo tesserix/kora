@@ -195,6 +195,29 @@ test("logging shows a toast naming skipped ingredients", async () => {
   );
 });
 
+test("editing an ingredient's amount sends the full list with only that ingredient's grams changed", async () => {
+  (useLocalSearchParams as jest.Mock).mockReturnValue({ id: "r1" });
+  mockRecipeData = baseRecipe();
+  const { findByLabelText, findByText } = await render(<RecipeDetail />);
+
+  fireEvent.press(await findByLabelText("Edit amount for Grilled chicken breast"));
+  fireEvent.changeText(await findByLabelText("Amount"), "350");
+  fireEvent.press(await findByText("Save"));
+
+  expect(mockUpdateMutate).toHaveBeenCalledWith(
+    expect.objectContaining({
+      id: "r1",
+      body: expect.objectContaining({
+        servings: 4,
+        ingredients: [
+          expect.objectContaining({ food_item_id: "f1", raw_text: "chicken breast", grams: 350 }),
+        ],
+      }),
+    }),
+    expect.anything(),
+  );
+});
+
 test("a failed mutation shows an error toast", async () => {
   (useLocalSearchParams as jest.Mock).mockReturnValue({ id: "r1" });
   mockRecipeData = baseRecipe();
