@@ -1,112 +1,205 @@
-import { useEffect, useState } from "react";
-import { BackHandler, View } from "react-native";
+import { useEffect, useMemo, useState } from "react";
+import { View } from "react-native";
 import { router } from "expo-router";
 import { AppText } from "@/components/Text";
 import { Button } from "@/components/Button";
 import { Overline } from "@/components/Overline";
 import { Segmented } from "@/components/Segmented";
-import { Field } from "@/components/Field";
-import { BrandLockup } from "@/components/BrandLockup";
-import { SelectableCard } from "@/components/SelectableCard";
+import { Numeral } from "@/components/Numeral";
 import { AuthScaffold } from "@/components/AuthScaffold";
-import { ActivityFromHealth } from "@/components/ActivityFromHealth";
-import { useActivityHistory } from "@/health/useActivityHistory";
+import { TickRuler } from "@/components/instrument/TickRuler";
+import { PlanDial } from "@/components/instrument/PlanDial";
+import { PlanDelta } from "@/components/instrument/PlanDelta";
+import { DerivationChain, type DerivationRow } from "@/components/instrument/DerivationChain";
 import { useSubmitOnboarding } from "@/api/hooks";
 import type { OnboardingInput } from "@/api/types";
 import { useTheme } from "@/theme";
-import { validateOnboardingNumbers } from "@/lib/validateOnboarding";
+import { validateGoalWeight, validateOnboardingNumbers } from "@/lib/validateOnboarding";
 import { apiErrorMessage } from "@/lib/apiErrorMessage";
 import { haptics } from "@/motion";
-import { cmFromFtIn, kgFromLb, useUnits } from "@/units";
+import { CM_PER_IN, kgFromLb, lbFromKg, useUnits, weightUnitLabel } from "@/units";
+import {
+  ACTIVITY_FACTORS,
+  availablePaces,
+  computePlan,
+  weeksToGoal,
+  type ActivityLevel,
+  type PlanGoal,
+} from "@/lib/plan";
 
-const GOALS: Array<{ id: OnboardingInput["goal"]; icon: string; title: string; sub: string }> = [
-  { id: "fat_loss", icon: "trending-down", title: "Lose weight", sub: "Gentle calorie deficit" },
-  { id: "maintenance", icon: "minus", title: "Maintain", sub: "Stay where you are" },
-  { id: "muscle_gain", icon: "trending-up", title: "Build muscle", sub: "Lean surplus + protein" },
-];
+type TouchedField = "age" | "height" | "weight";
+
+const GOAL_IDS: readonly PlanGoal[] = ["fat_loss", "maintenance", "muscle_gain"];
+const GOAL_LABELS = ["Lose weight", "Maintain", "Build muscle"] as const;
+const GOAL_CAPTIONS = ["Gentle calorie deficit", "Stay where you are", "Lean surplus + protein"];
 
 const SEX_OPTIONS: Array<{ key: OnboardingInput["sex"]; label: string }> = [
   { key: "male", label: "Male" },
   { key: "female", label: "Female" },
 ];
 
-// Descriptors do double duty: they explain what each level means, and they let
-// the levels render as cards instead of a five-way Segmented, which divided its
-// width equally and clipped "Sedentary" to "Sedentar/y".
-const ACTIVITY_OPTIONS: Array<{
-  key: OnboardingInput["activity_level"];
-  label: string;
-  sub: string;
-}> = [
-  { key: "sedentary", label: "Sedentary", sub: "Desk job, little walking" },
-  { key: "light", label: "Light", sub: "1–2 sessions a week" },
-  { key: "moderate", label: "Moderate", sub: "3–5 sessions a week" },
-  { key: "active", label: "Active", sub: "6–7 sessions a week" },
-  { key: "very_active", label: "Very active", sub: "Physical job or athlete" },
+const ACTIVITY_IDS: readonly ActivityLevel[] = [
+  "sedentary",
+  "light",
+  "moderate",
+  "active",
+  "very_active",
+];
+const ACTIVITY_LABELS = ["Sedentary", "Light", "Moderate", "Active", "Very active"] as const;
+const ACTIVITY_CAPTIONS = [
+  "Desk job, little walking",
+  "1–2 sessions a week",
+  "3–5 sessions a week",
+  "6–7 sessions a week",
+  "Physical job or athlete",
 ];
 
-// Maps a stored activity_level back to its display label, so the Health
-// suggestion names the level using exactly the same words as the cards below it.
-function activityLabel(level: OnboardingInput["activity_level"]): string {
-  return ACTIVITY_OPTIONS.find((a) => a.key === level)?.label ?? String(level);
+// Continuous ruler ranges. Metric ranges are ours to choose; imperial ranges
+// (weight/goal-weight in lb, height in whole inches) are pinned by the brief.
+const AGE_MIN = 13;
+const AGE_MAX = 100;
+const HEIGHT_CM_MIN = 120;
+const HEIGHT_CM_MAX = 220;
+const WEIGHT_KG_MIN = 30;
+const WEIGHT_KG_MAX = 200;
+const HEIGHT_IN_MIN = 55;
+const HEIGHT_IN_MAX = 84;
+const WEIGHT_LB_MIN = 80;
+const WEIGHT_LB_MAX = 400;
+
+function formatFtIn(inches: number): string {
+  return `${Math.floor(inches / 12)}'${inches % 12}"`;
 }
 
 export default function Onboarding() {
   const { colors, spacing } = useTheme();
   const submit = useSubmitOnboarding();
-  const [step, setStep] = useState<1 | 2>(1);
-  const [goal, setGoal] = useState<OnboardingInput["goal"]>("fat_loss");
-  const [sex, setSex] = useState<OnboardingInput["sex"]>("male");
-  const [activity, setActivity] = useState<OnboardingInput["activity_level"]>("moderate");
-  const [birthYear, setBirthYear] = useState("");
-  const [heightCm, setHeightCm] = useState("");
-  const [heightFt, setHeightFt] = useState("");
-  const [heightIn, setHeightIn] = useState("");
-  const [weightText, setWeightText] = useState("");
-  const [error, setError] = useState<string | null>(null);
   const { system } = useUnits();
-  const health = useActivityHistory();
 
-  // Android's hardware back on step 2 must return to step 1, not pop the route —
-  // leaving onboarding would discard everything already entered.
+  const [goalIndex, setGoalIndex] = useState(0);
+  const [sex, setSex] = useState<OnboardingInput["sex"]>("male");
+  const [activityIndex, setActivityIndex] = useState(2);
+  const [age, setAge] = useState(30);
+  const [heightCm, setHeightCm] = useState(170);
+  const [weightKg, setWeightKg] = useState(70);
+  const [goalWeightKg, setGoalWeightKg] = useState(65);
+  const [paceIndex, setPaceIndex] = useState(1);
+  const [touched, setTouched] = useState<ReadonlySet<TouchedField>>(new Set());
+  // Three separate error slots, not one: validation errors render under their
+  // own field, and only a submit (API/network) failure renders beside the
+  // accept button.
+  const [detailsError, setDetailsError] = useState<string | null>(null);
+  const [goalWeightErrorMsg, setGoalWeightErrorMsg] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  // The only evidence the user acted, for PlanDelta: incremented on every
+  // input change, including ones where the resting-burn clamp leaves kcal
+  // itself unchanged.
+  const [revision, setRevision] = useState(0);
+
+  const bump = () => setRevision((r) => r + 1);
+  const markTouched = (field: TouchedField) =>
+    setTouched((prev) => (prev.has(field) ? prev : new Set(prev).add(field)));
+
+  const goal = GOAL_IDS[goalIndex];
+  const activityLevel = ACTIVITY_IDS[activityIndex];
+  const paces = useMemo(() => availablePaces(weightKg), [weightKg]);
+
+  // A dropping weight can shrink the pace list below the current index —
+  // clamp to the last available stop rather than leaving it pointing past
+  // the end of the list.
   useEffect(() => {
-    if (step !== 2) return;
-    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-      setStep(1);
-      return true; // handled
-    });
-    return () => sub.remove();
-  }, [step]);
+    if (paceIndex > paces.length - 1) setPaceIndex(paces.length - 1);
+  }, [paceIndex, paces.length]);
+
+  const paceKgPerWeek = paces[Math.min(paceIndex, paces.length - 1)];
+
+  const plan = useMemo(
+    () =>
+      computePlan({
+        sex,
+        age,
+        heightCm,
+        weightKg,
+        activityLevel,
+        goal,
+        paceKgPerWeek,
+      }),
+    [sex, age, heightCm, weightKg, activityLevel, goal, paceKgPerWeek],
+  );
+
+  const hasAllNumbers = touched.has("age") && touched.has("height") && touched.has("weight");
+  const dialKcal = hasAllNumbers ? plan.kcal : null;
+
+  function onGoalChange(index: number) {
+    setGoalIndex(index);
+    bump();
+  }
+  function onSexChange(key: string) {
+    setSex(key as OnboardingInput["sex"]);
+    bump();
+  }
+  function onActivityChange(index: number) {
+    setActivityIndex(index);
+    bump();
+  }
+  function onAgeChange(value: number) {
+    setAge(value);
+    markTouched("age");
+    bump();
+  }
+  function onHeightChange(value: number) {
+    setHeightCm(system === "imperial" ? value * CM_PER_IN : value);
+    markTouched("height");
+    bump();
+  }
+  function onWeightChange(value: number) {
+    setWeightKg(system === "imperial" ? kgFromLb(value) : value);
+    markTouched("weight");
+    bump();
+  }
+  function onGoalWeightChange(value: number) {
+    setGoalWeightKg(system === "imperial" ? kgFromLb(value) : value);
+    bump();
+  }
+  function onPaceChange(index: number) {
+    setPaceIndex(index);
+    bump();
+  }
 
   function onSubmit() {
-    setError(null);
-    // Imperial: a blank ft/in pair converts to "0" (truthy), which would slip
-    // past the validator's presence check into a range error. Catch missing raw
-    // inputs here so the user sees "Please fill in..." instead.
-    if (system === "imperial" && (!birthYear || (!heightFt && !heightIn) || !weightText)) {
-      setError("Please fill in your age, height, and weight.");
+    setDetailsError(null);
+    setGoalWeightErrorMsg(null);
+    setSubmitError(null);
+    const unitOpts = system === "imperial" ? { heightUnit: "in", weightUnit: "lb" } : undefined;
+    const numbersError = validateOnboardingNumbers(
+      String(age),
+      String(heightCm),
+      String(weightKg),
+      unitOpts,
+    );
+    if (numbersError) {
+      setDetailsError(numbersError);
       return;
     }
-    const heightCmStr = system === "imperial" ? String(cmFromFtIn(Number(heightFt), Number(heightIn))) : heightCm;
-    const weightKgStr = system === "imperial" ? String(kgFromLb(Number(weightText))) : weightText;
-    const ageFromBirthYear = birthYear ? String(new Date().getFullYear() - Number(birthYear)) : "";
-    const validationError = validateOnboardingNumbers(
-      ageFromBirthYear,
-      heightCmStr,
-      weightKgStr,
-      system === "imperial" ? { heightUnit: "ft/in", weightUnit: "lb" } : undefined,
-    );
-    if (validationError) {
-      setError(validationError);
-      return;
+    if (goal !== "maintenance") {
+      const goalWeightError = validateGoalWeight(goal, weightKg, goalWeightKg, weightUnitLabel(system));
+      if (goalWeightError) {
+        setGoalWeightErrorMsg(goalWeightError);
+        return;
+      }
     }
     const input: OnboardingInput = {
       sex,
       goal,
-      activity_level: activity,
-      birth_year: Number(birthYear),
-      height_cm: Number(heightCmStr),
-      weight_kg: Number(weightKgStr),
+      activity_level: activityLevel,
+      birth_year: new Date().getFullYear() - age,
+      height_cm: heightCm,
+      weight_kg: weightKg,
+      // The destination has no meaning while maintaining — omitted entirely
+      // rather than sent as zeros.
+      ...(goal !== "maintenance"
+        ? { goal_weight_kg: goalWeightKg, pace_kg_per_week: paceKgPerWeek }
+        : {}),
     };
     submit.mutate(input, {
       onSuccess: () => {
@@ -115,146 +208,249 @@ export default function Onboarding() {
       },
       // Names the actual cause: a 5xx or an offline phone must not tell the
       // user their details are wrong and send them round a loop.
-      onError: (e: unknown) => setError(apiErrorMessage(e)),
+      onError: (e: unknown) => setSubmitError(apiErrorMessage(e)),
     });
   }
 
-  if (step === 1) {
-    return (
-      <AuthScaffold
-        progress={{ step: 1, total: 2 }}
-        footer={
-          <Button
-            title="Continue"
-            icon="arrow-right"
-            iconPosition="trailing"
-            onPress={() => setStep(2)}
-          />
-        }
-      >
-        <BrandLockup />
-        <AppText variant="title1" style={{ marginTop: spacing.sm }}>
-          Snap it.{"\n"}Otto tracks it.
-        </AppText>
-        <AppText muted>
-          Photo or chat — log meals in seconds and let AI handle the calories and macros.
-        </AppText>
+  const derivationRows: DerivationRow[] = [
+    { label: "Resting burn", value: `${Math.round(plan.bmr)} kcal` },
+    { label: "Activity-adjusted", value: `${Math.round(plan.tdee)} kcal` },
+    {
+      label: "Goal adjustment",
+      value: `${plan.adjustment >= 0 ? "+" : "−"}${Math.abs(Math.round(plan.adjustment))} kcal`,
+    },
+    { label: "Daily target", value: `${Math.round(plan.kcal)} kcal` },
+  ];
 
-        <Overline style={{ marginTop: spacing.xs }}>What&apos;s your goal?</Overline>
-        <View accessibilityRole="radiogroup" style={{ gap: spacing.sm }}>
-          {GOALS.map((g) => (
-            <SelectableCard
-              key={g.id}
-              icon={g.icon}
-              title={g.title}
-              subtitle={g.sub}
-              selected={goal === g.id}
-              onPress={() => setGoal(g.id)}
-            />
-          ))}
-        </View>
-      </AuthScaffold>
-    );
-  }
+  const weeks = goal !== "maintenance" ? weeksToGoal(weightKg, goalWeightKg, paceKgPerWeek) : 0;
 
   return (
     <AuthScaffold
-      onBack={() => setStep(1)}
-      progress={{ step: 2, total: 2 }}
+      header={
+        <View
+          style={{
+            alignItems: "center",
+            gap: spacing.xs,
+            paddingHorizontal: spacing.lg,
+            paddingBottom: spacing.sm,
+          }}
+        >
+          <PlanDial kcal={dialKcal} />
+          <Numeral size={36} weight="800">
+            {hasAllNumbers ? String(Math.round(plan.kcal)) : "—"}
+          </Numeral>
+          <AppText variant="caption" muted style={{ textTransform: "uppercase", letterSpacing: 1.4 }}>
+            kcal / day
+          </AppText>
+          <PlanDelta kcal={dialKcal} floored={plan.floored} revision={revision} />
+        </View>
+      }
       footer={
-        <Button
-          title={submit.isPending ? "Saving…" : "Get started"}
-          icon="arrow-right"
-          iconPosition="trailing"
-          onPress={onSubmit}
-          disabled={submit.isPending}
-        />
+        <View style={{ gap: spacing.xs }}>
+          {submitError ? (
+            <AppText
+              variant="footnote"
+              accessibilityLiveRegion="polite"
+              style={{ color: colors.destructive }}
+            >
+              {submitError}
+            </AppText>
+          ) : null}
+          <Button
+            title={submit.isPending ? "Saving…" : "Start with this plan"}
+            icon="arrow-right"
+            iconPosition="trailing"
+            onPress={onSubmit}
+            disabled={submit.isPending}
+          />
+        </View>
       }
     >
-      <AppText variant="title1">About you</AppText>
-
-      <Segmented
-        options={SEX_OPTIONS}
-        value={sex}
-        onChange={(key) => setSex(key as OnboardingInput["sex"])}
+      <Overline>Your goal</Overline>
+      <TickRuler
+        mode="detented"
+        index={goalIndex}
+        labels={GOAL_LABELS}
+        onChange={onGoalChange}
+        accessibilityLabel="Goal"
+        testID="goal-ruler"
       />
+      <AppText variant="footnote" muted>
+        {GOAL_CAPTIONS[goalIndex]}
+      </AppText>
+
+      <Overline style={{ marginTop: spacing.sm }}>You</Overline>
+      <Segmented options={SEX_OPTIONS} value={sex} onChange={onSexChange} />
 
       <View style={{ gap: spacing.md }}>
-        <Field
-          label="Birth year"
-          placeholder="e.g. 1995"
-          keyboardType="number-pad"
-          value={birthYear}
-          onChangeText={setBirthYear}
-        />
-        {system === "imperial" ? (
-          <View style={{ flexDirection: "row", gap: spacing.sm }}>
-            <View style={{ flex: 1 }}>
-              <Field
-                label="Height (ft)"
-                accessibilityLabel="Height in feet"
-                keyboardType="number-pad"
-                value={heightFt}
-                onChangeText={setHeightFt}
-              />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Field
-                label="Height (in)"
-                accessibilityLabel="Height in inches"
-                keyboardType="number-pad"
-                value={heightIn}
-                onChangeText={setHeightIn}
-              />
-            </View>
-          </View>
-        ) : (
-          <Field
-            label="Height (cm)"
-            accessibilityLabel="Height in centimetres"
-            keyboardType="decimal-pad"
-            value={heightCm}
-            onChangeText={setHeightCm}
+        <View>
+          <AppText variant="footnote" muted>
+            Age
+          </AppText>
+          <TickRuler
+            mode="continuous"
+            value={age}
+            min={AGE_MIN}
+            max={AGE_MAX}
+            step={1}
+            onChange={onAgeChange}
+            accessibilityLabel="Age in years"
+            testID="age-ruler"
           />
-        )}
-        <Field
-          label={system === "imperial" ? "Weight (lb)" : "Weight (kg)"}
-          accessibilityLabel={system === "imperial" ? "Weight in pounds" : "Weight in kilograms"}
-          keyboardType="decimal-pad"
-          value={weightText}
-          onChangeText={setWeightText}
-        />
+        </View>
+        <View>
+          <AppText variant="footnote" muted>
+            Height
+          </AppText>
+          {system === "imperial" ? (
+            <TickRuler
+              mode="continuous"
+              value={Math.round(heightCm / CM_PER_IN)}
+              min={HEIGHT_IN_MIN}
+              max={HEIGHT_IN_MAX}
+              step={1}
+              onChange={onHeightChange}
+              formatLabel={formatFtIn}
+              accessibilityLabel="Height"
+              testID="height-ruler"
+            />
+          ) : (
+            <TickRuler
+              mode="continuous"
+              value={heightCm}
+              min={HEIGHT_CM_MIN}
+              max={HEIGHT_CM_MAX}
+              step={1}
+              onChange={onHeightChange}
+              accessibilityLabel="Height in centimetres"
+              testID="height-ruler"
+            />
+          )}
+        </View>
+        <View>
+          <AppText variant="footnote" muted>
+            Weight
+          </AppText>
+          {system === "imperial" ? (
+            <TickRuler
+              mode="continuous"
+              value={Math.round(lbFromKg(weightKg))}
+              min={WEIGHT_LB_MIN}
+              max={WEIGHT_LB_MAX}
+              step={1}
+              onChange={onWeightChange}
+              accessibilityLabel="Weight in pounds"
+              testID="weight-ruler"
+            />
+          ) : (
+            <TickRuler
+              mode="continuous"
+              value={weightKg}
+              min={WEIGHT_KG_MIN}
+              max={WEIGHT_KG_MAX}
+              step={0.5}
+              onChange={onWeightChange}
+              accessibilityLabel="Weight in kilograms"
+              testID="weight-ruler"
+            />
+          )}
+        </View>
+        {detailsError ? (
+          <AppText
+            variant="footnote"
+            accessibilityLiveRegion="polite"
+            style={{ color: colors.destructive }}
+          >
+            {detailsError}
+          </AppText>
+        ) : null}
       </View>
 
-      <Overline style={{ marginTop: spacing.xs }}>Activity</Overline>
-      <ActivityFromHealth
-        status={health.status}
-        inference={health.inference}
-        levelLabel={activityLabel}
-        onUseHealth={health.request}
-        onAccept={setActivity}
+      <Overline style={{ marginTop: spacing.sm }}>Activity</Overline>
+      <TickRuler
+        mode="detented"
+        index={activityIndex}
+        labels={ACTIVITY_LABELS}
+        onChange={onActivityChange}
+        accessibilityLabel="Activity level"
+        testID="activity-ruler"
       />
-      <View accessibilityRole="radiogroup" style={{ gap: spacing.sm }}>
-        {ACTIVITY_OPTIONS.map((a) => (
-          <SelectableCard
-            key={a.key}
-            title={a.label}
-            subtitle={a.sub}
-            selected={activity === a.key}
-            onPress={() => setActivity(a.key)}
+      <AppText variant="footnote" muted>
+        {ACTIVITY_CAPTIONS[activityIndex]} · ×{ACTIVITY_FACTORS[activityLevel]}
+      </AppText>
+
+      {goal !== "maintenance" ? (
+        <>
+          <Overline style={{ marginTop: spacing.sm }}>Destination</Overline>
+          {system === "imperial" ? (
+            <TickRuler
+              mode="continuous"
+              value={Math.round(lbFromKg(goalWeightKg))}
+              min={WEIGHT_LB_MIN}
+              max={WEIGHT_LB_MAX}
+              step={1}
+              onChange={onGoalWeightChange}
+              accessibilityLabel="Goal weight in pounds"
+              testID="goal-weight-ruler"
+            />
+          ) : (
+            <TickRuler
+              mode="continuous"
+              value={goalWeightKg}
+              min={WEIGHT_KG_MIN}
+              max={WEIGHT_KG_MAX}
+              step={0.5}
+              onChange={onGoalWeightChange}
+              accessibilityLabel="Goal weight in kilograms"
+              testID="goal-weight-ruler"
+            />
+          )}
+          {goalWeightErrorMsg ? (
+            <AppText
+              variant="footnote"
+              accessibilityLiveRegion="polite"
+              style={{ color: colors.destructive }}
+            >
+              {goalWeightErrorMsg}
+            </AppText>
+          ) : null}
+          <TickRuler
+            mode="detented"
+            index={paceIndex}
+            labels={paces.map((p) => `${p} kg/wk`)}
+            onChange={onPaceChange}
+            accessibilityLabel="Pace"
+            testID="pace-ruler"
           />
-        ))}
+          <AppText variant="footnote" muted>
+            {weeks > 0 ? `${weeks} weeks to goal` : "You're already there"}
+          </AppText>
+        </>
+      ) : null}
+
+      <DerivationChain rows={derivationRows} />
+
+      <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+        <View style={{ alignItems: "center" }}>
+          <AppText variant="footnote" muted>
+            Protein
+          </AppText>
+          <Numeral>{Math.round(plan.proteinG)}g</Numeral>
+        </View>
+        <View style={{ alignItems: "center" }}>
+          <AppText variant="footnote" muted>
+            Carbs
+          </AppText>
+          <Numeral>{Math.round(plan.carbsG)}g</Numeral>
+        </View>
+        <View style={{ alignItems: "center" }}>
+          <AppText variant="footnote" muted>
+            Fat
+          </AppText>
+          <Numeral>{Math.round(plan.fatG)}g</Numeral>
+        </View>
       </View>
 
-      {error ? (
-        <AppText
-          variant="footnote"
-          accessibilityLiveRegion="polite"
-          style={{ color: colors.destructive }}
-        >
-          {error}
-        </AppText>
-      ) : null}
       <AppText variant="footnote" muted style={{ textAlign: "center" }}>
         Kora gives general nutrition information, not medical advice. For medical concerns, talk
         to a healthcare professional.
