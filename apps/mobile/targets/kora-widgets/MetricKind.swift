@@ -30,15 +30,22 @@ struct MetricPresentation: Equatable, Sendable {
   let fraction: Double
   let isOverTarget: Bool
   let deepLink: String
+  /// A single self-contained line for the Lock Screen inline accessory.
+  /// Unlike `caption`, which is designed to be read alongside `heroText` in a
+  /// two-line layout, this is pre-composed because the two are not always
+  /// glueable: steps' caption ("OF 10,000") reads naturally after a leading
+  /// number, but protein's ("38G TO GO") is already a complete phrase.
+  let inlineText: String
 
   init(label: String, heroText: String, caption: String,
-              fraction: Double, isOverTarget: Bool, deepLink: String) {
+              fraction: Double, isOverTarget: Bool, deepLink: String, inlineText: String) {
     self.label = label
     self.heroText = heroText
     self.caption = caption
     self.fraction = fraction
     self.isOverTarget = isOverTarget
     self.deepLink = deepLink
+    self.inlineText = inlineText
   }
 }
 
@@ -61,7 +68,8 @@ enum MetricKind: String, CaseIterable, Sendable {
         caption: over ? "KCAL OVER" : "KCAL LEFT",
         fraction: Self.ratio(snapshot.kcalConsumed, snapshot.kcalTarget),
         isOverTarget: over,
-        deepLink: "mobile:///"
+        deepLink: "mobile:///",
+        inlineText: "\(Format.grouped(abs(left))) kcal \(over ? "over" : "left")"
       )
 
     case .steps:
@@ -69,7 +77,8 @@ enum MetricKind: String, CaseIterable, Sendable {
       guard let steps else {
         return MetricPresentation(
           label: "STEPS", heroText: "—", caption: "OF \(Format.grouped(Int(goal)))",
-          fraction: 0, isOverTarget: false, deepLink: "mobile:///progress"
+          fraction: 0, isOverTarget: false, deepLink: "mobile:///progress",
+          inlineText: "— of \(Format.grouped(Int(goal)))"
         )
       }
       return MetricPresentation(
@@ -78,7 +87,8 @@ enum MetricKind: String, CaseIterable, Sendable {
         caption: "OF \(Format.grouped(Int(goal)))",
         fraction: Self.ratio(Double(steps), goal),
         isOverTarget: goal > 0 && Double(steps) > goal,
-        deepLink: "mobile:///progress"
+        deepLink: "mobile:///progress",
+        inlineText: "\(Format.grouped(steps)) of \(Format.grouped(Int(goal)))"
       )
 
     case .protein:
@@ -91,7 +101,8 @@ enum MetricKind: String, CaseIterable, Sendable {
         caption: toGo > 0 ? "\(Format.grouped(toGo))G TO GO" : "TARGET MET",
         fraction: Self.ratio(snapshot.proteinConsumed, snapshot.proteinTarget),
         isOverTarget: target > 0 && consumed > target,
-        deepLink: "mobile:///"
+        deepLink: "mobile:///",
+        inlineText: "\(Format.grouped(consumed))g of \(Format.grouped(target))g"
       )
     }
   }

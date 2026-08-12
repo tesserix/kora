@@ -32,7 +32,7 @@ struct MediumView: View {
       TrackView(
         label: "PROTEIN",
         fraction: ratio(snapshot.proteinConsumed, snapshot.proteinTarget),
-        detail: "\(Int(snapshot.proteinConsumed)) / \(Int(snapshot.proteinTarget)) g"
+        detail: "\(Int(snapshot.proteinConsumed.rounded())) / \(Int(snapshot.proteinTarget.rounded())) g"
       )
       HStack(spacing: 12) {
         TrackView(label: "CARBS", fraction: ratio(snapshot.carbsConsumed, snapshot.carbsTarget), detail: nil)

@@ -28,8 +28,10 @@ struct AccessoryInlineView: View {
   let presentation: MetricPresentation
 
   var body: some View {
-    // Inline gets ONE line beside the clock, so the label is dropped and the
-    // caption carries the context: "6,420 of 10,000".
-    Text("\(presentation.heroText) \(presentation.caption.lowercased())")
+    // Inline gets ONE line beside the clock, so the label is dropped.
+    // `inlineText` is pre-composed per metric in MetricKind — gluing
+    // heroText + caption together generically produced nonsense for metrics
+    // whose caption isn't designed to follow a leading number (e.g. protein).
+    Text(presentation.inlineText)
   }
 }

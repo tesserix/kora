@@ -17,7 +17,7 @@ struct LargeView: View {
           TrackView(
             label: "PROTEIN",
             fraction: ratio(snapshot.proteinConsumed, snapshot.proteinTarget),
-            detail: "\(Int(snapshot.proteinConsumed)) / \(Int(snapshot.proteinTarget)) g"
+            detail: "\(Int(snapshot.proteinConsumed.rounded())) / \(Int(snapshot.proteinTarget.rounded())) g"
           )
           HStack(spacing: 12) {
             TrackView(label: "CARBS", fraction: ratio(snapshot.carbsConsumed, snapshot.carbsTarget), detail: nil)
@@ -42,8 +42,8 @@ struct LargeView: View {
       // Adding meals would require widening the wire format on both sides —
       // out of scope for this plan (see spec: the wire format does not change).
       HStack(spacing: 18) {
-        figure(label: "EATEN", value: Format.grouped(Int(snapshot.kcalConsumed)))
-        figure(label: "BUDGET", value: Format.grouped(Int(snapshot.kcalTarget)))
+        figure(label: "EATEN", value: Format.grouped(Int(snapshot.kcalConsumed.rounded())))
+        figure(label: "BUDGET", value: Format.grouped(Int(snapshot.kcalTarget.rounded())))
       }
 
       Spacer(minLength: 0)
