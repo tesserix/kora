@@ -38,14 +38,12 @@ export function PlanDial({ kcal, testID = "plan-dial" }: PlanDialProps) {
       {/* The gauge is decorative: the target is exposed once, as text, on the
           panel around this component. Announcing it here too would make a
           screen reader read the same number twice. */}
-      <View testID={`${testID}-gauge`}>
-        <Svg
-          width="100%"
-          height={GAUGE_VIEW_H}
-          viewBox={`0 0 ${GAUGE_VIEW_W} ${GAUGE_VIEW_H}`}
-          accessibilityElementsHidden={true}
-          importantForAccessibility="no-hide-descendants"
-        >
+      <View
+        testID={`${testID}-gauge`}
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+      >
+        <Svg width="100%" height={GAUGE_VIEW_H} viewBox={`0 0 ${GAUGE_VIEW_W} ${GAUGE_VIEW_H}`}>
           {ticks.map((t, i) => (
             <Line
               key={i}

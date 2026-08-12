@@ -33,12 +33,11 @@ describe("PlanDial", () => {
     expect(screen.queryByTestId("plan-dial-awaiting")).toBeNull();
   });
 
-  it("hides the gauge SVG from assistive tech on both platforms", async () => {
-    const { debug, container } = await render(<PlanDial kcal={2244} testID="plan-dial" />);
-    // The gauge SVG is marked with accessibilityElementsHidden and importantForAccessibility
-    // to hide it from screen readers while keeping the caption announceable
-    debug();
-    expect(container).toBeTruthy();
+  it("hides the gauge from assistive tech on both platforms", async () => {
+    const r = await render(<PlanDial kcal={2244} testID="plan-dial" />);
+    const gauge = r.getByTestId("plan-dial-gauge", { includeHiddenElements: true });
+    expect(gauge.props.accessibilityElementsHidden).toBe(true);
+    expect(gauge.props.importantForAccessibility).toBe("no-hide-descendants");
   });
 
   it("still announces the awaiting caption when there is no target", async () => {
