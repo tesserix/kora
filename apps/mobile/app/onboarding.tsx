@@ -84,13 +84,14 @@ export default function Onboarding() {
     // past the validator's presence check into a range error. Catch missing raw
     // inputs here so the user sees "Please fill in..." instead.
     if (system === "imperial" && (!birthYear || (!heightFt && !heightIn) || !weightText)) {
-      setError("Please fill in your birth year, height, and weight.");
+      setError("Please fill in your age, height, and weight.");
       return;
     }
     const heightCmStr = system === "imperial" ? String(cmFromFtIn(Number(heightFt), Number(heightIn))) : heightCm;
     const weightKgStr = system === "imperial" ? String(kgFromLb(Number(weightText))) : weightText;
+    const ageFromBirthYear = birthYear ? String(new Date().getFullYear() - Number(birthYear)) : "";
     const validationError = validateOnboardingNumbers(
-      birthYear,
+      ageFromBirthYear,
       heightCmStr,
       weightKgStr,
       system === "imperial" ? { heightUnit: "ft/in", weightUnit: "lb" } : undefined,

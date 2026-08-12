@@ -7,6 +7,9 @@ export type Profile = {
   target_protein_g: number;
   target_carbs_g: number;
   target_fat_g: number;
+  goal_weight_kg: number;
+  pace_kg_per_week: number;
+  target_date: string | null;
   onboarded_at: string | null;
   weight_kg: number;
   share_progress: boolean;
@@ -222,6 +225,8 @@ export type OnboardingInput = {
   weight_kg: number;
   activity_level: "sedentary" | "light" | "moderate" | "active" | "very_active";
   goal: "fat_loss" | "maintenance" | "muscle_gain";
+  goal_weight_kg?: number;
+  pace_kg_per_week?: number;
 };
 
 export type WeightEntry = {

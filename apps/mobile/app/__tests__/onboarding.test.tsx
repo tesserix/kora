@@ -98,7 +98,7 @@ test("submit is blocked with an error when the numeric fields fail validation", 
   await advance(ui);
   await fireEvent.press(ui.getByText("Get started"));
   expect(mockMutate).not.toHaveBeenCalled();
-  expect(await ui.findByText("Please fill in your birth year, height, and weight.")).toBeTruthy();
+  expect(await ui.findByText("Please fill in your age, height, and weight.")).toBeTruthy();
 });
 
 test("the goal chosen on step 1 survives the transition and reaches the payload", async () => {
