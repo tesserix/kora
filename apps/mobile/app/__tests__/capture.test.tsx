@@ -60,6 +60,12 @@ jest.mock("@/lib/api", () => ({
       this.name = "ResponseParseError";
     }
   },
+  TimeoutError: class TimeoutError extends Error {
+    constructor() {
+      super("The request timed out");
+      this.name = "TimeoutError";
+    }
+  },
 }));
 
 const mockResolveTextMutate = jest.fn();
@@ -403,6 +409,15 @@ test("analyzing stage shows the spinner", async () => {
   expect(getByTestId("capture-analyzing-spinner")).toBeTruthy();
 });
 
+test("analyzing stage renders a Cancel control that calls onCancelResolve", async () => {
+  const onCancelResolve = jest.fn();
+  const { findByLabelText } = await render(
+    <CaptureBody {...noopBodyProps} stage="analyzing" resolution={null} onCancelResolve={onCancelResolve} />,
+  );
+  await fireEvent.press(await findByLabelText("Cancel"));
+  expect(onCancelResolve).toHaveBeenCalledTimes(1);
+});
+
 test("result stage renders DetectedCard when resolution is set", async () => {
   const resolution = makeResolution();
   const { getByText } = await render(
@@ -575,6 +590,39 @@ describe("Type mode", () => {
     const { getByTestId } = await render(<CaptureScreen />);
     expect(getByTestId("capture-analyzing-spinner")).toBeTruthy();
   });
+
+  test("Cancel aborts the in-flight resolve and returns the screen to idle", async () => {
+    mockResolveTextIsPending = true;
+    const { getByTestId, findByLabelText, findByTestId, queryByTestId } = await render(<CaptureScreen />);
+    expect(getByTestId("capture-analyzing-spinner")).toBeTruthy();
+
+    await fireEvent.press(await findByLabelText("Cancel"));
+
+    // The mutation's own isPending is still (harmlessly) true here — the
+    // hook has no cancellation support — but the screen must show idle
+    // regardless, which is the whole point of the cancel token.
+    expect(queryByTestId("capture-analyzing-spinner")).toBeNull();
+    expect(await findByTestId("capture-idle-photo")).toBeTruthy();
+  });
+
+  test("a response that arrives after Cancel does not apply", async () => {
+    // The mock isPending flag is static, not driven by mutate() itself, so
+    // it's set true up front — the composer (and its Send button) render
+    // regardless of stage, so the send below still fires normally.
+    mockResolveTextIsPending = true;
+    const { findByText, findByLabelText, queryByText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Type"));
+    const input = await findByLabelText("Tell Otto what you ate");
+    await fireEvent.changeText(input, "grilled chicken and rice");
+    await fireEvent.press(await findByLabelText("Send"));
+
+    await fireEvent.press(await findByLabelText("Cancel"));
+
+    const [, options] = mockResolveTextMutate.mock.calls[0];
+    await act(async () => options.onSuccess(makeResolution()));
+
+    expect(queryByText("Grilled chicken breast")).toBeNull();
+  });
 });
 
 describe("Photo mode", () => {
@@ -606,14 +654,20 @@ describe("Photo mode", () => {
     expect(queryByText(/camera or photo access/i)).toBeNull();
   });
 
-  test("denied camera and library permissions render the Otto error bubble", async () => {
+  // Was "denied camera and library permissions render the Otto error bubble"
+  // — task 6 fix round 2 replaced the transient Otto-bubble copy for a
+  // photo-mode denial with the persistent PermissionDenied card (Open
+  // Settings / Describe it instead), the same treatment Scan's camera denial
+  // got, since a bubble that scrolls away left no lasting route to Settings.
+  test("denied camera and library permissions render the permission-denied card with a route to Settings", async () => {
     (ImagePicker.requestCameraPermissionsAsync as jest.Mock).mockResolvedValueOnce({ granted: false });
     (ImagePicker.requestMediaLibraryPermissionsAsync as jest.Mock).mockResolvedValueOnce({ granted: false });
 
     const { findByLabelText, findByText } = await render(<CaptureScreen />);
     await fireEvent.press(await findByLabelText("Photo viewfinder"));
 
-    expect(await findByText("I need camera or photo access to see your meal.")).toBeTruthy();
+    expect(await findByText("Open Settings")).toBeTruthy();
+    expect(await findByText(/describe it instead/i)).toBeTruthy();
     expect(mockResolvePhotoMutate).not.toHaveBeenCalled();
   });
 
@@ -709,7 +763,11 @@ describe("Voice mode", () => {
     );
   });
 
-  test("denied mic permission renders the Otto error bubble and never starts recording", async () => {
+  // Was "denied mic permission renders the Otto error bubble and never
+  // starts recording" — task 6 fix round 2 routed Voice's mic denial through
+  // the same persistent PermissionDenied card as Scan/Photo (Open Settings /
+  // Describe it instead), rather than a bubble with no route to Settings.
+  test("denied mic permission renders the permission-denied card and never starts recording", async () => {
     const recorder = makeRecorder();
     (useAudioRecorder as jest.Mock).mockReturnValue(recorder);
     (requestRecordingPermissionsAsync as jest.Mock).mockResolvedValueOnce({ granted: false, status: "denied" });
@@ -718,7 +776,8 @@ describe("Voice mode", () => {
     await fireEvent.press(await findByText("Voice"));
     await fireEvent.press(await findByLabelText("Hold to record"));
 
-    expect(await findByText(/i need mic access/i)).toBeTruthy();
+    expect(await findByText("Open Settings")).toBeTruthy();
+    expect(await findByText(/describe it instead/i)).toBeTruthy();
     expect(recorder.record).not.toHaveBeenCalled();
     expect(mockResolveVoiceMutate).not.toHaveBeenCalled();
   });
@@ -799,7 +858,7 @@ describe("Scan mode", () => {
     const { findByText, findByTestId } = await render(<CaptureScreen />);
     await fireEvent.press(await findByText("Scan"));
 
-    const cameraView = await findByTestId("capture-camera-view");
+    const cameraView = await findByTestId("barcode-scanner");
     await act(async () => {
       cameraView.props.onBarcodeScanned({ data: "012345678905", type: "ean13" });
     });
@@ -814,7 +873,7 @@ describe("Scan mode", () => {
     const { findByText, findByTestId } = await render(<CaptureScreen />);
     await fireEvent.press(await findByText("Scan"));
 
-    const cameraView = await findByTestId("capture-camera-view");
+    const cameraView = await findByTestId("barcode-scanner");
     await act(async () => {
       cameraView.props.onBarcodeScanned({ data: "012345678905", type: "ean13" });
       cameraView.props.onBarcodeScanned({ data: "012345678905", type: "ean13" });
@@ -823,7 +882,11 @@ describe("Scan mode", () => {
     expect(mockResolveBarcodeMutate).toHaveBeenCalledTimes(1);
   });
 
-  test("denied camera permission renders the Otto error bubble", async () => {
+  // Was "denied camera permission renders the Otto error bubble" — task 6
+  // replaced the transient Otto-bubble copy for a scan-mode camera denial
+  // with the persistent PermissionDenied card (Open Settings / Describe it
+  // instead), since a bubble that scrolls away left no lasting way out.
+  test("denied camera permission renders the permission-denied card with a route to Settings", async () => {
     const deniedRequest = jest.fn(async () => ({ granted: false, status: "denied" }));
     (useCameraPermissions as jest.Mock).mockReturnValue([
       { granted: false, status: "denied", canAskAgain: true, expires: "never" },
@@ -834,7 +897,8 @@ describe("Scan mode", () => {
     const { findByText } = await render(<CaptureScreen />);
     await fireEvent.press(await findByText("Scan"));
 
-    expect(await findByText(/i need camera access/i)).toBeTruthy();
+    expect(await findByText("Open Settings")).toBeTruthy();
+    expect(await findByText(/describe it instead/i)).toBeTruthy();
     expect(mockResolveBarcodeMutate).not.toHaveBeenCalled();
   });
 
@@ -842,7 +906,7 @@ describe("Scan mode", () => {
     const { findByText, findByTestId } = await render(<CaptureScreen />);
     await fireEvent.press(await findByText("Scan"));
 
-    const cameraView = await findByTestId("capture-camera-view");
+    const cameraView = await findByTestId("barcode-scanner");
     await act(async () => {
       cameraView.props.onBarcodeScanned({ data: "012345678905", type: "ean13" });
     });
@@ -870,7 +934,7 @@ describe("Scan mode", () => {
   test("a barcode answered from the offline cache says so, instead of posing as a fresh resolve", async () => {
     const { findByText, findAllByText, findByTestId, queryByText } = await render(<CaptureScreen />);
     await fireEvent.press(await findByText("Scan"));
-    const cameraView = await findByTestId("capture-camera-view");
+    const cameraView = await findByTestId("barcode-scanner");
 
     await act(async () => {
       cameraView.props.onBarcodeScanned({ data: "012345678905", type: "ean13" });
@@ -899,7 +963,7 @@ describe("Scan mode", () => {
   test("an unscanned barcode offline explains why, and leaves the scanner usable", async () => {
     const { findByText, findByTestId } = await render(<CaptureScreen />);
     await fireEvent.press(await findByText("Scan"));
-    const cameraView = await findByTestId("capture-camera-view");
+    const cameraView = await findByTestId("barcode-scanner");
 
     await act(async () => {
       cameraView.props.onBarcodeScanned({ data: "999999999999", type: "ean13" });
@@ -931,7 +995,7 @@ describe("Scan mode", () => {
   test("a failed barcode resolve releases the scanner so the user can scan again", async () => {
     const { findByText, findByTestId } = await render(<CaptureScreen />);
     await fireEvent.press(await findByText("Scan"));
-    const cameraView = await findByTestId("capture-camera-view");
+    const cameraView = await findByTestId("barcode-scanner");
 
     await act(async () => {
       cameraView.props.onBarcodeScanned({ data: "012345678905", type: "ean13" });
@@ -1210,7 +1274,7 @@ describe("Add to diary", () => {
 //
 // The remaining three (voice, fresh barcode, cached-fallback barcode) can't
 // be built to disagree: "Hold to record"/"Stop recording" only exists once `mode` is
-// "voice", and "capture-camera-view" only exists once `mode` is "scan" — so
+// "voice", and "barcode-scanner" only exists once `mode` is "scan" — so
 // `mode` and the resolve necessarily match in those tests, and they stay
 // green under the old `sourceForMode(mode)` too. They still earn their
 // place here: each pins its handler to stamping the correct literal via
@@ -1288,7 +1352,7 @@ describe("Add to diary — source follows the resolve, not the tab", () => {
   test("a fresh barcode resolve logs ai_barcode", async () => {
     const rendered = await render(<CaptureScreen />);
     await fireEvent.press(await rendered.findByText("Scan"));
-    const cameraView = await rendered.findByTestId("capture-camera-view");
+    const cameraView = await rendered.findByTestId("barcode-scanner");
     await act(async () => {
       cameraView.props.onBarcodeScanned({ data: "012345678905", type: "ean13" });
     });
@@ -1308,7 +1372,7 @@ describe("Add to diary — source follows the resolve, not the tab", () => {
   test("a cached-fallback barcode resolve still logs ai_barcode", async () => {
     const rendered = await render(<CaptureScreen />);
     await fireEvent.press(await rendered.findByText("Scan"));
-    const cameraView = await rendered.findByTestId("capture-camera-view");
+    const cameraView = await rendered.findByTestId("barcode-scanner");
     await act(async () => {
       cameraView.props.onBarcodeScanned({ data: "012345678905", type: "ean13" });
     });
@@ -1407,16 +1471,20 @@ describe("Resolving an uncertain item", () => {
   });
 });
 
-test("switching mode clears a stale error bubble", async () => {
+// Was "switching mode clears a stale error bubble" — photo-mode denial no
+// longer renders a bubble (see the permission-denied-card test above), so
+// this now pins that the persistent card itself doesn't linger into a mode
+// it doesn't belong to.
+test("switching mode clears a stale permission-denied card", async () => {
   (ImagePicker.requestCameraPermissionsAsync as jest.Mock).mockResolvedValueOnce({ granted: false });
   (ImagePicker.requestMediaLibraryPermissionsAsync as jest.Mock).mockResolvedValueOnce({ granted: false });
 
   const { findByLabelText, findByText, queryByText } = await render(<CaptureScreen />);
   await fireEvent.press(await findByLabelText("Photo viewfinder"));
-  expect(await findByText("I need camera or photo access to see your meal.")).toBeTruthy();
+  expect(await findByText("Open Settings")).toBeTruthy();
 
   await fireEvent.press(await findByText("Type"));
-  expect(queryByText("I need camera or photo access to see your meal.")).toBeNull();
+  expect(queryByText("Open Settings")).toBeNull();
 });
 
 

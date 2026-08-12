@@ -268,7 +268,7 @@ test("a phrase from an earlier text resolve does not leak into a later barcode r
 
   // 2. Switch to Scan mode and resolve a barcode in the same mounted component.
   await fireEvent.press(await findByText("Scan"));
-  const cameraView = await findByTestId("capture-camera-view");
+  const cameraView = await findByTestId("barcode-scanner");
   await act(async () => {
     cameraView.props.onBarcodeScanned({ data: "012345678905", type: "ean13" });
   });

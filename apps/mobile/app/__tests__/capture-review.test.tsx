@@ -4,11 +4,31 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react-native";
 import { File, Paths } from "expo-file-system";
 import { router } from "expo-router";
-import { append, list as listCaptures, markReview } from "@/offline/captureQueue";
-import { copyIntoQueue, mediaExists } from "@/offline/captureMedia";
-import { list as listLogs } from "@/offline/queue";
+import { append, list as listCaptures, markReview, discard } from "@/offline/captureQueue";
+import { copyIntoQueue, mediaExists, deleteQueuedMedia } from "@/offline/captureMedia";
+import { append as appendLog, list as listLogs } from "@/offline/queue";
 import CaptureReviewScreen from "../capture-review";
-import type { Resolution } from "@/api/types";
+import type { Resolution, ResolvedCandidate } from "@/api/types";
+import type { QueuedCapture } from "@/offline/captureQueue";
+
+// The real queues/media, with the mutating entry points wrapped so individual
+// tests can override one call's outcome (mirrors the identical pattern in
+// src/api/__tests__/useInstantLog.test.tsx: `discard: jest.fn(actual.discard)`).
+// Every other test in this file relies on the wrapped functions calling
+// straight through to the real, AsyncStorage/expo-file-system-backed
+// implementation by default.
+jest.mock("@/offline/queue", () => {
+  const actual = jest.requireActual("@/offline/queue");
+  return { ...actual, append: jest.fn(actual.append) };
+});
+jest.mock("@/offline/captureQueue", () => {
+  const actual = jest.requireActual("@/offline/captureQueue");
+  return { ...actual, list: jest.fn(actual.list), discard: jest.fn(actual.discard) };
+});
+jest.mock("@/offline/captureMedia", () => {
+  const actual = jest.requireActual("@/offline/captureMedia");
+  return { ...actual, deleteQueuedMedia: jest.fn(actual.deleteQueuedMedia) };
+});
 
 // A realistic capture-queue key (src/offline/enqueueCapture.ts mints exactly
 // this shape), so the id the log queue is handed cannot accidentally look like
@@ -49,6 +69,71 @@ const RESOLUTION = {
 // passes.
 const atLocalNoon = (y: number, m: number, d: number) => new Date(y, m - 1, d, 12).toISOString();
 
+// Plain fixture helpers, local to this file (task-1-brief: "do not import
+// fixtures from source files"). Return exactly the shapes declared in
+// src/api/types.ts and src/offline/captureQueue.ts.
+function candidateFixture(overrides: {
+  id?: string;
+  name?: string;
+  portion_grams?: number;
+  tier?: ResolvedCandidate["tier"];
+} = {}): ResolvedCandidate {
+  const { id = "food-1", name = "Oats", portion_grams = 100, tier } = overrides;
+  return {
+    item: {
+      id,
+      name,
+      brand: "",
+      provenance: "",
+      serving_desc: "",
+      serving_grams: portion_grams,
+      kcal_per_100g: 200,
+      protein_per_100g: 10,
+      carbs_per_100g: 20,
+      fat_per_100g: 5,
+    },
+    portion_grams,
+    kcal: Math.round((200 * portion_grams) / 100),
+    match_score: 0.9,
+    match_tier: "high",
+    ...(tier ? { tier } : {}),
+  };
+}
+
+function resolutionFixture(overrides: Partial<Resolution> = {}): Resolution {
+  return {
+    tier: "confirm",
+    candidates: [candidateFixture()],
+    is_estimate: false,
+    provenance: "ai_photo",
+    ...overrides,
+  };
+}
+
+function queuedCaptureFixture(overrides: Partial<QueuedCapture> = {}): QueuedCapture {
+  return {
+    id: CAPTURE_ID,
+    kind: "photo",
+    storedName: "c1.jpg",
+    fileName: "m.jpg",
+    mimeType: "image/jpeg",
+    capturedAt: atLocalNoon(2026, 8, 6),
+    status: "review",
+    attempts: 0,
+    ownerId: "uid-1",
+    queuedAt: atLocalNoon(2026, 8, 6),
+    ...overrides,
+  };
+}
+
+// Makes the screen's own `listCaptures()` call resolve with exactly this
+// array, bypassing AsyncStorage entirely — `list` is wrapped (see the
+// jest.mock above) precisely so this one call can be swapped out without
+// disturbing every other test's real, storage-backed setup.
+function mockListCaptures(captures: QueuedCapture[]): void {
+  (listCaptures as jest.Mock).mockResolvedValueOnce(captures);
+}
+
 // See the identical constant in src/offline/__tests__/drainCaptures.test.ts:
 // the log-queue id travels to the server as `ID *uuid.UUID`, so the capture's
 // own `cap_<millis>_<rand>` key cannot stand in for it.
@@ -67,6 +152,10 @@ beforeEach(async () => {
   // ever drift the screen would render "not found" and every assertion below
   // would fail confusingly instead of here.
   expect(CAPTURE_ID).toBe("cap_1754476800000_a1b2c3");
+  // Clears call history (never implementation — see the jest.mock blocks
+  // above) so one test's appendLog/discard/deleteQueuedMedia/listCaptures
+  // call counts never leak into the next.
+  jest.clearAllMocks();
   await AsyncStorage.clear();
   await append({
     id: CAPTURE_ID, kind: "photo", storedName: "c1.jpg", fileName: "m.jpg", mimeType: "image/jpeg",
@@ -216,4 +305,151 @@ it("treats another account's capture as not found", async () => {
   // And the row survives untouched — nothing on this screen could have
   // reached it.
   expect(await listCaptures()).toHaveLength(1);
+});
+
+// task-1: capture-review.tsx used to read only resolution?.candidates?.[0]
+// and log that ONE item, then delete the capture row and its media — every
+// other detected item was destroyed with no trace, even though the card
+// above reads "Add 2 items to diary". These tests pin the fix.
+describe("confirming a capture with multiple detected items", () => {
+  test("confirming a two-item capture logs both items", async () => {
+    const capture = queuedCaptureFixture({
+      resolution: resolutionFixture({
+        candidates: [
+          candidateFixture({ id: "food-a", name: "Chicken ramen", portion_grams: 350 }),
+          candidateFixture({ id: "food-b", name: "Soft boiled egg", portion_grams: 50 }),
+        ],
+      }),
+    });
+    mockListCaptures([capture]);
+
+    const { getByLabelText } = await render(<CaptureReviewScreen />, { wrapper: wrap(newClient()) });
+    fireEvent.press(getByLabelText("Add to diary"));
+
+    await waitFor(() => expect(appendLog).toHaveBeenCalledTimes(2));
+    expect((appendLog as jest.Mock).mock.calls[0][0]).toMatchObject({ food_item_id: "food-a", quantity_grams: 350 });
+    expect((appendLog as jest.Mock).mock.calls[1][0]).toMatchObject({ food_item_id: "food-b", quantity_grams: 50 });
+  });
+
+  test("each logged item gets its own fresh log id", async () => {
+    const capture = queuedCaptureFixture({
+      resolution: resolutionFixture({
+        candidates: [candidateFixture({ id: "food-a" }), candidateFixture({ id: "food-b" })],
+      }),
+    });
+    mockListCaptures([capture]);
+
+    const { getByLabelText } = await render(<CaptureReviewScreen />, { wrapper: wrap(newClient()) });
+    fireEvent.press(getByLabelText("Add to diary"));
+
+    await waitFor(() => expect(appendLog).toHaveBeenCalledTimes(2));
+    const idA = (appendLog as jest.Mock).mock.calls[0][1];
+    const idB = (appendLog as jest.Mock).mock.calls[1][1];
+    expect(idA).not.toEqual(idB);
+  });
+
+  // The capture row and its media are the only copy of an unlogged item. They
+  // must not be destroyed while any item still failed to queue.
+  test("a partial failure keeps the capture and its media", async () => {
+    (appendLog as jest.Mock).mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("queue full"));
+    const capture = queuedCaptureFixture({
+      resolution: resolutionFixture({
+        candidates: [candidateFixture({ id: "food-a" }), candidateFixture({ id: "food-b" })],
+      }),
+    });
+    mockListCaptures([capture]);
+
+    const { getByLabelText } = await render(<CaptureReviewScreen />, { wrapper: wrap(newClient()) });
+    fireEvent.press(getByLabelText("Add to diary"));
+
+    await waitFor(() => expect(appendLog).toHaveBeenCalledTimes(2));
+    expect(deleteQueuedMedia).not.toHaveBeenCalled();
+    expect(discard).not.toHaveBeenCalled();
+  });
+
+  // Fix round 1: handleConfirm used to recompute `loggable` fresh from the
+  // capture's unmodified resolution on every press, with no memory of which
+  // candidates already queued. A retry after a partial failure re-submitted
+  // EVERY candidate — including the one that already succeeded — under a
+  // fresh newLogId(), silently double-logging it. Mirrors capture.tsx's
+  // handleAddToDiary, which tracks loggedCandidateKeys for exactly this
+  // reason.
+  test("retrying after a partial failure re-queues only the item that failed", async () => {
+    (appendLog as jest.Mock)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("queue full"))
+      .mockResolvedValueOnce(undefined);
+    const capture = queuedCaptureFixture({
+      resolution: resolutionFixture({
+        candidates: [candidateFixture({ id: "food-a" }), candidateFixture({ id: "food-b" })],
+      }),
+    });
+    mockListCaptures([capture]);
+
+    const { getByLabelText } = await render(<CaptureReviewScreen />, { wrapper: wrap(newClient()) });
+    fireEvent.press(getByLabelText("Add to diary"));
+    await waitFor(() => expect(appendLog).toHaveBeenCalledTimes(2));
+
+    // Retry: food-a already succeeded on the first press and must not be
+    // resubmitted — only food-b (the one that failed) goes out again.
+    fireEvent.press(getByLabelText("Add to diary"));
+    await waitFor(() => expect(appendLog).toHaveBeenCalledTimes(3));
+    expect((appendLog as jest.Mock).mock.calls[2][0]).toMatchObject({ food_item_id: "food-b" });
+  });
+
+  test("once the retry succeeds, the media is deleted and the row discarded exactly once", async () => {
+    (appendLog as jest.Mock)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("queue full"))
+      .mockResolvedValueOnce(undefined);
+    const capture = queuedCaptureFixture({
+      resolution: resolutionFixture({
+        candidates: [candidateFixture({ id: "food-a" }), candidateFixture({ id: "food-b" })],
+      }),
+    });
+    mockListCaptures([capture]);
+
+    const { getByLabelText } = await render(<CaptureReviewScreen />, { wrapper: wrap(newClient()) });
+    fireEvent.press(getByLabelText("Add to diary"));
+    await waitFor(() => expect(appendLog).toHaveBeenCalledTimes(2));
+    expect(deleteQueuedMedia).not.toHaveBeenCalled();
+    expect(discard).not.toHaveBeenCalled();
+
+    fireEvent.press(getByLabelText("Add to diary"));
+    await waitFor(() => expect(appendLog).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(deleteQueuedMedia).toHaveBeenCalledTimes(1));
+    expect(discard).toHaveBeenCalledTimes(1);
+  });
+});
+
+// task-1 step 5: this screen passed no onResolveUncertain to ResolutionResult,
+// so an uncertain row's "tap to change" was inert here even though it works on
+// the live-capture path (capture.tsx). Wiring it wholesale to the manual-
+// search flow is out of scope for this task — only that the row is pressable
+// and carries its own index to the route capture-review already uses for
+// manual correction.
+describe("correcting a single uncertain row", () => {
+  test("tapping an uncertain row routes to manual search carrying its index", async () => {
+    const capture = queuedCaptureFixture({
+      resolution: resolutionFixture({
+        candidates: [
+          candidateFixture({ id: "food-a", name: "Chicken ramen" }),
+          candidateFixture({ id: "food-b", name: "Mystery soup", tier: "follow_up" }),
+        ],
+      }),
+    });
+    mockListCaptures([capture]);
+
+    const { getByLabelText } = await render(<CaptureReviewScreen />, { wrapper: wrap(newClient()) });
+    fireEvent.press(getByLabelText("Change Mystery soup"));
+
+    await waitFor(() =>
+      expect(router.push).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pathname: "/log",
+          params: expect.objectContaining({ loggedAt: capture.capturedAt, candidateIndex: "1" }),
+        }),
+      ),
+    );
+  });
 });

@@ -5,6 +5,7 @@ import {
   Easing,
   Keyboard,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -22,7 +23,6 @@ import { RecordingPresets, requestRecordingPermissionsAsync, useAudioRecorder } 
 import { Icon } from "@/components/Icon";
 import { AppText } from "@/components/Text";
 import { OttoBubble } from "@/components/capture/OttoBubble";
-import { UserBubble } from "@/components/capture/UserBubble";
 import { ModePill } from "@/components/capture/ModePill";
 import { Waveform } from "@/components/capture/Waveform";
 import { VoiceComposer } from "@/components/capture/VoiceComposer";
@@ -40,7 +40,7 @@ import {
   useResolveText,
   useResolveVoice,
 } from "@/api/hooks";
-import { ApiError, AuthTokenError, NetworkError, ResponseParseError } from "@/lib/api";
+import { ApiError, AuthTokenError, NetworkError, ResponseParseError, TimeoutError } from "@/lib/api";
 import { OfflineUnknownBarcodeError } from "@/offline/cachedResolution";
 import { CaptureQueueFullError } from "@/offline/captureQueue";
 import { enqueueCapture, type CaptureFile } from "@/offline/enqueueCapture";
@@ -193,12 +193,87 @@ function ViewfinderReticle() {
   );
 }
 
+// A denied camera/mic permission used to be a dead end — the affordance kept
+// pretending it could still capture (see the fake barcode scan line this
+// replaced). This is the ONE recovery surface reused across all three denial
+// sites (Scan's camera, Photo's camera/library, Voice's mic): a plain
+// explanation, a primary route to the OS Settings pane (the only place a
+// re-prompt can come from once iOS has denied it), and a secondary route
+// that keeps the capture going without a camera or mic at all — describing
+// the meal in words. Mirrors the pattern already used for denied
+// notification permission (src/reminders/notificationAccess.ts's "Open
+// Settings" toast action) rather than inventing a second style.
+interface PermissionDeniedProps {
+  message: string;
+  /** Icon name matching the permission this denial is about — "barcode" for
+   *  Scan, "camera" for Photo, "mic" for Voice — so the card still reads as
+   *  belonging to the mode it replaced, not a single generic dead end. */
+  icon: string;
+  onDescribeInstead: () => void;
+}
+
+function PermissionDenied({ message, icon, onDescribeInstead }: PermissionDeniedProps) {
+  return (
+    <View
+      testID="capture-permission-denied"
+      style={{
+        height: 200,
+        borderRadius: 20,
+        backgroundColor: T.glass,
+        borderWidth: 1,
+        borderColor: T.glassBorder,
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 14,
+        paddingHorizontal: 24,
+      }}
+    >
+      <Icon name={icon} size={40} color={T.mut} />
+      <AppText style={{ color: T.mut, fontSize: 13, fontWeight: "600", textAlign: "center" }}>
+        {message}
+      </AppText>
+      {/* Primary action — the only place a re-prompt can come from once iOS
+          has denied a permission once, so accent is correct here. */}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Open Settings"
+        onPress={() => void Linking.openSettings()}
+        style={{
+          backgroundColor: T.accent,
+          paddingHorizontal: 20,
+          paddingVertical: 10,
+          borderRadius: 9999,
+        }}
+      >
+        <AppText style={{ color: T.accentOn, fontWeight: "700", fontSize: 14 }}>Open Settings</AppText>
+      </Pressable>
+      {/* Secondary route — not accent. Text resolution needs no camera, so a
+          denied permission still doesn't have to be a dead end. */}
+      <Pressable accessibilityRole="button" accessibilityLabel="Describe it instead" onPress={onDescribeInstead}>
+        <AppText style={{ color: T.mut, fontSize: 13, fontWeight: "600", textDecorationLine: "underline" }}>
+          Describe it instead
+        </AppText>
+      </Pressable>
+    </View>
+  );
+}
+
 interface IdleAffordanceProps {
   mode: CaptureMode;
   onCapturePhoto: () => void;
   isRecordingVoice: boolean;
   cameraPermissionGranted: boolean;
+  cameraPermissionDenied: boolean;
+  /** Set once expo-image-picker's camera+library request has actually come
+   *  back denied (see handleCapturePhoto) — Photo has no equivalent of
+   *  useCameraPermissions' proactive hook, so this is only known after a tap. */
+  photoPermissionDenied: boolean;
+  /** Set once expo-audio's requestRecordingPermissionsAsync has actually come
+   *  back denied (see handleStartVoice) — same "only known after a tap" story
+   *  as photoPermissionDenied. */
+  micPermissionDenied: boolean;
   onBarcodeScanned: (data: string) => void;
+  onDescribeInstead: () => void;
 }
 
 // The per-mode "empty" affordance shown in the thread before a capture
@@ -209,9 +284,22 @@ function IdleAffordance({
   onCapturePhoto,
   isRecordingVoice,
   cameraPermissionGranted,
+  cameraPermissionDenied,
+  photoPermissionDenied,
+  micPermissionDenied,
   onBarcodeScanned,
+  onDescribeInstead,
 }: IdleAffordanceProps) {
   if (mode === "photo") {
+    if (photoPermissionDenied) {
+      return (
+        <PermissionDenied
+          message="I need camera or photo access to see your meal. Turn it on in Settings, or tell me what you ate instead."
+          icon="camera"
+          onDescribeInstead={onDescribeInstead}
+        />
+      );
+    }
     return (
       <Pressable
         testID="capture-idle-photo"
@@ -241,6 +329,15 @@ function IdleAffordance({
   }
 
   if (mode === "voice") {
+    if (micPermissionDenied) {
+      return (
+        <PermissionDenied
+          message="I need mic access to hear what you ate. Turn it on in Settings, or tell me what you ate instead."
+          icon="mic"
+          onDescribeInstead={onDescribeInstead}
+        />
+      );
+    }
     return (
       <View
         testID="capture-idle-voice"
@@ -255,23 +352,6 @@ function IdleAffordance({
           gap: 18,
         }}
       >
-        {/* Display only. This used to be a second, competing record button;
-            the composer's mic below now owns starting and stopping, so a
-            single control means a single mental model. */}
-        <View
-          style={{
-            width: 72,
-            height: 72,
-            borderRadius: 9999,
-            backgroundColor: T.accent,
-            alignItems: "center",
-            justifyContent: "center",
-            borderWidth: 10,
-            borderColor: withAlpha(T.accent, 0.22),
-          }}
-        >
-          <Icon name="mic" size={30} color={T.accentOn} />
-        </View>
         <Waveform active={isRecordingVoice} />
         <AppText style={{ color: T.mut, fontSize: 13, fontWeight: "600" }}>
           {isRecordingVoice ? "Listening… tell Otto what you ate" : "Hold the mic below to record"}
@@ -281,6 +361,15 @@ function IdleAffordance({
   }
 
   if (mode === "scan") {
+    if (cameraPermissionDenied) {
+      return (
+        <PermissionDenied
+          message="I need camera access to scan barcodes. Turn it on in Settings, or tell me what you ate instead."
+          icon="barcode"
+          onDescribeInstead={onDescribeInstead}
+        />
+      );
+    }
     return (
       <View
         testID="capture-idle-scan"
@@ -309,16 +398,19 @@ function IdleAffordance({
           {cameraPermissionGranted ? (
             // No camera on the iOS simulator — this renders but won't scan
             // there; live barcode detection is device-only (see report).
-            <CameraView
-              testID="capture-camera-view"
-              style={{ width: "100%", height: "100%" }}
-              barcodeScannerSettings={{ barcodeTypes: ["ean13", "ean8", "upc_a", "upc_e"] }}
-              onBarcodeScanned={({ data }) => onBarcodeScanned(data)}
-            />
-          ) : (
             <>
-              <Icon name="barcode" size={64} color={T.mut} />
+              <CameraView
+                testID="barcode-scanner"
+                style={{ width: "100%", height: "100%" }}
+                barcodeScannerSettings={{ barcodeTypes: ["ean13", "ean8", "upc_a", "upc_e"] }}
+                onBarcodeScanned={({ data }) => onBarcodeScanned(data)}
+              />
+              {/* The real scan line — over the live camera feed this screen
+                  can actually scan with. Distinct from (and not to be
+                  confused with) the fake one this replaced, which drew the
+                  same line while camera access was denied. */}
               <View
+                testID="scan-line"
                 style={{
                   position: "absolute",
                   left: 0,
@@ -329,6 +421,8 @@ function IdleAffordance({
                 }}
               />
             </>
+          ) : (
+            <Icon name="barcode" size={64} color={T.mut} />
           )}
         </View>
         <AppText style={{ marginTop: 12, color: T.mut, fontSize: 13, fontWeight: "600" }}>
@@ -338,11 +432,7 @@ function IdleAffordance({
     );
   }
 
-  return (
-    <View testID="capture-idle-type">
-      <UserBubble>Grilled chicken with broccoli and brown rice</UserBubble>
-    </View>
-  );
+  return <View testID="capture-idle-type" />;
 }
 
 interface CaptureBodyProps {
@@ -368,10 +458,22 @@ interface CaptureBodyProps {
   onFinishVoice: () => void;
   onCancelVoice: () => void;
   cameraPermissionGranted: boolean;
+  /** True only once the OS has actually refused camera access — distinct
+   *  from "not yet granted", which also covers the not-yet-requested and
+   *  still-requesting states. Drives the Scan idle affordance's denied UI. */
+  cameraPermissionDenied?: boolean;
+  /** True once expo-image-picker's camera+library request has actually come
+   *  back denied. Drives the Photo idle affordance's denied UI. */
+  photoPermissionDenied?: boolean;
+  /** True once expo-audio's mic permission request has actually come back
+   *  denied. Drives the Voice idle affordance's denied UI. */
+  micPermissionDenied?: boolean;
   onBarcodeScanned: (data: string) => void;
   onClose: () => void;
   /** Forwarded to DetectedCard — asked when the user taps an uncertain row. */
   onResolveUncertain?: (index: number) => void;
+  /** Bails out of the in-flight resolve and returns to idle. Analyzing-state only. */
+  onCancelResolve?: () => void;
 }
 
 // Presentational capture surface — pure props in, no state, no API calls.
@@ -400,9 +502,13 @@ export function CaptureBody({
   onFinishVoice,
   onCancelVoice,
   cameraPermissionGranted,
+  cameraPermissionDenied = false,
+  photoPermissionDenied = false,
+  micPermissionDenied = false,
   onBarcodeScanned,
   onClose,
   onResolveUncertain,
+  onCancelResolve,
 }: CaptureBodyProps) {
   const scrollViewRef = useRef<ScrollView>(null);
   const composerFieldRef = useRef<TextInput>(null);
@@ -441,18 +547,10 @@ export function CaptureBody({
           <Icon name="camera" size={17} color={T.accent} />
           <AppText style={{ color: T.ink, fontWeight: "700" }}>Ask Otto</AppText>
         </View>
-        {/* Reserved for a future gallery/history view — no-op in this task,
-            hidden from screen readers so they don't focus a dead button. */}
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Photo library"
-          accessibilityElementsHidden
-          importantForAccessibility="no-hide-descendants"
-          onPress={() => {}}
-          style={ROUND_BUTTON}
-        >
-          <Icon name="images" size={18} color={T.ink} />
-        </Pressable>
+        {/* Balances the Close button on the left so the title stays centered
+            now that the no-op photo-library button (it did nothing on press)
+            is gone. */}
+        <View style={{ width: ROUND_BUTTON.width, height: ROUND_BUTTON.height }} />
       </View>
 
       <ScrollView
@@ -471,14 +569,48 @@ export function CaptureBody({
             onCapturePhoto={onCapturePhoto}
             isRecordingVoice={isRecordingVoice}
             cameraPermissionGranted={cameraPermissionGranted}
+            cameraPermissionDenied={cameraPermissionDenied}
+            photoPermissionDenied={photoPermissionDenied}
+            micPermissionDenied={micPermissionDenied}
             onBarcodeScanned={onBarcodeScanned}
+            onDescribeInstead={() => onModeChange("type")}
           />
         )}
 
         {stage === "analyzing" && (
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingLeft: 40 }}>
-            <AnalyzingSpinner />
-            <AppText style={{ color: T.mut, fontSize: 13 }}>Otto is analyzing…</AppText>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 10,
+              paddingLeft: 40,
+            }}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <AnalyzingSpinner />
+              <AppText style={{ color: T.mut, fontSize: 13 }}>Otto is analyzing…</AppText>
+            </View>
+            {/* Secondary control — a resolve is bounded by REQUEST_TIMEOUT_MS
+                either way (api.ts), so Cancel is purely for the user who
+                doesn't want to wait; it must never read as the primary
+                action, hence T.mut/T.glass rather than T.accent. */}
+            <Pressable
+              testID="capture-cancel-resolve"
+              accessibilityRole="button"
+              accessibilityLabel="Cancel"
+              onPress={onCancelResolve}
+              style={{
+                paddingHorizontal: 12,
+                paddingVertical: 6,
+                borderRadius: 9999,
+                backgroundColor: T.glass,
+                borderWidth: 1,
+                borderColor: T.glassBorder,
+              }}
+            >
+              <AppText style={{ color: T.mut, fontSize: 13, fontWeight: "600" }}>Cancel</AppText>
+            </Pressable>
           </View>
         )}
 
@@ -722,6 +854,14 @@ function ottoErrorMessage(error: Error): string {
   if (error instanceof ResponseParseError) {
     return "The server answered, but I couldn't make sense of it. Mind trying again?";
   }
+  if (error instanceof TimeoutError) {
+    // Deliberately does not promise "I've saved that" — this function is also
+    // reached from the barcode and typed-text paths (handleBarcodeScanned,
+    // handleSend), neither of which calls enqueueCapture. Only
+    // handleResolveFailure's own branch (below) actually queues on timeout;
+    // this copy stays honest about the timeout itself for every other caller.
+    return "That took too long — mind trying again?";
+  }
   return "Something went wrong while I looked at that. Please try again.";
 }
 
@@ -737,6 +877,14 @@ export default function CaptureScreen() {
   const createLog = useCreateLog();
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  // Photo (expo-image-picker) and Voice (expo-audio) have no proactive
+  // permission hook the way Scan's useCameraPermissions does — their denial
+  // is only ever learned imperatively, at the moment the user taps to
+  // capture/record (see handleCapturePhoto/handleStartVoice). These flags are
+  // how that one-shot fact becomes persistent UI instead of a bubble that
+  // scrolls away, mirroring cameraPermissionDenied's role for Scan.
+  const [photoPermissionDenied, setPhotoPermissionDenied] = useState(false);
+  const [micPermissionDenied, setMicPermissionDenied] = useState(false);
   const [mode, setMode] = useState<CaptureMode>("photo");
   // idle<->result is driven by the four capture flows below; "analyzing" is
   // derived from the mutations' isPending rather than tracked separately.
@@ -775,8 +923,49 @@ export default function CaptureScreen() {
   // for the same physical scan while the camera keeps detecting the code.
   const scannedRef = useRef(false);
 
+  // The in-flight resolve's cancellation token. None of the four resolve
+  // hooks below support real network cancellation (react-query mutations
+  // have no signal parameter), so this exists to do the two things that
+  // matter regardless of whether the underlying request is still running:
+  // gate a late-arriving onSuccess/onError from writing to state, and force
+  // displayStage back to "idle" immediately rather than waiting on
+  // isPending to catch up. The request itself is still bounded by
+  // REQUEST_TIMEOUT_MS in api.ts either way.
+  const resolveControllerRef = useRef<AbortController | null>(null);
+  // Set the moment Cancel fires, cleared the moment a new resolve starts —
+  // overrides displayStage below so the UI returns to idle even while the
+  // hook's own isPending is still (harmlessly) true.
+  const [cancelledResolve, setCancelledResolve] = useState(false);
+
+  // Called at the top of every resolve-triggering handler, before the
+  // corresponding mutate(). Returns the controller so the caller's
+  // onSuccess/onError can check `.signal.aborted` before touching state.
+  function beginResolve(): AbortController {
+    const controller = new AbortController();
+    resolveControllerRef.current = controller;
+    setCancelledResolve(false);
+    return controller;
+  }
+
+  function handleCancelResolve() {
+    resolveControllerRef.current?.abort();
+    setCancelledResolve(true);
+    setStage("idle");
+  }
+
+  // Best-effort: nothing left to cancel into once the screen is gone, and a
+  // signal nobody reads is harmless. Mirrors the voice-recorder cleanup
+  // effect above — same "leaving the screen must not leave work running
+  // unbounded behind it" concern, applied to the resolve instead of the mic.
+  useEffect(() => {
+    return () => {
+      resolveControllerRef.current?.abort();
+    };
+  }, []);
+
   const displayStage: CaptureStage =
-    resolveText.isPending || resolvePhoto.isPending || resolveVoice.isPending || resolveBarcode.isPending
+    !cancelledResolve &&
+    (resolveText.isPending || resolvePhoto.isPending || resolveVoice.isPending || resolveBarcode.isPending)
       ? "analyzing"
       : stage;
 
@@ -799,19 +988,17 @@ export default function CaptureScreen() {
     };
   }, [resolution, promoted]);
 
-  // Request camera access as soon as the user switches into Scan mode; a
-  // denial surfaces as an Otto bubble rather than a silently blank viewfinder.
+  // Request camera access as soon as the user switches into Scan mode. A
+  // denial surfaces through the idle affordance itself (cameraPermissionDenied
+  // -> the PermissionDenied card with its Open Settings / Describe it instead
+  // routes), not an Otto bubble — a bubble scrolls away, leaving no persistent
+  // way out, which is the dead end this replaced. An unexpected native failure
+  // is a different, transient problem and still gets its own bubble.
   useEffect(() => {
     if (mode !== "scan" || cameraPermission?.granted) return;
-    requestCameraPermission()
-      .then((result) => {
-        if (!result.granted) {
-          setErrorMsg("I need camera access to scan barcodes.");
-        }
-      })
-      .catch(() => {
-        setErrorMsg("Something went wrong turning on the camera — please try again.");
-      });
+    requestCameraPermission().catch(() => {
+      setErrorMsg("Something went wrong turning on the camera — please try again.");
+    });
     // Only re-check on a mode change into "scan" — requestCameraPermission's
     // own hook state (cameraPermission) updates independently and re-running
     // this on every state change would re-prompt in a loop.
@@ -863,6 +1050,11 @@ export default function CaptureScreen() {
     setMode(next);
     setStage("idle");
     setErrorMsg(null);
+    // A denial recorded against the mode being left must not linger — coming
+    // back later (e.g. after fixing it in Settings) should get a clean retry,
+    // not a stale card.
+    setPhotoPermissionDenied(false);
+    setMicPermissionDenied(false);
     scannedRef.current = false;
   }
 
@@ -873,13 +1065,21 @@ export default function CaptureScreen() {
     // Fires right as send is pressed — the composer's own keyboard should
     // not stay up covering the result thread once a send is in flight.
     Keyboard.dismiss();
+    const controller = beginResolve();
     resolveText.mutate(phrase, {
       onSuccess: (data) => {
+        // A cancel that lands between mutate() firing and this callback
+        // means the user has already moved on — applying it now would
+        // resurrect a result onto a screen that told them it was abandoned.
+        if (controller.signal.aborted) return;
         applyResolution(data, "ai_text");
         setResolvedPhrase(phrase);
         setText("");
       },
-      onError: (error) => setErrorMsg(ottoErrorMessage(error)),
+      onError: (error) => {
+        if (controller.signal.aborted) return;
+        setErrorMsg(ottoErrorMessage(error));
+      },
     });
   }
 
@@ -905,12 +1105,25 @@ export default function CaptureScreen() {
   // it. Treating a genuinely broken session as "offline" is the safe direction
   // of error: the capture is preserved rather than discarded, and api.ts still
   // owns real session expiry via signOutForExpiredSession.
+  //
+  // TimeoutError joins the same group for the same reason. Before this
+  // client-side deadline existed, a resolve that outlived Istio's 30s cut
+  // rejected as a fetch failure — a NetworkError, already queued below. Now
+  // api.ts's own REQUEST_TIMEOUT_MS (25s) fires first and throws
+  // TimeoutError instead, which matched neither branch here and silently
+  // dropped the capture. That's precisely the slow/flaky-cellular scenario
+  // this queue exists for, so a timeout gets the same "preserve it" treatment
+  // as a network failure.
   async function handleResolveFailure(
     error: Error,
     file: CaptureFile,
     kind: "photo" | "voice",
   ) {
-    if (!(error instanceof NetworkError) && !(error instanceof AuthTokenError)) {
+    if (
+      !(error instanceof NetworkError) &&
+      !(error instanceof AuthTokenError) &&
+      !(error instanceof TimeoutError)
+    ) {
       setErrorMsg(ottoErrorMessage(error));
       return;
     }
@@ -935,22 +1148,32 @@ export default function CaptureScreen() {
 
   async function handleCapturePhoto() {
     setErrorMsg(null);
+    // A retry after fixing the permission in Settings deserves a clean slate,
+    // not a stale denied card sitting under whatever this attempt finds.
+    setPhotoPermissionDenied(false);
     const outcome = await pickMealPhoto();
     if (outcome.status === "canceled") return;
     if (outcome.status === "denied") {
-      setErrorMsg("I need camera or photo access to see your meal.");
+      // A persistent card with a Settings route, not a bubble that scrolls
+      // away — the same reasoning as Scan's cameraPermissionDenied.
+      setPhotoPermissionDenied(true);
       return;
     }
     if (outcome.status === "failed") {
       setErrorMsg("Something went wrong opening your photos — try again.");
       return;
     }
+    const controller = beginResolve();
     resolvePhoto.mutate(outcome.file, {
       onSuccess: (data) => {
+        if (controller.signal.aborted) return;
         applyResolution(data, "ai_photo");
         setResolvedPhrase(null);
       },
-      onError: (error) => { void handleResolveFailure(error, outcome.file, "photo"); },
+      onError: (error) => {
+        if (controller.signal.aborted) return;
+        void handleResolveFailure(error, outcome.file, "photo");
+      },
     });
   }
 
@@ -960,11 +1183,15 @@ export default function CaptureScreen() {
   async function handleStartVoice() {
     setErrorMsg(null);
     if (isRecordingVoice) return;
+    // Same clean-retry reasoning as handleCapturePhoto's reset above.
+    setMicPermissionDenied(false);
 
     try {
       const permission = await requestRecordingPermissionsAsync();
       if (!permission.granted) {
-        setErrorMsg("I need mic access to hear what you ate.");
+        // A persistent card with a Settings route, not a bubble — see
+        // handleCapturePhoto's photoPermissionDenied for the same reasoning.
+        setMicPermissionDenied(true);
         return;
       }
       await recorder.prepareToRecordAsync();
@@ -994,12 +1221,17 @@ export default function CaptureScreen() {
       return;
     }
     const file = { uri, name: "clip.m4a", type: "audio/mp4" };
+    const controller = beginResolve();
     resolveVoice.mutate(file, {
       onSuccess: (data) => {
+        if (controller.signal.aborted) return;
         applyResolution(data, "ai_voice");
         setResolvedPhrase(data.transcript ?? null);
       },
-      onError: (error) => { void handleResolveFailure(error, file, "voice"); },
+      onError: (error) => {
+        if (controller.signal.aborted) return;
+        void handleResolveFailure(error, file, "voice");
+      },
     });
   }
 
@@ -1019,20 +1251,33 @@ export default function CaptureScreen() {
     setIsRecordingVoice(false);
   }
 
+  // The latch (scannedRef) exists so CameraView firing onBarcodeScanned
+  // dozens of times a second while a code is in frame doesn't fire dozens of
+  // concurrent resolves — it is NOT meant to make scanning one-shot. It must
+  // therefore be released on every terminal outcome of the in-flight resolve:
+  // success, failure, AND the server's "not recognized" answer (a 200 with a
+  // follow-up question, not an error — see barcodeUnknownQuestion in
+  // api/internal/resolve/handler.go), which lands in onSuccess like any other
+  // resolution. Resetting only in onError (the previous version) left the
+  // scanner dead after the very first successful — or unrecognised — scan.
   function handleBarcodeScanned(data: string) {
     if (scannedRef.current) return;
     scannedRef.current = true;
     setErrorMsg(null);
+    const controller = beginResolve();
     resolveBarcode.mutate(data, {
       onSuccess: (result) => {
+        scannedRef.current = false;
+        if (controller.signal.aborted) return;
         // A cache hit still means the modality was a barcode scan — no AI
         // ran, but that's a COGS distinction (see #43), not a modality one.
         applyResolution(result, "ai_barcode");
         setResolvedPhrase(null);
       },
       onError: (error) => {
-        setErrorMsg(ottoErrorMessage(error));
         scannedRef.current = false;
+        if (controller.signal.aborted) return;
+        setErrorMsg(ottoErrorMessage(error));
       },
     });
   }
@@ -1155,9 +1400,18 @@ export default function CaptureScreen() {
         onFinishVoice={handleFinishVoice}
         onCancelVoice={handleCancelVoice}
         cameraPermissionGranted={cameraPermission?.granted ?? false}
+        // `granted === false` is also true for "undetermined" (never asked
+        // yet — useCameraPermissions auto-fetches on mount with its default
+        // {get: true}, so this resolves before the OS prompt is ever shown).
+        // Gate on the real PermissionStatus so a first-time user doesn't see
+        // "Open Settings" for a permission that hasn't been requested.
+        cameraPermissionDenied={cameraPermission?.status === "denied"}
+        photoPermissionDenied={photoPermissionDenied}
+        micPermissionDenied={micPermissionDenied}
         onBarcodeScanned={handleBarcodeScanned}
         onClose={() => router.back()}
         onResolveUncertain={setPickerIndex}
+        onCancelResolve={handleCancelResolve}
       />
       {/* Opened from an uncertain row. Seeded with the phrase the server could
           not resolve, so the user starts from what they actually said. */}

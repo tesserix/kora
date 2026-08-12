@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { CACHED_MATCH_TIER } from "@/api/types";
 import type { FoodItem } from "@/api/types";
 import { OfflineUnknownBarcodeError } from "@/offline/cachedResolution";
-import { NetworkError, apiFetch, apiFetchEnvelope, apiFetchMultipart, currentUserId } from "@/lib/api";
+import { NetworkError, TimeoutError, apiFetch, apiFetchEnvelope, apiFetchMultipart, currentUserId } from "@/lib/api";
 import { drain, list } from "@/offline/queue";
 import { getFoodById, getFoodByBarcode } from "@/offline/foodCache";
 import * as foodCache from "@/offline/foodCache";
@@ -59,6 +59,12 @@ jest.mock("@/lib/api", () => {
   // only by identity and the duck-typed object only by name — each branch of
   // isNetworkError is then exercised by exactly one test.
   class MockNetworkError extends Error {}
+  // Distinct from MockNetworkError on purpose: TimeoutError is a separate
+  // class from NetworkError in @/lib/api, and isNetworkError does NOT match
+  // it — the call sites under test widen their own guards with a separate
+  // `instanceof TimeoutError` check, so the mock must keep the two classes
+  // genuinely distinct or that widening couldn't be exercised at all.
+  class MockTimeoutError extends Error {}
   return {
     apiFetch: jest.fn().mockResolvedValue({ id: "u1", email: "a@b.c", goal: "", onboarded_at: null }),
     currentUserId: jest.fn(() => "user-a"),
@@ -66,6 +72,7 @@ jest.mock("@/lib/api", () => {
     apiFetchMultipart: jest.fn(),
     ApiError: class extends Error {},
     NetworkError: MockNetworkError,
+    TimeoutError: MockTimeoutError,
     isNetworkError: (e: unknown) =>
       e instanceof MockNetworkError || (e as { name?: string } | null)?.name === "NetworkError",
   };
@@ -834,6 +841,21 @@ test("useCreateLog queues a duck-typed NetworkError too, not just the class", as
   await AsyncStorage.clear();
 });
 
+// The 25s client-side request deadline (REQUEST_TIMEOUT_MS) throws
+// TimeoutError, a class distinct from NetworkError — without the explicit
+// `instanceof TimeoutError` check alongside isNetworkError, a log that times
+// out on slow-but-alive cellular would rethrow and vanish instead of queueing,
+// defeating the offline queue in exactly the scenario it exists for.
+test("useCreateLog queues the log when the POST times out", async () => {
+  await AsyncStorage.clear();
+  (apiFetch as jest.Mock).mockRejectedValueOnce(new TimeoutError());
+
+  const { result } = await renderHook(() => useCreateLog(), { wrapper });
+  await expect(result.current.mutateAsync(logInput)).resolves.toMatchObject({ status: "pending" });
+  expect(await list()).toHaveLength(1);
+  await AsyncStorage.clear();
+});
+
 // Only a lost connection earns a retry. A 400 is the server saying the write
 // itself is wrong; queueing it would replay a request that fails identically
 // forever, and swallowing the rejection would hide a real bug from the caller.
@@ -1127,6 +1149,26 @@ test("a connection that dies mid-resolve still falls back to the cache", async (
   onlineManager.setOnline(true);
   (apiFetch as jest.Mock).mockReset();
   (apiFetch as jest.Mock).mockRejectedValue(new NetworkError("socket closed"));
+
+  const { result } = await renderHook(() => useResolveBarcode(), { wrapper });
+  let out!: Awaited<ReturnType<typeof result.current.mutateAsync>>;
+  await act(async () => { out = await result.current.mutateAsync(BARCODE); });
+
+  expect(apiFetch).toHaveBeenCalled();
+  expect(out.candidates[0].item.name).toBe("Choc protein bar");
+  expect(out.candidates[0].match_tier).toBe(CACHED_MATCH_TIER);
+});
+
+// Same TimeoutError-vs-NetworkError distinction as useCreateLog: a scan that
+// times out on slow-but-alive cellular (REQUEST_TIMEOUT_MS) must still fall
+// back to the local food cache, not rethrow and strand the user with nothing.
+test("a request that times out still falls back to the cache", async () => {
+  await AsyncStorage.clear();
+  await foodCache.upsertFoods([barcodeFood as FoodItem]);
+
+  onlineManager.setOnline(true);
+  (apiFetch as jest.Mock).mockReset();
+  (apiFetch as jest.Mock).mockRejectedValue(new TimeoutError());
 
   const { result } = await renderHook(() => useResolveBarcode(), { wrapper });
   let out!: Awaited<ReturnType<typeof result.current.mutateAsync>>;

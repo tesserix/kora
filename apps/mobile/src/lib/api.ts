@@ -66,6 +66,82 @@ export class ResponseParseError extends Error {
   }
 }
 
+// A resolve that outlives the client's own deadline — distinct from
+// NetworkError because the client gave up on purpose, not because transport
+// failed. See REQUEST_TIMEOUT_MS below for why this exists at all.
+export class TimeoutError extends Error {
+  constructor() {
+    super("Request timed out");
+    this.name = "TimeoutError";
+  }
+}
+
+// Below Istio's 30s connection cut-off on purpose. The resolve service's own
+// budget reaches ~110s (photo 20s + fallback 90s, api/internal/resolve/router.go),
+// so without a client deadline the app waits on a socket the gateway has
+// already closed — which is why voice resolution appeared to hang rather
+// than fail (see src/api/resolveWire.ts).
+export const REQUEST_TIMEOUT_MS = 25_000;
+
+// AbortSignal.any() is unavailable at runtime here: RN's global
+// AbortController/AbortSignal come from the `abort-controller` npm polyfill
+// (see node_modules/react-native/Libraries/Core/setUpXHR.js), whose bundled
+// version (3.0.0) predates AbortSignal.any entirely — only the TypeScript
+// DOM lib knows about it, not this app's actual engine. So the caller's
+// signal (if any) and this request's own deadline signal are composed by
+// hand: one AbortController whose signal aborts when either input does.
+function composeDeadlineSignal(callerSignal: AbortSignal | null | undefined): {
+  signal: AbortSignal;
+  clear: () => void;
+} {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new TimeoutError()), REQUEST_TIMEOUT_MS);
+
+  let onCallerAbort: (() => void) | undefined;
+  if (callerSignal) {
+    if (callerSignal.aborted) {
+      controller.abort(callerSignal.reason);
+    } else {
+      onCallerAbort = () => controller.abort(callerSignal.reason);
+      callerSignal.addEventListener("abort", onCallerAbort);
+    }
+  }
+
+  const clear = () => {
+    clearTimeout(timer);
+    if (callerSignal && onCallerAbort) callerSignal.removeEventListener("abort", onCallerAbort);
+  };
+
+  return { signal: controller.signal, clear };
+}
+
+// Rejects when `signal` aborts, even if `promise` never settles on its own —
+// required because a mocked (or simply uncooperative) fetch() that ignores
+// its signal must still not hang the caller forever. Settles exactly once:
+// if `promise` later resolves or rejects after an abort already won the
+// race, that outcome is a no-op — a late-arriving response must never
+// surface once the deadline (or a caller's own cancel) has already fired.
+function raceWithSignal<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      signal.removeEventListener("abort", onAbort);
+      reject(signal.reason);
+    };
+    signal.addEventListener("abort", onAbort);
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (err) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(err);
+      },
+    );
+  });
+}
+
 // --- Session-expiry recovery ---------------------------------------------
 //
 // A 401 can mean the cached ID token merely went stale (Firebase caches it
@@ -147,26 +223,55 @@ async function getToken(user: User, forceRefresh?: true): Promise<string> {
   }
 }
 
-async function doFetch(path: string, init: RequestInit): Promise<Response> {
+async function doFetch(path: string, init: RequestInit, signal: AbortSignal): Promise<Response> {
   try {
-    return await fetch(`${BASE_URL}${path}`, init);
+    return await raceWithSignal(fetch(`${BASE_URL}${path}`, { ...init, signal }), signal);
   } catch (err) {
+    // The deadline itself firing must surface as TimeoutError, not get
+    // folded into the generic NetworkError every other fetch() failure
+    // (offline, DNS, TLS, a caller's own abort, ...) becomes below.
+    if (err instanceof TimeoutError) throw err;
     throw new NetworkError(err);
+  }
+}
+
+// Runs one attempt (token lookup + doFetch) under its own fresh
+// REQUEST_TIMEOUT_MS deadline. composeDeadlineSignal is called synchronously
+// as the FIRST thing this does — before `await getToken` — so the clock
+// starts the instant the attempt begins rather than after whatever async
+// auth work precedes the network call. That matters for more than
+// precision: a caller that races this promise against a timer (as the tests
+// do) needs the deadline armed before it ever yields control back.
+async function runAttempt(
+  path: string,
+  buildInit: (token: string | null) => RequestInit,
+  callerSignal: AbortSignal | null | undefined,
+  user: User | null,
+  forceRefresh?: true,
+): Promise<Response> {
+  const { signal, clear } = composeDeadlineSignal(callerSignal);
+  try {
+    const token = user ? await getToken(user, forceRefresh) : null;
+    return await doFetch(path, buildInit(token), signal);
+  } finally {
+    clear();
   }
 }
 
 async function fetchWithRetry(
   path: string,
   buildInit: (token: string | null) => RequestInit,
+  callerSignal?: AbortSignal | null,
 ): Promise<Response> {
   const user = auth?.currentUser ?? null;
-  const token = user ? await getToken(user) : null;
-  const res = await doFetch(path, buildInit(token));
+  const res = await runAttempt(path, buildInit, callerSignal, user);
 
   if (res.status !== 401 || !user) return res;
 
-  const refreshedToken = await getToken(user, true);
-  const retryRes = await doFetch(path, buildInit(refreshedToken));
+  // A fresh deadline for the retry, not the remainder of the first attempt's
+  // — a slow-but-recovering first attempt must not leave the retry with no
+  // time left to even try.
+  const retryRes = await runAttempt(path, buildInit, callerSignal, user, true);
 
   if (retryRes.status === 401) await signOutForExpiredSession();
 
@@ -213,14 +318,18 @@ export async function apiFetchEnvelope<T>(
   path: string,
   init: RequestInit = {},
 ): Promise<{ data: T; meta?: Record<string, unknown> }> {
-  const res = await fetchWithRetry(path, (token) => ({
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init.headers ?? {}),
-    },
-  }));
+  const res = await fetchWithRetry(
+    path,
+    (token) => ({
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(init.headers ?? {}),
+      },
+    }),
+    init.signal,
+  );
 
   if (!res.ok) return throwApiError(res);
   return parseJson<{ data: T; meta?: Record<string, unknown> }>(res);
@@ -237,13 +346,21 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<un
   return envelope.data ?? envelope;
 }
 
-export async function apiFetchMultipart(path: string, form: FormData): Promise<unknown> {
-  const res = await fetchWithRetry(path, (token) => ({
-    method: "POST",
-    body: form,
-    // No Content-Type — fetch sets multipart/form-data with the boundary.
-    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-  }));
+export async function apiFetchMultipart(
+  path: string,
+  form: FormData,
+  init: { signal?: AbortSignal } = {},
+): Promise<unknown> {
+  const res = await fetchWithRetry(
+    path,
+    (token) => ({
+      method: "POST",
+      body: form,
+      // No Content-Type — fetch sets multipart/form-data with the boundary.
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    }),
+    init.signal,
+  );
 
   if (!res.ok) return throwApiError(res);
   const body = await parseJson<{ data?: unknown }>(res);

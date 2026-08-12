@@ -49,6 +49,17 @@ export function resultSummary(resolution: Resolution): string {
   const count = resolution.candidates.length;
   const itemWord = count === 1 ? "item" : "items";
   const kcalText = kcalTotalLabel(resolution);
+  // Computed from the WHOLE candidate list, never candidates[0] — a set where
+  // any row is assumed must read as hedged, not just one whose first row is.
+  // The count itself matters too: "one portion is a guess" would understate
+  // it when several candidates in the same resolution had their portion
+  // assumed, so the wording must track the actual number.
+  const assumedCount = resolution.candidates.filter((c) => c.portion_assumed).length;
+  if (assumedCount > 0) {
+    const guessText =
+      assumedCount === 1 ? "one portion is a guess" : `${assumedCount} portions are guesses`;
+    return `I found ${count} ${itemWord}, about ${kcalText} — ${guessText}. Confirm and I'll log it.`;
+  }
   return `I found ${count} ${itemWord}, about ${kcalText} — confirm and I'll log it.`;
 }
 
