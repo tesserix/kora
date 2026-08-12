@@ -308,11 +308,24 @@ export function RecipeParseSheet({ visible, onClose, initialMode }: RecipeParseS
     void submitPhoto();
   }
 
+  // An unresolved draft row carries grams 0 — the parser has no food to
+  // measure against, and the 502 fallback row starts at 0 by construction — so
+  // matching a food must also supply a portion, or the save is rejected. The
+  // food's own serving size where it has one, else the same 100 g the parser
+  // falls back to, flagged as the guess it is (#138). The server applies the
+  // identical default; this keeps the review sheet honest about it beforehand.
   function resolveIngredientAt(index: number, item: FoodItem) {
     setDraftIngredients((prev) =>
-      prev.map((ing, i) =>
-        i === index ? { ...ing, food_item_id: item.id, name: item.name, match_score: 1, match_tier: "manual" } : ing,
-      ),
+      prev.map((ing, i) => {
+        if (i !== index) return ing;
+        const matched = { ...ing, food_item_id: item.id, name: item.name, match_score: 1, match_tier: "manual" };
+        if (ing.grams > 0) return matched;
+        return {
+          ...matched,
+          grams: item.serving_grams > 0 ? item.serving_grams : 100,
+          portion_assumed: true,
+        };
+      }),
     );
     setMatchTargetIndex(null);
   }

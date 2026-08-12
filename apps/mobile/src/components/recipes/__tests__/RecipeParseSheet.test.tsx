@@ -27,6 +27,23 @@ jest.mock("@/lib/api", () => ({
   },
 }));
 
+// A food with NO serving size of its own, which is what
+// foodCache.foodFromServingSummary synthesises — the case where a portion has
+// to be guessed rather than measured.
+const mysterySpiceFood = {
+  id: "spice-id",
+  name: "Mystery spice",
+  brand: "",
+  provenance: "seed",
+  serving_desc: "",
+  serving_grams: 0,
+  kcal_per_100g: 300,
+  protein_per_100g: 10,
+  carbs_per_100g: 50,
+  fat_per_100g: 5,
+};
+let mockFoodResults: { item: typeof mysterySpiceFood; match_score: number; match_tier: string }[] = [];
+
 const mockParseMutate = jest.fn();
 const mockCreateMutate = jest.fn();
 const mockToastShow = jest.fn();
@@ -34,7 +51,7 @@ const mockToastShow = jest.fn();
 jest.mock("@/api/hooks", () => ({
   useParseRecipe: () => ({ mutate: mockParseMutate, isPending: false }),
   useCreateRecipe: () => ({ mutate: mockCreateMutate, isPending: false }),
-  useFoodSearch: () => ({ data: [], isLoading: false, isError: false, isOfflineCache: false }),
+  useFoodSearch: () => ({ data: mockFoodResults, isLoading: false, isError: false, isOfflineCache: false }),
 }));
 
 jest.mock("@/components/Toast", () => ({
@@ -91,6 +108,7 @@ const draft: RecipeDraft = {
 };
 
 beforeEach(() => {
+  mockFoodResults = [];
   mockParseMutate.mockClear();
   mockCreateMutate.mockClear();
   mockToastShow.mockClear();
@@ -225,4 +243,38 @@ test("a genuine parse error (not parse_failed) toasts instead of opening a dead 
   fireEvent.press(await findByText("Parse recipe"));
 
   expect(mockToastShow).toHaveBeenCalledWith(expect.objectContaining({ message: expect.any(String) }));
+});
+
+// The 502 fallback and every unresolved parse row carry grams 0 — the server
+// has no food to measure them against. Matching a food therefore has to supply
+// a portion too, or the save the fallback exists to enable is rejected by the
+// API with "grams must be positive" and the "never a dead end" guarantee
+// becomes a dead end in the other direction.
+test("matching a food for the 502 fallback row makes the draft saveable", async () => {
+  mockFoodResults = [{ item: mysterySpiceFood, match_score: 1, match_tier: "fulltext" }];
+  mockParseMutate.mockImplementation((_input, { onError }) =>
+    onError(new ApiError(502, "unknown", "could not parse")),
+  );
+  mockCreateMutate.mockImplementation((body, { onSuccess }) => onSuccess({ id: "r9", ...body }));
+
+  const { findByLabelText, findByText } = await render(<RecipeParseSheet visible onClose={() => {}} />);
+  fireEvent.changeText(await findByLabelText("Paste recipe text"), "an unreadable mess");
+  fireEvent.press(await findByText("Parse recipe"));
+
+  fireEvent.press(await findByLabelText("Find a match for an unreadable mess"));
+  fireEvent.press(await findByLabelText("Select Mystery spice"));
+  fireEvent.press(await findByText("Save recipe"));
+
+  expect(mockCreateMutate).toHaveBeenCalledWith(
+    expect.objectContaining({
+      ingredients: [
+        expect.objectContaining({
+          food_item_id: "spice-id",
+          grams: 100, // the flat estimate; a zero here is a 400 from the API
+          portion_assumed: true,
+        }),
+      ],
+    }),
+    expect.anything(),
+  );
 });
