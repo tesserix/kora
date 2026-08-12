@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { ScrollView, Switch, View } from "react-native";
+import { ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { AppBackground } from "@/components/AppBackground";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { GroupedSection, Row } from "@/components/GroupedList";
+import { ToggleSwitch } from "@/components/ToggleSwitch";
 import { AppText } from "@/components/Text";
 import { RemindersSection } from "@/components/settings/RemindersSection";
 import { WeightReminderSection } from "@/components/settings/WeightReminderSection";
@@ -68,11 +69,10 @@ export default function Reminders() {
                   detail={fmt(r.hour, r.minute)}
                   onPress={() => openEdit(r)}
                   right={
-                    <Switch
+                    <ToggleSwitch
                       testID={`custom-switch-${r.id}`}
                       value={r.enabled}
                       onValueChange={(enabled) => toggleReminder(r.id, enabled)}
-                      trackColor={{ true: instrument.accent, false: instrument.inset }}
                     />
                   }
                 />

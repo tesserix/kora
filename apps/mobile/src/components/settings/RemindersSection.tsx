@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { Platform, View, Switch, Pressable } from "react-native";
+import { Platform, View, Pressable } from "react-native";
 import DateTimePicker, { type DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { AppText } from "@/components/Text";
 import { Overline } from "@/components/Overline";
 import { GroupedSection } from "@/components/GroupedList";
+import { ToggleSwitch } from "@/components/ToggleSwitch";
 import { Sheet } from "@/components/Sheet";
 import { Button } from "@/components/Button";
 import { useReminderPrefs } from "@/reminders/useReminderPrefs";
@@ -67,11 +68,10 @@ export function RemindersSection() {
               <Pressable accessibilityLabel={`${LABEL[slot]} time`} onPress={() => openPicker(slot)} disabled={!p.enabled}>
                 <AppText style={{ fontSize: 15, color: instrument.mut, opacity: p.enabled ? 1 : 0.4 }}>{fmt(p.hour, p.minute)}</AppText>
               </Pressable>
-              <Switch
+              <ToggleSwitch
                 testID={`reminder-switch-${slot}`}
                 value={p.enabled}
                 onValueChange={(enabled) => setSlot(slot, { ...p, enabled })}
-                trackColor={{ true: instrument.accent, false: instrument.inset }}
               />
             </View>
           );

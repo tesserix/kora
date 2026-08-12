@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
-import { Platform, View, Switch, Pressable } from "react-native";
+import { Platform, View, Pressable } from "react-native";
 import DateTimePicker, { type DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { AppText } from "@/components/Text";
 import { Overline } from "@/components/Overline";
 import { GroupedSection } from "@/components/GroupedList";
+import { ToggleSwitch } from "@/components/ToggleSwitch";
 import { Sheet } from "@/components/Sheet";
 import { Button } from "@/components/Button";
 import { useToast } from "@/components/Toast";
@@ -132,11 +133,10 @@ export function WeightReminderSection(): ReactElement {
               {fmt(pref.hour, pref.minute)}
             </AppText>
           </Pressable>
-          <Switch
+          <ToggleSwitch
             accessibilityLabel="Weight check-in reminder"
             value={pref.enabled}
             onValueChange={(enabled) => commit({ enabled })}
-            trackColor={{ true: instrument.accent, false: instrument.inset }}
           />
         </View>
       </GroupedSection>

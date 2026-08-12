@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Alert, ScrollView, StyleSheet, Switch, View } from "react-native";
+import { Alert, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { AppText } from "@/components/Text";
@@ -8,6 +8,7 @@ import { AppBackground } from "@/components/AppBackground";
 import { Icon } from "@/components/Icon";
 import { Avatar } from "@/components/Avatar";
 import { GroupedSection, Row } from "@/components/GroupedList";
+import { ToggleSwitch } from "@/components/ToggleSwitch";
 import { AddFriendSheet } from "@/components/social/AddFriendSheet";
 import { FriendsLeaderboard } from "@/components/social/FriendsLeaderboard";
 import { EmptyState } from "@/components/common/EmptyState";
@@ -64,11 +65,10 @@ export default function Friends() {
                 title="Share my progress"
                 subtitle="Friends can see your streak and on-target days."
                 right={
-                  <Switch
+                  <ToggleSwitch
                     accessibilityLabel="Share my progress"
                     value={shareOn}
                     onValueChange={(v) => setShare.mutate(v)}
-                    trackColor={{ true: instrument.accent, false: instrument.inset }}
                   />
                 }
               />
