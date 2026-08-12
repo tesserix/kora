@@ -197,6 +197,15 @@ func portionGrams(portion string, item nutrition.FoodItem) (float64, bool) {
 			return g, false
 		}
 	}
+	return assumedPortionGrams(item)
+}
+
+// assumedPortionGrams is the portion to use when nothing measurable is
+// available: the food's own serving size, else a flat estimate. The bool is
+// always true — this figure is a SYSTEM ESTIMATE and must be labelled as one
+// (#138). Shared with service.validate, so the parse path and the save path
+// cannot drift on what an unmeasured portion means.
+func assumedPortionGrams(item nutrition.FoodItem) (float64, bool) {
 	if item.ServingGrams > 0 {
 		return item.ServingGrams, true
 	}

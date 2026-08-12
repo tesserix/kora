@@ -178,6 +178,7 @@ func (s *Service) validate(ctx context.Context, req SaveRecipeRequest) (string, 
 		}
 
 		grams := in.Grams
+		assumed := in.PortionAssumed
 		if in.EnteredAmount != nil && in.EnteredUnit != nil {
 			grams, err = resolveEnteredUnit(*in.EnteredAmount, *in.EnteredUnit, food)
 			if err != nil {
@@ -185,13 +186,20 @@ func (s *Service) validate(ctx context.Context, req SaveRecipeRequest) (string, 
 			}
 		}
 		if grams <= 0 {
-			return "", nil, nil, httpx.ValidationError{Message: "grams must be positive"}
+			// An ingredient that has just been MATCHED carries no portion: it
+			// was persisted unresolved (grams 0 — see the branch above) and the
+			// client only had a food to add, not an amount. Rejecting it here
+			// made "Find a match" unsaveable forever, so the server supplies
+			// the same default parse.go applies on the parse path — and, per
+			// #138, always flags it as an estimate so a guess can never render
+			// as a measurement.
+			grams, assumed = assumedPortionGrams(food)
 		}
 
 		items = append(items, Ingredient{
 			FoodItemID: &fid, RawText: raw, Grams: grams,
 			EnteredAmount: in.EnteredAmount, EnteredUnit: in.EnteredUnit,
-			PortionAssumed: in.PortionAssumed,
+			PortionAssumed: assumed,
 			MatchScore:     in.MatchScore, MatchTier: in.MatchTier,
 		})
 		idStr := fid.String()
@@ -199,7 +207,7 @@ func (s *Service) validate(ctx context.Context, req SaveRecipeRequest) (string, 
 		views = append(views, IngredientView{
 			FoodItemID: &idStr, Name: food.Name, RawText: raw, Resolved: true, Grams: grams,
 			EnteredAmount: in.EnteredAmount, EnteredUnit: in.EnteredUnit,
-			PortionAssumed: in.PortionAssumed,
+			PortionAssumed: assumed,
 			MatchScore:     in.MatchScore, MatchTier: in.MatchTier,
 			Kcal:     food.KcalPer100g * f,
 			ProteinG: food.ProteinPer100g * f,

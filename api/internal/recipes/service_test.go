@@ -117,6 +117,75 @@ func TestPortionAssumedSurvivesSaveAndRead(t *testing.T) {
 	require.True(t, read.Ingredients[0].PortionAssumed, "assumed portion must survive the round trip")
 }
 
+// TestMatchingAnUnresolvedIngredientSaves walks the exact production path the
+// "Find a match" affordance drives: a recipe is saved with an unresolved
+// ingredient (which the server persists with grams 0 — it has no food to
+// measure against), the user then picks a food for that line, and the client
+// PUTs the whole list back with only food_item_id filled in. That save used to
+// 400 with "grams must be positive" on every retry, making any recipe with one
+// unmatchable ingredient permanently unsaveable.
+func TestMatchingAnUnresolvedIngredientSaves(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	f := seedFood(t, db, 100) // no serving_grams -> the flat 100g estimate
+	svc := NewService(NewRepository(db), nutrition.NewRepository(db))
+	ctx := context.Background()
+
+	created, err := svc.Create(ctx, userID, SaveRecipeRequest{
+		Name: "Curry", Servings: 2, Source: SourcePaste,
+		Ingredients: []IngredientInput{{FoodItemID: nil, RawText: "a pinch of asafoetida"}},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Exec("DELETE FROM recipes WHERE user_id = ?", userID) })
+	require.Equal(t, 1, created.UnresolvedCount)
+	require.Zero(t, created.Ingredients[0].Grams, "an unresolved ingredient carries no portion")
+
+	// Exactly what both client match handlers send: the same list back with
+	// food_item_id set and grams still zero.
+	fid := f.ID.String()
+	updated, err := svc.Update(ctx, userID, uuid.MustParse(created.ID), SaveRecipeRequest{
+		Name: "Curry", Servings: 2, Source: SourcePaste,
+		Ingredients: []IngredientInput{{FoodItemID: &fid, RawText: "a pinch of asafoetida", Grams: 0}},
+	})
+	require.NoError(t, err, "matching an unresolved ingredient must be saveable")
+	require.Zero(t, updated.UnresolvedCount)
+	require.Equal(t, defaultAssumedGrams, updated.Ingredients[0].Grams)
+	require.True(t, updated.Ingredients[0].PortionAssumed,
+		"a server-supplied portion is a guess and must never render as a measurement (#138)")
+
+	read, err := svc.Get(ctx, userID, uuid.MustParse(created.ID))
+	require.NoError(t, err)
+	require.Equal(t, defaultAssumedGrams, read.Ingredients[0].Grams)
+	require.True(t, read.Ingredients[0].PortionAssumed)
+	require.Equal(t, 100.0, read.TotalKcal) // 100 kcal/100g * 100g
+}
+
+// TestMatchedIngredientDefaultsToTheFoodsOwnServing pins the preferred rung of
+// that default: the food's real serving size, not the flat estimate.
+func TestMatchedIngredientDefaultsToTheFoodsOwnServing(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+
+	item := nutrition.FoodItem{
+		Name: "RC Breast " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD,
+		KcalPer100g: 100, ServingGrams: 140,
+	}
+	item.NormalizedName = nutrition.Normalize(item.Name)
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	svc := NewService(NewRepository(db), nutrition.NewRepository(db))
+	fid := item.ID.String()
+	v, err := svc.Create(context.Background(), userID, SaveRecipeRequest{
+		Name: "Grill", Servings: 1, Source: SourceManual,
+		Ingredients: []IngredientInput{{FoodItemID: &fid, RawText: "chicken", Grams: 0}},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Exec("DELETE FROM recipes WHERE user_id = ?", userID) })
+	require.Equal(t, 140.0, v.Ingredients[0].Grams)
+	require.True(t, v.Ingredients[0].PortionAssumed)
+}
+
 // TestCreateResolvesEnteredUnitsServerSide mirrors the saved-meal and
 // food-log surfaces: the client never converts.
 func TestCreateResolvesEnteredUnitsServerSide(t *testing.T) {
