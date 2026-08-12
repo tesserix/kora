@@ -85,9 +85,10 @@ describe("onboarding", () => {
     expect(mockMutate).not.toHaveBeenCalled();
   });
 
-  it("submits age as a birth year and includes the destination", async () => {
+  it("submits age as a birth year and includes the destination once the destination ruler is touched", async () => {
     await render(<Onboarding />);
     await setValidBody();
+    await increment("goal-weight-ruler");
     await fireEvent.press(screen.getByText("Start with this plan"));
     expect(mockMutate).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -107,6 +108,31 @@ describe("onboarding", () => {
     // to 31, so the wire value must be this year minus 31, not minus 30 and
     // not the raw age itself.
     expect(mockMutate.mock.calls[0][0].birth_year).toBe(new Date().getFullYear() - 31);
+  });
+
+  // The accept gate already fixed for age/height/weight did not extend to
+  // the destination: a default goalWeightKg (65) sits ready to submit even
+  // though the user never touched the ruler that sets it. This is the same
+  // failure class, just for the destination fields.
+  it("omits the destination when the destination ruler has not been touched", async () => {
+    await render(<Onboarding />);
+    await setValidBody();
+    await fireEvent.press(screen.getByText("Start with this plan"));
+    expect(mockMutate).toHaveBeenCalled();
+    const payload = mockMutate.mock.calls[0][0];
+    expect(payload.goal).toBe("fat_loss");
+    expect(payload.goal_weight_kg).toBeUndefined();
+    expect(payload.pace_kg_per_week).toBeUndefined();
+  });
+
+  it("includes the destination once the goal-weight ruler has been touched", async () => {
+    await render(<Onboarding />);
+    await setValidBody();
+    await increment("goal-weight-ruler");
+    await fireEvent.press(screen.getByText("Start with this plan"));
+    const payload = mockMutate.mock.calls[0][0];
+    expect(payload.goal_weight_kg).toEqual(expect.any(Number));
+    expect(payload.pace_kg_per_week).toEqual(expect.any(Number));
   });
 
   it("omits the destination from a maintenance payload", async () => {
@@ -276,6 +302,13 @@ describe("onboarding", () => {
     expect(screen.getByTestId("destination-caption").props.children).toBe("—");
 
     await setValidBody();
+
+    // Body numbers are real now, but the destination ruler itself has not
+    // been touched — the caption must still withhold rather than compute
+    // weeks from the untouched goalWeightKg default.
+    expect(screen.getByTestId("destination-caption").props.children).toBe("—");
+
+    await increment("goal-weight-ruler");
 
     const captionText = screen.getByTestId("destination-caption").props.children;
     expect(captionText).not.toBe("—");

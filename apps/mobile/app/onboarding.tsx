@@ -29,7 +29,7 @@ import {
   type PlanGoal,
 } from "@/lib/plan";
 
-type TouchedField = "age" | "height" | "weight";
+type TouchedField = "age" | "height" | "weight" | "goalWeight";
 
 const GOAL_IDS: readonly PlanGoal[] = ["fat_loss", "maintenance", "muscle_gain"];
 const GOAL_LABELS = ["Lose weight", "Maintain", "Build muscle"] as const;
@@ -140,6 +140,11 @@ export default function Onboarding() {
 
   const hasAllNumbers = touched.has("age") && touched.has("height") && touched.has("weight");
   const dialKcal = hasAllNumbers ? plan.kcal : null;
+  // Gates whether the destination (goal weight + pace) is a real, user-set
+  // value rather than the untouched defaults — mirrors hasAllNumbers, but
+  // for the ruler this screen never forces the user to touch before the
+  // accept button unlocks.
+  const hasDestination = goal !== "maintenance" && touched.has("goalWeight");
 
   function onGoalChange(index: number) {
     setGoalIndex(index);
@@ -178,6 +183,7 @@ export default function Onboarding() {
   }
   function onGoalWeightChange(value: number) {
     setGoalWeightKg(system === "imperial" ? kgFromLb(value) : value);
+    markTouched("goalWeight");
     bump();
   }
   function onPaceChange(index: number) {
@@ -200,7 +206,10 @@ export default function Onboarding() {
       setDetailsError(numbersError);
       return;
     }
-    if (goal !== "maintenance") {
+    // Validating an untouched destination would block submit on the default
+    // goalWeightKg (65) the user never chose — and since it is not sent
+    // below, there is nothing to validate until the ruler has been moved.
+    if (hasDestination) {
       const goalWeightError = validateGoalWeight(goal, weightKg, goalWeightKg, weightUnitLabel(system));
       if (goalWeightError) {
         setGoalWeightErrorMsg(goalWeightError);
@@ -214,11 +223,10 @@ export default function Onboarding() {
       birth_year: new Date().getFullYear() - age,
       height_cm: heightCm,
       weight_kg: weightKg,
-      // The destination has no meaning while maintaining — omitted entirely
-      // rather than sent as zeros.
-      ...(goal !== "maintenance"
-        ? { goal_weight_kg: goalWeightKg, pace_kg_per_week: paceKgPerWeek }
-        : {}),
+      // The destination has no meaning while maintaining, and an untouched
+      // ruler is a default the user never chose — both are omitted entirely
+      // rather than sent as a fabricated destination.
+      ...(hasDestination ? { goal_weight_kg: goalWeightKg, pace_kg_per_week: paceKgPerWeek } : {}),
     };
     submit.mutate(input, {
       onSuccess: () => {
@@ -249,7 +257,7 @@ export default function Onboarding() {
     { label: "Daily target", value: hasAllNumbers ? `${Math.round(plan.kcal)} kcal` : "—" },
   ];
 
-  const weeks = goal !== "maintenance" ? weeksToGoal(weightKg, goalWeightKg, paceKgPerWeek) : 0;
+  const weeks = hasDestination ? weeksToGoal(weightKg, goalWeightKg, paceKgPerWeek) : 0;
 
   return (
     <AuthScaffold
@@ -468,12 +476,16 @@ export default function Onboarding() {
             testID="pace-ruler"
           />
           <AppText testID="destination-caption" variant="footnote" muted>
-            {/* Same leak as the derivation rows: `weeks` is derived from
-                weightKg/goalWeightKg defaults until the user has actually
-                set their own numbers, so it withholds behind the same
-                hasAllNumbers gate rather than showing a distance to a body
-                the user never entered. */}
-            {hasAllNumbers ? (weeks > 0 ? `${weeks} weeks to goal` : "You're already there") : "—"}
+            {/* Same leak as the derivation rows: `weeks` is derived from the
+                goalWeightKg default until the user has actually moved the
+                destination ruler, so it withholds behind hasDestination
+                (which also requires hasAllNumbers) rather than showing a
+                distance to a body/destination the user never entered. */}
+            {hasAllNumbers && hasDestination
+              ? weeks > 0
+                ? `${weeks} weeks to goal`
+                : "You're already there"
+              : "—"}
           </AppText>
         </>
       ) : null}
