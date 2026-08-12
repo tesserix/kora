@@ -47,15 +47,23 @@ beforeEach(() => {
 // Camera permission is only ever checked proactively (without the user tapping
 // anything first) in Scan mode — see capture.tsx's mode==="scan" effect — so
 // that's the mode renderCapture switches into to exercise the denied state.
+//
+// Three distinct PermissionStatus values matter here (expo-modules-core's
+// PermissionStatus enum: "granted" | "undetermined" | "denied" — see
+// node_modules/expo-modules-core/build/PermissionsInterface.d.ts). Both
+// "undetermined" and "denied" carry `granted: false`, which is exactly the
+// bug this helper exists to pin: gating the denied card on `granted ===
+// false` instead of `status === "denied"` misfires on "undetermined" too.
 async function renderCapture(opts: {
-  cameraPermission?: "granted" | "denied";
+  cameraPermission?: "granted" | "denied" | "undetermined";
   mode?: "barcode";
 }) {
-  const granted = opts.cameraPermission !== "denied";
+  const status = opts.cameraPermission ?? "granted";
+  const granted = status === "granted";
   (useCameraPermissions as jest.Mock).mockReturnValue([
-    { granted, status: granted ? "granted" : "denied", canAskAgain: !granted ? false : true, expires: "never" },
-    jest.fn(async () => ({ granted, status: granted ? "granted" : "denied" })),
-    jest.fn(async () => ({ granted, status: granted ? "granted" : "denied" })),
+    { granted, status, canAskAgain: !granted ? false : true, expires: "never" },
+    jest.fn(async () => ({ granted, status })),
+    jest.fn(async () => ({ granted, status })),
   ]);
 
   const rendered = await render(<CaptureScreen />);
@@ -84,4 +92,31 @@ test("the denied barcode state does not render a scan line", async () => {
 test("no control renders without an action", async () => {
   const { queryByLabelText } = await renderCapture({});
   expect(queryByLabelText("Photo library")).toBeNull();
+});
+
+// Fix round 1, Finding 1 — pins all three PermissionStatus values distinctly
+// so the granted/undetermined/denied trio can never silently collapse back
+// into two again.
+test("a granted camera permission renders the live camera, not the denied card", async () => {
+  const { findByTestId, queryByTestId, queryByText } = await renderCapture({ cameraPermission: "granted" });
+  expect(await findByTestId("barcode-scanner")).toBeTruthy();
+  expect(queryByTestId("capture-permission-denied")).toBeNull();
+  expect(queryByText("Open Settings")).toBeNull();
+});
+
+// The regression test: useCameraPermissions auto-fetches on mount (default
+// {get: true}), so on a user's very first Scan the hook can resolve to
+// {granted: false, status: "undetermined"} before the native OS prompt is
+// even answered. This MUST fail if the denied-card gate reverts to
+// `granted === false`, which is also true for this state.
+test("an undetermined camera permission does not render the denied card", async () => {
+  const { queryByTestId, queryByText } = await renderCapture({ cameraPermission: "undetermined" });
+  expect(queryByTestId("capture-permission-denied")).toBeNull();
+  expect(queryByText("Open Settings")).toBeNull();
+});
+
+test("a denied camera permission renders the denied card, not the live camera", async () => {
+  const { getByText, queryByTestId } = await renderCapture({ cameraPermission: "denied" });
+  expect(getByText("Open Settings")).toBeTruthy();
+  expect(queryByTestId("barcode-scanner")).toBeNull();
 });

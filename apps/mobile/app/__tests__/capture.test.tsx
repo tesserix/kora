@@ -648,14 +648,20 @@ describe("Photo mode", () => {
     expect(queryByText(/camera or photo access/i)).toBeNull();
   });
 
-  test("denied camera and library permissions render the Otto error bubble", async () => {
+  // Was "denied camera and library permissions render the Otto error bubble"
+  // — task 6 fix round 2 replaced the transient Otto-bubble copy for a
+  // photo-mode denial with the persistent PermissionDenied card (Open
+  // Settings / Describe it instead), the same treatment Scan's camera denial
+  // got, since a bubble that scrolls away left no lasting route to Settings.
+  test("denied camera and library permissions render the permission-denied card with a route to Settings", async () => {
     (ImagePicker.requestCameraPermissionsAsync as jest.Mock).mockResolvedValueOnce({ granted: false });
     (ImagePicker.requestMediaLibraryPermissionsAsync as jest.Mock).mockResolvedValueOnce({ granted: false });
 
     const { findByLabelText, findByText } = await render(<CaptureScreen />);
     await fireEvent.press(await findByLabelText("Photo viewfinder"));
 
-    expect(await findByText("I need camera or photo access to see your meal.")).toBeTruthy();
+    expect(await findByText("Open Settings")).toBeTruthy();
+    expect(await findByText(/describe it instead/i)).toBeTruthy();
     expect(mockResolvePhotoMutate).not.toHaveBeenCalled();
   });
 
@@ -751,7 +757,11 @@ describe("Voice mode", () => {
     );
   });
 
-  test("denied mic permission renders the Otto error bubble and never starts recording", async () => {
+  // Was "denied mic permission renders the Otto error bubble and never
+  // starts recording" — task 6 fix round 2 routed Voice's mic denial through
+  // the same persistent PermissionDenied card as Scan/Photo (Open Settings /
+  // Describe it instead), rather than a bubble with no route to Settings.
+  test("denied mic permission renders the permission-denied card and never starts recording", async () => {
     const recorder = makeRecorder();
     (useAudioRecorder as jest.Mock).mockReturnValue(recorder);
     (requestRecordingPermissionsAsync as jest.Mock).mockResolvedValueOnce({ granted: false, status: "denied" });
@@ -760,7 +770,8 @@ describe("Voice mode", () => {
     await fireEvent.press(await findByText("Voice"));
     await fireEvent.press(await findByLabelText("Hold to record"));
 
-    expect(await findByText(/i need mic access/i)).toBeTruthy();
+    expect(await findByText("Open Settings")).toBeTruthy();
+    expect(await findByText(/describe it instead/i)).toBeTruthy();
     expect(recorder.record).not.toHaveBeenCalled();
     expect(mockResolveVoiceMutate).not.toHaveBeenCalled();
   });
@@ -1454,16 +1465,20 @@ describe("Resolving an uncertain item", () => {
   });
 });
 
-test("switching mode clears a stale error bubble", async () => {
+// Was "switching mode clears a stale error bubble" — photo-mode denial no
+// longer renders a bubble (see the permission-denied-card test above), so
+// this now pins that the persistent card itself doesn't linger into a mode
+// it doesn't belong to.
+test("switching mode clears a stale permission-denied card", async () => {
   (ImagePicker.requestCameraPermissionsAsync as jest.Mock).mockResolvedValueOnce({ granted: false });
   (ImagePicker.requestMediaLibraryPermissionsAsync as jest.Mock).mockResolvedValueOnce({ granted: false });
 
   const { findByLabelText, findByText, queryByText } = await render(<CaptureScreen />);
   await fireEvent.press(await findByLabelText("Photo viewfinder"));
-  expect(await findByText("I need camera or photo access to see your meal.")).toBeTruthy();
+  expect(await findByText("Open Settings")).toBeTruthy();
 
   await fireEvent.press(await findByText("Type"));
-  expect(queryByText("I need camera or photo access to see your meal.")).toBeNull();
+  expect(queryByText("Open Settings")).toBeNull();
 });
 
 
