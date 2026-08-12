@@ -1,31 +1,39 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-// The widgets deep link by literal string in Swift. Nothing else in the app
-// reads those strings, so a route rename would break a home screen tap and no
-// other test would notice. This asserts every widgetURL still resolves to a
-// real route file.
+// The single configurable KoraWidget deep-links by literal string in Swift,
+// composed per metric inside MetricKind.present(snapshot:steps:) rather than
+// one static widgetURL(...) per widget file. Nothing else in the app reads
+// those strings, so a route rename would break a home-screen tap and no other
+// test would notice. This asserts every deepLink still resolves to a real
+// route file, and that the exact set of routes is what we expect — so a new
+// metric that invents a route cannot slip in unnoticed.
 const TARGETS = join(__dirname, "../../../targets/kora-widgets");
 const APP = join(__dirname, "../../../app");
 
-function widgetURLs(file: string): string[] {
-  const source = readFileSync(join(TARGETS, file), "utf8");
-  return [...source.matchAll(/widgetURL\(URL\(string:\s*"mobile:\/\/([^"]*)"\)\)/g)].map((m) => m[1]);
+function metricKindDeepLinks(): string[] {
+  const source = readFileSync(join(TARGETS, "MetricKind.swift"), "utf8");
+  return [...source.matchAll(/deepLink:\s*"mobile:\/\/([^"]*)"/g)].map((m) => m[1]);
 }
 
 function routeExists(path: string): boolean {
+  if (path === "/") {
+    return existsSync(join(APP, "(tabs)", "index.tsx"));
+  }
   const name = path.replace(/^\//, "");
   return existsSync(join(APP, "(tabs)", `${name}.tsx`)) || existsSync(join(APP, `${name}.tsx`));
 }
 
-test("the nutrition widget links to a route that exists", () => {
-  const urls = widgetURLs("NutritionWidget.swift");
-  expect(urls).toEqual(["/diary"]);
-  expect(routeExists(urls[0])).toBe(true);
+test("KoraWidget's deep links are exactly the expected set of routes", () => {
+  const links = metricKindDeepLinks();
+  const distinct = [...new Set(links)];
+  expect(distinct.sort()).toEqual(["/", "/progress"]);
 });
 
-test("the steps widget links to a route that exists", () => {
-  const urls = widgetURLs("StepsWidget.swift");
-  expect(urls).toEqual(["/progress"]);
-  expect(routeExists(urls[0])).toBe(true);
+test("every KoraWidget deep link resolves to a route that exists", () => {
+  const links = metricKindDeepLinks();
+  expect(links.length).toBeGreaterThan(0);
+  for (const link of links) {
+    expect(routeExists(link)).toBe(true);
+  }
 });
