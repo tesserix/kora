@@ -32,7 +32,26 @@ export type ContinuousProps = {
   testID?: string;
 };
 
-export type TickRulerProps = ContinuousProps;
+// Detented mode: a fixed set of labelled stops (goal, activity level, pace)
+// under the same fixed centre index as continuous mode. Reports a stop
+// INDEX, never a position — a fractional or out-of-range index would reach
+// the plan formula as an invalid activity level, so `report` below always
+// rounds and clamps before calling `onChange`.
+export type DetentedProps = {
+  mode: "detented";
+  index: number;
+  labels: readonly string[];
+  onChange: (index: number) => void;
+  accessibilityLabel: string;
+  testID?: string;
+};
+
+export type TickRulerProps = ContinuousProps | DetentedProps;
+
+// Pixels of drag per detent stop. Deliberately coarser than PX_PER_UNIT
+// (continuous mode's px-per-value-unit) since a detented drag only needs to
+// cross a handful of stops, not glide through a numeric range.
+const DETENT_PX = 96;
 
 const clamp = (v: number, min: number, max: number): number => Math.min(max, Math.max(min, v));
 const quantize = (v: number, step: number): number => Math.round(v / step) * step;
@@ -61,7 +80,17 @@ export function valueFromDrag(
   return snap(startValue - translationX / PX_PER_UNIT, min, max, step);
 }
 
-export function TickRuler(props: TickRulerProps) {
+/**
+ * The stop index a detented drag has reached. Mirrors `valueFromDrag`:
+ * computed from the index at gesture start plus the CUMULATIVE translation,
+ * never a per-frame delta, and always rounded + clamped to a whole stop —
+ * detented mode never reports a fractional or out-of-range index.
+ */
+export function indexFromDrag(startIndex: number, translationX: number, stopCount: number): number {
+  return clamp(Math.round(startIndex - translationX / DETENT_PX), 0, stopCount - 1);
+}
+
+function ContinuousRuler(props: ContinuousProps) {
   const { instrument } = useTheme();
   const { reduceMotion } = useMotionPrefs();
   const { value, min, max, step, onChange, formatLabel, accessibilityLabel } = props;
@@ -204,4 +233,134 @@ export function TickRuler(props: TickRulerProps) {
       </View>
     </GestureDetector>
   );
+}
+
+function DetentedRuler(props: DetentedProps) {
+  const { instrument } = useTheme();
+  const { reduceMotion } = useMotionPrefs();
+  const { index, labels, onChange, accessibilityLabel } = props;
+  const testID = props.testID ?? "tick-ruler";
+  const [width, setWidth] = useState(FALLBACK_WIDTH);
+
+  const onLayout = useCallback((e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width), []);
+
+  // Same hazard as continuous mode: `index` is a JS-thread closure that only
+  // refreshes after a React re-render, slower than touch-move events land.
+  // indexRef always holds the latest so the gesture never reads a stale
+  // one; dragStart is captured once per gesture so every update computes an
+  // absolute stop from cumulative translation, never a per-frame delta.
+  const indexRef = useRef(index);
+  indexRef.current = index;
+  const dragStart = useRef(index);
+
+  const report = useCallback(
+    (next: number) => {
+      // Detented mode reports stops, never positions: a fractional index
+      // would reach the plan formula as an invalid activity level.
+      const stop = clamp(Math.round(next), 0, labels.length - 1);
+      if (stop === indexRef.current) return;
+      if (!reduceMotion) haptics.selection();
+      onChange(stop);
+    },
+    [labels.length, onChange, reduceMotion],
+  );
+
+  const beginDrag = useCallback(() => {
+    dragStart.current = indexRef.current;
+  }, []);
+
+  const applyDrag = useCallback(
+    (translationX: number) => {
+      report(indexFromDrag(dragStart.current, translationX, labels.length));
+    },
+    [labels.length, report],
+  );
+
+  const pan = useMemo(
+    () =>
+      Gesture.Pan()
+        .withTestId(`${testID}-pan`)
+        .onBegin(() => {
+          runOnJS(beginDrag)();
+        })
+        .onUpdate((e) => {
+          runOnJS(applyDrag)(e.translationX);
+        }),
+    [applyDrag, beginDrag, testID],
+  );
+
+  const onAccessibilityAction = useCallback(
+    (e: AccessibilityActionEvent) => {
+      if (e.nativeEvent.actionName === "increment") report(index + 1);
+      if (e.nativeEvent.actionName === "decrement") report(index - 1);
+    },
+    [index, report],
+  );
+
+  const mid = width / 2;
+
+  return (
+    <GestureDetector gesture={pan}>
+      <View
+        testID={testID}
+        onLayout={onLayout}
+        accessible
+        accessibilityRole="adjustable"
+        accessibilityLabel={accessibilityLabel}
+        accessibilityValue={{ text: labels[index] }}
+        accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
+        onAccessibilityAction={onAccessibilityAction}
+        style={{ height: HEIGHT + 8, width: "100%" }}
+      >
+        <Svg width="100%" height={HEIGHT + 8}>
+          {labels.map((label, i) => {
+            const x = mid + (i - index) * DETENT_PX;
+            const on = i === index;
+            return (
+              <Line
+                key={`stop-${label}`}
+                testID={`${testID}-stop-${i}`}
+                x1={x}
+                y1={BASELINE + 8}
+                x2={x}
+                y2={BASELINE - 6}
+                // instrument.accent is reserved for the fixed centre index
+                // below — selected-stop emphasis uses instrument.ink instead.
+                stroke={on ? instrument.ink : instrument.tick}
+                strokeWidth={on ? 2 : 1.4}
+              />
+            );
+          })}
+          {labels.map((label, i) => (
+            <SvgText
+              key={`stop-label-${label}`}
+              testID={`${testID}-label-${i}`}
+              x={mid + (i - index) * DETENT_PX}
+              y={BASELINE - 14}
+              fill={i === index ? instrument.ink : instrument.mut}
+              fontSize={10}
+              fontWeight={i === index ? "600" : "500"}
+              textAnchor="middle"
+            >
+              {label}
+            </SvgText>
+          ))}
+          {/* The fixed centre index — the only accent on the control. */}
+          <Line
+            testID={`${testID}-index`}
+            x1={mid}
+            y1={BASELINE + 12}
+            x2={mid}
+            y2={BASELINE - 10}
+            stroke={instrument.accent}
+            strokeWidth={2}
+          />
+        </Svg>
+      </View>
+    </GestureDetector>
+  );
+}
+
+export function TickRuler(props: TickRulerProps) {
+  return props.mode === "detented" ? <DetentedRuler {...props} /> : <ContinuousRuler {...props} />;
 }

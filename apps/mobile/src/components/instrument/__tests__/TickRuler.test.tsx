@@ -1,6 +1,6 @@
-import { fireEvent, render } from "@testing-library/react-native";
+import { fireEvent, render, screen } from "@testing-library/react-native";
 import { fireGestureHandler, getByGestureTestId } from "react-native-gesture-handler/jest-utils";
-import { TickRuler, valueFromDrag } from "../TickRuler";
+import { indexFromDrag, TickRuler, valueFromDrag } from "../TickRuler";
 
 const base = {
   mode: "continuous" as const,
@@ -164,5 +164,118 @@ describe("valueFromDrag", () => {
     }
     const single = valueFromDrag(startValue, 120, min, max, step);
     expect(lastReported).not.toBe(single);
+  });
+});
+
+const ACTIVITY = ["Sedentary", "Light", "Moderate", "Active", "Very active"] as const;
+
+describe("TickRuler detented mode", () => {
+  const detented = {
+    mode: "detented" as const,
+    labels: ACTIVITY,
+    accessibilityLabel: "Activity level",
+    testID: "activity-ruler",
+  };
+
+  it("reads its value as the label, never the index", async () => {
+    await render(<TickRuler {...detented} index={2} onChange={jest.fn()} />);
+    expect(screen.getByTestId("activity-ruler").props.accessibilityValue).toEqual({
+      text: "Moderate",
+    });
+  });
+
+  it("moves exactly one stop on increment", async () => {
+    const onChange = jest.fn();
+    await render(<TickRuler {...detented} index={2} onChange={onChange} />);
+    fireEvent(screen.getByTestId("activity-ruler"), "accessibilityAction", {
+      nativeEvent: { actionName: "increment" },
+    });
+    expect(onChange).toHaveBeenCalledWith(3);
+  });
+
+  it("stops at the last label rather than reporting a sixth stop", async () => {
+    const onChange = jest.fn();
+    await render(<TickRuler {...detented} index={4} onChange={onChange} />);
+    fireEvent(screen.getByTestId("activity-ruler"), "accessibilityAction", {
+      nativeEvent: { actionName: "increment" },
+    });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  // screen.getByText does not resolve react-native-svg <Text> nodes under
+  // this jest setup (RNSVGText renders its child through an RNSVGTSpan that
+  // testing-library's text matcher doesn't see) — asserting on each label's
+  // own testID instead of deleting the check, still proving every one of
+  // the five labels renders its own text rather than a shared/empty value.
+  it("renders every stop's label", async () => {
+    await render(<TickRuler {...detented} index={0} onChange={jest.fn()} />);
+    ACTIVITY.forEach((label, i) => {
+      // RNSVGText wraps its text child in an implicit TSpan element, so the
+      // rendered string is one level deeper than `.props.children`.
+      expect(screen.getByTestId(`activity-ruler-label-${i}`).props.children.props.children).toBe(
+        label,
+      );
+    });
+  });
+
+  it("never reports a fractional index", async () => {
+    const onChange = jest.fn();
+    await render(<TickRuler {...detented} index={1} onChange={onChange} />);
+    fireEvent(screen.getByTestId("activity-ruler"), "accessibilityAction", {
+      nativeEvent: { actionName: "decrement" },
+    });
+    const reported = onChange.mock.calls[0][0];
+    expect(Number.isInteger(reported)).toBe(true);
+  });
+
+  // Pins the WIRING (same hazard, same fix, as continuous mode's equivalent
+  // test above): `indexFromDrag`'s own unit tests can't distinguish
+  // `Gesture.Pan().onUpdate(e => ... e.translationX)` from an accidental
+  // `.onChange(e => ... e.changeX)` — both call the same correct function,
+  // just with different numbers. Firing real gesture events through
+  // react-native-gesture-handler's own change-event calculator (which
+  // derives changeX as the diff between consecutive translationX values,
+  // exactly as it does on-device) is the only way to catch a regression in
+  // which field gets read.
+  //
+  // Firing cumulative translationX = 48, 96, 192 from index=2, DETENT_PX=96:
+  //   correct (translationX, cumulative): last call carries 192 → 2 - 2 = 0
+  //   buggy   (changeX, per-frame delta): last call carries 192-96=96 → 2 - 1 = 1
+  // 0 and 1 are different stops, so the two wirings are distinguishable by
+  // the final onChange call alone.
+  it("wires the cumulative translationX into onChange, not the per-frame changeX", async () => {
+    const onChange = jest.fn();
+    await render(<TickRuler {...detented} index={2} onChange={onChange} />);
+    fireGestureHandler(getByGestureTestId("activity-ruler-pan"), [
+      { translationX: 48 },
+      { translationX: 96 },
+      { translationX: 192 },
+    ]);
+    expect(onChange).toHaveBeenLastCalledWith(0);
+  });
+});
+
+describe("indexFromDrag", () => {
+  const stopCount = 5;
+
+  it("moves one stop left on a leftward drag (negative translationX)", () => {
+    expect(indexFromDrag(2, -96, stopCount)).toBe(3);
+  });
+
+  it("moves one stop right on a rightward drag (positive translationX)", () => {
+    expect(indexFromDrag(2, 96, stopCount)).toBe(1);
+  });
+
+  it("clamps at the last stop for a large leftward translation", () => {
+    expect(indexFromDrag(2, -10000, stopCount)).toBe(stopCount - 1);
+  });
+
+  it("clamps at the first stop for a large rightward translation", () => {
+    expect(indexFromDrag(2, 10000, stopCount)).toBe(0);
+  });
+
+  it("always lands on a whole stop", () => {
+    const result = indexFromDrag(2, -130, stopCount);
+    expect(Number.isInteger(result)).toBe(true);
   });
 });
