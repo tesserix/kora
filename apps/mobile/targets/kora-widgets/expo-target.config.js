@@ -17,6 +17,11 @@ module.exports = (config) => {
     // name — "kora-widgets" here made remote builds fail with
     // "Could not find target 'korawidgets' in project.pbxproj".
     name: "korawidgets",
+    // AppIntentConfiguration (the metric picker) requires iOS 17. This raises
+    // the EXTENSION only — the app stays at 16.4, so iOS 16 users keep the app
+    // and simply see no Kora widgets in the gallery. @bacons/apple-targets maps
+    // this to IPHONEOS_DEPLOYMENT_TARGET on the target's build configuration.
+    deploymentTarget: "17.0",
     displayName: "Kora",
     bundleIdentifier: ".widgets",
     // HealthKit is read live inside StepsWidget (Task 6); the App Group carries
@@ -26,6 +31,6 @@ module.exports = (config) => {
       "com.apple.security.application-groups": appGroups,
       "com.apple.developer.healthkit": true,
     },
-    frameworks: ["SwiftUI", "WidgetKit", "HealthKit"],
+    frameworks: ["SwiftUI", "WidgetKit", "HealthKit", "AppIntents"],
   };
 };
