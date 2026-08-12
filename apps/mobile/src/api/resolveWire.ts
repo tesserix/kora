@@ -20,7 +20,14 @@ import type { Resolution, ResolvedCandidate } from "./types";
 // recognized" response for exactly that reason.
 export function normalizeResolution(raw: unknown): Resolution {
   const r = raw as Omit<Resolution, "candidates"> & { candidates: ResolvedCandidate[] | null };
-  return { ...r, candidates: r.candidates ?? [] };
+  const candidates = r.candidates ?? [];
+  return {
+    ...r,
+    // portion_assumed is optional on the wire (an older server omits it).
+    // Coerce it to a real boolean here so consumers never branch on
+    // `undefined` and can render the assumed-portion hedge unconditionally.
+    candidates: candidates.map((c) => ({ ...c, portion_assumed: c.portion_assumed ?? false })),
+  };
 }
 
 export type ResolveFile = {

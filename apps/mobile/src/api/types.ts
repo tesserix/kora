@@ -254,6 +254,12 @@ export interface ResolvedCandidate {
    * for it yet, so the card must render "—" rather than invent a figure.
    */
   kcal_unknown?: boolean;
+  /**
+   * True when the server had no serving size for this food and fell back to a
+   * 100g assumption. The portion is a guess, not a measurement, and must never
+   * be rendered as an exact figure without saying so.
+   */
+  portion_assumed?: boolean;
 }
 
 export interface Resolution {

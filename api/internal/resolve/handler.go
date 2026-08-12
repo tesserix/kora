@@ -66,6 +66,24 @@ func barcodePortionGrams(item nutrition.FoodItem) float64 {
 	return barcodeDefaultGrams
 }
 
+// barcodeCandidate builds the single candidate a barcode hit resolves to.
+// Extracted from the handler so the assumed-portion rule is testable without
+// standing up an HTTP request.
+func barcodeCandidate(item nutrition.FoodItem) ai.ResolvedCandidate {
+	assumed := item.ServingGrams <= 0
+	grams := barcodePortionGrams(item)
+	return ai.ResolvedCandidate{
+		Item:         item,
+		PortionGrams: grams,
+		// Nutrition is row-sourced: kcal = KcalPer100g * (grams/100).
+		Kcal:           item.KcalPer100g * grams / 100,
+		MatchScore:     1.0,
+		MatchTier:      nutrition.MatchAlias, // exact barcode == exact match
+		Tier:           ai.TierAuto,
+		PortionAssumed: assumed,
+	}
+}
+
 type TextPhotoResolver interface {
 	ResolveText(ctx context.Context, userID uuid.UUID, phrase string) (ai.Resolution, error)
 	ResolvePhoto(ctx context.Context, userID uuid.UUID, image []byte, mime string) (ai.Resolution, error)
@@ -229,18 +247,8 @@ func (h Handler) ResolveBarcode(c *gin.Context) {
 		})
 		return
 	}
-	// Nutrition is row-sourced: kcal = KcalPer100g * (grams/100).
-	grams := barcodePortionGrams(*item)
-	kcal := item.KcalPer100g * grams / 100
 	httpx.OK(c, ai.Resolution{
-		Candidates: []ai.ResolvedCandidate{{
-			Item:         *item,
-			PortionGrams: grams,
-			Kcal:         kcal,
-			MatchScore:   1.0,
-			MatchTier:    nutrition.MatchAlias, // exact barcode == exact match
-			Tier:         ai.TierAuto,
-		}},
+		Candidates: []ai.ResolvedCandidate{barcodeCandidate(*item)},
 		Tier:       ai.TierAuto,
 		Provenance: item.Provenance,
 	})

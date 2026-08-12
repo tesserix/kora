@@ -88,6 +88,13 @@ type ResolvedCandidate struct {
 	// keeps the max across items (it answers "is anything loggable?"), so
 	// without a per-item tier a weak item is invisible beside a strong one.
 	Tier Tier `json:"tier"`
+	// PortionAssumed reports that no serving size was known for this food and
+	// the portion below is a 100g fallback, not a measurement. It is
+	// deliberately separate from MatchScore: a barcode identifies the food
+	// exactly (score 1.0 is honest), while the portion is still a guess.
+	// Collapsing the two would either overstate the portion or understate the
+	// match. The client must not render an assumed portion as an exact figure.
+	PortionAssumed bool `json:"portion_assumed"`
 }
 
 // Resolution is the engine's answer for one resolve request.

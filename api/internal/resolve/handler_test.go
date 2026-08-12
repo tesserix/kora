@@ -557,3 +557,24 @@ func TestResolveBarcode_TooShortIsRejected(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "invalid_input")
 }
+
+func TestBarcodePortionAssumedWhenServingGramsMissing(t *testing.T) {
+	item := nutrition.FoodItem{Name: "Nescafé Mocha", KcalPer100g: 183, ServingGrams: 0}
+
+	got := barcodeCandidate(item)
+
+	assert.True(t, got.PortionAssumed, "a 100g fallback is a guess and must say so")
+	// Identity is still exact — a barcode names the food with certainty.
+	// Only the portion is assumed, and the two must not be conflated.
+	assert.Equal(t, 1.0, got.MatchScore)
+	assert.Equal(t, nutrition.MatchAlias, got.MatchTier)
+}
+
+func TestBarcodePortionNotAssumedWhenServingGramsPresent(t *testing.T) {
+	item := nutrition.FoodItem{Name: "Chicken Ramen", KcalPer100g: 183, ServingGrams: 350}
+
+	got := barcodeCandidate(item)
+
+	assert.False(t, got.PortionAssumed)
+	assert.InDelta(t, 350.0, got.PortionGrams, 1e-9)
+}
