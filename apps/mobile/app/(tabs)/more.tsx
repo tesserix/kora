@@ -25,7 +25,7 @@ import { useTheme } from "@/theme";
 // near-identically — MoreRow is kept as-is rather than migrated to avoid
 // churn on an already-shipped screen. The unread-count Badge is the one
 // accent element this screen is allowed.
-type MoreRowKey = "profile" | "friends" | "groups" | "notifications" | "settings" | "reminders" | "feedback";
+type MoreRowKey = "profile" | "friends" | "groups" | "notifications" | "settings" | "feedback";
 
 type MoreRowProps = {
   rowKey: MoreRowKey;
@@ -140,12 +140,6 @@ export default function More() {
             title="Settings"
             icon="gear"
             onPress={() => router.push("/settings" as Href)}
-          />
-          <MoreRow
-            rowKey="reminders"
-            title="Reminders"
-            icon="bell"
-            onPress={() => router.push("/reminders" as Href)}
           />
           <MoreRow
             rowKey="feedback"

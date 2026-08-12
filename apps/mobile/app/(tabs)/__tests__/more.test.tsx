@@ -34,12 +34,6 @@ test("tapping Notifications navigates to /notifications", async () => {
   expect(mockPush).toHaveBeenCalledWith("/notifications");
 });
 
-test("tapping Reminders navigates to /reminders", async () => {
-  const { getByText } = await render(<More />);
-  await fireEvent.press(getByText("Reminders"));
-  expect(mockPush).toHaveBeenCalledWith("/reminders");
-});
-
 test("tapping Send feedback navigates to /feedback", async () => {
   const { getByText } = await render(<More />);
   await fireEvent.press(getByText("Send feedback"));

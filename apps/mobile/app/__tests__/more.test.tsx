@@ -32,7 +32,7 @@ beforeEach(() => {
 test("renders every row label and the More title", async () => {
   const { getByText } = await render(<More />);
   expect(getByText("More")).toBeTruthy();
-  for (const label of ["Profile", "Friends", "Groups", "Notifications", "Settings", "Reminders", "Send feedback", "Sign out"]) {
+  for (const label of ["Profile", "Friends", "Groups", "Notifications", "Settings", "Send feedback", "Sign out"]) {
     expect(getByText(label)).toBeTruthy();
   }
 });
