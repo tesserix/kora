@@ -117,6 +117,47 @@ func seedFoodItem(t *testing.T, repo nutrition.Repository, item nutrition.FoodIt
 	return got
 }
 
+// TestResolveAliasPortion_AssumedFlag is a pure unit test (no DB) of the
+// fallback chain resolveAliasPortion drives: it must report assumed=true
+// ONLY on the final rung (defaultAliasPortionGrams), never when a real prior
+// log or the food's own ServingGrams supplied the number.
+func TestResolveAliasPortion_AssumedFlag(t *testing.T) {
+	userID := uuid.New()
+	phrase := "brekkie eggs"
+	itemWithServing := nutrition.FoodItem{KcalPer100g: 120, ServingGrams: 150}
+	itemNoServing := nutrition.FoodItem{KcalPer100g: 120, ServingGrams: 0}
+
+	t.Run("last logged portion is a real measurement, not assumed", func(t *testing.T) {
+		r := Resolver{}.WithPortionSource(&fakePortionSource{grams: map[string]float64{
+			userID.String() + "|" + phrase: 220,
+		}})
+		grams, assumed := r.resolveAliasPortion(context.Background(), userID, phrase, itemWithServing)
+		require.Equal(t, 220.0, grams)
+		require.False(t, assumed)
+	})
+
+	t.Run("falling back to the food's own ServingGrams is not assumed", func(t *testing.T) {
+		r := Resolver{}.WithPortionSource(&fakePortionSource{grams: map[string]float64{}})
+		grams, assumed := r.resolveAliasPortion(context.Background(), userID, phrase, itemWithServing)
+		require.Equal(t, 150.0, grams)
+		require.False(t, assumed)
+	})
+
+	t.Run("falling all the way to the flat default is assumed", func(t *testing.T) {
+		r := Resolver{}.WithPortionSource(&fakePortionSource{grams: map[string]float64{}})
+		grams, assumed := r.resolveAliasPortion(context.Background(), userID, phrase, itemNoServing)
+		require.Equal(t, float64(defaultAliasPortionGrams), grams)
+		require.True(t, assumed)
+	})
+
+	t.Run("nil portion source still marks the flat default as assumed", func(t *testing.T) {
+		r := Resolver{}
+		grams, assumed := r.resolveAliasPortion(context.Background(), userID, phrase, itemNoServing)
+		require.Equal(t, float64(defaultAliasPortionGrams), grams)
+		require.True(t, assumed)
+	})
+}
+
 // TestResolveText_PersonalAliasShortCircuit_SkipsProviderAndMetering is the
 // main fix under test: a personal alias for the RAW phrase must resolve
 // without ever calling the provider or metering any AI usage, since no AI
@@ -161,6 +202,7 @@ func TestResolveText_PersonalAliasShortCircuit_SkipsProviderAndMetering(t *testi
 	require.Equal(t, 220.0, res.Candidates[0].PortionGrams, "portion must come from the user's last log of this phrase")
 	// 120 kcal/100g * 220g / 100 = 264 — computed from the row, never fabricated.
 	require.Equal(t, 264.0, res.Candidates[0].Kcal)
+	require.False(t, res.Candidates[0].PortionAssumed, "a real prior log is a measurement, not an assumption")
 }
 
 // TestResolveText_PersonalAliasShortCircuit_FallsBackToServingGrams proves
@@ -192,6 +234,7 @@ func TestResolveText_PersonalAliasShortCircuit_FallsBackToServingGrams(t *testin
 	require.Equal(t, 180.0, res.Candidates[0].PortionGrams)
 	// 120 kcal/100g * 180g / 100 = 216.
 	require.Equal(t, 216.0, res.Candidates[0].Kcal)
+	require.False(t, res.Candidates[0].PortionAssumed, "the food's own ServingGrams is real serving data, not an assumption")
 }
 
 // TestResolveText_PersonalAliasShortCircuit_FallsBackTo100gWhenServingGramsZero
@@ -221,6 +264,7 @@ func TestResolveText_PersonalAliasShortCircuit_FallsBackTo100gWhenServingGramsZe
 	require.Len(t, res.Candidates, 1)
 	require.Equal(t, 100.0, res.Candidates[0].PortionGrams)
 	require.Equal(t, 120.0, res.Candidates[0].Kcal)
+	require.True(t, res.Candidates[0].PortionAssumed, "no prior log and no ServingGrams means the 100g is a silent fallback")
 }
 
 // TestResolveText_PersonalAliasShortCircuit_NilPortionSourceFallsBackSafely
@@ -284,6 +328,41 @@ func TestResolveText_NoAlias_LLMPathRunsUnchanged(t *testing.T) {
 	require.NotEmpty(t, meter.records, "the LLM path must still meter usage")
 	require.Equal(t, TierAuto, res.Tier)
 	require.Equal(t, 208.0, res.Candidates[0].Kcal)
+	require.False(t, res.Candidates[0].PortionAssumed, "an explicit portion phrase from the guess is not an assumption")
+}
+
+// TestResolveText_GuessWithNoPortionPhrase_MarksPortionAssumed covers a guess
+// whose PortionEstimate is empty (the model gave no portion signal at all)
+// against a food row with no OFF branded serving to fall back on —
+// portionGramsFor's true silent-default rung. The candidate must be marked
+// PortionAssumed so the client never renders the flat 100g as a measurement.
+func TestResolveText_GuessWithNoPortionPhrase_MarksPortionAssumed(t *testing.T) {
+	db := testDB(t)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE brand = 'test4g'") })
+	repo := nutrition.NewRepository(db)
+
+	item := seedFoodItem(t, repo, nutrition.FoodItem{
+		Name: "Unmeasured snack", Brand: "test4g",
+		Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 300,
+	})
+	seedAlias(t, db, "unmeasured snack", item.ID)
+
+	provider := &stubProvider{
+		guesses: []Guess{
+			{Food: "unmeasured snack", PortionEstimate: "", Confidence: 0.95},
+		},
+		guessUsage: Usage{Provider: "stub", CallType: "identify_text"},
+	}
+	meter := &stubMeter{withinBudget: true}
+	resolver := NewResolver(provider, repo, NoCache{}, meter)
+
+	res, err := resolver.ResolveText(context.Background(), uuid.New(), "unmeasured snack")
+
+	require.NoError(t, err)
+	require.Equal(t, TierAuto, res.Tier)
+	require.Len(t, res.Candidates, 1)
+	require.Equal(t, 100.0, res.Candidates[0].PortionGrams)
+	require.True(t, res.Candidates[0].PortionAssumed, "no portion phrase and no serving data means the 100g is a silent fallback")
 }
 
 // TestResolveText_PersonalAliasShortCircuit_AnotherUsersAliasDoesNotApply
@@ -450,6 +529,45 @@ func TestResolveText_UnknownDish_DecomposesToEstimate(t *testing.T) {
 	require.InDelta(t, wantSum*(1-estimateBand), res.KcalLow, 0.01)
 	require.InDelta(t, wantSum*(1+estimateBand), res.KcalHigh, 0.01)
 	require.Len(t, res.Candidates, 2)
+	for i, c := range res.Candidates {
+		require.False(t, c.PortionAssumed, "candidate %d: an explicit portion phrase from decompose is not an assumption", i)
+	}
+}
+
+// TestDecomposeAndEstimate_IngredientWithNoPortionPhrase_MarksPortionAssumed
+// covers a decomposed ingredient whose PortionEstimate is empty — the LLM
+// invented the ingredient but gave no portion signal — against a food row
+// with no OFF branded serving. portionGramsFor falls all the way to the flat
+// default here, so the candidate must be marked PortionAssumed.
+func TestDecomposeAndEstimate_IngredientWithNoPortionPhrase_MarksPortionAssumed(t *testing.T) {
+	db := testDB(t)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE brand = 'test3f'") })
+	repo := nutrition.NewRepository(db)
+
+	chicken := seedFoodItem(t, repo, nutrition.FoodItem{
+		Name: "Shredded chicken ingredient 3f", Brand: "test3f",
+		Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 165,
+	})
+	seedAlias(t, db, "shredded chicken 3f", chicken.ID)
+
+	provider := &stubProvider{
+		guesses:    []Guess{{Food: "qzzznonce unknown dish 3f", PortionEstimate: "1 serving", Confidence: 0.9}},
+		guessUsage: Usage{Provider: "stub", CallType: "identify_text"},
+		ingredients: []IngredientGuess{
+			{Ingredient: "shredded chicken 3f", PortionEstimate: "", Confidence: 0.8},
+		},
+		ingredientsUsage: Usage{Provider: "stub", CallType: "decompose"},
+	}
+	meter := &stubMeter{withinBudget: true}
+	resolver := NewResolver(provider, repo, NoCache{}, meter)
+
+	res, err := resolver.ResolveText(context.Background(), uuid.New(), "qzzznonce unknown dish 3f")
+
+	require.NoError(t, err)
+	require.True(t, res.IsEstimate)
+	require.Len(t, res.Candidates, 1)
+	require.Equal(t, 100.0, res.Candidates[0].PortionGrams)
+	require.True(t, res.Candidates[0].PortionAssumed, "no portion phrase and no serving data means the 100g is a silent fallback")
 }
 
 // TestResolveText_EstimatePath_StampsConfirmTierOnEveryCandidate covers the

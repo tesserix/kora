@@ -59,70 +59,89 @@ func TestPortionGramsForUsesTheFoodsOwnServing(t *testing.T) {
 	const portionUnits = `[{"name":"portion","amount":1,"base_amount":16.5}]`
 
 	tests := []struct {
-		name   string
-		phrase string
-		item   nutrition.FoodItem
-		want   float64
+		name        string
+		phrase      string
+		item        nutrition.FoodItem
+		want        float64
+		wantAssumed bool
 	}{
 		{
-			name:   "an unrecognised phrase falls back to a branded food's own serving",
-			phrase: "one sachet",
-			item:   offItem(16.5, portionUnits),
-			want:   16.5,
+			name:        "an unrecognised phrase falls back to a branded food's own serving",
+			phrase:      "one sachet",
+			item:        offItem(16.5, portionUnits),
+			want:        16.5,
+			wantAssumed: false,
 		},
 		{
-			name:   "an empty phrase falls back to a branded food's own serving",
-			phrase: "",
-			item:   offItem(16.5, portionUnits),
-			want:   16.5,
+			name:        "an empty phrase falls back to a branded food's own serving",
+			phrase:      "",
+			item:        offItem(16.5, portionUnits),
+			want:        16.5,
+			wantAssumed: false,
 		},
 		{
 			// The row's OWN named serving beats the generic table: a cup of
 			// this product is whatever the product says it is.
-			name:   "a phrase naming the food's own serving resolves against it",
-			phrase: "2 portions",
-			item:   offItem(16.5, portionUnits),
-			want:   33,
+			name:        "a phrase naming the food's own serving resolves against it",
+			phrase:      "2 portions",
+			item:        offItem(16.5, portionUnits),
+			want:        33,
+			wantAssumed: false,
 		},
 		{
-			name:   "a worded count against the food's own serving",
-			phrase: "one portion",
-			item:   offItem(16.5, portionUnits),
-			want:   16.5,
+			name:        "a worded count against the food's own serving",
+			phrase:      "one portion",
+			item:        offItem(16.5, portionUnits),
+			want:        16.5,
+			wantAssumed: false,
 		},
 		{
 			// An explicit mass is the most specific thing anyone can say.
-			name:   "an explicit gram figure still wins over the serving",
-			phrase: "45 g",
-			item:   offItem(16.5, portionUnits),
-			want:   45,
+			name:        "an explicit gram figure still wins over the serving",
+			phrase:      "45 g",
+			item:        offItem(16.5, portionUnits),
+			want:        45,
+			wantAssumed: false,
 		},
 		{
 			// USDA reference servings are arbitrary — "Turkey, whole, raw" is
 			// 5717 g. Falling back to those would log a whole bird where the
 			// flat default logs 100 g, so non-branded rows keep the default.
-			name:   "a USDA row keeps the flat default rather than its reference serving",
-			phrase: "some turkey",
-			item:   nutrition.FoodItem{Provenance: nutrition.ProvenanceUSDA, ServingGrams: 5717},
-			want:   defaultPortionGrams,
+			// Nothing food-specific applied and the phrase carried no usable
+			// signal either, so this IS the silent-default case.
+			name:        "a USDA row keeps the flat default rather than its reference serving",
+			phrase:      "some turkey",
+			item:        nutrition.FoodItem{Provenance: nutrition.ProvenanceUSDA, ServingGrams: 5717},
+			want:        defaultPortionGrams,
+			wantAssumed: true,
 		},
 		{
-			name:   "the generic table still applies when the food names no such serving",
-			phrase: "1 cup",
-			item:   offItem(16.5, portionUnits),
-			want:   240,
+			// The user's own phrase mapped through the curated table is still a
+			// real signal from what they said — not a silent assumption.
+			name:        "the generic table still applies when the food names no such serving",
+			phrase:      "1 cup",
+			item:        offItem(16.5, portionUnits),
+			want:        240,
+			wantAssumed: false,
 		},
 		{
-			name:   "a branded row with no serving mass keeps the flat default",
-			phrase: "one sachet",
-			item:   offItem(0, ""),
-			want:   defaultPortionGrams,
+			// No phrase signal AND no food-specific serving data at all — the
+			// pure silent-default case.
+			name:        "a branded row with no serving mass keeps the flat default",
+			phrase:      "one sachet",
+			item:        offItem(0, ""),
+			want:        defaultPortionGrams,
+			wantAssumed: true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := portionGramsFor(tt.phrase, tt.item); got != tt.want {
-				t.Fatalf("portionGramsFor(%q) = %v, want %v", tt.phrase, got, tt.want)
+			got, assumed := portionGramsFor(tt.phrase, tt.item)
+			if got != tt.want {
+				t.Fatalf("portionGramsFor(%q) grams = %v, want %v", tt.phrase, got, tt.want)
+			}
+			if assumed != tt.wantAssumed {
+				t.Fatalf("portionGramsFor(%q) assumed = %v, want %v", tt.phrase, assumed, tt.wantAssumed)
 			}
 		})
 	}

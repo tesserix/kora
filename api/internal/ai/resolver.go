@@ -142,15 +142,16 @@ func (r Resolver) aliasShortCircuit(ctx context.Context, userID uuid.UUID, phras
 		return Resolution{}, false
 	}
 
-	grams := r.resolveAliasPortion(ctx, userID, phrase, item)
+	grams, assumed := r.resolveAliasPortion(ctx, userID, phrase, item)
 	return Resolution{
 		Candidates: []ResolvedCandidate{{
-			Item:         item,
-			PortionGrams: grams,
-			Kcal:         item.KcalPer100g * grams / 100,
-			MatchScore:   1.0,
-			MatchTier:    nutrition.MatchAlias,
-			Tier:         TierAuto,
+			Item:           item,
+			PortionGrams:   grams,
+			Kcal:           item.KcalPer100g * grams / 100,
+			MatchScore:     1.0,
+			MatchTier:      nutrition.MatchAlias,
+			Tier:           TierAuto,
+			PortionAssumed: assumed,
 		}},
 		Tier:       TierAuto,
 		Provenance: item.Provenance,
@@ -163,20 +164,26 @@ func (r Resolver) aliasShortCircuit(ctx context.Context, userID uuid.UUID, phras
 // portionSource (no PortionSource wired) or a lookup error is treated the
 // same as "no prior log" — logged and folded into the same fallback chain —
 // since an alias hit still deserves an answer even without portion history.
-func (r Resolver) resolveAliasPortion(ctx context.Context, userID uuid.UUID, phrase string, item nutrition.FoodItem) float64 {
+//
+// The second return value, assumed, is true ONLY on the final rung
+// (defaultAliasPortionGrams) — a real prior log or the food's own
+// ServingGrams are both actual data, not assumptions. Callers must pass this
+// straight through to ResolvedCandidate.PortionAssumed rather than
+// re-deriving the condition themselves.
+func (r Resolver) resolveAliasPortion(ctx context.Context, userID uuid.UUID, phrase string, item nutrition.FoodItem) (grams float64, assumed bool) {
 	if r.portionSource != nil {
 		grams, found, err := r.portionSource.LastPortionForPhrase(ctx, userID, phrase)
 		if err != nil {
 			slog.WarnContext(ctx, "ai: last portion lookup failed, falling back to serving size",
 				"error", err, "user_id", userID)
 		} else if found {
-			return grams
+			return grams, false
 		}
 	}
 	if item.ServingGrams > 0 {
-		return item.ServingGrams
+		return item.ServingGrams, false
 	}
-	return defaultAliasPortionGrams
+	return defaultAliasPortionGrams, true
 }
 
 // ResolvePhoto resolves a food photo to a Resolution. It shares the exact
@@ -394,7 +401,7 @@ func (r Resolver) resolveGuesses(ctx context.Context, userID uuid.UUID, guesses 
 		}
 
 		top := cands[0]
-		grams := portionGramsFor(guess.PortionEstimate, top.Item)
+		grams, assumed := portionGramsFor(guess.PortionEstimate, top.Item)
 		// Kcal comes ONLY from the nutrition-index row's per-100g value —
 		// never from the guess, which structurally cannot carry one.
 		kcal := top.Item.KcalPer100g * grams / 100
@@ -402,12 +409,13 @@ func (r Resolver) resolveGuesses(ctx context.Context, userID uuid.UUID, guesses 
 		tier := TierFor(guess.Confidence, top.MatchScore)
 
 		candidates = append(candidates, ResolvedCandidate{
-			Item:         top.Item,
-			PortionGrams: grams,
-			Kcal:         kcal,
-			MatchScore:   top.MatchScore,
-			MatchTier:    top.MatchTier,
-			Tier:         tier,
+			Item:           top.Item,
+			PortionGrams:   grams,
+			Kcal:           kcal,
+			MatchScore:     top.MatchScore,
+			MatchTier:      top.MatchTier,
+			Tier:           tier,
+			PortionAssumed: assumed,
 		})
 
 		if rank := tierRank(tier); rank > bestRank {
@@ -484,7 +492,7 @@ func (r Resolver) decomposeAndEstimate(ctx context.Context, userID uuid.UUID, su
 		}
 
 		top := cands[0]
-		grams := portionGramsFor(ing.PortionEstimate, top.Item)
+		grams, assumed := portionGramsFor(ing.PortionEstimate, top.Item)
 		// Kcal comes ONLY from the row — same invariant as resolveGuesses.
 		kcal := top.Item.KcalPer100g * grams / 100
 		totalKcal += kcal
@@ -492,12 +500,13 @@ func (r Resolver) decomposeAndEstimate(ctx context.Context, userID uuid.UUID, su
 		tier := estimateIngredientTier(top.MatchScore)
 
 		candidates = append(candidates, ResolvedCandidate{
-			Item:         top.Item,
-			PortionGrams: grams,
-			Kcal:         kcal,
-			MatchScore:   top.MatchScore,
-			MatchTier:    top.MatchTier,
-			Tier:         tier,
+			Item:           top.Item,
+			PortionGrams:   grams,
+			Kcal:           kcal,
+			MatchScore:     top.MatchScore,
+			MatchTier:      top.MatchTier,
+			Tier:           tier,
+			PortionAssumed: assumed,
 		})
 
 		if rank := tierRank(tier); rank > bestRank {
