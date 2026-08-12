@@ -121,10 +121,12 @@ Typographic, so it survives the white mask.
 
 `widgetURL` by configured metric: Reserve and Protein → `mobile:///` (Today),
 Steps → `mobile:///progress` (Trends — the URL the existing `StepsWidget` already
-uses; expo-router route groups such as `(tabs)` do not appear in the URL). On
-`systemLarge`, meal rows get their own
-`Link` destinations into `mobile:///meal?id=…` — large is the only family with room
-for distinct tap regions.
+uses; expo-router route groups such as `(tabs)` do not appear in the URL).
+
+Every family uses that single `widgetURL` destination. An earlier draft gave
+`systemLarge`'s meal rows their own `Link` destinations into `mobile:///meal?id=…`;
+that died with the meal list, for the same reason (the wire format carries no meal
+ids). With no per-row targets left, large has nothing to distinguish from the others.
 
 ## States
 
