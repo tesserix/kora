@@ -2247,8 +2247,8 @@ In `api/internal/server/router.go`, add the import `"github.com/tesserix/kora/ap
 		recipeSvc := recipes.NewService(recipes.NewRepository(deps.DB), foodRepo).
 			WithBatchLogger(foodlog.NewService(logRepo, foodRepo))
 		var recipeParser *recipes.Parser
-		if deps.AIProvider != nil {
-			recipeParser = recipes.NewParser(deps.AIProvider, foodRepo)
+		if deps.Provider != nil {
+			recipeParser = recipes.NewParser(deps.Provider, foodRepo)
 		}
 		recipeHandler := recipes.NewHandler(recipeSvc, recipeParser)
 		v1.GET("/recipes", recipeHandler.List)
@@ -2262,24 +2262,17 @@ In `api/internal/server/router.go`, add the import `"github.com/tesserix/kora/ap
 
 Register `/recipes/parse` **before** `/recipes/:id` as written above; Gin's radix tree handles the two, but keeping the static path first makes the intent obvious to the next reader.
 
-Add the new dep to the `Deps` struct near the existing `Resolver *resolve.Handler` field (line ~45). `router.go` does not currently import package `ai`, so add `"github.com/tesserix/kora/api/internal/ai"` to its import block as well:
-
-```go
-	// AIProvider is the same provider instance the resolve engine uses. It is
-	// nil when no provider key is configured, which disables recipe parsing
-	// (not recipes themselves).
-	AIProvider ai.Provider
-```
+**Correction (found during Task 6):** an earlier draft of this plan told you to add a new `AIProvider ai.Provider` field to `Deps`. **Do not.** `Deps` already carries a `Provider ai.Provider` field (used by the coach handler), `router.go` already imports package `ai`, and `main.go` assigns the same `aiProvider` value to it. Adding a second field produced two names for one object with no path where they could differ. Use the existing `deps.Provider` for the recipe parser's nil-check and construction.
 
 - [ ] **Step 4: Pass the provider in from main**
 
-In `api/cmd/api/main.go`, `buildResolveEngine` already returns `(*resolve.Handler, ai.Provider, ai.Cache)`. Find the call site that builds `server.Deps` and set `AIProvider:` to the returned provider value alongside the existing `Resolver:` field.
+In `api/cmd/api/main.go`, `buildResolveEngine` already returns `(*resolve.Handler, ai.Provider, ai.Cache)`, and the `server.Deps` literal already sets `Provider: aiProvider`. Nothing to add here — recipes reuses that field. Do not introduce a second provider field.
 
 Run `grep -n "Resolver:" api/cmd/api/main.go` to locate it.
 
 - [ ] **Step 5: Add a route-registration test**
 
-In `api/internal/server/router_test.go`, extend the existing route-presence test with the seven recipe routes, following the `hasRoute(r.Routes(), "POST", "/v1/resolve/text")` pattern already in that file. Also assert that with `AIProvider: nil` the recipe routes are still registered — recipes must not disappear when the AI provider is absent.
+In `api/internal/server/router_test.go`, extend the existing route-presence test with the seven recipe routes, following the `hasRoute(r.Routes(), "POST", "/v1/resolve/text")` pattern already in that file. Also assert that with `Provider: nil` the recipe routes are still registered — recipes must not disappear when the AI provider is absent. Make the provider-present and provider-nil tests genuinely differ (one sets a non-nil `ai.Provider` stub), or they are duplicates that only cover the nil case.
 
 - [ ] **Step 6: Run everything**
 
