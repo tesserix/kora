@@ -28,6 +28,10 @@ describe("validateOnboardingNumbers", () => {
       validateOnboardingNumbers("31", "300", "84", { heightUnit: "ft/in", weightUnit: "lb" }),
     ).toBe("Please enter a valid height in ft/in.");
   });
+
+  it("rejects a current weight below the goal-weight plausibility floor", () => {
+    expect(validateOnboardingNumbers("31", "178", "15")).toBe("Please enter a valid weight in kg.");
+  });
 });
 
 describe("validateGoalWeight", () => {
@@ -49,8 +53,13 @@ describe("validateGoalWeight", () => {
     );
   });
 
-  it("ignores the goal weight entirely when maintaining", () => {
-    expect(validateGoalWeight("maintenance", 84, 40)).toBeNull();
+  it("ignores the goal weight entirely when maintaining, even an impossible one", () => {
+    // 5kg would fail the plausibility floor. Returning null proves the
+    // maintenance short-circuit runs BEFORE the range check, which is the
+    // guarantee: a maintenance user's goal weight is meaningless and must
+    // never produce an error.
+    expect(validateGoalWeight("maintenance", 84, 5)).toBeNull();
+    expect(validateGoalWeight("maintenance", 84, 600)).toBeNull();
   });
 
   it("rejects an implausible goal weight", () => {

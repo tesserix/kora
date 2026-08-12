@@ -32,7 +32,10 @@ export function validateOnboardingNumbers(
   if (h <= 0 || h > 260) {
     return `Please enter a valid height in ${heightUnit}.`;
   }
-  if (w <= 0 || w > 500) {
+  // Same 20kg floor validateGoalWeight applies. Without it a current
+  // weight under 20 leaves the goal-weight field unsatisfiable: no value
+  // can be both above the plausibility floor and at or below current weight.
+  if (w < 20 || w > 500) {
     return `Please enter a valid weight in ${weightUnit}.`;
   }
   return null;
