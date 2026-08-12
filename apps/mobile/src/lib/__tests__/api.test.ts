@@ -1,4 +1,8 @@
-import { ApiError, apiFetch, apiFetchEnvelope, apiFetchMultipart } from "../api";
+import { ApiError, REQUEST_TIMEOUT_MS, apiFetch, apiFetchEnvelope, apiFetchMultipart } from "../api";
+
+function abortError(): DOMException {
+  return new DOMException("Aborted", "AbortError");
+}
 
 jest.mock("../firebase", () => ({
   auth: { currentUser: { getIdToken: jest.fn().mockResolvedValue("test-token") } },
@@ -128,4 +132,57 @@ test("apiFetchMultipart sends FormData without a JSON content-type and with the 
   expect(init.body).toBeInstanceOf(FormData);
   expect(init.headers.Authorization).toBe("Bearer test-token");
   expect(init.headers["Content-Type"]).toBeUndefined();
+});
+
+test("a request that outlives the deadline rejects as a timeout", async () => {
+  jest.useFakeTimers();
+  (global.fetch as jest.Mock).mockImplementation(() => new Promise(() => {}));
+  const promise = apiFetch("/v1/slow");
+  jest.advanceTimersByTime(REQUEST_TIMEOUT_MS + 1);
+  await expect(promise).rejects.toMatchObject({ name: "TimeoutError" });
+  jest.useRealTimers();
+});
+
+test("an aborted request rejects and does not resolve later", async () => {
+  const controller = new AbortController();
+  (global.fetch as jest.Mock).mockImplementation((_u, init) =>
+    new Promise((_res, rej) => init.signal.addEventListener("abort", () => rej(abortError()))),
+  );
+  const promise = apiFetch("/v1/slow", { signal: controller.signal });
+  controller.abort();
+  await expect(promise).rejects.toBeTruthy();
+});
+
+test("the client deadline is below the gateway's 30s cut-off", () => {
+  expect(REQUEST_TIMEOUT_MS).toBeLessThan(30_000);
+});
+
+test("a fast response clears the deadline timer instead of leaving it pending", async () => {
+  jest.useFakeTimers();
+  (global.fetch as jest.Mock).mockResolvedValue({
+    ok: true,
+    json: async () => ({ data: { ok: true } }),
+  });
+
+  await apiFetch("/v1/fast");
+
+  // If the timer were still pending, advancing past it would throw a
+  // TimeoutError from a request that already completed. Nothing to await
+  // here — a leaked timer would need to actually fire an unhandled
+  // rejection, which fake timers surface as a thrown error from this call.
+  expect(() => jest.advanceTimersByTime(REQUEST_TIMEOUT_MS + 1)).not.toThrow();
+  jest.useRealTimers();
+});
+
+test("apiFetchMultipart forwards a caller signal that can abort the request", async () => {
+  const controller = new AbortController();
+  (global.fetch as jest.Mock).mockImplementation((_u, init) =>
+    new Promise((_res, rej) => init.signal.addEventListener("abort", () => rej(abortError()))),
+  );
+  const form = new FormData();
+
+  const promise = apiFetchMultipart("/v1/resolve/photo", form, { signal: controller.signal });
+  controller.abort();
+
+  await expect(promise).rejects.toBeTruthy();
 });

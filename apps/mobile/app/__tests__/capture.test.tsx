@@ -403,6 +403,15 @@ test("analyzing stage shows the spinner", async () => {
   expect(getByTestId("capture-analyzing-spinner")).toBeTruthy();
 });
 
+test("analyzing stage renders a Cancel control that calls onCancelResolve", async () => {
+  const onCancelResolve = jest.fn();
+  const { findByLabelText } = await render(
+    <CaptureBody {...noopBodyProps} stage="analyzing" resolution={null} onCancelResolve={onCancelResolve} />,
+  );
+  await fireEvent.press(await findByLabelText("Cancel"));
+  expect(onCancelResolve).toHaveBeenCalledTimes(1);
+});
+
 test("result stage renders DetectedCard when resolution is set", async () => {
   const resolution = makeResolution();
   const { getByText } = await render(
@@ -574,6 +583,39 @@ describe("Type mode", () => {
     mockResolveTextIsPending = true;
     const { getByTestId } = await render(<CaptureScreen />);
     expect(getByTestId("capture-analyzing-spinner")).toBeTruthy();
+  });
+
+  test("Cancel aborts the in-flight resolve and returns the screen to idle", async () => {
+    mockResolveTextIsPending = true;
+    const { getByTestId, findByLabelText, findByTestId, queryByTestId } = await render(<CaptureScreen />);
+    expect(getByTestId("capture-analyzing-spinner")).toBeTruthy();
+
+    await fireEvent.press(await findByLabelText("Cancel"));
+
+    // The mutation's own isPending is still (harmlessly) true here — the
+    // hook has no cancellation support — but the screen must show idle
+    // regardless, which is the whole point of the cancel token.
+    expect(queryByTestId("capture-analyzing-spinner")).toBeNull();
+    expect(await findByTestId("capture-idle-photo")).toBeTruthy();
+  });
+
+  test("a response that arrives after Cancel does not apply", async () => {
+    // The mock isPending flag is static, not driven by mutate() itself, so
+    // it's set true up front — the composer (and its Send button) render
+    // regardless of stage, so the send below still fires normally.
+    mockResolveTextIsPending = true;
+    const { findByText, findByLabelText, queryByText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Type"));
+    const input = await findByLabelText("Tell Otto what you ate");
+    await fireEvent.changeText(input, "grilled chicken and rice");
+    await fireEvent.press(await findByLabelText("Send"));
+
+    await fireEvent.press(await findByLabelText("Cancel"));
+
+    const [, options] = mockResolveTextMutate.mock.calls[0];
+    await act(async () => options.onSuccess(makeResolution()));
+
+    expect(queryByText("Grilled chicken breast")).toBeNull();
   });
 });
 

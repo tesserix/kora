@@ -372,6 +372,8 @@ interface CaptureBodyProps {
   onClose: () => void;
   /** Forwarded to DetectedCard — asked when the user taps an uncertain row. */
   onResolveUncertain?: (index: number) => void;
+  /** Bails out of the in-flight resolve and returns to idle. Analyzing-state only. */
+  onCancelResolve?: () => void;
 }
 
 // Presentational capture surface — pure props in, no state, no API calls.
@@ -403,6 +405,7 @@ export function CaptureBody({
   onBarcodeScanned,
   onClose,
   onResolveUncertain,
+  onCancelResolve,
 }: CaptureBodyProps) {
   const scrollViewRef = useRef<ScrollView>(null);
   const composerFieldRef = useRef<TextInput>(null);
@@ -476,9 +479,39 @@ export function CaptureBody({
         )}
 
         {stage === "analyzing" && (
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingLeft: 40 }}>
-            <AnalyzingSpinner />
-            <AppText style={{ color: T.mut, fontSize: 13 }}>Otto is analyzing…</AppText>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 10,
+              paddingLeft: 40,
+            }}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <AnalyzingSpinner />
+              <AppText style={{ color: T.mut, fontSize: 13 }}>Otto is analyzing…</AppText>
+            </View>
+            {/* Secondary control — a resolve is bounded by REQUEST_TIMEOUT_MS
+                either way (api.ts), so Cancel is purely for the user who
+                doesn't want to wait; it must never read as the primary
+                action, hence T.mut/T.glass rather than T.accent. */}
+            <Pressable
+              testID="capture-cancel-resolve"
+              accessibilityRole="button"
+              accessibilityLabel="Cancel"
+              onPress={onCancelResolve}
+              style={{
+                paddingHorizontal: 12,
+                paddingVertical: 6,
+                borderRadius: 9999,
+                backgroundColor: T.glass,
+                borderWidth: 1,
+                borderColor: T.glassBorder,
+              }}
+            >
+              <AppText style={{ color: T.mut, fontSize: 13, fontWeight: "600" }}>Cancel</AppText>
+            </Pressable>
           </View>
         )}
 
@@ -775,8 +808,49 @@ export default function CaptureScreen() {
   // for the same physical scan while the camera keeps detecting the code.
   const scannedRef = useRef(false);
 
+  // The in-flight resolve's cancellation token. None of the four resolve
+  // hooks below support real network cancellation (react-query mutations
+  // have no signal parameter), so this exists to do the two things that
+  // matter regardless of whether the underlying request is still running:
+  // gate a late-arriving onSuccess/onError from writing to state, and force
+  // displayStage back to "idle" immediately rather than waiting on
+  // isPending to catch up. The request itself is still bounded by
+  // REQUEST_TIMEOUT_MS in api.ts either way.
+  const resolveControllerRef = useRef<AbortController | null>(null);
+  // Set the moment Cancel fires, cleared the moment a new resolve starts —
+  // overrides displayStage below so the UI returns to idle even while the
+  // hook's own isPending is still (harmlessly) true.
+  const [cancelledResolve, setCancelledResolve] = useState(false);
+
+  // Called at the top of every resolve-triggering handler, before the
+  // corresponding mutate(). Returns the controller so the caller's
+  // onSuccess/onError can check `.signal.aborted` before touching state.
+  function beginResolve(): AbortController {
+    const controller = new AbortController();
+    resolveControllerRef.current = controller;
+    setCancelledResolve(false);
+    return controller;
+  }
+
+  function handleCancelResolve() {
+    resolveControllerRef.current?.abort();
+    setCancelledResolve(true);
+    setStage("idle");
+  }
+
+  // Best-effort: nothing left to cancel into once the screen is gone, and a
+  // signal nobody reads is harmless. Mirrors the voice-recorder cleanup
+  // effect above — same "leaving the screen must not leave work running
+  // unbounded behind it" concern, applied to the resolve instead of the mic.
+  useEffect(() => {
+    return () => {
+      resolveControllerRef.current?.abort();
+    };
+  }, []);
+
   const displayStage: CaptureStage =
-    resolveText.isPending || resolvePhoto.isPending || resolveVoice.isPending || resolveBarcode.isPending
+    !cancelledResolve &&
+    (resolveText.isPending || resolvePhoto.isPending || resolveVoice.isPending || resolveBarcode.isPending)
       ? "analyzing"
       : stage;
 
@@ -873,13 +947,21 @@ export default function CaptureScreen() {
     // Fires right as send is pressed — the composer's own keyboard should
     // not stay up covering the result thread once a send is in flight.
     Keyboard.dismiss();
+    const controller = beginResolve();
     resolveText.mutate(phrase, {
       onSuccess: (data) => {
+        // A cancel that lands between mutate() firing and this callback
+        // means the user has already moved on — applying it now would
+        // resurrect a result onto a screen that told them it was abandoned.
+        if (controller.signal.aborted) return;
         applyResolution(data, "ai_text");
         setResolvedPhrase(phrase);
         setText("");
       },
-      onError: (error) => setErrorMsg(ottoErrorMessage(error)),
+      onError: (error) => {
+        if (controller.signal.aborted) return;
+        setErrorMsg(ottoErrorMessage(error));
+      },
     });
   }
 
@@ -945,12 +1027,17 @@ export default function CaptureScreen() {
       setErrorMsg("Something went wrong opening your photos — try again.");
       return;
     }
+    const controller = beginResolve();
     resolvePhoto.mutate(outcome.file, {
       onSuccess: (data) => {
+        if (controller.signal.aborted) return;
         applyResolution(data, "ai_photo");
         setResolvedPhrase(null);
       },
-      onError: (error) => { void handleResolveFailure(error, outcome.file, "photo"); },
+      onError: (error) => {
+        if (controller.signal.aborted) return;
+        void handleResolveFailure(error, outcome.file, "photo");
+      },
     });
   }
 
@@ -994,12 +1081,17 @@ export default function CaptureScreen() {
       return;
     }
     const file = { uri, name: "clip.m4a", type: "audio/mp4" };
+    const controller = beginResolve();
     resolveVoice.mutate(file, {
       onSuccess: (data) => {
+        if (controller.signal.aborted) return;
         applyResolution(data, "ai_voice");
         setResolvedPhrase(data.transcript ?? null);
       },
-      onError: (error) => { void handleResolveFailure(error, file, "voice"); },
+      onError: (error) => {
+        if (controller.signal.aborted) return;
+        void handleResolveFailure(error, file, "voice");
+      },
     });
   }
 
@@ -1032,9 +1124,11 @@ export default function CaptureScreen() {
     if (scannedRef.current) return;
     scannedRef.current = true;
     setErrorMsg(null);
+    const controller = beginResolve();
     resolveBarcode.mutate(data, {
       onSuccess: (result) => {
         scannedRef.current = false;
+        if (controller.signal.aborted) return;
         // A cache hit still means the modality was a barcode scan — no AI
         // ran, but that's a COGS distinction (see #43), not a modality one.
         applyResolution(result, "ai_barcode");
@@ -1042,6 +1136,7 @@ export default function CaptureScreen() {
       },
       onError: (error) => {
         scannedRef.current = false;
+        if (controller.signal.aborted) return;
         setErrorMsg(ottoErrorMessage(error));
       },
     });
@@ -1168,6 +1263,7 @@ export default function CaptureScreen() {
         onBarcodeScanned={handleBarcodeScanned}
         onClose={() => router.back()}
         onResolveUncertain={setPickerIndex}
+        onCancelResolve={handleCancelResolve}
       />
       {/* Opened from an uncertain row. Seeded with the phrase the server could
           not resolve, so the user starts from what they actually said. */}
