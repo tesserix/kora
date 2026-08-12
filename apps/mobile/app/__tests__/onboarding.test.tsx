@@ -21,6 +21,7 @@ jest.mock("@/units", () => ({
 }));
 
 import Onboarding from "../onboarding";
+import { computePlan } from "@/lib/plan";
 
 beforeEach(() => {
   mockMutate.mockClear();
@@ -110,21 +111,6 @@ describe("onboarding", () => {
     expect(mockMutate.mock.calls[0][0].birth_year).toBe(new Date().getFullYear() - 31);
   });
 
-  // The accept gate already fixed for age/height/weight did not extend to
-  // the destination: a default goalWeightKg (65) sits ready to submit even
-  // though the user never touched the ruler that sets it. This is the same
-  // failure class, just for the destination fields.
-  it("omits the destination when the destination ruler has not been touched", async () => {
-    await render(<Onboarding />);
-    await setValidBody();
-    await fireEvent.press(screen.getByText("Start with this plan"));
-    expect(mockMutate).toHaveBeenCalled();
-    const payload = mockMutate.mock.calls[0][0];
-    expect(payload.goal).toBe("fat_loss");
-    expect(payload.goal_weight_kg).toBeUndefined();
-    expect(payload.pace_kg_per_week).toBeUndefined();
-  });
-
   it("includes the destination once the goal-weight ruler has been touched", async () => {
     await render(<Onboarding />);
     await setValidBody();
@@ -133,6 +119,67 @@ describe("onboarding", () => {
     const payload = mockMutate.mock.calls[0][0];
     expect(payload.goal_weight_kg).toEqual(expect.any(Number));
     expect(payload.pace_kg_per_week).toEqual(expect.any(Number));
+  });
+
+  // The regression this closes: computePlan (which drives the dial and
+  // derivation rows) always used the visually-selected, always-real
+  // paceKgPerWeek — even while the destination ruler was untouched and the
+  // payload therefore omitted pace_kg_per_week. A missing pace decodes to
+  // Go's zero value server-side, silently collapsing the deficit to plain
+  // TDEE, so the number the user agreed to on screen was not the number
+  // that got stored. canAccept closes this by making submission impossible
+  // until the destination is real, so the two can no longer disagree.
+  it("disables accept for a non-maintenance goal until the destination is touched, and does not submit on press", async () => {
+    await render(<Onboarding />);
+    await setValidBody();
+    // Default goal is "Lose weight" (fat_loss); body numbers are real but
+    // the destination ruler has not been touched.
+    expect(screen.getByTestId("accept-button").props.accessibilityState.disabled).toBe(true);
+
+    await fireEvent.press(screen.getByText("Start with this plan"));
+    expect(mockMutate).not.toHaveBeenCalled();
+
+    await increment("goal-weight-ruler");
+    expect(screen.getByTestId("accept-button").props.accessibilityState.disabled).toBe(false);
+  });
+
+  it("enables accept for maintenance without any destination", async () => {
+    await render(<Onboarding />);
+    await setValidBody();
+    await increment("goal-ruler"); // Lose weight -> Maintain
+    expect(screen.getByTestId("accept-button").props.accessibilityState.disabled).toBe(false);
+  });
+
+  // The assertion that actually pins screen-equals-server: read the target
+  // the dial/derivation row displayed, recompute computePlan using the pace
+  // that was actually submitted, and require they match. Pinning each side
+  // in isolation (as the omit/include tests above do) would not have caught
+  // this regression — both sides individually looked correct.
+  it("keeps the submitted pace in agreement with the displayed target", async () => {
+    await render(<Onboarding />);
+    await setValidBody();
+    await increment("goal-weight-ruler");
+
+    const displayedValue = within(screen.getByTestId("derivation-chain-row-3")).getByText(
+      /\d+ kcal/,
+    ).props.children;
+    const displayedKcal = Number(String(displayedValue).replace(/[^\d]/g, ""));
+
+    await fireEvent.press(screen.getByText("Start with this plan"));
+    const payload = mockMutate.mock.calls[0][0];
+    expect(payload.pace_kg_per_week).toEqual(expect.any(Number));
+
+    const recomputed = computePlan({
+      sex: payload.sex,
+      age: new Date().getFullYear() - payload.birth_year,
+      heightCm: payload.height_cm,
+      weightKg: payload.weight_kg,
+      activityLevel: payload.activity_level,
+      goal: payload.goal,
+      paceKgPerWeek: payload.pace_kg_per_week,
+    });
+
+    expect(Math.round(recomputed.kcal)).toBe(displayedKcal);
   });
 
   it("omits the destination from a maintenance payload", async () => {
@@ -164,6 +211,7 @@ describe("onboarding", () => {
     );
     await render(<Onboarding />);
     await setValidBody();
+    await increment("goal-weight-ruler");
     await fireEvent.press(screen.getByText("Start with this plan"));
     await waitFor(() => expect(screen.getByText(/connection|offline|try again/i)).toBeTruthy());
   });
@@ -172,6 +220,7 @@ describe("onboarding", () => {
     mockMutate.mockImplementation((_input, opts) => opts.onSuccess());
     await render(<Onboarding />);
     await setValidBody();
+    await increment("goal-weight-ruler");
     await fireEvent.press(screen.getByText("Start with this plan"));
     await waitFor(() => expect(router.replace).toHaveBeenCalledWith("/"));
   });
@@ -285,6 +334,10 @@ describe("onboarding", () => {
     expect(mockMutate).not.toHaveBeenCalled();
 
     await setValidBody();
+    // Default goal is "Lose weight" (fat_loss), so the button also needs the
+    // destination ruler touched — see the dedicated destination-gating tests
+    // below for that half of the accept gate.
+    await increment("goal-weight-ruler");
     expect(screen.getByTestId("accept-button").props.accessibilityState.disabled).toBe(false);
   });
 

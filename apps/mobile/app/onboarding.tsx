@@ -145,6 +145,12 @@ export default function Onboarding() {
   // for the ruler this screen never forces the user to touch before the
   // accept button unlocks.
   const hasDestination = goal !== "maintenance" && touched.has("goalWeight");
+  // A non-maintenance goal has no plan without a destination: the deficit is
+  // derived from pace, so an untouched destination would mean showing a
+  // target (computed from the visible, always-real pace stop) the server
+  // cannot reproduce — it omits pace_kg_per_week and collapses to plain
+  // TDEE. This is what gates the accept button, not hasAllNumbers alone.
+  const canAccept = hasAllNumbers && (goal === "maintenance" || touched.has("goalWeight"));
 
   function onGoalChange(index: number) {
     setGoalIndex(index);
@@ -298,15 +304,20 @@ export default function Onboarding() {
             iconPosition="trailing"
             onPress={onSubmit}
             // The accept gate is the whole point of this screen: a press
-            // before the user has actually set their own numbers would
-            // submit the age/height/weight defaults as if they were real.
-            // Button already turns `disabled` into accessibilityState for
-            // assistive tech.
-            disabled={submit.isPending || !hasAllNumbers}
+            // before the user has actually set their own numbers (or, for a
+            // non-maintenance goal, before they've set a destination) would
+            // submit fabricated or server-unreproducible values as if they
+            // were real. Button already turns `disabled` into
+            // accessibilityState for assistive tech.
+            disabled={submit.isPending || !canAccept}
           />
           {!hasAllNumbers ? (
             <AppText variant="footnote" muted style={{ textAlign: "center" }}>
               Set your age, height and weight to see your plan.
+            </AppText>
+          ) : !canAccept ? (
+            <AppText variant="footnote" muted style={{ textAlign: "center" }}>
+              Set your goal weight to see your plan.
             </AppText>
           ) : null}
         </View>
