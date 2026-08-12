@@ -24,9 +24,10 @@ module.exports = (config) => {
     deploymentTarget: "17.0",
     displayName: "Kora",
     bundleIdentifier: ".widgets",
-    // HealthKit is read live inside StepsWidget (Task 6); the App Group carries
-    // the snapshot the app writes (Task 2). Both must be on the TARGET, not just
-    // the app — an extension is a separate process with its own entitlements.
+    // HealthKit is read live inside KoraWidget's provider (Task 6/10); the App
+    // Group carries the snapshot the app writes (Task 2). Both must be on the
+    // TARGET, not just the app — an extension is a separate process with its
+    // own entitlements.
     entitlements: {
       "com.apple.security.application-groups": appGroups,
       "com.apple.developer.healthkit": true,

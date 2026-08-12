@@ -20,11 +20,21 @@ struct KoraProvider: AppIntentTimelineProvider {
   }
 
   func snapshot(for configuration: MetricIntent, in context: Context) async -> KoraEntry {
-    await entry(for: configuration)
+    // WidgetKit routes the gallery preview through this method. A fresh
+    // install has no snapshot by definition, so without this branch the
+    // gallery would show the empty state ("Open Kora...") instead of a
+    // populated widget. Use the CONFIGURED metric, not always reserve, so the
+    // preview matches what the user is about to place, and reuse the same
+    // sample snapshot as placeholder(in:) rather than a second set of figures.
+    if context.isPreview, SnapshotStore.current() == nil {
+      let kind = configuration.metric.kind
+      return KoraEntry(date: Date(), kind: kind, snapshot: Self.sample, steps: 6420, history: [])
+    }
+    return await entry(for: configuration, in: context)
   }
 
   func timeline(for configuration: MetricIntent, in context: Context) async -> Timeline<KoraEntry> {
-    let current = await entry(for: configuration)
+    let current = await entry(for: configuration, in: context)
 
     // 30 minutes, not 15: WidgetKit's daily budget is roughly 40-70 refreshes
     // and 15 minutes asks for 96, so iOS throttles and the widget ends up LESS
@@ -35,22 +45,35 @@ struct KoraProvider: AppIntentTimelineProvider {
     return Timeline(entries: [current], policy: .after(next))
   }
 
-  private func entry(for configuration: MetricIntent) async -> KoraEntry {
+  private func entry(for configuration: MetricIntent, in context: Context) async -> KoraEntry {
     let kind = configuration.metric.kind
     let snapshot = SnapshotStore.current()
 
     // No snapshot means no account context at all — do not touch HealthKit,
     // and do not render a step count belonging to nobody.
-    guard snapshot != nil else {
+    guard let snapshot else {
       return KoraEntry(date: Date(), kind: kind, snapshot: nil, steps: nil, history: [])
     }
 
-    guard kind == .steps else {
+    // Large always shows the day's steps alongside whatever metric is
+    // configured (macro tracks + steps against goal), per the design spec —
+    // so read Health here even when the configured metric isn't steps.
+    guard kind == .steps || context.family == .systemLarge else {
       return KoraEntry(date: Date(), kind: kind, snapshot: snapshot, steps: nil, history: [])
     }
 
     let steps = await HealthReader.todaySteps()
-    let history = await HealthReader.last7Days()
+
+    // last7Days() is only ever rendered by MediumView's steps history strip.
+    // Small, Large and both accessories would pay for an extra
+    // HKStatisticsCollectionQuery every 30 minutes for data they discard.
+    let history: [DayStep]
+    if kind == .steps, context.family == .systemMedium {
+      history = await HealthReader.last7Days()
+    } else {
+      history = []
+    }
+
     return KoraEntry(date: Date(), kind: kind, snapshot: snapshot, steps: steps, history: history)
   }
 

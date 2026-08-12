@@ -219,7 +219,7 @@ describe("useHealth", () => {
 
   // The whole point of BUG 2: raw samples are per-source, so an iPhone + Apple Watch
   // user double-counts. Only a cumulative-sum statistics query applies HealthKit's
-  // source-priority dedup — the same query the native StepsWidget already uses.
+  // source-priority dedup — the same query the native KoraWidget already uses.
   it("reads today's total with a cumulative-sum statistics query, not raw samples", async () => {
     mockIsAvailable.mockReturnValue(true);
     mockRequestAuthorization.mockResolvedValue(true);
