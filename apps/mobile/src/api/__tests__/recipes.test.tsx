@@ -128,13 +128,20 @@ test("useParseRecipe POSTs a photo to /v1/recipes/parse via multipart", async ()
   expect(mockApiFetch).not.toHaveBeenCalled();
 });
 
-test("useParseRecipe surfaces a 502 parse_failed as a distinguishable ApiError", async () => {
-  mockApiFetch.mockRejectedValueOnce(new MockApiError(502, "parse_failed", "could not parse recipe"));
+// The signal under test is `status`, NOT `code`. Commit a63c0ae switched
+// RecipeParseSheet's fallback detection to HTTP status precisely because a real
+// on-device 502 does not reliably carry a parseable `code` — throwApiError
+// falls back to the literal "unknown" whenever the body cannot be JSON-parsed.
+// The mock therefore hands back that unhelpful code deliberately: a test that
+// asserted `code === "parse_failed"` would pass even if status handling were
+// deleted outright, which is how the original failure survived a green suite.
+test("useParseRecipe surfaces a 502 with its status intact, whatever the code says", async () => {
+  mockApiFetch.mockRejectedValueOnce(new MockApiError(502, "unknown", "could not parse recipe"));
   const { result } = await renderHook(() => useParseRecipe(), { wrapper });
   result.current.mutate({ text: "garbled input" });
   await waitFor(() => expect(result.current.isError).toBe(true));
   expect(result.current.error).toBeInstanceOf(MockApiError);
-  expect((result.current.error as MockApiError).code).toBe("parse_failed");
+  expect((result.current.error as MockApiError).status).toBe(502);
 });
 
 test("useLogRecipe POSTs /v1/recipes/:id/log and invalidates the logs + dashboard queries", async () => {
