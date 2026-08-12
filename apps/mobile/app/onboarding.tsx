@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { View } from "react-native";
 import { router } from "expo-router";
 import { AppText } from "@/components/Text";
@@ -7,6 +7,8 @@ import { Overline } from "@/components/Overline";
 import { Segmented } from "@/components/Segmented";
 import { Numeral } from "@/components/Numeral";
 import { AuthScaffold } from "@/components/AuthScaffold";
+import { ActivityFromHealth } from "@/components/ActivityFromHealth";
+import { useActivityHistory } from "@/health/useActivityHistory";
 import { TickRuler } from "@/components/instrument/TickRuler";
 import { PlanDial } from "@/components/instrument/PlanDial";
 import { PlanDelta } from "@/components/instrument/PlanDelta";
@@ -71,10 +73,18 @@ function formatFtIn(inches: number): string {
   return `${Math.floor(inches / 12)}'${inches % 12}"`;
 }
 
+// Maps a stored activity_level back to its display label, so the Health
+// suggestion names the level using exactly the same words as the ruler below it.
+function activityLabel(level: OnboardingInput["activity_level"]): string {
+  const index = ACTIVITY_IDS.indexOf(level);
+  return index >= 0 ? ACTIVITY_LABELS[index] : String(level);
+}
+
 export default function Onboarding() {
   const { colors, spacing } = useTheme();
   const submit = useSubmitOnboarding();
   const { system } = useUnits();
+  const health = useActivityHistory();
 
   const [goalIndex, setGoalIndex] = useState(0);
   const [sex, setSex] = useState<OnboardingInput["sex"]>("male");
@@ -104,14 +114,15 @@ export default function Onboarding() {
   const activityLevel = ACTIVITY_IDS[activityIndex];
   const paces = useMemo(() => availablePaces(weightKg), [weightKg]);
 
-  // A dropping weight can shrink the pace list below the current index —
-  // clamp to the last available stop rather than leaving it pointing past
-  // the end of the list.
-  useEffect(() => {
-    if (paceIndex > paces.length - 1) setPaceIndex(paces.length - 1);
-  }, [paceIndex, paces.length]);
-
-  const paceKgPerWeek = paces[Math.min(paceIndex, paces.length - 1)];
+  // A dropping weight can shrink the pace list below the current index.
+  // Derived at render time rather than corrected afterward in an effect: an
+  // effect-based clamp runs AFTER the commit that shrank `paces`, so the
+  // ruler would render for one frame with a stale index against the shorter
+  // `labels` array (accessibilityValue reading undefined). Deriving it here
+  // means there is never a transient to correct, and there is exactly one
+  // source of truth for "the pace stop actually in effect".
+  const safePaceIndex = Math.min(paceIndex, paces.length - 1);
+  const paceKgPerWeek = paces[safePaceIndex];
 
   const plan = useMemo(
     () =>
@@ -140,6 +151,14 @@ export default function Onboarding() {
   }
   function onActivityChange(index: number) {
     setActivityIndex(index);
+    bump();
+  }
+  function onAcceptHealthActivity(level: OnboardingInput["activity_level"]) {
+    const index = ACTIVITY_IDS.indexOf(level);
+    if (index >= 0) setActivityIndex(index);
+    // PlanDelta's revision is the only evidence the user acted — a
+    // Health-sourced change is still the user accepting a suggestion, so it
+    // must bump exactly like a manual drag would.
     bump();
   }
   function onAgeChange(value: number) {
@@ -212,14 +231,22 @@ export default function Onboarding() {
     });
   }
 
+  // `plan` is computed unconditionally (from default placeholder numbers
+  // until the user has touched anything real), so these rows and the macro
+  // trio below must not read it directly while !hasAllNumbers — that would
+  // present a concrete target the user never agreed to. The labels stay in
+  // place (structure visible) while the values withhold ("—", matching the
+  // header Numeral's own placeholder) until the plan is real.
   const derivationRows: DerivationRow[] = [
-    { label: "Resting burn", value: `${Math.round(plan.bmr)} kcal` },
-    { label: "Activity-adjusted", value: `${Math.round(plan.tdee)} kcal` },
+    { label: "Resting burn", value: hasAllNumbers ? `${Math.round(plan.bmr)} kcal` : "—" },
+    { label: "Activity-adjusted", value: hasAllNumbers ? `${Math.round(plan.tdee)} kcal` : "—" },
     {
       label: "Goal adjustment",
-      value: `${plan.adjustment >= 0 ? "+" : "−"}${Math.abs(Math.round(plan.adjustment))} kcal`,
+      value: hasAllNumbers
+        ? `${plan.adjustment >= 0 ? "+" : "−"}${Math.abs(Math.round(plan.adjustment))} kcal`
+        : "—",
     },
-    { label: "Daily target", value: `${Math.round(plan.kcal)} kcal` },
+    { label: "Daily target", value: hasAllNumbers ? `${Math.round(plan.kcal)} kcal` : "—" },
   ];
 
   const weeks = goal !== "maintenance" ? weeksToGoal(weightKg, goalWeightKg, paceKgPerWeek) : 0;
@@ -367,6 +394,13 @@ export default function Onboarding() {
       </View>
 
       <Overline style={{ marginTop: spacing.sm }}>Activity</Overline>
+      <ActivityFromHealth
+        status={health.status}
+        inference={health.inference}
+        levelLabel={activityLabel}
+        onUseHealth={health.request}
+        onAccept={onAcceptHealthActivity}
+      />
       <TickRuler
         mode="detented"
         index={activityIndex}
@@ -416,7 +450,7 @@ export default function Onboarding() {
           ) : null}
           <TickRuler
             mode="detented"
-            index={paceIndex}
+            index={safePaceIndex}
             labels={paces.map((p) => `${p} kg/wk`)}
             onChange={onPaceChange}
             accessibilityLabel="Pace"
@@ -435,19 +469,19 @@ export default function Onboarding() {
           <AppText variant="footnote" muted>
             Protein
           </AppText>
-          <Numeral>{Math.round(plan.proteinG)}g</Numeral>
+          <Numeral>{hasAllNumbers ? `${Math.round(plan.proteinG)}g` : "—"}</Numeral>
         </View>
         <View style={{ alignItems: "center" }}>
           <AppText variant="footnote" muted>
             Carbs
           </AppText>
-          <Numeral>{Math.round(plan.carbsG)}g</Numeral>
+          <Numeral>{hasAllNumbers ? `${Math.round(plan.carbsG)}g` : "—"}</Numeral>
         </View>
         <View style={{ alignItems: "center" }}>
           <AppText variant="footnote" muted>
             Fat
           </AppText>
-          <Numeral>{Math.round(plan.fatG)}g</Numeral>
+          <Numeral>{hasAllNumbers ? `${Math.round(plan.fatG)}g` : "—"}</Numeral>
         </View>
       </View>
 

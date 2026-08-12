@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react-native";
+import { fireGestureHandler, getByGestureTestId } from "react-native-gesture-handler/jest-utils";
 import { router } from "expo-router";
 
 const mockMutate = jest.fn();
@@ -147,5 +148,99 @@ describe("onboarding", () => {
     await setValidBody();
     await fireEvent.press(screen.getByText("Start with this plan"));
     await waitFor(() => expect(router.replace).toHaveBeenCalledWith("/"));
+  });
+
+  // A concrete number in the derivation chain or macro grid before the user
+  // has agreed to anything is exactly the failure this screen exists to
+  // remove — those sections must withhold their values ("—", matching the
+  // header) until hasAllNumbers is true, the same gate PlanDial already uses.
+  it("withholds the derivation chain and macro numbers until the target is real", async () => {
+    await render(<Onboarding />);
+    expect(within(screen.getByTestId("derivation-chain-row-0")).getByText("—")).toBeTruthy();
+    expect(within(screen.getByTestId("derivation-chain-row-1")).getByText("—")).toBeTruthy();
+    expect(within(screen.getByTestId("derivation-chain-row-2")).getByText("—")).toBeTruthy();
+    expect(within(screen.getByTestId("derivation-chain-row-3")).getByText("—")).toBeTruthy();
+    // No numeric kcal or gram figure anywhere on screen — not just in the
+    // rows we happened to check by testID.
+    expect(screen.queryByText(/\d+ kcal/)).toBeNull();
+    expect(screen.queryByText(/^\d+g$/)).toBeNull();
+
+    await setValidBody();
+
+    expect(
+      within(screen.getByTestId("derivation-chain-row-3")).getByText(/\d+ kcal/),
+    ).toBeTruthy();
+    expect(screen.getAllByText(/^\d+g$/)).toHaveLength(3);
+  });
+
+  // Traced case: weight 120kg, pick the 1.0 stop, drag to 50kg. The clamp
+  // used to run in a useEffect AFTER commit, so the render that shrinks
+  // `paces` briefly carries the stale (now out-of-range) index into
+  // `labels[index]`, which is undefined — a screen reader announces nothing
+  // and the stop layout is momentarily wrong for one frame.
+  it("keeps the pace ruler's accessibility value defined when a weight drop shrinks the pace stops", async () => {
+    await render(<Onboarding />);
+
+    // Raise weight from the default 70kg to 100kg (cap 1.0 => all four pace
+    // stops allowed) via a direct drag rather than ~60 increments. A leading
+    // duplicate event is required — jest-utils' state-transition filler only
+    // delivers an `onUpdate` (where the ruler actually applies translationX)
+    // from the second event onward; a single-element list is consumed
+    // entirely by `onBegin`.
+    await act(() =>
+      fireGestureHandler(getByGestureTestId("weight-ruler-pan"), [
+        { translationX: -270 },
+        { translationX: -270 },
+      ]),
+    );
+    // Select the last stop (index 3, "1 kg/wk") from the default index 1.
+    await increment("pace-ruler");
+    await increment("pace-ruler");
+    expect(screen.getByTestId("pace-ruler").props.accessibilityValue).toEqual({
+      text: "1 kg/wk",
+    });
+
+    // Drop weight to 60kg — cap becomes 0.6, which only allows [0.25, 0.5],
+    // shrinking the pace list out from under the selected index.
+    await act(() =>
+      fireGestureHandler(getByGestureTestId("weight-ruler-pan"), [
+        { translationX: 360 },
+        { translationX: 360 },
+      ]),
+    );
+
+    const ruler = screen.getByTestId("pace-ruler");
+    expect(ruler.props.accessibilityValue).toEqual({ text: "0.5 kg/wk" });
+  });
+
+  // Nothing stops a regression that passes `plan.kcal` to PlanDial while
+  // leaving the gated `dialKcal` on PlanDelta (or vice versa) — pin the
+  // silence explicitly through the transition, not just PlanDelta's own
+  // isolated suite.
+  it("keeps PlanDelta silent through the null-to-first-target transition, then announces the next change", async () => {
+    jest.useFakeTimers();
+    try {
+      await render(<Onboarding />);
+      await increment("age-ruler");
+      await increment("height-ruler");
+      // The third touch flips hasAllNumbers — kcal goes from null to its
+      // first real value. PlanDelta's own mount-guard treats a null
+      // "previous" as nothing having changed yet, so this must stay silent.
+      await increment("weight-ruler");
+      await act(async () => {
+        jest.advanceTimersByTime(600);
+      });
+      expect(screen.queryByTestId("plan-delta-text")).toBeNull();
+
+      // The next change has a real previous kcal behind it, so it must
+      // announce.
+      await increment("weight-ruler");
+      await act(async () => {
+        jest.advanceTimersByTime(600);
+      });
+      expect(screen.getByTestId("plan-delta-text")).toBeTruthy();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });
