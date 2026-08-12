@@ -27,13 +27,13 @@ type Props = {
 export function AuthScaffold({ children, footer, header, onBack, progress }: Props) {
   const { colors, spacing } = useTheme();
   const insets = useSafeAreaInsets();
-  const hasHeader = Boolean(onBack || progress);
+  const hasNavRow = Boolean(onBack || progress);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppBackground />
 
-      {hasHeader ? (
+      {hasNavRow ? (
         <View
           style={{
             flexDirection: "row",
@@ -82,7 +82,11 @@ export function AuthScaffold({ children, footer, header, onBack, progress }: Pro
         </View>
       ) : null}
 
-      {header ? <View>{header}</View> : null}
+      {header ? (
+        <View testID="auth-scaffold-header-wrapper" style={{ paddingTop: hasNavRow ? 0 : insets.top }}>
+          {header}
+        </View>
+      ) : null}
 
       <ScrollView
         testID="auth-scaffold-scroll"
@@ -91,7 +95,7 @@ export function AuthScaffold({ children, footer, header, onBack, progress }: Pro
         automaticallyAdjustKeyboardInsets
         contentContainerStyle={{
           flexGrow: 1,
-          paddingTop: hasHeader ? spacing.sm : insets.top + spacing.xl,
+          paddingTop: hasNavRow ? spacing.sm : insets.top + spacing.xl,
           paddingHorizontal: spacing.lg,
           paddingBottom: spacing.lg,
           gap: spacing.md,

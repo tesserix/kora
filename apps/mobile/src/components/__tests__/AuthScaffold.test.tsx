@@ -1,5 +1,6 @@
 import { Text } from "react-native";
 import { fireEvent, render, within } from "@testing-library/react-native";
+import * as SafeAreaContext from "react-native-safe-area-context";
 import { AuthScaffold } from "../AuthScaffold";
 
 test("renders both body and footer content", async () => {
@@ -106,7 +107,7 @@ test("the current progress dot is visually distinct from the rest", async () => 
 });
 
 describe("AuthScaffold header", () => {
-  it("renders a header above the scroll when given one", async () => {
+  it("renders a header element when given one", async () => {
     const { getByTestId } = await render(
       <AuthScaffold header={<Text testID="pinned">Target</Text>} footer={<Text>Go</Text>}>
         <Text>Body</Text>
@@ -133,5 +134,28 @@ describe("AuthScaffold header", () => {
       </AuthScaffold>,
     );
     expect(getByTestId("body")).toBeTruthy();
+  });
+
+  it("applies top safe-area inset to header when no nav row is present", async () => {
+    // The onboarding screen uses header without onBack or progress — this is the
+    // critical configuration on notched devices. The header wrapper must take the
+    // top inset to avoid rendering under the notch.
+    const useSafeAreaInsetsSpy = jest.spyOn(SafeAreaContext, "useSafeAreaInsets");
+    useSafeAreaInsetsSpy.mockReturnValue({ top: 44, bottom: 0, left: 0, right: 0 });
+
+    try {
+      const { getByTestId } = await render(
+        <AuthScaffold header={<Text testID="pinned">Target</Text>} footer={<Text>Go</Text>}>
+          <Text>Body</Text>
+        </AuthScaffold>,
+      );
+
+      const headerWrapper = getByTestId("auth-scaffold-header-wrapper");
+      const style = headerWrapper.props.style;
+      const flatStyle = Array.isArray(style) ? Object.assign({}, ...style.filter(Boolean)) : style;
+      expect(flatStyle.paddingTop).toBe(44);
+    } finally {
+      useSafeAreaInsetsSpy.mockRestore();
+    }
   });
 });
