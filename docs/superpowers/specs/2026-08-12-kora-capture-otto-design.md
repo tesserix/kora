@@ -164,10 +164,15 @@ the server falls back to `barcodeDefaultGrams = 100.0`
 (`api/internal/resolve/handler.go:54,63-64`), computes
 `kcal = KcalPer100g * grams / 100` (`:232-234`) and stamps the result
 `MatchScore: 1.0` (`:240`) — and the client prints an exact kcal figure. An invented
-number wearing a perfect-confidence badge. This is the same defect class removed
-from the widgets on 2026-08-12. The resolve response carries an explicit
-`portion_assumed` flag, the score stops claiming certainty it does not have, and
-Otto says so: *"about 640 kcal, but the portion is a guess."*
+number presented as measurement. This is the same defect class removed from the
+widgets on 2026-08-12.
+
+The fix is a `portion_assumed` flag on the candidate, **not** a lower match
+score. `MatchScore: 1.0` on a barcode hit is correct and must stay: an exact
+barcode genuinely is an exact identification of the food. Identity is certain;
+only the portion is a guess, and conflating the two would make every barcode
+result look doubtful when it is not. Otto says the true thing:
+*"about 640 kcal, but the portion is a guess."*
 
 **Weak matches stop riding the primary button.** A `TierGuess` candidate is
 preselected and logged by the same accent CTA as a firm match, distinguished only
