@@ -78,7 +78,7 @@ struct MediumView: View {
 
   private var summaryLine: String {
     let known = history.compactMap(\.steps)
-    guard !known.isEmpty else { return "no history" }
+    guard !known.isEmpty else { return EmptyStateCopy.stepsHistoryUnknown }
     let avg = known.reduce(0, +) / known.count
     let hits = known.filter { snapshot.stepGoal > 0 && Double($0) >= snapshot.stepGoal }.count
     return "avg \(Format.grouped(avg)) · \(hits) goal days"

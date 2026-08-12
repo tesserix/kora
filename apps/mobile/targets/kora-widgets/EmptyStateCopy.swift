@@ -13,4 +13,9 @@ enum EmptyStateCopy {
     case .protein: return ("Open Kora", "to see your protein")
     }
   }
+
+  /// Copy for the medium steps widget's history summary line when the whole
+  /// 7-day window is unreadable — a denied/unavailable HealthKit read, not
+  /// "zero steps". Explains the `—` dial rather than leaving it unexplained.
+  static let stepsHistoryUnknown = "Health access needed"
 }

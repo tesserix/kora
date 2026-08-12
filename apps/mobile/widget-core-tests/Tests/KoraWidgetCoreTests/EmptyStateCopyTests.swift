@@ -25,4 +25,14 @@ final class EmptyStateCopyTests: XCTestCase {
       XCTAssertNil(copy.detail.rangeOfCharacter(from: .decimalDigits))
     }
   }
+
+  func testStepsHistoryUnknownMatchesSpecVerbatim() {
+    XCTAssertEqual(EmptyStateCopy.stepsHistoryUnknown, "Health access needed")
+  }
+
+  // This copy renders exactly where a number (avg steps) would otherwise go —
+  // it must never read as if it were data.
+  func testStepsHistoryUnknownContainsNoDigit() {
+    XCTAssertNil(EmptyStateCopy.stepsHistoryUnknown.rangeOfCharacter(from: .decimalDigits))
+  }
 }
