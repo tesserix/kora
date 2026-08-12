@@ -169,6 +169,23 @@ func main() {
 			IdentityDeleter: identityDeleter,
 			AppleRevoker:    appleRevoker,
 		}),
+		// Nothing bounded a request server-side: a client that hung up left the
+		// handler running against whatever budgets the AI Router happened to
+		// allow, and a slow-loris connection could hold a socket open with no
+		// deadline at all.
+		//
+		// ReadHeaderTimeout is the slow-loris guard and is deliberately tight —
+		// headers are small on every route, including the 8 MiB photo uploads,
+		// whose BODY read is not covered by it.
+		//
+		// WriteTimeout is a backstop, not a policy: it has to clear the
+		// slowest legitimate handler, which is voice resolve (a 30s transcribe
+		// followed by the full text-resolve pipeline), so it cannot be tuned to
+		// any one endpoint. Per-call-type latency budgets in internal/ai are
+		// where request latency is actually governed; this only guarantees no
+		// request can be held open indefinitely.
+		ReadHeaderTimeout: 15 * time.Second,
+		WriteTimeout:      150 * time.Second,
 	}
 
 	go func() {

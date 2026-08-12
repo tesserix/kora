@@ -3,6 +3,11 @@ package ai
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -301,10 +306,46 @@ func TestRouter_IdentifyText_StillUsesTextBudget(t *testing.T) {
 // 1.5s textBudget that killed every recipe parse and forced a 25s fallback
 // failure (502 parse_failed).
 func TestRouter_GenerateBudget_IsGenerousEnoughForRecipeParsing(t *testing.T) {
-	assert.Greater(t, generateBudget, 10*time.Second,
+	assert.GreaterOrEqual(t, generateBudget, 10*time.Second,
 		"generateBudget must clear the ~6s measured recipe-extraction latency with real headroom")
 	assert.Equal(t, textBudget, 1500*time.Millisecond,
 		"textBudget must not regress; IdentifyText's fast failover depends on it")
+}
+
+// mobileRequestTimeoutMs reads REQUEST_TIMEOUT_MS straight out of the mobile
+// client rather than restating it, so this test fails if EITHER side of the
+// relationship moves. The file is found relative to this package.
+func mobileRequestTimeoutMs(t *testing.T) time.Duration {
+	t.Helper()
+	path := filepath.Join("..", "..", "..", "apps", "mobile", "src", "lib", "api.ts")
+	src, err := os.ReadFile(path)
+	require.NoError(t, err, "the mobile client's api.ts is the other half of this contract")
+
+	m := regexp.MustCompile(`REQUEST_TIMEOUT_MS\s*=\s*([0-9_]+)`).FindSubmatch(src)
+	require.NotNil(t, m, "REQUEST_TIMEOUT_MS not found in %s — it is what bounds every budget here", path)
+	ms, err := strconv.Atoi(strings.ReplaceAll(string(m[1]), "_", ""))
+	require.NoError(t, err)
+	return time.Duration(ms) * time.Millisecond
+}
+
+// TestGenerateBudgetsFitInsideTheMobileClientDeadline is the relationship the
+// old constant-only assertion could not express, and the one that actually
+// broke: generateBudget was set to exactly the client's own abort deadline, so
+// the fallback leg was unreachable from the app and the server kept working
+// (and paying a second provider) on a request nobody was listening for.
+//
+// Both legs together must finish inside the client's patience, with margin for
+// the network, the food-index resolution that follows the provider call, and
+// the rest of the request.
+func TestGenerateBudgetsFitInsideTheMobileClientDeadline(t *testing.T) {
+	clientDeadline := mobileRequestTimeoutMs(t)
+
+	assert.Equal(t, clientDeadline, clientRequestTimeout,
+		"clientRequestTimeout must mirror the mobile client's REQUEST_TIMEOUT_MS")
+	assert.Less(t, generateBudget, clientDeadline,
+		"a primary budget at or above the client's deadline makes the fallback unreachable from the app")
+	assert.LessOrEqual(t, generateBudget+generateFallbackBudget, clientDeadline-2*time.Second,
+		"primary + fallback must both fit inside the client's deadline with margin, or the fallback leg is theatre")
 }
 
 func TestRouter_Name(t *testing.T) {

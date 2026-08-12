@@ -4,6 +4,7 @@ package recipes
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -66,7 +67,7 @@ func TestParseText_Smoke(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db)
 
-	p := NewParser(provider, nutrition.NewRepository(db))
+	p := NewParser(provider, nutrition.NewRepository(db), &stubMeter{})
 	d, err := p.ParseText(ctx, userID, pastedRecipe)
 	require.NoError(t, err, "a real model must produce parseable JSON for an ordinary pasted recipe")
 
@@ -136,16 +137,22 @@ func TestParseText_ThroughRouter_Smoke(t *testing.T) {
 	gemini, err := providers.NewGeminiProvider(ctx, apiKey)
 	require.NoError(t, err)
 
-	// Mirror main.go: Gemini primary behind the Router's real budgets. The
-	// fallback is deliberately the same provider here — this test is about
-	// the PRIMARY finishing inside its budget, not about fallback behaviour.
-	router := &ai.Router{Primary: gemini, Fallback: gemini}
+	// Mirror main.go: Gemini primary behind the Router's real budgets.
+	//
+	// The fallback must be a DISTINCT, counting provider. The earlier version
+	// of this test put gemini on both legs, which made it blind to the exact
+	// regression it was written to catch: with the same provider on both
+	// sides, a primary budget too short to generate simply means the fallback
+	// answers a few seconds later and the elapsed-time assertion still passes.
+	// Only "did the primary serve this call?" actually pins the budget.
+	fallback := &countingProvider{}
+	router := &ai.Router{Primary: gemini, Fallback: fallback}
 
 	db := testDB(t)
 	userID := seedUser(t, db)
 
 	start := time.Now()
-	p := NewParser(router, nutrition.NewRepository(db))
+	p := NewParser(router, nutrition.NewRepository(db), &stubMeter{})
 	d, err := p.ParseText(ctx, userID, pastedRecipe)
 	elapsed := time.Since(start)
 
@@ -153,9 +160,55 @@ func TestParseText_ThroughRouter_Smoke(t *testing.T) {
 	require.GreaterOrEqual(t, len(d.Ingredients), 5)
 	require.Equal(t, 4, d.Servings)
 
-	// The original failure took 25s. Anything near that means the primary is
-	// still being killed and the fallback is carrying the request.
+	// THE assertion: the primary finished inside generateBudget. If it did
+	// not, the fallback was reached and this counter is non-zero, no matter
+	// how quickly the whole call happened to complete.
+	require.Zero(t, fallback.calls,
+		"the fallback was reached — the primary is blowing generateBudget, which is exactly the production failure")
+
+	// Secondary: the whole call must also stay inside the mobile client's own
+	// 25s abort deadline, or the app hangs up on an answer it never sees.
 	require.Less(t, elapsed, 20*time.Second,
-		"parse took %s — the primary is likely still blowing its budget and falling back", elapsed)
+		"parse took %s — too close to the client's own deadline", elapsed)
 	t.Logf("router parse ok in %s: %q, %d servings, %d ingredients", elapsed, d.Name, d.Servings, len(d.Ingredients))
 }
+
+// countingProvider is an ai.Provider that answers nothing and counts every
+// call. Used as the Router's FALLBACK leg so a test can assert the primary
+// served the request — a fallback that can also answer makes a budget
+// regression invisible.
+type countingProvider struct{ calls int }
+
+func (p *countingProvider) IdentifyText(context.Context, string) ([]ai.Guess, ai.Usage, error) {
+	p.calls++
+	return nil, ai.Usage{Provider: "counting"}, errNoFallback
+}
+
+func (p *countingProvider) IdentifyPhoto(context.Context, []byte, string) ([]ai.Guess, ai.Usage, error) {
+	p.calls++
+	return nil, ai.Usage{Provider: "counting"}, errNoFallback
+}
+
+func (p *countingProvider) Decompose(context.Context, string) ([]ai.IngredientGuess, ai.Usage, error) {
+	p.calls++
+	return nil, ai.Usage{Provider: "counting"}, errNoFallback
+}
+
+func (p *countingProvider) Embed(context.Context, string) ([]float32, ai.Usage, error) {
+	p.calls++
+	return nil, ai.Usage{Provider: "counting"}, errNoFallback
+}
+
+func (p *countingProvider) Transcribe(context.Context, []byte, string) (string, ai.Usage, error) {
+	p.calls++
+	return "", ai.Usage{Provider: "counting"}, errNoFallback
+}
+
+func (p *countingProvider) GenerateText(context.Context, string, string) (string, ai.Usage, error) {
+	p.calls++
+	return "", ai.Usage{Provider: "counting"}, errNoFallback
+}
+
+func (p *countingProvider) Name() string { return "counting" }
+
+var errNoFallback = errors.New("fallback must not be reached in this test")
