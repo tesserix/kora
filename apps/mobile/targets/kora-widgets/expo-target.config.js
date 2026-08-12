@@ -12,7 +12,11 @@ module.exports = (config) => {
 
   return {
     type: "widget",
-    name: "kora-widgets",
+    // No hyphen: EAS registers credentials under the sanitized name
+    // ("korawidgets") and its worker looks the native target up by EXACT
+    // name — "kora-widgets" here made remote builds fail with
+    // "Could not find target 'korawidgets' in project.pbxproj".
+    name: "korawidgets",
     displayName: "Kora",
     bundleIdentifier: ".widgets",
     // HealthKit is read live inside StepsWidget (Task 6); the App Group carries
