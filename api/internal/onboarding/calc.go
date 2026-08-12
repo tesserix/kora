@@ -102,9 +102,7 @@ func Calculate(in Input, currentYear int) (Targets, error) {
 	}
 	// Maintenance has no destination, so its pace is ignored rather than
 	// validated — the client does not render the control for that goal.
-	// Only validate pace cap for people heavier than 50kg to allow aggressive
-	// targets for lighter individuals to floor at BMR rather than error.
-	if in.Goal != "maintenance" && in.WeightKg >= 50 &&in.PaceKgPerWeek > in.WeightKg*maxPaceFractionOfBodyweight {
+	if in.Goal != "maintenance" && in.PaceKgPerWeek > in.WeightKg*maxPaceFractionOfBodyweight {
 		return Targets{}, fmt.Errorf("onboarding: pace_kg_per_week exceeds 1%% of bodyweight")
 	}
 

@@ -65,11 +65,11 @@ func TestCalculateMatchesGoldenVectors(t *testing.T) {
 }
 
 // The floor is the safety-critical line: without it a 40kg user asking for
-// 1kg/week is handed a negative target.
+// 0.4kg/week is handed a negative target.
 func TestCalculateNeverReturnsBelowRestingBurn(t *testing.T) {
 	got, err := Calculate(Input{
 		Sex: "female", BirthYear: 1936, HeightCm: 150, WeightKg: 40,
-		ActivityLevel: "sedentary", Goal: "fat_loss", PaceKgPerWeek: 1,
+		ActivityLevel: "sedentary", Goal: "fat_loss", PaceKgPerWeek: 0.4,
 	}, 2026)
 	require.NoError(t, err)
 	approx(t, 726.5, got.Kcal, 0.001)
