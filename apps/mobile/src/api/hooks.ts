@@ -428,8 +428,11 @@ export function useDeleteRecipe() {
 // outcome, not swallowed here — apiFetch/apiFetchMultipart reject with an
 // ApiError(status, code, message), which lands on the mutation's `error`
 // field untouched, so a caller does
-// `error instanceof ApiError && error.code === "parse_failed"` to route to
-// the manual-entry fallback (Task 9) rather than a generic failure toast.
+// `error instanceof ApiError && error.status === 502` to route to the
+// manual-entry fallback (Task 9) rather than a generic failure toast. Keyed
+// off `status`, not `code`: a real 502's `code` is only as reliable as the
+// response body's JSON parsing, which is not guaranteed (see
+// RecipeParseSheet's handleParseError for why), but `status` always is.
 //
 // The photo branch must go through apiFetchMultipart, not apiFetch: apiFetch
 // always forces a `Content-Type: application/json` header, which would

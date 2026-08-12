@@ -150,9 +150,21 @@ test("a portion_assumed ingredient is marked estimated", async () => {
   expect(await findByText("portion is a guess")).toBeTruthy();
 });
 
+// Deliberately does NOT set code to "parse_failed" here — a real 502 from
+// this endpoint doesn't reliably carry it. throwApiError (src/lib/api.ts)
+// derives `code` by JSON-parsing the response body and reading its `error`
+// field, falling back to the literal string "unknown" the instant that
+// parse fails (a proxy/gateway hop mangling the body, a body that never
+// fully arrives, ...) — `status` is read off the response line and survives
+// all of that. An earlier version of both this test AND RecipeParseSheet
+// keyed detection off `code === "parse_failed"`, which is exactly why a real
+// on-device 502 fell through to nothing: the mock always handed the
+// component a clean "parse_failed" code that production could not
+// guarantee. Keying off `status === 502` (what production now does) is what
+// this test must prove holds even when `code` is the unhelpful "unknown".
 test("a 502 parse failure opens the manual editor rather than an error dead end", async () => {
   mockParseMutate.mockImplementation((_input, { onError }) =>
-    onError(new ApiError(502, "parse_failed", "could not parse")),
+    onError(new ApiError(502, "unknown", "could not parse")),
   );
   const { findByLabelText, findByText } = await render(<RecipeParseSheet visible onClose={() => {}} />);
   fireEvent.changeText(await findByLabelText("Paste recipe text"), "an unreadable mess of a recipe");
@@ -166,6 +178,20 @@ test("a 502 parse failure opens the manual editor rather than an error dead end"
   // And it really is the editable draft, not a dead end: a name field and a
   // save action are both present.
   expect(await findByText("Save recipe")).toBeTruthy();
+});
+
+// A non-502 ApiError must NOT be routed into the manual-editor fallback,
+// even if it happens to carry the "parse_failed" code (it never legitimately
+// would, but this pins that detection is keyed off `status`, not `code`).
+test("a non-502 ApiError toasts instead of opening the manual editor", async () => {
+  mockParseMutate.mockImplementation((_input, { onError }) =>
+    onError(new ApiError(500, "parse_failed", "internal error")),
+  );
+  const { findByLabelText, findByText } = await render(<RecipeParseSheet visible onClose={() => {}} />);
+  fireEvent.changeText(await findByLabelText("Paste recipe text"), "2 eggs, butter");
+  fireEvent.press(await findByText("Parse recipe"));
+
+  expect(mockToastShow).toHaveBeenCalledWith(expect.objectContaining({ message: expect.any(String) }));
 });
 
 test("saving posts the edited draft to /v1/recipes", async () => {

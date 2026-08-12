@@ -248,8 +248,20 @@ export function RecipeParseSheet({ visible, onClose, initialMode }: RecipeParseS
   // straight into the SAME review stage a successful parse reaches, seeded
   // with one unresolved ingredient carrying whatever the user gave us, so
   // they can still name it, match or drop that line, and save a real recipe.
+  //
+  // Keyed off `error.status === 502`, NOT `error.code === "parse_failed"`.
+  // A live on-device run showed this endpoint's real 502 does not reliably
+  // survive as a distinguishable `code`: throwApiError (src/lib/api.ts)
+  // builds `code` by parsing the response body as JSON and reading its
+  // `error` field, falling back to the literal string "unknown" the moment
+  // that parse fails for any reason (a proxy/gateway hop rewriting or
+  // truncating the body, a body that never fully arrives, ...). `status`
+  // survives all of that because it's read straight off the HTTP response
+  // line before any body parsing happens. /v1/recipes/parse only ever
+  // returns 502 for this one reason (see api/internal/recipes/handler.go),
+  // so the status alone is an unambiguous, more robust signal than the code.
   function handleParseError(error: unknown, pastedText: string) {
-    if (error instanceof ApiError && error.code === "parse_failed") {
+    if (error instanceof ApiError && error.status === 502) {
       setDraftName("");
       setDraftServings(1);
       setDraftSource(mode);
