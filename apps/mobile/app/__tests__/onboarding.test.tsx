@@ -243,4 +243,42 @@ describe("onboarding", () => {
       jest.useRealTimers();
     }
   });
+
+  // The accept gate is the whole point of this screen: the defaults (age 30,
+  // height 170, weight 70) pass validation on their own, so without this the
+  // button would let a press submit fabricated body measurements while the
+  // dial overhead still says "Awaiting your numbers". A `disabled` prop that
+  // still fires on press would pass a shallower check than this — the
+  // "does not call submit" assertion is the one that actually matters.
+  it("disables the accept button until every required number is set, and does not submit on press", async () => {
+    await render(<Onboarding />);
+    const button = screen.getByTestId("accept-button");
+    expect(button.props.accessibilityState.disabled).toBe(true);
+
+    await fireEvent.press(screen.getByText("Start with this plan"));
+    expect(mockMutate).not.toHaveBeenCalled();
+
+    await setValidBody();
+    expect(screen.getByTestId("accept-button").props.accessibilityState.disabled).toBe(false);
+  });
+
+  // Same leak as the derivation rows and macro trio, one level up: the
+  // "N weeks to goal" caption is derived from weightKg/goalWeightKg defaults
+  // and was rendered whenever the goal wasn't maintenance, regardless of
+  // whether the user had touched anything.
+  it("withholds the destination caption's weeks figure until the target is real", async () => {
+    await render(<Onboarding />);
+    // Default goal is "Lose weight" (fat_loss), so the destination section
+    // (and its caption) is already showing. The caption IS the Text node
+    // (its own children, not a nested one), so assert on `.props.children`
+    // rather than an in-scope `within(...).getByText`, which only searches
+    // descendants and would never match the element's own text.
+    expect(screen.getByTestId("destination-caption").props.children).toBe("—");
+
+    await setValidBody();
+
+    const captionText = screen.getByTestId("destination-caption").props.children;
+    expect(captionText).not.toBe("—");
+    expect(String(captionText)).toMatch(/weeks to goal|You're already there/);
+  });
 });

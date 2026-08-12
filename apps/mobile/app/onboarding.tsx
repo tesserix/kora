@@ -284,12 +284,23 @@ export default function Onboarding() {
             </AppText>
           ) : null}
           <Button
+            testID="accept-button"
             title={submit.isPending ? "Saving…" : "Start with this plan"}
             icon="arrow-right"
             iconPosition="trailing"
             onPress={onSubmit}
-            disabled={submit.isPending}
+            // The accept gate is the whole point of this screen: a press
+            // before the user has actually set their own numbers would
+            // submit the age/height/weight defaults as if they were real.
+            // Button already turns `disabled` into accessibilityState for
+            // assistive tech.
+            disabled={submit.isPending || !hasAllNumbers}
           />
+          {!hasAllNumbers ? (
+            <AppText variant="footnote" muted style={{ textAlign: "center" }}>
+              Set your age, height and weight to see your plan.
+            </AppText>
+          ) : null}
         </View>
       }
     >
@@ -456,8 +467,13 @@ export default function Onboarding() {
             accessibilityLabel="Pace"
             testID="pace-ruler"
           />
-          <AppText variant="footnote" muted>
-            {weeks > 0 ? `${weeks} weeks to goal` : "You're already there"}
+          <AppText testID="destination-caption" variant="footnote" muted>
+            {/* Same leak as the derivation rows: `weeks` is derived from
+                weightKg/goalWeightKg defaults until the user has actually
+                set their own numbers, so it withholds behind the same
+                hasAllNumbers gate rather than showing a distance to a body
+                the user never entered. */}
+            {hasAllNumbers ? (weeks > 0 ? `${weeks} weeks to goal` : "You're already there") : "—"}
           </AppText>
         </>
       ) : null}
