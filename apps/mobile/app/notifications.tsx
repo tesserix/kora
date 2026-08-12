@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
+import { safeBack } from "@/lib/safeBack";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { AppBackground } from "@/components/AppBackground";
 import { GroupedSection } from "@/components/GroupedList";
@@ -78,7 +79,7 @@ export default function NotificationsScreen() {
     <View style={{ flex: 1, backgroundColor: instrument.bg }}>
       <AppBackground />
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
-        <ScreenHeader overline="Recent" title="Notifications" onBack={() => router.back()} />
+        <ScreenHeader overline="Recent" title="Notifications" onBack={() => safeBack("/(tabs)/more")} />
         <View style={{ paddingHorizontal: 20 }}>
           {list.length === 0 ? (
             <EmptyState

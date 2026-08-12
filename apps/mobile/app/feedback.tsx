@@ -2,6 +2,7 @@ import { useState } from "react";
 import { KeyboardAvoidingView, Platform, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
+import { safeBack } from "@/lib/safeBack";
 import { AppBackground } from "@/components/AppBackground";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { Segmented } from "@/components/Segmented";
@@ -87,7 +88,7 @@ export default function Feedback() {
           contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: insets.bottom + 40 }}
           keyboardShouldPersistTaps="handled"
         >
-          <ScreenHeader title="Send feedback" onBack={() => router.back()} />
+          <ScreenHeader title="Send feedback" onBack={() => safeBack("/(tabs)/more")} />
           <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>
             {submitted ? (
               <GlassPanel radius={22} style={{ padding: spacing.md, gap: spacing.sm, alignItems: "flex-start" }}>

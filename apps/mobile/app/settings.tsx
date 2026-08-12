@@ -1,6 +1,7 @@
 import { ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, type Href } from "expo-router";
+import { safeBack } from "@/lib/safeBack";
 import { AppText } from "@/components/Text";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { AppBackground } from "@/components/AppBackground";
@@ -27,7 +28,7 @@ export default function SettingsScreen() {
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}
       >
-        <ScreenHeader overline="Preferences" title="Settings" onBack={() => router.back()} />
+        <ScreenHeader overline="Preferences" title="Settings" onBack={() => safeBack("/(tabs)/more")} />
         <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>
           <GlassPanel radius={22} style={{ padding: spacing.md }}>
             <AppText style={{ fontSize: 13, color: instrument.mut, marginBottom: spacing.sm }}>

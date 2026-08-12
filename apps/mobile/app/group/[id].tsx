@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Alert, ScrollView, Share, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, useLocalSearchParams, type Href } from "expo-router";
+import { safeBack } from "@/lib/safeBack";
 import { AppText } from "@/components/Text";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { AppBackground } from "@/components/AppBackground";
@@ -68,7 +69,7 @@ export default function GroupDetail() {
       <View style={{ flex: 1, backgroundColor: instrument.bg }}>
         <AppBackground />
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
-          <ScreenHeader overline="Group" title={d?.name ?? "Group"} onBack={() => router.back()} />
+          <ScreenHeader overline="Group" title={d?.name ?? "Group"} onBack={() => safeBack("/groups")} />
 
           <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>
             <GroupedSection>

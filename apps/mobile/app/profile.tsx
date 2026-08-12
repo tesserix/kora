@@ -1,6 +1,7 @@
 import { ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
+import { safeBack } from "@/lib/safeBack";
 import { AppText } from "@/components/Text";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { AppBackground } from "@/components/AppBackground";
@@ -57,7 +58,7 @@ export default function ProfileScreen() {
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}
       >
-        <ScreenHeader overline="Your account" title="Profile" onBack={() => router.back()} />
+        <ScreenHeader overline="Your account" title="Profile" onBack={() => safeBack("/(tabs)/more")} />
         <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>
           <GlassPanel radius={24} style={{ alignItems: "center", paddingVertical: spacing.lg }}>
             <Avatar initials={data ? initials(data.display_name) : "—"} size={72} />

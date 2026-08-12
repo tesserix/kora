@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
+import { safeBack } from "@/lib/safeBack";
 import { AppBackground } from "@/components/AppBackground";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { GroupedSection, Row } from "@/components/GroupedList";
@@ -54,7 +55,7 @@ export default function Reminders() {
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: insets.bottom + 40 }}
       >
-        <ScreenHeader title="Reminders" onBack={() => router.back()} />
+        <ScreenHeader title="Reminders" onBack={() => safeBack("/(tabs)/more")} />
         <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>
           <RemindersSection />
           <WeightReminderSection />

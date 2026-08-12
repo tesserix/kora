@@ -1,6 +1,7 @@
 import { Alert, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
+import { safeBack } from "@/lib/safeBack";
 import { AppText } from "@/components/Text";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { AppBackground } from "@/components/AppBackground";
@@ -42,7 +43,7 @@ export default function ChallengeDetailScreen() {
           overlineVariant="footnote"
           title={d?.title ?? "Challenge"}
           titleVariant="title1"
-          onBack={() => router.back()}
+          onBack={() => safeBack("/groups")}
         />
         <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>
           {d?.status === "ended" && d.winner ? (
