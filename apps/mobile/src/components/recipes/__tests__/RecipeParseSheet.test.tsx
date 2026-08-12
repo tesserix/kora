@@ -1,5 +1,6 @@
 import { fireEvent, render } from "@testing-library/react-native";
 import { router } from "expo-router";
+import * as ImagePicker from "expo-image-picker";
 import { ApiError } from "@/lib/api";
 import type { RecipeDraft } from "@/api/types";
 
@@ -198,9 +199,74 @@ test("a 502 parse failure opens the manual editor rather than an error dead end"
   expect(await findByText("Save recipe")).toBeTruthy();
 });
 
-// A non-502 ApiError must NOT be routed into the manual-editor fallback,
-// even if it happens to carry the "parse_failed" code (it never legitimately
-// would, but this pins that detection is keyed off `status`, not `code`).
+// A 429 budget_exhausted parse error must land in the SAME manual-editor
+// review stage a 502 reaches, but with its OWN notice copy naming the AI
+// limit specifically — a 502 is a parse failure (we tried and failed), a 429
+// is a budget exhaustion (we never tried this month's AI call at all). The
+// server's own message text (api/internal/recipes/handler.go) is what the
+// endpoint actually sends; this test uses it for realism, though the
+// component's fallback notice is its own copy, not this message.
+test("a 429 budget-exhausted parse error opens the manual editor with limit-specific copy", async () => {
+  mockParseMutate.mockImplementation((_input, { onError }) =>
+    onError(
+      new ApiError(
+        429,
+        "budget_exhausted",
+        "You've reached your AI limit this month — enter the recipe manually",
+      ),
+    ),
+  );
+  const { findByLabelText, findByText, queryByText } = await render(
+    <RecipeParseSheet visible onClose={() => {}} />,
+  );
+  fireEvent.changeText(await findByLabelText("Paste recipe text"), "an unreadable mess of a recipe");
+  fireEvent.press(await findByText("Parse recipe"));
+
+  // The pasted text survives as a single unresolved ingredient, plus an
+  // explanation naming the AI limit — never a bare error with no way forward.
+  expect(await findByText("an unreadable mess of a recipe")).toBeTruthy();
+  expect(await findByText("needs a match")).toBeTruthy();
+  expect(await findByText(/reached your AI limit this month/i)).toBeTruthy();
+  // Distinct from the 502 notice — an assertion mixup between the two tests
+  // must not be able to pass by accident.
+  expect(queryByText(/couldn't read that automatically/i)).toBeNull();
+  // And it really is the editable draft, not a dead end: a save action is
+  // present.
+  expect(await findByText("Save recipe")).toBeTruthy();
+});
+
+// The no-pasted-text case (a photo parse — there is no user text to fall
+// back on) must NOT reuse the 502 placeholder ("Couldn't read this recipe")
+// for a 429: that copy asserts a read failure, which is exactly backwards
+// when the real reason is budget exhaustion, not a bad read. See
+// fallbackIngredient's own comment in RecipeParseSheet.tsx.
+test("a 429 budget-exhausted photo parse seeds a budget-specific placeholder row, not a read-failure one", async () => {
+  (ImagePicker.launchCameraAsync as jest.Mock).mockResolvedValueOnce({
+    canceled: false,
+    assets: [{ uri: "file://recipe.jpg", fileName: "recipe.jpg", mimeType: "image/jpeg" }],
+  });
+  mockParseMutate.mockImplementation((_input, { onError }) =>
+    onError(
+      new ApiError(
+        429,
+        "budget_exhausted",
+        "You've reached your AI limit this month — enter the recipe manually",
+      ),
+    ),
+  );
+  const { findByText, queryByText } = await render(
+    <RecipeParseSheet visible onClose={() => {}} initialMode="photo" />,
+  );
+  fireEvent.press(await findByText("Choose photo"));
+
+  expect(await findByText("AI limit reached — add this ingredient manually")).toBeTruthy();
+  expect(queryByText("Couldn't read this recipe")).toBeNull();
+});
+
+// A status other than 502 or 429 must NOT be routed into the manual-editor
+// fallback, even if it happens to carry the "parse_failed" code (it never
+// legitimately would, but this pins that detection is keyed off `status`,
+// not `code`).
 test("a non-502 ApiError toasts instead of opening the manual editor", async () => {
   mockParseMutate.mockImplementation((_input, { onError }) =>
     onError(new ApiError(500, "parse_failed", "internal error")),
