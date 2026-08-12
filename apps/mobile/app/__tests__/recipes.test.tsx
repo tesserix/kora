@@ -7,10 +7,29 @@ jest.mock("expo-router", () => ({
   useLocalSearchParams: jest.fn(() => ({})),
 }));
 
+// Recipes now renders RecipeParseSheet, which reaches "@/lib/api" for
+// ApiError — that module imports firebase/auth (real ESM), which Jest can't
+// parse unmocked. See capture.test.tsx for the same mock, same reason.
+jest.mock("@/lib/api", () => ({
+  ApiError: class ApiError extends Error {
+    status: number;
+    code: string;
+    requestId?: string;
+    constructor(status: number, code: string, message: string, requestId?: string) {
+      super(message);
+      this.status = status;
+      this.code = code;
+      this.requestId = requestId;
+      this.name = "ApiError";
+    }
+  },
+}));
+
 const mockUpdateMutate = jest.fn();
 const mockDeleteMutate = jest.fn();
 const mockCreateMutate = jest.fn();
 const mockLogMutate = jest.fn();
+const mockParseMutate = jest.fn();
 const mockToastShow = jest.fn();
 let mockRecipesData: Recipe[] = [];
 let mockRecipeData: Recipe | undefined;
@@ -35,7 +54,12 @@ jest.mock("@/api/hooks", () => ({
   useUpdateRecipe: () => ({ mutate: mockUpdateMutate, isPending: false }),
   useDeleteRecipe: () => ({ mutate: mockDeleteMutate, isPending: false }),
   useLogRecipe: () => ({ mutate: mockLogMutate, isPending: false }),
+  useParseRecipe: () => ({ mutate: mockParseMutate, isPending: false }),
   useFoodSearch: () => ({ data: [{ item: chickenBreast, match_score: 1, match_tier: "fulltext" }], isLoading: false, isError: false, isOfflineCache: false }),
+}));
+
+jest.mock("@/offline/foodCache", () => ({
+  getFoodById: jest.fn(async () => null),
 }));
 
 jest.mock("@/components/Toast", () => ({
@@ -90,6 +114,7 @@ beforeEach(() => {
   mockDeleteMutate.mockClear();
   mockCreateMutate.mockClear();
   mockLogMutate.mockClear();
+  mockParseMutate.mockClear();
   mockToastShow.mockClear();
   (router.push as jest.Mock).mockClear();
   (router.replace as jest.Mock).mockClear();
@@ -111,6 +136,16 @@ test('the list shows the "need attention" note when unresolved_count > 0', async
   mockRecipesData = [baseRecipe({ unresolved_count: 2 })];
   const { findByText } = await render(<Recipes />);
   expect(await findByText(/2 need attention/)).toBeTruthy();
+});
+
+// The "Paste"/"Photo" header actions were deliberate no-op stubs before this
+// task wired them to the shared RecipeParseSheet — this pins that the tap
+// actually opens something, closing the dead-affordance gap.
+test("the Paste header action opens the parse-review sheet", async () => {
+  mockRecipesData = [baseRecipe()];
+  const { findByLabelText, findByText } = await render(<Recipes />);
+  fireEvent.press(await findByLabelText("Paste"));
+  expect(await findByText("Parse recipe")).toBeTruthy();
 });
 
 test("the empty state renders when there are no recipes", async () => {

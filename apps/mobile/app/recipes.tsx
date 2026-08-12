@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, type Href } from "expo-router";
@@ -7,6 +8,7 @@ import { ScreenHeader } from "@/components/ScreenHeader";
 import { AppBackground } from "@/components/AppBackground";
 import { GroupedSection, Row } from "@/components/GroupedList";
 import { EmptyState } from "@/components/common/EmptyState";
+import { RecipeParseSheet } from "@/components/recipes/RecipeParseSheet";
 import { PressableScale } from "@/motion";
 import { useRecipes } from "@/api/hooks";
 import type { Recipe } from "@/api/types";
@@ -47,16 +49,16 @@ export default function Recipes() {
   const recipes = useRecipes();
   const list: Recipe[] = recipes.data ?? [];
 
-  // Task 9 connects these to the parse-review sheet — see HeaderAction's
-  // comment. "New" needs no such wiring: the blank manual editor is the
-  // detail/editor screen itself, opened with the sentinel id "new".
-  const onPaste = () => {};
-  const onPhoto = () => {};
+  // Both open the SAME RecipeParseSheet, preselecting the entry mode the
+  // user actually tapped — "New" needs no such wiring: the blank manual
+  // editor is the detail/editor screen itself, opened with the sentinel id
+  // "new".
+  const [parseMode, setParseMode] = useState<"paste" | "photo" | null>(null);
 
   const headerActions = (
     <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md }}>
-      <HeaderAction label="Paste" onPress={onPaste} />
-      <HeaderAction label="Photo" onPress={onPhoto} />
+      <HeaderAction label="Paste" onPress={() => setParseMode("paste")} />
+      <HeaderAction label="Photo" onPress={() => setParseMode("photo")} />
       <HeaderAction label="New" onPress={() => router.push("/recipe/new" as Href)} />
     </View>
   );
@@ -95,6 +97,11 @@ export default function Recipes() {
           )}
         </View>
       </ScrollView>
+      <RecipeParseSheet
+        visible={parseMode !== null}
+        initialMode={parseMode ?? "paste"}
+        onClose={() => setParseMode(null)}
+      />
     </View>
   );
 }

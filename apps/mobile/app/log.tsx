@@ -16,11 +16,13 @@ import { Card } from "@/components/Card";
 import { AppBackground } from "@/components/AppBackground";
 import { Overline } from "@/components/Overline";
 import { PortionField } from "@/components/units/PortionField";
-import { useCreateLog, useFoodSearch, useMemory, usePins, useSavedMeals } from "@/api/hooks";
+import { useCreateLog, useFoodSearch, useMemory, usePins, useRecipes, useSavedMeals } from "@/api/hooks";
 import { useInstantLog } from "@/api/useInstantLog";
 import { usePinToggle } from "@/api/usePinToggle";
 import type { FoodItem } from "@/api/types";
 import { useSavedMealEditor } from "@/components/meals/SavedMealSheetProvider";
+import { RecipeParseSheet } from "@/components/recipes/RecipeParseSheet";
+import { LogRecipeSheet } from "@/components/recipes/LogRecipeSheet";
 import { baseQuantityFor, defaultServingCount, formatPortion } from "@/units/portion";
 import { foodVisual } from "@/lib/foodVisual";
 import { hslToHex } from "@/lib/color";
@@ -55,13 +57,19 @@ const FOOD_TAB_OPTIONS: { key: string; label: string }[] = [
 // logged in the same day|slot. "Combos" rather than "Usual meals" — the
 // grouping is what distinguishes it from Frequent, not the repetition they
 // both share.
+// A recipe is a third "several foods together" flavor, alongside Saved and
+// Combos — built by hand from a pasted/photographed source rather than
+// inferred from logging history. It belongs on this same tier for the same
+// axis reason the comment above states, not a fourth top-level tier of its
+// own.
 const MEAL_TAB_OPTIONS: { key: string; label: string }[] = [
   { key: "saved", label: "Saved" },
   { key: "usual_meals", label: "Combos" },
+  { key: "recipes", label: "Recipes" },
 ];
 
 type MemoryKind = "foods" | "meals";
-type MemoryTab = "saved" | "pinned" | "recents" | "frequent" | "usual_meals";
+type MemoryTab = "saved" | "pinned" | "recents" | "frequent" | "usual_meals" | "recipes";
 
 // The tab a tier lands on when selected. Keeping this beside the option lists
 // makes it a visible invariant that it is one of that tier's own tabs.
@@ -118,11 +126,17 @@ export default function LogScreen() {
   const [error, setError] = useState<string | null>(null);
   const [memKind, setMemKind] = useState<MemoryKind>("foods");
   const [memTab, setMemTab] = useState<MemoryTab>(FIRST_TAB_FOR_KIND.foods);
+  // "+ New recipe" opens the AI parse-review sheet; tapping a recipe row
+  // opens the same servings/slot picker the recipe detail screen's own "Log"
+  // button uses (LogRecipeSheet), seeded with that recipe's id/servings.
+  const [parseSheetOpen, setParseSheetOpen] = useState(false);
+  const [logRecipeTarget, setLogRecipeTarget] = useState<{ id: string; servings: number } | null>(null);
   const search = useFoodSearch(q);
   const createLog = useCreateLog();
   const memory = useMemory(today());
   const pins = usePins();
   const savedMeals = useSavedMeals();
+  const recipes = useRecipes();
   const { pinnedIds, toggle } = usePinToggle();
   const { logFood, logMeal } = useInstantLog();
   const { openCreate, openEdit, openBlank } = useSavedMealEditor();
@@ -305,6 +319,7 @@ export default function LogScreen() {
   }
 
   return (
+    <>
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppBackground />
       <View style={{ flex: 1, paddingTop: insets.top + 8 }}>
@@ -390,6 +405,36 @@ export default function LogScreen() {
                     </GroupedSection>
                   ) : (
                     <AppText muted>Save a usual meal to see it here.</AppText>
+                  )}
+                </>
+              ) : memTab === "recipes" ? (
+                <>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                    <Overline>Recipes</Overline>
+                    <Pressable accessibilityRole="button" accessibilityLabel="New recipe" onPress={() => setParseSheetOpen(true)}>
+                      <AppText style={{ color: colors.accent }}>+ New recipe</AppText>
+                    </Pressable>
+                  </View>
+                  {(recipes.data ?? []).length > 0 ? (
+                    <GroupedSection elevated>
+                      {(recipes.data ?? []).map((r) => {
+                        const fv = foodVisual(r.name);
+                        return (
+                          <MealRow
+                            key={r.id}
+                            name={r.name}
+                            slot={`makes ${r.servings}`}
+                            kcal={r.per_serving_kcal}
+                            iconName={fv.icon}
+                            tint={hslToHex(fv.hue, 0.5, 0.5)}
+                            onPress={() => setLogRecipeTarget({ id: r.id, servings: r.servings })}
+                            accessibilityLabel={r.name}
+                          />
+                        );
+                      })}
+                    </GroupedSection>
+                  ) : (
+                    <AppText muted>Paste or photograph a recipe to see it here.</AppText>
                   )}
                 </>
               ) : memTab === "pinned" ? (
@@ -507,5 +552,15 @@ export default function LogScreen() {
         </ScrollView>
       </View>
     </View>
+    <RecipeParseSheet visible={parseSheetOpen} onClose={() => setParseSheetOpen(false)} />
+    {logRecipeTarget ? (
+      <LogRecipeSheet
+        visible
+        recipeId={logRecipeTarget.id}
+        defaultServings={logRecipeTarget.servings}
+        onClose={() => setLogRecipeTarget(null)}
+      />
+    ) : null}
+    </>
   );
 }

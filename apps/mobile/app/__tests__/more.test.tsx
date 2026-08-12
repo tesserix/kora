@@ -32,7 +32,7 @@ beforeEach(() => {
 test("renders every row label and the More title", async () => {
   const { getByText } = await render(<More />);
   expect(getByText("More")).toBeTruthy();
-  for (const label of ["Profile", "Friends", "Groups", "Notifications", "Settings", "Send feedback", "Sign out"]) {
+  for (const label of ["Profile", "Friends", "Groups", "Notifications", "Recipes", "Settings", "Send feedback", "Sign out"]) {
     expect(getByText(label)).toBeTruthy();
   }
 });
@@ -41,6 +41,14 @@ test("pressing a row navigates to its route", async () => {
   const { getByText } = await render(<More />);
   fireEvent.press(getByText("Settings"));
   expect(mockPush).toHaveBeenCalledWith("/settings");
+});
+
+// Recipes had no in-app entry point at all until this row — /recipes was
+// reachable only by a raw deep link. This is the one place a user reaches it.
+test("Recipes row navigates to /recipes", async () => {
+  const { getByText } = await render(<More />);
+  fireEvent.press(getByText("Recipes"));
+  expect(mockPush).toHaveBeenCalledWith("/recipes");
 });
 
 test("row icon tiles use the instrument inset/mut palette, never the legacy accent tint", async () => {
