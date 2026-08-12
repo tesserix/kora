@@ -95,7 +95,7 @@ export function AuthScaffold({ children, footer, header, onBack, progress }: Pro
         automaticallyAdjustKeyboardInsets
         contentContainerStyle={{
           flexGrow: 1,
-          paddingTop: hasNavRow ? spacing.sm : insets.top + spacing.xl,
+          paddingTop: hasNavRow ? spacing.sm : header ? spacing.md : insets.top + spacing.xl,
           paddingHorizontal: spacing.lg,
           paddingBottom: spacing.lg,
           gap: spacing.md,

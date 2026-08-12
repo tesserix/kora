@@ -158,4 +158,39 @@ describe("AuthScaffold header", () => {
       useSafeAreaInsetsSpy.mockRestore();
     }
   });
+
+  it("scroll padding accounts for header already taking the inset", async () => {
+    // When header is present and no nav row, the header wrapper consumes the inset.
+    // The scroll must NOT add it again — instead use spacing.md for the gap below the header.
+    // This test pins that exactly one of the two takes the inset, not both.
+    const useSafeAreaInsetsSpy = jest.spyOn(SafeAreaContext, "useSafeAreaInsets");
+    useSafeAreaInsetsSpy.mockReturnValue({ top: 44, bottom: 0, left: 0, right: 0 });
+
+    try {
+      const { getByTestId } = await render(
+        <AuthScaffold header={<Text testID="pinned">Target</Text>} footer={<Text>Go</Text>}>
+          <Text>Body</Text>
+        </AuthScaffold>,
+      );
+
+      // Header wrapper must take the inset
+      const headerWrapper = getByTestId("auth-scaffold-header-wrapper");
+      const headerStyle = headerWrapper.props.style;
+      const flatHeaderStyle = Array.isArray(headerStyle)
+        ? Object.assign({}, ...headerStyle.filter(Boolean))
+        : headerStyle;
+      expect(flatHeaderStyle.paddingTop).toBe(44);
+
+      // Scroll content padding must NOT include the inset when header is present
+      const scroll = getByTestId("auth-scaffold-scroll");
+      const scrollContentStyle = scroll.props.contentContainerStyle;
+      const flatScrollStyle = Array.isArray(scrollContentStyle)
+        ? Object.assign({}, ...scrollContentStyle.filter(Boolean))
+        : scrollContentStyle;
+      // Should be spacing.md, not insets.top + spacing.xl
+      expect(flatScrollStyle.paddingTop).toBe(16); // spacing.md from theme
+    } finally {
+      useSafeAreaInsetsSpy.mockRestore();
+    }
+  });
 });
