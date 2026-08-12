@@ -30,6 +30,14 @@ enum HealthReader {
   }
 
   /// The last 7 days including today, oldest first, for the medium family's history strip.
+  ///
+  /// A denied read does not surface as an error or a nil collection — it
+  /// surfaces as a collection whose buckets are all empty, indistinguishable
+  /// from a genuinely quiet week. So a successful `HKStatisticsCollectionQuery`
+  /// does NOT by itself mean the window is readable; per-day absence needs
+  /// the same probe `todaySteps()` uses: if ANY day in the window has a
+  /// sample, reads work and the other empty days are real zeros. If none do,
+  /// the whole window is unknown.
   static func last7Days() async -> [DayStep] {
     guard HKHealthStore.isHealthDataAvailable() else { return [] }
     let cal = Calendar.current
@@ -39,16 +47,18 @@ enum HealthReader {
     let collection = await statisticsCollection(anchor: anchor)
     guard let collection else { return [] }
 
-    var out: [DayStep] = []
+    var days: [(date: Date, sum: Double?)] = []
     for offset in 0..<probeDays {
       guard let day = cal.date(byAdding: .day, value: offset, to: anchor) else { continue }
       let stats = collection.statistics(for: day)
       let sum = stats?.sumQuantity()?.doubleValue(for: .count())
-      // Absent here means "no samples for that day". Within a window we KNOW
-      // is readable (the collection query succeeded), that is a real zero.
-      out.append(DayStep(date: day, steps: sum.map { max(Int($0.rounded()), 0) } ?? 0))
+      days.append((date: day, sum: sum))
     }
-    return out
+
+    let windowReadable = days.contains { $0.sum != nil }
+    return days.map { day in
+      DayStep(date: day.date, steps: StepReading.resolve(todaySum: day.sum, probeFoundSamples: windowReadable))
+    }
   }
 
   private static func cumulativeSum(from start: Date, to end: Date) async -> Double? {
