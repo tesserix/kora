@@ -310,7 +310,7 @@ function IdleAffordance({
             // No camera on the iOS simulator — this renders but won't scan
             // there; live barcode detection is device-only (see report).
             <CameraView
-              testID="capture-camera-view"
+              testID="barcode-scanner"
               style={{ width: "100%", height: "100%" }}
               barcodeScannerSettings={{ barcodeTypes: ["ean13", "ean8", "upc_a", "upc_e"] }}
               onBarcodeScanned={({ data }) => onBarcodeScanned(data)}
@@ -1019,20 +1019,30 @@ export default function CaptureScreen() {
     setIsRecordingVoice(false);
   }
 
+  // The latch (scannedRef) exists so CameraView firing onBarcodeScanned
+  // dozens of times a second while a code is in frame doesn't fire dozens of
+  // concurrent resolves — it is NOT meant to make scanning one-shot. It must
+  // therefore be released on every terminal outcome of the in-flight resolve:
+  // success, failure, AND the server's "not recognized" answer (a 200 with a
+  // follow-up question, not an error — see barcodeUnknownQuestion in
+  // api/internal/resolve/handler.go), which lands in onSuccess like any other
+  // resolution. Resetting only in onError (the previous version) left the
+  // scanner dead after the very first successful — or unrecognised — scan.
   function handleBarcodeScanned(data: string) {
     if (scannedRef.current) return;
     scannedRef.current = true;
     setErrorMsg(null);
     resolveBarcode.mutate(data, {
       onSuccess: (result) => {
+        scannedRef.current = false;
         // A cache hit still means the modality was a barcode scan — no AI
         // ran, but that's a COGS distinction (see #43), not a modality one.
         applyResolution(result, "ai_barcode");
         setResolvedPhrase(null);
       },
       onError: (error) => {
-        setErrorMsg(ottoErrorMessage(error));
         scannedRef.current = false;
+        setErrorMsg(ottoErrorMessage(error));
       },
     });
   }

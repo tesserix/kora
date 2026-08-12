@@ -799,7 +799,7 @@ describe("Scan mode", () => {
     const { findByText, findByTestId } = await render(<CaptureScreen />);
     await fireEvent.press(await findByText("Scan"));
 
-    const cameraView = await findByTestId("capture-camera-view");
+    const cameraView = await findByTestId("barcode-scanner");
     await act(async () => {
       cameraView.props.onBarcodeScanned({ data: "012345678905", type: "ean13" });
     });
@@ -814,7 +814,7 @@ describe("Scan mode", () => {
     const { findByText, findByTestId } = await render(<CaptureScreen />);
     await fireEvent.press(await findByText("Scan"));
 
-    const cameraView = await findByTestId("capture-camera-view");
+    const cameraView = await findByTestId("barcode-scanner");
     await act(async () => {
       cameraView.props.onBarcodeScanned({ data: "012345678905", type: "ean13" });
       cameraView.props.onBarcodeScanned({ data: "012345678905", type: "ean13" });
@@ -842,7 +842,7 @@ describe("Scan mode", () => {
     const { findByText, findByTestId } = await render(<CaptureScreen />);
     await fireEvent.press(await findByText("Scan"));
 
-    const cameraView = await findByTestId("capture-camera-view");
+    const cameraView = await findByTestId("barcode-scanner");
     await act(async () => {
       cameraView.props.onBarcodeScanned({ data: "012345678905", type: "ean13" });
     });
@@ -870,7 +870,7 @@ describe("Scan mode", () => {
   test("a barcode answered from the offline cache says so, instead of posing as a fresh resolve", async () => {
     const { findByText, findAllByText, findByTestId, queryByText } = await render(<CaptureScreen />);
     await fireEvent.press(await findByText("Scan"));
-    const cameraView = await findByTestId("capture-camera-view");
+    const cameraView = await findByTestId("barcode-scanner");
 
     await act(async () => {
       cameraView.props.onBarcodeScanned({ data: "012345678905", type: "ean13" });
@@ -899,7 +899,7 @@ describe("Scan mode", () => {
   test("an unscanned barcode offline explains why, and leaves the scanner usable", async () => {
     const { findByText, findByTestId } = await render(<CaptureScreen />);
     await fireEvent.press(await findByText("Scan"));
-    const cameraView = await findByTestId("capture-camera-view");
+    const cameraView = await findByTestId("barcode-scanner");
 
     await act(async () => {
       cameraView.props.onBarcodeScanned({ data: "999999999999", type: "ean13" });
@@ -931,7 +931,7 @@ describe("Scan mode", () => {
   test("a failed barcode resolve releases the scanner so the user can scan again", async () => {
     const { findByText, findByTestId } = await render(<CaptureScreen />);
     await fireEvent.press(await findByText("Scan"));
-    const cameraView = await findByTestId("capture-camera-view");
+    const cameraView = await findByTestId("barcode-scanner");
 
     await act(async () => {
       cameraView.props.onBarcodeScanned({ data: "012345678905", type: "ean13" });
@@ -1210,7 +1210,7 @@ describe("Add to diary", () => {
 //
 // The remaining three (voice, fresh barcode, cached-fallback barcode) can't
 // be built to disagree: "Hold to record"/"Stop recording" only exists once `mode` is
-// "voice", and "capture-camera-view" only exists once `mode` is "scan" — so
+// "voice", and "barcode-scanner" only exists once `mode` is "scan" — so
 // `mode` and the resolve necessarily match in those tests, and they stay
 // green under the old `sourceForMode(mode)` too. They still earn their
 // place here: each pins its handler to stamping the correct literal via
@@ -1288,7 +1288,7 @@ describe("Add to diary — source follows the resolve, not the tab", () => {
   test("a fresh barcode resolve logs ai_barcode", async () => {
     const rendered = await render(<CaptureScreen />);
     await fireEvent.press(await rendered.findByText("Scan"));
-    const cameraView = await rendered.findByTestId("capture-camera-view");
+    const cameraView = await rendered.findByTestId("barcode-scanner");
     await act(async () => {
       cameraView.props.onBarcodeScanned({ data: "012345678905", type: "ean13" });
     });
@@ -1308,7 +1308,7 @@ describe("Add to diary — source follows the resolve, not the tab", () => {
   test("a cached-fallback barcode resolve still logs ai_barcode", async () => {
     const rendered = await render(<CaptureScreen />);
     await fireEvent.press(await rendered.findByText("Scan"));
-    const cameraView = await rendered.findByTestId("capture-camera-view");
+    const cameraView = await rendered.findByTestId("barcode-scanner");
     await act(async () => {
       cameraView.props.onBarcodeScanned({ data: "012345678905", type: "ean13" });
     });
