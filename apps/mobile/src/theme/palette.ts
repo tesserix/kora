@@ -136,7 +136,14 @@ export const instrumentLight = {
   glass: "rgba(255,255,255,0.60)",
   glassBorder: "rgba(255,255,255,0.85)",
   glassHighlight: "rgba(255,255,255,0.95)",
-  inset: "rgba(255,255,255,0.40)",
+  // Ink-tinted, NOT a white tint: a well is painted on `glass` (white at 60%
+  // over a light ground), so a white inset came out lighter than its own
+  // surround and every recess — segmented selection, the active tab well,
+  // stepper pills, track backgrounds, glyph tiles — vanished. Dark's well is
+  // darker than its panel; light's has to be too. 0.08 clears the near-white
+  // panel by ~18 luminance levels: visible at a 7px segmented pill, still
+  // reading as a recess in the material rather than a grey box on it.
+  inset: "rgba(22,24,28,0.08)",
   hairline: "rgba(22,24,28,0.09)",
   tick: "rgba(22,24,28,0.14)",
   tickLit: "#16181C",

@@ -31,7 +31,7 @@ to `"automatic"`.
 | `glass` | `rgba(24,28,35,0.55)` | `rgba(255,255,255,0.60)` | panel fill over blur |
 | `glassBorder` | `rgba(237,230,212,0.10)` | `rgba(255,255,255,0.85)` | 1px panel border |
 | `glassHighlight` | `rgba(237,230,212,0.07)` | `rgba(255,255,255,0.95)` | inset top edge ("light catching the material") |
-| `inset` | `rgba(11,13,16,0.50)` | `rgba(255,255,255,0.40)` | recessed wells (track backgrounds, steppers, glyph tiles) |
+| `inset` | `rgba(11,13,16,0.50)` | `rgba(22,24,28,0.08)` | recessed wells (track backgrounds, steppers, glyph tiles) |
 | `hairline` | `rgba(237,230,212,0.08)` | `rgba(22,24,28,0.09)` | row separators |
 | `tick` | `rgba(237,230,212,0.15)` | `rgba(22,24,28,0.14)` | unlit gauge ticks |
 | `tickLit` | `#EDE6D4` | `#16181C` | lit gauge ticks |
@@ -39,6 +39,16 @@ to `"automatic"`.
 | `accentOn` | `#0B0D10` | `#FFFFFF` | text/icon on accent |
 | `danger` | `#E23B2E` | `#D32F23` | destructive only |
 | `teal` | `#48A89E` | `#48A89E` | ambient pool + rare secondary data series only |
+
+`inset` is ink-tinted in light, not white-tinted. A well is painted on `glass`,
+which in light is white at 60% over a light ground — so a white inset comes out
+*lighter* than the surface it is recessed into, and the recess reads backwards:
+selected segments, the active tab well, stepper pills and glyph tiles all
+disappear. In both themes the well must sit darker than its own panel; the
+light value clears the near-white panel by ~18 luminance levels, enough to read
+at a 7px segmented pill without becoming a grey box painted on the glass. The
+ring stays `glassBorder` — the fill carries the recess, and the light hairline
+remains the lip catching the light, as in dark.
 
 Ambient pools (behind everything, never behind long text):
 - Dark: orange `rgba(255,74,0,0.08–0.10)` upper-left, teal `rgba(72,168,158,0.07–0.09)` mid-right, warm `rgba(255,148,80,0.06)` bottom.
