@@ -30,12 +30,22 @@ export function PlanDial({ kcal, testID = "plan-dial" }: PlanDialProps) {
   const fraction = hasTarget
     ? Math.min(1, Math.max(0, (kcal - PLAN_DIAL_MIN) / (PLAN_DIAL_MAX - PLAN_DIAL_MIN)))
     : 0;
-  const ticks = buildGaugeTicks(hasTarget ? fraction : 0);
+  const ticks = buildGaugeTicks(fraction);
   const needle = hasTarget ? needleFor(fraction) : null;
 
   return (
-    <View testID={testID} accessible={false}>
-      <Svg width="100%" height={GAUGE_VIEW_H} viewBox={`0 0 ${GAUGE_VIEW_W} ${GAUGE_VIEW_H}`}>
+    <View testID={testID}>
+      {/* The gauge is decorative: the target is exposed once, as text, on the
+          panel around this component. Announcing it here too would make a
+          screen reader read the same number twice. */}
+      <View testID={`${testID}-gauge`}>
+        <Svg
+          width="100%"
+          height={GAUGE_VIEW_H}
+          viewBox={`0 0 ${GAUGE_VIEW_W} ${GAUGE_VIEW_H}`}
+          accessibilityElementsHidden={true}
+          importantForAccessibility="no-hide-descendants"
+        >
           {ticks.map((t, i) => (
             <Line
               key={i}
@@ -73,16 +83,17 @@ export function PlanDial({ kcal, testID = "plan-dial" }: PlanDialProps) {
             />
           )}
         </Svg>
-        {!hasTarget ? (
-          <AppText
-            testID={`${testID}-awaiting`}
-            variant="caption"
-            muted
-            style={{ textAlign: "center", letterSpacing: 1.6, textTransform: "uppercase" }}
-          >
-            Awaiting your numbers
-          </AppText>
-        ) : null}
+      </View>
+      {!hasTarget ? (
+        <AppText
+          testID={`${testID}-awaiting`}
+          variant="caption"
+          muted
+          style={{ textAlign: "center", letterSpacing: 1.6, textTransform: "uppercase" }}
+        >
+          Awaiting your numbers
+        </AppText>
+      ) : null}
     </View>
   );
 }
