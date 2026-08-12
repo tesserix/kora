@@ -106,7 +106,9 @@ export default function ProfileScreen() {
               </View>
 
               <View style={{ flexDirection: "row", alignItems: "baseline", gap: spacing.xs, marginBottom: spacing.md }}>
-                <AppText style={[{ fontSize: 40, fontWeight: "700", color: instrument.ink }, mono]}>
+                {/* Explicit lineHeight: large mono numerals clip their ascent
+                    without it (same class as the GaugeDial center-numeral bug). */}
+                <AppText style={[{ fontSize: 40, lineHeight: 46, fontWeight: "700", color: instrument.ink }, mono]}>
                   {data ? Math.round(data.target_kcal) : "—"}
                 </AppText>
                 <AppText style={{ fontSize: 13, color: instrument.mut }}>kcal / day</AppText>
