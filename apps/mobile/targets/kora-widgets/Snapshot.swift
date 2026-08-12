@@ -47,9 +47,11 @@ enum SnapshotStore {
   static let appGroup = "group.com.tesserix.kora"
   static let key = "nutritionSnapshot"
 
-  /// The raw snapshot, whatever day it describes. Use for values that do not
-  /// go stale — the step goal.
-  static func raw() -> NutritionSnapshot? {
+  /// The undecorated read, whatever day it describes — `current()`'s only
+  /// caller layers the staleness guard on top of this. Not for direct use:
+  /// every value in the snapshot goes stale at midnight, so nothing outside
+  /// this enum should see a snapshot before that check has run.
+  private static func raw() -> NutritionSnapshot? {
     guard let defaults = UserDefaults(suiteName: appGroup),
           let json = defaults.string(forKey: key)
     else { return nil }
