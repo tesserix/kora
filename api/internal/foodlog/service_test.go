@@ -283,6 +283,46 @@ func TestCreateBatchComputesMacrosServerSide(t *testing.T) {
 	require.Equal(t, item.FiberPer100g*2.0, logs[0].FiberG)
 }
 
+// TestCreateBatchRejectsAForeignSource: `source` is bound straight from the
+// request body, so without an allowlist a client could POST {"source":"ai_text"}
+// and write correction-eligible rows carrying no input_phrase — the invariant
+// 000020_log_corrections documents — or pass "manual" and make a fan-out
+// indistinguishable from hand entry in dashboard.SourceCounts.
+func TestCreateBatchRejectsAForeignSource(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	item := nutrition.FoodItem{Name: "Batch Src " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+	t.Cleanup(func() { db.Exec("DELETE FROM food_logs WHERE user_id = ?", userID) })
+
+	svc := NewService(NewRepository(db), nutrition.NewRepository(db))
+	req := func(source string) CreateBatchRequest {
+		return CreateBatchRequest{
+			LoggedAt: time.Now(), MealSlot: "breakfast", Source: source,
+			Items: []BatchItem{{FoodItemID: item.ID, QuantityGrams: 100}},
+		}
+	}
+
+	for _, source := range []string{"ai_text", "ai_voice", "ai_photo", "manual", "nonsense", strings.Repeat("x", 500)} {
+		_, err := svc.CreateBatch(context.Background(), userID, req(source))
+		require.Error(t, err, "source %q must be rejected", source)
+		_, ok := httpx.IsValidation(err)
+		require.True(t, ok, "want ValidationError for source %q, got: %v", source, err)
+	}
+
+	for _, source := range []string{"", "memory", "meal", "recipe"} {
+		logs, err := svc.CreateBatch(context.Background(), userID, req(source))
+		require.NoError(t, err, "source %q is a legitimate batch source", source)
+		require.Len(t, logs, 1)
+		if source == "" {
+			require.Equal(t, "memory", logs[0].Source, "empty still means memory")
+		} else {
+			require.Equal(t, source, logs[0].Source)
+		}
+	}
+}
+
 func TestCreateBatchRejectsEmptyItems(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db)
