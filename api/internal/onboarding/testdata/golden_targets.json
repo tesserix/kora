@@ -1,0 +1,42 @@
+[
+  {
+    "name": "male moderate fat loss at half a kilo",
+    "sex": "male", "age": 31, "height_cm": 178, "weight_kg": 84,
+    "activity_level": "moderate", "goal": "fat_loss", "pace_kg_per_week": 0.5,
+    "bmr": 1802.5, "tdee": 2793.875, "kcal": 2243.875,
+    "protein_g": 168, "carbs_g": 252.7265625, "fat_g": 62.32986111111111,
+    "floored": false
+  },
+  {
+    "name": "female light maintenance ignores pace",
+    "sex": "female", "age": 25, "height_cm": 165, "weight_kg": 65,
+    "activity_level": "light", "goal": "maintenance", "pace_kg_per_week": 0.5,
+    "bmr": 1395.25, "tdee": 1918.46875, "kcal": 1918.46875,
+    "protein_g": 130, "carbs_g": 229.712890625, "fat_g": 53.29079861111111,
+    "floored": false
+  },
+  {
+    "name": "male active muscle gain adds a surplus",
+    "sex": "male", "age": 22, "height_cm": 183, "weight_kg": 70,
+    "activity_level": "active", "goal": "muscle_gain", "pace_kg_per_week": 0.25,
+    "bmr": 1738.75, "tdee": 2999.34375, "kcal": 3274.34375,
+    "protein_g": 140, "carbs_g": 473.93955, "fat_g": 90.95398148148148,
+    "floored": false
+  },
+  {
+    "name": "small sedentary body at an aggressive pace floors at resting burn",
+    "sex": "female", "age": 90, "height_cm": 150, "weight_kg": 40,
+    "activity_level": "sedentary", "goal": "fat_loss", "pace_kg_per_week": 1,
+    "bmr": 726.5, "tdee": 871.8, "kcal": 726.5,
+    "protein_g": 80, "carbs_g": 56.21875, "fat_g": 20.180555555555557,
+    "floored": true
+  },
+  {
+    "name": "very active female fat loss at the slowest pace",
+    "sex": "female", "age": 34, "height_cm": 170, "weight_kg": 62,
+    "activity_level": "very_active", "goal": "fat_loss", "pace_kg_per_week": 0.25,
+    "bmr": 1351.5, "tdee": 2567.85, "kcal": 2292.85,
+    "protein_g": 124, "carbs_g": 305.90937500, "fat_g": 63.69027777777778,
+    "floored": false
+  }
+]

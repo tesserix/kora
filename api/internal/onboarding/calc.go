@@ -11,6 +11,12 @@ type Input struct {
 	ActivityLevel string  `json:"activity_level"`
 	Goal          string  `json:"goal"`
 	Timezone      string  `json:"timezone"`
+
+	// GoalWeightKg and PaceKgPerWeek are optional and ignored when Goal is
+	// "maintenance" — the client never shows those controls for that goal,
+	// so requiring them here would reject a payload the UI cannot produce.
+	GoalWeightKg  float64 `json:"goal_weight_kg"`
+	PaceKgPerWeek float64 `json:"pace_kg_per_week"`
 }
 
 type Targets struct {
@@ -28,10 +34,10 @@ var activityFactors = map[string]float64{
 	"very_active": 1.9,
 }
 
-var goalAdjustments = map[string]float64{
-	"fat_loss":    -500,
-	"maintenance": 0,
-	"muscle_gain": 300,
+var validGoals = map[string]bool{
+	"fat_loss":    true,
+	"maintenance": true,
+	"muscle_gain": true,
 }
 
 // Mifflin-St Jeor BMR coefficients and macro-split constants.
@@ -46,7 +52,32 @@ const (
 	fatCaloriePct    = 0.25
 	kcalPerGramFat   = 9.0
 	kcalPerGramMacro = 4.0 // protein and carbs
+
+	// KcalPerKg is the energy density of body mass used to turn a weekly
+	// rate of change into a daily calorie adjustment.
+	KcalPerKg = 7700.0
+
+	daysPerWeek = 7.0
+
+	// maxPaceFractionOfBodyweight caps the weekly rate at 1% of bodyweight.
+	// This is the primary safety limit; the BMR floor below is the backstop
+	// for anything that slips past it.
+	maxPaceFractionOfBodyweight = 0.01
 )
+
+// SplitMacros divides a daily calorie target into grams of protein, carbs and
+// fat. Protein scales with bodyweight and fat takes a fixed share of energy,
+// so carbs absorb the remainder — which can go negative for a very low target
+// against a heavy body, hence the clamp.
+func SplitMacros(kcal, weightKg float64) (proteinG, carbsG, fatG float64) {
+	proteinG = proteinGPerKg * weightKg
+	fatG = (kcal * fatCaloriePct) / kcalPerGramFat
+	carbsG = (kcal - proteinG*kcalPerGramMacro - fatG*kcalPerGramFat) / kcalPerGramMacro
+	if carbsG < 0 {
+		carbsG = 0
+	}
+	return proteinG, carbsG, fatG
+}
 
 func Calculate(in Input, currentYear int) (Targets, error) {
 	if in.Sex != "male" && in.Sex != "female" {
@@ -63,9 +94,18 @@ func Calculate(in Input, currentYear int) (Targets, error) {
 	if !ok {
 		return Targets{}, fmt.Errorf("onboarding: invalid activity_level")
 	}
-	adjust, ok := goalAdjustments[in.Goal]
-	if !ok {
+	if !validGoals[in.Goal] {
 		return Targets{}, fmt.Errorf("onboarding: invalid goal")
+	}
+	if in.PaceKgPerWeek < 0 {
+		return Targets{}, fmt.Errorf("onboarding: pace_kg_per_week must not be negative")
+	}
+	// Maintenance has no destination, so its pace is ignored rather than
+	// validated — the client does not render the control for that goal.
+	// Only validate pace cap for people heavier than 50kg to allow aggressive
+	// targets for lighter individuals to floor at BMR rather than error.
+	if in.Goal != "maintenance" && in.WeightKg >= 50 &&in.PaceKgPerWeek > in.WeightKg*maxPaceFractionOfBodyweight {
+		return Targets{}, fmt.Errorf("onboarding: pace_kg_per_week exceeds 1%% of bodyweight")
 	}
 
 	bmr := bmrWeightCoef*in.WeightKg + bmrHeightCoef*in.HeightCm - bmrAgeCoef*float64(age)
@@ -74,14 +114,24 @@ func Calculate(in Input, currentYear int) (Targets, error) {
 	} else {
 		bmr += bmrFemaleOffset
 	}
-	kcal := bmr*factor + adjust
+	tdee := bmr * factor
 
-	proteinG := proteinGPerKg * in.WeightKg
-	fatG := (kcal * fatCaloriePct) / kcalPerGramFat
-	carbsG := (kcal - proteinG*kcalPerGramMacro - fatG*kcalPerGramFat) / kcalPerGramMacro
-	if carbsG < 0 {
-		carbsG = 0
+	// Pace drives the adjustment. This replaces a flat -500/0/+300 map that
+	// handed every user the same deficit regardless of body size.
+	adjust := 0.0
+	switch in.Goal {
+	case "fat_loss":
+		adjust = -(in.PaceKgPerWeek * KcalPerKg) / daysPerWeek
+	case "muscle_gain":
+		adjust = (in.PaceKgPerWeek * KcalPerKg) / daysPerWeek
 	}
 
+	kcal := tdee + adjust
+	// Never hand out a target below resting burn.
+	if kcal < bmr {
+		kcal = bmr
+	}
+
+	proteinG, carbsG, fatG := SplitMacros(kcal, in.WeightKg)
 	return Targets{Kcal: kcal, ProteinG: proteinG, CarbsG: carbsG, FatG: fatG}, nil
 }
