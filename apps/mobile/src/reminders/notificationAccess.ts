@@ -1,5 +1,6 @@
 import { Linking } from "react-native";
 import * as Notifications from "expo-notifications";
+import { openNotificationSettings as openNativeNotificationSettings } from "../../modules/widget-bridge";
 
 export type NotificationAccessResult = { granted: boolean; blocked: boolean };
 
@@ -15,9 +16,21 @@ const DECLINED_MESSAGE = "Reminders need notification permission.";
 // system prompt is still available next time.
 export function notifyNotificationAccessDenied(toast: ToastApi, blocked: boolean): void {
   if (blocked) {
-    toast.show({ message: BLOCKED_MESSAGE, actionLabel: "Open Settings", onAction: () => void Linking.openSettings() });
+    toast.show({ message: BLOCKED_MESSAGE, actionLabel: "Open Settings", onAction: () => void openNotificationSettings() });
   } else {
     toast.show({ message: DECLINED_MESSAGE });
+  }
+}
+
+// Deep-links straight to Kora's Notifications pane in iOS Settings, saving
+// the tap from Settings→Kora→Notifications the plain Linking.openSettings()
+// route leaves the user with. Falls back to Linking.openSettings() when the
+// native method is missing (a dev client built before this shipped won't
+// have it until the next native build) or throws.
+export async function openNotificationSettings(): Promise<void> {
+  const opened = await openNativeNotificationSettings();
+  if (!opened) {
+    await Linking.openSettings();
   }
 }
 

@@ -3,6 +3,7 @@ import { Platform, requireNativeModule } from "expo-modules-core";
 type WidgetBridgeNative = {
   setSnapshot: (json: string) => void;
   clearSnapshot: () => void;
+  openNotificationSettings: () => Promise<boolean>;
 };
 
 // Widgets are iOS-only, and the native module is absent on Android and in
@@ -23,4 +24,16 @@ export function setSnapshot(json: string): void {
 
 export function clearSnapshot(): void {
   native()?.clearSnapshot();
+}
+
+// Resolves false (never rejects to the caller) when the native module is
+// absent or the call itself throws — callers fall back to Linking.openSettings.
+export async function openNotificationSettings(): Promise<boolean> {
+  const mod = native();
+  if (!mod) return false;
+  try {
+    return await mod.openNotificationSettings();
+  } catch {
+    return false;
+  }
 }

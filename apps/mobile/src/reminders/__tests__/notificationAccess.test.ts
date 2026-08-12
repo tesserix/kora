@@ -1,10 +1,19 @@
 import { Linking } from "react-native";
 import * as Notifications from "expo-notifications";
-import { ensureNotificationAccess, notifyNotificationAccessDenied } from "../notificationAccess";
+import {
+  ensureNotificationAccess,
+  notifyNotificationAccessDenied,
+  openNotificationSettings,
+} from "../notificationAccess";
 
 jest.mock("expo-notifications", () => ({
   getPermissionsAsync: jest.fn(),
   requestPermissionsAsync: jest.fn(),
+}));
+
+const mockOpenNativeNotificationSettings = jest.fn();
+jest.mock("../../../modules/widget-bridge", () => ({
+  openNotificationSettings: (...args: unknown[]) => mockOpenNativeNotificationSettings(...args),
 }));
 
 const mockGetPermissions = Notifications.getPermissionsAsync as jest.Mock;
@@ -53,9 +62,9 @@ describe("ensureNotificationAccess", () => {
 });
 
 describe("notifyNotificationAccessDenied", () => {
-  test("blocked shows the Open Settings action wired to Linking.openSettings", () => {
+  test("blocked shows the Open Settings action wired to openNotificationSettings", async () => {
     const show = jest.fn();
-    const openSettings = jest.spyOn(Linking, "openSettings").mockResolvedValue(undefined);
+    mockOpenNativeNotificationSettings.mockResolvedValue(true);
 
     notifyNotificationAccessDenied({ show }, true);
 
@@ -66,8 +75,8 @@ describe("notifyNotificationAccessDenied", () => {
         onAction: expect.any(Function),
       }),
     );
-    show.mock.calls[0][0].onAction();
-    expect(openSettings).toHaveBeenCalled();
+    await show.mock.calls[0][0].onAction();
+    expect(mockOpenNativeNotificationSettings).toHaveBeenCalled();
   });
 
   test("not blocked shows a plain toast with no action", () => {
@@ -76,5 +85,27 @@ describe("notifyNotificationAccessDenied", () => {
     notifyNotificationAccessDenied({ show }, false);
 
     expect(show).toHaveBeenCalledWith({ message: "Reminders need notification permission." });
+  });
+});
+
+describe("openNotificationSettings", () => {
+  test("prefers the native method when present", async () => {
+    mockOpenNativeNotificationSettings.mockResolvedValue(true);
+    const openSettings = jest.spyOn(Linking, "openSettings").mockResolvedValue(undefined);
+
+    await openNotificationSettings();
+
+    expect(mockOpenNativeNotificationSettings).toHaveBeenCalled();
+    expect(openSettings).not.toHaveBeenCalled();
+  });
+
+  test("falls back to Linking.openSettings when the native method resolves false (missing or throws)", async () => {
+    mockOpenNativeNotificationSettings.mockResolvedValue(false);
+    const openSettings = jest.spyOn(Linking, "openSettings").mockResolvedValue(undefined);
+
+    await openNotificationSettings();
+
+    expect(mockOpenNativeNotificationSettings).toHaveBeenCalled();
+    expect(openSettings).toHaveBeenCalled();
   });
 });

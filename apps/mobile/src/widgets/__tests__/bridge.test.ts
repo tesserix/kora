@@ -2,6 +2,7 @@ import { Platform } from "expo-modules-core";
 
 const mockSetSnapshot = jest.fn();
 const mockClearSnapshot = jest.fn();
+const mockOpenNotificationSettings = jest.fn();
 let mockThrows = false;
 
 // Faking the WHOLE "expo-modules-core" module (as a first draft of this test
@@ -19,18 +20,23 @@ jest.mock("expo-modules-core", () => {
     requireNativeModule: (name: string) => {
       if (name !== "WidgetBridge") return actual.requireNativeModule(name);
       if (mockThrows) throw new Error("native module not linked");
-      return { setSnapshot: mockSetSnapshot, clearSnapshot: mockClearSnapshot };
+      return {
+        setSnapshot: mockSetSnapshot,
+        clearSnapshot: mockClearSnapshot,
+        openNotificationSettings: mockOpenNotificationSettings,
+      };
     },
   };
 });
 
-import { clearSnapshot, setSnapshot } from "../../../modules/widget-bridge";
+import { clearSnapshot, openNotificationSettings, setSnapshot } from "../../../modules/widget-bridge";
 
 const originalOS = Platform.OS;
 
 beforeEach(() => {
   mockSetSnapshot.mockClear();
   mockClearSnapshot.mockClear();
+  mockOpenNotificationSettings.mockClear();
   Object.defineProperty(Platform, "OS", { value: "ios", configurable: true });
   mockThrows = false;
 });
@@ -61,4 +67,27 @@ test("is a no-op when the native module is missing", () => {
   mockThrows = true;
   expect(() => setSnapshot("{}")).not.toThrow();
   expect(() => clearSnapshot()).not.toThrow();
+});
+
+test("openNotificationSettings forwards to the native module and returns its result", async () => {
+  mockOpenNotificationSettings.mockResolvedValue(true);
+  await expect(openNotificationSettings()).resolves.toBe(true);
+  expect(mockOpenNotificationSettings).toHaveBeenCalledTimes(1);
+});
+
+test("openNotificationSettings resolves false on android rather than throwing", async () => {
+  Object.defineProperty(Platform, "OS", { value: "android", configurable: true });
+  await expect(openNotificationSettings()).resolves.toBe(false);
+  expect(mockOpenNotificationSettings).not.toHaveBeenCalled();
+});
+
+// A dev client built before this method existed has the module but not the
+// method — calling it throws, and the caller falls back to Linking.openSettings.
+test("openNotificationSettings resolves false when the native module is missing or the call throws", async () => {
+  mockThrows = true;
+  await expect(openNotificationSettings()).resolves.toBe(false);
+
+  mockThrows = false;
+  mockOpenNotificationSettings.mockRejectedValue(new Error("method not linked"));
+  await expect(openNotificationSettings()).resolves.toBe(false);
 });
