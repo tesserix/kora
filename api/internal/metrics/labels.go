@@ -10,6 +10,12 @@ const (
 	callCoach         = "coach"
 	callDecompose     = "decompose"
 	callEmbed         = "embed"
+	// Recipe ingestion (POST /v1/recipes/parse). Mirrors
+	// recipes.callTypeParseText / callTypeParsePhoto — a value that is not
+	// listed here disappears into labelOther, which would leave recipe parsing
+	// as invisible in the metrics as it was before it was metered at all.
+	callParseRecipeText  = "parse_recipe_text"
+	callParseRecipePhoto = "parse_recipe_photo"
 )
 
 // labelOther is the sink for any value outside a known set. A non-zero count on
@@ -35,17 +41,25 @@ var classByCallType = map[string]string{
 	callCoach:         classResolution,
 	callDecompose:     classDerived,
 	callEmbed:         classDerived,
+	// A recipe parse is one user-initiated ingestion of one recipe — the same
+	// shape as an identify, so it belongs to the headline resolution class
+	// rather than to `derived`, which scales with meal complexity.
+	callParseRecipeText:  classResolution,
+	callParseRecipePhoto: classResolution,
 }
 
 // Mirrors ai.OutcomeOK / OutcomeError / OutcomeTimeout. Duplicated as literals
 // rather than imported so this package stays free of any dependency on ai.
 var knownOutcomes = map[string]bool{"ok": true, "error": true, "timeout": true}
 
-// The sources the mobile app can send, plus "memory" which the server itself
-// writes in foodlog.Service.CreateBatch.
+// The sources the mobile app can send, plus the ones the server itself writes
+// through foodlog.Service.CreateBatch: "memory" (its default) and "recipe"
+// (recipes.LogRecipe's fan-out). This map is the authoritative source list —
+// foodlog.batchSources and the food_logs.source CHECK constraint both mirror
+// it, and apps/mobile/src/api/types.ts points at it.
 var knownSources = map[string]bool{
 	"ai_photo": true, "ai_text": true, "ai_voice": true, "ai_barcode": true,
-	"manual": true, "memory": true, "meal": true,
+	"manual": true, "memory": true, "meal": true, "recipe": true,
 }
 
 func normalizeCallType(callType string) string {

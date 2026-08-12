@@ -222,7 +222,12 @@ func NewRouter(deps Deps) *gin.Engine {
 			WithBatchLogger(foodlog.NewService(logRepo, foodRepo))
 		var recipeParser *recipes.Parser
 		if deps.Provider != nil {
-			recipeParser = recipes.NewParser(deps.Provider, foodRepo)
+			// Same billing.Meter the coach and the resolve engine use: recipe
+			// parsing is gated by the same per-user and global caps, and its
+			// calls land in the same ai_usage_events ledger the global cap is
+			// computed from. An unmetered AI endpoint would under-protect
+			// every other AI feature, not just itself.
+			recipeParser = recipes.NewParser(deps.Provider, foodRepo, billing.NewMeter(deps.DB))
 		}
 		recipeHandler := recipes.NewHandler(recipeSvc, recipeParser)
 		v1.GET("/recipes", recipeHandler.List)

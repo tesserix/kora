@@ -22,7 +22,21 @@ import (
 // the task.
 var ErrParseFailed = errors.New("recipes: could not parse")
 
+// ErrBudgetExhausted means the caller (or the platform) is at its monthly AI
+// cap. The handler turns it into a 429 rather than a parse failure: nothing
+// was wrong with the recipe, so telling the user to retry would be a lie.
+// Recipes still work — the manual editor needs no provider at all.
+var ErrBudgetExhausted = errors.New("recipes: ai budget exhausted")
+
 const (
+	// callTypeParseText / callTypeParsePhoto label every provider call this
+	// package makes in ai_usage_events and in the Prometheus AI metrics, so
+	// recipe parsing is visible in COGS and — the #81 lesson — a never-working
+	// parse path is distinguishable from a never-attempted one. They are also
+	// registered in metrics.classByCallType so they do not bucket to "other".
+	callTypeParseText  = "parse_recipe_text"
+	callTypeParsePhoto = "parse_recipe_photo"
+
 	maxPasteLen = 6000
 	// defaultAssumedGrams is the portion used when neither the model nor the
 	// food row offers one. It is ALWAYS paired with PortionAssumed=true so it
@@ -56,10 +70,55 @@ type Draft struct {
 type Parser struct {
 	provider ai.Provider
 	foods    nutrition.Repository
+	meter    ai.Meter
 }
 
-func NewParser(p ai.Provider, foods nutrition.Repository) *Parser {
-	return &Parser{provider: p, foods: foods}
+// NewParser builds a Parser over its collaborators. The meter is REQUIRED, not
+// optional: every provider call in this package is billed upstream, and an
+// unmetered endpoint both escapes the per-user cap and corrupts the global one
+// that protects resolve and coach. billing.Meter satisfies ai.Meter
+// structurally — see the interface's own comment.
+func NewParser(p ai.Provider, foods nutrition.Repository, meter ai.Meter) *Parser {
+	return &Parser{provider: p, foods: foods, meter: meter}
+}
+
+// withinBudget gates a parse before the first provider call, exactly as
+// ai.Resolver.resolve and coach.Service.Ask do.
+func (p *Parser) withinBudget(ctx context.Context, userID uuid.UUID) error {
+	ok, err := p.meter.WithinBudget(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("recipes: parse: check budget: %w", err)
+	}
+	if !ok {
+		return ErrBudgetExhausted
+	}
+	return nil
+}
+
+// record meters one provider call. Metering failures must never break a parse
+// — a user's recipe cannot depend on the billing table being reachable — so
+// the error is deliberately ignored, matching ai.Resolver.record and
+// coach.Service.record.
+//
+// callType is forced rather than trusted: the providers label GenerateText as
+// "coach" and IdentifyPhoto/Decompose as their own types, which would make
+// recipe spend indistinguishable from coach's and resolve's.
+func (p *Parser) record(ctx context.Context, userID uuid.UUID, u ai.Usage, callType string, err error) {
+	if u.Provider == "" {
+		u.Provider = p.provider.Name()
+	}
+	u.CallType = callType
+	switch {
+	case err == nil && u.Outcome == "":
+		u.Outcome = ai.OutcomeOK
+	case err != nil && errors.Is(err, context.DeadlineExceeded):
+		// A provider timeout is a parse failure, not a 500, and is metered as
+		// a timeout so a budget that is too tight stays visible (spec).
+		u.Outcome = ai.OutcomeTimeout
+	case err != nil:
+		u.Outcome = ai.OutcomeError
+	}
+	_ = p.meter.Record(ctx, userID, u, ai.EstimateCostUSD(u))
 }
 
 // extracted is the model's JSON shape. Any field the model invents beyond
@@ -83,7 +142,12 @@ func (p *Parser) ParseText(ctx context.Context, userID uuid.UUID, text string) (
 		return Draft{}, httpx.ValidationError{Message: "that recipe is too long to read"}
 	}
 
-	raw, _, err := p.provider.GenerateText(ctx, parseSystemPrompt, text)
+	if err := p.withinBudget(ctx, userID); err != nil {
+		return Draft{}, err
+	}
+
+	raw, usage, err := p.provider.GenerateText(ctx, parseSystemPrompt, text)
+	p.record(ctx, userID, usage, callTypeParseText, err)
 	if err != nil {
 		return Draft{}, fmt.Errorf("%w: provider: %v", ErrParseFailed, err)
 	}
@@ -121,7 +185,12 @@ func (p *Parser) ParseText(ctx context.Context, userID uuid.UUID, text string) (
 }
 
 func (p *Parser) ParsePhoto(ctx context.Context, userID uuid.UUID, image []byte, mime string) (Draft, error) {
-	guesses, _, err := p.provider.IdentifyPhoto(ctx, image, mime)
+	if err := p.withinBudget(ctx, userID); err != nil {
+		return Draft{}, err
+	}
+
+	guesses, usage, err := p.provider.IdentifyPhoto(ctx, image, mime)
+	p.record(ctx, userID, usage, callTypeParsePhoto, err)
 	if err != nil {
 		return Draft{}, fmt.Errorf("%w: provider: %v", ErrParseFailed, err)
 	}
@@ -139,7 +208,8 @@ func (p *Parser) ParsePhoto(ctx context.Context, userID uuid.UUID, image []byte,
 		}
 	}
 
-	ings, _, err := p.provider.Decompose(ctx, best.Food)
+	ings, decomposeUsage, err := p.provider.Decompose(ctx, best.Food)
+	p.record(ctx, userID, decomposeUsage, callTypeParsePhoto, err)
 	if err != nil {
 		return Draft{}, fmt.Errorf("%w: decompose: %v", ErrParseFailed, err)
 	}

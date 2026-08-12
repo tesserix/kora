@@ -44,6 +44,129 @@ func (s *stubProvider) GenerateText(context.Context, string, string) (string, ai
 }
 func (s *stubProvider) Name() string { return "stub" }
 
+// stubMeter implements ai.Meter. It records what was metered and can refuse
+// budget, so the gate and the ledger are both assertable without a DB.
+type stubMeter struct {
+	overBudget  bool
+	budgetErr   error
+	recorded    []ai.Usage
+	budgetCalls int
+}
+
+func (m *stubMeter) WithinBudget(context.Context, uuid.UUID) (bool, error) {
+	m.budgetCalls++
+	if m.budgetErr != nil {
+		return false, m.budgetErr
+	}
+	return !m.overBudget, nil
+}
+
+func (m *stubMeter) Record(_ context.Context, _ uuid.UUID, u ai.Usage, _ float64) error {
+	m.recorded = append(m.recorded, u)
+	return nil
+}
+
+func (m *stubMeter) callTypes() []string {
+	out := make([]string, 0, len(m.recorded))
+	for _, u := range m.recorded {
+		out = append(out, u.CallType)
+	}
+	return out
+}
+
+// TestParseTextIsMetered is the #81 lesson applied to the newest AI endpoint:
+// a provider call that is not recorded is invisible to COGS, to the global cap
+// that protects every other AI feature, and to the metrics that would show the
+// path is broken at all.
+func TestParseTextIsMetered(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	f := seedFood(t, db, 100)
+	meter := &stubMeter{}
+	p := NewParser(&stubProvider{
+		generated: `{"name":"X","servings":1,"ingredients":[{"text":"` + f.Name + `","amount":100,"unit":"g"}]}`,
+	}, nutrition.NewRepository(db), meter)
+
+	_, err := p.ParseText(context.Background(), userID, "…")
+	require.NoError(t, err)
+
+	require.Equal(t, 1, meter.budgetCalls, "the budget must be checked BEFORE the provider is called")
+	require.Equal(t, []string{callTypeParseText}, meter.callTypes())
+	require.Equal(t, ai.OutcomeOK, meter.recorded[0].Outcome)
+	require.NotEmpty(t, meter.recorded[0].Provider)
+}
+
+// A failed call is billed upstream exactly like a successful one, so it must
+// be recorded too — otherwise a never-working parse path and a never-attempted
+// one are indistinguishable (#81).
+func TestParseTextMetersFailures(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	meter := &stubMeter{}
+	p := NewParser(&stubProvider{generateErr: errors.New("upstream 503")}, nutrition.NewRepository(db), meter)
+
+	_, err := p.ParseText(context.Background(), userID, "…")
+	require.ErrorIs(t, err, ErrParseFailed)
+	require.Equal(t, []string{callTypeParseText}, meter.callTypes())
+	require.Equal(t, ai.OutcomeError, meter.recorded[0].Outcome)
+}
+
+// A provider timeout is metered as a timeout, not a generic error, so a
+// latency budget that is too tight stays visible in the ledger (spec).
+func TestParseTextMetersTimeoutAsTimeout(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	meter := &stubMeter{}
+	p := NewParser(&stubProvider{generateErr: context.DeadlineExceeded}, nutrition.NewRepository(db), meter)
+
+	_, err := p.ParseText(context.Background(), userID, "…")
+	require.ErrorIs(t, err, ErrParseFailed)
+	require.Equal(t, ai.OutcomeTimeout, meter.recorded[0].Outcome)
+}
+
+// Over budget must stop the parse BEFORE any provider call: the caps exist to
+// prevent spend, so reporting them after paying for the call is no cap at all.
+func TestParseTextIsBudgetGated(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	provider := &stubProvider{generated: `{"name":"X","servings":1,"ingredients":[{"text":"x","amount":1,"unit":"g"}]}`}
+	meter := &stubMeter{overBudget: true}
+	p := NewParser(provider, nutrition.NewRepository(db), meter)
+
+	_, err := p.ParseText(context.Background(), userID, "some recipe")
+	require.ErrorIs(t, err, ErrBudgetExhausted)
+	require.Empty(t, meter.recorded, "nothing was called, so nothing may be billed")
+	require.NotErrorIs(t, err, ErrParseFailed, "out of budget is not a parse failure — retrying will not help")
+}
+
+// Both provider calls on the photo path are metered, not just the first.
+func TestParsePhotoMetersBothProviderCalls(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	f := seedFood(t, db, 100)
+	meter := &stubMeter{}
+	p := NewParser(&stubProvider{
+		guesses:     []ai.Guess{{Food: "dal", Confidence: 0.9}},
+		ingredients: []ai.IngredientGuess{{Ingredient: f.Name, PortionEstimate: "100 g"}},
+	}, nutrition.NewRepository(db), meter)
+
+	_, err := p.ParsePhoto(context.Background(), userID, []byte("jpeg"), "image/jpeg")
+	require.NoError(t, err)
+	require.Equal(t, []string{callTypeParsePhoto, callTypeParsePhoto}, meter.callTypes(),
+		"identify and decompose are two billed calls and both belong in the ledger")
+}
+
+func TestParsePhotoIsBudgetGated(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	meter := &stubMeter{overBudget: true}
+	p := NewParser(&stubProvider{guesses: []ai.Guess{{Food: "dal"}}}, nutrition.NewRepository(db), meter)
+
+	_, err := p.ParsePhoto(context.Background(), userID, []byte("jpeg"), "image/jpeg")
+	require.ErrorIs(t, err, ErrBudgetExhausted)
+	require.Empty(t, meter.recorded)
+}
+
 func TestParseTextExtractsNameServingsAndIngredients(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db)
@@ -56,7 +179,7 @@ func TestParseTextExtractsNameServingsAndIngredients(t *testing.T) {
 			{"text": "` + f.Name + `", "amount": 200, "unit": "g"},
 			{"text": "asafoetida", "amount": 1, "unit": "pinch"}
 		]
-	}`}, nutrition.NewRepository(db))
+	}`}, nutrition.NewRepository(db), &stubMeter{})
 
 	d, err := p.ParseText(context.Background(), userID, "…pasted recipe…")
 	require.NoError(t, err)
@@ -76,7 +199,7 @@ func TestParseTextExtractsNameServingsAndIngredients(t *testing.T) {
 func TestParseTextRejectsNonJSON(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db)
-	p := NewParser(&stubProvider{generated: "Sure! Here is a lovely dal recipe…"}, nutrition.NewRepository(db))
+	p := NewParser(&stubProvider{generated: "Sure! Here is a lovely dal recipe…"}, nutrition.NewRepository(db), &stubMeter{})
 
 	_, err := p.ParseText(context.Background(), userID, "…")
 	require.ErrorIs(t, err, ErrParseFailed)
@@ -85,7 +208,7 @@ func TestParseTextRejectsNonJSON(t *testing.T) {
 func TestParseTextProviderErrorIsParseFailure(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db)
-	p := NewParser(&stubProvider{generateErr: errors.New("upstream 503")}, nutrition.NewRepository(db))
+	p := NewParser(&stubProvider{generateErr: errors.New("upstream 503")}, nutrition.NewRepository(db), &stubMeter{})
 
 	_, err := p.ParseText(context.Background(), userID, "…")
 	require.ErrorIs(t, err, ErrParseFailed)
@@ -94,7 +217,7 @@ func TestParseTextProviderErrorIsParseFailure(t *testing.T) {
 func TestParseTextRejectsEmptyInput(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db)
-	p := NewParser(&stubProvider{}, nutrition.NewRepository(db))
+	p := NewParser(&stubProvider{}, nutrition.NewRepository(db), &stubMeter{})
 
 	_, err := p.ParseText(context.Background(), userID, "   ")
 	require.Error(t, err)
@@ -109,7 +232,7 @@ func TestParseTextDiscardsModelSuppliedMacros(t *testing.T) {
 	p := NewParser(&stubProvider{generated: `{
 		"name": "Dal", "servings": 1,
 		"ingredients": [{"text": "` + f.Name + `", "amount": 200, "unit": "g", "kcal": 9999}]
-	}`}, nutrition.NewRepository(db))
+	}`}, nutrition.NewRepository(db), &stubMeter{})
 
 	d, err := p.ParseText(context.Background(), userID, "…")
 	require.NoError(t, err)
@@ -139,7 +262,7 @@ func TestParseSetsMatchedFoodNameOnResolvedIngredient(t *testing.T) {
 			{"text": "` + phrase + `", "amount": 100, "unit": "g"},
 			{"text": "an unmatchable ingredient", "amount": 1, "unit": "pinch"}
 		]
-	}`}, foods)
+	}`}, foods, &stubMeter{})
 
 	d, err := p.ParseText(context.Background(), userID, "…pasted recipe…")
 	require.NoError(t, err)
@@ -161,7 +284,7 @@ func TestParsePhotoDefaultsServingsAndNamesFromGuess(t *testing.T) {
 	p := NewParser(&stubProvider{
 		guesses:     []ai.Guess{{Food: "vegetable curry", Confidence: 0.9}},
 		ingredients: []ai.IngredientGuess{{Ingredient: f.Name, PortionEstimate: "150g", Confidence: 0.8}},
-	}, nutrition.NewRepository(db))
+	}, nutrition.NewRepository(db), &stubMeter{})
 
 	d, err := p.ParsePhoto(context.Background(), userID, []byte("jpegbytes"), "image/jpeg")
 	require.NoError(t, err)
@@ -175,7 +298,7 @@ func TestParsePhotoDefaultsServingsAndNamesFromGuess(t *testing.T) {
 func TestParsePhotoNoGuessesIsParseFailure(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db)
-	p := NewParser(&stubProvider{guesses: nil}, nutrition.NewRepository(db))
+	p := NewParser(&stubProvider{guesses: nil}, nutrition.NewRepository(db), &stubMeter{})
 
 	_, err := p.ParsePhoto(context.Background(), userID, []byte("x"), "image/jpeg")
 	require.ErrorIs(t, err, ErrParseFailed)
@@ -191,7 +314,7 @@ func TestParseMarksPortionAssumedWhenNoPortionPhrase(t *testing.T) {
 	p := NewParser(&stubProvider{
 		guesses:     []ai.Guess{{Food: "stew", Confidence: 0.9}},
 		ingredients: []ai.IngredientGuess{{Ingredient: f.Name, PortionEstimate: "", Confidence: 0.8}},
-	}, nutrition.NewRepository(db))
+	}, nutrition.NewRepository(db), &stubMeter{})
 
 	d, err := p.ParsePhoto(context.Background(), userID, []byte("x"), "image/jpeg")
 	require.NoError(t, err)
@@ -226,7 +349,7 @@ func TestParseSingularisesPluralUnitAgainstServingUnit(t *testing.T) {
 		"ingredients": [
 			{"text": "` + garlic.Name + `", "amount": 2, "unit": "cloves"}
 		]
-	}`}, nutrition.NewRepository(db))
+	}`}, nutrition.NewRepository(db), &stubMeter{})
 
 	d, err := p.ParseText(context.Background(), userID, "…pasted recipe…")
 	require.NoError(t, err)
@@ -240,7 +363,7 @@ func TestDraftIsNeverPersisted(t *testing.T) {
 	userID := seedUser(t, db)
 	f := seedFood(t, db, 100)
 	p := NewParser(&stubProvider{generated: `{"name":"X","servings":1,"ingredients":[{"text":"` + f.Name + `","amount":100,"unit":"g"}]}`},
-		nutrition.NewRepository(db))
+		nutrition.NewRepository(db), &stubMeter{})
 
 	_, err := p.ParseText(context.Background(), userID, "…")
 	require.NoError(t, err)

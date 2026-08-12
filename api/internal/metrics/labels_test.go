@@ -3,7 +3,7 @@ package metrics
 import "testing"
 
 func TestNormalizeCallTypeKeepsKnownValues(t *testing.T) {
-	for _, ct := range []string{"identify_photo", "identify_text", "transcribe", "coach", "decompose", "embed"} {
+	for _, ct := range []string{"identify_photo", "identify_text", "transcribe", "coach", "decompose", "embed", "parse_recipe_text", "parse_recipe_photo"} {
 		if got := normalizeCallType(ct); got != ct {
 			t.Errorf("normalizeCallType(%q) = %q, want %q", ct, got, ct)
 		}
@@ -20,7 +20,7 @@ func TestNormalizeCallTypeBucketsUnknownValues(t *testing.T) {
 }
 
 func TestClassForSplitsResolutionFromDerived(t *testing.T) {
-	resolution := []string{"identify_photo", "identify_text", "transcribe", "coach"}
+	resolution := []string{"identify_photo", "identify_text", "transcribe", "coach", "parse_recipe_text", "parse_recipe_photo"}
 	derived := []string{"decompose", "embed"}
 	for _, ct := range resolution {
 		if got := classFor(ct); got != "resolution" {
@@ -51,7 +51,11 @@ func TestNormalizeOutcome(t *testing.T) {
 // normalizeSource is the one that protects the billing surface: food_logs.source
 // arrives verbatim from the client and is not validated by the API.
 func TestNormalizeSource(t *testing.T) {
-	for _, s := range []string{"ai_photo", "ai_text", "ai_voice", "ai_barcode", "manual", "memory", "meal"} {
+	// "recipe" is written by recipes.LogRecipe's fan-out through
+	// foodlog.CreateBatch. Without it every recipe-driven log buckets to
+	// "other", which is exactly the analytics distinction the source field
+	// exists to make.
+	for _, s := range []string{"ai_photo", "ai_text", "ai_voice", "ai_barcode", "manual", "memory", "meal", "recipe"} {
 		if got := normalizeSource(s); got != s {
 			t.Errorf("normalizeSource(%q) = %q, want %q", s, got, s)
 		}

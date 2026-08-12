@@ -105,7 +105,7 @@ func TestParseFailureIs502WithMessage(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db)
 
-	parser := NewParser(&stubProvider{generateErr: errUpstream}, nutrition.NewRepository(db))
+	parser := NewParser(&stubProvider{generateErr: errUpstream}, nutrition.NewRepository(db), &stubMeter{})
 	h := NewHandler(NewService(NewRepository(db), nutrition.NewRepository(db)), parser)
 	r := gin.New()
 	r.Use(withUser(userID))
@@ -122,6 +122,32 @@ func TestParseFailureIs502WithMessage(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
 	require.Equal(t, "parse_failed", out.Error)
+}
+
+// An exhausted AI budget is a 429, NOT the 502 the client turns into "couldn't
+// read that — enter it manually and try again": nothing was wrong with the
+// recipe and retrying cannot succeed until the month rolls over.
+func TestParseOverBudgetIs429(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := testDB(t)
+	userID := seedUser(t, db)
+
+	parser := NewParser(&stubProvider{generated: "{}"}, nutrition.NewRepository(db), &stubMeter{overBudget: true})
+	h := NewHandler(NewService(NewRepository(db), nutrition.NewRepository(db)), parser)
+	r := gin.New()
+	r.Use(withUser(userID))
+	r.POST("/v1/recipes/parse", h.Parse)
+
+	body, _ := json.Marshal(map[string]any{"text": "2 cups rice"})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/recipes/parse", bytes.NewReader(body)))
+	require.Equal(t, http.StatusTooManyRequests, w.Code)
+
+	var out struct {
+		Error string `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+	require.Equal(t, "budget_exhausted", out.Error)
 }
 
 func TestLogReturns201WithSkipped(t *testing.T) {
