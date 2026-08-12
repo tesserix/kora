@@ -42,13 +42,31 @@ func (h Handler) Submit(c *gin.Context) {
 	}
 	// The date is derived, never client-supplied: a client that could post
 	// its own target_date could post one the pace does not support.
+	//
+	// The three destination fields are all-or-nothing: a goal weight with no
+	// pace (or a pace of 0, or a maintenance goal) is a half-set destination
+	// that is neither "no destination" nor a resolved one, so nothing is
+	// persisted unless a target date can actually be derived.
+	var goalWeightKg, paceKgPerWeek float64
 	var targetDate *time.Time
 	if in.Goal != "maintenance" && in.GoalWeightKg > 0 && in.PaceKgPerWeek > 0 {
 		distance := math.Abs(in.GoalWeightKg - in.WeightKg)
 		if distance > 0 {
+			// Resolve the user's own timezone so "today" is their calendar
+			// day, not the server's UTC one -- a submission before 11:00
+			// AEDT is still the previous UTC day, which would otherwise
+			// store a target_date one day early.
+			loc, err := time.LoadLocation(tz)
+			if err != nil {
+				loc = time.UTC
+			}
 			weeks := math.Ceil(distance / in.PaceKgPerWeek)
-			d := h.now().AddDate(0, 0, int(weeks)*7)
+			today := h.now().In(loc)
+			start := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, loc)
+			d := start.AddDate(0, 0, int(weeks)*7)
 			targetDate = &d
+			goalWeightKg = in.GoalWeightKg
+			paceKgPerWeek = in.PaceKgPerWeek
 		}
 	}
 	saved, err := h.users.SaveOnboarding(c.Request.Context(), userID, user.OnboardingFields{
@@ -56,7 +74,7 @@ func (h Handler) Submit(c *gin.Context) {
 		ActivityLevel: in.ActivityLevel, Goal: in.Goal, Timezone: tz,
 		TargetKcal: targets.Kcal, TargetProteinG: targets.ProteinG,
 		TargetCarbsG: targets.CarbsG, TargetFatG: targets.FatG,
-		GoalWeightKg: in.GoalWeightKg, PaceKgPerWeek: in.PaceKgPerWeek, TargetDate: targetDate,
+		GoalWeightKg: goalWeightKg, PaceKgPerWeek: paceKgPerWeek, TargetDate: targetDate,
 	})
 	if err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not save onboarding")
