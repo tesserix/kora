@@ -107,13 +107,18 @@ export function TickRuler(props: TickRulerProps) {
   const pan = useMemo(
     () =>
       Gesture.Pan()
+        // Tags the gesture so tests can address it via
+        // `getByGestureTestId` (react-native-gesture-handler/jest-utils)
+        // and fire simulated events at it directly — the only way to pin
+        // the wiring (translationX vs changeX) rather than just the math.
+        .withTestId(`${testID}-pan`)
         .onBegin(() => {
           runOnJS(beginDrag)();
         })
         .onUpdate((e) => {
           runOnJS(applyDrag)(e.translationX);
         }),
-    [applyDrag, beginDrag],
+    [applyDrag, beginDrag, testID],
   );
 
   const onAccessibilityAction = useCallback(

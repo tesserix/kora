@@ -1,4 +1,5 @@
 import { fireEvent, render } from "@testing-library/react-native";
+import { fireGestureHandler, getByGestureTestId } from "react-native-gesture-handler/jest-utils";
 import { TickRuler, valueFromDrag } from "../TickRuler";
 
 const base = {
@@ -66,6 +67,32 @@ describe("TickRuler continuous mode", () => {
   it("renders a tick for every major graduation in view", async () => {
     const { getAllByTestId } = await render(<TickRuler {...base} value={84} onChange={jest.fn()} />);
     expect(getAllByTestId(/^weight-ruler-tick-/).length).toBeGreaterThan(0);
+  });
+
+  // Pins the WIRING, not just the arithmetic: `valueFromDrag`'s own tests
+  // can't tell `Gesture.Pan().onUpdate(e => ... e.translationX)` apart from
+  // an accidental `.onChange(e => ... e.changeX)` — both call the same
+  // correct function, just with different numbers. Firing real gesture
+  // events through react-native-gesture-handler's own change-event
+  // calculator (which derives changeX as the diff between consecutive
+  // translationX values, exactly as it does on-device) is the only way to
+  // catch a regression in which field gets read.
+  //
+  // Firing cumulative translationX = 9, 27, 45 from value=84 (step 0.5,
+  // PX_PER_UNIT=9):
+  //   correct (translationX, cumulative): last call carries 45 → 84 - 5 = 79
+  //   buggy   (changeX, per-frame delta): last call carries 45-27=18 → 84 - 2 = 82
+  // 79 and 82 are different snapped values, so the two wirings are
+  // distinguishable by the final onChange call alone.
+  it("wires the cumulative translationX into onChange, not the per-frame changeX", async () => {
+    const onChange = jest.fn();
+    await render(<TickRuler {...base} value={84} onChange={onChange} />);
+    fireGestureHandler(getByGestureTestId("weight-ruler-pan"), [
+      { translationX: 9 },
+      { translationX: 27 },
+      { translationX: 45 },
+    ]);
+    expect(onChange).toHaveBeenLastCalledWith(79);
   });
 });
 
