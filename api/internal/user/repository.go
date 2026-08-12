@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -176,6 +177,9 @@ type OnboardingFields struct {
 	TargetProteinG float64
 	TargetCarbsG   float64
 	TargetFatG     float64
+	GoalWeightKg   float64
+	PaceKgPerWeek  float64
+	TargetDate     *time.Time
 }
 
 func (r Repository) SaveOnboarding(ctx context.Context, userID uuid.UUID, f OnboardingFields) (User, error) {
@@ -191,6 +195,9 @@ func (r Repository) SaveOnboarding(ctx context.Context, userID uuid.UUID, f Onbo
 		"target_protein_g": f.TargetProteinG,
 		"target_carbs_g":   f.TargetCarbsG,
 		"target_fat_g":     f.TargetFatG,
+		"goal_weight_kg":   f.GoalWeightKg,
+		"pace_kg_per_week": f.PaceKgPerWeek,
+		"target_date":      f.TargetDate,
 		"onboarded_at":     gorm.Expr("now()"),
 	}
 	if err := r.db.WithContext(ctx).Model(&User{}).Where("id = ?", userID).Updates(updates).Error; err != nil {

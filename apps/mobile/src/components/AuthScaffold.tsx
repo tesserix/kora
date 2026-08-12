@@ -9,6 +9,7 @@ import { useTheme } from "@/theme";
 type Props = {
   children: ReactNode;
   footer: ReactNode;
+  header?: ReactNode;
   onBack?: () => void;
   progress?: { step: number; total: number };
 };
@@ -23,16 +24,16 @@ type Props = {
 // has no progress affordance, whereas this design keeps the title in the body.
 // The back control still matches ScreenHeader's conventions ("Go back",
 // selection haptic, arrow-left) so the two feel identical in use.
-export function AuthScaffold({ children, footer, onBack, progress }: Props) {
-  const { colors, spacing } = useTheme();
+export function AuthScaffold({ children, footer, header, onBack, progress }: Props) {
+  const { colors, instrument, spacing } = useTheme();
   const insets = useSafeAreaInsets();
-  const hasHeader = Boolean(onBack || progress);
+  const hasNavRow = Boolean(onBack || progress);
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
+    <View style={{ flex: 1, backgroundColor: instrument.bg }}>
       <AppBackground />
 
-      {hasHeader ? (
+      {hasNavRow ? (
         <View
           style={{
             flexDirection: "row",
@@ -81,13 +82,20 @@ export function AuthScaffold({ children, footer, onBack, progress }: Props) {
         </View>
       ) : null}
 
+      {header ? (
+        <View testID="auth-scaffold-header-wrapper" style={{ paddingTop: hasNavRow ? 0 : insets.top }}>
+          {header}
+        </View>
+      ) : null}
+
       <ScrollView
+        testID="auth-scaffold-scroll"
         style={{ flex: 1 }}
         keyboardShouldPersistTaps="handled"
         automaticallyAdjustKeyboardInsets
         contentContainerStyle={{
           flexGrow: 1,
-          paddingTop: hasHeader ? spacing.sm : insets.top + spacing.xl,
+          paddingTop: hasNavRow ? spacing.sm : header ? spacing.md : insets.top + spacing.xl,
           paddingHorizontal: spacing.lg,
           paddingBottom: spacing.lg,
           gap: spacing.md,

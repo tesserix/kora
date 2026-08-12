@@ -1,5 +1,6 @@
 import { Text } from "react-native";
-import { fireEvent, render } from "@testing-library/react-native";
+import { fireEvent, render, within } from "@testing-library/react-native";
+import * as SafeAreaContext from "react-native-safe-area-context";
 import { AuthScaffold } from "../AuthScaffold";
 
 test("renders both body and footer content", async () => {
@@ -103,4 +104,93 @@ test("the current progress dot is visually distinct from the rest", async () => 
   const [first, second] = getAllByTestId("progress-dot").map((d) => d.props.style);
   expect(first.width).not.toBe(second.width);
   expect(first.backgroundColor).not.toBe(second.backgroundColor);
+});
+
+describe("AuthScaffold header", () => {
+  it("renders a header element when given one", async () => {
+    const { getByTestId } = await render(
+      <AuthScaffold header={<Text testID="pinned">Target</Text>} footer={<Text>Go</Text>}>
+        <Text>Body</Text>
+      </AuthScaffold>,
+    );
+    expect(getByTestId("pinned")).toBeTruthy();
+  });
+
+  it("keeps the header outside the scroll view", async () => {
+    const { getByTestId, queryByTestId } = await render(
+      <AuthScaffold header={<Text testID="pinned">Target</Text>} footer={<Text>Go</Text>}>
+        <Text testID="body">Body</Text>
+      </AuthScaffold>,
+    );
+    const scroll = getByTestId("auth-scaffold-scroll");
+    expect(within(scroll).queryByTestId("pinned")).toBeNull();
+    expect(within(scroll).getByTestId("body")).toBeTruthy();
+  });
+
+  it("still renders without a header", async () => {
+    const { getByTestId } = await render(
+      <AuthScaffold footer={<Text>Go</Text>}>
+        <Text testID="body">Body</Text>
+      </AuthScaffold>,
+    );
+    expect(getByTestId("body")).toBeTruthy();
+  });
+
+  it("applies top safe-area inset to header when no nav row is present", async () => {
+    // The onboarding screen uses header without onBack or progress — this is the
+    // critical configuration on notched devices. The header wrapper must take the
+    // top inset to avoid rendering under the notch.
+    const useSafeAreaInsetsSpy = jest.spyOn(SafeAreaContext, "useSafeAreaInsets");
+    useSafeAreaInsetsSpy.mockReturnValue({ top: 44, bottom: 0, left: 0, right: 0 });
+
+    try {
+      const { getByTestId } = await render(
+        <AuthScaffold header={<Text testID="pinned">Target</Text>} footer={<Text>Go</Text>}>
+          <Text>Body</Text>
+        </AuthScaffold>,
+      );
+
+      const headerWrapper = getByTestId("auth-scaffold-header-wrapper");
+      const style = headerWrapper.props.style;
+      const flatStyle = Array.isArray(style) ? Object.assign({}, ...style.filter(Boolean)) : style;
+      expect(flatStyle.paddingTop).toBe(44);
+    } finally {
+      useSafeAreaInsetsSpy.mockRestore();
+    }
+  });
+
+  it("scroll padding accounts for header already taking the inset", async () => {
+    // When header is present and no nav row, the header wrapper consumes the inset.
+    // The scroll must NOT add it again — instead use spacing.md for the gap below the header.
+    // This test pins that exactly one of the two takes the inset, not both.
+    const useSafeAreaInsetsSpy = jest.spyOn(SafeAreaContext, "useSafeAreaInsets");
+    useSafeAreaInsetsSpy.mockReturnValue({ top: 44, bottom: 0, left: 0, right: 0 });
+
+    try {
+      const { getByTestId } = await render(
+        <AuthScaffold header={<Text testID="pinned">Target</Text>} footer={<Text>Go</Text>}>
+          <Text>Body</Text>
+        </AuthScaffold>,
+      );
+
+      // Header wrapper must take the inset
+      const headerWrapper = getByTestId("auth-scaffold-header-wrapper");
+      const headerStyle = headerWrapper.props.style;
+      const flatHeaderStyle = Array.isArray(headerStyle)
+        ? Object.assign({}, ...headerStyle.filter(Boolean))
+        : headerStyle;
+      expect(flatHeaderStyle.paddingTop).toBe(44);
+
+      // Scroll content padding must NOT include the inset when header is present
+      const scroll = getByTestId("auth-scaffold-scroll");
+      const scrollContentStyle = scroll.props.contentContainerStyle;
+      const flatScrollStyle = Array.isArray(scrollContentStyle)
+        ? Object.assign({}, ...scrollContentStyle.filter(Boolean))
+        : scrollContentStyle;
+      // Should be spacing.md, not insets.top + spacing.xl
+      expect(flatScrollStyle.paddingTop).toBe(16); // spacing.md from theme
+    } finally {
+      useSafeAreaInsetsSpy.mockRestore();
+    }
+  });
 });

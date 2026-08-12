@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/tesserix/kora/api/internal/ai"
 	"github.com/tesserix/kora/api/internal/ai/providers"
+	"github.com/tesserix/kora/api/internal/user"
 )
 
 // stubProvider is a minimal ai.Provider whose Embed fails with a recognisable
@@ -89,4 +91,26 @@ func TestRouterBackedEmbedderMasksTheRealError(t *testing.T) {
 	assert.NotErrorIs(t, routedErr, geminiErr, "the Router drops the primary's error — this is the masking that must not reach ingest")
 	assert.Contains(t, routedErr.Error(), "openai: embed: not supported",
 		"a Router-backed ingest embed reports OpenAI's refusal, hiding the real Gemini failure")
+}
+
+// TestNamedTimezonesResolve guards the blank `_ "time/tzdata"` import above.
+// Without it the production image has no zoneinfo and every named zone
+// silently resolves to UTC, which would put every user's day boundary in the
+// wrong place (see user/middleware.go's ResolveMiddleware and
+// onboarding/handler.go's target_date derivation, both of which call
+// time.LoadLocation on a stored timezone string).
+//
+// This test passes on macOS and most Linux desktops regardless of the
+// import, because the OS itself ships a zoneinfo database that
+// time.LoadLocation falls back to. It only proves the import is present (and
+// catches its removal) in environments with no OS-level zoneinfo -- CI
+// runners and the actual alpine-based container this binary ships in. A
+// green run here on a developer machine is not evidence the import works;
+// it is evidence the import compiles and the zone names are spelled right.
+func TestNamedTimezonesResolve(t *testing.T) {
+	for _, name := range []string{"Australia/Sydney", "Asia/Kolkata", "America/New_York", user.DefaultTimezone} {
+		loc, err := time.LoadLocation(name)
+		require.NoError(t, err, "zone %s must resolve", name)
+		require.NotNil(t, loc)
+	}
 }

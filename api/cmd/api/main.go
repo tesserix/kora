@@ -10,6 +10,14 @@ import (
 	"syscall"
 	"time"
 
+	// Embeds the IANA timezone database in the binary. Without this, the
+	// production image (alpine:3.19, which installs only ca-certificates)
+	// has no zoneinfo, so every time.LoadLocation for a named zone fails
+	// and silently falls back to UTC -- which would make every user's day
+	// boundary UTC regardless of their stored timezone, and would leave
+	// this package's target_date derivation inert in production.
+	_ "time/tzdata"
+
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 

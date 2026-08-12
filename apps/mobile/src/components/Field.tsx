@@ -23,12 +23,18 @@ export interface FieldProps extends TextInputProps {
 // border while focused (spec: Field.tsx > "inset well bg, glassBorder
 // border, ink text, mut placeholder, accent focus ring").
 export function Field({ label, error, accessibilityLabel, style, onFocus, onBlur, ...inputProps }: FieldProps) {
-  const { instrument, spacing, fontSize } = useTheme();
+  const { instrument, spacing, fontSize, fonts } = useTheme();
   const [focused, setFocused] = useState(false);
 
   return (
     <View style={{ gap: 6 }}>
-      <AppText style={{ fontSize: 13, color: instrument.mut }}>{label}</AppText>
+      {/* Engraved label: 9px uppercase, ~0.22em tracking, mut — the spec's
+          "engraved labels" recipe (9-11px / 0.14-0.26em / mut), matched to
+          this field's own size rather than the shared 10px/1.5 recipe in
+          instrument/typography.ts. */}
+      <AppText style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: 1.98, color: instrument.mut }}>
+        {label}
+      </AppText>
 
       <View
         style={{
@@ -56,6 +62,8 @@ export function Field({ label, error, accessibilityLabel, style, onFocus, onBlur
               color: instrument.ink,
               fontSize: fontSize.base,
               minHeight: 48,
+              fontFamily: fonts.mono,
+              fontVariant: ["tabular-nums"],
             },
             style,
           ]}

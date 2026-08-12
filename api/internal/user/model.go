@@ -45,6 +45,12 @@ type User struct {
 	TargetFatG     float64    `json:"target_fat_g"`
 	OnboardedAt    *time.Time `json:"onboarded_at"`
 
+	// Destination. Nil/zero means none was set — which is what a
+	// maintenance user stores, not an error state.
+	GoalWeightKg  float64    `json:"goal_weight_kg"`
+	PaceKgPerWeek float64    `json:"pace_kg_per_week"`
+	TargetDate    *time.Time `json:"target_date"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
