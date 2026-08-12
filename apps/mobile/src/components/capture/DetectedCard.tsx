@@ -144,6 +144,23 @@ function CandidateRow({
             ? `${formatPortion(portionEntryFor(candidate.portion_grams, candidate.item.base_unit, candidate.item.serving_units))} · Best guess — tap to change`
             : formatPortion(portionEntryFor(candidate.portion_grams, candidate.item.base_unit, candidate.item.serving_units))}
         </AppText>
+        {candidate.portion_assumed ? (
+          // The server had no serving size for this food and fell back to a
+          // 100g assumption. That fallback must never read like a measurement
+          // — engraved, `mut`, no accent (this is information, not an alarm).
+          <AppText
+            style={{
+              color: T.mut,
+              fontSize: 9,
+              fontWeight: "700",
+              textTransform: "uppercase",
+              letterSpacing: 1,
+              marginTop: 2,
+            }}
+          >
+            portion is a guess
+          </AppText>
+        ) : null}
         {uncertain ? null : (
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 5 }}>
             <MacroChip label="P" per100g={candidate.item.protein_per_100g} />

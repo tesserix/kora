@@ -374,3 +374,30 @@ test("a liquid candidate renders its portion in ml, not grams", async () => {
   expect(getAllByText("200 ml")).toHaveLength(2);
   expect(queryByText("200g")).toBeNull();
 });
+
+// The server falls back to a 100g portion when a food has no serving size.
+// That fallback is a guess, not a measurement, and must say so — the app has
+// a documented history of an unknown rendering as though it were confident.
+test("an assumed portion is labelled as a guess on the row", async () => {
+  const base = makeResolution();
+  const resolution = {
+    ...base,
+    candidates: [{ ...base.candidates[0], portion_assumed: true, portion_grams: 100 }],
+  };
+
+  const { getByText } = await renderCard(resolution);
+
+  expect(getByText(/portion is a guess/i)).toBeTruthy();
+});
+
+test("a known portion says nothing about guessing", async () => {
+  const base = makeResolution();
+  const resolution = {
+    ...base,
+    candidates: [{ ...base.candidates[0], portion_assumed: false, portion_grams: 350 }],
+  };
+
+  const { queryByText } = await renderCard(resolution);
+
+  expect(queryByText(/guess/i)).toBeNull();
+});

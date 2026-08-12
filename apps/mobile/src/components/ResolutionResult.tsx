@@ -49,6 +49,12 @@ export function resultSummary(resolution: Resolution): string {
   const count = resolution.candidates.length;
   const itemWord = count === 1 ? "item" : "items";
   const kcalText = kcalTotalLabel(resolution);
+  // Computed from the WHOLE candidate list, never candidates[0] — a set where
+  // any row is assumed must read as hedged, not just one whose first row is.
+  const hasAssumedPortion = resolution.candidates.some((c) => c.portion_assumed);
+  if (hasAssumedPortion) {
+    return `I found ${count} ${itemWord}, about ${kcalText} — one portion is a guess. Confirm and I'll log it.`;
+  }
   return `I found ${count} ${itemWord}, about ${kcalText} — confirm and I'll log it.`;
 }
 
