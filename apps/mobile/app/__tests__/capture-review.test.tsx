@@ -366,6 +366,60 @@ describe("confirming a capture with multiple detected items", () => {
     expect(deleteQueuedMedia).not.toHaveBeenCalled();
     expect(discard).not.toHaveBeenCalled();
   });
+
+  // Fix round 1: handleConfirm used to recompute `loggable` fresh from the
+  // capture's unmodified resolution on every press, with no memory of which
+  // candidates already queued. A retry after a partial failure re-submitted
+  // EVERY candidate — including the one that already succeeded — under a
+  // fresh newLogId(), silently double-logging it. Mirrors capture.tsx's
+  // handleAddToDiary, which tracks loggedCandidateKeys for exactly this
+  // reason.
+  test("retrying after a partial failure re-queues only the item that failed", async () => {
+    (appendLog as jest.Mock)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("queue full"))
+      .mockResolvedValueOnce(undefined);
+    const capture = queuedCaptureFixture({
+      resolution: resolutionFixture({
+        candidates: [candidateFixture({ id: "food-a" }), candidateFixture({ id: "food-b" })],
+      }),
+    });
+    mockListCaptures([capture]);
+
+    const { getByLabelText } = await render(<CaptureReviewScreen />, { wrapper: wrap(newClient()) });
+    fireEvent.press(getByLabelText("Add to diary"));
+    await waitFor(() => expect(appendLog).toHaveBeenCalledTimes(2));
+
+    // Retry: food-a already succeeded on the first press and must not be
+    // resubmitted — only food-b (the one that failed) goes out again.
+    fireEvent.press(getByLabelText("Add to diary"));
+    await waitFor(() => expect(appendLog).toHaveBeenCalledTimes(3));
+    expect((appendLog as jest.Mock).mock.calls[2][0]).toMatchObject({ food_item_id: "food-b" });
+  });
+
+  test("once the retry succeeds, the media is deleted and the row discarded exactly once", async () => {
+    (appendLog as jest.Mock)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("queue full"))
+      .mockResolvedValueOnce(undefined);
+    const capture = queuedCaptureFixture({
+      resolution: resolutionFixture({
+        candidates: [candidateFixture({ id: "food-a" }), candidateFixture({ id: "food-b" })],
+      }),
+    });
+    mockListCaptures([capture]);
+
+    const { getByLabelText } = await render(<CaptureReviewScreen />, { wrapper: wrap(newClient()) });
+    fireEvent.press(getByLabelText("Add to diary"));
+    await waitFor(() => expect(appendLog).toHaveBeenCalledTimes(2));
+    expect(deleteQueuedMedia).not.toHaveBeenCalled();
+    expect(discard).not.toHaveBeenCalled();
+
+    fireEvent.press(getByLabelText("Add to diary"));
+    await waitFor(() => expect(appendLog).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(deleteQueuedMedia).toHaveBeenCalledTimes(1));
+    expect(discard).toHaveBeenCalledTimes(1);
+  });
 });
 
 // task-1 step 5: this screen passed no onResolveUncertain to ResolutionResult,

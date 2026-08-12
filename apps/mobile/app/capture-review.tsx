@@ -8,7 +8,7 @@ import { AppText } from "@/components/Text";
 import { Button } from "@/components/Button";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { AppBackground } from "@/components/AppBackground";
-import { ResolutionResult, resolveResultView } from "@/components/ResolutionResult";
+import { ResolutionResult, resolveResultView, candidateKey } from "@/components/ResolutionResult";
 import { useTheme } from "@/theme";
 import { currentUserId } from "@/lib/api";
 import { list as listCaptures, discard, retry as retryCapture, type QueuedCapture } from "@/offline/captureQueue";
@@ -89,6 +89,14 @@ export default function CaptureReviewScreen() {
   const [capture, setCapture] = useState<QueuedCapture | null | undefined>(undefined);
   const [mealSlot, setMealSlot] = useState<MealSlot>("snack");
   const [busy, setBusy] = useState(false);
+  // Which candidates (by candidateKey — the same helper capture.tsx's
+  // handleAddToDiary uses) have already been queued, across every Confirm
+  // press for this capture. A retry after a partial failure must not
+  // re-submit one of these: appendLog mints a FRESH log id every time it's
+  // called, so resubmitting an already-queued candidate would not update the
+  // existing log, it would create a second one under a different id, and the
+  // server has no way to recognise the duplicate.
+  const [loggedCandidateKeys, setLoggedCandidateKeys] = useState<Set<string>>(new Set());
 
   // Always called, never conditionally — the source is null until a voice
   // capture is loaded, so a photo capture (or the loading/not-found states)
@@ -142,11 +150,21 @@ export default function CaptureReviewScreen() {
       // "Add 2 items to diary"; logging one and deleting the capture row
       // destroyed the rest with no trace.
       //
+      // Keyed on the FULL candidates array (before the isLoggable filter),
+      // the same way DetectedCard indexes its rows, so a key computed here
+      // always lines up with the one an earlier attempt recorded — and
+      // filtered against loggedCandidateKeys so a retry only resubmits what
+      // did not already make it (see the state comment above).
+      const pending = (resolution?.candidates ?? [])
+        .map((c, i) => ({ c, key: candidateKey(c, i) }))
+        .filter(({ c }) => isLoggable(c))
+        .filter(({ key }) => !loggedCandidateKeys.has(key));
+
       // allSettled, not all: one rejected item must not abandon the ones that
       // already queued, and the outcome list is what decides whether the
       // capture is safe to delete.
       const outcomes = await Promise.allSettled(
-        loggable.map((c) =>
+        pending.map(({ c }) =>
           appendLog(
             {
               food_item_id: c.item.id,
@@ -167,6 +185,13 @@ export default function CaptureReviewScreen() {
         ),
       );
 
+      const newlySucceededKeys = pending
+        .filter((_, index) => outcomes[index]?.status === "fulfilled")
+        .map(({ key }) => key);
+      // Union, never replace: keys from an earlier attempt must survive this
+      // one even though this attempt never touched them.
+      setLoggedCandidateKeys(new Set([...loggedCandidateKeys, ...newlySucceededKeys]));
+
       const failed = outcomes.filter((o) => o.status === "rejected").length;
       if (failed > 0) {
         // The capture row and its media are the only copy of an item that did
@@ -174,11 +199,17 @@ export default function CaptureReviewScreen() {
         setBusy(false);
         Alert.alert(
           "Some items didn't save",
-          `${failed} of ${loggable.length} couldn't be queued. Your capture is still here — try again.`,
+          `${failed} of ${pending.length} couldn't be queued. Your capture is still here — try again.`,
         );
         return;
       }
 
+      // Nothing failed this attempt, which means every loggable candidate is
+      // now in loggedCandidateKeys — either this attempt just finished the
+      // last of them, or a retry found `pending` empty because an earlier
+      // attempt already logged everything. Either way it is safe to delete:
+      // a retry that finds nothing left to queue must still finish rather
+      // than leave the user stranded on a screen whose items are all logged.
       await deleteQueuedMedia(capture.storedName);
       await discard(capture.id);
       invalidate();
