@@ -24,6 +24,11 @@ type Targets struct {
 	ProteinG float64 `json:"protein_g"`
 	CarbsG   float64 `json:"carbs_g"`
 	FatG     float64 `json:"fat_g"`
+	// Floored reports that the resting-burn clamp bound — the requested
+	// pace asked for a target below BMR and did not get it. Callers
+	// surface this to the user rather than silently showing a number
+	// that stopped obeying them.
+	Floored bool `json:"floored"`
 }
 
 var activityFactors = map[string]float64{
@@ -127,12 +132,15 @@ func Calculate(in Input, currentYear int) (Targets, error) {
 		adjust = (in.PaceKgPerWeek * KcalPerKg) / daysPerWeek
 	}
 
-	kcal := tdee + adjust
+	raw := tdee + adjust
+	kcal := raw
+	floored := false
 	// Never hand out a target below resting burn.
 	if kcal < bmr {
 		kcal = bmr
+		floored = true
 	}
 
 	proteinG, carbsG, fatG := SplitMacros(kcal, in.WeightKg)
-	return Targets{Kcal: kcal, ProteinG: proteinG, CarbsG: carbsG, FatG: fatG}, nil
+	return Targets{Kcal: kcal, ProteinG: proteinG, CarbsG: carbsG, FatG: fatG, Floored: floored}, nil
 }

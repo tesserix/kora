@@ -60,6 +60,7 @@ func TestCalculateMatchesGoldenVectors(t *testing.T) {
 			approx(t, c.ProteinG, got.ProteinG, 0.001)
 			approx(t, c.CarbsG, got.CarbsG, 0.001)
 			approx(t, c.FatG, got.FatG, 0.001)
+			require.Equal(t, c.Floored, got.Floored)
 		})
 	}
 }

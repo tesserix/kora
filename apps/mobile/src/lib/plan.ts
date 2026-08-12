@@ -51,16 +51,32 @@ const FAT_CALORIE_PCT = 0.25;
 const KCAL_PER_GRAM_FAT = 9;
 const KCAL_PER_GRAM_MACRO = 4;
 
+/**
+ * Computes energy and macro targets from user metrics.
+ *
+ * Assumes a pace drawn from `availablePaces`, which ensures the pace does not
+ * exceed 1% of bodyweight. An over-cap pace is left to the server to reject
+ * rather than being silently clamped here — clamping would hide from the user
+ * that their request was refused. A negative pace is clamped to zero instead
+ * of inverting the goal (e.g. a drag gesture briefly overshooting zero should
+ * produce a maintenance target, not a fat-loss surplus).
+ */
 export function computePlan(input: PlanInput): Plan {
+  // A negative pace is meaningless and, left alone, would flip the sign of
+  // the adjustment and hand a fat-loss user a surplus. Go rejects it at the
+  // API boundary; here it degrades to "no adjustment" so a mid-drag
+  // overshoot can never produce an inverted target.
+  const paceKgPerWeek = Math.max(0, input.paceKgPerWeek);
+
   const sexOffset = input.sex === "male" ? 5 : -161;
   const bmr = 10 * input.weightKg + 6.25 * input.heightCm - 5 * input.age + sexOffset;
   const tdee = bmr * ACTIVITY_FACTORS[input.activityLevel];
 
   let adjustment = 0;
   if (input.goal === "fat_loss") {
-    adjustment = -(input.paceKgPerWeek * KCAL_PER_KG) / DAYS_PER_WEEK;
+    adjustment = -(paceKgPerWeek * KCAL_PER_KG) / DAYS_PER_WEEK;
   } else if (input.goal === "muscle_gain") {
-    adjustment = (input.paceKgPerWeek * KCAL_PER_KG) / DAYS_PER_WEEK;
+    adjustment = (paceKgPerWeek * KCAL_PER_KG) / DAYS_PER_WEEK;
   }
 
   const raw = tdee + adjustment;

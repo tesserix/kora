@@ -75,3 +75,19 @@ describe("weeksToGoal", () => {
     expect(weeksToGoal(70, 75, 0.25)).toBe(20);
   });
 });
+
+describe("computePlan guards", () => {
+  it("treats a negative pace as no adjustment rather than inverting the goal", () => {
+    const base = { sex: "male", age: 31, heightCm: 178, weightKg: 84, activityLevel: "moderate", goal: "fat_loss" } as const;
+    const negative = computePlan({ ...base, paceKgPerWeek: -0.5 });
+    const zero = computePlan({ ...base, paceKgPerWeek: 0 });
+    expect(negative.kcal).toBeCloseTo(zero.kcal, 6);
+    expect(negative.kcal).toBeLessThanOrEqual(negative.tdee);
+  });
+
+  it("never returns a target below resting burn", () => {
+    const plan = computePlan({ sex: "female", age: 90, heightCm: 150, weightKg: 40, activityLevel: "sedentary", goal: "fat_loss", paceKgPerWeek: 0.4 });
+    expect(plan.kcal).toBeCloseTo(plan.bmr, 6);
+    expect(plan.floored).toBe(true);
+  });
+});
