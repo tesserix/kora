@@ -22,34 +22,43 @@ afterEach(() => {
   setColorScheme.mockRestore();
 });
 
-test("defaults to system and falls back to the device scheme when nothing is stored", async () => {
+test("defaults to dark when nothing is stored", async () => {
   const { result } = await renderHook(() => useAppearance(), { wrapper });
 
-  expect(result.current.preference).toBe("system");
-  await waitFor(() => expect(setColorScheme).toHaveBeenCalledWith("unspecified"));
+  expect(result.current.preference).toBe("dark");
+  await waitFor(() => expect(setColorScheme).toHaveBeenCalledWith("dark"));
 });
 
 test("hydrates a stored preference and applies it as the color scheme", async () => {
-  await AsyncStorage.setItem(STORAGE_KEY, "dark");
+  await AsyncStorage.setItem(STORAGE_KEY, "light");
 
   const { result } = await renderHook(() => useAppearance(), { wrapper });
 
-  await waitFor(() => expect(result.current.preference).toBe("dark"));
-  expect(setColorScheme).toHaveBeenCalledWith("dark");
+  await waitFor(() => expect(result.current.preference).toBe("light"));
+  expect(setColorScheme).toHaveBeenCalledWith("light");
 });
 
-test("ignores a stored value that is not a known preference", async () => {
+test("hydrates an explicit system preference and follows the device scheme", async () => {
+  await AsyncStorage.setItem(STORAGE_KEY, "system");
+
+  const { result } = await renderHook(() => useAppearance(), { wrapper });
+
+  await waitFor(() => expect(result.current.preference).toBe("system"));
+  expect(setColorScheme).toHaveBeenCalledWith("unspecified");
+});
+
+test("ignores a stored value that is not a known preference and falls back to dark", async () => {
   await AsyncStorage.setItem(STORAGE_KEY, "sepia");
 
   const { result } = await renderHook(() => useAppearance(), { wrapper });
 
-  await waitFor(() => expect(setColorScheme).toHaveBeenCalledWith("unspecified"));
-  expect(result.current.preference).toBe("system");
+  await waitFor(() => expect(setColorScheme).toHaveBeenCalledWith("dark"));
+  expect(result.current.preference).toBe("dark");
 });
 
 test("setPreference persists the choice and applies the literal scheme", async () => {
   const { result } = await renderHook(() => useAppearance(), { wrapper });
-  await waitFor(() => expect(setColorScheme).toHaveBeenCalledWith("unspecified"));
+  await waitFor(() => expect(setColorScheme).toHaveBeenCalledWith("dark"));
 
   await act(async () => {
     result.current.setPreference("light");
@@ -74,31 +83,31 @@ test("returning to system persists system and hands the scheme back to the devic
   await waitFor(async () => expect(await AsyncStorage.getItem(STORAGE_KEY)).toBe("system"));
 });
 
-test("survives an AsyncStorage read rejection by staying on system", async () => {
+test("survives an AsyncStorage read rejection by landing on dark", async () => {
   (AsyncStorage.getItem as jest.Mock).mockRejectedValueOnce(new Error("read failed"));
 
   const { result } = await renderHook(() => useAppearance(), { wrapper });
 
-  await waitFor(() => expect(setColorScheme).toHaveBeenCalledWith("unspecified"));
-  expect(result.current.preference).toBe("system");
+  await waitFor(() => expect(setColorScheme).toHaveBeenCalledWith("dark"));
+  expect(result.current.preference).toBe("dark");
 });
 
 test("survives an AsyncStorage write rejection without losing the in-memory choice", async () => {
   (AsyncStorage.setItem as jest.Mock).mockRejectedValueOnce(new Error("write failed"));
   const { result } = await renderHook(() => useAppearance(), { wrapper });
-  await waitFor(() => expect(setColorScheme).toHaveBeenCalledWith("unspecified"));
+  await waitFor(() => expect(setColorScheme).toHaveBeenCalledWith("dark"));
 
   await act(async () => {
-    result.current.setPreference("dark");
+    result.current.setPreference("light");
   });
 
-  expect(result.current.preference).toBe("dark");
-  expect(setColorScheme).toHaveBeenLastCalledWith("dark");
+  expect(result.current.preference).toBe("light");
+  expect(setColorScheme).toHaveBeenLastCalledWith("light");
 });
 
-test("useAppearance without a provider returns a safe system default", async () => {
+test("useAppearance without a provider returns a safe dark default", async () => {
   const { result } = await renderHook(() => useAppearance());
 
-  expect(result.current.preference).toBe("system");
+  expect(result.current.preference).toBe("dark");
   expect(() => result.current.setPreference("dark")).not.toThrow();
 });

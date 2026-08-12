@@ -29,20 +29,26 @@ function applyPreference(preference: AppearancePreference): void {
 }
 
 export function AppearanceProvider({ children }: { children: ReactNode }) {
-  const [preference, setPreferenceState] = useState<AppearancePreference>("system");
+  // Dark is Kora's home, not the device's. Instrument Glass is a dark-first
+  // instrument panel and capture is dark-only regardless, so absent any
+  // stored choice we open in dark. A stored "system" still means what it
+  // says — someone who explicitly picked System in Settings gets the
+  // device's scheme via applyPreference's "unspecified" sentinel below.
+  const [preference, setPreferenceState] = useState<AppearancePreference>("dark");
 
   useEffect(() => {
     let cancelled = false;
     AsyncStorage.getItem(STORAGE_KEY)
       .then((stored) => {
         if (cancelled) return;
-        const next = isAppearancePreference(stored) ? stored : "system";
+        const next = isAppearancePreference(stored) ? stored : "dark";
         setPreferenceState(next);
         applyPreference(next);
       })
       .catch(() => {
-        // Best-effort read; fall back to following the device setting.
-        if (!cancelled) applyPreference("system");
+        // Best-effort read; fall back to Kora's dark default rather than
+        // guessing at a stored preference we couldn't retrieve.
+        if (!cancelled) applyPreference("dark");
       });
     return () => {
       cancelled = true;
@@ -67,7 +73,9 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
 export function useAppearance(): AppearanceContextValue {
   const context = useContext(AppearanceContext);
   if (context === undefined) {
-    return { preference: "system", setPreference: () => {} };
+    // Match the provider's dark default so a component rendered outside
+    // the provider (e.g. in isolation in a test) doesn't disagree with it.
+    return { preference: "dark", setPreference: () => {} };
   }
   return context;
 }

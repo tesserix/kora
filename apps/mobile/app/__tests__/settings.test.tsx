@@ -91,7 +91,13 @@ describe("Appearance section", () => {
   });
 
   test("tapping Dark persists the preference and overrides the color scheme", async () => {
+    // Dark is now the app's default, so the segmented control's no-op guard
+    // (only fires onChange when the tapped key differs from the current
+    // value) would swallow a tap on "Dark" starting from the default. Seed a
+    // different stored preference first so the tap is a real change.
+    await AsyncStorage.setItem("kora.appearance", "light");
     const { getByText } = await render(withProvider(<Settings />));
+    await waitFor(() => expect(setColorScheme).toHaveBeenLastCalledWith("light"));
 
     fireEvent.press(getByText("Dark"));
 
