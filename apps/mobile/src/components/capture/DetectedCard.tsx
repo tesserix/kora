@@ -145,8 +145,8 @@ function CandidateRow({
             : formatPortion(portionEntryFor(candidate.portion_grams, candidate.item.base_unit, candidate.item.serving_units))}
         </AppText>
         {candidate.portion_assumed ? (
-          // The server had no serving size for this food and fell back to a
-          // 100g assumption. That fallback must never read like a measurement
+          // The server had no serving size for this food and estimated the
+          // portion instead. That estimate must never read like a measurement
           // — engraved, `mut`, no accent (this is information, not an alarm).
           <AppText
             style={{
