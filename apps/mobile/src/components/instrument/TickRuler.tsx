@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
-import { View, type LayoutChangeEvent, type AccessibilityActionEvent } from "react-native";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { Dimensions, View, type LayoutChangeEvent, type AccessibilityActionEvent } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { runOnJS } from "react-native-reanimated";
 import Svg, { Line, Text as SvgText } from "react-native-svg";
@@ -10,9 +10,10 @@ const HEIGHT = 44;
 const PX_PER_UNIT = 9;
 const BASELINE = HEIGHT - 8;
 // Ticks must render on first paint, before the real `onLayout` measurement
-// arrives (RN testing-library never fires it), so width starts at a sane
-// device-width estimate instead of 0 and is corrected once layout runs.
-const FALLBACK_WIDTH = 320;
+// arrives (RN testing-library never fires it), so width starts from the
+// window width instead of 0 — the onLayout correction is then a few points
+// of container padding rather than a visible sideways jump of every tick.
+const FALLBACK_WIDTH = Dimensions.get("window").width;
 
 // Continuous mode: a numeric value dragged along a scale under a fixed
 // centre index. Detented mode (labelled choices) is added by Task 6 as a
@@ -44,6 +45,22 @@ function snap(v: number, min: number, max: number, step: number): number {
   return Number(clamp(quantize(v, step), min, max).toFixed(decimals));
 }
 
+/**
+ * The value a drag has reached. Computed from the value at gesture start
+ * plus the CUMULATIVE translation, never from a per-frame delta against a
+ * possibly-stale prop — several touch-move events can land between React
+ * renders, and per-frame deltas silently drop that movement.
+ */
+export function valueFromDrag(
+  startValue: number,
+  translationX: number,
+  min: number,
+  max: number,
+  step: number,
+): number {
+  return snap(startValue - translationX / PX_PER_UNIT, min, max, step);
+}
+
 export function TickRuler(props: TickRulerProps) {
   const { instrument } = useTheme();
   const { reduceMotion } = useMotionPrefs();
@@ -53,10 +70,19 @@ export function TickRuler(props: TickRulerProps) {
 
   const onLayout = useCallback((e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width), []);
 
+  // `value` is a JS-thread closure that only refreshes after React
+  // re-renders — dozens of SVG nodes deep, slower than touch-move events
+  // land. valueRef always holds the latest so the gesture never reads a
+  // stale one; dragStart is captured once per gesture so every update
+  // computes an absolute position from cumulative translation instead of
+  // per-frame deltas that can silently drop movement between renders.
+  const valueRef = useRef(value);
+  valueRef.current = value;
+  const dragStart = useRef(value);
+
   const report = useCallback(
-    (next: number) => {
-      const snapped = snap(next, min, max, step);
-      if (snapped === value) return;
+    (snapped: number) => {
+      if (snapped === valueRef.current) return;
       // Reduce Motion users are also opting out of incidental vestibular/
       // haptic stimulation, so the per-tick buzz is skipped under that
       // preference — the value still reports on every step, only the
@@ -64,26 +90,39 @@ export function TickRuler(props: TickRulerProps) {
       if (!reduceMotion) haptics.selection();
       onChange(snapped);
     },
-    [max, min, onChange, reduceMotion, step, value],
+    [onChange, reduceMotion],
+  );
+
+  const beginDrag = useCallback(() => {
+    dragStart.current = valueRef.current;
+  }, []);
+
+  const applyDrag = useCallback(
+    (translationX: number) => {
+      report(valueFromDrag(dragStart.current, translationX, min, max, step));
+    },
+    [max, min, report, step],
   );
 
   const pan = useMemo(
     () =>
-      Gesture.Pan().onChange((e) => {
-        // Dragging left raises the value: the strip moves under a fixed
-        // index, so the scale travels the opposite way to the finger.
-        runOnJS(report)(value - e.changeX / PX_PER_UNIT);
-      }),
-    [report, value],
+      Gesture.Pan()
+        .onBegin(() => {
+          runOnJS(beginDrag)();
+        })
+        .onUpdate((e) => {
+          runOnJS(applyDrag)(e.translationX);
+        }),
+    [applyDrag, beginDrag],
   );
 
   const onAccessibilityAction = useCallback(
     (e: AccessibilityActionEvent) => {
       const { actionName } = e.nativeEvent;
-      if (actionName === "increment") report(value + step);
-      if (actionName === "decrement") report(value - step);
+      if (actionName === "increment") report(snap(value + step, min, max, step));
+      if (actionName === "decrement") report(snap(value - step, min, max, step));
     },
-    [report, step, value],
+    [max, min, report, step, value],
   );
 
   const mid = width / 2;
