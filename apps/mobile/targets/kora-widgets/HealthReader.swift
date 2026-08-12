@@ -22,7 +22,10 @@ enum HealthReader {
     guard HKHealthStore.isHealthDataAvailable() else { return nil }
     let start = Calendar.current.startOfDay(for: Date())
     let todaySum = await cumulativeSum(from: start, to: Date())
-    if let todaySum { return StepReading.resolve(todaySum: todaySum, probeFoundSamples: true) }
+    // A non-finite sum is not evidence of a working read — let it fall
+    // through to the probe rather than passing probeFoundSamples: true on
+    // its behalf, which would turn "no evidence" into a confident 0.
+    if let todaySum, todaySum.isFinite { return StepReading.resolve(todaySum: todaySum, probeFoundSamples: true) }
 
     let probeStart = Calendar.current.date(byAdding: .day, value: -probeDays, to: start) ?? start
     let probeSum = await cumulativeSum(from: probeStart, to: Date())
@@ -79,9 +82,15 @@ enum HealthReader {
 
   private static func statisticsCollection(anchor: Date) async -> HKStatisticsCollection? {
     await withCheckedContinuation { continuation in
+      // anchorDate only sets bucket boundaries, it does not bound the range —
+      // without this predicate HealthKit enumerates the user's ENTIRE step
+      // history to build the buckets, which can be years of Watch data. That
+      // is thousands of buckets computed inside a widget extension's ~30 MB
+      // memory ceiling and timeline deadline; the failure mode is a jetsam,
+      // not a slow query, and it is invisible on a simulator with no data.
       let query = HKStatisticsCollectionQuery(
         quantityType: HKQuantityType(.stepCount),
-        quantitySamplePredicate: nil,
+        quantitySamplePredicate: HKQuery.predicateForSamples(withStart: anchor, end: Date(), options: [.strictStartDate]),
         options: .cumulativeSum,
         anchorDate: anchor,
         intervalComponents: DateComponents(day: 1)
