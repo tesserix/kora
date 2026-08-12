@@ -865,7 +865,11 @@ describe("Scan mode", () => {
     expect(mockResolveBarcodeMutate).toHaveBeenCalledTimes(1);
   });
 
-  test("denied camera permission renders the Otto error bubble", async () => {
+  // Was "denied camera permission renders the Otto error bubble" — task 6
+  // replaced the transient Otto-bubble copy for a scan-mode camera denial
+  // with the persistent PermissionDenied card (Open Settings / Describe it
+  // instead), since a bubble that scrolls away left no lasting way out.
+  test("denied camera permission renders the permission-denied card with a route to Settings", async () => {
     const deniedRequest = jest.fn(async () => ({ granted: false, status: "denied" }));
     (useCameraPermissions as jest.Mock).mockReturnValue([
       { granted: false, status: "denied", canAskAgain: true, expires: "never" },
@@ -876,7 +880,8 @@ describe("Scan mode", () => {
     const { findByText } = await render(<CaptureScreen />);
     await fireEvent.press(await findByText("Scan"));
 
-    expect(await findByText(/i need camera access/i)).toBeTruthy();
+    expect(await findByText("Open Settings")).toBeTruthy();
+    expect(await findByText(/describe it instead/i)).toBeTruthy();
     expect(mockResolveBarcodeMutate).not.toHaveBeenCalled();
   });
 

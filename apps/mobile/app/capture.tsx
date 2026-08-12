@@ -5,6 +5,7 @@ import {
   Easing,
   Keyboard,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -22,7 +23,6 @@ import { RecordingPresets, requestRecordingPermissionsAsync, useAudioRecorder } 
 import { Icon } from "@/components/Icon";
 import { AppText } from "@/components/Text";
 import { OttoBubble } from "@/components/capture/OttoBubble";
-import { UserBubble } from "@/components/capture/UserBubble";
 import { ModePill } from "@/components/capture/ModePill";
 import { Waveform } from "@/components/capture/Waveform";
 import { VoiceComposer } from "@/components/capture/VoiceComposer";
@@ -193,12 +193,74 @@ function ViewfinderReticle() {
   );
 }
 
+// A denied camera/mic permission used to be a dead end — the affordance kept
+// pretending it could still capture (see the fake barcode scan line this
+// replaced). This is the one recovery surface for both: a plain explanation,
+// a primary route to the OS Settings pane (the only place a re-prompt can
+// come from once iOS has denied it), and a secondary route that keeps the
+// capture going without a camera at all — describing the meal in words.
+// Mirrors the pattern already used for denied notification permission
+// (src/reminders/notificationAccess.ts's "Open Settings" toast action)
+// rather than inventing a second style.
+interface PermissionDeniedProps {
+  message: string;
+  onDescribeInstead: () => void;
+}
+
+function PermissionDenied({ message, onDescribeInstead }: PermissionDeniedProps) {
+  return (
+    <View
+      testID="capture-permission-denied"
+      style={{
+        height: 200,
+        borderRadius: 20,
+        backgroundColor: T.glass,
+        borderWidth: 1,
+        borderColor: T.glassBorder,
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 14,
+        paddingHorizontal: 24,
+      }}
+    >
+      <Icon name="barcode" size={40} color={T.mut} />
+      <AppText style={{ color: T.mut, fontSize: 13, fontWeight: "600", textAlign: "center" }}>
+        {message}
+      </AppText>
+      {/* Primary action — the only place a re-prompt can come from once iOS
+          has denied a permission once, so accent is correct here. */}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Open Settings"
+        onPress={() => void Linking.openSettings()}
+        style={{
+          backgroundColor: T.accent,
+          paddingHorizontal: 20,
+          paddingVertical: 10,
+          borderRadius: 9999,
+        }}
+      >
+        <AppText style={{ color: T.accentOn, fontWeight: "700", fontSize: 14 }}>Open Settings</AppText>
+      </Pressable>
+      {/* Secondary route — not accent. Text resolution needs no camera, so a
+          denied permission still doesn't have to be a dead end. */}
+      <Pressable accessibilityRole="button" accessibilityLabel="Describe it instead" onPress={onDescribeInstead}>
+        <AppText style={{ color: T.mut, fontSize: 13, fontWeight: "600", textDecorationLine: "underline" }}>
+          Describe it instead
+        </AppText>
+      </Pressable>
+    </View>
+  );
+}
+
 interface IdleAffordanceProps {
   mode: CaptureMode;
   onCapturePhoto: () => void;
   isRecordingVoice: boolean;
   cameraPermissionGranted: boolean;
+  cameraPermissionDenied: boolean;
   onBarcodeScanned: (data: string) => void;
+  onDescribeInstead: () => void;
 }
 
 // The per-mode "empty" affordance shown in the thread before a capture
@@ -209,7 +271,9 @@ function IdleAffordance({
   onCapturePhoto,
   isRecordingVoice,
   cameraPermissionGranted,
+  cameraPermissionDenied,
   onBarcodeScanned,
+  onDescribeInstead,
 }: IdleAffordanceProps) {
   if (mode === "photo") {
     return (
@@ -255,23 +319,6 @@ function IdleAffordance({
           gap: 18,
         }}
       >
-        {/* Display only. This used to be a second, competing record button;
-            the composer's mic below now owns starting and stopping, so a
-            single control means a single mental model. */}
-        <View
-          style={{
-            width: 72,
-            height: 72,
-            borderRadius: 9999,
-            backgroundColor: T.accent,
-            alignItems: "center",
-            justifyContent: "center",
-            borderWidth: 10,
-            borderColor: withAlpha(T.accent, 0.22),
-          }}
-        >
-          <Icon name="mic" size={30} color={T.accentOn} />
-        </View>
         <Waveform active={isRecordingVoice} />
         <AppText style={{ color: T.mut, fontSize: 13, fontWeight: "600" }}>
           {isRecordingVoice ? "Listening… tell Otto what you ate" : "Hold the mic below to record"}
@@ -294,55 +341,65 @@ function IdleAffordance({
           justifyContent: "center",
         }}
       >
-        <View
-          style={{
-            width: 200,
-            height: 110,
-            borderRadius: 12,
-            borderWidth: 2,
-            borderColor: T.glassBorder,
-            alignItems: "center",
-            justifyContent: "center",
-            overflow: "hidden",
-          }}
-        >
-          {cameraPermissionGranted ? (
-            // No camera on the iOS simulator — this renders but won't scan
-            // there; live barcode detection is device-only (see report).
-            <CameraView
-              testID="barcode-scanner"
-              style={{ width: "100%", height: "100%" }}
-              barcodeScannerSettings={{ barcodeTypes: ["ean13", "ean8", "upc_a", "upc_e"] }}
-              onBarcodeScanned={({ data }) => onBarcodeScanned(data)}
-            />
-          ) : (
-            <>
-              <Icon name="barcode" size={64} color={T.mut} />
-              <View
-                style={{
-                  position: "absolute",
-                  left: 0,
-                  right: 0,
-                  top: "50%",
-                  height: 1.5,
-                  backgroundColor: T.accent,
-                }}
-              />
-            </>
-          )}
-        </View>
-        <AppText style={{ marginTop: 12, color: T.mut, fontSize: 13, fontWeight: "600" }}>
-          Point at a barcode
-        </AppText>
+        {cameraPermissionDenied ? (
+          <PermissionDenied
+            message="I need camera access to scan barcodes. Turn it on in Settings, or tell me what you ate instead."
+            onDescribeInstead={onDescribeInstead}
+          />
+        ) : (
+          <>
+            <View
+              style={{
+                width: 200,
+                height: 110,
+                borderRadius: 12,
+                borderWidth: 2,
+                borderColor: T.glassBorder,
+                alignItems: "center",
+                justifyContent: "center",
+                overflow: "hidden",
+              }}
+            >
+              {cameraPermissionGranted ? (
+                // No camera on the iOS simulator — this renders but won't scan
+                // there; live barcode detection is device-only (see report).
+                <>
+                  <CameraView
+                    testID="barcode-scanner"
+                    style={{ width: "100%", height: "100%" }}
+                    barcodeScannerSettings={{ barcodeTypes: ["ean13", "ean8", "upc_a", "upc_e"] }}
+                    onBarcodeScanned={({ data }) => onBarcodeScanned(data)}
+                  />
+                  {/* The real scan line — over the live camera feed this screen
+                      can actually scan with. Distinct from (and not to be
+                      confused with) the fake one this replaced, which drew the
+                      same line while camera access was denied. */}
+                  <View
+                    testID="scan-line"
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      right: 0,
+                      top: "50%",
+                      height: 1.5,
+                      backgroundColor: T.accent,
+                    }}
+                  />
+                </>
+              ) : (
+                <Icon name="barcode" size={64} color={T.mut} />
+              )}
+            </View>
+            <AppText style={{ marginTop: 12, color: T.mut, fontSize: 13, fontWeight: "600" }}>
+              Point at a barcode
+            </AppText>
+          </>
+        )}
       </View>
     );
   }
 
-  return (
-    <View testID="capture-idle-type">
-      <UserBubble>Grilled chicken with broccoli and brown rice</UserBubble>
-    </View>
-  );
+  return <View testID="capture-idle-type" />;
 }
 
 interface CaptureBodyProps {
@@ -368,6 +425,10 @@ interface CaptureBodyProps {
   onFinishVoice: () => void;
   onCancelVoice: () => void;
   cameraPermissionGranted: boolean;
+  /** True only once the OS has actually refused camera access — distinct
+   *  from "not yet granted", which also covers the not-yet-requested and
+   *  still-requesting states. Drives the Scan idle affordance's denied UI. */
+  cameraPermissionDenied?: boolean;
   onBarcodeScanned: (data: string) => void;
   onClose: () => void;
   /** Forwarded to DetectedCard — asked when the user taps an uncertain row. */
@@ -402,6 +463,7 @@ export function CaptureBody({
   onFinishVoice,
   onCancelVoice,
   cameraPermissionGranted,
+  cameraPermissionDenied = false,
   onBarcodeScanned,
   onClose,
   onResolveUncertain,
@@ -444,18 +506,10 @@ export function CaptureBody({
           <Icon name="camera" size={17} color={T.accent} />
           <AppText style={{ color: T.ink, fontWeight: "700" }}>Ask Otto</AppText>
         </View>
-        {/* Reserved for a future gallery/history view — no-op in this task,
-            hidden from screen readers so they don't focus a dead button. */}
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Photo library"
-          accessibilityElementsHidden
-          importantForAccessibility="no-hide-descendants"
-          onPress={() => {}}
-          style={ROUND_BUTTON}
-        >
-          <Icon name="images" size={18} color={T.ink} />
-        </Pressable>
+        {/* Balances the Close button on the left so the title stays centered
+            now that the no-op photo-library button (it did nothing on press)
+            is gone. */}
+        <View style={{ width: ROUND_BUTTON.width, height: ROUND_BUTTON.height }} />
       </View>
 
       <ScrollView
@@ -474,7 +528,9 @@ export function CaptureBody({
             onCapturePhoto={onCapturePhoto}
             isRecordingVoice={isRecordingVoice}
             cameraPermissionGranted={cameraPermissionGranted}
+            cameraPermissionDenied={cameraPermissionDenied}
             onBarcodeScanned={onBarcodeScanned}
+            onDescribeInstead={() => onModeChange("type")}
           />
         )}
 
@@ -873,19 +929,17 @@ export default function CaptureScreen() {
     };
   }, [resolution, promoted]);
 
-  // Request camera access as soon as the user switches into Scan mode; a
-  // denial surfaces as an Otto bubble rather than a silently blank viewfinder.
+  // Request camera access as soon as the user switches into Scan mode. A
+  // denial surfaces through the idle affordance itself (cameraPermissionDenied
+  // -> the PermissionDenied card with its Open Settings / Describe it instead
+  // routes), not an Otto bubble — a bubble scrolls away, leaving no persistent
+  // way out, which is the dead end this replaced. An unexpected native failure
+  // is a different, transient problem and still gets its own bubble.
   useEffect(() => {
     if (mode !== "scan" || cameraPermission?.granted) return;
-    requestCameraPermission()
-      .then((result) => {
-        if (!result.granted) {
-          setErrorMsg("I need camera access to scan barcodes.");
-        }
-      })
-      .catch(() => {
-        setErrorMsg("Something went wrong turning on the camera — please try again.");
-      });
+    requestCameraPermission().catch(() => {
+      setErrorMsg("Something went wrong turning on the camera — please try again.");
+    });
     // Only re-check on a mode change into "scan" — requestCameraPermission's
     // own hook state (cameraPermission) updates independently and re-running
     // this on every state change would re-prompt in a loop.
@@ -1260,6 +1314,7 @@ export default function CaptureScreen() {
         onFinishVoice={handleFinishVoice}
         onCancelVoice={handleCancelVoice}
         cameraPermissionGranted={cameraPermission?.granted ?? false}
+        cameraPermissionDenied={cameraPermission?.granted === false}
         onBarcodeScanned={handleBarcodeScanned}
         onClose={() => router.back()}
         onResolveUncertain={setPickerIndex}
