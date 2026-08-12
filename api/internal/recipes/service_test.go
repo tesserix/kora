@@ -32,8 +32,8 @@ func TestPerServingMacrosDivideByServings(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { db.Exec("DELETE FROM recipes WHERE user_id = ?", userID) })
 
-	require.Equal(t, "Dal", v.Name) // trimmed
-	require.Equal(t, 400.0, v.TotalKcal)     // 100/100 * 400
+	require.Equal(t, "Dal", v.Name)           // trimmed
+	require.Equal(t, 400.0, v.TotalKcal)      // 100/100 * 400
 	require.Equal(t, 100.0, v.PerServingKcal) // 400 / 4
 	require.Equal(t, 10.0, v.PerServingProteinG)
 	require.Zero(t, v.UnresolvedCount)

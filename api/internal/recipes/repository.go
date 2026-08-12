@@ -91,13 +91,13 @@ func (r Repository) IngredientsForRecipes(ctx context.Context, recipeIDs []uuid.
 	}
 	err := r.db.WithContext(ctx).
 		Table("recipe_ingredients AS ri").
-		Select("ri.recipe_id, ri.food_item_id, ri.position, ri.raw_text, ri.grams, " +
-			"ri.entered_amount, ri.entered_unit, ri.portion_assumed, ri.match_score, ri.match_tier, " +
-			"COALESCE(fi.name, '') AS name, " +
-			"COALESCE(fi.kcal_per_100g, 0) AS kcal_per100g, " +
-			"COALESCE(fi.protein_per_100g, 0) AS protein_per100g, " +
-			"COALESCE(fi.carbs_per_100g, 0) AS carbs_per100g, " +
-			"COALESCE(fi.fat_per_100g, 0) AS fat_per100g, " +
+		Select("ri.recipe_id, ri.food_item_id, ri.position, ri.raw_text, ri.grams, "+
+			"ri.entered_amount, ri.entered_unit, ri.portion_assumed, ri.match_score, ri.match_tier, "+
+			"COALESCE(fi.name, '') AS name, "+
+			"COALESCE(fi.kcal_per_100g, 0) AS kcal_per100g, "+
+			"COALESCE(fi.protein_per_100g, 0) AS protein_per100g, "+
+			"COALESCE(fi.carbs_per_100g, 0) AS carbs_per100g, "+
+			"COALESCE(fi.fat_per_100g, 0) AS fat_per100g, "+
 			"COALESCE(fi.fiber_per_100g, 0) AS fiber_per100g").
 		Joins("LEFT JOIN food_items fi ON fi.id = ri.food_item_id").
 		Where("ri.recipe_id IN ?", recipeIDs).

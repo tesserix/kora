@@ -7,9 +7,11 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/tesserix/kora/api/internal/ai"
 	"github.com/tesserix/kora/api/internal/ai/providers"
 	"github.com/tesserix/kora/api/internal/nutrition"
 )
@@ -108,4 +110,52 @@ func TestParseText_Smoke(t *testing.T) {
 		}
 		t.Logf("  %-40q -> %-40s %6.1fg assumed=%v", in.RawText, resolved, in.Grams, in.PortionAssumed)
 	}
+}
+
+// TestParseText_ThroughRouter_Smoke is the test that would have caught the
+// 25-second production failure the first smoke test missed.
+//
+// TestParseText_Smoke above calls the Gemini provider DIRECTLY. Production
+// does not: main.go wraps it in an ai.Router with a per-call-type latency
+// budget and a fallback provider. Router.GenerateText originally borrowed
+// IdentifyText's 1.5s textBudget — fine for "what food is this?", far too
+// short for a multi-ingredient recipe extraction that measurably takes ~6s.
+// The primary was killed at 1.5s, the fallback was attempted, and the request
+// 502'd at 25s. Every unit test passed throughout, because they all stub the
+// provider and none of them exercise the Router's budgets.
+//
+// This test drives the SAME construction main.go builds, so the budget is
+// part of what is under test.
+func TestParseText_ThroughRouter_Smoke(t *testing.T) {
+	apiKey := os.Getenv("GEMINI_API_KEY")
+	if apiKey == "" {
+		t.Skip("GEMINI_API_KEY not set; skipping live router smoke test")
+	}
+
+	ctx := context.Background()
+	gemini, err := providers.NewGeminiProvider(ctx, apiKey)
+	require.NoError(t, err)
+
+	// Mirror main.go: Gemini primary behind the Router's real budgets. The
+	// fallback is deliberately the same provider here — this test is about
+	// the PRIMARY finishing inside its budget, not about fallback behaviour.
+	router := &ai.Router{Primary: gemini, Fallback: gemini}
+
+	db := testDB(t)
+	userID := seedUser(t, db)
+
+	start := time.Now()
+	p := NewParser(router, nutrition.NewRepository(db))
+	d, err := p.ParseText(ctx, userID, pastedRecipe)
+	elapsed := time.Since(start)
+
+	require.NoError(t, err, "parsing through the Router must succeed — a budget too short for generation is what broke this in production")
+	require.GreaterOrEqual(t, len(d.Ingredients), 5)
+	require.Equal(t, 4, d.Servings)
+
+	// The original failure took 25s. Anything near that means the primary is
+	// still being killed and the fallback is carrying the request.
+	require.Less(t, elapsed, 20*time.Second,
+		"parse took %s — the primary is likely still blowing its budget and falling back", elapsed)
+	t.Logf("router parse ok in %s: %q, %d servings, %d ingredients", elapsed, d.Name, d.Servings, len(d.Ingredients))
 }
