@@ -7,6 +7,14 @@ const DEBOUNCE_MS = 600;
 interface PlanDeltaProps {
   kcal: number | null;
   floored: boolean;
+  /**
+   * Incremented by the parent on every input change. It is the only
+   * evidence the user acted: when the resting-burn clamp binds, dragging
+   * further leaves kcal untouched, so a change in kcal cannot be the
+   * trigger. Without this the component would have to guess from render
+   * count, and would announce on re-renders the user did not cause.
+   */
+  revision: number;
   testID?: string;
 }
 
@@ -15,27 +23,15 @@ interface PlanDeltaProps {
  * Silent on mount (nothing has changed yet) and debounced, so dragging a ruler
  * produces one announcement rather than a stream of interruptions.
  */
-export function PlanDelta({ kcal, floored, testID = "plan-delta" }: PlanDeltaProps) {
+export function PlanDelta({ kcal, floored, revision, testID = "plan-delta" }: PlanDeltaProps) {
   const { instrument } = useTheme();
   const previous = useRef<number | null>(null);
-  // A [floored, kcal] dependency array would make React bail out of the
-  // effect whenever two consecutive renders carry the same primitive values —
-  // exactly the case where the clamp binds twice in a row (the ruler moves,
-  // the target stays put). The effect must run on every commit so that case
-  // is still observed; skipNext guards against the render our own setMessage
-  // call triggers reprocessing itself into a runaway timer loop.
-  const skipNext = useRef(false);
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    if (skipNext.current) {
-      skipNext.current = false;
-      previous.current = kcal;
-      return;
-    }
-
     const prior = previous.current;
     previous.current = kcal;
+    // First revision is mount: nothing has changed yet, so say nothing.
     if (prior === null || kcal === null) return;
 
     const delta = Math.round(kcal) - Math.round(prior);
@@ -47,12 +43,11 @@ export function PlanDelta({ kcal, floored, testID = "plan-delta" }: PlanDeltaPro
           : null;
     if (next === null) return;
 
-    const timer = setTimeout(() => {
-      skipNext.current = true;
-      setMessage(next);
-    }, DEBOUNCE_MS);
+    const timer = setTimeout(() => setMessage(next), DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- revision is the
+    // deliberate trigger; kcal and floored are read as of that revision.
+  }, [revision]);
 
   if (!message) return null;
 
