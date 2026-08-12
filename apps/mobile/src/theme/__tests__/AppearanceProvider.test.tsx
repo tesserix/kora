@@ -22,6 +22,28 @@ afterEach(() => {
   setColorScheme.mockRestore();
 });
 
+test("applies dark synchronously on mount, before the AsyncStorage read resolves", async () => {
+  // Stored preference is "light", but the initial render must already have
+  // forced dark — proving the sync default runs ahead of hydration rather
+  // than racing it.
+  await AsyncStorage.setItem(STORAGE_KEY, "light");
+  let resolveGetItem: (value: string | null) => void = () => {};
+  (AsyncStorage.getItem as jest.Mock).mockReturnValueOnce(
+    new Promise((resolve) => {
+      resolveGetItem = resolve;
+    }),
+  );
+
+  await renderHook(() => useAppearance(), { wrapper });
+
+  expect(setColorScheme).toHaveBeenCalledWith("dark");
+
+  await act(async () => {
+    resolveGetItem("light");
+  });
+  await waitFor(() => expect(setColorScheme).toHaveBeenLastCalledWith("light"));
+});
+
 test("defaults to dark when nothing is stored", async () => {
   const { result } = await renderHook(() => useAppearance(), { wrapper });
 

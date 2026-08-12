@@ -34,7 +34,15 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
   // stored choice we open in dark. A stored "system" still means what it
   // says — someone who explicitly picked System in Settings gets the
   // device's scheme via applyPreference's "unspecified" sentinel below.
-  const [preference, setPreferenceState] = useState<AppearancePreference>("dark");
+  // Lazy initializer, not a bare render-body call: it runs exactly once,
+  // synchronously, before the AsyncStorage read below ever starts — so
+  // useColorScheme() consumers (useTheme(), navigation) see dark from the
+  // very first render instead of leaking the device's scheme until
+  // hydration resolves.
+  const [preference, setPreferenceState] = useState<AppearancePreference>(() => {
+    applyPreference("dark");
+    return "dark";
+  });
 
   useEffect(() => {
     let cancelled = false;
