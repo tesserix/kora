@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { Dimensions, View, type LayoutChangeEvent, type AccessibilityActionEvent } from "react-native";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { Gesture, GestureDetector, type PanGesture } from "react-native-gesture-handler";
 import { runOnJS } from "react-native-reanimated";
 import Svg, { Line, Text as SvgText } from "react-native-svg";
 import { useTheme } from "@/theme";
@@ -90,47 +90,64 @@ export function indexFromDrag(startIndex: number, translationX: number, stopCoun
   return clamp(Math.round(startIndex - translationX / DETENT_PX), 0, stopCount - 1);
 }
 
-function ContinuousRuler(props: ContinuousProps) {
-  const { instrument } = useTheme();
+/**
+ * The drag machinery both ruler modes share. Kept in one place because it
+ * carries the subtle part: the gesture must never close over the current
+ * value, and must compute an absolute position from a start captured once
+ * per gesture plus the CUMULATIVE translation. Getting that wrong makes the
+ * drag silently drop movement between renders, which is invisible to tests
+ * that only drive the accessibility path.
+ *
+ * `compute` must already return a fully snapped/clamped value (as
+ * `valueFromDrag`/`indexFromDrag` do) — this hook only decides WHETHER to
+ * report (equality short-circuit, haptics/reduce-motion gating) and HOW the
+ * gesture is wired, never how a raw drag distance turns into a value.
+ */
+function useDragReport<T>({
+  current,
+  testID,
+  compute,
+  onReport,
+}: {
+  current: T;
+  testID: string;
+  compute: (start: T, translationX: number) => T;
+  onReport: (next: T) => void;
+}): { pan: PanGesture; report: (next: T) => void } {
   const { reduceMotion } = useMotionPrefs();
-  const { value, min, max, step, onChange, formatLabel, accessibilityLabel } = props;
-  const testID = props.testID ?? "tick-ruler";
-  const [width, setWidth] = useState(FALLBACK_WIDTH);
 
-  const onLayout = useCallback((e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width), []);
-
-  // `value` is a JS-thread closure that only refreshes after React
+  // `current` is a JS-thread closure that only refreshes after React
   // re-renders — dozens of SVG nodes deep, slower than touch-move events
-  // land. valueRef always holds the latest so the gesture never reads a
+  // land. currentRef always holds the latest so the gesture never reads a
   // stale one; dragStart is captured once per gesture so every update
   // computes an absolute position from cumulative translation instead of
   // per-frame deltas that can silently drop movement between renders.
-  const valueRef = useRef(value);
-  valueRef.current = value;
-  const dragStart = useRef(value);
+  const currentRef = useRef(current);
+  currentRef.current = current;
+  const dragStart = useRef(current);
 
   const report = useCallback(
-    (snapped: number) => {
-      if (snapped === valueRef.current) return;
+    (next: T) => {
+      if (next === currentRef.current) return;
       // Reduce Motion users are also opting out of incidental vestibular/
       // haptic stimulation, so the per-tick buzz is skipped under that
       // preference — the value still reports on every step, only the
       // physical feedback is suppressed.
       if (!reduceMotion) haptics.selection();
-      onChange(snapped);
+      onReport(next);
     },
-    [onChange, reduceMotion],
+    [onReport, reduceMotion],
   );
 
   const beginDrag = useCallback(() => {
-    dragStart.current = valueRef.current;
+    dragStart.current = currentRef.current;
   }, []);
 
   const applyDrag = useCallback(
     (translationX: number) => {
-      report(valueFromDrag(dragStart.current, translationX, min, max, step));
+      report(compute(dragStart.current, translationX));
     },
-    [max, min, report, step],
+    [compute, report],
   );
 
   const pan = useMemo(
@@ -149,6 +166,29 @@ function ContinuousRuler(props: ContinuousProps) {
         }),
     [applyDrag, beginDrag, testID],
   );
+
+  return { pan, report };
+}
+
+function ContinuousRuler(props: ContinuousProps) {
+  const { instrument } = useTheme();
+  const { value, min, max, step, onChange, formatLabel, accessibilityLabel } = props;
+  const testID = props.testID ?? "tick-ruler";
+  const [width, setWidth] = useState(FALLBACK_WIDTH);
+
+  const onLayout = useCallback((e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width), []);
+
+  const compute = useCallback(
+    (start: number, translationX: number) => valueFromDrag(start, translationX, min, max, step),
+    [max, min, step],
+  );
+
+  const { pan, report } = useDragReport<number>({
+    current: value,
+    testID,
+    compute,
+    onReport: onChange,
+  });
 
   const onAccessibilityAction = useCallback(
     (e: AccessibilityActionEvent) => {
@@ -237,64 +277,34 @@ function ContinuousRuler(props: ContinuousProps) {
 
 function DetentedRuler(props: DetentedProps) {
   const { instrument } = useTheme();
-  const { reduceMotion } = useMotionPrefs();
   const { index, labels, onChange, accessibilityLabel } = props;
   const testID = props.testID ?? "tick-ruler";
   const [width, setWidth] = useState(FALLBACK_WIDTH);
 
   const onLayout = useCallback((e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width), []);
 
-  // Same hazard as continuous mode: `index` is a JS-thread closure that only
-  // refreshes after a React re-render, slower than touch-move events land.
-  // indexRef always holds the latest so the gesture never reads a stale
-  // one; dragStart is captured once per gesture so every update computes an
-  // absolute stop from cumulative translation, never a per-frame delta.
-  const indexRef = useRef(index);
-  indexRef.current = index;
-  const dragStart = useRef(index);
-
-  const report = useCallback(
-    (next: number) => {
-      // Detented mode reports stops, never positions: a fractional index
-      // would reach the plan formula as an invalid activity level.
-      const stop = clamp(Math.round(next), 0, labels.length - 1);
-      if (stop === indexRef.current) return;
-      if (!reduceMotion) haptics.selection();
-      onChange(stop);
-    },
-    [labels.length, onChange, reduceMotion],
+  const compute = useCallback(
+    (start: number, translationX: number) => indexFromDrag(start, translationX, labels.length),
+    [labels.length],
   );
 
-  const beginDrag = useCallback(() => {
-    dragStart.current = indexRef.current;
-  }, []);
-
-  const applyDrag = useCallback(
-    (translationX: number) => {
-      report(indexFromDrag(dragStart.current, translationX, labels.length));
-    },
-    [labels.length, report],
-  );
-
-  const pan = useMemo(
-    () =>
-      Gesture.Pan()
-        .withTestId(`${testID}-pan`)
-        .onBegin(() => {
-          runOnJS(beginDrag)();
-        })
-        .onUpdate((e) => {
-          runOnJS(applyDrag)(e.translationX);
-        }),
-    [applyDrag, beginDrag, testID],
-  );
+  const { pan, report } = useDragReport<number>({
+    current: index,
+    testID,
+    compute,
+    onReport: onChange,
+  });
 
   const onAccessibilityAction = useCallback(
     (e: AccessibilityActionEvent) => {
-      if (e.nativeEvent.actionName === "increment") report(index + 1);
-      if (e.nativeEvent.actionName === "decrement") report(index - 1);
+      // Detented mode reports stops, never positions: a fractional index
+      // would reach the plan formula as an invalid activity level, so
+      // increment/decrement clamp to a whole stop before reporting, exactly
+      // as `indexFromDrag` clamps a dragged position.
+      if (e.nativeEvent.actionName === "increment") report(clamp(index + 1, 0, labels.length - 1));
+      if (e.nativeEvent.actionName === "decrement") report(clamp(index - 1, 0, labels.length - 1));
     },
-    [index, report],
+    [index, labels.length, report],
   );
 
   const mid = width / 2;

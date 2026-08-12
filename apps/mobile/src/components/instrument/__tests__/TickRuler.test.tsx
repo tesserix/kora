@@ -218,14 +218,28 @@ describe("TickRuler detented mode", () => {
     });
   });
 
-  it("never reports a fractional index", async () => {
+  // A decrement from index=1 is already a whole number (0) before it ever
+  // reaches `report`, so driving it through the accessibility path alone
+  // would pass even against a `report` that dropped rounding entirely. The
+  // real hazard is a DRAG whose translation isn't a whole multiple of
+  // DETENT_PX (96): cumulative translationX=-60 from index=1 computes an
+  // intermediate stop of 1 - (-60/96) = 1.625 before `indexFromDrag` rounds
+  // it. (A leading -30 event is fired first only so the gesture-handler
+  // jest-utils' onBegin/onUpdate machinery actually delivers the -60
+  // onUpdate — see the equivalent continuous-mode wiring test above.) This
+  // exercises the real rounding rather than merely restating an
+  // already-whole accessibility step.
+  it("never reports a fractional index, even from a drag that lands between stops", async () => {
     const onChange = jest.fn();
     await render(<TickRuler {...detented} index={1} onChange={onChange} />);
-    fireEvent(screen.getByTestId("activity-ruler"), "accessibilityAction", {
-      nativeEvent: { actionName: "decrement" },
-    });
+    fireGestureHandler(getByGestureTestId("activity-ruler-pan"), [
+      { translationX: -30 },
+      { translationX: -60 },
+    ]);
+    expect(onChange).toHaveBeenCalledTimes(1);
     const reported = onChange.mock.calls[0][0];
     expect(Number.isInteger(reported)).toBe(true);
+    expect(reported).toBe(2);
   });
 
   // Pins the WIRING (same hazard, same fix, as continuous mode's equivalent
