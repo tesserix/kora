@@ -60,7 +60,25 @@ test("the summary reflects the weakest row, not the first", () => {
 
   const summary = resultSummary(resolution);
 
-  expect(summary).toMatch(/guess/i);
+  expect(summary).toMatch(/one portion is a guess/i);
+});
+
+test("the summary reflects the actual assumed-portion count, not just presence", () => {
+  const base = makeResolution();
+  const resolution: Resolution = {
+    ...base,
+    candidates: [
+      { ...base.candidates[0], portion_assumed: true },
+      { ...base.candidates[1], portion_assumed: true },
+      { ...base.candidates[0], item: { ...base.candidates[0].item, id: "3" }, portion_assumed: true },
+      { ...base.candidates[1], item: { ...base.candidates[1].item, id: "4" }, portion_assumed: false },
+    ],
+  };
+
+  const summary = resultSummary(resolution);
+
+  expect(summary).toMatch(/3 portions are guesses/i);
+  expect(summary).not.toMatch(/one portion is a guess/i);
 });
 
 test("a summary with no assumed portions says nothing about guessing", () => {
