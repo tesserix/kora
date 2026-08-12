@@ -243,3 +243,47 @@ No file introduced by this work exceeds 400 lines.
 - **No EAS builds** are triggered from this work until explicitly requested.
 - Any dependency change requires `npx npm@10.9.3 install --package-lock-only`.
 - Capture is exempt from theming — always dark, `INSTRUMENT_DARK_FIXED`.
+
+## Verification — capture integrity plan (plan 1 of 3)
+
+Recorded 2026-08-12 on branch `fix/capture-integrity`.
+
+### Automated — passed
+
+| Check | Result |
+| --- | --- |
+| `npm test` (apps/mobile) | 153 suites / 1212 tests, 0 failures |
+| `npx tsc --noEmit` | clean |
+| `go test -count=1 ./...` (api) | all packages pass, uncached |
+| `go vet ./...` | clean |
+
+### Simulator — observed (iPhone 17 Pro)
+
+| Check | Result |
+| --- | --- |
+| Dark is the default appearance | **PASS** — simulator set to *light*, app renders dark |
+| No-op photo-library button removed from the capture header | **PASS** — header is close button, title, spacer |
+| Undetermined camera permission does NOT show the denied card | **PASS** — the regression case for the Critical fixed in Task 6; the screen shows the normal idle affordance, not "Open Settings" |
+
+### Simulator — NOT observed
+
+macOS accessibility permission is not granted to this shell, so there is no tap
+driver: the screen can be reached by deep link but its controls cannot be
+operated. Everything below is covered by unit tests but was **not** seen on
+screen:
+
+- mode switching, and therefore the Voice / Scan / Type idle states — including
+  that the decorative mic, the fake barcode placeholder and the hardcoded
+  example bubble are gone from those states
+- barcode re-arm across two consecutive scans (also needs real barcode input)
+- multi-item confirm from the review screen
+- the assumed-portion hedge on a real resolution
+- Cancel during analyzing
+
+`simctl privacy` has no `deny` action — only `grant`, `revoke` (→ undetermined)
+and `reset` — so the **denied** permission card itself was not observed either.
+It is pinned by unit tests in `capture-permissions.test.tsx`.
+
+**These remain open for a device pass.** The riskiest is the permission card: the
+Task 6 review found the denied-state gate misfiring on first launch, and only a
+real first-run on hardware exercises that sequence end to end.
