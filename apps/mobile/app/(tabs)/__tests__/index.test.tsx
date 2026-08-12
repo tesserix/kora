@@ -1,19 +1,27 @@
-import { render, fireEvent } from "@testing-library/react-native";
+import { act, render, fireEvent } from "@testing-library/react-native";
 import * as RN from "react-native";
 
 jest.mock("@/lib/firebase", () => ({ auth: null, isFirebaseConfigured: true }));
 jest.mock("firebase/auth", () => ({ onAuthStateChanged: () => () => {}, signOut: jest.fn() }));
 
 const mockPush = jest.fn();
-jest.mock("expo-router", () => ({ router: { push: (...a: unknown[]) => mockPush(...a), replace: jest.fn() } }));
+// useHealth (rendered for real here) subscribes with useFocusEffect; the real one needs
+// a navigation container this render has no reason to mount, so it is a no-op stub.
+jest.mock("expo-router", () => ({
+  router: { push: (...a: unknown[]) => mockPush(...a), replace: jest.fn() },
+  useFocusEffect: () => {},
+}));
 
 const mockUseDashboard = jest.fn();
 const mockUseDayLogs = jest.fn();
+// Home's pull-to-refresh calls refetch() on both queries; the per-test mock returns
+// below only carry `data`/`isError`, so the default is spread in underneath.
+const mockRefetch = jest.fn(async () => ({}));
 
 jest.mock("@/api/hooks", () => ({
   useProfile: () => ({ data: { display_name: "Alex Stone", onboarded_at: "2026-07-01" } }),
-  useDashboard: (...args: unknown[]) => mockUseDashboard(...args),
-  useDayLogs: (...args: unknown[]) => mockUseDayLogs(...args),
+  useDashboard: (...args: unknown[]) => ({ refetch: mockRefetch, ...mockUseDashboard(...args) }),
+  useDayLogs: (...args: unknown[]) => ({ refetch: mockRefetch, ...mockUseDayLogs(...args) }),
   useUnreadCount: () => ({ data: { count: 0 } }),
   useMemory: () => ({ data: { recents: [], frequent: [], usual_meals: [] }, isLoading: false, isError: false }),
   usePins: () => ({ data: [] }),
@@ -72,6 +80,25 @@ test("shows a placeholder, not a fabricated zero, while the dashboard fetch is p
   expect(getAllByText("—").length).toBeGreaterThan(0);
   // No fabricated "0" reserve/macro figures anywhere while pending.
   expect(queryByText("0")).toBeNull();
+});
+
+// The error copy has always told the user to "Pull to refresh"; until now the screen
+// had no RefreshControl at all, and useHealth had no manual re-read path.
+test("pull-to-refresh refetches the day and re-reads Health", async () => {
+  mockUseDashboard.mockReturnValue({ data: undefined, isError: false });
+  mockUseDayLogs.mockReturnValue({ data: [], isError: false });
+
+  // RefreshControl is passed as a ScrollView prop, not rendered as its own node, so
+  // it is reached through the ScrollView's props rather than queried.
+  const { findByTestId } = await render(<Home />);
+  const scroll = await findByTestId("home-scroll");
+  mockRefetch.mockClear();
+  await act(async () => {
+    scroll.props.refreshControl.props.onRefresh();
+  });
+
+  // Once for the dashboard, once for the day's logs.
+  expect(mockRefetch).toHaveBeenCalledTimes(2);
 });
 
 test("tapping Add a meal routes to /capture", async () => {

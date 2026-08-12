@@ -1,5 +1,5 @@
-import { useEffect, useRef } from "react";
-import { ScrollView, StyleSheet, View } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
@@ -66,6 +66,26 @@ export default function Home() {
     firstMount.current = false;
   }, []);
   const enter = (i: number) => (firstMount.current ? FadeInDown.duration(300).delay(i * 30) : undefined);
+
+  // Pull to refresh. The error copy below has promised this since the screen was
+  // written, and useHealth otherwise only re-reads on foreground/focus — this is
+  // the deliberate path for "I just walked, show me now" without leaving the app.
+  // Failures are swallowed on purpose: each source already surfaces its own error
+  // state (dashboard.isError, or steps falling back to "—"), and a rejected
+  // refetch must still end the spinner rather than leave it turning forever.
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([
+        dashboard.refetch().catch(() => {}),
+        logs.refetch().catch(() => {}),
+        health.refresh().catch(() => {}),
+      ]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [dashboard, logs, health]);
 
   const mono = monoStyle(fonts);
   const engraved = {
@@ -143,7 +163,19 @@ export default function Home() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppBackground />
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + spacing.sm, paddingBottom: 130 }}>
+      <ScrollView
+        testID="home-scroll"
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingTop: insets.top + spacing.sm, paddingBottom: 130 }}
+        refreshControl={
+          <RefreshControl
+            testID="home-refresh"
+            refreshing={refreshing}
+            onRefresh={() => void onRefresh()}
+            tintColor={instrument.mut}
+          />
+        }
+      >
       {/* header: date sentence-case · greeting, avatar, bell */}
       <Animated.View
         entering={enter(0)}

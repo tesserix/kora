@@ -283,6 +283,14 @@ jest.mock("@kingstinct/react-native-healthkit", () => ({
   isHealthDataAvailableAsync: jest.fn(async () => false),
   requestAuthorization: jest.fn(async () => false),
   queryQuantitySamples: jest.fn(async () => []),
+  // Today's step total is read through the cumulative-sum statistics query, not raw
+  // samples, so HealthKit's source-priority dedup applies (an iPhone + Apple Watch
+  // user would otherwise double-count). Signature from the installed package's
+  // lib/typescript/healthkit.d.ts:
+  //   queryStatisticsForQuantity(identifier, statistics: StatisticsOptions[], options?)
+  //     => Promise<QueryStatisticsResponse>   // { sumQuantity?: { unit, quantity }, sources }
+  // Default response carries NO sumQuantity — the "nothing readable" shape.
+  queryStatisticsForQuantity: jest.fn(async () => ({ sources: [] })),
   queryCategorySamples: jest.fn(async () => []),
   // Read by useActivityHistory for onboarding's activity inference. Signature
   // taken from the installed package's lib/typescript/healthkit.d.ts:

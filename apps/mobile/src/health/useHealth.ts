@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
-import { Linking, Platform } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AppState, Linking, Platform } from "react-native";
+import { useFocusEffect } from "expo-router";
 import type { HealthData, HealthStatus } from "./types";
 
 // `@kingstinct/react-native-healthkit` is a Nitro native module that throws at
@@ -36,14 +37,18 @@ const MS_PER_HOUR = 60 * 60 * 1000;
 // evidence. See the spec's "empty-day trap".
 const READABLE_PROBE_DAYS = 7;
 
+// Today's total is read as a CUMULATIVE SUM statistic, never by summing raw samples.
+// queryQuantitySamples returns every source's samples — iPhone, Apple Watch, and any
+// third-party app — with no deduplication, so a Watch user's total came out inflated
+// and disagreed both with the Health app and with Kora's own widget. Only a statistics
+// query applies HealthKit's source-priority dedup. targets/kora-widgets/StepsWidget.swift
+// already does exactly this (HKStatisticsQuery with .cumulativeSum); this mirrors it.
+const CUMULATIVE_SUM: readonly ["cumulativeSum"] = ["cumulativeSum"];
+
 function startOfLocalDay(): Date {
   const start = new Date();
   start.setHours(0, 0, 0, 0);
   return start;
-}
-
-function sumSteps(samples: readonly { readonly quantity: number }[]): number {
-  return samples.reduce((total, sample) => total + sample.quantity, 0);
 }
 
 function sumAsleepMillis(
@@ -67,6 +72,10 @@ function sumAsleepMillis(
  * read directly from Apple HealthKit on-device. No backend call, no persistence — this
  * hook only ever reflects live HealthKit state for the current session.
  *
+ * It re-reads on return to the foreground, on screen focus, and on demand via
+ * `refresh()`. That is not an optimisation: Expo Router keeps Home mounted for the
+ * whole session, so a mount-only read is frozen for as long as the app stays open.
+ *
  * Degrades honestly through three `status` states, but `status` alone cannot be trusted
  * to gate the UI: HealthKit's `requestAuthorization` resolves successfully once the
  * READ prompt was merely *presented*, never disclosing whether the user actually granted
@@ -85,7 +94,16 @@ export function useHealth(): HealthData {
   const [steps, setSteps] = useState<HealthData["steps"]>(null);
   const [sleep, setSleep] = useState<HealthData["sleep"]>(null);
 
+  // Guards against two loads overlapping. Foreground and focus land within
+  // milliseconds of each other on a real tab switch, and two in-flight reads could
+  // interleave their setState calls and leave the OLDER answer on screen. A ref,
+  // not state: this must be readable and writable synchronously inside load(),
+  // before React has any chance to re-render.
+  const inFlight = useRef(false);
+
   const load = useCallback(async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     try {
       // TODO(health-connect): Android provider. This hook only supports iOS/HealthKit
       // today. When Android support lands, branch on Platform.OS === "android" here and
@@ -123,10 +141,12 @@ export function useHealth(): HealthData {
       const now = new Date();
       const sleepWindowStart = new Date(dayStart.getTime() - SLEEP_WINDOW_LOOKBACK_HOURS * MS_PER_HOUR);
 
-      const [stepSamples, sleepSamples] = await Promise.all([
-        hk.queryQuantitySamples(STEP_COUNT_IDENTIFIER, {
-          filter: { date: { startDate: dayStart, endDate: now } },
-          limit: 0,
+      const [stepStats, sleepSamples] = await Promise.all([
+        hk.queryStatisticsForQuantity(STEP_COUNT_IDENTIFIER, CUMULATIVE_SUM, {
+          // strictStartDate keeps a sample that spans midnight from being counted in
+          // full toward today — HealthKit's default predicate includes any sample
+          // merely overlapping the window.
+          filter: { date: { startDate: dayStart, endDate: now, strictStartDate: true } },
           unit: "count",
         }),
         hk.queryCategorySamples(SLEEP_ANALYSIS_IDENTIFIER, {
@@ -135,16 +155,19 @@ export function useHealth(): HealthData {
         }),
       ]);
 
-      // An empty sample array for today alone is ambiguous: no movement yet, or
-      // no read access — HealthKit will not say which, and "no steps today" is
-      // simply what every morning looks like before the user walks. Probe a
-      // wider window before concluding access is broken.
-      const stepTotal = sumSteps(stepSamples);
-      if (stepSamples.length > 0) {
+      // An ABSENT sumQuantity for today alone is ambiguous: no movement yet, or no
+      // read access — HealthKit will not say which, and "no steps today" is simply
+      // what every morning looks like before the user walks. Probe a wider window
+      // before concluding access is broken. A sum that is PRESENT and zero is a
+      // different fact (HealthKit measured and found nothing) and is a real 0.
+      const stepTotal = stepStats?.sumQuantity?.quantity;
+      if (typeof stepTotal === "number" && Number.isFinite(stepTotal)) {
         setSteps({ today: Math.round(stepTotal), goal: STEP_GOAL });
       } else {
         // Today is empty. Probe a wider window to tell "hasn't walked yet"
         // from "cannot read" — HealthKit will not tell us which directly.
+        // Raw samples are the right tool here and multi-source inflation does not
+        // matter: this asks only "does ANY step sample exist", never how many.
         const probeStart = new Date(dayStart.getTime() - READABLE_PROBE_DAYS * 24 * MS_PER_HOUR);
         const weekSamples = await hk.queryQuantitySamples(STEP_COUNT_IDENTIFIER, {
           filter: { date: { startDate: probeStart, endDate: now } },
@@ -163,12 +186,36 @@ export function useHealth(): HealthData {
       setStatus("unavailable");
       setSteps(null);
       setSleep(null);
+    } finally {
+      inFlight.current = false;
     }
   }, []);
 
+  // Cold start. Every early `return` above still releases the guard via `finally`,
+  // so a load that bails on a non-iOS platform does not wedge later triggers.
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Return to foreground. Without this the reported bug: Expo Router keeps Home
+  // mounted for the whole session, so a mount-only read froze whatever HealthKit
+  // said at launch — a user who opened Kora at ~1,000 steps and then walked all
+  // day kept reading "1,000". Mirrors the AppState pattern in app/_layout.tsx and
+  // src/offline/drainTriggers.ts: one subscription, removed on unmount.
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") void load();
+    });
+    return () => sub.remove();
+  }, [load]);
+
+  // Return to the screen. Foreground alone misses the far more common case:
+  // walking with the app open, then switching back to the Home tab.
+  useFocusEffect(
+    useCallback(() => {
+      void load();
+    }, [load]),
+  );
 
   // Always route to Health. The old `status === "denied"` guard was unreachable
   // (see the spec), which left a denied user with no way to grant access.
@@ -177,5 +224,5 @@ export function useHealth(): HealthData {
     void load();
   }, [load]);
 
-  return { status, steps, sleep, connect };
+  return { status, steps, sleep, connect, refresh: load };
 }
