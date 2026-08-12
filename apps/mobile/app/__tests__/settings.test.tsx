@@ -1,4 +1,7 @@
-import { render, fireEvent } from "@testing-library/react-native";
+import type { ReactNode } from "react";
+import { render, fireEvent, waitFor } from "@testing-library/react-native";
+import { Appearance } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const mockBack = jest.fn();
 const mockPush = jest.fn();
@@ -45,6 +48,7 @@ jest.mock("@/reminders/useCustomReminders", () => ({
 }));
 
 import Settings from "../settings";
+import { AppearanceProvider } from "@/theme";
 
 beforeEach(() => {
   mockBack.mockClear();
@@ -63,6 +67,39 @@ test("tapping Imperial calls setSystem with imperial", async () => {
   const { getByText } = await render(<Settings />);
   fireEvent.press(getByText("Imperial"));
   expect(mockSetSystem).toHaveBeenCalledWith("imperial");
+});
+
+describe("Appearance section", () => {
+  const withProvider = (children: ReactNode) => <AppearanceProvider>{children}</AppearanceProvider>;
+  let setColorScheme: jest.SpyInstance;
+
+  beforeEach(async () => {
+    await AsyncStorage.clear();
+    setColorScheme = jest.spyOn(Appearance, "setColorScheme").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    setColorScheme.mockRestore();
+  });
+
+  test("renders the Appearance label and all three options", async () => {
+    const { getByText } = await render(withProvider(<Settings />));
+    expect(getByText("Appearance")).toBeTruthy();
+    expect(getByText("System")).toBeTruthy();
+    expect(getByText("Light")).toBeTruthy();
+    expect(getByText("Dark")).toBeTruthy();
+  });
+
+  test("tapping Dark persists the preference and overrides the color scheme", async () => {
+    const { getByText } = await render(withProvider(<Settings />));
+
+    fireEvent.press(getByText("Dark"));
+
+    expect(setColorScheme).toHaveBeenLastCalledWith("dark");
+    await waitFor(async () =>
+      expect(await AsyncStorage.getItem("kora.appearance")).toBe("dark"),
+    );
+  });
 });
 
 test("lists custom reminders with label + day summary and an Add row", async () => {

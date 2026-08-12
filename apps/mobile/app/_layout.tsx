@@ -9,6 +9,7 @@ import { setupPushHandler } from "@/lib/push";
 import { installConnectivity } from "@/offline/connectivity";
 import { installDrainTriggers } from "@/offline/drainTriggers";
 import { UnitsProvider } from "@/units";
+import { AppearanceProvider } from "@/theme";
 import { ToastProvider } from "@/components/Toast";
 import { SavedMealSheetProvider } from "@/components/meals/SavedMealSheetProvider";
 import { reconcileWeightReminder } from "@/reminders/reconcileWeightReminder";
@@ -44,17 +45,19 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <QueryClientProvider client={queryClient}>
-        <UnitsProvider>
-          <ToastProvider>
-            <SavedMealSheetProvider>
-              <Stack screenOptions={{ headerShown: false }}>
-                <Stack.Screen name="(tabs)" />
-                <Stack.Screen name="meal" options={{ presentation: "transparentModal", animation: "fade" }} />
-                <Stack.Screen name="capture" options={{ presentation: "fullScreenModal", animation: "slide_from_bottom" }} />
-              </Stack>
-            </SavedMealSheetProvider>
-          </ToastProvider>
-        </UnitsProvider>
+        <AppearanceProvider>
+          <UnitsProvider>
+            <ToastProvider>
+              <SavedMealSheetProvider>
+                <Stack screenOptions={{ headerShown: false }}>
+                  <Stack.Screen name="(tabs)" />
+                  <Stack.Screen name="meal" options={{ presentation: "transparentModal", animation: "fade" }} />
+                  <Stack.Screen name="capture" options={{ presentation: "fullScreenModal", animation: "slide_from_bottom" }} />
+                </Stack>
+              </SavedMealSheetProvider>
+            </ToastProvider>
+          </UnitsProvider>
+        </AppearanceProvider>
       </QueryClientProvider>
     </GestureHandlerRootView>
   );

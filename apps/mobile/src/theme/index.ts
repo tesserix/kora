@@ -4,6 +4,8 @@ import {
   instrumentDark, instrumentLight, type InstrumentTokens, INSTRUMENT_DARK_FIXED,
 } from "./palette";
 
+export { AppearanceProvider, useAppearance, type AppearancePreference } from "./AppearanceProvider";
+
 export type ThemeColors = Record<keyof typeof lightColors, string>;
 export type { InstrumentTokens };
 export { INSTRUMENT_DARK_FIXED };

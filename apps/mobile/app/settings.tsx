@@ -16,11 +16,17 @@ import { CustomReminderSheet } from "@/components/reminders/CustomReminderSheet"
 import { useCustomReminders } from "@/reminders/useCustomReminders";
 import { MAX_CUSTOM_REMINDERS, type CustomReminder, type Weekday } from "@/reminders/customPrefs";
 import { useUnits, type UnitSystem } from "@/units";
-import { useTheme } from "@/theme";
+import { useTheme, useAppearance, type AppearancePreference } from "@/theme";
 
 const UNIT_OPTIONS = [
   { key: "metric", label: "Metric" },
   { key: "imperial", label: "Imperial" },
+];
+
+const APPEARANCE_OPTIONS = [
+  { key: "system", label: "System" },
+  { key: "light", label: "Light" },
+  { key: "dark", label: "Dark" },
 ];
 
 const SHORT: Record<Weekday, string> = { 0: "Sun", 1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat" };
@@ -43,6 +49,7 @@ export default function SettingsScreen() {
   const { instrument, spacing } = useTheme();
   const insets = useSafeAreaInsets();
   const { system, setSystem } = useUnits();
+  const { preference, setPreference } = useAppearance();
   const { reminders, addReminder, updateReminder, removeReminder, toggleReminder } = useCustomReminders();
   const [editing, setEditing] = useState<CustomReminder | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -79,6 +86,22 @@ export default function SettingsScreen() {
             </GlassPanel>
             <AppText style={{ fontSize: 13, color: instrument.mut, marginLeft: spacing.md, marginTop: spacing.xs }}>
               Weight and height display.
+            </AppText>
+          </View>
+
+          <View>
+            <AppText style={[engravedStyle(instrument), { marginLeft: spacing.md, marginBottom: spacing.xs }]}>
+              Appearance
+            </AppText>
+            <GlassPanel radius={22} style={{ padding: spacing.md }}>
+              <SegmentedGlass
+                options={APPEARANCE_OPTIONS}
+                value={preference}
+                onChange={(key) => setPreference(key as AppearancePreference)}
+              />
+            </GlassPanel>
+            <AppText style={{ fontSize: 13, color: instrument.mut, marginLeft: spacing.md, marginTop: spacing.xs }}>
+              System follows your device setting.
             </AppText>
           </View>
 
