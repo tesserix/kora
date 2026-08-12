@@ -97,10 +97,12 @@ func TestLogRecipeRejectsAnotherUsersRecipe(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = svc.LogRecipe(ctx, uuid.New(), uuid.MustParse(created.ID), LogRecipeRequest{
+	otherUser := uuid.New()
+	_, err = svc.LogRecipe(ctx, otherUser, uuid.MustParse(created.ID), LogRecipeRequest{
 		Servings: 1, MealSlot: "dinner",
 	})
 	require.Error(t, err)
+	require.Equal(t, 0, countFoodLogs(t, svc, otherUser))
 }
 
 // TestLogRecipeAllUnresolvedIsAValidationError: nothing loggable must be a
@@ -119,6 +121,7 @@ func TestLogRecipeAllUnresolvedIsAValidationError(t *testing.T) {
 		Servings: 1, MealSlot: "dinner",
 	})
 	require.Error(t, err)
+	require.Equal(t, 0, countFoodLogs(t, svc, userID))
 }
 
 // lastLoggedGrams reads back the single log the test just created.
@@ -130,4 +133,15 @@ func lastLoggedGrams(t *testing.T, svc *Service, userID uuid.UUID) float64 {
 		"SELECT quantity_grams FROM food_logs WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
 		userID).Scan(&grams).Error)
 	return grams
+}
+
+// countFoodLogs proves a failed LogRecipe call wrote zero rows — a future bug
+// that writes partial rows AND returns an error must not pass silently.
+func countFoodLogs(t *testing.T, svc *Service, userID uuid.UUID) int {
+	t.Helper()
+	db := testDB(t)
+	var n int64
+	require.NoError(t, db.Raw(
+		"SELECT COUNT(*) FROM food_logs WHERE user_id = ?", userID).Scan(&n).Error)
+	return int(n)
 }

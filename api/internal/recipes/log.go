@@ -14,8 +14,6 @@ import (
 // distinguishable from hand-entered ones.
 const logSource = "recipe"
 
-var validMealSlots = map[string]bool{"breakfast": true, "lunch": true, "dinner": true, "snack": true}
-
 // maxLogServings bounds one log call. A recipe is a household-scale dish; a
 // request for hundreds of servings is a client bug, not a meal.
 const maxLogServings = 20.0
@@ -66,7 +64,7 @@ func (s *Service) LogRecipe(ctx context.Context, userID, recipeID uuid.UUID, req
 	if req.Servings > maxLogServings {
 		return LogRecipeResult{}, httpx.ValidationError{Message: "that is too many servings to log at once"}
 	}
-	if !validMealSlots[req.MealSlot] {
+	if !foodlog.ValidMealSlot(req.MealSlot) {
 		return LogRecipeResult{}, httpx.ValidationError{Message: "invalid meal_slot"}
 	}
 

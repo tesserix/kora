@@ -74,6 +74,11 @@ type LogRequest struct {
 
 var validMealSlots = map[string]bool{"breakfast": true, "lunch": true, "dinner": true, "snack": true}
 
+// ValidMealSlot reports whether slot is a meal slot the diary accepts. It is
+// exported so other packages that gate on a meal slot before calling into
+// this one (recipes) cannot drift from the diary's own list.
+func ValidMealSlot(slot string) bool { return validMealSlots[slot] }
+
 // resolveSources are the log sources that carry a user phrase worth keeping.
 // A manual, memory, barcode or photo log has no phrase that resolved wrong,
 // so there is nothing a correction could teach the index with.
