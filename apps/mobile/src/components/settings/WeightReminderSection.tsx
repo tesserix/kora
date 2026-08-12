@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import { Platform, View, Switch, Pressable } from "react-native";
-import * as Notifications from "expo-notifications";
 import DateTimePicker, { type DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { AppText } from "@/components/Text";
 import { Overline } from "@/components/Overline";
 import { GroupedSection } from "@/components/GroupedList";
 import { Sheet } from "@/components/Sheet";
 import { Button } from "@/components/Button";
+import { useToast } from "@/components/Toast";
 import { WeekdayPicker } from "@/components/reminders/WeekdayPicker";
 import { DEFAULT_WEIGHT_PREF, loadWeightPref, saveWeightPref, type WeightReminderPref } from "@/reminders/weightPrefs";
 import { reconcileWeightReminder } from "@/reminders/reconcileWeightReminder";
+import { ensureNotificationAccess, notifyNotificationAccessDenied } from "@/reminders/notificationAccess";
 import { useTheme } from "@/theme";
 
 function fmt(hour: number, minute: number): string {
@@ -36,6 +37,7 @@ export function WeightReminderSection(): ReactElement {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<Date | null>(null);
   const [daysError, setDaysError] = useState<string | null>(null);
+  const toast = useToast();
 
   useEffect(() => {
     loadWeightPref().then((p) => {
@@ -58,15 +60,13 @@ export function WeightReminderSection(): ReactElement {
     void (async () => {
       const turningOn = patch.enabled === true && !prefRef.current.enabled;
       if (turningOn) {
-        const perm = await Notifications.getPermissionsAsync();
-        if (!perm.granted) {
-          const req = await Notifications.requestPermissionsAsync();
-          if (!req.granted) {
-            // denied → do not enable; force a fresh object reference so the
-            // controlled Switch re-renders back to its current (unchanged) state
-            setPref({ ...prefRef.current });
-            return;
-          }
+        const access = await ensureNotificationAccess();
+        if (!access.granted) {
+          // denied → do not enable; force a fresh object reference so the
+          // controlled Switch re-renders back to its current (unchanged) state
+          setPref({ ...prefRef.current });
+          notifyNotificationAccessDenied(toast, access.blocked);
+          return;
         }
       }
       const next = { ...prefRef.current, ...patch };

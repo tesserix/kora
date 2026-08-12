@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import * as Notifications from "expo-notifications";
 import type { MealSlot } from "@/lib/mealSlot";
+import { useToast } from "@/components/Toast";
 import { DEFAULT_PREFS, loadPrefs, savePrefs, type ReminderPref, type ReminderPrefs } from "./prefs";
 import { applyAllReminders } from "./schedule";
 import { loadCustom } from "./customPrefs";
 import { loadWeightPref } from "./weightPrefs";
 import { fetchLatestWeighInDate } from "./lastWeighIn";
+import { ensureNotificationAccess, notifyNotificationAccessDenied } from "./notificationAccess";
 
 // useReminderPrefs loads persisted reminder prefs and, on every change, persists
 // them and re-syncs the OS schedule. Enabling a reminder first ensures OS
@@ -21,6 +22,7 @@ export function useReminderPrefs() {
   const [prefs, setPrefs] = useState<ReminderPrefs>(DEFAULT_PREFS);
   const [ready, setReady] = useState(false);
   const prefsRef = useRef<ReminderPrefs>(DEFAULT_PREFS);
+  const toast = useToast();
 
   useEffect(() => {
     loadPrefs().then((p) => {
@@ -33,15 +35,13 @@ export function useReminderPrefs() {
   const setSlot = (slot: MealSlot, pref: ReminderPref) => {
     void (async () => {
       if (pref.enabled) {
-        const perm = await Notifications.getPermissionsAsync();
-        if (!perm.granted) {
-          const req = await Notifications.requestPermissionsAsync();
-          if (!req.granted) {
-            // denied → do not enable; force a fresh object reference so the
-            // controlled Switch re-renders back to its current (unchanged) state
-            setPrefs({ ...prefsRef.current });
-            return;
-          }
+        const access = await ensureNotificationAccess();
+        if (!access.granted) {
+          // denied → do not enable; force a fresh object reference so the
+          // controlled Switch re-renders back to its current (unchanged) state
+          setPrefs({ ...prefsRef.current });
+          notifyNotificationAccessDenied(toast, access.blocked);
+          return;
         }
       }
       const next = { ...prefsRef.current, [slot]: pref };

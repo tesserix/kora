@@ -1,19 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import * as Notifications from "expo-notifications";
+import { useToast } from "@/components/Toast";
 import { loadPrefs } from "./prefs";
 import { applyAllReminders } from "./schedule";
 import { loadCustom, saveCustom, newId, MAX_CUSTOM_REMINDERS, type CustomReminder } from "./customPrefs";
 import { loadWeightPref } from "./weightPrefs";
 import { fetchLatestWeighInDate } from "./lastWeighIn";
-
-// ensurePermission returns whether OS notification permission is (or becomes)
-// granted, prompting once if undetermined.
-async function ensurePermission(): Promise<boolean> {
-  const perm = await Notifications.getPermissionsAsync();
-  if (perm.granted) return true;
-  const req = await Notifications.requestPermissionsAsync();
-  return req.granted;
-}
+import { ensureNotificationAccess, notifyNotificationAccessDenied } from "./notificationAccess";
 
 // useCustomReminders loads persisted custom reminders and, on every mutation,
 // persists them and re-syncs the whole OS schedule (meals + customs together via
@@ -23,6 +15,7 @@ export function useCustomReminders() {
   const [reminders, setReminders] = useState<CustomReminder[]>([]);
   const [ready, setReady] = useState(false);
   const ref = useRef<CustomReminder[]>([]);
+  const toast = useToast();
 
   useEffect(() => {
     loadCustom().then((list) => {
@@ -47,12 +40,24 @@ export function useCustomReminders() {
 
   const addReminder = async (draft: Omit<CustomReminder, "id">): Promise<void> => {
     if (ref.current.length >= MAX_CUSTOM_REMINDERS) return;
-    if (draft.enabled && !(await ensurePermission())) return;
+    if (draft.enabled) {
+      const access = await ensureNotificationAccess();
+      if (!access.granted) {
+        notifyNotificationAccessDenied(toast, access.blocked);
+        return;
+      }
+    }
     await commit([...ref.current, { ...draft, id: newId() }]);
   };
 
   const updateReminder = async (r: CustomReminder): Promise<void> => {
-    if (r.enabled && !(await ensurePermission())) return;
+    if (r.enabled) {
+      const access = await ensureNotificationAccess();
+      if (!access.granted) {
+        notifyNotificationAccessDenied(toast, access.blocked);
+        return;
+      }
+    }
     await commit(ref.current.map((x) => (x.id === r.id ? r : x)));
   };
 
@@ -61,10 +66,14 @@ export function useCustomReminders() {
   };
 
   const toggleReminder = async (id: string, enabled: boolean): Promise<void> => {
-    if (enabled && !(await ensurePermission())) {
-      // denied → force a fresh reference so the controlled Switch reverts
-      setReminders([...ref.current]);
-      return;
+    if (enabled) {
+      const access = await ensureNotificationAccess();
+      if (!access.granted) {
+        // denied → force a fresh reference so the controlled Switch reverts
+        setReminders([...ref.current]);
+        notifyNotificationAccessDenied(toast, access.blocked);
+        return;
+      }
     }
     await commit(ref.current.map((x) => (x.id === id ? { ...x, enabled } : x)));
   };

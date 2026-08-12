@@ -18,6 +18,12 @@ jest.mock("../prefs", () => ({ loadPrefs: jest.fn(async () => ({})) }));
 jest.mock("../schedule", () => ({ applyAllReminders: jest.fn(async () => {}) }));
 jest.mock("../lastWeighIn", () => ({ fetchLatestWeighInDate: jest.fn() }));
 
+type ToastOptions = { message: string; actionLabel?: string; onAction?: () => void };
+const mockToastShow = jest.fn<void, [ToastOptions]>();
+jest.mock("@/components/Toast", () => ({
+  useToast: () => ({ show: mockToastShow }),
+}));
+
 const mockLoad = loadCustom as jest.Mock;
 const mockSave = saveCustom as jest.Mock;
 const mockApply = applyAllReminders as jest.Mock;
@@ -75,6 +81,51 @@ test("enabling with permission denied does not persist", async () => {
   await act(async () => { await result.current.toggleReminder("a", true); });
   expect(mockSave).not.toHaveBeenCalled();
   expect(mockApply).not.toHaveBeenCalled();
+});
+
+test("toggleReminder blocked (canAskAgain false): reverts and toasts with Open Settings", async () => {
+  (Notifications.getPermissionsAsync as jest.Mock).mockResolvedValue({ granted: false, canAskAgain: false });
+  (Notifications.requestPermissionsAsync as jest.Mock).mockResolvedValue({ granted: false, canAskAgain: false });
+  mockLoad.mockResolvedValue([{ id: "a", label: "x", hour: 9, minute: 0, days: [1], enabled: false }]);
+  const { result } = await renderHook(() => useCustomReminders());
+  await waitFor(() => expect(result.current.reminders).toHaveLength(1));
+
+  await act(async () => { await result.current.toggleReminder("a", true); });
+
+  expect(result.current.reminders[0].enabled).toBe(false);
+  expect(mockToastShow).toHaveBeenCalledWith(
+    expect.objectContaining({
+      message: "Notifications are off for Kora. Turn them on in Settings to get reminders.",
+      actionLabel: "Open Settings",
+      onAction: expect.any(Function),
+    }),
+  );
+});
+
+test("toggleReminder denied after fresh prompt: plain toast, no action", async () => {
+  (Notifications.getPermissionsAsync as jest.Mock).mockResolvedValue({ granted: false, canAskAgain: true });
+  (Notifications.requestPermissionsAsync as jest.Mock).mockResolvedValue({ granted: false, canAskAgain: true });
+  mockLoad.mockResolvedValue([{ id: "a", label: "x", hour: 9, minute: 0, days: [1], enabled: false }]);
+  const { result } = await renderHook(() => useCustomReminders());
+  await waitFor(() => expect(result.current.reminders).toHaveLength(1));
+
+  await act(async () => { await result.current.toggleReminder("a", true); });
+
+  expect(mockToastShow).toHaveBeenCalledWith({ message: "Reminders need notification permission." });
+});
+
+test("addReminder blocked: does not persist and toasts with Open Settings", async () => {
+  (Notifications.getPermissionsAsync as jest.Mock).mockResolvedValue({ granted: false, canAskAgain: false });
+  (Notifications.requestPermissionsAsync as jest.Mock).mockResolvedValue({ granted: false, canAskAgain: false });
+  const { result } = await renderHook(() => useCustomReminders());
+  await waitFor(() => expect(result.current.ready).toBe(true));
+
+  await act(async () => { await result.current.addReminder(draft); });
+
+  expect(mockSave).not.toHaveBeenCalled();
+  expect(mockToastShow).toHaveBeenCalledWith(
+    expect.objectContaining({ actionLabel: "Open Settings" }),
+  );
 });
 
 test("removeReminder drops it and re-syncs", async () => {

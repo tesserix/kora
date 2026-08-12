@@ -18,6 +18,12 @@ jest.mock("@/reminders/reconcileWeightReminder", () => ({
   reconcileWeightReminder: jest.fn(),
 }));
 
+type ToastOptions = { message: string; actionLabel?: string; onAction?: () => void };
+const mockToastShow = jest.fn<void, [ToastOptions]>();
+jest.mock("@/components/Toast", () => ({
+  useToast: () => ({ show: mockToastShow }),
+}));
+
 // WeekdayPicker is wrapped (not replaced) so its real chips still render for the
 // day-selection tests, while every render of the section is counted. That count
 // is what makes the permission-denial revert observable: the revert's whole
@@ -87,6 +93,36 @@ test("denied permission reverts the toggle by forcing a fresh render", async () 
   expect(reconcileWeightReminder).not.toHaveBeenCalled();
   expect(mockWeekdayRender.mock.calls.length).toBeGreaterThan(rendersBeforeToggle);
   expect(getByLabelText("Weight check-in reminder").props.value).toBe(false);
+});
+
+test("blocked denial (canAskAgain false) toasts with an Open Settings action", async () => {
+  (Notifications.requestPermissionsAsync as jest.Mock).mockResolvedValue({ granted: false, canAskAgain: false });
+  const { getByLabelText } = await render(<WeightReminderSection />);
+
+  await act(async () => {
+    fireEvent(getByLabelText("Weight check-in reminder"), "valueChange", true);
+    await waitFor(() => expect(Notifications.requestPermissionsAsync).toHaveBeenCalled());
+  });
+
+  expect(mockToastShow).toHaveBeenCalledWith(
+    expect.objectContaining({
+      message: "Notifications are off for Kora. Turn them on in Settings to get reminders.",
+      actionLabel: "Open Settings",
+      onAction: expect.any(Function),
+    }),
+  );
+});
+
+test("denial after a fresh prompt (canAskAgain true) toasts plainly, no action", async () => {
+  (Notifications.requestPermissionsAsync as jest.Mock).mockResolvedValue({ granted: false, canAskAgain: true });
+  const { getByLabelText } = await render(<WeightReminderSection />);
+
+  await act(async () => {
+    fireEvent(getByLabelText("Weight check-in reminder"), "valueChange", true);
+    await waitFor(() => expect(Notifications.requestPermissionsAsync).toHaveBeenCalled());
+  });
+
+  expect(mockToastShow).toHaveBeenCalledWith({ message: "Reminders need notification permission." });
 });
 
 // The section is editing the SCHEDULE, not recording a weigh-in. Passing an

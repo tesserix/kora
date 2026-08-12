@@ -21,6 +21,12 @@ jest.mock("../schedule", () => ({ applyAllReminders: jest.fn(async () => {}) }))
 jest.mock("../customPrefs", () => ({ loadCustom: jest.fn(async () => []) }));
 jest.mock("../lastWeighIn", () => ({ fetchLatestWeighInDate: jest.fn() }));
 
+type ToastOptions = { message: string; actionLabel?: string; onAction?: () => void };
+const mockToastShow = jest.fn<void, [ToastOptions]>();
+jest.mock("@/components/Toast", () => ({
+  useToast: () => ({ show: mockToastShow }),
+}));
+
 const mockGetPermissions = Notifications.getPermissionsAsync as jest.Mock;
 const mockRequestPermissions = Notifications.requestPermissionsAsync as jest.Mock;
 const mockLoadPrefs = loadPrefs as jest.Mock;
@@ -51,6 +57,41 @@ test("denial path: rejecting the permission prompt leaves the slot disabled and 
   expect(result.current.prefs.snack.enabled).toBe(false);
   expect(mockSavePrefs).not.toHaveBeenCalled();
   expect(mockApplyAllReminders).not.toHaveBeenCalled();
+});
+
+test("blocked (canAskAgain false): toggle reverts and toast surfaces the Open Settings action", async () => {
+  mockGetPermissions.mockResolvedValue({ granted: false, canAskAgain: false });
+  mockRequestPermissions.mockResolvedValue({ granted: false, canAskAgain: false });
+
+  const { result } = await renderHook(() => useReminderPrefs());
+  await waitFor(() => expect(result.current.ready).toBe(true));
+
+  await act(async () => {
+    result.current.setSlot("snack", { enabled: true, hour: 15, minute: 0 });
+  });
+
+  expect(result.current.prefs.snack.enabled).toBe(false);
+  expect(mockToastShow).toHaveBeenCalledWith(
+    expect.objectContaining({
+      message: "Notifications are off for Kora. Turn them on in Settings to get reminders.",
+      actionLabel: "Open Settings",
+      onAction: expect.any(Function),
+    }),
+  );
+});
+
+test("denied after a fresh prompt: plain toast, no action", async () => {
+  mockGetPermissions.mockResolvedValue({ granted: false, canAskAgain: true });
+  mockRequestPermissions.mockResolvedValue({ granted: false, canAskAgain: true });
+
+  const { result } = await renderHook(() => useReminderPrefs());
+  await waitFor(() => expect(result.current.ready).toBe(true));
+
+  await act(async () => {
+    result.current.setSlot("snack", { enabled: true, hour: 15, minute: 0 });
+  });
+
+  expect(mockToastShow).toHaveBeenCalledWith({ message: "Reminders need notification permission." });
 });
 
 test("latest-value: two concurrent disables both land in the final persisted prefs (no clobbering)", async () => {
