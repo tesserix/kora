@@ -9,6 +9,7 @@ import { useTheme } from "@/theme";
 type Props = {
   children: ReactNode;
   footer: ReactNode;
+  header?: ReactNode;
   onBack?: () => void;
   progress?: { step: number; total: number };
 };
@@ -23,7 +24,7 @@ type Props = {
 // has no progress affordance, whereas this design keeps the title in the body.
 // The back control still matches ScreenHeader's conventions ("Go back",
 // selection haptic, arrow-left) so the two feel identical in use.
-export function AuthScaffold({ children, footer, onBack, progress }: Props) {
+export function AuthScaffold({ children, footer, header, onBack, progress }: Props) {
   const { colors, spacing } = useTheme();
   const insets = useSafeAreaInsets();
   const hasHeader = Boolean(onBack || progress);
@@ -81,7 +82,10 @@ export function AuthScaffold({ children, footer, onBack, progress }: Props) {
         </View>
       ) : null}
 
+      {header ? <View>{header}</View> : null}
+
       <ScrollView
+        testID="auth-scaffold-scroll"
         style={{ flex: 1 }}
         keyboardShouldPersistTaps="handled"
         automaticallyAdjustKeyboardInsets

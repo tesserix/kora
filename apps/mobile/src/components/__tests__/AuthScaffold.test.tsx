@@ -1,5 +1,5 @@
 import { Text } from "react-native";
-import { fireEvent, render } from "@testing-library/react-native";
+import { fireEvent, render, within } from "@testing-library/react-native";
 import { AuthScaffold } from "../AuthScaffold";
 
 test("renders both body and footer content", async () => {
@@ -103,4 +103,35 @@ test("the current progress dot is visually distinct from the rest", async () => 
   const [first, second] = getAllByTestId("progress-dot").map((d) => d.props.style);
   expect(first.width).not.toBe(second.width);
   expect(first.backgroundColor).not.toBe(second.backgroundColor);
+});
+
+describe("AuthScaffold header", () => {
+  it("renders a header above the scroll when given one", async () => {
+    const { getByTestId } = await render(
+      <AuthScaffold header={<Text testID="pinned">Target</Text>} footer={<Text>Go</Text>}>
+        <Text>Body</Text>
+      </AuthScaffold>,
+    );
+    expect(getByTestId("pinned")).toBeTruthy();
+  });
+
+  it("keeps the header outside the scroll view", async () => {
+    const { getByTestId, queryByTestId } = await render(
+      <AuthScaffold header={<Text testID="pinned">Target</Text>} footer={<Text>Go</Text>}>
+        <Text testID="body">Body</Text>
+      </AuthScaffold>,
+    );
+    const scroll = getByTestId("auth-scaffold-scroll");
+    expect(within(scroll).queryByTestId("pinned")).toBeNull();
+    expect(within(scroll).getByTestId("body")).toBeTruthy();
+  });
+
+  it("still renders without a header", async () => {
+    const { getByTestId } = await render(
+      <AuthScaffold footer={<Text>Go</Text>}>
+        <Text testID="body">Body</Text>
+      </AuthScaffold>,
+    );
+    expect(getByTestId("body")).toBeTruthy();
+  });
 });
