@@ -237,6 +237,76 @@ func TestRouterGenerateText_PrimaryErrors_FallsBack(t *testing.T) {
 	assert.Equal(t, 1, fallback.calls)
 }
 
+// TestRouter_GenerateText_UsesGenerateBudget_NotTextBudget proves GenerateText
+// is bounded by generateBudget (overridden here via GenerateBudget), not
+// textBudget. The primary stub sleeps for 60ms — well past a 20ms TextBudget
+// (which is deliberately also set here to prove it is NOT what's applied) but
+// comfortably inside a 500ms GenerateBudget — so the primary must succeed
+// rather than being cut off and falling back. Before generateBudget existed,
+// GenerateText shared IdentifyText's tight 1.5s production budget, which was
+// too short for real recipe-extraction generation (~6s measured) and caused
+// every parse to fall through to the fallback, 502ing at 25s.
+func TestRouter_GenerateText_UsesGenerateBudget_NotTextBudget(t *testing.T) {
+	primary := &stubProvider{
+		name:      "primary-stub",
+		delay:     60 * time.Millisecond,
+		text:      "generated text",
+		textUsage: Usage{Provider: "primary-stub"},
+	}
+	fallback := &stubProvider{name: "fallback-stub"}
+	r := &Router{
+		Primary:        primary,
+		Fallback:       fallback,
+		TextBudget:     20 * time.Millisecond,
+		GenerateBudget: 500 * time.Millisecond,
+	}
+
+	got, usage, err := r.GenerateText(context.Background(), "sys", "user")
+
+	require.NoError(t, err)
+	assert.Equal(t, "generated text", got)
+	assert.Equal(t, "primary-stub", usage.Provider)
+	assert.Equal(t, 0, fallback.calls, "GenerateText must get the generous generateBudget, not the tight textBudget that killed recipe parsing")
+}
+
+// TestRouter_IdentifyText_StillUsesTextBudget proves IdentifyText's fast 1.5s
+// failover is untouched by the addition of generateBudget: the primary stub
+// sleeps 60ms, which exceeds a 20ms TextBudget, so IdentifyText must still
+// fall back — GenerateBudget being generous must not leak into IdentifyText.
+func TestRouter_IdentifyText_StillUsesTextBudget(t *testing.T) {
+	primary := &stubProvider{name: "primary-stub", delay: 60 * time.Millisecond, guesses: []Guess{{Food: "should-not-be-used"}}}
+	fallback := &stubProvider{
+		name:       "fallback-stub",
+		guesses:    []Guess{{Food: "fallback-guess"}},
+		guessUsage: Usage{Provider: "fallback-stub"},
+	}
+	r := &Router{
+		Primary:        primary,
+		Fallback:       fallback,
+		TextBudget:     20 * time.Millisecond,
+		GenerateBudget: 500 * time.Millisecond,
+	}
+
+	guesses, usage, err := r.IdentifyText(context.Background(), "slow")
+
+	require.NoError(t, err)
+	assert.Equal(t, []Guess{{Food: "fallback-guess"}}, guesses)
+	assert.Equal(t, "fallback-stub", usage.Provider)
+	assert.Equal(t, 1, fallback.calls, "IdentifyText must still be bounded by the tight textBudget, not generateBudget")
+}
+
+// TestRouter_GenerateBudget_IsGenerousEnoughForRecipeParsing guards the
+// production constant itself. Recipe extraction measured ~6s against Gemini
+// directly; generateBudget must clear that with real headroom, unlike the old
+// 1.5s textBudget that killed every recipe parse and forced a 25s fallback
+// failure (502 parse_failed).
+func TestRouter_GenerateBudget_IsGenerousEnoughForRecipeParsing(t *testing.T) {
+	assert.Greater(t, generateBudget, 10*time.Second,
+		"generateBudget must clear the ~6s measured recipe-extraction latency with real headroom")
+	assert.Equal(t, textBudget, 1500*time.Millisecond,
+		"textBudget must not regress; IdentifyText's fast failover depends on it")
+}
+
 func TestRouter_Name(t *testing.T) {
 	r := &Router{
 		Primary:  &stubProvider{name: "primary-stub"},

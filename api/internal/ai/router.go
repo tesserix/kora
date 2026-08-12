@@ -18,6 +18,20 @@ const (
 	photoBudget = 20 * time.Second
 	textBudget  = 1500 * time.Millisecond
 
+	// generateBudget bounds free-form/structured generation calls (recipe
+	// parsing, coach Q&A) — GenerateText, not IdentifyText. textBudget's
+	// 1.5s was sized for IdentifyText's short "what food is this?" call and
+	// is far too tight for generation: recipe extraction measured directly
+	// against Gemini (no Router) took ~6s and succeeded, but under the
+	// Router's 1.5s textBudget the primary was killed, the call fell through
+	// to the NVIDIA fallback, and the whole request 502'd at 25s
+	// (POST /v1/recipes/parse -> 502, latency_ms 25004). 25s gives real
+	// headroom over the ~6s measured latency while still bounded well under
+	// the gateway's 100s per-try allowance. textBudget itself must NOT
+	// change: IdentifyText's fast 1.5s failover is depended on by the
+	// food-resolve hot path.
+	generateBudget = 25 * time.Second
+
 	// fallbackBudget is deliberately generous: the fallback provider only runs
 	// after the primary has already failed or timed out, so latency there is a
 	// last-resort cost we accept rather than fail the resolve. It also absorbs
@@ -54,6 +68,13 @@ type Router struct {
 	PhotoBudget time.Duration
 	TextBudget  time.Duration
 
+	// GenerateBudget overrides the default generateBudget when non-zero, in
+	// the same style as PhotoBudget/TextBudget. Production code should leave
+	// this unset; tests use it to keep GenerateText's latency-fallback path
+	// fast and deterministic instead of waiting out the real 25s production
+	// budget.
+	GenerateBudget time.Duration
+
 	// FallbackBudget overrides the default fallbackBudget when non-zero. Tests
 	// use it to keep the fallback-latency path fast; production leaves it unset.
 	FallbackBudget time.Duration
@@ -71,6 +92,13 @@ func (r *Router) textBudgetOrDefault() time.Duration {
 		return r.TextBudget
 	}
 	return textBudget
+}
+
+func (r *Router) generateBudgetOrDefault() time.Duration {
+	if r.GenerateBudget > 0 {
+		return r.GenerateBudget
+	}
+	return generateBudget
 }
 
 func (r *Router) fallbackBudgetOrDefault() time.Duration {
@@ -163,7 +191,7 @@ func (r *Router) Embed(ctx context.Context, text string) ([]float32, Usage, erro
 }
 
 func (r *Router) GenerateText(ctx context.Context, systemPrompt, userPrompt string) (string, Usage, error) {
-	return withFallback(ctx, r.textBudgetOrDefault(), r.fallbackBudgetOrDefault(),
+	return withFallback(ctx, r.generateBudgetOrDefault(), r.fallbackBudgetOrDefault(),
 		func(c context.Context) (string, Usage, error) {
 			return r.Primary.GenerateText(c, systemPrompt, userPrompt)
 		},
