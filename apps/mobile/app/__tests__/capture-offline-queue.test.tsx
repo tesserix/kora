@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as ImagePicker from "expo-image-picker";
 import { useAudioRecorder } from "expo-audio";
 import { router } from "expo-router";
-import { ApiError, NetworkError } from "@/lib/api";
+import { ApiError, NetworkError, TimeoutError } from "@/lib/api";
 import { CaptureQueueFullError } from "@/offline/captureQueue";
 import { NoOwnerError } from "@/offline/owner";
 import { mealSlotForHour } from "@/lib/mealSlot";
@@ -43,6 +43,12 @@ jest.mock("@/lib/api", () => ({
     constructor(cause?: unknown) {
       super("Failed to parse response body", { cause });
       this.name = "ResponseParseError";
+    }
+  },
+  TimeoutError: class TimeoutError extends Error {
+    constructor() {
+      super("The request timed out");
+      this.name = "TimeoutError";
     }
   },
 }));
@@ -205,6 +211,32 @@ describe("Photo capture goes offline", () => {
 
     expect(await rendered.findByText(/couldn.{0,3}t reach the server/i)).toBeTruthy();
   });
+
+  // The regression this task fixes: api.ts's own REQUEST_TIMEOUT_MS now fires
+  // before Istio's 30s cut would, so a slow/flaky-cellular resolve throws
+  // TimeoutError instead of the NetworkError this describe block otherwise
+  // exercises. Before this task's fix, TimeoutError matched neither branch in
+  // handleResolveFailure's guard and the capture was silently dropped instead
+  // of queued — exactly the scenario the offline queue exists for.
+  test("queues a timed-out photo the same as a network failure, not dropped", async () => {
+    mockEnqueueCapture().mockResolvedValue({ id: "cap-1" });
+    (ImagePicker.launchCameraAsync as jest.Mock).mockResolvedValueOnce({
+      canceled: false,
+      assets: [{ uri: "file://x.jpg", fileName: "x.jpg", mimeType: "image/jpeg" }],
+    });
+    const rendered = await render(<CaptureScreen />);
+    await fireEvent.press(await rendered.findByLabelText("Photo viewfinder"));
+    await waitFor(() => expect(mockResolvePhotoMutate).toHaveBeenCalled());
+    const [, options] = mockResolvePhotoMutate.mock.calls[0];
+    await act(async () => options.onError(new TimeoutError()));
+
+    expect(mockEnqueueCapture()).toHaveBeenCalledWith(
+      { uri: "file://x.jpg", name: "x.jpg", type: "image/jpeg" },
+      "photo",
+      expectedMealSlot(),
+    );
+    expect(await rendered.findByText(/you.{0,3}re offline/i)).toBeTruthy();
+  });
 });
 
 describe("Voice capture goes offline", () => {
@@ -245,5 +277,29 @@ describe("A non-network resolve failure never enqueues", () => {
 
     expect(await rendered.findByText(/no confident match/i)).toBeTruthy();
     expect(mockEnqueueCapture()).not.toHaveBeenCalled();
+  });
+});
+
+// ottoErrorMessage's own copy for TimeoutError, exercised through the typed
+// (text) resolve path — the one call site of ottoErrorMessage that never
+// queues (handleSend doesn't route through handleResolveFailure/
+// enqueueCapture at all), so this pins that its message stays honest about
+// the timeout itself rather than reusing generic or queuing-flavoured copy.
+describe("ottoErrorMessage's TimeoutError copy", () => {
+  test("is distinct from the generic fallback and the network-error copy", async () => {
+    const rendered = await render(<CaptureScreen />);
+    const input = await rendered.findByLabelText("Tell Otto what you ate");
+    await fireEvent.changeText(input, "brekkie eggs");
+    await fireEvent.press(await rendered.findByLabelText("Send"));
+
+    await waitFor(() => expect(mockResolveTextMutate).toHaveBeenCalled());
+    const [, options] = mockResolveTextMutate.mock.calls[0];
+    await act(async () => options.onError(new TimeoutError()));
+
+    expect(await rendered.findByText(/took too long/i)).toBeTruthy();
+    expect(rendered.queryByText(/something went wrong while i looked/i)).toBeNull();
+    expect(rendered.queryByText(/couldn.{0,3}t reach the server/i)).toBeNull();
+    // Never claims the capture was saved — this path never enqueues.
+    expect(rendered.queryByText(/i.{0,3}ve saved that/i)).toBeNull();
   });
 });

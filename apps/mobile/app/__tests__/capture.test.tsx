@@ -60,6 +60,12 @@ jest.mock("@/lib/api", () => ({
       this.name = "ResponseParseError";
     }
   },
+  TimeoutError: class TimeoutError extends Error {
+    constructor() {
+      super("The request timed out");
+      this.name = "TimeoutError";
+    }
+  },
 }));
 
 const mockResolveTextMutate = jest.fn();

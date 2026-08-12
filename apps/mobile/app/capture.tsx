@@ -40,7 +40,7 @@ import {
   useResolveText,
   useResolveVoice,
 } from "@/api/hooks";
-import { ApiError, AuthTokenError, NetworkError, ResponseParseError } from "@/lib/api";
+import { ApiError, AuthTokenError, NetworkError, ResponseParseError, TimeoutError } from "@/lib/api";
 import { OfflineUnknownBarcodeError } from "@/offline/cachedResolution";
 import { CaptureQueueFullError } from "@/offline/captureQueue";
 import { enqueueCapture, type CaptureFile } from "@/offline/enqueueCapture";
@@ -854,6 +854,14 @@ function ottoErrorMessage(error: Error): string {
   if (error instanceof ResponseParseError) {
     return "The server answered, but I couldn't make sense of it. Mind trying again?";
   }
+  if (error instanceof TimeoutError) {
+    // Deliberately does not promise "I've saved that" — this function is also
+    // reached from the barcode and typed-text paths (handleBarcodeScanned,
+    // handleSend), neither of which calls enqueueCapture. Only
+    // handleResolveFailure's own branch (below) actually queues on timeout;
+    // this copy stays honest about the timeout itself for every other caller.
+    return "That took too long — mind trying again?";
+  }
   return "Something went wrong while I looked at that. Please try again.";
 }
 
@@ -1097,12 +1105,25 @@ export default function CaptureScreen() {
   // it. Treating a genuinely broken session as "offline" is the safe direction
   // of error: the capture is preserved rather than discarded, and api.ts still
   // owns real session expiry via signOutForExpiredSession.
+  //
+  // TimeoutError joins the same group for the same reason. Before this
+  // client-side deadline existed, a resolve that outlived Istio's 30s cut
+  // rejected as a fetch failure — a NetworkError, already queued below. Now
+  // api.ts's own REQUEST_TIMEOUT_MS (25s) fires first and throws
+  // TimeoutError instead, which matched neither branch here and silently
+  // dropped the capture. That's precisely the slow/flaky-cellular scenario
+  // this queue exists for, so a timeout gets the same "preserve it" treatment
+  // as a network failure.
   async function handleResolveFailure(
     error: Error,
     file: CaptureFile,
     kind: "photo" | "voice",
   ) {
-    if (!(error instanceof NetworkError) && !(error instanceof AuthTokenError)) {
+    if (
+      !(error instanceof NetworkError) &&
+      !(error instanceof AuthTokenError) &&
+      !(error instanceof TimeoutError)
+    ) {
       setErrorMsg(ottoErrorMessage(error));
       return;
     }
