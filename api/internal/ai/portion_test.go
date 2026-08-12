@@ -133,6 +133,39 @@ func TestPortionGramsForUsesTheFoodsOwnServing(t *testing.T) {
 			want:        defaultPortionGrams,
 			wantAssumed: true,
 		},
+		{
+			// namedUnitGrams rung, isolated from any OFF/ServingGrams
+			// influence: a model reporting PortionEstimate "1 cup" (e.g. for
+			// "1 cup rice") named a real-world unit — that's the user/model
+			// supplying information, so it must NOT be marked assumed. This
+			// must fail if "1 cup" is ever moved into sizeAdjectiveGrams.
+			name:        "a named unit like '1 cup' is not assumed",
+			phrase:      "1 cup",
+			item:        nutrition.FoodItem{Provenance: nutrition.ProvenanceAFCD},
+			want:        240,
+			wantAssumed: false,
+		},
+		{
+			// sizeAdjectiveGrams rung: a model reporting PortionEstimate
+			// "medium" (e.g. for "medium apple") named no unit and no number
+			// at all — we are supplying the 120g estimate on its behalf, not
+			// relaying something it said. This must fail if "medium" is ever
+			// moved into namedUnitGrams.
+			name:        "a bare size adjective like 'medium' IS assumed",
+			phrase:      "medium",
+			item:        nutrition.FoodItem{Provenance: nutrition.ProvenanceAFCD},
+			want:        120,
+			wantAssumed: true,
+		},
+		{
+			// A second size adjective, to prove the whole sizeAdjectiveGrams
+			// table is treated this way, not just "medium" specifically.
+			name:        "another bare size adjective like 'large' IS assumed",
+			phrase:      "large",
+			item:        nutrition.FoodItem{Provenance: nutrition.ProvenanceAFCD},
+			want:        170,
+			wantAssumed: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -13,18 +13,32 @@ import (
 // match any known pattern.
 const defaultPortionGrams = 100.0
 
-// namedPortionGrams maps common qualitative/countable portion phrases to a
-// pragmatic gram estimate. Keys are matched against the lowercased,
-// trimmed input.
-var namedPortionGrams = map[string]float64{
+// namedUnitGrams maps a real-world unit the caller actually named ("1 cup",
+// "1 egg", "1 slice") to a pragmatic gram estimate. Keys are matched against
+// the lowercased, trimmed input. The unit's MASS is still an estimate, but
+// the unit itself is information the user/model supplied — naming "1 egg"
+// is the same kind of signal as the task's own "two eggs" example — so a hit
+// here is never an assumed portion.
+var namedUnitGrams = map[string]float64{
 	"1 cup":    240,
 	"1 cups":   240,
 	"1 breast": 170,
 	"1 slice":  30,
 	"1 egg":    50,
-	"medium":   120,
-	"small":    90,
-	"large":    170,
+}
+
+// sizeAdjectiveGrams maps a bare size adjective ("medium", "small", "large")
+// to a pragmatic gram estimate. Unlike namedUnitGrams, a size adjective names
+// no real-world unit and carries no numeric signal from the caller at all —
+// it is a generic lookup WE trigger on their behalf once we know what food it
+// is, not something they told us. A model emitting PortionEstimate: "medium"
+// must not render as confidently as a user who typed "120g", so a hit here IS
+// an assumed portion. Keep this distinction: collapsing the two tables back
+// together is exactly the mistake this comment exists to prevent.
+var sizeAdjectiveGrams = map[string]float64{
+	"medium": 120,
+	"small":  90,
+	"large":  170,
 }
 
 // gramsPattern matches a leading number (integer or decimal) followed by
@@ -43,7 +57,10 @@ func parsePortionGrams(s string) float64 {
 		return defaultPortionGrams
 	}
 
-	if grams, ok := namedPortionGrams[norm]; ok {
+	if grams, ok := namedUnitGrams[norm]; ok {
+		return grams
+	}
+	if grams, ok := sizeAdjectiveGrams[norm]; ok {
 		return grams
 	}
 
@@ -133,9 +150,14 @@ func servingGramsFromPhrase(norm string, item nutrition.FoodItem) (float64, bool
 //  2. One of the FOOD'S OWN named servings ("2 portions"), resolved against
 //     that row's mass rather than a generic one. NOT assumed — both the
 //     phrase and the food's own data agree.
-//  3. The curated phrase table ("1 cup" → 240 g), for foods that name no such
-//     serving of their own. NOT assumed — the phrase itself named a portion;
-//     the table just maps it to a pragmatic estimate.
+//  3. The curated phrase table, for foods that name no such serving of their
+//     own. Split in two by what kind of signal the phrase carries:
+//     3a. A named unit ("1 cup" → 240 g). NOT assumed — the phrase named a
+//         real-world unit; the table just maps it to a pragmatic estimate.
+//     3b. A bare size adjective ("medium" → 120 g). ASSUMED — the phrase
+//         carries no unit and no number at all; the table is a generic
+//         estimate we are supplying on the caller's behalf, not information
+//         they gave us.
 //  4. A branded food's own serving mass. OpenFoodFacts' serving_quantity is a
 //     real package serving — what a person actually consumes — so it is a far
 //     better default than 100 g when nothing else matched. NOT assumed — a
@@ -159,8 +181,11 @@ func portionGramsFor(phrase string, item nutrition.FoodItem) (grams float64, ass
 	if grams, ok := servingGramsFromPhrase(norm, item); ok {
 		return grams, false
 	}
-	if grams, ok := namedPortionGrams[norm]; ok {
+	if grams, ok := namedUnitGrams[norm]; ok {
 		return grams, false
+	}
+	if grams, ok := sizeAdjectiveGrams[norm]; ok {
+		return grams, true
 	}
 	if item.Provenance == nutrition.ProvenanceOFF && item.ServingGrams > 0 {
 		return item.ServingGrams, false
