@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { Pressable } from "react-native";
 import Animated, { FadeInDown, FadeOutDown } from "react-native-reanimated";
 import { AppText } from "./Text";
+import { REDUCED_TRANSPARENCY_FALLBACK } from "./instrument/GlassPanel";
 import { useTheme } from "@/theme";
 
 type ToastOptions = { message: string; actionLabel?: string; onAction?: () => void; durationMs?: number };
@@ -13,7 +14,7 @@ export function useToast() {
 }
 
 export function ToastProvider({ children }: { children: ReactNode }) {
-  const { colors, radius, spacing, shadows } = useTheme();
+  const { instrument, radius, spacing, shadows, scheme } = useTheme();
   const [toast, setToast] = useState<ToastOptions | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -47,12 +48,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             justifyContent: "space-between",
             paddingVertical: 12,
             paddingHorizontal: 16,
-            borderRadius: radius.lg,
-            backgroundColor: colors.elevated,
+            borderRadius: radius.xl,
+            backgroundColor: REDUCED_TRANSPARENCY_FALLBACK[scheme],
+            borderWidth: 1,
+            borderColor: instrument.glassBorder,
             ...shadows.card,
           }}
         >
-          <AppText style={{ flex: 1 }}>{toast.message}</AppText>
+          <AppText style={{ flex: 1, color: instrument.ink }}>{toast.message}</AppText>
           {toast.actionLabel ? (
             <Pressable
               accessibilityRole="button"
@@ -63,7 +66,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               }}
               style={{ marginLeft: spacing.md }}
             >
-              <AppText style={{ color: colors.accent, fontWeight: "700" }}>{toast.actionLabel}</AppText>
+              <AppText style={{ color: instrument.accent, fontWeight: "700" }}>{toast.actionLabel}</AppText>
             </Pressable>
           ) : null}
         </Animated.View>

@@ -122,8 +122,10 @@ export function WeightReminderSection(): ReactElement {
         <View
           style={{ flexDirection: "row", alignItems: "center", minHeight: 44, paddingHorizontal: spacing.md, gap: spacing.sm }}
         >
+          {/* The section header already says "Weight check-in" — repeating it
+              here doubled the phrase and wrapped the row to two lines. */}
           <AppText style={{ flex: 1, fontSize: 17, fontWeight: "600", color: instrument.ink }}>
-            Weight check-in reminder
+            Reminder
           </AppText>
           <Pressable accessibilityLabel="Weight check-in time" onPress={openPicker} disabled={!pref.enabled}>
             <AppText style={{ fontSize: 15, color: instrument.mut, opacity: pref.enabled ? 1 : 0.4 }}>
