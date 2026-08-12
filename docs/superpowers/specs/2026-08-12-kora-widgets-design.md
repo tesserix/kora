@@ -102,9 +102,15 @@ structure for all three metrics; only label, fraction and caption change.
   count. Needs a second HealthKit call (`queryStatisticsCollection`, 7 daily
   buckets) — the one place the Steps configuration costs materially more.
 
-**`systemLarge`** — always the whole day regardless of configured metric: reserve
-dial, macro tracks, steps and sleep figures, then today's logged meals with mono
-times and kcal. The only family with room for legible secondary figures.
+**`systemLarge`** — always the whole day regardless of configured metric: the hero
+dial, macro tracks, steps against goal, and the day's eaten/budget totals. The only
+family with room for legible secondary figures.
+
+An earlier draft called for today's *logged meals* here. That contradicted this
+spec's own rule that the wire format does not change: `WidgetSnapshot` carries daily
+totals only, with no meal list, so meals would require widening the format on both
+sides and would make the app-side work non-trivial. Totals it is; a meal list can be
+added later as its own change if large turns out to earn it.
 
 **`accessoryRectangular`** — engraved label, mono value, thin progress track.
 Typographic, so it survives the white mask.
