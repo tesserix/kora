@@ -110,7 +110,9 @@ func (r Repository) IngredientsForRecipes(ctx context.Context, recipeIDs []uuid.
 }
 
 // Replace updates a user-owned recipe's name/servings and swaps its
-// ingredients atomically.
+// ingredients atomically. The updated_at timestamp is maintained by GORM's
+// autoUpdateTime tag on the Recipe.UpdatedAt field, guarded by
+// TestReplaceAdvancesUpdatedAt.
 func (r Repository) Replace(ctx context.Context, userID, recipeID uuid.UUID, name string, servings int, items []Ingredient) error {
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var existing Recipe
@@ -118,7 +120,7 @@ func (r Repository) Replace(ctx context.Context, userID, recipeID uuid.UUID, nam
 			return err // gorm.ErrRecordNotFound if absent/not owned
 		}
 		if err := tx.Model(&Recipe{}).Where("id = ?", recipeID).
-			Updates(map[string]any{"name": name, "servings": servings, "updated_at": gorm.Expr("now()")}).Error; err != nil {
+			Updates(map[string]any{"name": name, "servings": servings}).Error; err != nil {
 			return err
 		}
 		if err := tx.Where("recipe_id = ?", recipeID).Delete(&Ingredient{}).Error; err != nil {
