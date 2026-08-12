@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -44,6 +45,45 @@ const (
 	defaultAssumedGrams = 100.0
 	// resolveLimit bounds candidates fetched per ingredient name.
 	resolveLimit = 3
+
+	// recipePhotoBudget bounds ONLY ParsePhoto's IdentifyPhoto call. The shared
+	// ai.Router photoBudget (20s) is correctly sized for /v1/resolve/photo,
+	// which has no second leg after it — but ParsePhoto makes a Decompose call
+	// immediately afterward against the SAME client deadline, and 20s leaves no
+	// room for it. Wrapping the context passed into IdentifyPhoto with this
+	// narrower deadline caps ParsePhoto's effective photo-identify budget
+	// without touching router.go's shared photoBudget or /v1/resolve/photo's
+	// behavior — context.WithTimeout always yields the earlier of the parent
+	// and the new deadline.
+	//
+	// 13s, not 15s: see recipeDecomposeBudget's comment for why the margin
+	// against the mobile client's deadline has to be wider than it looks here.
+	recipePhotoBudget = 13 * time.Second
+
+	// recipeDecomposeBudget bounds the ENTIRE Decompose call that follows
+	// IdentifyPhoto in ParsePhoto — both the textBudget-bounded primary leg and
+	// its fallback (see Router.withFallback in router.go, which derives its
+	// child contexts from whatever context it is given). Wrapping the context
+	// passed into Decompose here caps the fallback leg's effective budget to
+	// whatever is left of this window, WITHOUT changing the shared textBudget
+	// or fallbackBudget constants that ai.Resolver.decomposeAndEstimate (the
+	// food-resolve hot path) depends on for its own Decompose call — that call
+	// site does not wrap its context this way, so it is unaffected.
+	//
+	// recipePhotoBudget (13s) + recipeDecomposeBudget (7s) = 20s, which fits
+	// inside the mobile client's 25s REQUEST_TIMEOUT_MS with 5s of margin for
+	// the network and the rest of the request. That margin is deliberately
+	// more generous than the 3s generateBudget + generateFallbackBudget
+	// (10s + 12s = 22s) uses in router.go, because those two are TEXT calls
+	// with a negligible request body, so the client's 25s timer and the
+	// server's own budget clock start at essentially the same instant. Here
+	// the request body is a multipart photo upload: the client's 25s timer
+	// starts when the upload begins, but recipePhotoBudget's clock only
+	// starts once that upload has fully arrived server-side and ParsePhoto
+	// begins running. The margin against the client deadline has to absorb
+	// that upload time too, on top of the network/response overhead the 3s
+	// figure already covers — hence 5s here instead of 3s.
+	recipeDecomposeBudget = 7 * time.Second
 )
 
 // parseSystemPrompt mirrors the discipline in the ai package's own prompts:
@@ -189,7 +229,9 @@ func (p *Parser) ParsePhoto(ctx context.Context, userID uuid.UUID, image []byte,
 		return Draft{}, err
 	}
 
-	guesses, usage, err := p.provider.IdentifyPhoto(ctx, image, mime)
+	photoCtx, photoCancel := context.WithTimeout(ctx, recipePhotoBudget)
+	defer photoCancel()
+	guesses, usage, err := p.provider.IdentifyPhoto(photoCtx, image, mime)
 	p.record(ctx, userID, usage, callTypeParsePhoto, err)
 	if err != nil {
 		return Draft{}, fmt.Errorf("%w: provider: %v", ErrParseFailed, err)
@@ -208,7 +250,9 @@ func (p *Parser) ParsePhoto(ctx context.Context, userID uuid.UUID, image []byte,
 		}
 	}
 
-	ings, decomposeUsage, err := p.provider.Decompose(ctx, best.Food)
+	decomposeCtx, decomposeCancel := context.WithTimeout(ctx, recipeDecomposeBudget)
+	defer decomposeCancel()
+	ings, decomposeUsage, err := p.provider.Decompose(decomposeCtx, best.Food)
 	p.record(ctx, userID, decomposeUsage, callTypeParsePhoto, err)
 	if err != nil {
 		return Draft{}, fmt.Errorf("%w: decompose: %v", ErrParseFailed, err)
