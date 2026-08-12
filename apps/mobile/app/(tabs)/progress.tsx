@@ -9,6 +9,7 @@ import { Icon } from "@/components/Icon";
 import { GlassPanel } from "@/components/instrument/GlassPanel";
 import { EnergyBars, type EnergyBarsDay } from "@/components/instrument/EnergyBars";
 import { StreakCells } from "@/components/instrument/StreakCells";
+import { SegmentedGlass } from "@/components/instrument/SegmentedGlass";
 import { monoStyle } from "@/components/instrument/typography";
 import { WeightChart } from "@/components/progress/WeightChart";
 import { WeightLogSheet } from "@/components/progress/WeightLogSheet";
@@ -75,68 +76,6 @@ function sleepStreakHits(lastNightHours: number | null): boolean[] {
   const hits = Array(7).fill(false);
   if (lastNightHours !== null) hits[6] = lastNightHours >= SLEEP_TARGET_HOURS;
   return hits;
-}
-
-type RangeOption = { key: string; label: string };
-
-// Instrument-glass segmented control (spec §Screens.4): the track carries the
-// panel's glass tint, the active segment gets an `inset` well + `glassBorder`
-// ring + `ink` text, inactive segments are `mut`, labels are the 11px
-// uppercase/tracked engraved treatment reserved for instrument zones. It's a
-// plain View (not a second `GlassPanel`) — glass never stacks on glass, and
-// this control already lives inside the Weight panel's GlassPanel.
-function RangeSegmented({ options, value, onChange }: { options: RangeOption[]; value: string; onChange: (key: string) => void }) {
-  const { instrument } = useTheme();
-  return (
-    <View
-      style={{
-        flexDirection: "row",
-        backgroundColor: instrument.glass,
-        borderRadius: 12,
-        padding: 3,
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: instrument.glassBorder,
-      }}
-    >
-      {options.map((opt) => {
-        const selected = opt.key === value;
-        return (
-          <PressableScale
-            key={opt.key}
-            accessibilityRole="tab"
-            accessibilityLabel={opt.label}
-            accessibilityState={{ selected }}
-            haptic="selection"
-            onPress={() => {
-              if (opt.key !== value) onChange(opt.key);
-            }}
-            style={{
-              flex: 1,
-              paddingVertical: 7,
-              borderRadius: 9,
-              alignItems: "center",
-              justifyContent: "center",
-              backgroundColor: selected ? instrument.inset : "transparent",
-              borderWidth: selected ? StyleSheet.hairlineWidth : 0,
-              borderColor: instrument.glassBorder,
-            }}
-          >
-            <AppText
-              style={{
-                fontSize: 11,
-                letterSpacing: 1.4,
-                textTransform: "uppercase",
-                fontWeight: "600",
-                color: selected ? instrument.ink : instrument.mut,
-              }}
-            >
-              {opt.label}
-            </AppText>
-          </PressableScale>
-        );
-      })}
-    </View>
-  );
 }
 
 export default function Progress() {
@@ -253,7 +192,7 @@ export default function Progress() {
             )}
 
             <View style={{ marginTop: 14 }}>
-              <RangeSegmented options={RANGE_OPTIONS} value={range} onChange={(key) => setRange(key as (typeof RANGES)[number])} />
+              <SegmentedGlass options={RANGE_OPTIONS} value={range} onChange={(key) => setRange(key as (typeof RANGES)[number])} />
             </View>
           </GlassPanel>
         </Animated.View>

@@ -8,6 +8,7 @@ import { ScreenHeader } from "@/components/ScreenHeader";
 import { AppBackground } from "@/components/AppBackground";
 import { Button } from "@/components/Button";
 import { GroupedSection, Row } from "@/components/GroupedList";
+import { EmptyState } from "@/components/common/EmptyState";
 import { CreateGroupSheet } from "@/components/social/CreateGroupSheet";
 import { useGroups } from "@/api/hooks";
 import { useTheme } from "@/theme";
@@ -52,14 +53,28 @@ export default function Groups() {
           <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>
             <View style={{ flexDirection: "row", gap: spacing.sm }}>
               <Button title="Create group" onPress={() => setSheet("create")} style={{ flex: 1 }} />
-              <Button title="Join by code" variant="secondary" onPress={() => setSheet("join")} style={{ flex: 1 }} />
+              <Button
+                title="Join by code"
+                variant="secondary"
+                onPress={() => setSheet("join")}
+                style={{
+                  flex: 1,
+                  borderWidth: StyleSheet.hairlineWidth,
+                  borderColor: instrument.glassBorder,
+                }}
+              />
             </View>
 
-            <GroupedSection>
-              {list.length === 0 ? (
-                <Row title="No groups yet" subtitle="Create one or join with a code." />
-              ) : (
-                list.map((g) => (
+            {list.length === 0 ? (
+              <EmptyState
+                variant="instrument"
+                icon="people"
+                title="No groups yet"
+                subtitle="Create one or join with a code."
+              />
+            ) : (
+              <GroupedSection>
+                {list.map((g) => (
                   <Row
                     key={g.id}
                     title={g.name}
@@ -68,9 +83,9 @@ export default function Groups() {
                     onPress={() => router.push(`/group/${g.id}` as Href)}
                     right={g.role === "owner" ? <OwnerChip /> : undefined}
                   />
-                ))
-              )}
-            </GroupedSection>
+                ))}
+              </GroupedSection>
+            )}
           </View>
         </ScrollView>
       </View>

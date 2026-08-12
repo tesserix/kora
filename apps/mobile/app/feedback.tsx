@@ -5,7 +5,7 @@ import { router } from "expo-router";
 import { safeBack } from "@/lib/safeBack";
 import { AppBackground } from "@/components/AppBackground";
 import { ScreenHeader } from "@/components/ScreenHeader";
-import { Segmented } from "@/components/Segmented";
+import { SegmentedGlass } from "@/components/instrument/SegmentedGlass";
 import { Button } from "@/components/Button";
 import { GlassPanel } from "@/components/instrument/GlassPanel";
 import { AppText } from "@/components/Text";
@@ -88,7 +88,7 @@ export default function Feedback() {
           contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: insets.bottom + 40 }}
           keyboardShouldPersistTaps="handled"
         >
-          <ScreenHeader title="Send feedback" onBack={() => safeBack("/(tabs)/more")} />
+          <ScreenHeader overline="Help us improve" title="Send feedback" onBack={() => safeBack("/(tabs)/more")} />
           <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>
             {submitted ? (
               <GlassPanel radius={22} style={{ padding: spacing.md, gap: spacing.sm, alignItems: "flex-start" }}>
@@ -105,7 +105,7 @@ export default function Feedback() {
               </GlassPanel>
             ) : (
               <>
-                <Segmented options={KIND_OPTIONS} value={kind} onChange={onChangeKind} />
+                <SegmentedGlass options={KIND_OPTIONS} value={kind} onChange={onChangeKind} />
 
                 <TextInput
                   value={subject}
@@ -130,7 +130,7 @@ export default function Feedback() {
                     style={[inputStyle, { minHeight: 140 }]}
                   />
                   {showDescriptionHint ? (
-                    <AppText style={{ fontSize: 13, color: instrument.mut, marginTop: spacing.xs }}>
+                    <AppText style={{ fontSize: 13, color: instrument.mut, marginTop: spacing.sm }}>
                       {descriptionRemaining} characters left
                     </AppText>
                   ) : null}
@@ -145,6 +145,7 @@ export default function Feedback() {
                   accessibilityLabel="Send"
                   disabled={!canSubmit}
                   onPress={onSubmit}
+                  style={{ borderRadius: 22 }}
                 />
               </>
             )}

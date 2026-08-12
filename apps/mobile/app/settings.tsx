@@ -6,7 +6,8 @@ import { AppText } from "@/components/Text";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { AppBackground } from "@/components/AppBackground";
 import { GlassPanel } from "@/components/instrument/GlassPanel";
-import { Segmented } from "@/components/Segmented";
+import { SegmentedGlass } from "@/components/instrument/SegmentedGlass";
+import { engravedStyle } from "@/components/instrument/typography";
 import { GroupedSection, Row } from "@/components/GroupedList";
 import { useUnits, type UnitSystem } from "@/units";
 import { useTheme } from "@/theme";
@@ -30,19 +31,21 @@ export default function SettingsScreen() {
       >
         <ScreenHeader overline="Preferences" title="Settings" onBack={() => safeBack("/(tabs)/more")} />
         <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>
-          <GlassPanel radius={22} style={{ padding: spacing.md }}>
-            <AppText style={{ fontSize: 13, color: instrument.mut, marginBottom: spacing.sm }}>
+          <View>
+            <AppText style={[engravedStyle(instrument), { marginLeft: spacing.md, marginBottom: spacing.xs }]}>
               Units
             </AppText>
-            <Segmented
-              options={UNIT_OPTIONS}
-              value={system}
-              onChange={(key) => setSystem(key as UnitSystem)}
-            />
-            <AppText style={{ fontSize: 11, color: instrument.mut, marginTop: spacing.sm }}>
+            <GlassPanel radius={22} style={{ padding: spacing.md }}>
+              <SegmentedGlass
+                options={UNIT_OPTIONS}
+                value={system}
+                onChange={(key) => setSystem(key as UnitSystem)}
+              />
+            </GlassPanel>
+            <AppText style={{ fontSize: 13, color: instrument.mut, marginLeft: spacing.md, marginTop: spacing.xs }}>
               Weight and height display.
             </AppText>
-          </GlassPanel>
+          </View>
           <GroupedSection>
             <Row
               title="Reminders"
