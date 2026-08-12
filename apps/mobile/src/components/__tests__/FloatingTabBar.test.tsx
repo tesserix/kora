@@ -1,12 +1,32 @@
-import { AccessibilityInfo } from "react-native";
+import { AccessibilityInfo, StyleSheet } from "react-native";
 import { render, fireEvent, waitFor } from "@testing-library/react-native";
 
 jest.mock("expo-router", () => ({ router: { push: jest.fn() } }));
 jest.mock("@/api/hooks", () => ({ useUnreadCount: jest.fn(() => ({ data: { count: 0 } })) }));
 
+// Local override of jest.setup.js's expo-symbols mock, which drops every prop
+// but the symbol name. The tab bar's active/inactive separation lives largely
+// in the icon tint, so these tests need `tintColor` to survive into the tree.
+jest.mock("expo-symbols", () => {
+  const React = require("react");
+  const { View } = require("react-native");
+  return {
+    SymbolView: (props: { name: string; tintColor?: string }) =>
+      React.createElement(View, { testID: `sf-${props.name}`, tintColor: props.tintColor }),
+  };
+});
+
 import { router } from "expo-router";
 import { useUnreadCount } from "@/api/hooks";
 import { FloatingTabBar } from "@/components/FloatingTabBar";
+import { instrumentLight } from "@/theme/palette";
+
+// Component tests render under the default (light) color scheme, so the
+// instrument tokens asserted below are the light half of the table.
+function flattenStyle(style: unknown): Record<string, unknown> {
+  const flat = Array.isArray(style) ? style.flat(Infinity) : [style];
+  return Object.assign({}, ...flat.filter(Boolean));
+}
 
 const props = {
   state: { index: 0, routes: [{ key: "index", name: "index" }, { key: "diary", name: "diary" }, { key: "progress", name: "progress" }, { key: "more", name: "more" }] },
@@ -64,6 +84,59 @@ test("hides the unread accent dot on More when count is 0", async () => {
   expect(queryByTestId("more-unread-badge")).toBeNull();
 });
 
+// The active tab used to differ from its neighbours only by icon tint, stroke
+// width, a 1.08 scale and a 4pt dot — over bright light-mode glass that reads
+// as "nothing is selected". These pin the recessed-well recipe borrowed from
+// SegmentedGlass's selected segment, so a tab bar and a segmented control stay
+// the same system.
+test("the active tab sits on an inset well with a hairline glassBorder ring", async () => {
+  const { findByTestId } = await render(<FloatingTabBar {...props} />);
+  const flat = flattenStyle((await findByTestId("tab-active-pill")).props.style);
+  expect(flat.backgroundColor).toBe(instrumentLight.inset);
+  expect(flat.borderColor).toBe(instrumentLight.glassBorder);
+  expect(flat.borderWidth).toBe(StyleSheet.hairlineWidth);
+});
+
+// Accent rule (hard, per spec): orange appears on ONE element per view. The
+// well is deliberately neutral so the 4pt dot keeps being the only accent in
+// the bar.
+test("the well is neutral so the accent dot stays the bar's only accent element", async () => {
+  const { findByTestId, getAllByTestId } = await render(<FloatingTabBar {...props} />);
+  const well = flattenStyle((await findByTestId("tab-active-pill")).props.style);
+  expect(well.backgroundColor).not.toBe(instrumentLight.accent);
+  const dot = flattenStyle((await findByTestId("tab-dot-active")).props.style);
+  expect(dot.backgroundColor).toBe(instrumentLight.accent);
+  expect(getAllByTestId("tab-active-pill")).toHaveLength(1);
+});
+
+test("the active label is full-opacity ink and heavier than the demoted inactive labels", async () => {
+  const { getByText } = await render(<FloatingTabBar {...props} />);
+  const active = flattenStyle(getByText("Today").props.style);
+  const inactive = flattenStyle(getByText("Diary").props.style);
+  expect(active.color).toBe(instrumentLight.ink);
+  expect(active.opacity).toBe(1);
+  expect(inactive.color).toBe(instrumentLight.mut);
+  expect(Number(inactive.opacity)).toBeLessThan(1);
+  // Separation by weight as well as hue — at 9px, hue alone is not enough.
+  expect(Number(active.fontWeight)).toBeGreaterThan(Number(inactive.fontWeight));
+});
+
+test("the active icon is tinted ink while inactive icons stay mut", async () => {
+  const { getByTestId } = await render(<FloatingTabBar {...props} />);
+  expect(getByTestId("sf-house.fill").props.tintColor).toBe(instrumentLight.ink);
+  expect(getByTestId("sf-book.fill").props.tintColor).toBe(instrumentLight.mut);
+  expect(getByTestId("sf-square.grid.2x2.fill").props.tintColor).toBe(instrumentLight.mut);
+});
+
+// A11y gate (spec: touch targets >= 44pt). The well must not have shrunk the
+// tap area to its own painted bounds.
+test("keeps every tab's touch target at 52pt", async () => {
+  const { getByLabelText } = await render(<FloatingTabBar {...props} />);
+  const flat = flattenStyle(getByLabelText("Today").props.style);
+  expect(flat.width).toBe(52);
+  expect(flat.height).toBe(52);
+});
+
 // I3: the tab bar's BlurView must honor Reduce Transparency, same as GlassPanel.
 test("swaps the pill's BlurView for the opaque fallback when Reduce Transparency is on", async () => {
   jest.spyOn(AccessibilityInfo, "isReduceTransparencyEnabled").mockResolvedValue(true);
@@ -74,6 +147,9 @@ test("swaps the pill's BlurView for the opaque fallback when Reduce Transparency
     expect(queryByTestId("tab-bar-pill-blur")).toBeNull();
   });
   expect(getByTestId("tab-bar-pill")).toBeTruthy();
+  // The active well lives inside the tab button, so it must survive the branch
+  // swap — the fallback pill is opaque, not blurred, but still a glass surface.
+  expect(getByTestId("tab-active-pill")).toBeTruthy();
 
   jest.restoreAllMocks();
 });

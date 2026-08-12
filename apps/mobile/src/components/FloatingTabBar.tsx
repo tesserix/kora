@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import { BlurView } from "expo-blur";
 import { router } from "expo-router";
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
@@ -26,6 +26,12 @@ const ORDER_RIGHT = ["progress", "more"];
 const CAMERA_SIZE = 52;
 const CAMERA_RAISE = 16;
 
+// Tab slot is 52x52 — above the 44pt a11y floor with room to spare, and the
+// painted area of the active well. Radius 18 is the top of the spec's
+// pills/chips band (14–18), nested inside the bar's own radius 32.
+const TAB_SIZE = 52;
+const TAB_WELL_RADIUS = 18;
+
 type FloatingTabBarProps = {
   state: { index: number; routes: ReadonlyArray<{ key: string; name: string }> };
   navigation: { navigate: (name: string) => void };
@@ -40,14 +46,20 @@ type TabButtonProps = {
 };
 
 function TabButton({ name, meta, active, showBadge, onPress }: TabButtonProps) {
-  const { instrument, radius } = useTheme();
+  const { instrument } = useTheme();
   const scale = useSharedValue(active ? 1.08 : 1);
+  const well = useSharedValue(active ? 1 : 0);
 
   useEffect(() => {
     scale.value = withSpring(active ? 1.08 : 1, springs.standard);
-  }, [active, scale]);
+    well.value = withSpring(active ? 1 : 0, springs.standard);
+  }, [active, scale, well]);
 
   const iconStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+  // Fade, not a background-color swap: the well has to leave the tab you just
+  // left as well as arrive on the one you tapped, and swapping the fill to
+  // "transparent" would pop instead of spring out.
+  const wellStyle = useAnimatedStyle(() => ({ opacity: well.value }));
 
   return (
     <PressableScale
@@ -56,8 +68,28 @@ function TabButton({ name, meta, active, showBadge, onPress }: TabButtonProps) {
       accessibilityState={{ selected: active }}
       haptic="selection"
       onPress={onPress}
-      style={{ width: 52, height: 52, borderRadius: radius.full, alignItems: "center", justifyContent: "center" }}
+      style={{ width: TAB_SIZE, height: TAB_SIZE, borderRadius: TAB_WELL_RADIUS, alignItems: "center", justifyContent: "center" }}
     >
+      {/* The recessed well marking the active tab — same `inset` fill + hairline
+          `glassBorder` ring SegmentedGlass gives its selected segment, so a tab
+          bar and a segmented control read as one system. Deliberately NEUTRAL:
+          the 4pt dot below is the bar's single accent element (spec: accent
+          rules, one per view). Rendered behind the content and non-interactive
+          so it cannot eat the tab's own presses. */}
+      <Animated.View
+        testID={active ? "tab-active-pill" : undefined}
+        pointerEvents="none"
+        style={[
+          StyleSheet.absoluteFill,
+          {
+            borderRadius: TAB_WELL_RADIUS,
+            backgroundColor: instrument.inset,
+            borderWidth: StyleSheet.hairlineWidth,
+            borderColor: instrument.glassBorder,
+          },
+          wellStyle,
+        ]}
+      />
       <View style={{ alignItems: "center", justifyContent: "center" }}>
         <Animated.View style={iconStyle}>
           <Icon name={meta.icon} size={22} color={active ? instrument.ink : instrument.mut} strokeWidth={active ? 2.5 : 2} />
@@ -72,11 +104,17 @@ function TabButton({ name, meta, active, showBadge, onPress }: TabButtonProps) {
             backgroundColor: active ? instrument.accent : "transparent",
           }}
         />
+        {/* At 9px an engraved label separates by weight long before it
+            separates by hue, so the inactive state is demoted twice over:
+            `mut` at 500 and held back to 72% opacity, against full-opacity
+            `ink` at 700. */}
         <Text
           style={{
             fontSize: 9,
             textTransform: "uppercase",
             letterSpacing: 1.4,
+            fontWeight: active ? "700" : "500",
+            opacity: active ? 1 : 0.72,
             color: active ? instrument.ink : instrument.mut,
           }}
         >
