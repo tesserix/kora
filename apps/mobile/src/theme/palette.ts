@@ -132,7 +132,11 @@ export const instrumentDark = {
 export const instrumentLight = {
   bg: "#ECEDEF",
   ink: "#16181C",
-  mut: "#6D7580",
+  // Darkened from #6D7580 so 9-11px engraved labels clear WCAG AA (4.5:1)
+  // against the light inset well, which is the worst case at ~4.62:1 — the
+  // old value sat at 3.40:1 there and ~4.38:1 on a glass panel. Dark mode's
+  // `mut` is unchanged; it already passes at ~6.2:1.
+  mut: "#5A6069",
   glass: "rgba(255,255,255,0.60)",
   glassBorder: "rgba(255,255,255,0.85)",
   glassHighlight: "rgba(255,255,255,0.95)",

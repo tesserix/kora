@@ -98,3 +98,33 @@ test("the light inset is ink-tinted, mirroring dark's ground-tinted well", () =>
   const ink = parseColor(instrumentLight.ink);
   expect([inset.r, inset.g, inset.b]).toEqual([ink.r, ink.g, ink.b]);
 });
+
+// --- WCAG AA contrast for engraved labels -----------------------------------
+// `mut` carries every engraved label (Field's caption, secondary text, unlit
+// dial captions) across ~40 components. At 9-11px there is no WCAG large-text
+// exception, so the floor is 4.5:1. The worst-case surface is Field's input
+// well: `inset` composited directly on `bg` (Field sits straight on the
+// screen ground, not inside a glass panel — see AuthScaffold/sign-in.tsx).
+// This asserts the real contrast ratio, not a hex literal, so the guarantee
+// survives a future palette tweak instead of silently drifting with it.
+
+/** WCAG relative luminance (gamma-corrected), formula per WCAG 2.x 1.4.3. */
+function relativeLuminance(c: Rgb): number {
+  const channel = (v: number) => {
+    const s = v / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b);
+}
+
+/** WCAG contrast ratio between two colors, per WCAG 2.x 1.4.3 (range 1-21). */
+function contrastRatio(a: Rgb, b: Rgb): number {
+  const [l1, l2] = [relativeLuminance(a), relativeLuminance(b)].sort((x, y) => y - x);
+  return (l1 + 0.05) / (l2 + 0.05);
+}
+
+test("light-mode mut clears WCAG AA (4.5:1) against Field's inset well", () => {
+  const insetOnBg = over(instrumentLight.inset, parseColor(instrumentLight.bg));
+  const ratio = contrastRatio(parseColor(instrumentLight.mut), insetOnBg);
+  expect(ratio).toBeGreaterThanOrEqual(4.5);
+});
