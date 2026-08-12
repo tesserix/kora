@@ -2711,6 +2711,183 @@ git commit -m "docs: recipes handoff with simulator verification results"
 
 ---
 
+---
+
+### Task 11: Bound the photo-parse path inside the mobile client's deadline
+
+**Context:** Final-review residual R1. `POST /v1/recipes/parse` with a photo calls, via the production `ai.Router`, `IdentifyPhoto` (bounded by the shared `photoBudget` = 20s, no fallback leg) and then `Decompose` (bounded by the shared `textBudget` = 1.5s primary, falling back to the shared `fallbackBudget` = 90s). Worst case is therefore ~111.5s on an endpoint this plan introduced, while the mobile client's `REQUEST_TIMEOUT_MS` (`apps/mobile/src/lib/api.ts`) aborts at 25s — the app gives up long before the server does, and the server keeps paying for a fallback call nobody will read.
+
+This is the same class of defect Task 9's live-verification fixed on the text leg (`GenerateText`, commit `9ed1a18`): a dedicated `generateBudget` (10s) + `generateFallbackBudget` (12s) were added to `router.go` specifically because `textBudget`'s 1.5s is load-bearing for `IdentifyText`'s fast failover on the food-resolve hot path, and the shared `fallbackBudget`'s 90s is a deliberate last-resort allowance for that same hot path — neither may move.
+
+`Decompose` is a single `ai.Provider` method shared by TWO call sites: `ai.Resolver.decomposeAndEstimate` (the food-resolve hot path, which must keep the fast 1.5s primary / generous 90s fallback) and `recipes.Parser.ParsePhoto` (this plan's new code). Because it is one method on the shared `ai.Router`, its budget cannot be resized per-caller from inside `router.go` without touching the hot path. The photo path's own `IdentifyPhoto` call is *also* shared, with `/v1/resolve/photo` (which has no second leg after it and is fine at the full 20s).
+
+**Resolution — bound the recipe-photo-parse call sites from the CALLER side, in `internal/recipes/parse.go`, touching nothing in `router.go`:** `context.WithTimeout` composes with whatever deadline `Router`'s internals derive from the context handed to them (`context.WithTimeout(ctx, budget)` always takes the *earlier* of the two deadlines). Wrapping the context passed to `IdentifyPhoto` and to `Decompose` in `ParsePhoto` with narrower, recipe-specific deadlines caps their *effective* budgets for this call site only — `/v1/resolve/photo`'s `IdentifyPhoto` call and `ai.Resolver`'s `Decompose` call are untouched, because neither wraps its context this way.
+
+**Files:**
+- Modify: `api/internal/recipes/parse.go`
+- Modify: `api/internal/recipes/parse_test.go` (or a new `api/internal/recipes/parse_budget_test.go`)
+
+**Interfaces:**
+- Consumes: `ai.Provider.IdentifyPhoto`, `ai.Provider.Decompose` (unchanged signatures).
+- Produces: two new unexported constants in `recipes` package; `ParsePhoto`'s behavior is otherwise unchanged.
+
+- [ ] **Step 1: Add two recipe-scoped budget constants to `parse.go`**
+
+Alongside the existing `const` block (`callTypeParseText`, `maxPasteLen`, etc.), add:
+
+```go
+// recipePhotoBudget bounds ONLY ParsePhoto's IdentifyPhoto call. The shared
+// ai.Router photoBudget (20s) is correctly sized for /v1/resolve/photo,
+// which has no second leg after it — but ParsePhoto makes a Decompose call
+// immediately afterward against the SAME client deadline, and 20s leaves no
+// room for it. Wrapping the context passed into IdentifyPhoto with this
+// narrower deadline caps ParsePhoto's effective photo-identify budget
+// without touching router.go's shared photoBudget or /v1/resolve/photo's
+// behavior — context.WithTimeout always yields the earlier of the parent
+// and the new deadline.
+recipePhotoBudget = 15 * time.Second
+
+// recipeDecomposeBudget bounds the ENTIRE Decompose call that follows
+// IdentifyPhoto in ParsePhoto — both the textBudget-bounded primary leg and
+// its fallback (see Router.withFallback in router.go, which derives its
+// child contexts from whatever context it is given). Wrapping the context
+// passed into Decompose here caps the fallback leg's effective budget to
+// whatever is left of this window, WITHOUT changing the shared textBudget
+// or fallbackBudget constants that ai.Resolver.decomposeAndEstimate (the
+// food-resolve hot path) depends on for its own Decompose call — that call
+// site does not wrap its context this way, so it is unaffected.
+//
+// recipePhotoBudget (15s) + recipeDecomposeBudget (7s) = 22s, which fits
+// inside the mobile client's 25s REQUEST_TIMEOUT_MS with 3s of margin for
+// the network and the rest of the request — the same shape and the same
+// margin as generateBudget + generateFallbackBudget (10s + 12s = 22s) in
+// router.go.
+recipeDecomposeBudget = 7 * time.Second
+```
+
+Add `"time"` to the import block if not already present.
+
+- [ ] **Step 2: Wrap the two provider calls in `ParsePhoto`**
+
+In `ParsePhoto` (currently calls `p.provider.IdentifyPhoto(ctx, image, mime)` then, after picking the best guess, `p.provider.Decompose(ctx, best.Food)`), wrap each call's context independently, each derived from the ORIGINAL `ctx` parameter (not from each other — the two budgets are sequential windows starting when each call begins, exactly like `withFallback`'s primary/fallback derive from the same parent, not from each other's expired child context):
+
+```go
+photoCtx, photoCancel := context.WithTimeout(ctx, recipePhotoBudget)
+defer photoCancel()
+guesses, usage, err := p.provider.IdentifyPhoto(photoCtx, image, mime)
+```
+
+and, later in the same function, after `best` is chosen:
+
+```go
+decomposeCtx, decomposeCancel := context.WithTimeout(ctx, recipeDecomposeBudget)
+defer decomposeCancel()
+ings, decomposeUsage, err := p.provider.Decompose(decomposeCtx, best.Food)
+```
+
+Everything else in `ParsePhoto` (error wrapping, metering via `p.record`, the empty-guesses/empty-ingredients checks) is unchanged — only the `ctx` argument passed to these two calls changes.
+
+- [ ] **Step 3: Add a regression test pinning the total against the mobile client's deadline**
+
+In the same style as `ai.TestGenerateBudgetsFitInsideTheMobileClientDeadline` (`api/internal/ai/router_test.go:340`), add a test in the `recipes` package (new file `api/internal/recipes/parse_budget_test.go` is fine) that:
+
+1. Reads `REQUEST_TIMEOUT_MS` out of `apps/mobile/src/lib/api.ts` the same way `mobileRequestTimeoutMs` does in `router_test.go` (copy the same regex-based helper — `recipes` cannot import an unexported helper from `ai`'s test file, so duplicate the small helper rather than reaching across packages).
+2. Asserts `recipePhotoBudget < clientDeadline` (photo alone must not itself hit the deadline).
+3. Asserts `recipePhotoBudget + recipeDecomposeBudget <= clientDeadline - 2*time.Second` (both legs together must fit with margin, mirroring the `generateBudget` test's exact margin).
+
+Also add (or confirm one already exists) a stub-provider-driven test that exercises `ParsePhoto` end-to-end with a primary that always errors and a fallback that succeeds within the new `recipeDecomposeBudget` window, asserting the call returns a usable draft rather than timing out — this is the "the fallback leg is actually reachable" proof, not just an arithmetic assertion. A slow-primary stub (sleeps past `textBudget` but well under `recipeDecomposeBudget`) exercising the fallback path is sufficient; do not sleep for anywhere near the real 15s/7s windows in a unit test — use the existing `Router.PhotoBudget`/`TextBudget`/`FallbackBudget` test-override fields (see `router_test.go`) with small values, or a stub provider swapped directly into `Parser` (bypassing `Router` entirely) if that is simpler, to keep the test fast and deterministic.
+
+- [ ] **Step 4: Verify and commit**
+
+```bash
+cd api
+gofmt -l internal/recipes/    # must list nothing you touched
+go build ./...
+go vet ./...
+go test ./internal/ai/ ./internal/recipes/ -count=1
+```
+
+```bash
+git add api/internal/recipes/parse.go api/internal/recipes/parse_budget_test.go
+git commit -m "fix(api): bound recipe photo-parse's Decompose fallback inside the mobile client deadline"
+```
+
+---
+
+### Task 12: Route a 429 budget-exhausted parse error into the manual editor
+
+**Context:** Final-review residual R2. `POST /v1/recipes/parse` returns **429 `budget_exhausted`** (`api/internal/recipes/handler.go:190-192`) when the AI budget is exhausted, with message `"You've reached your AI limit this month — enter the recipe manually"`. `RecipeParseSheet.handleParseError` (`apps/mobile/src/components/recipes/RecipeParseSheet.tsx:263`) only recognizes `error.status === 502` — a 429 falls through to the generic `toast.show({ message: parseErrorMessage(error) })` branch, which shows exactly that "enter it manually" toast while the sheet stays on the paste/photo entry stage. The message names an action (the manual editor) the interface at that moment does not offer.
+
+**Resolution:** both 502 and 429 must land the user in the SAME manual-editor review stage that 502 already reaches (`fallbackIngredient` seeding a single unresolved ingredient carrying the pasted text, `stage` set to `"review"`), sharing that fallback path, but with DISTINCT `fallbackNotice` copy: 502 keeps its existing "Otto couldn't read that automatically" wording (a parse failure — we tried and failed), 429 gets its own wording naming the AI limit specifically (we didn't try — the budget is exhausted). Do not merge the two into one shared string.
+
+**Files:**
+- Modify: `apps/mobile/src/components/recipes/RecipeParseSheet.tsx`
+- Modify: `apps/mobile/src/components/recipes/__tests__/RecipeParseSheet.test.tsx` (or wherever this component's existing tests live — search for the current 502 fallback test first and match its file/pattern)
+
+**Interfaces:**
+- Consumes: `ApiError.status` (unchanged shape).
+- Produces: no new exports; `handleParseError`'s branching changes.
+
+- [ ] **Step 1: Locate the existing 502 fallback test**
+
+Before writing anything, find the test that currently drives a real 502 through `handleParseError` and asserts the manual editor appears (added in commit `a63c0ae` / pinned further in `b4a31e6`, per the plan's own ledger). Match its exact mocking pattern (how it constructs `ApiError`, how it mocks `useParseRecipe`) for the new 429 test — do not invent a different mocking style.
+
+- [ ] **Step 2: Extend `handleParseError` to cover 429, with distinct copy**
+
+Change the 502-only branch to also match 429, and select the notice text by status:
+
+```typescript
+function handleParseError(error: unknown, pastedText: string) {
+  if (error instanceof ApiError && (error.status === 502 || error.status === 429)) {
+    setDraftName("");
+    setDraftServings(1);
+    setDraftSource(mode);
+    setDraftIngredients([fallbackIngredient(mode, pastedText)]);
+    setFallbackNotice(
+      error.status === 429
+        ? "You've reached your AI limit this month. Name the recipe and find a match for the ingredient below."
+        : "Otto couldn't read that automatically. Name the recipe and find a match for the ingredient below.",
+    );
+    setStage("review");
+    return;
+  }
+  toast.show({ message: parseErrorMessage(error) });
+}
+```
+
+Keep the existing comment block above the function (the one explaining why this is keyed off `error.status` rather than `error.code`) — extend it, in place, to note that 429 is included for the same reliability reason and because the endpoint's 429 is unambiguous (recipes' `budget_exhausted` is the only 429 this endpoint returns), rather than deleting or replacing the comment.
+
+- [ ] **Step 3: Add a test driving a real 429 through the sheet**
+
+Following the located 502 test's exact pattern, add a sibling test that:
+1. Mocks `useParseRecipe`'s mutate to call `onError` with a real `ApiError` carrying `status: 429` (matching how the 502 test constructs its `ApiError`, including whatever `code`/`message` fields it sets — use `"budget_exhausted"` and the server's own message text for realism).
+2. Triggers a paste (or photo) submission.
+3. Asserts the sheet reaches the review/manual-editor stage (same assertion style as the 502 test — e.g. the fallback ingredient row and/or the "review" stage's save button becoming visible).
+4. Asserts the notice text shown is the 429-specific one, not the 502 one, and that it differs from the 502 test's expected text (so an assertion mixup between the two tests cannot pass by accident — e.g. via `getByText` with the new copy, or however this test file asserts the 502 notice text).
+
+- [ ] **Step 4: Verify and commit**
+
+```bash
+cd apps/mobile
+npx tsc --noEmit
+npx jest <path-to-RecipeParseSheet-test-file>
+```
+
+Then the full suite to confirm no regression (baseline: 162 suites / 1326 tests passing):
+
+```bash
+npx jest
+```
+
+```bash
+git add apps/mobile/src/components/recipes/RecipeParseSheet.tsx apps/mobile/src/components/recipes/__tests__/RecipeParseSheet.test.tsx
+git commit -m "fix(mobile): route a 429 budget-exhausted parse error into the manual editor"
+```
+
+(Adjust the `git add` paths to the actual test file location found in Step 1 if it differs from the guess above.)
+
+---
+
 ## Deferred to later slices
 
 - **URL import** (#25's third input) — its own slice once the paste prompt is proven.
