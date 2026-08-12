@@ -1222,3 +1222,31 @@ func TestEditLogUnknownEnteredUnitReturnsValidationError(t *testing.T) {
 	require.ErrorAs(t, err, &verr)
 	assert.Contains(t, verr.Message, "unit")
 }
+
+// TestCreateBatchSourceDefaultsToMemory keeps every pre-recipes caller's
+// behaviour byte-identical while letting recipes tag their own logs.
+func TestCreateBatchSourceDefaultsToMemory(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	item := nutrition.FoodItem{Name: "Batch Source Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	ctx := context.Background()
+
+	logs, err := svc.CreateBatch(ctx, userID, CreateBatchRequest{
+		MealSlot: "lunch",
+		Items:    []BatchItem{{FoodItemID: item.ID, QuantityGrams: 100}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "memory", logs[0].Source)
+
+	tagged, err := svc.CreateBatch(ctx, userID, CreateBatchRequest{
+		MealSlot: "lunch", Source: "recipe",
+		Items: []BatchItem{{FoodItemID: item.ID, QuantityGrams: 100}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "recipe", tagged[0].Source)
+}

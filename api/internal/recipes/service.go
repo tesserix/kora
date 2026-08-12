@@ -98,6 +98,7 @@ type SaveRecipeRequest struct {
 type Service struct {
 	repo  Repository
 	foods nutrition.Repository
+	batch BatchLogger
 }
 
 func NewService(repo Repository, foods nutrition.Repository) *Service {

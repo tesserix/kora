@@ -417,6 +417,11 @@ type CreateBatchRequest struct {
 	LoggedAt time.Time   `json:"logged_at"`
 	MealSlot string      `json:"meal_slot"`
 	Items    []BatchItem `json:"items"`
+	// Source tags every log this batch creates. Empty means "memory", which
+	// is what every caller before recipes meant and keeps existing behaviour
+	// byte-identical. Recipes pass "recipe" so recipe-driven logs are
+	// distinguishable from hand-entered ones in analytics.
+	Source string `json:"source"`
 }
 
 // CreateBatch logs several foods as one meal in a single transaction. Macros
@@ -435,6 +440,10 @@ func (s Service) CreateBatch(ctx context.Context, userID uuid.UUID, req CreateBa
 	loggedAt := req.LoggedAt
 	if loggedAt.IsZero() {
 		loggedAt = time.Now()
+	}
+	source := req.Source
+	if source == "" {
+		source = "memory"
 	}
 
 	out := make([]FoodLog, 0, len(req.Items))
@@ -494,7 +503,7 @@ func (s Service) CreateBatch(ctx context.Context, userID uuid.UUID, req CreateBa
 				FoodItemID:    &fid,
 				LoggedAt:      loggedAt,
 				MealSlot:      req.MealSlot,
-				Source:        "memory",
+				Source:        source,
 				Description:   item.Name,
 				QuantityGrams: grams,
 				EnteredAmount: it.EnteredAmount,
