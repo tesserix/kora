@@ -2457,6 +2457,11 @@ export function useDeleteRecipe() {
 
 // useParseRecipe never writes: it returns an UNSAVED draft the review sheet
 // edits before POSTing to /v1/recipes. No cache invalidation, by design.
+//
+// CORRECTION (found in Task 7): the photo branch MUST use apiFetchMultipart,
+// not apiFetch. apiFetch unconditionally sets Content-Type: application/json,
+// which corrupts the FormData boundary. apiFetchMultipart deliberately omits
+// the header. useResolvePhoto/useResolveVoice already do it this way.
 export function useParseRecipe() {
   return useMutation({
     mutationFn: (input: { text: string } | { photo: FormData }) =>
@@ -2465,7 +2470,7 @@ export function useParseRecipe() {
             method: "POST",
             body: JSON.stringify({ text: input.text }),
           }) as Promise<RecipeDraft>)
-        : (apiFetch("/v1/recipes/parse", { method: "POST", body: input.photo }) as Promise<RecipeDraft>),
+        : (apiFetchMultipart("/v1/recipes/parse", input.photo) as Promise<RecipeDraft>),
   });
 }
 
