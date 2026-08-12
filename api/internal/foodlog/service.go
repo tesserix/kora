@@ -74,6 +74,11 @@ type LogRequest struct {
 
 var validMealSlots = map[string]bool{"breakfast": true, "lunch": true, "dinner": true, "snack": true}
 
+// ValidMealSlot reports whether slot is a meal slot the diary accepts. It is
+// exported so other packages that gate on a meal slot before calling into
+// this one (recipes) cannot drift from the diary's own list.
+func ValidMealSlot(slot string) bool { return validMealSlots[slot] }
+
 // resolveSources are the log sources that carry a user phrase worth keeping.
 // A manual, memory, barcode or photo log has no phrase that resolved wrong,
 // so there is nothing a correction could teach the index with.
@@ -417,7 +422,24 @@ type CreateBatchRequest struct {
 	LoggedAt time.Time   `json:"logged_at"`
 	MealSlot string      `json:"meal_slot"`
 	Items    []BatchItem `json:"items"`
+	// Source tags every log this batch creates. Empty means "memory", which
+	// is what every caller before recipes meant and keeps existing behaviour
+	// byte-identical. Recipes pass "recipe" so recipe-driven logs are
+	// distinguishable from hand-entered ones in analytics.
+	//
+	// Constrained to batchSources below. This field is bound straight from the
+	// request body, so an unconstrained value let a client write rows into the
+	// correction-eligible source set with no input_phrase — violating the
+	// invariant 000020_log_corrections documents — or make batch rows
+	// indistinguishable from hand-entered ones in dashboard.SourceCounts.
+	Source string `json:"source"`
 }
+
+// batchSources are the sources a BATCH may claim. A batch is always a
+// server-shaped fan-out of several foods at once (memory re-log, saved meal,
+// recipe); none of them carries a user phrase, so no ai_* source can honestly
+// originate here, and "manual" would misreport a fan-out as hand entry.
+var batchSources = map[string]bool{"memory": true, "meal": true, "recipe": true}
 
 // CreateBatch logs several foods as one meal in a single transaction. Macros
 // are recomputed server-side per item (item per-100g × grams) — identical to
@@ -435,6 +457,13 @@ func (s Service) CreateBatch(ctx context.Context, userID uuid.UUID, req CreateBa
 	loggedAt := req.LoggedAt
 	if loggedAt.IsZero() {
 		loggedAt = time.Now()
+	}
+	source := req.Source
+	if source == "" {
+		source = "memory"
+	}
+	if !batchSources[source] {
+		return nil, httpx.ValidationError{Message: "invalid source"}
 	}
 
 	out := make([]FoodLog, 0, len(req.Items))
@@ -494,7 +523,7 @@ func (s Service) CreateBatch(ctx context.Context, userID uuid.UUID, req CreateBa
 				FoodItemID:    &fid,
 				LoggedAt:      loggedAt,
 				MealSlot:      req.MealSlot,
-				Source:        "memory",
+				Source:        source,
 				Description:   item.Name,
 				QuantityGrams: grams,
 				EnteredAmount: it.EnteredAmount,

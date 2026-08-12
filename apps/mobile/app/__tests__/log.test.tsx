@@ -1,10 +1,28 @@
 import { fireEvent, render } from "@testing-library/react-native";
 import { router, useLocalSearchParams } from "expo-router";
-import type { Memory, SavedMeal } from "@/api/types";
+import type { Memory, Recipe, SavedMeal } from "@/api/types";
 
 jest.mock("expo-router", () => ({
-  router: { replace: jest.fn(), back: jest.fn() },
+  router: { replace: jest.fn(), back: jest.fn(), push: jest.fn() },
   useLocalSearchParams: jest.fn(() => ({})),
+}));
+
+// The Log screen now renders RecipeParseSheet, which reaches "@/lib/api" for
+// ApiError — that module imports firebase/auth (real ESM), which Jest can't
+// parse unmocked. See capture.test.tsx for the same mock, same reason.
+jest.mock("@/lib/api", () => ({
+  ApiError: class ApiError extends Error {
+    status: number;
+    code: string;
+    requestId?: string;
+    constructor(status: number, code: string, message: string, requestId?: string) {
+      super(message);
+      this.status = status;
+      this.code = code;
+      this.requestId = requestId;
+      this.name = "ApiError";
+    }
+  },
 }));
 
 const mockLogMutate = jest.fn();
@@ -14,11 +32,15 @@ const mockToggle = jest.fn();
 const mockOpenCreate = jest.fn();
 const mockOpenEdit = jest.fn();
 const mockOpenBlank = jest.fn();
+const mockParseMutate = jest.fn();
+const mockCreateRecipeMutate = jest.fn();
+const mockLogRecipeMutate = jest.fn();
 let mockMemoryData: Memory = { recents: [], frequent: [], usual_meals: [] };
 let mockMemoryIsLoading = false;
 let mockMemoryIsError = false;
 let mockPinsData: unknown[] = [];
 let mockSavedMealsData: SavedMeal[] = [];
+let mockRecipesData: Recipe[] = [];
 
 const chickenCandidate = {
   item: {
@@ -50,6 +72,10 @@ jest.mock("@/api/hooks", () => ({
   useMemory: () => ({ data: mockMemoryData, isLoading: mockMemoryIsLoading, isError: mockMemoryIsError }),
   usePins: () => ({ data: mockPinsData }),
   useSavedMeals: () => ({ data: mockSavedMealsData }),
+  useRecipes: () => ({ data: mockRecipesData }),
+  useParseRecipe: () => ({ mutate: mockParseMutate, isPending: false }),
+  useCreateRecipe: () => ({ mutate: mockCreateRecipeMutate, isPending: false }),
+  useLogRecipe: () => ({ mutate: mockLogRecipeMutate, isPending: false }),
 }));
 
 jest.mock("@/api/usePinToggle", () => ({
@@ -74,12 +100,16 @@ beforeEach(() => {
   mockOpenCreate.mockClear();
   mockOpenEdit.mockClear();
   mockOpenBlank.mockClear();
+  mockParseMutate.mockClear();
+  mockCreateRecipeMutate.mockClear();
+  mockLogRecipeMutate.mockClear();
   mockSearch = { data: [chickenCandidate], isLoading: false, isOfflineCache: false };
   mockMemoryData = { recents: [], frequent: [], usual_meals: [] };
   mockMemoryIsLoading = false;
   mockMemoryIsError = false;
   mockPinsData = [];
   mockSavedMealsData = [];
+  mockRecipesData = [];
   (useLocalSearchParams as jest.Mock).mockReturnValue({});
 });
 
@@ -323,6 +353,51 @@ test("Saved tab shows a saved meal", async () => {
   fireEvent.press(await findByLabelText("Meals"));
   fireEvent.press(await findByLabelText("Saved"));
   expect(await findByText("Protein Bowl")).toBeTruthy();
+});
+
+// Closes the reachability gap this task exists for: before it, nothing in
+// the app linked to a recipe at all. The Recipes tab is the in-app entry
+// point — both browsing a recipe to log it, and starting a new one.
+test("Recipes tab shows a recipe and logs it via LogRecipeSheet", async () => {
+  mockRecipesData = [
+    {
+      id: "r1",
+      name: "Chicken Stir Fry",
+      servings: 4,
+      source: "manual",
+      ingredients: [],
+      unresolved_count: 0,
+      total_kcal: 660,
+      total_protein_g: 124,
+      total_carbs_g: 0,
+      total_fat_g: 14.4,
+      total_fiber_g: 0,
+      per_serving_kcal: 165,
+      per_serving_protein_g: 31,
+      per_serving_carbs_g: 0,
+      per_serving_fat_g: 3.6,
+      per_serving_fiber_g: 0,
+    },
+  ];
+  const { findByText, findByLabelText } = await render(<LogScreen />);
+  fireEvent.press(await findByLabelText("Meals"));
+  fireEvent.press(await findByLabelText("Recipes"));
+  fireEvent.press(await findByText("Chicken Stir Fry"));
+
+  fireEvent.press(await findByText("Log it"));
+  expect(mockLogRecipeMutate).toHaveBeenCalledWith(
+    expect.objectContaining({ id: "r1", body: expect.objectContaining({ servings: 4 }) }),
+    expect.anything(),
+  );
+});
+
+test("the Recipes tab's + New recipe opens the parse-review sheet", async () => {
+  const { findByLabelText, findByText } = await render(<LogScreen />);
+  fireEvent.press(await findByLabelText("Meals"));
+  fireEvent.press(await findByLabelText("Recipes"));
+  fireEvent.press(await findByText("+ New recipe"));
+
+  expect(await findByText("Parse recipe")).toBeTruthy();
 });
 
 test("the log screen can start a new meal from scratch", async () => {

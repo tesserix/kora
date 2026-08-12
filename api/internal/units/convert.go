@@ -3,6 +3,8 @@ package units
 import (
 	"encoding/json"
 	"errors"
+	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -85,4 +87,36 @@ func DecodeServingUnits(raw json.RawMessage) []ServingUnit {
 // validation-error type using UnrecognisedUnitMessage.
 func ResolveEntered(amount float64, unit, baseUnit string, servingUnitsRaw json.RawMessage) (float64, error) {
 	return ToBase(amount, unit, baseUnit, DecodeServingUnits(servingUnitsRaw))
+}
+
+// phrasePattern matches a short "<number> <unit>" phrase — "150g", "1 tbsp",
+// "2 sachets" — with or without a separating space.
+var phrasePattern = regexp.MustCompile(`^\s*([\d.]+)\s*([a-zA-Z]+)\s*$`)
+
+// ParsePhrase splits a short free-text portion phrase into an amount and a
+// unit — "150g" → (150, "g", true), "1 tbsp" → (1, "tbsp", true). It does not
+// resolve the unit against anything; it only recognises the "<number>
+// <unit>" shape. A phrase with no leading number — "a pinch", "" — returns
+// ok=false, since there is nothing here to convert: guessing a quantity for
+// vague wording would be exactly the fabrication this package refuses to do.
+func ParsePhrase(phrase string) (amount float64, unit string, ok bool) {
+	phrase = strings.TrimSpace(phrase)
+	if phrase == "" {
+		return 0, "", false
+	}
+	m := phrasePattern.FindStringSubmatch(phrase)
+	if m == nil {
+		return 0, "", false
+	}
+	amt, err := strconv.ParseFloat(m[1], 64)
+	if err != nil || amt <= 0 {
+		return 0, "", false
+	}
+	// Singularise so a plural like "cloves" matches a serving unit named
+	// "clove" — an AI extractor emits plurals ("2 cloves", "3 eggs") as the
+	// common case, not the exception, and ResolveEntered's match is exact.
+	// singular() is a no-op for short base units (g, ml, kg, oz, tbsp, tsp)
+	// since none of them end in a bare "s", so "150g", "400 ml", and "1
+	// tbsp" resolve exactly as before.
+	return amt, singular(strings.ToLower(m[2])), true
 }

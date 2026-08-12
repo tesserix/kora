@@ -423,3 +423,79 @@ export interface FeedbackCreated {
   id: string;
   status: string;
 }
+
+export interface RecipeIngredient {
+  food_item_id: string | null;
+  name: string;
+  raw_text: string;
+  /** false means the food index has no match — the line shows but adds no macros. */
+  resolved: boolean;
+  grams: number;
+  entered_amount: number | null;
+  entered_unit: string | null;
+  /** The grams above are a system estimate, not a measurement. Must be rendered as such. */
+  portion_assumed: boolean;
+  match_score: number | null;
+  match_tier: string | null;
+  kcal: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+  fiber_g: number;
+}
+
+export interface Recipe {
+  id: string;
+  name: string;
+  servings: number;
+  source: "manual" | "paste" | "photo";
+  ingredients: RecipeIngredient[];
+  /** > 0 means the totals below are PARTIAL. Say so in the UI. */
+  unresolved_count: number;
+  total_kcal: number;
+  total_protein_g: number;
+  total_carbs_g: number;
+  total_fat_g: number;
+  total_fiber_g: number;
+  per_serving_kcal: number;
+  per_serving_protein_g: number;
+  per_serving_carbs_g: number;
+  per_serving_fat_g: number;
+  per_serving_fiber_g: number;
+}
+
+export interface RecipeIngredientInput {
+  food_item_id: string | null;
+  raw_text: string;
+  grams: number;
+  entered_amount?: number | null;
+  entered_unit?: string | null;
+  portion_assumed?: boolean;
+  match_score?: number | null;
+  match_tier?: string | null;
+  /** SERVER-POPULATED on a parse draft only (the matched food's canonical
+   *  name, for display) — absent otherwise, and IGNORED by the server on
+   *  create/update, which re-derives the name from food_item_id. Never set
+   *  this from the client. */
+  name?: string;
+}
+
+export interface RecipeDraft {
+  name: string;
+  servings: number;
+  source: "paste" | "photo";
+  ingredients: RecipeIngredientInput[];
+}
+
+export interface SaveRecipeBody {
+  name: string;
+  servings: number;
+  source: "manual" | "paste" | "photo";
+  ingredients: RecipeIngredientInput[];
+}
+
+export interface LogRecipeResult {
+  logged: number;
+  /** Unresolved ingredients that could not be logged — tell the user. */
+  skipped: string[];
+}

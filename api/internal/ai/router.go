@@ -18,6 +18,51 @@ const (
 	photoBudget = 20 * time.Second
 	textBudget  = 1500 * time.Millisecond
 
+	// clientRequestTimeout mirrors REQUEST_TIMEOUT_MS in
+	// apps/mobile/src/lib/api.ts — the per-attempt deadline after which the
+	// app aborts the request. It is NOT a budget; it is the hard ceiling every
+	// user-facing budget on this Router has to fit inside, because work the
+	// server does past it is work nobody is listening for (and, for a provider
+	// call, money spent on an answer that is thrown away).
+	// TestGenerateBudgetsFitInsideTheMobileClientDeadline reads the real
+	// constant out of that file, so the two cannot drift silently.
+	clientRequestTimeout = 25 * time.Second
+
+	// generateBudget bounds free-form/structured generation calls (recipe
+	// parsing, coach Q&A) — GenerateText, not IdentifyText. textBudget's
+	// 1.5s was sized for IdentifyText's short "what food is this?" call and
+	// is far too tight for generation: recipe extraction measured directly
+	// against Gemini (no Router) took ~6s and succeeded, but under the
+	// Router's 1.5s textBudget the primary was killed, the call fell through
+	// to the NVIDIA fallback, and the whole request 502'd at 25s
+	// (POST /v1/recipes/parse -> 502, latency_ms 25004).
+	//
+	// That 25s was then read as "the fallback took ~23.5s" and the budget was
+	// sized to 25s to match. It was in fact clientRequestTimeout to within
+	// 4ms: the APP hung up, and the server's own work was never bounded at
+	// all. A 25s primary budget is unusable — it equals the client's deadline,
+	// so the fallback leg could never be reached from the app, and
+	// withFallback derives the fallback context from the PARENT ctx, making
+	// the budgets additive (25s + 90s = a 115s request nobody was waiting on).
+	//
+	// 10s clears the ~6s measured generation latency with real headroom and,
+	// paired with generateFallbackBudget below, leaves the whole two-leg
+	// sequence inside the client's patience with margin for the network and
+	// the rest of the request. textBudget itself must NOT change:
+	// IdentifyText's fast 1.5s failover is depended on by the food-resolve hot
+	// path.
+	generateBudget = 10 * time.Second
+
+	// generateFallbackBudget bounds the SECOND leg of a generation call,
+	// replacing the shared 90s fallbackBudget on this one path. 90s is right
+	// for a resolve, which the client waits on differently, but on a
+	// generation the fallback only has whatever is left of the client's 25s
+	// after the primary spent its own budget. 10s + 12s = 22s, which fits
+	// inside clientRequestTimeout with ~3s of margin — so the fallback is
+	// actually reachable from the app, which is the entire point of having
+	// one.
+	generateFallbackBudget = 12 * time.Second
+
 	// fallbackBudget is deliberately generous: the fallback provider only runs
 	// after the primary has already failed or timed out, so latency there is a
 	// last-resort cost we accept rather than fail the resolve. It also absorbs
@@ -54,6 +99,13 @@ type Router struct {
 	PhotoBudget time.Duration
 	TextBudget  time.Duration
 
+	// GenerateBudget overrides the default generateBudget when non-zero, in
+	// the same style as PhotoBudget/TextBudget. Production code should leave
+	// this unset; tests use it to keep GenerateText's latency-fallback path
+	// fast and deterministic instead of waiting out the real 25s production
+	// budget.
+	GenerateBudget time.Duration
+
 	// FallbackBudget overrides the default fallbackBudget when non-zero. Tests
 	// use it to keep the fallback-latency path fast; production leaves it unset.
 	FallbackBudget time.Duration
@@ -71,6 +123,23 @@ func (r *Router) textBudgetOrDefault() time.Duration {
 		return r.TextBudget
 	}
 	return textBudget
+}
+
+func (r *Router) generateBudgetOrDefault() time.Duration {
+	if r.GenerateBudget > 0 {
+		return r.GenerateBudget
+	}
+	return generateBudget
+}
+
+// generateFallbackBudgetOrDefault is the fallback budget for GenerateText.
+// The FallbackBudget field still overrides it, so tests that shorten the
+// fallback leg keep working on every call type.
+func (r *Router) generateFallbackBudgetOrDefault() time.Duration {
+	if r.FallbackBudget > 0 {
+		return r.FallbackBudget
+	}
+	return generateFallbackBudget
 }
 
 func (r *Router) fallbackBudgetOrDefault() time.Duration {
@@ -163,7 +232,7 @@ func (r *Router) Embed(ctx context.Context, text string) ([]float32, Usage, erro
 }
 
 func (r *Router) GenerateText(ctx context.Context, systemPrompt, userPrompt string) (string, Usage, error) {
-	return withFallback(ctx, r.textBudgetOrDefault(), r.fallbackBudgetOrDefault(),
+	return withFallback(ctx, r.generateBudgetOrDefault(), r.generateFallbackBudgetOrDefault(),
 		func(c context.Context) (string, Usage, error) {
 			return r.Primary.GenerateText(c, systemPrompt, userPrompt)
 		},

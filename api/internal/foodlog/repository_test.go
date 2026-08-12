@@ -78,11 +78,11 @@ func TestListForUserSince(t *testing.T) {
 
 	now := time.Now()
 	// in-window
-	inWindow, err := repo.Create(ctx, FoodLog{UserID: userID, FoodItemID: &item.ID, LoggedAt: now.Add(-2 * 24 * time.Hour), MealSlot: "breakfast", QuantityGrams: 60, Kcal: 100})
+	inWindow, err := repo.Create(ctx, FoodLog{UserID: userID, FoodItemID: &item.ID, LoggedAt: now.Add(-2 * 24 * time.Hour), MealSlot: "breakfast", Source: "manual", QuantityGrams: 60, Kcal: 100})
 	require.NoError(t, err)
 	t.Cleanup(func() { db.Exec("DELETE FROM food_logs WHERE id = ?", inWindow.ID) })
 	// out-of-window
-	outOfWindow, err := repo.Create(ctx, FoodLog{UserID: userID, FoodItemID: &item.ID, LoggedAt: now.Add(-200 * 24 * time.Hour), MealSlot: "breakfast", QuantityGrams: 60, Kcal: 100})
+	outOfWindow, err := repo.Create(ctx, FoodLog{UserID: userID, FoodItemID: &item.ID, LoggedAt: now.Add(-200 * 24 * time.Hour), MealSlot: "breakfast", Source: "manual", QuantityGrams: 60, Kcal: 100})
 	require.NoError(t, err)
 	t.Cleanup(func() { db.Exec("DELETE FROM food_logs WHERE id = ?", outOfWindow.ID) })
 
@@ -206,7 +206,7 @@ func TestHasLoggedBefore(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, got, "a user with no logs at all has not logged before anything")
 
-	old, err := repo.Create(ctx, FoodLog{UserID: userID, FoodItemID: &item.ID, LoggedAt: now.Add(-10 * 24 * time.Hour), MealSlot: "breakfast", QuantityGrams: 60, Kcal: 100})
+	old, err := repo.Create(ctx, FoodLog{UserID: userID, FoodItemID: &item.ID, LoggedAt: now.Add(-10 * 24 * time.Hour), MealSlot: "breakfast", Source: "manual", QuantityGrams: 60, Kcal: 100})
 	require.NoError(t, err)
 	t.Cleanup(func() { db.Exec("DELETE FROM food_logs WHERE id = ?", old.ID) })
 

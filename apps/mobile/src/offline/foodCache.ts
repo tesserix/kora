@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import type { FoodItem, Memory, PinnedFood, SavedMeal } from "@/api/types";
+import type { FoodItem, Memory, PinnedFood, Recipe, RecipeIngredient, SavedMeal } from "@/api/types";
 import { UNKNOWN_PROVENANCE } from "@/api/types";
 import { createLock } from "./lock";
 
@@ -174,6 +174,31 @@ export function foodsFromPins(pins: PinnedFood[]): FoodItem[] {
 export function foodsFromSavedMeals(meals: SavedMeal[]): FoodItem[] {
   if (!Array.isArray(meals)) return [];
   return meals.flatMap((m) => (Array.isArray(m?.items) ? m.items : []).map(foodFromServingSummary).filter((f): f is FoodItem => f !== null));
+}
+
+// A recipe ingredient's food_item_id is `string | null` (see
+// api/types.ts RecipeIngredient) — null exactly when `resolved` is false, an
+// ingredient line the food index had no match for. Only a resolved
+// ingredient narrows to a cacheable ServingSummary; this predicate is what
+// lets TypeScript see that narrowing rather than requiring an unchecked cast.
+type ResolvedRecipeIngredient = RecipeIngredient & { food_item_id: string };
+
+function isResolvedIngredient(i: RecipeIngredient): i is ResolvedRecipeIngredient {
+  return i.resolved && i.food_item_id !== null;
+}
+
+// Only RESOLVED ingredients are cacheable: an unresolved line has no
+// food_item_id to key the cache on and contributes no macros (see
+// RecipeIngredient.resolved), so it is silently skipped here rather than
+// caching a phantom food.
+export function foodsFromRecipes(recipes: Recipe[]): FoodItem[] {
+  if (!Array.isArray(recipes)) return [];
+  return recipes.flatMap((r) =>
+    (Array.isArray(r?.ingredients) ? r.ingredients : [])
+      .filter(isResolvedIngredient)
+      .map(foodFromServingSummary)
+      .filter((f): f is FoodItem => f !== null),
+  );
 }
 
 // MemoryFood is not declared here because it is structurally the same

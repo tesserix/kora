@@ -8,6 +8,7 @@ import { reconcileWeightReminder } from "@/reminders/reconcileWeightReminder";
 import {
   foodsFromMemory,
   foodsFromPins,
+  foodsFromRecipes,
   foodsFromSavedMeals,
   getFoodByBarcode,
   searchCachedFoods,
@@ -43,10 +44,14 @@ import type {
   Metric,
   MyFriendCode,
   OnboardingInput,
+  LogRecipeResult,
   PinnedFood,
   Profile,
+  Recipe,
+  RecipeDraft,
   Resolution,
   SavedMeal,
+  SaveRecipeBody,
   SubmitFeedbackInput,
   WeightEntry,
 } from "./types";
@@ -362,6 +367,101 @@ export function useDeleteSavedMeal() {
   return useMutation({
     mutationFn: (id: string) => apiFetch(`/v1/saved-meals/${id}`, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["savedMeals"] }),
+  });
+}
+
+export function useRecipes() {
+  const query = useQuery({
+    queryKey: ["recipes"],
+    queryFn: () => apiFetch("/v1/recipes") as Promise<Recipe[]>,
+  });
+  // Same by-product cache fill as useSavedMeals/usePins: only RESOLVED
+  // ingredients are cacheable (see foodsFromRecipes), same "summary"
+  // fidelity — a recipe never carries a full FoodItem (provenance, serving
+  // info, barcode), only a gram-scaled per-ingredient total.
+  useEffect(() => {
+    if (query.data) cacheFoodsQuietly(foodsFromRecipes(query.data), "summary");
+  }, [query.data]);
+  return query;
+}
+
+export function useRecipe(id: string) {
+  return useQuery({
+    queryKey: ["recipes", id],
+    queryFn: () => apiFetch(`/v1/recipes/${id}`) as Promise<Recipe>,
+    enabled: Boolean(id),
+  });
+}
+
+export function useCreateRecipe() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: SaveRecipeBody) =>
+      apiFetch("/v1/recipes", { method: "POST", body: JSON.stringify(body) }) as Promise<Recipe>,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["recipes"] }),
+  });
+}
+
+export function useUpdateRecipe() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: SaveRecipeBody }) =>
+      apiFetch(`/v1/recipes/${id}`, { method: "PUT", body: JSON.stringify(body) }) as Promise<Recipe>,
+    onSuccess: (_data, { id }) => {
+      qc.invalidateQueries({ queryKey: ["recipes"] });
+      qc.invalidateQueries({ queryKey: ["recipes", id] });
+    },
+  });
+}
+
+export function useDeleteRecipe() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiFetch(`/v1/recipes/${id}`, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["recipes"] }),
+  });
+}
+
+// useParseRecipe never writes: it returns an UNSAVED draft that the review
+// sheet edits before POSTing to /v1/recipes via useCreateRecipe. No cache
+// invalidation, by design. A parse failure (502 parse_failed) is a NORMAL
+// outcome, not swallowed here — apiFetch/apiFetchMultipart reject with an
+// ApiError(status, code, message), which lands on the mutation's `error`
+// field untouched, so a caller does
+// `error instanceof ApiError && error.status === 502` to route to the
+// manual-entry fallback (Task 9) rather than a generic failure toast. Keyed
+// off `status`, not `code`: a real 502's `code` is only as reliable as the
+// response body's JSON parsing, which is not guaranteed (see
+// RecipeParseSheet's handleParseError for why), but `status` always is.
+//
+// The photo branch must go through apiFetchMultipart, not apiFetch: apiFetch
+// always forces a `Content-Type: application/json` header, which would
+// break the multipart boundary fetch() sets automatically for a FormData
+// body (see useResolvePhoto/useResolveVoice above for the same split).
+export function useParseRecipe() {
+  return useMutation({
+    mutationFn: (input: { text: string } | { photo: FormData }) =>
+      "text" in input
+        ? (apiFetch("/v1/recipes/parse", {
+            method: "POST",
+            body: JSON.stringify({ text: input.text }),
+          }) as Promise<RecipeDraft>)
+        : (apiFetchMultipart("/v1/recipes/parse", input.photo) as Promise<RecipeDraft>),
+  });
+}
+
+export function useLogRecipe() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: { servings: number; meal_slot: string; logged_at: string } }) =>
+      apiFetch(`/v1/recipes/${id}/log`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }) as Promise<LogRecipeResult>,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["logs"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+    },
   });
 }
 

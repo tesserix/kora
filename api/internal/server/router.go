@@ -30,6 +30,7 @@ import (
 	"github.com/tesserix/kora/api/internal/nutrition"
 	"github.com/tesserix/kora/api/internal/onboarding"
 	"github.com/tesserix/kora/api/internal/pins"
+	"github.com/tesserix/kora/api/internal/recipes"
 	"github.com/tesserix/kora/api/internal/resolve"
 	"github.com/tesserix/kora/api/internal/savedmeals"
 	"github.com/tesserix/kora/api/internal/social"
@@ -210,6 +211,32 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.POST("/saved-meals", smHandler.Create)
 		v1.PUT("/saved-meals/:id", smHandler.Update)
 		v1.DELETE("/saved-meals/:id", smHandler.Delete)
+
+		// Recipes. Reuses the same ai.Provider instance the coach handler and
+		// resolve engine already use — there is no reason recipe parsing
+		// would ever need a different one. The parser is nil when that
+		// provider is unset (no provider key configured) — Handler.Parse
+		// then returns 503 and the manual editor still works, so recipes
+		// degrade rather than disappear.
+		recipeSvc := recipes.NewService(recipes.NewRepository(deps.DB), foodRepo).
+			WithBatchLogger(foodlog.NewService(logRepo, foodRepo))
+		var recipeParser *recipes.Parser
+		if deps.Provider != nil {
+			// Same billing.Meter the coach and the resolve engine use: recipe
+			// parsing is gated by the same per-user and global caps, and its
+			// calls land in the same ai_usage_events ledger the global cap is
+			// computed from. An unmetered AI endpoint would under-protect
+			// every other AI feature, not just itself.
+			recipeParser = recipes.NewParser(deps.Provider, foodRepo, billing.NewMeter(deps.DB))
+		}
+		recipeHandler := recipes.NewHandler(recipeSvc, recipeParser)
+		v1.GET("/recipes", recipeHandler.List)
+		v1.POST("/recipes", recipeHandler.Create)
+		v1.POST("/recipes/parse", recipeHandler.Parse)
+		v1.GET("/recipes/:id", recipeHandler.Get)
+		v1.PUT("/recipes/:id", recipeHandler.Update)
+		v1.DELETE("/recipes/:id", recipeHandler.Delete)
+		v1.POST("/recipes/:id/log", recipeHandler.Log)
 
 		trackingRepo := tracking.NewRepository(deps.DB)
 		trackingHandler := tracking.NewHandler(trackingRepo)
