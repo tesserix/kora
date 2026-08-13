@@ -1,5 +1,6 @@
 import { act, fireEvent, render as rtlRender, waitFor } from "@testing-library/react-native";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import * as ImagePicker from "expo-image-picker";
 import type { Resolution } from "@/api/types";
 
 // The real "@/lib/api" pulls in "@/lib/firebase" -> AsyncStorage's native
@@ -21,13 +22,24 @@ const mockResolveBarcodeMutate = jest.fn();
 // mockResolveTextIsPending getter pattern in capture.test.tsx.
 let mockResolveBarcodeIsPending = false;
 
-// Only the barcode-scan path is under test here, so the other capture modes'
-// hooks are stubbed to inert no-ops — CaptureScreen still mounts all of them
-// unconditionally.
+// Photo is only used by the cross-modality regression below (cancel a photo
+// resolve, then confirm a barcode scan right after is still accepted) — every
+// other test in this file stays barcode-only.
+const mockResolvePhotoMutate = jest.fn();
+let mockResolvePhotoIsPending = false;
+
+// Only the barcode-scan (and, for one cross-modality test, photo) path is
+// under test here, so the remaining capture modes' hooks are stubbed to
+// inert no-ops — CaptureScreen still mounts all of them unconditionally.
 jest.mock("@/api/hooks", () => ({
   useProfile: () => ({ data: { display_name: "Alex Stone" } }),
   useResolveText: () => ({ mutate: jest.fn(), isPending: false }),
-  useResolvePhoto: () => ({ mutate: jest.fn(), isPending: false }),
+  useResolvePhoto: () => ({
+    mutate: mockResolvePhotoMutate,
+    get isPending() {
+      return mockResolvePhotoIsPending;
+    },
+  }),
   useResolveVoice: () => ({ mutate: jest.fn(), isPending: false }),
   useResolveBarcode: () => ({
     mutate: mockResolveBarcodeMutate,
@@ -110,6 +122,9 @@ function resolutionFixture(overrides: Partial<Resolution> = {}): Resolution {
 beforeEach(() => {
   mockResolveBarcodeMutate.mockReset();
   mockResolveBarcodeIsPending = false;
+  mockResolvePhotoMutate.mockReset();
+  mockResolvePhotoIsPending = false;
+  (ImagePicker.launchCameraAsync as jest.Mock).mockReset().mockResolvedValue({ canceled: true, assets: null });
 });
 
 describe("barcode scanner re-arming", () => {
@@ -274,5 +289,107 @@ describe("barcode scanner cooldown after Cancel", () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  // Pins the exact trap this task exists to avoid (see the review that
+  // followed the first pass): resetting scannedRef inside handleCancelResolve
+  // directly, rather than relying solely on the abort's onError to release it
+  // (see #136 part 1). That naive reset would leave all three tests above
+  // green — the cooldown above still blocks the SAME code either way — so it
+  // needs its own, more direct assertion: pressing Cancel, on its own, before
+  // the abort's onError has actually landed, must not itself re-open the
+  // latch. Only onError may do that.
+  test("Cancel alone does not release the scan latch — only the abort's onError does", async () => {
+    const render = await renderCapture();
+    const { utils, rerenderSame } = render;
+    await fireEvent.press(await utils.findByText("Scan"));
+
+    const options = await scanThenReachCancel(render, "5000112637922");
+    expect(mockResolveBarcodeMutate).toHaveBeenCalledTimes(1);
+
+    await fireEvent.press(await utils.findByLabelText("Cancel"));
+    mockResolveBarcodeIsPending = false;
+    await act(async () => rerenderSame());
+
+    // Deliberately no call to options.onError yet. If handleCancelResolve
+    // reset scannedRef itself, the latch would already be open here and a
+    // DIFFERENT code (not subject to the cooldown at all) would start a
+    // second resolve immediately.
+    const scannerAfterCancel = await utils.findByTestId("barcode-scanner");
+    await act(async () => {
+      scannerAfterCancel.props.onBarcodeScanned({ data: "4008400402222" });
+    });
+    expect(mockResolveBarcodeMutate).toHaveBeenCalledTimes(1);
+
+    // The abort's onError, mirroring Task 1, is what actually releases it —
+    // the same different code now goes through.
+    await act(async () => options.onError(new DOMException("Aborted", "AbortError")));
+    await act(async () => {
+      scannerAfterCancel.props.onBarcodeScanned({ data: "4008400402222" });
+    });
+    expect(mockResolveBarcodeMutate).toHaveBeenCalledTimes(2);
+  });
+});
+
+// A Cancel on a non-barcode resolve must not leave lastScannedCodeRef
+// pointing at some earlier, unrelated barcode scan — otherwise switching
+// modes and cancelling a photo/voice/text resolve would arm the barcode
+// cooldown against a code that was never in flight this time (see the
+// review finding: beginResolve() now clears lastScannedCodeRef by default,
+// and only handleBarcodeScanned sets it back).
+//
+// The scenario has to include an earlier SUCCESSFUL barcode scan of the
+// exact code re-presented at the end — cancelling the photo resolve alone
+// proves nothing, since lastScannedCodeRef starts out null regardless of the
+// fix. Reproducing the reported trap requires: scan A (succeeds) -> switch
+// to Photo -> capture -> Cancel the photo resolve -> switch back to Scan ->
+// present A again inside the 2s cooldown window. Without the fix,
+// handleCancelResolve copies the stale "A" left in lastScannedCodeRef into
+// cancelledCodeRef and A is silently dropped.
+describe("cross-modality: a photo cancel must not suppress a later barcode scan", () => {
+  test("re-presenting an earlier-scanned barcode is accepted right after cancelling an unrelated photo resolve", async () => {
+    (ImagePicker.launchCameraAsync as jest.Mock).mockResolvedValueOnce({
+      canceled: false,
+      assets: [{ uri: "file://meal.jpg", fileName: "meal.jpg", mimeType: "image/jpeg" }],
+    });
+
+    const render = await renderCapture();
+    const { utils, rerenderSame } = render;
+
+    // 1. Scan barcode A to success — this is what leaves lastScannedCodeRef
+    // pointing at "5000112637922" if beginResolve() doesn't clear it for
+    // every OTHER modality's resolve.
+    await fireEvent.press(await utils.findByText("Scan"));
+    const scanner = await utils.findByTestId("barcode-scanner");
+    await act(async () => {
+      scanner.props.onBarcodeScanned({ data: "5000112637922" });
+    });
+    expect(mockResolveBarcodeMutate).toHaveBeenCalledTimes(1);
+    const [, barcodeOptions] = mockResolveBarcodeMutate.mock.calls[0];
+    await act(async () => barcodeOptions.onSuccess(resolutionFixture()));
+
+    // 2. Switch to Photo, capture, and Cancel that — an entirely different
+    // modality's resolve, with no barcode of its own.
+    await fireEvent.press(await utils.findByText("Photo"));
+    await fireEvent.press(await utils.findByLabelText("Photo viewfinder"));
+    await waitFor(() => expect(mockResolvePhotoMutate).toHaveBeenCalledTimes(1));
+
+    mockResolvePhotoIsPending = true;
+    await act(async () => rerenderSame());
+    await fireEvent.press(await utils.findByLabelText("Cancel"));
+    const [, photoOptions] = mockResolvePhotoMutate.mock.calls[0];
+    await act(async () => photoOptions.onError(new DOMException("Aborted", "AbortError")));
+    mockResolvePhotoIsPending = false;
+    await act(async () => rerenderSame());
+
+    // 3. Back to Scan, and present the SAME code A again, still well inside
+    // the barcode cooldown window — it must be accepted, not suppressed as
+    // if IT were the thing just cancelled.
+    await fireEvent.press(await utils.findByText("Scan"));
+    const scannerAgain = await utils.findByTestId("barcode-scanner");
+    await act(async () => {
+      scannerAgain.props.onBarcodeScanned({ data: "5000112637922" });
+    });
+    expect(mockResolveBarcodeMutate).toHaveBeenCalledTimes(2);
   });
 });

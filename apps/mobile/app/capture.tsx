@@ -935,8 +935,12 @@ export default function CaptureScreen() {
   // scan instantly while stopping the cancelled one from re-firing on its own.
   const cancelledCodeRef = useRef<string | null>(null);
   const cancelledAtRef = useRef(0);
-  // The barcode currently in flight — set the moment a resolve starts, read
-  // by handleCancelResolve so it knows what to suppress. Distinct from
+  // The last barcode scanned, if a barcode resolve is what's currently in
+  // flight — set at the top of handleBarcodeScanned (after beginResolve,
+  // which clears it for every OTHER modality), read by handleCancelResolve
+  // so it knows what to suppress. A Cancel on a photo/voice/text resolve
+  // must not arm the barcode cooldown with whatever barcode was scanned
+  // earlier, hence the clear-by-default in beginResolve. Distinct from
   // cancelledCodeRef, which only records a code once it has actually been
   // cancelled.
   const lastScannedCodeRef = useRef<string | null>(null);
@@ -964,10 +968,16 @@ export default function CaptureScreen() {
   // Called at the top of every resolve-triggering handler, before the
   // corresponding mutate(). Returns the controller so the caller's
   // onSuccess/onError can check `.signal.aborted` before touching state.
+  //
+  // Clears lastScannedCodeRef by default — only handleBarcodeScanned sets it
+  // back (immediately after calling this), so a Cancel on a photo/voice/text
+  // resolve never arms the barcode cooldown with a stale code from an
+  // earlier, unrelated scan (see #136 part 2 follow-up review).
   function beginResolve(): AbortController {
     const controller = new AbortController();
     resolveControllerRef.current = controller;
     setCancelledResolve(false);
+    lastScannedCodeRef.current = null;
     return controller;
   }
 
@@ -1304,18 +1314,22 @@ export default function CaptureScreen() {
       return;
     }
     scannedRef.current = true;
-    lastScannedCodeRef.current = data;
     setErrorMsg(null);
+    // beginResolve() clears lastScannedCodeRef by default (for every OTHER
+    // modality) — set it back to this scan's code immediately after, not
+    // before, so this write is the one that survives.
     const controller = beginResolve();
+    lastScannedCodeRef.current = data;
     resolveBarcode.mutate({ input: data, signal: controller.signal }, {
       onSuccess: (result) => {
         scannedRef.current = false;
         if (controller.signal.aborted) return;
-        // A different code succeeding means the suppression from an earlier
-        // cancel has served its purpose — clear it so it cannot outlive it.
-        if (cancelledCodeRef.current !== data) {
-          cancelledCodeRef.current = null;
-        }
+        // Any barcode succeeding means whatever suppression a prior cancel
+        // may have left behind has served its purpose — clear it
+        // unconditionally rather than only when the codes differ, so a
+        // cancelled-then-later-successful code can't leave a stale entry
+        // for a future cancel to re-arm with a fresh timestamp.
+        cancelledCodeRef.current = null;
         // A cache hit still means the modality was a barcode scan — no AI
         // ran, but that's a COGS distinction (see #43), not a modality one.
         applyResolution(result, "ai_barcode");
