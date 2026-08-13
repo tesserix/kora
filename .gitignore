@@ -6,6 +6,14 @@
 google-services.json
 GoogleService-Info.plist
 
+# ...except the mobile app's, which EAS Build needs present at build time.
+# Unlike a service-account key, an iOS GoogleService-Info.plist is public by
+# design: it is embedded in every copy of the shipped binary, and its API_KEY
+# is a client identifier restricted by bundle ID, not a credential. Keeping it
+# untracked makes it an invisible build input — the cloud builder never sees it
+# and the build fails for a reason nothing in the repo explains.
+!apps/mobile/GoogleService-Info.plist
+
 # Go
 api/bin/
 api/coverage.out
