@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { act, fireEvent, render as rtlRender, waitFor } from "@testing-library/react-native";
-import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as ImagePicker from "expo-image-picker";
 import { useAudioRecorder } from "expo-audio";
 import { router } from "expo-router";
-import { ApiError, NetworkError, TimeoutError } from "@/lib/api";
+import { ApiError, AuthTokenError, CancelledError, NetworkError, TimeoutError } from "@/lib/api";
 import { CaptureQueueFullError } from "@/offline/captureQueue";
 import { NoOwnerError } from "@/offline/owner";
 import { mealSlotForHour } from "@/lib/mealSlot";
@@ -50,6 +50,12 @@ jest.mock("@/lib/api", () => ({
     constructor() {
       super("The request timed out");
       this.name = "TimeoutError";
+    }
+  },
+  CancelledError: class CancelledError extends Error {
+    constructor(cause?: unknown) {
+      super("Request cancelled", { cause });
+      this.name = "CancelledError";
     }
   },
 }));
@@ -282,21 +288,20 @@ describe("Voice capture goes offline", () => {
   });
 });
 
-// #136 task 3: today, onError early-returns on controller.signal.aborted
-// before ever reaching handleResolveFailure, so a cancelled photo/voice
-// capture is destroyed instead of queued — the one place Cancel discards
-// something the user made. Cancel stops the WAITING, not the capture: this
-// pair pins that a cancelled offline capture is preserved (queued, same as
-// an offline timeout already is) while a cancelled ONLINE capture enqueues
-// nothing, since doFetch folds a caller's own abort into NetworkError (see
-// src/lib/api.ts) exactly like a real network failure — without the
-// connectivity gate, an online Cancel would look queueable too.
+// #136 task 3 + its follow-up review. Cancel stops the WAITING, not the
+// capture: a cancelled capture whose failure would otherwise be queueable is
+// preserved, and a cancel that has nothing to preserve queues nothing.
+//
+// The discriminant is the ERROR CLASS, not a connectivity snapshot. A capture
+// cancelled on a dead connection arrives as a NetworkError (the request had
+// already failed in transport), which handleResolveFailure queues exactly as it
+// queues an uncancelled one. A capture cancelled on a live connection arrives as
+// api.ts's CancelledError, which that same classifier does not queue — there is
+// nothing to resolve later. isOnline() used to make this call instead, and it
+// fails open while NetInfo is still probing: on a connection that had dropped
+// but not yet been reclassified, the capture was discarded.
 describe("Cancelling a photo resolve", () => {
-  afterEach(() => {
-    onlineManager.setOnline(true);
-  });
-
-  async function cancelPhotoResolve() {
+  async function cancelPhotoResolve(error: Error) {
     (ImagePicker.launchCameraAsync as jest.Mock).mockResolvedValueOnce({
       canceled: false,
       assets: [{ uri: "file://x.jpg", fileName: "x.jpg", mimeType: "image/jpeg" }],
@@ -307,15 +312,14 @@ describe("Cancelling a photo resolve", () => {
     await fireEvent.press(await rendered.findByLabelText("Cancel"));
 
     const [, options] = mockResolvePhotoMutate.mock.calls[0];
-    await act(async () => options.onError(new NetworkError(new TypeError("Network request failed"))));
+    await act(async () => options.onError(error));
     return rendered;
   }
 
   test("offline, the cancelled capture is enqueued rather than discarded", async () => {
-    onlineManager.setOnline(false);
     mockEnqueueCapture().mockResolvedValue({ id: "cap-cancel-photo" });
 
-    await cancelPhotoResolve();
+    await cancelPhotoResolve(new NetworkError(new TypeError("Network request failed")));
 
     expect(mockEnqueueCapture()).toHaveBeenCalledWith(
       { uri: "file://x.jpg", name: "x.jpg", type: "image/jpeg" },
@@ -325,20 +329,68 @@ describe("Cancelling a photo resolve", () => {
   });
 
   test("online, nothing is enqueued — there is nothing to resolve later", async () => {
-    onlineManager.setOnline(true);
-
-    await cancelPhotoResolve();
+    await cancelPhotoResolve(new CancelledError(new Error("aborted")));
 
     expect(mockEnqueueCapture()).not.toHaveBeenCalled();
+  });
+
+  // A broken session while offline is the condition handleResolveFailure's own
+  // comment names as the reason it groups AuthTokenError with NetworkError: a
+  // user offline for longer than the token's life (a flight, a hike) gets
+  // AuthTokenError, not NetworkError, and the capture must survive it — cancelled
+  // or not.
+  test("an expired token while offline still preserves the cancelled capture", async () => {
+    mockEnqueueCapture().mockResolvedValue({ id: "cap-cancel-auth" });
+
+    await cancelPhotoResolve(new AuthTokenError(new Error("no token")));
+
+    expect(mockEnqueueCapture()).toHaveBeenCalledWith(
+      { uri: "file://x.jpg", name: "x.jpg", type: "image/jpeg" },
+      "photo",
+      expectedMealSlot(),
+    );
+  });
+
+  // `silent` itself, pinned: Cancel already took the screen to idle and told
+  // the user what it was doing, so a successful enqueue does NOT also pop an
+  // Otto bubble. Without this, deleting `{ silent: true }` from the cancelled
+  // path would keep the whole suite green.
+  test("a successful enqueue after Cancel says nothing — the screen already went idle", async () => {
+    mockEnqueueCapture().mockResolvedValue({ id: "cap-cancel-photo" });
+
+    const rendered = await cancelPhotoResolve(new NetworkError(new TypeError("Network request failed")));
+
+    expect(mockEnqueueCapture()).toHaveBeenCalled();
+    expect(rendered.queryByText(/i.{0,3}ve saved that/i)).toBeNull();
+    expect(rendered.queryByText(/you.{0,3}re offline/i)).toBeNull();
+  });
+
+  // The other half of that rule, and the defect it exists to prevent: `silent`
+  // suppresses the reassurance, never the bad news. A queue refusal on the
+  // cancelled path destroyed the photo with zero indication.
+  test("a full queue still surfaces its refusal — a destroyed capture is never silent", async () => {
+    mockEnqueueCapture().mockRejectedValue(new CaptureQueueFullError());
+
+    const rendered = await cancelPhotoResolve(new NetworkError(new TypeError("Network request failed")));
+
+    expect(
+      await rendered.findByText(
+        "There are too many captures waiting to be identified. Connect to the internet, or remove one first.",
+      ),
+    ).toBeTruthy();
+  });
+
+  test("no signed-in owner still surfaces its refusal on the cancelled path", async () => {
+    mockEnqueueCapture().mockRejectedValue(new NoOwnerError());
+
+    const rendered = await cancelPhotoResolve(new NetworkError(new TypeError("Network request failed")));
+
+    expect(await rendered.findByText("Can't save this log — please sign in and try again.")).toBeTruthy();
   });
 });
 
 describe("Cancelling a voice resolve", () => {
-  afterEach(() => {
-    onlineManager.setOnline(true);
-  });
-
-  async function cancelVoiceResolve() {
+  async function cancelVoiceResolve(error: Error) {
     const recorder = makeRecorder();
     (useAudioRecorder as jest.Mock).mockReturnValue(recorder);
 
@@ -350,15 +402,14 @@ describe("Cancelling a voice resolve", () => {
     await fireEvent.press(await rendered.findByLabelText("Cancel"));
 
     const [, options] = mockResolveVoiceMutate.mock.calls[0];
-    await act(async () => options.onError(new NetworkError(new TypeError("Network request failed"))));
+    await act(async () => options.onError(error));
     return rendered;
   }
 
   test("offline, the cancelled clip is enqueued rather than discarded", async () => {
-    onlineManager.setOnline(false);
     mockEnqueueCapture().mockResolvedValue({ id: "cap-cancel-voice" });
 
-    await cancelVoiceResolve();
+    await cancelVoiceResolve(new NetworkError(new TypeError("Network request failed")));
 
     expect(mockEnqueueCapture()).toHaveBeenCalledWith(
       { uri: "file://mock-recording.m4a", name: "clip.m4a", type: "audio/mp4" },
@@ -368,11 +419,21 @@ describe("Cancelling a voice resolve", () => {
   });
 
   test("online, nothing is enqueued — there is nothing to resolve later", async () => {
-    onlineManager.setOnline(true);
-
-    await cancelVoiceResolve();
+    await cancelVoiceResolve(new CancelledError(new Error("aborted")));
 
     expect(mockEnqueueCapture()).not.toHaveBeenCalled();
+  });
+
+  test("a full queue still surfaces its refusal for a cancelled clip", async () => {
+    mockEnqueueCapture().mockRejectedValue(new CaptureQueueFullError());
+
+    const rendered = await cancelVoiceResolve(new NetworkError(new TypeError("Network request failed")));
+
+    expect(
+      await rendered.findByText(
+        "There are too many captures waiting to be identified. Connect to the internet, or remove one first.",
+      ),
+    ).toBeTruthy();
   });
 });
 

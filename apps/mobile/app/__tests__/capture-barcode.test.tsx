@@ -7,12 +7,19 @@ import type { Resolution } from "@/api/types";
 // module, which isn't available under Jest. Mirrors the minimal mock in
 // capture.test.tsx — this file never exercises the error-message narrowing,
 // but capture.tsx imports these names at module scope so they must exist.
+// Every failure class capture.tsx branches on has to exist here: the cancelled
+// path now routes through handleResolveFailure's classifier like any other
+// failure, and a missing class turns `instanceof` into a TypeError.
 jest.mock("@/lib/api", () => ({
   ApiError: class ApiError extends Error {},
   AuthTokenError: class AuthTokenError extends Error {},
   NetworkError: class NetworkError extends Error {},
   ResponseParseError: class ResponseParseError extends Error {},
+  TimeoutError: class TimeoutError extends Error {},
+  CancelledError: class CancelledError extends Error {},
 }));
+
+const { CancelledError } = jest.requireMock("@/lib/api") as { CancelledError: new () => Error };
 
 jest.mock("expo-router", () => ({ router: { back: jest.fn(), push: jest.fn() } }));
 
@@ -378,7 +385,9 @@ describe("cross-modality: a photo cancel must not suppress a later barcode scan"
     await act(async () => rerenderSame());
     await fireEvent.press(await utils.findByLabelText("Cancel"));
     const [, photoOptions] = mockResolvePhotoMutate.mock.calls[0];
-    await act(async () => photoOptions.onError(new DOMException("Aborted", "AbortError")));
+    // What a cancelled resolve really rejects with now (src/lib/api.ts): not
+    // queueable, so nothing reaches the capture queue from this path.
+    await act(async () => photoOptions.onError(new CancelledError()));
     mockResolvePhotoIsPending = false;
     await act(async () => rerenderSame());
 

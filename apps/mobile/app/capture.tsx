@@ -43,7 +43,6 @@ import {
 import { ApiError, AuthTokenError, NetworkError, ResponseParseError, TimeoutError } from "@/lib/api";
 import { OfflineUnknownBarcodeError } from "@/offline/cachedResolution";
 import { CaptureQueueFullError } from "@/offline/captureQueue";
-import { isOnline } from "@/offline/connectivity";
 import { enqueueCapture, type CaptureFile } from "@/offline/enqueueCapture";
 import { NoOwnerError } from "@/offline/owner";
 import { QUEUED_CAPTURES_KEY } from "@/offline/queryKeys";
@@ -995,10 +994,15 @@ export default function CaptureScreen() {
     setStage("idle");
   }
 
-  // Best-effort: nothing left to cancel into once the screen is gone, and a
-  // signal nobody reads is harmless. Mirrors the voice-recorder cleanup
-  // effect above — same "leaving the screen must not leave work running
-  // unbounded behind it" concern, applied to the resolve instead of the mic.
+  // Leaving the screen genuinely kills the in-flight resolve: the signal is
+  // threaded all the way to fetch (see resolveControllerRef above), so this
+  // stops the upload and the server-side AI work rather than merely dropping a
+  // reference to a request that would run to completion regardless. Mirrors the
+  // voice-recorder cleanup effect above — same "leaving the screen must not
+  // leave work running unbounded behind it" concern, applied to the resolve
+  // instead of the mic. There is no state left to update afterwards, so the
+  // rejection this raises has nowhere to surface and nothing to say: it is a
+  // CancelledError, which the reporter deliberately does not treat as a fault.
   useEffect(() => {
     return () => {
       resolveControllerRef.current?.abort();
@@ -1159,8 +1163,10 @@ export default function CaptureScreen() {
   // `silent` is set only by the cancelled-resolve path below: Cancel already
   // told the user the screen is going idle, so it does not also get to pop a
   // new Otto bubble about a request it just told capture.tsx to stop waiting
-  // on. The capture is still worth preserving — silent controls the message,
-  // never the enqueue.
+  // on. The capture is still worth preserving — silent controls the SUCCESS
+  // message only. It never suppresses the enqueue, and never suppresses a
+  // queue refusal: a capture that could not be saved must say so (see the
+  // catch below).
   async function handleResolveFailure(
     error: Error,
     file: CaptureFile,
@@ -1185,16 +1191,21 @@ export default function CaptureScreen() {
       }
       void queryClient.invalidateQueries({ queryKey: [QUEUED_CAPTURES_KEY] });
     } catch (queueError) {
-      // The queue itself refused (full, or nobody signed in). Both carry
-      // user-facing copy on `message`, so surface it verbatim rather than
-      // collapsing to a generic failure.
-      if (!silent) {
-        setErrorMsg(
-          queueError instanceof CaptureQueueFullError || queueError instanceof NoOwnerError
-            ? queueError.message
-            : ottoErrorMessage(error),
-        );
-      }
+      // The queue itself refused (full, or nobody signed in) — the capture is
+      // GONE. `silent` deliberately does not apply here: it suppresses the
+      // reassurance, never the bad news. A refusal swallowed on the cancelled
+      // path destroyed the photo or clip with zero indication, which is the one
+      // outcome this whole path exists to prevent — the user must either keep
+      // the capture or be told plainly that it was discarded.
+      //
+      // CaptureQueueFullError and NoOwnerError both carry user-facing copy on
+      // `message`, so surface it verbatim rather than collapsing to a generic
+      // failure; anything else falls back to the original failure's own copy.
+      setErrorMsg(
+        queueError instanceof CaptureQueueFullError || queueError instanceof NoOwnerError
+          ? queueError.message
+          : ottoErrorMessage(error),
+      );
     }
   }
 
@@ -1224,17 +1235,18 @@ export default function CaptureScreen() {
       },
       onError: (error) => {
         if (controller.signal.aborted) {
-          // Cancel stops the WAITING, not the capture (#136 task 3): offline,
-          // this is exactly what an offline timeout already does above, so
-          // route it the same way rather than destroying the photo the user
-          // just took. doFetch folds a caller's own abort into NetworkError
-          // just like a real network failure (src/lib/api.ts), so without
-          // the isOnline() gate an online Cancel would look queueable too —
-          // there is nothing to resolve later there, so it enqueues nothing.
-          // silent: true keeps the UI suppressed either way; Cancel already
-          // took the screen to idle and does not also get to raise a new
-          // Otto bubble about the request it just told to stop.
-          if (!isOnline()) void handleResolveFailure(error, outcome.file, "photo", { silent: true });
+          // Cancel stops the WAITING, not the capture (#136 task 3): route the
+          // failure through the same classifier the non-cancelled path uses
+          // rather than destroying the photo the user just took. No
+          // connectivity snapshot is consulted — an online Cancel arrives as
+          // CancelledError, which handleResolveFailure's NetworkError /
+          // TimeoutError / AuthTokenError classifier does not queue (there is
+          // nothing to resolve later), while a capture that failed because the
+          // connection was gone is preserved exactly as an uncancelled one is.
+          // silent: true suppresses only the "I've saved that" message; Cancel
+          // already took the screen to idle and does not also get to raise a
+          // new Otto bubble about the request it just told to stop.
+          void handleResolveFailure(error, outcome.file, "photo", { silent: true });
           return;
         }
         void handleResolveFailure(error, outcome.file, "photo");
@@ -1297,10 +1309,9 @@ export default function CaptureScreen() {
         if (controller.signal.aborted) {
           // See handleCapturePhoto's onError above — same reasoning (#136
           // task 3): Cancel preserves the clip via the offline queue instead
-          // of destroying it, gated on isOnline() since an aborted request
-          // surfaces as NetworkError whether or not the device is actually
-          // offline.
-          if (!isOnline()) void handleResolveFailure(error, file, "voice", { silent: true });
+          // of destroying it, with handleResolveFailure's own classifier
+          // deciding, so an online Cancel (CancelledError) queues nothing.
+          void handleResolveFailure(error, file, "voice", { silent: true });
           return;
         }
         void handleResolveFailure(error, file, "voice");
