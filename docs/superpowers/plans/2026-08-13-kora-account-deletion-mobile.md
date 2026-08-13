@@ -19,6 +19,8 @@
 - **Commit messages are single-line**, conventional-commit prefixed, with no signature and no body.
 - **Spec of record:** `docs/superpowers/specs/2026-08-07-account-deletion-design.md`, sections "Mobile" and "Testing". This plan implements only its Mobile portion; the Server portion is already done.
 
+> **Correction (applied during execution).** The test code in Tasks 2 and 3 below omits `await` on `fireEvent` calls. That is a defect in this plan. Under this repo's `@testing-library/react-native` 14.0.1 + React 19.2.3, an un-awaited `fireEvent` does not flush state updates before the next line, so the gate assertions pass against a completely ungated implementation — the tests would be worthless. **Write `await fireEvent.press(...)` / `await fireEvent.changeText(...)`**, matching the repo convention in `app/__tests__/sign-in.test.tsx:69-121` and `meal-undo.test.tsx:141-293`. Verified empirically during Task 2.
+
 ## Context an implementer needs
 
 **What already exists and must NOT be rebuilt:**
