@@ -7,6 +7,7 @@ import { ScreenHeader } from "@/components/ScreenHeader";
 import { AppBackground } from "@/components/AppBackground";
 import { GlassPanel } from "@/components/instrument/GlassPanel";
 import { engravedStyle, monoStyle } from "@/components/instrument/typography";
+import { GroupedSection, Row } from "@/components/GroupedList";
 import { Avatar } from "@/components/Avatar";
 import { useProfile } from "@/api/hooks";
 import type { Profile } from "@/api/types";
@@ -153,6 +154,23 @@ export default function ProfileScreen() {
                 {data ? formatMemberSince(data.onboarded_at) : "—"}
               </AppText>
             </GlassPanel>
+          </View>
+
+          <View>
+            <AppText style={[engravedStyle(instrument), { marginLeft: spacing.md, marginBottom: spacing.xs }]}>
+              Account
+            </AppText>
+            <GroupedSection>
+              <Row
+                title="Delete account"
+                destructive
+                chevron
+                onPress={() => router.push("/delete-account")}
+              />
+            </GroupedSection>
+            <AppText style={{ fontSize: 13, color: instrument.mut, marginLeft: spacing.md, marginTop: spacing.xs }}>
+              Permanently deletes your account and all your data.
+            </AppText>
           </View>
         </View>
       </ScrollView>
