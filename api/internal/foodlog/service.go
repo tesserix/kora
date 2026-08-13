@@ -70,6 +70,10 @@ type LogRequest struct {
 	// queued write replayed after a lost response is idempotent. Optional:
 	// when nil the column default generates one as before.
 	ID *uuid.UUID `json:"id"`
+	// PortionAssumed marks a portion the system chose rather than one derived
+	// from real data or stated by the user — see #138. Omitted yields Go's
+	// zero value false, matching the column default; no pointer needed.
+	PortionAssumed bool `json:"portion_assumed"`
 }
 
 var validMealSlots = map[string]bool{"breakfast": true, "lunch": true, "dinner": true, "snack": true}
@@ -182,23 +186,24 @@ func (s Service) LogFood(ctx context.Context, userID uuid.UUID, req LogRequest) 
 		loggedAt = time.Now()
 	}
 	log := FoodLog{
-		UserID:        userID,
-		FoodItemID:    req.FoodItemID,
-		LoggedAt:      loggedAt,
-		MealSlot:      req.MealSlot,
-		Source:        source,
-		Description:   item.Name,
-		QuantityGrams: req.QuantityGrams,
-		EnteredAmount: req.EnteredAmount,
-		EnteredUnit:   req.EnteredUnit,
-		Kcal:          item.KcalPer100g * f,
-		ProteinG:      item.ProteinPer100g * f,
-		CarbsG:        item.CarbsPer100g * f,
-		FatG:          item.FatPer100g * f,
-		FiberG:        item.FiberPer100g * f,
-		Provenance:    item.Provenance,
-		ClientLogMs:   req.ClientLogMs,
-		InputPhrase:   phraseForSource(source, req.InputPhrase),
+		UserID:         userID,
+		FoodItemID:     req.FoodItemID,
+		LoggedAt:       loggedAt,
+		MealSlot:       req.MealSlot,
+		Source:         source,
+		Description:    item.Name,
+		QuantityGrams:  req.QuantityGrams,
+		EnteredAmount:  req.EnteredAmount,
+		EnteredUnit:    req.EnteredUnit,
+		Kcal:           item.KcalPer100g * f,
+		ProteinG:       item.ProteinPer100g * f,
+		CarbsG:         item.CarbsPer100g * f,
+		FatG:           item.FatPer100g * f,
+		FiberG:         item.FiberPer100g * f,
+		Provenance:     item.Provenance,
+		ClientLogMs:    req.ClientLogMs,
+		InputPhrase:    phraseForSource(source, req.InputPhrase),
+		PortionAssumed: req.PortionAssumed,
 	}
 	// Assigned after construction, not inside the literal: FoodLog.ID is a
 	// value type, so writing uuid.Nil into it when the client sent no id
@@ -327,6 +332,13 @@ func (s Service) EditLog(ctx context.Context, userID, logID uuid.UUID, req EditR
 		current.QuantityGrams = *req.QuantityGrams
 		current.EnteredAmount = nil
 		current.EnteredUnit = nil
+		// A stored portion_assumed: true no longer describes this amount once
+		// the user has overwritten it directly — same reasoning as nulling the
+		// entered pair above, applied to the hedge instead of the unit. See
+		// #138: a client that forgets to clear this leaves a stale hedge on
+		// the row the user just corrected, which is the bug this issue is
+		// about, in miniature.
+		current.PortionAssumed = false
 	}
 
 	// Recompute nutrition from the row whenever food or grams changed.
@@ -414,6 +426,11 @@ type BatchItem struct {
 	QuantityGrams float64   `json:"quantity_grams"`
 	EnteredAmount *float64  `json:"entered_amount"`
 	EnteredUnit   *string   `json:"entered_unit"`
+	// PortionAssumed marks a portion the system chose rather than one derived
+	// from real data or stated by the user — see #138. This is how capture
+	// logs several candidates from one photo, so missing this field would
+	// leave every multi-item capture unmarked.
+	PortionAssumed bool `json:"portion_assumed"`
 }
 
 // CreateBatchRequest logs several foods as a single meal (e.g. all items on a
@@ -519,21 +536,22 @@ func (s Service) CreateBatch(ctx context.Context, userID uuid.UUID, req CreateBa
 			fid := it.FoodItemID
 			f := grams / 100.0
 			created, err := txLogs.Create(ctx, FoodLog{
-				UserID:        userID,
-				FoodItemID:    &fid,
-				LoggedAt:      loggedAt,
-				MealSlot:      req.MealSlot,
-				Source:        source,
-				Description:   item.Name,
-				QuantityGrams: grams,
-				EnteredAmount: it.EnteredAmount,
-				EnteredUnit:   it.EnteredUnit,
-				Kcal:          item.KcalPer100g * f,
-				ProteinG:      item.ProteinPer100g * f,
-				CarbsG:        item.CarbsPer100g * f,
-				FatG:          item.FatPer100g * f,
-				FiberG:        item.FiberPer100g * f,
-				Provenance:    item.Provenance,
+				UserID:         userID,
+				FoodItemID:     &fid,
+				LoggedAt:       loggedAt,
+				MealSlot:       req.MealSlot,
+				Source:         source,
+				Description:    item.Name,
+				QuantityGrams:  grams,
+				EnteredAmount:  it.EnteredAmount,
+				EnteredUnit:    it.EnteredUnit,
+				Kcal:           item.KcalPer100g * f,
+				ProteinG:       item.ProteinPer100g * f,
+				CarbsG:         item.CarbsPer100g * f,
+				FatG:           item.FatPer100g * f,
+				FiberG:         item.FiberPer100g * f,
+				Provenance:     item.Provenance,
+				PortionAssumed: it.PortionAssumed,
 			})
 			if err != nil {
 				return err

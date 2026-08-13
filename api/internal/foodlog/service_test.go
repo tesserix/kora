@@ -131,6 +131,91 @@ func TestLogFoodLiveFoodStillLogsSuccessfully(t *testing.T) {
 	require.Equal(t, item.Name, log.Description)
 }
 
+// TestLogFoodPersistsPortionAssumedTrue proves a log created with
+// portion_assumed: true carries that flag through create and read back —
+// see #138: the hedge shown at capture must survive into the diary.
+func TestLogFoodPersistsPortionAssumedTrue(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	item := nutrition.FoodItem{Name: "Assumed Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	created, err := svc.LogFood(context.Background(), userID, LogRequest{
+		FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual",
+		QuantityGrams: 100, LoggedAt: time.Now(), PortionAssumed: true,
+	})
+	require.NoError(t, err)
+	require.True(t, created.PortionAssumed)
+
+	fetched, err := NewRepository(db).GetByID(context.Background(), userID, created.ID)
+	require.NoError(t, err)
+	require.True(t, fetched.PortionAssumed, "portion_assumed must survive a read back, not just the create response")
+}
+
+// TestLogFoodDefaultsPortionAssumedFalse proves a log created WITHOUT the
+// field reads back as false — the Go zero value, matching the column
+// default — never null, never absent.
+func TestLogFoodDefaultsPortionAssumedFalse(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	item := nutrition.FoodItem{Name: "Not Assumed Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	created, err := svc.LogFood(context.Background(), userID, LogRequest{
+		FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual",
+		QuantityGrams: 100, LoggedAt: time.Now(),
+	})
+	require.NoError(t, err)
+	require.False(t, created.PortionAssumed)
+
+	fetched, err := NewRepository(db).GetByID(context.Background(), userID, created.ID)
+	require.NoError(t, err)
+	require.False(t, fetched.PortionAssumed)
+}
+
+// TestPortionAssumedDoesNotAffectDayTotals pins "the flag is a LABEL, never
+// an input to arithmetic" (#138): two logs with identical nutrition, one
+// assumed and one not, must sum to exactly twice one row's kcal.
+func TestPortionAssumedDoesNotAffectDayTotals(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	item := nutrition.FoodItem{Name: "Totals Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	day := time.Date(2026, 5, 1, 9, 0, 0, 0, time.UTC)
+
+	assumed, err := svc.LogFood(context.Background(), userID, LogRequest{
+		FoodItemID: &item.ID, MealSlot: "breakfast", Source: "manual",
+		QuantityGrams: 150, LoggedAt: day, PortionAssumed: true,
+	})
+	require.NoError(t, err)
+	measured, err := svc.LogFood(context.Background(), userID, LogRequest{
+		FoodItemID: &item.ID, MealSlot: "breakfast", Source: "manual",
+		QuantityGrams: 150, LoggedAt: day.Add(time.Hour),
+	})
+	require.NoError(t, err)
+
+	require.Equal(t, assumed.Kcal, measured.Kcal, "identical grams of the same item must produce identical kcal regardless of the flag")
+
+	logs, err := NewRepository(db).ListByUserAndDay(context.Background(), userID, day, time.UTC)
+	require.NoError(t, err)
+	require.Len(t, logs, 2)
+	var sum float64
+	for _, l := range logs {
+		sum += l.Kcal
+	}
+	require.Equal(t, 2*measured.Kcal, sum, "portion_assumed must never be an input to the day's kcal total")
+}
+
 func TestCopyDayClonesLogsToNewDate(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db)
@@ -176,6 +261,36 @@ func TestEditLogGramsChangeRecomputesFromSameFoodRow(t *testing.T) {
 	require.InDelta(t, item.KcalPer100g*newGrams/100, res.Log.Kcal, 0.001)
 	require.InDelta(t, item.ProteinPer100g*newGrams/100, res.Log.ProteinG, 0.001)
 	require.Equal(t, wantDescription, res.Log.Description)
+}
+
+// TestEditLogOverwritingGramsClearsPortionAssumed proves the server clears a
+// stale hedge rather than trusting clients to send portion_assumed: false —
+// see #138. A stored true no longer describes a portion the user just
+// overwrote by hand.
+func TestEditLogOverwritingGramsClearsPortionAssumed(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	item := nutrition.FoodItem{Name: "Clear Assumed Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	created, err := svc.LogFood(context.Background(), userID, LogRequest{
+		FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual",
+		QuantityGrams: 100, LoggedAt: time.Now(), PortionAssumed: true,
+	})
+	require.NoError(t, err)
+	require.True(t, created.PortionAssumed)
+
+	newGrams := 180.0
+	res, err := svc.EditLog(context.Background(), userID, created.ID, EditRequest{QuantityGrams: &newGrams})
+	require.NoError(t, err)
+	require.False(t, res.Log.PortionAssumed, "editing the portion by hand must clear the stale hedge")
+
+	fetched, err := NewRepository(db).GetByID(context.Background(), userID, created.ID)
+	require.NoError(t, err)
+	require.False(t, fetched.PortionAssumed)
 }
 
 func TestEditLogFoodChangeWithCorrectionPhraseRecordsAlias(t *testing.T) {
@@ -281,6 +396,33 @@ func TestCreateBatchComputesMacrosServerSide(t *testing.T) {
 	require.Equal(t, item.CarbsPer100g*2.0, logs[0].CarbsG)
 	require.Equal(t, item.FatPer100g*2.0, logs[0].FatG)
 	require.Equal(t, item.FiberPer100g*2.0, logs[0].FiberG)
+}
+
+// TestCreateBatchPersistsPortionAssumedPerItem proves the batch path — how
+// capture logs several candidates from one photo — carries portion_assumed
+// per item, not just the single-log path. Missing this would leave every
+// multi-item capture unmarked, which is the common case for a photo of a
+// plate. See #138.
+func TestCreateBatchPersistsPortionAssumedPerItem(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	item := nutrition.FoodItem{Name: "Batch Assumed Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	logs, err := svc.CreateBatch(context.Background(), userID, CreateBatchRequest{
+		LoggedAt: time.Now(), MealSlot: "breakfast",
+		Items: []BatchItem{
+			{FoodItemID: item.ID, QuantityGrams: 100, PortionAssumed: true},
+			{FoodItemID: item.ID, QuantityGrams: 100},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, logs, 2)
+	require.True(t, logs[0].PortionAssumed, "the first item requested portion_assumed: true")
+	require.False(t, logs[1].PortionAssumed, "the second item omitted it and must default false")
 }
 
 // TestCreateBatchRejectsAForeignSource: `source` is bound straight from the

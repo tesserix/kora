@@ -24,6 +24,11 @@ type FoodLog struct {
 	FatG          float64    `json:"fat_g"`
 	FiberG        float64    `json:"fiber_g"`
 	Provenance    string     `json:"provenance"`
+	// PortionAssumed reports that the system chose this portion rather than
+	// deriving it from a serving size or receiving it from the user. It is a
+	// LABEL, never an input to arithmetic — nutrition and day totals are
+	// unaffected by it. Cleared when the user edits the portion by hand.
+	PortionAssumed bool `gorm:"not null;default:false" json:"portion_assumed"`
 	// InputPhrase is the raw text the user said or typed, kept only for
 	// resolve-sourced logs so a later correction can teach the index which
 	// phrase resolved wrong. Description holds the RESOLVED food's name;
