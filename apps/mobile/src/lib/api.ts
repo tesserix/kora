@@ -310,6 +310,17 @@ async function parseJson<T>(res: Response): Promise<T> {
   }
 }
 
+// A 204 (and its sibling 205) is defined by HTTP to carry no body at all, so
+// there is nothing for parseJson to read — calling res.json() on one throws,
+// and a bodiless success would surface as a ResponseParseError. That mattered
+// most where it hurt most: DELETE /v1/me answers 204, so every SUCCESSFUL
+// account deletion was reported to the user as a failure. Keyed on the status
+// rather than on "the body failed to parse", so a 200 whose body is genuinely
+// unreadable still surfaces as ResponseParseError.
+function isNoContent(res: Response): boolean {
+  return res.status === 204 || res.status === 205;
+}
+
 // apiFetchEnvelope returns the whole `{ data, meta? }` envelope. PATCH
 // /v1/logs/:id needs the `meta` object saying whether the correction taught
 // the food index — the client must not claim "Kora will remember" for a
@@ -332,6 +343,7 @@ export async function apiFetchEnvelope<T>(
   );
 
   if (!res.ok) return throwApiError(res);
+  if (isNoContent(res)) return { data: undefined as T };
   return parseJson<{ data: T; meta?: Record<string, unknown> }>(res);
 }
 
