@@ -119,6 +119,26 @@ test("a failed deletion re-registers push for the account that survived", async 
   expect(mockReplace).not.toHaveBeenCalled();
 });
 
+// The dominant cause of a failed deleteAccount() is a bad network, and
+// registerPushToken() goes over that same bad network — so awaiting it before
+// surfacing the error would leave the user staring at "Deleting…" for up to
+// REQUEST_TIMEOUT_MS with no feedback. The error must appear even while
+// re-registration is still in flight.
+test("a failed deletion surfaces the error without waiting for re-registration", async () => {
+  const apiError = Object.assign(new Error("boom"), { name: "ApiError", status: 500 });
+  mockDeleteAccount.mockRejectedValue(apiError);
+  mockRegister.mockReturnValue(new Promise(() => {}));
+
+  const { getByTestId, getByText } = await render(<DeleteAccount />);
+  await fireEvent.changeText(getByTestId("confirm-input"), "delete");
+  await fireEvent.press(getByTestId("confirm-delete"));
+
+  await waitFor(() =>
+    expect(getByText("Kora is having trouble right now. Please try again in a moment.")).toBeTruthy(),
+  );
+  expect(getByTestId("confirm-delete").props.accessibilityState.disabled).toBe(false);
+});
+
 test("a successful deletion does not re-register push", async () => {
   const { getByTestId } = await render(<DeleteAccount />);
   await fireEvent.changeText(getByTestId("confirm-input"), "delete");

@@ -72,14 +72,17 @@ export default function DeleteAccountScreen() {
       // nothing else would ever put it back: registerPushToken()'s only other
       // caller fires on an auth transition, and this user never signed out. Not
       // re-registering here loses them push silently, forever.
-      try {
-        await registerPushToken();
-      } catch {
-        // Deliberately swallowed — see src/lib/push.ts for this convention.
-      }
+      //
+      // Not awaited: the dominant cause of deleteAccount() failing is a bad
+      // network, and registerDevice() rides that same network, so awaiting it
+      // here would leave the user staring at "Deleting…" for up to
+      // REQUEST_TIMEOUT_MS with no error on screen. Fire the error first;
+      // registerPushToken() never rejects (see src/lib/push.ts), so nothing is
+      // lost by not waiting on it.
       setError(apiErrorMessage(e));
       setPending(false);
       inFlight.current = false;
+      void registerPushToken();
       return;
     }
 
