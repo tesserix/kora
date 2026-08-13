@@ -8,15 +8,12 @@ beforeEach(() => {
   mockApiFetch.mockResolvedValue(undefined);
 });
 
-test("issues DELETE to /v1/me", async () => {
+// toHaveBeenCalledWith is a recursive equality check on the whole init object,
+// so this also pins that no body is sent — the server takes the user from the
+// auth context, and an added `body` key would fail this assertion.
+test("issues DELETE to /v1/me, with no body", async () => {
   await deleteAccount();
   expect(mockApiFetch).toHaveBeenCalledWith("/v1/me", { method: "DELETE" });
-});
-
-test("sends no body — the server takes the user from the auth context", async () => {
-  await deleteAccount();
-  const init = mockApiFetch.mock.calls[0][1] as RequestInit;
-  expect(init.body).toBeUndefined();
 });
 
 test("propagates a rejection so the screen can surface it", async () => {
