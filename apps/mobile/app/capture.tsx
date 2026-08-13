@@ -74,6 +74,12 @@ export type { ResolutionSource };
 // which has been deleted now that nothing references it.
 const T = INSTRUMENT_DARK_FIXED;
 
+// How long a cancelled barcode is suppressed from re-triggering a resolve of
+// its own accord (see cancelledCodeRef above). Long enough to outlast the
+// code still sitting in frame at the moment Cancel is pressed, short enough
+// that the scanner isn't left deaf to a legitimately re-presented code.
+const CANCELLED_CODE_COOLDOWN_MS = 2000;
+
 const MODE_PILLS: ReadonlyArray<{ mode: CaptureMode; icon: string; label: string }> = [
   { mode: "photo", icon: "camera", label: "Photo" },
   { mode: "voice", icon: "mic", label: "Voice" },
@@ -922,6 +928,18 @@ export default function CaptureScreen() {
   // Guards a single CameraView against firing onBarcodeScanned repeatedly
   // for the same physical scan while the camera keeps detecting the code.
   const scannedRef = useRef(false);
+  // Cancel must mean "stop this scan", not "stop scanning". Once the resolve
+  // genuinely aborts (#136), scannedRef releases immediately — with the
+  // cancelled code still in frame, and CameraView firing dozens of times a
+  // second. Suppressing only THAT code for a moment lets a different barcode
+  // scan instantly while stopping the cancelled one from re-firing on its own.
+  const cancelledCodeRef = useRef<string | null>(null);
+  const cancelledAtRef = useRef(0);
+  // The barcode currently in flight — set the moment a resolve starts, read
+  // by handleCancelResolve so it knows what to suppress. Distinct from
+  // cancelledCodeRef, which only records a code once it has actually been
+  // cancelled.
+  const lastScannedCodeRef = useRef<string | null>(null);
 
   // The in-flight resolve's cancellation token. `.signal` is threaded into
   // the mutation variables (see ResolveVars in src/api/hooks.ts) and reaches
@@ -955,6 +973,13 @@ export default function CaptureScreen() {
 
   function handleCancelResolve() {
     resolveControllerRef.current?.abort();
+    // Do NOT reset scannedRef here — the abort above releases it through
+    // handleBarcodeScanned's onError (see #136 part 1). Resetting it a
+    // second time here would just re-open the same door faster; the
+    // cooldown below is what actually stops the still-in-frame code from
+    // re-triggering on its own.
+    cancelledCodeRef.current = lastScannedCodeRef.current;
+    cancelledAtRef.current = Date.now();
     setCancelledResolve(true);
     setStage("idle");
   }
@@ -1268,13 +1293,29 @@ export default function CaptureScreen() {
   // scanner dead after the very first successful — or unrecognised — scan.
   function handleBarcodeScanned(data: string) {
     if (scannedRef.current) return;
+    // The cooldown left by a just-cancelled resolve of THIS code (see
+    // handleCancelResolve) — scannedRef has already released by the time
+    // this fires again (Task 1's abort resolves onError immediately), so
+    // without this check the cancelled code would instantly restart itself.
+    if (
+      cancelledCodeRef.current === data &&
+      Date.now() - cancelledAtRef.current < CANCELLED_CODE_COOLDOWN_MS
+    ) {
+      return;
+    }
     scannedRef.current = true;
+    lastScannedCodeRef.current = data;
     setErrorMsg(null);
     const controller = beginResolve();
     resolveBarcode.mutate({ input: data, signal: controller.signal }, {
       onSuccess: (result) => {
         scannedRef.current = false;
         if (controller.signal.aborted) return;
+        // A different code succeeding means the suppression from an earlier
+        // cancel has served its purpose — clear it so it cannot outlive it.
+        if (cancelledCodeRef.current !== data) {
+          cancelledCodeRef.current = null;
+        }
         // A cache hit still means the modality was a barcode scan — no AI
         // ran, but that's a COGS distinction (see #43), not a modality one.
         applyResolution(result, "ai_barcode");
