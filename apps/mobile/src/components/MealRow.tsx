@@ -32,6 +32,10 @@ type Props = {
    * accent wash so the state is visible, not just announced.
    */
   selected?: boolean;
+  /** The system chose this portion rather than deriving or being told it (#138).
+   *  Rendered with the same engraved marker capture uses, so the user learns
+   *  one signal rather than three. */
+  portionAssumed?: boolean;
 };
 
 // Instrument Glass restyle (C2): mono time/kcal, ink name, mut secondary
@@ -39,7 +43,7 @@ type Props = {
 // accent wash — accent stays reserved for the primary CTA/gauge/redline
 // elsewhere), and star/bookmark glyphs tinted from instrument.ink at reduced
 // opacity rather than accent. Pure restyle — props/behavior unchanged.
-export function MealRow({ name, slot, kcal, iconName = "utensils", tint, onPress, onLongPress, accessibilityLabel, pinned, onPinToggle, bookmarked, onBookmark, badge, dimmed, selected }: Props) {
+export function MealRow({ name, slot, kcal, iconName = "utensils", tint, onPress, onLongPress, accessibilityLabel, pinned, onPinToggle, bookmarked, onBookmark, badge, dimmed, selected, portionAssumed }: Props) {
   const { radius, spacing, instrument, fonts } = useTheme();
   const mono = monoStyle(fonts);
   const chip = tint ?? instrument.mut;
@@ -67,6 +71,22 @@ export function MealRow({ name, slot, kcal, iconName = "utensils", tint, onPress
       <View style={{ flex: 1 }}>
         <AppText variant="headline" style={{ color: instrument.ink }}>{name}</AppText>
         <AppText variant="footnote" style={[{ color: instrument.mut }, mono]}>{slot}</AppText>
+        {portionAssumed ? (
+          // Same engraved marker DetectedCard and the recipe screen use for a
+          // system-guessed portion (#138) — one signal, not three. `mut`, no
+          // accent: this is information, not an alarm.
+          <AppText
+            style={{
+              color: instrument.mut,
+              fontSize: 9,
+              fontWeight: "700",
+              textTransform: "uppercase",
+              letterSpacing: 1,
+            }}
+          >
+            portion is a guess
+          </AppText>
+        ) : null}
       </View>
       {badge}
       <View style={{ opacity: dimmed ? 0.5 : 1 }}>

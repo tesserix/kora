@@ -524,6 +524,7 @@ export default function Diary() {
                           onLongPress={() => toggleSelected(log.id)}
                           selected={rowSelected}
                           accessibilityLabel={log.description}
+                          portionAssumed={log.portion_assumed === true}
                         />
                       </View>
                     </Swipeable>

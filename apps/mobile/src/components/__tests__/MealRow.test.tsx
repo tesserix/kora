@@ -83,3 +83,18 @@ test("an unknown kcal renders a dash, not zero", async () => {
   getByText("— kcal");
   expect(queryByText("0 kcal")).toBeNull();
 });
+
+// The same engraved marker DetectedCard and the recipe screen use for a
+// system-guessed portion (#138) — one signal, not three. Both directions
+// matter: a marker that always renders is as wrong as one that never does.
+test("an assumed-portion row shows the guess marker", async () => {
+  const { getByText } = await render(
+    <MealRow name="Egg" slot="100g" kcal={143} portionAssumed />,
+  );
+  getByText(/portion is a guess/i);
+});
+
+test("a plain row shows no guess marker", async () => {
+  const { queryByText } = await render(<MealRow name="Egg" slot="100g" kcal={143} />);
+  expect(queryByText(/portion is a guess/i)).toBeNull();
+});

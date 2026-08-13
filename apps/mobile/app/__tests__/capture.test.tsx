@@ -1275,6 +1275,31 @@ describe("Add to diary", () => {
     await waitFor(() => expect(mockCreateLogMutateAsync).toHaveBeenCalledTimes(1));
     expect(mockCreateLogMutateAsync).toHaveBeenCalledWith(expect.objectContaining({ portion_assumed: false }));
   });
+
+  // A single confirm with BOTH an assumed and a non-assumed candidate. The
+  // map in handleAddToDiary binds a fresh `candidate` per iteration today, so
+  // this isn't a live bug — but it's the regression guard for a future
+  // refactor that hoists a value out of the loop and lets one candidate's
+  // flag leak onto the other's createLog call.
+  test("a mixed batch sends portion_assumed matched to the right candidate, not just one of each", async () => {
+    const rendered = await render(<CaptureScreen />);
+    const assumed = { ...makeCandidate("1", "Mystery stew", { grams: 300, kcal: 420 }), portion_assumed: true };
+    const measured = { ...makeCandidate("2", "Grilled chicken breast", { grams: 140, kcal: 231 }), portion_assumed: false };
+    await resolveWithMultiCandidates(rendered, {
+      ...makeMultiCandidateResolution(),
+      candidates: [assumed, measured],
+    });
+
+    await fireEvent.press(await rendered.findByLabelText("Add to diary"));
+
+    await waitFor(() => expect(mockCreateLogMutateAsync).toHaveBeenCalledTimes(2));
+    expect(mockCreateLogMutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ food_item_id: "1", portion_assumed: true }),
+    );
+    expect(mockCreateLogMutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ food_item_id: "2", portion_assumed: false }),
+    );
+  });
 });
 
 // `source` must record which modality actually resolved the food, not which

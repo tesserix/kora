@@ -1,4 +1,5 @@
 import { resultSummary } from "../ResolutionResult";
+import { CACHED_MATCH_TIER } from "@/api/types";
 import type { Resolution } from "@/api/types";
 
 function makeResolution(overrides: Partial<Resolution> = {}): Resolution {
@@ -90,5 +91,37 @@ test("a summary with no assumed portions says nothing about guessing", () => {
 
   const summary = resultSummary(resolution);
 
+  expect(summary).not.toMatch(/guess/i);
+});
+
+// The cached branch used to return before the assumedCount hedging below it,
+// so an offline barcode hit with a system-guessed portion read as an exact
+// figure. This pair pins the bug: hedge when the cached candidate demands it,
+// and leave the existing unhedged copy alone otherwise.
+test("a cached resolution with an assumed candidate hedges the summary", () => {
+  const base = makeResolution();
+  const resolution: Resolution = {
+    ...base,
+    provenance: CACHED_MATCH_TIER,
+    candidates: [{ ...base.candidates[0], portion_assumed: true }],
+  };
+
+  const summary = resultSummary(resolution);
+
+  expect(summary).toMatch(/from a scan you.{0,3}ve done before/i);
+  expect(summary).toMatch(/one portion is a guess/i);
+});
+
+test("a cached resolution with no assumed candidate keeps the existing unhedged copy", () => {
+  const base = makeResolution();
+  const resolution: Resolution = {
+    ...base,
+    provenance: CACHED_MATCH_TIER,
+    candidates: [{ ...base.candidates[0], portion_assumed: false }],
+  };
+
+  const summary = resultSummary(resolution);
+
+  expect(summary).toMatch(/from a scan you.{0,3}ve done before/i);
   expect(summary).not.toMatch(/guess/i);
 });

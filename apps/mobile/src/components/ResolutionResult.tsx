@@ -42,22 +42,28 @@ export function resultSummary(resolution: Resolution): string {
   // same cached record moments later and counts it in the day total — so any
   // promise of a later fill-in would describe an event that has already
   // happened by the time the user sees it.
-  if (isCachedResult({ match_tier: resolution.provenance })) {
-    const name = resolution.candidates[0]?.item.name ?? "that";
-    return `You're offline — that's ${name}, from a scan you've done before. Confirm and I'll log it.`;
-  }
-  const count = resolution.candidates.length;
-  const itemWord = count === 1 ? "item" : "items";
-  const kcalText = kcalTotalLabel(resolution);
   // Computed from the WHOLE candidate list, never candidates[0] — a set where
   // any row is assumed must read as hedged, not just one whose first row is.
   // The count itself matters too: "one portion is a guess" would understate
   // it when several candidates in the same resolution had their portion
-  // assumed, so the wording must track the actual number.
+  // assumed, so the wording must track the actual number. Computed above
+  // both branches and reused by each, so the cached and fresh copy cannot
+  // drift out of sync on when they hedge.
   const assumedCount = resolution.candidates.filter((c) => c.portion_assumed).length;
+  const guessText =
+    assumedCount === 1 ? "one portion is a guess" : `${assumedCount} portions are guesses`;
+
+  if (isCachedResult({ match_tier: resolution.provenance })) {
+    const name = resolution.candidates[0]?.item.name ?? "that";
+    const base = `You're offline — that's ${name}, from a scan you've done before`;
+    return assumedCount > 0
+      ? `${base} — ${guessText}. Confirm and I'll log it.`
+      : `${base}. Confirm and I'll log it.`;
+  }
+  const count = resolution.candidates.length;
+  const itemWord = count === 1 ? "item" : "items";
+  const kcalText = kcalTotalLabel(resolution);
   if (assumedCount > 0) {
-    const guessText =
-      assumedCount === 1 ? "one portion is a guess" : `${assumedCount} portions are guesses`;
     return `I found ${count} ${itemWord}, about ${kcalText} — ${guessText}. Confirm and I'll log it.`;
   }
   return `I found ${count} ${itemWord}, about ${kcalText} — confirm and I'll log it.`;
