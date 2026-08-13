@@ -324,6 +324,10 @@ func (s Service) EditLog(ctx context.Context, userID, logID uuid.UUID, req EditR
 		current.QuantityGrams = grams
 		current.EnteredAmount = req.EnteredAmount
 		current.EnteredUnit = req.EnteredUnit
+		// Same reasoning as the QuantityGrams-only branch below: a stored
+		// portion_assumed: true no longer describes this amount once the user
+		// has re-entered it through a real unit — see #138.
+		current.PortionAssumed = false
 	case req.QuantityGrams != nil:
 		if *req.QuantityGrams <= 0 {
 			return EditResult{}, httpx.ValidationError{Message: "quantity_grams must be positive"}

@@ -94,7 +94,13 @@ func (s *Service) LogRecipe(ctx context.Context, userID, recipeID uuid.UUID, req
 		// recipe's worth ("2 sachets"), and a fractional-serving log needs
 		// the scaled grams instead. Forwarding it would make the server
 		// re-resolve the unscaled amount and log the wrong quantity.
-		items = append(items, foodlog.BatchItem{FoodItemID: *r.FoodItemID, QuantityGrams: grams})
+		//
+		// PortionAssumed IS forwarded, unlike the entered pair: it is
+		// scale-invariant — a guessed portion stays a guess whether you log
+		// half a recipe or double it. Dropping it here would leave every
+		// recipe-logged ingredient with a guessed portion unmarked in the
+		// diary; see #138.
+		items = append(items, foodlog.BatchItem{FoodItemID: *r.FoodItemID, QuantityGrams: grams, PortionAssumed: r.PortionAssumed})
 	}
 	if len(items) == 0 {
 		return LogRecipeResult{}, httpx.ValidationError{Message: "no ingredients in this recipe can be logged yet"}

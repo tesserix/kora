@@ -206,14 +206,12 @@ func TestPortionAssumedDoesNotAffectDayTotals(t *testing.T) {
 
 	require.Equal(t, assumed.Kcal, measured.Kcal, "identical grams of the same item must produce identical kcal regardless of the flag")
 
-	logs, err := NewRepository(db).ListByUserAndDay(context.Background(), userID, day, time.UTC)
+	// Go through the real aggregate rather than hand-summing rows, so a
+	// future change that filtered totals on the flag would actually fail
+	// this test.
+	m, err := NewRepository(db).DailyKcal(context.Background(), userID, day, day.Add(24*time.Hour), time.UTC)
 	require.NoError(t, err)
-	require.Len(t, logs, 2)
-	var sum float64
-	for _, l := range logs {
-		sum += l.Kcal
-	}
-	require.Equal(t, 2*measured.Kcal, sum, "portion_assumed must never be an input to the day's kcal total")
+	require.Equal(t, 2*measured.Kcal, m[day.Format("2006-01-02")], "portion_assumed must never be an input to the day's kcal total")
 }
 
 func TestCopyDayClonesLogsToNewDate(t *testing.T) {
@@ -291,6 +289,77 @@ func TestEditLogOverwritingGramsClearsPortionAssumed(t *testing.T) {
 	fetched, err := NewRepository(db).GetByID(context.Background(), userID, created.ID)
 	require.NoError(t, err)
 	require.False(t, fetched.PortionAssumed)
+}
+
+// TestEditLogEnteredPairClearsPortionAssumed is the sibling of
+// TestEditLogOverwritingGramsClearsPortionAssumed for the OTHER path that
+// overwrites the portion: re-resolving from a new entered pair (e.g. "1
+// cup") instead of a bare grams figure. A unit-aware client is if anything
+// MORE likely to take this path, so it must clear the same stale hedge — see
+// #138.
+func TestEditLogEnteredPairClearsPortionAssumed(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+
+	item := nutrition.FoodItem{
+		Name: "Clear Assumed Sachet Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD,
+		BaseUnit:     "g",
+		ServingUnits: json.RawMessage(`[{"name":"sachet","amount":1,"base_amount":16.5}]`),
+		KcalPer100g:  545.45,
+	}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	created, err := svc.LogFood(context.Background(), userID, LogRequest{
+		FoodItemID: &item.ID, MealSlot: "snack", Source: "manual",
+		QuantityGrams: 100, LoggedAt: time.Now(), PortionAssumed: true,
+	})
+	require.NoError(t, err)
+	require.True(t, created.PortionAssumed)
+
+	amount := 3.0
+	unit := "sachet"
+	res, err := svc.EditLog(context.Background(), userID, created.ID, EditRequest{
+		EnteredAmount: &amount, EnteredUnit: &unit,
+	})
+	require.NoError(t, err)
+	require.False(t, res.Log.PortionAssumed, "re-resolving from a real entered unit must clear the stale hedge")
+
+	fetched, err := NewRepository(db).GetByID(context.Background(), userID, created.ID)
+	require.NoError(t, err)
+	require.False(t, fetched.PortionAssumed)
+}
+
+// TestEditLogMealSlotOnlyLeavesPortionAssumedUntouched proves the clear is
+// scoped to edits that actually change the portion: an edit that changes
+// only meal_slot (or, symmetrically, only logged_at) falls through both
+// grams-resolution branches and must NOT clear the flag, because nothing
+// about the amount changed.
+func TestEditLogMealSlotOnlyLeavesPortionAssumedUntouched(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	nutriRepo := nutrition.NewRepository(db)
+	item := nutrition.FoodItem{Name: "Untouched Assumed Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	svc := NewService(NewRepository(db), nutriRepo)
+	created, err := svc.LogFood(context.Background(), userID, LogRequest{
+		FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual",
+		QuantityGrams: 100, LoggedAt: time.Now(), PortionAssumed: true,
+	})
+	require.NoError(t, err)
+	require.True(t, created.PortionAssumed)
+
+	res, err := svc.EditLog(context.Background(), userID, created.ID, EditRequest{MealSlot: "dinner"})
+	require.NoError(t, err)
+	require.True(t, res.Log.PortionAssumed, "a meal_slot-only edit does not change the portion and must not clear the hedge")
+
+	fetched, err := NewRepository(db).GetByID(context.Background(), userID, created.ID)
+	require.NoError(t, err)
+	require.True(t, fetched.PortionAssumed)
 }
 
 func TestEditLogFoodChangeWithCorrectionPhraseRecordsAlias(t *testing.T) {

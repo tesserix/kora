@@ -48,6 +48,52 @@ func TestLogRecipeScalesGramsByServingsRatio(t *testing.T) {
 	require.Equal(t, 200.0, lastLoggedGrams(t, svc, userID))
 }
 
+// TestLogRecipePortionAssumedSurvivesIntoFoodLog is issue #138's lesson
+// applied to the recipe → diary path: r.PortionAssumed must be forwarded
+// onto the BatchItem, not just carried on the recipe row. Unlike the entered
+// pair (which is scale-dependent and deliberately dropped, see log.go),
+// portion_assumed is scale-invariant, so it must survive scaling untouched.
+func TestLogRecipePortionAssumedSurvivesIntoFoodLog(t *testing.T) {
+	svc, userID, f := loggingService(t)
+	ctx := context.Background()
+
+	created, err := svc.Create(ctx, userID, SaveRecipeRequest{
+		Name: "Mixed Confidence", Servings: 2, Source: SourceManual,
+		Ingredients: []IngredientInput{
+			{FoodItemID: strPtr(f.ID.String()), Grams: 100, RawText: "guessed lentils", PortionAssumed: true},
+			{FoodItemID: strPtr(f.ID.String()), Grams: 100, RawText: "weighed rice", PortionAssumed: false},
+		},
+	})
+	require.NoError(t, err)
+
+	res, err := svc.LogRecipe(ctx, userID, uuid.MustParse(created.ID), LogRecipeRequest{
+		Servings: 2, MealSlot: "dinner",
+	})
+	require.NoError(t, err)
+	require.Equal(t, 2, res.Logged)
+
+	flags := loggedPortionAssumedFlags(t, userID)
+	require.ElementsMatch(t, []bool{true, false}, flags,
+		"the assumed ingredient's flag must reach the food log, and the weighed one's false must not be flipped")
+}
+
+// strPtr is a small literal helper for constructing IngredientInput values
+// that need PortionAssumed set explicitly (the shared `ing` helper always
+// defaults it false).
+func strPtr(s string) *string { return &s }
+
+// loggedPortionAssumedFlags reads back portion_assumed for every log this
+// user has, in insertion order.
+func loggedPortionAssumedFlags(t *testing.T, userID uuid.UUID) []bool {
+	t.Helper()
+	db := testDB(t)
+	var flags []bool
+	require.NoError(t, db.Raw(
+		"SELECT portion_assumed FROM food_logs WHERE user_id = ? ORDER BY created_at ASC",
+		userID).Scan(&flags).Error)
+	return flags
+}
+
 // TestLogRecipeSkipsUnresolvedAndReportsThem: an unresolved ingredient cannot
 // be logged, and the user must be told rather than silently short-changed.
 func TestLogRecipeSkipsUnresolvedAndReportsThem(t *testing.T) {
