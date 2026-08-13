@@ -117,3 +117,15 @@ test("lists custom reminders with label + day summary and an Add row", async () 
   getByText("Mon, Wed, Fri");
   getByText("Add reminder");
 });
+
+test("offers a destructive Delete account row", async () => {
+  const { getByText } = await render(<Settings />);
+  expect(getByText("Account")).toBeTruthy();
+  expect(getByText("Delete account")).toBeTruthy();
+});
+
+test("tapping Delete account routes to the confirmation screen", async () => {
+  const { getByText } = await render(<Settings />);
+  await fireEvent.press(getByText("Delete account"));
+  expect(mockPush).toHaveBeenCalledWith("/delete-account");
+});

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ScrollView, View } from "react-native";
+import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { safeBack } from "@/lib/safeBack";
 import { AppText } from "@/components/Text";
@@ -140,6 +141,23 @@ export default function SettingsScreen() {
                 You’ve reached the {MAX_CUSTOM_REMINDERS}-reminder limit.
               </AppText>
             ) : null}
+          </View>
+
+          <View>
+            <AppText style={[engravedStyle(instrument), { marginLeft: spacing.md, marginBottom: spacing.xs }]}>
+              Account
+            </AppText>
+            <GroupedSection>
+              <Row
+                title="Delete account"
+                destructive
+                chevron
+                onPress={() => router.push("/delete-account")}
+              />
+            </GroupedSection>
+            <AppText style={{ fontSize: 13, color: instrument.mut, marginLeft: spacing.md, marginTop: spacing.xs }}>
+              Permanently deletes your account and all your data.
+            </AppText>
           </View>
         </View>
       </ScrollView>
