@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { act, fireEvent, render as rtlRender, waitFor } from "@testing-library/react-native";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react-query";
 import * as ImagePicker from "expo-image-picker";
 import { useAudioRecorder } from "expo-audio";
 import { router } from "expo-router";
@@ -67,12 +68,30 @@ const mockResolveVoiceMutate = jest.fn();
 const mockResolveBarcodeMutate = jest.fn();
 const mockCreateLogMutateAsync = jest.fn();
 
+// A plain `{ mutate, isPending: false }` object (as the other describe
+// blocks below used before the Cancel tests were added) never lets
+// displayStage reach "analyzing", so the Cancel control never renders and
+// there is nothing to press. This mirrors capture.tsx's own hook shape with
+// real state instead: mutate() flips isPending true synchronously, which
+// re-renders the tree the same way a real useMutation call would, and the
+// Cancel tests below rely on that to reach and press the button.
+function mockUseMutation(mutateFn: jest.Mock) {
+  const [isPending, setIsPending] = useState(false);
+  return {
+    isPending,
+    mutate: (vars: unknown, options: unknown) => {
+      setIsPending(true);
+      mutateFn(vars, options);
+    },
+  };
+}
+
 jest.mock("@/api/hooks", () => ({
   useProfile: () => ({ data: { display_name: "Alex Stone" } }),
-  useResolveText: () => ({ mutate: mockResolveTextMutate, isPending: false }),
-  useResolvePhoto: () => ({ mutate: mockResolvePhotoMutate, isPending: false }),
-  useResolveVoice: () => ({ mutate: mockResolveVoiceMutate, isPending: false }),
-  useResolveBarcode: () => ({ mutate: mockResolveBarcodeMutate, isPending: false }),
+  useResolveText: () => mockUseMutation(mockResolveTextMutate),
+  useResolvePhoto: () => mockUseMutation(mockResolvePhotoMutate),
+  useResolveVoice: () => mockUseMutation(mockResolveVoiceMutate),
+  useResolveBarcode: () => mockUseMutation(mockResolveBarcodeMutate),
   useCreateLog: () => ({ mutateAsync: mockCreateLogMutateAsync, isPending: false }),
   useFoodSearch: () => ({ data: [], isLoading: false, isError: false }),
 }));
@@ -260,6 +279,100 @@ describe("Voice capture goes offline", () => {
       expectedMealSlot(),
     );
     expect(await rendered.findByText(/you.{0,3}re offline/i)).toBeTruthy();
+  });
+});
+
+// #136 task 3: today, onError early-returns on controller.signal.aborted
+// before ever reaching handleResolveFailure, so a cancelled photo/voice
+// capture is destroyed instead of queued — the one place Cancel discards
+// something the user made. Cancel stops the WAITING, not the capture: this
+// pair pins that a cancelled offline capture is preserved (queued, same as
+// an offline timeout already is) while a cancelled ONLINE capture enqueues
+// nothing, since doFetch folds a caller's own abort into NetworkError (see
+// src/lib/api.ts) exactly like a real network failure — without the
+// connectivity gate, an online Cancel would look queueable too.
+describe("Cancelling a photo resolve", () => {
+  afterEach(() => {
+    onlineManager.setOnline(true);
+  });
+
+  async function cancelPhotoResolve() {
+    (ImagePicker.launchCameraAsync as jest.Mock).mockResolvedValueOnce({
+      canceled: false,
+      assets: [{ uri: "file://x.jpg", fileName: "x.jpg", mimeType: "image/jpeg" }],
+    });
+    const rendered = await render(<CaptureScreen />);
+    await fireEvent.press(await rendered.findByLabelText("Photo viewfinder"));
+    await waitFor(() => expect(mockResolvePhotoMutate).toHaveBeenCalled());
+    await fireEvent.press(await rendered.findByLabelText("Cancel"));
+
+    const [, options] = mockResolvePhotoMutate.mock.calls[0];
+    await act(async () => options.onError(new NetworkError(new TypeError("Network request failed"))));
+    return rendered;
+  }
+
+  test("offline, the cancelled capture is enqueued rather than discarded", async () => {
+    onlineManager.setOnline(false);
+    mockEnqueueCapture().mockResolvedValue({ id: "cap-cancel-photo" });
+
+    await cancelPhotoResolve();
+
+    expect(mockEnqueueCapture()).toHaveBeenCalledWith(
+      { uri: "file://x.jpg", name: "x.jpg", type: "image/jpeg" },
+      "photo",
+      expectedMealSlot(),
+    );
+  });
+
+  test("online, nothing is enqueued — there is nothing to resolve later", async () => {
+    onlineManager.setOnline(true);
+
+    await cancelPhotoResolve();
+
+    expect(mockEnqueueCapture()).not.toHaveBeenCalled();
+  });
+});
+
+describe("Cancelling a voice resolve", () => {
+  afterEach(() => {
+    onlineManager.setOnline(true);
+  });
+
+  async function cancelVoiceResolve() {
+    const recorder = makeRecorder();
+    (useAudioRecorder as jest.Mock).mockReturnValue(recorder);
+
+    const rendered = await render(<CaptureScreen />);
+    await fireEvent.press(await rendered.findByText("Voice"));
+    await fireEvent.press(await rendered.findByLabelText("Hold to record"));
+    await fireEvent.press(await rendered.findByLabelText("Stop recording"));
+    await waitFor(() => expect(mockResolveVoiceMutate).toHaveBeenCalled());
+    await fireEvent.press(await rendered.findByLabelText("Cancel"));
+
+    const [, options] = mockResolveVoiceMutate.mock.calls[0];
+    await act(async () => options.onError(new NetworkError(new TypeError("Network request failed"))));
+    return rendered;
+  }
+
+  test("offline, the cancelled clip is enqueued rather than discarded", async () => {
+    onlineManager.setOnline(false);
+    mockEnqueueCapture().mockResolvedValue({ id: "cap-cancel-voice" });
+
+    await cancelVoiceResolve();
+
+    expect(mockEnqueueCapture()).toHaveBeenCalledWith(
+      { uri: "file://mock-recording.m4a", name: "clip.m4a", type: "audio/mp4" },
+      "voice",
+      expectedMealSlot(),
+    );
+  });
+
+  test("online, nothing is enqueued — there is nothing to resolve later", async () => {
+    onlineManager.setOnline(true);
+
+    await cancelVoiceResolve();
+
+    expect(mockEnqueueCapture()).not.toHaveBeenCalled();
   });
 });
 
