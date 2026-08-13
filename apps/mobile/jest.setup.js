@@ -291,6 +291,11 @@ jest.mock("@kingstinct/react-native-healthkit", () => ({
   //     => Promise<QueryStatisticsResponse>   // { sumQuantity?: { unit, quantity }, sources }
   // Default response carries NO sumQuantity — the "nothing readable" shape.
   queryStatisticsForQuantity: jest.fn(async () => ({ sources: [] })),
+  // Multi-day step history (useActivityHistory) is read through the same
+  // cumulative-sum statistics dedup, bucketed per day via HealthKit's
+  // HKStatisticsCollectionQuery. Default response is an empty bucket array —
+  // individual tests override per-case.
+  queryStatisticsCollectionForQuantity: jest.fn(async () => []),
   queryCategorySamples: jest.fn(async () => []),
   // Read by useActivityHistory for onboarding's activity inference. Signature
   // taken from the installed package's lib/typescript/healthkit.d.ts:

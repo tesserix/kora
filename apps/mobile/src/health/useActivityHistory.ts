@@ -19,6 +19,17 @@ const WORKOUT_IDENTIFIER = "HKWorkoutTypeIdentifier";
 const WINDOW_DAYS = 14;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
+// Multi-day step totals are read through a cumulative-sum STATISTICS COLLECTION
+// query, never by summing raw samples. queryQuantitySamples returns every source's
+// samples — iPhone, Apple Watch, and any third-party app — with no dedup, so a
+// Watch user's daily totals came out inflated, which in turn pushed
+// inferActivityLevel (and therefore the calorie target) into a higher band than
+// their real activity supports. Only a statistics query applies HealthKit's
+// source-priority dedup. useHealth.ts already does exactly this for today's total
+// (HKStatisticsQuery/.cumulativeSum); this mirrors it across the whole window via
+// HKStatisticsCollectionQuery.
+const CUMULATIVE_SUM: readonly ["cumulativeSum"] = ["cumulativeSum"];
+
 export type ActivityHistoryStatus =
   | "idle" // not asked yet — the manual card list is showing
   | "loading"
@@ -39,24 +50,34 @@ function startOfLocalDay(d: Date): number {
   return start.getTime();
 }
 
+/** The shape this hook needs from a HealthKit statistics-collection bucket. */
+export type StepStatisticsBucket = {
+  readonly startDate?: Date;
+  readonly sumQuantity?: { readonly unit: string; readonly quantity: number };
+};
+
 /**
- * Buckets step samples into per-day totals across the window. Days with no
- * samples are genuinely absent rather than zero-filled — a zero-filled gap would
- * drag the mean down and bias the inferred level (and therefore the calorie
- * target) downward, which is the direction that matters least safely.
+ * Extracts one total per day from HealthKit's per-day statistics buckets
+ * (queryStatisticsCollectionForQuantity, anchored to local midnight with a
+ * `{ day: 1 }` interval). A bucket's `sumQuantity` is deliberately treated as
+ * two distinct facts, not one:
+ *
+ * - ABSENT (no `sumQuantity` at all) means HealthKit has no data for that day.
+ *   The bucket is dropped, not zero-filled — a zero-filled gap would drag the
+ *   mean down and bias the inferred level (and therefore the calorie target)
+ *   downward, which is the direction that matters least safely.
+ * - PRESENT and zero (`sumQuantity: { quantity: 0 }`) means HealthKit measured
+ *   and found nothing: a genuine sedentary day, and real evidence for the
+ *   inference. This is the exact inverse of the absent case and is kept.
  */
-export function bucketStepsByDay(
-  samples: readonly { readonly startDate: Date; readonly quantity: number }[],
-): number[] {
-  const byDay = new Map<number, number>();
-  for (const s of samples) {
-    const day = startOfLocalDay(new Date(s.startDate));
-    if (!Number.isFinite(day)) continue;
-    const q = Number(s.quantity);
-    if (!Number.isFinite(q) || q < 0) continue;
-    byDay.set(day, (byDay.get(day) ?? 0) + q);
+export function dailyStepTotals(buckets: readonly StepStatisticsBucket[]): number[] {
+  const totals: number[] = [];
+  for (const bucket of buckets) {
+    const q = bucket.sumQuantity?.quantity;
+    if (typeof q !== "number" || !Number.isFinite(q) || q < 0) continue;
+    totals.push(Math.round(q));
   }
-  return [...byDay.values()].map((n) => Math.round(n));
+  return totals;
 }
 
 /** Mean sessions per week from workout samples over a window of `days`. */
@@ -101,19 +122,23 @@ export function useActivityHistory(): ActivityHistory {
         const now = new Date();
         const windowStart = new Date(startOfLocalDay(now) - (WINDOW_DAYS - 1) * MS_PER_DAY);
 
-        const [stepSamples, workouts] = await Promise.all([
-          hk.queryQuantitySamples(STEP_COUNT_IDENTIFIER, {
-            filter: { date: { startDate: windowStart, endDate: now } },
-            limit: 0,
-            unit: "count",
-          }),
+        const [stepBuckets, workouts] = await Promise.all([
+          hk.queryStatisticsCollectionForQuantity(
+            STEP_COUNT_IDENTIFIER,
+            CUMULATIVE_SUM,
+            // anchorDate: local midnight of windowStart, so each interval bucket
+            // aligns to a local calendar day, matching startOfLocalDay semantics.
+            windowStart,
+            { day: 1 },
+            { filter: { date: { startDate: windowStart, endDate: now } }, unit: "count" },
+          ),
           hk.queryWorkoutSamples({
             filter: { date: { startDate: windowStart, endDate: now } },
             limit: 0,
           }),
         ]);
 
-        const dailySteps = bucketStepsByDay(stepSamples);
+        const dailySteps = dailyStepTotals(stepBuckets);
         const result = inferActivityLevel({
           dailySteps,
           workoutsPerWeek: workoutsPerWeek(workouts.length, WINDOW_DAYS),

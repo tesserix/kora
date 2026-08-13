@@ -2,12 +2,12 @@ import { renderHook, waitFor } from "@testing-library/react-native";
 import { Platform } from "react-native";
 import {
   isHealthDataAvailable,
-  queryQuantitySamples,
+  queryStatisticsCollectionForQuantity,
   queryWorkoutSamples,
   requestAuthorization,
 } from "@kingstinct/react-native-healthkit";
 import {
-  bucketStepsByDay,
+  dailyStepTotals,
   workoutsPerWeek,
   useActivityHistory,
 } from "../useActivityHistory";
@@ -16,7 +16,7 @@ import {
 // mocked references and configure them per test, matching useHealth.test.tsx.
 const mockIsAvailable = isHealthDataAvailable as jest.Mock;
 const mockRequestAuthorization = requestAuthorization as jest.Mock;
-const mockQueryQuantitySamples = queryQuantitySamples as jest.Mock;
+const mockQueryStatisticsCollectionForQuantity = queryStatisticsCollectionForQuantity as jest.Mock;
 const mockQueryWorkoutSamples = queryWorkoutSamples as jest.Mock;
 
 // Platform.OS is a getter on a shared singleton under jest-expo, so it is
@@ -34,45 +34,61 @@ const day = (offset: number, hour = 9) => {
   return d;
 };
 
-const stepSamples = (days: number, perDay: number) =>
-  Array.from({ length: days }, (_, i) => ({ startDate: day(i), quantity: perDay }));
+// Buckets shaped like queryStatisticsCollectionForQuantity's QueryStatisticsResponse[].
+const statsBuckets = (days: number, perDay: number) =>
+  Array.from({ length: days }, (_, i) => ({
+    startDate: day(i),
+    sumQuantity: { unit: "count", quantity: perDay },
+  }));
 
-describe("bucketStepsByDay", () => {
-  it("sums multiple samples falling on the same day", () => {
+describe("dailyStepTotals", () => {
+  it("takes each bucket's sum as the day's total", () => {
     expect(
-      bucketStepsByDay([
-        { startDate: day(0, 9), quantity: 1000 },
-        { startDate: day(0, 18), quantity: 2500 },
+      dailyStepTotals([
+        { startDate: day(0), sumQuantity: { unit: "count", quantity: 3500 } },
       ]),
     ).toEqual([3500]);
   });
 
   it("keeps separate days separate", () => {
     expect(
-      bucketStepsByDay([
-        { startDate: day(0), quantity: 1000 },
-        { startDate: day(1), quantity: 2000 },
+      dailyStepTotals([
+        { startDate: day(0), sumQuantity: { unit: "count", quantity: 1000 } },
+        { startDate: day(1), sumQuantity: { unit: "count", quantity: 2000 } },
       ]),
     ).toHaveLength(2);
   });
 
-  it("does NOT zero-fill days that have no samples", () => {
+  it("does NOT include a bucket with no sumQuantity — absent stays absent", () => {
     // Zero-filling a gap would drag the mean down and bias the inferred level —
-    // and so the calorie target — downward.
-    expect(
-      bucketStepsByDay([
-        { startDate: day(0), quantity: 9000 },
-        { startDate: day(10), quantity: 9000 },
-      ]),
-    ).toEqual([9000, 9000]);
+    // and so the calorie target — downward. A missing sumQuantity means HealthKit
+    // has no data for that day, so it is dropped, not zeroed.
+    const result = dailyStepTotals([
+      { startDate: day(0), sumQuantity: { unit: "count", quantity: 9000 } },
+      { startDate: day(1) }, // no sumQuantity at all
+      { startDate: day(2), sumQuantity: { unit: "count", quantity: 9000 } },
+    ]);
+    expect(result).toHaveLength(2);
+    expect(result).toEqual([9000, 9000]);
+  });
+
+  it("DOES include a bucket with sumQuantity: { quantity: 0 } — a present zero is real evidence", () => {
+    // The inverse of the above: HealthKit measured and found nothing, which is a
+    // genuine sedentary day, not a gap.
+    const result = dailyStepTotals([
+      { startDate: day(0), sumQuantity: { unit: "count", quantity: 0 } },
+      { startDate: day(1), sumQuantity: { unit: "count", quantity: 9000 } },
+    ]);
+    expect(result).toHaveLength(2);
+    expect(result).toEqual([0, 9000]);
   });
 
   it("discards negative and non-finite quantities", () => {
     expect(
-      bucketStepsByDay([
-        { startDate: day(0), quantity: 5000 },
-        { startDate: day(0), quantity: -100 },
-        { startDate: day(0), quantity: Number.NaN },
+      dailyStepTotals([
+        { startDate: day(0), sumQuantity: { unit: "count", quantity: 5000 } },
+        { startDate: day(1), sumQuantity: { unit: "count", quantity: -100 } },
+        { startDate: day(2), sumQuantity: { unit: "count", quantity: Number.NaN } },
       ]),
     ).toEqual([5000]);
   });
@@ -92,7 +108,7 @@ describe("useActivityHistory", () => {
     setPlatformOS("ios");
     mockIsAvailable.mockReturnValue(true);
     mockRequestAuthorization.mockResolvedValue(true);
-    mockQueryQuantitySamples.mockResolvedValue(stepSamples(14, 8000));
+    mockQueryStatisticsCollectionForQuantity.mockResolvedValue(statsBuckets(14, 8000));
     mockQueryWorkoutSamples.mockResolvedValue([]);
   });
 
@@ -132,11 +148,33 @@ describe("useActivityHistory", () => {
   });
 
   it("reports insufficient rather than guessing when data is thin", async () => {
-    mockQueryQuantitySamples.mockResolvedValue(stepSamples(3, 8000));
+    mockQueryStatisticsCollectionForQuantity.mockResolvedValue(statsBuckets(3, 8000));
     const { result } = await renderHook(() => useActivityHistory());
     result.current.request();
     await waitFor(() => expect(result.current.status).toBe("insufficient"));
     expect(result.current.inference).toBeNull();
+  });
+
+  it("queries a bounded window with a daily interval and cumulative-sum statistic", async () => {
+    const { result } = await renderHook(() => useActivityHistory());
+    result.current.request();
+    await waitFor(() => expect(mockQueryStatisticsCollectionForQuantity).toHaveBeenCalled());
+
+    const [identifier, statistics, anchorDate, intervalComponents, options] =
+      mockQueryStatisticsCollectionForQuantity.mock.calls[0];
+    expect(identifier).toBe("HKQuantityTypeIdentifierStepCount");
+    expect(statistics).toEqual(["cumulativeSum"]);
+    expect(anchorDate).toBeInstanceOf(Date);
+    expect(intervalComponents).toEqual({ day: 1 });
+    expect(options).toMatchObject({
+      filter: {
+        date: expect.objectContaining({
+          startDate: expect.any(Date),
+          endDate: expect.any(Date),
+        }),
+      },
+      unit: "count",
+    });
   });
 
   it("degrades honestly when HealthKit is unavailable", async () => {
@@ -147,7 +185,7 @@ describe("useActivityHistory", () => {
   });
 
   it("degrades instead of crashing when a native call rejects", async () => {
-    mockQueryQuantitySamples.mockRejectedValue(new Error("bridge exploded"));
+    mockQueryStatisticsCollectionForQuantity.mockRejectedValue(new Error("bridge exploded"));
     const { result } = await renderHook(() => useActivityHistory());
     result.current.request();
     await waitFor(() => expect(result.current.status).toBe("unavailable"));
@@ -163,7 +201,7 @@ describe("useActivityHistory", () => {
   });
 
   it("lets workouts lift the level above what steps alone would give", async () => {
-    mockQueryQuantitySamples.mockResolvedValue(stepSamples(14, 3000)); // sedentary on steps
+    mockQueryStatisticsCollectionForQuantity.mockResolvedValue(statsBuckets(14, 3000)); // sedentary on steps
     mockQueryWorkoutSamples.mockResolvedValue(Array.from({ length: 10 }, () => ({}))); // 5/wk
     const { result } = await renderHook(() => useActivityHistory());
     result.current.request();
