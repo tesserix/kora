@@ -98,3 +98,13 @@ test("a plain row shows no guess marker", async () => {
   const { queryByText } = await render(<MealRow name="Egg" slot="100g" kcal={143} />);
   expect(queryByText(/portion is a guess/i)).toBeNull();
 });
+
+// portionAssumed omitted and portionAssumed={false} collapse to the same
+// branch today — this pins that explicitly rather than only via the omitted
+// case above, so a future change that treats them differently is caught.
+test("an explicit portionAssumed={false} row shows no guess marker", async () => {
+  const { queryByText } = await render(
+    <MealRow name="Egg" slot="100g" kcal={143} portionAssumed={false} />,
+  );
+  expect(queryByText(/portion is a guess/i)).toBeNull();
+});

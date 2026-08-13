@@ -22,6 +22,7 @@ import { monoStyle } from "@/components/instrument/typography";
 import { useProfile, useDashboard, useDayLogs, useUnreadCount } from "@/api/hooks";
 import { useHealth } from "@/health";
 import { useTheme } from "@/theme";
+import { accessibleMealLabel } from "@/lib/portionAssumedLabel";
 import type { FoodLog } from "@/api/types";
 
 function today(): string {
@@ -320,7 +321,7 @@ export default function Home() {
                 <View key={log.id}>
                   <PressableScale
                     accessibilityRole="button"
-                    accessibilityLabel={log.description}
+                    accessibilityLabel={accessibleMealLabel(log.description, log.portion_assumed === true)}
                     haptic="selection"
                     onPress={() => openMeal(log)}
                     style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10 }}
@@ -333,6 +334,24 @@ export default function Home() {
                         {log.description}
                       </AppText>
                       <AppText style={[mutedLabel, { marginTop: 2 }]}>{sentenceCase(log.meal_slot)}</AppText>
+                      {log.portion_assumed ? (
+                        // Same engraved marker MealRow renders in the diary
+                        // (#138) — hand-rolled here because this row is
+                        // bespoke markup, not a MealRow instance, but the
+                        // words and treatment must still read as one signal.
+                        <AppText
+                          style={{
+                            color: instrument.mut,
+                            fontSize: 9,
+                            fontWeight: "700",
+                            textTransform: "uppercase",
+                            letterSpacing: 1,
+                            marginTop: 2,
+                          }}
+                        >
+                          portion is a guess
+                        </AppText>
+                      ) : null}
                     </View>
                     <AppText style={[{ fontSize: 15, fontWeight: "600", color: instrument.ink }, mono]}>
                       {Math.round(log.kcal)} kcal

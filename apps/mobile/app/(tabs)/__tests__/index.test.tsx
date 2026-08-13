@@ -69,6 +69,35 @@ test("Home renders the Today large title, the gauge dial reserve numeral, protei
   expect(await findByText("Breakfast")).toBeTruthy();
 });
 
+// Home renders "Logged today" with bespoke markup rather than MealRow
+// (#138) — a "find every MealRow call site" sweep would miss it, and it
+// shows the SAME server-confirmed logs the diary marks, so a guessed portion
+// must read as a guess here too, not as an exact figure on the app's
+// default, most-seen tab.
+test("marks a guessed portion in Logged today, and leaves a real one unmarked", async () => {
+  mockUseDashboard.mockReturnValue({
+    data: { consumed: { kcal: 1252, protein_g: 96, carbs_g: 140, fat_g: 40 }, targets: { kcal: 2000, protein_g: 140, carbs_g: 220, fat_g: 70 }, water_ml: 1400, streak_days: 12 },
+    isError: false,
+  });
+  mockUseDayLogs.mockReturnValue({
+    data: [
+      { id: "1", description: "Mystery stew", meal_slot: "dinner", kcal: 420, protein_g: 24, carbs_g: 30, fat_g: 10, logged_at: "2026-07-24T20:00:00Z", provenance: "afcd", quantity_grams: 300, source: "ai_photo", portion_assumed: true },
+      { id: "2", description: "Greek yogurt bowl", meal_slot: "breakfast", kcal: 320, protein_g: 24, carbs_g: 30, fat_g: 10, logged_at: "2026-07-24T08:00:00Z", provenance: "manual", quantity_grams: 200, source: "manual", portion_assumed: false },
+    ],
+    isError: false,
+  });
+
+  const { findByText, queryByLabelText, findByLabelText } = await render(<Home />);
+  expect(await findByText("portion is a guess")).toBeTruthy();
+
+  // The accessible name carries the hedge too — a screen reader that only
+  // announces the plain description would let the guess read as fact.
+  expect(await findByLabelText("Mystery stew, portion is a guess")).toBeTruthy();
+  expect(queryByLabelText("Mystery stew")).toBeNull();
+  // The unassumed row's accessible name stays exactly the description.
+  expect(await findByLabelText("Greek yogurt bowl")).toBeTruthy();
+});
+
 test("shows a placeholder, not a fabricated zero, while the dashboard fetch is pending", async () => {
   mockUseDashboard.mockReturnValue({ data: undefined, isError: false });
   mockUseDayLogs.mockReturnValue({ data: [], isError: false });

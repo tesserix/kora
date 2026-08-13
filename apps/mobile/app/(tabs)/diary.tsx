@@ -25,6 +25,7 @@ import { monoStyle } from "@/components/instrument/typography";
 import { useUnits, mlToFlOz, flOzToMl, type UnitSystem } from "@/units";
 import { formatPortion } from "@/units/portion";
 import { foodVisual } from "@/lib/foodVisual";
+import { accessibleMealLabel } from "@/lib/portionAssumedLabel";
 import type { FoodLog } from "@/api/types";
 
 const DOW = ["S", "M", "T", "W", "T", "F", "S"];
@@ -486,8 +487,9 @@ export default function Diary() {
                       tint={hslToHex(fv.hue, 0.5, 0.5)}
                       dimmed={failed}
                       badge={<Badge variant="neutral">{failed ? "Failed" : "Pending"}</Badge>}
-                      accessibilityLabel={`${r.description}, ${failed ? "failed to sync" : "waiting to sync"}`}
+                      accessibilityLabel={`${accessibleMealLabel(r.description, r.portionAssumed)}, ${failed ? "failed to sync" : "waiting to sync"}`}
                       onPress={failed ? () => setFailedRowId(r.id) : undefined}
+                      portionAssumed={r.portionAssumed}
                     />
                   );
                 })}
@@ -523,7 +525,7 @@ export default function Diary() {
                           onPress={() => (selecting ? toggleSelected(log.id) : openMeal(log))}
                           onLongPress={() => toggleSelected(log.id)}
                           selected={rowSelected}
-                          accessibilityLabel={log.description}
+                          accessibilityLabel={accessibleMealLabel(log.description, log.portion_assumed === true)}
                           portionAssumed={log.portion_assumed === true}
                         />
                       </View>

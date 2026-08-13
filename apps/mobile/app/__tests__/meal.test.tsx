@@ -29,6 +29,7 @@ type MockLog = {
   fat_g: number;
   provenance: string;
   input_phrase?: string;
+  portion_assumed?: boolean;
 };
 
 let mockLogData: MockLog | undefined;
@@ -84,6 +85,7 @@ async function renderMeal(overrides: {
   entered_unit?: string;
   source?: string;
   provenance?: string;
+  portion_assumed?: boolean;
   item?: { base_unit?: string; serving_units?: { name: string; amount: number; base_amount: number }[] };
 } = {}) {
   const { item, ...rest } = overrides;
@@ -127,6 +129,21 @@ test("editing a sachet log sends the entered unit, not grams", async () => {
     expect.objectContaining({ quantity_grams: 33 }),
     expect.anything(),
   );
+});
+
+// This is the screen where the user CORRECTS a portion (#138) — the marker
+// vanishing on the way in would hide the guess exactly where acting on it
+// matters most.
+test("shows the guess marker on the portion panel when the fetched log's portion was assumed", async () => {
+  const { findByText } = await renderMeal({ portion_assumed: true });
+  expect(await findByText("portion is a guess")).toBeTruthy();
+});
+
+test("shows no guess marker when the fetched log's portion was not assumed", async () => {
+  const { queryByText, findByText } = await renderMeal({ portion_assumed: false });
+  // Wait for the log-backed render to settle before asserting an absence.
+  await findByText("300"); // kcal hero numeral, unique to the fetched-log render
+  expect(queryByText("portion is a guess")).toBeNull();
 });
 
 test("Save is disabled until something changes, then PATCHes only changed fields", async () => {

@@ -621,6 +621,24 @@ export default function MealDetail() {
                 {`${Math.round(grams)}${baseUnit}`}
               </AppText>
             </View>
+            {effective?.portion_assumed ? (
+              // This is the screen where the user CORRECTS a portion (#138) —
+              // the marker must survive the trip in from the diary/Home, or
+              // the exact place someone would act on the guess is the one
+              // place it reads as measured fact. Same engraved treatment as
+              // MealRow's.
+              <AppText
+                style={{
+                  color: instrument.mut,
+                  fontSize: 9,
+                  fontWeight: "700",
+                  textTransform: "uppercase",
+                  letterSpacing: 1,
+                }}
+              >
+                portion is a guess
+              </AppText>
+            ) : null}
             <PressableScale
               haptic="selection"
               accessibilityRole="button"

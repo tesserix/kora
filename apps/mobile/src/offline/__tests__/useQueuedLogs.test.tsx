@@ -271,6 +271,28 @@ test("reports an unknown kcal rather than zero when the food is no longer cached
   expect(result.current.rows[0]).toMatchObject({ description: "Queued item", kcal: null });
 });
 
+// portion_assumed marks a portion the system chose (#138). These rows are
+// real, durable logs merely awaiting sync — and already fold into the day
+// total (diary.tsx) while queued — so they must not silently drop the flag
+// on the way from the queued payload to the row the diary renders.
+test("carries portion_assumed from the queued payload onto the row", async () => {
+  await append({ ...payloadOn(atLocalNoon(2026, 8, 2)), portion_assumed: true }, "q1", "user-a");
+
+  const { result } = await renderQueued("2026-08-02");
+
+  await waitFor(() => expect(result.current.rows).toHaveLength(1));
+  expect(result.current.rows[0].portionAssumed).toBe(true);
+});
+
+test("a queued write with no assumed portion carries portionAssumed: false", async () => {
+  await append({ ...payloadOn(atLocalNoon(2026, 8, 2)), portion_assumed: false }, "q1", "user-a");
+
+  const { result } = await renderQueued("2026-08-02");
+
+  await waitFor(() => expect(result.current.rows).toHaveLength(1));
+  expect(result.current.rows[0].portionAssumed).toBe(false);
+});
+
 test("discardRow removes the row", async () => {
   await append(payloadOn(atLocalNoon(2026, 8, 2)), "q1", "user-a");
   const { result } = await renderQueued("2026-08-02");

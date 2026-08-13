@@ -29,7 +29,7 @@ const LOGS_DATA = [
 
 // Mutable holders so a test can supply an empty day or a different dashboard;
 // both reset in beforeEach.
-let mockDayLogs: typeof LOGS_DATA = LOGS_DATA;
+let mockDayLogs: (typeof LOGS_DATA[number] & { portion_assumed?: boolean })[] = LOGS_DATA;
 let mockDashboardData: typeof DASHBOARD_DATA | undefined = DASHBOARD_DATA;
 
 // The queued-row hook is exercised directly in
@@ -231,6 +231,27 @@ test("swiping a meal row's delete action confirms then deletes that log id", asy
   );
 });
 
+// A logged, server-confirmed row whose portion the system guessed (#138)
+// must show the marker both visually and in its accessible name, and a
+// plain row must show neither.
+test("a logged row with an assumed portion shows the guess marker in both the visual and accessible name", async () => {
+  mockDayLogs = [{ ...LOGS_DATA[0], portion_assumed: true }];
+  const { findByText, findByLabelText, queryByLabelText } = await render(<Diary />);
+
+  expect(await findByText("portion is a guess")).toBeTruthy();
+  expect(await findByLabelText("Grilled salmon, portion is a guess")).toBeTruthy();
+  expect(queryByLabelText("Grilled salmon")).toBeNull();
+});
+
+test("a logged row with no assumed portion shows no guess marker", async () => {
+  mockDayLogs = [{ ...LOGS_DATA[0], portion_assumed: false }];
+  const { findByText, queryByText, findByLabelText } = await render(<Diary />);
+
+  await findByText("Grilled salmon");
+  expect(queryByText("portion is a guess")).toBeNull();
+  expect(await findByLabelText("Grilled salmon")).toBeTruthy();
+});
+
 // --- Queued (offline) rows -------------------------------------------------
 
 const queuedRow = (over: Partial<QueuedRow> = {}): QueuedRow => ({
@@ -239,6 +260,7 @@ const queuedRow = (over: Partial<QueuedRow> = {}): QueuedRow => ({
   kcal: 93,
   mealSlot: "lunch",
   status: "pending",
+  portionAssumed: false,
   ...over,
 });
 
@@ -253,6 +275,26 @@ test("a pending queued row appears in its own slot with a Pending badge", async 
   getByText("Greek yogurt");
   getByText("Pending");
   getByText("Waiting to sync");
+});
+
+// Queued rows are real, durable logs merely pending sync, and their kcal
+// already counts into the day total — so a guessed portion must read as a
+// guess here too, not just once a real server row lands (#138).
+test("a queued row with an assumed portion shows the guess marker in both the visual and accessible name", async () => {
+  mockQueuedRows = [queuedRow({ portionAssumed: true })];
+  const { findByText, findByLabelText, queryByLabelText } = await render(<Diary />);
+
+  expect(await findByText("portion is a guess")).toBeTruthy();
+  expect(await findByLabelText("Greek yogurt, portion is a guess, waiting to sync")).toBeTruthy();
+  expect(queryByLabelText("Greek yogurt, waiting to sync")).toBeNull();
+});
+
+test("a queued row with no assumed portion shows no guess marker", async () => {
+  mockQueuedRows = [queuedRow({ portionAssumed: false })];
+  const { findByText, queryByText } = await render(<Diary />);
+
+  await findByText("Greek yogurt");
+  expect(queryByText("portion is a guess")).toBeNull();
 });
 
 test("a failed queued row is labelled as failed and offers retry and discard", async () => {

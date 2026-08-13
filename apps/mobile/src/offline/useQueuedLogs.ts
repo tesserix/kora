@@ -18,6 +18,15 @@ export type QueuedRow = {
   kcal: number | null;
   mealSlot: string;
   status: "pending" | "failed";
+  /**
+   * True when the queued write's own portion was a system estimate rather
+   * than derived from real data or stated by the user — carried straight off
+   * `QueuedLog.payload.portion_assumed` (sent by createLog, #138). These rows
+   * are real, durable logs merely pending sync — and are counted into the
+   * day total the same as a server row — so they must not read as an exact
+   * measurement while queued.
+   */
+  portionAssumed: boolean;
 };
 
 // A serving-mode log is queued with quantity_grams 0 and an entered
@@ -38,6 +47,7 @@ async function toRow(q: QueuedLog): Promise<QueuedRow> {
     kcal: food && gramsKnown(q) ? (food.kcal_per_100g * q.payload.quantity_grams) / 100 : null,
     mealSlot: q.payload.meal_slot,
     status: q.status,
+    portionAssumed: q.payload.portion_assumed === true,
   };
 }
 
