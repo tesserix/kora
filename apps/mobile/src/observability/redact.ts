@@ -6,11 +6,18 @@
 // Pure by design — no imports from api.ts or any SDK — so the rules are
 // testable without a native module.
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const DIGITS = /^\d+$/;
+// Matches static route segments like v1, logs, saved-meals, unread-count.
+// Rejects parameter-like segments: IDs with prefixes (post-6f1b...), encoded tokens, mixed formats.
+// Pattern: lowercase letters optionally followed by hyphenated word groups, then optional version digits.
+const SAFE_SEGMENT = /^[a-z]+(-[a-z]+)*([0-9]+)?$/;
 
 /**
  * Collapses identifying path segments to `:id`.
+ *
+ * Uses a default-deny approach: only segments matching the lowercase kebab-case
+ * pattern (e.g. "v1", "logs", "saved-meals") are kept unchanged. Everything
+ * else — UUIDs, numeric IDs, encoded push tokens, or any dynamic segment — is
+ * replaced with `:id`.
  *
  * Two reasons, both load-bearing. A raw id leaks an identifier into a third
  * party. It also shatters grouping — a thousand distinct issues with a count
@@ -23,7 +30,7 @@ export function templateRoute(path: string): string {
   const [withoutQuery] = path.split("?");
   return withoutQuery
     .split("/")
-    .map((segment) => (UUID.test(segment) || DIGITS.test(segment) ? ":id" : segment))
+    .map((segment) => (segment === "" || SAFE_SEGMENT.test(segment) ? segment : ":id"))
     .join("/");
 }
 
@@ -35,7 +42,9 @@ function isApiErrorShape(e: unknown): e is { status: number; requestId?: string 
     typeof e === "object" &&
     e !== null &&
     (e as { name?: unknown }).name === "ApiError" &&
-    typeof (e as { status?: unknown }).status === "number"
+    typeof (e as { status?: unknown }).status === "number" &&
+    (typeof (e as { requestId?: unknown }).requestId === "string" ||
+      (e as { requestId?: unknown }).requestId === undefined)
   );
 }
 

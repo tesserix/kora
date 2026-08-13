@@ -22,6 +22,23 @@ describe("templateRoute", () => {
       "/v1/groups/:id/members/:id",
     );
   });
+
+  test("replaces an Expo push token with :id (default-deny prevents leaks)", () => {
+    expect(templateRoute("/v1/devices/ExponentPushToken%5Babc123%5D")).toBe("/v1/devices/:id");
+  });
+
+  test("replaces a compound segment containing a uuid with :id", () => {
+    expect(templateRoute("/v1/logs/post-6f1b11bc-1234-4abc-89ef-0123456789ab")).toBe("/v1/logs/:id");
+  });
+
+  test("preserves lowercase kebab-case route segments like saved-meals and unread-count, templates ids", () => {
+    expect(templateRoute("/v1/123/saved-meals/6f1b11bc-1234-4abc-89ef-0123456789ab")).toBe("/v1/:id/saved-meals/:id");
+    expect(templateRoute("/v1/some-id-42/unread-count")).toBe("/v1/:id/unread-count");
+  });
+
+  test("templates an uppercase-hex UUID segment", () => {
+    expect(templateRoute("/v1/logs/6F1B11BC-1234-4ABC-89EF-0123456789AB")).toBe("/v1/logs/:id");
+  });
 });
 
 describe("buildAttributes", () => {
@@ -71,5 +88,20 @@ describe("buildAttributes", () => {
 
   test("falls back to a stable class name for a non-Error throwable", () => {
     expect(buildAttributes("just a string").error_class).toBe("UnknownError");
+  });
+
+  test("rejects ApiError-shaped objects with non-string requestId (duck-type guard narrows safely)", () => {
+    // A malformed object with a non-string requestId should not pass the type predicate
+    const fakeError = Object.assign(new Error(), {
+      name: "ApiError",
+      status: 500,
+      requestId: { echo: "chicken curry" }, // NOT a string
+    });
+    const attrs = buildAttributes(fakeError, "/v1/logs/:id");
+    // Should not be treated as ApiError-shaped, so no status/request_id
+    expect(attrs).not.toHaveProperty("status");
+    expect(attrs).not.toHaveProperty("request_id");
+    const serialised = JSON.stringify(attrs);
+    expect(serialised).not.toContain("chicken curry");
   });
 });
