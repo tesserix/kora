@@ -20,7 +20,8 @@
           "group.com.tesserix.kora"
         ]
       },
-      "appleTeamId": "2CRHRRYBPL"
+      "appleTeamId": "2CRHRRYBPL",
+      "googleServicesFile": "./GoogleService-Info.plist"
     },
     "android": {
       "package": "com.tesserix.kora",
@@ -89,7 +90,15 @@
       ],
       "@bacons/apple-targets",
       "expo-asset",
-      "expo-font"
+      "expo-font",
+      "@react-native-firebase/app",
+      "@react-native-firebase/crashlytics",
+      [
+        "expo-build-properties",
+        {
+          "ios": { "useFrameworks": "dynamic" }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

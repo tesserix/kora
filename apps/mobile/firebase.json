@@ -12,5 +12,9 @@
         "supportEmail": "mahesh.sangawar@gmail.com"
       }
     }
+  },
+  "react-native": {
+    "crashlytics_debug_enabled": false,
+    "crashlytics_auto_collection_enabled": true
   }
 }
