@@ -580,3 +580,18 @@ jest.mock("expo-crypto", () => ({
   CryptoDigestAlgorithm: { SHA256: "SHA-256" },
 }));
 
+// The native Crashlytics module cannot load under Jest. createCrashlyticsSink
+// already returns null when the require fails, but mocking it explicitly keeps
+// the failure path deliberate rather than incidental.
+jest.mock(
+  "@react-native-firebase/crashlytics",
+  () => ({
+    getCrashlytics: jest.fn(() => ({})),
+    recordError: jest.fn(),
+    setUserId: jest.fn(),
+    setAttributes: jest.fn(),
+    log: jest.fn(),
+  }),
+  { virtual: true },
+);
+
