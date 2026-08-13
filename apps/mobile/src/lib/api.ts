@@ -99,42 +99,79 @@ export class TimeoutError extends Error {
 // than fail (see src/api/resolveWire.ts).
 export const REQUEST_TIMEOUT_MS = 25_000;
 
-// AbortSignal.any() is unavailable at runtime here: RN's global
+// Which of the two inputs aborted the composed signal below. This is tracked
+// as closure state we own rather than read back off the signal, because
+// AbortSignal.reason DOES NOT EXIST on this runtime: RN's global
 // AbortController/AbortSignal come from the `abort-controller` npm polyfill
 // (see node_modules/react-native/Libraries/Core/setUpXHR.js), whose bundled
-// version (3.0.0) predates AbortSignal.any entirely — only the TypeScript
-// DOM lib knows about it, not this app's actual engine. So the caller's
-// signal (if any) and this request's own deadline signal are composed by
-// hand: one AbortController whose signal aborts when either input does.
-function composeDeadlineSignal(callerSignal: AbortSignal | null | undefined): {
-  signal: AbortSignal;
-  clear: () => void;
-} {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(new TimeoutError()), REQUEST_TIMEOUT_MS);
+// version (3.0.0) declares `abort(): void` and has no `reason` at all. So
+// `controller.abort(someError)` silently DISCARDS its argument on device and
+// `signal.reason` reads `undefined` — a discriminant routed through it is
+// always undefined in production while looking perfectly correct under Jest,
+// which runs on Node's native AbortController (where `reason` does exist) and
+// never loads the polyfill. That mismatch is exactly how a timeout spent this
+// app's entire history surfacing as a NetworkError.
+//
+// AbortSignal.any() is unavailable for the same reason (3.0.0 predates it
+// entirely — only the TypeScript DOM lib knows about it, not this app's actual
+// engine), so the caller's signal and this request's own deadline are still
+// composed by hand into one controller.
+type AbortCause = "caller" | "deadline";
 
-  // The caller's abort is re-thrown wrapped in CancelledError rather than as
-  // its raw reason: this composed signal carries BOTH the caller's cancel and
-  // the deadline, and downstream (doFetch) only sees the merged signal. Wrapping
-  // here is what keeps the two apart — the deadline aborts with TimeoutError,
-  // the caller with CancelledError — so a cancel can never be mistaken for a
-  // timeout, nor either for a transport failure.
+type ComposedSignal = {
+  readonly signal: AbortSignal;
+  // Why the composed signal aborted, or null while it has not. Read by doFetch
+  // to pick the typed error, and by abortError below.
+  readonly cause: () => AbortCause | null;
+  // The error this abort should surface as. Never undefined, in every case.
+  readonly abortError: () => Error;
+  readonly clear: () => void;
+};
+
+function composeDeadlineSignal(callerSignal: AbortSignal | null | undefined): ComposedSignal {
+  const controller = new AbortController();
+
+  // Deliberately a closure variable rather than anything read off the signal:
+  // see the AbortSignal.reason note above. Written exactly once — whichever
+  // input aborts first wins, and abort() on an already-aborted controller is a
+  // no-op anyway, so a later abort can never relabel an earlier one.
+  let cause: AbortCause | null = null;
+  const abortWith = (next: AbortCause): void => {
+    if (cause !== null) return;
+    cause = next;
+    // No argument: the polyfill drops it, and nothing here reads it back.
+    controller.abort();
+  };
+
+  const timer = setTimeout(() => abortWith("deadline"), REQUEST_TIMEOUT_MS);
+
   let onCallerAbort: (() => void) | undefined;
   if (callerSignal) {
     if (callerSignal.aborted) {
-      controller.abort(new CancelledError(callerSignal.reason));
+      abortWith("caller");
     } else {
-      onCallerAbort = () => controller.abort(new CancelledError(callerSignal.reason));
+      onCallerAbort = () => abortWith("caller");
       callerSignal.addEventListener("abort", onCallerAbort);
     }
   }
 
-  const clear = () => {
+  // The deadline aborts as TimeoutError, the caller as CancelledError — so a
+  // cancel can never be mistaken for a timeout, nor either for a transport
+  // failure. `reason` is read only opportunistically for CancelledError's
+  // `cause`: on a runtime that supports it the caller's own reason is
+  // preserved, and on this one the fallback keeps `cause` meaningful rather
+  // than undefined.
+  const abortError = (): Error => {
+    if (cause === "deadline") return new TimeoutError();
+    return new CancelledError(callerSignal?.reason ?? new Error("Aborted by the caller"));
+  };
+
+  const clear = (): void => {
     clearTimeout(timer);
     if (callerSignal && onCallerAbort) callerSignal.removeEventListener("abort", onCallerAbort);
   };
 
-  return { signal: controller.signal, clear };
+  return { signal: controller.signal, cause: () => cause, abortError, clear };
 }
 
 // Rejects when `signal` aborts, even if `promise` never settles on its own —
@@ -143,12 +180,15 @@ function composeDeadlineSignal(callerSignal: AbortSignal | null | undefined): {
 // if `promise` later resolves or rejects after an abort already won the
 // race, that outcome is a no-op — a late-arriving response must never
 // surface once the deadline (or a caller's own cancel) has already fired.
-function raceWithSignal<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) return Promise.reject(signal.reason);
+// `abortReason` supplies the rejection value, because `signal.reason` is
+// `undefined` on this runtime (see composeDeadlineSignal) — rejecting with it
+// would hand every caller an undefined error.
+function raceWithSignal<T>(promise: Promise<T>, signal: AbortSignal, abortReason: () => Error): Promise<T> {
+  if (signal.aborted) return Promise.reject(abortReason());
   return new Promise<T>((resolve, reject) => {
     const onAbort = () => {
       signal.removeEventListener("abort", onAbort);
-      reject(signal.reason);
+      reject(abortReason());
     };
     signal.addEventListener("abort", onAbort);
     promise.then(
@@ -245,16 +285,26 @@ async function getToken(user: User, forceRefresh?: true): Promise<string> {
   }
 }
 
-async function doFetch(path: string, init: RequestInit, signal: AbortSignal): Promise<Response> {
+async function doFetch(path: string, init: RequestInit, composed: ComposedSignal): Promise<Response> {
+  const { signal } = composed;
   try {
-    return await raceWithSignal(fetch(`${BASE_URL}${path}`, { ...init, signal }), signal);
+    return await raceWithSignal(fetch(`${BASE_URL}${path}`, { ...init, signal }), signal, composed.abortError);
   } catch (err) {
     // The deadline itself firing must surface as TimeoutError, and the
     // caller's own cancel as CancelledError — neither gets folded into the
     // generic NetworkError every genuine transport failure (offline, DNS,
-    // TLS, ...) becomes below. composeDeadlineSignal is what tells the two
-    // aborts apart before either reaches here.
+    // TLS, ...) becomes below.
     if (err instanceof TimeoutError || err instanceof CancelledError) throw err;
+    // fetch() sees the same abort and rejects with the ENGINE's own AbortError,
+    // which can win the race against raceWithSignal's listener. That rejection
+    // carries no usable identity (it is a DOMException/Error indistinguishable
+    // from a transport fault), so the classification comes from the composed
+    // signal's own recorded cause instead — the whole point of tracking it here
+    // rather than on the signal. Without this branch an abort that lost the
+    // race would still land in NetworkError.
+    const cause = composed.cause();
+    if (cause === "deadline") throw new TimeoutError();
+    if (cause === "caller") throw new CancelledError(err);
     throw new NetworkError(err);
   }
 }
@@ -273,12 +323,12 @@ async function runAttempt(
   user: User | null,
   forceRefresh?: true,
 ): Promise<Response> {
-  const { signal, clear } = composeDeadlineSignal(callerSignal);
+  const composed = composeDeadlineSignal(callerSignal);
   try {
     const token = user ? await getToken(user, forceRefresh) : null;
-    return await doFetch(path, buildInit(token), signal);
+    return await doFetch(path, buildInit(token), composed);
   } finally {
-    clear();
+    composed.clear();
   }
 }
 

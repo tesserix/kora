@@ -6,7 +6,18 @@ import {
   apiFetch,
   apiFetchEnvelope,
   apiFetchMultipart,
+  isNetworkError,
 } from "../api";
+// The polyfill React Native installs over the globals at runtime — imported
+// directly so the tests at the bottom of this file can run against the same
+// AbortController the device gets. See that describe block for why.
+// The deep path is deliberate and matches setUpXHR.js exactly: the package's
+// `browser` field maps the bare specifier back to the native global, which
+// would defeat the entire point of these tests.
+import {
+  AbortController as RNAbortController,
+  AbortSignal as RNAbortSignal,
+} from "abort-controller/dist/abort-controller";
 
 function abortError(): DOMException {
   return new DOMException("Aborted", "AbortError");
@@ -218,6 +229,86 @@ test("a fast response clears the deadline timer instead of leaving it pending", 
   // rejection, which fake timers surface as a thrown error from this call.
   expect(() => jest.advanceTimersByTime(REQUEST_TIMEOUT_MS + 1)).not.toThrow();
   jest.useRealTimers();
+});
+
+// --- The runtime the app actually ships on -------------------------------
+//
+// Every test above runs against Node's native AbortController, which supports
+// `AbortSignal.reason`. THE DEVICE DOES NOT. React Native polyfills global
+// AbortController/AbortSignal with `abort-controller` 3.0.0
+// (node_modules/react-native/Libraries/Core/setUpXHR.js), whose `abort()` takes
+// no argument and whose signal has no `reason` property at all — so
+// `controller.abort(new TimeoutError())` discards the error and `signal.reason`
+// reads `undefined` in production. jest-expo never loads that polyfill, so a
+// discriminant routed through `reason` passes every test above while being
+// undefined on every real phone. These tests close that gap by running the same
+// two assertions against the polyfill the app actually gets.
+describe("against React Native's AbortController polyfill (no AbortSignal.reason)", () => {
+  const nativeAbortController = global.AbortController;
+  const nativeAbortSignal = global.AbortSignal;
+
+  beforeEach(() => {
+    global.AbortController = RNAbortController as unknown as typeof AbortController;
+    global.AbortSignal = RNAbortSignal as unknown as typeof AbortSignal;
+  });
+
+  afterEach(() => {
+    global.AbortController = nativeAbortController;
+    global.AbortSignal = nativeAbortSignal;
+  });
+
+  // The property whose absence is the whole defect — pinned, so a future
+  // polyfill bump that adds `reason` is a visible change rather than a silent
+  // one that makes this suite stop testing anything.
+  test("the polyfill really has no usable abort reason", () => {
+    const controller = new AbortController();
+    controller.abort(new Error("discarded"));
+    expect(controller.signal.aborted).toBe(true);
+    expect(controller.signal.reason).toBeUndefined();
+  });
+
+  test("a caller abort still rejects as CancelledError", async () => {
+    const controller = new AbortController();
+    (global.fetch as jest.Mock).mockImplementation((_u, init) =>
+      new Promise((_res, rej) => init.signal.addEventListener("abort", () => rej(abortError()))),
+    );
+
+    const promise = apiFetch("/v1/slow", { signal: controller.signal });
+    controller.abort();
+
+    await expect(promise).rejects.toBeInstanceOf(CancelledError);
+    await expect(promise).rejects.not.toBeInstanceOf(NetworkError);
+  });
+
+  // Defect 5, the pre-existing one with the same root cause: `abort(new
+  // TimeoutError())` never survived on device, so every 25s deadline has
+  // always surfaced as NetworkError. This is the assertion that proves it does
+  // not any more.
+  test("the deadline still rejects as TimeoutError", async () => {
+    jest.useFakeTimers();
+    (global.fetch as jest.Mock).mockImplementation(() => new Promise(() => {}));
+
+    const promise = apiFetch("/v1/slow");
+    jest.advanceTimersByTime(REQUEST_TIMEOUT_MS + 1);
+
+    await expect(promise).rejects.toMatchObject({ name: "TimeoutError" });
+    await expect(promise).rejects.not.toBeInstanceOf(NetworkError);
+    jest.useRealTimers();
+  });
+
+  // isNetworkError is the offline queue's discriminant: a genuine transport
+  // failure must still reach it, polyfill or not. A fix that turned every
+  // failure into a CancelledError would break offline logging far worse than
+  // the bug it replaced.
+  test("a genuine transport failure is still a NetworkError", async () => {
+    const controller = new AbortController();
+    (global.fetch as jest.Mock).mockRejectedValue(new TypeError("Network request failed"));
+
+    const promise = apiFetch("/v1/slow", { signal: controller.signal });
+
+    await expect(promise).rejects.toBeInstanceOf(NetworkError);
+    await expect(promise.then(() => null, isNetworkError)).resolves.toBe(true);
+  });
 });
 
 test("apiFetchMultipart forwards a caller signal that can abort the request", async () => {
