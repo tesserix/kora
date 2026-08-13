@@ -1,4 +1,12 @@
-import { ApiError, REQUEST_TIMEOUT_MS, apiFetch, apiFetchEnvelope, apiFetchMultipart } from "../api";
+import {
+  ApiError,
+  CancelledError,
+  NetworkError,
+  REQUEST_TIMEOUT_MS,
+  apiFetch,
+  apiFetchEnvelope,
+  apiFetchMultipart,
+} from "../api";
 
 function abortError(): DOMException {
   return new DOMException("Aborted", "AbortError");
@@ -143,14 +151,52 @@ test("a request that outlives the deadline rejects as a timeout", async () => {
   jest.useRealTimers();
 });
 
-test("an aborted request rejects and does not resolve later", async () => {
+// A caller's own Cancel has its own identity (#136 follow-up): folding it into
+// NetworkError filed a crash report for every Cancel and made a cancel
+// indistinguishable from a dropped connection everywhere downstream.
+test("an aborted request rejects as CancelledError, not NetworkError, and does not resolve later", async () => {
   const controller = new AbortController();
   (global.fetch as jest.Mock).mockImplementation((_u, init) =>
     new Promise((_res, rej) => init.signal.addEventListener("abort", () => rej(abortError()))),
   );
   const promise = apiFetch("/v1/slow", { signal: controller.signal });
   controller.abort();
-  await expect(promise).rejects.toBeTruthy();
+  await expect(promise).rejects.toBeInstanceOf(CancelledError);
+  await expect(promise).rejects.not.toBeInstanceOf(NetworkError);
+});
+
+test("a signal already aborted before the request starts also rejects as CancelledError", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  (global.fetch as jest.Mock).mockResolvedValue({ ok: true, json: async () => ({ data: {} }) });
+
+  await expect(apiFetch("/v1/slow", { signal: controller.signal })).rejects.toBeInstanceOf(CancelledError);
+});
+
+// The composed signal carries BOTH the caller's cancel and the 25s deadline.
+// A deadline that fired while a caller signal was attached must still be a
+// TimeoutError — a timeout is a fault worth reporting and worth queueing a
+// capture for; a cancel is neither.
+test("the deadline still produces TimeoutError when a caller signal is attached", async () => {
+  jest.useFakeTimers();
+  const controller = new AbortController();
+  (global.fetch as jest.Mock).mockImplementation(() => new Promise(() => {}));
+  const promise = apiFetch("/v1/slow", { signal: controller.signal });
+  jest.advanceTimersByTime(REQUEST_TIMEOUT_MS + 1);
+  await expect(promise).rejects.toMatchObject({ name: "TimeoutError" });
+  await expect(promise).rejects.not.toBeInstanceOf(CancelledError);
+  jest.useRealTimers();
+});
+
+// The other half of the discriminant: a genuine transport failure is still a
+// NetworkError, so the offline queue's classifier is untouched by this change.
+test("a genuine fetch failure with a caller signal attached is still a NetworkError", async () => {
+  const controller = new AbortController();
+  (global.fetch as jest.Mock).mockRejectedValue(new TypeError("Network request failed"));
+
+  const promise = apiFetch("/v1/slow", { signal: controller.signal });
+  await expect(promise).rejects.toBeInstanceOf(NetworkError);
+  await expect(promise).rejects.not.toBeInstanceOf(CancelledError);
 });
 
 test("the client deadline is below the gateway's 30s cut-off", () => {
@@ -184,5 +230,5 @@ test("apiFetchMultipart forwards a caller signal that can abort the request", as
   const promise = apiFetchMultipart("/v1/resolve/photo", form, { signal: controller.signal });
   controller.abort();
 
-  await expect(promise).rejects.toBeTruthy();
+  await expect(promise).rejects.toBeInstanceOf(CancelledError);
 });

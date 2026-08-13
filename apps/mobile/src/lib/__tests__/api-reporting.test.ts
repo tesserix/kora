@@ -77,6 +77,26 @@ test("a 200 whose body will not parse is reported as a ResponseParseError", asyn
   expect(context).toEqual({ route: "/v1/dashboard" });
 });
 
+// api.ts still reports unconditionally (isReportable is what filters), but the
+// error it hands the reporter must be the honest one: a Cancel reaching
+// Crashlytics as a NetworkError is a fault report for something that never
+// failed, filed once per Cancel and once per unmount-while-resolving.
+test("a cancelled request hands the reporter a CancelledError, not a NetworkError", async () => {
+  const controller = new AbortController();
+  global.fetch = jest.fn(
+    (_url: unknown, init: { signal?: AbortSignal }) =>
+      new Promise((_res, rej) => init.signal?.addEventListener("abort", () => rej(new Error("aborted")))),
+  ) as unknown as typeof fetch;
+
+  const promise = apiFetch("/v1/resolve/photo", { signal: controller.signal });
+  controller.abort();
+  await expect(promise).rejects.toBeDefined();
+
+  expect(mockReportError).toHaveBeenCalledTimes(1);
+  const [error] = mockReportError.mock.calls[0];
+  expect((error as { name?: string }).name).toBe("CancelledError");
+});
+
 test("a successful request reports nothing", async () => {
   global.fetch = jest.fn(async () =>
     new Response(JSON.stringify({ data: { ok: true } }), {

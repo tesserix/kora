@@ -6,12 +6,23 @@
 // already learned this the hard way for NetworkError.
 
 // Client-side faults that always indicate something is wrong.
+//
 const REPORTABLE_NAMES = new Set([
   "NetworkError",
   "TimeoutError",
   "ResponseParseError",
   "AuthTokenError",
 ]);
+
+// Deliberate, user-driven outcomes that are not faults. Listed explicitly
+// rather than merely left out of REPORTABLE_NAMES, because the fallback below
+// reports every unrecognised Error — so "absent" would still mean "reported".
+//
+// A user cancelling (capture's Cancel, a screen unmounting mid-resolve) is the
+// app doing exactly what it was told. Reporting it would let every Cancel storm
+// the dashboard and bury the signal — the same failure the 4xx exclusion below
+// exists to prevent.
+const NEVER_REPORTABLE_NAMES = new Set(["CancelledError"]);
 
 function isApiErrorShape(e: unknown): e is { status: number } {
   return (
@@ -36,6 +47,7 @@ export function isReportable(error: unknown): boolean {
   if (isApiErrorShape(error)) return error.status >= 500;
 
   const name = (error as { name?: unknown }).name;
+  if (typeof name === "string" && NEVER_REPORTABLE_NAMES.has(name)) return false;
   if (typeof name === "string" && REPORTABLE_NAMES.has(name)) return true;
 
   // An error we do not recognise is still a fault — the unknown case is

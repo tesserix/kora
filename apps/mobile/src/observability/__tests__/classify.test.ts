@@ -26,6 +26,16 @@ describe("isReportable", () => {
     },
   );
 
+  // #136: capture's Cancel genuinely aborts the in-flight resolve, and every
+  // abort used to reach Crashlytics as a NetworkError — a user-initiated
+  // outcome misattributed as a client network fault, once per Cancel and once
+  // per unmount-while-resolving. NetworkError is asserted alongside it so this
+  // can never pass by disabling reporting wholesale.
+  test("does NOT report a CancelledError — a user cancelling is not a fault", () => {
+    expect(isReportable(named("CancelledError"))).toBe(false);
+    expect(isReportable(named("NetworkError"))).toBe(true);
+  });
+
   test("reports an unrecognised Error — an unknown fault is still a fault", () => {
     expect(isReportable(new Error("something unexpected"))).toBe(true);
   });

@@ -5,7 +5,15 @@ import type { ReactNode } from "react";
 import { CACHED_MATCH_TIER } from "@/api/types";
 import type { FoodItem } from "@/api/types";
 import { OfflineUnknownBarcodeError } from "@/offline/cachedResolution";
-import { NetworkError, TimeoutError, apiFetch, apiFetchEnvelope, apiFetchMultipart, currentUserId } from "@/lib/api";
+import {
+  CancelledError,
+  NetworkError,
+  TimeoutError,
+  apiFetch,
+  apiFetchEnvelope,
+  apiFetchMultipart,
+  currentUserId,
+} from "@/lib/api";
 import { drain, list } from "@/offline/queue";
 import { getFoodById, getFoodByBarcode } from "@/offline/foodCache";
 import * as foodCache from "@/offline/foodCache";
@@ -65,6 +73,9 @@ jest.mock("@/lib/api", () => {
   // `instanceof TimeoutError` check, so the mock must keep the two classes
   // genuinely distinct or that widening couldn't be exercised at all.
   class MockTimeoutError extends Error {}
+  // A caller's own Cancel: its own class, so withCacheFallback's fallback can
+  // be proven NOT to fire for it while it still fires for MockNetworkError.
+  class MockCancelledError extends Error {}
   return {
     apiFetch: jest.fn().mockResolvedValue({ id: "u1", email: "a@b.c", goal: "", onboarded_at: null }),
     currentUserId: jest.fn(() => "user-a"),
@@ -73,6 +84,7 @@ jest.mock("@/lib/api", () => {
     ApiError: class extends Error {},
     NetworkError: MockNetworkError,
     TimeoutError: MockTimeoutError,
+    CancelledError: MockCancelledError,
     isNetworkError: (e: unknown) =>
       e instanceof MockNetworkError || (e as { name?: string } | null)?.name === "NetworkError",
   };
@@ -1184,12 +1196,11 @@ test("a barcode resolved online is found again offline, from the cache", async (
   expect(offline.candidates[0].kcal_unknown).toBe(true);
 });
 
-// doFetch folds a caller's own abort into NetworkError right alongside a
-// genuine dropped connection (src/lib/api.ts:230-236), and withCacheFallback
-// treats any NetworkError as "fall back to the cache" — so without the
-// `signal?.aborted` guard, cancelling a barcode scan would quietly settle as
-// a successful (or OfflineUnknownBarcodeError) cache lookup instead of
-// propagating as the cancellation it actually is. The cache-not-touched
+// doFetch gives a caller's own abort its own class (CancelledError), distinct
+// from the NetworkError a genuine dropped connection produces. withCacheFallback
+// falls back to the cache only for NetworkError/TimeoutError, so a cancel must
+// propagate as the cancellation it is rather than quietly settling as a
+// successful (or OfflineUnknownBarcodeError) cache lookup. The cache-not-touched
 // assertion is the half that actually proves the fallback was skipped, not
 // merely that *some* rejection happened to surface.
 test("Cancel during an in-flight barcode resolve rejects and never falls back to the cache", async () => {
@@ -1204,8 +1215,8 @@ test("Cancel during an in-flight barcode resolve rejects and never falls back to
     (_path: string, init: RequestInit) =>
       new Promise((_resolve, reject) => {
         // Mirrors doFetch's real behaviour: a caller abort surfaces as a
-        // NetworkError, not a distinct AbortError.
-        init.signal?.addEventListener("abort", () => reject(new NetworkError("aborted")));
+        // CancelledError, never as the NetworkError a dropped connection gives.
+        init.signal?.addEventListener("abort", () => reject(new CancelledError("aborted")));
       }),
   );
 

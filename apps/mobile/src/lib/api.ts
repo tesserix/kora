@@ -58,6 +58,21 @@ export function isNetworkError(err: unknown): boolean {
   return err instanceof NetworkError || (err as { name?: string } | null)?.name === "NetworkError";
 }
 
+// The CALLER aborted this request on purpose (capture's Cancel, a screen
+// unmounting mid-resolve). Distinct from NetworkError because nothing failed:
+// there is no fault to report, nothing to retry, and nothing to queue. Folding
+// it into NetworkError made every Cancel file a crash report misattributed as a
+// client network fault, and made a cancel indistinguishable from a dropped
+// connection at every call site that has to tell them apart. `cause` keeps the
+// underlying abort reason (whatever the caller passed to abort(), or the
+// engine's own AbortError) so nothing is lost.
+export class CancelledError extends Error {
+  constructor(cause: unknown) {
+    super("Request cancelled", { cause });
+    this.name = "CancelledError";
+  }
+}
+
 // The response came back with a 2xx status, but its body did not parse as
 // JSON — the server answered, but the client couldn't read the answer.
 export class ResponseParseError extends Error {
@@ -98,12 +113,18 @@ function composeDeadlineSignal(callerSignal: AbortSignal | null | undefined): {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new TimeoutError()), REQUEST_TIMEOUT_MS);
 
+  // The caller's abort is re-thrown wrapped in CancelledError rather than as
+  // its raw reason: this composed signal carries BOTH the caller's cancel and
+  // the deadline, and downstream (doFetch) only sees the merged signal. Wrapping
+  // here is what keeps the two apart — the deadline aborts with TimeoutError,
+  // the caller with CancelledError — so a cancel can never be mistaken for a
+  // timeout, nor either for a transport failure.
   let onCallerAbort: (() => void) | undefined;
   if (callerSignal) {
     if (callerSignal.aborted) {
-      controller.abort(callerSignal.reason);
+      controller.abort(new CancelledError(callerSignal.reason));
     } else {
-      onCallerAbort = () => controller.abort(callerSignal.reason);
+      onCallerAbort = () => controller.abort(new CancelledError(callerSignal.reason));
       callerSignal.addEventListener("abort", onCallerAbort);
     }
   }
@@ -228,10 +249,12 @@ async function doFetch(path: string, init: RequestInit, signal: AbortSignal): Pr
   try {
     return await raceWithSignal(fetch(`${BASE_URL}${path}`, { ...init, signal }), signal);
   } catch (err) {
-    // The deadline itself firing must surface as TimeoutError, not get
-    // folded into the generic NetworkError every other fetch() failure
-    // (offline, DNS, TLS, a caller's own abort, ...) becomes below.
-    if (err instanceof TimeoutError) throw err;
+    // The deadline itself firing must surface as TimeoutError, and the
+    // caller's own cancel as CancelledError — neither gets folded into the
+    // generic NetworkError every genuine transport failure (offline, DNS,
+    // TLS, ...) becomes below. composeDeadlineSignal is what tells the two
+    // aborts apart before either reaches here.
+    if (err instanceof TimeoutError || err instanceof CancelledError) throw err;
     throw new NetworkError(err);
   }
 }

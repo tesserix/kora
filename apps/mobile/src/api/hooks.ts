@@ -97,25 +97,19 @@ export function useSubmitOnboarding() {
 // Anything that is not a network failure (a 4xx, a bad token, an unparseable
 // body) rethrows: masking a real server rejection behind a stale local answer
 // would be worse than failing.
-// `signal` is optional because useFoodSearch's queryFn has no caller-provided
-// AbortSignal to pass — only useResolveBarcode's mutation does.
-async function withCacheFallback<T>(
-  live: () => Promise<T>,
-  cached: () => Promise<T>,
-  signal?: AbortSignal,
-): Promise<T> {
+// A caller's own Cancel needs no guard of its own here: doFetch now gives it a
+// distinct class (CancelledError, src/lib/api.ts), so it matches neither
+// isNetworkError nor TimeoutError below and takes the rethrow path — which is
+// exactly right. A cancelled barcode resolve must propagate as the cancellation
+// it is, not quietly settle as a successful (or OfflineUnknownBarcodeError)
+// cache lookup. Before that class existed this needed an explicit
+// `signal?.aborted` check, because an abort arrived here as a NetworkError
+// indistinguishable from a dropped connection — see #136.
+async function withCacheFallback<T>(live: () => Promise<T>, cached: () => Promise<T>): Promise<T> {
   if (!isOnline()) return cached();
   try {
     return await live();
   } catch (err) {
-    // A caller's own Cancel surfaces here indistinguishably from a dropped
-    // connection: doFetch folds everything that isn't a TimeoutError into
-    // NetworkError, including "a caller's own abort" (src/lib/api.ts:230-236),
-    // and isNetworkError below would otherwise match it. Without this guard a
-    // cancelled barcode resolve quietly settles as a successful (or
-    // OfflineUnknownBarcodeError) cache lookup instead of propagating as the
-    // cancellation it actually is — see #136.
-    if (signal?.aborted) throw err;
     // TimeoutError joins isNetworkError here for the same reason it joins it
     // in useCreateLog below: the 25s client deadline (REQUEST_TIMEOUT_MS) is a
     // distinct class from NetworkError, and a slow-but-alive connection that
@@ -719,7 +713,6 @@ export function useResolveBarcode() {
             }),
           ),
         () => barcodeFromCache(barcode),
-        signal,
       ),
     // The one path that hands back genuine server FoodItems — brand,
     // provenance, canonical serving, and (the whole point) a barcode.
