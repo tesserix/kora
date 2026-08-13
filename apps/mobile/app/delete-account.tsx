@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
@@ -10,7 +10,7 @@ import { GlassPanel } from "@/components/instrument/GlassPanel";
 import { PressableScale } from "@/motion";
 import { safeBack } from "@/lib/safeBack";
 import { deleteAccount } from "@/api/hooks";
-import { unregisterPushToken } from "@/lib/push";
+import { registerPushToken, unregisterPushToken } from "@/lib/push";
 import { apiErrorMessage } from "@/lib/apiErrorMessage";
 import { auth } from "@/lib/firebase";
 import { useTheme } from "@/theme";
@@ -41,11 +41,18 @@ export default function DeleteAccountScreen() {
   const [value, setValue] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // A ref, not the `pending` state, is what actually latches: two presses
+  // dispatched in the same tick both read the pre-commit `pending` from their
+  // render closure and both pass. The state stays for the UI (label, opacity,
+  // disabled); the ref is the guard, and this is the one irreversible action in
+  // the app.
+  const inFlight = useRef(false);
 
   const confirmed = isConfirmed(value);
 
   const onConfirm = async (): Promise<void> => {
-    if (!confirmed || pending) return;
+    if (!confirmed || inFlight.current) return;
+    inFlight.current = true;
     setPending(true);
     setError(null);
 
@@ -61,8 +68,18 @@ export default function DeleteAccountScreen() {
     try {
       await deleteAccount();
     } catch (e: unknown) {
+      // The account survives, but the device was de-registered a moment ago and
+      // nothing else would ever put it back: registerPushToken()'s only other
+      // caller fires on an auth transition, and this user never signed out. Not
+      // re-registering here loses them push silently, forever.
+      try {
+        await registerPushToken();
+      } catch {
+        // Deliberately swallowed — see src/lib/push.ts for this convention.
+      }
       setError(apiErrorMessage(e));
       setPending(false);
+      inFlight.current = false;
       return;
     }
 
@@ -130,6 +147,11 @@ export default function DeleteAccountScreen() {
             accessibilityRole="button"
             accessibilityLabel="Delete my account"
             accessibilityState={{ disabled: !confirmed || pending }}
+            // The real prop, not just the a11y state: without it the button
+            // still springs under the finger and still fires onPress, so the
+            // only thing refusing an unconfirmed delete was the JS guard.
+            // PressableScale spreads ...rest onto its inner Pressable.
+            disabled={!confirmed || pending}
             haptic="none"
             onPress={onConfirm}
             style={{
