@@ -55,6 +55,43 @@ test("never forwards the error message to the sink attributes", () => {
   expect(JSON.stringify(recorded[0].attributes)).not.toContain("chicken curry");
 });
 
+test("never hands the server's message to the sink on the Error object itself", () => {
+  // Crashlytics transmits error.message as the non-fatal's reason — it is not
+  // attributes-only. For an ApiError that message is body.message straight
+  // from the server, which can echo user input, so reportError must
+  // synthesize its own Error rather than forward the original.
+  const { sink, recorded } = fakeSink();
+  initReporting(sink);
+
+  reportError(apiError(500, "req-42"), { route: "/v1/me" });
+
+  expect(recorded[0].error.message).not.toContain("chicken curry");
+  expect(recorded[0].error.message).toBe("ApiError 500");
+});
+
+test("preserves the original stack when synthesizing an ApiError's report", () => {
+  const { sink, recorded } = fakeSink();
+  initReporting(sink);
+
+  const original = apiError(500);
+  reportError(original, { route: "/v1/me" });
+
+  expect(recorded[0].error.stack).toBe(original.stack);
+});
+
+test("forwards our own static messages unchanged for non-ApiError failures", () => {
+  // NetworkError/TimeoutError/ResponseParseError messages are our literals,
+  // never server- or user-derived, and they aid triage.
+  const { sink, recorded } = fakeSink();
+  initReporting(sink);
+
+  reportError(Object.assign(new Error("network request failed"), { name: "NetworkError" }), {
+    route: "/v1/me",
+  });
+
+  expect(recorded[0].error.message).toBe("network request failed");
+});
+
 test("passes the user id through to the sink", () => {
   const { sink, users } = fakeSink();
   initReporting(sink);
