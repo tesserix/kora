@@ -73,11 +73,18 @@ test("useResolvePhoto builds a multipart body Expo's fetch can actually encode",
   (File as SeedableFile).__seed(uri, new Uint8Array([0x4d, 0x45, 0x41, 0x4c])); // "MEAL"
   (apiFetchMultipart as jest.Mock).mockResolvedValueOnce(resolution);
 
+  const controller = new AbortController();
   const { result } = await renderHook(() => useResolvePhoto(), { wrapper });
-  result.current.mutate({ uri, name: "meal.png", type: "image/png" });
+  result.current.mutate({ input: { uri, name: "meal.png", type: "image/png" }, signal: controller.signal });
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-  expect(apiFetchMultipart).toHaveBeenCalledWith("/v1/resolve/photo", expect.any(FormData));
+  // The third argument to apiFetchMultipart carries the caller's signal — see
+  // #136: without this, Cancel never reached the underlying request.
+  expect(apiFetchMultipart).toHaveBeenCalledWith(
+    "/v1/resolve/photo",
+    expect.any(FormData),
+    expect.objectContaining({ signal: controller.signal }),
+  );
 
   const encoded = await encodeCapturedForm();
   // The Go handler reads the part by name: c.FormFile("file") in
@@ -99,10 +106,14 @@ test("useResolveVoice builds a multipart body Expo's fetch can actually encode",
   (apiFetchMultipart as jest.Mock).mockResolvedValueOnce(resolution);
 
   const { result } = await renderHook(() => useResolveVoice(), { wrapper });
-  result.current.mutate({ uri, name: "clip.m4a", type: "audio/mp4" });
+  result.current.mutate({ input: { uri, name: "clip.m4a", type: "audio/mp4" } });
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-  expect(apiFetchMultipart).toHaveBeenCalledWith("/v1/resolve/voice", expect.any(FormData));
+  expect(apiFetchMultipart).toHaveBeenCalledWith(
+    "/v1/resolve/voice",
+    expect.any(FormData),
+    expect.objectContaining({ signal: undefined }),
+  );
 
   const encoded = await encodeCapturedForm();
   expect(encoded).toContain('name="file"');

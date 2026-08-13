@@ -656,10 +656,20 @@ export function useRepeatLog() {
   });
 }
 
+/** Resolve mutations carry the caller's AbortSignal in their variables because
+ *  React Query hands `mutationFn` exactly one argument. Without it, Cancel was
+ *  a local token only: the UI went idle while the socket — and the server's AI
+ *  budget — kept running to completion or the 25s deadline. See #136. */
+export type ResolveVars<T> = { input: T; signal?: AbortSignal };
+
 export function useResolveText() {
   return useMutation({
-    mutationFn: (phrase: string) =>
-      apiFetch("/v1/resolve/text", { method: "POST", body: JSON.stringify({ phrase }) }).then(normalizeResolution),
+    mutationFn: ({ input: phrase, signal }: ResolveVars<string>) =>
+      apiFetch("/v1/resolve/text", {
+        method: "POST",
+        body: JSON.stringify({ phrase }),
+        signal,
+      }).then(normalizeResolution),
   });
 }
 
@@ -684,11 +694,15 @@ export function useResolveBarcode() {
     // removes it. Kept next to the code that depends on it rather than relying
     // on the app-wide default a later change could narrow.
     networkMode: "always",
-    mutationFn: (barcode: string): Promise<Resolution> =>
+    mutationFn: ({ input: barcode, signal }: ResolveVars<string>): Promise<Resolution> =>
       withCacheFallback(
         async () =>
           normalizeResolution(
-            await apiFetch("/v1/resolve/barcode", { method: "POST", body: JSON.stringify({ barcode }) }),
+            await apiFetch("/v1/resolve/barcode", {
+              method: "POST",
+              body: JSON.stringify({ barcode }),
+              signal,
+            }),
           ),
         () => barcodeFromCache(barcode),
       ),
@@ -716,8 +730,8 @@ export function useResolveBarcode() {
 
 export function useResolvePhoto() {
   return useMutation({
-    mutationFn: (file: ResolveFile) =>
-      apiFetchMultipart("/v1/resolve/photo", buildCaptureForm(file)).then(normalizeResolution),
+    mutationFn: ({ input: file, signal }: ResolveVars<ResolveFile>) =>
+      apiFetchMultipart("/v1/resolve/photo", buildCaptureForm(file), { signal }).then(normalizeResolution),
   });
 }
 
@@ -755,8 +769,8 @@ export function useWeightSeries(range: WeightRange) {
 
 export function useResolveVoice() {
   return useMutation({
-    mutationFn: (file: ResolveFile) =>
-      apiFetchMultipart("/v1/resolve/voice", buildCaptureForm(file)).then(normalizeResolution),
+    mutationFn: ({ input: file, signal }: ResolveVars<ResolveFile>) =>
+      apiFetchMultipart("/v1/resolve/voice", buildCaptureForm(file), { signal }).then(normalizeResolution),
   });
 }
 

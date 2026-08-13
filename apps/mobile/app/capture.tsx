@@ -1066,7 +1066,7 @@ export default function CaptureScreen() {
     // not stay up covering the result thread once a send is in flight.
     Keyboard.dismiss();
     const controller = beginResolve();
-    resolveText.mutate(phrase, {
+    resolveText.mutate({ input: phrase, signal: controller.signal }, {
       onSuccess: (data) => {
         // A cancel that lands between mutate() firing and this callback
         // means the user has already moved on — applying it now would
@@ -1164,7 +1164,7 @@ export default function CaptureScreen() {
       return;
     }
     const controller = beginResolve();
-    resolvePhoto.mutate(outcome.file, {
+    resolvePhoto.mutate({ input: outcome.file, signal: controller.signal }, {
       onSuccess: (data) => {
         if (controller.signal.aborted) return;
         applyResolution(data, "ai_photo");
@@ -1222,7 +1222,7 @@ export default function CaptureScreen() {
     }
     const file = { uri, name: "clip.m4a", type: "audio/mp4" };
     const controller = beginResolve();
-    resolveVoice.mutate(file, {
+    resolveVoice.mutate({ input: file, signal: controller.signal }, {
       onSuccess: (data) => {
         if (controller.signal.aborted) return;
         applyResolution(data, "ai_voice");
@@ -1265,7 +1265,7 @@ export default function CaptureScreen() {
     scannedRef.current = true;
     setErrorMsg(null);
     const controller = beginResolve();
-    resolveBarcode.mutate(data, {
+    resolveBarcode.mutate({ input: data, signal: controller.signal }, {
       onSuccess: (result) => {
         scannedRef.current = false;
         if (controller.signal.aborted) return;

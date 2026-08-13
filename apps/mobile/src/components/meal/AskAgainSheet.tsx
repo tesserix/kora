@@ -90,7 +90,7 @@ export function AskAgainSheet({ visible, phrase, onSelect, onManualSearch, onClo
     if (!trimmed || resolveText.isPending) return;
     setError(null);
     setResolution(null);
-    resolveText.mutate(trimmed, {
+    resolveText.mutate({ input: trimmed }, {
       onSuccess: (result: Resolution) => setResolution(result),
       onError: () => setError("Couldn't ask Kora right now. Try again."),
     });

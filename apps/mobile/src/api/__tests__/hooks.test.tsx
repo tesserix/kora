@@ -122,12 +122,13 @@ test("useResolveText posts phrase to /v1/resolve/text", async () => {
   (apiFetch as jest.Mock).mockResolvedValueOnce(resolution);
 
   const { result } = await renderHook(() => useResolveText(), { wrapper });
-  result.current.mutate("2 eggs");
+  result.current.mutate({ input: "2 eggs" });
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
   expect(apiFetch).toHaveBeenCalledWith("/v1/resolve/text", {
     method: "POST",
     body: JSON.stringify({ phrase: "2 eggs" }),
+    signal: undefined,
   });
   expect(result.current.data).toEqual(resolution);
 });
@@ -136,14 +137,58 @@ test("useResolveBarcode posts barcode to /v1/resolve/barcode", async () => {
   (apiFetch as jest.Mock).mockResolvedValueOnce(resolution);
 
   const { result } = await renderHook(() => useResolveBarcode(), { wrapper });
-  result.current.mutate("0123456789012");
+  result.current.mutate({ input: "0123456789012" });
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
   expect(apiFetch).toHaveBeenCalledWith("/v1/resolve/barcode", {
     method: "POST",
     body: JSON.stringify({ barcode: "0123456789012" }),
+    signal: undefined,
   });
   expect(result.current.data).toEqual(resolution);
+});
+
+// #136: the mutationFn is a single-argument function, so the caller's
+// AbortSignal has to travel inside the mutation variables — there is no other
+// channel react-query hands it through. Without this, Cancel was a purely
+// local token: the UI went idle while the socket (and the server's AI
+// budget) kept running.
+test("useResolveText passes the caller's signal to apiFetch", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce(resolution);
+  const controller = new AbortController();
+
+  const { result } = await renderHook(() => useResolveText(), { wrapper });
+  await result.current.mutateAsync({ input: "two eggs", signal: controller.signal });
+
+  expect(apiFetch).toHaveBeenCalledWith(
+    "/v1/resolve/text",
+    expect.objectContaining({ signal: controller.signal }),
+  );
+});
+
+// The test that actually matters for #136: the UI returning to idle on
+// Cancel already happens today without this fix (capture.tsx's local
+// `controller.signal.aborted` early-return in onSuccess/onError). The only
+// way to prove Cancel genuinely stops the socket is to prove the in-flight
+// request itself rejects when the signal aborts.
+test("aborting the signal rejects the in-flight resolve", async () => {
+  const controller = new AbortController();
+  (apiFetch as jest.Mock).mockImplementation(
+    (_path: string, init: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+      }),
+  );
+
+  const { result } = await renderHook(() => useResolveText(), { wrapper });
+  const pending = result.current.mutateAsync({ input: "two eggs", signal: controller.signal });
+  // mutateAsync schedules the mutationFn asynchronously — abort only once
+  // apiFetch has actually registered its listener, or the abort event fires
+  // on a signal nothing is listening to yet.
+  await waitFor(() => expect(apiFetch).toHaveBeenCalled());
+  controller.abort();
+
+  await expect(pending).rejects.toThrow("aborted");
 });
 
 // The server's designed response for an unrecognised barcode omits
@@ -164,7 +209,7 @@ test("useResolveBarcode succeeds on the server's real not-found response (candid
   (apiFetch as jest.Mock).mockResolvedValueOnce(notFound);
 
   const { result } = await renderHook(() => useResolveBarcode(), { wrapper });
-  await expect(result.current.mutateAsync("0000000000000")).resolves.toMatchObject({
+  await expect(result.current.mutateAsync({ input: "0000000000000" })).resolves.toMatchObject({
     candidates: [],
     tier: "follow_up",
   });
@@ -195,7 +240,7 @@ test("useResolveBarcode caches the resolved food for an offline repeat scan", as
   (apiFetch as jest.Mock).mockResolvedValueOnce(barcodeResolution);
 
   const { result } = await renderHook(() => useResolveBarcode(), { wrapper });
-  await result.current.mutateAsync("0123456789012");
+  await result.current.mutateAsync({ input: "0123456789012" });
 
   await waitFor(async () => expect(await getFoodByBarcode("0123456789012")).not.toBeNull());
   const cached = await getFoodByBarcode("0123456789012");
@@ -228,7 +273,7 @@ test("a pins refetch does not overwrite a food already cached at full fidelity f
   };
   (apiFetch as jest.Mock).mockResolvedValueOnce(barcodeResolution);
   const barcodeHook = await renderHook(() => useResolveBarcode(), { wrapper });
-  await barcodeHook.result.current.mutateAsync("0123456789012");
+  await barcodeHook.result.current.mutateAsync({ input: "0123456789012" });
   await waitFor(async () => expect(await getFoodById("f9")).not.toBeNull());
 
   // The user then pins the SAME food. The server's pins summary carries no
@@ -282,10 +327,14 @@ test("useResolvePhoto posts to /v1/resolve/photo and returns the normalized reso
   (apiFetchMultipart as jest.Mock).mockResolvedValueOnce(resolution);
 
   const { result } = await renderHook(() => useResolvePhoto(), { wrapper });
-  result.current.mutate({ uri: "file:///photo.jpg", name: "photo.jpg", type: "image/jpeg" });
+  result.current.mutate({ input: { uri: "file:///photo.jpg", name: "photo.jpg", type: "image/jpeg" } });
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-  expect(apiFetchMultipart).toHaveBeenCalledWith("/v1/resolve/photo", expect.any(FormData));
+  expect(apiFetchMultipart).toHaveBeenCalledWith(
+    "/v1/resolve/photo",
+    expect.any(FormData),
+    expect.objectContaining({ signal: undefined }),
+  );
   expect(result.current.data).toEqual(resolution);
 });
 
@@ -293,10 +342,14 @@ test("useResolveVoice posts to /v1/resolve/voice and returns the normalized reso
   (apiFetchMultipart as jest.Mock).mockResolvedValueOnce(resolution);
 
   const { result } = await renderHook(() => useResolveVoice(), { wrapper });
-  result.current.mutate({ uri: "file:///voice.m4a", name: "clip.m4a", type: "audio/mp4" });
+  result.current.mutate({ input: { uri: "file:///voice.m4a", name: "clip.m4a", type: "audio/mp4" } });
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-  expect(apiFetchMultipart).toHaveBeenCalledWith("/v1/resolve/voice", expect.any(FormData));
+  expect(apiFetchMultipart).toHaveBeenCalledWith(
+    "/v1/resolve/voice",
+    expect.any(FormData),
+    expect.objectContaining({ signal: undefined }),
+  );
   expect(result.current.data).toEqual(resolution);
 });
 
@@ -1101,7 +1154,7 @@ test("a barcode resolved online is found again offline, from the cache", async (
   (apiFetch as jest.Mock).mockResolvedValueOnce(serverBarcodeResolution);
 
   const { result } = await renderHook(() => useResolveBarcode(), { wrapper });
-  await act(async () => { await result.current.mutateAsync(BARCODE); });
+  await act(async () => { await result.current.mutateAsync({ input: BARCODE }); });
   await waitFor(async () => expect(await getFoodByBarcode(BARCODE)).not.toBeNull());
 
   // Genuinely offline, and apiFetch would now reject if anything reached it.
@@ -1110,7 +1163,7 @@ test("a barcode resolved online is found again offline, from the cache", async (
   (apiFetch as jest.Mock).mockRejectedValue(new NetworkError("no network"));
 
   let offline!: Awaited<ReturnType<typeof result.current.mutateAsync>>;
-  await act(async () => { offline = await result.current.mutateAsync(BARCODE); });
+  await act(async () => { offline = await result.current.mutateAsync({ input: BARCODE }); });
 
   expect(apiFetch).not.toHaveBeenCalled();
   expect(offline.candidates).toHaveLength(1);
@@ -1133,7 +1186,7 @@ test("a barcode the device has never resolved is refused offline, with a reason"
   const { result } = await renderHook(() => useResolveBarcode(), { wrapper });
 
   await expect(
-    act(async () => { await result.current.mutateAsync("999999999999"); }),
+    act(async () => { await result.current.mutateAsync({ input: "999999999999" }); }),
   ).rejects.toBeInstanceOf(OfflineUnknownBarcodeError);
   expect(apiFetch).not.toHaveBeenCalled();
 });
@@ -1152,7 +1205,7 @@ test("a connection that dies mid-resolve still falls back to the cache", async (
 
   const { result } = await renderHook(() => useResolveBarcode(), { wrapper });
   let out!: Awaited<ReturnType<typeof result.current.mutateAsync>>;
-  await act(async () => { out = await result.current.mutateAsync(BARCODE); });
+  await act(async () => { out = await result.current.mutateAsync({ input: BARCODE }); });
 
   expect(apiFetch).toHaveBeenCalled();
   expect(out.candidates[0].item.name).toBe("Choc protein bar");
@@ -1172,7 +1225,7 @@ test("a request that times out still falls back to the cache", async () => {
 
   const { result } = await renderHook(() => useResolveBarcode(), { wrapper });
   let out!: Awaited<ReturnType<typeof result.current.mutateAsync>>;
-  await act(async () => { out = await result.current.mutateAsync(BARCODE); });
+  await act(async () => { out = await result.current.mutateAsync({ input: BARCODE }); });
 
   expect(apiFetch).toHaveBeenCalled();
   expect(out.candidates[0].item.name).toBe("Choc protein bar");
@@ -1192,7 +1245,7 @@ test("a server rejection is NOT masked by the cache", async () => {
 
   const { result } = await renderHook(() => useResolveBarcode(), { wrapper });
   await expect(
-    act(async () => { await result.current.mutateAsync(BARCODE); }),
+    act(async () => { await result.current.mutateAsync({ input: BARCODE }); }),
   ).rejects.toThrow("bad barcode");
 });
 
@@ -1263,7 +1316,7 @@ test("scan online, then offline: the repeat scan is logged and lands in the diar
     { wrapper },
   );
 
-  await act(async () => { await result.current.barcode.mutateAsync(BARCODE); });
+  await act(async () => { await result.current.barcode.mutateAsync({ input: BARCODE }); });
   await waitFor(async () => expect(await getFoodByBarcode(BARCODE)).not.toBeNull());
 
   onlineManager.setOnline(false);
@@ -1271,7 +1324,7 @@ test("scan online, then offline: the repeat scan is logged and lands in the diar
   (apiFetch as jest.Mock).mockRejectedValue(new NetworkError("no network"));
 
   let scanned!: Awaited<ReturnType<typeof result.current.barcode.mutateAsync>>;
-  await act(async () => { scanned = await result.current.barcode.mutateAsync(BARCODE); });
+  await act(async () => { scanned = await result.current.barcode.mutateAsync({ input: BARCODE }); });
   const candidate = scanned.candidates[0];
 
   await act(async () => {

@@ -453,7 +453,7 @@ describe("Type mode", () => {
     await fireEvent.press(await findByLabelText("Send"));
 
     expect(mockResolveTextMutate).toHaveBeenCalledWith(
-      "grilled chicken and rice",
+      expect.objectContaining({ input: "grilled chicken and rice" }),
       expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
     );
   });
@@ -637,7 +637,7 @@ describe("Photo mode", () => {
 
     await waitFor(() =>
       expect(mockResolvePhotoMutate).toHaveBeenCalledWith(
-        { uri: "file://x.jpg", name: "x.jpg", type: "image/jpeg" },
+        expect.objectContaining({ input: { uri: "file://x.jpg", name: "x.jpg", type: "image/jpeg" } }),
         expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
       ),
     );
@@ -705,7 +705,7 @@ describe("Photo mode", () => {
 
     await waitFor(() =>
       expect(mockResolvePhotoMutate).toHaveBeenCalledWith(
-        { uri: "file://library.jpg", name: "library.jpg", type: "image/jpeg" },
+        expect.objectContaining({ input: { uri: "file://library.jpg", name: "library.jpg", type: "image/jpeg" } }),
         expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
       ),
     );
@@ -723,7 +723,7 @@ describe("Photo mode", () => {
 
     await waitFor(() =>
       expect(mockResolvePhotoMutate).toHaveBeenCalledWith(
-        { uri: "file://quick.jpg", name: "quick.jpg", type: "image/jpeg" },
+        expect.objectContaining({ input: { uri: "file://quick.jpg", name: "quick.jpg", type: "image/jpeg" } }),
         expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
       ),
     );
@@ -757,7 +757,7 @@ describe("Voice mode", () => {
 
     await waitFor(() =>
       expect(mockResolveVoiceMutate).toHaveBeenCalledWith(
-        { uri: "file://mock-recording.m4a", name: "clip.m4a", type: "audio/mp4" },
+        expect.objectContaining({ input: { uri: "file://mock-recording.m4a", name: "clip.m4a", type: "audio/mp4" } }),
         expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
       ),
     );
@@ -864,7 +864,7 @@ describe("Scan mode", () => {
     });
 
     expect(mockResolveBarcodeMutate).toHaveBeenCalledWith(
-      "012345678905",
+      expect.objectContaining({ input: "012345678905" }),
       expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
     );
   });

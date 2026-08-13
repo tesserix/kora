@@ -87,7 +87,7 @@ test("Ask Kora again is shown for an ai_text log and re-resolves the edited phra
   await fireEvent.press(getByLabelText("Submit phrase to Kora"));
 
   expect(mockResolveTextMutate).toHaveBeenCalledWith(
-    "scrambled eggs",
+    expect.objectContaining({ input: "scrambled eggs" }),
     expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
   );
 });
