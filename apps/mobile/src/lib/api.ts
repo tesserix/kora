@@ -1,5 +1,6 @@
 import { onAuthStateChanged, signOut, type User } from "firebase/auth";
 import { auth } from "./firebase";
+import { reportError } from "@/observability/reporter";
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:8080";
 
@@ -329,22 +330,30 @@ export async function apiFetchEnvelope<T>(
   path: string,
   init: RequestInit = {},
 ): Promise<{ data: T; meta?: Record<string, unknown> }> {
-  const res = await fetchWithRetry(
-    path,
-    (token) => ({
-      ...init,
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...(init.headers ?? {}),
-      },
-    }),
-    init.signal,
-  );
+  try {
+    const res = await fetchWithRetry(
+      path,
+      (token) => ({
+        ...init,
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(init.headers ?? {}),
+        },
+      }),
+      init.signal,
+    );
 
-  if (!res.ok) return throwApiError(res);
-  if (isNoContent(res)) return { data: undefined as T };
-  return parseJson<{ data: T; meta?: Record<string, unknown> }>(res);
+    if (!res.ok) return await throwApiError(res);
+    if (isNoContent(res)) return { data: undefined as T };
+    return parseJson<{ data: T; meta?: Record<string, unknown> }>(res);
+  } catch (err) {
+    // Report EVERY failure and rethrow unchanged. This call site deliberately
+    // does not decide what is worth reporting — reportError applies
+    // isReportable itself, so the rule lives in exactly one place.
+    reportError(err, { route: path });
+    throw err;
+  }
 }
 
 // apiFetch unwraps to `data` and drops everything else, which is right for
@@ -363,18 +372,26 @@ export async function apiFetchMultipart(
   form: FormData,
   init: { signal?: AbortSignal } = {},
 ): Promise<unknown> {
-  const res = await fetchWithRetry(
-    path,
-    (token) => ({
-      method: "POST",
-      body: form,
-      // No Content-Type — fetch sets multipart/form-data with the boundary.
-      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-    }),
-    init.signal,
-  );
+  try {
+    const res = await fetchWithRetry(
+      path,
+      (token) => ({
+        method: "POST",
+        body: form,
+        // No Content-Type — fetch sets multipart/form-data with the boundary.
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      }),
+      init.signal,
+    );
 
-  if (!res.ok) return throwApiError(res);
-  const body = await parseJson<{ data?: unknown }>(res);
-  return body.data ?? body;
+    if (!res.ok) return await throwApiError(res);
+    const body = await parseJson<{ data?: unknown }>(res);
+    return body.data ?? body;
+  } catch (err) {
+    // Report EVERY failure and rethrow unchanged. This call site deliberately
+    // does not decide what is worth reporting — reportError applies
+    // isReportable itself, so the rule lives in exactly one place.
+    reportError(err, { route: path });
+    throw err;
+  }
 }
