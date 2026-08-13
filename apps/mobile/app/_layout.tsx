@@ -51,7 +51,17 @@ try {
   };
   rejectionTracking.enable({
     allRejections: true,
-    onUnhandled: (_id, error) => reportError(error),
+    onUnhandled: (_id, error) => {
+      reportError(error);
+      // enable() REPLACES React Native's own tracker, which would otherwise
+      // silence the LogBox unhandled-rejection warning in development —
+      // exactly where you want to notice one. Mirrors the ErrorUtils handler
+      // above, which chains the previous handler for the same reason.
+      // console.warn is intentional here: this is dev-only diagnostics, and
+      // the repo's no-console rule targets production code paths. Do not
+      // "clean this up".
+      if (__DEV__) console.warn("Unhandled promise rejection:", error);
+    },
     onHandled: () => {
       // Required by the API. A rejection handled late is not a fault.
     },
