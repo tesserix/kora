@@ -843,6 +843,16 @@ export function storeAppleAuthorization(authorization_code: string): Promise<unk
   });
 }
 
+// Plain function, not a hook: the caller unmounts as a direct result of the
+// call succeeding (the screen signs out and navigates away), so there is no
+// component left to hold mutation state or a cache to invalidate.
+//
+// The server takes the user from the auth context — there is no id in the
+// request and nothing to forge. Returns 204 with no body.
+export function deleteAccount(): Promise<unknown> {
+  return apiFetch("/v1/me", { method: "DELETE" });
+}
+
 export function useGroups() {
   return useQuery({ queryKey: ["groups"], queryFn: () => apiFetch("/v1/groups") as Promise<GroupSummary[]> });
 }
