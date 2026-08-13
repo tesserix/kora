@@ -57,6 +57,26 @@ test("a 401 reaches the reporter, which is what drops it — the call site does 
   expect((error as { status?: number }).status).toBe(401);
 });
 
+test("a 200 whose body will not parse is reported as a ResponseParseError", async () => {
+  // The headline case: a 200 that the client cannot read. It only reaches the
+  // reporter if apiFetchEnvelope AWAITS parseJson inside its try — a bare
+  // `return parseJson(...)` adopts the promise outside the try and the catch
+  // never fires.
+  global.fetch = jest.fn(async () =>
+    new Response("<html>not json</html>", {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
+  ) as unknown as typeof fetch;
+
+  await expect(apiFetch("/v1/dashboard")).rejects.toBeDefined();
+
+  expect(mockReportError).toHaveBeenCalledTimes(1);
+  const [error, context] = mockReportError.mock.calls[0];
+  expect((error as { name?: string }).name).toBe("ResponseParseError");
+  expect(context).toEqual({ route: "/v1/dashboard" });
+});
+
 test("a successful request reports nothing", async () => {
   global.fetch = jest.fn(async () =>
     new Response(JSON.stringify({ data: { ok: true } }), {

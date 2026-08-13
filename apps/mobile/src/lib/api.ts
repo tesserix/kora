@@ -346,7 +346,10 @@ export async function apiFetchEnvelope<T>(
 
     if (!res.ok) return await throwApiError(res);
     if (isNoContent(res)) return { data: undefined as T };
-    return parseJson<{ data: T; meta?: Record<string, unknown> }>(res);
+    // `await` is load-bearing: a bare `return parseJson(...)` adopts the
+    // promise OUTSIDE this try, so the catch below never sees a
+    // ResponseParseError and the failure goes unreported.
+    return await parseJson<{ data: T; meta?: Record<string, unknown> }>(res);
   } catch (err) {
     // Report EVERY failure and rethrow unchanged. This call site deliberately
     // does not decide what is worth reporting — reportError applies
