@@ -167,9 +167,49 @@ allergen is a hospital visit.
 
 ---
 
-## 8. Housekeeping — proposed GitHub changes
+## 8. Housekeeping — APPLIED 2026-08-13
 
-**Not yet applied.** Each needs a decision.
+All of the following were applied. Final state: **R1 16 open, R2 25, R3 14**,
+and only two issues unmilestoned — #40 (this backlog index, now superseded) and
+#16 (Australis, explicitly parked). Every other open issue has a milestone.
+
+### Verified by reading the code, not assumed
+
+TestFlight turned out to be **partly done** and several issues were confirmed
+still broken. Evidence recorded as comments on each:
+
+| # | Finding |
+|---|---|
+| 109 | **Config gate passed** — `eas.json` has `ascAppId: 6799465324` and `appleTeamId: 2CRHRRYBPL`. Kept open: its own criteria also require crash reporting (absent) and a real external-tester install (unverified). |
+| 136 | **Looks fixed, is not wired.** `capture.tsx` creates and aborts an `AbortController`, but `grep -rn signal` returns nothing — the signal never reaches the fetch, so Cancel cancels nothing. Now costlier than when filed, since per-user AI caps landed. |
+| 142 | Confirmed broken. No source/device de-dup in `useActivityHistory.ts`, no commits since filing. |
+| 138 | **Partially fixed.** Recipes honour `portion_assumed` end to end; the capture path still drops it — `food_logs` has no such column. |
+| 97 | Confirmed. 7,881 foods, **0** embeddings. |
+| 143 | Confirmed. `expo.android.notification` absent. |
+| 137 | Confirmed. No `AppState` listener, so the denied card cannot clear on foreground. |
+
+### Applied
+
+- **→ R1:** #104, #142, #138, #118, #136, #140, #137, #84, #150 (eslint)
+- **→ R2:** #31, #36, #144, #141, #139, #85, #15, #97, #143, #39, #147, #148, #149, #151
+- **→ R3:** #146, #32, #33, #34, #35, #47, #48, #49, #50, #152
+- **Closed:** #25 with a scope note recording what shipped and why URL import was split out.
+- **Re-scoped:** #44 — caps, metering and per-call-type budgets all shipped during recipes; what remains is model routing and cache strategy, the latter blocked on #105. Suggested retitle recorded on the issue.
+- **Superseded:** #40 now points at this document.
+- **Scoped:** #36 with the allergen decisions and the "we cannot certify safety" constraint written down.
+
+### Opened
+
+| # | Issue |
+|---|---|
+| 147 | recipe metadata — tags and cooking steps (in flight) |
+| 148 | recipe URL import — the deferred third input from #25 |
+| 149 | shopping list from selected recipes (split from #31) |
+| 150 | mobile eslint broken repo-wide — nothing has been linted |
+| 151 | nutrition tests fight the dev food index in both directions |
+| 152 | an abandoned fallback leg is never metered — cost data incomplete |
+
+### Original proposals, for the record
 
 **Milestone moves**
 - #104 → R1 (dependency of #109)
