@@ -17,7 +17,6 @@ const STEP_COUNT_IDENTIFIER = "HKQuantityTypeIdentifierStepCount";
 const WORKOUT_IDENTIFIER = "HKWorkoutTypeIdentifier";
 
 const WINDOW_DAYS = 14;
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 // Multi-day step totals are read through a cumulative-sum STATISTICS COLLECTION
 // query, never by summing raw samples. queryQuantitySamples returns every source's
@@ -43,12 +42,6 @@ export type ActivityHistory = {
   inference: ActivityInference | null;
   request: () => void;
 };
-
-function startOfLocalDay(d: Date): number {
-  const start = new Date(d);
-  start.setHours(0, 0, 0, 0);
-  return start.getTime();
-}
 
 /** The shape this hook needs from a HealthKit statistics-collection bucket. */
 export type StepStatisticsBucket = {
@@ -120,14 +113,21 @@ export function useActivityHistory(): ActivityHistory {
         }
 
         const now = new Date();
-        const windowStart = new Date(startOfLocalDay(now) - (WINDOW_DAYS - 1) * MS_PER_DAY);
+        // Built with calendar-field mutation (setHours/setDate), NOT millisecond
+        // subtraction: subtracting (WINDOW_DAYS - 1) * MS_PER_DAY drifts off local
+        // midnight whenever a DST transition falls inside the window, which would
+        // then shift every HealthKit bucket boundary — windowStart is also the
+        // anchorDate below, so it must stay exactly on a calendar-day boundary.
+        const windowStart = new Date(now);
+        windowStart.setHours(0, 0, 0, 0);
+        windowStart.setDate(windowStart.getDate() - (WINDOW_DAYS - 1));
 
         const [stepBuckets, workouts] = await Promise.all([
           hk.queryStatisticsCollectionForQuantity(
             STEP_COUNT_IDENTIFIER,
             CUMULATIVE_SUM,
-            // anchorDate: local midnight of windowStart, so each interval bucket
-            // aligns to a local calendar day, matching startOfLocalDay semantics.
+            // anchorDate: windowStart is already local midnight, so each interval
+            // bucket aligns to a local calendar day.
             windowStart,
             { day: 1 },
             { filter: { date: { startDate: windowStart, endDate: now } }, unit: "count" },

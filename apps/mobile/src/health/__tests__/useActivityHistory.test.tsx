@@ -164,7 +164,22 @@ describe("useActivityHistory", () => {
       mockQueryStatisticsCollectionForQuantity.mock.calls[0];
     expect(identifier).toBe("HKQuantityTypeIdentifierStepCount");
     expect(statistics).toEqual(["cumulativeSum"]);
+
+    // anchorDate must be local MIDNIGHT — not merely "a Date" — because it is now
+    // the bucket-grid anchor for queryStatisticsCollectionForQuantity. A
+    // millisecond-subtraction anchor (now - N*MS_PER_DAY) drifts off midnight
+    // across a DST transition, shifting every bucket boundary in the window.
     expect(anchorDate).toBeInstanceOf(Date);
+    expect((anchorDate as Date).getHours()).toBe(0);
+    expect((anchorDate as Date).getMinutes()).toBe(0);
+    expect((anchorDate as Date).getSeconds()).toBe(0);
+    expect((anchorDate as Date).getMilliseconds()).toBe(0);
+
+    const expectedAnchor = new Date();
+    expectedAnchor.setHours(0, 0, 0, 0);
+    expectedAnchor.setDate(expectedAnchor.getDate() - 13); // WINDOW_DAYS - 1
+    expect((anchorDate as Date).getTime()).toBe(expectedAnchor.getTime());
+
     expect(intervalComponents).toEqual({ day: 1 });
     expect(options).toMatchObject({
       filter: {
