@@ -50,9 +50,10 @@ export function setReportingUser(id: string | null): void {
  */
 export function reportError(error: unknown, context: ReportContext = {}): void {
   if (!sink) return;
-  if (!isReportable(error)) return;
 
   try {
+    if (!isReportable(error)) return;
+
     const attributes = buildAttributes(error, context.route);
     // The sink contract needs an Error for its stack. Anything else is
     // wrapped, preserving only the class name — never the original message,

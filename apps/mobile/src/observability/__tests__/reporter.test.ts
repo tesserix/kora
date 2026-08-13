@@ -96,3 +96,37 @@ test("wraps a non-Error throwable so the sink always receives an Error", () => {
   expect(recorded[0].error).toBeInstanceOf(Error);
   expect(recorded[0].attributes.error_class).toBe("NetworkError");
 });
+
+test("a value with a throwing property getter never propagates out of reportError", () => {
+  // isReportable() does defensive reads of `name`/`status`. Those reads must
+  // be inside the same guard as everything else, or a hostile/malformed
+  // error defeats the "never throw into the caller" guarantee.
+  const { sink, recorded } = fakeSink();
+  initReporting(sink);
+
+  const hostile: unknown = {
+    get name(): string {
+      throw new Error("boom");
+    },
+  };
+
+  expect(() => reportError(hostile, { route: "/v1/me" })).not.toThrow();
+  expect(recorded).toHaveLength(0);
+});
+
+test("a Proxy that throws on every property access never propagates out of reportError", () => {
+  const { sink, recorded } = fakeSink();
+  initReporting(sink);
+
+  const hostile = new Proxy(
+    {},
+    {
+      get() {
+        throw new Error("boom");
+      },
+    },
+  );
+
+  expect(() => reportError(hostile, { route: "/v1/me" })).not.toThrow();
+  expect(recorded).toHaveLength(0);
+});
