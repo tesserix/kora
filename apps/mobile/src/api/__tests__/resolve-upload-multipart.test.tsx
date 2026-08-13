@@ -129,6 +129,27 @@ test("useResolveVoice builds a multipart body Expo's fetch can actually encode",
   expect(encoded).not.toContain("audio/x-m4a");
 });
 
+// Voice is the other expensive path #136 cares about (photo's positive signal
+// assertion is above) — an abandoned voice transcription burns the same
+// server AI budget as an abandoned photo resolve, so this needs its own
+// direct proof, not just inference from the photo case.
+test("useResolveVoice passes the caller's signal as apiFetchMultipart's third argument", async () => {
+  const uri = "file:///Library/Caches/AV/recording.m4a";
+  (File as SeedableFile).__seed(uri, new Uint8Array([0x43, 0x4c, 0x49, 0x50])); // "CLIP"
+  (apiFetchMultipart as jest.Mock).mockResolvedValueOnce(resolution);
+
+  const controller = new AbortController();
+  const { result } = await renderHook(() => useResolveVoice(), { wrapper });
+  result.current.mutate({ input: { uri, name: "clip.m4a", type: "audio/mp4" }, signal: controller.signal });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+  expect(apiFetchMultipart).toHaveBeenCalledWith(
+    "/v1/resolve/voice",
+    expect.any(FormData),
+    expect.objectContaining({ signal: controller.signal }),
+  );
+});
+
 // The bug reduced to its essence, kept as its own test so a regression names itself
 // instead of surfacing as four confusing failures above. This is the exact shape the
 // hooks used to append, and Expo rejects it outright.

@@ -97,11 +97,25 @@ export function useSubmitOnboarding() {
 // Anything that is not a network failure (a 4xx, a bad token, an unparseable
 // body) rethrows: masking a real server rejection behind a stale local answer
 // would be worse than failing.
-async function withCacheFallback<T>(live: () => Promise<T>, cached: () => Promise<T>): Promise<T> {
+// `signal` is optional because useFoodSearch's queryFn has no caller-provided
+// AbortSignal to pass — only useResolveBarcode's mutation does.
+async function withCacheFallback<T>(
+  live: () => Promise<T>,
+  cached: () => Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
   if (!isOnline()) return cached();
   try {
     return await live();
   } catch (err) {
+    // A caller's own Cancel surfaces here indistinguishably from a dropped
+    // connection: doFetch folds everything that isn't a TimeoutError into
+    // NetworkError, including "a caller's own abort" (src/lib/api.ts:230-236),
+    // and isNetworkError below would otherwise match it. Without this guard a
+    // cancelled barcode resolve quietly settles as a successful (or
+    // OfflineUnknownBarcodeError) cache lookup instead of propagating as the
+    // cancellation it actually is — see #136.
+    if (signal?.aborted) throw err;
     // TimeoutError joins isNetworkError here for the same reason it joins it
     // in useCreateLog below: the 25s client deadline (REQUEST_TIMEOUT_MS) is a
     // distinct class from NetworkError, and a slow-but-alive connection that
@@ -705,6 +719,7 @@ export function useResolveBarcode() {
             }),
           ),
         () => barcodeFromCache(barcode),
+        signal,
       ),
     // The one path that hands back genuine server FoodItems — brand,
     // provenance, canonical serving, and (the whole point) a barcode.

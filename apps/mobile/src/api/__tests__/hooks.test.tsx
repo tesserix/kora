@@ -173,7 +173,12 @@ test("useResolveText passes the caller's signal to apiFetch", async () => {
 // request itself rejects when the signal aborts.
 test("aborting the signal rejects the in-flight resolve", async () => {
   const controller = new AbortController();
-  (apiFetch as jest.Mock).mockImplementation(
+  // Once, not a standing mockImplementation: apiFetch is a module-factory
+  // jest.fn() with nothing resetting it between tests, so leaving this in
+  // place beyond this one call would make it every later test's default —
+  // a never-settling promise — and mask that they've all learned to queue
+  // their own mockResolvedValueOnce/mockRejectedValueOnce around it.
+  (apiFetch as jest.Mock).mockImplementationOnce(
     (_path: string, init: RequestInit) =>
       new Promise((_resolve, reject) => {
         init.signal?.addEventListener("abort", () => reject(new Error("aborted")));
@@ -1179,9 +1184,47 @@ test("a barcode resolved online is found again offline, from the cache", async (
   expect(offline.candidates[0].kcal_unknown).toBe(true);
 });
 
+// doFetch folds a caller's own abort into NetworkError right alongside a
+// genuine dropped connection (src/lib/api.ts:230-236), and withCacheFallback
+// treats any NetworkError as "fall back to the cache" — so without the
+// `signal?.aborted` guard, cancelling a barcode scan would quietly settle as
+// a successful (or OfflineUnknownBarcodeError) cache lookup instead of
+// propagating as the cancellation it actually is. The cache-not-touched
+// assertion is the half that actually proves the fallback was skipped, not
+// merely that *some* rejection happened to surface.
+test("Cancel during an in-flight barcode resolve rejects and never falls back to the cache", async () => {
+  await AsyncStorage.clear();
+  await foodCache.upsertFoods([barcodeFood as FoodItem]);
+  onlineManager.setOnline(true);
+
+  const getFoodByBarcodeSpy = jest.spyOn(foodCache, "getFoodByBarcode");
+  const controller = new AbortController();
+  (apiFetch as jest.Mock).mockReset();
+  (apiFetch as jest.Mock).mockImplementationOnce(
+    (_path: string, init: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        // Mirrors doFetch's real behaviour: a caller abort surfaces as a
+        // NetworkError, not a distinct AbortError.
+        init.signal?.addEventListener("abort", () => reject(new NetworkError("aborted")));
+      }),
+  );
+
+  const { result } = await renderHook(() => useResolveBarcode(), { wrapper });
+  const pending = result.current.mutateAsync({ input: BARCODE, signal: controller.signal });
+  await waitFor(() => expect(apiFetch).toHaveBeenCalled());
+  controller.abort();
+
+  await expect(pending).rejects.toThrow();
+  expect(getFoodByBarcodeSpy).not.toHaveBeenCalled();
+});
+
 test("a barcode the device has never resolved is refused offline, with a reason", async () => {
   await AsyncStorage.clear();
   onlineManager.setOnline(false);
+  // Isolation from the preceding test's in-flight (aborted) call — apiFetch is
+  // a module-factory jest.fn() with nothing resetting its call history between
+  // tests.
+  (apiFetch as jest.Mock).mockReset();
 
   const { result } = await renderHook(() => useResolveBarcode(), { wrapper });
 

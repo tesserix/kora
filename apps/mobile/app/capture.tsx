@@ -923,14 +923,20 @@ export default function CaptureScreen() {
   // for the same physical scan while the camera keeps detecting the code.
   const scannedRef = useRef(false);
 
-  // The in-flight resolve's cancellation token. None of the four resolve
-  // hooks below support real network cancellation (react-query mutations
-  // have no signal parameter), so this exists to do the two things that
-  // matter regardless of whether the underlying request is still running:
-  // gate a late-arriving onSuccess/onError from writing to state, and force
-  // displayStage back to "idle" immediately rather than waiting on
-  // isPending to catch up. The request itself is still bounded by
-  // REQUEST_TIMEOUT_MS in api.ts either way.
+  // The in-flight resolve's cancellation token. `.signal` is threaded into
+  // the mutation variables (see ResolveVars in src/api/hooks.ts) and reaches
+  // apiFetch/apiFetchMultipart's `signal`, so `.abort()` here really does
+  // cancel the underlying request — the socket stops, not just the UI. See
+  // #136: before that threading existed, this controller was a purely local
+  // token and Cancel kept burning bandwidth and the server's AI budget until
+  // completion or the 25s deadline.
+  //
+  // It still does the two things that matter independently of whether the
+  // abort reaches the network in time: gate a late-arriving onSuccess/onError
+  // from writing to state, and force displayStage back to "idle" immediately
+  // rather than waiting on isPending to catch up. And the unmount cleanup
+  // effect below now genuinely kills an in-flight upload rather than merely
+  // dropping a reference to one.
   const resolveControllerRef = useRef<AbortController | null>(null);
   // Set the moment Cancel fires, cleared the moment a new resolve starts —
   // overrides displayStage below so the UI returns to idle even while the
