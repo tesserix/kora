@@ -163,6 +163,19 @@ test("drainLogs invalidates logs and dashboard after sending", async () => {
 // read straight off local storage, and a pass that sent nothing may still have
 // flipped one pending -> failed, or may simply be the first pass to learn who
 // is signed in (the diary's owner filter returns nothing until then).
+// The portion_assumed flag is what tells the diary a portion was a system
+// guess rather than a measurement. A queued log carries it exactly like any
+// other request field, so a drain must forward it unchanged.
+test("a queued log for an assumed candidate still carries portion_assumed: true when drained", async () => {
+  (apiFetch as jest.Mock).mockResolvedValue({ id: "id-1" });
+  await append({ ...payload, portion_assumed: true }, "id-1", "user-a");
+
+  await drainLogs(new QueryClient());
+
+  const body = JSON.parse((apiFetch as jest.Mock).mock.calls[0][1].body);
+  expect(body.portion_assumed).toBe(true);
+});
+
 test("a drain that sent nothing refreshes only the queued rows, not the server views", async () => {
   const qc = new QueryClient();
   const spy = jest.spyOn(qc, "invalidateQueries");

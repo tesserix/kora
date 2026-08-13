@@ -169,6 +169,17 @@ export type CreateLogInput = {
   client_log_ms?: number;
   /** Raw user phrase; the server keeps it only for ai_text / ai_voice sources. */
   input_phrase?: string;
+  /**
+   * True when the portion being logged is a system estimate rather than one
+   * derived from real data or stated by the user (ResolvedCandidate's own
+   * `portion_assumed`, see src/api/types.ts). Optional — like entered_amount
+   * and input_phrase above — because most callers of this shared input type
+   * (saved meals, memory foods, manual search) have no assumed portion to
+   * report at all; the server treats an omitted value as false. The server
+   * clears it automatically on any edit that rewrites the portion — never
+   * send it on an edit/PATCH path.
+   */
+  portion_assumed?: boolean;
 };
 
 export function useCreateLog() {

@@ -1332,6 +1332,11 @@ export default function CaptureScreen() {
         return createLog.mutateAsync({
           food_item_id: candidate.item.id,
           quantity_grams: candidate.portion_grams,
+          // Sent explicitly as a real boolean, never left to the "omitted
+          // means false" default: candidate.portion_assumed is known here,
+          // and coercing it pins the value the card actually showed instead
+          // of silently trusting whatever `undefined` happens to mean later.
+          portion_assumed: candidate.portion_assumed === true,
           meal_slot: mealSlot,
           source,
           logged_at: new Date().toISOString(),

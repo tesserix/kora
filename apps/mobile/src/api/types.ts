@@ -107,6 +107,13 @@ export type FoodLog = {
    * currently returned by the log-fetch endpoint.
    */
   serving_units?: ServingUnit[];
+  /**
+   * True when the portion logged was a system estimate rather than one
+   * derived from real data or stated by the user — mirrors
+   * ResolvedCandidate.portion_assumed above. Optional because an older
+   * server, or a cached/replayed row, may omit it.
+   */
+  portion_assumed?: boolean;
 };
 
 export type MemoryFood = {

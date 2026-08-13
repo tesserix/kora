@@ -1249,6 +1249,32 @@ describe("Add to diary", () => {
     );
     await waitFor(() => expect(router.back).toHaveBeenCalled());
   });
+
+  // portion_assumed marks a portion the system chose rather than one derived
+  // from real data or stated by the user. Losing it at confirm is the exact
+  // bug this pair guards: a single test that hardcodes the value in the
+  // payload could pass either way, so both true and false are required.
+  test("sends portion_assumed: true for a candidate whose portion was a system guess", async () => {
+    const rendered = await render(<CaptureScreen />);
+    const candidate = { ...makeCandidate("1", "Mystery stew", { grams: 300, kcal: 420 }), portion_assumed: true };
+    await resolveWithMultiCandidates(rendered, { ...makeMultiCandidateResolution(), candidates: [candidate] });
+
+    await fireEvent.press(await rendered.findByLabelText("Add to diary"));
+
+    await waitFor(() => expect(mockCreateLogMutateAsync).toHaveBeenCalledTimes(1));
+    expect(mockCreateLogMutateAsync).toHaveBeenCalledWith(expect.objectContaining({ portion_assumed: true }));
+  });
+
+  test("sends portion_assumed: false for a candidate with a real portion", async () => {
+    const rendered = await render(<CaptureScreen />);
+    const candidate = { ...makeCandidate("1", "Grilled chicken breast", { grams: 140, kcal: 231 }), portion_assumed: false };
+    await resolveWithMultiCandidates(rendered, { ...makeMultiCandidateResolution(), candidates: [candidate] });
+
+    await fireEvent.press(await rendered.findByLabelText("Add to diary"));
+
+    await waitFor(() => expect(mockCreateLogMutateAsync).toHaveBeenCalledTimes(1));
+    expect(mockCreateLogMutateAsync).toHaveBeenCalledWith(expect.objectContaining({ portion_assumed: false }));
+  });
 });
 
 // `source` must record which modality actually resolved the food, not which
