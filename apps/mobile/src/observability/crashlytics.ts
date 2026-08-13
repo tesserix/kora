@@ -15,27 +15,44 @@ import type { ReportSink } from "./reporter";
 export function createCrashlyticsSink(): ReportSink | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
+    // These three return PROMISES in the RNFB modular API — declaring them
+    // `void` is what let a native rejection float. `unknown` covers both the
+    // real promise-returning functions and any future void form.
     const mod = require("@react-native-firebase/crashlytics") as {
       getCrashlytics: () => unknown;
-      recordError: (c: unknown, e: Error) => void;
-      setUserId: (c: unknown, id: string) => void;
-      setAttributes: (c: unknown, a: Record<string, string>) => void;
+      recordError: (c: unknown, e: Error) => unknown;
+      setUserId: (c: unknown, id: string) => unknown;
+      setAttributes: (c: unknown, a: Record<string, string>) => unknown;
     };
     if (typeof mod?.getCrashlytics !== "function") return null;
 
     const instance = mod.getCrashlytics();
 
+    // A native rejection must die here. reportError's try/catch only guards
+    // SYNCHRONOUS throws, so a floating rejected promise escapes as an
+    // unhandled rejection — and app/_layout.tsx routes unhandled rejections
+    // straight back into reportError, which would call this sink again. A
+    // deterministic native failure would become a self-sustaining loop rather
+    // than one dropped report. Promise.resolve() makes this safe whether the
+    // native function returns a promise or not.
+    const settle = (result: unknown): void => {
+      void Promise.resolve(result).catch(() => {
+        // Deliberately swallowed — see src/lib/push.ts for this convention.
+        // Failing to report must never become a failure the app has to handle.
+      });
+    };
+
     return {
       recordError(error, attributes) {
         // Attributes first: they must be attached to the instance before the
         // record call that snapshots them.
-        mod.setAttributes(instance, attributes);
-        mod.recordError(instance, error);
+        settle(mod.setAttributes(instance, attributes));
+        settle(mod.recordError(instance, error));
       },
       setUser(id) {
         // Crashlytics has no "clear user" call; empty string is its documented
         // way of dissociating, and is what a sign-out should leave behind.
-        mod.setUserId(instance, id ?? "");
+        settle(mod.setUserId(instance, id ?? ""));
       },
     };
   } catch {
