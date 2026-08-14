@@ -13,6 +13,8 @@ import { CreateChallengeSheet } from "@/components/social/CreateChallengeSheet";
 import { RenameGroupSheet } from "@/components/social/RenameGroupSheet";
 import { InviteFriendSheet } from "@/components/social/InviteFriendSheet";
 import { useGroup, useGroupProgress, useGroupCode, useLeaveGroup, useRemoveMember, useDeleteGroup, useProfile, useGroupChallenges } from "@/api/hooks";
+import { useToast } from "@/components/Toast";
+import { apiErrorMessage } from "@/lib/apiErrorMessage";
 import { useTheme } from "@/theme";
 
 const METRIC_LABEL: Record<string, string> = { logged: "Logged days", on_target: "On-target days" };
@@ -29,6 +31,7 @@ export default function GroupDetail() {
   const code = useGroupCode(id);
   const leave = useLeaveGroup();
   const removeMember = useRemoveMember();
+  const toast = useToast();
   const del = useDeleteGroup();
   const challenges = useGroupChallenges(id);
   const [sheet, setSheet] = useState(false);
@@ -36,6 +39,13 @@ export default function GroupDetail() {
   const [inviteOpen, setInviteOpen] = useState(false);
 
   const profile = useProfile();
+
+  // #83: all three of this screen's mutations ran with no error surface. Their
+  // buttons gate on isPending, so a silent failure read as a broken control
+  // rather than a failed request. The onSuccess handlers are preserved — the
+  // navigation on a successful leave/delete still happens.
+  const onError = (error: unknown) => toast.show({ message: apiErrorMessage(error) });
+
   const d = detail.data;
   const isOwner = d?.my_role === "owner";
   const members = progress.data?.members ?? [];
@@ -53,13 +63,13 @@ export default function GroupDetail() {
   const onDelete = () =>
     Alert.alert("Delete this group?", "This removes it for everyone.", [
       { text: "Cancel", style: "cancel" },
-      { text: "Delete", style: "destructive", onPress: () => del.mutate(id, { onSuccess: () => router.back() }) },
+      { text: "Delete", style: "destructive", onPress: () => del.mutate(id, { onSuccess: () => router.back(), onError }) },
     ]);
 
   const onLeave = () =>
     Alert.alert("Leave this group?", "", [
       { text: "Cancel", style: "cancel" },
-      { text: "Leave", style: "destructive", onPress: () => leave.mutate({ groupId: id, userId: profile.data?.id ?? "" }, { onSuccess: () => router.back() }) },
+      { text: "Leave", style: "destructive", onPress: () => leave.mutate({ groupId: id, userId: profile.data?.id ?? "" }, { onSuccess: () => router.back(), onError }) },
     ]);
 
   const leaveDisabled = !profile.data?.id || leave.isPending;
@@ -104,7 +114,7 @@ export default function GroupDetail() {
                         accessibilityLabel={`Remove ${m.display_name}`}
                         haptic="none"
                         disabled={removeMember.isPending}
-                        onPress={() => removeMember.mutate({ groupId: id, userId: m.id })}
+                        onPress={() => removeMember.mutate({ groupId: id, userId: m.id }, { onError })}
                         style={{ opacity: removeMember.isPending ? 0.5 : 1 }}
                       >
                         <AppText style={{ fontSize: 13, color: instrument.danger, fontWeight: "600" }}>

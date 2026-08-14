@@ -11,6 +11,8 @@ import { Icon } from "@/components/Icon";
 import { LeaderRow } from "@/components/LeaderRow";
 import { GroupedSection } from "@/components/GroupedList";
 import { useChallenge, useJoinChallenge, useLeaveChallenge, useDeleteChallenge } from "@/api/hooks";
+import { useToast } from "@/components/Toast";
+import { apiErrorMessage } from "@/lib/apiErrorMessage";
 import { useTheme } from "@/theme";
 
 const METRIC_LABEL: Record<string, string> = { logged: "Logged days", on_target: "On-target days" };
@@ -24,6 +26,12 @@ export default function ChallengeDetailScreen() {
   const join = useJoinChallenge();
   const leave = useLeaveChallenge();
   const del = useDeleteChallenge();
+  const toast = useToast();
+
+  // #83: none of the three had an error surface, and Join/Leave gate their
+  // button on isPending — so a failed tap looked like a dead button. The
+  // onSuccess navigation on delete is preserved.
+  const onError = (error: unknown) => toast.show({ message: apiErrorMessage(error) });
 
   const d = challenge.data;
   const groupId = d?.group_id ?? "";
@@ -31,7 +39,7 @@ export default function ChallengeDetailScreen() {
   const onDelete = () =>
     Alert.alert("Delete this challenge?", "This removes it for everyone.", [
       { text: "Cancel", style: "cancel" },
-      { text: "Delete", style: "destructive", onPress: () => del.mutate({ challengeId: id, groupId }, { onSuccess: () => router.back() }) },
+      { text: "Delete", style: "destructive", onPress: () => del.mutate({ challengeId: id, groupId }, { onSuccess: () => router.back(), onError }) },
     ]);
 
   return (
@@ -72,9 +80,9 @@ export default function ChallengeDetailScreen() {
 
           {d ? (
             d.joined ? (
-              <Button title="Leave challenge" variant="secondary" onPress={() => leave.mutate({ challengeId: id, groupId })} disabled={leave.isPending} />
+              <Button title="Leave challenge" variant="secondary" onPress={() => leave.mutate({ challengeId: id, groupId }, { onError })} disabled={leave.isPending} />
             ) : (
-              <Button title="Join challenge" onPress={() => join.mutate({ challengeId: id, groupId })} disabled={join.isPending} />
+              <Button title="Join challenge" onPress={() => join.mutate({ challengeId: id, groupId }, { onError })} disabled={join.isPending} />
             )
           ) : null}
 

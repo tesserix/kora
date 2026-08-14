@@ -4,6 +4,8 @@ import NotificationsScreen from "../notifications";
 
 const mockPush = jest.fn();
 const mockMarkAll = jest.fn();
+const mockShow = jest.fn();
+jest.mock("@/components/Toast", () => ({ useToast: () => ({ show: mockShow }) }));
 jest.mock("expo-router", () => ({ router: { push: (...a: unknown[]) => mockPush(...a) } }));
 jest.mock("@/api/hooks", () => ({
   useNotifications: () => ({
@@ -53,4 +55,20 @@ test("renders challenge_started message and deep-links", async () => {
   expect(getByText("A challenge you joined has started")).toBeTruthy();
   await fireEvent.press(getByText("A challenge you joined has started"));
   expect(mockPush).toHaveBeenCalledWith("/challenge/c9");
+});
+
+// #83 counts mark-all-read among the mutations with no error surface. It is the
+// one that should NOT get a toast, and this pins that so a later sweep over the
+// issue does not "complete" it by adding one.
+//
+// The other twelve sites are user-initiated taps — the person asked for
+// something and it did not happen. This fires from an effect on mount. Its
+// failure is self-describing (the badge stays unread, which is true), and a
+// toast would report an error for an action nobody took.
+test("mark-all-read fires on mount with no error surface, deliberately", async () => {
+  mockShow.mockClear();
+  await render(<NotificationsScreen />);
+  expect(mockMarkAll).toHaveBeenCalled();
+  expect(mockMarkAll.mock.calls[0]).toHaveLength(0);
+  expect(mockShow).not.toHaveBeenCalled();
 });

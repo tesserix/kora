@@ -68,6 +68,18 @@ export default function NotificationsScreen() {
   // Opening the inbox clears the unread badge. Rows keep their unread styling
   // from this fetch (taken before the mark), so the visual "new" state persists
   // for this viewing.
+  //
+  // #83 lists this among the mutations with no error surface, but it is the one
+  // case where staying silent is correct, and that is a decision rather than an
+  // oversight. The other twelve are user-initiated taps: something the person
+  // asked for did not happen, so they must be told. This one fires from an
+  // effect on mount. Nobody asked for it, and its failure is self-describing —
+  // the badge simply stays unread, which is TRUE, because the server did not
+  // record the read. Toasting here would put "Couldn't reach Kora" on screen
+  // for an action the user never took, on top of whatever the notifications
+  // list itself is already showing for the same outage.
+  //
+  // Pinned by notifications.test.tsx so a later sweep does not "fix" it.
   useEffect(() => {
     markAll.mutate();
     // eslint-disable-next-line react-hooks/exhaustive-deps

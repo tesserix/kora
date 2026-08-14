@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Alert, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { router } from "expo-router";
 import { safeBack } from "@/lib/safeBack";
 import { AppText } from "@/components/Text";
 import { ScreenHeader } from "@/components/ScreenHeader";
@@ -24,6 +23,8 @@ import {
   useSetShareProgress,
   useFriendsProgress,
 } from "@/api/hooks";
+import { useToast } from "@/components/Toast";
+import { apiErrorMessage } from "@/lib/apiErrorMessage";
 import { useTheme } from "@/theme";
 
 function initials(name: string): string {
@@ -41,6 +42,12 @@ export default function Friends() {
   const profile = useProfile();
   const setShare = useSetShareProgress();
   const compare = useFriendsProgress();
+  const toast = useToast();
+
+  // #83: none of the four mutations on this screen had an error surface, so a
+  // failed tap did nothing and said nothing. Shared because every failure here
+  // reads the same to the user — the action did not happen, and this is why.
+  const surfaceError = { onError: (error: unknown) => toast.show({ message: apiErrorMessage(error) }) };
   const [addOpen, setAddOpen] = useState(false);
 
   const shareOn = profile.data?.share_progress ?? false;
@@ -51,7 +58,7 @@ export default function Friends() {
   const onUnfriend = (id: string, name: string) =>
     Alert.alert("Remove friend?", `Remove ${name} from your friends.`, [
       { text: "Cancel", style: "cancel" },
-      { text: "Remove", style: "destructive", onPress: () => unfriend.mutate(id) },
+      { text: "Remove", style: "destructive", onPress: () => unfriend.mutate(id, surfaceError) },
     ]);
 
   return (
@@ -69,7 +76,7 @@ export default function Friends() {
                   <ToggleSwitch
                     accessibilityLabel="Share my progress"
                     value={shareOn}
-                    onValueChange={(v) => setShare.mutate(v)}
+                    onValueChange={(v) => setShare.mutate(v, surfaceError)}
                   />
                 }
               />
@@ -111,7 +118,7 @@ export default function Friends() {
                           accessibilityRole="button"
                           accessibilityLabel={`Accept request from ${r.user.display_name}`}
                           haptic="success"
-                          onPress={() => accept.mutate(r.id)}
+                          onPress={() => accept.mutate(r.id, surfaceError)}
                           style={{ width: 32, height: 32, borderRadius: radius.full, alignItems: "center", justifyContent: "center", backgroundColor: instrument.accent }}
                         >
                           <Icon name="check" size={16} color={instrument.accentOn} />
@@ -120,7 +127,7 @@ export default function Friends() {
                           accessibilityRole="button"
                           accessibilityLabel={`Decline request from ${r.user.display_name}`}
                           haptic="selection"
-                          onPress={() => decline.mutate(r.id)}
+                          onPress={() => decline.mutate(r.id, surfaceError)}
                           style={{
                             width: 32,
                             height: 32,
