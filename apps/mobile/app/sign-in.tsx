@@ -33,8 +33,15 @@ import { LinkAccountPrompt } from "@/components/auth/LinkAccountPrompt";
 type Mode = "in" | "up";
 
 export default function SignIn() {
-  if (!isFirebaseConfigured) return null;
-
+  // The `!isFirebaseConfigured` guard USED to sit here, above every hook below
+  // — a conditional-hooks violation (#159). It never crashed, because
+  // isFirebaseConfigured is `config !== null` evaluated once at module scope,
+  // so the hook order was stable by accident rather than by construction. The
+  // moment that value became anything computed per render, every hook below it
+  // would shift index. The guard now sits after the last hook instead; nothing
+  // between here and there has a side effect that matters in an unconfigured
+  // build, and app/_layout.tsx redirects to /config-missing before this screen
+  // mounts anyway. Pinned by sign-in-unconfigured.test.tsx.
   const { colors, spacing } = useTheme();
   // Set by api.ts's forced sign-out (a 401 that survived a token refresh)
   // via the redirect (tabs)/_layout.tsx makes when the session becomes
@@ -67,6 +74,9 @@ export default function SignIn() {
   useEffect(() => {
     clearSnapshot();
   }, []);
+
+  // Last hook is above; the guard is safe from here down.
+  if (!isFirebaseConfigured) return null;
 
   async function submit() {
     if (!auth) return;
