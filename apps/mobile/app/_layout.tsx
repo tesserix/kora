@@ -14,7 +14,7 @@ import { ToastProvider } from "@/components/Toast";
 import { SavedMealSheetProvider } from "@/components/meals/SavedMealSheetProvider";
 import { reconcileWeightReminder } from "@/reminders/reconcileWeightReminder";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { createCrashlyticsSink } from "@/observability/crashlytics";
+import { createSentrySink } from "@/observability/sentry";
 import { initReporting, reportError } from "@/observability/reporter";
 import { ReportingUserBinder } from "@/observability/ReportingUserBinder";
 
@@ -22,7 +22,7 @@ setupPushHandler();
 
 // Module scope, like setupPushHandler above: reporting must be installed
 // before any component renders, or the first crash is the one we miss.
-initReporting(createCrashlyticsSink());
+initReporting(createSentrySink());
 
 // React Native's global handler catches what escapes every try/catch and
 // every boundary. `isFatal` is not forwarded — Crashlytics distinguishes

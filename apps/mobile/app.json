@@ -91,14 +91,7 @@
       "@bacons/apple-targets",
       "expo-asset",
       "expo-font",
-      "@react-native-firebase/app",
-      "@react-native-firebase/crashlytics",
-      [
-        "expo-build-properties",
-        {
-          "ios": { "useFrameworks": "dynamic" }
-        }
-      ]
+      "@sentry/react-native"
     ],
     "experiments": {
       "typedRoutes": true,

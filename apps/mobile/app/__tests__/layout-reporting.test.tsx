@@ -12,8 +12,8 @@ jest.mock("@/observability/reporter", () => ({
   setReportingUser: jest.fn(),
 }));
 
-jest.mock("@/observability/crashlytics", () => ({
-  createCrashlyticsSink: jest.fn(() => null),
+jest.mock("@/observability/sentry", () => ({
+  createSentrySink: jest.fn(() => null),
 }));
 
 jest.mock("expo-router", () => ({
