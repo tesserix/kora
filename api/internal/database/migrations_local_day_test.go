@@ -54,6 +54,22 @@ func TestLocalDayColumnsExistAndAreNotNull(t *testing.T) {
 	require.Equal(t, 3, indexes)
 }
 
+// NOT NULL alone does not protect this column. Go's zero time.Time marshals
+// to 0001-01-01, which Postgres accepts as a valid DATE — so a writer that
+// forgets to set local_date would pass NOT NULL and store year 1, producing a
+// row that matches no day query and is invisible forever. The CHECK turns that
+// silent corruption into a failed write.
+func TestLocalDayRejectsGoZeroTime(t *testing.T) {
+	db := testDB(t)
+
+	err := db.Exec(`
+		INSERT INTO water_entries (user_id, logged_at, local_date, volume_ml)
+		SELECT id, now(), DATE '0001-01-01', 250 FROM users LIMIT 1
+	`).Error
+	require.Error(t, err, "a zero local_date must be rejected, not stored")
+	require.Contains(t, err.Error(), "local_date_plausible")
+}
+
 // Every existing row must land in the bucket the old logic would have given
 // it. Asserted against real rows rather than only against the SQL expression,
 // because the migration's UPDATE joins users and could silently miss rows.

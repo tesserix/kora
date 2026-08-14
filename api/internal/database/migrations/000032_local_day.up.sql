@@ -39,3 +39,16 @@ ALTER TABLE weight_entries ALTER COLUMN local_date SET NOT NULL;
 CREATE INDEX idx_food_logs_user_local_date ON food_logs (user_id, local_date);
 CREATE INDEX idx_water_entries_user_local_date ON water_entries (user_id, local_date);
 CREATE INDEX idx_weight_entries_user_local_date ON weight_entries (user_id, local_date);
+
+-- NOT NULL is not enough on its own. Go's zero time.Time marshals to
+-- 0001-01-01, which Postgres accepts as a perfectly valid DATE -- so a writer
+-- that forgets to set local_date passes the NOT NULL check and stores year 1.
+-- Such a row matches no day query and is silently invisible forever, which is
+-- a far worse failure than a rejected write. These CHECKs make that mistake
+-- loud at the moment it happens.
+ALTER TABLE food_logs ADD CONSTRAINT food_logs_local_date_plausible
+  CHECK (local_date > DATE '2000-01-01');
+ALTER TABLE water_entries ADD CONSTRAINT water_entries_local_date_plausible
+  CHECK (local_date > DATE '2000-01-01');
+ALTER TABLE weight_entries ADD CONSTRAINT weight_entries_local_date_plausible
+  CHECK (local_date > DATE '2000-01-01');
