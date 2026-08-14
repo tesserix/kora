@@ -55,7 +55,7 @@ func TestGetFoodCountsTheLogsReferencingIt(t *testing.T) {
 	userID := seedUser(t, tx)
 	for i := 0; i < 3; i++ {
 		require.NoError(t, tx.Create(&foodlog.FoodLog{
-			UserID: userID, FoodItemID: &id, LoggedAt: time.Now().UTC(),
+			UserID: userID, FoodItemID: &id, LoggedAt: time.Now().UTC(), LocalDate: localDayOf(time.Now().UTC()),
 			MealSlot: "lunch", Source: "manual", Description: "zzz-detail-counted",
 			QuantityGrams: 100, Kcal: 100,
 		}).Error)
@@ -79,7 +79,7 @@ func TestGetFoodReportsZeroLogsForAnUnreferencedFood(t *testing.T) {
 
 	userID := seedUser(t, tx)
 	require.NoError(t, tx.Create(&foodlog.FoodLog{
-		UserID: userID, FoodItemID: &other, LoggedAt: time.Now().UTC(),
+		UserID: userID, FoodItemID: &other, LoggedAt: time.Now().UTC(), LocalDate: localDayOf(time.Now().UTC()),
 		MealSlot: "lunch", Source: "manual", Description: "other", QuantityGrams: 100, Kcal: 100,
 	}).Error)
 
@@ -425,4 +425,14 @@ func TestReadHandlersReportRepositoryFailureAs500(t *testing.T) {
 	readerRouter(f).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/admin/events", nil))
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 	assert.NotContains(t, w.Body.String(), "boom")
+}
+
+// localDayOf gives a fixture the local day matching the instant it seeds.
+// food_logs.local_date is NOT NULL with a plausibility CHECK, so a literal
+// that omits it would write 0001-01-01 and be rejected — see kora#84.
+func localDayOf(t time.Time) time.Time {
+	if t.IsZero() {
+		t = time.Now()
+	}
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 }

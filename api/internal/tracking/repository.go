@@ -19,14 +19,14 @@ func NewRepository(db *gorm.DB) Repository {
 	return Repository{db: db}
 }
 
-func (r Repository) AddWater(ctx context.Context, userID uuid.UUID, volumeML int, at time.Time) (WaterEntry, error) {
+func (r Repository) AddWater(ctx context.Context, userID uuid.UUID, volumeML int, at time.Time, localDate time.Time) (WaterEntry, error) {
 	if volumeML <= 0 {
 		return WaterEntry{}, httpx.ValidationError{Message: "volume_ml must be positive"}
 	}
 	if at.IsZero() {
 		at = time.Now()
 	}
-	e := WaterEntry{UserID: userID, VolumeML: volumeML, LoggedAt: at}
+	e := WaterEntry{UserID: userID, VolumeML: volumeML, LoggedAt: at, LocalDate: localDate}
 	if err := r.db.WithContext(ctx).Create(&e).Error; err != nil {
 		return WaterEntry{}, fmt.Errorf("tracking: add water: %w", err)
 	}
@@ -49,14 +49,14 @@ func (r Repository) WaterTotalForDay(ctx context.Context, userID uuid.UUID, day 
 	return *total, nil
 }
 
-func (r Repository) AddWeight(ctx context.Context, userID uuid.UUID, weightKg float64, at time.Time) (WeightEntry, error) {
+func (r Repository) AddWeight(ctx context.Context, userID uuid.UUID, weightKg float64, at time.Time, localDate time.Time) (WeightEntry, error) {
 	if weightKg <= 0 {
 		return WeightEntry{}, httpx.ValidationError{Message: "weight_kg must be positive"}
 	}
 	if at.IsZero() {
 		at = time.Now()
 	}
-	e := WeightEntry{UserID: userID, WeightKg: weightKg, LoggedAt: at}
+	e := WeightEntry{UserID: userID, WeightKg: weightKg, LoggedAt: at, LocalDate: localDate}
 	if err := r.db.WithContext(ctx).Create(&e).Error; err != nil {
 		return WeightEntry{}, fmt.Errorf("tracking: add weight: %w", err)
 	}

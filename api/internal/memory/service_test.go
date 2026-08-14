@@ -11,7 +11,7 @@ import (
 func fid(s string) *uuid.UUID { u := uuid.MustParse(s); return &u }
 
 func log(itemID, name, slot string, grams, kcal float64, at time.Time) foodlog.FoodLog {
-	return foodlog.FoodLog{FoodItemID: fid(itemID), Description: name, MealSlot: slot, QuantityGrams: grams, Kcal: kcal, LoggedAt: at}
+	return foodlog.FoodLog{FoodItemID: fid(itemID), Description: name, MealSlot: slot, QuantityGrams: grams, Kcal: kcal, LoggedAt: at, LocalDate: localDayOf(at)}
 }
 
 const eggs = "11111111-1111-1111-1111-111111111111"
@@ -152,7 +152,7 @@ func TestUsualMealsDeterministicOrderOnExactTie(t *testing.T) {
 func TestNilFoodItemIDIsSkippedNotPanicked(t *testing.T) {
 	base := time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC)
 	logs := []foodlog.FoodLog{
-		{FoodItemID: nil, Description: "Mystery Snack", MealSlot: "snack", QuantityGrams: 50, Kcal: 90, LoggedAt: base},
+		{FoodItemID: nil, Description: "Mystery Snack", MealSlot: "snack", QuantityGrams: 50, Kcal: 90, LoggedAt: base, LocalDate: localDayOf(base)},
 		log(eggs, "Eggs", "breakfast", 100, 155, base.Add(24*time.Hour)),
 		log(eggs, "Eggs", "breakfast", 100, 155, base.Add(48*time.Hour)),
 	}
@@ -184,4 +184,14 @@ func TestUsualMealsBelowThresholdExcluded(t *testing.T) {
 	if got := usualMeals(logs, loc); len(got) != 0 {
 		t.Fatalf("want 0 usual meals below threshold, got %d", len(got))
 	}
+}
+
+// localDayOf gives a fixture the local day matching the instant it seeds.
+// food_logs.local_date is NOT NULL with a plausibility CHECK, so a literal
+// that omits it would write 0001-01-01 and be rejected — see kora#84.
+func localDayOf(t time.Time) time.Time {
+	if t.IsZero() {
+		t = time.Now()
+	}
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 }

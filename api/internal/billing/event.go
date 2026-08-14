@@ -20,8 +20,8 @@ type Event struct {
 	CostUSDEst float64   `gorm:"column:cost_usd_est" json:"cost_usd_est"`
 	// ok | error | timeout. Failures are recorded too since #81, so any cost
 	// query that does not filter this will OVER-count.
-	Outcome    string    `json:"outcome"`
-	CreatedAt  time.Time `json:"created_at"`
+	Outcome   string    `json:"outcome"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // TableName pins the GORM table name (default pluralization would be

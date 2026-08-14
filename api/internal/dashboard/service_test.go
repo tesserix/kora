@@ -42,7 +42,7 @@ func TestForDayAggregatesConsumedAndSources(t *testing.T) {
 
 	day := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
 	logSvc := foodlog.NewService(foodlog.NewRepository(db), nutrition.NewRepository(db))
-	_, err := logSvc.LogFood(context.Background(), id, foodlog.LogRequest{FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 200, LoggedAt: day})
+	_, err := logSvc.LogFood(context.Background(), id, foodlog.LogRequest{FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 200, LoggedAt: day}, nil)
 	require.NoError(t, err)
 
 	svc := NewService(foodlog.NewRepository(db), tracking.NewRepository(db), db)
@@ -77,7 +77,7 @@ func TestForDayStreakNonUTCTimezone(t *testing.T) {
 	// calendar day in America/New_York.
 	loggedAt := time.Date(2026, 4, 10, 14, 0, 0, 0, time.UTC)
 	logSvc := foodlog.NewService(foodlog.NewRepository(db), nutrition.NewRepository(db))
-	_, err = logSvc.LogFood(context.Background(), id, foodlog.LogRequest{FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 200, LoggedAt: loggedAt})
+	_, err = logSvc.LogFood(context.Background(), id, foodlog.LogRequest{FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 200, LoggedAt: loggedAt}, nil)
 	require.NoError(t, err)
 
 	// day is midnight-UTC-anchored, matching how the handler parses the

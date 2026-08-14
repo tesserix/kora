@@ -42,7 +42,7 @@ func (h Handler) Create(c *gin.Context) {
 		httpx.Error(c, http.StatusBadRequest, "invalid_input", "malformed log body")
 		return
 	}
-	log, err := h.svc.LogFood(c.Request.Context(), userID, req)
+	log, err := h.svc.LogFood(c.Request.Context(), userID, req, user.LocFromContext(c))
 	if err != nil {
 		httpx.RespondServiceError(c, err)
 		return
@@ -60,7 +60,7 @@ func (h Handler) CreateBatch(c *gin.Context) {
 		httpx.Error(c, http.StatusBadRequest, "invalid_input", "malformed log body")
 		return
 	}
-	logs, err := h.svc.CreateBatch(c.Request.Context(), userID, req)
+	logs, err := h.svc.CreateBatch(c.Request.Context(), userID, req, user.LocFromContext(c))
 	if err != nil {
 		httpx.RespondServiceError(c, err)
 		return

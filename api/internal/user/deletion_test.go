@@ -132,9 +132,9 @@ func seedFoodLog(t *testing.T, db *gorm.DB, userID uuid.UUID) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
 	require.NoError(t, db.Exec(`
-		INSERT INTO food_logs (id, user_id, logged_at, meal_slot, source, description,
+		INSERT INTO food_logs (id, user_id, logged_at, local_date, meal_slot, source, description,
 			quantity_grams, kcal, protein_g, carbs_g, fat_g, fiber_g, provenance)
-		VALUES (?, ?, now(), 'lunch', 'manual', 'test log', 100, 200, 10, 20, 5, 2, 'test')`,
+		VALUES (?, ?, now(), current_date, 'lunch', 'manual', 'test log', 100, 200, 10, 20, 5, 2, 'test')`,
 		id, userID).Error)
 	return id
 }
@@ -144,7 +144,7 @@ func seedWeightEntry(t *testing.T, db *gorm.DB, userID uuid.UUID) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
 	require.NoError(t, db.Exec(
-		`INSERT INTO weight_entries (id, user_id, logged_at, weight_kg) VALUES (?, ?, now(), 80)`,
+		`INSERT INTO weight_entries (id, user_id, logged_at, local_date, weight_kg) VALUES (?, ?, now(), current_date, 80)`,
 		id, userID).Error)
 	return id
 }
@@ -231,7 +231,7 @@ func seedEveryCascadingTable(t *testing.T, db *gorm.DB, userID, otherID uuid.UUI
 	}
 
 	insert("water_entries",
-		`INSERT INTO water_entries (id, user_id, logged_at, volume_ml) VALUES (?, ?, now(), 250)`,
+		`INSERT INTO water_entries (id, user_id, logged_at, local_date, volume_ml) VALUES (?, ?, now(), current_date, 250)`,
 		userID)
 	insert("device_tokens",
 		`INSERT INTO device_tokens (id, user_id, token, platform) VALUES (?, ?, ?, 'ios')`,

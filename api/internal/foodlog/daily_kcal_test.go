@@ -21,9 +21,9 @@ func TestDailyKcalBucketsByLocalDay(t *testing.T) {
 	svc := NewService(NewRepository(db), nutrition.NewRepository(db))
 	d := time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC)
 	// 100g of a 100kcal/100g item = 100 kcal each. Two on 04-10 (=>200), one on 04-09 (=>100).
-	_, _ = svc.LogFood(context.Background(), userID, LogRequest{FoodItemID: &item.ID, MealSlot: "breakfast", Source: "manual", QuantityGrams: 100, LoggedAt: d})
-	_, _ = svc.LogFood(context.Background(), userID, LogRequest{FoodItemID: &item.ID, MealSlot: "dinner", Source: "manual", QuantityGrams: 100, LoggedAt: d.Add(2 * time.Hour)})
-	_, _ = svc.LogFood(context.Background(), userID, LogRequest{FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 100, LoggedAt: d.Add(-24 * time.Hour)})
+	_, _ = svc.LogFood(context.Background(), userID, LogRequest{FoodItemID: &item.ID, MealSlot: "breakfast", Source: "manual", QuantityGrams: 100, LoggedAt: d}, nil)
+	_, _ = svc.LogFood(context.Background(), userID, LogRequest{FoodItemID: &item.ID, MealSlot: "dinner", Source: "manual", QuantityGrams: 100, LoggedAt: d.Add(2 * time.Hour)}, nil)
+	_, _ = svc.LogFood(context.Background(), userID, LogRequest{FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 100, LoggedAt: d.Add(-24 * time.Hour)}, nil)
 
 	from := time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC)
 	to := time.Date(2026, 4, 11, 0, 0, 0, 0, time.UTC)

@@ -44,7 +44,7 @@ func TestAddWaterHappyPath(t *testing.T) {
 	userID := seedUser(t, db)
 	repo := NewRepository(db)
 
-	entry, err := repo.AddWater(context.Background(), userID, 500, time.Now())
+	entry, err := repo.AddWater(context.Background(), userID, 500, time.Now(), dayOf(time.Now()))
 	require.NoError(t, err)
 	require.Equal(t, 500, entry.VolumeML)
 	require.NotEqual(t, uuid.Nil, entry.ID)
@@ -55,10 +55,10 @@ func TestAddWaterRejectsNonPositiveVolume(t *testing.T) {
 	userID := seedUser(t, db)
 	repo := NewRepository(db)
 
-	_, err := repo.AddWater(context.Background(), userID, 0, time.Time{})
+	_, err := repo.AddWater(context.Background(), userID, 0, time.Time{}, dayOf(time.Time{}))
 	require.Error(t, err)
 
-	_, err = repo.AddWater(context.Background(), userID, -100, time.Now())
+	_, err = repo.AddWater(context.Background(), userID, -100, time.Now(), dayOf(time.Now()))
 	require.Error(t, err)
 }
 
@@ -67,7 +67,7 @@ func TestAddWaterDefaultsLoggedAtWhenZero(t *testing.T) {
 	userID := seedUser(t, db)
 	repo := NewRepository(db)
 
-	entry, err := repo.AddWater(context.Background(), userID, 250, time.Time{})
+	entry, err := repo.AddWater(context.Background(), userID, 250, time.Time{}, dayOf(time.Time{}))
 	require.NoError(t, err)
 	require.False(t, entry.LoggedAt.IsZero())
 }
@@ -81,11 +81,11 @@ func TestWaterTotalForDaySumsSameDayAndExcludesOtherDays(t *testing.T) {
 	dayD2 := time.Date(2026, 3, 3, 9, 0, 0, 0, time.UTC)
 	dayNone := time.Date(2026, 3, 5, 0, 0, 0, 0, time.UTC)
 
-	_, err := repo.AddWater(context.Background(), userID, 250, dayD)
+	_, err := repo.AddWater(context.Background(), userID, 250, dayD, dayOf(dayD))
 	require.NoError(t, err)
-	_, err = repo.AddWater(context.Background(), userID, 500, dayD.Add(2*time.Hour))
+	_, err = repo.AddWater(context.Background(), userID, 500, dayD.Add(2*time.Hour), dayOf(dayD.Add(2*time.Hour)))
 	require.NoError(t, err)
-	_, err = repo.AddWater(context.Background(), userID, 1000, dayD2)
+	_, err = repo.AddWater(context.Background(), userID, 1000, dayD2, dayOf(dayD2))
 	require.NoError(t, err)
 
 	total, err := repo.WaterTotalForDay(context.Background(), userID, dayD, time.UTC)
@@ -106,14 +106,14 @@ func TestAddWeightHappyPathAndRejectsNonPositive(t *testing.T) {
 	userID := seedUser(t, db)
 	repo := NewRepository(db)
 
-	e, err := repo.AddWeight(context.Background(), userID, 72.4, time.Now())
+	e, err := repo.AddWeight(context.Background(), userID, 72.4, time.Now(), dayOf(time.Now()))
 	require.NoError(t, err)
 	require.Equal(t, 72.4, e.WeightKg)
 	require.NotEqual(t, uuid.Nil, e.ID)
 
-	_, err = repo.AddWeight(context.Background(), userID, 0, time.Now())
+	_, err = repo.AddWeight(context.Background(), userID, 0, time.Now(), dayOf(time.Now()))
 	require.Error(t, err)
-	_, err = repo.AddWeight(context.Background(), userID, -5, time.Now())
+	_, err = repo.AddWeight(context.Background(), userID, -5, time.Now(), dayOf(time.Now()))
 	require.Error(t, err)
 }
 
@@ -126,10 +126,10 @@ func TestWeightSeriesInRangeAscendingAndUserScoped(t *testing.T) {
 	d1 := time.Date(2026, 3, 1, 8, 0, 0, 0, time.UTC)
 	d2 := time.Date(2026, 3, 3, 8, 0, 0, 0, time.UTC)
 	outOfRange := time.Date(2026, 2, 1, 8, 0, 0, 0, time.UTC)
-	_, _ = repo.AddWeight(context.Background(), userID, 73.0, d2) // insert out of order
-	_, _ = repo.AddWeight(context.Background(), userID, 74.0, d1)
-	_, _ = repo.AddWeight(context.Background(), userID, 99.0, outOfRange)
-	_, _ = repo.AddWeight(context.Background(), other, 60.0, d1) // other user, must be excluded
+	_, _ = repo.AddWeight(context.Background(), userID, 73.0, d2, dayOf(d2)) // insert out of order
+	_, _ = repo.AddWeight(context.Background(), userID, 74.0, d1, dayOf(d1))
+	_, _ = repo.AddWeight(context.Background(), userID, 99.0, outOfRange, dayOf(outOfRange))
+	_, _ = repo.AddWeight(context.Background(), other, 60.0, d1, dayOf(d1)) // other user, must be excluded
 
 	got, err := repo.WeightSeries(context.Background(), userID,
 		time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
@@ -138,4 +138,18 @@ func TestWeightSeriesInRangeAscendingAndUserScoped(t *testing.T) {
 	require.Len(t, got, 2)
 	require.Equal(t, 74.0, got[0].WeightKg) // ascending by logged_at
 	require.Equal(t, 73.0, got[1].WeightKg)
+}
+
+// dayOf gives a test the local day matching the instant it is seeding.
+//
+// It mirrors the repository's own zero-time defaulting: AddWater/AddWeight
+// substitute time.Now() for a zero logged_at, so a test passing time.Time{}
+// must get today's date here too. Returning the zero date instead would write
+// 0001-01-01 and trip the local_date_plausible CHECK — which is exactly the
+// silent-corruption case that constraint exists to catch (kora#84).
+func dayOf(t time.Time) time.Time {
+	if t.IsZero() {
+		t = time.Now()
+	}
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 }

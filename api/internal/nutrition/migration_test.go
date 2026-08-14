@@ -90,9 +90,9 @@ func TestFoodItemsIndexesAreNonPartial(t *testing.T) {
 // actor_email CHECK: bffauth.Middleware guards UserID but not Email (round 1
 // added the guard for empty; round 2 closed the middleware gap too, but this
 // CHECK is the database-level backstop for any other write path into this
-// table). round 2 changed the CHECK from a bare `<> ''` to
-// `btrim(actor_email) <> ''`, so a whitespace-only value is rejected as well
-// as the empty string — `<> ''` alone would have let "   " through.
+// table). round 2 changed the CHECK from a bare `<> ”` to
+// `btrim(actor_email) <> ”`, so a whitespace-only value is rejected as well
+// as the empty string — `<> ”` alone would have let "   " through.
 func TestAdminEventsActorEmailCheckConstraint(t *testing.T) {
 	db := testDB(t)
 

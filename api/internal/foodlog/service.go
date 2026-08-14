@@ -13,6 +13,7 @@ import (
 
 	"github.com/tesserix/kora/api/internal/ai"
 	"github.com/tesserix/kora/api/internal/httpx"
+	"github.com/tesserix/kora/api/internal/localday"
 	"github.com/tesserix/kora/api/internal/nutrition"
 	"github.com/tesserix/kora/api/internal/units"
 )
@@ -64,8 +65,15 @@ type LogRequest struct {
 	EnteredAmount *float64  `json:"entered_amount"`
 	EnteredUnit   *string   `json:"entered_unit"`
 	LoggedAt      time.Time `json:"logged_at"`
-	ClientLogMs   *int      `json:"client_log_ms"`
-	InputPhrase   *string   `json:"input_phrase"`
+	// LocalDate is the device-local calendar day at the moment of capture,
+	// "YYYY-MM-DD". Sent by the client rather than computed here because the
+	// offline queue replays writes later and possibly from another timezone —
+	// a meal captured in London and replayed after landing in Sydney must keep
+	// London's date. Empty means an older client; internal/localday falls back
+	// to the profile zone, which is the previous behaviour. See kora#84.
+	LocalDate   string  `json:"local_date"`
+	ClientLogMs *int    `json:"client_log_ms"`
+	InputPhrase *string `json:"input_phrase"`
 	// ID lets the client mint the log's identity before it has network, so a
 	// queued write replayed after a lost response is idempotent. Optional:
 	// when nil the column default generates one as before.
@@ -141,7 +149,7 @@ func (s Service) invalidateResolutionCache(ctx context.Context, userID uuid.UUID
 	}
 }
 
-func (s Service) LogFood(ctx context.Context, userID uuid.UUID, req LogRequest) (FoodLog, error) {
+func (s Service) LogFood(ctx context.Context, userID uuid.UUID, req LogRequest, loc *time.Location) (FoodLog, error) {
 	if !validMealSlots[req.MealSlot] {
 		return FoodLog{}, httpx.ValidationError{Message: "invalid meal_slot"}
 	}
@@ -185,10 +193,15 @@ func (s Service) LogFood(ctx context.Context, userID uuid.UUID, req LogRequest) 
 	if loggedAt.IsZero() {
 		loggedAt = time.Now()
 	}
+	localDate, err := localday.Resolve(req.LocalDate, loggedAt, loc)
+	if err != nil {
+		return FoodLog{}, err
+	}
 	log := FoodLog{
 		UserID:         userID,
 		FoodItemID:     req.FoodItemID,
 		LoggedAt:       loggedAt,
+		LocalDate:      localDate,
 		MealSlot:       req.MealSlot,
 		Source:         source,
 		Description:    item.Name,
@@ -440,9 +453,13 @@ type BatchItem struct {
 // CreateBatchRequest logs several foods as a single meal (e.g. all items on a
 // plate) in one atomic call.
 type CreateBatchRequest struct {
-	LoggedAt time.Time   `json:"logged_at"`
-	MealSlot string      `json:"meal_slot"`
-	Items    []BatchItem `json:"items"`
+	LoggedAt time.Time `json:"logged_at"`
+	// LocalDate is the device-local calendar day at capture — see
+	// LogRequest.LocalDate and kora#84. Validated identically, so the batch
+	// path is not a hole in the guarantee.
+	LocalDate string      `json:"local_date"`
+	MealSlot  string      `json:"meal_slot"`
+	Items     []BatchItem `json:"items"`
 	// Source tags every log this batch creates. Empty means "memory", which
 	// is what every caller before recipes meant and keeps existing behaviour
 	// byte-identical. Recipes pass "recipe" so recipe-driven logs are
@@ -468,7 +485,7 @@ var batchSources = map[string]bool{"memory": true, "meal": true, "recipe": true}
 // All-or-nothing: if any item's food_item_id doesn't resolve, or has a
 // non-positive quantity, the entire batch is rolled back and no logs are
 // created.
-func (s Service) CreateBatch(ctx context.Context, userID uuid.UUID, req CreateBatchRequest) ([]FoodLog, error) {
+func (s Service) CreateBatch(ctx context.Context, userID uuid.UUID, req CreateBatchRequest, loc *time.Location) ([]FoodLog, error) {
 	if len(req.Items) == 0 {
 		return nil, httpx.ValidationError{Message: "items must not be empty"}
 	}
@@ -479,6 +496,10 @@ func (s Service) CreateBatch(ctx context.Context, userID uuid.UUID, req CreateBa
 	if loggedAt.IsZero() {
 		loggedAt = time.Now()
 	}
+	localDate, err := localday.Resolve(req.LocalDate, loggedAt, loc)
+	if err != nil {
+		return nil, err
+	}
 	source := req.Source
 	if source == "" {
 		source = "memory"
@@ -488,7 +509,7 @@ func (s Service) CreateBatch(ctx context.Context, userID uuid.UUID, req CreateBa
 	}
 
 	out := make([]FoodLog, 0, len(req.Items))
-	err := s.logs.Transaction(ctx, func(txLogs Repository) error {
+	err = s.logs.Transaction(ctx, func(txLogs Repository) error {
 		for _, it := range req.Items {
 			// The food row is loaded BEFORE the quantity guard (unlike the
 			// original ordering) because unit resolution below needs it —
@@ -543,6 +564,7 @@ func (s Service) CreateBatch(ctx context.Context, userID uuid.UUID, req CreateBa
 				UserID:         userID,
 				FoodItemID:     &fid,
 				LoggedAt:       loggedAt,
+				LocalDate:      localDate,
 				MealSlot:       req.MealSlot,
 				Source:         source,
 				Description:    item.Name,

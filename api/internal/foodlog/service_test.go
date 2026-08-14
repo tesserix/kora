@@ -75,7 +75,7 @@ func TestLogFoodComputesMacrosFromGrams(t *testing.T) {
 	log, err := svc.LogFood(context.Background(), userID, LogRequest{
 		FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual",
 		QuantityGrams: 200, LoggedAt: time.Now(),
-	})
+	}, nil)
 	require.NoError(t, err)
 	require.Equal(t, 200.0, log.Kcal)    // 100/100g * 200g
 	require.Equal(t, 20.0, log.ProteinG) // 10/100g * 200g
@@ -104,7 +104,7 @@ func TestLogFoodRetiredFoodReturnsValidationError(t *testing.T) {
 	svc := NewService(NewRepository(db), nutriRepo)
 	_, err := svc.LogFood(context.Background(), userID, LogRequest{
 		FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 100, LoggedAt: time.Now(),
-	})
+	}, nil)
 	require.Error(t, err)
 	msg, ok := httpx.IsValidation(err)
 	require.True(t, ok, "a retired food_item_id must be a client ValidationError (400), not a 500 that costs five wasted replays; got: %v", err)
@@ -126,7 +126,7 @@ func TestLogFoodLiveFoodStillLogsSuccessfully(t *testing.T) {
 	svc := NewService(NewRepository(db), nutriRepo)
 	log, err := svc.LogFood(context.Background(), userID, LogRequest{
 		FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 100, LoggedAt: time.Now(),
-	})
+	}, nil)
 	require.NoError(t, err)
 	require.Equal(t, item.Name, log.Description)
 }
@@ -146,7 +146,7 @@ func TestLogFoodPersistsPortionAssumedTrue(t *testing.T) {
 	created, err := svc.LogFood(context.Background(), userID, LogRequest{
 		FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual",
 		QuantityGrams: 100, LoggedAt: time.Now(), PortionAssumed: true,
-	})
+	}, nil)
 	require.NoError(t, err)
 	require.True(t, created.PortionAssumed)
 
@@ -170,7 +170,7 @@ func TestLogFoodDefaultsPortionAssumedFalse(t *testing.T) {
 	created, err := svc.LogFood(context.Background(), userID, LogRequest{
 		FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual",
 		QuantityGrams: 100, LoggedAt: time.Now(),
-	})
+	}, nil)
 	require.NoError(t, err)
 	require.False(t, created.PortionAssumed)
 
@@ -196,12 +196,12 @@ func TestPortionAssumedDoesNotAffectDayTotals(t *testing.T) {
 	assumed, err := svc.LogFood(context.Background(), userID, LogRequest{
 		FoodItemID: &item.ID, MealSlot: "breakfast", Source: "manual",
 		QuantityGrams: 150, LoggedAt: day, PortionAssumed: true,
-	})
+	}, nil)
 	require.NoError(t, err)
 	measured, err := svc.LogFood(context.Background(), userID, LogRequest{
 		FoodItemID: &item.ID, MealSlot: "breakfast", Source: "manual",
 		QuantityGrams: 150, LoggedAt: day.Add(time.Hour),
-	})
+	}, nil)
 	require.NoError(t, err)
 
 	require.Equal(t, assumed.Kcal, measured.Kcal, "identical grams of the same item must produce identical kcal regardless of the flag")
@@ -225,7 +225,7 @@ func TestCopyDayClonesLogsToNewDate(t *testing.T) {
 	svc := NewService(NewRepository(db), nutriRepo)
 	day1 := time.Date(2026, 1, 10, 12, 0, 0, 0, time.UTC)
 	day2 := time.Date(2026, 1, 11, 8, 0, 0, 0, time.UTC)
-	_, err := svc.LogFood(context.Background(), userID, LogRequest{FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 100, LoggedAt: day1})
+	_, err := svc.LogFood(context.Background(), userID, LogRequest{FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 100, LoggedAt: day1}, nil)
 	require.NoError(t, err)
 
 	n, err := svc.CopyDay(context.Background(), userID, day1, day2, time.UTC)
@@ -248,7 +248,7 @@ func TestEditLogGramsChangeRecomputesFromSameFoodRow(t *testing.T) {
 	svc := NewService(NewRepository(db), nutriRepo)
 	created, err := svc.LogFood(context.Background(), userID, LogRequest{
 		FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 100, LoggedAt: time.Now(),
-	})
+	}, nil)
 	require.NoError(t, err)
 	wantDescription := created.Description
 
@@ -277,7 +277,7 @@ func TestEditLogOverwritingGramsClearsPortionAssumed(t *testing.T) {
 	created, err := svc.LogFood(context.Background(), userID, LogRequest{
 		FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual",
 		QuantityGrams: 100, LoggedAt: time.Now(), PortionAssumed: true,
-	})
+	}, nil)
 	require.NoError(t, err)
 	require.True(t, created.PortionAssumed)
 
@@ -315,7 +315,7 @@ func TestEditLogEnteredPairClearsPortionAssumed(t *testing.T) {
 	created, err := svc.LogFood(context.Background(), userID, LogRequest{
 		FoodItemID: &item.ID, MealSlot: "snack", Source: "manual",
 		QuantityGrams: 100, LoggedAt: time.Now(), PortionAssumed: true,
-	})
+	}, nil)
 	require.NoError(t, err)
 	require.True(t, created.PortionAssumed)
 
@@ -349,7 +349,7 @@ func TestEditLogMealSlotOnlyLeavesPortionAssumedUntouched(t *testing.T) {
 	created, err := svc.LogFood(context.Background(), userID, LogRequest{
 		FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual",
 		QuantityGrams: 100, LoggedAt: time.Now(), PortionAssumed: true,
-	})
+	}, nil)
 	require.NoError(t, err)
 	require.True(t, created.PortionAssumed)
 
@@ -411,7 +411,7 @@ func TestEditLogFoodChangeWithoutCorrectionPhraseRecordsNoAlias(t *testing.T) {
 	svc := NewService(NewRepository(db), nutriRepo)
 	created, err := svc.LogFood(context.Background(), userID, LogRequest{
 		FoodItemID: &oldItem.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 100, LoggedAt: time.Now(),
-	})
+	}, nil)
 	require.NoError(t, err)
 
 	_, err = svc.EditLog(context.Background(), userID, created.ID, EditRequest{FoodItemID: &newItem.ID})
@@ -433,7 +433,7 @@ func TestEditLogNonexistentFoodItemIDReturnsValidationError(t *testing.T) {
 	svc := NewService(NewRepository(db), nutriRepo)
 	created, err := svc.LogFood(context.Background(), userID, LogRequest{
 		FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 100, LoggedAt: time.Now(),
-	})
+	}, nil)
 	require.NoError(t, err)
 
 	bogusFoodID := uuid.New()
@@ -457,7 +457,7 @@ func TestCreateBatchComputesMacrosServerSide(t *testing.T) {
 	logs, err := svc.CreateBatch(context.Background(), userID, CreateBatchRequest{
 		LoggedAt: time.Now(), MealSlot: "breakfast",
 		Items: []BatchItem{{FoodItemID: item.ID, QuantityGrams: 200}},
-	})
+	}, nil)
 	require.NoError(t, err)
 	require.Len(t, logs, 1)
 	require.Equal(t, item.KcalPer100g*2.0, logs[0].Kcal, "kcal must be server-computed from item per-100g * grams")
@@ -487,7 +487,7 @@ func TestCreateBatchPersistsPortionAssumedPerItem(t *testing.T) {
 			{FoodItemID: item.ID, QuantityGrams: 100, PortionAssumed: true},
 			{FoodItemID: item.ID, QuantityGrams: 100},
 		},
-	})
+	}, nil)
 	require.NoError(t, err)
 	require.Len(t, logs, 2)
 	require.True(t, logs[0].PortionAssumed, "the first item requested portion_assumed: true")
@@ -516,14 +516,14 @@ func TestCreateBatchRejectsAForeignSource(t *testing.T) {
 	}
 
 	for _, source := range []string{"ai_text", "ai_voice", "ai_photo", "manual", "nonsense", strings.Repeat("x", 500)} {
-		_, err := svc.CreateBatch(context.Background(), userID, req(source))
+		_, err := svc.CreateBatch(context.Background(), userID, req(source), nil)
 		require.Error(t, err, "source %q must be rejected", source)
 		_, ok := httpx.IsValidation(err)
 		require.True(t, ok, "want ValidationError for source %q, got: %v", source, err)
 	}
 
 	for _, source := range []string{"", "memory", "meal", "recipe"} {
-		logs, err := svc.CreateBatch(context.Background(), userID, req(source))
+		logs, err := svc.CreateBatch(context.Background(), userID, req(source), nil)
 		require.NoError(t, err, "source %q is a legitimate batch source", source)
 		require.Len(t, logs, 1)
 		if source == "" {
@@ -541,7 +541,7 @@ func TestCreateBatchRejectsEmptyItems(t *testing.T) {
 
 	_, err := svc.CreateBatch(context.Background(), userID, CreateBatchRequest{
 		LoggedAt: time.Now(), MealSlot: "breakfast", Items: nil,
-	})
+	}, nil)
 	require.Error(t, err)
 	_, ok := httpx.IsValidation(err)
 	require.True(t, ok, "want ValidationError on empty items, got: %v", err)
@@ -565,7 +565,7 @@ func TestCreateBatchRollsBackWholeBatchOnUnresolvableItem(t *testing.T) {
 			{FoodItemID: item.ID, QuantityGrams: 100},
 			{FoodItemID: bogusID, QuantityGrams: 100},
 		},
-	})
+	}, nil)
 	require.Error(t, err)
 
 	logs, err := NewRepository(db).ListForUserSince(context.Background(), userID, since)
@@ -596,7 +596,7 @@ func TestCreateBatchRollbackDoesNotCountFoodLogMetric(t *testing.T) {
 			{FoodItemID: item.ID, QuantityGrams: 100},
 			{FoodItemID: bogusID, QuantityGrams: 100},
 		},
-	})
+	}, nil)
 	require.Error(t, err)
 
 	after := testutil.ToFloat64(metrics.Default().FoodLogsCounter("memory"))
@@ -626,7 +626,7 @@ func TestCreateBatchSuccessCountsEachCommittedLog(t *testing.T) {
 			{FoodItemID: item.ID, QuantityGrams: 100},
 			{FoodItemID: item.ID, QuantityGrams: 150},
 		},
-	})
+	}, nil)
 	require.NoError(t, err)
 	require.Len(t, created, 2)
 
@@ -643,7 +643,7 @@ func TestCreateBatchUnknownFoodItemIDReturnsValidationError(t *testing.T) {
 	_, err := svc.CreateBatch(context.Background(), userID, CreateBatchRequest{
 		LoggedAt: time.Now(), MealSlot: "breakfast",
 		Items: []BatchItem{{FoodItemID: bogusFoodID, QuantityGrams: 100}},
-	})
+	}, nil)
 	require.Error(t, err)
 	msg, ok := httpx.IsValidation(err)
 	require.True(t, ok, "unknown food_item_id must be a client ValidationError (400), got: %v", err)
@@ -670,7 +670,7 @@ func TestCreateBatchRetiredFoodItemNamesTheUnavailableFood(t *testing.T) {
 	_, err := svc.CreateBatch(context.Background(), userID, CreateBatchRequest{
 		LoggedAt: time.Now(), MealSlot: "breakfast",
 		Items: []BatchItem{{FoodItemID: item.ID, QuantityGrams: 100}},
-	})
+	}, nil)
 	require.Error(t, err)
 	msg, ok := httpx.IsValidation(err)
 	require.True(t, ok, "a retired food_item_id must still be a client ValidationError (400), got: %v", err)
@@ -694,7 +694,7 @@ func TestCreateBatchInfraFaultIsNotMisclassifiedAsValidation(t *testing.T) {
 	_, err = svc.CreateBatch(context.Background(), userID, CreateBatchRequest{
 		LoggedAt: time.Now(), MealSlot: "breakfast",
 		Items: []BatchItem{{FoodItemID: uuid.New(), QuantityGrams: 100}},
-	})
+	}, nil)
 	require.Error(t, err)
 	require.False(t, errors.Is(err, gorm.ErrRecordNotFound), "driver fault must not masquerade as record-not-found")
 	_, ok := httpx.IsValidation(err)
@@ -739,7 +739,7 @@ func TestCreateBatchResolvesEnteredUnits(t *testing.T) {
 			{FoodItemID: sachet.ID, EnteredAmount: &amount, EnteredUnit: &unit},
 			{FoodItemID: milk.ID, QuantityGrams: 200},
 		},
-	})
+	}, nil)
 	require.NoError(t, err)
 	require.Len(t, got, 2)
 
@@ -793,7 +793,7 @@ func TestCreateBatchRejectsUnknownUnitAndLogsNothing(t *testing.T) {
 			{FoodItemID: milk.ID, QuantityGrams: 200},
 			{FoodItemID: sachet.ID, EnteredAmount: &amount, EnteredUnit: &unit},
 		},
-	})
+	}, nil)
 	require.Error(t, err)
 	msg, ok := httpx.IsValidation(err)
 	require.True(t, ok, "unresolvable entered unit must be a client ValidationError (400), got: %v", err)
@@ -819,7 +819,7 @@ func TestEditLogInvalidMealSlotReturnsValidationError(t *testing.T) {
 	svc := NewService(NewRepository(db), nutriRepo)
 	created, err := svc.LogFood(context.Background(), userID, LogRequest{
 		FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 100, LoggedAt: time.Now(),
-	})
+	}, nil)
 	require.NoError(t, err)
 
 	_, err = svc.EditLog(context.Background(), userID, created.ID, EditRequest{MealSlot: "brunch"})
@@ -841,7 +841,7 @@ func TestLogFoodPersistsInputPhraseForTextSource(t *testing.T) {
 	log, err := svc.LogFood(context.Background(), userID, LogRequest{
 		FoodItemID: &item.ID, MealSlot: "breakfast", Source: "ai_text",
 		QuantityGrams: 100, InputPhrase: &phrase,
-	})
+	}, nil)
 	require.NoError(t, err)
 	require.NotNil(t, log.InputPhrase)
 	require.Equal(t, "brekkie eggs", *log.InputPhrase)
@@ -863,7 +863,7 @@ func TestLogFoodIgnoresInputPhraseForNonResolveSource(t *testing.T) {
 	log, err := svc.LogFood(context.Background(), userID, LogRequest{
 		FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual",
 		QuantityGrams: 100, InputPhrase: &phrase,
-	})
+	}, nil)
 	require.NoError(t, err)
 	require.Nil(t, log.InputPhrase)
 }
@@ -881,7 +881,7 @@ func TestLogFoodPersistsInputPhraseForVoiceSource(t *testing.T) {
 	log, err := svc.LogFood(context.Background(), userID, LogRequest{
 		FoodItemID: &item.ID, MealSlot: "breakfast", Source: "ai_voice",
 		QuantityGrams: 100, InputPhrase: &phrase,
-	})
+	}, nil)
 	require.NoError(t, err)
 	require.NotNil(t, log.InputPhrase)
 	require.Equal(t, "two boiled eggs", *log.InputPhrase)
@@ -894,7 +894,7 @@ func seedPhraseLog(t *testing.T, db *gorm.DB, userID uuid.UUID, from nutrition.F
 	log, err := svc.LogFood(context.Background(), userID, LogRequest{
 		FoodItemID: &from.ID, MealSlot: "lunch", Source: "ai_text",
 		QuantityGrams: 100, InputPhrase: &phrase,
-	})
+	}, nil)
 	require.NoError(t, err)
 	return log
 }
@@ -940,7 +940,7 @@ func TestEditLogWritesNoAliasWhenLogHasNoPhrase(t *testing.T) {
 	// A manual log carries no phrase, so there is nothing to teach.
 	log, err := svc.LogFood(context.Background(), userID, LogRequest{
 		FoodItemID: &rice.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 100,
-	})
+	}, nil)
 	require.NoError(t, err)
 
 	res, err := svc.EditLog(context.Background(), userID, log.ID, EditRequest{FoodItemID: &quinoa.ID})
@@ -1254,12 +1254,12 @@ func TestLogFoodUsesClientSuppliedIDSoAReplayStaysOneRow(t *testing.T) {
 		QuantityGrams: 150, LoggedAt: time.Now(),
 	}
 
-	first, err := svc.LogFood(context.Background(), userID, req)
+	first, err := svc.LogFood(context.Background(), userID, req, nil)
 	require.NoError(t, err)
 	require.Equal(t, id, first.ID, "LogFood must persist the client's id, not let the column default mint one")
 
 	// Exactly what a queue drain replays after a response was lost.
-	second, err := svc.LogFood(context.Background(), userID, req)
+	second, err := svc.LogFood(context.Background(), userID, req, nil)
 	require.NoError(t, err)
 	require.Equal(t, id, second.ID)
 
@@ -1298,7 +1298,7 @@ func TestLogFoodResolvesEnteredUnitToGrams(t *testing.T) {
 	got, err := svc.LogFood(context.Background(), userID, LogRequest{
 		FoodItemID: &item.ID, MealSlot: "snack", Source: "manual",
 		EnteredAmount: &amount, EnteredUnit: &unit, LoggedAt: time.Now(),
-	})
+	}, nil)
 	require.NoError(t, err)
 
 	// Two sachets = 33g, resolved server-side.
@@ -1332,7 +1332,7 @@ func TestLogFoodRejectsUnknownUnit(t *testing.T) {
 	_, err := svc.LogFood(context.Background(), userID, LogRequest{
 		FoodItemID: &item.ID, MealSlot: "snack", Source: "manual",
 		EnteredAmount: &amount, EnteredUnit: &unit, LoggedAt: time.Now(),
-	})
+	}, nil)
 	var verr httpx.ValidationError
 	require.ErrorAs(t, err, &verr)
 	assert.Contains(t, verr.Message, "unit")
@@ -1357,7 +1357,7 @@ func TestLogFoodWithoutEnteredUnitIsUnchanged(t *testing.T) {
 	got, err := svc.LogFood(context.Background(), userID, LogRequest{
 		FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual",
 		QuantityGrams: 140, LoggedAt: time.Now(),
-	})
+	}, nil)
 	require.NoError(t, err)
 	assert.InDelta(t, 140.0, got.QuantityGrams, 1e-9)
 	assert.Nil(t, got.EnteredAmount)
@@ -1386,7 +1386,7 @@ func TestEditLogReResolvesGramsFromEnteredUnit(t *testing.T) {
 	created, err := svc.LogFood(context.Background(), userID, LogRequest{
 		FoodItemID: &item.ID, MealSlot: "snack", Source: "manual",
 		QuantityGrams: 100, LoggedAt: time.Now(),
-	})
+	}, nil)
 	require.NoError(t, err)
 
 	amount := 3.0
@@ -1427,7 +1427,7 @@ func TestEditLogGramsOnlyClearsEnteredPair(t *testing.T) {
 	created, err := svc.LogFood(context.Background(), userID, LogRequest{
 		FoodItemID: &item.ID, MealSlot: "snack", Source: "manual",
 		EnteredAmount: &amount, EnteredUnit: &unit, LoggedAt: time.Now(),
-	})
+	}, nil)
 	require.NoError(t, err)
 	require.NotNil(t, created.EnteredAmount)
 	require.NotNil(t, created.EnteredUnit)
@@ -1461,7 +1461,7 @@ func TestEditLogUnknownEnteredUnitReturnsValidationError(t *testing.T) {
 	created, err := svc.LogFood(context.Background(), userID, LogRequest{
 		FoodItemID: &item.ID, MealSlot: "snack", Source: "manual",
 		QuantityGrams: 100, LoggedAt: time.Now(),
-	})
+	}, nil)
 	require.NoError(t, err)
 
 	amount := 1.0
@@ -1490,14 +1490,14 @@ func TestCreateBatchSourceDefaultsToMemory(t *testing.T) {
 	logs, err := svc.CreateBatch(ctx, userID, CreateBatchRequest{
 		MealSlot: "lunch",
 		Items:    []BatchItem{{FoodItemID: item.ID, QuantityGrams: 100}},
-	})
+	}, nil)
 	require.NoError(t, err)
 	require.Equal(t, "memory", logs[0].Source)
 
 	tagged, err := svc.CreateBatch(ctx, userID, CreateBatchRequest{
 		MealSlot: "lunch", Source: "recipe",
 		Items: []BatchItem{{FoodItemID: item.ID, QuantityGrams: 100}},
-	})
+	}, nil)
 	require.NoError(t, err)
 	require.Equal(t, "recipe", tagged[0].Source)
 }

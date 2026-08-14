@@ -70,19 +70,19 @@ func TestBuildContextAggregatesRecentDailyAndRenders(t *testing.T) {
 
 	// Yesterday: one log, 400 kcal.
 	seedLog(t, db, logRepo, foodlog.FoodLog{
-		UserID: userID, FoodItemID: &item.ID, LoggedAt: now.AddDate(0, 0, -1),
+		UserID: userID, FoodItemID: &item.ID, LoggedAt: now.AddDate(0, 0, -1), LocalDate: localDayOf(now.AddDate(0, 0, -1)),
 		MealSlot: "lunch", Source: "manual", Provenance: nutrition.ProvenanceAFCD,
 		QuantityGrams: 200, Kcal: 400, ProteinG: 40, FiberG: 10,
 	})
 
 	// Today: two logs totalling 600 kcal.
 	seedLog(t, db, logRepo, foodlog.FoodLog{
-		UserID: userID, FoodItemID: &item.ID, LoggedAt: now.Add(-2 * time.Hour),
+		UserID: userID, FoodItemID: &item.ID, LoggedAt: now.Add(-2 * time.Hour), LocalDate: localDayOf(now.Add(-2 * time.Hour)),
 		MealSlot: "breakfast", Source: "manual", Provenance: nutrition.ProvenanceAFCD,
 		QuantityGrams: 100, Kcal: 200, ProteinG: 20, FiberG: 5,
 	})
 	seedLog(t, db, logRepo, foodlog.FoodLog{
-		UserID: userID, FoodItemID: &item.ID, LoggedAt: now.Add(-1 * time.Hour),
+		UserID: userID, FoodItemID: &item.ID, LoggedAt: now.Add(-1 * time.Hour), LocalDate: localDayOf(now.Add(-1 * time.Hour)),
 		MealSlot: "lunch", Source: "manual", Provenance: nutrition.ProvenanceAFCD,
 		QuantityGrams: 200, Kcal: 400, ProteinG: 40, FiberG: 10,
 	})
@@ -144,12 +144,12 @@ func TestBuildContextFastingStreakExcludesTodayAndRequiresPriorLogging(t *testin
 	// for the 2 days before today, then today itself is also silent but
 	// must be excluded from the count.
 	seedLog(t, db, logRepo, foodlog.FoodLog{
-		UserID: userID, FoodItemID: &item.ID, LoggedAt: now.AddDate(0, 0, -4),
+		UserID: userID, FoodItemID: &item.ID, LoggedAt: now.AddDate(0, 0, -4), LocalDate: localDayOf(now.AddDate(0, 0, -4)),
 		MealSlot: "lunch", Source: "manual", Provenance: nutrition.ProvenanceAFCD,
 		QuantityGrams: 100, Kcal: 100, ProteinG: 10,
 	})
 	seedLog(t, db, logRepo, foodlog.FoodLog{
-		UserID: userID, FoodItemID: &item.ID, LoggedAt: now.AddDate(0, 0, -3),
+		UserID: userID, FoodItemID: &item.ID, LoggedAt: now.AddDate(0, 0, -3), LocalDate: localDayOf(now.AddDate(0, 0, -3)),
 		MealSlot: "lunch", Source: "manual", Provenance: nutrition.ProvenanceAFCD,
 		QuantityGrams: 100, Kcal: 100, ProteinG: 10,
 	})
@@ -333,7 +333,7 @@ func TestBuildContextFastingStreak_SilentWholeWindowAfterEstablishedLogging(t *t
 	// Established logging history WELL before the 7-day window (10 days
 	// ago); total silence for the entire window, including today.
 	seedLog(t, db, logRepo, foodlog.FoodLog{
-		UserID: userID, FoodItemID: &item.ID, LoggedAt: now.AddDate(0, 0, -10),
+		UserID: userID, FoodItemID: &item.ID, LoggedAt: now.AddDate(0, 0, -10), LocalDate: localDayOf(now.AddDate(0, 0, -10)),
 		MealSlot: "lunch", Source: "manual", Provenance: nutrition.ProvenanceAFCD,
 		QuantityGrams: 200, Kcal: 400, ProteinG: 40,
 	})
@@ -432,7 +432,7 @@ func TestBuildContextWindowStartMatchesAcrossFetchAndBucketing(t *testing.T) {
 	// Seeded just after local midnight on the oldest day of the window —
 	// the log a since/bucket boundary mismatch would drop.
 	seedLog(t, db, logRepo, foodlog.FoodLog{
-		UserID: userID, FoodItemID: &item.ID, LoggedAt: oldestDayStart.Add(time.Minute),
+		UserID: userID, FoodItemID: &item.ID, LoggedAt: oldestDayStart.Add(time.Minute), LocalDate: localDayOf(oldestDayStart.Add(time.Minute)),
 		MealSlot: "breakfast", Source: "manual", Provenance: nutrition.ProvenanceAFCD,
 		QuantityGrams: 1000, Kcal: targetKcal, ProteinG: 100,
 	})
@@ -610,4 +610,14 @@ func TestBuildContextSwallowsWeightSourceError(t *testing.T) {
 	require.NoError(t, err, "a weight source error must not fail BuildContext")
 	require.Equal(t, WeightTrend{}, ctx.WeightTrend, "a failed weight read must leave WeightTrend zero-valued, not a misleading zero-change trend")
 	require.False(t, ctx.WeightTrend.Valid)
+}
+
+// localDayOf gives a fixture the local day matching the instant it seeds.
+// food_logs.local_date is NOT NULL with a plausibility CHECK, so a literal
+// that omits it would write 0001-01-01 and be rejected — see kora#84.
+func localDayOf(t time.Time) time.Time {
+	if t.IsZero() {
+		t = time.Now()
+	}
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 }

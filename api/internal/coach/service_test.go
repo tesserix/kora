@@ -311,7 +311,7 @@ func seedSteadyWeek(t *testing.T, db *gorm.DB, logRepo foodlog.Repository, userI
 
 	for i := 0; i < recentWindowDays; i++ {
 		seedLog(t, db, logRepo, foodlog.FoodLog{
-			UserID: userID, FoodItemID: &item.ID, LoggedAt: now.AddDate(0, 0, -i).Add(-time.Hour),
+			UserID: userID, FoodItemID: &item.ID, LoggedAt: now.AddDate(0, 0, -i).Add(-time.Hour), LocalDate: localDayOf(now.AddDate(0, 0, -i).Add(-time.Hour)),
 			MealSlot: "lunch", Source: "manual", Provenance: nutrition.ProvenanceAFCD,
 			QuantityGrams: targetKcal / 200 * 100, Kcal: targetKcal, ProteinG: targetKcal / 10,
 		})
@@ -338,7 +338,7 @@ func seedUnderEatingWeek(t *testing.T, db *gorm.DB, logRepo foodlog.Repository, 
 	underEatKcal := 0.4 * targetKcal
 	for i := 0; i < recentWindowDays; i++ {
 		seedLog(t, db, logRepo, foodlog.FoodLog{
-			UserID: userID, FoodItemID: &item.ID, LoggedAt: now.AddDate(0, 0, -i).Add(-time.Hour),
+			UserID: userID, FoodItemID: &item.ID, LoggedAt: now.AddDate(0, 0, -i).Add(-time.Hour), LocalDate: localDayOf(now.AddDate(0, 0, -i).Add(-time.Hour)),
 			MealSlot: "lunch", Source: "manual", Provenance: nutrition.ProvenanceAFCD,
 			QuantityGrams: underEatKcal / 200 * 100, Kcal: underEatKcal, ProteinG: underEatKcal / 10,
 		})
@@ -510,7 +510,7 @@ func TestServiceNudges_FreshUserWhoLoggedOneMealTodayIsNotFlagged(t *testing.T) 
 	// One partial meal, a couple hours before now — a brand-new user's first
 	// log of the day, not a full day's intake.
 	seedLog(t, db, logRepo, foodlog.FoodLog{
-		UserID: userID, FoodItemID: &item.ID, LoggedAt: now.Add(-2 * time.Hour),
+		UserID: userID, FoodItemID: &item.ID, LoggedAt: now.Add(-2 * time.Hour), LocalDate: localDayOf(now.Add(-2 * time.Hour)),
 		MealSlot: "breakfast", Source: "manual", Provenance: nutrition.ProvenanceAFCD,
 		QuantityGrams: 200, Kcal: 450, ProteinG: 30,
 	})
@@ -578,7 +578,7 @@ func TestServiceNudges_GenuineFastingGapStillFlagsAtRisk(t *testing.T) {
 
 	logDaysAgo := func(daysAgo int) {
 		seedLog(t, db, logRepo, foodlog.FoodLog{
-			UserID: userID, FoodItemID: &item.ID, LoggedAt: now.AddDate(0, 0, -daysAgo).Add(-time.Hour),
+			UserID: userID, FoodItemID: &item.ID, LoggedAt: now.AddDate(0, 0, -daysAgo).Add(-time.Hour), LocalDate: localDayOf(now.AddDate(0, 0, -daysAgo).Add(-time.Hour)),
 			MealSlot: "lunch", Source: "manual", Provenance: nutrition.ProvenanceAFCD,
 			QuantityGrams: 1000, Kcal: 3000, ProteinG: 100,
 		})
@@ -781,7 +781,7 @@ func TestServiceThread_ShowSupportReflectsLiveSignalsNotStoredState(t *testing.T
 
 	logDaysAgo := func(daysAgo int) {
 		seedLog(t, db, logRepo, foodlog.FoodLog{
-			UserID: userID, FoodItemID: &item.ID, LoggedAt: now.AddDate(0, 0, -daysAgo).Add(-time.Hour),
+			UserID: userID, FoodItemID: &item.ID, LoggedAt: now.AddDate(0, 0, -daysAgo).Add(-time.Hour), LocalDate: localDayOf(now.AddDate(0, 0, -daysAgo).Add(-time.Hour)),
 			MealSlot: "lunch", Source: "manual", Provenance: nutrition.ProvenanceAFCD,
 			QuantityGrams: 1000, Kcal: 3000, ProteinG: 100,
 		})

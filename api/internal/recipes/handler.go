@@ -220,7 +220,7 @@ func (h Handler) Log(c *gin.Context) {
 		httpx.Error(c, http.StatusBadRequest, "invalid_input", "malformed log body")
 		return
 	}
-	res, err := h.svc.LogRecipe(c.Request.Context(), userID, id, req)
+	res, err := h.svc.LogRecipe(c.Request.Context(), userID, id, req, user.LocFromContext(c))
 	if err != nil {
 		h.notFoundOr(c, err)
 		return

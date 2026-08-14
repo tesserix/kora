@@ -77,7 +77,7 @@ func TestCreateValidates(t *testing.T) {
 	bad(r) // empty name
 	r = SaveMealRequest{Name: "x", MealSlot: "brunch"}
 	r.Items = append(r.Items, itemReq(f1.ID.String(), 100))
-	bad(r) // bad slot
+	bad(r)                                             // bad slot
 	bad(SaveMealRequest{Name: "x", MealSlot: "lunch"}) // no items
 	r = SaveMealRequest{Name: "x", MealSlot: "lunch"}
 	r.Items = append(r.Items, itemReq(uuid.NewString(), 100))

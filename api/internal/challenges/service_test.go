@@ -81,7 +81,9 @@ func (s *stubStore) ListParticipantsForScoring(_ context.Context, _ uuid.UUID) (
 func (s *stubStore) Delete(_ context.Context, _ uuid.UUID) error { s.deleted = true; return nil }
 
 // DailyKcal-only stub for scoring.
-type stubLogs struct{ kcal map[uuid.UUID]map[string]float64 }
+type stubLogs struct {
+	kcal map[uuid.UUID]map[string]float64
+}
 
 func (s stubLogs) LoggedDaysDesc(_ context.Context, _ uuid.UUID, _ time.Time, _ *time.Location, _ int) ([]string, error) {
 	return nil, nil

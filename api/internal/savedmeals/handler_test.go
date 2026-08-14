@@ -37,7 +37,9 @@ func TestHandlerCRUD(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/saved-meals", bytes.NewReader(body)))
 	require.Equal(t, http.StatusCreated, w.Code)
-	var created struct{ Data SavedMealView `json:"data"` }
+	var created struct {
+		Data SavedMealView `json:"data"`
+	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &created))
 	id := created.Data.ID
 

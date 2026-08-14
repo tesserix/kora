@@ -40,7 +40,7 @@ func TestLogRecipeScalesGramsByServingsRatio(t *testing.T) {
 
 	res, err := svc.LogRecipe(ctx, userID, uuid.MustParse(created.ID), LogRecipeRequest{
 		Servings: 2, MealSlot: "dinner",
-	})
+	}, nil)
 	require.NoError(t, err)
 	require.Equal(t, 1, res.Logged)
 	require.Empty(t, res.Skipped)
@@ -68,7 +68,7 @@ func TestLogRecipePortionAssumedSurvivesIntoFoodLog(t *testing.T) {
 
 	res, err := svc.LogRecipe(ctx, userID, uuid.MustParse(created.ID), LogRecipeRequest{
 		Servings: 2, MealSlot: "dinner",
-	})
+	}, nil)
 	require.NoError(t, err)
 	require.Equal(t, 2, res.Logged)
 
@@ -111,7 +111,7 @@ func TestLogRecipeSkipsUnresolvedAndReportsThem(t *testing.T) {
 
 	res, err := svc.LogRecipe(ctx, userID, uuid.MustParse(created.ID), LogRecipeRequest{
 		Servings: 1, MealSlot: "dinner",
-	})
+	}, nil)
 	require.NoError(t, err)
 	require.Equal(t, 1, res.Logged)
 	require.Equal(t, []string{"a pinch of asafoetida"}, res.Skipped)
@@ -128,9 +128,9 @@ func TestLogRecipeValidates(t *testing.T) {
 	require.NoError(t, err)
 	id := uuid.MustParse(created.ID)
 
-	_, err = svc.LogRecipe(ctx, userID, id, LogRecipeRequest{Servings: 0, MealSlot: "dinner"})
+	_, err = svc.LogRecipe(ctx, userID, id, LogRecipeRequest{Servings: 0, MealSlot: "dinner"}, nil)
 	require.Error(t, err)
-	_, err = svc.LogRecipe(ctx, userID, id, LogRecipeRequest{Servings: 1, MealSlot: "brunch"})
+	_, err = svc.LogRecipe(ctx, userID, id, LogRecipeRequest{Servings: 1, MealSlot: "brunch"}, nil)
 	require.Error(t, err)
 }
 
@@ -146,7 +146,7 @@ func TestLogRecipeRejectsAnotherUsersRecipe(t *testing.T) {
 	otherUser := uuid.New()
 	_, err = svc.LogRecipe(ctx, otherUser, uuid.MustParse(created.ID), LogRecipeRequest{
 		Servings: 1, MealSlot: "dinner",
-	})
+	}, nil)
 	require.Error(t, err)
 	require.Equal(t, 0, countFoodLogs(t, svc, otherUser))
 }
@@ -165,7 +165,7 @@ func TestLogRecipeAllUnresolvedIsAValidationError(t *testing.T) {
 
 	_, err = svc.LogRecipe(ctx, userID, uuid.MustParse(created.ID), LogRecipeRequest{
 		Servings: 1, MealSlot: "dinner",
-	})
+	}, nil)
 	require.Error(t, err)
 	require.Equal(t, 0, countFoodLogs(t, svc, userID))
 }

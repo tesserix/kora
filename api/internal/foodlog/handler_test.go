@@ -124,7 +124,7 @@ func TestUpdateHandler(t *testing.T) {
 	r.Use(func(c *gin.Context) { c.Set("user_id", u.ID); c.Next() })
 	r.PATCH("/v1/logs/:id", h.Update)
 
-	created, err := svc.LogFood(context.Background(), u.ID, LogRequest{FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 100, LoggedAt: time.Now()})
+	created, err := svc.LogFood(context.Background(), u.ID, LogRequest{FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 100, LoggedAt: time.Now()}, nil)
 	require.NoError(t, err)
 
 	t.Run("200 on valid grams edit with recomputed kcal", func(t *testing.T) {
@@ -158,7 +158,7 @@ func TestUpdateHandler(t *testing.T) {
 	t.Run("404 on other user's log", func(t *testing.T) {
 		otherRepo := NewRepository(db)
 		otherSvc := NewService(otherRepo, nutrition.NewRepository(db))
-		otherLog, err := otherSvc.LogFood(context.Background(), otherU.ID, LogRequest{FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 100, LoggedAt: time.Now()})
+		otherLog, err := otherSvc.LogFood(context.Background(), otherU.ID, LogRequest{FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 100, LoggedAt: time.Now()}, nil)
 		require.NoError(t, err)
 
 		body, _ := json.Marshal(EditRequest{QuantityGrams: floatPtr(50)})
@@ -196,7 +196,7 @@ func TestRepeatWithEmptyBodyDefaultsToNow(t *testing.T) {
 
 	repo := NewRepository(db)
 	svc := NewService(repo, nutrition.NewRepository(db))
-	first, err := svc.LogFood(context.Background(), u.ID, LogRequest{FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 100, LoggedAt: time.Now()})
+	first, err := svc.LogFood(context.Background(), u.ID, LogRequest{FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 100, LoggedAt: time.Now()}, nil)
 	require.NoError(t, err)
 
 	h := NewHandler(svc, repo)

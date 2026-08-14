@@ -153,11 +153,11 @@ func servingGramsFromPhrase(norm string, item nutrition.FoodItem) (float64, bool
 //  3. The curated phrase table, for foods that name no such serving of their
 //     own. Split in two by what kind of signal the phrase carries:
 //     3a. A named unit ("1 cup" → 240 g). NOT assumed — the phrase named a
-//         real-world unit; the table just maps it to a pragmatic estimate.
+//     real-world unit; the table just maps it to a pragmatic estimate.
 //     3b. A bare size adjective ("medium" → 120 g). ASSUMED — the phrase
-//         carries no unit and no number at all; the table is a generic
-//         estimate we are supplying on the caller's behalf, not information
-//         they gave us.
+//     carries no unit and no number at all; the table is a generic
+//     estimate we are supplying on the caller's behalf, not information
+//     they gave us.
 //  4. A branded food's own serving mass. OpenFoodFacts' serving_quantity is a
 //     real package serving — what a person actually consumes — so it is a far
 //     better default than 100 g when nothing else matched. NOT assumed — a

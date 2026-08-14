@@ -21,9 +21,9 @@ func TestLoggedDaysDescReturnsDistinctDays(t *testing.T) {
 	svc := NewService(NewRepository(db), nutrition.NewRepository(db))
 	// Two logs same day + one the day before.
 	d := time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC)
-	_, _ = svc.LogFood(context.Background(), userID, LogRequest{FoodItemID: &item.ID, MealSlot: "breakfast", Source: "manual", QuantityGrams: 100, LoggedAt: d})
-	_, _ = svc.LogFood(context.Background(), userID, LogRequest{FoodItemID: &item.ID, MealSlot: "dinner", Source: "manual", QuantityGrams: 100, LoggedAt: d.Add(6 * time.Hour)})
-	_, _ = svc.LogFood(context.Background(), userID, LogRequest{FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 100, LoggedAt: d.Add(-24 * time.Hour)})
+	_, _ = svc.LogFood(context.Background(), userID, LogRequest{FoodItemID: &item.ID, MealSlot: "breakfast", Source: "manual", QuantityGrams: 100, LoggedAt: d}, nil)
+	_, _ = svc.LogFood(context.Background(), userID, LogRequest{FoodItemID: &item.ID, MealSlot: "dinner", Source: "manual", QuantityGrams: 100, LoggedAt: d.Add(6 * time.Hour)}, nil)
+	_, _ = svc.LogFood(context.Background(), userID, LogRequest{FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 100, LoggedAt: d.Add(-24 * time.Hour)}, nil)
 
 	days, err := NewRepository(db).LoggedDaysDesc(context.Background(), userID, d, time.UTC, 400)
 	require.NoError(t, err)

@@ -50,8 +50,8 @@ func TestListWeightHandlerReturnsSeries(t *testing.T) {
 	r := weightRouter(userID, repo)
 
 	base := time.Now().Add(-48 * time.Hour)
-	_, _ = repo.AddWeight(context.Background(), userID, 74.0, base)
-	_, _ = repo.AddWeight(context.Background(), userID, 73.5, base.Add(24*time.Hour))
+	_, _ = repo.AddWeight(context.Background(), userID, 74.0, base, dayOf(base))
+	_, _ = repo.AddWeight(context.Background(), userID, 73.5, base.Add(24*time.Hour), dayOf(base.Add(24*time.Hour)))
 
 	from := time.Now().Add(-72 * time.Hour).Format(time.RFC3339)
 	to := time.Now().Format(time.RFC3339)

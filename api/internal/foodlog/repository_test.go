@@ -24,7 +24,7 @@ func TestUpdatePersistsFieldsForOwner(t *testing.T) {
 
 	repo := NewRepository(db)
 	created, err := repo.Create(context.Background(), FoodLog{
-		UserID: userID, FoodItemID: &item.ID, LoggedAt: time.Now(), MealSlot: "lunch",
+		UserID: userID, FoodItemID: &item.ID, LoggedAt: time.Now(), LocalDate: dayOf(time.Now()), MealSlot: "lunch",
 		Source: "manual", Description: item.Name, QuantityGrams: 100, Kcal: 100, ProteinG: 10,
 		Provenance: item.Provenance,
 	})
@@ -51,7 +51,7 @@ func TestUpdateIsNotFoundForOtherUser(t *testing.T) {
 
 	repo := NewRepository(db)
 	created, err := repo.Create(context.Background(), FoodLog{
-		UserID: userID, FoodItemID: &item.ID, LoggedAt: time.Now(), MealSlot: "lunch",
+		UserID: userID, FoodItemID: &item.ID, LoggedAt: time.Now(), LocalDate: dayOf(time.Now()), MealSlot: "lunch",
 		Source: "manual", Description: item.Name, QuantityGrams: 100, Kcal: 100,
 		Provenance: item.Provenance,
 	})
@@ -78,11 +78,11 @@ func TestListForUserSince(t *testing.T) {
 
 	now := time.Now()
 	// in-window
-	inWindow, err := repo.Create(ctx, FoodLog{UserID: userID, FoodItemID: &item.ID, LoggedAt: now.Add(-2 * 24 * time.Hour), MealSlot: "breakfast", Source: "manual", QuantityGrams: 60, Kcal: 100})
+	inWindow, err := repo.Create(ctx, FoodLog{UserID: userID, FoodItemID: &item.ID, LoggedAt: now.Add(-2 * 24 * time.Hour), LocalDate: dayOf(now.Add(-2 * 24 * time.Hour)), MealSlot: "breakfast", Source: "manual", QuantityGrams: 60, Kcal: 100})
 	require.NoError(t, err)
 	t.Cleanup(func() { db.Exec("DELETE FROM food_logs WHERE id = ?", inWindow.ID) })
 	// out-of-window
-	outOfWindow, err := repo.Create(ctx, FoodLog{UserID: userID, FoodItemID: &item.ID, LoggedAt: now.Add(-200 * 24 * time.Hour), MealSlot: "breakfast", Source: "manual", QuantityGrams: 60, Kcal: 100})
+	outOfWindow, err := repo.Create(ctx, FoodLog{UserID: userID, FoodItemID: &item.ID, LoggedAt: now.Add(-200 * 24 * time.Hour), LocalDate: dayOf(now.Add(-200 * 24 * time.Hour)), MealSlot: "breakfast", Source: "manual", QuantityGrams: 60, Kcal: 100})
 	require.NoError(t, err)
 	t.Cleanup(func() { db.Exec("DELETE FROM food_logs WHERE id = ?", outOfWindow.ID) })
 
@@ -109,14 +109,14 @@ func TestLastPortionForPhraseReturnsMostRecent(t *testing.T) {
 	now := time.Now()
 
 	older, err := repo.Create(ctx, FoodLog{
-		UserID: userID, FoodItemID: &item.ID, LoggedAt: now.Add(-48 * time.Hour), MealSlot: "breakfast",
+		UserID: userID, FoodItemID: &item.ID, LoggedAt: now.Add(-48 * time.Hour), LocalDate: dayOf(now.Add(-48 * time.Hour)), MealSlot: "breakfast",
 		Source: "ai_text", QuantityGrams: 80, Kcal: 80, InputPhrase: &phrase,
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { db.Exec("DELETE FROM food_logs WHERE id = ?", older.ID) })
 
 	newer, err := repo.Create(ctx, FoodLog{
-		UserID: userID, FoodItemID: &item.ID, LoggedAt: now.Add(-1 * time.Hour), MealSlot: "breakfast",
+		UserID: userID, FoodItemID: &item.ID, LoggedAt: now.Add(-1 * time.Hour), LocalDate: dayOf(now.Add(-1 * time.Hour)), MealSlot: "breakfast",
 		Source: "ai_text", QuantityGrams: 150, Kcal: 150, InputPhrase: &phrase,
 	})
 	require.NoError(t, err)
@@ -143,7 +143,7 @@ func TestLastPortionForPhraseIgnoresOtherUsers(t *testing.T) {
 	phrase := "brekkie eggs " + uuid.NewString()
 
 	otherLog, err := repo.Create(ctx, FoodLog{
-		UserID: other, FoodItemID: &item.ID, LoggedAt: time.Now(), MealSlot: "breakfast",
+		UserID: other, FoodItemID: &item.ID, LoggedAt: time.Now(), LocalDate: dayOf(time.Now()), MealSlot: "breakfast",
 		Source: "ai_text", QuantityGrams: 300, Kcal: 300, InputPhrase: &phrase,
 	})
 	require.NoError(t, err)
@@ -168,7 +168,7 @@ func TestLastPortionForPhraseIgnoresNullInputPhrase(t *testing.T) {
 	phrase := "brekkie eggs " + uuid.NewString()
 
 	manual, err := repo.Create(ctx, FoodLog{
-		UserID: userID, FoodItemID: &item.ID, LoggedAt: time.Now(), MealSlot: "breakfast",
+		UserID: userID, FoodItemID: &item.ID, LoggedAt: time.Now(), LocalDate: dayOf(time.Now()), MealSlot: "breakfast",
 		Source: "manual", QuantityGrams: 300, Kcal: 300, InputPhrase: nil,
 	})
 	require.NoError(t, err)
@@ -206,7 +206,7 @@ func TestHasLoggedBefore(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, got, "a user with no logs at all has not logged before anything")
 
-	old, err := repo.Create(ctx, FoodLog{UserID: userID, FoodItemID: &item.ID, LoggedAt: now.Add(-10 * 24 * time.Hour), MealSlot: "breakfast", Source: "manual", QuantityGrams: 60, Kcal: 100})
+	old, err := repo.Create(ctx, FoodLog{UserID: userID, FoodItemID: &item.ID, LoggedAt: now.Add(-10 * 24 * time.Hour), LocalDate: dayOf(now.Add(-10 * 24 * time.Hour)), MealSlot: "breakfast", Source: "manual", QuantityGrams: 60, Kcal: 100})
 	require.NoError(t, err)
 	t.Cleanup(func() { db.Exec("DELETE FROM food_logs WHERE id = ?", old.ID) })
 
@@ -232,7 +232,7 @@ func TestCreateIdempotentReplayReturnsExistingRow(t *testing.T) {
 	repo := NewRepository(tx)
 
 	id := uuid.New()
-	log := FoodLog{ID: id, UserID: userID, LoggedAt: time.Now(), MealSlot: "lunch",
+	log := FoodLog{ID: id, UserID: userID, LoggedAt: time.Now(), LocalDate: dayOf(time.Now()), MealSlot: "lunch",
 		Source: "manual", Description: "Test food", QuantityGrams: 100, Kcal: 200}
 
 	first, err := repo.CreateIdempotent(context.Background(), log)
@@ -262,7 +262,7 @@ func TestCreateIdempotentRejectsAnotherUsersID(t *testing.T) {
 	repo := NewRepository(tx)
 
 	id := uuid.New()
-	owner := FoodLog{ID: id, UserID: ownerID, LoggedAt: time.Now(), MealSlot: "lunch",
+	owner := FoodLog{ID: id, UserID: ownerID, LoggedAt: time.Now(), LocalDate: dayOf(time.Now()), MealSlot: "lunch",
 		Source: "manual", Description: "Owner food", QuantityGrams: 100, Kcal: 200}
 	_, err := repo.CreateIdempotent(context.Background(), owner)
 	require.NoError(t, err)
@@ -290,7 +290,7 @@ func TestCreateCountsTheLogBySource(t *testing.T) {
 	before := testutil.ToFloat64(metrics.Default().FoodLogsCounter("ai_photo"))
 
 	_, err := repo.Create(context.Background(), FoodLog{
-		UserID: userID, FoodItemID: &item.ID, LoggedAt: time.Now(), MealSlot: "lunch",
+		UserID: userID, FoodItemID: &item.ID, LoggedAt: time.Now(), LocalDate: dayOf(time.Now()), MealSlot: "lunch",
 		Source: "ai_photo", Description: item.Name, QuantityGrams: 100, Kcal: 100,
 		Provenance: item.Provenance,
 	})
@@ -314,7 +314,7 @@ func TestCreateIdempotentDoesNotCountAReplay(t *testing.T) {
 
 	repo := NewRepository(db)
 	log := FoodLog{
-		ID: uuid.New(), UserID: userID, FoodItemID: &item.ID, LoggedAt: time.Now(),
+		ID: uuid.New(), UserID: userID, FoodItemID: &item.ID, LoggedAt: time.Now(), LocalDate: dayOf(time.Now()),
 		MealSlot: "lunch", Source: "ai_voice", Description: item.Name, QuantityGrams: 100,
 		Kcal: 100, Provenance: item.Provenance,
 	}
@@ -351,7 +351,7 @@ func TestReadsCarryTheFoodsBaseUnit(t *testing.T) {
 	day := time.Date(2026, 3, 4, 9, 0, 0, 0, time.UTC)
 	repo := NewRepository(db)
 	created, err := repo.Create(context.Background(), FoodLog{
-		UserID: userID, FoodItemID: &item.ID, LoggedAt: day, MealSlot: "breakfast",
+		UserID: userID, FoodItemID: &item.ID, LoggedAt: day, LocalDate: dayOf(day), MealSlot: "breakfast",
 		Source: "manual", Description: item.Name, QuantityGrams: 300, Kcal: 156,
 		Provenance: item.Provenance,
 	})
@@ -378,7 +378,7 @@ func TestReadsTolerateALogWithNoFoodItem(t *testing.T) {
 
 	repo := NewRepository(db)
 	created, err := repo.Create(context.Background(), FoodLog{
-		UserID: userID, LoggedAt: day, MealSlot: "snack", Source: "manual",
+		UserID: userID, LoggedAt: day, LocalDate: dayOf(day), MealSlot: "snack", Source: "manual",
 		Description: "Unresolved snack", QuantityGrams: 50, Kcal: 60, Provenance: "user_estimate",
 	})
 	require.NoError(t, err)

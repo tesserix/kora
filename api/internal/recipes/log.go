@@ -22,7 +22,7 @@ const maxLogServings = 20.0
 // is an interface so the recipes service does not depend on the whole food-log
 // surface, and so tests can drive the fan-out directly.
 type BatchLogger interface {
-	CreateBatch(ctx context.Context, userID uuid.UUID, req foodlog.CreateBatchRequest) ([]foodlog.FoodLog, error)
+	CreateBatch(ctx context.Context, userID uuid.UUID, req foodlog.CreateBatchRequest, loc *time.Location) ([]foodlog.FoodLog, error)
 }
 
 // WithBatchLogger attaches the log fan-out target, following the functional
@@ -37,6 +37,10 @@ type LogRecipeRequest struct {
 	Servings float64   `json:"servings"`
 	MealSlot string    `json:"meal_slot"`
 	LoggedAt time.Time `json:"logged_at"`
+	// LocalDate is the device-local day at capture, forwarded to the batch
+	// writer so a recipe logged offline keeps the day it was logged on rather
+	// than the day it drained. See kora#84.
+	LocalDate string `json:"local_date"`
 }
 
 // LogRecipeResult reports what actually reached the diary. Skipped names the
@@ -54,7 +58,7 @@ type LogRecipeResult struct {
 // memory and every macro computation operate on food-item rows, so a
 // synthetic row would be invisible to the food index and uncorrectable.
 // Saved meals already fan out this way.
-func (s *Service) LogRecipe(ctx context.Context, userID, recipeID uuid.UUID, req LogRecipeRequest) (LogRecipeResult, error) {
+func (s *Service) LogRecipe(ctx context.Context, userID, recipeID uuid.UUID, req LogRecipeRequest, loc *time.Location) (LogRecipeResult, error) {
 	if s.batch == nil {
 		return LogRecipeResult{}, httpx.ValidationError{Message: "logging is unavailable"}
 	}
@@ -111,8 +115,8 @@ func (s *Service) LogRecipe(ctx context.Context, userID, recipeID uuid.UUID, req
 		loggedAt = time.Now()
 	}
 	logs, err := s.batch.CreateBatch(ctx, userID, foodlog.CreateBatchRequest{
-		LoggedAt: loggedAt, MealSlot: req.MealSlot, Items: items, Source: logSource,
-	})
+		LoggedAt: loggedAt, LocalDate: req.LocalDate, MealSlot: req.MealSlot, Items: items, Source: logSource,
+	}, loc)
 	if err != nil {
 		return LogRecipeResult{}, err
 	}

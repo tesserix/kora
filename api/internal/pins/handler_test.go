@@ -45,7 +45,9 @@ func TestHandlerCreateListDelete(t *testing.T) {
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/pins", nil))
 	require.Equal(t, http.StatusOK, w.Code)
-	var listBody struct{ Data []PinnedFood `json:"data"` }
+	var listBody struct {
+		Data []PinnedFood `json:"data"`
+	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &listBody))
 	require.Len(t, listBody.Data, 1)
 	require.Equal(t, food.Name, listBody.Data[0].Name)

@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/tesserix/kora/api/internal/httpx"
+	"github.com/tesserix/kora/api/internal/localday"
 	"github.com/tesserix/kora/api/internal/user"
 )
 
@@ -31,6 +32,9 @@ func (h Handler) resolveUser(c *gin.Context) (uuid.UUID, bool) {
 type addWaterRequest struct {
 	VolumeML int       `json:"volume_ml"`
 	LoggedAt time.Time `json:"logged_at"`
+	// LocalDate is the device-local day at capture — see kora#84 and
+	// internal/localday. Empty falls back to the profile zone.
+	LocalDate string `json:"local_date"`
 }
 
 func (h Handler) Add(c *gin.Context) {
@@ -43,7 +47,12 @@ func (h Handler) Add(c *gin.Context) {
 		httpx.Error(c, http.StatusBadRequest, "invalid_input", "malformed body")
 		return
 	}
-	e, err := h.repo.AddWater(c.Request.Context(), userID, req.VolumeML, req.LoggedAt)
+	localDate, err := localday.Resolve(req.LocalDate, orNow(req.LoggedAt), user.LocFromContext(c))
+	if err != nil {
+		httpx.RespondServiceError(c, err)
+		return
+	}
+	e, err := h.repo.AddWater(c.Request.Context(), userID, req.VolumeML, req.LoggedAt, localDate)
 	if err != nil {
 		httpx.RespondServiceError(c, err)
 		return
@@ -72,6 +81,9 @@ func (h Handler) DayTotal(c *gin.Context) {
 type addWeightRequest struct {
 	WeightKg float64   `json:"weight_kg"`
 	LoggedAt time.Time `json:"logged_at"`
+	// LocalDate is the device-local day at capture — see kora#84 and
+	// internal/localday. Empty falls back to the profile zone.
+	LocalDate string `json:"local_date"`
 }
 
 func (h Handler) AddWeight(c *gin.Context) {
@@ -84,7 +96,12 @@ func (h Handler) AddWeight(c *gin.Context) {
 		httpx.Error(c, http.StatusBadRequest, "invalid_input", "malformed body")
 		return
 	}
-	e, err := h.repo.AddWeight(c.Request.Context(), userID, req.WeightKg, req.LoggedAt)
+	localDate, err := localday.Resolve(req.LocalDate, orNow(req.LoggedAt), user.LocFromContext(c))
+	if err != nil {
+		httpx.RespondServiceError(c, err)
+		return
+	}
+	e, err := h.repo.AddWeight(c.Request.Context(), userID, req.WeightKg, req.LoggedAt, localDate)
 	if err != nil {
 		httpx.RespondServiceError(c, err)
 		return
@@ -111,4 +128,14 @@ func (h Handler) ListWeight(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, entries)
+}
+
+// orNow mirrors the repository's zero-time defaulting so the local day is
+// resolved against the SAME instant that will be persisted. Without this a
+// client omitting logged_at would have its day computed from the zero time.
+func orNow(t time.Time) time.Time {
+	if t.IsZero() {
+		return time.Now()
+	}
+	return t
 }
