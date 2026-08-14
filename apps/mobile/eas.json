@@ -33,7 +33,9 @@
         "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "564299717841-k80q23k7nouu7525plsjb812gn5bajm7.apps.googleusercontent.com",
         "SENTRY_DISABLE_AUTO_UPLOAD": "true",
         "SENTRY_ORG": "tesserix",
-        "SENTRY_PROJECT": "kora"
+        "SENTRY_PROJECT": "kora",
+        "EXPO_PUBLIC_SENTRY_DSN": "https://804f2b00da5e555f6f9882903c4a5f77@o4511120959209472.ingest.de.sentry.io/4511907546857552",
+        "SENTRY_URL": "https://de.sentry.io"
       },
       "node": "22.19.0"
     }
