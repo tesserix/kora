@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactElement } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 import { ActivityIndicator, TextInput, View } from "react-native";
 import { Sheet } from "@/components/Sheet";
 import { Icon } from "@/components/Icon";
@@ -74,6 +74,13 @@ export function AskAgainSheet({ visible, phrase, onSelect, onManualSearch, onClo
   const [resolution, setResolution] = useState<Resolution | null>(null);
   const [error, setError] = useState<string | null>(null);
   const resolveText = useResolveText();
+  // #158: the sheet is dismissible three ways while a resolve is pending
+  // (backdrop tap, swipe-down, Android back — Sheet.tsx), and submit renders a
+  // spinner off isPending, so a user watching it can and will dismiss.
+  // Without this the abandoned AI call ran on to completion or the 25s
+  // REQUEST_TIMEOUT_MS, spending a real user's per-user cap (#81) on a result
+  // nobody would ever see.
+  const resolveControllerRef = useRef<AbortController | null>(null);
 
   // Reset to the log's phrase (and clear any prior result/error) every time
   // the sheet opens, rather than leaking a previous visit's edit or result.
@@ -90,10 +97,28 @@ export function AskAgainSheet({ visible, phrase, onSelect, onManualSearch, onClo
     if (!trimmed || resolveText.isPending) return;
     setError(null);
     setResolution(null);
-    resolveText.mutate({ input: trimmed }, {
-      onSuccess: (result: Resolution) => setResolution(result),
-      onError: () => setError("Couldn't ask Kora right now. Try again."),
+    const controller = new AbortController();
+    resolveControllerRef.current = controller;
+    resolveText.mutate({ input: trimmed, signal: controller.signal }, {
+      // Guarded on `aborted` only — the device's AbortSignal has no `reason`
+      // (React Native polyfills the globals with abort-controller 3.0.0), so a
+      // discriminant routed through reason would be undefined on every phone.
+      onSuccess: (result: Resolution) => {
+        if (controller.signal.aborted) return;
+        setResolution(result);
+      },
+      onError: () => {
+        if (controller.signal.aborted) return;
+        setError("Couldn't ask Kora right now. Try again.");
+      },
     });
+  };
+
+  // Every dismissal route in Sheet.tsx funnels through onClose, so aborting
+  // here covers backdrop, swipe and Android back without three call sites.
+  const handleClose = () => {
+    resolveControllerRef.current?.abort();
+    onClose();
   };
 
   // A follow_up WITHOUT a question comes from the API's estimate path
@@ -106,7 +131,7 @@ export function AskAgainSheet({ visible, phrase, onSelect, onManualSearch, onClo
   const asksQuestion = resolution?.tier === "follow_up" && !!resolution.follow_up_question;
 
   return (
-    <Sheet visible={visible} onClose={onClose}>
+    <Sheet visible={visible} onClose={handleClose}>
       <View style={{ paddingHorizontal: 22, paddingBottom: 30 }}>
         <Overline style={{ marginTop: 8, marginBottom: 8 }}>Ask Kora again</Overline>
 
@@ -164,7 +189,7 @@ export function AskAgainSheet({ visible, phrase, onSelect, onManualSearch, onClo
         {resolution && !asksQuestion && resolution.candidates.length === 0 ? (
           <View>
             <AppText variant="subheadline" muted style={{ marginTop: 4, marginBottom: 12 }}>
-              Kora couldn't identify that.
+              Kora couldn&apos;t identify that.
             </AppText>
             <Button
               title="Search manually instead"
