@@ -31,7 +31,9 @@
         "EXPO_PUBLIC_API_URL": "https://kora-api.tesserix.app",
         "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "564299717841-45p3feut4bgauj6e2k4hijtcm5b5u72l.apps.googleusercontent.com",
         "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "564299717841-k80q23k7nouu7525plsjb812gn5bajm7.apps.googleusercontent.com",
-        "SENTRY_DISABLE_AUTO_UPLOAD": "true"
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true",
+        "SENTRY_ORG": "tesserix",
+        "SENTRY_PROJECT": "kora"
       },
       "node": "22.19.0"
     }

@@ -91,7 +91,14 @@
       "@bacons/apple-targets",
       "expo-asset",
       "expo-font",
-      "@sentry/react-native"
+      [
+        "@sentry/react-native/expo",
+        {
+          "url": "https://sentry.io/",
+          "organization": "tesserix",
+          "project": "kora"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
