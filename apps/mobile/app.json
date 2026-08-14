@@ -94,7 +94,7 @@
       [
         "@sentry/react-native/expo",
         {
-          "url": "https://de.sentry.io/",
+          "url": "https://sentry.io/",
           "organization": "tesserix",
           "project": "kora"
         }
