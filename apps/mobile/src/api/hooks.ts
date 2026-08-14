@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Crypto from "expo-crypto";
+import { localDateNow } from "@/lib/localDate";
 import { apiFetch, apiFetchEnvelope, apiFetchMultipart, currentUserId, isNetworkError, TimeoutError } from "@/lib/api";
 import { buildCaptureForm, normalizeResolution, type ResolveFile } from "./resolveWire";
 import { isOnline } from "@/offline/connectivity";
@@ -174,6 +175,12 @@ export type CreateLogInput = {
   /** The unit entered alongside entered_amount (e.g. "sachet", "g", "ml"). */
   entered_unit?: string;
   logged_at: string;
+  /**
+   * The device-local calendar day at capture ("YYYY-MM-DD"). Part of the
+   * payload — not stamped at send time — so a QUEUED log replayed from another
+   * timezone keeps the day it was actually logged on. See kora#84.
+   */
+  local_date?: string;
   client_log_ms?: number;
   /** Raw user phrase; the server keeps it only for ai_text / ai_voice sources. */
   input_phrase?: string;
@@ -207,6 +214,11 @@ export function useCreateLog() {
     // defaults — the shortest proof that this is load-bearing.
     networkMode: "always",
     mutationFn: async (input: CreateLogInput): Promise<FoodLog | QueuedLog> => {
+      // Stamped HERE, at capture, so the queued copy below carries the day the
+      // user actually logged on. Resolving it at drain time (or server-side on
+      // receipt) would file a London capture replayed in Sydney on the wrong
+      // day — see kora#84 and src/lib/localDate.
+      const local_date = localDateNow();
       // The id is minted client-side for EVERY log, online or not, so the
       // server row and any queued copy share one identity and a replay is
       // idempotent (see api/internal/foodlog CreateIdempotent).
@@ -219,11 +231,11 @@ export function useCreateLog() {
       // queueing would swallow the meal into a black hole.
       const ownerId = await resolveOwnerId();
       if (!ownerId) throw new NoOwnerError();
-      if (!isOnline()) return append(input, id, ownerId);
+      if (!isOnline()) return append({ ...input, local_date }, id, ownerId);
       try {
         return (await apiFetch("/v1/logs", {
           method: "POST",
-          body: JSON.stringify({ ...input, id }),
+          body: JSON.stringify({ ...input, id, local_date }),
         })) as FoodLog;
       } catch (err) {
         // isOnline() was only a snapshot taken before the request left. The
@@ -277,7 +289,10 @@ export function useCreateLogBatch() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: BatchLogInput) =>
-      apiFetch("/v1/logs/batch", { method: "POST", body: JSON.stringify(input) }) as Promise<FoodLog[]>,
+      apiFetch("/v1/logs/batch", {
+        method: "POST",
+        body: JSON.stringify({ ...input, local_date: localDateNow() }),
+      }) as Promise<FoodLog[]>,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["logs"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
@@ -545,7 +560,10 @@ export function useAddWater() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ volume_ml, logged_at }: { volume_ml: number; logged_at?: string }) =>
-      apiFetch("/v1/water", { method: "POST", body: JSON.stringify({ volume_ml, logged_at }) }),
+      apiFetch("/v1/water", {
+        method: "POST",
+        body: JSON.stringify({ volume_ml, logged_at, local_date: localDateNow() }),
+      }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["dashboard"] }),
   });
 }
@@ -656,7 +674,12 @@ export function useRepeatLog() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) =>
-      apiFetch(`/v1/logs/${id}/repeat`, { method: "POST" }) as Promise<FoodLog>,
+      apiFetch(`/v1/logs/${id}/repeat`, {
+        method: "POST",
+        // A repeat lands on TODAY, so it carries today's local day rather
+        // than inheriting the original log's — see kora#84.
+        body: JSON.stringify({ local_date: localDateNow() }),
+      }) as Promise<FoodLog>,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["logs"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
@@ -747,7 +770,10 @@ export function useAddWeight() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ weight_kg, logged_at }: { weight_kg: number; logged_at?: string }) =>
-      apiFetch("/v1/weight", { method: "POST", body: JSON.stringify({ weight_kg, logged_at }) }),
+      apiFetch("/v1/weight", {
+        method: "POST",
+        body: JSON.stringify({ weight_kg, logged_at, local_date: localDateNow() }),
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["weight"] });
       // The user just weighed in — re-arm the one-shot weight reminder trigger

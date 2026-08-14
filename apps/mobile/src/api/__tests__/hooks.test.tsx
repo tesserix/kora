@@ -14,6 +14,7 @@ import {
   apiFetchMultipart,
   currentUserId,
 } from "@/lib/api";
+import { localDateNow } from "@/lib/localDate";
 import { drain, list , append } from "@/offline/queue";
 import { getFoodById, getFoodByBarcode } from "@/offline/foodCache";
 import * as foodCache from "@/offline/foodCache";
@@ -459,7 +460,9 @@ test("useAddWater POSTs /v1/water with volume_ml and logged_at", async () => {
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
   expect(apiFetch).toHaveBeenCalledWith("/v1/water", {
     method: "POST",
-    body: JSON.stringify({ volume_ml: 250, logged_at: "2026-07-25T12:00:00Z" }),
+    // local_date is stamped on every write so the server buckets the day
+    // the user experienced rather than one derived from the profile zone (kora#84).
+    body: JSON.stringify({ volume_ml: 250, logged_at: "2026-07-25T12:00:00Z", local_date: localDateNow() }),
   });
 });
 
@@ -470,16 +473,22 @@ test("useAddWeight POSTs /v1/weight and invalidates weight", async () => {
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
   expect(apiFetch).toHaveBeenCalledWith("/v1/weight", {
     method: "POST",
-    body: JSON.stringify({ weight_kg: 72.4, logged_at: undefined }),
+    body: JSON.stringify({ weight_kg: 72.4, logged_at: undefined, local_date: localDateNow() }),
   });
 });
 
-test("useRepeatLog POSTs /v1/logs/:id/repeat with no body", async () => {
+test("useRepeatLog POSTs /v1/logs/:id/repeat with the day it lands on", async () => {
   (apiFetch as jest.Mock).mockResolvedValueOnce({ id: "log2" });
   const { result } = await renderHook(() => useRepeatLog(), { wrapper });
   result.current.mutate("log1");
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
-  expect(apiFetch).toHaveBeenCalledWith("/v1/logs/log1/repeat", { method: "POST" });
+  // A repeat now carries a body: the day it lands on. Without it the clone
+  // would inherit the ORIGINAL log's local_date and be filed on that day
+  // instead of today — see kora#84.
+  expect(apiFetch).toHaveBeenCalledWith("/v1/logs/log1/repeat", {
+    method: "POST",
+    body: JSON.stringify({ local_date: localDateNow() }),
+  });
 });
 
 test("useRepeatLog invalidates logs and dashboard on success", async () => {

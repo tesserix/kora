@@ -249,6 +249,9 @@ test("logging a saved meal sends each item's entered unit, not its grams", async
   const [, init] = (apiFetch as jest.Mock).mock.calls[0];
   expect(JSON.parse(init.body as string)).toEqual({
     logged_at: expect.any(String),
+    // Every write carries the device-local day so the server does not derive
+    // one from the profile timezone — kora#84.
+    local_date: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
     meal_slot: "snack",
     items: [
       // The server resolves the pair; grams is a placeholder it ignores.

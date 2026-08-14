@@ -226,6 +226,10 @@ export type DashboardSummary = {
 };
 
 export type OnboardingInput = {
+  // The device's IANA zone, sent so a user is not provisioned into the server's
+  // DefaultTimezone (Australia/Sydney) regardless of where they live. Every
+  // account created before this was Sydney — see kora#84.
+  timezone?: string;
   sex: "male" | "female";
   birth_year: number;
   height_cm: number;

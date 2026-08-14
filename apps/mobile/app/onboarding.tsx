@@ -225,6 +225,12 @@ export default function Onboarding() {
     const input: OnboardingInput = {
       sex,
       goal,
+      // Without this the server falls back to DefaultTimezone
+      // (Australia/Sydney) for every account, so a user anywhere else got the
+      // wrong day boundary from signup — see kora#84. The profile zone still
+      // drives streaks and challenge windows even after local_date fixed log
+      // bucketing, so it has to be right.
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       activity_level: activityLevel,
       birth_year: new Date().getFullYear() - age,
       height_cm: heightCm,
