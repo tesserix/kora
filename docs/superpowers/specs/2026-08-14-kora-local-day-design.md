@@ -28,7 +28,7 @@ Store the local calendar date on each row at write time, and query by it directl
 
 ### Schema
 
-Migration `000031_local_day`, adding to **three** tables — `food_logs`, `water_entries`, `weight_entries`:
+Migration `000032_local_day`, adding to **three** tables — `food_logs`, `water_entries`, `weight_entries`:
 
 ```sql
 ALTER TABLE food_logs ADD COLUMN local_date DATE;
@@ -100,4 +100,4 @@ Stating this explicitly so the issue is not closed as "timezone fixed" when a we
 
 ## Migration ordering note
 
-Production `schema_migrations` is at **26** while the repo has up to `000030` — prod is four migrations behind. This work adds `000031`. The next deploy will therefore apply five migrations at once, which is also the first real exercise of kora#118's initContainer ordering against a migration-bearing deploy.
+Production `schema_migrations` is at **26** while the repo has up to `000031` — prod is five migrations behind. This work adds `000032`. The next deploy will therefore apply six migrations at once, which is also the first real exercise of kora#118's initContainer ordering against a migration-bearing deploy.
