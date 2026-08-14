@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/tesserix/kora/api/internal/httpx"
+	"github.com/tesserix/kora/api/internal/localday"
 	"github.com/tesserix/kora/api/internal/user"
 )
 
@@ -78,7 +79,7 @@ func (h Handler) List(c *gin.Context) {
 		httpx.Error(c, http.StatusBadRequest, "invalid_input", "date must be YYYY-MM-DD")
 		return
 	}
-	logs, err := h.repo.ListByUserAndDay(c.Request.Context(), userID, day, user.LocFromContext(c))
+	logs, err := h.repo.ListByUserAndDay(c.Request.Context(), userID, day)
 	if err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not list logs")
 		return
@@ -183,7 +184,7 @@ func (h Handler) CopyDay(c *gin.Context) {
 		httpx.Error(c, http.StatusBadRequest, "invalid_input", "from/to must be YYYY-MM-DD")
 		return
 	}
-	n, err := h.svc.CopyDay(c.Request.Context(), userID, from, to, user.LocFromContext(c))
+	n, err := h.svc.CopyDay(c.Request.Context(), userID, from, to)
 	if err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not copy day")
 		return
@@ -193,6 +194,9 @@ func (h Handler) CopyDay(c *gin.Context) {
 
 type repeatRequest struct {
 	At time.Time `json:"at"`
+	// LocalDate is the day the repeat belongs to — see kora#84. Empty falls
+	// back to the profile zone, matching every other write path.
+	LocalDate string `json:"local_date"`
 }
 
 func (h Handler) Repeat(c *gin.Context) {
@@ -216,7 +220,12 @@ func (h Handler) Repeat(c *gin.Context) {
 	if at.IsZero() {
 		at = time.Now()
 	}
-	log, err := h.svc.RepeatLog(c.Request.Context(), userID, logID, at)
+	localDate, lerr := localday.Resolve(req.LocalDate, at, user.LocFromContext(c))
+	if lerr != nil {
+		httpx.RespondServiceError(c, lerr)
+		return
+	}
+	log, err := h.svc.RepeatLog(c.Request.Context(), userID, logID, at, localDate)
 	if err != nil {
 		httpx.Error(c, http.StatusNotFound, "not_found", "log not found")
 		return

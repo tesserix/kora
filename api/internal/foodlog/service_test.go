@@ -228,11 +228,11 @@ func TestCopyDayClonesLogsToNewDate(t *testing.T) {
 	_, err := svc.LogFood(context.Background(), userID, LogRequest{FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 100, LoggedAt: day1}, nil)
 	require.NoError(t, err)
 
-	n, err := svc.CopyDay(context.Background(), userID, day1, day2, time.UTC)
+	n, err := svc.CopyDay(context.Background(), userID, day1, day2)
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
 
-	logs, err := NewRepository(db).ListByUserAndDay(context.Background(), userID, day2, time.UTC)
+	logs, err := NewRepository(db).ListByUserAndDay(context.Background(), userID, day2)
 	require.NoError(t, err)
 	require.Len(t, logs, 1)
 }

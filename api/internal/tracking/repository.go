@@ -33,12 +33,13 @@ func (r Repository) AddWater(ctx context.Context, userID uuid.UUID, volumeML int
 	return e, nil
 }
 
-func (r Repository) WaterTotalForDay(ctx context.Context, userID uuid.UUID, day time.Time, loc *time.Location) (int, error) {
-	start := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
-	end := start.Add(24 * time.Hour)
+// WaterTotalForDay sums the entries whose stored local_date is `day` — the
+// day fixed at capture, not one re-derived from the current profile zone.
+// See kora#84.
+func (r Repository) WaterTotalForDay(ctx context.Context, userID uuid.UUID, day time.Time) (int, error) {
 	var total *int
 	err := r.db.WithContext(ctx).Model(&WaterEntry{}).
-		Where("user_id = ? AND logged_at >= ? AND logged_at < ?", userID, start, end).
+		Where("user_id = ? AND local_date = ?", userID, day.Format("2006-01-02")).
 		Select("COALESCE(SUM(volume_ml), 0)").Scan(&total).Error
 	if err != nil {
 		return 0, fmt.Errorf("tracking: water total: %w", err)

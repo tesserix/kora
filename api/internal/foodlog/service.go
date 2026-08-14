@@ -592,19 +592,27 @@ func (s Service) CreateBatch(ctx context.Context, userID uuid.UUID, req CreateBa
 	return out, nil
 }
 
-func (s Service) CopyDay(ctx context.Context, userID uuid.UUID, from, to time.Time, loc *time.Location) (int, error) {
-	src, err := s.logs.ListByUserAndDay(ctx, userID, from, loc)
+// CopyDay copies one day's logs onto another day. `from` and `to` are dates
+// (midnight UTC), so the shift is a whole number of days and the clone's
+// stored day is simply `to`.
+//
+// Setting clone.LocalDate is NOT optional: a clone that inherited the
+// source's local_date would be filed on the source's day and be invisible on
+// the day the user asked to copy to. See kora#84.
+func (s Service) CopyDay(ctx context.Context, userID uuid.UUID, from, to time.Time) (int, error) {
+	src, err := s.logs.ListByUserAndDay(ctx, userID, from)
 	if err != nil {
 		return 0, err
 	}
-	dayDelta := time.Date(to.Year(), to.Month(), to.Day(), 0, 0, 0, 0, loc).
-		Sub(time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, loc))
+	targetDay := time.Date(to.Year(), to.Month(), to.Day(), 0, 0, 0, 0, time.UTC)
+	dayDelta := targetDay.Sub(time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, time.UTC))
 	count := 0
 	for _, l := range src {
 		clone := l
 		clone.ID = uuid.Nil
 		clone.CreatedAt = time.Time{}
 		clone.LoggedAt = l.LoggedAt.Add(dayDelta)
+		clone.LocalDate = targetDay
 		if _, err := s.logs.Create(ctx, clone); err != nil {
 			return count, err
 		}
@@ -613,7 +621,12 @@ func (s Service) CopyDay(ctx context.Context, userID uuid.UUID, from, to time.Ti
 	return count, nil
 }
 
-func (s Service) RepeatLog(ctx context.Context, userID, logID uuid.UUID, at time.Time) (FoodLog, error) {
+// RepeatLog re-logs an existing entry at a new instant.
+//
+// localDate must be the day the repeat belongs to — inheriting the source's
+// would file today's repeat under the original's day, where the user would
+// never see it. See kora#84.
+func (s Service) RepeatLog(ctx context.Context, userID, logID uuid.UUID, at time.Time, localDate time.Time) (FoodLog, error) {
 	src, err := s.logs.GetByID(ctx, userID, logID)
 	if err != nil {
 		return FoodLog{}, err
@@ -622,5 +635,6 @@ func (s Service) RepeatLog(ctx context.Context, userID, logID uuid.UUID, at time
 	clone.ID = uuid.Nil
 	clone.CreatedAt = time.Time{}
 	clone.LoggedAt = at
+	clone.LocalDate = localDate
 	return s.logs.Create(ctx, clone)
 }

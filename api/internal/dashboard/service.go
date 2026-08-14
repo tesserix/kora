@@ -41,7 +41,7 @@ func NewService(logs foodlog.Repository, water tracking.Repository, db *gorm.DB)
 }
 
 func (s Service) ForDay(ctx context.Context, userID uuid.UUID, day time.Time, loc *time.Location) (Summary, error) {
-	logs, err := s.logs.ListByUserAndDay(ctx, userID, day, loc)
+	logs, err := s.logs.ListByUserAndDay(ctx, userID, day)
 	if err != nil {
 		return Summary{}, err
 	}
@@ -68,7 +68,7 @@ func (s Service) ForDay(ctx context.Context, userID uuid.UUID, day time.Time, lo
 		return Summary{}, fmt.Errorf("dashboard: load targets: %w", err)
 	}
 
-	waterML, err := s.water.WaterTotalForDay(ctx, userID, day, loc)
+	waterML, err := s.water.WaterTotalForDay(ctx, userID, day)
 	if err != nil {
 		return Summary{}, err
 	}
@@ -79,7 +79,7 @@ func (s Service) ForDay(ctx context.Context, userID uuid.UUID, day time.Time, lo
 	}
 
 	return Summary{
-		Date:         day.In(loc).Format("2006-01-02"),
+		Date:         day.Format("2006-01-02"),
 		Consumed:     consumed,
 		Targets:      Totals{Kcal: u.TargetKcal, ProteinG: u.TargetProteinG, CarbsG: u.TargetCarbsG, FatG: u.TargetFatG},
 		WaterML:      waterML,

@@ -88,15 +88,15 @@ func TestWaterTotalForDaySumsSameDayAndExcludesOtherDays(t *testing.T) {
 	_, err = repo.AddWater(context.Background(), userID, 1000, dayD2, dayOf(dayD2))
 	require.NoError(t, err)
 
-	total, err := repo.WaterTotalForDay(context.Background(), userID, dayD, time.UTC)
+	total, err := repo.WaterTotalForDay(context.Background(), userID, dayD)
 	require.NoError(t, err)
 	require.Equal(t, 750, total)
 
-	total, err = repo.WaterTotalForDay(context.Background(), userID, dayD2, time.UTC)
+	total, err = repo.WaterTotalForDay(context.Background(), userID, dayD2)
 	require.NoError(t, err)
 	require.Equal(t, 1000, total)
 
-	total, err = repo.WaterTotalForDay(context.Background(), userID, dayNone, time.UTC)
+	total, err = repo.WaterTotalForDay(context.Background(), userID, dayNone)
 	require.NoError(t, err)
 	require.Equal(t, 0, total)
 }

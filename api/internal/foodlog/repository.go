@@ -117,13 +117,15 @@ func (r Repository) withFoodUnit(ctx context.Context) *gorm.DB {
 		Joins("LEFT JOIN food_items ON food_items.id = food_logs.food_item_id")
 }
 
-// ListByUserAndDay returns logs whose logged_at falls on `day` in location `loc`.
-func (r Repository) ListByUserAndDay(ctx context.Context, userID uuid.UUID, day time.Time, loc *time.Location) ([]FoodLog, error) {
-	start := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
-	end := start.Add(24 * time.Hour)
+// ListByUserAndDay returns the logs whose stored local_date is `day`.
+//
+// Filters on the STORED local_date rather than deriving a window from the
+// user's current profile timezone: a log's day is fixed at capture and must
+// not move when the profile changes. See kora#84 and internal/localday.
+func (r Repository) ListByUserAndDay(ctx context.Context, userID uuid.UUID, day time.Time) ([]FoodLog, error) {
 	var logs []FoodLog
 	err := r.withFoodUnit(ctx).
-		Where("food_logs.user_id = ? AND food_logs.logged_at >= ? AND food_logs.logged_at < ?", userID, start, end).
+		Where("food_logs.user_id = ? AND food_logs.local_date = ?", userID, day.Format("2006-01-02")).
 		Order("food_logs.logged_at ASC").
 		Find(&logs).Error
 	if err != nil {

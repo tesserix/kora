@@ -362,7 +362,7 @@ func TestReadsCarryTheFoodsBaseUnit(t *testing.T) {
 	require.Equal(t, "ml", fetched.BaseUnit)
 	require.Equal(t, 300.0, fetched.QuantityGrams, "the stored grams figure is never re-resolved on read")
 
-	listed, err := repo.ListByUserAndDay(context.Background(), userID, day, time.UTC)
+	listed, err := repo.ListByUserAndDay(context.Background(), userID, day)
 	require.NoError(t, err)
 	require.Len(t, listed, 1)
 	require.Equal(t, "ml", listed[0].BaseUnit)
@@ -387,7 +387,7 @@ func TestReadsTolerateALogWithNoFoodItem(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, fetched.BaseUnit)
 
-	listed, err := repo.ListByUserAndDay(context.Background(), userID, day, time.UTC)
+	listed, err := repo.ListByUserAndDay(context.Background(), userID, day)
 	require.NoError(t, err)
 	require.Len(t, listed, 1)
 }
