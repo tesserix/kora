@@ -32,6 +32,14 @@ import { LinkAccountPrompt } from "@/components/auth/LinkAccountPrompt";
 
 type Mode = "in" | "up";
 
+// Ceiling for the collapsible gap between the lockup and the provider buttons
+// (kora#172). Not a spacing token on purpose: this is not a rhythm value to be
+// picked from a scale, it is the measured height that gap settles at on the
+// narrowest device we support, captured so that taller screens stop inflating
+// it. Raising it re-opens the bug; lowering it pulls the button cluster up on
+// every device, which is a design change rather than a fix.
+const SIGN_IN_TOP_GAP_MAX = 248;
+
 export default function SignIn() {
   // The `!isFirebaseConfigured` guard USED to sit here, above every hook below
   // — a conditional-hooks violation (#159). It never crashed, because
@@ -183,8 +191,19 @@ export default function SignIn() {
         {/* Collapsible: the email reveal grows downward, so the lockup stays
             top-anchored and this spacer shrinks instead of the lockup jumping
             to stay centred. minHeight is what lets it collapse once content
-            (the form, the keyboard) needs the room. */}
-        <View style={{ flex: 1, minHeight: spacing.xl }} />
+            (the form, the keyboard) needs the room.
+
+            maxHeight is the kora#172 half. Without a ceiling this spacer takes
+            two thirds of every extra point a taller device offers (flex 1 here
+            against flex 0.5 below), so the surplus pools into one dead band
+            instead of the layout breathing. Measured on the sign-in screen:
+            going 17 Pro -> 17 Pro Max adds 82pt of height, of which 54.7pt --
+            67%, exactly the 2:1 flex split -- landed in this single gap, while
+            content grew 16.7pt. The cap is the gap this spacer already settles
+            at on the smaller device, so that layout is unchanged and larger
+            screens stop inflating it; what is left flows to the spacer below
+            the buttons, lifting the cluster rather than stretching the void. */}
+        <View style={{ flex: 1, minHeight: spacing.xl, maxHeight: SIGN_IN_TOP_GAP_MAX }} />
 
         <View style={{ gap: spacing.sm }}>
           <AppleSignInButton
