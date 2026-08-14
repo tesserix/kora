@@ -25,7 +25,7 @@ func TestLoggedDaysDescReturnsDistinctDays(t *testing.T) {
 	_, _ = svc.LogFood(context.Background(), userID, LogRequest{FoodItemID: &item.ID, MealSlot: "dinner", Source: "manual", QuantityGrams: 100, LoggedAt: d.Add(6 * time.Hour)}, nil)
 	_, _ = svc.LogFood(context.Background(), userID, LogRequest{FoodItemID: &item.ID, MealSlot: "lunch", Source: "manual", QuantityGrams: 100, LoggedAt: d.Add(-24 * time.Hour)}, nil)
 
-	days, err := NewRepository(db).LoggedDaysDesc(context.Background(), userID, d, time.UTC, 400)
+	days, err := NewRepository(db).LoggedDaysDesc(context.Background(), userID, d, 400)
 	require.NoError(t, err)
 	require.Equal(t, []string{"2026-04-10", "2026-04-09"}, days)
 }

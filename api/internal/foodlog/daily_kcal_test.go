@@ -27,7 +27,7 @@ func TestDailyKcalBucketsByLocalDay(t *testing.T) {
 
 	from := time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC)
 	to := time.Date(2026, 4, 11, 0, 0, 0, 0, time.UTC)
-	m, err := NewRepository(db).DailyKcal(context.Background(), userID, from, to, time.UTC)
+	m, err := NewRepository(db).DailyKcal(context.Background(), userID, from, to)
 	require.NoError(t, err)
 	require.Equal(t, 200.0, m["2026-04-10"])
 	require.Equal(t, 100.0, m["2026-04-09"])

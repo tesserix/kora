@@ -14,10 +14,10 @@ type stubLogs struct {
 	kcal map[string]float64
 }
 
-func (s stubLogs) LoggedDaysDesc(_ context.Context, _ uuid.UUID, _ time.Time, _ *time.Location, _ int) ([]string, error) {
+func (s stubLogs) LoggedDaysDesc(_ context.Context, _ uuid.UUID, _ time.Time, _ int) ([]string, error) {
 	return s.days, nil
 }
-func (s stubLogs) DailyKcal(_ context.Context, _ uuid.UUID, _, _ time.Time, _ *time.Location) (map[string]float64, error) {
+func (s stubLogs) DailyKcal(_ context.Context, _ uuid.UUID, _, _ time.Time) (map[string]float64, error) {
 	return s.kcal, nil
 }
 

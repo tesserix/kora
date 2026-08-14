@@ -252,16 +252,24 @@ func (r Repository) Delete(ctx context.Context, userID, logID uuid.UUID) error {
 
 // LoggedDaysDesc returns distinct calendar days (YYYY-MM-DD in loc) that have at
 // least one log at or before `notAfter`'s day, most-recent first, capped at limit.
-func (r Repository) LoggedDaysDesc(ctx context.Context, userID uuid.UUID, notAfter time.Time, loc *time.Location, limit int) ([]string, error) {
+// Reads the STORED local_date rather than deriving a day from logged_at in the
+// profile timezone.
+//
+// kora#84 fixed the diary this way but left this query on the old derivation,
+// which made the two DISAGREE: a meal visible on Tuesday in the diary could be
+// counted against Wednesday by the streak, and the user could see both. Same
+// day, one answer — and a timezone change can no longer move streak history.
+func (r Repository) LoggedDaysDesc(ctx context.Context, userID uuid.UUID, notAfter time.Time, limit int) ([]string, error) {
 	if limit <= 0 || limit > 4000 {
 		limit = 4000
 	}
-	end := time.Date(notAfter.Year(), notAfter.Month(), notAfter.Day(), 0, 0, 0, 0, loc).Add(24 * time.Hour)
-	tz := loc.String()
+	// notAfter is a calendar date; days strictly before the day AFTER it are
+	// in range, which is the same inclusive-of-notAfter window as before.
+	end := time.Date(notAfter.Year(), notAfter.Month(), notAfter.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, 1)
 	var days []string
 	err := r.db.WithContext(ctx).
-		Raw("SELECT DISTINCT to_char(logged_at AT TIME ZONE ?, 'YYYY-MM-DD') AS day FROM food_logs WHERE user_id = ? AND logged_at < ? ORDER BY day DESC LIMIT ?",
-			tz, userID, end, limit).
+		Raw("SELECT DISTINCT to_char(local_date, 'YYYY-MM-DD') AS day FROM food_logs WHERE user_id = ? AND local_date < ? ORDER BY day DESC LIMIT ?",
+			userID, end.Format("2006-01-02"), limit).
 		Scan(&days).Error
 	if err != nil {
 		return nil, fmt.Errorf("foodlog: logged days: %w", err)
@@ -271,16 +279,18 @@ func (r Repository) LoggedDaysDesc(ctx context.Context, userID uuid.UUID, notAft
 
 // DailyKcal returns total kcal grouped by local calendar day (YYYY-MM-DD in loc)
 // over [from, to). Days with no logs are simply absent from the map.
-func (r Repository) DailyKcal(ctx context.Context, userID uuid.UUID, from, to time.Time, loc *time.Location) (map[string]float64, error) {
-	tz := loc.String()
+// Buckets on the STORED local_date, so the trends chart agrees with the diary
+// and the streak rather than re-deriving a day from the profile timezone. Same
+// reasoning as LoggedDaysDesc above — see kora#84.
+func (r Repository) DailyKcal(ctx context.Context, userID uuid.UUID, from, to time.Time) (map[string]float64, error) {
 	type row struct {
 		Day  string
 		Kcal float64
 	}
 	var rows []row
 	err := r.db.WithContext(ctx).
-		Raw("SELECT to_char(logged_at AT TIME ZONE ?, 'YYYY-MM-DD') AS day, COALESCE(SUM(kcal), 0) AS kcal FROM food_logs WHERE user_id = ? AND logged_at >= ? AND logged_at < ? GROUP BY day",
-			tz, userID, from, to).
+		Raw("SELECT to_char(local_date, 'YYYY-MM-DD') AS day, COALESCE(SUM(kcal), 0) AS kcal FROM food_logs WHERE user_id = ? AND local_date >= ? AND local_date < ? GROUP BY day",
+			userID, from.Format("2006-01-02"), to.Format("2006-01-02")).
 		Scan(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("foodlog: daily kcal: %w", err)

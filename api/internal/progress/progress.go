@@ -27,15 +27,15 @@ type Metrics struct {
 
 // LogSource is the slice of foodlog.Repository this package needs.
 type LogSource interface {
-	LoggedDaysDesc(ctx context.Context, userID uuid.UUID, notAfter time.Time, loc *time.Location, limit int) ([]string, error)
-	DailyKcal(ctx context.Context, userID uuid.UUID, from, to time.Time, loc *time.Location) (map[string]float64, error)
+	LoggedDaysDesc(ctx context.Context, userID uuid.UUID, notAfter time.Time, limit int) ([]string, error)
+	DailyKcal(ctx context.Context, userID uuid.UUID, from, to time.Time) (map[string]float64, error)
 }
 
 func Compute(ctx context.Context, logs LogSource, userID uuid.UUID, targetKcal float64, day time.Time, loc *time.Location) (Metrics, error) {
 	local := day.In(loc)
 	endDay := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, loc)
 
-	loggedDays, err := logs.LoggedDaysDesc(ctx, userID, day, loc, 4000)
+	loggedDays, err := logs.LoggedDaysDesc(ctx, userID, day, 4000)
 	if err != nil {
 		return Metrics{}, err
 	}
@@ -50,7 +50,7 @@ func Compute(ctx context.Context, logs LogSource, userID uuid.UUID, targetKcal f
 
 	from := endDay.AddDate(0, 0, -(adherenceWindow - 1))
 	to := endDay.AddDate(0, 0, 1)
-	kcalByDay, err := logs.DailyKcal(ctx, userID, from, to, loc)
+	kcalByDay, err := logs.DailyKcal(ctx, userID, from, to)
 	if err != nil {
 		return Metrics{}, err
 	}
@@ -74,7 +74,7 @@ func Compute(ctx context.Context, logs LogSource, userID uuid.UUID, targetKcal f
 func WindowScore(ctx context.Context, logs LogSource, userID uuid.UUID, metric string, targetKcal float64, from, to time.Time, loc *time.Location) (int, error) {
 	startLocal := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, loc)
 	endLocal := time.Date(to.Year(), to.Month(), to.Day(), 0, 0, 0, 0, loc)
-	kcalByDay, err := logs.DailyKcal(ctx, userID, startLocal, endLocal.AddDate(0, 0, 1), loc)
+	kcalByDay, err := logs.DailyKcal(ctx, userID, startLocal, endLocal.AddDate(0, 0, 1))
 	if err != nil {
 		return 0, err
 	}

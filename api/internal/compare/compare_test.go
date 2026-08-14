@@ -30,10 +30,10 @@ func (s stubUsers) ByID(context.Context, uuid.UUID) (user.User, error) {
 
 type stubLogs struct{}
 
-func (stubLogs) LoggedDaysDesc(context.Context, uuid.UUID, time.Time, *time.Location, int) ([]string, error) {
+func (stubLogs) LoggedDaysDesc(context.Context, uuid.UUID, time.Time, int) ([]string, error) {
 	return []string{}, nil
 }
-func (stubLogs) DailyKcal(context.Context, uuid.UUID, time.Time, time.Time, *time.Location) (map[string]float64, error) {
+func (stubLogs) DailyKcal(context.Context, uuid.UUID, time.Time, time.Time) (map[string]float64, error) {
 	return map[string]float64{}, nil
 }
 

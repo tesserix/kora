@@ -209,7 +209,7 @@ func TestPortionAssumedDoesNotAffectDayTotals(t *testing.T) {
 	// Go through the real aggregate rather than hand-summing rows, so a
 	// future change that filtered totals on the flag would actually fail
 	// this test.
-	m, err := NewRepository(db).DailyKcal(context.Background(), userID, day, day.Add(24*time.Hour), time.UTC)
+	m, err := NewRepository(db).DailyKcal(context.Background(), userID, day, day.Add(24*time.Hour))
 	require.NoError(t, err)
 	require.Equal(t, 2*measured.Kcal, m[day.Format("2006-01-02")], "portion_assumed must never be an input to the day's kcal total")
 }
