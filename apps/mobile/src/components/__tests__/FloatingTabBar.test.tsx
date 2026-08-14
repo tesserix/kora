@@ -86,9 +86,10 @@ test("hides the unread accent dot on More when count is 0", async () => {
 
 // The active tab used to differ from its neighbours only by icon tint, stroke
 // width, a 1.08 scale and a 4pt dot — over bright light-mode glass that reads
-// as "nothing is selected". These pin the recessed-well recipe borrowed from
-// SegmentedGlass's selected segment, so a tab bar and a segmented control stay
-// the same system.
+// as "nothing is selected". These pin the recessed-well recipe. SegmentedGlass
+// shared it until kora#166 moved its selected segment to a solid `ink` pill —
+// the well survives here because the active tab carries four other cues on top
+// of it, where a segment carried only this one.
 test("the active tab sits on an inset well with a hairline glassBorder ring", async () => {
   const { findByTestId } = await render(<FloatingTabBar {...props} />);
   const flat = flattenStyle((await findByTestId("tab-active-pill")).props.style);

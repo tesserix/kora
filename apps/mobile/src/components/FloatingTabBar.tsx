@@ -70,9 +70,13 @@ function TabButton({ name, meta, active, showBadge, onPress }: TabButtonProps) {
       onPress={onPress}
       style={{ width: TAB_SIZE, height: TAB_SIZE, borderRadius: TAB_WELL_RADIUS, alignItems: "center", justifyContent: "center" }}
     >
-      {/* The recessed well marking the active tab — same `inset` fill + hairline
-          `glassBorder` ring SegmentedGlass gives its selected segment, so a tab
-          bar and a segmented control read as one system. Deliberately NEUTRAL:
+      {/* The recessed well marking the active tab — an `inset` fill + hairline
+          `glassBorder` ring. (SegmentedGlass used the same recipe until
+          kora#166 moved its selected segment to a solid `ink` pill for
+          non-text contrast; the tab bar keeps the well because the active tab
+          is also marked by icon tint, stroke width, scale and the accent dot
+          below, so the well is reinforcement rather than the sole cue.)
+          Deliberately NEUTRAL:
           the 4pt dot below is the bar's single accent element (spec: accent
           rules, one per view). Rendered behind the content and non-interactive
           so it cannot eat the tab's own presses. */}
