@@ -167,6 +167,50 @@ describe("valueFromDrag", () => {
   });
 });
 
+// kora#165: the ruler never showed its number on screen — only assistive
+// tech could read it, so a sighted user was reading tick positions. The
+// readout is a real RN Text (not an SVG one) precisely so it is queryable
+// and announced-once: the wrapper View is `accessible`, which collapses its
+// children, so this cannot double up the existing accessibilityValue.
+describe("TickRuler continuous readout", () => {
+  it("shows the current value on screen with its unit", async () => {
+    await render(<TickRuler {...base} value={84} unit="kg" onChange={jest.fn()} />);
+    expect(screen.getByTestId("weight-ruler-readout").props.children).toBe("84 kg");
+  });
+
+  it("shows the value with no unit when none is given", async () => {
+    await render(<TickRuler {...base} value={84} onChange={jest.fn()} />);
+    expect(screen.getByTestId("weight-ruler-readout").props.children).toBe("84");
+  });
+
+  it("prefers formatLabel over the raw number so ft/in reads as ft/in", async () => {
+    await render(
+      <TickRuler
+        {...base}
+        value={67}
+        onChange={jest.fn()}
+        formatLabel={(v) => `${Math.floor(v / 12)}'${v % 12}"`}
+      />,
+    );
+    expect(screen.getByTestId("weight-ruler-readout").props.children).toBe("5'7\"");
+  });
+
+  it("updates the readout as the value the parent reports back changes", async () => {
+    const { rerender } = await render(<TickRuler {...base} value={84} unit="kg" onChange={jest.fn()} />);
+    expect(screen.getByTestId("weight-ruler-readout").props.children).toBe("84 kg");
+    await rerender(<TickRuler {...base} value={84.5} unit="kg" onChange={jest.fn()} />);
+    expect(screen.getByTestId("weight-ruler-readout").props.children).toBe("84.5 kg");
+  });
+
+  // The readout is a display of the same value the control reports, so it
+  // must never disagree with what assistive tech announces.
+  it("keeps the accessibility value working alongside the readout", async () => {
+    await render(<TickRuler {...base} value={84} unit="kg" onChange={jest.fn()} />);
+    expect(screen.getByTestId("weight-ruler").props.accessibilityValue).toEqual({ text: "84" });
+    expect(screen.getByTestId("weight-ruler-readout").props.children).toBe("84 kg");
+  });
+});
+
 const ACTIVITY = ["Sedentary", "Light", "Moderate", "Active", "Very active"] as const;
 
 describe("TickRuler detented mode", () => {

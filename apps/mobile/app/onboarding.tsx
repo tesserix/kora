@@ -17,6 +17,7 @@ import { useSubmitOnboarding } from "@/api/hooks";
 import type { OnboardingInput } from "@/api/types";
 import { useTheme } from "@/theme";
 import { validateGoalWeight, validateOnboardingNumbers } from "@/lib/validateOnboarding";
+import { deriveGoalWeightKg } from "@/lib/goalWeightDefault";
 import { apiErrorMessage } from "@/lib/apiErrorMessage";
 import { haptics } from "@/motion";
 import { CM_PER_IN, kgFromLb, lbFromKg, useUnits, weightUnitLabel } from "@/units";
@@ -28,8 +29,6 @@ import {
   type ActivityLevel,
   type PlanGoal,
 } from "@/lib/plan";
-
-type TouchedField = "age" | "height" | "weight" | "goalWeight";
 
 const GOAL_IDS: readonly PlanGoal[] = ["fat_loss", "maintenance", "muscle_gain"];
 const GOAL_LABELS = ["Lose weight", "Maintain", "Build muscle"] as const;
@@ -92,9 +91,13 @@ export default function Onboarding() {
   const [age, setAge] = useState(30);
   const [heightCm, setHeightCm] = useState(170);
   const [weightKg, setWeightKg] = useState(70);
-  const [goalWeightKg, setGoalWeightKg] = useState(65);
+  // `null` IS the "has the user set a destination yet" flag, held as one piece
+  // of state rather than a boolean beside a number so the two can never
+  // disagree: there is no representable state where the flag says "user set"
+  // but the value is stale, or vice versa. Purely a DEFAULTING mechanism — it
+  // gates nothing, withholds nothing, and never reaches the payload.
+  const [chosenGoalWeightKg, setChosenGoalWeightKg] = useState<number | null>(null);
   const [paceIndex, setPaceIndex] = useState(1);
-  const [touched, setTouched] = useState<ReadonlySet<TouchedField>>(new Set());
   // Three separate error slots, not one: validation errors render under their
   // own field, and only a submit (API/network) failure renders beside the
   // accept button.
@@ -107,11 +110,26 @@ export default function Onboarding() {
   const [revision, setRevision] = useState(0);
 
   const bump = () => setRevision((r) => r + 1);
-  const markTouched = (field: TouchedField) =>
-    setTouched((prev) => (prev.has(field) ? prev : new Set(prev).add(field)));
 
   const goal = GOAL_IDS[goalIndex];
   const activityLevel = ACTIVITY_IDS[activityIndex];
+  // Clamp the derived destination against the range of the ruler actually on
+  // screen. The imperial weight ruler is 80-400 lb, which is not the metric
+  // ruler's 30-200 kg, so deriving against the metric bounds in imperial mode
+  // could place the destination off the end of the scale the user is reading.
+  const weightRangeKg =
+    system === "imperial"
+      ? { min: kgFromLb(WEIGHT_LB_MIN), max: kgFromLb(WEIGHT_LB_MAX) }
+      : { min: WEIGHT_KG_MIN, max: WEIGHT_KG_MAX };
+  // Until the user moves the destination ruler it tracks their goal and their
+  // current weight, so the value on display can never be the contradiction
+  // `validateGoalWeight` would refuse at submit — the failure that removing
+  // the untouched-destination validation skip would otherwise have created for
+  // anyone whose first action is picking "Build muscle". Once they have moved
+  // it their number stands: recomputing it under them would be a worse bug
+  // than the incoherent default it replaced.
+  const goalWeightKg =
+    chosenGoalWeightKg ?? deriveGoalWeightKg(goal, weightKg, weightRangeKg.min, weightRangeKg.max);
   const paces = useMemo(() => availablePaces(weightKg), [weightKg]);
 
   // A dropping weight can shrink the pace list below the current index.
@@ -138,19 +156,30 @@ export default function Onboarding() {
     [sex, age, heightCm, weightKg, activityLevel, goal, paceKgPerWeek],
   );
 
-  const hasAllNumbers = touched.has("age") && touched.has("height") && touched.has("weight");
-  const dialKcal = hasAllNumbers ? plan.kcal : null;
-  // Gates whether the destination (goal weight + pace) is a real, user-set
-  // value rather than the untouched defaults — mirrors hasAllNumbers, but
-  // for the ruler this screen never forces the user to touch before the
-  // accept button unlocks.
-  const hasDestination = goal !== "maintenance" && touched.has("goalWeight");
-  // A non-maintenance goal has no plan without a destination: the deficit is
-  // derived from pace, so an untouched destination would mean showing a
-  // target (computed from the visible, always-real pace stop) the server
-  // cannot reproduce — it omits pace_kg_per_week and collapses to plain
-  // TDEE. This is what gates the accept button, not hasAllNumbers alone.
-  const canAccept = hasAllNumbers && (goal === "maintenance" || touched.has("goalWeight"));
+  // kora#164: the rulers arrive carrying real, sensible defaults (30 / 170cm
+  // / 70kg / 65kg) and — since kora#165 — those numbers are legible on the
+  // face of each control. A screen that displays a value and then refuses to
+  // accept it until you have jogged the control is not asking for consent, it
+  // is demanding a ritual, and it blocked first run outright. So the
+  // displayed values ARE the accepted values: the plan they imply is shown
+  // from the first frame, the accept button is live from the first frame, and
+  // the payload carries exactly what the rulers say.
+  //
+  // The old `touched` set is gone entirely rather than kept for preview
+  // gating. Keeping it would have left the screen in a strictly worse state
+  // than either of its endpoints: the button would be live while the dial,
+  // derivation chain and macro trio still read "—", so a user could accept a
+  // plan they had never been shown. The gating existed to stop the screen
+  // presenting a target derived from values the user had not chosen — a
+  // premise this change deliberately reverses.
+  const dialKcal = plan.kcal;
+  // The destination (goal weight + pace) is meaningless while maintaining and
+  // is omitted from the payload then — but for every other goal it is now
+  // always sent, touched or not. That is what keeps screen and server in
+  // agreement: the dial is computed from the visible pace stop, so omitting
+  // pace_kg_per_week would let the server decode Go's zero value and collapse
+  // the deficit to plain TDEE behind a target the user had already accepted.
+  const hasDestination = goal !== "maintenance";
 
   function onGoalChange(index: number) {
     setGoalIndex(index);
@@ -174,22 +203,19 @@ export default function Onboarding() {
   }
   function onAgeChange(value: number) {
     setAge(value);
-    markTouched("age");
     bump();
   }
   function onHeightChange(value: number) {
     setHeightCm(system === "imperial" ? value * CM_PER_IN : value);
-    markTouched("height");
     bump();
   }
   function onWeightChange(value: number) {
     setWeightKg(system === "imperial" ? kgFromLb(value) : value);
-    markTouched("weight");
     bump();
   }
   function onGoalWeightChange(value: number) {
-    setGoalWeightKg(system === "imperial" ? kgFromLb(value) : value);
-    markTouched("goalWeight");
+    // The first move is also the moment deriving stops, for good.
+    setChosenGoalWeightKg(system === "imperial" ? kgFromLb(value) : value);
     bump();
   }
   function onPaceChange(index: number) {
@@ -202,6 +228,10 @@ export default function Onboarding() {
     setGoalWeightErrorMsg(null);
     setSubmitError(null);
     const unitOpts = system === "imperial" ? { heightUnit: "in", weightUnit: "lb" } : undefined;
+    // These are always real numbers straight off the rulers — never the empty
+    // strings a text field could hand over — so this guard is a range check on
+    // values the user can see, not a fill-in-the-blanks check. It stays
+    // because a ruler range and a validator range can drift apart.
     const numbersError = validateOnboardingNumbers(
       String(age),
       String(heightCm),
@@ -212,9 +242,10 @@ export default function Onboarding() {
       setDetailsError(numbersError);
       return;
     }
-    // Validating an untouched destination would block submit on the default
-    // goalWeightKg (65) the user never chose — and since it is not sent
-    // below, there is nothing to validate until the ruler has been moved.
+    // Now that the destination is always sent for a non-maintenance goal it
+    // is always validated too: a default 65kg goal under "Build muscle" at
+    // 70kg current is a contradiction the user can see on screen, and it must
+    // be caught in the field rather than stored.
     if (hasDestination) {
       const goalWeightError = validateGoalWeight(goal, weightKg, goalWeightKg, weightUnitLabel(system));
       if (goalWeightError) {
@@ -235,9 +266,8 @@ export default function Onboarding() {
       birth_year: new Date().getFullYear() - age,
       height_cm: heightCm,
       weight_kg: weightKg,
-      // The destination has no meaning while maintaining, and an untouched
-      // ruler is a default the user never chose — both are omitted entirely
-      // rather than sent as a fabricated destination.
+      // The destination has no meaning while maintaining, so it is omitted
+      // entirely rather than sent as a value the goal cannot use.
       ...(hasDestination ? { goal_weight_kg: goalWeightKg, pace_kg_per_week: paceKgPerWeek } : {}),
     };
     submit.mutate(input, {
@@ -251,22 +281,18 @@ export default function Onboarding() {
     });
   }
 
-  // `plan` is computed unconditionally (from default placeholder numbers
-  // until the user has touched anything real), so these rows and the macro
-  // trio below must not read it directly while !hasAllNumbers — that would
-  // present a concrete target the user never agreed to. The labels stay in
-  // place (structure visible) while the values withhold ("—", matching the
-  // header Numeral's own placeholder) until the plan is real.
+  // Every row is the arithmetic behind the number on the dial, for the values
+  // currently on the rulers. Shown unconditionally: the user is being asked to
+  // accept this plan, so they get to see how it was reached before they press
+  // the button (kora#164).
   const derivationRows: DerivationRow[] = [
-    { label: "Resting burn", value: hasAllNumbers ? `${Math.round(plan.bmr)} kcal` : "—" },
-    { label: "Activity-adjusted", value: hasAllNumbers ? `${Math.round(plan.tdee)} kcal` : "—" },
+    { label: "Resting burn", value: `${Math.round(plan.bmr)} kcal` },
+    { label: "Activity-adjusted", value: `${Math.round(plan.tdee)} kcal` },
     {
       label: "Goal adjustment",
-      value: hasAllNumbers
-        ? `${plan.adjustment >= 0 ? "+" : "−"}${Math.abs(Math.round(plan.adjustment))} kcal`
-        : "—",
+      value: `${plan.adjustment >= 0 ? "+" : "−"}${Math.abs(Math.round(plan.adjustment))} kcal`,
     },
-    { label: "Daily target", value: hasAllNumbers ? `${Math.round(plan.kcal)} kcal` : "—" },
+    { label: "Daily target", value: `${Math.round(plan.kcal)} kcal` },
   ];
 
   const weeks = hasDestination ? weeksToGoal(weightKg, goalWeightKg, paceKgPerWeek) : 0;
@@ -284,7 +310,7 @@ export default function Onboarding() {
         >
           <PlanDial kcal={dialKcal} />
           <Numeral size={36} weight="800">
-            {hasAllNumbers ? String(Math.round(plan.kcal)) : "—"}
+            {String(Math.round(plan.kcal))}
           </Numeral>
           <AppText variant="caption" muted style={{ textTransform: "uppercase", letterSpacing: 1.4 }}>
             kcal / day
@@ -309,23 +335,12 @@ export default function Onboarding() {
             icon="arrow-right"
             iconPosition="trailing"
             onPress={onSubmit}
-            // The accept gate is the whole point of this screen: a press
-            // before the user has actually set their own numbers (or, for a
-            // non-maintenance goal, before they've set a destination) would
-            // submit fabricated or server-unreproducible values as if they
-            // were real. Button already turns `disabled` into
-            // accessibilityState for assistive tech.
-            disabled={submit.isPending || !canAccept}
+            // The only gate left (kora#164): a second press while the first
+            // submit is still in flight would onboard the account twice.
+            // Button already turns `disabled` into accessibilityState for
+            // assistive tech.
+            disabled={submit.isPending}
           />
-          {!hasAllNumbers ? (
-            <AppText variant="footnote" muted style={{ textAlign: "center" }}>
-              Set your age, height and weight to see your plan.
-            </AppText>
-          ) : !canAccept ? (
-            <AppText variant="footnote" muted style={{ textAlign: "center" }}>
-              Set your goal weight to see your plan.
-            </AppText>
-          ) : null}
         </View>
       }
     >
@@ -356,6 +371,7 @@ export default function Onboarding() {
             min={AGE_MIN}
             max={AGE_MAX}
             step={1}
+            unit="years"
             onChange={onAgeChange}
             accessibilityLabel="Age in years"
             testID="age-ruler"
@@ -373,6 +389,8 @@ export default function Onboarding() {
               max={HEIGHT_IN_MAX}
               step={1}
               onChange={onHeightChange}
+              // formatFtIn already spells the unit into the value (5'7"), so
+              // there is no `unit` suffix here.
               formatLabel={formatFtIn}
               accessibilityLabel="Height"
               testID="height-ruler"
@@ -384,6 +402,7 @@ export default function Onboarding() {
               min={HEIGHT_CM_MIN}
               max={HEIGHT_CM_MAX}
               step={1}
+              unit="cm"
               onChange={onHeightChange}
               accessibilityLabel="Height in centimetres"
               testID="height-ruler"
@@ -401,6 +420,7 @@ export default function Onboarding() {
               min={WEIGHT_LB_MIN}
               max={WEIGHT_LB_MAX}
               step={1}
+              unit="lb"
               onChange={onWeightChange}
               accessibilityLabel="Weight in pounds"
               testID="weight-ruler"
@@ -412,6 +432,7 @@ export default function Onboarding() {
               min={WEIGHT_KG_MIN}
               max={WEIGHT_KG_MAX}
               step={0.5}
+              unit="kg"
               onChange={onWeightChange}
               accessibilityLabel="Weight in kilograms"
               testID="weight-ruler"
@@ -459,6 +480,7 @@ export default function Onboarding() {
               min={WEIGHT_LB_MIN}
               max={WEIGHT_LB_MAX}
               step={1}
+              unit="lb"
               onChange={onGoalWeightChange}
               accessibilityLabel="Goal weight in pounds"
               testID="goal-weight-ruler"
@@ -470,6 +492,7 @@ export default function Onboarding() {
               min={WEIGHT_KG_MIN}
               max={WEIGHT_KG_MAX}
               step={0.5}
+              unit="kg"
               onChange={onGoalWeightChange}
               accessibilityLabel="Goal weight in kilograms"
               testID="goal-weight-ruler"
@@ -493,16 +516,7 @@ export default function Onboarding() {
             testID="pace-ruler"
           />
           <AppText testID="destination-caption" variant="footnote" muted>
-            {/* Same leak as the derivation rows: `weeks` is derived from the
-                goalWeightKg default until the user has actually moved the
-                destination ruler, so it withholds behind hasDestination
-                (which also requires hasAllNumbers) rather than showing a
-                distance to a body/destination the user never entered. */}
-            {hasAllNumbers && hasDestination
-              ? weeks > 0
-                ? `${weeks} weeks to goal`
-                : "You're already there"
-              : "—"}
+            {weeks > 0 ? `${weeks} weeks to goal` : "You're already there"}
           </AppText>
         </>
       ) : null}
@@ -514,19 +528,19 @@ export default function Onboarding() {
           <AppText variant="footnote" muted>
             Protein
           </AppText>
-          <Numeral>{hasAllNumbers ? `${Math.round(plan.proteinG)}g` : "—"}</Numeral>
+          <Numeral>{`${Math.round(plan.proteinG)}g`}</Numeral>
         </View>
         <View style={{ alignItems: "center" }}>
           <AppText variant="footnote" muted>
             Carbs
           </AppText>
-          <Numeral>{hasAllNumbers ? `${Math.round(plan.carbsG)}g` : "—"}</Numeral>
+          <Numeral>{`${Math.round(plan.carbsG)}g`}</Numeral>
         </View>
         <View style={{ alignItems: "center" }}>
           <AppText variant="footnote" muted>
             Fat
           </AppText>
-          <Numeral>{hasAllNumbers ? `${Math.round(plan.fatG)}g` : "—"}</Numeral>
+          <Numeral>{`${Math.round(plan.fatG)}g`}</Numeral>
         </View>
       </View>
 

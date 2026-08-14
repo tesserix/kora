@@ -3,10 +3,15 @@ import { Dimensions, View, type LayoutChangeEvent, type AccessibilityActionEvent
 import { Gesture, GestureDetector, type PanGesture } from "react-native-gesture-handler";
 import { runOnJS } from "react-native-reanimated";
 import Svg, { Line, Text as SvgText } from "react-native-svg";
+import { AppText } from "@/components/Text";
 import { useTheme } from "@/theme";
 import { haptics, useMotionPrefs } from "@/motion";
 
 const HEIGHT = 44;
+// Row above the ticks holding the numeric readout (kora#165). Fixed rather
+// than intrinsic so the ruler's overall height never changes as the value
+// grows a digit — a control that reflows while you drag it is unusable.
+const READOUT_HEIGHT = 20;
 const PX_PER_UNIT = 9;
 const BASELINE = HEIGHT - 8;
 // Ticks must render on first paint, before the real `onLayout` measurement
@@ -28,9 +33,30 @@ export type ContinuousProps = {
   step: number;
   onChange: (value: number) => void;
   formatLabel?: (value: number) => string;
+  /**
+   * Unit suffix for the on-screen readout ("cm", "kg", "lb", "years").
+   * Display only — `value` is whatever the parent chose to put on the scale,
+   * so a screen showing imperial passes lb/in here while still storing
+   * metric. Omitted when `formatLabel` already carries the unit (ft/in).
+   */
+  unit?: string;
   accessibilityLabel: string;
   testID?: string;
 };
+
+/**
+ * The one string both the readout and (minus the unit) the accessibility
+ * value are built from, so the number a sighted user reads can never drift
+ * from the one VoiceOver announces.
+ */
+export function formatReadout(
+  value: number,
+  formatLabel?: (value: number) => string,
+  unit?: string,
+): string {
+  const base = formatLabel ? formatLabel(value) : String(value);
+  return unit ? `${base} ${unit}` : base;
+}
 
 // Detented mode: a fixed set of labelled stops (goal, activity level, pace)
 // under the same fixed centre index as continuous mode. Reports a stop
@@ -172,7 +198,7 @@ function useDragReport<T>({
 
 function ContinuousRuler(props: ContinuousProps) {
   const { instrument } = useTheme();
-  const { value, min, max, step, onChange, formatLabel, accessibilityLabel } = props;
+  const { value, min, max, step, onChange, formatLabel, unit, accessibilityLabel } = props;
   const testID = props.testID ?? "tick-ruler";
   const [width, setWidth] = useState(FALLBACK_WIDTH);
 
@@ -230,8 +256,27 @@ function ContinuousRuler(props: ContinuousProps) {
         accessibilityValue={{ text: formatLabel ? formatLabel(value) : String(value) }}
         accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
         onAccessibilityAction={onAccessibilityAction}
-        style={{ height: HEIGHT, width: "100%" }}
+        style={{ height: HEIGHT + READOUT_HEIGHT, width: "100%" }}
       >
+        {/* kora#165: the value in plain sight. A real RN Text rather than an
+            SVG one so it inherits the app's type scale and Dynamic Type, and
+            it sits INSIDE the `accessible` wrapper above — which collapses
+            its children — so it cannot double up the accessibilityValue that
+            assistive tech already reads correctly. */}
+        <AppText
+          testID={`${testID}-readout`}
+          style={{
+            height: READOUT_HEIGHT,
+            lineHeight: READOUT_HEIGHT,
+            textAlign: "center",
+            fontSize: 15,
+            fontWeight: "700",
+            letterSpacing: 0.4,
+            color: instrument.ink,
+          }}
+        >
+          {formatReadout(value, formatLabel, unit)}
+        </AppText>
         <Svg width="100%" height={HEIGHT}>
           {ticks.map((t) => (
             <Line

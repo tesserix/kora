@@ -40,29 +40,24 @@ async function increment(testID: string) {
   });
 }
 
-// Drives age, height and weight to a touched, valid state. Asserts the
-// awaiting caption is gone before returning, so a change to the rulers'
-// defaults (which would otherwise leave one of them still untouched, or an
-// out-of-range value that fails validation later) fails loudly here instead
-// of silently invalidating every test downstream that calls it.
+// Nudges age, height and weight off their defaults. Asserts a real target is
+// on screen before returning, so a change to the rulers' defaults that lands
+// out of range (and would fail validation later) fails loudly here instead of
+// silently invalidating every test downstream that calls it.
 async function setValidBody() {
   await increment("age-ruler");
   await increment("height-ruler");
   await increment("weight-ruler");
-  expect(screen.queryByTestId("plan-dial-awaiting")).toBeNull();
+  expect(within(screen.getByTestId("derivation-chain-row-3")).getByText(/\d+ kcal/)).toBeTruthy();
 }
 
 describe("onboarding", () => {
-  it("shows no target until every required number is set", async () => {
+  // kora#164: the defaults on the rulers ARE the plan until the user moves
+  // them, so the screen shows the target they describe from the first frame
+  // instead of an "awaiting your numbers" dial the user cannot dismiss
+  // without touching every control.
+  it("shows a target on arrival, derived from the defaults on display", async () => {
     await render(<Onboarding />);
-    expect(screen.getByTestId("plan-dial-awaiting")).toBeTruthy();
-  });
-
-  it("shows a target once age, height and weight are set", async () => {
-    await render(<Onboarding />);
-    await increment("age-ruler");
-    await increment("height-ruler");
-    await increment("weight-ruler");
     expect(screen.queryByTestId("plan-dial-awaiting")).toBeNull();
     // PlanDial wraps its SVG in an accessibility-hidden subtree; RNTL excludes
     // hidden elements by default, so this needs includeHiddenElements or it
@@ -70,6 +65,66 @@ describe("onboarding", () => {
     expect(
       screen.getByTestId("plan-dial-needle", { includeHiddenElements: true }),
     ).toBeTruthy();
+  });
+
+  // The heart of kora#164. Enabling the button is only safe because the
+  // values are visible (kora#165) AND because pressing it submits exactly
+  // those values — not zeros, nulls or empty strings routed round
+  // validateOnboardingNumbers.
+  it("enables accept on arrival and submits exactly the defaults on display", async () => {
+    await render(<Onboarding />);
+    expect(screen.getByTestId("accept-button").props.accessibilityState.disabled).toBe(false);
+
+    await fireEvent.press(screen.getByText("Start with this plan"));
+    expect(mockMutate).toHaveBeenCalledTimes(1);
+    const payload = mockMutate.mock.calls[0][0];
+    expect(payload.height_cm).toBe(170);
+    expect(payload.weight_kg).toBe(70);
+    expect(payload.birth_year).toBe(new Date().getFullYear() - 30);
+    expect(payload.goal_weight_kg).toBe(65);
+    expect(payload.pace_kg_per_week).toEqual(expect.any(Number));
+  });
+
+  // kora#165 at the screen level: every ruler names its number in the units
+  // the screen is in, and those numbers are the ones that leave for the
+  // server (metric, always).
+  it("reads out every ruler's value and submits those same values", async () => {
+    await render(<Onboarding />);
+    expect(screen.getByTestId("age-ruler-readout").props.children).toBe("30 years");
+    expect(screen.getByTestId("height-ruler-readout").props.children).toBe("170 cm");
+    expect(screen.getByTestId("weight-ruler-readout").props.children).toBe("70 kg");
+    expect(screen.getByTestId("goal-weight-ruler-readout").props.children).toBe("65 kg");
+
+    await fireEvent.press(screen.getByText("Start with this plan"));
+    const payload = mockMutate.mock.calls[0][0];
+    expect(payload.birth_year).toBe(new Date().getFullYear() - 30);
+    expect(payload.height_cm).toBe(170);
+    expect(payload.weight_kg).toBe(70);
+    expect(payload.goal_weight_kg).toBe(65);
+  });
+
+  // Imperial is a DISPLAY mode only — the readouts speak ft/in and lb while
+  // the payload stays metric, so a readout that agreed with the payload
+  // numerically would in fact be the bug.
+  it("reads out imperial units while still submitting metric", async () => {
+    mockUseUnits.mockReturnValue({ system: "imperial", setSystem: jest.fn() });
+    await render(<Onboarding />);
+    expect(screen.getByTestId("height-ruler-readout").props.children).toBe("5'7\"");
+    expect(screen.getByTestId("weight-ruler-readout").props.children).toBe("154 lb");
+    expect(screen.getByTestId("goal-weight-ruler-readout").props.children).toBe("143 lb");
+
+    await fireEvent.press(screen.getByText("Start with this plan"));
+    const payload = mockMutate.mock.calls[0][0];
+    expect(payload.height_cm).toBe(170);
+    expect(payload.weight_kg).toBe(70);
+  });
+
+  it("keeps the readout in step with the value as the ruler moves", async () => {
+    await render(<Onboarding />);
+    await increment("weight-ruler");
+    expect(screen.getByTestId("weight-ruler-readout").props.children).toBe("70.5 kg");
+    await fireEvent.press(screen.getByText("Start with this plan"));
+    expect(mockMutate.mock.calls[0][0].weight_kg).toBe(70.5);
   });
 
   // The destination has no meaning when maintaining — it disappears rather
@@ -121,31 +176,108 @@ describe("onboarding", () => {
     expect(payload.pace_kg_per_week).toEqual(expect.any(Number));
   });
 
-  // The regression this closes: computePlan (which drives the dial and
+  // The regression this protects: computePlan (which drives the dial and
   // derivation rows) always used the visually-selected, always-real
-  // paceKgPerWeek — even while the destination ruler was untouched and the
-  // payload therefore omitted pace_kg_per_week. A missing pace decodes to
-  // Go's zero value server-side, silently collapsing the deficit to plain
-  // TDEE, so the number the user agreed to on screen was not the number
-  // that got stored. canAccept closes this by making submission impossible
-  // until the destination is real, so the two can no longer disagree.
-  it("disables accept for a non-maintenance goal until the destination is touched, and does not submit on press", async () => {
+  // paceKgPerWeek, while the payload used to OMIT pace_kg_per_week whenever
+  // the destination ruler was untouched. A missing pace decodes to Go's zero
+  // value server-side, silently collapsing the deficit to plain TDEE, so the
+  // number the user agreed to on screen was not the number that got stored.
+  // Now that the visible destination is an accepted value, it is always sent
+  // for a non-maintenance goal — untouched included — so the two cannot
+  // disagree.
+  it("sends the destination for a non-maintenance goal even when its ruler was never touched", async () => {
     await render(<Onboarding />);
-    await setValidBody();
-    // Default goal is "Lose weight" (fat_loss); body numbers are real but
-    // the destination ruler has not been touched.
-    expect(screen.getByTestId("accept-button").props.accessibilityState.disabled).toBe(true);
+    await fireEvent.press(screen.getByText("Start with this plan"));
+    const payload = mockMutate.mock.calls[0][0];
+    expect(payload.goal).toBe("fat_loss");
+    expect(payload.goal_weight_kg).toBe(65);
+    expect(payload.pace_kg_per_week).toEqual(expect.any(Number));
+  });
+
+  // The default destination has to stay COHERENT with the goal and the current
+  // weight, or removing the untouched-destination validation skip just moves
+  // kora#164's first-run blocker somewhere new: pick "Build muscle" as your
+  // very first action and the default 65kg destination contradicts the default
+  // 70kg current weight, so the first tap of an enabled button is a validation
+  // error about a number you never chose. Derived-until-set fixes the value
+  // rather than re-hiding it.
+  it("derives a destination above current weight when Build muscle is picked and nothing is touched", async () => {
+    await render(<Onboarding />);
+    await increment("goal-ruler"); // Lose weight -> Maintain
+    await increment("goal-ruler"); // Maintain -> Build muscle
+    expect(screen.getByTestId("accept-button").props.accessibilityState.disabled).toBe(false);
+    expect(screen.getByTestId("goal-weight-ruler-readout").props.children).toBe("75 kg");
 
     await fireEvent.press(screen.getByText("Start with this plan"));
-    expect(mockMutate).not.toHaveBeenCalled();
+    const payload = mockMutate.mock.calls[0][0];
+    expect(payload.goal).toBe("muscle_gain");
+    expect(payload.goal_weight_kg).toBe(75);
+    expect(payload.goal_weight_kg).toBeGreaterThan(payload.weight_kg);
+    expect(screen.queryByText(/goal weight is below your current weight/)).toBeNull();
+  });
 
-    await increment("goal-weight-ruler");
+  // The same incoherence reached from the other direction: stay on Lose weight
+  // and drag current weight below the default destination.
+  it("re-derives the destination when current weight is dragged past it", async () => {
+    await render(<Onboarding />);
+    // 70kg -> 60kg. A leading duplicate event is required: jest-utils' state
+    // filler only delivers an `onUpdate` from the second event onward.
+    await act(() =>
+      fireGestureHandler(getByGestureTestId("weight-ruler-pan"), [
+        { translationX: 90 },
+        { translationX: 90 },
+      ]),
+    );
+    expect(screen.getByTestId("weight-ruler-readout").props.children).toBe("60 kg");
+    expect(screen.getByTestId("goal-weight-ruler-readout").props.children).toBe("55 kg");
+    expect(screen.getByTestId("accept-button").props.accessibilityState.disabled).toBe(false);
+
+    await fireEvent.press(screen.getByText("Start with this plan"));
+    const payload = mockMutate.mock.calls[0][0];
+    expect(payload.weight_kg).toBe(60);
+    expect(payload.goal_weight_kg).toBe(55);
+    expect(screen.queryByText(/goal weight is above your current weight/)).toBeNull();
+  });
+
+  // Deriving stops the moment the user says otherwise. Silently rewriting a
+  // destination somebody deliberately dialled in would be a worse bug than the
+  // one the derivation fixes.
+  it("never overwrites a destination the user set, however the goal or weight then change", async () => {
+    await render(<Onboarding />);
+    await increment("goal-weight-ruler"); // 65 -> 65.5, explicitly set
+    expect(screen.getByTestId("goal-weight-ruler-readout").props.children).toBe("65.5 kg");
+
+    await act(() =>
+      fireGestureHandler(getByGestureTestId("weight-ruler-pan"), [
+        { translationX: 90 },
+        { translationX: 90 },
+      ]),
+    );
+    expect(screen.getByTestId("weight-ruler-readout").props.children).toBe("60 kg");
+    expect(screen.getByTestId("goal-weight-ruler-readout").props.children).toBe("65.5 kg");
+
+    await increment("goal-ruler"); // -> Maintain (destination hidden)
+    await increment("goal-ruler"); // -> Build muscle (destination back)
+    expect(screen.getByTestId("goal-weight-ruler-readout").props.children).toBe("65.5 kg");
+    expect(screen.getByTestId("accept-button").props.accessibilityState.disabled).toBe(false);
+
+    await fireEvent.press(screen.getByText("Start with this plan"));
+    expect(mockMutate.mock.calls[0][0].goal_weight_kg).toBe(65.5);
+  });
+
+  // The derivation is a DEFAULTING mechanism, never a gate: whichever way the
+  // goal and weight are driven, the button stays live.
+  it("keeps accept enabled across every goal with an untouched destination", async () => {
+    await render(<Onboarding />);
+    for (let i = 0; i < 3; i++) {
+      expect(screen.getByTestId("accept-button").props.accessibilityState.disabled).toBe(false);
+      await increment("goal-ruler");
+    }
     expect(screen.getByTestId("accept-button").props.accessibilityState.disabled).toBe(false);
   });
 
   it("enables accept for maintenance without any destination", async () => {
     await render(<Onboarding />);
-    await setValidBody();
     await increment("goal-ruler"); // Lose weight -> Maintain
     expect(screen.getByTestId("accept-button").props.accessibilityState.disabled).toBe(false);
   });
@@ -225,27 +357,39 @@ describe("onboarding", () => {
     await waitFor(() => expect(router.replace).toHaveBeenCalledWith("/"));
   });
 
-  // A concrete number in the derivation chain or macro grid before the user
-  // has agreed to anything is exactly the failure this screen exists to
-  // remove — those sections must withhold their values ("—", matching the
-  // header) until hasAllNumbers is true, the same gate PlanDial already uses.
-  it("withholds the derivation chain and macro numbers until the target is real", async () => {
+  // The withholding this replaces was the other half of kora#164: the chain
+  // and macro trio showed "—" until every ruler had been touched, so the
+  // user could not see the plan they were being asked to accept. The
+  // defaults are accepted values now, so their derivation is shown — and it
+  // must be the derivation of the numbers actually on the rulers.
+  it("shows the derivation chain and macro numbers for the defaults on arrival", async () => {
     await render(<Onboarding />);
-    expect(within(screen.getByTestId("derivation-chain-row-0")).getByText("—")).toBeTruthy();
-    expect(within(screen.getByTestId("derivation-chain-row-1")).getByText("—")).toBeTruthy();
-    expect(within(screen.getByTestId("derivation-chain-row-2")).getByText("—")).toBeTruthy();
-    expect(within(screen.getByTestId("derivation-chain-row-3")).getByText("—")).toBeTruthy();
-    // No numeric kcal or gram figure anywhere on screen — not just in the
-    // rows we happened to check by testID.
-    expect(screen.queryByText(/\d+ kcal/)).toBeNull();
-    expect(screen.queryByText(/^\d+g$/)).toBeNull();
-
-    await setValidBody();
-
+    for (const row of [0, 1, 2, 3]) {
+      expect(
+        within(screen.getByTestId(`derivation-chain-row-${row}`)).queryByText("—"),
+      ).toBeNull();
+    }
     expect(
       within(screen.getByTestId("derivation-chain-row-3")).getByText(/\d+ kcal/),
     ).toBeTruthy();
     expect(screen.getAllByText(/^\d+g$/)).toHaveLength(3);
+
+    const displayed = within(screen.getByTestId("derivation-chain-row-3")).getByText(/\d+ kcal/)
+      .props.children;
+    const displayedKcal = Number(String(displayed).replace(/[^\d]/g, ""));
+
+    await fireEvent.press(screen.getByText("Start with this plan"));
+    const payload = mockMutate.mock.calls[0][0];
+    const recomputed = computePlan({
+      sex: payload.sex,
+      age: new Date().getFullYear() - payload.birth_year,
+      heightCm: payload.height_cm,
+      weightKg: payload.weight_kg,
+      activityLevel: payload.activity_level,
+      goal: payload.goal,
+      paceKgPerWeek: payload.pace_kg_per_week,
+    });
+    expect(Math.round(recomputed.kcal)).toBe(displayedKcal);
   });
 
   // Traced case: weight 120kg, pick the 1.0 stop, drag to 50kg. The clamp
@@ -292,23 +436,17 @@ describe("onboarding", () => {
   // leaving the gated `dialKcal` on PlanDelta (or vice versa) — pin the
   // silence explicitly through the transition, not just PlanDelta's own
   // isolated suite.
-  it("keeps PlanDelta silent through the null-to-first-target transition, then announces the next change", async () => {
+  it("keeps PlanDelta silent on arrival, then announces the first change the user makes", async () => {
     jest.useFakeTimers();
     try {
       await render(<Onboarding />);
-      await increment("age-ruler");
-      await increment("height-ruler");
-      // The third touch flips hasAllNumbers — kcal goes from null to its
-      // first real value. PlanDelta's own mount-guard treats a null
-      // "previous" as nothing having changed yet, so this must stay silent.
-      await increment("weight-ruler");
+      // kcal is real from the first frame now, but nothing has CHANGED yet —
+      // PlanDelta's mount guard must still keep the screen quiet.
       await act(async () => {
         jest.advanceTimersByTime(600);
       });
       expect(screen.queryByTestId("plan-delta-text")).toBeNull();
 
-      // The next change has a real previous kcal behind it, so it must
-      // announce.
       await increment("weight-ruler");
       await act(async () => {
         jest.advanceTimersByTime(600);
@@ -319,52 +457,26 @@ describe("onboarding", () => {
     }
   });
 
-  // The accept gate is the whole point of this screen: the defaults (age 30,
-  // height 170, weight 70) pass validation on their own, so without this the
-  // button would let a press submit fabricated body measurements while the
-  // dial overhead still says "Awaiting your numbers". A `disabled` prop that
-  // still fires on press would pass a shallower check than this — the
-  // "does not call submit" assertion is the one that actually matters.
-  it("disables the accept button until every required number is set, and does not submit on press", async () => {
+  // The one gate that survives kora#164: a press while the mutation is
+  // already in flight would submit twice.
+  it("disables the accept button while a submit is in flight", async () => {
+    mockIsPending = true;
     await render(<Onboarding />);
-    const button = screen.getByTestId("accept-button");
-    expect(button.props.accessibilityState.disabled).toBe(true);
-
-    await fireEvent.press(screen.getByText("Start with this plan"));
+    expect(screen.getByTestId("accept-button").props.accessibilityState.disabled).toBe(true);
+    await fireEvent.press(screen.getByText("Saving…"));
     expect(mockMutate).not.toHaveBeenCalled();
-
-    await setValidBody();
-    // Default goal is "Lose weight" (fat_loss), so the button also needs the
-    // destination ruler touched — see the dedicated destination-gating tests
-    // below for that half of the accept gate.
-    await increment("goal-weight-ruler");
-    expect(screen.getByTestId("accept-button").props.accessibilityState.disabled).toBe(false);
   });
 
-  // Same leak as the derivation rows and macro trio, one level up: the
-  // "N weeks to goal" caption is derived from weightKg/goalWeightKg defaults
-  // and was rendered whenever the goal wasn't maintenance, regardless of
-  // whether the user had touched anything.
-  it("withholds the destination caption's weeks figure until the target is real", async () => {
+  // Same change as the derivation rows, one level up: the "N weeks to goal"
+  // caption describes the distance between two visible, accepted numbers, so
+  // it says so from arrival rather than showing "—" under a ruler that is
+  // plainly displaying 65 kg. The caption IS the Text node (its own children,
+  // not a nested one), so assert on `.props.children` rather than an in-scope
+  // `within(...).getByText`, which only searches descendants.
+  it("states the weeks to goal for the defaults on arrival", async () => {
     await render(<Onboarding />);
-    // Default goal is "Lose weight" (fat_loss), so the destination section
-    // (and its caption) is already showing. The caption IS the Text node
-    // (its own children, not a nested one), so assert on `.props.children`
-    // rather than an in-scope `within(...).getByText`, which only searches
-    // descendants and would never match the element's own text.
-    expect(screen.getByTestId("destination-caption").props.children).toBe("—");
-
-    await setValidBody();
-
-    // Body numbers are real now, but the destination ruler itself has not
-    // been touched — the caption must still withhold rather than compute
-    // weeks from the untouched goalWeightKg default.
-    expect(screen.getByTestId("destination-caption").props.children).toBe("—");
-
-    await increment("goal-weight-ruler");
-
-    const captionText = screen.getByTestId("destination-caption").props.children;
-    expect(captionText).not.toBe("—");
-    expect(String(captionText)).toMatch(/weeks to goal|You're already there/);
+    const caption = screen.getByTestId("destination-caption").props.children;
+    expect(caption).not.toBe("—");
+    expect(String(caption)).toMatch(/weeks to goal|You're already there/);
   });
 });
