@@ -6,6 +6,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { isFirebaseConfigured } from "@/lib/firebase";
 import { setupPushHandler } from "@/lib/push";
+import { installAppFocus } from "@/lib/appFocus";
 import { installConnectivity } from "@/offline/connectivity";
 import { installDrainTriggers } from "@/offline/drainTriggers";
 import { UnitsProvider } from "@/units";
@@ -78,6 +79,12 @@ export default function RootLayout() {
   }, []);
 
   useEffect(() => installConnectivity(), []);
+
+  // Focus, the other half of the pair above. react-query's focus default is a
+  // DOM `visibilitychange` listener that never fires under React Native, so
+  // without this it treats the app as focused forever and keeps polling into a
+  // suspended process — see src/lib/appFocus.ts for the crash that caused.
+  useEffect(() => installAppFocus(), []);
 
   useEffect(() => installDrainTriggers(queryClient), []);
 
