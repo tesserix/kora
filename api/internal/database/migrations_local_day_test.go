@@ -3,6 +3,7 @@ package database
 import (
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 
@@ -59,13 +60,25 @@ func TestLocalDayColumnsExistAndAreNotNull(t *testing.T) {
 // forgets to set local_date would pass NOT NULL and store year 1, producing a
 // row that matches no day query and is invisible forever. The CHECK turns that
 // silent corruption into a failed write.
+// Seeds its OWN user rather than selecting an arbitrary existing one. The
+// first version did `INSERT ... SELECT id FROM users LIMIT 1`, which inserts
+// ZERO rows on an empty database — so the statement succeeded, no constraint
+// fired, and the test passed vacuously. It went green locally (where the dev
+// database has users) and red on CI (where it does not), which is the wrong
+// way round for a test whose entire job is to prove a constraint bites.
 func TestLocalDayRejectsGoZeroTime(t *testing.T) {
 	db := testDB(t)
 
+	uid := uuid.New()
+	require.NoError(t, db.Exec(
+		"INSERT INTO users (id, firebase_uid, email) VALUES (?, ?, ?)",
+		uid, "localday-"+uid.String(), "localday@test.dev").Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE id = ?", uid) })
+
 	err := db.Exec(`
 		INSERT INTO water_entries (user_id, logged_at, local_date, volume_ml)
-		SELECT id, now(), DATE '0001-01-01', 250 FROM users LIMIT 1
-	`).Error
+		VALUES (?, now(), DATE '0001-01-01', 250)
+	`, uid).Error
 	require.Error(t, err, "a zero local_date must be rejected, not stored")
 	require.Contains(t, err.Error(), "local_date_plausible")
 }
@@ -75,6 +88,16 @@ func TestLocalDayRejectsGoZeroTime(t *testing.T) {
 // because the migration's UPDATE joins users and could silently miss rows.
 func TestLocalDayBackfillMatchesProfileZoneForExistingRows(t *testing.T) {
 	db := testDB(t)
+
+	// Skip rather than pass when there is nothing to check. On a fresh database
+	// this query returns 0 mismatches out of 0 rows and reports success without
+	// having verified anything — a green tick that means nothing is worse than
+	// an honest skip.
+	var rows int
+	require.NoError(t, db.Raw(`SELECT count(*) FROM food_logs`).Scan(&rows).Error)
+	if rows == 0 {
+		t.Skip("no food_logs to verify the backfill against")
+	}
 
 	var mismatches int
 	require.NoError(t, db.Raw(`
