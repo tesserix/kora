@@ -66,7 +66,8 @@ jobs:
     # ghcr-remote pull-through mirror in tesseracthub-480811 (matches every
     # other service). Needs packages:write on GITHUB_TOKEN.
     permissions:
-      contents: read
+      # contents: write — the `deploy` branch advance below is a git push.
+      contents: write
       packages: write
     steps:
       - uses: actions/checkout@v4
@@ -81,3 +82,23 @@ jobs:
           docker build -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" api/
           docker push "$IMAGE:${{ github.sha }}"
           docker push "$IMAGE:latest"
+
+      # Kargo watches `deploy`, NOT `main`, and derives the image tag from the
+      # commit it finds there. Two failure modes make this indirection load-bearing:
+      #
+      # 1. Image-tag discovery is unusable here. kora-api already has >=100
+      #    published tags, and the registry paginates at 100 in arbitrary order
+      #    while Kargo's discoveryLimit is hard-capped at 100. NewestBuild then
+      #    never sees the newest build and silently promotes the newest of the
+      #    stale page-1 tags — flapping prod backwards. devai hit exactly this on
+      #    2026-06-09; see kargo-manifests/projects/devai/warehouses/services.yaml.
+      #
+      # 2. Watching `main` directly races the build. Kargo would promote a commit
+      #    whose image does not exist yet, the pod would pull a missing tag, and
+      #    the GAR pull-through mirror negative-caches that 404 — an
+      #    ImagePullBackOff that does not recover on its own.
+      #
+      # Advancing `deploy` only after both pushes succeed makes "this commit is
+      # on deploy" mean "this commit's image is pullable".
+      - name: Advance deploy branch
+        run: git push origin "${{ github.sha }}:refs/heads/deploy" --force
