@@ -101,3 +101,20 @@ Stating this explicitly so the issue is not closed as "timezone fixed" when a we
 ## Migration ordering note
 
 Production `schema_migrations` is at **26** while the repo has up to `000031` — prod is five migrations behind. This work adds `000032`. The next deploy will therefore apply six migrations at once, which is also the first real exercise of kora#118's initContainer ordering against a migration-bearing deploy.
+
+## Verified end to end, 2026-08-14
+
+Against the running stack (dev API + iPhone 17 Pro simulator, migration `000032` applied):
+
+**Backfill preserved existing buckets.** `local_date` equals `(logged_at AT TIME ZONE u.timezone)::date` for every pre-existing row — zero visible change, which is what made `NOT NULL` safe.
+
+**A write round-trips the client's date.** Adding water from the app produced `POST /v1/water 201` and a row with `local_date = 2026-08-14`, the simulator's device date.
+
+**The day does not move when the timezone changes.** The water row's stored day is the 14th, but under `Pacific/Kiritimati` (UTC+14) the old profile-zone logic computes the **15th** for the same `logged_at` — a genuine divergence, confirmed in SQL. With the profile switched to Kiritimati the diary still showed `0.3 L` and `190 kcal` on the 14th. Under the old code the water would have vanished from that day.
+
+## Changes made during implementation that this design did not anticipate
+
+- **A `CHECK (local_date > DATE '2000-01-01')` on all three tables.** `NOT NULL` alone does not protect the column: Go's zero `time.Time` marshals to `0001-01-01`, which Postgres accepts as a valid DATE. A writer that forgot the field would pass `NOT NULL` and store year 1, producing a row that matches no day query and is invisible forever. The CHECK makes that a failed write instead, and immediately caught direct-write paths in `admin`, `coach`, `memory`, `user`, `foodlog` and `tracking`.
+- **`CopyDay` and `RepeatLog` needed the clone's day set explicitly.** Both clone a log and shift `LoggedAt`; without also setting `LocalDate` the clone inherits the SOURCE's day and lands invisible on the day the user asked for. Neither was in the original design.
+- **`dashboard.ForDay` keeps its `*time.Location`.** Streaks remain profile-zone scoped per the "What this does NOT fix" section, so the parameter stays for that alone; only the log and water reads inside it dropped it.
+- **A latent off-by-one in the summary's date label.** `ForDay` rendered `day.In(loc)`, but `day` is a calendar date at midnight UTC rather than an instant, so any negative-offset zone labelled the summary with the previous day. Now `day.Format(...)`.
