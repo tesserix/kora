@@ -430,7 +430,7 @@ func TestDeleteWritesAuditRowForAdminOnly(t *testing.T) {
 // committing a delete whose audit row failed.
 //
 // The failure is forced at the DATABASE, not in Go: a whitespace-only actor
-// email violates kora_admin_events' `CHECK (btrim(actor_email) <> ”)` (see
+// email violates kora_admin_events' `CHECK (btrim(actor_email) <> '')` (see
 // internal/admin/events.go, which documents this as the free way to force a
 // real failure and relies on it for three sibling rollback tests). A Go-side
 // `return errors.New(...)` would abort the tx func without ever proving the

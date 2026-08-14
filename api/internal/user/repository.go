@@ -61,9 +61,9 @@ func seedableDisplayName(name string) string {
 // It also seeds display_name from name whenever the row's current
 // display_name is empty -- both for a row just created here, and to repair a
 // pre-existing row (e.g. a Google user provisioned before this claim was
-// wired through) that still has ”. The presence check is `== ""`, not a
+// wired through) that still has ''. The presence check is `== ""`, not a
 // nullness check: display_name is a nullable column, but every row ever
-// written via UpsertByFirebaseUID/Create got the Go zero value ” rather
+// written via UpsertByFirebaseUID/Create got the Go zero value '' rather
 // than SQL NULL (see the identical trap documented on User.AppleRefreshToken
 // in model.go), so 'IS NULL' would never match and the repair would be dead
 // code. A non-empty display_name is never overwritten -- users can rename
