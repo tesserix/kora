@@ -1,5 +1,7 @@
 import { render, fireEvent } from "@testing-library/react-native";
 
+import Profile from "../profile";
+
 const mockBack = jest.fn();
 const mockPush = jest.fn();
 
@@ -26,8 +28,6 @@ jest.mock("@/api/hooks", () => ({
     },
   }),
 }));
-
-import Profile from "../profile";
 
 beforeEach(() => {
   mockBack.mockClear();

@@ -1,5 +1,7 @@
 import { render } from "@testing-library/react-native";
 
+import { ReportingUserBinder } from "../ReportingUserBinder";
+
 const mockSetReportingUser = jest.fn();
 jest.mock("@/observability/reporter", () => ({
   setReportingUser: (...a: unknown[]) => mockSetReportingUser(...a),
@@ -7,8 +9,6 @@ jest.mock("@/observability/reporter", () => ({
 
 let mockProfile: { data?: { id: string } } = {};
 jest.mock("@/api/hooks", () => ({ useProfile: () => mockProfile }));
-
-import { ReportingUserBinder } from "../ReportingUserBinder";
 
 beforeEach(() => {
   mockSetReportingUser.mockClear();

@@ -1,5 +1,7 @@
 import { fireEvent, render } from "@testing-library/react-native";
 
+import NotificationsScreen from "../notifications";
+
 const mockPush = jest.fn();
 const mockMarkAll = jest.fn();
 jest.mock("expo-router", () => ({ router: { push: (...a: unknown[]) => mockPush(...a) } }));
@@ -15,8 +17,6 @@ jest.mock("@/api/hooks", () => ({
   }),
   useMarkAllRead: () => ({ mutate: mockMarkAll }),
 }));
-
-import NotificationsScreen from "../notifications";
 
 beforeEach(() => {
   mockPush.mockReset();

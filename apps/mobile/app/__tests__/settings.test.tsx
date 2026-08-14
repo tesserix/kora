@@ -3,6 +3,9 @@ import { render, fireEvent, waitFor } from "@testing-library/react-native";
 import { Appearance } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
+import Settings from "../settings";
+import { AppearanceProvider } from "@/theme";
+
 const mockBack = jest.fn();
 const mockSetSystem = jest.fn();
 
@@ -44,9 +47,6 @@ jest.mock("@/reminders/useCustomReminders", () => ({
     toggleReminder: jest.fn(),
   }),
 }));
-
-import Settings from "../settings";
-import { AppearanceProvider } from "@/theme";
 
 beforeEach(() => {
   mockBack.mockClear();

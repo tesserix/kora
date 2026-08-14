@@ -1,5 +1,7 @@
 import { Platform } from "expo-modules-core";
 
+import { clearSnapshot, openNotificationSettings, setSnapshot } from "../../../modules/widget-bridge";
+
 const mockSetSnapshot = jest.fn();
 const mockClearSnapshot = jest.fn();
 const mockOpenNotificationSettings = jest.fn();
@@ -28,8 +30,6 @@ jest.mock("expo-modules-core", () => {
     },
   };
 });
-
-import { clearSnapshot, openNotificationSettings, setSnapshot } from "../../../modules/widget-bridge";
 
 const originalOS = Platform.OS;
 

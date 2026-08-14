@@ -34,7 +34,7 @@ test("the queue survives a restart", async () => {
   // (not held in module-level state). AsyncStorage is NOT cleared, simulating
   // how persistent storage survives a real app restart.
   delete require.cache[require.resolve("../queue")];
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
+   
   const fresh = require("../queue");
   const itemsAfterRestart = await fresh.list();
   expect(itemsAfterRestart.map((i: QueuedLog) => i.id)).toEqual(["id-1"]);

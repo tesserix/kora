@@ -1,5 +1,7 @@
 import { render, fireEvent } from "@testing-library/react-native";
 
+import Groups from "../groups";
+
 const mockPush = jest.fn();
 jest.mock("expo-router", () => ({ router: { push: (...a: unknown[]) => mockPush(...a) } }));
 jest.mock("@/api/hooks", () => ({
@@ -7,8 +9,6 @@ jest.mock("@/api/hooks", () => ({
   useCreateGroup: () => ({ mutate: jest.fn(), isPending: false }),
   useJoinGroup: () => ({ mutate: jest.fn(), isPending: false }),
 }));
-
-import Groups from "../groups";
 
 test("lists my groups and navigates to detail on tap", async () => {
   const { getByText } = await render(<Groups />);

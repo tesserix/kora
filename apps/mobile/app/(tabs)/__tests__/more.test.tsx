@@ -1,12 +1,12 @@
 import { render, fireEvent } from "@testing-library/react-native";
 
+import More from "../more";
+
 const mockPush = jest.fn();
 jest.mock("expo-router", () => ({ router: { push: (...a: unknown[]) => mockPush(...a) } }));
 jest.mock("@/lib/firebase", () => ({ auth: null }));
 jest.mock("firebase/auth", () => ({ signOut: jest.fn() }));
 jest.mock("@/api/hooks", () => ({ useUnreadCount: () => ({ data: { count: 2 } }) }));
-
-import More from "../more";
 
 beforeEach(() => mockPush.mockClear());
 

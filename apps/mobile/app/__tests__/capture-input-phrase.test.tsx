@@ -6,6 +6,8 @@ import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
 import type { Resolution } from "@/api/types";
 
+import CaptureScreen from "../capture";
+
 jest.mock("expo-router", () => ({ router: { back: jest.fn(), push: jest.fn() } }));
 
 // Same shape as the real "@/lib/api" ApiError — see capture.test.tsx for why
@@ -73,8 +75,6 @@ function makeRecorder(): MockRecorder {
   });
   return recorder;
 }
-
-import CaptureScreen from "../capture";
 
 // CaptureScreen now holds its own query client (useQueryClient, for
 // invalidating the queued-captures view after an offline enqueue), so every

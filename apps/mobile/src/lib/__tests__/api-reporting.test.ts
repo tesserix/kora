@@ -1,3 +1,5 @@
+import { apiFetch } from "../api";
+
 const mockReportError = jest.fn();
 jest.mock("@/observability/reporter", () => ({
   reportError: (...a: unknown[]) => mockReportError(...a),
@@ -10,8 +12,6 @@ jest.mock("firebase/auth", () => ({
   onAuthStateChanged: jest.fn(),
   signOut: jest.fn(),
 }));
-
-import { apiFetch } from "../api";
 
 const realFetch = global.fetch;
 

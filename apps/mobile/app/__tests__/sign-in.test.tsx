@@ -1,6 +1,8 @@
 import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { router, useLocalSearchParams } from "expo-router";
 
+import SignIn from "../sign-in";
+
 const mockSignIn = jest.fn();
 const mockCreateUser = jest.fn();
 
@@ -34,8 +36,6 @@ jest.mock("@/lib/socialAuth", () => ({
 jest.mock("@/components/auth/LinkAccountPrompt", () => ({
   LinkAccountPrompt: () => null,
 }));
-
-import SignIn from "../sign-in";
 
 beforeEach(() => {
   mockSignIn.mockClear();

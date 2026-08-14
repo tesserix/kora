@@ -1,5 +1,7 @@
 import { fireEvent, render } from "@testing-library/react-native";
 
+import { RemindersSection } from "../RemindersSection";
+
 const mockSetSlot = jest.fn();
 jest.mock("@/reminders/useReminderPrefs", () => ({
   useReminderPrefs: () => ({
@@ -15,8 +17,6 @@ jest.mock("@/reminders/useReminderPrefs", () => ({
 }));
 
 jest.mock("@react-native-community/datetimepicker", () => "DateTimePicker");
-
-import { RemindersSection } from "../RemindersSection";
 
 beforeEach(() => mockSetSlot.mockReset());
 

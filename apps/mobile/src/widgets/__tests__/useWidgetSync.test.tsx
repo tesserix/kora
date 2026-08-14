@@ -1,5 +1,7 @@
 import { render } from "@testing-library/react-native";
 
+import { useWidgetSync } from "../useWidgetSync";
+
 const mockSetSnapshot = jest.fn();
 const mockClearSnapshot = jest.fn();
 jest.mock("../../../modules/widget-bridge", () => ({
@@ -39,8 +41,6 @@ jest.mock("firebase/auth", () => ({
   },
 }));
 jest.mock("@/lib/firebase", () => ({ auth: {}, isFirebaseConfigured: true }));
-
-import { useWidgetSync } from "../useWidgetSync";
 
 function Harness() {
   useWidgetSync();

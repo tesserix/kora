@@ -10,6 +10,8 @@ import { NoOwnerError } from "@/offline/owner";
 import { mealSlotForHour } from "@/lib/mealSlot";
 import { QUEUED_CAPTURES_KEY } from "@/offline/queryKeys";
 
+import CaptureScreen from "../capture";
+
 jest.mock("expo-router", () => ({ router: { back: jest.fn(), push: jest.fn() } }));
 
 // Same shape as the real "@/lib/api" — see capture.test.tsx for why this is
@@ -134,8 +136,6 @@ function makeRecorder(): MockRecorder {
   });
   return recorder;
 }
-
-import CaptureScreen from "../capture";
 
 function mockEnqueueCapture(): jest.Mock {
   return jest.requireMock("@/offline/enqueueCapture").enqueueCapture;

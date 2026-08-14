@@ -45,8 +45,11 @@ export function PlanDelta({ kcal, floored, revision, testID = "plan-delta" }: Pl
 
     const timer = setTimeout(() => setMessage(next), DEBOUNCE_MS);
     return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- revision is the
-    // deliberate trigger; kcal and floored are read as of that revision.
+    // revision is the deliberate trigger; kcal and floored are read as of that
+    // revision. The directive must sit immediately above the dependency array —
+    // with the prose between them it applied to a comment line and suppressed
+    // nothing, which is how it read as "unused" while the warning still fired.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [revision]);
 
   if (!message) return null;

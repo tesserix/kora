@@ -1,7 +1,7 @@
+import { deleteAccount } from "@/api/hooks";
+
 const mockApiFetch = jest.fn();
 jest.mock("@/lib/api", () => ({ apiFetch: (...a: unknown[]) => mockApiFetch(...a) }));
-
-import { deleteAccount } from "@/api/hooks";
 
 beforeEach(() => {
   mockApiFetch.mockReset();

@@ -1,5 +1,7 @@
 import { fireEvent, render } from "@testing-library/react-native";
 
+import { YourUsualStrip } from "../YourUsualStrip";
+
 const mockLogMeal = jest.fn();
 const mockLogFood = jest.fn();
 let mockMemoryReturn: any = { data: undefined, isLoading: true, isError: false };
@@ -7,8 +9,6 @@ let mockMemoryReturn: any = { data: undefined, isLoading: true, isError: false }
 jest.mock("@/api/hooks", () => ({ useMemory: () => mockMemoryReturn }));
 jest.mock("@/api/useInstantLog", () => ({ useInstantLog: () => ({ logMeal: mockLogMeal, logFood: mockLogFood }) }));
 jest.mock("@/lib/mealSlot", () => ({ mealSlotForHour: () => "breakfast" }));
-
-import { YourUsualStrip } from "../YourUsualStrip";
 
 const meal = { id: "m1", name: "Oats & Egg", meal_slot: "breakfast", items: [{ food_item_id: "o", name: "Oats", meal_slot: "breakfast", grams: 60, kcal: 233, protein_g: 0, carbs_g: 0, fat_g: 0, fiber_g: 0, count: 3, last_logged_at: "" }], kcal: 376, protein_g: 0, carbs_g: 0, fat_g: 0, fiber_g: 0, count: 3, last_logged_at: "" };
 const food = { food_item_id: "b", name: "Banana", meal_slot: "breakfast", grams: 120, kcal: 107, protein_g: 0, carbs_g: 0, fat_g: 0, fiber_g: 0, count: 4, last_logged_at: "" };

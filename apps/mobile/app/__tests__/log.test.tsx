@@ -2,6 +2,8 @@ import { fireEvent, render } from "@testing-library/react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import type { Memory, Recipe, SavedMeal } from "@/api/types";
 
+import LogScreen from "../log";
+
 jest.mock("expo-router", () => ({
   router: { replace: jest.fn(), back: jest.fn(), push: jest.fn() },
   useLocalSearchParams: jest.fn(() => ({})),
@@ -89,8 +91,6 @@ jest.mock("@/components/meals/SavedMealSheetProvider", () => ({
 jest.mock("@/components/Toast", () => ({
   useToast: () => ({ show: (o: { onAction?: () => void }) => o.onAction?.() }),
 }));
-
-import LogScreen from "../log";
 
 beforeEach(() => {
   mockLogMutate.mockClear();

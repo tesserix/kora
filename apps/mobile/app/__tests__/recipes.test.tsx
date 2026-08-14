@@ -2,6 +2,9 @@ import { fireEvent, render } from "@testing-library/react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import type { Recipe } from "@/api/types";
 
+import Recipes from "../recipes";
+import RecipeDetail from "../recipe/[id]";
+
 jest.mock("expo-router", () => ({
   router: { push: jest.fn(), replace: jest.fn(), back: jest.fn(), canGoBack: jest.fn(() => true) },
   useLocalSearchParams: jest.fn(() => ({})),
@@ -81,9 +84,6 @@ let mockFoodItems = [chickenBreast];
 function mockFoodSearchResults() {
   return mockFoodItems.map((item) => ({ item, match_score: 1, match_tier: "fulltext" }));
 }
-
-import Recipes from "../recipes";
-import RecipeDetail from "../recipe/[id]";
 
 function baseRecipe(overrides: Partial<Recipe> = {}): Recipe {
   return {

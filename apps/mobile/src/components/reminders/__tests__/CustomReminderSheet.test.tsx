@@ -1,9 +1,9 @@
 import { fireEvent, render } from "@testing-library/react-native";
 
+import { CustomReminderSheet } from "../CustomReminderSheet";
+
 jest.mock("@react-native-community/datetimepicker", () => "DateTimePicker");
 jest.mock("@/components/Sheet", () => ({ Sheet: ({ visible, children }: { visible: boolean; children: React.ReactNode }) => (visible ? children : null) }));
-
-import { CustomReminderSheet } from "../CustomReminderSheet";
 
 const noop = () => {};
 

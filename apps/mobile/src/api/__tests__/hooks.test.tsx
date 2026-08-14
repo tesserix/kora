@@ -14,11 +14,10 @@ import {
   apiFetchMultipart,
   currentUserId,
 } from "@/lib/api";
-import { drain, list } from "@/offline/queue";
+import { drain, list , append } from "@/offline/queue";
 import { getFoodById, getFoodByBarcode } from "@/offline/foodCache";
 import * as foodCache from "@/offline/foodCache";
 import { rememberOwner } from "@/offline/owner";
-import { append } from "@/offline/queue";
 import { useQueuedLogs } from "@/offline/useQueuedLogs";
 import {
   useAcceptRequest,

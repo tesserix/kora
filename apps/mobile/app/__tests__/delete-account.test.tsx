@@ -1,5 +1,7 @@
 import { act, render, fireEvent, waitFor } from "@testing-library/react-native";
 
+import DeleteAccount from "../delete-account";
+
 const mockReplace = jest.fn();
 const mockBack = jest.fn();
 jest.mock("expo-router", () => ({
@@ -22,8 +24,6 @@ jest.mock("@/lib/push", () => ({
 const mockSignOut = jest.fn();
 jest.mock("firebase/auth", () => ({ signOut: (...a: unknown[]) => mockSignOut(...a) }));
 jest.mock("@/lib/firebase", () => ({ auth: { name: "fake-auth" } }));
-
-import DeleteAccount from "../delete-account";
 
 beforeEach(() => {
   mockReplace.mockClear();

@@ -8,6 +8,8 @@ import { fireEvent, render } from "@testing-library/react-native";
 import { router } from "expo-router";
 import type { QueuedCaptureRow } from "@/offline/useQueuedCaptures";
 
+import Diary from "../diary";
+
 jest.mock("expo-router", () => ({ router: { push: jest.fn() } }));
 
 const LOGS_DATA = [
@@ -48,8 +50,6 @@ jest.mock("@/api/hooks", () => ({
   useDeleteLog: () => ({ mutate: jest.fn(), isPending: false }),
   useCopyDay: () => ({ mutate: jest.fn(), isPending: false }),
 }));
-
-import Diary from "../diary";
 
 // A UTC instant that lands at midday on the given LOCAL calendar day, so the
 // fixture means the same day in every timezone the suite might run in.

@@ -1,11 +1,11 @@
 // ApiError lives in api.ts, which pulls in firebase/auth at import time.
 // Same mocks api.test.ts installs — this file only needs the import not to
 // crash, since apiErrorMessage is pure.
-jest.mock("../firebase", () => ({ auth: null }));
-jest.mock("firebase/auth", () => ({ onAuthStateChanged: jest.fn(), signOut: jest.fn() }));
-
 import { ApiError } from "../api";
 import { apiErrorMessage } from "../apiErrorMessage";
+
+jest.mock("../firebase", () => ({ auth: null }));
+jest.mock("firebase/auth", () => ({ onAuthStateChanged: jest.fn(), signOut: jest.fn() }));
 
 const CHECK_DETAILS = "Please check your details and try again.";
 const SERVER = "Kora is having trouble right now. Please try again in a moment.";

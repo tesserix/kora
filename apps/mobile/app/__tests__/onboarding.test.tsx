@@ -2,6 +2,9 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { fireGestureHandler, getByGestureTestId } from "react-native-gesture-handler/jest-utils";
 import { router } from "expo-router";
 
+import Onboarding from "../onboarding";
+import { computePlan } from "@/lib/plan";
+
 const mockMutate = jest.fn();
 let mockIsPending = false;
 
@@ -19,9 +22,6 @@ jest.mock("@/units", () => ({
   ...jest.requireActual("@/units"),
   useUnits: () => mockUseUnits(),
 }));
-
-import Onboarding from "../onboarding";
-import { computePlan } from "@/lib/plan";
 
 beforeEach(() => {
   mockMutate.mockClear();

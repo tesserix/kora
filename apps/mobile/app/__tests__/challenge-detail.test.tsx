@@ -1,5 +1,7 @@
 import { render } from "@testing-library/react-native";
 
+import ChallengeDetailScreen from "../challenge/[id]";
+
 const mockBack = jest.fn();
 jest.mock("expo-router", () => ({ router: { back: mockBack }, useLocalSearchParams: () => ({ id: "c1" }) }));
 
@@ -27,8 +29,6 @@ jest.mock("@/api/hooks", () => ({
   useLeaveChallenge: () => ({ mutate: jest.fn(), isPending: false }),
   useDeleteChallenge: () => ({ mutate: jest.fn(), isPending: false }),
 }));
-
-import ChallengeDetailScreen from "../challenge/[id]";
 
 test("renders standings, winner banner when ended, and Delete when can_delete", async () => {
   const { getByText } = await render(<ChallengeDetailScreen />);

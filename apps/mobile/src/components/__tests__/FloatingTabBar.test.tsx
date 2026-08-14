@@ -1,6 +1,11 @@
 import { AccessibilityInfo, StyleSheet } from "react-native";
 import { render, fireEvent, waitFor } from "@testing-library/react-native";
 
+import { router } from "expo-router";
+import { useUnreadCount } from "@/api/hooks";
+import { FloatingTabBar } from "@/components/FloatingTabBar";
+import { instrumentLight } from "@/theme/palette";
+
 jest.mock("expo-router", () => ({ router: { push: jest.fn() } }));
 jest.mock("@/api/hooks", () => ({ useUnreadCount: jest.fn(() => ({ data: { count: 0 } })) }));
 
@@ -15,11 +20,6 @@ jest.mock("expo-symbols", () => {
       React.createElement(View, { testID: `sf-${props.name}`, tintColor: props.tintColor }),
   };
 });
-
-import { router } from "expo-router";
-import { useUnreadCount } from "@/api/hooks";
-import { FloatingTabBar } from "@/components/FloatingTabBar";
-import { instrumentLight } from "@/theme/palette";
 
 // Component tests render under the default (light) color scheme, so the
 // instrument tokens asserted below are the light half of the table.

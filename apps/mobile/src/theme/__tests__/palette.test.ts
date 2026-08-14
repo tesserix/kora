@@ -1,4 +1,5 @@
-import { darkColors, lightColors, radius, spacing } from "../palette";
+import { darkColors, lightColors, radius, spacing , gradientStops } from "../palette";
+
 
 test("every light color key has a dark counterpart", () => {
   expect(Object.keys(darkColors).sort()).toEqual(Object.keys(lightColors).sort());
@@ -29,8 +30,6 @@ test("spacing and radius match the design system scale", () => {
   expect(spacing.md).toBe(16);
   expect(radius.lg).toBe(12);
 });
-
-import { gradientStops } from "../palette";
 
 describe("elevated tokens", () => {
   it("adds elevated surface to both schemes", () => {

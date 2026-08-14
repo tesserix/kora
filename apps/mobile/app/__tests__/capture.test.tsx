@@ -9,6 +9,8 @@ import type { FoodItem, Resolution } from "@/api/types";
 import { OfflineUnknownBarcodeError, resolutionFromCachedFood } from "@/offline/cachedResolution";
 import { INSTRUMENT_DARK_FIXED } from "@/theme";
 
+import CaptureScreen, { CaptureBody, COMPOSER_BUTTON } from "../capture";
+
 const cachedBarcodeFood: FoodItem = {
   id: "f-bar",
   name: "Choc protein bar",
@@ -166,8 +168,6 @@ function makeRecorder(): MockRecorder {
   });
   return recorder;
 }
-
-import CaptureScreen, { CaptureBody, COMPOSER_BUTTON } from "../capture";
 
 // CaptureScreen now holds its own query client (useQueryClient, for
 // invalidating the queued-captures view after an offline enqueue), so every

@@ -1,6 +1,10 @@
 import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import * as Notifications from "expo-notifications";
 
+import { WeightReminderSection } from "../WeightReminderSection";
+import { DEFAULT_WEIGHT_PREF, loadWeightPref, saveWeightPref } from "@/reminders/weightPrefs";
+import { reconcileWeightReminder } from "@/reminders/reconcileWeightReminder";
+
 jest.mock("expo-notifications", () => ({
   getPermissionsAsync: jest.fn(),
   requestPermissionsAsync: jest.fn(),
@@ -40,10 +44,6 @@ jest.mock("@/components/reminders/WeekdayPicker", () => {
     },
   };
 });
-
-import { WeightReminderSection } from "../WeightReminderSection";
-import { DEFAULT_WEIGHT_PREF, loadWeightPref, saveWeightPref } from "@/reminders/weightPrefs";
-import { reconcileWeightReminder } from "@/reminders/reconcileWeightReminder";
 
 beforeEach(() => {
   jest.clearAllMocks();

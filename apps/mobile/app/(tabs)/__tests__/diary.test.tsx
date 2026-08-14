@@ -3,6 +3,8 @@ import { fireEvent, render, within } from "@testing-library/react-native";
 import { router } from "expo-router";
 import type { QueuedRow } from "@/offline/useQueuedLogs";
 
+import Diary from "../diary";
+
 jest.mock("expo-router", () => ({ router: { push: jest.fn() } }));
 
 const mockDeleteMutate = jest.fn();
@@ -79,8 +81,6 @@ const mockOpenCompose = jest.fn();
 jest.mock("@/components/meals/SavedMealSheetProvider", () => ({
   useSavedMealEditor: () => ({ openCreate: jest.fn(), openEdit: jest.fn(), openBlank: jest.fn(), openCompose: mockOpenCompose }),
 }));
-
-import Diary from "../diary";
 
 beforeEach(() => {
   mockDayLogs = LOGS_DATA;
@@ -218,7 +218,7 @@ test("swiping a meal row's delete action confirms then deletes that log id", asy
 
   // Invoke the "Delete" button's onPress exactly as the confirm-Alert would.
   const alertMock = Alert.alert as jest.Mock;
-  const buttons = alertMock.mock.calls[0][2] as Array<{ text: string; onPress?: () => void }>;
+  const buttons = alertMock.mock.calls[0][2] as { text: string; onPress?: () => void }[];
   const confirm = buttons.find((b) => b.text === "Delete");
   confirm?.onPress?.();
 

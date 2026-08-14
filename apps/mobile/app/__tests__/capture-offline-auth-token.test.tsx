@@ -21,6 +21,8 @@ import * as ImagePicker from "expo-image-picker";
 import { AuthTokenError, NetworkError, apiFetchMultipart } from "@/lib/api";
 import { mealSlotForHour } from "@/lib/mealSlot";
 
+import CaptureScreen from "../capture";
+
 jest.mock("expo-router", () => ({ router: { back: jest.fn(), push: jest.fn() } }));
 
 // Firebase's own module boundary. `getIdToken` rejecting is what an expired cached
@@ -64,8 +66,6 @@ jest.mock("@/offline/enqueueCapture", () => ({ enqueueCapture: jest.fn() }));
 // the slot would stay green, and the slot decides which diary section the
 // meal lands in.
 const expectedMealSlot = () => mealSlotForHour(new Date().getHours());
-
-import CaptureScreen from "../capture";
 
 function mockEnqueueCapture(): jest.Mock {
   return jest.requireMock("@/offline/enqueueCapture").enqueueCapture;

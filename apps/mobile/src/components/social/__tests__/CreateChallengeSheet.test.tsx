@@ -1,13 +1,13 @@
 import { fireEvent, render } from "@testing-library/react-native";
 
+import { CreateChallengeSheet } from "../CreateChallengeSheet";
+
 const mockMutate = jest.fn();
 const mockPush = jest.fn();
 jest.mock("expo-router", () => ({ router: { push: (...a: unknown[]) => mockPush(...a) } }));
 jest.mock("@/api/hooks", () => ({
   useCreateChallenge: () => ({ mutate: mockMutate, isPending: false }),
 }));
-
-import { CreateChallengeSheet } from "../CreateChallengeSheet";
 
 beforeEach(() => {
   mockMutate.mockReset();

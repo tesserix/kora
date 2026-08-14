@@ -1,5 +1,7 @@
 import { fireEvent, render } from "@testing-library/react-native";
 
+import { SavedMealSheet } from "../SavedMealSheet";
+
 const mockCreate = jest.fn();
 const mockUpdate = jest.fn();
 const mockDelete = jest.fn();
@@ -47,8 +49,6 @@ jest.mock("@/components/meal/FoodPicker", () => {
       ) : null,
   };
 });
-
-import { SavedMealSheet } from "../SavedMealSheet";
 
 const usual = {
   id: "u1", name: "Eggs & Oats", meal_slot: "breakfast",

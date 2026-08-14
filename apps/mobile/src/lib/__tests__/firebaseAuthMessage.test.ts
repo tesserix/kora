@@ -1,5 +1,7 @@
 import { firebaseAuthMessage } from "../firebaseAuthMessage";
 
+import { AuthCancelledError, LastSignInMethodError } from "@/auth/errors";
+
 test.each([
   ["auth/email-already-in-use", "That email already has an account. Try signing in."],
   ["auth/weak-password", "Choose a password of at least 6 characters."],
@@ -48,8 +50,6 @@ test("a non-Firebase value does not throw and still yields the fallback", () => 
   expect(firebaseAuthMessage({})).toBe("Something went wrong. Please try again.");
   expect(firebaseAuthMessage({ code: 42 })).toBe("Something went wrong. Please try again.");
 });
-
-import { AuthCancelledError, LastSignInMethodError } from "@/auth/errors";
 
 test("returns null for a cancelled sign-in so callers render nothing", () => {
   expect(firebaseAuthMessage(new AuthCancelledError())).toBeNull();

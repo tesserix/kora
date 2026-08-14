@@ -4,6 +4,8 @@ import * as ImagePicker from "expo-image-picker";
 import { ApiError } from "@/lib/api";
 import type { RecipeDraft } from "@/api/types";
 
+import { RecipeParseSheet } from "../RecipeParseSheet";
+
 jest.mock("expo-router", () => ({
   router: { push: jest.fn(), back: jest.fn(), replace: jest.fn() },
 }));
@@ -58,8 +60,6 @@ jest.mock("@/api/hooks", () => ({
 jest.mock("@/components/Toast", () => ({
   useToast: () => ({ show: mockToastShow }),
 }));
-
-import { RecipeParseSheet } from "../RecipeParseSheet";
 
 // One resolved ingredient, one unresolved, one portion_assumed — covers all
 // three row states the review stage renders in a single successful parse.

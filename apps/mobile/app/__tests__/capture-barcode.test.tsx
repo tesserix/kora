@@ -3,6 +3,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as ImagePicker from "expo-image-picker";
 import type { Resolution } from "@/api/types";
 
+import CaptureScreen from "../capture";
+
 // The real "@/lib/api" pulls in "@/lib/firebase" -> AsyncStorage's native
 // module, which isn't available under Jest. Mirrors the minimal mock in
 // capture.test.tsx — this file never exercises the error-message narrowing,
@@ -57,8 +59,6 @@ jest.mock("@/api/hooks", () => ({
   useCreateLog: () => ({ mutateAsync: jest.fn(), isPending: false }),
   useFoodSearch: () => ({ data: [], isLoading: false, isError: false }),
 }));
-
-import CaptureScreen from "../capture";
 
 async function render(ui: React.ReactElement) {
   const queryClient = new QueryClient();

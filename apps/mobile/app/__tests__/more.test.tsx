@@ -1,6 +1,8 @@
 import { render, fireEvent } from "@testing-library/react-native";
 import { instrumentLight } from "@/theme/palette";
 
+import More from "../(tabs)/more";
+
 const mockPush = jest.fn();
 const mockSignOut = jest.fn(async () => {});
 const mockUnregisterPushToken = jest.fn(async () => {});
@@ -14,8 +16,6 @@ let mockUnreadCount = 0;
 jest.mock("@/api/hooks", () => ({
   useUnreadCount: () => ({ data: { count: mockUnreadCount } }),
 }));
-
-import More from "../(tabs)/more";
 
 function flattenStyle(style: unknown): Record<string, unknown> {
   const flat = Array.isArray(style) ? style.flat(Infinity) : [style];

@@ -1,5 +1,7 @@
 import { act, fireEvent, render } from "@testing-library/react-native";
 
+import FeedbackScreen from "../feedback";
+
 const mockBack = jest.fn();
 jest.mock("expo-router", () => ({ router: { back: (...a: unknown[]) => mockBack(...a) } }));
 
@@ -22,8 +24,6 @@ jest.mock("@/lib/deviceContext", () => ({
     device_model: "iPhone 15",
   }),
 }));
-
-import FeedbackScreen from "../feedback";
 
 beforeEach(() => {
   mockBack.mockClear();

@@ -14,10 +14,10 @@ import type { ReportSink } from "./reporter";
  */
 export function createCrashlyticsSink(): ReportSink | null {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     // These three return PROMISES in the RNFB modular API — declaring them
     // `void` is what let a native rejection float. `unknown` covers both the
     // real promise-returning functions and any future void form.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const mod = require("@react-native-firebase/crashlytics") as {
       getCrashlytics: () => unknown;
       recordError: (c: unknown, e: Error) => unknown;

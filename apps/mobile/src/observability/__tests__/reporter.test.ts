@@ -1,8 +1,8 @@
 import { initReporting, reportError, setReportingUser, type ReportSink } from "../reporter";
 
 function fakeSink() {
-  const recorded: Array<{ error: Error; attributes: Record<string, string> }> = [];
-  const users: Array<string | null> = [];
+  const recorded: { error: Error; attributes: Record<string, string> }[] = [];
+  const users: (string | null)[] = [];
   const sink: ReportSink = {
     recordError: (error, attributes) => recorded.push({ error, attributes }),
     setUser: (id) => users.push(id),

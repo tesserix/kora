@@ -1,6 +1,8 @@
 import { act, render, fireEvent } from "@testing-library/react-native";
 import * as RN from "react-native";
 
+import Home from "../index";
+
 jest.mock("@/lib/firebase", () => ({ auth: null, isFirebaseConfigured: true }));
 jest.mock("firebase/auth", () => ({ onAuthStateChanged: () => () => {}, signOut: jest.fn() }));
 
@@ -37,8 +39,6 @@ jest.mock("@/api/useInstantLog", () => ({
 jest.mock("@/components/meals/SavedMealSheetProvider", () => ({
   useSavedMealEditor: () => ({ openCreate: jest.fn(), openEdit: jest.fn() }),
 }));
-
-import Home from "../index";
 
 beforeEach(() => {
   mockUseDashboard.mockReset();

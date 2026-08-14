@@ -4,6 +4,8 @@ import { Linking } from "react-native";
 import { useCameraPermissions } from "expo-camera";
 import { router } from "expo-router";
 
+import CaptureScreen from "../capture";
+
 jest.mock("expo-router", () => ({ router: { back: jest.fn(), push: jest.fn() } }));
 
 // Mirrors capture.test.tsx's mock: same-shape classes so the `instanceof`
@@ -25,8 +27,6 @@ jest.mock("@/api/hooks", () => ({
   useCreateLog: () => ({ mutateAsync: jest.fn(), isPending: false }),
   useFoodSearch: () => ({ data: [], isLoading: false, isError: false }),
 }));
-
-import CaptureScreen from "../capture";
 
 function render(ui: React.ReactElement) {
   const queryClient = new QueryClient();

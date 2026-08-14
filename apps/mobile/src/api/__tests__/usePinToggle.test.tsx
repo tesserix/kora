@@ -1,5 +1,7 @@
 import { renderHook } from "@testing-library/react-native";
 
+import { usePinToggle } from "../usePinToggle";
+
 const mockCreateMutate = jest.fn();
 const mockDeleteMutate = jest.fn();
 let mockPinsData: { food_item_id: string }[] = [];
@@ -9,8 +11,6 @@ jest.mock("../hooks", () => ({
   useCreatePin: () => ({ mutate: mockCreateMutate }),
   useDeletePin: () => ({ mutate: mockDeleteMutate }),
 }));
-
-import { usePinToggle } from "../usePinToggle";
 
 beforeEach(() => {
   mockCreateMutate.mockReset();

@@ -1,5 +1,7 @@
 import { render, fireEvent } from "@testing-library/react-native";
 
+import Friends from "../friends";
+
 const mockAcceptMutate = jest.fn();
 const mockDeclineMutate = jest.fn();
 const mockUnfriendMutate = jest.fn();
@@ -18,8 +20,6 @@ jest.mock("@/api/hooks", () => ({
   useSetShareProgress: () => ({ mutate: mockSetShareMutate, isPending: false }),
   useFriendsProgress: () => ({ data: { me: { streak_days: 2, adherence_days: 1, adherence_window: 7 }, friends: [] } }),
 }));
-
-import Friends from "../friends";
 
 beforeEach(() => { mockAcceptMutate.mockClear(); mockDeclineMutate.mockClear(); mockSetShareMutate.mockClear(); });
 

@@ -1,5 +1,7 @@
 import { render } from "@testing-library/react-native";
 
+import { PinnedStrip } from "../PinnedStrip";
+
 const mockLogFood = jest.fn();
 const mockToggle = jest.fn();
 let mockPinsResult: { data?: unknown; isLoading?: boolean; isError?: boolean } = { data: [] };
@@ -7,8 +9,6 @@ let mockPinsResult: { data?: unknown; isLoading?: boolean; isError?: boolean } =
 jest.mock("@/api/hooks", () => ({ usePins: () => mockPinsResult }));
 jest.mock("@/api/usePinToggle", () => ({ usePinToggle: () => ({ pinnedIds: new Set(["f1"]), toggle: mockToggle }) }));
 jest.mock("@/api/useInstantLog", () => ({ useInstantLog: () => ({ logFood: mockLogFood, logMeal: jest.fn() }) }));
-
-import { PinnedStrip } from "../PinnedStrip";
 
 beforeEach(() => { mockPinsResult = { data: [] }; });
 

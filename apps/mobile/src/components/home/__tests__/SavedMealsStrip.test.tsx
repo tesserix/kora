@@ -1,5 +1,7 @@
 import { render } from "@testing-library/react-native";
 
+import { SavedMealsStrip } from "../SavedMealsStrip";
+
 const mockLogMeal = jest.fn();
 const mockOpenEdit = jest.fn();
 let mockSaved: { data?: unknown; isLoading?: boolean; isError?: boolean } = { data: [] };
@@ -7,8 +9,6 @@ let mockSaved: { data?: unknown; isLoading?: boolean; isError?: boolean } = { da
 jest.mock("@/api/hooks", () => ({ useSavedMeals: () => mockSaved }));
 jest.mock("@/api/useInstantLog", () => ({ useInstantLog: () => ({ logMeal: mockLogMeal, logFood: jest.fn() }) }));
 jest.mock("@/components/meals/SavedMealSheetProvider", () => ({ useSavedMealEditor: () => ({ openCreate: jest.fn(), openEdit: mockOpenEdit }) }));
-
-import { SavedMealsStrip } from "../SavedMealsStrip";
 
 beforeEach(() => { mockSaved = { data: [] }; });
 
