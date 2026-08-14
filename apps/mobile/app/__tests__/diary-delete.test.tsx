@@ -6,6 +6,16 @@ import { queryClient as appQueryClient } from "@/lib/queryClient";
 import { apiFetch } from "@/lib/api";
 import Diary from "../(tabs)/diary";
 
+// The reminder scheduler now consults the signed-in user before it (re-)arms
+// anything (#171), which pulls @/lib/firebase into this module graph — and
+// firebase ships ESM that Jest cannot transform. A signed-in stub keeps the
+// import hermetic and preserves the pre-#171 behaviour of these tests, where
+// the reconcile pass ran unconditionally.
+jest.mock("@/lib/firebase", () => ({
+  isFirebaseConfigured: true,
+  auth: { authStateReady: async () => {}, currentUser: { uid: "test-user" } },
+}));
+
 jest.mock("expo-router", () => ({ router: { push: jest.fn() } }));
 jest.mock("@/offline/useQueuedLogs", () => ({
   useQueuedLogs: () => ({ rows: [], retryRow: jest.fn(), discardRow: jest.fn() }),

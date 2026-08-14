@@ -23,7 +23,12 @@ import { mealSlotForHour } from "@/lib/mealSlot";
 
 import CaptureScreen from "../capture";
 
-jest.mock("expo-router", () => ({ router: { back: jest.fn(), push: jest.fn() } }));
+// canGoBack/replace back safeBack(): capture is deep-link reachable (a
+// notification tap), so it can mount with an empty stack and must not rely on a
+// bare router.back(). Defaults to "there is history", the ordinary case.
+jest.mock("expo-router", () => ({
+  router: { back: jest.fn(), push: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => true) },
+}));
 
 // Firebase's own module boundary. `getIdToken` rejecting is what an expired cached
 // token does on an offline device; firebase/auth's other exports are only used by

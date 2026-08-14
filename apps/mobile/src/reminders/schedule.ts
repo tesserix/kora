@@ -98,6 +98,32 @@ export function applyAllReminders(
   return run;
 }
 
+// cancelAllReminders disarms every scheduled local notification and schedules
+// nothing back. It is the exit-path counterpart to applyAllReminders: sign-out
+// and account deletion previously only ever addressed REMOTE push
+// (unregisterPushToken), so a deleted user's meal reminders stayed armed in the
+// OS and fired for an account that no longer existed (#171).
+//
+// It runs on the SAME queue as applyAllReminders, and that is the whole point:
+// applyAllReminders is cancel-then-reschedule, so an unserialised cancel landing
+// mid-pass would be immediately undone by the rest of that pass re-arming
+// reminders for the user who just left.
+//
+// Never rejects. Every caller is an irreversible exit path (sign-out, forced
+// 401 sign-out, account deletion) where a wedged notification service must not
+// block or fail the thing the user actually asked for — the same best-effort
+// convention as src/lib/push.ts.
+export function cancelAllReminders(): Promise<void> {
+  const run = applyTail
+    .catch(() => {})
+    .then(() => Notifications.cancelAllScheduledNotificationsAsync())
+    .catch(() => {
+      // Deliberately swallowed — see above.
+    });
+  applyTail = run;
+  return run;
+}
+
 // applyTail must never hold a rejection: one failed apply must not prevent the
 // next from running.
 let applyTail: Promise<void> = Promise.resolve();

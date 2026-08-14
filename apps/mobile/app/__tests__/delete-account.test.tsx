@@ -21,6 +21,12 @@ jest.mock("@/lib/push", () => ({
   registerPushToken: () => mockRegister(),
 }));
 
+// Local (scheduled) reminders are a separate surface from remote push: they
+// live in the OS, not on the server, and unregisterPushToken does nothing to
+// them (#171).
+const mockCancelReminders = jest.fn();
+jest.mock("@/reminders/schedule", () => ({ cancelAllReminders: () => mockCancelReminders() }));
+
 const mockSignOut = jest.fn();
 jest.mock("firebase/auth", () => ({ signOut: (...a: unknown[]) => mockSignOut(...a) }));
 jest.mock("@/lib/firebase", () => ({ auth: { name: "fake-auth" } }));
@@ -32,6 +38,7 @@ beforeEach(() => {
   mockDeleteAccount.mockReset().mockResolvedValue(undefined);
   mockUnregister.mockReset().mockResolvedValue(undefined);
   mockRegister.mockReset().mockResolvedValue(undefined);
+  mockCancelReminders.mockReset().mockResolvedValue(undefined);
 });
 
 test("names what is destroyed and that it is irreversible", async () => {
@@ -193,5 +200,51 @@ test("the failed request can be retried without retyping", async () => {
   await waitFor(() => expect(mockDeleteAccount).toHaveBeenCalledTimes(1));
 
   await fireEvent.press(getByTestId("confirm-delete"));
+  await waitFor(() => expect(mockReplace).toHaveBeenCalledWith("/sign-in"));
+});
+
+
+// --- #171: the deleted account's reminders ---------------------------------
+//
+// Reported from a real device: after deleting their account the user sat on the
+// sign-in screen, backgrounded the app, and a "log dinner" reminder fired for
+// an account that no longer existed. The deletion flow only ever addressed
+// REMOTE push (unregisterPushToken); the meal reminders are LOCAL scheduled
+// notifications and stayed armed in the OS.
+test("deleting the account disarms the local reminders it scheduled", async () => {
+  const { getByTestId } = await render(<DeleteAccount />);
+  await fireEvent.changeText(getByTestId("confirm-input"), "delete");
+  await act(async () => {
+    await fireEvent.press(getByTestId("confirm-delete"));
+  });
+
+  await waitFor(() => expect(mockCancelReminders).toHaveBeenCalledTimes(1));
+  expect(mockReplace).toHaveBeenCalledWith("/sign-in");
+});
+
+// The account survived, so its reminders must too — cancelling here would
+// silently wipe a working user's schedule because of a network blip.
+test("a failed deletion leaves the reminders alone", async () => {
+  mockDeleteAccount.mockRejectedValue(new Error("network"));
+  const { getByTestId } = await render(<DeleteAccount />);
+  await fireEvent.changeText(getByTestId("confirm-input"), "delete");
+  await act(async () => {
+    await fireEvent.press(getByTestId("confirm-delete"));
+  });
+
+  await waitFor(() => expect(mockRegister).toHaveBeenCalled());
+  expect(mockCancelReminders).not.toHaveBeenCalled();
+});
+
+// Best-effort, like every other side effect on this path: a wedged notification
+// service must never strand the user on a screen for an account that is gone.
+test("a failed cancellation still signs the user out and navigates away", async () => {
+  mockCancelReminders.mockRejectedValue(new Error("notification service unavailable"));
+  const { getByTestId } = await render(<DeleteAccount />);
+  await fireEvent.changeText(getByTestId("confirm-input"), "delete");
+  await act(async () => {
+    await fireEvent.press(getByTestId("confirm-delete"));
+  });
+
   await waitFor(() => expect(mockReplace).toHaveBeenCalledWith("/sign-in"));
 });

@@ -1,4 +1,4 @@
-import { buildSchedule, buildCustomSchedule, applyAllReminders, MAX_SCHEDULED_NOTIFICATIONS } from "../schedule";
+import { buildSchedule, buildCustomSchedule, applyAllReminders, cancelAllReminders, MAX_SCHEDULED_NOTIFICATIONS } from "../schedule";
 import { DEFAULT_PREFS } from "../prefs";
 import type { CustomReminder, Weekday } from "../customPrefs";
 import * as Notifications from "expo-notifications";
@@ -242,4 +242,62 @@ test("two concurrent applyAllReminders calls are serialised, not interleaved", a
   // Exactly two complete, non-overlapping passes: 3 meals + 3 weekly customs each.
   const pass = ["cancel", ...Array(6).fill("schedule")];
   expect(events).toEqual([...pass, ...pass]);
+});
+
+// --- cancelAllReminders (#171) --------------------------------------------
+//
+// Deleting an account (or signing out) left every local reminder the user had
+// configured armed in the OS. A "log dinner" notification then fired for an
+// account that no longer existed. Nothing in the app disarmed them, because
+// both exit paths only ever addressed REMOTE push.
+
+test("cancelAllReminders clears every scheduled local notification", async () => {
+  await cancelAllReminders();
+  expect(Notifications.cancelAllScheduledNotificationsAsync).toHaveBeenCalledTimes(1);
+  expect(Notifications.scheduleNotificationAsync).not.toHaveBeenCalled();
+});
+
+// It runs on the same serialisation queue as applyAllReminders. Without that,
+// a sign-out cancel could land in the middle of a reconcile pass and the
+// reconcile's remaining scheduleNotificationAsync calls would re-arm reminders
+// for the user who just left.
+test("cancelAllReminders is serialised behind an in-flight apply, so nothing is re-armed after it", async () => {
+  const events: string[] = [];
+  let releaseFirstCancel: () => void = () => {};
+  const gate = new Promise<void>((resolve) => {
+    releaseFirstCancel = resolve;
+  });
+  let cancels = 0;
+
+  (Notifications.cancelAllScheduledNotificationsAsync as jest.Mock).mockImplementation(async () => {
+    cancels++;
+    events.push(cancels === 1 ? "apply-cancel" : "signout-cancel");
+    if (cancels === 1) await gate;
+  });
+  (Notifications.scheduleNotificationAsync as jest.Mock).mockImplementation(async () => {
+    events.push("schedule");
+    return "id";
+  });
+
+  const apply = applyAllReminders(DEFAULT_PREFS_ALL_OFF, [mwf], NO_WEIGHT_REMINDER);
+  const cancel = cancelAllReminders();
+
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(events).toEqual(["apply-cancel"]);
+
+  releaseFirstCancel();
+  await Promise.all([apply, cancel]);
+
+  // The sign-out cancel is LAST: no schedule call follows it.
+  expect(events[events.length - 1]).toBe("signout-cancel");
+});
+
+// Best-effort, like every other push side effect in this app: a failed cancel
+// must never reject into a sign-out or an account deletion.
+test("cancelAllReminders resolves instead of rejecting when the OS call fails", async () => {
+  (Notifications.cancelAllScheduledNotificationsAsync as jest.Mock).mockRejectedValueOnce(
+    new Error("notification service unavailable"),
+  );
+  await expect(cancelAllReminders()).resolves.toBeUndefined();
 });

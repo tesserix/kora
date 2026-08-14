@@ -23,7 +23,12 @@ jest.mock("@/lib/api", () => ({
 
 const { CancelledError } = jest.requireMock("@/lib/api") as { CancelledError: new () => Error };
 
-jest.mock("expo-router", () => ({ router: { back: jest.fn(), push: jest.fn() } }));
+// canGoBack/replace back safeBack(): capture is deep-link reachable (a
+// notification tap), so it can mount with an empty stack and must not rely on a
+// bare router.back(). Defaults to "there is history", the ordinary case.
+jest.mock("expo-router", () => ({
+  router: { back: jest.fn(), push: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => true) },
+}));
 
 const mockResolveBarcodeMutate = jest.fn();
 // Mutable so the Cancel tests below can force the analyzing stage (and its

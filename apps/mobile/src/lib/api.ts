@@ -1,6 +1,7 @@
 import { onAuthStateChanged, signOut, type User } from "firebase/auth";
 import { auth } from "./firebase";
 import { reportError } from "@/observability/reporter";
+import { cancelAllReminders } from "@/reminders/schedule";
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:8080";
 
@@ -249,6 +250,13 @@ async function signOutForExpiredSession(): Promise<void> {
   if (hasSignedOutForExpiredSession || !auth) return;
   hasSignedOutForExpiredSession = true;
   sessionExpiredNotice = true;
+  // A forced sign-out is a sign-out. The user lands on /sign-in with a dead
+  // session, and any meal/custom/weight reminder they configured is a LOCAL
+  // scheduled notification that would otherwise keep firing there — the #171
+  // symptom, reached by a path with no button and no user action behind it.
+  // Inside the idempotence guard above, so a burst of concurrent 401s cancels
+  // once rather than once per request. cancelAllReminders never rejects.
+  await cancelAllReminders();
   try {
     await signOut(auth);
   } catch {

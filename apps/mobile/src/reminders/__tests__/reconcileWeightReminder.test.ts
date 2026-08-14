@@ -1,17 +1,24 @@
 import { reconcileWeightReminder } from "../reconcileWeightReminder";
 import { fetchLatestWeighInDate } from "../lastWeighIn";
 import * as scheduleModule from "../schedule";
+import { resolveAuthState } from "@/lib/authState";
 
 jest.mock("../prefs", () => ({ loadPrefs: jest.fn().mockResolvedValue({}) }));
 jest.mock("../customPrefs", () => ({ loadCustom: jest.fn().mockResolvedValue([]) }));
 jest.mock("../weightPrefs", () => ({ loadWeightPref: jest.fn().mockResolvedValue({ enabled: true, hour: 7, minute: 0, days: [1] }) }));
 jest.mock("../lastWeighIn", () => ({ fetchLatestWeighInDate: jest.fn() }));
+// The auth gate (#171). Reminders must only be (re-)armed for a signed-in user;
+// every test that is not about the gate itself declares the signed-in case.
+jest.mock("@/lib/authState", () => ({ resolveAuthState: jest.fn(async () => "signed-in") }));
 
 const mockFetch = fetchLatestWeighInDate as jest.Mock;
+const mockAuthState = resolveAuthState as jest.Mock;
 
 beforeEach(() => {
   mockFetch.mockReset();
   mockFetch.mockResolvedValue(null);
+  mockAuthState.mockReset();
+  mockAuthState.mockResolvedValue("signed-in");
 });
 
 // jest.spyOn on the same method across tests reuses the same underlying mock,
@@ -185,4 +192,62 @@ test("a consumed weigh-in does not leak into the next reconcile", async () => {
     expect.anything(),
     expect.objectContaining({ lastWeighedAt: null }),
   ]);
+});
+
+
+// --- the signed-out gate (#171) -------------------------------------------
+//
+// setupPushHandler() runs at module scope on EVERY launch and funnels into
+// here, deliberately so reminders survive reinstalls and permission changes.
+// It had no auth check, so a user sitting on the sign-in screen after deleting
+// their account re-armed the deleted account's meal reminders on every
+// relaunch. Cancelling at deletion alone would not have held.
+test("a signed-out launch does NOT re-arm reminders", async () => {
+  mockAuthState.mockResolvedValue("signed-out");
+  const apply = jest.spyOn(scheduleModule, "applyAllReminders").mockResolvedValue(undefined);
+  const cancel = jest.spyOn(scheduleModule, "cancelAllReminders").mockResolvedValue(undefined);
+
+  await reconcileWeightReminder();
+
+  expect(apply).not.toHaveBeenCalled();
+  // It also cleans up: reminders armed before this fix shipped (or by a
+  // sign-out path that failed to disarm them) are disarmed on the next launch.
+  expect(cancel).toHaveBeenCalledTimes(1);
+});
+
+// A signed-out reconcile must not even reach the network. fetchLatestWeighInDate
+// goes through apiFetch, which with no session produces a pointless 401.
+test("a signed-out launch does not look up the last weigh-in", async () => {
+  mockAuthState.mockResolvedValue("signed-out");
+  jest.spyOn(scheduleModule, "cancelAllReminders").mockResolvedValue(undefined);
+
+  await reconcileWeightReminder();
+
+  expect(mockFetch).not.toHaveBeenCalled();
+});
+
+// The intent of the existing behaviour is preserved: for a SIGNED-IN user the
+// launch pass still re-arms everything, so reminders survive reinstalls and
+// permission changes exactly as before.
+test("a signed-in launch still re-arms reminders", async () => {
+  const apply = jest.spyOn(scheduleModule, "applyAllReminders").mockResolvedValue(undefined);
+  const cancel = jest.spyOn(scheduleModule, "cancelAllReminders").mockResolvedValue(undefined);
+
+  await reconcileWeightReminder();
+
+  expect(apply).toHaveBeenCalledTimes(1);
+  expect(cancel).not.toHaveBeenCalled();
+});
+
+// A missing Firebase config is not a sign-out. Treating it as one would destroy
+// a working user's schedule because of an unrelated configuration problem.
+test("an unconfigured build neither arms nor cancels anything", async () => {
+  mockAuthState.mockResolvedValue("unconfigured");
+  const apply = jest.spyOn(scheduleModule, "applyAllReminders").mockResolvedValue(undefined);
+  const cancel = jest.spyOn(scheduleModule, "cancelAllReminders").mockResolvedValue(undefined);
+
+  await reconcileWeightReminder();
+
+  expect(apply).not.toHaveBeenCalled();
+  expect(cancel).not.toHaveBeenCalled();
 });

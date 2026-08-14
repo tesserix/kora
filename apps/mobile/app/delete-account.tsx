@@ -11,6 +11,7 @@ import { PressableScale } from "@/motion";
 import { safeBack } from "@/lib/safeBack";
 import { deleteAccount } from "@/api/hooks";
 import { registerPushToken, unregisterPushToken } from "@/lib/push";
+import { cancelAllReminders } from "@/reminders/schedule";
 import { apiErrorMessage } from "@/lib/apiErrorMessage";
 import { auth } from "@/lib/firebase";
 import { useTheme } from "@/theme";
@@ -89,6 +90,21 @@ export default function DeleteAccountScreen() {
     // The account is gone. A failure past this point must not strand the user
     // on a screen for an account that no longer exists, so sign-out is
     // best-effort and navigation happens regardless.
+    //
+    // cancelAllReminders is the LOCAL counterpart to the unregisterPushToken
+    // above, and it is not redundant with it: meal, custom and weight reminders
+    // are scheduled in the OS, not on the server, so de-registering the device
+    // does nothing to them. Without this they kept firing for a deleted account
+    // (#171). Deliberately AFTER deleteAccount succeeded — a failed deletion
+    // leaves a working account whose reminders must survive.
+    try {
+      await cancelAllReminders();
+    } catch {
+      // Deliberately swallowed — see src/lib/push.ts for this convention.
+      // cancelAllReminders already swallows its own failures; this is belt and
+      // braces on the one irreversible path in the app, where nothing may stand
+      // between the user and /sign-in.
+    }
     try {
       if (auth) await signOut(auth);
     } catch {

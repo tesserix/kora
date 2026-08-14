@@ -2,7 +2,8 @@ import { loadPrefs } from "./prefs";
 import { loadCustom } from "./customPrefs";
 import { loadWeightPref } from "./weightPrefs";
 import { fetchLatestWeighInDate } from "./lastWeighIn";
-import { applyAllReminders } from "./schedule";
+import { applyAllReminders, cancelAllReminders } from "./schedule";
+import { resolveAuthState } from "@/lib/authState";
 
 // run does one full reconcile pass: fresh reads of everything from storage,
 // then a single applyAllReminders call.
@@ -19,6 +20,26 @@ import { applyAllReminders } from "./schedule";
 // fails, so an unknown weigh-in still lets the reminder FIRE — a redundant
 // reminder is a nuisance, a silently suppressed one defeats the feature.
 async function run(justWeighedAt: Date | null): Promise<void> {
+  // The auth gate (#171). This function is the single funnel for the launch
+  // pass (setupPushHandler, module scope) and the foreground pass
+  // (app/_layout.tsx), both of which used to run unconditionally. A user who
+  // deleted their account and was sitting on the sign-in screen therefore
+  // re-armed the deleted account's meal reminders on every relaunch — so
+  // cancelling at deletion alone could never have held.
+  //
+  // Signed OUT is not merely "skip": it actively disarms, so reminders left
+  // over from a previous session (or armed by a build from before this fix)
+  // are cleaned up the next time the app opens.
+  //
+  // Unconfigured is neither. Destroying a working user's schedule because the
+  // Firebase config went missing would be a worse bug than the one this fixes.
+  const authState = await resolveAuthState();
+  if (authState === "unconfigured") return;
+  if (authState === "signed-out") {
+    await cancelAllReminders();
+    return;
+  }
+
   const [mealPrefs, customs, pref, lastWeighedAt] = await Promise.all([
     loadPrefs(),
     loadCustom(),

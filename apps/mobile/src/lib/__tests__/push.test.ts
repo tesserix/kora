@@ -3,26 +3,39 @@ import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import { router } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { registerPushToken, unregisterPushToken, setupPushHandler, usePushResponder } from "../push";
+import { onAuthStateChanged } from "firebase/auth";
+import {
+  registerPushToken,
+  unregisterPushToken,
+  setupPushHandler,
+  usePushRegistration,
+  usePushResponder,
+} from "../push";
 import { registerDevice, unregisterDevice } from "../pushApi";
 import { targetFor } from "../notificationTarget";
-import { applyAllReminders } from "@/reminders/schedule";
+import { applyAllReminders, cancelAllReminders } from "@/reminders/schedule";
 import { DEFAULT_WEIGHT_PREF } from "@/reminders/weightPrefs";
 import { fetchLatestWeighInDate } from "@/reminders/lastWeighIn";
+import { resolveAuthState } from "@/lib/authState";
 
 jest.mock("../pushApi", () => ({
   registerDevice: jest.fn(async () => {}),
   unregisterDevice: jest.fn(async () => {}),
 }));
 
-// Firebase is initialised elsewhere; the exported functions under test don't
-// touch it, so a light mock keeps the module import clean.
-jest.mock("@/lib/firebase", () => ({ auth: null, isFirebaseConfigured: false }));
+// Firebase is initialised elsewhere; a light mock keeps the module import
+// clean. Configured (not null) so usePushRegistration's auth subscription is
+// actually reachable.
+jest.mock("@/lib/firebase", () => ({ auth: { name: "fake-auth" }, isFirebaseConfigured: true }));
 // firebase/auth ships ESM that Jest can't transform out of the box; the repo's
 // existing tests (e.g. more.test.tsx) mock it directly for the same reason.
 jest.mock("firebase/auth", () => ({ onAuthStateChanged: jest.fn(() => jest.fn()) }));
 
-jest.mock("expo-router", () => ({ router: { push: jest.fn() } }));
+jest.mock("expo-router", () => ({ router: { push: jest.fn(), replace: jest.fn() } }));
+
+// The auth gate (#171). Reminders and their deep links belong to a signed-in
+// user; tests that are not about the gate declare the signed-in case.
+jest.mock("@/lib/authState", () => ({ resolveAuthState: jest.fn(async () => "signed-in") }));
 
 // usePushResponder's non-reminder branch only needs targetFor's return value,
 // not its real switch logic — mocked here to keep the routing test focused.
@@ -32,7 +45,10 @@ jest.mock("../notificationTarget", () => ({ targetFor: jest.fn() }));
 // (usePushResponder doesn't call it), but push.ts imports both modules at the
 // top level, so they're mocked to keep the import hermetic.
 jest.mock("@/reminders/prefs", () => ({ loadPrefs: jest.fn(async () => ({})) }));
-jest.mock("@/reminders/schedule", () => ({ applyAllReminders: jest.fn(async () => {}) }));
+jest.mock("@/reminders/schedule", () => ({
+  applyAllReminders: jest.fn(async () => {}),
+  cancelAllReminders: jest.fn(async () => {}),
+}));
 jest.mock("@/reminders/customPrefs", () => ({ loadCustom: jest.fn(async () => []) }));
 jest.mock("@/reminders/weightPrefs", () => {
   const actual = jest.requireActual("@/reminders/weightPrefs");
@@ -48,6 +64,7 @@ function setProjectId(id: string | undefined): void {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  (resolveAuthState as jest.Mock).mockResolvedValue("signed-in");
   setProjectId("test-project");
   (Notifications.getPermissionsAsync as jest.Mock).mockResolvedValue({ status: "granted" });
   (Notifications.requestPermissionsAsync as jest.Mock).mockResolvedValue({ status: "granted" });
@@ -161,33 +178,52 @@ test("unregisterPushToken deletes and clears the cached token", async () => {
 });
 
 // fakeResponse builds the minimal shape usePushResponder's listener reads —
-// response.notification.request.content.data — without pulling in the full
-// (large) expo-notifications NotificationResponse type.
-function fakeResponse(data: unknown): Notifications.NotificationResponse {
+// the payload plus the identity (request id + delivery date) it de-duplicates
+// on — without pulling in the full (large) expo-notifications
+// NotificationResponse type.
+//
+// The identity defaults to a fresh one per call, so a test that does not
+// deliberately re-deliver the SAME response is never accidentally de-duplicated
+// by module-level state left behind by an earlier test.
+let nextResponseId = 0;
+function fakeResponse(
+  data: unknown,
+  identity?: { identifier: string; date: number },
+): Notifications.NotificationResponse {
+  const id = identity ?? { identifier: `req-${++nextResponseId}`, date: 1_700_000_000_000 };
   return {
-    notification: { request: { content: { data } } },
+    notification: { date: id.date, request: { identifier: id.identifier, content: { data } } },
   } as unknown as Notifications.NotificationResponse;
 }
 
-test("reminder tap routes straight to /capture and skips the targetFor deep-link path", async () => {
+// listenerFrom renders the hook and hands back the callback expo-notifications
+// was given, which is what a real notification tap invokes.
+async function listenerFrom(): Promise<(r: Notifications.NotificationResponse) => unknown> {
   await renderHook(() => usePushResponder());
-  const callback = (Notifications.addNotificationResponseReceivedListener as jest.Mock).mock.calls[0][0];
+  const calls = (Notifications.addNotificationResponseReceivedListener as jest.Mock).mock.calls;
+  return calls[calls.length - 1][0];
+}
 
-  callback(fakeResponse({ kind: "reminder", slot: "breakfast" }));
+test("reminder tap routes straight to /capture and skips the targetFor deep-link path", async () => {
+  const callback = await listenerFrom();
 
-  expect(router.push).toHaveBeenCalledWith("/capture");
-  expect(router.push).toHaveBeenCalledTimes(1);
+  await callback(fakeResponse({ kind: "reminder", slot: "breakfast" }));
+
+  // replace, not push: repeated delivery of a reminder response must not be
+  // able to stack capture screens on top of each other (#171).
+  expect(router.replace).toHaveBeenCalledWith("/capture");
+  expect(router.replace).toHaveBeenCalledTimes(1);
+  expect(router.push).not.toHaveBeenCalled();
   expect(targetFor).not.toHaveBeenCalled();
 });
 
 test("tapping a custom reminder routes to Home", async () => {
-  await renderHook(() => usePushResponder());
-  const callback = (Notifications.addNotificationResponseReceivedListener as jest.Mock).mock.calls[0][0];
+  const callback = await listenerFrom();
 
-  callback(fakeResponse({ kind: "custom", id: "cr_1" }));
+  await callback(fakeResponse({ kind: "custom", id: "cr_1" }));
 
-  expect(router.push).toHaveBeenCalledWith("/");
-  expect(router.push).toHaveBeenCalledTimes(1);
+  expect(router.replace).toHaveBeenCalledWith("/");
+  expect(router.replace).toHaveBeenCalledTimes(1);
 });
 
 // Regression: the weight reminder's payload is { kind: "weight" }, which had no
@@ -195,24 +231,135 @@ test("tapping a custom reminder routes to Home", async () => {
 // case either, so tapping the notification opened the app wherever it last was
 // — no deep link at all. Weight logging lives in WeightLogSheet on Progress.
 test("tapping a weight check-in reminder routes to Progress, where weight is logged", async () => {
-  await renderHook(() => usePushResponder());
-  const callback = (Notifications.addNotificationResponseReceivedListener as jest.Mock).mock.calls[0][0];
+  const callback = await listenerFrom();
 
-  callback(fakeResponse({ kind: "weight" }));
+  await callback(fakeResponse({ kind: "weight" }));
 
-  expect(router.push).toHaveBeenCalledWith("/progress");
-  expect(router.push).toHaveBeenCalledTimes(1);
+  expect(router.replace).toHaveBeenCalledWith("/progress");
+  expect(router.replace).toHaveBeenCalledTimes(1);
   expect(targetFor).not.toHaveBeenCalled();
 });
 
 test("non-reminder tap still routes via the existing targetFor deep-link path, not /capture", async () => {
   (targetFor as jest.Mock).mockReturnValue("/friends");
-  await renderHook(() => usePushResponder());
-  const callback = (Notifications.addNotificationResponseReceivedListener as jest.Mock).mock.calls[0][0];
+  const callback = await listenerFrom();
 
-  callback(fakeResponse({ type: "friend_request", entity_id: "x" }));
+  await callback(fakeResponse({ type: "friend_request", entity_id: "x" }));
 
   expect(targetFor).toHaveBeenCalledWith({ type: "friend_request", entity_id: "x" });
-  expect(router.push).toHaveBeenCalledWith("/friends");
-  expect(router.push).not.toHaveBeenCalledWith("/capture");
+  expect(router.replace).toHaveBeenCalledWith("/friends");
+  expect(router.replace).not.toHaveBeenCalledWith("/capture");
+});
+
+// --- the signed-out deep link, and the stacking it caused (#171) -----------
+//
+// Reported from a real device: after deleting their account and sitting on the
+// sign-in screen, a "log dinner" reminder fired and opened the CAPTURE screen
+// while signed out. usePushResponder() is called at the top of TabsLayout,
+// before the onAuthStateChanged -> /sign-in redirect in its effect has run, so
+// the listener is live during the signed-out moments of a launch.
+test("a reminder tap while signed out navigates nowhere", async () => {
+  (resolveAuthState as jest.Mock).mockResolvedValue("signed-out");
+  const callback = await listenerFrom();
+
+  await callback(fakeResponse({ kind: "reminder", slot: "dinner" }));
+
+  expect(router.replace).not.toHaveBeenCalled();
+  expect(router.push).not.toHaveBeenCalled();
+});
+
+test("no deep link of any kind opens while signed out", async () => {
+  (resolveAuthState as jest.Mock).mockResolvedValue("signed-out");
+  (targetFor as jest.Mock).mockReturnValue("/friends");
+  const callback = await listenerFrom();
+
+  await callback(fakeResponse({ kind: "custom", id: "cr_1" }));
+  await callback(fakeResponse({ kind: "weight" }));
+  await callback(fakeResponse({ type: "friend_request", entity_id: "x" }));
+
+  expect(router.replace).not.toHaveBeenCalled();
+  expect(router.push).not.toHaveBeenCalled();
+});
+
+// The stacking. The device report needed capture closed 3-4 times before it
+// stopped. TabsLayout remounts re-register the listener, and expo-notifications
+// re-delivers the pending launch response to each newly added listener, so ONE
+// tap produced several navigations. This asserts the observable consequence:
+// the same response delivered repeatedly navigates exactly once.
+test("the same notification response delivered repeatedly navigates exactly once", async () => {
+  const identity = { identifier: "req-stack", date: 1_700_000_000_000 };
+  const callback = await listenerFrom();
+  const second = await listenerFrom();
+
+  await callback(fakeResponse({ kind: "reminder", slot: "dinner" }, identity));
+  await second(fakeResponse({ kind: "reminder", slot: "dinner" }, identity));
+  await callback(fakeResponse({ kind: "reminder", slot: "dinner" }, identity));
+
+  expect(router.replace).toHaveBeenCalledTimes(1);
+});
+
+// The de-duplication keys on the DELIVERY, not on the scheduled request: a
+// DAILY trigger keeps the same request identifier for every occurrence, so
+// keying on the identifier alone would silently kill tomorrow's deep link.
+test("the next occurrence of the same daily reminder still deep-links", async () => {
+  const callback = await listenerFrom();
+
+  await callback(
+    fakeResponse({ kind: "reminder", slot: "dinner" }, { identifier: "daily-dinner", date: 1 }),
+  );
+  await callback(
+    fakeResponse({ kind: "reminder", slot: "dinner" }, { identifier: "daily-dinner", date: 2 }),
+  );
+
+  expect(router.replace).toHaveBeenCalledTimes(2);
+});
+
+// The listener is removed on unmount; leaking one per TabsLayout remount is
+// what multiplied the deliveries in the first place.
+test("the listener is removed when the responder unmounts", async () => {
+  const remove = jest.fn();
+  (Notifications.addNotificationResponseReceivedListener as jest.Mock).mockReturnValue({ remove });
+
+  const { unmount } = await renderHook(() => usePushResponder());
+  await unmount();
+
+  expect(remove).toHaveBeenCalledTimes(1);
+});
+
+// --- the launch re-arm gate (#171) ----------------------------------------
+
+test("setupPushHandler does NOT re-arm reminders while signed out", async () => {
+  (resolveAuthState as jest.Mock).mockResolvedValue("signed-out");
+
+  setupPushHandler();
+
+  await waitFor(() => expect(cancelAllReminders).toHaveBeenCalled());
+  expect(applyAllReminders).not.toHaveBeenCalled();
+});
+
+
+// --- re-arming on sign-in (#171) ------------------------------------------
+//
+// The launch pass is now gated on a signed-in user, so a launch that lands on
+// the sign-in screen deliberately arms nothing. Something must therefore re-arm
+// when the user actually signs in, or their reminders stay dead for the rest of
+// the session (until the next foreground pass).
+test("signing in re-arms the reminders the signed-out launch declined to arm", async () => {
+  await renderHook(() => usePushRegistration());
+  const onAuth = (onAuthStateChanged as jest.Mock).mock.calls[0][1];
+
+  onAuth({ uid: "u1" });
+
+  await waitFor(() => expect(applyAllReminders).toHaveBeenCalled());
+});
+
+test("an auth callback with no user arms nothing", async () => {
+  (resolveAuthState as jest.Mock).mockResolvedValue("signed-out");
+  await renderHook(() => usePushRegistration());
+  const onAuth = (onAuthStateChanged as jest.Mock).mock.calls[0][1];
+
+  onAuth(null);
+
+  await waitFor(() => expect(registerDevice).not.toHaveBeenCalled());
+  expect(applyAllReminders).not.toHaveBeenCalled();
 });

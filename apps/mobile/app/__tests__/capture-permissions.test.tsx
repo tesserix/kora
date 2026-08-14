@@ -7,7 +7,12 @@ import { router } from "expo-router";
 
 import CaptureScreen from "../capture";
 
-jest.mock("expo-router", () => ({ router: { back: jest.fn(), push: jest.fn() } }));
+// canGoBack/replace back safeBack(): capture is deep-link reachable (a
+// notification tap), so it can mount with an empty stack and must not rely on a
+// bare router.back(). Defaults to "there is history", the ordinary case.
+jest.mock("expo-router", () => ({
+  router: { back: jest.fn(), push: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => true) },
+}));
 
 // Mirrors capture.test.tsx's mock: same-shape classes so the `instanceof`
 // narrowing in capture.tsx's ottoErrorMessage still works, without pulling in

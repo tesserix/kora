@@ -9,6 +9,7 @@ import { auth, isFirebaseConfigured } from "@/lib/firebase";
 import { registerDevice, unregisterDevice } from "@/lib/pushApi";
 import { targetFor } from "@/lib/notificationTarget";
 import { reconcileWeightReminder } from "@/reminders/reconcileWeightReminder";
+import { resolveAuthState } from "@/lib/authState";
 import type { NotificationType } from "@/api/types";
 
 const TOKEN_KEY = "kora.pushToken";
@@ -59,12 +60,21 @@ export async function unregisterPushToken(): Promise<void> {
   await AsyncStorage.removeItem(TOKEN_KEY);
 }
 
-// usePushRegistration registers the device whenever a user signs in.
+// usePushRegistration registers the device whenever a user signs in, and
+// re-arms that user's local reminders at the same moment.
+//
+// The reminder half exists because the launch pass is now gated on a signed-in
+// user (#171): a launch that lands on the sign-in screen deliberately arms
+// nothing and disarms whatever was left over. Without this, a user who then
+// signs in would have no reminders for the rest of the session — the next
+// foreground pass would eventually fix it, which is not the same as working.
 export function usePushRegistration(): void {
   useEffect(() => {
     if (!isFirebaseConfigured || !auth) return;
     const unsub = onAuthStateChanged(auth, (user) => {
-      if (user) void registerPushToken();
+      if (!user) return;
+      void registerPushToken();
+      void reconcileWeightReminder().catch(() => {});
     });
     return unsub;
   }, []);
@@ -94,21 +104,65 @@ export function setupPushHandler(): void {
   void reconcileWeightReminder().catch(() => {});
 }
 
+// handledResponseKey de-duplicates deliveries of the SAME notification response.
+//
+// Module scope, deliberately: the duplicates come from the listener being
+// re-registered. usePushResponder is called at the top of TabsLayout, which
+// remounts (auth resolving, the profile query settling, the onboarding
+// redirect), and expo-notifications re-delivers the pending launch response to
+// each newly added listener. One tap therefore produced several navigations —
+// the device report needed the capture screen closed 3-4 times before it
+// stopped. Per-hook state would reset on exactly the remounts that cause this.
+//
+// The key is the DELIVERY, not the scheduled request: a DAILY trigger keeps one
+// request identifier for every occurrence, so keying on the identifier alone
+// would kill tomorrow's deep link.
+let handledResponseKey: string | null = null;
+
+function responseKey(response: Notifications.NotificationResponse): string {
+  const { identifier } = response.notification.request;
+  return `${identifier}:${response.notification.date ?? ""}:${response.actionIdentifier ?? ""}`;
+}
+
 // usePushResponder deep-links when the user taps a push.
+//
+// Every target is `replace`, never `push`. These are entry points, not steps in
+// a journey: a second delivery must land the user on the destination, not stack
+// a second copy of it on top of the first.
 export function usePushResponder(): void {
   useEffect(() => {
-    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+    const sub = Notifications.addNotificationResponseReceivedListener(async (response) => {
+      // Claimed synchronously, before the first await, so two deliveries racing
+      // each other cannot both pass this guard.
+      const key = responseKey(response);
+      if (key === handledResponseKey) return;
+      handledResponseKey = key;
+
+      // Auth gate (#171). The listener is registered at the top of TabsLayout,
+      // whereas the onAuthStateChanged -> /sign-in redirect runs later in an
+      // effect, so this callback is live during the signed-out moments of a
+      // launch — which is how a deleted account's reminder opened the capture
+      // screen on the sign-in screen.
+      //
+      // Awaited rather than read from auth.currentUser: persistence is
+      // AsyncStorage-backed, so a signed-in user cold-starting FROM a
+      // notification tap has a null currentUser at delivery time, and a
+      // synchronous check would drop their deep link. The key is already
+      // claimed above, so a response that belongs to a dead session stays
+      // consumed and cannot navigate later either.
+      if ((await resolveAuthState()) !== "signed-in") return;
+
       const data = response.notification.request.content.data as {
         type?: NotificationType;
         entity_id?: string;
         kind?: string;
       };
       if (data?.kind === "reminder") {
-        router.push("/capture");
+        router.replace("/capture");
         return;
       }
       if (data?.kind === "custom") {
-        router.push("/");
+        router.replace("/");
         return;
       }
       // Weight check-in reminders land on Progress, where WeightLogSheet lives —
@@ -116,12 +170,12 @@ export function usePushResponder(): void {
       // targetFor path (which has no "weight" case) would drop the user wherever
       // the app happened to be, which is not a deep link at all.
       if (data?.kind === "weight") {
-        router.push("/progress");
+        router.replace("/progress");
         return;
       }
       if (!data?.type) return;
       const target = targetFor({ type: data.type, entity_id: data.entity_id });
-      if (target) router.push(target);
+      if (target) router.replace(target);
     });
     return () => sub.remove();
   }, []);

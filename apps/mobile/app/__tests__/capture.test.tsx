@@ -25,7 +25,12 @@ const cachedBarcodeFood: FoodItem = {
   barcode: "012345678905",
 };
 
-jest.mock("expo-router", () => ({ router: { back: jest.fn(), push: jest.fn() } }));
+// canGoBack/replace back safeBack(): capture is deep-link reachable (a
+// notification tap), so it can mount with an empty stack and must not rely on a
+// bare router.back(). Defaults to "there is history", the ordinary case.
+jest.mock("expo-router", () => ({
+  router: { back: jest.fn(), push: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => true) },
+}));
 
 // The real "@/lib/api" pulls in "@/lib/firebase" -> AsyncStorage's native
 // module, which isn't available under Jest. Mock it with same-shape classes
@@ -1642,5 +1647,34 @@ describe("Voice cancel", () => {
     // the thread used to be a competing button with the same job.
     expect(queryAllByLabelText("Hold to record")).toHaveLength(1);
     expect(queryAllByLabelText("Start recording")).toHaveLength(0);
+  });
+});
+
+
+// --- #171: capture is reachable with no history ----------------------------
+//
+// A reminder tap now REPLACES rather than pushes (src/lib/push.ts), so repeated
+// delivery cannot stack capture screens. That leaves capture mounted with an
+// empty stack, where a bare router.back() dispatches GO_BACK into nothing and
+// the Close button is simply dead. safeBack anchors it instead.
+describe("closing capture with no navigation history", () => {
+  test("Close still gets the user out when there is nothing to go back to", async () => {
+    (router.canGoBack as jest.Mock).mockReturnValue(false);
+    const rendered = await render(<CaptureScreen />);
+
+    await fireEvent.press(await rendered.findByLabelText("Close"));
+
+    expect(router.replace).toHaveBeenCalledWith("/(tabs)");
+  });
+
+  test("Close still pops normally when there IS history", async () => {
+    (router.replace as jest.Mock).mockClear();
+    (router.canGoBack as jest.Mock).mockReturnValue(true);
+    const rendered = await render(<CaptureScreen />);
+
+    await fireEvent.press(await rendered.findByLabelText("Close"));
+
+    expect(router.back).toHaveBeenCalledTimes(1);
+    expect(router.replace).not.toHaveBeenCalled();
   });
 });

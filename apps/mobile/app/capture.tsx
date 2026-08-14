@@ -18,6 +18,7 @@ import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
+import { safeBack } from "@/lib/safeBack";
 import * as ImagePicker from "expo-image-picker";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { RecordingPresets, requestRecordingPermissionsAsync, useAudioRecorder } from "expo-audio";
@@ -1508,7 +1509,7 @@ export default function CaptureScreen() {
     // visible evidence the log happened.
     const count = newlySucceededKeys.length;
     toast.show({ message: `Logged ${count} ${count === 1 ? "item" : "items"} to your diary` });
-    router.back();
+    safeBack("/(tabs)");
   }
 
   return (
@@ -1546,7 +1547,12 @@ export default function CaptureScreen() {
         photoPermissionDenied={photoPermissionDenied}
         micPermissionDenied={micPermissionDenied}
         onBarcodeScanned={handleBarcodeScanned}
-        onClose={() => router.back()}
+        // safeBack, not router.back: a reminder tap REPLACES the current route
+        // with capture (src/lib/push.ts, so repeated delivery cannot stack
+        // capture screens), which leaves this screen mounted with an empty
+        // stack. A bare router.back() there dispatches GO_BACK into nothing and
+        // the Close button is dead (#171).
+        onClose={() => safeBack("/(tabs)")}
         onResolveUncertain={setPickerIndex}
         onCancelResolve={handleCancelResolve}
       />

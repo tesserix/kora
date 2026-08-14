@@ -5,6 +5,7 @@ import { router, type Href } from "expo-router";
 import { signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { unregisterPushToken } from "@/lib/push";
+import { cancelAllReminders } from "@/reminders/schedule";
 import { AppBackground } from "@/components/AppBackground";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { GlassPanel } from "@/components/instrument/GlassPanel";
@@ -166,6 +167,16 @@ export default function More() {
                 await unregisterPushToken();
               } catch {
                 // best-effort: still sign out even if de-registration fails
+              }
+              // The LOCAL counterpart to the de-registration above. Meal,
+              // custom and weight reminders are scheduled in the OS, not on
+              // the server, so unregistering the device leaves every one of
+              // them armed — on a shared device they then fire at the previous
+              // user's mealtimes (#171). Best-effort for the same reason.
+              try {
+                await cancelAllReminders();
+              } catch {
+                // best-effort: never trap the user in a session they left
               }
               await signOut(auth);
             }}

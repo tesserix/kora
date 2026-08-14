@@ -16,6 +16,10 @@ jest.mock("firebase/auth", () => ({
   onAuthStateChanged: (...args: unknown[]) => mockOnAuthStateChanged(...args),
 }));
 
+// A forced sign-out is a sign-out: it must disarm the local reminders too (#171).
+const mockCancelReminders = jest.fn(async () => {});
+jest.mock("@/reminders/schedule", () => ({ cancelAllReminders: () => mockCancelReminders() }));
+
 function mockUser(getIdToken: jest.Mock): { currentUser: { getIdToken: jest.Mock } } {
   return { currentUser: { getIdToken } };
 }
@@ -33,6 +37,7 @@ beforeEach(() => {
   jest.resetModules();
   mockSignOut.mockClear();
   mockOnAuthStateChanged.mockClear();
+  mockCancelReminders.mockClear();
   global.fetch = jest.fn();
 });
 
@@ -207,4 +212,59 @@ test("signing back in resets the sign-out guard for a later session", async () =
   authStateCallback({ uid: "u1" });
   await expect(api.apiFetch("/v1/today")).rejects.toMatchObject({ status: 401 });
   expect(mockSignOut).toHaveBeenCalledTimes(2);
+});
+
+
+// --- #171: a forced sign-out must also disarm local reminders --------------
+//
+// The 401-driven sign-out is a real exit path, not a special case: the session
+// is unusable and the user lands on /sign-in. Leaving the meal reminders armed
+// there reproduces the reported bug (a reminder firing while signed out) via a
+// route that has no button and no user action behind it.
+test("a 401 that survives a token refresh disarms the scheduled local reminders", async () => {
+  const getIdToken = jest.fn().mockResolvedValue("token");
+  loadApiWithAuth(mockUser(getIdToken));
+
+  (global.fetch as jest.Mock)
+    .mockResolvedValueOnce(jsonResponse(401, false, { error: "unauthorized", message: "expired" }))
+    .mockResolvedValueOnce(jsonResponse(401, false, { error: "unauthorized", message: "expired" }));
+
+  await expect(api.apiFetch("/v1/today")).rejects.toBeDefined();
+
+  expect(mockSignOut).toHaveBeenCalledTimes(1);
+  expect(mockCancelReminders).toHaveBeenCalledTimes(1);
+});
+
+// The idempotence guard covers the cancel too: a burst of concurrent 401s must
+// not fire a burst of cancels at the OS.
+test("a concurrent burst of unrecoverable 401s cancels reminders exactly once", async () => {
+  const getIdToken = jest.fn().mockResolvedValue("token");
+  loadApiWithAuth(mockUser(getIdToken));
+
+  (global.fetch as jest.Mock).mockResolvedValue(
+    jsonResponse(401, false, { error: "unauthorized", message: "expired" }),
+  );
+
+  await Promise.allSettled([
+    api.apiFetch("/v1/today"),
+    api.apiFetch("/v1/me"),
+    api.apiFetch("/v1/diary"),
+  ]);
+
+  expect(mockCancelReminders).toHaveBeenCalledTimes(1);
+});
+
+// A non-401 failure is not a sign-out, so nothing may be disarmed.
+test("a 500 leaves the reminders alone", async () => {
+  const getIdToken = jest.fn().mockResolvedValue("token");
+  loadApiWithAuth(mockUser(getIdToken));
+
+  (global.fetch as jest.Mock).mockResolvedValue(
+    jsonResponse(500, false, { error: "internal_error", message: "boom" }),
+  );
+
+  await expect(api.apiFetch("/v1/today")).rejects.toBeDefined();
+
+  expect(mockSignOut).not.toHaveBeenCalled();
+  expect(mockCancelReminders).not.toHaveBeenCalled();
 });
