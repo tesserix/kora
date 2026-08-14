@@ -1,6 +1,7 @@
-import { fireEvent, render as rtlRender } from "@testing-library/react-native";
+import { act, fireEvent, render as rtlRender } from "@testing-library/react-native";
 import { QueryClientProvider, QueryClient } from "@tanstack/react-query";
-import { Linking } from "react-native";
+import { AppState, Linking } from "react-native";
+import * as ImagePicker from "expo-image-picker";
 import { useCameraPermissions } from "expo-camera";
 import { router } from "expo-router";
 
@@ -28,6 +29,15 @@ jest.mock("@/api/hooks", () => ({
   useFoodSearch: () => ({ data: [], isLoading: false, isError: false }),
 }));
 
+// Drives the AppState listener capture.tsx installs, without a real app
+// lifecycle. Returns nothing; callers wrap it in act().
+function foregroundApp() {
+  const calls = (AppState.addEventListener as jest.Mock).mock.calls;
+  for (const [event, handler] of calls) {
+    if (event === "change") handler("active");
+  }
+}
+
 function render(ui: React.ReactElement) {
   const queryClient = new QueryClient();
   return rtlRender(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
@@ -42,6 +52,13 @@ beforeEach(() => {
     jest.fn(async () => ({ granted: true, status: "granted" })),
   ]);
   jest.spyOn(Linking, "openSettings").mockResolvedValue();
+  // Captured so foregroundApp() can drive the listener capture.tsx installs.
+  jest.spyOn(AppState, "addEventListener").mockReturnValue({ remove: jest.fn() } as never);
+  (ImagePicker.requestCameraPermissionsAsync as jest.Mock).mockResolvedValue({ granted: true, status: "granted" });
+  (ImagePicker.requestMediaLibraryPermissionsAsync as jest.Mock).mockResolvedValue({ granted: true, status: "granted" });
+  (ImagePicker.getMediaLibraryPermissionsAsync as jest.Mock).mockResolvedValue({ granted: true, status: "granted" });
+  (ImagePicker.launchCameraAsync as jest.Mock).mockResolvedValue({ canceled: true, assets: null });
+  (ImagePicker.launchImageLibraryAsync as jest.Mock).mockResolvedValue({ canceled: true, assets: null });
 });
 
 // Camera permission is only ever checked proactively (without the user tapping
@@ -119,4 +136,68 @@ test("a denied camera permission renders the denied card, not the live camera", 
   const { getByText, queryByTestId } = await renderCapture({ cameraPermission: "denied" });
   expect(getByText("Open Settings")).toBeTruthy();
   expect(queryByTestId("barcode-scanner")).toBeNull();
+});
+
+// #137: the denied photo card REPLACES the tappable viewfinder, so there is no
+// in-place retry. Camera and mic are masked because iOS terminates the app when
+// either changes — but a photo-library grant does not restart it, so without a
+// foreground re-check the card is a dead end.
+test("granting photo access from Settings clears the denied card on foreground", async () => {
+  (ImagePicker.requestCameraPermissionsAsync as jest.Mock).mockResolvedValue({
+    granted: false,
+    status: "denied",
+  });
+  (ImagePicker.requestMediaLibraryPermissionsAsync as jest.Mock).mockResolvedValue({
+    granted: false,
+    status: "denied",
+  });
+
+  const utils = await render(<CaptureScreen />);
+  await fireEvent.press(await utils.findByText("Photo"));
+  await fireEvent.press(await utils.findByLabelText("Photo viewfinder"));
+
+  // Denied: the card has replaced the viewfinder.
+  expect(await utils.findByTestId("capture-permission-denied")).toBeTruthy();
+  expect(utils.queryByLabelText("Photo viewfinder")).toBeNull();
+
+  // The user grants access in Settings and comes back. getMediaLibrary... is the
+  // NON-prompting read; re-requesting here would pop a second dialog.
+  (ImagePicker.getMediaLibraryPermissionsAsync as jest.Mock).mockResolvedValue({
+    granted: true,
+    status: "granted",
+  });
+  await act(async () => {
+    foregroundApp();
+  });
+
+  await utils.findByLabelText("Photo viewfinder");
+  expect(utils.queryByTestId("capture-permission-denied")).toBeNull();
+});
+
+// A foreground while the permission is STILL denied must leave the card alone —
+// otherwise the card flickers away and the next tap re-denies it.
+test("a foreground with photo access still denied leaves the card up", async () => {
+  (ImagePicker.requestCameraPermissionsAsync as jest.Mock).mockResolvedValue({
+    granted: false,
+    status: "denied",
+  });
+  (ImagePicker.requestMediaLibraryPermissionsAsync as jest.Mock).mockResolvedValue({
+    granted: false,
+    status: "denied",
+  });
+
+  const utils = await render(<CaptureScreen />);
+  await fireEvent.press(await utils.findByText("Photo"));
+  await fireEvent.press(await utils.findByLabelText("Photo viewfinder"));
+  expect(await utils.findByTestId("capture-permission-denied")).toBeTruthy();
+
+  (ImagePicker.getMediaLibraryPermissionsAsync as jest.Mock).mockResolvedValue({
+    granted: false,
+    status: "denied",
+  });
+  await act(async () => {
+    foregroundApp();
+  });
+
+  expect(utils.queryByTestId("capture-permission-denied")).toBeTruthy();
 });

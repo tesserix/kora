@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AccessibilityInfo,
   Animated,
+  AppState,
   Easing,
   Keyboard,
   KeyboardAvoidingView,
@@ -891,6 +892,33 @@ export default function CaptureScreen() {
   // scrolls away, mirroring cameraPermissionDenied's role for Scan.
   const [photoPermissionDenied, setPhotoPermissionDenied] = useState(false);
   const [micPermissionDenied, setMicPermissionDenied] = useState(false);
+
+  // #137: the denied card REPLACES the tappable viewfinder, so there is no
+  // in-place retry — the flag is otherwise cleared only by a mode change or a
+  // fresh tap. For camera and mic that is masked, because iOS terminates the
+  // app when either permission changes and it relaunches with fresh state. A
+  // photo-library grant does NOT restart the app, so without this the user
+  // taps "Open Settings", grants access, comes back, and the dead end is still
+  // there.
+  //
+  // getMediaLibraryPermissionsAsync is the NON-prompting read. Using the
+  // request* variant here would pop a second dialog on every foreground.
+  //
+  // Mirrors app/_layout.tsx's reconcileWeightReminder foreground listener
+  // rather than introducing a second mechanism.
+  useEffect(() => {
+    if (!photoPermissionDenied) return;
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state !== "active") return;
+      void ImagePicker.getMediaLibraryPermissionsAsync()
+        .then((permission) => {
+          if (permission.granted) setPhotoPermissionDenied(false);
+        })
+        .catch((err) => console.warn("capture: photo permission re-check failed", err));
+    });
+    return () => sub.remove();
+  }, [photoPermissionDenied]);
+
   const [mode, setMode] = useState<CaptureMode>("photo");
   // idle<->result is driven by the four capture flows below; "analyzing" is
   // derived from the mutations' isPending rather than tracked separately.
