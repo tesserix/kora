@@ -515,7 +515,13 @@ func summariseGuesses(guesses []Guess) string {
 	}
 	parts := make([]string, 0, len(guesses))
 	for _, g := range guesses {
-		parts = append(parts, fmt.Sprintf("%s@%.2f", g.Food, g.Confidence))
+		// PortionEstimate is included because omitting it caused a wrong
+		// diagnosis (#184): a phrase logged as `chicken@0.95; chips@0.95`
+		// looked like the model had discarded the user's stated "1/2", when a
+		// live call showed it had returned "1/2 chicken" all along. The loss
+		// was downstream, in portion mapping. A field absent from a log is not
+		// a field absent from the data.
+		parts = append(parts, fmt.Sprintf("%s@%.2f[%s]", g.Food, g.Confidence, g.PortionEstimate))
 	}
 	return strings.Join(parts, "; ")
 }
