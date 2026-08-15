@@ -154,12 +154,20 @@ export function GaugeDial({
   // it is invisible, and it fades back in. It used to jump-cut, which is what
   // reanimated 4.5 degrades an animation to on its own and is precisely what
   // the guard was supposed to avoid.
-  // Ignition starts the needle pinned at zero so the first effect run below
-  // has somewhere to sweep up FROM; everyone else starts already at rest.
-  const fractionSV = useSharedValue(showIgnition ? 0 : fraction);
+  const fractionSV = useSharedValue(fraction);
   const needleOpacity = useSharedValue(1);
   // First paint has no previous position to cross-fade FROM.
   const firstRun = useRef(true);
+  // Tracks the ignition overshoot separately from `firstRun` above: that ref
+  // belongs to the reduced-motion cross-fade and flips to false on this
+  // effect's very first run REGARDLESS of `showIgnition` — `useDailyIgnition`
+  // always mounts `false` and flips `true` asynchronously after AsyncStorage
+  // resolves, so by the time `ignition` actually becomes true, `firstRun`
+  // would already be spent and the sequence would silently never play
+  // (that was the bug). This ref instead latches on "has the ignition
+  // sequence itself ever run" so it fires exactly once, whenever
+  // `showIgnition` first turns true post-mount.
+  const ignitionPlayed = useRef(false);
   useEffect(() => {
     if (reduceMotion) {
       cancelAnimation(fractionSV);
@@ -177,15 +185,21 @@ export function GaugeDial({
       firstRun.current = false;
       return;
     }
-    // Captured before the flag flips below: the ignition overshoot is a
-    // one-shot flourish that only ever plays on the first non-reduced-motion
-    // run of this effect — later fraction changes (a new log arriving) get
-    // the ordinary critically-damped spring, ignition prop or not.
-    const isIgnitionRun = showIgnition && firstRun.current;
     firstRun.current = false;
-    fractionSV.value = isIgnitionRun
-      ? withSequence(withTiming(1, { duration: 650, easing: Easing.in(Easing.quad) }), withSpring(fraction, springs.ignition))
-      : withSpring(fraction, NEEDLE_SPRING);
+    const isIgnitionRun = showIgnition && !ignitionPlayed.current;
+    if (isIgnitionRun) {
+      ignitionPlayed.current = true;
+      // Pin to zero right before the sweep so there is somewhere to sweep
+      // up FROM — done here (not at useSharedValue init) because at mount
+      // time `showIgnition` is still false (see comment above).
+      fractionSV.value = 0;
+      fractionSV.value = withSequence(
+        withTiming(1, { duration: 650, easing: Easing.in(Easing.quad) }),
+        withSpring(fraction, springs.ignition),
+      );
+    } else {
+      fractionSV.value = withSpring(fraction, NEEDLE_SPRING);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fraction, reduceMotion, showIgnition]);
 

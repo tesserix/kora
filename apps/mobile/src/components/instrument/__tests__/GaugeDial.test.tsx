@@ -1,6 +1,7 @@
 import type { ComponentProps } from "react";
 import { render } from "@testing-library/react-native";
 import * as Reanimated from "react-native-reanimated";
+import { springs } from "@/motion";
 import { buildGaugeTicks, needleFor, GAUGE_VIEW_H, GAUGE_CENTER_Y } from "../gauge";
 import { describeReserve, GaugeDial } from "../GaugeDial";
 
@@ -108,6 +109,32 @@ test("outside reduced motion, the needle springs via withSpring toward the targe
   expect(spy).toHaveBeenCalledWith(0.5, { damping: 30, stiffness: 250 });
 
   spy.mockRestore();
+});
+
+// kora ignition review: useDailyIgnition always mounts `false` and only
+// flips `true` asynchronously (after AsyncStorage resolves), so the real
+// call site never has `ignition={true}` on the very first render — it is
+// always a false -> true transition post-mount. This is exactly the path
+// that let the "sequence never plays" bug ship, so it's the path this test
+// exercises directly, rather than mounting straight at `ignition={true}`.
+test("the ignition sequence engages when `ignition` flips false -> true post-mount, using springs.ignition for the settle", async () => {
+  const springSpy = jest.spyOn(Reanimated, "withSpring");
+  const timingSpy = jest.spyOn(Reanimated, "withTiming");
+
+  const { rerender } = await render(<GaugeDial value={1100} target={2200} ignition={false} />);
+  springSpy.mockClear();
+  timingSpy.mockClear();
+
+  await rerender(<GaugeDial value={1100} target={2200} ignition={true} />);
+
+  // The overshoot ramp to full scale, and the settle spring using the
+  // dedicated (deliberately underdamped) ignition spring — NOT the
+  // critically-damped NEEDLE_SPRING used by ordinary data-change springs.
+  expect(timingSpy).toHaveBeenCalledWith(1, expect.objectContaining({ duration: 650 }));
+  expect(springSpy).toHaveBeenCalledWith(0.5, springs.ignition);
+
+  springSpy.mockRestore();
+  timingSpy.mockRestore();
 });
 
 test("the center overlay is bounded above the hub dot, derived from the gauge geometry", async () => {
