@@ -18,13 +18,24 @@ interface Props {
   format?: (n: number) => string;
   style?: StyleProp<TextStyle>;
   duration?: number;
+  // Dynamic Type cap (kora ignition review, Finding 2): AnimatedNumber renders
+  // its own raw RN Text rather than going through AppText, so it doesn't pick
+  // up AppText's maxFontSizeMultiplier handling for free — callers that need
+  // a cap (fixed-inset instrument numerals, mainly) must pass it through here.
+  maxFontSizeMultiplier?: number;
 }
 
 const defaultFormat = (n: number): string => Math.round(n).toLocaleString();
 
 const AnimatedText = Animated.createAnimatedComponent(Text);
 
-export function AnimatedNumber({ value, format = defaultFormat, style, duration = 600 }: Props) {
+export function AnimatedNumber({
+  value,
+  format = defaultFormat,
+  style,
+  duration = 600,
+  maxFontSizeMultiplier,
+}: Props) {
   const { reduceMotion } = useMotionPrefs();
   const sv = useSharedValue(value);
   const opacity = useSharedValue(1);
@@ -90,5 +101,12 @@ export function AnimatedNumber({ value, format = defaultFormat, style, duration 
     [],
   );
 
-  return <AnimatedText style={[{ fontVariant: ["tabular-nums"] }, style, animatedStyle]}>{format(display)}</AnimatedText>;
+  return (
+    <AnimatedText
+      maxFontSizeMultiplier={maxFontSizeMultiplier}
+      style={[{ fontVariant: ["tabular-nums"] }, style, animatedStyle]}
+    >
+      {format(display)}
+    </AnimatedText>
+  );
 }

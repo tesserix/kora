@@ -67,6 +67,11 @@ test("Home renders the Today large title, the gauge dial reserve numeral, protei
   expect(await findByText("320 kcal")).toBeTruthy();
   // meal-row slot is sentence case, not an engraved uppercase label (spec's ~4-label budget)
   expect(await findByText("Breakfast")).toBeTruthy();
+  // Finding 2 (Dynamic Type cap pass): Home's engraved "Energy reserve" caption
+  // and the meal-row slot label need an explicit cap — the cap IS the overflow
+  // protection for these fixed-size instrument clusters.
+  expect((await findByText("Energy reserve")).props.maxFontSizeMultiplier).toBe(1.4);
+  expect((await findByText("Breakfast")).props.maxFontSizeMultiplier).toBe(1.4);
 });
 
 // Home renders "Logged today" with bespoke markup rather than MealRow

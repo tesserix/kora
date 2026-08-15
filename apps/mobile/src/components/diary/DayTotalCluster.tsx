@@ -133,7 +133,7 @@ export function DayTotalCluster({
     <View>
       <BezelCluster radius={26} testID={testID}>
         <View style={{ padding: 16 }}>
-          <AppText style={engravedStyle(instrument)}>Day total</AppText>
+          <AppText maxFontSizeMultiplier={1.4} style={engravedStyle(instrument)}>Day total</AppText>
           {unknownTotals ? (
             <AppText style={[{ fontSize: 22, color: instrument.mut, marginTop: 4 }, mono]}>—</AppText>
           ) : (
@@ -150,7 +150,7 @@ export function DayTotalCluster({
 
         <WellFooter>
           <View>
-            <AppText style={{ fontSize: 11, color: instrument.mut }}>Water</AppText>
+            <AppText maxFontSizeMultiplier={1.4} style={{ fontSize: 11, color: instrument.mut }}>Water</AppText>
             <AppText style={[{ fontSize: 15, fontWeight: "600", color: instrument.ink, marginTop: 2 }, mono]}>
               {waterLabel}
             </AppText>

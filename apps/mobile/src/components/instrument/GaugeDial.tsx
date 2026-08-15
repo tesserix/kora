@@ -380,7 +380,11 @@ export const GaugeDial = forwardRef<GaugeDialHandle, GaugeDialProps>(function Ga
             alignItems: "center",
           }}
         >
-          <AppText variant="body" style={centerNumeralStyle}>
+          {/* maxFontSizeMultiplier 1.6 (Finding 2): the overlay has fixed
+              insets (see OVERLAY_BOTTOM above) — the cap IS the overflow
+              protection, there is no room for this 44px numeral to grow
+              unbounded at accessibility text sizes. */}
+          <AppText variant="body" maxFontSizeMultiplier={1.6} style={centerNumeralStyle}>
             {sequenceInFlight ? (
               // Passed explicitly (rather than relying on RN's nested-Text
               // style inheritance) so the rendered node itself carries the
@@ -391,7 +395,12 @@ export const GaugeDial = forwardRef<GaugeDialHandle, GaugeDialProps>(function Ga
               // roll below — otherwise the hero numeral would stay pinned to
               // the countdown mechanism for the rest of the session on any
               // day the sequence has ever fired (Finding 1).
-              <AnimatedNumber value={countdownValue} duration={1650} style={centerNumeralStyle} />
+              <AnimatedNumber
+                value={countdownValue}
+                duration={1650}
+                style={centerNumeralStyle}
+                maxFontSizeMultiplier={1.6}
+              />
             ) : reserve.over ? (
               `+${reserve.magnitude.toLocaleString()}`
             ) : (
@@ -403,7 +412,12 @@ export const GaugeDial = forwardRef<GaugeDialHandle, GaugeDialProps>(function Ga
               // (its shared value starts equal to `value`) and already
               // degrades to a cross-fade under Reduce Motion, so no extra
               // guard is needed here.
-              <AnimatedNumber value={reserve.magnitude} duration={550} style={centerNumeralStyle} />
+              <AnimatedNumber
+                value={reserve.magnitude}
+                duration={550}
+                style={centerNumeralStyle}
+                maxFontSizeMultiplier={1.6}
+              />
             )}
           </AppText>
           {/* Bespoke engraved caption (T6 exception): the dial's center label
@@ -412,6 +426,7 @@ export const GaugeDial = forwardRef<GaugeDialHandle, GaugeDialProps>(function Ga
               routing through engravedStyle() — see typography.ts. */}
           <AppText
             variant="body"
+            maxFontSizeMultiplier={1.4}
             style={[
               {
                 fontSize: 10,
@@ -445,7 +460,11 @@ export const GaugeDial = forwardRef<GaugeDialHandle, GaugeDialProps>(function Ga
       >
         {footer.map(([v, k]) => (
           <View key={k} style={{ flex: 1, alignItems: "center" }}>
-            <AppText variant="body" style={[{ fontSize: 15, fontWeight: "600", color: instrument.ink }, mono]}>
+            <AppText
+              variant="body"
+              maxFontSizeMultiplier={1.6}
+              style={[{ fontSize: 15, fontWeight: "600", color: instrument.ink }, mono]}
+            >
               {Math.round(Number(v)).toLocaleString()}
             </AppText>
             {/* Bespoke engraved caption (T6 exception): the footer row's
@@ -454,6 +473,7 @@ export const GaugeDial = forwardRef<GaugeDialHandle, GaugeDialProps>(function Ga
                 face — see typography.ts. */}
             <AppText
               variant="body"
+              maxFontSizeMultiplier={1.4}
               style={{ fontSize: 9, letterSpacing: 2, textTransform: "uppercase", color: instrument.mut, marginTop: 3 }}
             >
               {k}

@@ -39,6 +39,15 @@ test("shows the remaining energy as the center numeral", async () => {
   expect(getByText("2,200")).toBeTruthy(); // budget, footer + scale numeral dedupe is fine
 });
 
+// Finding 2 (Dynamic Type cap pass): the center overlay has fixed insets —
+// the cap IS the overflow protection at accessibility text sizes, so the
+// hero numeral and its caption must carry an explicit maxFontSizeMultiplier.
+test("caps the center numeral and caption at the spec'd Dynamic Type multipliers", async () => {
+  const { getByText } = await render(<GaugeDial value={1430} target={2200} burned={304} />);
+  expect(getByText("770").props.maxFontSizeMultiplier).toBe(1.6);
+  expect(getByText("kcal in reserve").props.maxFontSizeMultiplier).toBe(1.4);
+});
+
 // Was "never renders a negative reserve" / expected "0" — value > target now
 // renders the explicit over-budget state (spec 2026-08-16-kora-ignition-design.md)
 // instead of clamping to zero, so this asserts the new +N over-budget reading.

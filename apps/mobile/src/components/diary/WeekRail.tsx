@@ -58,8 +58,11 @@ function WeekDayCell({ day, onSelect }: WeekDayCellProps) {
           style={{ position: "absolute", top: 0, left: 0, right: 0, height: 1, backgroundColor: instrument.wellShadow }}
         />
       ) : null}
-      <AppText style={{ fontSize: 11, color: instrument.mut }}>{dow}</AppText>
-      <AppText style={[{ fontSize: 15, fontWeight: "600", color: today || selected ? instrument.ink : instrument.mut }, mono]}>
+      <AppText maxFontSizeMultiplier={1.4} style={{ fontSize: 11, color: instrument.mut }}>{dow}</AppText>
+      <AppText
+        maxFontSizeMultiplier={1.6}
+        style={[{ fontSize: 15, fontWeight: "600", color: today || selected ? instrument.ink : instrument.mut }, mono]}
+      >
         {date.getDate()}
       </AppText>
       {/* Goal pips never carry the accent (spec: accent budget — Diary's ONE

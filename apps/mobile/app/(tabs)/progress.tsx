@@ -255,15 +255,15 @@ export default function Progress() {
             <View style={{ flexDirection: "row", alignItems: "center", gap: 14, marginTop: 10 }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
                 <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: instrument.tickLit, opacity: 0.72 }} />
-                <AppText style={{ fontSize: 10, color: instrument.mut }}>In-budget</AppText>
+                <AppText maxFontSizeMultiplier={1.4} style={{ fontSize: 10, color: instrument.mut }}>In-budget</AppText>
               </View>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
                 <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: instrument.accent }} />
-                <AppText style={{ fontSize: 10, color: instrument.mut }}>Over</AppText>
+                <AppText maxFontSizeMultiplier={1.4} style={{ fontSize: 10, color: instrument.mut }}>Over</AppText>
               </View>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
                 <View style={{ width: 10, height: 0, borderTopWidth: 1.5, borderStyle: "dashed", borderColor: instrument.tick }} />
-                <AppText style={{ fontSize: 10, color: instrument.mut }}>Target</AppText>
+                <AppText maxFontSizeMultiplier={1.4} style={{ fontSize: 10, color: instrument.mut }}>Target</AppText>
               </View>
             </View>
           </GlassPanel>

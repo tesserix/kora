@@ -136,6 +136,13 @@ test("shows real sleep and renders the energy-vs-budget bars when Health is auth
   // rather than misattributed to the wrong day.
   expect(getByText("today")).toBeTruthy();
   expect(getAllByText("—").length).toBe(6);
+  // Finding 2 (Dynamic Type cap pass): EnergyBars' day labels and the
+  // In-budget/Over/Target legend need an explicit cap — the cap IS the
+  // overflow protection for this fixed-width bar chart.
+  expect(getByText("today").props.maxFontSizeMultiplier).toBe(1.4);
+  expect(getByText("In-budget").props.maxFontSizeMultiplier).toBe(1.4);
+  expect(getByText("Over").props.maxFontSizeMultiplier).toBe(1.4);
+  expect(getByText("Target").props.maxFontSizeMultiplier).toBe(1.4);
 });
 
 test("renders the logging-streak and avg-sleep streak cell duo", async () => {

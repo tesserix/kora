@@ -276,7 +276,7 @@ export default function Home() {
           <BezelCluster glow testID="home-hero">
             {ignite ? <SpecularSweep /> : null}
             <View style={{ padding: 16 }}>
-              <AppText style={[engraved, { marginBottom: 8 }]}>Energy reserve</AppText>
+              <AppText maxFontSizeMultiplier={1.4} style={[engraved, { marginBottom: 8 }]}>Energy reserve</AppText>
               {pending ? (
                 // Same-height "—" placeholder so a fresh fetch never flashes a
                 // fabricated "0 in reserve" / "0 of 0" before real targets are known.
@@ -329,7 +329,7 @@ export default function Home() {
                     </View>
                     <View>
                       <AppText style={[{ fontSize: 17, fontWeight: "600", color: instrument.ink }, mono]}>{c.value}</AppText>
-                      <AppText style={mutedLabel}>{c.label}</AppText>
+                      <AppText maxFontSizeMultiplier={1.4} style={mutedLabel}>{c.label}</AppText>
                     </View>
                   </View>
                 </Fragment>
@@ -367,7 +367,7 @@ export default function Home() {
                       <AppText style={{ fontSize: 15, fontWeight: "600", color: instrument.ink }}>
                         {log.description}
                       </AppText>
-                      <AppText style={[mutedLabel, { marginTop: 2 }]}>{sentenceCase(log.meal_slot)}</AppText>
+                      <AppText maxFontSizeMultiplier={1.4} style={[mutedLabel, { marginTop: 2 }]}>{sentenceCase(log.meal_slot)}</AppText>
                       {log.portion_assumed ? (
                         // Same engraved marker MealRow renders in the diary
                         // (#138) — hand-rolled here because this row is

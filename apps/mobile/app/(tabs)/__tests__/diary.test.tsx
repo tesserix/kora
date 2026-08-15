@@ -547,6 +547,17 @@ test("a plain tap when not selecting still navigates to the meal screen as befor
 const flatten = (style: unknown) =>
   Array.isArray(style) ? Object.assign({}, ...style.flat().filter(Boolean)) : (style ?? {});
 
+// Finding 2 (Dynamic Type cap pass): the day-total cluster's engraved "Day
+// total" caption and its "Water" label need an explicit cap — the cap IS the
+// overflow protection at accessibility text sizes for this fixed-size
+// instrument cluster.
+test("caps the day-total and water captions at 1.4x", async () => {
+  const { getByText } = await render(<Diary />);
+
+  expect(getByText("Day total").props.maxFontSizeMultiplier).toBe(1.4);
+  expect(getByText("Water").props.maxFontSizeMultiplier).toBe(1.4);
+});
+
 test("the selected week-strip day gets the glass-cell look and others do not", async () => {
   const { getByTestId } = await render(<Diary />);
 

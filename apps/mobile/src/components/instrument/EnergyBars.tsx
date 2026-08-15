@@ -94,7 +94,7 @@ export function EnergyBars({ days, targetFraction = 0.74 }: EnergyBarsProps) {
       </View>
       <View style={{ flexDirection: "row", gap: 6, marginTop: 6 }}>
         {days.map((d, i) => (
-          <AppText key={i} style={[dayLabel, { flex: 1, textAlign: "center" }]}>
+          <AppText key={i} maxFontSizeMultiplier={1.4} style={[dayLabel, { flex: 1, textAlign: "center" }]}>
             {d.label}
           </AppText>
         ))}
