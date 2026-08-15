@@ -179,6 +179,16 @@ export const GaugeDial = forwardRef<GaugeDialHandle, GaugeDialProps>(function Ga
   // sequence itself ever run" so it fires exactly once, whenever
   // `showIgnition` first turns true post-mount.
   const ignitionPlayed = useRef(false);
+  // `showIgnition` never clears (it just gates whether the sequence should
+  // START, per the prop doc above) so it can't also stand in for "is the
+  // overshoot-and-settle sequence currently playing" — that conflated the
+  // once-a-day countdown numeral and the sweep() guard with a flag that was
+  // permanently true for the rest of the session once ignition fired once,
+  // leaving the hero numeral stuck on the countdown branch and refresh sweep
+  // disabled all session (kora ignition review, Finding 1). This state is the
+  // actual "sequence in flight" signal: set when the overshoot run starts,
+  // cleared in the settle spring's `finished` callback below.
+  const [sequenceInFlight, setSequenceInFlight] = useState(false);
   useEffect(() => {
     if (reduceMotion) {
       cancelAnimation(fractionSV);
@@ -200,6 +210,7 @@ export const GaugeDial = forwardRef<GaugeDialHandle, GaugeDialProps>(function Ga
     const isIgnitionRun = showIgnition && !ignitionPlayed.current;
     if (isIgnitionRun) {
       ignitionPlayed.current = true;
+      setSequenceInFlight(true);
       // Pin to zero right before the sweep so there is somewhere to sweep
       // up FROM — done here (not at useSharedValue init) because at mount
       // time `showIgnition` is still false (see comment above).
@@ -212,8 +223,14 @@ export const GaugeDial = forwardRef<GaugeDialHandle, GaugeDialProps>(function Ga
           // overshoot spring has actually come to rest, not on every
           // intermediate frame. runOnJS crosses back from the UI thread;
           // haptics.impactLight is safe to call from any thread boundary
-          // since it's already a fire-and-forget promise wrapper.
-          if (finished) runOnJS(haptics.impactLight)();
+          // since it's already a fire-and-forget promise wrapper. The same
+          // bridge clears `sequenceInFlight` — that's the JS-thread state
+          // that ungates the odometer numeral branch and the sweep() guard
+          // (Finding 1), so it must cross back the same way the haptic does.
+          if (finished) {
+            runOnJS(haptics.impactLight)();
+            runOnJS(setSequenceInFlight)(false);
+          }
         }),
       );
     } else {
@@ -230,21 +247,20 @@ export const GaugeDial = forwardRef<GaugeDialHandle, GaugeDialProps>(function Ga
   // the once-a-day ignition sequence is engaged — sweep()'s withSequence
   // would otherwise preempt the ignition needle mid-flight while the
   // countdown numeral above keeps counting on its own timeline, breaking the
-  // choreography. `showIgnition` covers the whole overshoot-and-settle window
-  // (it doesn't clear until the next render after `ignition` itself drops),
-  // so gating on it is the simplest correct guard.
+  // choreography. Gated on `sequenceInFlight` (not `showIgnition`, which
+  // never clears) so refresh sweeps work again once the sequence settles.
   useImperativeHandle(
     ref,
     () => ({
       sweep: () => {
-        if (reduceMotion || showIgnition) return;
+        if (reduceMotion || sequenceInFlight) return;
         fractionSV.value = withSequence(
           withTiming(1, { duration: 500, easing: Easing.out(Easing.quad) }),
           withSpring(fraction, NEEDLE_SPRING),
         );
       },
     }),
-    [fraction, reduceMotion, showIgnition, fractionSV],
+    [fraction, reduceMotion, sequenceInFlight, fractionSV],
   );
 
   const needleAnimatedProps = useAnimatedProps(() => {
@@ -365,11 +381,16 @@ export const GaugeDial = forwardRef<GaugeDialHandle, GaugeDialProps>(function Ga
           }}
         >
           <AppText variant="body" style={centerNumeralStyle}>
-            {showIgnition ? (
+            {sequenceInFlight ? (
               // Passed explicitly (rather than relying on RN's nested-Text
               // style inheritance) so the rendered node itself carries the
               // font metrics — inheritance is invisible to a style-flattening
-              // test/inspection of this specific Text node.
+              // test/inspection of this specific Text node. Gated on
+              // `sequenceInFlight` (not `showIgnition`) so once the sequence
+              // settles this branch releases back to the normal odometer
+              // roll below — otherwise the hero numeral would stay pinned to
+              // the countdown mechanism for the rest of the session on any
+              // day the sequence has ever fired (Finding 1).
               <AnimatedNumber value={countdownValue} duration={1650} style={centerNumeralStyle} />
             ) : reserve.over ? (
               `+${reserve.magnitude.toLocaleString()}`

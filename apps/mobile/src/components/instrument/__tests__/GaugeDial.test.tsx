@@ -224,10 +224,14 @@ test("ref.sweep() is a no-op under reduced motion", async () => {
   spring.mockRestore();
 });
 
-// A pull-to-refresh mid-ignition must not preempt the needle overshoot or
-// desync it from the countdown numeral's own timeline — sweep() is a no-op
-// for the whole engaged window, same suppression rule as Reduce Motion above.
-test("ref.sweep() does not retarget the needle while the ignition sequence is engaged", async () => {
+// kora ignition review Finding 1: `showIgnition` used to gate sweep() too,
+// and it never clears, so refresh sweeps were disabled all session after the
+// once-a-day sequence fired even once. The jest reanimated mock invokes
+// withSpring's `finished` callback synchronously (see jest.setup.js), so the
+// settle — and with it the runOnJS-bridged `sequenceInFlight` clear — has
+// already happened by the time this rerender call returns. sweep() must be
+// callable (i.e. retarget the needle) immediately after.
+test("ref.sweep() retargets the needle once the ignition sequence has settled", async () => {
   const spring = jest.spyOn(Reanimated, "withSpring");
   const timing = jest.spyOn(Reanimated, "withTiming");
   const ref = createRef<GaugeDialHandle>();
@@ -239,8 +243,44 @@ test("ref.sweep() does not retarget the needle while the ignition sequence is en
 
   ref.current?.sweep();
 
-  expect(spring).not.toHaveBeenCalled();
-  expect(timing).not.toHaveBeenCalled();
+  expect(timing).toHaveBeenCalledWith(1, expect.objectContaining({ duration: 500 }));
+  expect(spring).toHaveBeenCalledWith(0.5, { damping: 30, stiffness: 250 });
+
+  spring.mockRestore();
+  timing.mockRestore();
+});
+
+// Finding 1 regression: after the sequence settles, the hero numeral must
+// release back to the normal odometer branch so a later meal log rolls it —
+// it used to stay pinned to the (now-stale) countdown mechanism forever,
+// because the old gate (`showIgnition`) never cleared. (The reanimated mock
+// NOOPs useAnimatedReaction — see AnimatedNumber.tsx — so, same as the
+// existing "data change rolls the center numeral" test above, the mechanism
+// is asserted via the withTiming call rather than the rendered digit.)
+test("after the ignition sequence settles, a later value change engages the 550ms odometer branch, not the countdown branch", async () => {
+  const timing = jest.spyOn(Reanimated, "withTiming");
+  const ref = createRef<GaugeDialHandle>();
+
+  const { rerender } = await render(<GaugeDial ref={ref} value={1100} target={2200} ignition={false} />);
+  // Sequence fires; the mock settles it synchronously (finished callback
+  // runs inline), clearing `sequenceInFlight` back to false before this
+  // await resolves.
+  await rerender(<GaugeDial ref={ref} value={1100} target={2200} ignition={true} />);
+  timing.mockClear();
+
+  // A new value arrives (e.g. a meal logged) after settle.
+  await rerender(<GaugeDial ref={ref} value={1650} target={2200} ignition={true} />);
+
+  // The 550ms odometer branch engaged for this transition, not the 1650ms
+  // countdown branch — proof the numeral released back to the normal path.
+  expect(timing).toHaveBeenCalledWith(550, expect.objectContaining({ duration: 550 }));
+  expect(timing).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ duration: 1650 }));
+
+  // sweep() is callable (retargets) post-settle too.
+  const spring = jest.spyOn(Reanimated, "withSpring");
+  spring.mockClear();
+  ref.current?.sweep();
+  expect(spring).toHaveBeenCalledWith(0.75, { damping: 30, stiffness: 250 }); // fraction: 1650/2200
 
   spring.mockRestore();
   timing.mockRestore();
