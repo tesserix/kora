@@ -12,6 +12,7 @@ import { ToggleSwitch } from "@/components/ToggleSwitch";
 import { AddFriendSheet } from "@/components/social/AddFriendSheet";
 import { FriendsLeaderboard } from "@/components/social/FriendsLeaderboard";
 import { EmptyState } from "@/components/common/EmptyState";
+import { LoadErrorNotice } from "@/components/common/LoadErrorNotice";
 import { PressableScale } from "@/motion";
 import {
   useFriends,
@@ -54,6 +55,10 @@ export default function Friends() {
 
   const incoming = requests.data?.incoming ?? [];
   const list = friends.data ?? [];
+  // #174: an outage rendered as "No friends yet" — the empty state is a claim
+  // about the user's circle, not about the network. An inline notice with a
+  // retry is all a list screen needs, so long as it REPLACES that claim.
+  const listError = friends.isError;
 
   const onUnfriend = (id: string, name: string) =>
     Alert.alert("Remove friend?", `Remove ${name} from your friends.`, [
@@ -148,7 +153,9 @@ export default function Friends() {
               </GroupedSection>
             ) : null}
 
-            {list.length === 0 ? (
+            {listError ? (
+              <LoadErrorNotice message="Couldn't load your friends." onRetry={() => void friends.refetch()} />
+            ) : list.length === 0 ? (
               <EmptyState
                 variant="instrument"
                 icon="users"

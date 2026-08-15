@@ -10,6 +10,7 @@ import { Button } from "@/components/Button";
 import { Icon } from "@/components/Icon";
 import { LeaderRow } from "@/components/LeaderRow";
 import { GroupedSection } from "@/components/GroupedList";
+import { LoadErrorNotice } from "@/components/common/LoadErrorNotice";
 import { useChallenge, useJoinChallenge, useLeaveChallenge, useDeleteChallenge } from "@/api/hooks";
 import { useToast } from "@/components/Toast";
 import { apiErrorMessage } from "@/lib/apiErrorMessage";
@@ -35,6 +36,9 @@ export default function ChallengeDetailScreen() {
 
   const d = challenge.data;
   const groupId = d?.group_id ?? "";
+  // #174: with no data the standings rendered "No one has joined yet." — a
+  // statement about the challenge, made without having loaded it.
+  const loadError = challenge.isError;
 
   const onDelete = () =>
     Alert.alert("Delete this challenge?", "This removes it for everyone.", [
@@ -66,8 +70,16 @@ export default function ChallengeDetailScreen() {
             </GlassPanel>
           ) : null}
 
+          {loadError ? (
+            <LoadErrorNotice message="Couldn't load this challenge." onRetry={() => void challenge.refetch()} />
+          ) : null}
+
           <GroupedSection header="Standings">
-            {(d?.standings ?? []).length === 0 ? (
+            {loadError ? (
+              <View style={{ minHeight: 44, justifyContent: "center", paddingHorizontal: spacing.md }}>
+                <AppText style={{ fontSize: 13, color: instrument.mut }}>Standings unavailable.</AppText>
+              </View>
+            ) : (d?.standings ?? []).length === 0 ? (
               <View style={{ minHeight: 44, justifyContent: "center", paddingHorizontal: spacing.md }}>
                 <AppText style={{ fontSize: 13, color: instrument.mut }}>No one has joined yet.</AppText>
               </View>

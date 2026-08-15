@@ -9,6 +9,7 @@ import { AppBackground } from "@/components/AppBackground";
 import { PressableScale } from "@/motion";
 import { GroupedSection, Row } from "@/components/GroupedList";
 import { EmptyState } from "@/components/common/EmptyState";
+import { LoadErrorNotice } from "@/components/common/LoadErrorNotice";
 import { CreateGroupSheet } from "@/components/social/CreateGroupSheet";
 import { useGroups } from "@/api/hooks";
 import { useTheme } from "@/theme";
@@ -43,6 +44,9 @@ export default function Groups() {
   const groups = useGroups();
   const [sheet, setSheet] = useState<null | "create" | "join">(null);
   const list = groups.data ?? [];
+  // #174: "No groups yet" is a claim about the user's groups. A failed fetch
+  // knows nothing about them, so it says that instead.
+  const listError = groups.isError;
 
   return (
     <>
@@ -87,7 +91,9 @@ export default function Groups() {
               </GroupedSection>
             </View>
 
-            {list.length === 0 ? (
+            {listError ? (
+              <LoadErrorNotice message="Couldn't load your groups." onRetry={() => void groups.refetch()} />
+            ) : list.length === 0 ? (
               <EmptyState
                 variant="instrument"
                 icon="people"

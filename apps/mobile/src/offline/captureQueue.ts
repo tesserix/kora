@@ -142,3 +142,25 @@ export async function retry(id: string): Promise<void> {
 export async function discard(id: string): Promise<void> {
   await update((items) => items.filter((i) => i.id !== id));
 }
+
+// Puts a discarded row back exactly as it was — status, resolution, attempts
+// and all. append() cannot serve as an undo: it mints a FRESH pending row and
+// drops the resolution the user was looking at, so an "undo" through it would
+// send the capture back for identification instead of restoring the review.
+//
+// Idempotent on id (a double-tapped Undo cannot duplicate the row) and capped
+// the same way append is — a queue that filled while the toast was up throws
+// rather than silently exceeding MAX_CAPTURES, so the caller can say so.
+export async function restore(item: QueuedCapture): Promise<void> {
+  let full = false;
+  await withCaptureLock(async () => {
+    const items = await list();
+    if (items.some((i) => i.id === item.id)) return;
+    if (items.length >= MAX_CAPTURES) {
+      full = true;
+      return;
+    }
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([...items, item]));
+  });
+  if (full) throw new CaptureQueueFullError();
+}

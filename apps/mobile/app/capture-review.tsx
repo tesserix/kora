@@ -9,9 +9,11 @@ import { Button } from "@/components/Button";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { AppBackground } from "@/components/AppBackground";
 import { ResolutionResult, resolveResultView, candidateKey } from "@/components/ResolutionResult";
+import { useToast } from "@/components/Toast";
+import { safeBack } from "@/lib/safeBack";
 import { useTheme } from "@/theme";
 import { currentUserId } from "@/lib/api";
-import { list as listCaptures, discard, retry as retryCapture, type QueuedCapture } from "@/offline/captureQueue";
+import { list as listCaptures, discard, restore, retry as retryCapture, type QueuedCapture } from "@/offline/captureQueue";
 import { deleteQueuedMedia, queuedMediaUri } from "@/offline/captureMedia";
 import { append as appendLog, newLogId } from "@/offline/queue";
 import { drainCaptures } from "@/offline/drainCaptures";
@@ -74,6 +76,14 @@ function failureMessage(capture: QueuedCapture): string {
   }
 }
 
+// Every exit on this screen goes through safeBack, never router.back(): this
+// is the one screen that documents deep entry (`/capture-review?id=…`, see the
+// owner-gated loader below), and on a deep-linked mount the stack is empty, so
+// GO_BACK dispatches into nothing and every exit is dead. The diary is the
+// honest anchor — it is where this screen's rows live and the only place that
+// pushes it.
+const EXIT_TO = "/(tabs)/diary" as const;
+
 // The confirmation surface for a capture that resolved in the background to
 // "confirm" or "follow_up" — drainCaptures parked it with status "review" and
 // its stored resolution rather than logging it automatically. This is the
@@ -82,6 +92,7 @@ export default function CaptureReviewScreen() {
   const { colors, spacing } = useTheme();
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
+  const toast = useToast();
   const { id } = useLocalSearchParams<{ id: string }>();
 
   // undefined = still loading, null = not found (already resolved/discarded
@@ -214,7 +225,7 @@ export default function CaptureReviewScreen() {
       await discard(capture.id);
       invalidate();
       qc.invalidateQueries({ queryKey: [QUEUED_LOGS_KEY] });
-      router.back();
+      safeBack(EXIT_TO);
     } catch {
       setBusy(false);
       Alert.alert("Couldn't confirm that", "Please try again.");
@@ -269,15 +280,41 @@ export default function CaptureReviewScreen() {
     });
   };
 
-  const handleReject = async () => {
+  // "Discard capture" — named for its consequence. It used to read "Not
+  // right", which says "this identification is wrong, try again" and is
+  // therefore exactly what a user wanting to RE-identify would tap; it then
+  // deleted the media and dropped the row, destroying the only copy of the
+  // photo or recording with no confirmation and no way back.
+  //
+  // A confirm Alert would be the over-correction — this is one tap among three
+  // on a review screen, not the deletion of something already logged — so the
+  // single tap stays and an Undo toast carries the reversibility, the same
+  // shape meal.tsx's save and delete already use.
+  //
+  // The media is deliberately NOT deleted here, which is what makes the Undo
+  // real: `restore` can put the row back, but nothing can put the file back.
+  // The file is left for sweepOrphans, which runs once per launch
+  // (drainTriggers.ts) — so it comfortably outlives the toast, and is reclaimed
+  // on the next launch if the user let the discard stand.
+  const handleDiscard = async () => {
     if (!capture) return;
+    const discarded = capture;
     setBusy(true);
     try {
-      // No logging on reject: delete the media, then drop the row.
-      await deleteQueuedMedia(capture.storedName);
-      await discard(capture.id);
+      await discard(discarded.id);
       invalidate();
-      router.back();
+      safeBack(EXIT_TO);
+      toast.show({
+        message: "Capture discarded",
+        actionLabel: "Undo",
+        onAction: () => {
+          // Restores the row WHOLE — status "review" and its stored
+          // resolution, not a fresh pending capture (see captureQueue.restore).
+          restore(discarded)
+            .then(invalidate)
+            .catch(() => Alert.alert("Couldn't undo that", "Please try again."));
+        },
+      });
     } catch {
       setBusy(false);
       Alert.alert("Couldn't discard that", "Please try again.");
@@ -301,7 +338,7 @@ export default function CaptureReviewScreen() {
       await deleteQueuedMedia(capture.storedName);
       await discard(capture.id);
       invalidate();
-      router.back();
+      safeBack(EXIT_TO);
     } catch {
       setBusy(false);
       Alert.alert("Couldn't discard that", "Please try again.");
@@ -322,7 +359,7 @@ export default function CaptureReviewScreen() {
       await retryCapture(capture.id);
       invalidate();
       void drainCaptures(qc).catch(() => {});
-      router.back();
+      safeBack(EXIT_TO);
     } catch {
       setBusy(false);
       Alert.alert("Couldn't retry that", "Please try again.");
@@ -335,7 +372,7 @@ export default function CaptureReviewScreen() {
       <ScreenHeader
         overline={capture?.kind === "photo" ? "Photo" : "Voice note"}
         title="Review capture"
-        onBack={() => router.back()}
+        onBack={() => safeBack(EXIT_TO)}
       />
       {capture === undefined ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
@@ -431,9 +468,9 @@ export default function CaptureReviewScreen() {
           />
           <View style={{ flexDirection: "row", gap: spacing.sm }}>
             <Button
-              title="Not right"
+              title="Discard capture"
               variant="secondary"
-              onPress={handleReject}
+              onPress={handleDiscard}
               disabled={busy}
               style={{ flex: 1 }}
             />
@@ -444,6 +481,19 @@ export default function CaptureReviewScreen() {
               style={{ flex: 1 }}
             />
           </View>
+          {/* The third, non-destructive route: "this isn't right" now has an
+              answer that keeps the capture. Card view only — the follow-up and
+              unidentified views already render ResolutionResult's own
+              SearchManuallyLink, and two identical affordances would be worse
+              than none. */}
+          {resultView === "card" ? (
+            <Button
+              title="Search manually"
+              variant="secondary"
+              onPress={handleSearchManually}
+              disabled={busy}
+            />
+          ) : null}
         </ScrollView>
       )}
     </View>

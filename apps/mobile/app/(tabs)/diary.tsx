@@ -14,6 +14,7 @@ import { GlassPanel } from "@/components/instrument/GlassPanel";
 import { CopyDaySheet } from "@/components/diary/CopyDaySheet";
 import { QueuedFailedSheet } from "@/components/diary/QueuedFailedSheet";
 import { EmptyState } from "@/components/common/EmptyState";
+import { LoadErrorNotice } from "@/components/common/LoadErrorNotice";
 import { useSavedMealEditor } from "@/components/meals/SavedMealSheetProvider";
 import { useDashboard, useDayLogs, useAddWater, useDeleteLog } from "@/api/hooks";
 import { useQueuedLogs } from "@/offline/useQueuedLogs";
@@ -278,10 +279,26 @@ export default function Diary() {
   };
 
   const d = dashboard.data;
+  // Same shape as Home (index.tsx): an explicit error flag, the figures hidden
+  // rather than zeroed, and a placeholder while the query is still in flight.
+  // The two failures are tracked separately because they lie about different
+  // things — a failed dashboard fabricates the day's totals, a failed log fetch
+  // fabricates an empty day.
+  const dashError = dashboard.isError;
+  const logsError = logs.isError;
+  const loadError = dashError || logsError;
   // No dashboard data yet and no error means the query hasn't resolved — distinct
   // from a resolved dashboard with genuinely zero consumption, which must still
   // show real "0" figures, not a placeholder. Same guard as Home (index.tsx).
-  const pending = !d && !dashboard.isError;
+  const pending = !d && !dashError;
+  // Neither resolved nor resolvable: both states must render "—", never a
+  // figure. `pending` alone was false on error, which is exactly how "0 / 0
+  // kcal" and "0.0 L" reached the screen as if they were the user's day.
+  const unknownTotals = pending || dashError;
+  const retry = () => {
+    if (dashError) void dashboard.refetch();
+    if (logsError) void logs.refetch();
+  };
   const goal = d?.targets.kcal ?? 0;
   // Pending only. A pending item is a real food with known nutrition whose
   // upload is merely outstanding, so leaving it out makes remaining-calories
@@ -306,7 +323,7 @@ export default function Diary() {
   // Only the day actually on screen has real consumed/target data — the other
   // six week-strip cells have none of it loaded (this screen fetches one day
   // at a time, unchanged), so their pip stays unlit rather than guessing.
-  const hitGoal = !pending && goal > 0 && total >= goal;
+  const hitGoal = !unknownTotals && goal > 0 && total >= goal;
 
   const openMeal = (log: FoodLog) =>
     router.push({ pathname: "/meal", params: { id: log.id, name: log.description, mealSlot: log.meal_slot, time: timeOf(log.logged_at), kcal: String(Math.round(log.kcal)), protein: String(Math.round(log.protein_g)), carbs: String(Math.round(log.carbs_g)), fat: String(Math.round(log.fat_g)), grams: String(Math.round(log.quantity_grams)) } });
@@ -326,11 +343,14 @@ export default function Diary() {
         group.queued.reduce((sum, r) => sum + (r.status === "pending" ? (r.kcal ?? 0) : 0), 0),
     );
 
-  const isEmptyDay = logged.length === 0 && queuedNotOnServer.length === 0 && captures.rows.length === 0;
+  // A failed log fetch is not an empty day. Rendering the first-run empty
+  // state there tells a user with a full diary that they logged nothing.
+  const isEmptyDay =
+    !logsError && logged.length === 0 && queuedNotOnServer.length === 0 && captures.rows.length === 0;
   // The ghost row nudges toward the next unlogged slot, in canonical order —
   // it never appears once every slot has something, and never fabricates a
   // reserve figure before the dashboard has resolved.
-  const missingSlot = !pending && !isEmptyDay ? SLOT_ORDER.find((slot) => !slots.some((g) => g.slot === slot)) : undefined;
+  const missingSlot = !loadError && !pending && !isEmptyDay ? SLOT_ORDER.find((slot) => !slots.some((g) => g.slot === slot)) : undefined;
 
   const mono = monoStyle(fonts);
   // The four slot headers below (Breakfast/Lunch/Dinner/Snack, at most) ARE
@@ -385,11 +405,14 @@ export default function Diary() {
         </Animated.View>
 
         <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
+          {/* Same explicit-error surface Home carries, with a Retry because this
+              screen has no pull-to-refresh to point the copy at. */}
+          {loadError ? <LoadErrorNotice message="Couldn't load your day." onRetry={retry} /> : null}
           <Animated.View entering={enter(2)}>
             <GlassPanel radius={20} style={{ marginBottom: 16 }} testID="day-total">
               <View style={{ padding: 16 }}>
                 <AppText style={mutedLabel}>Day total</AppText>
-                {pending ? (
+                {unknownTotals ? (
                   <AppText style={[{ fontSize: 22, color: instrument.mut, marginTop: 4 }, mono]}>—</AppText>
                 ) : (
                   <View style={{ flexDirection: "row", alignItems: "baseline", marginTop: 4 }}>
@@ -397,15 +420,21 @@ export default function Diary() {
                     <AppText style={[{ fontSize: 13, color: instrument.mut }, mono]}>{` / ${Math.round(goal).toLocaleString()} kcal`}</AppText>
                   </View>
                 )}
-                <View style={{ height: 6, borderRadius: 3, backgroundColor: instrument.inset, overflow: "hidden", marginTop: 10 }}>
-                  <View style={{ height: "100%", width: `${pending ? 0 : pct}%`, backgroundColor: instrument.accent, borderRadius: 3 }} />
-                </View>
+                {/* Hidden outright on error, the way Home hides its gauge: an empty
+                    track is still a claim — "0% of your goal" — about a day we
+                    could not load. While merely pending it stays, at 0%, as the
+                    placeholder for a figure that is about to arrive. */}
+                {dashError ? null : (
+                  <View style={{ height: 6, borderRadius: 3, backgroundColor: instrument.inset, overflow: "hidden", marginTop: 10 }}>
+                    <View style={{ height: "100%", width: `${pending ? 0 : pct}%`, backgroundColor: instrument.accent, borderRadius: 3 }} />
+                  </View>
+                )}
 
                 <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 16 }}>
                   <View>
                     <AppText style={mutedLabel}>Water</AppText>
                     <AppText style={[{ fontSize: 15, fontWeight: "600", color: instrument.ink, marginTop: 2 }, mono]}>
-                      {pending ? "—" : `${system === "imperial" ? Math.round(water.value) : water.value.toFixed(1)} ${water.unit}`}
+                      {unknownTotals ? "—" : `${system === "imperial" ? Math.round(water.value) : water.value.toFixed(1)} ${water.unit}`}
                     </AppText>
                   </View>
                   <View style={{ flexDirection: "row", gap: 8, flex: 1, marginLeft: 16 }}>

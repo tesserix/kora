@@ -8,6 +8,7 @@ import { AppBackground } from "@/components/AppBackground";
 import { GroupedSection } from "@/components/GroupedList";
 import { NotifRow } from "@/components/NotifRow";
 import { EmptyState } from "@/components/common/EmptyState";
+import { LoadErrorNotice } from "@/components/common/LoadErrorNotice";
 import { useNotifications, useMarkAllRead } from "@/api/hooks";
 import { useTheme } from "@/theme";
 import { targetFor } from "@/lib/notificationTarget";
@@ -86,6 +87,8 @@ export default function NotificationsScreen() {
   }, []);
 
   const list = notifications.data ?? [];
+  // #174: an unreachable inbox is not an empty one.
+  const listError = notifications.isError;
 
   return (
     <View style={{ flex: 1, backgroundColor: instrument.bg }}>
@@ -93,7 +96,9 @@ export default function NotificationsScreen() {
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
         <ScreenHeader overline="Recent" title="Notifications" onBack={() => safeBack("/(tabs)/more")} />
         <View style={{ paddingHorizontal: 20 }}>
-          {list.length === 0 ? (
+          {listError ? (
+            <LoadErrorNotice message="Couldn't load your notifications." onRetry={() => void notifications.refetch()} />
+          ) : list.length === 0 ? (
             <EmptyState
               variant="instrument"
               icon="bell"

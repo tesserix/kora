@@ -14,6 +14,7 @@ import { monoStyle } from "@/components/instrument/typography";
 import { WeightChart } from "@/components/progress/WeightChart";
 import { WeightLogSheet } from "@/components/progress/WeightLogSheet";
 import { EmptyState } from "@/components/common/EmptyState";
+import { LoadErrorNotice } from "@/components/common/LoadErrorNotice";
 import { useAvgIntake7d, useDashboard, useProfile, useWeightSeries } from "@/api/hooks";
 import type { WeightEntry } from "@/api/types";
 import { useHealth } from "@/health";
@@ -105,6 +106,11 @@ export default function Progress() {
   // gauge instruments themselves).
   const mutedLabel = { fontSize: 11, color: instrument.mut };
 
+  // The weight series' error was never read at all, so a failed fetch fell
+  // straight through to the "No weigh-ins yet" empty state below — telling a
+  // user with months of weigh-ins that they have none. Same distinction Home
+  // draws: "we couldn't load this" is not "you have none".
+  const seriesError = series.isError;
   const entries = (series.data ?? []) as WeightEntry[];
   const points = entries.map((e) => e.weight_kg);
   const hasChart = points.length >= 2;
@@ -118,7 +124,8 @@ export default function Progress() {
   const deltaText = d !== null ? `${d <= 0 ? "▾" : "▴"} ${Math.abs(d).toFixed(1)} ${weightUnitLabel(system)}` : null;
 
   const dash = dashboard.data;
-  const dashPending = !dash && !dashboard.isError;
+  const dashError = dashboard.isError;
+  const dashPending = !dash && !dashError;
   const streakDays = dash?.streak_days ?? 0;
   const targetKcal = dash?.targets?.kcal ?? 0;
 
@@ -179,6 +186,8 @@ export default function Progress() {
                   <AppText style={[mutedLabel, mono]}>{shortDate(entries[entries.length - 1].logged_at)}</AppText>
                 </View>
               </>
+            ) : seriesError ? (
+              <LoadErrorNotice message="Couldn't load your weigh-ins." onRetry={() => void series.refetch()} />
             ) : entries.length === 0 ? (
               <EmptyState
                 icon="chart-line"
@@ -223,12 +232,21 @@ export default function Progress() {
         <Animated.View entering={enter(3)} style={{ flexDirection: "row", gap: 12 }}>
           <GlassPanel radius={20} style={{ flex: 1, padding: 14 }}>
             <AppText style={mutedLabel}>Logging streak</AppText>
-            <AppText style={[{ fontSize: 15, fontWeight: "600", color: instrument.ink, marginTop: 2 }, mono]}>
-              {dashPending ? "—" : `${loggingStreakDays}/7 days`}
-            </AppText>
-            <View style={{ marginTop: 10 }}>
-              <StreakCells hits={loggingStreakHits} testIDPrefix="logging-streak" />
-            </View>
+            {/* A row of unlit cells reads as "you logged nothing this week",
+                which is a claim about days we could not load — so on error the
+                cells go entirely, replaced by the notice. */}
+            {dashError ? (
+              <LoadErrorNotice message="Couldn't load your streak." onRetry={() => void dashboard.refetch()} />
+            ) : (
+              <>
+                <AppText style={[{ fontSize: 15, fontWeight: "600", color: instrument.ink, marginTop: 2 }, mono]}>
+                  {dashPending ? "—" : `${loggingStreakDays}/7 days`}
+                </AppText>
+                <View style={{ marginTop: 10 }}>
+                  <StreakCells hits={loggingStreakHits} testIDPrefix="logging-streak" />
+                </View>
+              </>
+            )}
           </GlassPanel>
           <GlassPanel radius={20} style={{ flex: 1, padding: 14 }}>
             <AppText style={mutedLabel}>Avg sleep</AppText>
