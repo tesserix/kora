@@ -26,6 +26,12 @@
   --radius-well: 10px;
 
   --shadow-card: 0 12px 24px rgba(0, 0, 0, 0.55);
+
+  /* Ignition finish (sketch 001 winner) */
+  --shade: rgba(0, 0, 0, 0.28);          /* bezel bottom shading */
+  --well-shadow: rgba(0, 0, 0, 0.25);    /* inner shadow of recessed wells */
+  --lume-text: rgba(237, 230, 212, 0.30);/* warm glow behind hero numerals */
+  --lume-accent: rgba(255, 74, 0, 0.45); /* glow behind accent captions */
 }
 
 @media (prefers-color-scheme: light) {
@@ -45,6 +51,10 @@
     --danger: #D32F23;
     --teal: #2C7871;
     --shadow-card: 0 12px 24px rgba(0, 0, 0, 0.12);
+    --shade: rgba(22, 24, 28, 0.12);
+    --well-shadow: rgba(22, 24, 28, 0.08);
+    --lume-text: transparent;
+    --lume-accent: rgba(210, 56, 0, 0.22);
   }
 }
 
