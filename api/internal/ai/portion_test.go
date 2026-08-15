@@ -166,6 +166,38 @@ func TestPortionGramsForUsesTheFoodsOwnServing(t *testing.T) {
 			want:        170,
 			wantAssumed: true,
 		},
+		{
+			// kora#180. A USDA serving used to be discarded wholesale, so a
+			// photographed croissant reported the 100 g default -- 414 kcal
+			// against a ~117 kcal truth. The exclusion existed to keep whole
+			// birds out (see below); it is now a plausibility bound instead,
+			// so a sensible USDA serving is honoured like any other.
+			name:        "a plausible USDA serving is used, not the flat default",
+			phrase:      "",
+			item:        nutrition.FoodItem{Provenance: nutrition.ProvenanceUSDA, ServingGrams: 28.35},
+			want:        28.35,
+			wantAssumed: false,
+		},
+		{
+			// The case the original OFF-only restriction was written for, and
+			// which the bound must keep excluding: "Turkey, whole, meat and
+			// skin, raw" really does carry 5717 g. 100 g is wrong, but it is
+			// far less wrong than a whole bird.
+			name:        "an implausible USDA serving is rejected, falling to the default",
+			phrase:      "",
+			item:        nutrition.FoodItem{Provenance: nutrition.ProvenanceUSDA, ServingGrams: 5717},
+			want:        100,
+			wantAssumed: true,
+		},
+		{
+			// OFF servings are real package servings and must keep working
+			// exactly as before -- the bound is additive, not a replacement.
+			name:        "an OFF branded serving still wins",
+			phrase:      "",
+			item:        nutrition.FoodItem{Provenance: nutrition.ProvenanceOFF, ServingGrams: 37.5},
+			want:        37.5,
+			wantAssumed: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

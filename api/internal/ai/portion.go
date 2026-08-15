@@ -129,6 +129,28 @@ func servingGramsFromPhrase(norm string, item nutrition.FoodItem) (float64, bool
 	return 0, false
 }
 
+// Bounds on a food's own stored serving size, for deciding whether it is a
+// portion a person plausibly eats in one sitting.
+//
+// Chosen from the shipped index rather than intuition. Of 7,764 USDA rows
+// carrying a serving: 7,470 fall within 1-500 g, 276 sit above 500 g, and 18
+// below 1 g. The rows above the ceiling are precisely the pathological ones —
+// "Turkey, whole, meat and skin, raw" (5717 g), "Canada Goose, breast meat
+// only, skinless, raw" (4405 g) — i.e. whole-animal reference masses, not
+// servings. So the bound admits ~96% of real servings and excludes exactly the
+// class the original OFF-only restriction was written to exclude.
+//
+// The floor is data hygiene, not nutrition: a sub-gram "serving" is a parsing
+// artefact rather than a food anyone portions out.
+const (
+	minPlausibleServingGrams = 1
+	maxPlausibleServingGrams = 500
+)
+
+func plausibleServingGrams(g float64) bool {
+	return g >= minPlausibleServingGrams && g <= maxPlausibleServingGrams
+}
+
 // portionGramsFor is parsePortionGrams with the resolved food in hand. The
 // second return value, assumed, reports whether grams is the silent flat
 // default (defaultPortionGrams) rather than a value derived from either the
@@ -166,10 +188,17 @@ func servingGramsFromPhrase(norm string, item nutrition.FoodItem) (float64, bool
 //  5. The flat default. ASSUMED — no phrase signal and no food-specific
 //     serving data at all.
 //
-// Step 4 is restricted to OFF provenance ON PURPOSE. A USDA reference serving
-// is not a portion anyone eats: "Turkey, whole, meat and skin, raw" carries
-// 5717 g. Falling back to that would turn an unrecognised phrase into a whole
-// bird, which is far worse than the 100 g it replaces.
+// Step 4 was once restricted to OFF provenance, to keep USDA reference servings
+// out: "Turkey, whole, meat and skin, raw" carries 5717 g, and falling back to
+// that would turn an unrecognised phrase into a whole bird. The concern is real
+// but the instrument was too blunt — it discarded ~7,470 perfectly sensible
+// USDA servings to exclude ~276 absurd ones, and a photographed croissant
+// therefore reported the flat 100 g default (414 kcal) instead of its own
+// 28.35 g serving (~117 kcal) (kora#180).
+//
+// It is now a plausibility bound on the VALUE rather than a ban on the source,
+// which keeps the turkey out and lets the croissant in. See
+// plausibleServingGrams for how the bounds were chosen.
 func portionGramsFor(phrase string, item nutrition.FoodItem) (grams float64, assumed bool) {
 	norm := strings.ToLower(strings.TrimSpace(phrase))
 
@@ -187,7 +216,7 @@ func portionGramsFor(phrase string, item nutrition.FoodItem) (grams float64, ass
 	if grams, ok := sizeAdjectiveGrams[norm]; ok {
 		return grams, true
 	}
-	if item.Provenance == nutrition.ProvenanceOFF && item.ServingGrams > 0 {
+	if plausibleServingGrams(item.ServingGrams) {
 		return item.ServingGrams, false
 	}
 	// Nothing food-specific applied and no phrase signal matched; fall through
