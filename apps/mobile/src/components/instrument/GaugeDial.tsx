@@ -221,16 +221,24 @@ export const GaugeDial = forwardRef<GaugeDialHandle, GaugeDialProps>(function Ga
           "worklet";
           // Settle thump (spec: ignition-settle haptic) — fires once the
           // overshoot spring has actually come to rest, not on every
-          // intermediate frame. runOnJS crosses back from the UI thread;
-          // haptics.impactLight is safe to call from any thread boundary
-          // since it's already a fire-and-forget promise wrapper. The same
-          // bridge clears `sequenceInFlight` — that's the JS-thread state
-          // that ungates the odometer numeral branch and the sweep() guard
-          // (Finding 1), so it must cross back the same way the haptic does.
-          if (finished) {
-            runOnJS(haptics.impactLight)();
-            runOnJS(setSequenceInFlight)(false);
-          }
+          // intermediate frame, so it stays gated on `finished`. runOnJS
+          // crosses back from the UI thread; haptics.impactLight is safe to
+          // call from any thread boundary since it's already a fire-and-forget
+          // promise wrapper.
+          if (finished) runOnJS(haptics.impactLight)();
+          // `sequenceInFlight` clears UNCONDITIONALLY, finished or not — a
+          // re-render mid-sequence (e.g. `fraction`/`showIgnition` changing
+          // from a refetch, plausible right at app-open) takes the `else`
+          // branch below on the NEXT effect run, which calls
+          // `withSpring(fraction, NEEDLE_SPRING)` and cancels this in-flight
+          // spring — its callback then fires with `finished=false`. Gating
+          // the clear on `finished` left the flag stuck `true` for the rest
+          // of the session in exactly that case (kora ignition re-review,
+          // Finding 1 follow-up): a cancelled sequence is no longer in
+          // flight either way, so the JS-thread state that ungates the
+          // odometer numeral branch and the sweep() guard must always cross
+          // back over this same runOnJS bridge.
+          runOnJS(setSequenceInFlight)(false);
         }),
       );
     } else {

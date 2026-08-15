@@ -201,7 +201,7 @@ test("the hero is a single fused cluster: gauge, Macros zone rule, and vitals fo
   expect(await findByText("MACROS")).toBeTruthy();
   expect(await findByTestId("home-vitals")).toBeTruthy();
   // Carbs/Fat now render as the same compact SubDial cell as Protein — no
-  // separate MacroWide panel.
+  // separate wide macro panel.
   expect(await findByText("140/220g")).toBeTruthy();
   expect(await findByText("40/70g")).toBeTruthy();
   // Dynamic Type is never disabled, only capped (mirrors ZoneRule's

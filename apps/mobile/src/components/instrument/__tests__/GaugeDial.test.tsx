@@ -295,6 +295,51 @@ test("after the ignition sequence settles, a later value change engages the 550m
   timing.mockRestore();
 });
 
+// Finding 1 follow-up (kora ignition re-review): the settle callback used to
+// clear `sequenceInFlight` only `if (finished)`. A re-render mid-sequence
+// (fraction/showIgnition changing from a refetch, plausible right at
+// app-open) takes the plain `withSpring(fraction, NEEDLE_SPRING)` branch on
+// the NEXT effect run, which cancels the still-in-flight ignition spring —
+// its callback then fires with `finished=false`, and the flag used to get
+// stuck `true` for the rest of the session. It must clear unconditionally.
+test("sequenceInFlight clears even when the settle spring is interrupted (finished=false)", async () => {
+  const springSpy = jest.spyOn(Reanimated, "withSpring");
+  const timingSpy = jest.spyOn(Reanimated, "withTiming");
+  const ref = createRef<GaugeDialHandle>();
+
+  const { rerender } = await render(<GaugeDial ref={ref} value={1100} target={2200} ignition={false} />);
+  springSpy.mockClear();
+
+  await rerender(<GaugeDial ref={ref} value={1100} target={2200} ignition={true} />);
+
+  // Find the settle spring's own call (the one configured with
+  // springs.ignition) and grab its `finished` callback — the mock already
+  // invoked it with `true` automatically, but calling it again ourselves
+  // with `false` exercises the interrupted-settle path directly, the same
+  // way a cancelled real spring would (called directly, not wrapped in RTL's
+  // `act` — the mock applies the resulting setState synchronously, and
+  // wrapping it in a second, outer `act()` here disrupts the render queue
+  // that the subsequent `await rerender(...)` below depends on).
+  const settleCall = springSpy.mock.calls.find(([, config]) => config === springs.ignition);
+  expect(settleCall).toBeDefined();
+  const settleCallback = settleCall?.[2] as (finished: boolean) => void;
+  settleCallback(false);
+
+  // sweep() must be callable (retargets) immediately — the flag cleared.
+  springSpy.mockClear();
+  ref.current?.sweep();
+  expect(springSpy).toHaveBeenCalledWith(0.5, { damping: 30, stiffness: 250 });
+
+  // A later value change engages the 550ms odometer branch, not the stale
+  // countdown mechanism.
+  timingSpy.mockClear();
+  await rerender(<GaugeDial ref={ref} value={1650} target={2200} ignition={true} />);
+  expect(timingSpy).toHaveBeenCalledWith(550, expect.objectContaining({ duration: 550 }));
+
+  springSpy.mockRestore();
+  timingSpy.mockRestore();
+});
+
 describe("over budget", () => {
   it("describeReserve reports overage", () => {
     expect(describeReserve(2320, 2100)).toEqual({ over: true, magnitude: 220, caption: "kcal over budget" });
