@@ -266,8 +266,17 @@ function ContinuousRuler(props: ContinuousProps) {
         <AppText
           testID={`${testID}-readout`}
           style={{
-            height: READOUT_HEIGHT,
-            lineHeight: READOUT_HEIGHT,
+            // minHeight, NOT height, and no fixed lineHeight (kora#173). The
+            // no-reflow requirement this row exists for is about the value
+            // gaining a digit MID-DRAG, and a floor satisfies that completely:
+            // the digits never change height, so the row never moves while you
+            // drag it. Pinning height and lineHeight to 20 also pinned them
+            // against a fontSize that Dynamic Type scales, so at accessibility
+            // text sizes the readout was clipped through the middle of the
+            // glyphs — the value in plain sight, unreadable, which is the exact
+            // failure kora#165 set out to fix. Growth here happens only when the
+            // user changes their text size, which is not during a drag.
+            minHeight: READOUT_HEIGHT,
             textAlign: "center",
             fontSize: 15,
             fontWeight: "700",
