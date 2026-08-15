@@ -110,7 +110,8 @@ afterEach(() => {
 test("Diary shows header, week strip and a logged meal grouped by slot", async () => {
   const { findByText } = await render(<Diary />);
   expect(await findByText("Diary")).toBeTruthy();
-  expect(await findByText("DINNER · 520 KCAL")).toBeTruthy();
+  expect(await findByText("DINNER")).toBeTruthy();
+  expect(await findByText("· 520 KCAL")).toBeTruthy();
   expect(await findByText("Grilled salmon")).toBeTruthy();
 });
 
@@ -272,7 +273,8 @@ test("a pending queued row appears in its own slot with a Pending badge", async 
   mockQueuedRows = [queuedRow()];
   const { findByText, getByText } = await render(<Diary />);
 
-  expect(await findByText("LUNCH · 93 KCAL")).toBeTruthy();
+  expect(await findByText("LUNCH")).toBeTruthy();
+  expect(await findByText("· 93 KCAL")).toBeTruthy();
   getByText("Greek yogurt");
   getByText("Pending");
   getByText("Waiting to sync");
@@ -364,7 +366,8 @@ test("a queued row the server already has is rendered once, not twice", async ()
   mockQueuedRows = [queuedRow({ id: "dup", description: "Greek yogurt", kcal: 93 })];
 
   const { findByText, getAllByText, queryByText } = await render(<Diary />);
-  await findByText("LUNCH · 93 KCAL");
+  await findByText("LUNCH");
+  await findByText("· 93 KCAL");
 
   expect(getAllByText("Greek yogurt")).toHaveLength(1);
   // And the survivor is the SERVER row, not the queued copy.

@@ -20,6 +20,21 @@ describe("BezelCluster", () => {
     expect(getByText("MACROS")).toBeTruthy();
   });
 
+  // Review fix (kora ignition Task 7): a slot's kcal subtotal has to stay
+  // mono/tabular-nums, not inherit the label's plain engraved sans — that
+  // regressed when the two were merged into one ZoneRule label string.
+  it("ZoneRule renders an optional detail in mono/tabular-nums, uppercased", async () => {
+    const { getByText } = await render(<ZoneRule label="breakfast" detail="· 380 kcal" />);
+    const detailStyle = StyleSheet.flatten(getByText("· 380 KCAL").props.style);
+    expect(detailStyle.fontVariant).toContain("tabular-nums");
+  });
+
+  it("ZoneRule with no detail renders only the label, unaffected", async () => {
+    const { getByText, queryByText } = await render(<ZoneRule label="Macros" />);
+    expect(getByText("MACROS")).toBeTruthy();
+    expect(queryByText(/·/)).toBeNull();
+  });
+
   it("WellFooter paints the recessed inset fill matching instrument.inset", async () => {
     const { getByTestId } = await render(
       <WellFooter testID="well"><Text>water</Text></WellFooter>,

@@ -338,7 +338,7 @@ export default function Diary() {
               not another glass panel. */}
           {slots.map((group, gi) => (
             <Animated.View key={group.slot} entering={enter(4 + gi)} style={{ marginBottom: 20 }}>
-              <ZoneRule label={formatSlotLabel(group.slot, slotKcal(group))} />
+              <ZoneRule {...formatSlotLabel(group.slot, slotKcal(group))} />
               <View style={{ paddingTop: 10 }}>
                 {group.captures.map((c) => {
                   const failed = c.status === "failed";

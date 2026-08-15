@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { GlassPanel } from "./GlassPanel";
+import { monoStyle } from "./typography";
 import { AppText } from "@/components/Text";
 import { useTheme } from "@/theme";
 
@@ -47,11 +48,21 @@ export function BezelCluster({ children, radius = 26, style, glow = false, testI
 
 export interface ZoneRuleProps {
   label: string;
+  /**
+   * An optional mono-figure detail rendered after the label (e.g. a slot's
+   * "· 380 kcal" subtotal) — same 10px engraved scale and instrument.mut
+   * color as the label, but routed through monoStyle so the digits keep
+   * tabular-nums instead of inheriting the label's sans engraving. Omitting
+   * this prop keeps ZoneRule's single-label rendering byte-identical to
+   * before (spec 2026-08-16 "Diary recomposition" review fix).
+   */
+  detail?: string;
   testID?: string;
 }
 
-export function ZoneRule({ label, testID }: ZoneRuleProps) {
-  const { instrument } = useTheme();
+export function ZoneRule({ label, detail, testID }: ZoneRuleProps) {
+  const { instrument, fonts } = useTheme();
+  const mono = monoStyle(fonts);
   const line = { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: instrument.hairline } as const;
   return (
     <View testID={testID} style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 16 }}>
@@ -59,6 +70,14 @@ export function ZoneRule({ label, testID }: ZoneRuleProps) {
       <AppText maxFontSizeMultiplier={1.4} style={{ fontSize: 10, fontWeight: "600", letterSpacing: 1.5, color: instrument.mut }}>
         {label.toUpperCase()}
       </AppText>
+      {detail ? (
+        <AppText
+          maxFontSizeMultiplier={1.4}
+          style={[{ fontSize: 10, fontWeight: "600", letterSpacing: 1.5, color: instrument.mut }, mono]}
+        >
+          {detail.toUpperCase()}
+        </AppText>
+      ) : null}
       <View style={line} />
     </View>
   );

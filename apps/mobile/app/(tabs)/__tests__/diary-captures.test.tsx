@@ -90,8 +90,10 @@ test("a queued capture renders only in its own meal slot", async () => {
 
   // Both sections exist: LUNCH because of the capture alone (captures never
   // contribute to the subtotal, so it reads 0), DINNER from the log.
-  expect(await findByText("LUNCH · 0 KCAL")).toBeTruthy();
-  expect(await findByText("DINNER · 520 KCAL")).toBeTruthy();
+  expect(await findByText("LUNCH")).toBeTruthy();
+  expect(await findByText("· 0 KCAL")).toBeTruthy();
+  expect(await findByText("DINNER")).toBeTruthy();
+  expect(await findByText("· 520 KCAL")).toBeTruthy();
   expect(getAllByLabelText("Photo, Identifying when you're back online")).toHaveLength(1);
 });
 
@@ -102,7 +104,8 @@ test("a capture in a slot with no logs still creates that slot's section", async
   mockCaptureRows = [captureRow({ mealSlot: "breakfast", kind: "voice", thumbnailUri: null })];
   const { findByText } = await render(<Diary />);
 
-  expect(await findByText("BREAKFAST · 0 KCAL")).toBeTruthy();
+  expect(await findByText("BREAKFAST")).toBeTruthy();
+  expect(await findByText("· 0 KCAL")).toBeTruthy();
   expect(await findByText("Voice note")).toBeTruthy();
 });
 
