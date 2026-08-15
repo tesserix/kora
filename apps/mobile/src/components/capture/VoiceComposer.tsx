@@ -3,7 +3,6 @@ import { Pressable, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { Icon } from "@/components/Icon";
 import { AppText } from "@/components/Text";
-import { PressableScale } from "@/motion";
 import { INSTRUMENT_DARK_FIXED } from "@/theme";
 import {
   PRESS_ARM_MS,
@@ -83,11 +82,22 @@ export function VoiceComposer({ isRecording, onStart, onFinish, onCancel }: Voic
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
       <GestureDetector gesture={pan}>
-        {/* PressableScale, not a raw Pressable: PRESS_ARM_MS is 200ms of
-            deliberate nothing before the recording arms, and the press-down
-            scale is what covers it. The arming delay is defensible; the
-            silence was not. */}
-        <PressableScale
+        {/* MUST stay a raw Pressable — NOT PressableScale (kora#175 regression,
+            crashed on device in build 21).
+
+            GestureDetector attaches to its child by cloning it with a ref to
+            reach the underlying native view. `PressableScale` is a plain
+            function component and forwards no ref, so RNGH gets nothing to
+            attach to and the screen crashes on mount. Every other
+            GestureDetector in the app hands it a host component (`View` in
+            TickRuler, `Animated.View` in Sheet), which is why this was the only
+            site that broke.
+
+            The press-down feedback kora#175 wanted is still here, via the
+            `pressed` style callback — the same idiom used in ModePill and
+            DetectedCard. It covers the 200ms PRESS_ARM_MS window without
+            needing a ref. */}
+        <Pressable
           accessibilityRole="button"
           accessibilityLabel={isRecording ? "Stop recording" : "Hold to record"}
           accessibilityHint={
@@ -98,7 +108,7 @@ export function VoiceComposer({ isRecording, onStart, onFinish, onCancel }: Voic
             if (isRecording) onFinish();
             else onStart();
           }}
-          style={{
+          style={(s) => ({
             width: 38,
             height: 38,
             borderRadius: 9999,
@@ -107,10 +117,11 @@ export function VoiceComposer({ isRecording, onStart, onFinish, onCancel }: Voic
             backgroundColor: T.accent,
             alignItems: "center",
             justifyContent: "center",
-          }}
+            opacity: s.pressed ? 0.6 : 1,
+          })}
         >
           <Icon name="mic" size={19} color={T.accentOn} />
-        </PressableScale>
+        </Pressable>
       </GestureDetector>
 
       {isRecording ? (

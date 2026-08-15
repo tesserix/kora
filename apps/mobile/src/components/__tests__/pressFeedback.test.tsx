@@ -13,8 +13,10 @@ import { VoiceComposer } from "@/components/capture/VoiceComposer";
 // Pinning all 37 would be 37 near-identical tests, so this file pins a
 // representative sample chosen for coverage of the distinct cases rather than
 // for count:
-//   - VoiceComposer's mic — a PressableScale swap, and the site with the
-//     200ms PRESS_ARM_MS delay that the missing feedback was covering.
+//   - VoiceComposer's mic — the site with the 200ms PRESS_ARM_MS delay that
+//     the missing feedback was covering. Uses the opacity idiom, NOT
+//     PressableScale: it sits inside a GestureDetector, and that pairing
+//     crashed on device (see the test below and gestureDetectorChild.test.ts).
 //   - MealRow's pin glyph — the opacity idiom, chosen where a scale would
 //     visibly disturb a dense row.
 //   - Segmented's segment — the opacity idiom on a control whose own sliding
@@ -68,20 +70,20 @@ function styleForPressState(ui: ReactElement, accessibilityLabel: string, presse
   return StyleSheet.flatten(matches[0].props.style({ pressed })) ?? {};
 }
 
-test("the mic responds on press-down, so the arming delay is not silent", async () => {
-  const spy = jest.spyOn(Reanimated, "withSpring");
-  const { getByLabelText } = await render(
-    <VoiceComposer isRecording={false} onStart={jest.fn()} onFinish={jest.fn()} onCancel={jest.fn()} />,
+// The mic dims rather than springs, and that is not a stylistic preference.
+// It lives inside a GestureDetector, which reaches its child's native view by
+// cloning it with a ref — and PressableScale forwards no ref, so the pairing
+// crashed on device in build 21 (kora#175 regression). The press-down feedback
+// the arming delay needs is still here; it just comes from the `pressed` style
+// callback, which needs no ref. See gestureDetectorChild.test.ts, which stops
+// the crashing pairing coming back.
+test("the mic dims on press-down, so the arming delay is not silent", () => {
+  const mic = (
+    <VoiceComposer isRecording={false} onStart={jest.fn()} onFinish={jest.fn()} onCancel={jest.fn()} />
   );
-  const mic = getByLabelText("Hold to record");
-  spy.mockClear();
 
-  await pressDown(mic);
-  expect(spy).toHaveBeenCalledTimes(1);
-  expect((spy.mock.calls[0] as [number, unknown])[0]).toBeLessThan(1);
-
-  await release(mic);
-  spy.mockRestore();
+  expect(styleForPressState(mic, "Hold to record", false).opacity).toBe(1);
+  expect(styleForPressState(mic, "Hold to record", true).opacity).toBeLessThan(1);
 });
 
 test("a meal row's pin glyph dims under the finger without moving the row", () => {
