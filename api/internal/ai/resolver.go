@@ -258,29 +258,54 @@ func (r Resolver) resolve(
 		return res, nil
 	}
 
+	// A weak match beats a decomposition, always (#180).
+	//
+	// decomposeAndEstimate sums ingredient rows at portionGramsFor's flat 100 g
+	// default with NOTHING scaling them to the finished dish, so it can only
+	// ever produce a number LARGER than the food — usually by an order of
+	// magnitude. Replacing a real index row with that is strictly worse than
+	// showing the row and letting the user correct it.
+	//
+	// Measured: a photographed mini croissant (identified "croissant" at 0.99)
+	// matched `Croissants, cheese` at 0.4425 — 117 kcal against a ~114 kcal
+	// truth — and was discarded for a 2248-3041 kcal decomposition. The answer
+	// was already in hand.
+	//
+	// Decomposition is kept for the case it was designed for, below: a
+	// composite dish with NO index row at all.
+	if len(res.Candidates) > 0 {
+		// Blanked for the same reason decomposeAndEstimate leaves it blank: the
+		// client renders its dedicated follow-up branch only when tier is
+		// follow_up AND this is non-empty, and that branch DISCARDS the
+		// candidate list and dead-ends at "Search manually". Blank keeps the
+		// normal detected-card path, where each item carries its own tier and
+		// an uncertain row is tappable — which is exactly the correction
+		// affordance a low-confidence match wants.
+		//
+		// Deliberately NOT cached: a weak answer should not be pinned for the
+		// cache's 24h, unlike the auto/confirm path above.
+		res.FollowUpQuestion = ""
+		slog.InfoContext(ctx, "ai: returning low-confidence match rather than decomposing",
+			"guesses", summariseGuesses(guesses),
+			"tier", string(res.Tier),
+			"top", topCandidateName(res),
+			"score", topCandidateScore(res),
+		)
+		return res, nil
+	}
+
 	subject := decomposeSubject(guesses)
 	if subject == "" {
 		return res, nil
 	}
 
-	// The one line that explains a wrong answer (#180). Decomposition only runs
-	// because the index match was not good enough, and it can only ever produce
-	// a number LARGER than the dish — so every implausible estimate the user
-	// sees passes through here. Without the guess phrase and the score that was
-	// rejected there is no way to tell whether the identify step, the embedding
-	// match, or the tier threshold is at fault: a mini croissant resolved to
-	// 2248-3041 kcal while `Croissants, butter` (114 kcal at its 28 g serving)
-	// sat in the index, embedded, and nothing recorded said why it lost.
-	//
-	// Logged at WARN because reaching here is already a degraded outcome, not a
-	// normal path. Food names are user content; they are the whole diagnostic
-	// value here and are no more sensitive than the log rows they become.
-	slog.WarnContext(ctx, "ai: no candidate reached auto/confirm; falling back to decomposition",
+	// Reaching here now means NOTHING resolved — the case decomposition exists
+	// for. Still logged, because the estimate it produces is unscaled (see
+	// above) and any implausible total a user reports passes through this line.
+	// Food names are user content; they are the whole diagnostic value here.
+	slog.WarnContext(ctx, "ai: nothing resolved; decomposing into ingredients",
 		"subject", subject,
 		"guesses", summariseGuesses(guesses),
-		"rejected_tier", string(res.Tier),
-		"rejected_top", topCandidateName(res),
-		"rejected_score", topCandidateScore(res),
 	)
 
 	estimate, resolved, err := r.decomposeAndEstimate(ctx, userID, subject)

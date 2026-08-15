@@ -446,13 +446,20 @@ func TestResolveText_InvariantGuard_KcalComesOnlyFromTheRow(t *testing.T) {
 	require.NotEmpty(t, meter.records, "provider usage must be metered")
 }
 
-// TestResolveText_WeakConfidence_FollowUpWhenDecomposeYieldsNothing covers a
+// TestResolveText_WeakConfidence_ReturnsCandidateWithoutQuestion covers a
 // resolvable-but-weak match: the alias gives a perfect MatchScore, but the
 // guess's own identify confidence is low, so TierFor's min() rule pulls the
-// overall tier down to follow_up. Decompose is configured to return nothing
-// resolvable, so the resolver must fall back to the original follow-up
-// Resolution (with its question) rather than fabricate an estimate.
-func TestResolveText_WeakConfidence_FollowUpWhenDecomposeYieldsNothing(t *testing.T) {
+// overall tier down to follow_up.
+//
+// This test previously asserted the OPPOSITE — that the resolution came back
+// carrying its follow-up question. That was wrong, and shipped a dead end
+// (#180): src/components/ResolutionResult.tsx:148-154 renders the follow-up
+// branch as the question bubble plus a "Search manually" link and NEVER the
+// candidate list, so "Which of these best matches what you ate?" was asked
+// while displaying nothing to choose from. Blank keeps the client on the
+// detected-card path, where the weak candidate is shown as an uncertain row
+// the user can tap to correct.
+func TestResolveText_WeakConfidence_ReturnsCandidateWithoutQuestion(t *testing.T) {
 	db := testDB(t)
 	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE brand = 'test2b'") })
 	repo := nutrition.NewRepository(db)
@@ -477,8 +484,10 @@ func TestResolveText_WeakConfidence_FollowUpWhenDecomposeYieldsNothing(t *testin
 
 	require.NoError(t, err)
 	require.Equal(t, TierFollowUp, res.Tier)
-	require.NotEmpty(t, res.FollowUpQuestion)
 	require.False(t, res.IsEstimate)
+	require.Len(t, res.Candidates, 1, "the weak match itself must survive")
+	require.Empty(t, res.FollowUpQuestion,
+		"a question the client renders WITHOUT its candidates is unanswerable — see the doc comment")
 }
 
 // TestResolveText_UnknownDish_DecomposesToEstimate covers a dish that
@@ -1105,4 +1114,68 @@ func TestDecomposeAndEstimate_AllFollowUpProducesEmptyFollowUpQuestion(t *testin
 	}
 	require.Equal(t, TierFollowUp, res.Tier)
 	require.Empty(t, res.FollowUpQuestion)
+}
+
+// TestResolveText_WeakMatch_PrefersCandidateOverDecomposition pins the fix for
+// kora#180. A photographed croissant identified as "croissant" at 0.99 matched
+// `Croissants, cheese` at 0.4425 — a ~117 kcal answer against a ~114 kcal truth
+// — and the resolver threw it away because it missed the confirm floor, then
+// returned a 2248-3041 kcal ingredient decomposition instead.
+//
+// decomposeAndEstimate sums ingredients at a flat 100 g default with no scaling
+// to the finished dish, so it can only ever produce a number LARGER than the
+// food. That makes it a strictly worse answer than the weak match it replaces
+// whenever a match exists at all.
+//
+// The tier here is forced deterministically rather than by fuzzy scoring:
+// TierFor takes the MINIMUM of identify-confidence and match score, so a
+// seeded alias (match ~1.0) with a 0.5 confidence lands in follow_up.
+func TestResolveText_WeakMatch_PrefersCandidateOverDecomposition(t *testing.T) {
+	db := testDB(t)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE brand = 'test180'") })
+	repo := nutrition.NewRepository(db)
+
+	croissant := seedFoodItem(t, repo, nutrition.FoodItem{
+		Name: "Croissant test180", Brand: "test180",
+		Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 406,
+	})
+	seedAlias(t, db, "croissant 180", croissant.ID)
+
+	// The ingredient MUST resolve too. Without it decomposeAndEstimate returns
+	// resolved=false and the resolver falls back to `res` anyway — which looks
+	// like a pass while never exercising the bug. The regression is a
+	// SUCCESSFUL decomposition displacing a good candidate.
+	flour := seedFoodItem(t, repo, nutrition.FoodItem{
+		Name: "Wheat flour test180", Brand: "test180",
+		Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 364,
+	})
+	seedAlias(t, db, "wheat flour 180", flour.ID)
+
+	provider := &stubProvider{
+		guesses: []Guess{
+			{Food: "croissant 180", PortionEstimate: "1 serving", Confidence: 0.5},
+		},
+		guessUsage: Usage{Provider: "stub", CallType: "identify_text"},
+		// Present so that a regression is loud: if the resolver decomposes
+		// despite holding a candidate, IsEstimate flips and these replace it.
+		ingredients: []IngredientGuess{
+			{Ingredient: "wheat flour 180", PortionEstimate: "100 g", Confidence: 0.8},
+		},
+		ingredientsUsage: Usage{Provider: "stub", CallType: "decompose"},
+	}
+	resolver := NewResolver(provider, repo, NoCache{}, &stubMeter{withinBudget: true})
+
+	res, err := resolver.ResolveText(context.Background(), uuid.New(), "croissant 180")
+
+	require.NoError(t, err)
+	require.False(t, res.IsEstimate,
+		"a weak match must be returned as itself, never replaced by an ingredient estimate")
+	require.Len(t, res.Candidates, 1)
+	require.Equal(t, "Croissant test180", res.Candidates[0].Item.Name)
+	require.Equal(t, TierFollowUp, res.Tier)
+	// The client's dedicated follow-up branch DISCARDS the candidate list and
+	// dead-ends at "Search manually", so a question here would hide the very
+	// answer this fix exists to surface.
+	require.Empty(t, res.FollowUpQuestion,
+		"blank keeps the client on the detected-card path, where the uncertain row is tappable")
 }
