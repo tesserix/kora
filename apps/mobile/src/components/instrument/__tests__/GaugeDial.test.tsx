@@ -1,6 +1,7 @@
 import type { ComponentProps } from "react";
 import { createRef } from "react";
 import { render, within } from "@testing-library/react-native";
+import * as Haptics from "expo-haptics";
 import * as Reanimated from "react-native-reanimated";
 import { springs } from "@/motion";
 import { buildGaugeTicks, needleFor, GAUGE_VIEW_H, GAUGE_CENTER_Y } from "../gauge";
@@ -132,10 +133,25 @@ test("the ignition sequence engages when `ignition` flips false -> true post-mou
   // dedicated (deliberately underdamped) ignition spring — NOT the
   // critically-damped NEEDLE_SPRING used by ordinary data-change springs.
   expect(timingSpy).toHaveBeenCalledWith(1, expect.objectContaining({ duration: 650 }));
-  expect(springSpy).toHaveBeenCalledWith(0.5, springs.ignition);
+  // Third arg is the ignition-settle haptic callback (Task 9) — asserted
+  // separately below, so only its presence (any function) matters here.
+  expect(springSpy).toHaveBeenCalledWith(0.5, springs.ignition, expect.any(Function));
 
   springSpy.mockRestore();
   timingSpy.mockRestore();
+});
+
+// Task 9 haptics sweep: the settle spring's callback (asserted above via
+// `expect.any(Function)`) fires `haptics.impactLight()` once the overshoot
+// spring actually comes to rest — the jest.setup.js reanimated mock invokes
+// withSpring's callback synchronously with `finished = true`.
+test("the ignition settle plays an impactLight haptic once the overshoot spring comes to rest", async () => {
+  const { rerender } = await render(<GaugeDial value={1100} target={2200} ignition={false} />);
+  (Haptics.impactAsync as jest.Mock).mockClear();
+
+  await rerender(<GaugeDial value={1100} target={2200} ignition={true} />);
+
+  expect(Haptics.impactAsync).toHaveBeenCalledWith(Haptics.ImpactFeedbackStyle.Light);
 });
 
 test("the center overlay is bounded above the hub dot, derived from the gauge geometry", async () => {

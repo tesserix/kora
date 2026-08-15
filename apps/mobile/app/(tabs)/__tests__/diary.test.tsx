@@ -6,7 +6,10 @@ import { instrumentLight } from "@/theme/palette";
 
 import Diary from "../diary";
 
-jest.mock("expo-router", () => ({ router: { push: jest.fn() } }));
+// useFocusEffect: ScreenEntrance (Task 9) now wraps Diary's root content and
+// calls the real expo-router hook, which needs a navigation container this
+// isolated render doesn't mount — same reasoning as index.test.tsx's mock.
+jest.mock("expo-router", () => ({ router: { push: jest.fn() }, useFocusEffect: () => {} }));
 
 const mockDeleteMutate = jest.fn();
 const mockAddWaterMutate = jest.fn();

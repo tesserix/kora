@@ -1,6 +1,11 @@
 import { render, fireEvent } from "@testing-library/react-native";
 import Progress from "../progress";
 
+// useFocusEffect: ScreenEntrance (Task 9) wraps Progress's root content and
+// calls the real expo-router hook, which needs a navigation container this
+// isolated render doesn't mount.
+jest.mock("expo-router", () => ({ useFocusEffect: () => {} }));
+
 // #174 item 1. Two separate lies on this screen:
 //  - the dashboard's `pending` guard is false on error, so the logging streak
 //    rendered "0/7 days" as fact;

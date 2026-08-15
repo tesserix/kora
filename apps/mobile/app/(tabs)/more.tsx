@@ -14,7 +14,7 @@ import { AppText } from "@/components/Text";
 import { Avatar } from "@/components/Avatar";
 import { Icon } from "@/components/Icon";
 import { Badge } from "@/components/Badge";
-import { PressableScale } from "@/motion";
+import { PressableScale, ScreenEntrance } from "@/motion";
 import { useProfile, useUnreadCount } from "@/api/hooks";
 import { useTheme } from "@/theme";
 
@@ -123,6 +123,7 @@ export default function More() {
   const data = profile.data;
 
   return (
+    <ScreenEntrance direction={3}>
     <View style={{ flex: 1, backgroundColor: instrument.bg }}>
       <AppBackground />
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
@@ -238,5 +239,6 @@ export default function More() {
       </View>
       </ScrollView>
     </View>
+    </ScreenEntrance>
   );
 }

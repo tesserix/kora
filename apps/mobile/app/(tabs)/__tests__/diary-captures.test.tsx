@@ -10,7 +10,10 @@ import type { QueuedCaptureRow } from "@/offline/useQueuedCaptures";
 
 import Diary from "../diary";
 
-jest.mock("expo-router", () => ({ router: { push: jest.fn() } }));
+// useFocusEffect: ScreenEntrance (Task 9) wraps Diary's root content and
+// calls the real expo-router hook, which needs a navigation container this
+// isolated render doesn't mount.
+jest.mock("expo-router", () => ({ router: { push: jest.fn() }, useFocusEffect: () => {} }));
 
 const LOGS_DATA = [
   {

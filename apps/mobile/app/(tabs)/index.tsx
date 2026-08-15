@@ -12,7 +12,7 @@ import { YourUsualStrip } from "@/components/home/YourUsualStrip";
 import { MacroCell } from "@/components/home/MacroCell";
 import { EmptyState } from "@/components/common/EmptyState";
 import { AppBackground } from "@/components/AppBackground";
-import { PressableScale, useMotionPrefs } from "@/motion";
+import { PressableScale, ScreenEntrance, useMotionPrefs } from "@/motion";
 import { useDailyIgnition } from "@/motion/useDailyIgnition";
 import { GaugeDial, type GaugeDialHandle } from "@/components/instrument/GaugeDial";
 import { GAUGE_VIEW_H } from "@/components/instrument/gauge";
@@ -188,6 +188,7 @@ export default function Home() {
     });
 
   return (
+    <ScreenEntrance direction={0}>
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppBackground />
       <ScrollView
@@ -422,5 +423,6 @@ export default function Home() {
       ) : null}
       </ScrollView>
     </View>
+    </ScreenEntrance>
   );
 }

@@ -20,7 +20,7 @@ import { LoadErrorNotice } from "@/components/common/LoadErrorNotice";
 import { useAvgIntake7d, useDashboard, useProfile, useWeightSeries } from "@/api/hooks";
 import type { WeightEntry } from "@/api/types";
 import { useHealth } from "@/health";
-import { AnimatedNumber, PressableScale, useMotionPrefs } from "@/motion";
+import { AnimatedNumber, PressableScale, ScreenEntrance, useMotionPrefs } from "@/motion";
 import { useTheme } from "@/theme";
 import { formatWeight, lbFromKg, useUnits, weightUnitLabel } from "@/units";
 
@@ -173,6 +173,7 @@ export default function Progress() {
   const sleepHits = sleepStreakHits(health.sleep?.lastNightHours ?? null);
 
   return (
+    <ScreenEntrance direction={2}>
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppBackground />
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
@@ -315,5 +316,6 @@ export default function Progress() {
       <WeightLogSheet visible={sheetOpen} initialKg={current} onClose={() => setSheetOpen(false)} />
       </ScrollView>
     </View>
+    </ScreenEntrance>
   );
 }

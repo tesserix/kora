@@ -4,6 +4,7 @@ import Svg, { Circle, Line, Text as SvgText } from "react-native-svg";
 import Animated, {
   cancelAnimation,
   Easing,
+  runOnJS,
   useAnimatedProps,
   useSharedValue,
   withSequence,
@@ -12,7 +13,7 @@ import Animated, {
   type SharedValue,
 } from "react-native-reanimated";
 import { AppText } from "@/components/Text";
-import { AnimatedNumber, REDUCED_MOTION_CROSSFADE_MS, springs, useMotionPrefs } from "@/motion";
+import { AnimatedNumber, REDUCED_MOTION_CROSSFADE_MS, haptics, springs, useMotionPrefs } from "@/motion";
 import { useTheme } from "@/theme";
 import type { InstrumentTokens } from "@/theme";
 import { monoStyle } from "./typography";
@@ -205,7 +206,15 @@ export const GaugeDial = forwardRef<GaugeDialHandle, GaugeDialProps>(function Ga
       fractionSV.value = 0;
       fractionSV.value = withSequence(
         withTiming(1, { duration: 650, easing: Easing.in(Easing.quad) }),
-        withSpring(fraction, springs.ignition),
+        withSpring(fraction, springs.ignition, (finished) => {
+          "worklet";
+          // Settle thump (spec: ignition-settle haptic) — fires once the
+          // overshoot spring has actually come to rest, not on every
+          // intermediate frame. runOnJS crosses back from the UI thread;
+          // haptics.impactLight is safe to call from any thread boundary
+          // since it's already a fire-and-forget promise wrapper.
+          if (finished) runOnJS(haptics.impactLight)();
+        }),
       );
     } else {
       fractionSV.value = withSpring(fraction, NEEDLE_SPRING);
@@ -246,10 +255,14 @@ export const GaugeDial = forwardRef<GaugeDialHandle, GaugeDialProps>(function Ga
   // RN has no drop-shadow filter, so the needle's under-glow is a second,
   // wider stroke of the same geometry rendered beneath it (spec: "needle
   // under-glow"). It tracks the same fraction-driven position as the needle
-  // but keeps its own static opacity rather than reduced-motion's cross-fade.
+  // AND the needle's own opacity — the glow used to hold a flat 0.28 while
+  // the needle cross-faded under Reduce Motion, which left a full-opacity
+  // halo floating over an invisible needle mid-crossfade. Baking the 0.28
+  // base into the animated opacity (rather than the JSX `opacity` prop)
+  // keeps the two strokes visually locked together at every frame.
   const needleGlowAnimatedProps = useAnimatedProps(() => {
     "worklet";
-    return needleFor(fractionSV.value);
+    return { ...needleFor(fractionSV.value), opacity: 0.28 * needleOpacity.value };
   });
 
   // Count-down (spec: center numeral counts from budget down to reserve over
@@ -324,7 +337,6 @@ export const GaugeDial = forwardRef<GaugeDialHandle, GaugeDialProps>(function Ga
             stroke={instrument.accent}
             strokeWidth={7}
             strokeLinecap="round"
-            opacity={0.28}
             animatedProps={needleGlowAnimatedProps}
           />
           <AnimatedLine

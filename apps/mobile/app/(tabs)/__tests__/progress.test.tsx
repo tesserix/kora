@@ -2,6 +2,12 @@ import { StyleSheet } from "react-native";
 import { render, fireEvent } from "@testing-library/react-native";
 import Progress from "../progress";
 
+// useFocusEffect: ScreenEntrance (Task 9) wraps Progress's root content and
+// calls the real expo-router hook, which needs a navigation container this
+// isolated render doesn't mount — Progress otherwise has no expo-router
+// dependency, so nothing else needs mocking here.
+jest.mock("expo-router", () => ({ useFocusEffect: () => {} }));
+
 const mockSeries = jest.fn();
 const mockAvgIntake7d = jest.fn();
 const mockProfile = jest.fn();

@@ -16,7 +16,10 @@ jest.mock("@/lib/firebase", () => ({
   auth: { authStateReady: async () => {}, currentUser: { uid: "test-user" } },
 }));
 
-jest.mock("expo-router", () => ({ router: { push: jest.fn() } }));
+// useFocusEffect: ScreenEntrance (Task 9) wraps Diary's root content and
+// calls the real expo-router hook, which needs a navigation container this
+// isolated render doesn't mount.
+jest.mock("expo-router", () => ({ router: { push: jest.fn() }, useFocusEffect: () => {} }));
 jest.mock("@/offline/useQueuedLogs", () => ({
   useQueuedLogs: () => ({ rows: [], retryRow: jest.fn(), discardRow: jest.fn() }),
 }));

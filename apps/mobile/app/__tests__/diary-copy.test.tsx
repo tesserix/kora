@@ -1,7 +1,10 @@
 import { render, fireEvent } from "@testing-library/react-native";
 import Diary from "../(tabs)/diary";
 
-jest.mock("expo-router", () => ({ router: { push: jest.fn() } }));
+// useFocusEffect: ScreenEntrance (Task 9) wraps Diary's root content and
+// calls the real expo-router hook, which needs a navigation container this
+// isolated render doesn't mount.
+jest.mock("expo-router", () => ({ router: { push: jest.fn() }, useFocusEffect: () => {} }));
 // The diary now reads the offline queue too; these tests are about water/copy,
 // so the queue is stubbed empty (it has its own tests in src/offline).
 jest.mock("@/offline/useQueuedLogs", () => ({

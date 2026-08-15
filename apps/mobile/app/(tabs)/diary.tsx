@@ -22,7 +22,7 @@ import { useSavedMealEditor } from "@/components/meals/SavedMealSheetProvider";
 import { useDashboard, useDayLogs, useAddWater, useDeleteLog } from "@/api/hooks";
 import { useQueuedLogs } from "@/offline/useQueuedLogs";
 import { useQueuedCaptures } from "@/offline/useQueuedCaptures";
-import { PressableScale, haptics, useMotionPrefs } from "@/motion";
+import { PressableScale, ScreenEntrance, haptics, useMotionPrefs } from "@/motion";
 import { useTheme } from "@/theme";
 import { hslToHex } from "@/lib/color";
 import { useUnits, mlToFlOz } from "@/units";
@@ -287,6 +287,7 @@ export default function Diary() {
   });
 
   return (
+    <ScreenEntrance direction={1}>
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppBackground />
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + spacing.sm, paddingBottom: 140 }}>
@@ -495,5 +496,6 @@ export default function Diary() {
         />
       ) : null}
     </View>
+    </ScreenEntrance>
   );
 }

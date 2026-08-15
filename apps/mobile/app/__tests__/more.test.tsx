@@ -7,7 +7,13 @@ const mockPush = jest.fn();
 const mockSignOut = jest.fn(async () => {});
 const mockUnregisterPushToken = jest.fn(async () => {});
 
-jest.mock("expo-router", () => ({ router: { push: (...a: unknown[]) => mockPush(...a) } }));
+// useFocusEffect: ScreenEntrance (Task 9) wraps More's root content and
+// calls the real expo-router hook, which needs a navigation container this
+// isolated render doesn't mount.
+jest.mock("expo-router", () => ({
+  router: { push: (...a: unknown[]) => mockPush(...a) },
+  useFocusEffect: () => {},
+}));
 jest.mock("firebase/auth", () => ({ signOut: () => mockSignOut() }));
 jest.mock("@/lib/firebase", () => ({ auth: {} }));
 jest.mock("@/lib/push", () => ({ unregisterPushToken: () => mockUnregisterPushToken() }));
