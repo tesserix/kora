@@ -12,7 +12,7 @@ export interface SubDialProps {
    * stays dark even when the device is in light mode. Defaults to the
    * scheme-aware theme, unchanged for every other caller.
    */
-  tokens?: Pick<InstrumentTokens, "accent" | "tick">;
+  tokens?: Pick<InstrumentTokens, "accent" | "tick" | "tickLit">;
 }
 
 export function SubDial({ fraction, size = 42, testID = "subdial", tokens }: SubDialProps) {
@@ -37,7 +37,8 @@ export function SubDial({ fraction, size = 42, testID = "subdial", tokens }: Sub
         y1={C + (R - 4) * Math.sin(a)}
         x2={C + R * Math.cos(a)}
         y2={C + R * Math.sin(a)}
-        stroke={t <= f ? colors.accent : colors.tick}
+        // spec 2026-08-16 accent budget: orange belongs to the hero needle alone
+        stroke={t <= f ? colors.tickLit : colors.tick}
         strokeWidth={1.6}
         strokeLinecap="round"
       />
