@@ -131,6 +131,18 @@ test("the active label is full-opacity ink and heavier than the demoted inactive
   expect(Number(active.fontWeight)).toBeGreaterThan(Number(inactive.fontWeight));
 });
 
+// Dock v2: the dot that used to sit between icon and label (and doubled as
+// their spacer, via its own marginBottom) moved onto the shared well. Without
+// a replacement the icon and always-on label would render touching.
+test("keeps vertical spacing between the icon and its label", async () => {
+  const { getAllByTestId } = await render(<FloatingTabBar {...props} />);
+  const icons = getAllByTestId("tab-icon");
+  expect(icons.length).toBeGreaterThan(0);
+  for (const icon of icons) {
+    expect(flattenStyle(icon.props.style).marginBottom).toBeGreaterThan(0);
+  }
+});
+
 test("the active icon is tinted ink while inactive icons stay mut", async () => {
   const { getByTestId } = await render(<FloatingTabBar {...props} />);
   expect(getByTestId("sf-house.fill").props.tintColor).toBe(instrumentLight.ink);

@@ -36,6 +36,8 @@ const CAMERA_RAISE = 16;
 // Tab slot is 52x52 — above the 44pt a11y floor with room to spare, and the
 // painted area the sliding well tracks.
 const TAB_SIZE = 52;
+// Vertical breathing room between the icon and the always-on label below it.
+const ICON_LABEL_GAP = 4;
 
 // Dock v2 (spec 2026-08-16 "Panel architecture" + "dock v2"): the bar's own
 // rim gradient, inlined rather than reused from BezelCluster — different
@@ -48,6 +50,9 @@ const PILL_CONTENT_RADIUS = PILL_RADIUS - RIM_INSET;
 // be free to grow with it. Dropped from 64 (kora#177) to 58 — dock v2's
 // sliding well now carries most of the bar's visual weight itself.
 const PILL_MIN_HEIGHT = 58;
+// The row's own inset — also the well's pre-measurement default x (see
+// `wellX` below), so the first frame lands where the first tab actually is.
+const ROW_PADDING_HORIZONTAL = 6;
 
 // Sliding well: the dock capsule silhouette miniaturized (spec "dock v2") —
 // a full pill, not a rounded rectangle.
@@ -101,7 +106,7 @@ function TabButton({ meta, active, showBadge, reduceMotion, onPress }: TabButton
       onPress={handlePress}
       style={{ width: TAB_SIZE, height: TAB_SIZE, alignItems: "center", justifyContent: "center" }}
     >
-      <Animated.View style={iconStyle}>
+      <Animated.View testID="tab-icon" style={[{ marginBottom: ICON_LABEL_GAP }, iconStyle]}>
         <Icon name={meta.icon} size={22} color={active ? instrument.ink : instrument.mut} strokeWidth={active ? 2.5 : 2} />
       </Animated.View>
       {/* At 9px an engraved label separates by weight long before it
@@ -194,7 +199,10 @@ export function FloatingTabBar({ state, navigation }: FloatingTabBarProps) {
   // are flex:1, so their own width varies with available space; the button
   // inside each is centered and fixed-size).
   const layouts = useRef<Record<string, { x: number; width: number }>>({});
-  const wellX = useSharedValue(0);
+  // Pre-`onLayout` default: the first tab sits right after the row's own
+  // horizontal padding, so the well's first-frame position (before any slot
+  // has measured) starts there rather than at the row's left edge.
+  const wellX = useSharedValue(ROW_PADDING_HORIZONTAL);
   const wellWidth = useSharedValue(TAB_SIZE);
 
   const positionWell = useCallback(
@@ -293,7 +301,7 @@ export function FloatingTabBar({ state, navigation }: FloatingTabBarProps) {
   const rowStyle = {
     flexDirection: "row" as const,
     alignItems: "center" as const,
-    paddingHorizontal: 6,
+    paddingHorizontal: ROW_PADDING_HORIZONTAL,
     minHeight: PILL_MIN_HEIGHT,
     borderRadius: PILL_CONTENT_RADIUS,
     borderWidth: 1,
