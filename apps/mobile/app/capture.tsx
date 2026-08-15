@@ -27,6 +27,8 @@ import { OttoBubble } from "@/components/capture/OttoBubble";
 import { ModePill } from "@/components/capture/ModePill";
 import { Waveform } from "@/components/capture/Waveform";
 import { VoiceComposer } from "@/components/capture/VoiceComposer";
+import { beginRecordingSession, endRecordingSession } from "@/capture/audioSession";
+import { reportError } from "@/observability/reporter";
 import { ResolutionResult, candidateKey } from "@/components/ResolutionResult";
 import { FoodPicker } from "@/components/meal/FoodPicker";
 import { withAlpha } from "@/lib/color";
@@ -1092,6 +1094,9 @@ export default function CaptureScreen() {
     return () => {
       if (isRecordingVoiceRef.current) {
         recorder.stop().catch(() => {});
+        // Hand the audio session back on the way out too, or the app is left
+        // in a capture category with no screen to ever release it.
+        void endRecordingSession();
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1116,6 +1121,7 @@ export default function CaptureScreen() {
     // the mic button back to its start state.
     if (next !== "voice" && isRecordingVoice) {
       recorder.stop().catch(() => {});
+      void endRecordingSession();
       setIsRecordingVoice(false);
     }
     setMode(next);
@@ -1296,10 +1302,20 @@ export default function CaptureScreen() {
         setMicPermissionDenied(true);
         return;
       }
+      // MUST precede prepareToRecordAsync — see beginRecordingSession. Without
+      // it the iOS session is in a playback category and prepare throws.
+      await beginRecordingSession();
       await recorder.prepareToRecordAsync();
       recorder.record();
       setIsRecordingVoice(true);
-    } catch {
+    } catch (error) {
+      // Reported, not just shown. The previous `catch {}` discarded the only
+      // evidence of WHY recording failed, which is why kora#186 reached a
+      // device as an unexplained message rather than a stack trace — the whole
+      // mic path looked fine from here. The user-facing copy stays deliberately
+      // vague; the diagnosis goes to Sentry.
+      reportError(error, { route: "capture/voice-start" });
+      void endRecordingSession();
       setErrorMsg("Something went wrong starting the recording — please try again.");
     }
   }
@@ -1310,11 +1326,14 @@ export default function CaptureScreen() {
 
     try {
       await recorder.stop();
-    } catch {
+    } catch (error) {
+      reportError(error, { route: "capture/voice-stop" });
+      void endRecordingSession();
       setIsRecordingVoice(false);
       setErrorMsg("Something went wrong recording that — please try again.");
       return;
     }
+    void endRecordingSession();
     setIsRecordingVoice(false);
 
     const uri = recorder.uri;
@@ -1357,6 +1376,7 @@ export default function CaptureScreen() {
     } catch {
       // deliberately ignored — see above
     }
+    void endRecordingSession();
     setIsRecordingVoice(false);
   }
 
