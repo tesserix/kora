@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { View } from "react-native";
 import Svg, { Circle, Line, Text as SvgText } from "react-native-svg";
 import Animated, {
@@ -125,14 +125,24 @@ export interface GaugeDialProps {
   ignition?: boolean;
 }
 
-export function GaugeDial({
-  value,
-  target,
-  burned,
-  centerLabel = "kcal in reserve",
-  testID = "gauge-dial",
-  ignition = false,
-}: GaugeDialProps) {
+// Imperative escape hatch (spec: "pull-to-refresh sweep") — the needle runs
+// full-and-back on demand (e.g. from Home's onRefresh) without the caller
+// having to fake a value change to trigger motion.
+export interface GaugeDialHandle {
+  sweep: () => void;
+}
+
+export const GaugeDial = forwardRef<GaugeDialHandle, GaugeDialProps>(function GaugeDial(
+  {
+    value,
+    target,
+    burned,
+    centerLabel = "kcal in reserve",
+    testID = "gauge-dial",
+    ignition = false,
+  },
+  ref,
+) {
   const { instrument, fonts } = useTheme();
   const fraction = target > 0 ? Math.min(value / target, 1) : 0;
   const reserve = describeReserve(value, target);
@@ -203,6 +213,25 @@ export function GaugeDial({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fraction, reduceMotion, showIgnition]);
 
+  // Pull-to-refresh sweep (spec Step 5): full-and-back, from wherever the
+  // needle currently sits — NOT reset to 0 first like the ignition overshoot,
+  // since a mid-scroll refresh shouldn't visually reset the reading before
+  // sweeping. Skipped under Reduce Motion: a one-shot flourish has no calmer
+  // substitute, only suppression (same rule as ignition).
+  useImperativeHandle(
+    ref,
+    () => ({
+      sweep: () => {
+        if (reduceMotion) return;
+        fractionSV.value = withSequence(
+          withTiming(1, { duration: 500, easing: Easing.out(Easing.quad) }),
+          withSpring(fraction, NEEDLE_SPRING),
+        );
+      },
+    }),
+    [fraction, reduceMotion, fractionSV],
+  );
+
   const needleAnimatedProps = useAnimatedProps(() => {
     "worklet";
     return { ...needleFor(fractionSV.value), opacity: needleOpacity.value };
@@ -230,6 +259,26 @@ export function GaugeDial({
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showIgnition]);
+
+  const centerNumeralStyle = [
+    {
+      fontSize: 44,
+      lineHeight: 50,
+      color: reserve.over ? instrument.danger : instrument.ink,
+      letterSpacing: -1.2,
+    },
+    mono,
+    // Lume glow reads as an instrument-face backlight, so the over-budget
+    // numeral (already carrying the danger color) stays muted rather than
+    // glowing (spec: "Over state has no lume").
+    reserve.over
+      ? null
+      : {
+          textShadowColor: instrument.lumeText,
+          textShadowRadius: 22,
+          textShadowOffset: { width: 0, height: 0 },
+        },
+  ];
 
   const footer: Array<[number, string]> = [
     [value, "Eaten"],
@@ -297,37 +346,25 @@ export function GaugeDial({
             alignItems: "center",
           }}
         >
-          <AppText
-            variant="body"
-            style={[
-              {
-                fontSize: 44,
-                lineHeight: 50,
-                color: reserve.over ? instrument.danger : instrument.ink,
-                letterSpacing: -1.2,
-              },
-              mono,
-              // Lume glow reads as an instrument-face backlight, so the
-              // over-budget numeral (already carrying the danger color) stays
-              // muted rather than glowing (spec: "Over state has no lume").
-              reserve.over
-                ? null
-                : {
-                    textShadowColor: instrument.lumeText,
-                    textShadowRadius: 22,
-                    textShadowOffset: { width: 0, height: 0 },
-                  },
-            ]}
-          >
+          <AppText variant="body" style={centerNumeralStyle}>
             {showIgnition ? (
-              // Nested Text inherits the outer AppText's style (color, mono,
-              // lume shadow) — see React Native's nested-Text convention —
-              // so this doesn't need to restate any of it.
-              <AnimatedNumber value={countdownValue} duration={1650} />
+              // Passed explicitly (rather than relying on RN's nested-Text
+              // style inheritance) so the rendered node itself carries the
+              // font metrics — inheritance is invisible to a style-flattening
+              // test/inspection of this specific Text node.
+              <AnimatedNumber value={countdownValue} duration={1650} style={centerNumeralStyle} />
             ) : reserve.over ? (
               `+${reserve.magnitude.toLocaleString()}`
             ) : (
-              reserve.magnitude.toLocaleString()
+              // Odometer roll (spec Step 4): on a data change (a meal logged)
+              // the numeral counts old -> new over ~550ms ease-out, reusing
+              // AnimatedNumber — the same mechanism the ignition count-down
+              // above already uses — rather than a second one-off tween.
+              // AnimatedNumber itself is a no-op visually on first mount
+              // (its shared value starts equal to `value`) and already
+              // degrades to a cross-fade under Reduce Motion, so no extra
+              // guard is needed here.
+              <AnimatedNumber value={reserve.magnitude} duration={550} style={centerNumeralStyle} />
             )}
           </AppText>
           {/* Bespoke engraved caption (T6 exception): the dial's center label
@@ -387,4 +424,4 @@ export function GaugeDial({
       </View>
     </View>
   );
-}
+});

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -9,16 +9,17 @@ import { Icon } from "@/components/Icon";
 import { SavedMealsStrip } from "@/components/home/SavedMealsStrip";
 import { PinnedStrip } from "@/components/home/PinnedStrip";
 import { YourUsualStrip } from "@/components/home/YourUsualStrip";
+import { MacroCell } from "@/components/home/MacroCell";
 import { EmptyState } from "@/components/common/EmptyState";
 import { AppBackground } from "@/components/AppBackground";
 import { PressableScale, useMotionPrefs } from "@/motion";
-import { GaugeDial } from "@/components/instrument/GaugeDial";
+import { useDailyIgnition } from "@/motion/useDailyIgnition";
+import { GaugeDial, type GaugeDialHandle } from "@/components/instrument/GaugeDial";
 import { GAUGE_VIEW_H } from "@/components/instrument/gauge";
-import { MacroWide } from "@/components/instrument/MacroWide";
-import { SubDial } from "@/components/instrument/SubDial";
-import { TeleStrip, type TeleStripCell } from "@/components/instrument/TeleStrip";
-import { GlassPanel } from "@/components/instrument/GlassPanel";
+import { SpecularSweep } from "@/components/instrument/SpecularSweep";
+import { BezelCluster, ZoneRule, WellFooter } from "@/components/instrument/BezelCluster";
 import { monoStyle } from "@/components/instrument/typography";
+import type { TeleStripCell } from "@/components/instrument/TeleStrip";
 import { useProfile, useDashboard, useDayLogs, useUnreadCount } from "@/api/hooks";
 import { useHealth } from "@/health";
 import { useTheme } from "@/theme";
@@ -63,6 +64,11 @@ export default function Home() {
   // without unmounting this screen, so `firstMount.current` is already false
   // by the time those re-renders happen and no re-stagger occurs.
   const { reduceMotion } = useMotionPrefs();
+  // Once-a-day flourish (Task 4): mounts false and flips true at most once per
+  // local-day key, persisted across restarts — suppressed entirely under
+  // Reduce Motion rather than degraded, same as every other flourish here.
+  const ignite = useDailyIgnition(date, reduceMotion);
+  const gaugeRef = useRef<GaugeDialHandle>(null);
   const firstMount = useRef(true);
   useEffect(() => {
     firstMount.current = false;
@@ -86,6 +92,11 @@ export default function Home() {
   const [refreshing, setRefreshing] = useState(false);
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
+    // Refresh-begin needle sweep (Step 5) — a visual "reading now" cue that
+    // runs alongside the refetch, not gated on its result. sweep() itself
+    // no-ops under Reduce Motion, and the ref is null while the placeholder
+    // (pending) is mounted, so this is safe in every state.
+    gaugeRef.current?.sweep();
     try {
       await Promise.all([
         dashboard.refetch().catch(() => {}),
@@ -128,6 +139,12 @@ export default function Home() {
   const carbsGoal = Math.round(d?.targets.carbs_g ?? 0);
   const fatValue = Math.round(d?.consumed.fat_g ?? 0);
   const fatGoal = Math.round(d?.targets.fat_g ?? 0);
+
+  const MACROS = [
+    { key: "protein", label: "Protein", have: proteinValue, target: proteinGoal },
+    { key: "carbs", label: "Carbs", have: carbsValue, target: carbsGoal },
+    { key: "fat", label: "Fat", have: fatValue, target: fatGoal },
+  ] as const;
 
   // Dashboard `Totals` (src/api/types.ts) has no burned/active-energy field —
   // GaugeDial's `burned` prop is intentionally omitted rather than guessed.
@@ -241,76 +258,69 @@ export default function Home() {
         </View>
       ) : null}
 
-      {/* energy reserve dial — hidden entirely on load error so no contradictory reserve figure shows.
-          While pending, a same-height "—" placeholder stands in so a fresh fetch never flashes
-          a fabricated "0 in reserve" / "0 of 0" before real targets are known. */}
+      {/* the fused hero — one bezel-grade instrument per screen (spec 2026-08-16
+          "Home recomposition"), replacing the old gauge/macro-pair/vitals stack.
+          Hidden entirely on load error so no contradictory reserve figure shows. */}
       {!loadError ? (
         <Animated.View entering={enter(1)} style={{ paddingHorizontal: 16, paddingVertical: 12 }}>
-          <GlassPanel radius={24} style={{ padding: 16 }}>
-            <AppText style={[engraved, { marginBottom: 8 }]}>Energy reserve</AppText>
-            {pending ? (
-              <View
-                testID="gauge-dial-placeholder"
-                style={{ height: GAUGE_VIEW_H + 60, alignItems: "center", justifyContent: "center" }}
-              >
-                <AppText style={[{ fontSize: 54, color: instrument.mut, letterSpacing: -1.5 }, mono]}>—</AppText>
-              </View>
-            ) : (
-              <GaugeDial value={eaten} target={goal} />
-            )}
-          </GlassPanel>
-        </Animated.View>
-      ) : null}
-
-      {/* macros — protein full-width, carbs/fat compact pair (deliberate asymmetry).
-          Same pending guard as the gauge: no fabricated 0/0 before the dashboard resolves. */}
-      {!loadError ? (
-        <Animated.View entering={enter(2)} style={{ paddingHorizontal: 16, gap: 12 }}>
-          {pending ? (
-            <GlassPanel radius={22} testID="macro-wide-placeholder">
-              <View style={{ padding: 14 }}>
-                <AppText style={[mutedLabel, mono]}>—</AppText>
-              </View>
-            </GlassPanel>
-          ) : (
-            <MacroWide label="Protein" value={proteinValue} goal={proteinGoal} unit="g" />
-          )}
-          <View style={{ flexDirection: "row", gap: 12 }}>
-            <GlassPanel radius={20} style={{ flex: 1 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", padding: 12, gap: 10 }}>
-                <SubDial fraction={pending || carbsGoal === 0 ? 0 : carbsValue / carbsGoal} testID="carbs-subdial" />
-                <View>
-                  <AppText style={mutedLabel}>Carbs</AppText>
-                  <AppText style={[{ fontSize: 13, fontWeight: "600", color: instrument.ink, marginTop: 2 }, mono]}>
-                    {pending ? "—" : `${carbsValue}/${carbsGoal}g`}
-                  </AppText>
+          <BezelCluster glow testID="home-hero">
+            {ignite ? <SpecularSweep /> : null}
+            <View style={{ padding: 16 }}>
+              <AppText style={[engraved, { marginBottom: 8 }]}>Energy reserve</AppText>
+              {pending ? (
+                // Same-height "—" placeholder so a fresh fetch never flashes a
+                // fabricated "0 in reserve" / "0 of 0" before real targets are known.
+                <View
+                  testID="gauge-dial-placeholder"
+                  style={{ height: GAUGE_VIEW_H + 60, alignItems: "center", justifyContent: "center" }}
+                >
+                  <AppText style={[{ fontSize: 54, color: instrument.mut, letterSpacing: -1.5 }, mono]}>—</AppText>
                 </View>
-              </View>
-            </GlassPanel>
-            <GlassPanel radius={20} style={{ flex: 1 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", padding: 12, gap: 10 }}>
-                <SubDial fraction={pending || fatGoal === 0 ? 0 : fatValue / fatGoal} testID="fat-subdial" />
-                <View>
-                  <AppText style={mutedLabel}>Fat</AppText>
-                  <AppText style={[{ fontSize: 13, fontWeight: "600", color: instrument.ink, marginTop: 2 }, mono]}>
-                    {pending ? "—" : `${fatValue}/${fatGoal}g`}
-                  </AppText>
-                </View>
-              </View>
-            </GlassPanel>
-          </View>
-        </Animated.View>
-      ) : null}
-
-      {/* today's vitals — Steps + Sleep, both driven live from Apple HealthKit via useHealth() */}
-      {!loadError ? (
-        <Animated.View entering={enter(3)} style={{ paddingHorizontal: 16, paddingTop: 12 }}>
-          {/* Gated on `health.steps`/`health.sleep`, not `health.status`: HealthKit never
-              discloses whether READ access was actually granted, so "authorized" status
-              alone cannot tell a real 0 from a denial. A user who has genuinely logged no
-              steps/sleep yet today will see the connect prompt too — accepted, since the
-              alternative (a denied user stuck on a false "0" with no way back) is worse. */}
-          <TeleStrip cells={[stepsCell, sleepCell]} />
+              ) : (
+                <GaugeDial ref={gaugeRef} value={eaten} target={goal} ignition={ignite} />
+              )}
+            </View>
+            <ZoneRule label="Macros" />
+            <View style={{ flexDirection: "row" }}>
+              {MACROS.map((m, i) => (
+                <MacroCell key={m.key} first={i === 0} label={m.label} have={m.have} target={m.target} pending={pending} />
+              ))}
+            </View>
+            {/* today's vitals — Steps + Sleep, both driven live from Apple HealthKit via
+                useHealth(). Gated on `health.steps`/`health.sleep`, not `health.status`:
+                HealthKit never discloses whether READ access was actually granted, so
+                "authorized" status alone cannot tell a real 0 from a denial. A user who
+                has genuinely logged no steps/sleep yet today will see the connect prompt
+                too — accepted, since the alternative (a denied user stuck on a false "0"
+                with no way back) is worse. */}
+            <WellFooter testID="home-vitals">
+              {[stepsCell, sleepCell].map((c, i) => (
+                <Fragment key={c.label}>
+                  {i > 0 ? (
+                    <View style={{ width: 1, height: 30, backgroundColor: instrument.hairline, marginHorizontal: 16 }} />
+                  ) : null}
+                  <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 12 }}>
+                    <View
+                      style={{
+                        width: 34,
+                        height: 34,
+                        borderRadius: 10,
+                        backgroundColor: instrument.shade,
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      {c.icon}
+                    </View>
+                    <View>
+                      <AppText style={[{ fontSize: 17, fontWeight: "600", color: instrument.ink }, mono]}>{c.value}</AppText>
+                      <AppText style={mutedLabel}>{c.label}</AppText>
+                    </View>
+                  </View>
+                </Fragment>
+              ))}
+            </WellFooter>
+          </BezelCluster>
         </Animated.View>
       ) : null}
 
@@ -377,7 +387,7 @@ export default function Home() {
               variant="instrument"
               icon="camera"
               title="No meals logged yet"
-              subtitle="Tap the camera button to log your first meal."
+              subtitle="The gauge is full and waiting. Point the camera at your first meal."
             />
           )}
           {/* Dashed ghost-slot CTA — same recipe as Diary's "Add {slot} · N

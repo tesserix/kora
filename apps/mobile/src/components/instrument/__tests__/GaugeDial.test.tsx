@@ -1,9 +1,10 @@
 import type { ComponentProps } from "react";
-import { render } from "@testing-library/react-native";
+import { createRef } from "react";
+import { render, within } from "@testing-library/react-native";
 import * as Reanimated from "react-native-reanimated";
 import { springs } from "@/motion";
 import { buildGaugeTicks, needleFor, GAUGE_VIEW_H, GAUGE_CENTER_Y } from "../gauge";
-import { describeReserve, GaugeDial } from "../GaugeDial";
+import { describeReserve, GaugeDial, type GaugeDialHandle } from "../GaugeDial";
 
 const renderGauge = async (props: ComponentProps<typeof GaugeDial>) => render(<GaugeDial {...props} />);
 
@@ -146,6 +147,65 @@ test("the center overlay is bounded above the hub dot, derived from the gauge ge
   const hubTopEdge = GAUGE_CENTER_Y - 4.5; // hub circle radius, GaugeDial.tsx
   const overlayContentBottomY = GAUGE_VIEW_H - (flat.bottom as number);
   expect(overlayContentBottomY).toBeLessThan(hubTopEdge);
+});
+
+// Step 4 (spec 2026-08-16-kora-ignition-design.md): a data change (a meal
+// logged) rolls the center numeral old -> new over ~550ms via AnimatedNumber
+// — the same countdown mechanism the ignition sequence already uses.
+test("a data change rolls the center numeral via AnimatedNumber over ~550ms", async () => {
+  const timing = jest.spyOn(Reanimated, "withTiming");
+
+  const { rerender, getByTestId } = await render(<GaugeDial value={1100} target={2200} />);
+  const overlay = () => within(getByTestId("gauge-center-overlay"));
+  expect(overlay().getByText("1,100")).toBeTruthy();
+  timing.mockClear();
+
+  await rerender(<GaugeDial value={1650} target={2200} />);
+
+  // The mock's useAnimatedReaction is a NOOP (see jest.setup.js), so the
+  // rendered digit itself is not observable mid-flight here — asserting the
+  // withTiming call is the mechanism-level equivalent of the needle-spring
+  // assertions elsewhere in this file (they check the call, not pixels).
+  expect(timing).toHaveBeenCalledWith(550, expect.objectContaining({ duration: 550 }));
+
+  timing.mockRestore();
+});
+
+// Step 5: an imperative sweep() sends the needle full-and-back without a
+// value change, for Home's pull-to-refresh.
+test("ref.sweep() sends the needle to full and back via NEEDLE_SPRING", async () => {
+  const timing = jest.spyOn(Reanimated, "withTiming");
+  const spring = jest.spyOn(Reanimated, "withSpring");
+  const ref = createRef<GaugeDialHandle>();
+
+  await render(<GaugeDial ref={ref} value={1100} target={2200} />);
+  timing.mockClear();
+  spring.mockClear();
+
+  ref.current?.sweep();
+
+  expect(timing).toHaveBeenCalledWith(1, expect.objectContaining({ duration: 500 }));
+  expect(spring).toHaveBeenCalledWith(0.5, { damping: 30, stiffness: 250 });
+
+  timing.mockRestore();
+  spring.mockRestore();
+});
+
+// sweep() is a one-shot flourish with no calmer substitute (same rule as
+// ignition) — Reduce Motion suppresses it entirely rather than degrading it.
+test("ref.sweep() is a no-op under reduced motion", async () => {
+  (Reanimated.useReducedMotion as jest.Mock).mockReturnValue(true);
+  const spring = jest.spyOn(Reanimated, "withSpring");
+  const ref = createRef<GaugeDialHandle>();
+
+  await render(<GaugeDial ref={ref} value={1100} target={2200} />);
+  spring.mockClear();
+
+  ref.current?.sweep();
+
+  expect(spring).not.toHaveBeenCalled();
+
+  spring.mockRestore();
 });
 
 describe("over budget", () => {

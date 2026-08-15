@@ -158,6 +158,7 @@ test("shows a first-run empty state when no meals are logged, keeping the gauge 
 
   const { findByText, findByTestId } = await render(<Home />);
   expect(await findByText("No meals logged yet")).toBeTruthy();
+  expect(await findByText("The gauge is full and waiting. Point the camera at your first meal.")).toBeTruthy();
   expect(await findByTestId("gauge-dial")).toBeTruthy();
   expect(await findByText("0/140g")).toBeTruthy(); // protein target
   expect(await findByText("140g to go")).toBeTruthy();
@@ -180,6 +181,26 @@ test("shows a Connect Apple Health affordance for Steps and Sleep (never a numbe
 // correctly under an explicit light scheme, not just whatever the test environment
 // defaults to. Pins useColorScheme to "light" via spyOn rather than relying on the
 // jest default so this keeps testing what it says even if that default ever changes.
+// Step 2 (spec 2026-08-16 "Home recomposition"): the gauge, macros, and
+// vitals now live inside ONE fused BezelCluster instead of three separate panels.
+test("the hero is a single fused cluster: gauge, Macros zone rule, and vitals footer all present", async () => {
+  mockUseDashboard.mockReturnValue({
+    data: { consumed: { kcal: 1252, protein_g: 96, carbs_g: 140, fat_g: 40 }, targets: { kcal: 2000, protein_g: 140, carbs_g: 220, fat_g: 70 }, water_ml: 1400, streak_days: 12 },
+    isError: false,
+  });
+  mockUseDayLogs.mockReturnValue({ data: [], isError: false });
+
+  const { findByTestId, findByText } = await render(<Home />);
+  expect(await findByTestId("home-hero")).toBeTruthy();
+  expect(await findByTestId("gauge-dial")).toBeTruthy();
+  expect(await findByText("MACROS")).toBeTruthy();
+  expect(await findByTestId("home-vitals")).toBeTruthy();
+  // Carbs/Fat now render as the same compact SubDial cell as Protein — no
+  // separate MacroWide panel.
+  expect(await findByText("140/220g")).toBeTruthy();
+  expect(await findByText("40/70g")).toBeTruthy();
+});
+
 test("renders the light theme: app-background is the light instrument ground and the gauge still renders", async () => {
   const schemeSpy = jest.spyOn(RN, "useColorScheme").mockReturnValue("light");
   mockUseDashboard.mockReturnValue({

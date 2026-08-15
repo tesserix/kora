@@ -3,9 +3,9 @@ import { processColor } from "react-native";
 import { SubDial } from "../SubDial";
 import { instrumentLight, instrumentDark } from "@/theme/palette";
 
-function strokePayload(node: { props: { stroke: unknown } }): unknown {
-  const stroke = node.props.stroke as { payload?: unknown } | string;
-  return (stroke as { payload?: unknown })?.payload ?? stroke;
+function strokePayload(node: { props: Record<string, unknown> }): unknown {
+  const stroke = node.props.stroke;
+  return (stroke as { payload?: unknown } | undefined)?.payload ?? stroke;
 }
 
 test("lights segments up to the fraction in accent", async () => {
