@@ -275,7 +275,19 @@
   @media (prefers-reduced-motion: reduce) {
     .dock2 .slider { transition: none; }
     .dock2 .tb2.popping > span:first-child { animation: none; }
+    .screen.from-right, .screen.from-left, .capture-fab2.snap, .capture-fab2.snap::after { animation: none; }
   }
+  /* directional screen transition — completes the dock slide as one gesture */
+  @keyframes fromRight { from { opacity: 0; transform: translateX(16px); } }
+  @keyframes fromLeft { from { opacity: 0; transform: translateX(-16px); } }
+  .screen.from-right { animation: fromRight .28s cubic-bezier(.2,.7,.3,1); }
+  .screen.from-left { animation: fromLeft .28s cubic-bezier(.2,.7,.3,1); }
+  /* capture shutter press */
+  @keyframes shutter { 0% { transform: translateX(-50%) scale(1); } 40% { transform: translateX(-50%) scale(.86); } 100% { transform: translateX(-50%) scale(1); } }
+  .capture-fab2.snap { animation: shutter .35s cubic-bezier(.3,.7,.4,1); }
+  .capture-fab2::after { content: ""; position: absolute; inset: 7px; border-radius: 50%; background: var(--accent-on); opacity: 0; pointer-events: none; }
+  @keyframes iris { 0% { opacity: 0; transform: scale(.4); } 45% { opacity: .3; transform: scale(1); } 100% { opacity: 0; transform: scale(1); } }
+  .capture-fab2.snap::after { animation: iris .35s ease-out; }
   /* review: labels always on for discoverability; active gets full weight */
   .dock2 .tb2 .lbl2 { font-size: 8px; font-weight: 500; letter-spacing: 1.6px; text-transform: uppercase; opacity: .72; transition: all .18s ease; }
   .dock2 .tb2.active .lbl2 { opacity: 1; font-weight: 700; }
@@ -745,7 +757,7 @@
       const order = [["today", "⌂", "Today"], ["diary", "▦", "Diary"], null, ["trends", "↗", "Trends"], ["more", "≡", "More"]];
       order.forEach((t) => {
         if (!t) { html += '<span class="notch"></span>'; return; }
-        html += '<button class="tb2' + (t[0] === active ? " active" : "") + '"><span>' + t[1] + '</span><span class="lbl2">' + t[2] + "</span></button>";
+        html += '<button class="tb2' + (t[0] === active ? " active" : "") + '" data-nav="' + t[0] + '"><span>' + t[1] + '</span><span class="lbl2">' + t[2] + "</span></button>";
       });
       html += '<button class="capture-fab2" title="Capture a meal">📷</button></div></div>';
       z.innerHTML = html;
@@ -759,8 +771,23 @@
         t.classList.add("active", "popping");
         t.addEventListener("animationend", () => t.classList.remove("popping"), { once: true });
         slide(t);
+        // the dock actually navigates: after the well starts sliding, switch screens
+        const target = { today: "home", diary: "diary", trends: "trends", more: "more" }[t.dataset.nav];
+        if (target && target !== currentScreen) setTimeout(() => navTo(target), 160);
       }));
+      const fab = z.querySelector(".capture-fab2");
+      if (fab) fab.addEventListener("click", () => {
+        fab.classList.remove("snap");
+        void fab.offsetWidth;
+        fab.classList.add("snap"); // shutter press: scale dip + iris blink
+      });
     });
+  }
+  const SCREEN_ORDER = ["home", "diary", "trends", "more"];
+  let currentScreen = "home";
+  function navTo(id) {
+    const btn = document.querySelectorAll("#variant-nav .variant-tab")[SCREEN_ORDER.indexOf(id)];
+    if (btn) showScreen(id, btn);
   }
   function syncDockSliders() {
     // hidden docks have zero layout; position sliders once their screen is visible
@@ -786,11 +813,18 @@
     if (id === "trends") { drawWeight(); drawEnergy(); }
   }
   function showScreen(id, btn) {
+    const dir = SCREEN_ORDER.indexOf(id) > SCREEN_ORDER.indexOf(currentScreen) ? "from-right" : "from-left";
+    currentScreen = id;
     document.querySelectorAll(".variant").forEach((v) => v.classList.remove("active"));
     document.querySelectorAll(".variant-tab").forEach((t) => t.classList.remove("active"));
     const sec = document.getElementById("variant-" + id);
     sec.classList.add("active");
     btn.classList.add("active");
+    const scr = sec.querySelector(".screen");
+    scr.classList.remove("from-right", "from-left");
+    void scr.offsetWidth;
+    scr.classList.add(dir);
+    scr.addEventListener("animationend", () => scr.classList.remove("from-right", "from-left"), { once: true });
     replayRises(sec);
     renderScreen(id);
     requestAnimationFrame(() => requestAnimationFrame(syncDockSliders));

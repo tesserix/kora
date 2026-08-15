@@ -132,6 +132,33 @@
   .gauge-center { position: absolute; top: 37%; left: 0; right: 0; text-align: center; pointer-events: none; }
   .gauge-remaining { font-family: var(--font-mono); font-size: 44px; line-height: 50px; letter-spacing: -1.2px; font-variant-numeric: tabular-nums; color: var(--ink); }
   .gauge-caption { font-size: 10px; font-weight: 600; letter-spacing: 3px; text-transform: uppercase; color: var(--accent); margin-top: 6px; }
+  /* over-budget: calm, not screaming — muted danger, no lume, needle rests in the redline */
+  .gauge-remaining.over { color: var(--danger); text-shadow: none; }
+  .gauge-caption.over { color: var(--danger); text-shadow: none; }
+  @keyframes numroll { from { transform: translateY(9px); opacity: 0; } }
+  .roll { display: inline-block; animation: numroll .35s cubic-bezier(.2,.7,.3,1); }
+  .empty-state { text-align: center; padding: 26px 20px 18px; }
+  .empty-state .es-tile {
+    width: 64px; height: 64px; border-radius: 50%; margin: 0 auto 12px;
+    background: var(--inset); border: 1px solid var(--glass-border);
+    display: grid; place-items: center; font-size: 24px;
+    box-shadow: inset 0 1px 0 var(--well-shadow);
+  }
+  .empty-state .es-t { font-size: 15px; font-weight: 600; color: var(--ink); }
+  .empty-state .es-s { font-size: 12px; color: var(--mut); margin-top: 4px; line-height: 1.5; }
+  .state-chips { display: flex; gap: 8px; align-items: center; justify-content: center; margin-bottom: 16px; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--mut); }
+  .state-chips button {
+    border: 1px solid var(--hairline); background: transparent; color: var(--mut);
+    font-size: 11px; font-weight: 600; padding: 5px 12px; border-radius: 999px; transition: all .15s ease;
+  }
+  .state-chips button:hover { color: var(--ink); }
+  .state-chips button.active { background: var(--inset); color: var(--ink); border-color: var(--glass-border); }
+  @keyframes shutter { 0% { transform: translateX(-50%) scale(1); } 40% { transform: translateX(-50%) scale(.86); } 100% { transform: translateX(-50%) scale(1); } }
+  .capture-fab2.snap { animation: shutter .35s cubic-bezier(.3,.7,.4,1); }
+  .capture-fab2::after { content: ""; position: absolute; inset: 7px; border-radius: 50%; background: var(--accent-on); opacity: 0; pointer-events: none; }
+  @keyframes iris { 0% { opacity: 0; transform: scale(.4); } 45% { opacity: .3; transform: scale(1); } 100% { opacity: 0; transform: scale(1); } }
+  .capture-fab2.snap::after { animation: iris .35s ease-out; }
+  @media (prefers-reduced-motion: reduce) { .roll, .capture-fab2.snap, .capture-fab2.snap::after { animation: none; } }
   .gauge-needle { transition: transform .8s cubic-bezier(.3,.9,.35,1); }
   .gauge-footer { display: flex; border-top: 1px solid var(--hairline); padding-top: 12px; margin-top: 8px; }
   .gauge-footer > div { flex: 1; text-align: center; }
@@ -382,6 +409,11 @@
 
 <!-- ============================ VARIANT D ============================ -->
 <div id="variant-d" class="variant active">
+  <div class="state-chips">Scenario:
+    <button data-scenario="empty" onclick="setScenario('empty', this)">Empty morning</button>
+    <button data-scenario="midday" class="active" onclick="setScenario('midday', this)">Midday</button>
+    <button data-scenario="over" onclick="setScenario('over', this)">Over budget</button>
+  </div>
   <div class="stage">
     <div class="phone">
       <div class="screen">
@@ -389,7 +421,7 @@
         <div class="home-header">
           <div>
             <div class="greet">Sat, Aug 16 · Good morning, Mahesh</div>
-            <h1>Today</h1>
+            <h1 onclick="simulateRefresh()" style="cursor:pointer" title="Simulates pull-to-refresh: the gauge does a quick tick-sweep">Today</h1>
           </div>
           <div class="side">
             <div class="bell">🔔<span class="dot"></span></div>
@@ -446,7 +478,15 @@
       <ul>
         <li>Ignition sweep: needle runs to redline and settles back, like a car cluster at startup; the reserve figure counts down with it. <em>Production contract: plays once per day (persisted flag); every other visit uses the calm settle</em></li>
         <li>Warm lume glow on the needle, reserve numeral, and caption — watch-dial, not neon</li>
-        <li>Brushed conic bezel + one-time specular sweep across the glass</li>
+        <li>Linear bezel rim + one-time specular sweep across the glass</li>
+        <li>Odometer roll: log a meal and the reserve figure counts down while macro values roll in</li>
+        <li>Tap the "Today" title — the gauge tick-sweeps as a branded pull-to-refresh</li>
+        <li>Tap the capture button — shutter dip + iris blink</li>
+      </ul>
+      <h3>States (chips above)</h3>
+      <ul>
+        <li>Empty morning: full gauge, inviting empty log — no guilt</li>
+        <li>Over budget: needle rests in the redline, "+N kcal over budget" in muted danger — calm, never screaming</li>
       </ul>
       <h3>Dock v2</h3>
       <ul>
@@ -711,10 +751,33 @@
     { time: "21:10", name: "Greek yogurt with honey", slot: "Snack", kcal: 180, p: 12, c: 22, f: 4 },
     { time: "22:00", name: "Roasted makhana", slot: "Snack", kcal: 110, p: 4, c: 13, f: 4 },
   ];
+  const scenarios = {
+    empty: [],
+    midday: [
+      { time: "08:10", name: "Masala oats with almond milk", slot: "Breakfast", kcal: 380, p: 14, c: 52, f: 11 },
+      { time: "13:05", name: "Paneer tikka wrap", slot: "Lunch", kcal: 460, p: 24, c: 41, f: 19, guess: true },
+      { time: "16:30", name: "Filter coffee with milk", slot: "Snack", kcal: 20, p: 1, c: 2, f: 1 },
+    ],
+    over: [
+      { time: "08:10", name: "Masala oats with almond milk", slot: "Breakfast", kcal: 380, p: 14, c: 52, f: 11 },
+      { time: "13:05", name: "Paneer tikka wrap", slot: "Lunch", kcal: 460, p: 24, c: 41, f: 19, guess: true },
+      { time: "16:30", name: "Filter coffee with milk", slot: "Snack", kcal: 20, p: 1, c: 2, f: 1 },
+      { time: "19:45", name: "Dinner out — butter naan & paneer", slot: "Dinner", kcal: 940, p: 32, c: 96, f: 44, guess: true },
+      { time: "21:30", name: "Gulab jamun", slot: "Dessert", kcal: 520, p: 6, c: 78, f: 20 },
+    ],
+  };
+  function setScenario(name, btn) {
+    state.meals = scenarios[name].map((m) => ({ ...m }));
+    document.querySelectorAll(".state-chips button").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    playIgnition = false;
+    renderAll();
+  }
   const eaten = () => state.meals.reduce((s, m) => s + m.kcal, 0);
   const macro = (k) => state.meals.reduce((s, m) => s + m[k[0]], 0); // p/c/f
   const fmt = (n) => n.toLocaleString("en-US");
   let playIgnition = true; // ignition replays on variant entry, not on data updates
+  let pendingRollFrom = null; // odometer roll: previous reserve value when a meal is logged
   const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 
   // ---------- gauge (geometry mirrors src/components/instrument/gauge.ts) ----------
@@ -762,10 +825,14 @@
     svg.appendChild(el("circle", { cx, cy, r: 4.5, fill: colors.accent }));
     wrap.appendChild(svg);
 
-    const remaining = Math.max(0, Math.round(state.goal - eaten()));
+    const diff = Math.round(state.goal - eaten());
+    const over = diff < 0;
+    const remaining = Math.max(0, diff);
     const center = document.createElement("div");
     center.className = "gauge-center";
-    center.innerHTML = '<div class="gauge-remaining">' + fmt(remaining) + '</div><div class="gauge-caption">kcal in reserve</div>';
+    center.innerHTML = over
+      ? '<div class="gauge-remaining over">+' + fmt(-diff) + '</div><div class="gauge-caption over">kcal over budget</div>'
+      : '<div class="gauge-remaining">' + fmt(remaining) + '</div><div class="gauge-caption">kcal in reserve</div>';
     wrap.appendChild(center);
 
     const footer = document.createElement("div");
@@ -777,8 +844,18 @@
     wrap.appendChild(footer);
     slot.appendChild(wrap);
     const target = SWEEP * frac;
-    const ignite = slot.hasAttribute("data-ignition") && playIgnition
-      && !matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const ignite = slot.hasAttribute("data-ignition") && playIgnition && !over && !reduced;
+    // odometer roll: count the reserve figure from its previous value after a meal is logged
+    if (pendingRollFrom !== null && !ignite && !over && !reduced && pendingRollFrom !== remaining) {
+      const numEl = center.querySelector(".gauge-remaining");
+      const t0 = performance.now(), dur = 550, from = pendingRollFrom, to = remaining;
+      (function step(now) {
+        const p = Math.min((now - t0) / dur, 1), e = 1 - Math.pow(1 - p, 3);
+        numEl.textContent = fmt(Math.round(from + (to - from) * e));
+        if (p < 1) requestAnimationFrame(step);
+      })(t0);
+    }
     requestAnimationFrame(() => requestAnimationFrame(() => {
       if (!ignite) { needle.style.transform = "rotate(" + target + "deg)"; return; }
       // ignition: sweep to redline, settle back with a slight overshoot
@@ -819,6 +896,13 @@
 
   // ---------- meals + macros ----------
   function renderMeals(container) {
+    if (!state.meals.length) {
+      container.innerHTML =
+        '<div class="empty-state"><div class="es-tile">📷</div>' +
+        '<div class="es-t">No meals logged yet</div>' +
+        '<div class="es-s">The gauge is full and waiting.<br>Point the camera at your first meal.</div></div>';
+      return;
+    }
     container.innerHTML = state.meals.map((m) =>
       '<div class="meal-row"><span class="meal-time">' + m.time + '</span>' +
       '<span class="meal-main"><div class="meal-name">' + m.name + '</div>' +
@@ -834,6 +918,11 @@
       const val = cell.querySelector("[data-macro-val]");
       if (val) val.textContent = have + "/" + target + (cell.classList.contains("ed-macro") ? "" : "g");
       if (cell.classList.contains("ed-macro")) val.innerHTML = have + "/" + target + "<small>g</small>";
+      if (val && pendingRollFrom !== null) {
+        val.classList.remove("roll");
+        void val.offsetWidth;
+        val.classList.add("roll");
+      }
       const togo = cell.querySelector("[data-macro-togo]");
       if (togo) togo.textContent = Math.max(0, target - have) + "g to go";
       const bar = cell.querySelector("[data-macro-bar]");
@@ -865,6 +954,12 @@
         slide(t);
       }));
       requestAnimationFrame(() => requestAnimationFrame(() => slide(z.querySelector(".tb2.active"))));
+      const fab = z.querySelector(".capture-fab2");
+      if (fab) fab.addEventListener("click", () => {
+        fab.classList.remove("snap");
+        void fab.offsetWidth;
+        fab.classList.add("snap"); // shutter press: scale dip + iris blink
+      });
     });
     document.querySelectorAll("[data-tabbar]").forEach((z) => {
       z.innerHTML =
@@ -887,13 +982,29 @@
     document.querySelectorAll("[data-subdial]").forEach(renderSubDial);
     document.querySelectorAll("[data-meals]").forEach(renderMeals);
     document.querySelectorAll(".variant").forEach(renderMacros);
+    pendingRollFrom = null;
   }
 
   function logMeal() {
     if (!extraMeals.length) return;
+    pendingRollFrom = Math.max(0, Math.round(state.goal - eaten()));
     state.meals.push(extraMeals.shift());
     playIgnition = false;
     renderAll();
+  }
+
+  function simulateRefresh() {
+    // branded pull-to-refresh: quick tick-sweep to full and back to the resting value
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    document.querySelectorAll(".variant.active .gauge-needle").forEach((n) => {
+      const resting = n.style.transform;
+      n.style.transition = "transform .45s cubic-bezier(.5,0,.6,1)";
+      n.style.transform = "rotate(230deg)";
+      setTimeout(() => {
+        n.style.transition = "transform .75s cubic-bezier(.22,1.2,.36,1)";
+        n.style.transform = resting;
+      }, 500);
+    });
   }
 
   function showVariant(id, btn) {

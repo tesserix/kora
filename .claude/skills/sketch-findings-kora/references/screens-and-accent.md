@@ -13,6 +13,18 @@ is the only other orange allowed.
 | Trends | Weight endpoint dot (+ over-budget energy bars — semantic warning) | Streak/sleep hit cells (lit-ink @ .55), weight delta (ink; accent/danger only when moving AWAY from goal) |
 | More | Whisper of orange lume behind the avatar well | Everything else; teal strictly for status badges |
 
+## Edge states (Home)
+- **Over budget**: needle pinned in redline, `+N` reserve numeral + "kcal over budget"
+  caption both in muted danger (lume off) — the only place danger appears on Home.
+  Semantic danger does not count against the accent budget but must stay calm.
+- **Empty morning**: gauge full at rest; log area shows the circular inset camera
+  tile empty state — inviting, never guilt-framing.
+
+## Tab-switch transition
+Screen changes ride the dock slide: incoming screen fades in drifting 16px from the
+direction of travel (~280ms ease-out), fired just after the dock well starts moving
+(~160ms stagger) so dock + content read as one gesture. Reduce Motion: instant swap.
+
 ## Per-screen layout contracts
 - **Home**: header (greet + largeTitle "Today" + bell/avatar) → BezelCluster
   [engraved "Energy reserve" + gauge → zone-rule "Macros" → 3-cell sub-dial rail with

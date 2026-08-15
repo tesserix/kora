@@ -28,7 +28,21 @@
 - **Sub-dials light in lit-ink, NOT accent** (post-review): four gauge-shaped arcs
   on Home would otherwise compete; orange belongs to the hero needle alone.
 - **Haptics** (review addition, not in mockups): impactLight on ignition settle and
-  water pills; selection on week-rail day taps.
+  water pills; selection on week-rail day taps; impactMedium on capture press.
+- **Over-budget state (calm, never screaming):** when eaten > budget the needle rests
+  pinned in the redline, the center reads `+N` in muted danger with caption
+  "kcal over budget" (danger, lume OFF), and ignition/odometer theatrics are skipped.
+  No pulsing, no extra red. Empty-morning state: full gauge at rest, empty log shows
+  an inviting circular inset camera tile ("The gauge is full and waiting") — no guilt.
+- **Odometer roll:** when a meal is logged, the reserve figure counts from its old
+  value to the new one (~550ms ease-out cubic) and macro numerals do a small
+  rise-in roll (translateY 9px + fade, ~350ms). Reuses the count-down machinery;
+  skipped under Reduce Motion and in the over-budget state.
+- **Branded pull-to-refresh:** the gauge needle tick-sweeps to full (~450ms ease-in)
+  and returns to rest with slight overshoot (~750ms) as the refresh indicator —
+  replaces the default spinner on Home. Skipped under Reduce Motion.
+- **Capture shutter press:** scale dip to .86 and back (~350ms) with a brief iris
+  blink (inner disc fade to 30% and out) before the camera opens.
 
 ## Key values
 ```js
