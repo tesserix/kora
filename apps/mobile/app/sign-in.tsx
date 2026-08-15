@@ -205,7 +205,19 @@ export default function SignIn() {
             the buttons, lifting the cluster rather than stretching the void. */}
         <View style={{ flex: 1, minHeight: spacing.xl, maxHeight: SIGN_IN_TOP_GAP_MAX }} />
 
-        <View style={{ gap: spacing.sm }}>
+        {/* flexShrink: 0 is load-bearing (kora#173). The scaffold's ScrollView
+            sets contentContainerStyle.flexGrow = 1, and the spacers around this
+            block are `flex`, which means flexShrink: 1. At accessibility text
+            sizes the buttons grow past the viewport, the flexible children
+            absorb the difference, and the content ends up clamped to EXACTLY
+            the viewport height -- so the ScrollView has no overflow to scroll
+            and simply clips the last button. Verified on device: two
+            screenshots either side of a swipe were byte-identical, with
+            "Continue with email" cut through the middle of the word and no way
+            to reach it. Refusing to shrink lets the content exceed the viewport,
+            which is what turns the scaffold's ScrollView back into a scroll
+            view. */}
+        <View style={{ gap: spacing.sm, flexShrink: 0 }}>
           <AppleSignInButton
             accessibilityLabel="Continue with Apple"
             disabled={busy}
