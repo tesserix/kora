@@ -92,16 +92,14 @@
   /* entrance stagger (mirrors the app's FadeInDown enter(i)) */
   .rise { animation: rise .45s cubic-bezier(.2,.7,.3,1) both; animation-delay: var(--d, 0s); }
   @keyframes rise { from { opacity: 0; transform: translateY(10px); } }
-  @media (prefers-reduced-motion: reduce) { .rise { animation: none; } .bezel::after { animation: none !important; } }
+  @media (prefers-reduced-motion: reduce) { .rise { animation: none; } .bezel::after { animation: none !important; } .track i, .gauge-needle, .macro-cell .microbar i { transition: none; } }
 
   /* Ignition material */
   .bezel {
     border-radius: 28px; padding: 1.5px; box-shadow: var(--shadow-card);
-    background:
-      linear-gradient(180deg, var(--glass-highlight), transparent 22%, rgba(0,0,0,.28) 90%),
-      conic-gradient(from 210deg, transparent 0deg, color-mix(in srgb, var(--ink) 22%, transparent) 40deg, transparent 90deg, transparent 250deg, color-mix(in srgb, var(--ink) 14%, transparent) 300deg, transparent 340deg);
+    /* review: two-stop linear rim only — conic sweep dropped (not buildable in RN without Skia) */
+    background: linear-gradient(180deg, var(--glass-highlight), transparent 22%, var(--shade) 90%);
   }
-  .bezel { background-image: linear-gradient(180deg, var(--glass-highlight), transparent 22%, var(--shade) 90%), conic-gradient(from 210deg, transparent 0deg, color-mix(in srgb, var(--ink) 22%, transparent) 40deg, transparent 90deg, transparent 250deg, color-mix(in srgb, var(--ink) 14%, transparent) 300deg, transparent 340deg); }
   .cluster {
     position: relative; overflow: hidden; border-radius: 26.5px;
     border: 1px solid var(--glass-border); backdrop-filter: blur(20px);
@@ -134,6 +132,38 @@
   .ghost-cta:hover { border-color: var(--accent); color: var(--ink); }
   .ghost-cta .plus { color: var(--accent); font-size: 16px; font-weight: 700; }
 
+  /* ---------- Home (winner D contract from sketch 001, post-review) ---------- */
+  .home-header { display: flex; align-items: flex-end; justify-content: space-between; padding: 0 16px 8px; }
+  .home-header .greet { font-size: 14px; color: var(--mut); margin-bottom: 2px; }
+  .home-header h1 { font-size: 34px; line-height: 41px; font-weight: 700; letter-spacing: .37px; }
+  .home-header .side { display: flex; align-items: center; gap: 12px; padding-bottom: 4px; }
+  .bell { position: relative; width: 36px; height: 36px; display: grid; place-items: center; color: var(--ink); }
+  .bell .dot { position: absolute; top: 5px; right: 5px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+  .avatar { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--inset); border: 1px solid var(--glass-border); font-size: 13px; font-weight: 700; color: var(--ink); }
+  .gauge-wrap { position: relative; width: 264px; margin: 0 auto; }
+  .gauge-wrap svg { display: block; width: 100%; height: auto; }
+  .gauge-center { position: absolute; top: 37%; left: 0; right: 0; text-align: center; pointer-events: none; }
+  .gauge-remaining { font-family: var(--font-mono); font-size: 44px; line-height: 50px; letter-spacing: -1.2px; font-variant-numeric: tabular-nums; color: var(--ink); text-shadow: 0 0 22px var(--lume-text); }
+  .gauge-caption { font-size: 10px; font-weight: 600; letter-spacing: 3px; text-transform: uppercase; color: var(--accent); margin-top: 6px; text-shadow: 0 0 14px var(--lume-accent); }
+  .gauge-needle { transition: transform .9s cubic-bezier(.3,.9,.35,1); filter: drop-shadow(0 0 5px color-mix(in srgb, var(--accent) 65%, transparent)); }
+  .gauge-footer { display: flex; border-top: 1px solid var(--hairline); padding-top: 12px; margin-top: 8px; }
+  .gauge-footer > div { flex: 1; text-align: center; }
+  .gauge-footer .v { font-family: var(--font-mono); font-size: 15px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .gauge-footer .l { font-size: 9px; letter-spacing: 2px; text-transform: uppercase; color: var(--mut); margin-top: 2px; }
+  .macro-rail { display: flex; }
+  .macro-cell { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 4px 2px; }
+  .macro-cell + .macro-cell { border-left: 1px solid var(--hairline); }
+  .macro-cell .nm { font-size: 11px; font-weight: 600; color: var(--mut); }
+  .macro-cell .vl { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .macro-cell .microbar { width: 64%; height: 2px; border-radius: 1px; background: var(--inset); margin-top: 2px; overflow: hidden; }
+  .macro-cell .microbar i { display: block; height: 100%; background: var(--ink); border-radius: 1px; }
+  .macro-cell .togo { font-size: 10px; font-family: var(--font-mono); color: var(--mut); }
+  .vf-cell { flex: 1; display: flex; align-items: center; gap: 10px; justify-content: center; }
+  .vf-cell + .vf-cell { border-left: 1px solid var(--hairline); }
+  .vf-cell .ico { width: 30px; height: 30px; border-radius: 9px; background: var(--glass); border: 1px solid var(--glass-border); display: grid; place-items: center; font-size: 14px; }
+  .vf-cell .v { font-family: var(--font-mono); font-size: 16px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .vf-cell .l { font-size: 10px; font-weight: 600; color: var(--mut); }
+
   /* ---------- Diary ---------- */
   .week-rail-wrap { padding: 0 16px; }
   .week-rail { display: flex; padding: 6px; gap: 4px; border-radius: 20.5px; }
@@ -145,7 +175,7 @@
   .day-cell .dw { font-size: 10px; font-weight: 600; letter-spacing: .5px; }
   .day-cell .dd { font-family: var(--font-mono); font-size: 15px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
   .day-cell .pip { width: 4px; height: 4px; border-radius: 50%; background: var(--tick); }
-  .day-cell .pip.hit { background: var(--accent); box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 60%, transparent); }
+  .day-cell .pip.hit { background: var(--tick-lit); } /* review: accent budget — day-total track is Diary's one accent */
   .day-cell.sel { background: var(--inset); box-shadow: inset 0 1px 0 var(--well-shadow), 0 0 0 1px var(--glass-border); color: var(--ink); }
   .daytotal-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
   .daytotal-head .big { font-family: var(--font-mono); font-size: 22px; font-weight: 600; letter-spacing: -.5px; font-variant-numeric: tabular-nums; }
@@ -166,7 +196,8 @@
   .link-row:hover { color: var(--ink); }
 
   /* ---------- Trends ---------- */
-  .delta { font-family: var(--font-mono); font-size: 13px; font-weight: 700; color: var(--accent); }
+  /* review: color grammar — loss toward goal is neutral; accent/danger only when moving away from goal */
+  .delta { font-family: var(--font-mono); font-size: 13px; font-weight: 700; color: var(--ink); }
   .seg { display: flex; background: var(--inset); border: 1px solid var(--glass-border); border-radius: 12px; padding: 3px; margin-top: 14px; }
   .seg button {
     flex: 1; border: none; background: transparent; border-radius: 9px; padding: 7px 0;
@@ -183,7 +214,7 @@
   .duo .l { font-size: 11px; font-weight: 600; color: var(--mut); margin-bottom: 6px; }
   .cells { display: flex; gap: 3px; margin-top: 10px; }
   .cells i { flex: 1; height: 14px; border-radius: 3px; background: var(--inset); }
-  .cells i.hit { background: var(--accent); opacity: .9; }
+  .cells i.hit { background: var(--tick-lit); opacity: .55; } /* review: weight endpoint is Trends' one accent */
   .cells i.part { background: var(--tick); }
   chart-host, .chart-host { display: block; }
 
@@ -227,12 +258,13 @@
   .dock2 .tb2:hover { color: var(--ink); }
   .dock2 .tb2.active { color: var(--ink); background: var(--inset); box-shadow: inset 0 1px 0 var(--well-shadow); }
   .dock2 .tb2.active::after { content: ""; position: absolute; bottom: 6px; width: 4px; height: 4px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 70%, transparent); }
-  .dock2 .tb2 .lbl2 { font-size: 8px; font-weight: 700; letter-spacing: 1.6px; text-transform: uppercase; opacity: 0; height: 0; overflow: hidden; transition: all .18s ease; }
-  .dock2 .tb2.active .lbl2 { opacity: 1; height: 10px; }
+  /* review: labels always on for discoverability; active gets full weight */
+  .dock2 .tb2 .lbl2 { font-size: 8px; font-weight: 500; letter-spacing: 1.6px; text-transform: uppercase; opacity: .72; transition: all .18s ease; }
+  .dock2 .tb2.active .lbl2 { opacity: 1; font-weight: 700; }
   .dock2 .notch { flex: 0 0 66px; }
   .capture-fab2 {
-    position: absolute; left: 50%; top: -12px; transform: translateX(-50%);
-    width: 56px; height: 56px; border-radius: 50%; border: 5px solid var(--bg);
+    position: absolute; left: 50%; top: -16px; transform: translateX(-50%);
+    width: 56px; height: 56px; border-radius: 50%; border: none; /* review: raised sibling, no bg-ring notch */
     background: radial-gradient(120% 120% at 50% 0%, color-mix(in srgb, #fff 28%, var(--accent)) 0%, var(--accent) 46%, color-mix(in srgb, #000 22%, var(--accent)) 100%);
     color: var(--accent-on); font-size: 19px;
     box-shadow: 0 8px 20px color-mix(in srgb, var(--accent) 45%, transparent), inset 0 1px 0 rgba(255,255,255,.35);
@@ -252,7 +284,8 @@
 
 <div id="variant-nav">
   <span class="sketch-id">Sketch 002 · Ignition screens</span>
-  <button class="variant-tab active" onclick="showScreen('diary', this)">Diary</button>
+  <button class="variant-tab active" onclick="showScreen('home', this)">Home</button>
+  <button class="variant-tab" onclick="showScreen('diary', this)">Diary</button>
   <button class="variant-tab" onclick="showScreen('trends', this)">Trends</button>
   <button class="variant-tab" onclick="showScreen('more', this)">More</button>
   <label style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--mut)">◐ Theme
@@ -264,8 +297,70 @@
   </label>
 </div>
 
+<!-- ============================ HOME ============================ -->
+<div id="variant-home" class="variant active">
+  <div class="stage">
+    <div class="phone">
+      <div class="screen">
+        <div class="statusbar"><span>9:41</span><span>◧ 87%</span></div>
+        <div class="home-header rise" style="--d:.02s">
+          <div>
+            <div class="greet">Sat, Aug 16 · Good morning, Mahesh</div>
+            <h1>Today</h1>
+          </div>
+          <div class="side">
+            <div class="bell">🔔<span class="dot"></span></div>
+            <div class="avatar">MS</div>
+          </div>
+        </div>
+
+        <div class="rise" style="padding: 12px 16px 0; --d:.08s">
+          <div class="bezel">
+            <div class="cluster">
+              <div class="zone">
+                <div class="engraved" style="margin-bottom:8px">Energy reserve</div>
+                <div class="gauge-slot" data-home-gauge></div>
+              </div>
+              <div class="zone-rule"><span class="engraved">Macros</span></div>
+              <div class="macro-rail">
+                <div class="macro-cell"><span data-home-subdial="0.39"></span><span class="nm">Protein</span><span class="vl">62/160g</span><span class="microbar"><i style="width:39%"></i></span><span class="togo">98g to go</span></div>
+                <div class="macro-cell"><span data-home-subdial="0.37"></span><span class="nm">Carbs</span><span class="vl">88/240g</span><span class="microbar"><i style="width:37%"></i></span><span class="togo">152g to go</span></div>
+                <div class="macro-cell"><span data-home-subdial="0.44"></span><span class="nm">Fat</span><span class="vl">31/70g</span><span class="microbar"><i style="width:44%"></i></span><span class="togo">39g to go</span></div>
+              </div>
+              <div class="well-footer" style="padding: 12px 18px">
+                <div class="vf-cell"><span class="ico">👟</span><span><div class="v">6,482</div><div class="l">Steps</div></span></div>
+                <div class="vf-cell"><span class="ico">🌙</span><span><div class="v">7h 12m</div><div class="l">Sleep</div></span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="rise" style="padding: 20px 16px 0; --d:.16s">
+          <div class="zone-rule" style="padding:0"><span class="engraved">Logged today</span></div>
+          <div class="row"><span class="t">08:10</span><span class="m"><span class="nm">Masala oats with almond milk</span><div class="sub">Breakfast</div></span><span class="kc">380 kcal</span></div>
+          <div class="row"><span class="t">13:05</span><span class="m"><span class="nm">Paneer tikka wrap</span><div class="sub">Lunch</div><div class="sub" style="font-size:11px;font-weight:600">≈ Portion is a guess</div></span><span class="kc">460 kcal</span></div>
+          <div class="row"><span class="t">16:30</span><span class="m"><span class="nm">Filter coffee with milk</span><div class="sub">Snack</div></span><span class="kc">20 kcal</span></div>
+          <button class="ghost-cta"><span class="plus">+</span> Log a meal</button>
+        </div>
+        <div class="tabbar-zone" data-dock="today"></div>
+      </div>
+    </div>
+    <aside class="notes">
+      <h2>Home</h2>
+      <p>The winning sketch-001 variant D, carried into the v2 set with the review contract applied.</p>
+      <h3>Post-review contract</h3>
+      <ul>
+        <li>Bezel rim is the two-stop linear gradient (conic dropped — not buildable in RN without Skia)</li>
+        <li>Sub-dials light in ink; orange belongs to the hero needle only</li>
+        <li>Full ignition sequence (see sketch 001) plays once per day; other visits get this calm settle</li>
+        <li>Dock: always-on labels, clearer glyphs, raised capture button (no notch ring)</li>
+      </ul>
+    </aside>
+  </div>
+</div>
+
 <!-- ============================ DIARY ============================ -->
-<div id="variant-diary" class="variant active">
+<div id="variant-diary" class="variant">
   <div class="stage">
     <div class="phone">
       <div class="screen">
@@ -297,27 +392,22 @@
                 </div>
                 <div class="track"><i data-daytrack></i></div>
               </div>
-              <div class="zone-rule"><span class="engraved">Breakfast · 380 kcal</span></div>
-              <div class="zone" style="padding-top:4px;padding-bottom:8px">
-                <div class="row"><span class="t">08:10</span><span class="m"><span class="nm">Masala oats with almond milk</span></span><span class="kc">380 kcal</span></div>
-              </div>
-              <div class="zone-rule"><span class="engraved">Lunch · 460 kcal</span></div>
-              <div class="zone" style="padding-top:4px;padding-bottom:8px">
-                <div class="row"><span class="t">13:05</span><span class="m"><span class="nm">Paneer tikka wrap</span><div class="sub" style="font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase">Portion is a guess</div></span><span class="kc">460 kcal</span></div>
-              </div>
-              <div class="zone-rule"><span class="engraved">Snack · 20 kcal</span></div>
-              <div class="zone" style="padding-top:4px;padding-bottom:8px">
-                <div class="row"><span class="t">16:30</span><span class="m"><span class="nm">Filter coffee with milk</span></span><span class="kc">20 kcal</span></div>
-              </div>
-              <div class="zone" style="padding-top:0">
-                <button class="ghost-cta"><span class="plus">+</span> Add dinner · 1,240 kcal in reserve</button>
-              </div>
               <div class="well-footer">
                 <span class="engraved" style="flex:1">Water · <span class="mono" data-water>750</span> ml of 2 L</span>
                 <button class="pill-btn" style="flex:0 0 auto;padding:9px 14px" onclick="addWater(250)">+250</button>
                 <button class="pill-btn" style="flex:0 0 auto;padding:9px 14px" onclick="addWater(500)">+500</button>
               </div>
             </div>
+          </div>
+          <!-- review: meal log broken out of the cluster — the bezel wraps only fixed-cardinality content -->
+          <div style="margin-top:18px">
+            <div class="zone-rule" style="padding:0"><span class="engraved">Breakfast · 380 kcal</span></div>
+            <div class="row"><span class="t">08:10</span><span class="m"><span class="nm">Masala oats with almond milk</span></span><span class="kc">380 kcal</span></div>
+            <div class="zone-rule" style="padding:0;margin-top:8px"><span class="engraved">Lunch · 460 kcal</span></div>
+            <div class="row"><span class="t">13:05</span><span class="m"><span class="nm">Paneer tikka wrap</span><div class="sub" style="font-size:11px;font-weight:600">≈ Portion is a guess</div></span><span class="kc">460 kcal</span></div>
+            <div class="zone-rule" style="padding:0;margin-top:8px"><span class="engraved">Snack · 20 kcal</span></div>
+            <div class="row"><span class="t">16:30</span><span class="m"><span class="nm">Filter coffee with milk</span></span><span class="kc">20 kcal</span></div>
+            <button class="ghost-cta"><span class="plus">+</span> Add dinner · 1,240 kcal in reserve</button>
           </div>
           <button class="link-row">⧉&nbsp; Copy yesterday's meals</button>
         </div>
@@ -326,10 +416,10 @@
     </div>
     <aside class="notes">
       <h2>Diary</h2>
-      <p>The whole day becomes <strong>one instrument</strong>: total, slots, add-dinner, and water live in a single bezel, with engraved zone rules carrying each slot's subtotal.</p>
+      <p><em>Post-review structure:</em> the bezel wraps only fixed-cardinality content — day-total and water. The meal log breaks out into a card-free hairline list (it must scale to any meal count and support swipe-to-edit in RN).</p>
       <h3>Ignition details</h3>
       <ul>
-        <li>Week strip is a machined rail — selected day sinks into an inset well, goal pips glow orange</li>
+        <li>Week strip is a machined rail — selected day sinks into an inset well; goal pips are lit ink (accent budget: the day-total track is this screen's one orange)</li>
         <li>Day-total track fills on entry, echoing the home needle sweep</li>
         <li>Water lives in the recessed footer well with working +250/+500 pills</li>
       </ul>
@@ -418,7 +508,7 @@
           <div class="bezel" style="border-radius:26px">
             <button class="cluster profile-hero" style="border-radius:24.5px;width:100%;border:none;text-align:left">
               <span class="avatar-lg">MS</span>
-              <span class="who"><span class="nm">Mahesh Sangawar</span><div class="em">mahesh.sangawar@gmail.com</div></span>
+              <span class="who"><span class="nm">Mahesh Sangawar</span><div class="em">m.sangawar@example.com</div></span>
               <span class="chev">›</span>
             </button>
           </div>
@@ -557,13 +647,84 @@
     svg.appendChild(el("line", { x1: P, x2: W - P, y1: y(budget), y2: y(budget), stroke: css("--mut"), "stroke-width": 1, "stroke-dasharray": "4 4" }));
   }
 
+  // ---------- Home gauge (geometry mirrors src/components/instrument/gauge.ts) ----------
+  function pt(cx, cy, r, deg) {
+    const a = (deg * Math.PI) / 180;
+    return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+  }
+  function renderHomeGauge() {
+    const slot = document.querySelector("[data-home-gauge]");
+    if (!slot) return;
+    const cx = 132, cy = 138, R = 114, START = 155, SWEEP = 230, TICKS = 40;
+    const goal = 2100, eaten = 860, frac = Math.min(eaten / goal, 1);
+    slot.innerHTML = "";
+    const wrap = document.createElement("div");
+    wrap.className = "gauge-wrap";
+    const svg = el("svg", { viewBox: "0 0 264 200" });
+    const colors = { accent: css("--accent"), tick: css("--tick"), tickLit: css("--tick-lit"), mut: css("--mut") };
+    for (let i = 0; i <= TICKS; i++) {
+      const t = i / TICKS, deg = START + SWEEP * t, major = i % 5 === 0;
+      const [x1, y1] = pt(cx, cy, R, deg);
+      const [x2, y2] = pt(cx, cy, R - (major ? 14 : 8), deg);
+      const lit = t <= frac, red = t > 0.9;
+      const stroke = red ? (lit ? colors.accent : colors.accent + "73")
+        : lit ? (major ? colors.tickLit : colors.tickLit + "8C") : colors.tick;
+      svg.appendChild(el("line", { x1, y1, x2, y2, stroke, "stroke-width": major ? 2.5 : 1.25, "stroke-linecap": "round" }));
+    }
+    [[0, "0", "start"], [0.5, "1,050", "middle"], [1, "2,100", "end"]].forEach(([t, txt, anchor]) => {
+      const [x, y] = pt(cx, cy, R - 26, START + SWEEP * t);
+      const tx = el("text", { x, y, fill: colors.mut, "font-size": 9, "text-anchor": anchor, "font-family": "Menlo, monospace" });
+      tx.textContent = txt;
+      svg.appendChild(tx);
+    });
+    const [nx1, ny1] = pt(cx, cy, 26, START);
+    const [nx2, ny2] = pt(cx, cy, R - 20, START);
+    const needle = el("line", { x1: nx1, y1: ny1, x2: nx2, y2: ny2, stroke: colors.accent, "stroke-width": 3, "stroke-linecap": "round", class: "gauge-needle" });
+    needle.style.transformOrigin = cx + "px " + cy + "px";
+    needle.style.transform = "rotate(0deg)";
+    svg.appendChild(needle);
+    svg.appendChild(el("circle", { cx, cy, r: 4.5, fill: colors.accent }));
+    wrap.appendChild(svg);
+    const center = document.createElement("div");
+    center.className = "gauge-center";
+    center.innerHTML = '<div class="gauge-remaining">1,240</div><div class="gauge-caption">kcal in reserve</div>';
+    wrap.appendChild(center);
+    const footer = document.createElement("div");
+    footer.className = "gauge-footer";
+    footer.innerHTML =
+      '<div><div class="v">860</div><div class="l">Eaten</div></div>' +
+      '<div><div class="v">412</div><div class="l">Burned</div></div>' +
+      '<div><div class="v">2,100</div><div class="l">Budget</div></div>';
+    wrap.appendChild(footer);
+    slot.appendChild(wrap);
+    const apply = () => { needle.style.transform = "rotate(" + SWEEP * frac + "deg)"; };
+    if (reduced) apply();
+    else requestAnimationFrame(() => requestAnimationFrame(apply));
+  }
+  function renderHomeSubdials() {
+    document.querySelectorAll("[data-home-subdial]").forEach((slot) => {
+      const frac = Number(slot.dataset.homeSubdial);
+      const c = 22, R = 17, START = 135, SWEEP = 270, N = 24;
+      slot.innerHTML = "";
+      const svg = el("svg", { viewBox: "0 0 44 44", width: 42, height: 42 });
+      for (let i = 0; i <= N; i++) {
+        const t = i / N, deg = START + SWEEP * t;
+        const [x1, y1] = pt(c, c, R, deg);
+        const [x2, y2] = pt(c, c, R - 5, deg);
+        // review: sub-dials in lit ink — accent stays on the hero needle
+        svg.appendChild(el("line", { x1, y1, x2, y2, "stroke-width": 1.6, "stroke-linecap": "round", stroke: t <= frac ? css("--tick-lit") : css("--tick") }));
+      }
+      slot.appendChild(svg);
+    });
+  }
+
   // ---------- dock ----------
   function renderDocks() {
     const tabs = [["diary", "☀︎", "Today"], ["diary", "▤", "Diary"], null, ["trends", "↗", "Trends"], ["more", "•••", "More"]];
     document.querySelectorAll("[data-dock]").forEach((z) => {
       const active = z.dataset.dock;
       let html = '<div class="dock2-bezel"><div class="dock2">';
-      const order = [["today", "☀︎", "Today"], ["diary", "▤", "Diary"], null, ["trends", "↗", "Trends"], ["more", "•••", "More"]];
+      const order = [["today", "⌂", "Today"], ["diary", "▦", "Diary"], null, ["trends", "↗", "Trends"], ["more", "≡", "More"]];
       order.forEach((t) => {
         if (!t) { html += '<span class="notch"></span>'; return; }
         html += '<button class="tb2' + (t[0] === active ? " active" : "") + '"><span>' + t[1] + '</span><span class="lbl2">' + t[2] + "</span></button>";
@@ -582,6 +743,7 @@
     });
   }
   function renderScreen(id) {
+    if (id === "home") { renderHomeGauge(); renderHomeSubdials(); }
     if (id === "diary") fillTracks();
     if (id === "trends") { drawWeight(); drawEnergy(); }
   }
@@ -597,7 +759,7 @@
   function setTheme(v) {
     if (v === "system") document.documentElement.removeAttribute("data-theme");
     else document.documentElement.setAttribute("data-theme", v);
-    drawWeight(); drawEnergy(); // SVG colors are sampled from CSS vars
+    drawWeight(); drawEnergy(); renderHomeGauge(); renderHomeSubdials(); // SVG colors are sampled from CSS vars
   }
   document.querySelectorAll("[data-seg] button").forEach((b) => b.addEventListener("click", () => {
     document.querySelectorAll("[data-seg] button").forEach((o) => o.classList.remove("active"));
@@ -613,5 +775,5 @@
 
   document.documentElement.setAttribute("data-theme", "dark");
   renderDocks();
-  renderScreen("diary");
+  renderScreen("home");
 </script>

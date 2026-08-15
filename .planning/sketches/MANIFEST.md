@@ -18,4 +18,4 @@ Direction cues: automotive/aviation instrument clusters, editorial data pages, b
 | # | Name | Design Question | Winner | Tags |
 |---|------|----------------|--------|------|
 | 001 | home-instrument-panels | How should Home's panels be structured so they stop feeling like a stack of identical glass cards? | D: Ignition | layout, home, panels |
-| 002 | ignition-screens | How does the winning Ignition language extend to Diary, Trends, and More? | — | layout, diary, trends, more |
+| 002 | ignition-screens | How does the winning Ignition language extend to Home, Diary, Trends, and More? | post-review contract | layout, home, diary, trends, more |

@@ -137,7 +137,7 @@
   .gauge-footer > div { flex: 1; text-align: center; }
   .gauge-footer .v { font-family: var(--font-mono); font-size: 15px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
   .gauge-footer .l { font-size: 9px; letter-spacing: 2px; text-transform: uppercase; color: var(--mut); margin-top: 2px; }
-  @media (prefers-reduced-motion: reduce) { .gauge-needle { transition: none; } }
+  @media (prefers-reduced-motion: reduce) { .gauge-needle, .tile .bar i, .macro-cell .microbar i, .ed-macro .bar i { transition: none; } }
 
   /* meals list */
   .meal-row { display: flex; gap: 12px; padding: 10px 0; align-items: baseline; border-top: 1px solid var(--hairline); }
@@ -146,7 +146,7 @@
   .meal-main { flex: 1; min-width: 0; }
   .meal-name { font-size: 15px; font-weight: 600; color: var(--ink); }
   .meal-slot { font-size: 11px; color: var(--mut); margin-top: 1px; }
-  .meal-guess { font-size: 9px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--mut); margin-top: 2px; }
+  .meal-guess { font-size: 11px; font-weight: 600; color: var(--mut); margin-top: 2px; } /* review: trust disclosure, not decoration */
   .meal-kcal { font-family: var(--font-mono); font-size: 15px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
   .section-label { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
   .section-label span { font-size: 14px; font-weight: 600; color: var(--ink); }
@@ -266,7 +266,7 @@
   .tile.tall .togo { font-size: 11px; font-family: var(--font-mono); color: var(--mut); margin-top: 4px; }
   .tile.half .vl { font-size: 15px; }
   .tile .bar { height: 5px; border-radius: 3px; background: var(--inset); margin-top: 10px; overflow: hidden; }
-  .tile .bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; transition: width .5s ease; }
+  .tile .bar i { display: block; height: 100%; background: var(--ink); border-radius: 3px; transition: width .5s ease; } /* review: accent reserved for hero needle */
   .bento-minis { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
   .mini { border-radius: 16px; padding: 12px 10px; text-align: center; }
   .mini .v { font-size: 15px; }
@@ -277,9 +277,8 @@
      VARIANT D — ignition (A × C synthesis, refined)
      ========================================================= */
   .cluster-bezel.v2 {
-    background:
-      linear-gradient(180deg, var(--glass-highlight), transparent 22%, var(--shade) 90%),
-      conic-gradient(from 210deg, transparent 0deg, color-mix(in srgb, var(--ink) 22%, transparent) 40deg, transparent 90deg, transparent 250deg, color-mix(in srgb, var(--ink) 14%, transparent) 300deg, transparent 340deg);
+    /* review: two-stop linear rim only — conic sweep dropped (not buildable in RN without Skia) */
+    background: linear-gradient(180deg, var(--glass-highlight), transparent 22%, var(--shade) 90%);
     box-shadow: var(--shadow-card), 0 0 54px -22px color-mix(in srgb, var(--accent) 30%, transparent);
   }
   .cluster.v2 {
@@ -324,13 +323,14 @@
     content: ""; position: absolute; bottom: 6px; width: 4px; height: 4px; border-radius: 50%;
     background: var(--accent); box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 70%, transparent);
   }
-  .dock2 .tb2 .lbl2 { font-size: 8px; font-weight: 700; letter-spacing: 1.6px; text-transform: uppercase; opacity: 0; height: 0; overflow: hidden; transition: all .18s ease; }
-  .dock2 .tb2.active .lbl2 { opacity: 1; height: 10px; }
+  /* review: labels always on for discoverability; active gets full weight */
+  .dock2 .tb2 .lbl2 { font-size: 8px; font-weight: 500; letter-spacing: 1.6px; text-transform: uppercase; opacity: .72; transition: all .18s ease; }
+  .dock2 .tb2.active .lbl2 { opacity: 1; font-weight: 700; }
   .dock2 .notch { flex: 0 0 66px; }
   .capture-fab2 {
-    position: absolute; left: 50%; top: -12px; transform: translateX(-50%);
+    position: absolute; left: 50%; top: -16px; transform: translateX(-50%);
     width: 56px; height: 56px; border-radius: 50%;
-    border: 5px solid var(--bg); /* carved into the dock, not floating over it */
+    border: none; /* review: raised sibling (bg-ring notch breaks over blur in RN) */
     background:
       radial-gradient(120% 120% at 50% 0%, color-mix(in srgb, #fff 28%, var(--accent)) 0%, var(--accent) 46%, color-mix(in srgb, #000 22%, var(--accent)) 100%);
     color: var(--accent-on); font-size: 19px;
@@ -429,7 +429,7 @@
       <p>A's fused cluster, C's layered light, B's card-free meal list — plus the wow lives in <strong>motion and lume, not decoration</strong>. Re-open this tab to replay the ignition.</p>
       <h3>The wow</h3>
       <ul>
-        <li>Ignition sweep: needle runs to redline and settles back, like a car cluster at startup; the reserve figure counts down with it</li>
+        <li>Ignition sweep: needle runs to redline and settles back, like a car cluster at startup; the reserve figure counts down with it. <em>Production contract: plays once per day (persisted flag); every other visit uses the calm settle</em></li>
         <li>Warm lume glow on the needle, reserve numeral, and caption — watch-dial, not neon</li>
         <li>Brushed conic bezel + one-time specular sweep across the glass</li>
       </ul>
@@ -796,7 +796,7 @@
       const [x2, y2] = pt(c, c, R - 5, deg);
       svg.appendChild(el("line", {
         x1, y1, x2, y2, "stroke-width": 1.6, "stroke-linecap": "round",
-        stroke: t <= frac ? css("--accent") : css("--tick"),
+        stroke: t <= frac ? css("--tick-lit") : css("--tick"), // review: sub-dials in lit ink, accent stays on hero needle
       }));
     }
     slot.appendChild(svg);
@@ -808,7 +808,7 @@
       '<div class="meal-row"><span class="meal-time">' + m.time + '</span>' +
       '<span class="meal-main"><div class="meal-name">' + m.name + '</div>' +
       '<div class="meal-slot">' + m.slot + '</div>' +
-      (m.guess ? '<div class="meal-guess">Portion is a guess</div>' : "") +
+      (m.guess ? '<div class="meal-guess">≈ Portion is a guess</div>' : "") +
       '</span><span class="meal-kcal">' + m.kcal + ' kcal</span></div>'
     ).join("");
   }
@@ -830,11 +830,11 @@
     document.querySelectorAll("[data-tabbar-v2]").forEach((z) => {
       z.innerHTML =
         '<div class="dock2-bezel"><div class="dock2">' +
-        '<button class="tb2 active"><span>☀︎</span><span class="lbl2">Today</span></button>' +
-        '<button class="tb2"><span>▤</span><span class="lbl2">Diary</span></button>' +
+        '<button class="tb2 active"><span>⌂</span><span class="lbl2">Today</span></button>' +
+        '<button class="tb2"><span>▦</span><span class="lbl2">Diary</span></button>' +
         '<span class="notch"></span>' +
         '<button class="tb2"><span>↗</span><span class="lbl2">Trends</span></button>' +
-        '<button class="tb2"><span>•••</span><span class="lbl2">More</span></button>' +
+        '<button class="tb2"><span>≡</span><span class="lbl2">More</span></button>' +
         '<button class="capture-fab2" title="Capture a meal">📷</button>' +
         '</div></div>';
       z.querySelectorAll(".tb2").forEach((t) => t.addEventListener("click", () => {
