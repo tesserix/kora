@@ -7,6 +7,8 @@ import { router } from "expo-router";
 import { ApiError, AuthTokenError, NetworkError, ResponseParseError } from "@/lib/api";
 import type { FoodItem, Resolution } from "@/api/types";
 import { OfflineUnknownBarcodeError, resolutionFromCachedFood } from "@/offline/cachedResolution";
+import { StyleSheet } from "react-native";
+import * as Reanimated from "react-native-reanimated";
 import { INSTRUMENT_DARK_FIXED } from "@/theme";
 
 import CaptureScreen, { CaptureBody, COMPOSER_BUTTON } from "../capture";
@@ -390,6 +392,27 @@ test("the photo viewfinder shows lume reticle corners and a static scan line", a
   expect(getByTestId("viewfinder-scan-line")).toBeTruthy();
 });
 
+// kora#175 §1. The viewfinder is the app's central action and was a raw
+// <Pressable>: you tapped and stared at an unchanged screen until the camera
+// fired. It now springs on press-DOWN, so the acknowledgement is on the touch
+// rather than on whatever arrives later.
+test("the photo viewfinder responds on press-down", async () => {
+  const spy = jest.spyOn(Reanimated, "withSpring");
+  const { getByTestId } = await render(<CaptureScreen />);
+  spy.mockClear();
+
+  await act(async () => {
+    fireEvent(getByTestId("capture-idle-photo"), "pressIn");
+  });
+  expect(spy).toHaveBeenCalledTimes(1);
+  expect((spy.mock.calls[0] as [number, unknown])[0]).toBeLessThan(1);
+
+  await act(async () => {
+    fireEvent(getByTestId("capture-idle-photo"), "pressOut");
+  });
+  spy.mockRestore();
+});
+
 test("tapping a mode pill switches mode and changes the idle affordance", async () => {
   const { findByText, findByTestId, getByTestId, queryByTestId } = await render(<CaptureScreen />);
   expect(getByTestId("capture-idle-photo")).toBeTruthy();
@@ -480,8 +503,9 @@ describe("Type mode", () => {
     const sendButton = await findByLabelText("Send");
     expect(sendButton.props.accessibilityState).toEqual({ disabled: true });
     // Instrument Glass: inactive-send fill is 15%-alpha `ink` on the fixed
-    // dark tokens now, not a hardcoded white rgba.
-    expect(sendButton.props.style.backgroundColor).toBe("rgba(237, 230, 212, 0.15)");
+    // dark tokens now, not a hardcoded white rgba. Flattened because Send is a
+    // PressableScale (kora#175), so its host style is [caller style, animated].
+    expect(StyleSheet.flatten(sendButton.props.style).backgroundColor).toBe("rgba(237, 230, 212, 0.15)");
 
     await fireEvent.press(sendButton);
     expect(mockResolveTextMutate).not.toHaveBeenCalled();

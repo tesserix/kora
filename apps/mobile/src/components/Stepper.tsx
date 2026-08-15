@@ -73,12 +73,16 @@ export function Stepper({ value, onChange, step = 10, min = 0 }: StepperProps) {
     [tick],
   );
 
-  const btn = {
+  // Dim, don't scale: both buttons live inside the capsule's overflow:"hidden"
+  // track between hairline dividers, and the dim has to persist for the whole
+  // press-and-hold repeat rather than blink once on the release.
+  const btn = (state: { pressed: boolean }) => ({
     width: 36,
     height: 36,
     alignItems: "center" as const,
     justifyContent: "center" as const,
-  };
+    opacity: state.pressed ? 0.6 : 1,
+  });
   const divider = { width: 1, height: 20, backgroundColor: colors.separator };
 
   return (

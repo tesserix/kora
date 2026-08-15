@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, TextInput, View } from "react-native";
-import Animated, { FadeInDown } from "react-native-reanimated";
+import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
 import { AppText } from "@/components/Text";
@@ -26,7 +26,7 @@ import { LogRecipeSheet } from "@/components/recipes/LogRecipeSheet";
 import { baseQuantityFor, defaultServingCount, formatPortion } from "@/units/portion";
 import { foodVisual } from "@/lib/foodVisual";
 import { hslToHex } from "@/lib/color";
-import { haptics } from "@/motion";
+import { haptics, useMotionPrefs } from "@/motion";
 import { useTheme } from "@/theme";
 
 const MEALS = ["breakfast", "lunch", "dinner", "snack"] as const;
@@ -143,11 +143,20 @@ export default function LogScreen() {
 
   // Entrance stagger runs on first mount only — see app/(tabs)/index.tsx for the
   // same guard and rationale (refetches update results in place, no re-stagger).
+  const { reduceMotion } = useMotionPrefs();
   const firstMount = useRef(true);
   useEffect(() => {
     firstMount.current = false;
   }, []);
-  const enter = (i: number) => (firstMount.current ? FadeInDown.duration(300).delay(i * 30) : undefined);
+  // Reduce Motion keeps the fade and drops the translate. Reanimated 4.5
+  // would otherwise degrade FadeInDown to an instant pop-in, throwing away
+  // the opacity half that is exactly the prescribed fallback.
+  const enter = (i: number) =>
+    firstMount.current
+      ? reduceMotion
+        ? FadeIn.duration(150).delay(i * 30)
+        : FadeInDown.duration(300).delay(i * 30)
+      : undefined;
 
   // Selecting a food seeds the portion from that food's own default serving
   // and base unit, resetting any previous selection's serving-mode edit —
@@ -379,7 +388,7 @@ export default function LogScreen() {
                 <>
                   <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
                     <Overline>Saved</Overline>
-                    <Pressable accessibilityRole="button" accessibilityLabel="New meal" onPress={openBlank}>
+                    <Pressable accessibilityRole="button" accessibilityLabel="New meal" onPress={openBlank} style={(s) => ({ opacity: s.pressed ? 0.6 : 1 })}>
                       <AppText style={{ color: colors.accent }}>+ New meal</AppText>
                     </Pressable>
                   </View>
@@ -411,7 +420,7 @@ export default function LogScreen() {
                 <>
                   <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
                     <Overline>Recipes</Overline>
-                    <Pressable accessibilityRole="button" accessibilityLabel="New recipe" onPress={() => setParseSheetOpen(true)}>
+                    <Pressable accessibilityRole="button" accessibilityLabel="New recipe" onPress={() => setParseSheetOpen(true)} style={(s) => ({ opacity: s.pressed ? 0.6 : 1 })}>
                       <AppText style={{ color: colors.accent }}>+ New recipe</AppText>
                     </Pressable>
                   </View>

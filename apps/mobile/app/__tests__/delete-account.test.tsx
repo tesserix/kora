@@ -105,6 +105,11 @@ test("a failed deletion shows mapped copy, stays put, and does not sign out", as
   await waitFor(() =>
     expect(getByText("Kora is having trouble right now. Please try again in a moment.")).toBeTruthy(),
   );
+  // kora#175 §6: the failure has to be announced, not just drawn.
+  expect(
+    getByText("Kora is having trouble right now. Please try again in a moment.").props
+      .accessibilityLiveRegion,
+  ).toBe("polite");
   expect(mockSignOut).not.toHaveBeenCalled();
   expect(mockReplace).not.toHaveBeenCalled();
 });

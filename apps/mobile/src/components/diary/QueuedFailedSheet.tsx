@@ -1,4 +1,5 @@
-import { Pressable, View } from "react-native";
+import { View } from "react-native";
+import { PressableScale } from "@/motion";
 import { Sheet } from "@/components/Sheet";
 import { AppText } from "@/components/Text";
 import { Overline } from "@/components/Overline";
@@ -19,7 +20,7 @@ export function QueuedFailedSheet({ visible, description, onRetry, onDiscard, on
   const { colors, radius } = useTheme();
 
   const option = (label: string, detail: string, destructive: boolean, onPress: () => void) => (
-    <Pressable
+    <PressableScale
       accessibilityRole="button"
       accessibilityLabel={label}
       onPress={onPress}
@@ -27,7 +28,7 @@ export function QueuedFailedSheet({ visible, description, onRetry, onDiscard, on
     >
       <AppText style={{ fontSize: 15, fontWeight: "600", color: destructive ? colors.destructive : colors.label }}>{label}</AppText>
       <AppText muted style={{ fontSize: 13, marginTop: 2 }}>{detail}</AppText>
-    </Pressable>
+    </PressableScale>
   );
 
   return (

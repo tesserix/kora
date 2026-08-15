@@ -1,5 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react-native";
 import { fireGestureHandler, getByGestureTestId } from "react-native-gesture-handler/jest-utils";
+import { impactAsync, selectionAsync } from "expo-haptics";
+import * as Reanimated from "react-native-reanimated";
 import { indexFromDrag, TickRuler, valueFromDrag } from "../TickRuler";
 
 const base = {
@@ -93,6 +95,101 @@ describe("TickRuler continuous mode", () => {
       { translationX: 45 },
     ]);
     expect(onChange).toHaveBeenLastCalledWith(79);
+  });
+});
+
+// kora#175 §3. PX_PER_UNIT is 9, so a moderate 900px/s drag steps ~100 times a
+// second and the ruler fired one haptic on every one of them. Over-feedback
+// trains users to ignore all feedback (Apple §13, Utility) — and the one
+// haptic that WOULD earn its place, hitting min/max, was missing entirely:
+// the value just stopped silently.
+describe("TickRuler haptics", () => {
+  beforeEach(() => {
+    (selectionAsync as jest.Mock).mockClear();
+    (impactAsync as jest.Mock).mockClear();
+    (Reanimated.useReducedMotion as jest.Mock).mockReturnValue(false);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    (Reanimated.useReducedMotion as jest.Mock).mockReturnValue(false);
+  });
+
+  it("rate-limits the drag buzz instead of firing one per stepped change", async () => {
+    const onChange = jest.fn();
+    await render(<TickRuler {...base} value={84} onChange={onChange} />);
+
+    // Fired synchronously, so every step lands inside one rate-limit window.
+    fireGestureHandler(getByGestureTestId("weight-ruler-pan"), [
+      { translationX: 9 },
+      { translationX: 18 },
+      { translationX: 27 },
+      { translationX: 36 },
+    ]);
+
+    expect(onChange.mock.calls.length).toBeGreaterThan(1);
+    expect(selectionAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it("buzzes again once the rate-limit window has passed", async () => {
+    let clock = 0;
+    jest.spyOn(Date, "now").mockImplementation(() => (clock += 50));
+    const onChange = jest.fn();
+    await render(<TickRuler {...base} value={84} onChange={onChange} />);
+
+    fireGestureHandler(getByGestureTestId("weight-ruler-pan"), [
+      { translationX: 9 },
+      { translationX: 18 },
+      { translationX: 27 },
+    ]);
+
+    expect(onChange.mock.calls.length).toBeGreaterThan(1);
+    expect(selectionAsync).toHaveBeenCalledTimes(onChange.mock.calls.length);
+  });
+
+  it("marks first contact with a bound with a distinct impact, once", async () => {
+    const onChange = jest.fn();
+    await render(<TickRuler {...base} value={179.5} onChange={onChange} />);
+
+    fireGestureHandler(getByGestureTestId("weight-ruler-pan"), [
+      { translationX: -100 },
+      { translationX: -200 },
+    ]);
+
+    expect(onChange).toHaveBeenLastCalledWith(180);
+    // Hitting the bound is a different event from stepping, so it gets a
+    // different feel — and it does not repeat while the value sits there.
+    expect(impactAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks the lower bound too", async () => {
+    const onChange = jest.fn();
+    await render(<TickRuler {...base} value={35.5} onChange={onChange} />);
+
+    fireGestureHandler(getByGestureTestId("weight-ruler-pan"), [
+      { translationX: 0 },
+      { translationX: 100 },
+    ]);
+
+    expect(onChange).toHaveBeenLastCalledWith(35);
+    expect(impactAsync).toHaveBeenCalledTimes(1);
+  });
+
+  // Reduce Motion is a VESTIBULAR preference. A haptic has no vestibular
+  // component, and on this control it is the primary confirmation that the
+  // value moved at all — suppressing it left the drag silent.
+  it("keeps the drag haptic under Reduce Motion", async () => {
+    (Reanimated.useReducedMotion as jest.Mock).mockReturnValue(true);
+    const onChange = jest.fn();
+    await render(<TickRuler {...base} value={84} onChange={onChange} />);
+
+    fireGestureHandler(getByGestureTestId("weight-ruler-pan"), [
+      { translationX: 0 },
+      { translationX: 9 },
+    ]);
+
+    expect(onChange).toHaveBeenCalledWith(83);
+    expect(selectionAsync).toHaveBeenCalledTimes(1);
   });
 });
 

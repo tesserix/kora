@@ -191,6 +191,7 @@ function CandidateRow({
       accessibilityRole="button"
       accessibilityLabel={`Change ${candidate.item.name}`}
       onPress={onResolve}
+      style={(state) => ({ opacity: state.pressed ? 0.6 : 1 })}
     >
       {body}
     </Pressable>

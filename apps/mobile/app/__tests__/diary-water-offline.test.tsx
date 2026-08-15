@@ -62,6 +62,9 @@ test("an offline water tap reports an error instead of disabling the pills forev
   // The mutation must actually RUN and reject. Paused, it never reaches the
   // network and this text never appears.
   await waitFor(() => expect(ui.getByText("Couldn't add water. Try again.")).toBeTruthy());
+  // kora#175 §6: an error that only exists visually is no error at all to a
+  // VoiceOver user, who gets no announcement that the tap failed.
+  expect(ui.getByText("Couldn't add water. Try again.").props.accessibilityLiveRegion).toBe("polite");
   expect(apiFetch).toHaveBeenCalledWith("/v1/water", expect.objectContaining({ method: "POST" }));
 
   // And the control must come back. `disabled={addWater.isPending}` is the

@@ -65,7 +65,7 @@ export function RemindersSection() {
               style={{ flexDirection: "row", alignItems: "center", minHeight: 44, paddingHorizontal: spacing.md, gap: spacing.sm }}
             >
               <AppText style={{ flex: 1, fontSize: 17, fontWeight: "600", color: instrument.ink }}>{LABEL[slot]}</AppText>
-              <Pressable accessibilityLabel={`${LABEL[slot]} time`} onPress={() => openPicker(slot)} disabled={!p.enabled}>
+              <Pressable accessibilityLabel={`${LABEL[slot]} time`} onPress={() => openPicker(slot)} disabled={!p.enabled} style={(s) => ({ opacity: s.pressed ? 0.6 : 1 })}>
                 <AppText style={{ fontSize: 15, color: instrument.mut, opacity: p.enabled ? 1 : 0.4 }}>{fmt(p.hour, p.minute)}</AppText>
               </Pressable>
               <ToggleSwitch

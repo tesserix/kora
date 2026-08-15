@@ -66,6 +66,24 @@ test("AnimatedNumber snaps to the new value immediately when reduceMotion is tru
   expect(await findByText("250")).toBeTruthy();
 });
 
+// kora#175 §4. Reduce Motion is not "no feedback that the number changed" —
+// the spec's own fallback for a sweep is a CROSS-FADE, and reanimated 4.5's
+// built-in degradation is an instant jump instead. The figure fades out, swaps
+// at the midpoint, and fades back in; there is nothing vestibular about that.
+test("AnimatedNumber cross-fades a changed value under reduced motion", async () => {
+  (Reanimated.useReducedMotion as jest.Mock).mockReturnValue(true);
+  const spy = jest.spyOn(Reanimated, "withTiming");
+  const { findByText, rerender } = await render(<AnimatedNumber value={100} />);
+  // Nothing to cross-fade FROM on first paint.
+  expect(spy).not.toHaveBeenCalled();
+
+  await rerender(<AnimatedNumber value={250} />);
+
+  expect(spy).toHaveBeenCalled();
+  expect(await findByText("250")).toBeTruthy();
+  spy.mockRestore();
+});
+
 // The press-scale is observed through withSpring rather than the rendered
 // transform: the reanimated mock mutates a shared value that does not trigger
 // a re-render, so reading the transform back cannot distinguish "did not

@@ -1,5 +1,6 @@
 import { Pressable, View } from "react-native";
 import { AppText } from "@/components/Text";
+import { PressableScale } from "@/motion";
 import { useTheme } from "@/theme";
 import type { Weekday } from "@/reminders/customPrefs";
 
@@ -33,13 +34,13 @@ export function WeekdayPicker({ days, onChange }: Props) {
         {DAY_CHIPS.map(({ day, label: l }) => {
           const on = days.includes(day);
           return (
-            <Pressable key={day} testID={`day-${day}`} onPress={() => toggleDay(day)} style={[chip(on), { minWidth: 40, alignItems: "center" }]}>
+            <PressableScale key={day} testID={`day-${day}`} onPress={() => toggleDay(day)} style={[chip(on), { minWidth: 40, alignItems: "center" }]}>
               <AppText style={{ fontSize: 15, color: on ? instrument.accentOn : instrument.ink }}>{l}</AppText>
-            </Pressable>
+            </PressableScale>
           );
         })}
       </View>
-      <Pressable onPress={() => onChange(ALL)} style={{ marginTop: spacing.sm }}>
+      <Pressable onPress={() => onChange(ALL)} style={(s) => ({ marginTop: spacing.sm, opacity: s.pressed ? 0.6 : 1 })}>
         <AppText style={{ fontSize: 13, color: instrument.mut }}>Select all days</AppText>
       </Pressable>
     </>

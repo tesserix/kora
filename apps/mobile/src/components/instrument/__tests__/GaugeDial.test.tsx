@@ -73,6 +73,27 @@ test("under reduced motion, the needle renders statically at the target fraction
   spy.mockRestore();
 });
 
+// kora#175 §4. The comment above cited the spec's "needle sweeps become
+// cross-fades" and then implemented a jump cut. A cross-fade has no vestibular
+// component, so it is the fallback the preference actually asks for.
+test("under reduced motion, a data change cross-fades the needle instead of jump-cutting", async () => {
+  (Reanimated.useReducedMotion as jest.Mock).mockReturnValue(true);
+  const timing = jest.spyOn(Reanimated, "withTiming");
+  const spring = jest.spyOn(Reanimated, "withSpring");
+
+  const { rerender } = await render(<GaugeDial value={1100} target={2200} />);
+  // Nothing to cross-fade FROM on first paint.
+  expect(timing).not.toHaveBeenCalled();
+
+  await rerender(<GaugeDial value={1650} target={2200} />);
+
+  expect(timing).toHaveBeenCalled();
+  expect(spring).not.toHaveBeenCalled();
+
+  timing.mockRestore();
+  spring.mockRestore();
+});
+
 test("outside reduced motion, the needle springs via withSpring toward the target fraction", async () => {
   const spy = jest.spyOn(Reanimated, "withSpring");
 

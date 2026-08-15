@@ -1,15 +1,17 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { View } from "react-native";
 import Svg, { Circle, Line, Text as SvgText } from "react-native-svg";
 import Animated, {
   cancelAnimation,
   useAnimatedProps,
   useSharedValue,
+  withSequence,
   withSpring,
+  withTiming,
   type SharedValue,
 } from "react-native-reanimated";
 import { AppText } from "@/components/Text";
-import { useMotionPrefs } from "@/motion";
+import { REDUCED_MOTION_CROSSFADE_MS, useMotionPrefs } from "@/motion";
 import { useTheme } from "@/theme";
 import type { InstrumentTokens } from "@/theme";
 import { monoStyle } from "./typography";
@@ -123,22 +125,41 @@ export function GaugeDial({
   const tickGeometry = buildGaugeTicks(0);
 
   // Springs from the current live position to the new fraction on every data
-  // change; reduced motion snaps instead (spec: Motion > prefers-reduced-motion
-  // "needle sweeps become cross-fades" — here, an instant jump with no sweep).
+  // change. Reduced motion gets the spec's actual fallback (Motion >
+  // prefers-reduced-motion, "needle sweeps become cross-fades"): the needle
+  // fades out, the fraction — and with it the lit-tick boundary — swaps while
+  // it is invisible, and it fades back in. It used to jump-cut, which is what
+  // reanimated 4.5 degrades an animation to on its own and is precisely what
+  // the guard was supposed to avoid.
   const fractionSV = useSharedValue(fraction);
+  const needleOpacity = useSharedValue(1);
+  // First paint has no previous position to cross-fade FROM.
+  const firstRun = useRef(true);
   useEffect(() => {
     if (reduceMotion) {
       cancelAnimation(fractionSV);
-      fractionSV.value = fraction;
+      if (firstRun.current) {
+        fractionSV.value = fraction;
+      } else {
+        needleOpacity.value = withSequence(
+          withTiming(0, { duration: REDUCED_MOTION_CROSSFADE_MS / 2 }, () => {
+            "worklet";
+            fractionSV.value = fraction;
+          }),
+          withTiming(1, { duration: REDUCED_MOTION_CROSSFADE_MS / 2 }),
+        );
+      }
+      firstRun.current = false;
       return;
     }
+    firstRun.current = false;
     fractionSV.value = withSpring(fraction, NEEDLE_SPRING);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fraction, reduceMotion]);
 
   const needleAnimatedProps = useAnimatedProps(() => {
     "worklet";
-    return needleFor(fractionSV.value);
+    return { ...needleFor(fractionSV.value), opacity: needleOpacity.value };
   });
 
   const footer: Array<[number, string]> = [

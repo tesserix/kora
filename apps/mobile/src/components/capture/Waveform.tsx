@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
-import { AccessibilityInfo, Animated, View } from "react-native";
+import { useEffect, useRef } from "react";
+import { Animated, View } from "react-native";
+import { useMotionPrefs } from "@/motion";
 import { INSTRUMENT_DARK_FIXED } from "@/theme";
 
 const T = INSTRUMENT_DARK_FIXED;
@@ -21,25 +22,17 @@ const CYCLE_MS = 1000;
 // setting by falling back to static bars instead of looping the scale
 // animation — mirrors the mockup's `tsx-wave` keyframes.
 export function Waveform({ active }: Props) {
-  const [reducedMotion, setReducedMotion] = useState(false);
+  // useMotionPrefs, not a mount-only AccessibilityInfo.isReduceMotionEnabled()
+  // query: that read the preference exactly once and never subscribed to
+  // `reduceMotionChanged`, so turning Reduce Motion on mid-session left these
+  // bars looping until the next mount. useMotionPrefs wraps reanimated's
+  // useReducedMotion, which IS subscribed, and is what the rest of the app
+  // already uses.
+  const { reduceMotion } = useMotionPrefs();
   const scales = useRef(BAR_HEIGHTS.map(() => new Animated.Value(1))).current;
 
   useEffect(() => {
-    let cancelled = false;
-    AccessibilityInfo.isReduceMotionEnabled()
-      .then((enabled) => {
-        if (!cancelled) setReducedMotion(enabled);
-      })
-      .catch(() => {
-        if (!cancelled) setReducedMotion(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!active || reducedMotion) {
+    if (!active || reduceMotion) {
       // Skip the imperative write when a bar is already at rest — avoids an
       // unnecessary AnimatedValue update (and its Jest "not configured for
       // act()" warning) on the common case of mounting already-inactive,
@@ -63,7 +56,7 @@ export function Waveform({ active }: Props) {
     return () => {
       animations.forEach((animation) => animation.stop());
     };
-  }, [active, reducedMotion, scales]);
+  }, [active, reduceMotion, scales]);
 
   return (
     <View

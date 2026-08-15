@@ -70,7 +70,15 @@ export function Segmented({ options, value, onChange }: Props) {
               haptics.selection();
               onChange(option.key);
             }}
-            style={{ flex: 1, paddingVertical: 6, alignItems: "center", justifyContent: "center" }}
+            // Dim, don't scale: the selected pill slides behind these segments,
+            // and a label springing under the finger would fight that motion.
+            style={(s) => ({
+              flex: 1,
+              paddingVertical: 6,
+              alignItems: "center",
+              justifyContent: "center",
+              opacity: s.pressed ? 0.6 : 1,
+            })}
           >
             {/*
               Segments are equal-width, so a label wider than its share of the

@@ -100,7 +100,10 @@ export function MealRow({ name, slot, kcal, iconName = "utensils", tint, onPress
           accessibilityLabel={pinned ? `Unpin ${name}` : `Pin ${name}`}
           hitSlop={10}
           onPress={onPinToggle}
-          style={{ paddingLeft: spacing.sm }}
+          // Dim, don't scale: these glyphs sit inside the row's own flex line,
+          // and springing them under the finger visibly jitters the row (the
+          // reason PressableScale is not used for either of them).
+          style={(s) => ({ paddingLeft: spacing.sm, opacity: s.pressed ? 0.6 : 1 })}
         >
           <Icon name={pinned ? "star-fill" : "star"} size={20} color={pinned ? glyphOn : glyphOff} />
         </Pressable>
@@ -111,7 +114,7 @@ export function MealRow({ name, slot, kcal, iconName = "utensils", tint, onPress
           accessibilityLabel={bookmarked ? `Edit ${name}` : `Save ${name}`}
           hitSlop={10}
           onPress={onBookmark}
-          style={{ paddingLeft: spacing.sm }}
+          style={(s) => ({ paddingLeft: spacing.sm, opacity: s.pressed ? 0.6 : 1 })}
         >
           <Icon name={bookmarked ? "bookmark-fill" : "bookmark"} size={20} color={bookmarked ? glyphOn : glyphOff} />
         </Pressable>

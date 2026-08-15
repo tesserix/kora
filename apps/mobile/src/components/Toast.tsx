@@ -1,8 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Pressable } from "react-native";
-import Animated, { FadeInDown, FadeOutDown } from "react-native-reanimated";
+import Animated, { FadeIn, FadeInDown, FadeOutDown } from "react-native-reanimated";
 import { AppText } from "./Text";
 import { REDUCED_TRANSPARENCY_FALLBACK } from "./instrument/GlassPanel";
+import { useMotionPrefs } from "@/motion";
 import { useTheme } from "@/theme";
 
 type ToastOptions = { message: string; actionLabel?: string; onAction?: () => void; durationMs?: number };
@@ -15,6 +16,7 @@ export function useToast() {
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const { instrument, radius, spacing, shadows, scheme } = useTheme();
+  const { reduceMotion } = useMotionPrefs();
   const [toast, setToast] = useState<ToastOptions | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -36,7 +38,15 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       {toast ? (
         <Animated.View
-          entering={FadeInDown}
+          testID="toast"
+          // The app's primary confirmation surface — and the only place the
+          // 5s Undo window is offered — so it has to announce itself. Without
+          // this a VoiceOver user saving or deleting a meal heard nothing and
+          // the Undo window expired unnoticed.
+          accessibilityLiveRegion="polite"
+          // Reduce Motion keeps the fade and drops the translate; reanimated
+          // would otherwise degrade FadeInDown to an instant pop-in.
+          entering={reduceMotion ? FadeIn.duration(150) : FadeInDown}
           exiting={FadeOutDown}
           style={{
             position: "absolute",
@@ -64,7 +74,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                 toast.onAction?.();
                 dismiss();
               }}
-              style={{ marginLeft: spacing.md }}
+              style={(state) => ({ marginLeft: spacing.md, opacity: state.pressed ? 0.6 : 1 })}
             >
               <AppText style={{ color: instrument.accent, fontWeight: "700" }}>{toast.actionLabel}</AppText>
             </Pressable>

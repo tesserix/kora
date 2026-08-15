@@ -45,6 +45,21 @@ test("shows a message and fires the action", async () => {
   expect(onUndo).toHaveBeenCalledTimes(1);
 });
 
+// kora#175 §6. The toast is the app's primary confirmation surface and the
+// only place the 5s Undo window is offered, so a VoiceOver user saving or
+// deleting a meal used to get no announcement at all — and the Undo window
+// expired unnoticed.
+test("announces itself to assistive tech", async () => {
+  const { getByText, getByTestId } = await render(
+    <ToastProvider><Trigger onUndo={() => {}} /></ToastProvider>,
+  );
+  await act(async () => {
+    fireEvent.press(getByText("go"));
+  });
+  await waitFor(() => getByText("Logged"));
+  expect(getByTestId("toast").props.accessibilityLiveRegion).toBe("polite");
+});
+
 test("clears the auto-dismiss timer on unmount (no setState after unmount)", async () => {
   const { getByText, unmount } = await render(
     <ToastProvider><Trigger onUndo={() => {}} /></ToastProvider>,

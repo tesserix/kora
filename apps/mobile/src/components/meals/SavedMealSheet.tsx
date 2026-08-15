@@ -290,7 +290,7 @@ export function SavedMealSheet({ seed, onClose }: Props) {
             <View key={it.rowId} style={{ gap: spacing.xs }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
                 <AppText style={{ flex: 1 }}>{it.name}</AppText>
-                <Pressable accessibilityLabel={`Remove ${it.name}`} hitSlop={8} onPress={() => removeItem(idx)}>
+                <Pressable accessibilityLabel={`Remove ${it.name}`} hitSlop={8} onPress={() => removeItem(idx)} style={(s) => ({ opacity: s.pressed ? 0.6 : 1 })}>
                   <Icon name="minus" size={20} color={colors.destructive} />
                 </Pressable>
               </View>
@@ -304,7 +304,7 @@ export function SavedMealSheet({ seed, onClose }: Props) {
             </View>
           ))}
         </View>
-        <Pressable accessibilityRole="button" accessibilityLabel="Add ingredient" onPress={() => setPickerOpen(true)}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Add ingredient" onPress={() => setPickerOpen(true)} style={(s) => ({ opacity: s.pressed ? 0.6 : 1 })}>
           <AppText style={{ color: colors.accent, marginTop: spacing.sm }}>+ Add ingredient</AppText>
         </Pressable>
         <FoodPicker title="Add ingredient" visible={pickerOpen} initialQuery="" onSelect={addItem} onClose={() => setPickerOpen(false)} />
@@ -313,7 +313,7 @@ export function SavedMealSheet({ seed, onClose }: Props) {
           <Button accessibilityLabel="Save" title="Save" onPress={save} disabled={pending || !canSave} />
         </View>
         {seed?.mode === "edit" ? (
-          <Pressable onPress={remove} disabled={pending} style={{ marginTop: spacing.md, alignItems: "center" }}>
+          <Pressable onPress={remove} disabled={pending} style={(s) => ({ marginTop: spacing.md, alignItems: "center", opacity: s.pressed ? 0.6 : 1 })}>
             <AppText style={{ color: colors.destructive }}>Delete saved meal</AppText>
           </Pressable>
         ) : null}

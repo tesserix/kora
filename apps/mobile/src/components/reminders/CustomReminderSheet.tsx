@@ -5,6 +5,7 @@ import { Sheet } from "@/components/Sheet";
 import { Button } from "@/components/Button";
 import { AppText } from "@/components/Text";
 import { Overline } from "@/components/Overline";
+import { PressableScale } from "@/motion";
 import { useTheme } from "@/theme";
 import { WeekdayPicker } from "@/components/reminders/WeekdayPicker";
 import { NEW_REMINDER_DEFAULT, type CustomReminder, type Weekday } from "@/reminders/customPrefs";
@@ -81,13 +82,13 @@ export function CustomReminderSheet({ visible, editing, onClose, onSave, onDelet
 
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.xs, marginTop: spacing.sm }}>
           {PRESETS.map((p) => (
-            <Pressable key={p} onPress={() => setLabel(p)} style={chip(false)}>
+            <PressableScale key={p} onPress={() => setLabel(p)} style={chip(false)}>
               <AppText style={{ fontSize: 13, color: instrument.mut }}>{p}</AppText>
-            </Pressable>
+            </PressableScale>
           ))}
         </View>
 
-        <Pressable accessibilityLabel="Reminder time" onPress={() => setShowPicker((s) => !s)} style={{ marginTop: spacing.md, flexDirection: "row", justifyContent: "space-between" }}>
+        <Pressable accessibilityLabel="Reminder time" onPress={() => setShowPicker((open) => !open)} style={(state) => ({ marginTop: spacing.md, flexDirection: "row", justifyContent: "space-between", opacity: state.pressed ? 0.6 : 1 })}>
           <AppText style={{ fontSize: 17, fontWeight: "600", color: instrument.ink }}>Time</AppText>
           <AppText style={{ fontSize: 17, fontWeight: "600", color: instrument.accent }}>{fmt(hour, minute)}</AppText>
         </Pressable>
@@ -112,7 +113,7 @@ export function CustomReminderSheet({ visible, editing, onClose, onSave, onDelet
           <Button title="Save" onPress={save} />
         </View>
         {editing ? (
-          <Pressable onPress={() => onDelete(editing.id)} style={{ marginTop: spacing.md, alignItems: "center" }}>
+          <Pressable onPress={() => onDelete(editing.id)} style={(state) => ({ marginTop: spacing.md, alignItems: "center", opacity: state.pressed ? 0.6 : 1 })}>
             <AppText style={{ color: instrument.danger }}>Delete reminder</AppText>
           </Pressable>
         ) : null}

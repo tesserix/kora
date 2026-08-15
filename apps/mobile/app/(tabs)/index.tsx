@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshControl, ScrollView, StyleSheet, View } from "react-native";
-import Animated, { FadeInDown } from "react-native-reanimated";
+import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { AppText } from "@/components/Text";
@@ -11,7 +11,7 @@ import { PinnedStrip } from "@/components/home/PinnedStrip";
 import { YourUsualStrip } from "@/components/home/YourUsualStrip";
 import { EmptyState } from "@/components/common/EmptyState";
 import { AppBackground } from "@/components/AppBackground";
-import { PressableScale } from "@/motion";
+import { PressableScale, useMotionPrefs } from "@/motion";
 import { GaugeDial } from "@/components/instrument/GaugeDial";
 import { GAUGE_VIEW_H } from "@/components/instrument/gauge";
 import { MacroWide } from "@/components/instrument/MacroWide";
@@ -62,11 +62,20 @@ export default function Home() {
   // React Query background revalidation) update `dashboard`/`logs` in place
   // without unmounting this screen, so `firstMount.current` is already false
   // by the time those re-renders happen and no re-stagger occurs.
+  const { reduceMotion } = useMotionPrefs();
   const firstMount = useRef(true);
   useEffect(() => {
     firstMount.current = false;
   }, []);
-  const enter = (i: number) => (firstMount.current ? FadeInDown.duration(300).delay(i * 30) : undefined);
+  // Reduce Motion keeps the fade and drops the translate. Reanimated 4.5
+  // would otherwise degrade FadeInDown to an instant pop-in, throwing away
+  // the opacity half that is exactly the prescribed fallback.
+  const enter = (i: number) =>
+    firstMount.current
+      ? reduceMotion
+        ? FadeIn.duration(150).delay(i * 30)
+        : FadeInDown.duration(300).delay(i * 30)
+      : undefined;
 
   // Pull to refresh. The error copy below has promised this since the screen was
   // written, and useHealth otherwise only re-reads on foreground/focus — this is

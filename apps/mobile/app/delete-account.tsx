@@ -156,7 +156,10 @@ export default function DeleteAccountScreen() {
           </View>
 
           {error ? (
-            <AppText style={{ fontSize: 14, color: instrument.danger, marginLeft: spacing.md }}>
+            <AppText
+              accessibilityLiveRegion="polite"
+              style={{ fontSize: 14, color: instrument.danger, marginLeft: spacing.md }}
+            >
               {error}
             </AppText>
           ) : null}

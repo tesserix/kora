@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Pressable, StyleSheet, TextInput, View } from "react-native";
 import { AppText } from "@/components/Text";
 import { Icon } from "@/components/Icon";
+import { PressableScale } from "@/motion";
 import { useTheme } from "@/theme";
 import { pluralizeUnit, type ServingUnit } from "@/units/portion";
 
@@ -184,15 +185,15 @@ export function PortionField({ baseUnit, servingUnits, amount, unit, onChange, v
     return (
       <View style={{ gap: spacing.sm }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md }}>
-          <Pressable accessibilityLabel="Decrease amount" hitSlop={8} onPress={decrease} style={stepButtonStyle}>
+          <PressableScale accessibilityLabel="Decrease amount" hitSlop={8} onPress={decrease} style={stepButtonStyle}>
             <Icon name="minus" size={16} color={stepIconColor} />
-          </Pressable>
+          </PressableScale>
           <AppText style={stepperValueStyle}>{stepperLabel}</AppText>
-          <Pressable accessibilityLabel="Increase amount" hitSlop={8} onPress={increase} style={stepButtonStyle}>
+          <PressableScale accessibilityLabel="Increase amount" hitSlop={8} onPress={increase} style={stepButtonStyle}>
             <Icon name="plus" size={16} color={stepIconColor} />
-          </Pressable>
+          </PressableScale>
         </View>
-        <Pressable onPress={enterExactMode}>
+        <Pressable onPress={enterExactMode} style={(state) => ({ opacity: state.pressed ? 0.6 : 1 })}>
           <AppText muted style={{ textAlign: "center" }}>
             Enter exact amount
           </AppText>
@@ -226,7 +227,7 @@ export function PortionField({ baseUnit, servingUnits, amount, unit, onChange, v
           {unitOptions.map((option) => {
             const selected = option === exactUnit;
             return (
-              <Pressable
+              <PressableScale
                 key={option}
                 onPress={() => onExactUnitChange(option)}
                 style={{
@@ -257,7 +258,7 @@ export function PortionField({ baseUnit, servingUnits, amount, unit, onChange, v
                 >
                   {option}
                 </AppText>
-              </Pressable>
+              </PressableScale>
             );
           })}
         </View>

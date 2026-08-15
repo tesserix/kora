@@ -3,6 +3,7 @@ import { Pressable, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { Icon } from "@/components/Icon";
 import { AppText } from "@/components/Text";
+import { PressableScale } from "@/motion";
 import { INSTRUMENT_DARK_FIXED } from "@/theme";
 import {
   PRESS_ARM_MS,
@@ -82,7 +83,11 @@ export function VoiceComposer({ isRecording, onStart, onFinish, onCancel }: Voic
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
       <GestureDetector gesture={pan}>
-        <Pressable
+        {/* PressableScale, not a raw Pressable: PRESS_ARM_MS is 200ms of
+            deliberate nothing before the recording arms, and the press-down
+            scale is what covers it. The arming delay is defensible; the
+            silence was not. */}
+        <PressableScale
           accessibilityRole="button"
           accessibilityLabel={isRecording ? "Stop recording" : "Hold to record"}
           accessibilityHint={
@@ -105,7 +110,7 @@ export function VoiceComposer({ isRecording, onStart, onFinish, onCancel }: Voic
           }}
         >
           <Icon name="mic" size={19} color={T.accentOn} />
-        </Pressable>
+        </PressableScale>
       </GestureDetector>
 
       {isRecording ? (
@@ -116,6 +121,7 @@ export function VoiceComposer({ isRecording, onStart, onFinish, onCancel }: Voic
             stateRef.current = initialVoiceState;
             onCancel();
           }}
+          style={(s) => ({ opacity: s.pressed ? 0.6 : 1 })}
         >
           <AppText style={{ color: T.mut, fontSize: 13, fontWeight: "600" }}>Cancel</AppText>
         </Pressable>

@@ -128,7 +128,7 @@ export function WeightReminderSection(): ReactElement {
           <AppText style={{ flex: 1, fontSize: 17, fontWeight: "600", color: instrument.ink }}>
             Reminder
           </AppText>
-          <Pressable accessibilityLabel="Weight check-in time" onPress={openPicker} disabled={!pref.enabled}>
+          <Pressable accessibilityLabel="Weight check-in time" onPress={openPicker} disabled={!pref.enabled} style={(s) => ({ opacity: s.pressed ? 0.6 : 1 })}>
             <AppText style={{ fontSize: 15, color: instrument.mut, opacity: pref.enabled ? 1 : 0.4 }}>
               {fmt(pref.hour, pref.minute)}
             </AppText>

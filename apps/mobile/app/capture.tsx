@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  AccessibilityInfo,
   Animated,
   AppState,
   Easing,
@@ -33,7 +32,7 @@ import { FoodPicker } from "@/components/meal/FoodPicker";
 import { withAlpha } from "@/lib/color";
 import { useToast } from "@/components/Toast";
 import { INSTRUMENT_DARK_FIXED } from "@/theme";
-import { haptics } from "@/motion";
+import { haptics, PressableScale, useMotionPrefs } from "@/motion";
 import {
   useCreateLog,
   useProfile,
@@ -121,25 +120,15 @@ const ROUND_BUTTON = {
 // freezing at 0deg instead of looping the rotation — mirrors the mockup's
 // `tsx-spin` keyframes and Waveform's reduce-motion pattern.
 function AnalyzingSpinner() {
-  const [reducedMotion, setReducedMotion] = useState(false);
+  // useMotionPrefs, not a mount-only AccessibilityInfo.isReduceMotionEnabled()
+  // query: that read the preference once and never subscribed to
+  // `reduceMotionChanged`, so turning Reduce Motion on mid-session left this
+  // spinning until the next mount. Same fix as Waveform.
+  const { reduceMotion } = useMotionPrefs();
   const rotation = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    let cancelled = false;
-    AccessibilityInfo.isReduceMotionEnabled()
-      .then((enabled) => {
-        if (!cancelled) setReducedMotion(enabled);
-      })
-      .catch(() => {
-        if (!cancelled) setReducedMotion(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (reducedMotion) {
+    if (reduceMotion) {
       rotation.setValue(0);
       return undefined;
     }
@@ -148,7 +137,7 @@ function AnalyzingSpinner() {
     );
     animation.start();
     return () => animation.stop();
-  }, [reducedMotion, rotation]);
+  }, [reduceMotion, rotation]);
 
   const spin = rotation.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
 
@@ -242,7 +231,7 @@ function PermissionDenied({ message, icon, onDescribeInstead }: PermissionDenied
       </AppText>
       {/* Primary action — the only place a re-prompt can come from once iOS
           has denied a permission once, so accent is correct here. */}
-      <Pressable
+      <PressableScale
         accessibilityRole="button"
         accessibilityLabel="Open Settings"
         onPress={() => void Linking.openSettings()}
@@ -254,10 +243,15 @@ function PermissionDenied({ message, icon, onDescribeInstead }: PermissionDenied
         }}
       >
         <AppText style={{ color: T.accentOn, fontWeight: "700", fontSize: 14 }}>Open Settings</AppText>
-      </Pressable>
+      </PressableScale>
       {/* Secondary route — not accent. Text resolution needs no camera, so a
           denied permission still doesn't have to be a dead end. */}
-      <Pressable accessibilityRole="button" accessibilityLabel="Describe it instead" onPress={onDescribeInstead}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Describe it instead"
+        onPress={onDescribeInstead}
+        style={(s) => ({ opacity: s.pressed ? 0.6 : 1 })}
+      >
         <AppText style={{ color: T.mut, fontSize: 13, fontWeight: "600", textDecorationLine: "underline" }}>
           Describe it instead
         </AppText>
@@ -309,7 +303,9 @@ function IdleAffordance({
       );
     }
     return (
-      <Pressable
+      // The app's central action. A raw Pressable here meant the tap had no
+      // acknowledgement at all until the camera fired.
+      <PressableScale
         testID="capture-idle-photo"
         accessibilityRole="button"
         accessibilityLabel="Photo viewfinder"
@@ -332,7 +328,7 @@ function IdleAffordance({
             Tap the viewfinder to capture
           </AppText>
         </View>
-      </Pressable>
+      </PressableScale>
     );
   }
 
@@ -548,9 +544,9 @@ export function CaptureBody({
           paddingTop: insetTop + 8,
         }}
       >
-        <Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={onClose} style={ROUND_BUTTON}>
+        <PressableScale accessibilityRole="button" accessibilityLabel="Close" onPress={onClose} style={ROUND_BUTTON}>
           <Icon name="x" size={20} color={T.ink} />
-        </Pressable>
+        </PressableScale>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
           <Icon name="camera" size={17} color={T.accent} />
           <AppText style={{ color: T.ink, fontWeight: "700" }}>Ask Otto</AppText>
@@ -603,7 +599,7 @@ export function CaptureBody({
                 either way (api.ts), so Cancel is purely for the user who
                 doesn't want to wait; it must never read as the primary
                 action, hence T.mut/T.glass rather than T.accent. */}
-            <Pressable
+            <PressableScale
               testID="capture-cancel-resolve"
               accessibilityRole="button"
               accessibilityLabel="Cancel"
@@ -618,7 +614,7 @@ export function CaptureBody({
               }}
             >
               <AppText style={{ color: T.mut, fontSize: 13, fontWeight: "600" }}>Cancel</AppText>
-            </Pressable>
+            </PressableScale>
           </View>
         )}
 
@@ -678,7 +674,7 @@ export function CaptureBody({
               onCancel={onCancelVoice}
             />
           ) : (
-            <Pressable
+            <PressableScale
               accessibilityRole="button"
               accessibilityLabel={COMPOSER_BUTTON[mode].label}
               onPress={mode === "type" ? () => composerFieldRef.current?.focus() : onCapturePhoto}
@@ -692,7 +688,7 @@ export function CaptureBody({
               }}
             >
               <Icon name={COMPOSER_BUTTON[mode].icon} size={19} color={T.accentOn} />
-            </Pressable>
+            </PressableScale>
           )}
           {/* Typing is only an input in photo/type. In voice and scan the middle
               is static guidance, so there is no dead field to tab into. */}
@@ -713,7 +709,7 @@ export function CaptureBody({
           )}
           {/* Send — resolves the typed phrase via useResolveText. */}
           {showsTextField ? (
-          <Pressable
+          <PressableScale
             accessibilityRole="button"
             accessibilityLabel="Send"
             accessibilityState={{ disabled: !text.trim() }}
@@ -729,7 +725,7 @@ export function CaptureBody({
             }}
           >
             <Icon name="arrow-up" size={19} color={text.trim() ? T.accentOn : T.ink} />
-          </Pressable>
+          </PressableScale>
           ) : null}
         </View>
       </View>

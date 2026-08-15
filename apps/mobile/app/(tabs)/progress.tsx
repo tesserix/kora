@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ScrollView, StyleSheet, View } from "react-native";
-import Animated, { FadeInDown } from "react-native-reanimated";
+import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppText } from "@/components/Text";
 import { AppBackground } from "@/components/AppBackground";
@@ -18,7 +18,7 @@ import { LoadErrorNotice } from "@/components/common/LoadErrorNotice";
 import { useAvgIntake7d, useDashboard, useProfile, useWeightSeries } from "@/api/hooks";
 import type { WeightEntry } from "@/api/types";
 import { useHealth } from "@/health";
-import { AnimatedNumber, PressableScale } from "@/motion";
+import { AnimatedNumber, PressableScale, useMotionPrefs } from "@/motion";
 import { useTheme } from "@/theme";
 import { formatWeight, lbFromKg, useUnits, weightUnitLabel } from "@/units";
 
@@ -94,11 +94,20 @@ export default function Progress() {
   // Entrance stagger runs on first mount only — see app/(tabs)/index.tsx for the
   // same guard and rationale (range switches / refetches update in place here,
   // no re-stagger on those).
+  const { reduceMotion } = useMotionPrefs();
   const firstMount = useRef(true);
   useEffect(() => {
     firstMount.current = false;
   }, []);
-  const enter = (i: number) => (firstMount.current ? FadeInDown.duration(300).delay(i * 30) : undefined);
+  // Reduce Motion keeps the fade and drops the translate. Reanimated 4.5
+  // would otherwise degrade FadeInDown to an instant pop-in, throwing away
+  // the opacity half that is exactly the prescribed fallback.
+  const enter = (i: number) =>
+    firstMount.current
+      ? reduceMotion
+        ? FadeIn.duration(150).delay(i * 30)
+        : FadeInDown.duration(300).delay(i * 30)
+      : undefined;
 
   const mono = monoStyle(fonts);
   // Sentence case, not engraved — same convention as Diary's "Day total"/"Water"

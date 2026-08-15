@@ -64,7 +64,10 @@ export function CopyDaySheet({ visible, targetDate, onClose }: CopyDaySheetProps
                 accessibilityLabel={`Copy from ${dISO}`}
                 disabled={copyDay.isPending}
                 onPress={() => onPick(dISO)}
-                style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 12, paddingHorizontal: 16, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, opacity: copyDay.isPending ? 0.5 : 1 }}
+                // Stays a raw Pressable rather than a PressableScale: the row
+                // already owns its own opacity (dimmed while a copy is in
+                // flight), and the pressed state folds into the same value.
+                style={(state) => ({ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 12, paddingHorizontal: 16, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, opacity: copyDay.isPending ? 0.5 : state.pressed ? 0.6 : 1 })}
               >
                 <AppText style={{ fontSize: 15, fontWeight: "600" }}>{DOW[d.getDay()]}</AppText>
                 <AppText muted style={{ fontSize: 13 }}>{dISO}</AppText>

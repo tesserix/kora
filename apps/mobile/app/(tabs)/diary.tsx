@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View } from "react-native";
-import Animated, { FadeInDown } from "react-native-reanimated";
+import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 import Swipeable from "react-native-gesture-handler/ReanimatedSwipeable";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
@@ -19,7 +19,7 @@ import { useSavedMealEditor } from "@/components/meals/SavedMealSheetProvider";
 import { useDashboard, useDayLogs, useAddWater, useDeleteLog } from "@/api/hooks";
 import { useQueuedLogs } from "@/offline/useQueuedLogs";
 import { useQueuedCaptures } from "@/offline/useQueuedCaptures";
-import { PressableScale, haptics } from "@/motion";
+import { PressableScale, haptics, useMotionPrefs } from "@/motion";
 import { useTheme } from "@/theme";
 import { hslToHex } from "@/lib/color";
 import { monoStyle } from "@/components/instrument/typography";
@@ -187,11 +187,20 @@ export default function Diary() {
 
   // Entrance stagger runs on first mount only — see app/(tabs)/index.tsx for the
   // same guard and rationale (refetches update data in place, no re-stagger).
+  const { reduceMotion } = useMotionPrefs();
   const firstMount = useRef(true);
   useEffect(() => {
     firstMount.current = false;
   }, []);
-  const enter = (i: number) => (firstMount.current ? FadeInDown.duration(300).delay(i * 30) : undefined);
+  // Reduce Motion keeps the fade and drops the translate. Reanimated 4.5
+  // would otherwise degrade FadeInDown to an instant pop-in, throwing away
+  // the opacity half that is exactly the prescribed fallback.
+  const enter = (i: number) =>
+    firstMount.current
+      ? reduceMotion
+        ? FadeIn.duration(150).delay(i * 30)
+        : FadeInDown.duration(300).delay(i * 30)
+      : undefined;
 
   const addWaterMl = (volume_ml: number) => {
     setWaterErr(null);
@@ -377,10 +386,10 @@ export default function Diary() {
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 10 }}>
             <AppText>{`${selectedIds.length} selected`}</AppText>
             <View style={{ flexDirection: "row", gap: 16 }}>
-              <Pressable accessibilityRole="button" onPress={() => setSelectedIds([])}>
+              <Pressable accessibilityRole="button" onPress={() => setSelectedIds([])} style={(s) => ({ opacity: s.pressed ? 0.6 : 1 })}>
                 <AppText>Cancel</AppText>
               </Pressable>
-              <Pressable accessibilityRole="button" onPress={saveSelectionAsMeal}>
+              <Pressable accessibilityRole="button" onPress={saveSelectionAsMeal} style={(s) => ({ opacity: s.pressed ? 0.6 : 1 })}>
                 <AppText style={{ color: instrument.ink, fontWeight: "600" }}>Save as meal</AppText>
               </Pressable>
             </View>
@@ -450,7 +459,10 @@ export default function Diary() {
                   </View>
                 </View>
                 {waterErr ? (
-                  <AppText style={{ color: colors.destructive, marginTop: 8 }}>{waterErr}</AppText>
+                  // Announced, not just drawn: this is the only signal the tap
+                  // failed, and it is the same live-region treatment the other
+                  // inline errors in the app already use.
+                  <AppText accessibilityLiveRegion="polite" style={{ color: colors.destructive, marginTop: 8 }}>{waterErr}</AppText>
                 ) : null}
               </View>
             </GlassPanel>

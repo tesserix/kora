@@ -199,6 +199,12 @@ jest.mock("react-native-reanimated", () => {
       callback?.(true);
       return toValue;
     },
+    // Returns the LAST animation in the chain, matching the value the sequence
+    // ultimately settles on. Each argument has already been constructed by the
+    // withTiming/withSpring stubs above, so their callbacks have already run —
+    // which is what makes a mid-sequence callback (AnimatedNumber's display
+    // swap, GaugeDial's fraction snap) observable under Jest.
+    withSequence: (...animations) => animations[animations.length - 1],
     cancelAnimation: NOOP,
     runOnJS: ID,
     Easing: {
@@ -214,6 +220,14 @@ jest.mock("react-native-reanimated", () => {
     // animates anything — it's just a prop that must not throw when constructed via
     // its real chainable API (`FadeInDown.duration(300).delay(30)`). This stub
     // mirrors that chaining surface, returning itself so any call order resolves.
+    FadeIn: (() => {
+      const builder = {
+        duration: () => builder,
+        delay: () => builder,
+        springify: () => builder,
+      };
+      return builder;
+    })(),
     FadeInDown: (() => {
       const builder = {
         duration: () => builder,
