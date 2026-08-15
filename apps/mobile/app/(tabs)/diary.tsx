@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, View } from "react-native";
 import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 import Swipeable from "react-native-gesture-handler/ReanimatedSwipeable";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -10,7 +10,10 @@ import { Icon } from "@/components/Icon";
 import { GroupedSection, Row } from "@/components/GroupedList";
 import { MealRow } from "@/components/MealRow";
 import { Badge } from "@/components/Badge";
-import { GlassPanel } from "@/components/instrument/GlassPanel";
+import { ZoneRule } from "@/components/instrument/BezelCluster";
+import { WeekRail, type WeekRailDay } from "@/components/diary/WeekRail";
+import { DayTotalCluster, WATER_QUICK_ADDS } from "@/components/diary/DayTotalCluster";
+import { formatSlotLabel } from "@/components/diary/slotLabel";
 import { CopyDaySheet } from "@/components/diary/CopyDaySheet";
 import { QueuedFailedSheet } from "@/components/diary/QueuedFailedSheet";
 import { EmptyState } from "@/components/common/EmptyState";
@@ -22,8 +25,7 @@ import { useQueuedCaptures } from "@/offline/useQueuedCaptures";
 import { PressableScale, haptics, useMotionPrefs } from "@/motion";
 import { useTheme } from "@/theme";
 import { hslToHex } from "@/lib/color";
-import { monoStyle } from "@/components/instrument/typography";
-import { useUnits, mlToFlOz, flOzToMl, type UnitSystem } from "@/units";
+import { useUnits, mlToFlOz } from "@/units";
 import { formatPortion } from "@/units/portion";
 import { foodVisual } from "@/lib/foodVisual";
 import { accessibleMealLabel } from "@/lib/portionAssumedLabel";
@@ -46,105 +48,8 @@ function weekDates(): Date[] {
 const iso = (d: Date) => d.toLocaleDateString("en-CA");
 const timeOf = (s: string) => new Date(s).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
-type WeekDayCellProps = {
-  date: Date;
-  dow: string;
-  selected: boolean;
-  today: boolean;
-  hitGoal: boolean;
-  onSelect: () => void;
-};
-
-// A single week-strip day per the instrument-glass spec (§Screens.2): weekday
-// caption + mono day number + a 4pt goal-hit pip. The selected day gets the
-// "glass cell" look (instrument.glass fill + glassBorder ring) — no other
-// affordance distinguishes it, so this is load-bearing, not decorative.
-function WeekDayCell({ date, dow, selected, today, hitGoal, onSelect }: WeekDayCellProps) {
-  const { instrument, fonts } = useTheme();
-  const mono = monoStyle(fonts);
-  const dISO = iso(date);
-
-  return (
-    <PressableScale
-      accessibilityRole="button"
-      accessibilityLabel={dISO}
-      accessibilityState={{ selected }}
-      haptic="selection"
-      onPress={onSelect}
-      testID={`week-cell-${dISO}`}
-      style={{
-        flex: 1,
-        alignItems: "center",
-        gap: 5,
-        paddingVertical: 8,
-        borderRadius: 14,
-        backgroundColor: selected ? instrument.glass : "transparent",
-        borderWidth: selected ? StyleSheet.hairlineWidth : 0,
-        borderColor: instrument.glassBorder,
-      }}
-    >
-      <AppText style={{ fontSize: 11, color: instrument.mut }}>{dow}</AppText>
-      <AppText style={[{ fontSize: 15, fontWeight: "600", color: today || selected ? instrument.ink : instrument.mut }, mono]}>
-        {date.getDate()}
-      </AppText>
-      <View
-        testID={`week-pip-${dISO}`}
-        style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: hitGoal ? instrument.accent : instrument.tick }}
-      />
-    </PressableScale>
-  );
-}
-
-type WaterPillProps = { label: string; a11yLabel: string; disabled: boolean; onPress: () => void };
-
-// Green-turned-accent pill matching the mock's `.waterbtns`. `label` ("+250 ml"
-// / "+8 fl oz") and `a11yLabel` ("Add 250 ml water" / "Add 8 fl oz water") are
-// unit-aware and load-bearing for tests.
-function WaterPill({ label, a11yLabel, disabled, onPress }: WaterPillProps) {
-  const { instrument } = useTheme();
-  return (
-    <PressableScale
-      accessibilityRole="button"
-      accessibilityLabel={a11yLabel}
-      accessibilityState={{ disabled }}
-      haptic="impactLight"
-      disabled={disabled}
-      onPress={onPress}
-      style={{
-        flex: 1,
-        alignItems: "center",
-        justifyContent: "center",
-        paddingVertical: 13,
-        borderRadius: 16,
-        backgroundColor: instrument.inset,
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: instrument.glassBorder,
-        opacity: disabled ? 0.5 : 1,
-      }}
-    >
-      <AppText style={{ color: instrument.ink, fontWeight: "700" }}>{label}</AppText>
-    </PressableScale>
-  );
-}
-
-type WaterQuickAdd = { ml: number; label: string; a11yLabel: string };
-
-// Quick-add amounts per unit system. Metric: 250/500 ml. Imperial: a cup (8 fl oz)
-// and a large glass (16 fl oz), stored as their rounded ml equivalents (the backend
-// is always ml). Metric labels/a11y are preserved verbatim for existing tests.
-const WATER_QUICK_ADDS: Record<UnitSystem, readonly WaterQuickAdd[]> = {
-  metric: [
-    { ml: 250, label: "+250 ml", a11yLabel: "Add 250 ml water" },
-    { ml: 500, label: "+500 ml", a11yLabel: "Add 500 ml water" },
-  ],
-  imperial: [
-    { ml: Math.round(flOzToMl(8)), label: "+8 fl oz", a11yLabel: "Add 8 fl oz water" },
-    { ml: Math.round(flOzToMl(16)), label: "+16 fl oz", a11yLabel: "Add 16 fl oz water" },
-  ],
-};
-
 export default function Diary() {
-  const { colors, spacing, instrument, fonts } = useTheme();
+  const { colors, spacing, instrument } = useTheme();
   const { system } = useUnits();
   const insets = useSafeAreaInsets();
   const week = weekDates();
@@ -361,18 +266,25 @@ export default function Diary() {
   // reserve figure before the dashboard has resolved.
   const missingSlot = !loadError && !pending && !isEmptyDay ? SLOT_ORDER.find((slot) => !slots.some((g) => g.slot === slot)) : undefined;
 
-  const mono = monoStyle(fonts);
-  // The four slot headers below (Breakfast/Lunch/Dinner/Snack, at most) ARE
-  // this screen's engraved zone (spec's ~4-visible-label budget) — every other
-  // caption on this screen is sentence-case muted text, not engraved.
-  const engraved = {
-    fontSize: 10,
-    letterSpacing: 1.4,
-    textTransform: "uppercase" as const,
-    fontWeight: "600" as const,
-    color: instrument.mut,
-  };
-  const mutedLabel = { fontSize: 11, color: instrument.mut };
+  // Day-total figure, water readout and the per-slot ZoneRule labels (at most
+  // four visible at once: Breakfast/Lunch/Dinner/Snack) are this screen's
+  // engraved zone (spec's ~4-visible-label budget) — everything else stays
+  // sentence-case muted text.
+  const waterLabel = unknownTotals
+    ? "—"
+    : `${system === "imperial" ? Math.round(water.value) : water.value.toFixed(1)} ${water.unit}`;
+
+  const weekDays: WeekRailDay[] = week.map((date) => {
+    const dISO = iso(date);
+    return {
+      date,
+      dow: DOW[date.getDay()],
+      iso: dISO,
+      selected: dISO === selected,
+      today: dISO === todayIso,
+      hitGoal: dISO === selected && hitGoal,
+    };
+  });
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -396,87 +308,38 @@ export default function Diary() {
           </View>
         ) : null}
 
-        <Animated.View entering={enter(1)} style={{ flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingBottom: 8 }}>
-          {week.map((date) => {
-            const dISO = iso(date);
-            return (
-              <WeekDayCell
-                key={dISO}
-                date={date}
-                dow={DOW[date.getDay()]}
-                selected={dISO === selected}
-                today={dISO === todayIso}
-                hitGoal={dISO === selected && hitGoal}
-                onSelect={() => selectDay(dISO)}
-              />
-            );
-          })}
+        <Animated.View entering={enter(1)} style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
+          <WeekRail days={weekDays} onSelectDay={selectDay} />
         </Animated.View>
 
         <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
           {/* Same explicit-error surface Home carries, with a Retry because this
               screen has no pull-to-refresh to point the copy at. */}
           {loadError ? <LoadErrorNotice message="Couldn't load your day." onRetry={retry} /> : null}
-          <Animated.View entering={enter(2)}>
-            <GlassPanel radius={20} style={{ marginBottom: 16 }} testID="day-total">
-              <View style={{ padding: 16 }}>
-                <AppText style={mutedLabel}>Day total</AppText>
-                {unknownTotals ? (
-                  <AppText style={[{ fontSize: 22, color: instrument.mut, marginTop: 4 }, mono]}>—</AppText>
-                ) : (
-                  <View style={{ flexDirection: "row", alignItems: "baseline", marginTop: 4 }}>
-                    <AppText style={[{ fontSize: 17, fontWeight: "600", color: instrument.ink }, mono]}>{total}</AppText>
-                    <AppText style={[{ fontSize: 13, color: instrument.mut }, mono]}>{` / ${Math.round(goal).toLocaleString()} kcal`}</AppText>
-                  </View>
-                )}
-                {/* Hidden outright on error, the way Home hides its gauge: an empty
-                    track is still a claim — "0% of your goal" — about a day we
-                    could not load. While merely pending it stays, at 0%, as the
-                    placeholder for a figure that is about to arrive. */}
-                {dashError ? null : (
-                  <View style={{ height: 6, borderRadius: 3, backgroundColor: instrument.inset, overflow: "hidden", marginTop: 10 }}>
-                    <View style={{ height: "100%", width: `${pending ? 0 : pct}%`, backgroundColor: instrument.accent, borderRadius: 3 }} />
-                  </View>
-                )}
-
-                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 16 }}>
-                  <View>
-                    <AppText style={mutedLabel}>Water</AppText>
-                    <AppText style={[{ fontSize: 15, fontWeight: "600", color: instrument.ink, marginTop: 2 }, mono]}>
-                      {unknownTotals ? "—" : `${system === "imperial" ? Math.round(water.value) : water.value.toFixed(1)} ${water.unit}`}
-                    </AppText>
-                  </View>
-                  <View style={{ flexDirection: "row", gap: 8, flex: 1, marginLeft: 16 }}>
-                    {waterQuickAdds.map((qa) => (
-                      <WaterPill
-                        key={qa.ml}
-                        label={qa.label}
-                        a11yLabel={qa.a11yLabel}
-                        disabled={addWater.isPending}
-                        onPress={() => addWaterMl(qa.ml)}
-                      />
-                    ))}
-                  </View>
-                </View>
-                {waterErr ? (
-                  // Announced, not just drawn: this is the only signal the tap
-                  // failed, and it is the same live-region treatment the other
-                  // inline errors in the app already use.
-                  <AppText accessibilityLiveRegion="polite" style={{ color: colors.destructive, marginTop: 8 }}>{waterErr}</AppText>
-                ) : null}
-              </View>
-            </GlassPanel>
+          <Animated.View entering={enter(2)} style={{ marginBottom: 24 }}>
+            <DayTotalCluster
+              testID="day-total"
+              unknownTotals={unknownTotals}
+              dashError={dashError}
+              total={total}
+              goal={goal}
+              pct={pending ? 0 : pct}
+              waterLabel={waterLabel}
+              waterQuickAdds={waterQuickAdds}
+              addWaterDisabled={addWater.isPending}
+              onAddWater={addWaterMl}
+              waterErr={waterErr}
+              destructiveColor={colors.destructive}
+            />
           </Animated.View>
 
+          {/* Meal log stays OUTSIDE the day-total cluster (spec Step 4): each
+              slot is a zone-ruled hairline section directly on the ground,
+              not another glass panel. */}
           {slots.map((group, gi) => (
-            <Animated.View key={group.slot} entering={enter(4 + gi)}>
-              <GlassPanel radius={20} style={{ marginBottom: 16 }}>
-                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 14, paddingBottom: 8 }}>
-                  <AppText style={engraved}>{group.slot.toUpperCase()}</AppText>
-                  <AppText style={[{ fontSize: 13, fontWeight: "600", color: instrument.ink }, mono]}>
-                    {`${slotKcal(group)} kcal`}
-                  </AppText>
-                </View>
+            <Animated.View key={group.slot} entering={enter(4 + gi)} style={{ marginBottom: 20 }}>
+              <ZoneRule label={formatSlotLabel(group.slot, slotKcal(group))} />
+              <View style={{ paddingTop: 10 }}>
                 {group.captures.map((c) => {
                   const failed = c.status === "failed";
                   const pendingCapture = c.status === "pending";
@@ -573,7 +436,7 @@ export default function Diary() {
                     </Swipeable>
                   );
                 })}
-              </GlassPanel>
+              </View>
             </Animated.View>
           ))}
 

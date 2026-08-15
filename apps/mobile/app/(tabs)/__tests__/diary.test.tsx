@@ -110,7 +110,7 @@ afterEach(() => {
 test("Diary shows header, week strip and a logged meal grouped by slot", async () => {
   const { findByText } = await render(<Diary />);
   expect(await findByText("Diary")).toBeTruthy();
-  expect(await findByText("DINNER")).toBeTruthy();
+  expect(await findByText("DINNER · 520 KCAL")).toBeTruthy();
   expect(await findByText("Grilled salmon")).toBeTruthy();
 });
 
@@ -272,7 +272,7 @@ test("a pending queued row appears in its own slot with a Pending badge", async 
   mockQueuedRows = [queuedRow()];
   const { findByText, getByText } = await render(<Diary />);
 
-  expect(await findByText("LUNCH")).toBeTruthy();
+  expect(await findByText("LUNCH · 93 KCAL")).toBeTruthy();
   getByText("Greek yogurt");
   getByText("Pending");
   getByText("Waiting to sync");
@@ -364,7 +364,7 @@ test("a queued row the server already has is rendered once, not twice", async ()
   mockQueuedRows = [queuedRow({ id: "dup", description: "Greek yogurt", kcal: 93 })];
 
   const { findByText, getAllByText, queryByText } = await render(<Diary />);
-  await findByText("LUNCH");
+  await findByText("LUNCH · 93 KCAL");
 
   expect(getAllByText("Greek yogurt")).toHaveLength(1);
   // And the survivor is the SERVER row, not the queued copy.
@@ -554,24 +554,26 @@ test("the selected week-strip day gets the glass-cell look and others do not", a
   expect(otherStyle.borderWidth ?? 0).toBe(0);
 });
 
-test("a week-strip day that hit its kcal goal shows an accent pip", async () => {
+// Goal pips are demoted to lit-ink (spec 2026-08-16 "Diary recomposition" —
+// accent budget): the day-total track is Diary's ONE accent, so a met goal
+// lights the pip in tickLit, never the accent orange.
+test("a week-strip day that hit its kcal goal shows a tickLit (non-accent) pip", async () => {
   mockDashboardData = { consumed: { kcal: 2000 }, targets: { kcal: 2000 }, water_ml: 0 };
   const { getByTestId } = await render(<Diary />);
 
   const todayIso = isoOf(new Date());
   const pipStyle = flatten(getByTestId(`week-pip-${todayIso}`).props.style);
-  // Against the token, not a literal: what this test means is "a met goal is
-  // painted in the accent", and the accent's value is now scheme-specific
-  // (kora#167 — light had to darken to clear AA on the CTA label).
-  expect(pipStyle.backgroundColor).toBe(instrumentLight.accent);
+  expect(pipStyle.backgroundColor).toBe(instrumentLight.tickLit);
+  expect(pipStyle.backgroundColor).not.toBe(instrumentLight.accent);
 });
 
-test("a week-strip day under its kcal goal shows a tick (non-accent) pip", async () => {
+test("a week-strip day under its kcal goal shows a dim tick pip", async () => {
   const { getByTestId } = await render(<Diary />);
 
   const todayIso = isoOf(new Date());
   const pipStyle = flatten(getByTestId(`week-pip-${todayIso}`).props.style);
-  expect(pipStyle.backgroundColor).not.toBe("#FF4A00");
+  expect(pipStyle.backgroundColor).toBe(instrumentLight.tick);
+  expect(pipStyle.backgroundColor).not.toBe(instrumentLight.accent);
 });
 
 test("the day-total row shows mono eaten / target", async () => {
