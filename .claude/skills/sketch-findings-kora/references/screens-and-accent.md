@@ -50,6 +50,10 @@ direction of travel (~280ms ease-out), fired just after the dock well starts mov
   scaling; give the gauge overlay overflow clearance at large sizes.
 - "≈ Portion is a guess" is a TRUST DISCLOSURE: ≥11px sentence case with the ≈ mark —
   never 9px engraved styling.
+  **OPEN DEBT (final review 2026-08-16):** still rendered 9px/uppercase/engraved at
+  index.tsx meal rows, MealRow.tsx, meal.tsx, DetectedCard.tsx, RecipeParseSheet.tsx —
+  pre-existing, deliberately left out of the Ignition branch's scope. First UI pass that
+  touches any of these files must apply this contract.
 
 ## What to Avoid
 - Everything-in-one-cluster Diary (rejected); equal-thirds macro cards; orange goal

@@ -41,6 +41,11 @@
     color-mix(in srgb, #000 22%, var(--accent)) 100%); }
 ```
 
+**As-built drift (accepted, final review 2026-08-16):** the shipped capture button is
+52px (not 56) and keeps the pre-existing `impactLight` haptic (not impactMedium) —
+matches current dock proportions and the existing haptic vocabulary. This file's sizes
+are the design intent; the code is the shipping truth until revisited.
+
 ## What to Avoid
 - The bg-ring notch trick over blur; label-on-active-only; ambiguous glyphs;
   floating flat-orange FAB (the pre-redesign look the user called ordinary).
