@@ -67,7 +67,24 @@ export function VoiceComposer({ isRecording, onStart, onFinish, onCancel }: Voic
     }
   }
 
+  // runOnJS(true) is what stops this crashing the app.
+  //
+  // With Reanimated installed, RNGH runs gesture callbacks on the UI thread as
+  // worklets by default. Every callback below reaches plain JS: `send` closes
+  // over React callbacks, `clearArmTimer` mutates a ref, and `setTimeout` is a
+  // JS-runtime API. Invoking any of those from a worklet tears down the UI
+  // runtime — the app dies the moment the mic is touched.
+  //
+  // TickRuler solves the same problem the other way, wrapping each call in
+  // runOnJS(...). Here the ENTIRE gesture is JS-side glue over a pure reducer,
+  // so flipping the whole gesture is simpler and leaves no callback able to
+  // drift back onto the UI thread later.
+  //
+  // Jest cannot catch this: RNGH is mocked, so a synthesised pan exercises the
+  // mock rather than the worklet boundary — this file's own comment says as
+  // much. It is the third UI-runtime crash of this shape in this codebase.
   const pan = Gesture.Pan()
+    .runOnJS(true)
     .onBegin(() => {
       send({ type: "press" });
       clearArmTimer();
