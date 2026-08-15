@@ -2,7 +2,12 @@ import { act, fireEvent, render as rtlRender, waitFor } from "@testing-library/r
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as ImagePicker from "expo-image-picker";
 import { useCameraPermissions } from "expo-camera";
-import { requestRecordingPermissionsAsync, useAudioRecorder } from "expo-audio";
+import { requestRecordingPermissionsAsync, setAudioModeAsync, useAudioRecorder } from "expo-audio";
+import { reportError } from "@/observability/reporter";
+
+// Mocked so a start failure can be asserted as REPORTED, not merely displayed
+// — kora#186 was invisible precisely because the error went nowhere.
+jest.mock("@/observability/reporter", () => ({ reportError: jest.fn() }));
 import { router } from "expo-router";
 import { ApiError, AuthTokenError, NetworkError, ResponseParseError } from "@/lib/api";
 import type { FoodItem, Resolution } from "@/api/types";
@@ -309,6 +314,8 @@ function makeMixedCertaintyResolution(): Resolution {
 }
 
 const noopBodyProps = {
+  excluded: new Set<number>(),
+  onToggleExclude: () => {},
   displayName: "Alex",
   insetTop: 0,
   insetBottom: 0,
@@ -809,6 +816,52 @@ describe("Voice mode", () => {
     expect(await findByText(/describe it instead/i)).toBeTruthy();
     expect(recorder.record).not.toHaveBeenCalled();
     expect(mockResolveVoiceMutate).not.toHaveBeenCalled();
+  });
+
+  // kora#186. The app never called setAudioModeAsync anywhere, so on iOS the
+  // audio session stayed in a playback category and prepareToRecordAsync threw
+  // the moment the user granted the mic permission — "now it asked for
+  // permission but seeing something went wrong starting recording once i
+  // allowed". Voice capture could not have worked on a device at all.
+  //
+  // Pinned by ORDER, not just by call: configuring the session after prepare
+  // would satisfy a mere "was it called" assertion and still be broken.
+  test("the audio session is put into recording mode before prepare", async () => {
+    const recorder = makeRecorder();
+    (useAudioRecorder as jest.Mock).mockReturnValue(recorder);
+    const order: string[] = [];
+    (setAudioModeAsync as jest.Mock).mockImplementation(async () => {
+      order.push("setAudioMode");
+    });
+    recorder.prepareToRecordAsync.mockImplementation(async () => {
+      order.push("prepare");
+    });
+
+    const { findByText, findByLabelText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Voice"));
+    await fireEvent.press(await findByLabelText("Hold to record"));
+
+    await waitFor(() => expect(recorder.record).toHaveBeenCalled());
+    expect(setAudioModeAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ allowsRecording: true, playsInSilentMode: true }),
+    );
+    expect(order).toEqual(["setAudioMode", "prepare"]);
+  });
+
+  test("a failure to start recording is surfaced and reported, not swallowed", async () => {
+    const recorder = makeRecorder();
+    (useAudioRecorder as jest.Mock).mockReturnValue(recorder);
+    recorder.prepareToRecordAsync.mockRejectedValueOnce(new Error("session busy"));
+
+    const { findByText, findByLabelText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Voice"));
+    await fireEvent.press(await findByLabelText("Hold to record"));
+
+    expect(await findByText(/went wrong starting the recording/i)).toBeTruthy();
+    // The `catch {}` that used to be here discarded the only evidence of WHY,
+    // which is why this reached a device as an unexplained message.
+    await waitFor(() => expect(reportError).toHaveBeenCalled());
+    expect(recorder.record).not.toHaveBeenCalled();
   });
 
   test("a successful voice resolve renders the DetectedCard", async () => {

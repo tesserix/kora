@@ -45,11 +45,19 @@ interface Props {
   onAdd: () => void;
   adding: boolean;
   /**
-   * Asked when the user taps an uncertain row, with that row's index in
-   * `resolution.candidates`. When absent the row still reads as uncertain but
-   * is not pressable — the card never resolves anything on its own.
+   * Asked when the user taps a row's "Change" button, with that row's index in
+   * `resolution.candidates`. When absent the button is not rendered — the card
+   * never resolves anything on its own.
    */
   onResolveUncertain?: (index: number) => void;
+  /**
+   * Indices the user has unchecked. Held by the screen rather than the card so
+   * it survives a re-render and stays the single source of truth for what
+   * `onAdd` will actually write — a card-local copy could disagree with the
+   * diary, which is the one place this must not drift.
+   */
+  excluded: ReadonlySet<number>;
+  onToggleExclude: (index: number) => void;
 }
 
 const MEAL_SLOTS: ReadonlyArray<{ slot: MealSlot; label: string; icon: string }> = [
@@ -87,10 +95,14 @@ function MacroChip({ label, per100g }: { label: string; per100g: number }) {
 function CandidateRow({
   candidate,
   isLast,
+  included,
+  onToggleInclude,
   onResolve,
 }: {
   candidate: ResolvedCandidate;
   isLast: boolean;
+  included: boolean;
+  onToggleInclude: () => void;
   onResolve?: () => void;
 }) {
   const { icon } = foodVisual(candidate.item.name);
@@ -106,7 +118,7 @@ function CandidateRow({
   // preselected row, and print a fabricated "0 kcal" for a hand-picked one.
   const showsKcal = contributesKcal(candidate);
 
-  const body = (
+  return (
     <View
       style={{
         flexDirection: "row",
@@ -117,19 +129,45 @@ function CandidateRow({
         borderBottomColor: T.hairline,
       }}
     >
-      <View
-        style={{
+      {/* This tile used to be a STATUS glyph — a food icon, or `help-circle`
+          for a low-confidence row — and testers read it as an unchecked radio
+          button (kora#183). On an all-uncertain result the card rendered as a
+          column of apparently-empty selection controls, then logged every one
+          of them regardless.
+
+          Rather than restyle the false affordance away, it is now the real
+          control it already looked like. That was the right way round because
+          the underlying need is genuine: a photo of a plate legitimately
+          detects things you do not want in your diary, and before this the
+          only way to drop one was to log it and delete it afterwards. */}
+      <Pressable
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: included }}
+        accessibilityLabel={candidate.item.name}
+        accessibilityHint={included ? "Excludes this item from the diary" : "Includes this item in the diary"}
+        onPress={onToggleInclude}
+        // 38px visual, but hitSlop takes the touch target past the 44px
+        // minimum without changing the row's rhythm.
+        hitSlop={6}
+        style={(state) => ({
           width: 38,
           height: 38,
           borderRadius: 8,
           alignItems: "center",
           justifyContent: "center",
           flexShrink: 0,
-          backgroundColor: T.inset,
-        }}
+          backgroundColor: included ? T.accent : T.inset,
+          borderWidth: included ? 0 : 1,
+          borderColor: T.glassBorder,
+          opacity: state.pressed ? 0.6 : 1,
+        })}
       >
-        <Icon name={uncertain ? "help-circle" : icon} size={18} color={T.ink} />
-      </View>
+        <Icon
+          name={included ? "check" : uncertain ? "help-circle" : icon}
+          size={18}
+          color={included ? T.accentOn : T.mut}
+        />
+      </Pressable>
       <View style={{ flex: 1, minWidth: 0 }}>
         <AppText style={{ color: T.ink, fontSize: 15, fontWeight: "600" }}>
           {candidate.item.name}
@@ -139,9 +177,9 @@ function CandidateRow({
             the user cannot act on. The weak row states the same portion plus
             where it came from and what to do about it, because it is about to
             be logged on the user's behalf unless they intervene. */}
-        <AppText style={[{ color: T.mut, fontSize: 11 }, mono]}>
+        <AppText style={[{ color: uncertain ? T.ink : T.mut, fontSize: 12 }, mono]}>
           {uncertain
-            ? `${formatPortion(portionEntryFor(candidate.portion_grams, candidate.item.base_unit, candidate.item.serving_units))} · Best guess — tap to change`
+            ? `${formatPortion(portionEntryFor(candidate.portion_grams, candidate.item.base_unit, candidate.item.serving_units))} · Best guess`
             : formatPortion(portionEntryFor(candidate.portion_grams, candidate.item.base_unit, candidate.item.serving_units))}
         </AppText>
         {candidate.portion_assumed ? (
@@ -168,6 +206,40 @@ function CandidateRow({
             <MacroChip label="F" per100g={candidate.item.fat_per_100g} />
           </View>
         )}
+        {/* The correction path used to be the words "tap to change" appended to
+            the portion line: 11px, `mut` grey, mono, third line of the row —
+            while the accent-filled CTA offered to log the guess. An
+            experienced tester of this app read the row and did not know it was
+            tappable (kora#181). A hint that has to be read is not an
+            affordance; this is a real bordered control.
+
+            Offered on EVERY row, not just uncertain ones. A confident match
+            can still be the wrong food, and previously such a row was not
+            pressable at all, so there was no way to correct it OR remove it. */}
+        {onResolve ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Change ${candidate.item.name}`}
+            onPress={onResolve}
+            hitSlop={6}
+            style={(state) => ({
+              flexDirection: "row",
+              alignItems: "center",
+              alignSelf: "flex-start",
+              gap: 3,
+              marginTop: 6,
+              paddingVertical: 5,
+              paddingHorizontal: 9,
+              borderRadius: 9999,
+              borderWidth: 1,
+              borderColor: T.glassBorder,
+              opacity: state.pressed ? 0.6 : 1,
+            })}
+          >
+            <AppText style={{ color: T.ink, fontSize: 11, fontWeight: "700" }}>Change</AppText>
+            <Icon name="chevron-right" size={11} color={T.ink} />
+          </Pressable>
+        ) : null}
       </View>
       <AppText
         style={[
@@ -183,18 +255,6 @@ function CandidateRow({
         {showsKcal ? `${Math.round(candidate.kcal)} kcal` : "—"}
       </AppText>
     </View>
-  );
-
-  if (!uncertain || !onResolve) return body;
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`Change ${candidate.item.name}`}
-      onPress={onResolve}
-      style={(state) => ({ opacity: state.pressed ? 0.6 : 1 })}
-    >
-      {body}
-    </Pressable>
   );
 }
 
@@ -217,16 +277,22 @@ export function DetectedCard({
   onAdd,
   adding,
   onResolveUncertain,
+  excluded,
+  onToggleExclude,
 }: Props) {
   const { fonts } = useTheme();
   const mono = monoStyle(fonts);
-  // The CTA states what will actually be written to the diary. Every detected
-  // row is written — the uncertain ones as the server's preselected top match
-  // — so this now agrees with the header count; the guard below only survives
-  // for a resolution with no candidates at all.
-  const loggable = loggableCandidates(resolution);
-  const nothingToLog = loggable.length === 0;
-  const ctaLabel = `Add ${loggable.length} item${loggable.length === 1 ? "" : "s"} to diary`;
+  // The CTA states what will actually be written to the diary — which is now
+  // the loggable rows MINUS the ones the user unchecked. Counting the excluded
+  // rows here would recreate exactly the dishonesty kora#183 reported: a
+  // control that implies a choice the button then ignores.
+  const loggable = loggableCandidates(resolution).length;
+  const excludedCount = resolution.candidates.filter((_, i) => excluded.has(i)).length;
+  const toLog = Math.max(0, loggable - excludedCount);
+  const nothingToLog = toLog === 0;
+  const ctaLabel = nothingToLog
+    ? "Select an item to add"
+    : `Add ${toLog} item${toLog === 1 ? "" : "s"} to diary`;
   return (
     <View
       testID="detected-card"
@@ -273,6 +339,8 @@ export function DetectedCard({
           key={`${candidate.item.id}-${i}`}
           candidate={candidate}
           isLast={i === resolution.candidates.length - 1}
+          included={!excluded.has(i)}
+          onToggleInclude={() => onToggleExclude(i)}
           onResolve={onResolveUncertain ? () => onResolveUncertain(i) : undefined}
         />
       ))}

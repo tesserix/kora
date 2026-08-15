@@ -107,8 +107,11 @@ interface ResolutionResultProps {
   onAdd: () => void;
   adding: boolean;
   onSearchManually: () => void;
-  /** Forwarded to DetectedCard — asked when the user taps an uncertain row. */
+  /** Forwarded to DetectedCard — asked when the user taps a row's "Change". */
   onResolveUncertain?: (index: number) => void;
+  /** Forwarded to DetectedCard — rows the user has unchecked (kora#183). */
+  excluded: ReadonlySet<number>;
+  onToggleExclude: (index: number) => void;
 }
 
 // The "here is what the AI thinks — confirm, correct, or answer a follow-up"
@@ -126,6 +129,8 @@ export function ResolutionResult({
   adding,
   onSearchManually,
   onResolveUncertain,
+  excluded,
+  onToggleExclude,
 }: ResolutionResultProps) {
   const resultView = resolveResultView(resolution);
 
@@ -140,6 +145,8 @@ export function ResolutionResult({
           onAdd={onAdd}
           adding={adding}
           onResolveUncertain={onResolveUncertain}
+          excluded={excluded}
+          onToggleExclude={onToggleExclude}
         />
       </>
     );

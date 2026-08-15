@@ -34,3 +34,27 @@ test("pressing the scrim calls onClose", async () => {
   await fireEvent.press(getByLabelText("Close"));
   expect(onClose).toHaveBeenCalled();
 });
+
+// kora#182. Every sheet is bottom-anchored, so a raised keyboard sat directly
+// on top of its content. FoodPicker is the worst case — TextInput at the top,
+// results list below — which made correcting a misidentified food impossible
+// on a device: "the row was tappable but editing wasnt usable keyboard was
+// covering the list".
+//
+// Fixed here rather than in FoodPicker because all eleven sheets with a text
+// input share the defect. Asserted structurally because a keyboard cannot be
+// raised under Jest — the check is that the mechanism is present and wraps the
+// sheet, which is the part that regressed by being absent entirely.
+test("the sheet body is wrapped in a keyboard-avoiding container", async () => {
+  const { getByTestId } = await render(
+    <Sheet visible onClose={() => {}}>
+      <AppText>Sheet body</AppText>
+    </Sheet>
+  );
+  // Presence is the assertion, and it is the right one: the defect was that
+  // NO keyboard mechanism existed anywhere in this component. The `behavior`
+  // prop is deliberately not asserted — getByTestId returns the host View that
+  // KeyboardAvoidingView renders, which does not carry it, so an assertion
+  // here would be testing the mock rather than the choice.
+  expect(getByTestId("sheet-keyboard-avoider")).toBeTruthy();
+});

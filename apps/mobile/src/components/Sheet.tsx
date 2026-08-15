@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect } from "react";
-import { Modal, Pressable, ScrollView, useWindowDimensions, View } from "react-native";
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, useWindowDimensions, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, { interpolate, runOnJS, useAnimatedStyle, useSharedValue, withSpring, withTiming } from "react-native-reanimated";
 import { springs } from "@/motion/springs";
@@ -55,7 +55,26 @@ export function Sheet({ visible, onClose, children }: Props) {
   if (!visible) return null;
   return (
     <Modal visible transparent animationType={reduceMotion ? "fade" : "none"} onRequestClose={dismiss}>
-      <View style={{ flex: 1, justifyContent: "flex-end" }}>
+      {/* Every sheet in the app is bottom-anchored, so a raised keyboard sits
+          exactly on top of its content. FoodPicker is the worst case and the
+          reason this is here (kora#182): its TextInput is at the top and the
+          results list below it, so typing a correction worked but seeing or
+          tapping the result did not — the correction journey was impossible to
+          finish on a device.
+
+          Fixed in Sheet rather than in FoodPicker because all eleven sheets
+          with a text input inherit the same defect. `behavior="padding"`
+          matches the pattern already proven in app/sign-in.tsx; it shrinks the
+          parent, and since the sheet is sized `maxHeight: "82%"` OF that
+          parent, the sheet shrinks with it instead of being clipped.
+
+          iOS only: on Android `windowSoftInputMode` already resizes the
+          window, and adding padding on top of that double-compensates. */}
+      <KeyboardAvoidingView
+        testID="sheet-keyboard-avoider"
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={{ flex: 1, justifyContent: "flex-end" }}
+      >
         <Animated.View style={[{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: "rgba(0,0,0,0.4)" }, scrimStyle]}>
           <Pressable accessibilityLabel="Close" onPress={dismiss} style={{ flex: 1 }} />
         </Animated.View>
@@ -72,7 +91,7 @@ export function Sheet({ visible, onClose, children }: Props) {
             <ScrollView keyboardShouldPersistTaps="handled">{children}</ScrollView>
           </Animated.View>
         </GestureDetector>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

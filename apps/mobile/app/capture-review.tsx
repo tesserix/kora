@@ -108,6 +108,20 @@ export default function CaptureReviewScreen() {
   // existing log, it would create a second one under a different id, and the
   // server has no way to recognise the duplicate.
   const [loggedCandidateKeys, setLoggedCandidateKeys] = useState<Set<string>>(new Set());
+  // Per-row exclusion, same as capture.tsx (kora#183). This screen replays the
+  // very same DetectedCard, so it had the very same defect: a checkbox-looking
+  // glyph and no way to drop a row. Indices are stable here — the resolution
+  // is restored with the capture and never replaced.
+  const [excluded, setExcluded] = useState<ReadonlySet<number>>(() => new Set());
+
+  function toggleExcluded(index: number) {
+    setExcluded((current) => {
+      const next = new Set(current);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  }
 
   // Always called, never conditionally — the source is null until a voice
   // capture is loaded, so a photo capture (or the loading/not-found states)
@@ -143,7 +157,7 @@ export default function CaptureReviewScreen() {
 
   const resolution = capture?.resolution;
   const resultView = resolution ? resolveResultView(resolution) : null;
-  const loggable = (resolution?.candidates ?? []).filter(isLoggable);
+  const loggable = (resolution?.candidates ?? []).filter((c, i) => isLoggable(c) && !excluded.has(i));
   // Only a "card" result names food to log — a follow-up question has nothing
   // to hand the log queue, so there is nothing honest for Confirm to do
   // there.
@@ -167,8 +181,9 @@ export default function CaptureReviewScreen() {
       // filtered against loggedCandidateKeys so a retry only resubmits what
       // did not already make it (see the state comment above).
       const pending = (resolution?.candidates ?? [])
-        .map((c, i) => ({ c, key: candidateKey(c, i) }))
+        .map((c, i) => ({ c, i, key: candidateKey(c, i) }))
         .filter(({ c }) => isLoggable(c))
+        .filter(({ i }) => !excluded.has(i))
         .filter(({ key }) => !loggedCandidateKeys.has(key));
 
       // allSettled, not all: one rejected item must not abandon the ones that
@@ -464,6 +479,8 @@ export default function CaptureReviewScreen() {
             onAdd={handleConfirm}
             adding={busy}
             onSearchManually={handleSearchManually}
+            excluded={excluded}
+            onToggleExclude={toggleExcluded}
             onResolveUncertain={handleResolveUncertain}
           />
           <View style={{ flexDirection: "row", gap: spacing.sm }}>

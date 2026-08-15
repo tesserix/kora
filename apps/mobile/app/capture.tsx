@@ -478,6 +478,9 @@ interface CaptureBodyProps {
   onClose: () => void;
   /** Forwarded to DetectedCard — asked when the user taps an uncertain row. */
   onResolveUncertain?: (index: number) => void;
+  /** Rows the user unchecked, forwarded to DetectedCard (kora#183). */
+  excluded: ReadonlySet<number>;
+  onToggleExclude: (index: number) => void;
   /** Bails out of the in-flight resolve and returns to idle. Analyzing-state only. */
   onCancelResolve?: () => void;
 }
@@ -514,6 +517,8 @@ export function CaptureBody({
   onBarcodeScanned,
   onClose,
   onResolveUncertain,
+  excluded,
+  onToggleExclude,
   onCancelResolve,
 }: CaptureBodyProps) {
   const scrollViewRef = useRef<ScrollView>(null);
@@ -629,6 +634,8 @@ export function CaptureBody({
             adding={adding}
             onSearchManually={onSearchManually}
             onResolveUncertain={onResolveUncertain}
+            excluded={excluded}
+            onToggleExclude={onToggleExclude}
           />
         )}
 
@@ -943,6 +950,23 @@ export default function CaptureScreen() {
   // survived into the next capture would silently relabel a different food.
   const [promoted, setPromoted] = useState<Record<number, FoodItem>>({});
   const [pickerIndex, setPickerIndex] = useState<number | null>(null);
+  // Rows the user unchecked, by index into the CURRENT resolution — so it is
+  // cleared alongside `promoted` for the same reason: indices are meaningless
+  // against a different capture, and a stale exclusion would silently drop a
+  // food the user never touched.
+  const [excluded, setExcluded] = useState<ReadonlySet<number>>(() => new Set());
+
+  // A new Set rather than mutating in place — see the immutability rule in the
+  // repo's coding style; a mutated Set is the same reference and React would
+  // not re-render the checkbox that was just tapped.
+  function toggleExcluded(index: number) {
+    setExcluded((current) => {
+      const next = new Set(current);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  }
   const [text, setText] = useState("");
   // The phrase that produced the current resolution. `text` is cleared as soon
   // as the resolve fires, so it cannot be read at add-to-diary time — but the
@@ -1112,6 +1136,7 @@ export default function CaptureScreen() {
     setStage("result");
     setLoggedCandidateKeys(new Set());
     setPromoted({});
+    setExcluded(new Set());
     setPickerIndex(null);
   }
 
@@ -1451,7 +1476,8 @@ export default function CaptureScreen() {
   async function handleAddToDiary() {
     // effectiveResolution, not resolution: a row the user resolved by hand must
     // log the food they picked, not the guess it replaced.
-    const loggableCount = effectiveResolution?.candidates.filter(isLoggable).length ?? 0;
+    const loggableCount =
+      effectiveResolution?.candidates.filter((c, i) => isLoggable(c) && !excluded.has(i)).length ?? 0;
     // resolutionSource is set by applyResolution in the same call that sets
     // resolution/effectiveResolution, so a truthy effectiveResolution always
     // implies a truthy resolutionSource — the null check here is just to
@@ -1462,8 +1488,11 @@ export default function CaptureScreen() {
     const source = resolutionSource;
 
     const pending = effectiveResolution.candidates
-      .map((candidate, index) => ({ candidate, key: candidateKey(candidate, index) }))
+      .map((candidate, index) => ({ candidate, index, key: candidateKey(candidate, index) }))
       .filter(({ candidate }) => isLoggable(candidate))
+      // The user's own exclusions (kora#183). This is the filter that makes
+      // the checkbox real: without it the CTA count and the diary disagree.
+      .filter(({ index }) => !excluded.has(index))
       .filter(({ key }) => !loggedCandidateKeys.has(key));
 
     const outcomes = await Promise.allSettled(
@@ -1570,6 +1599,8 @@ export default function CaptureScreen() {
         // the Close button is dead (#171).
         onClose={() => safeBack("/(tabs)")}
         onResolveUncertain={setPickerIndex}
+        excluded={excluded}
+        onToggleExclude={toggleExcluded}
         onCancelResolve={handleCancelResolve}
       />
       {/* Opened from an uncertain row. Seeded with the phrase the server could

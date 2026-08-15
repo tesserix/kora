@@ -76,6 +76,11 @@ jest.mock("expo-audio", () => ({
     currentTime: 0,
     id: "mock-recorder",
   })),
+  // The iOS audio session must be put into recording mode before
+  // prepareToRecordAsync or it throws on a device (kora#186). Mocked as a
+  // jest.fn so a test can assert it was called, and can make it reject to
+  // exercise the failure path.
+  setAudioModeAsync: jest.fn(async () => {}),
   useAudioRecorderState: () => ({
     isRecording: false,
     durationMillis: 0,

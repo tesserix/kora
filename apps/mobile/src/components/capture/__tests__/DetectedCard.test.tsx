@@ -12,6 +12,8 @@ function renderCard(resolution: Resolution, onResolveUncertain?: (index: number)
       onAdd={() => {}}
       adding={false}
       onResolveUncertain={onResolveUncertain}
+      excluded={new Set()}
+      onToggleExclude={() => {}}
     />,
   );
 }
@@ -72,6 +74,8 @@ test("renders candidate rows with row-sourced grams/kcal and a header count", as
       onChangeMealSlot={jest.fn()}
       onAdd={jest.fn()}
       adding={false}
+      excluded={new Set()}
+      onToggleExclude={() => {}}
     />,
   );
 
@@ -95,6 +99,8 @@ test("shows the summed kcal when the resolution is not an estimate", async () =>
       onChangeMealSlot={jest.fn()}
       onAdd={jest.fn()}
       adding={false}
+      excluded={new Set()}
+      onToggleExclude={() => {}}
     />,
   );
 
@@ -111,6 +117,8 @@ test("shows a kcal range when the resolution is an estimate", async () => {
       onChangeMealSlot={jest.fn()}
       onAdd={jest.fn()}
       adding={false}
+      excluded={new Set()}
+      onToggleExclude={() => {}}
     />,
   );
 
@@ -127,6 +135,8 @@ test("pressing a meal-slot chip calls onChangeMealSlot with that slot", async ()
       onChangeMealSlot={onChangeMealSlot}
       onAdd={jest.fn()}
       adding={false}
+      excluded={new Set()}
+      onToggleExclude={() => {}}
     />,
   );
 
@@ -144,6 +154,8 @@ test("pressing add to diary calls onAdd", async () => {
       onChangeMealSlot={jest.fn()}
       onAdd={onAdd}
       adding={false}
+      excluded={new Set()}
+      onToggleExclude={() => {}}
     />,
   );
 
@@ -160,6 +172,8 @@ test("shows a spinner and hides the label while adding", async () => {
       onChangeMealSlot={jest.fn()}
       onAdd={jest.fn()}
       adding
+      excluded={new Set()}
+      onToggleExclude={() => {}}
     />,
   );
 
@@ -209,8 +223,11 @@ test("an uncertain item is preselected with its top match's server kcal", async 
 test("a preselected uncertain row still reads as a changeable guess", async () => {
   const { queryByText } = await renderCard(makeMixedResolution());
 
-  // Portion, provenance of the choice, and the affordance, on one line.
-  expect(queryByText("90.2 g · Best guess — tap to change")).toBeTruthy();
+  // Portion and provenance of the choice. The affordance is deliberately NOT
+  // part of this string any more: it used to read "… — tap to change" in 11px
+  // mut grey, and a tester who uses this app daily did not know the row was
+  // tappable (kora#181). It is a real "Change" button now, asserted below.
+  expect(queryByText("90.2 g · Best guess")).toBeTruthy();
   // The confident row keeps its plain portion caption.
   expect(queryByText("140.4 g")).toBeTruthy();
   // Macro chips stay off the weak row — fewer numbers asserted for a match we
@@ -400,4 +417,86 @@ test("a known portion says nothing about guessing", async () => {
   const { queryByText } = await renderCard(resolution);
 
   expect(queryByText(/guess/i)).toBeNull();
+});
+
+// kora#183 / kora#181. The leading tile used to be a STATUS glyph that testers
+// read as an unchecked radio button, on a card that then logged every row
+// regardless — "the row shows it as a radio button which is misleading if
+// there are multiple items", "but its not selectable". These pin the control
+// being real, because the failure mode is silent: the card looks correct
+// either way, and only the diary reveals which rows were actually written.
+
+test("each row exposes a real checkbox, checked by default", async () => {
+  const onToggleExclude = jest.fn();
+  const { getAllByRole } = await render(
+    <DetectedCard
+      resolution={makeMixedResolution()}
+      mealSlot="lunch"
+      onChangeMealSlot={() => {}}
+      onAdd={() => {}}
+      adding={false}
+      excluded={new Set()}
+      onToggleExclude={onToggleExclude}
+    />,
+  );
+
+  const boxes = getAllByRole("checkbox");
+  expect(boxes).toHaveLength(2);
+  // Preselected — the server's answer is still the default, exclusion is opt-in.
+  expect(boxes.every((b) => b.props.accessibilityState?.checked === true)).toBe(true);
+
+  fireEvent.press(boxes[0]);
+  expect(onToggleExclude).toHaveBeenCalledWith(0);
+});
+
+test("an excluded row reads as unchecked and leaves the CTA count", async () => {
+  const { getAllByRole, getByText } = await render(
+    <DetectedCard
+      resolution={makeMixedResolution()}
+      mealSlot="lunch"
+      onChangeMealSlot={() => {}}
+      onAdd={() => {}}
+      adding={false}
+      excluded={new Set([1])}
+      onToggleExclude={() => {}}
+    />,
+  );
+
+  const boxes = getAllByRole("checkbox");
+  expect(boxes[0].props.accessibilityState?.checked).toBe(true);
+  expect(boxes[1].props.accessibilityState?.checked).toBe(false);
+  // The count is the whole point: a checkbox the CTA ignores is the defect.
+  expect(getByText("Add 1 item to diary")).toBeTruthy();
+});
+
+test("excluding every row disables the CTA and says so", async () => {
+  const { getByText } = await render(
+    <DetectedCard
+      resolution={makeMixedResolution()}
+      mealSlot="lunch"
+      onChangeMealSlot={() => {}}
+      onAdd={() => {}}
+      adding={false}
+      excluded={new Set([0, 1])}
+      onToggleExclude={() => {}}
+    />,
+  );
+
+  // Not "Add 0 items to diary" — that reads as a broken button rather than a
+  // consequence of the user's own choice.
+  expect(getByText("Select an item to add")).toBeTruthy();
+});
+
+test("every row offers a visible Change button, not just uncertain ones", async () => {
+  const onResolveUncertain = jest.fn();
+  const { getAllByText } = await renderCard(makeMixedResolution(), onResolveUncertain);
+
+  // Both rows: a confident match can still be the wrong food, and before
+  // kora#183 such a row was not pressable at all — it could not be corrected
+  // OR removed.
+  const buttons = getAllByText("Change");
+  expect(buttons).toHaveLength(2);
+
+  fireEvent.press(buttons[1]);
+  expect(onResolveUncertain).toHaveBeenCalledWith(1);
 });
