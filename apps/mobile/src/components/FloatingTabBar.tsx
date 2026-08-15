@@ -113,6 +113,11 @@ function TabButton({ name, meta, active, showBadge, onPress }: TabButtonProps) {
             `mut` at 500 and held back to 72% opacity, against full-opacity
             `ink` at 700. */}
         <Text
+          // The one place capping Dynamic Type is legitimate: a five-letter tab
+          // label inside a fixed-width 52pt slot, backed up by an icon that
+          // carries the same meaning. 1.6 keeps it legible (~14pt) without
+          // letting a 310% setting push the pill to twice its height.
+          maxFontSizeMultiplier={1.6}
           style={{
             fontSize: 9,
             textTransform: "uppercase",
@@ -214,7 +219,10 @@ export function FloatingTabBar({ state, navigation }: FloatingTabBarProps) {
               flexDirection: "row",
               alignItems: "center",
               paddingHorizontal: 6,
-              height: 64,
+              // minHeight, not height (kora#177): the pill clips with
+              // overflow:"hidden", and its content includes a label that grows
+              // with Dynamic Type. It has to be free to grow with it.
+              minHeight: 64,
               borderRadius: 32,
               borderWidth: 1,
               borderColor: instrument.glassBorder,
@@ -235,7 +243,10 @@ export function FloatingTabBar({ state, navigation }: FloatingTabBarProps) {
               flexDirection: "row",
               alignItems: "center",
               paddingHorizontal: 6,
-              height: 64,
+              // minHeight, not height (kora#177): the pill clips with
+              // overflow:"hidden", and its content includes a label that grows
+              // with Dynamic Type. It has to be free to grow with it.
+              minHeight: 64,
               borderRadius: 32,
               borderWidth: 1,
               borderColor: instrument.glassBorder,

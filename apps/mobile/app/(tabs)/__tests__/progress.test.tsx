@@ -1,11 +1,13 @@
+import { StyleSheet } from "react-native";
 import { render, fireEvent } from "@testing-library/react-native";
 import Progress from "../progress";
 
 const mockSeries = jest.fn();
 const mockAvgIntake7d = jest.fn();
+const mockProfile = jest.fn();
 jest.mock("@/api/hooks", () => ({
   useDashboard: () => ({ data: { streak_days: 3 } }),
-  useProfile: () => ({ data: { weight_kg: 80 } }),
+  useProfile: () => mockProfile(),
   useWeightSeries: (range: string) => mockSeries(range),
   useAddWeight: () => ({ mutate: jest.fn(), isPending: false }),
   useAvgIntake7d: () => mockAvgIntake7d(),
@@ -27,6 +29,7 @@ jest.mock("@/health", () => ({
 }));
 
 beforeEach(() => {
+  mockProfile.mockReturnValue({ data: { weight_kg: 80 } });
   mockAvgIntake7d.mockReturnValue({ avg: null, series: [], isLoading: false });
   mockUseHealth.mockReturnValue({ status: "unavailable", steps: null, sleep: null, connect: jest.fn() });
   mockUseUnits.mockReturnValue({ system: "metric", setSystem: jest.fn() });
@@ -152,4 +155,30 @@ test("shows weight in lb and converts the delta badge when the preference is imp
   expect(getByText("lb")).toBeTruthy();
   // delta: 78.6 - 80 = -1.4 kg -> -3.1 lb, accent down-arrow delta (magnitude only).
   expect(getByText("▾ 3.1 lb")).toBeTruthy();
+});
+
+// kora#177: the loaded figure renders via AnimatedNumber (a raw RN Text) and
+// the placeholder via AppText, both inside one `alignItems: "baseline"` row.
+// They must share a line box or the number jumps vertically the moment data
+// lands.
+test("the weight figure and its placeholder share one line box", async () => {
+  mockSeries.mockReturnValue({ data: [] });
+  mockProfile.mockReturnValue({ data: { weight_kg: null } });
+  const placeholder = await render(<Progress />);
+  // The energy bars also render "—" for their unlabeled days; the weight
+  // figure is the only 34pt one.
+  const placeholderStyle = placeholder
+    .getAllByText("—")
+    .map((n) => StyleSheet.flatten(n.props.style))
+    .find((s) => s?.fontSize === 34);
+
+  mockSeries.mockReturnValue({ data: [
+    { id: "1", weight_kg: 71.9, logged_at: "2026-07-23T08:00:00Z" },
+  ] });
+  const loaded = await render(<Progress />);
+  const loadedStyle = StyleSheet.flatten(loaded.getByText("71.9").props.style);
+
+  expect(placeholderStyle?.fontSize).toBe(loadedStyle.fontSize);
+  expect(typeof loadedStyle.lineHeight).toBe("number");
+  expect(loadedStyle.lineHeight).toBe(placeholderStyle?.lineHeight);
 });

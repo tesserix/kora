@@ -154,3 +154,33 @@ test("swaps the pill's BlurView for the opaque fallback when Reduce Transparency
 
   jest.restoreAllMocks();
 });
+
+// kora#177: the pill was a HARD `height: 64` with `overflow: "hidden"` around a
+// 9px label that scales with Dynamic Type. At 310% the label alone is ~28pt in
+// a ~34pt box, so the content overflowed the pill and was clipped. The pill now
+// grows, and the label — one of the few places a cap is legitimate — is capped.
+test("the pill grows instead of clipping at large Dynamic Type sizes", async () => {
+  // Pinned explicitly: the reduce-transparency spy above swaps which of the two
+  // pills renders, and restoreAllMocks does not put the default back.
+  jest.spyOn(AccessibilityInfo, "isReduceTransparencyEnabled").mockResolvedValue(false);
+  const { getByTestId } = await render(<FloatingTabBar {...props} />);
+  const pill = flattenStyle(getByTestId("tab-bar-pill-blur").props.style);
+  expect(pill.height).toBeUndefined();
+  expect(pill.minHeight).toBe(64);
+});
+
+test("the Reduce Transparency fallback pill grows too", async () => {
+  jest.spyOn(AccessibilityInfo, "isReduceTransparencyEnabled").mockResolvedValue(true);
+  const { findByTestId } = await render(<FloatingTabBar {...props} />);
+  const pill = flattenStyle((await findByTestId("tab-bar-pill")).props.style);
+  expect(pill.height).toBeUndefined();
+  expect(pill.minHeight).toBe(64);
+  jest.restoreAllMocks();
+});
+
+test("caps the 9px tab label's Dynamic Type growth", async () => {
+  const { getByText } = await render(<FloatingTabBar {...props} />);
+  for (const label of ["Today", "Diary"]) {
+    expect(getByText(label).props.maxFontSizeMultiplier).toBe(1.6);
+  }
+});

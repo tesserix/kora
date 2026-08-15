@@ -1,4 +1,4 @@
-import { darkColors, lightColors, radius, spacing , gradientStops } from "../palette";
+import { darkColors, lightColors, radius, spacing , gradientStops, type } from "../palette";
 
 
 test("every light color key has a dark counterpart", () => {
@@ -45,5 +45,36 @@ describe("elevated tokens", () => {
         expect(pair[1]).toMatch(/^#/);
       }
     }
+  });
+});
+
+// kora#177: AppText sets no fontFamily, so every variant renders in SF Pro,
+// which ships its own optical-size tracking — POSITIVE at display sizes (SF
+// Display is drawn tight) and NEGATIVE at text sizes (SF Text is drawn loose).
+// The old table used the generic web rule (negative on titles, 0 on body) and
+// therefore fought the system: -0.4 on a 34pt title landed 0.77pt tighter than
+// native iOS chrome beside it.
+describe("type tracking is signed with SF Pro, not against it", () => {
+  it("leaves text-size variants untracked so SF's built-in tracking applies", () => {
+    for (const v of ["headline", "body", "subheadline", "footnote"] as const) {
+      expect(type[v].letterSpacing).toBeUndefined();
+    }
+  });
+
+  it("tracks the three display variants POSITIVE, matching SF Display", () => {
+    expect(type.largeTitle.letterSpacing).toBe(0.37);
+    expect(type.title1.letterSpacing).toBe(0.36);
+    expect(type.title2.letterSpacing).toBe(0.35);
+  });
+
+  it("keeps caption's editorial widening but at a sane multiple of SF's own", () => {
+    // SF's caption1 tracking is +0.06; the old +0.5 was 8x that.
+    expect(type.caption.letterSpacing).toBe(0.2);
+  });
+
+  it("keeps the Apple Dynamic Type size/leading pairs unchanged", () => {
+    expect(type.body).toMatchObject({ size: 17, lineHeight: 22 });
+    expect(type.largeTitle).toMatchObject({ size: 34, lineHeight: 41 });
+    expect(type.caption).toMatchObject({ size: 11, lineHeight: 13 });
   });
 });

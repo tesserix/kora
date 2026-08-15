@@ -114,6 +114,18 @@ export default function Progress() {
   // captions and Home's MacroWide caption (engraving is reserved for inside the
   // gauge instruments themselves).
   const mutedLabel = { fontSize: 11, color: instrument.mut };
+  // Shared by BOTH branches of the weight figure — AnimatedNumber (a raw RN
+  // Text) when data has landed and AppText's em-dash before it. They sit in one
+  // `alignItems: "baseline"` row, so a line box present on only one of them
+  // made the number jump vertically the moment data arrived (kora#177). The
+  // lineHeight is stated explicitly because AnimatedNumber cannot derive one.
+  const weightFigure = {
+    fontSize: 34,
+    lineHeight: 39,
+    fontWeight: "700",
+    fontFamily: fonts.mono,
+    color: instrument.ink,
+  } as const;
 
   // The weight series' error was never read at all, so a failed fetch fell
   // straight through to the "No weigh-ins yet" empty state below — telling a
@@ -173,10 +185,10 @@ export default function Progress() {
                       <AnimatedNumber
                         value={system === "imperial" ? lbFromKg(current) : current}
                         format={weightFormat}
-                        style={{ fontSize: 34, fontWeight: "700", fontFamily: fonts.mono, color: instrument.ink }}
+                        style={weightFigure}
                       />
                     ) : (
-                      <AppText style={{ fontSize: 34, fontWeight: "700", fontFamily: fonts.mono, color: instrument.ink }}>—</AppText>
+                      <AppText style={weightFigure}>—</AppText>
                     )}
                     <AppText style={{ fontSize: 14, color: instrument.mut }}>{w ? w.unit : "kg"}</AppText>
                   </View>

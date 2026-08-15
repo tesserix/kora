@@ -74,15 +74,24 @@ export const fontSize = { xs: 11, sm: 13, base: 15, lg: 17, xl: 22, "2xl": 28, "
 export type TypeVariant =
   | "largeTitle" | "title1" | "title2" | "headline" | "body" | "subheadline" | "footnote" | "caption";
 
-export const type: Record<TypeVariant, { size: number; weight: "400" | "500" | "600" | "700"; letterSpacing: number; lineHeight?: number }> = {
-  largeTitle: { size: 34, weight: "700", letterSpacing: -0.4, lineHeight: 41 },
-  title1: { size: 28, weight: "700", letterSpacing: -0.4, lineHeight: 34 },
-  title2: { size: 22, weight: "700", letterSpacing: -0.3, lineHeight: 28 },
-  headline: { size: 17, weight: "600", letterSpacing: 0, lineHeight: 22 },
-  body: { size: 17, weight: "400", letterSpacing: 0, lineHeight: 22 },
-  subheadline: { size: 15, weight: "400", letterSpacing: 0, lineHeight: 20 },
-  footnote: { size: 13, weight: "400", letterSpacing: 0, lineHeight: 18 },
-  caption: { size: 11, weight: "500", letterSpacing: 0.5, lineHeight: 13 },
+// Sizes and leadings are Apple's Dynamic Type values verbatim. TRACKING is
+// signed to agree with SF Pro rather than with the generic web rule (kora#177):
+// AppText sets no fontFamily, so this all renders in SF, which already applies
+// its own optical-size tracking — POSITIVE at display sizes (SF Display is
+// drawn tight) and NEGATIVE at text sizes (SF Text is drawn loose). The old
+// table inverted both, so a 34pt title landed 0.77pt tighter than the native
+// chrome next to it. `undefined` means "let SF's own tracking stand".
+export const type: Record<TypeVariant, { size: number; weight: "400" | "500" | "600" | "700"; letterSpacing?: number; lineHeight?: number }> = {
+  largeTitle: { size: 34, weight: "700", letterSpacing: 0.37, lineHeight: 41 },
+  title1: { size: 28, weight: "700", letterSpacing: 0.36, lineHeight: 34 },
+  title2: { size: 22, weight: "700", letterSpacing: 0.35, lineHeight: 28 },
+  headline: { size: 17, weight: "600", lineHeight: 22 },
+  body: { size: 17, weight: "400", lineHeight: 22 },
+  subheadline: { size: 15, weight: "400", lineHeight: 20 },
+  footnote: { size: 13, weight: "400", lineHeight: 18 },
+  // SF's own caption1 tracking is +0.06. Kept wider for the small-caps-ish
+  // editorial feel the captions carry, but a fifth of the old +0.5.
+  caption: { size: 11, weight: "500", letterSpacing: 0.2, lineHeight: 13 },
 };
 
 export type GradientSet = {

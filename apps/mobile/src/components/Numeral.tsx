@@ -13,10 +13,11 @@ export function Numeral({ size = 16, weight = "700", color, style, children, ...
       rounded
       style={[
         {
+          // No lineHeight override: AppText derives the line box from the
+          // effective fontSize since kora#177, which is what this used to patch
+          // locally (at large sizes body's fixed ~20px box clipped the top of
+          // the glyph — a "0" read as a "U").
           fontSize: size,
-          // Override AppText's body lineHeight: at large sizes a ~20px line box
-          // clips the top of the glyph (a "0" reads as a "U"). Scale it with size.
-          lineHeight: Math.round(size * 1.25),
           fontWeight: weight,
           letterSpacing: -0.3,
           color: color ?? colors.label,
