@@ -208,6 +208,28 @@ test("ref.sweep() is a no-op under reduced motion", async () => {
   spring.mockRestore();
 });
 
+// A pull-to-refresh mid-ignition must not preempt the needle overshoot or
+// desync it from the countdown numeral's own timeline — sweep() is a no-op
+// for the whole engaged window, same suppression rule as Reduce Motion above.
+test("ref.sweep() does not retarget the needle while the ignition sequence is engaged", async () => {
+  const spring = jest.spyOn(Reanimated, "withSpring");
+  const timing = jest.spyOn(Reanimated, "withTiming");
+  const ref = createRef<GaugeDialHandle>();
+
+  const { rerender } = await render(<GaugeDial ref={ref} value={1100} target={2200} ignition={false} />);
+  await rerender(<GaugeDial ref={ref} value={1100} target={2200} ignition={true} />);
+  spring.mockClear();
+  timing.mockClear();
+
+  ref.current?.sweep();
+
+  expect(spring).not.toHaveBeenCalled();
+  expect(timing).not.toHaveBeenCalled();
+
+  spring.mockRestore();
+  timing.mockRestore();
+});
+
 describe("over budget", () => {
   it("describeReserve reports overage", () => {
     expect(describeReserve(2320, 2100)).toEqual({ over: true, magnitude: 220, caption: "kcal over budget" });

@@ -199,6 +199,9 @@ test("the hero is a single fused cluster: gauge, Macros zone rule, and vitals fo
   // separate MacroWide panel.
   expect(await findByText("140/220g")).toBeTruthy();
   expect(await findByText("40/70g")).toBeTruthy();
+  // Dynamic Type is never disabled, only capped (mirrors ZoneRule's
+  // precedent in BezelCluster.tsx) — the macro cell numeral caps at 1.6.
+  expect((await findByText("140/220g")).props.maxFontSizeMultiplier).toBe(1.6);
 });
 
 test("renders the light theme: app-background is the light instrument ground and the gauge still renders", async () => {

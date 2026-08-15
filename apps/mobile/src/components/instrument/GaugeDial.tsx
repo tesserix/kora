@@ -217,19 +217,25 @@ export const GaugeDial = forwardRef<GaugeDialHandle, GaugeDialProps>(function Ga
   // needle currently sits — NOT reset to 0 first like the ignition overshoot,
   // since a mid-scroll refresh shouldn't visually reset the reading before
   // sweeping. Skipped under Reduce Motion: a one-shot flourish has no calmer
-  // substitute, only suppression (same rule as ignition).
+  // substitute, only suppression (same rule as ignition). Also skipped while
+  // the once-a-day ignition sequence is engaged — sweep()'s withSequence
+  // would otherwise preempt the ignition needle mid-flight while the
+  // countdown numeral above keeps counting on its own timeline, breaking the
+  // choreography. `showIgnition` covers the whole overshoot-and-settle window
+  // (it doesn't clear until the next render after `ignition` itself drops),
+  // so gating on it is the simplest correct guard.
   useImperativeHandle(
     ref,
     () => ({
       sweep: () => {
-        if (reduceMotion) return;
+        if (reduceMotion || showIgnition) return;
         fractionSV.value = withSequence(
           withTiming(1, { duration: 500, easing: Easing.out(Easing.quad) }),
           withSpring(fraction, NEEDLE_SPRING),
         );
       },
     }),
-    [fraction, reduceMotion, fractionSV],
+    [fraction, reduceMotion, showIgnition, fractionSV],
   );
 
   const needleAnimatedProps = useAnimatedProps(() => {

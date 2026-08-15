@@ -300,12 +300,17 @@ export default function Home() {
                     <View style={{ width: 1, height: 30, backgroundColor: instrument.hairline, marginHorizontal: 16 }} />
                   ) : null}
                   <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 12 }}>
+                    {/* 34px glyph tile: glass fill + glassBorder ring, per the
+                        design contract's recessed-footer recipe — `shade` is
+                        bezel-bottom gradient shading, not a surface fill. */}
                     <View
                       style={{
                         width: 34,
                         height: 34,
                         borderRadius: 10,
-                        backgroundColor: instrument.shade,
+                        backgroundColor: instrument.glass,
+                        borderWidth: StyleSheet.hairlineWidth,
+                        borderColor: instrument.glassBorder,
                         alignItems: "center",
                         justifyContent: "center",
                       }}

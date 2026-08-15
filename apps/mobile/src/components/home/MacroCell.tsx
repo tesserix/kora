@@ -47,9 +47,14 @@ export function MacroCell({ label, have, target, unit = "g", first = false, pend
       }}
     >
       <SubDial fraction={fraction} testID={`macro-cell-${label.toLowerCase()}-subdial`} />
-      <AppText style={{ fontSize: 11, fontWeight: "600", color: instrument.mut }}>{label}</AppText>
+      {/* Dynamic Type caps (mirrors ZoneRule's precedent in BezelCluster.tsx):
+          1.4 on the two micro-labels, 1.6 on the numeral — never disabled,
+          only bounded so the cell doesn't blow out at the largest sizes. */}
+      <AppText maxFontSizeMultiplier={1.4} style={{ fontSize: 11, fontWeight: "600", color: instrument.mut }}>
+        {label}
+      </AppText>
       <Animated.View key={pending ? "pending" : have} entering={entering}>
-        <AppText style={[{ fontSize: 13, fontWeight: "600", color: instrument.ink }, mono]}>
+        <AppText maxFontSizeMultiplier={1.6} style={[{ fontSize: 13, fontWeight: "600", color: instrument.ink }, mono]}>
           {pending ? "—" : `${have}/${target}${unit}`}
         </AppText>
       </Animated.View>
@@ -71,7 +76,7 @@ export function MacroCell({ label, have, target, unit = "g", first = false, pend
           }}
         />
       </View>
-      <AppText style={[{ fontSize: 10, color: instrument.mut }, mono]}>
+      <AppText maxFontSizeMultiplier={1.4} style={[{ fontSize: 10, color: instrument.mut }, mono]}>
         {pending ? "—" : `${toGo}${unit} to go`}
       </AppText>
     </View>
