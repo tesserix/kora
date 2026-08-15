@@ -1,7 +1,10 @@
+import type { ComponentProps } from "react";
 import { render } from "@testing-library/react-native";
 import * as Reanimated from "react-native-reanimated";
 import { buildGaugeTicks, needleFor, GAUGE_VIEW_H, GAUGE_CENTER_Y } from "../gauge";
-import { GaugeDial } from "../GaugeDial";
+import { describeReserve, GaugeDial } from "../GaugeDial";
+
+const renderGauge = async (props: ComponentProps<typeof GaugeDial>) => render(<GaugeDial {...props} />);
 
 afterEach(() => {
   jest.clearAllMocks();
@@ -33,9 +36,12 @@ test("shows the remaining energy as the center numeral", async () => {
   expect(getByText("2,200")).toBeTruthy(); // budget, footer + scale numeral dedupe is fine
 });
 
-test("never renders a negative reserve", async () => {
+// Was "never renders a negative reserve" / expected "0" — value > target now
+// renders the explicit over-budget state (spec 2026-08-16-kora-ignition-design.md)
+// instead of clamping to zero, so this asserts the new +N over-budget reading.
+test("renders the over-budget reading instead of clamping to zero", async () => {
   const { getByText } = await render(<GaugeDial value={2500} target={2200} />);
-  expect(getByText("0")).toBeTruthy();
+  expect(getByText("+300")).toBeTruthy();
 });
 
 test("rounds raw API floats in the footer instead of showing decimals", async () => {
@@ -113,4 +119,20 @@ test("the center overlay is bounded above the hub dot, derived from the gauge ge
   const hubTopEdge = GAUGE_CENTER_Y - 4.5; // hub circle radius, GaugeDial.tsx
   const overlayContentBottomY = GAUGE_VIEW_H - (flat.bottom as number);
   expect(overlayContentBottomY).toBeLessThan(hubTopEdge);
+});
+
+describe("over budget", () => {
+  it("describeReserve reports overage", () => {
+    expect(describeReserve(2320, 2100)).toEqual({ over: true, magnitude: 220, caption: "kcal over budget" });
+    expect(describeReserve(860, 2100)).toEqual({ over: false, magnitude: 1240, caption: "kcal in reserve" });
+  });
+  it("renders +N in danger with the over caption and pins the needle", async () => {
+    const { getByText } = await renderGauge({ value: 2320, target: 2100 });
+    expect(getByText("+220")).toBeTruthy();
+    expect(getByText(/kcal over budget/i)).toBeTruthy();
+  });
+  it("keeps the calm reserve reading under budget", async () => {
+    const { getByText } = await renderGauge({ value: 860, target: 2100 });
+    expect(getByText("1,240")).toBeTruthy();
+  });
 });

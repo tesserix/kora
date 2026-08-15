@@ -98,6 +98,19 @@ const HUB_CLEARANCE = 18;
 // area ends above the hub instead of an eyeballed percentage.
 const OVERLAY_BOTTOM = GAUGE_VIEW_H - (GAUGE_CENTER_Y - HUB_CLEARANCE);
 
+// Pure helper (spec 2026-08-16-kora-ignition-design.md): shared by GaugeDial's
+// center overlay and reused directly by other tasks in this milestone — keep
+// the exact name/shape (over/magnitude/caption).
+export function describeReserve(
+  value: number,
+  target: number,
+): { over: boolean; magnitude: number; caption: string } {
+  const diff = Math.round(target - value);
+  return diff < 0
+    ? { over: true, magnitude: -diff, caption: "kcal over budget" }
+    : { over: false, magnitude: diff, caption: "kcal in reserve" };
+}
+
 export interface GaugeDialProps {
   value: number; // eaten kcal
   target: number; // budget kcal
@@ -115,7 +128,7 @@ export function GaugeDial({
 }: GaugeDialProps) {
   const { instrument, fonts } = useTheme();
   const fraction = target > 0 ? Math.min(value / target, 1) : 0;
-  const remaining = Math.max(0, Math.round(target - value));
+  const reserve = describeReserve(value, target);
   const mono = monoStyle(fonts);
   const { reduceMotion } = useMotionPrefs();
 
@@ -162,15 +175,24 @@ export function GaugeDial({
     return { ...needleFor(fractionSV.value), opacity: needleOpacity.value };
   });
 
+  // RN has no drop-shadow filter, so the needle's under-glow is a second,
+  // wider stroke of the same geometry rendered beneath it (spec: "needle
+  // under-glow"). It tracks the same fraction-driven position as the needle
+  // but keeps its own static opacity rather than reduced-motion's cross-fade.
+  const needleGlowAnimatedProps = useAnimatedProps(() => {
+    "worklet";
+    return needleFor(fractionSV.value);
+  });
+
   const footer: Array<[number, string]> = [
     [value, "Eaten"],
     ...(burned === undefined ? [] : ([[burned, "Burned"]] as Array<[number, string]>)),
     [target, "Budget"],
   ];
 
-  const accessibilityLabel = `${Math.round(remaining).toLocaleString()} calories in reserve of ${Math.round(
-    target,
-  ).toLocaleString()}`;
+  const accessibilityLabel = `${reserve.magnitude.toLocaleString()} calories ${
+    reserve.over ? "over budget" : "in reserve"
+  } of ${Math.round(target).toLocaleString()}`;
 
   return (
     <View testID={testID} accessible accessibilityLabel={accessibilityLabel}>
@@ -195,6 +217,14 @@ export function GaugeDial({
               </SvgText>
             );
           })}
+          <AnimatedLine
+            testID="gauge-needle-glow"
+            stroke={instrument.accent}
+            strokeWidth={7}
+            strokeLinecap="round"
+            opacity={0.28}
+            animatedProps={needleGlowAnimatedProps}
+          />
           <AnimatedLine
             testID="gauge-needle"
             stroke={instrument.accent}
@@ -222,9 +252,27 @@ export function GaugeDial({
         >
           <AppText
             variant="body"
-            style={[{ fontSize: 44, lineHeight: 50, color: instrument.ink, letterSpacing: -1.2 }, mono]}
+            style={[
+              {
+                fontSize: 44,
+                lineHeight: 50,
+                color: reserve.over ? instrument.danger : instrument.ink,
+                letterSpacing: -1.2,
+              },
+              mono,
+              // Lume glow reads as an instrument-face backlight, so the
+              // over-budget numeral (already carrying the danger color) stays
+              // muted rather than glowing (spec: "Over state has no lume").
+              reserve.over
+                ? null
+                : {
+                    textShadowColor: instrument.lumeText,
+                    textShadowRadius: 22,
+                    textShadowOffset: { width: 0, height: 0 },
+                  },
+            ]}
           >
-            {remaining.toLocaleString()}
+            {reserve.over ? `+${reserve.magnitude.toLocaleString()}` : reserve.magnitude.toLocaleString()}
           </AppText>
           {/* Bespoke engraved caption (T6 exception): the dial's center label
               is literally part of the instrument face and keeps its own
@@ -232,16 +280,25 @@ export function GaugeDial({
               routing through engravedStyle() — see typography.ts. */}
           <AppText
             variant="body"
-            style={{
-              fontSize: 10,
-              letterSpacing: 3,
-              textTransform: "uppercase",
-              color: instrument.accent,
-              marginTop: 6,
-              fontWeight: "600",
-            }}
+            style={[
+              {
+                fontSize: 10,
+                letterSpacing: 3,
+                textTransform: "uppercase",
+                color: reserve.over ? instrument.danger : instrument.accent,
+                marginTop: 6,
+                fontWeight: "600",
+              },
+              reserve.over
+                ? null
+                : {
+                    textShadowColor: instrument.lumeAccent,
+                    textShadowRadius: 14,
+                    textShadowOffset: { width: 0, height: 0 },
+                  },
+            ]}
           >
-            {centerLabel}
+            {reserve.over ? reserve.caption : centerLabel}
           </AppText>
         </View>
       </View>
