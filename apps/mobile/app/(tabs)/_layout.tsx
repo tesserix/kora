@@ -73,9 +73,17 @@ export default function TabsLayout() {
   // alone let that state fall through to <Tabs> with no data, which is the
   // exact empty-shell stranding this task exists to eliminate. isPending is
   // false once data is cached, so a background refetch still renders <Tabs>.
-  if (profile.isPending) return <Splash />;
+  // A query paused by onlineManager is NOT "still loading" — it is "there is no
+  // network and this will not start". It never resolves and never errors, so
+  // gating it into <Splash /> below left the app frozen on the splash screen
+  // with no way out, and made the error branch under it unreachable offline.
+  // Found on device, build 21. `fetchStatus` is the only thing that separates
+  // the two: both are status "pending".
+  const offlinePaused = profile.isPending && profile.fetchStatus === "paused";
 
-  if (profile.isError) {
+  if (profile.isPending && !offlinePaused) return <Splash />;
+
+  if (profile.isError || offlinePaused) {
     // A 401 means api.ts already forced a sign-out and the onAuthStateChanged
     // effect above is redirecting to /sign-in?reason=expired. Offering "Retry"
     // here would be misleadingly actionable: the session is gone.

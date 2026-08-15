@@ -87,20 +87,45 @@ test("routes a never-onboarded profile to onboarding instead of the tabs", async
 
 // Offline first-run: onlineManager pauses the query before it ever reaches
 // isLoading. status is "pending" with fetchStatus "paused" — isPending is
-// true, but isLoading, isError are both false and data is undefined. Gating
-// on isLoading alone lets this fall through to <Tabs> with no data, which is
-// the exact empty-shell stranding this task exists to eliminate.
-test("renders the splash, not the tabs, when the query is paused offline", async () => {
+// true, but isLoading, isError are both false and data is undefined.
+//
+// Falling through to <Tabs> is the empty-shell stranding this gate exists to
+// prevent, and that still must not happen. But a bare <Splash /> is the OTHER
+// stranding: a paused query never resolves while offline and never errors
+// either, so the error branch below is unreachable and the app sits on the
+// splash screen forever with no way out. Found on device, build 21.
+test("offers a way out, not an endless splash, when the query is paused offline", async () => {
   mockUseProfile.mockReturnValue({
     data: undefined,
     isPending: true,
     isLoading: false,
+    fetchStatus: "paused",
     isError: false,
     error: null,
     refetch: jest.fn(),
   });
-  const { getByTestId, queryByTestId } = await render(<TabsLayout />);
+  const { getByText, getByLabelText, queryByTestId } = await render(<TabsLayout />);
+  expect(getByText("Couldn't load your profile")).toBeTruthy();
+  expect(getByLabelText("Retry")).toBeTruthy();
+  expect(queryByTestId("tabs")).toBeNull();
+});
+
+// The counterweight: a genuinely in-flight fetch (fetchStatus "fetching") is
+// NOT a failure and must still show the splash rather than flashing an error
+// at a user whose request is simply in progress.
+test("still shows the splash while the profile fetch is genuinely in flight", async () => {
+  mockUseProfile.mockReturnValue({
+    data: undefined,
+    isPending: true,
+    isLoading: true,
+    fetchStatus: "fetching",
+    isError: false,
+    error: null,
+    refetch: jest.fn(),
+  });
+  const { getByTestId, queryByText, queryByTestId } = await render(<TabsLayout />);
   expect(getByTestId("brand-mark")).toBeTruthy();
+  expect(queryByText("Couldn't load your profile")).toBeNull();
   expect(queryByTestId("tabs")).toBeNull();
 });
 
