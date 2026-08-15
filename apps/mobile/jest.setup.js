@@ -204,6 +204,10 @@ jest.mock("react-native-reanimated", () => {
       callback?.(true);
       return toValue;
     },
+    // The mock has no real timer/delay pipeline, so the delayed animation
+    // simply resolves immediately — same "run synchronously to the settled
+    // value" convention as withSpring/withTiming above.
+    withDelay: (_delayMs, animation) => animation,
     // Returns the LAST animation in the chain, matching the value the sequence
     // ultimately settles on. Each argument has already been constructed by the
     // withTiming/withSpring stubs above, so their callbacks have already run —
@@ -219,6 +223,9 @@ jest.mock("react-native-reanimated", () => {
       out: ID,
       in: ID,
       inOut: ID,
+      // bezier(...) returns an easing function, not a value transform, unlike
+      // the identity stubs above — matches the real API's shape.
+      bezier: () => ID,
     },
     // Layout-animation entering builders (FadeInDown, etc.): under Jest there's no
     // native layout-animation runtime to drive them, so `entering` never actually

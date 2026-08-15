@@ -1,6 +1,7 @@
 import { StyleSheet, Text } from "react-native";
 import { render } from "@testing-library/react-native";
 import { BezelCluster, ZoneRule, WellFooter } from "../BezelCluster";
+import { SpecularSweep } from "../SpecularSweep";
 import { instrumentLight } from "@/theme/palette";
 
 // Light scheme is the test environment's default (no useColorScheme mock) —
@@ -25,5 +26,12 @@ describe("BezelCluster", () => {
     );
     const style = StyleSheet.flatten(getByTestId("well").props.style);
     expect(style.backgroundColor).toBe(instrumentLight.inset);
+  });
+});
+
+describe("SpecularSweep", () => {
+  it("renders without crashing", async () => {
+    const { toJSON } = await render(<SpecularSweep />);
+    expect(toJSON()).toBeTruthy();
   });
 });

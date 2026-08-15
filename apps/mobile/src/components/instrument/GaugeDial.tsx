@@ -1,8 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { View } from "react-native";
 import Svg, { Circle, Line, Text as SvgText } from "react-native-svg";
 import Animated, {
   cancelAnimation,
+  Easing,
   useAnimatedProps,
   useSharedValue,
   withSequence,
@@ -11,7 +12,7 @@ import Animated, {
   type SharedValue,
 } from "react-native-reanimated";
 import { AppText } from "@/components/Text";
-import { REDUCED_MOTION_CROSSFADE_MS, useMotionPrefs } from "@/motion";
+import { AnimatedNumber, REDUCED_MOTION_CROSSFADE_MS, springs, useMotionPrefs } from "@/motion";
 import { useTheme } from "@/theme";
 import type { InstrumentTokens } from "@/theme";
 import { monoStyle } from "./typography";
@@ -117,6 +118,11 @@ export interface GaugeDialProps {
   burned?: number;
   centerLabel?: string;
   testID?: string;
+  // Once-a-day flourish (spec 2026-08-16-kora-ignition-design.md): needle
+  // overshoots to full and springs back to the true fraction while the
+  // center numeral counts down from the budget to the actual reserve.
+  // Suppressed whenever the reading is over budget — see `showIgnition`.
+  ignition?: boolean;
 }
 
 export function GaugeDial({
@@ -125,12 +131,16 @@ export function GaugeDial({
   burned,
   centerLabel = "kcal in reserve",
   testID = "gauge-dial",
+  ignition = false,
 }: GaugeDialProps) {
   const { instrument, fonts } = useTheme();
   const fraction = target > 0 ? Math.min(value / target, 1) : 0;
   const reserve = describeReserve(value, target);
   const mono = monoStyle(fonts);
   const { reduceMotion } = useMotionPrefs();
+  // Ignition never plays over budget (spec) or under Reduce Motion — it is a
+  // motion flourish with no reduced-motion substitute, only suppression.
+  const showIgnition = ignition && !reserve.over && !reduceMotion;
 
   // Static geometry (position/width/major/red never depend on fraction — see
   // AnimatedGaugeTick); the argument here is arbitrary, only `.lit` (unused
@@ -144,7 +154,9 @@ export function GaugeDial({
   // it is invisible, and it fades back in. It used to jump-cut, which is what
   // reanimated 4.5 degrades an animation to on its own and is precisely what
   // the guard was supposed to avoid.
-  const fractionSV = useSharedValue(fraction);
+  // Ignition starts the needle pinned at zero so the first effect run below
+  // has somewhere to sweep up FROM; everyone else starts already at rest.
+  const fractionSV = useSharedValue(showIgnition ? 0 : fraction);
   const needleOpacity = useSharedValue(1);
   // First paint has no previous position to cross-fade FROM.
   const firstRun = useRef(true);
@@ -165,10 +177,17 @@ export function GaugeDial({
       firstRun.current = false;
       return;
     }
+    // Captured before the flag flips below: the ignition overshoot is a
+    // one-shot flourish that only ever plays on the first non-reduced-motion
+    // run of this effect — later fraction changes (a new log arriving) get
+    // the ordinary critically-damped spring, ignition prop or not.
+    const isIgnitionRun = showIgnition && firstRun.current;
     firstRun.current = false;
-    fractionSV.value = withSpring(fraction, NEEDLE_SPRING);
+    fractionSV.value = isIgnitionRun
+      ? withSequence(withTiming(1, { duration: 650, easing: Easing.in(Easing.quad) }), withSpring(fraction, springs.ignition))
+      : withSpring(fraction, NEEDLE_SPRING);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fraction, reduceMotion]);
+  }, [fraction, reduceMotion, showIgnition]);
 
   const needleAnimatedProps = useAnimatedProps(() => {
     "worklet";
@@ -183,6 +202,20 @@ export function GaugeDial({
     "worklet";
     return needleFor(fractionSV.value);
   });
+
+  // Count-down (spec: center numeral counts from budget down to reserve over
+  // ~1650ms). AnimatedNumber only animates when its `value` prop CHANGES —
+  // mounting it straight at `reserve.magnitude` would show the final figure
+  // with nothing to count down from — so this starts pinned at `target` and
+  // flips to the reserve one tick after mount to trigger that transition.
+  const [countdownValue, setCountdownValue] = useState(target);
+  useEffect(() => {
+    if (!showIgnition) return;
+    setCountdownValue(target);
+    const id = setTimeout(() => setCountdownValue(reserve.magnitude), 0);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showIgnition]);
 
   const footer: Array<[number, string]> = [
     [value, "Eaten"],
@@ -272,7 +305,16 @@ export function GaugeDial({
                   },
             ]}
           >
-            {reserve.over ? `+${reserve.magnitude.toLocaleString()}` : reserve.magnitude.toLocaleString()}
+            {showIgnition ? (
+              // Nested Text inherits the outer AppText's style (color, mono,
+              // lume shadow) — see React Native's nested-Text convention —
+              // so this doesn't need to restate any of it.
+              <AnimatedNumber value={countdownValue} duration={1650} />
+            ) : reserve.over ? (
+              `+${reserve.magnitude.toLocaleString()}`
+            ) : (
+              reserve.magnitude.toLocaleString()
+            )}
           </AppText>
           {/* Bespoke engraved caption (T6 exception): the dial's center label
               is literally part of the instrument face and keeps its own
