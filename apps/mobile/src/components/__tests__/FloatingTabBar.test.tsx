@@ -1,4 +1,4 @@
-import { AccessibilityInfo, StyleSheet } from "react-native";
+import { AccessibilityInfo } from "react-native";
 import { render, fireEvent, waitFor } from "@testing-library/react-native";
 
 import { router } from "expo-router";
@@ -39,16 +39,29 @@ test("renders tab labels and a capture button", async () => {
   expect(await findByLabelText("Capture")).toBeTruthy();
 });
 
-// Instrument Glass rename: Home -> Today, Progress -> Trends. The active tab
-// (index, per `props` above) carries a shared accent-dot testID rather than a
-// per-route one, since only one tab is ever active at a time.
+// Dock v2: labels are always on, not just the active tab. (Rendered text is
+// the label as authored — visual uppercasing is `textTransform`, which RNTL's
+// getByText does not apply, so this matches the literal TAB_META case.)
+test("renders always-visible labels for every tab", async () => {
+  const { getByText } = await render(<FloatingTabBar {...props} />);
+  for (const l of ["Today", "Diary", "Trends", "More"]) expect(getByText(l)).toBeTruthy();
+});
+
+// Dock v2: a single sliding well replaces the old per-tab recessed pill.
+test("renders a single sliding active well", async () => {
+  const { getByTestId } = await render(<FloatingTabBar {...props} />);
+  expect(getByTestId("dock-well")).toBeTruthy();
+});
+
+// Instrument Glass rename: Home -> Today, Progress -> Trends. The active tab's
+// accent dot now lives on the shared sliding well (dock-well-dot), not per-tab.
 test("the active tab carries the accent dot and tabs use the new names", async () => {
   const { getByText, queryByText, findByTestId } = await render(<FloatingTabBar {...props} />);
   expect(getByText("Today")).toBeTruthy();
   expect(getByText("Trends")).toBeTruthy();
   expect(queryByText("Progress")).toBeNull();
   expect(queryByText("Home")).toBeNull();
-  expect(await findByTestId("tab-dot-active")).toBeTruthy();
+  expect(await findByTestId("dock-well-dot")).toBeTruthy();
 });
 
 test("capture button routes to /capture", async () => {
@@ -66,11 +79,11 @@ test("tab press navigates to the tapped route", async () => {
   expect(navigate).toHaveBeenCalledWith("diary");
 });
 
-test("shows the active tint dot only on the currently active tab", async () => {
+test("shows the active tint dot exactly once, on the sliding well", async () => {
   // getByTestId throws if more than one match exists, so this alone proves
-  // the dot renders exactly once even though every tab shares the testID.
+  // the dot renders exactly once even though the well itself is shared.
   const { findByTestId } = await render(<FloatingTabBar {...props} />);
-  expect(await findByTestId("tab-dot-active")).toBeTruthy();
+  expect(await findByTestId("dock-well-dot")).toBeTruthy();
 });
 
 test("shows an unread accent dot on More when count > 0", async () => {
@@ -84,18 +97,14 @@ test("hides the unread accent dot on More when count is 0", async () => {
   expect(queryByTestId("more-unread-badge")).toBeNull();
 });
 
-// The active tab used to differ from its neighbours only by icon tint, stroke
-// width, a 1.08 scale and a 4pt dot — over bright light-mode glass that reads
-// as "nothing is selected". These pin the recessed-well recipe. SegmentedGlass
-// shared it until kora#166 moved its selected segment to a solid `ink` pill —
-// the well survives here because the active tab carries four other cues on top
-// of it, where a segment carried only this one.
-test("the active tab sits on an inset well with a hairline glassBorder ring", async () => {
+// Dock v2: the single sliding well (not a per-tab pill) marks the active tab,
+// a full-pill dock-capsule silhouette painted in the recessed `inset` fill.
+test("the sliding well is an inset full pill", async () => {
   const { findByTestId } = await render(<FloatingTabBar {...props} />);
-  const flat = flattenStyle((await findByTestId("tab-active-pill")).props.style);
+  const flat = flattenStyle((await findByTestId("dock-well")).props.style);
   expect(flat.backgroundColor).toBe(instrumentLight.inset);
-  expect(flat.borderColor).toBe(instrumentLight.glassBorder);
-  expect(flat.borderWidth).toBe(StyleSheet.hairlineWidth);
+  expect(flat.height).toBe(44);
+  expect(flat.borderRadius).toBe(22);
 });
 
 // Accent rule (hard, per spec): orange appears on ONE element per view. The
@@ -103,11 +112,11 @@ test("the active tab sits on an inset well with a hairline glassBorder ring", as
 // the bar.
 test("the well is neutral so the accent dot stays the bar's only accent element", async () => {
   const { findByTestId, getAllByTestId } = await render(<FloatingTabBar {...props} />);
-  const well = flattenStyle((await findByTestId("tab-active-pill")).props.style);
+  const well = flattenStyle((await findByTestId("dock-well")).props.style);
   expect(well.backgroundColor).not.toBe(instrumentLight.accent);
-  const dot = flattenStyle((await findByTestId("tab-dot-active")).props.style);
+  const dot = flattenStyle((await findByTestId("dock-well-dot")).props.style);
   expect(dot.backgroundColor).toBe(instrumentLight.accent);
-  expect(getAllByTestId("tab-active-pill")).toHaveLength(1);
+  expect(getAllByTestId("dock-well")).toHaveLength(1);
 });
 
 test("the active label is full-opacity ink and heavier than the demoted inactive labels", async () => {
@@ -148,9 +157,9 @@ test("swaps the pill's BlurView for the opaque fallback when Reduce Transparency
     expect(queryByTestId("tab-bar-pill-blur")).toBeNull();
   });
   expect(getByTestId("tab-bar-pill")).toBeTruthy();
-  // The active well lives inside the tab button, so it must survive the branch
+  // The sliding well lives inside the pill's row, so it must survive the branch
   // swap — the fallback pill is opaque, not blurred, but still a glass surface.
-  expect(getByTestId("tab-active-pill")).toBeTruthy();
+  expect(getByTestId("dock-well")).toBeTruthy();
 
   jest.restoreAllMocks();
 });
@@ -159,6 +168,8 @@ test("swaps the pill's BlurView for the opaque fallback when Reduce Transparency
 // 9px label that scales with Dynamic Type. At 310% the label alone is ~28pt in
 // a ~34pt box, so the content overflowed the pill and was clipped. The pill now
 // grows, and the label — one of the few places a cap is legitimate — is capped.
+// Dock v2 dropped the minHeight from 64 to 58 (the sliding well's own 44pt
+// pill plus margin covers the visual weight the taller pill used to carry).
 test("the pill grows instead of clipping at large Dynamic Type sizes", async () => {
   // Pinned explicitly: the reduce-transparency spy above swaps which of the two
   // pills renders, and restoreAllMocks does not put the default back.
@@ -166,7 +177,7 @@ test("the pill grows instead of clipping at large Dynamic Type sizes", async () 
   const { getByTestId } = await render(<FloatingTabBar {...props} />);
   const pill = flattenStyle(getByTestId("tab-bar-pill-blur").props.style);
   expect(pill.height).toBeUndefined();
-  expect(pill.minHeight).toBe(64);
+  expect(pill.minHeight).toBe(58);
 });
 
 test("the Reduce Transparency fallback pill grows too", async () => {
@@ -174,7 +185,7 @@ test("the Reduce Transparency fallback pill grows too", async () => {
   const { findByTestId } = await render(<FloatingTabBar {...props} />);
   const pill = flattenStyle((await findByTestId("tab-bar-pill")).props.style);
   expect(pill.height).toBeUndefined();
-  expect(pill.minHeight).toBe(64);
+  expect(pill.minHeight).toBe(58);
   jest.restoreAllMocks();
 });
 
