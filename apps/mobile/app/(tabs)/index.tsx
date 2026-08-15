@@ -19,12 +19,21 @@ import { GAUGE_VIEW_H } from "@/components/instrument/gauge";
 import { SpecularSweep } from "@/components/instrument/SpecularSweep";
 import { BezelCluster, ZoneRule, WellFooter } from "@/components/instrument/BezelCluster";
 import { monoStyle } from "@/components/instrument/typography";
-import type { TeleStripCell } from "@/components/instrument/TeleStrip";
 import { useProfile, useDashboard, useDayLogs, useUnreadCount } from "@/api/hooks";
 import { useHealth } from "@/health";
 import { useTheme } from "@/theme";
 import { accessibleMealLabel } from "@/lib/portionAssumedLabel";
 import type { FoodLog } from "@/api/types";
+import type { ReactNode } from "react";
+
+// Shape of the steps/sleep telemetry cells rendered below (kora ignition
+// review, Finding 4: was imported from the now-deleted TeleStrip.tsx, which
+// rendered nowhere — this is the only surviving consumer of the shape).
+interface TelemetryCell {
+  icon: ReactNode;
+  value: string;
+  label: string;
+}
 
 function today(): string {
   return new Date().toLocaleDateString("en-CA");
@@ -117,8 +126,8 @@ export default function Home() {
   };
   // Sentence-case demotion for labels that would otherwise push the screen past
   // the spec's ~4-visible-engraved-label budget (Energy reserve caption + the
-  // GaugeDial footer group + MacroWide's own label + TeleStrip's own labels
-  // already account for that budget — see task-8 fix report).
+  // GaugeDial footer group + the telemetry cells' own labels already account
+  // for that budget — see task-8 fix report).
   const mutedLabel = { fontSize: 11, color: instrument.mut };
 
   const d = dashboard.data;
@@ -148,7 +157,7 @@ export default function Home() {
 
   // Dashboard `Totals` (src/api/types.ts) has no burned/active-energy field —
   // GaugeDial's `burned` prop is intentionally omitted rather than guessed.
-  const stepsCell: TeleStripCell = health.steps
+  const stepsCell: TelemetryCell = health.steps
     ? { icon: <Icon name="footprints" size={16} color={instrument.mut} />, value: health.steps.today.toLocaleString(), label: "Steps" }
     : {
         icon: (
@@ -164,7 +173,7 @@ export default function Home() {
         value: "—",
         label: "Steps",
       };
-  const sleepCell: TeleStripCell = health.sleep
+  const sleepCell: TelemetryCell = health.sleep
     ? { icon: <Icon name="moon" size={16} color={instrument.mut} />, value: `${health.sleep.lastNightHours}h`, label: "Sleep" }
     : {
         icon: (

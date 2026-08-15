@@ -113,8 +113,8 @@ export default function Progress() {
 
   const mono = monoStyle(fonts);
   // Sentence case, not engraved — same convention as Diary's "Day total"/"Water"
-  // captions and Home's MacroWide caption (engraving is reserved for inside the
-  // gauge instruments themselves).
+  // captions and Home's telemetry-cell captions (engraving is reserved for
+  // inside the gauge instruments themselves).
   const mutedLabel = { fontSize: 11, color: instrument.mut };
   // Shared by BOTH branches of the weight figure — AnimatedNumber (a raw RN
   // Text) when data has landed and AppText's em-dash before it. They sit in one
