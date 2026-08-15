@@ -1,0 +1,77 @@
+/* Kora Instrument Glass — sketch theme (mirrors apps/mobile/src/theme/palette.ts)
+   Dark-first: bare :root is dark, matching the app's default appearance. */
+:root {
+  --bg: #0B0D10;
+  --ink: #EDE6D4;
+  --mut: #89929D;
+  --glass: rgba(34, 40, 49, 0.62);
+  --glass-border: rgba(237, 230, 212, 0.38);
+  --glass-highlight: rgba(237, 230, 212, 0.16);
+  --inset: rgba(11, 13, 16, 0.55);
+  --hairline: rgba(237, 230, 212, 0.16);
+  --tick: rgba(237, 230, 212, 0.42);
+  --tick-lit: #EDE6D4;
+  --accent: #FF4A00;
+  --accent-on: #0B0D10;
+  --danger: #EC4E40;
+  --teal: #48A89E;
+  --pool-warm: #FF9450;
+
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --font-mono: Menlo, "SF Mono", Consolas, "Liberation Mono", monospace;
+
+  --radius-hero: 24px;
+  --radius-card: 22px;
+  --radius-strip: 20px;
+  --radius-well: 10px;
+
+  --shadow-card: 0 12px 24px rgba(0, 0, 0, 0.55);
+
+  /* Ignition finish (sketch 001 winner) */
+  --shade: rgba(0, 0, 0, 0.28);          /* bezel bottom shading */
+  --well-shadow: rgba(0, 0, 0, 0.25);    /* inner shadow of recessed wells */
+  --lume-text: rgba(237, 230, 212, 0.30);/* warm glow behind hero numerals */
+  --lume-accent: rgba(255, 74, 0, 0.45); /* glow behind accent captions */
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #ECEDEF;
+    --ink: #16181C;
+    --mut: #5A6069;
+    --glass: rgba(255, 255, 255, 0.60);
+    --glass-border: rgba(22, 24, 28, 0.28);
+    --glass-highlight: rgba(255, 255, 255, 0.95);
+    --inset: rgba(22, 24, 28, 0.08);
+    --hairline: rgba(22, 24, 28, 0.14);
+    --tick: rgba(22, 24, 28, 0.50);
+    --tick-lit: #16181C;
+    --accent: #D23800;
+    --accent-on: #FFFFFF;
+    --danger: #D32F23;
+    --teal: #2C7871;
+    --shadow-card: 0 12px 24px rgba(0, 0, 0, 0.12);
+    --shade: rgba(22, 24, 28, 0.12);
+    --well-shadow: rgba(22, 24, 28, 0.08);
+    --lume-text: transparent;
+    --lume-accent: rgba(210, 56, 0, 0.22);
+  }
+}
+
+:root[data-theme="light"] {
+  --bg: #ECEDEF;
+  --ink: #16181C;
+  --mut: #5A6069;
+  --glass: rgba(255, 255, 255, 0.60);
+  --glass-border: rgba(22, 24, 28, 0.28);
+  --glass-highlight: rgba(255, 255, 255, 0.95);
+  --inset: rgba(22, 24, 28, 0.08);
+  --hairline: rgba(22, 24, 28, 0.14);
+  --tick: rgba(22, 24, 28, 0.50);
+  --tick-lit: #16181C;
+  --accent: #D23800;
+  --accent-on: #FFFFFF;
+  --danger: #D32F23;
+  --teal: #2C7871;
+  --shadow-card: 0 12px 24px rgba(0, 0, 0, 0.12);
+}

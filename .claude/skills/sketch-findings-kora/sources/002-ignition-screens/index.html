@@ -1,0 +1,779 @@
+<!-- Sketch 002 — the winning "Ignition" language applied to Diary, Trends, More. Throwaway mockup. -->
+<title>Kora Ignition Screens</title>
+<link rel="stylesheet" href="../themes/default.css">
+<style>
+  /* Tokens inlined for self-containment (mirrors ../themes/default.css / apps/mobile/src/theme/palette.ts) */
+  :root {
+    --bg: #0B0D10; --ink: #EDE6D4; --mut: #89929D;
+    --glass: rgba(34,40,49,0.62); --glass-border: rgba(237,230,212,0.38);
+    --glass-highlight: rgba(237,230,212,0.16); --inset: rgba(11,13,16,0.55);
+    --hairline: rgba(237,230,212,0.16); --tick: rgba(237,230,212,0.42); --tick-lit: #EDE6D4;
+    --accent: #FF4A00; --accent-on: #0B0D10; --danger: #EC4E40; --teal: #48A89E; --pool-warm: #FF9450;
+    --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+    --font-mono: Menlo, "SF Mono", Consolas, "Liberation Mono", monospace;
+    --shadow-card: 0 12px 24px rgba(0,0,0,0.55);
+    --shade: rgba(0,0,0,.28); --well-shadow: rgba(0,0,0,.25);
+    --lume-text: rgba(237,230,212,.30); --lume-accent: rgba(255,74,0,.45);
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #ECEDEF; --ink: #16181C; --mut: #5A6069;
+      --glass: rgba(255,255,255,0.60); --glass-border: rgba(22,24,28,0.28);
+      --glass-highlight: rgba(255,255,255,0.95); --inset: rgba(22,24,28,0.08);
+      --hairline: rgba(22,24,28,0.14); --tick: rgba(22,24,28,0.50); --tick-lit: #16181C;
+      --accent: #D23800; --accent-on: #FFFFFF; --danger: #D32F23; --teal: #2C7871;
+      --shadow-card: 0 12px 24px rgba(0,0,0,0.12);
+      --shade: rgba(22,24,28,.12); --well-shadow: rgba(22,24,28,.08);
+      --lume-text: transparent; --lume-accent: rgba(210,56,0,.22);
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #ECEDEF; --ink: #16181C; --mut: #5A6069;
+    --glass: rgba(255,255,255,0.60); --glass-border: rgba(22,24,28,0.28);
+    --glass-highlight: rgba(255,255,255,0.95); --inset: rgba(22,24,28,0.08);
+    --hairline: rgba(22,24,28,0.14); --tick: rgba(22,24,28,0.50); --tick-lit: #16181C;
+    --accent: #D23800; --accent-on: #FFFFFF; --danger: #D32F23; --teal: #2C7871;
+    --shadow-card: 0 12px 24px rgba(0,0,0,0.12);
+    --shade: rgba(22,24,28,.12); --well-shadow: rgba(22,24,28,.08);
+    --lume-text: transparent; --lume-accent: rgba(210,56,0,.22);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { background: var(--bg); }
+  body { font-family: var(--font-ui); background: var(--bg); color: var(--ink); padding: 76px 24px 48px; min-height: 100vh; }
+  button { font-family: inherit; cursor: pointer; }
+
+  #variant-nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 9998;
+    display: flex; align-items: center; gap: 8px; padding: 12px 20px;
+    background: color-mix(in srgb, var(--bg) 86%, transparent);
+    backdrop-filter: blur(14px); border-bottom: 1px solid var(--hairline);
+  }
+  #variant-nav .sketch-id { font-family: var(--font-mono); font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--mut); margin-right: 8px; }
+  .variant-tab {
+    border: 1px solid var(--hairline); background: transparent; color: var(--mut);
+    font-size: 12px; font-weight: 600; padding: 7px 14px; border-radius: 999px; transition: all .15s ease;
+  }
+  .variant-tab:hover { color: var(--ink); border-color: var(--glass-border); }
+  .variant-tab.active { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .variant-tab:focus-visible, .pill-btn:focus-visible, .tb2:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .variant { display: none; }
+  .variant.active { display: block; }
+  .stage { display: flex; gap: 40px; justify-content: center; align-items: flex-start; flex-wrap: wrap; }
+  .notes { max-width: 300px; padding-top: 12px; font-size: 13px; line-height: 1.55; color: var(--mut); }
+  .notes h2 { font-size: 13px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--ink); margin-bottom: 10px; }
+  .notes h3 { font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--mut); margin: 16px 0 6px; }
+  .notes ul { list-style: none; }
+  .notes li { padding: 3px 0 3px 14px; position: relative; }
+  .notes li::before { content: ""; position: absolute; left: 0; top: 10px; width: 5px; height: 1px; background: var(--accent); }
+
+  .phone {
+    width: 390px; height: 844px; border-radius: 54px; overflow: hidden; position: relative;
+    background: var(--bg); border: 1px solid var(--glass-border);
+    box-shadow: 0 30px 60px rgba(0,0,0,.45); flex-shrink: 0;
+  }
+  .phone::before {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background:
+      radial-gradient(340px 260px at 82% 104%, color-mix(in srgb, var(--pool-warm) 13%, transparent), transparent 70%),
+      radial-gradient(300px 240px at 8% -6%, color-mix(in srgb, var(--teal) 10%, transparent), transparent 70%);
+  }
+  .screen { position: absolute; inset: 0; overflow-y: auto; padding: 14px 0 140px; scrollbar-width: none; }
+  .screen::-webkit-scrollbar { display: none; }
+  .statusbar { display: flex; justify-content: space-between; padding: 4px 34px 10px; font-family: var(--font-mono); font-size: 12px; font-weight: 600; color: var(--ink); }
+  .screen-header { padding: 4px 20px 14px; }
+  .screen-header .overline { font-size: 13px; color: var(--mut); margin-bottom: 2px; }
+  .screen-header h1 { font-size: 34px; line-height: 41px; font-weight: 700; letter-spacing: .37px; }
+
+  .engraved { font-size: 10px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: var(--mut); }
+  .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+  .lume-num { text-shadow: 0 0 22px var(--lume-text); }
+
+  /* entrance stagger (mirrors the app's FadeInDown enter(i)) */
+  .rise { animation: rise .45s cubic-bezier(.2,.7,.3,1) both; animation-delay: var(--d, 0s); }
+  @keyframes rise { from { opacity: 0; transform: translateY(10px); } }
+  @media (prefers-reduced-motion: reduce) { .rise { animation: none; } .bezel::after { animation: none !important; } .track i, .gauge-needle, .macro-cell .microbar i { transition: none; } }
+
+  /* Ignition material */
+  .bezel {
+    border-radius: 28px; padding: 1.5px; box-shadow: var(--shadow-card);
+    /* review: two-stop linear rim only — conic sweep dropped (not buildable in RN without Skia) */
+    background: linear-gradient(180deg, var(--glass-highlight), transparent 22%, var(--shade) 90%);
+  }
+  .cluster {
+    position: relative; overflow: hidden; border-radius: 26.5px;
+    border: 1px solid var(--glass-border); backdrop-filter: blur(20px);
+    background: radial-gradient(150% 80% at 50% -18%, var(--glass-highlight), transparent 40%), var(--glass);
+  }
+  .zone { padding: 14px 16px 16px; }
+  .zone-rule { display: flex; align-items: center; gap: 10px; padding: 0 16px; }
+  .zone-rule::before, .zone-rule::after { content: ""; flex: 1; height: 1px; background: var(--hairline); }
+  .glass-panel {
+    position: relative; overflow: hidden; border-radius: 22px;
+    border: 1px solid var(--glass-border); backdrop-filter: blur(18px); box-shadow: var(--shadow-card);
+    background: radial-gradient(130% 70% at 50% -14%, var(--glass-highlight), transparent 46%), var(--glass);
+  }
+  .well-footer { display: flex; align-items: center; background: var(--inset); border-top: 1px solid var(--hairline); padding: 12px 16px; gap: 10px; }
+
+  /* rows */
+  .row { display: flex; gap: 12px; padding: 10px 0; align-items: baseline; border-top: 1px solid var(--hairline); }
+  .row:first-child { border-top: none; }
+  .row .t { width: 54px; flex-shrink: 0; font-family: var(--font-mono); font-size: 12px; color: var(--mut); }
+  .row .m { flex: 1; min-width: 0; }
+  .row .nm { font-size: 15px; font-weight: 600; color: var(--ink); }
+  .row .sub { font-size: 11px; color: var(--mut); margin-top: 1px; }
+  .row .kc { font-family: var(--font-mono); font-size: 15px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+
+  .ghost-cta {
+    width: 100%; margin-top: 10px; padding: 13px; display: flex; align-items: center; justify-content: center; gap: 8px;
+    background: transparent; border: 1.5px dashed var(--tick); border-radius: 12px;
+    color: var(--mut); font-size: 14px; font-weight: 600; transition: all .15s ease;
+  }
+  .ghost-cta:hover { border-color: var(--accent); color: var(--ink); }
+  .ghost-cta .plus { color: var(--accent); font-size: 16px; font-weight: 700; }
+
+  /* ---------- Home (winner D contract from sketch 001, post-review) ---------- */
+  .home-header { display: flex; align-items: flex-end; justify-content: space-between; padding: 0 16px 8px; }
+  .home-header .greet { font-size: 14px; color: var(--mut); margin-bottom: 2px; }
+  .home-header h1 { font-size: 34px; line-height: 41px; font-weight: 700; letter-spacing: .37px; }
+  .home-header .side { display: flex; align-items: center; gap: 12px; padding-bottom: 4px; }
+  .bell { position: relative; width: 36px; height: 36px; display: grid; place-items: center; color: var(--ink); }
+  .bell .dot { position: absolute; top: 5px; right: 5px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+  .avatar { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--inset); border: 1px solid var(--glass-border); font-size: 13px; font-weight: 700; color: var(--ink); }
+  .gauge-wrap { position: relative; width: 264px; margin: 0 auto; }
+  .gauge-wrap svg { display: block; width: 100%; height: auto; }
+  .gauge-center { position: absolute; top: 37%; left: 0; right: 0; text-align: center; pointer-events: none; }
+  .gauge-remaining { font-family: var(--font-mono); font-size: 44px; line-height: 50px; letter-spacing: -1.2px; font-variant-numeric: tabular-nums; color: var(--ink); text-shadow: 0 0 22px var(--lume-text); }
+  .gauge-caption { font-size: 10px; font-weight: 600; letter-spacing: 3px; text-transform: uppercase; color: var(--accent); margin-top: 6px; text-shadow: 0 0 14px var(--lume-accent); }
+  .gauge-needle { transition: transform .9s cubic-bezier(.3,.9,.35,1); filter: drop-shadow(0 0 5px color-mix(in srgb, var(--accent) 65%, transparent)); }
+  .gauge-footer { display: flex; border-top: 1px solid var(--hairline); padding-top: 12px; margin-top: 8px; }
+  .gauge-footer > div { flex: 1; text-align: center; }
+  .gauge-footer .v { font-family: var(--font-mono); font-size: 15px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .gauge-footer .l { font-size: 9px; letter-spacing: 2px; text-transform: uppercase; color: var(--mut); margin-top: 2px; }
+  .macro-rail { display: flex; }
+  .macro-cell { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 4px 2px; }
+  .macro-cell + .macro-cell { border-left: 1px solid var(--hairline); }
+  .macro-cell .nm { font-size: 11px; font-weight: 600; color: var(--mut); }
+  .macro-cell .vl { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .macro-cell .microbar { width: 64%; height: 2px; border-radius: 1px; background: var(--inset); margin-top: 2px; overflow: hidden; }
+  .macro-cell .microbar i { display: block; height: 100%; background: var(--ink); border-radius: 1px; }
+  .macro-cell .togo { font-size: 10px; font-family: var(--font-mono); color: var(--mut); }
+  .vf-cell { flex: 1; display: flex; align-items: center; gap: 10px; justify-content: center; }
+  .vf-cell + .vf-cell { border-left: 1px solid var(--hairline); }
+  .vf-cell .ico { width: 30px; height: 30px; border-radius: 9px; background: var(--glass); border: 1px solid var(--glass-border); display: grid; place-items: center; font-size: 14px; }
+  .vf-cell .v { font-family: var(--font-mono); font-size: 16px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .vf-cell .l { font-size: 10px; font-weight: 600; color: var(--mut); }
+
+  /* ---------- Diary ---------- */
+  .week-rail-wrap { padding: 0 16px; }
+  .week-rail { display: flex; padding: 6px; gap: 4px; border-radius: 20.5px; }
+  .day-cell {
+    flex: 1; border: none; background: transparent; border-radius: 14px; padding: 8px 0 7px;
+    display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--mut); transition: all .15s ease;
+  }
+  .day-cell:hover { color: var(--ink); }
+  .day-cell .dw { font-size: 10px; font-weight: 600; letter-spacing: .5px; }
+  .day-cell .dd { font-family: var(--font-mono); font-size: 15px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .day-cell .pip { width: 4px; height: 4px; border-radius: 50%; background: var(--tick); }
+  .day-cell .pip.hit { background: var(--tick-lit); } /* review: accent budget — day-total track is Diary's one accent */
+  .day-cell.sel { background: var(--inset); box-shadow: inset 0 1px 0 var(--well-shadow), 0 0 0 1px var(--glass-border); color: var(--ink); }
+  .daytotal-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
+  .daytotal-head .big { font-family: var(--font-mono); font-size: 22px; font-weight: 600; letter-spacing: -.5px; font-variant-numeric: tabular-nums; }
+  .daytotal-head .big small { font-size: 13px; color: var(--mut); font-weight: 500; letter-spacing: 0; }
+  .track { height: 6px; border-radius: 3px; background: var(--inset); overflow: hidden; }
+  .track i { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 3px; transition: width 1.1s cubic-bezier(.22,1,.36,1) .15s; }
+  .pill-btn {
+    border: none; border-radius: 16px; padding: 12px 18px; background: var(--inset);
+    color: var(--ink); font-size: 14px; font-weight: 700; transition: all .15s ease; flex: 1;
+    box-shadow: inset 0 1px 0 var(--well-shadow);
+  }
+  .pill-btn:hover { color: var(--accent); }
+  .link-row {
+    display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%;
+    padding: 12px; margin-top: 10px; background: transparent; border: none;
+    color: var(--mut); font-size: 13px; font-weight: 600; transition: color .15s ease;
+  }
+  .link-row:hover { color: var(--ink); }
+
+  /* ---------- Trends ---------- */
+  /* review: color grammar — loss toward goal is neutral; accent/danger only when moving away from goal */
+  .delta { font-family: var(--font-mono); font-size: 13px; font-weight: 700; color: var(--ink); }
+  .seg { display: flex; background: var(--inset); border: 1px solid var(--glass-border); border-radius: 12px; padding: 3px; margin-top: 14px; }
+  .seg button {
+    flex: 1; border: none; background: transparent; border-radius: 9px; padding: 7px 0;
+    font-size: 11px; font-weight: 600; letter-spacing: 1.4px; text-transform: uppercase; color: var(--mut); transition: all .15s ease;
+  }
+  .seg button.active { background: var(--ink); color: var(--bg); font-weight: 700; }
+  .legend { display: flex; gap: 16px; margin-top: 12px; align-items: center; }
+  .legend .it { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--mut); }
+  .legend .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .legend .dash { width: 12px; border-top: 1px dashed var(--mut); }
+  .duo { display: flex; gap: 12px; padding: 0 16px; margin-top: 12px; }
+  .duo .glass-panel { flex: 1; padding: 14px; border-radius: 20px; }
+  .duo .v { font-family: var(--font-mono); font-size: 22px; font-weight: 600; letter-spacing: -.5px; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .duo .l { font-size: 11px; font-weight: 600; color: var(--mut); margin-bottom: 6px; }
+  .cells { display: flex; gap: 3px; margin-top: 10px; }
+  .cells i { flex: 1; height: 14px; border-radius: 3px; background: var(--inset); }
+  .cells i.hit { background: var(--tick-lit); opacity: .55; } /* review: weight endpoint is Trends' one accent */
+  .cells i.part { background: var(--tick); }
+  chart-host, .chart-host { display: block; }
+
+  /* ---------- More ---------- */
+  .profile-hero { display: flex; align-items: center; gap: 14px; padding: 16px; }
+  .avatar-lg {
+    width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center;
+    background: var(--inset); border: 1px solid var(--glass-border);
+    font-size: 18px; font-weight: 700; color: var(--ink);
+    box-shadow: inset 0 1px 0 var(--well-shadow), 0 0 24px -8px color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+  .profile-hero .who { flex: 1; }
+  .profile-hero .nm { font-size: 17px; font-weight: 700; color: var(--ink); }
+  .profile-hero .em { font-size: 12px; color: var(--mut); margin-top: 2px; font-family: var(--font-mono); }
+  .chev { color: var(--mut); font-size: 15px; }
+  .set-row {
+    display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+    padding: 12px 16px; border: none; background: transparent; color: var(--ink); transition: background .15s ease;
+  }
+  .set-row:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); }
+  .set-row + .set-row { border-top: 1px solid var(--hairline); }
+  .icon-well {
+    width: 34px; height: 34px; border-radius: 10px; background: var(--inset);
+    border: 1px solid var(--glass-border); display: grid; place-items: center; font-size: 15px;
+    box-shadow: inset 0 1px 0 var(--well-shadow); flex-shrink: 0;
+  }
+  .set-row .lb { flex: 1; font-size: 15px; font-weight: 500; }
+  .set-row.danger .lb, .set-row.danger .icon-well { color: var(--danger); }
+  .badge { font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--teal); border: 1px solid color-mix(in srgb, var(--teal) 45%, transparent); border-radius: 999px; padding: 3px 8px; }
+  .version { text-align: center; margin-top: 20px; }
+
+  /* dock v2 (winner from sketch 001) */
+  .tabbar-zone { position: absolute; left: 24px; right: 24px; bottom: 24px; z-index: 5; }
+  .dock2-bezel { border-radius: 31px; padding: 1.5px; background: linear-gradient(180deg, var(--glass-highlight), transparent 30%, var(--shade) 92%); box-shadow: var(--shadow-card); }
+  .dock2 { display: flex; align-items: center; height: 58px; border-radius: 29.5px; background: var(--glass); backdrop-filter: blur(20px); border: 1px solid var(--glass-border); padding: 0 10px; position: relative; }
+  .dock2 .tb2 {
+    flex: 1; height: 44px; border: none; background: transparent; border-radius: 15px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    color: var(--mut); position: relative; transition: all .18s ease; font-size: 19px;
+  }
+  .dock2 .tb2:hover { color: var(--ink); }
+  .dock2 .tb2.active { color: var(--ink); background: var(--inset); box-shadow: inset 0 1px 0 var(--well-shadow); }
+  .dock2 .tb2.active::after { content: ""; position: absolute; bottom: 6px; width: 4px; height: 4px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 70%, transparent); }
+  /* review: labels always on for discoverability; active gets full weight */
+  .dock2 .tb2 .lbl2 { font-size: 8px; font-weight: 500; letter-spacing: 1.6px; text-transform: uppercase; opacity: .72; transition: all .18s ease; }
+  .dock2 .tb2.active .lbl2 { opacity: 1; font-weight: 700; }
+  .dock2 .notch { flex: 0 0 66px; }
+  .capture-fab2 {
+    position: absolute; left: 50%; top: -16px; transform: translateX(-50%);
+    width: 56px; height: 56px; border-radius: 50%; border: none; /* review: raised sibling, no bg-ring notch */
+    background: radial-gradient(120% 120% at 50% 0%, color-mix(in srgb, #fff 28%, var(--accent)) 0%, var(--accent) 46%, color-mix(in srgb, #000 22%, var(--accent)) 100%);
+    color: var(--accent-on); font-size: 19px;
+    box-shadow: 0 8px 20px color-mix(in srgb, var(--accent) 45%, transparent), inset 0 1px 0 rgba(255,255,255,.35);
+    transition: transform .18s ease;
+  }
+  .capture-fab2:hover { transform: translateX(-50%) scale(1.07); }
+
+  #sketch-tools {
+    position: fixed; bottom: 12px; right: 12px; z-index: 9999;
+    font-family: system-ui; font-size: 12px; background: rgba(0,0,0,.75); color: #fff;
+    padding: 8px 12px; border-radius: 8px; opacity: .45; transition: opacity .2s;
+    display: flex; gap: 8px; align-items: center;
+  }
+  #sketch-tools:hover { opacity: 1; }
+  #sketch-tools select { background: #222; color: #fff; border: 1px solid #444; border-radius: 4px; padding: 2px 4px; font-size: 12px; }
+</style>
+
+<div id="variant-nav">
+  <span class="sketch-id">Sketch 002 · Ignition screens</span>
+  <button class="variant-tab active" onclick="showScreen('home', this)">Home</button>
+  <button class="variant-tab" onclick="showScreen('diary', this)">Diary</button>
+  <button class="variant-tab" onclick="showScreen('trends', this)">Trends</button>
+  <button class="variant-tab" onclick="showScreen('more', this)">More</button>
+  <label style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--mut)">◐ Theme
+    <select onchange="setTheme(this.value)" style="background:transparent;color:var(--ink);border:1px solid var(--hairline);border-radius:999px;padding:5px 10px;font-size:12px;font-weight:600">
+      <option value="dark" selected>Dark</option>
+      <option value="light">Light</option>
+      <option value="system">System</option>
+    </select>
+  </label>
+</div>
+
+<!-- ============================ HOME ============================ -->
+<div id="variant-home" class="variant active">
+  <div class="stage">
+    <div class="phone">
+      <div class="screen">
+        <div class="statusbar"><span>9:41</span><span>◧ 87%</span></div>
+        <div class="home-header rise" style="--d:.02s">
+          <div>
+            <div class="greet">Sat, Aug 16 · Good morning, Mahesh</div>
+            <h1>Today</h1>
+          </div>
+          <div class="side">
+            <div class="bell">🔔<span class="dot"></span></div>
+            <div class="avatar">MS</div>
+          </div>
+        </div>
+
+        <div class="rise" style="padding: 12px 16px 0; --d:.08s">
+          <div class="bezel">
+            <div class="cluster">
+              <div class="zone">
+                <div class="engraved" style="margin-bottom:8px">Energy reserve</div>
+                <div class="gauge-slot" data-home-gauge></div>
+              </div>
+              <div class="zone-rule"><span class="engraved">Macros</span></div>
+              <div class="macro-rail">
+                <div class="macro-cell"><span data-home-subdial="0.39"></span><span class="nm">Protein</span><span class="vl">62/160g</span><span class="microbar"><i style="width:39%"></i></span><span class="togo">98g to go</span></div>
+                <div class="macro-cell"><span data-home-subdial="0.37"></span><span class="nm">Carbs</span><span class="vl">88/240g</span><span class="microbar"><i style="width:37%"></i></span><span class="togo">152g to go</span></div>
+                <div class="macro-cell"><span data-home-subdial="0.44"></span><span class="nm">Fat</span><span class="vl">31/70g</span><span class="microbar"><i style="width:44%"></i></span><span class="togo">39g to go</span></div>
+              </div>
+              <div class="well-footer" style="padding: 12px 18px">
+                <div class="vf-cell"><span class="ico">👟</span><span><div class="v">6,482</div><div class="l">Steps</div></span></div>
+                <div class="vf-cell"><span class="ico">🌙</span><span><div class="v">7h 12m</div><div class="l">Sleep</div></span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="rise" style="padding: 20px 16px 0; --d:.16s">
+          <div class="zone-rule" style="padding:0"><span class="engraved">Logged today</span></div>
+          <div class="row"><span class="t">08:10</span><span class="m"><span class="nm">Masala oats with almond milk</span><div class="sub">Breakfast</div></span><span class="kc">380 kcal</span></div>
+          <div class="row"><span class="t">13:05</span><span class="m"><span class="nm">Paneer tikka wrap</span><div class="sub">Lunch</div><div class="sub" style="font-size:11px;font-weight:600">≈ Portion is a guess</div></span><span class="kc">460 kcal</span></div>
+          <div class="row"><span class="t">16:30</span><span class="m"><span class="nm">Filter coffee with milk</span><div class="sub">Snack</div></span><span class="kc">20 kcal</span></div>
+          <button class="ghost-cta"><span class="plus">+</span> Log a meal</button>
+        </div>
+        <div class="tabbar-zone" data-dock="today"></div>
+      </div>
+    </div>
+    <aside class="notes">
+      <h2>Home</h2>
+      <p>The winning sketch-001 variant D, carried into the v2 set with the review contract applied.</p>
+      <h3>Post-review contract</h3>
+      <ul>
+        <li>Bezel rim is the two-stop linear gradient (conic dropped — not buildable in RN without Skia)</li>
+        <li>Sub-dials light in ink; orange belongs to the hero needle only</li>
+        <li>Full ignition sequence (see sketch 001) plays once per day; other visits get this calm settle</li>
+        <li>Dock: always-on labels, clearer glyphs, raised capture button (no notch ring)</li>
+      </ul>
+    </aside>
+  </div>
+</div>
+
+<!-- ============================ DIARY ============================ -->
+<div id="variant-diary" class="variant">
+  <div class="stage">
+    <div class="phone">
+      <div class="screen">
+        <div class="statusbar"><span>9:41</span><span>◧ 87%</span></div>
+        <div class="screen-header rise" style="--d:.02s"><h1>Diary</h1></div>
+
+        <div class="week-rail-wrap rise" style="--d:.06s">
+          <div class="bezel" style="border-radius:22px">
+            <div class="cluster week-rail" style="border-radius:20.5px">
+              <button class="day-cell"><span class="dw">Sun</span><span class="dd">10</span><span class="pip"></span></button>
+              <button class="day-cell"><span class="dw">Mon</span><span class="dd">11</span><span class="pip hit"></span></button>
+              <button class="day-cell"><span class="dw">Tue</span><span class="dd">12</span><span class="pip hit"></span></button>
+              <button class="day-cell"><span class="dw">Wed</span><span class="dd">13</span><span class="pip"></span></button>
+              <button class="day-cell"><span class="dw">Thu</span><span class="dd">14</span><span class="pip hit"></span></button>
+              <button class="day-cell"><span class="dw">Fri</span><span class="dd">15</span><span class="pip hit"></span></button>
+              <button class="day-cell sel"><span class="dw">Sat</span><span class="dd">16</span><span class="pip"></span></button>
+            </div>
+          </div>
+        </div>
+
+        <div class="rise" style="padding: 12px 16px 0; --d:.12s">
+          <div class="bezel">
+            <div class="cluster">
+              <div class="zone">
+                <div class="engraved" style="margin-bottom:8px">Day total</div>
+                <div class="daytotal-head">
+                  <span class="big mono lume-num">860 <small>of 2,100 kcal</small></span>
+                  <span class="mono" style="font-size:13px;color:var(--mut)">41%</span>
+                </div>
+                <div class="track"><i data-daytrack></i></div>
+              </div>
+              <div class="well-footer">
+                <span class="engraved" style="flex:1">Water · <span class="mono" data-water>750</span> ml of 2 L</span>
+                <button class="pill-btn" style="flex:0 0 auto;padding:9px 14px" onclick="addWater(250)">+250</button>
+                <button class="pill-btn" style="flex:0 0 auto;padding:9px 14px" onclick="addWater(500)">+500</button>
+              </div>
+            </div>
+          </div>
+          <!-- review: meal log broken out of the cluster — the bezel wraps only fixed-cardinality content -->
+          <div style="margin-top:18px">
+            <div class="zone-rule" style="padding:0"><span class="engraved">Breakfast · 380 kcal</span></div>
+            <div class="row"><span class="t">08:10</span><span class="m"><span class="nm">Masala oats with almond milk</span></span><span class="kc">380 kcal</span></div>
+            <div class="zone-rule" style="padding:0;margin-top:8px"><span class="engraved">Lunch · 460 kcal</span></div>
+            <div class="row"><span class="t">13:05</span><span class="m"><span class="nm">Paneer tikka wrap</span><div class="sub" style="font-size:11px;font-weight:600">≈ Portion is a guess</div></span><span class="kc">460 kcal</span></div>
+            <div class="zone-rule" style="padding:0;margin-top:8px"><span class="engraved">Snack · 20 kcal</span></div>
+            <div class="row"><span class="t">16:30</span><span class="m"><span class="nm">Filter coffee with milk</span></span><span class="kc">20 kcal</span></div>
+            <button class="ghost-cta"><span class="plus">+</span> Add dinner · 1,240 kcal in reserve</button>
+          </div>
+          <button class="link-row">⧉&nbsp; Copy yesterday's meals</button>
+        </div>
+        <div class="tabbar-zone" data-dock="diary"></div>
+      </div>
+    </div>
+    <aside class="notes">
+      <h2>Diary</h2>
+      <p><em>Post-review structure:</em> the bezel wraps only fixed-cardinality content — day-total and water. The meal log breaks out into a card-free hairline list (it must scale to any meal count and support swipe-to-edit in RN).</p>
+      <h3>Ignition details</h3>
+      <ul>
+        <li>Week strip is a machined rail — selected day sinks into an inset well; goal pips are lit ink (accent budget: the day-total track is this screen's one orange)</li>
+        <li>Day-total track fills on entry, echoing the home needle sweep</li>
+        <li>Water lives in the recessed footer well with working +250/+500 pills</li>
+      </ul>
+    </aside>
+  </div>
+</div>
+
+<!-- ============================ TRENDS ============================ -->
+<div id="variant-trends" class="variant">
+  <div class="stage">
+    <div class="phone">
+      <div class="screen">
+        <div class="statusbar"><span>9:41</span><span>◧ 87%</span></div>
+        <div class="screen-header rise" style="--d:.02s"><div class="overline">Last 30 days</div><h1>Trends</h1></div>
+
+        <div class="rise" style="padding: 0 16px; --d:.08s">
+          <div class="bezel">
+            <div class="cluster" style="padding: 16px 16px 14px">
+              <div class="engraved" style="margin-bottom:6px">Weight</div>
+              <div style="display:flex;align-items:baseline;gap:10px">
+                <span class="mono lume-num" style="font-size:34px;font-weight:700;letter-spacing:-1px">74.8 <span style="font-size:14px;color:var(--mut);font-weight:500">kg</span></span>
+                <span class="delta">▾ 1.2 kg</span>
+              </div>
+              <svg class="chart-host" data-weight-chart viewBox="0 0 326 110" style="width:100%;margin-top:10px"></svg>
+              <div class="seg" data-seg>
+                <button>1W</button><button class="active">1M</button><button>3M</button><button>1Y</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="rise" style="padding: 0 16px; margin-top: 12px; --d:.16s">
+          <div class="glass-panel" style="padding: 16px 16px 14px">
+            <div class="engraved" style="margin-bottom:10px">Energy vs budget</div>
+            <svg class="chart-host" data-energy-chart viewBox="0 0 326 120" style="width:100%"></svg>
+            <div class="legend">
+              <span class="it"><span class="dot" style="background:var(--tick)"></span>days</span>
+              <span class="it"><span class="dot" style="background:var(--accent)"></span>over budget</span>
+              <span class="it"><span class="dash"></span>budget 2,100</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="duo rise" style="--d:.24s">
+          <div class="glass-panel">
+            <div class="l">Logging streak</div>
+            <div class="v lume-num">12 <span style="font-size:12px;color:var(--mut)">days</span></div>
+            <div class="cells">
+              <i class="hit"></i><i class="hit"></i><i class="hit"></i><i class="part"></i><i class="hit"></i><i class="hit"></i><i class="hit"></i><i class="hit"></i><i class="hit"></i><i class="hit"></i><i class="hit"></i><i class="hit"></i><i></i><i></i>
+            </div>
+          </div>
+          <div class="glass-panel">
+            <div class="l">Avg sleep</div>
+            <div class="v lume-num">7h 04m</div>
+            <div class="cells">
+              <i class="part"></i><i class="hit"></i><i class="hit"></i><i class="hit"></i><i class="part"></i><i class="hit"></i><i class="hit"></i>
+            </div>
+          </div>
+        </div>
+        <div class="tabbar-zone" data-dock="trends"></div>
+      </div>
+    </div>
+    <aside class="notes">
+      <h2>Trends</h2>
+      <p>Weight is the hero instrument in the full bezel; secondary analytics stay on lighter glass so the hierarchy from Home carries over.</p>
+      <h3>Ignition details</h3>
+      <ul>
+        <li>Weight line draws itself in on entry; the endpoint dot carries the lume glow</li>
+        <li>Energy bars grow from the baseline; only over-budget days may wear orange</li>
+        <li>Segmented control is live — switch ranges to see the chart redraw</li>
+        <li>Streak cells reuse the accent-hit language from the spec</li>
+      </ul>
+    </aside>
+  </div>
+</div>
+
+<!-- ============================ MORE ============================ -->
+<div id="variant-more" class="variant">
+  <div class="stage">
+    <div class="phone">
+      <div class="screen">
+        <div class="statusbar"><span>9:41</span><span>◧ 87%</span></div>
+        <div class="screen-header rise" style="--d:.02s"><div class="overline">Your account</div><h1>More</h1></div>
+
+        <div class="rise" style="padding: 0 20px; --d:.08s">
+          <div class="bezel" style="border-radius:26px">
+            <button class="cluster profile-hero" style="border-radius:24.5px;width:100%;border:none;text-align:left">
+              <span class="avatar-lg">MS</span>
+              <span class="who"><span class="nm">Mahesh Sangawar</span><div class="em">m.sangawar@example.com</div></span>
+              <span class="chev">›</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="rise" style="padding: 0 20px; margin-top: 20px; --d:.14s">
+          <div class="engraved" style="margin-bottom:8px;margin-left:4px">Tracking</div>
+          <div class="glass-panel">
+            <button class="set-row"><span class="icon-well">🎯</span><span class="lb">Goals &amp; units</span><span class="chev">›</span></button>
+            <button class="set-row"><span class="icon-well">❤️</span><span class="lb">Apple Health</span><span class="badge">Connected</span><span class="chev">›</span></button>
+            <button class="set-row"><span class="icon-well">🔔</span><span class="lb">Notifications</span><span class="chev">›</span></button>
+            <button class="set-row"><span class="icon-well">◐</span><span class="lb">Appearance</span><span class="chev">›</span></button>
+          </div>
+        </div>
+
+        <div class="rise" style="padding: 0 20px; margin-top: 20px; --d:.20s">
+          <div class="engraved" style="margin-bottom:8px;margin-left:4px">Data &amp; support</div>
+          <div class="glass-panel">
+            <button class="set-row"><span class="icon-well">🔒</span><span class="lb">Privacy</span><span class="chev">›</span></button>
+            <button class="set-row"><span class="icon-well">⤓</span><span class="lb">Export data</span><span class="chev">›</span></button>
+            <button class="set-row"><span class="icon-well">?</span><span class="lb">Help &amp; feedback</span><span class="chev">›</span></button>
+          </div>
+        </div>
+
+        <div class="rise" style="padding: 0 20px; margin-top: 20px; --d:.26s">
+          <div class="glass-panel">
+            <button class="set-row danger"><span class="icon-well">⏻</span><span class="lb">Sign out</span></button>
+          </div>
+          <div class="version engraved mono">Kora 1.4.2 (318)</div>
+        </div>
+        <div class="tabbar-zone" data-dock="more"></div>
+      </div>
+    </div>
+    <aside class="notes">
+      <h2>More</h2>
+      <p>Utility screens keep the hierarchy honest: only the identity hero earns the full bezel; settings groups stay on lighter sheened glass under engraved group labels.</p>
+      <h3>Ignition details</h3>
+      <ul>
+        <li>Avatar well carries a whisper of orange lume — the screen's single accent</li>
+        <li>Icon wells are recessed (inset + inner shadow), machined like the vitals footer</li>
+        <li>Connected state uses teal, reserved for status — never decoration</li>
+      </ul>
+    </aside>
+  </div>
+</div>
+
+<script>
+  const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  const SVGNS = "http://www.w3.org/2000/svg";
+  function el(tag, attrs) {
+    const e = document.createElementNS(SVGNS, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // ---------- Diary ----------
+  let water = 750;
+  function addWater(ml) {
+    water = Math.min(2000, water + ml);
+    document.querySelectorAll("[data-water]").forEach((e) => (e.textContent = water.toLocaleString("en-US")));
+  }
+  function fillTracks() {
+    document.querySelectorAll("[data-daytrack]").forEach((t) => {
+      t.style.width = "0";
+      requestAnimationFrame(() => requestAnimationFrame(() => { t.style.width = "41%"; }));
+    });
+  }
+
+  // ---------- Trends charts ----------
+  const weightData = {
+    "1W": [75.4, 75.3, 75.1, 75.2, 75.0, 74.9, 74.8],
+    "1M": [76.0, 75.8, 75.9, 75.6, 75.7, 75.4, 75.5, 75.2, 75.3, 75.0, 74.9, 75.1, 74.8],
+    "3M": [77.6, 77.1, 76.8, 76.9, 76.4, 76.0, 75.7, 75.9, 75.3, 75.0, 74.8],
+    "1Y": [81.2, 80.4, 79.8, 79.9, 78.9, 78.2, 77.5, 77.8, 76.9, 76.2, 75.4, 74.8],
+  };
+  let weightRange = "1M";
+
+  function drawWeight() {
+    const svg = document.querySelector("[data-weight-chart]");
+    if (!svg) return;
+    svg.innerHTML = "";
+    const d = weightData[weightRange], W = 326, H = 110, P = 8;
+    const min = Math.min(...d), max = Math.max(...d), span = max - min || 1;
+    const px = (i) => P + (i / (d.length - 1)) * (W - 2 * P);
+    const py = (v) => P + (1 - (v - min) / span) * (H - 2 * P - 14) + 4;
+    // faint grid
+    [0.25, 0.5, 0.75].forEach((g) => {
+      svg.appendChild(el("line", { x1: P, x2: W - P, y1: P + g * (H - 2 * P), y2: P + g * (H - 2 * P), stroke: css("--hairline"), "stroke-width": 1 }));
+    });
+    const pts = d.map((v, i) => px(i) + "," + py(v)).join(" ");
+    // area fill
+    const area = el("polygon", { points: pts + " " + px(d.length - 1) + "," + (H - 2) + " " + px(0) + "," + (H - 2), fill: css("--ink"), opacity: 0.05 });
+    svg.appendChild(area);
+    const line = el("polyline", { points: pts, fill: "none", stroke: css("--ink"), "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" });
+    svg.appendChild(line);
+    // endpoint lume dot
+    const dot = el("circle", { cx: px(d.length - 1), cy: py(d[d.length - 1]), r: 3.5, fill: css("--accent") });
+    const halo = el("circle", { cx: px(d.length - 1), cy: py(d[d.length - 1]), r: 8, fill: css("--accent"), opacity: 0.22 });
+    svg.appendChild(halo); svg.appendChild(dot);
+    if (!reduced) { // draw-in
+      const len = line.getTotalLength();
+      line.style.strokeDasharray = len;
+      line.style.strokeDashoffset = len;
+      line.style.transition = "stroke-dashoffset 1.1s cubic-bezier(.3,.7,.3,1) .1s";
+      requestAnimationFrame(() => requestAnimationFrame(() => (line.style.strokeDashoffset = "0")));
+    }
+  }
+
+  function drawEnergy() {
+    const svg = document.querySelector("[data-energy-chart]");
+    if (!svg) return;
+    svg.innerHTML = "";
+    const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const vals = [1980, 2230, 1750, 2040, 1890, 2410, 860];
+    const budget = 2100, W = 326, H = 120, P = 8, base = H - 18, top = 10;
+    const maxV = 2600;
+    const bw = 22, gap = (W - 2 * P - 7 * bw) / 6;
+    const y = (v) => base - ((v / maxV) * (base - top));
+    vals.forEach((v, i) => {
+      const x = P + i * (bw + gap);
+      const over = v > budget;
+      const h = base - y(v);
+      const bar = el("rect", { x, y: base, width: bw, height: 0, rx: 4, fill: over ? css("--accent") : css("--tick"), opacity: over ? 0.95 : 0.85 });
+      svg.appendChild(bar);
+      const lb = el("text", { x: x + bw / 2, y: H - 4, "text-anchor": "middle", "font-size": 8.5, fill: css("--mut"), "font-family": "Menlo, monospace" });
+      lb.textContent = days[i];
+      svg.appendChild(lb);
+      const apply = () => { bar.setAttribute("y", y(v)); bar.setAttribute("height", h); };
+      if (reduced) apply();
+      else {
+        bar.style.transition = "all .7s cubic-bezier(.22,1,.36,1) " + (0.08 + i * 0.05) + "s";
+        requestAnimationFrame(() => requestAnimationFrame(apply));
+      }
+    });
+    svg.appendChild(el("line", { x1: P, x2: W - P, y1: y(budget), y2: y(budget), stroke: css("--mut"), "stroke-width": 1, "stroke-dasharray": "4 4" }));
+  }
+
+  // ---------- Home gauge (geometry mirrors src/components/instrument/gauge.ts) ----------
+  function pt(cx, cy, r, deg) {
+    const a = (deg * Math.PI) / 180;
+    return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+  }
+  function renderHomeGauge() {
+    const slot = document.querySelector("[data-home-gauge]");
+    if (!slot) return;
+    const cx = 132, cy = 138, R = 114, START = 155, SWEEP = 230, TICKS = 40;
+    const goal = 2100, eaten = 860, frac = Math.min(eaten / goal, 1);
+    slot.innerHTML = "";
+    const wrap = document.createElement("div");
+    wrap.className = "gauge-wrap";
+    const svg = el("svg", { viewBox: "0 0 264 200" });
+    const colors = { accent: css("--accent"), tick: css("--tick"), tickLit: css("--tick-lit"), mut: css("--mut") };
+    for (let i = 0; i <= TICKS; i++) {
+      const t = i / TICKS, deg = START + SWEEP * t, major = i % 5 === 0;
+      const [x1, y1] = pt(cx, cy, R, deg);
+      const [x2, y2] = pt(cx, cy, R - (major ? 14 : 8), deg);
+      const lit = t <= frac, red = t > 0.9;
+      const stroke = red ? (lit ? colors.accent : colors.accent + "73")
+        : lit ? (major ? colors.tickLit : colors.tickLit + "8C") : colors.tick;
+      svg.appendChild(el("line", { x1, y1, x2, y2, stroke, "stroke-width": major ? 2.5 : 1.25, "stroke-linecap": "round" }));
+    }
+    [[0, "0", "start"], [0.5, "1,050", "middle"], [1, "2,100", "end"]].forEach(([t, txt, anchor]) => {
+      const [x, y] = pt(cx, cy, R - 26, START + SWEEP * t);
+      const tx = el("text", { x, y, fill: colors.mut, "font-size": 9, "text-anchor": anchor, "font-family": "Menlo, monospace" });
+      tx.textContent = txt;
+      svg.appendChild(tx);
+    });
+    const [nx1, ny1] = pt(cx, cy, 26, START);
+    const [nx2, ny2] = pt(cx, cy, R - 20, START);
+    const needle = el("line", { x1: nx1, y1: ny1, x2: nx2, y2: ny2, stroke: colors.accent, "stroke-width": 3, "stroke-linecap": "round", class: "gauge-needle" });
+    needle.style.transformOrigin = cx + "px " + cy + "px";
+    needle.style.transform = "rotate(0deg)";
+    svg.appendChild(needle);
+    svg.appendChild(el("circle", { cx, cy, r: 4.5, fill: colors.accent }));
+    wrap.appendChild(svg);
+    const center = document.createElement("div");
+    center.className = "gauge-center";
+    center.innerHTML = '<div class="gauge-remaining">1,240</div><div class="gauge-caption">kcal in reserve</div>';
+    wrap.appendChild(center);
+    const footer = document.createElement("div");
+    footer.className = "gauge-footer";
+    footer.innerHTML =
+      '<div><div class="v">860</div><div class="l">Eaten</div></div>' +
+      '<div><div class="v">412</div><div class="l">Burned</div></div>' +
+      '<div><div class="v">2,100</div><div class="l">Budget</div></div>';
+    wrap.appendChild(footer);
+    slot.appendChild(wrap);
+    const apply = () => { needle.style.transform = "rotate(" + SWEEP * frac + "deg)"; };
+    if (reduced) apply();
+    else requestAnimationFrame(() => requestAnimationFrame(apply));
+  }
+  function renderHomeSubdials() {
+    document.querySelectorAll("[data-home-subdial]").forEach((slot) => {
+      const frac = Number(slot.dataset.homeSubdial);
+      const c = 22, R = 17, START = 135, SWEEP = 270, N = 24;
+      slot.innerHTML = "";
+      const svg = el("svg", { viewBox: "0 0 44 44", width: 42, height: 42 });
+      for (let i = 0; i <= N; i++) {
+        const t = i / N, deg = START + SWEEP * t;
+        const [x1, y1] = pt(c, c, R, deg);
+        const [x2, y2] = pt(c, c, R - 5, deg);
+        // review: sub-dials in lit ink — accent stays on the hero needle
+        svg.appendChild(el("line", { x1, y1, x2, y2, "stroke-width": 1.6, "stroke-linecap": "round", stroke: t <= frac ? css("--tick-lit") : css("--tick") }));
+      }
+      slot.appendChild(svg);
+    });
+  }
+
+  // ---------- dock ----------
+  function renderDocks() {
+    const tabs = [["diary", "☀︎", "Today"], ["diary", "▤", "Diary"], null, ["trends", "↗", "Trends"], ["more", "•••", "More"]];
+    document.querySelectorAll("[data-dock]").forEach((z) => {
+      const active = z.dataset.dock;
+      let html = '<div class="dock2-bezel"><div class="dock2">';
+      const order = [["today", "⌂", "Today"], ["diary", "▦", "Diary"], null, ["trends", "↗", "Trends"], ["more", "≡", "More"]];
+      order.forEach((t) => {
+        if (!t) { html += '<span class="notch"></span>'; return; }
+        html += '<button class="tb2' + (t[0] === active ? " active" : "") + '"><span>' + t[1] + '</span><span class="lbl2">' + t[2] + "</span></button>";
+      });
+      html += '<button class="capture-fab2" title="Capture a meal">📷</button></div></div>';
+      z.innerHTML = html;
+    });
+  }
+
+  // ---------- chrome ----------
+  function replayRises(section) {
+    section.querySelectorAll(".rise").forEach((e) => {
+      e.style.animation = "none";
+      void e.offsetWidth;
+      e.style.animation = "";
+    });
+  }
+  function renderScreen(id) {
+    if (id === "home") { renderHomeGauge(); renderHomeSubdials(); }
+    if (id === "diary") fillTracks();
+    if (id === "trends") { drawWeight(); drawEnergy(); }
+  }
+  function showScreen(id, btn) {
+    document.querySelectorAll(".variant").forEach((v) => v.classList.remove("active"));
+    document.querySelectorAll(".variant-tab").forEach((t) => t.classList.remove("active"));
+    const sec = document.getElementById("variant-" + id);
+    sec.classList.add("active");
+    btn.classList.add("active");
+    replayRises(sec);
+    renderScreen(id);
+  }
+  function setTheme(v) {
+    if (v === "system") document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", v);
+    drawWeight(); drawEnergy(); renderHomeGauge(); renderHomeSubdials(); // SVG colors are sampled from CSS vars
+  }
+  document.querySelectorAll("[data-seg] button").forEach((b) => b.addEventListener("click", () => {
+    document.querySelectorAll("[data-seg] button").forEach((o) => o.classList.remove("active"));
+    b.classList.add("active");
+    weightRange = b.textContent;
+    drawWeight();
+  }));
+  document.querySelectorAll(".day-cell").forEach((c) => c.addEventListener("click", () => {
+    document.querySelectorAll(".day-cell").forEach((o) => o.classList.remove("sel"));
+    c.classList.add("sel");
+    fillTracks();
+  }));
+
+  document.documentElement.setAttribute("data-theme", "dark");
+  renderDocks();
+  renderScreen("home");
+</script>

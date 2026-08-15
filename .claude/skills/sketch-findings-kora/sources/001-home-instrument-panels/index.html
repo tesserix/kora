@@ -1,0 +1,894 @@
+<!-- Sketch 001 — Kora home panel redesign. Throwaway mockup, not production code. -->
+<title>Kora Home Panels</title>
+<link rel="stylesheet" href="../themes/default.css">
+<style>
+  /* Tokens inlined so the file is self-contained when the theme link is absent
+     (values mirror ../themes/default.css, which mirrors apps/mobile/src/theme/palette.ts) */
+  :root {
+    --bg: #0B0D10; --ink: #EDE6D4; --mut: #89929D;
+    --glass: rgba(34,40,49,0.62); --glass-border: rgba(237,230,212,0.38);
+    --glass-highlight: rgba(237,230,212,0.16); --inset: rgba(11,13,16,0.55);
+    --hairline: rgba(237,230,212,0.16); --tick: rgba(237,230,212,0.42); --tick-lit: #EDE6D4;
+    --accent: #FF4A00; --accent-on: #0B0D10; --danger: #EC4E40; --teal: #48A89E; --pool-warm: #FF9450;
+    --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+    --font-mono: Menlo, "SF Mono", Consolas, "Liberation Mono", monospace;
+    --shadow-card: 0 12px 24px rgba(0,0,0,0.55);
+    --shade: rgba(0,0,0,.28); --well-shadow: rgba(0,0,0,.25);
+    --lume-text: rgba(237,230,212,.30); --lume-accent: rgba(255,74,0,.45);
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #ECEDEF; --ink: #16181C; --mut: #5A6069;
+      --glass: rgba(255,255,255,0.60); --glass-border: rgba(22,24,28,0.28);
+      --glass-highlight: rgba(255,255,255,0.95); --inset: rgba(22,24,28,0.08);
+      --hairline: rgba(22,24,28,0.14); --tick: rgba(22,24,28,0.50); --tick-lit: #16181C;
+      --accent: #D23800; --accent-on: #FFFFFF; --danger: #D32F23; --teal: #2C7871;
+      --shadow-card: 0 12px 24px rgba(0,0,0,0.12);
+      --shade: rgba(22,24,28,.12); --well-shadow: rgba(22,24,28,.08);
+      --lume-text: transparent; --lume-accent: rgba(210,56,0,.22);
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #ECEDEF; --ink: #16181C; --mut: #5A6069;
+    --glass: rgba(255,255,255,0.60); --glass-border: rgba(22,24,28,0.28);
+    --glass-highlight: rgba(255,255,255,0.95); --inset: rgba(22,24,28,0.08);
+    --hairline: rgba(22,24,28,0.14); --tick: rgba(22,24,28,0.50); --tick-lit: #16181C;
+    --accent: #D23800; --accent-on: #FFFFFF; --danger: #D32F23; --teal: #2C7871;
+    --shadow-card: 0 12px 24px rgba(0,0,0,0.12);
+    --shade: rgba(22,24,28,.12); --well-shadow: rgba(22,24,28,.08);
+    --lume-text: transparent; --lume-accent: rgba(210,56,0,.22);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { background: var(--bg); }
+  body {
+    font-family: var(--font-ui); background: var(--bg); color: var(--ink);
+    padding: 76px 24px 48px; min-height: 100vh;
+  }
+  button { font-family: inherit; cursor: pointer; }
+
+  /* ---------- variant chrome ---------- */
+  #variant-nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 9998;
+    display: flex; align-items: center; gap: 8px; padding: 12px 20px;
+    background: color-mix(in srgb, var(--bg) 86%, transparent);
+    backdrop-filter: blur(14px); border-bottom: 1px solid var(--hairline);
+  }
+  #variant-nav .sketch-id {
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: 1.5px;
+    text-transform: uppercase; color: var(--mut); margin-right: 8px;
+  }
+  .variant-tab {
+    border: 1px solid var(--hairline); background: transparent; color: var(--mut);
+    font-size: 12px; font-weight: 600; padding: 7px 14px; border-radius: 999px;
+    transition: all .15s ease;
+  }
+  .variant-tab:hover { color: var(--ink); border-color: var(--glass-border); }
+  .variant-tab.active { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .variant-tab:focus-visible, .ghost-cta:focus-visible, .tb-tab:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+  .variant { display: none; }
+  .variant.active { display: block; }
+
+  .stage { display: flex; gap: 40px; justify-content: center; align-items: flex-start; flex-wrap: wrap; }
+  .notes { max-width: 300px; padding-top: 12px; font-size: 13px; line-height: 1.55; color: var(--mut); }
+  .notes h2 { font-size: 13px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--ink); margin-bottom: 10px; }
+  .notes h3 { font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--mut); margin: 16px 0 6px; }
+  .notes ul { list-style: none; }
+  .notes li { padding: 3px 0 3px 14px; position: relative; }
+  .notes li::before { content: ""; position: absolute; left: 0; top: 10px; width: 5px; height: 1px; background: var(--accent); }
+
+  /* ---------- phone frame ---------- */
+  .phone {
+    width: 390px; height: 844px; border-radius: 54px; overflow: hidden; position: relative;
+    background: var(--bg); border: 1px solid var(--glass-border);
+    box-shadow: 0 30px 60px rgba(0,0,0,.45); flex-shrink: 0;
+  }
+  .phone::before { /* AppBackground ambient pools */
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background:
+      radial-gradient(340px 260px at 82% 104%, color-mix(in srgb, var(--pool-warm, #FF9450) 13%, transparent), transparent 70%),
+      radial-gradient(300px 240px at 8% -6%, color-mix(in srgb, var(--teal) 10%, transparent), transparent 70%);
+  }
+  .screen { position: absolute; inset: 0; overflow-y: auto; padding: 14px 0 140px; scrollbar-width: none; }
+  .screen::-webkit-scrollbar { display: none; }
+  .statusbar {
+    display: flex; justify-content: space-between; padding: 4px 34px 10px;
+    font-family: var(--font-mono); font-size: 12px; font-weight: 600; color: var(--ink);
+  }
+
+  /* ---------- shared home pieces ---------- */
+  .home-header { display: flex; align-items: flex-end; justify-content: space-between; padding: 0 16px 8px; }
+  .home-header .greet { font-size: 14px; color: var(--mut); margin-bottom: 2px; }
+  .home-header h1 { font-size: 34px; line-height: 41px; font-weight: 700; letter-spacing: .37px; }
+  .home-header .side { display: flex; align-items: center; gap: 12px; padding-bottom: 4px; }
+  .bell { position: relative; width: 36px; height: 36px; display: grid; place-items: center; color: var(--ink); }
+  .bell .dot { position: absolute; top: 5px; right: 5px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+  .avatar {
+    width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center;
+    background: var(--inset); border: 1px solid var(--glass-border);
+    font-size: 13px; font-weight: 700; color: var(--ink);
+  }
+
+  .engraved {
+    font-size: 10px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: var(--mut);
+  }
+  .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+  .glass-panel {
+    position: relative; border-radius: 22px; border: 1px solid var(--glass-border);
+    background: var(--glass); backdrop-filter: blur(18px); box-shadow: var(--shadow-card);
+    overflow: hidden;
+  }
+  .glass-panel::before { /* top-edge highlight */
+    content: ""; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+    background: var(--glass-highlight);
+  }
+
+  /* gauge */
+  .gauge-wrap { position: relative; width: 264px; margin: 0 auto; }
+  .gauge-wrap svg { display: block; width: 100%; height: auto; }
+  .gauge-center { position: absolute; top: 37%; left: 0; right: 0; text-align: center; pointer-events: none; }
+  .gauge-remaining { font-family: var(--font-mono); font-size: 44px; line-height: 50px; letter-spacing: -1.2px; font-variant-numeric: tabular-nums; color: var(--ink); }
+  .gauge-caption { font-size: 10px; font-weight: 600; letter-spacing: 3px; text-transform: uppercase; color: var(--accent); margin-top: 6px; }
+  .gauge-needle { transition: transform .8s cubic-bezier(.3,.9,.35,1); }
+  .gauge-footer { display: flex; border-top: 1px solid var(--hairline); padding-top: 12px; margin-top: 8px; }
+  .gauge-footer > div { flex: 1; text-align: center; }
+  .gauge-footer .v { font-family: var(--font-mono); font-size: 15px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .gauge-footer .l { font-size: 9px; letter-spacing: 2px; text-transform: uppercase; color: var(--mut); margin-top: 2px; }
+  @media (prefers-reduced-motion: reduce) { .gauge-needle, .tile .bar i, .macro-cell .microbar i, .ed-macro .bar i { transition: none; } }
+
+  /* meals list */
+  .meal-row { display: flex; gap: 12px; padding: 10px 0; align-items: baseline; border-top: 1px solid var(--hairline); }
+  .meal-row:first-child { border-top: none; }
+  .meal-time { width: 60px; flex-shrink: 0; font-family: var(--font-mono); font-size: 12px; color: var(--mut); }
+  .meal-main { flex: 1; min-width: 0; }
+  .meal-name { font-size: 15px; font-weight: 600; color: var(--ink); }
+  .meal-slot { font-size: 11px; color: var(--mut); margin-top: 1px; }
+  .meal-guess { font-size: 11px; font-weight: 600; color: var(--mut); margin-top: 2px; } /* review: trust disclosure, not decoration */
+  .meal-kcal { font-family: var(--font-mono); font-size: 15px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .section-label { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .section-label span { font-size: 14px; font-weight: 600; color: var(--ink); }
+  .section-label::after { content: ""; flex: 1; height: 1px; background: var(--hairline); }
+  .ghost-cta {
+    width: 100%; margin-top: 10px; padding: 14px; display: flex; align-items: center; justify-content: center; gap: 8px;
+    background: transparent; border: 1.5px dashed var(--tick); border-radius: 12px;
+    color: var(--mut); font-size: 14px; font-weight: 600; transition: all .15s ease;
+  }
+  .ghost-cta:hover { border-color: var(--accent); color: var(--ink); }
+  .ghost-cta .plus { color: var(--accent); font-size: 16px; font-weight: 700; }
+
+  /* tab bar */
+  .tabbar-zone { position: absolute; left: 24px; right: 24px; bottom: 24px; z-index: 5; }
+  .tabbar {
+    display: flex; align-items: stretch; min-height: 64px; border-radius: 32px;
+    background: var(--glass); backdrop-filter: blur(18px);
+    border: 1px solid var(--glass-border); padding: 0 6px;
+  }
+  .tb-tab {
+    width: 62px; margin: 6px 0; border: none; background: transparent; border-radius: 18px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    color: var(--mut); position: relative; transition: all .15s ease;
+  }
+  .tb-tab .ico { font-size: 18px; line-height: 1; }
+  .tb-tab .lbl { font-size: 9px; font-weight: 500; letter-spacing: 1.4px; text-transform: uppercase; opacity: .72; }
+  .tb-tab.active { background: var(--inset); border: 1px solid var(--glass-border); color: var(--ink); }
+  .tb-tab.active .lbl { font-weight: 700; opacity: 1; }
+  .tb-tab.active::after { content: ""; position: absolute; bottom: 5px; width: 4px; height: 4px; border-radius: 50%; background: var(--accent); }
+  .tb-spacer { flex: 1; }
+  .capture-fab {
+    position: absolute; left: 50%; top: -16px; transform: translateX(-50%);
+    width: 52px; height: 52px; border-radius: 50%; border: none;
+    background: var(--accent); color: var(--accent-on); font-size: 20px;
+    box-shadow: 0 10px 16px color-mix(in srgb, var(--accent) 50%, transparent);
+    transition: transform .15s ease;
+  }
+  .capture-fab:hover { transform: translateX(-50%) scale(1.06); }
+
+  /* =========================================================
+     VARIANT A — instrument cluster (fused bezel panel)
+     ========================================================= */
+  .cluster-bezel {
+    margin: 12px 16px 0; border-radius: 28px; padding: 1.5px;
+    background: linear-gradient(180deg, var(--glass-highlight), transparent 24%, var(--shade) 88%);
+    box-shadow: var(--shadow-card);
+  }
+  .cluster {
+    border-radius: 26.5px; background: var(--glass); backdrop-filter: blur(20px);
+    border: 1px solid var(--glass-border); overflow: hidden;
+  }
+  .cluster .zone { padding: 14px 16px 16px; }
+  .cluster .zone-rule {
+    display: flex; align-items: center; gap: 10px; padding: 0 16px;
+  }
+  .cluster .zone-rule::before, .cluster .zone-rule::after { content: ""; flex: 1; height: 1px; background: var(--hairline); }
+  .macro-rail { display: flex; }
+  .macro-cell { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 4px 2px; }
+  .macro-cell + .macro-cell { border-left: 1px solid var(--hairline); }
+  .macro-cell .nm { font-size: 11px; font-weight: 600; color: var(--mut); }
+  .macro-cell .vl { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .macro-cell .togo { font-size: 10px; font-family: var(--font-mono); color: var(--mut); }
+  .vitals-footer {
+    display: flex; background: var(--inset); border-top: 1px solid var(--hairline);
+    padding: 12px 18px;
+  }
+  .vitals-footer .cell { flex: 1; display: flex; align-items: center; gap: 10px; justify-content: center; }
+  .vitals-footer .cell + .cell { border-left: 1px solid var(--hairline); }
+  .vitals-footer .ico { width: 30px; height: 30px; border-radius: 9px; background: var(--glass); border: 1px solid var(--glass-border); display: grid; place-items: center; font-size: 14px; }
+  .vitals-footer .v { font-family: var(--font-mono); font-size: 16px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .vitals-footer .l { font-size: 10px; font-weight: 600; color: var(--mut); }
+
+  /* =========================================================
+     VARIANT B — editorial hairline (no cards on data)
+     ========================================================= */
+  .ed-section { padding: 0 20px; margin-top: 22px; }
+  .ed-rule { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .ed-rule::after { content: ""; flex: 1; height: 1px; background: var(--hairline); }
+  .ed-gauge { padding: 4px 20px 0; }
+  .ed-gauge .gauge-wrap { width: 300px; }
+  .ed-macros { display: flex; }
+  .ed-macro { flex: 1; }
+  .ed-macro + .ed-macro { border-left: 1px solid var(--hairline); padding-left: 16px; margin-left: 16px; }
+  .ed-macro .vl { font-family: var(--font-mono); font-size: 21px; font-weight: 600; letter-spacing: -.5px; color: var(--ink); font-variant-numeric: tabular-nums; margin-top: 6px; }
+  .ed-macro .vl small { font-size: 12px; color: var(--mut); font-weight: 500; letter-spacing: 0; }
+  .ed-macro .bar { height: 3px; border-radius: 2px; background: var(--inset); margin-top: 10px; overflow: hidden; }
+  .ed-macro .bar i { display: block; height: 100%; background: var(--ink); border-radius: 2px; transition: width .5s ease; }
+  .ed-macro .togo { font-size: 10px; font-family: var(--font-mono); color: var(--mut); margin-top: 6px; }
+  .ed-vitals { display: flex; gap: 28px; }
+  .ed-vitals .v { font-family: var(--font-mono); font-size: 19px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .ed-vitals .v small { font-size: 11px; color: var(--mut); font-weight: 500; margin-left: 4px; }
+
+  /* =========================================================
+     VARIANT C — bento depth (asymmetric tiles)
+     ========================================================= */
+  .bento { padding: 12px 16px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .bento .hero {
+    grid-column: 1 / -1; border-radius: 24px; padding: 16px;
+    background:
+      radial-gradient(140% 90% at 50% -20%, var(--glass-highlight), transparent 42%),
+      var(--glass);
+    backdrop-filter: blur(20px); border: 1px solid var(--glass-border);
+    box-shadow: var(--shadow-card), 0 0 44px -18px color-mix(in srgb, var(--accent) 32%, transparent);
+    position: relative; overflow: hidden;
+  }
+  .tile {
+    position: relative; overflow: hidden; padding: 14px;
+    background: radial-gradient(120% 70% at 50% -14%, var(--glass-highlight), transparent 46%), var(--glass);
+    backdrop-filter: blur(18px); border: 1px solid var(--glass-border);
+    box-shadow: var(--shadow-card);
+  }
+  .tile.tall { border-radius: 22px; grid-row: span 2; display: flex; flex-direction: column; justify-content: space-between; }
+  .tile.half { border-radius: 18px; display: flex; align-items: center; gap: 12px; }
+  .tile .nm { font-size: 11px; font-weight: 600; color: var(--mut); }
+  .tile .vl { font-family: var(--font-mono); font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .tile.tall .vl { font-size: 24px; letter-spacing: -.5px; margin-top: 2px; }
+  .tile.tall .togo { font-size: 11px; font-family: var(--font-mono); color: var(--mut); margin-top: 4px; }
+  .tile.half .vl { font-size: 15px; }
+  .tile .bar { height: 5px; border-radius: 3px; background: var(--inset); margin-top: 10px; overflow: hidden; }
+  .tile .bar i { display: block; height: 100%; background: var(--ink); border-radius: 3px; transition: width .5s ease; } /* review: accent reserved for hero needle */
+  .bento-minis { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  .mini { border-radius: 16px; padding: 12px 10px; text-align: center; }
+  .mini .v { font-size: 15px; }
+  .mini .l { font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--mut); margin-top: 3px; font-weight: 600; }
+  .bento-log { grid-column: 1 / -1; border-radius: 22px; padding: 14px 16px 16px; }
+
+  /* =========================================================
+     VARIANT D — ignition (A × C synthesis, refined)
+     ========================================================= */
+  .cluster-bezel.v2 {
+    /* review: two-stop linear rim only — conic sweep dropped (not buildable in RN without Skia) */
+    background: linear-gradient(180deg, var(--glass-highlight), transparent 22%, var(--shade) 90%);
+    box-shadow: var(--shadow-card), 0 0 54px -22px color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+  .cluster.v2 {
+    background:
+      radial-gradient(150% 80% at 50% -18%, var(--glass-highlight), transparent 40%),
+      var(--glass);
+  }
+  .cluster.v2::after { /* one-time specular sweep */
+    content: ""; position: absolute; inset: -40px; pointer-events: none;
+    background: linear-gradient(115deg, transparent 42%, color-mix(in srgb, var(--glass-highlight) 80%, transparent) 50%, transparent 58%);
+    transform: translateX(-110%);
+    animation: specular 1.6s cubic-bezier(.4,0,.2,1) .5s 1 forwards;
+  }
+  @keyframes specular { to { transform: translateX(110%); } }
+  @media (prefers-reduced-motion: reduce) { .cluster.v2::after { animation: none; } }
+  .cluster.v2 { position: relative; }
+  .lume .gauge-remaining { text-shadow: 0 0 22px var(--lume-text); }
+  .lume .gauge-needle { filter: drop-shadow(0 0 5px color-mix(in srgb, var(--accent) 65%, transparent)); }
+  .lume .gauge-caption { text-shadow: 0 0 14px var(--lume-accent); }
+  .macro-cell .microbar { width: 64%; height: 2px; border-radius: 1px; background: var(--inset); margin-top: 2px; overflow: hidden; }
+  .macro-cell .microbar i { display: block; height: 100%; background: var(--ink); border-radius: 1px; transition: width .5s ease; }
+
+  /* dock v2 — carved keystone */
+  .dock2-bezel {
+    border-radius: 31px; padding: 1.5px;
+    background: linear-gradient(180deg, var(--glass-highlight), transparent 30%, var(--shade) 92%);
+    box-shadow: var(--shadow-card);
+  }
+  .dock2 {
+    display: flex; align-items: center; height: 58px; border-radius: 29.5px;
+    background: var(--glass); backdrop-filter: blur(20px);
+    border: 1px solid var(--glass-border); padding: 0 10px; position: relative;
+  }
+  .dock2 .tb2 {
+    flex: 1; height: 44px; border: none; background: transparent; border-radius: 15px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    color: var(--mut); position: relative; transition: all .18s ease; font-size: 19px;
+  }
+  .dock2 .tb2:hover { color: var(--ink); }
+  .dock2 .tb2.active { color: var(--ink); background: var(--inset); box-shadow: inset 0 1px 0 var(--well-shadow); }
+  .dock2 .tb2.active::after {
+    content: ""; position: absolute; bottom: 6px; width: 4px; height: 4px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 70%, transparent);
+  }
+  /* review: labels always on for discoverability; active gets full weight */
+  .dock2 .tb2 .lbl2 { font-size: 8px; font-weight: 500; letter-spacing: 1.6px; text-transform: uppercase; opacity: .72; transition: all .18s ease; }
+  .dock2 .tb2.active .lbl2 { opacity: 1; font-weight: 700; }
+  .dock2 .notch { flex: 0 0 66px; }
+  .capture-fab2 {
+    position: absolute; left: 50%; top: -16px; transform: translateX(-50%);
+    width: 56px; height: 56px; border-radius: 50%;
+    border: none; /* review: raised sibling (bg-ring notch breaks over blur in RN) */
+    background:
+      radial-gradient(120% 120% at 50% 0%, color-mix(in srgb, #fff 28%, var(--accent)) 0%, var(--accent) 46%, color-mix(in srgb, #000 22%, var(--accent)) 100%);
+    color: var(--accent-on); font-size: 19px;
+    box-shadow: 0 8px 20px color-mix(in srgb, var(--accent) 45%, transparent), inset 0 1px 0 rgba(255,255,255,.35);
+    transition: transform .18s ease;
+  }
+  .capture-fab2:hover { transform: translateX(-50%) scale(1.07); }
+
+  /* sketch toolbar */
+  #sketch-tools {
+    position: fixed; bottom: 12px; right: 12px; z-index: 9999;
+    font-family: system-ui; font-size: 12px; background: rgba(0,0,0,.75); color: #fff;
+    padding: 8px 12px; border-radius: 8px; opacity: .45; transition: opacity .2s;
+    display: flex; gap: 8px; align-items: center;
+  }
+  #sketch-tools:hover { opacity: 1; }
+  #sketch-tools select { background: #222; color: #fff; border: 1px solid #444; border-radius: 4px; padding: 2px 4px; font-size: 12px; }
+</style>
+
+<div id="variant-nav">
+  <span class="sketch-id">Sketch 001 · Home panels</span>
+  <button class="variant-tab" onclick="showVariant('a', this)">A: Instrument cluster</button>
+  <button class="variant-tab" onclick="showVariant('b', this)">B: Editorial (rejected)</button>
+  <button class="variant-tab" onclick="showVariant('c', this)">C: Bento depth</button>
+  <button class="variant-tab active" onclick="showVariant('d', this)">D: Ignition ★ Selected</button>
+  <label style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--mut)">◐ Theme
+    <select onchange="setTheme(this.value)" style="background:transparent;color:var(--ink);border:1px solid var(--hairline);border-radius:999px;padding:5px 10px;font-size:12px;font-weight:600">
+      <option value="dark" selected>Dark</option>
+      <option value="light">Light</option>
+      <option value="system">System</option>
+    </select>
+  </label>
+</div>
+
+<!-- ============================ VARIANT D ============================ -->
+<div id="variant-d" class="variant active">
+  <div class="stage">
+    <div class="phone">
+      <div class="screen">
+        <div class="statusbar"><span>9:41</span><span>◧ 87%</span></div>
+        <div class="home-header">
+          <div>
+            <div class="greet">Sat, Aug 16 · Good morning, Mahesh</div>
+            <h1>Today</h1>
+          </div>
+          <div class="side">
+            <div class="bell">🔔<span class="dot"></span></div>
+            <div class="avatar">MS</div>
+          </div>
+        </div>
+
+        <div class="cluster-bezel v2">
+          <div class="cluster v2 lume">
+            <div class="zone">
+              <div class="engraved" style="margin-bottom:8px">Energy reserve</div>
+              <div class="gauge-slot" data-gauge data-ignition></div>
+            </div>
+            <div class="zone-rule"><span class="engraved">Macros</span></div>
+            <div class="macro-rail">
+              <div class="macro-cell" data-macro="protein">
+                <span data-subdial></span>
+                <span class="nm">Protein</span><span class="vl" data-macro-val></span>
+                <span class="microbar"><i data-macro-bar></i></span>
+                <span class="togo" data-macro-togo></span>
+              </div>
+              <div class="macro-cell" data-macro="carbs">
+                <span data-subdial></span>
+                <span class="nm">Carbs</span><span class="vl" data-macro-val></span>
+                <span class="microbar"><i data-macro-bar></i></span>
+                <span class="togo" data-macro-togo></span>
+              </div>
+              <div class="macro-cell" data-macro="fat">
+                <span data-subdial></span>
+                <span class="nm">Fat</span><span class="vl" data-macro-val></span>
+                <span class="microbar"><i data-macro-bar></i></span>
+                <span class="togo" data-macro-togo></span>
+              </div>
+            </div>
+            <div class="vitals-footer">
+              <div class="cell"><span class="ico">👟</span><span><div class="v">6,482</div><div class="l">Steps</div></span></div>
+              <div class="cell"><span class="ico">🌙</span><span><div class="v">7h 12m</div><div class="l">Sleep</div></span></div>
+            </div>
+          </div>
+        </div>
+
+        <div style="padding: 20px 16px 0">
+          <div class="section-label"><span>Logged today</span></div>
+          <div data-meals></div>
+          <button class="ghost-cta" onclick="logMeal()"><span class="plus">+</span> Log a meal</button>
+        </div>
+        <div class="tabbar-zone" data-tabbar-v2></div>
+      </div>
+    </div>
+    <aside class="notes">
+      <h2>D — Ignition <span style="color:var(--accent)">· my pick</span></h2>
+      <p>A's fused cluster, C's layered light, B's card-free meal list — plus the wow lives in <strong>motion and lume, not decoration</strong>. Re-open this tab to replay the ignition.</p>
+      <h3>The wow</h3>
+      <ul>
+        <li>Ignition sweep: needle runs to redline and settles back, like a car cluster at startup; the reserve figure counts down with it. <em>Production contract: plays once per day (persisted flag); every other visit uses the calm settle</em></li>
+        <li>Warm lume glow on the needle, reserve numeral, and caption — watch-dial, not neon</li>
+        <li>Brushed conic bezel + one-time specular sweep across the glass</li>
+      </ul>
+      <h3>Dock v2</h3>
+      <ul>
+        <li>Slimmer 58px capsule with the same gradient bezel as the cluster</li>
+        <li>Capture button carved into a notch (bg-ring), domed orange, soft glow</li>
+        <li>Icons only at rest — the engraved label appears under the active tab</li>
+      </ul>
+      <h3>Judge</h3>
+      <ul>
+        <li>Ignition: delightful once-per-open, or too theatrical?</li>
+        <li>Does the notched dock beat the floating FAB?</li>
+      </ul>
+    </aside>
+  </div>
+</div>
+
+<!-- ============================ VARIANT A ============================ -->
+<div id="variant-a" class="variant">
+  <div class="stage">
+    <div class="phone">
+      <div class="screen">
+        <div class="statusbar"><span>9:41</span><span>◧ 87%</span></div>
+        <div class="home-header">
+          <div>
+            <div class="greet">Sat, Aug 16 · Good morning, Mahesh</div>
+            <h1>Today</h1>
+          </div>
+          <div class="side">
+            <div class="bell">🔔<span class="dot"></span></div>
+            <div class="avatar">MS</div>
+          </div>
+        </div>
+
+        <div class="cluster-bezel">
+          <div class="cluster">
+            <div class="zone">
+              <div class="engraved" style="margin-bottom:8px">Energy reserve</div>
+              <div class="gauge-slot" data-gauge></div>
+            </div>
+            <div class="zone-rule"><span class="engraved">Macros</span></div>
+            <div class="macro-rail">
+              <div class="macro-cell" data-macro="protein">
+                <span data-subdial></span>
+                <span class="nm">Protein</span><span class="vl" data-macro-val></span>
+                <span class="togo" data-macro-togo></span>
+              </div>
+              <div class="macro-cell" data-macro="carbs">
+                <span data-subdial></span>
+                <span class="nm">Carbs</span><span class="vl" data-macro-val></span>
+                <span class="togo" data-macro-togo></span>
+              </div>
+              <div class="macro-cell" data-macro="fat">
+                <span data-subdial></span>
+                <span class="nm">Fat</span><span class="vl" data-macro-val></span>
+                <span class="togo" data-macro-togo></span>
+              </div>
+            </div>
+            <div class="vitals-footer">
+              <div class="cell"><span class="ico">👟</span><span><div class="v">6,482</div><div class="l">Steps</div></span></div>
+              <div class="cell"><span class="ico">🌙</span><span><div class="v">7h 12m</div><div class="l">Sleep</div></span></div>
+            </div>
+          </div>
+        </div>
+
+        <div style="padding: 20px 16px 0">
+          <div class="section-label"><span>Logged today</span></div>
+          <div data-meals></div>
+          <button class="ghost-cta" onclick="logMeal()"><span class="plus">+</span> Log a meal</button>
+        </div>
+        <div class="tabbar-zone" data-tabbar></div>
+      </div>
+    </div>
+    <aside class="notes">
+      <h2>A — Instrument cluster</h2>
+      <p>Six stacked cards become <strong>one sculpted instrument</strong>. Gauge, macro rail, and vitals fuse into a single bezel with engraved zone rules; vitals sit in a recessed metal well at its base.</p>
+      <h3>What changed</h3>
+      <ul>
+        <li>Gradient bezel rim replaces the flat card border</li>
+        <li>Macros share one rail with hairline splits — no more three separate cards</li>
+        <li>Vitals become an inset footer well, not a floating strip</li>
+        <li>Logged list floats card-free below the instrument</li>
+      </ul>
+      <h3>Judge</h3>
+      <ul>
+        <li>Does the single cluster feel premium or heavy?</li>
+        <li>Is the recessed vitals well readable?</li>
+      </ul>
+    </aside>
+  </div>
+</div>
+
+<!-- ============================ VARIANT B ============================ -->
+<div id="variant-b" class="variant">
+  <div class="stage">
+    <div class="phone">
+      <div class="screen">
+        <div class="statusbar"><span>9:41</span><span>◧ 87%</span></div>
+        <div class="home-header">
+          <div>
+            <div class="greet">Sat, Aug 16 · Good morning, Mahesh</div>
+            <h1>Today</h1>
+          </div>
+          <div class="side">
+            <div class="bell">🔔<span class="dot"></span></div>
+            <div class="avatar">MS</div>
+          </div>
+        </div>
+
+        <div class="ed-gauge">
+          <div class="gauge-slot" data-gauge></div>
+        </div>
+
+        <div class="ed-section">
+          <div class="ed-rule"><span class="engraved">Macros</span></div>
+          <div class="ed-macros">
+            <div class="ed-macro" data-macro="protein">
+              <span class="engraved" style="letter-spacing:1.2px">Protein</span>
+              <div class="vl" data-macro-val></div>
+              <div class="bar"><i data-macro-bar></i></div>
+              <div class="togo" data-macro-togo></div>
+            </div>
+            <div class="ed-macro" data-macro="carbs">
+              <span class="engraved" style="letter-spacing:1.2px">Carbs</span>
+              <div class="vl" data-macro-val></div>
+              <div class="bar"><i data-macro-bar></i></div>
+              <div class="togo" data-macro-togo></div>
+            </div>
+            <div class="ed-macro" data-macro="fat">
+              <span class="engraved" style="letter-spacing:1.2px">Fat</span>
+              <div class="vl" data-macro-val></div>
+              <div class="bar"><i data-macro-bar></i></div>
+              <div class="togo" data-macro-togo></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="ed-section">
+          <div class="ed-rule"><span class="engraved">Vitals</span></div>
+          <div class="ed-vitals">
+            <div class="v">6,482<small>steps</small></div>
+            <div class="v">7h 12m<small>sleep</small></div>
+          </div>
+        </div>
+
+        <div class="ed-section">
+          <div class="ed-rule"><span class="engraved">Logged today</span></div>
+          <div data-meals></div>
+          <button class="ghost-cta" onclick="logMeal()"><span class="plus">+</span> Log a meal</button>
+        </div>
+        <div class="tabbar-zone" data-tabbar></div>
+      </div>
+    </div>
+    <aside class="notes">
+      <h2>B — Editorial hairline</h2>
+      <p><strong>No cards on data at all.</strong> The gauge floats directly on the instrument ground; every section is an engraved overline with a hairline rule. Glass is reserved for chrome — the tab bar and capture button only.</p>
+      <h3>What changed</h3>
+      <ul>
+        <li>Zero glass panels in the content — data is engraved into the surface</li>
+        <li>Gauge grows to 300px, the undisputed hero</li>
+        <li>Macros as three mono numeral columns with thin ink bars</li>
+        <li>One consistent hairline + overline rhythm down the page</li>
+      </ul>
+      <h3>Judge</h3>
+      <ul>
+        <li>Calmer or too sparse? Does hierarchy hold without panel edges?</li>
+        <li>Does the ambient background carry enough depth?</li>
+      </ul>
+    </aside>
+  </div>
+</div>
+
+<!-- ============================ VARIANT C ============================ -->
+<div id="variant-c" class="variant">
+  <div class="stage">
+    <div class="phone">
+      <div class="screen">
+        <div class="statusbar"><span>9:41</span><span>◧ 87%</span></div>
+        <div class="home-header">
+          <div>
+            <div class="greet">Sat, Aug 16 · Good morning, Mahesh</div>
+            <h1>Today</h1>
+          </div>
+          <div class="side">
+            <div class="bell">🔔<span class="dot"></span></div>
+            <div class="avatar">MS</div>
+          </div>
+        </div>
+
+        <div class="bento">
+          <div class="hero">
+            <div class="engraved" style="margin-bottom:8px">Energy reserve</div>
+            <div class="gauge-slot" data-gauge></div>
+          </div>
+
+          <div class="tile tall" data-macro="protein">
+            <div>
+              <div class="nm">Protein</div>
+              <div class="vl" data-macro-val></div>
+              <div class="togo" data-macro-togo></div>
+            </div>
+            <div>
+              <span data-subdial data-subdial-size="56"></span>
+              <div class="bar"><i data-macro-bar></i></div>
+            </div>
+          </div>
+          <div class="tile half" data-macro="carbs">
+            <span data-subdial></span>
+            <span><div class="nm">Carbs</div><div class="vl" data-macro-val></div></span>
+          </div>
+          <div class="tile half" data-macro="fat">
+            <span data-subdial></span>
+            <span><div class="nm">Fat</div><div class="vl" data-macro-val></div></span>
+          </div>
+
+          <div class="bento-minis">
+            <div class="tile mini"><div class="vl v">6,482</div><div class="l">Steps</div></div>
+            <div class="tile mini"><div class="vl v">7h 12m</div><div class="l">Sleep</div></div>
+            <div class="tile mini"><div class="vl v">12</div><div class="l">Streak</div></div>
+          </div>
+
+          <div class="tile bento-log">
+            <div class="section-label"><span>Logged today</span></div>
+            <div data-meals></div>
+            <button class="ghost-cta" onclick="logMeal()"><span class="plus">+</span> Log a meal</button>
+          </div>
+        </div>
+        <div class="tabbar-zone" data-tabbar></div>
+      </div>
+    </div>
+    <aside class="notes">
+      <h2>C — Bento depth</h2>
+      <p>Keeps glass, but <strong>breaks the monotony with size</strong>: an asymmetric bento where importance = area. Every tile gets a radial top sheen; the hero alone carries a faint orange rim glow.</p>
+      <h3>What changed</h3>
+      <ul>
+        <li>Protein earns a tall tile; carbs/fat stack beside it — no equal-thirds row</li>
+        <li>Radii step down with importance: 24 → 22 → 18 → 16</li>
+        <li>Radial top sheen on every tile adds the layered-light depth</li>
+        <li>Logged list lives inside a panel again, ghost CTA inset</li>
+      </ul>
+      <h3>Judge</h3>
+      <ul>
+        <li>Is the orange rim glow on the hero within the accent budget?</li>
+        <li>Does the asymmetry read as hierarchy or as clutter?</li>
+      </ul>
+    </aside>
+  </div>
+</div>
+
+<script>
+  // ---------- shared state ----------
+  const state = {
+    goal: 2100,
+    meals: [
+      { time: "08:10", name: "Masala oats with almond milk", slot: "Breakfast", kcal: 380, p: 14, c: 52, f: 11 },
+      { time: "13:05", name: "Paneer tikka wrap", slot: "Lunch", kcal: 460, p: 24, c: 41, f: 19, guess: true },
+      { time: "16:30", name: "Filter coffee with milk", slot: "Snack", kcal: 20, p: 1, c: 2, f: 1 },
+    ],
+    targets: { protein: 160, carbs: 240, fat: 70 },
+  };
+  const extraMeals = [
+    { time: "19:45", name: "Dal tadka with jeera rice", slot: "Dinner", kcal: 520, p: 21, c: 74, f: 14 },
+    { time: "21:10", name: "Greek yogurt with honey", slot: "Snack", kcal: 180, p: 12, c: 22, f: 4 },
+    { time: "22:00", name: "Roasted makhana", slot: "Snack", kcal: 110, p: 4, c: 13, f: 4 },
+  ];
+  const eaten = () => state.meals.reduce((s, m) => s + m.kcal, 0);
+  const macro = (k) => state.meals.reduce((s, m) => s + m[k[0]], 0); // p/c/f
+  const fmt = (n) => n.toLocaleString("en-US");
+  let playIgnition = true; // ignition replays on variant entry, not on data updates
+  const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+
+  // ---------- gauge (geometry mirrors src/components/instrument/gauge.ts) ----------
+  const SVGNS = "http://www.w3.org/2000/svg";
+  function pt(cx, cy, r, deg) {
+    const a = (deg * Math.PI) / 180;
+    return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+  }
+  function el(tag, attrs) {
+    const e = document.createElementNS(SVGNS, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+  function renderGauge(slot) {
+    const cx = 132, cy = 138, R = 114, START = 155, SWEEP = 230, TICKS = 40;
+    const frac = Math.min(eaten() / state.goal, 1);
+    slot.innerHTML = "";
+    const wrap = document.createElement("div");
+    wrap.className = "gauge-wrap";
+    const svg = el("svg", { viewBox: "0 0 264 200" });
+    const colors = {
+      accent: css("--accent"), tick: css("--tick"), tickLit: css("--tick-lit"), mut: css("--mut"),
+    };
+    for (let i = 0; i <= TICKS; i++) {
+      const t = i / TICKS, deg = START + SWEEP * t, major = i % 5 === 0;
+      const [x1, y1] = pt(cx, cy, R, deg);
+      const [x2, y2] = pt(cx, cy, R - (major ? 14 : 8), deg);
+      const lit = t <= frac, red = t > 0.9;
+      const stroke = red ? (lit ? colors.accent : colors.accent + "73")
+        : lit ? (major ? colors.tickLit : colors.tickLit + "8C") : colors.tick;
+      svg.appendChild(el("line", { x1, y1, x2, y2, stroke, "stroke-width": major ? 2.5 : 1.25, "stroke-linecap": "round" }));
+    }
+    [[0, "0", "start"], [0.5, fmt(state.goal / 2), "middle"], [1, fmt(state.goal), "end"]].forEach(([t, txt, anchor]) => {
+      const [x, y] = pt(cx, cy, R - 26, START + SWEEP * t);
+      const tx = el("text", { x, y, fill: colors.mut, "font-size": 9, "text-anchor": anchor, "font-family": "Menlo, monospace" });
+      tx.textContent = txt;
+      svg.appendChild(tx);
+    });
+    const [nx1, ny1] = pt(cx, cy, 26, START);
+    const [nx2, ny2] = pt(cx, cy, R - 20, START);
+    const needle = el("line", { x1: nx1, y1: ny1, x2: nx2, y2: ny2, stroke: colors.accent, "stroke-width": 3, "stroke-linecap": "round", class: "gauge-needle" });
+    needle.style.transformOrigin = cx + "px " + cy + "px";
+    needle.style.transform = "rotate(0deg)";
+    svg.appendChild(needle);
+    svg.appendChild(el("circle", { cx, cy, r: 4.5, fill: colors.accent }));
+    wrap.appendChild(svg);
+
+    const remaining = Math.max(0, Math.round(state.goal - eaten()));
+    const center = document.createElement("div");
+    center.className = "gauge-center";
+    center.innerHTML = '<div class="gauge-remaining">' + fmt(remaining) + '</div><div class="gauge-caption">kcal in reserve</div>';
+    wrap.appendChild(center);
+
+    const footer = document.createElement("div");
+    footer.className = "gauge-footer";
+    footer.innerHTML =
+      '<div><div class="v">' + fmt(eaten()) + '</div><div class="l">Eaten</div></div>' +
+      '<div><div class="v">412</div><div class="l">Burned</div></div>' +
+      '<div><div class="v">' + fmt(state.goal) + '</div><div class="l">Budget</div></div>';
+    wrap.appendChild(footer);
+    slot.appendChild(wrap);
+    const target = SWEEP * frac;
+    const ignite = slot.hasAttribute("data-ignition") && playIgnition
+      && !matchMedia("(prefers-reduced-motion: reduce)").matches;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (!ignite) { needle.style.transform = "rotate(" + target + "deg)"; return; }
+      // ignition: sweep to redline, settle back with a slight overshoot
+      needle.style.transition = "transform .65s cubic-bezier(.5,0,.6,1)";
+      needle.style.transform = "rotate(" + SWEEP + "deg)";
+      setTimeout(() => {
+        needle.style.transition = "transform .95s cubic-bezier(.22,1.4,.36,1)";
+        needle.style.transform = "rotate(" + target + "deg)";
+      }, 700);
+      const numEl = center.querySelector(".gauge-remaining");
+      const t0 = performance.now(), dur = 1650, from = state.goal, to = remaining;
+      (function step(now) {
+        const p = Math.min((now - t0) / dur, 1), e = 1 - Math.pow(1 - p, 3);
+        numEl.textContent = fmt(Math.round(from + (to - from) * e));
+        if (p < 1) requestAnimationFrame(step);
+      })(t0);
+    }));
+  }
+
+  function renderSubDial(slot) {
+    const size = Number(slot.dataset.subdialSize || 42);
+    const key = slot.closest("[data-macro]").dataset.macro;
+    const frac = Math.min(macro(key) / state.targets[key], 1);
+    const c = 22, R = 17, START = 135, SWEEP = 270, N = 24;
+    slot.innerHTML = "";
+    const svg = el("svg", { viewBox: "0 0 44 44", width: size, height: size });
+    for (let i = 0; i <= N; i++) {
+      const t = i / N, deg = START + SWEEP * t;
+      const [x1, y1] = pt(c, c, R, deg);
+      const [x2, y2] = pt(c, c, R - 5, deg);
+      svg.appendChild(el("line", {
+        x1, y1, x2, y2, "stroke-width": 1.6, "stroke-linecap": "round",
+        stroke: t <= frac ? css("--tick-lit") : css("--tick"), // review: sub-dials in lit ink, accent stays on hero needle
+      }));
+    }
+    slot.appendChild(svg);
+  }
+
+  // ---------- meals + macros ----------
+  function renderMeals(container) {
+    container.innerHTML = state.meals.map((m) =>
+      '<div class="meal-row"><span class="meal-time">' + m.time + '</span>' +
+      '<span class="meal-main"><div class="meal-name">' + m.name + '</div>' +
+      '<div class="meal-slot">' + m.slot + '</div>' +
+      (m.guess ? '<div class="meal-guess">≈ Portion is a guess</div>' : "") +
+      '</span><span class="meal-kcal">' + m.kcal + ' kcal</span></div>'
+    ).join("");
+  }
+  function renderMacros(root) {
+    root.querySelectorAll("[data-macro]").forEach((cell) => {
+      const key = cell.dataset.macro;
+      const have = macro(key), target = state.targets[key];
+      const val = cell.querySelector("[data-macro-val]");
+      if (val) val.textContent = have + "/" + target + (cell.classList.contains("ed-macro") ? "" : "g");
+      if (cell.classList.contains("ed-macro")) val.innerHTML = have + "/" + target + "<small>g</small>";
+      const togo = cell.querySelector("[data-macro-togo]");
+      if (togo) togo.textContent = Math.max(0, target - have) + "g to go";
+      const bar = cell.querySelector("[data-macro-bar]");
+      if (bar) bar.style.width = Math.min(100, (have / target) * 100) + "%";
+    });
+  }
+
+  function renderTabbars() {
+    document.querySelectorAll("[data-tabbar-v2]").forEach((z) => {
+      z.innerHTML =
+        '<div class="dock2-bezel"><div class="dock2">' +
+        '<button class="tb2 active"><span>⌂</span><span class="lbl2">Today</span></button>' +
+        '<button class="tb2"><span>▦</span><span class="lbl2">Diary</span></button>' +
+        '<span class="notch"></span>' +
+        '<button class="tb2"><span>↗</span><span class="lbl2">Trends</span></button>' +
+        '<button class="tb2"><span>≡</span><span class="lbl2">More</span></button>' +
+        '<button class="capture-fab2" title="Capture a meal">📷</button>' +
+        '</div></div>';
+      z.querySelectorAll(".tb2").forEach((t) => t.addEventListener("click", () => {
+        z.querySelectorAll(".tb2").forEach((o) => o.classList.remove("active"));
+        t.classList.add("active");
+      }));
+    });
+    document.querySelectorAll("[data-tabbar]").forEach((z) => {
+      z.innerHTML =
+        '<div class="tabbar">' +
+        '<button class="tb-tab active"><span class="ico">☀︎</span><span class="lbl">Today</span></button>' +
+        '<button class="tb-tab"><span class="ico">▤</span><span class="lbl">Diary</span></button>' +
+        '<span class="tb-spacer"></span>' +
+        '<button class="tb-tab"><span class="ico">↗</span><span class="lbl">Trends</span></button>' +
+        '<button class="tb-tab"><span class="ico">•••</span><span class="lbl">More</span></button>' +
+        '</div><button class="capture-fab" title="Capture a meal">📷</button>';
+      z.querySelectorAll(".tb-tab").forEach((t) => t.addEventListener("click", () => {
+        z.querySelectorAll(".tb-tab").forEach((o) => o.classList.remove("active"));
+        t.classList.add("active");
+      }));
+    });
+  }
+
+  function renderAll() {
+    document.querySelectorAll("[data-gauge]").forEach(renderGauge);
+    document.querySelectorAll("[data-subdial]").forEach(renderSubDial);
+    document.querySelectorAll("[data-meals]").forEach(renderMeals);
+    document.querySelectorAll(".variant").forEach(renderMacros);
+  }
+
+  function logMeal() {
+    if (!extraMeals.length) return;
+    state.meals.push(extraMeals.shift());
+    playIgnition = false;
+    renderAll();
+  }
+
+  function showVariant(id, btn) {
+    document.querySelectorAll(".variant").forEach((v) => v.classList.remove("active"));
+    document.querySelectorAll(".variant-tab").forEach((t) => t.classList.remove("active"));
+    document.getElementById("variant-" + id).classList.add("active");
+    btn.classList.add("active");
+    playIgnition = true;
+    renderAll(); // replay the needle sweep (and D's ignition) on entry
+  }
+
+  function setTheme(v) {
+    if (v === "system") document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", v);
+    playIgnition = false;
+    renderAll(); // SVG colors are sampled from CSS vars
+  }
+
+  document.documentElement.setAttribute("data-theme", "dark"); // app defaults to dark
+  renderTabbars();
+  renderAll();
+</script>
