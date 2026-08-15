@@ -48,6 +48,18 @@ test("without reduced motion, the line and area start hidden (about to draw in)"
   expect(area.props.opacity).toBe(0);
 });
 
+// Kora ignition Task 8: the endpoint dot demotes to r 3.5 (was 4.5) and
+// gains a soft halo behind it (r 8, opacity 0.22) — the chart's accent
+// budget item.
+test("the endpoint carries a soft accent halo behind its dot", async () => {
+  const { getByTestId } = await render(<WeightChart points={[70, 72, 71]} />);
+  const halo = getByTestId("weight-chart-endpoint-halo");
+  const dot = getByTestId("weight-chart-endpoint");
+  expect(halo.props.r).toBe(8);
+  expect(halo.props.opacity).toBe(0.22);
+  expect(dot.props.r).toBe(3.5);
+});
+
 test("reduced motion renders fully drawn immediately, no retracted state", async () => {
   (Reanimated.useReducedMotion as jest.Mock).mockReturnValue(true);
   const { getByTestId } = await render(<WeightChart points={[70, 72, 71]} />);

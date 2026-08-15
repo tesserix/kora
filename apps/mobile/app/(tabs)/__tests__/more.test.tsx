@@ -8,7 +8,10 @@ jest.mock("@/lib/firebase", () => ({ auth: { name: "fake-auth" } }));
 
 const mockSignOut = jest.fn();
 jest.mock("firebase/auth", () => ({ signOut: (...a: unknown[]) => mockSignOut(...a) }));
-jest.mock("@/api/hooks", () => ({ useUnreadCount: () => ({ data: { count: 2 } }) }));
+jest.mock("@/api/hooks", () => ({
+  useUnreadCount: () => ({ data: { count: 2 } }),
+  useProfile: () => ({ data: { display_name: "Kai Rivers", email: "kai@example.com" } }),
+}));
 
 const mockUnregister = jest.fn();
 jest.mock("@/lib/push", () => ({ unregisterPushToken: () => mockUnregister() }));

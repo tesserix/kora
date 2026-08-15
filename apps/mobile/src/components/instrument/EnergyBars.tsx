@@ -1,6 +1,9 @@
+import { useEffect } from "react";
 import { View } from "react-native";
+import Animated, { Easing, useAnimatedStyle, useSharedValue, withDelay, withTiming } from "react-native-reanimated";
 import { AppText } from "@/components/Text";
-import { useTheme } from "@/theme";
+import { useMotionPrefs } from "@/motion";
+import { useTheme, type InstrumentTokens } from "@/theme";
 
 export interface EnergyBarsDay {
   label: string;
@@ -11,6 +14,54 @@ export interface EnergyBarsDay {
 export interface EnergyBarsProps {
   days: EnergyBarsDay[];
   targetFraction?: number;
+}
+
+const GROW_DURATION = 700;
+const GROW_STAGGER_MS = 50;
+
+interface EnergyBarProps {
+  index: number;
+  day: EnergyBarsDay;
+  instrument: InstrumentTokens;
+}
+
+// Kora ignition Task 8: bars grow from the baseline on mount, staggered
+// i*50ms over ~700ms ease-out — instant under Reduce Motion. `scaleY` +
+// `transformOrigin: "bottom"` grows the bar upward from its foot rather than
+// from its vertical center, which is what "grow from baseline" means here.
+function EnergyBar({ index, day, instrument }: EnergyBarProps) {
+  const { reduceMotion } = useMotionPrefs();
+  const scale = useSharedValue(reduceMotion ? 1 : 0);
+
+  useEffect(() => {
+    if (reduceMotion) {
+      scale.value = 1;
+      return;
+    }
+    scale.value = 0;
+    scale.value = withDelay(
+      index * GROW_STAGGER_MS,
+      withTiming(1, { duration: GROW_DURATION, easing: Easing.out(Easing.cubic) }),
+    );
+  }, [day.fraction, reduceMotion]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const animatedStyle = useAnimatedStyle(() => ({ transform: [{ scaleY: scale.value }] }));
+
+  return (
+    <Animated.View
+      testID={`ebar-${index}`}
+      style={[
+        {
+          flex: 1,
+          height: `${Math.min(Math.max(day.fraction, 0), 1) * 100}%`,
+          borderRadius: 6,
+          backgroundColor: day.over ? instrument.accent : instrument.tick,
+          transformOrigin: "bottom",
+        },
+        animatedStyle,
+      ]}
+    />
+  );
 }
 
 export function EnergyBars({ days, targetFraction = 0.74 }: EnergyBarsProps) {
@@ -38,17 +89,7 @@ export function EnergyBars({ days, targetFraction = 0.74 }: EnergyBarsProps) {
           }}
         />
         {days.map((d, i) => (
-          <View
-            key={i}
-            testID={`ebar-${i}`}
-            style={{
-              flex: 1,
-              height: `${Math.min(Math.max(d.fraction, 0), 1) * 100}%`,
-              borderRadius: 6,
-              backgroundColor: d.over ? instrument.accent : instrument.tickLit,
-              opacity: d.over ? 1 : 0.72,
-            }}
-          />
+          <EnergyBar key={i} index={i} day={d} instrument={instrument} />
         ))}
       </View>
       <View style={{ flexDirection: "row", gap: 6, marginTop: 6 }}>

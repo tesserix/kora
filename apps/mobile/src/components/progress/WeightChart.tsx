@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { View } from "react-native";
-import Svg, { Defs, LinearGradient, Stop, Polygon, Polyline, Circle } from "react-native-svg";
+import Svg, { Defs, LinearGradient, Stop, Polygon, Polyline, Circle, G } from "react-native-svg";
 import Animated, { Easing, useAnimatedProps, useSharedValue, withTiming } from "react-native-reanimated";
 import { useMotionPrefs } from "@/motion";
 import { useTheme } from "@/theme";
@@ -9,7 +9,16 @@ type Props = { points: number[] };
 
 const AnimatedPolyline = Animated.createAnimatedComponent(Polyline);
 const AnimatedPolygon = Animated.createAnimatedComponent(Polygon);
-const DRAW_DURATION = 700;
+// Kora ignition Task 8: Weight is now the screen's BezelCluster hero, so its
+// chart draw-in gets the slower ~1100ms sweep (was 700ms) to read as the
+// panel's signature motion, mirroring the needle-draw weight the GaugeDial
+// gives its own hero reveal.
+const DRAW_DURATION = 1100;
+// Endpoint dot geometry (spec: "endpoint dot accent r 3.5 with halo circle
+// opacity 0.22 r 8") — the chart's one accent element besides the stroke.
+const ENDPOINT_DOT_RADIUS = 3.5;
+const ENDPOINT_HALO_RADIUS = 8;
+const ENDPOINT_HALO_OPACITY = 0.22;
 
 // Weight trend chart: an SVG polyline + gradient-filled area. Callers are
 // responsible for the >=2-point guard (see app/(tabs)/progress.tsx) — this
@@ -86,17 +95,32 @@ export function WeightChart({ points }: Props) {
           strokeDasharray={length}
           animatedProps={lineAnimatedProps}
         />
-        {points.map((v, i) => (
-          <Circle
-            key={i}
-            cx={x(i)}
-            cy={y(v)}
-            r={i === points.length - 1 ? 4.5 : 2.5}
-            fill={instrument.accent}
-            stroke={instrument.glass}
-            strokeWidth={1.5}
-          />
-        ))}
+        {points.map((v, i) => {
+          const isEndpoint = i === points.length - 1;
+          return isEndpoint ? (
+            <G key={i}>
+              <Circle
+                testID="weight-chart-endpoint-halo"
+                cx={x(i)}
+                cy={y(v)}
+                r={ENDPOINT_HALO_RADIUS}
+                fill={instrument.accent}
+                opacity={ENDPOINT_HALO_OPACITY}
+              />
+              <Circle
+                testID="weight-chart-endpoint"
+                cx={x(i)}
+                cy={y(v)}
+                r={ENDPOINT_DOT_RADIUS}
+                fill={instrument.accent}
+                stroke={instrument.glass}
+                strokeWidth={1.5}
+              />
+            </G>
+          ) : (
+            <Circle key={i} cx={x(i)} cy={y(v)} r={2.5} fill={instrument.accent} stroke={instrument.glass} strokeWidth={1.5} />
+          );
+        })}
       </Svg>
     </View>
   );

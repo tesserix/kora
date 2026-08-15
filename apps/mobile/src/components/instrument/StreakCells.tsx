@@ -23,7 +23,7 @@ export function StreakCells({ hits, testIDPrefix = "streak" }: StreakCellsProps)
             flex: 1,
             height: 26,
             borderRadius: 6,
-            backgroundColor: hit ? instrument.accent : instrument.tick,
+            backgroundColor: hit ? instrument.tickLit : instrument.tick,
           }}
         />
       ))}

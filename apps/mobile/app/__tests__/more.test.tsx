@@ -15,6 +15,7 @@ jest.mock("@/lib/push", () => ({ unregisterPushToken: () => mockUnregisterPushTo
 let mockUnreadCount = 0;
 jest.mock("@/api/hooks", () => ({
   useUnreadCount: () => ({ data: { count: mockUnreadCount } }),
+  useProfile: () => ({ data: { display_name: "Kai Rivers", email: "kai@example.com" } }),
 }));
 
 function flattenStyle(style: unknown): Record<string, unknown> {

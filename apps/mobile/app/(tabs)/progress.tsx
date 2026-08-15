@@ -7,12 +7,14 @@ import { AppBackground } from "@/components/AppBackground";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { Icon } from "@/components/Icon";
 import { GlassPanel } from "@/components/instrument/GlassPanel";
+import { BezelCluster } from "@/components/instrument/BezelCluster";
 import { EnergyBars, type EnergyBarsDay } from "@/components/instrument/EnergyBars";
 import { StreakCells } from "@/components/instrument/StreakCells";
 import { SegmentedGlass } from "@/components/instrument/SegmentedGlass";
-import { monoStyle } from "@/components/instrument/typography";
+import { engravedStyle, monoStyle } from "@/components/instrument/typography";
 import { WeightChart } from "@/components/progress/WeightChart";
 import { WeightLogSheet } from "@/components/progress/WeightLogSheet";
+import { deltaColor } from "@/components/progress/deltaColor";
 import { EmptyState } from "@/components/common/EmptyState";
 import { LoadErrorNotice } from "@/components/common/LoadErrorNotice";
 import { useAvgIntake7d, useDashboard, useProfile, useWeightSeries } from "@/api/hooks";
@@ -119,12 +121,18 @@ export default function Progress() {
   // `alignItems: "baseline"` row, so a line box present on only one of them
   // made the number jump vertically the moment data arrived (kora#177). The
   // lineHeight is stated explicitly because AnimatedNumber cannot derive one.
+  // Lume text-shadow (spec: "34px mono figure with lumeText text-shadow") —
+  // the same faint backlit glow the gauge instruments give their own
+  // engraved numerals, now on Weight's hero figure inside its BezelCluster.
   const weightFigure = {
     fontSize: 34,
     lineHeight: 39,
     fontWeight: "700",
     fontFamily: fonts.mono,
     color: instrument.ink,
+    textShadowColor: instrument.lumeText,
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 6,
   } as const;
 
   // The weight series' error was never read at all, so a failed fetch fell
@@ -139,10 +147,14 @@ export default function Progress() {
   const delta = hasChart ? points[points.length - 1] - points[0] : null;
   const w = current > 0 ? formatWeight(current, system) : null;
   const d = delta !== null ? (system === "imperial" ? lbFromKg(delta) : delta) : null;
-  // Accent, always — instrument glass has no separate "good"/"bad" color for
-  // this, only the arrow direction (spec's accent-budget rule: weight delta is
-  // one of the handful of things allowed to carry the accent).
   const deltaText = d !== null ? `${d <= 0 ? "▾" : "▴"} ${Math.abs(d).toFixed(1)} ${weightUnitLabel(system)}` : null;
+  // Accent-budget demotion (kora ignition Task 8): the delta used to carry
+  // the accent unconditionally — Trends now spends its one accent on the
+  // chart's endpoint dot, so the delta reads ink when it's moving toward the
+  // stated goal and danger when it's moving away (see deltaColor.ts).
+  // "maintenance" (and a profile that hasn't loaded yet) has no away
+  // direction to judge, so it defaults to ink.
+  const deltaTextColor = d !== null ? deltaColor(d, profile.data?.goal ?? "maintenance", instrument) : instrument.ink;
 
   const dash = dashboard.data;
   const dashError = dashboard.isError;
@@ -170,7 +182,12 @@ export default function Progress() {
 
       <View style={{ paddingHorizontal: 16, gap: 16 }}>
         <Animated.View entering={enter(1)}>
-          <GlassPanel radius={24} style={{ padding: 18 }}>
+          {/* Trends' one BezelCluster hero (spec: "Weight panel becomes the
+              screen's BezelCluster") — Weight is the panel other Trends
+              content orbits, same "one bezel-grade instrument per screen"
+              rule Home and Diary already follow for their own heroes. */}
+          <BezelCluster radius={26} glow>
+            <View style={{ padding: 18 }}>
             <PressableScale
               accessibilityRole="button"
               accessibilityLabel="Log weight"
@@ -179,7 +196,7 @@ export default function Progress() {
             >
               <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
                 <View>
-                  <AppText style={mutedLabel}>Weight</AppText>
+                  <AppText maxFontSizeMultiplier={1.5} style={engravedStyle(instrument)}>Weight</AppText>
                   <View style={{ flexDirection: "row", alignItems: "baseline", gap: 6, marginTop: 2 }}>
                     {current > 0 ? (
                       <AnimatedNumber
@@ -194,7 +211,7 @@ export default function Progress() {
                   </View>
                 </View>
                 {deltaText ? (
-                  <AppText style={[{ fontSize: 13, fontWeight: "700", color: instrument.accent }, mono]}>{deltaText}</AppText>
+                  <AppText style={[{ fontSize: 13, fontWeight: "700", color: deltaTextColor }, mono]}>{deltaText}</AppText>
                 ) : null}
               </View>
             </PressableScale>
@@ -224,7 +241,8 @@ export default function Progress() {
             <View style={{ marginTop: 14 }}>
               <SegmentedGlass options={RANGE_OPTIONS} value={range} onChange={(key) => setRange(key as (typeof RANGES)[number])} />
             </View>
-          </GlassPanel>
+            </View>
+          </BezelCluster>
         </Animated.View>
 
         <Animated.View entering={enter(2)}>
