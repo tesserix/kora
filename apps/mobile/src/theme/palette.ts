@@ -162,6 +162,13 @@ export const instrumentDark = {
   // row titles it is used for.
   danger: "#EC4E40",
   teal: "#48A89E",
+  // Ignition finish (spec 2026-08-16): bezel bottom shading, recessed-well
+  // inner line, and the two lume glows. Light mode is a different finish,
+  // not a swap — see the light set.
+  shade: "rgba(0,0,0,0.28)",
+  wellShadow: "rgba(0,0,0,0.25)",
+  lumeText: "rgba(237,230,212,0.30)",
+  lumeAccent: "rgba(255,74,0,0.45)",
 } as const;
 
 export const instrumentLight = {
@@ -221,6 +228,12 @@ export const instrumentLight = {
   // 2.68:1 before — failing AA *and* the 3:1 non-text floor. #2C7871 is 4.89:1.
   // (The audit's #2F7F77 measures 4.46 — under the line, same trap as above.)
   teal: "#2C7871",
+  shade: "rgba(22,24,28,0.12)",
+  wellShadow: "rgba(22,24,28,0.08)",
+  // OFF by design: a halo behind near-black numerals reads as smudge —
+  // daylight dials don't glow.
+  lumeText: "transparent",
+  lumeAccent: "rgba(210,56,0,0.22)",
 } as const satisfies Record<keyof typeof instrumentDark, string>;
 
 export type InstrumentTokens = typeof instrumentDark;

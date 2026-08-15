@@ -145,3 +145,18 @@ test("light-mode mut clears WCAG AA (4.5:1) against Field's inset well", () => {
   const ratio = contrastRatio(parseColor(instrumentLight.mut), insetOnBg);
   expect(ratio).toBeGreaterThanOrEqual(4.5);
 });
+
+describe("ignition finish tokens", () => {
+  it("defines the four finish tokens in both schemes", () => {
+    for (const set of [instrumentDark, instrumentLight]) {
+      expect(set.shade).toMatch(/^rgba\(/);
+      expect(set.wellShadow).toMatch(/^rgba\(/);
+      expect(set.lumeAccent).toMatch(/^rgba\(/);
+      expect(typeof set.lumeText).toBe("string");
+    }
+  });
+  it("turns the text lume off in light mode", () => {
+    expect(instrumentLight.lumeText).toBe("transparent");
+    expect(instrumentDark.lumeText).not.toBe("transparent");
+  });
+});
