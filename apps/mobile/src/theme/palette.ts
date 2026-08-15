@@ -116,16 +116,42 @@ export const instrumentDark = {
   bg: "#0B0D10",
   ink: "#EDE6D4",
   mut: "#89929D",
-  glass: "rgba(24,28,35,0.55)",
-  glassBorder: "rgba(237,230,212,0.10)",
-  glassHighlight: "rgba(237,230,212,0.07)",
-  inset: "rgba(11,13,16,0.50)",
-  hairline: "rgba(237,230,212,0.08)",
-  tick: "rgba(237,230,212,0.15)",
+  // Raised from rgba(24,28,35,0.55) (kora#167). Composited over `bg` the old
+  // value was #12151A — 1.06:1, three luminance levels, a panel body that
+  // contributed nothing and left `shadows.card` doing 100% of the separation
+  // against a near-black ground it had nowhere to fall on. This composites to
+  // ~#222831, ~1.31:1: roughly 5x the luminance delta, still glass.
+  glass: "rgba(34,40,49,0.62)",
+  // 0.10 composited to 1.27:1 against the panel — an edge you cannot see.
+  // 0.38 reaches ~3.07:1, clearing WCAG 1.4.11's 3:1 floor for a boundary that
+  // is doing real work. (Measured curve: 0.10=1.27, 0.20=1.73, 0.30=2.40.)
+  glassBorder: "rgba(237,230,212,0.38)",
+  // The "light catching the material" top edge. Raised in proportion to the
+  // border so it still reads as a highlight rather than becoming a second rule.
+  glassHighlight: "rgba(237,230,212,0.16)",
+  // Deepened, NOT inverted (kora#167). The audit that found this proposed
+  // flipping the dark well to an ink tint, on the grounds that a near-black
+  // panel has no headroom left to darken into. That was true of the OLD panel
+  // and stopped being true one line above: lifting `glass` moved the panel from
+  // luminance 21.0 to 29.3, which hands the recess its headroom back. Inverting
+  // it would have made every well read as raised rather than sunk — the recess
+  // invariant in src/theme/__tests__/instrument.test.ts caught exactly that.
+  //
+  // Same alpha family as before, one step deeper: the step against the panel
+  // goes from 4.08 (its own test demands >= 4, so it was passing by 0.08) to
+  // ~9.1. The well is still the darkest thing in the material, and now visibly.
+  inset: "rgba(11,13,16,0.55)",
+  hairline: "rgba(237,230,212,0.16)",
+  // 0.15 was 1.47:1. A gauge graduation is meaningful non-text content and owes
+  // 3:1; at the old value the dials read as a lit pointer floating on nothing,
+  // which is half of what kora#167 describes as "flat".
+  tick: "rgba(237,230,212,0.42)",
   tickLit: "#EDE6D4",
   accent: "#FF4A00",
   accentOn: "#0B0D10",
-  danger: "#E23B2E",
+  // #E23B2E was 4.27:1 on a dark panel — just under AA for the 15px destructive
+  // row titles it is used for.
+  danger: "#EC4E40",
   teal: "#48A89E",
 } as const;
 
