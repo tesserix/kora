@@ -11,4 +11,10 @@ export const springs = {
   instant: { duration: 150, dampingRatio: 1 },
   standard: { duration: 350, dampingRatio: 1 },
   lively: { duration: 400, dampingRatio: 0.8 }, // gesture-released motion only
+  // Deliberately underdamped (spec 2026-08-16-kora-ignition-design.md:
+  // Motion > "ignition sequence" — needle overshoots and settles with a
+  // visible wobble). ONLY for the once-a-day ignition sequence's settle —
+  // every other needle motion in the app uses NEEDLE_SPRING (critically
+  // damped) and must never borrow this.
+  ignition: { damping: 12, stiffness: 180 },
 } as const satisfies Record<string, WithSpringConfig>;
