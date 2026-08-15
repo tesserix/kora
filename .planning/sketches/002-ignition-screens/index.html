@@ -256,8 +256,25 @@
     color: var(--mut); position: relative; transition: all .18s ease; font-size: 19px;
   }
   .dock2 .tb2:hover { color: var(--ink); }
-  .dock2 .tb2.active { color: var(--ink); background: var(--inset); box-shadow: inset 0 1px 0 var(--well-shadow); }
-  .dock2 .tb2.active::after { content: ""; position: absolute; bottom: 6px; width: 4px; height: 4px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 70%, transparent); }
+  .dock2 .tb2.active { color: var(--ink); }
+  /* sliding active well (Instagram-style): the inset well + accent dot glide between tabs */
+  .dock2 .slider {
+    position: absolute; top: 7px; height: 44px; border-radius: 15px;
+    background: var(--inset); box-shadow: inset 0 1px 0 var(--well-shadow);
+    transition: left .38s cubic-bezier(.3,1.3,.4,1), width .38s cubic-bezier(.3,1.3,.4,1);
+    pointer-events: none;
+  }
+  .dock2 .slider::after {
+    content: ""; position: absolute; bottom: 6px; left: 50%; transform: translateX(-50%);
+    width: 4px; height: 4px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 70%, transparent);
+  }
+  @keyframes tabpop { 0% { transform: scale(1); } 35% { transform: scale(.82); } 70% { transform: scale(1.12); } 100% { transform: scale(1); } }
+  .dock2 .tb2.popping > span:first-child { animation: tabpop .4s cubic-bezier(.3,.7,.4,1); }
+  @media (prefers-reduced-motion: reduce) {
+    .dock2 .slider { transition: none; }
+    .dock2 .tb2.popping > span:first-child { animation: none; }
+  }
   /* review: labels always on for discoverability; active gets full weight */
   .dock2 .tb2 .lbl2 { font-size: 8px; font-weight: 500; letter-spacing: 1.6px; text-transform: uppercase; opacity: .72; transition: all .18s ease; }
   .dock2 .tb2.active .lbl2 { opacity: 1; font-weight: 700; }
@@ -723,7 +740,7 @@
     const tabs = [["diary", "☀︎", "Today"], ["diary", "▤", "Diary"], null, ["trends", "↗", "Trends"], ["more", "•••", "More"]];
     document.querySelectorAll("[data-dock]").forEach((z) => {
       const active = z.dataset.dock;
-      let html = '<div class="dock2-bezel"><div class="dock2">';
+      let html = '<div class="dock2-bezel"><div class="dock2"><span class="slider"></span>';
       const order = [["today", "⌂", "Today"], ["diary", "▦", "Diary"], null, ["trends", "↗", "Trends"], ["more", "≡", "More"]];
       order.forEach((t) => {
         if (!t) { html += '<span class="notch"></span>'; return; }
@@ -731,6 +748,26 @@
       });
       html += '<button class="capture-fab2" title="Capture a meal">📷</button></div></div>';
       z.innerHTML = html;
+      const slide = (t) => {
+        const s = z.querySelector(".slider");
+        s.style.left = t.offsetLeft + "px";
+        s.style.width = t.offsetWidth + "px";
+      };
+      z.querySelectorAll(".tb2").forEach((t) => t.addEventListener("click", () => {
+        z.querySelectorAll(".tb2").forEach((o) => o.classList.remove("active", "popping"));
+        t.classList.add("active", "popping");
+        t.addEventListener("animationend", () => t.classList.remove("popping"), { once: true });
+        slide(t);
+      }));
+    });
+  }
+  function syncDockSliders() {
+    // hidden docks have zero layout; position sliders once their screen is visible
+    document.querySelectorAll(".variant.active [data-dock]").forEach((z) => {
+      const t = z.querySelector(".tb2.active"), s = z.querySelector(".slider");
+      if (!t || !s) return;
+      s.style.left = t.offsetLeft + "px";
+      s.style.width = t.offsetWidth + "px";
     });
   }
 
@@ -755,6 +792,7 @@
     btn.classList.add("active");
     replayRises(sec);
     renderScreen(id);
+    requestAnimationFrame(() => requestAnimationFrame(syncDockSliders));
   }
   function setTheme(v) {
     if (v === "system") document.documentElement.removeAttribute("data-theme");
@@ -776,4 +814,5 @@
   document.documentElement.setAttribute("data-theme", "dark");
   renderDocks();
   renderScreen("home");
+  requestAnimationFrame(() => requestAnimationFrame(syncDockSliders));
 </script>

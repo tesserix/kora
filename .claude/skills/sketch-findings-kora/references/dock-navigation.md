@@ -11,8 +11,15 @@
 - **Glyphs must be self-evident**: home / calendar-grid / trend-arrow / menu
   (mockup placeholders ⌂ ▦ ↗ ≡ — production uses the app's monochrome icon set,
   never emoji). The original ☀︎/▤/•••set failed the review.
-- **Active tab well**: inset fill + `well-shadow` top inner line + 4px accent dot
-  with a soft glow — the dock's single accent element.
+- **Active state is a sliding well (Instagram-style switching).** The inset well is a
+  single element that glides between tabs with a springy overshoot ease
+  (`cubic-bezier(.3,1.3,.4,1)`, ~380ms), carrying the 4px glowing accent dot with it;
+  the tapped icon simultaneously does a quick pop (scale 1 → .82 → 1.12 → 1, ~400ms).
+  RN mapping: animate the well's `translateX`/width with a Reanimated spring
+  (lively-adjacent, slight underdamp is intended here), icon pop via the existing
+  PressableScale/scale spring, `selection` haptic on switch. Under Reduce Motion the
+  well jumps instantly and the pop is skipped. The well + dot remain the dock's
+  single accent element.
 - **Capture button: raised sibling, NOT notched.** The mockup's bg-colored ring
   "carved" look breaks over live blur in RN. Keep FloatingTabBar's architecture
   (absolute sibling raised ~16px above the pill); restyle only: 56px domed orange
