@@ -263,6 +263,26 @@ func (r Resolver) resolve(
 		return res, nil
 	}
 
+	// The one line that explains a wrong answer (#180). Decomposition only runs
+	// because the index match was not good enough, and it can only ever produce
+	// a number LARGER than the dish — so every implausible estimate the user
+	// sees passes through here. Without the guess phrase and the score that was
+	// rejected there is no way to tell whether the identify step, the embedding
+	// match, or the tier threshold is at fault: a mini croissant resolved to
+	// 2248-3041 kcal while `Croissants, butter` (114 kcal at its 28 g serving)
+	// sat in the index, embedded, and nothing recorded said why it lost.
+	//
+	// Logged at WARN because reaching here is already a degraded outcome, not a
+	// normal path. Food names are user content; they are the whole diagnostic
+	// value here and are no more sensitive than the log rows they become.
+	slog.WarnContext(ctx, "ai: no candidate reached auto/confirm; falling back to decomposition",
+		"subject", subject,
+		"guesses", summariseGuesses(guesses),
+		"rejected_tier", string(res.Tier),
+		"rejected_top", topCandidateName(res),
+		"rejected_score", topCandidateScore(res),
+	)
+
 	estimate, resolved, err := r.decomposeAndEstimate(ctx, userID, subject)
 	if err != nil {
 		return Resolution{}, fmt.Errorf("ai: resolve: decompose: %w", err)
@@ -454,6 +474,44 @@ func estimateIngredientTier(matchScore float64) Tier {
 		return TierConfirm
 	}
 	return tier
+}
+
+// Diagnostics for the decomposition fallback log (#180). Kept as plain
+// functions returning already-formatted values so the log call site stays one
+// statement, and so a nil/empty Resolution can never panic the request it is
+// only trying to explain.
+
+// summariseGuesses renders what the model actually said, which is the single
+// most useful field when an answer is wrong: it separates "identify was wrong"
+// from "identify was right and the index match failed".
+func summariseGuesses(guesses []Guess) string {
+	if len(guesses) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(guesses))
+	for _, g := range guesses {
+		parts = append(parts, fmt.Sprintf("%s@%.2f", g.Food, g.Confidence))
+	}
+	return strings.Join(parts, "; ")
+}
+
+// topCandidateName is the index row that came closest and was still rejected.
+// Empty when nothing resolved at all — a meaningfully different failure.
+func topCandidateName(res Resolution) string {
+	if len(res.Candidates) == 0 {
+		return ""
+	}
+	return res.Candidates[0].Item.Name
+}
+
+// topCandidateScore pairs with the name above: the score that failed to clear
+// the tier threshold. Without it there is no way to tell a near miss (tune the
+// threshold) from a genuine non-match (fix the matching).
+func topCandidateScore(res Resolution) float64 {
+	if len(res.Candidates) == 0 {
+		return 0
+	}
+	return res.Candidates[0].MatchScore
 }
 
 // decomposeAndEstimate decomposes subject into ingredients, resolves each
