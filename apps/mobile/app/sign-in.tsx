@@ -151,7 +151,20 @@ export default function SignIn() {
     <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
       <AuthScaffold
         footer={
-          <View style={{ flexDirection: "row", justifyContent: "center", gap: 6 }}>
+          // flexWrap so the two halves stack instead of running off the screen
+          // (kora#173). A centred row with no wrap overflows BOTH edges once the
+          // text outgrows the width, which at accessibility text sizes put
+          // "Create an account" -- the only way to reach signup -- partly past
+          // the right edge.
+          <View
+            style={{
+              flexDirection: "row",
+              flexWrap: "wrap",
+              justifyContent: "center",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
             <AppText muted variant="footnote">
               {mode === "in" ? "New here?" : "Already have an account?"}
             </AppText>

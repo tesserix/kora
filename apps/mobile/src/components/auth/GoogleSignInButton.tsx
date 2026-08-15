@@ -45,6 +45,9 @@ export function GoogleSignInButton({
         alignItems: "center",
         justifyContent: "center",
         gap: spacing.sm + 2,
+        // Horizontal breathing room so a wrapped label stops short of the
+        // border rather than running into it (kora#173).
+        paddingHorizontal: spacing.md,
         minHeight: 48,
         borderRadius: radius.lg,
         backgroundColor: GOOGLE_DARK_FILL,
@@ -53,7 +56,9 @@ export function GoogleSignInButton({
         opacity: disabled ? 0.6 : 1,
       }}
     >
-      <View testID="google-g-mark">
+      {/* flexShrink: 0 so the mark keeps its size when the label wraps
+          (kora#173) — Google's guidelines do not permit rendering it smaller. */}
+      <View testID="google-g-mark" style={{ flexShrink: 0 }}>
         <Svg width={18} height={18} viewBox="0 0 48 48">
           <Path
             fill="#EA4335"
@@ -73,7 +78,13 @@ export function GoogleSignInButton({
           />
         </Svg>
       </View>
-      <AppText variant="headline" style={{ color: GOOGLE_DARK_LABEL }}>
+      {/* flexShrink: 1 is what keeps the mark inside the button (kora#173).
+          Without it this Text claims its full intrinsic width, and because the
+          row is centred the overflow spills BOTH ways — at accessibility text
+          sizes the G rendered outside the border, against the screen edge,
+          while the label wrapped. Shrinking lets the text wrap within the
+          space that is actually available instead. */}
+      <AppText variant="headline" style={{ color: GOOGLE_DARK_LABEL, flexShrink: 1 }}>
         {title}
       </AppText>
     </PressableScale>
