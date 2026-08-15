@@ -14,10 +14,27 @@ test("both instrument themes define every token", () => {
 
 test("the accent is signal orange in both themes and nothing is purple", () => {
   expect(instrumentDark.accent).toBe("#FF4A00");
-  expect(instrumentLight.accent).toBe("#FF4A00");
+  // Light's accent is DELIBERATELY a darker orange than dark's (kora#167).
+  // A single shared value cannot satisfy both schemes: #FF4A00 is 5.43:1 on the
+  // dark panel but only 3.17:1 as text on the light one, and 3.37:1 for the
+  // white `accentOn` label sitting on it — the primary CTA failing AA. Darkening
+  // it far enough for light would in turn sink it toward the dark background.
+  // So the hexes differ; the hue does not. The contrast test below is the real
+  // guarantee, and this one keeps the family honest.
+  expect(instrumentLight.accent).not.toBe(instrumentDark.accent);
+  expect(instrumentLight.accent).toMatch(/^#[CD][0-9A-F]{5}$/i);
   // the legacy purple sleepMetric must not leak into instrument tokens
   const all = [...Object.values(instrumentDark), ...Object.values(instrumentLight)];
   expect(all.some((v) => /7A6BFF|8B7CFF/i.test(v))).toBe(false);
+});
+
+test("light-mode accent clears AA as text and behind its own label", () => {
+  const panel = over(instrumentLight.glass, parseColor(instrumentLight.bg));
+  const accent = parseColor(instrumentLight.accent);
+  // As text on a panel...
+  expect(contrastRatio(accent, panel)).toBeGreaterThanOrEqual(4.5);
+  // ...and as the fill under `accentOn`, which is the primary CTA's label.
+  expect(contrastRatio(parseColor(instrumentLight.accentOn), accent)).toBeGreaterThanOrEqual(4.5);
 });
 
 test("grounds and ink swap between themes", () => {

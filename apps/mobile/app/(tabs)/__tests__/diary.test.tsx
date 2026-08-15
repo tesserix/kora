@@ -2,6 +2,7 @@ import { Alert } from "react-native";
 import { fireEvent, render, within } from "@testing-library/react-native";
 import { router } from "expo-router";
 import type { QueuedRow } from "@/offline/useQueuedLogs";
+import { instrumentLight } from "@/theme/palette";
 
 import Diary from "../diary";
 
@@ -559,7 +560,10 @@ test("a week-strip day that hit its kcal goal shows an accent pip", async () => 
 
   const todayIso = isoOf(new Date());
   const pipStyle = flatten(getByTestId(`week-pip-${todayIso}`).props.style);
-  expect(pipStyle.backgroundColor).toBe("#FF4A00");
+  // Against the token, not a literal: what this test means is "a met goal is
+  // painted in the accent", and the accent's value is now scheme-specific
+  // (kora#167 — light had to darken to clear AA on the CTA label).
+  expect(pipStyle.backgroundColor).toBe(instrumentLight.accent);
 });
 
 test("a week-strip day under its kcal goal shows a tick (non-accent) pip", async () => {

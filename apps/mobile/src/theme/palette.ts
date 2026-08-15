@@ -164,7 +164,18 @@ export const instrumentLight = {
   // `mut` is unchanged; it already passes at ~6.2:1.
   mut: "#5A6069",
   glass: "rgba(255,255,255,0.60)",
-  glassBorder: "rgba(255,255,255,0.85)",
+  // INK-tinted, not white (kora#167). White at 0.85 over a glass panel that is
+  // itself near-white composited to 1.05:1 — a border with no border in it. The
+  // same trap `inset` below already documents: on a light ground a boundary has
+  // to be drawn *into* the surface, not lit on top of it. 0.28 reaches 1.84:1.
+  //
+  // Honest limit: a true 3:1 boundary here needs roughly a mid-grey (#8A8A8A),
+  // which reads as a hard outline around every card and is a bigger aesthetic
+  // change than a contrast fix should make unilaterally. Dark reaches 3.07:1
+  // because it has the headroom; light does not without changing its character.
+  glassBorder: "rgba(22,24,28,0.28)",
+  // Stays white: this is the highlight catching the top edge, and it reads
+  // against the ink border above rather than against the panel.
   glassHighlight: "rgba(255,255,255,0.95)",
   // Ink-tinted, NOT a white tint: a well is painted on `glass` (white at 60%
   // over a light ground), so a white inset came out lighter than its own
@@ -173,14 +184,34 @@ export const instrumentLight = {
   // darker than its panel; light's has to be too. 0.08 clears the near-white
   // panel by ~18 luminance levels: visible at a 7px segmented pill, still
   // reading as a recess in the material rather than a grey box on it.
+  // Left at 0.08 on purpose. Deepening this to 0.12 (as the dark well was
+  // deepened) drops `mut` on the well from ~4.62:1 to 4.25:1 and breaks the AA
+  // guarantee the comment above it documents — instrument.test.ts pins exactly
+  // that pair. Light's recess was already measured and tuned; unlike dark's, it
+  // did not need re-deriving.
   inset: "rgba(22,24,28,0.08)",
-  hairline: "rgba(22,24,28,0.09)",
-  tick: "rgba(22,24,28,0.14)",
+  hairline: "rgba(22,24,28,0.14)",
+  // 0.14 was 1.33:1 — gauge graduations that are not there. 0.50 reaches
+  // 3.34:1, clearing SC 1.4.11 for meaningful non-text content.
+  tick: "rgba(22,24,28,0.50)",
   tickLit: "#16181C",
-  accent: "#FF4A00",
+  // Darkened from the shared #FF4A00 (kora#167). That value was 3.17:1 as text
+  // on a light panel and — worse — 3.37:1 for `accentOn` white sitting on it,
+  // which is the PRIMARY CTA LABEL failing AA. #D23800 is the lightest value
+  // that clears 4.5 on both counts (4.58 text, 4.88 white-on), so it stays as
+  // close to the brand orange as the requirement allows.
+  //
+  // The audit that found this proposed #D63900; measured, that is 4.44 text —
+  // under the 4.5 line, so it would have shipped a still-failing CTA.
+  //
+  // Dark keeps #FF4A00 deliberately: on the dark panel it is already 5.43:1.
+  // The accent differs by scheme because the requirement differs by scheme.
+  accent: "#D23800",
   accentOn: "#FFFFFF",
   danger: "#D32F23",
-  teal: "#48A89E",
+  // 2.68:1 before — failing AA *and* the 3:1 non-text floor. #2C7871 is 4.89:1.
+  // (The audit's #2F7F77 measures 4.46 — under the line, same trap as above.)
+  teal: "#2C7871",
 } as const satisfies Record<keyof typeof instrumentDark, string>;
 
 export type InstrumentTokens = typeof instrumentDark;
