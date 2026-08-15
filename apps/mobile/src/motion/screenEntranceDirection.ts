@@ -26,3 +26,13 @@ export function resolveScreenDirection(index: number): ScreenDirection {
   lastFocusedIndex = index;
   return direction;
 }
+
+// Test-only reset for the module-level `lastFocusedIndex` above. Without
+// this, tests that call `resolveScreenDirection` are order-dependent — one
+// test's calls leak into the next via the shared module state, since Jest
+// only re-evaluates a module fresh per test FILE, not per test. Exported
+// (rather than relying solely on `jest.resetModules()`) so callers don't
+// have to re-import the module after resetting.
+export function __resetForTests(): void {
+  lastFocusedIndex = 0;
+}
