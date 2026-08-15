@@ -45,3 +45,35 @@ test("an active pill fills with accent", async () => {
     : activeStyle;
   expect(flatActive.backgroundColor).toBe(INSTRUMENT_DARK_FIXED.accent);
 });
+
+test("renders with enlarged sizing and 44pt touch targets", async () => {
+  const onPress = jest.fn();
+  const { getByRole, getByText } = await render(
+    <ModePill icon="camera" label="Photo" active={false} onPress={onPress} />,
+  );
+  const pressableButton = getByRole("button");
+  const style = pressableButton.props.style;
+  const flatStyle = Array.isArray(style)
+    ? Object.assign({}, ...style.flat().filter(Boolean))
+    : style;
+
+  // Assert padding dimensions for ~36pt touch target
+  expect(flatStyle.paddingVertical).toBe(9);
+  expect(flatStyle.paddingHorizontal).toBe(16);
+  expect(flatStyle.gap).toBe(7);
+
+  // Assert hitSlop for 44pt minimum touch target
+  expect(pressableButton.props.hitSlop).toEqual({
+    top: 6,
+    bottom: 6,
+    left: 4,
+    right: 4,
+  });
+
+  // Assert AppText fontSize
+  const textElement = getByText("Photo");
+  const textStyle = Array.isArray(textElement.props.style)
+    ? Object.assign({}, ...textElement.props.style.flat().filter(Boolean))
+    : textElement.props.style;
+  expect(textStyle.fontSize).toBe(13);
+});

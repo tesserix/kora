@@ -31,12 +31,13 @@ export function ModePill({ icon, label, active, onPress }: Props) {
         haptics.selection();
         onPress();
       }}
+      hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
       style={(state) => ({
         flexDirection: "row",
         alignItems: "center",
-        gap: 6,
-        paddingHorizontal: 12,
-        paddingVertical: 6,
+        gap: 7,
+        paddingHorizontal: 16,
+        paddingVertical: 9,
         borderRadius: 9999,
         backgroundColor: active ? INSTRUMENT_DARK_FIXED.accent : INSTRUMENT_DARK_FIXED.glass,
         borderWidth: active ? 0 : 1,
@@ -44,11 +45,12 @@ export function ModePill({ icon, label, active, onPress }: Props) {
         opacity: state.pressed ? 0.85 : 1,
       })}
     >
-      <Icon name={icon} size={14} color={fg} />
+      <Icon name={icon} size={16} color={fg} />
       <AppText
+        maxFontSizeMultiplier={1.6}
         style={{
           color: fg,
-          fontSize: 11,
+          fontSize: 13,
           fontWeight: "700",
           textTransform: "uppercase",
           letterSpacing: 1.4,
