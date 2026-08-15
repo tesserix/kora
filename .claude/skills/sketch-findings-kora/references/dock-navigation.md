@@ -11,8 +11,9 @@
 - **Glyphs must be self-evident**: home / calendar-grid / trend-arrow / menu
   (mockup placeholders ⌂ ▦ ↗ ≡ — production uses the app's monochrome icon set,
   never emoji). The original ☀︎/▤/•••set failed the review.
-- **Active state is a sliding well (Instagram-style switching).** The inset well is a
-  single element that glides between tabs with a springy overshoot ease
+- **Active state is a sliding well (Instagram-style switching).** The well is a
+  full pill (radius = height/2, 44px → 22px) — the dock's own capsule silhouette
+  miniaturized, not a rounded rectangle. It is a single element that glides between tabs with a springy overshoot ease
   (`cubic-bezier(.3,1.3,.4,1)`, ~380ms), carrying the 4px glowing accent dot with it;
   the tapped icon simultaneously does a quick pop (scale 1 → .82 → 1.12 → 1, ~400ms).
   RN mapping: animate the well's `translateX`/width with a Reanimated spring
