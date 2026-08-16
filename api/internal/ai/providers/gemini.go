@@ -75,6 +75,10 @@ type GeminiProvider struct {
 
 // NewGeminiProvider builds a GeminiProvider authenticated with apiKey against
 // the Gemini API backend (not Vertex AI).
+//
+// Kept for local development and for cmd/embed run from a laptop, where a key
+// is simpler than arranging application-default credentials. Production uses
+// NewVertexProvider — see its comment for why.
 func NewGeminiProvider(ctx context.Context, apiKey string) (GeminiProvider, error) {
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{
 		APIKey:  apiKey,
@@ -82,6 +86,48 @@ func NewGeminiProvider(ctx context.Context, apiKey string) (GeminiProvider, erro
 	})
 	if err != nil {
 		return GeminiProvider{}, fmt.Errorf("gemini: new client: %w", err)
+	}
+	return GeminiProvider{client: client}, nil
+}
+
+// NewVertexProvider builds the same provider against Vertex AI, authenticated
+// by the workload's own service account rather than an API key.
+//
+// WHY: production ran on a personal Gemini API key on the free tier, which
+// caused three separate problems that all resolve here.
+//
+//   - **Capacity.** The free tier shares a demand pool, and a 503 "this model
+//     is currently experiencing high demand" took photo logging down entirely
+//     (kora#179). Vertex has project-scoped capacity.
+//   - **Quota.** The free tier caps embeddings at 1,000 per project per DAY,
+//     which is what stopped the OpenFoodFacts index backfill at 607 of 5,669
+//     rows (kora#97). That ceiling is the limiting factor on index growth, not
+//     the ingest.
+//   - **Identity.** A personal key belonging to one individual underpinned
+//     production, and it had to be present in the environment. Vertex uses the
+//     `kora-api` Kubernetes service account via Workload Identity
+//     (kora-api-prod@, granted roles/aiplatform.user), so there is no key.
+//
+// LOCATION is "global" deliberately. Verified against the live API on
+// 2026-08-16: asia-south1 (where this cluster runs) serves gemini-3.5-flash and
+// gemini-embedding-001 but returns 404 for **gemini-3.5-flash-lite**, which the
+// identify path uses. us-central1 has neither 3.5 model. Only "global" serves
+// all three, so pinning a region would have forced a model change; this does
+// not.
+func NewVertexProvider(ctx context.Context, project, location string) (GeminiProvider, error) {
+	if project == "" {
+		return GeminiProvider{}, fmt.Errorf("gemini: vertex: project is required")
+	}
+	if location == "" {
+		location = "global"
+	}
+	client, err := genai.NewClient(ctx, &genai.ClientConfig{
+		Project:  project,
+		Location: location,
+		Backend:  genai.BackendVertexAI,
+	})
+	if err != nil {
+		return GeminiProvider{}, fmt.Errorf("gemini: new vertex client: %w", err)
 	}
 	return GeminiProvider{client: client}, nil
 }

@@ -16,6 +16,11 @@ type Config struct {
 	RedisURL          string
 	FirebaseProjectID string
 	GeminiAPIKey      string
+	// VertexProject, when set, switches the resolve engine from the Gemini API
+	// (personal API key, free-tier quotas) to Vertex AI authenticated by the
+	// workload's own service account. See providers.NewVertexProvider.
+	VertexProject     string
+	VertexLocation    string
 	OpenAIAPIKey      string
 	OpenAIBaseURL     string
 	OpenAIModel       string
@@ -59,6 +64,8 @@ func Load() (Config, error) {
 		RedisURL:                 getenv("REDIS_URL", "redis://localhost:6379/0"),
 		FirebaseProjectID:        os.Getenv("FIREBASE_PROJECT_ID"),
 		GeminiAPIKey:             os.Getenv("GEMINI_API_KEY"),
+		VertexProject:            os.Getenv("VERTEX_PROJECT"),
+		VertexLocation:           getenv("VERTEX_LOCATION", "global"),
 		OpenAIAPIKey:             os.Getenv("OPENAI_API_KEY"),
 		OpenAIBaseURL:            os.Getenv("OPENAI_BASE_URL"),
 		OpenAIModel:              os.Getenv("OPENAI_MODEL"),

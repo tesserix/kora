@@ -295,13 +295,31 @@ func ingestEmbedder(gemini providers.GeminiProvider) providerEmbedder {
 // were served the stale food for up to the cache's 24h TTL. The identity is
 // pinned by server.TestAdminMutationBumpsTheSameCacheInstanceWiredIntoDeps.
 func buildResolveHandler(ctx context.Context, cfg config.Config, db *gorm.DB, logger *slog.Logger) (*resolve.Handler, ai.Provider, ai.Cache) {
-	if cfg.GeminiAPIKey == "" {
-		logger.Info("resolve engine disabled (no GEMINI_API_KEY)")
-		return nil, nil, nil
-	}
-	gemini, err := providers.NewGeminiProvider(ctx, cfg.GeminiAPIKey)
-	if err != nil {
-		logger.Error("gemini provider init failed — resolve engine disabled", "err", err)
+	// Vertex wins when configured: it is authenticated by the workload's own
+	// service account, so unlike the API-key path it needs no secret present,
+	// and it escapes the free tier's shared demand pool and 1,000/day embedding
+	// cap (kora#97, kora#179). The API-key path stays for local development.
+	var (
+		gemini providers.GeminiProvider
+		err    error
+	)
+	switch {
+	case cfg.VertexProject != "":
+		gemini, err = providers.NewVertexProvider(ctx, cfg.VertexProject, cfg.VertexLocation)
+		if err != nil {
+			logger.Error("vertex provider init failed — resolve engine disabled", "err", err)
+			return nil, nil, nil
+		}
+		logger.Info("resolve engine: vertex ai", "project", cfg.VertexProject, "location", cfg.VertexLocation)
+	case cfg.GeminiAPIKey != "":
+		gemini, err = providers.NewGeminiProvider(ctx, cfg.GeminiAPIKey)
+		if err != nil {
+			logger.Error("gemini provider init failed — resolve engine disabled", "err", err)
+			return nil, nil, nil
+		}
+		logger.Info("resolve engine: gemini api key")
+	default:
+		logger.Info("resolve engine disabled (no VERTEX_PROJECT and no GEMINI_API_KEY)")
 		return nil, nil, nil
 	}
 
