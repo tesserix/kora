@@ -1,4 +1,4 @@
-# Device test plan — TestFlight build 28
+# Device test plan — TestFlight build 29
 
 Three fixes that landed after build 27 was cut, plus everything 27 already carried (now confirmed).
 The AI changes below are **already live in production** and need no build at all.
@@ -52,7 +52,11 @@ already had the screen for it: "couldn't identify that", with Search manually.
 
 ---
 
-## B. New in build 28 — untested
+> **Build 28 does not exist.** A first attempt failed on EAS's filename-casing check because the repo
+> was being modified (a `git mv`) while the build scanned the tree — `autoIncrement` had already
+> reserved 28 remotely by then. Do not edit the working tree during a local build.
+
+## B. New in build 29 — untested
 
 ### B1. Correcting a QUEUED capture no longer double-logs (kora#198)
 
