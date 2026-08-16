@@ -41,6 +41,34 @@ const budgetFollowUpQuestion = "You've reached your AI limit this month — sear
 // identified but none of them resolved to a confident nutrition-index match.
 const noResolvableGuessFollowUpQuestion = "Which of these best matches what you ate?"
 
+// minReturnableMatchScore is the floor below which the engine says it does not
+// know, instead of returning its nearest row.
+//
+// Chosen from MEASURED production resolutions, not intuition — the same
+// standard internal/nutrition/score.go holds its weights to. Observed on
+// 2026-08-15/16, with the outcome judged against what the user actually ate:
+//
+//	0.349  "McSpicy Chicken Burger" -> McDONALD'S Bacon Ranch Salad    WRONG
+//	0.399  "McSpicy Chicken Patty"  -> Chicken patty, frozen, cooked   WRONG
+//	0.424  "McDonald's meal"        -> McDONALD'S, Hamburger           vague query
+//	0.4425 "croissant"              -> Croissants, cheese              RIGHT (117 vs ~114 kcal)
+//	0.522  "McChicken sandwich"     -> McDONALD'S, McCHICKEN Sandwich  RIGHT
+//	0.566  "pear"                   -> Pears, raw                      RIGHT
+//
+// Every correct match observed scored >= 0.4425; every clearly wrong one
+// <= 0.399. 0.40 sits in that gap, and the gap — not the precise value — is
+// what this rests on. It is one figure read off real outcomes, NOT seven
+// parameters fitted to a golden set, which score.go rightly calls "overfitting
+// dressed as rigour".
+//
+// WHY A FLOOR IS NEEDED AT ALL: 98% of the index was USDA until the AFCD and
+// OpenFoodFacts imports (kora#184), so for an Australian user the right row
+// frequently did not exist. A resolver that always returns its nearest row then
+// fabricates — three wrong branded foods, 870 kcal, one tap from the diary. The
+// index is better now, but no index covers everything, and "I don't know" has
+// to be reachable.
+const minReturnableMatchScore = 0.40
+
 // blankTranscriptFollowUp is returned when transcription yields no usable
 // speech — the user recorded silence or noise.
 const blankTranscriptFollowUp = "I couldn't make out any food from that — try again or type it."
@@ -273,7 +301,13 @@ func (r Resolver) resolve(
 	//
 	// Decomposition is kept for the case it was designed for, below: a
 	// composite dish with NO index row at all.
-	if len(res.Candidates) > 0 {
+	// ...but only when the match is strong enough to be worth correcting rather
+	// than worth disowning. Below minReturnableMatchScore the honest answer is
+	// "I couldn't identify that", which the client already renders — its
+	// follow-up branch offers Search manually, and FoodPicker is a better
+	// outcome than a confidently-wrong branded row the user must notice and
+	// undo. kora#184.
+	if returnableWeakMatch(res) {
 		// Blanked for the same reason decomposeAndEstimate leaves it blank: the
 		// client renders its dedicated follow-up branch only when tier is
 		// follow_up AND this is non-empty, and that branch DISCARDS the
@@ -290,6 +324,26 @@ func (r Resolver) resolve(
 			"tier", string(res.Tier),
 			"top", topCandidateName(res),
 			"score", topCandidateScore(res),
+		)
+		return res, nil
+	}
+
+	if len(res.Candidates) > 0 {
+		// Reached only when every candidate is below the floor. The follow-up
+		// question is deliberately LEFT set (resolveGuesses set it when the best
+		// tier was follow_up), which is what makes the client take its
+		// "couldn't identify that / search manually" branch instead of the card.
+		//
+		// Logged at the same key as the return-anyway case above so the two
+		// stay comparable: this line is the evidence minReturnableMatchScore
+		// gets recalibrated from, and a floor that can never be re-measured is
+		// a magic number waiting to rot.
+		slog.InfoContext(ctx, "ai: abstaining — best match below the floor",
+			"guesses", summariseGuesses(guesses),
+			"tier", string(res.Tier),
+			"top", topCandidateName(res),
+			"score", topCandidateScore(res),
+			"floor", minReturnableMatchScore,
 		)
 		return res, nil
 	}
@@ -479,6 +533,17 @@ func (r Resolver) resolveGuesses(ctx context.Context, userID uuid.UUID, guesses 
 		res.FollowUpQuestion = noResolvableGuessFollowUpQuestion
 	}
 	return res, nil
+}
+
+// returnableWeakMatch reports whether a below-confirm resolution is still worth
+// showing as itself, rather than abstaining.
+//
+// A separate function purely so the boundary is testable without driving real
+// scoring: the interesting cases are "just under" and "exactly on" the floor,
+// and reproducing those through full-text ranking would be a test of the
+// ranker, not of this decision.
+func returnableWeakMatch(res Resolution) bool {
+	return len(res.Candidates) > 0 && topCandidateScore(res) >= minReturnableMatchScore
 }
 
 // estimateIngredientTier computes a decomposed ingredient's own tier from its

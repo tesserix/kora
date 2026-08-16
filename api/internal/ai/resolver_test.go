@@ -1179,3 +1179,58 @@ func TestResolveText_WeakMatch_PrefersCandidateOverDecomposition(t *testing.T) {
 	require.Empty(t, res.FollowUpQuestion,
 		"blank keeps the client on the detected-card path, where the uncertain row is tappable")
 }
+
+// TestReturnableWeakMatch pins the abstain floor (kora#184) at the boundary,
+// with the cases named by the real resolutions the floor was measured from.
+//
+// The floor exists because the engine had no way to say "I don't know": every
+// query returned the nearest row it held, however far away. Against an index
+// that was 98% USDA, an Australian user asking for a McSpicy got a Bacon Ranch
+// Salad — and three such rows, 870 kcal, sat one tap from the diary.
+//
+// The values below are production measurements, not invented thresholds. If
+// this test is ever changed, change it against fresh measurements from the
+// "ai: abstaining" / "returning low-confidence match" log lines, which exist to
+// keep this figure re-derivable.
+func TestReturnableWeakMatch(t *testing.T) {
+	withScore := func(score float64) Resolution {
+		return Resolution{Candidates: []ResolvedCandidate{{MatchScore: score}}}
+	}
+
+	tests := []struct {
+		name  string
+		res   Resolution
+		want  bool
+		notes string
+	}{
+		{"no candidates at all", Resolution{}, false, "nothing to return; decomposition may still apply"},
+		{"McSpicy -> Bacon Ranch Salad", withScore(0.349), false, "measured wrong"},
+		{"McSpicy patty -> frozen chicken patty", withScore(0.399), false, "measured wrong"},
+		{"exactly on the floor", withScore(0.40), true, "boundary is inclusive"},
+		{"just under the floor", withScore(0.3999), false, "boundary is inclusive"},
+		{"croissant -> Croissants, cheese", withScore(0.4425), true, "measured RIGHT: 117 vs ~114 kcal"},
+		{"McChicken -> McCHICKEN Sandwich", withScore(0.522), true, "measured right"},
+		{"pear -> Pears, raw", withScore(0.566), true, "measured right"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, returnableWeakMatch(tt.res), tt.notes)
+		})
+	}
+}
+
+// The floor must sit strictly BETWEEN the worst correct match and the best
+// wrong one that were measured. Pinned separately from the table above because
+// it is the property that makes 0.40 defensible at all: move the constant
+// outside this gap and the separation it rests on is gone, whatever the table
+// says.
+func TestAbstainFloorSitsInTheMeasuredGap(t *testing.T) {
+	const bestMeasuredWrong = 0.399   // McSpicy Chicken Patty -> Chicken patty, frozen
+	const worstMeasuredRight = 0.4425 // croissant -> Croissants, cheese
+
+	require.Greater(t, minReturnableMatchScore, bestMeasuredWrong,
+		"the floor must reject every wrong match that was measured")
+	require.LessOrEqual(t, minReturnableMatchScore, worstMeasuredRight,
+		"the floor must keep every correct match that was measured — the croissant is the tight one")
+}
