@@ -66,10 +66,12 @@ func TestRunRetriesTransientFailures(t *testing.T) {
 	// Fails twice, succeeds on the third attempt — within the 3-attempt budget.
 	e := &flakyEmbedder{failures: map[string]int{"Flaky food": 2}}
 
-	embedded, failed := run(context.Background(), s, e)
+	o := run(context.Background(), s, e)
 
-	assert.Equal(t, 1, embedded)
-	assert.Equal(t, 0, failed)
+	assert.Equal(t, 1, o.embedded)
+	assert.Equal(t, 0, o.failed)
+	assert.False(t, o.gaveUp, "a run that drained the queue has not given up")
+	assert.Equal(t, 0, exitCode(o))
 	assert.True(t, s.stored[row.ID])
 }
 
@@ -78,19 +80,21 @@ func TestRunCountsPersistentFailures(t *testing.T) {
 	s := &fakeStore{batches: [][]nutrition.FoodItem{{row}}}
 	e := &flakyEmbedder{alwaysErr: true}
 
-	embedded, failed := run(context.Background(), s, e)
+	o := run(context.Background(), s, e)
 
-	assert.Equal(t, 0, embedded)
-	assert.Equal(t, 1, failed)
+	assert.Equal(t, 0, o.embedded)
+	assert.Equal(t, 1, o.failed)
 	// The whole-batch bail-out must stop the loop rather than spinning forever
 	// on rows that are never marked done.
 	assert.Equal(t, 1, s.call)
+	assert.True(t, o.gaveUp, "bailing out of a batch is giving up")
+	assert.Equal(t, 1, exitCode(o))
 }
 
-// TestRunContinuesPastAPartialBatchFailure pins the shape Ruling 1 turned
-// green: a row that cannot be embedded does not abort the run, the next batch
-// is still fetched and embedded, and the run reports both the progress and the
-// failure — which exitCode then reads as success.
+// TestRunContinuesPastAPartialBatchFailure pins the shape that stays green: a
+// row that cannot be embedded does not abort the run, the next batch is still
+// fetched and embedded, and the run drains the queue. It reports the failure
+// but did not give up, so exitCode reads it as success.
 func TestRunContinuesPastAPartialBatchFailure(t *testing.T) {
 	good1 := nutrition.FoodItem{ID: uuid.New(), Name: "Good food one"}
 	doomed := nutrition.FoodItem{ID: uuid.New(), Name: "Doomed food"}
@@ -101,43 +105,96 @@ func TestRunContinuesPastAPartialBatchFailure(t *testing.T) {
 	// other two rows embed first time.
 	e := &flakyEmbedder{failures: map[string]int{"Doomed food": embedAttempts}}
 
-	embedded, failed := run(context.Background(), s, e)
+	o := run(context.Background(), s, e)
 
-	assert.Equal(t, 2, embedded, "both good rows must be embedded")
-	assert.Equal(t, 1, failed, "the doomed row must still be counted as failed")
+	assert.Equal(t, 2, o.embedded, "both good rows must be embedded")
+	assert.Equal(t, 1, o.failed, "the doomed row must still be counted as failed")
 	assert.True(t, s.stored[good1.ID])
 	assert.True(t, s.stored[good2.ID])
 	assert.False(t, s.stored[doomed.ID], "a failed embed must never mark the row done")
 	// The partial failure must NOT stop the loop: the second batch was fetched.
 	assert.Equal(t, 2, s.call, "run must continue to the next batch after a partial failure")
-	// And under Ruling 1 this run is a success — it made real progress.
-	assert.Equal(t, 0, exitCode(embedded, failed))
+	// The queue drained, so this run is a success despite the failed row.
+	assert.False(t, o.gaveUp)
+	assert.Equal(t, 0, exitCode(o))
+}
+
+// TestRunGivingUpAfterProgressIsAFailure is the kora#97 regression, and the
+// case the previous "progress means green" rule got wrong. The run embeds a
+// whole first batch, then hits a batch nothing succeeds in and stops with rows
+// still outstanding. It made real progress — and it must still be RED, because
+// it did not finish what it was asked to do. Under the old rule this exact
+// shape exited 0, the Job reported Complete, and the index sat at 42%.
+func TestRunGivingUpAfterProgressIsAFailure(t *testing.T) {
+	good := nutrition.FoodItem{ID: uuid.New(), Name: "Good food"}
+	doomed := nutrition.FoodItem{ID: uuid.New(), Name: "Doomed food"}
+
+	s := &fakeStore{batches: [][]nutrition.FoodItem{{good}, {doomed}}}
+	e := &flakyEmbedder{failures: map[string]int{"Doomed food": embedAttempts}}
+
+	o := run(context.Background(), s, e)
+
+	assert.Equal(t, 1, o.embedded, "the first batch really was embedded")
+	assert.Equal(t, 1, o.failed)
+	assert.True(t, o.gaveUp, "stopping with rows still outstanding is giving up")
+	assert.Equal(t, 1, exitCode(o), "a run that gave up must not report success, however much it embedded first")
+}
+
+// errStore fails the fetch after serving errAfter batches, standing in for the
+// database going away mid-run.
+type errStore struct {
+	fakeStore
+	errAfter int
+}
+
+func (s *errStore) RowsMissingEmbedding(ctx context.Context, limit int) ([]nutrition.FoodItem, error) {
+	if s.call >= s.errAfter {
+		return nil, errors.New("connection refused")
+	}
+	return s.fakeStore.RowsMissingEmbedding(ctx, limit)
+}
+
+// TestRunFetchErrorIsAFailure covers the other way run stops with work
+// outstanding: it cannot even read the queue. Nothing was drained, so this is
+// not a completed run whatever it embedded first.
+func TestRunFetchErrorIsAFailure(t *testing.T) {
+	good := nutrition.FoodItem{ID: uuid.New(), Name: "Good food"}
+	s := &errStore{fakeStore: fakeStore{batches: [][]nutrition.FoodItem{{good}}}, errAfter: 1}
+	e := &flakyEmbedder{}
+
+	o := run(context.Background(), s, e)
+
+	assert.Equal(t, 1, o.embedded)
+	assert.True(t, o.gaveUp)
+	assert.Equal(t, 1, exitCode(o))
 }
 
 func TestExitCode(t *testing.T) {
 	tests := []struct {
-		name             string
-		embedded, failed int
-		want             int
+		name string
+		o    outcome
+		want int
 	}{
-		{name: "nothing to do is success", embedded: 0, failed: 0, want: 0},
-		{name: "all embedded is success", embedded: 10, failed: 0, want: 0},
-		// Ruling 1: progress means green. A run that embedded rows stays
-		// successful even with failures, so one permanently un-embeddable row
-		// cannot red-line every deploy forever and a partial rate-limit
-		// failure cannot trigger up to six re-runs of the whole seed/ingest/
-		// embed chain against an already-exhausted quota. The slow leak is
-		// caught by the kora_food_index_missing gauge instead.
-		{name: "progress with some failures is success", embedded: 10, failed: 1, want: 0},
-		{name: "one embedded row is enough to stay green", embedded: 1, failed: 99, want: 0},
-		// The 2026-08-02 signature, and the only red: the run achieved nothing
-		// while rows were missing, yet would otherwise have reported success.
-		{name: "embedded nothing while rows failed is a failure", embedded: 0, failed: 5, want: 1},
-		{name: "a single total failure is a failure", embedded: 0, failed: 1, want: 1},
+		// The two green shapes. Nothing-to-do is the steady state: this Job
+		// runs on every ArgoCD sync and almost always finds an empty queue.
+		{name: "nothing to do is success", o: outcome{}, want: 0},
+		{name: "all embedded is success", o: outcome{embedded: 10}, want: 0},
+		// Draining the queue is what makes a run complete. A row that could
+		// not be embedded but did not stop the run is reported in the log and
+		// in kora_food_index_missing, not in the exit code.
+		{
+			name: "drained the queue despite a failed row is success",
+			o:    outcome{embedded: 10, failed: 1},
+			want: 0,
+		},
+		// The kora#97 signature: a run that stopped early must be red no
+		// matter how much it embedded on the way.
+		{name: "gave up having embedded nothing is a failure", o: outcome{failed: 5, gaveUp: true}, want: 1},
+		{name: "gave up after real progress is still a failure", o: outcome{embedded: 999, failed: 1, gaveUp: true}, want: 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, exitCode(tt.embedded, tt.failed))
+			assert.Equal(t, tt.want, exitCode(tt.o))
 		})
 	}
 }

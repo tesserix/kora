@@ -123,6 +123,17 @@ func main() {
 	}
 	apiKey := os.Getenv("GEMINI_API_KEY")
 
+	// An unconfigured environment SKIPS AND EXITS 0, even though the rest of
+	// this command now treats stopping early as a failure. The two are not the
+	// same event. Giving up is a run that was asked to embed rows and could
+	// not; this is a deployment that never asked. cmd/embed is chained into
+	// the sync-wave-0 seed Job, which must stay green in environments that
+	// deliberately run without AI credentials (CI, a bare dev cluster) — the
+	// same tolerance cmd/api shows by leaving the resolve endpoints unmounted
+	// rather than refusing to boot. Failing here would red-line those
+	// environments permanently on a condition that is correct for them, which
+	// is exactly the kind of always-on alarm that trained everyone to ignore
+	// this Job in the first place.
 	backend := chooseBackend(vertexProject, apiKey)
 	if backend == backendNone {
 		log.Println("cmd/embed: no embedding backend (no VERTEX_PROJECT and no GEMINI_API_KEY); skipping")
@@ -153,9 +164,9 @@ func main() {
 		log.Println("cmd/embed: gemini api key")
 	}
 
-	embedded, failed := run(ctx, repo, geminiEmbedder{provider: provider})
-	log.Printf("cmd/embed: embedded %d food items, failed %d", embedded, failed)
-	os.Exit(exitCode(embedded, failed))
+	res := run(ctx, repo, geminiEmbedder{provider: provider})
+	log.Printf("cmd/embed: embedded %d food items, failed %d, gave up %t", res.embedded, res.failed, res.gaveUp)
+	os.Exit(exitCode(res))
 }
 
 // isRateLimited reports whether err is the provider's rate-limit / quota
@@ -222,48 +233,76 @@ func embedWithRetry(ctx context.Context, e embedder, name string) ([]float32, er
 	return nil, lastErr
 }
 
-// exitCode maps a run's outcome to a process exit code. It is non-zero for
-// exactly one shape: the run embedded NOTHING while rows were failing. That is
-// the 2026-08-02 signature — a run that achieved nothing yet reported success,
-// losing 69 rows silently.
+// outcome is what one run achieved. gaveUp is the field that decides the exit
+// code; embedded and failed are for the operator's log line.
+type outcome struct {
+	embedded int
+	failed   int
+	// gaveUp reports that run STOPPED EARLY with work still outstanding —
+	// either it could not read the queue at all, or a whole batch failed and
+	// continuing would have re-fetched the same never-completed rows forever.
+	// It is false only when run drained the queue: RowsMissingEmbedding came
+	// back empty, meaning everything it was asked to embed is embedded.
+	gaveUp bool
+}
+
+// exitCode maps a run's outcome to a process exit code: red if and only if the
+// run gave up.
 //
-// A run that embedded anything stays GREEN even with failures, and that is
-// deliberate. cmd/embed runs chained as `seed && ingest && embed` in a Job with
-// backoffLimit 5 and restartPolicy OnFailure, on every ArgoCD sync. Under an
-// "any failure is red" rule:
+// THIS REVERSES THE EARLIER "progress means green" RULING, deliberately.
+// That rule returned 0 whenever the run embedded at least one row, so a run
+// that logged "entire batch of 100 rows failed to embed; stopping" after
+// finishing 11% of its work still exited 0. The Kubernetes Job reported
+// Complete, ArgoCD stayed green, and the food index sat at 42% embedded for
+// weeks with nobody notified (kora#97). An exit code that cannot say "I
+// stopped early" is not reporting on the thing that goes wrong.
 //
-//   - one permanently un-embeddable row — which sits at the head of
-//     RowsMissingEmbedding forever, since that query is ORDER BY created_at —
-//     red-lines every deploy from then on, and an alarm that is always on is
-//     an alarm nobody reads; and
-//   - a partial rate-limit failure red-lines a run that made real progress,
-//     then re-runs the entire seed/ingest/embed chain up to six times, burning
-//     the ~1000/day Gemini quota whose exhaustion caused the failure.
+// The two objections the old ruling raised are answered rather than ignored:
 //
-// Progress-means-green is safe because the slow-leak signal lives elsewhere,
-// on a continuous gauge rather than a binary exit code: kora_food_index_missing
-// (declared in internal/metrics/metrics.go, reported by
-// internal/metrics/foodindex.go) publishes the number of rows still missing an
-// embedding on every scrape. A backlog that only ever grows is visible there
-// without making every deploy red.
-func exitCode(embedded, failed int) int {
-	if embedded == 0 && failed > 0 {
+//   - "A partial rate-limit failure red-lines real progress, then re-runs the
+//     whole seed/ingest/embed chain up to six times against the very quota
+//     that was exhausted." That objection was about the free tier's ~1,000/day
+//     embedding cap. The backfill now runs on Vertex against a billing-enabled
+//     project (see chooseBackend), so the quota that made a retry storm
+//     destructive is gone. And note the old rule did not actually prevent the
+//     retries — a rate limit that empties the FIRST batch was red under it too.
+//   - "One permanently un-embeddable row red-lines every deploy forever."
+//     True, and that is now the intended report: it means the index can never
+//     be completed, which is a bug in a row or in the embedder, not weather.
+//     The old rule's answer was the kora_food_index_missing gauge — which
+//     existed throughout the period the index sat at 42% and did not raise
+//     anyone. A permanent red is at least read once.
+//
+// Two shapes stay GREEN, and both matter:
+//
+//   - a run that embedded everything it was asked to, however much or little;
+//     and
+//   - a run with nothing to do (the steady state — this Job runs on every
+//     ArgoCD sync, and almost every one of those has an empty queue).
+func exitCode(o outcome) int {
+	if o.gaveUp {
 		return 1
 	}
 	return 0
 }
 
 // run streams food_items missing an embedding, embeds each with retry, and
-// returns how many succeeded and how many failed permanently.
-func run(ctx context.Context, s store, e embedder) (embedded int, failed int) {
+// reports how many succeeded, how many failed permanently, and whether it
+// stopped short of draining the queue.
+func run(ctx context.Context, s store, e embedder) outcome {
+	var o outcome
 	for {
 		rows, err := s.RowsMissingEmbedding(ctx, batchSize)
 		if err != nil {
 			log.Printf("cmd/embed: fetch rows: %v", err)
-			return embedded, failed + 1
+			o.failed++
+			o.gaveUp = true
+			return o
 		}
 		if len(rows) == 0 {
-			return embedded, failed
+			// The queue is drained: everything asked for is embedded. This is
+			// the only successful exit from the loop.
+			return o
 		}
 
 		succeeded := 0
@@ -271,25 +310,26 @@ func run(ctx context.Context, s store, e embedder) (embedded int, failed int) {
 			vec, err := embedWithRetry(ctx, e, row.Name)
 			if err != nil {
 				log.Printf("cmd/embed: embed %q (%s): %v", row.Name, row.ID, err)
-				failed++
+				o.failed++
 				continue
 			}
 			if err := s.SetEmbedding(ctx, row.ID, vec); err != nil {
 				log.Printf("cmd/embed: set embedding %q (%s): %v", row.Name, row.ID, err)
-				failed++
+				o.failed++
 				continue
 			}
-			embedded++
+			o.embedded++
 			succeeded++
 		}
 
 		// A batch where nothing succeeded would return the same rows forever —
-		// they are never marked done. Stop. Whether that is reported as a
-		// failure is exitCode's call: it is only red if the whole run embedded
-		// nothing, not merely this batch.
+		// they are never marked done. Stop, and say so: this is giving up with
+		// work outstanding, which exitCode reports as a failure however many
+		// rows earlier batches managed.
 		if succeeded == 0 {
 			log.Printf("cmd/embed: entire batch of %d rows failed to embed; stopping", len(rows))
-			return embedded, failed
+			o.gaveUp = true
+			return o
 		}
 	}
 }
