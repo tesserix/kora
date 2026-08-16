@@ -159,10 +159,16 @@ export function useFoodSearch(query: string) {
   // result by inspection — and those two need to say very different things to
   // the user ("nothing matches" vs "you're offline, so only foods you've logged
   // before are searchable").
+  //
+  // Nothing beyond those two and the loading/error pair is returned: spreading
+  // `result` had react-query mark EVERY property as tracked, so both screens
+  // re-rendered on isFetching, dataUpdatedAt and failureCount — state neither
+  // of them reads.
   return {
-    ...result,
     data: result.data?.candidates,
     isOfflineCache: result.data?.fromCache ?? false,
+    isLoading: result.isLoading,
+    isError: result.isError,
   };
 }
 
