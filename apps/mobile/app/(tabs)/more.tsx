@@ -28,7 +28,7 @@ import { useTheme } from "@/theme";
 // near-identically — MoreRow is kept as-is rather than migrated to avoid
 // churn on an already-shipped screen. The unread-count Badge is the one
 // accent element this screen is allowed.
-type MoreRowKey = "profile" | "friends" | "groups" | "notifications" | "recipes" | "settings" | "feedback";
+type MoreRowKey = "profile" | "friends" | "groups" | "notifications" | "recipes" | "settings" | "feedback" | "about";
 
 type MoreRowProps = {
   rowKey: MoreRowKey;
@@ -203,6 +203,15 @@ export default function More() {
             title="Send feedback"
             icon="message-circle"
             onPress={() => router.push("/feedback" as Href)}
+          />
+          {/* Not decoration: Open Food Facts data is published under ODbL,
+              which obliges Kora to attribute it wherever the data is used.
+              This row is the route to that attribution (kora#197). */}
+          <MoreRow
+            rowKey="about"
+            title="About"
+            icon="book-open"
+            onPress={() => router.push("/about" as Href)}
           />
         </MoreGroup>
         <GlassPanel radius={22}>
