@@ -2,6 +2,7 @@ package ai
 
 import (
 	"encoding/json"
+	"math"
 	"testing"
 
 	"github.com/tesserix/kora/api/internal/nutrition"
@@ -40,6 +41,87 @@ func TestParsePortionGrams(t *testing.T) {
 	}
 }
 
+// TestSplitCountAndUnitFractions is kora#184. splitCountAndUnit read a leading
+// count with ParseFloat or wordCounts, and a fraction is neither: "1/2 chicken"
+// became count 1 with "1/2 chicken" as the unit name, matched no serving, and
+// fell through to the flat 100 g default. Half a charcoal chicken is 600-800
+// kcal, so the stated quantity was being discarded, not rounded.
+func TestSplitCountAndUnitFractions(t *testing.T) {
+	const third = 1.0 / 3.0
+
+	tests := []struct {
+		name      string
+		phrase    string
+		wantCount float64
+		wantUnit  string
+	}{
+		// Unchanged behaviour: plain numbers, decimals, words and bare units.
+		{"plain integer", "2 portions", 2, "portions"},
+		{"decimal", "1.5 cups", 1.5, "cups"},
+		{"word count", "one sachet", 1, "sachet"},
+		{"word count above one", "three portions", 3, "portions"},
+		{"bare unit", "sachet", 1, "sachet"},
+		{"multi-word unit", "2 slices bread", 2, "slices bread"},
+		{"no leading count", "a handful of rice", 1, "a handful of rice"},
+
+		// ASCII fractions.
+		{"half as a fraction", "1/2 chicken", 0.5, "chicken"},
+		{"three quarters as a fraction", "3/4 cup", 0.75, "cup"},
+		{"quarter as a fraction", "1/4 pizza", 0.25, "pizza"},
+		{"improper fraction", "3/2 portions", 1.5, "portions"},
+
+		// Mixed numbers.
+		{"mixed number", "1 1/2 cups", 1.5, "cups"},
+		{"mixed number with multi-word unit", "2 1/4 slices bread", 2.25, "slices bread"},
+
+		// Unicode vulgar fractions, bare and glued to a whole number.
+		{"unicode half", "½ chicken", 0.5, "chicken"},
+		{"unicode quarter", "¼ pizza", 0.25, "pizza"},
+		{"unicode three quarters", "¾ cup", 0.75, "cup"},
+		{"unicode third", "⅓ portion", third, "portion"},
+		{"unicode glued to a whole number", "1½ cups", 1.5, "cups"},
+
+		// Word forms.
+		{"half as a word", "half chicken", 0.5, "chicken"},
+		{"quarter as a word", "quarter pizza", 0.25, "pizza"},
+		{"article plus fraction word", "a half chicken", 0.5, "chicken"},
+		{"numeral times fraction word", "three quarters cup", 0.75, "cup"},
+		{"two thirds", "two thirds cup", 2 * third, "cup"},
+
+		// Malformed and absurd input falls back to the previous "no usable
+		// count" behaviour rather than producing NaN, Inf or a nonsense mass.
+		{"zero denominator", "1/0 chicken", 1, "1/0 chicken"},
+		{"zero over zero", "0/0 chicken", 1, "0/0 chicken"},
+		{"zero numerator", "0/2 chicken", 1, "0/2 chicken"},
+		{"negative numerator", "-1/2 chicken", 1, "-1/2 chicken"},
+		{"negative count", "-2 portions", 1, "-2 portions"},
+		{"zero count", "0 portions", 1, "0 portions"},
+		{"non-numeric fraction", "a/b chicken", 1, "a/b chicken"},
+		{"empty numerator", "/2 chicken", 1, "/2 chicken"},
+		{"absurd count", "5000 portions", 1, "5000 portions"},
+		{"absurd mixed number", "5000 1/2 portions", 1, "5000 1/2 portions"},
+
+		// A count with nothing left to count is not a count: there is no unit
+		// to resolve it against, exactly as before this change.
+		{"bare fraction", "1/2", 1, "1/2"},
+		{"bare number", "2", 1, "2"},
+
+		{"empty", "", 0, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			count, unit := splitCountAndUnit(tt.phrase)
+			if math.Abs(count-tt.wantCount) > 1e-9 {
+				t.Errorf("splitCountAndUnit(%q) count = %v, want %v", tt.phrase, count, tt.wantCount)
+			}
+			if unit != tt.wantUnit {
+				t.Errorf("splitCountAndUnit(%q) unit = %q, want %q", tt.phrase, unit, tt.wantUnit)
+			}
+		})
+	}
+}
+
 // offItem is a branded OpenFoodFacts row: serving_grams is a real package
 // serving, which is what a person actually consumes.
 func offItem(servingGrams float64, servingUnits string) nutrition.FoodItem {
@@ -57,6 +139,9 @@ func offItem(servingGrams float64, servingUnits string) nutrition.FoodItem {
 // free-text phrase and never the food it had resolved to.
 func TestPortionGramsForUsesTheFoodsOwnServing(t *testing.T) {
 	const portionUnits = `[{"name":"portion","amount":1,"base_amount":16.5}]`
+	// A whole charcoal chicken, as a row that names "chicken" as its own
+	// serving — the shape "1/2 chicken" needs in order to resolve at all.
+	const chickenUnits = `[{"name":"chicken","amount":1,"base_amount":1400}]`
 
 	tests := []struct {
 		name        string
@@ -94,6 +179,65 @@ func TestPortionGramsForUsesTheFoodsOwnServing(t *testing.T) {
 			item:        offItem(16.5, portionUnits),
 			want:        16.5,
 			wantAssumed: false,
+		},
+		{
+			// kora#184. "1/2 chicken" used to degrade to count 1 with the whole
+			// phrase as the unit name, match no serving, and report the flat
+			// 100 g default — roughly a tenth of what was actually eaten.
+			name:        "a fractional count resolves against the food's own serving",
+			phrase:      "1/2 chicken",
+			item:        offItem(0, chickenUnits),
+			want:        700,
+			wantAssumed: false,
+		},
+		{
+			name:        "a worded fraction resolves against the food's own serving",
+			phrase:      "half chicken",
+			item:        offItem(0, chickenUnits),
+			want:        700,
+			wantAssumed: false,
+		},
+		{
+			name:        "a unicode fraction resolves against the food's own serving",
+			phrase:      "½ chicken",
+			item:        offItem(0, chickenUnits),
+			want:        700,
+			wantAssumed: false,
+		},
+		{
+			name:        "a mixed number resolves against the food's own serving",
+			phrase:      "1 1/2 portions",
+			item:        offItem(16.5, portionUnits),
+			want:        24.75,
+			wantAssumed: false,
+		},
+		{
+			// A stated quantity is a stated quantity whether or not it is
+			// fractional: this must never be marked assumed.
+			name:        "a fractional count is not an assumed portion",
+			phrase:      "1/4 portion",
+			item:        offItem(16.5, portionUnits),
+			want:        4.125,
+			wantAssumed: false,
+		},
+		{
+			// The malformed guard, end to end: no count is read, nothing else
+			// matches, so this is the ordinary silent-default case.
+			name:        "a zero denominator falls through to the default",
+			phrase:      "1/0 chicken",
+			item:        offItem(0, chickenUnits),
+			want:        defaultPortionGrams,
+			wantAssumed: true,
+		},
+		{
+			// Scope guard for kora#184: parsing the fraction only pays off when
+			// the matched row names the serving. Without one, the phrase is as
+			// unrecognised as it ever was.
+			name:        "a fraction against a row naming no such serving keeps the default",
+			phrase:      "1/2 chicken",
+			item:        offItem(0, portionUnits),
+			want:        defaultPortionGrams,
+			wantAssumed: true,
 		},
 		{
 			// An explicit mass is the most specific thing anyone can say.
