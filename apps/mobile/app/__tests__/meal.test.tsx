@@ -6,6 +6,7 @@ import { instrumentDark, instrumentLight } from "@/theme/palette";
 const mockEditMutate = jest.fn();
 const mockEditMutateAsync = jest.fn();
 const mockDeleteMutate = jest.fn();
+const mockDeleteMutateAsync = jest.fn();
 const mockRepeatMutate = jest.fn();
 const mockToastShow = jest.fn();
 const mockBack = jest.fn();
@@ -46,7 +47,7 @@ jest.mock("@/api/hooks", () => ({
   useLog: () => ({ data: mockLogData, isLoading: false }),
   useFoodSearch: () => ({ data: [], isLoading: false, isError: false }),
   useEditLog: () => ({ mutate: mockEditMutate, mutateAsync: mockEditMutateAsync, isPending: false }),
-  useDeleteLog: () => ({ mutate: mockDeleteMutate, isPending: false }),
+  useDeleteLog: () => ({ mutate: mockDeleteMutate, mutateAsync: mockDeleteMutateAsync, isPending: false }),
   useRepeatLog: () => ({ mutate: mockRepeatMutate, isPending: mockRepeatPending }),
   // meal.tsx's delete-undo path re-creates via useCreateLog — not exercised
   // by these tests (that's meal-undo.test.tsx's job), but the hook must
@@ -63,6 +64,8 @@ beforeEach(() => {
   mockEditMutateAsync.mockReset();
   mockEditMutateAsync.mockResolvedValue({ log: undefined, aliasRecorded: false });
   mockDeleteMutate.mockClear();
+  mockDeleteMutateAsync.mockReset();
+  mockDeleteMutateAsync.mockResolvedValue(undefined);
   mockRepeatMutate.mockClear();
   mockToastShow.mockClear();
   mockBack.mockClear();
@@ -200,9 +203,12 @@ test("Delete confirms then calls useDeleteLog", async () => {
   alertSpy.mockRestore();
 });
 
-test("Repeat calls useRepeatLog, navigates back and confirms", async () => {
+// Duplicating is the easiest of this screen's three actions to trigger by
+// accident, so it confirms the way its neighbours do — a toast with an Undo,
+// never a modal Alert the user has to dismiss.
+test("Repeat calls useRepeatLog, navigates back and confirms with a toast", async () => {
   const alertSpy = jest.spyOn(Alert, "alert").mockImplementation(() => {});
-  mockRepeatMutate.mockImplementation((_id, opts) => opts.onSuccess?.());
+  mockRepeatMutate.mockImplementation((_id, opts) => opts.onSuccess?.({ id: "log2" }));
   const { getByLabelText } = await render(<MealDetail />);
   await fireEvent.press(getByLabelText("Repeat entry"));
   expect(mockRepeatMutate).toHaveBeenCalledWith(
@@ -210,8 +216,22 @@ test("Repeat calls useRepeatLog, navigates back and confirms", async () => {
     expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
   );
   expect(mockBack).toHaveBeenCalled();
-  expect(alertSpy).toHaveBeenCalled();
+  expect(mockToastShow).toHaveBeenCalledWith(
+    expect.objectContaining({ message: "Logged again to today", actionLabel: "Undo" }),
+  );
+  expect(alertSpy).not.toHaveBeenCalled();
   alertSpy.mockRestore();
+});
+
+// The repeat POST answers with the log it created, so Undo deletes exactly the
+// row this tap made — not the original entry the user was looking at.
+test("Repeat's Undo deletes the log the duplicate created, not the original", async () => {
+  mockRepeatMutate.mockImplementation((_id, opts) => opts.onSuccess?.({ id: "log2" }));
+  const { getByLabelText } = await render(<MealDetail />);
+  await fireEvent.press(getByLabelText("Repeat entry"));
+
+  mockToastShow.mock.calls[0][0].onAction();
+  expect(mockDeleteMutateAsync).toHaveBeenCalledWith("log2");
 });
 
 test("Repeat is disabled while a repeat is pending", async () => {
