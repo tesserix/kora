@@ -136,8 +136,40 @@ func TestWithinBudgetCallCountCap(t *testing.T) {
 	}
 }
 
+// TestRecordSystemInsertsWithNullUserID pins the food-index backfill's
+// metering path (kora#97). The row MUST land with user_id NULL: the zero UUID
+// a non-pointer field would have written is rejected by
+// ai_usage_events_user_id_fkey, so the insert would fail and the spend would
+// stay invisible — the exact bug this path exists to close.
+func TestRecordSystemInsertsWithNullUserID(t *testing.T) {
+	db := testDB(t)
+	meter := NewMeter(db)
+
+	// A model string unique to this run, so the row is findable and removable
+	// without a user_id to scope by.
+	model := "test-embed-" + uuid.NewString()
+	t.Cleanup(func() { db.Exec("DELETE FROM ai_usage_events WHERE model = ?", model) })
+
+	usage := ai.Usage{
+		Provider: "gemini", Model: model, CallType: "embed",
+		LatencyMs: 120, Outcome: ai.OutcomeOK,
+	}
+	require.NoError(t, meter.RecordSystem(context.Background(), usage, 0))
+
+	var got Event
+	require.NoError(t, db.Where("model = ?", model).First(&got).Error)
+	require.Nil(t, got.UserID, "a system call has no owning user and must store NULL, not the zero UUID")
+	require.Equal(t, "embed", got.CallType)
+
+	var nullCount int64
+	require.NoError(t, db.Model(&Event{}).
+		Where("model = ? AND user_id IS NULL", model).Count(&nullCount).Error)
+	require.Equal(t, int64(1), nullCount, "the column itself must be NULL in the database")
+}
+
 func TestEventJSONOmitsUserID(t *testing.T) {
-	b, err := json.Marshal(Event{UserID: uuid.New(), Provider: "gemini"})
+	id := uuid.New()
+	b, err := json.Marshal(Event{UserID: &id, Provider: "gemini"})
 	if err != nil {
 		t.Fatal(err)
 	}

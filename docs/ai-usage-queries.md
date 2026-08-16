@@ -53,6 +53,12 @@ anything feeding pricing (#41) or success metrics (#43)*
 Filter, or failures and retries inflate the number — and a single user tap can
 now produce several rows when a fallback runs.
 
+Per-user queries must ALSO exclude `user_id IS NULL`. Two things write NULL
+there and neither is a person: a deleted user's retained rows (#106) and the
+food-index backfill's embeds (kora#97), which arrive thousands at a time. A
+`GROUP BY user_id` that keeps them collapses all of it into one enormous
+phantom "user".
+
 ```sql
 -- Median successful AI calls per user this month.
 SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY n) AS median_calls
@@ -60,6 +66,7 @@ FROM (
   SELECT user_id, count(*) AS n
   FROM ai_usage_events
   WHERE outcome = 'ok'
+    AND user_id IS NOT NULL
     AND created_at >= date_trunc('month', now())
   GROUP BY user_id
 ) t;
@@ -141,12 +148,20 @@ scales with meal complexity and corrections, not with user actions.
 
 Before trusting an `outcome="ok"` panel for `coach`, `decompose`, or `embed`,
 read the Help text on `kora_ai_calls_total` (`kubectl exec` into the pod, hit
-`/metrics`, or `promtool metric-metadata`): those three call types record
+`/metrics`, or `promtool metric-metadata`): `coach` and `decompose` record
 **only** successful calls at the metering seam today, so their `error` /
 `timeout` series will show near-zero not because they never fail, but because
 the failure was never recorded. A 100% success rate there is an artefact of
 that gap, not a fact about reliability — the same trap the "Two traps"
 section above warns about for pre-#81 SQL rows.
+
+`embed` is now split, and the split matters when reading volume as well as
+success rate. The food-index backfill (`cmd/embed`) records every provider
+call, successes and failures alike, with `user_id` NULL in `ai_usage_events`
+since no user made them (kora#97). Ingest-time embeds — nutrition's
+`embedAsync`, triggered by a barcode scan — are still not metered at all, so
+`embed` volume is the backfill's volume plus nothing, not the system's total
+embedding volume.
 
 ### Per-user questions → NOT answerable from this exporter, by design
 
