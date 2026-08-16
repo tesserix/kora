@@ -25,6 +25,8 @@ import { RecipeParseSheet } from "@/components/recipes/RecipeParseSheet";
 import { LogRecipeSheet } from "@/components/recipes/LogRecipeSheet";
 import { baseQuantityFor, defaultServingCount, formatPortion } from "@/units/portion";
 import { logFailureMessage } from "@/lib/apiErrorMessage";
+import { safeBack } from "@/lib/safeBack";
+import { useToast } from "@/components/Toast";
 import { foodVisual } from "@/lib/foodVisual";
 import { hslToHex } from "@/lib/color";
 import { haptics, useMotionPrefs } from "@/motion";
@@ -141,6 +143,7 @@ export default function LogScreen() {
   const { pinnedIds, toggle } = usePinToggle();
   const { logFood, logMeal } = useInstantLog();
   const { openCreate, openEdit, openBlank } = useSavedMealEditor();
+  const toast = useToast();
 
   // Entrance stagger runs on first mount only — see app/(tabs)/index.tsx for the
   // same guard and rationale (refetches update results in place, no re-stagger).
@@ -212,7 +215,20 @@ export default function LogScreen() {
     createLog.mutate(input, {
       onSuccess: () => {
         haptics.success();
-        router.replace("/");
+        // The root ToastProvider outlives this screen, so the confirmation
+        // survives the exit below — same reason app/capture.tsx shows one.
+        // A haptic alone was the only success signal, and it says nothing
+        // about WHICH food landed.
+        toast.show({ message: `Logged ${selected.name}` });
+        // Not router.replace("/"): this screen is PUSHED from app/capture.tsx
+        // ("Search manually") and app/capture-review.tsx ("Log it manually"),
+        // so replacing destroyed the stack the user came through and stranded
+        // them on Home — which, for a seeded `loggedAt` from an older
+        // capture, may not even show the entry they just made. Back returns
+        // them where they were; the diary is the fallback anchor for a
+        // deep-linked mount with no stack, for the same reason
+        // capture-review's EXIT_TO is the diary: it is where these rows live.
+        safeBack("/(tabs)/diary");
       },
       onError: (e) => setError(logFailureMessage(e)),
     });

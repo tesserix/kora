@@ -66,10 +66,23 @@ export default function GroupDetail() {
       { text: "Delete", style: "destructive", onPress: () => del.mutate(id, { onSuccess: () => router.back(), onError }) },
     ]);
 
+  // #174: this shipped with "" as its message, which renders a title-only
+  // alert — every other confirm on this screen (and in friends.tsx) states the
+  // consequence, so this one does too.
   const onLeave = () =>
-    Alert.alert("Leave this group?", "", [
+    Alert.alert("Leave this group?", "You'll drop off its leaderboard and challenges. You can rejoin with an invite code.", [
       { text: "Cancel", style: "cancel" },
       { text: "Leave", style: "destructive", onPress: () => leave.mutate({ groupId: id, userId: profile.data?.id ?? "" }, { onSuccess: () => router.back(), onError }) },
+    ]);
+
+  // #174: removing a member was the one unconfirmed action on this screen, and
+  // the only one whose consequence lands on someone else. It gets the same
+  // confirm as delete/leave/unfriend, naming the member so the owner can see
+  // which row they hit.
+  const onRemoveMember = (userId: string, name: string) =>
+    Alert.alert(`Remove ${name}?`, `${name} loses access to this group. You can invite them back later.`, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Remove", style: "destructive", onPress: () => removeMember.mutate({ groupId: id, userId }, { onError }) },
     ]);
 
   const leaveDisabled = !profile.data?.id || leave.isPending;
@@ -114,7 +127,7 @@ export default function GroupDetail() {
                         accessibilityLabel={`Remove ${m.display_name}`}
                         haptic="none"
                         disabled={removeMember.isPending}
-                        onPress={() => removeMember.mutate({ groupId: id, userId: m.id }, { onError })}
+                        onPress={() => onRemoveMember(m.id, m.display_name)}
                         style={{ opacity: removeMember.isPending ? 0.5 : 1 }}
                       >
                         <AppText style={{ fontSize: 13, color: instrument.danger, fontWeight: "600" }}>

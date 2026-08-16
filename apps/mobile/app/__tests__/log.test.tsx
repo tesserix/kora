@@ -5,7 +5,10 @@ import type { Memory, Recipe, SavedMeal } from "@/api/types";
 import LogScreen from "../log";
 
 jest.mock("expo-router", () => ({
-  router: { replace: jest.fn(), back: jest.fn(), push: jest.fn() },
+  // canGoBack/replace back safeBack(): the success path returns the user to
+  // whatever pushed this screen, and falls back to the diary only when a deep
+  // link left the stack empty.
+  router: { replace: jest.fn(), back: jest.fn(), push: jest.fn(), canGoBack: jest.fn(() => true) },
   useLocalSearchParams: jest.fn(() => ({})),
 }));
 
@@ -88,11 +91,16 @@ jest.mock("@/components/meals/SavedMealSheetProvider", () => ({
   useSavedMealEditor: () => ({ openCreate: mockOpenCreate, openEdit: mockOpenEdit, openBlank: mockOpenBlank }),
 }));
 
+// Records what was shown AND fires the action immediately: the instant-log
+// path's Undo is only reachable through this toast, so tests that exercise it
+// depend on the call-through.
+const mockToastShow = jest.fn((o: { message: string; onAction?: () => void }) => o.onAction?.());
 jest.mock("@/components/Toast", () => ({
-  useToast: () => ({ show: (o: { onAction?: () => void }) => o.onAction?.() }),
+  useToast: () => ({ show: mockToastShow }),
 }));
 
 beforeEach(() => {
+  mockToastShow.mockClear();
   mockLogMutate.mockClear();
   mockBatchMutate.mockClear();
   mockDeleteMutate.mockClear();
@@ -111,6 +119,9 @@ beforeEach(() => {
   mockSavedMealsData = [];
   mockRecipesData = [];
   (useLocalSearchParams as jest.Mock).mockReturnValue({});
+  (router.back as jest.Mock).mockClear();
+  (router.replace as jest.Mock).mockClear();
+  (router.canGoBack as jest.Mock).mockClear().mockReturnValue(true);
 });
 
 test("Log screen shows the editorial header and a food tile result", async () => {
@@ -173,6 +184,37 @@ test("logging from a seeded route stamps the SEEDED time, not now", async () => 
     expect.objectContaining({ logged_at: "2026-08-06T06:30:00.000Z" }),
     expect.anything(),
   );
+});
+
+// This screen is PUSHED from capture ("Search manually") and capture-review
+// ("Log it manually"), so the old router.replace("/") destroyed the stack the
+// user came through — and with a seeded `loggedAt` the entry may not even be
+// on the Home day they were dumped on. A haptic was the only success signal.
+test("a manual log confirms with a toast naming the food and returns to where it came from", async () => {
+  const { findByText } = await render(<LogScreen />);
+  fireEvent.press(await findByText("Grilled chicken breast"));
+  fireEvent.press(await findByText("Log it"));
+
+  mockLogMutate.mock.calls[0][1].onSuccess();
+
+  expect(mockToastShow).toHaveBeenCalledWith({ message: "Logged Grilled chicken breast" });
+  expect(router.back).toHaveBeenCalledTimes(1);
+  expect(router.replace).not.toHaveBeenCalled();
+});
+
+// Deep-linked into /log with nothing behind it, back() dispatches into
+// nothing — the diary is the anchor, for the same reason capture-review's
+// EXIT_TO is: it is where these rows live.
+test("a manual log with an empty stack falls back to the diary", async () => {
+  (router.canGoBack as jest.Mock).mockReturnValue(false);
+  const { findByText } = await render(<LogScreen />);
+  fireEvent.press(await findByText("Grilled chicken breast"));
+  fireEvent.press(await findByText("Log it"));
+
+  mockLogMutate.mock.calls[0][1].onSuccess();
+
+  expect(router.replace).toHaveBeenCalledWith("/(tabs)/diary");
+  expect(router.back).not.toHaveBeenCalled();
 });
 
 // The food-memory tabs carry two independent axes — food vs meal, and chosen

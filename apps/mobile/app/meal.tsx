@@ -294,6 +294,13 @@ export default function MealDetail() {
       .catch(() => toast.show({ message: "Couldn't restore. Try again." }));
   };
 
+  // Undoes a duplicate. Unlike a delete-undo there is nothing to reconstruct:
+  // the repeat POST answers with the log it created, so undoing it is the same
+  // single-id DELETE the diary row itself offers.
+  const undoRepeat = (createdId: string) => {
+    deleteLog.mutateAsync(createdId).catch(() => toast.show({ message: "Couldn't undo. Try again." }));
+  };
+
   const onSelectFood = (item: FoodItem) => {
     // Shared by both the free-index FoodPicker and the AI re-resolve
     // AskAgainSheet — whichever one is open, closing both here keeps this
@@ -429,10 +436,19 @@ export default function MealDetail() {
     if (busy) return;
     setErr(null);
     repeatLog.mutate(p.id, {
-      onSuccess: () => {
+      // Duplicating is the easiest of this screen's three actions to trigger
+      // by accident, so it gets the same confirmation its neighbours get — a
+      // toast, not a modal the user has to dismiss — and the Undo that save
+      // and delete already offer. The created log comes back on the response,
+      // so the Undo is real: it deletes exactly the row this tap made.
+      onSuccess: (created) => {
         haptics.success();
         router.back();
-        Alert.alert("Logged again", "Added to today's diary.");
+        toast.show({
+          message: "Logged again to today",
+          actionLabel: "Undo",
+          onAction: () => undoRepeat(created.id),
+        });
       },
       onError: () => {
         haptics.error();
