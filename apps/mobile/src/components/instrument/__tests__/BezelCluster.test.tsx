@@ -50,3 +50,33 @@ describe("SpecularSweep", () => {
     expect(toJSON()).toBeTruthy();
   });
 });
+
+// The accent budget, pinned. Spec 2026-08-16: "one hero orange moment per
+// screen + dock chrome", and a full-panel halo is not that moment — it wraps
+// the hero and competes with it.
+//
+// Reported on device: "reduce or remove the orange glow outside the panel or
+// use different color which contrast?". The glow is kept, because it lifts the
+// cluster off the ground, but it is now a warm-ink backlight rather than accent.
+test("the cluster's glow is a backlight, never the accent colour", async () => {
+  const { getByTestId } = await render(
+    <BezelCluster glow testID="hero">
+      <Text>gauge</Text>
+    </BezelCluster>,
+  );
+
+  const style = StyleSheet.flatten(getByTestId("hero").props.style);
+  expect(style.shadowColor).toBe(instrumentLight.ink);
+  expect(style.shadowColor).not.toBe(instrumentLight.accent);
+});
+
+test("without glow the cluster casts no coloured shadow of its own", async () => {
+  const { getByTestId } = await render(
+    <BezelCluster testID="plain">
+      <Text>gauge</Text>
+    </BezelCluster>,
+  );
+
+  const style = StyleSheet.flatten(getByTestId("plain").props.style) ?? {};
+  expect(style.shadowColor).toBeUndefined();
+});

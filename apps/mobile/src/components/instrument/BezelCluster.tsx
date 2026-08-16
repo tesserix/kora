@@ -25,10 +25,23 @@ export function BezelCluster({ children, radius = 26, style, glow = false, testI
     <View
       testID={testID}
       style={[
+        // Backlight, not accent. This was `instrument.accent` at 0.3 — a wide
+        // orange halo around the whole cluster, which spent the screen's one
+        // accent moment on its CONTAINER and then competed with the hero it
+        // surrounds (the gauge on Home, the chart on Progress). The spec's
+        // budget is "one hero orange moment per screen + dock chrome", and
+        // app/(tabs)/more.tsx already reasons this way in a comment: its accent
+        // is "a whisper glow behind the avatar well, not a full-panel glow".
+        //
+        // Warm ink instead of a dark shadow because the ground is #0B0D10 — a
+        // black halo on near-black separates nothing. A lume-toned backlight
+        // does, and it is the language the spec already uses for instrument
+        // faces ("watch-dial lume"), so the cluster still lifts off the ground
+        // without claiming to be the thing worth looking at.
         glow && {
-          shadowColor: instrument.accent,
-          shadowOpacity: 0.3,
-          shadowRadius: 27,
+          shadowColor: instrument.ink,
+          shadowOpacity: 0.16,
+          shadowRadius: 24,
           shadowOffset: { width: 0, height: 0 },
         },
         style,
