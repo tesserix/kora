@@ -21,7 +21,9 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/genai"
 
+	"github.com/tesserix/kora/api/internal/ai"
 	"github.com/tesserix/kora/api/internal/ai/providers"
+	"github.com/tesserix/kora/api/internal/billing"
 	"github.com/tesserix/kora/api/internal/database"
 	"github.com/tesserix/kora/api/internal/nutrition"
 )
@@ -46,12 +48,29 @@ const (
 // COUNT, not the wall-clock delay.
 var embedBaseDelay = 500 * time.Millisecond
 
-// embedder is the subset of a provider's embedding capability cmd/embed
-// needs. The real providers.GeminiProvider.Embed returns three values
-// ([]float32, ai.Usage, error); geminiEmbedder below adapts it to this
-// two-value shape so main can keep run's dependency small and testable.
+// embedder is the subset of a provider's embedding capability cmd/embed needs.
+// It is providers.GeminiProvider.Embed's FULL signature, ai.Usage included, so
+// providers.GeminiProvider satisfies it directly — which covers both backends,
+// since NewVertexProvider returns the same struct as NewGeminiProvider.
+//
+// The Usage used to be dropped by a two-value adapter here. That discarded the
+// metering for every embed this command makes — thousands per backfill, the
+// single largest embedding consumer in the system — so the food index's spend
+// appeared in neither ai_usage_events nor kora_ai_calls_total, and "total COGS
+// = resolution + derived" was false at the org level (kora#97). Narrowing an
+// interface is cheap; the thing it narrowed away was the entire cost signal.
 type embedder interface {
-	Embed(ctx context.Context, text string) ([]float32, error)
+	Embed(ctx context.Context, text string) ([]float32, ai.Usage, error)
+}
+
+// usageRecorder records one AI provider call that no user made.
+//
+// Declared as an interface here, not taken as a concrete billing.Meter, for
+// the same reason ai.Meter is: run must stay testable without a database.
+// billing.Meter satisfies it structurally, so billing.NewMeter(db) is passed
+// straight in with no adapter.
+type usageRecorder interface {
+	RecordSystem(ctx context.Context, u ai.Usage, costUSD float64) error
 }
 
 // store is the subset of nutrition.Repository run needs.
@@ -60,18 +79,28 @@ type store interface {
 	SetEmbedding(ctx context.Context, id uuid.UUID, vec []float32) error
 }
 
-// geminiEmbedder adapts providers.GeminiProvider's three-value Embed to the
-// two-value embedder interface run depends on. It covers BOTH backends:
-// NewVertexProvider returns the same GeminiProvider struct as
-// NewGeminiProvider, differing only in the client's backend, so nothing below
-// this line has to know which one was chosen.
-type geminiEmbedder struct {
-	provider providers.GeminiProvider
-}
-
-func (g geminiEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
-	vec, _, err := g.provider.Embed(ctx, text)
-	return vec, err
+// meter records one provider call against the platform, with no owning user.
+//
+// Recording must NEVER break the backfill — the embeddings are the point, the
+// accounting is not — so a metering error is logged and swallowed, exactly as
+// ai.Resolver.record swallows it on the user-facing path.
+//
+// Note the cost will usually be $0.00: providers.GeminiProvider.Embed does not
+// populate TokensIn, so ai.EstimateCostUSD has nothing to price. The CALL is
+// still the thing worth counting — kora_ai_calls_total{call_type="embed"} and
+// the ai_usage_events row are what make the backfill's volume visible at all.
+// A token count added to Embed later prices it with no change here.
+func meter(ctx context.Context, rec usageRecorder, u ai.Usage, outcome string) {
+	if rec == nil || u.Provider == "" {
+		// No Provider means the call never reached one — a stub, or a zero
+		// value. Recording it would pad the meter with phantom calls, the same
+		// guard ai.Resolver.recordAll applies.
+		return
+	}
+	u.Outcome = outcome
+	if err := rec.RecordSystem(ctx, u, ai.EstimateCostUSD(u)); err != nil {
+		log.Printf("cmd/embed: record usage: %v", err)
+	}
 }
 
 // embedBackend names which provider main will construct.
@@ -164,7 +193,7 @@ func main() {
 		log.Println("cmd/embed: gemini api key")
 	}
 
-	res := run(ctx, repo, geminiEmbedder{provider: provider})
+	res := run(ctx, repo, provider, billing.NewMeter(db))
 	log.Printf("cmd/embed: embedded %d food items, failed %d, gave up %t", res.embedded, res.failed, res.gaveUp)
 	os.Exit(exitCode(res))
 }
@@ -213,14 +242,22 @@ func isRateLimited(err error) bool {
 // three requests per row against the quota whose exhaustion caused the
 // failure, which makes the outage worse and deeper. Fail the row on the first
 // 429 and let it stay in RowsMissingEmbedding for the next run.
-func embedWithRetry(ctx context.Context, e embedder, name string) ([]float32, error) {
+//
+// EVERY ATTEMPT IS METERED, not just the one whose result is returned. Each
+// one reached the provider and consumed its quota, so a run that burns three
+// calls per row must show three. Recording only successes is how a failing
+// path comes to look free — the exact under-count #81 removed from the
+// user-facing metering.
+func embedWithRetry(ctx context.Context, e embedder, rec usageRecorder, name string) ([]float32, error) {
 	var lastErr error
 	delay := embedBaseDelay
 	for attempt := 1; attempt <= embedAttempts; attempt++ {
-		vec, err := e.Embed(ctx, name)
+		vec, usage, err := e.Embed(ctx, name)
 		if err == nil {
+			meter(ctx, rec, usage, ai.OutcomeOK)
 			return vec, nil
 		}
+		meter(ctx, rec, usage, ai.OutcomeError)
 		lastErr = err
 		if isRateLimited(err) {
 			return nil, err
@@ -289,7 +326,7 @@ func exitCode(o outcome) int {
 // run streams food_items missing an embedding, embeds each with retry, and
 // reports how many succeeded, how many failed permanently, and whether it
 // stopped short of draining the queue.
-func run(ctx context.Context, s store, e embedder) outcome {
+func run(ctx context.Context, s store, e embedder, rec usageRecorder) outcome {
 	var o outcome
 	for {
 		rows, err := s.RowsMissingEmbedding(ctx, batchSize)
@@ -307,7 +344,7 @@ func run(ctx context.Context, s store, e embedder) outcome {
 
 		succeeded := 0
 		for _, row := range rows {
-			vec, err := embedWithRetry(ctx, e, row.Name)
+			vec, err := embedWithRetry(ctx, e, rec, row.Name)
 			if err != nil {
 				log.Printf("cmd/embed: embed %q (%s): %v", row.Name, row.ID, err)
 				o.failed++

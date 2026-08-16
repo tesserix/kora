@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/genai"
 
+	"github.com/tesserix/kora/api/internal/ai"
 	"github.com/tesserix/kora/api/internal/nutrition"
 )
 
@@ -49,15 +50,16 @@ type flakyEmbedder struct {
 	alwaysErr bool
 }
 
-func (e *flakyEmbedder) Embed(_ context.Context, text string) ([]float32, error) {
+func (e *flakyEmbedder) Embed(_ context.Context, text string) ([]float32, ai.Usage, error) {
+	u := ai.Usage{Provider: "gemini", Model: "gemini-embedding-001", CallType: "embed"}
 	if e.alwaysErr {
-		return nil, errors.New("provider down")
+		return nil, u, errors.New("provider down")
 	}
 	if e.failures[text] > 0 {
 		e.failures[text]--
-		return nil, errors.New("transient")
+		return nil, u, errors.New("transient")
 	}
-	return make([]float32, 768), nil
+	return make([]float32, 768), u, nil
 }
 
 func TestRunRetriesTransientFailures(t *testing.T) {
@@ -66,7 +68,7 @@ func TestRunRetriesTransientFailures(t *testing.T) {
 	// Fails twice, succeeds on the third attempt — within the 3-attempt budget.
 	e := &flakyEmbedder{failures: map[string]int{"Flaky food": 2}}
 
-	o := run(context.Background(), s, e)
+	o := run(context.Background(), s, e, nil)
 
 	assert.Equal(t, 1, o.embedded)
 	assert.Equal(t, 0, o.failed)
@@ -80,7 +82,7 @@ func TestRunCountsPersistentFailures(t *testing.T) {
 	s := &fakeStore{batches: [][]nutrition.FoodItem{{row}}}
 	e := &flakyEmbedder{alwaysErr: true}
 
-	o := run(context.Background(), s, e)
+	o := run(context.Background(), s, e, nil)
 
 	assert.Equal(t, 0, o.embedded)
 	assert.Equal(t, 1, o.failed)
@@ -105,7 +107,7 @@ func TestRunContinuesPastAPartialBatchFailure(t *testing.T) {
 	// other two rows embed first time.
 	e := &flakyEmbedder{failures: map[string]int{"Doomed food": embedAttempts}}
 
-	o := run(context.Background(), s, e)
+	o := run(context.Background(), s, e, nil)
 
 	assert.Equal(t, 2, o.embedded, "both good rows must be embedded")
 	assert.Equal(t, 1, o.failed, "the doomed row must still be counted as failed")
@@ -132,7 +134,7 @@ func TestRunGivingUpAfterProgressIsAFailure(t *testing.T) {
 	s := &fakeStore{batches: [][]nutrition.FoodItem{{good}, {doomed}}}
 	e := &flakyEmbedder{failures: map[string]int{"Doomed food": embedAttempts}}
 
-	o := run(context.Background(), s, e)
+	o := run(context.Background(), s, e, nil)
 
 	assert.Equal(t, 1, o.embedded, "the first batch really was embedded")
 	assert.Equal(t, 1, o.failed)
@@ -162,11 +164,81 @@ func TestRunFetchErrorIsAFailure(t *testing.T) {
 	s := &errStore{fakeStore: fakeStore{batches: [][]nutrition.FoodItem{{good}}}, errAfter: 1}
 	e := &flakyEmbedder{}
 
-	o := run(context.Background(), s, e)
+	o := run(context.Background(), s, e, nil)
 
 	assert.Equal(t, 1, o.embedded)
 	assert.True(t, o.gaveUp)
 	assert.Equal(t, 1, exitCode(o))
+}
+
+// fakeRecorder captures every metered call. err makes recording fail, which
+// must never be allowed to break the backfill.
+type fakeRecorder struct {
+	usages []ai.Usage
+	costs  []float64
+	err    error
+}
+
+func (r *fakeRecorder) RecordSystem(_ context.Context, u ai.Usage, costUSD float64) error {
+	r.usages = append(r.usages, u)
+	r.costs = append(r.costs, costUSD)
+	return r.err
+}
+
+// TestRunRecordsUsageForEveryProviderCall is the kora#97 metering regression:
+// before this, the embedder interface threw ai.Usage away and the backfill —
+// the system's single largest embedding consumer — appeared nowhere in
+// ai_usage_events or kora_ai_calls_total.
+//
+// It asserts EVERY attempt is recorded, failures included, with the right
+// outcome. Recording only the successes would let a failing backfill read as
+// free, which is the same under-count #81 removed from the user-facing path.
+func TestRunRecordsUsageForEveryProviderCall(t *testing.T) {
+	flaky := nutrition.FoodItem{ID: uuid.New(), Name: "Flaky food"}
+	good := nutrition.FoodItem{ID: uuid.New(), Name: "Good food"}
+
+	s := &fakeStore{batches: [][]nutrition.FoodItem{{flaky, good}}}
+	// One failed attempt on the flaky row, then success: 2 + 1 = 3 calls.
+	e := &flakyEmbedder{failures: map[string]int{"Flaky food": 1}}
+	rec := &fakeRecorder{}
+
+	o := run(context.Background(), s, e, rec)
+
+	require.Equal(t, 2, o.embedded)
+	require.Len(t, rec.usages, 3, "every provider call must be metered, not just the successful ones")
+	assert.Equal(t, []string{ai.OutcomeError, ai.OutcomeOK, ai.OutcomeOK},
+		[]string{rec.usages[0].Outcome, rec.usages[1].Outcome, rec.usages[2].Outcome})
+	for _, u := range rec.usages {
+		assert.Equal(t, "embed", u.CallType, "these must land under call_type=embed")
+		assert.Equal(t, "gemini-embedding-001", u.Model)
+	}
+}
+
+// A metering failure must never cost an embedding. The vectors are the point;
+// the accounting is not.
+func TestRunKeepsEmbeddingWhenRecordingFails(t *testing.T) {
+	row := nutrition.FoodItem{ID: uuid.New(), Name: "Good food"}
+	s := &fakeStore{batches: [][]nutrition.FoodItem{{row}}}
+	rec := &fakeRecorder{err: errors.New("billing: record: connection refused")}
+
+	o := run(context.Background(), s, &flakyEmbedder{}, rec)
+
+	assert.Equal(t, 1, o.embedded)
+	assert.False(t, o.gaveUp)
+	assert.Equal(t, 0, exitCode(o))
+	assert.True(t, s.stored[row.ID])
+}
+
+// A Usage with no Provider is a call that never reached one. Recording it
+// would pad ai_usage_events and kora_ai_calls_total with phantom calls.
+func TestMeterSkipsUsageThatNeverReachedAProvider(t *testing.T) {
+	rec := &fakeRecorder{}
+
+	meter(context.Background(), rec, ai.Usage{}, ai.OutcomeOK)
+	assert.Empty(t, rec.usages, "a zero Usage is a call that never happened")
+
+	meter(context.Background(), rec, ai.Usage{Provider: "gemini", CallType: "embed"}, ai.OutcomeOK)
+	assert.Len(t, rec.usages, 1)
 }
 
 func TestExitCode(t *testing.T) {
@@ -238,9 +310,9 @@ type countingEmbedder struct {
 	err   error
 }
 
-func (e *countingEmbedder) Embed(_ context.Context, _ string) ([]float32, error) {
+func (e *countingEmbedder) Embed(_ context.Context, _ string) ([]float32, ai.Usage, error) {
 	e.calls++
-	return nil, e.err
+	return nil, ai.Usage{Provider: "gemini", Model: "gemini-embedding-001", CallType: "embed"}, e.err
 }
 
 func TestEmbedWithRetryAttempts(t *testing.T) {
@@ -276,7 +348,7 @@ func TestEmbedWithRetryAttempts(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			e := &countingEmbedder{err: tt.err}
-			vec, err := embedWithRetry(context.Background(), e, "Some food")
+			vec, err := embedWithRetry(context.Background(), e, nil, "Some food")
 			require.Error(t, err)
 			assert.Nil(t, vec)
 			assert.Equal(t, tt.wantAttempts, e.calls)

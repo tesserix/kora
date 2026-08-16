@@ -35,8 +35,37 @@ func NewMeter(db *gorm.DB) Meter {
 	return Meter{db: db}
 }
 
-// Record persists one metered AI provider call.
+// Record persists one metered AI provider call made on behalf of userID.
 func (m Meter) Record(ctx context.Context, userID uuid.UUID, u ai.Usage, costUSD float64) error {
+	return m.record(ctx, &userID, u, costUSD)
+}
+
+// RecordSystem persists one metered AI provider call that NO USER made, so it
+// lands with a NULL user_id.
+//
+// It exists for the food-index backfill (cmd/embed), which embeds thousands of
+// rows on the platform's behalf. Those calls were previously discarded
+// entirely, which made "total COGS = resolution + derived" false at the org
+// level: the single largest embedding consumer in the system appeared in
+// neither ai_usage_events nor the kora_ai_calls_total counters (kora#97).
+//
+// Deliberately NOT routed through Record with some placeholder user: there is
+// no user to attribute it to, and inventing one would corrupt every per-user
+// query, including the WithinBudget caps below, which would then throttle a
+// fictional account while the real spend stayed unattributed. NULL is the
+// value the schema already uses for "usage with no owning person" — the same
+// state a deleted user's retained rows end up in (migration 000025).
+//
+// It does NOT consult WithinBudget. Those caps are per-user throttles, and the
+// backfill is an operator-initiated batch job whose ceiling is its own row
+// count, not a user's monthly allowance.
+func (m Meter) RecordSystem(ctx context.Context, u ai.Usage, costUSD float64) error {
+	return m.record(ctx, nil, u, costUSD)
+}
+
+// record is the shared body of Record and RecordSystem. userID is nil for a
+// call with no owning user.
+func (m Meter) record(ctx context.Context, userID *uuid.UUID, u ai.Usage, costUSD float64) error {
 	// Instrumented BEFORE the insert and independently of its result: the
 	// provider call already happened and was already billed upstream, whether
 	// or not this row lands. See #43.
