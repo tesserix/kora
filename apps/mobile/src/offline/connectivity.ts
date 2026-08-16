@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from "react";
 import NetInfo, { type NetInfoState } from "@react-native-community/netinfo";
 import { onlineManager } from "@tanstack/react-query";
 
@@ -19,4 +20,16 @@ function reachable(state: NetInfoState): boolean {
 
 export function isOnline(): boolean {
   return onlineManager.isOnline();
+}
+
+// onlineManager.subscribe hands the listener the new state; useSyncExternalStore
+// wants a bare callback, so the argument is dropped here.
+function subscribeOnline(onChange: () => void): () => void {
+  return onlineManager.subscribe(() => onChange());
+}
+
+// Reactive counterpart to isOnline(): a mounted row that reads this re-renders
+// when connectivity flips, instead of keeping whatever it read on first paint.
+export function useIsOnline(): boolean {
+  return useSyncExternalStore(subscribeOnline, isOnline, isOnline);
 }

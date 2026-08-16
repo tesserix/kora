@@ -1619,13 +1619,21 @@ export default function CaptureScreen() {
       .filter((_, index) => outcomes[index]?.status === "rejected")
       .map(({ candidate }) => candidate.item.name);
 
-    const updatedKeys = new Set([...loggedCandidateKeys, ...newlySucceededKeys]);
-    setLoggedCandidateKeys(updatedKeys);
+    // Union, never replace — and via a functional updater so the write depends
+    // on the ledger at commit time rather than on the snapshot this closure
+    // captured when the press started. `pending` already excluded every key in
+    // that snapshot, so the union is exactly "what was logged before" plus
+    // "what just landed", whichever order the updates commit in.
+    setLoggedCandidateKeys((prev) => new Set([...prev, ...newlySucceededKeys]));
+    // The count the user is told about, computed from the same snapshot the
+    // rest of this function reasoned about. A local Set (not the state one) so
+    // the message can never be affected by when React flushes the write above.
+    const loggedSoFarCount = new Set([...loggedCandidateKeys, ...newlySucceededKeys]).size;
 
     if (failedNames.length > 0) {
       haptics.error();
       setErrorMsg(
-        `I logged ${updatedKeys.size} of ${loggableCount} items, but couldn't log ${failedNames.join(
+        `I logged ${loggedSoFarCount} of ${loggableCount} items, but couldn't log ${failedNames.join(
           ", ",
         )}. Please try again.`,
       );

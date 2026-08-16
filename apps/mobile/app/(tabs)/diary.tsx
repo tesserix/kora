@@ -22,6 +22,7 @@ import { useSavedMealEditor } from "@/components/meals/SavedMealSheetProvider";
 import { useDashboard, useDayLogs, useAddWater, useDeleteLog } from "@/api/hooks";
 import { useQueuedLogs } from "@/offline/useQueuedLogs";
 import { useQueuedCaptures } from "@/offline/useQueuedCaptures";
+import { useIsOnline } from "@/offline/connectivity";
 import { PressableScale, ScreenEntrance, haptics, useMotionPrefs } from "@/motion";
 import { useTheme } from "@/theme";
 import { hslToHex } from "@/lib/color";
@@ -67,6 +68,11 @@ export default function Diary() {
   // contributes to the day total — see the `kcal: null` invariant on
   // useQueuedCaptures.
   const captures = useQueuedCaptures(selected);
+  // A pending capture is only WAITING on connectivity while the device is
+  // offline; online it is actively resolving, so the row must not promise a
+  // future action. Subscribed rather than sampled so the copy flips with the
+  // connection while the row stays mounted.
+  const online = useIsOnline();
   const addWater = useAddWater();
   const deleteLog = useDeleteLog();
   const { openCompose } = useSavedMealEditor();
@@ -345,7 +351,9 @@ export default function Diary() {
                   const failed = c.status === "failed";
                   const pendingCapture = c.status === "pending";
                   const statusText = pendingCapture
-                    ? "Identifying when you're back online"
+                    ? online
+                      ? "Identifying…"
+                      : "Identifying when you're back online"
                     : c.status === "review"
                       ? "Tap to confirm"
                       : "Couldn't identify";

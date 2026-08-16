@@ -254,8 +254,10 @@ export default function CaptureReviewScreen() {
         .filter((_, index) => outcomes[index]?.status === "fulfilled")
         .map(({ key }) => key);
       // Union, never replace: keys from an earlier attempt must survive this
-      // one even though this attempt never touched them.
-      setLoggedCandidateKeys(new Set([...loggedCandidateKeys, ...newlySucceededKeys]));
+      // one even though this attempt never touched them. A functional updater,
+      // so the union is taken against the ledger at commit time rather than
+      // against the snapshot this closure captured when the press started.
+      setLoggedCandidateKeys((prev) => new Set([...prev, ...newlySucceededKeys]));
 
       const failed = outcomes.filter((o) => o.status === "rejected").length;
       if (failed > 0) {

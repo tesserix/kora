@@ -48,6 +48,13 @@ jobs:
           cache: npm
           cache-dependency-path: apps/mobile/package-lock.json
       - run: cd apps/mobile && npm ci
+      # app.json sets experiments.typedRoutes, but that is inert until the
+      # route union in .expo/types/router.d.ts exists — and both it and
+      # expo-env.d.ts are gitignored, so a fresh checkout has neither and
+      # expo-router's Href silently falls back to plain string. Without this
+      # step a typo'd router.push("/delete-acount") passes tsc. `expo customize
+      # tsconfig.json` is the supported way to run typegen with no dev server.
+      - run: cd apps/mobile && npx expo customize tsconfig.json
       - run: cd apps/mobile && npx tsc --noEmit
       - run: cd apps/mobile && npm test
 

@@ -1082,10 +1082,14 @@ describe("Scan mode", () => {
     expect(mockResolveBarcodeMutate).toHaveBeenCalledTimes(2);
   });
 
-  // The scanner is guarded by a one-shot ref so one physical barcode does not
-  // fire the resolve repeatedly. A resolve that FAILS has to release that
-  // guard, or the viewfinder is dead for the rest of the session — the user
-  // sees the error and can do nothing about it. This matters more now that
+  // The scanner is guarded by a ref that latches only for as long as a resolve
+  // is in flight — CameraView fires onBarcodeScanned dozens of times a second
+  // while a code is in frame, and the latch is what stops that becoming dozens
+  // of concurrent resolves. It is not one-shot: every terminal outcome
+  // (success, failure, and the server's "not recognized" 200) releases it. A
+  // resolve that FAILS therefore has to release it too, or the viewfinder is
+  // dead for the rest of the session — the user sees the error and can do
+  // nothing about it. This matters more now that
   // mutations reject offline instead of hanging in "analyzing" forever (see
   // src/lib/queryClient), because failing is the common offline outcome.
   test("a failed barcode resolve releases the scanner so the user can scan again", async () => {

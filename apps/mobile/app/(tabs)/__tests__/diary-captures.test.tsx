@@ -33,6 +33,11 @@ const LOGS_DATA = [
 
 let mockDayLogs: typeof LOGS_DATA = LOGS_DATA;
 let mockCaptureRows: QueuedCaptureRow[] = [];
+// The pending-capture copy branches on connectivity, so every test declares
+// which side of that branch it is exercising. Stubbed like the hooks above
+// rather than driven through the real onlineManager, so the state cannot leak
+// between suites.
+let mockOnline = false;
 
 jest.mock("@/offline/useQueuedLogs", () => ({
   useQueuedLogs: () => ({ rows: [], retryRow: jest.fn(), discardRow: jest.fn() }),
@@ -44,6 +49,10 @@ jest.mock("@/offline/useQueuedLogs", () => ({
 // it: the real hook reaches @/lib/api's firebase/auth ESM.
 jest.mock("@/offline/useQueuedCaptures", () => ({
   useQueuedCaptures: () => ({ rows: mockCaptureRows }),
+}));
+
+jest.mock("@/offline/connectivity", () => ({
+  useIsOnline: () => mockOnline,
 }));
 
 jest.mock("@/api/hooks", () => ({
@@ -74,6 +83,7 @@ function captureRow(over: Partial<QueuedCaptureRow> = {}): QueuedCaptureRow {
 beforeEach(() => {
   mockDayLogs = LOGS_DATA;
   mockCaptureRows = [];
+  mockOnline = false;
   (router.push as jest.Mock).mockClear();
   jest.spyOn(Alert, "alert").mockImplementation(() => {});
 });
@@ -152,6 +162,40 @@ test("pressing a pending capture navigates nowhere", async () => {
   fireEvent.press(await findByLabelText("Photo, Identifying when you're back online"));
 
   expect(router.push).not.toHaveBeenCalled();
+});
+
+// Online, a pending capture is not waiting for anything: the resolve is
+// running right now, so promising a future action ("when you're back online")
+// is a lie the user can see through while the spinner turns.
+test("a pending capture reads as actively identifying when the device is online", async () => {
+  mockOnline = true;
+  mockCaptureRows = [captureRow({ status: "pending" })];
+  const { findByLabelText, queryByLabelText } = await render(<Diary />);
+
+  expect(await findByLabelText("Photo, Identifying…")).toBeTruthy();
+  expect(queryByLabelText("Photo, Identifying when you're back online")).toBeNull();
+});
+
+// The online copy must not swallow the press-handler rule: pending is still
+// pending, whatever the connection says.
+test("pressing a pending capture navigates nowhere while online either", async () => {
+  mockOnline = true;
+  mockCaptureRows = [captureRow({ status: "pending" })];
+  const { findByLabelText } = await render(<Diary />);
+
+  fireEvent.press(await findByLabelText("Photo, Identifying…"));
+
+  expect(router.push).not.toHaveBeenCalled();
+});
+
+// Only PENDING rows branch on connectivity — a review row says the same thing
+// online as off, so the branch cannot be widened to the other statuses.
+test("a review capture keeps its own copy while online", async () => {
+  mockOnline = true;
+  mockCaptureRows = [captureRow({ status: "review" })];
+  const { findByLabelText } = await render(<Diary />);
+
+  expect(await findByLabelText("Photo, Tap to confirm")).toBeTruthy();
 });
 
 // diary.tsx:465 — the `&& captures.rows.length === 0` term of the empty-state
