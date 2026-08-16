@@ -500,3 +500,31 @@ test("every row offers a visible Change button, not just uncertain ones", async 
   fireEvent.press(buttons[1]);
   expect(onResolveUncertain).toHaveBeenCalledWith(1);
 });
+
+// kora#193. capture-review embeds this card AND supplies its own
+// Confirm/Discard pair, which rendered two accent-filled buttons calling the
+// same handler — "Add 3 items to diary" directly above "Confirm".
+test("hideAddButton removes the card's own CTA without touching the rows", async () => {
+  const { queryByLabelText, getAllByRole, getByText } = await render(
+    <DetectedCard
+      resolution={makeMixedResolution()}
+      mealSlot="lunch"
+      onChangeMealSlot={() => {}}
+      onAdd={() => {}}
+      adding={false}
+      excluded={new Set()}
+      onToggleExclude={() => {}}
+      hideAddButton
+    />,
+  );
+
+  expect(queryByLabelText("Add to diary")).toBeNull();
+  // Everything else the card is for must survive — it still presents data.
+  expect(getAllByRole("checkbox")).toHaveLength(2);
+  expect(getByText("Grilled chicken breast")).toBeTruthy();
+});
+
+test("the CTA is present by default, so the live capture flow is unaffected", async () => {
+  const { getByLabelText } = await renderCard(makeMixedResolution());
+  expect(getByLabelText("Add to diary")).toBeTruthy();
+});

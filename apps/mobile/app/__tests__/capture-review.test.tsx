@@ -323,8 +323,8 @@ describe("confirming a capture with multiple detected items", () => {
     });
     mockListCaptures([capture]);
 
-    const { getByLabelText } = await render(<CaptureReviewScreen />, { wrapper: wrap(newClient()) });
-    fireEvent.press(getByLabelText("Add to diary"));
+    const { getByText, getByLabelText } = await render(<CaptureReviewScreen />, { wrapper: wrap(newClient()) });
+    fireEvent.press(getByText("Confirm"));
 
     await waitFor(() => expect(appendLog).toHaveBeenCalledTimes(2));
     expect((appendLog as jest.Mock).mock.calls[0][0]).toMatchObject({ food_item_id: "food-a", quantity_grams: 350 });
@@ -339,8 +339,8 @@ describe("confirming a capture with multiple detected items", () => {
     });
     mockListCaptures([capture]);
 
-    const { getByLabelText } = await render(<CaptureReviewScreen />, { wrapper: wrap(newClient()) });
-    fireEvent.press(getByLabelText("Add to diary"));
+    const { getByText, getByLabelText } = await render(<CaptureReviewScreen />, { wrapper: wrap(newClient()) });
+    fireEvent.press(getByText("Confirm"));
 
     await waitFor(() => expect(appendLog).toHaveBeenCalledTimes(2));
     const idA = (appendLog as jest.Mock).mock.calls[0][1];
@@ -359,8 +359,8 @@ describe("confirming a capture with multiple detected items", () => {
     });
     mockListCaptures([capture]);
 
-    const { getByLabelText } = await render(<CaptureReviewScreen />, { wrapper: wrap(newClient()) });
-    fireEvent.press(getByLabelText("Add to diary"));
+    const { getByText, getByLabelText } = await render(<CaptureReviewScreen />, { wrapper: wrap(newClient()) });
+    fireEvent.press(getByText("Confirm"));
 
     await waitFor(() => expect(appendLog).toHaveBeenCalledTimes(2));
     expect(deleteQueuedMedia).not.toHaveBeenCalled();
@@ -386,13 +386,13 @@ describe("confirming a capture with multiple detected items", () => {
     });
     mockListCaptures([capture]);
 
-    const { getByLabelText } = await render(<CaptureReviewScreen />, { wrapper: wrap(newClient()) });
-    fireEvent.press(getByLabelText("Add to diary"));
+    const { getByText, getByLabelText } = await render(<CaptureReviewScreen />, { wrapper: wrap(newClient()) });
+    fireEvent.press(getByText("Confirm"));
     await waitFor(() => expect(appendLog).toHaveBeenCalledTimes(2));
 
     // Retry: food-a already succeeded on the first press and must not be
     // resubmitted — only food-b (the one that failed) goes out again.
-    fireEvent.press(getByLabelText("Add to diary"));
+    fireEvent.press(getByText("Confirm"));
     await waitFor(() => expect(appendLog).toHaveBeenCalledTimes(3));
     expect((appendLog as jest.Mock).mock.calls[2][0]).toMatchObject({ food_item_id: "food-b" });
   });
@@ -409,13 +409,13 @@ describe("confirming a capture with multiple detected items", () => {
     });
     mockListCaptures([capture]);
 
-    const { getByLabelText } = await render(<CaptureReviewScreen />, { wrapper: wrap(newClient()) });
-    fireEvent.press(getByLabelText("Add to diary"));
+    const { getByText, getByLabelText } = await render(<CaptureReviewScreen />, { wrapper: wrap(newClient()) });
+    fireEvent.press(getByText("Confirm"));
     await waitFor(() => expect(appendLog).toHaveBeenCalledTimes(2));
     expect(deleteQueuedMedia).not.toHaveBeenCalled();
     expect(discard).not.toHaveBeenCalled();
 
-    fireEvent.press(getByLabelText("Add to diary"));
+    fireEvent.press(getByText("Confirm"));
     await waitFor(() => expect(appendLog).toHaveBeenCalledTimes(3));
     await waitFor(() => expect(deleteQueuedMedia).toHaveBeenCalledTimes(1));
     expect(discard).toHaveBeenCalledTimes(1);
@@ -440,7 +440,7 @@ describe("correcting a single uncertain row", () => {
     });
     mockListCaptures([capture]);
 
-    const { getByLabelText } = await render(<CaptureReviewScreen />, { wrapper: wrap(newClient()) });
+    const { getByText, getByLabelText } = await render(<CaptureReviewScreen />, { wrapper: wrap(newClient()) });
     fireEvent.press(getByLabelText("Change Mystery soup"));
 
     await waitFor(() =>

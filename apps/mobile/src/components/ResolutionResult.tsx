@@ -112,6 +112,8 @@ interface ResolutionResultProps {
   /** Forwarded to DetectedCard — rows the user has unchecked (kora#183). */
   excluded: ReadonlySet<number>;
   onToggleExclude: (index: number) => void;
+  /** Forwarded to DetectedCard — see its `hideAddButton` (kora#193). */
+  hideAddButton?: boolean;
 }
 
 // The "here is what the AI thinks — confirm, correct, or answer a follow-up"
@@ -131,6 +133,7 @@ export function ResolutionResult({
   onResolveUncertain,
   excluded,
   onToggleExclude,
+  hideAddButton,
 }: ResolutionResultProps) {
   const resultView = resolveResultView(resolution);
 
@@ -147,6 +150,7 @@ export function ResolutionResult({
           onResolveUncertain={onResolveUncertain}
           excluded={excluded}
           onToggleExclude={onToggleExclude}
+          hideAddButton={hideAddButton}
         />
       </>
     );

@@ -384,11 +384,26 @@ export default function CaptureReviewScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppBackground />
-      <ScreenHeader
-        overline={capture?.kind === "photo" ? "Photo" : "Voice note"}
-        title="Review capture"
-        onBack={() => safeBack(EXIT_TO)}
-      />
+      {/* insets.top, or the header renders UNDER the status bar — the clock and
+          battery sit on top of the title and the overline collides with it
+          (kora#192, seen on device).
+
+          ScreenHeader deliberately carries no top inset of its own; every other
+          screen that uses it applies one (settings.tsx:72, friends.tsx:73,
+          log.tsx:334 all use `insets.top + 8`). This screen used `insets` for
+          paddingBottom only and was the sole deviation.
+
+          It survived every simulator pass because the screen is reachable ONLY
+          by draining an offline capture — queue in airplane mode, reconnect,
+          tap the diary row. No online path renders it. Same class of gap as
+          kora#139. */}
+      <View style={{ paddingTop: insets.top + 8 }}>
+        <ScreenHeader
+          overline={capture?.kind === "photo" ? "Photo" : "Voice note"}
+          title="Review capture"
+          onBack={() => safeBack(EXIT_TO)}
+        />
+      </View>
       {capture === undefined ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
           <ActivityIndicator color={colors.tertiaryLabel} />
@@ -481,6 +496,9 @@ export default function CaptureReviewScreen() {
             onSearchManually={handleSearchManually}
             excluded={excluded}
             onToggleExclude={toggleExcluded}
+            // This screen supplies its own Confirm/Discard pair below, so the
+            // card must not render a second, identical accent CTA (kora#193).
+            hideAddButton
             onResolveUncertain={handleResolveUncertain}
           />
           <View style={{ flexDirection: "row", gap: spacing.sm }}>

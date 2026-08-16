@@ -58,6 +58,19 @@ interface Props {
    */
   excluded: ReadonlySet<number>;
   onToggleExclude: (index: number) => void;
+  /**
+   * Hides the card's own confirm CTA, for screens that supply their own.
+   *
+   * capture-review embeds this card AND has its own Confirm/Discard pair, so
+   * it rendered two accent-filled buttons calling the SAME handler — "Add 3
+   * items to diary" directly above "Confirm" (kora#193). Two identical primary
+   * actions is a "which one is real?" moment on a screen whose entire job is to
+   * take a confirmation.
+   *
+   * Defaults to showing it, so the live capture flow — where the card's CTA is
+   * the only action on screen — is unaffected.
+   */
+  hideAddButton?: boolean;
 }
 
 const MEAL_SLOTS: ReadonlyArray<{ slot: MealSlot; label: string; icon: string }> = [
@@ -279,6 +292,7 @@ export function DetectedCard({
   onResolveUncertain,
   excluded,
   onToggleExclude,
+  hideAddButton = false,
 }: Props) {
   const { fonts } = useTheme();
   const mono = monoStyle(fonts);
@@ -351,6 +365,7 @@ export function DetectedCard({
         ))}
       </View>
 
+      {hideAddButton ? null : (
       <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
         <Pressable
           accessibilityRole="button"
@@ -382,6 +397,7 @@ export function DetectedCard({
           )}
         </Pressable>
       </View>
+      )}
     </View>
   );
 }
