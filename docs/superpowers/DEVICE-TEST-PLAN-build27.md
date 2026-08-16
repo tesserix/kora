@@ -1,4 +1,4 @@
-# Device test plan — TestFlight build 26
+# Device test plan — TestFlight build 27
 
 Seven mobile fixes, all found by testing build 25 on hardware, plus a server-side change that is
 **already live in production** and needs no build at all.
@@ -53,6 +53,9 @@ already had the screen for it: "couldn't identify that", with Search manually.
 ---
 
 ## B. What this build fixes
+
+(Build 26 came from the parallel ignition/UI-uplift session; 27 is the first build carrying the
+capture fixes below.)
 
 ### B1. Correcting a food actually works now (kora#189, kora#190)
 
