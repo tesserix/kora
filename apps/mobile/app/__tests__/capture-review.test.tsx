@@ -48,6 +48,35 @@ jest.mock("expo-router", () => ({
 // which imports @/lib/api — and that transitively pulls in firebase/auth's
 // ESM build, which crashes the Jest transform unmocked. Mirrors the mock
 // shape src/offline/__tests__/useQueuedLogs.test.tsx uses for the same reason.
+// FoodPicker (now rendered by this screen for in-place correction, kora#198)
+// pulls in useFoodSearch, whose import chain reaches firebase/app — which Jest
+// cannot transform. Mocked to an empty result: these suites are about confirm,
+// discard and retry, not about search.
+jest.mock("@/api/hooks", () => ({
+  useFoodSearch: () => ({
+    data: [
+      {
+        item: {
+          id: "picked",
+          name: "Picked food",
+          brand: "",
+          provenance: "afcd",
+          serving_desc: "1 serve",
+          serving_grams: 120,
+          kcal_per_100g: 100,
+          protein_per_100g: 5,
+          carbs_per_100g: 10,
+          fat_per_100g: 2,
+        },
+        match_score: 0.9,
+        match_tier: "full_text",
+      },
+    ],
+    isLoading: false,
+    isError: false,
+  }),
+}));
+
 jest.mock("@/lib/api", () => ({
   apiFetch: jest.fn(),
   apiFetchEnvelope: jest.fn(),
@@ -422,14 +451,17 @@ describe("confirming a capture with multiple detected items", () => {
   });
 });
 
-// task-1 step 5: this screen passed no onResolveUncertain to ResolutionResult,
-// so an uncertain row's "tap to change" was inert here even though it works on
-// the live-capture path (capture.tsx). Wiring it wholesale to the manual-
-// search flow is out of scope for this task — only that the row is pressable
-// and carries its own index to the route capture-review already uses for
-// manual correction.
+// Change must correct the capture IN PLACE, never navigate to /log.
+//
+// The previous version of this test asserted the opposite — that the row
+// "routes to manual search carrying its index" — and so pinned kora#198 as
+// intended behaviour. It was green throughout, because `/log` genuinely was
+// reached; what it could not see is that `/log` never READ candidateIndex and
+// simply logged the food, leaving the queued capture untouched. Combined with
+// kora#111's surviving row, Confirm then logged the rejected food as well:
+// two diary entries from one correction.
 describe("correcting a single uncertain row", () => {
-  test("tapping an uncertain row routes to manual search carrying its index", async () => {
+  test("Change opens the picker in place and does not navigate away", async () => {
     const capture = queuedCaptureFixture({
       resolution: resolutionFixture({
         candidates: [
@@ -440,16 +472,57 @@ describe("correcting a single uncertain row", () => {
     });
     mockListCaptures([capture]);
 
-    const { getByText, getByLabelText } = await render(<CaptureReviewScreen />, { wrapper: wrap(newClient()) });
+    const { getByLabelText, findByPlaceholderText } = await render(<CaptureReviewScreen />, {
+      wrapper: wrap(newClient()),
+    });
     fireEvent.press(getByLabelText("Change Mystery soup"));
 
-    await waitFor(() =>
-      expect(router.push).toHaveBeenCalledWith(
-        expect.objectContaining({
-          pathname: "/log",
-          params: expect.objectContaining({ loggedAt: capture.capturedAt, candidateIndex: "1" }),
-        }),
-      ),
+    // The picker, seeded with the row being corrected.
+    const search = await findByPlaceholderText("Search foods…");
+    expect(search.props.value).toBe("Mystery soup");
+
+    // Navigating away is the defect: /log logs immediately, which is neither
+    // what the button says nor recoverable once the capture is also confirmed.
+    expect(router.push).not.toHaveBeenCalledWith(
+      expect.objectContaining({ pathname: "/log" }),
     );
+  });
+
+  // The half that actually protects the diary: a correction must reach Confirm.
+  // Before kora#198 the picked food was logged by /log while the capture kept
+  // the OLD food, so confirming afterwards wrote the rejected one too.
+  test("a corrected row is what Confirm writes, and the old food is not", async () => {
+    const capture = queuedCaptureFixture({
+      resolution: resolutionFixture({
+        candidates: [candidateFixture({ id: "food-b", name: "Mystery soup", tier: "follow_up" })],
+      }),
+    });
+    mockListCaptures([capture]);
+
+    const { getByLabelText, getByText, findByText, queryByText } = await render(<CaptureReviewScreen />, {
+      wrapper: wrap(newClient()),
+    });
+    fireEvent.press(getByLabelText("Change Mystery soup"));
+    fireEvent.press(await findByText("Picked food"));
+
+    // Wait for the row itself to show the correction before confirming.
+    // Pressing Confirm immediately runs against the pre-selection render, which
+    // is a test artefact rather than a real sequence — a user cannot tap faster
+    // than the row redraws.
+    await waitFor(() => expect(queryByText("Mystery soup")).toBeNull());
+
+    fireEvent.press(getByText("Confirm"));
+
+    await waitFor(() => expect(appendLog).toHaveBeenCalledTimes(1));
+    // appendLog(payload, captureId, ownerId) — assert on the payload, the same
+    // way the multi-item tests above do.
+    const payload = (appendLog as jest.Mock).mock.calls[0][0];
+    expect(payload).toMatchObject({
+      food_item_id: "picked",
+      // 120 g: the PICKED food's own serving, not the replaced row's portion
+      // (kora#190's rule, applied here too).
+      quantity_grams: 120,
+    });
+    expect(payload.food_item_id).not.toBe("food-b");
   });
 });

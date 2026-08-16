@@ -350,6 +350,18 @@ func (r Resolver) resolve(
 
 	subject := decomposeSubject(guesses)
 	if subject == "" {
+		// No candidate AND nothing to decompose: the engine simply has no answer.
+		//
+		// Logged because it is otherwise INDISTINGUISHABLE in production from
+		// the abstain-by-floor case above, and the two demand opposite
+		// responses: a floor that is too high is fixed by lowering it, an index
+		// gap only by adding data. On 2026-08-16 a device test of "McSpicy"
+		// correctly showed "couldn't identify that", and nothing in the logs
+		// could say which of the two had produced it.
+		slog.InfoContext(ctx, "ai: no match and nothing to decompose",
+			"guesses", summariseGuesses(guesses),
+			"candidates", len(res.Candidates),
+		)
 		return res, nil
 	}
 

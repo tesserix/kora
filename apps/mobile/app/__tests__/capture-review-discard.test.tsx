@@ -36,6 +36,14 @@ jest.mock("@/components/Toast", () => ({ useToast: () => ({ show: mockShow }) })
 // capture-review.tsx pulls in drainCaptures.ts, which imports @/lib/api — and
 // that transitively pulls in firebase/auth's ESM build, which crashes the Jest
 // transform unmocked. Same mock shape capture-review.test.tsx uses.
+// FoodPicker (now rendered by this screen for in-place correction, kora#198)
+// pulls in useFoodSearch, whose import chain reaches firebase/app — which Jest
+// cannot transform. Mocked to an empty result: these suites are about confirm,
+// discard and retry, not about search.
+jest.mock("@/api/hooks", () => ({
+  useFoodSearch: () => ({ data: [], isLoading: false, isError: false }),
+}));
+
 jest.mock("@/lib/api", () => ({
   apiFetch: jest.fn(),
   apiFetchEnvelope: jest.fn(),

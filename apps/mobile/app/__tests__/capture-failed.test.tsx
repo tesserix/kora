@@ -17,6 +17,13 @@ jest.mock("expo-router", () => ({
 // which imports @/lib/api — and that transitively pulls in firebase/auth's
 // ESM build, which crashes the Jest transform unmocked. Mirrors the mock
 // shape src/offline/__tests__/useQueuedLogs.test.tsx uses for the same reason.
+// The review screen renders FoodPicker for in-place correction (kora#198), and
+// useFoodSearch's import chain reaches firebase/app, which Jest cannot
+// transform. This suite is about the FAILED-capture states, not search.
+jest.mock("@/api/hooks", () => ({
+  useFoodSearch: () => ({ data: [], isLoading: false, isError: false }),
+}));
+
 jest.mock("@/lib/api", () => ({
   apiFetch: jest.fn(),
   apiFetchEnvelope: jest.fn(),

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Image, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
@@ -19,8 +19,10 @@ import { append as appendLog, newLogId } from "@/offline/queue";
 import { drainCaptures } from "@/offline/drainCaptures";
 import { QUEUED_CAPTURES_KEY, QUEUED_LOGS_KEY } from "@/offline/queryKeys";
 import { isLoggable } from "@/lib/candidateTier";
+import { FoodPicker } from "@/components/meal/FoodPicker";
+import { initialPortionFor } from "@/lib/promotedPortion";
 import type { MealSlot } from "@/lib/mealSlot";
-import type { ResolutionSource } from "@/api/types";
+import type { FoodItem, ResolutionSource } from "@/api/types";
 
 // mm:ss, rounding down — a partial second reading "0:12" while playback is
 // mid-second is expected, never "0:12.4".
@@ -113,6 +115,18 @@ export default function CaptureReviewScreen() {
   // glyph and no way to drop a row. Indices are stable here — the resolution
   // is restored with the capture and never replaced.
   const [excluded, setExcluded] = useState<ReadonlySet<number>>(() => new Set());
+  // In-place correction, the same shape capture.tsx holds (kora#198). Change
+  // used to push to /log, which never read the candidateIndex it was given and
+  // so simply LOGGED the food — leaving the queued capture untouched and, with
+  // kora#111's surviving row, letting Confirm log the rejected food as well.
+  //
+  // Index-keyed like `excluded` above, and safe for the same reason: this
+  // screen's resolution is restored with the capture and never replaced.
+  const [promoted, setPromoted] = useState<Record<number, FoodItem>>({});
+  const [promotedPortion, setPromotedPortion] = useState<
+    Record<number, { grams: number; assumed: boolean }>
+  >({});
+  const [pickerIndex, setPickerIndex] = useState<number | null>(null);
 
   function toggleExcluded(index: number) {
     setExcluded((current) => {
@@ -155,7 +169,32 @@ export default function CaptureReviewScreen() {
     };
   }, [id, ownerId]);
 
-  const resolution = capture?.resolution;
+  const stored = capture?.resolution;
+  // The capture as the user has amended it. Identical treatment to
+  // capture.tsx's effectiveResolution, including the kcal rules: a hand-picked
+  // row carries NO kcal (the client never derives nutrition — the server
+  // recomputes on log), and takes the replacement food's OWN portion rather
+  // than inheriting the replaced food's (kora#190).
+  const resolution = useMemo(() => {
+    if (!stored || Object.keys(promoted).length === 0) return stored;
+    return {
+      ...stored,
+      candidates: stored.candidates.map((candidate, i) => {
+        const item = promoted[i];
+        if (!item) return candidate;
+        const portion = promotedPortion[i] ?? initialPortionFor(item);
+        return {
+          ...candidate,
+          item,
+          kcal: 0,
+          tier: "confirm" as const,
+          kcal_unknown: true,
+          portion_grams: portion.grams,
+          portion_assumed: portion.assumed,
+        };
+      }),
+    };
+  }, [stored, promoted, promotedPortion]);
   const resultView = resolution ? resolveResultView(resolution) : null;
   const loggable = (resolution?.candidates ?? []).filter((c, i) => isLoggable(c) && !excluded.has(i));
   // Only a "card" result names food to log — a follow-up question has nothing
@@ -289,10 +328,7 @@ export default function CaptureReviewScreen() {
   // actually consume it is out of this task's scope.
   const handleResolveUncertain = (index: number) => {
     if (!capture) return;
-    router.push({
-      pathname: "/log",
-      params: { loggedAt: capture.capturedAt, candidateIndex: String(index) },
-    });
+    setPickerIndex(index);
   };
 
   // "Discard capture" — named for its consequence. It used to read "Not
@@ -496,6 +532,9 @@ export default function CaptureReviewScreen() {
             onSearchManually={handleSearchManually}
             excluded={excluded}
             onToggleExclude={toggleExcluded}
+            onChangePortion={(index, grams) =>
+              setPromotedPortion((prev) => ({ ...prev, [index]: { grams, assumed: false } }))
+            }
             // This screen supplies its own Confirm/Discard pair below, so the
             // card must not render a second, identical accent CTA (kora#193).
             hideAddButton
@@ -531,6 +570,25 @@ export default function CaptureReviewScreen() {
           ) : null}
         </ScrollView>
       )}
+
+      {/* Seeded from the CORRECTED row, not the stored one — a second visit to
+          an already-changed row must not re-offer the food the user rejected
+          (the kora#189 lesson, applied here from the start). */}
+      <FoodPicker
+        visible={pickerIndex !== null}
+        initialQuery={
+          pickerIndex !== null ? (resolution?.candidates[pickerIndex]?.item.name ?? "") : ""
+        }
+        onSelect={(item) => {
+          if (pickerIndex !== null) {
+            setPromoted((prev) => ({ ...prev, [pickerIndex]: item }));
+            setPromotedPortion((prev) => ({ ...prev, [pickerIndex]: initialPortionFor(item) }));
+          }
+          setPickerIndex(null);
+        }}
+        onClose={() => setPickerIndex(null)}
+        forceDark
+      />
     </View>
   );
 }
