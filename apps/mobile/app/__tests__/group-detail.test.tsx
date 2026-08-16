@@ -61,15 +61,51 @@ function pressDestructive(alert: jest.SpyInstance) {
   buttons.find((b) => b.style === "destructive")!.onPress!();
 }
 
-test("a failed Remove-member tells the user why", async () => {
+// #174: removing a member is the only action on this screen whose consequence
+// lands on a third party, and it was the only one that fired unconfirmed.
+test("Remove-member confirms first, and does nothing if the owner cancels", async () => {
+  const alert = jest.spyOn(Alert, "alert").mockImplementation(() => {});
   const { getByLabelText } = await render(<GroupDetail />);
   await fireEvent.press(getByLabelText("Remove Mate"));
+
+  expect(mockRemoveMutate).not.toHaveBeenCalled();
+  const [title, message, buttons] = alert.mock.calls.at(-1)!;
+  expect(title).toBe("Remove Mate?");
+  expect(message).toBe("Mate loses access to this group. You can invite them back later.");
+
+  // Cancelling leaves the member in place.
+  (buttons as { style?: string; onPress?: () => void }[]).find((b) => b.style === "cancel")?.onPress?.();
+  expect(mockRemoveMutate).not.toHaveBeenCalled();
+
+  pressDestructive(alert);
+  expect(mockRemoveMutate).toHaveBeenCalledWith({ groupId: "g1", userId: "u2" }, expect.anything());
+  alert.mockRestore();
+});
+
+test("the Leave-group alert carries a real message, not an empty string", async () => {
+  mockRole = "member";
+  const alert = jest.spyOn(Alert, "alert").mockImplementation(() => {});
+  const { getByText } = await render(<GroupDetail />);
+  await fireEvent.press(getByText("Leave group"));
+
+  const [title, message] = alert.mock.calls.at(-1)!;
+  expect(title).toBe("Leave this group?");
+  expect(message).toBe("You'll drop off its leaderboard and challenges. You can rejoin with an invite code.");
+  alert.mockRestore();
+});
+
+test("a failed Remove-member tells the user why", async () => {
+  const alert = jest.spyOn(Alert, "alert").mockImplementation(() => {});
+  const { getByLabelText } = await render(<GroupDetail />);
+  await fireEvent.press(getByLabelText("Remove Mate"));
+  pressDestructive(alert);
   expect(mockRemoveMutate).toHaveBeenCalledWith(
     { groupId: "g1", userId: "u2" },
     expect.objectContaining({ onError: expect.any(Function) }),
   );
   mockRemoveMutate.mock.calls[0][1].onError(OFFLINE);
   expect(mockShow).toHaveBeenCalledWith({ message: OFFLINE_COPY });
+  alert.mockRestore();
 });
 
 test("a failed Delete-group tells the user why, and keeps onSuccess navigation", async () => {
