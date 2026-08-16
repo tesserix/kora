@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -90,21 +91,174 @@ func singular(name string) string {
 	return name
 }
 
-// splitCountAndUnit reads "2 portions", "one sachet" or a bare "sachet" into a
-// count and a unit name. A phrase with no leading count means one of the thing.
+// fractionWords covers the fraction names a person or model actually writes.
+// Both the singular and plural forms are listed rather than routed through
+// singular(), because these are matched as counts, not as serving names.
+var fractionWords = map[string]float64{
+	"half":     0.5,
+	"halves":   0.5,
+	"third":    1.0 / 3.0,
+	"thirds":   1.0 / 3.0,
+	"quarter":  0.25,
+	"quarters": 0.25,
+	"fourth":   0.25,
+	"fourths":  0.25,
+}
+
+// vulgarFractions maps the Unicode vulgar fraction characters an iOS keyboard
+// or a model can emit. Keyed by the character itself so a lookup is a plain
+// map hit rather than a rune classification.
+var vulgarFractions = map[string]float64{
+	"½": 0.5,
+	"⅓": 1.0 / 3.0,
+	"⅔": 2.0 / 3.0,
+	"¼": 0.25,
+	"¾": 0.75,
+	"⅕": 0.2,
+	"⅖": 0.4,
+	"⅗": 0.6,
+	"⅘": 0.8,
+	"⅙": 1.0 / 6.0,
+	"⅚": 5.0 / 6.0,
+	"⅐": 1.0 / 7.0,
+	"⅛": 0.125,
+	"⅜": 0.375,
+	"⅝": 0.625,
+	"⅞": 0.875,
+	"⅑": 1.0 / 9.0,
+	"⅒": 0.1,
+}
+
+// maxPortionCount bounds a leading count. Nobody eats a hundred servings in a
+// sitting, so a larger figure is a parsing artefact (a stray year, a barcode
+// fragment) rather than a portion; rejecting it leaves the phrase to the
+// downstream rungs exactly as any other unrecognised phrase.
+const maxPortionCount = 100
+
+// plausibleCount keeps the "n > 0" standard the numeric path always applied and
+// adds the upper bound. A NaN or ±Inf from a pathological ParseFloat input
+// fails both comparisons.
+func plausibleCount(n float64) bool {
+	return n > 0 && n <= maxPortionCount
+}
+
+// parseFractionToken reads a single token that is wholly or partly a fraction:
+// an ASCII "3/4", a Unicode "¾", or the two glued together as "1¾". Zero or
+// negative numerators and denominators are rejected rather than producing an
+// infinity or a NaN downstream.
+func parseFractionToken(tok string) (float64, bool) {
+	if v, ok := vulgarFractions[tok]; ok {
+		return v, true
+	}
+	// A vulgar fraction glued to a leading whole number: "1½".
+	for glyph, v := range vulgarFractions {
+		if whole, ok := strings.CutSuffix(tok, glyph); ok && whole != "" {
+			n, err := strconv.ParseFloat(whole, 64)
+			if err != nil || n < 0 || n != math.Trunc(n) {
+				return 0, false
+			}
+			return n + v, true
+		}
+	}
+	num, den, ok := strings.Cut(tok, "/")
+	if !ok {
+		return 0, false
+	}
+	n, err := strconv.ParseFloat(num, 64)
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+	d, err := strconv.ParseFloat(den, 64)
+	if err != nil || d <= 0 {
+		return 0, false
+	}
+	return n / d, true
+}
+
+// parseCountToken reads one token as a count: a plain number, a fraction in any
+// supported spelling, a written-out numeral, or a fraction word.
+func parseCountToken(tok string) (float64, bool) {
+	if n, err := strconv.ParseFloat(tok, 64); err == nil {
+		return n, true
+	}
+	if n, ok := parseFractionToken(tok); ok {
+		return n, true
+	}
+	if n, ok := wordCounts[tok]; ok {
+		return n, true
+	}
+	if n, ok := fractionWords[tok]; ok {
+		return n, true
+	}
+	return 0, false
+}
+
+// parseLeadingCount reads the count off the front of a phrase's fields and
+// reports how many fields it consumed. Two-field forms are tried first so the
+// "1" of "1 1/2 cups" is not mistaken for the whole count, leaving "1/2 cups"
+// as a unit name that matches nothing.
+func parseLeadingCount(fields []string) (count float64, consumed int, ok bool) {
+	if len(fields) >= 2 {
+		if n, ok := parseTwoFieldCount(fields[0], fields[1]); ok && plausibleCount(n) {
+			return n, 2, true
+		}
+	}
+	if n, ok := parseCountToken(fields[0]); ok && plausibleCount(n) {
+		return n, 1, true
+	}
+	return 0, 0, false
+}
+
+// parseTwoFieldCount reads the count forms that span two fields: a mixed number
+// ("1 1/2"), an article plus a fraction word ("a half"), and a numeral times a
+// fraction word ("three quarters").
+func parseTwoFieldCount(first, second string) (float64, bool) {
+	if first == "a" || first == "an" {
+		if frac, ok := fractionWords[second]; ok {
+			return frac, true
+		}
+		return 0, false
+	}
+	if n, ok := wordCounts[first]; ok {
+		if frac, ok := fractionWords[second]; ok {
+			return n * frac, true
+		}
+		return 0, false
+	}
+	whole, err := strconv.ParseFloat(first, 64)
+	if err != nil || whole < 1 || whole != math.Trunc(whole) {
+		return 0, false
+	}
+	frac, ok := parseFractionToken(second)
+	if !ok || frac <= 0 {
+		return 0, false
+	}
+	return whole + frac, true
+}
+
+// splitCountAndUnit reads "2 portions", "one sachet", "1/2 chicken", "half
+// chicken", "1 1/2 cups" or a bare "sachet" into a count and a unit name. A
+// phrase with no leading count means one of the thing.
+//
+// The fraction forms are kora#184: "1/2 chicken" is neither a float nor a
+// wordCounts key, so it used to degrade to count 1 with the whole phrase as the
+// unit name, match no serving, and land on the flat 100 g default — silently
+// discarding a stated quantity worth several hundred calories.
+//
+// A count that consumes the whole phrase leaves no unit behind, so it is not
+// treated as a count at all: the fall-through below reproduces the previous
+// behaviour for a bare "2" or a bare "1/2", where there is nothing to resolve
+// the count against.
 func splitCountAndUnit(norm string) (float64, string) {
 	fields := strings.Fields(norm)
 	if len(fields) == 0 {
 		return 0, ""
 	}
+	if count, consumed, ok := parseLeadingCount(fields); ok && consumed < len(fields) {
+		return count, strings.Join(fields[consumed:], " ")
+	}
 	if len(fields) == 1 {
 		return 1, fields[0]
-	}
-	if n, err := strconv.ParseFloat(fields[0], 64); err == nil && n > 0 {
-		return n, strings.Join(fields[1:], " ")
-	}
-	if n, ok := wordCounts[fields[0]]; ok {
-		return n, strings.Join(fields[1:], " ")
 	}
 	return 1, norm
 }
