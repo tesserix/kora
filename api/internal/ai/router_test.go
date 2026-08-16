@@ -416,3 +416,92 @@ func TestRouter_IdentifyPhoto_GivesPrimaryTheFullPhotoBudget(t *testing.T) {
 	assert.Equal(t, []Guess{{Food: "omelette", Confidence: 0.9}}, guesses)
 	assert.Equal(t, "primary-stub", usage.Provider)
 }
+
+// flakyPhotoProvider returns errs[i] on call i+1, then succeeds. Purpose-built
+// because stubProvider returns one fixed error for every call, and the whole
+// point here is a provider that answers differently the second time.
+type flakyPhotoProvider struct {
+	Provider
+	errs  []error
+	calls int
+	usage Usage
+}
+
+func (f *flakyPhotoProvider) IdentifyPhoto(context.Context, []byte, string) ([]Guess, Usage, error) {
+	f.calls++
+	if f.calls <= len(f.errs) {
+		return nil, f.usage, f.errs[f.calls-1]
+	}
+	return []Guess{{Food: "croissant", Confidence: 0.9}}, f.usage, nil
+}
+
+// kora#179. A photo capture failed on device because Gemini answered
+// "Error 503 ... This model is currently experiencing high demand. Spikes in
+// demand are usually temporary. Please try again later."
+//
+// That took the app's CORE action down completely, after 5.7s, with 14s of the
+// photo budget still unspent — and the photo path is the only one with no
+// fallback leg to catch it (IdentifyPhoto calls the primary directly, because
+// the deployed fallback is text-only).
+func TestRouter_IdentifyPhoto_RetriesATransient503(t *testing.T) {
+	primary := &flakyPhotoProvider{
+		errs:  []error{errors.New("gemini: generate content: Error 503, Message: This model is currently experiencing high demand., Status: UNAVAILABLE")},
+		usage: Usage{Provider: "gemini", TokensIn: 10, LatencyMs: 100},
+	}
+	r := &Router{Primary: primary, Fallback: &stubProvider{name: "fallback-stub"}}
+
+	guesses, usage, err := r.IdentifyPhoto(context.Background(), []byte("jpeg"), "image/jpeg")
+
+	require.NoError(t, err, "a documented-temporary error must not fail the capture on first sight")
+	require.Len(t, guesses, 1)
+	assert.Equal(t, 2, primary.calls, "exactly one retry")
+	// The failed attempt's cost is carried forward — ai_usage_events records
+	// failures too, so dropping it would under-count spend.
+	assert.Equal(t, 20, usage.TokensIn, "both attempts' tokens must be accounted for")
+	assert.Equal(t, 200, usage.LatencyMs)
+}
+
+// The counterpart, and the more important guarantee of the two: a rate limit
+// must NOT be retried.
+//
+// cmd/embed reached this from production evidence and says so plainly —
+// retrying a rate-limit rejection spends further requests against the very
+// quota whose exhaustion caused the failure, deepening the outage. It holds
+// harder here: Gemini's free tier caps embeddings at 1,000 per project per
+// DAY, so no user-facing wait can clear it.
+func TestRouter_IdentifyPhoto_DoesNotRetryARateLimit(t *testing.T) {
+	primary := &flakyPhotoProvider{
+		errs: []error{
+			errors.New("gemini: Error 429, Message: Resource has been exhausted, Status: RESOURCE_EXHAUSTED"),
+			errors.New("second call that must never happen"),
+		},
+	}
+	r := &Router{Primary: primary, Fallback: &stubProvider{name: "fallback-stub"}}
+
+	_, _, err := r.IdentifyPhoto(context.Background(), []byte("jpeg"), "image/jpeg")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "429", "the rate limit itself must surface, not a retry's error")
+	assert.Equal(t, 1, primary.calls, "a rate limit must be surfaced immediately, never retried")
+}
+
+func TestIsTransientProviderError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"the reported 503", errors.New("Error 503, Status: UNAVAILABLE"), true},
+		{"high demand wording", errors.New("This model is currently experiencing high demand"), true},
+		{"overloaded", errors.New("provider overloaded"), true},
+		{"rate limit is NOT transient for our purposes", errors.New("Error 429, RESOURCE_EXHAUSTED"), false},
+		{"a real failure", errors.New("invalid image encoding"), false},
+		{"auth failure", errors.New("Error 401, unauthorized"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isTransientProviderError(tt.err))
+		})
+	}
+}

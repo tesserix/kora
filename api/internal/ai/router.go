@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"strings"
 	"time"
 )
 
@@ -16,7 +17,32 @@ const (
 	// 20s is generous but this is a one-shot user-initiated capture, not a
 	// latency-critical interaction, and the gateway now allows 100s per try.
 	photoBudget = 20 * time.Second
-	textBudget  = 1500 * time.Millisecond
+
+	// photoAttempts is 2 — one retry, no more.
+	//
+	// The photo path is the app's core action AND its only single point of
+	// failure: every text path has a fallback leg, while IdentifyPhoto calls
+	// the primary directly because the deployed fallback is text-only (see
+	// IdentifyPhoto). So a single transient 503 took photo logging down
+	// completely (kora#179).
+	//
+	// Two attempts rather than three because the retry has to fit inside
+	// photoBudget, which has to fit inside the 25s client deadline. One retry
+	// is what the reported incident needed — a 5.7s failure with 14s of budget
+	// still unspent.
+	photoAttempts = 2
+
+	// Long enough for a demand spike to pass, short enough to leave room for
+	// the second attempt inside the budget. No jitter: this is one call per
+	// user-initiated capture, not a fleet retrying in lockstep, so there is no
+	// thundering herd to spread.
+	photoRetryDelay = 750 * time.Millisecond
+
+	// Below this much remaining budget a second attempt cannot plausibly
+	// finish, so it would spend a paid call to produce an answer that arrives
+	// after the client has already given up.
+	minRetryHeadroom = 3 * time.Second
+	textBudget       = 1500 * time.Millisecond
 
 	// clientRequestTimeout mirrors REQUEST_TIMEOUT_MS in
 	// apps/mobile/src/lib/api.ts — the per-attempt deadline after which the
@@ -214,7 +240,84 @@ func (r *Router) IdentifyText(ctx context.Context, phrase string) ([]Guess, Usag
 func (r *Router) IdentifyPhoto(ctx context.Context, image []byte, mime string) ([]Guess, Usage, error) {
 	pctx, cancel := context.WithTimeout(ctx, r.photoBudgetOrDefault())
 	defer cancel()
-	return r.Primary.IdentifyPhoto(pctx, image, mime)
+
+	var last Usage
+	for attempt := 1; ; attempt++ {
+		guesses, usage, err := r.Primary.IdentifyPhoto(pctx, image, mime)
+		// Carry the failed attempt's cost forward. ai_usage_events records
+		// failures as well as successes (see Usage.Outcome), so dropping a
+		// retried attempt's tokens would under-count spend — the same class of
+		// gap kora#152 tracks for the abandoned fallback leg.
+		usage.TokensIn += last.TokensIn
+		usage.TokensOut += last.TokensOut
+		usage.LatencyMs += last.LatencyMs
+		if err == nil {
+			return guesses, usage, nil
+		}
+		last = usage
+		if attempt >= photoAttempts || !isTransientProviderError(err) || !hasRetryHeadroom(pctx) {
+			return nil, usage, err
+		}
+		if !sleepWithin(pctx, photoRetryDelay) {
+			return nil, usage, err
+		}
+	}
+}
+
+// isTransientProviderError reports whether an error is the provider saying
+// "not now" rather than "no".
+//
+// Deliberately NARROW. It matches 503/UNAVAILABLE only — Google documents that
+// status as temporary and asks callers to try again, and the observed failure
+// (kora#179) was verbatim "This model is currently experiencing high demand.
+// Spikes in demand are usually temporary. Please try again later."
+//
+// **429 is excluded on purpose.** cmd/embed reached the same conclusion from
+// production evidence and states it plainly: retrying a rate-limit rejection
+// spends further requests against the very quota whose exhaustion caused the
+// failure, which makes the outage deeper rather than shorter. That reasoning
+// holds here, and holds harder — Gemini's free tier caps embeddings at 1,000
+// per project per DAY, so a quota failure will not clear inside a user-facing
+// request no matter how long we wait.
+func isTransientProviderError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "503") ||
+		strings.Contains(msg, "unavailable") ||
+		strings.Contains(msg, "high demand") ||
+		strings.Contains(msg, "overloaded")
+}
+
+// hasRetryHeadroom reports whether enough of the photo budget remains to be
+// worth another attempt.
+//
+// The retry lives INSIDE photoBudget rather than extending it, which is what
+// keeps clientRequestTimeout intact: the app aborts at 25s, so a second full
+// 20s attempt would produce an answer nobody is listening for, and a paid call
+// for it. A 503 fails fast — 5.7s in the reported incident — so in the case
+// this exists for there is ample room; a first attempt that instead consumed
+// the budget by timing out leaves none, and correctly gets no retry.
+func hasRetryHeadroom(ctx context.Context) bool {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return true
+	}
+	return time.Until(deadline) > photoRetryDelay+minRetryHeadroom
+}
+
+// sleepWithin waits out the backoff unless the context ends first, in which
+// case there is nothing left to retry into.
+func sleepWithin(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 func (r *Router) Decompose(ctx context.Context, dish string) ([]IngredientGuess, Usage, error) {
