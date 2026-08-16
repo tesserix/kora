@@ -111,3 +111,74 @@ Already verified on the simulator; a device pass is confirmation, not discovery.
 Screen, what you did, what you expected, what happened. For capture failures **check Sentry first** —
 several of these paths now leave a stack trace where they previously left nothing, and an absent event
 is itself information.
+
+---
+
+# Appendix — the three "no code left" verifications
+
+These three are already fixed in code. They are open only because nobody has confirmed them on
+hardware, so each is a few minutes of tapping rather than any work.
+
+## V1. kora#171 — a deleted account must not keep firing reminders
+
+**Use the disposable account below. Do NOT delete your own.**
+
+Both halves of the fix are in: `app/delete-account.tsx:101` cancels every locally-scheduled reminder,
+and `src/lib/push.ts:141` gates the notification-tap handler on auth state (with a test asserting
+reminders do not re-arm while signed out).
+
+1. Sign out, then sign in as the test account below.
+2. **Settings → Reminders**, and add a custom reminder a few minutes into the future. Make sure it is
+   enabled and you have granted notification permission.
+3. **More → Profile → Delete account**, and complete it.
+4. **Wait past the reminder's time with the app closed.** Nothing must fire. A notification appearing
+   here is the bug.
+5. If any older Kora notification is still in Notification Centre, **tap it while signed out**. It must
+   NOT deep-link into capture — you should land on sign-in.
+
+Step 4 is the one that matters and the one that needs patience: it is a real OS-scheduled notification,
+so there is no way to hurry it.
+
+## V2. kora#170 — background polling and stale data
+
+Fixed in build 21 (`src/lib/appFocus.ts` mirrors AppState into react-query's `focusManager`).
+
+1. Open Kora, note the day's figures.
+2. Background it — home screen, use another app — for **more than two minutes**. Under two minutes
+   proves nothing; iOS has not suspended the process yet.
+3. Return to Kora.
+4. Data should refresh promptly and the notification badge update. The failure this guards against is
+   the opposite: phantom timeouts logged to Sentry from polling a suspended process.
+
+Worth glancing at Sentry afterwards — this bug's original signature was timeout events, not anything
+visible on screen.
+
+## V3. kora#137 — the denied photo-library card must clear
+
+**Cannot be tested on a simulator**, which is why it is still open: `simctl privacy revoke photos` is
+not enough, because modern simulators supply a working fake camera, so the library path is never
+reached.
+
+1. **iOS Settings → Privacy & Security → Photos → Kora → None.**
+2. In Kora: capture → **Photo** → choose from library. The persistent denied card appears, with an
+   Open Settings route.
+3. Tap **Open Settings** from that card, and grant photo access.
+4. **Return to Kora.** The denied card must be gone.
+
+The failure is the card persisting after the permission has been granted, leaving the user stuck on a
+screen telling them to fix something they have already fixed.
+
+## Test account for V1
+
+Created 2026-08-16 in `kora-app-e6d38` specifically so the deletion test does not cost a real account.
+
+```
+email:    kora.deletetest.20260816@example.com
+password: KoraDelete!2026qa
+uid:      AICL4vPfI1OSk5XnpRbKYIDrDus2
+```
+
+It has no data, so nothing is lost when it is deleted — which is the point of the test. If the deletion
+path fails midway, the identity may survive: check with the runbook at
+`docs/runbooks/kora-firebase-identity-deletion.md`, and note the two-project trap it documents
+(identities live in `kora-app-e6d38`, workloads in `tesseracthub-480811`).
