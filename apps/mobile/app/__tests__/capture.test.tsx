@@ -1061,6 +1061,19 @@ describe("Scan mode", () => {
     expect(bubble).toBeTruthy();
     expect(bubble.props.children).not.toMatch(/couldn.{0,3}t identify/i);
 
+    // And it must NOT promise to handle it later (kora#191). The copy read
+    // "I'll recognise it once you're back online", which describes a capture
+    // that has been saved and will be replayed — but the barcode path never
+    // calls enqueueCapture, so nothing was. The user came back online to no
+    // meal and no record they had tried.
+    //
+    // Asserted as a property, not as exact words: nothing pinned this copy
+    // before, which is how it drifted from what the code does. Any future
+    // rewording that re-promises later handling fails here, whatever its
+    // phrasing — unless the scan is genuinely queued by then.
+    expect(bubble.props.children).not.toMatch(/i'?ll\s+(recognise|recognize|identify|get|log|save)/i);
+    expect(bubble.props.children).not.toMatch(/(saved|queued) (it|that)/i);
+
     // The guard released, so the user can scan something else.
     await act(async () => {
       cameraView.props.onBarcodeScanned({ data: "888888888888", type: "ean13" });

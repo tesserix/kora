@@ -850,7 +850,22 @@ function ottoErrorMessage(error: Error): string {
   // identify that" would claim the food does not exist when we simply cannot
   // see the index from here.
   if (error instanceof OfflineUnknownBarcodeError) {
-    return "You're offline, and this isn't a barcode you've scanned before. I'll recognise it once you're back online.";
+    // Says what is true and what the user can do — it does NOT promise to
+    // handle it later.
+    //
+    // This read "I'll recognise it once you're back online", which describes a
+    // capture that has been SAVED and will be replayed. Nothing is saved: the
+    // barcode path never calls enqueueCapture (only handleResolveFailure does,
+    // and only photo/voice reach it). So the user put the phone away, came back
+    // online, and found no meal and no record they had tried — a promise the
+    // code does not keep, which is worse than a plain failure because it stops
+    // them doing the one thing that would have worked: scanning again later
+    // (kora#191).
+    //
+    // Queueing the scan properly is the better fix and is tracked as kora#196;
+    // the capture queue is media-shaped (kind: photo | voice, storedName,
+    // mimeType) and has no text/barcode variant yet.
+    return "You're offline, and this isn't a barcode you've scanned before. Scan it again once you're back online.";
   }
   if (error instanceof ApiError) {
     return `Hmm, I couldn't tell — ${error.message}. Mind trying again?`;
@@ -874,6 +889,8 @@ function ottoErrorMessage(error: Error): string {
   }
   if (error instanceof TimeoutError) {
     // Deliberately does not promise "I've saved that" — this function is also
+    // (kora#196 tracks giving those paths a queue; this comment is the marker
+    // to revisit when it lands.)
     // reached from the barcode and typed-text paths (handleBarcodeScanned,
     // handleSend), neither of which calls enqueueCapture. Only
     // handleResolveFailure's own branch (below) actually queues on timeout;
