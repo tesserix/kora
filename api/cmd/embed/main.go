@@ -1,7 +1,12 @@
 // Command embed backfills the food_items.embedding column so the nutrition
 // resolver's embedding tier (Resolve's MatchEmbedding path) has vectors to
-// search. It requires GEMINI_API_KEY; without one it logs and exits 0 rather
-// than crashing, since the rest of the engine builds/tests without keys.
+// search.
+//
+// It needs an embedding backend, and picks one exactly the way cmd/api's
+// buildResolveHandler does: VERTEX_PROJECT (with optional VERTEX_LOCATION)
+// wins, GEMINI_API_KEY is the fallback. With neither it logs and exits 0
+// rather than crashing, since the rest of the engine builds/tests without
+// keys.
 package main
 
 import (
@@ -27,6 +32,11 @@ const (
 	// embedAttempts is how many times a single row's embed is tried before
 	// counting it as failed.
 	embedAttempts = 3
+	// defaultVertexLocation matches config.Load's VERTEX_LOCATION default and
+	// providers.NewVertexProvider's own fallback. It is spelled out here only
+	// so the startup log reports the location actually used; see
+	// NewVertexProvider for why "global" and not a region.
+	defaultVertexLocation = "global"
 )
 
 // embedBaseDelay is the initial backoff between retry attempts, doubled each
@@ -51,7 +61,10 @@ type store interface {
 }
 
 // geminiEmbedder adapts providers.GeminiProvider's three-value Embed to the
-// two-value embedder interface run depends on.
+// two-value embedder interface run depends on. It covers BOTH backends:
+// NewVertexProvider returns the same GeminiProvider struct as
+// NewGeminiProvider, differing only in the client's backend, so nothing below
+// this line has to know which one was chosen.
 type geminiEmbedder struct {
 	provider providers.GeminiProvider
 }
@@ -61,15 +74,58 @@ func (g geminiEmbedder) Embed(ctx context.Context, text string) ([]float32, erro
 	return vec, err
 }
 
+// embedBackend names which provider main will construct.
+type embedBackend int
+
+const (
+	// backendNone means nothing is configured — the run is skipped.
+	backendNone embedBackend = iota
+	backendVertex
+	backendGemini
+)
+
+// chooseBackend applies the SAME precedence as cmd/api's buildResolveHandler:
+// Vertex wins when configured, the API key is the fallback, and neither means
+// disabled.
+//
+// The reason is stronger here than it is there. This command's whole job is
+// bulk embedding, and the Gemini free tier — which is what a GEMINI_API_KEY
+// from the billing-disabled kora-app-e6d38 project buys — caps embeddings at
+// 1,000 per project per DAY, shared with the resolver's own embed calls. At
+// ~15k rows that is a fortnight of backfill for a job that should take
+// minutes, and it is the documented reason the index stalled at 607 of 5,669
+// rows (kora#97). Vertex is authenticated by the workload's service account
+// against a billing-enabled project, so it has neither the cap nor the key.
+//
+// The API-key path stays for local development, where there is no Workload
+// Identity to authenticate against.
+func chooseBackend(vertexProject, geminiAPIKey string) embedBackend {
+	switch {
+	case vertexProject != "":
+		return backendVertex
+	case geminiAPIKey != "":
+		return backendGemini
+	default:
+		return backendNone
+	}
+}
+
 func main() {
 	url := os.Getenv("DATABASE_URL")
 	if url == "" {
 		log.Fatal("cmd/embed: DATABASE_URL required")
 	}
 
+	vertexProject := os.Getenv("VERTEX_PROJECT")
+	vertexLocation := os.Getenv("VERTEX_LOCATION")
+	if vertexLocation == "" {
+		vertexLocation = defaultVertexLocation
+	}
 	apiKey := os.Getenv("GEMINI_API_KEY")
-	if apiKey == "" {
-		log.Println("cmd/embed: GEMINI_API_KEY required to generate embeddings; skipping")
+
+	backend := chooseBackend(vertexProject, apiKey)
+	if backend == backendNone {
+		log.Println("cmd/embed: no embedding backend (no VERTEX_PROJECT and no GEMINI_API_KEY); skipping")
 		os.Exit(0)
 	}
 
@@ -81,9 +137,20 @@ func main() {
 	}
 	repo := nutrition.NewRepository(db)
 
-	provider, err := providers.NewGeminiProvider(ctx, apiKey)
-	if err != nil {
-		log.Fatal(err)
+	var provider providers.GeminiProvider
+	switch backend {
+	case backendVertex:
+		provider, err = providers.NewVertexProvider(ctx, vertexProject, vertexLocation)
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("cmd/embed: vertex ai project=%s location=%s", vertexProject, vertexLocation)
+	case backendGemini:
+		provider, err = providers.NewGeminiProvider(ctx, apiKey)
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Println("cmd/embed: gemini api key")
 	}
 
 	embedded, failed := run(ctx, repo, geminiEmbedder{provider: provider})

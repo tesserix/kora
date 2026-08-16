@@ -142,6 +142,37 @@ func TestExitCode(t *testing.T) {
 	}
 }
 
+// TestChooseBackend pins the precedence, which must stay identical to
+// cmd/api's buildResolveHandler: Vertex over the API key, never the other way
+// round. Getting it backwards is not a compile error and not a runtime error —
+// the backfill simply runs on the free tier's 1,000/day embedding cap again
+// and quietly takes a fortnight (kora#97).
+func TestChooseBackend(t *testing.T) {
+	tests := []struct {
+		name          string
+		vertexProject string
+		geminiAPIKey  string
+		want          embedBackend
+	}{
+		{name: "nothing configured", want: backendNone},
+		{name: "api key only falls back to gemini", geminiAPIKey: "key", want: backendGemini},
+		{name: "vertex only", vertexProject: "tesseracthub-480811", want: backendVertex},
+		{
+			// The case that matters: production has BOTH, because the key is
+			// still in the environment. Vertex must win.
+			name:          "vertex wins when both are configured",
+			vertexProject: "tesseracthub-480811",
+			geminiAPIKey:  "key",
+			want:          backendVertex,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, chooseBackend(tt.vertexProject, tt.geminiAPIKey))
+		})
+	}
+}
+
 // countingEmbedder records how many times Embed was called and always fails
 // with err. It exists to assert the ATTEMPT COUNT, which is the whole point of
 // the rate-limit exemption.
