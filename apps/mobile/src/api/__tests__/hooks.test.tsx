@@ -758,7 +758,7 @@ test("useMemory fetches GET /v1/memory (date is not sent — backend ignores it)
 const logInput = {
   food_item_id: "f1",
   meal_slot: "lunch",
-  source: "manual",
+  source: "manual" as const,
   quantity_grams: 100,
   logged_at: "2026-08-02T12:00:00.000Z",
 };

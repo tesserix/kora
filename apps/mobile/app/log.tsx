@@ -195,7 +195,9 @@ export default function LogScreen() {
     const base = {
       food_item_id: selected.id,
       meal_slot: meal,
-      source: "manual",
+      // `as const` so the literal survives into CreateLogInput's LogSource
+      // union instead of widening to `string` through this intermediate const.
+      source: "manual" as const,
       logged_at: seededLoggedAt ?? new Date().toISOString(),
       client_log_ms: Date.now() - mountedAt.current,
     };

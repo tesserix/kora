@@ -41,6 +41,7 @@ import type {
   GroupDetail,
   GroupProgress,
   GroupSummary,
+  LogSource,
   Memory,
   Metric,
   MyFriendCode,
@@ -168,7 +169,7 @@ export function useFoodSearch(query: string) {
 export type CreateLogInput = {
   food_item_id: string;
   meal_slot: string;
-  source: string;
+  source: LogSource;
   quantity_grams: number;
   /** What the user entered (e.g. 1, 2, 0.5); when set with entered_unit the SERVER resolves quantity_grams from it. */
   entered_amount?: number;

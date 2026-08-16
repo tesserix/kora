@@ -16,7 +16,7 @@ import { provenanceDescriptor, sourceLabel } from "@/components/meal/mealProvena
 import { PortionField } from "@/components/units/PortionField";
 import { haptics, PressableScale } from "@/motion";
 import { useEditLog, useDeleteLog, useLog, useRepeatLog, useCreateLog, type EditLogInput } from "@/api/hooks";
-import type { FoodItem, FoodLog } from "@/api/types";
+import type { FoodItem, FoodLog, LogSource } from "@/api/types";
 import type { MealSlot } from "@/lib/mealSlot";
 import type { ServingUnit } from "@/units/portion";
 import { useTheme } from "@/theme";
@@ -71,7 +71,7 @@ type RetainedLog = {
   quantity_grams: number;
   meal_slot: MealSlot;
   logged_at: string;
-  source: string;
+  source: LogSource;
   input_phrase?: string;
 };
 

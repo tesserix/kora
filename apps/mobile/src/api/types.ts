@@ -78,7 +78,7 @@ export type FoodLog = {
   food_item_id?: string;
   logged_at: string;
   meal_slot: string;
-  source: string;
+  source: LogSource;
   description: string;
   quantity_grams: number;
   kcal: number;
@@ -255,6 +255,28 @@ export type ResolveTier = "auto" | "confirm" | "follow_up";
 // originated) so a leaf module like src/offline/drainCaptures.ts can type a
 // handoff source against it without importing from the app/ directory.
 export type ResolutionSource = "ai_photo" | "ai_text" | "ai_voice" | "ai_barcode";
+
+// Every `source` a food log can carry — the AI capture sources above plus the
+// non-AI ones. It is deliberately a SUPERSET of ResolutionSource rather than a
+// second, parallel union: the two would drift, and a subtly different source
+// list is worse than the bare `string` this replaces.
+//
+// The extra members and where the server accepts them:
+//   "manual" — foodlog.Service.Create's default for an empty source
+//              (api/internal/foodlog/service.go:188-190).
+//   "memory" — CreateBatch's default, and a batchSources member
+//              (service.go:503-508, batchSources at :480).
+//   "meal"   — batchSources member (service.go:480).
+//   "recipe" — batchSources member, written by recipes.LogRecipe
+//              (api/internal/recipes/log.go:15).
+// All eight are the food_logs.source CHECK constraint
+// (000029_food_logs_source_check.up.sql) and metrics.knownSources, which the
+// migration names as the authoritative list.
+//
+// Note "manual" is the only member of this union a client may send to the
+// SINGLE-log endpoint that isn't also a resolution source; the batch endpoint
+// rejects anything outside batchSources with a 400.
+export type LogSource = ResolutionSource | "manual" | "memory" | "meal" | "recipe";
 
 export interface ResolvedCandidate {
   item: FoodItem;
