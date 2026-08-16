@@ -11,7 +11,7 @@ jest.mock("@/lib/api", () => ({
 }));
 
 const payload = {
-  food_item_id: "f1", meal_slot: "lunch", source: "manual",
+  food_item_id: "f1", meal_slot: "lunch", source: "manual" as const,
   quantity_grams: 100, logged_at: "2026-08-02T12:00:00.000Z",
 };
 

@@ -58,7 +58,7 @@ const atLocalNoon = (y: number, m: number, d: number) => new Date(y, m - 1, d, 1
 const payloadOn = (iso: string, foodItemId = "f1") => ({
   food_item_id: foodItemId,
   meal_slot: "lunch",
-  source: "manual",
+  source: "manual" as const,
   quantity_grams: 150,
   logged_at: iso,
 });

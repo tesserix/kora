@@ -24,6 +24,7 @@ import { useSavedMealEditor } from "@/components/meals/SavedMealSheetProvider";
 import { RecipeParseSheet } from "@/components/recipes/RecipeParseSheet";
 import { LogRecipeSheet } from "@/components/recipes/LogRecipeSheet";
 import { baseQuantityFor, defaultServingCount, formatPortion } from "@/units/portion";
+import { logFailureMessage } from "@/lib/apiErrorMessage";
 import { foodVisual } from "@/lib/foodVisual";
 import { hslToHex } from "@/lib/color";
 import { haptics, useMotionPrefs } from "@/motion";
@@ -195,7 +196,9 @@ export default function LogScreen() {
     const base = {
       food_item_id: selected.id,
       meal_slot: meal,
-      source: "manual",
+      // `as const` so the literal survives into CreateLogInput's LogSource
+      // union instead of widening to `string` through this intermediate const.
+      source: "manual" as const,
       logged_at: seededLoggedAt ?? new Date().toISOString(),
       client_log_ms: Date.now() - mountedAt.current,
     };
@@ -211,7 +214,7 @@ export default function LogScreen() {
         haptics.success();
         router.replace("/");
       },
-      onError: () => setError("Couldn't log that. Please try again."),
+      onError: (e) => setError(logFailureMessage(e)),
     });
   }
 

@@ -2,24 +2,16 @@ import { useCreateLog, useCreateLogBatch, useDeleteLog } from "@/api/hooks";
 import { useToast } from "@/components/Toast";
 import { haptics } from "@/motion";
 import { discard, isQueued, list, type QueuedLog } from "@/offline/queue";
+import { logFailureMessage } from "@/lib/apiErrorMessage";
 import type { FoodLog, LoggableFood, LoggableMeal } from "@/api/types";
 
 // useInstantLog centralises the one-tap "log from memory + Undo toast" flow so
 // the Log screen and the Home "Your usual" strip share one implementation.
 // The client never sends macros — only food_item_id + grams + slot + logged_at;
 // nutrition is recomputed server-side.
-// Every failure that is not "we could not attribute this log" resolves to copy
-// that does not pretend to know the cause — a raw server string ("request
-// failed") is not something to show a user. Mirrors app/log.tsx's onError.
-const LOG_FAILED = "Couldn't log that. Please try again.";
-
-// Duck-typed on `name` rather than `instanceof`, the way apiErrorMessage.ts
-// already discriminates: NoOwnerError's message IS the user-facing copy.
-function logFailureMessage(error: unknown): string {
-  return (error as { name?: string } | null)?.name === "NoOwnerError" && error instanceof Error
-    ? error.message
-    : LOG_FAILED;
-}
+//
+// Failure copy comes from logFailureMessage, which app/log.tsx also uses: this
+// screen shows it in a toast and that one inline, but neither owns the words.
 
 export function useInstantLog(): { logFood: (f: LoggableFood) => void; logMeal: (m: LoggableMeal) => void } {
   const createLog = useCreateLog();

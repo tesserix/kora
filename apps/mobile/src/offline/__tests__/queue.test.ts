@@ -2,7 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { append, list, retry, discard, drain, MAX_DELIVERY_ATTEMPTS, type QueuedLog } from "../queue";
 
 const payload = {
-  food_item_id: "f1", meal_slot: "lunch", source: "manual",
+  food_item_id: "f1", meal_slot: "lunch", source: "manual" as const,
   quantity_grams: 100, logged_at: "2026-08-02T12:00:00.000Z",
 };
 
@@ -264,4 +264,35 @@ test("retry resets the attempt count so a retried item gets a full budget", asyn
   const after = await drain(async () => { throw err; }, "user-a");
   expect(after.deferred).toBe(1);
   expect((await list())[0].status).toBe("pending");
+});
+
+// The reset above is only worth anything if a drain already in flight cannot
+// undo it. Drains fire on foreground and on reconnect, so a send can still be
+// awaiting a reply when the user presses Retry on the row a previous drain
+// failed. If the failure write then stores the count it read BEFORE the send,
+// the press is clobbered: the item resumes the old total and can be marked
+// `failed` again on this very refusal, far short of the budget the button
+// implies. The count must come from the item as it is inside the lock.
+test("a retry landing mid-send is not clobbered by the in-flight drain's failure write", async () => {
+  await append(payload, "id-1", "user-a");
+  const err = Object.assign(new Error("server error"), { name: "ApiError", status: 500 });
+
+  // Spend all but one of the budget, so a carried-over count would tip the
+  // item straight to `failed` on the next refusal.
+  for (let i = 0; i < MAX_DELIVERY_ATTEMPTS - 1; i++) {
+    await drain(async () => { throw err; }, "user-a");
+  }
+  expect((await list())[0].attempts).toBe(MAX_DELIVERY_ATTEMPTS - 1);
+
+  // The user presses Retry while this send is still awaiting its reply.
+  const result = await drain(async () => {
+    await retry("id-1");
+    throw err;
+  }, "user-a");
+
+  const item = (await list())[0];
+  expect(item.attempts).toBe(1); // the reset survived; this refusal costs one
+  expect(item.status).toBe("pending");
+  expect(result.deferred).toBe(1);
+  expect(result.failed).toBe(0);
 });

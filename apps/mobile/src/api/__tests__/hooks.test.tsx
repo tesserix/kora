@@ -122,15 +122,18 @@ test("useProfile fetches /v1/me", async () => {
 
 test("useFoodSearch hits /v1/foods with the query and stays disabled under 2 chars", async () => {
   const { result: idle } = await renderHook(() => useFoodSearch("q"), { wrapper });
-  // enabled: false means react-query never runs the queryFn for this query.
-  expect(idle.current.fetchStatus).toBe("idle");
+  // enabled: false means react-query never runs the queryFn for this query, so
+  // the request is never made and there is no data. (Asserted on the request
+  // rather than on fetchStatus: the hook returns only the fields its call sites
+  // read, and no screen reads fetchStatus.)
+  expect(apiFetch).not.toHaveBeenCalledWith("/v1/foods?q=q");
+  expect(idle.current.data).toBeUndefined();
 
   const candidates = [{ item: { id: "f2", name: "Quinoa" }, match_score: 0.9, match_tier: "fulltext" }];
   (apiFetch as jest.Mock).mockResolvedValueOnce(candidates);
   const { result } = await renderHook(() => useFoodSearch("quinoa"), { wrapper });
-  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  await waitFor(() => expect(result.current.data).toEqual(candidates));
   expect(apiFetch).toHaveBeenCalledWith("/v1/foods?q=quinoa");
-  expect(result.current.data).toEqual(candidates);
 });
 
 const resolution = {
@@ -758,7 +761,7 @@ test("useMemory fetches GET /v1/memory (date is not sent — backend ignores it)
 const logInput = {
   food_item_id: "f1",
   meal_slot: "lunch",
-  source: "manual",
+  source: "manual" as const,
   quantity_grams: 100,
   logged_at: "2026-08-02T12:00:00.000Z",
 };
@@ -1363,7 +1366,7 @@ test("useFoodSearch online is unchanged — server results, not flagged as cache
   ]);
 
   const { result } = await renderHook(() => useFoodSearch("protein"), { wrapper });
-  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  await waitFor(() => expect(result.current.data).toBeDefined());
 
   expect(apiFetch).toHaveBeenCalledWith("/v1/foods?q=protein");
   expect(result.current.data![0].match_tier).toBe("fulltext");
