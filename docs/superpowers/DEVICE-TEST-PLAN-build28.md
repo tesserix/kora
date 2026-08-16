@@ -1,7 +1,7 @@
-# Device test plan — TestFlight build 27
+# Device test plan — TestFlight build 28
 
-Seven mobile fixes, all found by testing build 25 on hardware, plus a server-side change that is
-**already live in production** and needs no build at all.
+Three fixes that landed after build 27 was cut, plus everything 27 already carried (now confirmed).
+The AI changes below are **already live in production** and need no build at all.
 
 Ordered by consequence. Each item names the **specific failure to look for**.
 
@@ -52,43 +52,37 @@ already had the screen for it: "couldn't identify that", with Search manually.
 
 ---
 
-## B. What this build fixes
+## B. New in build 28 — untested
 
-(Build 26 came from the parallel ignition/UI-uplift session; 27 is the first build carrying the
-capture fixes below.)
+### B1. Correcting a QUEUED capture no longer double-logs (kora#198)
 
-### B1. Correcting a food actually works now (kora#189, kora#190)
+The one worth the most attention, because the old behaviour silently wrote wrong data.
 
-Both found while you exercised the corrected-row flow on build 25.
+Reaching it needs an offline capture: **airplane mode → photo or voice → back online → wait for the
+drain → tap the row in the diary.**
 
-- **Change a row, pick a replacement, then tap Change on that row again.** The search must pre-fill
-  with the food that is on the row **now** — not the one you rejected.
-- **A hand-picked row now has a portion control**, and takes the new food's own serving rather than
-  inheriting the replaced food's. Check the diary afterwards: swapping a 170 g item for a drink must
-  not log 170 g of the drink.
+- **Tap Change on a row.** It must open the food picker **in place**. It must NOT jump to the manual
+  log screen.
+- Pick a replacement, then **Confirm**, then **check the diary**: exactly one entry, for the food you
+  picked.
+- The old behaviour: Change logged the picked food immediately via `/log`, left the capture showing the
+  food you rejected, and Confirm then logged that one too — two entries from one correction.
 
-### B2. The review screen (kora#192, kora#193, kora#194)
+### B2. A typed phrase enters the thread (kora#199)
 
-Reachable only by draining an offline capture — queue in airplane mode, reconnect, tap the diary row.
+Already verified on the simulator; a device pass is confirmation, not discovery.
 
-- **The header must sit below the status bar.** The clock and battery were drawing on top of "Review
-  capture".
-- **One primary action, not two.** "Add N items to diary" is gone from the embedded card; Confirm and
-  Discard are the screen's own pair.
-- **A capture made in the small hours must not default to BREAKFAST.** Anything from midnight to 11am
-  used to. Record a clip after midnight and check the slot.
+- Type something and Send. The composer clears **immediately** and the phrase appears as your own
+  right-aligned bubble — not after the resolve finishes.
+- **Make one fail** (airplane mode, then type and Send): the words come back into the composer and the
+  bubble disappears. A failed text resolve is not queued, so losing the text would mean retyping.
 
-### B3. The offline barcode message (kora#191)
+### B3. The cluster glow is no longer orange
 
-- Airplane mode, scan a barcode you have never scanned. The message must **not** promise to handle it
-  later — nothing is queued on that path. It should say to scan again once back online.
-
-### B4. Data sources are attributed (kora#197)
-
-- **More → About.** Three sources listed, Open Food Facts shown with its Open Database License. This is
-  a licence obligation, not a courtesy — OFF data is now serving to users.
-
----
+- Home and Trends: the panel should lift off the ground with a **warm, neutral backlight** — not an
+  orange halo. Measured on the simulator, warmth beside the cluster dropped from R−B +37 to +6.
+- The accent should now read as: gauge needle, "KCAL IN RESERVE", the dock camera button. If the panel
+  edge still glows orange, the change did not ship.
 
 ## C. Regression surface
 
