@@ -42,3 +42,29 @@ export function apiErrorMessage(error: unknown): string {
   }
   return SERVER;
 }
+
+// Every failure that is not "we could not attribute this log" resolves to copy
+// that does not pretend to know the cause — a raw server string ("request
+// failed") is not something to show a user.
+const LOG_FAILED = "Couldn't log that. Please try again.";
+
+/**
+ * The log path's counterpart to apiErrorMessage, and its single source of copy:
+ * both the Log screen's inline error and useInstantLog's toast derive from here
+ * rather than repeating the literal.
+ *
+ * It does the one thing apiErrorMessage cannot: NoOwnerError's message IS the
+ * user-facing copy ("Can't save this log — please sign in and try again."), so
+ * it is surfaced instead of being flattened into a generic string. Duck-typed
+ * on `name` rather than `instanceof` for the same reason isApiError above is.
+ *
+ * Everything else stays on LOG_FAILED rather than falling through to
+ * apiErrorMessage: the mapper's generic copy names a different cause ("Kora is
+ * having trouble right now…"), and changing what a failed log tells the user is
+ * a copy decision, not a refactor.
+ */
+export function logFailureMessage(error: unknown): string {
+  return (error as { name?: string } | null)?.name === "NoOwnerError" && error instanceof Error
+    ? error.message
+    : LOG_FAILED;
+}

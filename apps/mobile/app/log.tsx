@@ -24,6 +24,7 @@ import { useSavedMealEditor } from "@/components/meals/SavedMealSheetProvider";
 import { RecipeParseSheet } from "@/components/recipes/RecipeParseSheet";
 import { LogRecipeSheet } from "@/components/recipes/LogRecipeSheet";
 import { baseQuantityFor, defaultServingCount, formatPortion } from "@/units/portion";
+import { logFailureMessage } from "@/lib/apiErrorMessage";
 import { foodVisual } from "@/lib/foodVisual";
 import { hslToHex } from "@/lib/color";
 import { haptics, useMotionPrefs } from "@/motion";
@@ -213,7 +214,7 @@ export default function LogScreen() {
         haptics.success();
         router.replace("/");
       },
-      onError: () => setError("Couldn't log that. Please try again."),
+      onError: (e) => setError(logFailureMessage(e)),
     });
   }
 
