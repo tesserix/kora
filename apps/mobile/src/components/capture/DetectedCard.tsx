@@ -2,7 +2,8 @@ import { ActivityIndicator, Pressable, View } from "react-native";
 import { Icon } from "@/components/Icon";
 import { AppText } from "@/components/Text";
 import { SubDial } from "@/components/instrument/SubDial";
-import { formatPortion, portionEntryFor } from "@/units/portion";
+import { baseQuantityFor, formatPortion, portionEntryFor } from "@/units/portion";
+import { PortionField } from "@/components/units/PortionField";
 import { foodVisual } from "@/lib/foodVisual";
 import type { MealSlot } from "@/lib/mealSlot";
 import { kcalTotalLabel } from "@/lib/resolutionKcal";
@@ -71,6 +72,18 @@ interface Props {
    * the only action on screen — is unaffected.
    */
   hideAddButton?: boolean;
+  /**
+   * Sets the portion on a HAND-PICKED row, in the food's base unit.
+   *
+   * Only such a row gets an editor. A server-resolved row already carries the
+   * portion the resolver derived, and its kcal is computed from it; a
+   * hand-picked one previously inherited the portion of the food it REPLACED
+   * and offered no way to change it, so the wrong figure went to the diary
+   * (kora#190, "wasnt able put size for it").
+   *
+   * Absent means no editor, which keeps every existing call site unchanged.
+   */
+  onChangePortion?: (index: number, baseQuantity: number) => void;
 }
 
 const MEAL_SLOTS: ReadonlyArray<{ slot: MealSlot; label: string; icon: string }> = [
@@ -111,12 +124,14 @@ function CandidateRow({
   included,
   onToggleInclude,
   onResolve,
+  onChangePortion,
 }: {
   candidate: ResolvedCandidate;
   isLast: boolean;
   included: boolean;
   onToggleInclude: () => void;
   onResolve?: () => void;
+  onChangePortion?: (baseQuantity: number) => void;
 }) {
   const { icon } = foodVisual(candidate.item.name);
   const { fonts } = useTheme();
@@ -130,6 +145,11 @@ function CandidateRow({
   // Keying this off `uncertain` instead would blank the server's own kcal on a
   // preselected row, and print a fabricated "0 kcal" for a hand-picked one.
   const showsKcal = contributesKcal(candidate);
+  const portionEntry = portionEntryFor(
+    candidate.portion_grams,
+    candidate.item.base_unit,
+    candidate.item.serving_units,
+  );
 
   return (
     <View
@@ -191,9 +211,7 @@ function CandidateRow({
             where it came from and what to do about it, because it is about to
             be logged on the user's behalf unless they intervene. */}
         <AppText style={[{ color: uncertain ? T.ink : T.mut, fontSize: 12 }, mono]}>
-          {uncertain
-            ? `${formatPortion(portionEntryFor(candidate.portion_grams, candidate.item.base_unit, candidate.item.serving_units))} · Best guess`
-            : formatPortion(portionEntryFor(candidate.portion_grams, candidate.item.base_unit, candidate.item.serving_units))}
+          {uncertain ? `${formatPortion(portionEntry)} · Best guess` : formatPortion(portionEntry)}
         </AppText>
         {candidate.portion_assumed ? (
           // The server had no serving size for this food and estimated the
@@ -229,6 +247,40 @@ function CandidateRow({
             Offered on EVERY row, not just uncertain ones. A confident match
             can still be the wrong food, and previously such a row was not
             pressable at all, so there was no way to correct it OR remove it. */}
+        {/* A hand-picked row is the ONE case with no server-derived portion:
+            `showsKcal` is false exactly when the user replaced the food
+            themselves. Before kora#190 such a row silently kept the portion of
+            the food it replaced — spread through from the candidate — and had
+            no editor, so "1 breast" (170 g) survived being changed into a
+            drink and that figure went to the diary.
+
+            PortionField is the same control app/log.tsx and meal detail use;
+            the `instrument` variant exists for exactly this dark surface. */}
+        {!showsKcal && onChangePortion ? (
+          <View style={{ marginTop: 8 }}>
+            <PortionField
+              variant="instrument"
+              baseUnit={candidate.item.base_unit === "ml" ? "ml" : "g"}
+              servingUnits={candidate.item.serving_units ?? []}
+              amount={portionEntry.entered_amount ?? candidate.portion_grams}
+              unit={portionEntry.entered_unit ?? (candidate.item.base_unit === "ml" ? "ml" : "g")}
+              onChange={(amount, unit) => {
+                // Mirrors app/log.tsx's onPortionChange: an entry in the food's
+                // OWN base unit is already the base-unit figure, while a named
+                // serving converts through that row's own base_amount. No
+                // nutrition is derived here — the server still resolves the
+                // authoritative quantity at write time.
+                const base = candidate.item.base_unit === "ml" ? "ml" : "g";
+                if (unit === base) {
+                  onChangePortion(amount);
+                  return;
+                }
+                const converted = baseQuantityFor(amount, unit, candidate.item.serving_units ?? []);
+                if (converted !== null) onChangePortion(converted);
+              }}
+            />
+          </View>
+        ) : null}
         {onResolve ? (
           <Pressable
             accessibilityRole="button"
@@ -293,6 +345,7 @@ export function DetectedCard({
   excluded,
   onToggleExclude,
   hideAddButton = false,
+  onChangePortion,
 }: Props) {
   const { fonts } = useTheme();
   const mono = monoStyle(fonts);
@@ -356,6 +409,7 @@ export function DetectedCard({
           included={!excluded.has(i)}
           onToggleInclude={() => onToggleExclude(i)}
           onResolve={onResolveUncertain ? () => onResolveUncertain(i) : undefined}
+          onChangePortion={onChangePortion ? (grams) => onChangePortion(i, grams) : undefined}
         />
       ))}
 

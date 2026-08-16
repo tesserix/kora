@@ -114,6 +114,8 @@ interface ResolutionResultProps {
   onToggleExclude: (index: number) => void;
   /** Forwarded to DetectedCard — see its `hideAddButton` (kora#193). */
   hideAddButton?: boolean;
+  /** Forwarded to DetectedCard — see its `onChangePortion` (kora#190). */
+  onChangePortion?: (index: number, baseQuantity: number) => void;
 }
 
 // The "here is what the AI thinks — confirm, correct, or answer a follow-up"
@@ -134,6 +136,7 @@ export function ResolutionResult({
   excluded,
   onToggleExclude,
   hideAddButton,
+  onChangePortion,
 }: ResolutionResultProps) {
   const resultView = resolveResultView(resolution);
 
@@ -151,6 +154,7 @@ export function ResolutionResult({
           excluded={excluded}
           onToggleExclude={onToggleExclude}
           hideAddButton={hideAddButton}
+          onChangePortion={onChangePortion}
         />
       </>
     );

@@ -1566,7 +1566,54 @@ describe("Resolving an uncertain item", () => {
     await fireEvent.press(await rendered.findByLabelText("Add to diary"));
 
     await waitFor(() => expect(mockCreateLogMutateAsync).toHaveBeenCalledTimes(2));
+    // 150, the replacement's OWN serving_grams — not 200, the portion of the
+    // food it replaced. This assertion used to read 200 and so pinned kora#190:
+    // the promoted row spread portion_grams through from the old candidate, and
+    // the wrong figure reached the diary. See the dedicated test below.
     expect(mockCreateLogMutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ food_item_id: "picked", quantity_grams: 150 }),
+    );
+  });
+
+  // kora#189, found on device: "i tap it again so in the search it was showing
+  // old item instead of new". The picker was seeded from `resolution` (the
+  // server's untouched answer) rather than effectiveResolution, so a second
+  // visit to a corrected row pre-filled the search with the one name the user
+  // had already looked at and rejected.
+  test("re-opening Change on a corrected row seeds the search with the NEW food", async () => {
+    const rendered = await render(<CaptureScreen />);
+    await resolveWithMultiCandidates(rendered, makeMixedCertaintyResolution());
+
+    await fireEvent.press(await rendered.findByLabelText("Change Rice dish"));
+    await fireEvent.press(await rendered.findByText("White rice, cooked"));
+
+    // Re-open the same row. Its label now names the promoted food.
+    await fireEvent.press(await rendered.findByLabelText("Change White rice, cooked"));
+
+    const search = await rendered.findByPlaceholderText("Search foods…");
+    expect(search.props.value).toBe("White rice, cooked");
+    expect(search.props.value).not.toBe("Rice dish");
+  });
+
+  // kora#190: "wasnt able put size for it". The promoted row spread
+  // portion_grams through from the candidate it REPLACED, so the diary got the
+  // old food's portion. 200 g is the uncertain row's own portion; 150 g is the
+  // replacement's serving_grams — asserting the logged figure is the one that
+  // catches this, because the card renders "—" for kcal either way.
+  test("a hand-picked food logs ITS OWN serving, not the replaced food's portion", async () => {
+    const rendered = await render(<CaptureScreen />);
+    await resolveWithMultiCandidates(rendered, makeMixedCertaintyResolution());
+
+    await fireEvent.press(await rendered.findByLabelText("Change Rice dish"));
+    await fireEvent.press(await rendered.findByText("White rice, cooked"));
+
+    await fireEvent.press(await rendered.findByLabelText("Add to diary"));
+    await waitFor(() => expect(mockCreateLogMutateAsync).toHaveBeenCalledTimes(2));
+
+    expect(mockCreateLogMutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ food_item_id: "picked", quantity_grams: 150 }),
+    );
+    expect(mockCreateLogMutateAsync).not.toHaveBeenCalledWith(
       expect.objectContaining({ food_item_id: "picked", quantity_grams: 200 }),
     );
   });

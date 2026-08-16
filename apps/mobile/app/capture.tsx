@@ -53,6 +53,7 @@ import { isLoggable } from "@/lib/candidateTier";
 import { servingEntryFor } from "@/units/portion";
 import type { FoodItem, Resolution, ResolutionSource } from "@/api/types";
 import { mealSlotForHour, type MealSlot } from "@/lib/mealSlot";
+import { initialPortionFor } from "@/lib/promotedPortion";
 
 export type CaptureMode = "photo" | "voice" | "scan" | "type";
 export type CaptureStage = "idle" | "analyzing" | "result";
@@ -481,6 +482,8 @@ interface CaptureBodyProps {
   /** Rows the user unchecked, forwarded to DetectedCard (kora#183). */
   excluded: ReadonlySet<number>;
   onToggleExclude: (index: number) => void;
+  /** Sets a hand-picked row's portion — see DetectedCard (kora#190). */
+  onChangePortion?: (index: number, baseQuantity: number) => void;
   /** Bails out of the in-flight resolve and returns to idle. Analyzing-state only. */
   onCancelResolve?: () => void;
 }
@@ -519,6 +522,7 @@ export function CaptureBody({
   onResolveUncertain,
   excluded,
   onToggleExclude,
+  onChangePortion,
   onCancelResolve,
 }: CaptureBodyProps) {
   const scrollViewRef = useRef<ScrollView>(null);
@@ -636,6 +640,7 @@ export function CaptureBody({
             onResolveUncertain={onResolveUncertain}
             excluded={excluded}
             onToggleExclude={onToggleExclude}
+            onChangePortion={onChangePortion}
           />
         )}
 
@@ -950,6 +955,15 @@ export default function CaptureScreen() {
   // survived into the next capture would silently relabel a different food.
   const [promoted, setPromoted] = useState<Record<number, FoodItem>>({});
   const [pickerIndex, setPickerIndex] = useState<number | null>(null);
+  // The portion for a hand-picked row, keyed by candidate index. Held here
+  // rather than derived, because it has two sources — the replacement food's
+  // own serving when it was picked, and whatever the user then set — and the
+  // card must not have to tell them apart. `assumed` is carried alongside so
+  // the row can say "portion is a guess" honestly: true only while it is the
+  // flat default, false once the food's own serving applied OR the user chose.
+  const [promotedPortion, setPromotedPortion] = useState<
+    Record<number, { grams: number; assumed: boolean }>
+  >({});
   // Rows the user unchecked, by index into the CURRENT resolution — so it is
   // cleared alongside `promoted` for the same reason: indices are meaningless
   // against a different capture, and a stale exclusion would silently drop a
@@ -1077,13 +1091,28 @@ export default function CaptureScreen() {
     if (!resolution || Object.keys(promoted).length === 0) return resolution;
     return {
       ...resolution,
-      candidates: resolution.candidates.map((candidate, i) =>
-        promoted[i]
-          ? { ...candidate, item: promoted[i], kcal: 0, tier: "confirm" as const, kcal_unknown: true }
-          : candidate,
-      ),
+      candidates: resolution.candidates.map((candidate, i) => {
+        const item = promoted[i];
+        if (!item) return candidate;
+        // portion_grams MUST be replaced, not spread through. It previously
+        // inherited the REPLACED food's portion, so swapping "1 breast" (170 g)
+        // for a drink logged 170 g of the drink, and nothing on screen said so
+        // — the row renders "—" for kcal, which reads as "the number is coming
+        // later" rather than "this portion belongs to a different food"
+        // (kora#190).
+        const portion = promotedPortion[i] ?? initialPortionFor(item);
+        return {
+          ...candidate,
+          item,
+          kcal: 0,
+          tier: "confirm" as const,
+          kcal_unknown: true,
+          portion_grams: portion.grams,
+          portion_assumed: portion.assumed,
+        };
+      }),
     };
-  }, [resolution, promoted]);
+  }, [resolution, promoted, promotedPortion]);
 
   // Request camera access as soon as the user switches into Scan mode. A
   // denial surfaces through the idle affordance itself (cameraPermissionDenied
@@ -1136,6 +1165,7 @@ export default function CaptureScreen() {
     setStage("result");
     setLoggedCandidateKeys(new Set());
     setPromoted({});
+    setPromotedPortion({});
     setExcluded(new Set());
     setPickerIndex(null);
   }
@@ -1601,15 +1631,31 @@ export default function CaptureScreen() {
         onResolveUncertain={setPickerIndex}
         excluded={excluded}
         onToggleExclude={toggleExcluded}
+        onChangePortion={(index, grams) =>
+          setPromotedPortion((prev) => ({ ...prev, [index]: { grams, assumed: false } }))
+        }
         onCancelResolve={handleCancelResolve}
       />
-      {/* Opened from an uncertain row. Seeded with the phrase the server could
-          not resolve, so the user starts from what they actually said. */}
+      {/* Opened from a row's "Change". Seeded from effectiveResolution, NOT
+          `resolution` — otherwise a second visit to an already-corrected row
+          re-seeds the search with the food the user just replaced, i.e. the one
+          name they have already looked at and rejected (kora#189, found on
+          device). `resolution` is the server's untouched answer;
+          effectiveResolution carries the promotion, and is what the card
+          itself renders — so this also stops the picker and the row disagreeing
+          about what the row contains. */}
       <FoodPicker
         visible={pickerIndex !== null}
-        initialQuery={pickerIndex !== null ? (resolution?.candidates[pickerIndex]?.item.name ?? "") : ""}
+        initialQuery={
+          pickerIndex !== null ? (effectiveResolution?.candidates[pickerIndex]?.item.name ?? "") : ""
+        }
         onSelect={(item) => {
-          if (pickerIndex !== null) setPromoted((prev) => ({ ...prev, [pickerIndex]: item }));
+          if (pickerIndex !== null) {
+            setPromoted((prev) => ({ ...prev, [pickerIndex]: item }));
+            // Seed from the NEW food's own serving, so the row is right before
+            // the user touches anything — most people will not open the editor.
+            setPromotedPortion((prev) => ({ ...prev, [pickerIndex]: initialPortionFor(item) }));
+          }
           setPickerIndex(null);
         }}
         onClose={() => setPickerIndex(null)}
