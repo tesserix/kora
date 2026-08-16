@@ -120,6 +120,10 @@ export async function append(
 // attempts is reset, not carried: retry is the user saying "try this again",
 // and an item that returned with its whole budget already spent would re-fail
 // on the very next drain and make the button look broken.
+//
+// This reset is only as durable as the writes that race it. A drain whose send
+// is still in flight when this lands must not write back the count it read
+// before the press — see the failure write in `drain`.
 export async function retry(id: string): Promise<void> {
   await update((items) =>
     items.map((i) => (i.id === id ? { ...i, status: "pending", attempts: 0, lastError: undefined } : i)),
@@ -212,15 +216,39 @@ export async function drain(
       sent++;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      const attempts = item.attempts + (countsAsAttempt(err) ? 1 : 0);
-      // Two independent routes to `failed`: one refusal that will never change
-      // (a 4xx), or enough refusals that will not change in practice.
-      const done = isPermanent(err) || attempts >= MAX_DELIVERY_ATTEMPTS;
+      const permanent = isPermanent(err);
+      const charge = countsAsAttempt(err) ? 1 : 0;
+      // The count is read from the CURRENT item inside the lock, never from
+      // `item` — that is a snapshot taken before `send`, and a `retry()` press
+      // that lands while the request is in flight resets attempts to 0. Writing
+      // `snapshot + 1` would clobber the reset, so the user's retry would
+      // silently resume the old count and hit the ceiling far sooner than
+      // MAX_DELIVERY_ATTEMPTS promises. Deriving it here charges exactly one
+      // attempt for the one refusal this send actually got, whatever else
+      // happened to the item meanwhile.
+      //
+      // The write is applied rather than skipped as stale even when a retry has
+      // flipped the status back to `pending`. A retry cannot be detected
+      // reliably — it resets attempts to 0, which is indistinguishable from an
+      // item that had never failed — so "skip if it looks retried" would be
+      // guesswork, and dropping the write loses a real verdict from the server.
+      // Applied, the two outcomes are both defensible: a transient refusal
+      // leaves the item `pending` with attempts 1, so the retry keeps
+      // effectively its whole budget; a PERMANENT refusal (a 4xx) marks it
+      // `failed` again, which is right — the payload will be rejected
+      // identically forever, and surfacing that immediately beats letting the
+      // retry loop rediscover it.
+      let done = permanent;
+      await update((items) => items.map((i) => {
+        if (i.id !== item.id) return i;
+        const attempts = i.attempts + charge;
+        // Two independent routes to `failed`: one refusal that will never
+        // change (a 4xx), or enough refusals that will not change in practice.
+        done = permanent || attempts >= MAX_DELIVERY_ATTEMPTS;
+        return { ...i, attempts, lastError: message, status: done ? "failed" : "pending" };
+      }));
       if (done) failed++;
       else deferred++;
-      await update((items) => items.map((i) => (i.id === item.id
-        ? { ...i, attempts, lastError: message, status: done ? "failed" : "pending" }
-        : i)));
     }
   }
   return { sent, failed, deferred };
