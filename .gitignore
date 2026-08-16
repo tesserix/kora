@@ -31,3 +31,8 @@ dist/
 # Brainstorming visual companion artifacts
 .superpowers/brainstorm/
 .superpowers/
+
+# Local EAS build artifacts. `eas build --local` drops the .ipa in apps/mobile,
+# and a 25 MB binary was swept into db7cc25 by a `git add -A`.
+*.ipa
+*.app.zip
