@@ -24,6 +24,7 @@ import { RecordingPresets, requestRecordingPermissionsAsync, useAudioRecorder } 
 import { Icon } from "@/components/Icon";
 import { AppText } from "@/components/Text";
 import { OttoBubble } from "@/components/capture/OttoBubble";
+import { UserBubble } from "@/components/capture/UserBubble";
 import { ModePill } from "@/components/capture/ModePill";
 import { Waveform } from "@/components/capture/Waveform";
 import { VoiceComposer } from "@/components/capture/VoiceComposer";
@@ -451,6 +452,11 @@ interface CaptureBodyProps {
   stage: CaptureStage;
   resolution: Resolution | null;
   errorMsg: string | null;
+  /**
+   * The phrase the user has just sent, shown as their own message in the
+   * thread while Otto works (kora#199).
+   */
+  sentPhrase: string | null;
   mealSlot: MealSlot;
   onChangeMealSlot: (slot: MealSlot) => void;
   onAdd: () => void;
@@ -500,6 +506,7 @@ export function CaptureBody({
   stage,
   resolution,
   errorMsg,
+  sentPhrase,
   mealSlot,
   onChangeMealSlot,
   onAdd,
@@ -591,6 +598,16 @@ export function CaptureBody({
             onDescribeInstead={() => onModeChange("type")}
           />
         )}
+
+        {/* The user's own message, in the thread where they put it.
+            UserBubble has existed — styled, tested, with its own reduced-motion
+            entrance — since the capture screen was built, and no screen ever
+            rendered it. So a typed phrase went nowhere: the text sat in the
+            composer for the whole 2-3s resolve (setText("") was inside
+            onSuccess) while the thread showed nothing, which reads as "did that
+            send?". Photo felt fine only because it has no field to linger in.
+            kora#199. */}
+        {sentPhrase ? <UserBubble>{sentPhrase}</UserBubble> : null}
 
         {stage === "analyzing" && (
           <View
@@ -1006,6 +1023,11 @@ export default function CaptureScreen() {
   // cleared to null) in the same onSuccess handler that calls applyResolution,
   // so it can never lag behind — and never a later, unrelated resolution.
   const [resolvedPhrase, setResolvedPhrase] = useState<string | null>(null);
+  // What the user just said, shown as their own bubble while Otto works.
+  // Distinct from resolvedPhrase, which is the phrase attached to the LOG for
+  // the correction loop — this one is presentation, and is cleared whenever the
+  // thread is reset.
+  const [sentPhrase, setSentPhrase] = useState<string | null>(null);
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   // Guards a single CameraView against firing onBarcodeScanned repeatedly
   // for the same physical scan while the camera keeps detecting the code.
@@ -1064,6 +1086,8 @@ export default function CaptureScreen() {
   }
 
   function handleCancelResolve() {
+    // Cancel means "I've moved on" — the message goes with the request.
+    setSentPhrase(null);
     resolveControllerRef.current?.abort();
     // Do NOT reset scannedRef here — the abort above releases it through
     // handleBarcodeScanned's onError (see #136 part 1). Resetting it a
@@ -1188,6 +1212,8 @@ export default function CaptureScreen() {
   }
 
   function handleModeChange(next: CaptureMode) {
+    // The bubble belongs to the thread being left behind.
+    setSentPhrase(null);
     // Switching away from Voice mid-recording must not leave the native
     // recorder running in the background — stop it (best-effort) and reset
     // the mic button back to its start state.
@@ -1211,6 +1237,12 @@ export default function CaptureScreen() {
     const phrase = text.trim();
     if (!phrase) return;
     setErrorMsg(null);
+    // Optimistic, and deliberately BEFORE the request: the message belongs in
+    // the thread the instant it is sent, exactly as every messaging app
+    // behaves. Clearing inside onSuccess (as this did) left the text sitting in
+    // the composer for the whole resolve with nothing else on screen changing.
+    setSentPhrase(phrase);
+    setText("");
     // Fires right as send is pressed — the composer's own keyboard should
     // not stay up covering the result thread once a send is in flight.
     Keyboard.dismiss();
@@ -1223,10 +1255,16 @@ export default function CaptureScreen() {
         if (controller.signal.aborted) return;
         applyResolution(data, "ai_text");
         setResolvedPhrase(phrase);
-        setText("");
       },
       onError: (error) => {
         if (controller.signal.aborted) return;
+        // Hand the words back. A failed text resolve is NOT queued — only
+        // photo and voice reach enqueueCapture (kora#196) — so leaving the
+        // composer empty would make the user retype what they just lost. The
+        // bubble goes with it: a message that never arrived should not sit in
+        // the thread as though it did.
+        setSentPhrase(null);
+        setText(phrase);
         setErrorMsg(ottoErrorMessage(error));
       },
     });
@@ -1616,6 +1654,7 @@ export default function CaptureScreen() {
         stage={displayStage}
         resolution={effectiveResolution}
         errorMsg={errorMsg}
+        sentPhrase={sentPhrase}
         mealSlot={mealSlot}
         onChangeMealSlot={setMealSlot}
         onAdd={handleAddToDiary}

@@ -314,6 +314,7 @@ function makeMixedCertaintyResolution(): Resolution {
 }
 
 const noopBodyProps = {
+  sentPhrase: null,
   excluded: new Set<number>(),
   onToggleExclude: () => {},
   displayName: "Alex",
@@ -1813,5 +1814,61 @@ describe("closing capture with no navigation history", () => {
 
     expect(router.back).toHaveBeenCalledTimes(1);
     expect(router.replace).not.toHaveBeenCalled();
+  });
+});
+
+// kora#199, reported on device: "when i type and submit the text remains in the
+// textfield instead of the chat".
+//
+// Two faults compounded. `setText("")` sat inside onSuccess, so the composer
+// held the phrase for the whole 2-3s resolve; and `UserBubble` — styled, tested,
+// with its own reduced-motion entrance — was never rendered by any screen, so
+// the message went nowhere. Nothing on screen changed after pressing Send,
+// which reads as "did that send?". Photo felt right only because it has no
+// field to linger in.
+describe("a typed phrase enters the thread", () => {
+  test("Send clears the composer immediately and shows the message", async () => {
+    const { findByText, findByLabelText, queryByText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Type"));
+    const input = await findByLabelText("Tell Otto what you ate");
+    await fireEvent.changeText(input, "chicken and rice");
+    await fireEvent.press(await findByLabelText("Send"));
+
+    // BEFORE the resolve settles — the whole point is that the user sees this
+    // during the wait, not after it.
+    expect(input.props.value).toBe("");
+    expect(await findByText("chicken and rice")).toBeTruthy();
+  });
+
+  test("a failed send hands the words back and removes the message", async () => {
+    const { findByText, findByLabelText, queryByText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Type"));
+    const input = await findByLabelText("Tell Otto what you ate");
+    await fireEvent.changeText(input, "chicken and rice");
+    await fireEvent.press(await findByLabelText("Send"));
+
+    const [, options] = mockResolveTextMutate.mock.calls[0];
+    await act(async () => options.onError(new Error("boom")));
+
+    // A failed text resolve is NOT queued (only photo/voice reach
+    // enqueueCapture, kora#196), so an empty composer would mean retyping.
+    expect(input.props.value).toBe("chicken and rice");
+    // And the bubble is gone: a message that never arrived must not sit in the
+    // thread as though it had. queryByText matches rendered Text, not a
+    // TextInput's value, so null here IS the bubble's absence — the restored
+    // composer is asserted on props.value above.
+    expect(queryByText("chicken and rice")).toBeNull();
+    expect(await findByText(/went wrong|couldn't/i)).toBeTruthy();
+  });
+
+  test("switching mode clears the message with the thread", async () => {
+    const { findByText, findByLabelText, queryByText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Type"));
+    await fireEvent.changeText(await findByLabelText("Tell Otto what you ate"), "chicken and rice");
+    await fireEvent.press(await findByLabelText("Send"));
+    expect(await findByText("chicken and rice")).toBeTruthy();
+
+    await fireEvent.press(await findByText("Voice"));
+    expect(queryByText("chicken and rice")).toBeNull();
   });
 });
