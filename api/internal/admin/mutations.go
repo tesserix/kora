@@ -244,6 +244,10 @@ func (r MutationRepository) CreateFood(ctx context.Context, actor Actor, in Food
 			Brand:          in.Brand,
 			NormalizedName: nutrition.Normalize(in.Name),
 			Provenance:     in.Provenance,
+			// Derived, never taken from the admin payload: what kind of thing a
+			// row is follows from the row itself, so an admin cannot type one
+			// food differently from an identical food that arrived via ingest.
+			EntityType:     nutrition.DeriveEntityType(in.Brand, in.Barcode),
 			Barcode:        in.Barcode,
 			ServingDesc:    in.ServingDesc,
 			ServingGrams:   in.ServingGrams,

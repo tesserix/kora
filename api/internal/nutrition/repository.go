@@ -139,6 +139,11 @@ func (r Repository) Insert(ctx context.Context, items []FoodItem) (int, error) {
 		}
 		created := item
 		created.NormalizedName = Normalize(item.Name)
+		// Derived at write time for the same reason NormalizedName is: it is a
+		// function of the row, so a caller must not be able to disagree with
+		// the rule. Every bulk source lands here — cmd/ingest, cmd/seed and the
+		// OpenFoodFacts cache-on-miss in ResolveBarcode all call Insert.
+		created.EntityType = DeriveEntityType(item.Brand, item.Barcode)
 		if err := r.db.WithContext(ctx).Create(&created).Error; err != nil {
 			return inserted, fmt.Errorf("nutrition: insert: %w", err)
 		}

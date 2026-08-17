@@ -3,9 +3,11 @@ package nutrition
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type Provenance = string
@@ -22,6 +24,45 @@ const (
 	// for a home-cooked portion, not lab measurements.
 	ProvenanceCurated Provenance = "curated"
 )
+
+// EntityType is what KIND of thing a food row is, as distinct from Provenance,
+// which is where it came from. Provenance answers a question about lineage and
+// trust; EntityType answers whether the row describes one specific packaged
+// item or a food in general. See migration 000033 for the full rationale,
+// including why there is no 'dish' value yet.
+type EntityType = string
+
+const (
+	// EntityTypeGeneric is a reference figure for a food itself, not for any
+	// one seller's version of it: USDA and AFCD reference data, hand-authored
+	// dishes, and user estimates.
+	EntityTypeGeneric EntityType = "generic"
+	// EntityTypeBrandedProduct is one specific packaged retail item.
+	EntityTypeBrandedProduct EntityType = "branded_product"
+)
+
+// DeriveEntityType states the rule in one place: a row is a branded_product
+// when it identifies one specific packaged item — it carries a barcode or a
+// non-empty brand — and generic otherwise.
+//
+// The barcode half is load-bearing rather than belt-and-braces: 80 rows in the
+// live index come from OpenFoodFacts with a real barcode and an empty brand
+// ("Gala Apple", "wafer crackers"). They are retail products whose brand field
+// OFF left blank, and a brand-only rule would call every one of them generic
+// reference data.
+//
+// Deliberately reads only the row's own identity columns and not Provenance, so
+// a label_ocr row — scanned off a package, so barcoded but possibly with no
+// brand string — types itself correctly without a rule change.
+func DeriveEntityType(brand string, barcode *string) EntityType {
+	if barcode != nil && strings.TrimSpace(*barcode) != "" {
+		return EntityTypeBrandedProduct
+	}
+	if strings.TrimSpace(brand) != "" {
+		return EntityTypeBrandedProduct
+	}
+	return EntityTypeGeneric
+}
 
 const (
 	// MatchPersonalAlias is an alias THIS user saved themselves — a correction
@@ -46,11 +87,15 @@ type Candidate struct {
 }
 
 type FoodItem struct {
-	ID             uuid.UUID       `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	Name           string          `json:"name"`
-	Brand          string          `json:"brand"`
-	NormalizedName string          `gorm:"column:normalized_name" json:"-"`
-	Provenance     string          `json:"provenance"`
+	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	Name           string    `json:"name"`
+	Brand          string    `json:"brand"`
+	NormalizedName string    `gorm:"column:normalized_name" json:"-"`
+	Provenance     string    `json:"provenance"`
+	// EntityType is json:"-" on purpose. Phase 1 of kora#212 is data-model
+	// only: nothing scores, ranks, filters or renders on it yet, and putting it
+	// in the API response would be a behaviour change ahead of a consumer.
+	EntityType     EntityType      `gorm:"column:entity_type" json:"-"`
 	Barcode        *string         `json:"barcode,omitempty"`
 	ServingDesc    string          `json:"serving_desc"`
 	ServingGrams   float64         `json:"serving_grams"`
@@ -62,4 +107,20 @@ type FoodItem struct {
 	FatPer100g     float64         `gorm:"column:fat_per_100g" json:"fat_per_100g"`
 	FiberPer100g   float64         `gorm:"column:fiber_per_100g" json:"fiber_per_100g"`
 	CreatedAt      time.Time       `json:"created_at"`
+}
+
+// BeforeCreate types any row that reaches the database without an EntityType.
+//
+// The two production insert paths (Repository.Insert and admin's CreateFood)
+// both set it explicitly, so in normal operation this is a no-op. It exists
+// because "set it at ingest" is only true for the ingest paths that exist
+// today: a future caller that builds a FoodItem and calls Create directly would
+// otherwise fall through to the column DEFAULT and silently land in `generic`
+// even when it is plainly a barcoded retail product. Applying the same rule
+// here makes the invariant a property of the model rather than of a checklist.
+func (f *FoodItem) BeforeCreate(*gorm.DB) error {
+	if f.EntityType == "" {
+		f.EntityType = DeriveEntityType(f.Brand, f.Barcode)
+	}
+	return nil
 }
