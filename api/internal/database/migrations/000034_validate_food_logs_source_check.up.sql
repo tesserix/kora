@@ -1,0 +1,18 @@
+-- Finish what 000029_food_logs_source_check.up.sql deliberately left undone.
+--
+-- That migration added food_logs_source_check as NOT VALID, which guards every
+-- future write but leaves existing rows unchecked, and ended with: "Run
+-- VALIDATE CONSTRAINT separately once the existing data is known to be clean."
+-- This is that step.
+--
+-- WHY NOW: prod holds a single food_logs row (Kora is pre-launch; the only user
+-- is the developer testing), and it was verified to satisfy the constraint
+-- before validating. VALIDATE CONSTRAINT takes a SHARE UPDATE EXCLUSIVE lock and
+-- scans the table — concurrent reads and writes continue, but the scan cost only
+-- grows from here, so this is the cheapest this will ever be.
+--
+-- Without this migration the two environments drift: prod was validated by hand
+-- on 2026-08-17, while any database rebuilt from migrations would come up with
+-- the constraint still NOT VALID. Running it on an already-validated constraint
+-- is a no-op, so this is safe to apply anywhere.
+ALTER TABLE food_logs VALIDATE CONSTRAINT food_logs_source_check;
