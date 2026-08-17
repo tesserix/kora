@@ -13,7 +13,13 @@ import (
 type Provenance = string
 
 const (
-	ProvenanceAFCD         Provenance = "afcd"
+	ProvenanceAFCD Provenance = "afcd"
+	// ProvenanceIFCT marks the Indian Food Composition Tables (IFCT 2017) — the
+	// Indian generic reference set, the counterpart to AFCD's Australian one.
+	// Like AFCD it is per-100 g lab data with no serving size and no brand, so
+	// every row types as `generic`. See scripts/ifct_convert.py, which converts
+	// IFCT's kilojoules to kcal and gates each row on Atwater.
+	ProvenanceIFCT         Provenance = "ifct"
 	ProvenanceOFF          Provenance = "off"
 	ProvenanceUSDA         Provenance = "usda"
 	ProvenanceLabelOCR     Provenance = "label_ocr"
