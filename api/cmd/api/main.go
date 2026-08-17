@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"github.com/google/uuid"
 	"log/slog"
 	"net/http"
 	"os"
@@ -351,11 +352,34 @@ func buildResolveHandler(ctx context.Context, cfg config.Config, db *gorm.DB, lo
 	// ai.Resolver.ResolveText inherit the portion from the user's last log of
 	// the same phrase (see foodlog.Repository.LastPortionForPhrase), instead
 	// of always falling back to the food's serving size.
-	resolver := ai.NewResolver(provider, foods, cache, meter).WithPortionSource(foodlog.NewRepository(db))
+	resolver := ai.NewResolver(provider, foods, cache, meter).
+		WithPortionSource(foodlog.NewRepository(db)).
+		WithLocales(userLocales{users: user.NewRepository(db)})
 	off := nutrition.NewHTTPOFFClient()
 
 	h := resolve.NewHandler(resolver, func(c context.Context, code string) (*nutrition.FoodItem, bool, error) {
 		return foods.ResolveBarcode(c, off, code)
 	})
 	return &h, provider, cache
+}
+
+// userLocales adapts the user repository to ai.LocaleSource, mapping the
+// timezone users already have onto the food locale to prefer (kora#212
+// Phase 4). No new user-facing setting: the timezone is set at onboarding and
+// defaults to Australia/Sydney.
+//
+// Deliberately swallows the lookup error and returns LocaleUnknown. A locale
+// preference is a small ranking nudge, and failing a whole resolve because the
+// users row could not be read would trade an answer for a nudge. Unknown
+// simply applies no preference, which is the pre-Phase-4 behaviour.
+type userLocales struct {
+	users user.Repository
+}
+
+func (u userLocales) LocaleFor(ctx context.Context, userID uuid.UUID) nutrition.Locale {
+	usr, err := u.users.ByID(ctx, userID)
+	if err != nil {
+		return nutrition.LocaleUnknown
+	}
+	return nutrition.LocaleFromTimezone(usr.Timezone)
 }

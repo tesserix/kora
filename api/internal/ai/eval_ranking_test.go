@@ -209,6 +209,18 @@ func TestEvalRanking(t *testing.T) {
 	anonUser := uuid.Nil
 	ctx := context.Background()
 
+	// KORA_EVAL_LOCALE runs the whole dataset as a user of that food locale
+	// (AU | IN | US), so kora#212 Phase 4's preference can actually be
+	// measured. Unset means LocaleUnknown, i.e. no preference — which is both
+	// the default and the pre-Phase-4 behaviour, so an unset run stays
+	// comparable with every earlier baseline.
+	//
+	// It is one locale for the whole run rather than per case on purpose: the
+	// question this answers is "what does the SAME dataset look like to an
+	// Australian versus an Indian user", and that only means something if the
+	// queries are held constant.
+	evalLocale := nutrition.Locale(strings.TrimSpace(os.Getenv("KORA_EVAL_LOCALE")))
+
 	var rows []rankingRow
 	for _, c := range cases {
 		guesses := c.guesses()
@@ -224,6 +236,7 @@ func TestEvalRanking(t *testing.T) {
 				Text:       g.Food,
 				Brand:      g.Brand,
 				Qualifiers: g.Qualifiers,
+				Locale:     evalLocale,
 			}, nil, rankingTopK)
 			if err != nil {
 				t.Fatalf("resolve %q (phrase %q): %v", g.Food, c.Phrase, err)

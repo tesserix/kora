@@ -177,6 +177,10 @@ type Query struct {
 	Brand string
 	// Qualifiers narrow which variant is meant, e.g. ["charcoal"].
 	Qualifiers []string
+	// Locale is the user's food culture (kora#212 Phase 4), empty when unknown.
+	// It only ever boosts matching rows — never filters — because an
+	// Australian user eating Indian food is the normal case here.
+	Locale Locale
 }
 
 // Resolve ranks food candidates for a plain phrase. It is the unstructured
@@ -499,6 +503,13 @@ func (r Repository) ResolveQuery(ctx context.Context, userID uuid.UUID, q Query,
 		// kora#217 includes the 310 USDA chain rows that finally carry a brand.
 		if brandNamed && wantBrand != "" && brandMatches(wantBrand, s.item.Brand) {
 			s.rankKey += brandMatchBonus
+		}
+		// Locale preference. Both sides must be known: an unknown user locale
+		// must not favour unknown-locale rows, which would quietly promote
+		// user estimates over reference data for every user whose timezone we
+		// do not map.
+		if q.Locale != LocaleUnknown && s.item.Locale == q.Locale {
+			s.rankKey += localeBonus
 		}
 	}
 	sort.SliceStable(scoredList, func(i, j int) bool {

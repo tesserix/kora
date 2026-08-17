@@ -177,7 +177,7 @@ func TestParseTextExtractsNameServingsAndIngredients(t *testing.T) {
 		"servings": 4,
 		"ingredients": [
 			{"text": "` + f.Name + `", "amount": 200, "unit": "g"},
-			{"text": "asafoetida", "amount": 1, "unit": "pinch"}
+			{"text": "zqxunmatchable spice", "amount": 1, "unit": "pinch"}
 		]
 	}`}, nutrition.NewRepository(db), &stubMeter{})
 
@@ -189,8 +189,15 @@ func TestParseTextExtractsNameServingsAndIngredients(t *testing.T) {
 	require.Len(t, d.Ingredients, 2)
 	require.NotNil(t, d.Ingredients[0].FoodItemID, "a seeded food must resolve")
 	require.Equal(t, f.ID.String(), *d.Ingredients[0].FoodItemID)
+	// The unmatchable ingredient must be a NONSENSE token, not a real food.
+	// This assertion originally used "asafoetida", which stopped being
+	// unmatchable the moment IFCT was ingested (kora#215 added an `Asafoetida`
+	// row) — so the test failed against a fully-ingested index while still
+	// passing in CI, whose database holds only the curated seed. The `zqx`
+	// prefix is the convention already used elsewhere for strings that must
+	// never match a real row.
 	require.Nil(t, d.Ingredients[1].FoodItemID, "an unmatchable ingredient stays unresolved, not guessed")
-	require.Equal(t, "asafoetida", d.Ingredients[1].RawText)
+	require.Equal(t, "zqxunmatchable spice", d.Ingredients[1].RawText)
 }
 
 // TestParseTextRejectsNonJSON: GenerateText enforces no schema, so garbage is

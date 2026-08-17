@@ -110,6 +110,20 @@ type Resolver struct {
 	cache         Cache
 	meter         Meter
 	portionSource PortionSource
+	locales       LocaleSource
+}
+
+// LocaleSource reports the food locale to prefer for a user (kora#212 Phase 4).
+//
+// Narrow on purpose: the Resolver needs one string per resolve and must not
+// gain a dependency on the whole user package to get it. cmd/api adapts the
+// user repository to this shape.
+//
+// Implementations must NOT fail a resolve. A user that cannot be loaded, or
+// whose timezone is unrecognised, yields nutrition.LocaleUnknown — no
+// preference — because a locale nudge is worth strictly less than an answer.
+type LocaleSource interface {
+	LocaleFor(ctx context.Context, userID uuid.UUID) nutrition.Locale
 }
 
 // NewResolver builds a Resolver over its collaborators.
@@ -127,6 +141,30 @@ func NewResolver(p Provider, foods nutrition.Repository, cache Cache, meter Mete
 func (r Resolver) WithPortionSource(ps PortionSource) Resolver {
 	r.portionSource = ps
 	return r
+}
+
+// WithLocales attaches an optional source of the user's food locale, following
+// the same functional-option pattern as WithPortionSource and
+// foodlog.Service.WithResolutionCache — chosen over a NewResolver parameter so
+// every existing construction site, production and test, keeps working
+// unchanged.
+//
+// A nil LocaleSource (the default) means every query resolves with
+// nutrition.LocaleUnknown, which applies no locale preference at all. That is
+// exactly the pre-Phase-4 behaviour, so leaving it unset is a safe no-op rather
+// than a silent downgrade.
+func (r Resolver) WithLocales(ls LocaleSource) Resolver {
+	r.locales = ls
+	return r
+}
+
+// localeFor returns the caller's food locale, or unknown when no LocaleSource
+// is attached.
+func (r Resolver) localeFor(ctx context.Context, userID uuid.UUID) nutrition.Locale {
+	if r.locales == nil {
+		return nutrition.LocaleUnknown
+	}
+	return r.locales.LocaleFor(ctx, userID)
 }
 
 // ResolveText resolves a free-text food phrase to a Resolution. Before
@@ -173,10 +211,10 @@ func (r Resolver) aliasShortCircuit(ctx context.Context, userID uuid.UUID, phras
 	grams, assumed := r.resolveAliasPortion(ctx, userID, phrase, item)
 	return Resolution{
 		Candidates: []ResolvedCandidate{{
-			Item:           item,
-			PortionGrams:   grams,
-			Kcal:           item.KcalPer100g * grams / 100,
-			MatchScore:     1.0,
+			Item:         item,
+			PortionGrams: grams,
+			Kcal:         item.KcalPer100g * grams / 100,
+			MatchScore:   1.0,
 			// Reported as MatchPersonalAlias for the same reason
 			// nutrition.Resolve's personal branch is: this IS the user's own
 			// alias, and stamping it "alias" would make the same event report
@@ -513,6 +551,11 @@ func (r Resolver) resolveGuesses(ctx context.Context, userID uuid.UUID, phrase s
 	bestRank := -1
 	provenance := ""
 
+	// Resolved ONCE for the whole resolution, not per guess: the locale is a
+	// property of the user, and a multi-item meal would otherwise repeat the
+	// same lookup for every food in it.
+	locale := r.localeFor(ctx, userID)
+
 	// One factor for the whole resolution: coverage is a property of the
 	// phrase and the guess set together, not of any single candidate.
 	coverage := phraseCoverage(phrase, guesses)
@@ -545,6 +588,7 @@ func (r Resolver) resolveGuesses(ctx context.Context, userID uuid.UUID, phrase s
 			Text:       guess.Food,
 			Brand:      guess.Brand,
 			Qualifiers: guess.Qualifiers,
+			Locale:     locale,
 		}, vec, resolveTopK)
 		if err != nil {
 			return Resolution{}, fmt.Errorf("ai: resolve guesses: %w", err)
