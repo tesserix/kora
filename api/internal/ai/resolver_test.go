@@ -198,7 +198,7 @@ func TestResolveText_PersonalAliasShortCircuit_SkipsProviderAndMetering(t *testi
 	// most confident signal there is, so the row is never a follow-up.
 	require.Equal(t, TierAuto, res.Candidates[0].Tier)
 	require.Equal(t, item.ID, res.Candidates[0].Item.ID)
-	require.Equal(t, nutrition.MatchAlias, res.Candidates[0].MatchTier)
+	require.Equal(t, nutrition.MatchPersonalAlias, res.Candidates[0].MatchTier)
 	require.Equal(t, 220.0, res.Candidates[0].PortionGrams, "portion must come from the user's last log of this phrase")
 	// 120 kcal/100g * 220g / 100 = 264 — computed from the row, never fabricated.
 	require.Equal(t, 264.0, res.Candidates[0].Kcal)
@@ -800,18 +800,18 @@ func TestResolveText_CacheDoesNotLeakAcrossUsers(t *testing.T) {
 		Name: "Personally aliased quinoa", Brand: "test2c",
 		Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 120,
 	})
-	unique := uuid.NewString()
-	phrase := "brekkie bowl " + unique
+	phrase := "brekkie bowl " + uuid.NewString()
 	// What the model calls it — deliberately NOT what the user typed, so the
 	// raw-phrase personal-alias short-circuit (LookupPersonalAlias(userA,
 	// phrase)) finds nothing and this request falls through to the LLM/cache
 	// path under test, exactly as it did before that short-circuit existed.
 	//
-	// It is a SUPERSET of the phrase rather than a disjoint string, so that
-	// phrase coverage is 1.0 and the reduction factor stays a no-op: this test
-	// is about cache keying, and a tier damped for discarding the user's words
-	// would never be cached at all, silently retargeting it (kora#184).
-	modelFood := "brekkie bowl model quinoa " + unique
+	// DISJOINT from the phrase on purpose, and restored to that after the
+	// kora#184 damping briefly forced it to be a superset: the personal-alias
+	// exemption (see factorForTier) means near-zero phrase coverage no longer
+	// damps a user's own correction, so this test can go back to the shape it
+	// was written in — a model wording that shares nothing with the user's.
+	modelFood := "quinoa bowl (model) " + uuid.NewString()
 	// A real correction: user A's personal alias on the MODEL's wording,
 	// scored 1.0 by the alias tier (see nutrition.Repository.Resolve tier 1),
 	// which is enough on its own to reach TierAuto and get cached.
@@ -954,6 +954,82 @@ func TestResolveGuesses_PhraseCoverageDampsConfidence(t *testing.T) {
 		require.Len(t, res.Candidates, 1)
 		require.Equal(t, TierAuto, res.Candidates[0].Tier,
 			"a photo carries no phrase, so there is nothing for the model to have discarded")
+	})
+}
+
+// The exemption and its boundary, as a pair — the whole point being that the
+// two halves are IDENTICAL but for who owns the alias. In both, the user types
+// one thing, identify answers with something wholly disjoint (phrase coverage
+// ~0), and an exact alias resolves that answer at 1.0.
+//
+// A PERSONAL alias must still reach auto: it is the user's own correction
+// coming back, and damping it asks them the very question they already
+// answered by saving it. A GLOBAL alias must still be damped: it is curated
+// data that merely matched identify's string, which is exactly the kora#184
+// failure ("El Janah 1/2 chicken with Chips" -> a global-aliased `Chicken`).
+func TestResolveGuesses_PersonalAliasIsExemptFromPhraseReduction(t *testing.T) {
+	db := testDB(t)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE brand = 'test184b'") })
+	repo := nutrition.NewRepository(db)
+	ctx := context.Background()
+
+	newResolver := func(guesses []Guess) Resolver {
+		return NewResolver(
+			&stubProvider{guesses: guesses, guessUsage: Usage{Provider: "stub", CallType: "identify_text"}},
+			repo, NoCache{}, &stubMeter{withinBudget: true})
+	}
+
+	t.Run("the user's own alias still reaches auto at zero coverage", func(t *testing.T) {
+		userID := seedTestUser(t, db)
+		item := seedFoodItem(t, repo, nutrition.FoodItem{
+			Name: "Personally aliased quinoa bowl", Brand: "test184b",
+			Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 120,
+		})
+		// Disjoint by construction — no shared token, not even the nonce, so
+		// phrase coverage is exactly 0 and the damping is at full strength. An
+		// alias exists precisely because the user's wording and the model's
+		// wording do not overlap.
+		phrase := "brekkie plate " + uuid.NewString()
+		modelFood := "quinoa medley (model) " + uuid.NewString()
+		require.NoError(t, repo.AddAlias(ctx, userID, modelFood, item.ID))
+		t.Cleanup(func() { db.Exec("DELETE FROM food_aliases WHERE food_item_id = ?", item.ID) })
+
+		res, err := newResolver([]Guess{
+			{Food: modelFood, PortionEstimate: "100 g", Confidence: 0.95},
+		}).ResolveText(ctx, userID, phrase)
+
+		require.NoError(t, err)
+		require.Len(t, res.Candidates, 1)
+		require.Equal(t, nutrition.MatchPersonalAlias, res.Candidates[0].MatchTier)
+		require.Equal(t, TierAuto, res.Candidates[0].Tier,
+			"a correction the user saved themselves must not be re-asked")
+		require.Equal(t, TierAuto, res.Tier)
+	})
+
+	t.Run("a global alias at the same zero coverage is still damped", func(t *testing.T) {
+		userID := seedTestUser(t, db)
+		item := seedFoodItem(t, repo, nutrition.FoodItem{
+			Name: "Globally aliased quinoa bowl", Brand: "test184b",
+			Provenance: nutrition.ProvenanceOFF, KcalPer100g: 120,
+		})
+		// Disjoint on the same terms as the personal case above.
+		phrase := "brekkie plate " + uuid.NewString()
+		modelFood := "quinoa medley (global) " + uuid.NewString()
+		// user_id NULL — curated, not this user's.
+		seedAlias(t, db, modelFood, item.ID)
+		t.Cleanup(func() { db.Exec("DELETE FROM food_aliases WHERE food_item_id = ?", item.ID) })
+
+		res, err := newResolver([]Guess{
+			{Food: modelFood, PortionEstimate: "100 g", Confidence: 0.95},
+		}).ResolveText(ctx, userID, phrase)
+
+		require.NoError(t, err)
+		require.Len(t, res.Candidates, 1)
+		require.Equal(t, nutrition.MatchAlias, res.Candidates[0].MatchTier)
+		require.NotEqual(t, TierAuto, res.Candidates[0].Tier,
+			"kora#184: curated data matching the model's own wording is not the user's say-so")
+		require.Equal(t, 1.0, res.Candidates[0].MatchScore,
+			"only the tier is damped — the row still matched the string it was searched with")
 	})
 }
 

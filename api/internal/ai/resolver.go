@@ -177,7 +177,12 @@ func (r Resolver) aliasShortCircuit(ctx context.Context, userID uuid.UUID, phras
 			PortionGrams:   grams,
 			Kcal:           item.KcalPer100g * grams / 100,
 			MatchScore:     1.0,
-			MatchTier:      nutrition.MatchAlias,
+			// Reported as MatchPersonalAlias for the same reason
+			// nutrition.Resolve's personal branch is: this IS the user's own
+			// alias, and stamping it "alias" would make the same event report
+			// two different tiers depending only on whether the raw phrase or
+			// the model's wording happened to hit it.
+			MatchTier:      nutrition.MatchPersonalAlias,
 			Tier:           TierAuto,
 			PortionAssumed: assumed,
 		}},
@@ -539,7 +544,10 @@ func (r Resolver) resolveGuesses(ctx context.Context, userID uuid.UUID, phrase s
 		// never from the guess, which structurally cannot carry one.
 		kcal := top.Item.KcalPer100g * grams / 100
 
-		tier := tierWithReduction(guess.Confidence, top.MatchScore, factor)
+		// Per-candidate, not per-resolution: one guess in a meal may land on the
+		// user's own alias while another does not, and only the former has
+		// earned the exemption.
+		tier := tierWithReduction(guess.Confidence, top.MatchScore, factorForTier(top.MatchTier, factor))
 
 		candidates = append(candidates, ResolvedCandidate{
 			Item:           top.Item,

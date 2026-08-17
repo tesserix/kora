@@ -394,7 +394,7 @@ func TestResolvePersonalAliasExcludesSoftDeleted(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, gotLive, "the live food must still resolve via personal alias")
 	require.Equal(t, live.ID, gotLive[0].Item.ID)
-	require.Equal(t, MatchAlias, gotLive[0].MatchTier)
+	require.Equal(t, MatchPersonalAlias, gotLive[0].MatchTier)
 }
 
 // TestResolveGlobalAliasExcludesSoftDeleted is the regression guard for the

@@ -181,6 +181,12 @@ func (r Repository) Resolve(ctx context.Context, userID uuid.UUID, phrase string
 	// both personally and globally, `seen` keeps the personal one and drops
 	// the global duplicate. Both score 1.0: within the alias tier, order
 	// carries the precedence, not the score.
+	//
+	// They are stamped with DIFFERENT tiers, though — MatchPersonalAlias vs
+	// MatchAlias — because the score alone cannot tell the two apart
+	// downstream, and one of them (the user's own correction) is trusted
+	// enough to be exempt from ai's phrase-reduction damping while the other
+	// is not. See the MatchPersonalAlias doc comment in model.go.
 	aliasKey := strings.ToLower(strings.TrimSpace(phrase))
 	if userID != uuid.Nil {
 		var personalItems []FoodItem
@@ -197,7 +203,7 @@ func (r Repository) Resolve(ctx context.Context, userID uuid.UUID, phrase string
 			Scan(&personalItems).Error; err != nil {
 			return nil, fmt.Errorf("nutrition: resolve personal alias: %w", err)
 		}
-		add(personalItems, MatchAlias, func(FoodItem) float64 { return 1.0 })
+		add(personalItems, MatchPersonalAlias, func(FoodItem) float64 { return 1.0 })
 	}
 	var aliasItems []FoodItem
 	// ORDER BY fa.created_at DESC, fa.id DESC: unlike the personal query

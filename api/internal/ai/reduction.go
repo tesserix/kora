@@ -70,6 +70,30 @@ func reductionFactor(coverage float64) float64 {
 	return f
 }
 
+// factorForTier exempts a candidate the USER themselves resolved from the
+// damping, and only that candidate.
+//
+// The damping asks "how much of what the user said survived into the guesses?"
+// — a fair question of the model's wording, but the wrong question of a
+// personal alias. When someone types "brekkie bowl", identify answers "quinoa
+// bowl", and their OWN saved alias resolves it at 1.0, phrase coverage is near
+// zero BY CONSTRUCTION: the whole point of an alias is that the user's wording
+// and the food's wording are disjoint. Damping there asks the user the exact
+// question they already answered when they saved the correction.
+//
+// Deliberately NOT extended to MatchAlias. A GLOBAL alias is curated data that
+// happened to match identify's string, carrying no evidence that THIS user
+// meant it — exempting it would sail the kora#184 case (a global alias on
+// "chicken", from "El Janah 1/2 chicken with Chips") straight back through
+// undamped. That distinction is the entire reason nutrition.Resolve stamps the
+// two branches differently.
+func factorForTier(matchTier string, factor float64) float64 {
+	if matchTier == nutrition.MatchPersonalAlias {
+		return 1
+	}
+	return factor
+}
+
 // tierWithReduction is TierFor with the reduction factor applied. Both inputs
 // are scaled, which — since TierFor takes their MIN and the factor is
 // non-negative — is exactly scaling that min: the damping changes how far the

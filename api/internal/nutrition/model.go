@@ -24,9 +24,18 @@ const (
 )
 
 const (
-	MatchAlias     = "alias"
-	MatchFullText  = "full_text"
-	MatchEmbedding = "embedding"
+	// MatchPersonalAlias is an alias THIS user saved themselves — a correction
+	// they made once and expect to stick. It is split out from MatchAlias
+	// because the two carry very different authority despite both scoring 1.0:
+	// a personal alias is the user's own answer coming back, while a global
+	// alias is curated data that happens to match the string identify produced.
+	// Downstream (see ai/reduction.go) only the personal one is exempt from
+	// phrase-reduction damping; exempting both would reopen kora#184, where a
+	// global alias for "chicken" auto-logged an unrelated row.
+	MatchPersonalAlias = "personal_alias"
+	MatchAlias         = "alias"
+	MatchFullText      = "full_text"
+	MatchEmbedding     = "embedding"
 )
 
 // Candidate is a ranked resolution result. MatchScore is normalized 0..1.
