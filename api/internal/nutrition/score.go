@@ -64,6 +64,22 @@ const (
 	// Still a RANKING signal on rankKey, never on score — the same discipline
 	// as the other two, so it cannot move a confidence tier by itself.
 	brandMatchBonus = 0.40
+
+	// localeBonus prefers food from the user's own food culture (kora#212
+	// Phase 4).
+	//
+	// Sized SMALLER than the others on purpose. `headBonus` and `genericBonus`
+	// act on the query, and `brandMatchBonus` on something the user actually
+	// said; locale acts on a proxy for the user — their timezone — which is
+	// right most of the time and silently wrong for travellers, expats and
+	// anyone eating another culture's food. It should break ties between
+	// comparable rows and settle "chips"/"biscuit"/"capsicum", not overrule a
+	// clearly better lexical match.
+	//
+	// It BOOSTS and never filters, which is the property that makes a proxy
+	// safe here: an Australian user eating Indian food is the normal case, so
+	// being wrong costs a small ordering nudge rather than a missing answer.
+	localeBonus = 0.10
 )
 
 // brandMatches reports whether a candidate's brand is the brand the user named.
