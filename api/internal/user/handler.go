@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
@@ -69,8 +70,12 @@ func (h Handler) UpdateShareProgress(c *gin.Context) {
 // pathological value cannot break the friends list or leaderboard layouts.
 const MaxDisplayNameLen = 100
 
+// updateProfileBody uses POINTERS so an absent field is distinguishable from
+// an empty one. A client patching only the timezone must not be read as
+// clearing the display name, and vice versa.
 type updateProfileBody struct {
-	DisplayName string `json:"display_name"`
+	DisplayName *string `json:"display_name"`
+	Timezone    *string `json:"timezone"`
 }
 
 // UpdateProfile writes the caller's own display name. The row is resolved from
@@ -87,18 +92,47 @@ func (h Handler) UpdateProfile(c *gin.Context) {
 		httpx.Error(c, http.StatusBadRequest, "invalid_input", "malformed body")
 		return
 	}
-	name := strings.TrimSpace(req.DisplayName)
-	if name == "" {
-		httpx.Error(c, http.StatusBadRequest, "invalid_input", "display name is required")
+	if req.DisplayName == nil && req.Timezone == nil {
+		httpx.Error(c, http.StatusBadRequest, "invalid_input", "nothing to update")
 		return
 	}
-	if utf8.RuneCountInString(name) > MaxDisplayNameLen {
-		httpx.Error(c, http.StatusBadRequest, "invalid_input", "display name is too long")
-		return
+	if req.DisplayName != nil {
+		name := strings.TrimSpace(*req.DisplayName)
+		if name == "" {
+			httpx.Error(c, http.StatusBadRequest, "invalid_input", "display name is required")
+			return
+		}
+		if utf8.RuneCountInString(name) > MaxDisplayNameLen {
+			httpx.Error(c, http.StatusBadRequest, "invalid_input", "display name is too long")
+			return
+		}
+		if err := h.repo.SetDisplayName(c.Request.Context(), id, name); err != nil {
+			httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not update profile")
+			return
+		}
 	}
-	if err := h.repo.SetDisplayName(c.Request.Context(), id, name); err != nil {
-		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not update profile")
-		return
+	if req.Timezone != nil {
+		tz := strings.TrimSpace(*req.Timezone)
+		// time.LoadLocation is the authority, not a regex or an allow-list:
+		// it is what every consumer of this value will call, so anything it
+		// rejects would be stored only to fail later at read time.
+		//
+		// "" and "Local" are refused explicitly. LoadLocation ACCEPTS both —
+		// "" means UTC and "Local" means the SERVER's zone — so storing either
+		// would look successful and then silently resolve every streak window
+		// and food locale against the wrong place.
+		if tz == "" || tz == "Local" {
+			httpx.Error(c, http.StatusBadRequest, "invalid_input", "timezone must be a named IANA zone")
+			return
+		}
+		if _, err := time.LoadLocation(tz); err != nil {
+			httpx.Error(c, http.StatusBadRequest, "invalid_input", "unknown timezone")
+			return
+		}
+		if err := h.repo.SetTimezone(c.Request.Context(), id, tz); err != nil {
+			httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not update profile")
+			return
+		}
 	}
 	u, err := h.repo.ByID(c.Request.Context(), id)
 	if err != nil {

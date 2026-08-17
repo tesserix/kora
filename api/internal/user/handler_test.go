@@ -279,3 +279,59 @@ func TestUpdateProfileMultibyteBoundary(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, w101.Code, "101 characters should be rejected")
 }
+
+func TestUpdateProfileSetsTimezone(t *testing.T) {
+	db := testDB(t)
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", "test-uid-tz") })
+	r := newProfileRouter(t, db, "test-uid-tz", "tz@test.dev")
+
+	w := patchProfile(t, r, `{"timezone":"Asia/Kolkata"}`)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var got string
+	db.Raw("SELECT timezone FROM users WHERE firebase_uid = ?", "test-uid-tz").Scan(&got)
+	assert.Equal(t, "Asia/Kolkata", got, "the pre-#84 default Australia/Sydney must be replaceable")
+}
+
+// TestUpdateProfileTimezoneOnlyLeavesTheNameAlone is the reason the request
+// body uses pointers. A client patching only the timezone must not be read as
+// clearing the display name.
+func TestUpdateProfileTimezoneOnlyLeavesTheNameAlone(t *testing.T) {
+	db := testDB(t)
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", "test-uid-tzname") })
+	r := newProfileRouter(t, db, "test-uid-tzname", "tzname@test.dev")
+
+	require.Equal(t, http.StatusOK, patchProfile(t, r, `{"display_name":"Grace Hopper"}`).Code)
+	require.Equal(t, http.StatusOK, patchProfile(t, r, `{"timezone":"Europe/London"}`).Code)
+
+	var name, tz string
+	db.Raw("SELECT display_name, timezone FROM users WHERE firebase_uid = ?", "test-uid-tzname").Row().Scan(&name, &tz)
+	assert.Equal(t, "Grace Hopper", name, "a timezone-only patch must not clear the name")
+	assert.Equal(t, "Europe/London", tz)
+}
+
+func TestUpdateProfileRejectsBadTimezones(t *testing.T) {
+	db := testDB(t)
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", "test-uid-badtz") })
+	r := newProfileRouter(t, db, "test-uid-badtz", "badtz@test.dev")
+
+	for _, tc := range []struct{ body, why string }{
+		{`{"timezone":"Mars/Olympus_Mons"}`, "an unknown zone must not be stored"},
+		{`{"timezone":"   "}`, "blank is not a zone"},
+		// time.LoadLocation ACCEPTS both of these, which is exactly why they
+		// are refused explicitly: "" resolves to UTC and "Local" to the
+		// SERVER's zone, so either would store successfully and then silently
+		// resolve every streak window and food locale against the wrong place.
+		{`{"timezone":""}`, `"" is UTC to LoadLocation, never what the user meant`},
+		{`{"timezone":"Local"}`, `"Local" is the server's zone, never the user's`},
+		{`{}`, "a patch with no fields has nothing to do"},
+	} {
+		t.Run(tc.why, func(t *testing.T) {
+			w := patchProfile(t, r, tc.body)
+			require.Equal(t, http.StatusBadRequest, w.Code, tc.why)
+			var tz string
+			db.Raw("SELECT timezone FROM users WHERE firebase_uid = ?", "test-uid-badtz").Scan(&tz)
+			assert.Equal(t, DefaultTimezone, tz, "a rejected patch must leave the row untouched")
+		})
+	}
+}
