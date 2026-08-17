@@ -14,6 +14,45 @@ files here (except the committed `*.sample.*`) are gitignored.
 photos.jsonl: {"file": "photos/omelette.jpg", "expected_name": "Egg", "expected_kcal": 155, "grams": 100}
 - `file` is relative to testdata/eval/.
 
+## ranking.sample.jsonl (one JSON object per line) — provider-free
+
+Committed, unlike the files above: this is the regression suite for index and
+ranking changes, so it has to travel with the code. `ranking.jsonl` overrides it
+if present (and stays gitignored).
+
+    {"phrase": "Coke Zero", "guesses": [{"food": "coke zero", "portion_estimate": "1 can"}], "expected_name": "Coke Zero", "note": "..."}
+
+- `phrase`   — the text a user would type/speak.
+- `guesses`  — the guess strings identify is known to emit for that phrase
+  (`food`, optional `portion_estimate`, `cooking_method`, `confidence`; confidence
+  defaults to the 0.95 identify was measured emitting). The harness feeds these
+  to `nutrition.Resolve` directly, so no AI provider is called and nothing is spent.
+- `expected_name` — substring expected in the top-1 item name. Recorded ONLY where
+  the right answer is genuinely known; **left empty where it is still a judgement
+  call**, and it must stay that way. A case with no expected value still prints
+  what happens — that is the point.
+- `note`     — provenance of the case (which production failure, what it probes).
+
+Run it:
+
+    set -a && . ./.env && set +a
+    KORA_EVAL=1 go test -tags eval ./internal/ai/ -run TestEvalRanking -v
+
+Per guess it prints the top 10 candidates (name, provenance, kcal/100g,
+`MatchScore`, `MatchTier`), the case's `nutrition.PhraseCoverage`, the reduction
+factor it produces, and the tier before and after damping. Machine-readable TSV
+goes to `KORA_EVAL_RANKING_OUT` (default `ranking.out.tsv` in this directory) —
+two runs over an unchanged index produce a byte-identical file, so
+`diff before.tsv after.tsv` is the measurement.
+
+Read-only against the database: SELECTs only, and the TSV is the one file it
+writes. It never calls a provider, so the embedding tier of `nutrition.Resolve`
+is skipped (nil query vector) — a ranking change visible only through embeddings
+is out of scope by design, which is the price of determinism.
+
+The only assertion is that cases with a KNOWN `expected_name` still pass.
+Everything else is diagnostic.
+
 ## Thresholds (exit gate)
 - chat top-1 id accuracy  >= 0.90
 - photo top-1 id accuracy >= 0.80
