@@ -53,7 +53,41 @@ const (
 	// the user actually asked for — and when they DID ask, brandEvidence
 	// switches the bonus off entirely rather than relying on its magnitude.
 	genericBonus = 0.15
+
+	// brandMatchBonus rewards a row whose brand is the one the user actually
+	// named (kora#212 Phase 3). Larger than genericBonus and headBonus because
+	// it acts on strictly better evidence: those two are heuristics about what
+	// a bare phrase probably means, whereas this is the user having said the
+	// brand out loud. When someone types "McSpicy", a McDonald's row should
+	// beat a generic chicken burger decisively rather than by a nose.
+	//
+	// Still a RANKING signal on rankKey, never on score — the same discipline
+	// as the other two, so it cannot move a confidence tier by itself.
+	brandMatchBonus = 0.40
 )
+
+// brandMatches reports whether a candidate's brand is the brand the user named.
+// want must already be Normalize()d; got is the raw column value.
+//
+// Substring in either direction, because the two sides are written by different
+// hands and rarely agree exactly: the user says "McDonald's" while USDA stores
+// "McDONALD'S" (normalizing settles the case), and says "Coke" where
+// OpenFoodFacts stores "Coca-Cola Amatil" or USDA stores "KRAFT BREAKSTONE'S
+// FREE" for something a user would just call "Kraft". Requiring equality would
+// match almost nothing; containment matches the shapes that actually occur.
+//
+// Empty on either side is never a match — an unbranded row must not be treated
+// as matching a named brand just because "" is contained in everything.
+func brandMatches(want, got string) bool {
+	if want == "" {
+		return false
+	}
+	normalized := Normalize(got)
+	if normalized == "" {
+		return false
+	}
+	return strings.Contains(normalized, want) || strings.Contains(want, normalized)
+}
 
 // headToken returns the head noun of a raw (un-normalized) food name — the
 // signal that identifies which candidate is the generic food rather than a

@@ -46,6 +46,20 @@ const (
 		"estimated portion (a short human phrase like \"1 cup\" or \"150g\"), " +
 		"the cooking method if apparent (e.g. \"grilled\", \"raw\", \"fried\"), " +
 		"and your confidence (0.0-1.0) that the identification is correct. " +
+		// kora#212 Phase 3. Splitting these out is the whole point: a brand or
+		// a qualifier left inside `food` is information the resolver can never
+		// recover, because it searches a name column where "El Janah chicken"
+		// matches nothing and "chicken" matches everything.
+		"Put the food itself in \"food\" — the plain food name, WITHOUT any " +
+		"brand, shop name, portion, or descriptive words. " +
+		"Put any brand, restaurant or shop the user named in \"brand\" (for " +
+		"example \"El Janah\", \"McDonald's\", \"Woolworths\"), and use an " +
+		"empty string when they named none — never guess a brand that was not " +
+		"stated. " +
+		"Put words that narrow down WHICH version of the food it is in " +
+		"\"qualifiers\" (for example \"charcoal\", \"wholemeal\", \"diet\", " +
+		"\"skinless\"), as a list, and use an empty list when there are none. " +
+		"Do not repeat the portion or the cooking method in \"qualifiers\". " +
 		"Do NOT estimate or state any calorie, macro, or other nutrition number " +
 		"— nutrition values are looked up separately and any number you " +
 		"provide would be ignored and could mislead. Respond with JSON only, " +
@@ -147,11 +161,18 @@ func guessResponseSchema() *genai.Schema {
 			Type: genai.TypeObject,
 			Properties: map[string]*genai.Schema{
 				"food":             {Type: genai.TypeString},
+				"brand":            {Type: genai.TypeString},
+				"qualifiers":       {Type: genai.TypeArray, Items: &genai.Schema{Type: genai.TypeString}},
 				"portion_estimate": {Type: genai.TypeString},
 				"cooking_method":   {Type: genai.TypeString},
 				"confidence":       {Type: genai.TypeNumber},
 			},
-			Required: []string{"food", "portion_estimate", "cooking_method", "confidence"},
+			// brand and qualifiers are REQUIRED so the model must decide about
+			// them on every guess. Making them optional invites it to omit the
+			// field when unsure, which is indistinguishable from "no brand" —
+			// and "no brand" is a load-bearing signal for Phase 2's
+			// generic-preference policy, not an absence.
+			Required: []string{"food", "brand", "qualifiers", "portion_estimate", "cooking_method", "confidence"},
 		},
 	}
 }
