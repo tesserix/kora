@@ -62,10 +62,17 @@ const rankingTopK = 10
 const defaultIdentifyConfidence = 0.95
 
 type rankingGuess struct {
-	Food            string  `json:"food"`
-	PortionEstimate string  `json:"portion_estimate"`
-	CookingMethod   string  `json:"cooking_method"`
-	Confidence      float64 `json:"confidence"`
+	Food string `json:"food"`
+	// Brand and Qualifiers mirror ai.Guess (kora#212 Phase 3). Recorded in the
+	// dataset because the harness is provider-free: it replays what identify
+	// WOULD have returned, so if these are missing here the harness measures a
+	// resolver that never learns the brand — which is precisely the behaviour
+	// Phase 3 removed, and it would score the fix as a no-op.
+	Brand           string   `json:"brand"`
+	Qualifiers      []string `json:"qualifiers"`
+	PortionEstimate string   `json:"portion_estimate"`
+	CookingMethod   string   `json:"cooking_method"`
+	Confidence      float64  `json:"confidence"`
 }
 
 type rankingCase struct {
@@ -88,6 +95,8 @@ func (c rankingCase) guesses() []ai.Guess {
 		}
 		out = append(out, ai.Guess{
 			Food:            g.Food,
+			Brand:           g.Brand,
+			Qualifiers:      g.Qualifiers,
 			PortionEstimate: g.PortionEstimate,
 			CookingMethod:   g.CookingMethod,
 			Confidence:      conf,
@@ -211,7 +220,11 @@ func TestEvalRanking(t *testing.T) {
 		for _, g := range guesses {
 			// nil query vector = no provider call, no AI spend, no embedding
 			// tier. See the file header.
-			cands, err := foods.Resolve(ctx, anonUser, g.Food, nil, rankingTopK)
+			cands, err := foods.ResolveQuery(ctx, anonUser, nutrition.Query{
+				Text:       g.Food,
+				Brand:      g.Brand,
+				Qualifiers: g.Qualifiers,
+			}, nil, rankingTopK)
 			if err != nil {
 				t.Fatalf("resolve %q (phrase %q): %v", g.Food, c.Phrase, err)
 			}

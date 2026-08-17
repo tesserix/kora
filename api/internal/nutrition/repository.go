@@ -152,16 +152,62 @@ func (r Repository) Insert(ctx context.Context, items []FoodItem) (int, error) {
 	return inserted, nil
 }
 
-// Resolve ranks food candidates for a phrase across three tiers:
-// alias (exact normalized) > full-text (tsvector) > embedding (cosine).
+// Query is a structured food query: what the user asked for, with the parts
+// that mean different things kept apart.
+//
+// It exists because a flat string cannot express "the user named a brand".
+// identify produces this shape (kora#212 Phase 3, ai.Guess), and collapsing it
+// back into one string here would discard the same information the phase was
+// created to preserve. Declared in this package rather than taking ai.Guess
+// directly because ai imports nutrition — the dependency cannot run both ways.
+type Query struct {
+	// Text is the food core, e.g. "chicken".
+	Text string
+	// Brand is the brand the user named, empty when they named none. Empty is
+	// a meaningful state, not missing data: it is what marks a query as
+	// unqualified for the generic-preference policy.
+	Brand string
+	// Qualifiers narrow which variant is meant, e.g. ["charcoal"].
+	Qualifiers []string
+}
+
+// Resolve ranks food candidates for a plain phrase. It is the unstructured
+// entry point, equivalent to a Query carrying no brand and no qualifiers, and
+// is kept because most callers (barcode paths, admin search, the recipe
+// importer) genuinely have nothing but a string.
+//
+// A caller that HAS a structured guess should use ResolveQuery instead:
+// flattening it here throws away the brand, and no downstream scoring can get
+// it back.
+func (r Repository) Resolve(ctx context.Context, userID uuid.UUID, phrase string, queryVec []float32, limit int) ([]Candidate, error) {
+	return r.ResolveQuery(ctx, userID, Query{Text: phrase}, queryVec, limit)
+}
+
+// ResolveQuery ranks food candidates for a structured query across three
+// tiers: alias (exact normalized) > full-text (tsvector) > embedding (cosine).
 // queryVec may be nil to skip the embedding tier.
 // userID scopes the alias tier: that user's personal aliases are checked
 // first, then curated/global ones. uuid.Nil means global-only.
-func (r Repository) Resolve(ctx context.Context, userID uuid.UUID, phrase string, queryVec []float32, limit int) ([]Candidate, error) {
+func (r Repository) ResolveQuery(ctx context.Context, userID uuid.UUID, q Query, queryVec []float32, limit int) ([]Candidate, error) {
+	phrase := q.Text
 	if limit <= 0 || limit > searchLimitMax {
 		limit = searchLimitMax
 	}
+	// The ALIAS tier keys off the user's plain phrase, so it must not see the
+	// qualifiers — aliases are stored as the exact words someone typed, and
+	// appending anything makes every lookup miss.
+	//
+	// Retrieval and scoring use the qualified form (kora#212 Phase 3). This is
+	// the half of the phase that does the work: without it, splitting "Coke
+	// Zero" into food "cola" + brand "Coca-Cola" makes the search term STRICTLY
+	// WEAKER than the flat string it replaced, and a row literally named "Cola"
+	// scores a perfect 1.0 and wins. Searching "cola zero sugar" instead puts
+	// coverage behind the words that actually distinguish the product.
 	norm := Normalize(phrase)
+	searchNorm := Normalize(strings.TrimSpace(phrase + " " + strings.Join(q.Qualifiers, " ")))
+	if searchNorm == "" {
+		searchNorm = norm
+	}
 	seen := map[uuid.UUID]bool{}
 	var out []Candidate
 
@@ -239,7 +285,7 @@ func (r Repository) Resolve(ctx context.Context, userID uuid.UUID, phrase string
 			return s
 		}
 		s := &scoredItem{item: it}
-		s.comp.Coverage, s.comp.Precision = tokenOverlap(norm, it.NormalizedName)
+		s.comp.Coverage, s.comp.Precision = tokenOverlap(searchNorm, it.NormalizedName)
 		pool[it.ID] = s
 		order = append(order, it.ID)
 		return s
@@ -272,7 +318,7 @@ func (r Repository) Resolve(ctx context.Context, userID uuid.UUID, phrase string
 		     WHERE to_tsvector('simple', fi.normalized_name) @@ plainto_tsquery('simple', ?)
 		     AND fi.deleted_at IS NULL
 		     ORDER BY similarity(fi.normalized_name, ?) DESC
-		     LIMIT ?`, norm, norm, norm, resolveScanLimit).
+		     LIMIT ?`, searchNorm, searchNorm, searchNorm, resolveScanLimit).
 		Scan(&ftRows).Error; err != nil {
 		return nil, fmt.Errorf("nutrition: resolve fulltext: %w", err)
 	}
@@ -337,7 +383,7 @@ func (r Repository) Resolve(ctx context.Context, userID uuid.UUID, phrase string
 			         WHERE fi.embedding IS NOT NULL AND fi.deleted_at IS NULL
 			         ORDER BY distance ASC LIMIT ?
 			     ) ranked`,
-				norm, pgvector.NewVector(queryVec), resolveScanLimit).
+				searchNorm, pgvector.NewVector(queryVec), resolveScanLimit).
 			Scan(&embRows).Error; err != nil {
 			return nil, fmt.Errorf("nutrition: resolve embedding: %w", err)
 		}
@@ -359,18 +405,28 @@ func (r Repository) Resolve(ctx context.Context, userID uuid.UUID, phrase string
 	// unmodified quality() and is what MatchScore is ultimately derived from,
 	// so the head-noun signal can move a row to top-1 without ever inflating
 	// its reported confidence.
-	qTokens := fieldSet(norm)
+	qTokens := fieldSet(searchNorm)
 	scoredList := make([]*scoredItem, 0, len(order))
 	for _, id := range order {
 		scoredList = append(scoredList, pool[id])
 	}
 
-	// kora#212 Phase 2's retrieval policy. An unqualified query prefers generic
-	// reference data; a query that names a brand turns the preference off and
-	// lets branded products compete normally. Evaluated once for the pool, not
-	// per candidate, because "did the user name a brand" is a property of the
-	// query and the candidate set together.
-	preferGenerics := !queryNamesABrand(qTokens, scoredList)
+	// kora#212's retrieval policy. An unqualified query prefers generic
+	// reference data; a query that names a brand turns that preference off and
+	// rewards rows of the brand actually named.
+	//
+	// Phase 3 changes where "did the user name a brand" comes from. Phase 2 had
+	// to INFER it by matching query tokens against candidate brands, because a
+	// flat phrase was all the resolver received. A structured Query states it,
+	// so when q.Brand is set the inference is skipped entirely — it exists now
+	// only for the plain-string Resolve path, which still has nothing better.
+	namedBrand := strings.TrimSpace(q.Brand)
+	brandNamed := namedBrand != ""
+	if !brandNamed {
+		brandNamed = queryNamesABrand(qTokens, scoredList)
+	}
+	preferGenerics := !brandNamed
+	wantBrand := Normalize(namedBrand)
 
 	for _, s := range scoredList {
 		s.score = quality(s.comp)
@@ -385,6 +441,17 @@ func (r Repository) Resolve(ctx context.Context, userID uuid.UUID, phrase string
 		// so a row's rankKey can never fall below its own quality.
 		if preferGenerics && s.item.EntityType == EntityTypeGeneric {
 			s.rankKey += genericBonus
+		}
+		// The user named a brand and this row is that brand. Rewarding the
+		// match rather than filtering out everything else is deliberate: a
+		// hard filter returns NOTHING when the named brand is absent from the
+		// index — which is the common case, since El Janah and most local
+		// takeaways have no rows at all — and an empty candidate set is a
+		// worse answer than a ranked generic one the user can correct.
+		// Matching rows still win comfortably when they exist, which since
+		// kora#217 includes the 310 USDA chain rows that finally carry a brand.
+		if brandNamed && wantBrand != "" && brandMatches(wantBrand, s.item.Brand) {
+			s.rankKey += brandMatchBonus
 		}
 	}
 	sort.SliceStable(scoredList, func(i, j int) bool {

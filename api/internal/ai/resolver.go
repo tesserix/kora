@@ -537,7 +537,15 @@ func (r Resolver) resolveGuesses(ctx context.Context, userID uuid.UUID, phrase s
 			r.record(ctx, userID, embUsage)
 		}
 
-		cands, err := r.foods.Resolve(ctx, userID, guess.Food, vec, resolveTopK)
+		// Pass the STRUCTURED guess, not just guess.Food. This is the point of
+		// kora#212 Phase 3: the brand the user named reaches the index instead
+		// of being dropped on the floor here, which is what made "El Janah 1/2
+		// chicken with Chips" arrive as the bare word "chicken".
+		cands, err := r.foods.ResolveQuery(ctx, userID, nutrition.Query{
+			Text:       guess.Food,
+			Brand:      guess.Brand,
+			Qualifiers: guess.Qualifiers,
+		}, vec, resolveTopK)
 		if err != nil {
 			return Resolution{}, fmt.Errorf("ai: resolve guesses: %w", err)
 		}
