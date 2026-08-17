@@ -394,7 +394,7 @@ func TestEditLogFoodChangeWithCorrectionPhraseRecordsAlias(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, cands)
 	require.Equal(t, newItem.ID, cands[0].Item.ID)
-	require.Equal(t, nutrition.MatchAlias, cands[0].MatchTier)
+	require.Equal(t, nutrition.MatchPersonalAlias, cands[0].MatchTier)
 }
 
 func TestEditLogFoodChangeWithoutCorrectionPhraseRecordsNoAlias(t *testing.T) {

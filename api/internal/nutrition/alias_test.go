@@ -44,7 +44,7 @@ func TestPersonalAliasResolvesForItsOwner(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, got)
 	require.Equal(t, quinoa.ID, got[0].Item.ID)
-	require.Equal(t, MatchAlias, got[0].MatchTier)
+	require.Equal(t, MatchPersonalAlias, got[0].MatchTier)
 }
 
 func TestPersonalAliasIsInvisibleToOtherUsers(t *testing.T) {
@@ -129,7 +129,7 @@ func TestAddAliasNormalizesCaseAndWhitespaceOnWrite(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, got, "alias written with whitespace/case must resolve via its normalized form")
 	require.Equal(t, quinoa.ID, got[0].Item.ID)
-	require.Equal(t, MatchAlias, got[0].MatchTier)
+	require.Equal(t, MatchPersonalAlias, got[0].MatchTier)
 }
 
 // TestAddAliasBlankIsNoOp is the finding-3 regression test for AddAlias's

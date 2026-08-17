@@ -144,7 +144,7 @@ func (r Resolver) ResolveText(ctx context.Context, userID uuid.UUID, phrase stri
 	}
 
 	key := CacheKey("phrase", userID, phrase)
-	return r.resolve(ctx, userID, key,
+	return r.resolve(ctx, userID, key, phrase,
 		func(c context.Context) ([]Guess, Usage, error) { return r.provider.IdentifyText(c, phrase) },
 		func(guesses []Guess) string { return phrase },
 	)
@@ -177,7 +177,12 @@ func (r Resolver) aliasShortCircuit(ctx context.Context, userID uuid.UUID, phras
 			PortionGrams:   grams,
 			Kcal:           item.KcalPer100g * grams / 100,
 			MatchScore:     1.0,
-			MatchTier:      nutrition.MatchAlias,
+			// Reported as MatchPersonalAlias for the same reason
+			// nutrition.Resolve's personal branch is: this IS the user's own
+			// alias, and stamping it "alias" would make the same event report
+			// two different tiers depending only on whether the raw phrase or
+			// the model's wording happened to hit it.
+			MatchTier:      nutrition.MatchPersonalAlias,
 			Tier:           TierAuto,
 			PortionAssumed: assumed,
 		}},
@@ -220,7 +225,10 @@ func (r Resolver) resolveAliasPortion(ctx context.Context, userID uuid.UUID, phr
 func (r Resolver) ResolvePhoto(ctx context.Context, userID uuid.UUID, image []byte, mime string) (Resolution, error) {
 	sum := sha256.Sum256(image)
 	key := CacheKey("photo", userID, hex.EncodeToString(sum[:]))
-	return r.resolve(ctx, userID, key,
+	// The empty phrase is load-bearing, not a placeholder: a photo says nothing
+	// that identify could have discarded, so phraseCoverage returns 1 and the
+	// reduction factor is exactly 1.0 — this path behaves as it always has.
+	return r.resolve(ctx, userID, key, "",
 		func(c context.Context) ([]Guess, Usage, error) { return r.provider.IdentifyPhoto(c, image, mime) },
 		func(guesses []Guess) string {
 			if len(guesses) == 0 {
@@ -234,6 +242,11 @@ func (r Resolver) ResolvePhoto(ctx context.Context, userID uuid.UUID, image []by
 // resolve implements the shared cache → budget → identify → resolveGuesses
 // → decompose flow for both ResolveText and ResolvePhoto.
 //
+// phrase is the user's original utterance, threaded through to resolveGuesses
+// so confidence can be damped by how much of it the guesses actually account
+// for. ResolvePhoto passes "" (no phrase exists), which makes that damping a
+// no-op there.
+//
 // decomposeSubject derives the dish name passed to Provider.Decompose from
 // the identified guesses (ResolveText uses the original phrase directly;
 // ResolvePhoto has no phrase, so it uses the top guess's Food). An empty
@@ -243,6 +256,7 @@ func (r Resolver) resolve(
 	ctx context.Context,
 	userID uuid.UUID,
 	key string,
+	phrase string,
 	identify func(context.Context) ([]Guess, Usage, error),
 	decomposeSubject func([]Guess) string,
 ) (Resolution, error) {
@@ -276,7 +290,7 @@ func (r Resolver) resolve(
 	}
 	r.recordAll(ctx, userID, sink.drain(), usage)
 
-	res, err := r.resolveGuesses(ctx, userID, guesses)
+	res, err := r.resolveGuesses(ctx, userID, phrase, guesses)
 	if err != nil {
 		return Resolution{}, fmt.Errorf("ai: resolve: resolve guesses: %w", err)
 	}
@@ -484,11 +498,31 @@ func tierRank(t Tier) int {
 // nutrition numbers (see types.go), so the only way a candidate's Kcal is
 // computed is top.Item.KcalPer100g * grams / 100 — from the row, never from
 // the guess.
-func (r Resolver) resolveGuesses(ctx context.Context, userID uuid.UUID, guesses []Guess) (Resolution, error) {
+//
+// phrase is the user's ORIGINAL utterance (empty on the photo path, which has
+// none). It never reaches the index — every lookup below still searches on
+// guess.Food — it only measures how much of what the user said the guesses
+// collectively kept, and damps the tier accordingly. Without it the pipeline is
+// most confident exactly when identify discarded the most: "El Janah 1/2
+// chicken with Chips" became the bare guess "chicken", which matched an
+// OpenFoodFacts row literally named `Chicken` at a perfect 1.0 and auto-logged
+// 280 kcal/100g without asking (kora#184).
+func (r Resolver) resolveGuesses(ctx context.Context, userID uuid.UUID, phrase string, guesses []Guess) (Resolution, error) {
 	var candidates []ResolvedCandidate
 	bestTier := TierFollowUp
 	bestRank := -1
 	provenance := ""
+
+	// One factor for the whole resolution: coverage is a property of the
+	// phrase and the guess set together, not of any single candidate.
+	coverage := phraseCoverage(phrase, guesses)
+	factor := reductionFactor(coverage)
+
+	// What the tiers WOULD have been without the damping, tracked so the log
+	// below can report the change rather than just the outcome.
+	undampedBest := TierFollowUp
+	undampedRank := -1
+	damped := 0
 
 	for _, guess := range guesses {
 		vec, embUsage, embErr := r.provider.Embed(ctx, guess.Food)
@@ -517,7 +551,19 @@ func (r Resolver) resolveGuesses(ctx context.Context, userID uuid.UUID, guesses 
 		// never from the guess, which structurally cannot carry one.
 		kcal := top.Item.KcalPer100g * grams / 100
 
-		tier := TierFor(guess.Confidence, top.MatchScore)
+		// Per-candidate, not per-resolution: one guess in a meal may land on the
+		// user's own alias while another does not, and only the former has
+		// earned the exemption.
+		tier := tierWithReduction(guess.Confidence, top.MatchScore, factorForTier(top.MatchTier, factor))
+
+		undamped := tierWithReduction(guess.Confidence, top.MatchScore, 1)
+		if undamped != tier {
+			damped++
+		}
+		if rank := tierRank(undamped); rank > undampedRank {
+			undampedRank = rank
+			undampedBest = undamped
+		}
 
 		candidates = append(candidates, ResolvedCandidate{
 			Item:           top.Item,
@@ -534,6 +580,37 @@ func (r Resolver) resolveGuesses(ctx context.Context, userID uuid.UUID, guesses 
 			bestTier = tier
 			provenance = top.Item.Provenance
 		}
+	}
+
+	// phraseCoverageFloor is argued from principle and checked against two
+	// production cases; minReturnableMatchScore (above) was DERIVED from
+	// measured outcomes, and this line is what lets the floor be held to that
+	// same standard later. Each record pairs the coverage that was measured
+	// with the tier change it caused, so a sweep of production logs can answer
+	// "at what coverage did damping start costing correct answers?".
+	//
+	// Emitted ONLY when the damping actually moved a tier, which is both the
+	// interesting event and self-limiting: at most one line per resolve, and
+	// none at all on the photo path or on a fully-accounted-for phrase.
+	//
+	// PRIVACY: the user's utterance is NOT logged, and must not be. What goes
+	// out is the coverage ratio, its denominator as a COUNT (phrase_tokens),
+	// and the model's own guesses — the same summariseGuesses already emitted
+	// by the sibling log lines in resolve(). The phrase itself is the one field
+	// that could carry anything a user typed, and it is precisely the field the
+	// coverage figure already summarises.
+	if damped > 0 {
+		slog.InfoContext(ctx, "ai: phrase coverage damped the tier",
+			"coverage", coverage,
+			"factor", factor,
+			"phrase_tokens", nutrition.PhraseTokenCount(phrase),
+			"floor", phraseCoverageFloor,
+			"tier_before", string(undampedBest),
+			"tier_after", string(bestTier),
+			"damped_candidates", damped,
+			"candidates", len(candidates),
+			"guesses", summariseGuesses(guesses),
+		)
 	}
 
 	res := Resolution{
