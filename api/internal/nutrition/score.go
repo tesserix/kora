@@ -21,6 +21,54 @@ const (
 	ambiguityFloor = 0.6
 	ambiguitySlope = 2.0
 
+	// unqualifiedBrandFactor discounts a BRANDED row when the query carries no
+	// brand signal at all (see brandUnqualified).
+	//
+	// Every lexical signal is computed over FoodItem.Name alone, but a branded
+	// row's name is elliptical: "Oat" is not a food, it is Sanitarium So Good's
+	// oat MILK (46 kcal/100g), and "Rye" is Bürgen's rye BREAD (249). Against
+	// the bare query "oat" such a row saturates coverage, precision and trigram
+	// simultaneously and scores a perfect 1.0 — beating "Rolled oats, raw"
+	// (AFCD, 379 kcal), which is what the user actually meant. 286 single-token
+	// OpenFoodFacts product rows in the index can win a bare-word query this
+	// way, and they win it at tier auto, i.e. logged with no confirmation.
+	//
+	// The rule: an unqualified query names the food, not a product named after
+	// it. The constant states the reason literally — a branded row is
+	// identified by two things, what the food is (name) and whose product it is
+	// (brand); an unqualified query supplies evidence for the first and none
+	// whatsoever for the second, so at most half the row's identity is
+	// accounted for and at most half the evidence is earned. 0.5 is the only
+	// value that argument admits; it is not fitted to the golden set, and it
+	// was deliberately not swept against the ranking harness.
+	//
+	// The discount is deliberately narrow. It applies only when ALL THREE hold:
+	//   1. the row has a brand (a generic row has no second half to be missing);
+	//   2. the query names nothing of that brand (brandUnqualified) — so
+	//      "Coke Zero" -> Coke's "Coke Zero Sugar" and "weet bix" -> Weet-Bix's
+	//      "Weet-Bix" are never touched;
+	//   3. some UNBRANDED row also answers this query (genericAlternative in
+	//      repository.go) — a discount is a demotion, and there has to be
+	//      something to demote to.
+	//
+	// Condition 3 is the one a reader is most likely to think redundant. It is
+	// not: it makes the discount a comparison rather than a verdict. Deciding
+	// from the (query, row) pair alone that a query "means a food" is guessing
+	// at which words are trademarks; the candidate pool answers it with
+	// evidence instead. "oat" has generic oats sitting in its result set and
+	// losing to oat milk — that is the whole defect — whereas a bare product
+	// query with no generic behind it has no better answer available, and
+	// demoting its only real candidate would trade a wrong confidence for a
+	// wrong answer.
+	//
+	// Consequence worth stating out loud rather than discovering later: where
+	// the discount does apply, the branded row can no longer reach the confirm
+	// floor (0.70) on lexical evidence alone, let alone auto — it becomes a
+	// follow-up question ("which one?"). That is the intent. We must not
+	// silently log a specific commercial product the user never named while
+	// the food they did name sits in the same result set.
+	unqualifiedBrandFactor = 0.5
+
 	// headBonus rewards a candidate whose head noun (see headToken) matches one
 	// of the query's tokens, nudging ranking toward the generic food a user
 	// meant over a derivative product that merely shares more tokens with a
@@ -70,6 +118,65 @@ type components struct {
 	Precision float64 // |Q∩D| / |D| — how much of this row the query explains
 	Trigram   float64 // pg_trgm similarity(normalized_name, query)
 	EmbSim    float64 // cosine similarity; 0 when the row has no embedding
+
+	// UnqualifiedBrand marks a branded row the query never named the maker of,
+	// in a result set where an unbranded food answers the same query. It is
+	// not a signal like the others — it is the statement that the signals
+	// above were measured against half a document. See unqualifiedBrandFactor
+	// for the three conditions and brandUnqualified/genericAlternative for
+	// where each is decided.
+	UnqualifiedBrand bool
+}
+
+// brandUnqualified reports whether a row is branded AND the query carries no
+// signal of that brand — the case in which the query names a food and the row
+// answers with a product.
+//
+// query and normalizedName must already be Normalize()d; brand is normalized
+// here so all three go through the same pipeline (lowercase, punctuation
+// stripped, singularized) — "Coke" and "coke" must not be different tokens.
+//
+// A brand token only carries a signal if the row's own NAME does not already
+// supply it. This is the whole subtlety, and getting it wrong was measurable:
+// the row "Milk" by "a2 Milk Company" shares the token "milk" with the bare
+// query "milk", but that word came from the food, not the maker — reading it
+// as "the user named a2" exempted the row and let a 46 kcal/100g branded milk
+// reach tier auto for a query that plainly means milk. The maker's identifying
+// tokens there are "a2" and "company", and the query has neither. Same trap in
+// reverse for OFF's junk brand strings ("Sonora Corn Chips  Salted 500g"),
+// where a food word smuggled into the brand would otherwise exempt every corn
+// chip query.
+//
+// The remaining case is a brand wholly contained in the name — "Coke" for
+// "Coke Zero Sugar", "Vegemite" for "Vegemite", "Weet-Bix" for "Weet-Bix".
+// There the brand contributes no token of its own, and that is not a missing
+// signal but the answer: the product is named after its maker, so naming the
+// product IS naming the maker. Such a row is never unqualified.
+//
+// Where a maker does have distinguishing tokens, ANY of them appearing in the
+// query is enough — OFF brands often carry more than a name ("Youfoodz
+// Fuel'd", "Australia's Own"), so requiring all of them would make the
+// exemption dead code.
+func brandUnqualified(query, normalizedName, brand string) bool {
+	brandTokens := fieldSet(Normalize(brand))
+	if len(brandTokens) == 0 {
+		return false // generic row: no brand to leave unqualified
+	}
+	nameTokens := fieldSet(normalizedName)
+	qTokens := fieldSet(query)
+	distinguishing := false
+	for t := range brandTokens {
+		if nameTokens[t] {
+			continue // the name already supplies this word; it names no maker
+		}
+		distinguishing = true
+		if qTokens[t] {
+			return false // the query named the maker
+		}
+	}
+	// No token distinguishes the brand from the name: the product is named
+	// after its maker, so the name carries the brand.
+	return distinguishing
 }
 
 // tokenOverlap returns coverage and precision for two already-Normalize()d
@@ -113,12 +220,23 @@ func lexical(c components) float64 {
 // never a penalty: a row with no embedding has EmbSim 0 and scores exactly its
 // lexical value, so the index's partial embedding coverage cannot distort a
 // comparison between rows.
+// The brand discount is applied LAST, to whichever of the two paths won. It
+// belongs here rather than beside headBonus in the ranking key because it is a
+// claim about how good the match actually is, not merely about sort order: a
+// branded row matched with no brand signal must not report a confidence its
+// evidence does not support, and a ranking-only signal would leave MatchScore
+// (and therefore the tier) untouched. Being a common factor, it also cannot
+// flip the full_text/embedding tier decision, which compares the two paths
+// before it is applied.
 func quality(c components) float64 {
-	l := lexical(c)
-	if e := embeddingFactor * c.EmbSim; e > l {
-		return e
+	q := lexical(c)
+	if e := embeddingFactor * c.EmbSim; e > q {
+		q = e
 	}
-	return l
+	if c.UnqualifiedBrand {
+		q *= unqualifiedBrandFactor
+	}
+	return q
 }
 
 // ambiguityFactor scales confidence by how clearly the best candidate beats the

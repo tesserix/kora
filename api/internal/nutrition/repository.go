@@ -235,6 +235,11 @@ func (r Repository) Resolve(ctx context.Context, userID uuid.UUID, phrase string
 		}
 		s := &scoredItem{item: it}
 		s.comp.Coverage, s.comp.Precision = tokenOverlap(norm, it.NormalizedName)
+		// Whether the query named this row's maker is a property of the pair
+		// (query, row), fixed the moment the row enters the pool — it does not
+		// depend on which tier found the row, so it is set once here alongside
+		// the other per-row signals.
+		s.comp.UnqualifiedBrand = brandUnqualified(norm, it.NormalizedName, it.Brand)
 		pool[it.ID] = s
 		order = append(order, it.ID)
 		return s
@@ -355,9 +360,18 @@ func (r Repository) Resolve(ctx context.Context, userID uuid.UUID, phrase string
 	// so the head-noun signal can move a row to top-1 without ever inflating
 	// its reported confidence.
 	qTokens := fieldSet(norm)
+	// The unqualified-brand discount (see unqualifiedBrandFactor) is a
+	// demotion, so it only makes sense when there is something to demote to.
+	// Asking the pool is what separates "oat", where a generic food is sitting
+	// right there and losing, from "Weet-Bix", where the branded row is the
+	// only honest answer and must keep its score.
+	generic := genericAlternative(pool, order)
 	scoredList := make([]*scoredItem, 0, len(order))
 	for _, id := range order {
 		s := pool[id]
+		if !generic {
+			s.comp.UnqualifiedBrand = false
+		}
 		s.score = quality(s.comp)
 		s.rankKey = s.score
 		if head := headToken(s.item.Name); head != "" && qTokens[head] {
@@ -409,6 +423,27 @@ func (r Repository) Resolve(ctx context.Context, userID uuid.UUID, phrase string
 		out = out[:limit]
 	}
 	return out, nil
+}
+
+// genericAlternative reports whether the candidate pool contains an UNBRANDED
+// row that actually answers the query — evidence that the query named a food
+// rather than a product. It is condition 3 of the unqualified-brand discount
+// (see unqualifiedBrandFactor).
+//
+// "Actually answers" is Coverage == 1: every token of the query appears in the
+// row's name. Mere presence in the pool is not enough, because the embedding
+// tier contributes rows on semantic similarity alone — without this test, one
+// loosely related unbranded neighbour would be enough to demote a correctly
+// matched branded product. Coverage is a ratio of set sizes, so it is exactly
+// 1 when the query's tokens are a subset of the row's; no epsilon is needed.
+func genericAlternative(pool map[uuid.UUID]*scoredItem, order []uuid.UUID) bool {
+	for _, id := range order {
+		s := pool[id]
+		if s.comp.Coverage >= 1 && strings.TrimSpace(s.item.Brand) == "" {
+			return true
+		}
+	}
+	return false
 }
 
 // scoredItem accumulates one candidate's signals across the full-text and
