@@ -4,6 +4,41 @@ Paste the section below into a fresh session. Everything here was measured today
 
 ---
 
+> ## STATUS UPDATE — later on 2026-08-17. Read this before the body.
+>
+> Two sections below are now WRONG. They are left in place because the reasoning
+> that produced them is instructive, but do not act on them.
+>
+> **1. The Vertex blocker is SOLVED** (kora#209, tesserix-k8s #378 + #379).
+> It was never the PSC endpoint. `aiplatform.googleapis.com` resolves to
+> `10.255.0.2`, and `allow-<ns>-egress` permitted only
+> `0.0.0.0/0 except 10.0.0.0/8` on 443 — which excludes it. Calico dropped
+> ztunnel's upstream dial.
+>
+> **"The PSC endpoint rejects pod-sourced TLS" was the second wrong diagnosis and
+> is now disproved.** So is the framing of this as a kora-vs-devai difference:
+> `devai-mcp-hub` fails identically. devai-api worked because of a *third*,
+> pod-scoped NetworkPolicy that the namespace-level diff never compared.
+>
+> Why it fooled everyone: in ambient mesh `nc -z 10.255.0.2 443` **always
+> succeeds** — it reaches ztunnel's local redirect socket, not the endpoint. The
+> tell is ztunnel's own access log, `bytes_sent=0 bytes_recv=0
+> duration="10001ms"` — nothing ever left the node.
+>
+> **2. Workstream 1, item 1 (IFCT) is DONE** (kora#215). 523 rows, all typed
+> `generic` with no change to the #213 derivation, no tier regression.
+>
+> Item 2 (colloquial names) is also partly re-measured: `chana`, `curd`, `rajma`,
+> `poha`, `bhindi` are **not** zero-match — the curated dish set already answers
+> them. Only `moong dal` and `toor dal` return nothing. IFCT ships translations in
+> its `lang` column (430/542 rows), but `toor` is absent from IFCT entirely and
+> `curd`/`dahi` are absent as foods — a data gap, not an alias gap.
+>
+> Corrected details live on kora#209 and kora#212, and in the PR bodies for
+> kora#215 / tesserix-k8s #378.
+
+---
+
 ## Context
 
 You are taking over Kora work mid-thread. Two live workstreams:
