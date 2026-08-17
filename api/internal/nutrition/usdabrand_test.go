@@ -132,9 +132,12 @@ func TestBackfillUSDAEmbeddedBrandsIsIdempotentAndRetypes(t *testing.T) {
 	}
 	require.NoError(t, tx.Create(&generic).Error)
 
-	n, err := repo.BackfillUSDAEmbeddedBrands(context.Background())
+	// Assertions are scoped to the two seeded rows rather than to the returned
+	// count. `go test` runs packages in parallel against one database, and this
+	// transaction reads at READ COMMITTED, so rows another package commits
+	// mid-test can become visible and make any global count flaky.
+	_, err := repo.BackfillUSDAEmbeddedBrands(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, 1, n, "only the row with an embedded brand should be touched")
 
 	var got FoodItem
 	require.NoError(t, tx.First(&got, "id = ?", branded.ID).Error)
@@ -150,7 +153,11 @@ func TestBackfillUSDAEmbeddedBrandsIsIdempotentAndRetypes(t *testing.T) {
 	require.Equal(t, "Spinach, raw", untouched.Name, "a generic row must not be rewritten")
 	require.Equal(t, EntityTypeGeneric, untouched.EntityType)
 
-	again, err := repo.BackfillUSDAEmbeddedBrands(context.Background())
+	_, err = repo.BackfillUSDAEmbeddedBrands(context.Background())
 	require.NoError(t, err)
-	require.Zero(t, again, "a second run must be a no-op")
+	var afterSecondRun FoodItem
+	require.NoError(t, tx.First(&afterSecondRun, "id = ?", branded.ID).Error)
+	require.Equal(t, got.Brand, afterSecondRun.Brand, "a second run must not re-split an already-split row")
+	require.Equal(t, got.Name, afterSecondRun.Name)
+	require.Equal(t, got.EntityType, afterSecondRun.EntityType)
 }
