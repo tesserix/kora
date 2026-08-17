@@ -84,7 +84,14 @@ func TestResolveFullTextMatchesPluralQueryAgainstSingularizedName(t *testing.T) 
 		{Name: "Rolled oats, raw", Brand: "test2a", Provenance: ProvenanceAFCD, KcalPer100g: 379},
 	})
 
-	got, err := repo.Resolve(context.Background(), uuid.Nil, "oats", nil, 5)
+	// Ask for the full scan window rather than the production limit of 5. What
+	// this test asserts is that a plural query matches a singularized
+	// normalized_name AND is tiered full-text — not that the seeded row
+	// out-ranks the real index. Against ~15k rows there are many genuine "oat"
+	// products, so a limit of 5 made the assertion depend on ranking position
+	// and it began failing as the index grew, for reasons unrelated to
+	// normalization. resolveScanLimit is what Resolve scans internally.
+	got, err := repo.Resolve(context.Background(), uuid.Nil, "oats", nil, resolveScanLimit)
 	require.NoError(t, err)
 	require.NotEmpty(t, got)
 

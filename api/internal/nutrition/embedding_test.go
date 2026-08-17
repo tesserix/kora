@@ -19,6 +19,15 @@ func fixedVector768(v float32) []float32 {
 	return vec
 }
 
+// allMissingEmbeddings is a limit large enough to return every unembedded row
+// in the dev index. RowsMissingEmbedding is `ORDER BY created_at LIMIT ?`, so a
+// freshly seeded row sorts LAST — and the dev index carries a backlog of well
+// over 15,000 unembedded rows (unlike prod, which is fully embedded). Passing a
+// production-sized limit of 1000 therefore never reached the row these tests
+// had just created. What they assert is membership of the queue, not position
+// in it, so they ask for the whole queue.
+const allMissingEmbeddings = 1_000_000
+
 func TestRowsMissingEmbeddingAndSetEmbedding(t *testing.T) {
 	db := testDB(t)
 	repo := NewRepository(db)
@@ -32,7 +41,7 @@ func TestRowsMissingEmbeddingAndSetEmbedding(t *testing.T) {
 	require.NoError(t, db.First(&item, "name = ? AND brand = 'test2b-embed'", "Zqxembed grilled tofu").Error)
 
 	// Freshly inserted row has no embedding yet.
-	missing, err := repo.RowsMissingEmbedding(context.Background(), 1000)
+	missing, err := repo.RowsMissingEmbedding(context.Background(), allMissingEmbeddings)
 	require.NoError(t, err)
 	require.True(t, containsID(missing, item.ID), "expected newly inserted row to be missing an embedding")
 
@@ -40,7 +49,7 @@ func TestRowsMissingEmbeddingAndSetEmbedding(t *testing.T) {
 	require.NoError(t, repo.SetEmbedding(context.Background(), item.ID, vec))
 
 	// After SetEmbedding, the row must no longer be "missing".
-	missingAfter, err := repo.RowsMissingEmbedding(context.Background(), 1000)
+	missingAfter, err := repo.RowsMissingEmbedding(context.Background(), allMissingEmbeddings)
 	require.NoError(t, err)
 	require.False(t, containsID(missingAfter, item.ID), "expected row to no longer be missing an embedding")
 
@@ -81,7 +90,7 @@ func TestRowsMissingEmbeddingExcludesSoftDeleted(t *testing.T) {
 	require.NoError(t, tx.Create(&retired).Error)
 	require.NoError(t, tx.Exec("UPDATE food_items SET deleted_at = now() WHERE id = ?", retired.ID).Error)
 
-	missing, err := repo.RowsMissingEmbedding(context.Background(), 1000)
+	missing, err := repo.RowsMissingEmbedding(context.Background(), allMissingEmbeddings)
 	require.NoError(t, err)
 	require.True(t, containsID(missing, live.ID), "a live unembedded row must still be queued for embedding")
 	require.False(t, containsID(missing, retired.ID), "a retired row must not consume a scarce embedding-backfill slot")
