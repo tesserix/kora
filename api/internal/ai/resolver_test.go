@@ -800,12 +800,18 @@ func TestResolveText_CacheDoesNotLeakAcrossUsers(t *testing.T) {
 		Name: "Personally aliased quinoa", Brand: "test2c",
 		Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 120,
 	})
-	phrase := "brekkie bowl " + uuid.NewString()
+	unique := uuid.NewString()
+	phrase := "brekkie bowl " + unique
 	// What the model calls it — deliberately NOT what the user typed, so the
 	// raw-phrase personal-alias short-circuit (LookupPersonalAlias(userA,
 	// phrase)) finds nothing and this request falls through to the LLM/cache
 	// path under test, exactly as it did before that short-circuit existed.
-	modelFood := "quinoa bowl (model) " + uuid.NewString()
+	//
+	// It is a SUPERSET of the phrase rather than a disjoint string, so that
+	// phrase coverage is 1.0 and the reduction factor stays a no-op: this test
+	// is about cache keying, and a tier damped for discarding the user's words
+	// would never be cached at all, silently retargeting it (kora#184).
+	modelFood := "brekkie bowl model quinoa " + unique
 	// A real correction: user A's personal alias on the MODEL's wording,
 	// scored 1.0 by the alias tier (see nutrition.Repository.Resolve tier 1),
 	// which is enough on its own to reach TierAuto and get cached.
@@ -883,6 +889,72 @@ func TestResolveText_PerItemTiers_WeakItemKeepsItsOwnTier(t *testing.T) {
 	// The aggregate deliberately still reports the BEST item's tier — it
 	// answers "is anything here loggable?", not "is everything certain?".
 	require.Equal(t, TierAuto, res.Tier)
+}
+
+// The #184 defect, end to end: a guess that threw away most of the user's
+// phrase matched an index row named after it at a perfect 1.0 and auto-logged.
+// The phrase-coverage reduction must stop that, WITHOUT touching the two paths
+// that legitimately reach auto — a phrase the guesses account for whole, and a
+// photo, which has no phrase at all.
+func TestResolveGuesses_PhraseCoverageDampsConfidence(t *testing.T) {
+	db := testDB(t)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE brand = 'test184'") })
+	repo := nutrition.NewRepository(db)
+
+	// Named distinctively rather than bare "Chicken" only so seedFoodItem's
+	// top-5 Search can find it in a 15k-row dev index; what stands in for the
+	// real OpenFoodFacts `Chicken` row is the alias below, which is what gives
+	// the bare guess its perfect 1.0.
+	bareChicken := seedFoodItem(t, repo, nutrition.FoodItem{
+		Name: "Chicken test184", Brand: "test184",
+		Provenance: nutrition.ProvenanceOFF, KcalPer100g: 280,
+	})
+	seedAlias(t, db, "chicken", bareChicken.ID)
+	grilled := seedFoodItem(t, repo, nutrition.FoodItem{
+		Name: "Grilled chicken breast", Brand: "test184",
+		Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 165,
+	})
+	seedAlias(t, db, "grilled chicken breast", grilled.ID)
+
+	newResolver := func(guesses []Guess) Resolver {
+		return NewResolver(
+			&stubProvider{guesses: guesses, guessUsage: Usage{Provider: "stub", CallType: "identify_text"}},
+			repo, NoCache{}, &stubMeter{withinBudget: true})
+	}
+
+	t.Run("brand and dish discarded — no longer a one-tap auto-log", func(t *testing.T) {
+		res, err := newResolver([]Guess{
+			{Food: "chicken", PortionEstimate: "1/2", Confidence: 0.95},
+		}).ResolveText(context.Background(), uuid.New(), "El Janah 1/2 chicken with Chips")
+
+		require.NoError(t, err)
+		require.Len(t, res.Candidates, 1)
+		require.Equal(t, 1.0, res.Candidates[0].MatchScore,
+			"MatchScore stays honest about the row's own match — only the tier is damped")
+		require.Equal(t, TierConfirm, res.Candidates[0].Tier)
+		require.NotEqual(t, TierAuto, res.Tier, "this is the #184 auto-log that must not happen")
+	})
+
+	t.Run("phrase accounted for whole — no penalty at all", func(t *testing.T) {
+		res, err := newResolver([]Guess{
+			{Food: "grilled chicken breast", PortionEstimate: "100 g", Confidence: 0.95},
+		}).ResolveText(context.Background(), uuid.New(), "grilled chicken breast")
+
+		require.NoError(t, err)
+		require.Len(t, res.Candidates, 1)
+		require.Equal(t, TierAuto, res.Candidates[0].Tier, "the regression guard: full coverage costs nothing")
+	})
+
+	t.Run("photo path is unaffected", func(t *testing.T) {
+		res, err := newResolver([]Guess{
+			{Food: "chicken", PortionEstimate: "1/2", Confidence: 0.95},
+		}).ResolvePhoto(context.Background(), uuid.New(), []byte("fake-jpeg-bytes"), "image/jpeg")
+
+		require.NoError(t, err)
+		require.Len(t, res.Candidates, 1)
+		require.Equal(t, TierAuto, res.Candidates[0].Tier,
+			"a photo carries no phrase, so there is nothing for the model to have discarded")
+	})
 }
 
 // TestEstimateIngredientTier_CapsScoreAtConfirm is a pure table-driven test of

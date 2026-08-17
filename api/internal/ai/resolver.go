@@ -144,7 +144,7 @@ func (r Resolver) ResolveText(ctx context.Context, userID uuid.UUID, phrase stri
 	}
 
 	key := CacheKey("phrase", userID, phrase)
-	return r.resolve(ctx, userID, key,
+	return r.resolve(ctx, userID, key, phrase,
 		func(c context.Context) ([]Guess, Usage, error) { return r.provider.IdentifyText(c, phrase) },
 		func(guesses []Guess) string { return phrase },
 	)
@@ -220,7 +220,10 @@ func (r Resolver) resolveAliasPortion(ctx context.Context, userID uuid.UUID, phr
 func (r Resolver) ResolvePhoto(ctx context.Context, userID uuid.UUID, image []byte, mime string) (Resolution, error) {
 	sum := sha256.Sum256(image)
 	key := CacheKey("photo", userID, hex.EncodeToString(sum[:]))
-	return r.resolve(ctx, userID, key,
+	// The empty phrase is load-bearing, not a placeholder: a photo says nothing
+	// that identify could have discarded, so phraseCoverage returns 1 and the
+	// reduction factor is exactly 1.0 — this path behaves as it always has.
+	return r.resolve(ctx, userID, key, "",
 		func(c context.Context) ([]Guess, Usage, error) { return r.provider.IdentifyPhoto(c, image, mime) },
 		func(guesses []Guess) string {
 			if len(guesses) == 0 {
@@ -234,6 +237,11 @@ func (r Resolver) ResolvePhoto(ctx context.Context, userID uuid.UUID, image []by
 // resolve implements the shared cache → budget → identify → resolveGuesses
 // → decompose flow for both ResolveText and ResolvePhoto.
 //
+// phrase is the user's original utterance, threaded through to resolveGuesses
+// so confidence can be damped by how much of it the guesses actually account
+// for. ResolvePhoto passes "" (no phrase exists), which makes that damping a
+// no-op there.
+//
 // decomposeSubject derives the dish name passed to Provider.Decompose from
 // the identified guesses (ResolveText uses the original phrase directly;
 // ResolvePhoto has no phrase, so it uses the top guess's Food). An empty
@@ -243,6 +251,7 @@ func (r Resolver) resolve(
 	ctx context.Context,
 	userID uuid.UUID,
 	key string,
+	phrase string,
 	identify func(context.Context) ([]Guess, Usage, error),
 	decomposeSubject func([]Guess) string,
 ) (Resolution, error) {
@@ -276,7 +285,7 @@ func (r Resolver) resolve(
 	}
 	r.recordAll(ctx, userID, sink.drain(), usage)
 
-	res, err := r.resolveGuesses(ctx, userID, guesses)
+	res, err := r.resolveGuesses(ctx, userID, phrase, guesses)
 	if err != nil {
 		return Resolution{}, fmt.Errorf("ai: resolve: resolve guesses: %w", err)
 	}
@@ -484,11 +493,24 @@ func tierRank(t Tier) int {
 // nutrition numbers (see types.go), so the only way a candidate's Kcal is
 // computed is top.Item.KcalPer100g * grams / 100 — from the row, never from
 // the guess.
-func (r Resolver) resolveGuesses(ctx context.Context, userID uuid.UUID, guesses []Guess) (Resolution, error) {
+//
+// phrase is the user's ORIGINAL utterance (empty on the photo path, which has
+// none). It never reaches the index — every lookup below still searches on
+// guess.Food — it only measures how much of what the user said the guesses
+// collectively kept, and damps the tier accordingly. Without it the pipeline is
+// most confident exactly when identify discarded the most: "El Janah 1/2
+// chicken with Chips" became the bare guess "chicken", which matched an
+// OpenFoodFacts row literally named `Chicken` at a perfect 1.0 and auto-logged
+// 280 kcal/100g without asking (kora#184).
+func (r Resolver) resolveGuesses(ctx context.Context, userID uuid.UUID, phrase string, guesses []Guess) (Resolution, error) {
 	var candidates []ResolvedCandidate
 	bestTier := TierFollowUp
 	bestRank := -1
 	provenance := ""
+
+	// One factor for the whole resolution: coverage is a property of the
+	// phrase and the guess set together, not of any single candidate.
+	factor := reductionFactor(phraseCoverage(phrase, guesses))
 
 	for _, guess := range guesses {
 		vec, embUsage, embErr := r.provider.Embed(ctx, guess.Food)
@@ -517,7 +539,7 @@ func (r Resolver) resolveGuesses(ctx context.Context, userID uuid.UUID, guesses 
 		// never from the guess, which structurally cannot carry one.
 		kcal := top.Item.KcalPer100g * grams / 100
 
-		tier := TierFor(guess.Confidence, top.MatchScore)
+		tier := tierWithReduction(guess.Confidence, top.MatchScore, factor)
 
 		candidates = append(candidates, ResolvedCandidate{
 			Item:           top.Item,
