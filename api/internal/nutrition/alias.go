@@ -118,3 +118,60 @@ func (r Repository) RemoveAlias(ctx context.Context, userID uuid.UUID, alias str
 	}
 	return nil
 }
+
+// GlobalAlias is one curated translation: a phrase people actually use, and the
+// name of the food row it means.
+type GlobalAlias struct {
+	Alias string `json:"alias"`
+	Food  string `json:"food"`
+	// Why records the justification for the mapping. Carried in the data file
+	// and deliberately not stored — the reasoning belongs in review, not in a
+	// column nothing reads.
+	Why string `json:"why"`
+}
+
+// UpsertGlobalAliases imports curated global aliases, resolving each to a food
+// by exact name among rows with no brand.
+//
+// Returns the number applied and the aliases whose food could not be resolved.
+// An unresolved alias is REPORTED, never silently skipped: it means the data
+// file names a row that no longer exists — a genuine breakage in a hand-curated
+// mapping, and exactly the sort of thing that rots unnoticed.
+//
+// Idempotent via idx_food_aliases_global_unique (migration 000037), so a
+// re-import updates the target rather than duplicating the row. Without that
+// index ON CONFLICT cannot fire for global rows at all, because Postgres treats
+// NULL as distinct from NULL — see AddAlias.
+//
+// Matching is on name with an EMPTY brand on purpose: these aliases translate
+// generic foods, and a curated phrase must never silently attach itself to some
+// brand's product that happens to share a name.
+func (r Repository) UpsertGlobalAliases(ctx context.Context, aliases []GlobalAlias) (applied int, unresolved []string, err error) {
+	for _, a := range aliases {
+		key := strings.ToLower(strings.TrimSpace(a.Alias))
+		if key == "" || strings.TrimSpace(a.Food) == "" {
+			continue
+		}
+		var ids []uuid.UUID
+		if err := r.db.WithContext(ctx).
+			Raw(`SELECT id FROM food_items
+			     WHERE name = ? AND COALESCE(brand, '') = '' AND deleted_at IS NULL
+			     ORDER BY id LIMIT 1`, a.Food).
+			Scan(&ids).Error; err != nil {
+			return applied, unresolved, fmt.Errorf("nutrition: upsert global alias lookup %q: %w", a.Alias, err)
+		}
+		if len(ids) == 0 {
+			unresolved = append(unresolved, a.Alias+" -> "+a.Food)
+			continue
+		}
+		if err := r.db.WithContext(ctx).Exec(
+			`INSERT INTO food_aliases (alias, food_item_id, user_id) VALUES (?, ?, NULL)
+			 ON CONFLICT (lower(alias)) WHERE user_id IS NULL
+			 DO UPDATE SET food_item_id = EXCLUDED.food_item_id`,
+			key, ids[0]).Error; err != nil {
+			return applied, unresolved, fmt.Errorf("nutrition: upsert global alias %q: %w", a.Alias, err)
+		}
+		applied++
+	}
+	return applied, unresolved, nil
+}
