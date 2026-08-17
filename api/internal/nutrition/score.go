@@ -112,19 +112,22 @@ func brandMatches(want, got string) bool {
 // Two naming conventions coexist in the index:
 //   - USDA, comma-inverted: "Almonds, raw", "Beef, cured, dried" — the head
 //     noun comes first, with descriptors trailing after the comma.
-//   - Curated/AFCD, natural English: "Wholemeal bread", "Cheddar cheese",
-//     "Chicken biryani" — English noun compounds are head-final, so the head
-//     noun is the LAST word.
+//   - Curated/AFCD, natural English: "Wholemeal bread", "Cheddar cheese" —
+//     English noun compounds are head-final, so the head is the LAST word.
 //
-// The rule that covers both conventions: the head is the last token of the
-// segment before the first comma (or of the whole name, when there is no
-// comma).
+// The rule covering both: the last token of the segment before the first comma
+// (or of the whole name when there is no comma).
 //
-// This MUST be derived from FoodItem.Name (the raw name), never from
-// normalized_name: Normalize() replaces punctuation — including the comma
-// that marks the USDA convention — with spaces before this function ever
-// sees it, so deriving the head from normalized_name would silently give the
-// wrong answer for every USDA row (7,695 of 7,848 names in the index).
+// MEASURED AND REJECTED (kora#219): also heading on the SECOND comma segment,
+// so that "Potato, chips, ..." would head on "chips". It does fix the chips
+// case, and it promotes `Kheer, rice` (a dessert) to top-1 for "rice" and
+// `Fish, tuna salad` for "salad", because plenty of rows carry a second segment
+// that is a common food word without the row being that food. Net worse.
+//
+// MUST be derived from FoodItem.Name (the raw name), never normalized_name:
+// Normalize() replaces the comma that marks the convention with a space, so
+// deriving the head from normalized_name would give the wrong answer for every
+// USDA row.
 func headToken(rawName string) string {
 	segment := rawName
 	if idx := strings.IndexByte(rawName, ','); idx >= 0 {
@@ -139,8 +142,8 @@ func headToken(rawName string) string {
 
 // queryNamesABrand reports whether the query carries brand evidence — that is,
 // whether the user appears to have named one of the brands present among the
-// candidates. It is the gate on the generic-preference policy: a query naming
-// McDonald's must still reach McDonald's rows.
+// candidates. It is the fallback for the plain-string Resolve path, where
+// identify has not stated a brand (kora#212 Phase 3 states it directly).
 //
 // The rule is "every token of some candidate's brand appears in the query",
 // deliberately requiring the WHOLE brand rather than any one token. Brands
@@ -150,12 +153,6 @@ func headToken(rawName string) string {
 // Requiring both "smart" and "soup" cannot misfire that way, while a
 // single-token brand ("KFC", "Coke") still matches on its one token, which is
 // correct: those words genuinely are the brand.
-//
-// This is knowingly conservative in the other direction, and Phase 3 is what
-// fixes that: identify currently flattens "El Janah 1/2 chicken with Chips" to
-// "chicken" before the resolver ever sees it, so the brand is usually gone by
-// now. Once identify returns a structured brand field, this inference gets
-// replaced by the real thing rather than extended.
 //
 // Brands are compared through Normalize so they match the query on the same
 // terms the rest of the scorer uses.
@@ -190,12 +187,62 @@ type components struct {
 	EmbSim    float64 // cosine similarity; 0 when the row has no embedding
 }
 
-// tokenOverlap returns coverage and precision for two already-Normalize()d
-// phrases, comparing them as token *sets* so a repeated word cannot inflate
-// either side. Both are 0 when either phrase has no tokens.
-func tokenOverlap(query, doc string) (coverage, precision float64) {
+// identityPhrase returns the part of a raw food name that says WHICH FOOD it
+// is, dropping the trailing qualifiers — "Potato, chips, regular, fast food
+// outlet, deep fried, blended oil, salted" becomes "potato chips".
+//
+// It is the first TWO comma segments, because the comma-inverted convention
+// USDA and AFCD share writes the identity across at most two of them
+// ("Potato, chips"; "Beef, ground"; "Cheese, cheddar") and everything after is
+// preparation, cut, packaging or fat source. Names in natural English have no
+// comma at all and are returned whole.
+//
+// Derived from the RAW name for the same reason headToken is: Normalize()
+// replaces the comma that marks the convention with a space, so by the time a
+// name is normalized this boundary no longer exists.
+func identityPhrase(rawName string) string {
+	return strings.Join(identitySegments(rawName), " ")
+}
+
+// identitySegments returns the normalized head segments of a name: the first
+// comma segment always, and the second only when it names the food rather than
+// its preparation state.
+func identitySegments(rawName string) []string {
+	parts := strings.SplitN(rawName, ",", 3)
+	if len(parts) > 2 {
+		parts = parts[:2]
+	}
+	var out []string
+	for _, part := range parts {
+		normalized := Normalize(part)
+		if normalized == "" {
+			continue
+		}
+		out = append(out, normalized)
+	}
+	return out
+}
+
+// tokenOverlap returns coverage and precision, comparing already-Normalize()d
+// phrases as token *sets* so a repeated word cannot inflate either side.
+//
+// COVERAGE is measured against the whole document — how much of the query this
+// row accounts for — so a query term that only appears in a trailing qualifier
+// still counts as found.
+//
+// PRECISION is measured against the row's IDENTITY only (see identityPhrase),
+// not the whole name. Using the whole name charged a row for being described
+// carefully: `Potato, chips, regular, fast food outlet, deep fried, blended
+// oil, salted` scored 1/10 = 0.10 for the query "chips" while `Banana chip`
+// scored 1/2 = 0.50, so AFCD's precise naming lost to a shorter, wronger row
+// (kora#219). Against the identity both score 0.50, and the decision falls to
+// signals that are actually about relevance.
+//
+// All three are 0 when either side has no tokens.
+func tokenOverlap(query, doc, identity string) (coverage, precision float64) {
 	qSet := fieldSet(query)
 	dSet := fieldSet(doc)
+	iSet := fieldSet(identity)
 	if len(qSet) == 0 || len(dSet) == 0 {
 		return 0, 0
 	}
@@ -205,7 +252,17 @@ func tokenOverlap(query, doc string) (coverage, precision float64) {
 			shared++
 		}
 	}
-	return float64(shared) / float64(len(qSet)), float64(shared) / float64(len(dSet))
+	coverage = float64(shared) / float64(len(qSet))
+	if len(iSet) == 0 {
+		return coverage, 0
+	}
+	sharedIdentity := 0
+	for w := range qSet {
+		if iSet[w] {
+			sharedIdentity++
+		}
+	}
+	return coverage, float64(sharedIdentity) / float64(len(iSet))
 }
 
 func fieldSet(s string) map[string]bool {

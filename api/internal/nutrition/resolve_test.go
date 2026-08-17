@@ -336,7 +336,7 @@ func TestResolveMatchScoreUnaffectedByHeadBonus(t *testing.T) {
 	norm := Normalize("zqxc dried apricot")
 
 	qualityOf := func(name string) float64 {
-		cov, prec := tokenOverlap(norm, Normalize(name))
+		cov, prec := tokenOverlap(norm, Normalize(name), identityPhrase(name))
 		var trgm float64
 		require.NoError(t, tx.Raw(
 			`SELECT similarity(normalized_name, ?) FROM food_items WHERE name = ?`, norm, name,

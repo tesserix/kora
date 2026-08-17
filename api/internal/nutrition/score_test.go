@@ -7,22 +7,42 @@ import (
 )
 
 func TestTokenOverlap(t *testing.T) {
+	// identity defaults to doc where a case does not set it, which is the
+	// no-comma shape: a natural-English name has no qualifier tail to strip.
 	tests := []struct {
 		name              string
 		query, doc        string
+		identity          string
 		wantCov, wantPrec float64
 	}{
-		{"exact", "chicken breast", "chicken breast", 1.0, 1.0},
-		{"doc has extra terms", "chicken breast", "fast food fried chicken breast", 1.0, 0.4},
-		{"query has extra terms", "grilled chicken breast", "chicken breast", 2.0 / 3.0, 1.0},
-		{"no shared terms", "paneer", "chicken breast", 0, 0},
-		{"empty query", "", "chicken breast", 0, 0},
-		{"empty doc", "chicken breast", "", 0, 0},
-		{"duplicate terms counted once", "chicken chicken", "chicken", 1.0, 1.0},
+		{"exact", "chicken breast", "chicken breast", "", 1.0, 1.0},
+		{"doc has extra terms", "chicken breast", "fast food fried chicken breast", "", 1.0, 0.4},
+		{"query has extra terms", "grilled chicken breast", "chicken breast", "", 2.0 / 3.0, 1.0},
+		{"no shared terms", "paneer", "chicken breast", "", 0, 0},
+		{"empty query", "", "chicken breast", "", 0, 0},
+		{"empty doc", "chicken breast", "", "", 0, 0},
+		{"duplicate terms counted once", "chicken chicken", "chicken", "", 1.0, 1.0},
+		// kora#219: coverage still sees the whole document, but precision is
+		// charged only against the identity, so a carefully-qualified name is
+		// no longer penalised for its tail.
+		{
+			// Inputs are already-Normalize()d, which singularizes: "chips" -> "chip".
+			"qualifier tail does not dilute precision",
+			"chip", "potato chip regular fast food outlet deep fried blended oil salted",
+			"potato chip", 1.0, 0.5,
+		},
+		{
+			"a query term found only in the tail counts for coverage, not precision",
+			"salted", "potato chip regular salted", "potato chip", 1.0, 0.0,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cov, prec := tokenOverlap(tt.query, tt.doc)
+			identity := tt.identity
+			if identity == "" {
+				identity = tt.doc
+			}
+			cov, prec := tokenOverlap(tt.query, tt.doc, identity)
 			require.InDelta(t, tt.wantCov, cov, 0.001, "coverage")
 			require.InDelta(t, tt.wantPrec, prec, 0.001, "precision")
 		})
@@ -99,6 +119,14 @@ func TestHeadToken(t *testing.T) {
 			require.Equal(t, tt.want, headToken(tt.raw))
 		})
 	}
+}
+
+func TestIdentityPhraseDropsTheQualifierTail(t *testing.T) {
+	require.Equal(t, "potato chip",
+		identityPhrase("Potato, chips, regular, fast food outlet, deep fried, blended oil, salted"))
+	require.Equal(t, "banana chip", identityPhrase("Banana chip"), "a no-comma name is its own identity")
+	require.Equal(t, "cheese cheddar", identityPhrase("Cheese, cheddar"))
+	require.Equal(t, "", identityPhrase(""))
 }
 
 func TestScoringSeparatesTheAmbiguousFromTheClear(t *testing.T) {
