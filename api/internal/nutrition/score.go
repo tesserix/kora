@@ -33,6 +33,26 @@ const (
 	// the golden set was measured stable across 0.10–0.30, so this is not a
 	// tuned knife-edge; 0.15 sits in the middle of that stable range.
 	headBonus = 0.15
+
+	// genericBonus implements kora#212 Phase 2's retrieval policy: when a query
+	// names no brand, prefer generic reference data over branded retail
+	// products.
+	//
+	// It is a RANKING signal, exactly like headBonus and for the same reason.
+	// The parked feat/184 branch tried expressing this as a 0.5 discount on the
+	// branded row's quality instead, and it broke the product: 25 of 28 queries
+	// collapsed to follow_up, because quality drives ordering, the tier decision
+	// AND the abstain floor at once, so perturbing it to fix ranking moved
+	// confidence everywhere. Adding to rankKey moves ordering and NOTHING else —
+	// MatchScore is still the unmodified quality, and ambiguityMargin finds the
+	// rival by scanning, so a demoted row cannot inflate the survivor.
+	//
+	// Sized to match headBonus. It has to be able to reorder rows that are
+	// genuinely close (the branded/generic pairs this exists to separate sit
+	// within ~0.1 of each other) without being so large it buries a branded row
+	// the user actually asked for — and when they DID ask, brandEvidence
+	// switches the bonus off entirely rather than relying on its magnitude.
+	genericBonus = 0.15
 )
 
 // headToken returns the head noun of a raw (un-normalized) food name — the
@@ -65,6 +85,51 @@ func headToken(rawName string) string {
 		return ""
 	}
 	return fields[len(fields)-1]
+}
+
+// queryNamesABrand reports whether the query carries brand evidence — that is,
+// whether the user appears to have named one of the brands present among the
+// candidates. It is the gate on the generic-preference policy: a query naming
+// McDonald's must still reach McDonald's rows.
+//
+// The rule is "every token of some candidate's brand appears in the query",
+// deliberately requiring the WHOLE brand rather than any one token. Brands
+// routinely contain ordinary food words — `SMART SOUP`, `HOT POCKETS`,
+// `CAMPBELL'S CHUNKY` — so a single-token rule would read the bare query "soup"
+// as naming a brand and switch off the very preference that query needs most.
+// Requiring both "smart" and "soup" cannot misfire that way, while a
+// single-token brand ("KFC", "Coke") still matches on its one token, which is
+// correct: those words genuinely are the brand.
+//
+// This is knowingly conservative in the other direction, and Phase 3 is what
+// fixes that: identify currently flattens "El Janah 1/2 chicken with Chips" to
+// "chicken" before the resolver ever sees it, so the brand is usually gone by
+// now. Once identify returns a structured brand field, this inference gets
+// replaced by the real thing rather than extended.
+//
+// Brands are compared through Normalize so they match the query on the same
+// terms the rest of the scorer uses.
+func queryNamesABrand(qTokens map[string]bool, items []*scoredItem) bool {
+	if len(qTokens) == 0 {
+		return false
+	}
+	for _, s := range items {
+		brandTokens := strings.Fields(Normalize(s.item.Brand))
+		if len(brandTokens) == 0 {
+			continue
+		}
+		all := true
+		for _, t := range brandTokens {
+			if !qTokens[t] {
+				all = false
+				break
+			}
+		}
+		if all {
+			return true
+		}
+	}
+	return false
 }
 
 // components are the raw per-candidate signals feeding quality().

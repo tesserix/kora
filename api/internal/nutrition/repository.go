@@ -362,13 +362,30 @@ func (r Repository) Resolve(ctx context.Context, userID uuid.UUID, phrase string
 	qTokens := fieldSet(norm)
 	scoredList := make([]*scoredItem, 0, len(order))
 	for _, id := range order {
-		s := pool[id]
+		scoredList = append(scoredList, pool[id])
+	}
+
+	// kora#212 Phase 2's retrieval policy. An unqualified query prefers generic
+	// reference data; a query that names a brand turns the preference off and
+	// lets branded products compete normally. Evaluated once for the pool, not
+	// per candidate, because "did the user name a brand" is a property of the
+	// query and the candidate set together.
+	preferGenerics := !queryNamesABrand(qTokens, scoredList)
+
+	for _, s := range scoredList {
 		s.score = quality(s.comp)
 		s.rankKey = s.score
 		if head := headToken(s.item.Name); head != "" && qTokens[head] {
 			s.rankKey += headBonus
 		}
-		scoredList = append(scoredList, s)
+		// Stated about what the row IS (entity_type, kora#213), not inferred
+		// from how its name looks — which is the whole point of Phase 1 having
+		// landed first. Note this REWARDS generics rather than penalising
+		// branded rows: same ordering effect, but nothing is ever subtracted,
+		// so a row's rankKey can never fall below its own quality.
+		if preferGenerics && s.item.EntityType == EntityTypeGeneric {
+			s.rankKey += genericBonus
+		}
 	}
 	sort.SliceStable(scoredList, func(i, j int) bool {
 		return scoredList[i].rankKey > scoredList[j].rankKey

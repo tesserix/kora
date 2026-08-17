@@ -171,3 +171,37 @@ func TestAmbiguityMarginFloorsAPromotedWeakerWinner(t *testing.T) {
 	require.InDelta(t, 0.6, ambiguityFactorFor(promoted), 1e-9,
 		"it must land on the ambiguity floor, not above it")
 }
+
+// TestQueryNamesABrandRequiresTheWholeBrand pins the gate on Phase 2's
+// generic-preference policy. The failure mode it guards is specific: brands
+// routinely contain ordinary food words, so a match-any-token rule would read
+// the bare query "soup" as naming a brand and switch off the preference for
+// exactly the query that needs it.
+func TestQueryNamesABrandRequiresTheWholeBrand(t *testing.T) {
+	pool := func(brands ...string) []*scoredItem {
+		out := make([]*scoredItem, 0, len(brands))
+		for _, b := range brands {
+			out = append(out, &scoredItem{item: FoodItem{Brand: b}})
+		}
+		return out
+	}
+	tests := []struct {
+		name  string
+		query string
+		items []*scoredItem
+		want  bool
+	}{
+		{"single-token brand named outright", "coke zero", pool("Coke"), true},
+		{"multi-token brand named in full", "smart soup indian bean", pool("SMART SOUP"), true},
+		{"only a food word shared with a brand", "soup", pool("SMART SOUP"), false},
+		{"only one word of a two-word brand", "hot chocolate", pool("HOT POCKETS"), false},
+		{"no brand in the pool at all", "spinach", pool("", ""), false},
+		{"brand present but unnamed", "chicken", pool("McDONALD'S"), false},
+		{"empty query", "", pool("Coke"), false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, queryNamesABrand(fieldSet(Normalize(tc.query)), tc.items))
+		})
+	}
+}
