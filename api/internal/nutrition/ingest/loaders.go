@@ -37,9 +37,21 @@ func LoadFile(path, provenance string) ([]nutrition.FoodItem, error) {
 		if r.Name == "" || r.KcalPer100g <= 0 {
 			continue
 		}
+		name, brand := r.Name, r.Brand
+		// USDA carries chain and packaged items as `McDONALD'S, FILET-O-FISH`,
+		// with the brand in the name and the brand column empty. Move it into
+		// the column it belongs in, which is what lets the existing
+		// DeriveEntityType type these rows as branded_product with no rule
+		// change, and what makes brand matching able to see them at all.
+		// See nutrition.SplitEmbeddedBrand and kora#212.
+		if provenance == nutrition.ProvenanceUSDA && brand == "" {
+			if extracted, rest := nutrition.SplitEmbeddedBrand(name); extracted != "" {
+				name, brand = rest, extracted
+			}
+		}
 		item := nutrition.FoodItem{
-			Name:           r.Name,
-			Brand:          r.Brand,
+			Name:           name,
+			Brand:          brand,
 			Provenance:     provenance,
 			ServingDesc:    r.ServingDesc,
 			ServingGrams:   r.ServingGrams,
