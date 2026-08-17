@@ -328,6 +328,13 @@ func (r Repository) ResolveQuery(ctx context.Context, userID uuid.UUID, q Query,
 	if err := r.db.WithContext(ctx).
 		Raw(`SELECT fi.*, similarity(fi.normalized_name, ?) AS trgm
 		     FROM food_items fi
+		     -- RECALL uses the CORE text only, never the qualified form.
+		     -- plainto_tsquery ANDs its terms, so folding qualifiers in here
+		     -- makes them mandatory: "chicken" with the qualifier "half"
+		     -- became the query "chicken half", no row contains both, and
+		     -- kora#184's own case returned ZERO candidates. Qualifiers are a
+		     -- RANKING signal — they are still in searchNorm below, which
+		     -- feeds similarity() and the coverage/precision scoring.
 		     WHERE to_tsvector('simple', fi.normalized_name) @@ plainto_tsquery('simple', ?)
 		     AND fi.deleted_at IS NULL
 		     -- fi.id is a TIEBREAKER, not a preference. similarity() produces
@@ -341,7 +348,8 @@ func (r Repository) ResolveQuery(ctx context.Context, userID uuid.UUID, q Query,
 		     -- by id costs nothing and makes the whole pipeline deterministic,
 		     -- since the Go ranker below sorts stably.
 		     ORDER BY similarity(fi.normalized_name, ?) DESC, fi.id
-		     LIMIT ?`, searchNorm, searchNorm, searchNorm, resolveScanLimit).
+		     -- searchNorm ranks (similarity), norm recalls (tsquery).
+		     LIMIT ?`, searchNorm, norm, searchNorm, resolveScanLimit).
 		Scan(&ftRows).Error; err != nil {
 		return nil, fmt.Errorf("nutrition: resolve fulltext: %w", err)
 	}

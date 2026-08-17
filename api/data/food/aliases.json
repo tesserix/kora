@@ -1,0 +1,22 @@
+[
+  {
+    "alias": "hot chips",
+    "food": "Potato, chips, regular, fast food outlet, deep fried, blended oil, salted",
+    "why": "AU idiom. No lexical signal can reach this row: it competes with Banana chip and Corn chips, all AFCD, all AU, all generic, all legitimately named chip (kora#219). Deliberately NOT aliasing the bare word chips — in Australia that means hot chips OR crisps, ~226 vs ~500 kcal, which is real ambiguity the resolver should ask about rather than settle at score 1.0."
+  },
+  {
+    "alias": "aubergine",
+    "food": "Eggplant, unpeeled, fresh, raw",
+    "why": "UK/AU term for the same raw vegetable. No row contains the word, so today it resolves to nothing."
+  },
+  {
+    "alias": "brinjal",
+    "food": "Eggplant, unpeeled, fresh, raw",
+    "why": "Indian English for the same raw vegetable. Same preparation state, so no calorie shift."
+  },
+  {
+    "alias": "okra",
+    "food": "Ladies finger",
+    "why": "IFCT names this Ladies finger; okra is what most people call it. Same raw vegetable. NOT aliasing bhindi to it — a user typing bhindi usually means the cooked dish, which the curated Bhindi masala row already answers, and a score-1.0 alias would override it."
+  }
+]
