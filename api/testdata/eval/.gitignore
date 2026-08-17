@@ -3,3 +3,6 @@
 !.gitignore
 !README.md
 !chat.sample.jsonl
+# ranking.sample.jsonl is the opposite: a committed regression suite, not
+# user-provided data. Its measured output (ranking.out.tsv) stays ignored.
+!ranking.sample.jsonl
