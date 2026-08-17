@@ -144,6 +144,14 @@ func (r Repository) Insert(ctx context.Context, items []FoodItem) (int, error) {
 		// the rule. Every bulk source lands here — cmd/ingest, cmd/seed and the
 		// OpenFoodFacts cache-on-miss in ResolveBarcode all call Insert.
 		created.EntityType = DeriveEntityType(item.Brand, item.Barcode)
+		// Unlike EntityType, locale is NOT recomputed here: it is a property of
+		// the SOURCE, not of the row's own columns, and the caller may
+		// legitimately know better than the provenance rule (au_in_dishes.json
+		// carries a per-row locale). Fall back to the rule only when the
+		// caller supplied nothing.
+		if created.Locale == "" {
+			created.Locale = DeriveLocale(item.Provenance)
+		}
 		if err := r.db.WithContext(ctx).Create(&created).Error; err != nil {
 			return inserted, fmt.Errorf("nutrition: insert: %w", err)
 		}
@@ -317,7 +325,17 @@ func (r Repository) ResolveQuery(ctx context.Context, userID uuid.UUID, q Query,
 		     FROM food_items fi
 		     WHERE to_tsvector('simple', fi.normalized_name) @@ plainto_tsquery('simple', ?)
 		     AND fi.deleted_at IS NULL
-		     ORDER BY similarity(fi.normalized_name, ?) DESC
+		     -- fi.id is a TIEBREAKER, not a preference. similarity() produces
+		     -- large ties (every "Corn Chips" row scores identically), and with
+		     -- no second key Postgres returns them in heap order — so ANY
+		     -- migration that rewrites rows silently reshuffles results. That
+		     -- made the ranking harness report phantom changes three separate
+		     -- times (the IFCT ingest, the USDA brand backfill, and the locale
+		     -- migration), each needing a manual check that the score multiset
+		     -- was unchanged before the real diff could be read. Ordering ties
+		     -- by id costs nothing and makes the whole pipeline deterministic,
+		     -- since the Go ranker below sorts stably.
+		     ORDER BY similarity(fi.normalized_name, ?) DESC, fi.id
 		     LIMIT ?`, searchNorm, searchNorm, searchNorm, resolveScanLimit).
 		Scan(&ftRows).Error; err != nil {
 		return nil, fmt.Errorf("nutrition: resolve fulltext: %w", err)
@@ -381,7 +399,9 @@ func (r Repository) ResolveQuery(ctx context.Context, userID uuid.UUID, q Query,
 			         SELECT fi.*, (fi.embedding <=> ?) AS distance
 			         FROM food_items fi
 			         WHERE fi.embedding IS NOT NULL AND fi.deleted_at IS NULL
-			         ORDER BY distance ASC LIMIT ?
+			         -- id tiebreaks equal distances, for the same determinism
+			         -- reason as the full-text query above.
+			         ORDER BY distance ASC, id LIMIT ?
 			     ) ranked`,
 				searchNorm, pgvector.NewVector(queryVec), resolveScanLimit).
 			Scan(&embRows).Error; err != nil {
@@ -580,6 +600,35 @@ func (r Repository) BackfillNormalizedNames(ctx context.Context) (int, error) {
 			return updated, fmt.Errorf("nutrition: backfill update: %w", err)
 		}
 		updated++
+	}
+	return updated, nil
+}
+
+// BackfillLocales fills in the locale of rows that are already in the index and
+// have none, using the locale the source file states for them.
+//
+// Needed because migration 000035 can only set what provenance derives, and the
+// curated file is deliberately mixed — 46 Indian dishes and 15 Australian ones
+// under one provenance. Those rows come out of the migration with an empty
+// locale, and Insert skips them on re-ingest (they already exist), so nothing
+// else would ever fill them in.
+//
+// Only ever writes over an EMPTY locale. A row that already has one was either
+// derived correctly by the migration or set deliberately, and this must not
+// second-guess it — which also makes a second run a no-op.
+func (r Repository) BackfillLocales(ctx context.Context, items []FoodItem) (int, error) {
+	updated := 0
+	for _, item := range items {
+		if item.Locale == "" {
+			continue
+		}
+		res := r.db.WithContext(ctx).Model(&FoodItem{}).
+			Where("name = ? AND brand = ? AND COALESCE(locale, '') = ''", item.Name, item.Brand).
+			Update("locale", item.Locale)
+		if res.Error != nil {
+			return updated, fmt.Errorf("nutrition: backfill locales: %w", res.Error)
+		}
+		updated += int(res.RowsAffected)
 	}
 	return updated, nil
 }

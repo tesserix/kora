@@ -19,6 +19,11 @@ type row struct {
 	FatPer100g     float64 `json:"fat_per_100g"`
 	FiberPer100g   float64 `json:"fiber_per_100g"`
 	Barcode        string  `json:"barcode"`
+	// Locale is set only by sources whose rows are not all one locale —
+	// today just au_in_dishes.json, which mixes Indian and Australian dishes.
+	// Everything else leaves it empty and takes nutrition.DeriveLocale's
+	// provenance rule.
+	Locale string `json:"locale"`
 }
 
 // LoadFile parses a JSON array of food rows into FoodItems, stamping provenance
@@ -49,9 +54,14 @@ func LoadFile(path, provenance string) ([]nutrition.FoodItem, error) {
 				name, brand = rest, extracted
 			}
 		}
+		locale := r.Locale
+		if locale == "" {
+			locale = nutrition.DeriveLocale(provenance)
+		}
 		item := nutrition.FoodItem{
 			Name:           name,
 			Brand:          brand,
+			Locale:         locale,
 			Provenance:     provenance,
 			ServingDesc:    r.ServingDesc,
 			ServingGrams:   r.ServingGrams,
