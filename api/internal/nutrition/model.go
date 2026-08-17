@@ -31,6 +31,51 @@ const (
 	ProvenanceCurated Provenance = "curated"
 )
 
+// Locale is which food culture a row describes — the answer to "is this food
+// from here?", which neither Provenance (which dataset) nor EntityType (what
+// kind of thing) can give.
+//
+// It exists because USDA is 7,740 rows against AFCD's 1,635 and IFCT's 523, so
+// on an India + Australia user base the US meaning of "chips", "biscuit",
+// "capsicum" and "rocket" outnumbers the local one on every query. Locale fixes
+// that as a class rather than term by term (kora#212 Phase 4).
+type Locale = string
+
+const (
+	LocaleAU Locale = "AU"
+	LocaleIN Locale = "IN"
+	LocaleUS Locale = "US"
+	// LocaleUnknown is a real state, not a gap: the row gets no locale
+	// preference in either direction. Correct for user estimates and for any
+	// source that is not national reference data.
+	LocaleUnknown Locale = ""
+)
+
+// DeriveLocale states the provenance→locale rule in one place, so a new ingest
+// stays correct without maintenance.
+//
+// `curated` is deliberately absent: au_in_dishes.json is MIXED (46 Indian
+// dishes, 15 Australian), so deriving it from provenance would confidently
+// mislabel two thirds of the file. Those rows carry an explicit per-row locale
+// from the source JSON instead, and this returns unknown for them so a caller
+// that forgets to pass one gets no preference rather than a wrong one.
+func DeriveLocale(provenance Provenance) Locale {
+	switch provenance {
+	case ProvenanceAFCD, ProvenanceOFF:
+		// OFF is Australian here specifically because off_au.json is filtered
+		// to Australian products at conversion time. If a second OFF region is
+		// ever ingested, this rule stops being true and must move to the
+		// converter, like curated's did.
+		return LocaleAU
+	case ProvenanceIFCT:
+		return LocaleIN
+	case ProvenanceUSDA:
+		return LocaleUS
+	default:
+		return LocaleUnknown
+	}
+}
+
 // EntityType is what KIND of thing a food row is, as distinct from Provenance,
 // which is where it came from. Provenance answers a question about lineage and
 // trust; EntityType answers whether the row describes one specific packaged
@@ -101,7 +146,10 @@ type FoodItem struct {
 	// EntityType is json:"-" on purpose. Phase 1 of kora#212 is data-model
 	// only: nothing scores, ranks, filters or renders on it yet, and putting it
 	// in the API response would be a behaviour change ahead of a consumer.
-	EntityType     EntityType      `gorm:"column:entity_type" json:"-"`
+	EntityType EntityType `gorm:"column:entity_type" json:"-"`
+	// Locale is json:"-" for the same reason as EntityType: it is a ranking
+	// input, not something a client renders or should start depending on.
+	Locale         Locale          `gorm:"column:locale" json:"-"`
 	Barcode        *string         `json:"barcode,omitempty"`
 	ServingDesc    string          `json:"serving_desc"`
 	ServingGrams   float64         `json:"serving_grams"`
