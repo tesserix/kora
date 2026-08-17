@@ -1,0 +1,33 @@
+-- kora#219: rank on what a food IS, not on how long its description is.
+--
+-- `normalized_name` covers the whole name, qualifier tail included, and TWO of
+-- the three lexical signals are computed against it:
+--
+--   precision = |Q∩D| / |D|                  -- charged per token of the name
+--   trigram   = similarity(normalized_name, Q)
+--
+-- Both punish a carefully-described row. For the query "chips":
+--
+--   Banana chip                                                    -> precision 0.50, high trigram
+--   Potato, chips, regular, fast food outlet, deep fried, salted   -> precision 0.10, low  trigram
+--
+-- so AFCD's correct Australian hot-chips row (226 kcal) lost to a banana chip
+-- (519 kcal) on nothing but verbosity, and did not even reach the top 10.
+-- Fixing precision alone was measured and was NOT enough: trigram carries the
+-- same 0.3 weight and independently favours the shorter string.
+--
+-- normalized_identity holds just the identifying part — the first two comma
+-- segments of the name, normalized ("potato chip") — so similarity() compares
+-- the query against the food's identity instead of against its paragraph.
+--
+-- RECALL IS UNCHANGED AND MUST STAY THAT WAY. The tsvector predicate still runs
+-- over normalized_name, so a query mentioning a qualifier ("salted", "deep
+-- fried") still FINDS the row. Only the ranking signal moves. Narrowing recall
+-- to the identity would silently make every qualifier unsearchable.
+--
+-- Populated by a Go backfill, not here: the value comes from Normalize(), which
+-- singularizes and strips punctuation in ways this migration cannot reproduce
+-- in SQL. Same reason normalized_name has always been written from Go. The
+-- column therefore starts empty and the scorer must tolerate that — see
+-- identityOrName in the repository.
+ALTER TABLE food_items ADD COLUMN normalized_identity TEXT NOT NULL DEFAULT '';

@@ -142,7 +142,12 @@ type FoodItem struct {
 	Name           string    `json:"name"`
 	Brand          string    `json:"brand"`
 	NormalizedName string    `gorm:"column:normalized_name" json:"-"`
-	Provenance     string    `json:"provenance"`
+	// NormalizedIdentity is the identifying part of the name only — the first
+	// two comma segments, normalized. Ranking compares against this so a row
+	// is not punished for describing itself precisely (kora#219). Recall still
+	// runs over NormalizedName.
+	NormalizedIdentity string `gorm:"column:normalized_identity" json:"-"`
+	Provenance         string `json:"provenance"`
 	// EntityType is json:"-" on purpose. Phase 1 of kora#212 is data-model
 	// only: nothing scores, ranks, filters or renders on it yet, and putting it
 	// in the API response would be a behaviour change ahead of a consumer.

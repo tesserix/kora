@@ -139,6 +139,7 @@ func (r Repository) Insert(ctx context.Context, items []FoodItem) (int, error) {
 		}
 		created := item
 		created.NormalizedName = Normalize(item.Name)
+		created.NormalizedIdentity = identityPhrase(item.Name)
 		// Derived at write time for the same reason NormalizedName is: it is a
 		// function of the row, so a caller must not be able to disagree with
 		// the rule. Every bulk source lands here — cmd/ingest, cmd/seed and the
@@ -297,7 +298,7 @@ func (r Repository) ResolveQuery(ctx context.Context, userID uuid.UUID, q Query,
 			return s
 		}
 		s := &scoredItem{item: it}
-		s.comp.Coverage, s.comp.Precision = tokenOverlap(searchNorm, it.NormalizedName)
+		s.comp.Coverage, s.comp.Precision = tokenOverlap(searchNorm, it.NormalizedName, identityPhrase(it.Name))
 		pool[it.ID] = s
 		order = append(order, it.ID)
 		return s
@@ -603,11 +604,16 @@ func (r Repository) BackfillNormalizedNames(ctx context.Context) (int, error) {
 	updated := 0
 	for _, it := range items {
 		norm := Normalize(it.Name)
-		if norm == it.NormalizedName {
+		// normalized_identity (kora#219) is recomputed in the same pass: it is
+		// derived from the same source string, and a row whose name is current
+		// but whose identity is empty would otherwise never be filled in.
+		identity := identityPhrase(it.Name)
+		if norm == it.NormalizedName && identity == it.NormalizedIdentity {
 			continue
 		}
 		if err := r.db.WithContext(ctx).Model(&FoodItem{}).
-			Where("id = ?", it.ID).Update("normalized_name", norm).Error; err != nil {
+			Where("id = ?", it.ID).
+			Updates(map[string]any{"normalized_name": norm, "normalized_identity": identity}).Error; err != nil {
 			return updated, fmt.Errorf("nutrition: backfill update: %w", err)
 		}
 		updated++
