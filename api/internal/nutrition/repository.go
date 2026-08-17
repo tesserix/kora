@@ -421,12 +421,39 @@ func (r Repository) ResolveQuery(ctx context.Context, userID uuid.UUID, q Query,
 	// so when q.Brand is set the inference is skipped entirely — it exists now
 	// only for the plain-string Resolve path, which still has nothing better.
 	namedBrand := strings.TrimSpace(q.Brand)
-	brandNamed := namedBrand != ""
-	if !brandNamed {
+	wantBrand := Normalize(namedBrand)
+
+	// Whether the named brand is actually IN this index, not merely named.
+	//
+	// The distinction matters more than it looks. Turning the generic
+	// preference off on the mere mention of a brand is wrong when we do not
+	// stock it: nothing then earns the brand bonus either, so the only effect
+	// is that generics lose their preference and arbitrary OTHER brands float
+	// up. Measured on "El Janah 1/2 chicken with Chips", whose brand has no
+	// rows at all: the generic `Banana chip` was displaced by `Corn Chips`
+	// (Woolworths) — a branded row for a brand the user did not name, which is
+	// worse than either policy on its own.
+	//
+	// So the preference is disabled only when the brand is present to compete.
+	// Naming a brand we do not carry leaves the query effectively unqualified,
+	// and a generic is the honest fallback.
+	brandPresent := false
+	if wantBrand != "" {
+		for _, s := range scoredList {
+			if brandMatches(wantBrand, s.item.Brand) {
+				brandPresent = true
+				break
+			}
+		}
+	}
+	// The token-matching inference is for the plain-string Resolve path only.
+	// Once identify has stated the brand, re-deriving it from the phrase can
+	// only disagree with the better source.
+	brandNamed := brandPresent
+	if namedBrand == "" {
 		brandNamed = queryNamesABrand(qTokens, scoredList)
 	}
 	preferGenerics := !brandNamed
-	wantBrand := Normalize(namedBrand)
 
 	for _, s := range scoredList {
 		s.score = quality(s.comp)
