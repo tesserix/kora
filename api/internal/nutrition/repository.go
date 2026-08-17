@@ -486,3 +486,50 @@ func (r Repository) BackfillNormalizedNames(ctx context.Context) (int, error) {
 	}
 	return updated, nil
 }
+
+// BackfillUSDAEmbeddedBrands moves a brand that USDA wrote into the name of an
+// ALREADY-INGESTED row into the brand column, and retypes the row.
+//
+// This is the other half of the loader change in ingest.LoadFile, and skipping
+// it does active harm rather than merely leaving work undone: ingest matches
+// existing rows on name+brand, so once the loader starts emitting
+// ("FILET-O-FISH", "McDONALD'S") while the table still holds
+// ("McDONALD'S, FILET-O-FISH", ""), the next run stops recognising them and
+// inserts 310 DUPLICATES instead of updating anything.
+//
+// Rewriting `name` also invalidates `normalized_name`, which is what the
+// full-text tier matches on, so it is recomputed in the same update rather
+// than left to a separate BackfillNormalizedNames pass a caller might forget.
+// EntityType is recomputed through the ordinary DeriveEntityType, which needs
+// no change to start returning branded_product now that the brand column is
+// populated — that is the whole point of doing this at the data layer instead
+// of teaching the derivation about name shapes (kora#212).
+//
+// Scoped to USDA rows with an empty brand, so a second run is a no-op.
+func (r Repository) BackfillUSDAEmbeddedBrands(ctx context.Context) (int, error) {
+	var items []FoodItem
+	if err := r.db.WithContext(ctx).
+		Where("provenance = ? AND (brand IS NULL OR brand = '')", ProvenanceUSDA).
+		Find(&items).Error; err != nil {
+		return 0, fmt.Errorf("nutrition: backfill usda brands load: %w", err)
+	}
+	updated := 0
+	for _, it := range items {
+		brand, rest := SplitEmbeddedBrand(it.Name)
+		if brand == "" {
+			continue
+		}
+		if err := r.db.WithContext(ctx).Model(&FoodItem{}).
+			Where("id = ?", it.ID).
+			Updates(map[string]any{
+				"name":            rest,
+				"brand":           brand,
+				"normalized_name": Normalize(rest),
+				"entity_type":     DeriveEntityType(brand, it.Barcode),
+			}).Error; err != nil {
+			return updated, fmt.Errorf("nutrition: backfill usda brands update: %w", err)
+		}
+		updated++
+	}
+	return updated, nil
+}
