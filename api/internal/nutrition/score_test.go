@@ -115,3 +115,59 @@ func TestScoringSeparatesTheAmbiguousFromTheClear(t *testing.T) {
 	ambiguous := roasted * ambiguityFactor(roasted-grilled)
 	require.Less(t, ambiguous, 0.70, "near-tied candidates must fall to follow_up")
 }
+
+// TestAmbiguityMarginIgnoresRankOrder is the guard for kora#212's invariant:
+// discounting or promoting a rival must never raise the survivor's confidence.
+//
+// The pool is passed in an order that a ranking bonus would have produced, with
+// the true runner-up pushed into third place. If the margin were read off the
+// ranked list it would be 0.95-0.75 = 0.20 (factor 1.00, `auto`); the correct
+// answer is 0.95-0.85 = 0.10 (factor 0.80), because A's real rival C is still
+// sitting there at 0.85 and nothing about A actually improved.
+func TestAmbiguityMarginIgnoresRankOrder(t *testing.T) {
+	byScore := []*scoredItem{{score: 0.95}, {score: 0.85}, {score: 0.75}}
+	// The same three rows as a ranking signal would order them: the 0.75 row
+	// has been promoted above the 0.85 row. The presented answer (0.95) is
+	// unchanged, so its confidence must be too.
+	reordered := []*scoredItem{{score: 0.95}, {score: 0.75}, {score: 0.85}}
+
+	require.InDelta(t, 0.10, ambiguityMargin(byScore), 1e-9)
+	require.InDelta(t, 0.10, ambiguityMargin(reordered), 1e-9,
+		"the margin must be a property of the candidate set, not of the presentation order")
+	require.Equal(t, ambiguityMargin(byScore), ambiguityMargin(reordered))
+
+	// And the consequence that actually matters: the tier-driving factor is
+	// unchanged by the reorder, so promoting a weaker row cannot manufacture
+	// confidence.
+	require.InDelta(t, 0.80, ambiguityFactor(ambiguityMargin(reordered)), 1e-9)
+}
+
+func TestAmbiguityMarginHandlesShortAndTiedPools(t *testing.T) {
+	// A pool with no rival must NOT be damped: ambiguityFactorFor short-circuits
+	// to 1.0. Routing it through ambiguityMargin instead would read as a dead
+	// tie and floor an unambiguous single answer at 0.6.
+	require.InDelta(t, 1.0, ambiguityFactorFor(nil), 1e-9)
+	require.InDelta(t, 1.0, ambiguityFactorFor([]*scoredItem{{score: 0.9}}), 1e-9,
+		"one candidate and no rival is the least ambiguous case, not the most")
+	require.Zero(t, ambiguityMargin([]*scoredItem{{score: 0.6}, {score: 0.6}}),
+		"a genuine tie is zero margin")
+	require.InDelta(t, 0.6, ambiguityFactorFor([]*scoredItem{{score: 0.6}, {score: 0.6}}), 1e-9,
+		"a real tie between two candidates must land on the ambiguity floor")
+}
+
+// TestAmbiguityMarginFloorsAPromotedWeakerWinner is the other half of the
+// invariant, and the direction an earlier attempt at this got backwards.
+//
+// headBonus deliberately promotes a lower-quality row to top-1. When it does,
+// the row being reported is WEAKER than a rival still in the pool, which is the
+// least confident situation there is. Measuring the gap between the top two
+// qualities regardless of which is presented would report this as a clear win
+// and raise confidence; keeping items[0] as the subject yields a negative
+// margin that clamps to 0 and floors it.
+func TestAmbiguityMarginFloorsAPromotedWeakerWinner(t *testing.T) {
+	promoted := []*scoredItem{{score: 0.60}, {score: 0.80}}
+	require.Zero(t, ambiguityMargin(promoted),
+		"a presented row that is weaker than its rival must not earn a positive margin")
+	require.InDelta(t, 0.6, ambiguityFactorFor(promoted), 1e-9,
+		"it must land on the ambiguity floor, not above it")
+}

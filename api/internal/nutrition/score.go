@@ -1,6 +1,9 @@
 package nutrition
 
-import "strings"
+import (
+	"math"
+	"strings"
+)
 
 // Scoring weights, fixed by principle and deliberately NOT tuned against the
 // golden set. Seven free parameters fitted to a set of that size would be
@@ -119,6 +122,88 @@ func quality(c components) float64 {
 		return e
 	}
 	return l
+}
+
+// ambiguityMargin returns how far the presented answer's BASE quality sits
+// above that of its strongest rival — with the rival found by scanning the
+// whole pool, so it does not depend on the order the pool was ranked in.
+//
+// THE INVARIANT (kora#212, first proved on the parked
+// feat/184-brand-aware-ranking branch): **a ranking signal that demotes a rival
+// must never promote its twin.**
+//
+// The margin is what tells confidence "one of these is right and I can't tell
+// which". Reading the rival off items[1] of the RANKED list breaks that,
+// because any ranking-only bonus can substitute a weaker row into second place
+// and widen a gap that did not really widen. Worked example, with headBonus
+// alone:
+//
+//	base qualities   A 0.95, C 0.85, B 0.75
+//	ranked by score  A, C, B   -> rival C -> margin 0.10 -> factor 0.80
+//	B gets headBonus A, B, C   -> rival B -> margin 0.20 -> factor 1.00
+//
+// A's confidence rose because an unrelated third row moved, while A's real
+// rival C still sits there at 0.85. That is the mechanism which silently
+// promoted an arbitrary branded milk to `auto` when a discount was tried, and
+// it was latent in headBonus. Scanning for the strongest rival gives 0.10 in
+// both orderings.
+//
+// Making the RIVAL independent of presentation order is what lets a Phase 2
+// retrieval policy express "prefer generics" without touching MatchScore: any
+// number of ranking signals can be added and none of them can quietly move
+// confidence.
+//
+// Callers must not use this for a pool of fewer than two — there is no rival to
+// measure against. Use ambiguityFactorFor, which handles that case; this
+// returns 0 for it, and 0 means "dead tie", which is the OPPOSITE of the truth.
+//
+// Note carefully WHICH row is the subject and which is the rival:
+//
+//   - The SUBJECT is items[0] — the row actually being presented as the answer.
+//     It must be, because confidence is reported about that row.
+//   - The RIVAL is the strongest of ALL the others, found by scanning rather
+//     than by reading items[1]. That is the half that removes the bug.
+//
+// Getting this backwards inverts the guard. An earlier attempt here took the
+// top TWO base qualities regardless of which was presented, which looks more
+// symmetric and is wrong: when headBonus deliberately promotes a lower-quality
+// row to top-1, that version measured the gap as though the stronger rival were
+// the answer and so RAISED confidence for the weaker row it actually returned.
+// Keeping items[0] as the subject means such a promotion yields a negative
+// margin, which clamps to 0 and floors confidence — the cautious answer, and
+// the behaviour TestResolveMatchScoreUnaffectedByHeadBonus pins.
+func ambiguityMargin(items []*scoredItem) float64 {
+	if len(items) < 2 {
+		return 0
+	}
+	rival := math.Inf(-1)
+	for _, s := range items[1:] {
+		if s.score > rival {
+			rival = s.score
+		}
+	}
+	margin := items[0].score - rival
+	if margin < 0 {
+		return 0
+	}
+	return margin
+}
+
+// ambiguityFactorFor is what Resolve calls: the confidence multiplier for a
+// whole candidate pool.
+//
+// A pool with fewer than two candidates gets 1.0 — no damping. One row and no
+// rival is the LEAST ambiguous situation there is; there is nothing for the
+// resolver to confuse it with. Treating it as a dead tie (margin 0) instead
+// floors confidence at 0.6 and turns unambiguous single answers into targeted
+// questions — measured on the harness, it dropped `palak paneer` from `auto`
+// to `follow_up` and `bhindi` and `Coke Zero` from `confirm` to `follow_up`,
+// each of which returns exactly one candidate.
+func ambiguityFactorFor(items []*scoredItem) float64 {
+	if len(items) < 2 {
+		return 1
+	}
+	return ambiguityFactor(ambiguityMargin(items))
 }
 
 // ambiguityFactor scales confidence by how clearly the best candidate beats the

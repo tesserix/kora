@@ -374,30 +374,16 @@ func (r Repository) Resolve(ctx context.Context, userID uuid.UUID, phrase string
 		return scoredList[i].rankKey > scoredList[j].rankKey
 	})
 
-	// The ambiguity margin is computed from the BASE qualities (not rank keys)
-	// of the top two candidates in the now-ranked order, clamped at >= 0.
-	// Ranking by rankKey can promote a candidate whose base quality is lower
-	// than the one it displaced (that's the whole point of the head-noun
-	// signal), so a naive scoredList[0].score - scoredList[1].score can go
-	// negative post-reorder. A negative margin must not be interpreted as
-	// "more ambiguous than a dead tie" — clamp it at the dead-tie value (0)
-	// instead of letting it feed further below.
+	// The ambiguity margin comes from the two highest BASE qualities in the
+	// pool, found independently of the ranked order — see ambiguityMargin for
+	// the invariant and a worked example.
 	//
-	// This clamp is deliberately BELT-AND-BRACES and currently unobservable:
-	// ambiguityFactor already floors any input below 0 at ambiguityFloor, so
-	// removing this would change no output today. It is kept because it makes
-	// the intent local ("a reorder cannot mean extra ambiguity") rather than
-	// relying on a clamp two functions away. Note there is therefore no test
-	// that can distinguish its presence — do not write one and claim it
-	// guards this; it would pass either way.
-	factor := 1.0
-	if len(scoredList) > 1 {
-		margin := scoredList[0].score - scoredList[1].score
-		if margin < 0 {
-			margin = 0
-		}
-		factor = ambiguityFactor(margin)
-	}
+	// It deliberately does NOT read scoredList[0] and scoredList[1]. Doing that
+	// let any ranking-only bonus substitute a weaker row into second place and
+	// widen the gap, so demoting a rival could RAISE the survivor's confidence.
+	// That is the mechanism that promoted an arbitrary branded milk to `auto`
+	// on the parked feat/184 branch, and it was latent here via headBonus.
+	factor := ambiguityFactorFor(scoredList)
 	for _, s := range scoredList {
 		tier := MatchFullText
 		if embeddingFactor*s.comp.EmbSim > lexical(s.comp) {
