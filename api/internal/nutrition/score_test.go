@@ -157,8 +157,10 @@ func TestUnqualifiedBrandedProductLosesToTheGenericFood(t *testing.T) {
 	// The measured prod defect, as scores. Bare query "oat":
 	//   "Oat" (Sanitarium So Good — oat milk, 46 kcal) matched every signal.
 	//   "Rolled oats, raw" (AFCD, 379 kcal) is what the user meant.
-	oatMilk := quality(components{Coverage: 1, Precision: 1, Trigram: 1, UnqualifiedBrand: true})
-	rolledOats := quality(components{Coverage: 1, Precision: 1.0 / 3.0, Trigram: 0.286})
+	oatMilkComp := components{Coverage: 1, Precision: 1, Trigram: 1, UnqualifiedBrand: true}
+	rolledOatsComp := components{Coverage: 1, Precision: 1.0 / 3.0, Trigram: 0.286}
+	oatMilk := discount(quality(oatMilkComp), oatMilkComp)
+	rolledOats := discount(quality(rolledOatsComp), rolledOatsComp)
 
 	require.Greater(t, rolledOats, oatMilk,
 		"an unqualified query must prefer the generic food over a product named after it")
@@ -185,19 +187,23 @@ func TestNamingTheBrandExemptsTheRow(t *testing.T) {
 	c := components{Coverage: 1, Precision: 2.0 / 3.0, Trigram: 0.625,
 		UnqualifiedBrand: brandUnqualified(Normalize("Coke Zero"), Normalize("Coke Zero Sugar"), "Coke")}
 	require.False(t, c.UnqualifiedBrand)
-	require.InDelta(t, 0.7875, quality(c), 0.0001)
-	require.GreaterOrEqual(t, quality(c), tierConfirmFloorForTest)
+	require.InDelta(t, 0.7875, discount(quality(c), c), 0.0001)
+	require.GreaterOrEqual(t, discount(quality(c), c), tierConfirmFloorForTest)
 }
 
 func TestBrandDiscountLeavesGenericRowsUntouched(t *testing.T) {
 	// "banana" -> AFCD "Banana" (no brand) must keep its perfect score.
 	c := components{Coverage: 1, Precision: 1, Trigram: 1}
-	require.InDelta(t, 1.0, quality(c), 0.0001)
+	require.InDelta(t, 1.0, discount(quality(c), c), 0.0001)
 
 	// The discount is a common factor, so it cannot flip which path won.
 	embWins := components{Coverage: 0, Precision: 0, Trigram: 0.1, EmbSim: 0.9}
 	embWins.UnqualifiedBrand = true
-	require.InDelta(t, embeddingFactor*0.9*unqualifiedBrandFactor, quality(embWins), 0.0001)
+	require.InDelta(t, embeddingFactor*0.9*unqualifiedBrandFactor, discount(quality(embWins), embWins), 0.0001)
+
+	// quality() itself must stay the RAW evidence: the ambiguity margin is
+	// read off it, and a discount leaking in there is what promoted a rival.
+	require.InDelta(t, embeddingFactor*0.9, quality(embWins), 0.0001)
 }
 
 func TestBrandDiscountNeedsAGenericToDemoteTo(t *testing.T) {
@@ -235,5 +241,52 @@ func TestBrandDiscountNeedsAGenericToDemoteTo(t *testing.T) {
 			pool, order := build(tt.items...)
 			require.Equal(t, tt.want, genericAlternative(pool, order))
 		})
+	}
+}
+
+// TestDiscountingARivalNeverPromotesTheSurvivor is the regression guard for a
+// bug this change introduced and then fixed. "vegemite" returns two rows tied
+// at raw quality 1.0 — Bega's Vegemite and Vegemite's Vegemite. The tie was
+// protecting the user: ambiguityFactor held both to 0.60, tier follow_up.
+// Discounting Bega (the user never said "Bega") separates the pair, and if the
+// margin is measured on the DISCOUNTED values the survivor recovers to a full
+// 1.00 and is silently auto-logged. Demoting one candidate must never promote
+// another.
+func TestDiscountingARivalNeverPromotesTheSurvivor(t *testing.T) {
+	survivor := components{Coverage: 1, Precision: 1, Trigram: 1}
+	rival := components{Coverage: 1, Precision: 1, Trigram: 1, UnqualifiedBrand: true}
+
+	// Ambiguity is a property of the evidence, so it is read off quality()...
+	rawMargin := quality(survivor) - quality(rival)
+	require.InDelta(t, 0, rawMargin, 0.0001, "the two rows are tied on evidence")
+	require.InDelta(t, ambiguityFloor, ambiguityFactor(rawMargin), 0.0001)
+
+	reported := discount(quality(survivor), survivor) * ambiguityFactor(rawMargin)
+	require.InDelta(t, 0.60, reported, 0.0001, "the tie must still damp the survivor")
+	require.Less(t, reported, tierConfirmFloorForTest, "and must not reach confirm, let alone auto")
+
+	// ...never off the discounted scores, which would manufacture a margin.
+	discountedMargin := discount(quality(survivor), survivor) - discount(quality(rival), rival)
+	require.Greater(t, discountedMargin, rawMargin, "the discount does open a spurious margin")
+	require.Greater(t, discount(quality(survivor), survivor)*ambiguityFactor(discountedMargin), 0.90,
+		"which is exactly how the survivor reached auto — this is the shape being guarded against")
+}
+
+// TestDiscountIsNonIncreasing is the property the ambiguity split relies on:
+// discount() can only ever lower a score, so with the factor computed on raw
+// evidence no reported score can rise because a different row was discounted.
+func TestDiscountIsNonIncreasing(t *testing.T) {
+	for _, c := range []components{
+		{Coverage: 1, Precision: 1, Trigram: 1},
+		{Coverage: 1, Precision: 0.5, Trigram: 0.2},
+		{Coverage: 0, Precision: 0, Trigram: 0.1, EmbSim: 0.9},
+		{},
+	} {
+		raw := quality(c)
+		require.InDelta(t, raw, discount(raw, c), 0.0001, "unbranded rows are untouched")
+
+		flagged := c
+		flagged.UnqualifiedBrand = true
+		require.LessOrEqual(t, discount(raw, flagged), raw)
 	}
 }

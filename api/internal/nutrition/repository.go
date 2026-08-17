@@ -372,25 +372,49 @@ func (r Repository) Resolve(ctx context.Context, userID uuid.UUID, phrase string
 		if !generic {
 			s.comp.UnqualifiedBrand = false
 		}
-		s.score = quality(s.comp)
-		s.rankKey = s.score
+		bonus := 0.0
 		if head := headToken(s.item.Name); head != "" && qTokens[head] {
-			s.rankKey += headBonus
+			bonus = headBonus
 		}
+		s.raw = quality(s.comp)
+		s.rawRankKey = s.raw + bonus
+		s.score = discount(s.raw, s.comp)
+		s.rankKey = s.score + bonus
 		scoredList = append(scoredList, s)
 	}
+
+	// Two orderings, deliberately. The reported order uses rankKey (discounted);
+	// the ambiguity margin below is read off rawOrder, which is what rankKey
+	// would have been with no discount at all. Both are sorted from the same
+	// insertion order with the same stable sort, so when nothing is discounted
+	// they are the identical permutation and the factor is bit-for-bit what it
+	// was before the discount existed.
+	rawOrder := append([]*scoredItem(nil), scoredList...)
+	sort.SliceStable(rawOrder, func(i, j int) bool {
+		return rawOrder[i].rawRankKey > rawOrder[j].rawRankKey
+	})
 	sort.SliceStable(scoredList, func(i, j int) bool {
 		return scoredList[i].rankKey > scoredList[j].rankKey
 	})
 
-	// The ambiguity margin is computed from the BASE qualities (not rank keys)
-	// of the top two candidates in the now-ranked order, clamped at >= 0.
-	// Ranking by rankKey can promote a candidate whose base quality is lower
-	// than the one it displaced (that's the whole point of the head-noun
-	// signal), so a naive scoredList[0].score - scoredList[1].score can go
-	// negative post-reorder. A negative margin must not be interpreted as
-	// "more ambiguous than a dead tie" — clamp it at the dead-tie value (0)
-	// instead of letting it feed further below.
+	// The ambiguity margin is computed from the RAW qualities (not rank keys,
+	// and never the discounted score) of the top two candidates in the
+	// undiscounted order, clamped at >= 0.
+	//
+	// Reading it off the discounted order instead was a measured bug, not a
+	// hypothetical one: "vegemite" returns Bega's Vegemite and Vegemite's
+	// Vegemite tied at raw 1.0, a dead tie that correctly held both to 0.60.
+	// Discounting Bega — which the user never named — separated the pair, and
+	// the recovered margin lifted the SURVIVOR from 0.60 (follow_up) to 1.00
+	// (auto). Demoting one candidate promoted its twin into silent logging.
+	// Ambiguity is a property of the evidence, so it must be measured before
+	// any judgement about which candidate deserves to win is applied.
+	//
+	// Ranking by rankKey can promote a candidate whose quality is lower than
+	// the one it displaced (that's the whole point of the head-noun signal), so
+	// a naive [0]-[1] can go negative post-reorder. A negative margin must not
+	// be interpreted as "more ambiguous than a dead tie" — clamp it at the
+	// dead-tie value (0) instead of letting it feed further below.
 	//
 	// This clamp is deliberately BELT-AND-BRACES and currently unobservable:
 	// ambiguityFactor already floors any input below 0 at ambiguityFloor, so
@@ -400,8 +424,8 @@ func (r Repository) Resolve(ctx context.Context, userID uuid.UUID, phrase string
 	// that can distinguish its presence — do not write one and claim it
 	// guards this; it would pass either way.
 	factor := 1.0
-	if len(scoredList) > 1 {
-		margin := scoredList[0].score - scoredList[1].score
+	if len(rawOrder) > 1 {
+		margin := rawOrder[0].raw - rawOrder[1].raw
 		if margin < 0 {
 			margin = 0
 		}
@@ -449,10 +473,20 @@ func genericAlternative(pool map[uuid.UUID]*scoredItem, order []uuid.UUID) bool 
 // scoredItem accumulates one candidate's signals across the full-text and
 // embedding queries before a single score is computed from them.
 type scoredItem struct {
-	item    FoodItem
-	comp    components
-	score   float64 // unmodified quality() — this, scaled by the ambiguity factor, becomes MatchScore
-	rankKey float64 // score plus headBonus when applicable — sort order ONLY, never reported
+	item FoodItem
+	comp components
+
+	// raw is quality() before the unqualified-brand discount: the evidence,
+	// and the ONLY thing the ambiguity margin may be computed from. rawRankKey
+	// is raw plus headBonus — the ordering that would exist with no discount.
+	raw        float64
+	rawRankKey float64
+
+	// score is the discounted quality; scaled by the ambiguity factor it
+	// becomes MatchScore. rankKey is score plus headBonus when applicable —
+	// sort order ONLY, never reported.
+	score   float64
+	rankKey float64
 }
 
 // RowsMissingEmbedding returns food items with no embedding yet (up to limit),

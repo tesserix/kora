@@ -220,23 +220,48 @@ func lexical(c components) float64 {
 // never a penalty: a row with no embedding has EmbSim 0 and scores exactly its
 // lexical value, so the index's partial embedding coverage cannot distort a
 // comparison between rows.
-// The brand discount is applied LAST, to whichever of the two paths won. It
-// belongs here rather than beside headBonus in the ranking key because it is a
-// claim about how good the match actually is, not merely about sort order: a
-// branded row matched with no brand signal must not report a confidence its
-// evidence does not support, and a ranking-only signal would leave MatchScore
-// (and therefore the tier) untouched. Being a common factor, it also cannot
-// flip the full_text/embedding tier decision, which compares the two paths
-// before it is applied.
+// quality deliberately does NOT apply the unqualified-brand discount: it is
+// the raw evidence for a candidate, and the ambiguity margin must be measured
+// on raw evidence (see discount below and ambiguityFactor). Callers that need
+// the reported score apply discount() to this value.
 func quality(c components) float64 {
-	q := lexical(c)
-	if e := embeddingFactor * c.EmbSim; e > q {
-		q = e
+	l := lexical(c)
+	if e := embeddingFactor * c.EmbSim; e > l {
+		return e
 	}
+	return l
+}
+
+// discount turns a candidate's raw quality into its reported match strength by
+// applying the unqualified-brand factor.
+//
+// It is split out from quality() rather than folded into it because of an
+// interaction that was measured, not theorised. ambiguityFactor damps
+// confidence when the top two candidates are indistinguishable, and that
+// damping is often the only thing standing between a bare-word query and tier
+// auto: "vegemite" returned Bega's Vegemite and Vegemite's Vegemite tied at
+// 1.0, so the margin was 0 and both were held to 0.60. Discounting one of a
+// tied pair separates them — and if the margin is read off the discounted
+// values, the SURVIVOR's confidence goes UP. Demoting a rival promoted its
+// twin from follow_up straight to auto (0.60 -> 1.00), the exact harm this
+// change exists to prevent, inflicted by the change itself.
+//
+// So the discount must never be visible to the ambiguity computation. The
+// invariant the caller maintains is: the ambiguity factor is computed from
+// quality() and the ranking quality() alone would produce, so deleting the
+// discount entirely would leave every factor identical. Since the factor is
+// then independent of the discount, and discount() is non-increasing, no
+// candidate's reported score can ever rise because a different candidate was
+// discounted.
+//
+// The discount is applied to whichever of the lexical/embedding paths won, so
+// as a common factor it also cannot flip the full_text/embedding tier
+// decision, which compares the two paths before this runs.
+func discount(rawQuality float64, c components) float64 {
 	if c.UnqualifiedBrand {
-		q *= unqualifiedBrandFactor
+		return rawQuality * unqualifiedBrandFactor
 	}
-	return q
+	return rawQuality
 }
 
 // ambiguityFactor scales confidence by how clearly the best candidate beats the
