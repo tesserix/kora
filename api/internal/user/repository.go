@@ -139,6 +139,21 @@ func (r Repository) SetShareProgress(ctx context.Context, id uuid.UUID, share bo
 	return nil
 }
 
+// SetTimezone updates a user's IANA timezone.
+//
+// The value governs more than display: streak and challenge windows resolve
+// through it (kora#160), and since kora#212 Phase 4 it also selects which food
+// LOCALE the resolver prefers. Callers must validate it with time.LoadLocation
+// first — a bad zone here silently degrades both, and time.LoadLocation is the
+// only authority on what the runtime will actually accept.
+func (r Repository) SetTimezone(ctx context.Context, id uuid.UUID, tz string) error {
+	if err := r.db.WithContext(ctx).Model(&User{}).
+		Where("id = ?", id).Update("timezone", tz).Error; err != nil {
+		return fmt.Errorf("user: set timezone: %w", err)
+	}
+	return nil
+}
+
 func (r Repository) SetDisplayName(ctx context.Context, id uuid.UUID, name string) error {
 	if err := r.db.WithContext(ctx).Model(&User{}).Where("id = ?", id).Update("display_name", name).Error; err != nil {
 		return fmt.Errorf("user: set display name: %w", err)

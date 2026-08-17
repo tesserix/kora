@@ -14,6 +14,7 @@ import { AppearanceProvider } from "@/theme";
 import { ToastProvider } from "@/components/Toast";
 import { SavedMealSheetProvider } from "@/components/meals/SavedMealSheetProvider";
 import { reconcileWeightReminder } from "@/reminders/reconcileWeightReminder";
+import { syncTimezone } from "@/profile/syncTimezone";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { createSentrySink } from "@/observability/sentry";
 import { initReporting, reportError } from "@/observability/reporter";
@@ -100,6 +101,12 @@ export default function RootLayout() {
         void reconcileWeightReminder().catch((err) =>
           console.warn("reminders: foreground reconciliation failed", err),
         );
+        // Correct the stored timezone if the device has moved zone while
+        // backgrounded (kora#160). Shares this listener rather than adding a
+        // second one: both are "re-check what changed while we were away".
+        // No profile argument — syncTimezone skips the request unless the zone
+        // actually differs from what it last sent, so the steady state is free.
+        void syncTimezone();
       }
     });
     return () => sub.remove();
