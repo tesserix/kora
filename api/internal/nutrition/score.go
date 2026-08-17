@@ -1,6 +1,9 @@
 package nutrition
 
-import "strings"
+import (
+	"math"
+	"strings"
+)
 
 // Scoring weights, fixed by principle and deliberately NOT tuned against the
 // golden set. Seven free parameters fitted to a set of that size would be
@@ -30,6 +33,26 @@ const (
 	// the golden set was measured stable across 0.10–0.30, so this is not a
 	// tuned knife-edge; 0.15 sits in the middle of that stable range.
 	headBonus = 0.15
+
+	// genericBonus implements kora#212 Phase 2's retrieval policy: when a query
+	// names no brand, prefer generic reference data over branded retail
+	// products.
+	//
+	// It is a RANKING signal, exactly like headBonus and for the same reason.
+	// The parked feat/184 branch tried expressing this as a 0.5 discount on the
+	// branded row's quality instead, and it broke the product: 25 of 28 queries
+	// collapsed to follow_up, because quality drives ordering, the tier decision
+	// AND the abstain floor at once, so perturbing it to fix ranking moved
+	// confidence everywhere. Adding to rankKey moves ordering and NOTHING else —
+	// MatchScore is still the unmodified quality, and ambiguityMargin finds the
+	// rival by scanning, so a demoted row cannot inflate the survivor.
+	//
+	// Sized to match headBonus. It has to be able to reorder rows that are
+	// genuinely close (the branded/generic pairs this exists to separate sit
+	// within ~0.1 of each other) without being so large it buries a branded row
+	// the user actually asked for — and when they DID ask, brandEvidence
+	// switches the bonus off entirely rather than relying on its magnitude.
+	genericBonus = 0.15
 )
 
 // headToken returns the head noun of a raw (un-normalized) food name — the
@@ -62,6 +85,51 @@ func headToken(rawName string) string {
 		return ""
 	}
 	return fields[len(fields)-1]
+}
+
+// queryNamesABrand reports whether the query carries brand evidence — that is,
+// whether the user appears to have named one of the brands present among the
+// candidates. It is the gate on the generic-preference policy: a query naming
+// McDonald's must still reach McDonald's rows.
+//
+// The rule is "every token of some candidate's brand appears in the query",
+// deliberately requiring the WHOLE brand rather than any one token. Brands
+// routinely contain ordinary food words — `SMART SOUP`, `HOT POCKETS`,
+// `CAMPBELL'S CHUNKY` — so a single-token rule would read the bare query "soup"
+// as naming a brand and switch off the very preference that query needs most.
+// Requiring both "smart" and "soup" cannot misfire that way, while a
+// single-token brand ("KFC", "Coke") still matches on its one token, which is
+// correct: those words genuinely are the brand.
+//
+// This is knowingly conservative in the other direction, and Phase 3 is what
+// fixes that: identify currently flattens "El Janah 1/2 chicken with Chips" to
+// "chicken" before the resolver ever sees it, so the brand is usually gone by
+// now. Once identify returns a structured brand field, this inference gets
+// replaced by the real thing rather than extended.
+//
+// Brands are compared through Normalize so they match the query on the same
+// terms the rest of the scorer uses.
+func queryNamesABrand(qTokens map[string]bool, items []*scoredItem) bool {
+	if len(qTokens) == 0 {
+		return false
+	}
+	for _, s := range items {
+		brandTokens := strings.Fields(Normalize(s.item.Brand))
+		if len(brandTokens) == 0 {
+			continue
+		}
+		all := true
+		for _, t := range brandTokens {
+			if !qTokens[t] {
+				all = false
+				break
+			}
+		}
+		if all {
+			return true
+		}
+	}
+	return false
 }
 
 // components are the raw per-candidate signals feeding quality().
@@ -119,6 +187,88 @@ func quality(c components) float64 {
 		return e
 	}
 	return l
+}
+
+// ambiguityMargin returns how far the presented answer's BASE quality sits
+// above that of its strongest rival — with the rival found by scanning the
+// whole pool, so it does not depend on the order the pool was ranked in.
+//
+// THE INVARIANT (kora#212, first proved on the parked
+// feat/184-brand-aware-ranking branch): **a ranking signal that demotes a rival
+// must never promote its twin.**
+//
+// The margin is what tells confidence "one of these is right and I can't tell
+// which". Reading the rival off items[1] of the RANKED list breaks that,
+// because any ranking-only bonus can substitute a weaker row into second place
+// and widen a gap that did not really widen. Worked example, with headBonus
+// alone:
+//
+//	base qualities   A 0.95, C 0.85, B 0.75
+//	ranked by score  A, C, B   -> rival C -> margin 0.10 -> factor 0.80
+//	B gets headBonus A, B, C   -> rival B -> margin 0.20 -> factor 1.00
+//
+// A's confidence rose because an unrelated third row moved, while A's real
+// rival C still sits there at 0.85. That is the mechanism which silently
+// promoted an arbitrary branded milk to `auto` when a discount was tried, and
+// it was latent in headBonus. Scanning for the strongest rival gives 0.10 in
+// both orderings.
+//
+// Making the RIVAL independent of presentation order is what lets a Phase 2
+// retrieval policy express "prefer generics" without touching MatchScore: any
+// number of ranking signals can be added and none of them can quietly move
+// confidence.
+//
+// Callers must not use this for a pool of fewer than two — there is no rival to
+// measure against. Use ambiguityFactorFor, which handles that case; this
+// returns 0 for it, and 0 means "dead tie", which is the OPPOSITE of the truth.
+//
+// Note carefully WHICH row is the subject and which is the rival:
+//
+//   - The SUBJECT is items[0] — the row actually being presented as the answer.
+//     It must be, because confidence is reported about that row.
+//   - The RIVAL is the strongest of ALL the others, found by scanning rather
+//     than by reading items[1]. That is the half that removes the bug.
+//
+// Getting this backwards inverts the guard. An earlier attempt here took the
+// top TWO base qualities regardless of which was presented, which looks more
+// symmetric and is wrong: when headBonus deliberately promotes a lower-quality
+// row to top-1, that version measured the gap as though the stronger rival were
+// the answer and so RAISED confidence for the weaker row it actually returned.
+// Keeping items[0] as the subject means such a promotion yields a negative
+// margin, which clamps to 0 and floors confidence — the cautious answer, and
+// the behaviour TestResolveMatchScoreUnaffectedByHeadBonus pins.
+func ambiguityMargin(items []*scoredItem) float64 {
+	if len(items) < 2 {
+		return 0
+	}
+	rival := math.Inf(-1)
+	for _, s := range items[1:] {
+		if s.score > rival {
+			rival = s.score
+		}
+	}
+	margin := items[0].score - rival
+	if margin < 0 {
+		return 0
+	}
+	return margin
+}
+
+// ambiguityFactorFor is what Resolve calls: the confidence multiplier for a
+// whole candidate pool.
+//
+// A pool with fewer than two candidates gets 1.0 — no damping. One row and no
+// rival is the LEAST ambiguous situation there is; there is nothing for the
+// resolver to confuse it with. Treating it as a dead tie (margin 0) instead
+// floors confidence at 0.6 and turns unambiguous single answers into targeted
+// questions — measured on the harness, it dropped `palak paneer` from `auto`
+// to `follow_up` and `bhindi` and `Coke Zero` from `confirm` to `follow_up`,
+// each of which returns exactly one candidate.
+func ambiguityFactorFor(items []*scoredItem) float64 {
+	if len(items) < 2 {
+		return 1
+	}
+	return ambiguityFactor(ambiguityMargin(items))
 }
 
 // ambiguityFactor scales confidence by how clearly the best candidate beats the
