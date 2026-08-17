@@ -515,7 +515,14 @@ func (r Resolver) resolveGuesses(ctx context.Context, userID uuid.UUID, phrase s
 
 	// One factor for the whole resolution: coverage is a property of the
 	// phrase and the guess set together, not of any single candidate.
-	factor := reductionFactor(phraseCoverage(phrase, guesses))
+	coverage := phraseCoverage(phrase, guesses)
+	factor := reductionFactor(coverage)
+
+	// What the tiers WOULD have been without the damping, tracked so the log
+	// below can report the change rather than just the outcome.
+	undampedBest := TierFollowUp
+	undampedRank := -1
+	damped := 0
 
 	for _, guess := range guesses {
 		vec, embUsage, embErr := r.provider.Embed(ctx, guess.Food)
@@ -549,6 +556,15 @@ func (r Resolver) resolveGuesses(ctx context.Context, userID uuid.UUID, phrase s
 		// earned the exemption.
 		tier := tierWithReduction(guess.Confidence, top.MatchScore, factorForTier(top.MatchTier, factor))
 
+		undamped := tierWithReduction(guess.Confidence, top.MatchScore, 1)
+		if undamped != tier {
+			damped++
+		}
+		if rank := tierRank(undamped); rank > undampedRank {
+			undampedRank = rank
+			undampedBest = undamped
+		}
+
 		candidates = append(candidates, ResolvedCandidate{
 			Item:           top.Item,
 			PortionGrams:   grams,
@@ -564,6 +580,37 @@ func (r Resolver) resolveGuesses(ctx context.Context, userID uuid.UUID, phrase s
 			bestTier = tier
 			provenance = top.Item.Provenance
 		}
+	}
+
+	// phraseCoverageFloor is argued from principle and checked against two
+	// production cases; minReturnableMatchScore (above) was DERIVED from
+	// measured outcomes, and this line is what lets the floor be held to that
+	// same standard later. Each record pairs the coverage that was measured
+	// with the tier change it caused, so a sweep of production logs can answer
+	// "at what coverage did damping start costing correct answers?".
+	//
+	// Emitted ONLY when the damping actually moved a tier, which is both the
+	// interesting event and self-limiting: at most one line per resolve, and
+	// none at all on the photo path or on a fully-accounted-for phrase.
+	//
+	// PRIVACY: the user's utterance is NOT logged, and must not be. What goes
+	// out is the coverage ratio, its denominator as a COUNT (phrase_tokens),
+	// and the model's own guesses — the same summariseGuesses already emitted
+	// by the sibling log lines in resolve(). The phrase itself is the one field
+	// that could carry anything a user typed, and it is precisely the field the
+	// coverage figure already summarises.
+	if damped > 0 {
+		slog.InfoContext(ctx, "ai: phrase coverage damped the tier",
+			"coverage", coverage,
+			"factor", factor,
+			"phrase_tokens", nutrition.PhraseTokenCount(phrase),
+			"floor", phraseCoverageFloor,
+			"tier_before", string(undampedBest),
+			"tier_after", string(bestTier),
+			"damped_candidates", damped,
+			"candidates", len(candidates),
+			"guesses", summariseGuesses(guesses),
+		)
 	}
 
 	res := Resolution{

@@ -95,3 +95,32 @@ func TestPhraseCoverage(t *testing.T) {
 		})
 	}
 }
+
+// PhraseTokenCount is the denominator PhraseCoverage divides by, so the two
+// must agree on what "meaningful" means — a count that stopped excluding
+// stopwords would silently make every logged coverage figure look like it came
+// from a longer phrase than it did.
+func TestPhraseTokenCount(t *testing.T) {
+	tests := []struct {
+		name   string
+		phrase string
+		want   int
+	}{
+		{name: "empty phrase has nothing to lose", phrase: "", want: 0},
+		{name: "stopwords only", phrase: "a the with some", want: 0},
+		{name: "stopwords are not counted", phrase: "chicken with rice", want: 2},
+		{name: "repeats collapse, as they do in the ratio", phrase: "chicken chicken", want: 1},
+		// el, janah, 1, 2, chicken, chip — Normalize splits "1/2" on the
+		// punctuation, so the fraction counts as two tokens, not one. Recorded
+		// as-observed rather than as-hoped: this count is a log field to be read
+		// beside a ratio computed the same way, so agreeing with PhraseCoverage
+		// matters more than matching an intuitive word count.
+		{name: "the #184 phrase", phrase: "El Janah 1/2 chicken with Chips", want: 6},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, PhraseTokenCount(tt.phrase))
+		})
+	}
+}

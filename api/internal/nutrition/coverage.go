@@ -33,12 +33,7 @@ var phraseStopwords = map[string]bool{
 // said that could have been discarded. This is what keeps the photo path — which
 // has no phrase at all — completely unaffected.
 func PhraseCoverage(phrase string, accounted []string) float64 {
-	meaningful := make([]string, 0)
-	for token := range fieldSet(Normalize(phrase)) {
-		if !phraseStopwords[token] {
-			meaningful = append(meaningful, token)
-		}
-	}
+	meaningful := meaningfulTokens(phrase)
 	if len(meaningful) == 0 {
 		return 1
 	}
@@ -57,4 +52,28 @@ func PhraseCoverage(phrase string, accounted []string) float64 {
 		}
 	}
 	return float64(shared) / float64(len(meaningful))
+}
+
+// PhraseTokenCount is the DENOMINATOR PhraseCoverage divided by: how many
+// meaningful (non-stopword) tokens the phrase had. Exported so a diagnostic can
+// report it alongside a coverage figure, which is otherwise uninterpretable —
+// 0.5 of two tokens is one word lost, 0.5 of eight is four, and only the second
+// is evidence about where phraseCoverageFloor belongs.
+//
+// It is a COUNT, deliberately not the tokens themselves: the phrase is the
+// user's own utterance and must never reach a log line.
+func PhraseTokenCount(phrase string) int {
+	return len(meaningfulTokens(phrase))
+}
+
+// meaningfulTokens is the one definition of "what the user actually said",
+// shared so a reported count can never drift from the count the ratio used.
+func meaningfulTokens(phrase string) []string {
+	tokens := make([]string, 0)
+	for token := range fieldSet(Normalize(phrase)) {
+		if !phraseStopwords[token] {
+			tokens = append(tokens, token)
+		}
+	}
+	return tokens
 }
