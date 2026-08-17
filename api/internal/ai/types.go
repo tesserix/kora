@@ -8,7 +8,32 @@ import "github.com/tesserix/kora/api/internal/nutrition"
 // Guess is a single food identification from a provider. It carries NO
 // nutrition numbers — only identity + portion + confidence.
 type Guess struct {
-	Food            string  `json:"food"`
+	// Food is the food CORE — the thing itself, with the brand and any
+	// distinguishing qualifiers split out into the fields below rather than
+	// left inside this string.
+	Food string `json:"food"`
+
+	// Brand is the retail or restaurant brand the user named, empty when they
+	// named none. kora#212 Phase 3 exists because this used to have nowhere to
+	// go: "El Janah 1/2 chicken with Chips" reached the resolver as the single
+	// word "chicken", and no amount of downstream scoring can recover
+	// information identify already discarded. With the brand preserved, the
+	// resolver can REQUIRE a brand match instead of guessing from a bare noun.
+	//
+	// Empty is meaningful and must stay distinguishable from "unknown": it is
+	// what tells the resolver the query is unqualified, which is the condition
+	// Phase 2's generic-preference policy keys on.
+	Brand string `json:"brand"`
+
+	// Qualifiers are the words that narrow which variant of Food this is —
+	// "charcoal", "grilled", "wholemeal", "large" — excluding the portion and
+	// the cooking method, which have their own fields. Kept as a list rather
+	// than folded back into Food so the resolver can choose to search with or
+	// without them: "charcoal chicken" finds the right row when it exists, and
+	// falls back to "chicken" when it does not, which a single pre-joined
+	// string cannot express.
+	Qualifiers []string `json:"qualifiers"`
+
 	PortionEstimate string  `json:"portion_estimate"`
 	CookingMethod   string  `json:"cooking_method"`
 	Confidence      float64 `json:"confidence"`

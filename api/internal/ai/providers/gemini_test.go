@@ -30,7 +30,13 @@ func TestGuessResponseSchema_NoNutritionFields(t *testing.T) {
 	// nutrition-number field (kcal, protein, carbs, fat, ...) here would let
 	// a hallucinated number flow straight into a Guess — this assertion is
 	// the schema-boundary guard against that.
-	assert.ElementsMatch(t, []string{"food", "portion_estimate", "cooking_method", "confidence"}, gotProps)
+	//
+	// brand and qualifiers (kora#212 Phase 3) are identity fields: they say
+	// WHICH food this is, never how much energy it has. Adding them widens
+	// what the model may describe without widening what it may assert.
+	assert.ElementsMatch(t, []string{
+		"food", "brand", "qualifiers", "portion_estimate", "cooking_method", "confidence",
+	}, gotProps)
 
 	for _, forbidden := range []string{"kcal", "calories", "protein", "carbs", "fat"} {
 		_, present := schema.Items.Properties[forbidden]

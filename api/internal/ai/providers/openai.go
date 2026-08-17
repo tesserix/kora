@@ -77,11 +77,18 @@ func guessJSONSchema() map[string]any {
 					"type": "object",
 					"properties": map[string]any{
 						"food":             map[string]any{"type": "string"},
+						"brand":            map[string]any{"type": "string"},
+						"qualifiers":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 						"portion_estimate": map[string]any{"type": "string"},
 						"cooking_method":   map[string]any{"type": "string"},
 						"confidence":       map[string]any{"type": "number"},
 					},
-					"required":             []string{"food", "portion_estimate", "cooking_method", "confidence"},
+					// Every property must appear in "required" under
+					// strict:true, so brand and qualifiers are listed here for
+					// the same reason as in Gemini's schema: an omitted brand
+					// is indistinguishable from a stated absence, and the
+					// absence is load-bearing.
+					"required":             []string{"food", "brand", "qualifiers", "portion_estimate", "cooking_method", "confidence"},
 					"additionalProperties": false,
 				},
 			},
