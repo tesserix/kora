@@ -104,8 +104,22 @@ func seedFoodItem(t *testing.T, repo nutrition.Repository, item nutrition.FoodIt
 	_, err := repo.Insert(context.Background(), []nutrition.FoodItem{item})
 	require.NoError(t, err)
 
+	// Look the row up by BRAND, not by name. This lookup exists only to recover
+	// the id of the row just inserted, so it must not depend on that row ranking
+	// well against the rest of the index — and searching by name did.
+	//
+	// Search is `name ILIKE %q% OR brand ILIKE %q%`, ordered `name ASC` and
+	// clamped to searchLimitMax (25). Seeding "Banana" and searching "Banana"
+	// therefore competed with every OFF row containing the word, and the
+	// thousands that sort alphabetically earlier ("Apple & Banana ...") filled
+	// the 25 slots before the seeded row was reached. Every caller here seeds a
+	// distinctive test brand, which matches nothing else in the index, so
+	// searching on that returns the seeded rows and only those.
+	//
+	// Limit 0 asks Search for its own maximum; the constant is unexported.
+	require.NotEmpty(t, item.Brand, "seedFoodItem needs a distinctive brand to find its row again")
 	var got nutrition.FoodItem
-	items, err := repo.Search(context.Background(), item.Name, 5)
+	items, err := repo.Search(context.Background(), item.Brand, 0)
 	require.NoError(t, err)
 	for _, it := range items {
 		if it.Brand == item.Brand && it.Name == item.Name {
