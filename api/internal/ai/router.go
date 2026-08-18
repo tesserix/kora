@@ -42,7 +42,36 @@ const (
 	// finish, so it would spend a paid call to produce an answer that arrives
 	// after the client has already given up.
 	minRetryHeadroom = 3 * time.Second
-	textBudget       = 1500 * time.Millisecond
+
+	// textBudget bounds IdentifyText — the food-resolve hot path.
+	//
+	// This was 1500ms, sized when the primary was the Gemini API reached
+	// directly. 53ebb7e5 moved the engine to Vertex, whose round trip alone is
+	// ~2s, and nothing re-sized this: the primary could no longer finish
+	// inside its own budget, so EVERY uncached text resolve failed over to the
+	// fallback. Paired with the shared 90s fallbackBudget below (additive,
+	// because withFallback derives the fallback context from the parent), that
+	// is 91.5s — and the app gives up at 25s. Measured in production: every
+	// uncached resolve took ~92s and 500'd, and only cache hits worked
+	// (kora#247).
+	//
+	// 6s clears the measured ~2.4s primary latency with better than 2x
+	// headroom, and pairs with textFallbackBudget so BOTH legs fit inside the
+	// client deadline. The old comment here insisted this constant "must NOT
+	// change" because the hot path depended on a fast 1.5s failover; that was
+	// true of a provider that could answer inside 1.5s, and stopped being true
+	// the moment the engine moved. A failover that fires on every single call
+	// is not a fast path, it is an outage.
+	textBudget = 6 * time.Second
+
+	// textFallbackBudget bounds the SECOND leg of IdentifyText, replacing the
+	// shared 90s fallbackBudget on this path for exactly the reason
+	// generateFallbackBudget replaces it on generation: the fallback only has
+	// whatever is left of the client's 25s after the primary spent its own.
+	// 6s + 12s = 18s, inside clientRequestTimeout with margin — so the
+	// fallback is actually reachable from the app, which is the entire point
+	// of having one.
+	textFallbackBudget = 12 * time.Second
 
 	// clientRequestTimeout mirrors REQUEST_TIMEOUT_MS in
 	// apps/mobile/src/lib/api.ts — the per-attempt deadline after which the
@@ -89,9 +118,18 @@ const (
 	// one.
 	generateFallbackBudget = 12 * time.Second
 
-	// fallbackBudget is deliberately generous: the fallback provider only runs
-	// after the primary has already failed or timed out, so latency there is a
-	// last-resort cost we accept rather than fail the resolve. It also absorbs
+	// fallbackBudget is the shared default for call types with no
+	// path-specific fallback budget of their own. It is deliberately generous:
+	// the fallback provider only runs after the primary has already failed or
+	// timed out, so latency there is a last-resort cost we accept rather than
+	// fail the call.
+	//
+	// It no longer applies to IdentifyText. This comment used to say 90s was
+	// "right for a resolve, which the client waits on differently" — the
+	// mobile client does not wait differently, it applies the same 25s
+	// REQUEST_TIMEOUT_MS to every request, so on the resolve path a 90s
+	// fallback answered ~65s after the app had hung up. See textFallbackBudget
+	// (kora#247). It also absorbs
 	// slow cold starts on free-tier fallback endpoints (NVIDIA NIM cold start
 	// was measured at ~75s). Bounded only so a truly hung fallback can't pin a
 	// request forever; the request's own context still applies on top.
@@ -168,6 +206,16 @@ func (r *Router) generateFallbackBudgetOrDefault() time.Duration {
 	return generateFallbackBudget
 }
 
+// textFallbackBudgetOrDefault is the fallback budget for IdentifyText. The
+// FallbackBudget field still overrides it, so tests that shorten the fallback
+// leg keep working on every call type.
+func (r *Router) textFallbackBudgetOrDefault() time.Duration {
+	if r.FallbackBudget > 0 {
+		return r.FallbackBudget
+	}
+	return textFallbackBudget
+}
+
 func (r *Router) fallbackBudgetOrDefault() time.Duration {
 	if r.FallbackBudget > 0 {
 		return r.FallbackBudget
@@ -218,7 +266,7 @@ func withFallback[T any](ctx context.Context, budget, fbBudget time.Duration, pr
 }
 
 func (r *Router) IdentifyText(ctx context.Context, phrase string) ([]Guess, Usage, error) {
-	return withFallback(ctx, r.textBudgetOrDefault(), r.fallbackBudgetOrDefault(),
+	return withFallback(ctx, r.textBudgetOrDefault(), r.textFallbackBudgetOrDefault(),
 		func(c context.Context) ([]Guess, Usage, error) { return r.Primary.IdentifyText(c, phrase) },
 		func(c context.Context) ([]Guess, Usage, error) { return r.Fallback.IdentifyText(c, phrase) },
 	)
