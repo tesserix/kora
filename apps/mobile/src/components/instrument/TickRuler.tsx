@@ -410,23 +410,29 @@ function ContinuousRuler(props: ContinuousProps) {
   // thread, rather than a window of ticks recomputed from the `value` prop on
   // every React render. The widest scale in the app (lb, 80–400) is 320 ticks
   // — cheap to draw once, and it makes the drag a pure transform.
-  const scaleWidth = (max - min) * PX_PER_UNIT;
+  // A viewport of blank scale on each side. Without it the SVG's own left
+  // edge sits exactly on the first tick, so `min`'s centred label is cut in
+  // half the moment the ruler is dragged to the bottom of its range — the SVG
+  // clips anything at a negative local x. Costs nothing but a wider (empty)
+  // canvas.
+  const pad = width;
+  const scaleWidth = (max - min) * PX_PER_UNIT + pad * 2;
   const ticks = useMemo(() => {
     const out: { key: string; x: number; major: boolean; label?: string }[] = [];
     for (let u = Math.ceil(min); u <= Math.floor(max); u++) {
       const major = u % 10 === 0;
       out.push({
         key: String(u),
-        x: (u - min) * PX_PER_UNIT,
+        x: pad + (u - min) * PX_PER_UNIT,
         major,
         label: major ? String(u) : undefined,
       });
     }
     return out;
-  }, [max, min]);
+  }, [max, min, pad]);
 
   const scaleStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: mid - (offset.value - min) * PX_PER_UNIT }],
+    transform: [{ translateX: mid - pad - (offset.value - min) * PX_PER_UNIT }],
   }));
 
   return (
@@ -568,10 +574,15 @@ function DetentedRuler(props: DetentedProps) {
   );
 
   const mid = width / 2;
-  const scaleWidth = Math.max(1, (labels.length - 1) * DETENT_PX);
+  // Same reason as continuous mode's `pad`: the first and last stops' labels
+  // are centred on their tick, so without a margin the SVG clips half of each.
+  // The first stop is SELECTED by default on every detented ruler in
+  // onboarding, so this was visible immediately ("Lose weight" -> "veight").
+  const pad = width;
+  const scaleWidth = Math.max(1, (labels.length - 1) * DETENT_PX) + pad * 2;
 
   const scaleStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: mid - offset.value * DETENT_PX }],
+    transform: [{ translateX: mid - pad - offset.value * DETENT_PX }],
   }));
 
   return (
@@ -595,9 +606,9 @@ function DetentedRuler(props: DetentedProps) {
                 <Line
                   key={`stop-${label}`}
                   testID={`${testID}-stop-${i}`}
-                  x1={i * DETENT_PX}
+                  x1={pad + i * DETENT_PX}
                   y1={BASELINE + 8}
-                  x2={i * DETENT_PX}
+                  x2={pad + i * DETENT_PX}
                   y2={BASELINE - 6}
                   // instrument.accent is reserved for the fixed centre index
                   // below — selected-stop emphasis uses instrument.ink instead.
@@ -610,7 +621,7 @@ function DetentedRuler(props: DetentedProps) {
               <SvgText
                 key={`stop-label-${label}`}
                 testID={`${testID}-label-${i}`}
-                x={i * DETENT_PX}
+                x={pad + i * DETENT_PX}
                 y={BASELINE - 14}
                 fill={i === index ? instrument.ink : instrument.mut}
                 fontSize={10}
