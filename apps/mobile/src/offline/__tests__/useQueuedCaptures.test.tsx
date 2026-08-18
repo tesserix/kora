@@ -137,3 +137,17 @@ it("excludes captures from other days", async () => {
   await waitFor(() => expect(result.current.rows).toHaveLength(1));
   expect(result.current.rows.map((r) => r.id)).toEqual(["selectedDay"]);
 });
+
+// kora#196: a queued text capture has no thumbnail. Its phrase is what the
+// diary shows in place of one, so the row must carry it.
+it("exposes a text capture's phrase and no thumbnail", async () => {
+  await append({
+    id: "cap_t1", kind: "text", phrase: "chicken and rice",
+    capturedAt: atLocalNoon(daysAgo(3)), ownerId: "uid-1",
+  } as Parameters<typeof append>[0]);
+  const { result } = await renderHook(() => useQueuedCaptures(localDayOf(daysAgo(3))), { wrapper: wrap(newClient()) });
+  await waitFor(() => expect(result.current.rows).toHaveLength(1));
+  expect(result.current.rows[0]).toMatchObject({
+    kind: "text", phrase: "chicken and rice", thumbnailUri: null, kcal: null,
+  });
+});
