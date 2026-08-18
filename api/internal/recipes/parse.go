@@ -23,9 +23,10 @@ import (
 // the task.
 var ErrParseFailed = errors.New("recipes: could not parse")
 
-// ErrBudgetExhausted means the caller (or the platform) is at its monthly AI
-// cap. The handler turns it into a 429 rather than a parse failure: nothing
-// was wrong with the recipe, so telling the user to retry would be a lie.
+// ErrBudgetExhausted means the caller (or the platform) has exhausted an AI
+// quota or cost cap. The handler turns it into a 429 rather than a parse
+// failure: nothing was wrong with the recipe, so telling the user to retry
+// would be a lie.
 // Recipes still work — the manual editor needs no provider at all.
 var ErrBudgetExhausted = errors.New("recipes: ai budget exhausted")
 

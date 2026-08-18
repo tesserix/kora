@@ -126,7 +126,7 @@ func TestParseFailureIs502WithMessage(t *testing.T) {
 
 // An exhausted AI budget is a 429, NOT the 502 the client turns into "couldn't
 // read that — enter it manually and try again": nothing was wrong with the
-// recipe and retrying cannot succeed until the month rolls over.
+// recipe and retrying cannot succeed until the exhausted window resets.
 func TestParseOverBudgetIs429(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := testDB(t)
@@ -144,10 +144,12 @@ func TestParseOverBudgetIs429(t *testing.T) {
 	require.Equal(t, http.StatusTooManyRequests, w.Code)
 
 	var out struct {
-		Error string `json:"error"`
+		Error   string `json:"error"`
+		Message string `json:"message"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
 	require.Equal(t, "budget_exhausted", out.Error)
+	require.Equal(t, "You've reached your AI usage limit — enter the recipe manually", out.Message)
 }
 
 func TestLogReturns201WithSkipped(t *testing.T) {

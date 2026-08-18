@@ -108,6 +108,31 @@ func TestResolveRoutesAbsentWhenResolverNil(t *testing.T) {
 	}
 }
 
+func TestAnonymousRequestsCannotReachAnyPublicAICapability(t *testing.T) {
+	h := resolve.NewHandler(nil, nil)
+	r := NewRouter(Deps{
+		DB:       &gorm.DB{},
+		Verifier: stubVerifier{},
+		Resolver: &h,
+		Provider: stubProvider{},
+	})
+
+	for _, path := range []string{
+		"/v1/resolve/text",
+		"/v1/resolve/photo",
+		"/v1/resolve/voice",
+		"/v1/coach/ask",
+		"/v1/recipes/parse",
+	} {
+		t.Run(path, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, path, nil))
+			assert.Equal(t, http.StatusUnauthorized, w.Code)
+			assert.JSONEq(t, `{"error":"unauthorized","message":"invalid or missing token"}`, w.Body.String())
+		})
+	}
+}
+
 // recipeRoutes is the full set of recipe routes; used to confirm they are
 // always registered regardless of Deps.Provider.
 var recipeRoutes = []struct{ method, path string }{

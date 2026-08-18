@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -158,6 +159,18 @@ func TestResolvePhoto_Unauthorized(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/resolve/photo", body)
 	req.Header.Set("Content-Type", contentType)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+	assert.Contains(t, w.Body.String(), "unauthorized")
+}
+
+func TestResolveVoice_UnauthorizedBeforeMultipartParsing(t *testing.T) {
+	h := NewHandler(&stubTP{}, nil)
+	r := newEngineNoUser(h)
+
+	req := httptest.NewRequest(http.MethodPost, "/resolve/voice", strings.NewReader("not multipart"))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 

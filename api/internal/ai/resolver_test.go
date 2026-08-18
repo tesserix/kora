@@ -663,7 +663,7 @@ func TestResolveText_BudgetExceeded_GracefulManualFallback(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, TierFollowUp, res.Tier)
 	require.Equal(t, "budget", res.Provenance)
-	require.NotEmpty(t, res.FollowUpQuestion)
+	require.Equal(t, "You've reached your AI usage limit — search and log manually.", res.FollowUpQuestion)
 	require.Equal(t, 0, provider.calls, "provider must never be called once over budget")
 }
 

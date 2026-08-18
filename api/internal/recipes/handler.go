@@ -185,11 +185,11 @@ func (h Handler) Parse(c *gin.Context) {
 
 	if err != nil {
 		// Out of AI budget is not a parse failure: the recipe was never read,
-		// and retrying will not help until the month rolls over. 429 with a
-		// message that points at the manual editor, which needs no provider.
+		// and retrying will not help until the exhausted window resets. 429
+		// points at the manual editor, which needs no provider.
 		if errors.Is(err, ErrBudgetExhausted) {
 			httpx.Error(c, http.StatusTooManyRequests, "budget_exhausted",
-				"You've reached your AI limit this month — enter the recipe manually")
+				"You've reached your AI usage limit — enter the recipe manually")
 			return
 		}
 		// A parse failure is 502, not 500: the upstream model could not read

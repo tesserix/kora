@@ -39,3 +39,28 @@ func TestAIUsageEventsSurvivesUserDeletion(t *testing.T) {
 	assert.Contains(t, def, "ON DELETE SET NULL")
 	assert.NotContains(t, def, "ON DELETE CASCADE")
 }
+
+func TestAIQuotaWindowsSchemaEnforcesFixedWindowIdentity(t *testing.T) {
+	db := testDB(t)
+
+	var tableName string
+	require.NoError(t, db.Raw(`SELECT to_regclass('public.ai_quota_windows')::text`).Scan(&tableName).Error)
+	require.Equal(t, "ai_quota_windows", tableName)
+
+	var primaryKey string
+	require.NoError(t, db.Raw(`
+		SELECT pg_get_constraintdef(oid)
+		FROM pg_constraint
+		WHERE conrelid = 'ai_quota_windows'::regclass AND contype = 'p'`).Scan(&primaryKey).Error)
+	require.Contains(t, primaryKey, "user_id, window_kind, window_start")
+
+	var kindCheck string
+	require.NoError(t, db.Raw(`
+		SELECT pg_get_constraintdef(oid)
+		FROM pg_constraint
+		WHERE conrelid = 'ai_quota_windows'::regclass AND contype = 'c'
+		  AND conname = 'ai_quota_windows_kind_check'`).Scan(&kindCheck).Error)
+	require.Contains(t, kindCheck, "day")
+	require.Contains(t, kindCheck, "week")
+	require.Contains(t, kindCheck, "month")
+}
