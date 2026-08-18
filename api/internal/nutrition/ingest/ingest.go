@@ -40,6 +40,15 @@ func Run(ctx context.Context, repo nutrition.Repository, files map[string]string
 		if _, err := repo.BackfillLocales(ctx, items); err != nil {
 			return total, fmt.Errorf("ingest: backfill locales %s: %w", path, err)
 		}
+		// Same reconciliation, for serving data. The sorted-path rule above
+		// means afcd_release3.json claims every name it shares with
+		// ausnut.json, and AFCD states no servings while AUSNUT ships 9,816
+		// measures — so 315 foods would keep an empty serving and discard a
+		// measured one. Writes only where the row has neither a mass nor named
+		// units, so it is idempotent and never overrides an owning source.
+		if _, err := repo.BackfillServings(ctx, items); err != nil {
+			return total, fmt.Errorf("ingest: backfill servings %s: %w", path, err)
+		}
 	}
 	return total, nil
 }
