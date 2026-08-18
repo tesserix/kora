@@ -308,8 +308,19 @@ func TestRouter_IdentifyText_StillUsesTextBudget(t *testing.T) {
 func TestRouter_GenerateBudget_IsGenerousEnoughForRecipeParsing(t *testing.T) {
 	assert.GreaterOrEqual(t, generateBudget, 10*time.Second,
 		"generateBudget must clear the ~6s measured recipe-extraction latency with real headroom")
-	assert.Equal(t, textBudget, 1500*time.Millisecond,
-		"textBudget must not regress; IdentifyText's fast failover depends on it")
+	// This used to pin textBudget at 1500ms, guarding against generation's
+	// sizing bleeding into the resolve hot path. The guard's INTENT survives —
+	// the two budgets must stay independent — but its number did not. 1.5s was
+	// sized for the pre-Vertex primary; once the engine moved, it was shorter
+	// than the provider's own round trip, so IdentifyText failed over on every
+	// single call and the claim it asserted ("IdentifyText's fast failover
+	// depends on it") had become the opposite of true (kora#247).
+	//
+	// textBudget now carries its own guards, which is where a claim about its
+	// size belongs: TestTextBudgetClearsTheMeasuredPrimaryLatency and
+	// TestTextBudgetsFitInsideTheMobileClientDeadline.
+	assert.NotEqual(t, generateBudget, textBudget,
+		"generate and text budgets must stay independent; sizing one must not silently resize the other")
 }
 
 // mobileRequestTimeoutMs reads REQUEST_TIMEOUT_MS straight out of the mobile
@@ -504,4 +515,52 @@ func TestIsTransientProviderError(t *testing.T) {
 			assert.Equal(t, tt.want, isTransientProviderError(tt.err))
 		})
 	}
+}
+
+// measuredPrimaryLatency is the primary provider's observed round-trip against
+// production on 2026-08-18, sampled through /v1/resolve/photo — the one path
+// that calls the primary DIRECTLY with no fallback (see IdentifyPhoto), so it
+// isolates provider latency from any fallback or retry: 2.699s, 1.920s,
+// 2.457s, 2.157s.
+//
+// It is a floor for sizing any primary budget. A budget below it does not make
+// the primary "fast"; it makes the primary lose every race and hands the call
+// to the fallback unconditionally, which is kora#247.
+const measuredPrimaryLatency = 2700 * time.Millisecond
+
+// TestTextBudgetsFitInsideTheMobileClientDeadline is exactly the relationship
+// TestGenerateBudgetsFitInsideTheMobileClientDeadline pins for generation,
+// applied to the RESOLVE TEXT path — which never had it. That gap is how
+// kora#247 shipped: textBudget (1.5s) plus the SHARED fallbackBudget (90s) is
+// 91.5s, and withFallback derives the fallback context from the parent, so the
+// two are additive. Every uncached resolve therefore spent ~92s and 500'd,
+// while the app had already given up at 25s.
+func TestTextBudgetsFitInsideTheMobileClientDeadline(t *testing.T) {
+	clientDeadline := mobileRequestTimeoutMs(t)
+
+	assert.Less(t, textBudget, clientDeadline,
+		"a primary budget at or above the client's deadline makes the fallback unreachable from the app")
+	assert.LessOrEqual(t, textBudget+textFallbackBudget, clientDeadline-2*time.Second,
+		"primary + fallback must both fit inside the client's deadline with margin, or the fallback leg is theatre")
+}
+
+// A budget under the provider's real latency is not a fast failover — it is a
+// guaranteed one. kora#247: textBudget was 1.5s against a ~2.4s provider, so
+// the primary never once served a text resolve and every call fell through to
+// a fallback that was itself failing.
+func TestTextBudgetClearsTheMeasuredPrimaryLatency(t *testing.T) {
+	assert.GreaterOrEqual(t, textBudget, 2*measuredPrimaryLatency,
+		"textBudget must clear the measured primary latency with headroom, or the primary loses every race")
+}
+
+// The resolve text path must not silently inherit the shared 90s
+// fallbackBudget again. That constant is sized for a leg nobody is waiting on;
+// this one is on the user's critical path.
+func TestTextFallbackBudgetIsNotTheSharedNinetySecondOne(t *testing.T) {
+	assert.NotEqual(t, fallbackBudget, textFallbackBudget,
+		"the text path needs its own fallback budget; the shared one is 90s and the client gives up at 25s")
+
+	r := &Router{}
+	assert.Equal(t, textFallbackBudget, r.textFallbackBudgetOrDefault(),
+		"IdentifyText must resolve its fallback budget from the text-specific constant")
 }
