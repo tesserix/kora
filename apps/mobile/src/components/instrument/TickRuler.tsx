@@ -1,11 +1,17 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dimensions, View, type LayoutChangeEvent, type AccessibilityActionEvent } from "react-native";
 import { Gesture, GestureDetector, type PanGesture } from "react-native-gesture-handler";
-import { runOnJS } from "react-native-reanimated";
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  type SharedValue,
+} from "react-native-reanimated";
 import Svg, { Line, Text as SvgText } from "react-native-svg";
 import { AppText } from "@/components/Text";
 import { useTheme } from "@/theme";
-import { haptics } from "@/motion";
+import { haptics, springs } from "@/motion";
 
 const HEIGHT = 44;
 // Row above the ticks holding the numeric readout (kora#165). Fixed rather
@@ -14,10 +20,9 @@ const HEIGHT = 44;
 const READOUT_HEIGHT = 20;
 const PX_PER_UNIT = 9;
 const BASELINE = HEIGHT - 8;
-// Ticks must render on first paint, before the real `onLayout` measurement
-// arrives (RN testing-library never fires it), so width starts from the
-// window width instead of 0 — the onLayout correction is then a few points
-// of container padding rather than a visible sideways jump of every tick.
+// The scale is drawn ONCE at full width and then translated (kora#176), so
+// this is only the fallback for the centre index's position before the real
+// `onLayout` measurement arrives (RN testing-library never fires it).
 const FALLBACK_WIDTH = Dimensions.get("window").width;
 
 // Continuous mode: a numeric value dragged along a scale under a fixed
@@ -86,15 +91,68 @@ const DETENT_PX = 96;
 // while cutting the actual count by an order of magnitude.
 const HAPTIC_MIN_INTERVAL_MS = 40;
 
-const clamp = (v: number, min: number, max: number): number => Math.min(max, Math.max(min, v));
-const quantize = (v: number, step: number): number => Math.round(v / step) * step;
+// UIScrollView's deceleration rate. The projection below is the closed form
+// of "where would this keep sliding to", which is what makes a flick travel
+// further than the finger did (Apple §6) instead of dead-stopping on release.
+const DECELERATION = 0.998;
+
+// Apple's rubber-band constant. Higher gives more travel past the end.
+const RUBBER_BAND_COEFFICIENT = 0.55;
+
+// How far the finger must commit horizontally before the ruler claims the
+// touch, and how far vertically before it gives up (kora#176). Onboarding
+// stacks TEN rulers inside AuthScaffold's vertical ScrollView; without these
+// the Pan activates on the first pixel of movement in ANY direction, then
+// applies a translationX of ~0, so a vertical swipe started on a ruler
+// scrolls nothing and the page reads as frozen.
+const ACTIVE_OFFSET_X = 10;
+const FAIL_OFFSET_Y = 15;
+
+const clamp = (v: number, min: number, max: number): number => {
+  "worklet";
+  return Math.min(max, Math.max(min, v));
+};
+
+const quantize = (v: number, step: number): number => {
+  "worklet";
+  return Math.round(v / step) * step;
+};
 
 // Floating-point noise makes 0.1+0.2-style drift visible on a 0.5-step ruler,
 // so every reported value is rounded to the step's own decimal precision
 // rather than a bare Math.round.
 function snap(v: number, min: number, max: number, step: number): number {
+  "worklet";
   const decimals = (String(step).split(".")[1] ?? "").length;
   return Number(clamp(quantize(v, step), min, max).toFixed(decimals));
+}
+
+/**
+ * Where a release would keep sliding to, given the speed it was released at.
+ * `position` and `velocity` must be in the SAME units (this control works in
+ * scale units per second, not pixels, so one formula serves both modes).
+ *
+ * Velocity zero projects nowhere, which is what makes a slow, deliberate
+ * release land exactly where the finger left it.
+ */
+export function projectMomentum(position: number, velocity: number): number {
+  "worklet";
+  return position + (velocity / 1000) * (DECELERATION / (1 - DECELERATION));
+}
+
+/**
+ * Apple's rubber-band curve: how far the scale actually moves when dragged
+ * `overshoot` past its end. Asymptotic in `overshoot`, so resistance rises
+ * the further you pull and the scale can never run away — dragging past the
+ * end reads as "there is nothing more here" rather than as a frozen control,
+ * which is what a hard clamp reads as (kora#176, Apple §9).
+ *
+ * `dimension` is the visible width the band is scaled against.
+ */
+export function rubberBand(overshoot: number, dimension: number): number {
+  "worklet";
+  const c = RUBBER_BAND_COEFFICIENT;
+  return (overshoot * dimension * c) / (dimension + c * Math.abs(overshoot));
 }
 
 /**
@@ -110,6 +168,7 @@ export function valueFromDrag(
   max: number,
   step: number,
 ): number {
+  "worklet";
   return snap(startValue - translationX / PX_PER_UNIT, min, max, step);
 }
 
@@ -120,6 +179,7 @@ export function valueFromDrag(
  * detented mode never reports a fractional or out-of-range index.
  */
 export function indexFromDrag(startIndex: number, translationX: number, stopCount: number): number {
+  "worklet";
   return clamp(Math.round(startIndex - translationX / DETENT_PX), 0, stopCount - 1);
 }
 
@@ -131,10 +191,18 @@ export function indexFromDrag(startIndex: number, translationX: number, stopCoun
  * drag silently drop movement between renders, which is invisible to tests
  * that only drive the accessibility path.
  *
- * `compute` must already return a fully snapped/clamped value (as
- * `valueFromDrag`/`indexFromDrag` do) — this hook only decides WHETHER to
- * report (equality short-circuit, haptic rate-limiting) and HOW the gesture is
- * wired, never how a raw drag distance turns into a value.
+ * kora#176: the drag now runs on the UI thread. `offset` is the live scale
+ * position in SCALE UNITS (values for continuous, stop indices for detented)
+ * and is what the ticks are translated by, so the scale tracks the finger
+ * without waiting for React. It may sit outside [lo, hi] while rubber-banding;
+ * the REPORTED value never does.
+ *
+ * `compute` must be a worklet, and must already return a fully snapped and
+ * clamped value (as `valueFromDrag`/`indexFromDrag` do) — this hook only
+ * decides WHETHER to report (equality short-circuit, haptic rate-limiting)
+ * and HOW the gesture is wired, never how a raw drag distance turns into a
+ * value. `compute(position, 0)` is therefore also how an arbitrary position
+ * gets snapped, which is what the release projection needs.
  *
  * `atBound` says whether a value is at the end of the scale. Only the caller
  * knows what "the end" means (min/max for continuous, first/last stop for
@@ -142,28 +210,32 @@ export function indexFromDrag(startIndex: number, translationX: number, stopCoun
  * genuinely earns its keep — the value stops moving there, and without a
  * distinct feel it just goes silent, which reads as the control breaking.
  */
-function useDragReport<T>({
+function useDragReport({
   current,
   testID,
   compute,
   atBound,
   onReport,
+  pxPerUnit,
+  lo,
+  hi,
+  width,
 }: {
-  current: T;
+  current: number;
   testID: string;
-  compute: (start: T, translationX: number) => T;
-  atBound: (value: T) => boolean;
-  onReport: (next: T) => void;
-}): { pan: PanGesture; report: (next: T) => void } {
+  compute: (start: number, translationX: number) => number;
+  atBound: (value: number) => boolean;
+  onReport: (next: number) => void;
+  pxPerUnit: number;
+  lo: number;
+  hi: number;
+  width: number;
+}): { pan: PanGesture; report: (next: number) => void; offset: SharedValue<number> } {
   // `current` is a JS-thread closure that only refreshes after React
-  // re-renders — dozens of SVG nodes deep, slower than touch-move events
-  // land. currentRef always holds the latest so the gesture never reads a
-  // stale one; dragStart is captured once per gesture so every update
-  // computes an absolute position from cumulative translation instead of
-  // per-frame deltas that can silently drop movement between renders.
+  // re-renders. currentRef always holds the latest so the haptic decisions
+  // below never read a stale one.
   const currentRef = useRef(current);
   currentRef.current = current;
-  const dragStart = useRef(current);
 
   // Rate-limit state. `lastHapticAt` is a wall-clock stamp rather than a
   // counter so the limit tracks real drag speed, and `wasAtBound` makes the
@@ -173,10 +245,22 @@ function useDragReport<T>({
   // thump on the first frame of the first drag.
   const lastHapticAt = useRef(0);
   const wasAtBound = useRef(atBound(current));
+  // The last value this control itself put on the wire. The parent echoes
+  // every reported value straight back as a new `current`, and the sync
+  // effect below has to be able to tell that echo apart from a value changed
+  // from OUTSIDE the drag — otherwise it would fight the finger.
+  const lastReportedRef = useRef<number | null>(null);
 
   const report = useCallback(
-    (next: T) => {
+    (next: number) => {
       if (next === currentRef.current) return;
+      // Adopt the reported value immediately instead of waiting for the
+      // parent to echo it back on the next render. A gesture can produce
+      // several reports before React commits, and a stale currentRef would
+      // let one value report twice — which the bound impact below would feel
+      // as two separate arrivals at the same end of the scale.
+      currentRef.current = next;
+      lastReportedRef.current = next;
       const nowAtBound = atBound(next);
       if (nowAtBound) {
         // Deliberately NOT rate-limited: it can only fire on the transition.
@@ -201,35 +285,84 @@ function useDragReport<T>({
     [atBound, onReport],
   );
 
-  const beginDrag = useCallback(() => {
-    dragStart.current = currentRef.current;
-  }, []);
+  // The live scale position driving the ticks, in scale units.
+  const offset = useSharedValue(current);
+  // The position the current gesture started from, captured once per gesture
+  // so every update computes an absolute position from cumulative translation.
+  const dragStart = useSharedValue(current);
+  // The last value handed to `report`, tracked on the UI thread so the
+  // crossing into a new step — not every frame — is what wakes the JS thread.
+  const lastSnapped = useSharedValue(current);
 
-  const applyDrag = useCallback(
-    (translationX: number) => {
-      report(compute(dragStart.current, translationX));
-    },
-    [compute, report],
-  );
+  // Adopt a value that changed from OUTSIDE this control — the accessibility
+  // increment/decrement actions, or a parent that rejected what we reported.
+  // The echo of our own report is deliberately ignored: it arrives on every
+  // frame of a drag, and adopting it would snap the scale to the last whole
+  // step and cancel the rubber-band the finger is currently stretching.
+  useEffect(() => {
+    if (current !== lastReportedRef.current) offset.value = current;
+  }, [current, offset]);
 
   const pan = useMemo(
     () =>
       Gesture.Pan()
-        // Tags the gesture so tests can address it via
-        // `getByGestureTestId` (react-native-gesture-handler/jest-utils)
-        // and fire simulated events at it directly — the only way to pin
-        // the wiring (translationX vs changeX) rather than just the math.
+        // Tags the gesture so tests can address it via `getByGestureTestId`
+        // (react-native-gesture-handler/jest-utils) and fire simulated events
+        // at it directly — the only way to pin the wiring (translationX vs
+        // changeX) rather than just the math.
         .withTestId(`${testID}-pan`)
+        // Kept in this one chain rather than factored into a builder: the
+        // repo's gesture-worklet-boundary guard reads each gesture chain for
+        // its `runOnJS` hop, and splitting the chain across a helper hides
+        // that declaration from it (see src/motion/__tests__).
+        .activeOffsetX([-ACTIVE_OFFSET_X, ACTIVE_OFFSET_X])
+        .failOffsetY([-FAIL_OFFSET_Y, FAIL_OFFSET_Y])
         .onBegin(() => {
-          runOnJS(beginDrag)();
+          "worklet";
+          dragStart.value = offset.value;
+          lastSnapped.value = compute(offset.value, 0);
         })
         .onUpdate((e) => {
-          runOnJS(applyDrag)(e.translationX);
+          "worklet";
+          const raw = dragStart.value - e.translationX / pxPerUnit;
+          const bounded = clamp(raw, lo, hi);
+          // Past an end, the scale keeps moving but with rising resistance.
+          // Purely visual: the snapped value below is clamped, so nothing out
+          // of range is ever reported.
+          const overshootPx = (raw - bounded) * pxPerUnit;
+          offset.value = bounded + rubberBand(overshootPx, width) / pxPerUnit;
+
+          // The JS thread is woken only when the drag crosses into a new
+          // step — not on every frame, which is what used to re-render the
+          // whole onboarding screen under the finger.
+          const snapped = compute(dragStart.value, e.translationX);
+          if (snapped !== lastSnapped.value) {
+            lastSnapped.value = snapped;
+            runOnJS(report)(snapped);
+          }
+        })
+        .onEnd((e) => {
+          "worklet";
+          const position = dragStart.value - e.translationX / pxPerUnit;
+          // Velocity arrives in px/s along the finger's axis; the scale moves
+          // the opposite way, and this control thinks in scale units.
+          const velocity = -(e.velocityX ?? 0) / pxPerUnit;
+          const target = compute(projectMomentum(position, velocity), 0);
+          // Released past an end, the only motion left is the return — that is
+          // a settle, not a throw, so it uses the critically damped spring.
+          const outOfBounds = position < lo || position > hi;
+          offset.value = outOfBounds
+            ? withSpring(target, springs.standard)
+            : withSpring(target, { ...springs.lively, velocity });
+          if (target !== lastSnapped.value) {
+            lastSnapped.value = target;
+            runOnJS(report)(target);
+          }
         }),
-    [applyDrag, beginDrag, testID],
+    [compute, dragStart, hi, lastSnapped, lo, offset, pxPerUnit, report, testID, width],
   );
 
-  return { pan, report };
+  return { pan, report, offset };
 }
 
 function ContinuousRuler(props: ContinuousProps) {
@@ -241,18 +374,25 @@ function ContinuousRuler(props: ContinuousProps) {
   const onLayout = useCallback((e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width), []);
 
   const compute = useCallback(
-    (start: number, translationX: number) => valueFromDrag(start, translationX, min, max, step),
+    (start: number, translationX: number) => {
+      "worklet";
+      return valueFromDrag(start, translationX, min, max, step);
+    },
     [max, min, step],
   );
 
   const atBound = useCallback((v: number) => v <= min || v >= max, [max, min]);
 
-  const { pan, report } = useDragReport<number>({
+  const { pan, report, offset } = useDragReport({
     current: value,
     testID,
     compute,
     atBound,
     onReport: onChange,
+    pxPerUnit: PX_PER_UNIT,
+    lo: min,
+    hi: max,
+    width,
   });
 
   const onAccessibilityAction = useCallback(
@@ -265,24 +405,29 @@ function ContinuousRuler(props: ContinuousProps) {
   );
 
   const mid = width / 2;
+
+  // kora#176: the WHOLE scale is built once and then translated on the UI
+  // thread, rather than a window of ticks recomputed from the `value` prop on
+  // every React render. The widest scale in the app (lb, 80–400) is 320 ticks
+  // — cheap to draw once, and it makes the drag a pure transform.
+  const scaleWidth = (max - min) * PX_PER_UNIT;
   const ticks = useMemo(() => {
-    if (!width) return [];
     const out: { key: string; x: number; major: boolean; label?: string }[] = [];
-    const span = mid / PX_PER_UNIT;
-    const first = Math.ceil(value - span);
-    const last = Math.floor(value + span);
-    for (let u = first; u <= last; u++) {
-      if (u < min || u > max) continue;
+    for (let u = Math.ceil(min); u <= Math.floor(max); u++) {
       const major = u % 10 === 0;
       out.push({
         key: String(u),
-        x: mid + (u - value) * PX_PER_UNIT,
+        x: (u - min) * PX_PER_UNIT,
         major,
         label: major ? String(u) : undefined,
       });
     }
     return out;
-  }, [max, mid, min, value, width]);
+  }, [max, min]);
+
+  const scaleStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: mid - (offset.value - min) * PX_PER_UNIT }],
+  }));
 
   return (
     <GestureDetector gesture={pan}>
@@ -295,7 +440,7 @@ function ContinuousRuler(props: ContinuousProps) {
         accessibilityValue={{ text: formatLabel ? formatLabel(value) : String(value) }}
         accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
         onAccessibilityAction={onAccessibilityAction}
-        style={{ height: HEIGHT + READOUT_HEIGHT, width: "100%" }}
+        style={{ height: HEIGHT + READOUT_HEIGHT, width: "100%", overflow: "hidden" }}
       >
         {/* kora#165: the value in plain sight. A real RN Text rather than an
             SVG one so it inherits the app's type scale and Dynamic Type, and
@@ -325,44 +470,56 @@ function ContinuousRuler(props: ContinuousProps) {
         >
           {formatReadout(value, formatLabel, unit)}
         </AppText>
-        <Svg width="100%" height={HEIGHT}>
-          {ticks.map((t) => (
+        <View style={{ height: HEIGHT }}>
+          <Animated.View style={[{ width: scaleWidth, height: HEIGHT }, scaleStyle]}>
+            <Svg width={scaleWidth} height={HEIGHT}>
+              {ticks.map((t) => (
+                <Line
+                  key={t.key}
+                  testID={`${testID}-tick-${t.key}`}
+                  x1={t.x}
+                  y1={BASELINE}
+                  x2={t.x}
+                  y2={BASELINE - (t.major ? 16 : 7)}
+                  stroke={t.major ? instrument.ink : instrument.tick}
+                  strokeWidth={t.major ? 1.6 : 1}
+                />
+              ))}
+              {ticks
+                .filter((t) => t.label)
+                .map((t) => (
+                  <SvgText
+                    key={`label-${t.key}`}
+                    x={t.x}
+                    y={BASELINE - 22}
+                    fill={instrument.mut}
+                    fontSize={9}
+                    textAnchor="middle"
+                  >
+                    {t.label}
+                  </SvgText>
+                ))}
+            </Svg>
+          </Animated.View>
+          {/* The fixed centre index — the only accent on the control, and the
+              one thing that must NOT move with the scale. */}
+          <Svg
+            width="100%"
+            height={HEIGHT}
+            style={{ position: "absolute", left: 0, top: 0 }}
+            pointerEvents="none"
+          >
             <Line
-              key={t.key}
-              testID={`${testID}-tick-${t.key}`}
-              x1={t.x}
-              y1={BASELINE}
-              x2={t.x}
-              y2={BASELINE - (t.major ? 16 : 7)}
-              stroke={t.major ? instrument.ink : instrument.tick}
-              strokeWidth={t.major ? 1.6 : 1}
+              testID={`${testID}-index`}
+              x1={mid}
+              y1={BASELINE + 4}
+              x2={mid}
+              y2={BASELINE - 24}
+              stroke={instrument.accent}
+              strokeWidth={2}
             />
-          ))}
-          {ticks
-            .filter((t) => t.label)
-            .map((t) => (
-              <SvgText
-                key={`label-${t.key}`}
-                x={t.x}
-                y={BASELINE - 22}
-                fill={instrument.mut}
-                fontSize={9}
-                textAnchor="middle"
-              >
-                {t.label}
-              </SvgText>
-            ))}
-          {/* The fixed centre index — the only accent on the control. */}
-          <Line
-            testID={`${testID}-index`}
-            x1={mid}
-            y1={BASELINE + 4}
-            x2={mid}
-            y2={BASELINE - 24}
-            stroke={instrument.accent}
-            strokeWidth={2}
-          />
-        </Svg>
+          </Svg>
+        </View>
       </View>
     </GestureDetector>
   );
@@ -377,18 +534,25 @@ function DetentedRuler(props: DetentedProps) {
   const onLayout = useCallback((e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width), []);
 
   const compute = useCallback(
-    (start: number, translationX: number) => indexFromDrag(start, translationX, labels.length),
+    (start: number, translationX: number) => {
+      "worklet";
+      return indexFromDrag(start, translationX, labels.length);
+    },
     [labels.length],
   );
 
   const atBound = useCallback((i: number) => i <= 0 || i >= labels.length - 1, [labels.length]);
 
-  const { pan, report } = useDragReport<number>({
+  const { pan, report, offset } = useDragReport({
     current: index,
     testID,
     compute,
     atBound,
     onReport: onChange,
+    pxPerUnit: DETENT_PX,
+    lo: 0,
+    hi: labels.length - 1,
+    width,
   });
 
   const onAccessibilityAction = useCallback(
@@ -404,6 +568,11 @@ function DetentedRuler(props: DetentedProps) {
   );
 
   const mid = width / 2;
+  const scaleWidth = Math.max(1, (labels.length - 1) * DETENT_PX);
+
+  const scaleStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: mid - offset.value * DETENT_PX }],
+  }));
 
   return (
     <GestureDetector gesture={pan}>
@@ -416,42 +585,51 @@ function DetentedRuler(props: DetentedProps) {
         accessibilityValue={{ text: labels[index] }}
         accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
         onAccessibilityAction={onAccessibilityAction}
-        style={{ height: HEIGHT + 8, width: "100%" }}
+        style={{ height: HEIGHT + 8, width: "100%", overflow: "hidden" }}
       >
-        <Svg width="100%" height={HEIGHT + 8}>
-          {labels.map((label, i) => {
-            const x = mid + (i - index) * DETENT_PX;
-            const on = i === index;
-            return (
-              <Line
-                key={`stop-${label}`}
-                testID={`${testID}-stop-${i}`}
-                x1={x}
-                y1={BASELINE + 8}
-                x2={x}
-                y2={BASELINE - 6}
-                // instrument.accent is reserved for the fixed centre index
-                // below — selected-stop emphasis uses instrument.ink instead.
-                stroke={on ? instrument.ink : instrument.tick}
-                strokeWidth={on ? 2 : 1.4}
-              />
-            );
-          })}
-          {labels.map((label, i) => (
-            <SvgText
-              key={`stop-label-${label}`}
-              testID={`${testID}-label-${i}`}
-              x={mid + (i - index) * DETENT_PX}
-              y={BASELINE - 14}
-              fill={i === index ? instrument.ink : instrument.mut}
-              fontSize={10}
-              fontWeight={i === index ? "600" : "500"}
-              textAnchor="middle"
-            >
-              {label}
-            </SvgText>
-          ))}
-          {/* The fixed centre index — the only accent on the control. */}
+        <Animated.View style={[{ width: scaleWidth, height: HEIGHT + 8 }, scaleStyle]}>
+          <Svg width={scaleWidth} height={HEIGHT + 8}>
+            {labels.map((label, i) => {
+              const on = i === index;
+              return (
+                <Line
+                  key={`stop-${label}`}
+                  testID={`${testID}-stop-${i}`}
+                  x1={i * DETENT_PX}
+                  y1={BASELINE + 8}
+                  x2={i * DETENT_PX}
+                  y2={BASELINE - 6}
+                  // instrument.accent is reserved for the fixed centre index
+                  // below — selected-stop emphasis uses instrument.ink instead.
+                  stroke={on ? instrument.ink : instrument.tick}
+                  strokeWidth={on ? 2 : 1.4}
+                />
+              );
+            })}
+            {labels.map((label, i) => (
+              <SvgText
+                key={`stop-label-${label}`}
+                testID={`${testID}-label-${i}`}
+                x={i * DETENT_PX}
+                y={BASELINE - 14}
+                fill={i === index ? instrument.ink : instrument.mut}
+                fontSize={10}
+                fontWeight={i === index ? "600" : "500"}
+                textAnchor="middle"
+              >
+                {label}
+              </SvgText>
+            ))}
+          </Svg>
+        </Animated.View>
+        {/* The fixed centre index — the only accent on the control, and the
+            one thing that must NOT move with the scale. */}
+        <Svg
+          width="100%"
+          height={HEIGHT + 8}
+          style={{ position: "absolute", left: 0, top: 0 }}
+          pointerEvents="none"
+        >
           <Line
             testID={`${testID}-index`}
             x1={mid}
