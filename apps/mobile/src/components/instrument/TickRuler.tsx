@@ -8,7 +8,7 @@ import Animated, {
   withSpring,
   type SharedValue,
 } from "react-native-reanimated";
-import Svg, { Line, Text as SvgText } from "react-native-svg";
+import Svg, { Line, Path, Text as SvgText } from "react-native-svg";
 import { AppText } from "@/components/Text";
 import { useTheme } from "@/theme";
 import { haptics, springs } from "@/motion";
@@ -417,18 +417,31 @@ function ContinuousRuler(props: ContinuousProps) {
   // canvas.
   const pad = width;
   const scaleWidth = (max - min) * PX_PER_UNIT + pad * 2;
-  const ticks = useMemo(() => {
-    const out: { key: string; x: number; major: boolean; label?: string }[] = [];
+  // kora#245: the graduations are TWO <Path> nodes, not one <Line> per tick.
+  // The widest scale (lb, 80-400) is 321 graduations, and onboarding mounts ten
+  // rulers at once — 3,000+ SVG nodes on one screen made its initial render
+  // roughly 10x heavier than it needed to be and flaked CI on a slow runner.
+  // A path is one native view however many segments it holds, so this keeps
+  // #176's render-once-and-translate design while paying for it once.
+  //
+  // Majors and minors stay separate because they differ in stroke weight and
+  // colour; merging them would need per-segment styling a single path cannot
+  // express. Labels remain their own nodes, but only majors carry one — about
+  // a tenth of the graduations.
+  const { minorPath, majorPath, labels } = useMemo(() => {
+    let minor = "";
+    let major = "";
+    const out: { key: string; x: number; text: string }[] = [];
     for (let u = Math.ceil(min); u <= Math.floor(max); u++) {
-      const major = u % 10 === 0;
-      out.push({
-        key: String(u),
-        x: pad + (u - min) * PX_PER_UNIT,
-        major,
-        label: major ? String(u) : undefined,
-      });
+      const x = pad + (u - min) * PX_PER_UNIT;
+      if (u % 10 === 0) {
+        major += `M${x} ${BASELINE}L${x} ${BASELINE - 16}`;
+        out.push({ key: String(u), x, text: String(u) });
+      } else {
+        minor += `M${x} ${BASELINE}L${x} ${BASELINE - 7}`;
+      }
     }
-    return out;
+    return { minorPath: minor, majorPath: major, labels: out };
   }, [max, min, pad]);
 
   const scaleStyle = useAnimatedStyle(() => ({
@@ -479,32 +492,30 @@ function ContinuousRuler(props: ContinuousProps) {
         <View style={{ height: HEIGHT }}>
           <Animated.View style={[{ width: scaleWidth, height: HEIGHT }, scaleStyle]}>
             <Svg width={scaleWidth} height={HEIGHT}>
-              {ticks.map((t) => (
-                <Line
-                  key={t.key}
-                  testID={`${testID}-tick-${t.key}`}
-                  x1={t.x}
-                  y1={BASELINE}
-                  x2={t.x}
-                  y2={BASELINE - (t.major ? 16 : 7)}
-                  stroke={t.major ? instrument.ink : instrument.tick}
-                  strokeWidth={t.major ? 1.6 : 1}
-                />
+              <Path
+                testID={`${testID}-ticks-minor`}
+                d={minorPath}
+                stroke={instrument.tick}
+                strokeWidth={1}
+              />
+              <Path
+                testID={`${testID}-ticks-major`}
+                d={majorPath}
+                stroke={instrument.ink}
+                strokeWidth={1.6}
+              />
+              {labels.map((t) => (
+                <SvgText
+                  key={`label-${t.key}`}
+                  x={t.x}
+                  y={BASELINE - 22}
+                  fill={instrument.mut}
+                  fontSize={9}
+                  textAnchor="middle"
+                >
+                  {t.text}
+                </SvgText>
               ))}
-              {ticks
-                .filter((t) => t.label)
-                .map((t) => (
-                  <SvgText
-                    key={`label-${t.key}`}
-                    x={t.x}
-                    y={BASELINE - 22}
-                    fill={instrument.mut}
-                    fontSize={9}
-                    textAnchor="middle"
-                  >
-                    {t.label}
-                  </SvgText>
-                ))}
             </Svg>
           </Animated.View>
           {/* The fixed centre index — the only accent on the control, and the
