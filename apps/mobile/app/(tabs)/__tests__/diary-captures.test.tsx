@@ -72,6 +72,7 @@ function captureRow(over: Partial<QueuedCaptureRow> = {}): QueuedCaptureRow {
     id: "cap_1754476800000_a1b2c3",
     kind: "photo",
     thumbnailUri: "file:///document/captures/c1.jpg",
+    phrase: null,
     capturedAt: atLocalNoon(2026, 8, 6),
     mealSlot: "lunch",
     status: "pending",

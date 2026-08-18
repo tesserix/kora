@@ -9,7 +9,7 @@ import { copyIntoQueue, mediaExists, deleteQueuedMedia } from "@/offline/capture
 import { append as appendLog, list as listLogs } from "@/offline/queue";
 import CaptureReviewScreen from "../capture-review";
 import type { Resolution, ResolvedCandidate } from "@/api/types";
-import type { QueuedCapture } from "@/offline/captureQueue";
+import type { MediaCapture, QueuedCapture } from "@/offline/captureQueue";
 
 // The real queues/media, with the mutating entry points wrapped so individual
 // tests can override one call's outcome (mirrors the identical pattern in
@@ -139,7 +139,12 @@ function resolutionFixture(overrides: Partial<Resolution> = {}): Resolution {
   };
 }
 
-function queuedCaptureFixture(overrides: Partial<QueuedCapture> = {}): QueuedCapture {
+// Partial<MediaCapture>, not Partial<QueuedCapture>: every caller below
+// builds a photo capture (the fixed storedName/fileName/mimeType fields
+// only make sense for a MediaCapture), and Partial<QueuedCapture> would let
+// `overrides` carry `kind: "text"` while these fields stayed fixed — a shape
+// TypeScript rightly refuses to call a QueuedCapture.
+function queuedCaptureFixture(overrides: Partial<MediaCapture> = {}): QueuedCapture {
   return {
     id: CAPTURE_ID,
     kind: "photo",
@@ -209,6 +214,23 @@ it("rejecting discards the capture without logging anything", async () => {
 
   await waitFor(async () => expect(await listCaptures()).toEqual([]));
   await expect(listLogs()).resolves.toEqual([]);
+});
+
+// kora#196: a text capture has neither a thumbnail nor an audio clip. The
+// phrase itself is the record of what the user logged, so a failed text
+// capture must still show it — that is the whole point of keeping the row.
+it("shows the typed phrase for a failed text capture", async () => {
+  mockListCaptures([
+    {
+      id: CAPTURE_ID, kind: "text", phrase: "chicken and rice",
+      capturedAt: "2026-08-18T10:00:00.000Z", queuedAt: "2026-08-18T10:00:00.000Z",
+      status: "failed", attempts: 5, failureKind: "delivery",
+      lastError: "boom", ownerId: "uid-1",
+    } as unknown as QueuedCapture,
+  ]);
+
+  const { findByText } = await render(<CaptureReviewScreen />, { wrapper: wrap(newClient()) });
+  expect(await findByText("chicken and rice")).toBeTruthy();
 });
 
 // The id drainLogs will send as the request body's `id`. The server binds it
