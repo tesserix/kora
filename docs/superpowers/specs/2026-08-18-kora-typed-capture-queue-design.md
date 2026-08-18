@@ -157,9 +157,12 @@ Guarded by `hasMedia`:
 
 - the `mediaExists` precondition and its `missing-media` failure
 - the `deleteMedia` call after a successful auto-log
-- `sweepOrphans`' `keepNames`, which must filter to media rows — a text row
-  otherwise contributes `undefined` and corrupts the keep-set, which would delete
-  live media
+- `sweepOrphans`' `keepNames` at its call site, `src/offline/drainTriggers.ts:31`
+  (`items.map((i) => i.storedName)`), which must filter to media rows. This is a
+  **type-level** fix, not a latent data-loss bug: the map stops compiling once
+  `QueuedCapture` is a union, and an `undefined` in the keep-set would in any case
+  be harmless because no file on disk is ever named "undefined". Worth stating
+  precisely so nobody later "fixes" a bug that was never there.
 
 Everything downstream is untouched: `tier === "auto"` still hands off to the log
 queue under a fresh `newLogId()` (never the capture id, which the server cannot
