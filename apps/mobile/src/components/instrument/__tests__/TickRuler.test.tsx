@@ -2,7 +2,13 @@ import { fireEvent, render, screen } from "@testing-library/react-native";
 import { fireGestureHandler, getByGestureTestId } from "react-native-gesture-handler/jest-utils";
 import { impactAsync, selectionAsync } from "expo-haptics";
 import * as Reanimated from "react-native-reanimated";
-import { indexFromDrag, TickRuler, valueFromDrag } from "../TickRuler";
+import {
+  indexFromDrag,
+  projectMomentum,
+  rubberBand,
+  TickRuler,
+  valueFromDrag,
+} from "../TickRuler";
 
 const base = {
   mode: "continuous" as const,
@@ -66,9 +72,23 @@ describe("TickRuler continuous mode", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it("renders a tick for every major graduation in view", async () => {
+  // kora#176 changed what this proves. The scale is now built ONCE at full
+  // width and translated on the UI thread, rather than a window of ticks
+  // recomputed from the `value` prop — so every graduation in [min, max]
+  // renders and clipping is the container's job. Asserting the exact count
+  // pins that: a regression back to windowing would render far fewer.
+  it("renders a tick for every whole graduation across the entire scale", async () => {
     const { getAllByTestId } = await render(<TickRuler {...base} value={84} onChange={jest.fn()} />);
-    expect(getAllByTestId(/^weight-ruler-tick-/).length).toBeGreaterThan(0);
+    // min 35 .. max 180 inclusive.
+    expect(getAllByTestId(/^weight-ruler-tick-/).length).toBe(146);
+  });
+
+  // The centre index is the fixed reference the scale moves under. If it ever
+  // got swept into the translated group it would track the finger and the
+  // control would read as having no reference point at all.
+  it("keeps the centre index outside the group that the drag translates", async () => {
+    const { getByTestId } = await render(<TickRuler {...base} value={84} onChange={jest.fn()} />);
+    expect(getByTestId("weight-ruler-index")).toBeTruthy();
   });
 
   // Pins the WIRING, not just the arithmetic: `valueFromDrag`'s own tests
@@ -432,5 +452,157 @@ describe("indexFromDrag", () => {
   it("always lands on a whole stop", () => {
     const result = indexFromDrag(2, -130, stopCount);
     expect(Number.isInteger(result)).toBe(true);
+  });
+});
+
+// kora#176. The ruler had no `.onEnd` at all, so three Apple principles were
+// simply absent: velocity handoff (§5), momentum projection (§6) and
+// rubber-banding (§9). These pin the arithmetic of each; the wiring tests
+// below pin that the gesture actually calls them.
+describe("projectMomentum", () => {
+  it("projects nowhere when the finger was not moving", () => {
+    expect(projectMomentum(500, 0)).toBe(500);
+  });
+
+  it("carries a leftward flick further left than the finger reached", () => {
+    expect(projectMomentum(500, -1000)).toBeLessThan(500);
+  });
+
+  it("carries a rightward flick further right than the finger reached", () => {
+    expect(projectMomentum(500, 1000)).toBeGreaterThan(500);
+  });
+
+  // The whole point of a projection is that a HARDER flick goes FURTHER —
+  // a projection that ignored velocity magnitude would still pass the
+  // direction tests above.
+  it("travels further the harder the flick", () => {
+    const gentle = projectMomentum(500, 400) - 500;
+    const hard = projectMomentum(500, 1600) - 500;
+    expect(hard).toBeGreaterThan(gentle);
+  });
+});
+
+describe("rubberBand", () => {
+  const WIDTH = 400;
+
+  it("does not move a position that is not past the bound", () => {
+    expect(rubberBand(0, WIDTH)).toBe(0);
+  });
+
+  // The defining property: resistance. Pulling 100px past the end must move
+  // the scale LESS than 100px, or it is not rubber-banding, it is just an
+  // unclamped drag.
+  it("damps an overshoot to less than the raw distance pulled", () => {
+    const damped = rubberBand(100, WIDTH);
+    expect(damped).toBeGreaterThan(0);
+    expect(damped).toBeLessThan(100);
+  });
+
+  it("damps a negative overshoot symmetrically", () => {
+    expect(rubberBand(-100, WIDTH)).toBe(-rubberBand(100, WIDTH));
+  });
+
+  // Resistance must INCREASE with distance — the further you pull, the less
+  // each additional pixel buys. A linear scale factor would pass the
+  // "less than raw" test above but feel like a slow drag, not a rubber band.
+  it("gives diminishing returns the further past the bound you pull", () => {
+    const first = rubberBand(100, WIDTH);
+    const second = rubberBand(200, WIDTH);
+    expect(second - first).toBeLessThan(first);
+  });
+
+  // Asymptotic: no amount of pull may run away with the scale.
+  it("never exceeds the coefficient's share of the dimension", () => {
+    expect(rubberBand(100000, WIDTH)).toBeLessThan(WIDTH);
+  });
+});
+
+describe("TickRuler release behaviour (kora#176)", () => {
+  beforeEach(() => {
+    (selectionAsync as jest.Mock).mockClear();
+    (impactAsync as jest.Mock).mockClear();
+  });
+
+  // Velocity handoff (§5): the ruler used to dead-stop the instant you lifted,
+  // because there was no `.onEnd` to continue the motion. A release carrying
+  // velocity must land BEYOND where the finger stopped.
+  it("carries a flick past the value the finger stopped on", async () => {
+    const onChange = jest.fn();
+    await render(<TickRuler {...base} value={84} onChange={onChange} />);
+
+    fireGestureHandler(getByGestureTestId("weight-ruler-pan"), [
+      { translationX: -9 },
+      { translationX: -18, velocityX: -2000 },
+    ]);
+
+    // The finger alone covered 18px = 2 units, so a dead stop lands on 86.
+    // With the flick's momentum carried through it must land higher.
+    expect(onChange).toHaveBeenCalled();
+    expect(onChange.mock.calls.at(-1)![0]).toBeGreaterThan(86);
+  });
+
+  it("still lands exactly on a step boundary after a flick", async () => {
+    const onChange = jest.fn();
+    await render(<TickRuler {...base} value={84} onChange={onChange} />);
+
+    fireGestureHandler(getByGestureTestId("weight-ruler-pan"), [
+      { translationX: -9 },
+      { translationX: -18, velocityX: -700 },
+    ]);
+
+    const settled = onChange.mock.calls.at(-1)![0];
+    expect(settled % base.step).toBe(0);
+  });
+
+  // Rubber-banding is VISUAL only — the reported value stays clamped, so a
+  // flick that projects past the end of the scale must still settle on max.
+  it("settles at the bound rather than past it when a flick overshoots the scale", async () => {
+    const onChange = jest.fn();
+    await render(<TickRuler {...base} value={179} onChange={onChange} />);
+
+    fireGestureHandler(getByGestureTestId("weight-ruler-pan"), [
+      { translationX: -9 },
+      { translationX: -50, velocityX: -8000 },
+    ]);
+
+    expect(onChange.mock.calls.at(-1)![0]).toBe(base.max);
+  });
+});
+
+// The ruler sits inside AuthScaffold's vertical ScrollView, and onboarding
+// stacks TEN of them. A Pan with no offset thresholds claims the touch on the
+// first pixel of movement in ANY direction and then applies translationX ≈ 0,
+// so a vertical swipe started on a ruler scrolls nothing and the page reads as
+// frozen. The thresholds are what let the ScrollView win a vertical drag.
+describe("TickRuler gesture configuration (kora#176)", () => {
+  it("claims the touch only once the finger has committed horizontally", async () => {
+    await render(<TickRuler {...base} value={84} onChange={jest.fn()} />);
+    const { config } = getByGestureTestId("weight-ruler-pan");
+    expect(config.activeOffsetXStart).toBeLessThan(0);
+    expect(config.activeOffsetXEnd).toBeGreaterThan(0);
+  });
+
+  it("yields to the enclosing scroll view on a vertical swipe", async () => {
+    await render(<TickRuler {...base} value={84} onChange={jest.fn()} />);
+    const { config } = getByGestureTestId("weight-ruler-pan");
+    expect(config.failOffsetYStart).toBeLessThan(0);
+    expect(config.failOffsetYEnd).toBeGreaterThan(0);
+  });
+
+  // Detented rulers sit in the same stack and need the same escape hatch.
+  it("applies the same thresholds to a detented ruler", async () => {
+    await render(
+      <TickRuler
+        mode="detented"
+        index={0}
+        labels={ACTIVITY}
+        accessibilityLabel="Activity level"
+        testID="activity-ruler"
+        onChange={jest.fn()}
+      />,
+    );
+    const { config } = getByGestureTestId("activity-ruler-pan");
+    expect(config.activeOffsetXStart).toBeLessThan(0);
+    expect(config.failOffsetYEnd).toBeGreaterThan(0);
   });
 });
