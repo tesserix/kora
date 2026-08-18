@@ -39,7 +39,17 @@ func LoadFile(path, provenance string) ([]nutrition.FoodItem, error) {
 	}
 	var items []nutrition.FoodItem
 	for _, r := range rows {
-		if r.Name == "" || r.KcalPer100g <= 0 {
+		// Drop unnamed and NEGATIVE-energy rows only. A kcal of exactly 0 is a
+		// real measurement, not missing data, and conflating the two removed
+		// every zero-energy food from the index: water, tap water, plain
+		// mineral water, tea and coffee brewed without milk. Measured
+		// consequence — the index held ZERO rows with kcal <= 0, so "water"
+		// resolved to `Coconut Water` at 15.3 kcal.
+		//
+		// Sources that genuinely lack an energy figure express it as a missing
+		// or negative value, which is still rejected. See kora#219's sibling
+		// discussion; the rule is "unknown is not zero".
+		if r.Name == "" || r.KcalPer100g < 0 {
 			continue
 		}
 		name, brand := r.Name, r.Brand

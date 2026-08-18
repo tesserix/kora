@@ -118,9 +118,12 @@ def main():
         if not name:
             continue
         kcal = number(row[COL["energy_kj"]]) / KJ_PER_KCAL
-        # LoadFile drops rows without a positive kcal anyway; skipping here keeps
-        # the committed file free of entries that would never be ingested.
-        if kcal <= 0:
+        # Only NEGATIVE energy is rejected. Zero is a real measurement — water,
+        # mineral water, black tea and coffee are all legitimately 0 kJ — and
+        # dropping them here (matching LoadFile's old `<= 0`) is what removed
+        # every zero-energy food from the index. AFCD publishes 1,588 foods and
+        # this file carried 1,578; the difference was mostly these.
+        if kcal < 0:
             continue
         out.append(
             {
