@@ -223,7 +223,12 @@ function PermissionDenied({ message, icon, onDescribeInstead, onChooseFromLibrar
     <View
       testID="capture-permission-denied"
       style={{
-        height: 200,
+        // minHeight, not height: the camera denial carries a THIRD action
+        // ("Choose from library", kora#201) and a fixed 200 clipped it against
+        // the card's own bottom edge. A floor keeps every other denial card
+        // exactly the size it was.
+        minHeight: 200,
+        paddingVertical: 20,
         borderRadius: 20,
         backgroundColor: T.glass,
         borderWidth: 1,
