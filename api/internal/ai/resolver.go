@@ -585,10 +585,11 @@ func (r Resolver) resolveGuesses(ctx context.Context, userID uuid.UUID, phrase s
 		// of being dropped on the floor here, which is what made "El Janah 1/2
 		// chicken with Chips" arrive as the bare word "chicken".
 		cands, err := r.foods.ResolveQuery(ctx, userID, nutrition.Query{
-			Text:       guess.Food,
-			Brand:      guess.Brand,
-			Qualifiers: guess.Qualifiers,
-			Locale:     locale,
+			Text:          guess.Food,
+			Brand:         guess.Brand,
+			Qualifiers:    guess.Qualifiers,
+			CookingMethod: guess.CookingMethod,
+			Locale:        locale,
 		}, vec, resolveTopK)
 		if err != nil {
 			return Resolution{}, fmt.Errorf("ai: resolve guesses: %w", err)
