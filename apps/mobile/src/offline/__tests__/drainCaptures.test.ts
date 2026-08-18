@@ -2,13 +2,13 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { append as appendCapture, list as listCaptures } from "../captureQueue";
 import * as queueModule from "../queue";
 import { list as listLogs } from "../queue";
+import { CaptureUnidentifiedError, drainCaptureQueue } from "../drainCaptures";
+import type { Resolution } from "@/api/types";
 
 // A spy, not a mock: append() must still actually enqueue the log row (other
 // assertions in this file read it back via listLogs), so calls pass through
 // to the real implementation.
 const appendLog = jest.spyOn(queueModule, "append");
-import { CaptureUnidentifiedError, drainCaptureQueue } from "../drainCaptures";
-import type { Resolution } from "@/api/types";
 
 // drainCaptures.ts imports @/lib/api at module scope for its app-facing wrapper
 // (currentUserId, apiFetchMultipart) even though none of the tests below exercise

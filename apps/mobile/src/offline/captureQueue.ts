@@ -198,8 +198,9 @@ export async function discard(id: string): Promise<void> {
 // send the capture back for identification instead of restoring the review.
 //
 // Idempotent on id (a double-tapped Undo cannot duplicate the row) and capped
-// the same way append is — a queue that filled while the toast was up throws
-// rather than silently exceeding MAX_CAPTURES, so the caller can say so.
+// the same way append is — throws if the queue filled to its limit for the
+// row's arm (MAX_CAPTURES for photo/voice, MAX_TEXT_CAPTURES for text), so
+// the caller can say so.
 export async function restore(item: QueuedCapture): Promise<void> {
   let full = false;
   await withCaptureLock(async () => {
