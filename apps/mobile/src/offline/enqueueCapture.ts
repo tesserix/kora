@@ -1,5 +1,5 @@
 import { copyIntoQueue, deleteQueuedMedia } from "./captureMedia";
-import { append, type QueuedCapture } from "./captureQueue";
+import { append, type QueuedCapture, type TextCapture } from "./captureQueue";
 import { NoOwnerError, resolveOwnerId } from "./owner";
 
 export type CaptureFile = { uri: string; name: string; type: string };
@@ -44,4 +44,26 @@ export async function enqueueCapture(
     await deleteQueuedMedia(storedName);
     throw err;
   }
+}
+
+// The text sibling of enqueueCapture (kora#196). Deliberately does NOT share a
+// body with it: the copy-before-append invariant the header comment above
+// exists to state has nothing to protect when there is no file, and there is
+// no cleanup path because a refused append can leak nothing.
+export async function enqueueTextCapture(
+  phrase: string,
+  mealSlot?: string,
+): Promise<TextCapture> {
+  const ownerId = await resolveOwnerId();
+  if (!ownerId) throw new NoOwnerError();
+
+  return (await append({
+    id: `cap_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    kind: "text",
+    phrase,
+    // The user is holding the phone now: capture time IS now (decision 2).
+    capturedAt: new Date().toISOString(),
+    ownerId,
+    mealSlot,
+  })) as TextCapture;
 }

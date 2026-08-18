@@ -1,6 +1,8 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { MAX_CAPTURES, append, list } from "../captureQueue";
-import { enqueueCapture } from "../enqueueCapture";
+import { enqueueCapture, enqueueTextCapture } from "../enqueueCapture";
+import type { TextCapture } from "../captureQueue";
+import { NoOwnerError } from "../owner";
 
 jest.mock("@/lib/api", () => ({
   currentUserId: jest.fn(() => null),
@@ -92,4 +94,31 @@ it("deletes the copied media when the queue refuses the row", async () => {
   expect(deleteQueuedMedia).toHaveBeenCalledWith(storedName);
   // And no row leaked past the cap.
   expect(await list()).toHaveLength(MAX_CAPTURES);
+});
+
+// kora#196. enqueueCapture's whole contract is media: copy the file first,
+// then append, so a failure can only ever leak a file with no row. A text
+// capture has no file, so none of that machinery applies to it.
+describe("enqueueTextCapture (kora#196)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it("queues the phrase without writing any media", async () => {
+    const row = await enqueueTextCapture("chicken and rice", "lunch");
+    expect(row).toMatchObject({ kind: "text", phrase: "chicken and rice", mealSlot: "lunch" });
+    const { copyIntoQueue } = jest.requireMock("../captureMedia");
+    expect(copyIntoQueue).not.toHaveBeenCalled();
+  });
+
+  it("mints an id in the same shape the media path uses", async () => {
+    const row = await enqueueTextCapture("two eggs");
+    expect(row.id).toMatch(/^cap_\d+_[a-z0-9]+$/);
+  });
+
+  it("refuses to queue with nobody signed in, rather than queueing an ownerless row", async () => {
+    const { resolveOwnerId } = jest.requireMock("../owner");
+    resolveOwnerId.mockResolvedValueOnce(null);
+    await expect(enqueueTextCapture("two eggs")).rejects.toBeInstanceOf(NoOwnerError);
+  });
 });
