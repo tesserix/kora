@@ -149,7 +149,8 @@ func TestWithinBudgetEnforcesWeeklyAndMonthlyQuota(t *testing.T) {
 func TestWithinBudgetResetsAtNewUTCWindows(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db)
-	previous := time.Date(2026, time.August, 31, 23, 59, 59, 0, time.UTC)
+	// 31 May 2026 is Sunday, so midnight resets the day, ISO week, and month.
+	previous := time.Date(2026, time.May, 31, 23, 59, 59, 0, time.UTC)
 	now := previous.Add(time.Second)
 	previousWindows := quotaWindowsAt(previous)
 	for _, window := range previousWindows {
@@ -165,6 +166,23 @@ func TestWithinBudgetResetsAtNewUTCWindows(t *testing.T) {
 	for _, window := range quotaWindowsAt(now) {
 		require.Equal(t, 1, quotaCount(t, db, userID, window.kind, window.start))
 	}
+}
+
+func TestWithinBudgetDoesNotResetWeeklyQuotaAtMonthBoundary(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	previous := time.Date(2026, time.August, 31, 23, 59, 59, 0, time.UTC)
+	now := previous.Add(time.Second)
+	previousWeek := quotaWindowsAt(previous)[1]
+	require.Equal(t, previousWeek.start, quotaWindowsAt(now)[1].start)
+	setQuotaCount(t, db, userID, quotaWeek, previousWeek.start, perUserWeeklyRequestCap)
+	meter := NewMeter(db)
+	meter.now = func() time.Time { return now }
+
+	ok, err := meter.WithinBudget(context.Background(), userID)
+
+	require.NoError(t, err)
+	require.False(t, ok)
 }
 
 func TestWithinBudgetSerializesConcurrentReservations(t *testing.T) {
