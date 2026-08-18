@@ -1,7 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { MAX_CAPTURES, append, list } from "../captureQueue";
 import { enqueueCapture, enqueueTextCapture } from "../enqueueCapture";
-import type { TextCapture } from "../captureQueue";
 import { NoOwnerError } from "../owner";
 
 jest.mock("@/lib/api", () => ({

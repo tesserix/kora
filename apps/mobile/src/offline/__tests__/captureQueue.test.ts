@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   append, CaptureQueueFullError, discard, hasMedia, list, markFailed, markReview,
-  MAX_CAPTURES, MAX_TEXT_CAPTURES, recordAttempt, restore, retry,
+  MAX_CAPTURES, MAX_TEXT_CAPTURES, recordAttempt, retry,
 } from "../captureQueue";
 import type { Resolution } from "@/api/types";
 

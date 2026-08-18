@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { onlineManager } from "@tanstack/react-query";
-import { append as appendCapture, list as listCaptures } from "../captureQueue";
+import { append as appendCapture } from "../captureQueue";
 import { installDrainTriggers } from "../drainTriggers";
 
 jest.mock("@/lib/api", () => ({
