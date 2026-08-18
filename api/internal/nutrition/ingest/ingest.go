@@ -49,6 +49,23 @@ func Run(ctx context.Context, repo nutrition.Repository, files map[string]string
 		if _, err := repo.BackfillServings(ctx, items); err != nil {
 			return total, fmt.Errorf("ingest: backfill servings %s: %w", path, err)
 		}
+		// AFTER the backfill, and distinct from it: the backfill only ever
+		// fills an EMPTY row, so it cannot repair a serving this pipeline
+		// previously wrote wrong. It did write some wrong — see
+		// ReconcileGeneratedServings.
+		//
+		// AUSNUT ONLY, and that restriction is load-bearing rather than
+		// tidiness. Reconcile matches on name+brand, so running it for every
+		// file lets one source rewrite another's row: afcd_release3 (which
+		// states no servings) CLEARED the beer serving AUSNUT had just given
+		// it, and usda_common overwrote `Couscous, cooked` from a 157 g cup to
+		// a 528 g dry-yield. Both were observed on a full ingest. Only the
+		// file that authored these values may correct them.
+		if provenance == nutrition.ProvenanceAUSNUT {
+			if _, err := repo.ReconcileGeneratedServings(ctx, items); err != nil {
+				return total, fmt.Errorf("ingest: reconcile servings %s: %w", path, err)
+			}
+		}
 	}
 	return total, nil
 }

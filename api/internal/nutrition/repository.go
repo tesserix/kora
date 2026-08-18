@@ -715,6 +715,55 @@ func (r Repository) BackfillServings(ctx context.Context, items []FoodItem) (int
 	return updated, nil
 }
 
+// ReconcileGeneratedServings corrects serving data this pipeline itself wrote,
+// where the source file no longer states what the stored row says.
+//
+// BackfillServings deliberately only fills rows that have NOTHING, so it can
+// never repair a value it previously got wrong — and it did get one wrong. The
+// first AUSNUT measures release chose a food's smallest measure as its default
+// serving, which for a food eaten in handfuls is one piece of it: "1 pea" at
+// 1 g, "1 chip" at 3.9 g. 213 rows shipped a serving under 5 g and a plate of
+// hot chips resolved to 7 kcal in production. Re-ingesting fixes the FILE but
+// leaves the stored rows exactly as wrong as before.
+//
+// Scoped to rows this converter authored, so it cannot touch a serving that
+// belongs to another source:
+//
+//   - provenance is AUSNUT, or AFCD holding a value BackfillServings copied
+//     across from AUSNUT;
+//   - serving_desc is the bare "1 <descriptor>" form this pipeline emits.
+//     Every other source writes a parenthetical — afcd_staples has
+//     "1 cup (158 g)", au_in_dishes has "1 bowl (200 g)" — or a plain mass.
+//
+// Idempotent by construction: it writes only where stored and stated differ,
+// so a second run matches nothing. Clearing is a real outcome — the current
+// rule abstains when a food's measures disagree, and a row whose default is
+// withdrawn must go back to the flat 100 g fallback rather than keep a number
+// nothing stands behind.
+//
+// serving_units are NOT touched. Every measure remains valid as a named unit:
+// "3 chips" should still resolve even where "chips" has no default.
+func (r Repository) ReconcileGeneratedServings(ctx context.Context, items []FoodItem) (int, error) {
+	updated := 0
+	for _, item := range items {
+		res := r.db.WithContext(ctx).Model(&FoodItem{}).
+			Where("name = ? AND brand = ?", item.Name, item.Brand).
+			Where("provenance IN ?", []string{ProvenanceAUSNUT, ProvenanceAFCD}).
+			Where("serving_desc LIKE ?", "1 %").
+			Where("serving_desc NOT LIKE ?", "% (%").
+			Where("COALESCE(serving_grams, 0) <> ?", item.ServingGrams).
+			Updates(map[string]any{
+				"serving_grams": item.ServingGrams,
+				"serving_desc":  item.ServingDesc,
+			})
+		if res.Error != nil {
+			return updated, fmt.Errorf("nutrition: reconcile servings: %w", res.Error)
+		}
+		updated += int(res.RowsAffected)
+	}
+	return updated, nil
+}
+
 // BackfillUSDAEmbeddedBrands moves a brand that USDA wrote into the name of an
 // ALREADY-INGESTED row into the brand column, and retypes the row.
 //

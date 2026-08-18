@@ -63,7 +63,11 @@ func TestAusnutCarriesNamedServings(t *testing.T) {
 		}
 	}
 	require.Greater(t, withUnits, 2000, "AUSNUT must carry named servings from the measures join")
-	require.Greater(t, withGrams, 2000, "AUSNUT must carry a default serving mass")
+	// Lower than withUnits ON PURPOSE. primary_serving abstains when a food's
+	// measures disagree about what a serving is, so ~700 foods carry named
+	// units but no default and fall back to the flat 100 g.
+	require.Greater(t, withGrams, 1500, "AUSNUT must carry a default serving mass")
+	require.Less(t, withGrams, withUnits, "abstention is expected, not a bug")
 
 	byName := map[string]nutrition.FoodItem{}
 	for _, it := range items {
@@ -138,5 +142,61 @@ func TestAusnutOmitsServingFieldsWhenUnmatched(t *testing.T) {
 			require.NotContains(t, r, "serving_grams")
 			require.NotContains(t, r, "serving_desc")
 		}
+	}
+}
+
+// The regression guard. Two primary-selection rules shipped wrong answers in
+// opposite directions before this one:
+//
+//	smallest -> one piece of a food eaten in handfuls. AUSNUT publishes
+//	            "1 pea" (1 g), "1 leaf" (1 g), "1 chip" (3.9 g), and 213 rows
+//	            landed under 5 g. A plate of hot chips resolved to 7 KCAL in
+//	            production.
+//	nearest a -> a cup of a food eaten by the teaspoon. `Sauce, tomato` got a
+//	260 g "1 cup" where the 10 g packet was right.
+//
+// Neither was caught by spot-checking individual foods, because the cases I
+// picked (beer, couscous, pizza) all happened to be foods whose smallest
+// measure IS a serving. A distribution check finds it instantly, which is why
+// this asserts over every row rather than over a chosen few.
+// Scoped to ausnut.json deliberately. Other sources state servings taken from
+// real packaging, where small IS correct — OpenFoodFacts has "English
+// Breakfast Tea" at 2 g, which is a tea bag and right. The claim here is only
+// about the masses THIS converter derives from AUSNUT's measure list.
+func TestNoImplausiblySmallDefaultServing(t *testing.T) {
+	items, err := LoadFile(repoFoodDir+"/ausnut.json", nutrition.ProvenanceAUSNUT)
+	require.NoError(t, err)
+	for _, it := range items {
+		if it.ServingGrams <= 0 {
+			continue
+		}
+		require.GreaterOrEqualf(t, it.ServingGrams, 5.0,
+			"%q defaults to %.1f g — that is one piece of a food, not a serving",
+			it.Name, it.ServingGrams)
+	}
+}
+
+// Where AUSNUT's measures disagree about what a serving is, the converter must
+// emit NO default rather than choose. Chips list a 3.9 g chip beside a 100 g
+// takeaway serve and a 320 g bucket; tomato sauce lists a 10 g packet beside a
+// 260 g cup. Both previously produced a confidently wrong number.
+func TestAusnutAbstainsWhenMeasuresDisagree(t *testing.T) {
+	items, err := LoadFile(repoFoodDir+"/ausnut.json", nutrition.ProvenanceAUSNUT)
+	require.NoError(t, err)
+	byName := map[string]nutrition.FoodItem{}
+	for _, it := range items {
+		byName[it.Name] = it
+	}
+	for _, name := range []string{
+		"Potato, chips, takeaway outlet, deep fried, blended oil, salted",
+		"Sauce, tomato, commercial, regular",
+		"Pizza, meat & vegetable (e.g. supreme), takeaway",
+	} {
+		it, ok := byName[name]
+		require.Truef(t, ok, "%s missing from the index", name)
+		require.Zerof(t, it.ServingGrams,
+			"%s must abstain: its measures describe different servings", name)
+		require.NotEmptyf(t, units.DecodeServingUnits(it.ServingUnits),
+			"%s must still carry its named units so \"2 slices\" resolves", name)
 	}
 }
