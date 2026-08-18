@@ -148,10 +148,10 @@ test("a denied camera permission renders the denied card, not the live camera", 
 // either changes — but a photo-library grant does not restart it, so without a
 // foreground re-check the card is a dead end.
 test("granting photo access from Settings clears the denied card on foreground", async () => {
-  (ImagePicker.requestCameraPermissionsAsync as jest.Mock).mockResolvedValue({
-    granted: false,
-    status: "denied",
-  });
+  // kora#201: a DENIED camera no longer reaches the library at all, so the
+  // library denial these tests are about is now reached the only way left —
+  // a camera that is permitted but absent, which makes launchCameraAsync throw.
+  (ImagePicker.launchCameraAsync as jest.Mock).mockRejectedValue(new Error("no camera hardware"));
   (ImagePicker.requestMediaLibraryPermissionsAsync as jest.Mock).mockResolvedValue({
     granted: false,
     status: "denied",
@@ -182,10 +182,10 @@ test("granting photo access from Settings clears the denied card on foreground",
 // A foreground while the permission is STILL denied must leave the card alone —
 // otherwise the card flickers away and the next tap re-denies it.
 test("a foreground with photo access still denied leaves the card up", async () => {
-  (ImagePicker.requestCameraPermissionsAsync as jest.Mock).mockResolvedValue({
-    granted: false,
-    status: "denied",
-  });
+  // kora#201: a DENIED camera no longer reaches the library at all, so the
+  // library denial these tests are about is now reached the only way left —
+  // a camera that is permitted but absent, which makes launchCameraAsync throw.
+  (ImagePicker.launchCameraAsync as jest.Mock).mockRejectedValue(new Error("no camera hardware"));
   (ImagePicker.requestMediaLibraryPermissionsAsync as jest.Mock).mockResolvedValue({
     granted: false,
     status: "denied",
@@ -197,6 +197,59 @@ test("a foreground with photo access still denied leaves the card up", async () 
   expect(await utils.findByTestId("capture-permission-denied")).toBeTruthy();
 
   (ImagePicker.getMediaLibraryPermissionsAsync as jest.Mock).mockResolvedValue({
+    granted: false,
+    status: "denied",
+  });
+  await act(async () => {
+    foregroundApp();
+  });
+
+  expect(utils.queryByTestId("capture-permission-denied")).toBeTruthy();
+});
+
+// kora#201: the camera denial gets its own persistent card, so it needs the
+// same foreground recovery the library one has. iOS normally terminates the
+// app when the camera permission changes — but the card is now reachable
+// WITHOUT a tap, so a stale one would be a dead end on any path where it
+// isn't restarted.
+test("granting camera access from Settings clears the camera-denied card on foreground", async () => {
+  (ImagePicker.requestCameraPermissionsAsync as jest.Mock).mockResolvedValue({
+    granted: false,
+    status: "denied",
+  });
+
+  const utils = await render(<CaptureScreen />);
+  await fireEvent.press(await utils.findByText("Photo"));
+  await fireEvent.press(await utils.findByLabelText("Photo viewfinder"));
+
+  expect(await utils.findByText(/camera access is off/i)).toBeTruthy();
+
+  // getCameraPermissionsAsync is the NON-prompting read, for the same reason
+  // the library path uses getMediaLibraryPermissionsAsync.
+  (ImagePicker.getCameraPermissionsAsync as jest.Mock).mockResolvedValue({
+    granted: true,
+    status: "granted",
+  });
+  await act(async () => {
+    foregroundApp();
+  });
+
+  await utils.findByLabelText("Photo viewfinder");
+  expect(utils.queryByTestId("capture-permission-denied")).toBeNull();
+});
+
+test("a foreground with camera access still denied leaves the camera card up", async () => {
+  (ImagePicker.requestCameraPermissionsAsync as jest.Mock).mockResolvedValue({
+    granted: false,
+    status: "denied",
+  });
+
+  const utils = await render(<CaptureScreen />);
+  await fireEvent.press(await utils.findByText("Photo"));
+  await fireEvent.press(await utils.findByLabelText("Photo viewfinder"));
+  expect(await utils.findByText(/camera access is off/i)).toBeTruthy();
+
+  (ImagePicker.getCameraPermissionsAsync as jest.Mock).mockResolvedValue({
     granted: false,
     status: "denied",
   });
