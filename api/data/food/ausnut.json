@@ -19,7 +19,7 @@
       }
     ],
     "serving_grams": 333.0,
-    "serving_desc": "1 can"
+    "serving_desc": "1 bottle"
   },
   {
     "name": "Beer, full strength (alcohol 4-4.9% v/v)",
@@ -41,7 +41,7 @@
       }
     ],
     "serving_grams": 331.6,
-    "serving_desc": "1 can"
+    "serving_desc": "1 bottle"
   },
   {
     "name": "Beer, full strength (alcohol 4-4.9% v/v), low carbohydrate",
@@ -63,7 +63,7 @@
       }
     ],
     "serving_grams": 331.6,
-    "serving_desc": "1 can"
+    "serving_desc": "1 bottle"
   },
   {
     "name": "Beer, full strength (alcohol 4-4.9% v/v), gluten free",
@@ -85,7 +85,7 @@
       }
     ],
     "serving_grams": 331.6,
-    "serving_desc": "1 can"
+    "serving_desc": "1 bottle"
   },
   {
     "name": "Beer, home-brewed, full strength",
@@ -115,7 +115,7 @@
       }
     ],
     "serving_grams": 332.0,
-    "serving_desc": "1 can"
+    "serving_desc": "1 bottle"
   },
   {
     "name": "Beer, light (alcohol 1- <2.9% v/v)",
@@ -137,7 +137,7 @@
       }
     ],
     "serving_grams": 332.6,
-    "serving_desc": "1 can"
+    "serving_desc": "1 bottle"
   },
   {
     "name": "Beer, home-brewed, reduced alcohol, light beer, or mid-strength",
@@ -167,7 +167,7 @@
       }
     ],
     "serving_grams": 333.3,
-    "serving_desc": "1 can"
+    "serving_desc": "1 bottle"
   },
   {
     "name": "Beer, not further defined",
@@ -189,7 +189,7 @@
       }
     ],
     "serving_grams": 331.6,
-    "serving_desc": "1 can"
+    "serving_desc": "1 bottle"
   },
   {
     "name": "Bitters",
@@ -204,9 +204,7 @@
         "amount": 1,
         "base_amount": 4.7
       }
-    ],
-    "serving_grams": 4.7,
-    "serving_desc": "1 teaspoon"
+    ]
   },
   {
     "name": "Cider, apple, alcoholic",
@@ -228,7 +226,7 @@
       }
     ],
     "serving_grams": 334.3,
-    "serving_desc": "1 can"
+    "serving_desc": "1 bottle"
   },
   {
     "name": "Cider, apple, alcoholic, low carbohydrate",
@@ -250,7 +248,7 @@
       }
     ],
     "serving_grams": 334.3,
-    "serving_desc": "1 can"
+    "serving_desc": "1 bottle"
   },
   {
     "name": "Cider, apple, de-alcoholised",
@@ -272,7 +270,7 @@
       }
     ],
     "serving_grams": 334.3,
-    "serving_desc": "1 can"
+    "serving_desc": "1 bottle"
   },
   {
     "name": "Cider, pear (perry), alcoholic",
@@ -294,7 +292,7 @@
       }
     ],
     "serving_grams": 334.3,
-    "serving_desc": "1 can"
+    "serving_desc": "1 bottle"
   },
   {
     "name": "Cider, not further defined",
@@ -316,7 +314,7 @@
       }
     ],
     "serving_grams": 334.3,
-    "serving_desc": "1 can"
+    "serving_desc": "1 bottle"
   },
   {
     "name": "Liqueur, cream based",
@@ -347,9 +345,7 @@
         "amount": 1,
         "base_amount": 20.0
       }
-    ],
-    "serving_grams": 20.0,
-    "serving_desc": "1 tablespoon"
+    ]
   },
   {
     "name": "Port",
@@ -417,9 +413,7 @@
         "amount": 1,
         "base_amount": 199.0
       }
-    ],
-    "serving_grams": 199.0,
-    "serving_desc": "1 bottle"
+    ]
   },
   {
     "name": "Wine, red, reduced alcohol",
@@ -439,9 +433,7 @@
         "amount": 1,
         "base_amount": 210.0
       }
-    ],
-    "serving_grams": 210.0,
-    "serving_desc": "1 bottle"
+    ]
   },
   {
     "name": "Wine, red, de-alcoholised",
@@ -461,9 +453,7 @@
         "amount": 1,
         "base_amount": 210.0
       }
-    ],
-    "serving_grams": 210.0,
-    "serving_desc": "1 bottle"
+    ]
   },
   {
     "name": "Wine, red, cooked",
@@ -491,9 +481,7 @@
         "amount": 1,
         "base_amount": 199.0
       }
-    ],
-    "serving_grams": 199.0,
-    "serving_desc": "1 bottle"
+    ]
   },
   {
     "name": "Wine, red, sparkling, de-alcoholised",
@@ -513,9 +501,7 @@
         "amount": 1,
         "base_amount": 210.0
       }
-    ],
-    "serving_grams": 210.0,
-    "serving_desc": "1 bottle"
+    ]
   },
   {
     "name": "Wine, rose",
@@ -535,9 +521,7 @@
         "amount": 1,
         "base_amount": 199.0
       }
-    ],
-    "serving_grams": 199.0,
-    "serving_desc": "1 bottle"
+    ]
   },
   {
     "name": "Wine, white",
@@ -557,9 +541,7 @@
         "amount": 1,
         "base_amount": 198.4
       }
-    ],
-    "serving_grams": 198.4,
-    "serving_desc": "1 bottle"
+    ]
   },
   {
     "name": "Wine, white, reduced alcohol",
@@ -579,9 +561,7 @@
         "amount": 1,
         "base_amount": 210.0
       }
-    ],
-    "serving_grams": 210.0,
-    "serving_desc": "1 bottle"
+    ]
   },
   {
     "name": "Wine, white, de-alcoholised",
@@ -601,9 +581,7 @@
         "amount": 1,
         "base_amount": 210.0
       }
-    ],
-    "serving_grams": 210.0,
-    "serving_desc": "1 bottle"
+    ]
   },
   {
     "name": "Wine, white, cooked",
@@ -631,9 +609,7 @@
         "amount": 1,
         "base_amount": 199.0
       }
-    ],
-    "serving_grams": 199.0,
-    "serving_desc": "1 bottle"
+    ]
   },
   {
     "name": "Wine, white, sparkling, de-alcoholised",
@@ -653,9 +629,7 @@
         "amount": 1,
         "base_amount": 210.0
       }
-    ],
-    "serving_grams": 210.0,
-    "serving_desc": "1 bottle"
+    ]
   },
   {
     "name": "Wine, white, sweet dessert style",
@@ -716,9 +690,7 @@
         "amount": 1,
         "base_amount": 134.4
       }
-    ],
-    "serving_grams": 134.4,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Cocktail, ready to drink, coffee based",
@@ -738,9 +710,7 @@
         "amount": 1,
         "base_amount": 134.4
       }
-    ],
-    "serving_grams": 134.4,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Cocktail, ready to drink, de-alcoholised",
@@ -760,9 +730,7 @@
         "amount": 1,
         "base_amount": 134.4
       }
-    ],
-    "serving_grams": 134.4,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Mixed drink, ready to drink, spirit & cola soft drink",
@@ -782,9 +750,7 @@
         "amount": 1,
         "base_amount": 144.2
       }
-    ],
-    "serving_grams": 144.2,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Mixed drink, ready to drink, spirit & non-cola soft drink",
@@ -804,9 +770,7 @@
         "amount": 1,
         "base_amount": 144.2
       }
-    ],
-    "serving_grams": 144.2,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Mixed drink, commercial, pre-mixed, spirit & energy drink",
@@ -826,9 +790,7 @@
         "amount": 1,
         "base_amount": 144.2
       }
-    ],
-    "serving_grams": 144.2,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Mixed drink, ready to drink, spirit & juice",
@@ -848,9 +810,7 @@
         "amount": 1,
         "base_amount": 134.4
       }
-    ],
-    "serving_grams": 134.4,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Mixed drink, ready to drink, spirit & soda",
@@ -870,9 +830,7 @@
         "amount": 1,
         "base_amount": 144.2
       }
-    ],
-    "serving_grams": 144.2,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Mixed drink, ready to drink, spirit & tonic",
@@ -892,9 +850,7 @@
         "amount": 1,
         "base_amount": 144.2
       }
-    ],
-    "serving_grams": 144.2,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Mixed drink, ready to drink, spirit & soft drink, de-alcoholised",
@@ -914,9 +870,7 @@
         "amount": 1,
         "base_amount": 144.2
       }
-    ],
-    "serving_grams": 144.2,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Mixed drink, ready to drink, spirit & diet soft drink",
@@ -936,9 +890,7 @@
         "amount": 1,
         "base_amount": 144.2
       }
-    ],
-    "serving_grams": 144.2,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Mulled wine",
@@ -966,9 +918,7 @@
         "amount": 1,
         "base_amount": 206.0
       }
-    ],
-    "serving_grams": 206.0,
-    "serving_desc": "1 bottle"
+    ]
   },
   {
     "name": "Beverage base, drinking chocolate",
@@ -1089,9 +1039,7 @@
         "amount": 1,
         "base_amount": 3.5
       }
-    ],
-    "serving_grams": 3.5,
-    "serving_desc": "1 straw"
+    ]
   },
   {
     "name": "Beverage base, malted milk powder",
@@ -2680,9 +2628,7 @@
         "amount": 1,
         "base_amount": 346.5
       }
-    ],
-    "serving_grams": 262.5,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Energy drink, added vitamins B2, B3, B5, B6 & B12 (V Blue)",
@@ -2702,9 +2648,7 @@
         "amount": 1,
         "base_amount": 346.5
       }
-    ],
-    "serving_grams": 262.5,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Energy drink, added vitamins B3, B5, B6 & B12 (Red Bull)",
@@ -2724,9 +2668,7 @@
         "amount": 1,
         "base_amount": 346.5
       }
-    ],
-    "serving_grams": 262.5,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Energy drink, added vitamins B3, B5 & B6 (Red Eye)",
@@ -2746,9 +2688,7 @@
         "amount": 1,
         "base_amount": 346.5
       }
-    ],
-    "serving_grams": 262.5,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Energy drink, intense sweetened, added vitamins B2, B3, B5, B6 & B12 (V Sugarfree)",
@@ -2768,9 +2708,7 @@
         "amount": 1,
         "base_amount": 330.0
       }
-    ],
-    "serving_grams": 250.0,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Energy drink, intense sweetened, added vitamins B2, B3, B6 & B12 (Monster Zero)",
@@ -2790,9 +2728,7 @@
         "amount": 1,
         "base_amount": 330.0
       }
-    ],
-    "serving_grams": 250.0,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Energy drink, intense sweetened, added vitamins B3, B5, B6 & B12 (Red Bull Sugarfree/Zero)",
@@ -2812,9 +2748,7 @@
         "amount": 1,
         "base_amount": 330.0
       }
-    ],
-    "serving_grams": 250.0,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Energy drink, not further defined",
@@ -2834,9 +2768,7 @@
         "amount": 1,
         "base_amount": 346.5
       }
-    ],
-    "serving_grams": 262.5,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Energy drink, intense sweetened, not further defined",
@@ -2856,9 +2788,7 @@
         "amount": 1,
         "base_amount": 330.0
       }
-    ],
-    "serving_grams": 250.0,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Ice tea, commercial",
@@ -2878,9 +2808,7 @@
         "amount": 1,
         "base_amount": 312.0
       }
-    ],
-    "serving_grams": 208.0,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Ice tea, commercial, intense sweetened or diet",
@@ -2900,9 +2828,7 @@
         "amount": 1,
         "base_amount": 300.0
       }
-    ],
-    "serving_grams": 200.0,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Ice tea, homemade",
@@ -2930,9 +2856,7 @@
         "amount": 1,
         "base_amount": 285.0
       }
-    ],
-    "serving_grams": 190.0,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Kava, prepared with water",
@@ -2960,9 +2884,7 @@
         "amount": 1,
         "base_amount": 375.0
       }
-    ],
-    "serving_grams": 250.0,
-    "serving_desc": "1 bottle"
+    ]
   },
   {
     "name": "Mineral water, flavoured",
@@ -2982,9 +2904,7 @@
         "amount": 1,
         "base_amount": 312.0
       }
-    ],
-    "serving_grams": 208.0,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Mineral water, flavoured, intense sweetened or diet",
@@ -3004,9 +2924,7 @@
         "amount": 1,
         "base_amount": 300.0
       }
-    ],
-    "serving_grams": 200.0,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Soft drink, cola flavour",
@@ -3026,9 +2944,7 @@
         "amount": 1,
         "base_amount": 312.0
       }
-    ],
-    "serving_grams": 208.0,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Soft drink, cola flavour, caffeine free",
@@ -3048,9 +2964,7 @@
         "amount": 1,
         "base_amount": 312.0
       }
-    ],
-    "serving_grams": 208.0,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Soft drink, cola flavour, intense sweetened or diet",
@@ -3070,9 +2984,7 @@
         "amount": 1,
         "base_amount": 300.0
       }
-    ],
-    "serving_grams": 200.0,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Soft drink, cola flavour, intense sweetened or diet, caffeine free",
@@ -3092,9 +3004,7 @@
         "amount": 1,
         "base_amount": 300.0
       }
-    ],
-    "serving_grams": 200.0,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Soft drink, creaming soda",
@@ -3114,9 +3024,7 @@
         "amount": 1,
         "base_amount": 312.0
       }
-    ],
-    "serving_grams": 208.0,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Soft drink, creaming soda, intense sweetened or diet",
@@ -3136,9 +3044,7 @@
         "amount": 1,
         "base_amount": 300.0
       }
-    ],
-    "serving_grams": 200.0,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Soft drink, dry ginger ale or ginger beer",
@@ -3158,9 +3064,7 @@
         "amount": 1,
         "base_amount": 312.0
       }
-    ],
-    "serving_grams": 208.0,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Soft drink, dry ginger ale or ginger beer, intense sweetened or diet",
@@ -3180,9 +3084,7 @@
         "amount": 1,
         "base_amount": 300.0
       }
-    ],
-    "serving_grams": 200.0,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Soft drink, fruit flavours",
@@ -3202,9 +3104,7 @@
         "amount": 1,
         "base_amount": 312.0
       }
-    ],
-    "serving_grams": 208.0,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Soft drink, fruit flavours, intense sweetened or diet",
@@ -3224,9 +3124,7 @@
         "amount": 1,
         "base_amount": 300.0
       }
-    ],
-    "serving_grams": 200.0,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Soft drink, grass jelly, all flavours",
@@ -3246,9 +3144,7 @@
         "amount": 1,
         "base_amount": 312.0
       }
-    ],
-    "serving_grams": 208.0,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Soft drink, lemon, lime & bitters",
@@ -3268,9 +3164,7 @@
         "amount": 1,
         "base_amount": 312.0
       }
-    ],
-    "serving_grams": 208.0,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Soft drink, Lucozade",
@@ -3307,9 +3201,7 @@
         "amount": 1,
         "base_amount": 309.0
       }
-    ],
-    "serving_grams": 206.0,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Soft drink, tonic water, intense sweetened or diet",
@@ -3329,9 +3221,7 @@
         "amount": 1,
         "base_amount": 300.0
       }
-    ],
-    "serving_grams": 200.0,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Soft drink, sarsaparilla",
@@ -3351,9 +3241,7 @@
         "amount": 1,
         "base_amount": 312.0
       }
-    ],
-    "serving_grams": 208.0,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Soft drink, with added dairy",
@@ -3491,9 +3379,7 @@
         "amount": 1,
         "base_amount": 375.0
       }
-    ],
-    "serving_grams": 250.0,
-    "serving_desc": "1 bottle"
+    ]
   },
   {
     "name": "Water, bottled, carbonated or soda water",
@@ -3513,9 +3399,7 @@
         "amount": 1,
         "base_amount": 300.0
       }
-    ],
-    "serving_grams": 200.0,
-    "serving_desc": "1 can"
+    ]
   },
   {
     "name": "Water, bottled, flavoured, added sugar",
@@ -3535,9 +3419,7 @@
         "amount": 1,
         "base_amount": 375.0
       }
-    ],
-    "serving_grams": 250.0,
-    "serving_desc": "1 bottle"
+    ]
   },
   {
     "name": "Water, bottled, flavoured, added sugar, vitamins & minerals",
@@ -3557,9 +3439,7 @@
         "amount": 1,
         "base_amount": 375.0
       }
-    ],
-    "serving_grams": 250.0,
-    "serving_desc": "1 bottle"
+    ]
   },
   {
     "name": "Water, bottled, flavoured, no added sugar",
@@ -3579,9 +3459,7 @@
         "amount": 1,
         "base_amount": 375.0
       }
-    ],
-    "serving_grams": 250.0,
-    "serving_desc": "1 bottle"
+    ]
   },
   {
     "name": "Water, bottled, flavoured, no added sugar, added vitamins & minerals",
@@ -3601,9 +3479,7 @@
         "amount": 1,
         "base_amount": 375.0
       }
-    ],
-    "serving_grams": 250.0,
-    "serving_desc": "1 bottle"
+    ]
   },
   {
     "name": "Water, bore",
@@ -3855,9 +3731,7 @@
         "amount": 1,
         "base_amount": 255.0
       }
-    ],
-    "serving_grams": 25.0,
-    "serving_desc": "1 chip"
+    ]
   },
   {
     "name": "Couscous, uncooked",
@@ -4304,9 +4178,7 @@
         "amount": 1,
         "base_amount": 40.0
       }
-    ],
-    "serving_grams": 40.0,
-    "serving_desc": "1 cup or sachet"
+    ]
   },
   {
     "name": "Oats, rolled, with added fibre, uncooked",
@@ -4556,9 +4428,7 @@
         "amount": 1,
         "base_amount": 125.0
       }
-    ],
-    "serving_grams": 125.0,
-    "serving_desc": "1 microwavable cup"
+    ]
   },
   {
     "name": "Rice, white, cooked with coconut milk",
@@ -4630,9 +4500,7 @@
         "amount": 1,
         "base_amount": 125.0
       }
-    ],
-    "serving_grams": 125.0,
-    "serving_desc": "1 microwavable cup"
+    ]
   },
   {
     "name": "Rice, with grains, purchased par-cooked or instant, cooked",
@@ -4652,9 +4520,7 @@
         "amount": 1,
         "base_amount": 125.0
       }
-    ],
-    "serving_grams": 125.0,
-    "serving_desc": "1 microwavable cup"
+    ]
   },
   {
     "name": "Rice, flavoured, instant dry mix",
@@ -4704,9 +4570,7 @@
         "amount": 1,
         "base_amount": 125.0
       }
-    ],
-    "serving_grams": 125.0,
-    "serving_desc": "1 microwavable cup"
+    ]
   },
   {
     "name": "Rice, red, cooked",
@@ -5062,8 +4926,8 @@
         "base_amount": 33.3
       }
     ],
-    "serving_grams": 1.0,
-    "serving_desc": "1 crouton"
+    "serving_grams": 33.3,
+    "serving_desc": "1 toast"
   },
   {
     "name": "Bread, damper, white, commercial",
@@ -5088,9 +4952,7 @@
         "amount": 1,
         "base_amount": 46.0
       }
-    ],
-    "serving_grams": 11.0,
-    "serving_desc": "1 baguette"
+    ]
   },
   {
     "name": "Bread, damper, white, commercial, toasted",
@@ -5115,9 +4977,7 @@
         "amount": 1,
         "base_amount": 46.0
       }
-    ],
-    "serving_grams": 11.0,
-    "serving_desc": "1 baguette"
+    ]
   },
   {
     "name": "Bread, damper, white, homemade",
@@ -5142,9 +5002,7 @@
         "amount": 1,
         "base_amount": 44.0
       }
-    ],
-    "serving_grams": 26.0,
-    "serving_desc": "1 cob"
+    ]
   },
   {
     "name": "Bread, damper, white, homemade, toasted",
@@ -5169,9 +5027,7 @@
         "amount": 1,
         "base_amount": 44.0
       }
-    ],
-    "serving_grams": 26.0,
-    "serving_desc": "1 cob"
+    ]
   },
   {
     "name": "Bread, damper, from Jackaroo flour, homemade",
@@ -5196,9 +5052,7 @@
         "amount": 1,
         "base_amount": 44.0
       }
-    ],
-    "serving_grams": 26.0,
-    "serving_desc": "1 cob"
+    ]
   },
   {
     "name": "Bread, flat (pita or Lebanese), white, commercial",
@@ -5585,9 +5439,7 @@
         "amount": 1,
         "base_amount": 44.0
       }
-    ],
-    "serving_grams": 26.0,
-    "serving_desc": "1 cob"
+    ]
   },
   {
     "name": "Bread, focaccia, plain, commercial, toasted",
@@ -5612,9 +5464,7 @@
         "amount": 1,
         "base_amount": 44.0
       }
-    ],
-    "serving_grams": 26.0,
-    "serving_desc": "1 cob"
+    ]
   },
   {
     "name": "Bread, gluten free, commercial",
@@ -5707,9 +5557,7 @@
         "amount": 1,
         "base_amount": 44.0
       }
-    ],
-    "serving_grams": 26.0,
-    "serving_desc": "1 cob"
+    ]
   },
   {
     "name": "Bread, gluten free, homemade, toasted",
@@ -5734,9 +5582,7 @@
         "amount": 1,
         "base_amount": 44.0
       }
-    ],
-    "serving_grams": 26.0,
-    "serving_desc": "1 cob"
+    ]
   },
   {
     "name": "Bread, mixed grain, commercial",
@@ -5756,9 +5602,7 @@
         "amount": 1,
         "base_amount": 40.0
       }
-    ],
-    "serving_grams": 36.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Bread, mixed grain, commercial, toasted",
@@ -5800,9 +5644,7 @@
         "amount": 1,
         "base_amount": 46.0
       }
-    ],
-    "serving_grams": 11.0,
-    "serving_desc": "1 baguette"
+    ]
   },
   {
     "name": "Bread, mixed grain, homemade",
@@ -5827,9 +5669,7 @@
         "amount": 1,
         "base_amount": 44.0
       }
-    ],
-    "serving_grams": 26.0,
-    "serving_desc": "1 cob"
+    ]
   },
   {
     "name": "Bread, mixed grain, homemade, toasted",
@@ -5854,9 +5694,7 @@
         "amount": 1,
         "base_amount": 44.0
       }
-    ],
-    "serving_grams": 26.0,
-    "serving_desc": "1 cob"
+    ]
   },
   {
     "name": "Bread roll, mixed grain, commercial",
@@ -6106,9 +5944,7 @@
         "amount": 1,
         "base_amount": 44.0
       }
-    ],
-    "serving_grams": 26.0,
-    "serving_desc": "1 cob"
+    ]
   },
   {
     "name": "Bread, rye, homemade, toasted",
@@ -6133,9 +5969,7 @@
         "amount": 1,
         "base_amount": 44.0
       }
-    ],
-    "serving_grams": 26.0,
-    "serving_desc": "1 cob"
+    ]
   },
   {
     "name": "Bread, spelt, commercial",
@@ -6155,9 +5989,7 @@
         "amount": 1,
         "base_amount": 27.0
       }
-    ],
-    "serving_grams": 27.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Bread, spelt, commercial, toasted",
@@ -6177,9 +6009,7 @@
         "amount": 1,
         "base_amount": 23.0
       }
-    ],
-    "serving_grams": 23.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Bread, sour dough, commercial",
@@ -6209,9 +6039,7 @@
         "amount": 1,
         "base_amount": 46.0
       }
-    ],
-    "serving_grams": 11.0,
-    "serving_desc": "1 baguette"
+    ]
   },
   {
     "name": "Bread, sour dough, commercial, toasted",
@@ -6236,9 +6064,7 @@
         "amount": 1,
         "base_amount": 46.0
       }
-    ],
-    "serving_grams": 11.0,
-    "serving_desc": "1 baguette"
+    ]
   },
   {
     "name": "Bread, Turkish, plain, commercial",
@@ -6268,9 +6094,7 @@
         "amount": 1,
         "base_amount": 44.0
       }
-    ],
-    "serving_grams": 26.0,
-    "serving_desc": "1 cob"
+    ]
   },
   {
     "name": "Bread, Turkish, plain, commercial, toasted",
@@ -6295,9 +6119,7 @@
         "amount": 1,
         "base_amount": 44.0
       }
-    ],
-    "serving_grams": 26.0,
-    "serving_desc": "1 cob"
+    ]
   },
   {
     "name": "Bread, white, commercial",
@@ -6492,9 +6314,7 @@
         "amount": 1,
         "base_amount": 46.0
       }
-    ],
-    "serving_grams": 11.0,
-    "serving_desc": "1 baguette"
+    ]
   },
   {
     "name": "Bread, white, Italian-style, commercial",
@@ -6524,9 +6344,7 @@
         "amount": 1,
         "base_amount": 46.0
       }
-    ],
-    "serving_grams": 11.0,
-    "serving_desc": "1 baguette"
+    ]
   },
   {
     "name": "Bread, white, Italian-style, commercial, toasted",
@@ -6556,9 +6374,7 @@
         "amount": 1,
         "base_amount": 46.0
       }
-    ],
-    "serving_grams": 11.0,
-    "serving_desc": "1 baguette"
+    ]
   },
   {
     "name": "Bread, white, homemade",
@@ -6583,9 +6399,7 @@
         "amount": 1,
         "base_amount": 44.0
       }
-    ],
-    "serving_grams": 26.0,
-    "serving_desc": "1 cob"
+    ]
   },
   {
     "name": "Bread, white, homemade, toasted",
@@ -6610,9 +6424,7 @@
         "amount": 1,
         "base_amount": 44.0
       }
-    ],
-    "serving_grams": 26.0,
-    "serving_desc": "1 cob"
+    ]
   },
   {
     "name": "Bread roll, white, commercial",
@@ -6666,9 +6478,7 @@
         "amount": 1,
         "base_amount": 40.0
       }
-    ],
-    "serving_grams": 32.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Bread, wholemeal, commercial, toasted",
@@ -6744,9 +6554,7 @@
         "amount": 1,
         "base_amount": 44.0
       }
-    ],
-    "serving_grams": 26.0,
-    "serving_desc": "1 cob"
+    ]
   },
   {
     "name": "Bread, wholemeal, homemade, toasted",
@@ -6771,9 +6579,7 @@
         "amount": 1,
         "base_amount": 44.0
       }
-    ],
-    "serving_grams": 26.0,
-    "serving_desc": "1 cob"
+    ]
   },
   {
     "name": "Bread roll, wholemeal, commercial",
@@ -6840,9 +6646,7 @@
         "amount": 1,
         "base_amount": 44.0
       }
-    ],
-    "serving_grams": 26.0,
-    "serving_desc": "1 cob"
+    ]
   },
   {
     "name": "Bread, homemade, not further defined, toasted",
@@ -6867,9 +6671,7 @@
         "amount": 1,
         "base_amount": 44.0
       }
-    ],
-    "serving_grams": 26.0,
-    "serving_desc": "1 cob"
+    ]
   },
   {
     "name": "Breadcrumbs for coating food, uncooked",
@@ -6941,9 +6743,7 @@
         "amount": 1,
         "base_amount": 46.0
       }
-    ],
-    "serving_grams": 11.0,
-    "serving_desc": "1 baguette"
+    ]
   },
   {
     "name": "Bread or bread roll, topped/mixed with cheese & bacon",
@@ -6973,9 +6773,7 @@
         "amount": 1,
         "base_amount": 46.0
       }
-    ],
-    "serving_grams": 11.0,
-    "serving_desc": "1 baguette"
+    ]
   },
   {
     "name": "Bread or bread roll, topped/mixed with cheese & vegemite",
@@ -7005,9 +6803,7 @@
         "amount": 1,
         "base_amount": 46.0
       }
-    ],
-    "serving_grams": 11.0,
-    "serving_desc": "1 baguette"
+    ]
   },
   {
     "name": "Bread or bread roll, topped/mixed with cheese & vegetables",
@@ -7037,9 +6833,7 @@
         "amount": 1,
         "base_amount": 46.0
       }
-    ],
-    "serving_grams": 11.0,
-    "serving_desc": "1 baguette"
+    ]
   },
   {
     "name": "Bread or bread roll, topped/mixed with cheese, meat & vegetables",
@@ -7069,9 +6863,7 @@
         "amount": 1,
         "base_amount": 46.0
       }
-    ],
-    "serving_grams": 11.0,
-    "serving_desc": "1 baguette"
+    ]
   },
   {
     "name": "Bread or bread roll, topped/mixed with olives",
@@ -7101,9 +6893,7 @@
         "amount": 1,
         "base_amount": 46.0
       }
-    ],
-    "serving_grams": 11.0,
-    "serving_desc": "1 baguette"
+    ]
   },
   {
     "name": "Bagel, fruit, commercial",
@@ -7157,9 +6947,7 @@
         "amount": 1,
         "base_amount": 470.0
       }
-    ],
-    "serving_grams": 34.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Bread, commercial, added dried fruit, toasted",
@@ -7240,9 +7028,7 @@
         "amount": 1,
         "base_amount": 44.0
       }
-    ],
-    "serving_grams": 20.0,
-    "serving_desc": "1 bun or roll"
+    ]
   },
   {
     "name": "Bun, sweet, chocolate or chocolate chips, uniced",
@@ -7279,9 +7065,7 @@
         "amount": 1,
         "base_amount": 67.0
       }
-    ],
-    "serving_grams": 65.0,
-    "serving_desc": "1 bun or scroll"
+    ]
   },
   {
     "name": "Bun, sweet, with sultanas, iced",
@@ -7311,9 +7095,7 @@
         "amount": 1,
         "base_amount": 44.0
       }
-    ],
-    "serving_grams": 26.0,
-    "serving_desc": "1 cob"
+    ]
   },
   {
     "name": "Bun, sweet, with fruit (other than sultanas), uniced",
@@ -7343,9 +7125,7 @@
         "amount": 1,
         "base_amount": 44.0
       }
-    ],
-    "serving_grams": 26.0,
-    "serving_desc": "1 cob"
+    ]
   },
   {
     "name": "Bun, sweet, with fruit (other than sultanas), iced",
@@ -7375,9 +7155,7 @@
         "amount": 1,
         "base_amount": 44.0
       }
-    ],
-    "serving_grams": 26.0,
-    "serving_desc": "1 cob"
+    ]
   },
   {
     "name": "Bun, sweet, with fruit (other than sultanas) & nuts, iced",
@@ -7407,9 +7185,7 @@
         "amount": 1,
         "base_amount": 44.0
       }
-    ],
-    "serving_grams": 26.0,
-    "serving_desc": "1 cob"
+    ]
   },
   {
     "name": "Bun, sweet, without fruit, uniced",
@@ -7429,9 +7205,7 @@
         "amount": 1,
         "base_amount": 65.0
       }
-    ],
-    "serving_grams": 65.0,
-    "serving_desc": "1 bun or scroll"
+    ]
   },
   {
     "name": "Bun, sweet, with custard, iced",
@@ -7461,9 +7235,7 @@
         "amount": 1,
         "base_amount": 44.0
       }
-    ],
-    "serving_grams": 26.0,
-    "serving_desc": "1 cob"
+    ]
   },
   {
     "name": "Bun, sweet, with mock cream & jam, uniced",
@@ -7539,9 +7311,7 @@
         "amount": 1,
         "base_amount": 44.0
       }
-    ],
-    "serving_grams": 26.0,
-    "serving_desc": "1 cob"
+    ]
   },
   {
     "name": "Pizza, sweet",
@@ -7566,9 +7336,7 @@
         "amount": 1,
         "base_amount": 450.0
       }
-    ],
-    "serving_grams": 56.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Crumpet, white, commercial, toasted",
@@ -8110,9 +7878,7 @@
         "amount": 1,
         "base_amount": 15.0
       }
-    ],
-    "serving_grams": 15.0,
-    "serving_desc": "1 ravioli or tortellini"
+    ]
   },
   {
     "name": "Pasta, gluten free, filled with spinach & ricotta, commercial, cooked without added sauce",
@@ -8132,9 +7898,7 @@
         "amount": 1,
         "base_amount": 15.0
       }
-    ],
-    "serving_grams": 15.0,
-    "serving_desc": "1 ravioli or tortellini"
+    ]
   },
   {
     "name": "Breakfast cereal, beverage, chocolate flavour, added vitamins & minerals",
@@ -8317,9 +8081,7 @@
         "amount": 1,
         "base_amount": 27.5
       }
-    ],
-    "serving_grams": 25.0,
-    "serving_desc": "1 box"
+    ]
   },
   {
     "name": "Breakfast cereal, corn, flakes, gluten free, added vitamins B1, B2, B3, B6, E & folate, Fe & Zn",
@@ -8356,9 +8118,7 @@
         "amount": 1,
         "base_amount": 45.0
       }
-    ],
-    "serving_grams": 25.0,
-    "serving_desc": "1 box"
+    ]
   },
   {
     "name": "Breakfast cereal, corn, flakes, sugar frosted, added vitamins B2, B3, B6, E & folate, Fe & Zn",
@@ -8497,9 +8257,7 @@
         "amount": 1,
         "base_amount": 32.5
       }
-    ],
-    "serving_grams": 25.0,
-    "serving_desc": "1 box"
+    ]
   },
   {
     "name": "Breakfast cereal, mixed grain, extruded, gluten free, added Ca",
@@ -8570,9 +8328,7 @@
         "amount": 1,
         "base_amount": 42.5
       }
-    ],
-    "serving_grams": 30.0,
-    "serving_desc": "1 box"
+    ]
   },
   {
     "name": "Breakfast cereal, mixed grain, flakes, dried fruit, unfortified",
@@ -8626,9 +8382,7 @@
         "amount": 1,
         "base_amount": 65.0
       }
-    ],
-    "serving_grams": 40.0,
-    "serving_desc": "1 box"
+    ]
   },
   {
     "name": "Breakfast cereal, mixed grain, flakes, dried fruit, added vitamins B1, B2, B3, B6, E & folate, Ca, Fe & Zn",
@@ -8665,9 +8419,7 @@
         "amount": 1,
         "base_amount": 65.0
       }
-    ],
-    "serving_grams": 40.0,
-    "serving_desc": "1 box"
+    ]
   },
   {
     "name": "Breakfast cereal, mixed grain, flakes, dried fruit, added vitamins & minerals",
@@ -8738,9 +8490,7 @@
         "amount": 1,
         "base_amount": 60.0
       }
-    ],
-    "serving_grams": 45.0,
-    "serving_desc": "1 box"
+    ]
   },
   {
     "name": "Breakfast cereal, mixed grain, flakes, dried fruit & nuts, added vitamins & minerals",
@@ -8947,9 +8697,7 @@
         "amount": 1,
         "base_amount": 30.0
       }
-    ],
-    "serving_grams": 30.0,
-    "serving_desc": "1 cup"
+    ]
   },
   {
     "name": "Breakfast cereal, rice, puffed or popped, cocoa coating, unfortified",
@@ -9003,9 +8751,7 @@
         "amount": 1,
         "base_amount": 40.0
       }
-    ],
-    "serving_grams": 35.0,
-    "serving_desc": "1 box"
+    ]
   },
   {
     "name": "Breakfast cereal, rice, puffed or popped, cocoa coating, gluten free, added vitamins B1, B2, B3, E & folate",
@@ -9093,9 +8839,7 @@
         "amount": 1,
         "base_amount": 65.0
       }
-    ],
-    "serving_grams": 40.0,
-    "serving_desc": "1 box"
+    ]
   },
   {
     "name": "Breakfast cereal, wheat bran, pellets, unfortified",
@@ -9149,9 +8893,7 @@
         "amount": 1,
         "base_amount": 60.0
       }
-    ],
-    "serving_grams": 45.0,
-    "serving_desc": "1 box"
+    ]
   },
   {
     "name": "Breakfast cereal, whole wheat, biscuit, no added sugar or salt, unfortified",
@@ -9239,9 +8981,7 @@
         "amount": 1,
         "base_amount": 30.0
       }
-    ],
-    "serving_grams": 17.0,
-    "serving_desc": "1 biscuit"
+    ]
   },
   {
     "name": "Breakfast cereal, whole wheat, biscuit, added vitamins B1, B2, B3 & B6, Ca, Fe & Zn",
@@ -9341,9 +9081,7 @@
         "amount": 1,
         "base_amount": 2.5
       }
-    ],
-    "serving_grams": 2.5,
-    "serving_desc": "1 biscuit"
+    ]
   },
   {
     "name": "Breakfast cereal, whole wheat, small biscuit, with honey, added vitamins B1, B2, B3 & folate & Fe",
@@ -9358,9 +9096,7 @@
         "amount": 1,
         "base_amount": 2.5
       }
-    ],
-    "serving_grams": 2.5,
-    "serving_desc": "1 biscuit"
+    ]
   },
   {
     "name": "Breakfast cereal, whole wheat, flakes, added vitamins B1, B2, B3 & folate",
@@ -9482,9 +9218,7 @@
         "amount": 1,
         "base_amount": 67.5
       }
-    ],
-    "serving_grams": 18.0,
-    "serving_desc": "1 biscuit"
+    ]
   },
   {
     "name": "Breakfast cereal, with hemp seeds",
@@ -9546,9 +9280,7 @@
         "amount": 1,
         "base_amount": 117.5
       }
-    ],
-    "serving_grams": 60.0,
-    "serving_desc": "1 cup or sachet"
+    ]
   },
   {
     "name": "Muesli, commercial, untoasted or natural, dried fruit, low fat",
@@ -9568,9 +9300,7 @@
         "amount": 1,
         "base_amount": 117.5
       }
-    ],
-    "serving_grams": 60.0,
-    "serving_desc": "1 cup or sachet"
+    ]
   },
   {
     "name": "Muesli, commercial, untoasted or natural, dried fruit & nuts",
@@ -9590,9 +9320,7 @@
         "amount": 1,
         "base_amount": 117.5
       }
-    ],
-    "serving_grams": 60.0,
-    "serving_desc": "1 cup or sachet"
+    ]
   },
   {
     "name": "Muesli, commercial, untoasted or natural, nuts & seeds",
@@ -9612,9 +9340,7 @@
         "amount": 1,
         "base_amount": 117.5
       }
-    ],
-    "serving_grams": 60.0,
-    "serving_desc": "1 cup or sachet"
+    ]
   },
   {
     "name": "Muesli, homemade, untoasted or natural, dried fruit, nuts & seeds",
@@ -9659,9 +9385,7 @@
         "amount": 1,
         "base_amount": 117.5
       }
-    ],
-    "serving_grams": 60.0,
-    "serving_desc": "1 cup or sachet"
+    ]
   },
   {
     "name": "Muesli, commercial, toasted, dried fruit & nuts",
@@ -10168,9 +9892,7 @@
         "amount": 1,
         "base_amount": 2.1
       }
-    ],
-    "serving_grams": 2.1,
-    "serving_desc": "1 corn cake"
+    ]
   },
   {
     "name": "Biscuit, savoury, corn cake, multigrain",
@@ -10185,9 +9907,7 @@
         "amount": 1,
         "base_amount": 2.1
       }
-    ],
-    "serving_grams": 2.1,
-    "serving_desc": "1 corn cake"
+    ]
   },
   {
     "name": "Biscuit, savoury, rice cake, plain",
@@ -10208,8 +9928,8 @@
         "base_amount": 24.0
       }
     ],
-    "serving_grams": 2.1,
-    "serving_desc": "1 rice cake"
+    "serving_grams": 24.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Biscuit, savoury, rice cake, flavoured",
@@ -10230,8 +9950,8 @@
         "base_amount": 2.1
       }
     ],
-    "serving_grams": 2.1,
-    "serving_desc": "1 rice cake"
+    "serving_grams": 25.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Biscuit, savoury, rice cracker, brown rice, all flavours",
@@ -10252,8 +9972,8 @@
         "base_amount": 2.3
       }
     ],
-    "serving_grams": 2.3,
-    "serving_desc": "1 biscuit/cracker"
+    "serving_grams": 13.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Biscuit, savoury, rice cracker, plain",
@@ -10274,8 +9994,8 @@
         "base_amount": 1.9
       }
     ],
-    "serving_grams": 1.9,
-    "serving_desc": "1 biscuit/cracker"
+    "serving_grams": 13.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Biscuit, savoury, rice cracker, added grains or seeds",
@@ -10296,8 +10016,8 @@
         "base_amount": 13.0
       }
     ],
-    "serving_grams": 1.9,
-    "serving_desc": "1 biscuit/cracker"
+    "serving_grams": 13.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Biscuit, savoury, rice cracker, vegetable flavours",
@@ -10318,8 +10038,8 @@
         "base_amount": 1.9
       }
     ],
-    "serving_grams": 1.9,
-    "serving_desc": "1 biscuit/cracker"
+    "serving_grams": 12.2,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Biscuit, savoury, rice cracker, other flavours",
@@ -10340,8 +10060,8 @@
         "base_amount": 13.0
       }
     ],
-    "serving_grams": 1.9,
-    "serving_desc": "1 biscuit/cracker"
+    "serving_grams": 13.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Biscuit, savoury, chip style",
@@ -10362,8 +10082,8 @@
         "base_amount": 150.0
       }
     ],
-    "serving_grams": 1.9,
-    "serving_desc": "1 biscuit/cracker"
+    "serving_grams": 150.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Biscuit, savoury, corn, crispbread, puffed & toasted",
@@ -10383,9 +10103,7 @@
         "amount": 1,
         "base_amount": 5.5
       }
-    ],
-    "serving_grams": 5.5,
-    "serving_desc": "1 crispbread"
+    ]
   },
   {
     "name": "Biscuit, savoury, rye, crispbread",
@@ -10405,9 +10123,7 @@
         "amount": 1,
         "base_amount": 150.0
       }
-    ],
-    "serving_grams": 10.0,
-    "serving_desc": "1 crispbread"
+    ]
   },
   {
     "name": "Biscuit, savoury, rye, crispbread, with added grains",
@@ -10427,9 +10143,7 @@
         "amount": 1,
         "base_amount": 250.0
       }
-    ],
-    "serving_grams": 11.0,
-    "serving_desc": "1 crispbread"
+    ]
   },
   {
     "name": "Biscuit, savoury, shortbread style, cheese flavour",
@@ -10466,9 +10180,7 @@
         "amount": 1,
         "base_amount": 125.0
       }
-    ],
-    "serving_grams": 6.3,
-    "serving_desc": "1 crispbread"
+    ]
   },
   {
     "name": "Biscuit, savoury, wheat, crispbread, puffed & toasted, reduced fat",
@@ -10488,9 +10200,7 @@
         "amount": 1,
         "base_amount": 125.0
       }
-    ],
-    "serving_grams": 6.3,
-    "serving_desc": "1 crispbread"
+    ]
   },
   {
     "name": "Biscuit, savoury, wheat, flaky cracker style",
@@ -10510,9 +10220,7 @@
         "amount": 1,
         "base_amount": 250.0
       }
-    ],
-    "serving_grams": 8.5,
-    "serving_desc": "1 biscuit/cracker"
+    ]
   },
   {
     "name": "Biscuit, savoury, wheat, flatbread style",
@@ -10550,8 +10258,8 @@
         "base_amount": 25.0
       }
     ],
-    "serving_grams": 2.5,
-    "serving_desc": "1 biscuit/cracker"
+    "serving_grams": 25.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Biscuit, savoury, wheat, plain cracker style",
@@ -10572,8 +10280,8 @@
         "base_amount": 1.7
       }
     ],
-    "serving_grams": 1.7,
-    "serving_desc": "1 biscuit/cracker"
+    "serving_grams": 11.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Biscuit, savoury, wheat, plain cracker style, reduced fat",
@@ -10594,8 +10302,8 @@
         "base_amount": 11.0
       }
     ],
-    "serving_grams": 1.7,
-    "serving_desc": "1 biscuit/cracker"
+    "serving_grams": 11.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Biscuit, savoury, wheat, Salada style",
@@ -10615,9 +10323,7 @@
         "amount": 1,
         "base_amount": 250.0
       }
-    ],
-    "serving_grams": 6.3,
-    "serving_desc": "1 biscuit/cracker"
+    ]
   },
   {
     "name": "Biscuit, savoury, wheat, Salada style, reduced fat",
@@ -10654,9 +10360,7 @@
         "amount": 1,
         "base_amount": 300.0
       }
-    ],
-    "serving_grams": 6.3,
-    "serving_desc": "1 biscuit/cracker"
+    ]
   },
   {
     "name": "Biscuit, savoury, wheat, stick, salted",
@@ -10676,9 +10380,7 @@
         "amount": 1,
         "base_amount": 125.0
       }
-    ],
-    "serving_grams": 7.0,
-    "serving_desc": "1 biscuit/cracker"
+    ]
   },
   {
     "name": "Biscuit, savoury, wheat, wafer style",
@@ -10699,8 +10401,8 @@
         "base_amount": 100.0
       }
     ],
-    "serving_grams": 1.8,
-    "serving_desc": "1 biscuit/cracker"
+    "serving_grams": 100.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Biscuit, savoury, wheat, water cracker style",
@@ -10721,8 +10423,8 @@
         "base_amount": 3.1
       }
     ],
-    "serving_grams": 3.1,
-    "serving_desc": "1 biscuit/cracker"
+    "serving_grams": 12.4,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Biscuit, savoury, wheat, with nuts or seeds",
@@ -10742,9 +10444,7 @@
         "amount": 1,
         "base_amount": 6.4
       }
-    ],
-    "serving_grams": 6.4,
-    "serving_desc": "1 biscuit/cracker"
+    ]
   },
   {
     "name": "Biscuit, savoury, wheat, plain, not further defined",
@@ -10759,9 +10459,7 @@
         "amount": 1,
         "base_amount": 1.7
       }
-    ],
-    "serving_grams": 1.7,
-    "serving_desc": "1 biscuit/cracker"
+    ]
   },
   {
     "name": "Biscuit, savoury, wholewheat",
@@ -10781,9 +10479,7 @@
         "amount": 1,
         "base_amount": 6.3
       }
-    ],
-    "serving_grams": 6.3,
-    "serving_desc": "1 biscuit/cracker"
+    ]
   },
   {
     "name": "Biscuit, savoury, wholewheat, added grains",
@@ -10804,8 +10500,8 @@
         "base_amount": 130.0
       }
     ],
-    "serving_grams": 3.3,
-    "serving_desc": "1 biscuit/cracker"
+    "serving_grams": 130.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Biscuit, savoury, wholewheat, crispbread",
@@ -10830,9 +10526,7 @@
         "amount": 1,
         "base_amount": 12.2
       }
-    ],
-    "serving_grams": 2.5,
-    "serving_desc": "1 biscuit/cracker"
+    ]
   },
   {
     "name": "Biscuit, savoury, wholewheat & rye, crispbread, puffed",
@@ -10852,9 +10546,7 @@
         "amount": 1,
         "base_amount": 125.0
       }
-    ],
-    "serving_grams": 5.7,
-    "serving_desc": "1 biscuit/cracker"
+    ]
   },
   {
     "name": "Biscuit, savoury, from nuts & seeds (without grains/flour)",
@@ -10875,8 +10567,8 @@
         "base_amount": 80.0
       }
     ],
-    "serving_grams": 1.9,
-    "serving_desc": "1 biscuit/cracker"
+    "serving_grams": 80.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Snack pack, savoury, wheat biscuit with cheese",
@@ -10959,9 +10651,7 @@
         "amount": 1,
         "base_amount": 2.9
       }
-    ],
-    "serving_grams": 2.9,
-    "serving_desc": "1 biscuit"
+    ]
   },
   {
     "name": "Biscuit, sweet, biscuit base, caramel or mint filling, chocolate-coated, commercial",
@@ -10981,9 +10671,7 @@
         "amount": 1,
         "base_amount": 5.0
       }
-    ],
-    "serving_grams": 5.0,
-    "serving_desc": "1 pod"
+    ]
   },
   {
     "name": "Biscuit, sweet, breakfast, commercial",
@@ -11004,8 +10692,8 @@
         "base_amount": 24.2
       }
     ],
-    "serving_grams": 2.9,
-    "serving_desc": "1 biscuit"
+    "serving_grams": 24.2,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Biscuit, sweet, chocolate chip, commercial",
@@ -11026,8 +10714,8 @@
         "base_amount": 24.2
       }
     ],
-    "serving_grams": 2.5,
-    "serving_desc": "1 biscuit"
+    "serving_grams": 24.2,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Biscuit, sweet, chocolate chip, homemade",
@@ -11065,8 +10753,8 @@
         "base_amount": 2.0
       }
     ],
-    "serving_grams": 2.0,
-    "serving_desc": "1 biscuit"
+    "serving_grams": 24.2,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Biscuit, sweet, chocolate flavoured, homemade",
@@ -11121,8 +10809,8 @@
         "base_amount": 30.0
       }
     ],
-    "serving_grams": 3.0,
-    "serving_desc": "1 biscuit"
+    "serving_grams": 30.0,
+    "serving_desc": "1 ginger bread"
   },
   {
     "name": "Biscuit, sweet, gingerbread, homemade, uniced",
@@ -11154,9 +10842,7 @@
         "amount": 1,
         "base_amount": 2.9
       }
-    ],
-    "serving_grams": 2.9,
-    "serving_desc": "1 biscuit"
+    ]
   },
   {
     "name": "Biscuit, sweet, gluten free, non-chocolate flavours, commercial",
@@ -11171,9 +10857,7 @@
         "amount": 1,
         "base_amount": 2.9
       }
-    ],
-    "serving_grams": 2.9,
-    "serving_desc": "1 biscuit"
+    ]
   },
   {
     "name": "Biscuit, sweet, gluten free, sandwich, cream filling, commercial",
@@ -11188,9 +10872,7 @@
         "amount": 1,
         "base_amount": 2.9
       }
-    ],
-    "serving_grams": 2.9,
-    "serving_desc": "1 biscuit"
+    ]
   },
   {
     "name": "Biscuit, sweet, gluten free, with dried fruit, commercial",
@@ -11205,9 +10887,7 @@
         "amount": 1,
         "base_amount": 2.9
       }
-    ],
-    "serving_grams": 2.9,
-    "serving_desc": "1 biscuit"
+    ]
   },
   {
     "name": "Biscuit, sweet, macaron (almond based), filled",
@@ -11256,9 +10936,7 @@
         "amount": 1,
         "base_amount": 2.9
       }
-    ],
-    "serving_grams": 2.9,
-    "serving_desc": "1 biscuit"
+    ]
   },
   {
     "name": "Biscuit, sweet, plain, commercial",
@@ -11279,8 +10957,8 @@
         "base_amount": 24.2
       }
     ],
-    "serving_grams": 2.0,
-    "serving_desc": "1 biscuit"
+    "serving_grams": 24.2,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Biscuit, sweet, plain, homemade",
@@ -11317,9 +10995,7 @@
         "amount": 1,
         "base_amount": 24.2
       }
-    ],
-    "serving_grams": 6.7,
-    "serving_desc": "1 biscuit"
+    ]
   },
   {
     "name": "Biscuit, sweet, plain, sponge finger, commercial",
@@ -11357,8 +11033,8 @@
         "base_amount": 2.0
       }
     ],
-    "serving_grams": 2.0,
-    "serving_desc": "1 rice cake"
+    "serving_grams": 60.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Biscuit, sweet, sandwich, cream filling, commercial",
@@ -11379,8 +11055,8 @@
         "base_amount": 24.2
       }
     ],
-    "serving_grams": 2.9,
-    "serving_desc": "1 biscuit"
+    "serving_grams": 24.2,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Biscuit, sweet, sandwich, cream filling, chocolate-coated, commercial",
@@ -11418,8 +11094,8 @@
         "base_amount": 24.2
       }
     ],
-    "serving_grams": 2.1,
-    "serving_desc": "1 biscuit"
+    "serving_grams": 24.2,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Biscuit, sweet, sandwich, cream & jam filling, commercial",
@@ -11519,9 +11195,7 @@
         "amount": 1,
         "base_amount": 2.9
       }
-    ],
-    "serving_grams": 2.9,
-    "serving_desc": "1 biscuit"
+    ]
   },
   {
     "name": "Biscuit, sweet, shortbread style, homemade",
@@ -11553,9 +11227,7 @@
         "amount": 1,
         "base_amount": 4.0
       }
-    ],
-    "serving_grams": 4.0,
-    "serving_desc": "1 biscuit"
+    ]
   },
   {
     "name": "Biscuit, sweet, wheatmeal, commercial",
@@ -11570,9 +11242,7 @@
         "amount": 1,
         "base_amount": 2.9
       }
-    ],
-    "serving_grams": 2.9,
-    "serving_desc": "1 biscuit"
+    ]
   },
   {
     "name": "Biscuit, sweet, wheatmeal, chocolate-coated, commercial",
@@ -11587,9 +11257,7 @@
         "amount": 1,
         "base_amount": 2.9
       }
-    ],
-    "serving_grams": 2.9,
-    "serving_desc": "1 biscuit"
+    ]
   },
   {
     "name": "Biscuit, sweet, with dried fruit, commercial",
@@ -11604,9 +11272,7 @@
         "amount": 1,
         "base_amount": 2.9
       }
-    ],
-    "serving_grams": 2.9,
-    "serving_desc": "1 biscuit"
+    ]
   },
   {
     "name": "Biscuit, sweet, with jam, commercial",
@@ -11677,9 +11343,7 @@
         "amount": 1,
         "base_amount": 25.0
       }
-    ],
-    "serving_grams": 20.0,
-    "serving_desc": "1 biscuit"
+    ]
   },
   {
     "name": "Biscuit, sweet, with nuts, commercial",
@@ -11694,9 +11358,7 @@
         "amount": 1,
         "base_amount": 2.9
       }
-    ],
-    "serving_grams": 2.9,
-    "serving_desc": "1 biscuit"
+    ]
   },
   {
     "name": "Biscuit, sweet, with nuts, homemade",
@@ -11728,9 +11390,7 @@
         "amount": 1,
         "base_amount": 2.9
       }
-    ],
-    "serving_grams": 2.9,
-    "serving_desc": "1 biscuit"
+    ]
   },
   {
     "name": "Biscuit, sweet, reduced sugar, commercial",
@@ -11745,9 +11405,7 @@
         "amount": 1,
         "base_amount": 2.9
       }
-    ],
-    "serving_grams": 2.9,
-    "serving_desc": "1 biscuit"
+    ]
   },
   {
     "name": "Breakfast pastry, sweet filling, commercial",
@@ -11787,9 +11445,7 @@
         "amount": 1,
         "base_amount": 1.3
       }
-    ],
-    "serving_grams": 1.3,
-    "serving_desc": "1 cone"
+    ]
   },
   {
     "name": "Cone, waffle style, for ice cream",
@@ -11804,9 +11460,7 @@
         "amount": 1,
         "base_amount": 4.4
       }
-    ],
-    "serving_grams": 4.4,
-    "serving_desc": "1 cone"
+    ]
   },
   {
     "name": "Brownie, commercial",
@@ -11877,9 +11531,7 @@
         "amount": 1,
         "base_amount": 100.0
       }
-    ],
-    "serving_grams": 25.0,
-    "serving_desc": "1 cupcake"
+    ]
   },
   {
     "name": "Cake or bread, banana, homemade, uniced",
@@ -11899,9 +11551,7 @@
         "amount": 1,
         "base_amount": 100.0
       }
-    ],
-    "serving_grams": 20.0,
-    "serving_desc": "1 cupcake"
+    ]
   },
   {
     "name": "Cake or bread, banana, homemade, iced",
@@ -12008,7 +11658,7 @@
       }
     ],
     "serving_grams": 110.0,
-    "serving_desc": "1 slice"
+    "serving_desc": "1 cake"
   },
   {
     "name": "Cake, cheesecake, biscuit base, fruit flavoured, commercial",
@@ -12028,9 +11678,7 @@
         "amount": 1,
         "base_amount": 110.0
       }
-    ],
-    "serving_grams": 110.0,
-    "serving_desc": "1 cake"
+    ]
   },
   {
     "name": "Cake, cheesecake, biscuit base, fruit flavoured, homemade",
@@ -12050,9 +11698,7 @@
         "amount": 1,
         "base_amount": 110.0
       }
-    ],
-    "serving_grams": 110.0,
-    "serving_desc": "1 cake"
+    ]
   },
   {
     "name": "Cake, cheesecake, biscuit base, plain, commercial",
@@ -12072,9 +11718,7 @@
         "amount": 1,
         "base_amount": 110.0
       }
-    ],
-    "serving_grams": 110.0,
-    "serving_desc": "1 cake"
+    ]
   },
   {
     "name": "Cake, cheesecake, biscuit base, plain, homemade",
@@ -12094,9 +11738,7 @@
         "amount": 1,
         "base_amount": 110.0
       }
-    ],
-    "serving_grams": 110.0,
-    "serving_desc": "1 cake"
+    ]
   },
   {
     "name": "Cake, chocolate, commercial, uniced",
@@ -12750,9 +12392,7 @@
         "amount": 1,
         "base_amount": 22.0
       }
-    ],
-    "serving_grams": 20.0,
-    "serving_desc": "1 cupcake"
+    ]
   },
   {
     "name": "Cake, reduced sugar, commercial",
@@ -12784,9 +12424,7 @@
         "amount": 1,
         "base_amount": 21.2
       }
-    ],
-    "serving_grams": 21.2,
-    "serving_desc": "1 tablespoon"
+    ]
   },
   {
     "name": "Crepe or pancake, buckwheat flour",
@@ -12806,9 +12444,7 @@
         "amount": 1,
         "base_amount": 68.0
       }
-    ],
-    "serving_grams": 14.0,
-    "serving_desc": "1 blini"
+    ]
   },
   {
     "name": "Crepe or pancake, gluten free",
@@ -13023,9 +12659,7 @@
         "amount": 1,
         "base_amount": 19.0
       }
-    ],
-    "serving_grams": 19.0,
-    "serving_desc": "1 churros"
+    ]
   },
   {
     "name": "Doughnut (donut), unfilled, with icing",
@@ -14021,9 +13655,7 @@
         "amount": 1,
         "base_amount": 53.0
       }
-    ],
-    "serving_grams": 28.0,
-    "serving_desc": "1 croissant"
+    ]
   },
   {
     "name": "Croissant, with cheese",
@@ -14213,9 +13845,7 @@
         "amount": 1,
         "base_amount": 45.0
       }
-    ],
-    "serving_grams": 30.0,
-    "serving_desc": "1 dumpling"
+    ]
   },
   {
     "name": "Dumpling, savoury, seafood, steamed, boiled or microwaved",
@@ -14235,9 +13865,7 @@
         "amount": 1,
         "base_amount": 45.0
       }
-    ],
-    "serving_grams": 30.0,
-    "serving_desc": "1 dumpling"
+    ]
   },
   {
     "name": "Dumpling, savoury, vegetable, fried",
@@ -14291,9 +13919,7 @@
         "amount": 1,
         "base_amount": 40.0
       }
-    ],
-    "serving_grams": 40.0,
-    "serving_desc": "1 sausage roll"
+    ]
   },
   {
     "name": "Pasty, filled with vegetables & meat",
@@ -14315,7 +13941,7 @@
       }
     ],
     "serving_grams": 42.0,
-    "serving_desc": "1 pasty"
+    "serving_desc": "1 empanada"
   },
   {
     "name": "Pastry, filled with spinach & cheese",
@@ -14963,9 +14589,7 @@
         "amount": 1,
         "base_amount": 19.0
       }
-    ],
-    "serving_grams": 19.0,
-    "serving_desc": "1 profiterole"
+    ]
   },
   {
     "name": "Eclair or profiterole, filled, homemade, chocolate icing",
@@ -14985,9 +14609,7 @@
         "amount": 1,
         "base_amount": 120.0
       }
-    ],
-    "serving_grams": 19.0,
-    "serving_desc": "1 profiterole"
+    ]
   },
   {
     "name": "Fritter, fruit, all types",
@@ -15389,9 +15011,7 @@
         "amount": 1,
         "base_amount": 70.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Pizza, cheese, purchased frozen",
@@ -15411,9 +15031,7 @@
         "amount": 1,
         "base_amount": 70.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Pizza, cheese, homemade",
@@ -15433,9 +15051,7 @@
         "amount": 1,
         "base_amount": 70.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Pizza, chicken, takeaway",
@@ -15455,9 +15071,7 @@
         "amount": 1,
         "base_amount": 70.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Pizza, chicken, takeaway, thin base",
@@ -15477,9 +15091,7 @@
         "amount": 1,
         "base_amount": 70.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Pizza, chicken, homemade",
@@ -15499,9 +15111,7 @@
         "amount": 1,
         "base_amount": 70.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Pizza, ham/bacon, takeaway",
@@ -15529,9 +15139,7 @@
         "amount": 1,
         "base_amount": 70.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Pizza, ham/bacon, purchased frozen",
@@ -15556,9 +15164,7 @@
         "amount": 1,
         "base_amount": 70.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Pizza, ham/bacon, homemade",
@@ -15578,9 +15184,7 @@
         "amount": 1,
         "base_amount": 70.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Pizza, meat (e.g. meat lovers, pepperoni), takeaway",
@@ -15600,9 +15204,7 @@
         "amount": 1,
         "base_amount": 70.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Pizza, meat (e.g. meat lovers, pepperoni), takeaway, thin base",
@@ -15622,9 +15224,7 @@
         "amount": 1,
         "base_amount": 70.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Pizza, meat (e.g. meat lovers, pepperoni), purchased frozen",
@@ -15649,9 +15249,7 @@
         "amount": 1,
         "base_amount": 70.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Pizza, meat (e.g. meat lovers, pepperoni), homemade",
@@ -15671,9 +15269,7 @@
         "amount": 1,
         "base_amount": 70.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Pizza, meat & vegetable (e.g. supreme), takeaway",
@@ -15693,9 +15289,7 @@
         "amount": 1,
         "base_amount": 70.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Pizza, meat & vegetable (e.g. supreme), takeaway, thin base",
@@ -15715,9 +15309,7 @@
         "amount": 1,
         "base_amount": 70.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Pizza, meat & vegetable (e.g. supreme), purchased frozen",
@@ -15742,9 +15334,7 @@
         "amount": 1,
         "base_amount": 70.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Pizza, meat & vegetable (e.g. supreme), homemade",
@@ -15764,9 +15354,7 @@
         "amount": 1,
         "base_amount": 70.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Pizza, prawn/seafood, takeaway",
@@ -15786,9 +15374,7 @@
         "amount": 1,
         "base_amount": 70.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Pizza, prawn/seafood, takeaway, thin base",
@@ -15813,9 +15399,7 @@
         "amount": 1,
         "base_amount": 70.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Pizza, prawn/seafood, homemade",
@@ -15835,9 +15419,7 @@
         "amount": 1,
         "base_amount": 70.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Pizza, vegetable, takeaway",
@@ -15857,9 +15439,7 @@
         "amount": 1,
         "base_amount": 70.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Pizza, vegetable, takeaway, thin base",
@@ -15884,9 +15464,7 @@
         "amount": 1,
         "base_amount": 640.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Pizza, vegetable, purchased frozen",
@@ -15906,9 +15484,7 @@
         "amount": 1,
         "base_amount": 70.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Pizza, vegetable, homemade",
@@ -15928,9 +15504,7 @@
         "amount": 1,
         "base_amount": 70.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Pizza, vegetable, gluten free, commercial",
@@ -15950,9 +15524,7 @@
         "amount": 1,
         "base_amount": 70.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Pizza, vegetable, gluten free, homemade",
@@ -15972,9 +15544,7 @@
         "amount": 1,
         "base_amount": 70.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Pizza, vegan, commercial",
@@ -15994,9 +15564,7 @@
         "amount": 1,
         "base_amount": 70.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Pizza, vegan, homemade",
@@ -16016,9 +15584,7 @@
         "amount": 1,
         "base_amount": 70.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Bacon & egg roll",
@@ -16344,9 +15910,7 @@
         "amount": 1,
         "base_amount": 70.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 slider"
+    ]
   },
   {
     "name": "Chicken wrap, chicken breast, with salad, fast food chain",
@@ -16468,9 +16032,7 @@
         "amount": 1,
         "base_amount": 70.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 slider"
+    ]
   },
   {
     "name": "Hamburger, beef patty, with pickles, fast food chain",
@@ -16711,9 +16273,7 @@
         "amount": 1,
         "base_amount": 70.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 slider"
+    ]
   },
   {
     "name": "Hamburger, lamb/goat patty or fillet",
@@ -16750,9 +16310,7 @@
         "amount": 1,
         "base_amount": 70.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 slider"
+    ]
   },
   {
     "name": "Hot dog, bread roll, frankfurt",
@@ -17554,9 +17112,7 @@
         "amount": 1,
         "base_amount": 300.0
       }
-    ],
-    "serving_grams": 100.0,
-    "serving_desc": "1 wrap"
+    ]
   },
   {
     "name": "Wrap, salad, homemade",
@@ -17576,9 +17132,7 @@
         "amount": 1,
         "base_amount": 300.0
       }
-    ],
-    "serving_grams": 100.0,
-    "serving_desc": "1 wrap"
+    ]
   },
   {
     "name": "Burrito bowl",
@@ -17834,9 +17388,7 @@
         "amount": 1,
         "base_amount": 104.0
       }
-    ],
-    "serving_grams": 33.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Sushi, california roll",
@@ -17856,9 +17408,7 @@
         "amount": 1,
         "base_amount": 33.0
       }
-    ],
-    "serving_grams": 33.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Sushi, chicken",
@@ -17878,9 +17428,7 @@
         "amount": 1,
         "base_amount": 33.0
       }
-    ],
-    "serving_grams": 33.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Sushi, fish",
@@ -17900,9 +17448,7 @@
         "amount": 1,
         "base_amount": 33.0
       }
-    ],
-    "serving_grams": 33.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Sushi, fried bean curd (inari)",
@@ -17922,9 +17468,7 @@
         "amount": 1,
         "base_amount": 33.0
       }
-    ],
-    "serving_grams": 33.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Sushi, prawn & other seafood",
@@ -17944,9 +17488,7 @@
         "amount": 1,
         "base_amount": 104.0
       }
-    ],
-    "serving_grams": 33.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Sushi, salmon",
@@ -17966,9 +17508,7 @@
         "amount": 1,
         "base_amount": 104.0
       }
-    ],
-    "serving_grams": 33.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Sushi, tuna",
@@ -17988,9 +17528,7 @@
         "amount": 1,
         "base_amount": 33.0
       }
-    ],
-    "serving_grams": 33.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Sushi, vegetable",
@@ -18010,9 +17548,7 @@
         "amount": 1,
         "base_amount": 33.0
       }
-    ],
-    "serving_grams": 33.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Sushi, nigiri or aburi, fish",
@@ -18977,9 +18513,7 @@
         "amount": 1,
         "base_amount": 19.0
       }
-    ],
-    "serving_grams": 19.0,
-    "serving_desc": "1 tablespoon"
+    ]
   },
   {
     "name": "Butter, not further defined",
@@ -19016,9 +18550,7 @@
         "amount": 1,
         "base_amount": 17.0
       }
-    ],
-    "serving_grams": 17.0,
-    "serving_desc": "1 tablespoon"
+    ]
   },
   {
     "name": "Dairy blend",
@@ -19795,9 +19327,7 @@
         "amount": 1,
         "base_amount": 4.0
       }
-    ],
-    "serving_grams": 4.0,
-    "serving_desc": "1 anchovy"
+    ]
   },
   {
     "name": "Barramundi, raw",
@@ -19851,9 +19381,7 @@
         "amount": 1,
         "base_amount": 66.0
       }
-    ],
-    "serving_grams": 66.0,
-    "serving_desc": "1 fillet"
+    ]
   },
   {
     "name": "Barramundi, boiled, microwaved, steamed or poached",
@@ -19873,9 +19401,7 @@
         "amount": 1,
         "base_amount": 76.0
       }
-    ],
-    "serving_grams": 76.0,
-    "serving_desc": "1 fillet"
+    ]
   },
   {
     "name": "Bassa (basa), raw",
@@ -20328,9 +19854,7 @@
         "amount": 1,
         "base_amount": 55.0
       }
-    ],
-    "serving_grams": 55.0,
-    "serving_desc": "1 fillet"
+    ]
   },
   {
     "name": "Mullet, raw",
@@ -20469,9 +19993,7 @@
         "amount": 1,
         "base_amount": 98.0
       }
-    ],
-    "serving_grams": 98.0,
-    "serving_desc": "1 fillet"
+    ]
   },
   {
     "name": "Salmon, baked, roasted, fried, grilled, BBQ'd or deep fried, added fat",
@@ -20491,9 +20013,7 @@
         "amount": 1,
         "base_amount": 132.0
       }
-    ],
-    "serving_grams": 98.0,
-    "serving_desc": "1 fillet"
+    ]
   },
   {
     "name": "Salmon, boiled, microwaved, steamed or poached",
@@ -20513,9 +20033,7 @@
         "amount": 1,
         "base_amount": 123.0
       }
-    ],
-    "serving_grams": 99.0,
-    "serving_desc": "1 fillet"
+    ]
   },
   {
     "name": "Salmon, coated, baked, roasted, fried, grilled or BBQ'd, no added fat",
@@ -20586,9 +20104,7 @@
         "amount": 1,
         "base_amount": 25.0
       }
-    ],
-    "serving_grams": 25.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Salmon, pink, unflavoured, canned, drained",
@@ -20727,9 +20243,7 @@
         "amount": 1,
         "base_amount": 81.0
       }
-    ],
-    "serving_grams": 15.0,
-    "serving_desc": "1 fillet"
+    ]
   },
   {
     "name": "Sardine, canned in oil, drained",
@@ -20749,9 +20263,7 @@
         "amount": 1,
         "base_amount": 15.0
       }
-    ],
-    "serving_grams": 15.0,
-    "serving_desc": "1 sardine"
+    ]
   },
   {
     "name": "Sardine, canned in oil, undrained",
@@ -20771,9 +20283,7 @@
         "amount": 1,
         "base_amount": 125.0
       }
-    ],
-    "serving_grams": 15.0,
-    "serving_desc": "1 sardine"
+    ]
   },
   {
     "name": "Sardine, canned in tomato sauce, undrained",
@@ -20793,9 +20303,7 @@
         "amount": 1,
         "base_amount": 15.0
       }
-    ],
-    "serving_grams": 15.0,
-    "serving_desc": "1 sardine"
+    ]
   },
   {
     "name": "Sardine, canned in water, drained",
@@ -20815,9 +20323,7 @@
         "amount": 1,
         "base_amount": 15.0
       }
-    ],
-    "serving_grams": 15.0,
-    "serving_desc": "1 sardine"
+    ]
   },
   {
     "name": "Shark (flake), raw",
@@ -20905,9 +20411,7 @@
         "amount": 1,
         "base_amount": 22.0
       }
-    ],
-    "serving_grams": 22.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Silver perch, raw",
@@ -21227,9 +20731,7 @@
         "amount": 1,
         "base_amount": 2.0
       }
-    ],
-    "serving_grams": 2.0,
-    "serving_desc": "1 fish"
+    ]
   },
   {
     "name": "Whiting, raw",
@@ -21317,9 +20819,7 @@
         "amount": 1,
         "base_amount": 60.0
       }
-    ],
-    "serving_grams": 60.0,
-    "serving_desc": "1 fillet"
+    ]
   },
   {
     "name": "Fish, white flesh, baked, roasted, fried, grilled, BBQ'd or deep fried, added fat",
@@ -21356,9 +20856,7 @@
         "amount": 1,
         "base_amount": 71.0
       }
-    ],
-    "serving_grams": 71.0,
-    "serving_desc": "1 fillet"
+    ]
   },
   {
     "name": "Fish, white flesh, coated, cooked, added fat",
@@ -21378,9 +20876,7 @@
         "amount": 1,
         "base_amount": 62.0
       }
-    ],
-    "serving_grams": 62.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Fish, white flesh, battered, purchased frozen, cooked",
@@ -21434,9 +20930,7 @@
         "amount": 1,
         "base_amount": 62.0
       }
-    ],
-    "serving_grams": 62.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Fish, white flesh, crumbed, takeaway outlet, deep fried",
@@ -21456,9 +20950,7 @@
         "amount": 1,
         "base_amount": 22.0
       }
-    ],
-    "serving_grams": 22.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Fish (including eel & trout), smoked",
@@ -21572,8 +21064,8 @@
         "base_amount": 45.0
       }
     ],
-    "serving_grams": 4.0,
-    "serving_desc": "1 anchovy"
+    "serving_grams": 45.0,
+    "serving_desc": "1 can"
   },
   {
     "name": "Cod, Atlantic, dried, salted",
@@ -21609,9 +21101,7 @@
         "amount": 1,
         "base_amount": 50.0
       }
-    ],
-    "serving_grams": 50.0,
-    "serving_desc": "1 crab claw"
+    ]
   },
   {
     "name": "Crab, flesh, purchased cooked",
@@ -21631,9 +21121,7 @@
         "amount": 1,
         "base_amount": 106.0
       }
-    ],
-    "serving_grams": 50.0,
-    "serving_desc": "1 crab claw"
+    ]
   },
   {
     "name": "Crab, flesh, coated, fried or deep fried, added fat",
@@ -21687,9 +21175,7 @@
         "amount": 1,
         "base_amount": 15.0
       }
-    ],
-    "serving_grams": 15.0,
-    "serving_desc": "1 fillet"
+    ]
   },
   {
     "name": "Jellyfish, coated, cooked, added fat",
@@ -21739,9 +21225,7 @@
         "amount": 1,
         "base_amount": 35.0
       }
-    ],
-    "serving_grams": 13.0,
-    "serving_desc": "1 crayfish"
+    ]
   },
   {
     "name": "Lobster or crayfish, flesh, coated, cooked, added fat",
@@ -21773,9 +21257,7 @@
         "amount": 1,
         "base_amount": 2.0
       }
-    ],
-    "serving_grams": 2.0,
-    "serving_desc": "1 worm"
+    ]
   },
   {
     "name": "Moreton bay bug, flesh, raw",
@@ -21795,9 +21277,7 @@
         "amount": 1,
         "base_amount": 36.0
       }
-    ],
-    "serving_grams": 36.0,
-    "serving_desc": "1 balmain bay bug"
+    ]
   },
   {
     "name": "Moreton bay bug, flesh, cooked",
@@ -21817,9 +21297,7 @@
         "amount": 1,
         "base_amount": 29.0
       }
-    ],
-    "serving_grams": 29.0,
-    "serving_desc": "1 balmain bay bug"
+    ]
   },
   {
     "name": "Mussel, cooked",
@@ -21864,9 +21342,7 @@
         "amount": 1,
         "base_amount": 105.0
       }
-    ],
-    "serving_grams": 8.0,
-    "serving_desc": "1 mussel"
+    ]
   },
   {
     "name": "Octopus, raw",
@@ -21995,9 +21471,7 @@
         "amount": 1,
         "base_amount": 85.0
       }
-    ],
-    "serving_grams": 6.0,
-    "serving_desc": "1 oyster"
+    ]
   },
   {
     "name": "Periwinkle (sea snail)",
@@ -23114,9 +22588,7 @@
         "amount": 1,
         "base_amount": 60.0
       }
-    ],
-    "serving_grams": 60.0,
-    "serving_desc": "1 packet"
+    ]
   },
   {
     "name": "Apple, red skin, unpeeled, raw",
@@ -23136,9 +22608,7 @@
         "amount": 1,
         "base_amount": 60.0
       }
-    ],
-    "serving_grams": 60.0,
-    "serving_desc": "1 packet"
+    ]
   },
   {
     "name": "Apple, royal gala, unpeeled, raw",
@@ -23247,9 +22717,7 @@
         "amount": 1,
         "base_amount": 400.0
       }
-    ],
-    "serving_grams": 90.0,
-    "serving_desc": "1 pouch"
+    ]
   },
   {
     "name": "Apple, dried",
@@ -23270,8 +22738,8 @@
         "base_amount": 40.0
       }
     ],
-    "serving_grams": 3.5,
-    "serving_desc": "1 piece"
+    "serving_grams": 40.0,
+    "serving_desc": "1 box"
   },
   {
     "name": "Apricot, raw",
@@ -23330,9 +22798,7 @@
         "amount": 1,
         "base_amount": 410.0
       }
-    ],
-    "serving_grams": 6.1,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Apricot, canned in pear juice, drained",
@@ -23352,9 +22818,7 @@
         "amount": 1,
         "base_amount": 6.1
       }
-    ],
-    "serving_grams": 6.1,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Apricot, canned in pear juice, juice only",
@@ -23387,9 +22851,7 @@
         "amount": 1,
         "base_amount": 410.0
       }
-    ],
-    "serving_grams": 6.1,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Apricot, canned in syrup, drained",
@@ -23409,9 +22871,7 @@
         "amount": 1,
         "base_amount": 6.1
       }
-    ],
-    "serving_grams": 6.1,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Apricot, canned in syrup, syrup only",
@@ -23439,9 +22899,7 @@
         "amount": 1,
         "base_amount": 40.0
       }
-    ],
-    "serving_grams": 5.0,
-    "serving_desc": "1 apricot"
+    ]
   },
   {
     "name": "Babaco, peeled, raw",
@@ -23476,9 +22934,7 @@
         "amount": 1,
         "base_amount": 11.1
       }
-    ],
-    "serving_grams": 11.1,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Banana, lady finger or sugar, peeled, raw",
@@ -23515,9 +22971,7 @@
         "amount": 1,
         "base_amount": 10.3
       }
-    ],
-    "serving_grams": 10.3,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Banana, frozen",
@@ -23537,9 +22991,7 @@
         "amount": 1,
         "base_amount": 111.0
       }
-    ],
-    "serving_grams": 10.3,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Banana chip",
@@ -23554,9 +23006,7 @@
         "amount": 1,
         "base_amount": 1.4
       }
-    ],
-    "serving_grams": 1.4,
-    "serving_desc": "1 banana chip"
+    ]
   },
   {
     "name": "Blackberry, raw",
@@ -23576,9 +23026,7 @@
         "amount": 1,
         "base_amount": 125.0
       }
-    ],
-    "serving_grams": 5.0,
-    "serving_desc": "1 berry"
+    ]
   },
   {
     "name": "Blackberry, frozen",
@@ -23616,8 +23064,8 @@
         "base_amount": 125.0
       }
     ],
-    "serving_grams": 1.2,
-    "serving_desc": "1 berry"
+    "serving_grams": 125.0,
+    "serving_desc": "1 punnet"
   },
   {
     "name": "Blueberry, frozen",
@@ -23632,9 +23080,7 @@
         "amount": 1,
         "base_amount": 1.2
       }
-    ],
-    "serving_grams": 1.2,
-    "serving_desc": "1 berry"
+    ]
   },
   {
     "name": "Blueberry, canned in syrup, drained",
@@ -23655,8 +23101,8 @@
         "base_amount": 415.0
       }
     ],
-    "serving_grams": 1.2,
-    "serving_desc": "1 berry"
+    "serving_grams": 415.0,
+    "serving_desc": "1 can"
   },
   {
     "name": "Blueberry, dried, sugar sweetened",
@@ -23742,9 +23188,7 @@
         "amount": 1,
         "base_amount": 415.0
       }
-    ],
-    "serving_grams": 6.0,
-    "serving_desc": "1 cherry"
+    ]
   },
   {
     "name": "Cherry, dried",
@@ -23759,9 +23203,7 @@
         "amount": 1,
         "base_amount": 2.0
       }
-    ],
-    "serving_grams": 2.0,
-    "serving_desc": "1 cherry"
+    ]
   },
   {
     "name": "Cherry, glace or maraschino",
@@ -23776,9 +23218,7 @@
         "amount": 1,
         "base_amount": 4.0
       }
-    ],
-    "serving_grams": 4.0,
-    "serving_desc": "1 cherry"
+    ]
   },
   {
     "name": "Cumquat (kumquat), raw",
@@ -23810,9 +23250,7 @@
         "amount": 1,
         "base_amount": 1.2
       }
-    ],
-    "serving_grams": 1.2,
-    "serving_desc": "1 berry"
+    ]
   },
   {
     "name": "Cranberry, dried, sugar sweetened",
@@ -23833,8 +23271,8 @@
         "base_amount": 40.0
       }
     ],
-    "serving_grams": 1.4,
-    "serving_desc": "1 berry"
+    "serving_grams": 40.0,
+    "serving_desc": "1 box"
   },
   {
     "name": "Cranberry, dried, sugar & intense sweetened",
@@ -23849,9 +23287,7 @@
         "amount": 1,
         "base_amount": 1.4
       }
-    ],
-    "serving_grams": 1.4,
-    "serving_desc": "1 berry"
+    ]
   },
   {
     "name": "Currant, fresh",
@@ -23866,9 +23302,7 @@
         "amount": 1,
         "base_amount": 1.2
       }
-    ],
-    "serving_grams": 1.2,
-    "serving_desc": "1 currant"
+    ]
   },
   {
     "name": "Currant, dried",
@@ -24044,9 +23478,7 @@
         "amount": 1,
         "base_amount": 9.0
       }
-    ],
-    "serving_grams": 9.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Fruit salad, fresh, commercial",
@@ -24145,9 +23577,7 @@
         "amount": 1,
         "base_amount": 3.0
       }
-    ],
-    "serving_grams": 3.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Goji berry, dried",
@@ -24162,9 +23592,7 @@
         "amount": 1,
         "base_amount": 1.4
       }
-    ],
-    "serving_grams": 1.4,
-    "serving_desc": "1 berry"
+    ]
   },
   {
     "name": "Grape, black muscatel (muscat), raw",
@@ -24179,9 +23607,7 @@
         "amount": 1,
         "base_amount": 3.9
       }
-    ],
-    "serving_grams": 3.9,
-    "serving_desc": "1 grape"
+    ]
   },
   {
     "name": "Grape, green, seedless, raw",
@@ -24201,9 +23627,7 @@
         "amount": 1,
         "base_amount": 5.0
       }
-    ],
-    "serving_grams": 5.0,
-    "serving_desc": "1 grape"
+    ]
   },
   {
     "name": "Grape, red, raw",
@@ -24224,8 +23648,8 @@
         "base_amount": 4.4
       }
     ],
-    "serving_grams": 4.4,
-    "serving_desc": "1 grape"
+    "serving_grams": 75.0,
+    "serving_desc": "1 container"
   },
   {
     "name": "Grape, raw",
@@ -24246,8 +23670,8 @@
         "base_amount": 4.5
       }
     ],
-    "serving_grams": 4.5,
-    "serving_desc": "1 grape"
+    "serving_grams": 75.0,
+    "serving_desc": "1 container"
   },
   {
     "name": "Grapefruit, peeled, raw",
@@ -24367,9 +23791,7 @@
         "amount": 1,
         "base_amount": 16.5
       }
-    ],
-    "serving_grams": 16.5,
-    "serving_desc": "1 slice or segment"
+    ]
   },
   {
     "name": "Lemon, preserved",
@@ -24411,9 +23833,7 @@
         "amount": 1,
         "base_amount": 2.0
       }
-    ],
-    "serving_grams": 2.0,
-    "serving_desc": "1 lemon"
+    ]
   },
   {
     "name": "Lilly pilly",
@@ -24450,9 +23870,7 @@
         "amount": 1,
         "base_amount": 71.0
       }
-    ],
-    "serving_grams": 8.2,
-    "serving_desc": "1 slice or segment"
+    ]
   },
   {
     "name": "Lime, native, fruit",
@@ -24562,9 +23980,7 @@
         "amount": 1,
         "base_amount": 6.3
       }
-    ],
-    "serving_grams": 6.3,
-    "serving_desc": "1 slice or segment"
+    ]
   },
   {
     "name": "Mandarin, canned",
@@ -24584,9 +24000,7 @@
         "amount": 1,
         "base_amount": 310.0
       }
-    ],
-    "serving_grams": 6.3,
-    "serving_desc": "1 slice or segment"
+    ]
   },
   {
     "name": "Mango, peeled, raw",
@@ -24606,9 +24020,7 @@
         "amount": 1,
         "base_amount": 10.0
       }
-    ],
-    "serving_grams": 10.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Mango, peeled, frozen",
@@ -24662,9 +24074,7 @@
         "amount": 1,
         "base_amount": 425.0
       }
-    ],
-    "serving_grams": 25.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Mangosteen, peeled, raw",
@@ -24735,9 +24145,7 @@
         "amount": 1,
         "base_amount": 9.0
       }
-    ],
-    "serving_grams": 9.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Melon, watermelon, raw",
@@ -24767,9 +24175,7 @@
         "amount": 1,
         "base_amount": 336.0
       }
-    ],
-    "serving_grams": 9.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Melon, watermelon, frozen",
@@ -24801,9 +24207,7 @@
         "amount": 1,
         "base_amount": 4.4
       }
-    ],
-    "serving_grams": 4.4,
-    "serving_desc": "1 berry"
+    ]
   },
   {
     "name": "Mixed berry, frozen",
@@ -24818,9 +24222,7 @@
         "amount": 1,
         "base_amount": 4.4
       }
-    ],
-    "serving_grams": 4.4,
-    "serving_desc": "1 berry"
+    ]
   },
   {
     "name": "Mixed berry, stewed, sugar sweetened, no added fat",
@@ -24835,9 +24237,7 @@
         "amount": 1,
         "base_amount": 4.2
       }
-    ],
-    "serving_grams": 4.2,
-    "serving_desc": "1 berry"
+    ]
   },
   {
     "name": "Mixed berry, canned in syrup, drained",
@@ -24852,9 +24252,7 @@
         "amount": 1,
         "base_amount": 4.4
       }
-    ],
-    "serving_grams": 4.4,
-    "serving_desc": "1 berry"
+    ]
   },
   {
     "name": "Mixed berry, dried",
@@ -24869,9 +24267,7 @@
         "amount": 1,
         "base_amount": 1.4
       }
-    ],
-    "serving_grams": 1.4,
-    "serving_desc": "1 berry"
+    ]
   },
   {
     "name": "Mixed fruit, dried",
@@ -24891,9 +24287,7 @@
         "amount": 1,
         "base_amount": 6.4
       }
-    ],
-    "serving_grams": 6.4,
-    "serving_desc": "1 fruit"
+    ]
   },
   {
     "name": "Mulberry, raw",
@@ -25005,9 +24399,7 @@
         "amount": 1,
         "base_amount": 18.0
       }
-    ],
-    "serving_grams": 18.0,
-    "serving_desc": "1 slice or segment"
+    ]
   },
   {
     "name": "Passionfruit, raw",
@@ -25107,9 +24499,7 @@
         "amount": 1,
         "base_amount": 18.0
       }
-    ],
-    "serving_grams": 18.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Peach, yellow, unpeeled, raw",
@@ -25129,9 +24519,7 @@
         "amount": 1,
         "base_amount": 18.0
       }
-    ],
-    "serving_grams": 18.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Peach, stewed, sugar sweetened, no added fat",
@@ -25178,9 +24566,7 @@
         "amount": 1,
         "base_amount": 405.0
       }
-    ],
-    "serving_grams": 18.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Peach, canned in pear juice, drained",
@@ -25205,9 +24591,7 @@
         "amount": 1,
         "base_amount": 54.0
       }
-    ],
-    "serving_grams": 18.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Peach, canned in pear juice, juice only",
@@ -25245,9 +24629,7 @@
         "amount": 1,
         "base_amount": 405.0
       }
-    ],
-    "serving_grams": 18.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Peach, canned in syrup, drained",
@@ -25272,9 +24654,7 @@
         "amount": 1,
         "base_amount": 54.0
       }
-    ],
-    "serving_grams": 18.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Peach, canned in syrup, syrup only",
@@ -25307,9 +24687,7 @@
         "amount": 1,
         "base_amount": 54.0
       }
-    ],
-    "serving_grams": 18.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Peach, dried",
@@ -25448,9 +24826,7 @@
         "amount": 1,
         "base_amount": 410.0
       }
-    ],
-    "serving_grams": 18.3,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Pear, canned in pear juice, drained",
@@ -25475,9 +24851,7 @@
         "amount": 1,
         "base_amount": 72.0
       }
-    ],
-    "serving_grams": 18.3,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Pear, canned in pear juice, juice only",
@@ -25510,9 +24884,7 @@
         "amount": 1,
         "base_amount": 18.3
       }
-    ],
-    "serving_grams": 18.3,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Pear, canned in syrup, drained",
@@ -25537,9 +24909,7 @@
         "amount": 1,
         "base_amount": 72.0
       }
-    ],
-    "serving_grams": 18.3,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Pear, canned in syrup, syrup only",
@@ -25572,9 +24942,7 @@
         "amount": 1,
         "base_amount": 18.3
       }
-    ],
-    "serving_grams": 18.3,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Pear, dried",
@@ -25633,9 +25001,7 @@
         "amount": 1,
         "base_amount": 30.0
       }
-    ],
-    "serving_grams": 30.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Pineapple, peeled, stewed, sugar sweetened, no added fat",
@@ -25699,9 +25065,7 @@
         "amount": 1,
         "base_amount": 226.0
       }
-    ],
-    "serving_grams": 5.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Pineapple, canned in pineapple juice, drained",
@@ -25726,9 +25090,7 @@
         "amount": 1,
         "base_amount": 40.0
       }
-    ],
-    "serving_grams": 5.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Pineapple, canned in pineapple juice, juice only",
@@ -25766,9 +25128,7 @@
         "amount": 1,
         "base_amount": 226.0
       }
-    ],
-    "serving_grams": 5.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Pineapple, canned in syrup, drained",
@@ -25793,9 +25153,7 @@
         "amount": 1,
         "base_amount": 5.0
       }
-    ],
-    "serving_grams": 5.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Pineapple, canned in syrup, syrup only",
@@ -25920,9 +25278,7 @@
         "amount": 1,
         "base_amount": 1.6
       }
-    ],
-    "serving_grams": 1.6,
-    "serving_desc": "1 plum"
+    ]
   },
   {
     "name": "Plum, davidson",
@@ -26005,9 +25361,7 @@
         "amount": 1,
         "base_amount": 4.5
       }
-    ],
-    "serving_grams": 4.5,
-    "serving_desc": "1 quandong"
+    ]
   },
   {
     "name": "Quince, peeled, raw",
@@ -26062,8 +25416,8 @@
         "base_amount": 1.4
       }
     ],
-    "serving_grams": 1.4,
-    "serving_desc": "1 raisin"
+    "serving_grams": 40.0,
+    "serving_desc": "1 box"
   },
   {
     "name": "Rambutan, raw",
@@ -26101,8 +25455,8 @@
         "base_amount": 125.0
       }
     ],
-    "serving_grams": 1.9,
-    "serving_desc": "1 berry"
+    "serving_grams": 125.0,
+    "serving_desc": "1 punnet"
   },
   {
     "name": "Raspberry, frozen",
@@ -26117,9 +25471,7 @@
         "amount": 1,
         "base_amount": 1.9
       }
-    ],
-    "serving_grams": 1.9,
-    "serving_desc": "1 berry"
+    ]
   },
   {
     "name": "Raspberry, canned in syrup, drained",
@@ -26140,8 +25492,8 @@
         "base_amount": 415.0
       }
     ],
-    "serving_grams": 1.9,
-    "serving_desc": "1 berry"
+    "serving_grams": 415.0,
+    "serving_desc": "1 can"
   },
   {
     "name": "Rhubarb, stalk, raw",
@@ -26223,9 +25575,7 @@
         "amount": 1,
         "base_amount": 250.0
       }
-    ],
-    "serving_grams": 8.0,
-    "serving_desc": "1 berry"
+    ]
   },
   {
     "name": "Strawberry, frozen",
@@ -26262,9 +25612,7 @@
         "amount": 1,
         "base_amount": 415.0
       }
-    ],
-    "serving_grams": 12.0,
-    "serving_desc": "1 berry"
+    ]
   },
   {
     "name": "Sultana",
@@ -26285,8 +25633,8 @@
         "base_amount": 1.4
       }
     ],
-    "serving_grams": 1.4,
-    "serving_desc": "1 sultana"
+    "serving_grams": 40.0,
+    "serving_desc": "1 box"
   },
   {
     "name": "Tamarillo, peeled, raw",
@@ -26357,9 +25705,7 @@
         "amount": 1,
         "base_amount": 18.0
       }
-    ],
-    "serving_grams": 18.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Wax jambu, raw",
@@ -26413,9 +25759,7 @@
         "amount": 1,
         "base_amount": 90.0
       }
-    ],
-    "serving_grams": 75.0,
-    "serving_desc": "1 tub"
+    ]
   },
   {
     "name": "Fruit, wild harvested, raw",
@@ -26440,9 +25784,7 @@
         "amount": 1,
         "base_amount": 138.0
       }
-    ],
-    "serving_grams": 1.2,
-    "serving_desc": "1 berry"
+    ]
   },
   {
     "name": "Acai bowl",
@@ -27281,9 +26623,7 @@
         "amount": 1,
         "base_amount": 154.0
       }
-    ],
-    "serving_grams": 92.9,
-    "serving_desc": "1 steak"
+    ]
   },
   {
     "name": "Beef, rib cutlet or roast, lean, cooked, added fat",
@@ -27303,9 +26643,7 @@
         "amount": 1,
         "base_amount": 92.9
       }
-    ],
-    "serving_grams": 92.9,
-    "serving_desc": "1 steak"
+    ]
   },
   {
     "name": "Beef, rib, marinated, cooked, added fat",
@@ -27649,9 +26987,7 @@
         "amount": 1,
         "base_amount": 37.0
       }
-    ],
-    "serving_grams": 25.0,
-    "serving_desc": "1 meatball"
+    ]
   },
   {
     "name": "Meatball or rissole, beef mince, homemade, raw",
@@ -27688,9 +27024,7 @@
         "amount": 1,
         "base_amount": 25.0
       }
-    ],
-    "serving_grams": 25.0,
-    "serving_desc": "1 meatball"
+    ]
   },
   {
     "name": "Meat, for use in pasta dishes",
@@ -28239,9 +27573,7 @@
         "amount": 1,
         "base_amount": 85.0
       }
-    ],
-    "serving_grams": 85.0,
-    "serving_desc": "1 steak"
+    ]
   },
   {
     "name": "Lamb, fillet, lean, baked, roasted, fried, grilled or BBQ'd, no added fat",
@@ -28261,9 +27593,7 @@
         "amount": 1,
         "base_amount": 72.0
       }
-    ],
-    "serving_grams": 72.0,
-    "serving_desc": "1 steak"
+    ]
   },
   {
     "name": "Lamb, frenched cutlet/rack, lean, raw",
@@ -28333,9 +27663,7 @@
         "amount": 1,
         "base_amount": 25.0
       }
-    ],
-    "serving_grams": 25.0,
-    "serving_desc": "1 meatball"
+    ]
   },
   {
     "name": "Lamb, rib, cooked",
@@ -28536,9 +27864,7 @@
         "amount": 1,
         "base_amount": 34.0
       }
-    ],
-    "serving_grams": 34.0,
-    "serving_desc": "1 meatball"
+    ]
   },
   {
     "name": "Meatball or rissole, lamb mince, homemade, cooked",
@@ -28558,9 +27884,7 @@
         "amount": 1,
         "base_amount": 23.0
       }
-    ],
-    "serving_grams": 23.0,
-    "serving_desc": "1 meatball"
+    ]
   },
   {
     "name": "Mutton, all cuts, separable fat, raw",
@@ -28843,9 +28167,7 @@
         "amount": 1,
         "base_amount": 50.0
       }
-    ],
-    "serving_grams": 7.4,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Pork, diced/stir-fry strips, raw",
@@ -29230,9 +28552,7 @@
         "amount": 1,
         "base_amount": 89.0
       }
-    ],
-    "serving_grams": 34.0,
-    "serving_desc": "1 meatball"
+    ]
   },
   {
     "name": "Meatball or rissole, pork mince, homemade, cooked",
@@ -29252,9 +28572,7 @@
         "amount": 1,
         "base_amount": 61.0
       }
-    ],
-    "serving_grams": 23.0,
-    "serving_desc": "1 meatball"
+    ]
   },
   {
     "name": "Bandicoot, cooked",
@@ -29354,9 +28672,7 @@
         "amount": 1,
         "base_amount": 1075.0
       }
-    ],
-    "serving_grams": 57.0,
-    "serving_desc": "1 wing"
+    ]
   },
   {
     "name": "Chicken, barbecued, without skin, commercial",
@@ -29391,9 +28707,7 @@
         "amount": 1,
         "base_amount": 967.0
       }
-    ],
-    "serving_grams": 34.0,
-    "serving_desc": "1 wing"
+    ]
   },
   {
     "name": "Chicken, breast, lean, raw",
@@ -29413,9 +28727,7 @@
         "amount": 1,
         "base_amount": 166.2
       }
-    ],
-    "serving_grams": 51.2,
-    "serving_desc": "1 tenderloin"
+    ]
   },
   {
     "name": "Chicken, breast, lean, baked, roasted, fried, grilled or BBQ'd, no added fat",
@@ -29435,9 +28747,7 @@
         "amount": 1,
         "base_amount": 133.0
       }
-    ],
-    "serving_grams": 41.0,
-    "serving_desc": "1 tenderloin"
+    ]
   },
   {
     "name": "Chicken, breast, lean, baked, roasted, fried, grilled or BBQ'd, added fat",
@@ -29457,9 +28767,7 @@
         "amount": 1,
         "base_amount": 133.0
       }
-    ],
-    "serving_grams": 41.0,
-    "serving_desc": "1 tenderloin"
+    ]
   },
   {
     "name": "Chicken, breast, lean, boiled, casseroled, microwaved, poached, steamed or stewed, no added fat",
@@ -29479,9 +28787,7 @@
         "amount": 1,
         "base_amount": 133.0
       }
-    ],
-    "serving_grams": 41.0,
-    "serving_desc": "1 tenderloin"
+    ]
   },
   {
     "name": "Chicken, breast, lean, smoked, no added fat",
@@ -29501,9 +28807,7 @@
         "amount": 1,
         "base_amount": 133.0
       }
-    ],
-    "serving_grams": 41.0,
-    "serving_desc": "1 tenderloin"
+    ]
   },
   {
     "name": "Chicken, breast, lean, skin & fat, raw",
@@ -29523,9 +28827,7 @@
         "amount": 1,
         "base_amount": 189.5
       }
-    ],
-    "serving_grams": 58.4,
-    "serving_desc": "1 tenderloin"
+    ]
   },
   {
     "name": "Chicken, breast, lean, skin & fat, baked, roasted, fried, grilled or BBQ'd, no added fat",
@@ -29545,9 +28847,7 @@
         "amount": 1,
         "base_amount": 151.6
       }
-    ],
-    "serving_grams": 46.7,
-    "serving_desc": "1 tenderloin"
+    ]
   },
   {
     "name": "Chicken, breast, breadcrumb coating, cooked",
@@ -29970,9 +29270,7 @@
         "amount": 1,
         "base_amount": 88.0
       }
-    ],
-    "serving_grams": 57.0,
-    "serving_desc": "1 wing"
+    ]
   },
   {
     "name": "Chicken, lean, raw",
@@ -30015,9 +29313,7 @@
         "amount": 1,
         "base_amount": 34.0
       }
-    ],
-    "serving_grams": 34.0,
-    "serving_desc": "1 wing"
+    ]
   },
   {
     "name": "Chicken, lean, boiled, casseroled, microwaved, poached, steamed or stewed, no added fat",
@@ -30052,9 +29348,7 @@
         "amount": 1,
         "base_amount": 70.0
       }
-    ],
-    "serving_grams": 54.0,
-    "serving_desc": "1 wing"
+    ]
   },
   {
     "name": "Chicken, lean, marinated, cooked",
@@ -30108,9 +29402,7 @@
         "amount": 1,
         "base_amount": 10.0
       }
-    ],
-    "serving_grams": 10.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Chicken, nugget, purchased frozen, cooked",
@@ -30147,9 +29439,7 @@
         "amount": 1,
         "base_amount": 18.0
       }
-    ],
-    "serving_grams": 18.0,
-    "serving_desc": "1 nugget"
+    ]
   },
   {
     "name": "Chicken, nugget, takeaway outlet, grilled",
@@ -30169,9 +29459,7 @@
         "amount": 1,
         "base_amount": 40.0
       }
-    ],
-    "serving_grams": 18.0,
-    "serving_desc": "1 nugget"
+    ]
   },
   {
     "name": "Chicken, piece, flesh, skin & fat, coated, takeaway outlet, deep fried",
@@ -30242,9 +29530,7 @@
         "amount": 1,
         "base_amount": 29.0
       }
-    ],
-    "serving_grams": 29.0,
-    "serving_desc": "1 meatball"
+    ]
   },
   {
     "name": "Meatball or rissole, chicken mince, homemade, raw",
@@ -30264,9 +29550,7 @@
         "amount": 1,
         "base_amount": 89.0
       }
-    ],
-    "serving_grams": 34.0,
-    "serving_desc": "1 meatball"
+    ]
   },
   {
     "name": "Meatball or rissole, chicken mince, homemade, cooked",
@@ -30286,9 +29570,7 @@
         "amount": 1,
         "base_amount": 65.0
       }
-    ],
-    "serving_grams": 25.0,
-    "serving_desc": "1 meatball"
+    ]
   },
   {
     "name": "Turkey, breast, lean, raw",
@@ -30387,9 +29669,7 @@
         "amount": 1,
         "base_amount": 25.0
       }
-    ],
-    "serving_grams": 25.0,
-    "serving_desc": "1 meatball"
+    ]
   },
   {
     "name": "Duck, skin & fat, raw",
@@ -30451,9 +29731,7 @@
         "amount": 1,
         "base_amount": 162.0
       }
-    ],
-    "serving_grams": 64.0,
-    "serving_desc": "1 wing"
+    ]
   },
   {
     "name": "Duck, lean, baked, roasted, fried, grilled or BBQ'd, no added fat",
@@ -30488,9 +29766,7 @@
         "amount": 1,
         "base_amount": 48.0
       }
-    ],
-    "serving_grams": 48.0,
-    "serving_desc": "1 wing"
+    ]
   },
   {
     "name": "Duck, lean, baked, roasted, fried, grilled or BBQ'd, added fat",
@@ -30525,9 +29801,7 @@
         "amount": 1,
         "base_amount": 48.0
       }
-    ],
-    "serving_grams": 48.0,
-    "serving_desc": "1 wing"
+    ]
   },
   {
     "name": "Duck, lean, skin & fat, raw",
@@ -30557,9 +29831,7 @@
         "amount": 1,
         "base_amount": 103.0
       }
-    ],
-    "serving_grams": 103.0,
-    "serving_desc": "1 wing"
+    ]
   },
   {
     "name": "Duck, lean, skin & fat, baked, roasted, fried, grilled or BBQ'd, no added fat",
@@ -30594,9 +29866,7 @@
         "amount": 1,
         "base_amount": 143.0
       }
-    ],
-    "serving_grams": 77.0,
-    "serving_desc": "1 wing"
+    ]
   },
   {
     "name": "Duck, lean, skin & fat, boiled, casseroled, microwaved, poached, steamed or stewed, no added fat",
@@ -30631,9 +29901,7 @@
         "amount": 1,
         "base_amount": 143.0
       }
-    ],
-    "serving_grams": 77.0,
-    "serving_desc": "1 wing"
+    ]
   },
   {
     "name": "Duck, marinated, cooked",
@@ -30658,9 +29926,7 @@
         "amount": 1,
         "base_amount": 143.0
       }
-    ],
-    "serving_grams": 104.0,
-    "serving_desc": "1 drumstick"
+    ]
   },
   {
     "name": "Duck, smoked",
@@ -30785,9 +30051,7 @@
         "amount": 1,
         "base_amount": 133.0
       }
-    ],
-    "serving_grams": 41.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Dugong, meat, raw",
@@ -30923,9 +30187,7 @@
         "amount": 1,
         "base_amount": 133.0
       }
-    ],
-    "serving_grams": 41.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Goose, meat, raw",
@@ -31055,9 +30317,7 @@
         "amount": 1,
         "base_amount": 36.0
       }
-    ],
-    "serving_grams": 36.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Kangaroo, wild caught, meat, cooked",
@@ -31234,9 +30494,7 @@
         "amount": 1,
         "base_amount": 133.0
       }
-    ],
-    "serving_grams": 41.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Turtle, meat, raw",
@@ -31264,9 +30522,7 @@
         "amount": 1,
         "base_amount": 133.0
       }
-    ],
-    "serving_grams": 41.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Turtle, meat & organs, cooked",
@@ -31286,9 +30542,7 @@
         "amount": 1,
         "base_amount": 133.0
       }
-    ],
-    "serving_grams": 41.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Venison, mince, raw",
@@ -31341,9 +30595,7 @@
         "amount": 1,
         "base_amount": 89.0
       }
-    ],
-    "serving_grams": 21.3,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Wallaby, meat, cooked",
@@ -31439,9 +30691,7 @@
         "amount": 1,
         "base_amount": 50.0
       }
-    ],
-    "serving_grams": 50.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Beef, liver, raw",
@@ -31653,9 +30903,7 @@
         "amount": 1,
         "base_amount": 100.0
       }
-    ],
-    "serving_grams": 25.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Lamb, heart, raw",
@@ -31725,9 +30973,7 @@
         "amount": 1,
         "base_amount": 60.0
       }
-    ],
-    "serving_grams": 15.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Lamb, liver, raw",
@@ -31991,9 +31237,7 @@
         "amount": 1,
         "base_amount": 340.0
       }
-    ],
-    "serving_grams": 25.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Berliner, processed meat",
@@ -32217,9 +31461,7 @@
         "amount": 1,
         "base_amount": 340.0
       }
-    ],
-    "serving_grams": 28.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Ham, steak, raw",
@@ -32290,9 +31532,7 @@
         "amount": 1,
         "base_amount": 50.0
       }
-    ],
-    "serving_grams": 10.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Meat paste, commercial",
@@ -32405,9 +31645,7 @@
         "amount": 1,
         "base_amount": 15.0
       }
-    ],
-    "serving_grams": 15.0,
-    "serving_desc": "1 stick"
+    ]
   },
   {
     "name": "Sausage, beef, raw",
@@ -32563,9 +31801,7 @@
         "amount": 1,
         "base_amount": 14.0
       }
-    ],
-    "serving_grams": 14.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Sausage, chorizo, cooked",
@@ -32585,9 +31821,7 @@
         "amount": 1,
         "base_amount": 12.0
       }
-    ],
-    "serving_grams": 12.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Sausage, deep fried, commercial",
@@ -32743,9 +31977,7 @@
         "amount": 1,
         "base_amount": 340.0
       }
-    ],
-    "serving_grams": 20.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Spam, turkey, canned",
@@ -32765,9 +31997,7 @@
         "amount": 1,
         "base_amount": 340.0
       }
-    ],
-    "serving_grams": 20.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Speck",
@@ -34325,9 +33555,7 @@
         "amount": 1,
         "base_amount": 257.5
       }
-    ],
-    "serving_grams": 154.5,
-    "serving_desc": "1 carton"
+    ]
   },
   {
     "name": "Milk, cow, fluid, regular fat (~3.5%), lactose free",
@@ -34772,9 +34000,7 @@
         "amount": 1,
         "base_amount": 110.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 pouch"
+    ]
   },
   {
     "name": "Yoghurt, natural, regular fat (~4%)",
@@ -34799,9 +34025,7 @@
         "amount": 1,
         "base_amount": 37.0
       }
-    ],
-    "serving_grams": 37.0,
-    "serving_desc": "1 packet"
+    ]
   },
   {
     "name": "Yoghurt, natural, regular fat (~4%), lactose free",
@@ -34837,9 +34061,7 @@
         "amount": 1,
         "base_amount": 110.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 pouch"
+    ]
   },
   {
     "name": "Yoghurt, natural, reduced fat (~2%), lactose free",
@@ -34883,9 +34105,7 @@
         "amount": 1,
         "base_amount": 110.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 pouch"
+    ]
   },
   {
     "name": "Yoghurt, natural, goat's milk",
@@ -34921,9 +34141,7 @@
         "amount": 1,
         "base_amount": 110.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 pouch"
+    ]
   },
   {
     "name": "Yoghurt, flavoured/added fruit, high fat (>5%), lactose free",
@@ -34951,9 +34169,7 @@
         "amount": 1,
         "base_amount": 110.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 pouch"
+    ]
   },
   {
     "name": "Yoghurt, flavoured/added fruit, regular fat (4%), lactose free",
@@ -34981,9 +34197,7 @@
         "amount": 1,
         "base_amount": 110.0
       }
-    ],
-    "serving_grams": 110.0,
-    "serving_desc": "1 tub or container"
+    ]
   },
   {
     "name": "Yoghurt, flavoured/added fruit, regular fat (4%), no added sugar",
@@ -35027,9 +34241,7 @@
         "amount": 1,
         "base_amount": 110.0
       }
-    ],
-    "serving_grams": 70.0,
-    "serving_desc": "1 pouch"
+    ]
   },
   {
     "name": "Yoghurt, flavoured/added fruit, reduced fat (2%), lactose free",
@@ -35097,9 +34309,7 @@
         "amount": 1,
         "base_amount": 110.0
       }
-    ],
-    "serving_grams": 110.0,
-    "serving_desc": "1 tub or container"
+    ]
   },
   {
     "name": "Yoghurt, flavoured/added fruit, low fat (<1%), no added sugar, added fibre",
@@ -35583,9 +34793,7 @@
         "amount": 1,
         "base_amount": 20.0
       }
-    ],
-    "serving_grams": 6.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Cheese, cheddar, processed, babybel style",
@@ -35610,9 +34818,7 @@
         "amount": 1,
         "base_amount": 16.0
       }
-    ],
-    "serving_grams": 16.0,
-    "serving_desc": "1 wedge"
+    ]
   },
   {
     "name": "Cheese, cheddar, processed, stick style",
@@ -35715,9 +34921,7 @@
         "amount": 1,
         "base_amount": 250.0
       }
-    ],
-    "serving_grams": 250.0,
-    "serving_desc": "1 tub"
+    ]
   },
   {
     "name": "Cheese, cottage, flavoured",
@@ -35764,9 +34968,7 @@
         "amount": 1,
         "base_amount": 34.0
       }
-    ],
-    "serving_grams": 34.0,
-    "serving_desc": "1 tub"
+    ]
   },
   {
     "name": "Cheese, cream, plain, lactose free",
@@ -35791,9 +34993,7 @@
         "amount": 1,
         "base_amount": 252.5
       }
-    ],
-    "serving_grams": 34.0,
-    "serving_desc": "1 tub"
+    ]
   },
   {
     "name": "Cheese, cream, plain, reduced fat",
@@ -35818,9 +35018,7 @@
         "amount": 1,
         "base_amount": 34.0
       }
-    ],
-    "serving_grams": 34.0,
-    "serving_desc": "1 tub"
+    ]
   },
   {
     "name": "Cheese, cream, fruit flavoured",
@@ -35867,9 +35065,7 @@
         "amount": 1,
         "base_amount": 40.0
       }
-    ],
-    "serving_grams": 40.0,
-    "serving_desc": "1 tub"
+    ]
   },
   {
     "name": "Cheese, edam",
@@ -35889,9 +35085,7 @@
         "amount": 1,
         "base_amount": 21.0
       }
-    ],
-    "serving_grams": 7.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Cheese, fetta (feta)",
@@ -35921,9 +35115,7 @@
         "amount": 1,
         "base_amount": 7.0
       }
-    ],
-    "serving_grams": 5.0,
-    "serving_desc": "1 cube"
+    ]
   },
   {
     "name": "Cheese, fetta (feta), lactose free",
@@ -35953,9 +35145,7 @@
         "amount": 1,
         "base_amount": 157.5
       }
-    ],
-    "serving_grams": 5.0,
-    "serving_desc": "1 cube"
+    ]
   },
   {
     "name": "Cheese, fetta (feta), reduced fat",
@@ -35980,9 +35170,7 @@
         "amount": 1,
         "base_amount": 157.5
       }
-    ],
-    "serving_grams": 5.0,
-    "serving_desc": "1 cube"
+    ]
   },
   {
     "name": "Cheese, fetta (feta), marinated",
@@ -36012,9 +35200,7 @@
         "amount": 1,
         "base_amount": 157.5
       }
-    ],
-    "serving_grams": 5.0,
-    "serving_desc": "1 cube"
+    ]
   },
   {
     "name": "Cheese, goat, soft",
@@ -36039,9 +35225,7 @@
         "amount": 1,
         "base_amount": 157.5
       }
-    ],
-    "serving_grams": 7.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Cheese, gouda",
@@ -36061,9 +35245,7 @@
         "amount": 1,
         "base_amount": 21.0
       }
-    ],
-    "serving_grams": 7.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Cheese, haloumi (halloumi)",
@@ -36139,9 +35321,7 @@
         "amount": 1,
         "base_amount": 7.0
       }
-    ],
-    "serving_grams": 7.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Cheese, hard, flavoured, lactose free",
@@ -36215,9 +35395,7 @@
         "amount": 1,
         "base_amount": 20.0
       }
-    ],
-    "serving_grams": 7.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Cheese, mozzarella, reduced fat",
@@ -36247,9 +35425,7 @@
         "amount": 1,
         "base_amount": 7.0
       }
-    ],
-    "serving_grams": 7.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Cheese, mozzarella, buffalo",
@@ -36544,9 +35720,7 @@
         "amount": 1,
         "base_amount": 125.0
       }
-    ],
-    "serving_grams": 32.0,
-    "serving_desc": "1 stick"
+    ]
   },
   {
     "name": "Gelato or sorbet, milk based, chocolate or coffee flavoured",
@@ -36571,9 +35745,7 @@
         "amount": 1,
         "base_amount": 125.0
       }
-    ],
-    "serving_grams": 36.0,
-    "serving_desc": "1 stick"
+    ]
   },
   {
     "name": "Gelato or sorbet, milk based, non-chocolate or coffee flavours",
@@ -36598,9 +35770,7 @@
         "amount": 1,
         "base_amount": 36.0
       }
-    ],
-    "serving_grams": 36.0,
-    "serving_desc": "1 stick"
+    ]
   },
   {
     "name": "Ice cream, chocolate, premium or rich (~15% fat)",
@@ -36620,9 +35790,7 @@
         "amount": 1,
         "base_amount": 74.0
       }
-    ],
-    "serving_grams": 74.0,
-    "serving_desc": "1 scoop"
+    ]
   },
   {
     "name": "Ice cream, chocolate, premium or rich (~15% fat), with sweet additions",
@@ -36642,9 +35810,7 @@
         "amount": 1,
         "base_amount": 74.0
       }
-    ],
-    "serving_grams": 74.0,
-    "serving_desc": "1 scoop"
+    ]
   },
   {
     "name": "Ice cream, vanilla flavour, premium or rich (~15% fat)",
@@ -36664,9 +35830,7 @@
         "amount": 1,
         "base_amount": 74.0
       }
-    ],
-    "serving_grams": 74.0,
-    "serving_desc": "1 scoop"
+    ]
   },
   {
     "name": "Ice cream, vanilla flavour, premium or rich (~15% fat), with sweet additions",
@@ -36686,9 +35850,7 @@
         "amount": 1,
         "base_amount": 74.0
       }
-    ],
-    "serving_grams": 74.0,
-    "serving_desc": "1 scoop"
+    ]
   },
   {
     "name": "Ice cream, chocolate or coffee flavour",
@@ -36708,9 +35870,7 @@
         "amount": 1,
         "base_amount": 66.0
       }
-    ],
-    "serving_grams": 66.0,
-    "serving_desc": "1 scoop"
+    ]
   },
   {
     "name": "Ice cream, chocolate or coffee flavour, low fat (~3%)",
@@ -36730,9 +35890,7 @@
         "amount": 1,
         "base_amount": 69.0
       }
-    ],
-    "serving_grams": 69.0,
-    "serving_desc": "1 scoop"
+    ]
   },
   {
     "name": "Ice cream, fried",
@@ -36769,9 +35927,7 @@
         "amount": 1,
         "base_amount": 127.0
       }
-    ],
-    "serving_grams": 66.0,
-    "serving_desc": "1 scoop"
+    ]
   },
   {
     "name": "Ice cream, fruit flavour, low fat (~3%)",
@@ -36791,9 +35947,7 @@
         "amount": 1,
         "base_amount": 69.0
       }
-    ],
-    "serving_grams": 69.0,
-    "serving_desc": "1 scoop"
+    ]
   },
   {
     "name": "Ice cream, neapolitan",
@@ -36830,9 +35984,7 @@
         "amount": 1,
         "base_amount": 127.0
       }
-    ],
-    "serving_grams": 66.0,
-    "serving_desc": "1 scoop"
+    ]
   },
   {
     "name": "Ice cream, other flavours, low fat (~3%)",
@@ -36852,9 +36004,7 @@
         "amount": 1,
         "base_amount": 69.0
       }
-    ],
-    "serving_grams": 69.0,
-    "serving_desc": "1 scoop"
+    ]
   },
   {
     "name": "Ice cream, vanilla flavour",
@@ -36879,9 +36029,7 @@
         "amount": 1,
         "base_amount": 66.0
       }
-    ],
-    "serving_grams": 53.0,
-    "serving_desc": "1 dixie cup"
+    ]
   },
   {
     "name": "Ice cream, vanilla flavour, low fat (~3%)",
@@ -36906,9 +36054,7 @@
         "amount": 1,
         "base_amount": 46.0
       }
-    ],
-    "serving_grams": 46.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Ice cream, with chocolate chips",
@@ -36928,9 +36074,7 @@
         "amount": 1,
         "base_amount": 66.0
       }
-    ],
-    "serving_grams": 66.0,
-    "serving_desc": "1 scoop"
+    ]
   },
   {
     "name": "Ice cream, with nuts",
@@ -36950,9 +36094,7 @@
         "amount": 1,
         "base_amount": 66.0
       }
-    ],
-    "serving_grams": 66.0,
-    "serving_desc": "1 scoop"
+    ]
   },
   {
     "name": "Ice cream, with sweet additions",
@@ -37028,9 +36170,7 @@
         "amount": 1,
         "base_amount": 75.0
       }
-    ],
-    "serving_grams": 66.0,
-    "serving_desc": "1 scoop"
+    ]
   },
   {
     "name": "Ice cream, all flavours, no added sugar",
@@ -37055,9 +36195,7 @@
         "amount": 1,
         "base_amount": 75.0
       }
-    ],
-    "serving_grams": 66.0,
-    "serving_desc": "1 scoop"
+    ]
   },
   {
     "name": "Ice cream, cake, not further defined",
@@ -37094,9 +36232,7 @@
         "amount": 1,
         "base_amount": 105.0
       }
-    ],
-    "serving_grams": 52.0,
-    "serving_desc": "1 cornetto/drumstick"
+    ]
   },
   {
     "name": "Ice cream, cone, soft serve, fast food style",
@@ -37184,9 +36320,7 @@
         "amount": 1,
         "base_amount": 69.0
       }
-    ],
-    "serving_grams": 69.0,
-    "serving_desc": "1 scoop"
+    ]
   },
   {
     "name": "Ice cream, soft serve, vanilla, with chocolate cream filled biscuit, fast food chain",
@@ -37206,9 +36340,7 @@
         "amount": 1,
         "base_amount": 297.0
       }
-    ],
-    "serving_grams": 180.0,
-    "serving_desc": "1 mcflurry"
+    ]
   },
   {
     "name": "Ice cream, stick, chocolate coated",
@@ -37313,9 +36445,7 @@
         "amount": 1,
         "base_amount": 60.0
       }
-    ],
-    "serving_grams": 44.0,
-    "serving_desc": "1 bar"
+    ]
   },
   {
     "name": "Ice confection, stick, milk based, chocolate flavoured",
@@ -37374,9 +36504,7 @@
         "amount": 1,
         "base_amount": 64.0
       }
-    ],
-    "serving_grams": 58.0,
-    "serving_desc": "1 stick"
+    ]
   },
   {
     "name": "Ice confection, stick or tub, fruit flavoured",
@@ -37479,9 +36607,7 @@
         "amount": 1,
         "base_amount": 127.0
       }
-    ],
-    "serving_grams": 36.0,
-    "serving_desc": "1 stick"
+    ]
   },
   {
     "name": "Yoghurt, frozen, protein increased, no added sugar",
@@ -37506,9 +36632,7 @@
         "amount": 1,
         "base_amount": 40.0
       }
-    ],
-    "serving_grams": 40.0,
-    "serving_desc": "1 stick or bar"
+    ]
   },
   {
     "name": "Custard, dairy, chocolate, commercial",
@@ -37924,7 +37048,7 @@
       }
     ],
     "serving_grams": 265.0,
-    "serving_desc": "1 carton"
+    "serving_desc": "1 bottle"
   },
   {
     "name": "Flavoured milk, cow's, regular fat, lactose free",
@@ -37946,7 +37070,7 @@
       }
     ],
     "serving_grams": 265.0,
-    "serving_desc": "1 carton"
+    "serving_desc": "1 bottle"
   },
   {
     "name": "Flavoured milk, cow's, regular fat, no added sugar",
@@ -37968,7 +37092,7 @@
       }
     ],
     "serving_grams": 257.5,
-    "serving_desc": "1 carton"
+    "serving_desc": "1 bottle"
   },
   {
     "name": "Flavoured milk, cow's, reduced fat",
@@ -37990,7 +37114,7 @@
       }
     ],
     "serving_grams": 265.0,
-    "serving_desc": "1 carton"
+    "serving_desc": "1 bottle"
   },
   {
     "name": "Flavoured milk, cow's, reduced fat, lactose free",
@@ -38012,7 +37136,7 @@
       }
     ],
     "serving_grams": 265.0,
-    "serving_desc": "1 carton"
+    "serving_desc": "1 bottle"
   },
   {
     "name": "Flavoured milk, cow's, reduced fat, added vitamins",
@@ -38034,7 +37158,7 @@
       }
     ],
     "serving_grams": 265.0,
-    "serving_desc": "1 carton"
+    "serving_desc": "1 bottle"
   },
   {
     "name": "Flavoured milk, cow's, reduced fat, added vitamins & minerals",
@@ -38073,7 +37197,7 @@
       }
     ],
     "serving_grams": 260.0,
-    "serving_desc": "1 carton"
+    "serving_desc": "1 bottle"
   },
   {
     "name": "Iced chocolate, made with cow's milk",
@@ -38095,7 +37219,7 @@
       }
     ],
     "serving_grams": 222.5,
-    "serving_desc": "1 carton"
+    "serving_desc": "1 bottle"
   },
   {
     "name": "Iced coffee, commercially packaged",
@@ -38117,7 +37241,7 @@
       }
     ],
     "serving_grams": 265.0,
-    "serving_desc": "1 carton"
+    "serving_desc": "1 bottle"
   },
   {
     "name": "Iced coffee, made with cow's milk",
@@ -38865,9 +37989,7 @@
         "amount": 1,
         "base_amount": 12.6
       }
-    ],
-    "serving_grams": 12.6,
-    "serving_desc": "1 tablespoon"
+    ]
   },
   {
     "name": "Ice confection, oat based, all flavours",
@@ -38887,9 +38009,7 @@
         "amount": 1,
         "base_amount": 66.0
       }
-    ],
-    "serving_grams": 66.0,
-    "serving_desc": "1 scoop"
+    ]
   },
   {
     "name": "Ice confection, nut based, all flavours",
@@ -38914,9 +38034,7 @@
         "amount": 1,
         "base_amount": 127.0
       }
-    ],
-    "serving_grams": 66.0,
-    "serving_desc": "1 scoop"
+    ]
   },
   {
     "name": "Ice confection, soy based, all flavours",
@@ -38941,9 +38059,7 @@
         "amount": 1,
         "base_amount": 127.0
       }
-    ],
-    "serving_grams": 66.0,
-    "serving_desc": "1 scoop"
+    ]
   },
   {
     "name": "Ice confection, stick or cone, dairy alternative, all flavours",
@@ -39077,9 +38193,7 @@
         "amount": 1,
         "base_amount": 25.0
       }
-    ],
-    "serving_grams": 25.0,
-    "serving_desc": "1 bite"
+    ]
   },
   {
     "name": "Meat alternative, mycoprotein/fungus base, mince/pieces/fillets, as purchased",
@@ -39116,9 +38230,7 @@
         "amount": 1,
         "base_amount": 20.0
       }
-    ],
-    "serving_grams": 20.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Meat alternative, mycoprotein/fungus base, schnitzels/fish alternative/patty/sausages, as purchased",
@@ -39171,9 +38283,7 @@
         "amount": 1,
         "base_amount": 42.0
       }
-    ],
-    "serving_grams": 18.0,
-    "serving_desc": "1 nugget"
+    ]
   },
   {
     "name": "Meat alternative, nut based, cooked",
@@ -39193,9 +38303,7 @@
         "amount": 1,
         "base_amount": 140.0
       }
-    ],
-    "serving_grams": 125.0,
-    "serving_desc": "1 patty or rissole"
+    ]
   },
   {
     "name": "Meat alternative, protein (soy/wheat/pea) base, as purchased",
@@ -39220,9 +38328,7 @@
         "amount": 1,
         "base_amount": 113.0
       }
-    ],
-    "serving_grams": 63.0,
-    "serving_desc": "1 fillet"
+    ]
   },
   {
     "name": "Meat alternative, protein (soy/wheat/pea) base, cooked",
@@ -39247,9 +38353,7 @@
         "amount": 1,
         "base_amount": 20.0
       }
-    ],
-    "serving_grams": 20.0,
-    "serving_desc": "1 strip"
+    ]
   },
   {
     "name": "Meat alternative, protein (soy/wheat/pea) base, added vitamins & minerals, as purchased",
@@ -40195,9 +39299,7 @@
         "amount": 1,
         "base_amount": 106.0
       }
-    ],
-    "serving_grams": 85.0,
-    "serving_desc": "1 cup"
+    ]
   },
   {
     "name": "Coconut, grated & desiccated",
@@ -40366,9 +39468,7 @@
         "amount": 1,
         "base_amount": 10.4
       }
-    ],
-    "serving_grams": 10.4,
-    "serving_desc": "1 tablespoon"
+    ]
   },
   {
     "name": "Coconut, water or juice",
@@ -40432,8 +39532,8 @@
         "base_amount": 30.0
       }
     ],
-    "serving_grams": 1.2,
-    "serving_desc": "1 nut"
+    "serving_grams": 30.0,
+    "serving_desc": "1 box"
   },
   {
     "name": "Nut, almond meal",
@@ -40489,8 +39589,8 @@
         "base_amount": 28.0
       }
     ],
-    "serving_grams": 1.2,
-    "serving_desc": "1 nut"
+    "serving_grams": 30.0,
+    "serving_desc": "1 box"
   },
   {
     "name": "Nut, brazil, raw/natural, unsalted",
@@ -40510,9 +39610,7 @@
         "amount": 1,
         "base_amount": 3.3
       }
-    ],
-    "serving_grams": 3.3,
-    "serving_desc": "1 nut"
+    ]
   },
   {
     "name": "Nut, cashew, raw/natural, unsalted",
@@ -40538,8 +39636,8 @@
         "base_amount": 1.3
       }
     ],
-    "serving_grams": 1.3,
-    "serving_desc": "1 nut"
+    "serving_grams": 30.0,
+    "serving_desc": "1 box"
   },
   {
     "name": "Nut, cashew, roasted, unsalted",
@@ -40565,8 +39663,8 @@
         "base_amount": 30.0
       }
     ],
-    "serving_grams": 1.3,
-    "serving_desc": "1 nut"
+    "serving_grams": 30.0,
+    "serving_desc": "1 box"
   },
   {
     "name": "Nut, cashew, roasted, salted",
@@ -40592,8 +39690,8 @@
         "base_amount": 1.3
       }
     ],
-    "serving_grams": 1.3,
-    "serving_desc": "1 nut"
+    "serving_grams": 30.0,
+    "serving_desc": "1 box"
   },
   {
     "name": "Nut, cashew, roasted, coated in honey",
@@ -40619,8 +39717,8 @@
         "base_amount": 36.0
       }
     ],
-    "serving_grams": 1.3,
-    "serving_desc": "1 nut"
+    "serving_grams": 30.0,
+    "serving_desc": "1 box"
   },
   {
     "name": "Nut, cashew, roasted, savoury flavoured",
@@ -40646,8 +39744,8 @@
         "base_amount": 36.0
       }
     ],
-    "serving_grams": 1.3,
-    "serving_desc": "1 nut"
+    "serving_grams": 30.0,
+    "serving_desc": "1 box"
   },
   {
     "name": "Nut, chestnut, raw/natural, unsalted",
@@ -40734,8 +39832,8 @@
         "base_amount": 30.0
       }
     ],
-    "serving_grams": 2.0,
-    "serving_desc": "1 nut"
+    "serving_grams": 30.0,
+    "serving_desc": "1 box"
   },
   {
     "name": "Nut, macadamia, roasted, salted",
@@ -40761,8 +39859,8 @@
         "base_amount": 30.0
       }
     ],
-    "serving_grams": 2.0,
-    "serving_desc": "1 nut"
+    "serving_grams": 30.0,
+    "serving_desc": "1 box"
   },
   {
     "name": "Nut, macadamia, roasted, coated in honey",
@@ -40788,8 +39886,8 @@
         "base_amount": 30.0
       }
     ],
-    "serving_grams": 2.0,
-    "serving_desc": "1 nut"
+    "serving_grams": 30.0,
+    "serving_desc": "1 box"
   },
   {
     "name": "Nut, peanut, roasted, unsalted",
@@ -40890,9 +39988,7 @@
         "amount": 1,
         "base_amount": 2.2
       }
-    ],
-    "serving_grams": 2.2,
-    "serving_desc": "1 nut"
+    ]
   },
   {
     "name": "Nut, pine, raw/natural, unsalted",
@@ -40999,8 +40095,8 @@
         "base_amount": 30.0
       }
     ],
-    "serving_grams": 2.2,
-    "serving_desc": "1 nut"
+    "serving_grams": 30.0,
+    "serving_desc": "1 box"
   },
   {
     "name": "Pandanus kernel",
@@ -41172,8 +40268,8 @@
         "base_amount": 30.0
       }
     ],
-    "serving_grams": 1.7,
-    "serving_desc": "1 nut"
+    "serving_grams": 30.0,
+    "serving_desc": "1 box"
   },
   {
     "name": "Mixed nuts, with peanuts, unsalted",
@@ -41203,9 +40299,7 @@
         "amount": 1,
         "base_amount": 100.0
       }
-    ],
-    "serving_grams": 1.5,
-    "serving_desc": "1 nut"
+    ]
   },
   {
     "name": "Mixed nuts, with peanuts, salted",
@@ -41235,9 +40329,7 @@
         "amount": 1,
         "base_amount": 100.0
       }
-    ],
-    "serving_grams": 1.5,
-    "serving_desc": "1 nut"
+    ]
   },
   {
     "name": "Mixed nuts, without peanuts, unsalted",
@@ -41263,8 +40355,8 @@
         "base_amount": 1.5
       }
     ],
-    "serving_grams": 1.5,
-    "serving_desc": "1 nut"
+    "serving_grams": 100.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Mixed nuts, without peanuts, salted",
@@ -41294,9 +40386,7 @@
         "amount": 1,
         "base_amount": 100.0
       }
-    ],
-    "serving_grams": 1.5,
-    "serving_desc": "1 nut"
+    ]
   },
   {
     "name": "Mixed nuts, savoury flavoured",
@@ -41322,8 +40412,8 @@
         "base_amount": 1.5
       }
     ],
-    "serving_grams": 1.5,
-    "serving_desc": "1 nut"
+    "serving_grams": 30.0,
+    "serving_desc": "1 box"
   },
   {
     "name": "Mixed nuts & dried fruit, with peanuts",
@@ -41415,8 +40505,8 @@
         "base_amount": 36.0
       }
     ],
-    "serving_grams": 1.5,
-    "serving_desc": "1 nut"
+    "serving_grams": 30.0,
+    "serving_desc": "1 box"
   },
   {
     "name": "Mixed nuts & seeds, without peanut",
@@ -41442,8 +40532,8 @@
         "base_amount": 36.0
       }
     ],
-    "serving_grams": 1.5,
-    "serving_desc": "1 nut"
+    "serving_grams": 30.0,
+    "serving_desc": "1 box"
   },
   {
     "name": "Mixed nuts & seeds, savoury flavoured",
@@ -41469,8 +40559,8 @@
         "base_amount": 1.5
       }
     ],
-    "serving_grams": 1.5,
-    "serving_desc": "1 nut"
+    "serving_grams": 30.0,
+    "serving_desc": "1 box"
   },
   {
     "name": "Mixed nuts, dried fruit & seeds (trail mix), with peanuts",
@@ -41540,8 +40630,8 @@
         "base_amount": 30.0
       }
     ],
-    "serving_grams": 1.5,
-    "serving_desc": "1 nut"
+    "serving_grams": 30.0,
+    "serving_desc": "1 box"
   },
   {
     "name": "Mixed nuts, seeds & chocolate",
@@ -41567,8 +40657,8 @@
         "base_amount": 30.0
       }
     ],
-    "serving_grams": 1.5,
-    "serving_desc": "1 nut"
+    "serving_grams": 30.0,
+    "serving_desc": "1 box"
   },
   {
     "name": "Nuts & seeds, wild harvested",
@@ -41591,9 +40681,7 @@
         "amount": 1,
         "base_amount": 24.0
       }
-    ],
-    "serving_grams": 24.0,
-    "serving_desc": "1 tablespoon"
+    ]
   },
   {
     "name": "Peanut butter, added sugar, no added salt",
@@ -41608,9 +40696,7 @@
         "amount": 1,
         "base_amount": 24.0
       }
-    ],
-    "serving_grams": 24.0,
-    "serving_desc": "1 tablespoon"
+    ]
   },
   {
     "name": "Peanut butter, added sugar & salt",
@@ -41647,9 +40733,7 @@
         "amount": 1,
         "base_amount": 24.0
       }
-    ],
-    "serving_grams": 24.0,
-    "serving_desc": "1 tablespoon"
+    ]
   },
   {
     "name": "Peanut butter, added salt & seeds",
@@ -41664,9 +40748,7 @@
         "amount": 1,
         "base_amount": 24.0
       }
-    ],
-    "serving_grams": 24.0,
-    "serving_desc": "1 tablespoon"
+    ]
   },
   {
     "name": "Peanut butter, added salt, protein increased",
@@ -41681,9 +40763,7 @@
         "amount": 1,
         "base_amount": 24.0
       }
-    ],
-    "serving_grams": 24.0,
-    "serving_desc": "1 tablespoon"
+    ]
   },
   {
     "name": "Almond spread, no added sugar or salt",
@@ -41698,9 +40778,7 @@
         "amount": 1,
         "base_amount": 24.0
       }
-    ],
-    "serving_grams": 24.0,
-    "serving_desc": "1 tablespoon"
+    ]
   },
   {
     "name": "Almond spread, added sugar & salt",
@@ -41715,9 +40793,7 @@
         "amount": 1,
         "base_amount": 24.0
       }
-    ],
-    "serving_grams": 24.0,
-    "serving_desc": "1 tablespoon"
+    ]
   },
   {
     "name": "Almond spread, not further defined",
@@ -41732,9 +40808,7 @@
         "amount": 1,
         "base_amount": 24.0
       }
-    ],
-    "serving_grams": 24.0,
-    "serving_desc": "1 tablespoon"
+    ]
   },
   {
     "name": "Cashew spread, no added sugar or salt",
@@ -41749,9 +40823,7 @@
         "amount": 1,
         "base_amount": 24.0
       }
-    ],
-    "serving_grams": 24.0,
-    "serving_desc": "1 tablespoon"
+    ]
   },
   {
     "name": "Cashew spread, added sugar & salt",
@@ -41766,9 +40838,7 @@
         "amount": 1,
         "base_amount": 24.0
       }
-    ],
-    "serving_grams": 24.0,
-    "serving_desc": "1 tablespoon"
+    ]
   },
   {
     "name": "Cashew spread, not further defined",
@@ -41783,9 +40853,7 @@
         "amount": 1,
         "base_amount": 24.0
       }
-    ],
-    "serving_grams": 24.0,
-    "serving_desc": "1 tablespoon"
+    ]
   },
   {
     "name": "Mixed nut spread, added salt",
@@ -41800,9 +40868,7 @@
         "amount": 1,
         "base_amount": 24.0
       }
-    ],
-    "serving_grams": 24.0,
-    "serving_desc": "1 tablespoon"
+    ]
   },
   {
     "name": "Mixed nut & seed spread, added salt",
@@ -41817,9 +40883,7 @@
         "amount": 1,
         "base_amount": 24.0
       }
-    ],
-    "serving_grams": 24.0,
-    "serving_desc": "1 tablespoon"
+    ]
   },
   {
     "name": "Casserole base, dry mix",
@@ -41884,9 +40948,7 @@
         "amount": 1,
         "base_amount": 19.8
       }
-    ],
-    "serving_grams": 19.8,
-    "serving_desc": "1 tablespoon"
+    ]
   },
   {
     "name": "Dressing, Asian style, with lime juice, chilli & fish sauce",
@@ -42098,9 +41160,7 @@
         "amount": 1,
         "base_amount": 165.0
       }
-    ],
-    "serving_grams": 165.0,
-    "serving_desc": "1 packet"
+    ]
   },
   {
     "name": "Gravy, made from reduced salt dry powder & water",
@@ -42125,9 +41185,7 @@
         "amount": 1,
         "base_amount": 165.0
       }
-    ],
-    "serving_grams": 165.0,
-    "serving_desc": "1 packet"
+    ]
   },
   {
     "name": "Gravy, purchased prepared",
@@ -42152,9 +41210,7 @@
         "amount": 1,
         "base_amount": 165.0
       }
-    ],
-    "serving_grams": 165.0,
-    "serving_desc": "1 packet"
+    ]
   },
   {
     "name": "Gravy, made from pan drippings",
@@ -42243,9 +41299,7 @@
         "amount": 1,
         "base_amount": 19.8
       }
-    ],
-    "serving_grams": 19.8,
-    "serving_desc": "1 tablespoon"
+    ]
   },
   {
     "name": "Miso, soya (soy) bean paste",
@@ -42268,9 +41322,7 @@
         "amount": 1,
         "base_amount": 21.0
       }
-    ],
-    "serving_grams": 21.0,
-    "serving_desc": "1 tablespoon"
+    ]
   },
   {
     "name": "Paste, curry style",
@@ -42309,9 +41361,7 @@
         "amount": 1,
         "base_amount": 20.8
       }
-    ],
-    "serving_grams": 20.8,
-    "serving_desc": "1 tablespoon"
+    ]
   },
   {
     "name": "Sauce, apricot",
@@ -42348,9 +41398,7 @@
         "amount": 1,
         "base_amount": 10.0
       }
-    ],
-    "serving_grams": 10.0,
-    "serving_desc": "1 packet"
+    ]
   },
   {
     "name": "Sauce, basil pesto, commercial",
@@ -42448,9 +41496,7 @@
         "amount": 1,
         "base_amount": 350.0
       }
-    ],
-    "serving_grams": 10.0,
-    "serving_desc": "1 packet"
+    ]
   },
   {
     "name": "Sauce, cocktail or seafood",
@@ -42565,9 +41611,7 @@
         "amount": 1,
         "base_amount": 10.0
       }
-    ],
-    "serving_grams": 10.0,
-    "serving_desc": "1 packet"
+    ]
   },
   {
     "name": "Sauce, hollandaise or bearnaise, homemade",
@@ -42678,9 +41722,7 @@
         "amount": 1,
         "base_amount": 275.0
       }
-    ],
-    "serving_grams": 133.0,
-    "serving_desc": "1 packet"
+    ]
   },
   {
     "name": "Sauce, mint",
@@ -42927,9 +41969,7 @@
         "amount": 1,
         "base_amount": 21.4
       }
-    ],
-    "serving_grams": 21.4,
-    "serving_desc": "1 tablespoon"
+    ]
   },
   {
     "name": "Sauce, satay, homemade",
@@ -42944,9 +41984,7 @@
         "amount": 1,
         "base_amount": 21.4
       }
-    ],
-    "serving_grams": 21.4,
-    "serving_desc": "1 tablespoon"
+    ]
   },
   {
     "name": "Sauce, simmer, curry style, commercial",
@@ -42993,9 +42031,7 @@
         "amount": 1,
         "base_amount": 6.0
       }
-    ],
-    "serving_grams": 3.0,
-    "serving_desc": "1 fish"
+    ]
   },
   {
     "name": "Sauce, soy, reduced salt, commercial",
@@ -43015,9 +42051,7 @@
         "amount": 1,
         "base_amount": 262.5
       }
-    ],
-    "serving_grams": 6.0,
-    "serving_desc": "1 packet"
+    ]
   },
   {
     "name": "Sauce, sweet & sour, commercial",
@@ -43042,9 +42076,7 @@
         "amount": 1,
         "base_amount": 280.0
       }
-    ],
-    "serving_grams": 10.0,
-    "serving_desc": "1 packet"
+    ]
   },
   {
     "name": "Sauce, sweet chilli (chili), commercial",
@@ -43064,9 +42096,7 @@
         "amount": 1,
         "base_amount": 10.0
       }
-    ],
-    "serving_grams": 10.0,
-    "serving_desc": "1 packet"
+    ]
   },
   {
     "name": "Sauce, tabasco, commercial",
@@ -43138,9 +42168,7 @@
         "amount": 1,
         "base_amount": 10.0
       }
-    ],
-    "serving_grams": 10.0,
-    "serving_desc": "1 packet"
+    ]
   },
   {
     "name": "Sauce, tomato, commercial, reduced sugar & salt",
@@ -43165,9 +42193,7 @@
         "amount": 1,
         "base_amount": 260.0
       }
-    ],
-    "serving_grams": 10.0,
-    "serving_desc": "1 packet"
+    ]
   },
   {
     "name": "Sauce, tomato, homemade",
@@ -43556,9 +42582,7 @@
         "amount": 1,
         "base_amount": 40.0
       }
-    ],
-    "serving_grams": 27.0,
-    "serving_desc": "1 heart"
+    ]
   },
   {
     "name": "Artichoke, jerusalem, peeled, raw",
@@ -43646,9 +42670,7 @@
         "amount": 1,
         "base_amount": 125.0
       }
-    ],
-    "serving_grams": 13.0,
-    "serving_desc": "1 spear"
+    ]
   },
   {
     "name": "Asparagus, green, baked, roasted, fried, stir-fried, grilled or BBQ'd, no added fat",
@@ -43668,9 +42690,7 @@
         "amount": 1,
         "base_amount": 185.0
       }
-    ],
-    "serving_grams": 13.0,
-    "serving_desc": "1 spear"
+    ]
   },
   {
     "name": "Asparagus, green, boiled, microwaved or steamed, drained",
@@ -43690,9 +42710,7 @@
         "amount": 1,
         "base_amount": 11.0
       }
-    ],
-    "serving_grams": 11.0,
-    "serving_desc": "1 spear"
+    ]
   },
   {
     "name": "Asparagus, canned in brine, drained",
@@ -43729,9 +42747,7 @@
         "amount": 1,
         "base_amount": 20.0
       }
-    ],
-    "serving_grams": 20.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Avocado, cooked",
@@ -43819,9 +42835,7 @@
         "amount": 1,
         "base_amount": 2.5
       }
-    ],
-    "serving_grams": 2.5,
-    "serving_desc": "1 bean"
+    ]
   },
   {
     "name": "Bean, broad, cooked",
@@ -43836,9 +42850,7 @@
         "amount": 1,
         "base_amount": 2.5
       }
-    ],
-    "serving_grams": 2.5,
-    "serving_desc": "1 bean"
+    ]
   },
   {
     "name": "Bean, butter, raw",
@@ -43853,9 +42865,7 @@
         "amount": 1,
         "base_amount": 2.5
       }
-    ],
-    "serving_grams": 2.5,
-    "serving_desc": "1 bean"
+    ]
   },
   {
     "name": "Bean, green, raw",
@@ -43870,9 +42880,7 @@
         "amount": 1,
         "base_amount": 4.3
       }
-    ],
-    "serving_grams": 4.3,
-    "serving_desc": "1 bean"
+    ]
   },
   {
     "name": "Bean, green, baked, roasted, fried, stir-fried, grilled or BBQ'd, added fat",
@@ -43887,9 +42895,7 @@
         "amount": 1,
         "base_amount": 3.7
       }
-    ],
-    "serving_grams": 3.7,
-    "serving_desc": "1 bean"
+    ]
   },
   {
     "name": "Bean, green, baked, roasted, fried, stir-fried, grilled or BBQ'd, no added fat",
@@ -43904,9 +42910,7 @@
         "amount": 1,
         "base_amount": 3.7
       }
-    ],
-    "serving_grams": 3.7,
-    "serving_desc": "1 bean"
+    ]
   },
   {
     "name": "Bean, green, boiled, microwaved or steamed, drained",
@@ -43921,9 +42925,7 @@
         "amount": 1,
         "base_amount": 4.0
       }
-    ],
-    "serving_grams": 4.0,
-    "serving_desc": "1 bean"
+    ]
   },
   {
     "name": "Bean, green, canned, cooked",
@@ -43938,9 +42940,7 @@
         "amount": 1,
         "base_amount": 4.0
       }
-    ],
-    "serving_grams": 4.0,
-    "serving_desc": "1 bean"
+    ]
   },
   {
     "name": "Beetroot, purple, peeled, raw",
@@ -43965,9 +42965,7 @@
         "amount": 1,
         "base_amount": 19.0
       }
-    ],
-    "serving_grams": 10.3,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Beetroot, purple, peeled, baked, roasted, fried, stir-fried, grilled or BBQ'd, added fat",
@@ -43992,9 +42990,7 @@
         "amount": 1,
         "base_amount": 33.0
       }
-    ],
-    "serving_grams": 10.3,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Beetroot, purple, peeled, boiled, microwaved or steamed, drained",
@@ -44019,9 +43015,7 @@
         "amount": 1,
         "base_amount": 19.0
       }
-    ],
-    "serving_grams": 8.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Beetroot, purple, cooked, pre-packaged",
@@ -44041,9 +43035,7 @@
         "amount": 1,
         "base_amount": 8.0
       }
-    ],
-    "serving_grams": 8.0,
-    "serving_desc": "1 slice/piece"
+    ]
   },
   {
     "name": "Beetroot, canned, drained",
@@ -44063,9 +43055,7 @@
         "amount": 1,
         "base_amount": 33.0
       }
-    ],
-    "serving_grams": 19.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Bok choy or pak choy, raw",
@@ -44085,9 +43075,7 @@
         "amount": 1,
         "base_amount": 13.0
       }
-    ],
-    "serving_grams": 13.0,
-    "serving_desc": "1 leaf"
+    ]
   },
   {
     "name": "Bok choy or pak choy, baked, roasted, fried, stir-fried, grilled or BBQ'd, added fat",
@@ -44107,9 +43095,7 @@
         "amount": 1,
         "base_amount": 9.1
       }
-    ],
-    "serving_grams": 9.1,
-    "serving_desc": "1 leaf"
+    ]
   },
   {
     "name": "Bok choy or pak choy, boiled, microwaved or steamed, drained",
@@ -44129,9 +43115,7 @@
         "amount": 1,
         "base_amount": 12.5
       }
-    ],
-    "serving_grams": 12.5,
-    "serving_desc": "1 leaf"
+    ]
   },
   {
     "name": "Broccoli, fresh or frozen, raw",
@@ -44219,9 +43203,7 @@
         "amount": 1,
         "base_amount": 180.0
       }
-    ],
-    "serving_grams": 13.0,
-    "serving_desc": "1 leaf"
+    ]
   },
   {
     "name": "Broccoli, chinese (gai lan), cooked",
@@ -44241,9 +43223,7 @@
         "amount": 1,
         "base_amount": 173.0
       }
-    ],
-    "serving_grams": 9.1,
-    "serving_desc": "1 leaf"
+    ]
   },
   {
     "name": "Broccoli & cauliflower rice, raw",
@@ -44279,9 +43259,7 @@
         "amount": 1,
         "base_amount": 29.0
       }
-    ],
-    "serving_grams": 29.0,
-    "serving_desc": "1 stalk"
+    ]
   },
   {
     "name": "Broccolini, baked, roasted, fried, stir-fried, grilled or BBQ'd, added fat",
@@ -44301,9 +43279,7 @@
         "amount": 1,
         "base_amount": 23.8
       }
-    ],
-    "serving_grams": 23.8,
-    "serving_desc": "1 stalk"
+    ]
   },
   {
     "name": "Broccolini, boiled, microwaved or steamed, drained",
@@ -44323,9 +43299,7 @@
         "amount": 1,
         "base_amount": 28.0
       }
-    ],
-    "serving_grams": 28.0,
-    "serving_desc": "1 stalk"
+    ]
   },
   {
     "name": "Brussels sprout, raw",
@@ -44412,9 +43386,7 @@
         "amount": 1,
         "base_amount": 13.0
       }
-    ],
-    "serving_grams": 13.0,
-    "serving_desc": "1 leaf"
+    ]
   },
   {
     "name": "Cabbage, Chinese flowering/choy sum, cooked",
@@ -44434,9 +43406,7 @@
         "amount": 1,
         "base_amount": 8.0
       }
-    ],
-    "serving_grams": 8.0,
-    "serving_desc": "1 leaf"
+    ]
   },
   {
     "name": "Cabbage, mustard, raw",
@@ -44472,9 +43442,7 @@
         "amount": 1,
         "base_amount": 23.0
       }
-    ],
-    "serving_grams": 23.0,
-    "serving_desc": "1 leaf"
+    ]
   },
   {
     "name": "Cabbage, red, cooked",
@@ -44494,9 +43462,7 @@
         "amount": 1,
         "base_amount": 435.0
       }
-    ],
-    "serving_grams": 22.0,
-    "serving_desc": "1 leaf"
+    ]
   },
   {
     "name": "Cabbage, red, canned, heated, drained",
@@ -44644,9 +43610,7 @@
         "amount": 1,
         "base_amount": 16.0
       }
-    ],
-    "serving_grams": 16.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Capsicum, red, raw",
@@ -44666,9 +43630,7 @@
         "amount": 1,
         "base_amount": 16.0
       }
-    ],
-    "serving_grams": 16.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Capsicum, yellow, raw",
@@ -44688,9 +43650,7 @@
         "amount": 1,
         "base_amount": 15.0
       }
-    ],
-    "serving_grams": 15.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Capsicum, raw",
@@ -44710,9 +43670,7 @@
         "amount": 1,
         "base_amount": 16.0
       }
-    ],
-    "serving_grams": 16.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Capsicum, baked, roasted, fried, stir-fried, grilled or BBQ'd, no added fat",
@@ -44732,9 +43690,7 @@
         "amount": 1,
         "base_amount": 181.0
       }
-    ],
-    "serving_grams": 15.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Capsicum, baked, roasted, fried, stir-fried, grilled or BBQ'd, added fat",
@@ -44754,9 +43710,7 @@
         "amount": 1,
         "base_amount": 181.0
       }
-    ],
-    "serving_grams": 15.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Capsicum, boiled, microwaved or steamed, drained",
@@ -44776,9 +43730,7 @@
         "amount": 1,
         "base_amount": 15.5
       }
-    ],
-    "serving_grams": 15.5,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Carrot, baby, canned in brine, drained, cooked",
@@ -44815,9 +43767,7 @@
         "amount": 1,
         "base_amount": 16.0
       }
-    ],
-    "serving_grams": 16.0,
-    "serving_desc": "1 stick"
+    ]
   },
   {
     "name": "Carrot, baked, roasted, fried, stir-fried, grilled or BBQ'd, no added fat",
@@ -44871,9 +43821,7 @@
         "amount": 1,
         "base_amount": 13.1
       }
-    ],
-    "serving_grams": 13.1,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Carrot, packaged, chopped or grated",
@@ -45180,9 +44128,7 @@
         "amount": 1,
         "base_amount": 8.0
       }
-    ],
-    "serving_grams": 8.0,
-    "serving_desc": "1 stick"
+    ]
   },
   {
     "name": "Celery, cooked",
@@ -45202,9 +44148,7 @@
         "amount": 1,
         "base_amount": 6.2
       }
-    ],
-    "serving_grams": 6.2,
-    "serving_desc": "1 stick"
+    ]
   },
   {
     "name": "Chicory, raw",
@@ -45258,8 +44202,8 @@
         "base_amount": 2.0
       }
     ],
-    "serving_grams": 2.0,
-    "serving_desc": "1 piece"
+    "serving_grams": 12.2,
+    "serving_desc": "1 chilli"
   },
   {
     "name": "Chilli (chili), red, raw",
@@ -45280,8 +44224,8 @@
         "base_amount": 2.0
       }
     ],
-    "serving_grams": 2.0,
-    "serving_desc": "1 piece"
+    "serving_grams": 12.2,
+    "serving_desc": "1 chilli"
   },
   {
     "name": "Chilli (chili), raw",
@@ -45302,8 +44246,8 @@
         "base_amount": 12.2
       }
     ],
-    "serving_grams": 2.0,
-    "serving_desc": "1 piece"
+    "serving_grams": 12.2,
+    "serving_desc": "1 chilli"
   },
   {
     "name": "Chilli (chili), cooked",
@@ -45324,8 +44268,8 @@
         "base_amount": 11.0
       }
     ],
-    "serving_grams": 2.0,
-    "serving_desc": "1 piece"
+    "serving_grams": 11.0,
+    "serving_desc": "1 chilli"
   },
   {
     "name": "Chives, fresh, raw",
@@ -45409,9 +44353,7 @@
         "amount": 1,
         "base_amount": 47.0
       }
-    ],
-    "serving_grams": 12.5,
-    "serving_desc": "1 baby corn"
+    ]
   },
   {
     "name": "Corn, baked, roasted, fried, stir-fried, grilled or BBQ'd, no added fat",
@@ -45436,9 +44378,7 @@
         "amount": 1,
         "base_amount": 42.0
       }
-    ],
-    "serving_grams": 11.2,
-    "serving_desc": "1 baby corn"
+    ]
   },
   {
     "name": "Corn, baked, roasted, fried, stir-fried, grilled or BBQ'd, added fat",
@@ -45463,9 +44403,7 @@
         "amount": 1,
         "base_amount": 42.0
       }
-    ],
-    "serving_grams": 11.2,
-    "serving_desc": "1 baby corn"
+    ]
   },
   {
     "name": "Corn, boiled, microwaved or steamed, drained",
@@ -45490,9 +44428,7 @@
         "amount": 1,
         "base_amount": 45.0
       }
-    ],
-    "serving_grams": 12.0,
-    "serving_desc": "1 baby corn"
+    ]
   },
   {
     "name": "Corn, canned, baby, heated, drained",
@@ -45513,8 +44449,8 @@
         "base_amount": 420.0
       }
     ],
-    "serving_grams": 2.2,
-    "serving_desc": "1 baby corn"
+    "serving_grams": 420.0,
+    "serving_desc": "1 can"
   },
   {
     "name": "Corn, canned, creamed, heated",
@@ -45597,9 +44533,7 @@
         "amount": 1,
         "base_amount": 18.0
       }
-    ],
-    "serving_grams": 5.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Cucumber, cooked",
@@ -45619,9 +44553,7 @@
         "amount": 1,
         "base_amount": 5.0
       }
-    ],
-    "serving_grams": 5.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Dill, fresh, raw",
@@ -45649,9 +44581,7 @@
         "amount": 1,
         "base_amount": 45.9
       }
-    ],
-    "serving_grams": 29.0,
-    "serving_desc": "1 eggplant"
+    ]
   },
   {
     "name": "Eggplant, baked, roasted, fried, stir-fried, grilled or BBQ'd, no added fat",
@@ -45671,9 +44601,7 @@
         "amount": 1,
         "base_amount": 20.0
       }
-    ],
-    "serving_grams": 20.0,
-    "serving_desc": "1 eggplant"
+    ]
   },
   {
     "name": "Eggplant, baked, roasted, fried, stir-fried, grilled or BBQ'd, added fat",
@@ -45693,9 +44621,7 @@
         "amount": 1,
         "base_amount": 20.0
       }
-    ],
-    "serving_grams": 20.0,
-    "serving_desc": "1 eggplant"
+    ]
   },
   {
     "name": "Eggplant, boiled, microwaved or steamed, drained",
@@ -45715,9 +44641,7 @@
         "amount": 1,
         "base_amount": 30.0
       }
-    ],
-    "serving_grams": 27.0,
-    "serving_desc": "1 eggplant"
+    ]
   },
   {
     "name": "Eggplant, pickled",
@@ -45755,8 +44679,8 @@
         "base_amount": 4.0
       }
     ],
-    "serving_grams": 4.0,
-    "serving_desc": "1 leaf"
+    "serving_grams": 390.0,
+    "serving_desc": "1 endive"
   },
   {
     "name": "Fennel, raw",
@@ -45813,9 +44737,7 @@
         "amount": 1,
         "base_amount": 3.0
       }
-    ],
-    "serving_grams": 3.0,
-    "serving_desc": "1 clove"
+    ]
   },
   {
     "name": "Garlic, peeled, cooked",
@@ -45830,9 +44752,7 @@
         "amount": 1,
         "base_amount": 2.0
       }
-    ],
-    "serving_grams": 2.0,
-    "serving_desc": "1 clove"
+    ]
   },
   {
     "name": "Gherkin, pickled, drained",
@@ -45852,9 +44772,7 @@
         "amount": 1,
         "base_amount": 25.0
       }
-    ],
-    "serving_grams": 6.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Ginger, peeled, raw",
@@ -45885,9 +44803,7 @@
         "amount": 1,
         "base_amount": 2.0
       }
-    ],
-    "serving_grams": 2.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Herbs, mixed, raw",
@@ -45923,9 +44839,7 @@
         "amount": 1,
         "base_amount": 251.0
       }
-    ],
-    "serving_grams": 26.0,
-    "serving_desc": "1 leaf"
+    ]
   },
   {
     "name": "Kale, cooked",
@@ -45945,9 +44859,7 @@
         "amount": 1,
         "base_amount": 176.0
       }
-    ],
-    "serving_grams": 18.0,
-    "serving_desc": "1 leaf"
+    ]
   },
   {
     "name": "Kim chi (kimchi)",
@@ -46020,9 +44932,7 @@
         "amount": 1,
         "base_amount": 4.0
       }
-    ],
-    "serving_grams": 4.0,
-    "serving_desc": "1 leaf"
+    ]
   },
   {
     "name": "Lettuce, iceberg, raw",
@@ -46042,9 +44952,7 @@
         "amount": 1,
         "base_amount": 417.0
       }
-    ],
-    "serving_grams": 5.0,
-    "serving_desc": "1 leaf"
+    ]
   },
   {
     "name": "Lettuce, green leaves (oak, mignonette etc.)",
@@ -46065,8 +44973,8 @@
         "base_amount": 230.0
       }
     ],
-    "serving_grams": 4.0,
-    "serving_desc": "1 leaf"
+    "serving_grams": 230.0,
+    "serving_desc": "1 lettuce"
   },
   {
     "name": "Lettuce, red leaves",
@@ -46087,8 +44995,8 @@
         "base_amount": 230.0
       }
     ],
-    "serving_grams": 4.0,
-    "serving_desc": "1 leaf"
+    "serving_grams": 230.0,
+    "serving_desc": "1 lettuce"
   },
   {
     "name": "Lettuce, raw",
@@ -46108,9 +45016,7 @@
         "amount": 1,
         "base_amount": 5.0
       }
-    ],
-    "serving_grams": 5.0,
-    "serving_desc": "1 leaf"
+    ]
   },
   {
     "name": "Lettuce, cooked",
@@ -46130,9 +45036,7 @@
         "amount": 1,
         "base_amount": 300.0
       }
-    ],
-    "serving_grams": 6.8,
-    "serving_desc": "1 leaf"
+    ]
   },
   {
     "name": "Marjoram, fresh, raw",
@@ -46262,9 +45166,7 @@
         "amount": 1,
         "base_amount": 220.0
       }
-    ],
-    "serving_grams": 60.0,
-    "serving_desc": "1 packet"
+    ]
   },
   {
     "name": "Mixed vegetables, Asian greens, raw",
@@ -46442,9 +45344,7 @@
         "amount": 1,
         "base_amount": 5.8
       }
-    ],
-    "serving_grams": 5.8,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Mushroom, common, baked, roasted, fried, stir-fried, grilled or BBQ'd, no added fat",
@@ -46465,8 +45365,8 @@
         "base_amount": 3.1
       }
     ],
-    "serving_grams": 3.1,
-    "serving_desc": "1 slice"
+    "serving_grams": 6.4,
+    "serving_desc": "1 mushroom"
   },
   {
     "name": "Mushroom, common, baked, roasted, fried, stir-fried, grilled or BBQ'd, added fat",
@@ -46487,8 +45387,8 @@
         "base_amount": 6.4
       }
     ],
-    "serving_grams": 3.1,
-    "serving_desc": "1 slice"
+    "serving_grams": 6.4,
+    "serving_desc": "1 mushroom"
   },
   {
     "name": "Mushroom, common, boiled, microwaved or steamed, drained",
@@ -46509,8 +45409,8 @@
         "base_amount": 4.6
       }
     ],
-    "serving_grams": 4.6,
-    "serving_desc": "1 slice"
+    "serving_grams": 7.9,
+    "serving_desc": "1 mushroom"
   },
   {
     "name": "Mushroom, canned in brine, drained",
@@ -46530,9 +45430,7 @@
         "amount": 1,
         "base_amount": 220.0
       }
-    ],
-    "serving_grams": 13.2,
-    "serving_desc": "1 mushroom"
+    ]
   },
   {
     "name": "Mushroom, dried",
@@ -46648,9 +45546,7 @@
         "amount": 1,
         "base_amount": 4.0
       }
-    ],
-    "serving_grams": 4.0,
-    "serving_desc": "1 olive"
+    ]
   },
   {
     "name": "Olive, green, pimento stuffed, drained",
@@ -46665,9 +45561,7 @@
         "amount": 1,
         "base_amount": 4.0
       }
-    ],
-    "serving_grams": 4.0,
-    "serving_desc": "1 olive"
+    ]
   },
   {
     "name": "Onion, mature, brown skinned, peeled, raw",
@@ -46687,9 +45581,7 @@
         "amount": 1,
         "base_amount": 12.4
       }
-    ],
-    "serving_grams": 12.4,
-    "serving_desc": "1 slice or ring"
+    ]
   },
   {
     "name": "Onion, mature, red skinned, peeled, raw",
@@ -46717,9 +45609,7 @@
         "amount": 1,
         "base_amount": 12.4
       }
-    ],
-    "serving_grams": 12.4,
-    "serving_desc": "1 slice or ring"
+    ]
   },
   {
     "name": "Onion, mature, peeled, raw",
@@ -46739,9 +45629,7 @@
         "amount": 1,
         "base_amount": 12.4
       }
-    ],
-    "serving_grams": 12.4,
-    "serving_desc": "1 slice or ring"
+    ]
   },
   {
     "name": "Onion, mature, peeled, baked, roasted, fried, stir-fried, grilled or BBQ'd, no added fat",
@@ -46761,9 +45649,7 @@
         "amount": 1,
         "base_amount": 7.7
       }
-    ],
-    "serving_grams": 7.7,
-    "serving_desc": "1 slice or ring"
+    ]
   },
   {
     "name": "Onion, mature, peeled, baked, roasted, fried, stir-fried, grilled or BBQ'd, added fat",
@@ -46783,9 +45669,7 @@
         "amount": 1,
         "base_amount": 7.7
       }
-    ],
-    "serving_grams": 7.7,
-    "serving_desc": "1 slice or ring"
+    ]
   },
   {
     "name": "Onion, mature, peeled, boiled, microwaved or steamed, drained",
@@ -46805,9 +45689,7 @@
         "amount": 1,
         "base_amount": 11.2
       }
-    ],
-    "serving_grams": 11.2,
-    "serving_desc": "1 slice or ring"
+    ]
   },
   {
     "name": "Onion, pickled, drained, commercial",
@@ -46903,9 +45785,7 @@
         "amount": 1,
         "base_amount": 8.4
       }
-    ],
-    "serving_grams": 8.4,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Parsnip, peeled, baked, roasted, fried, stir-fried, grilled or BBQ'd, no added fat",
@@ -46925,9 +45805,7 @@
         "amount": 1,
         "base_amount": 8.4
       }
-    ],
-    "serving_grams": 8.4,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Parsnip, peeled, baked, roasted, fried, stir-fried, grilled or BBQ'd, added fat",
@@ -46947,9 +45825,7 @@
         "amount": 1,
         "base_amount": 8.4
       }
-    ],
-    "serving_grams": 8.4,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Parsnip, peeled, boiled, microwaved or steamed, drained",
@@ -46969,9 +45845,7 @@
         "amount": 1,
         "base_amount": 8.4
       }
-    ],
-    "serving_grams": 8.4,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Pea, green, raw",
@@ -46986,9 +45860,7 @@
         "amount": 1,
         "base_amount": 1.2
       }
-    ],
-    "serving_grams": 1.2,
-    "serving_desc": "1 pea"
+    ]
   },
   {
     "name": "Pea, green, cooked, no added fat",
@@ -47008,9 +45880,7 @@
         "amount": 1,
         "base_amount": 4.0
       }
-    ],
-    "serving_grams": 1.0,
-    "serving_desc": "1 pea"
+    ]
   },
   {
     "name": "Pea, green, cooked, added fat",
@@ -47025,9 +45895,7 @@
         "amount": 1,
         "base_amount": 1.0
       }
-    ],
-    "serving_grams": 1.0,
-    "serving_desc": "1 pea"
+    ]
   },
   {
     "name": "Pea, green, canned, drained, cooked",
@@ -47042,9 +45910,7 @@
         "amount": 1,
         "base_amount": 1.0
       }
-    ],
-    "serving_grams": 1.0,
-    "serving_desc": "1 pea"
+    ]
   },
   {
     "name": "Pickles, mustard, sweet",
@@ -47333,9 +46199,7 @@
         "amount": 1,
         "base_amount": 120.0
       }
-    ],
-    "serving_grams": 10.0,
-    "serving_desc": "1 chip"
+    ]
   },
   {
     "name": "Potato, chips, purchased frozen, deep fried or fried, fat not further defined",
@@ -47407,8 +46271,8 @@
         "base_amount": 3.9
       }
     ],
-    "serving_grams": 3.9,
-    "serving_desc": "1 chip"
+    "serving_grams": 100.0,
+    "serving_desc": "1 takeaway serve"
   },
   {
     "name": "Potato, chips, takeaway outlet, deep fried, monounsaturated oil, unsalted",
@@ -47429,8 +46293,8 @@
         "base_amount": 100.0
       }
     ],
-    "serving_grams": 3.9,
-    "serving_desc": "1 chip"
+    "serving_grams": 100.0,
+    "serving_desc": "1 takeaway serve"
   },
   {
     "name": "Potato, chips, takeaway outlet, deep fried, blended oil, salted",
@@ -47455,9 +46319,7 @@
         "amount": 1,
         "base_amount": 3.9
       }
-    ],
-    "serving_grams": 3.9,
-    "serving_desc": "1 chip"
+    ]
   },
   {
     "name": "Potato, chips, takeaway outlet, deep fried, blended oil, unsalted",
@@ -47482,9 +46344,7 @@
         "amount": 1,
         "base_amount": 3.9
       }
-    ],
-    "serving_grams": 3.9,
-    "serving_desc": "1 chip"
+    ]
   },
   {
     "name": "Potato, gem, nugget or royal, purchased frozen, par-fried in canola oil, raw",
@@ -47512,9 +46372,7 @@
         "amount": 1,
         "base_amount": 25.0
       }
-    ],
-    "serving_grams": 7.5,
-    "serving_desc": "1 gem"
+    ]
   },
   {
     "name": "Potato, gem, nugget or royal, purchased frozen, deep fried or fried",
@@ -47534,9 +46392,7 @@
         "amount": 1,
         "base_amount": 15.0
       }
-    ],
-    "serving_grams": 7.5,
-    "serving_desc": "1 gem"
+    ]
   },
   {
     "name": "Potato, hash brown, purchased frozen, par-fried in canola oil, raw",
@@ -47694,9 +46550,7 @@
         "amount": 1,
         "base_amount": 22.0
       }
-    ],
-    "serving_grams": 22.0,
-    "serving_desc": "1 wedge"
+    ]
   },
   {
     "name": "Potato, scallop, deep fried, salted",
@@ -47818,8 +46672,8 @@
         "base_amount": 20.0
       }
     ],
-    "serving_grams": 3.0,
-    "serving_desc": "1 slice"
+    "serving_grams": 20.0,
+    "serving_desc": "1 radish"
   },
   {
     "name": "Rocket, fresh, raw",
@@ -47840,8 +46694,8 @@
         "base_amount": 60.0
       }
     ],
-    "serving_grams": 1.0,
-    "serving_desc": "1 leaf"
+    "serving_grams": 60.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Rocket, packaged, raw",
@@ -47862,8 +46716,8 @@
         "base_amount": 60.0
       }
     ],
-    "serving_grams": 1.0,
-    "serving_desc": "1 leaf"
+    "serving_grams": 60.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Rocket, cooked",
@@ -47915,9 +46769,7 @@
         "amount": 1,
         "base_amount": 0.5
       }
-    ],
-    "serving_grams": 3.0,
-    "serving_desc": "1 packet"
+    ]
   },
   {
     "name": "Seaweed, cooked",
@@ -47932,9 +46784,7 @@
         "amount": 1,
         "base_amount": 2.5
       }
-    ],
-    "serving_grams": 2.5,
-    "serving_desc": "1 sheet"
+    ]
   },
   {
     "name": "Salad, seaweed",
@@ -47996,9 +46846,7 @@
         "amount": 1,
         "base_amount": 340.0
       }
-    ],
-    "serving_grams": 42.0,
-    "serving_desc": "1 leaf"
+    ]
   },
   {
     "name": "Silverbeet, cooked",
@@ -48018,9 +46866,7 @@
         "amount": 1,
         "base_amount": 290.0
       }
-    ],
-    "serving_grams": 36.0,
-    "serving_desc": "1 leaf"
+    ]
   },
   {
     "name": "Snow pea, raw",
@@ -48035,9 +46881,7 @@
         "amount": 1,
         "base_amount": 4.0
       }
-    ],
-    "serving_grams": 4.0,
-    "serving_desc": "1 snow pea"
+    ]
   },
   {
     "name": "Sugar snap pea, raw",
@@ -48052,9 +46896,7 @@
         "amount": 1,
         "base_amount": 3.3
       }
-    ],
-    "serving_grams": 3.3,
-    "serving_desc": "1 sugar snap pea"
+    ]
   },
   {
     "name": "Snow pea, baked, roasted, fried, stir-fried, grilled or BBQ'd, no added fat",
@@ -48069,9 +46911,7 @@
         "amount": 1,
         "base_amount": 4.0
       }
-    ],
-    "serving_grams": 4.0,
-    "serving_desc": "1 snow pea"
+    ]
   },
   {
     "name": "Snow pea, baked, roasted, fried, stir-fried, grilled or BBQ'd, added fat",
@@ -48086,9 +46926,7 @@
         "amount": 1,
         "base_amount": 4.0
       }
-    ],
-    "serving_grams": 4.0,
-    "serving_desc": "1 snow pea"
+    ]
   },
   {
     "name": "Snow pea, boiled, microwaved or steamed, drained",
@@ -48103,9 +46941,7 @@
         "amount": 1,
         "base_amount": 4.0
       }
-    ],
-    "serving_grams": 4.0,
-    "serving_desc": "1 snow pea"
+    ]
   },
   {
     "name": "Spinach, baby, fresh, raw",
@@ -48126,8 +46962,8 @@
         "base_amount": 60.0
       }
     ],
-    "serving_grams": 1.0,
-    "serving_desc": "1 leaf"
+    "serving_grams": 60.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Spinach, baby, packaged, raw",
@@ -48148,8 +46984,8 @@
         "base_amount": 60.0
       }
     ],
-    "serving_grams": 1.0,
-    "serving_desc": "1 leaf"
+    "serving_grams": 60.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Spinach, mature, fresh, raw",
@@ -48169,9 +47005,7 @@
         "amount": 1,
         "base_amount": 10.0
       }
-    ],
-    "serving_grams": 10.0,
-    "serving_desc": "1 leaf"
+    ]
   },
   {
     "name": "Spinach, fresh, boiled, microwaved or steamed, drained",
@@ -48191,9 +47025,7 @@
         "amount": 1,
         "base_amount": 8.5
       }
-    ],
-    "serving_grams": 8.5,
-    "serving_desc": "1 leaf"
+    ]
   },
   {
     "name": "Spinach, purchased frozen, boiled, microwaved or steamed, drained",
@@ -48241,9 +47073,7 @@
         "amount": 1,
         "base_amount": 17.6
       }
-    ],
-    "serving_grams": 17.6,
-    "serving_desc": "1 handful"
+    ]
   },
   {
     "name": "Sprout, bean, raw",
@@ -48337,9 +47167,7 @@
         "amount": 1,
         "base_amount": 3.3
       }
-    ],
-    "serving_grams": 3.3,
-    "serving_desc": "1 sugar snap pea"
+    ]
   },
   {
     "name": "Swede, peeled, raw",
@@ -48410,9 +47238,7 @@
         "amount": 1,
         "base_amount": 22.0
       }
-    ],
-    "serving_grams": 22.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Sweet potato, orange flesh, peeled, baked, roasted, fried, stir-fried, grilled or BBQ'd, added fat",
@@ -48432,9 +47258,7 @@
         "amount": 1,
         "base_amount": 167.0
       }
-    ],
-    "serving_grams": 22.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Sweet potato, orange flesh, peeled, boiled, microwaved or steamed, drained",
@@ -48454,9 +47278,7 @@
         "amount": 1,
         "base_amount": 183.0
       }
-    ],
-    "serving_grams": 22.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Sweet potato, orange flesh, mashed, added fat",
@@ -48518,9 +47340,7 @@
         "amount": 1,
         "base_amount": 167.0
       }
-    ],
-    "serving_grams": 22.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Sweet potato, purple flesh, peeled, raw",
@@ -48591,9 +47411,7 @@
         "amount": 1,
         "base_amount": 10.0
       }
-    ],
-    "serving_grams": 5.7,
-    "serving_desc": "1 chip"
+    ]
   },
   {
     "name": "Tamarind, paste or puree, raw",
@@ -48736,8 +47554,8 @@
         "base_amount": 4.0
       }
     ],
-    "serving_grams": 2.5,
-    "serving_desc": "1 piece"
+    "serving_grams": 12.5,
+    "serving_desc": "1 slice"
   },
   {
     "name": "Tomato, cooked, added fat",
@@ -48757,9 +47575,7 @@
         "amount": 1,
         "base_amount": 99.0
       }
-    ],
-    "serving_grams": 13.5,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Tomato, paste, added salt",
@@ -48779,9 +47595,7 @@
         "amount": 1,
         "base_amount": 140.0
       }
-    ],
-    "serving_grams": 50.0,
-    "serving_desc": "1 packet"
+    ]
   },
   {
     "name": "Tomato, paste, no added salt",
@@ -48826,9 +47640,7 @@
         "amount": 1,
         "base_amount": 4.8
       }
-    ],
-    "serving_grams": 4.8,
-    "serving_desc": "1 tomato"
+    ]
   },
   {
     "name": "Tomato, whole, canned in tomato juice, undrained",
@@ -48933,9 +47745,7 @@
         "amount": 1,
         "base_amount": 122.0
       }
-    ],
-    "serving_grams": 15.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Turnip, white, peeled, cooked",
@@ -48955,9 +47765,7 @@
         "amount": 1,
         "base_amount": 116.0
       }
-    ],
-    "serving_grams": 14.5,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Vine leaf, grape, canned",
@@ -48972,9 +47780,7 @@
         "amount": 1,
         "base_amount": 4.0
       }
-    ],
-    "serving_grams": 4.0,
-    "serving_desc": "1 leaf"
+    ]
   },
   {
     "name": "Vine leaf, stuffed",
@@ -49027,9 +47833,7 @@
         "amount": 1,
         "base_amount": 227.0
       }
-    ],
-    "serving_grams": 7.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Watercress, raw",
@@ -49065,9 +47869,7 @@
         "amount": 1,
         "base_amount": 167.0
       }
-    ],
-    "serving_grams": 22.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Zucchini, green skin, raw",
@@ -49087,9 +47889,7 @@
         "amount": 1,
         "base_amount": 93.0
       }
-    ],
-    "serving_grams": 16.3,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Zucchini, green skin, baked, roasted, fried, stir-fried, grilled or BBQ'd, no added fat",
@@ -49109,9 +47909,7 @@
         "amount": 1,
         "base_amount": 65.0
       }
-    ],
-    "serving_grams": 11.4,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Zucchini, green skin, baked, roasted, fried, stir-fried, grilled or BBQ'd, added fat",
@@ -49131,9 +47929,7 @@
         "amount": 1,
         "base_amount": 65.0
       }
-    ],
-    "serving_grams": 11.4,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Zucchini, green skin, boiled, microwaved or steamed, drained",
@@ -49153,9 +47949,7 @@
         "amount": 1,
         "base_amount": 78.0
       }
-    ],
-    "serving_grams": 11.4,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Zucchini, golden, raw",
@@ -49647,9 +48441,7 @@
         "amount": 1,
         "base_amount": 290.0
       }
-    ],
-    "serving_grams": 220.0,
-    "serving_desc": "1 bowl"
+    ]
   },
   {
     "name": "Salad, chicken caesar, made with lettuce, bacon, parmesan, croutons, egg & chicken, no added dressing",
@@ -49702,9 +48494,7 @@
         "amount": 1,
         "base_amount": 400.0
       }
-    ],
-    "serving_grams": 220.0,
-    "serving_desc": "1 bowl"
+    ]
   },
   {
     "name": "Salad, coleslaw, homemade, added dressing",
@@ -49732,9 +48522,7 @@
         "amount": 1,
         "base_amount": 400.0
       }
-    ],
-    "serving_grams": 220.0,
-    "serving_desc": "1 bowl"
+    ]
   },
   {
     "name": "Salad, couscous, added dressing",
@@ -49778,9 +48566,7 @@
         "amount": 1,
         "base_amount": 270.0
       }
-    ],
-    "serving_grams": 220.0,
-    "serving_desc": "1 bowl"
+    ]
   },
   {
     "name": "Salad, garden, added bacon, no added dressing",
@@ -49800,9 +48586,7 @@
         "amount": 1,
         "base_amount": 270.0
       }
-    ],
-    "serving_grams": 220.0,
-    "serving_desc": "1 bowl"
+    ]
   },
   {
     "name": "Salad, garden, added cheese, no added dressing",
@@ -49822,9 +48606,7 @@
         "amount": 1,
         "base_amount": 270.0
       }
-    ],
-    "serving_grams": 220.0,
-    "serving_desc": "1 bowl"
+    ]
   },
   {
     "name": "Salad, garden, added bacon & cheese, no added dressing",
@@ -49844,9 +48626,7 @@
         "amount": 1,
         "base_amount": 270.0
       }
-    ],
-    "serving_grams": 220.0,
-    "serving_desc": "1 bowl"
+    ]
   },
   {
     "name": "Salad, garden, added meat, no added dressing",
@@ -49907,9 +48687,7 @@
         "amount": 1,
         "base_amount": 270.0
       }
-    ],
-    "serving_grams": 220.0,
-    "serving_desc": "1 bowl"
+    ]
   },
   {
     "name": "Salad, garden, added chicken, no added dressing",
@@ -49996,9 +48774,7 @@
         "amount": 1,
         "base_amount": 270.0
       }
-    ],
-    "serving_grams": 220.0,
-    "serving_desc": "1 bowl"
+    ]
   },
   {
     "name": "Salad, garden, added salmon or tuna, no added dressing",
@@ -50181,9 +48957,7 @@
         "amount": 1,
         "base_amount": 198.0
       }
-    ],
-    "serving_grams": 198.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Zucchini slice, with bacon",
@@ -50473,9 +49247,7 @@
         "amount": 1,
         "base_amount": 2.5
       }
-    ],
-    "serving_grams": 2.5,
-    "serving_desc": "1 bean"
+    ]
   },
   {
     "name": "Bean, refried, canned",
@@ -50897,8 +49669,8 @@
         "base_amount": 1.3
       }
     ],
-    "serving_grams": 1.3,
-    "serving_desc": "1 chip"
+    "serving_grams": 21.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Chip or crisp, soy (soya)",
@@ -50924,8 +49696,8 @@
         "base_amount": 2.0
       }
     ],
-    "serving_grams": 2.0,
-    "serving_desc": "1 chip"
+    "serving_grams": 19.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Coconut chips or crisps, flavoured",
@@ -50973,8 +49745,8 @@
         "base_amount": 12.0
       }
     ],
-    "serving_grams": 2.4,
-    "serving_desc": "1 chip"
+    "serving_grams": 19.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Corn chips, plain, salted",
@@ -51000,8 +49772,8 @@
         "base_amount": 12.0
       }
     ],
-    "serving_grams": 2.4,
-    "serving_desc": "1 chip"
+    "serving_grams": 19.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Corn chips, flavoured, salted",
@@ -51027,8 +49799,8 @@
         "base_amount": 12.0
       }
     ],
-    "serving_grams": 2.4,
-    "serving_desc": "1 chip"
+    "serving_grams": 19.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Extruded snack, cheese flavoured",
@@ -51058,9 +49830,7 @@
         "amount": 1,
         "base_amount": 9.0
       }
-    ],
-    "serving_grams": 1.0,
-    "serving_desc": "1 chip"
+    ]
   },
   {
     "name": "Extruded snack, non-cheese flavoured",
@@ -51090,9 +49860,7 @@
         "amount": 1,
         "base_amount": 1.0
       }
-    ],
-    "serving_grams": 1.0,
-    "serving_desc": "1 chip"
+    ]
   },
   {
     "name": "Fish skin, dried",
@@ -51158,9 +49926,7 @@
         "amount": 1,
         "base_amount": 4.0
       }
-    ],
-    "serving_grams": 4.0,
-    "serving_desc": "1 pappadam"
+    ]
   },
   {
     "name": "Pappadam, microwaved, no added oil or salt",
@@ -51175,9 +49941,7 @@
         "amount": 1,
         "base_amount": 3.3
       }
-    ],
-    "serving_grams": 3.3,
-    "serving_desc": "1 pappadam"
+    ]
   },
   {
     "name": "Pork rind/crackling, snack, commercial",
@@ -51215,8 +49979,8 @@
         "base_amount": 1.7
       }
     ],
-    "serving_grams": 1.7,
-    "serving_desc": "1 pretzel"
+    "serving_grams": 25.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Popcorn, plain, air-popped, no added fat or salt",
@@ -51241,9 +50005,7 @@
         "amount": 1,
         "base_amount": 3.0
       }
-    ],
-    "serving_grams": 13.0,
-    "serving_desc": "1 packet"
+    ]
   },
   {
     "name": "Popcorn, plain, salted",
@@ -51268,9 +50030,7 @@
         "amount": 1,
         "base_amount": 3.0
       }
-    ],
-    "serving_grams": 13.0,
-    "serving_desc": "1 packet"
+    ]
   },
   {
     "name": "Popcorn, butter flavoured, salted",
@@ -51295,9 +50055,7 @@
         "amount": 1,
         "base_amount": 3.0
       }
-    ],
-    "serving_grams": 13.0,
-    "serving_desc": "1 packet"
+    ]
   },
   {
     "name": "Popcorn, butter flavoured, reduced fat & salt",
@@ -51322,9 +50080,7 @@
         "amount": 1,
         "base_amount": 80.0
       }
-    ],
-    "serving_grams": 13.0,
-    "serving_desc": "1 packet"
+    ]
   },
   {
     "name": "Popcorn, sweet, flavoured, salted",
@@ -51394,8 +50150,8 @@
         "base_amount": 12.0
       }
     ],
-    "serving_grams": 1.4,
-    "serving_desc": "1 chip"
+    "serving_grams": 120.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Potato crisps or chips, plain, unsalted",
@@ -51421,8 +50177,8 @@
         "base_amount": 12.0
       }
     ],
-    "serving_grams": 1.4,
-    "serving_desc": "1 chip"
+    "serving_grams": 19.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Potato crisps or chips, plain, salted",
@@ -51448,8 +50204,8 @@
         "base_amount": 1.4
       }
     ],
-    "serving_grams": 1.4,
-    "serving_desc": "1 chip"
+    "serving_grams": 19.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Potato crisps or chips, salt & vinegar flavoured",
@@ -51475,8 +50231,8 @@
         "base_amount": 1.4
       }
     ],
-    "serving_grams": 1.4,
-    "serving_desc": "1 chip"
+    "serving_grams": 19.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Potato crisps or chips, other flavours",
@@ -51502,8 +50258,8 @@
         "base_amount": 12.0
       }
     ],
-    "serving_grams": 1.4,
-    "serving_desc": "1 chip"
+    "serving_grams": 19.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Potato crisps or chips, baked, all flavours",
@@ -51529,8 +50285,8 @@
         "base_amount": 19.0
       }
     ],
-    "serving_grams": 2.8,
-    "serving_desc": "1 chip"
+    "serving_grams": 19.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Potato crisps or chips, puffed, all flavours",
@@ -51556,8 +50312,8 @@
         "base_amount": 12.0
       }
     ],
-    "serving_grams": 1.4,
-    "serving_desc": "1 chip"
+    "serving_grams": 90.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Potato crisps or chips, reformed (pringles), all flavours",
@@ -51578,8 +50334,8 @@
         "base_amount": 1.9
       }
     ],
-    "serving_grams": 1.9,
-    "serving_desc": "1 chip"
+    "serving_grams": 53.0,
+    "serving_desc": "1 tube"
   },
   {
     "name": "Potato crisps or chips, straws (french fries), all flavours",
@@ -51605,8 +50361,8 @@
         "base_amount": 1.4
       }
     ],
-    "serving_grams": 1.4,
-    "serving_desc": "1 chip"
+    "serving_grams": 18.3,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Prawn cracker, commercial, fried",
@@ -51627,8 +50383,8 @@
         "base_amount": 2.0
       }
     ],
-    "serving_grams": 2.0,
-    "serving_desc": "1 cracker"
+    "serving_grams": 90.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Rice crisps or chips, extruded, flavoured",
@@ -51681,8 +50437,8 @@
         "base_amount": 12.0
       }
     ],
-    "serving_grams": 1.4,
-    "serving_desc": "1 chip"
+    "serving_grams": 30.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Snack mix, Bhuja",
@@ -51738,8 +50494,8 @@
         "base_amount": 2.4
       }
     ],
-    "serving_grams": 2.4,
-    "serving_desc": "1 chip"
+    "serving_grams": 19.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Sweet potato crisps or chips, plain, salted",
@@ -51809,8 +50565,8 @@
         "base_amount": 12.0
       }
     ],
-    "serving_grams": 1.9,
-    "serving_desc": "1 chip"
+    "serving_grams": 19.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Vegetable crisps or chips, plain, salted",
@@ -51836,8 +50592,8 @@
         "base_amount": 21.0
       }
     ],
-    "serving_grams": 1.4,
-    "serving_desc": "1 chip"
+    "serving_grams": 21.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Wheat snack, grain waves, all flavours",
@@ -51863,8 +50619,8 @@
         "base_amount": 13.8
       }
     ],
-    "serving_grams": 2.3,
-    "serving_desc": "1 grain wave"
+    "serving_grams": 22.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Glucose, liquid or syrup",
@@ -51901,9 +50657,7 @@
         "amount": 1,
         "base_amount": 15.0
       }
-    ],
-    "serving_grams": 15.0,
-    "serving_desc": "1 packet"
+    ]
   },
   {
     "name": "Honey, raw",
@@ -52024,9 +50778,7 @@
         "amount": 1,
         "base_amount": 3.0
       }
-    ],
-    "serving_grams": 3.0,
-    "serving_desc": "1 packet"
+    ]
   },
   {
     "name": "Intense sweetener, containing sucralose, powder",
@@ -52041,9 +50793,7 @@
         "amount": 1,
         "base_amount": 1.0
       }
-    ],
-    "serving_grams": 1.0,
-    "serving_desc": "1 packet"
+    ]
   },
   {
     "name": "Intense sweetener, containing xylitol, powder",
@@ -52058,9 +50808,7 @@
         "amount": 1,
         "base_amount": 4.0
       }
-    ],
-    "serving_grams": 4.0,
-    "serving_desc": "1 packet"
+    ]
   },
   {
     "name": "Intense sweetener, containing stevia, liquid",
@@ -52095,9 +50843,7 @@
         "amount": 1,
         "base_amount": 0.1
       }
-    ],
-    "serving_grams": 1.0,
-    "serving_desc": "1 packet"
+    ]
   },
   {
     "name": "Intense sweetener, containing stevia/thaumatin, powder/granules",
@@ -52112,9 +50858,7 @@
         "amount": 1,
         "base_amount": 1.0
       }
-    ],
-    "serving_grams": 1.0,
-    "serving_desc": "1 packet"
+    ]
   },
   {
     "name": "Sugar, brown",
@@ -52140,8 +50884,8 @@
         "base_amount": 4.5
       }
     ],
-    "serving_grams": 3.0,
-    "serving_desc": "1 packet"
+    "serving_grams": 155.0,
+    "serving_desc": "1 cup"
   },
   {
     "name": "Sugar, cinnamon",
@@ -52218,8 +50962,8 @@
         "base_amount": 4.5
       }
     ],
-    "serving_grams": 3.0,
-    "serving_desc": "1 packet"
+    "serving_grams": 207.5,
+    "serving_desc": "1 cup"
   },
   {
     "name": "Sugar, raw, low GI (glucose index)",
@@ -52240,8 +50984,8 @@
         "base_amount": 3.0
       }
     ],
-    "serving_grams": 3.0,
-    "serving_desc": "1 packet"
+    "serving_grams": 207.5,
+    "serving_desc": "1 cup"
   },
   {
     "name": "Sugar, white, fruit sugar (fructose), granulated or lump",
@@ -52284,8 +51028,8 @@
         "base_amount": 3.0
       }
     ],
-    "serving_grams": 3.0,
-    "serving_desc": "1 packet"
+    "serving_grams": 210.0,
+    "serving_desc": "1 cup"
   },
   {
     "name": "Sugar, white, icing",
@@ -52340,8 +51084,8 @@
         "base_amount": 3.0
       }
     ],
-    "serving_grams": 3.0,
-    "serving_desc": "1 packet"
+    "serving_grams": 210.0,
+    "serving_desc": "1 cup"
   },
   {
     "name": "Sugar, with added intense sweeteners, reduced energy",
@@ -52362,8 +51106,8 @@
         "base_amount": 207.5
       }
     ],
-    "serving_grams": 3.0,
-    "serving_desc": "1 packet"
+    "serving_grams": 207.5,
+    "serving_desc": "1 cup"
   },
   {
     "name": "Syrup, agave, light & dark",
@@ -52750,9 +51494,7 @@
         "amount": 1,
         "base_amount": 28.0
       }
-    ],
-    "serving_grams": 28.0,
-    "serving_desc": "1 tablespoon"
+    ]
   },
   {
     "name": "Spread, hazelnut & chocolate flavoured",
@@ -52936,9 +51678,7 @@
         "amount": 1,
         "base_amount": 6.5
       }
-    ],
-    "serving_grams": 6.5,
-    "serving_desc": "1 square"
+    ]
   },
   {
     "name": "Bar, cherry & coconut centre, dark chocolate-coated",
@@ -53010,8 +51750,8 @@
         "base_amount": 3.6
       }
     ],
-    "serving_grams": 3.6,
-    "serving_desc": "1 clinker"
+    "serving_grams": 14.0,
+    "serving_desc": "1 bar"
   },
   {
     "name": "Bar, nougat & caramel centre, milk chocolate-coated",
@@ -53065,9 +51805,7 @@
         "amount": 1,
         "base_amount": 9.0
       }
-    ],
-    "serving_grams": 9.0,
-    "serving_desc": "1 chocolate"
+    ]
   },
   {
     "name": "Bar, turkish delight centre, milk chocolate-coated",
@@ -53119,9 +51857,7 @@
         "amount": 1,
         "base_amount": 20.0
       }
-    ],
-    "serving_grams": 14.0,
-    "serving_desc": "1 bar"
+    ]
   },
   {
     "name": "Bar, wafer & fudge or hazelnut, milk chocolate-coated",
@@ -53202,9 +51938,7 @@
         "amount": 1,
         "base_amount": 12.5
       }
-    ],
-    "serving_grams": 6.5,
-    "serving_desc": "1 square"
+    ]
   },
   {
     "name": "Chocolate, dark, high cocoa solids, >60% cocoa solids",
@@ -53239,9 +51973,7 @@
         "amount": 1,
         "base_amount": 12.0
       }
-    ],
-    "serving_grams": 6.5,
-    "serving_desc": "1 square"
+    ]
   },
   {
     "name": "Chocolate, dark, high cocoa solids, <60% cocoa solids",
@@ -53286,9 +52018,7 @@
         "amount": 1,
         "base_amount": 20.0
       }
-    ],
-    "serving_grams": 6.5,
-    "serving_desc": "1 square"
+    ]
   },
   {
     "name": "Chocolate, dark, fondant filled",
@@ -53328,9 +52058,7 @@
         "amount": 1,
         "base_amount": 20.6
       }
-    ],
-    "serving_grams": 6.5,
-    "serving_desc": "1 square"
+    ]
   },
   {
     "name": "Chocolate, dark, with dried fruit",
@@ -53365,9 +52093,7 @@
         "amount": 1,
         "base_amount": 6.5
       }
-    ],
-    "serving_grams": 6.5,
-    "serving_desc": "1 square"
+    ]
   },
   {
     "name": "Chocolate, dark, with dried fruit & nuts",
@@ -53402,9 +52128,7 @@
         "amount": 1,
         "base_amount": 20.6
       }
-    ],
-    "serving_grams": 6.5,
-    "serving_desc": "1 square"
+    ]
   },
   {
     "name": "Chocolate, dark, with nuts",
@@ -53439,9 +52163,7 @@
         "amount": 1,
         "base_amount": 6.5
       }
-    ],
-    "serving_grams": 6.5,
-    "serving_desc": "1 square"
+    ]
   },
   {
     "name": "Chocolate, dark, with additions (lollies/biscuits/nuts)",
@@ -53476,9 +52198,7 @@
         "amount": 1,
         "base_amount": 12.0
       }
-    ],
-    "serving_grams": 6.5,
-    "serving_desc": "1 square"
+    ]
   },
   {
     "name": "Chocolate, dark, no added sugar",
@@ -53513,9 +52233,7 @@
         "amount": 1,
         "base_amount": 6.5
       }
-    ],
-    "serving_grams": 6.5,
-    "serving_desc": "1 square"
+    ]
   },
   {
     "name": "Chocolate, liqueur-filled",
@@ -53587,9 +52305,7 @@
         "amount": 1,
         "base_amount": 6.5
       }
-    ],
-    "serving_grams": 6.5,
-    "serving_desc": "1 square"
+    ]
   },
   {
     "name": "Chocolate, milk, caramel or fondant filled",
@@ -53649,9 +52365,7 @@
         "amount": 1,
         "base_amount": 15.0
       }
-    ],
-    "serving_grams": 6.5,
-    "serving_desc": "1 square"
+    ]
   },
   {
     "name": "Chocolate, milk, with hazelnut paste",
@@ -53681,9 +52395,7 @@
         "amount": 1,
         "base_amount": 6.5
       }
-    ],
-    "serving_grams": 6.5,
-    "serving_desc": "1 square"
+    ]
   },
   {
     "name": "Chocolate, milk, with dried fruit & nuts",
@@ -53718,9 +52430,7 @@
         "amount": 1,
         "base_amount": 6.5
       }
-    ],
-    "serving_grams": 6.5,
-    "serving_desc": "1 square"
+    ]
   },
   {
     "name": "Chocolate, milk, with nuts",
@@ -53755,9 +52465,7 @@
         "amount": 1,
         "base_amount": 6.5
       }
-    ],
-    "serving_grams": 6.5,
-    "serving_desc": "1 square"
+    ]
   },
   {
     "name": "Chocolate, milk, with additions (lollies/biscuits/nuts)",
@@ -53797,9 +52505,7 @@
         "amount": 1,
         "base_amount": 6.5
       }
-    ],
-    "serving_grams": 6.5,
-    "serving_desc": "1 square"
+    ]
   },
   {
     "name": "Chocolate, milk, no added sugar",
@@ -53834,9 +52540,7 @@
         "amount": 1,
         "base_amount": 20.6
       }
-    ],
-    "serving_grams": 6.5,
-    "serving_desc": "1 square"
+    ]
   },
   {
     "name": "Chocolate, white",
@@ -53891,9 +52595,7 @@
         "amount": 1,
         "base_amount": 6.5
       }
-    ],
-    "serving_grams": 3.5,
-    "serving_desc": "1 chip or melt"
+    ]
   },
   {
     "name": "Chocolate, white, with additions (lollies/biscuits/nuts)",
@@ -53928,9 +52630,7 @@
         "amount": 1,
         "base_amount": 6.5
       }
-    ],
-    "serving_grams": 6.5,
-    "serving_desc": "1 square"
+    ]
   },
   {
     "name": "Chocolate, milk & white",
@@ -53975,9 +52675,7 @@
         "amount": 1,
         "base_amount": 12.0
       }
-    ],
-    "serving_grams": 6.5,
-    "serving_desc": "1 square"
+    ]
   },
   {
     "name": "Chocolate, dairy free",
@@ -54031,9 +52729,7 @@
         "amount": 1,
         "base_amount": 12.0
       }
-    ],
-    "serving_grams": 6.3,
-    "serving_desc": "1 lolly"
+    ]
   },
   {
     "name": "Chewing gum",
@@ -54054,8 +52750,8 @@
         "base_amount": 14.0
       }
     ],
-    "serving_grams": 1.4,
-    "serving_desc": "1 piece"
+    "serving_grams": 14.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Chewing gum, intense sweetened",
@@ -54076,8 +52772,8 @@
         "base_amount": 30.0
       }
     ],
-    "serving_grams": 2.5,
-    "serving_desc": "1 piece"
+    "serving_grams": 30.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Confectionery, berry, chocolate-coated",
@@ -54092,9 +52788,7 @@
         "amount": 1,
         "base_amount": 1.8
       }
-    ],
-    "serving_grams": 1.8,
-    "serving_desc": "1 chocolate coated berry"
+    ]
   },
   {
     "name": "Confectionery, cake decoration, sugar based (hundreds & thousands)",
@@ -54127,9 +52821,7 @@
         "amount": 1,
         "base_amount": 1.7
       }
-    ],
-    "serving_grams": 1.7,
-    "serving_desc": "1 m&m"
+    ]
   },
   {
     "name": "Confectionery, chocolate centre, sugar-coated",
@@ -54174,9 +52866,7 @@
         "amount": 1,
         "base_amount": 2.8
       }
-    ],
-    "serving_grams": 2.8,
-    "serving_desc": "1 jaffa"
+    ]
   },
   {
     "name": "Confectionery, chocolate crackle",
@@ -54213,9 +52903,7 @@
         "amount": 1,
         "base_amount": 50.0
       }
-    ],
-    "serving_grams": 28.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Confectionery, coffee bean, chocolate-coated",
@@ -54230,9 +52918,7 @@
         "amount": 1,
         "base_amount": 2.0
       }
-    ],
-    "serving_grams": 2.0,
-    "serving_desc": "1 chocolate coated coffee bean"
+    ]
   },
   {
     "name": "Confectionery, dried fruit & nut, chocolate-coated",
@@ -54247,9 +52933,7 @@
         "amount": 1,
         "base_amount": 1.0
       }
-    ],
-    "serving_grams": 1.0,
-    "serving_desc": "1 chocolate coated fruit or nut"
+    ]
   },
   {
     "name": "Confectionery, ginger, chocolate-coated",
@@ -54334,8 +53018,8 @@
         "base_amount": 20.0
       }
     ],
-    "serving_grams": 3.2,
-    "serving_desc": "1 piece"
+    "serving_grams": 20.0,
+    "serving_desc": "1 twist or strap"
   },
   {
     "name": "Confectionery, malt centre, chocolate coated",
@@ -54356,8 +53040,8 @@
         "base_amount": 2.5
       }
     ],
-    "serving_grams": 2.5,
-    "serving_desc": "1 malteser"
+    "serving_grams": 13.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Confectionery, marshmallow, chocolate & coconut-coated (snowball)",
@@ -54389,9 +53073,7 @@
         "amount": 1,
         "base_amount": 4.6
       }
-    ],
-    "serving_grams": 4.6,
-    "serving_desc": "1 chocolate coated nut"
+    ]
   },
   {
     "name": "Confectionery, peanut brittle",
@@ -54433,9 +53115,7 @@
         "amount": 1,
         "base_amount": 30.0
       }
-    ],
-    "serving_grams": 28.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Confectionery, rum ball (rumball)",
@@ -54467,9 +53147,7 @@
         "amount": 1,
         "base_amount": 1.8
       }
-    ],
-    "serving_grams": 1.8,
-    "serving_desc": "1 chocolate coated sultana"
+    ]
   },
   {
     "name": "Confectionery, truffle",
@@ -54506,9 +53184,7 @@
         "amount": 1,
         "base_amount": 50.0
       }
-    ],
-    "serving_grams": 28.0,
-    "serving_desc": "1 slice"
+    ]
   },
   {
     "name": "Confectionery, yoghurt, button",
@@ -54650,9 +53326,7 @@
         "amount": 1,
         "base_amount": 20.0
       }
-    ],
-    "serving_grams": 20.0,
-    "serving_desc": "1 tub"
+    ]
   },
   {
     "name": "Jelly, sugar sweetened, all flavours, prepared, added fruit",
@@ -54750,9 +53424,7 @@
         "amount": 1,
         "base_amount": 120.0
       }
-    ],
-    "serving_grams": 3.2,
-    "serving_desc": "1 bullet"
+    ]
   },
   {
     "name": "Licorice, allsorts",
@@ -54789,9 +53461,7 @@
         "amount": 1,
         "base_amount": 15.0
       }
-    ],
-    "serving_grams": 8.1,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Lollipop or chupa chup",
@@ -54846,8 +53516,8 @@
         "base_amount": 2.9
       }
     ],
-    "serving_grams": 2.9,
-    "serving_desc": "1 lolly"
+    "serving_grams": 15.0,
+    "serving_desc": "1 packet"
   },
   {
     "name": "Lolly, jelly varieties",
@@ -54867,9 +53537,7 @@
         "amount": 1,
         "base_amount": 15.0
       }
-    ],
-    "serving_grams": 5.0,
-    "serving_desc": "1 lolly"
+    ]
   },
   {
     "name": "Lolly, with fruit juice",
@@ -54889,9 +53557,7 @@
         "amount": 1,
         "base_amount": 15.0
       }
-    ],
-    "serving_grams": 5.0,
-    "serving_desc": "1 lolly"
+    ]
   },
   {
     "name": "Lolly, fruit flavoured, chewy",
@@ -54916,9 +53582,7 @@
         "amount": 1,
         "base_amount": 45.0
       }
-    ],
-    "serving_grams": 15.0,
-    "serving_desc": "1 packet"
+    ]
   },
   {
     "name": "Lolly, medicated cough lolly or lozenge",
@@ -54938,9 +53602,7 @@
         "amount": 1,
         "base_amount": 40.0
       }
-    ],
-    "serving_grams": 6.3,
-    "serving_desc": "1 lolly"
+    ]
   },
   {
     "name": "Lolly, mint flavoured, sugar sweetened",
@@ -54982,9 +53644,7 @@
         "amount": 1,
         "base_amount": 15.0
       }
-    ],
-    "serving_grams": 5.0,
-    "serving_desc": "1 lolly"
+    ]
   },
   {
     "name": "Lolly, no added sugar",
@@ -55021,9 +53681,7 @@
         "amount": 1,
         "base_amount": 2.5
       }
-    ],
-    "serving_grams": 2.5,
-    "serving_desc": "1 lolly"
+    ]
   },
   {
     "name": "Lolly, reduced sugar",
@@ -55043,9 +53701,7 @@
         "amount": 1,
         "base_amount": 5.0
       }
-    ],
-    "serving_grams": 5.0,
-    "serving_desc": "1 lolly"
+    ]
   },
   {
     "name": "Marzipan, almond paste",
@@ -55065,9 +53721,7 @@
         "amount": 1,
         "base_amount": 40.0
       }
-    ],
-    "serving_grams": 14.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Marshmallow, plain or flavoured",
@@ -55087,9 +53741,7 @@
         "amount": 1,
         "base_amount": 7.5
       }
-    ],
-    "serving_grams": 7.5,
-    "serving_desc": "1 marshmallow"
+    ]
   },
   {
     "name": "Marshmallow, no added sugar",
@@ -55110,8 +53762,8 @@
         "base_amount": 2.5
       }
     ],
-    "serving_grams": 2.5,
-    "serving_desc": "1 marshmallow"
+    "serving_grams": 70.0,
+    "serving_desc": "1 bag"
   },
   {
     "name": "Meringue, commercial",
@@ -55165,9 +53817,7 @@
         "amount": 1,
         "base_amount": 12.0
       }
-    ],
-    "serving_grams": 12.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Nougat, honey & nuts, traditional",
@@ -55187,9 +53837,7 @@
         "amount": 1,
         "base_amount": 12.0
       }
-    ],
-    "serving_grams": 12.0,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Pavlova, commercial",
@@ -55282,9 +53930,7 @@
         "amount": 1,
         "base_amount": 12.5
       }
-    ],
-    "serving_grams": 5.0,
-    "serving_desc": "1 lolly"
+    ]
   },
   {
     "name": "Confectionary, almond, chocolate-coated",
@@ -55299,9 +53945,7 @@
         "amount": 1,
         "base_amount": 2.1
       }
-    ],
-    "serving_grams": 2.1,
-    "serving_desc": "1 almond"
+    ]
   },
   {
     "name": "Turkish delight, plain",
@@ -55355,9 +53999,7 @@
         "amount": 1,
         "base_amount": 20.0
       }
-    ],
-    "serving_grams": 7.4,
-    "serving_desc": "1 piece"
+    ]
   },
   {
     "name": "Bar, snack, fruit leather (roll-ups)",
@@ -55802,9 +54444,7 @@
         "amount": 1,
         "base_amount": 60.0
       }
-    ],
-    "serving_grams": 11.5,
-    "serving_desc": "1 ball"
+    ]
   },
   {
     "name": "Bar, meal replacement, added vitamins & minerals",
@@ -55875,9 +54515,7 @@
         "amount": 1,
         "base_amount": 26.0
       }
-    ],
-    "serving_grams": 26.0,
-    "serving_desc": "1 ball"
+    ]
   },
   {
     "name": "Meal replacement powder, coffee flavour",
@@ -56305,9 +54943,7 @@
         "amount": 1,
         "base_amount": 250.0
       }
-    ],
-    "serving_grams": 5.0,
-    "serving_desc": "1 scoop"
+    ]
   },
   {
     "name": "Oral supplement powder, vanilla flavour, added vitamins & minerals (Sustagen Everyday)",
@@ -57434,9 +56070,7 @@
         "amount": 1,
         "base_amount": 2.5
       }
-    ],
-    "serving_grams": 2.5,
-    "serving_desc": "1 teaspoon"
+    ]
   },
   {
     "name": "Prebiotic powder",
@@ -57451,9 +56085,7 @@
         "amount": 1,
         "base_amount": 2.5
       }
-    ],
-    "serving_grams": 2.5,
-    "serving_desc": "1 teaspoon"
+    ]
   },
   {
     "name": "Amino acid or creatine drink, made with water",
@@ -58298,9 +56930,7 @@
         "amount": 1,
         "base_amount": 24.0
       }
-    ],
-    "serving_grams": 6.0,
-    "serving_desc": "1 teaspoon"
+    ]
   },
   {
     "name": "Spread, yeast, vegemite, gluten free",
@@ -58320,9 +56950,7 @@
         "amount": 1,
         "base_amount": 24.0
       }
-    ],
-    "serving_grams": 6.0,
-    "serving_desc": "1 teaspoon"
+    ]
   },
   {
     "name": "Spread, yeast, cheesybite",
@@ -58396,9 +57024,7 @@
         "amount": 1,
         "base_amount": 24.0
       }
-    ],
-    "serving_grams": 6.0,
-    "serving_desc": "1 teaspoon"
+    ]
   },
   {
     "name": "Spread, vegetable & yeast extract, Promite",
@@ -58418,9 +57044,7 @@
         "amount": 1,
         "base_amount": 24.0
       }
-    ],
-    "serving_grams": 6.0,
-    "serving_desc": "1 teaspoon"
+    ]
   },
   {
     "name": "Cardamom seed, dried, ground",
@@ -58443,9 +57067,7 @@
         "amount": 1,
         "base_amount": 3.0
       }
-    ],
-    "serving_grams": 3.0,
-    "serving_desc": "1 chilli"
+    ]
   },
   {
     "name": "Cinnamon, dried, ground",
@@ -58556,9 +57178,7 @@
         "amount": 1,
         "base_amount": 1.7
       }
-    ],
-    "serving_grams": 1.7,
-    "serving_desc": "1 packet"
+    ]
   },
   {
     "name": "Rosemary, dried",
@@ -59291,9 +57911,7 @@
         "amount": 1,
         "base_amount": 3.0
       }
-    ],
-    "serving_grams": 3.0,
-    "serving_desc": "1 biscuit"
+    ]
   },
   {
     "name": "Infant snack, bar, fruit based",
@@ -59347,9 +57965,7 @@
         "amount": 1,
         "base_amount": 145.0
       }
-    ],
-    "serving_grams": 110.0,
-    "serving_desc": "1 jar"
+    ]
   },
   {
     "name": "Infant food, meat, vegetable & fruit, puree or mash",

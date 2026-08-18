@@ -96,3 +96,74 @@ func TestBackfillServingsIgnoresItemsWithNoServingData(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, n)
 }
+
+// The repair for a serving this pipeline itself wrote wrong. BackfillServings
+// only fills empty rows, so a bad value it previously wrote would survive
+// every future ingest untouched.
+func TestReconcileGeneratedServingsCorrectsOurOwnBadValue(t *testing.T) {
+	db := testDB(t)
+	tx := db.Begin()
+	require.NoError(t, tx.Error)
+	t.Cleanup(func() { tx.Rollback() })
+	repo := NewRepository(tx)
+	ctx := context.Background()
+
+	// What the "smallest measure" rule shipped: one chip as a serving.
+	bad := FoodItem{
+		Name: "Reconcile Probe, chips", Provenance: ProvenanceAUSNUT, KcalPer100g: 238,
+		ServingGrams: 3.9, ServingDesc: "1 chip",
+		NormalizedName: Normalize("Reconcile Probe, chips"),
+	}
+	require.NoError(t, tx.Create(&bad).Error)
+
+	// The corrected file abstains for this food: no default at all.
+	n, err := repo.ReconcileGeneratedServings(ctx, []FoodItem{{Name: "Reconcile Probe, chips"}})
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+
+	var got FoodItem
+	require.NoError(t, tx.First(&got, "name = ?", "Reconcile Probe, chips").Error)
+	require.Zero(t, got.ServingGrams, "a withdrawn default must go back to the 100 g fallback")
+	require.Empty(t, got.ServingDesc)
+
+	n2, err := repo.ReconcileGeneratedServings(ctx, []FoodItem{{Name: "Reconcile Probe, chips"}})
+	require.NoError(t, err)
+	require.Zero(t, n2, "reconcile must be idempotent")
+}
+
+// It must never touch a serving another source authored. Every other source
+// writes a parenthetical or a plain mass; only this pipeline writes bare
+// "1 <descriptor>".
+func TestReconcileGeneratedServingsLeavesOtherSourcesAlone(t *testing.T) {
+	db := testDB(t)
+	tx := db.Begin()
+	require.NoError(t, tx.Error)
+	t.Cleanup(func() { tx.Rollback() })
+	repo := NewRepository(tx)
+
+	staples := FoodItem{ // afcd_staples format
+		Name: "Untouched Probe", Provenance: ProvenanceAFCD, KcalPer100g: 100,
+		ServingGrams: 158, ServingDesc: "1 cup (158 g)",
+		NormalizedName: Normalize("Untouched Probe"),
+	}
+	require.NoError(t, tx.Create(&staples).Error)
+
+	branded := FoodItem{ // OpenFoodFacts: small but real
+		Name: "Tea Probe", Provenance: ProvenanceOFF, KcalPer100g: 1,
+		ServingGrams: 2, ServingDesc: "1 tea bag",
+		NormalizedName: Normalize("Tea Probe"),
+	}
+	require.NoError(t, tx.Create(&branded).Error)
+
+	n, err := repo.ReconcileGeneratedServings(context.Background(), []FoodItem{
+		{Name: "Untouched Probe"}, {Name: "Tea Probe"},
+	})
+	require.NoError(t, err)
+	require.Zero(t, n)
+
+	var a, b FoodItem
+	require.NoError(t, tx.First(&a, "name = ?", "Untouched Probe").Error)
+	require.NoError(t, tx.First(&b, "name = ?", "Tea Probe").Error)
+	require.Equal(t, 158.0, a.ServingGrams, "a parenthetical desc is another source's")
+	require.Equal(t, 2.0, b.ServingGrams, "a non-AUSNUT provenance is out of scope")
+}

@@ -76,18 +76,29 @@ TWO DIFFERENT OUTPUTS, because the resolver has two different tiers for them:
                  row's mass instead of a generic table. No judgement involved.
   serving_grams  ONE default, for when the phrase names no unit at all.
 
-CHOOSING THE PRIMARY, the only judgement here, made on the data:
+CHOOSING THE PRIMARY — agree or abstain:
 
-  smallest measure within 1-500 g, but never a spoon-scale descriptor
-  when the food has a larger real unit
+  a default is emitted ONLY when every candidate measure names the same mass;
+  otherwise the food gets none and falls back to the resolver's flat 100 g
 
-Smallest is right for the common case — AUSNUT lists one food in several
-container sizes (beer: can 333/378/504/656 g) and the smallest is the standard
-stubby, while the median (~440 g) matches no real container. But naive
-"smallest" is wrong for 98 foods where a tablespoon sits beside a cup:
-`Couscous, cooked` would default to 13 g rather than a 158 g cup, a 12×
-understatement. So teaspoon/tablespoon/pinch/handful are demoted to
-last-resort.
+Two earlier rules both shipped wrong answers, in opposite directions:
+
+  smallest            picked one piece of a food eaten in handfuls — "1 pea",
+                      "1 leaf", "1 chip" (3.9 g). 213 foods under 5 g, and a
+                      plate of hot chips resolving to 7 kcal.
+  nearest a typical   picked a cup of a food eaten by the teaspoon —
+  portion             `Sauce, tomato` at 260 g where the 10 g packet was right.
+
+A single scalar cannot mean "a portion" for both a sauce and a pizza. Where
+AUSNUT lists several genuinely different masses it is describing several
+genuinely different servings, and choosing one is a guess. 1,881 foods get an
+unambiguous default; 726 get none and are no worse off than before this join
+existed.
+
+Abstaining is cheap because `serving_units` still carries EVERY measure, so
+"2 slices of pizza" and "3 chips" resolve against the row's own data either
+way. Only the bare-phrase default falls back.
+
 
 `millilitres` is excluded outright rather than demoted — see
 UNIT_NAME_DESCRIPTORS. It names a unit rather than a thing, and storing it as
@@ -181,6 +192,25 @@ SPOON_SCALE = {"teaspoon", "tablespoon", "pinch", "handful"}
 MIN_SERVING_G = 1
 MAX_SERVING_G = 500
 
+# Absolute floor for a DEFAULT serving. Above the 1 g the resolver tolerates,
+# because a default is a different question from a valid unit: "1 pea" is a
+# real measure and a useless default.
+#
+# 5 g, chosen by reading the bands rather than by intuition. Below it sits the
+# absurd — pea 1.0, berry 1.2, currant 1.2, banana chip 1.4, plum 1.6. Just
+# above it sits the legitimately small — butter packet 7.0, pumpernickel slice
+# 7.0, Weet-Bix biscuit 7.5, rice-paper wrapper 8.0 — which a higher floor
+# would throw away.
+MIN_PRIMARY_SERVING_G = 5
+
+
+def number(value):
+    """Coerce a cell to a float, treating blanks and junk as 0."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
 
 def check_headers(header_row, columns=None, expected=None, what="COL"):
     """Fail loudly if the sheet's columns have moved.
@@ -238,27 +268,50 @@ def load_measures(path):
 
 
 def primary_serving(serving_units):
-    """Pick the ONE default serving, or None if no measure is plausible.
+    """Pick the ONE default serving, or None when the measures disagree.
 
-    Smallest within the plausible band, preferring anything over a spoon-scale
-    descriptor — see the module docstring for why, and for the 98 foods that
-    make the preference necessary rather than decorative.
+    AGREE OR ABSTAIN. A default is only emitted when every candidate measure
+    points at the same mass; otherwise the food gets no default and falls back
+    to the resolver's flat 100 g, exactly as it did before measures existed.
+
+    Two rules were tried and BOTH shipped wrong answers, in opposite
+    directions, which is why this one refuses to guess:
+
+      smallest          picked one piece of a food eaten in handfuls.
+                        "1 pea", "1 leaf", "1 chip" (3.9 g) — 213 foods under
+                        5 g, and a plate of hot chips resolving to 7 kcal.
+
+      nearest a typical picked a cup of a food eaten by the teaspoon.
+      portion (150 g)   `Sauce, tomato` -> "1 cup" 260 g, where the packet at
+                        10 g was right. Overstating a condiment 26x is no
+                        better than understating chips.
+
+    The failures share a cause: a single scalar cannot express "a portion" for
+    both a sauce and a pizza. Where AUSNUT lists several genuinely different
+    masses it is describing several genuinely different servings, and picking
+    one is a guess. So this abstains — 1,881 foods get an unambiguous default,
+    726 get none.
+
+    Abstaining costs little, because `serving_units` still carries EVERY
+    measure. "2 slices of pizza" and "3 chips" resolve against the row's own
+    data regardless; only the bare-phrase default falls back.
+
+    Candidates exclude spoon-scale descriptors (the 98 tablespoon-beside-a-cup
+    foods) and anything under MIN_PRIMARY_SERVING_G. Descriptors that merely
+    name the same mass twice — beer's `can` and `bottle` are both 333 g — are
+    NOT a disagreement, so beer keeps its stubby.
     """
-    plausible = [
-        u for u in serving_units if MIN_SERVING_G <= u["base_amount"] <= MAX_SERVING_G
+    candidates = [
+        u
+        for u in serving_units
+        if MIN_PRIMARY_SERVING_G <= u["base_amount"] <= MAX_SERVING_G
+        and u["name"] not in SPOON_SCALE
     ]
-    if not plausible:
+    if not candidates:
         return None
-    preferred = [u for u in plausible if u["name"] not in SPOON_SCALE] or plausible
-    return min(preferred, key=lambda u: u["base_amount"])
-
-
-def number(value):
-    """Coerce a cell to a float, treating blanks and junk as 0."""
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return 0.0
+    if len({u["base_amount"] for u in candidates}) != 1:
+        return None
+    return min(candidates, key=lambda u: u["name"])
 
 
 def convert(path, measures_path):
