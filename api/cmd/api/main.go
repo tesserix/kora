@@ -270,6 +270,27 @@ func ingestEmbedder(gemini providers.GeminiProvider) providerEmbedder {
 	return providerEmbedder{p: gemini}
 }
 
+func configuredProvider(cfg config.Config, gemini providers.GeminiProvider) ai.Provider {
+	if cfg.AIGatewayEnabled {
+		return providers.NewAgentGatewayProvider(
+			gemini,
+			cfg.AIGatewayAPIKey,
+			cfg.AIGatewayBaseURL,
+			cfg.AIGatewayModel,
+		)
+	}
+	if cfg.OpenAIAPIKey != "" {
+		fallback := providers.NewOpenAIProvider(
+			cfg.OpenAIAPIKey,
+			cfg.OpenAIBaseURL,
+			cfg.OpenAIModel,
+			cfg.OpenAIJSONObject,
+		)
+		return &ai.Router{Primary: gemini, Fallback: fallback}
+	}
+	return gemini
+}
+
 // buildResolveHandler composes the AI resolution engine from config. It
 // returns a nil handler (resolve endpoints stay unmounted), a nil provider,
 // and a nil cache when no Gemini key is set — the rest of the API runs
@@ -324,10 +345,10 @@ func buildResolveHandler(ctx context.Context, cfg config.Config, db *gorm.DB, lo
 		return nil, nil, nil
 	}
 
-	var provider ai.Provider = gemini
-	if cfg.OpenAIAPIKey != "" {
-		fallback := providers.NewOpenAIProvider(cfg.OpenAIAPIKey, cfg.OpenAIBaseURL, cfg.OpenAIModel, cfg.OpenAIJSONObject)
-		provider = &ai.Router{Primary: gemini, Fallback: fallback}
+	provider := configuredProvider(cfg, gemini)
+	if cfg.AIGatewayEnabled {
+		logger.Info("resolve engine: private agent gateway for text, vertex direct for embeddings and multimodal", "model", cfg.AIGatewayModel, "base_url", cfg.AIGatewayBaseURL)
+	} else if cfg.OpenAIAPIKey != "" {
 		logger.Info("resolve engine: gemini primary + openai-compatible fallback", "model", cfg.OpenAIModel, "base_url", cfg.OpenAIBaseURL)
 	} else {
 		logger.Info("resolve engine: gemini only (no fallback key)")

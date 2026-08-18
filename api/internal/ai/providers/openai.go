@@ -38,10 +38,15 @@ type OpenAIProvider struct {
 // models: strict schema is slow (~29s) and yields degenerate values, so the
 // schema shape is instead described in the prompt and enforced by parsing).
 func NewOpenAIProvider(apiKey, baseURL, model string, jsonObject bool) OpenAIProvider {
+	return newOpenAIProvider(apiKey, baseURL, model, jsonObject)
+}
+
+func newOpenAIProvider(apiKey, baseURL, model string, jsonObject bool, extraOptions ...option.RequestOption) OpenAIProvider {
 	opts := []option.RequestOption{option.WithAPIKey(apiKey)}
 	if baseURL != "" {
 		opts = append(opts, option.WithBaseURL(baseURL))
 	}
+	opts = append(opts, extraOptions...)
 	if model == "" {
 		model = modelGPT5Mini
 	}

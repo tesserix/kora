@@ -219,6 +219,34 @@ func TestLoadReadsFoodIndexRefreshIntervalFromEnv(t *testing.T) {
 	require.Equal(t, 5*time.Minute, cfg.FoodIndexRefreshInterval)
 }
 
+func TestLoadAgentGatewayFeatureFlag(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
+	t.Setenv("AI_GATEWAY_ENABLED", "true")
+	t.Setenv("AI_GATEWAY_BASE_URL", "http://agentgateway.kora.svc.cluster.local/v1")
+	t.Setenv("AI_GATEWAY_API_KEY", "internal-key")
+	t.Setenv("AI_GATEWAY_MODEL", "kora-auto")
+
+	cfg, err := Load()
+
+	require.NoError(t, err)
+	assert.True(t, cfg.AIGatewayEnabled)
+	assert.Equal(t, "http://agentgateway.kora.svc.cluster.local/v1", cfg.AIGatewayBaseURL)
+	assert.Equal(t, "internal-key", cfg.AIGatewayAPIKey)
+	assert.Equal(t, "kora-auto", cfg.AIGatewayModel)
+}
+
+func TestLoadRejectsIncompleteAgentGatewayConfig(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
+	t.Setenv("AI_GATEWAY_ENABLED", "true")
+	t.Setenv("AI_GATEWAY_BASE_URL", "")
+	t.Setenv("AI_GATEWAY_API_KEY", "internal-key")
+
+	_, err := Load()
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "AI_GATEWAY_BASE_URL")
+}
+
 // The likeliest way to hit the collision in practice: move the API to 9090 in a
 // manifest and never think about METRICS_PORT, which defaults to 9090. The
 // guard has to compare the RESOLVED values, not just the two env vars, or this
