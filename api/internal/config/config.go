@@ -25,6 +25,10 @@ type Config struct {
 	OpenAIBaseURL     string
 	OpenAIModel       string
 	OpenAIJSONObject  bool
+	AIGatewayEnabled  bool
+	AIGatewayBaseURL  string
+	AIGatewayAPIKey   string
+	AIGatewayModel    string
 	SchedulerInterval time.Duration
 	PushEnabled       bool
 	PushInterval      time.Duration
@@ -70,6 +74,10 @@ func Load() (Config, error) {
 		OpenAIBaseURL:            os.Getenv("OPENAI_BASE_URL"),
 		OpenAIModel:              os.Getenv("OPENAI_MODEL"),
 		OpenAIJSONObject:         os.Getenv("OPENAI_JSON_OBJECT") == "true",
+		AIGatewayEnabled:         os.Getenv("AI_GATEWAY_ENABLED") == "true",
+		AIGatewayBaseURL:         os.Getenv("AI_GATEWAY_BASE_URL"),
+		AIGatewayAPIKey:          os.Getenv("AI_GATEWAY_API_KEY"),
+		AIGatewayModel:           getenv("AI_GATEWAY_MODEL", "kora-auto"),
 		SchedulerInterval:        getdur("SCHEDULER_INTERVAL", 5*time.Minute),
 		PushEnabled:              os.Getenv("PUSH_ENABLED") == "true",
 		PushInterval:             getdur("PUSH_INTERVAL", 30*time.Second),
@@ -92,6 +100,14 @@ func Load() (Config, error) {
 	// instead.
 	if cfg.MetricsPort == cfg.Port {
 		return Config{}, fmt.Errorf("config: METRICS_PORT (%s) must differ from PORT (%s)", cfg.MetricsPort, cfg.Port)
+	}
+	if cfg.AIGatewayEnabled {
+		if cfg.AIGatewayBaseURL == "" {
+			return Config{}, fmt.Errorf("config: AI_GATEWAY_BASE_URL is required when AI_GATEWAY_ENABLED is true")
+		}
+		if cfg.AIGatewayAPIKey == "" {
+			return Config{}, fmt.Errorf("config: AI_GATEWAY_API_KEY is required when AI_GATEWAY_ENABLED is true")
+		}
 	}
 	if raw := os.Getenv("KORA_BFF_HMAC_KEY"); raw != "" {
 		key, err := base64.StdEncoding.DecodeString(raw)

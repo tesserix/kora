@@ -11,6 +11,7 @@ import (
 
 	"github.com/tesserix/kora/api/internal/ai"
 	"github.com/tesserix/kora/api/internal/ai/providers"
+	"github.com/tesserix/kora/api/internal/config"
 	"github.com/tesserix/kora/api/internal/user"
 )
 
@@ -61,6 +62,30 @@ func TestIngestEmbedderStaysOnGemini(t *testing.T) {
 	_, isRouter := e.p.(*ai.Router)
 	assert.False(t, isRouter, "ingest embeds must not go through ai.Router: it has no embedding fallback, only error-masking and a 1.5s budget")
 	assert.IsType(t, providers.GeminiProvider{}, e.p, "ingest embeds must go straight to Gemini")
+}
+
+func TestConfiguredProviderUsesGatewayOnlyWhenFeatureFlagEnabled(t *testing.T) {
+	t.Parallel()
+
+	gemini := providers.GeminiProvider{}
+
+	gateway := configuredProvider(config.Config{
+		AIGatewayEnabled: true,
+		AIGatewayBaseURL: "http://agentgateway.kora.svc.cluster.local/v1",
+		AIGatewayAPIKey:  "internal-key",
+		AIGatewayModel:   "kora-auto",
+	}, gemini)
+	assert.IsType(t, providers.AgentGatewayProvider{}, gateway)
+
+	fallback := configuredProvider(config.Config{
+		OpenAIAPIKey:  "fallback-key",
+		OpenAIBaseURL: "https://fallback.invalid/v1",
+		OpenAIModel:   "fallback-model",
+	}, gemini)
+	assert.IsType(t, &ai.Router{}, fallback)
+
+	direct := configuredProvider(config.Config{}, gemini)
+	assert.IsType(t, providers.GeminiProvider{}, direct)
 }
 
 // TestRouterBackedEmbedderMasksTheRealError is the observable difference that
