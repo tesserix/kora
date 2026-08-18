@@ -211,9 +211,14 @@ interface PermissionDeniedProps {
    *  belonging to the mode it replaced, not a single generic dead end. */
   icon: string;
   onDescribeInstead: () => void;
+  /** Only the CAMERA denial passes this: the photo library is a real
+   *  alternative there, and offering it as a labelled choice is what stops it
+   *  being the surprise prompt of kora#201. A denied LIBRARY has no such
+   *  second route, so it omits this and keeps two actions. */
+  onChooseFromLibrary?: () => void;
 }
 
-function PermissionDenied({ message, icon, onDescribeInstead }: PermissionDeniedProps) {
+function PermissionDenied({ message, icon, onDescribeInstead, onChooseFromLibrary }: PermissionDeniedProps) {
   return (
     <View
       testID="capture-permission-denied"
@@ -248,6 +253,20 @@ function PermissionDenied({ message, icon, onDescribeInstead }: PermissionDenied
       >
         <AppText style={{ color: T.accentOn, fontWeight: "700", fontSize: 14 }}>Open Settings</AppText>
       </PressableScale>
+      {/* Present only for a denied camera. Not accent — Open Settings is the
+          route that actually fixes the problem; this one works around it. */}
+      {onChooseFromLibrary ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Choose from library"
+          onPress={onChooseFromLibrary}
+          style={(s) => ({ opacity: s.pressed ? 0.6 : 1 })}
+        >
+          <AppText style={{ color: T.mut, fontSize: 13, fontWeight: "600", textDecorationLine: "underline" }}>
+            Choose from library
+          </AppText>
+        </Pressable>
+      ) : null}
       {/* Secondary route — not accent. Text resolution needs no camera, so a
           denied permission still doesn't have to be a dead end. */}
       <Pressable
@@ -274,6 +293,12 @@ interface IdleAffordanceProps {
    *  back denied (see handleCapturePhoto) — Photo has no equivalent of
    *  useCameraPermissions' proactive hook, so this is only known after a tap. */
   photoPermissionDenied: boolean;
+  /** Photo mode's own camera denial (kora#201). Separate from
+   *  `cameraPermissionDenied`, which Scan reads: this one is ALSO set by a
+   *  tap whose request came back denied, so the composer's photo button
+   *  reaches the same explanation the viewfinder does. */
+  cameraForPhotoDenied: boolean;
+  onChooseFromLibrary: () => void;
   /** Set once expo-audio's requestRecordingPermissionsAsync has actually come
    *  back denied (see handleStartVoice) — same "only known after a tap" story
    *  as photoPermissionDenied. */
@@ -292,15 +317,30 @@ function IdleAffordance({
   cameraPermissionGranted,
   cameraPermissionDenied,
   photoPermissionDenied,
+  cameraForPhotoDenied,
+  onChooseFromLibrary,
   micPermissionDenied,
   onBarcodeScanned,
   onDescribeInstead,
 }: IdleAffordanceProps) {
   if (mode === "photo") {
+    // Camera first: it is the permission the affordance actually promises, so
+    // it gets named. Checked BEFORE any tap — a tappable viewfinder over a
+    // camera the user switched off is the false affordance of kora#201.
+    if (cameraForPhotoDenied) {
+      return (
+        <PermissionDenied
+          message="Camera access is off, so I can't see your meal. Turn it on in Settings, choose an existing photo, or tell me what you ate."
+          icon="camera"
+          onDescribeInstead={onDescribeInstead}
+          onChooseFromLibrary={onChooseFromLibrary}
+        />
+      );
+    }
     if (photoPermissionDenied) {
       return (
         <PermissionDenied
-          message="I need camera or photo access to see your meal. Turn it on in Settings, or tell me what you ate instead."
+          message="I need photo access to see your meal. Turn it on in Settings, or tell me what you ate instead."
           icon="camera"
           onDescribeInstead={onDescribeInstead}
         />
@@ -475,9 +515,13 @@ interface CaptureBodyProps {
    *  from "not yet granted", which also covers the not-yet-requested and
    *  still-requesting states. Drives the Scan idle affordance's denied UI. */
   cameraPermissionDenied?: boolean;
-  /** True once expo-image-picker's camera+library request has actually come
+  /** True once expo-image-picker's photo-LIBRARY request has actually come
    *  back denied. Drives the Photo idle affordance's denied UI. */
   photoPermissionDenied?: boolean;
+  /** True when the CAMERA is denied and Photo mode should say so (kora#201). */
+  cameraForPhotoDenied?: boolean;
+  /** Explicit photo-library route offered by the camera-denied card. */
+  onChooseFromLibrary?: () => void;
   /** True once expo-audio's mic permission request has actually come back
    *  denied. Drives the Voice idle affordance's denied UI. */
   micPermissionDenied?: boolean;
@@ -523,6 +567,8 @@ export function CaptureBody({
   cameraPermissionGranted,
   cameraPermissionDenied = false,
   photoPermissionDenied = false,
+  cameraForPhotoDenied = false,
+  onChooseFromLibrary = () => {},
   micPermissionDenied = false,
   onBarcodeScanned,
   onClose,
@@ -593,6 +639,8 @@ export function CaptureBody({
             cameraPermissionGranted={cameraPermissionGranted}
             cameraPermissionDenied={cameraPermissionDenied}
             photoPermissionDenied={photoPermissionDenied}
+            cameraForPhotoDenied={cameraForPhotoDenied}
+            onChooseFromLibrary={onChooseFromLibrary}
             micPermissionDenied={micPermissionDenied}
             onBarcodeScanned={onBarcodeScanned}
             onDescribeInstead={() => onModeChange("type")}
@@ -769,48 +817,63 @@ type PhotoFile = { uri: string; name: string; type: string };
 type PhotoPickOutcome =
   | { status: "success"; file: PhotoFile }
   | { status: "canceled" }
+  /** The photo LIBRARY was denied. */
   | { status: "denied" }
+  /** The CAMERA was denied. Distinct from `denied` because the two want
+   *  opposite treatment, which is the whole of kora#201. */
+  | { status: "camera-denied" }
   | { status: "failed" };
 
-// Camera first, library as fallback — matches the sim (no camera hardware,
-// so launchCameraAsync throws) and a user who denies camera but allows
-// photo library access. Only a genuine permission denial (both camera *and*
-// library) is reported as "denied"; a user-canceled picker is silent. The
-// outer try/catch is a last-resort net: ANY unexpected throw (e.g. a native
-// error from the library permission check or launch, not just the camera)
-// must still surface an Otto bubble rather than fail silently.
+function assetOutcome(result: ImagePicker.ImagePickerResult): PhotoPickOutcome {
+  if (result.canceled) return { status: "canceled" };
+  const asset = result.assets[0];
+  if (!asset) return { status: "canceled" };
+  return {
+    status: "success",
+    file: { uri: asset.uri, name: asset.fileName ?? "meal.jpg", type: asset.mimeType ?? "image/jpeg" },
+  };
+}
+
+// The explicit library route, reached only when the user ASKS for it from the
+// camera-denied card. Before kora#201 this ran silently as a fallback, so a
+// camera icon produced a photo-library dialog nobody had requested.
+async function pickMealFromLibrary(): Promise<PhotoPickOutcome> {
+  try {
+    const libraryPermission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!libraryPermission.granted) return { status: "denied" };
+    return assetOutcome(await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.7 }));
+  } catch {
+    return { status: "failed" };
+  }
+}
+
+// Camera first. The two ways the camera can fail want OPPOSITE treatment, and
+// collapsing them was kora#201:
+//
+//   - DENIED — the user switched it off. Say so, and offer Settings. Falling
+//     through to a photo-library prompt asks for something they did not ask
+//     for, and never names the thing that is actually wrong. iOS will not
+//     re-prompt for a denied permission, so silence here is permanent.
+//   - THREW — there is no camera (the simulator, or genuinely absent
+//     hardware). Nothing the user can fix, so the silent library fallback is
+//     exactly right and is kept.
+//
+// The outer try/catch is a last-resort net: ANY unexpected throw must still
+// surface an Otto bubble rather than fail silently.
 async function pickMealPhoto(): Promise<PhotoPickOutcome> {
   try {
+    // `requestCameraPermissionsAsync` has already prompted by the time it
+    // returns, so "not granted" here cannot still be undetermined — it is a
+    // denial (or a restriction), and either way the card is the right answer.
     const cameraPermission = await ImagePicker.requestCameraPermissionsAsync();
-    let result: ImagePicker.ImagePickerResult | undefined;
+    if (!cameraPermission.granted) return { status: "camera-denied" };
 
-    if (cameraPermission.granted) {
-      try {
-        result = await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.7 });
-      } catch {
-        result = undefined; // no camera hardware available — fall back to the library below
-      }
+    try {
+      return assetOutcome(await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.7 }));
+    } catch {
+      // No camera hardware — fall back to the library silently, as before.
+      return await pickMealFromLibrary();
     }
-
-    if (!result) {
-      const libraryPermission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!libraryPermission.granted) {
-        return { status: "denied" };
-      }
-      result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.7 });
-    }
-
-    if (result.canceled) {
-      return { status: "canceled" };
-    }
-    const asset = result.assets[0];
-    if (!asset) {
-      return { status: "canceled" };
-    }
-    return {
-      status: "success",
-      file: { uri: asset.uri, name: asset.fileName ?? "meal.jpg", type: asset.mimeType ?? "image/jpeg" },
-    };
   } catch {
     return { status: "failed" };
   }
@@ -936,6 +999,11 @@ export default function CaptureScreen() {
   // how that one-shot fact becomes persistent UI instead of a bubble that
   // scrolls away, mirroring cameraPermissionDenied's role for Scan.
   const [photoPermissionDenied, setPhotoPermissionDenied] = useState(false);
+  // kora#201. Set by a tap whose camera request came back denied, so the
+  // composer's photo button reaches the same explanation the viewfinder does.
+  // OR'd with the proactive `cameraPermission.status` read below, which is
+  // what lets the card appear before any tap at all.
+  const [cameraDeniedOnTap, setCameraDeniedOnTap] = useState(false);
   const [micPermissionDenied, setMicPermissionDenied] = useState(false);
 
   // #137: the denied card REPLACES the tappable viewfinder, so there is no
@@ -952,7 +1020,7 @@ export default function CaptureScreen() {
   // Mirrors app/_layout.tsx's reconcileWeightReminder foreground listener
   // rather than introducing a second mechanism.
   useEffect(() => {
-    if (!photoPermissionDenied) return;
+    if (!photoPermissionDenied && !cameraDeniedOnTap) return;
     const sub = AppState.addEventListener("change", (state) => {
       if (state !== "active") return;
       void ImagePicker.getMediaLibraryPermissionsAsync()
@@ -960,9 +1028,17 @@ export default function CaptureScreen() {
           if (permission.granted) setPhotoPermissionDenied(false);
         })
         .catch((err) => console.warn("capture: photo permission re-check failed", err));
+      // Belt-and-braces for the camera (kora#201). iOS terminates the app when
+      // the camera permission changes, so this usually never fires — but the
+      // card is now reachable without a tap, and a stale one is a dead end.
+      void ImagePicker.getCameraPermissionsAsync()
+        .then((permission) => {
+          if (permission.granted) setCameraDeniedOnTap(false);
+        })
+        .catch((err) => console.warn("capture: camera permission re-check failed", err));
     });
     return () => sub.remove();
-  }, [photoPermissionDenied]);
+  }, [photoPermissionDenied, cameraDeniedOnTap]);
 
   const [mode, setMode] = useState<CaptureMode>("photo");
   // idle<->result is driven by the four capture flows below; "analyzing" is
@@ -1351,12 +1427,27 @@ export default function CaptureScreen() {
   }
 
   async function handleCapturePhoto() {
+    await runPhotoPick(pickMealPhoto);
+  }
+
+  // The explicit library route offered by the camera-denied card (kora#201).
+  // Same outcome handling — only the source of the asset differs.
+  async function handleChooseFromLibrary() {
+    await runPhotoPick(pickMealFromLibrary);
+  }
+
+  async function runPhotoPick(pick: () => Promise<PhotoPickOutcome>) {
     setErrorMsg(null);
     // A retry after fixing the permission in Settings deserves a clean slate,
     // not a stale denied card sitting under whatever this attempt finds.
     setPhotoPermissionDenied(false);
-    const outcome = await pickMealPhoto();
+    setCameraDeniedOnTap(false);
+    const outcome = await pick();
     if (outcome.status === "canceled") return;
+    if (outcome.status === "camera-denied") {
+      setCameraDeniedOnTap(true);
+      return;
+    }
     if (outcome.status === "denied") {
       // A persistent card with a Settings route, not a bubble that scrolls
       // away — the same reasoning as Scan's cameraPermissionDenied.
@@ -1684,6 +1775,10 @@ export default function CaptureScreen() {
         // "Open Settings" for a permission that hasn't been requested.
         cameraPermissionDenied={cameraPermission?.status === "denied"}
         photoPermissionDenied={photoPermissionDenied}
+        // Either the proactive read (camera already off when the screen
+        // opened) or a tap whose request came back denied.
+        cameraForPhotoDenied={cameraPermission?.status === "denied" || cameraDeniedOnTap}
+        onChooseFromLibrary={handleChooseFromLibrary}
         micPermissionDenied={micPermissionDenied}
         onBarcodeScanned={handleBarcodeScanned}
         // safeBack, not router.back: a reminder tap REPLACES the current route

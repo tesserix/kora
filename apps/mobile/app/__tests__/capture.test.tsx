@@ -696,8 +696,12 @@ describe("Photo mode", () => {
   // photo-mode denial with the persistent PermissionDenied card (Open
   // Settings / Describe it instead), the same treatment Scan's camera denial
   // got, since a bubble that scrolls away left no lasting route to Settings.
-  test("denied camera and library permissions render the permission-denied card with a route to Settings", async () => {
-    (ImagePicker.requestCameraPermissionsAsync as jest.Mock).mockResolvedValueOnce({ granted: false });
+  // kora#201 narrowed what this covers. A DENIED camera no longer reaches the
+  // library at all (see the camera-denied tests below), so the only way to a
+  // library denial is a camera that is permitted but absent — the simulator /
+  // no-hardware case, where launchCameraAsync throws.
+  test("a denied library, reached from a camera that isn't there, renders the permission-denied card", async () => {
+    (ImagePicker.launchCameraAsync as jest.Mock).mockRejectedValueOnce(new Error("no camera hardware"));
     (ImagePicker.requestMediaLibraryPermissionsAsync as jest.Mock).mockResolvedValueOnce({ granted: false });
 
     const { findByLabelText, findByText } = await render(<CaptureScreen />);
@@ -730,15 +734,35 @@ describe("Photo mode", () => {
     expect(getByTestId("capture-analyzing-spinner")).toBeTruthy();
   });
 
-  test("camera denied falls back to the library and still resolves the picked asset", async () => {
+  // kora#201. This used to assert the silent fallback — camera denied, so
+  // quietly ask for the PHOTO LIBRARY instead. That is the bug: the control is
+  // a camera icon, so a photo-library dialog is a prompt the user did not ask
+  // for, and one people deny by reflex. A denied camera must say so.
+  test("a denied camera explains itself instead of silently prompting for the photo library", async () => {
+    (ImagePicker.requestCameraPermissionsAsync as jest.Mock).mockResolvedValueOnce({ granted: false });
+
+    const { findByLabelText, findByText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByLabelText("Photo viewfinder"));
+
+    expect(await findByText(/camera access is off/i)).toBeTruthy();
+    expect(await findByText("Open Settings")).toBeTruthy();
+    // The library is still reachable — as a CHOICE, not a surprise.
+    expect(await findByText(/choose from library/i)).toBeTruthy();
+    expect(ImagePicker.requestMediaLibraryPermissionsAsync).not.toHaveBeenCalled();
+    expect(ImagePicker.launchImageLibraryAsync).not.toHaveBeenCalled();
+    expect(mockResolvePhotoMutate).not.toHaveBeenCalled();
+  });
+
+  test("the camera-denied card's library route opens the library and resolves the picked asset", async () => {
     (ImagePicker.requestCameraPermissionsAsync as jest.Mock).mockResolvedValueOnce({ granted: false });
     (ImagePicker.launchImageLibraryAsync as jest.Mock).mockResolvedValueOnce({
       canceled: false,
       assets: [{ uri: "file://library.jpg", fileName: "library.jpg", mimeType: "image/jpeg" }],
     });
 
-    const { findByLabelText } = await render(<CaptureScreen />);
+    const { findByLabelText, findByText } = await render(<CaptureScreen />);
     await fireEvent.press(await findByLabelText("Photo viewfinder"));
+    await fireEvent.press(await findByText(/choose from library/i));
 
     await waitFor(() =>
       expect(mockResolvePhotoMutate).toHaveBeenCalledWith(
@@ -747,6 +771,39 @@ describe("Photo mode", () => {
       ),
     );
     expect(ImagePicker.launchCameraAsync).not.toHaveBeenCalled();
+  });
+
+  // The affordance must stop lying BEFORE the first tap. A camera icon over a
+  // tappable viewfinder promises a camera the user has switched off, and
+  // useCameraPermissions already knows — Scan's branch has always read it.
+  test("photo mode shows the camera-denied card without waiting for a tap", async () => {
+    (useCameraPermissions as jest.Mock).mockReturnValue([
+      { granted: false, status: "denied", canAskAgain: true, expires: "never" },
+      jest.fn(async () => ({ granted: false, status: "denied" })),
+      jest.fn(),
+    ]);
+
+    const { findByText, queryByLabelText } = await render(<CaptureScreen />);
+
+    expect(await findByText(/camera access is off/i)).toBeTruthy();
+    expect(queryByLabelText("Photo viewfinder")).toBeNull();
+  });
+
+  // The regression case kora#139 verified on the simulator and must keep
+  // holding: "not granted" is also true for a permission that has never been
+  // requested, and offering "Open Settings" for a prompt iOS has not shown yet
+  // is a dead end pointing at a toggle that isn't there.
+  test("an undetermined camera still renders the viewfinder, not the denied card", async () => {
+    (useCameraPermissions as jest.Mock).mockReturnValue([
+      { granted: false, status: "undetermined", canAskAgain: true, expires: "never" },
+      jest.fn(async () => ({ granted: true, status: "granted" })),
+      jest.fn(),
+    ]);
+
+    const { findByLabelText, queryByText } = await render(<CaptureScreen />);
+
+    expect(await findByLabelText("Photo viewfinder")).toBeTruthy();
+    expect(queryByText(/camera access is off/i)).toBeNull();
   });
 
   test("the composer's Quick photo capture button triggers the same photo flow", async () => {
@@ -767,7 +824,9 @@ describe("Photo mode", () => {
   });
 
   test("an unexpected picker failure still renders an Otto error bubble (no silent failure)", async () => {
-    (ImagePicker.requestCameraPermissionsAsync as jest.Mock).mockResolvedValueOnce({ granted: false });
+    // Reaches the library the only way that remains after kora#201: a camera
+    // that is permitted but throws (no hardware).
+    (ImagePicker.launchCameraAsync as jest.Mock).mockRejectedValueOnce(new Error("no camera hardware"));
     (ImagePicker.requestMediaLibraryPermissionsAsync as jest.Mock).mockRejectedValueOnce(new Error("native crash"));
 
     const { findByLabelText, findByText } = await render(<CaptureScreen />);
