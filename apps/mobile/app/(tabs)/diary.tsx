@@ -357,14 +357,24 @@ export default function Diary() {
                     : c.status === "review"
                       ? "Tap to confirm"
                       : "Couldn't identify";
-                  const name = c.kind === "photo" ? "Photo" : "Voice note";
+                  // A text capture's own words are a better row title than
+                  // "Typed note" — the phrase IS the thing the user logged, and
+                  // a queued row is otherwise unidentifiable until it resolves.
+                  const name =
+                    c.kind === "text" ? (c.phrase ?? "Typed note")
+                      : c.kind === "photo" ? "Photo"
+                      : "Voice note";
                   return (
                     <MealRow
                       key={c.id}
                       name={name}
                       slot={statusText}
                       kcal={c.kcal}
-                      iconName={c.kind === "photo" ? "camera" : "mic"}
+                      iconName={
+                        c.kind === "text" ? "message-circle"
+                          : c.kind === "photo" ? "camera"
+                          : "mic"
+                      }
                       dimmed={failed}
                       badge={
                         pendingCapture ? (

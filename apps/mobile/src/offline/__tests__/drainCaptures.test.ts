@@ -1,8 +1,14 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { append as appendCapture, list as listCaptures } from "../captureQueue";
+import * as queueModule from "../queue";
 import { list as listLogs } from "../queue";
 import { CaptureUnidentifiedError, drainCaptureQueue } from "../drainCaptures";
 import type { Resolution } from "@/api/types";
+
+// A spy, not a mock: append() must still actually enqueue the log row (other
+// assertions in this file read it back via listLogs), so calls pass through
+// to the real implementation.
+const appendLog = jest.spyOn(queueModule, "append");
 
 // drainCaptures.ts imports @/lib/api at module scope for its app-facing wrapper
 // (currentUserId, apiFetchMultipart) even though none of the tests below exercise
@@ -63,6 +69,15 @@ async function seed(id: string, over: Record<string, unknown> = {}) {
   } as Parameters<typeof appendCapture>[0]);
 }
 
+// seed() builds a MEDIA row. A text capture has no media at all, so it gets
+// its own builder rather than a pile of `undefined` overrides (kora#196).
+async function seedText(id: string, over: Record<string, unknown> = {}) {
+  return appendCapture({
+    id, kind: "text", phrase: "chicken and rice",
+    capturedAt: atLocalNoon(2026, 8, 6), ownerId: OWNER, ...over,
+  } as Parameters<typeof appendCapture>[0]);
+}
+
 function deps(over: Partial<Parameters<typeof drainCaptureQueue>[0]> = {}) {
   return {
     ownerId: OWNER,
@@ -73,7 +88,10 @@ function deps(over: Partial<Parameters<typeof drainCaptureQueue>[0]> = {}) {
   } as Parameters<typeof drainCaptureQueue>[0];
 }
 
-beforeEach(async () => { await AsyncStorage.clear(); });
+beforeEach(async () => {
+  await AsyncStorage.clear();
+  appendLog.mockClear();
+});
 
 describe("drainCaptureQueue", () => {
   // tier "auto" hands off to the LOG queue — this drain never calls /v1/logs.
@@ -238,6 +256,43 @@ describe("drainCaptureQueue", () => {
     await drainCaptureQueue(d);
     await drainCaptureQueue(d);
     expect(d.resolve).toHaveBeenCalledTimes(1);
+  });
+});
+
+// kora#196. The drain assumed every row had media: it gated on mediaExists and
+// deleted a file after a successful auto-log. A text row has neither.
+describe("text captures (kora#196)", () => {
+  it("never asks whether a text row's media exists, and never deletes any", async () => {
+    await seedText("cap_t1");
+    const mediaExists = jest.fn(() => false);
+    const deleteMedia = jest.fn(async () => {});
+
+    await drainCaptureQueue(deps({ mediaExists, deleteMedia }));
+
+    // Without the hasMedia guard this row would be failed as "missing-media"
+    // on the first line of the loop — a text capture reported as a lost file.
+    expect(mediaExists).not.toHaveBeenCalled();
+    expect(deleteMedia).not.toHaveBeenCalled();
+  });
+
+  it("hands an auto-tier text resolution to the log queue as ai_text", async () => {
+    await seedText("cap_t1");
+    const result = await drainCaptureQueue(deps());
+
+    expect(result.logged).toBe(1);
+    expect(appendLog).toHaveBeenCalledWith(
+      expect.objectContaining({ source: "ai_text" }),
+      expect.stringMatching(UUID_V4),
+      OWNER,
+    );
+  });
+
+  it("sends a non-auto text resolution to review, like every other modality", async () => {
+    await seedText("cap_t1");
+    const result = await drainCaptureQueue(
+      deps({ resolve: jest.fn(async () => res("confirm")) }),
+    );
+    expect(result.review).toBe(1);
   });
 });
 

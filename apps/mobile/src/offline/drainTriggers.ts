@@ -3,7 +3,7 @@ import { onlineManager, type QueryClient } from "@tanstack/react-query";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, isFirebaseConfigured } from "@/lib/firebase";
 import { sweepOrphans } from "./captureMedia";
-import { list as listCaptures } from "./captureQueue";
+import { list as listCaptures, hasMedia } from "./captureQueue";
 import { drainCaptures } from "./drainCaptures";
 import { drainLogs } from "./drainLogs";
 import { forgetOwner, rememberOwner } from "./owner";
@@ -28,7 +28,10 @@ export function installDrainTriggers(queryClient: QueryClient): () => void {
   // Reclaim media left behind by a crash between the copy and the append. Runs
   // once per launch; a failure is ignored because the next launch retries.
   void listCaptures()
-    .then((items) => sweepOrphans(items.map((i) => i.storedName)))
+    // Media rows only (kora#196): a text capture has no file, so it
+    // contributes no name to keep. Filtering also keeps this compiling now
+    // that QueuedCapture is a union.
+    .then((items) => sweepOrphans(items.filter(hasMedia).map((i) => i.storedName)))
     .catch(() => {});
 
   // Reconnect.

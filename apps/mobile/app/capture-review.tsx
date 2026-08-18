@@ -13,7 +13,7 @@ import { useToast } from "@/components/Toast";
 import { safeBack } from "@/lib/safeBack";
 import { useTheme } from "@/theme";
 import { currentUserId } from "@/lib/api";
-import { list as listCaptures, discard, restore, retry as retryCapture, type QueuedCapture } from "@/offline/captureQueue";
+import { list as listCaptures, discard, restore, retry as retryCapture, hasMedia, type QueuedCapture } from "@/offline/captureQueue";
 import { deleteQueuedMedia, queuedMediaUri } from "@/offline/captureMedia";
 import { append as appendLog, newLogId } from "@/offline/queue";
 import { drainCaptures } from "@/offline/drainCaptures";
@@ -39,7 +39,9 @@ function formatDuration(seconds: number): string {
 // silently buckets into "other" server-side and corrupts the by-source
 // metric.
 function sourceOf(kind: QueuedCapture["kind"]): ResolutionSource {
-  return kind === "photo" ? "ai_photo" : "ai_voice";
+  if (kind === "photo") return "ai_photo";
+  if (kind === "text") return "ai_text";
+  return "ai_voice";
 }
 
 // Switches on the EXPLICIT `failureKind` drainCaptures.ts tags every failed
@@ -140,7 +142,7 @@ export default function CaptureReviewScreen() {
   // Always called, never conditionally — the source is null until a voice
   // capture is loaded, so a photo capture (or the loading/not-found states)
   // simply never gets a real source and the player stays idle.
-  const audioSource = capture && capture.kind === "voice" ? queuedMediaUri(capture.storedName) : null;
+  const audioSource = capture?.kind === "voice" ? queuedMediaUri(capture.storedName) : null;
   const player = useAudioPlayer(audioSource);
   const playerStatus = useAudioPlayerStatus(player);
 
@@ -277,7 +279,7 @@ export default function CaptureReviewScreen() {
       // attempt already logged everything. Either way it is safe to delete:
       // a retry that finds nothing left to queue must still finish rather
       // than leave the user stranded on a screen whose items are all logged.
-      await deleteQueuedMedia(capture.storedName);
+      if (hasMedia(capture)) await deleteQueuedMedia(capture.storedName);
       await discard(capture.id);
       invalidate();
       qc.invalidateQueries({ queryKey: [QUEUED_LOGS_KEY] });
@@ -388,7 +390,7 @@ export default function CaptureReviewScreen() {
     if (!capture) return;
     setBusy(true);
     try {
-      await deleteQueuedMedia(capture.storedName);
+      if (hasMedia(capture)) await deleteQueuedMedia(capture.storedName);
       await discard(capture.id);
       invalidate();
       safeBack(EXIT_TO);
@@ -437,7 +439,11 @@ export default function CaptureReviewScreen() {
           kora#139. */}
       <View style={{ paddingTop: insets.top + 8 }}>
         <ScreenHeader
-          overline={capture?.kind === "photo" ? "Photo" : "Voice note"}
+          overline={
+            capture?.kind === "text" ? "Typed"
+              : capture?.kind === "photo" ? "Photo"
+              : "Voice note"
+          }
           title="Review capture"
           onBack={() => safeBack(EXIT_TO)}
         />
@@ -462,7 +468,25 @@ export default function CaptureReviewScreen() {
           style={{ flex: 1 }}
           contentContainerStyle={{ padding: 18, paddingTop: 8, paddingBottom: insets.bottom + 24, gap: 14 }}
         >
-          {capture.kind === "photo" ? (
+          {capture.kind === "text" ? (
+            // Styled AFTER UserBubble, not reusing it: that component is built
+            // for the capture thread — right-aligned with a FadeInDown
+            // entrance — and this screen is not a thread and has no sender to
+            // align against. Same surface treatment, static.
+            <View
+              style={{
+                borderRadius: 16,
+                backgroundColor: colors.cardSecondary,
+                padding: 18,
+                gap: 8,
+              }}
+            >
+              <AppText muted style={{ fontSize: 13 }}>
+                Typed {new Date(capture.capturedAt).toLocaleString()}
+              </AppText>
+              <AppText variant="headline">{capture.phrase}</AppText>
+            </View>
+          ) : capture.kind === "photo" ? (
             <Image
               accessibilityLabel="Captured photo"
               source={{ uri: queuedMediaUri(capture.storedName) }}

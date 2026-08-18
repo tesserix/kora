@@ -47,7 +47,7 @@ import {
 import { ApiError, AuthTokenError, NetworkError, ResponseParseError, TimeoutError } from "@/lib/api";
 import { OfflineUnknownBarcodeError } from "@/offline/cachedResolution";
 import { CaptureQueueFullError } from "@/offline/captureQueue";
-import { enqueueCapture, type CaptureFile } from "@/offline/enqueueCapture";
+import { enqueueCapture, enqueueTextCapture, type CaptureFile } from "@/offline/enqueueCapture";
 import { NoOwnerError } from "@/offline/owner";
 import { QUEUED_CAPTURES_KEY } from "@/offline/queryKeys";
 import { isLoggable } from "@/lib/candidateTier";
@@ -973,13 +973,12 @@ function ottoErrorMessage(error: Error): string {
     return "The server answered, but I couldn't make sense of it. Mind trying again?";
   }
   if (error instanceof TimeoutError) {
-    // Deliberately does not promise "I've saved that" — this function is also
-    // (kora#196 tracks giving those paths a queue; this comment is the marker
-    // to revisit when it lands.)
-    // reached from the barcode and typed-text paths (handleBarcodeScanned,
-    // handleSend), neither of which calls enqueueCapture. Only
-    // handleResolveFailure's own branch (below) actually queues on timeout;
-    // this copy stays honest about the timeout itself for every other caller.
+    // Reached from the BARCODE path (handleBarcodeScanned), which still does
+    // not queue — kora#241 tracks giving it one. The typed path now queues on
+    // timeout (kora#196) and sets its own copy in handleSend's onError, and
+    // handleResolveFailure does the same for photo and voice, so this generic
+    // text is only ever seen by a caller with nothing saved. It therefore
+    // stays honest about the timeout itself and promises no save.
     return "That took too long — mind trying again?";
   }
   return "Something went wrong while I looked at that. Please try again.";
@@ -1337,16 +1336,43 @@ export default function CaptureScreen() {
         applyResolution(data, "ai_text");
         setResolvedPhrase(phrase);
       },
-      onError: (error) => {
+      onError: async (error) => {
         if (controller.signal.aborted) return;
-        // Hand the words back. A failed text resolve is NOT queued — only
-        // photo and voice reach enqueueCapture (kora#196) — so leaving the
-        // composer empty would make the user retype what they just lost. The
-        // bubble goes with it: a message that never arrived should not sit in
-        // the thread as though it did.
-        setSentPhrase(null);
-        setText(phrase);
-        setErrorMsg(ottoErrorMessage(error));
+        // Same classifier handleResolveFailure uses: these three mean the
+        // request never arrived, so the phrase is still good and belongs in
+        // the queue (kora#196). Anything else is a genuine refusal that would
+        // fail identically on replay.
+        const recoverable =
+          error instanceof NetworkError ||
+          error instanceof AuthTokenError ||
+          error instanceof TimeoutError;
+        if (!recoverable) {
+          // Hand the words back. The bubble goes with them: a message that
+          // never arrived should not sit in the thread as though it did.
+          setSentPhrase(null);
+          setText(phrase);
+          setErrorMsg(ottoErrorMessage(error));
+          return;
+        }
+        try {
+          await enqueueTextCapture(phrase, mealSlot);
+          // The bubble STAYS and the composer stays empty: the capture was
+          // accepted, so returning the text would be the misleading state.
+          setErrorMsg(
+            "You're offline — I've saved that, and I'll identify it as soon as you're back online.",
+          );
+          void queryClient.invalidateQueries({ queryKey: [QUEUED_CAPTURES_KEY] });
+        } catch (queueError) {
+          // The queue refused (full, or nobody signed in) — the phrase is only
+          // safe in the composer now, so put it back and say why.
+          setSentPhrase(null);
+          setText(phrase);
+          setErrorMsg(
+            queueError instanceof CaptureQueueFullError || queueError instanceof NoOwnerError
+              ? queueError.message
+              : ottoErrorMessage(error),
+          );
+        }
       },
     });
   }

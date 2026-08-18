@@ -57,3 +57,28 @@ it("sweeps orphaned media on install, keeping every queued capture's file", asyn
   expect(sweepOrphans).toHaveBeenCalledWith(["c1.jpg", "c2.m4a"]);
   teardown();
 });
+
+// kora#196: a text row has no storedName. The keep-set must contain only real
+// media names, and a text row in the queue must not disturb the sweep.
+it("passes only media names to the orphan sweep when the queue also holds text", async () => {
+  await AsyncStorage.clear();
+  await seedCapture("c1", "c1.jpg");
+  await appendCapture({
+    id: "c2", kind: "text", phrase: "chicken and rice",
+    capturedAt: atLocalNoon(2026, 8, 1), ownerId: "uid-1",
+  } as Parameters<typeof appendCapture>[0]);
+  await appendCapture({
+    id: "c3", kind: "voice", storedName: "c3.m4a", fileName: "m.m4a", mimeType: "audio/mp4",
+    capturedAt: atLocalNoon(2026, 8, 1), ownerId: "uid-1",
+  } as Parameters<typeof appendCapture>[0]);
+
+  const { sweepOrphans } = jest.requireMock("../captureMedia");
+  sweepOrphans.mockClear();
+
+  const teardown = installDrainTriggers({} as never);
+  // listCaptures() -> sweepOrphans() is two awaits deep.
+  await new Promise((resolve) => setImmediate(resolve));
+
+  expect(sweepOrphans).toHaveBeenCalledWith(["c1.jpg", "c3.m4a"]);
+  teardown();
+});
