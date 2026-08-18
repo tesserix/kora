@@ -16,22 +16,26 @@ import (
 // stubProvider implements ai.Provider. Only the three methods the parser uses
 // are meaningful; the rest exist to satisfy the interface.
 type stubProvider struct {
-	generated    string
-	generateErr  error
-	guesses      []ai.Guess
-	photoErr     error
-	ingredients  []ai.IngredientGuess
-	decomposeErr error
+	name           string
+	generated      string
+	generateErr    error
+	generateUsage  ai.Usage
+	guesses        []ai.Guess
+	photoErr       error
+	photoUsage     ai.Usage
+	ingredients    []ai.IngredientGuess
+	decomposeErr   error
+	decomposeUsage ai.Usage
 }
 
 func (s *stubProvider) IdentifyText(context.Context, string) ([]ai.Guess, ai.Usage, error) {
 	return nil, ai.Usage{}, nil
 }
 func (s *stubProvider) IdentifyPhoto(context.Context, []byte, string) ([]ai.Guess, ai.Usage, error) {
-	return s.guesses, ai.Usage{}, s.photoErr
+	return s.guesses, s.photoUsage, s.photoErr
 }
 func (s *stubProvider) Decompose(context.Context, string) ([]ai.IngredientGuess, ai.Usage, error) {
-	return s.ingredients, ai.Usage{}, s.decomposeErr
+	return s.ingredients, s.decomposeUsage, s.decomposeErr
 }
 func (s *stubProvider) Embed(context.Context, string) ([]float32, ai.Usage, error) {
 	return nil, ai.Usage{}, nil
@@ -40,9 +44,14 @@ func (s *stubProvider) Transcribe(context.Context, []byte, string) (string, ai.U
 	return "", ai.Usage{}, nil
 }
 func (s *stubProvider) GenerateText(context.Context, string, string) (string, ai.Usage, error) {
-	return s.generated, ai.Usage{}, s.generateErr
+	return s.generated, s.generateUsage, s.generateErr
 }
-func (s *stubProvider) Name() string { return "stub" }
+func (s *stubProvider) Name() string {
+	if s.name != "" {
+		return s.name
+	}
+	return "stub"
+}
 
 // stubMeter implements ai.Meter. It records what was metered and can refuse
 // budget, so the gate and the ledger are both assertable without a DB.
@@ -111,6 +120,36 @@ func TestParseTextMetersFailures(t *testing.T) {
 	require.Equal(t, ai.OutcomeError, meter.recorded[0].Outcome)
 }
 
+func TestParseTextMetersAbandonedPrimaryAndSuccessfulFallback(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	f := seedFood(t, db, 100)
+	meter := &stubMeter{}
+	provider := &ai.Router{
+		Primary: &stubProvider{
+			name:          "primary",
+			generateErr:   errors.New("primary boom"),
+			generateUsage: ai.Usage{Provider: "primary", TokensIn: 8},
+		},
+		Fallback: &stubProvider{
+			name:          "fallback",
+			generated:     `{"name":"X","servings":1,"ingredients":[{"text":"` + f.Name + `","amount":100,"unit":"g"}]}`,
+			generateUsage: ai.Usage{Provider: "fallback", TokensIn: 13},
+		},
+	}
+	p := NewParser(provider, nutrition.NewRepository(db), meter)
+
+	_, err := p.ParseText(context.Background(), userID, "recipe")
+
+	require.NoError(t, err)
+	require.Len(t, meter.recorded, 2, "recipe generation must meter both routed provider legs")
+	require.Equal(t, "primary", meter.recorded[0].Provider)
+	require.Equal(t, ai.OutcomeError, meter.recorded[0].Outcome)
+	require.Equal(t, callTypeParseText, meter.recorded[0].CallType)
+	require.Equal(t, "fallback", meter.recorded[1].Provider)
+	require.Equal(t, ai.OutcomeOK, meter.recorded[1].Outcome)
+}
+
 // A provider timeout is metered as a timeout, not a generic error, so a
 // latency budget that is too tight stays visible in the ledger (spec).
 func TestParseTextMetersTimeoutAsTimeout(t *testing.T) {
@@ -154,6 +193,36 @@ func TestParsePhotoMetersBothProviderCalls(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []string{callTypeParsePhoto, callTypeParsePhoto}, meter.callTypes(),
 		"identify and decompose are two billed calls and both belong in the ledger")
+}
+
+func TestParsePhotoMetersAbandonedDecomposePrimaryAndFallback(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	f := seedFood(t, db, 100)
+	meter := &stubMeter{}
+	provider := &ai.Router{
+		Primary: &stubProvider{
+			name:           "primary",
+			guesses:        []ai.Guess{{Food: "dal", Confidence: 0.9}},
+			photoUsage:     ai.Usage{Provider: "primary", TokensIn: 5},
+			decomposeErr:   errors.New("primary decompose boom"),
+			decomposeUsage: ai.Usage{Provider: "primary", TokensIn: 7},
+		},
+		Fallback: &stubProvider{
+			name:           "fallback",
+			ingredients:    []ai.IngredientGuess{{Ingredient: f.Name, PortionEstimate: "100 g"}},
+			decomposeUsage: ai.Usage{Provider: "fallback", TokensIn: 11},
+		},
+	}
+	p := NewParser(provider, nutrition.NewRepository(db), meter)
+
+	_, err := p.ParsePhoto(context.Background(), userID, []byte("jpeg"), "image/jpeg")
+
+	require.NoError(t, err)
+	require.Len(t, meter.recorded, 3, "identify plus both decompose legs are three billed calls")
+	require.Equal(t, []string{callTypeParsePhoto, callTypeParsePhoto, callTypeParsePhoto}, meter.callTypes())
+	require.Equal(t, ai.OutcomeError, meter.recorded[1].Outcome)
+	require.Equal(t, "fallback", meter.recorded[2].Provider)
 }
 
 func TestParsePhotoIsBudgetGated(t *testing.T) {

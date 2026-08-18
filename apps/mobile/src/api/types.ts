@@ -15,6 +15,57 @@ export type Profile = {
   share_progress: boolean;
 };
 
+export interface AIQuotaWindow {
+  used: number;
+  limit: number;
+  remaining: number;
+  resets_at: string;
+}
+
+export interface AIUsageStatus {
+  daily: AIQuotaWindow;
+  weekly: AIQuotaWindow;
+  monthly: AIQuotaWindow;
+}
+
+export type CoachKind = "protein" | "fibre" | "weight_down" | "weight_up" | "today";
+
+export interface CoachNudge {
+  kind: CoachKind;
+  title: string;
+  text: string;
+}
+
+export interface CoachCitation {
+  label: string;
+  value: string;
+}
+
+export type CoachRole = "user" | "otto";
+
+export interface CoachTurn {
+  role: CoachRole;
+  text: string;
+  citations: CoachCitation[];
+  created_at: string;
+}
+
+export interface CoachNudgesResponse {
+  nudges: CoachNudge[];
+  show_support: boolean;
+}
+
+export interface CoachThreadResponse {
+  turns: CoachTurn[];
+  show_support: boolean;
+}
+
+export interface CoachAnswer {
+  answer: string;
+  citations: CoachCitation[];
+  show_support: boolean;
+}
+
 export type ServingUnit = {
   name: string;
   amount: number;

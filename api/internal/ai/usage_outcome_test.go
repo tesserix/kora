@@ -116,6 +116,26 @@ func (p *depositingProvider) IdentifyPhoto(ctx context.Context, image []byte, mi
 	return nil, Usage{Provider: "returned-stub", CallType: "identify_photo", TokensIn: 5}, errors.New("boom")
 }
 
+type depositingDecomposeProvider struct {
+	*stubProvider
+	deposit Usage
+}
+
+func (p *depositingDecomposeProvider) Decompose(ctx context.Context, dish string) ([]IngredientGuess, Usage, error) {
+	addUsage(ctx, p.deposit)
+	return nil, Usage{Provider: "returned-stub", CallType: "decompose", TokensIn: 7}, errors.New("boom")
+}
+
+type depositingEmbedProvider struct {
+	*stubProvider
+	deposit Usage
+}
+
+func (p *depositingEmbedProvider) Embed(ctx context.Context, text string) ([]float32, Usage, error) {
+	addUsage(ctx, p.deposit)
+	return nil, Usage{Provider: "returned-stub", CallType: "embed", TokensIn: 5}, errors.New("boom")
+}
+
 // The Resolver must meter EVERY leg, not just the one whose result it returns.
 func TestResolve_RecordsDepositedLegsAsWellAsTheReturnedOne(t *testing.T) {
 	meter := &stubMeter{withinBudget: true}
@@ -136,4 +156,40 @@ func TestResolve_RecordsDepositedLegsAsWellAsTheReturnedOne(t *testing.T) {
 	require.Contains(t, byProvider, "returned-stub", "the returned leg must be metered even though it failed")
 	assert.Equal(t, OutcomeTimeout, byProvider["abandoned-stub"].Outcome)
 	assert.Equal(t, OutcomeError, byProvider["returned-stub"].Outcome)
+}
+
+func TestDecomposeAndEstimate_RecordsDepositedLegsAndReturnedFailure(t *testing.T) {
+	meter := &stubMeter{withinBudget: true}
+	provider := &depositingDecomposeProvider{
+		stubProvider: &stubProvider{name: "primary-stub"},
+		deposit:      Usage{Provider: "abandoned-stub", CallType: "decompose", TokensIn: 11, Outcome: OutcomeTimeout},
+	}
+	r := NewResolver(provider, nutrition.Repository{}, NoCache{}, meter)
+
+	_, _, err := r.decomposeAndEstimate(context.Background(), uuid.New(), "unknown dish")
+
+	require.Error(t, err)
+	require.Len(t, meter.records, 2, "decomposition must meter every provider leg even when no result is served")
+	assert.Equal(t, "abandoned-stub", meter.records[0].Provider)
+	assert.Equal(t, OutcomeTimeout, meter.records[0].Outcome)
+	assert.Equal(t, "returned-stub", meter.records[1].Provider)
+	assert.Equal(t, OutcomeError, meter.records[1].Outcome)
+}
+
+func TestEmbedForResolution_RecordsDepositedLegsAndReturnedFailure(t *testing.T) {
+	meter := &stubMeter{withinBudget: true}
+	provider := &depositingEmbedProvider{
+		stubProvider: &stubProvider{name: "primary-stub"},
+		deposit:      Usage{Provider: "abandoned-stub", CallType: "embed", TokensIn: 9, Outcome: OutcomeTimeout},
+	}
+	r := NewResolver(provider, nutrition.Repository{}, NoCache{}, meter)
+
+	_, err := r.embedForResolution(context.Background(), uuid.New(), "ingredient")
+
+	require.Error(t, err)
+	require.Len(t, meter.records, 2, "resolution embedding must meter every provider leg even when it degrades to text matching")
+	assert.Equal(t, "abandoned-stub", meter.records[0].Provider)
+	assert.Equal(t, OutcomeTimeout, meter.records[0].Outcome)
+	assert.Equal(t, "returned-stub", meter.records[1].Provider)
+	assert.Equal(t, OutcomeError, meter.records[1].Outcome)
 }

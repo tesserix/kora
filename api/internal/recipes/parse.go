@@ -162,6 +162,20 @@ func (p *Parser) record(ctx context.Context, userID uuid.UUID, u ai.Usage, callT
 	_ = p.meter.Record(ctx, userID, u, ai.EstimateCostUSD(u))
 }
 
+func (p *Parser) recordCollected(
+	ctx context.Context,
+	userID uuid.UUID,
+	collector *ai.UsageCollector,
+	returned ai.Usage,
+	callType string,
+	err error,
+) {
+	for _, abandoned := range collector.Drain() {
+		p.record(ctx, userID, abandoned, callType, nil)
+	}
+	p.record(ctx, userID, returned, callType, err)
+}
+
 // extracted is the model's JSON shape. Any field the model invents beyond
 // this — kcal included — is dropped by encoding/json.
 type extracted struct {
@@ -187,8 +201,9 @@ func (p *Parser) ParseText(ctx context.Context, userID uuid.UUID, text string) (
 		return Draft{}, err
 	}
 
-	raw, usage, err := p.provider.GenerateText(ctx, parseSystemPrompt, text)
-	p.record(ctx, userID, usage, callTypeParseText, err)
+	providerCtx, collector := ai.WithUsageCollector(ctx)
+	raw, usage, err := p.provider.GenerateText(providerCtx, parseSystemPrompt, text)
+	p.recordCollected(ctx, userID, collector, usage, callTypeParseText, err)
 	if err != nil {
 		return Draft{}, fmt.Errorf("%w: provider: %v", ErrParseFailed, err)
 	}
@@ -232,8 +247,9 @@ func (p *Parser) ParsePhoto(ctx context.Context, userID uuid.UUID, image []byte,
 
 	photoCtx, photoCancel := context.WithTimeout(ctx, recipePhotoBudget)
 	defer photoCancel()
-	guesses, usage, err := p.provider.IdentifyPhoto(photoCtx, image, mime)
-	p.record(ctx, userID, usage, callTypeParsePhoto, err)
+	providerCtx, collector := ai.WithUsageCollector(photoCtx)
+	guesses, usage, err := p.provider.IdentifyPhoto(providerCtx, image, mime)
+	p.recordCollected(ctx, userID, collector, usage, callTypeParsePhoto, err)
 	if err != nil {
 		return Draft{}, fmt.Errorf("%w: provider: %v", ErrParseFailed, err)
 	}
@@ -253,8 +269,9 @@ func (p *Parser) ParsePhoto(ctx context.Context, userID uuid.UUID, image []byte,
 
 	decomposeCtx, decomposeCancel := context.WithTimeout(ctx, recipeDecomposeBudget)
 	defer decomposeCancel()
-	ings, decomposeUsage, err := p.provider.Decompose(decomposeCtx, best.Food)
-	p.record(ctx, userID, decomposeUsage, callTypeParsePhoto, err)
+	providerCtx, collector = ai.WithUsageCollector(decomposeCtx)
+	ings, decomposeUsage, err := p.provider.Decompose(providerCtx, best.Food)
+	p.recordCollected(ctx, userID, collector, decomposeUsage, callTypeParsePhoto, err)
 	if err != nil {
 		return Draft{}, fmt.Errorf("%w: decompose: %v", ErrParseFailed, err)
 	}

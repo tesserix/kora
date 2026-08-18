@@ -2,6 +2,7 @@ package coach
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -134,8 +135,18 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 	}
 
 	userPrompt := fmt.Sprintf("CONTEXT:\n%s\n\nQUESTION: %s", grounded.Render(), question)
-	raw, usage, err := s.provider.GenerateText(ctx, qaSystemPrompt, userPrompt)
+	providerCtx, collector := ai.WithUsageCollector(ctx)
+	raw, usage, err := s.provider.GenerateText(providerCtx, qaSystemPrompt, userPrompt)
+	for _, abandoned := range collector.Drain() {
+		s.record(ctx, userID, abandoned)
+	}
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			usage.Outcome = ai.OutcomeTimeout
+		} else {
+			usage.Outcome = ai.OutcomeError
+		}
+		s.record(ctx, userID, usage)
 		return Answer{}, fmt.Errorf("coach: ask: generate: %w", err)
 	}
 	s.record(ctx, userID, usage)
@@ -250,6 +261,9 @@ func (s *Service) Nudges(ctx context.Context, userID uuid.UUID, now time.Time, l
 // it) must still be recorded as "ok" — not left blank, which the meter
 // normalizes to "other" and hides from every {outcome="ok"} product query.
 func (s *Service) record(ctx context.Context, userID uuid.UUID, u ai.Usage) {
+	if u.Provider == "" && s.provider != nil {
+		u.Provider = s.provider.Name()
+	}
 	if u.Outcome == "" {
 		u.Outcome = ai.OutcomeOK
 	}

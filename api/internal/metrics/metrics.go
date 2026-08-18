@@ -51,13 +51,7 @@ func New() *Collectors {
 		registry: prometheus.NewRegistry(),
 		aiCalls: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "kora_ai_calls_total",
-			// This guarantee is call-type-specific, not exporter-wide — do not
-			// broaden it back to "including failed and abandoned fallback legs"
-			// without also closing the metering gaps below, or class="derived"
-			// and call_type="coach" will keep reporting a 100% success rate
-			// that is an artefact of what never got recorded, not of what
-			// actually happened. See docs/ai-usage-queries.md.
-			Help: "AI provider calls. identify_photo, identify_text, transcribe, and the food-index backfill's embed calls (cmd/embed) include failed calls and abandoned fallback legs. coach and decompose record ONLY successful calls, and ingest-time embeds (nutrition's embedAsync) are not recorded at all; their failures and any abandoned legs are not observed here.",
+			Help: "AI provider calls, including failed calls and abandoned fallback legs. Ingest-time embeds (nutrition's embedAsync) are not metered and are absent.",
 		}, []string{"class", "call_type", "model", "outcome"}),
 		aiCostUSD: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "kora_ai_cost_usd_total",

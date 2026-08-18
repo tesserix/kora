@@ -36,6 +36,7 @@ jest.mock("@/lib/firebase", () => ({
 jest.mock("@/lib/api", () => ({
   apiFetch: (...a: unknown[]) => mockApiFetch(...a),
   apiFetchMultipart: (...a: unknown[]) => mockApiFetchMultipart(...a),
+  currentUserId: () => "user-a",
   ApiError: MockApiError,
 }));
 

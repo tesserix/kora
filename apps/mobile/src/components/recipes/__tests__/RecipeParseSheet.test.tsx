@@ -202,7 +202,9 @@ test("a 502 parse failure opens the manual editor rather than an error dead end"
 // A 429 budget_exhausted parse error must land in the SAME manual-editor
 // review stage a 502 reaches, but with its OWN notice copy naming the AI
 // limit specifically — a 502 is a parse failure (we tried and failed), a 429
-// is a budget exhaustion (we never tried this month's AI call at all). The
+// is a budget exhaustion (we never made this provider call at all). Daily,
+// weekly, monthly, user-cost and platform-cost limits all reach this same
+// response, so the UI must not claim it knows which window stopped the call.
 // server's own message text (api/internal/recipes/handler.go) is what the
 // endpoint actually sends; this test uses it for realism, though the
 // component's fallback notice is its own copy, not this message.
@@ -226,7 +228,9 @@ test("a 429 budget-exhausted parse error opens the manual editor with limit-spec
   // explanation naming the AI limit — never a bare error with no way forward.
   expect(await findByText("an unreadable mess of a recipe")).toBeTruthy();
   expect(await findByText("needs a match")).toBeTruthy();
-  expect(await findByText(/reached your AI limit this month/i)).toBeTruthy();
+  expect(await findByText(/reached an AI usage limit/i)).toBeTruthy();
+  expect(await findByText(/AI usage in More/i)).toBeTruthy();
+  expect(queryByText(/this month/i)).toBeNull();
   // Distinct from the 502 notice — an assertion mixup between the two tests
   // must not be able to pass by accident.
   expect(queryByText(/couldn't read that automatically/i)).toBeNull();

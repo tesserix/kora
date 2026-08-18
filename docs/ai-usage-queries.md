@@ -146,14 +146,11 @@ per second, all types") — most product questions (photo share, resolution
 success rate) are about `class="resolution"` specifically, since `derived`
 scales with meal complexity and corrections, not with user actions.
 
-Before trusting an `outcome="ok"` panel for `coach`, `decompose`, or `embed`,
-read the Help text on `kora_ai_calls_total` (`kubectl exec` into the pod, hit
-`/metrics`, or `promtool metric-metadata`): `coach` and `decompose` record
-**only** successful calls at the metering seam today, so their `error` /
-`timeout` series will show near-zero not because they never fail, but because
-the failure was never recorded. A 100% success rate there is an artefact of
-that gap, not a fact about reliability — the same trap the "Two traps"
-section above warns about for pre-#81 SQL rows.
+`coach`, recipe parsing, resolver decomposition, and user-facing resolver
+embeddings now install the same per-request usage collector as food
+identification. Their `error` / `timeout` series therefore include a failed
+returned call and every primary leg abandoned before a fallback served the
+request. As with all call types, one user action may produce more than one row.
 
 `embed` is now split, and the split matters when reading volume as well as
 success rate. The food-index backfill (`cmd/embed`) records every provider
