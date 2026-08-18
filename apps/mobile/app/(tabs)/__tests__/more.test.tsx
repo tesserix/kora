@@ -17,6 +17,13 @@ jest.mock("firebase/auth", () => ({ signOut: (...a: unknown[]) => mockSignOut(..
 jest.mock("@/api/hooks", () => ({
   useUnreadCount: () => ({ data: { count: 2 } }),
   useProfile: () => ({ data: { display_name: "Kai Rivers", email: "kai@example.com" } }),
+  useAIUsage: () => ({
+    data: {
+      daily: { used: 3, limit: 20, remaining: 17, resets_at: "2026-08-20T00:00:00Z" },
+      weekly: { used: 9, limit: 100, remaining: 91, resets_at: "2026-08-24T00:00:00Z" },
+      monthly: { used: 17, limit: 300, remaining: 283, resets_at: "2026-09-01T00:00:00Z" },
+    },
+  }),
 }));
 
 const mockUnregister = jest.fn();
@@ -55,6 +62,12 @@ test("tapping Notifications navigates to /notifications", async () => {
   const { getByText } = await render(<More />);
   await fireEvent.press(getByText("Notifications"));
   expect(mockPush).toHaveBeenCalledWith("/notifications");
+});
+
+test("tapping AI usage navigates to the quota details", async () => {
+  const { getByText } = await render(<More />);
+  await fireEvent.press(getByText("AI usage"));
+  expect(mockPush).toHaveBeenCalledWith("/ai-usage");
 });
 
 test("tapping Send feedback navigates to /feedback", async () => {

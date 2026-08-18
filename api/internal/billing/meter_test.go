@@ -98,6 +98,52 @@ func TestQuotaWindowStartsUseFixedUTCBoundaries(t *testing.T) {
 	require.Equal(t, time.Date(2025, time.December, 1, 0, 0, 0, 0, time.UTC), windows[2].start)
 }
 
+func TestStatusReturnsOnlyTheUsersCurrentWindowsAndResetTimes(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	otherUserID := seedUser(t, db)
+	now := time.Date(2026, time.August, 19, 12, 0, 0, 0, time.UTC)
+	meter := NewMeter(db)
+	meter.now = func() time.Time { return now }
+	windows := quotaWindowsAt(now)
+	setQuotaCount(t, db, userID, quotaDay, windows[0].start, 3)
+	setQuotaCount(t, db, userID, quotaWeek, windows[1].start, 9)
+	setQuotaCount(t, db, userID, quotaMonth, windows[2].start, 17)
+	setQuotaCount(t, db, otherUserID, quotaDay, windows[0].start, perUserDailyRequestCap)
+
+	status, err := meter.Status(context.Background(), userID)
+
+	require.NoError(t, err)
+	require.Equal(t, WindowStatus{
+		Used: 3, Limit: perUserDailyRequestCap, Remaining: perUserDailyRequestCap - 3,
+		ResetsAt: time.Date(2026, time.August, 20, 0, 0, 0, 0, time.UTC),
+	}, status.Daily)
+	require.Equal(t, WindowStatus{
+		Used: 9, Limit: perUserWeeklyRequestCap, Remaining: perUserWeeklyRequestCap - 9,
+		ResetsAt: time.Date(2026, time.August, 24, 0, 0, 0, 0, time.UTC),
+	}, status.Weekly)
+	require.Equal(t, WindowStatus{
+		Used: 17, Limit: perUserMonthlyRequestCap, Remaining: perUserMonthlyRequestCap - 17,
+		ResetsAt: time.Date(2026, time.September, 1, 0, 0, 0, 0, time.UTC),
+	}, status.Monthly)
+}
+
+func TestStatusClampsRemainingAtZeroWhenBackfillExceedsALimit(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	now := time.Date(2026, time.August, 19, 12, 0, 0, 0, time.UTC)
+	meter := NewMeter(db)
+	meter.now = func() time.Time { return now }
+	day := quotaWindowsAt(now)[0]
+	setQuotaCount(t, db, userID, quotaDay, day.start, perUserDailyRequestCap+4)
+
+	status, err := meter.Status(context.Background(), userID)
+
+	require.NoError(t, err)
+	require.Equal(t, perUserDailyRequestCap+4, status.Daily.Used)
+	require.Zero(t, status.Daily.Remaining)
+}
+
 func TestWithinBudgetRollsBackEveryWindowWhenDailyQuotaIsExhausted(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db)

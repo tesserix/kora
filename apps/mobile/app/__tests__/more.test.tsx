@@ -22,6 +22,7 @@ let mockUnreadCount = 0;
 jest.mock("@/api/hooks", () => ({
   useUnreadCount: () => ({ data: { count: mockUnreadCount } }),
   useProfile: () => ({ data: { display_name: "Kai Rivers", email: "kai@example.com" } }),
+  useAIUsage: () => ({ data: undefined }),
 }));
 
 function flattenStyle(style: unknown): Record<string, unknown> {
@@ -39,7 +40,7 @@ beforeEach(() => {
 test("renders every row label and the More title", async () => {
   const { getByText } = await render(<More />);
   expect(getByText("More")).toBeTruthy();
-  for (const label of ["Profile", "Friends", "Groups", "Notifications", "Recipes", "Settings", "Send feedback", "Sign out"]) {
+  for (const label of ["Profile", "Friends", "Groups", "Notifications", "Recipes", "AI usage", "Settings", "Send feedback", "Sign out"]) {
     expect(getByText(label)).toBeTruthy();
   }
 });

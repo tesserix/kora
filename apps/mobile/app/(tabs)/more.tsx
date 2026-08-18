@@ -15,7 +15,8 @@ import { Avatar } from "@/components/Avatar";
 import { Icon } from "@/components/Icon";
 import { Badge } from "@/components/Badge";
 import { PressableScale, ScreenEntrance } from "@/motion";
-import { useProfile, useUnreadCount } from "@/api/hooks";
+import { useAIUsage, useProfile, useUnreadCount } from "@/api/hooks";
+import { remainingAIRequests } from "@/api/aiUsage";
 import { useTheme } from "@/theme";
 
 // More tab, restyled to the Instrument Glass language (spec:
@@ -28,7 +29,7 @@ import { useTheme } from "@/theme";
 // near-identically — MoreRow is kept as-is rather than migrated to avoid
 // churn on an already-shipped screen. The unread-count Badge is the one
 // accent element this screen is allowed.
-type MoreRowKey = "profile" | "friends" | "groups" | "notifications" | "recipes" | "settings" | "feedback" | "about";
+type MoreRowKey = "profile" | "friends" | "groups" | "notifications" | "recipes" | "ai-usage" | "settings" | "feedback" | "about";
 
 type MoreRowProps = {
   rowKey: MoreRowKey;
@@ -120,6 +121,7 @@ export default function More() {
   const unread = useUnreadCount();
   const count = unread.data?.count ?? 0;
   const profile = useProfile();
+  const aiUsage = useAIUsage();
   const data = profile.data;
 
   return (
@@ -189,6 +191,17 @@ export default function More() {
             title="Recipes"
             icon="book-open"
             onPress={() => router.push("/recipes" as Href)}
+          />
+          <MoreRow
+            rowKey="ai-usage"
+            title="AI usage"
+            icon="sparkles"
+            right={aiUsage.data ? (
+              <AppText style={{ color: instrument.mut, fontSize: 12, marginRight: spacing.xs }}>
+                {remainingAIRequests(aiUsage.data)} left
+              </AppText>
+            ) : null}
+            onPress={() => router.push("/ai-usage" as Href)}
           />
         </MoreGroup>
         <MoreGroup>

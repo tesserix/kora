@@ -108,6 +108,13 @@ func TestResolveRoutesAbsentWhenResolverNil(t *testing.T) {
 	}
 }
 
+func TestAIUsageRouteIsAlwaysRegisteredInsideTheAuthenticatedAPI(t *testing.T) {
+	r := NewRouter(Deps{DB: &gorm.DB{}, Verifier: stubVerifier{}})
+	if !hasRoute(r.Routes(), http.MethodGet, "/v1/ai/usage") {
+		t.Error("expected GET /v1/ai/usage to be registered")
+	}
+}
+
 func TestAnonymousRequestsCannotReachAnyPublicAICapability(t *testing.T) {
 	h := resolve.NewHandler(nil, nil)
 	r := NewRouter(Deps{
@@ -131,6 +138,11 @@ func TestAnonymousRequestsCannotReachAnyPublicAICapability(t *testing.T) {
 			assert.JSONEq(t, `{"error":"unauthorized","message":"invalid or missing token"}`, w.Body.String())
 		})
 	}
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/ai/usage", nil))
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	assert.JSONEq(t, `{"error":"unauthorized","message":"invalid or missing token"}`, w.Body.String())
 }
 
 // recipeRoutes is the full set of recipe routes; used to confirm they are

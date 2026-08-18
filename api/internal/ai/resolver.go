@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -568,16 +569,13 @@ func (r Resolver) resolveGuesses(ctx context.Context, userID uuid.UUID, phrase s
 	damped := 0
 
 	for _, guess := range guesses {
-		vec, embUsage, embErr := r.provider.Embed(ctx, guess.Food)
+		vec, embErr := r.embedForResolution(ctx, userID, guess.Food)
 		if embErr != nil {
 			// Embedding is an optional signal-booster (tier 3 in
 			// nutrition.Resolve); a failure here must not fail the whole
-			// resolve, it just means the embedding tier is skipped. A failed
-			// embed also contributes no real usage, so it must not create a
-			// noise metering row.
+			// resolve, it just means the embedding tier is skipped. The helper
+			// still records any usage the provider reported for the failed call.
 			vec = nil
-		} else {
-			r.record(ctx, userID, embUsage)
 		}
 
 		// Pass the STRUCTURED guess, not just guess.Food. This is the point of
@@ -758,11 +756,18 @@ func topCandidateScore(res Resolution) float64 {
 // whether at least one ingredient resolved; when false, the caller must keep
 // its prior follow-up Resolution instead of presenting an empty estimate.
 func (r Resolver) decomposeAndEstimate(ctx context.Context, userID uuid.UUID, subject string) (Resolution, bool, error) {
-	ingredients, usage, err := r.provider.Decompose(ctx, subject)
+	providerCtx, collector := WithUsageCollector(ctx)
+	ingredients, usage, err := r.provider.Decompose(providerCtx, subject)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			usage.Outcome = OutcomeTimeout
+		} else {
+			usage.Outcome = OutcomeError
+		}
+		r.recordAll(ctx, userID, collector.Drain(), usage)
 		return Resolution{}, false, fmt.Errorf("ai: decompose: %w", err)
 	}
-	r.record(ctx, userID, usage)
+	r.recordAll(ctx, userID, collector.Drain(), usage)
 
 	var candidates []ResolvedCandidate
 	var totalKcal float64
@@ -770,13 +775,11 @@ func (r Resolver) decomposeAndEstimate(ctx context.Context, userID uuid.UUID, su
 	bestRank := -1
 
 	for _, ing := range ingredients {
-		vec, embUsage, embErr := r.provider.Embed(ctx, ing.Ingredient)
+		vec, embErr := r.embedForResolution(ctx, userID, ing.Ingredient)
 		if embErr != nil {
-			// A failed embed contributes no real usage and must not create a
-			// noise metering row; the embedding tier is simply skipped.
+			// Embedding remains an optional ranking signal. Failure falls back
+			// to text matching after any reported provider usage is recorded.
 			vec = nil
-		} else {
-			r.record(ctx, userID, embUsage)
 		}
 
 		cands, err := r.foods.Resolve(ctx, userID, ing.Ingredient, vec, resolveTopK)
@@ -833,4 +836,18 @@ func (r Resolver) decomposeAndEstimate(ctx context.Context, userID uuid.UUID, su
 		KcalHigh:   totalKcal * (1 + estimateBand),
 		Provenance: "estimate",
 	}, true, nil
+}
+
+func (r Resolver) embedForResolution(ctx context.Context, userID uuid.UUID, text string) ([]float32, error) {
+	providerCtx, collector := WithUsageCollector(ctx)
+	vec, usage, err := r.provider.Embed(providerCtx, text)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			usage.Outcome = OutcomeTimeout
+		} else {
+			usage.Outcome = OutcomeError
+		}
+	}
+	r.recordAll(ctx, userID, collector.Drain(), usage)
+	return vec, err
 }

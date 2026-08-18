@@ -213,6 +213,59 @@ func TestAsk_SuccessDefaultsBlankOutcomeToOK(t *testing.T) {
 	require.Equal(t, ai.OutcomeOK, meter.records[0].Outcome, "a successful call with no provider-set Outcome must be recorded as ok")
 }
 
+func TestAsk_MetersFailedProviderCall(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	logRepo := foodlog.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{})
+	meter := &stubMeter{withinBudget: true}
+	provider := &fakeProvider{
+		textErr:   errors.New("provider boom"),
+		textUsage: ai.Usage{Provider: "primary", CallType: "coach", TokensIn: 9},
+	}
+
+	_, err := NewService(&g, provider, meter, nil).Ask(
+		context.Background(), userID, time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC), time.UTC, "how am I doing?",
+	)
+
+	require.Error(t, err)
+	require.Len(t, meter.records, 1, "a billed provider failure must not disappear from coach usage")
+	require.Equal(t, ai.OutcomeError, meter.records[0].Outcome)
+}
+
+func TestAsk_MetersAbandonedPrimaryAndSuccessfulFallback(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	logRepo := foodlog.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{})
+	meter := &stubMeter{withinBudget: true}
+	provider := &ai.Router{
+		Primary: &fakeProvider{
+			textErr:   errors.New("primary boom"),
+			textUsage: ai.Usage{Provider: "primary", CallType: "coach", TokensIn: 9},
+		},
+		Fallback: &fakeProvider{
+			text:      "You have 55g protein to go.",
+			textUsage: ai.Usage{Provider: "fallback", CallType: "coach", TokensIn: 12},
+		},
+	}
+
+	_, err := NewService(&g, provider, meter, nil).Ask(
+		context.Background(), userID, time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC), time.UTC, "how's my protein?",
+	)
+
+	require.NoError(t, err)
+	require.Len(t, meter.records, 2, "the abandoned primary and serving fallback are both billed calls")
+	require.Equal(t, "primary", meter.records[0].Provider)
+	require.Equal(t, ai.OutcomeError, meter.records[0].Outcome)
+	require.Equal(t, "fallback", meter.records[1].Provider)
+	require.Equal(t, ai.OutcomeOK, meter.records[1].Outcome)
+}
+
 func TestAsk_OverBudgetDegradesGracefully(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db, 2000, 120)

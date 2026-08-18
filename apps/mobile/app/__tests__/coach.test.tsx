@@ -1,0 +1,136 @@
+import { fireEvent, render, waitFor } from "@testing-library/react-native";
+
+import CoachScreen from "../coach";
+
+const mockNudges = jest.fn();
+const mockThread = jest.fn();
+const mockAsk = jest.fn();
+const mockNudgesRefetch = jest.fn();
+const mockThreadRefetch = jest.fn();
+const mockAskMutate = jest.fn();
+const mockOnline = jest.fn(() => true);
+
+jest.mock("expo-router", () => ({
+  router: { back: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => true) },
+}));
+jest.mock("@/api/hooks", () => ({
+  useCoachNudges: () => mockNudges(),
+  useCoachThread: () => mockThread(),
+  useCoachAsk: () => mockAsk(),
+}));
+jest.mock("@/offline/connectivity", () => ({ useIsOnline: () => mockOnline() }));
+
+const nudgeData = {
+  nudges: [{ kind: "protein", title: "Protein", text: "142 / 160g — 18g to go" }],
+  show_support: false,
+};
+const threadData = {
+  turns: [
+    { role: "user", text: "How is my protein?", citations: [], created_at: "2026-08-19T00:00:00Z" },
+    {
+      role: "otto",
+      text: "You have 18g to go today.",
+      citations: [{ label: "Protein", value: "142 / 160g" }],
+      created_at: "2026-08-19T00:00:01Z",
+    },
+  ],
+  show_support: false,
+};
+
+beforeEach(() => {
+  mockNudgesRefetch.mockClear();
+  mockThreadRefetch.mockClear();
+  mockAskMutate.mockReset();
+  mockOnline.mockReturnValue(true);
+  mockNudges.mockReturnValue({ data: nudgeData, isLoading: false, isError: false, refetch: mockNudgesRefetch });
+  mockThread.mockReturnValue({ data: threadData, isLoading: false, isError: false, refetch: mockThreadRefetch });
+  mockAsk.mockReturnValue({ mutate: mockAskMutate, isPending: false });
+});
+
+test("renders grounded focus, stored conversation, and citation chips", async () => {
+  const { getByText, getByTestId } = await render(<CoachScreen />);
+
+  expect(getByTestId("coach-focus-cluster")).toBeTruthy();
+  expect(getByText("Protein")).toBeTruthy();
+  expect(getByText("142 / 160g — 18g to go")).toBeTruthy();
+  expect(getByText("How is my protein?")).toBeTruthy();
+  expect(getByText("You have 18g to go today.")).toBeTruthy();
+  expect(getByText("Protein · 142 / 160g")).toBeTruthy();
+});
+
+test("show_support adds help without replacing safe focus cards", async () => {
+  mockNudges.mockReturnValue({
+    data: { ...nudgeData, show_support: true },
+    isLoading: false,
+    isError: false,
+    refetch: mockNudgesRefetch,
+  });
+
+  const { getByText } = await render(<CoachScreen />);
+
+  expect(getByText("A little extra support")).toBeTruthy();
+  expect(getByText("Protein")).toBeTruthy();
+});
+
+test("sending shows the optimistic user turn and asks the coach", async () => {
+  mockThread.mockReturnValue({
+    data: { turns: [], show_support: false },
+    isLoading: false,
+    isError: false,
+    refetch: mockThreadRefetch,
+  });
+  const { getByLabelText, getByText } = await render(<CoachScreen />);
+
+  await fireEvent.changeText(getByLabelText("Ask Otto a nutrition question"), "How is my fibre?");
+  await fireEvent.press(getByLabelText("Send question"));
+
+  expect(mockAskMutate).toHaveBeenCalledWith("How is my fibre?", expect.any(Object));
+  expect(getByText("How is my fibre?")).toBeTruthy();
+  expect(getByText("Otto is thinking…")).toBeTruthy();
+});
+
+test("a failed answer keeps the question and provides an inline retry", async () => {
+  mockAskMutate.mockImplementation((_question, options) => options.onError(new Error("offline")));
+  const { getByLabelText, getByText } = await render(<CoachScreen />);
+  const input = getByLabelText("Ask Otto a nutrition question");
+
+  await fireEvent.changeText(input, "What should I focus on?");
+  await fireEvent.press(getByLabelText("Send question"));
+
+  expect(getByText("Couldn't get an answer. Your question is still here.")).toBeTruthy();
+  expect(getByLabelText("Ask Otto a nutrition question").props.value).toBe("What should I focus on?");
+  await fireEvent.press(getByLabelText("Retry question"));
+  expect(mockAskMutate).toHaveBeenCalledTimes(2);
+});
+
+test("focus and conversation failures stay independent and retryable", async () => {
+  mockNudges.mockReturnValue({ data: undefined, isLoading: false, isError: true, refetch: mockNudgesRefetch });
+  mockThread.mockReturnValue({ data: undefined, isLoading: false, isError: true, refetch: mockThreadRefetch });
+
+  const { getByText, getByLabelText } = await render(<CoachScreen />);
+
+  expect(getByText("Couldn't refresh today's focus.")).toBeTruthy();
+  expect(getByText(/I couldn't load your earlier conversation/)).toBeTruthy();
+  await fireEvent.press(getByLabelText("Retry focus"));
+  await fireEvent.press(getByLabelText("Retry conversation"));
+  expect(mockNudgesRefetch).toHaveBeenCalledTimes(1);
+  expect(mockThreadRefetch).toHaveBeenCalledTimes(1);
+});
+
+test("offline mode disables send with a clear reason", async () => {
+  mockOnline.mockReturnValue(false);
+  const { getByText, getByLabelText } = await render(<CoachScreen />);
+
+  expect(getByText("You're offline — reconnect to ask Otto.")).toBeTruthy();
+  expect(getByLabelText("Send question").props.accessibilityState.disabled).toBe(true);
+});
+
+test("a suggestion sends the exact grounded question", async () => {
+  const { getByLabelText } = await render(<CoachScreen />);
+
+  await fireEvent.press(getByLabelText("Ask: How is my protein today?"));
+
+  await waitFor(() =>
+    expect(mockAskMutate).toHaveBeenCalledWith("How is my protein today?", expect.any(Object)),
+  );
+});

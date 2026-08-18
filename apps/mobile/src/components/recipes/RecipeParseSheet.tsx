@@ -97,8 +97,8 @@ type FallbackReason = "parse_failed" | "budget_exhausted";
 // (mode === "paste" with non-empty text always wins, regardless of `reason`
 // — the user's own text is always the best placeholder when we have it), or
 // otherwise a placeholder that names why there's nothing to carry: a 502
-// means we tried to read the recipe and failed, a 429 means we never tried
-// this month's AI call at all. Conflating those into one "couldn't read
+// means we tried to read the recipe and failed, a 429 means a usage guard
+// stopped the provider call. Conflating those into one "couldn't read
 // this" string would undercut the whole point of distinguishing them in the
 // fallback notice above.
 function fallbackIngredient(mode: EntryMode, pastedText: string, reason: FallbackReason): RecipeIngredientInput {
@@ -274,7 +274,7 @@ export function RecipeParseSheet({ visible, onClose, initialMode }: RecipeParseS
   // only 429 /v1/recipes/parse ever returns. Both land in the same review
   // stage with the same fallback ingredient, but the notice copy differs —
   // 502 is a parse failure (we tried and failed to read it), 429 is a budget
-  // exhaustion (we never tried this month's AI call at all).
+  // exhaustion (a usage guard stopped the provider call).
   function handleParseError(error: unknown, pastedText: string) {
     if (error instanceof ApiError && (error.status === 502 || error.status === 429)) {
       setDraftName("");
@@ -283,7 +283,7 @@ export function RecipeParseSheet({ visible, onClose, initialMode }: RecipeParseS
       setDraftIngredients([fallbackIngredient(mode, pastedText, error.status === 429 ? "budget_exhausted" : "parse_failed")]);
       setFallbackNotice(
         error.status === 429
-          ? "You've reached your AI limit this month. Name the recipe and find a match for the ingredient below."
+          ? "You've reached an AI usage limit. Name the recipe and find a match below. Check AI usage in More to see when it resets."
           : "Otto couldn't read that automatically. Name the recipe and find a match for the ingredient below.",
       );
       setStage("review");

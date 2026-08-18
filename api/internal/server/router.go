@@ -128,6 +128,8 @@ func NewRouter(deps Deps) *gin.Engine {
 
 		v1 := r.Group("/v1", auth.Middleware(deps.Verifier))
 		v1.Use(user.ResolveMiddleware(userRepo))
+		billingHandler := billing.NewHandler(billing.NewMeter(deps.DB))
+		v1.GET("/ai/usage", billingHandler.UsageStatus)
 		v1.GET("/me", userHandler.Me)
 		v1.PATCH("/me/share-progress", userHandler.UpdateShareProgress)
 		v1.PATCH("/me", userHandler.UpdateProfile)

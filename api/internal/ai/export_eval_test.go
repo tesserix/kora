@@ -15,7 +15,9 @@ package ai
 // than reimplementing them. It carries the eval build tag so it does not even
 // exist during an ordinary `go test`.
 
-func EvalPhraseCoverage(phrase string, guesses []Guess) float64 { return phraseCoverage(phrase, guesses) }
+func EvalPhraseCoverage(phrase string, guesses []Guess) float64 {
+	return phraseCoverage(phrase, guesses)
+}
 
 func EvalReductionFactor(coverage float64) float64 { return reductionFactor(coverage) }
 

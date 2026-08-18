@@ -38,6 +38,27 @@ type quotaWindow struct {
 	limit int
 }
 
+type quotaCountRow struct {
+	Kind  string `gorm:"column:window_kind"`
+	Count int    `gorm:"column:request_count"`
+}
+
+// WindowStatus is the authenticated user's usage within one fixed quota
+// window. ResetsAt is always a UTC boundary.
+type WindowStatus struct {
+	Used      int       `json:"used"`
+	Limit     int       `json:"limit"`
+	Remaining int       `json:"remaining"`
+	ResetsAt  time.Time `json:"resets_at"`
+}
+
+// QuotaStatus reports every current free-tier request window.
+type QuotaStatus struct {
+	Daily   WindowStatus `json:"daily"`
+	Weekly  WindowStatus `json:"weekly"`
+	Monthly WindowStatus `json:"monthly"`
+}
+
 // Meter records provider usage and reserves user quota before provider work.
 type Meter struct {
 	db  *gorm.DB
@@ -75,6 +96,22 @@ func (m Meter) Record(ctx context.Context, userID uuid.UUID, u ai.Usage, costUSD
 // count, not a user's monthly allowance.
 func (m Meter) RecordSystem(ctx context.Context, u ai.Usage, costUSD float64) error {
 	return m.record(ctx, nil, u, costUSD)
+}
+
+// Status returns an informational snapshot of the user's current request
+// windows without reserving provider capacity. WithinBudget remains the
+// authoritative admission decision under concurrency.
+func (m Meter) Status(ctx context.Context, userID uuid.UUID) (QuotaStatus, error) {
+	windows := quotaWindowsAt(m.now())
+	counts, err := loadQuotaCounts(m.db.WithContext(ctx), userID, windows)
+	if err != nil {
+		return QuotaStatus{}, fmt.Errorf("billing: status: %w", err)
+	}
+	return QuotaStatus{
+		Daily:   windowStatus(windows[0], counts[quotaDay]),
+		Weekly:  windowStatus(windows[1], counts[quotaWeek]),
+		Monthly: windowStatus(windows[2], counts[quotaMonth]),
+	}, nil
 }
 
 // record is the shared body of Record and RecordSystem. userID is nil for a
@@ -157,26 +194,9 @@ func (m Meter) WithinBudget(ctx context.Context, userID uuid.UUID) (bool, error)
 			return errQuotaExceeded
 		}
 
-		type countRow struct {
-			Kind  string `gorm:"column:window_kind"`
-			Count int    `gorm:"column:request_count"`
-		}
-		var rows []countRow
-		if err := tx.Raw(`
-			SELECT window_kind, request_count
-			FROM ai_quota_windows
-			WHERE user_id = ?
-			  AND (window_kind, window_start) IN ((?, ?), (?, ?), (?, ?))`,
-			userID,
-			windows[0].kind, windows[0].start,
-			windows[1].kind, windows[1].start,
-			windows[2].kind, windows[2].start,
-		).Scan(&rows).Error; err != nil {
-			return fmt.Errorf("load quota windows: %w", err)
-		}
-		counts := make(map[string]int, len(rows))
-		for _, row := range rows {
-			counts[row.Kind] = row.Count
+		counts, err := loadQuotaCounts(tx, userID, windows)
+		if err != nil {
+			return err
 		}
 		for _, window := range windows {
 			if counts[window.kind] >= window.limit {
@@ -218,6 +238,44 @@ func quotaWindowsAt(t time.Time) [3]quotaWindow {
 		{kind: quotaWeek, start: dayStart.AddDate(0, 0, -daysSinceMonday), limit: perUserWeeklyRequestCap},
 		{kind: quotaMonth, start: startOfMonthUTC(u), limit: perUserMonthlyRequestCap},
 	}
+}
+
+func loadQuotaCounts(db *gorm.DB, userID uuid.UUID, windows [3]quotaWindow) (map[string]int, error) {
+	var rows []quotaCountRow
+	if err := db.Raw(`
+		SELECT window_kind, request_count
+		FROM ai_quota_windows
+		WHERE user_id = ?
+		  AND (window_kind, window_start) IN ((?, ?), (?, ?), (?, ?))`,
+		userID,
+		windows[0].kind, windows[0].start,
+		windows[1].kind, windows[1].start,
+		windows[2].kind, windows[2].start,
+	).Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("load quota windows: %w", err)
+	}
+	counts := make(map[string]int, len(rows))
+	for _, row := range rows {
+		counts[row.Kind] = row.Count
+	}
+	return counts, nil
+}
+
+func windowStatus(window quotaWindow, used int) WindowStatus {
+	remaining := window.limit - used
+	if remaining < 0 {
+		remaining = 0
+	}
+	var resetsAt time.Time
+	switch window.kind {
+	case quotaDay:
+		resetsAt = window.start.AddDate(0, 0, 1)
+	case quotaWeek:
+		resetsAt = window.start.AddDate(0, 0, 7)
+	case quotaMonth:
+		resetsAt = window.start.AddDate(0, 1, 0)
+	}
+	return WindowStatus{Used: used, Limit: window.limit, Remaining: remaining, ResetsAt: resetsAt}
 }
 
 // startOfMonthUTC returns midnight UTC on the first day of t's month.

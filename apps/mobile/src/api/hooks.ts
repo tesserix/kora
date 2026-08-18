@@ -1,5 +1,12 @@
 import { useEffect } from "react";
-import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+  type UseMutationResult,
+  type UseQueryResult,
+} from "@tanstack/react-query";
 import * as Crypto from "expo-crypto";
 import { localDateNow } from "@/lib/localDate";
 import { apiFetch, apiFetchEnvelope, apiFetchMultipart, currentUserId, isNetworkError, TimeoutError } from "@/lib/api";
@@ -27,9 +34,14 @@ import { NoOwnerError, resolveOwnerId } from "@/offline/owner";
 import type { MealSlot } from "@/lib/mealSlot";
 import type {
   AppNotification,
+  AIUsageStatus,
   Candidate,
   ChallengeDetail,
   ChallengeSummary,
+  CoachAnswer,
+  CoachNudgesResponse,
+  CoachThreadResponse,
+  CoachTurn,
   DashboardSummary,
   FeedbackCreated,
   FoodItem,
@@ -71,6 +83,73 @@ export function useProfile() {
     queryKey: ["profile"],
     queryFn: () => apiFetch("/v1/me") as Promise<Profile>,
   });
+}
+
+function aiUsageQueryKey(ownerID: string | null = currentUserId()) {
+  return ["ai-usage", ownerID] as const;
+}
+
+export function useAIUsage() {
+  const ownerID = currentUserId();
+  return useQuery({
+    queryKey: aiUsageQueryKey(ownerID),
+    queryFn: () => apiFetch("/v1/ai/usage") as Promise<AIUsageStatus>,
+  });
+}
+
+function coachNudgesQueryKey(ownerID: string | null = currentUserId()) {
+  return ["coach", "nudges", ownerID] as const;
+}
+
+function coachThreadQueryKey(ownerID: string | null = currentUserId()) {
+  return ["coach", "thread", ownerID] as const;
+}
+
+export function useCoachNudges(): UseQueryResult<CoachNudgesResponse, Error> {
+  const ownerID = currentUserId();
+  return useQuery({
+    queryKey: coachNudgesQueryKey(ownerID),
+    queryFn: () => apiFetch("/v1/coach/nudges") as Promise<CoachNudgesResponse>,
+  });
+}
+
+export function useCoachThread(): UseQueryResult<CoachThreadResponse, Error> {
+  const ownerID = currentUserId();
+  return useQuery({
+    queryKey: coachThreadQueryKey(ownerID),
+    queryFn: () => apiFetch("/v1/coach/thread") as Promise<CoachThreadResponse>,
+  });
+}
+
+export function useCoachAsk(): UseMutationResult<CoachAnswer, Error, string> {
+  const qc = useQueryClient();
+  const ownerID = currentUserId();
+  return useMutation({
+    mutationFn: (question: string) =>
+      apiFetch("/v1/coach/ask", {
+        method: "POST",
+        body: JSON.stringify({ question }),
+      }) as Promise<CoachAnswer>,
+    onSuccess: (answer, question) => {
+      const createdAt = new Date().toISOString();
+      const exchange: CoachTurn[] = [
+        { role: "user", text: question, citations: [], created_at: createdAt },
+        { role: "otto", text: answer.answer, citations: answer.citations ?? [], created_at: createdAt },
+      ];
+      qc.setQueryData<CoachThreadResponse>(coachThreadQueryKey(ownerID), (current) => ({
+        turns: [...(current?.turns ?? []), ...exchange],
+        show_support: answer.show_support,
+      }));
+      qc.invalidateQueries({ queryKey: coachNudgesQueryKey(ownerID) });
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: aiUsageQueryKey(ownerID) }),
+  });
+}
+
+function useRefreshAIUsage() {
+  const qc = useQueryClient();
+  const ownerID = currentUserId();
+  return () => qc.invalidateQueries({ queryKey: aiUsageQueryKey(ownerID) });
 }
 
 export function useSubmitOnboarding() {
@@ -480,6 +559,7 @@ export function useDeleteRecipe() {
 // break the multipart boundary fetch() sets automatically for a FormData
 // body (see useResolvePhoto/useResolveVoice above for the same split).
 export function useParseRecipe() {
+  const refreshAIUsage = useRefreshAIUsage();
   return useMutation({
     mutationFn: (input: { text: string } | { photo: FormData }) =>
       "text" in input
@@ -488,6 +568,7 @@ export function useParseRecipe() {
             body: JSON.stringify({ text: input.text }),
           }) as Promise<RecipeDraft>)
         : (apiFetchMultipart("/v1/recipes/parse", input.photo) as Promise<RecipeDraft>),
+    onSettled: refreshAIUsage,
   });
 }
 
@@ -701,6 +782,7 @@ export function useRepeatLog() {
 export type ResolveVars<T> = { input: T; signal?: AbortSignal };
 
 export function useResolveText() {
+  const refreshAIUsage = useRefreshAIUsage();
   return useMutation({
     mutationFn: ({ input: phrase, signal }: ResolveVars<string>) =>
       apiFetch("/v1/resolve/text", {
@@ -708,6 +790,7 @@ export function useResolveText() {
         body: JSON.stringify({ phrase }),
         signal,
       }).then(normalizeResolution),
+    onSettled: refreshAIUsage,
   });
 }
 
@@ -767,9 +850,11 @@ export function useResolveBarcode() {
 }
 
 export function useResolvePhoto() {
+  const refreshAIUsage = useRefreshAIUsage();
   return useMutation({
     mutationFn: ({ input: file, signal }: ResolveVars<ResolveFile>) =>
       apiFetchMultipart("/v1/resolve/photo", buildCaptureForm(file), { signal }).then(normalizeResolution),
+    onSettled: refreshAIUsage,
   });
 }
 
@@ -809,9 +894,11 @@ export function useWeightSeries(range: WeightRange) {
 }
 
 export function useResolveVoice() {
+  const refreshAIUsage = useRefreshAIUsage();
   return useMutation({
     mutationFn: ({ input: file, signal }: ResolveVars<ResolveFile>) =>
       apiFetchMultipart("/v1/resolve/voice", buildCaptureForm(file), { signal }).then(normalizeResolution),
+    onSettled: refreshAIUsage,
   });
 }
 

@@ -10,6 +10,7 @@ import { SavedMealsStrip } from "@/components/home/SavedMealsStrip";
 import { PinnedStrip } from "@/components/home/PinnedStrip";
 import { YourUsualStrip } from "@/components/home/YourUsualStrip";
 import { MacroCell } from "@/components/home/MacroCell";
+import { CoachEntryCard } from "@/components/home/CoachEntryCard";
 import { EmptyState } from "@/components/common/EmptyState";
 import { AppBackground } from "@/components/AppBackground";
 import { PressableScale, ScreenEntrance, useMotionPrefs } from "@/motion";
@@ -19,7 +20,7 @@ import { GAUGE_VIEW_H } from "@/components/instrument/gauge";
 import { SpecularSweep } from "@/components/instrument/SpecularSweep";
 import { BezelCluster, ZoneRule, WellFooter } from "@/components/instrument/BezelCluster";
 import { monoStyle } from "@/components/instrument/typography";
-import { useProfile, useDashboard, useDayLogs, useUnreadCount } from "@/api/hooks";
+import { useProfile, useDashboard, useDayLogs, useUnreadCount, useCoachNudges } from "@/api/hooks";
 import { useHealth } from "@/health";
 import { useTheme } from "@/theme";
 import { accessibleMealLabel } from "@/lib/portionAssumedLabel";
@@ -63,6 +64,7 @@ export default function Home() {
   const insets = useSafeAreaInsets();
   const profile = useProfile();
   const unread = useUnreadCount();
+  const coachNudges = useCoachNudges();
   const health = useHealth();
   const date = today();
   const dashboard = useDashboard(date);
@@ -338,6 +340,13 @@ export default function Home() {
           </BezelCluster>
         </Animated.View>
       ) : null}
+
+      <View style={{ paddingHorizontal: 16, marginTop: 4 }}>
+        <CoachEntryCard
+          nudge={coachNudges.data?.nudges[0]}
+          onPress={() => router.push("/coach")}
+        />
+      </View>
 
       {/* meals */}
       <SavedMealsStrip />

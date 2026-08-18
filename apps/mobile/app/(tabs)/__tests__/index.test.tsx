@@ -16,6 +16,7 @@ jest.mock("expo-router", () => ({
 
 const mockUseDashboard = jest.fn();
 const mockUseDayLogs = jest.fn();
+const mockUseCoachNudges = jest.fn();
 // Home's pull-to-refresh calls refetch() on both queries; the per-test mock returns
 // below only carry `data`/`isError`, so the default is spread in underneath.
 const mockRefetch = jest.fn(async () => ({}));
@@ -25,6 +26,7 @@ jest.mock("@/api/hooks", () => ({
   useDashboard: (...args: unknown[]) => ({ refetch: mockRefetch, ...mockUseDashboard(...args) }),
   useDayLogs: (...args: unknown[]) => ({ refetch: mockRefetch, ...mockUseDayLogs(...args) }),
   useUnreadCount: () => ({ data: { count: 0 } }),
+  useCoachNudges: () => mockUseCoachNudges(),
   useMemory: () => ({ data: { recents: [], frequent: [], usual_meals: [] }, isLoading: false, isError: false }),
   usePins: () => ({ data: [] }),
   useCreatePin: () => ({ mutate: jest.fn() }),
@@ -43,7 +45,42 @@ jest.mock("@/components/meals/SavedMealSheetProvider", () => ({
 beforeEach(() => {
   mockUseDashboard.mockReset();
   mockUseDayLogs.mockReset();
+  mockUseCoachNudges.mockReset().mockReturnValue({ data: { nudges: [], show_support: false } });
   mockPush.mockClear();
+});
+
+test("coach remains reachable when there is no proactive nudge", async () => {
+  mockUseDashboard.mockReturnValue({
+    data: { consumed: { kcal: 1252, protein_g: 140, carbs_g: 140, fat_g: 40 }, targets: { kcal: 2000, protein_g: 140, carbs_g: 220, fat_g: 70 }, water_ml: 1400, streak_days: 12 },
+    isError: false,
+  });
+  mockUseDayLogs.mockReturnValue({ data: [], isError: false });
+
+  const { findByLabelText, findByText } = await render(<Home />);
+
+  expect(await findByText("Ask Otto about your nutrition")).toBeTruthy();
+  await fireEvent.press(await findByLabelText("Open coach"));
+  expect(mockPush).toHaveBeenCalledWith("/coach");
+});
+
+test("the top grounded coach nudge opens the full coach", async () => {
+  mockUseDashboard.mockReturnValue({
+    data: { consumed: { kcal: 1252, protein_g: 96, carbs_g: 140, fat_g: 40 }, targets: { kcal: 2000, protein_g: 140, carbs_g: 220, fat_g: 70 }, water_ml: 1400, streak_days: 12 },
+    isError: false,
+  });
+  mockUseDayLogs.mockReturnValue({ data: [], isError: false });
+  mockUseCoachNudges.mockReturnValue({
+    data: {
+      nudges: [{ kind: "protein", title: "Protein", text: "96 / 140g — 44g to go" }],
+      show_support: false,
+    },
+  });
+
+  const { findByLabelText, findByText } = await render(<Home />);
+
+  expect(await findByText("Protein: 96 / 140g — 44g to go")).toBeTruthy();
+  await fireEvent.press(await findByLabelText(/Open coach/));
+  expect(mockPush).toHaveBeenCalledWith("/coach");
 });
 
 test("Home renders the Today large title, the gauge dial reserve numeral, protein macro, and meal rows", async () => {

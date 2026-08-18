@@ -24,11 +24,15 @@ import {
   useAcceptRequest,
   useAddWater,
   useAddWeight,
+  useAIUsage,
   useAvgIntake7d,
   useCreateChallenge,
   useCreateGroup,
   useCreateLog,
   useCreateLogBatch,
+  useCoachAsk,
+  useCoachNudges,
+  useCoachThread,
   useDashboard,
   useDeleteChallenge,
   useDeleteLog,
@@ -109,6 +113,7 @@ function wrapper({ children }: { children: ReactNode }) {
 // throws before its inline restore — otherwise a spy leaks into later tests.
 afterEach(() => {
   jest.restoreAllMocks();
+  (currentUserId as jest.Mock).mockReturnValue("user-a");
   // Offline is a PROCESS-WIDE flag on onlineManager. A test that leaves it set
   // silently pauses every query in every test after it.
   onlineManager.setOnline(true);
@@ -118,6 +123,128 @@ test("useProfile fetches /v1/me", async () => {
   const { result } = await renderHook(() => useProfile(), { wrapper });
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
   expect(result.current.data?.email).toBe("a@b.c");
+});
+
+test("useAIUsage fetches the authenticated users fixed quota windows", async () => {
+  const usage = {
+    daily: { used: 3, limit: 20, remaining: 17, resets_at: "2026-08-20T00:00:00Z" },
+    weekly: { used: 9, limit: 100, remaining: 91, resets_at: "2026-08-24T00:00:00Z" },
+    monthly: { used: 17, limit: 300, remaining: 283, resets_at: "2026-09-01T00:00:00Z" },
+  };
+  (apiFetch as jest.Mock).mockResolvedValueOnce(usage);
+
+  const { result } = await renderHook(() => useAIUsage(), { wrapper });
+
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(apiFetch).toHaveBeenCalledWith("/v1/ai/usage");
+  expect(result.current.data).toEqual(usage);
+});
+
+test("AI usage and coach caches never cross an account switch", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const localWrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+  const userAUsage = {
+    daily: { used: 1, limit: 20, remaining: 19, resets_at: "2026-08-20T00:00:00Z" },
+    weekly: { used: 1, limit: 100, remaining: 99, resets_at: "2026-08-24T00:00:00Z" },
+    monthly: { used: 1, limit: 300, remaining: 299, resets_at: "2026-09-01T00:00:00Z" },
+  };
+  const userAThread = { turns: [{ role: "user", text: "private A", citations: [], created_at: "2026-08-19T00:00:00Z" }], show_support: false };
+  const userBUsage = { ...userAUsage, daily: { ...userAUsage.daily, used: 7, remaining: 13 } };
+  const userBThread = { turns: [{ role: "user", text: "private B", citations: [], created_at: "2026-08-19T01:00:00Z" }], show_support: false };
+
+  (currentUserId as jest.Mock).mockReturnValue("user-a");
+  (apiFetch as jest.Mock).mockResolvedValueOnce(userAUsage).mockResolvedValueOnce(userAThread);
+  const { result, rerender } = await renderHook(
+    () => ({ usage: useAIUsage(), thread: useCoachThread() }),
+    { wrapper: localWrapper },
+  );
+  await waitFor(() => expect(result.current.usage.isSuccess && result.current.thread.isSuccess).toBe(true));
+
+  (currentUserId as jest.Mock).mockReturnValue("user-b");
+  (apiFetch as jest.Mock).mockResolvedValueOnce(userBUsage).mockResolvedValueOnce(userBThread);
+  await rerender(undefined);
+
+  await waitFor(() => expect(result.current.usage.data).toEqual(userBUsage));
+  await waitFor(() => expect(result.current.thread.data).toEqual(userBThread));
+  expect(client.getQueryData(["ai-usage", "user-a"])).toEqual(userAUsage);
+  expect(client.getQueryData(["ai-usage", "user-b"])).toEqual(userBUsage);
+  expect(client.getQueryData(["coach", "thread", "user-a"])).toEqual(userAThread);
+  expect(client.getQueryData(["coach", "thread", "user-b"])).toEqual(userBThread);
+});
+
+test("coach queries fetch the authenticated users nudges and stored thread", async () => {
+  const nudges = {
+    nudges: [{ kind: "protein", title: "Protein", text: "18g to go" }],
+    show_support: false,
+  };
+  const thread = {
+    turns: [{ role: "otto", text: "How can I help?", citations: [], created_at: "2026-08-19T00:00:00Z" }],
+    show_support: false,
+  };
+  (apiFetch as jest.Mock).mockResolvedValueOnce(nudges).mockResolvedValueOnce(thread);
+
+  const { result } = await renderHook(
+    () => ({ nudges: useCoachNudges(), thread: useCoachThread() }),
+    { wrapper },
+  );
+
+  await waitFor(() => expect(result.current.nudges.isSuccess && result.current.thread.isSuccess).toBe(true));
+  expect(apiFetch).toHaveBeenCalledWith("/v1/coach/nudges");
+  expect(apiFetch).toHaveBeenCalledWith("/v1/coach/thread");
+  expect(result.current.nudges.data).toEqual(nudges);
+  expect(result.current.thread.data).toEqual(thread);
+});
+
+test("asking the coach appends the exchange and refreshes nudges and AI usage", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(["coach", "thread", "user-a"], { turns: [], show_support: false });
+  const invalidateSpy = jest.spyOn(client, "invalidateQueries");
+  const localWrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+  const answer = {
+    answer: "You have 18g of protein remaining today.",
+    citations: [{ label: "Protein", value: "142 / 160g" }],
+    show_support: false,
+  };
+  (apiFetch as jest.Mock).mockResolvedValueOnce(answer);
+
+  const { result } = await renderHook(() => useCoachAsk(), { wrapper: localWrapper });
+  await result.current.mutateAsync("How is my protein?");
+
+  expect(apiFetch).toHaveBeenCalledWith("/v1/coach/ask", {
+    method: "POST",
+    body: JSON.stringify({ question: "How is my protein?" }),
+  });
+  expect(client.getQueryData(["coach", "thread", "user-a"])).toEqual({
+    turns: [
+      expect.objectContaining({ role: "user", text: "How is my protein?", citations: [] }),
+      expect.objectContaining({
+        role: "otto",
+        text: answer.answer,
+        citations: answer.citations,
+      }),
+    ],
+    show_support: false,
+  });
+  expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["coach", "nudges", "user-a"] });
+  expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["ai-usage", "user-a"] });
+});
+
+test("a failed coach call still refreshes AI usage because its reservation is consumed", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const invalidateSpy = jest.spyOn(client, "invalidateQueries");
+  const localWrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+  (apiFetch as jest.Mock).mockRejectedValueOnce(new Error("provider unavailable"));
+
+  const { result } = await renderHook(() => useCoachAsk(), { wrapper: localWrapper });
+
+  await expect(result.current.mutateAsync("How is my protein?")).rejects.toThrow("provider unavailable");
+  expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["ai-usage", "user-a"] });
 });
 
 test("useFoodSearch hits /v1/foods with the query and stays disabled under 2 chars", async () => {
@@ -156,6 +283,20 @@ test("useResolveText posts phrase to /v1/resolve/text", async () => {
     signal: undefined,
   });
   expect(result.current.data).toEqual(resolution);
+});
+
+test("useResolveText refreshes AI usage after the request settles", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce(resolution);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const invalidateSpy = jest.spyOn(client, "invalidateQueries");
+  const localWrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+
+  const { result } = await renderHook(() => useResolveText(), { wrapper: localWrapper });
+  await result.current.mutateAsync({ input: "2 eggs" });
+
+  expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["ai-usage", "user-a"] });
 });
 
 test("useResolveBarcode posts barcode to /v1/resolve/barcode", async () => {
