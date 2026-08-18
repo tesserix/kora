@@ -672,6 +672,49 @@ func (r Repository) BackfillLocales(ctx context.Context, items []FoodItem) (int,
 	return updated, nil
 }
 
+// BackfillServings fills in the serving data of rows that are already in the
+// index and have none, using what the source file states for them.
+//
+// Needed for the same reason as BackfillLocales, via a different route.
+// ingest.Run processes files in sorted path order and the first file to claim
+// a name+brand wins, so `afcd_release3.json` beats `ausnut.json` on every name
+// the two share. AFCD is per-100 g reference data with no servings; AUSNUT
+// ships 9,816 measures. Without this, 315 foods keep AFCD's empty serving and
+// AUSNUT's measured one is silently discarded — "Blackberry, raw",
+// "Ham, leg, lean", "Sugar, raw".
+//
+// Writes only where the row has NOTHING: no serving mass and no named units.
+// A row that already carries either was populated by whichever source owns it
+// and must not be second-guessed, which also makes a second run a no-op. Both
+// fields move together — a serving mass whose named units came from a
+// different food would resolve phrases against the wrong row.
+func (r Repository) BackfillServings(ctx context.Context, items []FoodItem) (int, error) {
+	updated := 0
+	for _, item := range items {
+		if item.ServingGrams <= 0 && len(item.ServingUnits) == 0 {
+			continue
+		}
+		updates := map[string]any{}
+		if item.ServingGrams > 0 {
+			updates["serving_grams"] = item.ServingGrams
+			updates["serving_desc"] = item.ServingDesc
+		}
+		if len(item.ServingUnits) > 0 {
+			updates["serving_units"] = item.ServingUnits
+		}
+		res := r.db.WithContext(ctx).Model(&FoodItem{}).
+			Where("name = ? AND brand = ?", item.Name, item.Brand).
+			Where("COALESCE(serving_grams, 0) = 0").
+			Where("COALESCE(serving_units::text, '[]') IN ('[]', 'null', '')").
+			Updates(updates)
+		if res.Error != nil {
+			return updated, fmt.Errorf("nutrition: backfill servings: %w", res.Error)
+		}
+		updated += int(res.RowsAffected)
+	}
+	return updated, nil
+}
+
 // BackfillUSDAEmbeddedBrands moves a brand that USDA wrote into the name of an
 // ALREADY-INGESTED row into the brand column, and retypes the row.
 //
