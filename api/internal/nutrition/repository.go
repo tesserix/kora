@@ -178,6 +178,12 @@ type Query struct {
 	Brand string
 	// Qualifiers narrow which variant is meant, e.g. ["charcoal"].
 	Qualifiers []string
+	// CookingMethod is how the food was prepared, as identify reported it
+	// ("grilled", "fried", "raw"). It was being thrown away: ai.Guess has
+	// carried it all along and the resolver never received it, so "grilled
+	// barramundi" competed against `Barramundi, raw` with nothing to separate
+	// them. Nobody logs raw fish.
+	CookingMethod string
 	// Locale is the user's food culture (kora#212 Phase 4), empty when unknown.
 	// It only ever boosts matching rows — never filters — because an
 	// Australian user eating Indian food is the normal case here.
@@ -487,6 +493,7 @@ func (r Repository) ResolveQuery(ctx context.Context, userID uuid.UUID, q Query,
 		brandNamed = queryNamesABrand(qTokens, scoredList)
 	}
 	preferGenerics := !brandNamed
+	method := Normalize(strings.TrimSpace(q.CookingMethod))
 
 	for _, s := range scoredList {
 		s.score = quality(s.comp)
@@ -519,6 +526,13 @@ func (r Repository) ResolveQuery(ctx context.Context, userID uuid.UUID, q Query,
 		// do not map.
 		if q.Locale != LocaleUnknown && s.item.Locale == q.Locale {
 			s.rankKey += localeBonus
+		}
+		// Reward a row prepared the way the user said. Like every other signal
+		// here this only ever ADDS, so a raw row is never pushed below its own
+		// quality — it simply stops collecting a bonus the cooked row earns.
+		// That asymmetry matters: when no method is stated, nothing changes.
+		if method != "" && strings.Contains(Normalize(s.item.Name), method) {
+			s.rankKey += cookingMethodBonus
 		}
 	}
 	sort.SliceStable(scoredList, func(i, j int) bool {

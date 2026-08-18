@@ -80,6 +80,21 @@ const (
 	// safe here: an Australian user eating Indian food is the normal case, so
 	// being wrong costs a small ordering nudge rather than a missing answer.
 	localeBonus = 0.10
+
+	// cookingMethodBonus rewards a row prepared the way the user said it was.
+	//
+	// identify has always returned a cooking method and the resolver never used
+	// it, which is why "grilled barramundi and chips" could resolve to
+	// `Barramundi, raw`. Raw entries are legitimate reference data — a food
+	// composition database is full of them — but nobody LOGS raw fish, and
+	// ingesting AUSNUT multiplied the raw/cooked pairs competing for every
+	// query.
+	//
+	// Sized with headBonus and genericBonus rather than with brandMatchBonus:
+	// a stated method is good evidence, but it is the model's reading of the
+	// phrase rather than something the user necessarily said, and a row can
+	// mention a method it was not primarily cooked by.
+	cookingMethodBonus = 0.15
 )
 
 // brandMatches reports whether a candidate's brand is the brand the user named.

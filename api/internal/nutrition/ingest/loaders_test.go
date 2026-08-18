@@ -10,9 +10,19 @@ import (
 func TestLoadFileStampsProvenanceAndSkipsInvalid(t *testing.T) {
 	items, err := LoadFile("testdata/sample.json", nutrition.ProvenanceUSDA)
 	require.NoError(t, err)
-	require.Len(t, items, 1) // "Bad Row" (kcal 0) skipped
+
+	// Unnamed and NEGATIVE-energy rows are dropped; a row at exactly 0 kcal is
+	// KEPT. Zero is a real measurement, not missing data, and conflating the
+	// two removed every zero-energy food from the index — water, mineral
+	// water, black tea and coffee — which is why "water" used to resolve to
+	// `Coconut Water` at 15.3 kcal.
+	require.Len(t, items, 2)
 	require.Equal(t, "Test Oats", items[0].Name)
-	require.Equal(t, nutrition.ProvenanceUSDA, items[0].Provenance)
+	require.Equal(t, "Test Water", items[1].Name, "a genuinely zero-energy food must survive ingest")
+	require.Zero(t, items[1].KcalPer100g)
+	for _, it := range items {
+		require.Equal(t, nutrition.ProvenanceUSDA, it.Provenance)
+	}
 }
 
 // The generated SR Legacy file is committed data the image ships; if it is

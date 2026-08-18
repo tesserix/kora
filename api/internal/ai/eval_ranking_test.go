@@ -233,10 +233,11 @@ func TestEvalRanking(t *testing.T) {
 			// nil query vector = no provider call, no AI spend, no embedding
 			// tier. See the file header.
 			cands, err := foods.ResolveQuery(ctx, anonUser, nutrition.Query{
-				Text:       g.Food,
-				Brand:      g.Brand,
-				Qualifiers: g.Qualifiers,
-				Locale:     evalLocale,
+				Text:          g.Food,
+				Brand:         g.Brand,
+				Qualifiers:    g.Qualifiers,
+				CookingMethod: g.CookingMethod,
+				Locale:        evalLocale,
 			}, nil, rankingTopK)
 			if err != nil {
 				t.Fatalf("resolve %q (phrase %q): %v", g.Food, c.Phrase, err)

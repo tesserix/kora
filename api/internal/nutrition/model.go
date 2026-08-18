@@ -19,7 +19,12 @@ const (
 	// Like AFCD it is per-100 g lab data with no serving size and no brand, so
 	// every row types as `generic`. See scripts/ifct_convert.py, which converts
 	// IFCT's kilojoules to kcal and gates each row on Atwater.
-	ProvenanceIFCT         Provenance = "ifct"
+	ProvenanceIFCT Provenance = "ifct"
+	// ProvenanceAUSNUT marks AUSNUT 2023 — FSANZ's national nutrition SURVEY
+	// database, foods as CONSUMED. Distinct from AFCD, which is the composition
+	// database of foods as ingredients: same publisher, different question, and
+	// AUSNUT is where Australian takeaway lives. See scripts/ausnut_convert.py.
+	ProvenanceAUSNUT       Provenance = "ausnut"
 	ProvenanceOFF          Provenance = "off"
 	ProvenanceUSDA         Provenance = "usda"
 	ProvenanceLabelOCR     Provenance = "label_ocr"
@@ -61,7 +66,7 @@ const (
 // that forgets to pass one gets no preference rather than a wrong one.
 func DeriveLocale(provenance Provenance) Locale {
 	switch provenance {
-	case ProvenanceAFCD, ProvenanceOFF:
+	case ProvenanceAFCD, ProvenanceAUSNUT, ProvenanceOFF:
 		// OFF is Australian here specifically because off_au.json is filtered
 		// to Australian products at conversion time. If a second OFF region is
 		// ever ingested, this rule stops being true and must move to the
