@@ -4,10 +4,18 @@ import * as ImagePicker from "expo-image-picker";
 import { useCameraPermissions } from "expo-camera";
 import { requestRecordingPermissionsAsync, setAudioModeAsync, useAudioRecorder } from "expo-audio";
 import { reportError } from "@/observability/reporter";
+import { enqueueTextCapture } from "@/offline/enqueueCapture";
 
 // Mocked so a start failure can be asserted as REPORTED, not merely displayed
 // — kora#186 was invisible precisely because the error went nowhere.
 jest.mock("@/observability/reporter", () => ({ reportError: jest.fn() }));
+// enqueueCapture (photo/voice) stays real — other describe blocks exercise it
+// against the real capture queue. Only the text sibling (kora#196) is mocked,
+// since handleSend's new onError is what these tests are pinning.
+jest.mock("@/offline/enqueueCapture", () => ({
+  ...jest.requireActual("@/offline/enqueueCapture"),
+  enqueueTextCapture: jest.fn(),
+}));
 import { router } from "expo-router";
 import { ApiError, AuthTokenError, NetworkError, ResponseParseError } from "@/lib/api";
 import type { FoodItem, Resolution } from "@/api/types";
@@ -347,6 +355,7 @@ beforeEach(() => {
   mockResolveVoiceMutate.mockReset();
   mockResolveBarcodeMutate.mockReset();
   mockCreateLogMutateAsync.mockReset().mockResolvedValue({ id: "log-1" });
+  (enqueueTextCapture as jest.Mock).mockReset();
   (router.back as jest.Mock).mockReset();
   (router.push as jest.Mock).mockReset();
   mockResolveTextIsPending = false;
@@ -547,7 +556,7 @@ describe("Type mode", () => {
     expect(await findByText(/no confident match/i)).toBeTruthy();
   });
 
-  test("a network failure renders copy about not reaching the server, not the generic fallback", async () => {
+  test("a network failure queues the capture instead of showing a plain fallback (kora#196)", async () => {
     const { findByText, findByLabelText, queryByText } = await render(<CaptureScreen />);
     await fireEvent.press(await findByText("Type"));
 
@@ -558,7 +567,8 @@ describe("Type mode", () => {
     const [, options] = mockResolveTextMutate.mock.calls[0];
     await act(async () => options.onError(new NetworkError(new TypeError("Network request failed"))));
 
-    expect(await findByText(/reach/i)).toBeTruthy();
+    expect(enqueueTextCapture).toHaveBeenCalledWith("mystery mush", expect.anything());
+    expect(await findByText(/saved/i)).toBeTruthy();
     expect(
       queryByText("Something went wrong while I looked at that. Please try again."),
     ).toBeNull();
@@ -581,7 +591,7 @@ describe("Type mode", () => {
     ).toBeNull();
   });
 
-  test("an auth-token failure renders its own copy, distinct from network and parse failures", async () => {
+  test("an auth-token failure queues the capture rather than asking the user to sign in again (kora#196)", async () => {
     const { findByText, findByLabelText, queryByText } = await render(<CaptureScreen />);
     await fireEvent.press(await findByText("Type"));
 
@@ -592,13 +602,12 @@ describe("Type mode", () => {
     const [, options] = mockResolveTextMutate.mock.calls[0];
     await act(async () => options.onError(new AuthTokenError(new Error("token unavailable"))));
 
-    // Asserts the property this test is named for — a distinct, non-generic
-    // message — rather than one specific phrase. The earlier version matched
-    // /sign(ing|ed)? in/, which coupled it to copy that told the user to
-    // sign in again; that advice was wrong (this error usually means a
-    // dropped connection, not an unusable session) and the assertion broke
-    // the moment the copy was corrected. Wording is not the contract here.
-    expect(await findByText(/session/i)).toBeTruthy();
+    // AuthTokenError joins NetworkError and TimeoutError in the recoverable
+    // group handleSend's onError now queues (kora#196): this error usually
+    // means a dropped connection, not an unusable session, so the capture is
+    // saved rather than the user being told to try again or sign in.
+    expect(enqueueTextCapture).toHaveBeenCalledWith("mystery mush", expect.anything());
+    expect(await findByText(/saved/i)).toBeTruthy();
     expect(
       queryByText("Something went wrong while I looked at that. Please try again."),
     ).toBeNull();
@@ -1933,5 +1942,52 @@ describe("a typed phrase enters the thread", () => {
 
     await fireEvent.press(await findByText("Voice"));
     expect(queryByText("chicken and rice")).toBeNull();
+  });
+
+  // kora#196. A failed typed resolve used to hand the words back and drop the
+  // capture. Someone typing "chicken and rice" on a plane lost it, while the
+  // same meal photographed was safely queued and replayed.
+  it("queues a typed capture when the request never arrived, and says so", async () => {
+    const { findByText, findByLabelText, findByPlaceholderText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Type"));
+    await fireEvent.changeText(await findByPlaceholderText(/tell otto/i), "chicken and rice");
+    await fireEvent.press(await findByLabelText("Send"));
+
+    const [, options] = mockResolveTextMutate.mock.calls[0];
+    await act(async () => options.onError(new NetworkError("offline")));
+
+    expect(enqueueTextCapture).toHaveBeenCalledWith("chicken and rice", expect.anything());
+    expect(await findByText(/I've saved that/i)).toBeTruthy();
+  });
+
+  // The phrase is safe in the queue, so returning it to the composer would be
+  // the misleading state — and the bubble stays because the capture WAS accepted.
+  it("keeps the sent bubble and leaves the composer empty once queued", async () => {
+    const { findByText, findByLabelText, findByPlaceholderText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Type"));
+    const field = await findByPlaceholderText(/tell otto/i);
+    await fireEvent.changeText(field, "chicken and rice");
+    await fireEvent.press(await findByLabelText("Send"));
+
+    const [, options] = mockResolveTextMutate.mock.calls[0];
+    await act(async () => options.onError(new NetworkError("offline")));
+
+    expect(await findByText("chicken and rice")).toBeTruthy();
+    expect(field.props.value).toBe("");
+  });
+
+  // A genuine refusal is NOT queued — retrying it would fail identically.
+  it("hands the words back on a real server refusal instead of queueing", async () => {
+    const { findByText, findByLabelText, findByPlaceholderText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Type"));
+    const field = await findByPlaceholderText(/tell otto/i);
+    await fireEvent.changeText(field, "chicken and rice");
+    await fireEvent.press(await findByLabelText("Send"));
+
+    const [, options] = mockResolveTextMutate.mock.calls[0];
+    await act(async () => options.onError(new ApiError(422, "no_match", "bad request")));
+
+    expect(enqueueTextCapture).not.toHaveBeenCalled();
+    expect(field.props.value).toBe("chicken and rice");
   });
 });
