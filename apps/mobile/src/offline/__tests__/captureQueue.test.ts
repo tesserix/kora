@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
-  CaptureQueueFullError, MAX_CAPTURES, append, discard, list, markFailed,
-  markReview, recordAttempt, retry,
+  append, CaptureQueueFullError, discard, hasMedia, list, markFailed, markReview,
+  MAX_CAPTURES, MAX_TEXT_CAPTURES, recordAttempt, restore, retry,
 } from "../captureQueue";
 import type { Resolution } from "@/api/types";
 
@@ -9,12 +9,19 @@ const RESOLUTION = { tier: "confirm", candidates: [] } as unknown as Resolution;
 
 const atLocalNoon = (y: number, m: number, d: number) => new Date(y, m - 1, d, 12).toISOString();
 
-function input(id: string, over: Partial<Parameters<typeof append>[0]> = {}) {
+// Explicit return type + cast: without it, TS distributes the merge of
+// `over: Partial<AppendCaptureInput>` (a discriminated union) across a plain
+// object spread into an unhelpful union-of-partial-merges instead of the
+// single AppendCaptureInput shape every caller here actually wants.
+function input(
+  id: string,
+  over: Partial<Parameters<typeof append>[0]> = {},
+): Parameters<typeof append>[0] {
   return {
     id, kind: "photo" as const, storedName: `${id}.jpg`, fileName: "meal.jpg",
     mimeType: "image/jpeg", capturedAt: atLocalNoon(2026, 8, 6),
     ownerId: "uid-1", ...over,
-  };
+  } as Parameters<typeof append>[0];
 }
 
 beforeEach(async () => { await AsyncStorage.clear(); });
@@ -120,5 +127,93 @@ describe("captureQueue", () => {
     await append(input("c1"));
     await discard("c1");
     await expect(list()).resolves.toEqual([]);
+  });
+});
+
+// kora#196. The queue was media-shaped: `kind` was "photo" | "voice" and
+// isValid rejected anything else, so a typed capture had nowhere to live.
+describe("text captures (kora#196)", () => {
+  const textInput = {
+    id: "cap_text_1",
+    kind: "text" as const,
+    phrase: "chicken and rice",
+    capturedAt: "2026-08-18T10:00:00.000Z",
+    ownerId: "owner-1",
+  };
+
+  it("accepts a text row and reads it back with its phrase", async () => {
+    await append(textInput);
+    const [row] = await list();
+    expect(row!.kind).toBe("text");
+    expect(row).toMatchObject({ phrase: "chicken and rice", status: "pending", attempts: 0 });
+  });
+
+  // The upgrade guard, and the most important test in this change. isValid
+  // silently DROPS rows it rejects, so a shipped-build media row that stops
+  // validating deletes a user's queued photos on update. It cannot be caught
+  // on a simulator either — no media capture can be staged there.
+  it("still accepts a row written by the shipped, media-only build", async () => {
+    await AsyncStorage.setItem(
+      "kora.captureQueue",
+      JSON.stringify([{
+        id: "cap_old_1", kind: "photo", storedName: "cap_old_1.jpg",
+        fileName: "meal.jpg", mimeType: "image/jpeg",
+        capturedAt: "2026-08-17T10:00:00.000Z", queuedAt: "2026-08-17T10:00:00.000Z",
+        status: "pending", attempts: 0, ownerId: "owner-1",
+      }]),
+    );
+    const rows = await list();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.kind).toBe("photo");
+  });
+
+  it("drops a text row with no phrase rather than queueing an empty capture", async () => {
+    await AsyncStorage.setItem(
+      "kora.captureQueue",
+      JSON.stringify([{
+        id: "cap_bad", kind: "text", phrase: "",
+        capturedAt: "2026-08-18T10:00:00.000Z", queuedAt: "2026-08-18T10:00:00.000Z",
+        status: "pending", attempts: 0, ownerId: "owner-1",
+      }]),
+    );
+    expect(await list()).toEqual([]);
+  });
+
+  // MAX_CAPTURES exists for BYTES ("a photo at quality 0.7 is roughly 1-3 MB").
+  // A few hundred bytes of text must not be refused because 20 photos are
+  // queued — typed is the mode with no safety net today.
+  it("does not let a full media queue refuse a text capture", async () => {
+    for (let i = 0; i < MAX_CAPTURES; i++) {
+      await append({
+        id: `cap_${i}`, kind: "photo", storedName: `cap_${i}.jpg`,
+        fileName: "m.jpg", mimeType: "image/jpeg",
+        capturedAt: "2026-08-18T10:00:00.000Z", ownerId: "owner-1",
+      });
+    }
+    await expect(append(textInput)).resolves.toMatchObject({ kind: "text" });
+  });
+
+  it("refuses a text capture past its own ceiling", async () => {
+    for (let i = 0; i < MAX_TEXT_CAPTURES; i++) {
+      await append({ ...textInput, id: `cap_t_${i}` });
+    }
+    await expect(append({ ...textInput, id: "cap_t_over" })).rejects.toThrow(CaptureQueueFullError);
+  });
+
+  it("does not let a full text queue refuse a photo", async () => {
+    for (let i = 0; i < MAX_TEXT_CAPTURES; i++) {
+      await append({ ...textInput, id: `cap_t_${i}` });
+    }
+    await expect(append({
+      id: "cap_photo", kind: "photo", storedName: "cap_photo.jpg",
+      fileName: "m.jpg", mimeType: "image/jpeg",
+      capturedAt: "2026-08-18T10:00:00.000Z", ownerId: "owner-1",
+    })).resolves.toMatchObject({ kind: "photo" });
+  });
+
+  it("hasMedia narrows a media row and rejects a text row", async () => {
+    await append(textInput);
+    const [row] = await list();
+    expect(hasMedia(row!)).toBe(false);
   });
 });

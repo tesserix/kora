@@ -13,6 +13,12 @@ const withCaptureLock = createLock();
 // well under 100 MB worst case.
 export const MAX_CAPTURES = 20;
 
+// Text has no byte budget — MAX_CAPTURES exists for megabytes of media and
+// that rationale does not transfer. Still bounded rather than unlimited: an
+// abandoned-owner queue growing without limit is a known leak already recorded
+// against the log queue (kora#85), and this must not add a second instance.
+export const MAX_TEXT_CAPTURES = 50;
+
 // Same ceiling and the same reasoning as the log queue's
 // MAX_DELIVERY_ATTEMPTS: without one, a capture the server will never accept
 // replays on every reconnect forever and the user cannot resolve it.
@@ -33,12 +39,9 @@ export class CaptureQueueFullError extends Error {
 // causes; only the site that catches the error can.
 export type CaptureFailureKind = "delivery" | "identification" | "missing-media";
 
-export type QueuedCapture = {
+// Fields every queued capture carries regardless of modality.
+type QueuedCaptureBase = {
   id: string;
-  kind: "photo" | "voice";
-  storedName: string;
-  fileName: string;
-  mimeType: string;
   capturedAt: string;
   mealSlot?: string;
   status: "pending" | "review" | "failed";
@@ -52,20 +55,62 @@ export type QueuedCapture = {
   queuedAt: string;
 };
 
-export type AppendCaptureInput = Pick<
-  QueuedCapture,
+// A capture whose identity is a file on disk. `storedName` is the persisted
+// NAME, never an absolute URI — see captureMedia.ts.
+export type MediaCapture = QueuedCaptureBase & {
+  kind: "photo" | "voice";
+  storedName: string;
+  fileName: string;
+  mimeType: string;
+};
+
+// A typed capture (kora#196). No media at all, so no storage lifecycle, no
+// orphan sweep, and no byte budget — which is why it gets its own ceiling
+// below rather than sharing the media one.
+export type TextCapture = QueuedCaptureBase & {
+  kind: "text";
+  phrase: string;
+};
+
+export type QueuedCapture = MediaCapture | TextCapture;
+
+// The single narrowing helper. Consumers use this rather than re-deriving
+// `kind === "photo" || kind === "voice"` at each site, so adding a future
+// media modality touches one predicate.
+export function hasMedia(c: QueuedCapture): c is MediaCapture {
+  return c.kind === "photo" || c.kind === "voice";
+}
+
+type AppendMediaInput = Pick<
+  MediaCapture,
   "id" | "kind" | "storedName" | "fileName" | "mimeType" | "capturedAt" | "ownerId"
 > & { mealSlot?: string };
 
+type AppendTextInput = Pick<
+  TextCapture,
+  "id" | "kind" | "phrase" | "capturedAt" | "ownerId"
+> & { mealSlot?: string };
+
+export type AppendCaptureInput = AppendMediaInput | AppendTextInput;
+
 function isValid(v: unknown): v is QueuedCapture {
   const q = v as QueuedCapture;
-  return (
-    !!q && typeof q.id === "string" && typeof q.storedName === "string" &&
-    typeof q.capturedAt === "string" && typeof q.queuedAt === "string" &&
-    (q.kind === "photo" || q.kind === "voice") &&
-    (q.status === "pending" || q.status === "review" || q.status === "failed") &&
-    typeof q.attempts === "number" && typeof q.ownerId === "string"
-  );
+  if (
+    !q || typeof q.id !== "string" || typeof q.capturedAt !== "string" ||
+    typeof q.queuedAt !== "string" || typeof q.attempts !== "number" ||
+    typeof q.ownerId !== "string" ||
+    !(q.status === "pending" || q.status === "review" || q.status === "failed")
+  ) {
+    return false;
+  }
+  // Per-arm. A shipped-build row carries kind "photo"/"voice" AND its media
+  // fields, so it satisfies the media arm exactly as it did before the union.
+  if (q.kind === "photo" || q.kind === "voice") return typeof q.storedName === "string";
+  // An empty phrase is not a capture — queueing one would drain into a resolve
+  // of nothing and fail as "unidentified", which reads as an AI failure rather
+  // than the empty input it actually is.
+  if (q.kind === "text") return typeof q.phrase === "string" && q.phrase.length > 0;
+  return false;
 }
 
 export async function list(): Promise<QueuedCapture[]> {
@@ -87,13 +132,17 @@ function update(fn: (items: QueuedCapture[]) => QueuedCapture[]): Promise<void> 
 }
 
 export async function append(input: AppendCaptureInput): Promise<QueuedCapture> {
-  const item: QueuedCapture = {
+  const item = {
     ...input, status: "pending", attempts: 0, queuedAt: new Date().toISOString(),
-  };
+  } as QueuedCapture;
   let full = false;
   await withCaptureLock(async () => {
     const items = await list();
-    if (items.length >= MAX_CAPTURES) { full = true; return; }
+    // Counted PER ARM: a queue of 20 photos must not refuse a text capture,
+    // and 50 queued phrases must not refuse a photo.
+    const limit = item.kind === "text" ? MAX_TEXT_CAPTURES : MAX_CAPTURES;
+    const used = items.filter((i) => (i.kind === "text") === (item.kind === "text")).length;
+    if (used >= limit) { full = true; return; }
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([...items, item]));
   });
   if (full) throw new CaptureQueueFullError();
@@ -156,7 +205,9 @@ export async function restore(item: QueuedCapture): Promise<void> {
   await withCaptureLock(async () => {
     const items = await list();
     if (items.some((i) => i.id === item.id)) return;
-    if (items.length >= MAX_CAPTURES) {
+    const limit = item.kind === "text" ? MAX_TEXT_CAPTURES : MAX_CAPTURES;
+    const used = items.filter((i) => (i.kind === "text") === (item.kind === "text")).length;
+    if (used >= limit) {
       full = true;
       return;
     }
