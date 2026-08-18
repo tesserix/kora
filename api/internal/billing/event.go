@@ -1,4 +1,4 @@
-// Package billing owns AI usage metering and monthly budget enforcement.
+// Package billing owns AI usage metering and quota enforcement.
 package billing
 
 import (

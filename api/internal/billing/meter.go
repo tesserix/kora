@@ -2,6 +2,7 @@ package billing
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -19,20 +20,33 @@ const (
 	// globalMonthlyCostCapUSD is the maximum estimated AI spend across all
 	// users within a calendar month.
 	globalMonthlyCostCapUSD = 500.0
-	// perUserMonthlyCallCap bounds how many AI calls a single user may make in
-	// a calendar month, protecting free-tier provider quota even when the
-	// list-price cost estimate stays under the dollar cap.
-	perUserMonthlyCallCap = 300
+
+	perUserDailyRequestCap   = 20
+	perUserWeeklyRequestCap  = 100
+	perUserMonthlyRequestCap = 300
+
+	quotaDay   = "day"
+	quotaWeek  = "week"
+	quotaMonth = "month"
 )
 
-// Meter records AI provider usage and enforces monthly cost budgets.
+var errQuotaExceeded = errors.New("ai quota exceeded")
+
+type quotaWindow struct {
+	kind  string
+	start time.Time
+	limit int
+}
+
+// Meter records provider usage and reserves user quota before provider work.
 type Meter struct {
-	db *gorm.DB
+	db  *gorm.DB
+	now func() time.Time
 }
 
 // NewMeter builds a Meter backed by db.
 func NewMeter(db *gorm.DB) Meter {
-	return Meter{db: db}
+	return Meter{db: db, now: time.Now}
 }
 
 // Record persists one metered AI provider call made on behalf of userID.
@@ -88,10 +102,10 @@ func (m Meter) record(ctx context.Context, userID *uuid.UUID, u ai.Usage, costUS
 	return nil
 }
 
-// WithinBudget reports whether userID has remaining monthly AI budget, and
-// whether the platform as a whole is still within its global monthly cap.
-// It returns false if either the user's or the global calendar-month spend
-// is at or above its respective cap.
+// WithinBudget atomically reserves one provider-backed AI request from the
+// user's daily, weekly, and monthly free-tier windows. It also checks the
+// user's and platform's calendar-month cost caps. False means no provider
+// work may begin; an error also fails closed.
 // NOTE ON `outcome` (added in #81): this function deliberately does NOT filter
 // it. Both caps guard a resource that a FAILED call still consumes — providers
 // return token usage alongside an error, and provider quota is spent by any
@@ -111,44 +125,99 @@ func (m Meter) record(ctx context.Context, userID *uuid.UUID, u ai.Usage, costUS
 // product query. That is no longer true, and an unfiltered product metric now
 // over-counts where it used to under-count.
 func (m Meter) WithinBudget(ctx context.Context, userID uuid.UUID) (bool, error) {
-	monthStart := startOfMonthUTC(time.Now())
+	windows := quotaWindowsAt(m.now())
+	monthStart := windows[2].start
+	err := m.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(
+			"SELECT pg_advisory_xact_lock(hashtextextended(CAST(? AS text), 0))",
+			userID.String(),
+		).Error; err != nil {
+			return fmt.Errorf("acquire user quota lock: %w", err)
+		}
 
-	var userTotal float64
-	if err := m.db.WithContext(ctx).
-		Model(&Event{}).
-		Where("user_id = ? AND created_at >= ?", userID, monthStart).
-		Select("COALESCE(SUM(cost_usd_est), 0)").
-		Scan(&userTotal).Error; err != nil {
-		return false, fmt.Errorf("billing: within budget: sum user cost: %w", err)
-	}
-	if userTotal >= perUserMonthlyCostCapUSD {
+		var userTotal float64
+		if err := tx.Model(&Event{}).
+			Where("user_id = ? AND created_at >= ?", userID, monthStart).
+			Select("COALESCE(SUM(cost_usd_est), 0)").
+			Scan(&userTotal).Error; err != nil {
+			return fmt.Errorf("sum user cost: %w", err)
+		}
+		if userTotal >= perUserMonthlyCostCapUSD {
+			return errQuotaExceeded
+		}
+
+		var globalTotal float64
+		if err := tx.Model(&Event{}).
+			Where("created_at >= ?", monthStart).
+			Select("COALESCE(SUM(cost_usd_est), 0)").
+			Scan(&globalTotal).Error; err != nil {
+			return fmt.Errorf("sum global cost: %w", err)
+		}
+		if globalTotal >= globalMonthlyCostCapUSD {
+			return errQuotaExceeded
+		}
+
+		type countRow struct {
+			Kind  string `gorm:"column:window_kind"`
+			Count int    `gorm:"column:request_count"`
+		}
+		var rows []countRow
+		if err := tx.Raw(`
+			SELECT window_kind, request_count
+			FROM ai_quota_windows
+			WHERE user_id = ?
+			  AND (window_kind, window_start) IN ((?, ?), (?, ?), (?, ?))`,
+			userID,
+			windows[0].kind, windows[0].start,
+			windows[1].kind, windows[1].start,
+			windows[2].kind, windows[2].start,
+		).Scan(&rows).Error; err != nil {
+			return fmt.Errorf("load quota windows: %w", err)
+		}
+		counts := make(map[string]int, len(rows))
+		for _, row := range rows {
+			counts[row.Kind] = row.Count
+		}
+		for _, window := range windows {
+			if counts[window.kind] >= window.limit {
+				return errQuotaExceeded
+			}
+		}
+
+		updatedAt := m.now().UTC()
+		if err := tx.Exec(`
+			INSERT INTO ai_quota_windows (user_id, window_kind, window_start, request_count, updated_at)
+			VALUES (?, ?, ?, 1, ?), (?, ?, ?, 1, ?), (?, ?, ?, 1, ?)
+			ON CONFLICT (user_id, window_kind, window_start)
+			DO UPDATE SET
+				request_count = ai_quota_windows.request_count + 1,
+				updated_at = EXCLUDED.updated_at`,
+			userID, windows[0].kind, windows[0].start, updatedAt,
+			userID, windows[1].kind, windows[1].start, updatedAt,
+			userID, windows[2].kind, windows[2].start, updatedAt,
+		).Error; err != nil {
+			return fmt.Errorf("reserve quota windows: %w", err)
+		}
+		return nil
+	})
+	if errors.Is(err, errQuotaExceeded) {
 		return false, nil
 	}
-
-	var userCalls int64
-	if err := m.db.WithContext(ctx).
-		Model(&Event{}).
-		Where("user_id = ? AND created_at >= ?", userID, monthStart).
-		Count(&userCalls).Error; err != nil {
-		return false, fmt.Errorf("billing: within budget: count user calls: %w", err)
+	if err != nil {
+		return false, fmt.Errorf("billing: within budget: %w", err)
 	}
-	if userCalls >= perUserMonthlyCallCap {
-		return false, nil
-	}
-
-	var globalTotal float64
-	if err := m.db.WithContext(ctx).
-		Model(&Event{}).
-		Where("created_at >= ?", monthStart).
-		Select("COALESCE(SUM(cost_usd_est), 0)").
-		Scan(&globalTotal).Error; err != nil {
-		return false, fmt.Errorf("billing: within budget: sum global cost: %w", err)
-	}
-	if globalTotal >= globalMonthlyCostCapUSD {
-		return false, nil
-	}
-
 	return true, nil
+}
+
+func quotaWindowsAt(t time.Time) [3]quotaWindow {
+	u := t.UTC()
+	dayStart := time.Date(u.Year(), u.Month(), u.Day(), 0, 0, 0, 0, time.UTC)
+	daysSinceMonday := (int(u.Weekday()) + 6) % 7
+	return [3]quotaWindow{
+		{kind: quotaDay, start: dayStart, limit: perUserDailyRequestCap},
+		{kind: quotaWeek, start: dayStart.AddDate(0, 0, -daysSinceMonday), limit: perUserWeeklyRequestCap},
+		{kind: quotaMonth, start: startOfMonthUTC(u), limit: perUserMonthlyRequestCap},
+	}
 }
 
 // startOfMonthUTC returns midnight UTC on the first day of t's month.

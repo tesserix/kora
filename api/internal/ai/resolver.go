@@ -32,10 +32,10 @@ const (
 	defaultAliasPortionGrams = 100
 )
 
-// budgetFollowUpQuestion is returned when a user has exhausted their monthly
-// AI budget — resolution degrades gracefully to manual logging rather than
+// budgetFollowUpQuestion is returned when a user has exhausted an AI quota
+// window — resolution degrades gracefully to manual logging rather than
 // failing the request.
-const budgetFollowUpQuestion = "You've reached your AI limit this month — search and log manually."
+const budgetFollowUpQuestion = "You've reached your AI usage limit — search and log manually."
 
 // noResolvableGuessFollowUpQuestion is used when at least one guess was
 // identified but none of them resolved to a confident nutrition-index match.
@@ -73,7 +73,7 @@ const minReturnableMatchScore = 0.40
 // speech — the user recorded silence or noise.
 const blankTranscriptFollowUp = "I couldn't make out any food from that — try again or type it."
 
-// Meter records AI provider usage and enforces monthly cost budgets.
+// Meter records AI provider usage and reserves user quota before provider work.
 //
 // This is declared locally rather than depending on the concrete
 // billing.Meter type because package billing already imports package ai (for

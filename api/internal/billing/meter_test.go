@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
@@ -64,6 +67,175 @@ func seedUser(t *testing.T, db *gorm.DB) uuid.UUID {
 	return id
 }
 
+func setQuotaCount(t *testing.T, db *gorm.DB, userID uuid.UUID, kind string, start time.Time, count int) {
+	t.Helper()
+	require.NoError(t, db.Exec(`
+		INSERT INTO ai_quota_windows (user_id, window_kind, window_start, request_count)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT (user_id, window_kind, window_start)
+		DO UPDATE SET request_count = EXCLUDED.request_count, updated_at = now()`,
+		userID, kind, start, count).Error)
+}
+
+func quotaCount(t *testing.T, db *gorm.DB, userID uuid.UUID, kind string, start time.Time) int {
+	t.Helper()
+	var count int
+	require.NoError(t, db.Raw(`
+		SELECT request_count FROM ai_quota_windows
+		WHERE user_id = ? AND window_kind = ? AND window_start = ?`,
+		userID, kind, start).Scan(&count).Error)
+	return count
+}
+
+func TestQuotaWindowStartsUseFixedUTCBoundaries(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.January, 1, 0, 30, 0, 0, time.FixedZone("AEDT", 11*60*60))
+	windows := quotaWindowsAt(now)
+
+	require.Equal(t, time.Date(2025, time.December, 31, 0, 0, 0, 0, time.UTC), windows[0].start)
+	require.Equal(t, time.Date(2025, time.December, 29, 0, 0, 0, 0, time.UTC), windows[1].start)
+	require.Equal(t, time.Date(2025, time.December, 1, 0, 0, 0, 0, time.UTC), windows[2].start)
+}
+
+func TestWithinBudgetRollsBackEveryWindowWhenDailyQuotaIsExhausted(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	now := time.Date(2026, time.August, 19, 12, 0, 0, 0, time.UTC)
+	meter := NewMeter(db)
+	meter.now = func() time.Time { return now }
+	windows := quotaWindowsAt(now)
+	setQuotaCount(t, db, userID, quotaDay, windows[0].start, perUserDailyRequestCap)
+	setQuotaCount(t, db, userID, quotaWeek, windows[1].start, 7)
+	setQuotaCount(t, db, userID, quotaMonth, windows[2].start, 8)
+
+	ok, err := meter.WithinBudget(context.Background(), userID)
+
+	require.NoError(t, err)
+	require.False(t, ok)
+	require.Equal(t, perUserDailyRequestCap, quotaCount(t, db, userID, quotaDay, windows[0].start))
+	require.Equal(t, 7, quotaCount(t, db, userID, quotaWeek, windows[1].start))
+	require.Equal(t, 8, quotaCount(t, db, userID, quotaMonth, windows[2].start))
+}
+
+func TestWithinBudgetEnforcesWeeklyAndMonthlyQuota(t *testing.T) {
+	tests := []struct {
+		name  string
+		kind  string
+		index int
+		limit int
+	}{
+		{name: "weekly", kind: quotaWeek, index: 1, limit: perUserWeeklyRequestCap},
+		{name: "monthly", kind: quotaMonth, index: 2, limit: perUserMonthlyRequestCap},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := testDB(t)
+			userID := seedUser(t, db)
+			now := time.Date(2026, time.August, 19, 12, 0, 0, 0, time.UTC)
+			meter := NewMeter(db)
+			meter.now = func() time.Time { return now }
+			windows := quotaWindowsAt(now)
+			setQuotaCount(t, db, userID, tt.kind, windows[tt.index].start, tt.limit)
+
+			ok, err := meter.WithinBudget(context.Background(), userID)
+
+			require.NoError(t, err)
+			require.False(t, ok)
+		})
+	}
+}
+
+func TestWithinBudgetResetsAtNewUTCWindows(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	// 31 May 2026 is Sunday, so midnight resets the day, ISO week, and month.
+	previous := time.Date(2026, time.May, 31, 23, 59, 59, 0, time.UTC)
+	now := previous.Add(time.Second)
+	previousWindows := quotaWindowsAt(previous)
+	for _, window := range previousWindows {
+		setQuotaCount(t, db, userID, window.kind, window.start, window.limit)
+	}
+	meter := NewMeter(db)
+	meter.now = func() time.Time { return now }
+
+	ok, err := meter.WithinBudget(context.Background(), userID)
+
+	require.NoError(t, err)
+	require.True(t, ok)
+	for _, window := range quotaWindowsAt(now) {
+		require.Equal(t, 1, quotaCount(t, db, userID, window.kind, window.start))
+	}
+}
+
+func TestWithinBudgetDoesNotResetWeeklyQuotaAtMonthBoundary(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	previous := time.Date(2026, time.August, 31, 23, 59, 59, 0, time.UTC)
+	now := previous.Add(time.Second)
+	previousWeek := quotaWindowsAt(previous)[1]
+	require.Equal(t, previousWeek.start, quotaWindowsAt(now)[1].start)
+	setQuotaCount(t, db, userID, quotaWeek, previousWeek.start, perUserWeeklyRequestCap)
+	meter := NewMeter(db)
+	meter.now = func() time.Time { return now }
+
+	ok, err := meter.WithinBudget(context.Background(), userID)
+
+	require.NoError(t, err)
+	require.False(t, ok)
+}
+
+func TestWithinBudgetSerializesConcurrentReservations(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	meter := NewMeter(db)
+	meter.now = func() time.Time {
+		return time.Date(2026, time.August, 19, 12, 0, 0, 0, time.UTC)
+	}
+
+	var allowed atomic.Int32
+	var denied atomic.Int32
+	errs := make(chan error, perUserDailyRequestCap+10)
+	var wg sync.WaitGroup
+	for range perUserDailyRequestCap + 10 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ok, err := meter.WithinBudget(context.Background(), userID)
+			if err != nil {
+				errs <- err
+				return
+			}
+			if ok {
+				allowed.Add(1)
+			} else {
+				denied.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	require.Equal(t, int32(perUserDailyRequestCap), allowed.Load())
+	require.Equal(t, int32(10), denied.Load())
+	day := quotaWindowsAt(meter.now())[0]
+	require.Equal(t, perUserDailyRequestCap, quotaCount(t, db, userID, quotaDay, day.start))
+}
+
+func TestWithinBudgetFailsClosedWhenDatabaseIsUnavailable(t *testing.T) {
+	db := testDB(t)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, sqlDB.Close())
+
+	ok, err := NewMeter(db).WithinBudget(context.Background(), uuid.New())
+
+	require.Error(t, err)
+	require.False(t, ok)
+}
+
 func TestRecordInsertsUsageEvent(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db)
@@ -115,25 +287,19 @@ func TestWithinBudgetFalseAfterCrossingPerUserCap(t *testing.T) {
 	require.False(t, ok)
 }
 
-func TestWithinBudgetCallCountCap(t *testing.T) {
-	db := testDB(t) // existing helper in this test file; it skips if no TEST_DATABASE_URL
-	m := NewMeter(db)
-	ctx := context.Background()
-	uid := seedUser(t, db) // existing helper; creates a users row and returns its id
+func TestWithinBudgetMonthlyRequestCap(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	now := time.Date(2026, time.August, 19, 12, 0, 0, 0, time.UTC)
+	meter := NewMeter(db)
+	meter.now = func() time.Time { return now }
+	month := quotaWindowsAt(now)[2]
+	setQuotaCount(t, db, userID, quotaMonth, month.start, perUserMonthlyRequestCap)
 
-	// Insert exactly the cap number of zero-cost calls this month.
-	for i := 0; i < perUserMonthlyCallCap; i++ {
-		if err := m.Record(ctx, uid, ai.Usage{Provider: "gemini", Model: "gemini-3.5-flash-lite", CallType: "identify_text"}, 0); err != nil {
-			t.Fatal(err)
-		}
-	}
-	ok, err := m.WithinBudget(ctx, uid)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ok {
-		t.Fatalf("WithinBudget = true at %d calls, want false (call-count cap)", perUserMonthlyCallCap)
-	}
+	ok, err := meter.WithinBudget(context.Background(), userID)
+
+	require.NoError(t, err)
+	require.False(t, ok)
 }
 
 // TestRecordSystemInsertsWithNullUserID pins the food-index backfill's
@@ -178,15 +344,14 @@ func TestEventJSONOmitsUserID(t *testing.T) {
 	}
 }
 
-// WithinBudget deliberately does NOT filter on outcome. Both caps protect a
-// real resource that a FAILED call still consumes:
+// The cost ledger deliberately does NOT filter on outcome. Both caps protect
+// a real resource that a FAILED call still consumes:
 //
 //   - the cost cap, because providers return token usage alongside an error
 //     (see openai.go: a response that arrived but failed to parse carries real
 //     billed tokens), so excluding failures under-counts actual spend;
-//   - the call cap, whose own comment says it exists to protect free-tier
-//     provider quota — and quota is spent by any request that reaches the
-//     provider, answered or not.
+//   - the request cap, because a reservation is not released after a provider
+//     failure or timeout.
 //
 // These two tests exist because the `outcome` column added in #81 invites the
 // opposite conclusion. Anyone "fixing" WithinBudget to filter outcome = 'ok'
@@ -220,13 +385,16 @@ func TestWithinBudgetCountsFailedCallsTowardTheCallCap(t *testing.T) {
 		Provider: "openai", Model: "gpt-4o", CallType: "identify_photo",
 		LatencyMs: 30000, Outcome: ai.OutcomeTimeout,
 	}
-	for i := 0; i < perUserMonthlyCallCap; i++ {
+	for range perUserDailyRequestCap {
+		ok, err := meter.WithinBudget(context.Background(), userID)
+		require.NoError(t, err)
+		require.True(t, ok)
 		require.NoError(t, meter.Record(context.Background(), userID, timedOut, 0))
 	}
 
 	ok, err := meter.WithinBudget(context.Background(), userID)
 	require.NoError(t, err)
-	require.False(t, ok, "failed calls consume free-tier provider quota, which is exactly what the call cap guards")
+	require.False(t, ok, "a failed provider call must not refund its quota reservation")
 }
 
 // The provider call happened — and was billed by the provider — whether or not

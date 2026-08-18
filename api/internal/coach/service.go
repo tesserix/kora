@@ -26,9 +26,9 @@ Rules:
 - Be additive and encouraging: never tell the user to eat less, restrict, skip meals, or stop eating.
 - Keep the answer short and conversational.`
 
-// budgetDegradedText is shown when a user has exhausted their monthly AI
-// budget — Ask degrades gracefully instead of calling the provider.
-const budgetDegradedText = "I've hit today's usage limit — try again later."
+// budgetDegradedText is shown when a user has exhausted an AI quota window —
+// Ask degrades gracefully instead of calling the provider.
+const budgetDegradedText = "I've reached your AI usage limit — try again after it resets."
 
 // providerUnavailableText is shown when no ai.Provider is configured (e.g.
 // GEMINI_API_KEY unset) — Ask degrades gracefully instead of nil-panicking
