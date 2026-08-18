@@ -122,6 +122,59 @@ Not mentioned in the spec, but AI inference has real per-user cost — free-fore
 - **Accessibility** — voice-first is a strength here; make VoiceOver + Dynamic Type explicit.
 - **Localization** — units, currency, date formats, and food DB selection follow from §10.
 
+## 13. Brand-level Australian chain data 🟡 — FatSecret ruled out 🟢
+
+The index answers "pizza, takeaway" with an AUSNUT survey category but has **no
+Australian chain brands**. Measured 2026-08-18: McDonald's 45 rows, all US;
+KFC 23 US / 1 AU; Grill'd, Guzman y Gomez, Zambrero, Red Rooster, Hungry
+Jack's and Oporto **zero**. AUSNUT names survey categories, never brands
+("Pizza, meat & vegetable (e.g. supreme), takeaway"), so no amount of work on
+the Australian government sources closes this.
+
+**The gap is still open.** What is decided is that FatSecret does not close it.
+
+### FatSecret — ruled out 2026-08-18 🟢
+
+Auth works (OAuth2 client-credentials, `scope=basic`, tokens issue fine). Data
+access is IP-allowlisted and was never granted, so no AU query was ever run.
+Ruled out on its **terms**, which no allowlist would change:
+
+- **Content must be deleted or re-requested within 24 hours** unless explicitly
+  marked storable indefinitely (Terms 1.5). This is the decisive one: FatSecret
+  can never be an ingest source feeding `food_items`. It could only ever be a
+  runtime lookup with a short cache — inside the 1.5 s resolve budget, on every
+  request, for a food the index cannot answer.
+- **Attribution is permanent.** Every surface displaying Content must credit
+  FatSecret, and the attribution links must be retained *even after you stop
+  using the API* (Terms 1.3).
+- **5,000 calls/day** on the free tier, not carried over.
+- The application may not operate only behind a firewall or on an internal
+  network outside development and testing.
+
+Separately, and less firmly: **AU localization appears to be a paid Premier
+feature.** FatSecret's FAQ twice groups it with Premier — "any Premier
+capabilities *or localization to supported countries*", "any of our Premier
+features *or localized data sets*" — and the "58+ countries" claim sits in
+Premier's feature list. This is documentation, **not measured**: the IP block
+stops every query before region is evaluated. It is a reason not to expect much
+from the free tier, not proof.
+
+Do not re-attempt the free tier. If AU brand coverage becomes a priority, the
+question is commercial — whether a paid Premier agreement is worth it — and the
+architecture it buys is still a runtime lookup, not an ingest source.
+
+### What is NOT ruled out
+
+- Per-chain menu data, negotiated or licensed directly.
+- Any source whose terms permit storage. OpenFoodFacts already works this way
+  (ODbL, attribution required, storage fine) but is packaged-goods only.
+- Accepting the gap: answer chain queries with the generic AUSNUT row and be
+  honest that it is a category estimate.
+
+Prior art that failed, so it is not retried: FoodSwitch is packaged-only; the
+chains publish JavaScript calculators rather than tables, and six fetch
+attempts across two methods returned nothing usable.
+
 ---
 
 _When a question is resolved, mark it 🟢, record the decision inline, and reflect any
