@@ -1,10 +1,10 @@
 import type { QueryClient } from "@tanstack/react-query";
 import type { Resolution, ResolutionSource } from "@/api/types";
-import { apiFetchMultipart, currentUserId } from "@/lib/api";
+import { apiFetch, apiFetchMultipart, currentUserId } from "@/lib/api";
 import { buildCaptureForm, normalizeResolution } from "@/api/resolveWire";
 import { deleteQueuedMedia, mediaExists, queuedMediaUri } from "./captureMedia";
 import {
-  discard, list, markFailed, markReview, recordAttempt, type QueuedCapture,
+  discard, hasMedia, list, markFailed, markReview, recordAttempt, type QueuedCapture,
 } from "./captureQueue";
 import { append as appendLog, newLogId } from "./queue";
 import { QUEUED_CAPTURES_KEY, QUEUED_LOGS_KEY } from "./queryKeys";
@@ -48,7 +48,9 @@ function firstCandidate(resolution: Resolution) {
 // labels.go's allowlist — rejects a value the server would silently bucket
 // into "other" and corrupt the by-source share metric.
 function sourceOf(kind: QueuedCapture["kind"]): ResolutionSource {
-  return kind === "photo" ? "ai_photo" : "ai_voice";
+  if (kind === "photo") return "ai_photo";
+  if (kind === "text") return "ai_text";
+  return "ai_voice";
 }
 
 export async function drainCaptureQueue(deps: DrainDeps) {
@@ -61,7 +63,10 @@ export async function drainCaptureQueue(deps: DrainDeps) {
     // The file can be gone: an OS purge, cleared app data, or a crash between
     // append and copy. Terminal, and handled per item so one missing file
     // cannot strand the rest of the pass.
-    if (!deps.mediaExists(item.storedName)) {
+    // Media rows only (kora#196). A text capture has no file, so asking
+    // whether its media exists would fail it as "missing-media" on the first
+    // line of the loop — reporting a lost file for a capture that never had one.
+    if (hasMedia(item) && !deps.mediaExists(item.storedName)) {
       await markFailed(item.id, "The photo or recording is no longer on this device.", "missing-media");
       failed++;
       continue;
@@ -97,7 +102,7 @@ export async function drainCaptureQueue(deps: DrainDeps) {
           newLogId(),
           item.ownerId,
         );
-        await deps.deleteMedia(item.storedName);
+        if (hasMedia(item)) await deps.deleteMedia(item.storedName);
         await discard(item.id);
         logged++;
       } else {
@@ -130,6 +135,18 @@ export async function drainCaptureQueue(deps: DrainDeps) {
 }
 
 async function resolveCapture(capture: QueuedCapture): Promise<Resolution> {
+  // Text posts plain JSON to the same endpoint useResolveText uses; only media
+  // needs the multipart body. normalizeResolution lives in the resolveWire leaf
+  // module precisely so this file can use it without inverting the
+  // @/api -> @/offline dependency (see that file's header).
+  if (!hasMedia(capture)) {
+    return normalizeResolution(
+      await apiFetch("/v1/resolve/text", {
+        method: "POST",
+        body: JSON.stringify({ phrase: capture.phrase }),
+      }),
+    );
+  }
   const path = capture.kind === "photo" ? "/v1/resolve/photo" : "/v1/resolve/voice";
   const form = buildCaptureForm({
     uri: queuedMediaUri(capture.storedName),
