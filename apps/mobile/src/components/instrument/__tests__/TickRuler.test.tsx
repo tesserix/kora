@@ -77,10 +77,41 @@ describe("TickRuler continuous mode", () => {
   // recomputed from the `value` prop — so every graduation in [min, max]
   // renders and clipping is the container's job. Asserting the exact count
   // pins that: a regression back to windowing would render far fewer.
-  it("renders a tick for every whole graduation across the entire scale", async () => {
+  // kora#245 changed the REPRESENTATION, not the content. The ticks were one
+  // <Line> node each — 321 of them on the widest ruler, and onboarding mounts
+  // ten rulers, which made that screen's initial render ~10x heavier than it
+  // needed to be and flaked CI. They are now two <Path> nodes (minors and
+  // majors), so the assertion moves from counting nodes to reading the path
+  // data. The scale still covers every whole graduation in [min, max].
+  it("draws every whole graduation across the entire scale", async () => {
+    const { getByTestId } = await render(<TickRuler {...base} value={84} onChange={jest.fn()} />);
+    const minors = getByTestId("weight-ruler-ticks-minor").props.d as string;
+    const majors = getByTestId("weight-ruler-ticks-major").props.d as string;
+
+    // One "M" per tick. min 35 .. max 180 inclusive is 146 graduations, of
+    // which 40, 50 ... 180 (15 of them) are majors.
+    const count = (d: string) => (d.match(/M/g) ?? []).length;
+    expect(count(minors) + count(majors)).toBe(146);
+    expect(count(majors)).toBe(15);
+  });
+
+  // The whole point of collapsing to a Path is that it is ONE node, not that
+  // it merely looks the same — a regression that emitted a Path per tick would
+  // render identically and cost exactly as much as before.
+  it("draws the minor ticks as a single node, not one per graduation", async () => {
     const { getAllByTestId } = await render(<TickRuler {...base} value={84} onChange={jest.fn()} />);
-    // min 35 .. max 180 inclusive.
-    expect(getAllByTestId(/^weight-ruler-tick-/).length).toBe(146);
+    expect(getAllByTestId("weight-ruler-ticks-minor")).toHaveLength(1);
+  });
+
+  // Majors and minors differ in stroke weight and colour, which is why they
+  // are two paths rather than one. Pin that they did not collapse into a
+  // single undifferentiated stroke.
+  it("keeps majors visually distinct from minors", async () => {
+    const { getByTestId } = await render(<TickRuler {...base} value={84} onChange={jest.fn()} />);
+    const minor = getByTestId("weight-ruler-ticks-minor").props;
+    const major = getByTestId("weight-ruler-ticks-major").props;
+    expect(major.strokeWidth).toBeGreaterThan(minor.strokeWidth);
+    expect(major.stroke).not.toBe(minor.stroke);
   });
 
   // The centre index is the fixed reference the scale moves under. If it ever
