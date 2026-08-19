@@ -116,7 +116,19 @@ const PlanGauge = memo(function PlanGauge({
   });
 
   return (
-    <Svg width="100%" height={GAUGE_VIEW_H} viewBox={`0 0 ${GAUGE_VIEW_W} ${GAUGE_VIEW_H}`}>
+    // kora#270: width MUST be the concrete viewBox width, not "100%". This
+    // component's parent (onboarding's AuthScaffold header) is a centre-aligned
+    // column, which gives its children no definite width to take a percentage
+    // OF — the root View shrank to its content, the content asked for 100% of
+    // nothing, and the whole dial resolved to zero width. `height` is explicit,
+    // so 178pt stayed reserved and the bug read as deliberate whitespace above
+    // the numeral for its entire life. GaugeDial has always used the fixed
+    // width; matching it is what makes this render.
+    <Svg
+      width={GAUGE_VIEW_W}
+      height={GAUGE_VIEW_H}
+      viewBox={`0 0 ${GAUGE_VIEW_W} ${GAUGE_VIEW_H}`}
+    >
       {TICK_GEOMETRY.map((geom, i) => (
         <PlanGaugeTick
           key={i}
