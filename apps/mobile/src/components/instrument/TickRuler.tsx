@@ -459,7 +459,23 @@ function ContinuousRuler(props: ContinuousProps) {
         accessibilityValue={{ text: formatLabel ? formatLabel(value) : String(value) }}
         accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
         onAccessibilityAction={onAccessibilityAction}
-        style={{ height: HEIGHT + READOUT_HEIGHT, width: "100%", overflow: "hidden" }}
+        // minHeight, NOT height (kora#173) — the same correction the readout
+        // inside it already got, applied to the box that contains it. A hard
+        // height here is measured in unscaled points while its first child, the
+        // readout, is type that Dynamic Type scales: at accessibility text
+        // sizes the ~40pt readout consumed the whole 64pt box and pushed the
+        // 44pt tick scale out of it, so `overflow: "hidden"` erased EVERY
+        // graduation and sliced the number labels through the middle. The
+        // ticks below are still a fixed 44pt and the readout still cannot
+        // shrink, so the floor keeps the no-reflow guarantee this row exists
+        // for while letting the container track the type it holds — no second
+        // hard-coded constant, and nothing derived from a font scale that would
+        // have to be kept in step with the readout's own leading.
+        //
+        // `overflow: "hidden"` stays: it is there for the HORIZONTAL clip, and
+        // the scale below is deliberately drawn `width` px wider than the
+        // viewport on each side so the end labels are not cut in half.
+        style={{ minHeight: HEIGHT + READOUT_HEIGHT, width: "100%", overflow: "hidden" }}
       >
         {/* kora#165: the value in plain sight. A real RN Text rather than an
             SVG one so it inherits the app's type scale and Dynamic Type, and
