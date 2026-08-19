@@ -127,6 +127,21 @@ export const routes = [
     ready: ["Your recipes"],
     readyAny: ["No recipes yet", "servings"],
   },
+  // Added after kora#278. This screen went unassessed for a full day because
+  // the stale dev client painted an ExpoLinearGradient LogBox over it —
+  // capture.tsx is one of the four consumers of that module — and the first
+  // clean capture showed the mode chip row clipped at the right edge even at
+  // `medium`. Exactly the reason to have it in the walk.
+  {
+    name: "capture",
+    path: "/capture",
+    auth: "required",
+    // The mode chips are the screen's own furniture: present as soon as it has
+    // mounted, and independent of any query, camera permission or device
+    // capability. TYPE is deliberately included — it is the chip kora#278
+    // reports as clipped, so a gate that waits for it also proves it rendered.
+    ready: ["PHOTO", "TYPE"],
+  },
   {
     name: "settings",
     path: "/settings",

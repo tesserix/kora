@@ -509,21 +509,51 @@ async function waitForReady(idbBin, udid, route, { timeout, pollInterval }) {
  * `landedOnSignIn: null` and the run is otherwise unaffected.
  */
 async function fingerprint(file) {
+  let stdout;
   try {
-    const { stdout } = await execFileAsync(
-      "magick",
-      [file, "-resize", "16x16!", "-colorspace", "gray", "-depth", "8", "txt:-"],
-      { maxBuffer: 8 * 1024 * 1024 },
-    );
-    return stdout
-      .split("\n")
-      .slice(1)
-      .map((line) => line.match(/gray\((\d+)/)?.[1])
-      .filter(Boolean)
-      .map(Number);
+    stdout = (
+      await execFileAsync(
+        "magick",
+        // `-alpha off` matters: these PNGs carry an alpha channel, and with it
+        // ImageMagick labels each pixel `graya(29,1)` rather than `gray(29)`.
+        // The original parse looked for `gray(` and therefore matched NOTHING,
+        // silently — see the comment on the empty-result guard below.
+        [file, "-alpha", "off", "-resize", "16x16!", "-colorspace", "gray", "-depth", "8", "txt:-"],
+        { maxBuffer: 8 * 1024 * 1024 },
+      )
+    ).stdout;
   } catch {
+    // ImageMagick genuinely absent or failed. Documented as optional: the
+    // manifest records `landedOnSignIn: null` and the run is unaffected.
     return null;
   }
+
+  const values = stdout
+    .split("\n")
+    .slice(1)
+    // `graya?` tolerates both spellings, so the alpha flag above is belt and
+    // braces rather than the only thing holding this together.
+    .map((line) => line.match(/graya?\((\d+)/)?.[1])
+    .filter(Boolean)
+    .map(Number);
+
+  // THE POINT OF THIS GUARD (kora#257): magick ran, produced output, and the
+  // parse matched nothing. Returning [] here would flow into
+  // fingerprintDistance, which returns null for an empty array, which reads in
+  // the manifest as "ImageMagick not installed" — indistinguishable from the
+  // honest case. The sign-in-wall detector was inert for 28 captures across two
+  // full runs exactly this way, reporting `landedOnSignIn: null` throughout.
+  //
+  // A safety check that always answers "fine" is worse than no check, and this
+  // whole harness exists because a green suite gave false confidence. So a
+  // parse failure is LOUD.
+  if (values.length === 0) {
+    throw new Error(
+      `fingerprint: magick produced output for ${file} but no pixels parsed. ` +
+        "The txt: format likely changed — check the pixel-enumeration line spelling.",
+    );
+  }
+  return values;
 }
 
 /** Mean absolute difference of two fingerprints, 0-255. */
