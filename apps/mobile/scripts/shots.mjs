@@ -322,6 +322,13 @@ async function pinStatusBar(udid) {
  * Must run while the app is NOT running — iOS flushes an app's defaults on
  * termination and would clobber the write. Hence its position here, after
  * terminate and before the launch URL.
+ *
+ * SIDE EFFECT worth knowing: this is a persistent per-simulator preference, so
+ * after any run the gear stays gone for interactive development too. The dev
+ * menu itself is unaffected (shake, or Cmd+D). To get the button back:
+ *
+ *   xcrun simctl spawn <udid> defaults write com.tesserix.kora \
+ *     EXDevMenuShowFloatingActionButton -bool YES
  */
 async function disableDevMenuFab(udid) {
   await simctl(
