@@ -26,7 +26,7 @@
  *                          re-capturing within one launch. The two modes have
  *                          different noise characteristics; measure both.
  *   --settle <ms>          EXTRA dwell after a route reports ready, for
- *                          animation only (default 250). This is no longer
+ *                          animation only (default 3000). This is no longer
  *                          what decides when to shoot — see the readiness
  *                          gate below. Routes may override.
  *   --ready-timeout <ms>   How long to wait for a route to become ready
@@ -110,10 +110,24 @@ const DEVICE_REQUIREMENT = "iPhone 17 Pro Max";
 
 const DEFAULTS = {
   contentSize: "medium",
-  // Extra dwell AFTER the readiness gate opens, not a substitute for it. Kept
-  // small and deliberately not per-route: it exists for entrance animation
-  // settling, and a route that needs more is a route with a bad selector.
-  settle: 250,
+  // Extra dwell AFTER the readiness gate opens, never a substitute for it.
+  //
+  // The gate answers "is the content there?", which on an animated screen is
+  // true a long time before the pixels stop moving. Measured: with the gate
+  // open and settle at 250ms, `tab-today` differed across launches by 1.005%
+  // of the frame — WORSE than the 0.801% #272 recorded with its old 4000ms
+  // timer. At 3000ms it drops to 0.113%. The gate had done its job; the
+  // shutter was simply firing mid-animation.
+  //
+  // 3000 comes from the longest one-shot entrance in the app:
+  // SpecularSweep is withDelay(500, withTiming(..., 1600)) = 2100ms from
+  // mount (src/components/instrument/SpecularSweep.tsx), plus margin. Every
+  // entrance here is one-shot, so a dwell genuinely ends the motion — there
+  // is no looping animation to chase.
+  //
+  // Global rather than per-route on purpose: a new animated screen should be
+  // stable by default rather than noisy until someone notices.
+  settle: 3000,
   readyTimeout: 25_000,
   pollInterval: 750,
   bootWait: 35_000,
@@ -289,9 +303,37 @@ async function pinStatusBar(udid) {
  * `simctl launch` is what points the dev client at a specific Metro; a plain
  * launch reuses whatever bundle URL it last had.
  */
+/**
+ * Turn off expo-dev-menu's floating action button.
+ *
+ * The draggable gear sits in a window ABOVE app content — it overlaps the
+ * notification bell on tab-today and the settings affordance on every stack
+ * screen — and its position lives in UserDefaults, so it moves between
+ * sessions and machines. #272 correctly refused to mask it: a fixed mask would
+ * also hide the real UI underneath, and a moving one cannot be derived from
+ * the image at all.
+ *
+ * It does not need a rebuild or a release build either. expo-dev-menu reads
+ * `EXDevMenuShowFloatingActionButton` straight out of UserDefaults
+ * (node_modules/expo-dev-menu/ios/Modules/DevMenuPreferences.swift), so
+ * writing it false on the simulator is enough. Verified: the `gearshape.fill`
+ * node disappears from the accessibility tree entirely.
+ *
+ * Must run while the app is NOT running — iOS flushes an app's defaults on
+ * termination and would clobber the write. Hence its position here, after
+ * terminate and before the launch URL.
+ */
+async function disableDevMenuFab(udid) {
+  await simctl(
+    ["spawn", udid, "defaults", "write", BUNDLE_ID, "EXDevMenuShowFloatingActionButton", "-bool", "NO"],
+    { allowFailure: true },
+  );
+}
+
 async function launchApp(udid, port) {
   await simctl(["terminate", udid, BUNDLE_ID], { allowFailure: true });
   await sleep(1500);
+  await disableDevMenuFab(udid);
   const metro = encodeURIComponent(`http://localhost:${port}`);
   await simctl(["openurl", udid, `${BUNDLE_ID}://expo-development-client/?url=${metro}`]);
 }
