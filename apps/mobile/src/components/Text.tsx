@@ -1,4 +1,4 @@
-import { PixelRatio, StyleSheet, Text, type TextProps } from "react-native";
+import { StyleSheet, Text, type TextProps } from "react-native";
 import { useTheme } from "@/theme";
 import { type as typeScale, type TypeVariant } from "@/theme/palette";
 
@@ -12,11 +12,13 @@ interface Props extends TextProps { variant?: Variant; muted?: boolean; rounded?
 // display type does not. A fixed pt line box (the variant's own) is only right
 // at the variant's own size, so any caller that overrides `fontSize` gets a
 // ratio-derived box instead. Bands are the same shape as the type scale.
-// The band comes from the AUTHORED size, not the scaled one: body copy at 200%
-// is still body copy and still wants body's air, not a display leading.
-function derivedLeading(size: number, scale: number): number {
+// The band comes from the AUTHORED size, and so does the result: the platform
+// scales the returned line box for Dynamic Type on its own (see AppText below).
+// Body copy at 200% is still body copy and still wants body's air, not a
+// display leading, so the band is picked before any scaling enters.
+function derivedLeading(size: number): number {
   const ratio = size <= 13 ? 1.45 : size <= 17 ? 1.3 : size <= 28 ? 1.22 : 1.15;
-  return Math.round(size * ratio * scale);
+  return Math.round(size * ratio);
 }
 
 export function AppText({ variant = "body", muted = false, rounded = false, style, ...rest }: Props) {
@@ -30,23 +32,36 @@ export function AppText({ variant = "body", muted = false, rounded = false, styl
   // (kora#177). Flatten first and read the size that will actually render.
   const flat = StyleSheet.flatten(style) ?? {};
   const size = typeof flat.fontSize === "number" ? flat.fontSize : p.size;
-  // RN scales `fontSize` for Dynamic Type but never `lineHeight`, so a pt line
-  // box collapses to zero spacing at accessibility text sizes — multi-line copy
-  // runs together and single-line readouts clip. Deriving against the size the
-  // OS will actually render keeps the ratio intact at every text size.
-  // Whatever the caller does to the glyph's scaling, the box has to follow it:
-  // scaling off means scale 1, and a cap on the glyph caps the box too.
-  const scale = rest.allowFontScaling === false
-    ? 1
-    // RN reads 0/null on maxFontSizeMultiplier as "no cap", so `||` not `??`.
-    : Math.min(PixelRatio.getFontScale(), rest.maxFontSizeMultiplier || Infinity);
+  // `lineHeight` is authored in UNSCALED points, because the platform applies
+  // the Dynamic Type scale to it ITSELF — measured on RN 0.86 / New
+  // Architecture, iPhone 17 Pro Max (kora#173). A sweep of fifteen lineHeight
+  // values from 10 to 80 at fontScale 2.6430 gave a rendered per-line advance
+  // of 2.633–2.650x the authored value in every case, and exactly 1.000x with
+  // `allowFontScaling={false}`. So the platform multiplies by fontScale, full
+  // stop.
+  //
+  // This code USED to multiply by `PixelRatio.getFontScale()` on the premise
+  // that RN scales `fontSize` but never `lineHeight`. That premise is false
+  // here, and the scale landed twice: at accessibility-extra-large a 20pt body
+  // string got a 169pt line box where ~63pt is correct, which is where the two
+  // blank lines between "Welcome" and "back." came from. Do not reintroduce it
+  // on reasoning alone — jest cannot observe platform font scaling, so a green
+  // suite says nothing here. The measurements, and the Fast Refresh trap that
+  // corrupts them, are written up in
+  // .planning/debug/resolved/lineheight-double-scaled.md.
+  //
+  // `allowFontScaling` and `maxFontSizeMultiplier` need no handling either:
+  // with scaling off the platform multiplies the box by 1, and a cap scales the
+  // rendered box and the glyph by the same capped multiplier, so the authored
+  // ratio survives both without help.
   const lineHeight =
-    // An explicit caller lineHeight always wins, unscaled — the handful of call
-    // sites that set one picked a specific number for a specific figure.
+    // An explicit caller lineHeight always wins — the handful of call sites
+    // that set one picked a specific number for a specific figure. It is passed
+    // through in the same unscaled points as everything else here.
     typeof flat.lineHeight === "number" ? flat.lineHeight
       // At the variant's own size, keep its hand-tuned Apple value.
-      : size === p.size && p.lineHeight ? Math.round(p.lineHeight * scale)
-      : derivedLeading(size, scale);
+      : size === p.size && p.lineHeight ? p.lineHeight
+      : derivedLeading(size);
   return (
     <Text
       style={[
