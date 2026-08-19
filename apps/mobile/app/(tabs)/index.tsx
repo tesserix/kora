@@ -224,13 +224,50 @@ export default function Home() {
         entering={enter(0)}
         style={{ paddingHorizontal: 16, paddingBottom: 8, flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end" }}
       >
-        <View>
+        {/* `flexShrink: 1`, with NO grow and NO basis — this one line is the
+            whole fix for kora#276, and it is the INVERSE of the kora#266 bug
+            in ScreenHeader rather than a repeat of it.
+
+            React Native defaults `flexShrink` to 0 (the web defaults to 1), so
+            before this both children of the row were unshrinkable. Each claimed
+            its hypothetical width, the row overflowed, and the overflow went
+            off the RIGHT edge because `space-between` cannot reclaim space it
+            does not have. Measured on iPhone 17 Pro Max (440pt wide, 408pt
+            inner) at accessibility-extra-large:
+
+              before  title column 408pt | bell x=424..464 | avatar x=476..516
+              after   title column 316pt | bell x=332..372 | avatar x=384..424
+
+            The bell's tap centre sat at x=444 — four points PAST the screen —
+            and the avatar was off-screen entirely. Only a 16pt sliver of the
+            bell was painted, which is why this reads as a rendering artefact in
+            a screenshot rather than as two unreachable controls.
+
+            Shrinking the ACTIONS instead is the wrong lever and was tried and
+            rejected in kora#263: a shrink box narrows past the word it holds,
+            which there split "kg" into "k" / "g". Two 40x40 icon buttons have
+            no reflow to give — they would just be drawn smaller than their own
+            glyphs. So the type yields and the controls hold.
+
+            NOT `flex: 1`, which is the mistake kora#266 had to undo: that adds
+            `flexGrow: 1` + `flexBasis: 0`, so the column would be sized from
+            whatever the actions left over with no floor, and it would grow to
+            fill at `medium` too. With plain `flexShrink: 1` the column measures
+            its own type and yields only the 92pt it actually has to. At
+            `medium` the two columns hypothetically measure 228 + 92 of 408 —
+            no overflow, so nothing shrinks and nothing moves. Verified by
+            byte-identical screenshot, not by the suite; 1,729 green tests hid
+            the original rendering bug (kora#257). */}
+        <View style={{ flexShrink: 1 }}>
           <AppText variant="subheadline" muted>
             {dateLabel()} · {greeting()}, {firstName}
           </AppText>
           <AppText variant="largeTitle">Today</AppText>
         </View>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+        {/* `flexShrink: 0` is already RN's default and is stated anyway: it is
+            the half of the fix that is load-bearing but invisible, and a later
+            edit adding `flex: 1` here would silently reopen kora#276. */}
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 12, flexShrink: 0 }}>
           <PressableScale
             accessibilityRole="button"
             accessibilityLabel="Notifications"
