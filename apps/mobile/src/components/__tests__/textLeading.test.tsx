@@ -4,20 +4,32 @@ import { AppText } from "../Text";
 import { Numeral } from "../Numeral";
 import { type as typeScale } from "@/theme/palette";
 
-// AppText merges caller `style` AFTER its own variant style, so a caller that
-// overrides `fontSize` but not `lineHeight` used to inherit `body`'s fixed
-// 22pt line box (kora#177). These pin the derived-leading rule: leading comes
-// from the EFFECTIVE size, and the ratio steps DOWN as the size grows.
+// ---------------------------------------------------------------------------
+// WHAT THESE TESTS CAN AND CANNOT SEE
+//
+// They assert the `lineHeight` NUMBER AppText puts on the style object. They do
+// NOT verify the rendered line box, and they cannot: jest renders no platform
+// text engine, so the Dynamic Type scaling that iOS applies to `lineHeight` is
+// invisible here — the same blind spot as `useAnimatedStyle` in kora#257.
+//
+// That blind spot has already cost one shipped bug. These five tests previously
+// asserted that AppText multiplies its line box by `PixelRatio.getFontScale()`,
+// and they passed, green, for the entire life of kora#173 — while the platform
+// was applying that same scale a second time and blowing the rendered box out to
+// scale². 1,729 green tests did not notice two blank lines between "Welcome"
+// and "back.".
+//
+// So: the contract below is the JS-side contract only. The rendered result is
+// verified by simulator screenshot at `medium` and at
+// `accessibility-extra-large`, and by the measurements recorded in
+// .planning/debug/resolved/lineheight-double-scaled.md. Anything you want to
+// claim about the rendered box has to be measured on a device.
+// ---------------------------------------------------------------------------
+
 function leading(style: unknown): { fontSize: number; lineHeight: number } {
   const flat = StyleSheet.flatten(style as never) as { fontSize: number; lineHeight: number };
   return { fontSize: flat.fontSize, lineHeight: flat.lineHeight };
 }
-
-// RN's jest preset resolves PixelRatio.getFontScale() to the mocked pixel ratio
-// (2), not to 1, so the default Dynamic Type scale has to be pinned explicitly
-// or every expectation below reads doubled.
-beforeEach(() => jest.spyOn(PixelRatio, "getFontScale").mockReturnValue(1));
-afterEach(() => jest.restoreAllMocks());
 
 describe("AppText leading follows the effective font size", () => {
   it.each([
@@ -79,25 +91,43 @@ describe("Numeral no longer needs its own leading workaround", () => {
   });
 });
 
-// RN scales `fontSize` for Dynamic Type but never `lineHeight`, so a fixed pt
-// line box collapses to zero spacing at accessibility text sizes and multi-line
-// copy runs together (kora#177). The derived box has to track the size the OS
-// actually renders, not the one written in the style.
-describe("leading scales with Dynamic Type", () => {
-  it("grows the derived line box by the user's font scale", async () => {
-    jest.spyOn(PixelRatio, "getFontScale").mockReturnValue(2);
-    const { getByText } = await render(<AppText style={{ fontSize: 15 }}>hi</AppText>);
-    expect(leading(getByText("hi").props.style).lineHeight).toBe(39); // 15 * 1.3 * 2
-  });
+// The platform scales `lineHeight` for Dynamic Type by exactly the same factor
+// it scales `fontSize`. Measured on RN 0.86 / New Architecture, iPhone 17 Pro
+// Max: a sweep of fifteen lineHeight values from 10 to 80 at fontScale 2.6430
+// produced a rendered per-line advance of 2.633–2.650x the authored value in
+// every case, and exactly 1.000x under `allowFontScaling={false}` (kora#173).
+//
+// AppText therefore emits UNSCALED points and lets the platform apply the scale
+// once. These tests pin the absence of a second application: whatever the device
+// font scale is, the emitted number must not move. They pass a mocked scale that
+// a jest run would otherwise never exercise — RN's preset resolves
+// PixelRatio.getFontScale() to the mocked pixel ratio (2), not to 1 — precisely
+// so a reintroduced multiplication fails here instead of on a user's phone.
+describe("leading is emitted unscaled — the platform applies Dynamic Type", () => {
+  afterEach(() => jest.restoreAllMocks());
 
-  it("grows a variant's own line box too", async () => {
-    jest.spyOn(PixelRatio, "getFontScale").mockReturnValue(2);
+  it.each([1, 2, 2.643, 3.571])(
+    "emits the same derived box at font scale %p",
+    async (scale) => {
+      jest.spyOn(PixelRatio, "getFontScale").mockReturnValue(scale);
+      const { getByText } = await render(<AppText style={{ fontSize: 15 }}>hi</AppText>);
+      // 15 * 1.3 = 19.5 -> 20. Not 20 * scale: the platform does that part.
+      expect(leading(getByText("hi").props.style).lineHeight).toBe(20);
+    },
+  );
+
+  it("emits a variant's own Apple line box unscaled", async () => {
+    jest.spyOn(PixelRatio, "getFontScale").mockReturnValue(2.643);
     const { getByText } = await render(<AppText variant="body">hi</AppText>);
-    expect(leading(getByText("hi").props.style).lineHeight).toBe(44); // 22 * 2
+    expect(leading(getByText("hi").props.style).lineHeight).toBe(typeScale.body.lineHeight);
   });
 
-  it("does not scale the box when the caller turns glyph scaling off", async () => {
-    jest.spyOn(PixelRatio, "getFontScale").mockReturnValue(2);
+  // `allowFontScaling={false}` needs no special case: the platform multiplies
+  // the box by 1 when scaling is off, so the authored ratio already survives.
+  // Measured: lineHeight 26 with scaling off renders at exactly 26.00pt while
+  // fontScale is 2.6430.
+  it("emits the same box when the caller turns glyph scaling off", async () => {
+    jest.spyOn(PixelRatio, "getFontScale").mockReturnValue(2.643);
     const { getByText } = await render(
       <AppText allowFontScaling={false} style={{ fontSize: 15 }}>
         hi
@@ -106,18 +136,23 @@ describe("leading scales with Dynamic Type", () => {
     expect(leading(getByText("hi").props.style).lineHeight).toBe(20);
   });
 
-  it("caps the box at the caller's maxFontSizeMultiplier", async () => {
+  // `maxFontSizeMultiplier` needs no special case either. It caps the glyph and
+  // the RENDERED box by the same capped multiplier, so the ratio holds. (RN does
+  // over-reserve LAYOUT height for capped text — measured 68.67pt for a box that
+  // renders at 39pt — but that is an RN measure/render disagreement, and
+  // pre-scaling here would corrupt the rendered result while not fixing it.)
+  it("emits the same box when the caller caps the multiplier", async () => {
     jest.spyOn(PixelRatio, "getFontScale").mockReturnValue(3);
     const { getByText } = await render(
       <AppText maxFontSizeMultiplier={1.5} style={{ fontSize: 15 }}>
         hi
       </AppText>,
     );
-    expect(leading(getByText("hi").props.style).lineHeight).toBe(29); // 15 * 1.3 * 1.5
+    expect(leading(getByText("hi").props.style).lineHeight).toBe(20);
   });
 
   it("leaves an explicit caller lineHeight alone", async () => {
-    jest.spyOn(PixelRatio, "getFontScale").mockReturnValue(2);
+    jest.spyOn(PixelRatio, "getFontScale").mockReturnValue(2.643);
     const { getByText } = await render(
       <AppText style={{ fontSize: 64, lineHeight: 72 }}>hi</AppText>,
     );

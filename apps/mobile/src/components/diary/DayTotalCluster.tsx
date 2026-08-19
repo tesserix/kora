@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { View } from "react-native";
+import { View, useWindowDimensions } from "react-native";
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { AppText } from "@/components/Text";
 import { BezelCluster, WellFooter } from "@/components/instrument/BezelCluster";
@@ -24,13 +24,31 @@ export const WATER_QUICK_ADDS: Record<UnitSystem, readonly WaterQuickAdd[]> = {
   ],
 };
 
-type WaterPillProps = { label: string; a11yLabel: string; disabled: boolean; onPress: () => void };
+type WaterPillProps = {
+  label: string;
+  a11yLabel: string;
+  disabled: boolean;
+  stacked: boolean;
+  onPress: () => void;
+};
+
+// Above this text scale the two pills no longer fit side by side and the row
+// stacks (kora#173). Chosen against the label they have to hold: at the 1.6
+// ceiling below, "+250 ml" needs roughly 110pt, and a half-width pill in this
+// footer only offers ~85pt. 1.3 is the first Dynamic Type step where that gap
+// opens, and it is a THRESHOLD not a cap — the type keeps growing past it, the
+// pills just stop competing for the same line.
+const STACK_FONT_SCALE = 1.3;
+
+// The established ceiling for primary controls in this app (FloatingTabBar,
+// GaugeDial, WeekRail, ModePill all use 1.6).
+const PILL_MAX_FONT_MULTIPLIER = 1.6;
 
 // The WellFooter's recessed inset pill (spec Step 3: "restyled as inset
 // pills") — same instrument.inset fill + glassBorder ring the well itself is
 // carved from, so the buttons read as part of the recess rather than sitting
 // on top of it.
-function WaterPill({ label, a11yLabel, disabled, onPress }: WaterPillProps) {
+function WaterPill({ label, a11yLabel, disabled, stacked, onPress }: WaterPillProps) {
   const { instrument } = useTheme();
   return (
     <PressableScale
@@ -41,7 +59,10 @@ function WaterPill({ label, a11yLabel, disabled, onPress }: WaterPillProps) {
       disabled={disabled}
       onPress={onPress}
       style={{
-        flex: 1,
+        // Stacked, each pill already spans the row's full width (the column's
+        // default align-items: stretch); flex: 1 there would instead divide a
+        // height nothing has asked for.
+        ...(stacked ? null : { flex: 1 }),
         alignItems: "center",
         justifyContent: "center",
         paddingVertical: 13,
@@ -52,7 +73,20 @@ function WaterPill({ label, a11yLabel, disabled, onPress }: WaterPillProps) {
         opacity: disabled ? 0.5 : 1,
       }}
     >
-      <AppText style={{ color: instrument.ink, fontWeight: "700" }}>{label}</AppText>
+      {/* numberOfLines={1} is the hard guarantee, not a nicety: wrapped, this
+          label breaks mid-number and the control MISSTATES ITS OWN QUANTITY —
+          at accessibility-extra-large "+250 ml" read as "+25" / "0 ml" while
+          still adding 250 (kora#173). The cap and the stacking above are what
+          keep the one line legible rather than merely atomic; nothing here is
+          allowed to shrink the glyphs, so a quantity that still cannot fit
+          would truncate visibly instead of lying quietly. */}
+      <AppText
+        numberOfLines={1}
+        maxFontSizeMultiplier={PILL_MAX_FONT_MULTIPLIER}
+        style={{ color: instrument.ink, fontWeight: "700" }}
+      >
+        {label}
+      </AppText>
     </PressableScale>
   );
 }
@@ -128,6 +162,11 @@ export function DayTotalCluster({
 }: DayTotalClusterProps) {
   const { instrument, fonts } = useTheme();
   const mono = monoStyle(fonts);
+  // useWindowDimensions, not PixelRatio.getFontScale(): the former is reactive,
+  // so the footer relays out when the user changes their text size and returns
+  // to a still-mounted app (same reason AppleSignInButton uses it).
+  const { fontScale } = useWindowDimensions();
+  const stacked = fontScale > STACK_FONT_SCALE;
 
   return (
     <View>
@@ -151,17 +190,32 @@ export function DayTotalCluster({
         <WellFooter>
           <View>
             <AppText maxFontSizeMultiplier={1.4} style={{ fontSize: 11, color: instrument.mut }}>Water</AppText>
-            <AppText style={[{ fontSize: 15, fontWeight: "600", color: instrument.ink, marginTop: 2 }, mono]}>
+            {/* The sibling readout the pills sit beside, and a quantity for the
+                same reason they are: "0.0 L" wrapping to "0.0" / "L" would put
+                a bare unit on its own line under a bare number. */}
+            <AppText
+              numberOfLines={1}
+              maxFontSizeMultiplier={PILL_MAX_FONT_MULTIPLIER}
+              style={[{ fontSize: 15, fontWeight: "600", color: instrument.ink, marginTop: 2 }, mono]}
+            >
               {waterLabel}
             </AppText>
           </View>
-          <View style={{ flexDirection: "row", gap: 8, flex: 1, marginLeft: 16 }}>
+          <View
+            style={{
+              flexDirection: stacked ? "column" : "row",
+              gap: 8,
+              flex: 1,
+              marginLeft: 16,
+            }}
+          >
             {waterQuickAdds.map((qa) => (
               <WaterPill
                 key={qa.ml}
                 label={qa.label}
                 a11yLabel={qa.a11yLabel}
                 disabled={addWaterDisabled}
+                stacked={stacked}
                 onPress={() => onAddWater(qa.ml)}
               />
             ))}

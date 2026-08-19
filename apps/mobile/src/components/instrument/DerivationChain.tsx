@@ -39,10 +39,23 @@ export function DerivationChain({ rows, testID = "derivation-chain" }: Derivatio
               borderBottomColor: instrument.hairline,
             }}
           >
-            <AppText variant="footnote" muted>
+            {/* The label is the compressible half of this row: it is prose,
+                so wrapping it costs nothing, while the value is a number and
+                a mid-number break would make the row misstate itself (see
+                the water pill in kora#173/#260). Without these, neither side
+                shrinks and "Activity-adjusted / 2507 kcal" runs off the right
+                edge at accessibility sizes. */}
+            <AppText variant="footnote" muted style={{ flexShrink: 1 }}>
               {row.label}
             </AppText>
-            <View style={{ flexDirection: "row", alignItems: "baseline", gap: spacing.xs }}>
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "baseline",
+                gap: spacing.xs,
+                flexShrink: 0,
+              }}
+            >
               {hasProposal ? (
                 <AppText
                   testID={`${testID}-row-${i}-was`}
