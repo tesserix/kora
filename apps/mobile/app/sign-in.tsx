@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { KeyboardAvoidingView, View } from "react-native";
+import { KeyboardAvoidingView, useWindowDimensions, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import {
   createUserWithEmailAndPassword,
@@ -40,6 +40,35 @@ type Mode = "in" | "up";
 // every device, which is a design change rather than a fix.
 const SIGN_IN_TOP_GAP_MAX = 248;
 
+// Above this font scale the hero gives up its decorative half (kora#173).
+//
+// At accessibility-extra-large only Apple and Google were visible on first
+// paint; "Continue with email" needed a scroll. Reachable, so this was
+// discoverability rather than a blocker — but this is the screen a user lands
+// on when they CANNOT get in, and the one control that does not depend on a
+// third-party sheet is the one that fell off it.
+//
+// Measured on device (iPhone 17 Pro Max): at that size the email button needs
+// roughly 126pt more than the viewport has. The subtitle is two lines, ~96pt
+// plus the scaffold's 16pt gap, and the collapsible spacer above the buttons
+// still holds a 32pt floor — ~144pt, which is enough, and neither is
+// load-bearing: the subtitle restates the title, and the spacer exists to place
+// the cluster rather than to say anything. Verified after the change: all three
+// controls above the fold on first paint with ~40pt to spare.
+//
+// The brand lockup deliberately STAYS. It was the obvious next thing to drop
+// and it turned out not to be needed, and it is the only thing on the screen
+// that says which app is asking for the credentials.
+//
+// Deliberately NOT capping the title's type. Shrinking the headline to fit is
+// the wrong trade on a sign-in screen — the point of Dynamic Type is that the
+// words get bigger, and this screen has decorative height to spend first.
+//
+// 1.5 is the boundary between iOS's largest non-accessibility size (xxxL,
+// ~1.35) and its smallest accessibility one (AX1, ~1.64), so the layout every
+// non-accessibility user sees is untouched.
+const HERO_COLLAPSE_FONT_SCALE = 1.5;
+
 export default function SignIn() {
   // The `!isFirebaseConfigured` guard USED to sit here, above every hook below
   // — a conditional-hooks violation (#159). It never crashed, because
@@ -51,6 +80,11 @@ export default function SignIn() {
   // build, and app/_layout.tsx redirects to /config-missing before this screen
   // mounts anyway. Pinned by sign-in-unconfigured.test.tsx.
   const { colors, spacing } = useTheme();
+  // useWindowDimensions, not PixelRatio.getFontScale(): the former is reactive,
+  // so the screen relays out when the user changes their text size and returns
+  // to a still-mounted app (kora#260's pattern).
+  const { fontScale } = useWindowDimensions();
+  const compactHero = fontScale > HERO_COLLAPSE_FONT_SCALE;
   // Set by api.ts's forced sign-out (a 401 that survived a token refresh)
   // via the redirect (tabs)/_layout.tsx makes when the session becomes
   // unusable — not present on a manual sign-out.
@@ -192,14 +226,16 @@ export default function SignIn() {
         }
       >
         <BrandLockup />
-        <AppText variant="title1" style={{ marginTop: spacing.sm }}>
+        <AppText variant="title1" style={{ marginTop: compactHero ? 0 : spacing.sm }}>
           {mode === "in" ? "Welcome back." : "Start with Kora."}
         </AppText>
-        <AppText muted>
-          {mode === "in"
-            ? "Sign in to pick up where you left off."
-            : "Create an account and log your first meal in seconds."}
-        </AppText>
+        {compactHero ? null : (
+          <AppText muted>
+            {mode === "in"
+              ? "Sign in to pick up where you left off."
+              : "Create an account and log your first meal in seconds."}
+          </AppText>
+        )}
 
         {/* Collapsible: the email reveal grows downward, so the lockup stays
             top-anchored and this spacer shrinks instead of the lockup jumping
@@ -216,7 +252,17 @@ export default function SignIn() {
             at on the smaller device, so that layout is unchanged and larger
             screens stop inflating it; what is left flows to the spacer below
             the buttons, lifting the cluster rather than stretching the void. */}
-        <View style={{ flex: 1, minHeight: spacing.xl, maxHeight: SIGN_IN_TOP_GAP_MAX }} />
+        <View
+          style={{
+            flex: 1,
+            // The floor goes with the rest of the decorative height at
+            // accessibility sizes — a 32pt void above the buttons is exactly
+            // the kind of room this screen has no business keeping when the
+            // third button is off the bottom of it.
+            minHeight: compactHero ? 0 : spacing.xl,
+            maxHeight: SIGN_IN_TOP_GAP_MAX,
+          }}
+        />
 
         {/* flexShrink: 0 is load-bearing (kora#173). The scaffold's ScrollView
             sets contentContainerStyle.flexGrow = 1, and the spacers around this
