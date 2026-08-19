@@ -1,0 +1,163 @@
+name: iOS Release
+
+# The build-and-ship flow we were running by hand, moved onto CI: an
+# `eas build --local` on a macOS runner, then `eas submit` of that exact
+# artifact to TestFlight.
+#
+# `--local` is deliberate, not a fallback. Hosted EAS builds are quota-limited
+# on the Free plan (and failed hosted builds burn quota too), while local
+# builds never appear in `eas build:list` and consume no build minutes.
+# GitHub-hosted macOS runners are free for public repos, so this is a straight
+# swap for the laptop, not a trade.
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: EAS build profile
+        type: choice
+        options: [production, preview]
+        default: production
+      submit:
+        description: Submit to TestFlight when the build succeeds
+        type: boolean
+        default: true
+  push:
+    tags: ["v*"]
+
+# Never run two of these at once. `appVersionSource: "remote"` +
+# `autoIncrement` means both would ask Expo for a build number, and the loser
+# ships a binary whose build number is already taken.
+concurrency:
+  group: ios-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    # macos-26 is the arm64 GA image. It ships Xcode 26.x, CocoaPods and
+    # fastlane preinstalled — exactly the three prerequisites `eas build
+    # --local` has for iOS.
+    runs-on: macos-26
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: apps/mobile
+    env:
+      # A tag push is always a production ship. workflow_dispatch can override.
+      PROFILE: ${{ github.event_name == 'workflow_dispatch' && inputs.profile || 'production' }}
+      SUBMIT: ${{ github.event_name != 'workflow_dispatch' || inputs.submit }}
+      # Lifted to job env because the `secrets` context is not available in a
+      # step-level `if:`, but `env` is.
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_API_KEY_P8_BASE64: ${{ secrets.ASC_API_KEY_P8_BASE64 }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned rather than left on the image default (26.6). 26.5 is the Xcode
+      # that produced the last known-good local build; an image bump should not
+      # be able to change the toolchain under us silently.
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "26.5"
+
+      # eas.json's `node` field is ignored by local builds ("no software
+      # version customization"), so the runner's Node *is* the build's Node.
+      # 22.19.0 is what eas.json pins for hosted builds, and it bundles npm
+      # 10.9.x — the version package-lock.json is generated against. A lockfile
+      # written by local npm 11 makes npm 10.9 fail with "Missing: X from lock
+      # file", so keeping CI on 10.9.x is also what catches that drift.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.19.0"
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+
+      # apps/mobile/.env sets EXPO_PUBLIC_API_URL=http://localhost:8080 and is
+      # gitignored, so a clean checkout must not have one. If it ever appears
+      # here (committed by accident, restored from a cache) the failure is
+      # silent and severe: a TestFlight build pointing at localhost. The
+      # production URL lives only in eas.json's `env` block.
+      - name: Assert no .env leaked into the checkout
+        run: test ! -f .env || { echo "::error::apps/mobile/.env is present in CI — it would point the build at localhost"; exit 1; }
+
+      - run: npm ci
+
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          packager: npm
+          # Required even for local builds: appVersionSource "remote" +
+          # autoIncrement fetch the build number from Expo, and signing
+          # credentials are downloaded from EAS servers.
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      # Optional. EAS capability sync (APP_GROUPS / HEALTHKIT) talks to the
+      # Apple developer portal, and an interactive Apple sign-in is impossible
+      # here. Setting all three of these makes eas-cli authenticate with an App
+      # Store Connect API key instead. Leave the secrets unset to skip — but
+      # set all three or none: eas-cli's hasAscEnvVars() treats any one of them
+      # as "use API key auth" and then fails on the missing rest.
+      # Do NOT reach for EXPO_NO_CAPABILITY_SYNC=1 instead; it produces
+      # provisioning profiles missing the capabilities.
+      - name: Configure App Store Connect API key
+        if: ${{ env.ASC_KEY_ID != '' }}
+        run: |
+          key_path="${RUNNER_TEMP}/asc-api-key.p8"
+          printf '%s' "$ASC_API_KEY_P8_BASE64" | base64 --decode > "$key_path"
+          chmod 600 "$key_path"
+          {
+            echo "EXPO_ASC_API_KEY_PATH=${key_path}"
+            echo "EXPO_ASC_KEY_ID=${ASC_KEY_ID}"
+            echo "EXPO_ASC_ISSUER_ID=${ASC_ISSUER_ID}"
+          } >> "$GITHUB_ENV"
+
+      # SENTRY_AUTH_TOKEN is a *secret*-visibility EAS environment variable,
+      # and local builds do not support secret-visibility variables. So it has
+      # to arrive from the workflow env or the Sentry step silently skips the
+      # source-map upload and every production crash comes back minified —
+      # kora#104's exact failure mode. Fail loudly instead.
+      # Never set SENTRY_URL: org auth tokens embed their own region.
+      - name: Build (local)
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        run: |
+          if [ "$PROFILE" = "production" ] && [ -z "$SENTRY_AUTH_TOKEN" ]; then
+            echo "::error::SENTRY_AUTH_TOKEN is unset — a production build would ship without source maps"
+            exit 1
+          fi
+          eas build \
+            --platform ios \
+            --profile "$PROFILE" \
+            --local \
+            --non-interactive \
+            --output "$RUNNER_TEMP/kora.ipa"
+
+      # --path, never --latest. Local builds do not appear in `eas build:list`,
+      # so --latest would silently submit a stale *cloud* build instead of the
+      # artifact this run just produced.
+      #
+      # App Store Connect auth for submit does NOT come from the EXPO_ASC_*
+      # variables above — eas-cli only reads those for developer-portal work.
+      # Submit uses the eas.json `ascApiKeyPath`/`ascApiKeyId`/`ascApiKeyIssuerId`
+      # triple if all three are set, and otherwise the API key stored on EAS
+      # servers, which is the path our manual submits already used.
+      #
+      # Only the production profile has a submit profile in eas.json.
+      - name: Submit to TestFlight
+        if: ${{ env.SUBMIT == 'true' && env.PROFILE == 'production' }}
+        run: |
+          eas submit \
+            --platform ios \
+            --profile production \
+            --path "$RUNNER_TEMP/kora.ipa" \
+            --non-interactive
+
+      # Deliberately no artifact upload. This repository is public, and Actions
+      # artifacts on a public repo are downloadable by anyone — that covers the
+      # .ipa and any xcodebuild log directory, which secret masking does not
+      # reach the way it reaches step output.
