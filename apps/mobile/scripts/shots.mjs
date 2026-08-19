@@ -25,9 +25,21 @@
  *   --relaunch-each-repeat Relaunch the app between repeats instead of
  *                          re-capturing within one launch. The two modes have
  *                          different noise characteristics; measure both.
- *   --settle <ms>          Wait after navigating before the shutter
- *                          (default 2500). Routes may override, see
- *                          shots.routes.mjs.
+ *   --settle <ms>          EXTRA dwell after a route reports ready, for
+ *                          animation only (default 3000). This is no longer
+ *                          what decides when to shoot — see the readiness
+ *                          gate below. Routes may override.
+ *   --ready-timeout <ms>   How long to wait for a route to become ready
+ *                          before failing it (default 25000).
+ *   --poll-interval <ms>   Accessibility-tree poll period (default 750).
+ *   --no-ready-gate        Shoot on the timer alone, as this harness did
+ *                          before kora#257 Stage B. Produces images you
+ *                          cannot trust; for debugging the gate itself.
+ *   --strict-render        Also fail the run when a capture contains a
+ *                          RENDER_ERRORS marker (a stale dev client's
+ *                          "Unimplemented component" LogBox, typically).
+ *   --idb <path>           idb binary (default: $KORA_IDB, else `idb` on
+ *                          PATH, else ~/Library/Python/3.9/bin/idb).
  *   --boot-wait <ms>       Wait after launching the app (default 35000).
  *                          The dev client has to fetch and evaluate a bundle.
  *   --routes <a,b,c>       Only capture these route names.
@@ -35,6 +47,32 @@
  *   --no-launch            Do not terminate/relaunch the app at all.
  *   --allow-any-device     Bypass the iPhone 17 Pro Max requirement. Read the
  *                          note next to DEVICE_REQUIREMENT before you use it.
+ *
+ * PRECONDITION — A PINNED CLOCK. Home renders a greeting and a date from the
+ * device clock, so an unpinned run cannot be byte-stable across a lunch break.
+ * Start Metro with the pin set, because EXPO_PUBLIC_* values are inlined into
+ * the bundle by Metro, not read by this script:
+ *
+ *   EXPO_PUBLIC_SHOTS_CLOCK=2026-08-19T09:41:00 \
+ *   EXPO_PUBLIC_API_URL=https://kora-api.tesserix.app \
+ *   npx expo start --dev-client --port 8083
+ *
+ * The value is echoed into the manifest as `shotsClock` from THIS process's
+ * environment, so export it here too and the two agree. See
+ * src/lib/shotsClock.ts for why it can never be live in a release build.
+ *
+ * THE READINESS GATE (kora#257 Stage B). The shutter does not fire on a timer.
+ * After navigating, the harness polls `idb ui describe-all` until the route's
+ * declared `ready` text is on screen and no "Loading…"/"Retry"/"Couldn't"
+ * marker is, then shoots. A route that never becomes ready is captured to
+ * `<name>.not-ready.png`, marked `ready: false` in the manifest, and FAILS the
+ * run with a non-zero exit.
+ *
+ * That last part is the point. #272 found that every large across-launch
+ * difference was a picture of a different screen — a fixed timer expiring
+ * mid-fetch — and no pixel tolerance can absorb a 250/255 delta over half the
+ * frame. A capture that fails honestly is worth far more than one that
+ * silently records the wrong screen. See shots.routes.mjs for the selectors.
  *
  * PRECONDITION — AUTHENTICATION. Most routes need a signed-in app. This script
  * does NOT script sign-up: doing so is slow and unreliable (idb's text entry
@@ -51,7 +89,7 @@ import { promisify } from "node:util";
 import { mkdir, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { routes as ALL_ROUTES } from "./shots.routes.mjs";
+import { routes as ALL_ROUTES, NOT_READY, RENDER_ERRORS } from "./shots.routes.mjs";
 
 const execFileAsync = promisify(execFile);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -72,12 +110,39 @@ const DEVICE_REQUIREMENT = "iPhone 17 Pro Max";
 
 const DEFAULTS = {
   contentSize: "medium",
-  settle: 2500,
+  // Extra dwell AFTER the readiness gate opens, never a substitute for it.
+  //
+  // The gate answers "is the content there?", which on an animated screen is
+  // true a long time before the pixels stop moving. Measured: with the gate
+  // open and settle at 250ms, `tab-today` differed across launches by 1.005%
+  // of the frame — WORSE than the 0.801% #272 recorded with its old 4000ms
+  // timer. At 3000ms it drops to 0.113%. The gate had done its job; the
+  // shutter was simply firing mid-animation.
+  //
+  // 3000 comes from the longest one-shot entrance in the app:
+  // SpecularSweep is withDelay(500, withTiming(..., 1600)) = 2100ms from
+  // mount (src/components/instrument/SpecularSweep.tsx), plus margin. Every
+  // entrance here is one-shot, so a dwell genuinely ends the motion — there
+  // is no looping animation to chase.
+  //
+  // Global rather than per-route on purpose: a new animated screen should be
+  // stable by default rather than noisy until someone notices.
+  settle: 3000,
+  readyTimeout: 25_000,
+  pollInterval: 750,
   bootWait: 35_000,
   repeat: 1,
   port: 8081,
   scheme: BUNDLE_ID,
 };
+
+/**
+ * The status-bar clock is the one piece of on-screen time simctl CAN pin, and
+ * an un-pinned one changes every minute in the top-left of all 14 frames.
+ * 9:41 is Apple's own convention. The app's own clock is a separate problem
+ * with a separate fix — see src/lib/shotsClock.ts.
+ */
+const STATUS_BAR_TIME = "9:41";
 
 // ---------------------------------------------------------------------------
 // argv
@@ -92,6 +157,9 @@ function parseArgs(argv) {
     launch: true,
     relaunchEachRepeat: false,
     allowAnyDevice: false,
+    readyGate: true,
+    strictRender: false,
+    idb: process.env.KORA_IDB ?? null,
   };
 
   const takeValue = (i, flag) => {
@@ -118,6 +186,11 @@ function parseArgs(argv) {
       case "--port": opts.port = int(takeValue(i, flag), flag); i += 1; break;
       case "--repeat": opts.repeat = Math.max(1, int(takeValue(i, flag), flag)); i += 1; break;
       case "--settle": opts.settle = int(takeValue(i, flag), flag); i += 1; break;
+      case "--ready-timeout": opts.readyTimeout = int(takeValue(i, flag), flag); i += 1; break;
+      case "--poll-interval": opts.pollInterval = Math.max(50, int(takeValue(i, flag), flag)); i += 1; break;
+      case "--idb": opts.idb = takeValue(i, flag); i += 1; break;
+      case "--no-ready-gate": opts.readyGate = false; break;
+      case "--strict-render": opts.strictRender = true; break;
       case "--boot-wait": opts.bootWait = int(takeValue(i, flag), flag); i += 1; break;
       case "--routes": opts.routes = takeValue(i, flag).split(",").map((s) => s.trim()).filter(Boolean); i += 1; break;
       case "--relaunch-each-repeat": opts.relaunchEachRepeat = true; break;
@@ -206,13 +279,68 @@ async function setContentSize(udid, size) {
 }
 
 /**
+ * Pin the status bar. Without this the clock in the top-left of every frame
+ * advances between passes, which is a real (if small) across-launch diff on
+ * all 14 routes at once. The override survives relaunches but not a device
+ * erase, so it is re-applied every run rather than assumed.
+ */
+async function pinStatusBar(udid) {
+  await simctl([
+    "status_bar", udid, "override",
+    "--time", STATUS_BAR_TIME,
+    "--dataNetwork", "wifi",
+    "--wifiMode", "active",
+    "--wifiBars", "3",
+    "--cellularMode", "active",
+    "--cellularBars", "4",
+    "--batteryState", "charged",
+    "--batteryLevel", "100",
+  ]);
+}
+
+/**
  * Terminate and relaunch through the dev client. Launching by URL rather than
  * `simctl launch` is what points the dev client at a specific Metro; a plain
  * launch reuses whatever bundle URL it last had.
  */
+/**
+ * Turn off expo-dev-menu's floating action button.
+ *
+ * The draggable gear sits in a window ABOVE app content — it overlaps the
+ * notification bell on tab-today and the settings affordance on every stack
+ * screen — and its position lives in UserDefaults, so it moves between
+ * sessions and machines. #272 correctly refused to mask it: a fixed mask would
+ * also hide the real UI underneath, and a moving one cannot be derived from
+ * the image at all.
+ *
+ * It does not need a rebuild or a release build either. expo-dev-menu reads
+ * `EXDevMenuShowFloatingActionButton` straight out of UserDefaults
+ * (node_modules/expo-dev-menu/ios/Modules/DevMenuPreferences.swift), so
+ * writing it false on the simulator is enough. Verified: the `gearshape.fill`
+ * node disappears from the accessibility tree entirely.
+ *
+ * Must run while the app is NOT running — iOS flushes an app's defaults on
+ * termination and would clobber the write. Hence its position here, after
+ * terminate and before the launch URL.
+ *
+ * SIDE EFFECT worth knowing: this is a persistent per-simulator preference, so
+ * after any run the gear stays gone for interactive development too. The dev
+ * menu itself is unaffected (shake, or Cmd+D). To get the button back:
+ *
+ *   xcrun simctl spawn <udid> defaults write com.tesserix.kora \
+ *     EXDevMenuShowFloatingActionButton -bool YES
+ */
+async function disableDevMenuFab(udid) {
+  await simctl(
+    ["spawn", udid, "defaults", "write", BUNDLE_ID, "EXDevMenuShowFloatingActionButton", "-bool", "NO"],
+    { allowFailure: true },
+  );
+}
+
 async function launchApp(udid, port) {
   await simctl(["terminate", udid, BUNDLE_ID], { allowFailure: true });
   await sleep(1500);
+  await disableDevMenuFab(udid);
   const metro = encodeURIComponent(`http://localhost:${port}`);
   await simctl(["openurl", udid, `${BUNDLE_ID}://expo-development-client/?url=${metro}`]);
 }
@@ -224,6 +352,148 @@ async function navigate(udid, scheme, routePath) {
 
 async function screenshot(udid, file) {
   await simctl(["io", udid, "screenshot", file]);
+}
+
+// ---------------------------------------------------------------------------
+// readiness gate — the accessibility tree decides when to shoot
+// ---------------------------------------------------------------------------
+
+/**
+ * idb ships as a Python console script and is routinely NOT on PATH (Homebrew
+ * puts it in ~/Library/Python/<v>/bin). Resolve it once and say so clearly if
+ * it is missing, rather than failing 14 times with ENOENT.
+ */
+async function resolveIdb(explicit) {
+  const candidates = [
+    explicit,
+    "idb",
+    path.join(process.env.HOME ?? "", "Library/Python/3.9/bin/idb"),
+    "/opt/homebrew/bin/idb",
+    "/usr/local/bin/idb",
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    try {
+      await execFileAsync(candidate, ["--help"], { maxBuffer: 4 * 1024 * 1024 });
+      return candidate;
+    } catch {
+      /* try the next one */
+    }
+  }
+  throw new Error(
+    "idb not found, and the readiness gate needs it to read the accessibility " +
+      "tree. Install it (pip3 install fb-idb) and pass --idb <path> or set " +
+      "KORA_IDB, or run with --no-ready-gate to fall back to timer-only " +
+      "capture — but then do not trust the images.",
+  );
+}
+
+/**
+ * The whole accessibility tree as a flat list of visible strings.
+ *
+ * idb's companion process goes stale and the FIRST describe-all after an app
+ * launch frequently comes back as a JSON decode error or empty output. It
+ * recovers on its own; retrying is the documented workaround and is cheaper
+ * than restarting the companion. Do not remove this loop — without it roughly
+ * one route per launch fails for a reason that has nothing to do with the app.
+ */
+async function describeAll(idbBin, udid, { attempts = 4 } = {}) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const { stdout } = await execFileAsync(idbBin, ["ui", "describe-all", "--udid", udid], {
+        maxBuffer: 64 * 1024 * 1024,
+      });
+      const parsed = JSON.parse(stdout);
+      if (!Array.isArray(parsed)) throw new Error("describe-all did not return an array");
+      return parsed;
+    } catch (err) {
+      lastError = err;
+      await sleep(700 * attempt);
+    }
+  }
+  throw new Error(
+    `idb ui describe-all failed ${attempts}x: ${lastError?.stderr || lastError?.message}`,
+  );
+}
+
+/** Every AXLabel/AXValue/title on screen, as one lowercase-preserving list. */
+function visibleText(tree) {
+  const out = [];
+  for (const node of tree) {
+    for (const key of ["AXLabel", "AXValue", "title", "help"]) {
+      const value = node?.[key];
+      if (typeof value === "string" && value.length > 0) out.push(value);
+    }
+  }
+  return out;
+}
+
+const hasText = (texts, needle) => texts.some((t) => t.includes(needle));
+
+/**
+ * Evaluate one route's readiness against a snapshot of the tree.
+ * Returns {ready, missing, blocked, renderErrors}.
+ */
+function evaluateReady(route, texts) {
+  const required = route.ready ?? [];
+  const anyOf = route.readyAny ?? null;
+  const allowed = new Set(route.allow ?? []);
+
+  const missing = required.filter((needle) => !hasText(texts, needle));
+  if (anyOf && anyOf.length > 0 && !anyOf.some((needle) => hasText(texts, needle))) {
+    missing.push(`any of [${anyOf.join(" | ")}]`);
+  }
+  const blocked = NOT_READY.filter((needle) => !allowed.has(needle) && hasText(texts, needle));
+  const renderErrors = RENDER_ERRORS.filter((needle) => hasText(texts, needle));
+
+  return { ready: missing.length === 0 && blocked.length === 0, missing, blocked, renderErrors };
+}
+
+/**
+ * Poll until the route is ready, or give up. Giving up is a first-class
+ * outcome: it returns {ready:false} with the reason, and the caller records the
+ * capture as untrustworthy and fails the run. It never shoots hopefully.
+ */
+async function waitForReady(idbBin, udid, route, { timeout, pollInterval }) {
+  if (!route.ready || route.ready.length === 0) {
+    return { ready: null, reason: "route declares no `ready` selector", polls: 0, waitedMs: 0, renderErrors: [] };
+  }
+
+  // `simctl openurl` returns as soon as the URL is handed to the app, before
+  // the router has swapped screens. Without this grace the first poll can read
+  // the OUTGOING route's tree — harmless while every route's selectors are
+  // distinct, but a silent way to shoot the wrong screen the day two routes
+  // share a section header.
+  const NAV_GRACE_MS = 500;
+  await sleep(NAV_GRACE_MS);
+
+  const startedAt = Date.now();
+  const deadline = startedAt + timeout;
+  let polls = 0;
+  let last = { missing: route.ready, blocked: [], renderErrors: [] };
+
+  for (;;) {
+    polls += 1;
+    const texts = visibleText(await describeAll(idbBin, udid));
+    last = evaluateReady(route, texts);
+    if (last.ready) {
+      return { ready: true, reason: null, polls, waitedMs: Date.now() - startedAt, renderErrors: last.renderErrors };
+    }
+    if (Date.now() >= deadline) {
+      const parts = [];
+      if (last.missing.length > 0) parts.push(`missing ${JSON.stringify(last.missing)}`);
+      if (last.blocked.length > 0) parts.push(`blocked by ${JSON.stringify(last.blocked)}`);
+      return {
+        ready: false,
+        reason: `not ready after ${timeout}ms — ${parts.join("; ") || "unknown"}`,
+        polls,
+        waitedMs: Date.now() - startedAt,
+        renderErrors: last.renderErrors,
+      };
+    }
+    await sleep(pollInterval);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -306,7 +576,14 @@ async function main() {
     `mode        ${opts.relaunchEachRepeat ? "relaunch between repeats" : "repeats within one launch"}`,
   );
 
+  const idbBin = opts.readyGate ? await resolveIdb(opts.idb) : null;
+  console.log(`readyGate   ${opts.readyGate ? `${idbBin} (timeout ${opts.readyTimeout}ms)` : "OFF — images are untrustworthy"}`);
+  console.log(
+    `clock       ${process.env.EXPO_PUBLIC_SHOTS_CLOCK ?? "NOT PINNED — greeting and date will drift between runs"}`,
+  );
+
   const contentSize = await setContentSize(device.udid, opts.contentSize);
+  await pinStatusBar(device.udid);
 
   const startedAt = new Date().toISOString();
   const shots = [];
@@ -329,11 +606,25 @@ async function main() {
 
     for (const route of selected) {
       const suffix = opts.repeat > 1 ? `.${String(pass).padStart(2, "0")}` : "";
-      const file = path.join(outDir, `${route.name}${suffix}.png`);
       const settle = route.settle ?? opts.settle;
 
       await navigate(device.udid, opts.scheme, route.path);
+
+      const gate = opts.readyGate
+        ? await waitForReady(idbBin, device.udid, route, {
+            timeout: opts.readyTimeout,
+            pollInterval: opts.pollInterval,
+          })
+        : { ready: null, reason: "readiness gate disabled", polls: 0, waitedMs: 0, renderErrors: [] };
+
+      // Extra dwell for entrance animation, once the content itself is there.
       await sleep(settle);
+
+      // A capture that did not pass the gate is still written — you cannot
+      // diagnose a timeout from a manifest line alone — but under a name no
+      // golden comparison will ever pick up, and it fails the run below.
+      const stem = gate.ready === false ? `${route.name}${suffix}.not-ready` : `${route.name}${suffix}`;
+      const file = path.join(outDir, `${stem}.png`);
       await screenshot(device.udid, file);
 
       const print = await fingerprint(file);
@@ -352,18 +643,34 @@ async function main() {
         settleMs: settle,
         capturedAt: new Date().toISOString(),
         landedOnSignIn,
+        ready: gate.ready,
+        readyReason: gate.reason,
+        readyWaitedMs: gate.waitedMs,
+        readyPolls: gate.polls,
+        renderErrors: gate.renderErrors,
         note: route.note ?? null,
       });
 
+      const status =
+        gate.ready === true
+          ? `ready in ${String(gate.waitedMs).padStart(5)}ms`
+          : gate.ready === false
+            ? "NOT READY"
+            : "no gate";
       console.log(
-        `  ${String(pass).padStart(2)} ${route.name.padEnd(14)} ${route.path.padEnd(14)}` +
+        `  ${String(pass).padStart(2)} ${route.name.padEnd(14)} ${route.path.padEnd(10)} ${status}` +
+          (gate.renderErrors.length > 0 ? " [render-error]" : "") +
           (landedOnSignIn ? " [sign-in wall]" : ""),
       );
+      if (gate.ready === false) console.log(`     ${gate.reason}`);
     }
   }
 
+  const notReady = shots.filter((s) => s.ready === false);
+  const withRenderErrors = shots.filter((s) => s.renderErrors.length > 0);
+
   const manifest = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     startedAt,
     finishedAt: new Date().toISOString(),
     device: { name: device.name, udid: device.udid, runtime: device.runtime },
@@ -372,6 +679,19 @@ async function main() {
     metroPort: opts.launch ? opts.port : null,
     repeat: opts.repeat,
     relaunchEachRepeat: opts.relaunchEachRepeat,
+    readyGate: opts.readyGate,
+    readyTimeoutMs: opts.readyTimeout,
+    statusBarTime: STATUS_BAR_TIME,
+    // Read from THIS process's environment. It is Metro that inlines the value
+    // into the bundle, so this is an assertion about how the run was invoked,
+    // not a readback from the app. Null here means date-bearing screens are
+    // not byte-stable across days.
+    shotsClock: process.env.EXPO_PUBLIC_SHOTS_CLOCK ?? null,
+    // Consumers (Stage C) must refuse to diff a run where this is non-empty:
+    // those files are pictures of a loading or error state, not of the screen.
+    notReady: notReady.map((s) => ({ route: s.route, pass: s.pass, reason: s.readyReason })),
+    // Present but not fatal by default — a build defect, not app state.
+    renderErrors: withRenderErrors.map((s) => ({ route: s.route, pass: s.pass, markers: s.renderErrors })),
     // A run where these are all true was captured signed out; the
     // auth-required images are pictures of the sign-in wall, not of the app.
     signedOut: shots.some((s) => s.landedOnSignIn === true),
@@ -384,6 +704,32 @@ async function main() {
     console.log(
       "NOTE: some routes landed on the sign-in wall. Sign in on the simulator by hand and re-run.",
     );
+  }
+
+  if (withRenderErrors.length > 0) {
+    const routes = [...new Set(withRenderErrors.map((s) => s.route))];
+    console.log(
+      `\nRENDER ERRORS in ${withRenderErrors.length} capture(s) across ${routes.length} route(s): ` +
+        `${routes.join(", ")}.\nThese images contain a LogBox overlay sitting on top of real UI — ` +
+        `a build defect, not app state. Rebuild the dev client (npx expo run:ios --device ` +
+        `"${DEVICE_REQUIREMENT}") before committing any golden.`,
+    );
+  }
+
+  // Fail loudly. The alternative — exiting 0 with a manifest nobody reads — is
+  // exactly how #272 ended up with a 0.000%-diff run in which all three passes
+  // showed "Couldn't load your profile".
+  if (notReady.length > 0) {
+    console.error(`\n${notReady.length} capture(s) NEVER BECAME READY:`);
+    for (const s of notReady) console.error(`  ${s.route} pass ${s.pass}: ${s.readyReason}`);
+    console.error(
+      "These are pictures of a loading or error state. Do not diff them, and do not " +
+        "raise --ready-timeout to make them go away without first looking at the .not-ready.png.",
+    );
+    process.exitCode = 1;
+  } else if (opts.strictRender && withRenderErrors.length > 0) {
+    console.error("\n--strict-render: failing because captures contain render errors.");
+    process.exitCode = 1;
   }
 }
 

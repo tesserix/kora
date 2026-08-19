@@ -10,11 +10,15 @@ import { mealSlotForHour } from "@/lib/mealSlot";
 import { formatPortion } from "@/units/portion";
 import { foodVisual } from "@/lib/foodVisual";
 import { hslToHex } from "@/lib/color";
+import { now, todayLocalDate } from "@/lib/shotsClock";
 
 // Same local-date convention as app/log.tsx so the ["memory", date] query is
 // cache-shared between Home and the Log screen.
+// Pinnable for the screenshot harness — the meal slot this strip picks is a
+// function of the hour, so an unpinned clock changes the whole section between
+// captures. See src/lib/shotsClock.ts.
 function today(): string {
-  return new Date().toLocaleDateString("en-CA");
+  return todayLocalDate();
 }
 
 // YourUsualStrip: a contextual "one-tap log" section on Home showing the user's
@@ -27,7 +31,7 @@ export function YourUsualStrip() {
   const { instrument } = useTheme();
   const memory = useMemory(today());
   const { logFood, logMeal } = useInstantLog();
-  const slot = mealSlotForHour(new Date().getHours());
+  const slot = mealSlotForHour(now().getHours());
   const rows = yourUsual(memory.data, slot);
 
   if (memory.isLoading || memory.isError || rows.length === 0) return null;
