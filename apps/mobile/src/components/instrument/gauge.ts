@@ -11,7 +11,11 @@ const CY = GAUGE_CENTER_Y;
 const R = 114;
 const START = -205;
 const END = 25;
-const TICKS = 40;
+// Exported so consumers deriving a per-tick fraction (GaugeDial's and PlanDial's
+// animated ticks both compute `index / TICKS` to find their lit threshold) share
+// this number instead of hardcoding it alongside the array it produces.
+export const GAUGE_TICKS = 40;
+const TICKS = GAUGE_TICKS;
 const MAJOR_EVERY = 5;
 
 export interface GaugeTick {
@@ -42,6 +46,11 @@ const toXY = (deg: number, rad: number): [number, number] => {
   return [CX + rad * Math.cos(a), CY + rad * Math.sin(a)];
 };
 
+// Only `.lit` depends on `fraction`; every other field (position, width, major,
+// red) is a function of the module constants above. Consumers that animate the
+// lit boundary on the UI thread (GaugeDial, and since kora#238 PlanDial) build
+// this ONCE with an arbitrary argument and ignore `.lit` — see
+// PlanDial.rebuild.test.tsx, which pins that invariant.
 export function buildGaugeTicks(fraction: number): GaugeTick[] {
   const out: GaugeTick[] = [];
   for (let i = 0; i <= TICKS; i++) {

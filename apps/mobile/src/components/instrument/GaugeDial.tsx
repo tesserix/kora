@@ -21,6 +21,7 @@ import {
   buildGaugeTicks,
   needleFor,
   scaleAnchor,
+  GAUGE_TICKS,
   GAUGE_VIEW_H,
   GAUGE_VIEW_W,
   GAUGE_CENTER_X,
@@ -70,7 +71,7 @@ interface AnimatedTickProps {
 }
 
 function AnimatedGaugeTick({ index, geom, fractionSV, instrument, testID }: AnimatedTickProps) {
-  const t = index / 40; // TICKS constant in gauge.ts — only used for the lit threshold below
+  const t = index / GAUGE_TICKS; // only used for the lit threshold below
   const animatedProps = useAnimatedProps(() => {
     "worklet";
     const lit = t <= fractionSV.value;
