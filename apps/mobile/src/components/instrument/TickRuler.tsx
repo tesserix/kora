@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Dimensions, View, type LayoutChangeEvent, type AccessibilityActionEvent } from "react-native";
+import {
+  Dimensions,
+  useWindowDimensions,
+  View,
+  type LayoutChangeEvent,
+  type AccessibilityActionEvent,
+} from "react-native";
 import { Gesture, GestureDetector, type PanGesture } from "react-native-gesture-handler";
 import Animated, {
   runOnJS,
@@ -107,6 +113,79 @@ const RUBBER_BAND_COEFFICIENT = 0.55;
 // scrolls nothing and the page reads as frozen.
 const ACTIVE_OFFSET_X = 10;
 const FAIL_OFFSET_Y = 15;
+
+// --- Dynamic Type for the SVG scale labels (kora#261) -----------------------
+//
+// `<SvgText>` sits outside Dynamic Type entirely: react-native-svg takes a raw
+// `fontSize` in SVG user units and never consults the system text size, so the
+// graduation numbers and the detent stop labels rendered pixel-identically at
+// `medium` and at `accessibility-extra-large` while every real <Text> around
+// them roughly tripled. They are scaled explicitly here instead.
+//
+// NOT moved out of SVG into RN <Text>: kora#245 deliberately collapsed the
+// graduations into two <Path> nodes because ten rulers mount at once in
+// onboarding, and per-label RN views would put that cost straight back.
+//
+// The caps are the geometry's, not a preference. Both scales are drawn on FIXED
+// point pitches — 10 * PX_PER_UNIT = 90pt between numeric labels, DETENT_PX =
+// 96pt between stop labels — and every label is centred on its own tick, so
+// nothing here can be made to reflow. Both numbers below were measured on
+// device (iPhone 17 Pro Max, 393pt wide), not estimated:
+//
+//   continuous — the binding constraint is the CONTAINER edge, not neighbour
+//     collision (neighbours have ~74pt of slack at 90pt pitch). A major tick
+//     can land exactly on the viewport edge — it does at height 170, where 150
+//     sits 16.5pt from the left edge — and its label is centred on it, so half
+//     of it hangs over the `overflow: "hidden"` boundary. Half of "150" is
+//     6.8pt at 9pt type, so it reaches the edge at ~2.4x. Probed by lifting the
+//     cap: at accessibility-extra-extra-extra-large (fontScale ~3.3 here) the
+//     end labels render as "50" and "19(". At 2.4 they are whole.
+//
+//   detented — the binding constraint IS neighbour collision. "Maintain" and
+//     "Build muscle" are the widest adjacent pair, ~48pt of combined half-width
+//     at 10pt type against a 96pt pitch, so they touch at ~2.0x. 1.6 leaves a
+//     measured ~19pt of clear space there and ~16pt on the tightest pace pair
+//     (two 10-character "0.25 kg/wk" strings), which is the margin that keeps
+//     the labels reading as separate stops rather than one smear.
+//
+// The two modes therefore get two different ceilings; they are different
+// geometry and a single shared number would have to be the smaller one.
+//
+// A cap is defensible here in a way it would not be for the value itself: the
+// ruler's READOUT ("30 years", "170 cm") is a real RN <Text> that already
+// scales correctly (kora#165, kora#173), so there is always an accessible
+// surface for the value. These labels are supplementary orientation.
+const CONTINUOUS_LABEL_FONT_SIZE = 9;
+const DETENT_LABEL_FONT_SIZE = 10;
+const CONTINUOUS_LABEL_SCALE_MAX = 2.4;
+const DETENT_LABEL_SCALE_MAX = 1.6;
+// Rough cap height as a fraction of font size. Used only to work out how much
+// vertical room a scaled continuous label needs above the ticks — an estimate
+// is the right tool because SVG gives no text metrics and the cost of being a
+// point or two generous is a point or two of extra height.
+const LABEL_CAP_RATIO = 0.75;
+
+/**
+ * The multiplier the SVG labels actually use: the system font scale, floored
+ * at 1 so a user who has SHRUNK their text never gets labels smaller than the
+ * design's own 9/10pt (they are already the smallest type in the app), and
+ * capped at whatever the caller's geometry can hold.
+ *
+ * Exported for the geometry tests, which pin the caps rather than re-deriving
+ * them.
+ */
+export function labelFontScale(fontScale: number, max: number): number {
+  return Math.min(Math.max(fontScale, 1), max);
+}
+
+/**
+ * Extra vertical room a scaled label needs above the ticks, in points. Zero at
+ * scale 1 — which is what keeps `medium` byte-identical — and grows with the
+ * part of the glyph that sits above the baseline.
+ */
+export function labelHeadroom(baseFontSize: number, scale: number): number {
+  return Math.ceil(baseFontSize * LABEL_CAP_RATIO * (scale - 1));
+}
 
 const clamp = (v: number, min: number, max: number): number => {
   "worklet";
@@ -370,6 +449,21 @@ function ContinuousRuler(props: ContinuousProps) {
   const { value, min, max, step, onChange, formatLabel, unit, accessibilityLabel } = props;
   const testID = props.testID ?? "tick-ruler";
   const [width, setWidth] = useState(FALLBACK_WIDTH);
+  // useWindowDimensions, not PixelRatio.getFontScale(): the former is reactive,
+  // so the scale relays out when the user changes their text size and returns
+  // to a still-mounted app (same reason AppleSignInButton and DayTotalCluster
+  // use it, kora#260).
+  const { fontScale } = useWindowDimensions();
+  const labelScale = labelFontScale(fontScale, CONTINUOUS_LABEL_SCALE_MAX);
+  const labelSize = CONTINUOUS_LABEL_FONT_SIZE * labelScale;
+  // The labels sit ABOVE the ticks, so a taller glyph runs off the top of the
+  // canvas rather than into the graduations. Everything below is therefore
+  // pushed DOWN by the headroom and the canvas grown to match — the tick
+  // geometry keeps its exact relationship to the baseline, it just starts
+  // lower. Zero at scale 1, so `medium` is untouched.
+  const headroom = labelHeadroom(CONTINUOUS_LABEL_FONT_SIZE, labelScale);
+  const svgHeight = HEIGHT + headroom;
+  const baseline = BASELINE + headroom;
 
   const onLayout = useCallback((e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width), []);
 
@@ -435,14 +529,14 @@ function ContinuousRuler(props: ContinuousProps) {
     for (let u = Math.ceil(min); u <= Math.floor(max); u++) {
       const x = pad + (u - min) * PX_PER_UNIT;
       if (u % 10 === 0) {
-        major += `M${x} ${BASELINE}L${x} ${BASELINE - 16}`;
+        major += `M${x} ${baseline}L${x} ${baseline - 16}`;
         out.push({ key: String(u), x, text: String(u) });
       } else {
-        minor += `M${x} ${BASELINE}L${x} ${BASELINE - 7}`;
+        minor += `M${x} ${baseline}L${x} ${baseline - 7}`;
       }
     }
     return { minorPath: minor, majorPath: major, labels: out };
-  }, [max, min, pad]);
+  }, [baseline, max, min, pad]);
 
   const scaleStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: mid - pad - (offset.value - min) * PX_PER_UNIT }],
@@ -475,7 +569,7 @@ function ContinuousRuler(props: ContinuousProps) {
         // `overflow: "hidden"` stays: it is there for the HORIZONTAL clip, and
         // the scale below is deliberately drawn `width` px wider than the
         // viewport on each side so the end labels are not cut in half.
-        style={{ minHeight: HEIGHT + READOUT_HEIGHT, width: "100%", overflow: "hidden" }}
+        style={{ minHeight: svgHeight + READOUT_HEIGHT, width: "100%", overflow: "hidden" }}
       >
         {/* kora#165: the value in plain sight. A real RN Text rather than an
             SVG one so it inherits the app's type scale and Dynamic Type, and
@@ -505,9 +599,9 @@ function ContinuousRuler(props: ContinuousProps) {
         >
           {formatReadout(value, formatLabel, unit)}
         </AppText>
-        <View style={{ height: HEIGHT }}>
-          <Animated.View style={[{ width: scaleWidth, height: HEIGHT }, scaleStyle]}>
-            <Svg width={scaleWidth} height={HEIGHT}>
+        <View style={{ height: svgHeight }}>
+          <Animated.View style={[{ width: scaleWidth, height: svgHeight }, scaleStyle]}>
+            <Svg width={scaleWidth} height={svgHeight}>
               <Path
                 testID={`${testID}-ticks-minor`}
                 d={minorPath}
@@ -523,10 +617,11 @@ function ContinuousRuler(props: ContinuousProps) {
               {labels.map((t) => (
                 <SvgText
                   key={`label-${t.key}`}
+                  testID={`${testID}-label-${t.key}`}
                   x={t.x}
-                  y={BASELINE - 22}
+                  y={baseline - 22}
                   fill={instrument.mut}
-                  fontSize={9}
+                  fontSize={labelSize}
                   textAnchor="middle"
                 >
                   {t.text}
@@ -538,16 +633,16 @@ function ContinuousRuler(props: ContinuousProps) {
               one thing that must NOT move with the scale. */}
           <Svg
             width="100%"
-            height={HEIGHT}
+            height={svgHeight}
             style={{ position: "absolute", left: 0, top: 0 }}
             pointerEvents="none"
           >
             <Line
               testID={`${testID}-index`}
               x1={mid}
-              y1={BASELINE + 4}
+              y1={baseline + 4}
               x2={mid}
-              y2={BASELINE - 24}
+              y2={baseline - 24}
               stroke={instrument.accent}
               strokeWidth={2}
             />
@@ -563,6 +658,13 @@ function DetentedRuler(props: DetentedProps) {
   const { index, labels, onChange, accessibilityLabel } = props;
   const testID = props.testID ?? "tick-ruler";
   const [width, setWidth] = useState(FALLBACK_WIDTH);
+  // Same reactive source as continuous mode above (kora#261). Unlike that
+  // mode this one needs no extra vertical room: the stop labels sit at
+  // BASELINE - 14 on a canvas 8pt taller than continuous mode's, so at the
+  // 1.6 cap the tallest glyph still starts ~10pt below the top edge and the
+  // descenders in "Lose weight"/"Sedentary" still clear the tick tops.
+  const { fontScale } = useWindowDimensions();
+  const labelSize = DETENT_LABEL_FONT_SIZE * labelFontScale(fontScale, DETENT_LABEL_SCALE_MAX);
 
   const onLayout = useCallback((e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width), []);
 
@@ -651,7 +753,7 @@ function DetentedRuler(props: DetentedProps) {
                 x={pad + i * DETENT_PX}
                 y={BASELINE - 14}
                 fill={i === index ? instrument.ink : instrument.mut}
-                fontSize={10}
+                fontSize={labelSize}
                 fontWeight={i === index ? "600" : "500"}
                 textAnchor="middle"
               >

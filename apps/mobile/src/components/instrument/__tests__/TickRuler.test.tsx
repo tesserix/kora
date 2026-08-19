@@ -4,6 +4,8 @@ import { impactAsync, selectionAsync } from "expo-haptics";
 import * as Reanimated from "react-native-reanimated";
 import {
   indexFromDrag,
+  labelFontScale,
+  labelHeadroom,
   projectMomentum,
   rubberBand,
   TickRuler,
@@ -635,5 +637,126 @@ describe("TickRuler gesture configuration (kora#176)", () => {
     const { config } = getByGestureTestId("activity-ruler-pan");
     expect(config.activeOffsetXStart).toBeLessThan(0);
     expect(config.failOffsetYEnd).toBeGreaterThan(0);
+  });
+});
+
+// kora#261. These labels are <SvgText>, which react-native-svg renders from a
+// raw numeric fontSize and never routes through Dynamic Type — so at
+// accessibility text sizes they rendered pixel-identically to `medium` while
+// every real <Text> around them roughly tripled. A green suite is what let that
+// ship, so these tests assert the rendered fontSize, not just the helpers.
+describe("TickRuler SVG label scaling (kora#261)", () => {
+  // require, not a top-level import: an ESM namespace object is sealed, so
+  // jest.spyOn cannot redefine a property on it.
+  // react-native-svg folds the text presentation props into a single `font`
+  // object on the rendered node, so fontSize sits one level in.
+  const fontSizeOf = (testID: string): number => screen.getByTestId(testID).props.font.fontSize;
+
+  function withFontScale(fontScale: number) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const rn = require("react-native");
+    return jest
+      .spyOn(rn, "useWindowDimensions")
+      .mockReturnValue({ width: 440, height: 956, scale: 3, fontScale });
+  }
+
+  describe("labelFontScale", () => {
+    it("passes a normal font scale straight through", () => {
+      expect(labelFontScale(1.35, 2.4)).toBeCloseTo(1.35);
+    });
+
+    // These are already the smallest type in the app; shrinking them further
+    // for a user who has REDUCED their text size makes the scale unreadable
+    // without making anything else fit.
+    it("never goes below 1, however small the user's text is", () => {
+      expect(labelFontScale(0.82, 2.4)).toBe(1);
+    });
+
+    it("stops at the caller's ceiling", () => {
+      expect(labelFontScale(3.3, 2.4)).toBe(2.4);
+      expect(labelFontScale(3.3, 1.6)).toBe(1.6);
+    });
+  });
+
+  describe("labelHeadroom", () => {
+    // Zero at scale 1 is what keeps `medium` byte-identical: every y in the
+    // continuous scale is derived from it.
+    it("asks for no extra room at the design's own size", () => {
+      expect(labelHeadroom(9, 1)).toBe(0);
+    });
+
+    it("grows with the part of the glyph that sits above the baseline", () => {
+      expect(labelHeadroom(9, 2.4)).toBeGreaterThan(0);
+      expect(labelHeadroom(9, 2.4)).toBeGreaterThan(labelHeadroom(9, 1.5));
+    });
+  });
+
+  it("scales the continuous graduation labels with the system font scale", async () => {
+    const spy = withFontScale(2);
+    try {
+      await render(<TickRuler {...base} value={84} onChange={jest.fn()} />);
+      // 40, 90 and 180 are the first, a middle and the last major graduation
+      // on this scale — all three scale, not just whichever renders first.
+      expect(fontSizeOf("weight-ruler-label-40")).toBe(18);
+      expect(fontSizeOf("weight-ruler-label-90")).toBe(18);
+      expect(fontSizeOf("weight-ruler-label-180")).toBe(18);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("caps the continuous labels where the end label would meet the clip edge", async () => {
+    const spy = withFontScale(3.3);
+    try {
+      await render(<TickRuler {...base} value={84} onChange={jest.fn()} />);
+      expect(fontSizeOf("weight-ruler-label-90")).toBeCloseTo(21.6);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  // The detent ruler has the tighter ceiling of the two: its stop labels are
+  // words, not two or three digits, and "Maintain"/"Build muscle" collide at
+  // roughly twice their design size on a 96pt pitch.
+  it("scales the detent stop labels but stops at the collision cap", async () => {
+    const spy = withFontScale(3.3);
+    try {
+      await render(
+        <TickRuler
+          mode="detented"
+          index={0}
+          labels={ACTIVITY}
+          accessibilityLabel="Activity level"
+          testID="activity-ruler"
+          onChange={jest.fn()}
+        />,
+      );
+      expect(fontSizeOf("activity-ruler-label-0")).toBeCloseTo(16);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("leaves both modes at their design size when text is not enlarged", async () => {
+    const spy = withFontScale(1);
+    try {
+      await render(
+        <>
+          <TickRuler {...base} value={84} onChange={jest.fn()} />
+          <TickRuler
+            mode="detented"
+            index={0}
+            labels={ACTIVITY}
+            accessibilityLabel="Activity level"
+            testID="activity-ruler"
+            onChange={jest.fn()}
+          />
+        </>,
+      );
+      expect(fontSizeOf("weight-ruler-label-90")).toBe(9);
+      expect(fontSizeOf("activity-ruler-label-0")).toBe(10);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

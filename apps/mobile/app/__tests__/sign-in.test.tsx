@@ -188,3 +188,47 @@ test("switching mode clears a stale error from the previous mode", async () => {
   });
   expect(ui.queryByText("Email or password is incorrect.")).toBeNull();
 });
+
+// kora#173. At accessibility text sizes only Apple and Google were visible on
+// first paint; "Continue with email" needed a scroll on the one screen a user
+// reaches when they cannot get in. The fix spends the hero's decorative height
+// instead of capping its type, so these two pin WHAT gives way and WHAT does
+// not — a future tidy-up that caps the title, or that drops the lockup, would
+// be a different (worse) trade than the one that was measured.
+//
+// The threshold itself is a device measurement; jest cannot observe platform
+// font scaling, so this drives useWindowDimensions directly.
+function withFontScale(fontScale: number) {
+  // require, not a top-level import: an ESM namespace object is sealed, so
+  // jest.spyOn cannot redefine a property on it.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const rn = require("react-native");
+  return jest
+    .spyOn(rn, "useWindowDimensions")
+    .mockReturnValue({ width: 440, height: 956, scale: 3, fontScale });
+}
+
+test("keeps the subtitle at ordinary text sizes", async () => {
+  const spy = withFontScale(1);
+  try {
+    const ui = await render(<SignIn />);
+    expect(ui.getByText("Sign in to pick up where you left off.")).toBeTruthy();
+  } finally {
+    spy.mockRestore();
+  }
+});
+
+test("drops the subtitle at accessibility text sizes, keeping title and lockup", async () => {
+  const spy = withFontScale(2.643);
+  try {
+    const ui = await render(<SignIn />);
+    expect(ui.queryByText("Sign in to pick up where you left off.")).toBeNull();
+    // The headline is NOT capped or shortened — it is the subtitle that goes.
+    expect(ui.getByText("Welcome back.")).toBeTruthy();
+    // And all three ways in are still on the screen.
+    expect(ui.getByLabelText("Continue with Apple")).toBeTruthy();
+    expect(ui.getByLabelText("Continue with email")).toBeTruthy();
+  } finally {
+    spy.mockRestore();
+  }
+});
