@@ -278,26 +278,27 @@ func TestExitCode(t *testing.T) {
 // and quietly takes a fortnight (kora#97).
 func TestChooseBackend(t *testing.T) {
 	tests := []struct {
-		name          string
-		vertexProject string
-		geminiAPIKey  string
-		want          embedBackend
+		name           string
+		gatewayEnabled bool
+		vertexProject  string
+		geminiAPIKey   string
+		want           embedBackend
 	}{
 		{name: "nothing configured", want: backendNone},
 		{name: "api key only falls back to gemini", geminiAPIKey: "key", want: backendGemini},
 		{name: "vertex only", vertexProject: "tesseracthub-480811", want: backendVertex},
+		{name: "gateway only", gatewayEnabled: true, want: backendGateway},
 		{
-			// The case that matters: production has BOTH, because the key is
-			// still in the environment. Vertex must win.
-			name:          "vertex wins when both are configured",
-			vertexProject: "tesseracthub-480811",
-			geminiAPIKey:  "key",
-			want:          backendVertex,
+			name:           "gateway wins over legacy direct credentials",
+			gatewayEnabled: true,
+			vertexProject:  "tesseracthub-480811",
+			geminiAPIKey:   "key",
+			want:           backendGateway,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, chooseBackend(tt.vertexProject, tt.geminiAPIKey))
+			assert.Equal(t, tt.want, chooseBackend(tt.gatewayEnabled, tt.vertexProject, tt.geminiAPIKey))
 		})
 	}
 }

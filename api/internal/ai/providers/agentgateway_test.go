@@ -1,7 +1,6 @@
 package providers
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,67 +8,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/tesserix/kora/api/internal/ai"
 )
 
-type recordingDirectProvider struct {
-	embedCalls      int
-	photoCalls      int
-	transcribeCalls int
-}
-
-func (*recordingDirectProvider) IdentifyText(context.Context, string) ([]ai.Guess, ai.Usage, error) {
-	panic("IdentifyText must use Agent Gateway")
-}
-
-func (p *recordingDirectProvider) IdentifyPhoto(context.Context, []byte, string) ([]ai.Guess, ai.Usage, error) {
-	p.photoCalls++
-	return []ai.Guess{{Food: "photo"}}, ai.Usage{Provider: "gemini"}, nil
-}
-
-func (*recordingDirectProvider) Decompose(context.Context, string) ([]ai.IngredientGuess, ai.Usage, error) {
-	panic("Decompose must use Agent Gateway")
-}
-
-func (p *recordingDirectProvider) Embed(context.Context, string) ([]float32, ai.Usage, error) {
-	p.embedCalls++
-	return []float32{1, 2, 3}, ai.Usage{Provider: "gemini", Model: "gemini-embedding-001"}, nil
-}
-
-func (p *recordingDirectProvider) Transcribe(context.Context, []byte, string) (string, ai.Usage, error) {
-	p.transcribeCalls++
-	return "spoken", ai.Usage{Provider: "gemini"}, nil
-}
-
-func (*recordingDirectProvider) GenerateText(context.Context, string, string) (string, ai.Usage, error) {
-	panic("GenerateText must use Agent Gateway")
-}
-
-func (*recordingDirectProvider) Name() string { return "gemini" }
-
-func TestAgentGatewayProviderKeepsEmbeddingAndMultimodalOnDirectVertex(t *testing.T) {
-	t.Parallel()
-
-	direct := &recordingDirectProvider{}
-	provider := NewAgentGatewayProvider(direct, "gateway-key", "https://gateway.invalid/v1", "kora-auto")
-
-	embedding, usage, err := provider.Embed(t.Context(), "apple")
-	require.NoError(t, err)
-	assert.Equal(t, []float32{1, 2, 3}, embedding)
-	assert.Equal(t, "gemini-embedding-001", usage.Model)
-
-	_, _, err = provider.IdentifyPhoto(t.Context(), []byte("image"), "image/jpeg")
-	require.NoError(t, err)
-	_, _, err = provider.Transcribe(t.Context(), []byte("audio"), "audio/m4a")
-	require.NoError(t, err)
-
-	assert.Equal(t, 1, direct.embedCalls)
-	assert.Equal(t, 1, direct.photoCalls)
-	assert.Equal(t, 1, direct.transcribeCalls)
-}
-
-func TestAgentGatewayProviderSendsServerOwnedClassificationHeaders(t *testing.T) {
+func TestAgentGatewayProviderRoutesEveryCapabilityThroughTheLogicalModel(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -77,6 +18,7 @@ func TestAgentGatewayProviderSendsServerOwnedClassificationHeaders(t *testing.T)
 		call       func(AgentGatewayProvider) error
 		capability string
 		kind       string
+		path       string
 		content    string
 	}{
 		{
@@ -87,6 +29,18 @@ func TestAgentGatewayProviderSendsServerOwnedClassificationHeaders(t *testing.T)
 			},
 			capability: "identify_text",
 			kind:       "json_api",
+			path:       "/v1/chat/completions",
+			content:    `{"guesses":[]}`,
+		},
+		{
+			name: "identify photo is multimodal JSON",
+			call: func(provider AgentGatewayProvider) error {
+				_, _, err := provider.IdentifyPhoto(t.Context(), []byte("image"), "image/jpeg")
+				return err
+			},
+			capability: "identify_photo",
+			kind:       "json_api",
+			path:       "/v1/chat/completions",
 			content:    `{"guesses":[]}`,
 		},
 		{
@@ -97,7 +51,29 @@ func TestAgentGatewayProviderSendsServerOwnedClassificationHeaders(t *testing.T)
 			},
 			capability: "decompose",
 			kind:       "json_api",
+			path:       "/v1/chat/completions",
 			content:    `{"ingredients":[]}`,
+		},
+		{
+			name: "embedding is derived data",
+			call: func(provider AgentGatewayProvider) error {
+				_, _, err := provider.Embed(t.Context(), "apple")
+				return err
+			},
+			capability: "embedding",
+			kind:       "embedding",
+			path:       "/v1/embeddings",
+		},
+		{
+			name: "transcription is multimodal audio",
+			call: func(provider AgentGatewayProvider) error {
+				_, _, err := provider.Transcribe(t.Context(), []byte("audio"), "audio/m4a")
+				return err
+			},
+			capability: "transcribe",
+			kind:       "audio",
+			path:       "/v1/chat/completions",
+			content:    "spoken words",
 		},
 		{
 			name: "coach is conversation",
@@ -107,6 +83,7 @@ func TestAgentGatewayProviderSendsServerOwnedClassificationHeaders(t *testing.T)
 			},
 			capability: "coach",
 			kind:       "conversation",
+			path:       "/v1/chat/completions",
 			content:    "answer",
 		},
 	}
@@ -116,9 +93,26 @@ func TestAgentGatewayProviderSendsServerOwnedClassificationHeaders(t *testing.T)
 			t.Parallel()
 
 			var gotHeader http.Header
+			var gotPath string
+			var gotModel string
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				gotHeader = r.Header.Clone()
+				gotPath = r.URL.Path
+				var requestBody map[string]any
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&requestBody))
+				gotModel, _ = requestBody["model"].(string)
 				w.Header().Set("Content-Type", "application/json")
+				if r.URL.Path == "/v1/embeddings" {
+					require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+						"object": "list",
+						"model":  "gemini-embedding-001",
+						"data": []map[string]any{{
+							"object": "embedding", "index": 0, "embedding": []float64{0.1, 0.2, 0.3},
+						}},
+						"usage": map[string]int{"prompt_tokens": 1, "total_tokens": 1},
+					}))
+					return
+				}
 				require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
 					"id":     "completion-1",
 					"object": "chat.completion",
@@ -132,14 +126,11 @@ func TestAgentGatewayProviderSendsServerOwnedClassificationHeaders(t *testing.T)
 			}))
 			t.Cleanup(server.Close)
 
-			provider := NewAgentGatewayProvider(
-				&recordingDirectProvider{},
-				"gateway-key",
-				server.URL+"/v1",
-				"kora-auto",
-			)
+			provider := NewAgentGatewayProvider("gateway-key", server.URL+"/v1", "kora-auto")
 			require.NoError(t, tt.call(provider))
 
+			assert.Equal(t, tt.path, gotPath)
+			assert.Equal(t, "kora-auto", gotModel)
 			assert.Equal(t, tt.capability, gotHeader.Get("X-Kora-Ai-Capability"))
 			assert.Equal(t, tt.kind, gotHeader.Get("X-Kora-Ai-Context-Kind"))
 			assert.Equal(t, "false", gotHeader.Get("X-Kora-Rtk-Applied"))

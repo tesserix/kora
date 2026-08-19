@@ -240,45 +240,25 @@ func (e providerEmbedder) Embed(ctx context.Context, text string) ([]float32, er
 	return vec, err
 }
 
-// ingestEmbedder builds the embedder wired into the nutrition repository for
-// ingest-time (barcode-scan) embeds.
-//
-// EMBEDDINGS DELIBERATELY STAY ON GEMINI. There is no fallback for them, and
-// this must NOT be handed the configured provider, which is an *ai.Router in
-// production. The parameter type is concrete precisely so that mistake cannot
-// compile.
-//
-// Three reasons, in order of severity:
-//
-//  1. There is nothing to fall back TO. providers.OpenAIProvider.Embed
-//     (internal/ai/providers/openai.go:225) never calls OpenAI at all — it
-//     returns "openai: embed: not supported" unconditionally, because two
-//     models' vectors are not comparable by cosine similarity just for sharing
-//     a length, and mixing vector spaces would poison the nutrition index.
-//  2. So a Router-backed embedder MASKS THE REAL ERROR. withFallback
-//     (internal/ai/router.go:118) returns the fallback's error, so the failure
-//     logged by nutrition's embedAsync would always read "openai: embed: not
-//     supported" — swallowing the actual Gemini error, including the 429 that
-//     the rest of this review wave exists to surface.
-//  3. Router.Embed bounds the primary leg to textBudget (1500ms,
-//     internal/ai/router.go:20), where embedAsync deliberately gives the call
-//     a 15s context of its own. Any ingest embed slower than 1.5s would be
-//     discarded.
-//
-// Pinned by TestIngestEmbedderStaysOnGemini.
-func ingestEmbedder(gemini providers.GeminiProvider) providerEmbedder {
-	return providerEmbedder{p: gemini}
+// aiProviders keeps request and embedding wiring explicit. In gateway mode
+// both are the same logical provider; legacy direct mode retains its existing
+// generation router and single-space Gemini embeddings.
+type aiProviders struct {
+	requests   ai.Provider
+	embeddings ai.Provider
 }
 
-func configuredProvider(cfg config.Config, gemini providers.GeminiProvider) ai.Provider {
-	if cfg.AIGatewayEnabled {
-		return providers.NewAgentGatewayProvider(
-			gemini,
-			cfg.AIGatewayAPIKey,
-			cfg.AIGatewayBaseURL,
-			cfg.AIGatewayModel,
-		)
-	}
+func gatewayProviders(cfg config.Config) aiProviders {
+	provider := providers.NewAgentGatewayProvider(
+		cfg.AIGatewayAPIKey,
+		cfg.AIGatewayBaseURL,
+		cfg.AIGatewayModel,
+	)
+	return aiProviders{requests: provider, embeddings: provider}
+}
+
+func directProviders(cfg config.Config, gemini providers.GeminiProvider) aiProviders {
+	var provider ai.Provider = gemini
 	if cfg.OpenAIAPIKey != "" {
 		fallback := providers.NewOpenAIProvider(
 			cfg.OpenAIAPIKey,
@@ -286,9 +266,9 @@ func configuredProvider(cfg config.Config, gemini providers.GeminiProvider) ai.P
 			cfg.OpenAIModel,
 			cfg.OpenAIJSONObject,
 		)
-		return &ai.Router{Primary: gemini, Fallback: fallback}
+		provider = &ai.Router{Primary: gemini, Fallback: fallback}
 	}
-	return gemini
+	return aiProviders{requests: provider, embeddings: gemini}
 }
 
 // buildResolveHandler composes the AI resolution engine from config. It
@@ -317,42 +297,42 @@ func configuredProvider(cfg config.Config, gemini providers.GeminiProvider) ai.P
 // were served the stale food for up to the cache's 24h TTL. The identity is
 // pinned by server.TestAdminMutationBumpsTheSameCacheInstanceWiredIntoDeps.
 func buildResolveHandler(ctx context.Context, cfg config.Config, db *gorm.DB, logger *slog.Logger) (*resolve.Handler, ai.Provider, ai.Cache) {
-	// Vertex wins when configured: it is authenticated by the workload's own
-	// service account, so unlike the API-key path it needs no secret present,
-	// and it escapes the free tier's shared demand pool and 1,000/day embedding
-	// cap (kora#97, kora#179). The API-key path stays for local development.
-	var (
-		gemini providers.GeminiProvider
-		err    error
-	)
-	switch {
-	case cfg.VertexProject != "":
-		gemini, err = providers.NewVertexProvider(ctx, cfg.VertexProject, cfg.VertexLocation)
-		if err != nil {
-			logger.Error("vertex provider init failed — resolve engine disabled", "err", err)
-			return nil, nil, nil
-		}
-		logger.Info("resolve engine: vertex ai", "project", cfg.VertexProject, "location", cfg.VertexLocation)
-	case cfg.GeminiAPIKey != "":
-		gemini, err = providers.NewGeminiProvider(ctx, cfg.GeminiAPIKey)
-		if err != nil {
-			logger.Error("gemini provider init failed — resolve engine disabled", "err", err)
-			return nil, nil, nil
-		}
-		logger.Info("resolve engine: gemini api key")
-	default:
-		logger.Info("resolve engine disabled (no VERTEX_PROJECT and no GEMINI_API_KEY)")
-		return nil, nil, nil
-	}
-
-	provider := configuredProvider(cfg, gemini)
+	var wiring aiProviders
 	if cfg.AIGatewayEnabled {
-		logger.Info("resolve engine: private agent gateway for text, vertex direct for embeddings and multimodal", "model", cfg.AIGatewayModel, "base_url", cfg.AIGatewayBaseURL)
-	} else if cfg.OpenAIAPIKey != "" {
-		logger.Info("resolve engine: gemini primary + openai-compatible fallback", "model", cfg.OpenAIModel, "base_url", cfg.OpenAIBaseURL)
+		wiring = gatewayProviders(cfg)
+		logger.Info("resolve engine: private agent gateway for all model capabilities", "model", cfg.AIGatewayModel, "base_url", cfg.AIGatewayBaseURL)
 	} else {
-		logger.Info("resolve engine: gemini only (no fallback key)")
+		var (
+			gemini providers.GeminiProvider
+			err    error
+		)
+		switch {
+		case cfg.VertexProject != "":
+			gemini, err = providers.NewVertexProvider(ctx, cfg.VertexProject, cfg.VertexLocation)
+			if err != nil {
+				logger.Error("vertex provider init failed — resolve engine disabled", "err", err)
+				return nil, nil, nil
+			}
+			logger.Info("resolve engine: vertex ai", "project", cfg.VertexProject, "location", cfg.VertexLocation)
+		case cfg.GeminiAPIKey != "":
+			gemini, err = providers.NewGeminiProvider(ctx, cfg.GeminiAPIKey)
+			if err != nil {
+				logger.Error("gemini provider init failed — resolve engine disabled", "err", err)
+				return nil, nil, nil
+			}
+			logger.Info("resolve engine: gemini api key")
+		default:
+			logger.Info("resolve engine disabled (AI gateway, VERTEX_PROJECT, and GEMINI_API_KEY are unset)")
+			return nil, nil, nil
+		}
+		wiring = directProviders(cfg, gemini)
+		if cfg.OpenAIAPIKey != "" {
+			logger.Info("resolve engine: gemini primary + openai-compatible fallback", "model", cfg.OpenAIModel, "base_url", cfg.OpenAIBaseURL)
+		} else {
+			logger.Info("resolve engine: gemini only (no fallback key)")
+		}
 	}
+	provider := wiring.requests
 
 	var cache ai.Cache = ai.NoCache{}
 	if opt, err := redis.ParseURL(cfg.RedisURL); err == nil {
@@ -366,8 +346,7 @@ func buildResolveHandler(ctx context.Context, cfg config.Config, db *gorm.DB, lo
 		}
 	}
 
-	// gemini, NOT provider: embeddings have no fallback — see ingestEmbedder.
-	foods := nutrition.NewRepository(db).WithEmbedder(ingestEmbedder(gemini))
+	foods := nutrition.NewRepository(db).WithEmbedder(providerEmbedder{p: wiring.embeddings})
 	meter := billing.NewMeter(db)
 	// WithPortionSource lets a personal-alias short-circuit in
 	// ai.Resolver.ResolveText inherit the portion from the user's last log of
