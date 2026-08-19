@@ -727,7 +727,17 @@ export function CaptureBody({
           borderTopColor: T.glassBorder,
         }}
       >
-        <View style={{ flexDirection: "row", gap: 8, marginBottom: 10 }}>
+        {/* flexWrap, because a clipped chip is a mode the user cannot reach.
+            The trimmed pill padding gets all four onto one line at `medium`
+            (395pt of 412), but Dynamic Type keeps growing past that: at
+            accessibility-extra-large the same four measured 520pt, and TYPE
+            started at x=419 on a 440pt screen — its tap centre off the display
+            entirely, the kora#276 failure mode. Wrapping spills the overflow
+            onto a second line where every chip stays whole and hittable, which
+            a horizontal scroll would not (it hides one by default). `gap: 8`
+            is both axes in RN, so the wrapped line gets its own 8pt of air.
+            Same mechanism DetectedCard already uses for these pills. */}
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
           {MODE_PILLS.map(({ mode: m, icon, label }) => (
             <ModePill key={m} icon={icon} label={label} active={mode === m} onPress={() => onModeChange(m)} />
           ))}

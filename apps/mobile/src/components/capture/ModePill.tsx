@@ -36,7 +36,18 @@ export function ModePill({ icon, label, active, onPress }: Props) {
         flexDirection: "row",
         alignItems: "center",
         gap: 7,
-        paddingHorizontal: 16,
+        // 12, not 16. Measured on iPhone 17 Pro Max (440pt) at `medium`, the
+        // four capture chips came to 427pt of natural width inside a 412pt
+        // padding box, so TYPE — the offline typed-capture entry point — hung
+        // 15pt past it and lost its right border off the 440pt screen edge
+        // entirely (kora#278). Trimming 4pt of padding a side takes 8pt off
+        // every pill, 32pt off the row, and lands it at 395pt with headroom.
+        // The label is untouched on purpose: 13pt at 1.4 tracking is the
+        // engraved instrument voice, and kora#263 established that squeezing a
+        // label to fit its box splits it mid-word ("kg" became "k"/"g").
+        // DetectedCard's meal-slot chips share this component and already wrap
+        // (flexWrap on their row), so narrower pills can only pack better there.
+        paddingHorizontal: 12,
         paddingVertical: 9,
         borderRadius: 9999,
         backgroundColor: active ? INSTRUMENT_DARK_FIXED.accent : INSTRUMENT_DARK_FIXED.glass,
