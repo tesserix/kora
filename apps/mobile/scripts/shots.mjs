@@ -48,6 +48,19 @@
  *   --allow-any-device     Bypass the iPhone 17 Pro Max requirement. Read the
  *                          note next to DEVICE_REQUIREMENT before you use it.
  *
+ * PRECONDITION — A PINNED CLOCK. Home renders a greeting and a date from the
+ * device clock, so an unpinned run cannot be byte-stable across a lunch break.
+ * Start Metro with the pin set, because EXPO_PUBLIC_* values are inlined into
+ * the bundle by Metro, not read by this script:
+ *
+ *   EXPO_PUBLIC_SHOTS_CLOCK=2026-08-19T09:41:00 \
+ *   EXPO_PUBLIC_API_URL=https://kora-api.tesserix.app \
+ *   npx expo start --dev-client --port 8083
+ *
+ * The value is echoed into the manifest as `shotsClock` from THIS process's
+ * environment, so export it here too and the two agree. See
+ * src/lib/shotsClock.ts for why it can never be live in a release build.
+ *
  * THE READINESS GATE (kora#257 Stage B). The shutter does not fire on a timer.
  * After navigating, the harness polls `idb ui describe-all` until the route's
  * declared `ready` text is on screen and no "Loading…"/"Retry"/"Couldn't"
@@ -516,6 +529,9 @@ async function main() {
 
   const idbBin = opts.readyGate ? await resolveIdb(opts.idb) : null;
   console.log(`readyGate   ${opts.readyGate ? `${idbBin} (timeout ${opts.readyTimeout}ms)` : "OFF — images are untrustworthy"}`);
+  console.log(
+    `clock       ${process.env.EXPO_PUBLIC_SHOTS_CLOCK ?? "NOT PINNED — greeting and date will drift between runs"}`,
+  );
 
   const contentSize = await setContentSize(device.udid, opts.contentSize);
   await pinStatusBar(device.udid);
@@ -617,6 +633,11 @@ async function main() {
     readyGate: opts.readyGate,
     readyTimeoutMs: opts.readyTimeout,
     statusBarTime: STATUS_BAR_TIME,
+    // Read from THIS process's environment. It is Metro that inlines the value
+    // into the bundle, so this is an assertion about how the run was invoked,
+    // not a readback from the app. Null here means date-bearing screens are
+    // not byte-stable across days.
+    shotsClock: process.env.EXPO_PUBLIC_SHOTS_CLOCK ?? null,
     // Consumers (Stage C) must refuse to diff a run where this is non-empty:
     // those files are pictures of a loading or error state, not of the screen.
     notReady: notReady.map((s) => ({ route: s.route, pass: s.pass, reason: s.readyReason })),

@@ -22,6 +22,7 @@ import type { WeightEntry } from "@/api/types";
 import { useHealth } from "@/health";
 import { AnimatedNumber, PressableScale, ScreenEntrance, useMotionPrefs } from "@/motion";
 import { useTheme } from "@/theme";
+import { todayLocalDate } from "@/lib/shotsClock";
 import { formatWeight, lbFromKg, useUnits, weightUnitLabel } from "@/units";
 
 const RANGES = ["1W", "1M", "3M", "1Y"] as const;
@@ -36,8 +37,10 @@ const RANGE_OPTIONS = RANGES.map((r) => ({ key: r, label: r }));
 const ENERGY_TARGET_FRACTION = 0.74;
 const SLEEP_TARGET_HOURS = 7;
 
+// Pinnable for the screenshot harness; identical to `new Date()` everywhere
+// else. See src/lib/shotsClock.ts.
 function today(): string {
-  return new Date().toLocaleDateString("en-CA");
+  return todayLocalDate();
 }
 const shortDate = (isoStr: string) => new Date(isoStr).toLocaleDateString([], { month: "short", day: "numeric" });
 const weightFormat = (n: number) => n.toFixed(1);

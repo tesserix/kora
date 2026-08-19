@@ -24,6 +24,7 @@ import { useProfile, useDashboard, useDayLogs, useUnreadCount, useCoachNudges } 
 import { useHealth } from "@/health";
 import { useTheme } from "@/theme";
 import { accessibleMealLabel } from "@/lib/portionAssumedLabel";
+import { now, todayLocalDate } from "@/lib/shotsClock";
 import type { FoodLog } from "@/api/types";
 import type { ReactNode } from "react";
 
@@ -36,15 +37,18 @@ interface TelemetryCell {
   label: string;
 }
 
+// These three read the clock through `now()` rather than `new Date()` so the
+// screenshot harness can pin them (src/lib/shotsClock.ts). Outside a dev build
+// with EXPO_PUBLIC_SHOTS_CLOCK set, `now()` IS `new Date()`.
 function today(): string {
-  return new Date().toLocaleDateString("en-CA");
+  return todayLocalDate();
 }
 function greeting(): string {
-  const h = new Date().getHours();
+  const h = now().getHours();
   return h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
 }
 function dateLabel(): string {
-  return new Date().toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+  return now().toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
 }
 function initials(name?: string): string {
   if (!name) return "K";
