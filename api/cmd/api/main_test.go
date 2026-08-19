@@ -46,46 +46,36 @@ func (s stubProvider) GenerateText(context.Context, string, string) (string, ai.
 
 func (s stubProvider) Name() string { return "stub" }
 
-// TestIngestEmbedderStaysOnGemini pins the wiring: the ingest-time embedder
-// must wrap the raw Gemini provider, never the configured provider (an
-// *ai.Router in production, since the OpenAI-compatible fallback key is set).
-//
-// A previous round wired this to the Router on the false premise that
-// embeddings inherit the text path's Gemini→OpenAI fallback. They do not:
-// providers.OpenAIProvider.Embed never calls OpenAI and always errors, so the
-// Router leg can only ever make things worse. ingestEmbedder's parameter type
-// makes the mistake a compile error; this test states the intent in words so
-// the constraint is not silently loosened to ai.Provider later.
-func TestIngestEmbedderStaysOnGemini(t *testing.T) {
-	e := ingestEmbedder(providers.GeminiProvider{})
-
-	_, isRouter := e.p.(*ai.Router)
-	assert.False(t, isRouter, "ingest embeds must not go through ai.Router: it has no embedding fallback, only error-masking and a 1.5s budget")
-	assert.IsType(t, providers.GeminiProvider{}, e.p, "ingest embeds must go straight to Gemini")
-}
-
-func TestConfiguredProviderUsesGatewayOnlyWhenFeatureFlagEnabled(t *testing.T) {
+func TestGatewayWiringUsesTheGatewayForRequestsAndEmbeddings(t *testing.T) {
 	t.Parallel()
 
-	gemini := providers.GeminiProvider{}
-
-	gateway := configuredProvider(config.Config{
+	wiring := gatewayProviders(config.Config{
 		AIGatewayEnabled: true,
 		AIGatewayBaseURL: "http://agentgateway.kora.svc.cluster.local/v1",
 		AIGatewayAPIKey:  "internal-key",
 		AIGatewayModel:   "kora-auto",
-	}, gemini)
-	assert.IsType(t, providers.AgentGatewayProvider{}, gateway)
+	})
 
-	fallback := configuredProvider(config.Config{
+	assert.IsType(t, providers.AgentGatewayProvider{}, wiring.requests)
+	assert.IsType(t, providers.AgentGatewayProvider{}, wiring.embeddings)
+}
+
+func TestDirectWiringKeepsEmbeddingsOnGemini(t *testing.T) {
+	t.Parallel()
+
+	gemini := providers.GeminiProvider{}
+
+	fallback := directProviders(config.Config{
 		OpenAIAPIKey:  "fallback-key",
 		OpenAIBaseURL: "https://fallback.invalid/v1",
 		OpenAIModel:   "fallback-model",
 	}, gemini)
-	assert.IsType(t, &ai.Router{}, fallback)
+	assert.IsType(t, &ai.Router{}, fallback.requests)
+	assert.IsType(t, providers.GeminiProvider{}, fallback.embeddings)
 
-	direct := configuredProvider(config.Config{}, gemini)
-	assert.IsType(t, providers.GeminiProvider{}, direct)
+	direct := directProviders(config.Config{}, gemini)
+	assert.IsType(t, providers.GeminiProvider{}, direct.requests)
+	assert.IsType(t, providers.GeminiProvider{}, direct.embeddings)
 }
 
 // TestRouterBackedEmbedderMasksTheRealError is the observable difference that

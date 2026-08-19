@@ -2,11 +2,11 @@
 // resolver's embedding tier (Resolve's MatchEmbedding path) has vectors to
 // search.
 //
-// It needs an embedding backend, and picks one exactly the way cmd/api's
-// buildResolveHandler does: VERTEX_PROJECT (with optional VERTEX_LOCATION)
-// wins, GEMINI_API_KEY is the fallback. With neither it logs and exits 0
-// rather than crashing, since the rest of the engine builds/tests without
-// keys.
+// Agent Gateway is the preferred backend and receives only Kora's logical
+// model. Vertex and Gemini remain available solely for explicitly disabled
+// legacy/local gateway mode. With no configured backend the command logs and
+// exits 0 rather than crashing, since the rest of the engine builds/tests
+// without credentials.
 package main
 
 import (
@@ -109,6 +109,7 @@ type embedBackend int
 const (
 	// backendNone means nothing is configured — the run is skipped.
 	backendNone embedBackend = iota
+	backendGateway
 	backendVertex
 	backendGemini
 )
@@ -128,8 +129,10 @@ const (
 //
 // The API-key path stays for local development, where there is no Workload
 // Identity to authenticate against.
-func chooseBackend(vertexProject, geminiAPIKey string) embedBackend {
+func chooseBackend(gatewayEnabled bool, vertexProject, geminiAPIKey string) embedBackend {
 	switch {
+	case gatewayEnabled:
+		return backendGateway
 	case vertexProject != "":
 		return backendVertex
 	case geminiAPIKey != "":
@@ -150,7 +153,14 @@ func main() {
 	if vertexLocation == "" {
 		vertexLocation = defaultVertexLocation
 	}
-	apiKey := os.Getenv("GEMINI_API_KEY")
+	geminiAPIKey := os.Getenv("GEMINI_API_KEY")
+	gatewayEnabled := os.Getenv("AI_GATEWAY_ENABLED") == "true"
+	gatewayAPIKey := os.Getenv("AI_GATEWAY_API_KEY")
+	gatewayBaseURL := os.Getenv("AI_GATEWAY_BASE_URL")
+	gatewayModel := os.Getenv("AI_GATEWAY_MODEL")
+	if gatewayModel == "" {
+		gatewayModel = "kora-auto"
+	}
 
 	// An unconfigured environment SKIPS AND EXITS 0, even though the rest of
 	// this command now treats stopping early as a failure. The two are not the
@@ -163,10 +173,13 @@ func main() {
 	// environments permanently on a condition that is correct for them, which
 	// is exactly the kind of always-on alarm that trained everyone to ignore
 	// this Job in the first place.
-	backend := chooseBackend(vertexProject, apiKey)
+	backend := chooseBackend(gatewayEnabled, vertexProject, geminiAPIKey)
 	if backend == backendNone {
-		log.Println("cmd/embed: no embedding backend (no VERTEX_PROJECT and no GEMINI_API_KEY); skipping")
+		log.Println("cmd/embed: no embedding backend (AI gateway, VERTEX_PROJECT, and GEMINI_API_KEY are unset); skipping")
 		os.Exit(0)
+	}
+	if backend == backendGateway && (gatewayAPIKey == "" || gatewayBaseURL == "") {
+		log.Fatal("cmd/embed: AI_GATEWAY_API_KEY and AI_GATEWAY_BASE_URL are required when AI_GATEWAY_ENABLED=true")
 	}
 
 	ctx := context.Background()
@@ -177,8 +190,11 @@ func main() {
 	}
 	repo := nutrition.NewRepository(db)
 
-	var provider providers.GeminiProvider
+	var provider embedder
 	switch backend {
+	case backendGateway:
+		provider = providers.NewAgentGatewayProvider(gatewayAPIKey, gatewayBaseURL, gatewayModel)
+		log.Printf("cmd/embed: private agent gateway model=%s base_url=%s", gatewayModel, gatewayBaseURL)
 	case backendVertex:
 		provider, err = providers.NewVertexProvider(ctx, vertexProject, vertexLocation)
 		if err != nil {
@@ -186,7 +202,7 @@ func main() {
 		}
 		log.Printf("cmd/embed: vertex ai project=%s location=%s", vertexProject, vertexLocation)
 	case backendGemini:
-		provider, err = providers.NewGeminiProvider(ctx, apiKey)
+		provider, err = providers.NewGeminiProvider(ctx, geminiAPIKey)
 		if err != nil {
 			log.Fatal(err)
 		}
