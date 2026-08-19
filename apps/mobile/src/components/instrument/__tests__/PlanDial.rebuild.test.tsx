@@ -1,17 +1,18 @@
 import { render } from "@testing-library/react-native";
+import { buildGaugeTicks } from "../gauge";
+import { PlanDial } from "../PlanDial";
 
 // kora#238: the claim under test is a JS-side render-count fact — "PlanDial
 // rebuilds its whole gauge SVG on every reported ruler change" — so the
 // instrument is a spy on the geometry builder, not a screenshot. `buildGaugeTicks`
 // is wrapped rather than replaced so the dial still renders real geometry and
-// the rest of the suite's visual assertions keep their meaning.
+// the rest of the suite's visual assertions keep their meaning. babel-plugin-jest-hoist
+// lifts this above the imports above, which is why the spy is in place before
+// PlanDial's module body runs (it builds its geometry once, at module load).
 jest.mock("../gauge", () => {
   const actual = jest.requireActual("../gauge");
   return { ...actual, buildGaugeTicks: jest.fn(actual.buildGaugeTicks) };
 });
-
-import { buildGaugeTicks } from "../gauge";
-import { PlanDial } from "../PlanDial";
 
 const buildSpy = buildGaugeTicks as jest.MockedFunction<typeof buildGaugeTicks>;
 
@@ -34,6 +35,8 @@ test("does not rebuild the tick geometry when the target changes", async () => {
     await r.rerender(<PlanDial kcal={1800 + i * 9} testID="plan-dial" />);
   }
 
+  // Measured on main before the fix: 21 (one per render). After: 0 — the array
+  // is built once at module load, before this spy's mockClear.
   expect(buildSpy.mock.calls.length).toBe(afterFirstPaint);
 });
 
@@ -54,8 +57,6 @@ test("keeps the same tick nodes across a run of target changes", async () => {
 
 // Guard on the fix itself: the geometry is shared, so nothing may mutate it.
 test("the geometry it renders is not fraction-dependent", () => {
-  const a = buildSpy.mock.results;
-  void a;
   const lowest = jest.requireActual("../gauge").buildGaugeTicks(0);
   const highest = jest.requireActual("../gauge").buildGaugeTicks(1);
   lowest.forEach((t: { x1: number; y1: number; x2: number; y2: number; width: number }, i: number) => {
