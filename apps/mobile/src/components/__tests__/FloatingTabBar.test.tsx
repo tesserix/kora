@@ -151,11 +151,15 @@ test("the active icon is tinted ink while inactive icons stay mut", async () => 
 });
 
 // A11y gate (spec: touch targets >= 44pt). The well must not have shrunk the
-// tap area to its own painted bounds.
-test("keeps every tab's touch target at 52pt", async () => {
+// tap area to its own painted bounds. minWidth, not width (kora#173): the box
+// has to be free to grow with a Dynamic Type label, or it constrains the
+// label's measurement to 52 and "TRENDS" wraps and clips. 52 is the floor and
+// the painted size, not a ceiling.
+test("keeps every tab's touch target at least 52pt, free to grow", async () => {
   const { getByLabelText } = await render(<FloatingTabBar {...props} />);
   const flat = flattenStyle(getByLabelText("Today").props.style);
-  expect(flat.width).toBe(52);
+  expect(flat.minWidth).toBe(52);
+  expect(flat.width).toBeUndefined();
   expect(flat.height).toBe(52);
 });
 
@@ -201,9 +205,12 @@ test("the Reduce Transparency fallback pill grows too", async () => {
   jest.restoreAllMocks();
 });
 
-test("caps the 9px tab label's Dynamic Type growth", async () => {
+test("caps the 9px tab label's Dynamic Type growth and keeps it on one line", async () => {
   const { getByText } = await render(<FloatingTabBar {...props} />);
-  for (const label of ["Today", "Diary"]) {
-    expect(getByText(label).props.maxFontSizeMultiplier).toBe(1.6);
+  // 1.2, not the app-wide 1.6: at 1.6 the longest label ("Trends") needs more
+  // width than the 52pt slot has, so it wrapped and clipped mid-word (kora#173).
+  for (const label of ["Today", "Diary", "Trends", "More"]) {
+    expect(getByText(label).props.maxFontSizeMultiplier).toBe(1.2);
+    expect(getByText(label).props.numberOfLines).toBe(1);
   }
 });
