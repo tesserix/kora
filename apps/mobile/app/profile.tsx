@@ -106,10 +106,31 @@ export default function ProfileScreen() {
                 </View>
               </View>
 
-              <View style={{ flexDirection: "row", alignItems: "baseline", gap: spacing.xs, marginBottom: spacing.md }}>
+              {/* flexWrap, not flexShrink: with nothing given, neither side
+                  yields and "kcal / day" is clipped by the screen edge at
+                  accessibility sizes; with flexShrink on the unit the box
+                  narrows below the word and the unit breaks MID-WORD instead
+                  (measured: "k / g" on the weight card below). Wrapping moves
+                  the unit to its own line whole, and the numeral -- the
+                  reading -- never splits. Unchanged at medium, where both
+                  still fit one line. (kora#173) */}
+              <View
+                style={{
+                  flexDirection: "row",
+                  flexWrap: "wrap",
+                  alignItems: "baseline",
+                  gap: spacing.xs,
+                  marginBottom: spacing.md,
+                }}
+              >
                 {/* Explicit lineHeight: large mono numerals clip their ascent
                     without it (same class as the GaugeDial center-numeral bug). */}
-                <AppText style={[{ fontSize: 40, lineHeight: 46, fontWeight: "700", color: instrument.ink }, mono]}>
+                <AppText
+                  style={[
+                    { fontSize: 40, lineHeight: 46, fontWeight: "700", color: instrument.ink },
+                    mono,
+                  ]}
+                >
                   {data ? Math.round(data.target_kcal) : "—"}
                 </AppText>
                 <AppText style={{ fontSize: 13, color: instrument.mut }}>kcal / day</AppText>
@@ -141,7 +162,13 @@ export default function ProfileScreen() {
           <View style={{ flexDirection: "row", gap: spacing.lg }}>
             <GlassPanel radius={22} style={{ flex: 1, padding: spacing.md, minHeight: 84, justifyContent: "center" }}>
               <AppText style={duoLabel}>Weight</AppText>
-              <View style={{ flexDirection: "row", alignItems: "baseline", gap: spacing.xs }}>
+              {/* Same treatment as the energy readout above; here the edge
+                  that clips is the card's, not the screen's. flexShrink on
+                  the unit was measured breaking "kg" into "k" / "g" -- a
+                  two-letter unit has no break point worth taking, so the row
+                  wraps instead and the unit drops to its own line whole
+                  (kora#173). */}
+              <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "baseline", gap: spacing.xs }}>
                 <AppText style={[{ fontSize: 24, fontWeight: "700", color: instrument.ink }, mono]}>
                   {fw ? fw.value : "—"}
                 </AppText>

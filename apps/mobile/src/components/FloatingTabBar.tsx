@@ -38,6 +38,9 @@ const CAMERA_RAISE = 16;
 const TAB_SIZE = 52;
 // Vertical breathing room between the icon and the always-on label below it.
 const ICON_LABEL_GAP = 4;
+// Dynamic Type ceiling for the tab label — see the Text below for the
+// arithmetic that picked it over the app's usual 1.6.
+const TAB_LABEL_MAX_FONT_MULTIPLIER = 1.2;
 
 // Dock v2 (spec 2026-08-16 "Panel architecture" + "dock v2"): the bar's own
 // rim gradient, inlined rather than reused from BezelCluster — different
@@ -104,7 +107,21 @@ function TabButton({ meta, active, showBadge, reduceMotion, onPress }: TabButton
       accessibilityState={{ selected: active }}
       haptic="selection"
       onPress={handlePress}
-      style={{ width: TAB_SIZE, height: TAB_SIZE, alignItems: "center", justifyContent: "center" }}
+      // minWidth, not width: 52 is the size of the PAINTED box (the icon and
+      // the sliding well that tracks it), not the space available — each tab
+      // sits in a flex:1 slot roughly 63-76pt wide depending on device. Pinning
+      // the button to 52 constrained the label's measurement to 52 too, which
+      // is what wrapped "TRENDS" to "TREN/DS" and let the pill clip it
+      // (kora#173). Growing here costs nothing: the well is positioned from the
+      // slot and a fixed TAB_SIZE (see handleSlotLayout), so it does not follow
+      // this box, and at `medium` every label is narrower than 52 so the
+      // rendering is byte-identical.
+      style={{
+        minWidth: TAB_SIZE,
+        height: TAB_SIZE,
+        alignItems: "center",
+        justifyContent: "center",
+      }}
     >
       <Animated.View testID="tab-icon" style={[{ marginBottom: ICON_LABEL_GAP }, iconStyle]}>
         <Icon name={meta.icon} size={22} color={active ? instrument.ink : instrument.mut} strokeWidth={active ? 2.5 : 2} />
@@ -115,11 +132,20 @@ function TabButton({ meta, active, showBadge, reduceMotion, onPress }: TabButton
           `ink` at 700. Always rendered (dock v2) — the label is no longer
           the active tab's exclusive tell, the sliding well is. */}
       <Text
-        // The one place capping Dynamic Type is legitimate: a five-letter tab
-        // label inside a fixed-width 52pt slot, backed up by an icon that
-        // carries the same meaning. 1.6 keeps it legible (~14pt) without
-        // letting a 310% setting push the pill to twice its height.
-        maxFontSizeMultiplier={1.6}
+        // Capping Dynamic Type is legitimate here — a six-letter label backed
+        // by an icon carrying the same meaning, in a dock that must not grow
+        // to twice its height at a 310% setting. But the old 1.6 ceiling did
+        // not honour its own reasoning: MEASURED at accessibility-extra-large,
+        // "TRENDS" wrapped to "TREN/DS" and the pill clipped it (kora#173).
+        // 1.2 (9pt -> 10.8pt) is what the widest label actually fits in: at
+        // 1.2 with the button free to grow (above) "TRENDS" measures ~55pt,
+        // inside the ~63-76pt slot; at 1.6 it needs ~62pt and crowds its
+        // neighbours on a 375pt-wide device. numberOfLines is the hard
+        // guarantee behind the cap — a mid-word break misreads the label, so
+        // anything that still cannot fit truncates visibly instead of
+        // splitting. Verified on the simulator at both text sizes.
+        maxFontSizeMultiplier={TAB_LABEL_MAX_FONT_MULTIPLIER}
+        numberOfLines={1}
         style={{
           fontSize: 9,
           textTransform: "uppercase",
