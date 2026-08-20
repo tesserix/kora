@@ -176,10 +176,52 @@ jest.mock("react-native-reanimated", () => {
       if (!ref.current) ref.current = { value: init };
       return ref.current;
     },
+    // ─── KNOWN BLIND SPOT — animated transforms are invisible to this suite ───
+    //
+    // The factory below is evaluated ONCE, at render. Nothing re-drives it when a
+    // shared value changes, because a faithful mock would need a real UI-runtime
+    // driver. So under Jest:
+    //
+    //   - `transform: [{ translateX: offset.value }]` is a snapshot of the INITIAL
+    //     offset, forever
+    //   - a drag that mutates `offset.value` moves nothing
+    //   - anything whose correctness lives in the TRANSLATION cannot be asserted
+    //
+    // This is not a defect to fix here; it is a limit to know about. The reason it
+    // is written at the mock rather than in a doc is that the test count gives no
+    // hint of it, and the cost of not knowing has already been paid once:
+    //
+    // kora#176 rewrote TickRuler to draw the scale once and translate it. The first
+    // implementation drew from local x = 0, so the SVG clipped everything at
+    // negative local x — "Lose weight" rendered on screen as "veight", and every
+    // continuous ruler halved its min/max label. It passed **1,729 tests**, tsc and
+    // lint clean, and was caught by a screenshot that happened to be part of that
+    // task rather than by design (kora#257).
+    //
+    // Affected surfaces are the ones the app leans on hardest: TickRuler, Sheet,
+    // PressableScale, GaugeDial, PlanDial, AnimatedNumber, CircularProgress.
+    //
+    // WHAT TO DO INSTEAD. Two things this suite genuinely can do, and one it cannot:
+    //
+    //   1. Assert the factory's OUTPUT. Call the updater with a known shared-value
+    //      state and assert the resulting transform/props. Covers the arithmetic.
+    //   2. Extract the geometry into a pure function and pin it there — the pattern
+    //      TickRuler (`labelFontScale`, `edgeFadeStop`) and gauge.ts
+    //      (`instrumentScale`, `overlayBudget`) already follow. Everything derived
+    //      is then testable without a runtime.
+    //   3. It CANNOT tell you what the screen looks like. Jest performs no layout,
+    //      so "is it clipped", "is it above the fold", "does it overlap" are not
+    //      questions any test here answers, however many are green. Those belong to
+    //      the screenshot harness: `npm run shots` then `npm run shots:compare`
+    //      (scripts/shots.mjs, golden set in shots-golden/).
+    //
+    // src/motion/__tests__/gestureWorkletBoundary.test.ts is the sibling guard for
+    // worklet-boundary crashes, which are invisible here for the same reason.
     useAnimatedStyle: (factory) => factory(),
     // Eagerly evaluates the worklet updater to a plain props object, mirroring
     // useAnimatedStyle above. Paired with the createAnimatedComponent change so the
     // resulting values land as real props (numbers) on the rendered host element.
+    // Carries the same blind spot — see the note above.
     useAnimatedProps: (factory) => factory(),
     useAnimatedReaction: NOOP,
     // react-native-gesture-handler's GestureDetector calls Reanimated.useEvent(...) to wire
