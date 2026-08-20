@@ -2,6 +2,7 @@ package nutrition
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"strings"
 	"testing"
@@ -25,33 +26,74 @@ func testDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-func TestSeedIsIdempotentAndSearchable(t *testing.T) {
-	db := testDB(t)
-	tx := db.Begin()
+// fixtureTx begins a transaction that is rolled back when the test ends, so
+// every row a test inserts is discarded even when an assertion fails partway
+// through. It is the isolation mechanism this package uses instead of
+// TRUNCATE food_items (kora#151): the dev database is shared, a table-wide
+// truncate destroys the food index that live AI resolves depend on, and it
+// holds an ACCESS EXCLUSIVE lock for the life of the transaction — which
+// stalls the other packages `go test ./...` runs concurrently against the
+// same table.
+//
+// Rollback is best-effort on purpose: a test that already failed may have
+// left the transaction aborted, and reporting that as a second failure would
+// bury the real one.
+func fixtureTx(t *testing.T) *gorm.DB {
+	t.Helper()
+	tx := testDB(t).Begin()
 	require.NoError(t, tx.Error)
 	t.Cleanup(func() { tx.Rollback() })
+	return tx
+}
 
-	// Seed's insert-count assertions require an empty table, but this suite
-	// must not destroy a pre-populated shared food_items. Truncate inside
-	// the transaction: the truncate and every subsequent insert are
-	// transactional and get discarded on rollback, so committed rows
-	// outside this tx are never touched.
-	require.NoError(t, tx.Exec("TRUNCATE food_items CASCADE").Error)
+func TestSeedIsIdempotentAndSearchable(t *testing.T) {
+	tx := fixtureTx(t)
 	repo := NewRepository(tx)
+	ctx := context.Background()
 
-	n1, err := Seed(context.Background(), repo)
-	require.NoError(t, err)
-	require.Greater(t, n1, 40)
+	// The old shape asserted a global insert count (n1 > 40), which only
+	// holds against an empty table — so it truncated the shared food index
+	// first (kora#151). Idempotency is a property of the SEED SET, not of the
+	// table, and it is assertable without touching a row this test does not
+	// own: run Seed twice, then check every curated item exists exactly once.
+	// That holds whether the index arrives empty or already carries a
+	// committed seed run, and it is strictly stronger than a count — a Seed
+	// that inserted duplicates would still satisfy `n2 == 0` if it also
+	// stopped counting them.
+	items := SeedItems()
+	require.Greater(t, len(items), 40, "precondition: the curated set is non-trivial")
 
-	// Second run inserts nothing new.
-	n2, err := Seed(context.Background(), repo)
+	_, err := Seed(ctx, repo)
 	require.NoError(t, err)
-	require.Equal(t, 0, n2)
 
-	results, err := repo.Search(context.Background(), "chicken", 10)
+	n2, err := Seed(ctx, repo)
 	require.NoError(t, err)
-	require.NotEmpty(t, results)
-	require.Contains(t, strings.ToLower(results[0].Name), "chicken")
+	require.Equal(t, 0, n2, "a second Seed run must insert nothing")
+
+	for _, want := range items {
+		var n int64
+		require.NoError(t, tx.Model(&FoodItem{}).
+			Where("name = ? AND brand = ?", want.Name, want.Brand).
+			Count(&n).Error)
+		require.Equal(t, int64(1), n, "seed item %q must exist exactly once after two Seed runs", want.Name)
+	}
+
+	// Searchability is checked against a specific seeded row rather than the
+	// bare word "chicken": Search is `name ILIKE %q% ... ORDER BY name ASC`
+	// clamped to searchLimitMax, so against the real index the first 25 rows
+	// matching "chicken" are whatever sorts alphabetically first, and none of
+	// them need be a curated row.
+	const seededName = "Grilled chicken breast"
+	results, err := repo.Search(ctx, seededName, 10)
+	require.NoError(t, err)
+	var found bool
+	for _, r := range results {
+		if r.Name == seededName {
+			found = true
+			require.Contains(t, strings.ToLower(r.Name), "chicken")
+		}
+	}
+	require.True(t, found, "a seeded curated row must be findable by its own name")
 }
 
 // TestGetByIDExcludesSoftDeleted seeds a live row and a soft-deleted row
@@ -60,10 +102,7 @@ func TestSeedIsIdempotentAndSearchable(t *testing.T) {
 // assertion that only checks the retired row is unreachable would pass
 // against a GetByID that returned an error for every id.
 func TestGetByIDExcludesSoftDeleted(t *testing.T) {
-	db := testDB(t)
-	tx := db.Begin()
-	require.NoError(t, tx.Error)
-	t.Cleanup(func() { tx.Rollback() })
+	tx := fixtureTx(t)
 	repo := NewRepository(tx)
 
 	live := FoodItem{Name: "Live GetByID Food " + uuid.NewString(), Provenance: ProvenanceCurated, KcalPer100g: 100}
@@ -89,9 +128,18 @@ func TestGetByIDExcludesSoftDeleted(t *testing.T) {
 // deadlock against them. The same assertion is reachable without it: read
 // Count() before seeding, add one live and one retired row, and check the
 // count moved by exactly 1 — the live row only.
+//
+// The delta is read under REPEATABLE READ, not the default READ COMMITTED
+// (kora#151). Count() is table-wide and cannot be scoped by a WHERE clause,
+// so under READ COMMITTED any row another package commits between the two
+// Count() calls lands in the delta and fails this test for reasons that have
+// nothing to do with soft deletion — observed as `expected: 18877, actual:
+// 18878` while foodlog and pins ran alongside it. A repeatable-read snapshot
+// makes the only difference between the two reads this transaction's own
+// two inserts.
 func TestCountExcludesSoftDeleted(t *testing.T) {
 	db := testDB(t)
-	tx := db.Begin()
+	tx := db.Begin(&sql.TxOptions{Isolation: sql.LevelRepeatableRead})
 	require.NoError(t, tx.Error)
 	t.Cleanup(func() { tx.Rollback() })
 	repo := NewRepository(tx)
@@ -113,10 +161,7 @@ func TestCountExcludesSoftDeleted(t *testing.T) {
 // TestSearchExcludesSoftDeleted covers the mobile picker: a retired food must
 // not be a candidate a user can log.
 func TestSearchExcludesSoftDeleted(t *testing.T) {
-	db := testDB(t)
-	tx := db.Begin()
-	require.NoError(t, tx.Error)
-	t.Cleanup(func() { tx.Rollback() })
+	tx := fixtureTx(t)
 	repo := NewRepository(tx)
 
 	unique := uuid.NewString()

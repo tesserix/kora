@@ -57,7 +57,14 @@ func TestRowsMissingEmbeddingAndSetEmbedding(t *testing.T) {
 	// vector. The query phrase is deliberately unrelated to the item's name
 	// (no alias/full-text overlap) so a match can only come from the
 	// embedding tier — proving the tier itself, not full-text, found it.
-	got, err := repo.Resolve(context.Background(), uuid.Nil, "unrelated banana smoothie phrase", fixedVector768(0.5), 5)
+	//
+	// Asks for resolveScanLimit rather than the production limit of 5
+	// (kora#151): what this asserts is that the row is REACHABLE via the
+	// embedding tier, not that it outranks the rest of a shared index that
+	// already carries other embedded rows. A limit of 5 made the assertion
+	// depend on ranking position against whatever the dev index happens to
+	// hold.
+	got, err := repo.Resolve(context.Background(), uuid.Nil, "unrelated banana smoothie phrase", fixedVector768(0.5), resolveScanLimit)
 	require.NoError(t, err)
 
 	var found *Candidate
@@ -78,10 +85,7 @@ func TestRowsMissingEmbeddingAndSetEmbedding(t *testing.T) {
 // and asserts both halves: the live one is still returned, the retired one
 // is not.
 func TestRowsMissingEmbeddingExcludesSoftDeleted(t *testing.T) {
-	db := testDB(t)
-	tx := db.Begin()
-	require.NoError(t, tx.Error)
-	t.Cleanup(func() { tx.Rollback() })
+	tx := fixtureTx(t)
 	repo := NewRepository(tx)
 
 	live := FoodItem{Name: "Live Missing-Embedding Food " + uuid.NewString(), Provenance: ProvenanceCurated, KcalPer100g: 100}
@@ -135,11 +139,15 @@ func partialVector768(n int, v float32) []float32 {
 //	x ("Zqxpool salmon teriyaki glaze extra filler"): full-text only, no
 //	  embedding. coverage=1, precision=2/6=0.333, trigram=0.349 ->
 //	  lexical=0.4+0.1+0.105=0.605.
-//	y ("Melon breeze smoothie"): embedding only — verified to share NO
-//	  token with the query (to_tsvector(...) @@ plainto_tsquery(...) is
-//	  false), so it can only be found via the embedding tier. Its embedding
-//	  is identical to queryVec (fixedVector768(1.0)), so cosine similarity
-//	  is 1.0 and embeddingFactor*EmbSim = 0.85*1.0 = 0.85 — above x's 0.605.
+//	y ("Zqymelon breeze smoothie"): embedding only — it shares NO token with
+//	  the query (to_tsvector(...) @@ plainto_tsquery(...) is false), so it
+//	  can only be found via the embedding tier. Its embedding is identical to
+//	  queryVec (fixedVector768(1.0)), so cosine similarity is 1.0 and
+//	  embeddingFactor*EmbSim = 0.85*1.0 = 0.85 — above x's 0.605. It carries
+//	  its own "zqxy" nonce rather than the query's: the lookup below recovers
+//	  each row's id BY NAME, and a plain "Melon breeze smoothie" could match
+//	  an ambient OFF row, which SetEmbedding would then write to — mutating a
+//	  row this test did not create (kora#151).
 //	z ("Zqxpool salmon mild dilution filler wordset"): recalled by BOTH
 //	  queries — it shares the query's two tokens (full-text: coverage=1,
 //	  precision=2/6=0.333, trigram=0.349 -> lexical=0.605, same shape as x)
@@ -148,23 +156,26 @@ func partialVector768(n int, v float32) []float32 {
 //	  0.85*0.7071=0.601. Both signals lose to y's 0.85; z exists purely to
 //	  prove a row found by both queries is scored once, not twice.
 //
-// Expected outcome: y wins top-1 on SCORE (0.85 beats both x's and z's
+// Expected outcome: y OUTRANKS both x and z on SCORE (0.85 beats their
 // ~0.60) and its MatchTier is MatchEmbedding because the embedding term
 // produced the winning score — not because "embedding" is preferred over
 // "full_text" as a tier. z appears exactly once in the pool despite being
 // recalled by both queries, and x is still present as a genuine (losing)
 // competitor.
+//
+// The ordering assertion is RELATIVE to the three fixture rows, not "y is
+// cands[0]" (kora#151). This test used to TRUNCATE food_items so that top-1
+// and "best of the fixture" were the same thing; against the shared dev index
+// the embedding tier scans every embedded row in the table, so an ambient row
+// may legitimately place above y without saying anything about whether the
+// two tiers were pooled and scored correctly — which is all this test is for.
 func TestResolvePoolsEmbeddingAgainstFullText(t *testing.T) {
-	db := testDB(t)
-	tx := db.Begin()
-	require.NoError(t, tx.Error)
-	t.Cleanup(func() { tx.Rollback() })
-	require.NoError(t, tx.Exec("TRUNCATE food_items CASCADE").Error)
+	tx := fixtureTx(t)
 	repo := NewRepository(tx)
 
 	const (
 		xName = "Zqxpool salmon teriyaki glaze extra filler"
-		yName = "Melon breeze smoothie"
+		yName = "Zqymelon breeze smoothie"
 		zName = "Zqxpool salmon mild dilution filler wordset"
 	)
 	_, err := repo.Insert(context.Background(), []FoodItem{
@@ -188,19 +199,30 @@ func TestResolvePoolsEmbeddingAgainstFullText(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, cands)
 
-	require.Equal(t, y.ID, cands[0].Item.ID,
-		"the embedding-only candidate must win top-1 on score (0.85) over both full-text candidates (~0.60)")
-	require.Equal(t, MatchEmbedding, cands[0].MatchTier)
-
-	var xCount, zCount int
-	for _, c := range cands {
+	// Positions and occurrence counts of the three fixture rows, and nothing
+	// else in the result.
+	pos := map[uuid.UUID]int{}
+	count := map[uuid.UUID]int{}
+	var yTier string
+	for i, c := range cands {
 		switch c.Item.ID {
-		case x.ID:
-			xCount++
-		case z.ID:
-			zCount++
+		case x.ID, y.ID, z.ID:
+			if count[c.Item.ID] == 0 {
+				pos[c.Item.ID] = i
+			}
+			count[c.Item.ID]++
+			if c.Item.ID == y.ID {
+				yTier = c.MatchTier
+			}
 		}
 	}
-	require.Equal(t, 1, xCount, "the full-text-only candidate must still be present, exactly once")
-	require.Equal(t, 1, zCount, "a row recalled by both the full-text and embedding queries must be scored once, not twice")
+	require.Equal(t, 1, count[x.ID], "the full-text-only candidate must still be present, exactly once")
+	require.Equal(t, 1, count[y.ID], "the embedding-only candidate must be present, exactly once")
+	require.Equal(t, 1, count[z.ID], "a row recalled by both the full-text and embedding queries must be scored once, not twice")
+
+	require.Less(t, pos[y.ID], pos[x.ID],
+		"the embedding-only candidate must outrank the full-text-only one on score (0.85 vs ~0.60)")
+	require.Less(t, pos[y.ID], pos[z.ID],
+		"the embedding-only candidate must outrank the dual-recall one on score (0.85 vs ~0.60)")
+	require.Equal(t, MatchEmbedding, yTier)
 }

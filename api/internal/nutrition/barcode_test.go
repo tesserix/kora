@@ -301,10 +301,7 @@ func TestResolveBarcodeNameBrandDedupReturnsFoundNoError(t *testing.T) {
 // the same barcode — this is proven by an unchanged row count, not by
 // re-deriving it from ambient rows.
 func TestResolveBarcodeRetiredLocalRowFallsThroughToOFF(t *testing.T) {
-	db := testDB(t)
-	tx := db.Begin()
-	require.NoError(t, tx.Error)
-	t.Cleanup(func() { tx.Rollback() })
+	tx := fixtureTx(t)
 	repo := NewRepository(tx)
 
 	code := "999" + uuid.NewString()[:9]
@@ -341,10 +338,7 @@ func TestResolveBarcodeRetiredLocalRowFallsThroughToOFF(t *testing.T) {
 // above: without it, a change that always fetched from OFF regardless of a
 // local hit would pass the retired-row test too.
 func TestResolveBarcodeLiveLocalRowSkipsOFF(t *testing.T) {
-	db := testDB(t)
-	tx := db.Begin()
-	require.NoError(t, tx.Error)
-	t.Cleanup(func() { tx.Rollback() })
+	tx := fixtureTx(t)
 	repo := NewRepository(tx)
 
 	code := "999" + uuid.NewString()[:9]
@@ -378,10 +372,7 @@ func TestResolveBarcodeLiveLocalRowSkipsOFF(t *testing.T) {
 // retired local row whose barcode OFF also does not know: the caller must
 // get a clean not-found, not a 500 and not the retired row.
 func TestResolveBarcodeRetiredLocalRowUnknownToOFFReturnsCleanNotFound(t *testing.T) {
-	db := testDB(t)
-	tx := db.Begin()
-	require.NoError(t, tx.Error)
-	t.Cleanup(func() { tx.Rollback() })
+	tx := fixtureTx(t)
 	repo := NewRepository(tx)
 
 	code := "999" + uuid.NewString()[:9]

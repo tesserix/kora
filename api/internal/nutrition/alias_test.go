@@ -287,10 +287,7 @@ func TestLookupPersonalAliasNilUserNotFound(t *testing.T) {
 // resurrected here would resolve from the AI capture path directly, bypassing
 // Resolve entirely.
 func TestLookupPersonalAliasExcludesSoftDeleted(t *testing.T) {
-	db := testDB(t)
-	tx := db.Begin()
-	require.NoError(t, tx.Error)
-	t.Cleanup(func() { tx.Rollback() })
+	tx := fixtureTx(t)
 	repo := NewRepository(tx)
 	ctx := context.Background()
 
