@@ -587,6 +587,44 @@ describe("Cancelling a typed resolve", () => {
     expect(await rendered.findByText("Can't save this log — please sign in and try again.")).toBeTruthy();
   });
 
+  // Saying so is not enough on this path: the words have to survive somewhere.
+  // Cancel cleared the thread bubble (handleCancelResolve sets sentPhrase to
+  // null) and the queue then refused, so the composer is the only place left
+  // holding the phrase. Restoring it there is what stops a cancelled capture
+  // the queue rejected from being lost outright — the one remaining hole in
+  // kora#242, and only reachable because #242 stopped returning at the abort
+  // guard.
+  test("a cancelled refusal hands the phrase back to the composer", async () => {
+    mockEnqueueTextCapture().mockRejectedValue(new CaptureQueueFullError());
+
+    const rendered = await cancelTypedResolve(new NetworkError(new TypeError("Network request failed")));
+
+    await waitFor(() =>
+      expect(rendered.getByLabelText("Tell Otto what you ate").props.value).toBe("chicken and rice"),
+    );
+  });
+
+  // The mirror image, and the reason the restore is conditional: uncancelled,
+  // the bubble is still on screen holding the phrase, so returning it to the
+  // composer as well would duplicate the prompt.
+  test("an uncancelled refusal leaves the composer empty, since the bubble still holds the phrase", async () => {
+    mockEnqueueTextCapture().mockRejectedValue(new CaptureQueueFullError());
+
+    const rendered = await render(<CaptureScreen />);
+    await fireEvent.press(await rendered.findByText("Type"));
+    await fireEvent.changeText(await rendered.findByLabelText("Tell Otto what you ate"), "chicken and rice");
+    await fireEvent.press(await rendered.findByLabelText("Send"));
+    await waitFor(() => expect(mockResolveTextMutate).toHaveBeenCalled());
+    await act(async () => {
+      mockResolveTextMutate.mock.calls[0][1].onError(
+        new NetworkError(new TypeError("Network request failed")),
+      );
+    });
+
+    await waitFor(() => expect(mockEnqueueTextCapture()).toHaveBeenCalled());
+    expect(rendered.getByLabelText("Tell Otto what you ate").props.value).toBe("");
+  });
+
   // The #196 path, uncancelled, unchanged — the reassurance that Cancel
   // suppresses is still there when nobody cancelled.
   test("without Cancel, the same offline failure queues AND says so", async () => {

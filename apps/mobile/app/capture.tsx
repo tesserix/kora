@@ -1416,9 +1416,21 @@ export default function CaptureScreen() {
           }
           void queryClient.invalidateQueries({ queryKey: [QUEUED_CAPTURES_KEY] });
         } catch (queueError) {
-          // The queue refused (full, or nobody signed in) — the phrase is only
-          // safe in the composer now, so put it back and say why.
-          setText("");
+          // The queue refused (full, or nobody signed in), so the phrase is
+          // now saved NOWHERE and survives only if something on screen still
+          // holds it. The optimistic thread bubble does — unless this resolve
+          // was cancelled, because handleCancelResolve clears sentPhrase. So
+          // the composer is restored in exactly that case.
+          //
+          // Not unconditionally: with the bubble still up, putting the words
+          // back too duplicates the prompt, which the non-recoverable branch
+          // above rejects for the same reason.
+          //
+          // This path was unreachable while a cancelled resolve returned at
+          // the abort guard; routing it through the classifier (kora#242) is
+          // what exposed it, and a cancelled capture the queue then refused
+          // was the one remaining way to lose the phrase outright.
+          setText(cancelled ? phrase : "");
           setErrorMsg(
             queueError instanceof CaptureQueueFullError || queueError instanceof NoOwnerError
               ? queueError.message
@@ -1463,10 +1475,14 @@ export default function CaptureScreen() {
   // `silent` is set only by the cancelled-resolve path below: Cancel already
   // told the user the screen is going idle, so it does not also get to pop a
   // new Otto bubble about a request it just told capture.tsx to stop waiting
-  // on. The capture is still worth preserving — silent controls the SUCCESS
-  // message only. It never suppresses the enqueue, and never suppresses a
-  // queue refusal: a capture that could not be saved must say so (see the
-  // catch below).
+  // on. The capture is still worth preserving — silent controls COPY only:
+  // the reassurance on the queued path AND the failure's own message on the
+  // non-recoverable one, since a request the user deliberately stopped should
+  // not report itself as having gone wrong. (This said "the SUCCESS message
+  // only", which was narrower than what the code below has always done —
+  // corrected in kora#242, which gave the typed path the same treatment.)
+  // It never suppresses the enqueue, and never suppresses a queue refusal: a
+  // capture that could not be saved must say so (see the catch below).
   async function handleResolveFailure(
     error: Error,
     file: CaptureFile,
