@@ -556,6 +556,45 @@ async function fingerprint(file) {
   return values;
 }
 
+/**
+ * Detect the dev client's blue "Refreshing…" banner over the status bar.
+ *
+ * FOUND THE HARD WAY (kora#257 Stage C): one capture in 45 had it, and it cost
+ * `profile` 8.5% of the frame with a 100%-density block — an instant, and
+ * entirely spurious, comparator failure. It is not app state, so the readiness
+ * gate cannot see it: like iOS's "Use Strong Password?" sheet it renders in
+ * another window, and `idb ui describe-all` returns the app's tree only. Its
+ * text also collides with real copy — coach says "Refreshing today's focus…" —
+ * so a text marker would be both unreliable and ambiguous.
+ *
+ * The image, though, is unambiguous. The banner paints a saturated system blue
+ * across the full width behind the status bar, where this app is always very
+ * dark. Mean the band and ask whether blue dominates.
+ *
+ * Reported per-shot rather than retried, for the same reason the not-ready
+ * images are still written: a capture you can look at beats a silent retry
+ * loop. Goldens refuse it (shots-golden.mjs) and comparisons refuse it
+ * (shots-compare.mjs).
+ */
+async function detectSystemBanner(file) {
+  try {
+    const { stdout } = await execFileAsync(
+      "magick",
+      [file, "-alpha", "off", "-crop", "1320x40+0+96", "+repage", "-resize", "1x1!",
+       "-format", "%[fx:mean.r] %[fx:mean.g] %[fx:mean.b]", "info:"],
+      { maxBuffer: 1024 * 1024 },
+    );
+    const [r, g, b] = stdout.trim().split(/\s+/).map(Number);
+    if (![r, g, b].every(Number.isFinite)) return null;
+    // Measured: normal status bar band ~(0.05,0.03,0.01); with the banner
+    // ~(0.10,0.35,0.62). Requiring blue to be both bright and dominant keeps
+    // this from firing on a dark blue-tinted screen.
+    return b > 0.3 && b > r * 2 && b > g * 1.4;
+  } catch {
+    return null;
+  }
+}
+
 /** Mean absolute difference of two fingerprints, 0-255. */
 function fingerprintDistance(a, b) {
   if (!a || !b || a.length === 0 || a.length !== b.length) return null;
@@ -657,6 +696,7 @@ async function main() {
       const file = path.join(outDir, `${stem}.png`);
       await screenshot(device.udid, file);
 
+      const systemBanner = await detectSystemBanner(file);
       const print = await fingerprint(file);
       if (route.name === "sign-in" && signInPrint === null) signInPrint = print;
       const distance = fingerprintDistance(print, signInPrint);
@@ -673,6 +713,7 @@ async function main() {
         settleMs: settle,
         capturedAt: new Date().toISOString(),
         landedOnSignIn,
+        systemBanner,
         ready: gate.ready,
         readyReason: gate.reason,
         readyWaitedMs: gate.waitedMs,
@@ -690,6 +731,7 @@ async function main() {
       console.log(
         `  ${String(pass).padStart(2)} ${route.name.padEnd(14)} ${route.path.padEnd(10)} ${status}` +
           (gate.renderErrors.length > 0 ? " [render-error]" : "") +
+          (systemBanner ? " [system banner]" : "") +
           (landedOnSignIn ? " [sign-in wall]" : ""),
       );
       if (gate.ready === false) console.log(`     ${gate.reason}`);
@@ -698,6 +740,7 @@ async function main() {
 
   const notReady = shots.filter((s) => s.ready === false);
   const withRenderErrors = shots.filter((s) => s.renderErrors.length > 0);
+  const withSystemBanner = shots.filter((s) => s.systemBanner === true);
 
   const manifest = {
     schemaVersion: 2,
@@ -722,6 +765,9 @@ async function main() {
     notReady: notReady.map((s) => ({ route: s.route, pass: s.pass, reason: s.readyReason })),
     // Present but not fatal by default — a build defect, not app state.
     renderErrors: withRenderErrors.map((s) => ({ route: s.route, pass: s.pass, markers: s.renderErrors })),
+    // The dev client's blue "Refreshing…" banner, painted over the status bar
+    // by another process. Never promotable to a golden, never comparable.
+    systemBanner: withSystemBanner.map((s) => ({ route: s.route, pass: s.pass })),
     // A run where these are all true was captured signed out; the
     // auth-required images are pictures of the sign-in wall, not of the app.
     signedOut: shots.some((s) => s.landedOnSignIn === true),
@@ -733,6 +779,15 @@ async function main() {
   if (manifest.signedOut) {
     console.log(
       "NOTE: some routes landed on the sign-in wall. Sign in on the simulator by hand and re-run.",
+    );
+  }
+
+  if (withSystemBanner.length > 0) {
+    const routes = [...new Set(withSystemBanner.map((s) => s.route))];
+    console.log(
+      `\nSYSTEM BANNER in ${withSystemBanner.length} capture(s) across ${routes.length} route(s): ` +
+        `${routes.join(", ")}.\nThe dev client painted its blue "Refreshing…" bar over the status ` +
+        "bar. Those frames are not comparable and cannot become goldens — re-run them.",
     );
   }
 

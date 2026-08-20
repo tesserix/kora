@@ -141,6 +141,14 @@ export const routes = [
     // capability. TYPE is deliberately included — it is the chip kora#278
     // reports as clipped, so a gate that waits for it also proves it rendered.
     ready: ["PHOTO", "TYPE"],
+    // The one route that needs more than the global dwell. Measured across
+    // launches at `medium` (Stage C): at the 3000ms default two passes of this
+    // screen differed with a max delta of 212/255 and a 12% densest block —
+    // enough to fail the golden rule on its own. At 8000ms the same comparison
+    // falls to a max delta of 34 and 644 pixels above threshold at 1x.
+    // The greeting bubble is the part that moves; the gate opens on the mode
+    // chips, which mount long before it has finished arriving.
+    settle: 8000,
   },
   {
     name: "settings",

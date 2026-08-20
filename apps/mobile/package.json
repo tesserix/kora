@@ -64,7 +64,11 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "test": "jest --ci --forceExit"
+    "test": "jest --ci --forceExit",
+    "shots": "node scripts/shots.mjs",
+    "shots:test": "node --test scripts/__tests__/*.test.mjs",
+    "shots:golden": "node scripts/shots-golden.mjs",
+    "shots:compare": "node scripts/shots-compare.mjs"
   },
   "jest": {
     "preset": "jest-expo",
