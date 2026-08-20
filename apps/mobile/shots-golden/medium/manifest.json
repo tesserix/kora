@@ -8,8 +8,8 @@
   "shotsClock": "2026-08-19T09:41:00",
   "statusBarTime": "9:41",
   "scheme": "com.tesserix.kora",
-  "capturedAt": "2026-08-20T03:15:44.884Z",
-  "gitCommit": "27d4ccd3",
+  "capturedAt": "2026-08-20T05:02:38.438Z",
+  "gitCommit": "88b5d1e4",
   "rule": {
     "scale": 3,
     "threshold": 48,
@@ -49,7 +49,7 @@
       "route": "onboarding",
       "width": 440,
       "height": 956,
-      "bytes": 187090
+      "bytes": 187158
     },
     {
       "route": "recipes",
