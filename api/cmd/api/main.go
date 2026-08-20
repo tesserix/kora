@@ -22,6 +22,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 
+	"github.com/tesserix/kora/api/internal/agents"
 	"github.com/tesserix/kora/api/internal/ai"
 	"github.com/tesserix/kora/api/internal/ai/providers"
 	"github.com/tesserix/kora/api/internal/appleid"
@@ -84,6 +85,11 @@ func main() {
 	}
 
 	resolveHandler, aiProvider, resolveCache := buildResolveHandler(context.Background(), cfg, db, logger)
+	agentDelegator, err := buildAgentDelegator(cfg)
+	if err != nil {
+		logger.Error("agent supervisor init failed", "err", err)
+		os.Exit(1)
+	}
 
 	schedCtx, schedCancel := context.WithCancel(context.Background())
 	if cfg.SchedulerInterval > 0 {
@@ -164,6 +170,7 @@ func main() {
 			Verifier:        verifier,
 			Resolver:        resolveHandler,
 			Provider:        aiProvider,
+			AgentDelegator:  agentDelegator,
 			ResolveCache:    resolveCache,
 			BFFHMACKey:      cfg.BFFHMACKey,
 			AppleExchanger:  appleExchanger,
@@ -227,6 +234,13 @@ func main() {
 		logger.Error("shutdown error", "err", err)
 	}
 	logger.Info("api stopped")
+}
+
+func buildAgentDelegator(cfg config.Config) (agents.Delegator, error) {
+	if !cfg.AIGatewayEnabled {
+		return nil, nil
+	}
+	return agents.NewGatewayClient(cfg.AIGatewayBaseURL, cfg.AIGatewayAPIKey, cfg.AIAgentTimeout)
 }
 
 // providerEmbedder adapts an ai.Provider's three-value Embed to the narrower
