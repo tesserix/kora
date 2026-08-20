@@ -30,7 +30,7 @@ function ErrorFallback({ onReset }: { onReset: () => void }) {
       }}
     >
       <GlassPanel radius={22} style={{ padding: spacing.lg, gap: spacing.sm, alignItems: "center" }}>
-        <AppText style={{ fontSize: 17, fontWeight: "600", color: instrument.ink }}>
+        <AppText variant="headline" style={{ color: instrument.ink }}>
           Something went wrong.
         </AppText>
         <AppText style={{ fontSize: 14, color: instrument.mut, textAlign: "center" }}>

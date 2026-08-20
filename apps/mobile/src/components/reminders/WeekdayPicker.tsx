@@ -35,7 +35,7 @@ export function WeekdayPicker({ days, onChange }: Props) {
           const on = days.includes(day);
           return (
             <PressableScale key={day} testID={`day-${day}`} onPress={() => toggleDay(day)} style={[chip(on), { minWidth: 40, alignItems: "center" }]}>
-              <AppText style={{ fontSize: 15, color: on ? instrument.accentOn : instrument.ink }}>{l}</AppText>
+              <AppText variant="subheadline" style={{ color: on ? instrument.accentOn : instrument.ink }}>{l}</AppText>
             </PressableScale>
           );
         })}

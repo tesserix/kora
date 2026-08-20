@@ -52,7 +52,7 @@ export function InviteFriendSheet({ visible, groupId, memberIds, onClose }: Prop
                 style={{ opacity: invite.isPending ? 0.5 : 1 }}
               >
                 <View style={{ flexDirection: "row", alignItems: "center", minHeight: 44, paddingHorizontal: spacing.md }}>
-                  <AppText style={{ flex: 1, fontSize: 17, fontWeight: "600", color: instrument.ink }}>{f.display_name}</AppText>
+                  <AppText variant="headline" style={{ flex: 1, color: instrument.ink }}>{f.display_name}</AppText>
                   <AppText style={{ fontSize: 15, color: instrument.accent, fontWeight: "600" }}>Invite</AppText>
                 </View>
               </PressableScale>

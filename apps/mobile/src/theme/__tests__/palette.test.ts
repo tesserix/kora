@@ -78,3 +78,70 @@ describe("type tracking is signed with SF Pro, not against it", () => {
     expect(type.caption).toMatchObject({ size: 11, lineHeight: 13 });
   });
 });
+
+// kora#237 added five steps. These pin the decisions that are easy to
+// "tidy up" later without realising they were decisions.
+describe("the steps kora#237 added", () => {
+  it("fills in the middle of Apple's ramp at Apple's own size/leading pairs", () => {
+    expect(type.title3).toMatchObject({ size: 20, lineHeight: 25 });
+    expect(type.callout).toMatchObject({ size: 16, lineHeight: 21 });
+  });
+
+  it("keeps title3 in the display family's weight and positive tracking", () => {
+    // Apple draws title3 Regular; this table draws its whole title family bold
+    // (title1/title2 are 700 too), so title3 follows the family, not Apple.
+    expect(type.title3.weight).toBe("700");
+    expect(type.title3.letterSpacing).toBe(0.38);
+  });
+
+  it("leaves callout untracked, like every other text-size variant", () => {
+    // SF Text ships its own (negative) tracking at 16pt — see the note on the
+    // table. callout is a text size, so it joins headline/body/subheadline/
+    // footnote in letting SF's own value stand.
+    expect(type.callout.letterSpacing).toBeUndefined();
+    expect(type.callout.weight).toBe("400");
+  });
+
+  it("puts caption2 BELOW Apple's floor, on purpose", () => {
+    // Apple's caption2 is 11/13 — which is what this table calls `caption`.
+    // Ours is 9/12, a kora-specific step named for the 9pt engraved labels the
+    // app already draws. It is not an Apple value and should not be "corrected"
+    // to one.
+    expect(type.caption2).toMatchObject({ size: 9, lineHeight: 12 });
+    expect(type.caption2.size).toBeLessThan(type.caption.size);
+    expect(type.caption2.letterSpacing).toBe(type.caption.letterSpacing);
+  });
+
+  it("names two display numerals above largeTitle, tracked negative", () => {
+    // Above Apple's ramp entirely, and rendered in the mono data face rather
+    // than SF Pro — so the positive-tracking rule that governs the titles does
+    // not apply here. Both values come from the call sites they were taken from.
+    expect(type.numeral1).toMatchObject({ size: 64, lineHeight: 72, letterSpacing: -2 });
+    expect(type.numeral2).toMatchObject({ size: 44, lineHeight: 50, letterSpacing: -1.2 });
+    for (const v of [type.numeral1, type.numeral2]) {
+      expect(v.size).toBeGreaterThan(type.largeTitle.size);
+      expect(v.letterSpacing).toBeLessThan(0);
+    }
+  });
+
+  it("gives none of them a Dynamic Type ceiling", () => {
+    // largeTitle's cap is the measured Apple ceiling for largeTitle and nothing
+    // else (kora#274); copying it onto a neighbour would be a guess.
+    for (const v of ["title3", "callout", "caption2", "numeral1", "numeral2"] as const) {
+      expect(type[v].maxScale).toBeUndefined();
+    }
+  });
+
+  it("keeps the scale strictly descending, so the steps are a ramp and not a bag", () => {
+    const order = [
+      "numeral1", "numeral2", "largeTitle", "title1", "title2", "title3",
+      "headline", "callout", "subheadline", "footnote", "caption", "caption2",
+    ] as const;
+    const sizes = order.map((v) => type[v].size);
+    // headline and body share 17, so `body` is left out of the ramp check and
+    // asserted against headline directly.
+    expect(type.body.size).toBe(type.headline.size);
+    expect(sizes).toEqual([...sizes].sort((a, b) => b - a));
+    expect(new Set(sizes).size).toBe(sizes.length);
+  });
+});
