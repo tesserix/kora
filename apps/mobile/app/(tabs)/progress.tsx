@@ -24,6 +24,7 @@ import { AnimatedNumber, PressableScale, ScreenEntrance, useMotionPrefs } from "
 import { useTheme } from "@/theme";
 import { todayLocalDate } from "@/lib/shotsClock";
 import { formatWeight, lbFromKg, useUnits, weightUnitLabel } from "@/units";
+import { TAB_BAR_SCROLL_INSET } from "@/components/FloatingTabBar";
 
 const RANGES = ["1W", "1M", "3M", "1Y"] as const;
 const RANGE_OPTIONS = RANGES.map((r) => ({ key: r, label: r }));
@@ -179,7 +180,7 @@ export default function Progress() {
     <ScreenEntrance direction={2}>
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppBackground />
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: TAB_BAR_SCROLL_INSET }}>
       <Animated.View entering={enter(0)}>
         <ScreenHeader title="Trends" />
       </Animated.View>

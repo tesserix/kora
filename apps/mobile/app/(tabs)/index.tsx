@@ -27,6 +27,7 @@ import { accessibleMealLabel } from "@/lib/portionAssumedLabel";
 import { now, todayLocalDate } from "@/lib/shotsClock";
 import type { FoodLog } from "@/api/types";
 import type { ReactNode } from "react";
+import { TAB_BAR_SCROLL_INSET_TIGHT } from "@/components/FloatingTabBar";
 
 // Shape of the steps/sleep telemetry cells rendered below (kora ignition
 // review, Finding 4: was imported from the now-deleted TeleStrip.tsx, which
@@ -209,7 +210,7 @@ export default function Home() {
       <ScrollView
         testID="home-scroll"
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingTop: insets.top + spacing.sm, paddingBottom: 130 }}
+        contentContainerStyle={{ paddingTop: insets.top + spacing.sm, paddingBottom: TAB_BAR_SCROLL_INSET_TIGHT }}
         refreshControl={
           <RefreshControl
             testID="home-refresh"
