@@ -152,6 +152,15 @@ const FAIL_OFFSET_Y = 15;
 //     cap: at accessibility-extra-extra-extra-large (fontScale ~3.3 here) the
 //     end labels render as "50" and "19(". At 2.4 they are whole.
 //
+//     CORRECTED by kora#286: "at 2.4 they are whole" was true only of the value
+//     those probes happened to sit at. The clip is set by where a major lands
+//     relative to the edge at a given VALUE, not by the label size, so it also
+//     arrives at scale 1.0 -- 172.0 kg renders "150" as a lone "0". The cap is
+//     therefore NOT what protects the container edge and never was; the fade
+//     below is (CONTINUOUS_FADE_RATIO). 2.4 stays as the vertical-headroom and
+//     legibility ceiling it doubles as, but lowering it would not buy an inch of
+//     edge safety, and raising it no longer costs any.
+//
 //   detented — the binding constraint IS neighbour collision. "Maintain" and
 //     "Build muscle" are the widest adjacent pair, ~48pt of combined half-width
 //     at 10pt type against a 96pt pitch, so they touch at ~2.0x. 1.6 leaves a
@@ -203,6 +212,53 @@ const FAIL_OFFSET_Y = 15;
 // the taper reads as a hard edge again at the top of the Dynamic Type range.
 const DETENT_FADE_RATIO = 2.4;
 
+// --- Edge fade for the continuous scale (kora#286) ---------------------------
+//
+// The same clip, on the same screen, for the same reason -- and it was already
+// written down here. The note on CONTINUOUS_LABEL_SCALE_MAX below records that
+// a major tick can land ON the viewport edge and that its centred label then
+// hangs over the `overflow: "hidden"` boundary. What it got wrong was reading
+// that as a LIMIT ON SCALING. The clip is driven by where a major happens to
+// land relative to the edge at a given VALUE, so it arrives at scale 1.0 and no
+// cap can dodge it.
+//
+// Measured on device (iPhone 17 Pro Max, 392pt ruler viewport, `medium`), on
+// the weight ruler, sweeping in single steps. A major's label sits at
+// `196 + (major - value) * PX_PER_UNIT` from the viewport's left edge, so at:
+//
+//   171.0 kg  "150" whole, its centre 7pt inside the edge
+//   171.5 kg  "50"      the leading 1 gone -- reads as a real, wrong number
+//   172.0 kg  "0"       a lone zero
+//   172.5 kg  ")"       a lone paren: the right half of the 0. kora#286.
+//   173.0 kg  nothing
+//
+// and mirrored at the right edge, where 190 decays "190" -> "19" -> "1(" over
+// 168.5-167.5 kg. It repeats every 10 units (the major pitch) on EVERY
+// continuous ruler -- confirmed at 172 cm on the height ruler, which renders
+// the same lone "0" -- and the destination weight ruler is simply the one
+// people drag furthest, which is why kora#286 was reported there.
+//
+// A lone ")" is worse than a truncated word. "entary" still reads as text with
+// more to the left of it; ")" reads as the renderer having failed. So the same
+// answer as kora#273: an alpha mask that makes the clip legible as "there is
+// more this way", rather than any attempt to reveal more text.
+//
+// NOT fixed by shrinking the labels (kora#263: a shrink box narrows past the
+// word it holds) and NOT by lowering the scale cap, since the defect is at 1.0.
+//
+// Sized off the label like the detent scale's, but the ratio means something
+// different because the labels do: a 3-digit continuous label measures 14.3pt
+// at the 9pt base size (measured from the screenshot, 43px at 3x), i.e. ~1.6x
+// its font size, where a detent label is 6-9x its own. So 2.4 buys a runway of
+// 1.5 WHOLE LABELS here -- every fragment the clip can leave is inside the ramp
+// with room to spare -- against a fraction of one there.
+//
+// It is nonetheless the same number on purpose. 2.4 * 9 = 21.6pt against the
+// detent scale's 2.4 * 10 = 24pt: the two controls sit adjacent on the
+// onboarding screen and now fade over visibly the same distance, which is what
+// keeps one clip from being communicated in two visual languages.
+const CONTINUOUS_FADE_RATIO = 2.4;
+
 const CONTINUOUS_LABEL_FONT_SIZE = 9;
 const DETENT_LABEL_FONT_SIZE = 10;
 const CONTINUOUS_LABEL_SCALE_MAX = 2.4;
@@ -214,20 +270,32 @@ const DETENT_LABEL_SCALE_MAX = 1.6;
 const LABEL_CAP_RATIO = 0.75;
 
 /**
- * How far into the detent viewport each edge fade runs, as a FRACTION of the
+ * How far into a ruler's viewport each edge fade runs, as a FRACTION of the
  * viewport width, ready to drop straight into the gradient's stop offsets.
  *
- * Clamped at 0.45 so the two fades can never meet and swallow the selected stop
- * whole -- on a narrow viewport that would leave the control with no legible
- * label at all, which is worse than the clipping this fixes.
+ * Clamped at 0.45 so the two fades can never meet and swallow what sits under
+ * the centre index -- on a narrow viewport that would leave the control with no
+ * legible label at all, which is worse than the clipping this fixes.
  *
- * Exported for the geometry tests, which pin the ratio rather than re-deriving
- * it from a screenshot.
+ * One function for both modes because the two clips are the same clip: a wide
+ * canvas translated under a fixed index, cut at the container's inner edge. Only
+ * the RATIO differs, and only because the labels do (see the two ratio notes
+ * above).
  */
-export function detentFadeStop(labelSize: number, width: number): number {
+export function edgeFadeStop(labelSize: number, width: number, ratio: number): number {
   if (width <= 0) return 0;
-  return Math.min(0.45, (labelSize * DETENT_FADE_RATIO) / width);
+  return Math.min(0.45, (labelSize * ratio) / width);
 }
+
+/**
+ * Exported for the geometry tests, which pin the ratios rather than re-deriving
+ * them from a screenshot.
+ */
+export const detentFadeStop = (labelSize: number, width: number): number =>
+  edgeFadeStop(labelSize, width, DETENT_FADE_RATIO);
+
+export const continuousFadeStop = (labelSize: number, width: number): number =>
+  edgeFadeStop(labelSize, width, CONTINUOUS_FADE_RATIO);
 
 /**
  * The multiplier the SVG labels actually use: the system font scale, floored
@@ -250,6 +318,13 @@ export function labelFontScale(fontScale: number, max: number): number {
 export function labelHeadroom(baseFontSize: number, scale: number): number {
   return Math.ceil(baseFontSize * LABEL_CAP_RATIO * (scale - 1));
 }
+
+// The mask lives INSIDE the translated canvas -- the only place a
+// react-native-svg mask can reach the scale -- so it has to be counter-
+// translated every frame or the fade would slide away from the viewport edge
+// along with the ticks. Driven off the same `offset` shared value as the scale
+// itself, on the UI thread, so it cannot fight kora#176's drag.
+const AnimatedRect = Animated.createAnimatedComponent(Rect);
 
 const clamp = (v: number, min: number, max: number): number => {
   "worklet";
@@ -606,6 +681,22 @@ function ContinuousRuler(props: ContinuousProps) {
     transform: [{ translateX: mid - pad - (offset.value - min) * PX_PER_UNIT }],
   }));
 
+  // kora#286, the same shape as kora#273's detent fade. Ten rulers mount at
+  // once in onboarding, so the ids have to be per-instance or whichever ruler
+  // mounted last owns the def and masks the rest by geometry that is not theirs.
+  const uid = useId().replace(/:/g, "");
+  const fadeId = `scale-fade-${uid}`;
+  const maskId = `scale-mask-${uid}`;
+  // Where the viewport's left edge currently sits in canvas coordinates --
+  // exactly the inverse of `scaleStyle`'s translate, so the fade band stays
+  // welded to the container edge while the ticks slide underneath it. The `-
+  // min` term is the one arithmetic difference from detented mode: this scale
+  // is anchored at `min` rather than at stop 0.
+  const maskProps = useAnimatedProps(() => ({
+    x: pad + (offset.value - min) * PX_PER_UNIT - mid,
+  }));
+  const fadeStop = continuousFadeStop(labelSize, width);
+
   return (
     <GestureDetector gesture={pan}>
       <View
@@ -666,31 +757,65 @@ function ContinuousRuler(props: ContinuousProps) {
         <View style={{ height: svgHeight }}>
           <Animated.View style={[{ width: scaleWidth, height: svgHeight }, scaleStyle]}>
             <Svg width={scaleWidth} height={svgHeight}>
-              <Path
-                testID={`${testID}-ticks-minor`}
-                d={minorPath}
-                stroke={instrument.tick}
-                strokeWidth={1}
-              />
-              <Path
-                testID={`${testID}-ticks-major`}
-                d={majorPath}
-                stroke={instrument.ink}
-                strokeWidth={1.6}
-              />
-              {labels.map((t) => (
-                <SvgText
-                  key={`label-${t.key}`}
-                  testID={`${testID}-label-${t.key}`}
-                  x={t.x}
-                  y={baseline - 22}
-                  fill={instrument.mut}
-                  fontSize={labelSize}
-                  textAnchor="middle"
+              <Defs>
+                <LinearGradient id={fadeId} x1="0" y1="0" x2="1" y2="0">
+                  <Stop offset="0" stopColor="#fff" stopOpacity="0" />
+                  <Stop offset={fadeStop} stopColor="#fff" stopOpacity="1" />
+                  <Stop offset={1 - fadeStop} stopColor="#fff" stopOpacity="1" />
+                  <Stop offset="1" stopColor="#fff" stopOpacity="0" />
+                </LinearGradient>
+                {/* userSpaceOnUse so the mask is authored in the same canvas
+                    coordinates as the ticks. Whatever the rect does not cover
+                    is masked out, which is exactly the region the viewport
+                    clips anyway. The height is `svgHeight`, not a constant:
+                    kora#261 grows this canvas with the label size, and a fixed
+                    height would leave the scaled labels unmasked at the top of
+                    the Dynamic Type range -- the one place the fragments are
+                    longest. */}
+                <Mask
+                  id={maskId}
+                  maskUnits="userSpaceOnUse"
+                  x={0}
+                  y={0}
+                  width={scaleWidth}
+                  height={svgHeight}
                 >
-                  {t.text}
-                </SvgText>
-              ))}
+                  <AnimatedRect
+                    animatedProps={maskProps}
+                    y={0}
+                    width={width}
+                    height={svgHeight}
+                    fill={`url(#${fadeId})`}
+                  />
+                </Mask>
+              </Defs>
+              <G testID={`${testID}-scale`} mask={`url(#${maskId})`}>
+                <Path
+                  testID={`${testID}-ticks-minor`}
+                  d={minorPath}
+                  stroke={instrument.tick}
+                  strokeWidth={1}
+                />
+                <Path
+                  testID={`${testID}-ticks-major`}
+                  d={majorPath}
+                  stroke={instrument.ink}
+                  strokeWidth={1.6}
+                />
+                {labels.map((t) => (
+                  <SvgText
+                    key={`label-${t.key}`}
+                    testID={`${testID}-label-${t.key}`}
+                    x={t.x}
+                    y={baseline - 22}
+                    fill={instrument.mut}
+                    fontSize={labelSize}
+                    textAnchor="middle"
+                  >
+                    {t.text}
+                  </SvgText>
+                ))}
+              </G>
             </Svg>
           </Animated.View>
           {/* The fixed centre index — the only accent on the control, and the
@@ -716,13 +841,6 @@ function ContinuousRuler(props: ContinuousProps) {
     </GestureDetector>
   );
 }
-
-// The mask lives INSIDE the translated canvas -- the only place a
-// react-native-svg mask can reach the scale -- so it has to be counter-
-// translated every frame or the fade would slide away from the viewport edge
-// along with the ticks. Driven off the same `offset` shared value as the scale
-// itself, on the UI thread, so it cannot fight kora#176's drag.
-const AnimatedRect = Animated.createAnimatedComponent(Rect);
 
 function DetentedRuler(props: DetentedProps) {
   const { instrument } = useTheme();
