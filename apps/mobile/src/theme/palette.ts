@@ -81,8 +81,45 @@ export type TypeVariant =
 // drawn tight) and NEGATIVE at text sizes (SF Text is drawn loose). The old
 // table inverted both, so a 34pt title landed 0.77pt tighter than the native
 // chrome next to it. `undefined` means "let SF's own tracking stand".
-export const type: Record<TypeVariant, { size: number; weight: "400" | "500" | "600" | "700"; letterSpacing?: number; lineHeight?: number }> = {
-  largeTitle: { size: 34, weight: "700", letterSpacing: 0.37, lineHeight: 41 },
+//
+// `maxScale` is Apple's own Dynamic Type CEILING for the variant, and it exists
+// because RN's ramp is not Apple's (kora#274). RN multiplies EVERY authored
+// size by one multiplier read from the content-size category — the BODY ramp,
+// 0.941 at `medium` up to 3.571 at accessibility-XXXL. Apple's ramp is
+// per-text-style and compresses hard at display sizes: largeTitle goes 34 ->
+// 60pt across the same range, a ceiling of 1.765, because a headline is
+// already large and does not need doubling to stay legible.
+//
+// Measured, not recalled — Apple's own Settings large title via
+// `idb ui describe-all`, heights in pt on iPhone 17 Pro Max:
+//
+//   large 40.7 | xL 43.0 | xxxL 48.0 | AX1 52.7 | AX2 57.3
+//   AX3 62.3 | AX4 67.0 | AX5 71.7
+//
+// Normalised to `large` that is 1.000 / 1.057 / 1.180 / 1.295 / 1.409 /
+// 1.532 / 1.648 / 1.762 — Apple's published largeTitle table to within 0.4%.
+// Against RN's 1.000 / 1.118 / 1.353 / 1.786 / 2.143 / 2.643 / 3.100 / 3.571,
+// RN over-scales a large title by 1.73x at AX3 and 2.03x at AX5.
+//
+// That over-scale is the whole of kora#274: at AX3 a 34pt title renders at
+// ~90pt, so "Notifications" needs ~520pt in a 360pt column and RN breaks it
+// mid-word ("Notificat" / "ions") because there is no space to break at. The
+// break is RN behaving correctly; the SIZE is what is wrong.
+//
+// This is NOT the cap kora#268 rejected. That one put a numeral BELOW what the
+// platform would draw. This one is the platform's own ceiling: at every content
+// size the capped title is still >= what iOS renders natively (60pt vs Apple's
+// 52pt at AX3), and below AX1 it never engages at all, because RN's own
+// multiplier does not reach 1.76 until the accessibility sizes. Nothing is
+// traded away in the range where RN and Apple already agree.
+//
+// Only `largeTitle` carries one. title1/title2 have the same distortion in
+// Apple's table (1.571 / 1.545 ceilings) but no reported breakage, and the text
+// variants must NOT get one — Apple scales body 17 -> 53pt (3.118) against RN's
+// 3.571, so RN is only 15% over there and capping body copy is a real
+// accessibility loss for no layout gain.
+export const type: Record<TypeVariant, { size: number; weight: "400" | "500" | "600" | "700"; letterSpacing?: number; lineHeight?: number; maxScale?: number }> = {
+  largeTitle: { size: 34, weight: "700", letterSpacing: 0.37, lineHeight: 41, maxScale: 1.76 },
   title1: { size: 28, weight: "700", letterSpacing: 0.36, lineHeight: 34 },
   title2: { size: 22, weight: "700", letterSpacing: 0.35, lineHeight: 28 },
   headline: { size: 17, weight: "600", lineHeight: 22 },
