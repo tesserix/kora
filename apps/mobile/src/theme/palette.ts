@@ -72,7 +72,9 @@ export const radius = { sm: 6, md: 10, lg: 12, xl: 16, "2xl": 24, "3xl": 32, ful
 export const fontSize = { xs: 11, sm: 13, base: 15, lg: 17, xl: 22, "2xl": 28, "3xl": 34, "4xl": 40, "5xl": 52 } as const;
 
 export type TypeVariant =
-  | "largeTitle" | "title1" | "title2" | "headline" | "body" | "subheadline" | "footnote" | "caption";
+  | "numeral1" | "numeral2"
+  | "largeTitle" | "title1" | "title2" | "title3"
+  | "headline" | "body" | "callout" | "subheadline" | "footnote" | "caption" | "caption2";
 
 // Sizes and leadings are Apple's Dynamic Type values verbatim. TRACKING is
 // signed to agree with SF Pro rather than with the generic web rule (kora#177):
@@ -118,17 +120,61 @@ export type TypeVariant =
 // variants must NOT get one — Apple scales body 17 -> 53pt (3.118) against RN's
 // 3.571, so RN is only 15% over there and capping body copy is a real
 // accessibility loss for no layout gain.
+//
+// title3 / callout / caption2 / numeral1 / numeral2 are the steps kora#237
+// added. The first three are the middle of Apple's own ramp that this table
+// had skipped (title3 20/25, callout 16/21) or that the app had outgrown
+// downwards (caption2, see its own note). They are named because call sites
+// were reaching for raw literals at exactly these sizes — 16 appears 10 times,
+// 9 twelve times — and a literal cannot be re-themed.
+//
+// Where an added step's Apple leading disagrees with Text.tsx's derived ratio,
+// the APPLE value wins here, because the derived ratio exists to give an
+// unnamed size a sane box, not to overrule a measured one:
+//   callout  16 -> derived 21, Apple 21  (agree)
+//   title3   20 -> derived 24, Apple 25  (+1, Apple's)
+//   caption2  9 -> derived 13, authored 12 (-1)
+// That disagreement is also why migrating a raw literal to one of these two is
+// NOT free — see the note on the call-site sweep in kora#237.
 export const type: Record<TypeVariant, { size: number; weight: "400" | "500" | "600" | "700"; letterSpacing?: number; lineHeight?: number; maxScale?: number }> = {
+  // Display numerals sit ABOVE largeTitle and are not part of Apple's ramp —
+  // no text style goes past 34pt, so a figure that has to read as an
+  // instrument reading has nothing to name it. Both steps are taken from the
+  // two sizes the app already draws, and both exist for the same reason: their
+  // hand-authored leading is NOT what Text.tsx's derived ratio produces, and a
+  // hand-tuned size/leading pair is exactly what a scale step is for.
+  //   numeral1  meal.tsx's kcal hero, authored 64/72 (derived would be 74)
+  //   numeral2  GaugeDial's centre numeral, authored 44/50 (derived would be 51)
+  // Sizes with a leading the derived ratio already gets right are deliberately
+  // NOT named — profile.tsx's 40 gets 46 from the ratio, which is the number it
+  // authors by hand, so it needs no step (kora#237).
+  //
+  // Tracking is NEGATIVE here, against the SF rule documented above, and for a
+  // reason that rule does not cover: these render in the monospaced data face,
+  // not SF Pro, so there is no optical-size tracking to agree with — the
+  // negative value is tightening a tabular face that sets loose at display
+  // size. Both values are the ones the call sites already author.
+  numeral1: { size: 64, weight: "700", letterSpacing: -2, lineHeight: 72 },
+  numeral2: { size: 44, weight: "700", letterSpacing: -1.2, lineHeight: 50 },
   largeTitle: { size: 34, weight: "700", letterSpacing: 0.37, lineHeight: 41, maxScale: 1.76 },
   title1: { size: 28, weight: "700", letterSpacing: 0.36, lineHeight: 34 },
   title2: { size: 22, weight: "700", letterSpacing: 0.35, lineHeight: 28 },
+  title3: { size: 20, weight: "700", letterSpacing: 0.38, lineHeight: 25 },
   headline: { size: 17, weight: "600", lineHeight: 22 },
   body: { size: 17, weight: "400", lineHeight: 22 },
+  callout: { size: 16, weight: "400", lineHeight: 21 },
   subheadline: { size: 15, weight: "400", lineHeight: 20 },
   footnote: { size: 13, weight: "400", lineHeight: 18 },
   // SF's own caption1 tracking is +0.06. Kept wider for the small-caps-ish
   // editorial feel the captions carry, but a fifth of the old +0.5.
   caption: { size: 11, weight: "500", letterSpacing: 0.2, lineHeight: 13 },
+  // NOT an Apple value — Apple's ramp stops at caption2 = 11/13, which is what
+  // `caption` above already is. 9pt is below the platform floor and is named
+  // here only because the app already draws at it in 12 places (tick labels,
+  // engraved micro-captions) with no variant to reach for, which is half of
+  // why kora#237 exists. Same +0.2 tracking as `caption` for the same
+  // editorial reason; callers that engrave still set their own wider tracking.
+  caption2: { size: 9, weight: "500", letterSpacing: 0.2, lineHeight: 12 },
 };
 
 export type GradientSet = {

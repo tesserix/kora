@@ -159,3 +159,82 @@ describe("leading is emitted unscaled — the platform applies Dynamic Type", ()
     expect(leading(getByText("hi").props.style).lineHeight).toBe(72);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The steps kora#237 added: title3, callout, caption2, numeral1, numeral2.
+//
+// The "every variant" test above already pins their size/leading, because it
+// iterates the table. What it does NOT pin is that they behave IDENTICALLY in
+// the rest of AppText's machinery — the derived-leading escape hatch, the
+// maxFontSizeMultiplier ceiling, and the caller-override precedence. Three of
+// the five have an authored leading that DISAGREES with the derived ratio, so
+// the two paths producing different numbers for the same variant is a real
+// failure mode rather than a theoretical one.
+//
+// Same blind spot as the header of this file: these read the emitted style
+// object. They prove the numbers AppText hands React Native. They prove nothing
+// about a glyph on a screen.
+// ---------------------------------------------------------------------------
+describe("the kora#237 steps behave like the eight that were already there", () => {
+  it.each([
+    // [variant, size, authored leading, what the derived ratio would give]
+    ["numeral1", 64, 72, 74],
+    ["numeral2", 44, 50, 51],
+    ["title3", 20, 25, 24],
+    ["callout", 16, 21, 21],
+    ["caption2", 9, 12, 13],
+  ] as const)(
+    "%s renders %ipt on a %ipt box, not the derived %ipt",
+    async (variant, size, authored, _derived) => {
+      const { getByText } = await render(<AppText variant={variant}>{variant}</AppText>);
+      expect(leading(getByText(variant).props.style)).toEqual({ fontSize: size, lineHeight: authored });
+    },
+  );
+
+  it.each([
+    // A caller who overrides the size gets the RATIO box, not the step's own —
+    // exactly as body does. Pinned per band because each new step sits in a
+    // different one.
+    ["numeral1", 26, 32], // 1.22
+    ["title3", 12, 17], // 1.45
+    ["callout", 40, 46], // 1.15
+    ["caption2", 24, 29], // 1.22
+  ] as const)("%s at an overridden %ipt falls back to the derived %ipt", async (variant, size, expected) => {
+    const { getByText } = await render(
+      <AppText variant={variant} style={{ fontSize: size }}>
+        over
+      </AppText>,
+    );
+    expect(leading(getByText("over").props.style)).toEqual({ fontSize: size, lineHeight: expected });
+  });
+
+  it("carries no Dynamic Type ceiling — largeTitle is still the only variant with one", async () => {
+    for (const variant of ["numeral1", "numeral2", "title3", "callout", "caption2"] as const) {
+      const { getByText } = await render(<AppText variant={variant}>{variant}</AppText>);
+      expect(getByText(variant).props.maxFontSizeMultiplier).toBeUndefined();
+    }
+    const { getByText } = await render(<AppText variant="largeTitle">big</AppText>);
+    expect(getByText("big").props.maxFontSizeMultiplier).toBe(typeScale.largeTitle.maxScale);
+  });
+
+  it("still lets an explicit caller maxFontSizeMultiplier win", async () => {
+    const { getByText } = await render(
+      <AppText variant="numeral2" maxFontSizeMultiplier={1.4}>
+        44
+      </AppText>,
+    );
+    expect(getByText("44").props.maxFontSizeMultiplier).toBe(1.4);
+  });
+
+  it("emits the added steps' boxes unscaled, like every other variant", async () => {
+    jest.spyOn(PixelRatio, "getFontScale").mockReturnValue(2.643);
+    try {
+      for (const variant of ["numeral1", "title3", "callout", "caption2"] as const) {
+        const { getByText } = await render(<AppText variant={variant}>{variant}</AppText>);
+        expect(leading(getByText(variant).props.style).lineHeight).toBe(typeScale[variant].lineHeight);
+      }
+    } finally {
+      jest.restoreAllMocks();
+    }
+  });
+});
