@@ -1,5 +1,15 @@
+import { StyleSheet } from "react-native";
 import { act, render } from "@testing-library/react-native";
-import { PlanDelta } from "../PlanDelta";
+import { PlanDelta, RESERVE_TEXT } from "../PlanDelta";
+
+async function announce(kcal: number, next: number, floored = false) {
+  const r = await render(<PlanDelta kcal={kcal} floored={floored} revision={0} testID="delta" />);
+  await r.rerender(<PlanDelta kcal={next} floored={floored} revision={1} testID="delta" />);
+  await act(async () => {
+    jest.advanceTimersByTime(600);
+  });
+  return r;
+}
 
 describe("PlanDelta", () => {
   beforeEach(() => {
@@ -120,5 +130,92 @@ describe("PlanDelta", () => {
       jest.advanceTimersByTime(600);
     });
     expect(r.getByTestId("delta-text").props.accessibilityLiveRegion).toBe("polite");
+  });
+
+  // kora#284. The line used to be absent until the first message, then
+  // appeared and pushed the rulers down by its own height — under a sticky
+  // header, while a finger was on the ruler. These four pin the geometry
+  // rather than the copy.
+  describe("reserved line", () => {
+    it("holds a real, non-empty line open before anything has been said", async () => {
+      const r = await render(<PlanDelta kcal={2244} floored={false} revision={0} testID="delta" />);
+      await act(async () => {
+        jest.advanceTimersByTime(600);
+      });
+      const reserve = r.getByTestId("delta-reserve", { includeHiddenElements: true });
+      expect(reserve).toHaveTextContent(RESERVE_TEXT);
+      expect(RESERVE_TEXT.length).toBeGreaterThan(0);
+    });
+
+    // The only thing in flow is the placeholder, and the placeholder never
+    // changes: same string, same variant, same type-affecting style, whether
+    // or not there is a message. Jest cannot measure a line box, so this is
+    // the strongest statement available here — the height SOURCE is identical
+    // across the transition.
+    it("does not change the laid-out line between the empty and message states", async () => {
+      const empty = await render(
+        <PlanDelta kcal={2244} floored={false} revision={0} testID="delta" />,
+      );
+      await act(async () => {
+        jest.advanceTimersByTime(600);
+      });
+      const before = empty.getByTestId("delta-reserve", { includeHiddenElements: true }).props;
+
+      const said = await announce(2244, 2484);
+      const after = said.getByTestId("delta-reserve", { includeHiddenElements: true }).props;
+
+      expect(after.children).toEqual(before.children);
+      expect(StyleSheet.flatten(after.style)).toEqual(StyleSheet.flatten(before.style));
+    });
+
+    it("keeps the message out of flow so neither its arrival nor a change can move anything", async () => {
+      const r = await announce(2244, 2484);
+      expect(StyleSheet.flatten(r.getByTestId("delta-text").props.style).position).toBe("absolute");
+
+      // message -> different message: still absolute, still the same reserve.
+      const reserve = StyleSheet.flatten(r.getByTestId("delta-reserve", { includeHiddenElements: true }).props.style);
+      await r.rerender(<PlanDelta kcal={2600} floored={false} revision={2} testID="delta" />);
+      await act(async () => {
+        jest.advanceTimersByTime(600);
+      });
+      expect(r.getByTestId("delta-text")).toHaveTextContent("+116 kcal from that change");
+      expect(StyleSheet.flatten(r.getByTestId("delta-text").props.style).position).toBe("absolute");
+      expect(StyleSheet.flatten(r.getByTestId("delta-reserve", { includeHiddenElements: true }).props.style)).toEqual(reserve);
+    });
+
+    // An empty line that VoiceOver reads, or stops on, would be worse than the
+    // shift it replaces.
+    it("says nothing to a screen reader while it is empty", async () => {
+      const r = await render(<PlanDelta kcal={2244} floored={false} revision={0} testID="delta" />);
+      await act(async () => {
+        jest.advanceTimersByTime(600);
+      });
+      // Not reachable by a default query at all: RNTL excludes hidden
+      // elements the same way VoiceOver's element order does, so this is the
+      // assertion, and the props below are why it holds.
+      expect(r.queryByTestId("delta-reserve")).toBeNull();
+      const reserve = r.getByTestId("delta-reserve", { includeHiddenElements: true }).props;
+      expect(reserve.accessibilityLiveRegion).toBeUndefined();
+      expect(reserve.accessible).toBe(false);
+      expect(reserve.accessibilityElementsHidden).toBe(true);
+      expect(reserve.importantForAccessibility).toBe("no-hide-descendants");
+      expect(StyleSheet.flatten(reserve.style).opacity).toBe(0);
+    });
+
+    // The reservation is only sound if it is the widest thing that can land in
+    // it — otherwise a long message overflows the box it was meant to fit.
+    // Character count is the proxy jest can check; the real guarantee is that
+    // the placeholder is built from the same template as the message.
+    it.each([
+      ["an increase", 2244, 2484, false],
+      ["a decrease", 2244, 2044, false],
+      ["the held message", 726, 726, true],
+      ["the largest plausible rise", 1, 9999, false],
+      ["the largest plausible fall", 9999, 1, false],
+    ])("reserves at least as much text as %s", async (_name, from, to, floored) => {
+      const r = await announce(from as number, to as number, floored as boolean);
+      const said = r.getByTestId("delta-text").props.children as string;
+      expect(said.length).toBeLessThanOrEqual(RESERVE_TEXT.length);
+    });
   });
 });
