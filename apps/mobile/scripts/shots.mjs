@@ -55,7 +55,14 @@
  *
  *   EXPO_PUBLIC_SHOTS_CLOCK=2026-08-19T09:41:00 \
  *   EXPO_PUBLIC_API_URL=https://kora-api.tesserix.app \
- *   npx expo start --dev-client --port 8083
+ *   npx expo start --dev-client --port 8081
+ *
+ * The port MUST match `--port` (default 8081, above). An installed dev client
+ * also caches the last bundle URL it was opened with, so a Metro on any other
+ * port leaves it fetching 8081 regardless: every route then fails the ready
+ * gate with a "There was a problem loading the project" screen, which looks
+ * like a readiness bug and is not one. This example said 8083 until kora#257 —
+ * following it produced exactly that.
  *
  * The value is echoed into the manifest as `shotsClock` from THIS process's
  * environment, so export it here too and the two agree. See
