@@ -200,11 +200,19 @@ are a deliberate golden update.
 - A screenshot of the centre numeral **can look vertically sliced** when the
   `AnimatedNumber` odometer is caught mid-roll. That is an artefact, not
   clipping — confirm against a settled frame before chasing it.
-- **The ejection path does not reproduce on the iPhone 17 Pro Max simulator.**
-  At 440pt wide, even after Home's `padding: 16`, the available width is ~408pt,
-  `s = 1.545`, budget `114.1` >= stack `109.8` — the caption stays in the face.
-  Ejection needs available width **below 392.46pt**, i.e. a 393pt-class device
-  (iPhone 17 Pro / 16 Pro). Verifying only on the usual Pro Max simulator will
-  show you the non-ejecting branch and tell you nothing about the one this issue
-  is about.
+- **WITHDRAWN — the ejection path reproduces everywhere.** This trap said
+  ejection would not fire on the iPhone 17 Pro Max, from `440 - 32 = 408pt`.
+  That subtraction stopped one container too early. Task 2 walked the real chain
+  on Home: `paddingHorizontal: 16` (−32), `BezelCluster`'s `RIM_INSET` 1.5x2
+  (−3), `GlassPanel`'s hairline border (−0.67), **and a second `padding: 16` on
+  the hero card's inner View** (−32). Available width is **325.3pt on a 393pt
+  device** and **372.3pt on the Pro Max** — `s = 1.232` and `1.410`, budgets
+  `91.0` and `104.2`, both short of the `109.8` stack.
+
+  Break-even needs 392.5pt of AVAILABLE width, which takes a ~460pt screen. **No
+  shipping iPhone has one.** So the ejected branch is the only branch any real
+  device takes at accessibility sizes, the non-ejecting branch is unreachable
+  through Home's chrome, and the Pro Max simulator is a fine place to verify.
+  The margin is 18.8pt, not the 0.15pt hairline the earlier correction worried
+  about.
 - Do not run prettier in this repo.
