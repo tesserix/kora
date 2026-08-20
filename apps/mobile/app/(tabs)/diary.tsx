@@ -32,6 +32,7 @@ import { foodVisual } from "@/lib/foodVisual";
 import { accessibleMealLabel } from "@/lib/portionAssumedLabel";
 import { now as clockNow } from "@/lib/shotsClock";
 import type { FoodLog } from "@/api/types";
+import { TAB_BAR_SCROLL_INSET } from "@/components/FloatingTabBar";
 
 const DOW = ["S", "M", "T", "W", "T", "F", "S"];
 const SLOT_ORDER = ["breakfast", "lunch", "dinner", "snack"];
@@ -300,7 +301,7 @@ export default function Diary() {
     <ScreenEntrance direction={1}>
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppBackground />
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + spacing.sm, paddingBottom: 140 }}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + spacing.sm, paddingBottom: TAB_BAR_SCROLL_INSET }}>
         <Animated.View entering={enter(0)} style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
           <AppText variant="largeTitle">Diary</AppText>
         </Animated.View>
