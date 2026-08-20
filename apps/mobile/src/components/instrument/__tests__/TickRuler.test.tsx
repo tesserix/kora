@@ -3,6 +3,7 @@ import { fireGestureHandler, getByGestureTestId } from "react-native-gesture-han
 import { impactAsync, selectionAsync } from "expo-haptics";
 import * as Reanimated from "react-native-reanimated";
 import {
+  detentFadeStop,
   indexFromDrag,
   labelFontScale,
   labelHeadroom,
@@ -758,5 +759,72 @@ describe("TickRuler SVG label scaling (kora#261)", () => {
     } finally {
       spy.mockRestore();
     }
+  });
+});
+
+// kora#273. The detent scale is a wide canvas translated so the SELECTED stop
+// sits under the centre index, so a stop two detents away lands 192pt from
+// centre against a 196pt half-viewport and its label is cut mid-glyph. Measured
+// on device: ~54% of the label survives at BOTH `medium` and
+// `accessibility-extra-large`, and the cut landed at the container's inner edge
+// -- 24pt INSIDE the screen edge -- so the fragments read as other words
+// ("Sedentary" -> "entary", "Lose weight" -> "weight", "1 kg/wk" -> "1 kg/").
+// The clip itself cannot be removed (see DETENT_FADE_RATIO), so the scale is
+// masked to fade into it instead. A green suite is what let kora#261 ship, so
+// these assert the rendered mask, not just the helper.
+describe("TickRuler detent edge fade (kora#273)", () => {
+  const detented = (testID: string) => (
+    <TickRuler
+      mode="detented"
+      index={0}
+      labels={ACTIVITY}
+      accessibilityLabel="Activity level"
+      testID={testID}
+      onChange={jest.fn()}
+    />
+  );
+
+  it("masks the detent scale so the clipped end labels fade rather than cut", async () => {
+    await render(detented("activity-ruler"));
+    // react-native-svg unwraps `url(#id)` down to the bare id on the node.
+    expect(screen.getByTestId("activity-ruler-scale").props.mask).toMatch(/^detent-mask-.+/);
+  });
+
+  // Onboarding mounts ten rulers at once. A shared gradient/mask id would let
+  // whichever ruler mounted last own the def and leave the rest masked by
+  // geometry that is not theirs.
+  it("gives every mounted ruler its own mask id", async () => {
+    await render(
+      <>
+        {detented("goal-ruler")}
+        {detented("pace-ruler")}
+      </>,
+    );
+    expect(screen.getByTestId("goal-ruler-scale").props.mask).not.toBe(
+      screen.getByTestId("pace-ruler-scale").props.mask,
+    );
+  });
+
+  describe("detentFadeStop", () => {
+    // 10pt label on the 392pt viewport of a 440pt-wide phone: a 24pt runway.
+    it("sizes the fade off the label, not the viewport", () => {
+      expect(detentFadeStop(10, 392)).toBeCloseTo(24 / 392);
+    });
+
+    // The same viewport at the 1.6 Dynamic Type cap: the fragment left behind
+    // is proportionally longer, so the runway grows with it.
+    it("grows the runway as the label scales up", () => {
+      expect(detentFadeStop(16, 392)).toBeGreaterThan(detentFadeStop(10, 392));
+      expect(detentFadeStop(16, 392)).toBeCloseTo(38.4 / 392);
+    });
+
+    it("never lets the two fades meet and swallow the selected label", () => {
+      expect(detentFadeStop(100, 120)).toBe(0.45);
+    });
+
+    // `width` is 0 until onLayout lands; a NaN offset would break the gradient.
+    it("is inert before the first layout pass", () => {
+      expect(detentFadeStop(10, 0)).toBe(0);
+    });
   });
 });
