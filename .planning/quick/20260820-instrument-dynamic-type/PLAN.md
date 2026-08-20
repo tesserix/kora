@@ -55,32 +55,43 @@ grows** rather than unconditionally. Against `stack(f) = 50·min(f,1.6) + 6 +
 | fontScale | budget `73.9·s` | in-face stack | slack |
 |-----------|-----------------|---------------|-------|
 | 1.0       | 73.9            | 73.0          | 0.9pt (today) |
-| 1.4       | 103.5           | 99.8          | 3.7pt |
+| 1.4       | 103.4           | 99.8          | 3.6pt |
 | 1.6       | 118.2           | 109.8         | 8.4pt |
 | 3.0 (capped) | 118.2        | 109.8         | 8.4pt |
 
 The 73.9 is #268's own measurement, re-derived here from the constants rather
-than copied: `GAUGE_CENTER_Y - HUB_DOT_R - 0.38·GAUGE_VIEW_H` = `146 - 4.5 -
-67.64`. It must be asserted in a test, not trusted.
+than copied: `GAUGE_CENTER_Y - HUB_DOT_R - 0.38·GAUGE_VIEW_H` = `146 - 4.5 - 67.64` =
+**73.86**. It must be asserted in a test, not trusted. (The table above is
+computed from 73.86; an earlier draft rounded to 73.9 first, which is where its
+103.5 row came from.)
 
 ### The cap is set by WIDTH, not by the font caps
 
-`GAUGE_VIEW_W · 1.6 = 422.4pt`. The narrowest supported screen is 393pt. So the
-width clamp binds first and claws `s` back to roughly `1.34` on a 393pt device —
-budget `99.0` against a stack of `109.8`, and **the collision #268 describes
-comes straight back**.
+`GAUGE_VIEW_W * 1.6 = 422.4pt`, so on any screen narrower than that the width
+clamp binds first and `s` never reaches 1.6.
 
-So the scale alone does not close #268. The second half is #268's own aside:
+**CORRECTED during task 1.** This section originally said the clamp "claws `s`
+back to roughly 1.34 on a 393pt device". That is wrong as stated: `393 / 264 =
+1.4886`, and at that scale the budget is `109.95` against a stack of `109.8` —
+the caption **fits, by 0.15pt**. The 1.34 figure is what you get from ~354pt,
+i.e. a *padded content* width reported as if it were the screen width.
 
-> *"Worth deciding at the same time whether the caption belongs inside the face
-> at all at large text sizes, or whether it should move below the dial where it
-> has room."*
+The conclusion survives, but the reason is different and the margin is the
+point:
 
-Adopted, and made a derived condition rather than a breakpoint: when
-`budget(s) < stack(f)`, the caption **ejects below the face**, where its room is
-unbounded. The numeral stays in the face — it is the instrument's readout, and
-#268 already rejected paying for caption position with the numeral's Dynamic
-Type.
+- Break-even is **392.46pt of available width**. A raw 393pt screen sits 0.54pt
+  above it.
+- 0.15pt of clearance is **thinner than the error bar on `CAPTION_LINE_RATIO`**,
+  which is an estimate of RN's default leading. At 1.72 rather than 1.70 it is
+  already negative.
+- Any horizontal padding at all tips it. `GaugeDial` on Home sits inside a
+  `padding: 16` container, so its real available width is at most 361pt on a
+  393pt device — `s = 1.337`, budget `98.8`, and the caption **does not fit**.
+
+So the ejection path is necessary, and the predicate must be fed the
+component's **available layout width, not `useWindowDimensions().width`**. On a
+393pt device those two differ by exactly enough to flip the result — window
+width would report a fit and the device would clip.
 
 No `maxFontSizeMultiplier` anywhere is lowered. That trade was explicitly
 weighed and rejected in #268 and #267, and this plan does not re-open it.
@@ -189,4 +200,11 @@ are a deliberate golden update.
 - A screenshot of the centre numeral **can look vertically sliced** when the
   `AnimatedNumber` odometer is caught mid-roll. That is an artefact, not
   clipping — confirm against a settled frame before chasing it.
+- **The ejection path does not reproduce on the iPhone 17 Pro Max simulator.**
+  At 440pt wide, even after Home's `padding: 16`, the available width is ~408pt,
+  `s = 1.545`, budget `114.1` >= stack `109.8` — the caption stays in the face.
+  Ejection needs available width **below 392.46pt**, i.e. a 393pt-class device
+  (iPhone 17 Pro / 16 Pro). Verifying only on the usual Pro Max simulator will
+  show you the non-ejecting branch and tell you nothing about the one this issue
+  is about.
 - Do not run prettier in this repo.
