@@ -792,6 +792,10 @@ export function CaptureBody({
               accessibilityLabel="Tell Otto what you ate"
               value={text}
               onChangeText={onChangeText}
+              autoCorrect
+              spellCheck
+              returnKeyType="send"
+              onSubmitEditing={onSend}
               placeholder="Tell Otto what you ate…"
               placeholderTextColor={T.mut}
               style={{ flex: 1, color: T.ink, fontSize: 15 }}
@@ -1359,8 +1363,10 @@ export default function CaptureScreen() {
         if (!recoverable) {
           // Hand the words back. The bubble goes with them: a message that
           // never arrived should not sit in the thread as though it did.
-          setSentPhrase(null);
-          setText(phrase);
+          // Keep the submitted phrase in the thread as the retry context and
+          // leave the composer empty; restoring it here made a failed request
+          // look like it had never been sent and duplicated the prompt.
+          setText("");
           setErrorMsg(ottoErrorMessage(error));
           return;
         }
@@ -1375,8 +1381,7 @@ export default function CaptureScreen() {
         } catch (queueError) {
           // The queue refused (full, or nobody signed in) — the phrase is only
           // safe in the composer now, so put it back and say why.
-          setSentPhrase(null);
-          setText(phrase);
+          setText("");
           setErrorMsg(
             queueError instanceof CaptureQueueFullError || queueError instanceof NoOwnerError
               ? queueError.message
