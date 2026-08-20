@@ -29,6 +29,7 @@ type Config struct {
 	AIGatewayBaseURL  string
 	AIGatewayAPIKey   string
 	AIGatewayModel    string
+	AIAgentTimeout    time.Duration
 	SchedulerInterval time.Duration
 	PushEnabled       bool
 	PushInterval      time.Duration
@@ -78,6 +79,7 @@ func Load() (Config, error) {
 		AIGatewayBaseURL:         os.Getenv("AI_GATEWAY_BASE_URL"),
 		AIGatewayAPIKey:          os.Getenv("AI_GATEWAY_API_KEY"),
 		AIGatewayModel:           getenv("AI_GATEWAY_MODEL", "kora-auto"),
+		AIAgentTimeout:           getdur("AI_AGENT_TIMEOUT", 24*time.Second),
 		SchedulerInterval:        getdur("SCHEDULER_INTERVAL", 5*time.Minute),
 		PushEnabled:              os.Getenv("PUSH_ENABLED") == "true",
 		PushInterval:             getdur("PUSH_INTERVAL", 30*time.Second),

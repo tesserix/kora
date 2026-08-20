@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/tesserix/kora/api/internal/agents"
 	"github.com/tesserix/kora/api/internal/ai"
 	"github.com/tesserix/kora/api/internal/ai/providers"
 	"github.com/tesserix/kora/api/internal/config"
@@ -58,6 +59,29 @@ func TestGatewayWiringUsesTheGatewayForRequestsAndEmbeddings(t *testing.T) {
 
 	assert.IsType(t, providers.AgentGatewayProvider{}, wiring.requests)
 	assert.IsType(t, providers.AgentGatewayProvider{}, wiring.embeddings)
+}
+
+func TestGatewayWiringAlsoBuildsGatewayOnlyAgentDelegator(t *testing.T) {
+	t.Parallel()
+
+	delegator, err := buildAgentDelegator(config.Config{
+		AIGatewayEnabled: true,
+		AIGatewayBaseURL: "http://agentgateway.kora.svc.cluster.local/v1",
+		AIGatewayAPIKey:  "internal-key",
+		AIAgentTimeout:   25 * time.Second,
+	})
+
+	require.NoError(t, err)
+	assert.IsType(t, &agents.GatewayClient{}, delegator)
+}
+
+func TestDirectProviderModeDoesNotBuildAgentServiceBypass(t *testing.T) {
+	t.Parallel()
+
+	delegator, err := buildAgentDelegator(config.Config{})
+
+	require.NoError(t, err)
+	assert.Nil(t, delegator)
 }
 
 func TestDirectWiringKeepsEmbeddingsOnGemini(t *testing.T) {

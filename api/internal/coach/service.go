@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/tesserix/kora/api/internal/agents"
 	"github.com/tesserix/kora/api/internal/ai"
 	"github.com/tesserix/kora/api/internal/guardrails"
 	"github.com/tesserix/kora/api/internal/httpx"
@@ -98,12 +99,21 @@ type Service struct {
 	provider ai.Provider
 	meter    ai.Meter
 	thread   *ThreadRepository
+	delegate agents.Delegator
 }
 
 // NewService builds a Service over its collaborators. thread may be nil, in
 // which case exchanges are answered but not persisted.
 func NewService(g *Grounder, p ai.Provider, m ai.Meter, thread *ThreadRepository) *Service {
 	return &Service{g: g, provider: p, meter: m, thread: thread}
+}
+
+// WithDelegator makes Otto a supervisor over reviewed A2A agents. The
+// delegator is wired only in AgentGateway mode; direct-provider development
+// mode keeps the existing GenerateText path.
+func (s *Service) WithDelegator(delegate agents.Delegator) *Service {
+	s.delegate = delegate
+	return s
 }
 
 // Ask answers a free-text question grounded over the user's Context. The
@@ -122,7 +132,7 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 	}
 	signals := SignalsFrom(grounded)
 
-	if s.provider == nil {
+	if s.delegate == nil && s.provider == nil {
 		return Answer{Text: providerUnavailableText, ShowSupport: guardrails.AtRisk(signals)}, nil
 	}
 
@@ -134,11 +144,18 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 		return Answer{Text: budgetDegradedText, ShowSupport: guardrails.AtRisk(signals)}, nil
 	}
 
-	userPrompt := fmt.Sprintf("CONTEXT:\n%s\n\nQUESTION: %s", grounded.Render(), question)
-	providerCtx, collector := ai.WithUsageCollector(ctx)
-	raw, usage, err := s.provider.GenerateText(providerCtx, qaSystemPrompt, userPrompt)
-	for _, abandoned := range collector.Drain() {
-		s.record(ctx, userID, abandoned)
+	userPrompt := fmt.Sprintf("SUPERVISOR REQUIREMENTS:\n%s\n\nCONTEXT:\n%s\n\nQUESTION: %s", qaSystemPrompt, grounded.Render(), question)
+	var raw string
+	var usage ai.Usage
+	if s.delegate != nil {
+		result, delegateErr := s.delegate.Delegate(ctx, agents.SelectForQuestion(question), userPrompt)
+		raw, usage, err = result.Text, result.Usage, delegateErr
+	} else {
+		providerCtx, collector := ai.WithUsageCollector(ctx)
+		raw, usage, err = s.provider.GenerateText(providerCtx, qaSystemPrompt, userPrompt)
+		for _, abandoned := range collector.Drain() {
+			s.record(ctx, userID, abandoned)
+		}
 	}
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {

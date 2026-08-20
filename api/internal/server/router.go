@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/tesserix/kora/api/internal/admin"
+	"github.com/tesserix/kora/api/internal/agents"
 	"github.com/tesserix/kora/api/internal/ai"
 	"github.com/tesserix/kora/api/internal/auth"
 	"github.com/tesserix/kora/api/internal/bffauth"
@@ -49,6 +50,10 @@ type Deps struct {
 	// gracefully instead of calling it — /coach/nudges is unaffected either
 	// way since it never touches the provider.
 	Provider ai.Provider
+	// AgentDelegator is the gateway-only A2A client Otto uses as a supervisor.
+	// It is nil outside AgentGateway mode, preserving local direct-provider
+	// development without creating a direct agent-service bypass.
+	AgentDelegator agents.Delegator
 	// ResolveCache is the SAME cache instance the resolve engine reads
 	// Resolutions from (see cmd/api/main.go's buildResolveHandler). It is
 	// wired into foodlog.Service so a post-log correction can evict the
@@ -297,7 +302,9 @@ func NewRouter(deps Deps) *gin.Engine {
 		coachGrounder := coach.NewGrounder(dashSvc, logRepo, memSvc, trackingRepo)
 		coachMeter := billing.NewMeter(deps.DB)
 		coachThread := coach.NewThreadRepository(deps.DB)
-		coachHandler := coach.NewHandler(coach.NewService(&coachGrounder, deps.Provider, coachMeter, &coachThread))
+		coachService := coach.NewService(&coachGrounder, deps.Provider, coachMeter, &coachThread).
+			WithDelegator(deps.AgentDelegator)
+		coachHandler := coach.NewHandler(coachService)
 		v1.GET("/coach/nudges", coachHandler.Nudges)
 		v1.POST("/coach/ask", coachHandler.Ask)
 		v1.GET("/coach/thread", coachHandler.Thread)
