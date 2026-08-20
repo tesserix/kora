@@ -1351,7 +1351,23 @@ export default function CaptureScreen() {
         setResolvedPhrase(phrase);
       },
       onError: async (error) => {
-        if (controller.signal.aborted) return;
+        // Cancel stops the WAITING, not the words (kora#242) — the rule the
+        // media path already states at runPhotoPick's onError, applied here.
+        // Returning at this guard skipped the classifier below, so a phrase
+        // typed offline and then cancelled was destroyed: gone from the thread
+        // (handleCancelResolve clears sentPhrase) and gone from the composer.
+        // No connectivity snapshot is consulted — an online Cancel arrives as
+        // CancelledError, which the classifier below does not queue, so there
+        // is nothing to preserve in that case and nothing to decide.
+        //
+        // `cancelled` suppresses COPY only — the same division
+        // handleResolveFailure's `silent` draws. Cancel already took the
+        // screen to idle and does not also get to raise a fresh bubble about
+        // the request it just stopped, neither the reassurance nor the
+        // failure's own message. It never suppresses the enqueue, and never
+        // suppresses a queue refusal: a phrase that could not be saved must
+        // say so (see the catch below).
+        const cancelled = controller.signal.aborted;
         // Same classifier handleResolveFailure uses: these three mean the
         // request never arrived, so the phrase is still good and belongs in
         // the queue (kora#196). Anything else is a genuine refusal that would
@@ -1367,16 +1383,18 @@ export default function CaptureScreen() {
           // leave the composer empty; restoring it here made a failed request
           // look like it had never been sent and duplicated the prompt.
           setText("");
-          setErrorMsg(ottoErrorMessage(error));
+          if (!cancelled) setErrorMsg(ottoErrorMessage(error));
           return;
         }
         try {
           await enqueueTextCapture(phrase, mealSlot);
           // The bubble STAYS and the composer stays empty: the capture was
           // accepted, so returning the text would be the misleading state.
-          setErrorMsg(
-            "You're offline — I've saved that, and I'll identify it as soon as you're back online.",
-          );
+          if (!cancelled) {
+            setErrorMsg(
+              "You're offline — I've saved that, and I'll identify it as soon as you're back online.",
+            );
+          }
           void queryClient.invalidateQueries({ queryKey: [QUEUED_CAPTURES_KEY] });
         } catch (queueError) {
           // The queue refused (full, or nobody signed in) — the phrase is only
