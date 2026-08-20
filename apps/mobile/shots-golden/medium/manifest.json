@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 1,
+  "contentSize": "medium",
+  "device": {
+    "name": "iPhone 17 Pro Max",
+    "runtime": "com.apple.CoreSimulator.SimRuntime.iOS-26-2"
+  },
+  "shotsClock": "2026-08-19T09:41:00",
+  "statusBarTime": "9:41",
+  "scheme": "com.tesserix.kora",
+  "capturedAt": "2026-08-20T01:28:52.778Z",
+  "gitCommit": "ae575a1d",
+  "rule": {
+    "scale": 3,
+    "threshold": 48,
+    "maxPixels": 0,
+    "broadThreshold": 8,
+    "broadFramePct": 3,
+    "block": 20,
+    "failDensity": 0.3
+  },
+  "routes": [
+    {
+      "route": "about",
+      "width": 440,
+      "height": 956,
+      "bytes": 169291
+    },
+    {
+      "route": "ai-usage",
+      "width": 440,
+      "height": 956,
+      "bytes": 147033
+    },
+    {
+      "route": "coach",
+      "width": 440,
+      "height": 956,
+      "bytes": 164363
+    },
+    {
+      "route": "feedback",
+      "width": 440,
+      "height": 956,
+      "bytes": 163424
+    },
+    {
+      "route": "notifications",
+      "width": 440,
+      "height": 956,
+      "bytes": 176575
+    },
+    {
+      "route": "onboarding",
+      "width": 440,
+      "height": 956,
+      "bytes": 186651
+    },
+    {
+      "route": "profile",
+      "width": 440,
+      "height": 956,
+      "bytes": 131874
+    },
+    {
+      "route": "recipes",
+      "width": 440,
+      "height": 956,
+      "bytes": 183709
+    },
+    {
+      "route": "settings",
+      "width": 440,
+      "height": 956,
+      "bytes": 152838
+    },
+    {
+      "route": "sign-in",
+      "width": 440,
+      "height": 956,
+      "bytes": 172920
+    },
+    {
+      "route": "tab-diary",
+      "width": 440,
+      "height": 956,
+      "bytes": 167063
+    },
+    {
+      "route": "tab-more",
+      "width": 440,
+      "height": 956,
+      "bytes": 123994
+    },
+    {
+      "route": "tab-progress",
+      "width": 440,
+      "height": 956,
+      "bytes": 115678
+    }
+  ],
+  "excluded": [
+    {
+      "route": "capture",
+      "reason": "The greeting bubble's entrance settles at a slightly different vertical offset on each launch — visibly one to three device pixels — and the route's per-route 8000ms dwell (shots.routes.mjs) reduces it without removing it: measured residuals across launches range from 0 to 4 pixels above 48/255 and up to 1,286 above 8/255. That upper bound is the same order as the 38-pixel signal of a one-character label change, so any budget that absorbs the drift also hides the defect. To bring it back: find what the bubble's entrance is waiting on — the gate opens on the mode chips, which mount well before it — and gate on that instead, or disable its entrance under a capture flag."
+    },
+    {
+      "route": "tab-today",
+      "reason": "Not deterministic across launches, and the only route that is not. GlassPanel renders an expo-blur BlurView whose backdrop re-samples per launch; Stage B showed an 8000ms dwell does not help and that the route is bimodal (0.113% and 1.101% of frame under identical settings). Measured here over six launches: up to 634 pixels above 48/255 at 1x, in a block 16.3% dense. A budget large enough to absorb that (~2000px) is roughly FIFTY TIMES the 38-pixel signal of a one-character label change, so it would keep the route green while blinding it to the bug class this harness exists for. Excluded rather than weakened. To bring it back: make the blur deterministic, or render it flat under a capture flag, or seed the backdrop — then delete this entry and run `npm run shots:golden`."
+    }
+  ]
+}
