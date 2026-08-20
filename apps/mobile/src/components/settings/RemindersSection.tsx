@@ -88,10 +88,10 @@ export function RemindersSection() {
               key={slot}
               style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", minHeight: 44, paddingHorizontal: spacing.md, rowGap: spacing.xs, columnGap: spacing.sm }}
             >
-              <AppText style={{ flexGrow: 1, flexShrink: 0, fontSize: 17, fontWeight: "600", color: instrument.ink }}>{LABEL[slot]}</AppText>
+              <AppText variant="headline" style={{ flexGrow: 1, flexShrink: 0, color: instrument.ink }}>{LABEL[slot]}</AppText>
               <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
                 <Pressable accessibilityLabel={`${LABEL[slot]} time`} onPress={() => openPicker(slot)} disabled={!p.enabled} style={(s) => ({ opacity: s.pressed ? 0.6 : 1 })}>
-                  <AppText style={{ fontSize: 15, color: instrument.mut, opacity: p.enabled ? 1 : 0.4 }}>{fmt(p.hour, p.minute)}</AppText>
+                  <AppText variant="subheadline" style={{ color: instrument.mut, opacity: p.enabled ? 1 : 0.4 }}>{fmt(p.hour, p.minute)}</AppText>
                 </Pressable>
                 <ToggleSwitch
                   testID={`reminder-switch-${slot}`}

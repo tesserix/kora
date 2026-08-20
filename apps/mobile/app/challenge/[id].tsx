@@ -62,7 +62,7 @@ export default function ChallengeDetailScreen() {
             <GlassPanel radius={22} style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.md }}>
               <Icon name="trophy" size={22} color={instrument.accent} />
               <View style={{ flex: 1 }}>
-                <AppText style={{ fontSize: 17, fontWeight: "600", color: instrument.ink }}>{`${d.winner.display_name} wins`}</AppText>
+                <AppText variant="headline" style={{ color: instrument.ink }}>{`${d.winner.display_name} wins`}</AppText>
                 <AppText style={{ fontSize: 13, color: instrument.mut }}>
                   {`${d.winner.score} ${d.metric === "logged" ? "days logged" : "days on target"}`}
                 </AppText>

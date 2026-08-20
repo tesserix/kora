@@ -32,7 +32,7 @@ export function NotifRow({ iconName, text, time, unread, onPress }: Props) {
         <Icon name={iconName} size={17} color={instrument.mut} />
       </View>
       <View style={{ flex: 1 }}>
-        <AppText style={{ fontSize: 15, color: instrument.ink }}>{text}</AppText>
+        <AppText variant="subheadline" style={{ color: instrument.ink }}>{text}</AppText>
         <AppText style={{ fontSize: 12, color: instrument.mut, marginTop: 2 }}>{time}</AppText>
       </View>
       {unread ? (

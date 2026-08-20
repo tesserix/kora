@@ -818,7 +818,7 @@ export function CaptureBody({
               style={{ flex: 1, color: T.ink, fontSize: 15 }}
             />
           ) : (
-            <AppText style={{ flex: 1, color: T.mut, fontSize: 15 }}>
+            <AppText variant="subheadline" style={{ flex: 1, color: T.mut }}>
               {mode === "voice" ? "Hold the mic to record" : "Point at a barcode"}
             </AppText>
           )}

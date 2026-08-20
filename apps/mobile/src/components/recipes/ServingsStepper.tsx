@@ -30,7 +30,7 @@ export function ServingsStepper({ value, onChange, min = 1 }: ServingsStepperPro
       >
         <Icon name="minus" size={16} color={instrument.accent} />
       </PressableScale>
-      <AppText style={{ fontSize: 17, fontWeight: "600", color: instrument.ink, minWidth: 24, textAlign: "center" }}>
+      <AppText variant="headline" style={{ color: instrument.ink, minWidth: 24, textAlign: "center" }}>
         {value}
       </AppText>
       <PressableScale

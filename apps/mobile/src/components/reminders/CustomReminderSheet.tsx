@@ -89,8 +89,8 @@ export function CustomReminderSheet({ visible, editing, onClose, onSave, onDelet
         </View>
 
         <Pressable accessibilityLabel="Reminder time" onPress={() => setShowPicker((open) => !open)} style={(state) => ({ marginTop: spacing.md, flexDirection: "row", justifyContent: "space-between", opacity: state.pressed ? 0.6 : 1 })}>
-          <AppText style={{ fontSize: 17, fontWeight: "600", color: instrument.ink }}>Time</AppText>
-          <AppText style={{ fontSize: 17, fontWeight: "600", color: instrument.accent }}>{fmt(hour, minute)}</AppText>
+          <AppText variant="headline" style={{ color: instrument.ink }}>Time</AppText>
+          <AppText variant="headline" style={{ color: instrument.accent }}>{fmt(hour, minute)}</AppText>
         </Pressable>
         {showPicker ? (
           <DateTimePicker

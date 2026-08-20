@@ -93,7 +93,7 @@ export default function Feedback() {
             {submitted ? (
               <GlassPanel radius={22} style={{ padding: spacing.md, gap: spacing.sm, alignItems: "flex-start" }}>
                 <AppText style={{ fontSize: 22, fontWeight: "700", color: instrument.ink }}>Thanks — got it.</AppText>
-                <AppText style={{ fontSize: 15, color: instrument.mut }}>
+                <AppText variant="subheadline" style={{ color: instrument.mut }}>
                   We read every note. If yours needs a reply, we'll be in touch.
                 </AppText>
                 <Button

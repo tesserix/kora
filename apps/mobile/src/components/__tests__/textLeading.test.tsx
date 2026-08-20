@@ -1,3 +1,4 @@
+import type { ReactElement } from "react";
 import { PixelRatio, StyleSheet } from "react-native";
 import { render } from "@testing-library/react-native";
 import { AppText } from "../Text";
@@ -236,5 +237,60 @@ describe("the kora#237 steps behave like the eight that were already there", () 
     } finally {
       jest.restoreAllMocks();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Which variants a raw `fontSize` literal can be migrated to WITHOUT moving a
+// pixel (kora#237 §2).
+//
+// A raw literal renders through derivedLeading(); a variant renders through its
+// own authored lineHeight. Those two numbers agree for some steps and disagree
+// for others, so "replace fontSize: N with variant=X" is only a no-op for the
+// ones where they agree AND the variant adds no tracking of its own. The
+// call-site sweep was scoped to exactly that set; footnote (13 -> authored 18 vs
+// derived 19) and caption (11, plus +0.2 tracking) were deliberately left with
+// their literals rather than shipped as a silent 1pt reflow across ~68 sites.
+//
+// This is a JS-side equality, not a visual one — see the header. It says the
+// two paths emit the same numbers, which is the strongest claim jest can make.
+// ---------------------------------------------------------------------------
+describe("the variants the call-site sweep migrated to are byte-identical to the literal", () => {
+  async function emitted(node: ReactElement, text: string) {
+    const { getByText } = await render(node);
+    const flat = StyleSheet.flatten(getByText(text).props.style as never) as Record<string, unknown>;
+    return {
+      fontSize: flat.fontSize,
+      lineHeight: flat.lineHeight,
+      fontWeight: flat.fontWeight,
+      letterSpacing: flat.letterSpacing,
+    };
+  }
+
+  it.each([
+    ["subheadline", 15, "400"],
+    ["headline", 17, "600"],
+    ["callout", 16, "400"],
+  ] as const)("%s matches a bare fontSize: %i at weight %s", async (variant, size, weight) => {
+    const asLiteral = await emitted(<AppText style={{ fontSize: size, fontWeight: weight }}>x</AppText>, "x");
+    const asVariant = await emitted(<AppText variant={variant}>x</AppText>, "x");
+    expect(asVariant).toEqual(asLiteral);
+  });
+
+  it.each([
+    // Left OUT of the sweep, and this is why: the variant's box is not the
+    // derived box, so migrating these WOULD change the rendered line.
+    ["footnote", 13],
+    ["caption", 11],
+    ["caption2", 9],
+    ["title3", 20],
+  ] as const)("%s is NOT interchangeable with a bare fontSize: %i", async (variant, size) => {
+    const asLiteral = await emitted(<AppText style={{ fontSize: size }}>x</AppText>, "x");
+    const asVariant = await emitted(<AppText variant={variant}>x</AppText>, "x");
+    expect(asVariant.fontSize).toBe(asLiteral.fontSize);
+    expect([asVariant.lineHeight, asVariant.letterSpacing]).not.toEqual([
+      asLiteral.lineHeight,
+      asLiteral.letterSpacing,
+    ]);
   });
 });

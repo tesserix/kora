@@ -172,12 +172,12 @@ export default function ProfileScreen() {
                 <AppText style={[{ fontSize: 24, fontWeight: "700", color: instrument.ink }, mono]}>
                   {fw ? fw.value : "—"}
                 </AppText>
-                <AppText style={{ fontSize: 15, color: instrument.mut }}>{fw ? fw.unit : "kg"}</AppText>
+                <AppText variant="subheadline" style={{ color: instrument.mut }}>{fw ? fw.unit : "kg"}</AppText>
               </View>
             </GlassPanel>
             <GlassPanel radius={22} style={{ flex: 1, padding: spacing.md, minHeight: 84, justifyContent: "center" }}>
               <AppText style={duoLabel}>Member since</AppText>
-              <AppText style={{ fontSize: 17, fontWeight: "600", color: instrument.ink }}>
+              <AppText variant="headline" style={{ color: instrument.ink }}>
                 {data ? formatMemberSince(data.onboarded_at) : "—"}
               </AppText>
             </GlassPanel>
