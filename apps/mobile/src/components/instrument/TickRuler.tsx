@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   Dimensions,
   useWindowDimensions,
@@ -9,12 +9,23 @@ import {
 import { Gesture, GestureDetector, type PanGesture } from "react-native-gesture-handler";
 import Animated, {
   runOnJS,
+  useAnimatedProps,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
   type SharedValue,
 } from "react-native-reanimated";
-import Svg, { Line, Path, Text as SvgText } from "react-native-svg";
+import Svg, {
+  Defs,
+  G,
+  Line,
+  LinearGradient,
+  Mask,
+  Path,
+  Rect,
+  Stop,
+  Text as SvgText,
+} from "react-native-svg";
 import { AppText } from "@/components/Text";
 import { useTheme } from "@/theme";
 import { haptics, springs } from "@/motion";
@@ -155,6 +166,43 @@ const FAIL_OFFSET_Y = 15;
 // ruler's READOUT ("30 years", "170 cm") is a real RN <Text> that already
 // scales correctly (kora#165, kora#173), so there is always an accessible
 // surface for the value. These labels are supplementary orientation.
+// --- Edge fade for the detent scale (kora#273) ------------------------------
+//
+// The scale is a wide canvas translated so the SELECTED stop sits under the
+// centre index, and the viewport clips it at `overflow: "hidden"`. A stop two
+// detents from the selection therefore lands 2 * DETENT_PX = 192pt from centre
+// against a 196pt half-viewport, leaving ~4pt for a label 60-95pt wide, so the
+// end labels were cut mid-glyph. Measured on device (iPhone 17 Pro Max, 392pt
+// viewport): ~54% of the label survives at BOTH `medium` and
+// `accessibility-extra-large`, so this is geometry, not Dynamic Type, and NOT
+// the same defect as the label sizes kora#261 fixed.
+//
+// The cut cannot be designed away. For stop 4 of the activity ruler to be whole
+// while stop 0 is selected, DETENT_PX would have to fall to ~42pt -- narrower
+// than the labels themselves, so they would collide instead. Clipping the far
+// stops is INHERENT to the centred-selection metaphor this control shares with
+// the continuous rulers and the dials.
+//
+// What was wrong was not that a label is clipped but that nothing said so. The
+// clip lands at the container's inner edge, 24pt INSIDE the screen edge, so the
+// text stopped dead in open background with a fully-drawn tick beneath it, and
+// the fragments left behind read as other words: "Sedentary" -> "entary",
+// "1 kg/wk" -> "1 kg/", and with Build muscle selected "Lose weight" ->
+// "weight". A picker peeking at a neighbour is fine; naming a stop wrongly is
+// not.
+//
+// So the fade does not try to reveal more text -- it makes the inherent clip
+// legible as "there is more this way". It is an alpha mask rather than a
+// background-coloured scrim on purpose: the page behind the ruler is a warm-to-
+// cool horizontal gradient (#14100F at the left edge to #0F171A at the right,
+// and different again per section), so a scrim would band and would couple this
+// component to whatever happens to be rendered behind it.
+//
+// Sized off the label, not the viewport: a 16pt label leaves a proportionally
+// longer fragment than a 10pt one and needs a longer runway to fade over, or
+// the taper reads as a hard edge again at the top of the Dynamic Type range.
+const DETENT_FADE_RATIO = 2.4;
+
 const CONTINUOUS_LABEL_FONT_SIZE = 9;
 const DETENT_LABEL_FONT_SIZE = 10;
 const CONTINUOUS_LABEL_SCALE_MAX = 2.4;
@@ -164,6 +212,22 @@ const DETENT_LABEL_SCALE_MAX = 1.6;
 // is the right tool because SVG gives no text metrics and the cost of being a
 // point or two generous is a point or two of extra height.
 const LABEL_CAP_RATIO = 0.75;
+
+/**
+ * How far into the detent viewport each edge fade runs, as a FRACTION of the
+ * viewport width, ready to drop straight into the gradient's stop offsets.
+ *
+ * Clamped at 0.45 so the two fades can never meet and swallow the selected stop
+ * whole -- on a narrow viewport that would leave the control with no legible
+ * label at all, which is worse than the clipping this fixes.
+ *
+ * Exported for the geometry tests, which pin the ratio rather than re-deriving
+ * it from a screenshot.
+ */
+export function detentFadeStop(labelSize: number, width: number): number {
+  if (width <= 0) return 0;
+  return Math.min(0.45, (labelSize * DETENT_FADE_RATIO) / width);
+}
 
 /**
  * The multiplier the SVG labels actually use: the system font scale, floored
@@ -653,6 +717,13 @@ function ContinuousRuler(props: ContinuousProps) {
   );
 }
 
+// The mask lives INSIDE the translated canvas -- the only place a
+// react-native-svg mask can reach the scale -- so it has to be counter-
+// translated every frame or the fade would slide away from the viewport edge
+// along with the ticks. Driven off the same `offset` shared value as the scale
+// itself, on the UI thread, so it cannot fight kora#176's drag.
+const AnimatedRect = Animated.createAnimatedComponent(Rect);
+
 function DetentedRuler(props: DetentedProps) {
   const { instrument } = useTheme();
   const { index, labels, onChange, accessibilityLabel } = props;
@@ -714,6 +785,18 @@ function DetentedRuler(props: DetentedProps) {
     transform: [{ translateX: mid - pad - offset.value * DETENT_PX }],
   }));
 
+  // Ten rulers mount at once in onboarding, so the gradient and mask ids have
+  // to be per-instance: a shared id would let whichever ruler mounted last own
+  // the def and leave the rest masked by geometry that is not theirs.
+  const uid = useId().replace(/:/g, "");
+  const fadeId = `detent-fade-${uid}`;
+  const maskId = `detent-mask-${uid}`;
+  // Where the viewport's left edge currently sits in canvas coordinates --
+  // exactly the inverse of `scaleStyle`'s translate, so the fade band stays
+  // welded to the container edge while the ticks slide underneath it.
+  const maskProps = useAnimatedProps(() => ({ x: pad + offset.value * DETENT_PX - mid }));
+  const fadeStop = detentFadeStop(labelSize, width);
+
   return (
     <GestureDetector gesture={pan}>
       <View
@@ -729,37 +812,67 @@ function DetentedRuler(props: DetentedProps) {
       >
         <Animated.View style={[{ width: scaleWidth, height: HEIGHT + 8 }, scaleStyle]}>
           <Svg width={scaleWidth} height={HEIGHT + 8}>
-            {labels.map((label, i) => {
-              const on = i === index;
-              return (
-                <Line
-                  key={`stop-${label}`}
-                  testID={`${testID}-stop-${i}`}
-                  x1={pad + i * DETENT_PX}
-                  y1={BASELINE + 8}
-                  x2={pad + i * DETENT_PX}
-                  y2={BASELINE - 6}
-                  // instrument.accent is reserved for the fixed centre index
-                  // below — selected-stop emphasis uses instrument.ink instead.
-                  stroke={on ? instrument.ink : instrument.tick}
-                  strokeWidth={on ? 2 : 1.4}
-                />
-              );
-            })}
-            {labels.map((label, i) => (
-              <SvgText
-                key={`stop-label-${label}`}
-                testID={`${testID}-label-${i}`}
-                x={pad + i * DETENT_PX}
-                y={BASELINE - 14}
-                fill={i === index ? instrument.ink : instrument.mut}
-                fontSize={labelSize}
-                fontWeight={i === index ? "600" : "500"}
-                textAnchor="middle"
+            <Defs>
+              <LinearGradient id={fadeId} x1="0" y1="0" x2="1" y2="0">
+                <Stop offset="0" stopColor="#fff" stopOpacity="0" />
+                <Stop offset={fadeStop} stopColor="#fff" stopOpacity="1" />
+                <Stop offset={1 - fadeStop} stopColor="#fff" stopOpacity="1" />
+                <Stop offset="1" stopColor="#fff" stopOpacity="0" />
+              </LinearGradient>
+              {/* userSpaceOnUse so the mask is authored in the same canvas
+                  coordinates as the ticks. Whatever the rect does not cover is
+                  masked out, which is exactly the region the viewport clips
+                  anyway. */}
+              <Mask
+                id={maskId}
+                maskUnits="userSpaceOnUse"
+                x={0}
+                y={0}
+                width={scaleWidth}
+                height={HEIGHT + 8}
               >
-                {label}
-              </SvgText>
-            ))}
+                <AnimatedRect
+                  animatedProps={maskProps}
+                  y={0}
+                  width={width}
+                  height={HEIGHT + 8}
+                  fill={`url(#${fadeId})`}
+                />
+              </Mask>
+            </Defs>
+            <G testID={`${testID}-scale`} mask={`url(#${maskId})`}>
+              {labels.map((label, i) => {
+                const on = i === index;
+                return (
+                  <Line
+                    key={`stop-${label}`}
+                    testID={`${testID}-stop-${i}`}
+                    x1={pad + i * DETENT_PX}
+                    y1={BASELINE + 8}
+                    x2={pad + i * DETENT_PX}
+                    y2={BASELINE - 6}
+                    // instrument.accent is reserved for the fixed centre index
+                    // below — selected-stop emphasis uses instrument.ink instead.
+                    stroke={on ? instrument.ink : instrument.tick}
+                    strokeWidth={on ? 2 : 1.4}
+                  />
+                );
+              })}
+              {labels.map((label, i) => (
+                <SvgText
+                  key={`stop-label-${label}`}
+                  testID={`${testID}-label-${i}`}
+                  x={pad + i * DETENT_PX}
+                  y={BASELINE - 14}
+                  fill={i === index ? instrument.ink : instrument.mut}
+                  fontSize={labelSize}
+                  fontWeight={i === index ? "600" : "500"}
+                  textAnchor="middle"
+                >
+                  {label}
+                </SvgText>
+              ))}
+            </G>
           </Svg>
         </Animated.View>
         {/* The fixed centre index — the only accent on the control, and the
