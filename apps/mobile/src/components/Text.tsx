@@ -64,6 +64,12 @@ export function AppText({ variant = "body", muted = false, rounded = false, styl
       : derivedLeading(size);
   return (
     <Text
+      // The variant's Apple Dynamic Type ceiling, where it has one — see the
+      // `maxScale` note on the type table for the measurements. It goes BEFORE
+      // the spread so an explicit caller prop still wins, and it needs no
+      // lineHeight handling: a cap scales the rendered box and the glyph by the
+      // same capped multiplier, so the authored ratio above survives it.
+      maxFontSizeMultiplier={p.maxScale}
       style={[
         { fontSize: p.size, fontWeight: p.weight, letterSpacing: p.letterSpacing,
           color: muted ? colors.secondaryLabel : colors.label,
