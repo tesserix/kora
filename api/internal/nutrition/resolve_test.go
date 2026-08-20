@@ -120,20 +120,25 @@ func TestInsertSetsNormalizedName(t *testing.T) {
 // this whole change exists to fix. Every one of these rows has an IDENTICAL
 // ts_rank (0.09910 for a two-term query); if match_score is ever again a
 // function of ts_rank alone, these assertions fail.
+//
+// Every name carries the "zqxtie" nonce, and so does the query. That is what
+// lets `require.Len(cands, 5)` hold against the real dev index instead of an
+// empty table (kora#151): plainto_tsquery ANDs its terms, so a row must
+// contain "zqxtie" AND "chicken" AND "breast" to be recalled at all, and no
+// ambient AFCD/USDA/OFF row contains the nonce. The nonce sits in the same
+// leading position in all five names and in the query, so it shifts
+// coverage, precision and trigram identically for every candidate and leaves
+// the tie this test is about intact.
 func TestResolveBreaksTiesThatTsRankCannot(t *testing.T) {
-	db := testDB(t)
-	tx := db.Begin()
-	require.NoError(t, tx.Error)
-	t.Cleanup(func() { tx.Rollback() })
-	require.NoError(t, tx.Exec("TRUNCATE food_items CASCADE").Error)
+	tx := fixtureTx(t)
 	repo := NewRepository(tx)
 
 	names := []string{
-		"Chicken breast",
-		"Chicken breast roasted",
-		"Grilled chicken breast",
-		"Fast foods fried chicken breast",
-		"Fast foods fried chicken breast wing thigh drumstick nugget",
+		"Zqxtie chicken breast",
+		"Zqxtie chicken breast roasted",
+		"Zqxtie grilled chicken breast",
+		"Zqxtie fast foods fried chicken breast",
+		"Zqxtie fast foods fried chicken breast wing thigh drumstick nugget",
 	}
 	items := make([]FoodItem, 0, len(names))
 	for _, n := range names {
@@ -142,12 +147,12 @@ func TestResolveBreaksTiesThatTsRankCannot(t *testing.T) {
 	_, err := repo.Insert(context.Background(), items)
 	require.NoError(t, err)
 
-	cands, err := repo.Resolve(context.Background(), uuid.Nil, "chicken breast", nil, 10)
+	cands, err := repo.Resolve(context.Background(), uuid.Nil, "zqxtie chicken breast", nil, 10)
 	require.NoError(t, err)
 	require.Len(t, cands, 5)
 
 	// The exact row wins, not an arbitrary tied one.
-	require.Equal(t, "Chicken breast", cands[0].Item.Name)
+	require.Equal(t, "Zqxtie chicken breast", cands[0].Item.Name)
 
 	// Scores discriminate — i.e. no two candidates land on the same value,
 	// which is what a flat ts_rank tie would produce.
@@ -177,25 +182,28 @@ func TestResolveBreaksTiesThatTsRankCannot(t *testing.T) {
 // TestResolveScoreIsNotFloored proves the 0.7 clamp is gone. Under the old
 // formula every full-text candidate was structurally >= 0.70 and follow_up was
 // unreachable.
+//
+// Both names and the query carry the "zqxfloor" nonce so the fixture is the
+// ENTIRE candidate set rather than the top of the dev index (kora#151). It
+// has to be: the assertion is about the winner's score, and against the real
+// index the winner would be an ambient exact "Chicken breast" row scoring
+// ~1.0 — which says nothing about whether near-tied candidates can fall
+// below the floor.
 func TestResolveScoreIsNotFloored(t *testing.T) {
-	db := testDB(t)
-	tx := db.Begin()
-	require.NoError(t, tx.Error)
-	t.Cleanup(func() { tx.Rollback() })
-	require.NoError(t, tx.Exec("TRUNCATE food_items CASCADE").Error)
+	tx := fixtureTx(t)
 	repo := NewRepository(tx)
 
 	// Two near-identical variants and no exact row — the real prod shape for
 	// "chicken breast".
 	_, err := repo.Insert(context.Background(), []FoodItem{
-		{Name: "Chicken breast roasted", Provenance: ProvenanceUSDA, KcalPer100g: 165},
-		{Name: "Grilled chicken breast", Provenance: ProvenanceUSDA, KcalPer100g: 165},
+		{Name: "Zqxfloor chicken breast roasted", Provenance: ProvenanceUSDA, KcalPer100g: 165},
+		{Name: "Zqxfloor grilled chicken breast", Provenance: ProvenanceUSDA, KcalPer100g: 165},
 	})
 	require.NoError(t, err)
 
-	cands, err := repo.Resolve(context.Background(), uuid.Nil, "chicken breast", nil, 10)
+	cands, err := repo.Resolve(context.Background(), uuid.Nil, "zqxfloor chicken breast", nil, 10)
 	require.NoError(t, err)
-	require.NotEmpty(t, cands)
+	require.Len(t, cands, 2, "the nonce must make the fixture the whole candidate set")
 	require.Less(t, cands[0].MatchScore, 0.70,
 		"near-tied candidates must be able to score below the confirm floor")
 }
@@ -235,12 +243,14 @@ func TestResolveScoreIsNotFloored(t *testing.T) {
 // (the caller's limit) keeps exactly the three competitors and drops the
 // winner — which is exactly what a reintroduced `LIMIT <caller's limit>`
 // bug would do.
+//
+// The "zqxwx" nonce is what makes "exactly four full-text matches" true
+// against the shared dev index rather than only against an empty table, so
+// this fixture needs no TRUNCATE (kora#151). The trigram values above are
+// pinned to these exact strings — if the nonce is ever changed, re-measure
+// them rather than assuming they carry over.
 func TestResolveDoesNotTruncateBeforeScoring(t *testing.T) {
-	db := testDB(t)
-	tx := db.Begin()
-	require.NoError(t, tx.Error)
-	t.Cleanup(func() { tx.Rollback() })
-	require.NoError(t, tx.Exec("TRUNCATE food_items CASCADE").Error)
+	tx := fixtureTx(t)
 	repo := NewRepository(tx)
 
 	const winnerName = "Zqxwx apple pineapplecrumble"
@@ -273,11 +283,7 @@ func TestResolveDoesNotTruncateBeforeScoring(t *testing.T) {
 // its normalized doc has fewer tokens diluting the query match than the
 // generic's does.
 func TestResolveHeadNounOutranksDerivative(t *testing.T) {
-	db := testDB(t)
-	tx := db.Begin()
-	require.NoError(t, tx.Error)
-	t.Cleanup(func() { tx.Rollback() })
-	require.NoError(t, tx.Exec("TRUNCATE food_items CASCADE").Error)
+	tx := fixtureTx(t)
 	repo := NewRepository(tx)
 
 	const (
@@ -307,11 +313,7 @@ func TestResolveHeadNounOutranksDerivative(t *testing.T) {
 // "Tofu yogurt" crossing into confirm), silently reporting more confidence
 // than the lexical/embedding signals actually support.
 func TestResolveMatchScoreUnaffectedByHeadBonus(t *testing.T) {
-	db := testDB(t)
-	tx := db.Begin()
-	require.NoError(t, tx.Error)
-	t.Cleanup(func() { tx.Rollback() })
-	require.NoError(t, tx.Exec("TRUNCATE food_items CASCADE").Error)
+	tx := fixtureTx(t)
 	repo := NewRepository(tx)
 
 	const (
@@ -367,10 +369,7 @@ func TestResolveMatchScoreUnaffectedByHeadBonus(t *testing.T) {
 // personal-alias raw SQL join in Resolve's tier 1: a taught personal
 // correction must not resurrect a food an admin has retired.
 func TestResolvePersonalAliasExcludesSoftDeleted(t *testing.T) {
-	db := testDB(t)
-	tx := db.Begin()
-	require.NoError(t, tx.Error)
-	t.Cleanup(func() { tx.Rollback() })
+	tx := fixtureTx(t)
 	repo := NewRepository(tx)
 	ctx := context.Background()
 
@@ -407,10 +406,7 @@ func TestResolvePersonalAliasExcludesSoftDeleted(t *testing.T) {
 // TestResolveGlobalAliasExcludesSoftDeleted is the regression guard for the
 // global/curated-alias raw SQL join in Resolve's tier 1.
 func TestResolveGlobalAliasExcludesSoftDeleted(t *testing.T) {
-	db := testDB(t)
-	tx := db.Begin()
-	require.NoError(t, tx.Error)
-	t.Cleanup(func() { tx.Rollback() })
+	tx := fixtureTx(t)
 	repo := NewRepository(tx)
 	ctx := context.Background()
 
@@ -442,10 +438,7 @@ func TestResolveGlobalAliasExcludesSoftDeleted(t *testing.T) {
 // TestResolveFullTextExcludesSoftDeleted is the regression guard for the
 // full-text (tsvector) raw SQL tier in Resolve.
 func TestResolveFullTextExcludesSoftDeleted(t *testing.T) {
-	db := testDB(t)
-	tx := db.Begin()
-	require.NoError(t, tx.Error)
-	t.Cleanup(func() { tx.Rollback() })
+	tx := fixtureTx(t)
 	repo := NewRepository(tx)
 	ctx := context.Background()
 
@@ -475,10 +468,7 @@ func TestResolveFullTextExcludesSoftDeleted(t *testing.T) {
 // so the tsvector tier never fires and only the embedding tier can be
 // responsible for either row appearing.
 func TestResolveEmbeddingExcludesSoftDeleted(t *testing.T) {
-	db := testDB(t)
-	tx := db.Begin()
-	require.NoError(t, tx.Error)
-	t.Cleanup(func() { tx.Rollback() })
+	tx := fixtureTx(t)
 	repo := NewRepository(tx)
 	ctx := context.Background()
 
@@ -521,33 +511,43 @@ func floatsClose(a, b, delta float64) bool {
 // scores), ambiguityFactor(0) returns 0.6, dragging all non-alias candidates
 // down. Aliases must not be scaled by this factor—they remain 1.0 exact.
 //
-// The fixture uses two rows with identical Name but different Brand (so both
-// insert), creating a genuine score tie. If the alias exemption is broken and
-// aliases are scaled like full-text rows, this test fails with score ~0.6.
+// The fixture uses three rows with identical Name but different Brand (so all
+// three insert), creating a genuine score tie. If the alias exemption is
+// broken and aliases are scaled like full-text rows, this test fails with
+// score ~0.6.
+//
+// Name, alias and query all carry the "zqxalias" nonce (kora#151). Both
+// halves of the fixture need it: the alias phrase must not collide with a
+// global alias that already lives in the shared food_aliases table — the tier-1
+// query is `WHERE user_id IS NULL AND lower(alias) = ?` and NULL user_ids are
+// not deduped, so a stray committed "brekkie eggs" row would decide the winner
+// instead of this test's — and the three tied rows must be the only full-text
+// candidates for the tie itself to be real.
 func TestResolveAliasKeepsExactScore(t *testing.T) {
-	db := testDB(t)
-	tx := db.Begin()
-	require.NoError(t, tx.Error)
-	t.Cleanup(func() { tx.Rollback() })
-	require.NoError(t, tx.Exec("TRUNCATE food_items CASCADE").Error)
+	tx := fixtureTx(t)
 	repo := NewRepository(tx)
 
+	const (
+		tiedName = "Zqxalias brekkie eggs"
+		phrase   = "zqxalias brekkie eggs"
+	)
 	_, err := repo.Insert(context.Background(), []FoodItem{
-		{Name: "Brekkie eggs", Brand: "brand_a", Provenance: ProvenanceCurated, KcalPer100g: 150},
-		{Name: "Brekkie eggs", Brand: "brand_b", Provenance: ProvenanceCurated, KcalPer100g: 150},
-		{Name: "Brekkie eggs", Brand: "brand_c", Provenance: ProvenanceCurated, KcalPer100g: 150},
+		{Name: tiedName, Brand: "brand_a", Provenance: ProvenanceCurated, KcalPer100g: 150},
+		{Name: tiedName, Brand: "brand_b", Provenance: ProvenanceCurated, KcalPer100g: 150},
+		{Name: tiedName, Brand: "brand_c", Provenance: ProvenanceCurated, KcalPer100g: 150},
 	})
 	require.NoError(t, err)
 
 	var target FoodItem
-	require.NoError(t, tx.First(&target, "name = ? AND brand = ?", "Brekkie eggs", "brand_a").Error)
+	require.NoError(t, tx.First(&target, "name = ? AND brand = ?", tiedName, "brand_a").Error)
 	require.NoError(t, tx.Exec(
 		`INSERT INTO food_aliases (user_id, alias, food_item_id) VALUES (NULL, ?, ?)`,
-		"brekkie eggs", target.ID).Error)
+		phrase, target.ID).Error)
 
-	cands, err := repo.Resolve(context.Background(), uuid.Nil, "brekkie eggs", nil, 10)
+	cands, err := repo.Resolve(context.Background(), uuid.Nil, phrase, nil, 10)
 	require.NoError(t, err)
-	require.NotEmpty(t, cands)
+	require.Len(t, cands, 3, "the alias row plus the two remaining tied full-text rows, and nothing ambient")
+	require.Equal(t, target.ID, cands[0].Item.ID)
 	require.Equal(t, MatchAlias, cands[0].MatchTier)
 	require.InDelta(t, 1.0, cands[0].MatchScore, 0.0001)
 }

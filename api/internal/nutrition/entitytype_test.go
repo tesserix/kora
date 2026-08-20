@@ -88,10 +88,7 @@ func TestFoodItemBeforeCreateTypesUntypedRows(t *testing.T) {
 // TestCountExcludesSoftDeleted, and deliberately does NOT truncate: this suite
 // must never be another way to lose the shared dev index (kora#151).
 func TestInsertTypesRowsAtIngest(t *testing.T) {
-	db := testDB(t)
-	tx := db.Begin()
-	require.NoError(t, tx.Error)
-	t.Cleanup(func() { tx.Rollback() })
+	tx := fixtureTx(t)
 	repo := NewRepository(tx)
 
 	barcode := "kora212-" + uuid.NewString()

@@ -676,17 +676,23 @@ func TestResolveVoiceTranscribesThenResolves(t *testing.T) {
 	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE brand = 'test3a'") })
 	repo := nutrition.NewRepository(db)
 
+	// The spoken phrase carries the "zqxvoice" nonce, and so do the seeded row
+	// and the alias (kora#151). A bare "banana" made this fixture share a
+	// phrase with the shared dev index: the 89.0 assertion is only meaningful
+	// if the resolve lands on THIS row, and with a plain phrase that depends
+	// on this test's global alias out-ranking whatever "Banana" rows and
+	// aliases the index already carries.
 	item := seedFoodItem(t, repo, nutrition.FoodItem{
-		Name: "Banana", Brand: "test3a",
+		Name: "Zqxvoice banana", Brand: "test3a",
 		Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 89,
 	})
-	seedAlias(t, db, "banana", item.ID)
+	seedAlias(t, db, "zqxvoice banana", item.ID)
 
 	provider := &stubProvider{
-		transcript:      "banana",
+		transcript:      "zqxvoice banana",
 		transcriptUsage: Usage{Provider: "stub", CallType: "transcribe"},
 		guesses: []Guess{
-			{Food: "banana", PortionEstimate: "100 g", Confidence: 0.95},
+			{Food: "zqxvoice banana", PortionEstimate: "100 g", Confidence: 0.95},
 		},
 		guessUsage: Usage{Provider: "stub", CallType: "identify_text"},
 	}
@@ -701,10 +707,12 @@ func TestResolveVoiceTranscribesThenResolves(t *testing.T) {
 	// 89 kcal/100g * 100g / 100 = 89 — computed from the row, never from the
 	// (kcal-less) transcript or guess.
 	require.Equal(t, 89.0, res.Candidates[0].Kcal)
+	require.Equal(t, item.ID, res.Candidates[0].Item.ID,
+		"89.0 must come from the seeded row, not from an ambient row that happens to share it")
 	// A successful voice resolve must carry the transcript back to the
 	// caller — a mobile client has nothing else it can put in
 	// FoodLog.InputPhrase for an ai_voice log.
-	require.Equal(t, "banana", res.Transcript)
+	require.Equal(t, "zqxvoice banana", res.Transcript)
 
 	// The whole point of transcription metering: at least one recorded Usage
 	// row must be the transcribe call itself, alongside the identify/embed

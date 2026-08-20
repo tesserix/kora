@@ -116,11 +116,7 @@ func TestSplitEmbeddedBrandAgainstCommittedSRLegacy(t *testing.T) {
 // recomputed, since the full-text tier matches on it and a stale value would
 // leave the row findable only under its old, brand-prefixed name.
 func TestBackfillUSDAEmbeddedBrandsIsIdempotentAndRetypes(t *testing.T) {
-	db := testDB(t)
-	tx := db.Begin()
-	require.NoError(t, tx.Error)
-	t.Cleanup(func() { tx.Rollback() })
-	require.NoError(t, tx.Exec("TRUNCATE food_items CASCADE").Error)
+	tx := fixtureTx(t)
 	repo := NewRepository(tx)
 
 	branded := FoodItem{
@@ -136,6 +132,12 @@ func TestBackfillUSDAEmbeddedBrandsIsIdempotentAndRetypes(t *testing.T) {
 	// count. `go test` runs packages in parallel against one database, and this
 	// transaction reads at READ COMMITTED, so rows another package commits
 	// mid-test can become visible and make any global count flaky.
+	//
+	// Scoping the assertions is also what lets this run without TRUNCATE-ing
+	// food_items first (kora#151). BackfillUSDAEmbeddedBrands is table-wide, so
+	// it does touch ambient rows — but only inside this transaction, which is
+	// rolled back, and only to apply the same rewrite cmd/ingest already
+	// applied to them, which is the idempotency this test is asserting.
 	_, err := repo.BackfillUSDAEmbeddedBrands(context.Background())
 	require.NoError(t, err)
 
