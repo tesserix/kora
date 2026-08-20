@@ -1,5 +1,5 @@
 import { memo, useEffect } from "react";
-import { View } from "react-native";
+import { View, useWindowDimensions } from "react-native";
 import Svg, { Circle, Line } from "react-native-svg";
 import Animated, {
   useAnimatedProps,
@@ -11,6 +11,7 @@ import type { InstrumentTokens } from "@/theme";
 import { AppText } from "@/components/Text";
 import {
   buildGaugeTicks,
+  instrumentScale,
   needleFor,
   GAUGE_CENTER_X,
   GAUGE_CENTER_Y,
@@ -97,6 +98,8 @@ interface PlanGaugeProps {
   hasTarget: boolean;
   fractionSV: SharedValue<number>;
   instrument: InstrumentTokens;
+  /** Face scale from `planDialScale` — a plain number, so it cannot bust memo. */
+  scale: number;
   testID: string;
 }
 
@@ -108,6 +111,7 @@ const PlanGauge = memo(function PlanGauge({
   hasTarget,
   fractionSV,
   instrument,
+  scale,
   testID,
 }: PlanGaugeProps) {
   const needleAnimatedProps = useAnimatedProps(() => {
@@ -116,17 +120,26 @@ const PlanGauge = memo(function PlanGauge({
   });
 
   return (
-    // kora#270: width MUST be the concrete viewBox width, not "100%". This
+    // kora#270: width MUST resolve to a concrete number, never "100%". This
     // component's parent (onboarding's AuthScaffold header) is a centre-aligned
     // column, which gives its children no definite width to take a percentage
     // OF — the root View shrank to its content, the content asked for 100% of
     // nothing, and the whole dial resolved to zero width. `height` is explicit,
     // so 178pt stayed reserved and the bug read as deliberate whitespace above
     // the numeral for its entire life. GaugeDial has always used the fixed
-    // width; matching it is what makes this render.
+    // width; matching it is what made this render.
+    //
+    // kora#268/#284 multiply that width by `scale`, which keeps the guard only
+    // because `planDialScale` can never return 0 or NaN: it is floored at 1 and
+    // every input that fails to resolve (an unmeasured width, an absent or
+    // garbage `maxHeight`) drops its clamp instead of applying it. A dial one
+    // frame too wide is recoverable; a dial 0pt wide was not noticed for months.
+    // The viewBox is untouched, so this is a pure vector scale — no tick, no
+    // needle worklet and no hub coordinate below changes.
     <Svg
-      width={GAUGE_VIEW_W}
-      height={GAUGE_VIEW_H}
+      testID={`${testID}-face`}
+      width={GAUGE_VIEW_W * scale}
+      height={GAUGE_VIEW_H * scale}
       viewBox={`0 0 ${GAUGE_VIEW_W} ${GAUGE_VIEW_H}`}
     >
       {TICK_GEOMETRY.map((geom, i) => (
@@ -164,14 +177,54 @@ const PlanGauge = memo(function PlanGauge({
   );
 });
 
+/**
+ * Face scale for this dial: `instrumentScale`'s width-clamped font scale, then
+ * additionally capped by a height budget expressed through the aspect ratio.
+ *
+ * The height cap exists for onboarding's header (kora#284): at AX sizes a dial
+ * free to grow with the text pushes the rulers — the actual controls — off the
+ * fold, so the screen needs a way to say "no taller than this".
+ *
+ * An absent, non-finite or non-positive `maxHeight` means NO height constraint
+ * and must leave the dial at its natural scale. That is the same kora#270 guard
+ * `instrumentScale` applies to width, for the same reason: a budget that has
+ * not resolved yet is a missing measurement, and treating it as "0pt of room"
+ * silently collapses the instrument. Floored at 1 so a tight budget shrinks the
+ * dial no further than its design size — below that it stops reading as an
+ * instrument at all, and the caller wanted a ceiling, not a shrink.
+ */
+export function planDialScale(fontScale: number, maxWidth: number, maxHeight?: number): number {
+  const scale = instrumentScale(fontScale, maxWidth);
+  if (maxHeight === undefined || !Number.isFinite(maxHeight) || maxHeight <= 0) return scale;
+  return Math.max(1, Math.min(scale, maxHeight / GAUGE_VIEW_H));
+}
+
 interface PlanDialProps {
   kcal: number | null;
+  /**
+   * Point ceiling on the dial's rendered height. Omit for no ceiling.
+   * Converted to a scale ceiling via the aspect ratio, so it bounds width too.
+   */
+  maxHeight?: number;
   testID?: string;
 }
 
-export function PlanDial({ kcal, testID = "plan-dial" }: PlanDialProps) {
-  const { instrument } = useTheme();
+export function PlanDial({ kcal, maxHeight, testID = "plan-dial" }: PlanDialProps) {
+  const { instrument, spacing } = useTheme();
+  const { fontScale, width: windowWidth } = useWindowDimensions();
   const hasTarget = kcal !== null && Number.isFinite(kcal);
+
+  // Available width from the window less the header's known horizontal padding,
+  // NOT from onLayout. This component sits in a centre-aligned column, so it has
+  // no definite width from its parent and its own measured box is its content —
+  // measuring it would ask the dial how wide the dial is. A stretched wrapper
+  // would answer that, but only from the second frame: the first paint would run
+  // on a zero width, which is the exact kora#270 shape this file already carries
+  // a scar from. The subtraction is exact rather than approximate — AuthScaffold
+  // wraps the header in a view with no horizontal padding of its own, so
+  // onboarding's `paddingHorizontal: spacing.lg` is the only inset between the
+  // window edge and this dial — and it is known on the very first frame.
+  const scale = planDialScale(fontScale, windowWidth - spacing.lg * 2, maxHeight);
 
   const fraction = hasTarget
     ? Math.min(1, Math.max(0, (kcal - PLAN_DIAL_MIN) / (PLAN_DIAL_MAX - PLAN_DIAL_MIN)))
@@ -202,6 +255,7 @@ export function PlanDial({ kcal, testID = "plan-dial" }: PlanDialProps) {
           hasTarget={hasTarget}
           fractionSV={fractionSV}
           instrument={instrument}
+          scale={scale}
           testID={testID}
         />
       </View>

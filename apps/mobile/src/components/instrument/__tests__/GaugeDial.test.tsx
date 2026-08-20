@@ -1,10 +1,10 @@
 import type { ComponentProps } from "react";
 import { createRef } from "react";
-import { render, within } from "@testing-library/react-native";
+import { act, fireEvent, render, within } from "@testing-library/react-native";
 import * as Haptics from "expo-haptics";
 import * as Reanimated from "react-native-reanimated";
 import { springs } from "@/motion";
-import { buildGaugeTicks, needleFor, GAUGE_VIEW_H, GAUGE_CENTER_Y } from "../gauge";
+import { buildGaugeTicks, needleFor, GAUGE_VIEW_H, GAUGE_VIEW_W, GAUGE_CENTER_Y } from "../gauge";
 import { describeReserve, GaugeDial, type GaugeDialHandle } from "../GaugeDial";
 
 const renderGauge = async (props: ComponentProps<typeof GaugeDial>) => render(<GaugeDial {...props} />);
@@ -353,5 +353,190 @@ describe("over budget", () => {
   it("keeps the calm reserve reading under budget", async () => {
     const { getByText } = await renderGauge({ value: 860, target: 2100 });
     expect(getByText("1,240")).toBeTruthy();
+  });
+});
+
+// --- Dynamic Type for the face itself (kora#268) -----------------------------
+//
+// A fixed viewBox draws at one physical size from xSmall to AX5, so the face
+// used to stay put while the numeral inside it nearly doubled. These pin the
+// rendered width/height (viewBox untouched), the point-valued overlay inset
+// that has to be scaled by hand, and the caption-ejection branch.
+//
+// What they do NOT prove: kora#257 — animated transforms are invisible to
+// Jest, and layout here is fabricated by fireEvent(onLayout) rather than
+// measured by Yoga. A green run says the props are right, not that anything
+// fits on a device.
+describe("face scaling and caption ejection (kora#268)", () => {
+  // require, not a top-level import: an ESM namespace object is sealed, so
+  // jest.spyOn cannot redefine a property on it.
+  const viewBoxOf = ({ props }: { props: Record<string, unknown> }) => ({
+    minX: props.minX,
+    minY: props.minY,
+    vbWidth: props.vbWidth,
+    vbHeight: props.vbHeight,
+  });
+
+  const spies: jest.SpyInstance[] = [];
+  function withFontScale(fontScale: number) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const rn = require("react-native");
+    const spy = jest
+      .spyOn(rn, "useWindowDimensions")
+      .mockReturnValue({ width: 393, height: 852, scale: 3, fontScale });
+    spies.push(spy);
+    return spy;
+  }
+  afterEach(() => {
+    // Restored one at a time, not via restoreAllMocks(): this file's other
+    // suites hold spies of their own and the shared reanimated mock from
+    // jest.setup.js is not a spy at all.
+    while (spies.length) spies.pop()?.mockRestore();
+  });
+
+  // Width comes from the component's own onLayout, NOT from the window — on a
+  // 393pt device those two differ by exactly enough to flip the fit result.
+  // Wrapped in act because the resulting setState lands outside RTL's own
+  // batching here — without it the tree still reads the pre-layout scale and
+  // every assertion below silently tests the first frame instead.
+  const layoutAt = async (utils: Awaited<ReturnType<typeof render>>, width: number) =>
+    act(async () => {
+      fireEvent(utils.getByTestId("gauge-dial"), "layout", {
+        nativeEvent: { layout: { width, height: 240, x: 0, y: 0 } },
+      });
+    });
+
+  it("draws byte-identically at the default text size", async () => {
+    withFontScale(1);
+    const utils = await render(<GaugeDial value={1430} target={2200} />);
+    await layoutAt(utils, 325);
+
+    const svg = utils.getByTestId("gauge-face");
+    expect(svg.props.width).toBe(GAUGE_VIEW_W);
+    expect(svg.props.height).toBe(GAUGE_VIEW_H);
+    // The viewBox never moves — this is a pure vector scale, so no tick,
+    // needle worklet or anchor is affected by any of the above.
+    // react-native-svg decomposes the viewBox string into these four props on
+    // the host node, so that is where it has to be read.
+    expect(viewBoxOf(svg)).toEqual({ minX: 0, minY: 0, vbWidth: GAUGE_VIEW_W, vbHeight: GAUGE_VIEW_H });
+  });
+
+  it("scales the rendered size while leaving the viewBox alone", async () => {
+    withFontScale(1.6);
+    const utils = await render(<GaugeDial value={1430} target={2200} />);
+    await layoutAt(utils, 325.34); // Home on a 393pt device — s = 325.34/264
+
+    const svg = utils.getByTestId("gauge-face");
+    const s = 325.34 / GAUGE_VIEW_W;
+    expect(svg.props.width).toBeCloseTo(GAUGE_VIEW_W * s);
+    expect(svg.props.height).toBeCloseTo(GAUGE_VIEW_H * s);
+    expect(viewBoxOf(svg)).toEqual({ minX: 0, minY: 0, vbWidth: GAUGE_VIEW_W, vbHeight: GAUGE_VIEW_H });
+  });
+
+  // The overlay's `top` is a percentage and rides the scaled Svg for free.
+  // `bottom` is in POINTS: forget to multiply it and the overlay's floor stays
+  // pinned at the design size while the face grows under it. That one missing
+  // multiply is the whole bug in miniature, so it gets its own test.
+  it("scales the overlay's point-valued bottom inset with the face", async () => {
+    withFontScale(1.6);
+    const utils = await render(<GaugeDial value={1430} target={2200} />);
+
+    await layoutAt(utils, 264); // s = 1
+    const atOne = flattenStyle(utils.getByTestId("gauge-center-overlay").props.style).bottom as number;
+
+    await layoutAt(utils, 396); // s = 1.5
+    const atOneAndAHalf = flattenStyle(utils.getByTestId("gauge-center-overlay").props.style).bottom as number;
+
+    expect(atOneAndAHalf).toBeCloseTo(atOne * 1.5);
+  });
+
+  it("keeps the caption inside the face at the default text size", async () => {
+    withFontScale(1);
+    const utils = await render(<GaugeDial value={1430} target={2200} />);
+    await layoutAt(utils, 325.34);
+
+    expect(
+      within(utils.getByTestId("gauge-center-overlay")).getByText("kcal in reserve"),
+    ).toBeTruthy();
+  });
+
+  // 325.34pt is Home's real content box on a 393pt device: 393 less the
+  // screen's paddingHorizontal 16, BezelCluster's 1.5pt rim, GlassPanel's
+  // hairline border and the hero card's own padding 16. s = 1.232, budget
+  // 91.0pt against a 109.8pt stack — it does not fit.
+  it("ejects the caption below the face when the stack outgrows the budget", async () => {
+    withFontScale(1.6);
+    const utils = await render(<GaugeDial value={1430} target={2200} />);
+    await layoutAt(utils, 325.34);
+
+    expect(
+      within(utils.getByTestId("gauge-center-overlay")).queryByText("kcal in reserve"),
+    ).toBeNull();
+    // Same text, same node, one level up in the tree.
+    expect(utils.getByText("kcal in reserve")).toBeTruthy();
+    expect(utils.getByText("kcal in reserve").props.maxFontSizeMultiplier).toBe(1.4);
+  });
+
+  // A real branch, not a bug: given enough width the face grows enough to hold
+  // the enlarged stack, and the caption belongs in the face where it was
+  // designed to sit. (No SHIPPING device reaches this through Home's chrome —
+  // see the ejection test above — but the predicate has two sides and the
+  // component must render both.)
+  it("keeps the caption in the face when the width allows a big enough face", async () => {
+    withFontScale(1.6);
+    const utils = await render(<GaugeDial value={1430} target={2200} />);
+    await layoutAt(utils, 440);
+
+    expect(
+      within(utils.getByTestId("gauge-center-overlay")).getByText("kcal in reserve"),
+    ).toBeTruthy();
+  });
+
+  // Ejection is a VISUAL move. `accessible` on the root already collapses the
+  // subtree into one element, so the caption never becomes a second focus stop
+  // reading the same words twice, and the announcement is built from the
+  // reading rather than the layout.
+  it("announces the same reading whichever side of the branch it is on", async () => {
+    withFontScale(1.6);
+    const utils = await render(<GaugeDial value={1430} target={2200} />);
+
+    await layoutAt(utils, 440);
+    const inFace = utils.getByTestId("gauge-dial").props.accessibilityLabel;
+    await layoutAt(utils, 325.34);
+    const ejected = utils.getByTestId("gauge-dial").props.accessibilityLabel;
+
+    expect(ejected).toBe(inFace);
+    expect(ejected).toBe("770 calories in reserve of 2,200");
+    // One node, not two — the ejected caption is not separately announced.
+    expect(utils.getAllByText("kcal in reserve")).toHaveLength(1);
+  });
+
+  // kora#270: a dimension that resolves to 0 on an early frame and reads as
+  // deliberate whitespace for the component's whole life. Before onLayout the
+  // width is unknown, and unknown must mean "draw the WANT", not "draw
+  // nothing" — so this is asserted at a font scale where the two differ. At
+  // fontScale 1 an unmeasured width and a zero width are indistinguishable,
+  // which is exactly why that is the wrong place to test the guard.
+  it("draws at the full wanted scale before onLayout has fired", async () => {
+    withFontScale(1.6);
+    const utils = await render(<GaugeDial value={1430} target={2200} />);
+
+    const svg = utils.getByTestId("gauge-face");
+    expect(svg.props.width).toBeCloseTo(GAUGE_VIEW_W * 1.6);
+    expect(svg.props.height).toBeCloseTo(GAUGE_VIEW_H * 1.6);
+  });
+
+  // The other half of the same guard: drawing the want on frame one is only
+  // acceptable because at the default text size the want IS the final scale,
+  // so the common case never visibly jumps when the measurement arrives.
+  it("does not change size when the measurement arrives at the default text size", async () => {
+    withFontScale(1);
+    const utils = await render(<GaugeDial value={1430} target={2200} />);
+    const before = utils.getByTestId("gauge-face").props.width;
+
+    await layoutAt(utils, 325.34);
+
+    expect(before).toBe(GAUGE_VIEW_W);
+    expect(utils.getByTestId("gauge-face").props.width).toBe(before);
   });
 });
