@@ -1929,7 +1929,7 @@ describe("a typed phrase enters the thread", () => {
     expect(await findByText("chicken and rice")).toBeTruthy();
   });
 
-  test("a failed send hands the words back and removes the message", async () => {
+  test("a failed send keeps the message and leaves the composer empty", async () => {
     const { findByText, findByLabelText, queryByText } = await render(<CaptureScreen />);
     await fireEvent.press(await findByText("Type"));
     const input = await findByLabelText("Tell Otto what you ate");
@@ -1939,14 +1939,8 @@ describe("a typed phrase enters the thread", () => {
     const [, options] = mockResolveTextMutate.mock.calls[0];
     await act(async () => options.onError(new Error("boom")));
 
-    // A failed text resolve is NOT queued (only photo/voice reach
-    // enqueueCapture, kora#196), so an empty composer would mean retyping.
-    expect(input.props.value).toBe("chicken and rice");
-    // And the bubble is gone: a message that never arrived must not sit in the
-    // thread as though it had. queryByText matches rendered Text, not a
-    // TextInput's value, so null here IS the bubble's absence — the restored
-    // composer is asserted on props.value above.
-    expect(queryByText("chicken and rice")).toBeNull();
+    expect(input.props.value).toBe("");
+    expect(await findByText("chicken and rice")).toBeTruthy();
     expect(await findByText(/went wrong|couldn't/i)).toBeTruthy();
   });
 
@@ -1994,7 +1988,7 @@ describe("a typed phrase enters the thread", () => {
   });
 
   // A genuine refusal is NOT queued — retrying it would fail identically.
-  it("hands the words back on a real server refusal instead of queueing", async () => {
+  it("keeps the submitted message and clears the composer on refusal", async () => {
     const { findByText, findByLabelText, findByPlaceholderText } = await render(<CaptureScreen />);
     await fireEvent.press(await findByText("Type"));
     const field = await findByPlaceholderText(/tell otto/i);
@@ -2005,6 +1999,7 @@ describe("a typed phrase enters the thread", () => {
     await act(async () => options.onError(new ApiError(422, "no_match", "bad request")));
 
     expect(enqueueTextCapture).not.toHaveBeenCalled();
-    expect(field.props.value).toBe("chicken and rice");
+    expect(field.props.value).toBe("");
+    expect(await findByText("chicken and rice")).toBeTruthy();
   });
 });
