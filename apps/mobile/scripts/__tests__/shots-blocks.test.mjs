@@ -149,3 +149,92 @@ test("a granted budget still cannot hide a compact defect — the block rule cat
   assert.equal(report.failing.length >= 1, true);
   assert.match(report.reasons.join(" "), /block\(s\) over 30% density/);
 });
+
+// ---------------------------------------------------------------------------
+// The masked band (kora#289 follow-up)
+//
+// These are the tests that would have caught the shipped defect: #289's
+// goldens embedded a status-bar battery glyph the harness could not reproduce,
+// and every route failed on it. The mask is the fix, so it needs tests that
+// break if it silently stops masking, and equally if it starts masking more
+// than the strip it was justified for.
+// ---------------------------------------------------------------------------
+
+const MASK = GOLDEN.ignoreTop;
+
+test("the shipped mask covers the status bar and nothing the app draws", () => {
+  // Measured on the 1x golden frame: the Dynamic Island's lowest black pixel
+  // is row 51, and the topmost app-drawn element on any route sits at y=70.
+  // A mask outside that window is either letting the system in or eating app
+  // pixels, and both are silent failures.
+  assert.ok(MASK > 51, `mask ${MASK} does not clear the Dynamic Island (row 51)`);
+  assert.ok(MASK < 70, `mask ${MASK} reaches into app content (topmost element y=70)`);
+});
+
+test("a difference entirely inside the masked band is invisible to every rule", () => {
+  const delta = blank();
+  // The shape of the real defect: 25x14 golden pixels of battery glyph, at
+  // full amplitude.
+  for (let y = 20; y < 34; y += 1) {
+    for (let x = 70; x < 95; x += 1) delta[y * WIDTH + x] = 255;
+  }
+  const masked = judge(blockDensities(delta, { ...opts, ignoreTop: MASK }), RULES);
+  assert.equal(masked.aboveThreshold, 0);
+  assert.equal(masked.broadPct, 0);
+  assert.equal(masked.blocks.length, 0);
+  assert.ok(masked.pass);
+
+  // ... and would have failed without it. If this half ever stops failing, the
+  // mask is not what is making the suite green.
+  const unmasked = judge(blockDensities(delta, { ...opts, ignoreTop: 0 }), RULES);
+  assert.ok(!unmasked.pass);
+  assert.equal(unmasked.aboveThreshold, 25 * 14);
+});
+
+test("the mask does not extend one row further than it says", () => {
+  const delta = blank();
+  for (let x = 0; x < WIDTH; x += 1) delta[MASK * WIDTH + x] = 255; // first UNmasked row
+  const report = blockDensities(delta, { ...opts, ignoreTop: MASK });
+  assert.equal(report.aboveThreshold, WIDTH);
+  assert.ok(!judge(report, RULES).pass);
+});
+
+test("a block straddling the mask boundary is measured over its real area", () => {
+  // MASK is not a multiple of the block size, so the first surviving block row
+  // is short. Padding it back to a full block would dilute a defect sitting
+  // just under the status bar — the header area, where clipping lives.
+  const firstBlockStart = Math.floor(MASK / BLOCK) * BLOCK;
+  const survivingRows = firstBlockStart + BLOCK - MASK;
+  const delta = blank();
+  for (let y = MASK; y < MASK + survivingRows; y += 1) {
+    for (let x = 0; x < BLOCK; x += 1) delta[y * WIDTH + x] = 255;
+  }
+  const report = blockDensities(delta, { ...opts, ignoreTop: MASK });
+  const block = report.blocks[0];
+  assert.equal(block.y, MASK);
+  assert.equal(block.height, survivingRows);
+  assert.equal(block.area, survivingRows * BLOCK);
+  assert.equal(block.density, 1); // fully dense over its REAL area, not diluted
+});
+
+test("masked rows are removed from the frame-share denominator", () => {
+  // Otherwise the broad rule gets quietly cheaper every time the mask grows.
+  const report = blockDensities(blank(), { ...opts, ignoreTop: MASK });
+  assert.equal(report.totalPixels, WIDTH * (HEIGHT - MASK));
+
+  const delta = blank();
+  const faint = GOLDEN.broadThreshold + 1;
+  const measured = WIDTH * (HEIGHT - MASK);
+  // Just over the shipped frame-share budget, counted against the MEASURED
+  // area. If the denominator were still the whole frame this would pass.
+  const target = Math.floor((measured * GOLDEN.broadFramePct) / 100) + 2;
+  for (let i = 0; i < target; i += 1) delta[MASK * WIDTH + i] = faint;
+  const verdict = judge(blockDensities(delta, { ...opts, ignoreTop: MASK }), RULES);
+  assert.ok(!verdict.pass);
+  assert.ok(verdict.reasons.some((r) => r.includes("shifted faintly")));
+});
+
+test("an out-of-range mask is an error, not a silently empty comparison", () => {
+  assert.throws(() => blockDensities(blank(), { ...opts, ignoreTop: HEIGHT }), /ignoreTop/);
+  assert.throws(() => blockDensities(blank(), { ...opts, ignoreTop: -1 }), /ignoreTop/);
+});

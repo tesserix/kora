@@ -32,6 +32,16 @@
  * These functions take the delta map produced by shots-image.maxChannelDelta
  * and know nothing about ImageMagick, files or routes, so the rule can be
  * exercised against synthetic buffers. See __tests__/shots-blocks.test.mjs.
+ *
+ * ---------------------------------------------------------------------------
+ * The masked band (kora#289 follow-up)
+ * ---------------------------------------------------------------------------
+ * `ignoreTop` removes the top N rows — the iOS status bar and Dynamic Island —
+ * from all three rules and from the frame-share denominator. That strip is
+ * drawn by the system, not by the app, and #289 shipped a golden set that
+ * failed all 13 routes on 243 pixels of it. The full reasoning, the
+ * measurements and the experiments that ruled out simply pinning it harder are
+ * in shots.goldens.mjs next to the constant.
  */
 
 /**
@@ -55,10 +65,22 @@ function spans(length, block) {
  * Returns every block that has any differing pixel at all, sorted densest
  * first, plus the global counts for reporting.
  */
-export function blockDensities(delta, { width, height, block, threshold, broadThreshold = 8 }) {
+export function blockDensities(
+  delta,
+  { width, height, block, threshold, broadThreshold = 8, ignoreTop = 0 },
+) {
   if (delta.length !== width * height) {
     throw new Error(`delta map is ${delta.length} bytes, expected ${width * height} (${width}x${height})`);
   }
+  if (ignoreTop < 0 || ignoreTop >= height) {
+    throw new Error(`ignoreTop must be within [0, ${height}); got ${ignoreTop}`);
+  }
+
+  // Masked rows are skipped by every rule AND removed from the frame-share
+  // denominator. Leaving them in the denominator would make the broad rule
+  // quietly cheaper every time the mask grew, which is the kind of loosening
+  // that does not show up in a diff.
+  const measuredPixels = width * (height - ignoreTop);
 
   const blocks = [];
   let aboveThreshold = 0;
@@ -67,9 +89,14 @@ export function blockDensities(delta, { width, height, block, threshold, broadTh
   let maxDelta = 0;
 
   for (const rows of spans(height, block)) {
+    // A block straddling the mask boundary is measured over the part of it
+    // that is below the mask, at its real area — same reasoning as the short
+    // edge blocks above.
+    const top = Math.max(rows.start, ignoreTop);
+    if (top >= rows.end) continue;
     for (const cols of spans(width, block)) {
       let count = 0;
-      for (let y = rows.start; y < rows.end; y += 1) {
+      for (let y = top; y < rows.end; y += 1) {
         const rowOffset = y * width;
         for (let x = cols.start; x < cols.end; x += 1) {
           const value = delta[rowOffset + x];
@@ -82,12 +109,12 @@ export function blockDensities(delta, { width, height, block, threshold, broadTh
       }
       if (count === 0) continue;
       aboveThreshold += count;
-      const area = (rows.end - rows.start) * (cols.end - cols.start);
+      const area = (rows.end - top) * (cols.end - cols.start);
       blocks.push({
         x: cols.start,
-        y: rows.start,
+        y: top,
         width: cols.end - cols.start,
-        height: rows.end - rows.start,
+        height: rows.end - top,
         pixels: count,
         area,
         density: count / area,
@@ -100,13 +127,14 @@ export function blockDensities(delta, { width, height, block, threshold, broadTh
   return {
     width,
     height,
-    totalPixels: width * height,
+    ignoreTop,
+    totalPixels: measuredPixels,
     maxDelta,
     differing,
     aboveThreshold,
     aboveBroad,
-    diffPct: (aboveThreshold / (width * height)) * 100,
-    broadPct: (aboveBroad / (width * height)) * 100,
+    diffPct: (aboveThreshold / measuredPixels) * 100,
+    broadPct: (aboveBroad / measuredPixels) * 100,
     blocks,
     worstBlock: blocks[0] ?? null,
   };

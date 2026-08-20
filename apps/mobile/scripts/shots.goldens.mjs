@@ -114,6 +114,60 @@ export const GOLDEN = {
   broadThreshold: 8,
   broadFramePct: 3,
 
+  /**
+   * Rows at the TOP of the frame, in GOLDEN-space pixels, that are excluded
+   * from all three rules — the iOS status bar and the Dynamic Island.
+   *
+   * WHY THIS EXISTS, and why it is not "pin the status bar harder".
+   *
+   * `shots.mjs` pins the status bar with `simctl status_bar override`, and
+   * kora#289's goldens were captured with that pin in place — the clock reads
+   * the pinned 9:41, the cellular and wifi bars read the pinned values, and
+   * the battery reads the pinned 100% against a host sitting at 79%. Three of
+   * four components took. The fourth did not: the pin asks for
+   * `--batteryState charged`, which on this device and runtime renders a GREEN
+   * cell with a bolt, and every one of those goldens carries the plain white
+   * DISCHARGING glyph instead. The result was 13 of 13 routes failing on the
+   * same 243-pixel region, on a set that had been reported green.
+   *
+   * The trigger was not found, and that is the finding. Eliminated by
+   * experiment on the same simulator, which has not been rebooted since before
+   * the #289 capture: host power state (`pmset -g log` shows AC at 79%
+   * continuously across both sessions), the content-size change, app
+   * terminate/relaunch, a SpringBoard restart, elapsed time, override merge
+   * semantics, and command failure (`simctl` exits non-zero and `shots.mjs`
+   * throws). Twenty monitored screenshots and a full three-route harness run
+   * render the pinned value correctly. `simctl status_bar list` reported the
+   * requested value in the #289 session too — the recorded override and the
+   * rendered pixels had simply diverged, and nothing reads the pixels back.
+   *
+   * So the battery is an input this harness reports as controlled and is not.
+   * Pinning it harder cannot fix a silent failure that will not reproduce on
+   * demand, and even a perfect battery pin leaves everything else iOS can put
+   * in that band — Focus, the orange/green privacy dots, VPN, screen
+   * recording, the location arrow, Low Power Mode, a Live Activity expanding
+   * the Island — equally unpinned and equally able to fail all routes at once.
+   *
+   * The band carries no app information. The clock was already pinned
+   * separately, which was an admission of exactly that: this strip is
+   * environment, not app.
+   *
+   * MEASURED on the 1x golden frame (440x956):
+   *   - the Dynamic Island's lowest black pixel is row 51
+   *   - the battery glyph spans rows 26-39, the clock roughly rows 20-44
+   *   - the topmost APP-drawn element on any route sits at y=70
+   *     (`idb ui describe-all`, minimum frame.y across the walk)
+   * 62 is the device's top safe-area inset: above every system glyph, below
+   * every pixel the app is allowed to draw content on.
+   *
+   * WHAT THIS GIVES UP: a regression that pushes app content up into the inset
+   * is invisible IN THAT BAND. It cannot be invisible everywhere — content
+   * that moves up leaves a hole below, and the rest of the frame is asserted
+   * as strictly as before. The masked rows are removed from the frame-share
+   * denominator too, so the broad rule does not get quietly cheaper.
+   */
+  ignoreTop: 62,
+
   /** Content sizes that have committed goldens. */
   contentSizes: ["medium"],
 };
@@ -158,6 +212,18 @@ export const DEFECT_SHAPE = { width: 20, height: 10 };
  */
 export const EXCLUDED = {
   medium: {
+    "ai-usage":
+      "Its quota card renders ABSOLUTE reset dates — \"Daily · 20 remaining · " +
+      "resets Fri, Aug 21 at 10:00 AM\", and the same for the weekly and " +
+      "monthly windows — and they come from the SERVER's clock, not from " +
+      "EXPO_PUBLIC_SHOTS_CLOCK. Proof, from the #289 golden set itself: the " +
+      "app clock is pinned to 2026-08-19 and tab-diary's week strip duly " +
+      "highlights the 19th, while ai-usage's daily window resets on the 21st " +
+      "— next-day relative to the 20th, the REAL capture date. So this golden " +
+      "goes stale every midnight no matter what the harness pins, and the " +
+      "\"20 calls left\" headline is the capturing account's quota besides. " +
+      "To bring it back: render the reset times relative (\"resets in 21h\") " +
+      "or derive them from the same pinned clock the rest of the app uses.",
     capture:
       "The greeting bubble's entrance settles at a slightly different vertical " +
       "offset on each launch — visibly one to three device pixels — and the " +
@@ -182,6 +248,36 @@ export const EXCLUDED = {
       "To bring it back: make the blur deterministic, or render it flat under " +
       "a capture flag, or seed the backdrop — then delete this entry and run " +
       "`npm run shots:golden`.",
+    profile:
+      "The screen IS the account. It renders the signed-in email, the avatar " +
+      "initial derived from it, the four daily macro targets, the current " +
+      "weight and \"MEMBER SINCE <month> <year>\" — so its pixels are a " +
+      "function of WHO captured it, and the member-since line is a function of " +
+      "the real calendar on top of that. The #289 golden embeds " +
+      "shotc1@kora.test, an account that was deleted at the end of that " +
+      "session, so it could never have been reproduced by anyone including " +
+      "its author. " +
+      "The alternatives were weighed and both cost more than the route is " +
+      "worth: a DOCUMENTED FIXED ACCOUNT makes the suite depend on a " +
+      "credential the next person will not have, and contradicts this repo's " +
+      "own rule that throwaway accounts are deleted after use; MASKING the " +
+      "identity-bearing region would blank the account card, the targets card " +
+      "and the weight card, leaving a back chevron and three section headers " +
+      "— and it would blank precisely the region where a long email is " +
+      "likeliest to overflow, which is the bug class this harness exists for. " +
+      "To bring it back: give the harness a capture-mode fixture profile " +
+      "(fixed email, targets and join date) behind the same flag as the clock " +
+      "pin — Stage B's outstanding \"fixture data\" item.",
+    "tab-more":
+      "Same defect as `profile`, smaller surface: the account row carries the " +
+      "signed-in email and the avatar initial, and the AI-usage row carries " +
+      "the account's remaining quota (\"20 left\"), which moves as the " +
+      "account is used. The rest of the screen is a static menu, so masking " +
+      "was the tempting option here — but the mask would have to cover the " +
+      "account card, which is the one place on this screen where an " +
+      "overlong email overflows. Excluded rather than masked at the point of " +
+      "interest. " +
+      "To bring it back: the same capture-mode fixture profile as `profile`.",
   },
 };
 
