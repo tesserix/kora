@@ -209,6 +209,7 @@ async function main() {
       broadFramePct: GOLDEN.broadFramePct,
       block: GOLDEN.block,
       failDensity: GOLDEN.failDensity,
+      ignoreTop: GOLDEN.ignoreTop,
     },
     routes: written.sort((a, b) => a.route.localeCompare(b.route)),
     excluded: Object.entries(EXCLUDED[contentSize] ?? {}).map(([route, reason]) => ({ route, reason })),

@@ -279,10 +279,23 @@ async function setContentSize(udid, size) {
 }
 
 /**
- * Pin the status bar. Without this the clock in the top-left of every frame
- * advances between passes, which is a real (if small) across-launch diff on
- * all 14 routes at once. The override survives relaunches but not a device
- * erase, so it is re-applied every run rather than assumed.
+ * Pin the status bar.
+ *
+ * NO LONGER LOAD-BEARING, and the reason is worth knowing before anyone
+ * decides to trust it again. kora#289's goldens were captured with this pin in
+ * place; the clock, wifi and cellular components took and the battery LEVEL
+ * took, but `--batteryState charged` did not — every golden carried the
+ * discharging glyph, and all 13 routes failed on the same 243 pixels. `simctl`
+ * exited 0 and `simctl status_bar list` reported the requested value; the
+ * recorded override and the rendered pixels had simply diverged, and nothing
+ * reads the pixels back. The trigger did not reproduce across twenty monitored
+ * probes, a content-size change, terminate/relaunch, a SpringBoard restart or
+ * a full harness run.
+ *
+ * So the comparison masks the whole band instead (GOLDEN.ignoreTop in
+ * shots.goldens.mjs), and this call is kept only because a pinned bar makes
+ * the captured images comparable to a human eye. Do NOT re-derive an assertion
+ * from it.
  */
 async function pinStatusBar(udid) {
   await simctl([

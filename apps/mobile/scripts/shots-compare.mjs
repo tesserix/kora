@@ -26,6 +26,11 @@
  *   3. No block may exceed 30% density — the tolerance mechanism for any route
  *      granted a pixel budget under rule 1. No route has one today.
  *
+ * All three are applied BELOW the masked band: the top 62 rows are the iOS
+ * status bar and Dynamic Island, which the system draws and the harness cannot
+ * reliably pin — kora#289 shipped a golden set that failed every route on 243
+ * pixels of it. See GOLDEN.ignoreTop in scripts/shots.goldens.mjs.
+ *
  * The reasoning, and the measurements each number came from, are in
  * scripts/shots-blocks.mjs and scripts/shots.goldens.mjs. Nothing about the
  * rules is configurable from the command line on purpose: a threshold that can
@@ -126,6 +131,17 @@ function auditCandidate(manifest, goldenManifest) {
       `content size differs: golden ${goldenManifest.contentSize}, candidate ${manifest.contentSize}`,
     );
   }
+  if (
+    goldenManifest.rule &&
+    goldenManifest.rule.ignoreTop !== undefined &&
+    goldenManifest.rule.ignoreTop !== GOLDEN.ignoreTop
+  ) {
+    problems.push(
+      `ignored band differs: goldens were accepted with the top ` +
+        `${goldenManifest.rule.ignoreTop}px masked, this comparator masks ` +
+        `${GOLDEN.ignoreTop}px. Re-accept the goldens or restore the constant.`,
+    );
+  }
   if (goldenManifest.device?.name && manifest.device?.name !== goldenManifest.device.name) {
     problems.push(
       `device differs: golden ${goldenManifest.device.name}, candidate ${manifest.device?.name}`,
@@ -155,6 +171,7 @@ async function compareRoute(goldenFile, candidateFile, workDir, maxPixels) {
     block: GOLDEN.block,
     threshold: GOLDEN.threshold,
     broadThreshold: GOLDEN.broadThreshold,
+    ignoreTop: GOLDEN.ignoreTop,
   });
   return judge(report, {
     maxPixels,
@@ -222,6 +239,13 @@ async function main() {
       `no ${GOLDEN.block}px block over ${(GOLDEN.failDensity * 100).toFixed(0)}% dense`,
   );
   console.log(`clock       ${goldenManifest.shotsClock}`);
+  // Printed every run for the same reason the exclusions are: a region that is
+  // not being asserted on should never be something you have to read the
+  // source to discover.
+  console.log(
+    `ignored     top ${GOLDEN.ignoreTop}px of every frame — iOS status bar and ` +
+      "Dynamic Island, drawn by the system (see scripts/shots.goldens.mjs)",
+  );
 
   // Exclusions are printed on EVERY run, with their reasons, so that the
   // shrinking of the suite is visible rather than archaeological.
