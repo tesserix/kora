@@ -109,6 +109,18 @@ export const COMPOSER_BUTTON: Record<Exclude<CaptureMode, "voice">, { icon: stri
   type: { icon: "keyboard", label: "Focus the message field" },
 };
 
+// The server refuses a shorter phrase outright (ResolveText in
+// api/internal/resolve/handler.go), so the client agrees with it at the point
+// of send. Without this a single character could be typed offline, queued, and
+// then 400 on every drain until it was marked permanently failed — since
+// kora#196 that is a persisted row the user has to deal with, not an error
+// bubble that scrolls away (kora#243).
+//
+// Deliberately NOT enforced in captureQueue's isValid: that is the upgrade
+// contract, not the entry rule, and tightening it there would silently delete
+// single-character rows an older build already queued.
+export const MIN_PHRASE_CHARS = 2;
+
 const ROUND_BUTTON = {
   width: 36,
   height: 36,
@@ -589,6 +601,11 @@ export function CaptureBody({
   // middle of the composer is static guidance, so there is no dead field.
   const showsTextField = mode === "photo" || mode === "type";
 
+  // Send is unavailable below MIN_PHRASE_CHARS rather than accepting a press
+  // that could only ever fail — the rule is visible in the affordance, which
+  // is how every other unavailable control on this screen behaves (kora#243).
+  const canSend = text.trim().length >= MIN_PHRASE_CHARS;
+
   // Bring the newest Otto message (an error bubble or the detected-food
   // result) into view — on short viewports or with the keyboard open, the
   // in-thread bubble can otherwise land below the fold with no signal.
@@ -810,19 +827,19 @@ export function CaptureBody({
           <PressableScale
             accessibilityRole="button"
             accessibilityLabel="Send"
-            accessibilityState={{ disabled: !text.trim() }}
-            disabled={!text.trim()}
+            accessibilityState={{ disabled: !canSend }}
+            disabled={!canSend}
             onPress={onSend}
             style={{
               width: 38,
               height: 38,
               borderRadius: 9999,
-              backgroundColor: text.trim() ? T.accent : withAlpha(T.ink, 0.15),
+              backgroundColor: canSend ? T.accent : withAlpha(T.ink, 0.15),
               alignItems: "center",
               justifyContent: "center",
             }}
           >
-            <Icon name="arrow-up" size={19} color={text.trim() ? T.accentOn : T.ink} />
+            <Icon name="arrow-up" size={19} color={canSend ? T.accentOn : T.ink} />
           </PressableScale>
           ) : null}
         </View>
@@ -1329,7 +1346,9 @@ export default function CaptureScreen() {
 
   function handleSend() {
     const phrase = text.trim();
-    if (!phrase) return;
+    // The same gate the Send button renders, enforced here too: the keyboard's
+    // own return key reaches this without going through that button.
+    if (phrase.length < MIN_PHRASE_CHARS) return;
     setErrorMsg(null);
     // Optimistic, and deliberately BEFORE the request: the message belongs in
     // the thread the instant it is sent, exactly as every messaging app
@@ -1351,7 +1370,23 @@ export default function CaptureScreen() {
         setResolvedPhrase(phrase);
       },
       onError: async (error) => {
-        if (controller.signal.aborted) return;
+        // Cancel stops the WAITING, not the words (kora#242) — the rule the
+        // media path already states at runPhotoPick's onError, applied here.
+        // Returning at this guard skipped the classifier below, so a phrase
+        // typed offline and then cancelled was destroyed: gone from the thread
+        // (handleCancelResolve clears sentPhrase) and gone from the composer.
+        // No connectivity snapshot is consulted — an online Cancel arrives as
+        // CancelledError, which the classifier below does not queue, so there
+        // is nothing to preserve in that case and nothing to decide.
+        //
+        // `cancelled` suppresses COPY only — the same division
+        // handleResolveFailure's `silent` draws. Cancel already took the
+        // screen to idle and does not also get to raise a fresh bubble about
+        // the request it just stopped, neither the reassurance nor the
+        // failure's own message. It never suppresses the enqueue, and never
+        // suppresses a queue refusal: a phrase that could not be saved must
+        // say so (see the catch below).
+        const cancelled = controller.signal.aborted;
         // Same classifier handleResolveFailure uses: these three mean the
         // request never arrived, so the phrase is still good and belongs in
         // the queue (kora#196). Anything else is a genuine refusal that would
@@ -1367,21 +1402,35 @@ export default function CaptureScreen() {
           // leave the composer empty; restoring it here made a failed request
           // look like it had never been sent and duplicated the prompt.
           setText("");
-          setErrorMsg(ottoErrorMessage(error));
+          if (!cancelled) setErrorMsg(ottoErrorMessage(error));
           return;
         }
         try {
           await enqueueTextCapture(phrase, mealSlot);
           // The bubble STAYS and the composer stays empty: the capture was
           // accepted, so returning the text would be the misleading state.
-          setErrorMsg(
-            "You're offline — I've saved that, and I'll identify it as soon as you're back online.",
-          );
+          if (!cancelled) {
+            setErrorMsg(
+              "You're offline — I've saved that, and I'll identify it as soon as you're back online.",
+            );
+          }
           void queryClient.invalidateQueries({ queryKey: [QUEUED_CAPTURES_KEY] });
         } catch (queueError) {
-          // The queue refused (full, or nobody signed in) — the phrase is only
-          // safe in the composer now, so put it back and say why.
-          setText("");
+          // The queue refused (full, or nobody signed in), so the phrase is
+          // now saved NOWHERE and survives only if something on screen still
+          // holds it. The optimistic thread bubble does — unless this resolve
+          // was cancelled, because handleCancelResolve clears sentPhrase. So
+          // the composer is restored in exactly that case.
+          //
+          // Not unconditionally: with the bubble still up, putting the words
+          // back too duplicates the prompt, which the non-recoverable branch
+          // above rejects for the same reason.
+          //
+          // This path was unreachable while a cancelled resolve returned at
+          // the abort guard; routing it through the classifier (kora#242) is
+          // what exposed it, and a cancelled capture the queue then refused
+          // was the one remaining way to lose the phrase outright.
+          setText(cancelled ? phrase : "");
           setErrorMsg(
             queueError instanceof CaptureQueueFullError || queueError instanceof NoOwnerError
               ? queueError.message
@@ -1426,10 +1475,14 @@ export default function CaptureScreen() {
   // `silent` is set only by the cancelled-resolve path below: Cancel already
   // told the user the screen is going idle, so it does not also get to pop a
   // new Otto bubble about a request it just told capture.tsx to stop waiting
-  // on. The capture is still worth preserving — silent controls the SUCCESS
-  // message only. It never suppresses the enqueue, and never suppresses a
-  // queue refusal: a capture that could not be saved must say so (see the
-  // catch below).
+  // on. The capture is still worth preserving — silent controls COPY only:
+  // the reassurance on the queued path AND the failure's own message on the
+  // non-recoverable one, since a request the user deliberately stopped should
+  // not report itself as having gone wrong. (This said "the SUCCESS message
+  // only", which was narrower than what the code below has always done —
+  // corrected in kora#242, which gave the typed path the same treatment.)
+  // It never suppresses the enqueue, and never suppresses a queue refusal: a
+  // capture that could not be saved must say so (see the catch below).
   async function handleResolveFailure(
     error: Error,
     file: CaptureFile,
