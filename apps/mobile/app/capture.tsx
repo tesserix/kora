@@ -782,6 +782,10 @@ export function CaptureBody({
               accessibilityLabel="Tell Otto what you ate"
               value={text}
               onChangeText={onChangeText}
+              autoCorrect
+              spellCheck
+              returnKeyType="send"
+              onSubmitEditing={onSend}
               placeholder="Tell Otto what you ate…"
               placeholderTextColor={T.mut}
               style={{ flex: 1, color: T.ink, fontSize: 15 }}

@@ -503,6 +503,23 @@ describe("Type mode", () => {
     );
   });
 
+  test("composer enables native autocorrection and submits from the keyboard", async () => {
+    const { findByText, findByLabelText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Type"));
+
+    const input = await findByLabelText("Tell Otto what you ate");
+    expect(input.props.autoCorrect).toBe(true);
+    expect(input.props.spellCheck).toBe(true);
+    expect(input.props.returnKeyType).toBe("send");
+
+    await fireEvent.changeText(input, "grilled chicken");
+    await fireEvent(input, "submitEditing");
+    expect(mockResolveTextMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ input: "grilled chicken" }),
+      expect.anything(),
+    );
+  });
+
   test("empty input does not call useResolveText", async () => {
     const { findByText, findByLabelText } = await render(<CaptureScreen />);
     await fireEvent.press(await findByText("Type"));
