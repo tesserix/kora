@@ -109,6 +109,18 @@ export const COMPOSER_BUTTON: Record<Exclude<CaptureMode, "voice">, { icon: stri
   type: { icon: "keyboard", label: "Focus the message field" },
 };
 
+// The server refuses a shorter phrase outright (ResolveText in
+// api/internal/resolve/handler.go), so the client agrees with it at the point
+// of send. Without this a single character could be typed offline, queued, and
+// then 400 on every drain until it was marked permanently failed — since
+// kora#196 that is a persisted row the user has to deal with, not an error
+// bubble that scrolls away (kora#243).
+//
+// Deliberately NOT enforced in captureQueue's isValid: that is the upgrade
+// contract, not the entry rule, and tightening it there would silently delete
+// single-character rows an older build already queued.
+export const MIN_PHRASE_CHARS = 2;
+
 const ROUND_BUTTON = {
   width: 36,
   height: 36,
@@ -589,6 +601,11 @@ export function CaptureBody({
   // middle of the composer is static guidance, so there is no dead field.
   const showsTextField = mode === "photo" || mode === "type";
 
+  // Send is unavailable below MIN_PHRASE_CHARS rather than accepting a press
+  // that could only ever fail — the rule is visible in the affordance, which
+  // is how every other unavailable control on this screen behaves (kora#243).
+  const canSend = text.trim().length >= MIN_PHRASE_CHARS;
+
   // Bring the newest Otto message (an error bubble or the detected-food
   // result) into view — on short viewports or with the keyboard open, the
   // in-thread bubble can otherwise land below the fold with no signal.
@@ -810,19 +827,19 @@ export function CaptureBody({
           <PressableScale
             accessibilityRole="button"
             accessibilityLabel="Send"
-            accessibilityState={{ disabled: !text.trim() }}
-            disabled={!text.trim()}
+            accessibilityState={{ disabled: !canSend }}
+            disabled={!canSend}
             onPress={onSend}
             style={{
               width: 38,
               height: 38,
               borderRadius: 9999,
-              backgroundColor: text.trim() ? T.accent : withAlpha(T.ink, 0.15),
+              backgroundColor: canSend ? T.accent : withAlpha(T.ink, 0.15),
               alignItems: "center",
               justifyContent: "center",
             }}
           >
-            <Icon name="arrow-up" size={19} color={text.trim() ? T.accentOn : T.ink} />
+            <Icon name="arrow-up" size={19} color={canSend ? T.accentOn : T.ink} />
           </PressableScale>
           ) : null}
         </View>
@@ -1329,7 +1346,9 @@ export default function CaptureScreen() {
 
   function handleSend() {
     const phrase = text.trim();
-    if (!phrase) return;
+    // The same gate the Send button renders, enforced here too: the keyboard's
+    // own return key reaches this without going through that button.
+    if (phrase.length < MIN_PHRASE_CHARS) return;
     setErrorMsg(null);
     // Optimistic, and deliberately BEFORE the request: the message belongs in
     // the thread the instant it is sent, exactly as every messaging app

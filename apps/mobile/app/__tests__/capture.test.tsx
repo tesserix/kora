@@ -545,6 +545,69 @@ describe("Type mode", () => {
     expect(mockResolveTextMutate).not.toHaveBeenCalled();
   });
 
+  // kora#243. The server refuses a phrase shorter than two characters
+  // (ResolveText in api/internal/resolve/handler.go). A single character used
+  // to pass the client's trim-only check, so typed offline it was queued and
+  // then failed permanently on drain — a persisted row the user has to deal
+  // with, not a bubble that scrolls away.
+  test("a one-character phrase keeps Send unavailable and never resolves", async () => {
+    const { findByText, findByLabelText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Type"));
+
+    const input = await findByLabelText("Tell Otto what you ate");
+    await fireEvent.changeText(input, "a");
+
+    const sendButton = await findByLabelText("Send");
+    expect(sendButton.props.accessibilityState).toEqual({ disabled: true });
+
+    await fireEvent.press(sendButton);
+    expect(mockResolveTextMutate).not.toHaveBeenCalled();
+    expect(enqueueTextCapture).not.toHaveBeenCalled();
+  });
+
+  // The keyboard's own return key never touches the Send button, so the rule
+  // is enforced at handleSend as well as rendered in the affordance.
+  test("submitting a one-character phrase from the keyboard does not resolve either", async () => {
+    const { findByText, findByLabelText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Type"));
+
+    const input = await findByLabelText("Tell Otto what you ate");
+    await fireEvent.changeText(input, "a");
+    await fireEvent(input, "submitEditing");
+
+    expect(mockResolveTextMutate).not.toHaveBeenCalled();
+  });
+
+  // The boundary from the other side: two characters is the server's own
+  // minimum, so it must go through untouched.
+  test("a two-character phrase is available to send and resolves", async () => {
+    const { findByText, findByLabelText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Type"));
+
+    const input = await findByLabelText("Tell Otto what you ate");
+    await fireEvent.changeText(input, "ha");
+
+    const sendButton = await findByLabelText("Send");
+    expect(sendButton.props.accessibilityState).toEqual({ disabled: false });
+
+    await fireEvent.press(sendButton);
+    expect(mockResolveTextMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ input: "ha" }),
+      expect.anything(),
+    );
+  });
+
+  // Surrounding whitespace is not content — " a " is still one character.
+  test("a padded one-character phrase is still refused", async () => {
+    const { findByText, findByLabelText } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByText("Type"));
+
+    await fireEvent.changeText(await findByLabelText("Tell Otto what you ate"), "  a  ");
+    await fireEvent.press(await findByLabelText("Send"));
+
+    expect(mockResolveTextMutate).not.toHaveBeenCalled();
+  });
+
   test("a successful resolve renders the DetectedCard", async () => {
     const { findByText, findByLabelText } = await render(<CaptureScreen />);
     await fireEvent.press(await findByText("Type"));

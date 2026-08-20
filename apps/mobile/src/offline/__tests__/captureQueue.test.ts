@@ -167,6 +167,24 @@ describe("text captures (kora#196)", () => {
     expect(rows[0]!.kind).toBe("photo");
   });
 
+  // kora#243 put a two-character minimum on the SEND path, not here. isValid is
+  // the upgrade contract: a single-character row queued by an older build must
+  // still load, because a row this rejects is silently deleted — the exact
+  // failure mode the media-row test above exists to prevent.
+  it("still accepts a single-character row an older build queued", async () => {
+    await AsyncStorage.setItem(
+      "kora.captureQueue",
+      JSON.stringify([{
+        id: "cap_short", kind: "text", phrase: "a",
+        capturedAt: "2026-08-18T10:00:00.000Z", queuedAt: "2026-08-18T10:00:00.000Z",
+        status: "pending", attempts: 0, ownerId: "owner-1",
+      }]),
+    );
+    const rows = await list();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: "text", phrase: "a" });
+  });
+
   it("drops a text row with no phrase rather than queueing an empty capture", async () => {
     await AsyncStorage.setItem(
       "kora.captureQueue",
