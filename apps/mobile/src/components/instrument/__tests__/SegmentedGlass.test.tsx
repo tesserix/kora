@@ -104,3 +104,43 @@ describe("SegmentedGlass selected state (kora#166)", () => {
     expect(tabs[1].backgroundColor).not.toBe("transparent");
   });
 });
+
+// kora#288. These pin the decisions the overflow bug turned on. All three are
+// invisible to a rendering test and easy to "tidy away" later — the numbers
+// they assert came off a device, not off taste.
+describe("SegmentedGlass label fitting (kora#288)", () => {
+  it("keeps horizontal padding on every segment so adjacent labels cannot abut", async () => {
+    await render(<SegmentedGlass options={SEX} value="male" onChange={jest.fn()} />);
+    for (const tab of screen.getAllByRole("tab")) {
+      const style = flatten(tab.props.style);
+      // Measured at AX3 on an iPhone 17 Pro Max: with no padding, Feedback's
+      // two labels ended and began 6.7pt apart while the words WITHIN each
+      // label were separated by 11.3pt — so the eye grouped "BROKEN I" before
+      // it grouped "I HAVE". The gutter is 2x this value; it has to stay
+      // comfortably above the 1.4pt letter tracking below.
+      expect(Number(style.paddingHorizontal)).toBeGreaterThanOrEqual(6);
+    }
+  });
+
+  it("does not cap the label's Dynamic Type growth", async () => {
+    await render(<SegmentedGlass options={SEX} value="male" onChange={jest.fn()} />);
+    // The tempting fix is kora#274's: cap `maxFontSizeMultiplier` at Apple's
+    // ceiling for the text style. Measured out of UIKit, Apple's caption1 ramp
+    // reaches 2.667 at AX3 where RN applies 2.643 — RN is UNDER Apple, so a cap
+    // here would put the label below what iOS itself draws (the cap kora#268
+    // rejected). If this ever fails, re-read the header comment before
+    // "fixing" it.
+    expect(screen.getByText("Male").props.maxFontSizeMultiplier).toBeUndefined();
+  });
+
+  it("lets the label shrink to the floor iOS actually applies", async () => {
+    await render(<SegmentedGlass options={SEX} value="male" onChange={jest.fn()} />);
+    const label = screen.getByText("Male");
+    expect(label.props.adjustsFontSizeToFit).toBe(true);
+    // RN's iOS Text ignores `minimumFontScale` outright — measured, a label
+    // declaring 0.85 rendered at 0.51 of its scaled size. Android honours it,
+    // so the declared floor has to match what iOS does or the two platforms
+    // diverge (one clips where the other shrinks).
+    expect(label.props.minimumFontScale).toBeLessThanOrEqual(0.5);
+  });
+});
