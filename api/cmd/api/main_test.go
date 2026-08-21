@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -64,24 +65,45 @@ func TestGatewayWiringUsesTheGatewayForRequestsAndEmbeddings(t *testing.T) {
 func TestGatewayWiringAlsoBuildsGatewayOnlyAgentDelegator(t *testing.T) {
 	t.Parallel()
 
-	delegator, err := buildAgentDelegator(config.Config{
+	delegator, registry, err := buildAgentDelegator(config.Config{
 		AIGatewayEnabled: true,
 		AIGatewayBaseURL: "http://agentgateway.kora.svc.cluster.local/v1",
 		AIGatewayAPIKey:  "internal-key",
 		AIAgentTimeout:   25 * time.Second,
-	})
+	}, slog.New(slog.DiscardHandler))
 
 	require.NoError(t, err)
 	assert.IsType(t, &agents.GatewayClient{}, delegator)
+	assert.Nil(t, registry, "no registry base URL means routing stays on the compiled-in agents")
+}
+
+func TestGatewayWiringBuildsTheRegistryWhenConfigured(t *testing.T) {
+	t.Parallel()
+
+	delegator, registry, err := buildAgentDelegator(config.Config{
+		AIGatewayEnabled:  true,
+		AIGatewayBaseURL:  "http://agentgateway.kora.svc.cluster.local/v1",
+		AIGatewayAPIKey:   "internal-key",
+		AIAgentTimeout:    25 * time.Second,
+		AIRegistryBaseURL: "https://aregistry.tesserix.app",
+		AIRegistryAPIKey:  "internal-key",
+		AIRegistryTTL:     5 * time.Minute,
+	}, slog.New(slog.DiscardHandler))
+
+	require.NoError(t, err)
+	assert.IsType(t, &agents.GatewayClient{}, delegator)
+	require.NotNil(t, registry)
+	assert.NotNil(t, registry.AsSelector(), "a configured registry must be usable as the coach's selector")
 }
 
 func TestDirectProviderModeDoesNotBuildAgentServiceBypass(t *testing.T) {
 	t.Parallel()
 
-	delegator, err := buildAgentDelegator(config.Config{})
+	delegator, registry, err := buildAgentDelegator(config.Config{}, slog.New(slog.DiscardHandler))
 
 	require.NoError(t, err)
 	assert.Nil(t, delegator)
+	assert.Nil(t, registry)
 }
 
 func TestDirectWiringKeepsEmbeddingsOnGemini(t *testing.T) {

@@ -30,6 +30,9 @@ type Config struct {
 	AIGatewayAPIKey   string
 	AIGatewayModel    string
 	AIAgentTimeout    time.Duration
+	AIRegistryBaseURL string
+	AIRegistryAPIKey  string
+	AIRegistryTTL     time.Duration
 	SchedulerInterval time.Duration
 	PushEnabled       bool
 	PushInterval      time.Duration
@@ -80,6 +83,11 @@ func Load() (Config, error) {
 		AIGatewayAPIKey:          os.Getenv("AI_GATEWAY_API_KEY"),
 		AIGatewayModel:           getenv("AI_GATEWAY_MODEL", "kora-auto"),
 		AIAgentTimeout:           getdur("AI_AGENT_TIMEOUT", 24*time.Second),
+		AIRegistryBaseURL:        os.Getenv("AI_REGISTRY_BASE_URL"),
+		// The registry accepts Kora's gateway key as its deploy key, so a
+		// separate AI_REGISTRY_API_KEY is only needed to override it.
+		AIRegistryAPIKey: getenv("AI_REGISTRY_API_KEY", os.Getenv("AI_GATEWAY_API_KEY")),
+		AIRegistryTTL:    getdur("AI_REGISTRY_TTL", 5*time.Minute),
 		SchedulerInterval:        getdur("SCHEDULER_INTERVAL", 5*time.Minute),
 		PushEnabled:              os.Getenv("PUSH_ENABLED") == "true",
 		PushInterval:             getdur("PUSH_INTERVAL", 30*time.Second),

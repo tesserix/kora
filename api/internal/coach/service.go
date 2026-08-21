@@ -100,6 +100,7 @@ type Service struct {
 	meter    ai.Meter
 	thread   *ThreadRepository
 	delegate agents.Delegator
+	selector agents.Selector
 }
 
 // NewService builds a Service over its collaborators. thread may be nil, in
@@ -114,6 +115,24 @@ func NewService(g *Grounder, p ai.Provider, m ai.Meter, thread *ThreadRepository
 func (s *Service) WithDelegator(delegate agents.Delegator) *Service {
 	s.delegate = delegate
 	return s
+}
+
+// WithSelector replaces the compiled-in phrase table with registry-driven
+// routing. A nil selector keeps the keyword default, so an unconfigured
+// registry changes nothing about how questions are routed.
+func (s *Service) WithSelector(selector agents.Selector) *Service {
+	if selector != nil {
+		s.selector = selector
+	}
+	return s
+}
+
+// route picks the agent for a question, defaulting to keyword selection.
+func (s *Service) route(ctx context.Context, question string) agents.Name {
+	if s.selector == nil {
+		return agents.SelectForQuestion(question)
+	}
+	return s.selector.SelectForQuestion(ctx, question)
 }
 
 // Ask answers a free-text question grounded over the user's Context. The
@@ -148,7 +167,7 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 	var raw string
 	var usage ai.Usage
 	if s.delegate != nil {
-		result, delegateErr := s.delegate.Delegate(ctx, agents.SelectForQuestion(question), userPrompt)
+		result, delegateErr := s.delegate.Delegate(ctx, s.route(ctx, question), userPrompt)
 		raw, usage, err = result.Text, result.Usage, delegateErr
 	} else {
 		providerCtx, collector := ai.WithUsageCollector(ctx)

@@ -39,6 +39,8 @@ type Collectors struct {
 	aiLatency *prometheus.HistogramVec
 	foodLogs  *prometheus.CounterVec
 
+	agentResolves *prometheus.CounterVec
+
 	foodIndexItems    prometheus.Gauge
 	foodIndexEmbedded prometheus.Gauge
 	foodIndexMissing  prometheus.Gauge
@@ -66,6 +68,10 @@ func New() *Collectors {
 			Name: "kora_food_logs_total",
 			Help: "Food logs created, by resolution source.",
 		}, []string{"source"}),
+		agentResolves: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "kora_agent_registry_resolves_total",
+			Help: "Agent roster lookups by cache outcome. A rising `stale` or `error` rate means routing has silently fallen back to the compiled-in phrase table.",
+		}, []string{"result"}),
 		foodIndexItems: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "kora_food_index_items",
 			Help: "Rows in food_items. A gauge, not a counter: refreshed from the database on a timer, so a restart re-reads truth rather than resetting to zero.",
@@ -80,7 +86,7 @@ func New() *Collectors {
 		}),
 	}
 	c.registry.MustRegister(c.aiCalls, c.aiCostUSD, c.aiLatency, c.foodLogs,
-		c.foodIndexItems, c.foodIndexEmbedded, c.foodIndexMissing)
+		c.agentResolves, c.foodIndexItems, c.foodIndexEmbedded, c.foodIndexMissing)
 	return c
 }
 
@@ -158,6 +164,21 @@ func RecordAICall(callType, model, outcome string, costUSD float64, latency time
 
 // RecordFoodLog records one newly created food log on the default collectors.
 func RecordFoodLog(source string) { defaultCollectors.RecordFoodLog(source) }
+
+// RecordAgentResolve records one agent roster lookup. The label is bounded to
+// the four outcomes the cache can produce, so the registry cannot widen this
+// series by publishing new agents.
+func (c *Collectors) RecordAgentResolve(result string) {
+	switch result {
+	case "hit", "miss", "stale", "error":
+	default:
+		result = "other"
+	}
+	c.agentResolves.WithLabelValues(result).Inc()
+}
+
+// RecordAgentResolve records one agent roster lookup on the default collectors.
+func RecordAgentResolve(result string) { defaultCollectors.RecordAgentResolve(result) }
 
 // SetFoodIndex publishes the food-index gauges on the default collectors.
 func SetFoodIndex(total, embedded int64) { defaultCollectors.SetFoodIndex(total, embedded) }

@@ -40,6 +40,28 @@ type GatewayClient struct {
 	apiKey     string
 	httpClient *http.Client
 	newID      func() string
+	roster     RosterSource
+}
+
+// WithRoster lets a trusted control plane publish agents beyond the two
+// compiled-in names. The roster only ever widens the allowlist; when it is
+// unset or unreachable, Delegate falls back to the compiled list, so a
+// registry outage can never admit an agent that review has not seen.
+func (c *GatewayClient) WithRoster(roster RosterSource) *GatewayClient {
+	c.roster = roster
+	return c
+}
+
+// allows reports whether name may be delegated to.
+func (c *GatewayClient) allows(ctx context.Context, name Name) bool {
+	if name.reviewed() {
+		return true
+	}
+	if c.roster == nil {
+		return false
+	}
+	published := c.roster.Roster(ctx)
+	return published != nil && published(name)
 }
 
 func NewGatewayClient(modelBaseURL, apiKey string, timeout time.Duration) (*GatewayClient, error) {
@@ -135,7 +157,7 @@ func (c *GatewayClient) Delegate(ctx context.Context, name Name, prompt string) 
 		result.Usage.LatencyMs = int(time.Since(started).Milliseconds())
 	}()
 
-	if !name.reviewed() {
+	if !c.allows(ctx, name) {
 		return result, fmt.Errorf("agents: %w: %q", ErrUnknownAgent, name)
 	}
 	prompt = strings.TrimSpace(prompt)
