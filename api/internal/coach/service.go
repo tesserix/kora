@@ -90,6 +90,17 @@ type Answer struct {
 	Text        string
 	Citations   []Fact
 	ShowSupport bool
+	// By names the agent that produced Text. It is zero when the direct
+	// provider answered, which the client shows as the plain assistant.
+	By Attribution
+}
+
+// Attribution is who answered: the agent's published display name and the
+// capability the question routed to. Both come from the registry, so a
+// republished agent renames itself in the UI without a Kora deploy.
+type Attribution struct {
+	Agent string
+	Skill string
 }
 
 // guidanceSkill is the registry skill id Q&A routes to. Kora names the
@@ -163,8 +174,14 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 
 	userPrompt := fmt.Sprintf("CONTEXT:\n%s\n\nQUESTION: %s", grounded.Render(), question)
 
-	raw, err := s.askAgent(ctx, userID, userPrompt)
-	if err != nil {
+	by := Attribution{}
+	raw, run, err := s.askAgent(ctx, userID, userPrompt)
+	if err == nil {
+		// The skill is the one Kora asked for, not the one the run echoes
+		// back: the capability that routed the question is what the user is
+		// told, and it stays right even if a runner omits the field.
+		by = Attribution{Agent: run.DisplayName, Skill: guidanceSkill}
+	} else {
 		// The agent path is preferred, not required: a registry that publishes
 		// no matching agent, or a gateway that fails, must not cost the user an
 		// answer the direct provider can still give. An unconfigured runner is
@@ -192,6 +209,7 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 		Text:        text,
 		Citations:   grounded.Facts(),
 		ShowSupport: decision.ShowSupport || guardrails.AtRisk(signals),
+		By:          by,
 	}
 
 	// Store the exchange for replay only; prior turns are never fed back
@@ -210,9 +228,9 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 // carries its own system prompt and guardrails from its published definition,
 // so only the grounded CONTEXT/QUESTION body is sent — the same body the
 // direct path uses, which the agents' supervisor grounding already expects.
-func (s *Service) askAgent(ctx context.Context, userID uuid.UUID, userPrompt string) (string, error) {
+func (s *Service) askAgent(ctx context.Context, userID uuid.UUID, userPrompt string) (string, agents.Run, error) {
 	if s.runner == nil {
-		return "", errNoAgent
+		return "", agents.Run{}, errNoAgent
 	}
 
 	started := time.Now()
@@ -230,11 +248,11 @@ func (s *Service) askAgent(ctx context.Context, userID uuid.UUID, userPrompt str
 		// other failed provider call rather than dropped.
 		usage.Outcome = outcomeFor(err)
 		s.record(ctx, userID, usage)
-		return "", err
+		return "", agents.Run{}, err
 	}
 
 	s.record(ctx, userID, usage)
-	return run.Text, nil
+	return run.Text, run, nil
 }
 
 // askProvider is the pre-agent path: one grounded GenerateText call.

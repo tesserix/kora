@@ -141,3 +141,19 @@ func TestNewCoordinatorNeedsBothHalves(t *testing.T) {
 		t.Error("NewCoordinator without a registry = non-nil, want nil")
 	}
 }
+
+func TestDisplayName_PrefersThePublishedNameThenTitleCasesTheID(t *testing.T) {
+	published := ResolvedAgent{Agent: Object{
+		Metadata: ObjectMeta{Name: "nutrition-coach"},
+		Spec:     map[string]any{"displayName": "Otto's Nutritionist"},
+	}}
+	if got := published.DisplayName(); got != "Otto's Nutritionist" {
+		t.Fatalf("published display name: got %q", got)
+	}
+
+	// An agent published without one must still read as words, not as its id.
+	bare := ResolvedAgent{Agent: Object{Metadata: ObjectMeta{Name: "meal-planner"}}}
+	if got := bare.DisplayName(); got != "Meal Planner" {
+		t.Fatalf("fallback display name: got %q", got)
+	}
+}

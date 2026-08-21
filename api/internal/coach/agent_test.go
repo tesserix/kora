@@ -143,3 +143,43 @@ func TestAsk_TypedNilRunnerLeavesTheProviderPath(t *testing.T) {
 	require.Equal(t, "from the provider", a.Text)
 	require.Equal(t, 1, provider.calls)
 }
+
+func TestAsk_AttributesTheAnswerToTheAgentThatProducedIt(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	g, meter := askFixture(t)
+
+	runner := &fakeRunner{run: agents.Run{
+		Agent:       "nutrition-coach",
+		DisplayName: "Nutrition Coach",
+		State:       "completed",
+		Text:        "You have 55g protein to go.",
+	}}
+	svc := NewService(g, &fakeProvider{text: "from the provider"}, meter, nil).WithAgents(runner)
+
+	a, err := svc.Ask(context.Background(), userID, time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC), time.UTC, "how's my protein?")
+
+	require.NoError(t, err)
+	require.Equal(t, "Nutrition Coach", a.By.Agent, "the user must be shown who answered")
+	require.Equal(t, guidanceSkill, a.By.Skill)
+	_ = db
+}
+
+func TestAsk_ProviderFallbackIsNotAttributedToAnAgent(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	g, meter := askFixture(t)
+
+	// A failed agent run must not leave the previous agent's name on an
+	// answer the plain provider actually wrote.
+	runner := &fakeRunner{err: errors.New("gateway unreachable")}
+	svc := NewService(g, &fakeProvider{text: "from the provider"}, meter, nil).WithAgents(runner)
+
+	a, err := svc.Ask(context.Background(), userID, time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC), time.UTC, "how's my protein?")
+
+	require.NoError(t, err)
+	require.Equal(t, "from the provider", a.Text)
+	require.Empty(t, a.By.Agent)
+	require.Empty(t, a.By.Skill)
+	_ = db
+}
