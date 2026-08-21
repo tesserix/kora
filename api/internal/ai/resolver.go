@@ -232,8 +232,8 @@ func (r Resolver) aliasShortCircuit(ctx context.Context, userID uuid.UUID, phras
 
 // resolveAliasPortion picks the portion (grams) for an alias short-circuit
 // hit: the user's last logged portion for this exact phrase, falling back to
-// the food's ServingGrams, falling back to defaultAliasPortionGrams. A nil
-// portionSource (no PortionSource wired) or a lookup error is treated the
+// the food's own serving size, falling back to defaultAliasPortionGrams. A
+// nil portionSource (no PortionSource wired) or a lookup error is treated the
 // same as "no prior log" — logged and folded into the same fallback chain —
 // since an alias hit still deserves an answer even without portion history.
 //
@@ -242,6 +242,23 @@ func (r Resolver) aliasShortCircuit(ctx context.Context, userID uuid.UUID, phras
 // ServingGrams are both actual data, not assumptions. Callers must pass this
 // straight through to ResolvedCandidate.PortionAssumed rather than
 // re-deriving the condition themselves.
+//
+// The serving rung is gated on plausibleServingGrams, not on ServingGrams > 0
+// (kora#144). It is the same rung as portionGramsFor's step 4 and has to obey
+// the same rule: a stored serving is only evidence of a portion when it is one
+// a person plausibly eats in a sitting. USDA rows carry whole-animal reference
+// masses — "Turkey, whole, meat and skin, raw" is 5717 g — and a bare > 0 test
+// admits them, so an alias hit with no logged portion could log ten thousand
+// calories AND report PortionAssumed: false, i.e. as a measured figure the
+// card would not even hedge. That an alias implies user history mitigates the
+// odds but not the outcome: the rung fires precisely when the phrase has NO
+// prior portion, and nothing bounds what row an alias points at. Falling to
+// the flat 100 g default instead is wrong by a factor the user can see and
+// correct, and it says so (assumed = true).
+//
+// Deliberately not applied to resolve's barcode sibling: that path only ever
+// sees packaged OFF products, where serving_quantity is a real package serving
+// and the reference-mass class does not arise.
 func (r Resolver) resolveAliasPortion(ctx context.Context, userID uuid.UUID, phrase string, item nutrition.FoodItem) (grams float64, assumed bool) {
 	if r.portionSource != nil {
 		grams, found, err := r.portionSource.LastPortionForPhrase(ctx, userID, phrase)
@@ -252,7 +269,7 @@ func (r Resolver) resolveAliasPortion(ctx context.Context, userID uuid.UUID, phr
 			return grams, false
 		}
 	}
-	if item.ServingGrams > 0 {
+	if plausibleServingGrams(item.ServingGrams) {
 		return item.ServingGrams, false
 	}
 	return defaultAliasPortionGrams, true
