@@ -33,8 +33,8 @@ beforeEach(() => {
 
 test('renders both kind options and defaults to "bug"', async () => {
   const { getByLabelText } = await render(<FeedbackScreen />);
-  const bugTab = getByLabelText("Something's broken");
-  const featureTab = getByLabelText("I have an idea");
+  const bugTab = getByLabelText("Bug");
+  const featureTab = getByLabelText("Idea");
   expect(bugTab.props.accessibilityState).toEqual({ selected: true });
   expect(featureTab.props.accessibilityState).toEqual({ selected: false });
 });
@@ -63,7 +63,7 @@ test("whitespace-only subject keeps submit disabled", async () => {
 
 test("submits kind, subject, description and the device context", async () => {
   const { getByLabelText } = await render(<FeedbackScreen />);
-  await fireEvent.press(getByLabelText("I have an idea"));
+  await fireEvent.press(getByLabelText("Idea"));
   await fireEvent.changeText(getByLabelText("Subject"), "Dark mode for charts");
   await fireEvent.changeText(getByLabelText("Description"), "The weekly chart is hard to read at night.");
   await fireEvent.press(getByLabelText("Send"));
@@ -127,4 +127,27 @@ test("enforces the subject and description length caps", async () => {
   const { getByLabelText } = await render(<FeedbackScreen />);
   expect(getByLabelText("Subject").props.maxLength).toBe(200);
   expect(getByLabelText("Description").props.maxLength).toBe(4000);
+});
+
+// kora#294: these labels have a width budget, and the budget is the reason the
+// copy is what it is. A segmented control splits one track into N equal parts,
+// so each label gets a half-track — measured at 196.7pt at
+// accessibility-extra-large on a 440pt screen. "Something's broken" wanted
+// 344.8pt there and could only fit shrunk to 52% of the requested size.
+//
+// From that measurement: 344.8pt across 18 characters is ~19.2pt per character,
+// so a half-track holds roughly 10. The cap below is that, not a taste.
+//
+// Character count is a PROXY for width, not width — Jest performs no layout and
+// cannot measure a glyph (#257). A wide-glyph label inside the cap could still
+// overflow. What this does catch is the regression that actually happened:
+// someone writing a sentence where a word belongs.
+const MAX_SEGMENT_CHARS = 10;
+
+test("the kind labels stay inside a segment's half-track budget", async () => {
+  const { getByLabelText } = await render(<FeedbackScreen />);
+  for (const label of ["Bug", "Idea"]) {
+    expect(getByLabelText(label)).toBeTruthy();
+    expect(label.length).toBeLessThanOrEqual(MAX_SEGMENT_CHARS);
+  }
 });
