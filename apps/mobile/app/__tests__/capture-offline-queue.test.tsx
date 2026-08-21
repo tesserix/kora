@@ -7,6 +7,7 @@ import { router } from "expo-router";
 import { ApiError, AuthTokenError, CancelledError, NetworkError, TimeoutError } from "@/lib/api";
 import { CaptureQueueFullError } from "@/offline/captureQueue";
 import { NoOwnerError } from "@/offline/owner";
+import { OfflineUnknownBarcodeError } from "@/offline/cachedResolution";
 import { mealSlotForHour } from "@/lib/mealSlot";
 import { QUEUED_CAPTURES_KEY } from "@/offline/queryKeys";
 
@@ -120,7 +121,9 @@ jest.mock("@/api/hooks", () => ({
 // the factory risks resolving before the const initializes, given import
 // statements (and therefore this module's require of "../capture", which
 // pulls in "@/offline/enqueueCapture") are hoisted above other statements.
-jest.mock("@/offline/enqueueCapture", () => ({ enqueueCapture: jest.fn(), enqueueTextCapture: jest.fn() }));
+jest.mock("@/offline/enqueueCapture", () => ({
+  enqueueCapture: jest.fn(), enqueueTextCapture: jest.fn(), enqueueBarcodeCapture: jest.fn(),
+}));
 
 type MockRecorder = {
   prepareToRecordAsync: jest.Mock;
@@ -150,6 +153,10 @@ function mockEnqueueTextCapture(): jest.Mock {
   return jest.requireMock("@/offline/enqueueCapture").enqueueTextCapture;
 }
 
+function mockEnqueueBarcodeCapture(): jest.Mock {
+  return jest.requireMock("@/offline/enqueueCapture").enqueueBarcodeCapture;
+}
+
 // CaptureScreen holds its own query client (useQueryClient, to invalidate the
 // queued-captures view after an offline enqueue), so every render needs a
 // provider in the tree.
@@ -173,6 +180,7 @@ beforeEach(() => {
   mockCreateLogMutateAsync.mockReset();
   mockEnqueueCapture().mockReset();
   mockEnqueueTextCapture().mockReset();
+  mockEnqueueBarcodeCapture().mockReset();
   (router.back as jest.Mock).mockReset();
   (ImagePicker.requestCameraPermissionsAsync as jest.Mock).mockReset().mockResolvedValue({ granted: true });
   (ImagePicker.requestMediaLibraryPermissionsAsync as jest.Mock).mockReset().mockResolvedValue({ granted: true });
@@ -641,5 +649,88 @@ describe("Cancelling a typed resolve", () => {
 
     expect(mockEnqueueTextCapture()).toHaveBeenCalledWith("chicken and rice", expectedMealSlot());
     expect(await rendered.findByText(/i.{0,3}ve saved that/i)).toBeTruthy();
+  });
+});
+
+
+// kora#241. The last modality with nothing to fall back on: an unseen barcode
+// scanned offline was dropped with honest but final copy. A SEEN one is
+// already answered locally by cachedResolution.ts and never reaches onError at
+// all, so the branch staged here is precisely the first-ever scan of a product
+// while offline — the only case that was losing anything.
+describe("An unseen barcode scanned offline", () => {
+  async function scanOffline() {
+    const rendered = await render(<CaptureScreen />);
+    await fireEvent.press(await rendered.findByText("Scan"));
+    const scanner = await rendered.findByTestId("barcode-scanner");
+    await act(async () => {
+      scanner.props.onBarcodeScanned({ data: "5000112637922" });
+    });
+    await waitFor(() => expect(mockResolveBarcodeMutate).toHaveBeenCalled());
+    const [, options] = mockResolveBarcodeMutate.mock.calls[0];
+    // Every transport failure of a barcode resolve arrives as this class:
+    // useResolveBarcode's withCacheFallback turns a NetworkError or a
+    // TimeoutError into a cache lookup, and a miss raises it.
+    await act(async () => options.onError(new OfflineUnknownBarcodeError()));
+    return rendered;
+  }
+
+  test("queues the code with the current meal slot", async () => {
+    mockEnqueueBarcodeCapture().mockResolvedValue({ id: "cap-1" });
+    await scanOffline();
+
+    expect(mockEnqueueBarcodeCapture()).toHaveBeenCalledWith("5000112637922", expectedMealSlot());
+  });
+
+  test("says the scan is saved, and keeps saying why it cannot answer now", async () => {
+    mockEnqueueBarcodeCapture().mockResolvedValue({ id: "cap-1" });
+    const rendered = await scanOffline();
+
+    // The first clause is what made kora#191's copy honest — "I couldn't
+    // identify that" would claim the product does not exist, when the truth is
+    // that this device cannot see the index from here.
+    expect(
+      await rendered.findByText(/isn.{0,3}t a barcode you.{0,3}ve scanned before/i),
+    ).toBeTruthy();
+    expect(await rendered.findByText(/I.{0,3}ll identify it as soon as you.{0,3}re back online/i)).toBeTruthy();
+    // The advice it replaces. Telling the user to scan again is now wrong:
+    // re-scanning is exactly what the dedupe treats as the same intent.
+    expect(rendered.queryByText(/Scan it again once you.{0,3}re back online/i)).toBeNull();
+  });
+
+  test("refreshes the diary's queued-capture view", async () => {
+    mockEnqueueBarcodeCapture().mockResolvedValue({ id: "cap-1" });
+    const rendered = await scanOffline();
+
+    await waitFor(() =>
+      expect(rendered.invalidateQueriesSpy).toHaveBeenCalledWith({ queryKey: [QUEUED_CAPTURES_KEY] }),
+    );
+  });
+
+  // The queue refused, so NOTHING was saved and the copy must not say it was.
+  test("shows the queue's own refusal copy when the queue is full", async () => {
+    mockEnqueueBarcodeCapture().mockRejectedValue(new CaptureQueueFullError());
+    const rendered = await scanOffline();
+
+    expect(await rendered.findByText(/too many captures waiting to be identified/i)).toBeTruthy();
+    expect(rendered.queryByText(/I.{0,3}ve saved the scan/i)).toBeNull();
+  });
+
+  test("shows the sign-in copy when nobody owns the queue", async () => {
+    mockEnqueueBarcodeCapture().mockRejectedValue(new NoOwnerError());
+    const rendered = await scanOffline();
+
+    expect(rendered.queryByText(/I.{0,3}ve saved the scan/i)).toBeNull();
+  });
+
+  // A refusal with no user-facing copy of its own falls back to the old
+  // message — which is still true in exactly this case, and is the one case
+  // where "scan it again" is still the advice that works.
+  test("falls back to the scan-again copy when the refusal carries no message", async () => {
+    mockEnqueueBarcodeCapture().mockRejectedValue(new Error("disk full"));
+    const rendered = await scanOffline();
+
+    expect(await rendered.findByText(/Scan it again once you.{0,3}re back online/i)).toBeTruthy();
+    expect(rendered.queryByText(/I.{0,3}ve saved the scan/i)).toBeNull();
   });
 });
