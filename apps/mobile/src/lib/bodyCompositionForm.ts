@@ -150,3 +150,23 @@ export function parseCompositionDraft(
   // states what the outcomes list already guarantees.
   return { ok: true, payload: { ...measured, source } as AddWeightPayload };
 }
+
+/**
+ * The draft's currently-valid values, for the live derived readout.
+ *
+ * Deliberately lenient where `parseCompositionDraft` is strict: a half-typed
+ * "7." is not an error while the user is still typing, it is simply not a value
+ * yet, so it is omitted. Same omission rule as everywhere else — a field that
+ * cannot be read contributes nothing rather than a zero, which is what keeps
+ * BMI from flashing an impossible figure mid-keystroke.
+ */
+export function previewValues(draft: CompositionDraft, system: UnitSystem): CompositionValues {
+  return Object.fromEntries(
+    COMPOSITION_METRICS.flatMap((metric) => {
+      const typed = readNumber(draft[metric.key] ?? "");
+      if (typed === null) return [];
+      const stored = toStored(metric, typed, system);
+      return inRange(metric, stored) ? [[metric.key, stored]] : [];
+    }),
+  );
+}

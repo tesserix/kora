@@ -1,4 +1,4 @@
-import { draftFromValues, parseCompositionDraft } from "../bodyCompositionForm";
+import { draftFromValues, parseCompositionDraft, previewValues } from "../bodyCompositionForm";
 
 const ok = (result: ReturnType<typeof parseCompositionDraft>) => {
   if (!result.ok) throw new Error(`expected a valid draft, got ${JSON.stringify(result.errors)}`);
@@ -138,5 +138,20 @@ describe("source", () => {
     expect(ok(parseCompositionDraft({ weight_kg: "70" }, "scale_screenshot", "metric")).source).toBe(
       "scale_screenshot",
     );
+  });
+});
+
+describe("previewValues — what the live derived readout reads", () => {
+  it("omits a field that is blank or still being typed, rather than reading it as 0", () => {
+    const values = previewValues({ weight_kg: "70.2", body_fat_pct: "", muscle_mass_kg: "abc" }, "metric");
+    expect(values).toEqual({ weight_kg: 70.2 });
+  });
+
+  it("omits an out-of-range value instead of deriving from it", () => {
+    expect(previewValues({ weight_kg: "70.2", body_fat_pct: "132" }, "metric")).toEqual({ weight_kg: 70.2 });
+  });
+
+  it("converts an imperial entry so the derivation runs in kg", () => {
+    expect(previewValues({ weight_kg: "150" }, "imperial").weight_kg).toBeCloseTo(68.0388555, 4);
   });
 });

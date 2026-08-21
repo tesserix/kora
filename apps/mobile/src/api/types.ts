@@ -12,6 +12,13 @@ export type Profile = {
   target_date: string | null;
   onboarded_at: string | null;
   weight_kg: number;
+  /**
+   * Onboarding height, already on the wire from GET /v1/me (internal/user's
+   * User is serialised whole) and declared here since kora#45 because BMI is
+   * DERIVED from it. There is no BMI column and there must not be one — see
+   * src/lib/bodyComposition.ts.
+   */
+  height_cm: number;
   share_progress: boolean;
 };
 
