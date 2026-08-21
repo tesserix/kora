@@ -92,12 +92,11 @@ func (r ResolvedAgent) HasSkill(id string) bool {
 }
 
 // DisplayName is the agent's human-readable name, for showing the user who
-// answered. It prefers what the card publishes (spec.displayName, then
-// spec.name) and falls back to title-casing the registry name, so an agent
-// published without one still reads as "Nutrition Coach" rather than
-// "nutrition-coach".
+// answered. spec.title is what the published cards actually carry; the other
+// two are accepted because the schema allows them. An agent published without
+// any of them still reads as "Nutrition Coach" rather than "nutrition-coach".
 func (r ResolvedAgent) DisplayName() string {
-	for _, key := range []string{"displayName", "name"} {
+	for _, key := range []string{"title", "displayName", "name"} {
 		if v, _ := r.Agent.Spec[key].(string); strings.TrimSpace(v) != "" {
 			return strings.TrimSpace(v)
 		}

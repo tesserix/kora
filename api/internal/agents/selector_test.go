@@ -143,11 +143,12 @@ func TestNewCoordinatorNeedsBothHalves(t *testing.T) {
 }
 
 func TestDisplayName_PrefersThePublishedNameThenTitleCasesTheID(t *testing.T) {
+	// spec.title is what the live registry's cards carry.
 	published := ResolvedAgent{Agent: Object{
 		Metadata: ObjectMeta{Name: "nutrition-coach"},
-		Spec:     map[string]any{"displayName": "Otto's Nutritionist"},
+		Spec:     map[string]any{"title": "Kora Nutrition Coach"},
 	}}
-	if got := published.DisplayName(); got != "Otto's Nutritionist" {
+	if got := published.DisplayName(); got != "Kora Nutrition Coach" {
 		t.Fatalf("published display name: got %q", got)
 	}
 
