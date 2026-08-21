@@ -24,6 +24,11 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# Screenshot harness output (apps/mobile/scripts/shots.mjs). Captured images
+# are never committed: goldens before the noise floor is known produce a suite
+# that fails randomly, gets muted, and then hides the next bug (kora#257).
+.shots/
+
 # OS / editor
 .DS_Store
 .idea/

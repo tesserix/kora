@@ -22,7 +22,9 @@ import type { WeightEntry } from "@/api/types";
 import { useHealth } from "@/health";
 import { AnimatedNumber, PressableScale, ScreenEntrance, useMotionPrefs } from "@/motion";
 import { useTheme } from "@/theme";
+import { todayLocalDate } from "@/lib/shotsClock";
 import { formatWeight, lbFromKg, useUnits, weightUnitLabel } from "@/units";
+import { TAB_BAR_SCROLL_INSET } from "@/components/FloatingTabBar";
 
 const RANGES = ["1W", "1M", "3M", "1Y"] as const;
 const RANGE_OPTIONS = RANGES.map((r) => ({ key: r, label: r }));
@@ -36,8 +38,10 @@ const RANGE_OPTIONS = RANGES.map((r) => ({ key: r, label: r }));
 const ENERGY_TARGET_FRACTION = 0.74;
 const SLEEP_TARGET_HOURS = 7;
 
+// Pinnable for the screenshot harness; identical to `new Date()` everywhere
+// else. See src/lib/shotsClock.ts.
 function today(): string {
-  return new Date().toLocaleDateString("en-CA");
+  return todayLocalDate();
 }
 const shortDate = (isoStr: string) => new Date(isoStr).toLocaleDateString([], { month: "short", day: "numeric" });
 const weightFormat = (n: number) => n.toFixed(1);
@@ -176,7 +180,7 @@ export default function Progress() {
     <ScreenEntrance direction={2}>
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppBackground />
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: TAB_BAR_SCROLL_INSET }}>
       <Animated.View entering={enter(0)}>
         <ScreenHeader title="Trends" />
       </Animated.View>

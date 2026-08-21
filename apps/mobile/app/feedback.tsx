@@ -19,9 +19,23 @@ const DESCRIPTION_MAX = 4000;
 // Only nudge the user once they're close to the cap — not a permanent counter.
 const DESCRIPTION_HINT_THRESHOLD = 200;
 
+// Kept to one word each (kora#294). A segmented control divides one track into
+// N equal parts, so each label gets half the width; at accessibility-extra-large
+// on a 440pt screen "Something's broken" needed 344.8pt against a 196.7pt
+// half-track, and would only fit shrunk to 15.1pt — 52% of the size the user
+// asked for. Wrapping could not save it either: "SOMETHING'S" alone needed
+// 212.9pt, more than the whole half-track before the second word.
+//
+// #288 had already spent the layout levers (the gutter went 6.7 -> 23.0pt) and
+// #263 ruled out flexShrink, which splits words rather than fitting them. What
+// was left was the copy. iOS's own UISegmentedControl sidesteps this by not
+// participating in Dynamic Type at all — Apple can do that because Apple also
+// controls every label's length; here, controlling the length is the fix.
+//
+// `key` is the API contract and does not change with the label.
 const KIND_OPTIONS: { key: FeedbackKind; label: string }[] = [
-  { key: "bug", label: "Something's broken" },
-  { key: "feature", label: "I have an idea" },
+  { key: "bug", label: "Bug" },
+  { key: "feature", label: "Idea" },
 ];
 
 function descriptionPlaceholder(kind: FeedbackKind): string {
@@ -93,7 +107,7 @@ export default function Feedback() {
             {submitted ? (
               <GlassPanel radius={22} style={{ padding: spacing.md, gap: spacing.sm, alignItems: "flex-start" }}>
                 <AppText style={{ fontSize: 22, fontWeight: "700", color: instrument.ink }}>Thanks — got it.</AppText>
-                <AppText style={{ fontSize: 15, color: instrument.mut }}>
+                <AppText variant="subheadline" style={{ color: instrument.mut }}>
                   We read every note. If yours needs a reply, we'll be in touch.
                 </AppText>
                 <Button

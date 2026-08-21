@@ -37,7 +37,7 @@ export function LeaderRow({ rank, name, sub, metric, isYou = false, onPress }: P
       <AppText style={[{ fontSize: 15, fontWeight: "600", color: instrument.mut }, mono]}>{String(rank)}</AppText>
       <Avatar initials={initials} />
       <View style={{ flex: 1 }}>
-        <AppText style={{ fontSize: 17, fontWeight: "600", color: instrument.ink }}>{name}</AppText>
+        <AppText variant="headline" style={{ color: instrument.ink }}>{name}</AppText>
         {sub ? <AppText style={[{ fontSize: 13, color: instrument.mut }, mono]}>{sub}</AppText> : null}
       </View>
       <AppText style={[{ fontSize: 17, fontWeight: "600", color: instrument.ink }, mono]}>{metric}</AppText>

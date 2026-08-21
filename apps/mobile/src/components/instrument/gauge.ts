@@ -11,7 +11,11 @@ const CY = GAUGE_CENTER_Y;
 const R = 114;
 const START = -205;
 const END = 25;
-const TICKS = 40;
+// Exported so consumers deriving a per-tick fraction (GaugeDial's and PlanDial's
+// animated ticks both compute `index / TICKS` to find their lit threshold) share
+// this number instead of hardcoding it alongside the array it produces.
+export const GAUGE_TICKS = 40;
+const TICKS = GAUGE_TICKS;
 const MAJOR_EVERY = 5;
 
 export interface GaugeTick {
@@ -42,6 +46,11 @@ const toXY = (deg: number, rad: number): [number, number] => {
   return [CX + rad * Math.cos(a), CY + rad * Math.sin(a)];
 };
 
+// Only `.lit` depends on `fraction`; every other field (position, width, major,
+// red) is a function of the module constants above. Consumers that animate the
+// lit boundary on the UI thread (GaugeDial, and since kora#238 PlanDial) build
+// this ONCE with an arbitrary argument and ignore `.lit` — see
+// PlanDial.rebuild.test.tsx, which pins that invariant.
 export function buildGaugeTicks(fraction: number): GaugeTick[] {
   const out: GaugeTick[] = [];
   for (let i = 0; i <= TICKS; i++) {
@@ -74,4 +83,120 @@ export function scaleAnchor(t: number): { x: number; y: number; anchor: "start" 
   const deg = START + t * (END - START);
   const [x, y] = toXY(deg, R - 26);
   return { x, y: y + 3, anchor: t < 0.25 ? "start" : t > 0.75 ? "end" : "middle" };
+}
+
+// --- Dynamic Type for the instrument itself (kora#268, kora#284) -------------
+//
+// An <Svg> with a fixed viewBox draws at the same physical size at xSmall and
+// at AX5, so everything above is outside Dynamic Type entirely — the same root
+// cause as the unscaled tick labels kora#261 fixed, one level up. The fix is
+// the same shape as TickRuler's: drive the RENDERED width/height off
+// `useWindowDimensions().fontScale`, leave the viewBox alone. No tick, needle
+// worklet or anchor below/above changes; it is a pure vector scale.
+
+/**
+ * Ceiling on the face scale.
+ *
+ * 1.6 because that is already the centre numeral's `maxFontSizeMultiplier` in
+ * GaugeDial: the face and its largest occupant then share one ceiling, so the
+ * numeral cannot outgrow the dial it sits in no matter how far the system
+ * scale is pushed.
+ *
+ * In practice this is the VERTICAL/legibility ceiling, not the operative
+ * constraint — the width clamp in `instrumentScale` binds first on every
+ * supported device (GAUGE_VIEW_W * 1.6 = 422.4pt against a 393pt narrowest
+ * screen), so no device reaches 1.6 at full width.
+ */
+export const INSTRUMENT_SCALE_MAX = 1.6;
+
+const clampScale = (v: number, min: number, max: number): number => Math.min(Math.max(v, min), max);
+
+/**
+ * The multiplier the instrument's rendered size actually uses: the system font
+ * scale, floored at 1 and capped both by `max` and by what `maxWidth` can hold.
+ *
+ * Floored at 1 in BOTH directions for the same reason TickRuler's
+ * `labelFontScale` is — a user who SHRANK their text must never get a dial
+ * smaller than the design. It also keeps `medium` byte-identical, which is what
+ * lets the existing goldens at the default content size stand.
+ *
+ * A `maxWidth` that is not a finite number > 0 returns the unclamped want
+ * rather than clamping to zero. This is the single most important guard here:
+ * it is the kora#270 failure mode, where a dimension resolves to 0 on an early
+ * frame and the collapsed result reads as deliberate whitespace for the
+ * component's entire life rather than as a missing measurement. Better to draw
+ * one frame slightly too wide than to draw nothing forever.
+ */
+export function instrumentScale(
+  fontScale: number,
+  maxWidth: number,
+  max: number = INSTRUMENT_SCALE_MAX,
+): number {
+  const want = clampScale(fontScale, 1, max);
+  if (!Number.isFinite(maxWidth) || maxWidth <= 0) return want;
+  return Math.min(want, Math.max(1, maxWidth / GAUGE_VIEW_W));
+}
+
+// --- Centre-overlay fit (kora#268) -------------------------------------------
+//
+// These numbers are GaugeDial's, and they currently live implicitly in its JSX.
+// They are lifted here so the fit arithmetic is testable and so a change to the
+// overlay's inset or the numeral's line height fails a test instead of quietly
+// re-opening kora#268's collision.
+
+/** GaugeDial's centre overlay `top: "38%"`, as a fraction. */
+export const OVERLAY_TOP_RATIO = 0.38;
+/** Radius of the <Circle> hub dot at (GAUGE_CENTER_X, GAUGE_CENTER_Y). */
+export const HUB_DOT_R = 4.5;
+/** The centre numeral's line height and its `maxFontSizeMultiplier`. */
+export const NUMERAL_LINE_HEIGHT = 50;
+export const NUMERAL_MAX_SCALE = 1.6;
+/** The caption below the numeral: its size, its cap, and its `marginTop`. */
+export const CAPTION_FONT_SIZE = 10;
+export const CAPTION_MAX_SCALE = 1.4;
+export const CAPTION_GAP = 6;
+/**
+ * RN's default leading as a multiple of font size, for the caption — which
+ * sets no explicit `lineHeight`, so this is an ESTIMATE, not a metric. An
+ * estimate is the right tool: SVG-adjacent text gives no metrics here, and
+ * being a point generous costs a point of ejection threshold and nothing else.
+ */
+export const CAPTION_LINE_RATIO = 1.7;
+
+/**
+ * Vertical room the centre overlay has for its content, in points, at face
+ * scale `s`: from the overlay's top inset down to the top of the hub dot.
+ *
+ * At s = 1 this is 73.86pt — kora#268's own device measurement (overlay top
+ * 67.6pt, hub-dot top 141.5pt), re-derived from the constants rather than
+ * copied, and pinned by a test so the two cannot drift apart silently.
+ */
+export function overlayBudget(scale: number): number {
+  return scale * (GAUGE_CENTER_Y - HUB_DOT_R - OVERLAY_TOP_RATIO * GAUGE_VIEW_H);
+}
+
+/**
+ * Height the overlay's content wants at a given system font scale: numeral
+ * line box + gap + caption line box, each capped by its own
+ * `maxFontSizeMultiplier` and floored at 1 to match `instrumentScale`.
+ *
+ * 73pt at fontScale 1 against a 73.86pt budget — the ~1pt of slack kora#268
+ * reports at design size.
+ */
+export function overlayStack(fontScale: number): number {
+  const numeral = NUMERAL_LINE_HEIGHT * clampScale(fontScale, 1, NUMERAL_MAX_SCALE);
+  const caption =
+    CAPTION_FONT_SIZE * CAPTION_LINE_RATIO * clampScale(fontScale, 1, CAPTION_MAX_SCALE);
+  return numeral + CAPTION_GAP + caption;
+}
+
+/**
+ * Whether the caption still belongs INSIDE the face at this combination of
+ * face scale and font scale. When false, GaugeDial ejects it below the dial,
+ * where its room is unbounded (kora#268's own aside, adopted as a derived
+ * condition rather than a breakpoint). The numeral never ejects — it is the
+ * instrument's readout.
+ */
+export function captionFitsInFace(scale: number, fontScale: number): boolean {
+  return overlayBudget(scale) >= overlayStack(fontScale);
 }

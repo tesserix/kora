@@ -16,6 +16,10 @@ import { PressableScale } from "@/motion";
 import { useIsOnline } from "@/offline/connectivity";
 import { useTheme } from "@/theme";
 
+// DEFAULT_AGENT names the capability Kora routes every coach question to, so
+// the thinking line reads honestly before any agent has identified itself.
+const DEFAULT_AGENT = "Coach";
+
 function InlineRetry({ message, label, onPress }: { message: string; label: string; onPress: () => void }) {
   const { instrument } = useTheme();
   return (
@@ -44,6 +48,10 @@ export default function CoachScreen() {
   const [input, setInput] = useState("");
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
   const [askError, setAskError] = useState(false);
+  // Who answered last. The thinking line names the agent before the answer
+  // lands, so it starts at the capability Kora routes Q&A to and is corrected
+  // to the published name once an agent has actually replied.
+  const [activeAgent, setActiveAgent] = useState(DEFAULT_AGENT);
 
   const focus = nudges.data?.nudges ?? [];
   const turns = thread.data?.turns ?? [];
@@ -56,7 +64,8 @@ export default function CoachScreen() {
     setPendingQuestion(question);
     setAskError(false);
     ask.mutate(question, {
-      onSuccess: () => {
+      onSuccess: (answer) => {
+        setActiveAgent(answer.agent?.name ?? DEFAULT_AGENT);
         setInput("");
         setPendingQuestion(null);
         setAskError(false);
@@ -123,11 +132,19 @@ export default function CoachScreen() {
             <Bubble role="otto" text="Hi — ask me about the nutrition you’ve logged, and I’ll stick to the facts in your Kora data." />
           ) : (
             turns.map((turn, index) => (
-              <Bubble key={`${turn.created_at}-${turn.role}-${index}`} role={turn.role} text={turn.text} citations={turn.citations} />
+              <Bubble
+                key={`${turn.created_at}-${turn.role}-${index}`}
+                role={turn.role}
+                text={turn.text}
+                citations={turn.citations}
+                agent={turn.agent}
+              />
             ))
           )}
           {pendingQuestion ? <Bubble role="user" text={pendingQuestion} /> : null}
-          {pendingQuestion && !askError ? <Bubble role="otto" text="Otto is thinking…" /> : null}
+          {pendingQuestion && !askError ? (
+            <Bubble role="otto" text={`${activeAgent} is thinking…`} agent={activeAgent} />
+          ) : null}
           {pendingQuestion && askError ? (
             <View style={{ marginBottom: 12 }}>
               <Bubble role="otto" text="Couldn't get an answer. Your question is still here." />

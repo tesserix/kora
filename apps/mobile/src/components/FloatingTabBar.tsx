@@ -62,6 +62,83 @@ const ROW_PADDING_HORIZONTAL = 6;
 const WELL_HEIGHT = 44;
 const WELL_RADIUS = 22;
 
+// The pill's outer bottom edge, measured from the BOTTOM OF THE SCREEN — the
+// same 24 as the left/right insets above, so the dock sits in a uniform 24pt
+// frame inset rather than a three-sided one.
+//
+// SCREEN EDGE, NOT SAFE AREA — decided deliberately (kora#280), not by
+// omission. On a 956pt iPhone 17 Pro Max the home-indicator inset is 34pt, so
+// this bottom edge lands ~10pt inside that region (measured: y=932.2). That is
+// fine, and switching to `insets.bottom` would be worse on three counts:
+//
+//   1. The home indicator is a HINT region, not an exclusion zone. What must
+//      clear it is the interactive content, and it does. MEASURED from the
+//      live accessibility tree: each tab button's frame is y=875.7 h=52, so
+//      its lowest tappable row is 28.3pt above the screen bottom — comparable
+//      to a system tab bar, whose own icon row bottoms out at the 34pt inset
+//      and whose BACKGROUND runs all the way to the screen edge. It is the
+//      pill's unpainted rim and shadow margin that dips into the region, not
+//      anything a finger has to reach.
+//   2. `insets.bottom` is 0 on a device with no home indicator, which would
+//      drop the dock flush against the screen edge — the one outcome nobody
+//      wants — so any safe-area form needs a max() floor and stops being
+//      simpler than a constant.
+//   3. 24 is a design value from the instrument glass spec, paired with the
+//      24pt side insets. Safe-area-driving only the bottom breaks that pairing
+//      per-device for no gain.
+//
+// If this ever does change, TAB_BAR_OCCUPIED_HEIGHT below follows it and every
+// screen's scroll inset follows that — which is the whole point of kora#280.
+const BAR_BOTTOM_INSET = 24;
+
+// How much of the screen, measured up from its bottom edge, the dock occupies.
+// The top of the raised capture cap is the highest thing it paints, so it sets
+// the ceiling:
+//
+//   BAR_BOTTOM_INSET  24    pill's outer bottom edge -> screen bottom
+//   RIM_INSET * 2      3    the rim gradient's padding, top and bottom
+//   PILL_MIN_HEIGHT   58    the glass pill itself
+//   CAMERA_RAISE      16    how far the capture cap is lifted above the pill
+//                    ---
+//                    101
+//
+// Confirmed against the live accessibility tree (kora#277): on a 956pt screen
+// the capture button's frame top measures y=855, i.e. exactly 101 up.
+//
+// This is a CONSTANT rather than a hook because every term is a constant. The
+// one term that could plausibly react to something — BAR_BOTTOM_INSET — is
+// deliberately not safe-area-derived (see above), and PILL_MIN_HEIGHT is a
+// FLOOR, not a height: under Dynamic Type the pill can grow taller than 58, so
+// the true occupied height is >= this. Screens add their own clearance on top
+// (below), which absorbs that growth; a measured hook would make every tab
+// screen re-render on a layout event to buy back a few points nothing needs.
+export const TAB_BAR_OCCUPIED_HEIGHT =
+  BAR_BOTTOM_INSET + RIM_INSET * 2 + PILL_MIN_HEIGHT + CAMERA_RAISE;
+
+// Breathing room between the last pixel of scrollable content and the top of
+// the dock, at the true scroll bottom.
+const TAB_BAR_CONTENT_GAP = 39;
+const TAB_BAR_CONTENT_GAP_TIGHT = 29;
+
+/**
+ * `paddingBottom` for a tab screen's scroll content, so the last item clears
+ * the dock. Used by Diary, Trends and More. (= 140)
+ */
+export const TAB_BAR_SCROLL_INSET = TAB_BAR_OCCUPIED_HEIGHT + TAB_BAR_CONTENT_GAP;
+
+/**
+ * The same, 10pt tighter. Used ONLY by Today. (= 130)
+ *
+ * The two values are historical drift, not a design distinction — the four tab
+ * screens each hardcoded their own number and Today's was written 10 lower.
+ * Preserved rather than unified because kora#280 is an inert refactor: both
+ * clearances were verified adequate in kora#277 (content clears the dock at the
+ * true scroll bottom on all four tabs at both content sizes), so collapsing
+ * them would move pixels on Today to no end. Unify when there is a reason to
+ * move Today's content, and delete this export then.
+ */
+export const TAB_BAR_SCROLL_INSET_TIGHT = TAB_BAR_OCCUPIED_HEIGHT + TAB_BAR_CONTENT_GAP_TIGHT;
+
 // Domed capture face — precomputed [highlight, accent, shadow] mixes per
 // scheme so the button reads as lit from above rather than a flat disc.
 // Dark: base #FF4A00 lightened -> #FF8149, darkened -> #C93A00.
@@ -336,7 +413,11 @@ export function FloatingTabBar({ state, navigation }: FloatingTabBarProps) {
   };
 
   return (
-    <View style={{ position: "absolute", left: 24, right: 24, bottom: 24 }} pointerEvents="box-none">
+    <View
+      testID="tab-bar-root"
+      style={{ position: "absolute", left: 24, right: 24, bottom: BAR_BOTTOM_INSET }}
+      pointerEvents="box-none"
+    >
       <View style={{ position: "relative" }}>
         <LinearGradient
           testID="dock-rim"

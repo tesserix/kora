@@ -22,6 +22,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 
+	"github.com/tesserix/kora/api/internal/agents"
 	"github.com/tesserix/kora/api/internal/ai"
 	"github.com/tesserix/kora/api/internal/ai/providers"
 	"github.com/tesserix/kora/api/internal/appleid"
@@ -157,6 +158,8 @@ func main() {
 		logger.Info("apple authorization exchange disabled (no APPLE_PRIVATE_KEY)")
 	}
 
+	coordinator := buildAgents(cfg, logger)
+
 	srv := &http.Server{
 		Addr: ":" + cfg.Port,
 		Handler: server.NewRouter(server.Deps{
@@ -164,6 +167,7 @@ func main() {
 			Verifier:        verifier,
 			Resolver:        resolveHandler,
 			Provider:        aiProvider,
+			Agents:          coordinator,
 			ResolveCache:    resolveCache,
 			BFFHMACKey:      cfg.BFFHMACKey,
 			AppleExchanger:  appleExchanger,
@@ -382,4 +386,31 @@ func (u userLocales) LocaleFor(ctx context.Context, userID uuid.UUID) nutrition.
 		return nutrition.LocaleUnknown
 	}
 	return nutrition.LocaleFromTimezone(usr.Timezone)
+}
+
+// buildAgents wires the Agentic Registry and the Agent Gateway into one
+// coordinator, or returns nil when either is unconfigured. Returning nil is a
+// supported deployment: every caller falls back to the direct provider, which
+// is how Kora behaved before agents were resolved at all.
+//
+// The gateway base URL doubles as the A2A host — the published card carries
+// the in-cluster service URL, and only its path is used (ResolvedAgent.A2APath).
+func buildAgents(cfg config.Config, logger *slog.Logger) *agents.Coordinator {
+	registry := agents.NewRegistry(agents.RegistryOptions{
+		BaseURL: cfg.AIRegistryBaseURL,
+		APIKey:  cfg.AIRegistryAPIKey,
+		TTL:     cfg.AIRegistryTTL,
+		Observe: func(agent string, result agents.CacheResult) {
+			metrics.RecordAgentResolve(agent, string(result))
+		},
+	})
+	gateway := agents.NewGateway(cfg.AIGatewayBaseURL, cfg.AIGatewayAPIKey, nil)
+
+	coordinator := agents.NewCoordinator(registry, gateway, metrics.RecordAgentRun)
+	if coordinator == nil {
+		logger.Info("agent path disabled (AI_REGISTRY_BASE_URL or AI_GATEWAY_BASE_URL is unset); coach uses the direct provider")
+		return nil
+	}
+	logger.Info("agent path enabled", "registry", cfg.AIRegistryBaseURL, "gateway", cfg.AIGatewayBaseURL)
+	return coordinator
 }

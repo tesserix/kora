@@ -1,5 +1,5 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { View } from "react-native";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { useWindowDimensions, View, type LayoutChangeEvent } from "react-native";
 import Svg, { Circle, Line, Text as SvgText } from "react-native-svg";
 import Animated, {
   cancelAnimation,
@@ -19,8 +19,11 @@ import type { InstrumentTokens } from "@/theme";
 import { monoStyle } from "./typography";
 import {
   buildGaugeTicks,
+  captionFitsInFace,
+  instrumentScale,
   needleFor,
   scaleAnchor,
+  GAUGE_TICKS,
   GAUGE_VIEW_H,
   GAUGE_VIEW_W,
   GAUGE_CENTER_X,
@@ -70,7 +73,7 @@ interface AnimatedTickProps {
 }
 
 function AnimatedGaugeTick({ index, geom, fractionSV, instrument, testID }: AnimatedTickProps) {
-  const t = index / 40; // TICKS constant in gauge.ts — only used for the lit threshold below
+  const t = index / GAUGE_TICKS; // only used for the lit threshold below
   const animatedProps = useAnimatedProps(() => {
     "worklet";
     const lit = t <= fractionSV.value;
@@ -145,6 +148,34 @@ export const GaugeDial = forwardRef<GaugeDialHandle, GaugeDialProps>(function Ga
   ref,
 ) {
   const { instrument, fonts } = useTheme();
+  // The face scales with Dynamic Type (kora#268): a fixed viewBox draws at one
+  // physical size from xSmall to AX5, so the numeral doubles while the dial it
+  // sits in does not. useWindowDimensions, not PixelRatio.getFontScale(): the
+  // former is reactive, the latter is a snapshot taken at mount.
+  const { fontScale } = useWindowDimensions();
+  // The ceiling on `s` is this component's AVAILABLE width, not the window's.
+  // On a 393pt device the two differ by enough to flip the caption-fit result
+  // (window says fits by 0.15pt; Home's real content box is ~325pt after its
+  // paddingHorizontal, BezelCluster's rim and the hero card's own padding, and
+  // it does not) — so it is measured, not assumed.
+  //
+  // NaN, not 0: instrumentScale treats a non-finite width as "not measured
+  // yet" and returns the unclamped want, where a real-looking 0 would clamp to
+  // the floor. That is the kora#270 failure mode — a dimension that resolves
+  // to 0 on an early frame and reads as deliberate layout forever. At the
+  // default text size this costs nothing anyway: `want` is already 1, so the
+  // pre-layout frame and every frame after it are identical and there is no
+  // second-frame jump in the common case.
+  const [availableWidth, setAvailableWidth] = useState(Number.NaN);
+  const onRootLayout = useCallback((e: LayoutChangeEvent) => {
+    const w = e.nativeEvent.layout.width;
+    setAvailableWidth((prev) => (prev === w ? prev : w));
+  }, []);
+  const faceScale = instrumentScale(fontScale, availableWidth);
+  // False ejects the caption out of the face to below the dial, where its room
+  // is unbounded. The numeral never ejects — it is the instrument's readout,
+  // and kora#268 rejected paying for the caption's position with it.
+  const captionInFace = captionFitsInFace(faceScale, fontScale);
   const fraction = target > 0 ? Math.min(value / target, 1) : 0;
   const reserve = describeReserve(value, target);
   const mono = monoStyle(fonts);
@@ -329,14 +360,62 @@ export const GaugeDial = forwardRef<GaugeDialHandle, GaugeDialProps>(function Ga
     [target, "Budget"],
   ];
 
+  // Bespoke engraved caption (T6 exception): the dial's center label is
+  // literally part of the instrument face and keeps its own wider tracking (3
+  // vs the shared recipe's 1.5) rather than routing through engravedStyle() —
+  // see typography.ts.
+  //
+  // Hoisted so the in-face and ejected branches cannot drift: same text, same
+  // size/tracking/weight, same danger-vs-accent rule, and the same "over has
+  // no lume" rule (spec: "Over state has no lume"). Ejection is a position
+  // change and nothing else.
+  const caption = (id: string) => (
+    <AppText
+      testID={id}
+      variant="body"
+      maxFontSizeMultiplier={1.4}
+      style={[
+        {
+          fontSize: 10,
+          letterSpacing: 3,
+          textTransform: "uppercase",
+          color: reserve.over ? instrument.danger : instrument.accent,
+          marginTop: 6,
+          fontWeight: "600",
+        },
+        reserve.over
+          ? null
+          : {
+              textShadowColor: instrument.lumeAccent,
+              textShadowRadius: 14,
+              textShadowOffset: { width: 0, height: 0 },
+            },
+      ]}
+    >
+      {reserve.over ? reserve.caption : centerLabel}
+    </AppText>
+  );
+
   const accessibilityLabel = `${reserve.magnitude.toLocaleString()} calories ${
     reserve.over ? "over budget" : "in reserve"
   } of ${Math.round(target).toLocaleString()}`;
 
   return (
-    <View testID={testID} accessible accessibilityLabel={accessibilityLabel}>
+    // `accessible` on the root collapses this whole subtree into ONE element
+    // announcing `accessibilityLabel`, so no descendant is separately
+    // focusable and the ejected caption cannot become a second stop that reads
+    // the caption text again. The announcement is identical in both branches
+    // because it is built from the reading, not from the layout.
+    <View testID={testID} accessible accessibilityLabel={accessibilityLabel} onLayout={onRootLayout}>
       <View style={{ alignItems: "center" }}>
-        <Svg width={GAUGE_VIEW_W} height={GAUGE_VIEW_H} viewBox={`0 0 ${GAUGE_VIEW_W} ${GAUGE_VIEW_H}`}>
+        {/* Rendered size scales; the viewBox does not. Pure vector scale — no
+            tick, needle worklet or anchor below is touched. */}
+        <Svg
+          testID="gauge-face"
+          width={GAUGE_VIEW_W * faceScale}
+          height={GAUGE_VIEW_H * faceScale}
+          viewBox={`0 0 ${GAUGE_VIEW_W} ${GAUGE_VIEW_H}`}
+        >
           {tickGeometry.map((geom, i) => (
             <AnimatedGaugeTick
               key={i}
@@ -381,8 +460,13 @@ export const GaugeDial = forwardRef<GaugeDialHandle, GaugeDialProps>(function Ga
             // the scale-numeral band (~y 61), bottom (OVERLAY_BOTTOM, derived from
             // GAUGE_CENTER_Y and HUB_CLEARANCE) keeps the label above the hub dot
             // and the needle tail instead of an eyeballed percentage.
+            // `top` is a percentage and already tracks the scaled Svg;
+            // OVERLAY_BOTTOM is in POINTS and does not, so it has to be scaled
+            // by hand or the overlay's floor stays pinned at the design size
+            // while the face grows under it. That single missing multiply is
+            // kora#268 in miniature.
             top: "38%",
-            bottom: OVERLAY_BOTTOM,
+            bottom: OVERLAY_BOTTOM * faceScale,
             left: 0,
             right: 0,
             alignItems: "center",
@@ -428,35 +512,17 @@ export const GaugeDial = forwardRef<GaugeDialHandle, GaugeDialProps>(function Ga
               />
             )}
           </AppText>
-          {/* Bespoke engraved caption (T6 exception): the dial's center label
-              is literally part of the instrument face and keeps its own
-              wider tracking (3 vs the shared recipe's 1.5) rather than
-              routing through engravedStyle() — see typography.ts. */}
-          <AppText
-            variant="body"
-            maxFontSizeMultiplier={1.4}
-            style={[
-              {
-                fontSize: 10,
-                letterSpacing: 3,
-                textTransform: "uppercase",
-                color: reserve.over ? instrument.danger : instrument.accent,
-                marginTop: 6,
-                fontWeight: "600",
-              },
-              reserve.over
-                ? null
-                : {
-                    textShadowColor: instrument.lumeAccent,
-                    textShadowRadius: 14,
-                    textShadowOffset: { width: 0, height: 0 },
-                  },
-            ]}
-          >
-            {reserve.over ? reserve.caption : centerLabel}
-          </AppText>
+          {captionInFace ? caption("gauge-caption") : null}
         </View>
       </View>
+      {/* Ejected below the face, NOT inside the alignItems:"center" wrapper
+          above. That wrapper is the overlay's positioning context, so a child
+          added to it would grow its height and drag the numeral off centre via
+          the `top: "38%"` inset — the overlay must keep measuring exactly the
+          Svg. */}
+      {captionInFace ? null : (
+        <View style={{ alignItems: "center" }}>{caption("gauge-caption")}</View>
+      )}
       <View
         style={{
           flexDirection: "row",

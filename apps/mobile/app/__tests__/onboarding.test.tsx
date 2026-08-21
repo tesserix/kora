@@ -480,3 +480,102 @@ describe("onboarding", () => {
     expect(String(caption)).toMatch(/weeks to goal|You're already there/);
   });
 });
+
+// kora#284. At accessibility-extra-large the scroll region reached only "Age":
+// both rulers and the goal selector sat below the fold on first paint, under a
+// header whose numeral and captions had doubled. Past 1.3 the header stops
+// being pinned and scrolls with them; at or below it, nothing moves — but the
+// dial, which since kora#268 grows with Dynamic Type like everything else, gets
+// a height ceiling so it does not spend the pinned header's whole budget.
+//
+// These tests pin the structure and the arithmetic. They do NOT show that the
+// rulers are above the fold: jest performs no layout, so not one point of
+// height here is measured. kora#257 is the standing warning — a clipped-ruler
+// regression shipped past 1,729 green tests. Only a device or a capture can
+// answer the question this fix is actually about.
+describe("onboarding header at accessibility text sizes (kora#284)", () => {
+  const windowSpies: Array<{ mockRestore: () => void }> = [];
+
+  // A 393x852 device (iPhone 16 Pro class), which is the geometry the budget
+  // comment does its arithmetic on.
+  function withFontScale(fontScale: number, height = 852) {
+    // require, not a top-level import: an ESM namespace object is sealed, so
+    // jest.spyOn cannot redefine a property on it.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const rn = require("react-native");
+    const spy = jest
+      .spyOn(rn, "useWindowDimensions")
+      .mockReturnValue({ width: 393, height, scale: 3, fontScale });
+    windowSpies.push(spy);
+    return spy;
+  }
+
+  afterEach(() => {
+    windowSpies.splice(0).forEach((spy) => spy.mockRestore());
+  });
+
+  // PlanDial hides its SVG from assistive tech, and RNTL excludes hidden
+  // elements by default — without this the query returns null unconditionally
+  // and the assertions below test nothing.
+  const faceOf = () => screen.getByTestId("plan-dial-face", { includeHiddenElements: true }).props;
+  const headerIsInsideScroll = () =>
+    within(screen.getByTestId("auth-scaffold-scroll")).queryByTestId(
+      "auth-scaffold-header-wrapper",
+    ) !== null;
+
+  it("keeps the header pinned at the default content size", async () => {
+    withFontScale(1);
+    await render(<Onboarding />);
+    expect(headerIsInsideScroll()).toBe(false);
+    // Floored at 1: the design size, unchanged, which is what lets the existing
+    // `onboarding` golden at `medium` stand.
+    expect(faceOf().height).toBe(178);
+  });
+
+  it("keeps the header pinned at the threshold itself and bounds the dial there", async () => {
+    // `>`, not `>=`. 1.3 is the last size that behaves as it always has.
+    withFontScale(1.3);
+    await render(<Onboarding />);
+    expect(headerIsInsideScroll()).toBe(false);
+    // 852 * 0.23 = 195.96pt, against the 178 * 1.3 = 231.4 an unbounded dial
+    // would take — the +53pt on an already-crowded header that the ceiling
+    // exists to refuse.
+    expect(faceOf().height).toBeCloseTo(195.96, 2);
+    expect(faceOf().height).toBeLessThan(178 * 1.3);
+  });
+
+  it("moves the header into the scroll view just past the threshold", async () => {
+    withFontScale(1.31);
+    await render(<Onboarding />);
+    expect(headerIsInsideScroll()).toBe(true);
+  });
+
+  it("drops the ceiling once the header scrolls, so the dial takes its natural scale", async () => {
+    withFontScale(1.31);
+    await render(<Onboarding />);
+    // No budget at all now: the scale is instrumentScale's, clamped only by the
+    // width available to the dial (393 - 24*2 = 345pt), so 178 * 345/264.
+    expect(faceOf().height).toBeCloseTo(178 * (345 / 264), 2);
+    expect(faceOf().height).toBeGreaterThan(852 * 0.23);
+  });
+
+  it("never shrinks the dial below its design height on a short window", async () => {
+    // 568 * 0.23 = 130.6pt, well under the 178 the dial is drawn at. A ceiling
+    // is a ceiling, not a target: PlanDial floors the result at 1, because
+    // below the design size this stops reading as an instrument at all.
+    withFontScale(1.3, 568);
+    await render(<Onboarding />);
+    expect(faceOf().height).toBe(178);
+  });
+
+  it("still reaches every ruler at accessibility sizes", async () => {
+    // Reachable in the TREE, which is all jest can say. The point of the move
+    // is that they are reachable on the SCREEN, and nothing here shows that.
+    withFontScale(2.643);
+    await render(<Onboarding />);
+    const scroll = within(screen.getByTestId("auth-scaffold-scroll"));
+    for (const id of ["goal-ruler", "age-ruler", "height-ruler", "weight-ruler"]) {
+      expect(scroll.getByTestId(id)).toBeTruthy();
+    }
+  });
+});

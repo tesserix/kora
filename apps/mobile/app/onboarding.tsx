@@ -1,12 +1,12 @@
 import { useMemo, useState } from "react";
-import { View } from "react-native";
+import { useWindowDimensions, View } from "react-native";
 import { router } from "expo-router";
 import { AppText } from "@/components/Text";
 import { Button } from "@/components/Button";
 import { Overline } from "@/components/Overline";
 import { SegmentedGlass } from "@/components/instrument/SegmentedGlass";
 import { Numeral } from "@/components/Numeral";
-import { AuthScaffold } from "@/components/AuthScaffold";
+import { AuthScaffold, HEADER_SCROLLS_ABOVE_FONT_SCALE } from "@/components/AuthScaffold";
 import { ActivityFromHealth } from "@/components/ActivityFromHealth";
 import { useActivityHistory } from "@/health/useActivityHistory";
 import { TickRuler } from "@/components/instrument/TickRuler";
@@ -68,6 +68,31 @@ const HEIGHT_IN_MAX = 84;
 const WEIGHT_LB_MIN = 80;
 const WEIGHT_LB_MAX = 400;
 
+/**
+ * The most of the window height the dial may take while the header is STICKY.
+ *
+ * The header is the only thing on this screen the user cannot scroll away below
+ * the threshold, and since kora#268 the dial grows with Dynamic Type like
+ * everything else in it. At fontScale 1.3 an unbounded dial goes from 178pt to
+ * 231pt — +53pt on the header that kora#284 is a complaint about — so while it
+ * is sticky the dial gets a ceiling instead.
+ *
+ * The arithmetic, on a 393x852 device (iPhone 16 Pro class):
+ *
+ *   design dial   178 / 852            = 20.9% of the window
+ *   ceiling       852 * 0.23           = 195.96pt
+ *   scale ceiling 195.96 / 178         = 1.101
+ *
+ * So 23% is 20.9% plus two points of headroom: the dial may grow by a tenth,
+ * and the rest of the header's growth is spent on the numeral and the captions
+ * — which is the text the user actually asked to enlarge. At 1.3 that is 196pt
+ * rather than 231pt.
+ *
+ * Above the threshold the header scrolls, so nothing is pinned and no ceiling
+ * is needed — the budget is omitted there and the dial takes its natural scale.
+ */
+export const STICKY_DIAL_HEIGHT_SHARE = 0.23;
+
 function formatFtIn(inches: number): string {
   return `${Math.floor(inches / 12)}'${inches % 12}"`;
 }
@@ -83,6 +108,7 @@ export default function Onboarding() {
   const { colors, spacing } = useTheme();
   const submit = useSubmitOnboarding();
   const { system } = useUnits();
+  const { fontScale, height: windowHeight } = useWindowDimensions();
   const health = useActivityHistory();
 
   const [goalIndex, setGoalIndex] = useState(0);
@@ -297,6 +323,15 @@ export default function Onboarding() {
 
   const weeks = hasDestination ? weeksToGoal(weightKg, goalWeightKg, paceKgPerWeek) : 0;
 
+  // `undefined`, not a number, once the header scrolls: PlanDial reads any
+  // absent or unresolved budget as "no ceiling" and a real-looking 0 as the
+  // same thing on purpose (the kora#270 collapse), so this must be genuinely
+  // absent rather than falsy.
+  const dialMaxHeight =
+    fontScale > HEADER_SCROLLS_ABOVE_FONT_SCALE
+      ? undefined
+      : windowHeight * STICKY_DIAL_HEIGHT_SHARE;
+
   return (
     <AuthScaffold
       header={
@@ -308,7 +343,7 @@ export default function Onboarding() {
             paddingBottom: spacing.sm,
           }}
         >
-          <PlanDial kcal={dialKcal} />
+          <PlanDial kcal={dialKcal} maxHeight={dialMaxHeight} />
           <Numeral size={36} weight="800">
             {String(Math.round(plan.kcal))}
           </Numeral>

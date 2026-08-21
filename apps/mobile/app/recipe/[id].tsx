@@ -442,7 +442,7 @@ export default function RecipeDetail() {
                   style={{ opacity: deleteRecipe.isPending ? 0.5 : 1 }}
                 >
                   <View style={{ minHeight: 44, justifyContent: "center", paddingHorizontal: spacing.md }}>
-                    <AppText style={{ fontSize: 17, fontWeight: "600", color: instrument.danger }}>Delete recipe</AppText>
+                    <AppText variant="headline" style={{ color: instrument.danger }}>Delete recipe</AppText>
                   </View>
                 </PressableScale>
               </GroupedSection>

@@ -58,7 +58,7 @@ export function FriendsLeaderboard({ data }: Props) {
         <GroupedSection header="Not sharing">
           {notSharing.map((f) => (
             <View key={f.id} style={{ minHeight: 44, justifyContent: "center", paddingHorizontal: spacing.md }}>
-              <AppText style={{ fontSize: 17, fontWeight: "600", color: instrument.mut }}>
+              <AppText variant="headline" style={{ color: instrument.mut }}>
                 {f.display_name}
               </AppText>
             </View>

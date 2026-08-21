@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "contentSize": "medium",
+  "device": {
+    "name": "iPhone 17 Pro Max",
+    "runtime": "com.apple.CoreSimulator.SimRuntime.iOS-26-2"
+  },
+  "shotsClock": "2026-08-19T09:41:00",
+  "statusBarTime": "9:41",
+  "scheme": "com.tesserix.kora",
+  "capturedAt": "2026-08-21T02:05:52.750Z",
+  "gitCommit": "3a677d17",
+  "rule": {
+    "scale": 3,
+    "threshold": 48,
+    "maxPixels": 0,
+    "broadThreshold": 8,
+    "broadFramePct": 3,
+    "block": 20,
+    "failDensity": 0.3,
+    "ignoreTop": 62
+  },
+  "routes": [
+    {
+      "route": "about",
+      "width": 440,
+      "height": 956,
+      "bytes": 169718
+    },
+    {
+      "route": "coach",
+      "width": 440,
+      "height": 956,
+      "bytes": 164645
+    },
+    {
+      "route": "feedback",
+      "width": 440,
+      "height": 956,
+      "bytes": 161281
+    },
+    {
+      "route": "notifications",
+      "width": 440,
+      "height": 956,
+      "bytes": 176972
+    },
+    {
+      "route": "onboarding",
+      "width": 440,
+      "height": 956,
+      "bytes": 186633
+    },
+    {
+      "route": "recipes",
+      "width": 440,
+      "height": 956,
+      "bytes": 184142
+    },
+    {
+      "route": "settings",
+      "width": 440,
+      "height": 956,
+      "bytes": 153258
+    },
+    {
+      "route": "sign-in",
+      "width": 440,
+      "height": 956,
+      "bytes": 173307
+    },
+    {
+      "route": "tab-diary",
+      "width": 440,
+      "height": 956,
+      "bytes": 167107
+    },
+    {
+      "route": "tab-progress",
+      "width": 440,
+      "height": 956,
+      "bytes": 115936
+    }
+  ],
+  "excluded": [
+    {
+      "route": "ai-usage",
+      "reason": "Its quota card renders ABSOLUTE reset dates — \"Daily · 20 remaining · resets Fri, Aug 21 at 10:00 AM\", and the same for the weekly and monthly windows — and they come from the SERVER's clock, not from EXPO_PUBLIC_SHOTS_CLOCK. Proof, from the #289 golden set itself: the app clock is pinned to 2026-08-19 and tab-diary's week strip duly highlights the 19th, while ai-usage's daily window resets on the 21st — next-day relative to the 20th, the REAL capture date. So this golden goes stale every midnight no matter what the harness pins, and the \"20 calls left\" headline is the capturing account's quota besides. To bring it back: render the reset times relative (\"resets in 21h\") or derive them from the same pinned clock the rest of the app uses."
+    },
+    {
+      "route": "capture",
+      "reason": "The greeting bubble's entrance settles at a slightly different vertical offset on each launch — visibly one to three device pixels — and the route's per-route 8000ms dwell (shots.routes.mjs) reduces it without removing it: measured residuals across launches range from 0 to 4 pixels above 48/255 and up to 1,286 above 8/255. That upper bound is the same order as the 38-pixel signal of a one-character label change, so any budget that absorbs the drift also hides the defect. To bring it back: find what the bubble's entrance is waiting on — the gate opens on the mode chips, which mount well before it — and gate on that instead, or disable its entrance under a capture flag."
+    },
+    {
+      "route": "tab-today",
+      "reason": "Not deterministic across launches, and the only route that is not. GlassPanel renders an expo-blur BlurView whose backdrop re-samples per launch; Stage B showed an 8000ms dwell does not help and that the route is bimodal (0.113% and 1.101% of frame under identical settings). Measured here over six launches: up to 634 pixels above 48/255 at 1x, in a block 16.3% dense. A budget large enough to absorb that (~2000px) is roughly FIFTY TIMES the 38-pixel signal of a one-character label change, so it would keep the route green while blinding it to the bug class this harness exists for. Excluded rather than weakened. To bring it back: make the blur deterministic, or render it flat under a capture flag, or seed the backdrop — then delete this entry and run `npm run shots:golden`."
+    },
+    {
+      "route": "profile",
+      "reason": "The screen IS the account. It renders the signed-in email, the avatar initial derived from it, the four daily macro targets, the current weight and \"MEMBER SINCE <month> <year>\" — so its pixels are a function of WHO captured it, and the member-since line is a function of the real calendar on top of that. The #289 golden embeds shotc1@kora.test, an account that was deleted at the end of that session, so it could never have been reproduced by anyone including its author. The alternatives were weighed and both cost more than the route is worth: a DOCUMENTED FIXED ACCOUNT makes the suite depend on a credential the next person will not have, and contradicts this repo's own rule that throwaway accounts are deleted after use; MASKING the identity-bearing region would blank the account card, the targets card and the weight card, leaving a back chevron and three section headers — and it would blank precisely the region where a long email is likeliest to overflow, which is the bug class this harness exists for. To bring it back: give the harness a capture-mode fixture profile (fixed email, targets and join date) behind the same flag as the clock pin — Stage B's outstanding \"fixture data\" item."
+    },
+    {
+      "route": "tab-more",
+      "reason": "Same defect as `profile`, smaller surface: the account row carries the signed-in email and the avatar initial, and the AI-usage row carries the account's remaining quota (\"20 left\"), which moves as the account is used. The rest of the screen is a static menu, so masking was the tempting option here — but the mask would have to cover the account card, which is the one place on this screen where an overlong email overflows. Excluded rather than masked at the point of interest. To bring it back: the same capture-mode fixture profile as `profile`."
+    }
+  ]
+}

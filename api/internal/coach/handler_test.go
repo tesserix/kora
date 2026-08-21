@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/tesserix/kora/api/internal/agents"
 	"github.com/tesserix/kora/api/internal/dashboard"
 	"github.com/tesserix/kora/api/internal/foodlog"
 	"github.com/tesserix/kora/api/internal/memory"
@@ -371,4 +372,43 @@ func TestHandlerThread_EmptyThreadReturnsEmptyList(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	// turns must serialise as [] not null, so the client can map over it.
 	require.Contains(t, w.Body.String(), `"turns":[]`)
+}
+
+// TestHandlerAsk_NamesTheAnsweringAgentOnlyWhenOneAnswered pins both halves
+// of the attribution contract the chat UI reads: the agent block is present
+// with the published display name when an agent answered, and absent — not
+// an empty string — when the direct provider did.
+func TestHandlerAsk_NamesTheAnsweringAgentOnlyWhenOneAnswered(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	trackingRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackingRepo, db)
+	g := NewGrounder(dashSvc, logRepo, memory.NewService(logRepo), trackingRepo)
+
+	ask := func(svc *Service) string {
+		payload, err := json.Marshal(askRequest{Question: "how's my protein?"})
+		require.NoError(t, err)
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/coach/ask", bytes.NewReader(payload))
+		req.Header.Set("Content-Type", "application/json")
+		newTestRouter(userID, NewHandler(svc)).ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		return w.Body.String()
+	}
+
+	runner := &fakeRunner{run: agents.Run{
+		Agent:       "nutrition-coach",
+		DisplayName: "Nutrition Coach",
+		State:       "completed",
+		Text:        "You have 55g protein to go.",
+	}}
+	withAgent := ask(NewService(&g, &fakeProvider{text: "from the provider"}, &stubMeter{withinBudget: true}, nil).WithAgents(runner))
+	require.Contains(t, withAgent, `"agent"`)
+	require.Contains(t, withAgent, `"name":"Nutrition Coach"`)
+	require.Contains(t, withAgent, `"skill":"nutrition-guidance"`)
+
+	withoutAgent := ask(NewService(&g, &fakeProvider{text: "from the provider"}, &stubMeter{withinBudget: true}, nil))
+	require.NotContains(t, withoutAgent, `"agent"`)
 }

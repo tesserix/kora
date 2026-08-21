@@ -1,14 +1,31 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Dimensions, View, type LayoutChangeEvent, type AccessibilityActionEvent } from "react-native";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  Dimensions,
+  useWindowDimensions,
+  View,
+  type LayoutChangeEvent,
+  type AccessibilityActionEvent,
+} from "react-native";
 import { Gesture, GestureDetector, type PanGesture } from "react-native-gesture-handler";
 import Animated, {
   runOnJS,
+  useAnimatedProps,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
   type SharedValue,
 } from "react-native-reanimated";
-import Svg, { Line, Path, Text as SvgText } from "react-native-svg";
+import Svg, {
+  Defs,
+  G,
+  Line,
+  LinearGradient,
+  Mask,
+  Path,
+  Rect,
+  Stop,
+  Text as SvgText,
+} from "react-native-svg";
 import { AppText } from "@/components/Text";
 import { useTheme } from "@/theme";
 import { haptics, springs } from "@/motion";
@@ -107,6 +124,207 @@ const RUBBER_BAND_COEFFICIENT = 0.55;
 // scrolls nothing and the page reads as frozen.
 const ACTIVE_OFFSET_X = 10;
 const FAIL_OFFSET_Y = 15;
+
+// --- Dynamic Type for the SVG scale labels (kora#261) -----------------------
+//
+// `<SvgText>` sits outside Dynamic Type entirely: react-native-svg takes a raw
+// `fontSize` in SVG user units and never consults the system text size, so the
+// graduation numbers and the detent stop labels rendered pixel-identically at
+// `medium` and at `accessibility-extra-large` while every real <Text> around
+// them roughly tripled. They are scaled explicitly here instead.
+//
+// NOT moved out of SVG into RN <Text>: kora#245 deliberately collapsed the
+// graduations into two <Path> nodes because ten rulers mount at once in
+// onboarding, and per-label RN views would put that cost straight back.
+//
+// The caps are the geometry's, not a preference. Both scales are drawn on FIXED
+// point pitches — 10 * PX_PER_UNIT = 90pt between numeric labels, DETENT_PX =
+// 96pt between stop labels — and every label is centred on its own tick, so
+// nothing here can be made to reflow. Both numbers below were measured on
+// device (iPhone 17 Pro Max, 393pt wide), not estimated:
+//
+//   continuous — the binding constraint is the CONTAINER edge, not neighbour
+//     collision (neighbours have ~74pt of slack at 90pt pitch). A major tick
+//     can land exactly on the viewport edge — it does at height 170, where 150
+//     sits 16.5pt from the left edge — and its label is centred on it, so half
+//     of it hangs over the `overflow: "hidden"` boundary. Half of "150" is
+//     6.8pt at 9pt type, so it reaches the edge at ~2.4x. Probed by lifting the
+//     cap: at accessibility-extra-extra-extra-large (fontScale ~3.3 here) the
+//     end labels render as "50" and "19(". At 2.4 they are whole.
+//
+//     CORRECTED by kora#286: "at 2.4 they are whole" was true only of the value
+//     those probes happened to sit at. The clip is set by where a major lands
+//     relative to the edge at a given VALUE, not by the label size, so it also
+//     arrives at scale 1.0 -- 172.0 kg renders "150" as a lone "0". The cap is
+//     therefore NOT what protects the container edge and never was; the fade
+//     below is (CONTINUOUS_FADE_RATIO). 2.4 stays as the vertical-headroom and
+//     legibility ceiling it doubles as, but lowering it would not buy an inch of
+//     edge safety, and raising it no longer costs any.
+//
+//   detented — the binding constraint IS neighbour collision. "Maintain" and
+//     "Build muscle" are the widest adjacent pair, ~48pt of combined half-width
+//     at 10pt type against a 96pt pitch, so they touch at ~2.0x. 1.6 leaves a
+//     measured ~19pt of clear space there and ~16pt on the tightest pace pair
+//     (two 10-character "0.25 kg/wk" strings), which is the margin that keeps
+//     the labels reading as separate stops rather than one smear.
+//
+// The two modes therefore get two different ceilings; they are different
+// geometry and a single shared number would have to be the smaller one.
+//
+// A cap is defensible here in a way it would not be for the value itself: the
+// ruler's READOUT ("30 years", "170 cm") is a real RN <Text> that already
+// scales correctly (kora#165, kora#173), so there is always an accessible
+// surface for the value. These labels are supplementary orientation.
+// --- Edge fade for the detent scale (kora#273) ------------------------------
+//
+// The scale is a wide canvas translated so the SELECTED stop sits under the
+// centre index, and the viewport clips it at `overflow: "hidden"`. A stop two
+// detents from the selection therefore lands 2 * DETENT_PX = 192pt from centre
+// against a 196pt half-viewport, leaving ~4pt for a label 60-95pt wide, so the
+// end labels were cut mid-glyph. Measured on device (iPhone 17 Pro Max, 392pt
+// viewport): ~54% of the label survives at BOTH `medium` and
+// `accessibility-extra-large`, so this is geometry, not Dynamic Type, and NOT
+// the same defect as the label sizes kora#261 fixed.
+//
+// The cut cannot be designed away. For stop 4 of the activity ruler to be whole
+// while stop 0 is selected, DETENT_PX would have to fall to ~42pt -- narrower
+// than the labels themselves, so they would collide instead. Clipping the far
+// stops is INHERENT to the centred-selection metaphor this control shares with
+// the continuous rulers and the dials.
+//
+// What was wrong was not that a label is clipped but that nothing said so. The
+// clip lands at the container's inner edge, 24pt INSIDE the screen edge, so the
+// text stopped dead in open background with a fully-drawn tick beneath it, and
+// the fragments left behind read as other words: "Sedentary" -> "entary",
+// "1 kg/wk" -> "1 kg/", and with Build muscle selected "Lose weight" ->
+// "weight". A picker peeking at a neighbour is fine; naming a stop wrongly is
+// not.
+//
+// So the fade does not try to reveal more text -- it makes the inherent clip
+// legible as "there is more this way". It is an alpha mask rather than a
+// background-coloured scrim on purpose: the page behind the ruler is a warm-to-
+// cool horizontal gradient (#14100F at the left edge to #0F171A at the right,
+// and different again per section), so a scrim would band and would couple this
+// component to whatever happens to be rendered behind it.
+//
+// Sized off the label, not the viewport: a 16pt label leaves a proportionally
+// longer fragment than a 10pt one and needs a longer runway to fade over, or
+// the taper reads as a hard edge again at the top of the Dynamic Type range.
+const DETENT_FADE_RATIO = 2.4;
+
+// --- Edge fade for the continuous scale (kora#286) ---------------------------
+//
+// The same clip, on the same screen, for the same reason -- and it was already
+// written down here. The note on CONTINUOUS_LABEL_SCALE_MAX below records that
+// a major tick can land ON the viewport edge and that its centred label then
+// hangs over the `overflow: "hidden"` boundary. What it got wrong was reading
+// that as a LIMIT ON SCALING. The clip is driven by where a major happens to
+// land relative to the edge at a given VALUE, so it arrives at scale 1.0 and no
+// cap can dodge it.
+//
+// Measured on device (iPhone 17 Pro Max, 392pt ruler viewport, `medium`), on
+// the weight ruler, sweeping in single steps. A major's label sits at
+// `196 + (major - value) * PX_PER_UNIT` from the viewport's left edge, so at:
+//
+//   171.0 kg  "150" whole, its centre 7pt inside the edge
+//   171.5 kg  "50"      the leading 1 gone -- reads as a real, wrong number
+//   172.0 kg  "0"       a lone zero
+//   172.5 kg  ")"       a lone paren: the right half of the 0. kora#286.
+//   173.0 kg  nothing
+//
+// and mirrored at the right edge, where 190 decays "190" -> "19" -> "1(" over
+// 168.5-167.5 kg. It repeats every 10 units (the major pitch) on EVERY
+// continuous ruler -- confirmed at 172 cm on the height ruler, which renders
+// the same lone "0" -- and the destination weight ruler is simply the one
+// people drag furthest, which is why kora#286 was reported there.
+//
+// A lone ")" is worse than a truncated word. "entary" still reads as text with
+// more to the left of it; ")" reads as the renderer having failed. So the same
+// answer as kora#273: an alpha mask that makes the clip legible as "there is
+// more this way", rather than any attempt to reveal more text.
+//
+// NOT fixed by shrinking the labels (kora#263: a shrink box narrows past the
+// word it holds) and NOT by lowering the scale cap, since the defect is at 1.0.
+//
+// Sized off the label like the detent scale's, but the ratio means something
+// different because the labels do: a 3-digit continuous label measures 14.3pt
+// at the 9pt base size (measured from the screenshot, 43px at 3x), i.e. ~1.6x
+// its font size, where a detent label is 6-9x its own. So 2.4 buys a runway of
+// 1.5 WHOLE LABELS here -- every fragment the clip can leave is inside the ramp
+// with room to spare -- against a fraction of one there.
+//
+// It is nonetheless the same number on purpose. 2.4 * 9 = 21.6pt against the
+// detent scale's 2.4 * 10 = 24pt: the two controls sit adjacent on the
+// onboarding screen and now fade over visibly the same distance, which is what
+// keeps one clip from being communicated in two visual languages.
+const CONTINUOUS_FADE_RATIO = 2.4;
+
+const CONTINUOUS_LABEL_FONT_SIZE = 9;
+const DETENT_LABEL_FONT_SIZE = 10;
+const CONTINUOUS_LABEL_SCALE_MAX = 2.4;
+const DETENT_LABEL_SCALE_MAX = 1.6;
+// Rough cap height as a fraction of font size. Used only to work out how much
+// vertical room a scaled continuous label needs above the ticks — an estimate
+// is the right tool because SVG gives no text metrics and the cost of being a
+// point or two generous is a point or two of extra height.
+const LABEL_CAP_RATIO = 0.75;
+
+/**
+ * How far into a ruler's viewport each edge fade runs, as a FRACTION of the
+ * viewport width, ready to drop straight into the gradient's stop offsets.
+ *
+ * Clamped at 0.45 so the two fades can never meet and swallow what sits under
+ * the centre index -- on a narrow viewport that would leave the control with no
+ * legible label at all, which is worse than the clipping this fixes.
+ *
+ * One function for both modes because the two clips are the same clip: a wide
+ * canvas translated under a fixed index, cut at the container's inner edge. Only
+ * the RATIO differs, and only because the labels do (see the two ratio notes
+ * above).
+ */
+export function edgeFadeStop(labelSize: number, width: number, ratio: number): number {
+  if (width <= 0) return 0;
+  return Math.min(0.45, (labelSize * ratio) / width);
+}
+
+/**
+ * Exported for the geometry tests, which pin the ratios rather than re-deriving
+ * them from a screenshot.
+ */
+export const detentFadeStop = (labelSize: number, width: number): number =>
+  edgeFadeStop(labelSize, width, DETENT_FADE_RATIO);
+
+export const continuousFadeStop = (labelSize: number, width: number): number =>
+  edgeFadeStop(labelSize, width, CONTINUOUS_FADE_RATIO);
+
+/**
+ * The multiplier the SVG labels actually use: the system font scale, floored
+ * at 1 so a user who has SHRUNK their text never gets labels smaller than the
+ * design's own 9/10pt (they are already the smallest type in the app), and
+ * capped at whatever the caller's geometry can hold.
+ *
+ * Exported for the geometry tests, which pin the caps rather than re-deriving
+ * them.
+ */
+export function labelFontScale(fontScale: number, max: number): number {
+  return Math.min(Math.max(fontScale, 1), max);
+}
+
+/**
+ * Extra vertical room a scaled label needs above the ticks, in points. Zero at
+ * scale 1 — which is what keeps `medium` byte-identical — and grows with the
+ * part of the glyph that sits above the baseline.
+ */
+export function labelHeadroom(baseFontSize: number, scale: number): number {
+  return Math.ceil(baseFontSize * LABEL_CAP_RATIO * (scale - 1));
+}
+
+// The mask lives INSIDE the translated canvas -- the only place a
+// react-native-svg mask can reach the scale -- so it has to be counter-
+// translated every frame or the fade would slide away from the viewport edge
+// along with the ticks. Driven off the same `offset` shared value as the scale
+// itself, on the UI thread, so it cannot fight kora#176's drag.
+const AnimatedRect = Animated.createAnimatedComponent(Rect);
 
 const clamp = (v: number, min: number, max: number): number => {
   "worklet";
@@ -370,6 +588,21 @@ function ContinuousRuler(props: ContinuousProps) {
   const { value, min, max, step, onChange, formatLabel, unit, accessibilityLabel } = props;
   const testID = props.testID ?? "tick-ruler";
   const [width, setWidth] = useState(FALLBACK_WIDTH);
+  // useWindowDimensions, not PixelRatio.getFontScale(): the former is reactive,
+  // so the scale relays out when the user changes their text size and returns
+  // to a still-mounted app (same reason AppleSignInButton and DayTotalCluster
+  // use it, kora#260).
+  const { fontScale } = useWindowDimensions();
+  const labelScale = labelFontScale(fontScale, CONTINUOUS_LABEL_SCALE_MAX);
+  const labelSize = CONTINUOUS_LABEL_FONT_SIZE * labelScale;
+  // The labels sit ABOVE the ticks, so a taller glyph runs off the top of the
+  // canvas rather than into the graduations. Everything below is therefore
+  // pushed DOWN by the headroom and the canvas grown to match — the tick
+  // geometry keeps its exact relationship to the baseline, it just starts
+  // lower. Zero at scale 1, so `medium` is untouched.
+  const headroom = labelHeadroom(CONTINUOUS_LABEL_FONT_SIZE, labelScale);
+  const svgHeight = HEIGHT + headroom;
+  const baseline = BASELINE + headroom;
 
   const onLayout = useCallback((e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width), []);
 
@@ -435,18 +668,34 @@ function ContinuousRuler(props: ContinuousProps) {
     for (let u = Math.ceil(min); u <= Math.floor(max); u++) {
       const x = pad + (u - min) * PX_PER_UNIT;
       if (u % 10 === 0) {
-        major += `M${x} ${BASELINE}L${x} ${BASELINE - 16}`;
+        major += `M${x} ${baseline}L${x} ${baseline - 16}`;
         out.push({ key: String(u), x, text: String(u) });
       } else {
-        minor += `M${x} ${BASELINE}L${x} ${BASELINE - 7}`;
+        minor += `M${x} ${baseline}L${x} ${baseline - 7}`;
       }
     }
     return { minorPath: minor, majorPath: major, labels: out };
-  }, [max, min, pad]);
+  }, [baseline, max, min, pad]);
 
   const scaleStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: mid - pad - (offset.value - min) * PX_PER_UNIT }],
   }));
+
+  // kora#286, the same shape as kora#273's detent fade. Ten rulers mount at
+  // once in onboarding, so the ids have to be per-instance or whichever ruler
+  // mounted last owns the def and masks the rest by geometry that is not theirs.
+  const uid = useId().replace(/:/g, "");
+  const fadeId = `scale-fade-${uid}`;
+  const maskId = `scale-mask-${uid}`;
+  // Where the viewport's left edge currently sits in canvas coordinates --
+  // exactly the inverse of `scaleStyle`'s translate, so the fade band stays
+  // welded to the container edge while the ticks slide underneath it. The `-
+  // min` term is the one arithmetic difference from detented mode: this scale
+  // is anchored at `min` rather than at stop 0.
+  const maskProps = useAnimatedProps(() => ({
+    x: pad + (offset.value - min) * PX_PER_UNIT - mid,
+  }));
+  const fadeStop = continuousFadeStop(labelSize, width);
 
   return (
     <GestureDetector gesture={pan}>
@@ -475,7 +724,7 @@ function ContinuousRuler(props: ContinuousProps) {
         // `overflow: "hidden"` stays: it is there for the HORIZONTAL clip, and
         // the scale below is deliberately drawn `width` px wider than the
         // viewport on each side so the end labels are not cut in half.
-        style={{ minHeight: HEIGHT + READOUT_HEIGHT, width: "100%", overflow: "hidden" }}
+        style={{ minHeight: svgHeight + READOUT_HEIGHT, width: "100%", overflow: "hidden" }}
       >
         {/* kora#165: the value in plain sight. A real RN Text rather than an
             SVG one so it inherits the app's type scale and Dynamic Type, and
@@ -505,49 +754,84 @@ function ContinuousRuler(props: ContinuousProps) {
         >
           {formatReadout(value, formatLabel, unit)}
         </AppText>
-        <View style={{ height: HEIGHT }}>
-          <Animated.View style={[{ width: scaleWidth, height: HEIGHT }, scaleStyle]}>
-            <Svg width={scaleWidth} height={HEIGHT}>
-              <Path
-                testID={`${testID}-ticks-minor`}
-                d={minorPath}
-                stroke={instrument.tick}
-                strokeWidth={1}
-              />
-              <Path
-                testID={`${testID}-ticks-major`}
-                d={majorPath}
-                stroke={instrument.ink}
-                strokeWidth={1.6}
-              />
-              {labels.map((t) => (
-                <SvgText
-                  key={`label-${t.key}`}
-                  x={t.x}
-                  y={BASELINE - 22}
-                  fill={instrument.mut}
-                  fontSize={9}
-                  textAnchor="middle"
+        <View style={{ height: svgHeight }}>
+          <Animated.View style={[{ width: scaleWidth, height: svgHeight }, scaleStyle]}>
+            <Svg width={scaleWidth} height={svgHeight}>
+              <Defs>
+                <LinearGradient id={fadeId} x1="0" y1="0" x2="1" y2="0">
+                  <Stop offset="0" stopColor="#fff" stopOpacity="0" />
+                  <Stop offset={fadeStop} stopColor="#fff" stopOpacity="1" />
+                  <Stop offset={1 - fadeStop} stopColor="#fff" stopOpacity="1" />
+                  <Stop offset="1" stopColor="#fff" stopOpacity="0" />
+                </LinearGradient>
+                {/* userSpaceOnUse so the mask is authored in the same canvas
+                    coordinates as the ticks. Whatever the rect does not cover
+                    is masked out, which is exactly the region the viewport
+                    clips anyway. The height is `svgHeight`, not a constant:
+                    kora#261 grows this canvas with the label size, and a fixed
+                    height would leave the scaled labels unmasked at the top of
+                    the Dynamic Type range -- the one place the fragments are
+                    longest. */}
+                <Mask
+                  id={maskId}
+                  maskUnits="userSpaceOnUse"
+                  x={0}
+                  y={0}
+                  width={scaleWidth}
+                  height={svgHeight}
                 >
-                  {t.text}
-                </SvgText>
-              ))}
+                  <AnimatedRect
+                    animatedProps={maskProps}
+                    y={0}
+                    width={width}
+                    height={svgHeight}
+                    fill={`url(#${fadeId})`}
+                  />
+                </Mask>
+              </Defs>
+              <G testID={`${testID}-scale`} mask={`url(#${maskId})`}>
+                <Path
+                  testID={`${testID}-ticks-minor`}
+                  d={minorPath}
+                  stroke={instrument.tick}
+                  strokeWidth={1}
+                />
+                <Path
+                  testID={`${testID}-ticks-major`}
+                  d={majorPath}
+                  stroke={instrument.ink}
+                  strokeWidth={1.6}
+                />
+                {labels.map((t) => (
+                  <SvgText
+                    key={`label-${t.key}`}
+                    testID={`${testID}-label-${t.key}`}
+                    x={t.x}
+                    y={baseline - 22}
+                    fill={instrument.mut}
+                    fontSize={labelSize}
+                    textAnchor="middle"
+                  >
+                    {t.text}
+                  </SvgText>
+                ))}
+              </G>
             </Svg>
           </Animated.View>
           {/* The fixed centre index — the only accent on the control, and the
               one thing that must NOT move with the scale. */}
           <Svg
             width="100%"
-            height={HEIGHT}
+            height={svgHeight}
             style={{ position: "absolute", left: 0, top: 0 }}
             pointerEvents="none"
           >
             <Line
               testID={`${testID}-index`}
               x1={mid}
-              y1={BASELINE + 4}
+              y1={baseline + 4}
               x2={mid}
-              y2={BASELINE - 24}
+              y2={baseline - 24}
               stroke={instrument.accent}
               strokeWidth={2}
             />
@@ -563,6 +847,13 @@ function DetentedRuler(props: DetentedProps) {
   const { index, labels, onChange, accessibilityLabel } = props;
   const testID = props.testID ?? "tick-ruler";
   const [width, setWidth] = useState(FALLBACK_WIDTH);
+  // Same reactive source as continuous mode above (kora#261). Unlike that
+  // mode this one needs no extra vertical room: the stop labels sit at
+  // BASELINE - 14 on a canvas 8pt taller than continuous mode's, so at the
+  // 1.6 cap the tallest glyph still starts ~10pt below the top edge and the
+  // descenders in "Lose weight"/"Sedentary" still clear the tick tops.
+  const { fontScale } = useWindowDimensions();
+  const labelSize = DETENT_LABEL_FONT_SIZE * labelFontScale(fontScale, DETENT_LABEL_SCALE_MAX);
 
   const onLayout = useCallback((e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width), []);
 
@@ -612,6 +903,18 @@ function DetentedRuler(props: DetentedProps) {
     transform: [{ translateX: mid - pad - offset.value * DETENT_PX }],
   }));
 
+  // Ten rulers mount at once in onboarding, so the gradient and mask ids have
+  // to be per-instance: a shared id would let whichever ruler mounted last own
+  // the def and leave the rest masked by geometry that is not theirs.
+  const uid = useId().replace(/:/g, "");
+  const fadeId = `detent-fade-${uid}`;
+  const maskId = `detent-mask-${uid}`;
+  // Where the viewport's left edge currently sits in canvas coordinates --
+  // exactly the inverse of `scaleStyle`'s translate, so the fade band stays
+  // welded to the container edge while the ticks slide underneath it.
+  const maskProps = useAnimatedProps(() => ({ x: pad + offset.value * DETENT_PX - mid }));
+  const fadeStop = detentFadeStop(labelSize, width);
+
   return (
     <GestureDetector gesture={pan}>
       <View
@@ -627,37 +930,67 @@ function DetentedRuler(props: DetentedProps) {
       >
         <Animated.View style={[{ width: scaleWidth, height: HEIGHT + 8 }, scaleStyle]}>
           <Svg width={scaleWidth} height={HEIGHT + 8}>
-            {labels.map((label, i) => {
-              const on = i === index;
-              return (
-                <Line
-                  key={`stop-${label}`}
-                  testID={`${testID}-stop-${i}`}
-                  x1={pad + i * DETENT_PX}
-                  y1={BASELINE + 8}
-                  x2={pad + i * DETENT_PX}
-                  y2={BASELINE - 6}
-                  // instrument.accent is reserved for the fixed centre index
-                  // below — selected-stop emphasis uses instrument.ink instead.
-                  stroke={on ? instrument.ink : instrument.tick}
-                  strokeWidth={on ? 2 : 1.4}
-                />
-              );
-            })}
-            {labels.map((label, i) => (
-              <SvgText
-                key={`stop-label-${label}`}
-                testID={`${testID}-label-${i}`}
-                x={pad + i * DETENT_PX}
-                y={BASELINE - 14}
-                fill={i === index ? instrument.ink : instrument.mut}
-                fontSize={10}
-                fontWeight={i === index ? "600" : "500"}
-                textAnchor="middle"
+            <Defs>
+              <LinearGradient id={fadeId} x1="0" y1="0" x2="1" y2="0">
+                <Stop offset="0" stopColor="#fff" stopOpacity="0" />
+                <Stop offset={fadeStop} stopColor="#fff" stopOpacity="1" />
+                <Stop offset={1 - fadeStop} stopColor="#fff" stopOpacity="1" />
+                <Stop offset="1" stopColor="#fff" stopOpacity="0" />
+              </LinearGradient>
+              {/* userSpaceOnUse so the mask is authored in the same canvas
+                  coordinates as the ticks. Whatever the rect does not cover is
+                  masked out, which is exactly the region the viewport clips
+                  anyway. */}
+              <Mask
+                id={maskId}
+                maskUnits="userSpaceOnUse"
+                x={0}
+                y={0}
+                width={scaleWidth}
+                height={HEIGHT + 8}
               >
-                {label}
-              </SvgText>
-            ))}
+                <AnimatedRect
+                  animatedProps={maskProps}
+                  y={0}
+                  width={width}
+                  height={HEIGHT + 8}
+                  fill={`url(#${fadeId})`}
+                />
+              </Mask>
+            </Defs>
+            <G testID={`${testID}-scale`} mask={`url(#${maskId})`}>
+              {labels.map((label, i) => {
+                const on = i === index;
+                return (
+                  <Line
+                    key={`stop-${label}`}
+                    testID={`${testID}-stop-${i}`}
+                    x1={pad + i * DETENT_PX}
+                    y1={BASELINE + 8}
+                    x2={pad + i * DETENT_PX}
+                    y2={BASELINE - 6}
+                    // instrument.accent is reserved for the fixed centre index
+                    // below — selected-stop emphasis uses instrument.ink instead.
+                    stroke={on ? instrument.ink : instrument.tick}
+                    strokeWidth={on ? 2 : 1.4}
+                  />
+                );
+              })}
+              {labels.map((label, i) => (
+                <SvgText
+                  key={`stop-label-${label}`}
+                  testID={`${testID}-label-${i}`}
+                  x={pad + i * DETENT_PX}
+                  y={BASELINE - 14}
+                  fill={i === index ? instrument.ink : instrument.mut}
+                  fontSize={labelSize}
+                  fontWeight={i === index ? "600" : "500"}
+                  textAnchor="middle"
+                >
+                  {label}
+                </SvgText>
+              ))}
+            </G>
           </Svg>
         </Animated.View>
         {/* The fixed centre index — the only accent on the control, and the

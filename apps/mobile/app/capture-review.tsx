@@ -8,7 +8,7 @@ import { AppText } from "@/components/Text";
 import { Button } from "@/components/Button";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { AppBackground } from "@/components/AppBackground";
-import { ResolutionResult, resolveResultView, candidateKey } from "@/components/ResolutionResult";
+import { ResolutionResult, resolveResultView } from "@/components/ResolutionResult";
 import { useToast } from "@/components/Toast";
 import { safeBack } from "@/lib/safeBack";
 import { useTheme } from "@/theme";
@@ -19,6 +19,7 @@ import { append as appendLog, newLogId } from "@/offline/queue";
 import { drainCaptures } from "@/offline/drainCaptures";
 import { QUEUED_CAPTURES_KEY, QUEUED_LOGS_KEY } from "@/offline/queryKeys";
 import { isLoggable } from "@/lib/candidateTier";
+import { runRetryLedger } from "@/lib/retryLedger";
 import { FoodPicker } from "@/components/meal/FoodPicker";
 import { initialPortionFor } from "@/lib/promotedPortion";
 import type { MealSlot } from "@/lib/mealSlot";
@@ -104,13 +105,13 @@ export default function CaptureReviewScreen() {
   const [capture, setCapture] = useState<QueuedCapture | null | undefined>(undefined);
   const [mealSlot, setMealSlot] = useState<MealSlot>("snack");
   const [busy, setBusy] = useState(false);
-  // Which candidates (by candidateKey — the same helper capture.tsx's
-  // handleAddToDiary uses) have already been queued, across every Confirm
-  // press for this capture. A retry after a partial failure must not
-  // re-submit one of these: appendLog mints a FRESH log id every time it's
-  // called, so resubmitting an already-queued candidate would not update the
-  // existing log, it would create a second one under a different id, and the
-  // server has no way to recognise the duplicate.
+  // Which candidates (by candidateKey — the shared retry ledger's own key,
+  // the same one capture.tsx's handleAddToDiary records under) have already
+  // been queued, across every Confirm press for this capture. A retry after a
+  // partial failure must not re-submit one of these: appendLog mints a FRESH
+  // log id every time it's called, so resubmitting an already-queued candidate
+  // would not update the existing log, it would create a second one under a
+  // different id, and the server has no way to recognise the duplicate.
   const [loggedCandidateKeys, setLoggedCandidateKeys] = useState<Set<string>>(new Set());
   // Per-row exclusion, same as capture.tsx (kora#183). This screen replays the
   // very same DetectedCard, so it had the very same defect: a checkbox-looking
@@ -216,22 +217,17 @@ export default function CaptureReviewScreen() {
       // "Add 2 items to diary"; logging one and deleting the capture row
       // destroyed the rest with no trace.
       //
-      // Keyed on the FULL candidates array (before the isLoggable filter),
-      // the same way DetectedCard indexes its rows, so a key computed here
-      // always lines up with the one an earlier attempt recorded — and
-      // filtered against loggedCandidateKeys so a retry only resubmits what
-      // did not already make it (see the state comment above).
-      const pending = (resolution?.candidates ?? [])
-        .map((c, i) => ({ c, i, key: candidateKey(c, i) }))
-        .filter(({ c }) => isLoggable(c))
-        .filter(({ i }) => !excluded.has(i))
-        .filter(({ key }) => !loggedCandidateKeys.has(key));
-
-      // allSettled, not all: one rejected item must not abandon the ones that
-      // already queued, and the outcome list is what decides whether the
-      // capture is safe to delete.
-      const outcomes = await Promise.allSettled(
-        pending.map(({ c }) =>
+      // Which items that is — keying off the FULL candidates array, the
+      // exclusions, skipping what an earlier attempt already queued, the
+      // allSettled and the union write — is runRetryLedger's, shared verbatim
+      // with capture.tsx's Add to diary (kora#144). This screen supplies only
+      // the backend: the offline log queue rather than the createLog mutation.
+      const attempt = await runRetryLedger({
+        candidates: resolution?.candidates ?? [],
+        excluded,
+        logged: loggedCandidateKeys,
+        markLogged: setLoggedCandidateKeys,
+        logCandidate: (c) =>
           appendLog(
             {
               food_item_id: c.item.id,
@@ -249,26 +245,16 @@ export default function CaptureReviewScreen() {
             newLogId(),
             capture.ownerId,
           ),
-        ),
-      );
+      });
 
-      const newlySucceededKeys = pending
-        .filter((_, index) => outcomes[index]?.status === "fulfilled")
-        .map(({ key }) => key);
-      // Union, never replace: keys from an earlier attempt must survive this
-      // one even though this attempt never touched them. A functional updater,
-      // so the union is taken against the ledger at commit time rather than
-      // against the snapshot this closure captured when the press started.
-      setLoggedCandidateKeys((prev) => new Set([...prev, ...newlySucceededKeys]));
-
-      const failed = outcomes.filter((o) => o.status === "rejected").length;
+      const failed = attempt.failed.length;
       if (failed > 0) {
         // The capture row and its media are the only copy of an item that did
         // not queue. Keep both so the user can retry rather than losing it.
         setBusy(false);
         Alert.alert(
           "Some items didn't save",
-          `${failed} of ${pending.length} couldn't be queued. Your capture is still here — try again.`,
+          `${failed} of ${attempt.pending.length} couldn't be queued. Your capture is still here — try again.`,
         );
         return;
       }

@@ -164,6 +164,40 @@ func TestResolveAliasPortion_AssumedFlag(t *testing.T) {
 		require.True(t, assumed)
 	})
 
+	// kora#144: the serving rung obeys plausibleServingGrams, the same bound
+	// portionGramsFor's step 4 uses. Without it a USDA whole-animal reference
+	// mass reaches the diary as a portion — and, worse, as a NOT-assumed one,
+	// so nothing in the card hedges it.
+	t.Run("an implausible reference serving is refused and falls to the assumed default", func(t *testing.T) {
+		turkey := nutrition.FoodItem{KcalPer100g: 160, ServingGrams: 5717}
+		r := Resolver{}.WithPortionSource(&fakePortionSource{grams: map[string]float64{}})
+		grams, assumed := r.resolveAliasPortion(context.Background(), userID, phrase, turkey)
+		require.Equal(t, float64(defaultAliasPortionGrams), grams)
+		require.True(t, assumed)
+	})
+
+	// The floor is data hygiene: a sub-gram "serving" is a parsing artefact,
+	// not a portion, and multiplying per-100g values by it logs ~nothing.
+	t.Run("a sub-gram serving artefact is refused too", func(t *testing.T) {
+		artefact := nutrition.FoodItem{KcalPer100g: 160, ServingGrams: 0.4}
+		r := Resolver{}.WithPortionSource(&fakePortionSource{grams: map[string]float64{}})
+		grams, assumed := r.resolveAliasPortion(context.Background(), userID, phrase, artefact)
+		require.Equal(t, float64(defaultAliasPortionGrams), grams)
+		require.True(t, assumed)
+	})
+
+	// The bound never overrides real history. A user who logs 700 g of this
+	// phrase gets 700 g back — plausibleServingGrams gates the food's STORED
+	// serving, not the portion the user actually ate.
+	t.Run("a large last logged portion is still returned verbatim", func(t *testing.T) {
+		r := Resolver{}.WithPortionSource(&fakePortionSource{grams: map[string]float64{
+			userID.String() + "|" + phrase: 700,
+		}})
+		grams, assumed := r.resolveAliasPortion(context.Background(), userID, phrase, nutrition.FoodItem{ServingGrams: 5717})
+		require.Equal(t, 700.0, grams)
+		require.False(t, assumed)
+	})
+
 	t.Run("nil portion source still marks the flat default as assumed", func(t *testing.T) {
 		r := Resolver{}
 		grams, assumed := r.resolveAliasPortion(context.Background(), userID, phrase, itemNoServing)
@@ -676,17 +710,23 @@ func TestResolveVoiceTranscribesThenResolves(t *testing.T) {
 	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE brand = 'test3a'") })
 	repo := nutrition.NewRepository(db)
 
+	// The spoken phrase carries the "zqxvoice" nonce, and so do the seeded row
+	// and the alias (kora#151). A bare "banana" made this fixture share a
+	// phrase with the shared dev index: the 89.0 assertion is only meaningful
+	// if the resolve lands on THIS row, and with a plain phrase that depends
+	// on this test's global alias out-ranking whatever "Banana" rows and
+	// aliases the index already carries.
 	item := seedFoodItem(t, repo, nutrition.FoodItem{
-		Name: "Banana", Brand: "test3a",
+		Name: "Zqxvoice banana", Brand: "test3a",
 		Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 89,
 	})
-	seedAlias(t, db, "banana", item.ID)
+	seedAlias(t, db, "zqxvoice banana", item.ID)
 
 	provider := &stubProvider{
-		transcript:      "banana",
+		transcript:      "zqxvoice banana",
 		transcriptUsage: Usage{Provider: "stub", CallType: "transcribe"},
 		guesses: []Guess{
-			{Food: "banana", PortionEstimate: "100 g", Confidence: 0.95},
+			{Food: "zqxvoice banana", PortionEstimate: "100 g", Confidence: 0.95},
 		},
 		guessUsage: Usage{Provider: "stub", CallType: "identify_text"},
 	}
@@ -701,10 +741,12 @@ func TestResolveVoiceTranscribesThenResolves(t *testing.T) {
 	// 89 kcal/100g * 100g / 100 = 89 — computed from the row, never from the
 	// (kcal-less) transcript or guess.
 	require.Equal(t, 89.0, res.Candidates[0].Kcal)
+	require.Equal(t, item.ID, res.Candidates[0].Item.ID,
+		"89.0 must come from the seeded row, not from an ambient row that happens to share it")
 	// A successful voice resolve must carry the transcript back to the
 	// caller — a mobile client has nothing else it can put in
 	// FoodLog.InputPhrase for an ai_voice log.
-	require.Equal(t, "banana", res.Transcript)
+	require.Equal(t, "zqxvoice banana", res.Transcript)
 
 	// The whole point of transcription metering: at least one recorded Usage
 	// row must be the transcribe call itself, alongside the identify/embed

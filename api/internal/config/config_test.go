@@ -362,3 +362,33 @@ func TestLoadValidatesAppleConfig(t *testing.T) {
 		})
 	}
 }
+
+// The registry is a separate trust domain: it matches sha256(bearer) against
+// its own `kora=` deploy-key entry, so the gateway key authenticates as
+// nobody. Inheriting it shipped to production and 401'd every roster lookup
+// behind a silent keyword fallback, which is why this is an error and not a
+// default.
+func TestLoadRequiresItsOwnRegistryDeployKey(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
+	t.Setenv("AI_GATEWAY_API_KEY", "internal-key")
+	t.Setenv("AI_REGISTRY_BASE_URL", "http://agentregistry.agentregistry-system.svc.cluster.local:12121")
+	t.Setenv("AI_REGISTRY_API_KEY", "")
+
+	_, err := Load()
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "AI_REGISTRY_API_KEY")
+	assert.NotContains(t, err.Error(), "AI_GATEWAY_API_KEY", "the gateway key is not an acceptable substitute")
+}
+
+func TestLoadReadsTheRegistryDeployKey(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
+	t.Setenv("AI_GATEWAY_API_KEY", "internal-key")
+	t.Setenv("AI_REGISTRY_BASE_URL", "http://agentregistry.agentregistry-system.svc.cluster.local:12121")
+	t.Setenv("AI_REGISTRY_API_KEY", "deploy-key")
+
+	cfg, err := Load()
+
+	require.NoError(t, err)
+	assert.Equal(t, "deploy-key", cfg.AIRegistryAPIKey)
+}

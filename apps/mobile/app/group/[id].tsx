@@ -180,7 +180,7 @@ export default function GroupDetail() {
                   style={{ opacity: del.isPending ? 0.5 : 1 }}
                 >
                   <View style={{ minHeight: 44, justifyContent: "center", paddingHorizontal: spacing.md }}>
-                    <AppText style={{ fontSize: 17, fontWeight: "600", color: instrument.danger }}>
+                    <AppText variant="headline" style={{ color: instrument.danger }}>
                       Delete group
                     </AppText>
                   </View>
@@ -195,7 +195,7 @@ export default function GroupDetail() {
                   style={{ opacity: leaveDisabled ? 0.5 : 1 }}
                 >
                   <View style={{ minHeight: 44, justifyContent: "center", paddingHorizontal: spacing.md }}>
-                    <AppText style={{ fontSize: 17, fontWeight: "600", color: instrument.danger }}>
+                    <AppText variant="headline" style={{ color: instrument.danger }}>
                       Leave group
                     </AppText>
                   </View>

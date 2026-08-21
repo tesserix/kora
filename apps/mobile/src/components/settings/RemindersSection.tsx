@@ -60,19 +60,45 @@ export function RemindersSection() {
         {SLOTS.map((slot) => {
           const p = prefs[slot];
           return (
+            // The row WRAPS, and the time + switch are grouped so they drop to
+            // line two TOGETHER (kora#274). Before this the row was three flat
+            // siblings and the label carried `flex: 1` — i.e. `flexShrink: 1`
+            // against two siblings on RN's default `flexShrink: 0`. So the
+            // label absorbed the whole overflow alone: measured at
+            // accessibility-extra-large, "Breakfast" got a 139pt box for a word
+            // that wants ~200pt at 45pt type, and broke as "Breakf" / "ast".
+            // That is the kora#263 failure exactly — a shrink box narrowed past
+            // the word it holds — not the largeTitle over-scale that the two
+            // ScreenHeader cases in the same issue turned out to be.
+            //
+            // `flexGrow: 1, flexShrink: 0` on the label is the kora#264 recipe
+            // and for the same reason: with `flexShrink: 1` yoga collapses the
+            // label when it decides where the line breaks, so the line never
+            // breaks. With shrink off the label measures its own type, the row
+            // sees 200 + 149 + 63 + gaps against a 400pt inner width, and the
+            // controls wrap. iOS does this itself — Settings > Accessibility at
+            // AXL drops the "Hover Text" row's "Off" detail to its own line
+            // rather than squeezing the label.
+            //
+            // At `medium` nothing moves: ~72pt label + ~55pt time + 51pt switch
+            // + gaps fits one line inside 400pt, and only "Breakfast" was ever
+            // long enough to break — "Lunch" measured 125pt on one line
+            // untouched. Verified by screenshot at both sizes.
             <View
               key={slot}
-              style={{ flexDirection: "row", alignItems: "center", minHeight: 44, paddingHorizontal: spacing.md, gap: spacing.sm }}
+              style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", minHeight: 44, paddingHorizontal: spacing.md, rowGap: spacing.xs, columnGap: spacing.sm }}
             >
-              <AppText style={{ flex: 1, fontSize: 17, fontWeight: "600", color: instrument.ink }}>{LABEL[slot]}</AppText>
-              <Pressable accessibilityLabel={`${LABEL[slot]} time`} onPress={() => openPicker(slot)} disabled={!p.enabled} style={(s) => ({ opacity: s.pressed ? 0.6 : 1 })}>
-                <AppText style={{ fontSize: 15, color: instrument.mut, opacity: p.enabled ? 1 : 0.4 }}>{fmt(p.hour, p.minute)}</AppText>
-              </Pressable>
-              <ToggleSwitch
-                testID={`reminder-switch-${slot}`}
-                value={p.enabled}
-                onValueChange={(enabled) => setSlot(slot, { ...p, enabled })}
-              />
+              <AppText variant="headline" style={{ flexGrow: 1, flexShrink: 0, color: instrument.ink }}>{LABEL[slot]}</AppText>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+                <Pressable accessibilityLabel={`${LABEL[slot]} time`} onPress={() => openPicker(slot)} disabled={!p.enabled} style={(s) => ({ opacity: s.pressed ? 0.6 : 1 })}>
+                  <AppText variant="subheadline" style={{ color: instrument.mut, opacity: p.enabled ? 1 : 0.4 }}>{fmt(p.hour, p.minute)}</AppText>
+                </Pressable>
+                <ToggleSwitch
+                  testID={`reminder-switch-${slot}`}
+                  value={p.enabled}
+                  onValueChange={(enabled) => setSlot(slot, { ...p, enabled })}
+                />
+              </View>
             </View>
           );
         })}

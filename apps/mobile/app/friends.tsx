@@ -174,7 +174,7 @@ export default function Friends() {
                   >
                     <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, minHeight: 44, paddingHorizontal: spacing.md }}>
                       <Avatar initials={initials(f.display_name)} size={32} />
-                      <AppText style={{ fontSize: 17, fontWeight: "600", color: instrument.ink }}>{f.display_name}</AppText>
+                      <AppText variant="headline" style={{ color: instrument.ink }}>{f.display_name}</AppText>
                     </View>
                   </PressableScale>
                 ))}

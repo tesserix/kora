@@ -3,7 +3,11 @@ import { fireGestureHandler, getByGestureTestId } from "react-native-gesture-han
 import { impactAsync, selectionAsync } from "expo-haptics";
 import * as Reanimated from "react-native-reanimated";
 import {
+  continuousFadeStop,
+  detentFadeStop,
   indexFromDrag,
+  labelFontScale,
+  labelHeadroom,
   projectMomentum,
   rubberBand,
   TickRuler,
@@ -635,5 +639,298 @@ describe("TickRuler gesture configuration (kora#176)", () => {
     const { config } = getByGestureTestId("activity-ruler-pan");
     expect(config.activeOffsetXStart).toBeLessThan(0);
     expect(config.failOffsetYEnd).toBeGreaterThan(0);
+  });
+});
+
+// kora#261. These labels are <SvgText>, which react-native-svg renders from a
+// raw numeric fontSize and never routes through Dynamic Type — so at
+// accessibility text sizes they rendered pixel-identically to `medium` while
+// every real <Text> around them roughly tripled. A green suite is what let that
+// ship, so these tests assert the rendered fontSize, not just the helpers.
+describe("TickRuler SVG label scaling (kora#261)", () => {
+  // require, not a top-level import: an ESM namespace object is sealed, so
+  // jest.spyOn cannot redefine a property on it.
+  // react-native-svg folds the text presentation props into a single `font`
+  // object on the rendered node, so fontSize sits one level in.
+  const fontSizeOf = (testID: string): number => screen.getByTestId(testID).props.font.fontSize;
+
+  function withFontScale(fontScale: number) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const rn = require("react-native");
+    return jest
+      .spyOn(rn, "useWindowDimensions")
+      .mockReturnValue({ width: 440, height: 956, scale: 3, fontScale });
+  }
+
+  describe("labelFontScale", () => {
+    it("passes a normal font scale straight through", () => {
+      expect(labelFontScale(1.35, 2.4)).toBeCloseTo(1.35);
+    });
+
+    // These are already the smallest type in the app; shrinking them further
+    // for a user who has REDUCED their text size makes the scale unreadable
+    // without making anything else fit.
+    it("never goes below 1, however small the user's text is", () => {
+      expect(labelFontScale(0.82, 2.4)).toBe(1);
+    });
+
+    it("stops at the caller's ceiling", () => {
+      expect(labelFontScale(3.3, 2.4)).toBe(2.4);
+      expect(labelFontScale(3.3, 1.6)).toBe(1.6);
+    });
+  });
+
+  describe("labelHeadroom", () => {
+    // Zero at scale 1 is what keeps `medium` byte-identical: every y in the
+    // continuous scale is derived from it.
+    it("asks for no extra room at the design's own size", () => {
+      expect(labelHeadroom(9, 1)).toBe(0);
+    });
+
+    it("grows with the part of the glyph that sits above the baseline", () => {
+      expect(labelHeadroom(9, 2.4)).toBeGreaterThan(0);
+      expect(labelHeadroom(9, 2.4)).toBeGreaterThan(labelHeadroom(9, 1.5));
+    });
+  });
+
+  it("scales the continuous graduation labels with the system font scale", async () => {
+    const spy = withFontScale(2);
+    try {
+      await render(<TickRuler {...base} value={84} onChange={jest.fn()} />);
+      // 40, 90 and 180 are the first, a middle and the last major graduation
+      // on this scale — all three scale, not just whichever renders first.
+      expect(fontSizeOf("weight-ruler-label-40")).toBe(18);
+      expect(fontSizeOf("weight-ruler-label-90")).toBe(18);
+      expect(fontSizeOf("weight-ruler-label-180")).toBe(18);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("caps the continuous labels where the end label would meet the clip edge", async () => {
+    const spy = withFontScale(3.3);
+    try {
+      await render(<TickRuler {...base} value={84} onChange={jest.fn()} />);
+      expect(fontSizeOf("weight-ruler-label-90")).toBeCloseTo(21.6);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  // The detent ruler has the tighter ceiling of the two: its stop labels are
+  // words, not two or three digits, and "Maintain"/"Build muscle" collide at
+  // roughly twice their design size on a 96pt pitch.
+  it("scales the detent stop labels but stops at the collision cap", async () => {
+    const spy = withFontScale(3.3);
+    try {
+      await render(
+        <TickRuler
+          mode="detented"
+          index={0}
+          labels={ACTIVITY}
+          accessibilityLabel="Activity level"
+          testID="activity-ruler"
+          onChange={jest.fn()}
+        />,
+      );
+      expect(fontSizeOf("activity-ruler-label-0")).toBeCloseTo(16);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("leaves both modes at their design size when text is not enlarged", async () => {
+    const spy = withFontScale(1);
+    try {
+      await render(
+        <>
+          <TickRuler {...base} value={84} onChange={jest.fn()} />
+          <TickRuler
+            mode="detented"
+            index={0}
+            labels={ACTIVITY}
+            accessibilityLabel="Activity level"
+            testID="activity-ruler"
+            onChange={jest.fn()}
+          />
+        </>,
+      );
+      expect(fontSizeOf("weight-ruler-label-90")).toBe(9);
+      expect(fontSizeOf("activity-ruler-label-0")).toBe(10);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+// kora#273. The detent scale is a wide canvas translated so the SELECTED stop
+// sits under the centre index, so a stop two detents away lands 192pt from
+// centre against a 196pt half-viewport and its label is cut mid-glyph. Measured
+// on device: ~54% of the label survives at BOTH `medium` and
+// `accessibility-extra-large`, and the cut landed at the container's inner edge
+// -- 24pt INSIDE the screen edge -- so the fragments read as other words
+// ("Sedentary" -> "entary", "Lose weight" -> "weight", "1 kg/wk" -> "1 kg/").
+// The clip itself cannot be removed (see DETENT_FADE_RATIO), so the scale is
+// masked to fade into it instead. A green suite is what let kora#261 ship, so
+// these assert the rendered mask, not just the helper.
+describe("TickRuler detent edge fade (kora#273)", () => {
+  const detented = (testID: string) => (
+    <TickRuler
+      mode="detented"
+      index={0}
+      labels={ACTIVITY}
+      accessibilityLabel="Activity level"
+      testID={testID}
+      onChange={jest.fn()}
+    />
+  );
+
+  it("masks the detent scale so the clipped end labels fade rather than cut", async () => {
+    await render(detented("activity-ruler"));
+    // react-native-svg unwraps `url(#id)` down to the bare id on the node.
+    expect(screen.getByTestId("activity-ruler-scale").props.mask).toMatch(/^detent-mask-.+/);
+  });
+
+  // Onboarding mounts ten rulers at once. A shared gradient/mask id would let
+  // whichever ruler mounted last own the def and leave the rest masked by
+  // geometry that is not theirs.
+  it("gives every mounted ruler its own mask id", async () => {
+    await render(
+      <>
+        {detented("goal-ruler")}
+        {detented("pace-ruler")}
+      </>,
+    );
+    expect(screen.getByTestId("goal-ruler-scale").props.mask).not.toBe(
+      screen.getByTestId("pace-ruler-scale").props.mask,
+    );
+  });
+
+  describe("detentFadeStop", () => {
+    // 10pt label on the 392pt viewport of a 440pt-wide phone: a 24pt runway.
+    it("sizes the fade off the label, not the viewport", () => {
+      expect(detentFadeStop(10, 392)).toBeCloseTo(24 / 392);
+    });
+
+    // The same viewport at the 1.6 Dynamic Type cap: the fragment left behind
+    // is proportionally longer, so the runway grows with it.
+    it("grows the runway as the label scales up", () => {
+      expect(detentFadeStop(16, 392)).toBeGreaterThan(detentFadeStop(10, 392));
+      expect(detentFadeStop(16, 392)).toBeCloseTo(38.4 / 392);
+    });
+
+    it("never lets the two fades meet and swallow the selected label", () => {
+      expect(detentFadeStop(100, 120)).toBe(0.45);
+    });
+
+    // `width` is 0 until onLayout lands; a NaN offset would break the gradient.
+    it("is inert before the first layout pass", () => {
+      expect(detentFadeStop(10, 0)).toBe(0);
+    });
+  });
+});
+
+// kora#286. The SAME clip as kora#273, on the continuous scale, at the SAME
+// container edge -- and it arrives at scale 1.0, so the CONTINUOUS_LABEL_SCALE_MAX
+// cap that was written for it cannot and never could reach it. Measured on
+// device (iPhone 17 Pro Max, 392pt viewport, `medium`) by sweeping the weight
+// ruler in single steps: "150" decays 171.0 -> "150", 171.5 -> "50", 172.0 ->
+// "0", 172.5 -> ")", 173.0 -> gone, and mirrored at the right edge over
+// 168.5-167.5. A lone ")" reads as a renderer fault rather than as a partial
+// label, so the scale is masked to fade into the clip instead.
+describe("TickRuler continuous edge fade (kora#286)", () => {
+  it("masks the continuous scale so the clipped end labels fade rather than cut", async () => {
+    await render(<TickRuler {...base} value={84} onChange={jest.fn()} />);
+    // react-native-svg unwraps `url(#id)` down to the bare id on the node.
+    expect(screen.getByTestId("weight-ruler-scale").props.mask).toMatch(/^scale-mask-.+/);
+  });
+
+  // The graduations and the labels must be INSIDE the mask: fading the numbers
+  // while leaving a full-strength tick standing at the edge is the exact "text
+  // stopped dead beneath a fully-drawn tick" reading this fixes.
+  it("puts the graduations and the labels inside the masked group", async () => {
+    await render(<TickRuler {...base} value={84} onChange={jest.fn()} />);
+    const scale = screen.getByTestId("weight-ruler-scale");
+    const inside = (testID: string) => {
+      let node = screen.getByTestId(testID).parent;
+      while (node) {
+        if (node.props?.testID === "weight-ruler-scale") return true;
+        node = node.parent;
+      }
+      return false;
+    };
+    expect(scale).toBeTruthy();
+    expect(inside("weight-ruler-ticks-minor")).toBe(true);
+    expect(inside("weight-ruler-ticks-major")).toBe(true);
+    expect(inside("weight-ruler-label-80")).toBe(true);
+  });
+
+  // Onboarding mounts FOUR continuous rulers alongside the detented ones. A
+  // shared gradient/mask id would let whichever mounted last own the def.
+  it("gives every mounted ruler its own mask id", async () => {
+    await render(
+      <>
+        <TickRuler {...base} testID="weight-ruler" value={84} onChange={jest.fn()} />
+        <TickRuler {...base} testID="goal-weight-ruler" value={84} onChange={jest.fn()} />
+      </>,
+    );
+    expect(screen.getByTestId("weight-ruler-scale").props.mask).not.toBe(
+      screen.getByTestId("goal-weight-ruler-scale").props.mask,
+    );
+  });
+
+  // The two modes are adjacent on the onboarding screen, so they must not
+  // communicate one clip in two visual languages.
+  it("does not share a mask id with a detented ruler", async () => {
+    await render(
+      <>
+        <TickRuler {...base} testID="weight-ruler" value={84} onChange={jest.fn()} />
+        <TickRuler
+          mode="detented"
+          index={0}
+          labels={ACTIVITY}
+          accessibilityLabel="Activity level"
+          testID="activity-ruler"
+          onChange={jest.fn()}
+        />
+      </>,
+    );
+    expect(screen.getByTestId("weight-ruler-scale").props.mask).not.toBe(
+      screen.getByTestId("activity-ruler-scale").props.mask,
+    );
+  });
+
+  describe("continuousFadeStop", () => {
+    // A 3-digit label measures 14.3pt at the 9pt base size (measured from the
+    // device screenshot: 43px at 3x), so 21.6pt is a runway of one and a half
+    // whole labels -- every fragment the clip can leave is inside the ramp.
+    it("gives the fragment a runway longer than the whole label", () => {
+      expect(continuousFadeStop(9, 392)).toBeCloseTo(21.6 / 392);
+      expect(continuousFadeStop(9, 392) * 392).toBeGreaterThan(14.3);
+    });
+
+    // Not a coincidence: the same 2.4 as the detent scale, so the two controls
+    // on the same screen fade over 21.6pt and 24pt rather than over lengths
+    // that read as two different treatments.
+    it("fades over visibly the same distance as the detent scale", () => {
+      const continuous = continuousFadeStop(9, 392) * 392;
+      const detent = detentFadeStop(10, 392) * 392;
+      expect(Math.abs(continuous - detent)).toBeLessThan(3);
+    });
+
+    // kora#261 scales these labels UP to 2.4x, and the fragment left behind
+    // grows with them, so the runway has to as well.
+    it("grows the runway as the label scales up", () => {
+      expect(continuousFadeStop(21.6, 392)).toBeGreaterThan(continuousFadeStop(9, 392));
+    });
+
+    it("never lets the two fades meet and swallow the value under the index", () => {
+      expect(continuousFadeStop(100, 120)).toBe(0.45);
+    });
+
+    // `width` is 0 until onLayout lands; a NaN offset would break the gradient.
+    it("is inert before the first layout pass", () => {
+      expect(continuousFadeStop(9, 0)).toBe(0);
+    });
   });
 });

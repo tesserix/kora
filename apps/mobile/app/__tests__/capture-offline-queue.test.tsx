@@ -120,7 +120,7 @@ jest.mock("@/api/hooks", () => ({
 // the factory risks resolving before the const initializes, given import
 // statements (and therefore this module's require of "../capture", which
 // pulls in "@/offline/enqueueCapture") are hoisted above other statements.
-jest.mock("@/offline/enqueueCapture", () => ({ enqueueCapture: jest.fn() }));
+jest.mock("@/offline/enqueueCapture", () => ({ enqueueCapture: jest.fn(), enqueueTextCapture: jest.fn() }));
 
 type MockRecorder = {
   prepareToRecordAsync: jest.Mock;
@@ -146,6 +146,10 @@ function mockEnqueueCapture(): jest.Mock {
   return jest.requireMock("@/offline/enqueueCapture").enqueueCapture;
 }
 
+function mockEnqueueTextCapture(): jest.Mock {
+  return jest.requireMock("@/offline/enqueueCapture").enqueueTextCapture;
+}
+
 // CaptureScreen holds its own query client (useQueryClient, to invalidate the
 // queued-captures view after an offline enqueue), so every render needs a
 // provider in the tree.
@@ -168,6 +172,7 @@ beforeEach(() => {
   mockResolveBarcodeMutate.mockReset();
   mockCreateLogMutateAsync.mockReset();
   mockEnqueueCapture().mockReset();
+  mockEnqueueTextCapture().mockReset();
   (router.back as jest.Mock).mockReset();
   (ImagePicker.requestCameraPermissionsAsync as jest.Mock).mockReset().mockResolvedValue({ granted: true });
   (ImagePicker.requestMediaLibraryPermissionsAsync as jest.Mock).mockReset().mockResolvedValue({ granted: true });
@@ -460,12 +465,14 @@ describe("A non-network resolve failure never enqueues", () => {
 });
 
 // ottoErrorMessage's own copy for TimeoutError, exercised through the typed
-// (text) resolve path — the one call site of ottoErrorMessage that never
-// queues (handleSend doesn't route through handleResolveFailure/
-// enqueueCapture at all), so this pins that its message stays honest about
-// the timeout itself rather than reusing generic or queuing-flavoured copy.
+// (text) resolve path. Since kora#196 a timeout IS queueable, so the only way
+// this copy still reaches the user is the queue-refusal fallback — an enqueue
+// that failed for a reason carrying no user-facing message of its own. That is
+// the branch staged here, and it pins that the message stays honest about the
+// timeout itself rather than reusing generic or queuing-flavoured copy.
 describe("ottoErrorMessage's TimeoutError copy", () => {
   test("is distinct from the generic fallback and the network-error copy", async () => {
+    mockEnqueueTextCapture().mockRejectedValue(new Error("disk full"));
     const rendered = await render(<CaptureScreen />);
     const input = await rendered.findByLabelText("Tell Otto what you ate");
     await fireEvent.changeText(input, "brekkie eggs");
@@ -478,7 +485,161 @@ describe("ottoErrorMessage's TimeoutError copy", () => {
     expect(await rendered.findByText(/took too long/i)).toBeTruthy();
     expect(rendered.queryByText(/something went wrong while i looked/i)).toBeNull();
     expect(rendered.queryByText(/couldn.{0,3}t reach the server/i)).toBeNull();
-    // Never claims the capture was saved — this path never enqueues.
+    // Never claims the capture was saved — the queue refused it.
     expect(rendered.queryByText(/i.{0,3}ve saved that/i)).toBeNull();
+  });
+});
+
+// kora#242. The typed path had the opposite behaviour to the two above: its
+// onError returned at the abort guard before reaching the classifier, so a
+// phrase typed offline and then cancelled was destroyed — handleCancelResolve
+// had already cleared it from the thread, and the composer was empty. Same
+// discriminant as the media blocks: the ERROR CLASS, never a connectivity
+// snapshot.
+describe("Cancelling a typed resolve", () => {
+  async function cancelTypedResolve(error: Error) {
+    const rendered = await render(<CaptureScreen />);
+    await fireEvent.press(await rendered.findByText("Type"));
+    await fireEvent.changeText(await rendered.findByLabelText("Tell Otto what you ate"), "chicken and rice");
+    await fireEvent.press(await rendered.findByLabelText("Send"));
+    await waitFor(() => expect(mockResolveTextMutate).toHaveBeenCalled());
+    await fireEvent.press(await rendered.findByLabelText("Cancel"));
+
+    const [, options] = mockResolveTextMutate.mock.calls[0];
+    await act(async () => options.onError(error));
+    return rendered;
+  }
+
+  test("offline, the cancelled phrase is enqueued rather than lost", async () => {
+    mockEnqueueTextCapture().mockResolvedValue({ id: "cap-cancel-text" });
+
+    await cancelTypedResolve(new NetworkError(new TypeError("Network request failed")));
+
+    expect(mockEnqueueTextCapture()).toHaveBeenCalledWith("chicken and rice", expectedMealSlot());
+  });
+
+  test("an expired token while offline still preserves the cancelled phrase", async () => {
+    mockEnqueueTextCapture().mockResolvedValue({ id: "cap-cancel-text" });
+
+    await cancelTypedResolve(new AuthTokenError(new Error("no token")));
+
+    expect(mockEnqueueTextCapture()).toHaveBeenCalledWith("chicken and rice", expectedMealSlot());
+  });
+
+  test("a cancelled timeout is queued too — the phrase never reached the server", async () => {
+    mockEnqueueTextCapture().mockResolvedValue({ id: "cap-cancel-text" });
+
+    await cancelTypedResolve(new TimeoutError());
+
+    expect(mockEnqueueTextCapture()).toHaveBeenCalledWith("chicken and rice", expectedMealSlot());
+  });
+
+  // The negative half, and the reason no connectivity check exists: an online
+  // Cancel is a CancelledError, which the classifier declines. Nothing about
+  // this test knows whether the device is online — the error class is the
+  // whole mechanism.
+  test("online, nothing is enqueued — there is nothing to resolve later", async () => {
+    await cancelTypedResolve(new CancelledError(new Error("aborted")));
+
+    expect(mockEnqueueTextCapture()).not.toHaveBeenCalled();
+  });
+
+  // Cancel already took the screen to idle. Without this, deleting the
+  // `cancelled` suppression would keep the suite green.
+  test("a successful enqueue after Cancel says nothing", async () => {
+    mockEnqueueTextCapture().mockResolvedValue({ id: "cap-cancel-text" });
+
+    const rendered = await cancelTypedResolve(new NetworkError(new TypeError("Network request failed")));
+
+    expect(mockEnqueueTextCapture()).toHaveBeenCalled();
+    expect(rendered.queryByText(/i.{0,3}ve saved that/i)).toBeNull();
+    expect(rendered.queryByText(/you.{0,3}re offline/i)).toBeNull();
+  });
+
+  // The same rule applied to the refusal branch: a request the user cancelled
+  // does not get to report its own failure either.
+  test("a cancelled refusal raises no Otto bubble about the request that was stopped", async () => {
+    const rendered = await cancelTypedResolve(new ApiError(422, "no_match", "no confident match"));
+
+    expect(mockEnqueueTextCapture()).not.toHaveBeenCalled();
+    expect(rendered.queryByText(/no confident match/i)).toBeNull();
+  });
+
+  // But a phrase that could NOT be saved must still say so — suppression
+  // covers reassurance and failure copy, never a destroyed capture.
+  test("a full queue still surfaces its refusal on the cancelled path", async () => {
+    mockEnqueueTextCapture().mockRejectedValue(new CaptureQueueFullError());
+
+    const rendered = await cancelTypedResolve(new NetworkError(new TypeError("Network request failed")));
+
+    expect(
+      await rendered.findByText(
+        "There are too many captures waiting to be identified. Connect to the internet, or remove one first.",
+      ),
+    ).toBeTruthy();
+  });
+
+  test("no signed-in owner still surfaces its refusal on the cancelled path", async () => {
+    mockEnqueueTextCapture().mockRejectedValue(new NoOwnerError());
+
+    const rendered = await cancelTypedResolve(new NetworkError(new TypeError("Network request failed")));
+
+    expect(await rendered.findByText("Can't save this log — please sign in and try again.")).toBeTruthy();
+  });
+
+  // Saying so is not enough on this path: the words have to survive somewhere.
+  // Cancel cleared the thread bubble (handleCancelResolve sets sentPhrase to
+  // null) and the queue then refused, so the composer is the only place left
+  // holding the phrase. Restoring it there is what stops a cancelled capture
+  // the queue rejected from being lost outright — the one remaining hole in
+  // kora#242, and only reachable because #242 stopped returning at the abort
+  // guard.
+  test("a cancelled refusal hands the phrase back to the composer", async () => {
+    mockEnqueueTextCapture().mockRejectedValue(new CaptureQueueFullError());
+
+    const rendered = await cancelTypedResolve(new NetworkError(new TypeError("Network request failed")));
+
+    await waitFor(() =>
+      expect(rendered.getByLabelText("Tell Otto what you ate").props.value).toBe("chicken and rice"),
+    );
+  });
+
+  // The mirror image, and the reason the restore is conditional: uncancelled,
+  // the bubble is still on screen holding the phrase, so returning it to the
+  // composer as well would duplicate the prompt.
+  test("an uncancelled refusal leaves the composer empty, since the bubble still holds the phrase", async () => {
+    mockEnqueueTextCapture().mockRejectedValue(new CaptureQueueFullError());
+
+    const rendered = await render(<CaptureScreen />);
+    await fireEvent.press(await rendered.findByText("Type"));
+    await fireEvent.changeText(await rendered.findByLabelText("Tell Otto what you ate"), "chicken and rice");
+    await fireEvent.press(await rendered.findByLabelText("Send"));
+    await waitFor(() => expect(mockResolveTextMutate).toHaveBeenCalled());
+    await act(async () => {
+      mockResolveTextMutate.mock.calls[0][1].onError(
+        new NetworkError(new TypeError("Network request failed")),
+      );
+    });
+
+    await waitFor(() => expect(mockEnqueueTextCapture()).toHaveBeenCalled());
+    expect(rendered.getByLabelText("Tell Otto what you ate").props.value).toBe("");
+  });
+
+  // The #196 path, uncancelled, unchanged — the reassurance that Cancel
+  // suppresses is still there when nobody cancelled.
+  test("without Cancel, the same offline failure queues AND says so", async () => {
+    mockEnqueueTextCapture().mockResolvedValue({ id: "cap-text" });
+
+    const rendered = await render(<CaptureScreen />);
+    await fireEvent.press(await rendered.findByText("Type"));
+    await fireEvent.changeText(await rendered.findByLabelText("Tell Otto what you ate"), "chicken and rice");
+    await fireEvent.press(await rendered.findByLabelText("Send"));
+    await waitFor(() => expect(mockResolveTextMutate).toHaveBeenCalled());
+
+    const [, options] = mockResolveTextMutate.mock.calls[0];
+    await act(async () => options.onError(new NetworkError(new TypeError("Network request failed"))));
+
+    expect(mockEnqueueTextCapture()).toHaveBeenCalledWith("chicken and rice", expectedMealSlot());
+    expect(await rendered.findByText(/i.{0,3}ve saved that/i)).toBeTruthy();
   });
 });

@@ -18,6 +18,7 @@ import { PressableScale, ScreenEntrance } from "@/motion";
 import { useAIUsage, useProfile, useUnreadCount } from "@/api/hooks";
 import { remainingAIRequests } from "@/api/aiUsage";
 import { useTheme } from "@/theme";
+import { TAB_BAR_SCROLL_INSET } from "@/components/FloatingTabBar";
 
 // More tab, restyled to the Instrument Glass language (spec:
 // docs/superpowers/specs/2026-08-11-kora-instrument-glass-design.md). Rows
@@ -128,7 +129,7 @@ export default function More() {
     <ScreenEntrance direction={3}>
     <View style={{ flex: 1, backgroundColor: instrument.bg }}>
       <AppBackground />
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: TAB_BAR_SCROLL_INSET }}>
       <ScreenHeader overline="Your account" title="More" />
       <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>
         {/* More's one BezelCluster hero (spec: "Identity hero → BezelCluster")

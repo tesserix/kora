@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/tesserix/kora/api/internal/admin"
+	"github.com/tesserix/kora/api/internal/agents"
 	"github.com/tesserix/kora/api/internal/ai"
 	"github.com/tesserix/kora/api/internal/auth"
 	"github.com/tesserix/kora/api/internal/bffauth"
@@ -49,6 +50,11 @@ type Deps struct {
 	// gracefully instead of calling it — /coach/nudges is unaffected either
 	// way since it never touches the provider.
 	Provider ai.Provider
+	// Agents is the Agentic Registry + Agent Gateway path. When non-nil the
+	// coach routes Q&A to whichever published agent declares the guidance
+	// skill; when nil it falls back to Provider, which is the pre-registry
+	// behaviour. Nil whenever AI_REGISTRY_BASE_URL is unset.
+	Agents *agents.Coordinator
 	// ResolveCache is the SAME cache instance the resolve engine reads
 	// Resolutions from (see cmd/api/main.go's buildResolveHandler). It is
 	// wired into foodlog.Service so a post-log correction can evict the
@@ -297,10 +303,18 @@ func NewRouter(deps Deps) *gin.Engine {
 		coachGrounder := coach.NewGrounder(dashSvc, logRepo, memSvc, trackingRepo)
 		coachMeter := billing.NewMeter(deps.DB)
 		coachThread := coach.NewThreadRepository(deps.DB)
-		coachHandler := coach.NewHandler(coach.NewService(&coachGrounder, deps.Provider, coachMeter, &coachThread))
+		coachService := coach.NewService(&coachGrounder, deps.Provider, coachMeter, &coachThread).WithAgents(deps.Agents)
+		coachHandler := coach.NewHandler(coachService)
 		v1.GET("/coach/nudges", coachHandler.Nudges)
 		v1.POST("/coach/ask", coachHandler.Ask)
 		v1.GET("/coach/thread", coachHandler.Thread)
+
+		if deps.Agents != nil {
+			agentsHandler := agents.NewHandler(deps.Agents)
+			v1.GET("/agents", agentsHandler.List)
+			v1.GET("/agents/:name", agentsHandler.Get)
+			v1.POST("/agents/:name/refresh", agentsHandler.Refresh)
+		}
 
 		feedbackHandler := feedback.NewHandler(feedback.NewRepository(deps.DB))
 		v1.POST("/feedback", feedbackHandler.Create)

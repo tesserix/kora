@@ -3,7 +3,12 @@ import { render, fireEvent, waitFor } from "@testing-library/react-native";
 
 import { router } from "expo-router";
 import { useUnreadCount } from "@/api/hooks";
-import { FloatingTabBar } from "@/components/FloatingTabBar";
+import {
+  FloatingTabBar,
+  TAB_BAR_OCCUPIED_HEIGHT,
+  TAB_BAR_SCROLL_INSET,
+  TAB_BAR_SCROLL_INSET_TIGHT,
+} from "@/components/FloatingTabBar";
 import { instrumentLight } from "@/theme/palette";
 
 jest.mock("expo-router", () => ({ router: { push: jest.fn() } }));
@@ -213,4 +218,36 @@ test("caps the 9px tab label's Dynamic Type growth and keeps it on one line", as
     expect(getByText(label).props.maxFontSizeMultiplier).toBe(1.2);
     expect(getByText(label).props.numberOfLines).toBe(1);
   }
+});
+
+// kora#280: the four tab screens used to hardcode their own scroll padding
+// (130 / 140 / 140 / 140), none of it derived from the dock. These assertions
+// are what stops the derivation drifting away from the bar again — if any term
+// of the arithmetic moves, this fails and says so, instead of the screens
+// silently reserving the wrong amount of space.
+//
+// 101 is MEASURED, not assumed: kora#277 read the capture button's frame top at
+// y=855 from the live accessibility tree on a 956pt screen.
+test("the exported scroll insets are derived from the dock's own geometry", () => {
+  expect(TAB_BAR_OCCUPIED_HEIGHT).toBe(101);
+  // The clearances the four screens shipped with, preserved exactly — kora#280
+  // is an inert refactor, so these are the pre-existing 140 and 130.
+  expect(TAB_BAR_SCROLL_INSET).toBe(TAB_BAR_OCCUPIED_HEIGHT + 39);
+  expect(TAB_BAR_SCROLL_INSET).toBe(140);
+  expect(TAB_BAR_SCROLL_INSET_TIGHT).toBe(TAB_BAR_OCCUPIED_HEIGHT + 29);
+  expect(TAB_BAR_SCROLL_INSET_TIGHT).toBe(130);
+});
+
+// The other half of the same guarantee: TAB_BAR_OCCUPIED_HEIGHT is only correct
+// while the bar is actually positioned this far up. Pinned here so a change to
+// the container's `bottom` cannot pass while the derived inset stays at 101.
+// Screen edge, NOT safe area — see the decision recorded on BAR_BOTTOM_INSET.
+test("the dock is positioned 24pt from the screen edge, not from the safe area", async () => {
+  const { getByTestId } = await render(<FloatingTabBar {...props} />);
+  const root = flattenStyle(getByTestId("tab-bar-root").props.style);
+  expect(root.bottom).toBe(24);
+  // Stated alongside, because the point of `bottom: 24` is that it MATCHES the
+  // side insets — a uniform frame inset is the reason it is not safe-area-driven.
+  expect(root.left).toBe(24);
+  expect(root.right).toBe(24);
 });

@@ -13,10 +13,7 @@ import (
 // ausnut.json also carries — and AFCD states no servings while AUSNUT ships
 // measures. Without this the measured serving is silently discarded.
 func TestBackfillServingsFillsRowsThatHaveNone(t *testing.T) {
-	db := testDB(t)
-	tx := db.Begin()
-	require.NoError(t, tx.Error)
-	t.Cleanup(func() { tx.Rollback() })
+	tx := fixtureTx(t)
 	repo := NewRepository(tx)
 	ctx := context.Background()
 
@@ -55,10 +52,7 @@ func TestBackfillServingsFillsRowsThatHaveNone(t *testing.T) {
 // Overwriting would let file ordering decide a logged portion, which is the
 // same class of bug the duplicate-descriptor collapse avoids.
 func TestBackfillServingsNeverOverwritesExistingData(t *testing.T) {
-	db := testDB(t)
-	tx := db.Begin()
-	require.NoError(t, tx.Error)
-	t.Cleanup(func() { tx.Rollback() })
+	tx := fixtureTx(t)
 	repo := NewRepository(tx)
 
 	owned := FoodItem{
@@ -84,10 +78,7 @@ func TestBackfillServingsNeverOverwritesExistingData(t *testing.T) {
 
 // Rows carrying nothing to contribute must not generate an UPDATE at all.
 func TestBackfillServingsIgnoresItemsWithNoServingData(t *testing.T) {
-	db := testDB(t)
-	tx := db.Begin()
-	require.NoError(t, tx.Error)
-	t.Cleanup(func() { tx.Rollback() })
+	tx := fixtureTx(t)
 	repo := NewRepository(tx)
 
 	n, err := repo.BackfillServings(context.Background(), []FoodItem{
@@ -101,10 +92,7 @@ func TestBackfillServingsIgnoresItemsWithNoServingData(t *testing.T) {
 // only fills empty rows, so a bad value it previously wrote would survive
 // every future ingest untouched.
 func TestReconcileGeneratedServingsCorrectsOurOwnBadValue(t *testing.T) {
-	db := testDB(t)
-	tx := db.Begin()
-	require.NoError(t, tx.Error)
-	t.Cleanup(func() { tx.Rollback() })
+	tx := fixtureTx(t)
 	repo := NewRepository(tx)
 	ctx := context.Background()
 
@@ -135,10 +123,7 @@ func TestReconcileGeneratedServingsCorrectsOurOwnBadValue(t *testing.T) {
 // writes a parenthetical or a plain mass; only this pipeline writes bare
 // "1 <descriptor>".
 func TestReconcileGeneratedServingsLeavesOtherSourcesAlone(t *testing.T) {
-	db := testDB(t)
-	tx := db.Begin()
-	require.NoError(t, tx.Error)
-	t.Cleanup(func() { tx.Rollback() })
+	tx := fixtureTx(t)
 	repo := NewRepository(tx)
 
 	staples := FoodItem{ // afcd_staples format

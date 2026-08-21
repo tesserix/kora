@@ -30,7 +30,7 @@ import { Waveform } from "@/components/capture/Waveform";
 import { VoiceComposer } from "@/components/capture/VoiceComposer";
 import { beginRecordingSession, endRecordingSession } from "@/capture/audioSession";
 import { reportError } from "@/observability/reporter";
-import { ResolutionResult, candidateKey } from "@/components/ResolutionResult";
+import { ResolutionResult } from "@/components/ResolutionResult";
 import { FoodPicker } from "@/components/meal/FoodPicker";
 import { withAlpha } from "@/lib/color";
 import { useToast } from "@/components/Toast";
@@ -51,6 +51,7 @@ import { enqueueCapture, enqueueTextCapture, type CaptureFile } from "@/offline/
 import { NoOwnerError } from "@/offline/owner";
 import { QUEUED_CAPTURES_KEY } from "@/offline/queryKeys";
 import { isLoggable } from "@/lib/candidateTier";
+import { runRetryLedger } from "@/lib/retryLedger";
 import { servingEntryFor } from "@/units/portion";
 import type { FoodItem, Resolution, ResolutionSource } from "@/api/types";
 import { mealSlotForHour, type MealSlot } from "@/lib/mealSlot";
@@ -108,6 +109,18 @@ export const COMPOSER_BUTTON: Record<Exclude<CaptureMode, "voice">, { icon: stri
   scan: { icon: "scan-barcode", label: "Scan a barcode" },
   type: { icon: "keyboard", label: "Focus the message field" },
 };
+
+// The server refuses a shorter phrase outright (ResolveText in
+// api/internal/resolve/handler.go), so the client agrees with it at the point
+// of send. Without this a single character could be typed offline, queued, and
+// then 400 on every drain until it was marked permanently failed — since
+// kora#196 that is a persisted row the user has to deal with, not an error
+// bubble that scrolls away (kora#243).
+//
+// Deliberately NOT enforced in captureQueue's isValid: that is the upgrade
+// contract, not the entry rule, and tightening it there would silently delete
+// single-character rows an older build already queued.
+export const MIN_PHRASE_CHARS = 2;
 
 const ROUND_BUTTON = {
   width: 36,
@@ -589,6 +602,11 @@ export function CaptureBody({
   // middle of the composer is static guidance, so there is no dead field.
   const showsTextField = mode === "photo" || mode === "type";
 
+  // Send is unavailable below MIN_PHRASE_CHARS rather than accepting a press
+  // that could only ever fail — the rule is visible in the affordance, which
+  // is how every other unavailable control on this screen behaves (kora#243).
+  const canSend = text.trim().length >= MIN_PHRASE_CHARS;
+
   // Bring the newest Otto message (an error bubble or the detected-food
   // result) into view — on short viewports or with the keyboard open, the
   // in-thread bubble can otherwise land below the fold with no signal.
@@ -727,7 +745,17 @@ export function CaptureBody({
           borderTopColor: T.glassBorder,
         }}
       >
-        <View style={{ flexDirection: "row", gap: 8, marginBottom: 10 }}>
+        {/* flexWrap, because a clipped chip is a mode the user cannot reach.
+            The trimmed pill padding gets all four onto one line at `medium`
+            (395pt of 412), but Dynamic Type keeps growing past that: at
+            accessibility-extra-large the same four measured 520pt, and TYPE
+            started at x=419 on a 440pt screen — its tap centre off the display
+            entirely, the kora#276 failure mode. Wrapping spills the overflow
+            onto a second line where every chip stays whole and hittable, which
+            a horizontal scroll would not (it hides one by default). `gap: 8`
+            is both axes in RN, so the wrapped line gets its own 8pt of air.
+            Same mechanism DetectedCard already uses for these pills. */}
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
           {MODE_PILLS.map(({ mode: m, icon, label }) => (
             <ModePill key={m} icon={icon} label={label} active={mode === m} onPress={() => onModeChange(m)} />
           ))}
@@ -791,7 +819,7 @@ export function CaptureBody({
               style={{ flex: 1, color: T.ink, fontSize: 15 }}
             />
           ) : (
-            <AppText style={{ flex: 1, color: T.mut, fontSize: 15 }}>
+            <AppText variant="subheadline" style={{ flex: 1, color: T.mut }}>
               {mode === "voice" ? "Hold the mic to record" : "Point at a barcode"}
             </AppText>
           )}
@@ -800,19 +828,19 @@ export function CaptureBody({
           <PressableScale
             accessibilityRole="button"
             accessibilityLabel="Send"
-            accessibilityState={{ disabled: !text.trim() }}
-            disabled={!text.trim()}
+            accessibilityState={{ disabled: !canSend }}
+            disabled={!canSend}
             onPress={onSend}
             style={{
               width: 38,
               height: 38,
               borderRadius: 9999,
-              backgroundColor: text.trim() ? T.accent : withAlpha(T.ink, 0.15),
+              backgroundColor: canSend ? T.accent : withAlpha(T.ink, 0.15),
               alignItems: "center",
               justifyContent: "center",
             }}
           >
-            <Icon name="arrow-up" size={19} color={text.trim() ? T.accentOn : T.ink} />
+            <Icon name="arrow-up" size={19} color={canSend ? T.accentOn : T.ink} />
           </PressableScale>
           ) : null}
         </View>
@@ -1319,7 +1347,9 @@ export default function CaptureScreen() {
 
   function handleSend() {
     const phrase = text.trim();
-    if (!phrase) return;
+    // The same gate the Send button renders, enforced here too: the keyboard's
+    // own return key reaches this without going through that button.
+    if (phrase.length < MIN_PHRASE_CHARS) return;
     setErrorMsg(null);
     // Optimistic, and deliberately BEFORE the request: the message belongs in
     // the thread the instant it is sent, exactly as every messaging app
@@ -1341,7 +1371,23 @@ export default function CaptureScreen() {
         setResolvedPhrase(phrase);
       },
       onError: async (error) => {
-        if (controller.signal.aborted) return;
+        // Cancel stops the WAITING, not the words (kora#242) — the rule the
+        // media path already states at runPhotoPick's onError, applied here.
+        // Returning at this guard skipped the classifier below, so a phrase
+        // typed offline and then cancelled was destroyed: gone from the thread
+        // (handleCancelResolve clears sentPhrase) and gone from the composer.
+        // No connectivity snapshot is consulted — an online Cancel arrives as
+        // CancelledError, which the classifier below does not queue, so there
+        // is nothing to preserve in that case and nothing to decide.
+        //
+        // `cancelled` suppresses COPY only — the same division
+        // handleResolveFailure's `silent` draws. Cancel already took the
+        // screen to idle and does not also get to raise a fresh bubble about
+        // the request it just stopped, neither the reassurance nor the
+        // failure's own message. It never suppresses the enqueue, and never
+        // suppresses a queue refusal: a phrase that could not be saved must
+        // say so (see the catch below).
+        const cancelled = controller.signal.aborted;
         // Same classifier handleResolveFailure uses: these three mean the
         // request never arrived, so the phrase is still good and belongs in
         // the queue (kora#196). Anything else is a genuine refusal that would
@@ -1357,21 +1403,35 @@ export default function CaptureScreen() {
           // leave the composer empty; restoring it here made a failed request
           // look like it had never been sent and duplicated the prompt.
           setText("");
-          setErrorMsg(ottoErrorMessage(error));
+          if (!cancelled) setErrorMsg(ottoErrorMessage(error));
           return;
         }
         try {
           await enqueueTextCapture(phrase, mealSlot);
           // The bubble STAYS and the composer stays empty: the capture was
           // accepted, so returning the text would be the misleading state.
-          setErrorMsg(
-            "You're offline — I've saved that, and I'll identify it as soon as you're back online.",
-          );
+          if (!cancelled) {
+            setErrorMsg(
+              "You're offline — I've saved that, and I'll identify it as soon as you're back online.",
+            );
+          }
           void queryClient.invalidateQueries({ queryKey: [QUEUED_CAPTURES_KEY] });
         } catch (queueError) {
-          // The queue refused (full, or nobody signed in) — the phrase is only
-          // safe in the composer now, so put it back and say why.
-          setText("");
+          // The queue refused (full, or nobody signed in), so the phrase is
+          // now saved NOWHERE and survives only if something on screen still
+          // holds it. The optimistic thread bubble does — unless this resolve
+          // was cancelled, because handleCancelResolve clears sentPhrase. So
+          // the composer is restored in exactly that case.
+          //
+          // Not unconditionally: with the bubble still up, putting the words
+          // back too duplicates the prompt, which the non-recoverable branch
+          // above rejects for the same reason.
+          //
+          // This path was unreachable while a cancelled resolve returned at
+          // the abort guard; routing it through the classifier (kora#242) is
+          // what exposed it, and a cancelled capture the queue then refused
+          // was the one remaining way to lose the phrase outright.
+          setText(cancelled ? phrase : "");
           setErrorMsg(
             queueError instanceof CaptureQueueFullError || queueError instanceof NoOwnerError
               ? queueError.message
@@ -1416,10 +1476,14 @@ export default function CaptureScreen() {
   // `silent` is set only by the cancelled-resolve path below: Cancel already
   // told the user the screen is going idle, so it does not also get to pop a
   // new Otto bubble about a request it just told capture.tsx to stop waiting
-  // on. The capture is still worth preserving — silent controls the SUCCESS
-  // message only. It never suppresses the enqueue, and never suppresses a
-  // queue refusal: a capture that could not be saved must say so (see the
-  // catch below).
+  // on. The capture is still worth preserving — silent controls COPY only:
+  // the reassurance on the queued path AND the failure's own message on the
+  // non-recoverable one, since a request the user deliberately stopped should
+  // not report itself as having gone wrong. (This said "the SUCCESS message
+  // only", which was narrower than what the code below has always done —
+  // corrected in kora#242, which gave the typed path the same treatment.)
+  // It never suppresses the enqueue, and never suppresses a queue refusal: a
+  // capture that could not be saved must say so (see the catch below).
   async function handleResolveFailure(
     error: Error,
     file: CaptureFile,
@@ -1670,15 +1734,13 @@ export default function CaptureScreen() {
 
   // Logs every not-yet-succeeded candidate in the current resolution as its
   // own diary entry. Only the id/grams/slot/source/timestamp quintet is ever
-  // sent — the backend recomputes kcal/macros from the food_item row. Uses
-  // allSettled (not Promise.all) so a single failing candidate doesn't hide
-  // whether the *other* candidates were logged — required to avoid a
-  // partial silent success per the task's error-handling discipline.
+  // sent — the backend recomputes kcal/macros from the food_item row.
   //
-  // Candidates already recorded in `loggedCandidateKeys` (from an earlier
-  // press of this same card) are skipped entirely — otherwise re-pressing
-  // "Add to diary" after a partial failure would re-log the ones that
-  // already succeeded, duplicating diary entries.
+  // Which candidates that is — allSettled, the exclusions, and above all
+  // skipping the ones an earlier press already logged (re-logging them is how
+  // a retry after a partial failure duplicates diary entries) — is
+  // runRetryLedger's, shared verbatim with capture-review.tsx. See
+  // src/lib/retryLedger for the rule and why it lives in one place.
   //
   // Candidates the server flagged as uncertain (`tier: "follow_up"`) ARE
   // logged: the server priced them like any other row and the card preselected
@@ -1699,16 +1761,18 @@ export default function CaptureScreen() {
     setAdding(true);
     const source = resolutionSource;
 
-    const pending = effectiveResolution.candidates
-      .map((candidate, index) => ({ candidate, index, key: candidateKey(candidate, index) }))
-      .filter(({ candidate }) => isLoggable(candidate))
-      // The user's own exclusions (kora#183). This is the filter that makes
-      // the checkbox real: without it the CTA count and the diary disagree.
-      .filter(({ index }) => !excluded.has(index))
-      .filter(({ key }) => !loggedCandidateKeys.has(key));
-
-    const outcomes = await Promise.allSettled(
-      pending.map(({ candidate }) => {
+    // The retry ledger (src/lib/retryLedger) owns the filtering, the
+    // allSettled and the union write — the rule shared with capture-review's
+    // Confirm, whose backend is the offline queue rather than this mutation.
+    // Only "how to log ONE candidate" is this screen's own (kora#144).
+    const attempt = await runRetryLedger({
+      candidates: effectiveResolution.candidates,
+      // The user's own exclusions (kora#183). This is what makes the checkbox
+      // real: without it the CTA count and the diary disagree.
+      excluded,
+      logged: loggedCandidateKeys,
+      markLogged: setLoggedCandidateKeys,
+      logCandidate: (candidate) => {
         // Record the portion as one of the food's own named servings when one
         // describes it exactly, so the diary reads "1 portion" instead of
         // "16.5 g" — the same entry the card just showed the user.
@@ -1735,27 +1799,15 @@ export default function CaptureScreen() {
             ? { input_phrase: resolvedPhrase }
             : {}),
         });
-      }),
-    );
+      },
+    });
     setAdding(false);
 
-    const newlySucceededKeys = pending
-      .filter((_, index) => outcomes[index]?.status === "fulfilled")
-      .map(({ key }) => key);
-    const failedNames = pending
-      .filter((_, index) => outcomes[index]?.status === "rejected")
-      .map(({ candidate }) => candidate.item.name);
-
-    // Union, never replace — and via a functional updater so the write depends
-    // on the ledger at commit time rather than on the snapshot this closure
-    // captured when the press started. `pending` already excluded every key in
-    // that snapshot, so the union is exactly "what was logged before" plus
-    // "what just landed", whichever order the updates commit in.
-    setLoggedCandidateKeys((prev) => new Set([...prev, ...newlySucceededKeys]));
-    // The count the user is told about, computed from the same snapshot the
-    // rest of this function reasoned about. A local Set (not the state one) so
-    // the message can never be affected by when React flushes the write above.
-    const loggedSoFarCount = new Set([...loggedCandidateKeys, ...newlySucceededKeys]).size;
+    const failedNames = attempt.failed.map(({ candidate }) => candidate.item.name);
+    // The count the user is told about — the ledger's own figure, taken
+    // against the snapshot this press started from rather than re-read from
+    // state, so the message cannot depend on when React flushes the write.
+    const loggedSoFarCount = attempt.loggedCount;
 
     if (failedNames.length > 0) {
       haptics.error();
@@ -1772,7 +1824,7 @@ export default function CaptureScreen() {
     // survives the router.back() — without it the only success signal is a
     // haptic, and the user lands on whichever tab they came from with no
     // visible evidence the log happened.
-    const count = newlySucceededKeys.length;
+    const count = attempt.succeeded.length;
     toast.show({ message: `Logged ${count} ${count === 1 ? "item" : "items"} to your diary` });
     safeBack("/(tabs)");
   }

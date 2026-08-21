@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ScrollView, View } from "react-native";
+import { ScrollView, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppBackground } from "./AppBackground";
 import { Icon } from "./Icon";
@@ -14,6 +14,28 @@ type Props = {
   progress?: { step: number; total: number };
 };
 
+/**
+ * Above this content size the header stops being sticky and becomes the first
+ * child of the scroll view instead (kora#284).
+ *
+ * At accessibility-extra-large the onboarding scroll region reached only "Age"
+ * before the footer: both rulers and the goal selector were below the fold on
+ * first paint, under a large empty band. A screen whose primary controls are
+ * all below the fold does not read as "scroll for more", it reads as broken —
+ * the same misreading cost a wrong conclusion on sign-in (kora#173). Capping
+ * the dial does not fix it, because the numeral and the captions are what
+ * double, and shrinking those is the `flexShrink` failure class kora#263 ruled
+ * out.
+ *
+ * 1.3 is a JUDGEMENT, not a measurement. It sits between iOS's `large` (1.118)
+ * and `xLarge` (1.353), which is roughly where the header's text growth starts
+ * costing a full control's worth of height on a 852pt window — past it the
+ * header is spending more than a ruler to say the same thing. Anything at or
+ * below the threshold is untouched, which is what keeps the `onboarding`
+ * golden at the default content size from moving.
+ */
+export const HEADER_SCROLLS_ABOVE_FONT_SCALE = 1.3;
+
 // Shared layout for the pre-app screens (sign-in and both onboarding steps).
 //
 // The primary action lives in a sticky footer OUTSIDE the scroll view. Putting
@@ -27,7 +49,32 @@ type Props = {
 export function AuthScaffold({ children, footer, header, onBack, progress }: Props) {
   const { colors, instrument, spacing } = useTheme();
   const insets = useSafeAreaInsets();
+  const { fontScale } = useWindowDimensions();
   const hasNavRow = Boolean(onBack || progress);
+  // Gated on `header` as well as the scale so the sign-in path — which passes
+  // no header — takes the identical branch at every content size. There is no
+  // fontScale at which a headerless scaffold renders differently than it did.
+  const headerScrolls = Boolean(header) && fontScale > HEADER_SCROLLS_ABOVE_FONT_SCALE;
+
+  // One element, two possible parents. Built once so the sticky and scrolling
+  // arrangements cannot drift apart: same testID, same inset ownership, same
+  // box. The only difference is the negative horizontal margin, which cancels
+  // the content container's `paddingHorizontal` so the header keeps EXACTLY the
+  // full-width box it has as a sibling. Without it the header would be inset
+  // twice — and PlanDial derives its available width from the window less one
+  // `spacing.lg` on each side, so the second inset would silently make the dial
+  // wider than the space it is drawn into.
+  const headerBlock = header ? (
+    <View
+      testID="auth-scaffold-header-wrapper"
+      style={{
+        paddingTop: hasNavRow ? 0 : insets.top,
+        ...(headerScrolls ? { marginHorizontal: -spacing.lg } : null),
+      }}
+    >
+      {header}
+    </View>
+  ) : null;
 
   return (
     <View style={{ flex: 1, backgroundColor: instrument.bg }}>
@@ -82,11 +129,7 @@ export function AuthScaffold({ children, footer, header, onBack, progress }: Pro
         </View>
       ) : null}
 
-      {header ? (
-        <View testID="auth-scaffold-header-wrapper" style={{ paddingTop: hasNavRow ? 0 : insets.top }}>
-          {header}
-        </View>
-      ) : null}
+      {headerScrolls ? null : headerBlock}
 
       <ScrollView
         testID="auth-scaffold-scroll"
@@ -95,12 +138,25 @@ export function AuthScaffold({ children, footer, header, onBack, progress }: Pro
         automaticallyAdjustKeyboardInsets
         contentContainerStyle={{
           flexGrow: 1,
-          paddingTop: hasNavRow ? spacing.sm : header ? spacing.md : insets.top + spacing.xl,
+          // When the header scrolls it is the first child, and it still owns
+          // the top inset, so the content must not add one on top of it. The
+          // gap between it and the body is the container's own `gap`, which is
+          // the same spacing.md the sticky arrangement uses.
+          paddingTop: headerScrolls
+            ? hasNavRow
+              ? spacing.sm
+              : 0
+            : hasNavRow
+              ? spacing.sm
+              : header
+                ? spacing.md
+                : insets.top + spacing.xl,
           paddingHorizontal: spacing.lg,
           paddingBottom: spacing.lg,
           gap: spacing.md,
         }}
       >
+        {headerScrolls ? headerBlock : null}
         {children}
       </ScrollView>
 

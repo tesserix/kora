@@ -19,16 +19,29 @@ type Config struct {
 	// VertexProject, when set, switches the resolve engine from the Gemini API
 	// (personal API key, free-tier quotas) to Vertex AI authenticated by the
 	// workload's own service account. See providers.NewVertexProvider.
-	VertexProject     string
-	VertexLocation    string
-	OpenAIAPIKey      string
-	OpenAIBaseURL     string
-	OpenAIModel       string
-	OpenAIJSONObject  bool
-	AIGatewayEnabled  bool
-	AIGatewayBaseURL  string
-	AIGatewayAPIKey   string
-	AIGatewayModel    string
+	VertexProject    string
+	VertexLocation   string
+	OpenAIAPIKey     string
+	OpenAIBaseURL    string
+	OpenAIModel      string
+	OpenAIJSONObject bool
+	AIGatewayEnabled bool
+	AIGatewayBaseURL string
+	AIGatewayAPIKey  string
+	AIGatewayModel   string
+	// AIRegistryBaseURL points at the Agentic Registry. When set, Kora
+	// resolves its agents, skills and tools from the catalog at request time
+	// instead of routing a bare model capability. Unset leaves the agent path
+	// off and every caller falls back to the direct provider.
+	AIRegistryBaseURL string
+	// AIRegistryAPIKey is Kora's registry deploy key, a credential of its own.
+	// The registry matches sha256(bearer) against its `kora=` entry, so the
+	// gateway key authenticates as nobody -- one credential does NOT cover
+	// both hops, and assuming it did 401'd every lookup in production.
+	AIRegistryAPIKey string
+	// AIRegistryTTL is how long a resolved agent stays fresh. 0 uses the
+	// package default.
+	AIRegistryTTL     time.Duration
 	SchedulerInterval time.Duration
 	PushEnabled       bool
 	PushInterval      time.Duration
@@ -78,6 +91,9 @@ func Load() (Config, error) {
 		AIGatewayBaseURL:         os.Getenv("AI_GATEWAY_BASE_URL"),
 		AIGatewayAPIKey:          os.Getenv("AI_GATEWAY_API_KEY"),
 		AIGatewayModel:           getenv("AI_GATEWAY_MODEL", "kora-auto"),
+		AIRegistryBaseURL:        os.Getenv("AI_REGISTRY_BASE_URL"),
+		AIRegistryAPIKey:         os.Getenv("AI_REGISTRY_API_KEY"),
+		AIRegistryTTL:            getdur("AI_REGISTRY_TTL", 0),
 		SchedulerInterval:        getdur("SCHEDULER_INTERVAL", 5*time.Minute),
 		PushEnabled:              os.Getenv("PUSH_ENABLED") == "true",
 		PushInterval:             getdur("PUSH_INTERVAL", 30*time.Second),
@@ -107,6 +123,17 @@ func Load() (Config, error) {
 		}
 		if cfg.AIGatewayAPIKey == "" {
 			return Config{}, fmt.Errorf("config: AI_GATEWAY_API_KEY is required when AI_GATEWAY_ENABLED is true")
+		}
+	}
+	if cfg.AIRegistryBaseURL != "" {
+		// Same philosophy as the gateway above: a registry URL with no usable
+		// key would leave the agent path mounted but failing every request,
+		// which reads as a broken agent rather than a missing credential.
+		// Deliberately no fallback to AIGatewayAPIKey -- it is not a valid
+		// deploy key, so falling back would turn this loud error into a
+		// permanent 401 hidden behind keyword routing.
+		if cfg.AIRegistryAPIKey == "" {
+			return Config{}, fmt.Errorf("config: AI_REGISTRY_API_KEY is required when AI_REGISTRY_BASE_URL is set")
 		}
 	}
 	if raw := os.Getenv("KORA_BFF_HMAC_KEY"); raw != "" {
