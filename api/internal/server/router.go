@@ -50,13 +50,11 @@ type Deps struct {
 	// gracefully instead of calling it — /coach/nudges is unaffected either
 	// way since it never touches the provider.
 	Provider ai.Provider
-	// AgentDelegator is the gateway-only A2A client Otto uses as a supervisor.
-	// It is nil outside AgentGateway mode, preserving local direct-provider
-	// development without creating a direct agent-service bypass.
-	AgentDelegator agents.Delegator
-	// AgentSelector routes a question to an agent using the skills the
-	// registry publishes. Nil falls back to the compiled-in phrase table.
-	AgentSelector agents.Selector
+	// Agents is the Agentic Registry + Agent Gateway path. When non-nil the
+	// coach routes Q&A to whichever published agent declares the guidance
+	// skill; when nil it falls back to Provider, which is the pre-registry
+	// behaviour. Nil whenever AI_REGISTRY_BASE_URL is unset.
+	Agents *agents.Coordinator
 	// ResolveCache is the SAME cache instance the resolve engine reads
 	// Resolutions from (see cmd/api/main.go's buildResolveHandler). It is
 	// wired into foodlog.Service so a post-log correction can evict the
@@ -305,13 +303,18 @@ func NewRouter(deps Deps) *gin.Engine {
 		coachGrounder := coach.NewGrounder(dashSvc, logRepo, memSvc, trackingRepo)
 		coachMeter := billing.NewMeter(deps.DB)
 		coachThread := coach.NewThreadRepository(deps.DB)
-		coachService := coach.NewService(&coachGrounder, deps.Provider, coachMeter, &coachThread).
-			WithDelegator(deps.AgentDelegator).
-			WithSelector(deps.AgentSelector)
+		coachService := coach.NewService(&coachGrounder, deps.Provider, coachMeter, &coachThread).WithAgents(deps.Agents)
 		coachHandler := coach.NewHandler(coachService)
 		v1.GET("/coach/nudges", coachHandler.Nudges)
 		v1.POST("/coach/ask", coachHandler.Ask)
 		v1.GET("/coach/thread", coachHandler.Thread)
+
+		if deps.Agents != nil {
+			agentsHandler := agents.NewHandler(deps.Agents)
+			v1.GET("/agents", agentsHandler.List)
+			v1.GET("/agents/:name", agentsHandler.Get)
+			v1.POST("/agents/:name/refresh", agentsHandler.Refresh)
+		}
 
 		feedbackHandler := feedback.NewHandler(feedback.NewRepository(deps.DB))
 		v1.POST("/feedback", feedbackHandler.Create)

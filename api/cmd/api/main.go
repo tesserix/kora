@@ -85,11 +85,6 @@ func main() {
 	}
 
 	resolveHandler, aiProvider, resolveCache := buildResolveHandler(context.Background(), cfg, db, logger)
-	agentDelegator, agentRegistry, err := buildAgentDelegator(cfg, logger)
-	if err != nil {
-		logger.Error("agent supervisor init failed", "err", err)
-		os.Exit(1)
-	}
 
 	schedCtx, schedCancel := context.WithCancel(context.Background())
 	if cfg.SchedulerInterval > 0 {
@@ -163,6 +158,8 @@ func main() {
 		logger.Info("apple authorization exchange disabled (no APPLE_PRIVATE_KEY)")
 	}
 
+	coordinator := buildAgents(cfg, logger)
+
 	srv := &http.Server{
 		Addr: ":" + cfg.Port,
 		Handler: server.NewRouter(server.Deps{
@@ -170,8 +167,7 @@ func main() {
 			Verifier:        verifier,
 			Resolver:        resolveHandler,
 			Provider:        aiProvider,
-			AgentDelegator:  agentDelegator,
-			AgentSelector:   agentRegistry.AsSelector(),
+			Agents:          coordinator,
 			ResolveCache:    resolveCache,
 			BFFHMACKey:      cfg.BFFHMACKey,
 			AppleExchanger:  appleExchanger,
@@ -235,33 +231,6 @@ func main() {
 		logger.Error("shutdown error", "err", err)
 	}
 	logger.Info("api stopped")
-}
-
-// buildAgentDelegator builds the A2A client and, when a registry is
-// configured, the roster that widens its allowlist beyond the compiled-in
-// agents. The registry is returned separately so the coach can also route on
-// it; a nil registry leaves both behaviours at their compiled defaults.
-func buildAgentDelegator(cfg config.Config, logger *slog.Logger) (agents.Delegator, *agents.Registry, error) {
-	if !cfg.AIGatewayEnabled {
-		return nil, nil, nil
-	}
-	client, err := agents.NewGatewayClient(cfg.AIGatewayBaseURL, cfg.AIGatewayAPIKey, cfg.AIAgentTimeout)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	registry, err := agents.NewRegistry(cfg.AIRegistryBaseURL, cfg.AIRegistryAPIKey, cfg.AIRegistryTTL)
-	if err != nil {
-		return nil, nil, err
-	}
-	if registry == nil {
-		logger.Info("agent routing: compiled-in agents (no registry configured)")
-		return client, nil, nil
-	}
-
-	registry.WithObserver(metrics.RecordAgentResolve)
-	logger.Info("agent routing: agentic registry", "base_url", cfg.AIRegistryBaseURL, "ttl", cfg.AIRegistryTTL)
-	return client.WithRoster(registry), registry, nil
 }
 
 // providerEmbedder adapts an ai.Provider's three-value Embed to the narrower
@@ -417,4 +386,31 @@ func (u userLocales) LocaleFor(ctx context.Context, userID uuid.UUID) nutrition.
 		return nutrition.LocaleUnknown
 	}
 	return nutrition.LocaleFromTimezone(usr.Timezone)
+}
+
+// buildAgents wires the Agentic Registry and the Agent Gateway into one
+// coordinator, or returns nil when either is unconfigured. Returning nil is a
+// supported deployment: every caller falls back to the direct provider, which
+// is how Kora behaved before agents were resolved at all.
+//
+// The gateway base URL doubles as the A2A host — the published card carries
+// the in-cluster service URL, and only its path is used (ResolvedAgent.A2APath).
+func buildAgents(cfg config.Config, logger *slog.Logger) *agents.Coordinator {
+	registry := agents.NewRegistry(agents.RegistryOptions{
+		BaseURL: cfg.AIRegistryBaseURL,
+		APIKey:  cfg.AIRegistryAPIKey,
+		TTL:     cfg.AIRegistryTTL,
+		Observe: func(agent string, result agents.CacheResult) {
+			metrics.RecordAgentResolve(agent, string(result))
+		},
+	})
+	gateway := agents.NewGateway(cfg.AIGatewayBaseURL, cfg.AIGatewayAPIKey, nil)
+
+	coordinator := agents.NewCoordinator(registry, gateway, metrics.RecordAgentRun)
+	if coordinator == nil {
+		logger.Info("agent path disabled (AI_REGISTRY_BASE_URL or AI_GATEWAY_BASE_URL is unset); coach uses the direct provider")
+		return nil
+	}
+	logger.Info("agent path enabled", "registry", cfg.AIRegistryBaseURL, "gateway", cfg.AIGatewayBaseURL)
+	return coordinator
 }

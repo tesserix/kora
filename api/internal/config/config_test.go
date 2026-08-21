@@ -233,42 +233,6 @@ func TestLoadAgentGatewayFeatureFlag(t *testing.T) {
 	assert.Equal(t, "http://agentgateway.kora.svc.cluster.local/v1", cfg.AIGatewayBaseURL)
 	assert.Equal(t, "internal-key", cfg.AIGatewayAPIKey)
 	assert.Equal(t, "kora-auto", cfg.AIGatewayModel)
-	assert.Equal(t, 24*time.Second, cfg.AIAgentTimeout)
-}
-
-// The registry is a separate trust domain: it matches sha256(bearer) against
-// its own deploy-key entry. Inheriting the gateway key here shipped to
-// production and 401'd every lookup behind a silent keyword fallback.
-func TestLoadDoesNotInheritTheGatewayKeyAsTheRegistryDeployKey(t *testing.T) {
-	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
-	t.Setenv("AI_GATEWAY_API_KEY", "internal-key")
-	t.Setenv("AI_REGISTRY_BASE_URL", "https://aregistry.tesserix.app")
-
-	cfg, err := Load()
-
-	require.NoError(t, err)
-	assert.Empty(t, cfg.AIRegistryAPIKey)
-}
-
-func TestLoadReadsTheRegistryDeployKey(t *testing.T) {
-	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
-	t.Setenv("AI_GATEWAY_API_KEY", "internal-key")
-	t.Setenv("AI_REGISTRY_API_KEY", "deploy-key")
-
-	cfg, err := Load()
-
-	require.NoError(t, err)
-	assert.Equal(t, "deploy-key", cfg.AIRegistryAPIKey)
-}
-
-func TestLoadReadsAgentTimeout(t *testing.T) {
-	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
-	t.Setenv("AI_AGENT_TIMEOUT", "18s")
-
-	cfg, err := Load()
-
-	require.NoError(t, err)
-	assert.Equal(t, 18*time.Second, cfg.AIAgentTimeout)
 }
 
 func TestLoadRejectsIncompleteAgentGatewayConfig(t *testing.T) {
@@ -397,4 +361,34 @@ func TestLoadValidatesAppleConfig(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The registry is a separate trust domain: it matches sha256(bearer) against
+// its own `kora=` deploy-key entry, so the gateway key authenticates as
+// nobody. Inheriting it shipped to production and 401'd every roster lookup
+// behind a silent keyword fallback, which is why this is an error and not a
+// default.
+func TestLoadRequiresItsOwnRegistryDeployKey(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
+	t.Setenv("AI_GATEWAY_API_KEY", "internal-key")
+	t.Setenv("AI_REGISTRY_BASE_URL", "http://agentregistry.agentregistry-system.svc.cluster.local:12121")
+	t.Setenv("AI_REGISTRY_API_KEY", "")
+
+	_, err := Load()
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "AI_REGISTRY_API_KEY")
+	assert.NotContains(t, err.Error(), "AI_GATEWAY_API_KEY", "the gateway key is not an acceptable substitute")
+}
+
+func TestLoadReadsTheRegistryDeployKey(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
+	t.Setenv("AI_GATEWAY_API_KEY", "internal-key")
+	t.Setenv("AI_REGISTRY_BASE_URL", "http://agentregistry.agentregistry-system.svc.cluster.local:12121")
+	t.Setenv("AI_REGISTRY_API_KEY", "deploy-key")
+
+	cfg, err := Load()
+
+	require.NoError(t, err)
+	assert.Equal(t, "deploy-key", cfg.AIRegistryAPIKey)
 }
