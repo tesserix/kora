@@ -5,7 +5,7 @@ import { DetectedCard } from "@/components/capture/DetectedCard";
 import { INSTRUMENT_DARK_FIXED } from "@/theme";
 import { kcalTotalLabel } from "@/lib/resolutionKcal";
 import { isCachedResult } from "@/api/types";
-import type { Resolution, ResolvedCandidate } from "@/api/types";
+import type { Resolution } from "@/api/types";
 import type { MealSlot } from "@/lib/mealSlot";
 
 const T = INSTRUMENT_DARK_FIXED;
@@ -67,14 +67,6 @@ export function resultSummary(resolution: Resolution): string {
     return `I found ${count} ${itemWord}, about ${kcalText} — ${guessText}. Confirm and I'll log it.`;
   }
   return `I found ${count} ${itemWord}, about ${kcalText} — confirm and I'll log it.`;
-}
-
-// A stable per-candidate key for tracking add-to-diary success across retry
-// attempts. Combines the candidate's position (stable for the lifetime of a
-// single resolution) with its food_item_id (in case ids ever duplicate) so
-// two candidates never collide.
-export function candidateKey(candidate: ResolvedCandidate, index: number): string {
-  return `${index}:${candidate.item.id}`;
 }
 
 // The fallback link shown alongside a follow-up question or an unidentified

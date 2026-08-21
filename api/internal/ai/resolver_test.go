@@ -164,6 +164,40 @@ func TestResolveAliasPortion_AssumedFlag(t *testing.T) {
 		require.True(t, assumed)
 	})
 
+	// kora#144: the serving rung obeys plausibleServingGrams, the same bound
+	// portionGramsFor's step 4 uses. Without it a USDA whole-animal reference
+	// mass reaches the diary as a portion — and, worse, as a NOT-assumed one,
+	// so nothing in the card hedges it.
+	t.Run("an implausible reference serving is refused and falls to the assumed default", func(t *testing.T) {
+		turkey := nutrition.FoodItem{KcalPer100g: 160, ServingGrams: 5717}
+		r := Resolver{}.WithPortionSource(&fakePortionSource{grams: map[string]float64{}})
+		grams, assumed := r.resolveAliasPortion(context.Background(), userID, phrase, turkey)
+		require.Equal(t, float64(defaultAliasPortionGrams), grams)
+		require.True(t, assumed)
+	})
+
+	// The floor is data hygiene: a sub-gram "serving" is a parsing artefact,
+	// not a portion, and multiplying per-100g values by it logs ~nothing.
+	t.Run("a sub-gram serving artefact is refused too", func(t *testing.T) {
+		artefact := nutrition.FoodItem{KcalPer100g: 160, ServingGrams: 0.4}
+		r := Resolver{}.WithPortionSource(&fakePortionSource{grams: map[string]float64{}})
+		grams, assumed := r.resolveAliasPortion(context.Background(), userID, phrase, artefact)
+		require.Equal(t, float64(defaultAliasPortionGrams), grams)
+		require.True(t, assumed)
+	})
+
+	// The bound never overrides real history. A user who logs 700 g of this
+	// phrase gets 700 g back — plausibleServingGrams gates the food's STORED
+	// serving, not the portion the user actually ate.
+	t.Run("a large last logged portion is still returned verbatim", func(t *testing.T) {
+		r := Resolver{}.WithPortionSource(&fakePortionSource{grams: map[string]float64{
+			userID.String() + "|" + phrase: 700,
+		}})
+		grams, assumed := r.resolveAliasPortion(context.Background(), userID, phrase, nutrition.FoodItem{ServingGrams: 5717})
+		require.Equal(t, 700.0, grams)
+		require.False(t, assumed)
+	})
+
 	t.Run("nil portion source still marks the flat default as assumed", func(t *testing.T) {
 		r := Resolver{}
 		grams, assumed := r.resolveAliasPortion(context.Background(), userID, phrase, itemNoServing)

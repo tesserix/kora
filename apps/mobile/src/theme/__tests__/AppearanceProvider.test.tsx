@@ -110,7 +110,15 @@ test("survives an AsyncStorage read rejection by landing on dark", async () => {
 
   const { result } = await renderHook(() => useAppearance(), { wrapper });
 
-  await waitFor(() => expect(setColorScheme).toHaveBeenCalledWith("dark"));
+  // NOT `toHaveBeenCalledWith("dark")`, which this test used to assert: the
+  // lazy initializer already applied dark synchronously at mount (the test at
+  // the top of this file is what proves that ordering), so that assertion is
+  // satisfied before the read is even issued — deleting the catch branch's
+  // applyPreference entirely would leave it green. The claim here is that the
+  // REJECTION path re-asserts dark, so wait for its own call and pin the whole
+  // sequence: mount, then the catch, and nothing that is not dark.
+  await waitFor(() => expect(setColorScheme).toHaveBeenCalledTimes(2));
+  expect(setColorScheme.mock.calls).toEqual([["dark"], ["dark"]]);
   expect(result.current.preference).toBe("dark");
 });
 

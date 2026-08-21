@@ -437,9 +437,18 @@ describe("confirming a capture with multiple detected items", () => {
     });
     mockListCaptures([capture]);
 
-    const { getByText, getByLabelText } = await render(<CaptureReviewScreen />, { wrapper: wrap(newClient()) });
+    const { getByText, getByRole, getByLabelText } = await render(<CaptureReviewScreen />, {
+      wrapper: wrap(newClient()),
+    });
     fireEvent.press(getByText("Confirm"));
     await waitFor(() => expect(appendLog).toHaveBeenCalledTimes(2));
+
+    // Wait for Confirm to be offered BACK to the user before retrying. It is
+    // disabled for the duration of an attempt, so a press dispatched while the
+    // attempt is still settling is a press the screen never sees — a retry
+    // test that silently tests nothing. Asserting the button is enabled again
+    // is also the promise the failure alert makes ("try again").
+    await waitFor(() => expect(getByRole("button", { name: "Confirm" })).toBeEnabled());
 
     // Retry: food-a already succeeded on the first press and must not be
     // resubmitted — only food-b (the one that failed) goes out again.
@@ -460,12 +469,17 @@ describe("confirming a capture with multiple detected items", () => {
     });
     mockListCaptures([capture]);
 
-    const { getByText, getByLabelText } = await render(<CaptureReviewScreen />, { wrapper: wrap(newClient()) });
+    const { getByText, getByRole, getByLabelText } = await render(<CaptureReviewScreen />, {
+      wrapper: wrap(newClient()),
+    });
     fireEvent.press(getByText("Confirm"));
     await waitFor(() => expect(appendLog).toHaveBeenCalledTimes(2));
     expect(deleteQueuedMedia).not.toHaveBeenCalled();
     expect(discard).not.toHaveBeenCalled();
 
+    // Same as the retry test above: Confirm has to be enabled again before a
+    // press means anything.
+    await waitFor(() => expect(getByRole("button", { name: "Confirm" })).toBeEnabled());
     fireEvent.press(getByText("Confirm"));
     await waitFor(() => expect(appendLog).toHaveBeenCalledTimes(3));
     await waitFor(() => expect(deleteQueuedMedia).toHaveBeenCalledTimes(1));
