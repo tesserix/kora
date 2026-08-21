@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { Appearance } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as SplashScreen from "expo-splash-screen";
 
 const STORAGE_KEY = "kora.appearance";
 
@@ -46,6 +47,24 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
+    // The app is behind the native splash until this resolves (kora#320): the
+    // scheme swap below would otherwise happen in front of the user, which is
+    // what the dark flash was. Hiding is idempotent and must happen on EVERY
+    // path out of here — including the failure path and the timeout below.
+    // Being stuck on the splash forever is far worse than a flash, so this is
+    // the one thing in this file that must not depend on storage behaving.
+    let revealed = false;
+    const reveal = () => {
+      if (revealed) return;
+      revealed = true;
+      void SplashScreen.hideAsync().catch(() => {});
+    };
+    // AsyncStorage rejecting is handled below; AsyncStorage never SETTLING is
+    // not, and has no upper bound. This is the backstop for that case only —
+    // it should never fire in practice, and if it does the app opens in dark
+    // and corrects itself when the read lands.
+    const timer = setTimeout(reveal, 2000);
+
     AsyncStorage.getItem(STORAGE_KEY)
       .then((stored) => {
         if (cancelled) return;
@@ -57,9 +76,16 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
         // Best-effort read; fall back to Kora's dark default rather than
         // guessing at a stored preference we couldn't retrieve.
         if (!cancelled) applyPreference("dark");
+      })
+      .finally(() => {
+        clearTimeout(timer);
+        reveal();
       });
     return () => {
       cancelled = true;
+      clearTimeout(timer);
+      // Unmounting before the read lands must not strand the splash.
+      reveal();
     };
   }, []);
 
