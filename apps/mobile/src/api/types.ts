@@ -291,10 +291,61 @@ export type OnboardingInput = {
   pace_kg_per_week?: number;
 };
 
+/**
+ * Which instrument produced a body-composition reading (kora#45).
+ *
+ * Load-bearing, not metadata: the same-named metric is not comparable across
+ * instruments. Renpho reports Skeletal Muscle at 48.9% where Omron reports
+ * 25.7% for the same body — different definitions, not measurement noise — and
+ * DEXA body fat differs from consumer bioimpedance by several points on the
+ * same day. A trend that joins two sources without consulting this shows a
+ * person losing half their muscle overnight.
+ *
+ * Mirrors weight_entries_source_check in api migration 000039 and
+ * api/internal/tracking/model.go's Source.
+ */
+export type WeightSource = "manual" | "scale_screenshot" | "inbody" | "dexa" | "healthkit";
+
+/**
+ * A weigh-in, optionally with the body composition a scale, InBody or DEXA
+ * report measured alongside it (kora#45).
+ *
+ * Every composition field is OPTIONAL, matching its nullable column: absent
+ * must not collapse into a measured zero, because a body fat of 0.0% is not
+ * "unknown" and a chart plotting one as the other draws a cliff that never
+ * happened.
+ *
+ * BMI, fat mass in kg and fat-free mass are deliberately absent — they are
+ * derived, and storing them would create a second source of truth able to
+ * contradict Kora's own height and weight. Derive them with the helpers in
+ * src/lib/bodyComposition.ts.
+ */
 export type WeightEntry = {
   id: string;
   weight_kg: number;
   logged_at: string;
+  body_fat_pct?: number;
+  subcutaneous_fat_pct?: number;
+  /**
+   * A vendor RATING, not a percentage — hence no `_pct`. Renpho shows a bare
+   * `7`, Omron `7.5 level`, Tanita a 1-59 scale. Never render it with a % sign.
+   */
+  visceral_fat_rating?: number;
+  /** A SUBSET of muscle mass, not the same number in another unit. */
+  skeletal_muscle_pct?: number;
+  muscle_mass_kg?: number;
+  body_water_pct?: number;
+  protein_pct?: number;
+  /** Bone MASS in kg. A DEXA report's bone DENSITY is a different quantity. */
+  bone_mass_kg?: number;
+  /**
+   * Recorded for comparison ONLY — never a calorie target. Kora derives BMR
+   * itself via Mifflin-St Jeor in src/lib/plan.ts, and that is what drives the
+   * daily target. Renpho and Omron disagree by ~200 kcal/day on the same body,
+   * so a scale-driven target would jump when the user changes scales.
+   */
+  scale_bmr_kcal?: number;
+  source: WeightSource;
 };
 
 export type ResolveTier = "auto" | "confirm" | "follow_up";
