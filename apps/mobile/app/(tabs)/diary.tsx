@@ -21,6 +21,7 @@ import { LoadErrorNotice } from "@/components/common/LoadErrorNotice";
 import { useSavedMealEditor } from "@/components/meals/SavedMealSheetProvider";
 import { useDashboard, useDayLogs, useAddWater, useDeleteLog } from "@/api/hooks";
 import { useQueuedLogs } from "@/offline/useQueuedLogs";
+import { captureRowPresentation } from "@/offline/captureRowPresentation";
 import { useQueuedCaptures } from "@/offline/useQueuedCaptures";
 import { useIsOnline } from "@/offline/connectivity";
 import { PressableScale, ScreenEntrance, haptics, useMotionPrefs } from "@/motion";
@@ -362,24 +363,17 @@ export default function Diary() {
                     : c.status === "review"
                       ? "Tap to confirm"
                       : "Couldn't identify";
-                  // A text capture's own words are a better row title than
-                  // "Typed note" — the phrase IS the thing the user logged, and
-                  // a queued row is otherwise unidentifiable until it resolves.
-                  const name =
-                    c.kind === "text" ? (c.phrase ?? "Typed note")
-                      : c.kind === "photo" ? "Photo"
-                      : "Voice note";
+                  // Name and icon come from one exhaustive switch, not a
+                  // ternary chain per prop: the chain's final arm silently
+                  // claimed every future kind as a voice note (kora#241).
+                  const { name, iconName } = captureRowPresentation(c);
                   return (
                     <MealRow
                       key={c.id}
                       name={name}
                       slot={statusText}
                       kcal={c.kcal}
-                      iconName={
-                        c.kind === "text" ? "message-circle"
-                          : c.kind === "photo" ? "camera"
-                          : "mic"
-                      }
+                      iconName={iconName}
                       dimmed={failed}
                       badge={
                         pendingCapture ? (

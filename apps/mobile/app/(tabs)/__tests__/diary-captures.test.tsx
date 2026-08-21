@@ -222,3 +222,36 @@ test("a day with no logs and no captures still shows the empty state", async () 
 
   expect(await findByText("Nothing logged")).toBeTruthy();
 });
+
+// kora#241. The label and icon used to be two independent ternary chains whose
+// final arm was "Voice note"/"mic", so a barcode row rendered as a voice note —
+// a wrong row that no assertion could distinguish from a right one, because
+// both strings are valid. This is the test that fails against that shape.
+test("a queued barcode renders as a scanned item, not a voice note", async () => {
+  mockCaptureRows = [
+    captureRow({ kind: "barcode", code: "5000112637922", thumbnailUri: null, mealSlot: "lunch" }),
+  ];
+  const { findByLabelText, queryByText, queryByTestId } = await render(<Diary />);
+
+  expect(
+    await findByLabelText("Scanned item ending 7922, Identifying when you're back online"),
+  ).toBeTruthy();
+  expect(queryByText("Voice note")).toBeNull();
+  // The Icon renders SF Symbols under Jest as `sf-<symbol>` (jest.setup.js), so
+  // the glyph is assertable even though nothing is laid out (kora#257).
+  expect(queryByTestId("sf-barcode")).toBeTruthy();
+  expect(queryByTestId("sf-mic.fill")).toBeNull();
+});
+
+// Two unknown codes queued in the same slot must not be two identical rows:
+// the user cannot tell which is which, nor a duplicate from a second product.
+test("two queued barcodes render as distinguishable rows", async () => {
+  mockCaptureRows = [
+    captureRow({ id: "cap_a", kind: "barcode", code: "5000112637922", thumbnailUri: null }),
+    captureRow({ id: "cap_b", kind: "barcode", code: "8901030865278", thumbnailUri: null }),
+  ];
+  const { findByText, getByText } = await render(<Diary />);
+
+  expect(await findByText("Scanned item ending 7922")).toBeTruthy();
+  expect(getByText("Scanned item ending 5278")).toBeTruthy();
+});
