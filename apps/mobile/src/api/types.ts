@@ -48,6 +48,8 @@ export interface CoachTurn {
   text: string;
   citations: CoachCitation[];
   created_at: string;
+  /** Set only on turns answered in this session — the stored thread has no attribution. */
+  agent?: string;
 }
 
 export interface CoachNudgesResponse {
@@ -60,10 +62,17 @@ export interface CoachThreadResponse {
   show_support: boolean;
 }
 
+/** Who answered, as published in the agent registry. Absent when the plain model replied. */
+export interface CoachAgent {
+  name: string;
+  skill: string;
+}
+
 export interface CoachAnswer {
   answer: string;
   citations: CoachCitation[];
   show_support: boolean;
+  agent?: CoachAgent;
 }
 
 export type ServingUnit = {

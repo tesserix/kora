@@ -8,6 +8,8 @@
 // so a registry outage degrades to stale composition rather than to no agent.
 package agents
 
+import "strings"
+
 // Object is the registry's universal envelope, shared by every kind (Agent,
 // Skill, Tool, Prompt). spec is left as a free-form map because Kora only
 // reads a handful of fields and must not break when the registry adds more.
@@ -87,6 +89,29 @@ func (r ResolvedAgent) HasSkill(id string) bool {
 		}
 	}
 	return false
+}
+
+// DisplayName is the agent's human-readable name, for showing the user who
+// answered. spec.title is what the published cards actually carry; the other
+// two are accepted because the schema allows them. An agent published without
+// any of them still reads as "Nutrition Coach" rather than "nutrition-coach".
+func (r ResolvedAgent) DisplayName() string {
+	for _, key := range []string{"title", "displayName", "name"} {
+		if v, _ := r.Agent.Spec[key].(string); strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return titleCase(r.Agent.Metadata.Name)
+}
+
+// titleCase turns a registry name into words: "nutrition-coach" reads as
+// "Nutrition Coach".
+func titleCase(name string) string {
+	fields := strings.FieldsFunc(name, func(r rune) bool { return r == '-' || r == '_' || r == '.' })
+	for i, f := range fields {
+		fields[i] = strings.ToUpper(f[:1]) + f[1:]
+	}
+	return strings.Join(fields, " ")
 }
 
 // A2APath is the agent's A2A endpoint path, taken from spec.a2a.url. Only the

@@ -86,7 +86,55 @@ test("sending shows the optimistic user turn and asks the coach", async () => {
 
   expect(mockAskMutate).toHaveBeenCalledWith("How is my fibre?", expect.any(Object));
   expect(getByText("How is my fibre?")).toBeTruthy();
-  expect(getByText("Otto is thinking…")).toBeTruthy();
+  expect(getByText("Coach is thinking…")).toBeTruthy();
+});
+
+test("the answering agent is named on its bubble and on the next thinking line", async () => {
+  mockThread.mockReturnValue({
+    data: { turns: [], show_support: false },
+    isLoading: false,
+    isError: false,
+    refetch: mockThreadRefetch,
+  });
+  mockAskMutate.mockImplementation((_question, options) =>
+    options.onSuccess({
+      answer: "You have 18g to go today.",
+      citations: [],
+      show_support: false,
+      agent: { name: "Nutrition Coach", skill: "nutrition-guidance" },
+    }),
+  );
+  const { getByLabelText, getByText } = await render(<CoachScreen />);
+
+  await fireEvent.changeText(getByLabelText("Ask Otto a nutrition question"), "How is my fibre?");
+  await fireEvent.press(getByLabelText("Send question"));
+
+  // The named agent carries into the next question's thinking line.
+  mockAskMutate.mockImplementation(() => undefined);
+  await fireEvent.changeText(getByLabelText("Ask Otto a nutrition question"), "And my fat?");
+  await fireEvent.press(getByLabelText("Send question"));
+
+  expect(getByText("Nutrition Coach is thinking…")).toBeTruthy();
+  expect(getByText("OTTO · NUTRITION COACH")).toBeTruthy();
+});
+
+test("an answer with no agent stays attributed to plain Otto", async () => {
+  mockThread.mockReturnValue({
+    data: {
+      turns: [
+        { role: "otto", text: "Plain answer.", citations: [], created_at: "2026-08-19T00:00:01Z" },
+      ],
+      show_support: false,
+    },
+    isLoading: false,
+    isError: false,
+    refetch: mockThreadRefetch,
+  });
+  const { getByText, queryByText, getByLabelText } = await render(<CoachScreen />);
+
+  expect(getByLabelText("Otto: Plain answer.")).toBeTruthy();
+  expect(queryByText(/OTTO ·/)).toBeNull();
+  expect(getByText("Plain answer.")).toBeTruthy();
 });
 
 test("a failed answer keeps the question and provides an inline retry", async () => {

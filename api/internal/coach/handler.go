@@ -110,7 +110,14 @@ func (h Handler) Ask(c *gin.Context) {
 	if cites == nil {
 		cites = []Fact{}
 	}
-	httpx.OK(c, gin.H{"answer": answer.Text, "citations": cites, "show_support": answer.ShowSupport})
+	body := gin.H{"answer": answer.Text, "citations": cites, "show_support": answer.ShowSupport}
+	if answer.By.Agent != "" {
+		// Omitted entirely when the direct provider answered, so the client
+		// can tell "the coach agent replied" from "the plain model replied"
+		// rather than having to compare against a sentinel name.
+		body["agent"] = gin.H{"name": answer.By.Agent, "skill": answer.By.Skill}
+	}
+	httpx.OK(c, body)
 }
 
 // threadTurnResponse is one replayed turn in the wire format. Field names are

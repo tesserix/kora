@@ -35,13 +35,18 @@ type Usage struct {
 // Run is the outcome of one A2A call: the agent's text plus enough provenance
 // to explain which revision produced it.
 type Run struct {
-	RunID  string
-	Agent  string
-	Skill  string
-	State  string
-	Text   string
-	Digest string
-	Usage  Usage
+	RunID string
+	Agent string
+	// DisplayName is what the user is shown as the answer's author. It is
+	// carried separately from Agent because Agent is the registry id that
+	// metrics and logs are labelled by, and that must stay stable even if
+	// the published display name changes.
+	DisplayName string
+	Skill       string
+	State       string
+	Text        string
+	Digest      string
+	Usage       Usage
 }
 
 // Gateway calls agents over A2A JSON-RPC through the Agent Gateway. It holds
@@ -152,11 +157,12 @@ func (g *Gateway) Send(ctx context.Context, resolved *ResolvedAgent, prompt stri
 	}
 
 	return Run{
-		RunID:  envelope.Result.ID,
-		Agent:  resolved.Agent.Metadata.Name,
-		State:  envelope.Result.Status.State,
-		Text:   text,
-		Digest: resolved.Agent.Metadata.Digest,
+		RunID:       envelope.Result.ID,
+		Agent:       resolved.Agent.Metadata.Name,
+		DisplayName: resolved.DisplayName(),
+		State:       envelope.Result.Status.State,
+		Text:        text,
+		Digest:      resolved.Agent.Metadata.Digest,
 		Usage: Usage{
 			InputTokens:  envelope.Result.Metadata.Usage.InputTokens,
 			OutputTokens: envelope.Result.Metadata.Usage.OutputTokens,

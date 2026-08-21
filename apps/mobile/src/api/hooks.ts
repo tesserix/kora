@@ -134,7 +134,13 @@ export function useCoachAsk(): UseMutationResult<CoachAnswer, Error, string> {
       const createdAt = new Date().toISOString();
       const exchange: CoachTurn[] = [
         { role: "user", text: question, citations: [], created_at: createdAt },
-        { role: "otto", text: answer.answer, citations: answer.citations ?? [], created_at: createdAt },
+        {
+          role: "otto",
+          text: answer.answer,
+          citations: answer.citations ?? [],
+          created_at: createdAt,
+          agent: answer.agent?.name,
+        },
       ];
       qc.setQueryData<CoachThreadResponse>(coachThreadQueryKey(ownerID), (current) => ({
         turns: [...(current?.turns ?? []), ...exchange],
