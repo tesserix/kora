@@ -1,5 +1,10 @@
 import type { WeightEntry } from "@/api/types";
-import { chartableMetrics, hasInstrumentChange, metricSeries } from "../bodyCompositionSeries";
+import {
+  chartableMetrics,
+  hasInstrumentChange,
+  lastComparableRun,
+  metricSeries,
+} from "../bodyCompositionSeries";
 
 let n = 0;
 const entry = (over: Partial<WeightEntry> = {}): WeightEntry => ({
@@ -108,5 +113,27 @@ describe("chartableMetrics", () => {
 
   it("offers nothing at all for an empty history", () => {
     expect(chartableMetrics([])).toEqual([]);
+  });
+});
+
+describe("lastComparableRun", () => {
+  it("is the whole series when one instrument measured all of it", () => {
+    const series = metricSeries([entry({ body_fat_pct: 24.2 }), entry({ body_fat_pct: 23.8 })], "body_fat_pct");
+    expect(lastComparableRun(series).map((p) => p.value)).toEqual([24.2, 23.8]);
+  });
+
+  it("is only the readings since the instrument changed", () => {
+    const series = metricSeries(
+      [
+        entry({ body_fat_pct: 24.2, source: "manual" }),
+        entry({ body_fat_pct: 24.0, source: "manual" }),
+        entry({ body_fat_pct: 19.4, source: "dexa" }),
+        entry({ body_fat_pct: 19.1, source: "dexa" }),
+      ],
+      "body_fat_pct",
+    );
+    // A change computed over the whole series would report -5.1 points of fat
+    // lost, when 4.6 of that is DEXA and bioimpedance disagreeing.
+    expect(lastComparableRun(series).map((p) => p.value)).toEqual([19.4, 19.1]);
   });
 });

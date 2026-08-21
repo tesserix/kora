@@ -83,3 +83,17 @@ export function chartableMetrics(entries: readonly WeightEntry[]): CompositionMe
 export function hasInstrumentChange(series: MetricSeries): boolean {
   return series.breaksAfter.length > 0;
 }
+
+/**
+ * The trailing run of points that share an instrument.
+ *
+ * A "change over this range" figure computed across an instrument switch is
+ * the artefact this whole module exists to prevent — it would report Renpho's
+ * 48.9% minus Omron's 25.7% as 23 points of muscle lost. Callers show a change
+ * for THIS run only, and say so when there is an earlier one they are not
+ * counting.
+ */
+export function lastComparableRun(series: MetricSeries): MetricPoint[] {
+  const lastBreak = series.breaksAfter[series.breaksAfter.length - 1];
+  return lastBreak === undefined ? series.points : series.points.slice(lastBreak + 1);
+}

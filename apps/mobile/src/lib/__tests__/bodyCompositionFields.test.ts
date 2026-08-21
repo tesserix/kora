@@ -3,6 +3,8 @@ import {
   COMPOSITION_METRICS,
   MANUAL_SOURCES,
   compositionMetric,
+  displayNumber,
+  formatMetricNumber,
   metricAccessibilityLabel,
   metricValue,
   sourceLabel,
@@ -98,5 +100,21 @@ describe("sources", () => {
     expect(sourceLabel("dexa")).toBe("DEXA");
     expect(sourceLabel("scale_screenshot")).toBe("Scale screenshot");
     expect(sourceLabel("healthkit")).toBe("Apple Health");
+  });
+});
+
+describe("displayNumber / formatMetricNumber", () => {
+  it("converts only the kg-backed metrics for display", () => {
+    expect(displayNumber(compositionMetric("muscle_mass_kg"), 50, "imperial")).toBeCloseTo(110.23, 2);
+    expect(displayNumber(compositionMetric("body_fat_pct"), 24.2, "imperial")).toBe(24.2);
+  });
+
+  it("writes a tenth for a scale's tenths, including Omron's 7.5 visceral rating", () => {
+    expect(formatMetricNumber(compositionMetric("visceral_fat_rating"), 7.5)).toBe("7.5");
+    expect(formatMetricNumber(compositionMetric("body_fat_pct"), 24.25)).toBe("24.3");
+  });
+
+  it("writes BMR whole, because no scale claims a tenth of a kilocalorie", () => {
+    expect(formatMetricNumber(compositionMetric("scale_bmr_kcal"), 1620.4)).toBe("1620");
   });
 });

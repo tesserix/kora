@@ -190,8 +190,7 @@ export function BodyCompositionForm({
       >
         <Overline style={{ fontSize: 11 }}>Calculated</Overline>
         <AppText muted style={{ fontSize: 12 }}>
-          Worked out from your weight, height and body fat — not stored, and not editable. Your scale's own
-          figures for these may differ.
+          {"Worked out from your weight, height and body fat — not stored, and not editable. Your scale's own figures for these may differ."}
         </AppText>
         <DerivedRow label="BMI" value={derived.bmi === null ? "—" : derived.bmi.toFixed(1)} />
         <DerivedRow label="Fat mass" value={showMass(derived.fatMassKg)} />

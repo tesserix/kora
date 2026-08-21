@@ -1,5 +1,5 @@
 import type { WeightEntry, WeightSource } from "@/api/types";
-import { weightUnitLabel, type UnitSystem } from "@/units";
+import { lbFromKg, weightUnitLabel, type UnitSystem } from "@/units";
 
 /**
  * The one description of every body-composition metric Kora stores (kora#45).
@@ -192,4 +192,23 @@ const SOURCE_LABELS: Record<WeightSource, string> = {
 
 export function sourceLabel(source: WeightSource): string {
   return SOURCE_LABELS[source] ?? source;
+}
+
+/**
+ * The stored value converted for display. Only the kg-backed metrics move; a
+ * percentage, a rating and a kcal figure are the same number in either system.
+ */
+export function displayNumber(metric: CompositionMetric, stored: number, system: UnitSystem): number {
+  return isMassMetric(metric) && system === "imperial" ? lbFromKg(stored) : stored;
+}
+
+/**
+ * How a metric's figure is written.
+ *
+ * A tenth for everything a scale prints to a tenth — including the visceral
+ * rating, which Omron gives as 7.5 — and whole numbers for BMR, where a
+ * decimal would imply a precision the device does not claim.
+ */
+export function formatMetricNumber(metric: CompositionMetric, value: number): string {
+  return metric.unitKind === "kcal" ? String(Math.round(value)) : value.toFixed(1);
 }

@@ -1,4 +1,4 @@
-import { fireEvent, render } from "@testing-library/react-native";
+import { act, fireEvent, render } from "@testing-library/react-native";
 import { BodyCompositionSheet } from "../BodyCompositionSheet";
 
 const mockAddMutate = jest.fn();
@@ -20,7 +20,7 @@ test("hands the parsed payload straight to useAddWeight and closes on success", 
   expect(mockAddMutate).toHaveBeenCalledTimes(1);
   const [payload, handlers] = mockAddMutate.mock.calls[0];
   expect(payload).toEqual({ weight_kg: 70.2, visceral_fat_rating: 7, source: "manual" });
-  handlers.onSuccess();
+  await act(async () => handlers.onSuccess());
   expect(onClose).toHaveBeenCalled();
 });
 
@@ -31,7 +31,7 @@ test("surfaces a save failure instead of closing over it", async () => {
   );
   await fireEvent.changeText(getByLabelText("Weight in kilograms"), "70.2");
   await fireEvent.press(getByText("Save"));
-  mockAddMutate.mock.calls[0][1].onError();
+  await act(async () => mockAddMutate.mock.calls[0][1].onError());
   expect(await findByText("Couldn't save. Try again.")).toBeTruthy();
   expect(onClose).not.toHaveBeenCalled();
 });
