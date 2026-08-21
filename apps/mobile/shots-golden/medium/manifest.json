@@ -8,8 +8,8 @@
   "shotsClock": "2026-08-19T09:41:00",
   "statusBarTime": "9:41",
   "scheme": "com.tesserix.kora",
-  "capturedAt": "2026-08-21T02:05:52.750Z",
-  "gitCommit": "3a677d17",
+  "capturedAt": "2026-08-21T10:49:32.586Z",
+  "gitCommit": "7bd2b692",
   "rule": {
     "scale": 3,
     "threshold": 48,
@@ -25,61 +25,61 @@
       "route": "about",
       "width": 440,
       "height": 956,
-      "bytes": 169718
+      "bytes": 184993
     },
     {
       "route": "coach",
       "width": 440,
       "height": 956,
-      "bytes": 164645
+      "bytes": 182214
     },
     {
       "route": "feedback",
       "width": 440,
       "height": 956,
-      "bytes": 161281
+      "bytes": 184568
     },
     {
       "route": "notifications",
       "width": 440,
       "height": 956,
-      "bytes": 176972
+      "bytes": 189680
     },
     {
       "route": "onboarding",
       "width": 440,
       "height": 956,
-      "bytes": 186633
+      "bytes": 197065
     },
     {
       "route": "recipes",
       "width": 440,
       "height": 956,
-      "bytes": 184142
+      "bytes": 195569
     },
     {
       "route": "settings",
       "width": 440,
       "height": 956,
-      "bytes": 153258
+      "bytes": 166518
     },
     {
       "route": "sign-in",
       "width": 440,
       "height": 956,
-      "bytes": 173307
+      "bytes": 184598
     },
     {
       "route": "tab-diary",
       "width": 440,
       "height": 956,
-      "bytes": 167107
+      "bytes": 185942
     },
     {
       "route": "tab-progress",
       "width": 440,
       "height": 956,
-      "bytes": 115936
+      "bytes": 135059
     }
   ],
   "excluded": [
