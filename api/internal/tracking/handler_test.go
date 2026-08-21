@@ -67,3 +67,61 @@ func TestListWeightHandlerReturnsSeries(t *testing.T) {
 	require.Len(t, body.Data, 2)
 	require.Equal(t, 74.0, body.Data[0].WeightKg)
 }
+
+// The JSON keys the client sends must be exactly the column names, and an
+// omitted metric must be omitted from the response rather than serialised as 0
+// — the wire format is where "absent is not zero" either survives or is lost
+// (kora#45).
+func TestAddWeightHandlerAcceptsAndReturnsComposition(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	r := weightRouter(userID, NewRepository(db))
+
+	body := `{"weight_kg":70.2,"body_fat_pct":32.6,"visceral_fat_rating":7.5,` +
+		`"skeletal_muscle_pct":25.7,"scale_bmr_kcal":1423,"source":"scale_screenshot"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/weight", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code)
+
+	var resp struct {
+		Data map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Equal(t, 32.6, resp.Data["body_fat_pct"])
+	require.Equal(t, 7.5, resp.Data["visceral_fat_rating"])
+	require.Equal(t, 25.7, resp.Data["skeletal_muscle_pct"])
+	require.Equal(t, 1423.0, resp.Data["scale_bmr_kcal"])
+	require.Equal(t, "scale_screenshot", resp.Data["source"])
+
+	// Unmeasured metrics are absent from the payload, not zero.
+	_, present := resp.Data["muscle_mass_kg"]
+	require.False(t, present, "an unmeasured metric must not be serialised at all")
+
+	// Derived values are never echoed back, because they are never stored.
+	for _, derived := range []string{"bmi", "fat_mass_kg", "fat_free_mass_kg", "metabolic_age"} {
+		_, present := resp.Data[derived]
+		require.False(t, present, "%s is derived on the client, never stored", derived)
+	}
+}
+
+// An impossible metric is the caller's mistake, so it must read as a 400 with a
+// named field rather than a 500 from a CHECK violation.
+func TestAddWeightHandlerRejectsImpossibleComposition(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	r := weightRouter(userID, NewRepository(db))
+
+	for _, body := range []string{
+		`{"weight_kg":70.2,"body_fat_pct":132.6}`,
+		`{"weight_kg":70.2,"visceral_fat_rating":95}`,
+		`{"weight_kg":70.2,"source":"renpho"}`,
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/v1/weight", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusBadRequest, w.Code, "body: %s", body)
+	}
+}
