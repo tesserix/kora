@@ -30,7 +30,7 @@ import { Waveform } from "@/components/capture/Waveform";
 import { VoiceComposer } from "@/components/capture/VoiceComposer";
 import { beginRecordingSession, endRecordingSession } from "@/capture/audioSession";
 import { reportError } from "@/observability/reporter";
-import { ResolutionResult, candidateKey } from "@/components/ResolutionResult";
+import { ResolutionResult } from "@/components/ResolutionResult";
 import { FoodPicker } from "@/components/meal/FoodPicker";
 import { withAlpha } from "@/lib/color";
 import { useToast } from "@/components/Toast";
@@ -51,6 +51,7 @@ import { enqueueCapture, enqueueTextCapture, type CaptureFile } from "@/offline/
 import { NoOwnerError } from "@/offline/owner";
 import { QUEUED_CAPTURES_KEY } from "@/offline/queryKeys";
 import { isLoggable } from "@/lib/candidateTier";
+import { runRetryLedger } from "@/lib/retryLedger";
 import { servingEntryFor } from "@/units/portion";
 import type { FoodItem, Resolution, ResolutionSource } from "@/api/types";
 import { mealSlotForHour, type MealSlot } from "@/lib/mealSlot";
@@ -1733,15 +1734,13 @@ export default function CaptureScreen() {
 
   // Logs every not-yet-succeeded candidate in the current resolution as its
   // own diary entry. Only the id/grams/slot/source/timestamp quintet is ever
-  // sent — the backend recomputes kcal/macros from the food_item row. Uses
-  // allSettled (not Promise.all) so a single failing candidate doesn't hide
-  // whether the *other* candidates were logged — required to avoid a
-  // partial silent success per the task's error-handling discipline.
+  // sent — the backend recomputes kcal/macros from the food_item row.
   //
-  // Candidates already recorded in `loggedCandidateKeys` (from an earlier
-  // press of this same card) are skipped entirely — otherwise re-pressing
-  // "Add to diary" after a partial failure would re-log the ones that
-  // already succeeded, duplicating diary entries.
+  // Which candidates that is — allSettled, the exclusions, and above all
+  // skipping the ones an earlier press already logged (re-logging them is how
+  // a retry after a partial failure duplicates diary entries) — is
+  // runRetryLedger's, shared verbatim with capture-review.tsx. See
+  // src/lib/retryLedger for the rule and why it lives in one place.
   //
   // Candidates the server flagged as uncertain (`tier: "follow_up"`) ARE
   // logged: the server priced them like any other row and the card preselected
@@ -1762,16 +1761,18 @@ export default function CaptureScreen() {
     setAdding(true);
     const source = resolutionSource;
 
-    const pending = effectiveResolution.candidates
-      .map((candidate, index) => ({ candidate, index, key: candidateKey(candidate, index) }))
-      .filter(({ candidate }) => isLoggable(candidate))
-      // The user's own exclusions (kora#183). This is the filter that makes
-      // the checkbox real: without it the CTA count and the diary disagree.
-      .filter(({ index }) => !excluded.has(index))
-      .filter(({ key }) => !loggedCandidateKeys.has(key));
-
-    const outcomes = await Promise.allSettled(
-      pending.map(({ candidate }) => {
+    // The retry ledger (src/lib/retryLedger) owns the filtering, the
+    // allSettled and the union write — the rule shared with capture-review's
+    // Confirm, whose backend is the offline queue rather than this mutation.
+    // Only "how to log ONE candidate" is this screen's own (kora#144).
+    const attempt = await runRetryLedger({
+      candidates: effectiveResolution.candidates,
+      // The user's own exclusions (kora#183). This is what makes the checkbox
+      // real: without it the CTA count and the diary disagree.
+      excluded,
+      logged: loggedCandidateKeys,
+      markLogged: setLoggedCandidateKeys,
+      logCandidate: (candidate) => {
         // Record the portion as one of the food's own named servings when one
         // describes it exactly, so the diary reads "1 portion" instead of
         // "16.5 g" — the same entry the card just showed the user.
@@ -1798,27 +1799,15 @@ export default function CaptureScreen() {
             ? { input_phrase: resolvedPhrase }
             : {}),
         });
-      }),
-    );
+      },
+    });
     setAdding(false);
 
-    const newlySucceededKeys = pending
-      .filter((_, index) => outcomes[index]?.status === "fulfilled")
-      .map(({ key }) => key);
-    const failedNames = pending
-      .filter((_, index) => outcomes[index]?.status === "rejected")
-      .map(({ candidate }) => candidate.item.name);
-
-    // Union, never replace — and via a functional updater so the write depends
-    // on the ledger at commit time rather than on the snapshot this closure
-    // captured when the press started. `pending` already excluded every key in
-    // that snapshot, so the union is exactly "what was logged before" plus
-    // "what just landed", whichever order the updates commit in.
-    setLoggedCandidateKeys((prev) => new Set([...prev, ...newlySucceededKeys]));
-    // The count the user is told about, computed from the same snapshot the
-    // rest of this function reasoned about. A local Set (not the state one) so
-    // the message can never be affected by when React flushes the write above.
-    const loggedSoFarCount = new Set([...loggedCandidateKeys, ...newlySucceededKeys]).size;
+    const failedNames = attempt.failed.map(({ candidate }) => candidate.item.name);
+    // The count the user is told about — the ledger's own figure, taken
+    // against the snapshot this press started from rather than re-read from
+    // state, so the message cannot depend on when React flushes the write.
+    const loggedSoFarCount = attempt.loggedCount;
 
     if (failedNames.length > 0) {
       haptics.error();
@@ -1835,7 +1824,7 @@ export default function CaptureScreen() {
     // survives the router.back() — without it the only success signal is a
     // haptic, and the user lands on whichever tab they came from with no
     // visible evidence the log happened.
-    const count = newlySucceededKeys.length;
+    const count = attempt.succeeded.length;
     toast.show({ message: `Logged ${count} ${count === 1 ? "item" : "items"} to your diary` });
     safeBack("/(tabs)");
   }
