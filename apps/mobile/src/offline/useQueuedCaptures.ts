@@ -6,10 +6,12 @@ import { QUEUED_CAPTURES_KEY } from "./queryKeys";
 
 export type QueuedCaptureRow = {
   id: string;
-  kind: "photo" | "voice" | "text";
+  kind: QueuedCapture["kind"];
   thumbnailUri: string | null;
   /** The typed phrase, for a text capture. null for media (kora#196). */
   phrase: string | null;
+  /** The scanned code, for a barcode capture. null otherwise (kora#241). */
+  code: string | null;
   capturedAt: string;
   mealSlot: string;
   status: "pending" | "review" | "failed";
@@ -28,6 +30,7 @@ function toRow(c: QueuedCapture): QueuedCaptureRow {
     kind: c.kind,
     thumbnailUri: c.kind === "photo" ? queuedMediaUri(c.storedName) : null,
     phrase: c.kind === "text" ? c.phrase : null,
+    code: c.kind === "barcode" ? c.code : null,
     capturedAt: c.capturedAt,
     mealSlot: c.mealSlot ?? "snack",
     status: c.status,

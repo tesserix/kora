@@ -151,3 +151,18 @@ it("exposes a text capture's phrase and no thumbnail", async () => {
     kind: "text", phrase: "chicken and rice", thumbnailUri: null, kcal: null,
   });
 });
+
+// kora#241: a queued barcode has no thumbnail and no phrase either. The row
+// carries the raw code, which is the only thing the diary can distinguish two
+// unresolved scans by.
+it("exposes a barcode capture's code and no thumbnail", async () => {
+  await append({
+    id: "cap_b1", kind: "barcode", code: "5000112637922",
+    capturedAt: atLocalNoon(daysAgo(3)), ownerId: "uid-1",
+  } as Parameters<typeof append>[0]);
+  const { result } = await renderHook(() => useQueuedCaptures(localDayOf(daysAgo(3))), { wrapper: wrap(newClient()) });
+  await waitFor(() => expect(result.current.rows).toHaveLength(1));
+  expect(result.current.rows[0]).toMatchObject({
+    kind: "barcode", code: "5000112637922", phrase: null, thumbnailUri: null, kcal: null,
+  });
+});

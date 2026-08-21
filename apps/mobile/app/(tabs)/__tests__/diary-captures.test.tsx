@@ -73,6 +73,7 @@ function captureRow(over: Partial<QueuedCaptureRow> = {}): QueuedCaptureRow {
     kind: "photo",
     thumbnailUri: "file:///document/captures/c1.jpg",
     phrase: null,
+    code: null,
     capturedAt: atLocalNoon(2026, 8, 6),
     mealSlot: "lunch",
     status: "pending",
