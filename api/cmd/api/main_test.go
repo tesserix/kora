@@ -3,14 +3,12 @@ package main
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tesserix/kora/api/internal/agents"
 	"github.com/tesserix/kora/api/internal/ai"
 	"github.com/tesserix/kora/api/internal/ai/providers"
 	"github.com/tesserix/kora/api/internal/config"
@@ -60,50 +58,6 @@ func TestGatewayWiringUsesTheGatewayForRequestsAndEmbeddings(t *testing.T) {
 
 	assert.IsType(t, providers.AgentGatewayProvider{}, wiring.requests)
 	assert.IsType(t, providers.AgentGatewayProvider{}, wiring.embeddings)
-}
-
-func TestGatewayWiringAlsoBuildsGatewayOnlyAgentDelegator(t *testing.T) {
-	t.Parallel()
-
-	delegator, registry, err := buildAgentDelegator(config.Config{
-		AIGatewayEnabled: true,
-		AIGatewayBaseURL: "http://agentgateway.kora.svc.cluster.local/v1",
-		AIGatewayAPIKey:  "internal-key",
-		AIAgentTimeout:   25 * time.Second,
-	}, slog.New(slog.DiscardHandler))
-
-	require.NoError(t, err)
-	assert.IsType(t, &agents.GatewayClient{}, delegator)
-	assert.Nil(t, registry, "no registry base URL means routing stays on the compiled-in agents")
-}
-
-func TestGatewayWiringBuildsTheRegistryWhenConfigured(t *testing.T) {
-	t.Parallel()
-
-	delegator, registry, err := buildAgentDelegator(config.Config{
-		AIGatewayEnabled:  true,
-		AIGatewayBaseURL:  "http://agentgateway.kora.svc.cluster.local/v1",
-		AIGatewayAPIKey:   "internal-key",
-		AIAgentTimeout:    25 * time.Second,
-		AIRegistryBaseURL: "https://aregistry.tesserix.app",
-		AIRegistryAPIKey:  "internal-key",
-		AIRegistryTTL:     5 * time.Minute,
-	}, slog.New(slog.DiscardHandler))
-
-	require.NoError(t, err)
-	assert.IsType(t, &agents.GatewayClient{}, delegator)
-	require.NotNil(t, registry)
-	assert.NotNil(t, registry.AsSelector(), "a configured registry must be usable as the coach's selector")
-}
-
-func TestDirectProviderModeDoesNotBuildAgentServiceBypass(t *testing.T) {
-	t.Parallel()
-
-	delegator, registry, err := buildAgentDelegator(config.Config{}, slog.New(slog.DiscardHandler))
-
-	require.NoError(t, err)
-	assert.Nil(t, delegator)
-	assert.Nil(t, registry)
 }
 
 func TestDirectWiringKeepsEmbeddingsOnGemini(t *testing.T) {

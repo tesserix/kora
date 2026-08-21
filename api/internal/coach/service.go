@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"strings"
 	"time"
 
@@ -91,6 +92,18 @@ type Answer struct {
 	ShowSupport bool
 }
 
+// guidanceSkill is the registry skill id Q&A routes to. Kora names the
+// capability, not the agent: whichever published agent declares this skill
+// answers, so adding or replacing one is a registry change, not a deploy.
+const guidanceSkill = "nutrition-guidance"
+
+// AgentRunner is the coach's view of the agent path — satisfied by
+// *agents.Coordinator. It is an interface here so this package keeps its
+// dependencies inverted and can be tested without a registry.
+type AgentRunner interface {
+	Run(ctx context.Context, skill, prompt string) (agents.Run, error)
+}
+
 // Service is the coach's Q&A + nudges entry point: grounded over a
 // deterministic Context, budget-gated via ai.Meter, and guardrail-gated via
 // the Protective policy.
@@ -99,8 +112,7 @@ type Service struct {
 	provider ai.Provider
 	meter    ai.Meter
 	thread   *ThreadRepository
-	delegate agents.Delegator
-	selector agents.Selector
+	runner   AgentRunner
 }
 
 // NewService builds a Service over its collaborators. thread may be nil, in
@@ -109,30 +121,16 @@ func NewService(g *Grounder, p ai.Provider, m ai.Meter, thread *ThreadRepository
 	return &Service{g: g, provider: p, meter: m, thread: thread}
 }
 
-// WithDelegator makes Otto a supervisor over reviewed A2A agents. The
-// delegator is wired only in AgentGateway mode; direct-provider development
-// mode keeps the existing GenerateText path.
-func (s *Service) WithDelegator(delegate agents.Delegator) *Service {
-	s.delegate = delegate
-	return s
-}
-
-// WithSelector replaces the compiled-in phrase table with registry-driven
-// routing. A nil selector keeps the keyword default, so an unconfigured
-// registry changes nothing about how questions are routed.
-func (s *Service) WithSelector(selector agents.Selector) *Service {
-	if selector != nil {
-		s.selector = selector
+// WithAgents returns a copy of s that prefers the registry-resolved agent for
+// Q&A. A nil or typed-nil runner leaves the direct provider path in place, so
+// an unconfigured registry is simply the previous behaviour.
+func (s *Service) WithAgents(runner AgentRunner) *Service {
+	if runner == nil || reflect.ValueOf(runner).IsNil() {
+		return s
 	}
-	return s
-}
-
-// route picks the agent for a question, defaulting to keyword selection.
-func (s *Service) route(ctx context.Context, question string) agents.Name {
-	if s.selector == nil {
-		return agents.SelectForQuestion(question)
-	}
-	return s.selector.SelectForQuestion(ctx, question)
+	out := *s
+	out.runner = runner
+	return &out
 }
 
 // Ask answers a free-text question grounded over the user's Context. The
@@ -151,7 +149,7 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 	}
 	signals := SignalsFrom(grounded)
 
-	if s.delegate == nil && s.provider == nil {
+	if s.provider == nil && s.runner == nil {
 		return Answer{Text: providerUnavailableText, ShowSupport: guardrails.AtRisk(signals)}, nil
 	}
 
@@ -163,29 +161,22 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 		return Answer{Text: budgetDegradedText, ShowSupport: guardrails.AtRisk(signals)}, nil
 	}
 
-	userPrompt := fmt.Sprintf("SUPERVISOR REQUIREMENTS:\n%s\n\nCONTEXT:\n%s\n\nQUESTION: %s", qaSystemPrompt, grounded.Render(), question)
-	var raw string
-	var usage ai.Usage
-	if s.delegate != nil {
-		result, delegateErr := s.delegate.Delegate(ctx, s.route(ctx, question), userPrompt)
-		raw, usage, err = result.Text, result.Usage, delegateErr
-	} else {
-		providerCtx, collector := ai.WithUsageCollector(ctx)
-		raw, usage, err = s.provider.GenerateText(providerCtx, qaSystemPrompt, userPrompt)
-		for _, abandoned := range collector.Drain() {
-			s.record(ctx, userID, abandoned)
+	userPrompt := fmt.Sprintf("CONTEXT:\n%s\n\nQUESTION: %s", grounded.Render(), question)
+
+	raw, err := s.askAgent(ctx, userID, userPrompt)
+	if err != nil {
+		// The agent path is preferred, not required: a registry that publishes
+		// no matching agent, or a gateway that fails, must not cost the user an
+		// answer the direct provider can still give. An unconfigured runner is
+		// the expected state in dev and is not worth a line per request.
+		if !errors.Is(err, errNoAgent) {
+			slog.WarnContext(ctx, "coach: agent run failed, falling back to the provider", "err", err, "skill", guidanceSkill)
 		}
+		raw, err = s.askProvider(ctx, userID, userPrompt)
 	}
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			usage.Outcome = ai.OutcomeTimeout
-		} else {
-			usage.Outcome = ai.OutcomeError
-		}
-		s.record(ctx, userID, usage)
 		return Answer{}, fmt.Errorf("coach: ask: generate: %w", err)
 	}
-	s.record(ctx, userID, usage)
 
 	restrictive := looksRestrictive(raw)
 	decision := guardrails.Evaluate(guardrails.Nudge{Text: raw, Restrictive: restrictive}, signals)
@@ -213,6 +204,71 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 	}
 
 	return answer, nil
+}
+
+// askAgent runs the question through the registry-resolved agent. The agent
+// carries its own system prompt and guardrails from its published definition,
+// so only the grounded CONTEXT/QUESTION body is sent — the same body the
+// direct path uses, which the agents' supervisor grounding already expects.
+func (s *Service) askAgent(ctx context.Context, userID uuid.UUID, userPrompt string) (string, error) {
+	if s.runner == nil {
+		return "", errNoAgent
+	}
+
+	started := time.Now()
+	run, err := s.runner.Run(ctx, guidanceSkill, userPrompt)
+	usage := ai.Usage{
+		Provider:  "agentgateway",
+		Model:     run.Agent,
+		CallType:  "coach",
+		TokensIn:  run.Usage.InputTokens,
+		TokensOut: run.Usage.OutputTokens,
+		LatencyMs: int(time.Since(started).Milliseconds()),
+	}
+	if err != nil {
+		// A failed run still consumed gateway quota, so it is metered like any
+		// other failed provider call rather than dropped.
+		usage.Outcome = outcomeFor(err)
+		s.record(ctx, userID, usage)
+		return "", err
+	}
+
+	s.record(ctx, userID, usage)
+	return run.Text, nil
+}
+
+// askProvider is the pre-agent path: one grounded GenerateText call.
+func (s *Service) askProvider(ctx context.Context, userID uuid.UUID, userPrompt string) (string, error) {
+	if s.provider == nil {
+		return "", errNoProvider
+	}
+	providerCtx, collector := ai.WithUsageCollector(ctx)
+	raw, usage, err := s.provider.GenerateText(providerCtx, qaSystemPrompt, userPrompt)
+	for _, abandoned := range collector.Drain() {
+		s.record(ctx, userID, abandoned)
+	}
+	if err != nil {
+		usage.Outcome = outcomeFor(err)
+		s.record(ctx, userID, usage)
+		return "", err
+	}
+	s.record(ctx, userID, usage)
+	return raw, nil
+}
+
+// errNoAgent marks "the agent path is not configured", so the fallback log
+// distinguishes it from an agent that was tried and failed.
+var errNoAgent = errors.New("coach: no agent runner configured")
+
+// errNoProvider marks the mirror case: the agent path failed and there is no
+// direct provider to fall back to.
+var errNoProvider = errors.New("coach: no provider configured")
+
+func outcomeFor(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return ai.OutcomeTimeout
+	}
+	return ai.OutcomeError
 }
 
 // ThreadResult is a replayed thread plus the CURRENT support state.

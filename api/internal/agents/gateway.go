@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,279 +12,201 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-
-	"github.com/tesserix/kora/api/internal/ai"
 )
 
-const maxResponseBytes = 1 << 20
+// runTimeout bounds one agent run. The published coach budget is 45s of model
+// time (ai-agents definitions.go), so this leaves headroom for transport
+// without letting a wedged agent hold a request open indefinitely.
+const runTimeout = 60 * time.Second
 
-var (
-	ErrUnknownAgent    = errors.New("unknown agent")
-	ErrInvalidResponse = errors.New("invalid agent response")
-)
+// maxPromptChars mirrors the A2A text part limit the agents enforce. Trimming
+// here turns a 422 from the gateway into a shorter prompt that still answers.
+const maxPromptChars = 12_000
 
-type Result struct {
-	Text  string
-	Usage ai.Usage
+// Usage is the token accounting an agent reports for a run, mapped onto the
+// same shape ai.Usage records so a run bills like any other model call.
+type Usage struct {
+	InputTokens  int
+	OutputTokens int
+	CachedTokens int
+	Estimated    bool
 }
 
-type Delegator interface {
-	Delegate(ctx context.Context, name Name, prompt string) (Result, error)
+// Run is the outcome of one A2A call: the agent's text plus enough provenance
+// to explain which revision produced it.
+type Run struct {
+	RunID  string
+	Agent  string
+	Skill  string
+	State  string
+	Text   string
+	Digest string
+	Usage  Usage
 }
 
-// GatewayClient invokes reviewed A2A agents only through the configured
-// AgentGateway origin. It never accepts an agent-card URL from request data.
-type GatewayClient struct {
-	baseURL    url.URL
-	apiKey     string
-	httpClient *http.Client
-	newID      func() string
-	roster     RosterSource
+// Gateway calls agents over A2A JSON-RPC through the Agent Gateway. It holds
+// no agent list of its own — every route comes from a resolved card.
+type Gateway struct {
+	baseURL string
+	apiKey  string
+	client  *http.Client
 }
 
-// WithRoster lets a trusted control plane publish agents beyond the two
-// compiled-in names. The roster only ever widens the allowlist; when it is
-// unset or unreachable, Delegate falls back to the compiled list, so a
-// registry outage can never admit an agent that review has not seen.
-func (c *GatewayClient) WithRoster(roster RosterSource) *GatewayClient {
-	c.roster = roster
-	return c
-}
-
-// allows reports whether name may be delegated to.
-func (c *GatewayClient) allows(ctx context.Context, name Name) bool {
-	if name.reviewed() {
-		return true
+// NewGateway builds a Gateway, returning nil when unconfigured so callers
+// nil-check it the same way they nil-check Registry.
+//
+// Only the ORIGIN of baseURL is kept. AI_GATEWAY_BASE_URL ends in /v1 because
+// the model path speaks the OpenAI protocol, while A2A is routed at /a2a/v1/
+// on the same gateway — joining the two would produce /v1/a2a/v1/<agent> and
+// 404 on every run.
+func NewGateway(baseURL, apiKey string, client *http.Client) *Gateway {
+	origin := originOf(baseURL)
+	if origin == "" || strings.TrimSpace(apiKey) == "" {
+		return nil
 	}
-	if c.roster == nil {
-		return false
+	if client == nil {
+		client = &http.Client{Timeout: runTimeout}
 	}
-	published := c.roster.Roster(ctx)
-	return published != nil && published(name)
+	return &Gateway{baseURL: origin, apiKey: apiKey, client: client}
 }
 
-func NewGatewayClient(modelBaseURL, apiKey string, timeout time.Duration) (*GatewayClient, error) {
-	parsed, err := url.Parse(strings.TrimSpace(modelBaseURL))
+// originOf reduces a URL to scheme://host[:port], returning "" when it has no
+// usable origin.
+func originOf(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
+}
+
+// Send runs one message against the agent addressed by the resolved card.
+// The card supplies the route; the gateway supplies the host and the key.
+func (g *Gateway) Send(ctx context.Context, resolved *ResolvedAgent, prompt string) (Run, error) {
+	if g == nil {
+		return Run{}, ErrNotConfigured
+	}
+	if resolved == nil {
+		return Run{}, fmt.Errorf("agents: send: no resolved agent")
+	}
+
+	path := resolved.A2APath()
+	if path == "" {
+		return Run{}, fmt.Errorf("agents: %s publishes no a2a url", resolved.Agent.Metadata.Name)
+	}
+	if transport := resolved.Transport(); transport != "JSONRPC" {
+		return Run{}, fmt.Errorf("agents: %s wants transport %s, which Kora does not speak", resolved.Agent.Metadata.Name, transport)
+	}
+	if len(prompt) > maxPromptChars {
+		prompt = prompt[:maxPromptChars]
+	}
+
+	requestID := uuid.NewString()
+	body, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      requestID,
+		"method":  "message/send",
+		"params": map[string]any{
+			"message": map[string]any{
+				"role":  "user",
+				"parts": []map[string]any{{"kind": "text", "text": prompt}},
+			},
+		},
+	})
 	if err != nil {
-		return nil, fmt.Errorf("agents: parse gateway URL: %w", err)
+		return Run{}, fmt.Errorf("agents: encode a2a request: %w", err)
 	}
-	if (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-		return nil, fmt.Errorf("agents: gateway URL must be absolute HTTP(S)")
-	}
-	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return nil, fmt.Errorf("agents: gateway URL must not contain user info, query, or fragment")
-	}
-	path := strings.TrimRight(parsed.EscapedPath(), "/")
-	if path != "" && path != "/v1" {
-		return nil, fmt.Errorf("agents: gateway URL path must be /v1 or empty")
-	}
-	if strings.TrimSpace(apiKey) == "" {
-		return nil, fmt.Errorf("agents: gateway API key is required")
-	}
-	if timeout <= 0 {
-		return nil, fmt.Errorf("agents: timeout must be positive")
-	}
-	parsed.Path = ""
-	parsed.RawPath = ""
 
-	return &GatewayClient{
-		baseURL:    *parsed,
-		apiKey:     apiKey,
-		httpClient: &http.Client{Timeout: timeout},
-		newID:      uuid.NewString,
+	ctx, cancel := context.WithTimeout(ctx, runTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.baseURL+path, bytes.NewReader(body))
+	if err != nil {
+		return Run{}, fmt.Errorf("agents: build a2a request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+g.apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := g.client.Do(req)
+	if err != nil {
+		return Run{}, fmt.Errorf("agents: a2a request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		detail, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return Run{}, fmt.Errorf("agents: a2a %s returned %d: %s", path, resp.StatusCode, strings.TrimSpace(string(detail)))
+	}
+
+	var envelope a2aResponse
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		return Run{}, fmt.Errorf("agents: decode a2a response: %w", err)
+	}
+	if envelope.Error != nil {
+		return Run{}, fmt.Errorf("agents: a2a error %d: %s", envelope.Error.Code, envelope.Error.Message)
+	}
+
+	text := envelope.text()
+	if text == "" {
+		return Run{}, fmt.Errorf("agents: %s returned no text part", resolved.Agent.Metadata.Name)
+	}
+
+	return Run{
+		RunID:  envelope.Result.ID,
+		Agent:  resolved.Agent.Metadata.Name,
+		State:  envelope.Result.Status.State,
+		Text:   text,
+		Digest: resolved.Agent.Metadata.Digest,
+		Usage: Usage{
+			InputTokens:  envelope.Result.Metadata.Usage.InputTokens,
+			OutputTokens: envelope.Result.Metadata.Usage.OutputTokens,
+			CachedTokens: envelope.Result.Metadata.Usage.CachedTokens,
+			Estimated:    envelope.Result.Metadata.Usage.Estimated,
+		},
 	}, nil
 }
 
-type a2aRequest struct {
-	JSONRPC string        `json:"jsonrpc"`
-	ID      string        `json:"id"`
-	Method  string        `json:"method"`
-	Params  requestParams `json:"params"`
-}
-
-type requestParams struct {
-	Message requestMessage `json:"message"`
-}
-
-type requestMessage struct {
-	Role  string        `json:"role"`
-	Parts []requestPart `json:"parts"`
-}
-
-type requestPart struct {
-	Kind string `json:"kind"`
-	Text string `json:"text"`
-}
-
 type a2aResponse struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id"`
-	Result  *responseResult `json:"result"`
-	Error   *responseError  `json:"error"`
+	Result struct {
+		ID     string `json:"id"`
+		Status struct {
+			State string `json:"state"`
+		} `json:"status"`
+		Artifacts []struct {
+			Parts []struct {
+				Kind string `json:"kind"`
+				Text string `json:"text"`
+			} `json:"parts"`
+		} `json:"artifacts"`
+		Metadata struct {
+			Usage struct {
+				InputTokens  int  `json:"input_tokens"`
+				OutputTokens int  `json:"output_tokens"`
+				CachedTokens int  `json:"cached_tokens"`
+				Estimated    bool `json:"estimated"`
+			} `json:"usage"`
+		} `json:"metadata"`
+	} `json:"result"`
+	Error *struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
 }
 
-type responseError struct {
-	Code int `json:"code"`
-}
-
-type responseResult struct {
-	Status struct {
-		State string `json:"state"`
-	} `json:"status"`
-	Artifacts []struct {
-		Parts []struct {
-			Kind string `json:"kind"`
-			Text string `json:"text"`
-		} `json:"parts"`
-	} `json:"artifacts"`
-	Metadata struct {
-		Usage struct {
-			InputTokens  int `json:"input_tokens"`
-			OutputTokens int `json:"output_tokens"`
-		} `json:"usage"`
-	} `json:"metadata"`
-}
-
-func (c *GatewayClient) Delegate(ctx context.Context, name Name, prompt string) (result Result, err error) {
-	result.Usage = ai.Usage{
-		Provider: "agentgateway",
-		Model:    string(name),
-		CallType: "agent_delegate",
-	}
-	started := time.Now()
-	defer func() {
-		result.Usage.LatencyMs = int(time.Since(started).Milliseconds())
-	}()
-
-	if !c.allows(ctx, name) {
-		return result, fmt.Errorf("agents: %w: %q", ErrUnknownAgent, name)
-	}
-	prompt = strings.TrimSpace(prompt)
-	if prompt == "" {
-		return result, fmt.Errorf("agents: prompt is required")
-	}
-
-	requestID := c.newID()
-	payload, err := json.Marshal(a2aRequest{
-		JSONRPC: "2.0",
-		ID:      requestID,
-		Method:  "message/send",
-		Params: requestParams{Message: requestMessage{
-			Role:  "user",
-			Parts: []requestPart{{Kind: "text", Text: prompt}},
-		}},
-	})
-	if err != nil {
-		return result, fmt.Errorf("agents: encode request: %w", err)
-	}
-
-	endpoint := c.baseURL
-	endpoint.Path = "/a2a/v1/" + string(name)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(payload))
-	if err != nil {
-		return result, fmt.Errorf("agents: build request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Kora-AI-Capability", "agent_delegate")
-	if name == MealPlanner {
-		req.Header.Set("X-Kora-AI-Context-Kind", "structured")
-	} else {
-		req.Header.Set("X-Kora-AI-Context-Kind", "conversation")
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return result, fmt.Errorf("agents: gateway request: %w", err)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
-	if err != nil {
-		return result, fmt.Errorf("agents: read gateway response: %w", err)
-	}
-	if len(body) > maxResponseBytes {
-		return result, fmt.Errorf("agents: %w: response exceeds limit", ErrInvalidResponse)
-	}
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return result, fmt.Errorf("agents: gateway returned HTTP %d", resp.StatusCode)
-	}
-
-	var decoded a2aResponse
-	if err := json.Unmarshal(body, &decoded); err != nil {
-		return result, fmt.Errorf("agents: %w: decode JSON", ErrInvalidResponse)
-	}
-	if decoded.JSONRPC != "2.0" {
-		return result, fmt.Errorf("agents: %w: unexpected JSON-RPC version", ErrInvalidResponse)
-	}
-	var responseID string
-	if err := json.Unmarshal(decoded.ID, &responseID); err != nil || responseID != requestID {
-		return result, fmt.Errorf("agents: %w: mismatched JSON-RPC id", ErrInvalidResponse)
-	}
-	if decoded.Error != nil {
-		return result, fmt.Errorf("agents: A2A JSON-RPC error %d", decoded.Error.Code)
-	}
-	if decoded.Result == nil || decoded.Result.Status.State != "completed" {
-		return result, fmt.Errorf("agents: %w: run did not complete", ErrInvalidResponse)
-	}
-
-	parts := make([]string, 0, len(decoded.Result.Artifacts))
-	for _, artifact := range decoded.Result.Artifacts {
+// text concatenates every text part across artifacts, which is how a
+// multi-artifact answer is meant to be read back.
+func (r a2aResponse) text() string {
+	var b strings.Builder
+	for _, artifact := range r.Result.Artifacts {
 		for _, part := range artifact.Parts {
-			if part.Kind == "text" && strings.TrimSpace(part.Text) != "" {
-				parts = append(parts, strings.TrimSpace(part.Text))
+			if part.Kind != "text" || part.Text == "" {
+				continue
 			}
-		}
-	}
-	if len(parts) == 0 {
-		return result, fmt.Errorf("agents: %w: missing text artifact", ErrInvalidResponse)
-	}
-	text := strings.Join(parts, "\n")
-	if name == MealPlanner {
-		text, err = formatMealPlan(text)
-		if err != nil {
-			return result, err
-		}
-	}
-
-	result.Text = text
-	result.Usage.TokensIn = decoded.Result.Metadata.Usage.InputTokens
-	result.Usage.TokensOut = decoded.Result.Metadata.Usage.OutputTokens
-	return result, nil
-}
-
-type mealPlan struct {
-	Summary string `json:"summary"`
-	Days    []struct {
-		Date  string `json:"date"`
-		Meals []struct {
-			Name        string `json:"name"`
-			Description string `json:"description"`
-		} `json:"meals"`
-	} `json:"days"`
-}
-
-func formatMealPlan(raw string) (string, error) {
-	var plan mealPlan
-	if err := json.Unmarshal([]byte(raw), &plan); err != nil {
-		return "", fmt.Errorf("agents: %w: meal plan is not JSON", ErrInvalidResponse)
-	}
-	if strings.TrimSpace(plan.Summary) == "" || len(plan.Days) == 0 {
-		return "", fmt.Errorf("agents: %w: meal plan is incomplete", ErrInvalidResponse)
-	}
-	lines := []string{strings.TrimSpace(plan.Summary)}
-	for _, day := range plan.Days {
-		if strings.TrimSpace(day.Date) == "" || len(day.Meals) == 0 {
-			return "", fmt.Errorf("agents: %w: meal plan day is incomplete", ErrInvalidResponse)
-		}
-		lines = append(lines, "", day.Date)
-		for _, meal := range day.Meals {
-			if strings.TrimSpace(meal.Name) == "" || strings.TrimSpace(meal.Description) == "" {
-				return "", fmt.Errorf("agents: %w: meal is incomplete", ErrInvalidResponse)
+			if b.Len() > 0 {
+				b.WriteString("\n")
 			}
-			lines = append(lines, "• "+strings.TrimSpace(meal.Name)+" — "+strings.TrimSpace(meal.Description))
+			b.WriteString(part.Text)
 		}
 	}
-	return strings.Join(lines, "\n"), nil
+	return strings.TrimSpace(b.String())
 }
-
-var _ Delegator = (*GatewayClient)(nil)
