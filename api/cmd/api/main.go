@@ -85,7 +85,7 @@ func main() {
 	}
 
 	resolveHandler, aiProvider, resolveCache := buildResolveHandler(context.Background(), cfg, db, logger)
-	agentDelegator, err := buildAgentDelegator(cfg)
+	agentDelegator, agentRegistry, err := buildAgentDelegator(cfg, logger)
 	if err != nil {
 		logger.Error("agent supervisor init failed", "err", err)
 		os.Exit(1)
@@ -171,6 +171,7 @@ func main() {
 			Resolver:        resolveHandler,
 			Provider:        aiProvider,
 			AgentDelegator:  agentDelegator,
+			AgentSelector:   agentRegistry.AsSelector(),
 			ResolveCache:    resolveCache,
 			BFFHMACKey:      cfg.BFFHMACKey,
 			AppleExchanger:  appleExchanger,
@@ -236,11 +237,31 @@ func main() {
 	logger.Info("api stopped")
 }
 
-func buildAgentDelegator(cfg config.Config) (agents.Delegator, error) {
+// buildAgentDelegator builds the A2A client and, when a registry is
+// configured, the roster that widens its allowlist beyond the compiled-in
+// agents. The registry is returned separately so the coach can also route on
+// it; a nil registry leaves both behaviours at their compiled defaults.
+func buildAgentDelegator(cfg config.Config, logger *slog.Logger) (agents.Delegator, *agents.Registry, error) {
 	if !cfg.AIGatewayEnabled {
-		return nil, nil
+		return nil, nil, nil
 	}
-	return agents.NewGatewayClient(cfg.AIGatewayBaseURL, cfg.AIGatewayAPIKey, cfg.AIAgentTimeout)
+	client, err := agents.NewGatewayClient(cfg.AIGatewayBaseURL, cfg.AIGatewayAPIKey, cfg.AIAgentTimeout)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	registry, err := agents.NewRegistry(cfg.AIRegistryBaseURL, cfg.AIRegistryAPIKey, cfg.AIRegistryTTL)
+	if err != nil {
+		return nil, nil, err
+	}
+	if registry == nil {
+		logger.Info("agent routing: compiled-in agents (no registry configured)")
+		return client, nil, nil
+	}
+
+	registry.WithObserver(metrics.RecordAgentResolve)
+	logger.Info("agent routing: agentic registry", "base_url", cfg.AIRegistryBaseURL, "ttl", cfg.AIRegistryTTL)
+	return client.WithRoster(registry), registry, nil
 }
 
 // providerEmbedder adapts an ai.Provider's three-value Embed to the narrower

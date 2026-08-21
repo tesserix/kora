@@ -54,6 +54,9 @@ type Deps struct {
 	// It is nil outside AgentGateway mode, preserving local direct-provider
 	// development without creating a direct agent-service bypass.
 	AgentDelegator agents.Delegator
+	// AgentSelector routes a question to an agent using the skills the
+	// registry publishes. Nil falls back to the compiled-in phrase table.
+	AgentSelector agents.Selector
 	// ResolveCache is the SAME cache instance the resolve engine reads
 	// Resolutions from (see cmd/api/main.go's buildResolveHandler). It is
 	// wired into foodlog.Service so a post-log correction can evict the
@@ -303,7 +306,8 @@ func NewRouter(deps Deps) *gin.Engine {
 		coachMeter := billing.NewMeter(deps.DB)
 		coachThread := coach.NewThreadRepository(deps.DB)
 		coachService := coach.NewService(&coachGrounder, deps.Provider, coachMeter, &coachThread).
-			WithDelegator(deps.AgentDelegator)
+			WithDelegator(deps.AgentDelegator).
+			WithSelector(deps.AgentSelector)
 		coachHandler := coach.NewHandler(coachService)
 		v1.GET("/coach/nudges", coachHandler.Nudges)
 		v1.POST("/coach/ask", coachHandler.Ask)
