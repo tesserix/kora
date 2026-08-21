@@ -236,6 +236,31 @@ func TestLoadAgentGatewayFeatureFlag(t *testing.T) {
 	assert.Equal(t, 24*time.Second, cfg.AIAgentTimeout)
 }
 
+// The registry is a separate trust domain: it matches sha256(bearer) against
+// its own deploy-key entry. Inheriting the gateway key here shipped to
+// production and 401'd every lookup behind a silent keyword fallback.
+func TestLoadDoesNotInheritTheGatewayKeyAsTheRegistryDeployKey(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
+	t.Setenv("AI_GATEWAY_API_KEY", "internal-key")
+	t.Setenv("AI_REGISTRY_BASE_URL", "https://aregistry.tesserix.app")
+
+	cfg, err := Load()
+
+	require.NoError(t, err)
+	assert.Empty(t, cfg.AIRegistryAPIKey)
+}
+
+func TestLoadReadsTheRegistryDeployKey(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
+	t.Setenv("AI_GATEWAY_API_KEY", "internal-key")
+	t.Setenv("AI_REGISTRY_API_KEY", "deploy-key")
+
+	cfg, err := Load()
+
+	require.NoError(t, err)
+	assert.Equal(t, "deploy-key", cfg.AIRegistryAPIKey)
+}
+
 func TestLoadReadsAgentTimeout(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
 	t.Setenv("AI_AGENT_TIMEOUT", "18s")
