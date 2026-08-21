@@ -84,6 +84,39 @@ type addWeightRequest struct {
 	// LocalDate is the device-local day at capture — see kora#84 and
 	// internal/localday. Empty falls back to the profile zone.
 	LocalDate string `json:"local_date"`
+	// Body composition is optional and every metric is a pointer, so an
+	// omitted field stays absent instead of arriving as a measured 0 (kora#45).
+	// Derived values — BMI, fat-free mass, fat mass in kg — are not accepted
+	// here at all; see migration 000039 for why.
+	BodyFatPct         *float64 `json:"body_fat_pct"`
+	SubcutaneousFatPct *float64 `json:"subcutaneous_fat_pct"`
+	VisceralFatRating  *float64 `json:"visceral_fat_rating"`
+	SkeletalMusclePct  *float64 `json:"skeletal_muscle_pct"`
+	MuscleMassKg       *float64 `json:"muscle_mass_kg"`
+	BodyWaterPct       *float64 `json:"body_water_pct"`
+	ProteinPct         *float64 `json:"protein_pct"`
+	BoneMassKg         *float64 `json:"bone_mass_kg"`
+	// ScaleBMRKcal is stored for comparison only — it never feeds a calorie
+	// target, which stays derived by internal/onboarding/calc.go.
+	ScaleBMRKcal *float64 `json:"scale_bmr_kcal"`
+	// Source is the measuring instrument. Empty defaults to manual in the
+	// repository; an unrecognised value is a 400, not a constraint violation.
+	Source Source `json:"source"`
+}
+
+func (req addWeightRequest) composition() BodyComposition {
+	return BodyComposition{
+		BodyFatPct:         req.BodyFatPct,
+		SubcutaneousFatPct: req.SubcutaneousFatPct,
+		VisceralFatRating:  req.VisceralFatRating,
+		SkeletalMusclePct:  req.SkeletalMusclePct,
+		MuscleMassKg:       req.MuscleMassKg,
+		BodyWaterPct:       req.BodyWaterPct,
+		ProteinPct:         req.ProteinPct,
+		BoneMassKg:         req.BoneMassKg,
+		ScaleBMRKcal:       req.ScaleBMRKcal,
+		Source:             req.Source,
+	}
 }
 
 func (h Handler) AddWeight(c *gin.Context) {
@@ -101,7 +134,12 @@ func (h Handler) AddWeight(c *gin.Context) {
 		httpx.RespondServiceError(c, err)
 		return
 	}
-	e, err := h.repo.AddWeight(c.Request.Context(), userID, req.WeightKg, req.LoggedAt, localDate)
+	e, err := h.repo.AddWeightEntry(c.Request.Context(), userID, WeightInput{
+		WeightKg:    req.WeightKg,
+		LoggedAt:    req.LoggedAt,
+		LocalDate:   localDate,
+		Composition: req.composition(),
+	})
 	if err != nil {
 		httpx.RespondServiceError(c, err)
 		return
