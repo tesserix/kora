@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/tesserix/kora/api/internal/auth"
 )
 
 // runTimeout bounds one agent run. The published coach budget is 45s of model
@@ -131,6 +133,9 @@ func (g *Gateway) Send(ctx context.Context, resolved *ResolvedAgent, prompt stri
 	}
 	req.Header.Set("Authorization", "Bearer "+g.apiKey)
 	req.Header.Set("Content-Type", "application/json")
+	if token, ok := auth.VerifiedTokenFromContext(ctx); ok {
+		req.Header.Set("X-Kora-End-User-Token", "Bearer "+token)
+	}
 
 	resp, err := g.client.Do(req)
 	if err != nil {

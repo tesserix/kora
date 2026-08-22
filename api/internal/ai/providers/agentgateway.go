@@ -10,12 +10,14 @@ import (
 	"github.com/openai/openai-go/option"
 
 	"github.com/tesserix/kora/api/internal/ai"
+	"github.com/tesserix/kora/api/internal/auth"
 )
 
 const (
 	gatewayCapabilityHeader  = "X-Kora-AI-Capability"
 	gatewayContextKindHeader = "X-Kora-AI-Context-Kind"
 	gatewayRTKAppliedHeader  = "X-Kora-RTK-Applied"
+	gatewayEndUserHeader     = "X-Kora-End-User-Token"
 )
 
 // AgentGatewayProvider routes every model capability through the private Agent
@@ -33,7 +35,7 @@ type AgentGatewayProvider struct {
 
 func NewAgentGatewayProvider(apiKey, baseURL, model string) AgentGatewayProvider {
 	classified := func(capability, contextKind string) OpenAIProvider {
-		return newOpenAIProvider(
+		provider := newOpenAIProvider(
 			apiKey,
 			baseURL,
 			model,
@@ -42,6 +44,8 @@ func NewAgentGatewayProvider(apiKey, baseURL, model string) AgentGatewayProvider
 			option.WithHeader(gatewayContextKindHeader, contextKind),
 			option.WithHeader(gatewayRTKAppliedHeader, "false"),
 		)
+		provider.options = delegatedUserOptions
+		return provider
 	}
 	return AgentGatewayProvider{
 		identify: classified("identify_text", "json_api"),
@@ -88,7 +92,7 @@ func (p AgentGatewayProvider) Embed(ctx context.Context, text string) ([]float32
 		Model:          p.embed.model,
 		Dimensions:     openai.Int(int64(embedOutputDimensionality)),
 		EncodingFormat: openai.EmbeddingNewParamsEncodingFormatFloat,
-	})
+	}, p.embed.requestOptions(ctx)...)
 	usage := ai.Usage{
 		Provider:  "agentgateway",
 		Model:     p.embed.model,
@@ -123,7 +127,7 @@ func (p AgentGatewayProvider) Transcribe(ctx context.Context, audio []byte, mime
 				openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{URL: dataURL}),
 			}),
 		},
-	})
+	}, p.transcribe.requestOptions(ctx)...)
 	usage := ai.Usage{
 		Provider:  "agentgateway",
 		Model:     p.transcribe.model,
@@ -141,6 +145,14 @@ func (p AgentGatewayProvider) Transcribe(ctx context.Context, audio []byte, mime
 		return "", usage, fmt.Errorf("agentgateway: transcribe: no choices in response")
 	}
 	return response.Choices[0].Message.Content, usage, nil
+}
+
+func delegatedUserOptions(ctx context.Context) []option.RequestOption {
+	token, ok := auth.VerifiedTokenFromContext(ctx)
+	if !ok {
+		return nil
+	}
+	return []option.RequestOption{option.WithHeader(gatewayEndUserHeader, "Bearer "+token)}
 }
 
 func (p AgentGatewayProvider) GenerateText(ctx context.Context, systemPrompt, userPrompt string) (string, ai.Usage, error) {

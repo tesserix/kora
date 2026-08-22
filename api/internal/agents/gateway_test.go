@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/tesserix/kora/api/internal/auth"
 )
 
 // a2aServer answers one message/send the way kora_agents.api does, and records
@@ -80,6 +82,34 @@ func TestSendSpeaksTheAgentsA2AContract(t *testing.T) {
 	}
 	if run.Digest != "sha256:abc" {
 		t.Errorf("Digest = %q, want the resolved revision's digest", run.Digest)
+	}
+}
+
+func TestSendDelegatesTheVerifiedEndUserIdentity(t *testing.T) {
+	var gotToken string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotToken = r.Header.Get("X-Kora-End-User-Token")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"jsonrpc": "2.0", "id": "1",
+			"result": map[string]any{
+				"id": "run-1", "status": map[string]any{"state": "completed"},
+				"artifacts": []any{map[string]any{
+					"parts": []any{map[string]any{"kind": "text", "text": "answer"}},
+				}},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	g := NewGateway(srv.URL, "gw-key", nil)
+	resolved := resolvedFixture()
+	ctx := auth.WithVerifiedToken(context.Background(), "firebase-user-token")
+	_, err := g.Send(ctx, &resolved, "question")
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if gotToken != "Bearer firebase-user-token" {
+		t.Fatalf("X-Kora-End-User-Token = %q, want delegated Firebase token", gotToken)
 	}
 }
 
