@@ -39,7 +39,7 @@ jobs:
           go test -race -p 1 -coverprofile=coverage.out ./...
 
   mobile:
-    uses: tesserix/tesserix-workflows/.github/workflows/expo-ci.yml@0e53e4eb28bc52c5dd24f5872c643fc87406e3ec
+    uses: tesserix/tesserix-workflows/.github/workflows/expo-ci.yml@v2.1.0
     with:
       working_directory: apps/mobile
       install_directory: apps/mobile
@@ -50,7 +50,7 @@ jobs:
       audit_config_path: apps/mobile/audit-ci.jsonc
 
   secrets:
-    uses: tesserix/tesserix-workflows/.github/workflows/secret-scan.yml@0e53e4eb28bc52c5dd24f5872c643fc87406e3ec
+    uses: tesserix/tesserix-workflows/.github/workflows/secret-scan.yml@v2.1.0
 
   gate:
     name: CI gate
