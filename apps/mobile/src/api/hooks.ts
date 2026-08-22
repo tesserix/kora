@@ -36,6 +36,7 @@ import type { MealSlot } from "@/lib/mealSlot";
 import type {
   AppNotification,
   AIUsageStatus,
+  BodyCompositionReadResult,
   Candidate,
   ChallengeDetail,
   ChallengeSummary,
@@ -1013,6 +1014,26 @@ export function useResolvePhoto() {
   });
 }
 
+// POST /v1/body-composition/read (kora#314, PR B): reads a smart-scale
+// screenshot with the vision model and returns whatever it could legibly
+// see — see api/internal/bodyread. It WRITES NOTHING; bodyread never touches
+// internal/tracking, and the uploaded image itself is discarded after the
+// provider call (service.go's own comment: "image is never written to disk
+// or any persistent store beyond this point"). Nothing is saved until the
+// confirmed reading goes through useAddWeight below. Multipart, like
+// useResolvePhoto/useParseRecipe's photo branch, for the same reason: apiFetch
+// forces a JSON content-type that would break the multipart boundary fetch()
+// sets for a FormData body. onSettled refreshes AI usage because this spends
+// the same quota those two endpoints do.
+export function useReadBodyComposition() {
+  const refreshAIUsage = useRefreshAIUsage();
+  return useMutation({
+    mutationFn: (file: ResolveFile) =>
+      apiFetchMultipart("/v1/body-composition/read", buildCaptureForm(file)) as Promise<BodyCompositionReadResult>,
+    onSettled: refreshAIUsage,
+  });
+}
+
 /**
  * What POST /v1/weight accepts.
  *
@@ -1021,20 +1042,37 @@ export function useResolvePhoto() {
  * through untouched — a key that is absent here is absent on the wire and
  * lands as SQL NULL, which is the whole point (a body fat of 0.0% is a
  * measurement, "not measured" is not). Do not default any of them in.
+ *
+ * `local_date` (kora#314) overrides the day this entry is filed under — see
+ * useAddWeight's own comment for the bug this field exists to prevent.
  */
 export type AddWeightVars = Omit<AddWeightPayload, "source"> & {
   source?: WeightSource;
   logged_at?: string;
+  local_date?: string;
 };
 
 export function useAddWeight() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (vars: AddWeightVars) =>
-      apiFetch("/v1/weight", {
+    mutationFn: (vars: AddWeightVars) => {
+      // THE TRAP (kora#314): this used to hardcode `local_date: localDateNow()`
+      // unconditionally, spread in LAST, which silently clobbered any
+      // `local_date` a caller supplied. BodyCompositionForm's date row lets a
+      // user confirm a scale reading dated days ago — if that override were
+      // dropped here, the entry would end up filed under TODAY's calendar day
+      // (local_date) while its own timestamp (logged_at) said otherwise, which
+      // is the exact mis-filing #314's date row exists to prevent (see
+      // internal/localday and kora#84). `vars.local_date` now wins when the
+      // caller supplies one; every existing caller that never sets it — plain
+      // WeightLogSheet weigh-ins, and BodyCompositionSheet before this field
+      // existed — keeps getting today's date, unchanged.
+      const local_date = vars.local_date ?? localDateNow();
+      return apiFetch("/v1/weight", {
         method: "POST",
-        body: JSON.stringify({ ...vars, local_date: localDateNow() }),
-      }),
+        body: JSON.stringify({ ...vars, local_date }),
+      });
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["weight"] });
       // The user just weighed in — re-arm the one-shot weight reminder trigger

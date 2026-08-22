@@ -1,4 +1,10 @@
-import { draftFromValues, parseCompositionDraft, previewValues } from "../bodyCompositionForm";
+import {
+  compositionValuesFromReading,
+  draftFromValues,
+  parseCompositionDraft,
+  parseReadingDate,
+  previewValues,
+} from "../bodyCompositionForm";
 
 const ok = (result: ReturnType<typeof parseCompositionDraft>) => {
   if (!result.ok) throw new Error(`expected a valid draft, got ${JSON.stringify(result.errors)}`);
@@ -138,6 +144,58 @@ describe("source", () => {
     expect(ok(parseCompositionDraft({ weight_kg: "70" }, "scale_screenshot", "metric")).source).toBe(
       "scale_screenshot",
     );
+  });
+});
+
+describe("parseReadingDate — kora#314's date row", () => {
+  it("accepts a well-formed date on or before today", () => {
+    expect(parseReadingDate("2026-08-19", "2026-08-22")).toEqual({ ok: true, value: "2026-08-19" });
+    expect(parseReadingDate("2026-08-22", "2026-08-22")).toEqual({ ok: true, value: "2026-08-22" });
+  });
+
+  it("rejects a date after today — a screenshot cannot show tomorrow", () => {
+    const result = parseReadingDate("2026-08-23", "2026-08-22");
+    expect(result).toEqual({ ok: false, error: "Date can't be in the future." });
+  });
+
+  it("rejects anything that isn't YYYY-MM-DD", () => {
+    expect(parseReadingDate("22/08/2026", "2026-08-22").ok).toBe(false);
+    expect(parseReadingDate("2026-8-9", "2026-08-22").ok).toBe(false);
+    expect(parseReadingDate("", "2026-08-22").ok).toBe(false);
+    expect(parseReadingDate("not a date", "2026-08-22").ok).toBe(false);
+  });
+
+  it("trims surrounding whitespace before validating", () => {
+    expect(parseReadingDate("  2026-08-19  ", "2026-08-22")).toEqual({ ok: true, value: "2026-08-19" });
+  });
+});
+
+describe("compositionValuesFromReading — kora#314's initialValues seed", () => {
+  it("carries every numeric field the reader saw", () => {
+    const values = compositionValuesFromReading({
+      weight_kg: 70.2,
+      body_fat_pct: 24.2,
+      reading_date: "2026-08-19",
+    });
+    expect(values).toEqual({ weight_kg: 70.2, body_fat_pct: 24.2 });
+  });
+
+  it("omits reading_date — it is not a composition metric", () => {
+    const values = compositionValuesFromReading({ weight_kg: 70.2, reading_date: "2026-08-19" });
+    expect("reading_date" in values).toBe(false);
+  });
+
+  it("omits every field the reader could not see, rather than defaulting to 0", () => {
+    const values = compositionValuesFromReading({ weight_kg: 70.2 });
+    expect(Object.keys(values)).toEqual(["weight_kg"]);
+    expect("body_fat_pct" in values).toBe(false);
+    expect("bone_mass_kg" in values).toBe(false);
+  });
+
+  it("keeps a legitimately read 0 as a measured 0", () => {
+    const values = compositionValuesFromReading({ weight_kg: 70.2, body_fat_pct: 0 });
+    expect(values.body_fat_pct).toBe(0);
+    expect("body_fat_pct" in values).toBe(true);
   });
 });
 
