@@ -496,6 +496,122 @@ func TestRouter_IdentifyPhoto_DoesNotRetryARateLimit(t *testing.T) {
 	assert.Equal(t, 1, primary.calls, "a rate limit must be surfaced immediately, never retried")
 }
 
+// TestRouter_IdentifyBodyComposition_DoesNotFallBack mirrors
+// TestRouter_IdentifyPhoto_DoesNotFallBack: IdentifyBodyComposition shares
+// IdentifyPhoto's no-fallback policy (retryPrimaryOnTransient), for the same
+// reason — the deployed fallback is text-only, so handing it a scale
+// screenshot would guarantee a failure that masks the primary's real error.
+func TestRouter_IdentifyBodyComposition_DoesNotFallBack(t *testing.T) {
+	primary := &stubProvider{name: "primary-stub", bodyCompErr: errors.New("gemini exploded")}
+	fallback := &stubProvider{
+		name: "fallback-stub",
+		bodyComp: BodyCompositionReading{
+			WeightKg: floatPtr(70),
+		},
+		bodyCompUsage: Usage{Provider: "fallback-stub"},
+	}
+	r := &Router{Primary: primary, Fallback: fallback}
+
+	_, _, err := r.IdentifyBodyComposition(context.Background(), []byte("png-bytes"), "image/png")
+
+	require.Error(t, err, "the primary's real error must surface, not be masked by a blind fallback")
+	assert.Contains(t, err.Error(), "gemini exploded")
+	assert.Equal(t, 1, primary.calls)
+	assert.Equal(t, 0, fallback.calls, "a text-only fallback must never be handed a body-composition screenshot")
+}
+
+// TestRouter_IdentifyBodyComposition_GivesPrimaryTheFullPhotoBudget mirrors
+// TestRouter_IdentifyPhoto_GivesPrimaryTheFullPhotoBudget: this call type
+// shares photoBudget with IdentifyPhoto rather than getting its own, shorter
+// budget that a real vision call could not meet.
+func TestRouter_IdentifyBodyComposition_GivesPrimaryTheFullPhotoBudget(t *testing.T) {
+	assert.Greater(t, photoBudget, 3*time.Second,
+		"3s cannot accommodate a vision call; that budget is what starved the photo primary")
+
+	primary := &stubProvider{
+		name:          "primary-stub",
+		bodyComp:      BodyCompositionReading{WeightKg: floatPtr(82.4)},
+		bodyCompUsage: Usage{Provider: "primary-stub"},
+		delay:         50 * time.Millisecond,
+	}
+	r := &Router{Primary: primary, Fallback: &stubProvider{name: "fallback-stub"}}
+
+	reading, usage, err := r.IdentifyBodyComposition(context.Background(), []byte("png-bytes"), "image/png")
+
+	require.NoError(t, err)
+	require.NotNil(t, reading.WeightKg)
+	assert.Equal(t, 82.4, *reading.WeightKg)
+	assert.Equal(t, "primary-stub", usage.Provider)
+}
+
+// flakyBodyCompositionProvider is flakyPhotoProvider's counterpart for
+// IdentifyBodyComposition: returns errs[i] on call i+1, then succeeds. Kept
+// as its own small type rather than folding a second flaky method onto
+// flakyPhotoProvider — the two types are two lines of near-identical
+// boilerplate each, and merging them would need an extra "which method"
+// flag that only exists to make the type serve two unrelated tests.
+type flakyBodyCompositionProvider struct {
+	Provider
+	errs  []error
+	calls int
+	usage Usage
+}
+
+func (f *flakyBodyCompositionProvider) IdentifyBodyComposition(context.Context, []byte, string) (BodyCompositionReading, Usage, error) {
+	f.calls++
+	if f.calls <= len(f.errs) {
+		return BodyCompositionReading{}, f.usage, f.errs[f.calls-1]
+	}
+	return BodyCompositionReading{WeightKg: floatPtr(65.1)}, f.usage, nil
+}
+
+// TestRouter_IdentifyBodyComposition_RetriesATransient503 mirrors
+// TestRouter_IdentifyPhoto_RetriesATransient503 (kora#179): the same
+// documented-temporary 503 must not fail a body-composition capture on
+// first sight, and both attempts' usage must be accounted for.
+func TestRouter_IdentifyBodyComposition_RetriesATransient503(t *testing.T) {
+	primary := &flakyBodyCompositionProvider{
+		errs:  []error{errors.New("gemini: generate content: Error 503, Message: This model is currently experiencing high demand., Status: UNAVAILABLE")},
+		usage: Usage{Provider: "gemini", TokensIn: 10, LatencyMs: 100},
+	}
+	r := &Router{Primary: primary, Fallback: &stubProvider{name: "fallback-stub"}}
+
+	reading, usage, err := r.IdentifyBodyComposition(context.Background(), []byte("png"), "image/png")
+
+	require.NoError(t, err, "a documented-temporary error must not fail the capture on first sight")
+	require.NotNil(t, reading.WeightKg)
+	assert.Equal(t, 2, primary.calls, "exactly one retry")
+	// The failed attempt's cost is carried forward — ai_usage_events records
+	// failures too, so dropping it would under-count spend.
+	assert.Equal(t, 20, usage.TokensIn, "both attempts' tokens must be accounted for")
+	assert.Equal(t, 200, usage.LatencyMs)
+}
+
+// TestRouter_IdentifyBodyComposition_DoesNotRetryARateLimit mirrors
+// TestRouter_IdentifyPhoto_DoesNotRetryARateLimit: a rate limit must
+// surface immediately, never retried, for the same free-tier-quota
+// reasoning cmd/embed and IdentifyPhoto both document.
+func TestRouter_IdentifyBodyComposition_DoesNotRetryARateLimit(t *testing.T) {
+	primary := &flakyBodyCompositionProvider{
+		errs: []error{
+			errors.New("gemini: Error 429, Message: Resource has been exhausted, Status: RESOURCE_EXHAUSTED"),
+			errors.New("second call that must never happen"),
+		},
+	}
+	r := &Router{Primary: primary, Fallback: &stubProvider{name: "fallback-stub"}}
+
+	_, _, err := r.IdentifyBodyComposition(context.Background(), []byte("png"), "image/png")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "429", "the rate limit itself must surface, not a retry's error")
+	assert.Equal(t, 1, primary.calls, "a rate limit must be surfaced immediately, never retried")
+}
+
+// floatPtr is a small test-only helper for BodyCompositionReading's pointer
+// fields, which are pointers on purpose (nil means "not legible", not zero
+// — see the type's doc in types.go).
+func floatPtr(f float64) *float64 { return &f }
+
 func TestIsTransientProviderError(t *testing.T) {
 	tests := []struct {
 		name string

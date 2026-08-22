@@ -19,6 +19,10 @@ type stubProvider struct {
 	guessUsage Usage
 	guessErr   error
 
+	bodyComp      BodyCompositionReading
+	bodyCompUsage Usage
+	bodyCompErr   error
+
 	ingredients      []IngredientGuess
 	ingredientsUsage Usage
 	ingredientsErr   error
@@ -95,7 +99,7 @@ func (s *stubProvider) IdentifyBodyComposition(ctx context.Context, image []byte
 		<-ctx.Done()
 		return BodyCompositionReading{}, Usage{}, ctx.Err()
 	}
-	return BodyCompositionReading{}, Usage{}, nil
+	return s.bodyComp, s.bodyCompUsage, s.bodyCompErr
 }
 
 func (s *stubProvider) Decompose(ctx context.Context, dish string) ([]IngredientGuess, Usage, error) {
