@@ -77,10 +77,23 @@ type BodyCompositionReading struct {
 	// ScaleBMRKcal is the scale's own BMR estimate — comparison only, never
 	// wired to Kora's own Mifflin-St Jeor target (see tracking.BodyComposition).
 	ScaleBMRKcal *float64 `json:"scale_bmr_kcal,omitempty"`
-	// ReadingDate is the calendar date the SCREENSHOT ITSELF shows for this
-	// reading, "YYYY-MM-DD", nil when not legible. Never a timestamp, never
-	// inferred as "today" — a reading may be days old by the time it's
-	// uploaded (kora#314).
+	// ReadingDateText is the date text EXACTLY as printed on the screenshot
+	// — "22/08", "Sat, 22/08, 10:57", "2026-08-22", whatever the screen
+	// actually shows, verbatim, nil when no date is legible at all. This is
+	// the vision model's ENTIRE contribution to the date: it transcribes,
+	// it never resolves a year or reformats. A provider must never invent
+	// a year that is not printed (kora#314) — asking the model to do that
+	// is the same fabrication class this whole type exists to prevent.
+	ReadingDateText *string `json:"reading_date_text,omitempty"`
+	// ReadingDate is the RESOLVED calendar date, "YYYY-MM-DD", derived from
+	// ReadingDateText by Go code (internal/bodyread's date resolver), never
+	// by the model — see that package's resolveReadingDateText for the
+	// deterministic, unit-tested rule (most recent occurrence of a
+	// year-less day/month at or before the server's today) and which
+	// ambiguities it deliberately leaves as nil rather than guesses. nil
+	// here means either no date was legible, or the text was too
+	// ambiguous to resolve safely — PR B's editable date row is what
+	// catches both cases and the rare stale-screenshot case besides.
 	ReadingDate *string `json:"reading_date,omitempty"`
 }
 

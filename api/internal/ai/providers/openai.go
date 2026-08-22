@@ -9,6 +9,7 @@ import (
 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
+	"github.com/openai/openai-go/packages/param"
 	"github.com/openai/openai-go/shared"
 
 	"github.com/tesserix/kora/api/internal/ai"
@@ -164,7 +165,7 @@ func unwrapIngredients(data []byte) ([]byte, error) {
 func (p OpenAIProvider) IdentifyText(ctx context.Context, phrase string) ([]ai.Guess, ai.Usage, error) {
 	data, usage, err := p.generateJSON(ctx, p.model, callTypeIdentifyText,
 		identifySystemPrompt, []openai.ChatCompletionContentPartUnionParam{openai.TextContentPart(phrase)},
-		"food_guesses", guessJSONSchema())
+		"food_guesses", guessJSONSchema(), param.Opt[float64]{})
 	if err != nil {
 		return nil, usage, err
 	}
@@ -188,7 +189,7 @@ func (p OpenAIProvider) IdentifyPhoto(ctx context.Context, image []byte, mime st
 		[]openai.ChatCompletionContentPartUnionParam{
 			openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{URL: dataURL}),
 		},
-		"food_guesses", guessJSONSchema())
+		"food_guesses", guessJSONSchema(), param.Opt[float64]{})
 	if err != nil {
 		return nil, usage, err
 	}
@@ -211,7 +212,7 @@ func (p OpenAIProvider) IdentifyPhoto(ctx context.Context, image []byte, mime st
 // object root directly.
 //
 // Every property is typed nullable (`["number", "null"]` or
-// `["string", "null"]` for reading_date) AND listed in "required". This
+// `["string", "null"]` for reading_date_text) AND listed in "required". This
 // looks contradictory at first glance — "required" usually means "must be
 // present with a value" — but under strict:true, Structured Outputs has no
 // other way to express "optional": every property MUST appear in
@@ -224,26 +225,59 @@ func (p OpenAIProvider) IdentifyPhoto(ctx context.Context, image []byte, mime st
 // read" invariant. Compare guessJSONSchema's comment, which anticipates the
 // same kind of reader confusion for its own required list.
 func bodyCompositionJSONSchema() map[string]any {
-	numberOrNull := map[string]any{"type": []string{"number", "null"}}
+	numberOrNull := func(description string) map[string]any {
+		return map[string]any{"type": []string{"number", "null"}, "description": description}
+	}
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"weight_kg":            numberOrNull,
-			"body_fat_pct":         numberOrNull,
-			"subcutaneous_fat_pct": numberOrNull,
-			"visceral_fat_rating":  numberOrNull,
-			"skeletal_muscle_pct":  numberOrNull,
-			"muscle_mass_kg":       numberOrNull,
-			"body_water_pct":       numberOrNull,
-			"protein_pct":          numberOrNull,
-			"bone_mass_kg":         numberOrNull,
-			"scale_bmr_kcal":       numberOrNull,
-			"reading_date":         map[string]any{"type": []string{"string", "null"}},
+			"weight_kg": numberOrNull("Body weight in kilograms, as displayed. Convert from " +
+				"pounds if the screen shows lb (1 lb = 0.453592 kg) — that is unit " +
+				"conversion of the one displayed number, not inference."),
+			"body_fat_pct": numberOrNull("Body fat PERCENTAGE only. If the screen also shows a " +
+				"fat mass in kilograms, ignore that number — report only the percentage here."),
+			"subcutaneous_fat_pct": numberOrNull("Subcutaneous fat percentage, if the screen " +
+				"labels one separately from body_fat_pct."),
+			"visceral_fat_rating": numberOrNull("The scale's own visceral fat RATING exactly as " +
+				"displayed — usually a small bare number like 7, or a value on a 1-59 scale. " +
+				"This is a vendor rating, not a percentage: report it even with no percent " +
+				"sign shown, and never treat it as one."),
+			"skeletal_muscle_pct": numberOrNull("Skeletal muscle PERCENTAGE. Distinct from " +
+				"muscle_mass_kg — some scales show both; report each only if its own value " +
+				"is on screen, never derive one from the other."),
+			"muscle_mass_kg": numberOrNull("Muscle mass in kilograms — return this ONLY if the " +
+				"screen labels a value as TOTAL muscle mass. A kg figure labelled SKELETAL " +
+				"muscle mass is a DIFFERENT, SMALLER quantity (skeletal muscle is a subset of " +
+				"total muscle) and reporting it here is a measurement error: many scale apps " +
+				"(Omron included) show only a skeletal-muscle kg figure and never a " +
+				"total-muscle one, so on those screens this field MUST be null even though a " +
+				"muscle-shaped kg number is visible."),
+			"body_water_pct": numberOrNull("Body water percentage, as displayed."),
+			"protein_pct":    numberOrNull("Protein percentage, as displayed."),
+			"bone_mass_kg": numberOrNull("Bone MASS in kilograms as the scale reports it — NOT " +
+				"bone density, a T-score, or a BMD number. If the screen shows only a density " +
+				"or T-score, use null."),
+			"scale_bmr_kcal": numberOrNull("The scale's own estimated basal metabolic rate in " +
+				"kilocalories, if shown."),
+			"reading_date_text": map[string]any{
+				"type": []string{"string", "null"},
+				"description": "The date TEXT EXACTLY AS PRINTED on screen for this reading — " +
+					"copy it verbatim, character for character (\"22/08\", \"Sat, 22/08\", " +
+					"\"2026-08-22\", whatever the screen actually shows). Do NOT reformat it " +
+					"to YYYY-MM-DD, do NOT add a year that is not printed, and do NOT compute " +
+					"or guess a year — a separate, non-model step resolves this text to a " +
+					"calendar date. Scale-app screens usually print this SOMEWHERE near the " +
+					"headline weight or measurement list — not only as a dedicated date " +
+					"label, but also as a timestamp, a day/date line under a metric name, or " +
+					"a history-chart axis entry for the displayed reading; check all of those " +
+					"before concluding no date is shown. Use null ONLY if no date for this " +
+					"reading appears anywhere on screen.",
+			},
 		},
 		"required": []string{
 			"weight_kg", "body_fat_pct", "subcutaneous_fat_pct", "visceral_fat_rating",
 			"skeletal_muscle_pct", "muscle_mass_kg", "body_water_pct", "protein_pct",
-			"bone_mass_kg", "scale_bmr_kcal", "reading_date",
+			"bone_mass_kg", "scale_bmr_kcal", "reading_date_text",
 		},
 		"additionalProperties": false,
 	}
@@ -268,7 +302,7 @@ func (p OpenAIProvider) IdentifyBodyComposition(ctx context.Context, image []byt
 		[]openai.ChatCompletionContentPartUnionParam{
 			openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{URL: dataURL}),
 		},
-		"body_composition_reading", bodyCompositionJSONSchema())
+		"body_composition_reading", bodyCompositionJSONSchema(), param.Opt[float64]{})
 	if err != nil {
 		return ai.BodyCompositionReading{}, usage, err
 	}
@@ -284,7 +318,7 @@ func (p OpenAIProvider) Decompose(ctx context.Context, dish string) ([]ai.Ingred
 	prompt := fmt.Sprintf(decomposeSystemPromptTmpl, dish)
 	data, usage, err := p.generateJSON(ctx, p.model, callTypeDecompose,
 		prompt, []openai.ChatCompletionContentPartUnionParam{openai.TextContentPart(dish)},
-		"dish_ingredients", ingredientJSONSchema())
+		"dish_ingredients", ingredientJSONSchema(), param.Opt[float64]{})
 	if err != nil {
 		return nil, usage, err
 	}
@@ -379,11 +413,18 @@ func jsonObjectSchemaHint(schema map[string]any) string {
 // compensates by appending a description of the expected shape to the
 // system prompt; see generateJSON's doc comment for why the schema itself
 // remains the actual invariant boundary regardless of response format.
+// temperature is per-call and zero-value (param.Opt[float64]{}, meaning
+// "omit — use the API's own default sampling") for every caller, including
+// IdentifyBodyComposition — kora#314's under-reads were never a sampling
+// problem (see bodyCompositionJSONSchema's required+nullable shape, and
+// gemini.go's IdentifyBodyComposition doc comment for the measurement that
+// ruled temperature out), so there is no special case to carry here.
 func (p OpenAIProvider) buildParams(
 	model, systemPrompt string,
 	userParts []openai.ChatCompletionContentPartUnionParam,
 	schemaName string,
 	schema map[string]any,
+	temperature param.Opt[float64],
 ) openai.ChatCompletionNewParams {
 	sys := systemPrompt
 	var rf openai.ChatCompletionNewParamsResponseFormatUnion
@@ -409,6 +450,7 @@ func (p OpenAIProvider) buildParams(
 			openai.UserMessage(userParts),
 		},
 		ResponseFormat: rf,
+		Temperature:    temperature,
 	}
 }
 
@@ -430,10 +472,11 @@ func (p OpenAIProvider) generateJSON(
 	userParts []openai.ChatCompletionContentPartUnionParam,
 	schemaName string,
 	schema map[string]any,
+	temperature param.Opt[float64],
 ) ([]byte, ai.Usage, error) {
 	start := time.Now()
 
-	params := p.buildParams(model, systemPrompt, userParts, schemaName, schema)
+	params := p.buildParams(model, systemPrompt, userParts, schemaName, schema, temperature)
 
 	resp, err := p.client.Chat.Completions.New(ctx, params, p.requestOptions(ctx)...)
 

@@ -180,7 +180,16 @@ func (s *Reader) Read(ctx context.Context, userID uuid.UUID, image []byte, mime 
 		return Result{}, fmt.Errorf("bodyread: read: provider: %w", err)
 	}
 
-	validated, dropped := validateReading(reading, time.Now())
+	// Resolve the model's VERBATIM date text (reading.ReadingDateText) into
+	// a calendar date BEFORE validateReading runs, so the same future-date
+	// and parse-failure guards validateReading already applies to every
+	// other field also cover a resolved date — this is Go code deriving a
+	// date by an explicit rule (see date_resolve.go), never the model
+	// guessing a year, which is the fabrication kora#314 forbids.
+	now := time.Now()
+	reading.ReadingDate = resolveReadingDateText(reading.ReadingDateText, now)
+
+	validated, dropped := validateReading(reading, now)
 	result := Result{
 		Reading:    validated,
 		Dropped:    dropped,
