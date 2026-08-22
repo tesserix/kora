@@ -62,12 +62,16 @@ func (p AgentGatewayProvider) IdentifyPhoto(ctx context.Context, image []byte, m
 	return guesses, gatewayUsage(usage), err
 }
 
-// IdentifyBodyComposition is not implemented for the Agent Gateway backend —
-// wiring it up (its own classified sub-provider, mirroring photo) is a
-// later task (kora#314). Zero value, nil error keeps AgentGatewayProvider
-// satisfying ai.Provider until then.
+// IdentifyBodyComposition is not yet implemented for the Agent Gateway
+// backend — wiring it up (its own classified sub-provider, mirroring photo)
+// is a later task (kora#314). Returning an error rather than a silent
+// zero-value "success" matters here: once Task 2/3 land, an all-nil
+// BodyCompositionReading is a legitimate real result (nothing legible on
+// the screen), so a caller must be able to tell "not implemented yet"
+// apart from "provider found nothing" by the error alone.
 func (p AgentGatewayProvider) IdentifyBodyComposition(ctx context.Context, image []byte, mime string) (ai.BodyCompositionReading, ai.Usage, error) {
-	return ai.BodyCompositionReading{}, ai.Usage{}, nil
+	return ai.BodyCompositionReading{}, ai.Usage{}, fmt.Errorf(
+		"agentgateway: identify body composition: not yet implemented — see kora#314")
 }
 
 func (p AgentGatewayProvider) Decompose(ctx context.Context, dish string) ([]ai.IngredientGuess, ai.Usage, error) {

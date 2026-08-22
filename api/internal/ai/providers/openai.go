@@ -202,13 +202,17 @@ func (p OpenAIProvider) IdentifyPhoto(ctx context.Context, image []byte, mime st
 	return guesses, usage, nil
 }
 
-// IdentifyBodyComposition is not implemented for the OpenAI-compatible
-// fallback — wiring it up is a later task (kora#314). Returning a zero
-// value and a nil error keeps OpenAIProvider satisfying ai.Provider without
-// silently claiming a capability this backend does not have yet; callers
-// must not reach this path until it is actually implemented.
+// IdentifyBodyComposition is not yet implemented for the OpenAI-compatible
+// fallback — wiring it up is a later task (kora#314). Returning an error
+// (rather than a silent zero-value "success", the way Embed and Transcribe
+// above also refuse rather than fake an answer) matters here specifically:
+// once Task 2/3 land, an all-nil BodyCompositionReading is a legitimate
+// real result (nothing legible on the screen), so a caller MUST be able to
+// tell "not implemented yet" apart from "provider found nothing" by the
+// error alone.
 func (p OpenAIProvider) IdentifyBodyComposition(ctx context.Context, image []byte, mime string) (ai.BodyCompositionReading, ai.Usage, error) {
-	return ai.BodyCompositionReading{}, ai.Usage{}, nil
+	return ai.BodyCompositionReading{}, ai.Usage{}, fmt.Errorf(
+		"openai: identify body composition: not yet implemented — see kora#314")
 }
 
 // Decompose breaks a dish into its ingredients using the configured model.

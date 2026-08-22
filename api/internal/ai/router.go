@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -394,11 +395,14 @@ func (r *Router) GenerateText(ctx context.Context, systemPrompt, userPrompt stri
 }
 
 // IdentifyBodyComposition is not routed yet — the primary/fallback/retry
-// policy for this call type is a later task (kora#314). Zero value, nil
-// error keeps Router satisfying Provider until that policy exists; nothing
-// in this task calls this method.
+// policy for this call type is a later task (kora#314). Returning an error
+// rather than a silent zero-value "success" matters here: once that policy
+// lands, an all-nil BodyCompositionReading is a legitimate real result
+// (nothing legible on the screen), so a caller must be able to tell "not
+// wired up yet" apart from "provider found nothing" by the error alone.
 func (r *Router) IdentifyBodyComposition(ctx context.Context, image []byte, mime string) (BodyCompositionReading, Usage, error) {
-	return BodyCompositionReading{}, Usage{}, nil
+	return BodyCompositionReading{}, Usage{}, fmt.Errorf(
+		"router: identify body composition: not yet implemented — see kora#314")
 }
 
 func (r *Router) Transcribe(ctx context.Context, audio []byte, mime string) (string, Usage, error) {
