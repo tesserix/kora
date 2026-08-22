@@ -208,11 +208,9 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 		// The agent path is preferred, not required: a registry that publishes
 		// no matching agent, or a gateway that fails, must not cost the user an
 		// answer the direct provider can still give. An unconfigured runner is
-		// the expected state in dev and is not worth a line per request.
-		// A configured agent path that FAILED is the case worth disclosing: the
-		// user asked the published coach and someone else answered. With no
-		// agent path at all there is nothing to disclose, and the reply stays
-		// unattributed as it always has.
+		// the expected state in dev and is not worth a line per request. A
+		// configured path that FAILED is worth disclosing, though: the user
+		// asked the published coach and someone else answered.
 		if !errors.Is(err, errNoAgent) {
 			slog.WarnContext(ctx, "coach: agent run failed, falling back to the provider", "err", err, "skill", skill)
 			by = Attribution{Agent: fallbackAgentName, Skill: skill}

@@ -100,6 +100,21 @@ export class TimeoutError extends Error {
 // than fail (see src/api/resolveWire.ts).
 export const REQUEST_TIMEOUT_MS = 25_000;
 
+// AGENT_REQUEST_TIMEOUT_MS is the deadline for routes that run the A2A agent
+// chain — classify, then draft with the planner, then review with the coach.
+// Three sequential model calls do not fit in 25s: a week-long plan measured
+// 27s+ on device and died at the deadline, and the user was told they were
+// OFFLINE. The catch-all Istio route caps each try at 30s and retries three
+// times (tesserix-k8s manifests/kora-istio/virtualservice.yaml), so a slow
+// plan was also re-running the whole paid chain on every retry.
+//
+// This only works for paths matched by that file's AI route, which holds
+// perTryTimeout: 100s and does not retry — 90s sits inside it with margin.
+// A path NOT on that route must keep REQUEST_TIMEOUT_MS: waiting 90s on a
+// socket Envoy closes at 30s is the exact failure the constant above exists
+// to prevent.
+export const AGENT_REQUEST_TIMEOUT_MS = 90_000;
+
 // Which of the two inputs aborted the composed signal below. This is tracked
 // as closure state we own rather than read back off the signal, because
 // AbortSignal.reason DOES NOT EXIST on this runtime: RN's global
@@ -129,7 +144,10 @@ type ComposedSignal = {
   readonly clear: () => void;
 };
 
-function composeDeadlineSignal(callerSignal: AbortSignal | null | undefined): ComposedSignal {
+function composeDeadlineSignal(
+  callerSignal: AbortSignal | null | undefined,
+  timeoutMs: number = REQUEST_TIMEOUT_MS,
+): ComposedSignal {
   const controller = new AbortController();
 
   // Deliberately a closure variable rather than anything read off the signal:
@@ -144,7 +162,7 @@ function composeDeadlineSignal(callerSignal: AbortSignal | null | undefined): Co
     controller.abort();
   };
 
-  const timer = setTimeout(() => abortWith("deadline"), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => abortWith("deadline"), timeoutMs);
 
   let onCallerAbort: (() => void) | undefined;
   if (callerSignal) {
@@ -330,8 +348,9 @@ async function runAttempt(
   callerSignal: AbortSignal | null | undefined,
   user: User | null,
   forceRefresh?: true,
+  timeoutMs?: number,
 ): Promise<Response> {
-  const composed = composeDeadlineSignal(callerSignal);
+  const composed = composeDeadlineSignal(callerSignal, timeoutMs);
   try {
     const token = user ? await getToken(user, forceRefresh) : null;
     return await doFetch(path, buildInit(token), composed);
@@ -344,16 +363,17 @@ async function fetchWithRetry(
   path: string,
   buildInit: (token: string | null) => RequestInit,
   callerSignal?: AbortSignal | null,
+  timeoutMs?: number,
 ): Promise<Response> {
   const user = auth?.currentUser ?? null;
-  const res = await runAttempt(path, buildInit, callerSignal, user);
+  const res = await runAttempt(path, buildInit, callerSignal, user, undefined, timeoutMs);
 
   if (res.status !== 401 || !user) return res;
 
   // A fresh deadline for the retry, not the remainder of the first attempt's
   // — a slow-but-recovering first attempt must not leave the retry with no
   // time left to even try.
-  const retryRes = await runAttempt(path, buildInit, callerSignal, user, true);
+  const retryRes = await runAttempt(path, buildInit, callerSignal, user, true, timeoutMs);
 
   if (retryRes.status === 401) await signOutForExpiredSession();
 
@@ -410,6 +430,7 @@ function isNoContent(res: Response): boolean {
 export async function apiFetchEnvelope<T>(
   path: string,
   init: RequestInit = {},
+  opts: { timeoutMs?: number } = {},
 ): Promise<{ data: T; meta?: Record<string, unknown> }> {
   try {
     const res = await fetchWithRetry(
@@ -423,6 +444,7 @@ export async function apiFetchEnvelope<T>(
         },
       }),
       init.signal,
+      opts.timeoutMs,
     );
 
     if (!res.ok) return await throwApiError(res);
@@ -446,8 +468,12 @@ export async function apiFetchEnvelope<T>(
 // fallback preserves the pre-existing behaviour for bodies with no `data`
 // key (or `data: null`): callers get the whole body back instead of
 // `undefined`.
-export async function apiFetch(path: string, init: RequestInit = {}): Promise<unknown> {
-  const envelope = await apiFetchEnvelope<unknown>(path, init);
+export async function apiFetch(
+  path: string,
+  init: RequestInit = {},
+  opts: { timeoutMs?: number } = {},
+): Promise<unknown> {
+  const envelope = await apiFetchEnvelope<unknown>(path, init, opts);
   return envelope.data ?? envelope;
 }
 

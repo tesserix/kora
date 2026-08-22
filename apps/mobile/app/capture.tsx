@@ -501,6 +501,11 @@ function IdleAffordance({
   return <View testID="capture-idle-type" />;
 }
 
+/** One settled turn in the Ask Otto thread, oldest first. */
+export type ThreadEntry =
+  | { role: "user"; text: string }
+  | { role: "otto"; text: string; agent?: string; reviewedBy?: string };
+
 interface CaptureBodyProps {
   displayName: string;
   insetTop: number;
@@ -511,12 +516,11 @@ interface CaptureBodyProps {
   resolution: Resolution | null;
   errorMsg: string | null;
   /**
-   * The phrase the user has just sent, shown as their own message in the
-   * thread while Otto works (kora#199).
+   * Every turn so far — the user's messages (kora#199) and Otto's replies
+   * (kora#264). Append-only: a second question must not erase the exchange it
+   * follows, or "also include breakfast" loses the plan it refers to.
    */
-  sentPhrase: string | null;
-  /** Otto's reply when the message was a question, not food (kora#264). */
-  answer?: { text: string; agent?: string; reviewedBy?: string } | null;
+  transcript: readonly ThreadEntry[];
   mealSlot: MealSlot;
   onChangeMealSlot: (slot: MealSlot) => void;
   onAdd: () => void;
@@ -570,8 +574,7 @@ export function CaptureBody({
   stage,
   resolution,
   errorMsg,
-  sentPhrase,
-  answer = null,
+  transcript,
   mealSlot,
   onChangeMealSlot,
   onAdd,
@@ -614,10 +617,10 @@ export function CaptureBody({
   // result) into view — on short viewports or with the keyboard open, the
   // in-thread bubble can otherwise land below the fold with no signal.
   useEffect(() => {
-    if (errorMsg || resolution) {
+    if (errorMsg || resolution || transcript.length > 0) {
       scrollViewRef.current?.scrollToEnd({ animated: true });
     }
-  }, [errorMsg, resolution]);
+  }, [errorMsg, resolution, transcript.length]);
 
   return (
     <KeyboardAvoidingView
@@ -673,15 +676,26 @@ export function CaptureBody({
           />
         )}
 
-        {/* The user's own message, in the thread where they put it.
-            UserBubble has existed — styled, tested, with its own reduced-motion
-            entrance — since the capture screen was built, and no screen ever
-            rendered it. So a typed phrase went nowhere: the text sat in the
-            composer for the whole 2-3s resolve (setText("") was inside
-            onSuccess) while the thread showed nothing, which reads as "did that
-            send?". Photo felt fine only because it has no field to linger in.
-            kora#199. */}
-        {sentPhrase ? <UserBubble>{sentPhrase}</UserBubble> : null}
+        {/* The conversation so far, oldest first. The user's turn is appended
+            optimistically on send (kora#199) and Otto's reply when it lands, so
+            the thread reads back the way the server already remembers it —
+            /v1/coach/message replays the last turns into every prompt. */}
+        {transcript.map((entry, index) =>
+          entry.role === "user" ? (
+            <UserBubble key={index}>{entry.text}</UserBubble>
+          ) : (
+            <OttoBubble
+              key={index}
+              agent={
+                entry.agent
+                  ? entry.agent + (entry.reviewedBy ? ` · reviewed by ${entry.reviewedBy}` : "")
+                  : undefined
+              }
+            >
+              {entry.text}
+            </OttoBubble>
+          ),
+        )}
 
         {stage === "analyzing" && (
           <View
@@ -734,18 +748,6 @@ export function CaptureBody({
             onChangePortion={onChangePortion}
           />
         )}
-
-        {answer ? (
-          <OttoBubble
-            agent={
-              answer.agent
-                ? answer.agent + (answer.reviewedBy ? ` · reviewed by ${answer.reviewedBy}` : "")
-                : undefined
-            }
-          >
-            {answer.text}
-          </OttoBubble>
-        ) : null}
 
         {errorMsg ? <OttoBubble>{errorMsg}</OttoBubble> : null}
       </ScrollView>
@@ -1021,11 +1023,12 @@ function ottoErrorMessage(error: Error): string {
   }
   if (error instanceof TimeoutError) {
     // Reached from the BARCODE path (handleBarcodeScanned), which still does
-    // not queue — kora#241 tracks giving it one. The typed path now queues on
-    // timeout (kora#196) and sets its own copy in handleSend's onError, and
-    // handleResolveFailure does the same for photo and voice, so this generic
-    // text is only ever seen by a caller with nothing saved. It therefore
-    // stays honest about the timeout itself and promises no save.
+    // not queue — kora#241 tracks giving it one — and from the typed path,
+    // which deliberately stopped queueing timeouts (see handleSend's onError,
+    // kora#264). handleResolveFailure still queues photo and voice timeouts
+    // and sets its own copy, so this text is only ever seen by a caller with
+    // nothing saved. It therefore stays honest about the timeout itself and
+    // promises no save.
     return "That took too long — mind trying again?";
   }
   return "Something went wrong while I looked at that. Please try again.";
@@ -1103,10 +1106,9 @@ export default function CaptureScreen() {
   // read `ai_text`.
   const [resolutionSource, setResolutionSource] = useState<ResolutionSource | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  // Otto's reply when the message was a question rather than food. Separate
-  // from errorMsg because it is an ANSWER, not a failure, and it carries who
-  // answered it.
-  const [answer, setAnswer] = useState<{ text: string; agent?: string; reviewedBy?: string } | null>(null);
+  // The conversation, not the latest line of it. Kept separate from errorMsg
+  // because these are ANSWERS, not failures, and each carries who answered.
+  const [transcript, setTranscript] = useState<readonly ThreadEntry[]>([]);
   const [mealSlot, setMealSlot] = useState<MealSlot>(() => mealSlotForHour(new Date().getHours()));
   const [adding, setAdding] = useState(false);
   // Candidate keys (see candidateKey) already logged successfully across
@@ -1154,11 +1156,14 @@ export default function CaptureScreen() {
   // cleared to null) in the same onSuccess handler that calls applyResolution,
   // so it can never lag behind — and never a later, unrelated resolution.
   const [resolvedPhrase, setResolvedPhrase] = useState<string | null>(null);
-  // What the user just said, shown as their own bubble while Otto works.
-  // Distinct from resolvedPhrase, which is the phrase attached to the LOG for
-  // the correction loop — this one is presentation, and is cleared whenever the
-  // thread is reset.
-  const [sentPhrase, setSentPhrase] = useState<string | null>(null);
+  // Cancel means the in-flight message never became an exchange, so it leaves
+  // the thread with the request it belonged to. A failed request does NOT go
+  // through here: its bubble stays as the retry context (see handleSend).
+  function dropPendingUserTurn() {
+    setTranscript((turns) =>
+      turns.length > 0 && turns[turns.length - 1].role === "user" ? turns.slice(0, -1) : turns,
+    );
+  }
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   // Guards a single CameraView against firing onBarcodeScanned repeatedly
   // for the same physical scan while the camera keeps detecting the code.
@@ -1218,8 +1223,7 @@ export default function CaptureScreen() {
 
   function handleCancelResolve() {
     // Cancel means "I've moved on" — the message goes with the request.
-    setSentPhrase(null);
-    setAnswer(null);
+    dropPendingUserTurn();
     resolveControllerRef.current?.abort();
     // Do NOT reset scannedRef here — the abort above releases it through
     // handleBarcodeScanned's onError (see #136 part 1). Resetting it a
@@ -1334,7 +1338,6 @@ export default function CaptureScreen() {
   // with a clean retry slate and no promotion leaking in from the last one.
   function applyResolution(data: Resolution, source: ResolutionSource) {
     setResolution(data);
-    setAnswer(null);
     setResolutionSource(source);
     setStage("result");
     setLoggedCandidateKeys(new Set());
@@ -1345,9 +1348,8 @@ export default function CaptureScreen() {
   }
 
   function handleModeChange(next: CaptureMode) {
-    // The bubble belongs to the thread being left behind.
-    setSentPhrase(null);
-    setAnswer(null);
+    // The thread belongs to the mode being left behind.
+    setTranscript([]);
     // Switching away from Voice mid-recording must not leave the native
     // recorder running in the background — stop it (best-effort) and reset
     // the mic button back to its start state.
@@ -1373,12 +1375,11 @@ export default function CaptureScreen() {
     // own return key reaches this without going through that button.
     if (phrase.length < MIN_PHRASE_CHARS) return;
     setErrorMsg(null);
-    setAnswer(null);
     // Optimistic, and deliberately BEFORE the request: the message belongs in
     // the thread the instant it is sent, exactly as every messaging app
     // behaves. Clearing inside onSuccess (as this did) left the text sitting in
     // the composer for the whole resolve with nothing else on screen changing.
-    setSentPhrase(phrase);
+    setTranscript((turns) => [...turns, { role: "user", text: phrase }]);
     setText("");
     // Fires right as send is pressed — the composer's own keyboard should
     // not stay up covering the result thread once a send is in flight.
@@ -1398,11 +1399,15 @@ export default function CaptureScreen() {
           // Conversation, so nothing to confirm and nothing to log: the thread
           // keeps the user's message and gains Otto's reply, and the screen
           // goes back to idle rather than to the add-to-diary card.
-          setAnswer({
-            text: data.answer,
-            agent: data.agent?.name,
-            reviewedBy: data.agent?.reviewed_by,
-          });
+          setTranscript((turns) => [
+            ...turns,
+            {
+              role: "otto",
+              text: data.answer,
+              agent: data.agent?.name,
+              reviewedBy: data.agent?.reviewed_by,
+            },
+          ]);
           setStage("idle");
           return;
         }
@@ -1427,14 +1432,23 @@ export default function CaptureScreen() {
         // suppresses a queue refusal: a phrase that could not be saved must
         // say so (see the catch below).
         const cancelled = controller.signal.aborted;
-        // Same classifier handleResolveFailure uses: these three mean the
-        // request never arrived, so the phrase is still good and belongs in
-        // the queue (kora#196). Anything else is a genuine refusal that would
-        // fail identically on replay.
-        const recoverable =
-          error instanceof NetworkError ||
-          error instanceof AuthTokenError ||
-          error instanceof TimeoutError;
+        // Same classifier handleResolveFailure uses, MINUS TimeoutError: these
+        // two mean the request never arrived, so the phrase is still good and
+        // belongs in the queue (kora#196). Anything else is a genuine refusal
+        // that would fail identically on replay.
+        //
+        // TimeoutError is excluded here alone (kora#264). This endpoint runs
+        // the agent chain — classify, draft, review — so a timeout means the
+        // request DID arrive and is still being worked on, which is the
+        // opposite of what the queue is for. Two things went wrong when it was
+        // treated as offline: a week-long plan request was told "You're
+        // offline" on a device with full signal, and the question itself was
+        // enqueued as a FOOD capture, so "plan my meals for the week" came
+        // back later as an attempt to name the foods in it. The deadline that
+        // makes a timeout here rare is AGENT_REQUEST_TIMEOUT_MS in
+        // src/lib/api.ts; when one still happens, the honest thing is to say
+        // it took too long and let the user ask again.
+        const recoverable = error instanceof NetworkError || error instanceof AuthTokenError;
         if (!recoverable) {
           // Hand the words back. The bubble goes with them: a message that
           // never arrived should not sit in the thread as though it did.
@@ -1880,8 +1894,7 @@ export default function CaptureScreen() {
         stage={displayStage}
         resolution={effectiveResolution}
         errorMsg={errorMsg}
-        sentPhrase={sentPhrase}
-        answer={answer}
+        transcript={transcript}
         mealSlot={mealSlot}
         onChangeMealSlot={setMealSlot}
         onAdd={handleAddToDiary}

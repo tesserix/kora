@@ -17,7 +17,7 @@ jest.mock("@/offline/enqueueCapture", () => ({
   enqueueTextCapture: jest.fn(),
 }));
 import { router } from "expo-router";
-import { ApiError, AuthTokenError, NetworkError, ResponseParseError } from "@/lib/api";
+import { ApiError, AuthTokenError, NetworkError, ResponseParseError, TimeoutError } from "@/lib/api";
 import type { FoodItem, Resolution } from "@/api/types";
 import { OfflineUnknownBarcodeError, resolutionFromCachedFood } from "@/offline/cachedResolution";
 import { StyleSheet } from "react-native";
@@ -328,7 +328,7 @@ function makeMixedCertaintyResolution(): Resolution {
 }
 
 const noopBodyProps = {
-  sentPhrase: null,
+  transcript: [],
   excluded: new Set<number>(),
   onToggleExclude: () => {},
   displayName: "Alex",
@@ -2003,6 +2003,35 @@ describe("a question gets an answer, not a food card", () => {
     await act(async () => options.onSuccess({ kind: "answer", citations: [], show_support: false, ...answer }));
   }
 
+  // A follow-up is only answerable if the user can still see what it follows.
+  // The screen kept one message and one answer, so the second question wiped
+  // the plan it was asking to amend — the server had the history, the thread
+  // did not.
+  test("a follow-up keeps the exchange it follows", async () => {
+    const rendered = await render(<CaptureScreen />);
+    await askAndAnswer(rendered, { answer: "Here's a week of meals to start from." });
+
+    const input = await rendered.findByLabelText("Tell Otto what you ate");
+    await fireEvent.changeText(input, "also include breakfast");
+    await fireEvent.press(await rendered.findByLabelText("Send"));
+    const [, options] = mockCaptureMessageMutate.mock.calls[1];
+    await act(async () =>
+      options.onSuccess({
+        kind: "answer",
+        citations: [],
+        show_support: false,
+        answer: "Breakfast added to each day.",
+      }),
+    );
+
+    expect(rendered.queryByText("Here's a week of meals to start from.")).toBeTruthy();
+    expect(
+      rendered.queryByText("can you please help create a proper meal plan for the next 1 week"),
+    ).toBeTruthy();
+    expect(rendered.queryByText("also include breakfast")).toBeTruthy();
+    expect(rendered.queryByText("Breakfast added to each day.")).toBeTruthy();
+  });
+
   test("renders the answer in the thread with no Add to diary", async () => {
     const rendered = await render(<CaptureScreen />);
     await askAndAnswer(rendered, { answer: "Here's a week of meals to start from." });
@@ -2122,6 +2151,28 @@ describe("a typed phrase enters the thread", () => {
 
     expect(await findByText("chicken and rice")).toBeTruthy();
     expect(field.props.value).toBe("");
+  });
+
+  // kora#264. A timeout on /v1/capture/message is NOT "offline": the request
+  // arrived and the agent chain is still running it. Queueing it replayed a
+  // question ("plan my meals for the week") through FOOD resolution, and the
+  // "You're offline" copy was flatly untrue on a device with full signal.
+  it("does not queue or claim offline when the agent chain times out", async () => {
+    const { findByText, findByLabelText, findByPlaceholderText, queryByText } = await render(
+      <CaptureScreen />,
+    );
+    await fireEvent.press(await findByText("Type"));
+    const field = await findByPlaceholderText(/tell otto/i);
+    await fireEvent.changeText(field, "plan my meals for the week");
+    await fireEvent.press(await findByLabelText("Send"));
+
+    const [, options] = mockCaptureMessageMutate.mock.calls[0];
+    await act(async () => options.onError(new TimeoutError()));
+
+    expect(enqueueTextCapture).not.toHaveBeenCalled();
+    expect(queryByText(/you're offline/i)).toBeNull();
+    expect(await findByText(/took too long/i)).toBeTruthy();
+    expect(await findByText("plan my meals for the week")).toBeTruthy();
   });
 
   // A genuine refusal is NOT queued — retrying it would fail identically.
