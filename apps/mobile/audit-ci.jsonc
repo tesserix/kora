@@ -38,6 +38,41 @@
       }
     },
     {
+      "GHSA-2v35-w6hq-6mfw|@expo/plist>@xmldom/xmldom": {
+        "active": true,
+        "notes": "Build-time plist input is repository-owned; upstream @expo/plist has no fixed release.",
+        "expiry": "2026-09-30"
+      }
+    },
+    {
+      "GHSA-f6ww-3ggp-fr8h|@expo/plist>@xmldom/xmldom": {
+        "active": true,
+        "notes": "Build-time plist input is repository-owned; upstream @expo/plist has no fixed release.",
+        "expiry": "2026-09-30"
+      }
+    },
+    {
+      "GHSA-j759-j44w-7fr8|@expo/plist>@xmldom/xmldom": {
+        "active": true,
+        "notes": "Build-time plist input is repository-owned; upstream @expo/plist has no fixed release.",
+        "expiry": "2026-09-30"
+      }
+    },
+    {
+      "GHSA-wh4c-j3r5-mjhp|@expo/plist>@xmldom/xmldom": {
+        "active": true,
+        "notes": "Build-time plist input is repository-owned; upstream @expo/plist has no fixed release.",
+        "expiry": "2026-09-30"
+      }
+    },
+    {
+      "GHSA-x6wf-f3px-wcqx|@expo/plist>@xmldom/xmldom": {
+        "active": true,
+        "notes": "Build-time plist input is repository-owned; upstream @expo/plist has no fixed release.",
+        "expiry": "2026-09-30"
+      }
+    },
+    {
       "GHSA-5p2g-fcmc-qvqq|metro-config>metro>image-size>": {
         "active": true,
         "notes": "Metro parses repository-owned assets during builds; image-size has no fixed release.",
