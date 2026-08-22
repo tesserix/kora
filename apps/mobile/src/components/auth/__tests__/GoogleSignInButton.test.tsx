@@ -1,3 +1,4 @@
+import * as RN from "react-native";
 import { fireEvent, render } from "@testing-library/react-native";
 import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
 
@@ -15,16 +16,35 @@ test("renders the label and the G mark", async () => {
   expect(getByTestId("google-g-mark")).toBeTruthy();
 });
 
-// Google's dark-theme branding spec. These are Google's values and must not be
-// swapped for theme tokens, however tempting the consistency looks.
-test("uses Google's dark-theme fill and hairline border", async () => {
-  const { getByLabelText } = await render(
-    <GoogleSignInButton accessibilityLabel="Sign in with Google" onPress={jest.fn()} />,
-  );
-  const style = styleOf(getByLabelText("Sign in with Google"));
-  expect(style.backgroundColor).toBe("#131314");
-  expect(style.borderColor).toBe("#8E918F");
-  expect(style.borderWidth).toBe(1);
+// Google publishes TWO official button variants and expects the one matching
+// the surrounding surface. Only the dark pair was implemented, so in light mode
+// the button rendered near-black between a white Apple button and a white email
+// button — the one dark element on the screen. Both variants are pinned here
+// because the failure is invisible to a test that only ever checks one scheme.
+//
+// These are Google's own values. Selecting between them is what the guidelines
+// describe; substituting Kora's theme tokens is what they forbid.
+// The BORDER is deliberately Kora's token, not Google's — see the component's
+// "DELIBERATE DEVIATION" comment. Pinned as the theme value so that restoring
+// Google's own border is a visible, intentional test change rather than a
+// silent one.
+test.each([
+  ["light", "#FFFFFF", "rgba(60,60,67,0.29)", "#1F1F1F"],
+  ["dark", "#131314", "rgba(255,255,255,0.09)", "#E3E3E3"],
+] as const)("uses Google's %s-scheme fill and label with Kora's border", async (scheme, fill, border, label) => {
+  const spy = jest.spyOn(RN, "useColorScheme").mockReturnValue(scheme);
+  try {
+    const { getByLabelText, getByText } = await render(
+      <GoogleSignInButton accessibilityLabel="Sign in with Google" onPress={jest.fn()} />,
+    );
+    const style = styleOf(getByLabelText("Sign in with Google"));
+    expect(style.backgroundColor).toBe(fill);
+    expect(style.borderColor).toBe(border);
+    expect(style.borderWidth).toBe(1);
+    expect(styleOf(getByText("Sign in with Google")).color).toBe(label);
+  } finally {
+    spy.mockRestore();
+  }
 });
 
 test("renders a caller-supplied title", async () => {

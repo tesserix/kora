@@ -4,12 +4,38 @@ import { AppText } from "@/components/Text";
 import { PressableScale } from "@/motion";
 import { useTheme } from "@/theme";
 
-// Google's dark-theme branding spec. NOT theme tokens: these are Google's
-// values and changing them to match Kora's palette breaks the branding
+// Google's two official button variants. NOT theme tokens: these are Google's
+// own values, and substituting Kora's palette is what would break the branding
 // guidelines that permit using their mark at all.
-const GOOGLE_DARK_FILL = "#131314";
-const GOOGLE_DARK_BORDER = "#8E918F";
-const GOOGLE_DARK_LABEL = "#E3E3E3";
+//
+// Choosing BETWEEN these two by colour scheme is not a substitution — the
+// guidelines publish both and expect the one matching the surrounding surface.
+// Only the dark pair existed until now, so in light mode the button rendered
+// near-black between a white Apple button and a white email button: the single
+// dark element on the screen, reading as a rendering fault rather than a brand.
+const GOOGLE_BRAND = {
+  light: { fill: "#FFFFFF", label: "#1F1F1F" },
+  dark: { fill: "#131314", label: "#E3E3E3" },
+} as const;
+
+// DELIBERATE DEVIATION, decided by the product owner (see kora#314 session).
+//
+// Google specifies a border alongside each variant — #747775 on light, #8E918F
+// on dark. Both are heavier than Kora's own hairline, and on the sign-in screen
+// the three buttons sit in one stack: Apple (native, borderless), Google, and
+// email (Kora's `colors.border`). With Google's own value the middle button
+// carried a visibly darker outline than the one below it and read as a
+// mismatch rather than as branding.
+//
+// So the border — and ONLY the border — comes from the theme. The fill and the
+// label above stay exactly Google's, as does the G mark, because those are what
+// actually carry the brand. This is the smallest deviation that resolves the
+// mismatch; softening the fill or the mark would not be.
+//
+// It IS a deviation: Google's guidelines say not to alter the specified
+// colours. Enforcement risk is low in practice — Apple reviews the app, Google
+// does not — but if that ever changes, restoring the two values above is the
+// whole fix.
 
 export interface GoogleSignInButtonProps {
   onPress: () => void;
@@ -27,7 +53,8 @@ export function GoogleSignInButton({
   title = "Sign in with Google",
   disabled,
 }: GoogleSignInButtonProps) {
-  const { radius, spacing } = useTheme();
+  const { radius, spacing, scheme, colors } = useTheme();
+  const brand = GOOGLE_BRAND[scheme];
 
   return (
     <PressableScale
@@ -50,9 +77,9 @@ export function GoogleSignInButton({
         paddingHorizontal: spacing.md,
         minHeight: 48,
         borderRadius: radius.lg,
-        backgroundColor: GOOGLE_DARK_FILL,
+        backgroundColor: brand.fill,
         borderWidth: 1,
-        borderColor: GOOGLE_DARK_BORDER,
+        borderColor: colors.border,
         opacity: disabled ? 0.6 : 1,
       }}
     >
@@ -84,7 +111,7 @@ export function GoogleSignInButton({
           sizes the G rendered outside the border, against the screen edge,
           while the label wrapped. Shrinking lets the text wrap within the
           space that is actually available instead. */}
-      <AppText variant="headline" style={{ color: GOOGLE_DARK_LABEL, flexShrink: 1 }}>
+      <AppText variant="headline" style={{ color: brand.label, flexShrink: 1 }}>
         {title}
       </AppText>
     </PressableScale>
