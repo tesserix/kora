@@ -118,7 +118,12 @@ export const TAB_BAR_OCCUPIED_HEIGHT =
 // Breathing room between the last pixel of scrollable content and the top of
 // the dock, at the true scroll bottom.
 const TAB_BAR_CONTENT_GAP = 39;
-const TAB_BAR_CONTENT_GAP_TIGHT = 29;
+const TAB_BAR_CONTENT_GAP_TODAY = 44;
+
+// How far the capture cap's accent shadow blooms above its own top edge. The
+// dock's geometric top is not its visual top: content resting a few points
+// above the pill still sits inside this glow.
+const CAPTURE_GLOW_REACH = 14;
 
 /**
  * `paddingBottom` for a tab screen's scroll content, so the last item clears
@@ -127,17 +132,24 @@ const TAB_BAR_CONTENT_GAP_TIGHT = 29;
 export const TAB_BAR_SCROLL_INSET = TAB_BAR_OCCUPIED_HEIGHT + TAB_BAR_CONTENT_GAP;
 
 /**
- * The same, 10pt tighter. Used ONLY by Today. (= 130)
+ * The same, 5pt looser. Used ONLY by Today. (= 145)
  *
- * The two values are historical drift, not a design distinction — the four tab
- * screens each hardcoded their own number and Today's was written 10 lower.
- * Preserved rather than unified because kora#280 is an inert refactor: both
- * clearances were verified adequate in kora#277 (content clears the dock at the
- * true scroll bottom on all four tabs at both content sizes), so collapsing
- * them would move pixels on Today to no end. Unify when there is a reason to
- * move Today's content, and delete this export then.
+ * Today ends in a tappable row ("Log a meal") rather than a list, and an
+ * overscroll bounce dragged it into the capture cap's glow. The extra clearance
+ * parks it above the fade's start so the bounce fades it out instead.
  */
-export const TAB_BAR_SCROLL_INSET_TIGHT = TAB_BAR_OCCUPIED_HEIGHT + TAB_BAR_CONTENT_GAP_TIGHT;
+export const TAB_BAR_SCROLL_INSET_TODAY = TAB_BAR_OCCUPIED_HEIGHT + TAB_BAR_CONTENT_GAP_TODAY;
+
+// Ground fade under the dock. The dock floats over live content, so mid-scroll a
+// row arrived half-lit behind the pill and half in the open.
+//
+// Full ground at the top of the capture glow, not at the pill's geometric top:
+// anything an overscroll bounce pushes into the glow is already gone. The fade
+// starts at the shorter of the two resting lines, so no screen's content is
+// dimmed where it comes to rest.
+const SCRIM_GROUND_HEIGHT = TAB_BAR_OCCUPIED_HEIGHT + CAPTURE_GLOW_REACH;
+const SCRIM_HEIGHT = TAB_BAR_SCROLL_INSET;
+const SCRIM_GROUND_AT = (SCRIM_HEIGHT - SCRIM_GROUND_HEIGHT) / SCRIM_HEIGHT;
 
 // Domed capture face — precomputed [highlight, accent, shadow] mixes per
 // scheme so the button reads as lit from above rather than a flat disc.
@@ -418,6 +430,21 @@ export function FloatingTabBar({ state, navigation }: FloatingTabBarProps) {
       style={{ position: "absolute", left: 24, right: 24, bottom: BAR_BOTTOM_INSET }}
       pointerEvents="box-none"
     >
+      {/* Bleeds past the root's own 24pt frame inset to the screen edges: the
+          fade has to cover the full width of what scrolls under it. */}
+      <LinearGradient
+        testID="dock-scrim"
+        colors={["transparent", instrument.bg]}
+        locations={[0, SCRIM_GROUND_AT]}
+        pointerEvents="none"
+        style={{
+          position: "absolute",
+          left: -24,
+          right: -24,
+          bottom: -BAR_BOTTOM_INSET,
+          height: SCRIM_HEIGHT,
+        }}
+      />
       <View style={{ position: "relative" }}>
         <LinearGradient
           testID="dock-rim"
