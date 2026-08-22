@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/tesserix/kora/api/internal/httpx"
 )
@@ -62,6 +63,15 @@ type WeightInput struct {
 	// Composition is optional. A zero value records weight alone, with every
 	// metric absent (not zero) and Source defaulting to manual.
 	Composition BodyComposition
+	// ID, when non-nil (not uuid.Nil), makes the write idempotent: a retry
+	// with the same ID returns the row already stored instead of inserting a
+	// second one. Left uuid.Nil, postgres assigns a fresh id via
+	// gen_random_uuid() and every call is a genuinely new entry -- the
+	// historic AddWeight behaviour. Onboarding's first weigh-in (kora#45) is
+	// the first caller to set it -- see onboarding.Handler.Submit, which
+	// derives a deterministic per-user ID so a resubmitted or retried
+	// onboarding can never produce a second entry.
+	ID uuid.UUID
 }
 
 // AddWeight records a weight-only entry.
@@ -96,10 +106,35 @@ func (r Repository) AddWeightEntry(ctx context.Context, userID uuid.UUID, in Wei
 		LocalDate:       in.LocalDate,
 		BodyComposition: comp,
 	}
-	if err := r.db.WithContext(ctx).Create(&e).Error; err != nil {
-		return WeightEntry{}, fmt.Errorf("tracking: add weight: %w", err)
+
+	if in.ID == uuid.Nil {
+		if err := r.db.WithContext(ctx).Create(&e).Error; err != nil {
+			return WeightEntry{}, fmt.Errorf("tracking: add weight: %w", err)
+		}
+		return e, nil
 	}
-	return e, nil
+
+	// Idempotent path: caller supplied a deterministic ID. ON CONFLICT DO
+	// NOTHING (keyed on the primary key) rather than a check-then-insert --
+	// two concurrent requests racing a check would both see "no row yet" and
+	// both insert; the DB-level upsert is atomic and cannot double-write no
+	// matter how the requests interleave.
+	e.ID = in.ID
+	res := r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&e)
+	if res.Error != nil {
+		return WeightEntry{}, fmt.Errorf("tracking: add weight idempotent: %w", res.Error)
+	}
+	if res.RowsAffected > 0 {
+		return e, nil
+	}
+	// RowsAffected == 0: the row already exists (a replay of the same
+	// deterministic ID). Load and return it instead of the caller's input,
+	// so a retry observes what is actually stored.
+	var existing WeightEntry
+	if err := r.db.WithContext(ctx).First(&existing, "id = ?", in.ID).Error; err != nil {
+		return WeightEntry{}, fmt.Errorf("tracking: load existing weight: %w", err)
+	}
+	return existing, nil
 }
 
 // maxVisceralFatRating bounds the widest vendor scale in use (Tanita's 1-59),
