@@ -35,12 +35,6 @@ var ErrBudgetExhausted = errors.New("bodyread: ai budget exhausted")
 // wiring is needed here.
 const callTypeIdentifyBodyComposition = "identify_body_composition"
 
-// cacheTTL bounds how long a validated Result is cached, keyed by the
-// downscaled image's content hash. Matches ai.RedisCache's 24h TTL
-// (cmd/api/main.go's buildResolveHandler) so both caches age out on the
-// same rhythm — there is no reason for one to outlive the other.
-const cacheTTL = 24 * time.Hour
-
 // Result is what Reader.Read returns: a validated reading plus whatever
 // validateReading discarded from it, plus whether anything at all survived.
 type Result struct {
