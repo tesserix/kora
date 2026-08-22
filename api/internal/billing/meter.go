@@ -52,11 +52,30 @@ type WindowStatus struct {
 	ResetsAt  time.Time `json:"resets_at"`
 }
 
-// QuotaStatus reports every current free-tier request window.
+// QuotaStatus reports every current free-tier request window, plus whatever
+// the user has bought on top of it.
 type QuotaStatus struct {
 	Daily   WindowStatus `json:"daily"`
 	Weekly  WindowStatus `json:"weekly"`
 	Monthly WindowStatus `json:"monthly"`
+	TopUp   TopUpStatus  `json:"top_up"`
+	// Blocked is the single question the UI actually asks: is AI unavailable
+	// right now? Deriving it here rather than in three clients keeps them from
+	// each getting the free-plus-paid arithmetic subtly different.
+	Blocked bool `json:"blocked"`
+}
+
+// TopUpStatus summarises a user's live purchased entitlements.
+type TopUpStatus struct {
+	Active    bool   `json:"active"`
+	Unlimited bool   `json:"unlimited"`
+	PackCode  string `json:"pack_code,omitempty"`
+	// Remaining is requests left across every live pack. Meaningless when
+	// Unlimited, where it stays 0.
+	Remaining int `json:"remaining"`
+	// DailyRemaining is how many of those are still usable today.
+	DailyRemaining int        `json:"daily_remaining"`
+	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
 }
 
 // Meter records provider usage and reserves user quota before provider work.
@@ -102,16 +121,68 @@ func (m Meter) RecordSystem(ctx context.Context, u ai.Usage, costUSD float64) er
 // windows without reserving provider capacity. WithinBudget remains the
 // authoritative admission decision under concurrency.
 func (m Meter) Status(ctx context.Context, userID uuid.UUID) (QuotaStatus, error) {
-	windows := quotaWindowsAt(m.now())
-	counts, err := loadQuotaCounts(m.db.WithContext(ctx), userID, windows)
+	now := m.now()
+	windows := quotaWindowsAt(now)
+	db := m.db.WithContext(ctx)
+	counts, err := loadQuotaCounts(db, userID, windows)
 	if err != nil {
 		return QuotaStatus{}, fmt.Errorf("billing: status: %w", err)
 	}
-	return QuotaStatus{
+	status := QuotaStatus{
 		Daily:   windowStatus(windows[0], counts[quotaDay]),
 		Weekly:  windowStatus(windows[1], counts[quotaWeek]),
 		Monthly: windowStatus(windows[2], counts[quotaMonth]),
-	}, nil
+	}
+	status.TopUp, err = m.topUpStatus(db, userID, now)
+	if err != nil {
+		return QuotaStatus{}, fmt.Errorf("billing: status: %w", err)
+	}
+	freeLeft := status.Daily.Remaining > 0 && status.Weekly.Remaining > 0 && status.Monthly.Remaining > 0
+	status.Blocked = !freeLeft && !status.TopUp.Unlimited && status.TopUp.DailyRemaining == 0
+	return status, nil
+}
+
+// topUpStatus summarises live entitlements for display. It takes no lock: this
+// is the informational path, and WithinBudget remains the authority.
+func (m Meter) topUpStatus(db *gorm.DB, userID uuid.UUID, now time.Time) (TopUpStatus, error) {
+	live, err := liveEntitlements(db, userID, now, false)
+	if err != nil {
+		return TopUpStatus{}, err
+	}
+	if len(live) == 0 {
+		return TopUpStatus{}, nil
+	}
+	ids := make([]uuid.UUID, 0, len(live))
+	for _, e := range live {
+		ids = append(ids, e.ID)
+	}
+	spentToday, err := dayCounts(db, ids, utcDay(now))
+	if err != nil {
+		return TopUpStatus{}, err
+	}
+
+	out := TopUpStatus{Active: true, PackCode: live[0].PackCode}
+	for _, e := range live {
+		if e.Unlimited {
+			out.Unlimited = true
+			continue
+		}
+		remaining := e.Remaining()
+		out.Remaining += remaining
+		perDay := remaining
+		if e.DailyCap != nil {
+			if left := *e.DailyCap - spentToday[e.ID]; left < perDay {
+				perDay = left
+			}
+		}
+		if perDay > 0 {
+			out.DailyRemaining += perDay
+		}
+	}
+	// Soonest expiry: that is the date the user needs to know, not the last.
+	expiry := live[0].ExpiresAt
+	out.ExpiresAt = &expiry
+	return out, nil
 }
 
 // record is the shared body of Record and RecordSystem. userID is nil for a
@@ -172,17 +243,6 @@ func (m Meter) WithinBudget(ctx context.Context, userID uuid.UUID) (bool, error)
 			return fmt.Errorf("acquire user quota lock: %w", err)
 		}
 
-		var userTotal float64
-		if err := tx.Model(&Event{}).
-			Where("user_id = ? AND created_at >= ?", userID, monthStart).
-			Select("COALESCE(SUM(cost_usd_est), 0)").
-			Scan(&userTotal).Error; err != nil {
-			return fmt.Errorf("sum user cost: %w", err)
-		}
-		if userTotal >= perUserMonthlyCostCapUSD {
-			return errQuotaExceeded
-		}
-
 		var globalTotal float64
 		if err := tx.Model(&Event{}).
 			Where("created_at >= ?", monthStart).
@@ -190,16 +250,42 @@ func (m Meter) WithinBudget(ctx context.Context, userID uuid.UUID) (bool, error)
 			Scan(&globalTotal).Error; err != nil {
 			return fmt.Errorf("sum global cost: %w", err)
 		}
+		// The GLOBAL cap is not purchasable. It protects the shared provider
+		// account from the platform's total spend, and selling a way past it
+		// would sell something Kora cannot deliver.
 		if globalTotal >= globalMonthlyCostCapUSD {
 			return errQuotaExceeded
+		}
+
+		var userTotal float64
+		if err := tx.Model(&Event{}).
+			Where("user_id = ? AND created_at >= ?", userID, monthStart).
+			Select("COALESCE(SUM(cost_usd_est), 0)").
+			Scan(&userTotal).Error; err != nil {
+			return fmt.Errorf("sum user cost: %w", err)
 		}
 
 		counts, err := loadQuotaCounts(tx, userID, windows)
 		if err != nil {
 			return err
 		}
+		exhausted := userTotal >= perUserMonthlyCostCapUSD
 		for _, window := range windows {
 			if counts[window.kind] >= window.limit {
+				exhausted = true
+				break
+			}
+		}
+		// Everything free is spent. A user who bought a top-up pays for this
+		// request out of it; a user who did not is refused exactly as before.
+		// The free windows are still incremented below either way, so nothing
+		// about when they reset changes for anyone.
+		if exhausted {
+			spent, err := spendEntitlement(tx, userID, m.now())
+			if err != nil {
+				return fmt.Errorf("spend entitlement: %w", err)
+			}
+			if !spent {
 				return errQuotaExceeded
 			}
 		}

@@ -1,13 +1,14 @@
 import { ActivityIndicator, ScrollView, StyleSheet, View } from "react-native";
+import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAIUsage } from "@/api/hooks";
-import { availableAgainAt, remainingAIRequests } from "@/api/aiUsage";
-import type { AIQuotaWindow } from "@/api/types";
+import { aiAllowance } from "@/api/aiUsage";
+import type { AIQuotaWindow, AITopUpStatus, AIUsageStatus } from "@/api/types";
 import { AppBackground } from "@/components/AppBackground";
 import { Icon } from "@/components/Icon";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { AppText } from "@/components/Text";
-import { BezelCluster, ZoneRule } from "@/components/instrument/BezelCluster";
+import { BezelCluster, WellFooter, ZoneRule } from "@/components/instrument/BezelCluster";
 import { monoStyle } from "@/components/instrument/typography";
 import { safeBack } from "@/lib/safeBack";
 import { PressableScale } from "@/motion";
@@ -56,12 +57,59 @@ function UsageRow({ label, window, last = false }: { label: string; window: AIQu
   );
 }
 
-export default function AIUsageScreen() {
+function Hero({ status }: { status: AIUsageStatus }) {
   const { instrument, fonts, spacing } = useTheme();
+  const allowance = aiAllowance(status);
+  return (
+    <View style={{ alignItems: "center", paddingHorizontal: spacing.lg, paddingVertical: spacing.xl }}>
+      <Icon name="sparkles" size={22} color={instrument.accent} />
+      <AppText
+        style={[
+          { color: instrument.ink, fontSize: allowance.blocked ? 25 : 34, fontWeight: "700", marginTop: spacing.sm },
+          monoStyle(fonts),
+        ]}
+      >
+        {allowance.headline}
+      </AppText>
+      <AppText style={{ color: instrument.mut, fontSize: 13, textAlign: "center", marginTop: spacing.xs }}>
+        {allowance.detail}
+      </AppText>
+    </View>
+  );
+}
+
+function TopUpRow({ topUp }: { topUp: AITopUpStatus }) {
+  const { instrument, fonts, spacing } = useTheme();
+  return (
+    <View
+      accessible
+      accessibilityLabel={
+        topUp.unlimited
+          ? "Top-up active: unlimited requests"
+          : `Top-up active: ${topUp.remaining} requests left, ${topUp.daily_remaining} today`
+      }
+      style={{ paddingHorizontal: spacing.md, paddingVertical: spacing.md }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "baseline", justifyContent: "space-between" }}>
+        <AppText style={{ color: instrument.ink, fontWeight: "600" }}>{topUp.pack_code ?? "Top-up"}</AppText>
+        <AppText style={[{ color: instrument.ink, fontSize: 15 }, monoStyle(fonts)]}>
+          {topUp.unlimited ? "unlimited" : `${topUp.remaining} left`}
+        </AppText>
+      </View>
+      <AppText style={{ color: instrument.mut, fontSize: 12, marginTop: 3 }}>
+        {topUp.unlimited ? "No daily cap" : `${topUp.daily_remaining} available today`}
+        {topUp.expires_at ? ` · expires ${resetText(topUp.expires_at)}` : ""}
+      </AppText>
+    </View>
+  );
+}
+
+export default function AIUsageScreen() {
+  const { instrument, spacing } = useTheme();
   const insets = useSafeAreaInsets();
   const usage = useAIUsage();
-  const remaining = usage.data ? remainingAIRequests(usage.data) : null;
-  const availableAt = usage.data ? availableAgainAt(usage.data) : null;
+  const blocked = usage.data ? aiAllowance(usage.data).blocked : false;
+  const topUp = usage.data?.top_up?.active ? usage.data.top_up : null;
 
   return (
     <View style={{ flex: 1, backgroundColor: instrument.bg }}>
@@ -89,26 +137,40 @@ export default function AIUsageScreen() {
               </View>
             ) : (
               <>
-                <View style={{ alignItems: "center", paddingHorizontal: spacing.lg, paddingVertical: spacing.xl }}>
-                  <Icon name="sparkles" size={22} color={instrument.accent} />
-                  <AppText
-                    style={[
-                      { color: instrument.ink, fontSize: availableAt ? 25 : 34, fontWeight: "700", marginTop: spacing.sm },
-                      monoStyle(fonts),
-                    ]}
-                  >
-                    {availableAt ? "AI limit reached" : `${remaining} calls left`}
-                  </AppText>
-                  <AppText style={{ color: instrument.mut, fontSize: 13, textAlign: "center", marginTop: spacing.xs }}>
-                    {availableAt
-                      ? `Available again ${resetText(availableAt)}`
-                      : "The tightest active limit determines what is available."}
-                  </AppText>
-                </View>
-                <ZoneRule label="Quota windows" />
+                <Hero status={usage.data} />
+                <ZoneRule label="Free allowance" detail="resets automatically" />
                 <UsageRow label="Daily" window={usage.data.daily} />
                 <UsageRow label="Weekly" window={usage.data.weekly} />
                 <UsageRow label="Monthly" window={usage.data.monthly} last />
+                {topUp ? (
+                  <>
+                    <ZoneRule label="Top-up" detail="30 days" />
+                    <TopUpRow topUp={topUp} />
+                  </>
+                ) : null}
+                <WellFooter testID="ai-usage-footer">
+                  <AppText style={{ flex: 1, color: instrument.mut, fontSize: 12 }}>
+                    {blocked ? "Out of requests" : "Need more than the free allowance?"}
+                  </AppText>
+                  <PressableScale
+                    accessibilityRole="button"
+                    accessibilityLabel="Add requests"
+                    onPress={() => router.push("/ai-top-up")}
+                    style={{
+                      minHeight: 44,
+                      justifyContent: "center",
+                      paddingHorizontal: spacing.lg,
+                      borderRadius: 14,
+                      backgroundColor: blocked ? instrument.accent : "transparent",
+                    }}
+                  >
+                    <AppText
+                      style={{ color: blocked ? instrument.accentOn : instrument.accent, fontWeight: "700" }}
+                    >
+                      Add requests
+                    </AppText>
+                  </PressableScale>
+                </WellFooter>
               </>
             )}
           </BezelCluster>

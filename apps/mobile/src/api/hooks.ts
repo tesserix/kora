@@ -36,6 +36,8 @@ import { NoOwnerError, resolveOwnerId } from "@/offline/owner";
 import type { MealSlot } from "@/lib/mealSlot";
 import type {
   AppNotification,
+  AIOrder,
+  AIPack,
   AIUsageStatus,
   BodyCompositionReadResult,
   Candidate,
@@ -109,6 +111,60 @@ export function useAIUsage() {
     queryKey: aiUsageQueryKey(ownerID),
     queryFn: () => apiFetch("/v1/ai/usage") as Promise<AIUsageStatus>,
   });
+}
+
+function aiOrdersQueryKey(ownerID: string | null = currentUserId()) {
+  return ["ai-orders", ownerID] as const;
+}
+
+// The catalogue is the same for everyone and changes only with a deploy, so it
+// is cached for the session rather than refetched per visit.
+export function useAIPacks(): UseQueryResult<AIPack[], Error> {
+  return useQuery({
+    queryKey: ["ai-packs"],
+    queryFn: async () => ((await apiFetch("/v1/ai/packs")) as { packs: AIPack[] }).packs,
+    staleTime: 60 * 60 * 1000,
+  });
+}
+
+export function useAIOrders(): UseQueryResult<AIOrder[], Error> {
+  const ownerID = currentUserId();
+  return useQuery({
+    queryKey: aiOrdersQueryKey(ownerID),
+    queryFn: async () => ((await apiFetch("/v1/ai/orders")) as { orders: AIOrder[] }).orders,
+  });
+}
+
+export function useCreateAIOrder(): UseMutationResult<AIOrder, Error, { pack_code: string; phone: string; email?: string }> {
+  const qc = useQueryClient();
+  const ownerID = currentUserId();
+  return useMutation({
+    mutationFn: (body) =>
+      apiFetch("/v1/ai/orders", { method: "POST", body: JSON.stringify(body) }) as Promise<AIOrder>,
+    onSuccess: () => qc.invalidateQueries({ queryKey: aiOrdersQueryKey(ownerID) }),
+  });
+}
+
+// Polls one order while it is still open. The webhook is what actually settles
+// a payment, so the app cannot know when to stop asking except by asking: the
+// poll ends the moment the order leaves `created`, and the AI allowance is
+// refreshed then so a paid pack shows up without a manual pull.
+export function useAIOrder(orderID: string | null): UseQueryResult<AIOrder, Error> {
+  const qc = useQueryClient();
+  const ownerID = currentUserId();
+  const query = useQuery({
+    queryKey: ["ai-order", ownerID, orderID],
+    queryFn: () => apiFetch(`/v1/ai/orders/${orderID}`) as Promise<AIOrder>,
+    enabled: Boolean(orderID),
+    refetchInterval: (q) => (q.state.data && q.state.data.status !== "created" ? false : 3000),
+  });
+  const settled = query.data && query.data.status !== "created" ? query.data.status : null;
+  useEffect(() => {
+    if (!settled) return;
+    qc.invalidateQueries({ queryKey: aiUsageQueryKey(ownerID) });
+    qc.invalidateQueries({ queryKey: aiOrdersQueryKey(ownerID) });
+  }, [settled, ownerID, qc]);
+  return query;
 }
 
 function coachNudgesQueryKey(ownerID: string | null = currentUserId()) {

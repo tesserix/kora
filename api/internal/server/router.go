@@ -101,6 +101,11 @@ type Deps struct {
 	// not configured in every environment — and user.Service.Delete skips
 	// revocation rather than failing when it is.
 	AppleRevoker user.AppleRevoker
+	// Cashfree is the payment gateway paid AI top-ups are bought through.
+	// Unconfigured leaves every purchase route unmounted — the same choice as
+	// AppleExchanger above — so an environment with no gateway advertises no
+	// checkout at all rather than one that takes money and grants nothing.
+	Cashfree billing.CashfreeConfig
 }
 
 func NewRouter(deps Deps) *gin.Engine {
@@ -146,8 +151,24 @@ func NewRouter(deps Deps) *gin.Engine {
 
 		v1 := r.Group("/v1", auth.Middleware(deps.Verifier))
 		v1.Use(user.ResolveMiddleware(userRepo))
-		billingHandler := billing.NewHandler(billing.NewMeter(deps.DB))
+		billingMeter := billing.NewMeter(deps.DB)
+		billingHandler := billing.NewHandler(billingMeter)
 		v1.GET("/ai/usage", billingHandler.UsageStatus)
+		if deps.Cashfree.Configured() {
+			purchases := billing.NewPurchaseHandler(
+				billing.NewOrders(deps.DB, billing.NewCashfreeClient(deps.Cashfree)),
+				billingMeter,
+				deps.Cashfree.SecretKey,
+			)
+			v1.GET("/ai/packs", purchases.Packs)
+			v1.POST("/ai/orders", purchases.CreateOrder)
+			v1.GET("/ai/orders", purchases.Orders)
+			v1.GET("/ai/orders/:id", purchases.Order)
+			// OUTSIDE the v1 group: the caller is Cashfree, which holds no
+			// Firebase token. Its own signature is the authentication, checked
+			// inside the handler over the raw request body.
+			r.POST("/webhooks/cashfree", purchases.Webhook)
+		}
 		v1.GET("/me", userHandler.Me)
 		v1.PATCH("/me/share-progress", userHandler.UpdateShareProgress)
 		v1.PATCH("/me", userHandler.UpdateProfile)

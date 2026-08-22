@@ -15,11 +15,14 @@ jest.mock("expo-router", () => ({
   router: { back: jest.fn(), push: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => true) },
 }));
 jest.mock("@/api/hooks", () => ({
+  useAIUsage: () => mockAIUsage(),
   useCoachNudges: () => mockNudges(),
   useCoachThread: () => mockThread(),
   useCoachAsk: () => mockAsk(),
 }));
 jest.mock("@/offline/connectivity", () => ({ useIsOnline: () => mockOnline() }));
+
+const mockAIUsage = jest.fn(() => ({ data: undefined }));
 
 const nudgeData = {
   nudges: [{ kind: "protein", title: "Protein", text: "142 / 160g — 18g to go" }],
@@ -43,6 +46,8 @@ beforeEach(() => {
   mockThreadRefetch.mockClear();
   mockAskMutate.mockReset();
   mockOnline.mockReturnValue(true);
+  mockAIUsage.mockReturnValue({ data: undefined });
+  (router.push as jest.Mock).mockClear();
   mockNudges.mockReturnValue({ data: nudgeData, isLoading: false, isError: false, refetch: mockNudgesRefetch });
   mockThread.mockReturnValue({ data: threadData, isLoading: false, isError: false, refetch: mockThreadRefetch });
   mockAsk.mockReturnValue({ mutate: mockAskMutate, isPending: false });
@@ -227,4 +232,26 @@ test("a suggestion sends the exact grounded question", async () => {
   await waitFor(() =>
     expect(mockAskMutate).toHaveBeenCalledWith("How is my protein today?", expect.any(Object)),
   );
+});
+
+test("a spent allowance offers a top-up next to the reply that says so", async () => {
+  mockAIUsage.mockReturnValue({
+    data: {
+      daily: { used: 20, limit: 20, remaining: 0, resets_at: "2026-08-23T00:00:00Z" },
+      weekly: { used: 20, limit: 100, remaining: 80, resets_at: "2026-08-24T00:00:00Z" },
+      monthly: { used: 20, limit: 300, remaining: 280, resets_at: "2026-09-01T00:00:00Z" },
+    },
+  });
+
+  const { getByLabelText, getByText } = await render(<CoachScreen />);
+
+  expect(getByText(/Your AI allowance is spent/)).toBeTruthy();
+  await fireEvent.press(getByLabelText("Add requests"));
+  expect(router.push).toHaveBeenCalledWith("/ai-top-up");
+});
+
+test("a healthy allowance says nothing about paying", async () => {
+  const { queryByLabelText } = await render(<CoachScreen />);
+
+  expect(queryByLabelText("Add requests")).toBeNull();
 });

@@ -29,10 +29,68 @@ export interface AIQuotaWindow {
   resets_at: string;
 }
 
+export interface AITopUpStatus {
+  active: boolean;
+  unlimited: boolean;
+  pack_code?: string;
+  remaining: number;
+  daily_remaining: number;
+  expires_at?: string;
+}
+
 export interface AIUsageStatus {
   daily: AIQuotaWindow;
   weekly: AIQuotaWindow;
   monthly: AIQuotaWindow;
+  top_up?: AITopUpStatus;
+  // Server-derived: free windows and any purchased pack, already combined.
+  // The app must not re-derive this — the arithmetic lives in one place.
+  blocked?: boolean;
+}
+
+// Every amount is integer paise, itemised by the API. The app renders these
+// and never computes GST or a platform fee itself.
+export interface AIPackPrice {
+  base_paise: number;
+  platform_fee_paise: number;
+  taxable_paise: number;
+  gst_paise: number;
+  total_paise: number;
+  gst_rate_basis_points: number;
+  platform_fee_rate_basis_points: number;
+}
+
+export interface AIPack {
+  code: string;
+  name: string;
+  base_paise: number;
+  grant: number;
+  daily_cap: number;
+  unlimited: boolean;
+  summary: string;
+  price: AIPackPrice;
+  base_rupees: string;
+  total_rupees: string;
+}
+
+export type AIOrderStatus = "created" | "paid" | "failed" | "expired";
+
+export interface AIOrder {
+  id: string;
+  pack_code: string;
+  base_paise: number;
+  platform_fee_paise: number;
+  gst_paise: number;
+  total_paise: number;
+  currency: string;
+  status: AIOrderStatus;
+  payment_session_id?: string;
+  // Built by the server so the app never has to know whether it is talking to
+  // the sandbox or the live gateway.
+  checkout_url?: string;
+  invoice_number?: string;
+  paid_at?: string;
+  created_at: string;
 }
 
 export type CoachKind = "protein" | "fibre" | "weight_down" | "weight_up" | "today";

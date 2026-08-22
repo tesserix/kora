@@ -3,7 +3,8 @@ import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, View } f
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import type { MentorCommitmentProposal } from "@/api/types";
-import { useCoachAsk, useCoachNudges, useCoachThread } from "@/api/hooks";
+import { useAIUsage, useCoachAsk, useCoachNudges, useCoachThread } from "@/api/hooks";
+import { aiAllowance } from "@/api/aiUsage";
 import { AppBackground } from "@/components/AppBackground";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { AppText } from "@/components/Text";
@@ -65,6 +66,11 @@ export default function CoachScreen() {
   const online = useIsOnline();
   const nudges = useCoachNudges();
   const thread = useCoachThread();
+  const usage = useAIUsage();
+  // Otto still answers when the allowance is gone — it just answers that it
+  // cannot. The offer to top up belongs next to that reply, not three screens
+  // away in More.
+  const outOfRequests = usage.data ? aiAllowance(usage.data).blocked : false;
   const ask = useCoachAsk();
   const [input, setInput] = useState("");
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
@@ -179,6 +185,40 @@ export default function CoachScreen() {
                 style={{ minHeight: 44, alignSelf: "flex-start", justifyContent: "center" }}
               >
                 <AppText style={{ color: instrument.accent, fontWeight: "700" }}>Try again</AppText>
+              </PressableScale>
+            </View>
+          ) : null}
+
+          {outOfRequests ? (
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 12,
+                marginBottom: 12,
+                paddingVertical: 12,
+                paddingHorizontal: 14,
+                borderRadius: 14,
+                backgroundColor: instrument.inset,
+              }}
+            >
+              <AppText style={{ flex: 1, color: instrument.mut, fontSize: 12 }}>
+                Your AI allowance is spent. It resets on its own — or add requests now.
+              </AppText>
+              <PressableScale
+                accessibilityRole="button"
+                accessibilityLabel="Add requests"
+                haptic="selection"
+                onPress={() => router.push("/ai-top-up")}
+                style={{
+                  minHeight: 44,
+                  justifyContent: "center",
+                  paddingHorizontal: 16,
+                  borderRadius: 12,
+                  backgroundColor: instrument.accent,
+                }}
+              >
+                <AppText style={{ color: instrument.accentOn, fontWeight: "700" }}>Add requests</AppText>
               </PressableScale>
             </View>
           ) : null}
