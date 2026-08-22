@@ -58,6 +58,7 @@ export interface CoachTurn {
   /** Set only on turns answered in this session — the stored thread has no attribution. */
   agent?: string;
   proposal?: MentorCommitmentProposal;
+  plan?: MealPlanProposal | null;
 }
 
 export interface CoachNudgesResponse {
@@ -84,6 +85,33 @@ export interface CoachAnswer {
   show_support: boolean;
   agent?: CoachAgent;
   proposal?: MentorCommitmentProposal | null;
+  plan?: MealPlanProposal | null;
+}
+
+export interface MealPlanMeal {
+  name: string;
+  description: string;
+}
+
+/** `date` is the planner's own label ("Monday", "2026-08-25"), shown verbatim —
+ *  nothing schedules from it. */
+export interface MealPlanDay {
+  date: string;
+  meals: MealPlanMeal[];
+}
+
+/** A reviewed plan the user has yet to approve. The prose in the answer says
+ *  why it fits; this is what the plan IS, so it can be rendered as a card with
+ *  an approve action. Approving records the decision — it does not log or
+ *  schedule anything. */
+export interface MealPlanProposal {
+  id: string;
+  summary: string;
+  days: MealPlanDay[];
+  agent_name: string;
+  reviewed_by: string;
+  accepted_at: string | null;
+  created_at: string;
 }
 
 export type MentorCoachingStyle = "supportive" | "direct" | "educational" | "accountability";

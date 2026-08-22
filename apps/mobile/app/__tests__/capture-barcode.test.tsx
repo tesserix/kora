@@ -47,6 +47,7 @@ let mockResolvePhotoIsPending = false;
 // inert no-ops — CaptureScreen still mounts all of them unconditionally.
 jest.mock("@/api/hooks", () => ({
   useProfile: () => ({ data: { display_name: "Alex Stone" } }),
+  useAcceptMealPlan: () => ({ mutate: jest.fn(), isPending: false }),
   useCaptureMessage: () => ({ mutate: jest.fn(), isPending: false }),
   useResolvePhoto: () => ({
     mutate: mockResolvePhotoMutate,

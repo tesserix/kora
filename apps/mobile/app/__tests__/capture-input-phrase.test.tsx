@@ -38,6 +38,7 @@ const mockCreateLogMutateAsync = jest.fn();
 
 jest.mock("@/api/hooks", () => ({
   useProfile: () => ({ data: { display_name: "Alex Stone" } }),
+  useAcceptMealPlan: () => ({ mutate: jest.fn(), isPending: false }),
   useCaptureMessage: () => ({ mutate: mockCaptureMessageMutate, isPending: false }),
   useResolvePhoto: () => ({ mutate: mockResolvePhotoMutate, isPending: false }),
   useResolveVoice: () => ({ mutate: mockResolveVoiceMutate, isPending: false }),

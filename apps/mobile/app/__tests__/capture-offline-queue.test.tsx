@@ -101,6 +101,7 @@ function mockUseMutation(mutateFn: jest.Mock) {
 
 jest.mock("@/api/hooks", () => ({
   useProfile: () => ({ data: { display_name: "Alex Stone" } }),
+  useAcceptMealPlan: () => ({ mutate: jest.fn(), isPending: false }),
   useCaptureMessage: () => mockUseMutation(mockCaptureMessageMutate),
   useResolvePhoto: () => mockUseMutation(mockResolvePhotoMutate),
   useResolveVoice: () => mockUseMutation(mockResolveVoiceMutate),

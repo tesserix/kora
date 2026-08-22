@@ -24,6 +24,7 @@ import { RecordingPresets, requestRecordingPermissionsAsync, useAudioRecorder } 
 import { Icon } from "@/components/Icon";
 import { AppText } from "@/components/Text";
 import { OttoBubble } from "@/components/capture/OttoBubble";
+import { PlanCard } from "@/components/capture/PlanCard";
 import { UserBubble } from "@/components/capture/UserBubble";
 import { ModePill } from "@/components/capture/ModePill";
 import { Waveform } from "@/components/capture/Waveform";
@@ -37,6 +38,7 @@ import { useToast } from "@/components/Toast";
 import { INSTRUMENT_DARK_FIXED } from "@/theme";
 import { haptics, PressableScale, useMotionPrefs } from "@/motion";
 import {
+  useAcceptMealPlan,
   useCreateLog,
   useProfile,
   useResolveBarcode,
@@ -53,7 +55,7 @@ import { QUEUED_CAPTURES_KEY } from "@/offline/queryKeys";
 import { isLoggable } from "@/lib/candidateTier";
 import { runRetryLedger } from "@/lib/retryLedger";
 import { servingEntryFor } from "@/units/portion";
-import type { FoodItem, Resolution, ResolutionSource } from "@/api/types";
+import type { FoodItem, MealPlanProposal, Resolution, ResolutionSource } from "@/api/types";
 import { mealSlotForHour, type MealSlot } from "@/lib/mealSlot";
 import { initialPortionFor } from "@/lib/promotedPortion";
 
@@ -504,7 +506,9 @@ function IdleAffordance({
 /** One settled turn in the Ask Otto thread, oldest first. */
 export type ThreadEntry =
   | { role: "user"; text: string }
-  | { role: "otto"; text: string; agent?: string; reviewedBy?: string };
+  /** `plan` is the reviewed meal plan in its structured form — the text says
+   *  why it fits, the card is what the user can approve (kora#264). */
+  | { role: "otto"; text: string; agent?: string; reviewedBy?: string; plan?: MealPlanProposal | null };
 
 interface CaptureBodyProps {
   displayName: string;
@@ -560,6 +564,12 @@ interface CaptureBodyProps {
   onChangePortion?: (index: number, baseQuantity: number) => void;
   /** Bails out of the in-flight resolve and returns to idle. Analyzing-state only. */
   onCancelResolve?: () => void;
+  /** Approves the plan on one of the thread's Otto turns. The index is the
+   *  turn's position, so a repeated plan in a long thread still updates the
+   *  turn the user tapped. */
+  onApprovePlan?: (planID: string, turnIndex: number) => void;
+  /** The plan currently being approved, so only its own button spins. */
+  approvingPlanID?: string | null;
 }
 
 // Presentational capture surface — pure props in, no state, no API calls.
@@ -601,6 +611,8 @@ export function CaptureBody({
   onToggleExclude,
   onChangePortion,
   onCancelResolve,
+  onApprovePlan = () => {},
+  approvingPlanID = null,
 }: CaptureBodyProps) {
   const scrollViewRef = useRef<ScrollView>(null);
   const composerFieldRef = useRef<TextInput>(null);
@@ -684,16 +696,24 @@ export function CaptureBody({
           entry.role === "user" ? (
             <UserBubble key={index}>{entry.text}</UserBubble>
           ) : (
-            <OttoBubble
-              key={index}
-              agent={
-                entry.agent
-                  ? entry.agent + (entry.reviewedBy ? ` · reviewed by ${entry.reviewedBy}` : "")
-                  : undefined
-              }
-            >
-              {entry.text}
-            </OttoBubble>
+            <View key={index} style={{ gap: 10 }}>
+              <OttoBubble
+                agent={
+                  entry.agent
+                    ? entry.agent + (entry.reviewedBy ? ` · reviewed by ${entry.reviewedBy}` : "")
+                    : undefined
+                }
+              >
+                {entry.text}
+              </OttoBubble>
+              {entry.plan ? (
+                <PlanCard
+                  plan={entry.plan}
+                  onApprove={() => onApprovePlan(entry.plan!.id, index)}
+                  approving={approvingPlanID === entry.plan.id}
+                />
+              ) : null}
+            </View>
           ),
         )}
 
@@ -1164,6 +1184,25 @@ export default function CaptureScreen() {
       turns.length > 0 && turns[turns.length - 1].role === "user" ? turns.slice(0, -1) : turns,
     );
   }
+  const acceptPlan = useAcceptMealPlan();
+  const [approvingPlanID, setApprovingPlanID] = useState<string | null>(null);
+  // Approval is a decision, not a log: the card flips to "approved" and the
+  // thread keeps the plan exactly as reviewed. A failure leaves the button
+  // where it was, so the user can simply tap again.
+  function handleApprovePlan(planID: string, turnIndex: number) {
+    setApprovingPlanID(planID);
+    acceptPlan.mutate(planID, {
+      onSuccess: (plan) => {
+        setTranscript((turns) =>
+          turns.map((turn, index) =>
+            index === turnIndex && turn.role === "otto" ? { ...turn, plan } : turn,
+          ),
+        );
+      },
+      onError: () => setErrorMsg("I couldn't save that approval — try again."),
+      onSettled: () => setApprovingPlanID(null),
+    });
+  }
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   // Guards a single CameraView against firing onBarcodeScanned repeatedly
   // for the same physical scan while the camera keeps detecting the code.
@@ -1406,6 +1445,7 @@ export default function CaptureScreen() {
               text: data.answer,
               agent: data.agent?.name,
               reviewedBy: data.agent?.reviewed_by,
+              plan: data.plan,
             },
           ]);
           setStage("idle");
@@ -1935,6 +1975,8 @@ export default function CaptureScreen() {
           setPromotedPortion((prev) => ({ ...prev, [index]: { grams, assumed: false } }))
         }
         onCancelResolve={handleCancelResolve}
+        onApprovePlan={handleApprovePlan}
+        approvingPlanID={approvingPlanID}
       />
       {/* Opened from a row's "Change". Seeded from effectiveResolution, NOT
           `resolution` — otherwise a second visit to an already-corrected row
