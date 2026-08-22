@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
-import type { MentorCommitmentProposal } from "@/api/types";
+import type { CoachDietFlag, MentorCommitmentProposal } from "@/api/types";
 import { useAIPacks, useAIUsage, useCoachAsk, useCoachNudges, useCoachThread } from "@/api/hooks";
 import { aiAllowance } from "@/api/aiUsage";
 import { AppBackground } from "@/components/AppBackground";
@@ -10,6 +10,7 @@ import { ScreenHeader } from "@/components/ScreenHeader";
 import { AppText } from "@/components/Text";
 import { AskInput } from "@/components/coach/AskInput";
 import { Bubble } from "@/components/coach/Bubble";
+import { DietFlagNotice } from "@/components/coach/DietFlagNotice";
 import { FocusCard } from "@/components/coach/FocusCard";
 import { SuggestionChips } from "@/components/coach/SuggestionChips";
 import { SupportCard } from "@/components/coach/SupportCard";
@@ -80,6 +81,9 @@ export default function CoachScreen() {
   // lands, so it starts at the capability Kora routes Q&A to and is corrected
   // to the published name once an agent has actually replied.
   const [activeAgent, setActiveAgent] = useState(DEFAULT_AGENT);
+  // The preferences the newest answer touched. Held here rather than on the
+  // turn, because the stored thread keeps the answer, not the screening.
+  const [dietFlags, setDietFlags] = useState<CoachDietFlag[]>([]);
 
   const focus = nudges.data?.nudges ?? [];
   const turns = thread.data?.turns ?? [];
@@ -91,9 +95,11 @@ export default function CoachScreen() {
     setInput(question);
     setPendingQuestion(question);
     setAskError(false);
+    setDietFlags([]);
     ask.mutate(question, {
       onSuccess: (answer) => {
         setActiveAgent(answer.agent?.name ?? DEFAULT_AGENT);
+        setDietFlags(answer.diet_flags ?? []);
         setInput("");
         setPendingQuestion(null);
         setAskError(false);
@@ -171,6 +177,7 @@ export default function CoachScreen() {
               />
             ))
           )}
+          {pendingQuestion === null ? <DietFlagNotice flags={dietFlags} /> : null}
           {pendingQuestion ? <Bubble role="user" text={pendingQuestion} /> : null}
           {pendingQuestion && !askError ? (
             <Bubble role="otto" text={`${activeAgent} is thinking…`} agent={activeAgent} />

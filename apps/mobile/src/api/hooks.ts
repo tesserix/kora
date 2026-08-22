@@ -66,6 +66,8 @@ import type {
   MentorCheckInInput,
   MentorCommitment,
   MentorCommitmentInput,
+  MentorFoodRuleInput,
+  MentorFoodRules,
   MentorHealthDayInput,
   MentorProfile,
   MentorProfileInput,
@@ -244,7 +246,10 @@ export function useSubmitOnboarding() {
   });
 }
 
-function mentorQueryKey(resource: "profile" | "commitments", ownerID: string | null) {
+function mentorQueryKey(
+  resource: "profile" | "commitments" | "food-rules",
+  ownerID: string | null,
+) {
   return ["mentor", resource, ownerID] as const;
 }
 
@@ -276,6 +281,47 @@ export function usePutMentorProfile(): UseMutationResult<MentorProfile, Error, M
     }) as Promise<MentorProfile>,
     onSuccess: (profile) => qc.setQueryData(mentorQueryKey("profile", ownerID), profile),
   });
+}
+
+export function useMentorFoodRules(): UseQueryResult<MentorFoodRules, Error> {
+  const ownerID = currentUserId();
+  return useQuery({
+    queryKey: mentorQueryKey("food-rules", ownerID),
+    queryFn: () => apiFetch("/v1/mentor/food-rules") as Promise<MentorFoodRules>,
+    enabled: ownerID !== null,
+  });
+}
+
+// Every food-rule mutation refetches rather than patching the cache: the
+// server derives rules from the diet pattern and free text too, so its list is
+// the only complete one.
+function useMentorFoodRuleMutation<TVariables>(
+  request: (variables: TVariables) => Promise<unknown>,
+): UseMutationResult<unknown, Error, TVariables> {
+  const qc = useQueryClient();
+  const ownerID = currentUserId();
+  return useMutation({
+    mutationFn: request,
+    onSuccess: () => qc.invalidateQueries({ queryKey: mentorQueryKey("food-rules", ownerID) }),
+  });
+}
+
+export function usePutMentorFoodRules() {
+  return useMentorFoodRuleMutation((rules: MentorFoodRuleInput[]) =>
+    apiFetch("/v1/mentor/food-rules", {
+      method: "PUT",
+      body: JSON.stringify({ rules }),
+    }));
+}
+
+export function useConfirmMentorFoodRule() {
+  return useMentorFoodRuleMutation((subject: string) =>
+    apiFetch(`/v1/mentor/food-rules/${encodeURIComponent(subject)}/confirm`, { method: "PUT" }));
+}
+
+export function useDeleteMentorFoodRule() {
+  return useMentorFoodRuleMutation((subject: string) =>
+    apiFetch(`/v1/mentor/food-rules/${encodeURIComponent(subject)}`, { method: "DELETE" }));
 }
 
 function cacheMentorCommitment(

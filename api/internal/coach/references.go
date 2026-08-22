@@ -25,12 +25,18 @@ type NutritionReference struct {
 
 // NutritionReferenceSource retrieves global evidence for one user question.
 // Implementations must not read user-owned rows.
+//
+// excludedTags is the one exception, and it travels as derived tags rather than
+// as the user's rules: a food the user's blocking rules forbid must not reach
+// the model as evidence at all, since evidence in the prompt is what the answer
+// gets built from.
 type NutritionReferenceSource interface {
 	Search(
 		ctx context.Context,
 		query string,
 		locale nutrition.Locale,
 		limit int,
+		excludedTags []string,
 	) ([]NutritionReference, ai.Usage, error)
 }
 
@@ -56,6 +62,7 @@ func (s nutritionReferenceSource) Search(
 	query string,
 	locale nutrition.Locale,
 	limit int,
+	excludedTags []string,
 ) ([]NutritionReference, ai.Usage, error) {
 	if s.provider == nil {
 		return nil, ai.Usage{}, fmt.Errorf("coach: nutrition references: provider unavailable")
@@ -64,7 +71,7 @@ func (s nutritionReferenceSource) Search(
 	if err != nil {
 		return nil, usage, fmt.Errorf("coach: nutrition references: embed query: %w", err)
 	}
-	candidates, err := s.foods.SearchReferenceFoods(ctx, vector, locale, limit)
+	candidates, err := s.foods.SearchReferenceFoods(ctx, vector, locale, limit, excludedTags)
 	if err != nil {
 		return nil, usage, fmt.Errorf("coach: nutrition references: search: %w", err)
 	}

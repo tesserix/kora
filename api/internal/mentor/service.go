@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/tesserix/kora/api/internal/diet"
 	"github.com/tesserix/kora/api/internal/httpx"
 )
 
@@ -27,6 +28,7 @@ type ProfileInput struct {
 	Motivation            string `json:"motivation"`
 	DietaryPreferences    string `json:"dietary_preferences"`
 	Allergies             string `json:"allergies"`
+	DietPattern           string `json:"diet_pattern"`
 	CoachingStyle         string `json:"coaching_style"`
 	ReminderIntensity     string `json:"reminder_intensity"`
 	QuietStartMinute      int    `json:"quiet_start_minute"`
@@ -82,12 +84,16 @@ func (s Service) PutProfile(
 	if !minuteOfDay(input.QuietStartMinute) || !minuteOfDay(input.QuietEndMinute) {
 		return Profile{}, validation("quiet hours must be valid times")
 	}
+	if !diet.ValidPattern(input.DietPattern) {
+		return Profile{}, validation("choose a valid diet pattern")
+	}
 	now := s.now().UTC()
 	profile := Profile{
 		UserID:                userID,
 		Motivation:            input.Motivation,
 		DietaryPreferences:    input.DietaryPreferences,
 		Allergies:             input.Allergies,
+		DietPattern:           input.DietPattern,
 		CoachingStyle:         input.CoachingStyle,
 		ReminderIntensity:     input.ReminderIntensity,
 		QuietStartMinute:      input.QuietStartMinute,
@@ -100,7 +106,26 @@ func (s Service) PutProfile(
 	if err := s.repo.UpsertProfile(ctx, profile); err != nil {
 		return Profile{}, err
 	}
+	if err := s.syncDerivedRules(ctx, userID, profile); err != nil {
+		return Profile{}, err
+	}
 	return s.Profile(ctx, userID)
+}
+
+// syncDerivedRules keeps the rules Kora infers in step with the profile: a diet
+// pattern expands into rules, and the free-text fields are parsed for anything
+// the taxonomy recognises.
+//
+// Both arrive as proposals, never in force. A pattern the user picked is still
+// Kora's reading of what it implies, and quietly enforcing a constraint nobody
+// reviewed is how a plan gets rejected for a rule the user never set.
+func (s Service) syncDerivedRules(ctx context.Context, userID uuid.UUID, profile Profile) error {
+	if err := s.repo.DeleteFoodRulesBySource(ctx, userID, diet.SourcePattern); err != nil {
+		return err
+	}
+	derived := diet.ExpandPattern(profile.DietPattern)
+	derived = append(derived, diet.ParseProfileText(profile.DietaryPreferences, profile.Allergies)...)
+	return s.ProposeFoodRules(ctx, userID, derived)
 }
 
 type HealthDayInput struct {

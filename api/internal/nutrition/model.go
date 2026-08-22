@@ -7,7 +7,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"gorm.io/gorm"
+
+	"github.com/tesserix/kora/api/internal/diet"
 )
 
 type Provenance = string
@@ -196,7 +199,27 @@ type FoodItem struct {
 	CarbsPer100g   float64         `gorm:"column:carbs_per_100g" json:"carbs_per_100g"`
 	FatPer100g     float64         `gorm:"column:fat_per_100g" json:"fat_per_100g"`
 	FiberPer100g   float64         `gorm:"column:fiber_per_100g" json:"fiber_per_100g"`
-	CreatedAt      time.Time       `json:"created_at"`
+	// DietTags are the containment facts derived from the food's own name and
+	// brand — "contains-dairy", "contains-peanut". They are json:"-" because a
+	// client must not treat a derived tag as an ingredient declaration; they
+	// exist so a user's blocking rules can be applied as an indexed query
+	// rather than a scan.
+	DietTags  pq.StringArray `gorm:"column:diet_tags;type:text[]" json:"-"`
+	CreatedAt time.Time      `json:"created_at"`
+}
+
+// deriveDietTags keeps diet_tags in step with the name and brand on every
+// write path. Doing it in the model rather than at each call site is what makes
+// "a food is tagged" an invariant instead of a checklist item — the same
+// reasoning as BeforeCreate below.
+func (f *FoodItem) deriveDietTags() {
+	f.DietTags = diet.TagsFor(f.Name, f.Brand, nil)
+}
+
+// BeforeSave runs for both creates and updates, so a rename retags the row.
+func (f *FoodItem) BeforeSave(*gorm.DB) error {
+	f.deriveDietTags()
+	return nil
 }
 
 // BeforeCreate types any row that reaches the database without an EntityType.

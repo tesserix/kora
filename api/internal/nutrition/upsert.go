@@ -3,6 +3,10 @@ package nutrition
 import (
 	"context"
 	"fmt"
+
+	"github.com/lib/pq"
+
+	"github.com/tesserix/kora/api/internal/diet"
 )
 
 // UpsertBarcoded reconciles refreshed barcoded products against the index:
@@ -70,6 +74,14 @@ func diffForUpdate(old, next FoodItem) map[string]any {
 	}
 	if _, renamed := changes["name"]; renamed || next.Brand != old.Brand {
 		changes["entity_type"] = DeriveEntityType(next.Brand, next.Barcode)
+		// Retag from the identity the row will HAVE, not from the incoming item
+		// alone: a brand-only change carries no name, and re-deriving from an
+		// empty one would drop every tag the food's name earned.
+		name := next.Name
+		if name == "" {
+			name = old.Name
+		}
+		changes["diet_tags"] = pq.StringArray(diet.TagsFor(name, next.Brand, nil))
 	}
 	if next.KcalPer100g != old.KcalPer100g {
 		changes["kcal_per_100g"] = next.KcalPer100g

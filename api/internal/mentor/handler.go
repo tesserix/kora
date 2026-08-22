@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/tesserix/kora/api/internal/diet"
 	"github.com/tesserix/kora/api/internal/httpx"
 	"github.com/tesserix/kora/api/internal/user"
 )
@@ -38,8 +39,14 @@ func (h Handler) commitmentID(c *gin.Context) (uuid.UUID, bool) {
 }
 
 func (h Handler) respond(c *gin.Context, data any, err error) {
+	h.respondWith(c, data, err, "commitment not found")
+}
+
+// respondWith is respond with an accurate not-found message: a missing dietary
+// rule reported as a missing commitment sends the client looking in the wrong place.
+func (h Handler) respondWith(c *gin.Context, data any, err error, notFound string) {
 	if errors.Is(err, ErrNotFound) {
-		httpx.Error(c, http.StatusNotFound, "not_found", "commitment not found")
+		httpx.Error(c, http.StatusNotFound, "not_found", notFound)
 		return
 	}
 	if err != nil {
@@ -156,6 +163,65 @@ func (h Handler) AcceptProposal(c *gin.Context) {
 	}
 	item, err := h.service.AcceptProposal(c.Request.Context(), userID, proposalID, input)
 	h.respond(c, item, err)
+}
+
+// ListFoodRules returns every rule with the taxonomy the client offers when
+// adding one, so the picker cannot drift from what the server will accept.
+func (h Handler) ListFoodRules(c *gin.Context) {
+	userID, ok := h.resolveUser(c)
+	if !ok {
+		return
+	}
+	rules, err := h.service.FoodRules(c.Request.Context(), userID)
+	if err != nil {
+		httpx.RespondServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"rules":    rules,
+		"subjects": diet.Catalog(),
+		"patterns": diet.Patterns(),
+	})
+}
+
+type foodRulesInput struct {
+	Rules []FoodRuleInput `json:"rules"`
+}
+
+func (h Handler) PutFoodRules(c *gin.Context) {
+	userID, ok := h.resolveUser(c)
+	if !ok {
+		return
+	}
+	var input foodRulesInput
+	if !bindMentorJSON(c, &input, "malformed dietary rules") {
+		return
+	}
+	rules, err := h.service.PutFoodRules(c.Request.Context(), userID, input.Rules)
+	h.respond(c, rules, err)
+}
+
+// ConfirmFoodRule puts a proposed rule in force — the one-tap accept for a rule
+// Kora inferred from a diet pattern, a profile note, or something said in chat.
+func (h Handler) ConfirmFoodRule(c *gin.Context) {
+	userID, ok := h.resolveUser(c)
+	if !ok {
+		return
+	}
+	rule, err := h.service.ConfirmFoodRule(c.Request.Context(), userID, c.Param("subject"))
+	h.respondWith(c, rule, err, "dietary rule not found")
+}
+
+func (h Handler) DeleteFoodRule(c *gin.Context) {
+	userID, ok := h.resolveUser(c)
+	if !ok {
+		return
+	}
+	if err := h.service.DeleteFoodRule(c.Request.Context(), userID, c.Param("subject")); err != nil {
+		h.respondWith(c, nil, err, "dietary rule not found")
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 func (h Handler) PutCheckIn(c *gin.Context) {

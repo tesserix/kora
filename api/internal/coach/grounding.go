@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/tesserix/kora/api/internal/dashboard"
+	"github.com/tesserix/kora/api/internal/diet"
 	"github.com/tesserix/kora/api/internal/foodlog"
 	"github.com/tesserix/kora/api/internal/memory"
 	"github.com/tesserix/kora/api/internal/mentor"
@@ -79,6 +80,10 @@ type Context struct {
 	HealthDays          []mentor.HealthDay
 	Commitments         []mentor.Commitment
 	NutritionReferences []NutritionReference
+	// DietProfile is the user's confirmed dietary rules, compiled once and
+	// shared by every gate so the prompt, the answer screen and the food
+	// layer all judge by the same rules.
+	DietProfile diet.Profile
 }
 
 // WeightTrend is the observed change in logged weight across the trailing
@@ -122,6 +127,7 @@ type MentorSource interface {
 	ProfileForUser(ctx context.Context, userID uuid.UUID) (mentor.Profile, bool, error)
 	HealthDaysSince(ctx context.Context, userID uuid.UUID, from time.Time, limit int) ([]mentor.HealthDay, error)
 	ActiveCommitments(ctx context.Context, userID uuid.UUID, on time.Time, limit int) ([]mentor.Commitment, error)
+	DietProfile(ctx context.Context, userID uuid.UUID) (diet.Profile, error)
 }
 
 // Grounder wires the read-only sources BuildContext aggregates.
@@ -193,6 +199,17 @@ func (g Grounder) BuildContext(ctx context.Context, userID uuid.UUID, now time.T
 	avgKcal, avgProtein, logsPerDay, daysLogged := summarizeRecent(recentDaily)
 	profile, healthDays, commitments := g.mentorContext(ctx, userID, now, loc)
 
+	// Unlike every other mentor read, this one fails the turn rather than
+	// degrading. Answering without a user's allergies is the exact failure
+	// these rules exist to prevent, and it would be invisible.
+	dietProfile := diet.Profile{}
+	if g.Mentor != nil {
+		dietProfile, err = g.Mentor.DietProfile(ctx, userID)
+		if err != nil {
+			return Context{}, fmt.Errorf("coach: build context: dietary rules: %w", err)
+		}
+	}
+
 	return Context{
 		Today:              today,
 		RecentDaily:        recentDaily,
@@ -207,6 +224,7 @@ func (g Grounder) BuildContext(ctx context.Context, userID uuid.UUID, now time.T
 		MentorProfile:      profile,
 		HealthDays:         healthDays,
 		Commitments:        commitments,
+		DietProfile:        dietProfile,
 	}, nil
 }
 
@@ -519,6 +537,10 @@ func (c Context) Render() string {
 		}
 		fmt.Fprintf(&b, ", quiet hours %s-%s.", minuteLabel(p.QuietStartMinute), minuteLabel(p.QuietEndMinute))
 	}
+	// The structured block follows the prose deliberately: the free text can
+	// say something the taxonomy has no token for, while this states the part
+	// that will actually be enforced after the answer comes back.
+	b.WriteString(diet.RenderConstraints(c.DietProfile))
 	if latest := latestHealth(c.HealthDays); latest != nil {
 		b.WriteString(" Consented Health summary:")
 		if latest.Steps != nil {

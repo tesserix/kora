@@ -36,7 +36,7 @@ func (r Repository) UpsertProfile(ctx context.Context, profile Profile) error {
 	err := r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "user_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
-			"motivation", "dietary_preferences", "allergies", "coaching_style",
+			"motivation", "dietary_preferences", "allergies", "diet_pattern", "coaching_style",
 			"reminder_intensity", "quiet_start_minute", "quiet_end_minute",
 			"health_steps_enabled", "health_sleep_enabled", "health_workouts_enabled",
 			"confirmed_at", "updated_at",

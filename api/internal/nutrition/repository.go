@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/pgvector/pgvector-go"
 	"gorm.io/gorm"
 )
@@ -74,17 +75,29 @@ type ReferenceCandidate struct {
 // national datasets. The stored vectors describe food identity, so this is
 // evidence retrieval, not a recommendation engine: the coach still applies
 // the user's confirmed preferences and safety policy after retrieval.
+//
+// excludedTags drops rows carrying a diet_tags entry the user's blocking rules
+// forbid. Excluding here rather than after retrieval means the model is not
+// handed evidence it must then be told to ignore, and the scan still returns a
+// full set of usable candidates instead of a set with holes in it.
 func (r Repository) SearchReferenceFoods(
 	ctx context.Context,
 	queryVec []float32,
 	locale Locale,
 	limit int,
+	excludedTags []string,
 ) ([]ReferenceCandidate, error) {
 	if len(queryVec) == 0 {
 		return nil, fmt.Errorf("nutrition: search references: empty query embedding")
 	}
 	if limit <= 0 || limit > searchLimitMax {
 		limit = searchLimitMax
+	}
+	// A nil slice binds as SQL NULL, which would make the guard NULL and filter
+	// every row out; an empty array keeps "no rules" meaning "exclude nothing".
+	excluded := pq.StringArray(excludedTags)
+	if excluded == nil {
+		excluded = pq.StringArray{}
 	}
 
 	type referenceRow struct {
@@ -104,8 +117,12 @@ func (r Repository) SearchReferenceFoods(
 		  AND embedding IS NOT NULL
 		  AND entity_type = ?
 		  AND provenance IN ?
+		  AND (cardinality(?::text[]) = 0 OR NOT (diet_tags && ?::text[]))
 		ORDER BY embedding <=> ?, id
-		LIMIT ?`, vector, EntityTypeGeneric, reviewedReferenceProvenance, vector, referenceScanLimit).
+		LIMIT ?`,
+		vector, EntityTypeGeneric, reviewedReferenceProvenance,
+		excluded, excluded,
+		vector, referenceScanLimit).
 		Scan(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("nutrition: search references: %w", err)

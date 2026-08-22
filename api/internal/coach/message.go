@@ -85,7 +85,8 @@ func (h Handler) Message(c *gin.Context) {
 		"show_support": answer.ShowSupport,
 		// The plan rides along with the prose: the composer renders an
 		// approvable card, and the text says why the plan fits.
-		"plan": answer.Plan,
+		"plan":       answer.Plan,
+		"diet_flags": dietFlags(answer),
 	}
 	if answer.By.Agent != "" {
 		agent := gin.H{"name": answer.By.Agent, "skill": answer.By.Skill}

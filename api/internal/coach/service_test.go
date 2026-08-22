@@ -180,8 +180,9 @@ type stubNutritionReferences struct {
 	items  []NutritionReference
 	usage  ai.Usage
 	err    error
-	query  string
-	locale nutrition.Locale
+	query    string
+	locale   nutrition.Locale
+	excluded []string
 }
 
 func (s *stubNutritionReferences) Search(
@@ -189,9 +190,11 @@ func (s *stubNutritionReferences) Search(
 	query string,
 	locale nutrition.Locale,
 	_ int,
+	excludedTags []string,
 ) ([]NutritionReference, ai.Usage, error) {
 	s.query = query
 	s.locale = locale
+	s.excluded = excludedTags
 	return s.items, s.usage, s.err
 }
 

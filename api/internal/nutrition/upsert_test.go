@@ -70,6 +70,29 @@ func TestUpsertBarcodedRespectsRetiredRows(t *testing.T) {
 	require.Zero(t, n)
 }
 
+func TestUpsertBarcodedRetagsARenamedProduct(t *testing.T) {
+	db := testDB(t)
+	tx := db.Begin()
+	require.NoError(t, tx.Error)
+	t.Cleanup(func() { tx.Rollback() })
+	require.NoError(t, tx.Exec("TRUNCATE food_items CASCADE").Error)
+	repo := NewRepository(tx)
+	ctx := context.Background()
+
+	_, _, err := repo.UpsertBarcoded(ctx, []FoodItem{barcoded("9310001000003", "Veggie patty", 400)})
+	require.NoError(t, err)
+
+	// Upstream reformulates the product into a beef one. Tags that stayed on
+	// the old name would leave a blocking rule silently unenforced.
+	_, upd, err := repo.UpsertBarcoded(ctx, []FoodItem{barcoded("9310001000003", "Beef patty", 400)})
+	require.NoError(t, err)
+	require.Equal(t, 1, upd)
+
+	var got FoodItem
+	require.NoError(t, tx.Where("barcode = ?", "9310001000003").First(&got).Error)
+	require.Contains(t, []string(got.DietTags), "contains-beef")
+}
+
 func TestLocalePrefers(t *testing.T) {
 	require.True(t, LocalePrefers(LocaleAU, LocaleAU))
 	require.True(t, LocalePrefers(LocaleNZ, LocaleNZ))

@@ -7,16 +7,22 @@ import { safeBack } from "@/lib/safeBack";
 import type {
   MentorCoachingStyle,
   MentorCommitment,
+  MentorFoodRuleKind,
   MentorProfileInput,
   MentorReminderIntensity,
 } from "@/api/types";
 import {
+  useConfirmMentorFoodRule,
+  useDeleteMentorFoodRule,
   useDeleteMentorHealth,
   useMentorCommitments,
+  useMentorFoodRules,
   useMentorProfile,
   usePutMentorCommitment,
+  usePutMentorFoodRules,
   usePutMentorProfile,
 } from "@/api/hooks";
+import { FoodRulesCard } from "@/components/mentor/FoodRulesCard";
 import { AppBackground } from "@/components/AppBackground";
 import { Button } from "@/components/Button";
 import { ScreenHeader } from "@/components/ScreenHeader";
@@ -45,6 +51,7 @@ const EMPTY_PROFILE: MentorProfileInput = {
   motivation: "",
   dietary_preferences: "",
   allergies: "",
+  diet_pattern: "",
   coaching_style: "supportive",
   reminder_intensity: "balanced",
   quiet_start_minute: 22 * 60,
@@ -59,6 +66,7 @@ function inputFromProfile(profile: MentorProfileInput): MentorProfileInput {
     motivation: profile.motivation,
     dietary_preferences: profile.dietary_preferences,
     allergies: profile.allergies,
+    diet_pattern: profile.diet_pattern,
     coaching_style: profile.coaching_style,
     reminder_intensity: profile.reminder_intensity,
     quiet_start_minute: profile.quiet_start_minute,
@@ -117,9 +125,13 @@ export default function MentorScreen() {
   const insets = useSafeAreaInsets();
   const profile = useMentorProfile();
   const commitments = useMentorCommitments();
+  const foodRules = useMentorFoodRules();
   const putProfile = usePutMentorProfile();
   const deleteHealth = useDeleteMentorHealth();
   const putCommitment = usePutMentorCommitment();
+  const putFoodRules = usePutMentorFoodRules();
+  const confirmFoodRule = useConfirmMentorFoodRule();
+  const deleteFoodRule = useDeleteMentorFoodRule();
   const [draft, setDraft] = useState<MentorProfileInput>(EMPTY_PROFILE);
   const [hydratedProfileVersion, setHydratedProfileVersion] = useState<string | null>(null);
   const [editingTime, setEditingTime] = useState<"start" | "end" | null>(null);
@@ -157,11 +169,38 @@ export default function MentorScreen() {
       await healthSyncPause?.waitForIdle;
       await putProfile.mutateAsync(draft);
       if (revoked) await deleteHealth.mutateAsync();
+      // A saved diet pattern and the free-text notes expand into rules on the
+      // server, so the rules list is stale the moment the profile lands.
+      void foodRules.refetch();
       setSaved(true);
     } catch {
       setError("Your mentor settings could not be saved. Please try again.");
     } finally {
       healthSyncPause?.resume();
+    }
+  };
+
+  // A rules PUT replaces the user's own set, so an add sends the existing
+  // user-authored rules alongside the new one. Pattern- and coach-authored
+  // rules are the server's to keep.
+  const addFoodRule = async (subject: string, kind: MentorFoodRuleKind): Promise<void> => {
+    const existing = (foodRules.data?.rules ?? [])
+      .filter((rule) => rule.source === "user")
+      .map((rule) => ({ subject: rule.subject, kind: rule.kind, severity: rule.severity }));
+    setError(null);
+    try {
+      await putFoodRules.mutateAsync([...existing, { subject, kind }]);
+    } catch {
+      setError("That food rule could not be saved. Please try again.");
+    }
+  };
+
+  const changeFoodRule = async (run: Promise<unknown>): Promise<void> => {
+    setError(null);
+    try {
+      await run;
+    } catch {
+      setError("That food rule could not be changed. Please try again.");
     }
   };
 
@@ -257,6 +296,17 @@ export default function MentorScreen() {
                     onChangeText={(value) => update("allergies", value)}
                     maxLength={500}
                     style={inputStyle}
+                  />
+
+                  <FoodRulesCard
+                    pattern={draft.diet_pattern}
+                    patterns={foodRules.data?.patterns ?? []}
+                    rules={foodRules.data?.rules ?? []}
+                    subjects={foodRules.data?.subjects ?? []}
+                    onPatternChange={(value) => update("diet_pattern", value)}
+                    onAdd={(subject, kind) => { void addFoodRule(subject, kind); }}
+                    onConfirm={(subject) => { void changeFoodRule(confirmFoodRule.mutateAsync(subject)); }}
+                    onRemove={(subject) => { void changeFoodRule(deleteFoodRule.mutateAsync(subject)); }}
                   />
 
                   <AppText style={engravedStyle(instrument)}>Coaching style</AppText>
