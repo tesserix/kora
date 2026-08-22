@@ -1992,7 +1992,7 @@ describe("closing capture with no navigation history", () => {
 describe("a question gets an answer, not a food card", () => {
   async function askAndAnswer(
     rendered: Awaited<ReturnType<typeof render>>,
-    answer: { answer: string; agent?: { name: string; skill: string } },
+    answer: { answer: string; agent?: { name: string; skill: string; reviewed_by?: string } },
   ) {
     const { findByText, findByLabelText } = rendered;
     await fireEvent.press(await findByText("Type"));
@@ -2009,6 +2009,18 @@ describe("a question gets an answer, not a food card", () => {
 
     expect(await rendered.findByText("Here's a week of meals to start from.")).toBeTruthy();
     expect(rendered.queryByLabelText("Add to diary")).toBeNull();
+  });
+
+  // The plan path is two agents: the planner drafts, the coach reviews. The
+  // label carries both so the user knows the plan was vetted, not just made.
+  test("names the reviewer when a plan draft was reviewed", async () => {
+    const rendered = await render(<CaptureScreen />);
+    await askAndAnswer(rendered, {
+      answer: "Day 1: ... Approve, or tell me what to change.",
+      agent: { name: "Kora Meal Planner", skill: "plan-meals", reviewed_by: "Kora Nutrition Coach" },
+    });
+
+    expect(await rendered.findByText("Kora Meal Planner · reviewed by Kora Nutrition Coach")).toBeTruthy();
   });
 
   test("names the agent that answered", async () => {

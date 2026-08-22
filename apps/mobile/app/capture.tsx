@@ -516,7 +516,7 @@ interface CaptureBodyProps {
    */
   sentPhrase: string | null;
   /** Otto's reply when the message was a question, not food (kora#264). */
-  answer?: { text: string; agent?: string } | null;
+  answer?: { text: string; agent?: string; reviewedBy?: string } | null;
   mealSlot: MealSlot;
   onChangeMealSlot: (slot: MealSlot) => void;
   onAdd: () => void;
@@ -736,7 +736,15 @@ export function CaptureBody({
         )}
 
         {answer ? (
-          <OttoBubble agent={answer.agent}>{answer.text}</OttoBubble>
+          <OttoBubble
+            agent={
+              answer.agent
+                ? answer.agent + (answer.reviewedBy ? ` · reviewed by ${answer.reviewedBy}` : "")
+                : undefined
+            }
+          >
+            {answer.text}
+          </OttoBubble>
         ) : null}
 
         {errorMsg ? <OttoBubble>{errorMsg}</OttoBubble> : null}
@@ -1098,7 +1106,7 @@ export default function CaptureScreen() {
   // Otto's reply when the message was a question rather than food. Separate
   // from errorMsg because it is an ANSWER, not a failure, and it carries who
   // answered it.
-  const [answer, setAnswer] = useState<{ text: string; agent?: string } | null>(null);
+  const [answer, setAnswer] = useState<{ text: string; agent?: string; reviewedBy?: string } | null>(null);
   const [mealSlot, setMealSlot] = useState<MealSlot>(() => mealSlotForHour(new Date().getHours()));
   const [adding, setAdding] = useState(false);
   // Candidate keys (see candidateKey) already logged successfully across
@@ -1390,7 +1398,11 @@ export default function CaptureScreen() {
           // Conversation, so nothing to confirm and nothing to log: the thread
           // keeps the user's message and gains Otto's reply, and the screen
           // goes back to idle rather than to the add-to-diary card.
-          setAnswer({ text: data.answer, agent: data.agent?.name });
+          setAnswer({
+            text: data.answer,
+            agent: data.agent?.name,
+            reviewedBy: data.agent?.reviewed_by,
+          });
           setStage("idle");
           return;
         }

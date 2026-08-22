@@ -66,6 +66,8 @@ export interface CoachThreadResponse {
 export interface CoachAgent {
   name: string;
   skill: string;
+  /** Set when a planner draft was reviewed by another agent before being shown. */
+  reviewed_by?: string;
 }
 
 export interface CoachAnswer {

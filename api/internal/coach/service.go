@@ -101,6 +101,9 @@ type Answer struct {
 type Attribution struct {
 	Agent string
 	Skill string
+	// ReviewedBy names the agent that reviewed a planner draft before it was
+	// shown. Empty on every other path — a plain answer has no review stage.
+	ReviewedBy string
 }
 
 // guidanceSkill is the registry skill id Q&A routes to. Kora names the
@@ -182,6 +185,16 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 		// back: the capability that routed the question is what the user is
 		// told, and it stays right even if a runner omits the field.
 		by = Attribution{Agent: run.DisplayName, Skill: skill}
+		if skill == planningSkill {
+			// Planner drafts are machine-shaped and unvetted; the coach
+			// reviews them against the user's numbers and presents the result
+			// as a proposal to approve or challenge. A failed review keeps
+			// the draft — worse, but still an answer.
+			if reviewed, reviewer := s.reviewPlan(ctx, userID, grounded.Render(), question, raw); reviewed != "" {
+				raw = reviewed
+				by.ReviewedBy = reviewer
+			}
+		}
 	} else {
 		// The agent path is preferred, not required: a registry that publishes
 		// no matching agent, or a gateway that fails, must not cost the user an
@@ -298,11 +311,22 @@ func (s *Service) askAgent(ctx context.Context, userID uuid.UUID, userPrompt str
 
 // askProvider is the pre-agent path: one grounded GenerateText call.
 func (s *Service) askProvider(ctx context.Context, userID uuid.UUID, userPrompt string) (string, error) {
+	return s.generate(ctx, userID, qaSystemPrompt, userPrompt)
+}
+
+// generate runs one provider call with a task-specific system contract while
+// preserving the same abandoned-call accounting as ordinary coach Q&A. Meal
+// plan review uses this because review instructions are not the Q&A prompt.
+func (s *Service) generate(
+	ctx context.Context,
+	userID uuid.UUID,
+	systemPrompt, userPrompt string,
+) (string, error) {
 	if s.provider == nil {
 		return "", errNoProvider
 	}
 	providerCtx, collector := ai.WithUsageCollector(ctx)
-	raw, usage, err := s.provider.GenerateText(providerCtx, qaSystemPrompt, userPrompt)
+	raw, usage, err := s.provider.GenerateText(providerCtx, systemPrompt, userPrompt)
 	for _, abandoned := range collector.Drain() {
 		s.record(ctx, userID, abandoned)
 	}

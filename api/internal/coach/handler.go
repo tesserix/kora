@@ -118,7 +118,11 @@ func (h Handler) Ask(c *gin.Context) {
 		// Omitted entirely when the direct provider answered, so the client
 		// can tell "the coach agent replied" from "the plain model replied"
 		// rather than having to compare against a sentinel name.
-		body["agent"] = gin.H{"name": answer.By.Agent, "skill": answer.By.Skill}
+		agent := gin.H{"name": answer.By.Agent, "skill": answer.By.Skill}
+		if answer.By.ReviewedBy != "" {
+			agent["reviewed_by"] = answer.By.ReviewedBy
+		}
+		body["agent"] = agent
 	}
 	httpx.OK(c, body)
 }

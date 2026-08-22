@@ -24,11 +24,29 @@ type fakeRunner struct {
 	calls  int
 	skill  string
 	prompt string
+
+	// Per-skill behaviour for the two-stage plan path, where one Ask reaches
+	// the runner twice (planner drafts, coach reviews). Nil falls back to the
+	// single run/err pair above.
+	bySkill map[string]agents.Run
+	errBy   map[string]error
+	skills  []string
+	prompts []string
 }
 
 func (f *fakeRunner) Run(_ context.Context, skill, prompt string) (agents.Run, error) {
 	f.calls++
 	f.skill, f.prompt = skill, prompt
+	f.skills = append(f.skills, skill)
+	f.prompts = append(f.prompts, prompt)
+	if f.errBy != nil {
+		if err, ok := f.errBy[skill]; ok {
+			return agents.Run{}, err
+		}
+	}
+	if f.bySkill != nil {
+		return f.bySkill[skill], nil
+	}
 	return f.run, f.err
 }
 
@@ -214,9 +232,79 @@ func TestAsk_RoutesAPlanRequestToThePlanningCapability(t *testing.T) {
 		"can you create a proper meal plan for the next 1 week to help me reduce my fat")
 
 	require.NoError(t, err)
-	require.Equal(t, planningSkill, runner.skill, "a plan request must route to the planning capability")
+	require.Equal(t, planningSkill, runner.skills[0], "a plan request must route to the planning capability")
 	require.Equal(t, "Kora Meal Planner", a.By.Agent, "the user is told which agent answered")
 	require.Equal(t, planningSkill, a.By.Skill)
+	_ = db
+}
+
+// The planner speaks JSON — its card's contract is a machine plan — and that
+// draft must never reach the user raw. The coach reviews it against the
+// user's numbers and presents it, and the user is told both names.
+func TestAsk_APlanDraftIsReviewedByTheCoach(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	g, meter := askFixture(t)
+
+	provider := &fakeProvider{text: "plan"}
+	runner := &fakeRunner{bySkill: map[string]agents.Run{
+		planningSkill: {
+			Agent:       "meal-planner",
+			DisplayName: "Kora Meal Planner",
+			State:       "completed",
+			Text:        `{"summary":"fits your targets","days":[]}`,
+		},
+		guidanceSkill: {
+			Agent:       "nutrition-coach",
+			DisplayName: "Kora Nutrition Coach",
+			State:       "completed",
+			Text:        "This draft fits your 2000 kcal target. Day 1: ... Approve, or tell me what to change.",
+		},
+	}}
+	svc := NewService(g, provider, meter, nil).WithAgents(runner)
+
+	a, err := svc.Ask(context.Background(), userID, time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC), time.UTC,
+		"plan my meals for the week")
+
+	require.NoError(t, err)
+	require.Equal(t, []string{planningSkill, guidanceSkill}, runner.skills, "the draft goes to the coach for review")
+	require.Contains(t, runner.prompts[1], `{"summary":"fits your targets"`, "the reviewer sees the draft")
+	require.Contains(t, a.Text, "Approve, or tell me what to change", "the user reads the review, not the draft")
+	require.Equal(t, "Kora Meal Planner", a.By.Agent)
+	require.Equal(t, "Kora Nutrition Coach", a.By.ReviewedBy)
+	_ = db
+}
+
+// A review that cannot happen must not cost the user the plan: the draft is
+// still the answer, with no reviewer attributed.
+func TestAsk_AFailedReviewKeepsThePlannerDraft(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	g, meter := askFixture(t)
+
+	// The provider answers the classifier with "plan", then fails every later
+	// call — so the review's provider fallback fails too and the draft stands.
+	provider := &flakyProvider{fakeProvider: fakeProvider{text: "plan"}, failAfter: 1}
+	runner := &fakeRunner{
+		bySkill: map[string]agents.Run{
+			planningSkill: {
+				Agent:       "meal-planner",
+				DisplayName: "Kora Meal Planner",
+				State:       "completed",
+				Text:        "Day 1: oats. Day 2: eggs.",
+			},
+		},
+		errBy: map[string]error{guidanceSkill: errors.New("gateway unreachable")},
+	}
+	svc := NewService(g, provider, meter, nil).WithAgents(runner)
+
+	a, err := svc.Ask(context.Background(), userID, time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC), time.UTC,
+		"plan my meals for the week")
+
+	require.NoError(t, err)
+	require.Equal(t, "Day 1: oats. Day 2: eggs.", a.Text, "the draft survives a failed review")
+	require.Equal(t, "Kora Meal Planner", a.By.Agent)
+	require.Empty(t, a.By.ReviewedBy)
 	_ = db
 }
 
@@ -262,4 +350,19 @@ func TestAsk_ClassifierFailureFallsBackToGuidance(t *testing.T) {
 	require.Equal(t, guidanceSkill, runner.skill)
 	require.Equal(t, "Still answered.", a.Text)
 	_ = db
+}
+
+// flakyProvider succeeds for its first failAfter GenerateText calls and then
+// errors — the shape of "the classifier worked, the fallback did not".
+type flakyProvider struct {
+	fakeProvider
+	failAfter int
+}
+
+func (f *flakyProvider) GenerateText(ctx context.Context, systemPrompt, userPrompt string) (string, ai.Usage, error) {
+	if f.calls >= f.failAfter {
+		f.calls++
+		return "", ai.Usage{}, errors.New("provider down")
+	}
+	return f.fakeProvider.GenerateText(ctx, systemPrompt, userPrompt)
 }
