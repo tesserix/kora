@@ -202,17 +202,80 @@ func (p OpenAIProvider) IdentifyPhoto(ctx context.Context, image []byte, mime st
 	return guesses, usage, nil
 }
 
-// IdentifyBodyComposition is not yet implemented for the OpenAI-compatible
-// fallback — wiring it up is a later task (kora#314). Returning an error
-// (rather than a silent zero-value "success", the way Embed and Transcribe
-// above also refuse rather than fake an answer) matters here specifically:
-// once Task 2/3 land, an all-nil BodyCompositionReading is a legitimate
-// real result (nothing legible on the screen), so a caller MUST be able to
-// tell "not implemented yet" apart from "provider found nothing" by the
-// error alone.
+// bodyCompositionJSONSchema builds the Structured Outputs JSON schema for
+// IdentifyBodyComposition. Unlike guessJSONSchema/ingredientJSONSchema, the
+// root here IS the reading object itself — no "guesses"/"ingredients"
+// envelope key, because a single reading (not an array of them) is the
+// natural top-level shape and OpenAI's Structured Outputs supports an
+// object root directly.
+//
+// Every property is typed nullable (`["number", "null"]` or
+// `["string", "null"]` for reading_date) AND listed in "required". This
+// looks contradictory at first glance — "required" usually means "must be
+// present with a value" — but under strict:true, Structured Outputs has no
+// other way to express "optional": every property MUST appear in
+// "required", full stop, so a field that the model may legitimately be
+// unable to read has to be expressed as "required to be present, but its
+// value may be JSON null" rather than "absent from the object". The system
+// prompt (bodyCompositionSystemPrompt) tells the model to answer null for
+// anything not legible on screen, which together with this schema shape
+// satisfies both the strict-mode constraint and the "omit what you can't
+// read" invariant. Compare guessJSONSchema's comment, which anticipates the
+// same kind of reader confusion for its own required list.
+func bodyCompositionJSONSchema() map[string]any {
+	numberOrNull := map[string]any{"type": []string{"number", "null"}}
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"weight_kg":            numberOrNull,
+			"body_fat_pct":         numberOrNull,
+			"subcutaneous_fat_pct": numberOrNull,
+			"visceral_fat_rating":  numberOrNull,
+			"skeletal_muscle_pct":  numberOrNull,
+			"muscle_mass_kg":       numberOrNull,
+			"body_water_pct":       numberOrNull,
+			"protein_pct":          numberOrNull,
+			"bone_mass_kg":         numberOrNull,
+			"scale_bmr_kcal":       numberOrNull,
+			"reading_date":         map[string]any{"type": []string{"string", "null"}},
+		},
+		"required": []string{
+			"weight_kg", "body_fat_pct", "subcutaneous_fat_pct", "visceral_fat_rating",
+			"skeletal_muscle_pct", "muscle_mass_kg", "body_water_pct", "protein_pct",
+			"bone_mass_kg", "scale_bmr_kcal", "reading_date",
+		},
+		"additionalProperties": false,
+	}
+}
+
+// IdentifyBodyComposition reads a smart-scale result screenshot using the
+// configured model's vision input, mirroring IdentifyPhoto's shape exactly.
+// There is no envelope to unwrap here (contrast unwrapGuesses/
+// unwrapIngredients): bodyCompositionJSONSchema's root IS the reading
+// object, so the raw response bytes go straight to
+// parseBodyCompositionReading — the same helper Gemini's implementation
+// uses (defined in gemini.go, same package), since a plain
+// json.Unmarshal into ai.BodyCompositionReading's pointer fields is
+// provider-agnostic: encoding/json sets a *float64/*string field to nil for
+// a JSON null exactly as it does for a missing key, so this decodes
+// correctly whether the field was omitted (Gemini, non-strict schemas) or
+// explicitly null (this schema, under strict:true).
 func (p OpenAIProvider) IdentifyBodyComposition(ctx context.Context, image []byte, mime string) (ai.BodyCompositionReading, ai.Usage, error) {
-	return ai.BodyCompositionReading{}, ai.Usage{}, fmt.Errorf(
-		"openai: identify body composition: not yet implemented — see kora#314")
+	dataURL := fmt.Sprintf("data:%s;base64,%s", mime, base64.StdEncoding.EncodeToString(image))
+	data, usage, err := p.generateJSON(ctx, p.model, callTypeIdentifyBodyComposition,
+		bodyCompositionSystemPrompt,
+		[]openai.ChatCompletionContentPartUnionParam{
+			openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{URL: dataURL}),
+		},
+		"body_composition_reading", bodyCompositionJSONSchema())
+	if err != nil {
+		return ai.BodyCompositionReading{}, usage, err
+	}
+	reading, err := parseBodyCompositionReading(data)
+	if err != nil {
+		return ai.BodyCompositionReading{}, usage, fmt.Errorf("openai: identify body composition: parse response: %w", err)
+	}
+	return reading, usage, nil
 }
 
 // Decompose breaks a dish into its ingredients using the configured model.
