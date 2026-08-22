@@ -1,4 +1,4 @@
-import { ActivityIndicator, Pressable, View } from "react-native";
+import { ActivityIndicator, Linking, Pressable, View } from "react-native";
 import { Icon } from "@/components/Icon";
 import { AppText } from "@/components/Text";
 import { INSTRUMENT_DARK_FIXED } from "@/theme";
@@ -13,6 +13,13 @@ interface Props {
   plan: MealPlanProposal;
   onApprove: () => void;
   approving?: boolean;
+}
+
+// The origin is fixed in code and only the meal name is interpolated, so a
+// model-supplied name can steer the search terms but never the destination.
+function openPreparationSearch(mealName: string) {
+  const query = encodeURIComponent(`${mealName} recipe`);
+  void Linking.openURL(`https://www.youtube.com/results?search_query=${query}`).catch(() => {});
 }
 
 function DaySection({ day, isLast }: { day: MealPlanDay; isLast: boolean }) {
@@ -43,13 +50,57 @@ function DaySection({ day, isLast }: { day: MealPlanDay; isLast: boolean }) {
           <View key={index} style={{ flexDirection: "row", gap: 8 }}>
             <AppText style={{ color: T.mut, fontSize: 14, lineHeight: 20 }}>·</AppText>
             <View style={{ flexShrink: 1 }}>
-              <AppText style={{ color: T.ink, fontSize: 14, lineHeight: 20, fontWeight: "600" }}>
-                {meal.name}
-              </AppText>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <AppText
+                  style={{
+                    flexShrink: 1,
+                    color: T.ink,
+                    fontSize: 14,
+                    lineHeight: 20,
+                    fontWeight: "600",
+                  }}
+                >
+                  {meal.name}
+                </AppText>
+                <Pressable
+                  accessibilityRole="link"
+                  accessibilityLabel={`Find preparation video for ${meal.name}`}
+                  onPress={() => openPreparationSearch(meal.name)}
+                  style={(state) => ({
+                    alignItems: "center",
+                    justifyContent: "center",
+                    minHeight: 44,
+                    minWidth: 44,
+                    opacity: state.pressed ? 0.6 : 1,
+                  })}
+                >
+                  <Icon name="search" size={13} color={T.mut} />
+                </Pressable>
+              </View>
               {meal.description ? (
                 <AppText style={{ color: T.mut, fontSize: 12, lineHeight: 18 }}>
                   {meal.description}
                 </AppText>
+              ) : null}
+              {meal.preparation ? (
+                <View style={{ flexDirection: "row", gap: 6, marginTop: 3 }}>
+                  <AppText
+                    maxFontSizeMultiplier={1.5}
+                    style={{
+                      fontSize: 10,
+                      fontWeight: "700",
+                      letterSpacing: 1.2,
+                      textTransform: "uppercase",
+                      color: withAlpha(T.mut, 0.75),
+                      lineHeight: 18,
+                    }}
+                  >
+                    How
+                  </AppText>
+                  <AppText style={{ flexShrink: 1, color: T.mut, fontSize: 12, lineHeight: 18 }}>
+                    {meal.preparation}
+                  </AppText>
+                </View>
               ) : null}
             </View>
           </View>
@@ -64,11 +115,26 @@ function DaySection({ day, isLast }: { day: MealPlanDay; isLast: boolean }) {
 // zone rules, and a single accent action — the screen's one hero moment while
 // a plan is on it.
 //
-// Approve records the user's decision and nothing else: Kora has no feature
-// that writes a plan's meals into the diary, so the copy promises exactly what
-// the button does.
+// Approval activates reminders but never writes meals into the diary; logging
+// remains an explicit user action.
+// formatStartsOn renders the server's local calendar date without letting the
+// device's zone shift it a day: the date was already resolved in the user's
+// own zone at approval, so it is read as calendar parts, not as an instant.
+function formatStartsOn(startsOn: string | null): string {
+  const parts = /^(\d{4})-(\d{2})-(\d{2})/.exec(startsOn ?? "");
+  if (!parts) return "";
+  const date = new Date(Date.UTC(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3])));
+  return date.toLocaleDateString("en-AU", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  });
+}
+
 export function PlanCard({ plan, onApprove, approving = false }: Props) {
   const approved = plan.accepted_at !== null;
+  const startsOn = formatStartsOn(plan.starts_on ?? null);
   return (
     <View
       testID="plan-card"
@@ -127,7 +193,9 @@ export function PlanCard({ plan, onApprove, approving = false }: Props) {
           }}
         >
           <Icon name="check" size={16} color={T.teal} />
-          <AppText style={{ color: T.teal, fontSize: 13, fontWeight: "700" }}>Plan approved</AppText>
+          <AppText style={{ color: T.teal, fontSize: 13, fontWeight: "700" }}>
+            {startsOn ? `Plan approved · starts ${startsOn}` : "Plan approved"}
+          </AppText>
         </View>
       ) : (
         <Pressable
@@ -163,7 +231,7 @@ export function PlanCard({ plan, onApprove, approving = false }: Props) {
       )}
 
       <AppText style={{ color: T.mut, fontSize: 11, lineHeight: 16, marginTop: 8 }}>
-        Approving saves your decision. Nothing is logged — tell Otto what to change any time.
+        Approving activates daily plan reminders at your first enabled meal reminder time. Nothing is logged — tell Otto what to change any time.
       </AppText>
     </View>
   );

@@ -242,9 +242,9 @@ func TestAsk_RoutesAPlanRequestToThePlanningCapability(t *testing.T) {
 }
 
 // The planner speaks JSON — its card's contract is a machine plan — and that
-// draft must never reach the user raw. The coach reviews it against the
+// draft must never reach the user raw. The supervisor reviews it against the
 // user's numbers and presents it, and the user is told both names.
-func TestAsk_APlanDraftIsReviewedByTheCoach(t *testing.T) {
+func TestAsk_APlanDraftIsReviewedByTheSupervisor(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db, 2000, 120)
 	g, meter := askFixture(t)
@@ -257,11 +257,14 @@ func TestAsk_APlanDraftIsReviewedByTheCoach(t *testing.T) {
 			State:       "completed",
 			Text:        `{"summary":"fits your targets","days":[]}`,
 		},
-		guidanceSkill: {
-			Agent:       "nutrition-coach",
-			DisplayName: "Kora Nutrition Coach",
+		planReviewSkill: {
+			Agent:       "plan-supervisor",
+			DisplayName: "Kora Plan Supervisor",
 			State:       "completed",
-			Text:        "This draft fits your 2000 kcal target. Day 1: ... Approve, or tell me what to change.",
+			Text: `I checked the draft against your grounded context. Approve, or tell me what to change.
+[[KORA_REVIEWED_PLAN]]
+{"summary":"Reviewed plan","days":[{"date":"Any day label","meals":[{"name":"Oats","description":"Reviewed breakfast","preparation":"Simmer oats until creamy."}]}]}
+[[/KORA_REVIEWED_PLAN]]`,
 		},
 	}}
 	svc := NewService(g, provider, meter, nil).WithAgents(runner)
@@ -270,11 +273,13 @@ func TestAsk_APlanDraftIsReviewedByTheCoach(t *testing.T) {
 		"plan my meals for the week")
 
 	require.NoError(t, err)
-	require.Equal(t, []string{planningSkill, guidanceSkill}, runner.skills, "the draft goes to the coach for review")
+	require.Equal(t, []string{planningSkill, planReviewSkill}, runner.skills, "the draft goes to the supervisor for review")
 	require.Contains(t, runner.prompts[1], `{"summary":"fits your targets"`, "the reviewer sees the draft")
+	require.NotContains(t, runner.prompts[1], "You are the user's nutrition coach",
+		"the published supervisor owns its system instructions; Kora sends only review input")
 	require.Contains(t, a.Text, "Approve, or tell me what to change", "the user reads the review, not the draft")
 	require.Equal(t, "Kora Meal Planner", a.By.Agent)
-	require.Equal(t, "Kora Nutrition Coach", a.By.ReviewedBy)
+	require.Equal(t, "Kora Plan Supervisor", a.By.ReviewedBy)
 	_ = db
 }
 
@@ -288,8 +293,8 @@ func TestAsk_AReviewedRoutineReturnsAndPersistsAUserReviewProposal(t *testing.T)
 			Agent: "meal-planner", DisplayName: "Kora Meal Planner",
 			State: "completed", Text: `{"summary":"hydration rhythm"}`,
 		},
-		guidanceSkill: {
-			Agent: "nutrition-coach", DisplayName: "Kora Nutrition Coach",
+		planReviewSkill: {
+			Agent: "plan-supervisor", DisplayName: "Kora Plan Supervisor",
 			State: "completed", Text: `This is a gentle rhythm. Review it before activation.
 [[KORA_COMMITMENT]]
 {"title":"Drink water","kind":"hydration","cadence":"interval","weekdays_mask":127,"start_minute":480,"interval_minutes":120,"end_minute":1200}
@@ -335,7 +340,7 @@ func TestAsk_AFailedReviewDoesNotExposeAProseDraft(t *testing.T) {
 				Text:        "Day 1: oats. Day 2: eggs.",
 			},
 		},
-		errBy: map[string]error{guidanceSkill: errors.New("gateway unreachable")},
+		errBy: map[string]error{planReviewSkill: errors.New("gateway unreachable")},
 	}
 	svc := NewService(g, provider, meter, nil).WithAgents(runner)
 
@@ -428,7 +433,7 @@ func TestAsk_AnUnreviewedPlanDraftIsNotShown(t *testing.T) {
 				Text:        `{"summary":"High-protein dinners.","days":[{"date":"Day 1","meals":[{"name":"Dinner: Steak","description":"180g sirloin."}]}]}`,
 			},
 		},
-		errBy: map[string]error{guidanceSkill: errors.New("gateway timeout")},
+		errBy: map[string]error{planReviewSkill: errors.New("gateway timeout")},
 	}
 	svc := NewService(g, provider, meter, nil).WithAgents(runner)
 
@@ -460,11 +465,11 @@ func TestAsk_AReviewedPlanIsAlsoReturnedAsAnApprovableCard(t *testing.T) {
 			Agent: "meal-planner", DisplayName: "Kora Meal Planner", State: "completed",
 			Text: `{"summary":"UNREVIEWED target claim","days":[{"date":"Monday","meals":[{"name":"Steak","description":"unsupported numbers"}]}]}`,
 		},
-		guidanceSkill: {
-			Agent: "nutrition-coach", DisplayName: "Kora Nutrition Coach", State: "completed",
+		planReviewSkill: {
+			Agent: "plan-supervisor", DisplayName: "Kora Plan Supervisor", State: "completed",
 			Text: `This was amended against your 2000 kcal target. [cite:today_kcal_target] Approve it, or tell me what to change.
 [[KORA_REVIEWED_PLAN]]
-{"summary":"Reviewed meal plan","days":[{"date":"Monday","meals":[{"name":"Lentil bowl","description":"A reviewed option"}]}]}
+{"summary":"Reviewed meal plan","days":[{"date":"Monday","meals":[{"name":"Lentil bowl","description":"A reviewed option","preparation":"Simmer lentils, then fold through roasted vegetables."}]}]}
 [[/KORA_REVIEWED_PLAN]]`,
 		},
 	}}
@@ -482,8 +487,9 @@ func TestAsk_AReviewedPlanIsAlsoReturnedAsAnApprovableCard(t *testing.T) {
 	require.Len(t, answer.Plan.Days, 1)
 	require.Equal(t, "Lentil bowl", answer.Plan.Days[0].Meals[0].Name)
 	require.NotContains(t, answer.Plan.Summary, "UNREVIEWED")
+	require.Equal(t, "Simmer lentils, then fold through roasted vegetables.", answer.Plan.Days[0].Meals[0].Preparation)
 	require.Equal(t, "Kora Meal Planner", answer.Plan.AgentName)
-	require.Equal(t, "Kora Nutrition Coach", answer.Plan.ReviewedBy)
+	require.Equal(t, "Kora Plan Supervisor", answer.Plan.ReviewedBy)
 	require.Nil(t, answer.Plan.AcceptedAt, "a plan is a proposal until the user approves it")
 
 	turns, err := thread.ListRecent(t.Context(), userID, maxThreadTurns)
@@ -491,6 +497,64 @@ func TestAsk_AReviewedPlanIsAlsoReturnedAsAnApprovableCard(t *testing.T) {
 	require.Len(t, turns, 2)
 	require.NotNil(t, turns[1].Plan)
 	require.Equal(t, answer.Plan.ID, turns[1].Plan.ID)
+}
+
+func TestAsk_AReviewWithoutCompletePreparationCannotBeApproved(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	g, meter := askFixture(t)
+	runner := &fakeRunner{bySkill: map[string]agents.Run{
+		planningSkill: {
+			Agent: "meal-planner", DisplayName: "Kora Meal Planner", State: "completed",
+			Text: `{"summary":"Draft","days":[{"date":"Day 1","meals":[{"name":"Oats","description":"Breakfast"}]}]}`,
+		},
+		planReviewSkill: {
+			Agent: "plan-supervisor", DisplayName: "Kora Plan Supervisor", State: "completed",
+			Text: `This is ready to approve.
+[[KORA_REVIEWED_PLAN]]
+{"summary":"Incomplete review","days":[{"date":"Day 1","meals":[{"name":"Oats","description":"Breakfast"}]}]}
+[[/KORA_REVIEWED_PLAN]]`,
+		},
+	}}
+	thread := NewThreadRepository(db)
+	svc := NewService(g, &fakeProvider{text: "plan"}, meter, &thread).WithAgents(runner)
+
+	answer, err := svc.Ask(
+		t.Context(), userID, time.Date(2026, 8, 22, 1, 0, 0, 0, time.UTC), time.UTC,
+		"plan my meals",
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, planReviewUnavailableText, answer.Text)
+	require.Nil(t, answer.Plan)
+}
+
+func TestAsk_AReviewWithoutAPlanOrCommitmentFailsClosed(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	g, meter := askFixture(t)
+	runner := &fakeRunner{bySkill: map[string]agents.Run{
+		planningSkill: {
+			Agent: "meal-planner", DisplayName: "Kora Meal Planner", State: "completed",
+			Text: `{"summary":"planner ignored its days contract"}`,
+		},
+		planReviewSkill: {
+			Agent: "plan-supervisor", DisplayName: "Kora Plan Supervisor", State: "completed",
+			Text: "This looks ready, but I omitted the machine decision.",
+		},
+	}}
+	thread := NewThreadRepository(db)
+	svc := NewService(g, &fakeProvider{text: "plan"}, meter, &thread).WithAgents(runner)
+
+	answer, err := svc.Ask(
+		t.Context(), userID, time.Date(2026, 8, 22, 1, 0, 0, 0, time.UTC), time.UTC,
+		"plan my meals",
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, planReviewUnavailableText, answer.Text)
+	require.Nil(t, answer.Plan)
+	require.Nil(t, answer.Proposal)
 }
 
 // A plan answered without a thread to store it in has no id, so there is
@@ -506,11 +570,11 @@ func TestAsk_AnUnstoredPlanCarriesNoCard(t *testing.T) {
 			Agent: "meal-planner", DisplayName: "Kora Meal Planner", State: "completed",
 			Text: `{"summary":"a week","days":[{"date":"Monday","meals":[{"name":"Oats"}]}]}`,
 		},
-		guidanceSkill: {
-			Agent: "nutrition-coach", DisplayName: "Kora Nutrition Coach", State: "completed",
+		planReviewSkill: {
+			Agent: "plan-supervisor", DisplayName: "Kora Plan Supervisor", State: "completed",
 			Text: `Looks good against your targets.
 [[KORA_REVIEWED_PLAN]]
-{"summary":"Reviewed week","days":[{"date":"Monday","meals":[{"name":"Oats"}]}]}
+{"summary":"Reviewed week","days":[{"date":"Monday","meals":[{"name":"Oats","description":"Warm breakfast","preparation":"Simmer oats with water until creamy."}]}]}
 [[/KORA_REVIEWED_PLAN]]`,
 		},
 	}}

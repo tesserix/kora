@@ -262,6 +262,12 @@ export function usePushResponder(): void {
         router.replace("/capture");
         return;
       }
+      // A plan reminder lands on capture, where the thread holding the reviewed
+      // plan and its card lives — the plan is a conversation, not a screen.
+      if (data?.kind === "meal-plan") {
+        router.replace("/capture");
+        return;
+      }
       if (data?.kind === "custom") {
         router.replace("/");
         return;

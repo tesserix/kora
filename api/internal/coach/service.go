@@ -240,9 +240,17 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 			if reviewed, reviewer := s.reviewPlan(ctx, userID, grounded.Render(), question, raw); reviewed != "" {
 				by.ReviewedBy = reviewer
 				reviewed, envelope, hasReviewedPlan := parseReviewedPlan(reviewed)
-				raw, proposal = parseReviewedCommitment(reviewed, userID, now, loc, by.Agent, reviewer)
-				if hasReviewedPlan {
-					plan = newPlanProposal(userID, envelope, by.Agent, by.ReviewedBy)
+				reviewed, proposal = parseReviewedCommitment(reviewed, userID, now, loc, by.Agent, reviewer)
+				if !hasReviewedPlan && proposal == nil {
+					// A supervisor decision is machine-verifiable or it is not a
+					// decision. Never present free-form review prose as though the
+					// user had a complete plan or schedulable commitment to approve.
+					raw = planReviewUnavailableText
+				} else {
+					raw = reviewed
+					if hasReviewedPlan {
+						plan = newPlanProposal(userID, envelope, by.Agent, by.ReviewedBy)
+					}
 				}
 			} else {
 				raw = planReviewUnavailableText

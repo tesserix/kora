@@ -177,18 +177,46 @@ func TestThreadRepository_ScopedToUser(t *testing.T) {
 func TestThreadRepository_AcceptPlanReturnsThePersistedTimestamp(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db, 2000, 120)
+	require.NoError(t, db.Exec("UPDATE users SET timezone = ? WHERE id = ?", "Australia/Melbourne", userID).Error)
 	repo := NewThreadRepository(db)
 	plan := seedPlanProposal(t, repo, userID)
-	now := time.Date(2026, 8, 22, 7, 13, 41, 863886612, time.UTC)
+	// 23:13 UTC is already the next local calendar day in Melbourne.
+	now := time.Date(2026, 8, 22, 23, 13, 41, 863886612, time.UTC)
 
 	first, err := repo.AcceptPlan(t.Context(), userID, plan.ID, now)
 	require.NoError(t, err)
 	require.NotNil(t, first.AcceptedAt)
+	require.NotNil(t, first.StartsOn)
+	require.Equal(t, "2026-08-23", first.StartsOn.Format("2006-01-02"))
+	require.Equal(t, "Australia/Melbourne", first.Timezone)
 
 	second, err := repo.AcceptPlan(t.Context(), userID, plan.ID, now.Add(time.Minute))
 	require.NoError(t, err)
 	require.NotNil(t, second.AcceptedAt)
+	require.NotNil(t, second.StartsOn)
 
 	require.True(t, first.AcceptedAt.Equal(*second.AcceptedAt),
 		"a double tap is not a second decision")
+	require.True(t, first.StartsOn.Equal(*second.StartsOn),
+		"a double tap must not restart the plan on another calendar day")
+}
+
+// A user whose zone is missing or unreadable still gets their approval
+// recorded; the stored zone says which day the date was read in.
+func TestThreadRepository_AcceptPlanFallsBackToUTCForAnUnknownZone(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	require.NoError(t, db.Exec("UPDATE users SET timezone = ? WHERE id = ?", "Mars/Olympus", userID).Error)
+	repo := NewThreadRepository(db)
+	plan := seedPlanProposal(t, repo, userID)
+
+	accepted, err := repo.AcceptPlan(
+		t.Context(), userID, plan.ID,
+		time.Date(2026, 8, 22, 23, 13, 41, 0, time.UTC),
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, "UTC", accepted.Timezone)
+	require.NotNil(t, accepted.StartsOn)
+	require.Equal(t, "2026-08-22", accepted.StartsOn.Format("2006-01-02"))
 }

@@ -10,8 +10,8 @@ import (
 
 func TestNewPlanProposal_BuildsACardFromThePlannerDraft(t *testing.T) {
 	draft := "```json\n" + `{"summary":"Hits 2000 kcal and 120g protein","days":[
-		{"date":"Monday","meals":[{"name":"Oats and whey","description":"32g protein"}]},
-		{"date":"Tuesday","meals":[{"name":"Chicken rice bowl","description":""}]}
+		{"date":"Monday","meals":[{"name":"Oats and whey","description":"32g protein","preparation":"Simmer oats, then stir through whey."}]},
+		{"date":"Tuesday","meals":[{"name":"Chicken rice bowl","description":"Balanced bowl","preparation":"Cook the chicken through and serve over rice."}]}
 	]}` + "\n```"
 
 	envelope, ok := parsePlanEnvelope(draft)
@@ -25,6 +25,7 @@ func TestNewPlanProposal_BuildsACardFromThePlannerDraft(t *testing.T) {
 	require.Equal(t, "Monday", plan.Days[0].Date)
 	require.Equal(t, "Oats and whey", plan.Days[0].Meals[0].Name)
 	require.Equal(t, "32g protein", plan.Days[0].Meals[0].Description)
+	require.Equal(t, "Simmer oats, then stir through whey.", plan.Days[0].Meals[0].Preparation)
 	require.Equal(t, "Kora Meal Planner", plan.AgentName)
 	require.Equal(t, "Kora Nutrition Coach", plan.ReviewedBy)
 }
@@ -54,23 +55,17 @@ func TestNewPlanProposal_ProseIsNotACard(t *testing.T) {
 func TestNewPlanProposal_BoundsTheDraftItWasGiven(t *testing.T) {
 	envelope := planEnvelope{Summary: strings.Repeat("s", maxPlanSummary+50)}
 	for day := 0; day < maxPlanDays+3; day++ {
-		var meals []struct {
-			Name        string `json:"name"`
-			Description string `json:"description"`
-		}
+		meals := make([]planEnvelopeMeal, 0, maxPlanMealsPerDay+2)
 		for meal := 0; meal < maxPlanMealsPerDay+2; meal++ {
-			meals = append(meals, struct {
-				Name        string `json:"name"`
-				Description string `json:"description"`
-			}{Name: strings.Repeat("n", maxPlanMealName+10), Description: strings.Repeat("d", maxPlanMealDetail+10)})
+			meals = append(meals, planEnvelopeMeal{
+				Name:        strings.Repeat("n", maxPlanMealName+10),
+				Description: strings.Repeat("d", maxPlanMealDetail+10),
+				Preparation: strings.Repeat("p", maxPlanMealPreparation+10),
+			})
 		}
-		envelope.Days = append(envelope.Days, struct {
-			Date  string `json:"date"`
-			Meals []struct {
-				Name        string `json:"name"`
-				Description string `json:"description"`
-			} `json:"meals"`
-		}{Date: strings.Repeat("t", maxPlanDateChars+10), Meals: meals})
+		envelope.Days = append(envelope.Days, planEnvelopeDay{
+			Date: strings.Repeat("t", maxPlanDateChars+10), Meals: meals,
+		})
 	}
 
 	plan := newPlanProposal(uuid.New(), envelope, "", "")
@@ -82,6 +77,7 @@ func TestNewPlanProposal_BoundsTheDraftItWasGiven(t *testing.T) {
 	require.Len(t, []rune(plan.Days[0].Date), maxPlanDateChars)
 	require.Len(t, []rune(plan.Days[0].Meals[0].Name), maxPlanMealName)
 	require.Len(t, []rune(plan.Days[0].Meals[0].Description), maxPlanMealDetail)
+	require.Len(t, []rune(plan.Days[0].Meals[0].Preparation), maxPlanMealPreparation)
 	require.Equal(t, fallbackAgentName, plan.AgentName, "an unnamed author is still attributed")
 	require.Equal(t, fallbackAgentName, plan.ReviewedBy)
 }
@@ -115,4 +111,31 @@ func TestParsePlanEnvelope_RejectsAnOversizedDraft(t *testing.T) {
 	_, ok := parsePlanEnvelope(huge)
 
 	require.False(t, ok)
+}
+
+// A meal Kora cannot tell the user how to cook is not a meal it should put on
+// an approvable card, so it is dropped rather than shown half-formed.
+func TestNewPlanProposal_DropsAMealWithoutPreparation(t *testing.T) {
+	envelope := planEnvelope{Summary: "Mixed", Days: []planEnvelopeDay{{
+		Date: "Monday",
+		Meals: []planEnvelopeMeal{
+			{Name: "Oats", Description: "Breakfast"},
+			{Name: "Lentil bowl", Description: "Dinner", Preparation: "Simmer lentils with cumin."},
+		},
+	}}}
+
+	plan := newPlanProposal(uuid.New(), envelope, "Kora Meal Planner", "Kora Plan Supervisor")
+
+	require.NotNil(t, plan)
+	require.Len(t, plan.Days[0].Meals, 1)
+	require.Equal(t, "Lentil bowl", plan.Days[0].Meals[0].Name)
+}
+
+func TestNewPlanProposal_IsNilWhenNoMealCanBeCooked(t *testing.T) {
+	envelope := planEnvelope{Summary: "Empty", Days: []planEnvelopeDay{{
+		Date:  "Monday",
+		Meals: []planEnvelopeMeal{{Name: "Oats", Description: "Breakfast"}},
+	}}}
+
+	require.Nil(t, newPlanProposal(uuid.New(), envelope, "Kora Meal Planner", "Kora Plan Supervisor"))
 }

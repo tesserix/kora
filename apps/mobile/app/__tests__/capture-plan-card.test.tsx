@@ -4,6 +4,7 @@ import { useCameraPermissions } from "expo-camera";
 import { requestRecordingPermissionsAsync, useAudioRecorder } from "expo-audio";
 import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
+import { Linking } from "react-native";
 import type { MealPlanProposal } from "@/api/types";
 
 import CaptureScreen from "../capture";
@@ -51,12 +52,22 @@ function makePlan(overrides: Partial<MealPlanProposal> = {}): MealPlanProposal {
     id: "plan-1",
     summary: "Hits your 2000 kcal and 120g protein targets.",
     days: [
-      { date: "Monday", meals: [{ name: "Oats and whey", description: "32g protein" }] },
-      { date: "Tuesday", meals: [{ name: "Chicken rice bowl", description: "" }] },
+      { date: "Monday", meals: [{
+        name: "Oats and whey",
+        description: "32g protein",
+        preparation: "Simmer oats, then stir through whey.",
+      }] },
+      { date: "Tuesday", meals: [{
+        name: "Chicken rice bowl",
+        description: "Balanced meal",
+        preparation: "Cook chicken through and serve over rice.",
+      }] },
     ],
     agent_name: "Kora Meal Planner",
     reviewed_by: "Kora Nutrition Coach",
     accepted_at: null,
+    starts_on: null,
+    timezone: "",
     created_at: "2026-08-22T00:00:00Z",
     ...overrides,
   };
@@ -87,7 +98,7 @@ beforeEach(() => {
   ]);
 });
 
-async function sendPlanRequest(plan: MealPlanProposal | null) {
+async function sendPlanRequest(plan: MealPlanProposal | null = makePlan()) {
   const view = await render(<CaptureScreen />);
   await fireEvent.press(await view.findByText("Type"));
   await fireEvent.changeText(await view.findByLabelText("Tell Otto what you ate"), "plan my meals for the week");
@@ -114,10 +125,22 @@ test("a reviewed plan arrives as a card the user can approve, not just prose", a
   await findByText("Hits your 2000 kcal and 120g protein targets.");
   await findByText("Monday");
   await findByText("Oats and whey");
+  await findByText("Simmer oats, then stir through whey.");
   await findByText("Chicken rice bowl");
   // The prose that justifies the plan stays: the card is what it IS, the
   // paragraph is why it fits.
   await findByText("This fits your targets. Approve it, or tell me what to change.");
+});
+
+test("recipe help opens only the fixed preparation-search origin with an encoded meal name", async () => {
+  const openURL = jest.spyOn(Linking, "openURL").mockResolvedValueOnce(true);
+  const view = await sendPlanRequest(makePlan());
+
+  await fireEvent.press(await view.findByLabelText("Find preparation video for Oats and whey"));
+
+  expect(openURL).toHaveBeenCalledWith(
+    "https://www.youtube.com/results?search_query=Oats%20and%20whey%20recipe",
+  );
 });
 
 test("approving a plan records the decision and settles the card", async () => {

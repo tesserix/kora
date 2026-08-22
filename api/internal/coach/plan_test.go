@@ -1,6 +1,7 @@
 package coach
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -62,7 +63,7 @@ func TestParseReviewedCommitmentRequiresReviewerAttribution(t *testing.T) {
 func TestParseReviewedPlanReturnsOnlyTheReviewersFinalStructure(t *testing.T) {
 	review := `I replaced the unsupported meal. Approve this version.
 [[KORA_REVIEWED_PLAN]]
-{"summary":"Reviewed plan","days":[{"date":"Monday","meals":[{"name":"Lentil bowl","description":"Reviewed option"}]}]}
+{"summary":"Reviewed plan","days":[{"date":"Monday","meals":[{"name":"Lentil bowl","description":"Reviewed option","preparation":"Simmer lentils, then fold through roasted vegetables."}]}]}
 [[/KORA_REVIEWED_PLAN]]`
 
 	clean, envelope, ok := parseReviewedPlan(review)
@@ -71,6 +72,50 @@ func TestParseReviewedPlanReturnsOnlyTheReviewersFinalStructure(t *testing.T) {
 	require.Equal(t, "I replaced the unsupported meal. Approve this version.", clean)
 	require.Equal(t, "Reviewed plan", envelope.Summary)
 	require.Equal(t, "Lentil bowl", envelope.Days[0].Meals[0].Name)
+	require.Equal(t, "Simmer lentils, then fold through roasted vegetables.", envelope.Days[0].Meals[0].Preparation)
+}
+
+func TestParseReviewedPlanRejectsAMealWithoutPreparationGuidance(t *testing.T) {
+	review := `This plan is ready.
+[[KORA_REVIEWED_PLAN]]
+{"summary":"Incomplete plan","days":[{"date":"Any day label","meals":[{"name":"Lentil bowl","description":"Reviewed option"}]}]}
+[[/KORA_REVIEWED_PLAN]]`
+
+	clean, _, ok := parseReviewedPlan(review)
+
+	require.False(t, ok)
+	require.Equal(t, "This plan is ready.", clean)
+}
+
+func TestParseReviewedPlanRejectsStructuresOutsideTheApprovalContract(t *testing.T) {
+	validMeal := planEnvelopeMeal{Name: "Lentil bowl", Preparation: "Simmer lentils until tender."}
+	validDay := planEnvelopeDay{Date: "Any day label", Meals: []planEnvelopeMeal{validMeal}}
+	tooManyDays := make([]planEnvelopeDay, maxPlanDays+1)
+	for i := range tooManyDays {
+		tooManyDays[i] = validDay
+	}
+	tooManyMeals := make([]planEnvelopeMeal, maxPlanMealsPerDay+1)
+	for i := range tooManyMeals {
+		tooManyMeals[i] = validMeal
+	}
+
+	tests := map[string]planEnvelope{
+		"blank day label": {Days: []planEnvelopeDay{{Date: "  ", Meals: []planEnvelopeMeal{validMeal}}}},
+		"too many days":   {Days: tooManyDays},
+		"too many meals":  {Days: []planEnvelopeDay{{Date: "Day", Meals: tooManyMeals}}},
+	}
+	for name, plan := range tests {
+		t.Run(name, func(t *testing.T) {
+			payload, err := json.Marshal(plan)
+			require.NoError(t, err)
+			review := "Review complete.\n" + reviewedPlanStart + "\n" + string(payload) + "\n" + reviewedPlanEnd
+
+			clean, _, ok := parseReviewedPlan(review)
+
+			require.False(t, ok)
+			require.Equal(t, "Review complete.", clean)
+		})
+	}
 }
 
 func TestParseReviewedPlanStripsAnInvalidMachineBlock(t *testing.T) {
