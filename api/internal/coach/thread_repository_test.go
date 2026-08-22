@@ -170,3 +170,25 @@ func TestThreadRepository_ScopedToUser(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, turns, "must never return another user's turns")
 }
+
+// Postgres stores timestamps to the microsecond, so an accepted_at echoed
+// straight back from memory disagrees with the one a second call reads from
+// the row whenever the clock carries nanoseconds.
+func TestThreadRepository_AcceptPlanReturnsThePersistedTimestamp(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	repo := NewThreadRepository(db)
+	plan := seedPlanProposal(t, repo, userID)
+	now := time.Date(2026, 8, 22, 7, 13, 41, 863886612, time.UTC)
+
+	first, err := repo.AcceptPlan(t.Context(), userID, plan.ID, now)
+	require.NoError(t, err)
+	require.NotNil(t, first.AcceptedAt)
+
+	second, err := repo.AcceptPlan(t.Context(), userID, plan.ID, now.Add(time.Minute))
+	require.NoError(t, err)
+	require.NotNil(t, second.AcceptedAt)
+
+	require.True(t, first.AcceptedAt.Equal(*second.AcceptedAt),
+		"a double tap is not a second decision")
+}

@@ -218,14 +218,12 @@ func (r ThreadRepository) AcceptPlan(
 		if out.AcceptedAt != nil {
 			return nil
 		}
-		accepted := now.UTC()
-		if err := tx.Model(&PlanProposal{}).
+		// Read the stored value back: Postgres keeps microseconds, so echoing
+		// the caller's clock would make a second tap look like a new decision.
+		return tx.Model(&out).
+			Clauses(clause.Returning{Columns: []clause.Column{{Name: "accepted_at"}}}).
 			Where("id = ? AND user_id = ?", planID, userID).
-			Update("accepted_at", accepted).Error; err != nil {
-			return err
-		}
-		out.AcceptedAt = &accepted
-		return nil
+			Update("accepted_at", now.UTC()).Error
 	})
 	if errors.Is(err, ErrPlanNotFound) {
 		return PlanProposal{}, err
