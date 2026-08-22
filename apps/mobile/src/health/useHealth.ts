@@ -29,6 +29,13 @@ const SLEEP_ANALYSIS_IDENTIFIER = "HKCategoryTypeIdentifierSleepAnalysis";
 // excluded — only genuine sleep stages count toward the total.
 const ASLEEP_CATEGORY_VALUES = new Set<number>([1, 3, 4, 5]);
 
+// KNOWN LIMITATION, not fixed here (#327): this window runs from 08:00 the
+// PREVIOUS day to now, so it will absorb a nap taken yesterday morning or
+// afternoon, or any nap taken today, into a total labelled "last night's
+// sleep". Interval merging (below) fixes the double-counting bug but cannot
+// fix this — it is a product decision (narrow the window, or relabel the
+// field as something like "sleep in the last 16h") deliberately left for a
+// separate change, not bundled into this bug fix.
 const SLEEP_WINDOW_LOOKBACK_HOURS = 16;
 const MS_PER_HOUR = 60 * 60 * 1000;
 
@@ -51,20 +58,72 @@ function startOfLocalDay(): Date {
   return start;
 }
 
-function sumAsleepMillis(
-  samples: readonly {
-    readonly value: number;
-    readonly startDate: Date;
-    readonly endDate: Date;
-  }[],
-): number {
-  return samples.reduce((total, sample) => {
-    if (!ASLEEP_CATEGORY_VALUES.has(sample.value)) return total;
-    const start = new Date(sample.startDate).getTime();
-    const end = new Date(sample.endDate).getTime();
-    if (!Number.isFinite(start) || !Number.isFinite(end)) return total;
-    return total + Math.max(0, end - start);
-  }, 0);
+type AsleepSample = {
+  readonly value: number;
+  readonly startDate: Date;
+  readonly endDate: Date;
+};
+
+// Interval union, not a sum. queryCategorySamples — like queryQuantitySamples for
+// steps above — returns every writing source's raw samples with no dedup, and
+// HKStatisticsQuery (the fix used for steps) only works on QUANTITY types; sleep
+// is a CATEGORY type, so that trick isn't available here (see #327). Worse, sleep
+// has a second failure mode steps doesn't: even a SINGLE source's samples overlap
+// each other, because sources describe the night at different granularity — a
+// third-party app writes one `asleepUnspecified` block for the whole night while
+// Apple Watch writes Core/Deep/REM samples layered across that same span. Summing
+// raw durations counts both in full (~7h unspecified + ~6h staged = the reported
+// 12.8h). Merging overlapping/adjacent intervals first and summing the union
+// measures TIME ASLEEP rather than THE SUM OF CLAIMS ABOUT TIME ASLEEP, which is
+// correct no matter how many sources write or how finely each one buckets stages.
+//
+// Deliberately keeps `asleepUnspecified` (1) in the union instead of dropping it
+// whenever staged (3/4/5) samples are also present. A source that only ever
+// writes unspecified blocks can cover minutes no staged sample touches — partial
+// Watch battery coverage, a stretch where only the third-party app was running —
+// and dropping unspecified outright would silently UNDER-count exactly those
+// minutes. Merging makes inclusion free when coverage matches (the spans just
+// collapse to one interval) and correct when it doesn't. A future "time in deep
+// sleep" readout can filter to staged-only values on its own path; it does not
+// need this total to have dropped unspecified first.
+export function mergeAsleepMillis(samples: readonly AsleepSample[]): number {
+  const intervals = samples
+    .filter((sample) => ASLEEP_CATEGORY_VALUES.has(sample.value))
+    .map((sample) => ({
+      start: new Date(sample.startDate).getTime(),
+      end: new Date(sample.endDate).getTime(),
+    }))
+    // Drop unparseable dates and zero/negative-duration samples up front so the
+    // sweep below never has to special-case them.
+    .filter((interval) => Number.isFinite(interval.start) && Number.isFinite(interval.end) && interval.end > interval.start)
+    .sort((a, b) => a.start - b.start);
+
+  let totalMillis = 0;
+  let runStart: number | null = null;
+  let runEnd: number | null = null;
+
+  for (const interval of intervals) {
+    if (runStart === null || runEnd === null) {
+      runStart = interval.start;
+      runEnd = interval.end;
+      continue;
+    }
+    if (interval.start <= runEnd) {
+      // Overlaps, or touches exactly (one ends the instant the next begins) —
+      // both describe one continuous span of sleep, so extend the run rather
+      // than double-counting the shared or adjoining minutes.
+      runEnd = Math.max(runEnd, interval.end);
+      continue;
+    }
+    // A genuine gap (interval.start > runEnd): close out the run and start a new one.
+    totalMillis += runEnd - runStart;
+    runStart = interval.start;
+    runEnd = interval.end;
+  }
+  if (runStart !== null && runEnd !== null) {
+    totalMillis += runEnd - runStart;
+  }
+  return totalMillis;
 }
 
 /**
@@ -176,7 +235,7 @@ export function useHealth(): HealthData {
         });
         setSteps(weekSamples.length > 0 ? { today: 0, goal: STEP_GOAL } : null);
       }
-      const sleepMillis = sumAsleepMillis(sleepSamples);
+      const sleepMillis = mergeAsleepMillis(sleepSamples);
       setSleep(sleepSamples.length > 0 ? { lastNightHours: Math.round((sleepMillis / MS_PER_HOUR) * 10) / 10 } : null);
       setStatus("authorized");
     } catch {
