@@ -120,11 +120,6 @@ export const TAB_BAR_OCCUPIED_HEIGHT =
 const TAB_BAR_CONTENT_GAP = 39;
 const TAB_BAR_CONTENT_GAP_TODAY = 44;
 
-// How far the capture cap's accent shadow blooms above its own top edge. The
-// dock's geometric top is not its visual top: content resting a few points
-// above the pill still sits inside this glow.
-const CAPTURE_GLOW_REACH = 14;
-
 /**
  * `paddingBottom` for a tab screen's scroll content, so the last item clears
  * the dock. Used by Diary, Trends and More. (= 140)
@@ -140,16 +135,21 @@ export const TAB_BAR_SCROLL_INSET = TAB_BAR_OCCUPIED_HEIGHT + TAB_BAR_CONTENT_GA
  */
 export const TAB_BAR_SCROLL_INSET_TODAY = TAB_BAR_OCCUPIED_HEIGHT + TAB_BAR_CONTENT_GAP_TODAY;
 
-// Ground fade under the dock. The dock floats over live content, so mid-scroll a
-// row arrived half-lit behind the pill and half in the open.
+// REMOVED (kora#354): a "ground fade" scrim used to sit under the dock,
+// fading transparent -> instrument.bg so content scrolling underneath faded
+// out rather than colliding with the pill.
 //
-// Full ground at the top of the capture glow, not at the pill's geometric top:
-// anything an overscroll bounce pushes into the glow is already gone. The fade
-// starts at the shorter of the two resting lines, so no screen's content is
-// dimmed where it comes to rest.
-const SCRIM_GROUND_HEIGHT = TAB_BAR_OCCUPIED_HEIGHT + CAPTURE_GLOW_REACH;
-const SCRIM_HEIGHT = TAB_BAR_SCROLL_INSET;
-const SCRIM_GROUND_AT = (SCRIM_HEIGHT - SCRIM_GROUND_HEIGHT) / SCRIM_HEIGHT;
+// It could never be invisible. AppBackground does not paint instrument.bg
+// flat — it lays three radial pools over it, and bg-pool-3 sits at cy 96%,
+// which is exactly where the dock is. So the scrim painted a flat cool grey
+// over the warmest part of the background: a slab, edged where the gradient
+// reached full opacity, across the whole screen width on every tab.
+//
+// Matching it was the wrong repair. A vertical linear gradient cannot equal a
+// radial pool, and any scrim that has to mirror AppBackground's internals
+// breaks again the moment those internals change. If the fade is wanted back,
+// fade the CONTENT (a mask over the scrolling view) instead of painting a
+// replica of the background over it.
 
 // Domed capture face — precomputed [highlight, accent, shadow] mixes per
 // scheme so the button reads as lit from above rather than a flat disc.
@@ -430,21 +430,6 @@ export function FloatingTabBar({ state, navigation }: FloatingTabBarProps) {
       style={{ position: "absolute", left: 24, right: 24, bottom: BAR_BOTTOM_INSET }}
       pointerEvents="box-none"
     >
-      {/* Bleeds past the root's own 24pt frame inset to the screen edges: the
-          fade has to cover the full width of what scrolls under it. */}
-      <LinearGradient
-        testID="dock-scrim"
-        colors={["transparent", instrument.bg]}
-        locations={[0, SCRIM_GROUND_AT]}
-        pointerEvents="none"
-        style={{
-          position: "absolute",
-          left: -24,
-          right: -24,
-          bottom: -BAR_BOTTOM_INSET,
-          height: SCRIM_HEIGHT,
-        }}
-      />
       <View style={{ position: "relative" }}>
         <LinearGradient
           testID="dock-rim"
