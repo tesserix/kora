@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { AppState, Platform } from "react-native";
 import { apiFetch } from "@/lib/api";
+import { resolveAuthState } from "@/lib/authState";
 import { readAnchor, writeAnchor } from "./anchorStore";
 import { syncWeight, type WeightRecord, type WeightSample, type WeightSyncResponse } from "./syncWeight";
 
@@ -53,6 +54,20 @@ async function post(weights: WeightRecord[]): Promise<WeightSyncResponse> {
   }) as Promise<WeightSyncResponse>;
 }
 
+// The auth gate. Mirrors src/reminders/reconcileWeightReminder.ts (#171): a
+// sync kicked off while signed out has no user to post to and no token to
+// post with, so apiFetch would just fail every call -- but only after
+// resolveAuthState's authStateReady() await, which loses the race against
+// this hook's own mount-time run on a cold start far more often than not, so
+// skipping outright here is not merely tidier than letting it fail, it is
+// the only way most signed-out launches actually skip the attempt.
+async function run(): Promise<void> {
+  if (Platform.OS !== "ios") return;
+  const authState = await resolveAuthState();
+  if (authState !== "signed-in") return;
+  await syncWeight({ queryWeights, post, readAnchor, writeAnchor });
+}
+
 // Runs the weight sync on mount and every time the app returns to the
 // foreground -- the two moments new HealthKit samples (written by the Health
 // app, a paired scale, or a third-party app) are most likely to be waiting.
@@ -62,15 +77,9 @@ async function post(weights: WeightRecord[]): Promise<WeightSyncResponse> {
 // initiate would be worse than silence.
 export function useHealthSync(): void {
   useEffect(() => {
-    if (Platform.OS !== "ios") return;
-
-    const run = () => {
-      void syncWeight({ queryWeights, post, readAnchor, writeAnchor }).catch(() => {});
-    };
-
-    run();
+    void run().catch(() => {});
     const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") run();
+      if (state === "active") void run().catch(() => {});
     });
     return () => subscription.remove();
   }, []);

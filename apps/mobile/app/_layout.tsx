@@ -15,6 +15,7 @@ import { AppearanceProvider } from "@/theme";
 import { ToastProvider } from "@/components/Toast";
 import { SavedMealSheetProvider } from "@/components/meals/SavedMealSheetProvider";
 import { reconcileWeightReminder } from "@/reminders/reconcileWeightReminder";
+import { useHealthSync } from "@/health/useHealthSync";
 import { syncTimezone } from "@/profile/syncTimezone";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { createSentrySink } from "@/observability/sentry";
@@ -104,6 +105,13 @@ export default function RootLayout() {
   useEffect(() => installAppFocus(), []);
 
   useEffect(() => installDrainTriggers(queryClient), []);
+
+  // Weight sync from HealthKit (kora#30). useHealthSync is self-contained --
+  // it runs its own mount + AppState("active") pass and gates on being
+  // signed in -- so this is the single call site, mirroring how
+  // installConnectivity/installAppFocus/installDrainTriggers above are each
+  // mounted exactly once. Two mount points would double-post every batch.
+  useHealthSync();
 
   // Re-arm the weight reminder's one-shot trigger on foreground: the user may
   // have weighed in (or the day may have rolled over) while the app was
