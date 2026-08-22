@@ -10,7 +10,7 @@ import {
 } from "@tanstack/react-query";
 import * as Crypto from "expo-crypto";
 import { localDateNow } from "@/lib/localDate";
-import { apiFetch, apiFetchEnvelope, apiFetchMultipart, currentUserId, isNetworkError, TimeoutError } from "@/lib/api";
+import { AGENT_REQUEST_TIMEOUT_MS, apiFetch, apiFetchEnvelope, apiFetchMultipart, currentUserId, isNetworkError, TimeoutError } from "@/lib/api";
 import { buildCaptureForm, normalizeCaptureMessage, normalizeResolution, type ResolveFile } from "./resolveWire";
 import { isOnline } from "@/offline/connectivity";
 import { reconcileWeightReminder } from "@/reminders/reconcileWeightReminder";
@@ -935,11 +935,14 @@ export function useCaptureMessage() {
   const refreshAIUsage = useRefreshAIUsage();
   return useMutation({
     mutationFn: ({ input: text, signal }: ResolveVars<string>) =>
-      apiFetch("/v1/capture/message", {
-        method: "POST",
-        body: JSON.stringify({ text }),
-        signal,
-      }).then(normalizeCaptureMessage),
+      apiFetch(
+        "/v1/capture/message",
+        { method: "POST", body: JSON.stringify({ text }), signal },
+        // The agent chain runs three sequential model calls here; the default
+        // 25s deadline killed every week-long plan request. See
+        // AGENT_REQUEST_TIMEOUT_MS.
+        { timeoutMs: AGENT_REQUEST_TIMEOUT_MS },
+      ).then(normalizeCaptureMessage),
     onSettled: refreshAIUsage,
   });
 }

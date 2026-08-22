@@ -6,6 +6,7 @@ import { CACHED_MATCH_TIER } from "@/api/types";
 import type { FoodItem } from "@/api/types";
 import { OfflineUnknownBarcodeError } from "@/offline/cachedResolution";
 import {
+  AGENT_REQUEST_TIMEOUT_MS,
   CancelledError,
   NetworkError,
   TimeoutError,
@@ -92,6 +93,9 @@ jest.mock("@/lib/api", () => {
   // be proven NOT to fire for it while it still fires for MockNetworkError.
   class MockCancelledError extends Error {}
   return {
+    // Mirrors the real constant (src/lib/api.ts) so the hook's deadline
+    // argument is asserted against a value, not against undefined.
+    AGENT_REQUEST_TIMEOUT_MS: 90_000,
     apiFetch: jest.fn().mockResolvedValue({ id: "u1", email: "a@b.c", goal: "", onboarded_at: null }),
     currentUserId: jest.fn(() => "user-a"),
     apiFetchEnvelope: jest.fn(),
@@ -295,11 +299,18 @@ test("useCaptureMessage posts text to /v1/capture/message", async () => {
   result.current.mutate({ input: "2 eggs" });
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-  expect(apiFetch).toHaveBeenCalledWith("/v1/capture/message", {
-    method: "POST",
-    body: JSON.stringify({ text: "2 eggs" }),
-    signal: undefined,
-  });
+  // The third argument is the point of kora#264: this endpoint runs the agent
+  // chain, so it gets the long deadline rather than the 25s default that was
+  // cutting week-long plans off and reporting them as being offline.
+  expect(apiFetch).toHaveBeenCalledWith(
+    "/v1/capture/message",
+    {
+      method: "POST",
+      body: JSON.stringify({ text: "2 eggs" }),
+      signal: undefined,
+    },
+    { timeoutMs: AGENT_REQUEST_TIMEOUT_MS },
+  );
   expect(result.current.data).toEqual({ kind: "resolution", resolution });
 });
 

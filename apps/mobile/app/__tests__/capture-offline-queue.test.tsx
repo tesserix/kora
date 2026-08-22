@@ -526,12 +526,17 @@ describe("Cancelling a typed resolve", () => {
     expect(mockEnqueueTextCapture()).toHaveBeenCalledWith("chicken and rice", expectedMealSlot());
   });
 
-  test("a cancelled timeout is queued too — the phrase never reached the server", async () => {
+  // The one error class the typed path does NOT queue (kora#264). This endpoint
+  // runs the agent chain, so a timeout means the message arrived and is being
+  // worked on — replaying it as a food capture turned "plan my meals for the
+  // week" into an attempt to name the foods in it. Photo and voice still queue
+  // their timeouts; see handleResolveFailure's block above.
+  test("a cancelled timeout is not queued — the message did reach the server", async () => {
     mockEnqueueTextCapture().mockResolvedValue({ id: "cap-cancel-text" });
 
     await cancelTypedResolve(new TimeoutError());
 
-    expect(mockEnqueueTextCapture()).toHaveBeenCalledWith("chicken and rice", expectedMealSlot());
+    expect(mockEnqueueTextCapture()).not.toHaveBeenCalled();
   });
 
   // The negative half, and the reason no connectivity check exists: an online
