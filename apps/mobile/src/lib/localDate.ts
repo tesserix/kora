@@ -14,5 +14,14 @@
 // Evaluated per call, never cached: a session left open across midnight would
 // otherwise keep filing logs under yesterday.
 export function localDateNow(): string {
-  return new Date().toLocaleDateString("en-CA");
+  return localDateOf(new Date());
+}
+
+// Same device-zone/en-CA conversion as localDateNow, for a timestamp that
+// isn't "now" — e.g. a HealthKit sample's recordedAt, which can be hours or
+// days old by the time the sync runs. Callers with a historical instant MUST
+// use this rather than localDateNow(), or a reading taken late one night
+// local time gets filed under whatever day it happens to sync on.
+export function localDateOf(date: Date): string {
+  return date.toLocaleDateString("en-CA");
 }
