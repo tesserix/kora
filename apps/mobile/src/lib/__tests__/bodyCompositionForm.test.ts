@@ -158,6 +158,22 @@ describe("parseReadingDate — kora#314's date row", () => {
     expect(result).toEqual({ ok: false, error: "Date can't be in the future." });
   });
 
+  it("rejects a well-formed date that does not exist", () => {
+    // The shape regex accepts all of these; none of them are real days. Go's
+    // time.Parse rejects them server-side, so without this the user types a
+    // date the form accepts and then gets a generic save failure.
+    for (const nonexistent of ["2026-02-31", "2026-13-45", "2026-00-00", "2025-02-29"]) {
+      expect(parseReadingDate(nonexistent, "2026-08-22")).toEqual({
+        ok: false,
+        error: "That date doesn't exist. Enter it as YYYY-MM-DD.",
+      });
+    }
+  });
+
+  it("still accepts a real leap day", () => {
+    expect(parseReadingDate("2024-02-29", "2026-08-22")).toEqual({ ok: true, value: "2024-02-29" });
+  });
+
   it("rejects anything that isn't YYYY-MM-DD", () => {
     expect(parseReadingDate("22/08/2026", "2026-08-22").ok).toBe(false);
     expect(parseReadingDate("2026-8-9", "2026-08-22").ok).toBe(false);

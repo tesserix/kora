@@ -205,6 +205,23 @@ const READING_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 export function parseReadingDate(text: string, today: string): ReadingDateResult {
   const trimmed = text.trim();
   if (!READING_DATE_RE.test(trimmed)) return { ok: false, error: "Enter a date as YYYY-MM-DD." };
+  // The shape check above is not enough on its own: it accepts 2026-02-31,
+  // 2026-13-45 and 2026-00-00, all of which are well-formed and none of
+  // which exist. Go's time.Parse rejects them server-side, so the entry is
+  // never stored — but the user would see a generic save failure instead of
+  // being told the date isn't real, having typed something the form appeared
+  // to accept. Round-tripping through a UTC Date (never local — a local
+  // Date shifts the day either side of midnight for most of the world)
+  // catches exactly the dates the regex cannot.
+  const [year, month, day] = trimmed.split("-").map(Number);
+  const roundTrip = new Date(Date.UTC(year, month - 1, day));
+  if (
+    roundTrip.getUTCFullYear() !== year ||
+    roundTrip.getUTCMonth() !== month - 1 ||
+    roundTrip.getUTCDate() !== day
+  ) {
+    return { ok: false, error: "That date doesn't exist. Enter it as YYYY-MM-DD." };
+  }
   if (trimmed > today) return { ok: false, error: "Date can't be in the future." };
   return { ok: true, value: trimmed };
 }
