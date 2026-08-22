@@ -23,7 +23,7 @@ jest.mock("@/api/hooks", () => ({
   useProfile: () => ({ data: { weight_kg: 80 } }),
   useWeightSeries: () => mockSeries(),
   useAddWeight: () => ({ mutate: jest.fn(), isPending: false }),
-  useAvgIntake7d: () => ({ avg: null, series: [], isLoading: false }),
+  useAvgIntake7d: () => ({ avg: null, series: [], days: [], isLoading: false, isError: false, refetch: jest.fn() }),
   // kora#314 PR C: Progress now mounts LogWeightSheet (Screenshot mode), which
   // calls this. Not exercised by any test in this file — a bare stub keeps
   // Progress's render tree happy.

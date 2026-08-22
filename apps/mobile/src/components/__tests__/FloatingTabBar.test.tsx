@@ -252,20 +252,16 @@ test("the dock is positioned 24pt from the screen edge, not from the safe area",
   expect(root.right).toBe(24);
 });
 
-// The fade only works if it reaches the screen edges and the bottom: inside the
-// root's 24pt frame it would leave content lit in three margins around it.
-test("the ground fade bleeds past the dock's frame inset and covers it", async () => {
-  const { getByTestId } = await render(<FloatingTabBar {...props} />);
-  const scrim = flattenStyle(getByTestId("dock-scrim").props.style);
-  expect(scrim.left).toBe(-24);
-  expect(scrim.right).toBe(-24);
-  expect(scrim.bottom).toBe(-24);
-  // The fade starts at the shortest resting line, so no screen's content is
-  // dimmed where it stops, and reaches full ground above the dock's own top —
-  // the capture glow blooms past that edge, and a bounce pushes content into it.
-  expect(scrim.height).toBe(TAB_BAR_SCROLL_INSET);
+// kora#354: the ground-fade scrim is GONE, and must stay gone. It faded to
+// instrument.bg, which AppBackground never paints flat — three radial pools
+// sit over it, one centred at cy 96%, right behind the dock. The scrim
+// therefore drew a flat slab with a hard edge across every tab screen.
+//
+// The scroll insets below are what keep content clear of the dock; they are
+// unchanged and still asserted. This pins the absence so the scrim is not
+// reintroduced without solving the background match it never solved.
+test("draws no ground scrim behind the dock", async () => {
+  const { queryByTestId } = await render(<FloatingTabBar {...props} />);
+  expect(queryByTestId("dock-scrim")).toBeNull();
   expect(TAB_BAR_SCROLL_INSET_TODAY).toBeGreaterThan(TAB_BAR_SCROLL_INSET);
-  const scrimProps = getByTestId("dock-scrim").props;
-  const groundAt = Number(scrim.height) - scrimProps.locations[1] * Number(scrim.height);
-  expect(groundAt).toBeGreaterThan(TAB_BAR_OCCUPIED_HEIGHT);
 });
