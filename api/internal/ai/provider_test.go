@@ -82,6 +82,22 @@ func (s *stubProvider) IdentifyPhoto(ctx context.Context, image []byte, mime str
 	return s.guesses, s.guessUsage, s.guessErr
 }
 
+func (s *stubProvider) IdentifyBodyComposition(ctx context.Context, image []byte, mime string) (BodyCompositionReading, Usage, error) {
+	s.calls++
+	if s.delay > 0 {
+		select {
+		case <-time.After(s.delay):
+		case <-ctx.Done():
+			return BodyCompositionReading{}, Usage{}, ctx.Err()
+		}
+	}
+	if s.block {
+		<-ctx.Done()
+		return BodyCompositionReading{}, Usage{}, ctx.Err()
+	}
+	return BodyCompositionReading{}, Usage{}, nil
+}
+
 func (s *stubProvider) Decompose(ctx context.Context, dish string) ([]IngredientGuess, Usage, error) {
 	s.calls++
 	if s.delay > 0 {

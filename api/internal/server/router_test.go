@@ -31,6 +31,9 @@ func (stubProvider) IdentifyText(context.Context, string) ([]ai.Guess, ai.Usage,
 func (stubProvider) IdentifyPhoto(context.Context, []byte, string) ([]ai.Guess, ai.Usage, error) {
 	return nil, ai.Usage{}, nil
 }
+func (stubProvider) IdentifyBodyComposition(context.Context, []byte, string) (ai.BodyCompositionReading, ai.Usage, error) {
+	return ai.BodyCompositionReading{}, ai.Usage{}, nil
+}
 func (stubProvider) Decompose(context.Context, string) ([]ai.IngredientGuess, ai.Usage, error) {
 	return nil, ai.Usage{}, nil
 }

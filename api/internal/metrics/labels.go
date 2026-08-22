@@ -16,6 +16,10 @@ const (
 	// as invisible in the metrics as it was before it was metered at all.
 	callParseRecipeText  = "parse_recipe_text"
 	callParseRecipePhoto = "parse_recipe_photo"
+	// Body-composition screenshot reads (POST /v1/body-composition/read).
+	// A value not listed here disappears into labelOther — see the #81
+	// lesson noted on the recipe call types just above.
+	callIdentifyBodyComposition = "identify_body_composition"
 )
 
 // labelOther is the sink for any value outside a known set. A non-zero count on
@@ -46,6 +50,10 @@ var classByCallType = map[string]string{
 	// rather than to `derived`, which scales with meal complexity.
 	callParseRecipeText:  classResolution,
 	callParseRecipePhoto: classResolution,
+	// A body-composition read is one user-initiated capture of one
+	// screenshot — the same shape as an identify, so it belongs to the
+	// headline resolution class too.
+	callIdentifyBodyComposition: classResolution,
 }
 
 // Mirrors ai.OutcomeOK / OutcomeError / OutcomeTimeout. Duplicated as literals

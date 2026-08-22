@@ -202,6 +202,15 @@ func (p OpenAIProvider) IdentifyPhoto(ctx context.Context, image []byte, mime st
 	return guesses, usage, nil
 }
 
+// IdentifyBodyComposition is not implemented for the OpenAI-compatible
+// fallback — wiring it up is a later task (kora#314). Returning a zero
+// value and a nil error keeps OpenAIProvider satisfying ai.Provider without
+// silently claiming a capability this backend does not have yet; callers
+// must not reach this path until it is actually implemented.
+func (p OpenAIProvider) IdentifyBodyComposition(ctx context.Context, image []byte, mime string) (ai.BodyCompositionReading, ai.Usage, error) {
+	return ai.BodyCompositionReading{}, ai.Usage{}, nil
+}
+
 // Decompose breaks a dish into its ingredients using the configured model.
 func (p OpenAIProvider) Decompose(ctx context.Context, dish string) ([]ai.IngredientGuess, ai.Usage, error) {
 	prompt := fmt.Sprintf(decomposeSystemPromptTmpl, dish)

@@ -8,6 +8,13 @@ import "context"
 type Provider interface {
 	IdentifyText(ctx context.Context, phrase string) ([]Guess, Usage, error)
 	IdentifyPhoto(ctx context.Context, image []byte, mime string) ([]Guess, Usage, error)
+	// IdentifyBodyComposition reads a smart-scale result screenshot and
+	// returns only what is legible — see BodyCompositionReading's doc
+	// comment. A separate method from IdentifyPhoto because the response
+	// shape is fundamentally different (one reading's worth of measured
+	// numbers, not a list of food guesses) and cannot be forced into
+	// []Guess.
+	IdentifyBodyComposition(ctx context.Context, image []byte, mime string) (BodyCompositionReading, Usage, error)
 	Decompose(ctx context.Context, dish string) ([]IngredientGuess, Usage, error)
 	Embed(ctx context.Context, text string) ([]float32, Usage, error)
 	// Transcribe converts spoken audio (a person describing what they ate)

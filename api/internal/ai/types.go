@@ -46,6 +46,44 @@ type IngredientGuess struct {
 	Confidence      float64 `json:"confidence"`
 }
 
+// BodyCompositionReading is what a smart-scale screenshot legibly shows,
+// read by a vision model (kora#314). Every field is a POINTER because
+// absent must not collapse into zero — the same reasoning as
+// tracking.BodyComposition (internal/tracking/model.go), which this
+// mirrors field-for-field on purpose so a reading can be handed straight
+// into that struct's shape without renaming.
+//
+// This type carries ONLY measured values. BMI, fat-free mass, fat mass in
+// kg, metabolic age, and qualitative bands are structurally impossible to
+// return here: there is no field for them, so a model that tries to supply
+// one anyway has it silently dropped by encoding/json. See
+// migrations/000039_body_composition.up.sql for why each is excluded.
+type BodyCompositionReading struct {
+	WeightKg           *float64 `json:"weight_kg,omitempty"`
+	BodyFatPct         *float64 `json:"body_fat_pct,omitempty"`
+	SubcutaneousFatPct *float64 `json:"subcutaneous_fat_pct,omitempty"`
+	// VisceralFatRating is a vendor RATING, not a percentage — see the
+	// struct doc on tracking.BodyComposition for the same warning. Never
+	// render or validate this as a 0-100 percent.
+	VisceralFatRating *float64 `json:"visceral_fat_rating,omitempty"`
+	// SkeletalMusclePct and MuscleMassKg are DIFFERENT quantities (a scale
+	// like Renpho reports both) — never derive one from the other.
+	SkeletalMusclePct *float64 `json:"skeletal_muscle_pct,omitempty"`
+	MuscleMassKg      *float64 `json:"muscle_mass_kg,omitempty"`
+	BodyWaterPct      *float64 `json:"body_water_pct,omitempty"`
+	ProteinPct        *float64 `json:"protein_pct,omitempty"`
+	// BoneMassKg is bone MASS, not bone DENSITY/BMD/T-score.
+	BoneMassKg *float64 `json:"bone_mass_kg,omitempty"`
+	// ScaleBMRKcal is the scale's own BMR estimate — comparison only, never
+	// wired to Kora's own Mifflin-St Jeor target (see tracking.BodyComposition).
+	ScaleBMRKcal *float64 `json:"scale_bmr_kcal,omitempty"`
+	// ReadingDate is the calendar date the SCREENSHOT ITSELF shows for this
+	// reading, "YYYY-MM-DD", nil when not legible. Never a timestamp, never
+	// inferred as "today" — a reading may be days old by the time it's
+	// uploaded (kora#314).
+	ReadingDate *string `json:"reading_date,omitempty"`
+}
+
 // Usage records one provider call for metering.
 type Usage struct {
 	Provider  string

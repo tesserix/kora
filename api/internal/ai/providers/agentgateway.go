@@ -62,6 +62,14 @@ func (p AgentGatewayProvider) IdentifyPhoto(ctx context.Context, image []byte, m
 	return guesses, gatewayUsage(usage), err
 }
 
+// IdentifyBodyComposition is not implemented for the Agent Gateway backend —
+// wiring it up (its own classified sub-provider, mirroring photo) is a
+// later task (kora#314). Zero value, nil error keeps AgentGatewayProvider
+// satisfying ai.Provider until then.
+func (p AgentGatewayProvider) IdentifyBodyComposition(ctx context.Context, image []byte, mime string) (ai.BodyCompositionReading, ai.Usage, error) {
+	return ai.BodyCompositionReading{}, ai.Usage{}, nil
+}
+
 func (p AgentGatewayProvider) Decompose(ctx context.Context, dish string) ([]ai.IngredientGuess, ai.Usage, error) {
 	ingredients, usage, err := p.decompose.Decompose(ctx, dish)
 	return ingredients, gatewayUsage(usage), err

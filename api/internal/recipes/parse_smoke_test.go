@@ -189,6 +189,11 @@ func (p *countingProvider) IdentifyPhoto(context.Context, []byte, string) ([]ai.
 	return nil, ai.Usage{Provider: "counting"}, errNoFallback
 }
 
+func (p *countingProvider) IdentifyBodyComposition(context.Context, []byte, string) (ai.BodyCompositionReading, ai.Usage, error) {
+	p.calls++
+	return ai.BodyCompositionReading{}, ai.Usage{Provider: "counting"}, errNoFallback
+}
+
 func (p *countingProvider) Decompose(context.Context, string) ([]ai.IngredientGuess, ai.Usage, error) {
 	p.calls++
 	return nil, ai.Usage{Provider: "counting"}, errNoFallback

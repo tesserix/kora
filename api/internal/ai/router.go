@@ -393,6 +393,14 @@ func (r *Router) GenerateText(ctx context.Context, systemPrompt, userPrompt stri
 	)
 }
 
+// IdentifyBodyComposition is not routed yet — the primary/fallback/retry
+// policy for this call type is a later task (kora#314). Zero value, nil
+// error keeps Router satisfying Provider until that policy exists; nothing
+// in this task calls this method.
+func (r *Router) IdentifyBodyComposition(ctx context.Context, image []byte, mime string) (BodyCompositionReading, Usage, error) {
+	return BodyCompositionReading{}, Usage{}, nil
+}
+
 func (r *Router) Transcribe(ctx context.Context, audio []byte, mime string) (string, Usage, error) {
 	tctx, cancel := context.WithTimeout(ctx, transcribeBudget)
 	defer cancel()
