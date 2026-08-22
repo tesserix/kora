@@ -302,6 +302,22 @@ func TestReader_Read_SomeFieldsLegibleIsNotUnreadable(t *testing.T) {
 	assert.False(t, result.Unreadable)
 }
 
+func TestReader_Read_InstrumentOnlyIsNotUnreadable(t *testing.T) {
+	// A reading where instrument is the ONLY surviving field (every
+	// measurement nil, no date) is still a partial success, not
+	// unreadable — isEmpty must consult Instrument exactly like every
+	// other field, or a confidently-detected instrument on an otherwise
+	// blank read would be silently discarded as a 422.
+	provider := &stubProvider{reading: ai.BodyCompositionReading{Instrument: sptr("dexa")}}
+	r := NewReader(provider, newStubCache(), &stubMeter{})
+
+	result, err := r.Read(context.Background(), uuid.New(), []byte("img"), "image/jpeg")
+	require.NoError(t, err)
+	assert.False(t, result.Unreadable)
+	require.NotNil(t, result.Reading.Instrument)
+	assert.Equal(t, "dexa", *result.Reading.Instrument)
+}
+
 func TestReader_Read_ProviderErrorIsNotUnreadable(t *testing.T) {
 	provider := &stubProvider{err: errors.New("upstream 503")}
 	r := NewReader(provider, newStubCache(), &stubMeter{})

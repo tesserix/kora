@@ -273,11 +273,24 @@ func bodyCompositionJSONSchema() map[string]any {
 					"before concluding no date is shown. Use null ONLY if no date for this " +
 					"reading appears anywhere on screen.",
 			},
+			"instrument": map[string]any{
+				"type": []string{"string", "null"},
+				"description": "Which PHYSICAL INSTRUMENT produced this image — exactly one of " +
+					"\"scale_screenshot\" (a consumer smart-scale app: Renpho, Omron, Tanita, " +
+					"Eufy, Xiaomi, or similar), \"inbody\" (an InBody clinical result sheet), " +
+					"or \"dexa\" (a DEXA/DXA clinical scan report). Decide this ONLY from what " +
+					"is VISIBLE — app chrome, logos, branding text, screen layout, section " +
+					"headings, or report letterhead — and NEVER from the measurement values " +
+					"themselves; reasoning \"these numbers look clinical, therefore DEXA\" is " +
+					"exactly the kind of inference this whole schema forbids. Use null if the " +
+					"image does not CLEARLY show which of the three it is — a confident wrong " +
+					"guess here is worse than no answer.",
+			},
 		},
 		"required": []string{
 			"weight_kg", "body_fat_pct", "subcutaneous_fat_pct", "visceral_fat_rating",
 			"skeletal_muscle_pct", "muscle_mass_kg", "body_water_pct", "protein_pct",
-			"bone_mass_kg", "scale_bmr_kcal", "reading_date_text",
+			"bone_mass_kg", "scale_bmr_kcal", "reading_date_text", "instrument",
 		},
 		"additionalProperties": false,
 	}

@@ -270,7 +270,7 @@ func TestBodyCompositionResponseSchema_RequiredAndNullable(t *testing.T) {
 	wantFields := []string{
 		"weight_kg", "body_fat_pct", "subcutaneous_fat_pct", "visceral_fat_rating",
 		"skeletal_muscle_pct", "muscle_mass_kg", "body_water_pct", "protein_pct",
-		"bone_mass_kg", "scale_bmr_kcal", "reading_date_text",
+		"bone_mass_kg", "scale_bmr_kcal", "reading_date_text", "instrument",
 	}
 	assert.ElementsMatch(t, wantFields, schema.Required,
 		"every property must be Required — that is how this schema expresses optional, not by omission")

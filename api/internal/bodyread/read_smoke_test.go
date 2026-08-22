@@ -69,6 +69,16 @@ type fixtureExpectation struct {
 	WeightKg                 *float64 `json:"weight_kg,omitempty"`
 	VisceralFatRatingPresent bool     `json:"visceral_fat_rating_present,omitempty"`
 	ReadingDate              string   `json:"reading_date,omitempty"`
+	// Instrument asserts the exact instrument value a real model call must
+	// return for this fixture — kora#314's whole point in adding detection
+	// is that both real fixtures on this machine (renpho/001, omron/001)
+	// are consumer smart-scale apps, so both MUST detect
+	// "scale_screenshot" on every single run; a wrong or absent detection
+	// here would be the exact under-confident/over-confident failure this
+	// feature exists to prevent. Empty string (the zero value) means this
+	// fixture makes no assertion — same "omit rather than force" contract
+	// as every other field on this struct.
+	Instrument string `json:"instrument,omitempty"`
 	// AbsentFields names ai.BodyCompositionReading JSON keys that this
 	// fixture's screenshot does NOT legibly show and which must therefore
 	// come back nil on every run. "not documented" (the field simply
@@ -287,11 +297,11 @@ func assertBodyCompReading(t *testing.T, fx bodyCompFixture, reading ai.BodyComp
 	// call (service.go).
 	resolvedDate := resolveReadingDateText(reading.ReadingDateText, time.Now())
 
-	t.Logf("fixture %s: weight=%v body_fat_pct=%v subq=%v visceral=%v skel_pct=%v muscle_kg=%v water=%v protein=%v bone=%v bmr=%v reading_date_text=%v resolved_reading_date=%v",
+	t.Logf("fixture %s: weight=%v body_fat_pct=%v subq=%v visceral=%v skel_pct=%v muscle_kg=%v water=%v protein=%v bone=%v bmr=%v reading_date_text=%v resolved_reading_date=%v instrument=%v",
 		fx.label, derefFloat(reading.WeightKg), derefFloat(reading.BodyFatPct), derefFloat(reading.SubcutaneousFatPct),
 		derefFloat(reading.VisceralFatRating), derefFloat(reading.SkeletalMusclePct), derefFloat(reading.MuscleMassKg),
 		derefFloat(reading.BodyWaterPct), derefFloat(reading.ProteinPct), derefFloat(reading.BoneMassKg),
-		derefFloat(reading.ScaleBMRKcal), derefString(reading.ReadingDateText), derefString(resolvedDate))
+		derefFloat(reading.ScaleBMRKcal), derefString(reading.ReadingDateText), derefString(resolvedDate), derefString(reading.Instrument))
 
 	if fx.expected.WeightKg != nil {
 		require.NotNil(t, reading.WeightKg, "fixture %s: weight_kg expected but not returned", fx.label)
@@ -318,6 +328,13 @@ func assertBodyCompReading(t *testing.T, fx bodyCompFixture, reading ai.BodyComp
 		require.Equal(t, fx.expected.ReadingDate, *resolvedDate, "fixture %s: resolved reading_date mismatch", fx.label)
 		_, parseErr := time.Parse("2006-01-02", *resolvedDate)
 		require.NoError(t, parseErr, "fixture %s: resolved reading_date %q must parse as YYYY-MM-DD", fx.label, *resolvedDate)
+	}
+
+	if fx.expected.Instrument != "" {
+		require.NotNil(t, reading.Instrument,
+			"fixture %s: instrument %q expected but detection returned nil — a consumer scale-app screenshot must be positively identified, not left uncertain", fx.label, fx.expected.Instrument)
+		require.Equal(t, fx.expected.Instrument, *reading.Instrument,
+			"fixture %s: instrument mismatch — a wrong detection here is the exact false-confidence failure kora#314's instrument field exists to prevent", fx.label)
 	}
 
 	for _, name := range fx.expected.AbsentFields {
@@ -457,6 +474,8 @@ func bodyCompFieldPresent(reading ai.BodyCompositionReading, name string) (prese
 		// bodyCompositionResponseSchema), so checking it here would always
 		// trivially pass regardless of what the model actually said.
 		return reading.ReadingDateText != nil, true
+	case "instrument":
+		return reading.Instrument != nil, true
 	default:
 		return false, false
 	}

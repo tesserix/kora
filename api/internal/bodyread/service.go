@@ -217,5 +217,6 @@ func isEmpty(r ai.BodyCompositionReading) bool {
 		r.ProteinPct == nil &&
 		r.BoneMassKg == nil &&
 		r.ScaleBMRKcal == nil &&
-		r.ReadingDate == nil
+		r.ReadingDate == nil &&
+		r.Instrument == nil
 }
