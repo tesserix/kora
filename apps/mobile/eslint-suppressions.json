@@ -1,0 +1,173 @@
+{
+  "app/(tabs)/diary.tsx": {
+    "react-hooks/refs": {
+      "count": 6
+    }
+  },
+  "app/(tabs)/index.tsx": {
+    "react-hooks/refs": {
+      "count": 3
+    },
+    "react/no-unescaped-entities": {
+      "count": 1
+    }
+  },
+  "app/(tabs)/progress.tsx": {
+    "react-hooks/refs": {
+      "count": 4
+    }
+  },
+  "app/__tests__/capture-offline-queue.test.tsx": {
+    "react-hooks/rules-of-hooks": {
+      "count": 1
+    }
+  },
+  "app/capture.tsx": {
+    "react-hooks/refs": {
+      "count": 4
+    }
+  },
+  "app/feedback.tsx": {
+    "react/no-unescaped-entities": {
+      "count": 1
+    }
+  },
+  "app/log.tsx": {
+    "react-hooks/purity": {
+      "count": 1
+    },
+    "react-hooks/refs": {
+      "count": 1
+    },
+    "react/no-unescaped-entities": {
+      "count": 3
+    }
+  },
+  "app/meal.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 2
+    }
+  },
+  "app/recipe/[id].tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    },
+    "react/no-unescaped-entities": {
+      "count": 1
+    }
+  },
+  "app/recipes.tsx": {
+    "react/no-unescaped-entities": {
+      "count": 1
+    }
+  },
+  "jest.setup.js": {
+    "react/display-name": {
+      "count": 1
+    }
+  },
+  "src/components/FloatingTabBar.tsx": {
+    "react-hooks/immutability": {
+      "count": 3
+    }
+  },
+  "src/components/Sheet.tsx": {
+    "react-hooks/immutability": {
+      "count": 3
+    }
+  },
+  "src/components/Stepper.tsx": {
+    "react-hooks/refs": {
+      "count": 1
+    }
+  },
+  "src/components/capture/VoiceComposer.tsx": {
+    "react-hooks/refs": {
+      "count": 3
+    }
+  },
+  "src/components/capture/Waveform.tsx": {
+    "react-hooks/refs": {
+      "count": 3
+    }
+  },
+  "src/components/instrument/GaugeDial.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/components/instrument/TickRuler.tsx": {
+    "react-hooks/immutability": {
+      "count": 6
+    },
+    "react-hooks/refs": {
+      "count": 3
+    }
+  },
+  "src/components/meal/AskAgainSheet.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/components/meal/FoodPicker.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    },
+    "react/no-unescaped-entities": {
+      "count": 1
+    }
+  },
+  "src/components/meals/SavedMealSheet.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/components/progress/LogWeightSheet.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/components/recipes/RecipeParseSheet.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    },
+    "react/no-unescaped-entities": {
+      "count": 2
+    }
+  },
+  "src/components/reminders/CustomReminderSheet.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/components/social/InviteFriendSheet.tsx": {
+    "react/no-unescaped-entities": {
+      "count": 1
+    }
+  },
+  "src/components/social/RenameGroupSheet.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/components/units/PortionField.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/health/useHealth.ts": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/motion/AnimatedNumber.tsx": {
+    "react-hooks/immutability": {
+      "count": 1
+    }
+  },
+  "src/motion/PressableScale.tsx": {
+    "react-hooks/immutability": {
+      "count": 4
+    }
+  }
+}
