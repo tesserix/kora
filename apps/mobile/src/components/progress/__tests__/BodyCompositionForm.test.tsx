@@ -265,3 +265,107 @@ test("the chosen instrument is what the payload carries", async () => {
   await fireEvent.press(getByText("Save"));
   expect(onSubmit.mock.calls[0][0].source).toBe("dexa");
 });
+
+// kora#314 PR C: consolidating the three Trends entry points into one sheet
+// hangs Manual mode's collapsed weight-only view, and Screenshot mode's
+// already-expanded confirm view, off these two props. Every test above this
+// point renders WITHOUT `expandable`, so they double as the guarantee that
+// existing callers (kora#45's original surface) see no behaviour change at
+// all — the prop defaults to false and the form is fully expanded, exactly
+// as it always was.
+describe("expandable (kora#314 PR C)", () => {
+  test("collapsed by default when expandable: only weight and the toggle show, nothing else", async () => {
+    const { getByLabelText, getByTestId, queryByTestId, queryByLabelText } = await render(
+      <BodyCompositionForm expandable onSubmit={jest.fn()} />,
+    );
+    expect(getByLabelText("Weight in kilograms")).toBeTruthy();
+    expect(getByTestId("composition-expand-toggle")).toBeTruthy();
+    expect(queryByTestId("composition-date")).toBeNull();
+    expect(queryByTestId("composition-derived")).toBeNull();
+    expect(queryByTestId("composition-source")).toBeNull();
+    expect(queryByTestId("composition-source-fixed")).toBeNull();
+    expect(queryByLabelText("Body fat percent")).toBeNull();
+  });
+
+  test("tapping the toggle reveals the rest, and tapping again hides it", async () => {
+    const { getByTestId, getByLabelText, queryByTestId } = await render(
+      <BodyCompositionForm expandable onSubmit={jest.fn()} />,
+    );
+    await fireEvent.press(getByTestId("composition-expand-toggle"));
+    expect(getByTestId("composition-date")).toBeTruthy();
+    expect(getByTestId("composition-derived")).toBeTruthy();
+    expect(getByLabelText("Body fat percent")).toBeTruthy();
+
+    await fireEvent.press(getByTestId("composition-expand-toggle"));
+    expect(queryByTestId("composition-date")).toBeNull();
+    expect(queryByTestId("composition-derived")).toBeNull();
+  });
+
+  test("initiallyExpanded opens the section already open — the screenshot-confirm shape", async () => {
+    const { getByTestId } = await render(
+      <BodyCompositionForm expandable initiallyExpanded onSubmit={jest.fn()} />,
+    );
+    expect(getByTestId("composition-derived")).toBeTruthy();
+  });
+
+  test("a weight-only save while collapsed sends no composition keys — not nine zeroes, not nine absences typed in", async () => {
+    const onSubmit = jest.fn();
+    const { getByLabelText, getByText } = await render(<BodyCompositionForm expandable onSubmit={onSubmit} />);
+    await fireEvent.changeText(getByLabelText("Weight in kilograms"), "70.2");
+    await fireEvent.press(getByText("Save"));
+    // Still today's date and "manual" source (the collapsed section's OWN
+    // defaults survive hidden, per this component's own doc comment) — just
+    // no visible way to have typed anything else.
+    expect(onSubmit.mock.calls[0][0]).toEqual({
+      weight_kg: 70.2,
+      source: "manual",
+      ...todayFields,
+    });
+  });
+
+  test("collapsing does not discard a value already typed into the hidden section", async () => {
+    const onSubmit = jest.fn();
+    const { getByTestId, getByLabelText, getByText } = await render(
+      <BodyCompositionForm expandable initiallyExpanded onSubmit={onSubmit} />,
+    );
+    await fireEvent.changeText(getByLabelText("Weight in kilograms"), "70.2");
+    await fireEvent.changeText(getByLabelText("Body fat percent"), "24.2");
+    // Collapse, then save from the collapsed view.
+    await fireEvent.press(getByTestId("composition-expand-toggle"));
+    await fireEvent.press(getByText("Save"));
+    expect(onSubmit.mock.calls[0][0]).toEqual({
+      weight_kg: 70.2,
+      body_fat_pct: 24.2,
+      source: "manual",
+      ...todayFields,
+    });
+  });
+
+  test("a multi-entry sources array pre-selects sources[0] as a CORRECTABLE control, not a stated fact", async () => {
+    // kora#314 PR C: the detected-instrument case. Unlike the single-entry
+    // `sources={["scale_screenshot"]}` case tested above (a stated fact),
+    // three entries render the existing SegmentedGlass control so a
+    // misdetection can be corrected.
+    const onSubmit = jest.fn();
+    const { getByTestId, getByLabelText, getByText, queryByTestId } = await render(
+      <BodyCompositionForm
+        expandable
+        initiallyExpanded
+        sources={["inbody", "scale_screenshot", "dexa"]}
+        onSubmit={onSubmit}
+      />,
+    );
+    expect(queryByTestId("composition-source-fixed")).toBeNull();
+    expect(getByTestId("composition-source")).toBeTruthy();
+    await fireEvent.changeText(getByLabelText("Weight in kilograms"), "70.2");
+    await fireEvent.press(getByText("Save"));
+    // Pre-selected to sources[0] — the detected guess — without the user
+    // touching the control at all.
+    expect(onSubmit.mock.calls[0][0].source).toBe("inbody");
+
+    // And it IS correctable: pressing a different segment changes what saves.
+    await fireEvent.press(getByTestId("composition-source-segment-dexa"));
+    await fireEvent.press(getByText("Save"));
+    expect(onSubmit.mock.calls[1][0].source).toBe("dexa");
+  });
+});

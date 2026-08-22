@@ -17,13 +17,13 @@ jest.mock("@/api/hooks", () => ({
   useWeightSeries: (range: string) => mockSeries(range),
   useAddWeight: () => ({ mutate: jest.fn(), isPending: false }),
   useAvgIntake7d: () => mockAvgIntake7d(),
-  // kora#314 PR B: Progress now also mounts BodyCompositionScanSheet, which
+  // kora#314 PR C: Progress now mounts LogWeightSheet (Screenshot mode), which
   // calls this. Not exercised by any test in this file — a bare stub keeps
   // Progress's render tree happy.
   useReadBodyComposition: () => ({ mutate: jest.fn(), isPending: false }),
 }));
 
-// BodyCompositionScanSheet (kora#314 PR B, mounted unconditionally by
+// LogWeightSheet (kora#314 PR C, mounted unconditionally by
 // Progress) imports ApiError from "@/lib/api" directly, same as
 // RecipeParseSheet does — and "@/lib/api" pulls in real firebase/auth ESM,
 // which Jest cannot parse unmocked. Only ApiError is needed here.

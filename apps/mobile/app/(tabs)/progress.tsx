@@ -13,12 +13,9 @@ import { StreakCells } from "@/components/instrument/StreakCells";
 import { SegmentedGlass } from "@/components/instrument/SegmentedGlass";
 import { engravedStyle, monoStyle } from "@/components/instrument/typography";
 import { WeightChart } from "@/components/progress/WeightChart";
-import { WeightLogSheet } from "@/components/progress/WeightLogSheet";
-import { BodyCompositionSheet } from "@/components/progress/BodyCompositionSheet";
-import { BodyCompositionScanSheet } from "@/components/progress/BodyCompositionScanSheet";
+import { LogWeightSheet } from "@/components/progress/LogWeightSheet";
 import { MetricChips } from "@/components/progress/MetricChips";
 import { deltaColor } from "@/components/progress/deltaColor";
-import { Button } from "@/components/Button";
 import { EmptyState } from "@/components/common/EmptyState";
 import { LoadErrorNotice } from "@/components/common/LoadErrorNotice";
 import { useAvgIntake7d, useDashboard, useProfile, useWeightSeries } from "@/api/hooks";
@@ -107,8 +104,6 @@ export default function Progress() {
   const insets = useSafeAreaInsets();
   const [range, setRange] = useState<(typeof RANGES)[number]>("1W");
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [compositionOpen, setCompositionOpen] = useState(false);
-  const [scanOpen, setScanOpen] = useState(false);
   const [metricKey, setMetricKey] = useState<CompositionMetricKey>("weight_kg");
   const dashboard = useDashboard(today());
   const profile = useProfile();
@@ -344,27 +339,6 @@ export default function Progress() {
               <SegmentedGlass options={RANGE_OPTIONS} value={range} onChange={(key) => setRange(key as (typeof RANGES)[number])} />
             </View>
 
-            {/* The way in to the ten-field form. Kept OUT of the weigh-in tap
-                above on purpose (kora#45): most days are weight and nothing
-                else, and putting nine optional fields in front of that would
-                be a regression for the common case. */}
-            <View style={{ marginTop: 10, gap: 8 }}>
-              <Button
-                title="Add body composition"
-                variant="secondary"
-                onPress={() => setCompositionOpen(true)}
-              />
-              {/* kora#314 PR B: a screenshot import is a distinct action from
-                  typing nine fields by hand, so it gets its own affordance
-                  rather than a mode toggle bolted onto "Add body
-                  composition" — the two entry points lead to the same
-                  confirm surface (BodyCompositionForm) either way. */}
-              <Button
-                title="Import from screenshot"
-                variant="secondary"
-                onPress={() => setScanOpen(true)}
-              />
-            </View>
             </View>
           </BezelCluster>
         </Animated.View>
@@ -436,21 +410,12 @@ export default function Progress() {
         </Animated.View>
       </View>
 
-      <WeightLogSheet
+      <LogWeightSheet
         visible={sheetOpen}
         // Still the WEIGHT, whichever metric the chart is showing.
         initialKg={latestWeightKg}
+        heightCm={profile.data?.height_cm}
         onClose={() => setSheetOpen(false)}
-      />
-      <BodyCompositionSheet
-        visible={compositionOpen}
-        heightCm={profile.data?.height_cm}
-        onClose={() => setCompositionOpen(false)}
-      />
-      <BodyCompositionScanSheet
-        visible={scanOpen}
-        heightCm={profile.data?.height_cm}
-        onClose={() => setScanOpen(false)}
       />
       </ScrollView>
     </View>

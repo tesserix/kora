@@ -1,12 +1,15 @@
-import type { WeightEntry } from "@/api/types";
+import type { BodyCompositionReading, WeightEntry } from "@/api/types";
 import {
   COMPOSITION_METRICS,
+  DETECTABLE_SOURCES,
   MANUAL_SOURCES,
   compositionMetric,
+  detectedInstrumentSource,
   displayNumber,
   formatMetricNumber,
   metricAccessibilityLabel,
   metricValue,
+  orderSourcesDetectedFirst,
   sourceLabel,
   unitLabel,
 } from "../bodyCompositionFields";
@@ -116,5 +119,47 @@ describe("displayNumber / formatMetricNumber", () => {
 
   it("writes BMR whole, because no scale claims a tenth of a kilocalorie", () => {
     expect(formatMetricNumber(compositionMetric("scale_bmr_kcal"), 1620.4)).toBe("1620");
+  });
+});
+
+// kora#314 PR C: a sibling PR is adding a nullable `detected_source` field to
+// the read response, and this branch is built against api/ before that PR
+// necessarily lands. These tests construct readings with the field present
+// via an unknown-cast (BodyCompositionReading does not declare it yet on
+// this branch), exercising `detectedInstrumentSource` exactly the way it
+// reads the wire response: defensively, through an untyped index.
+describe("detectedInstrumentSource", () => {
+  const reading = (over: Record<string, unknown> = {}): BodyCompositionReading =>
+    ({ weight_kg: 70, ...over }) as unknown as BodyCompositionReading;
+
+  it("falls back to scale_screenshot when the field is entirely absent (API hasn't shipped detection yet)", () => {
+    expect(detectedInstrumentSource(reading())).toBe("scale_screenshot");
+  });
+
+  it("falls back to scale_screenshot when the field is present but null", () => {
+    expect(detectedInstrumentSource(reading({ detected_source: null }))).toBe("scale_screenshot");
+  });
+
+  it("falls back to scale_screenshot for a value outside the three it's allowed to be", () => {
+    expect(detectedInstrumentSource(reading({ detected_source: "some_future_instrument" }))).toBe(
+      "scale_screenshot",
+    );
+    // Not even every OTHER real WeightSource — "manual" and "healthkit" are
+    // never something a screenshot detects.
+    expect(detectedInstrumentSource(reading({ detected_source: "manual" }))).toBe("scale_screenshot");
+  });
+
+  it("trusts each of the three values detection is allowed to produce", () => {
+    expect(detectedInstrumentSource(reading({ detected_source: "scale_screenshot" }))).toBe("scale_screenshot");
+    expect(detectedInstrumentSource(reading({ detected_source: "inbody" }))).toBe("inbody");
+    expect(detectedInstrumentSource(reading({ detected_source: "dexa" }))).toBe("dexa");
+  });
+});
+
+describe("orderSourcesDetectedFirst", () => {
+  it("puts the detected instrument first and keeps the other two, with none dropped or duplicated", () => {
+    expect(orderSourcesDetectedFirst("dexa")).toEqual(["dexa", "scale_screenshot", "inbody"]);
+    expect(orderSourcesDetectedFirst("inbody")).toEqual(["inbody", "scale_screenshot", "dexa"]);
+    expect(orderSourcesDetectedFirst("scale_screenshot")).toEqual(DETECTABLE_SOURCES);
   });
 });

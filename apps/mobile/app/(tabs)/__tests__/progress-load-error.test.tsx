@@ -24,13 +24,13 @@ jest.mock("@/api/hooks", () => ({
   useWeightSeries: () => mockSeries(),
   useAddWeight: () => ({ mutate: jest.fn(), isPending: false }),
   useAvgIntake7d: () => ({ avg: null, series: [], isLoading: false }),
-  // kora#314 PR B: Progress now also mounts BodyCompositionScanSheet, which
+  // kora#314 PR C: Progress now mounts LogWeightSheet (Screenshot mode), which
   // calls this. Not exercised by any test in this file — a bare stub keeps
   // Progress's render tree happy.
   useReadBodyComposition: () => ({ mutate: jest.fn(), isPending: false }),
 }));
 
-// See progress.test.tsx's own comment: BodyCompositionScanSheet imports
+// See progress.test.tsx's own comment: LogWeightSheet's screenshot mode imports
 // ApiError from "@/lib/api" directly, which pulls in real firebase/auth ESM
 // that Jest cannot parse unmocked.
 jest.mock("@/lib/api", () => ({
