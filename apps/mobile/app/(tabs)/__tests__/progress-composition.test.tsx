@@ -102,11 +102,14 @@ test("the hero figure stops being pressable once a composition metric is charted
       weighIn({ weight_kg: 71.9, body_fat_pct: 24.2, logged_at: "2026-07-23T08:00:00Z" }),
     ],
   });
-  const { getByTestId, getByLabelText, queryByLabelText } = await render(<Progress />);
-  expect(getByLabelText("Log weight")).toBeTruthy(); // pressable while weight is charted
+  // Targeted by testID, not by label: the explicit "Log weight" button below
+  // the chart shares this affordance's accessible name, so a label lookup
+  // would match either one and prove nothing about the figure.
+  const { getByTestId, queryByTestId } = await render(<Progress />);
+  expect(getByTestId("hero-log-weight")).toBeTruthy(); // pressable while weight is charted
 
   await fireEvent.press(getByTestId("metric-chip-body_fat_pct"));
-  expect(queryByLabelText("Log weight")).toBeNull();
+  expect(queryByTestId("hero-log-weight")).toBeNull();
 });
 
 test("the visceral rating is charted without a percent sign anywhere near it", async () => {
@@ -176,17 +179,17 @@ test("the change is measured since the instrument changed, not across the switch
 // these two tests just prove Trends' one remaining tap still reaches both.
 test("reaches the composition fields from the Trends panel, behind the expanding section", async () => {
   mockSeries.mockReturnValue({ data: [weighIn({ weight_kg: 71.9 })] });
-  const { getByLabelText, getByTestId, queryByTestId } = await render(<Progress />);
+  const { getByText, getByTestId, queryByTestId } = await render(<Progress />);
   expect(queryByTestId("composition-derived")).toBeNull();
-  await fireEvent.press(getByLabelText("Log weight"));
+  await fireEvent.press(getByText("Log weight"));
   await fireEvent.press(getByTestId("composition-expand-toggle"));
   expect(getByTestId("composition-derived")).toBeTruthy();
 });
 
 test("the daily weigh-in stays two taps: open the sheet, Save", async () => {
   mockSeries.mockReturnValue({ data: [weighIn({ weight_kg: 71.9 })] });
-  const { getByLabelText, findByText, queryByTestId } = await render(<Progress />);
-  await fireEvent.press(getByLabelText("Log weight"));
+  const { getByText, findByText, queryByTestId } = await render(<Progress />);
+  await fireEvent.press(getByText("Log weight"));
   expect(await findByText("Save")).toBeTruthy();
   // kora#45's rule survives consolidation (kora#314 PR C): the nine
   // composition fields and the derived readout stay collapsed until "More

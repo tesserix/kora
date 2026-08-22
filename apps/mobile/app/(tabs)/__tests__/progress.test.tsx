@@ -105,10 +105,9 @@ test("shows no hero figure — not the profile's weight — when there are no we
 
 // The common new-user state now that onboarding always writes a first
 // weigh-in: one real reading, no trend yet (hasChart needs 2+ points). The
-// hero figure shows the real number, and a single quiet line replaces the
-// chart — no icon, no CTA (the hero figure itself is the tap-to-log
-// affordance while the charted metric is weight).
-test("shows the hero figure and a quiet trend hint, with no CTA, for exactly one reading", async () => {
+// hero figure shows the real number and a single quiet line replaces the
+// chart — no icon, and no big EmptyState block.
+test("shows the hero figure and a quiet trend hint for exactly one reading", async () => {
   mockSeries.mockReturnValue({ data: [
     { id: "1", weight_kg: 71.9, logged_at: "2026-07-23T08:00:00Z" },
   ] });
@@ -116,7 +115,39 @@ test("shows the hero figure and a quiet trend hint, with no CTA, for exactly one
   expect(getByText("71.9")).toBeTruthy();
   expect(getByText(/once more to see a trend/i)).toBeTruthy();
   expect(queryByText("No weigh-ins yet")).toBeNull();
-  expect(queryByText("Log weight")).toBeNull(); // no duplicate CTA — only the pressable hero figure
+});
+
+// Regression: with one reading the card briefly had NO visible way to log.
+// The hero figure was the only affordance and nothing says a number is
+// pressable, so a second weigh-in was undiscoverable. The button must be
+// present in every state that does not already offer its own CTA.
+test("offers a visible Log weight button once there is any reading", async () => {
+  mockSeries.mockReturnValue({ data: [
+    { id: "1", weight_kg: 71.9, logged_at: "2026-07-23T08:00:00Z" },
+  ] });
+  const { getByText, findByText } = await render(<Progress />);
+  fireEvent.press(getByText("Log weight"));
+  expect(await findByText("Save")).toBeTruthy();
+});
+
+// The error branch keeps Retry as its action: offering "log a weigh-in" when
+// we could not read the ones that may already exist is the wrong invitation.
+test("offers no Log weight button when the series failed to load", async () => {
+  mockSeries.mockReturnValue({ data: undefined, isError: true });
+  const { queryByText } = await render(<Progress />);
+  expect(queryByText("Log weight")).toBeNull();
+});
+
+// Regression: switching 1W/1M/3M/1Y flashed "No weigh-ins yet". Each range is
+// its own query key, so an uncached one had no data until it landed and the
+// card claimed the user had no weigh-ins on the way to showing that they do.
+// The hook keeps the previous range's data now; this pins the other half —
+// a genuine first load must not render the empty state either.
+test("does not claim there are no weigh-ins while the first load is still pending", async () => {
+  mockSeries.mockReturnValue({ data: undefined, isPending: true });
+  const { queryByText } = await render(<Progress />);
+  expect(queryByText("No weigh-ins yet")).toBeNull();
+  expect(queryByText("Log your weight to see your trend.")).toBeNull();
 });
 
 test("shows the no-weigh-ins empty state and opens the weight-log sheet from its CTA", async () => {

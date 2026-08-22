@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import {
   useMutation,
+  keepPreviousData,
   useQueries,
   useQuery,
   useQueryClient,
@@ -1220,6 +1221,13 @@ export type WeightRange = keyof typeof WEIGHT_RANGE_DAYS;
 export function useWeightSeries(range: WeightRange) {
   return useQuery({
     queryKey: ["weight", range],
+    // Each range is its own cache entry, so switching to one not yet fetched
+    // leaves `data` undefined until the request lands — and Trends reads
+    // `data ?? []`, which put the card into its "No weigh-ins yet" empty
+    // state for a beat on every range switch. Keeping the previous range's
+    // readings on screen while the new ones load means the card never claims
+    // the user has no weigh-ins on the way to showing that they do.
+    placeholderData: keepPreviousData,
     queryFn: () => {
       const to = new Date();
       const from = new Date(to.getTime() - WEIGHT_RANGE_DAYS[range] * 24 * 60 * 60 * 1000);

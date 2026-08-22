@@ -3,6 +3,7 @@ import { ScrollView, StyleSheet, View } from "react-native";
 import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppText } from "@/components/Text";
+import { Button } from "@/components/Button";
 import { AppBackground } from "@/components/AppBackground";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { Icon } from "@/components/Icon";
@@ -159,6 +160,14 @@ export default function Progress() {
   // user with months of weigh-ins that they have none. Same distinction Home
   // draws: "we couldn't load this" is not "you have none".
   const seriesError = series.isError;
+  // The same distinction one step earlier: "we have not loaded yet" is not
+  // "you have none" either. Before this, a cold start rendered the empty
+  // state for as long as the first request took, so a user with months of
+  // history was told they had none every time Trends mounted. Range switches
+  // no longer hit this at all (useWeightSeries keeps the previous range's
+  // data), so this covers only the genuine first load, where there is no
+  // previous data to keep.
+  const seriesPending = series.isPending;
   const entries = (series.data ?? []) as WeightEntry[];
 
   // kora#45: the panel charts ONE metric at a time, picked from the metrics
@@ -261,6 +270,11 @@ export default function Progress() {
                 weight" under a body-fat figure would be a lie about what the
                 tap does. */}
             <PressableScale
+              // Distinct from the explicit "Log weight" button below, which
+              // shares this affordance's accessible name because both do the
+              // same thing. Tests target the figure by this testID rather than
+              // by label, so the two cannot be confused for one another.
+              testID={activeKey === "weight_kg" ? "hero-log-weight" : undefined}
               accessibilityRole={activeKey === "weight_kg" ? "button" : "none"}
               accessibilityLabel={activeKey === "weight_kg" ? "Log weight" : undefined}
               haptic="selection"
@@ -299,12 +313,10 @@ export default function Progress() {
                 above, no chart yet (hasChart needs 2+ points), so a single
                 quiet line replaces the chart's vertical space instead of
                 leaving it dead. It carries no icon and no CTA — the hero
-                figure above is already the tappable "log again" affordance
-                for weight. The zero-reading EmptyState below is reachable
-                only by accounts that onboarded before that backfill, which is
-                also the one state that still needs its own "Log weight"
-                button: nothing else on screen hints the hero figure is
-                pressable when there is no figure to press. */}
+                figure above is a "log again" affordance for weight, but it
+                does not LOOK like one, so it is not the only one — see the
+                explicit button below the states. The zero-reading EmptyState
+                carries its own CTA instead, so it is excluded there. */}
             {hasChart ? (
               <>
                 <WeightChart points={points} breaksAfter={trend.breaksAfter} />
@@ -328,6 +340,12 @@ export default function Progress() {
               </>
             ) : seriesError ? (
               <LoadErrorNotice message="Couldn't load your weigh-ins." onRetry={() => void series.refetch()} />
+            ) : seriesPending ? (
+              // Deliberately blank rather than a spinner: this occupies the
+              // chart's space for the length of one request on a cold start,
+              // and a spinner that appears and vanishes in that window reads
+              // as a flicker. What matters is that it is not the empty state.
+              <View style={{ paddingVertical: 16 }} />
             ) : entries.length === 0 ? (
               <EmptyState
                 icon="chart-line"
@@ -341,6 +359,31 @@ export default function Progress() {
                 {`Log ${metric.label.toLowerCase()} once more to see a trend.`}
               </AppText>
             )}
+
+            {/* The one always-visible way to log, in every state that does not
+                already offer one. It was briefly absent for a user with a
+                single reading: the hero figure was the sole affordance, and
+                nothing on screen says a number is pressable, so there was no
+                discoverable way to log a second weigh-in at all.
+
+                The label stays "Log weight" whatever metric is charted. That
+                is not the same lie the hero figure would tell — a figure
+                reading 32.6% that logs a WEIGHT misdescribes the tap, while a
+                button that says what it does describes itself correctly, and
+                the sheet it opens records weight and composition together.
+
+                Excluded from the zero-reading state (EmptyState has its own
+                CTA) and from the error state, where the honest action is
+                Retry, not "log a weigh-in we may already have". */}
+            {!seriesError && entries.length > 0 ? (
+              <Button
+                title="Log weight"
+                variant="secondary"
+                accessibilityLabel="Log weight"
+                onPress={() => setSheetOpen(true)}
+                style={{ marginTop: 12 }}
+              />
+            ) : null}
 
             {/* Only shown once there is more than weight to chart, so a
                 weight-only history sees no picker rather than nine chips that
