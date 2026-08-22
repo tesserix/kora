@@ -3,6 +3,7 @@ package coach
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -720,14 +721,18 @@ func TestServiceAsk_DoesNotPersistWhenNoProvider(t *testing.T) {
 }
 
 // TestServiceAsk_PriorTurnsNeverEnterThePrompt is the single most important
-// guard in this PR: persisting the thread for replay must never change what
-// the model sees. A prior exchange with a distinctive marker is stored, then
-// Ask is called for a new question — the marker must never appear in the
-// prompt passed to the provider. This must pass on first run: Task 3 wired
-// storage and replay only, it never touched prompt construction. If this
-// test ever fails, prompt construction was changed and must be reverted —
-// this test is the guard, never a target to satisfy by editing the assertion.
-func TestServiceAsk_PriorTurnsNeverEnterThePrompt(t *testing.T) {
+// guard that asserted the exact opposite — that a stored turn could never
+// reach the prompt. That guard was scope discipline for the PR which added
+// thread storage: it wired "storage and replay only" and proved it changed
+// nothing about prompt construction. It was not a privacy or safety
+// invariant, and no other test or comment treats it as one.
+//
+// It is reversed deliberately here. A coach that cannot see its own last turn
+// cannot ask a clarifying question and then read the answer to it, which is
+// the whole of a planning conversation. What must still hold is that the
+// history is the user's OWN thread and that it stays bounded — both asserted
+// below and in TestServiceAsk_HistoryIsBounded.
+func TestServiceAsk_PriorTurnsEnterThePromptAsHistory(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db, 2000, 120)
 
@@ -748,11 +753,68 @@ func TestServiceAsk_PriorTurnsNeverEnterThePrompt(t *testing.T) {
 	_, err := svc.Ask(context.Background(), userID, time.Now().UTC(), time.UTC, "today's question")
 	require.NoError(t, err)
 
-	require.NotContains(t, rec.userPrompt, "UNIQUEPRIORQUESTION",
-		"store+replay only: a prior turn must never reach the prompt")
-	require.NotContains(t, rec.userPrompt, "UNIQUEPRIORANSWER",
-		"store+replay only: a prior answer must never reach the prompt")
+	require.Contains(t, rec.userPrompt, "UNIQUEPRIORQUESTION",
+		"the coach must see the user's own prior turn to hold a conversation")
+	require.Contains(t, rec.userPrompt, "UNIQUEPRIORANSWER",
+		"and its own prior answer, or it re-asks what it already asked")
+	require.Contains(t, rec.userPrompt, "CONVERSATION SO FAR:")
 	require.Contains(t, rec.userPrompt, "today's question")
+}
+
+// One user's conversation must never ground another's answer. This is the
+// invariant that actually matters now that history reaches the prompt, and it
+// is the one the reversed guard above never covered.
+func TestServiceAsk_HistoryIsScopedToTheAskingUser(t *testing.T) {
+	db := testDB(t)
+	mine := seedUser(t, db, 2000, 120)
+	theirs := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	trackRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackRepo, db)
+	g := NewGrounder(dashSvc, logRepo, memory.NewService(logRepo), trackRepo)
+	threadRepo := NewThreadRepository(db)
+
+	require.NoError(t, threadRepo.AppendExchange(context.Background(), theirs,
+		"SOMEONEELSESQUESTION", "SOMEONEELSESANSWER", nil))
+
+	rec := &recordingProvider{}
+	svc := NewService(&g, rec, &stubMeter{withinBudget: true}, &threadRepo)
+
+	_, err := svc.Ask(context.Background(), mine, time.Now().UTC(), time.UTC, "my question")
+	require.NoError(t, err)
+
+	require.NotContains(t, rec.userPrompt, "SOMEONEELSESQUESTION")
+	require.NotContains(t, rec.userPrompt, "SOMEONEELSESANSWER")
+}
+
+// History is bounded so a long thread cannot crowd out the grounded CONTEXT
+// or grow the call without limit.
+func TestServiceAsk_HistoryIsBounded(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	trackRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackRepo, db)
+	g := NewGrounder(dashSvc, logRepo, memory.NewService(logRepo), trackRepo)
+	threadRepo := NewThreadRepository(db)
+
+	// Comfortably more exchanges than historyTurns can carry.
+	for i := 0; i < historyTurns; i++ {
+		require.NoError(t, threadRepo.AppendExchange(context.Background(), userID,
+			fmt.Sprintf("QUESTION%02d", i), fmt.Sprintf("ANSWER%02d", i), nil))
+	}
+
+	rec := &recordingProvider{}
+	svc := NewService(&g, rec, &stubMeter{withinBudget: true}, &threadRepo)
+
+	_, err := svc.Ask(context.Background(), userID, time.Now().UTC(), time.UTC, "latest question")
+	require.NoError(t, err)
+
+	// The oldest exchange has fallen out of the window; the newest is still in.
+	require.NotContains(t, rec.userPrompt, "QUESTION00")
+	require.Contains(t, rec.userPrompt, fmt.Sprintf("ANSWER%02d", historyTurns-1))
 }
 
 // TestServiceThread_NilThreadRepositoryReturnsEmptyTurns proves nil-tolerance

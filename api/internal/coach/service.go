@@ -172,22 +172,23 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 		return Answer{Text: budgetDegradedText, ShowSupport: guardrails.AtRisk(signals)}, nil
 	}
 
-	userPrompt := fmt.Sprintf("CONTEXT:\n%s\n\nQUESTION: %s", grounded.Render(), question)
+	skill := s.classifySkill(ctx, question)
+	userPrompt := fmt.Sprintf("CONTEXT:\n%s\n%s\nQUESTION: %s", grounded.Render(), s.renderHistory(ctx, userID), question)
 
 	by := Attribution{}
-	raw, run, err := s.askAgent(ctx, userID, userPrompt)
+	raw, run, err := s.askAgent(ctx, userID, userPrompt, skill)
 	if err == nil {
 		// The skill is the one Kora asked for, not the one the run echoes
 		// back: the capability that routed the question is what the user is
 		// told, and it stays right even if a runner omits the field.
-		by = Attribution{Agent: run.DisplayName, Skill: guidanceSkill}
+		by = Attribution{Agent: run.DisplayName, Skill: skill}
 	} else {
 		// The agent path is preferred, not required: a registry that publishes
 		// no matching agent, or a gateway that fails, must not cost the user an
 		// answer the direct provider can still give. An unconfigured runner is
 		// the expected state in dev and is not worth a line per request.
 		if !errors.Is(err, errNoAgent) {
-			slog.WarnContext(ctx, "coach: agent run failed, falling back to the provider", "err", err, "skill", guidanceSkill)
+			slog.WarnContext(ctx, "coach: agent run failed, falling back to the provider", "err", err, "skill", skill)
 		}
 		raw, err = s.askProvider(ctx, userID, userPrompt)
 	}
@@ -212,9 +213,8 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 		By:          by,
 	}
 
-	// Store the exchange for replay only; prior turns are never fed back
-	// into the prompt. A storage failure must not lose an answer the user
-	// is already owed, so log and continue rather than returning an error.
+	// A storage failure must not lose an answer the user is already owed, so
+	// log and continue rather than returning an error.
 	if s.thread != nil {
 		if err := s.thread.AppendExchange(ctx, userID, question, answer.Text, answer.Citations); err != nil {
 			slog.WarnContext(ctx, "coach: failed to persist thread exchange", "err", err, "user_id", userID)
@@ -224,17 +224,58 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 	return answer, nil
 }
 
+// historyTurns is how many prior turns are replayed into the prompt. Enough
+// for an agent to have asked a clarifying question and to read the answer to
+// it; short enough that the grounded CONTEXT stays the dominant input and the
+// call stays cheap.
+const historyTurns = 8
+
+// renderHistory replays the tail of the user's thread as conversation.
+//
+// Without it the coach cannot hold a conversation at all: it could ask "what
+// does your training week look like?" and then never see the reply, because
+// each Ask arrived as an isolated question. Returns "" when there is no
+// history, so a first message is shaped exactly as it was before.
+//
+// Read failures degrade to no history rather than failing the ask — losing
+// context is a worse answer, losing the answer is no answer.
+func (s *Service) renderHistory(ctx context.Context, userID uuid.UUID) string {
+	if s.thread == nil {
+		return ""
+	}
+
+	turns, err := s.thread.ListRecent(ctx, userID, historyTurns)
+	if err != nil {
+		slog.WarnContext(ctx, "coach: history read failed, answering without it", "err", err, "user_id", userID)
+		return ""
+	}
+	if len(turns) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("\nCONVERSATION SO FAR:\n")
+	for _, t := range turns {
+		speaker := "User"
+		if t.Role != TurnRoleUser {
+			speaker = "You"
+		}
+		fmt.Fprintf(&b, "%s: %s\n", speaker, t.Text)
+	}
+	return b.String()
+}
+
 // askAgent runs the question through the registry-resolved agent. The agent
 // carries its own system prompt and guardrails from its published definition,
 // so only the grounded CONTEXT/QUESTION body is sent — the same body the
 // direct path uses, which the agents' supervisor grounding already expects.
-func (s *Service) askAgent(ctx context.Context, userID uuid.UUID, userPrompt string) (string, agents.Run, error) {
+func (s *Service) askAgent(ctx context.Context, userID uuid.UUID, userPrompt string, skill string) (string, agents.Run, error) {
 	if s.runner == nil {
 		return "", agents.Run{}, errNoAgent
 	}
 
 	started := time.Now()
-	run, err := s.runner.Run(ctx, guidanceSkill, userPrompt)
+	run, err := s.runner.Run(ctx, skill, userPrompt)
 	usage := ai.Usage{
 		Provider:  "agentgateway",
 		Model:     run.Agent,

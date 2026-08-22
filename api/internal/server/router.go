@@ -305,6 +305,13 @@ func NewRouter(deps Deps) *gin.Engine {
 		coachThread := coach.NewThreadRepository(deps.DB)
 		coachService := coach.NewService(&coachGrounder, deps.Provider, coachMeter, &coachThread).WithAgents(deps.Agents)
 		coachHandler := coach.NewHandler(coachService)
+		if deps.Resolver != nil {
+			// The capture composer posts here: one endpoint that decides
+			// whether a message is food to log or something to talk about,
+			// rather than assuming every message is food.
+			coachHandler = coachHandler.WithFoodResolver(deps.Resolver.TextEngine())
+			v1.POST("/capture/message", coachHandler.Message)
+		}
 		v1.GET("/coach/nudges", coachHandler.Nudges)
 		v1.POST("/coach/ask", coachHandler.Ask)
 		v1.GET("/coach/thread", coachHandler.Thread)
