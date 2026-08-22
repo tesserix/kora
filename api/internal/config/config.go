@@ -75,6 +75,17 @@ type Config struct {
 	AppleKeyID         string
 	AppleBundleID      string
 	ApplePrivateKeyPEM string
+	// Cashfree credentials for paid AI top-ups. Empty leaves the purchase
+	// routes unmounted, exactly like Apple above: an environment with no
+	// gateway must answer 404 rather than offer a checkout that cannot
+	// complete. A PARTIALLY configured gateway is a startup error.
+	CashfreeAppID     string
+	CashfreeSecretKey string
+	CashfreeSandbox   bool
+	// CashfreeReturnURL is the deep link the hosted checkout sends the user
+	// back to. The result carried on that URL is never trusted; it only closes
+	// the browser and prompts the app to ask the gateway what happened.
+	CashfreeReturnURL string
 }
 
 func Load() (Config, error) {
@@ -111,6 +122,10 @@ func Load() (Config, error) {
 		AppleKeyID:               os.Getenv("APPLE_KEY_ID"),
 		AppleBundleID:            getenv("APPLE_BUNDLE_ID", "com.tesserix.kora"),
 		ApplePrivateKeyPEM:       os.Getenv("APPLE_PRIVATE_KEY"),
+		CashfreeAppID:            os.Getenv("CASHFREE_APP_ID"),
+		CashfreeSecretKey:        os.Getenv("CASHFREE_SECRET_KEY"),
+		CashfreeSandbox:          os.Getenv("CASHFREE_SANDBOX") == "true",
+		CashfreeReturnURL:        getenv("CASHFREE_RETURN_URL", "kora://billing/return"),
 	}
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("config: DATABASE_URL is required")
@@ -166,6 +181,12 @@ func Load() (Config, error) {
 		if cfg.AppleKeyID == "" {
 			return Config{}, fmt.Errorf("config: APPLE_KEY_ID is required when APPLE_PRIVATE_KEY is set")
 		}
+	}
+	// One Cashfree credential without the other cannot sign a webhook or
+	// authenticate an order, so it would mount a checkout that takes money and
+	// then fails to grant anything. Refuse to start instead.
+	if (cfg.CashfreeAppID == "") != (cfg.CashfreeSecretKey == "") {
+		return Config{}, fmt.Errorf("config: CASHFREE_APP_ID and CASHFREE_SECRET_KEY must be set together")
 	}
 	return cfg, nil
 }

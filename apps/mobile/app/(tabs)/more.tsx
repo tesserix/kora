@@ -16,7 +16,7 @@ import { Icon } from "@/components/Icon";
 import { Badge } from "@/components/Badge";
 import { PressableScale, ScreenEntrance } from "@/motion";
 import { useAIUsage, useProfile, useUnreadCount } from "@/api/hooks";
-import { remainingAIRequests } from "@/api/aiUsage";
+import { aiAllowanceBadge } from "@/api/aiUsage";
 import { useTheme } from "@/theme";
 import { TAB_BAR_SCROLL_INSET } from "@/components/FloatingTabBar";
 
@@ -205,7 +205,7 @@ export default function More() {
             icon="sparkles"
             right={aiUsage.data ? (
               <AppText style={{ color: instrument.mut, fontSize: 12, marginRight: spacing.xs }}>
-                {remainingAIRequests(aiUsage.data)} left
+                {aiAllowanceBadge(aiUsage.data)}
               </AppText>
             ) : null}
             onPress={() => router.push("/ai-usage" as Href)}

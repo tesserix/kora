@@ -190,6 +190,12 @@ func main() {
 			AppleExchanger:       appleExchanger,
 			IdentityDeleter:      identityDeleter,
 			AppleRevoker:         appleRevoker,
+			Cashfree: billing.CashfreeConfig{
+				AppID:     cfg.CashfreeAppID,
+				SecretKey: cfg.CashfreeSecretKey,
+				Sandbox:   cfg.CashfreeSandbox,
+				ReturnURL: cfg.CashfreeReturnURL,
+			},
 		}),
 		// Nothing bounded a request server-side: a client that hung up left the
 		// handler running against whatever budgets the AI Router happened to

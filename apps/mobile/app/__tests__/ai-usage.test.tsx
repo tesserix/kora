@@ -3,12 +3,15 @@ import { fireEvent, render } from "@testing-library/react-native";
 import AIUsageScreen from "../ai-usage";
 
 const mockUseAIUsage = jest.fn();
+const mockUseAIPacks = jest.fn();
 const mockRefetch = jest.fn();
 
+const mockPush = jest.fn();
+
 jest.mock("expo-router", () => ({
-  router: { back: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => true) },
+  router: { back: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => true), push: (...args: unknown[]) => mockPush(...args) },
 }));
-jest.mock("@/api/hooks", () => ({ useAIUsage: () => mockUseAIUsage() }));
+jest.mock("@/api/hooks", () => ({ useAIUsage: () => mockUseAIUsage(), useAIPacks: () => mockUseAIPacks() }));
 
 const usage = {
   daily: { used: 3, limit: 20, remaining: 17, resets_at: "2026-08-20T00:00:00Z" },
@@ -17,7 +20,9 @@ const usage = {
 };
 
 beforeEach(() => {
+  mockPush.mockClear();
   mockRefetch.mockClear();
+  mockUseAIPacks.mockReturnValue({ data: [{ code: "spark" }] });
   mockUseAIUsage.mockReturnValue({ data: usage, isLoading: false, isError: false, refetch: mockRefetch });
 });
 
@@ -55,4 +60,68 @@ test("calls out an exhausted limit instead of reporting zero calls as available"
 
   expect(getByText("AI limit reached")).toBeTruthy();
   expect(getByText(/Available again/)).toBeTruthy();
+});
+
+test("offers a top-up from the usage screen", async () => {
+  const { getByLabelText } = await render(<AIUsageScreen />);
+
+  await fireEvent.press(getByLabelText("Add requests"));
+
+  expect(mockPush).toHaveBeenCalledWith("/ai-top-up");
+});
+
+// A user who paid should be able to see what they paid for, separately from
+// the free allowance it sits on top of.
+test("an active top-up is shown beside the free allowance, not merged into it", async () => {
+  mockUseAIUsage.mockReturnValue({
+    data: {
+      ...usage,
+      daily: { ...usage.daily, used: 20, remaining: 0 },
+      top_up: {
+        active: true,
+        unlimited: false,
+        pack_code: "spark",
+        remaining: 25,
+        daily_remaining: 10,
+        expires_at: "2026-09-21T09:00:00Z",
+      },
+    },
+    isLoading: false,
+    isError: false,
+    refetch: mockRefetch,
+  });
+
+  const { getByText, getByLabelText } = await render(<AIUsageScreen />);
+
+  expect(getByText("10 calls left")).toBeTruthy();
+  expect(getByText("20 / 20")).toBeTruthy();
+  expect(getByLabelText("Top-up active: 25 requests left, 10 today")).toBeTruthy();
+});
+
+test("an unlimited pack reports unlimited rather than a count", async () => {
+  mockUseAIUsage.mockReturnValue({
+    data: {
+      ...usage,
+      daily: { ...usage.daily, used: 20, remaining: 0 },
+      top_up: { active: true, unlimited: true, pack_code: "boundless", remaining: 0, daily_remaining: 0 },
+    },
+    isLoading: false,
+    isError: false,
+    refetch: mockRefetch,
+  });
+
+  const { getByText } = await render(<AIUsageScreen />);
+
+  expect(getByText("Unlimited")).toBeTruthy();
+  expect(getByText("No daily cap")).toBeTruthy();
+});
+
+// Payments are not mounted everywhere. Where they are not, the screen must
+// not offer a purchase that would dead-end.
+test("no purchasable packs means no offer to buy", async () => {
+  mockUseAIPacks.mockReturnValue({ data: undefined });
+
+  const { queryByLabelText } = await render(<AIUsageScreen />);
+
+  expect(queryByLabelText("Add requests")).toBeNull();
 });
