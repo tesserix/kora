@@ -15,6 +15,7 @@ import { engravedStyle, monoStyle } from "@/components/instrument/typography";
 import { WeightChart } from "@/components/progress/WeightChart";
 import { WeightLogSheet } from "@/components/progress/WeightLogSheet";
 import { BodyCompositionSheet } from "@/components/progress/BodyCompositionSheet";
+import { BodyCompositionScanSheet } from "@/components/progress/BodyCompositionScanSheet";
 import { MetricChips } from "@/components/progress/MetricChips";
 import { deltaColor } from "@/components/progress/deltaColor";
 import { Button } from "@/components/Button";
@@ -107,6 +108,7 @@ export default function Progress() {
   const [range, setRange] = useState<(typeof RANGES)[number]>("1W");
   const [sheetOpen, setSheetOpen] = useState(false);
   const [compositionOpen, setCompositionOpen] = useState(false);
+  const [scanOpen, setScanOpen] = useState(false);
   const [metricKey, setMetricKey] = useState<CompositionMetricKey>("weight_kg");
   const dashboard = useDashboard(today());
   const profile = useProfile();
@@ -346,11 +348,21 @@ export default function Progress() {
                 above on purpose (kora#45): most days are weight and nothing
                 else, and putting nine optional fields in front of that would
                 be a regression for the common case. */}
-            <View style={{ marginTop: 10 }}>
+            <View style={{ marginTop: 10, gap: 8 }}>
               <Button
                 title="Add body composition"
                 variant="secondary"
                 onPress={() => setCompositionOpen(true)}
+              />
+              {/* kora#314 PR B: a screenshot import is a distinct action from
+                  typing nine fields by hand, so it gets its own affordance
+                  rather than a mode toggle bolted onto "Add body
+                  composition" — the two entry points lead to the same
+                  confirm surface (BodyCompositionForm) either way. */}
+              <Button
+                title="Import from screenshot"
+                variant="secondary"
+                onPress={() => setScanOpen(true)}
               />
             </View>
             </View>
@@ -434,6 +446,11 @@ export default function Progress() {
         visible={compositionOpen}
         heightCm={profile.data?.height_cm}
         onClose={() => setCompositionOpen(false)}
+      />
+      <BodyCompositionScanSheet
+        visible={scanOpen}
+        heightCm={profile.data?.height_cm}
+        onClose={() => setScanOpen(false)}
       />
       </ScrollView>
     </View>
