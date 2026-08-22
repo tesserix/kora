@@ -134,7 +134,7 @@ func NewRouter(deps Deps) *gin.Engine {
 		// service in the app; main.go builds only external clients.
 		userSvc := user.NewService(
 			deps.DB,
-			deletionCache(deps.ResolveCache),
+			deletionCache(deps.ResolveCache, deps.BodyCompositionCache),
 			identityDeleter(deps.IdentityDeleter),
 			deps.AppleRevoker, // may legitimately be nil; Delete tolerates it
 			auditDeletion,
@@ -398,16 +398,44 @@ func auditDeletion(tx *gorm.DB, actorID, actorEmail string, targetID uuid.UUID) 
 		admin.ActionUserDeleted, admin.TargetTypeUser, targetID, nil, nil)
 }
 
-// deletionCache narrows the resolve cache to the eviction surface account
-// deletion needs. A nil ai.Cache (resolve engine disabled, or Redis
-// unreachable at startup) becomes ai.NoCache{} rather than being passed
-// through: user.Service.Delete calls DeleteByUser unconditionally, and a nil
-// interface there would panic AFTER the row was already destroyed.
-func deletionCache(cache ai.Cache) user.CacheEvicter {
-	if cache == nil {
-		return ai.NoCache{}
+// deletionCache narrows BOTH the resolve cache and the body-composition
+// cache to the single eviction surface account deletion needs. Both store
+// AI data keyed by user id — resolve.Resolution and bodyread.Result
+// respectively — so a deletion that swept only the resolve cache would
+// leave a deleted user's cached body-composition readings (weight, body
+// fat, visceral fat, scale BMR — health data) sitting in Redis for up to
+// the cache's full TTL after their row is destroyed (kora#314 review
+// finding #1). A nil cache (resolve engine disabled, Redis unreachable at
+// startup, or no ai.Provider configured) becomes the matching NoCache{}
+// rather than being passed through: user.Service.Delete calls DeleteByUser
+// unconditionally, and a nil interface there would panic AFTER the row was
+// already destroyed.
+func deletionCache(resolveCache ai.Cache, bodyCache bodyread.Cache) user.CacheEvicter {
+	if resolveCache == nil {
+		resolveCache = ai.NoCache{}
 	}
-	return cache
+	if bodyCache == nil {
+		bodyCache = bodyread.NoCache{}
+	}
+	return multiCacheEvicter{resolve: resolveCache, body: bodyCache}
+}
+
+// multiCacheEvicter fans DeleteByUser out to every per-user AI cache this
+// server maintains. Both evictions are attempted even if the first fails —
+// a partial sweep (resolve cleared, bodyread not, or vice versa) is
+// strictly better than an early return that skips the second cache
+// entirely — and both errors are joined so the caller (user.Service.Delete,
+// which only logs this and never treats it as fatal — the row is already
+// gone by the time this runs) doesn't lose either one.
+type multiCacheEvicter struct {
+	resolve ai.Cache
+	body    bodyread.Cache
+}
+
+func (m multiCacheEvicter) DeleteByUser(ctx context.Context, userID uuid.UUID) error {
+	resolveErr := m.resolve.DeleteByUser(ctx, userID)
+	bodyErr := m.body.DeleteByUser(ctx, userID)
+	return errors.Join(resolveErr, bodyErr)
 }
 
 // unwiredIdentityDeleter stands in when Deps.IdentityDeleter is nil. It

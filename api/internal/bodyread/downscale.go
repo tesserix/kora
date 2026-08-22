@@ -21,6 +21,21 @@ import (
 	_ "image/png" // format registration for image.Decode; scale-app screenshots are jpeg or png (confirmed against apps/mobile's image-picker mime types)
 )
 
+// maxDecodePixels bounds the pixel count image.Decode is allowed to
+// allocate, checked via the cheap image.DecodeConfig header read BEFORE the
+// real decode ever runs. This is a SECURITY guard, not an optimization: the
+// 8 MiB byte-size cap the handler enforces (internal/bodyread/handler.go)
+// bounds the ENCODED size on the wire, but a crafted PNG can declare
+// enormous pixel dimensions in a few header bytes while staying well under
+// that cap — image.Decode allocates the FULL pixel buffer for whatever
+// dimensions the header claims before this file's own maxDimension
+// downscale logic ever gets a chance to run, so without this check an
+// authenticated user could OOM the pod with one upload that passes every
+// existing size check. 50,000,000 px (e.g. ~7071x7071) is far larger than
+// any real scale-app screenshot (even a 4K photo of a scale display is
+// under 9,000,000 px) while staying a small, bounded allocation.
+const maxDecodePixels = 50_000_000
+
 // maxDimension bounds the long side of an image sent to the provider. 1024
 // is deliberately generous for this use case: the source is large,
 // high-contrast UI text on a clean background, not a photograph where fine
@@ -35,6 +50,28 @@ const maxDimension = 1024
 // that keeps output size well below the original while leaving numerals and
 // labels sharp enough to read.
 const downscaleJPEGQuality = 85
+
+// declaredPixelsExceedCap reports whether data's HEADER ALONE (read via the
+// cheap image.DecodeConfig, which never allocates a pixel buffer) declares
+// more pixels than maxDecodePixels allows. Extracted from
+// downscaleForProvider as its own function so it can be exercised directly
+// against a crafted header — proving the CAP COMPARISON itself fires,
+// independent of whatever downscaleForProvider's decode-failure fallback
+// would otherwise do with the same bytes (a crafted file with no valid
+// pixel data fails a real image.Decode anyway, which would otherwise mask
+// a broken or missing guard behind the same "return original, no error"
+// outcome).
+//
+// A header that fails to decode at all (cfgErr != nil) is NOT treated as
+// exceeding the cap here — that is downscaleForProvider's decode-failure
+// path to handle, via the full image.Decode call that follows.
+func declaredPixelsExceedCap(data []byte) bool {
+	cfg, _, cfgErr := image.DecodeConfig(bytes.NewReader(data))
+	if cfgErr != nil {
+		return false
+	}
+	return int64(cfg.Width)*int64(cfg.Height) > maxDecodePixels
+}
 
 // downscaleForProvider shrinks data proportionally so its long side is at
 // most maxDimension, re-encoding the result as JPEG. It always returns
@@ -51,6 +88,14 @@ const downscaleJPEGQuality = 85
 // re-encoded — so a JPEG that never needed resizing is never re-compressed
 // as a lossy no-op.
 func downscaleForProvider(data []byte, mime string) ([]byte, string, error) {
+	// Cheap header-only read BEFORE the real decode allocates anything — see
+	// maxDecodePixels' doc comment for why this exists and what it defends
+	// against. A config-decode failure is handled identically to a full
+	// decode failure below: fall back to the original bytes, no error.
+	if declaredPixelsExceedCap(data) {
+		return data, mime, nil
+	}
+
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		return data, mime, nil

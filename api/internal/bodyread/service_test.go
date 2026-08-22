@@ -2,7 +2,10 @@ package bodyread
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -91,6 +94,20 @@ func (c *stubCache) Set(_ context.Context, key string, r Result) {
 	c.entries[key] = r
 }
 
+// DeleteByUser removes every entry whose key is prefixed
+// "body_composition:<userID>:" — mirrors RedisCache's SCAN-by-prefix
+// semantics closely enough to assert against in a test without a real
+// Redis.
+func (c *stubCache) DeleteByUser(_ context.Context, userID uuid.UUID) error {
+	prefix := "body_composition:" + userID.String() + ":"
+	for k := range c.entries {
+		if strings.HasPrefix(k, prefix) {
+			delete(c.entries, k)
+		}
+	}
+	return nil
+}
+
 func TestReader_Read_AbsentFieldsStayNil(t *testing.T) {
 	provider := &stubProvider{reading: ai.BodyCompositionReading{WeightKg: ptr(72.4)}}
 	r := NewReader(provider, newStubCache(), &stubMeter{})
@@ -167,6 +184,36 @@ func TestReader_Read_ReadingDate(t *testing.T) {
 		require.Len(t, result.Dropped, 1)
 		assert.Equal(t, "reading_date", result.Dropped[0].Field)
 	})
+}
+
+// TestReader_Read_CacheKeyUsesDownscaledBytes proves the ordering documented
+// in service.go's Read: the cache key must be built from the DOWNSCALED
+// bytes actually sent to the provider, not the original upload. Every other
+// test in this file feeds non-decodable byte slices through Read, which
+// makes downscaleForProvider a no-op passthrough and so cannot distinguish
+// "hash the downscaled bytes" from "hash the original bytes" — this test
+// uses a real, deliberately oversized synthetic image (synthImage, defined
+// in downscale_test.go) so downscaleForProvider actually resizes it.
+func TestReader_Read_CacheKeyUsesDownscaledBytes(t *testing.T) {
+	src := synthImage(2000, 1000) // long side well over maxDimension
+	original := encodeJPEG(t, src)
+
+	provider := &stubProvider{reading: ai.BodyCompositionReading{WeightKg: ptr(72.4)}}
+	cache := newStubCache()
+	r := NewReader(provider, cache, &stubMeter{})
+
+	uid := uuid.New()
+	_, err := r.Read(context.Background(), uid, original, "image/jpeg")
+	require.NoError(t, err)
+
+	require.NotEmpty(t, provider.gotImage)
+	assert.NotEqual(t, len(original), len(provider.gotImage),
+		"the oversized fixture must actually have been downscaled before reaching the provider")
+
+	sum := sha256.Sum256(provider.gotImage)
+	wantKey := ai.CacheKey("body_composition", uid, hex.EncodeToString(sum[:]))
+	_, ok := cache.entries[wantKey]
+	assert.True(t, ok, "cache key must hash the DOWNSCALED bytes sent to the provider, not the original upload")
 }
 
 func TestReader_Read_CacheHitSkipsProvider(t *testing.T) {
