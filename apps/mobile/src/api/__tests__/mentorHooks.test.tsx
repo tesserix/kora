@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { apiFetch, currentUserId } from "@/lib/api";
 import {
+  useAcceptMealPlan,
   useAcceptMentorProposal,
   useDeleteMentorHealth,
   useMentorCommitments,
@@ -212,5 +213,22 @@ test("accepting an AI proposal is an explicit owner-scoped PUT and refreshes the
       ends_on: null,
     }),
   });
+  await waitFor(() => expect(client.getQueryState(["coach", "thread", "user-a"])?.isInvalidated).toBe(true));
+});
+
+test("approving a meal plan is an owner-scoped PUT that unwraps the plan and refreshes the thread", async () => {
+  const { client, wrapper } = createHarness();
+  const plan = { id: "plan-1", summary: "Hits your targets", days: [], accepted_at: "2026-08-22T06:00:00Z" };
+  (apiFetch as jest.Mock).mockResolvedValue({ plan });
+  client.setQueryData(["coach", "thread", "user-a"], { turns: [] });
+  const { result } = await renderHook(() => useAcceptMealPlan(), { wrapper });
+
+  let approved;
+  await act(async () => {
+    approved = await result.current.mutateAsync("plan-1");
+  });
+
+  expect(apiFetch).toHaveBeenCalledWith("/v1/coach/plans/plan-1/accept", { method: "PUT" });
+  expect(approved).toEqual(plan);
   await waitFor(() => expect(client.getQueryState(["coach", "thread", "user-a"])?.isInvalidated).toBe(true));
 });

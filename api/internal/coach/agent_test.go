@@ -442,3 +442,74 @@ func TestAsk_AnUnreviewedPlanDraftIsStillReadable(t *testing.T) {
 	require.Empty(t, a.By.ReviewedBy, "an unreviewed draft claims no reviewer")
 	_ = db
 }
+
+// The review stage turns the planner's JSON into prose, which is what the user
+// reads — but prose is not something a client can render an approve button on.
+// The structured draft is kept alongside it, so the thread shows a card the
+// user can act on and a paragraph that says why it fits.
+func TestAsk_AReviewedPlanIsAlsoReturnedAsAnApprovableCard(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	g, meter := askFixture(t)
+
+	runner := &fakeRunner{bySkill: map[string]agents.Run{
+		planningSkill: {
+			Agent: "meal-planner", DisplayName: "Kora Meal Planner", State: "completed",
+			Text: `{"summary":"Hits 2000 kcal and 120g protein","days":[{"date":"Monday","meals":[{"name":"Oats and whey","description":"32g protein"}]}]}`,
+		},
+		guidanceSkill: {
+			Agent: "nutrition-coach", DisplayName: "Kora Nutrition Coach", State: "completed",
+			Text: "This fits your 2000 kcal target. Approve it, or tell me what to change.",
+		},
+	}}
+	thread := NewThreadRepository(db)
+	svc := NewService(g, &fakeProvider{text: "plan"}, meter, &thread).WithAgents(runner)
+
+	answer, err := svc.Ask(context.Background(), userID,
+		time.Date(2026, 8, 22, 1, 0, 0, 0, time.UTC), time.UTC, "plan my meals for the week")
+
+	require.NoError(t, err)
+	require.Equal(t, "This fits your 2000 kcal target. Approve it, or tell me what to change.", answer.Text)
+	require.NotNil(t, answer.Plan)
+	require.NotZero(t, answer.Plan.ID, "the card is approvable, so it has an id")
+	require.Equal(t, "Hits 2000 kcal and 120g protein", answer.Plan.Summary)
+	require.Len(t, answer.Plan.Days, 1)
+	require.Equal(t, "Oats and whey", answer.Plan.Days[0].Meals[0].Name)
+	require.Equal(t, "Kora Meal Planner", answer.Plan.AgentName)
+	require.Equal(t, "Kora Nutrition Coach", answer.Plan.ReviewedBy)
+	require.Nil(t, answer.Plan.AcceptedAt, "a plan is a proposal until the user approves it")
+
+	turns, err := thread.ListRecent(t.Context(), userID, maxThreadTurns)
+	require.NoError(t, err)
+	require.Len(t, turns, 2)
+	require.NotNil(t, turns[1].Plan)
+	require.Equal(t, answer.Plan.ID, turns[1].Plan.ID)
+}
+
+// A plan answered without a thread to store it in has no id, so there is
+// nothing the user could approve — returning a card with no id would give
+// them a button that 404s.
+func TestAsk_AnUnstoredPlanCarriesNoCard(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	g, meter := askFixture(t)
+
+	runner := &fakeRunner{bySkill: map[string]agents.Run{
+		planningSkill: {
+			Agent: "meal-planner", DisplayName: "Kora Meal Planner", State: "completed",
+			Text: `{"summary":"a week","days":[{"date":"Monday","meals":[{"name":"Oats"}]}]}`,
+		},
+		guidanceSkill: {
+			Agent: "nutrition-coach", DisplayName: "Kora Nutrition Coach", State: "completed",
+			Text: "Looks good against your targets.",
+		},
+	}}
+	svc := NewService(g, &fakeProvider{text: "plan"}, meter, nil).WithAgents(runner)
+
+	answer, err := svc.Ask(context.Background(), userID,
+		time.Date(2026, 8, 22, 1, 0, 0, 0, time.UTC), time.UTC, "plan my meals for the week")
+
+	require.NoError(t, err)
+	require.Nil(t, answer.Plan)
+	_ = db
+}

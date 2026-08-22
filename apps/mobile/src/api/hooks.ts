@@ -55,6 +55,7 @@ import type {
   GroupProgress,
   GroupSummary,
   LogSource,
+  MealPlanProposal,
   Memory,
   Metric,
   MentorCheckIn,
@@ -262,6 +263,22 @@ export function useAcceptMentorProposal(): UseMutationResult<
     }) as Promise<MentorCommitment>,
     onSuccess: (commitment) => {
       cacheMentorCommitment(qc, ownerID, commitment);
+      qc.invalidateQueries({ queryKey: coachThreadQueryKey(ownerID) });
+    },
+  });
+}
+
+/** Records the user's approval of a reviewed meal plan. The thread is
+ *  invalidated so a cold start replays the plan with its decision on it. */
+export function useAcceptMealPlan(): UseMutationResult<MealPlanProposal, Error, string> {
+  const qc = useQueryClient();
+  const ownerID = currentUserId();
+  return useMutation({
+    mutationFn: (planId: string) =>
+      apiFetch(`/v1/coach/plans/${planId}/accept`, { method: "PUT" }).then(
+        (data) => (data as { plan: MealPlanProposal }).plan,
+      ),
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: coachThreadQueryKey(ownerID) });
     },
   });

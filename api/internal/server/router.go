@@ -360,6 +360,7 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.GET("/coach/nudges", coachHandler.Nudges)
 		v1.POST("/coach/ask", coachHandler.Ask)
 		v1.GET("/coach/thread", coachHandler.Thread)
+		v1.PUT("/coach/plans/:id/accept", coachHandler.AcceptPlan)
 
 		if deps.Agents != nil {
 			agentsHandler := agents.NewHandler(deps.Agents)

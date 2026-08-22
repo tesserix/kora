@@ -49,6 +49,7 @@ jest.mock("@/lib/firebase", () => ({
 // one this file wrote.
 jest.mock("@/api/hooks", () => ({
   useProfile: () => ({ data: { display_name: "Alex Stone" } }),
+  useAcceptMealPlan: () => ({ mutate: jest.fn(), isPending: false }),
   useCaptureMessage: () => ({ mutate: jest.fn(), isPending: false }),
   useResolvePhoto: () => ({
     mutate: (_input: unknown, options: { onError: (e: Error) => void }) => {
