@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/openai/openai-go"
+	"github.com/openai/openai-go/packages/param"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -218,17 +219,18 @@ func systemTextOf(t *testing.T, params openai.ChatCompletionNewParams) string {
 
 func TestBuildParamsStrictSchemaDefault(t *testing.T) {
 	p := NewOpenAIProvider("k", "", "", false)
-	params := p.buildParams(modelDefault(p), "sys", nil, "food_guesses", guessJSONSchema())
+	params := p.buildParams(modelDefault(p), "sys", nil, "food_guesses", guessJSONSchema(), param.Opt[float64]{})
 
 	assert.Equal(t, "gpt-5-mini", params.Model)
 	require.NotNil(t, params.ResponseFormat.OfJSONSchema, "expected strict json_schema response format")
 	assert.Nil(t, params.ResponseFormat.OfJSONObject, "strict mode must not set json_object format")
 	assert.Equal(t, "sys", systemTextOf(t, params), "strict mode must not alter the system prompt")
+	assert.False(t, params.Temperature.Valid(), "food-path temperature must stay unset (model default)")
 }
 
 func TestBuildParamsJSONObjectCompat(t *testing.T) {
 	p := NewOpenAIProvider("k", "https://integrate.api.nvidia.com/v1", "meta/llama-3.3-70b-instruct", true)
-	params := p.buildParams(modelDefault(p), "sys", nil, "food_guesses", guessJSONSchema())
+	params := p.buildParams(modelDefault(p), "sys", nil, "food_guesses", guessJSONSchema(), param.Opt[float64]{})
 
 	assert.Equal(t, "meta/llama-3.3-70b-instruct", params.Model, "expected configured model")
 	require.NotNil(t, params.ResponseFormat.OfJSONObject, "expected json_object response format for compat mode")
@@ -241,6 +243,20 @@ func TestBuildParamsJSONObjectCompat(t *testing.T) {
 	if !strings.Contains(sys, "\"guesses\"") {
 		t.Fatalf("compat system prompt missing envelope shape hint: %q", sys)
 	}
+}
+
+// TestBuildParams_BodyCompositionTemperatureIsZero pins the fix: unlike the
+// food-path calls above (temperature left unset), the body-composition
+// call must explicitly pin sampling to 0 — see bodyCompositionTemperature's
+// doc comment in gemini.go for why this is a transcription task, not a
+// generative one.
+func TestBuildParams_BodyCompositionTemperatureIsZero(t *testing.T) {
+	p := NewOpenAIProvider("k", "", "", false)
+	params := p.buildParams(modelDefault(p), "sys", nil, "body_composition_reading",
+		bodyCompositionJSONSchema(), openai.Float(float64(bodyCompositionTemperature)))
+
+	require.True(t, params.Temperature.Valid(), "body-composition temperature must be set")
+	assert.Equal(t, float64(0), params.Temperature.Value)
 }
 
 func TestOpenAITranscribeNotSupported(t *testing.T) {
@@ -299,6 +315,36 @@ func TestBodyCompositionJSONSchema_MarshalsToValidJSON(t *testing.T) {
 	require.NoError(t, err)
 	var round map[string]any
 	require.NoError(t, json.Unmarshal(data, &round))
+}
+
+// TestBodyCompositionJSONSchema_EveryPropertyHasDescription pins kora#314's
+// second fix: a schema with no per-property guidance leaves everything the
+// model knows about a field (e.g. "muscle_mass_kg is NOT skeletal muscle
+// mass") in prose the model may not weigh heavily. Every property must
+// carry its own non-empty description now.
+func TestBodyCompositionJSONSchema_EveryPropertyHasDescription(t *testing.T) {
+	schema := bodyCompositionJSONSchema()
+	props, ok := schema["properties"].(map[string]any)
+	require.True(t, ok)
+
+	for _, name := range bodyCompositionFieldNames {
+		prop, ok := props[name].(map[string]any)
+		require.Truef(t, ok, "property %q missing or not an object", name)
+		desc, ok := prop["description"].(string)
+		require.Truef(t, ok, "property %q missing a description", name)
+		assert.NotEmptyf(t, desc, "property %q has an empty description", name)
+	}
+}
+
+// TestBodyCompositionJSONSchema_MuscleMassDescriptionWarnsAgainstSkeletalConflation
+// pins the exact trap migration 000039 warns about: a scale that shows
+// skeletal muscle mass in kilograms must not have that value land in
+// muscle_mass_kg.
+func TestBodyCompositionJSONSchema_MuscleMassDescriptionWarnsAgainstSkeletalConflation(t *testing.T) {
+	schema := bodyCompositionJSONSchema()
+	props := schema["properties"].(map[string]any)
+	desc := props["muscle_mass_kg"].(map[string]any)["description"].(string)
+	assert.Contains(t, strings.ToLower(desc), "skeletal", "muscle_mass_kg description must warn against skeletal muscle mass conflation")
 }
 
 // newOpenAIStubServer starts an httptest server that returns responseBody as
