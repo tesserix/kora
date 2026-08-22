@@ -75,6 +75,17 @@ export interface CoachAnswer {
   agent?: CoachAgent;
 }
 
+/** What the capture composer's message turned out to BE.
+ *
+ * The composer used to post everything typed to food resolution, which asks a
+ * model "what foods are in this?" — a question with no honest answer for "help
+ * me build a meal plan", so the model invented four items and offered to log
+ * them. The server now decides intent first and answers with one of these two
+ * shapes; see api/internal/coach/message.go. */
+export type CaptureMessage =
+  | { kind: "resolution"; resolution: Resolution }
+  | ({ kind: "answer" } & CoachAnswer);
+
 export type ServingUnit = {
   name: string;
   amount: number;

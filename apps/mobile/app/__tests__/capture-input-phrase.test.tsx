@@ -30,7 +30,7 @@ jest.mock("@/lib/api", () => ({
   },
 }));
 
-const mockResolveTextMutate = jest.fn();
+const mockCaptureMessageMutate = jest.fn();
 const mockResolvePhotoMutate = jest.fn();
 const mockResolveVoiceMutate = jest.fn();
 const mockResolveBarcodeMutate = jest.fn();
@@ -38,7 +38,7 @@ const mockCreateLogMutateAsync = jest.fn();
 
 jest.mock("@/api/hooks", () => ({
   useProfile: () => ({ data: { display_name: "Alex Stone" } }),
-  useResolveText: () => ({ mutate: mockResolveTextMutate, isPending: false }),
+  useCaptureMessage: () => ({ mutate: mockCaptureMessageMutate, isPending: false }),
   useResolvePhoto: () => ({ mutate: mockResolvePhotoMutate, isPending: false }),
   useResolveVoice: () => ({ mutate: mockResolveVoiceMutate, isPending: false }),
   useResolveBarcode: () => ({ mutate: mockResolveBarcodeMutate, isPending: false }),
@@ -119,7 +119,7 @@ function makeResolution(overrides: Partial<Resolution> = {}): Resolution {
 }
 
 beforeEach(() => {
-  mockResolveTextMutate.mockReset();
+  mockCaptureMessageMutate.mockReset();
   mockResolvePhotoMutate.mockReset();
   mockResolveVoiceMutate.mockReset();
   mockResolveBarcodeMutate.mockReset();
@@ -147,8 +147,8 @@ test("a typed resolve logs the phrase the user actually typed", async () => {
   await fireEvent.changeText(input, "brekkie eggs");
   await fireEvent.press(await findByLabelText("Send"));
 
-  const [, options] = mockResolveTextMutate.mock.calls[0];
-  await act(async () => options.onSuccess(makeResolution()));
+  const [, options] = mockCaptureMessageMutate.mock.calls[0];
+  await act(async () => options.onSuccess({ kind: "resolution", resolution: makeResolution() }));
 
   await fireEvent.press(await findByLabelText("Add to diary"));
 
@@ -233,8 +233,8 @@ test("a phrase from an earlier text resolve does not leak into a later photo res
   await fireEvent.changeText(input, "brekkie eggs");
   await fireEvent.press(await findByLabelText("Send"));
 
-  const [, textOptions] = mockResolveTextMutate.mock.calls[0];
-  await act(async () => textOptions.onSuccess(makeResolution()));
+  const [, textOptions] = mockCaptureMessageMutate.mock.calls[0];
+  await act(async () => textOptions.onSuccess({ kind: "resolution", resolution: makeResolution() }));
 
   // 2. Resolve a photo via the quick-capture shortcut, same session.
   (ImagePicker.launchCameraAsync as jest.Mock).mockResolvedValueOnce({
@@ -268,8 +268,8 @@ test("a phrase from an earlier text resolve does not leak into a later barcode r
   await fireEvent.changeText(input, "brekkie eggs");
   await fireEvent.press(await findByLabelText("Send"));
 
-  const [, textOptions] = mockResolveTextMutate.mock.calls[0];
-  await act(async () => textOptions.onSuccess(makeResolution()));
+  const [, textOptions] = mockCaptureMessageMutate.mock.calls[0];
+  await act(async () => textOptions.onSuccess({ kind: "resolution", resolution: makeResolution() }));
 
   // 2. Switch to Scan mode and resolve a barcode in the same mounted component.
   await fireEvent.press(await findByText("Scan"));

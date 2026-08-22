@@ -27,7 +27,7 @@ import { accessibleMealLabel } from "@/lib/portionAssumedLabel";
 import { now, todayLocalDate } from "@/lib/shotsClock";
 import type { FoodLog } from "@/api/types";
 import type { ReactNode } from "react";
-import { TAB_BAR_SCROLL_INSET_TIGHT } from "@/components/FloatingTabBar";
+import { TAB_BAR_SCROLL_INSET_TODAY } from "@/components/FloatingTabBar";
 
 // Shape of the steps/sleep telemetry cells rendered below (kora ignition
 // review, Finding 4: was imported from the now-deleted TeleStrip.tsx, which
@@ -210,7 +210,7 @@ export default function Home() {
       <ScrollView
         testID="home-scroll"
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingTop: insets.top + spacing.sm, paddingBottom: TAB_BAR_SCROLL_INSET_TIGHT }}
+        contentContainerStyle={{ paddingTop: insets.top + spacing.sm, paddingBottom: TAB_BAR_SCROLL_INSET_TODAY }}
         refreshControl={
           <RefreshControl
             testID="home-refresh"
@@ -449,9 +449,10 @@ export default function Home() {
               ))}
             </View>
           ) : (
+            /* No icon tile: the dock's capture button is already a camera two
+               rows below, and a second one read as a stray control. */
             <EmptyState
               variant="instrument"
-              icon="camera"
               title="No meals logged yet"
               subtitle="The gauge is full and waiting. Point the camera at your first meal."
             />

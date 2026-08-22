@@ -1,5 +1,5 @@
 import { File } from "expo-file-system";
-import type { Resolution, ResolvedCandidate } from "./types";
+import type { CaptureMessage, Resolution, ResolvedCandidate } from "./types";
 
 // A leaf module: no imports from @/offline/*. drainCaptures (src/offline/drainCaptures.ts)
 // needs both helpers below, but api/hooks.ts already imports from @/offline/* (connectivity,
@@ -28,6 +28,19 @@ export function normalizeResolution(raw: unknown): Resolution {
     // `undefined` and can render the assumed-portion hedge unconditionally.
     candidates: candidates.map((c) => ({ ...c, portion_assumed: c.portion_assumed ?? false })),
   };
+}
+
+// The composer's reply is a tagged union, so the resolution branch still has
+// to go through normalizeResolution above — and a server predating
+// /v1/capture/message, or any response that arrives untagged, is read as a
+// bare resolution rather than dropped.
+export function normalizeCaptureMessage(raw: unknown): CaptureMessage {
+  const r = raw as { kind?: string; resolution?: unknown };
+  if (r?.kind === "answer") {
+    const answer = raw as Extract<CaptureMessage, { kind: "answer" }>;
+    return { ...answer, citations: answer.citations ?? [] };
+  }
+  return { kind: "resolution", resolution: normalizeResolution(r?.kind === "resolution" ? r.resolution : raw) };
 }
 
 export type ResolveFile = {

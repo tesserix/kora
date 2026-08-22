@@ -26,7 +26,7 @@ jest.mock("@/lib/api", () => ({
 
 jest.mock("@/api/hooks", () => ({
   useProfile: () => ({ data: { display_name: "Alex Stone" } }),
-  useResolveText: () => ({ mutate: jest.fn(), isPending: false }),
+  useCaptureMessage: () => ({ mutate: jest.fn(), isPending: false }),
   useResolvePhoto: () => ({ mutate: jest.fn(), isPending: false }),
   useResolveVoice: () => ({ mutate: jest.fn(), isPending: false }),
   useResolveBarcode: () => ({ mutate: jest.fn(), isPending: false }),

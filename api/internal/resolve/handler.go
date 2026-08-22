@@ -253,3 +253,18 @@ func (h Handler) ResolveBarcode(c *gin.Context) {
 		Provenance: item.Provenance,
 	})
 }
+
+// textEngine adapts the text resolver to an opaque-result interface, so the
+// coach's capture endpoint can dispatch a food log without importing this
+// package's response types. A separate type rather than a method on Handler
+// because Handler.ResolveText is already the gin transport handler.
+type textEngine struct {
+	tp TextPhotoResolver
+}
+
+func (t textEngine) ResolveText(ctx context.Context, userID uuid.UUID, phrase string) (any, error) {
+	return t.tp.ResolveText(ctx, userID, phrase)
+}
+
+// TextEngine exposes the handler's text resolution for capture routing.
+func (h Handler) TextEngine() textEngine { return textEngine{tp: h.tp} }

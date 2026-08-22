@@ -41,7 +41,7 @@ import {
   useProfile,
   useResolveBarcode,
   useResolvePhoto,
-  useResolveText,
+  useCaptureMessage,
   useResolveVoice,
 } from "@/api/hooks";
 import { ApiError, AuthTokenError, NetworkError, ResponseParseError, TimeoutError } from "@/lib/api";
@@ -515,6 +515,8 @@ interface CaptureBodyProps {
    * thread while Otto works (kora#199).
    */
   sentPhrase: string | null;
+  /** Otto's reply when the message was a question, not food (kora#264). */
+  answer?: { text: string; agent?: string } | null;
   mealSlot: MealSlot;
   onChangeMealSlot: (slot: MealSlot) => void;
   onAdd: () => void;
@@ -569,6 +571,7 @@ export function CaptureBody({
   resolution,
   errorMsg,
   sentPhrase,
+  answer = null,
   mealSlot,
   onChangeMealSlot,
   onAdd,
@@ -635,7 +638,7 @@ export function CaptureBody({
           <Icon name="x" size={20} color={T.ink} />
         </PressableScale>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
-          <Icon name="camera" size={17} color={T.accent} />
+          <Icon name="sparkles" size={17} color={T.accent} />
           <AppText style={{ color: T.ink, fontWeight: "700" }}>Ask Otto</AppText>
         </View>
         {/* Balances the Close button on the left so the title stays centered
@@ -732,6 +735,10 @@ export function CaptureBody({
           />
         )}
 
+        {answer ? (
+          <OttoBubble agent={answer.agent}>{answer.text}</OttoBubble>
+        ) : null}
+
         {errorMsg ? <OttoBubble>{errorMsg}</OttoBubble> : null}
       </ScrollView>
 
@@ -823,7 +830,7 @@ export function CaptureBody({
               {mode === "voice" ? "Hold the mic to record" : "Point at a barcode"}
             </AppText>
           )}
-          {/* Send — resolves the typed phrase via useResolveText. */}
+          {/* Send — posts the typed phrase via useCaptureMessage. */}
           {showsTextField ? (
           <PressableScale
             accessibilityRole="button"
@@ -1021,7 +1028,7 @@ export default function CaptureScreen() {
   const queryClient = useQueryClient();
   const toast = useToast();
   const profile = useProfile();
-  const resolveText = useResolveText();
+  const captureMessage = useCaptureMessage();
   const resolvePhoto = useResolvePhoto();
   const resolveVoice = useResolveVoice();
   const resolveBarcode = useResolveBarcode();
@@ -1088,6 +1095,10 @@ export default function CaptureScreen() {
   // read `ai_text`.
   const [resolutionSource, setResolutionSource] = useState<ResolutionSource | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // Otto's reply when the message was a question rather than food. Separate
+  // from errorMsg because it is an ANSWER, not a failure, and it carries who
+  // answered it.
+  const [answer, setAnswer] = useState<{ text: string; agent?: string } | null>(null);
   const [mealSlot, setMealSlot] = useState<MealSlot>(() => mealSlotForHour(new Date().getHours()));
   const [adding, setAdding] = useState(false);
   // Candidate keys (see candidateKey) already logged successfully across
@@ -1200,6 +1211,7 @@ export default function CaptureScreen() {
   function handleCancelResolve() {
     // Cancel means "I've moved on" — the message goes with the request.
     setSentPhrase(null);
+    setAnswer(null);
     resolveControllerRef.current?.abort();
     // Do NOT reset scannedRef here — the abort above releases it through
     // handleBarcodeScanned's onError (see #136 part 1). Resetting it a
@@ -1229,7 +1241,7 @@ export default function CaptureScreen() {
 
   const displayStage: CaptureStage =
     !cancelledResolve &&
-    (resolveText.isPending || resolvePhoto.isPending || resolveVoice.isPending || resolveBarcode.isPending)
+    (captureMessage.isPending || resolvePhoto.isPending || resolveVoice.isPending || resolveBarcode.isPending)
       ? "analyzing"
       : stage;
 
@@ -1314,6 +1326,7 @@ export default function CaptureScreen() {
   // with a clean retry slate and no promotion leaking in from the last one.
   function applyResolution(data: Resolution, source: ResolutionSource) {
     setResolution(data);
+    setAnswer(null);
     setResolutionSource(source);
     setStage("result");
     setLoggedCandidateKeys(new Set());
@@ -1326,6 +1339,7 @@ export default function CaptureScreen() {
   function handleModeChange(next: CaptureMode) {
     // The bubble belongs to the thread being left behind.
     setSentPhrase(null);
+    setAnswer(null);
     // Switching away from Voice mid-recording must not leave the native
     // recorder running in the background — stop it (best-effort) and reset
     // the mic button back to its start state.
@@ -1351,6 +1365,7 @@ export default function CaptureScreen() {
     // own return key reaches this without going through that button.
     if (phrase.length < MIN_PHRASE_CHARS) return;
     setErrorMsg(null);
+    setAnswer(null);
     // Optimistic, and deliberately BEFORE the request: the message belongs in
     // the thread the instant it is sent, exactly as every messaging app
     // behaves. Clearing inside onSuccess (as this did) left the text sitting in
@@ -1361,13 +1376,25 @@ export default function CaptureScreen() {
     // not stay up covering the result thread once a send is in flight.
     Keyboard.dismiss();
     const controller = beginResolve();
-    resolveText.mutate({ input: phrase, signal: controller.signal }, {
+    // Not resolveText: the server decides what the message IS first. Posting
+    // straight to food resolution asked a model to name the foods in "help me
+    // build a meal plan", and it duly invented four and offered to log them
+    // (kora#264).
+    captureMessage.mutate({ input: phrase, signal: controller.signal }, {
       onSuccess: (data) => {
         // A cancel that lands between mutate() firing and this callback
         // means the user has already moved on — applying it now would
         // resurrect a result onto a screen that told them it was abandoned.
         if (controller.signal.aborted) return;
-        applyResolution(data, "ai_text");
+        if (data.kind === "answer") {
+          // Conversation, so nothing to confirm and nothing to log: the thread
+          // keeps the user's message and gains Otto's reply, and the screen
+          // goes back to idle rather than to the add-to-diary card.
+          setAnswer({ text: data.answer, agent: data.agent?.name });
+          setStage("idle");
+          return;
+        }
+        applyResolution(data.resolution, "ai_text");
         setResolvedPhrase(phrase);
       },
       onError: async (error) => {
@@ -1842,6 +1869,7 @@ export default function CaptureScreen() {
         resolution={effectiveResolution}
         errorMsg={errorMsg}
         sentPhrase={sentPhrase}
+        answer={answer}
         mealSlot={mealSlot}
         onChangeMealSlot={setMealSlot}
         onAdd={handleAddToDiary}

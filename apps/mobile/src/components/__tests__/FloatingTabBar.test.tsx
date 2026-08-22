@@ -7,7 +7,7 @@ import {
   FloatingTabBar,
   TAB_BAR_OCCUPIED_HEIGHT,
   TAB_BAR_SCROLL_INSET,
-  TAB_BAR_SCROLL_INSET_TIGHT,
+  TAB_BAR_SCROLL_INSET_TODAY,
 } from "@/components/FloatingTabBar";
 import { instrumentLight } from "@/theme/palette";
 
@@ -230,12 +230,12 @@ test("caps the 9px tab label's Dynamic Type growth and keeps it on one line", as
 // y=855 from the live accessibility tree on a 956pt screen.
 test("the exported scroll insets are derived from the dock's own geometry", () => {
   expect(TAB_BAR_OCCUPIED_HEIGHT).toBe(101);
-  // The clearances the four screens shipped with, preserved exactly — kora#280
-  // is an inert refactor, so these are the pre-existing 140 and 130.
   expect(TAB_BAR_SCROLL_INSET).toBe(TAB_BAR_OCCUPIED_HEIGHT + 39);
   expect(TAB_BAR_SCROLL_INSET).toBe(140);
-  expect(TAB_BAR_SCROLL_INSET_TIGHT).toBe(TAB_BAR_OCCUPIED_HEIGHT + 29);
-  expect(TAB_BAR_SCROLL_INSET_TIGHT).toBe(130);
+  // Today ends in a tappable row, so it clears the capture glow by more, not
+  // less — an overscroll bounce used to drag that row into the glow.
+  expect(TAB_BAR_SCROLL_INSET_TODAY).toBe(TAB_BAR_OCCUPIED_HEIGHT + 44);
+  expect(TAB_BAR_SCROLL_INSET_TODAY).toBe(145);
 });
 
 // The other half of the same guarantee: TAB_BAR_OCCUPIED_HEIGHT is only correct
@@ -250,4 +250,22 @@ test("the dock is positioned 24pt from the screen edge, not from the safe area",
   // side insets — a uniform frame inset is the reason it is not safe-area-driven.
   expect(root.left).toBe(24);
   expect(root.right).toBe(24);
+});
+
+// The fade only works if it reaches the screen edges and the bottom: inside the
+// root's 24pt frame it would leave content lit in three margins around it.
+test("the ground fade bleeds past the dock's frame inset and covers it", async () => {
+  const { getByTestId } = await render(<FloatingTabBar {...props} />);
+  const scrim = flattenStyle(getByTestId("dock-scrim").props.style);
+  expect(scrim.left).toBe(-24);
+  expect(scrim.right).toBe(-24);
+  expect(scrim.bottom).toBe(-24);
+  // The fade starts at the shortest resting line, so no screen's content is
+  // dimmed where it stops, and reaches full ground above the dock's own top —
+  // the capture glow blooms past that edge, and a bounce pushes content into it.
+  expect(scrim.height).toBe(TAB_BAR_SCROLL_INSET);
+  expect(TAB_BAR_SCROLL_INSET_TODAY).toBeGreaterThan(TAB_BAR_SCROLL_INSET);
+  const scrimProps = getByTestId("dock-scrim").props;
+  const groundAt = Number(scrim.height) - scrimProps.locations[1] * Number(scrim.height);
+  expect(groundAt).toBeGreaterThan(TAB_BAR_OCCUPIED_HEIGHT);
 });

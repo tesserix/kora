@@ -16,6 +16,9 @@ import (
 // Handler exposes the coach's nudges and Q&A endpoints over Service.
 type Handler struct {
 	svc *Service
+	// food is optional: set via WithFoodResolver so the capture composer can
+	// dispatch a food log without this package importing package resolve.
+	food FoodResolver
 }
 
 // NewHandler builds a Handler over svc.

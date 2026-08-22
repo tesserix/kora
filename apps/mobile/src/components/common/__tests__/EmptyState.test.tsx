@@ -24,4 +24,17 @@ describe("EmptyState", () => {
     fireEvent.press(screen.getByRole("button", { name: "Log weight" }));
     expect(onPress).toHaveBeenCalledTimes(1);
   });
+
+  // Today's empty state sits directly above the dock's camera button, so it
+  // opts out of the icon tile rather than showing a second camera glyph.
+  it("omits the icon tile when no icon is given", async () => {
+    await render(<EmptyState title="No meals logged yet" subtitle="Point the camera at your first meal." />);
+    expect(screen.queryByTestId("empty-state-icon")).toBeNull();
+    expect(screen.getByText("No meals logged yet")).toBeTruthy();
+  });
+
+  it("renders the icon tile when an icon is given", async () => {
+    await render(<EmptyState icon="camera" title="No meals yet" subtitle="Tap to log." />);
+    expect(screen.getByTestId("empty-state-icon")).toBeTruthy();
+  });
 });

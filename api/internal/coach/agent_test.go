@@ -60,7 +60,10 @@ func TestAsk_PrefersTheRegisteredAgentOverTheProvider(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "You have 55g protein to go.", a.Text, "the agent's answer must be the one returned")
 	require.Equal(t, 1, runner.calls)
-	require.Equal(t, 0, provider.calls, "the provider must not be called when the agent answered")
+	// One provider call, and it is the intent classifier — never the answer.
+	// The agent path still owes the user its own text, which is what a.Text
+	// asserts above.
+	require.Equal(t, 1, provider.calls, "the provider is called to route, not to answer")
 	require.Equal(t, guidanceSkill, runner.skill, "Kora routes on a skill, never on an agent name")
 	require.Contains(t, runner.prompt, "QUESTION: how's my protein?", "the agent must receive the grounded prompt")
 	require.Contains(t, runner.prompt, "CONTEXT:")
@@ -105,7 +108,8 @@ func TestAsk_FallsBackToTheProviderWhenTheAgentFails(t *testing.T) {
 
 	require.NoError(t, err, "a failed agent must not cost the user an answer the provider can still give")
 	require.Equal(t, "from the provider", a.Text)
-	require.Equal(t, 1, provider.calls)
+	// Two: one to route, one to answer once the agent failed.
+	require.Equal(t, 2, provider.calls)
 	require.Len(t, meter.records, 2, "both the failed run and the fallback call must be metered")
 	require.Equal(t, ai.OutcomeError, meter.records[0].Outcome)
 	require.Equal(t, ai.OutcomeOK, meter.records[1].Outcome)
@@ -181,5 +185,81 @@ func TestAsk_ProviderFallbackIsNotAttributedToAnAgent(t *testing.T) {
 	require.Equal(t, "from the provider", a.Text)
 	require.Empty(t, a.By.Agent)
 	require.Empty(t, a.By.Skill)
+	_ = db
+}
+
+// TestAsk_RoutesAPlanRequestToThePlanningCapability is the regression for the
+// bug this routing exists to kill: "create a meal plan for next week" was sent
+// to food identification and came back as four items to confirm and log, as
+// though the user had eaten a plan they had asked to be written.
+//
+// Kora names the capability, never the agent — the registry's Meal Planner
+// card declares plan-meals today, and replacing it must not need a deploy.
+func TestAsk_RoutesAPlanRequestToThePlanningCapability(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	g, meter := askFixture(t)
+
+	// The classifier is a provider call; this stub answers it with "plan".
+	provider := &fakeProvider{text: "plan"}
+	runner := &fakeRunner{run: agents.Run{
+		Agent:       "meal-planner",
+		DisplayName: "Kora Meal Planner",
+		State:       "completed",
+		Text:        "Here is a seven-day plan.",
+	}}
+	svc := NewService(g, provider, meter, nil).WithAgents(runner)
+
+	a, err := svc.Ask(context.Background(), userID, time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC), time.UTC,
+		"can you create a proper meal plan for the next 1 week to help me reduce my fat")
+
+	require.NoError(t, err)
+	require.Equal(t, planningSkill, runner.skill, "a plan request must route to the planning capability")
+	require.Equal(t, "Kora Meal Planner", a.By.Agent, "the user is told which agent answered")
+	require.Equal(t, planningSkill, a.By.Skill)
+	_ = db
+}
+
+// The complement: an ordinary question must NOT be handed to the planner.
+func TestAsk_RoutesAPlainQuestionToGuidance(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	g, meter := askFixture(t)
+
+	provider := &fakeProvider{text: "ask"}
+	runner := &fakeRunner{run: agents.Run{
+		Agent:       "nutrition-coach",
+		DisplayName: "Kora Nutrition Coach",
+		State:       "completed",
+		Text:        "You have 55g to go.",
+	}}
+	svc := NewService(g, provider, meter, nil).WithAgents(runner)
+
+	_, err := svc.Ask(context.Background(), userID, time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC), time.UTC, "is brown rice better than white?")
+
+	require.NoError(t, err)
+	require.Equal(t, guidanceSkill, runner.skill)
+	_ = db
+}
+
+// A classifier that fails must still produce an answer, routed to guidance.
+func TestAsk_ClassifierFailureFallsBackToGuidance(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	g, meter := askFixture(t)
+
+	runner := &fakeRunner{run: agents.Run{
+		Agent:       "nutrition-coach",
+		DisplayName: "Kora Nutrition Coach",
+		State:       "completed",
+		Text:        "Still answered.",
+	}}
+	svc := NewService(g, &errorProvider{}, meter, nil).WithAgents(runner)
+
+	a, err := svc.Ask(context.Background(), userID, time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC), time.UTC, "plan my week")
+
+	require.NoError(t, err, "a routing failure must not cost the user an answer")
+	require.Equal(t, guidanceSkill, runner.skill)
+	require.Equal(t, "Still answered.", a.Text)
 	_ = db
 }
