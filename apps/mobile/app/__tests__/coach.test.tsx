@@ -16,13 +16,15 @@ jest.mock("expo-router", () => ({
 }));
 jest.mock("@/api/hooks", () => ({
   useAIUsage: () => mockAIUsage(),
+  useAIPacks: () => mockAIPacks(),
   useCoachNudges: () => mockNudges(),
   useCoachThread: () => mockThread(),
   useCoachAsk: () => mockAsk(),
 }));
 jest.mock("@/offline/connectivity", () => ({ useIsOnline: () => mockOnline() }));
 
-const mockAIUsage = jest.fn(() => ({ data: undefined }));
+const mockAIUsage = jest.fn();
+const mockAIPacks = jest.fn();
 
 const nudgeData = {
   nudges: [{ kind: "protein", title: "Protein", text: "142 / 160g — 18g to go" }],
@@ -47,6 +49,7 @@ beforeEach(() => {
   mockAskMutate.mockReset();
   mockOnline.mockReturnValue(true);
   mockAIUsage.mockReturnValue({ data: undefined });
+  mockAIPacks.mockReturnValue({ data: [{ code: "spark" }] });
   (router.push as jest.Mock).mockClear();
   mockNudges.mockReturnValue({ data: nudgeData, isLoading: false, isError: false, refetch: mockNudgesRefetch });
   mockThread.mockReturnValue({ data: threadData, isLoading: false, isError: false, refetch: mockThreadRefetch });
@@ -251,6 +254,21 @@ test("a spent allowance offers a top-up next to the reply that says so", async (
 });
 
 test("a healthy allowance says nothing about paying", async () => {
+  const { queryByLabelText } = await render(<CoachScreen />);
+
+  expect(queryByLabelText("Add requests")).toBeNull();
+});
+
+test("nothing to sell means no top-up offer, even out of requests", async () => {
+  mockAIUsage.mockReturnValue({
+    data: {
+      daily: { used: 20, limit: 20, remaining: 0, resets_at: "2026-08-23T00:00:00Z" },
+      weekly: { used: 20, limit: 100, remaining: 80, resets_at: "2026-08-24T00:00:00Z" },
+      monthly: { used: 20, limit: 300, remaining: 280, resets_at: "2026-09-01T00:00:00Z" },
+    },
+  });
+  mockAIPacks.mockReturnValue({ data: [] });
+
   const { queryByLabelText } = await render(<CoachScreen />);
 
   expect(queryByLabelText("Add requests")).toBeNull();

@@ -3,6 +3,7 @@ import { fireEvent, render } from "@testing-library/react-native";
 import AIUsageScreen from "../ai-usage";
 
 const mockUseAIUsage = jest.fn();
+const mockUseAIPacks = jest.fn();
 const mockRefetch = jest.fn();
 
 const mockPush = jest.fn();
@@ -10,7 +11,7 @@ const mockPush = jest.fn();
 jest.mock("expo-router", () => ({
   router: { back: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => true), push: (...args: unknown[]) => mockPush(...args) },
 }));
-jest.mock("@/api/hooks", () => ({ useAIUsage: () => mockUseAIUsage() }));
+jest.mock("@/api/hooks", () => ({ useAIUsage: () => mockUseAIUsage(), useAIPacks: () => mockUseAIPacks() }));
 
 const usage = {
   daily: { used: 3, limit: 20, remaining: 17, resets_at: "2026-08-20T00:00:00Z" },
@@ -21,6 +22,7 @@ const usage = {
 beforeEach(() => {
   mockPush.mockClear();
   mockRefetch.mockClear();
+  mockUseAIPacks.mockReturnValue({ data: [{ code: "spark" }] });
   mockUseAIUsage.mockReturnValue({ data: usage, isLoading: false, isError: false, refetch: mockRefetch });
 });
 
@@ -112,4 +114,14 @@ test("an unlimited pack reports unlimited rather than a count", async () => {
 
   expect(getByText("Unlimited")).toBeTruthy();
   expect(getByText("No daily cap")).toBeTruthy();
+});
+
+// Payments are not mounted everywhere. Where they are not, the screen must
+// not offer a purchase that would dead-end.
+test("no purchasable packs means no offer to buy", async () => {
+  mockUseAIPacks.mockReturnValue({ data: undefined });
+
+  const { queryByLabelText } = await render(<AIUsageScreen />);
+
+  expect(queryByLabelText("Add requests")).toBeNull();
 });

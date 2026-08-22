@@ -3,7 +3,7 @@ import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, View } f
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import type { MentorCommitmentProposal } from "@/api/types";
-import { useAIUsage, useCoachAsk, useCoachNudges, useCoachThread } from "@/api/hooks";
+import { useAIPacks, useAIUsage, useCoachAsk, useCoachNudges, useCoachThread } from "@/api/hooks";
 import { aiAllowance } from "@/api/aiUsage";
 import { AppBackground } from "@/components/AppBackground";
 import { ScreenHeader } from "@/components/ScreenHeader";
@@ -70,7 +70,8 @@ export default function CoachScreen() {
   // Otto still answers when the allowance is gone — it just answers that it
   // cannot. The offer to top up belongs next to that reply, not three screens
   // away in More.
-  const outOfRequests = usage.data ? aiAllowance(usage.data).blocked : false;
+  const packs = useAIPacks();
+  const outOfRequests = (usage.data ? aiAllowance(usage.data).blocked : false) && (packs.data?.length ?? 0) > 0;
   const ask = useCoachAsk();
   const [input, setInput] = useState("");
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);

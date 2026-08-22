@@ -1,7 +1,7 @@
 import { ActivityIndicator, ScrollView, StyleSheet, View } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useAIUsage } from "@/api/hooks";
+import { useAIPacks, useAIUsage } from "@/api/hooks";
 import { aiAllowance } from "@/api/aiUsage";
 import type { AIQuotaWindow, AITopUpStatus, AIUsageStatus } from "@/api/types";
 import { AppBackground } from "@/components/AppBackground";
@@ -110,6 +110,11 @@ export default function AIUsageScreen() {
   const usage = useAIUsage();
   const blocked = usage.data ? aiAllowance(usage.data).blocked : false;
   const topUp = usage.data?.top_up?.active ? usage.data.top_up : null;
+  // Payments mount only where Cashfree is configured, so this answers 404 in
+  // an environment without it. Offering to sell something that cannot be
+  // bought is worse than not offering it.
+  const packs = useAIPacks();
+  const canBuy = (packs.data?.length ?? 0) > 0;
 
   return (
     <View style={{ flex: 1, backgroundColor: instrument.bg }}>
@@ -148,29 +153,31 @@ export default function AIUsageScreen() {
                     <TopUpRow topUp={topUp} />
                   </>
                 ) : null}
-                <WellFooter testID="ai-usage-footer">
-                  <AppText style={{ flex: 1, color: instrument.mut, fontSize: 12 }}>
-                    {blocked ? "Out of requests" : "Need more than the free allowance?"}
-                  </AppText>
-                  <PressableScale
-                    accessibilityRole="button"
-                    accessibilityLabel="Add requests"
-                    onPress={() => router.push("/ai-top-up")}
-                    style={{
-                      minHeight: 44,
-                      justifyContent: "center",
-                      paddingHorizontal: spacing.lg,
-                      borderRadius: 14,
-                      backgroundColor: blocked ? instrument.accent : "transparent",
-                    }}
-                  >
-                    <AppText
-                      style={{ color: blocked ? instrument.accentOn : instrument.accent, fontWeight: "700" }}
-                    >
-                      Add requests
+                {canBuy ? (
+                  <WellFooter testID="ai-usage-footer">
+                    <AppText style={{ flex: 1, color: instrument.mut, fontSize: 12 }}>
+                      {blocked ? "Out of requests" : "Need more than the free allowance?"}
                     </AppText>
-                  </PressableScale>
-                </WellFooter>
+                    <PressableScale
+                      accessibilityRole="button"
+                      accessibilityLabel="Add requests"
+                      onPress={() => router.push("/ai-top-up")}
+                      style={{
+                        minHeight: 44,
+                        justifyContent: "center",
+                        paddingHorizontal: spacing.lg,
+                        borderRadius: 14,
+                        backgroundColor: blocked ? instrument.accent : "transparent",
+                      }}
+                    >
+                      <AppText
+                        style={{ color: blocked ? instrument.accentOn : instrument.accent, fontWeight: "700" }}
+                      >
+                        Add requests
+                      </AppText>
+                    </PressableScale>
+                  </WellFooter>
+                ) : null}
               </>
             )}
           </BezelCluster>
