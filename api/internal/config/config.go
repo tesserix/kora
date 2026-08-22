@@ -85,6 +85,10 @@ type Config struct {
 	// CashfreeReturnURL is the deep link the hosted checkout sends the user
 	// back to. The result carried on that URL is never trusted; it only closes
 	// the browser and prompts the app to ask the gateway what happened.
+	//
+	// The scheme is the MOBILE APP's (`mobile://`, apps/mobile/app.json), not
+	// the product name: a link the app has not registered opens nothing at
+	// all, stranding the user in a browser after they have paid.
 	CashfreeReturnURL string
 }
 
@@ -125,7 +129,7 @@ func Load() (Config, error) {
 		CashfreeAppID:            os.Getenv("CASHFREE_APP_ID"),
 		CashfreeSecretKey:        os.Getenv("CASHFREE_SECRET_KEY"),
 		CashfreeSandbox:          os.Getenv("CASHFREE_SANDBOX") == "true",
-		CashfreeReturnURL:        getenv("CASHFREE_RETURN_URL", "kora://billing/return"),
+		CashfreeReturnURL:        getenv("CASHFREE_RETURN_URL", "mobile://billing/return"),
 	}
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("config: DATABASE_URL is required")

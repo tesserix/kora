@@ -403,3 +403,29 @@ func TestLoadReadsTheRegistryDeployKey(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "deploy-key", cfg.AIRegistryAPIKey)
 }
+
+// The checkout return link must use the scheme the mobile app actually
+// registers (apps/mobile/app.json), or a paid user is left in a browser the
+// app never reopens.
+func TestCashfreeReturnURLDefaultsToTheAppsOwnScheme(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
+	t.Setenv("CASHFREE_RETURN_URL", "")
+
+	cfg, err := Load()
+
+	require.NoError(t, err)
+	assert.Equal(t, "mobile://billing/return", cfg.CashfreeReturnURL)
+}
+
+// Half a credential set mounts a checkout that can take money and then fail
+// to grant anything, so it is a startup error rather than a degraded mode.
+func TestCashfreeCredentialsMustBeSetTogether(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
+	t.Setenv("CASHFREE_APP_ID", "app-id")
+	t.Setenv("CASHFREE_SECRET_KEY", "")
+
+	_, err := Load()
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "CASHFREE_SECRET_KEY")
+}
