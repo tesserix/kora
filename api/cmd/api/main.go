@@ -37,6 +37,7 @@ import (
 	"github.com/tesserix/kora/api/internal/metrics"
 	"github.com/tesserix/kora/api/internal/notifications"
 	"github.com/tesserix/kora/api/internal/nutrition"
+	"github.com/tesserix/kora/api/internal/nutrition/refresh"
 	"github.com/tesserix/kora/api/internal/push"
 	"github.com/tesserix/kora/api/internal/resolve"
 	"github.com/tesserix/kora/api/internal/scheduler"
@@ -98,6 +99,20 @@ func main() {
 		sched := scheduler.New(challengesRepo, challengesSvc, notifSvc, loc, cfg.SchedulerInterval, logger)
 		go sched.Run(schedCtx)
 		logger.Info("scheduler started", "interval", cfg.SchedulerInterval.String(), "loc", loc.String())
+	}
+
+	if cfg.FoodRefreshEvery > 0 {
+		foodRefresh := refresh.Runner{
+			DB:        db,
+			Repo:      nutrition.NewRepository(db),
+			Client:    refresh.NewClient(),
+			Countries: refresh.DefaultCountries(),
+			Every:     cfg.FoodRefreshEvery,
+			Check:     time.Hour,
+			Log:       logger,
+		}
+		go foodRefresh.Run(schedCtx)
+		logger.Info("food refresh started", "every", cfg.FoodRefreshEvery.String())
 	}
 
 	pushCtx, pushCancel := context.WithCancel(context.Background())

@@ -43,10 +43,14 @@ type Config struct {
 	// package default.
 	AIRegistryTTL     time.Duration
 	SchedulerInterval time.Duration
-	PushEnabled       bool
-	PushInterval      time.Duration
-	PushFreshness     time.Duration
-	ExpoAccessToken   string
+	// FoodRefreshEvery is the cadence of the OpenFoodFacts delta refresh
+	// (internal/nutrition/refresh). 0 disables it. The hourly due-check is
+	// fixed; this is how often work actually happens.
+	FoodRefreshEvery time.Duration
+	PushEnabled      bool
+	PushInterval     time.Duration
+	PushFreshness    time.Duration
+	ExpoAccessToken  string
 	// FoodIndexRefreshInterval is how often the food-index completeness gauges
 	// are re-read from the database. The value only changes when the embed job
 	// runs, so this is deliberately slow. 0 disables the refresher.
@@ -95,6 +99,7 @@ func Load() (Config, error) {
 		AIRegistryAPIKey:         os.Getenv("AI_REGISTRY_API_KEY"),
 		AIRegistryTTL:            getdur("AI_REGISTRY_TTL", 0),
 		SchedulerInterval:        getdur("SCHEDULER_INTERVAL", 5*time.Minute),
+		FoodRefreshEvery:         getdur("FOOD_REFRESH_EVERY", 7*24*time.Hour),
 		PushEnabled:              os.Getenv("PUSH_ENABLED") == "true",
 		PushInterval:             getdur("PUSH_INTERVAL", 30*time.Second),
 		PushFreshness:            getdur("PUSH_FRESHNESS", 15*time.Minute),
