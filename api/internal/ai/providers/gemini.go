@@ -98,14 +98,16 @@ const bodyCompositionSystemPrompt = "You read a smart body-composition " +
 	"below before answering, and fill in every value you can actually " +
 	"see, in the same pass. Under-reporting a value that IS shown is as " +
 	"wrong as fabricating one that is not: both lose real information. " +
-	"That said, for any field you cannot see stated on screen, OMIT it " +
-	"entirely — do not guess, do not estimate, and NEVER compute a value " +
-	"from other values. Do not compute BMI from weight and height. Do not " +
-	"compute a fat-free or lean mass from weight and body fat percentage. " +
-	"A value you calculate rather than read is worse than no value at " +
-	"all — so the rule is report everything shown, never infer anything " +
+	"That said, for any field you cannot see stated on screen, answer " +
+	"null for it — do not guess, do not estimate, and NEVER compute a " +
+	"value from other values. Do not compute BMI from weight and height. " +
+	"Do not compute a fat-free or lean mass from weight and body fat " +
+	"percentage. A value you calculate rather than read is worse than " +
+	"null — so the rule is report everything shown, never infer anything " +
 	"unshown; these two rules do not conflict, because inference is not " +
-	"reading. " +
+	"reading. Every field below is REQUIRED in your JSON response, but " +
+	"its value may be null — answer null rather than leaving a field out " +
+	"of the response entirely. " +
 	"Report weight in kilograms as weight_kg — convert from pounds if the " +
 	"screen shows pounds (1 lb = 0.453592 kg); that is unit conversion of " +
 	"a single displayed number, not inference of a new fact, so it is " +
@@ -117,17 +119,28 @@ const bodyCompositionSystemPrompt = "You read a smart body-composition " +
 	"RATING, not a percentage: report it even when the screen shows no " +
 	"percent sign, and never treat it as one. skeletal_muscle_pct and " +
 	"muscle_mass_kg are TWO DIFFERENT quantities, not the same number in " +
-	"two units — some apps show both. Report each ONLY if its own value " +
-	"is shown; never derive one from the other. bone_mass_kg is bone MASS " +
-	"in kilograms as the scale reports it — this is NOT bone density, a " +
-	"T-score, or a BMD number. If the screen shows only a density or " +
-	"T-score, leave bone_mass_kg unset. body_water_pct and protein_pct are " +
-	"percentages as shown. scale_bmr_kcal is the scale's own estimated " +
-	"basal metabolic rate in kilocalories, if shown. reading_date is the " +
-	"calendar date the screenshot itself displays for this reading — " +
-	"scale apps almost always show one. Report it as YYYY-MM-DD. Omit it " +
-	"if no date is legible on screen, and NEVER use today's date or any " +
-	"date that is not actually printed on the screen. Do NOT report BMI, " +
+	"two units — some apps show both, and some (Omron included) show " +
+	"ONLY a skeletal-muscle kg figure and never a total-muscle one. " +
+	"muscle_mass_kg means TOTAL muscle mass specifically: if the only kg " +
+	"figure on screen is labelled skeletal muscle, that is NOT " +
+	"muscle_mass_kg — leave muscle_mass_kg null in that case, even though " +
+	"a muscle-shaped kg number is visible. Never derive one field from " +
+	"the other. bone_mass_kg is bone MASS in kilograms as the scale " +
+	"reports it — this is NOT bone density, a T-score, or a BMD number. " +
+	"If the screen shows only a density or T-score, answer null for " +
+	"bone_mass_kg. body_water_pct and protein_pct are percentages as " +
+	"shown. scale_bmr_kcal is the scale's own estimated basal metabolic " +
+	"rate in kilocalories, if shown. reading_date_text is the date TEXT " +
+	"EXACTLY AS PRINTED for this reading — copy it verbatim, character " +
+	"for character (\"22/08\", \"Sat, 22/08\", \"2026-08-22\", whatever " +
+	"the screen actually shows). Do NOT reformat it, do NOT add a year " +
+	"that is not printed, and do NOT compute or guess a year — a " +
+	"separate step resolves this text to a calendar date, so your ONLY " +
+	"job is transcription. Look for it not only as a dedicated date " +
+	"label, but also as a timestamp, a day/date line under a metric " +
+	"name, or a history-chart axis entry for the displayed reading, " +
+	"before concluding none is shown. Answer null ONLY if no date for " +
+	"this reading appears anywhere on screen. Do NOT report BMI, " +
 	"fat-free mass, lean mass, fat mass in kilograms, metabolic age, or " +
 	"any qualitative band or label such as \"Average\", \"Low\", \"High\", " +
 	"or \"Excellent\" — these are derived or vendor opinion, not " +
@@ -250,19 +263,37 @@ func ingredientResponseSchema() *genai.Schema {
 }
 
 // bodyCompositionResponseSchema builds the JSON schema for a body-composition
-// read. Unlike guessResponseSchema and ingredientResponseSchema, this
-// schema has NO Required list — every field must be independently
-// omittable, because "not shown on this scale's screen" is the expected
-// case for most fields on any given reading (a Renpho screen and a Tanita
-// screen legibly show different subsets). A Required list here would force
-// the model to invent a value for a field the screen never displayed,
-// which is exactly the fabrication the system prompt spends most of its
-// words forbidding — this is that same rule enforced at the schema layer,
-// not just the prompt layer.
+// read.
+//
+// EVERY property is in Required AND Nullable — this is deliberately the
+// OPPOSITE of this function's original shape (no Required list at all,
+// on the theory that an unlisted field lets the model omit whatever it
+// can't read without being forced to invent a value). That theory was
+// WRONG and measured wrong: with nothing required, a valid response can
+// legally contain just one property, so the model has no schema-level
+// obligation to report anything beyond the single field it is most
+// confident about — and it usually didn't. Measured against Vertex AI on
+// real fixtures, that shape returned only weight_kg on the large majority
+// of calls. Required+Nullable is how Structured Outputs actually expresses
+// "optional" (mirrors bodyCompositionJSONSchema's identical reasoning in
+// openai.go, which had this right from the start): every key MUST appear,
+// but its value may be JSON null, which decodes to the exact same nil
+// pointer an omitted key would have produced — so "not legible on this
+// screen" still reaches ai.BodyCompositionReading as nil either way, and
+// the never-infer rule (reported in the prompt, enforced by giving the
+// model nothing to compute a number FROM in the first place) is untouched.
+// Verified against Vertex AI on the same two real fixtures: full legible
+// field-set recovery on every one of several consecutive runs, versus
+// weight-only on nearly every run under the old no-Required shape.
 func bodyCompositionResponseSchema() *genai.Schema {
 	return &genai.Schema{
 		Type:       genai.TypeObject,
 		Properties: bodyCompositionSchemaProperties(),
+		Required: []string{
+			"weight_kg", "body_fat_pct", "subcutaneous_fat_pct", "visceral_fat_rating",
+			"skeletal_muscle_pct", "muscle_mass_kg", "body_water_pct", "protein_pct",
+			"bone_mass_kg", "scale_bmr_kcal", "reading_date_text",
+		},
 	}
 }
 
@@ -273,72 +304,100 @@ func bodyCompositionResponseSchema() *genai.Schema {
 // consults the schema alongside the prompt, so the same rule stated twice,
 // in two places it actually looks, is more reliable than stating it once at
 // prompt length. Keep these in sync with bodyCompositionSystemPrompt's prose
-// if either changes.
+// if either changes. Every property is Nullable — required-but-nullable,
+// not omittable, is how "optional" is expressed here; see
+// bodyCompositionResponseSchema's doc comment for why.
 func bodyCompositionSchemaProperties() map[string]*genai.Schema {
 	return map[string]*genai.Schema{
 		"weight_kg": {
-			Type: genai.TypeNumber,
+			Type:     genai.TypeNumber,
+			Nullable: genai.Ptr(true),
 			Description: "Body weight in kilograms, as displayed. Convert " +
 				"from pounds if the screen shows lb (1 lb = 0.453592 kg) — " +
 				"that is unit conversion of the one displayed number, not " +
-				"inference.",
+				"inference. null if not legible.",
 		},
 		"body_fat_pct": {
-			Type: genai.TypeNumber,
+			Type:     genai.TypeNumber,
+			Nullable: genai.Ptr(true),
 			Description: "Body fat PERCENTAGE only. If the screen also " +
 				"shows a fat mass in kilograms, ignore that number — report " +
-				"only the percentage here.",
+				"only the percentage here. null if not legible.",
 		},
 		"subcutaneous_fat_pct": {
 			Type:        genai.TypeNumber,
-			Description: "Subcutaneous fat percentage, if the screen labels one separately from body_fat_pct.",
+			Nullable:    genai.Ptr(true),
+			Description: "Subcutaneous fat percentage, if the screen labels one separately from body_fat_pct. null if not shown.",
 		},
 		"visceral_fat_rating": {
-			Type: genai.TypeNumber,
+			Type:     genai.TypeNumber,
+			Nullable: genai.Ptr(true),
 			Description: "The scale's own visceral fat RATING exactly as " +
 				"displayed — usually a small bare number like 7, or a value " +
 				"on a 1-59 scale. This is a vendor rating, not a percentage: " +
 				"report it even with no percent sign shown, and never treat " +
-				"it as one.",
+				"it as one. null if not legible.",
 		},
 		"skeletal_muscle_pct": {
-			Type: genai.TypeNumber,
+			Type:     genai.TypeNumber,
+			Nullable: genai.Ptr(true),
 			Description: "Skeletal muscle PERCENTAGE. Distinct from " +
 				"muscle_mass_kg — some scales show both; report each only " +
 				"if its own value is on screen, never derive one from the " +
-				"other.",
+				"other. null if not legible.",
 		},
 		"muscle_mass_kg": {
-			Type: genai.TypeNumber,
-			Description: "Muscle mass in kilograms, ONLY if the screen " +
-				"itself labels a value as muscle mass (not skeletal " +
-				"muscle). A kg figure labelled skeletal muscle mass is a " +
-				"different quantity and must NOT be reported here.",
+			Type:     genai.TypeNumber,
+			Nullable: genai.Ptr(true),
+			Description: "Muscle mass in kilograms — return this ONLY if " +
+				"the screen labels a value as TOTAL muscle mass. A kg " +
+				"figure labelled SKELETAL muscle mass is a DIFFERENT, " +
+				"SMALLER quantity (skeletal muscle is a subset of total " +
+				"muscle) and reporting it here is a measurement error, not " +
+				"a stylistic choice — many scale apps (Omron included) " +
+				"show only a skeletal-muscle kg figure and never a total- " +
+				"muscle one; on those screens this field MUST be null, " +
+				"even though a muscle-shaped kg number is visible.",
 		},
 		"body_water_pct": {
 			Type:        genai.TypeNumber,
-			Description: "Body water percentage, as displayed.",
+			Nullable:    genai.Ptr(true),
+			Description: "Body water percentage, as displayed. null if not shown.",
 		},
 		"protein_pct": {
 			Type:        genai.TypeNumber,
-			Description: "Protein percentage, as displayed.",
+			Nullable:    genai.Ptr(true),
+			Description: "Protein percentage, as displayed. null if not shown.",
 		},
 		"bone_mass_kg": {
-			Type: genai.TypeNumber,
+			Type:     genai.TypeNumber,
+			Nullable: genai.Ptr(true),
 			Description: "Bone MASS in kilograms as the scale reports it — " +
-				"NOT bone density, a T-score, or a BMD number. If the " +
-				"screen shows only a density or T-score, leave this unset.",
+				"NOT bone density, a T-score, or a BMD number. null if the " +
+				"screen shows only a density or T-score, or shows nothing.",
 		},
 		"scale_bmr_kcal": {
 			Type:        genai.TypeNumber,
-			Description: "The scale's own estimated basal metabolic rate in kilocalories, if shown.",
+			Nullable:    genai.Ptr(true),
+			Description: "The scale's own estimated basal metabolic rate in kilocalories, if shown, else null.",
 		},
-		"reading_date": {
-			Type: genai.TypeString,
-			Description: "The calendar date the SCREENSHOT ITSELF displays " +
-				"for this reading, as YYYY-MM-DD. Omit if no date is " +
-				"legible on screen; NEVER use today's date or any date not " +
-				"actually printed on the screen.",
+		"reading_date_text": {
+			Type:     genai.TypeString,
+			Nullable: genai.Ptr(true),
+			Description: "The date text EXACTLY AS PRINTED on screen for " +
+				"this reading — copy it verbatim, character for " +
+				"character: \"22/08\", \"Sat, 22/08\", \"2026-08-22\", " +
+				"whatever the screen actually shows. Do NOT reformat it to " +
+				"YYYY-MM-DD, do NOT add a year that is not printed, and do " +
+				"NOT compute or guess a year — a separate, non-model step " +
+				"resolves this text to a calendar date. Scale-app screens " +
+				"usually print this SOMEWHERE near the headline weight or " +
+				"measurement list — not only as a dedicated 'date' label, " +
+				"but also as a timestamp, a day-of-week/date line under a " +
+				"metric name, or a history-chart axis entry for the " +
+				"displayed reading; check all of those before concluding " +
+				"no date is shown. null ONLY if no date for THIS reading " +
+				"appears anywhere on screen.",
 		},
 	}
 }
@@ -346,7 +405,7 @@ func bodyCompositionSchemaProperties() map[string]*genai.Schema {
 // IdentifyText identifies foods from a free-text phrase using Flash-Lite.
 func (p GeminiProvider) IdentifyText(ctx context.Context, phrase string) ([]ai.Guess, ai.Usage, error) {
 	data, usage, err := p.generateJSON(ctx, modelFlashLite, callTypeIdentifyText,
-		identifySystemPrompt, []*genai.Part{genai.NewPartFromText(phrase)}, guessResponseSchema(), nil)
+		identifySystemPrompt, []*genai.Part{genai.NewPartFromText(phrase)}, guessResponseSchema())
 	if err != nil {
 		return nil, usage, err
 	}
@@ -360,7 +419,7 @@ func (p GeminiProvider) IdentifyText(ctx context.Context, phrase string) ([]ai.G
 // IdentifyPhoto identifies foods from a photo using Flash (multimodal).
 func (p GeminiProvider) IdentifyPhoto(ctx context.Context, image []byte, mime string) ([]ai.Guess, ai.Usage, error) {
 	data, usage, err := p.generateJSON(ctx, modelFlash, callTypeIdentifyPhoto,
-		identifySystemPrompt, []*genai.Part{genai.NewPartFromBytes(image, mime)}, guessResponseSchema(), nil)
+		identifySystemPrompt, []*genai.Part{genai.NewPartFromBytes(image, mime)}, guessResponseSchema())
 	if err != nil {
 		return nil, usage, err
 	}
@@ -376,10 +435,18 @@ func (p GeminiProvider) IdentifyPhoto(ctx context.Context, image []byte, mime st
 // bodyCompositionSystemPrompt and bodyCompositionResponseSchema for the two
 // independent layers (prompt + schema) that together forbid a computed or
 // vendor-opinion value from ever reaching ai.BodyCompositionReading.
+//
+// Passes no temperature — same as every other generateJSON caller. An
+// earlier version of this fix pinned temperature to 0 on the theory that a
+// transcription task wants near-deterministic sampling; that was never the
+// actual cause of kora#314's under-reads (see bodyCompositionResponseSchema's
+// doc comment for the real one — an unconstrained schema, not sampling) and
+// temperature 0 measured no better than default sampling once the schema
+// was fixed, so the special case was removed rather than left in as
+// unjustified configuration.
 func (p GeminiProvider) IdentifyBodyComposition(ctx context.Context, image []byte, mime string) (ai.BodyCompositionReading, ai.Usage, error) {
-	temperature := bodyCompositionTemperature
 	data, usage, err := p.generateJSON(ctx, modelFlash, callTypeIdentifyBodyComposition,
-		bodyCompositionSystemPrompt, []*genai.Part{genai.NewPartFromBytes(image, mime)}, bodyCompositionResponseSchema(), &temperature)
+		bodyCompositionSystemPrompt, []*genai.Part{genai.NewPartFromBytes(image, mime)}, bodyCompositionResponseSchema())
 	if err != nil {
 		return ai.BodyCompositionReading{}, usage, err
 	}
@@ -394,7 +461,7 @@ func (p GeminiProvider) IdentifyBodyComposition(ctx context.Context, image []byt
 func (p GeminiProvider) Decompose(ctx context.Context, dish string) ([]ai.IngredientGuess, ai.Usage, error) {
 	prompt := fmt.Sprintf(decomposeSystemPromptTmpl, dish)
 	data, usage, err := p.generateJSON(ctx, modelFlashLite, callTypeDecompose,
-		prompt, []*genai.Part{genai.NewPartFromText(dish)}, ingredientResponseSchema(), nil)
+		prompt, []*genai.Part{genai.NewPartFromText(dish)}, ingredientResponseSchema())
 	if err != nil {
 		return nil, usage, err
 	}
@@ -474,35 +541,10 @@ func (p GeminiProvider) GenerateText(ctx context.Context, systemPrompt, userProm
 	return strings.TrimSpace(resp.Text()), usage, nil
 }
 
-// bodyCompositionTemperature pins IdentifyBodyComposition's sampling to
-// near-deterministic. The REASONING is that this is a TRANSCRIPTION task
-// (read the printed numbers off a screen), not a creative one, so the unset
-// SDK default (~1.0) was HYPOTHESISED to be why kora#314 read only
-// weight_kg on 5 of 6 real calls despite a prompt and schema that already
-// forbid nothing else. Read that as a hypothesis, not a finding — the
-// caveat below records evidence pointing the other way. generateJSON's other
-// three callers (IdentifyText, IdentifyPhoto, Decompose) pass a nil
-// temperature deliberately: food-phrase resolution is the app's core path,
-// and tightening its sampling is a real regression risk that is explicitly
-// out of scope here — see TestGenerateContentConfig_FoodPathsLeaveTemperatureUnset.
-//
-// UNVERIFIED CAVEAT: a small number of live calls made while building this
-// fix (not a controlled measurement — daily free-tier quota ran out mid-way,
-// see PR discussion) showed temperature 0 returning FEWER legible fields
-// than an unset temperature on the same fixture across repeated calls, the
-// opposite of what this constant assumes. That sample is too small to act
-// on, but it means this value is NOT proven correct — re-run
-// bodyread's smoke test (5+ consecutive clean runs per fixture, per its own
-// doc comment) before treating kora#314 as closed, and be ready to try a
-// low non-zero value or drop this back to nil if temperature 0 keeps
-// collapsing to a near-empty answer.
-const bodyCompositionTemperature float32 = 0
-
 // buildGenerateContentConfig builds the *genai.GenerateContentConfig for a
 // generateJSON call. Factored out as a pure function (no SDK/network call)
-// so the temperature-threading behaviour is unit-testable directly, rather
-// than only observable by making a real API call.
-func buildGenerateContentConfig(systemPrompt string, schema *genai.Schema, temperature *float32) *genai.GenerateContentConfig {
+// so it stays directly unit-testable.
+func buildGenerateContentConfig(systemPrompt string, schema *genai.Schema) *genai.GenerateContentConfig {
 	return &genai.GenerateContentConfig{
 		// Built directly (not via NewContentFromParts) so Role stays empty:
 		// a system instruction is not a conversation turn, so it should not
@@ -510,7 +552,6 @@ func buildGenerateContentConfig(systemPrompt string, schema *genai.Schema, tempe
 		SystemInstruction: &genai.Content{Parts: []*genai.Part{genai.NewPartFromText(systemPrompt)}},
 		ResponseMIMEType:  "application/json",
 		ResponseSchema:    schema,
-		Temperature:       temperature,
 	}
 }
 
@@ -521,10 +562,11 @@ func buildGenerateContentConfig(systemPrompt string, schema *genai.Schema, tempe
 // boundary — no nutrition field is ever a valid property, so the model
 // structurally cannot return one no matter what the prompt says.
 //
-// temperature is per-call and nil by default (SDK/model default sampling):
-// only IdentifyBodyComposition passes a non-nil value. See
-// bodyCompositionTemperature's doc comment for why this must stay per-call
-// rather than becoming a field on GeminiProvider or a package default.
+// No caller passes a temperature override (kora#314's earlier per-call
+// temperature parameter was removed once measurement showed sampling was
+// never the cause of the body-composition under-reads — see
+// IdentifyBodyComposition's doc comment); every call uses the SDK/model's
+// own default sampling.
 func (p GeminiProvider) generateJSON(
 	ctx context.Context,
 	model string,
@@ -532,11 +574,10 @@ func (p GeminiProvider) generateJSON(
 	systemPrompt string,
 	userParts []*genai.Part,
 	schema *genai.Schema,
-	temperature *float32,
 ) ([]byte, ai.Usage, error) {
 	start := time.Now()
 
-	cfg := buildGenerateContentConfig(systemPrompt, schema, temperature)
+	cfg := buildGenerateContentConfig(systemPrompt, schema)
 
 	resp, err := p.client.Models.GenerateContent(ctx, model,
 		[]*genai.Content{genai.NewContentFromParts(userParts, genai.RoleUser)}, cfg)

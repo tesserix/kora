@@ -212,7 +212,7 @@ func (p OpenAIProvider) IdentifyPhoto(ctx context.Context, image []byte, mime st
 // object root directly.
 //
 // Every property is typed nullable (`["number", "null"]` or
-// `["string", "null"]` for reading_date) AND listed in "required". This
+// `["string", "null"]` for reading_date_text) AND listed in "required". This
 // looks contradictory at first glance — "required" usually means "must be
 // present with a value" — but under strict:true, Structured Outputs has no
 // other way to express "optional": every property MUST appear in
@@ -245,9 +245,13 @@ func bodyCompositionJSONSchema() map[string]any {
 			"skeletal_muscle_pct": numberOrNull("Skeletal muscle PERCENTAGE. Distinct from " +
 				"muscle_mass_kg — some scales show both; report each only if its own value " +
 				"is on screen, never derive one from the other."),
-			"muscle_mass_kg": numberOrNull("Muscle mass in kilograms, ONLY if the screen itself " +
-				"labels a value as muscle mass (not skeletal muscle). A kg figure labelled " +
-				"skeletal muscle mass is a different quantity and must NOT be reported here."),
+			"muscle_mass_kg": numberOrNull("Muscle mass in kilograms — return this ONLY if the " +
+				"screen labels a value as TOTAL muscle mass. A kg figure labelled SKELETAL " +
+				"muscle mass is a DIFFERENT, SMALLER quantity (skeletal muscle is a subset of " +
+				"total muscle) and reporting it here is a measurement error: many scale apps " +
+				"(Omron included) show only a skeletal-muscle kg figure and never a " +
+				"total-muscle one, so on those screens this field MUST be null even though a " +
+				"muscle-shaped kg number is visible."),
 			"body_water_pct": numberOrNull("Body water percentage, as displayed."),
 			"protein_pct":    numberOrNull("Protein percentage, as displayed."),
 			"bone_mass_kg": numberOrNull("Bone MASS in kilograms as the scale reports it — NOT " +
@@ -255,17 +259,25 @@ func bodyCompositionJSONSchema() map[string]any {
 				"or T-score, use null."),
 			"scale_bmr_kcal": numberOrNull("The scale's own estimated basal metabolic rate in " +
 				"kilocalories, if shown."),
-			"reading_date": map[string]any{
+			"reading_date_text": map[string]any{
 				"type": []string{"string", "null"},
-				"description": "The calendar date the SCREENSHOT ITSELF displays for this " +
-					"reading, as YYYY-MM-DD. Use null if no date is legible on screen; NEVER " +
-					"use today's date or any date not actually printed on the screen.",
+				"description": "The date TEXT EXACTLY AS PRINTED on screen for this reading — " +
+					"copy it verbatim, character for character (\"22/08\", \"Sat, 22/08\", " +
+					"\"2026-08-22\", whatever the screen actually shows). Do NOT reformat it " +
+					"to YYYY-MM-DD, do NOT add a year that is not printed, and do NOT compute " +
+					"or guess a year — a separate, non-model step resolves this text to a " +
+					"calendar date. Scale-app screens usually print this SOMEWHERE near the " +
+					"headline weight or measurement list — not only as a dedicated date " +
+					"label, but also as a timestamp, a day/date line under a metric name, or " +
+					"a history-chart axis entry for the displayed reading; check all of those " +
+					"before concluding no date is shown. Use null ONLY if no date for this " +
+					"reading appears anywhere on screen.",
 			},
 		},
 		"required": []string{
 			"weight_kg", "body_fat_pct", "subcutaneous_fat_pct", "visceral_fat_rating",
 			"skeletal_muscle_pct", "muscle_mass_kg", "body_water_pct", "protein_pct",
-			"bone_mass_kg", "scale_bmr_kcal", "reading_date",
+			"bone_mass_kg", "scale_bmr_kcal", "reading_date_text",
 		},
 		"additionalProperties": false,
 	}
@@ -290,7 +302,7 @@ func (p OpenAIProvider) IdentifyBodyComposition(ctx context.Context, image []byt
 		[]openai.ChatCompletionContentPartUnionParam{
 			openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{URL: dataURL}),
 		},
-		"body_composition_reading", bodyCompositionJSONSchema(), openai.Float(float64(bodyCompositionTemperature)))
+		"body_composition_reading", bodyCompositionJSONSchema(), param.Opt[float64]{})
 	if err != nil {
 		return ai.BodyCompositionReading{}, usage, err
 	}
@@ -402,11 +414,11 @@ func jsonObjectSchemaHint(schema map[string]any) string {
 // system prompt; see generateJSON's doc comment for why the schema itself
 // remains the actual invariant boundary regardless of response format.
 // temperature is per-call and zero-value (param.Opt[float64]{}, meaning
-// "omit — use the API's own default sampling") for every caller except
-// IdentifyBodyComposition, which passes bodyCompositionTemperature. See
-// that constant's doc comment (gemini.go) for why: it is the same
-// transcription-vs-generation reasoning on both providers, and food-path
-// sampling must stay untouched here for the identical reason.
+// "omit — use the API's own default sampling") for every caller, including
+// IdentifyBodyComposition — kora#314's under-reads were never a sampling
+// problem (see bodyCompositionJSONSchema's required+nullable shape, and
+// gemini.go's IdentifyBodyComposition doc comment for the measurement that
+// ruled temperature out), so there is no special case to carry here.
 func (p OpenAIProvider) buildParams(
 	model, systemPrompt string,
 	userParts []openai.ChatCompletionContentPartUnionParam,

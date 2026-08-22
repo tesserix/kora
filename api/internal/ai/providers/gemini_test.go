@@ -180,15 +180,15 @@ func TestParseBodyCompositionReading_MissingKeysDecodeToNil(t *testing.T) {
 	// 0 would be indistinguishable from "the scale read exactly zero",
 	// which is the whole reason every field on BodyCompositionReading is a
 	// pointer.
-	data := []byte(`{"weight_kg": 72.4, "body_fat_pct": 18.2, "reading_date": "2026-08-20"}`)
+	data := []byte(`{"weight_kg": 72.4, "body_fat_pct": 18.2, "reading_date_text": "22/08"}`)
 
 	reading, err := parseBodyCompositionReading(data)
 
 	require.NoError(t, err)
 	assert.Equal(t, ai.BodyCompositionReading{
-		WeightKg:    f64(72.4),
-		BodyFatPct:  f64(18.2),
-		ReadingDate: str("2026-08-20"),
+		WeightKg:        f64(72.4),
+		BodyFatPct:      f64(18.2),
+		ReadingDateText: str("22/08"),
 	}, reading)
 	assert.Nil(t, reading.SubcutaneousFatPct)
 	assert.Nil(t, reading.VisceralFatRating)
@@ -229,15 +229,21 @@ func TestParseBodyCompositionReading_VisceralFatRatingIsNotPercentShaped(t *test
 	assert.Equal(t, ai.BodyCompositionReading{VisceralFatRating: f64(7)}, reading)
 }
 
-func TestParseBodyCompositionReading_ReadingDateRoundTripsAndOmitsWhenAbsent(t *testing.T) {
-	withDate, err := parseBodyCompositionReading([]byte(`{"reading_date": "2026-08-20"}`))
+// TestParseBodyCompositionReading_ReadingDateTextRoundTripsAndOmitsWhenAbsent
+// pins that the provider decodes the model's raw, verbatim date text into
+// ReadingDateText — NOT into the resolved ReadingDate field, which the
+// provider layer never populates at all (see date_resolve.go in
+// internal/bodyread for where ReadingDate actually gets set).
+func TestParseBodyCompositionReading_ReadingDateTextRoundTripsAndOmitsWhenAbsent(t *testing.T) {
+	withDate, err := parseBodyCompositionReading([]byte(`{"reading_date_text": "Sat, 22/08, 10:57"}`))
 	require.NoError(t, err)
-	require.NotNil(t, withDate.ReadingDate)
-	assert.Equal(t, "2026-08-20", *withDate.ReadingDate)
+	require.NotNil(t, withDate.ReadingDateText)
+	assert.Equal(t, "Sat, 22/08, 10:57", *withDate.ReadingDateText)
+	assert.Nil(t, withDate.ReadingDate, "the provider must never populate the resolved date itself")
 
 	withoutDate, err := parseBodyCompositionReading([]byte(`{"weight_kg": 65.0}`))
 	require.NoError(t, err)
-	assert.Nil(t, withoutDate.ReadingDate)
+	assert.Nil(t, withoutDate.ReadingDateText)
 }
 
 func TestParseBodyCompositionReading_Malformed(t *testing.T) {
@@ -245,24 +251,37 @@ func TestParseBodyCompositionReading_Malformed(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestBodyCompositionResponseSchema_NoRequiredList(t *testing.T) {
+// TestBodyCompositionResponseSchema_RequiredAndNullable pins kora#314's
+// actual root-cause fix: every property is BOTH Required and Nullable.
+// The earlier shape (nothing required, every field independently
+// omittable) let a one-property response satisfy the schema, so the model
+// had no obligation to report anything beyond the single field it was most
+// confident about — measured against Vertex AI, that under-read to
+// weight_kg-only on the large majority of real calls. Required+Nullable
+// forces every key to appear (so the model must make an explicit decision
+// about each field) while still letting an unreadable field decode to nil
+// via JSON null, so "not shown on screen" is preserved exactly — it just
+// can no longer be expressed by silent omission.
+func TestBodyCompositionResponseSchema_RequiredAndNullable(t *testing.T) {
 	schema := bodyCompositionResponseSchema()
 
 	require.Equal(t, genai.TypeObject, schema.Type)
-	// Every field must be independently omittable — a Required list here
-	// would force the model to invent a value the screen never displayed.
-	// See bodyCompositionResponseSchema's doc comment.
-	assert.Empty(t, schema.Required)
 
-	gotProps := make([]string, 0, len(schema.Properties))
-	for name := range schema.Properties {
-		gotProps = append(gotProps, name)
-	}
-	assert.ElementsMatch(t, []string{
+	wantFields := []string{
 		"weight_kg", "body_fat_pct", "subcutaneous_fat_pct", "visceral_fat_rating",
 		"skeletal_muscle_pct", "muscle_mass_kg", "body_water_pct", "protein_pct",
-		"bone_mass_kg", "scale_bmr_kcal", "reading_date",
-	}, gotProps)
+		"bone_mass_kg", "scale_bmr_kcal", "reading_date_text",
+	}
+	assert.ElementsMatch(t, wantFields, schema.Required,
+		"every property must be Required — that is how this schema expresses optional, not by omission")
+
+	gotProps := make([]string, 0, len(schema.Properties))
+	for name, prop := range schema.Properties {
+		gotProps = append(gotProps, name)
+		require.NotNilf(t, prop.Nullable, "property %q must set Nullable — required-but-not-nullable would force fabrication", name)
+		assert.Truef(t, *prop.Nullable, "property %q must be Nullable so an unreadable field decodes to nil, not a forced value", name)
+	}
+	assert.ElementsMatch(t, wantFields, gotProps)
 
 	for _, forbidden := range []string{"bmi", "fat_free_mass", "lean_mass", "fat_mass_kg", "metabolic_age"} {
 		_, present := schema.Properties[forbidden]
@@ -292,23 +311,16 @@ func TestBodyCompositionResponseSchema_MuscleMassDescriptionWarnsAgainstSkeletal
 	assert.Contains(t, desc, "skeletal", "muscle_mass_kg description must warn against skeletal muscle mass conflation")
 }
 
-// TestBuildGenerateContentConfig_FoodPathsLeaveTemperatureUnset pins the
-// CRITICAL constraint from kora#314's fix: IdentifyText/IdentifyPhoto/
-// Decompose all call generateJSON with a nil temperature, so this asserts
-// the shared config builder passes nil straight through to
-// genai.GenerateContentConfig.Temperature untouched — food-path sampling
-// must never regress as a side effect of fixing body-composition reads.
-func TestBuildGenerateContentConfig_FoodPathsLeaveTemperatureUnset(t *testing.T) {
-	cfg := buildGenerateContentConfig(identifySystemPrompt, guessResponseSchema(), nil)
-	assert.Nil(t, cfg.Temperature, "food-path config must leave Temperature nil (SDK/model default)")
-}
+// TestBuildGenerateContentConfig_LeavesTemperatureUnset pins the current
+// state for every generateJSON caller, including IdentifyBodyComposition:
+// no caller passes a temperature override (kora#314's under-reads were
+// never a sampling problem — see bodyCompositionResponseSchema's doc
+// comment for the actual root cause), so the config builder must never set
+// Temperature on its own.
+func TestBuildGenerateContentConfig_LeavesTemperatureUnset(t *testing.T) {
+	cfg := buildGenerateContentConfig(identifySystemPrompt, guessResponseSchema())
+	assert.Nil(t, cfg.Temperature, "config must leave Temperature nil (SDK/model default)")
 
-// TestBuildGenerateContentConfig_BodyCompositionPinsZeroTemperature pins
-// the primary root-cause fix: near-deterministic sampling for a
-// transcription task. See bodyCompositionTemperature's doc comment.
-func TestBuildGenerateContentConfig_BodyCompositionPinsZeroTemperature(t *testing.T) {
-	temperature := bodyCompositionTemperature
-	cfg := buildGenerateContentConfig(bodyCompositionSystemPrompt, bodyCompositionResponseSchema(), &temperature)
-	require.NotNil(t, cfg.Temperature)
-	assert.Equal(t, float32(0), *cfg.Temperature)
+	bodyCompCfg := buildGenerateContentConfig(bodyCompositionSystemPrompt, bodyCompositionResponseSchema())
+	assert.Nil(t, bodyCompCfg.Temperature, "body-composition config must leave Temperature nil too")
 }

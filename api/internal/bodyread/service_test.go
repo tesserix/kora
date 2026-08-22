@@ -151,9 +151,21 @@ func TestReader_Read_ImplausibleValuesDroppedAndReported(t *testing.T) {
 	assert.False(t, result.Unreadable, "a partial reading with some drops is NOT unreadable")
 }
 
+// TestReader_Read_ReadingDate pins the post-kora#314 date pipeline through
+// the public Reader.Read entry point: the PROVIDER supplies only raw,
+// verbatim ReadingDateText (never a resolved date — see
+// ai.BodyCompositionReading's doc comment), and Read() is responsible for
+// resolving it (date_resolve.go) and then validating the result
+// (validate.go), in that order. Resolver-format edge cases (D/M
+// disambiguation, leap years, "not yet occurred this year") are unit-tested
+// directly against resolveReadingDateText in date_resolve_test.go with a
+// fixed "now" — this suite only proves the WIRING, so every case here uses
+// either an unambiguous explicit-year date (stable regardless of the real
+// clock) or an inherently-ambiguous string (ambiguous regardless of the
+// real clock too), so none of it is flaky against a real time.Now().
 func TestReader_Read_ReadingDate(t *testing.T) {
-	t.Run("present and valid parses through with no drop", func(t *testing.T) {
-		provider := &stubProvider{reading: ai.BodyCompositionReading{ReadingDate: sptr("2020-01-01")}}
+	t.Run("reading_date_text resolves and parses through with no drop", func(t *testing.T) {
+		provider := &stubProvider{reading: ai.BodyCompositionReading{ReadingDateText: sptr("2020-01-01")}}
 		r := NewReader(provider, newStubCache(), &stubMeter{})
 
 		result, err := r.Read(context.Background(), uuid.New(), []byte("img"), "image/jpeg")
@@ -163,7 +175,7 @@ func TestReader_Read_ReadingDate(t *testing.T) {
 		assert.Empty(t, result.Dropped)
 	})
 
-	t.Run("absent is nil with no drop entry", func(t *testing.T) {
+	t.Run("absent reading_date_text is nil with no drop entry", func(t *testing.T) {
 		provider := &stubProvider{reading: ai.BodyCompositionReading{WeightKg: ptr(70)}}
 		r := NewReader(provider, newStubCache(), &stubMeter{})
 
@@ -173,7 +185,30 @@ func TestReader_Read_ReadingDate(t *testing.T) {
 		assert.Empty(t, result.Dropped)
 	})
 
-	t.Run("future date is dropped with a drop entry", func(t *testing.T) {
+	t.Run("ambiguous reading_date_text resolves to nil with no drop entry", func(t *testing.T) {
+		// "05/06" is ambiguous (D/M vs M/D) regardless of what day it is
+		// run — see resolveReadingDateText's doc comment. Nil here is a
+		// "never resolved" outcome, not a validation failure, so no
+		// DroppedField is expected — same as any other field the model
+		// simply never reported.
+		provider := &stubProvider{reading: ai.BodyCompositionReading{ReadingDateText: sptr("05/06")}}
+		r := NewReader(provider, newStubCache(), &stubMeter{})
+
+		result, err := r.Read(context.Background(), uuid.New(), []byte("img"), "image/jpeg")
+		require.NoError(t, err)
+		assert.Nil(t, result.Reading.ReadingDate)
+		assert.Empty(t, result.Dropped)
+	})
+
+	t.Run("a resolved ReadingDate the provider sets directly is ignored", func(t *testing.T) {
+		// Providers only ever populate ReadingDateText in practice (the
+		// schema has no reading_date property any more — see
+		// bodyCompositionResponseSchema), but this proves the CONTRACT
+		// itself: Read() always recomputes ReadingDate from
+		// ReadingDateText and never trusts whatever a provider happens to
+		// leave in the resolved field, so a future/malformed value placed
+		// there directly (a stub, a bug, a provider that regresses) can
+		// never leak through untouched.
 		future := "2999-01-01"
 		provider := &stubProvider{reading: ai.BodyCompositionReading{ReadingDate: sptr(future)}}
 		r := NewReader(provider, newStubCache(), &stubMeter{})
@@ -181,8 +216,7 @@ func TestReader_Read_ReadingDate(t *testing.T) {
 		result, err := r.Read(context.Background(), uuid.New(), []byte("img"), "image/jpeg")
 		require.NoError(t, err)
 		assert.Nil(t, result.Reading.ReadingDate)
-		require.Len(t, result.Dropped, 1)
-		assert.Equal(t, "reading_date", result.Dropped[0].Field)
+		assert.Empty(t, result.Dropped)
 	})
 }
 

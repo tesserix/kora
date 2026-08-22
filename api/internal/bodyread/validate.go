@@ -81,7 +81,17 @@ func validateReading(r ai.BodyCompositionReading, now time.Time) (ai.BodyComposi
 		ProteinPct:         validatePct("protein_pct", r.ProteinPct, &dropped),
 		BoneMassKg:         validatePositive("bone_mass_kg", r.BoneMassKg, &dropped),
 		ScaleBMRKcal:       validatePositive("scale_bmr_kcal", r.ScaleBMRKcal, &dropped),
-		ReadingDate:        validateReadingDate(r.ReadingDate, now, &dropped),
+		// ReadingDateText carries straight through, unvalidated — it is raw
+		// transcribed text, not a measurement, so there is no range/format
+		// to enforce on it; it exists so a client showing PR B's editable
+		// date row can explain WHY a date resolved the way it did (or
+		// didn't). ReadingDate is the field callers should treat as
+		// authoritative for storage — it already went through
+		// resolveReadingDateText's deterministic rule (service.go) before
+		// reaching here, and gets its own future-date/parse guard below,
+		// same as before this fix.
+		ReadingDateText: r.ReadingDateText,
+		ReadingDate:     validateReadingDate(r.ReadingDate, now, &dropped),
 	}
 
 	return out, dropped

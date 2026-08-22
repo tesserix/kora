@@ -245,18 +245,18 @@ func TestBuildParamsJSONObjectCompat(t *testing.T) {
 	}
 }
 
-// TestBuildParams_BodyCompositionTemperatureIsZero pins the fix: unlike the
-// food-path calls above (temperature left unset), the body-composition
-// call must explicitly pin sampling to 0 — see bodyCompositionTemperature's
-// doc comment in gemini.go for why this is a transcription task, not a
-// generative one.
-func TestBuildParams_BodyCompositionTemperatureIsZero(t *testing.T) {
+// TestBuildParams_BodyCompositionTemperatureLeftUnset pins the current
+// state: the body-composition call passes no temperature override, exactly
+// like the food-path calls above — kora#314's under-reads were never a
+// sampling problem (see bodyCompositionJSONSchema's required+nullable
+// shape, and gemini.go's IdentifyBodyComposition doc comment, for the
+// actual root cause and the measurement that ruled temperature out).
+func TestBuildParams_BodyCompositionTemperatureLeftUnset(t *testing.T) {
 	p := NewOpenAIProvider("k", "", "", false)
 	params := p.buildParams(modelDefault(p), "sys", nil, "body_composition_reading",
-		bodyCompositionJSONSchema(), openai.Float(float64(bodyCompositionTemperature)))
+		bodyCompositionJSONSchema(), param.Opt[float64]{})
 
-	require.True(t, params.Temperature.Valid(), "body-composition temperature must be set")
-	assert.Equal(t, float64(0), params.Temperature.Value)
+	assert.False(t, params.Temperature.Valid(), "body-composition temperature must stay unset")
 }
 
 func TestOpenAITranscribeNotSupported(t *testing.T) {
@@ -272,7 +272,7 @@ func TestOpenAITranscribeNotSupported(t *testing.T) {
 var bodyCompositionFieldNames = []string{
 	"weight_kg", "body_fat_pct", "subcutaneous_fat_pct", "visceral_fat_rating",
 	"skeletal_muscle_pct", "muscle_mass_kg", "body_water_pct", "protein_pct",
-	"bone_mass_kg", "scale_bmr_kcal", "reading_date",
+	"bone_mass_kg", "scale_bmr_kcal", "reading_date_text",
 }
 
 func TestBodyCompositionJSONSchema_Shape(t *testing.T) {
@@ -302,8 +302,8 @@ func TestBodyCompositionJSONSchema_Shape(t *testing.T) {
 	for _, name := range bodyCompositionFieldNames {
 		prop, ok := props[name].(map[string]any)
 		require.Truef(t, ok, "property %q missing or not an object", name)
-		if name == "reading_date" {
-			assert.Equal(t, []string{"string", "null"}, prop["type"], "reading_date must be nullable string")
+		if name == "reading_date_text" {
+			assert.Equal(t, []string{"string", "null"}, prop["type"], "reading_date_text must be nullable string")
 		} else {
 			assert.Equal(t, []string{"number", "null"}, prop["type"], "%s must be nullable number", name)
 		}
@@ -370,10 +370,12 @@ func newOpenAIStubServer(t *testing.T, responseBody string) *httptest.Server {
 }
 
 func TestOpenAIProvider_IdentifyBodyComposition_NullFieldsDecodeToNil(t *testing.T) {
-	// weight_kg and reading_date are present; every other field is
+	// weight_kg and reading_date_text are present; every other field is
 	// explicitly JSON null (as strict:true's required-but-nullable schema
 	// forces the model to answer for anything unreadable) and must decode
-	// to a nil pointer, not a zero value.
+	// to a nil pointer, not a zero value. reading_date_text decodes to
+	// ReadingDateText, NOT the resolved ReadingDate — the provider layer
+	// never resolves a year (see date_resolve.go in internal/bodyread).
 	server := newOpenAIStubServer(t, `{
 		"weight_kg": 72.4,
 		"body_fat_pct": null,
@@ -385,7 +387,7 @@ func TestOpenAIProvider_IdentifyBodyComposition_NullFieldsDecodeToNil(t *testing
 		"protein_pct": null,
 		"bone_mass_kg": null,
 		"scale_bmr_kcal": null,
-		"reading_date": "2026-08-20"
+		"reading_date_text": "22/08"
 	}`)
 
 	p := NewOpenAIProvider("test-key", server.URL+"/v1", "", false)
@@ -394,8 +396,9 @@ func TestOpenAIProvider_IdentifyBodyComposition_NullFieldsDecodeToNil(t *testing
 	require.NoError(t, err)
 	require.NotNil(t, reading.WeightKg)
 	assert.Equal(t, 72.4, *reading.WeightKg)
-	require.NotNil(t, reading.ReadingDate)
-	assert.Equal(t, "2026-08-20", *reading.ReadingDate)
+	require.NotNil(t, reading.ReadingDateText)
+	assert.Equal(t, "22/08", *reading.ReadingDateText)
+	assert.Nil(t, reading.ReadingDate, "the provider must never populate the resolved date itself")
 	assert.Nil(t, reading.BodyFatPct)
 	assert.Nil(t, reading.SubcutaneousFatPct)
 	assert.Nil(t, reading.VisceralFatRating)
@@ -425,7 +428,7 @@ func TestOpenAIProvider_IdentifyBodyComposition_DropsUnschemaedExtraKey(t *testi
 		"protein_pct": null,
 		"bone_mass_kg": null,
 		"scale_bmr_kcal": null,
-		"reading_date": null,
+		"reading_date_text": null,
 		"bmi": 21.3
 	}`)
 
@@ -437,6 +440,7 @@ func TestOpenAIProvider_IdentifyBodyComposition_DropsUnschemaedExtraKey(t *testi
 	assert.Equal(t, 60.0, *reading.WeightKg)
 	require.NotNil(t, reading.BodyFatPct)
 	assert.Equal(t, 22.1, *reading.BodyFatPct)
+	assert.Nil(t, reading.ReadingDateText)
 	assert.Nil(t, reading.ReadingDate)
 }
 

@@ -77,8 +77,10 @@ type fixtureExpectation struct {
 	// draws for the reading itself. This is deliberately the strongest
 	// assertion this test can make: it catches exactly the two traps
 	// kora#314 exists to prevent — a scale's skeletal-muscle-mass kg figure
-	// leaking into muscle_mass_kg, and a date invented for a screen that
-	// shows none.
+	// leaking into muscle_mass_kg, and date TEXT invented for a screen that
+	// shows none (use "reading_date_text" here, not "reading_date" — the
+	// model only ever reports the former; see
+	// bodyCompositionResponseSchema in gemini.go).
 	AbsentFields []string `json:"absent_fields,omitempty"`
 }
 
@@ -165,6 +167,34 @@ func findFixtureImage(t *testing.T, fixtureDir, label string) (path, mime string
 	return "", ""
 }
 
+// bodyCompProvider builds the live provider this test drives. Mirrors
+// cmd/api/main.go's buildResolveHandler: Vertex is preferred whenever
+// VERTEX_PROJECT is set (project-scoped capacity/quota, no shared free-tier
+// pool — see NewVertexProvider's doc comment), falling back to a Gemini API
+// key, and t.Skip when NEITHER is configured. The free-tier key's 20
+// calls/day quota made a clean measurement impossible (see kora#314), which
+// is why Vertex support exists here at all — it must be tried FIRST, not
+// merely supported, or every run keeps silently preferring the exhausted
+// key over the working credential.
+func bodyCompProvider(t *testing.T, ctx context.Context) (providers.GeminiProvider, bool) {
+	t.Helper()
+
+	project := os.Getenv("VERTEX_PROJECT")
+	apiKey := os.Getenv("GEMINI_API_KEY")
+	switch {
+	case project != "":
+		provider, err := providers.NewVertexProvider(ctx, project, os.Getenv("VERTEX_LOCATION"))
+		require.NoError(t, err)
+		return provider, true
+	case apiKey != "":
+		provider, err := providers.NewGeminiProvider(ctx, apiKey)
+		require.NoError(t, err)
+		return provider, true
+	default:
+		return providers.GeminiProvider{}, false
+	}
+}
+
 // defaultBodyCompSmokeRuns is how many times each fixture is read per test
 // invocation. kora#314's actual bug (never set temperature) made the model
 // answer correctly on roughly 1 call in 3 — a test that calls the provider
@@ -203,24 +233,22 @@ func bodyCompSmokeRuns(t *testing.T) int {
 // bodyread.Reader) — validation is bodyread's job and is already covered by
 // validate_test.go; this test is provider+prompt+schema only.
 //
-// Excluded from `go test ./...` (needs `-tags smoke`) and gated on BOTH
-// GEMINI_API_KEY and KORA_BODY_COMP_FIXTURES_DIR, so it never runs by
-// accident and never runs against a directory that doesn't exist.
+// Excluded from `go test ./...` (needs `-tags smoke`) and gated on BOTH a
+// live credential (VERTEX_PROJECT or GEMINI_API_KEY — see bodyCompProvider)
+// and KORA_BODY_COMP_FIXTURES_DIR, so it never runs by accident and never
+// runs against a directory that doesn't exist.
 func TestBodyComposition_Smoke(t *testing.T) {
-	apiKey := os.Getenv("GEMINI_API_KEY")
+	ctx := context.Background()
+	provider, configured := bodyCompProvider(t, ctx)
 	fixturesDir := os.Getenv("KORA_BODY_COMP_FIXTURES_DIR")
-	if apiKey == "" || fixturesDir == "" {
-		t.Skip("GEMINI_API_KEY and KORA_BODY_COMP_FIXTURES_DIR must both be set; skipping live body-composition smoke test")
+	if !configured || fixturesDir == "" {
+		t.Skip("VERTEX_PROJECT (or GEMINI_API_KEY) and KORA_BODY_COMP_FIXTURES_DIR must both be set; skipping live body-composition smoke test")
 	}
 
 	fixtures := loadBodyCompFixtures(t, fixturesDir)
 	require.NotEmpty(t, fixtures, "fixtures directory %s contained no expected.json sidecars", fixturesDir)
 
 	runs := bodyCompSmokeRuns(t)
-
-	ctx := context.Background()
-	provider, err := providers.NewGeminiProvider(ctx, apiKey)
-	require.NoError(t, err)
 
 	for _, fx := range fixtures {
 		fx := fx
@@ -251,11 +279,19 @@ func assertBodyCompReading(t *testing.T, fx bodyCompFixture, reading ai.BodyComp
 	// — a failure needs the full picture to tell "one field wrong" apart
 	// from "the model silently reverted to reporting almost nothing", which
 	// is the actual kora#314 failure mode this test exists to catch.
-	t.Logf("fixture %s: weight=%v body_fat_pct=%v subq=%v visceral=%v skel_pct=%v muscle_kg=%v water=%v protein=%v bone=%v bmr=%v reading_date=%v",
+	// resolveReadingDateText is called here, not by the provider — this test
+	// drives ai.Provider directly (see this function's own doc comment), so
+	// the resolution step bodyread.Reader.Read normally performs has to be
+	// simulated explicitly to assert on a resolved date at all. Real
+	// production traffic goes through Reader.Read, which does this exact
+	// call (service.go).
+	resolvedDate := resolveReadingDateText(reading.ReadingDateText, time.Now())
+
+	t.Logf("fixture %s: weight=%v body_fat_pct=%v subq=%v visceral=%v skel_pct=%v muscle_kg=%v water=%v protein=%v bone=%v bmr=%v reading_date_text=%v resolved_reading_date=%v",
 		fx.label, derefFloat(reading.WeightKg), derefFloat(reading.BodyFatPct), derefFloat(reading.SubcutaneousFatPct),
 		derefFloat(reading.VisceralFatRating), derefFloat(reading.SkeletalMusclePct), derefFloat(reading.MuscleMassKg),
 		derefFloat(reading.BodyWaterPct), derefFloat(reading.ProteinPct), derefFloat(reading.BoneMassKg),
-		derefFloat(reading.ScaleBMRKcal), derefString(reading.ReadingDate))
+		derefFloat(reading.ScaleBMRKcal), derefString(reading.ReadingDateText), derefString(resolvedDate))
 
 	if fx.expected.WeightKg != nil {
 		require.NotNil(t, reading.WeightKg, "fixture %s: weight_kg expected but not returned", fx.label)
@@ -278,10 +314,10 @@ func assertBodyCompReading(t *testing.T, fx bodyCompFixture, reading ai.BodyComp
 	}
 
 	if fx.expected.ReadingDate != "" {
-		require.NotNil(t, reading.ReadingDate, "fixture %s: reading_date expected but not returned", fx.label)
-		require.Equal(t, fx.expected.ReadingDate, *reading.ReadingDate, "fixture %s: reading_date mismatch", fx.label)
-		_, parseErr := time.Parse("2006-01-02", *reading.ReadingDate)
-		require.NoError(t, parseErr, "fixture %s: reading_date %q must parse as YYYY-MM-DD", fx.label, *reading.ReadingDate)
+		require.NotNil(t, resolvedDate, "fixture %s: reading_date_text expected to resolve but did not (raw text %v)", fx.label, derefString(reading.ReadingDateText))
+		require.Equal(t, fx.expected.ReadingDate, *resolvedDate, "fixture %s: resolved reading_date mismatch", fx.label)
+		_, parseErr := time.Parse("2006-01-02", *resolvedDate)
+		require.NoError(t, parseErr, "fixture %s: resolved reading_date %q must parse as YYYY-MM-DD", fx.label, *resolvedDate)
 	}
 
 	for _, name := range fx.expected.AbsentFields {
@@ -302,18 +338,15 @@ func assertBodyCompReading(t *testing.T, fx bodyCompFixture, reading ai.BodyComp
 // above only proves the raw provider works; this proves the budget the
 // Router actually enforces in production doesn't starve it.
 func TestBodyComposition_ThroughRouter_Smoke(t *testing.T) {
-	apiKey := os.Getenv("GEMINI_API_KEY")
+	ctx := context.Background()
+	gemini, configured := bodyCompProvider(t, ctx)
 	fixturesDir := os.Getenv("KORA_BODY_COMP_FIXTURES_DIR")
-	if apiKey == "" || fixturesDir == "" {
-		t.Skip("GEMINI_API_KEY and KORA_BODY_COMP_FIXTURES_DIR must both be set; skipping live router body-composition smoke test")
+	if !configured || fixturesDir == "" {
+		t.Skip("VERTEX_PROJECT (or GEMINI_API_KEY) and KORA_BODY_COMP_FIXTURES_DIR must both be set; skipping live router body-composition smoke test")
 	}
 
 	fixtures := loadBodyCompFixtures(t, fixturesDir)
 	require.NotEmpty(t, fixtures, "fixtures directory %s contained no expected.json sidecars", fixturesDir)
-
-	ctx := context.Background()
-	gemini, err := providers.NewGeminiProvider(ctx, apiKey)
-	require.NoError(t, err)
 
 	// Fallback must be a DISTINCT, counting provider so a budget regression
 	// (primary killed too early) is visible rather than papered over by the
@@ -416,8 +449,14 @@ func bodyCompFieldPresent(reading ai.BodyCompositionReading, name string) (prese
 		return reading.BoneMassKg != nil, true
 	case "scale_bmr_kcal":
 		return reading.ScaleBMRKcal != nil, true
-	case "reading_date":
-		return reading.ReadingDate != nil, true
+	case "reading_date_text":
+		// Checks the RAW model output, not the resolved ReadingDate —
+		// "absent" here means the model reported no date text at all, which
+		// is the actual fabrication kora#314 guards against at this layer.
+		// A provider never populates ReadingDate directly any more (see
+		// bodyCompositionResponseSchema), so checking it here would always
+		// trivially pass regardless of what the model actually said.
+		return reading.ReadingDateText != nil, true
 	default:
 		return false, false
 	}
