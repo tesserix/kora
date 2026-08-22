@@ -12,7 +12,10 @@ const mockSeries = jest.fn();
 const mockAvgIntake7d = jest.fn();
 const mockProfile = jest.fn();
 jest.mock("@/api/hooks", () => ({
-  useDashboard: () => ({ data: { streak_days: 3 } }),
+  // targets.kcal is load-bearing for the energy panel: "Energy vs budget"
+  // cannot draw a bar without a budget to scale it against, so with no target
+  // every day renders as an empty slot rather than a misleading zero bar.
+  useDashboard: () => ({ data: { streak_days: 3, targets: { kcal: 2000 } } }),
   useProfile: () => mockProfile(),
   useWeightSeries: (range: string) => mockSeries(range),
   useAddWeight: () => ({ mutate: jest.fn(), isPending: false }),
@@ -55,7 +58,7 @@ jest.mock("@/health", () => ({
 
 beforeEach(() => {
   mockProfile.mockReturnValue({ data: { weight_kg: 80 } });
-  mockAvgIntake7d.mockReturnValue({ avg: null, series: [], isLoading: false });
+  mockAvgIntake7d.mockReturnValue({ avg: null, series: [], days: [], isLoading: false, isError: false, refetch: jest.fn() });
   mockUseHealth.mockReturnValue({ status: "unavailable", steps: null, sleep: null, connect: jest.fn() });
   mockUseUnits.mockReturnValue({ system: "metric", setSystem: jest.fn() });
 });
@@ -150,6 +153,19 @@ test("does not claim there are no weigh-ins while the first load is still pendin
   expect(queryByText("Log your weight to see your trend.")).toBeNull();
 });
 
+// A row of empty bars is a CLAIM about what was eaten. When every day failed
+// to load, the panel must say so rather than draw seven days of nothing —
+// the same rule the streak panel beside it already states in its own comment.
+test("says the energy history could not be loaded rather than drawing an empty week", async () => {
+  mockSeries.mockReturnValue({ data: [] });
+  mockAvgIntake7d.mockReturnValue({
+    avg: null, series: [], days: [], isLoading: false, isError: true, refetch: jest.fn(),
+  });
+  const { getByText, queryByTestId } = await render(<Progress />);
+  expect(getByText("Couldn't load your energy history.")).toBeTruthy();
+  expect(queryByTestId("ebar-target")).toBeNull();
+});
+
 test("shows the no-weigh-ins empty state and opens the weight-log sheet from its CTA", async () => {
   mockSeries.mockReturnValue({ data: [] });
   const { getByText, findByText } = await render(<Progress />);
@@ -201,17 +217,21 @@ test("shows real sleep and renders the energy-vs-budget bars when Health is auth
     sleep: { lastNightHours: 7.1 },
     connect: jest.fn(),
   });
-  mockAvgIntake7d.mockReturnValue({ avg: 1921, series: [1900, 1950, 1921], isLoading: false });
+  mockAvgIntake7d.mockReturnValue({ avg: 1921, series: [1900, 1950, 1921], days: [null, null, null, null, 1900, 1950, 1921], isLoading: false, isError: false, refetch: jest.fn() });
 
   const { getByText, getByTestId, getAllByText, queryByLabelText } = await render(<Progress />);
   expect(getByText("7.1h")).toBeTruthy();
   expect(queryByLabelText("Connect Apple Health")).toBeNull();
-  for (let i = 0; i < 7; i++) expect(getByTestId(`ebar-${i}`)).toBeTruthy();
+  // The four days with no reading render as empty slots, not zero-height
+  // bars: a bar of height zero states "ate nothing", which is a different
+  // claim from "nothing logged, or we could not load it". Only the three days
+  // that actually carry calories draw a bar.
+  for (let i = 0; i < 4; i++) expect(getByTestId(`ebar-${i}-nodata`)).toBeTruthy();
+  for (let i = 4; i < 7; i++) expect(getByTestId(`ebar-${i}`)).toBeTruthy();
   expect(getByTestId("ebar-target")).toBeTruthy();
-  // useAvgIntake7d's series carries no dates (only the trailing days that had
-  // logged data, in order), so bars can't be attributed to real weekdays —
-  // only the most recent bar is labeled ("today"); the rest are unlabeled
-  // rather than misattributed to the wrong day.
+  // `days` is positional, so a gap keeps its slot instead of sliding later
+  // days earlier — but the slots still carry no weekday names, so only the
+  // most recent is labeled ("today") rather than misattributing the rest.
   expect(getByText("today")).toBeTruthy();
   // 6 unlabeled energy-bar days + the hero figure's own "—" (this test's
   // series has no weigh-ins, so there is no real reading to show).

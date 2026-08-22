@@ -9,6 +9,13 @@ export interface EnergyBarsDay {
   label: string;
   fraction: number;
   over: boolean;
+  /**
+   * No log for this day, or it failed to load — which is NOT the same as a
+   * day of zero calories. A zero-height bar states the latter, so a noData
+   * slot renders as an empty track instead: the day keeps its position
+   * without the chart claiming what was eaten in it.
+   */
+  noData?: boolean;
 }
 
 export interface EnergyBarsProps {
@@ -46,6 +53,23 @@ function EnergyBar({ index, day, instrument }: EnergyBarProps) {
   }, [day.fraction, reduceMotion]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const animatedStyle = useAnimatedStyle(() => ({ transform: [{ scaleY: scale.value }] }));
+
+  // An empty track, not a bar of height zero: it occupies the slot so the
+  // days stay aligned, while drawing nothing that could be read as an amount.
+  if (day.noData) {
+    return (
+      <View
+        testID={`ebar-${index}-nodata`}
+        style={{
+          flex: 1,
+          height: 3,
+          borderRadius: 6,
+          backgroundColor: instrument.tick,
+          opacity: 0.25,
+        }}
+      />
+    );
+  }
 
   return (
     <Animated.View

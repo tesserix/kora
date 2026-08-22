@@ -884,7 +884,31 @@ export function useDashboard(date: string) {
 // A day with `consumed.kcal === 0` is treated as unlogged, not "zero calories
 // eaten" — including it would drag the average down and an all-zero week
 // would otherwise render a fabricated-looking "0" instead of an honest "—".
-export function useAvgIntake7d(endDate: string): { avg: number | null; series: number[]; isLoading: boolean } {
+export function useAvgIntake7d(endDate: string): {
+  avg: number | null;
+  series: number[];
+  /**
+   * The same seven days, POSITIONALLY — index 0 is six days ago, index 6 is
+   * `endDate` — with `null` for any day that failed to load or holds no log.
+   *
+   * `series` cannot be used to draw a per-day chart: it is a FILTERED list, so
+   * a failed or unlogged Monday shortens it and every later day slides one
+   * slot earlier. A caller padding it back to seven then attributes Friday's
+   * calories to Thursday, and labels the last bar "today" when today is the
+   * day that dropped out. `days` keeps the slot and says "nothing here",
+   * which is a different claim from "zero calories" and must stay one.
+   */
+  days: (number | null)[];
+  isLoading: boolean;
+  /** Every day failed. A PARTIAL failure stays visible as nulls in `days`. */
+  isError: boolean;
+  /**
+   * Refetches all seven days. Lives here rather than the caller because this
+   * hook fans out into seven separate queries — a caller retrying would have
+   * to know the key family, which is this module's business, not a screen's.
+   */
+  refetch: () => void;
+} {
   const dates: string[] = [];
   const end = new Date(`${endDate}T00:00:00`);
   for (let i = 6; i >= 0; i--) {
@@ -901,12 +925,18 @@ export function useAvgIntake7d(endDate: string): { avg: number | null; series: n
   });
 
   const isLoading = results.some((r) => r.isLoading);
-  const series = results
-    .filter((r) => r.isSuccess && typeof r.data?.consumed?.kcal === "number" && r.data.consumed.kcal > 0)
-    .map((r) => r.data!.consumed.kcal);
+  const hasKcal = (r: (typeof results)[number]) =>
+    r.isSuccess && typeof r.data?.consumed?.kcal === "number" && r.data.consumed.kcal > 0;
+  const series = results.filter(hasKcal).map((r) => r.data!.consumed.kcal);
+  // Positional twin of `series` — same order as `dates`, holes preserved.
+  const days = results.map((r) => (hasKcal(r) ? r.data!.consumed.kcal : null));
   const avg = series.length > 0 ? Math.round(series.reduce((sum, kcal) => sum + kcal, 0) / series.length) : null;
+  const isError = results.length > 0 && results.every((r) => r.isError);
+  const refetch = () => {
+    for (const r of results) void r.refetch();
+  };
 
-  return { avg, series, isLoading };
+  return { avg, series, days, isLoading, isError, refetch };
 }
 
 export function useAddWater() {

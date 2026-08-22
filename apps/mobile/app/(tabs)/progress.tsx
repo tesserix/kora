@@ -74,12 +74,20 @@ const shortDate = (isoStr: string) => new Date(isoStr).toLocaleDateString([], { 
 // but the most recent (rightmost, chronologically last) is unlabeled, and
 // only that last one is marked "today" — the one position the series' own
 // chronological ordering actually guarantees.
-function buildEnergyDays(series: number[], targetKcal: number): EnergyBarsDay[] {
-  const padded = Array(Math.max(0, 7 - series.length)).fill(0).concat(series).slice(-7);
+// `days` is POSITIONAL and may hold nulls — see useAvgIntake7d. It replaced a
+// filtered `series` that was padded back to seven here, which silently slid
+// every day after a gap one slot earlier and could label another day's
+// calories "today". A null keeps its slot and draws nothing.
+function buildEnergyDays(days: (number | null)[], targetKcal: number): EnergyBarsDay[] {
+  const slots: (number | null)[] = Array(Math.max(0, 7 - days.length)).fill(null).concat(days).slice(-7);
   const maxRef = targetKcal > 0 ? targetKcal / ENERGY_TARGET_FRACTION : 0;
-  return padded.map((kcal, i) => {
-    const fraction = maxRef > 0 ? Math.min(kcal / maxRef, 1) : 0;
-    return { label: i === padded.length - 1 ? "today" : "—", fraction, over: targetKcal > 0 && kcal > targetKcal };
+  return slots.map((kcal, i) => {
+    const label = i === slots.length - 1 ? "today" : "—";
+    // No reading, or no target to scale against: either way there is nothing
+    // honest to draw. A bar scaled by a zero target would read as "nothing
+    // eaten" when the truth is "we do not know the budget".
+    if (kcal === null || maxRef <= 0) return { label, fraction: 0, over: false, noData: true };
+    return { label, fraction: Math.min(kcal / maxRef, 1), over: targetKcal > 0 && kcal > targetKcal };
   });
 }
 
@@ -237,7 +245,7 @@ export default function Progress() {
   const streakDays = dash?.streak_days ?? 0;
   const targetKcal = dash?.targets?.kcal ?? 0;
 
-  const energyDays = buildEnergyDays(avgIntake.series, targetKcal);
+  const energyDays = buildEnergyDays(avgIntake.days, targetKcal);
   // Data-honesty fix (task-11 review, finding 1): `streak_days` is the general
   // logging streak (any day with a logged entry), not a per-day protein-goal
   // hit — the dashboard has no such history. Labeling the panel "Protein
@@ -405,9 +413,21 @@ export default function Progress() {
         <Animated.View entering={enter(2)}>
           <GlassPanel radius={22} style={{ padding: 16 }}>
             <AppText style={mutedLabel}>Energy vs budget</AppText>
-            <View style={{ marginTop: 10 }}>
-              <EnergyBars days={energyDays} />
-            </View>
+            {/* Same rule the streak panel below states in its own words: a row
+                of empty bars is a CLAIM about what was eaten, so it must not
+                stand in for days we could not load. Only a total failure
+                replaces the chart — a partial one keeps its days and shows the
+                missing ones as empty slots, which is the more honest answer. */}
+            {avgIntake.isError ? (
+              <LoadErrorNotice
+                message="Couldn't load your energy history."
+                onRetry={() => avgIntake.refetch()}
+              />
+            ) : (
+              <View style={{ marginTop: 10 }}>
+                <EnergyBars days={energyDays} />
+              </View>
+            )}
             <View style={{ flexDirection: "row", alignItems: "center", gap: 14, marginTop: 10 }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
                 <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: instrument.tickLit, opacity: 0.72 }} />
