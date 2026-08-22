@@ -1,4 +1,4 @@
-import type { WeightSource } from "@/api/types";
+import type { BodyCompositionReading, WeightSource } from "@/api/types";
 import { kgFromLb, lbFromKg, type UnitSystem } from "@/units";
 import {
   COMPOSITION_METRICS,
@@ -32,10 +32,23 @@ export type CompositionValues = Partial<Record<CompositionMetricKey, number>>;
  * Optional metrics are OMITTED, not set to undefined and not set to 0 — the
  * server's columns are nullable pointers and a key that is never present is
  * the only shape that reaches them as SQL NULL.
+ *
+ * `logged_at`/`local_date` (kora#314's date row) are sent on EVERY save, not
+ * only an edited one — the alternative, sending them only when the date was
+ * actually changed, would need the caller to remember what "unchanged" was.
+ * A payload that always states its own date is simpler to reason about, and
+ * it costs nothing: when the date is untouched it is just today, which is
+ * what the server would have defaulted to anyway. See useAddWeight in
+ * src/api/hooks.ts for the trap this exists to close — that hook used to
+ * hardcode `local_date` to today unconditionally, which would silently
+ * clobber this field.
  */
-export type AddWeightPayload = { weight_kg: number; source: WeightSource } & Partial<
-  Record<Exclude<CompositionMetricKey, "weight_kg">, number>
->;
+export type AddWeightPayload = {
+  weight_kg: number;
+  source: WeightSource;
+  logged_at?: string;
+  local_date?: string;
+} & Partial<Record<Exclude<CompositionMetricKey, "weight_kg">, number>>;
 
 export type CompositionErrors = Partial<Record<CompositionMetricKey, string>>;
 
@@ -169,4 +182,60 @@ export function previewValues(draft: CompositionDraft, system: UnitSystem): Comp
       return inRange(metric, stored) ? [[metric.key, stored]] : [];
     }),
   );
+}
+
+export type ReadingDateResult = { ok: true; value: string } | { ok: false; error: string };
+
+const READING_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Validates the date row BodyCompositionForm adds for kora#314 (see that
+ * component's doc comment). Kept separate from parseCompositionDraft because
+ * a date is not a composition metric: it never unit-converts and its only
+ * bound is "not in the future", not a numeric range.
+ *
+ * `today` is passed in — "YYYY-MM-DD" — rather than read from `Date.now()`
+ * here, so this stays as pure and testable as every other function in this
+ * file. The server (internal/bodyread/validate.go) additionally grants one
+ * day of grace on reading_date for timezone skew between the SCREENSHOT's
+ * own clock and the server's; that grace does not belong here, because this
+ * validates what the user just TYPED against the DEVICE's own idea of today
+ * — no skew to explain.
+ */
+export function parseReadingDate(text: string, today: string): ReadingDateResult {
+  const trimmed = text.trim();
+  if (!READING_DATE_RE.test(trimmed)) return { ok: false, error: "Enter a date as YYYY-MM-DD." };
+  // The shape check above is not enough on its own: it accepts 2026-02-31,
+  // 2026-13-45 and 2026-00-00, all of which are well-formed and none of
+  // which exist. Go's time.Parse rejects them server-side, so the entry is
+  // never stored — but the user would see a generic save failure instead of
+  // being told the date isn't real, having typed something the form appeared
+  // to accept. Round-tripping through a UTC Date (never local — a local
+  // Date shifts the day either side of midnight for most of the world)
+  // catches exactly the dates the regex cannot.
+  const [year, month, day] = trimmed.split("-").map(Number);
+  const roundTrip = new Date(Date.UTC(year, month - 1, day));
+  if (
+    roundTrip.getUTCFullYear() !== year ||
+    roundTrip.getUTCMonth() !== month - 1 ||
+    roundTrip.getUTCDate() !== day
+  ) {
+    return { ok: false, error: "That date doesn't exist. Enter it as YYYY-MM-DD." };
+  }
+  if (trimmed > today) return { ok: false, error: "Date can't be in the future." };
+  return { ok: true, value: trimmed };
+}
+
+/**
+ * Turns what the vision pass read into BodyCompositionForm's `initialValues`
+ * (kora#314). A structural copy, not a rebuild field-by-field: every numeric
+ * key on `BodyCompositionReading` is already named identically to a
+ * `CompositionMetricKey`, and JSON's `omitempty` on the wire means a field
+ * the model never saw is simply ABSENT from `reading` — so dropping
+ * `reading_date` (not a composition metric) is the only work this needs to
+ * do. No `?? 0` anywhere on this path: an absent key stays absent.
+ */
+export function compositionValuesFromReading(reading: BodyCompositionReading): CompositionValues {
+  const { reading_date: _readingDate, ...metrics } = reading;
+  return metrics;
 }

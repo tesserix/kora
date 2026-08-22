@@ -4,6 +4,11 @@ import { BodyCompositionSheet } from "../BodyCompositionSheet";
 const mockAddMutate = jest.fn();
 jest.mock("@/api/hooks", () => ({ useAddWeight: () => ({ mutate: mockAddMutate, isPending: false }) }));
 
+// See BodyCompositionForm.test.tsx's own comment: the date row (kora#314)
+// defaults to today via localDateNow(), fixed here for a deterministic payload.
+jest.mock("@/lib/localDate", () => ({ localDateNow: () => "2026-08-22" }));
+const todayFields = { logged_at: "2026-08-22T12:00:00Z", local_date: "2026-08-22" };
+
 beforeEach(() => {
   mockAddMutate.mockClear();
 });
@@ -19,7 +24,7 @@ test("hands the parsed payload straight to useAddWeight and closes on success", 
 
   expect(mockAddMutate).toHaveBeenCalledTimes(1);
   const [payload, handlers] = mockAddMutate.mock.calls[0];
-  expect(payload).toEqual({ weight_kg: 70.2, visceral_fat_rating: 7, source: "manual" });
+  expect(payload).toEqual({ weight_kg: 70.2, visceral_fat_rating: 7, source: "manual", ...todayFields });
   await act(async () => handlers.onSuccess());
   expect(onClose).toHaveBeenCalled();
 });

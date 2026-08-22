@@ -7,6 +7,7 @@ import { Overline } from "@/components/Overline";
 import { SegmentedGlass } from "@/components/instrument/SegmentedGlass";
 import type { WeightSource } from "@/api/types";
 import { derivedComposition } from "@/lib/bodyComposition";
+import { localDateNow } from "@/lib/localDate";
 import {
   COMPOSITION_METRICS,
   MANUAL_SOURCES,
@@ -18,6 +19,7 @@ import {
 import {
   draftFromValues,
   parseCompositionDraft,
+  parseReadingDate,
   previewValues,
   type AddWeightPayload,
   type CompositionDraft,
@@ -38,6 +40,14 @@ export interface BodyCompositionFormProps {
    * here becomes a typed 0 and is written as a measurement.
    */
   initialValues?: CompositionValues;
+  /**
+   * The calendar date this reading is FOR, "YYYY-MM-DD" — #314's screenshot
+   * reader's own `reading_date` when it read one legibly, absent otherwise.
+   * Kept separate from `initialValues`: a date is not a numeric composition
+   * metric and `draftFromValues` has no notion of one. Absent means "today",
+   * same as a manual entry gets when this prop is never passed at all.
+   */
+  initialReadingDate?: string;
   /**
    * The instruments the user may choose between. One entry renders as a stated
    * fact rather than a control, which is what a screenshot import wants: the
@@ -73,11 +83,17 @@ export interface BodyCompositionFormProps {
  *   derive-don't-store rule where the user can see it rather than only in the
  *   model. There is deliberately no field for them.
  *
+ * A fourth rule, added for #314: the date row defaults to today and is
+ * always editable, and every save states its own `logged_at`/`local_date`
+ * explicitly rather than letting the caller's mutation default it — see
+ * useAddWeight's own comment on the bug that guards against.
+ *
  * Not offered here, and not an oversight: this form does not edit an existing
  * entry. `POST /v1/weight` only creates.
  */
 export function BodyCompositionForm({
   initialValues,
+  initialReadingDate,
   sources = MANUAL_SOURCES,
   heightCm,
   submitting = false,
@@ -94,6 +110,8 @@ export function BodyCompositionForm({
   const [draft, setDraft] = useState<CompositionDraft>(() => draftFromValues(initialValues ?? {}, system));
   const [errors, setErrors] = useState<CompositionErrors>({});
   const [source, setSource] = useState<WeightSource>(sources[0] ?? "manual");
+  const [dateText, setDateText] = useState<string>(() => initialReadingDate ?? localDateNow());
+  const [dateError, setDateError] = useState<string | null>(null);
 
   const setField = (metric: CompositionMetric, text: string) => {
     // A new object, never a mutation of the old draft — and the field's error
@@ -115,12 +133,27 @@ export function BodyCompositionForm({
 
   const onSave = () => {
     const result = parseCompositionDraft(draft, source, system);
-    if (!result.ok) {
-      setErrors(result.errors);
+    const dateResult = parseReadingDate(dateText, localDateNow());
+    // Both are validated before either error is shown, matching
+    // parseCompositionDraft's own "report every bad field at once" rule —
+    // a save attempt with a bad weight AND a bad date should not require two
+    // separate taps to see both messages.
+    if (!result.ok || !dateResult.ok) {
+      setErrors(result.ok ? {} : result.errors);
+      setDateError(dateResult.ok ? null : dateResult.error);
       return;
     }
     setErrors({});
-    onSubmit(result.payload);
+    setDateError(null);
+    onSubmit({
+      ...result.payload,
+      // "T12:00:00Z" mirrors diary.tsx's own water-logging pattern for a
+      // date-only entry: a fixed midday-UTC instant keeps logged_at inside
+      // localday.Resolve's one-day-either-side tolerance for any real
+      // timezone, without claiming a time of day nothing actually recorded.
+      logged_at: `${dateResult.value}T12:00:00Z`,
+      local_date: dateResult.value,
+    });
   };
 
   const massUnit = weightUnitLabel(system);
@@ -151,6 +184,25 @@ export function BodyCompositionForm({
         )}
         <AppText muted style={{ fontSize: 12 }}>
           Two instruments measure these differently, so Kora charts each one separately rather than joining them.
+        </AppText>
+      </View>
+
+      <View style={{ gap: 4 }}>
+        <Field
+          label="Date"
+          testID="composition-date"
+          accessibilityLabel="Reading date"
+          value={dateText}
+          onChangeText={(text) => {
+            setDateText(text);
+            setDateError(null);
+          }}
+          keyboardType="numbers-and-punctuation"
+          placeholder="YYYY-MM-DD"
+          error={dateError ?? undefined}
+        />
+        <AppText muted style={{ fontSize: 12 }}>
+          Defaults to today — change it if this reading is from another day.
         </AppText>
       </View>
 

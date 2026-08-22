@@ -7,6 +7,13 @@ jest.mock("@/units", () => ({
   useUnits: () => mockUseUnits(),
 }));
 
+// The date row (kora#314) defaults to "today" via localDateNow() — fixed
+// here so these tests don't flip on whatever day they happen to run, and so
+// every payload assertion below can state the date literally.
+jest.mock("@/lib/localDate", () => ({ localDateNow: () => "2026-08-22" }));
+const TODAY = "2026-08-22";
+const todayFields = { logged_at: `${TODAY}T12:00:00Z`, local_date: TODAY };
+
 beforeEach(() => {
   mockUseUnits.mockReturnValue({ system: "metric", setSystem: jest.fn() });
 });
@@ -27,7 +34,7 @@ test("saves only the fields that were filled, omitting the rest entirely", async
 
   expect(onSubmit).toHaveBeenCalledTimes(1);
   const payload = onSubmit.mock.calls[0][0];
-  expect(payload).toEqual({ weight_kg: 70.2, body_fat_pct: 24.2, source: "manual" });
+  expect(payload).toEqual({ weight_kg: 70.2, body_fat_pct: 24.2, source: "manual", ...todayFields });
   // The eight untouched metrics are absent, not zero.
   expect("visceral_fat_rating" in payload).toBe(false);
   expect("muscle_mass_kg" in payload).toBe(false);
@@ -40,7 +47,7 @@ test("a weight-only entry carries the weight and nothing else — not nine zeroe
   await fireEvent.press(getByText("Save"));
   // Exact equality on purpose: this is the assertion that fails if anything on
   // the path from field to payload ever coalesces an untouched metric to 0.
-  expect(onSubmit.mock.calls[0][0]).toEqual({ weight_kg: 70.2, source: "manual" });
+  expect(onSubmit.mock.calls[0][0]).toEqual({ weight_kg: 70.2, source: "manual", ...todayFields });
 });
 
 test("refuses to save without a weight, and says so on the field", async () => {
@@ -172,6 +179,7 @@ describe("reuse as kora#314's confirm surface", () => {
       weight_kg: 70.2,
       body_fat_pct: 23.9,
       source: "scale_screenshot",
+      ...todayFields,
     });
   });
 
@@ -181,6 +189,71 @@ describe("reuse as kora#314's confirm surface", () => {
     );
     expect(getByTestId("composition-source-fixed").props.children).toBe("Scale screenshot");
     expect(queryByTestId("composition-source")).toBeNull();
+  });
+});
+
+describe("the date row (kora#314)", () => {
+  test("defaults to today when no reading date is supplied", async () => {
+    const { getByLabelText } = await render(<BodyCompositionForm onSubmit={jest.fn()} />);
+    expect(getByLabelText("Reading date").props.value).toBe(TODAY);
+  });
+
+  test("pre-fills the screenshot's own reading date when one is given", async () => {
+    const { getByLabelText } = await render(
+      <BodyCompositionForm initialReadingDate="2026-08-19" onSubmit={jest.fn()} />,
+    );
+    expect(getByLabelText("Reading date").props.value).toBe("2026-08-19");
+  });
+
+  test("an edited date is what the payload carries, as logged_at and local_date", async () => {
+    const onSubmit = jest.fn();
+    const { getByLabelText, getByText } = await render(<BodyCompositionForm onSubmit={onSubmit} />);
+    await fireEvent.changeText(getByLabelText("Weight in kilograms"), "70.2");
+    await fireEvent.changeText(getByLabelText("Reading date"), "2026-08-19");
+    await fireEvent.press(getByText("Save"));
+    expect(onSubmit.mock.calls[0][0]).toEqual({
+      weight_kg: 70.2,
+      source: "manual",
+      logged_at: "2026-08-19T12:00:00Z",
+      local_date: "2026-08-19",
+    });
+  });
+
+  test("refuses to save a future date, and says so on the field", async () => {
+    const onSubmit = jest.fn();
+    const { getByLabelText, getByText, getAllByTestId } = await render(
+      <BodyCompositionForm onSubmit={onSubmit} />,
+    );
+    await fireEvent.changeText(getByLabelText("Weight in kilograms"), "70.2");
+    await fireEvent.changeText(getByLabelText("Reading date"), "2026-08-23");
+    await fireEvent.press(getByText("Save"));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(getAllByTestId("field-error").map((n) => n.props.children)).toContain("Date can't be in the future.");
+  });
+
+  test("refuses a malformed date", async () => {
+    const onSubmit = jest.fn();
+    const { getByLabelText, getByText, getAllByTestId } = await render(
+      <BodyCompositionForm onSubmit={onSubmit} />,
+    );
+    await fireEvent.changeText(getByLabelText("Weight in kilograms"), "70.2");
+    await fireEvent.changeText(getByLabelText("Reading date"), "19/08/2026");
+    await fireEvent.press(getByText("Save"));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(getAllByTestId("field-error").map((n) => n.props.children)).toContain("Enter a date as YYYY-MM-DD.");
+  });
+
+  test("a date error clears as soon as the field is corrected, like every other field", async () => {
+    const onSubmit = jest.fn();
+    const { getByLabelText, getByText, queryAllByTestId } = await render(
+      <BodyCompositionForm onSubmit={onSubmit} />,
+    );
+    await fireEvent.changeText(getByLabelText("Weight in kilograms"), "70.2");
+    await fireEvent.changeText(getByLabelText("Reading date"), "2026-08-23");
+    await fireEvent.press(getByText("Save"));
+    expect(queryAllByTestId("field-error")).toHaveLength(1);
+    await fireEvent.changeText(getByLabelText("Reading date"), "2026-08-19");
+    expect(queryAllByTestId("field-error")).toHaveLength(0);
   });
 });
 

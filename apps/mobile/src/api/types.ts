@@ -495,6 +495,53 @@ export type WeightEntry = {
   source: WeightSource;
 };
 
+/**
+ * What POST /v1/body-composition/read returns (kora#314, PR B) — the vision
+ * pass' best legible read of a smart-scale screenshot. Mirrors
+ * api/internal/ai/types.go's BodyCompositionReading field for field. Every
+ * field is OPTIONAL and an absent one means the model could not see it,
+ * NEVER a measured zero — the same rule WeightEntry's composition fields
+ * carry, for the same reason.
+ */
+export type BodyCompositionReading = {
+  weight_kg?: number;
+  body_fat_pct?: number;
+  subcutaneous_fat_pct?: number;
+  /** A vendor RATING, not a percentage — see WeightEntry's own note. */
+  visceral_fat_rating?: number;
+  skeletal_muscle_pct?: number;
+  muscle_mass_kg?: number;
+  body_water_pct?: number;
+  protein_pct?: number;
+  bone_mass_kg?: number;
+  scale_bmr_kcal?: number;
+  /**
+   * "YYYY-MM-DD" — the calendar date the SCREENSHOT ITSELF shows, never a
+   * timestamp and never today's date by default. Absent when not legible.
+   */
+  reading_date?: string;
+};
+
+/** One field the reader saw but discarded, and why — mirrors api/internal/bodyread.DroppedField. */
+export type BodyCompositionDroppedField = {
+  field: string;
+  reason: string;
+};
+
+/**
+ * The full response body of POST /v1/body-composition/read.
+ *
+ * WRITES NOTHING — this endpoint only reads. Nothing here is saved until the
+ * user confirms via BodyCompositionForm and useAddWeight.
+ */
+export type BodyCompositionReadResult = {
+  reading: BodyCompositionReading;
+  /** Always an array, never null — the server initializes it non-nil so every client handles one empty shape. */
+  dropped_fields: BodyCompositionDroppedField[];
+  /** True only when NOTHING at all survived validation — the handler maps this to a 422 instead, so a client never actually sees `true` here; kept because it's on the wire. */
+  unreadable: boolean;
+};
+
 export type ResolveTier = "auto" | "confirm" | "follow_up";
 
 // The food-log `source` value the server actually accepts — its allowlist is

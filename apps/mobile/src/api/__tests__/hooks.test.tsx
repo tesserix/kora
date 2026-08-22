@@ -52,6 +52,7 @@ import {
   useNotifications,
   usePins,
   useProfile,
+  useReadBodyComposition,
   useRenameGroup,
   useRepeatLog,
   useResolveBarcode,
@@ -561,6 +562,27 @@ test("useResolvePhoto posts to /v1/resolve/photo and returns the normalized reso
   expect(result.current.data).toEqual(resolution);
 });
 
+// kora#314 PR B: reads a smart-scale screenshot, writes nothing. Same
+// multipart shape as useResolvePhoto — this asserts the file is posted to the
+// RIGHT endpoint and the RIGHT-shaped result flows through untouched, which
+// is the only thing this thin wrapper is responsible for; useReadBodyComposition
+// itself does no parsing of the response.
+test("useReadBodyComposition posts to /v1/body-composition/read and returns the reading", async () => {
+  const readResult = {
+    reading: { weight_kg: 70.2, reading_date: "2026-08-19" },
+    dropped_fields: [{ field: "bone_mass_kg", reason: "bone_mass_kg -3.1 is not positive" }],
+    unreadable: false,
+  };
+  (apiFetchMultipart as jest.Mock).mockResolvedValueOnce(readResult);
+
+  const { result } = await renderHook(() => useReadBodyComposition(), { wrapper });
+  result.current.mutate({ uri: "file:///scale.jpg", name: "scale.jpg", type: "image/jpeg" });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+  expect(apiFetchMultipart).toHaveBeenCalledWith("/v1/body-composition/read", expect.any(FormData));
+  expect(result.current.data).toEqual(readResult);
+});
+
 test("useResolveVoice posts to /v1/resolve/voice and returns the normalized resolution", async () => {
   (apiFetchMultipart as jest.Mock).mockResolvedValueOnce(resolution);
 
@@ -680,6 +702,30 @@ test("useAddWeight POSTs /v1/weight and invalidates weight", async () => {
   expect(apiFetch).toHaveBeenCalledWith("/v1/weight", {
     method: "POST",
     body: JSON.stringify({ weight_kg: 72.4, logged_at: undefined, local_date: localDateNow() }),
+  });
+});
+
+// THE TRAP (kora#314): useAddWeight used to hardcode `local_date:
+// localDateNow()` unconditionally, spread in LAST, which silently clobbered
+// any local_date the caller supplied. BodyCompositionForm's date row lets a
+// user confirm a scale reading dated days in the past — if this override
+// were ever dropped, the entry would be filed under TODAY's calendar day
+// regardless of what the user confirmed. Mutation-checked: reverting
+// useAddWeight's `vars.local_date ?? localDateNow()` back to the bare
+// `localDateNow()` call turns this red (it asserts a fixed past date the
+// bug's hardcoded value can never produce).
+test("useAddWeight lets a caller-supplied local_date override today's default", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({ id: "w2" });
+  const { result } = await renderHook(() => useAddWeight(), { wrapper });
+  result.current.mutate({ weight_kg: 68.5, logged_at: "2026-08-19T12:00:00Z", local_date: "2026-08-19" });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(apiFetch).toHaveBeenCalledWith("/v1/weight", {
+    method: "POST",
+    body: JSON.stringify({
+      weight_kg: 68.5,
+      logged_at: "2026-08-19T12:00:00Z",
+      local_date: "2026-08-19",
+    }),
   });
 });
 
