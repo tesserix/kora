@@ -1,0 +1,344 @@
+//go:build smoke
+
+package bodyread
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/tesserix/kora/api/internal/ai"
+	"github.com/tesserix/kora/api/internal/ai/providers"
+)
+
+// Fixture directory layout (KORA_BODY_COMP_FIXTURES_DIR):
+//
+//	$KORA_BODY_COMP_FIXTURES_DIR/
+//	  renpho/
+//	    001/
+//	      image.jpg          (or .jpeg / .png — any of these three)
+//	      expected.json
+//	    002/
+//	      image.png
+//	      expected.json
+//	  omron/
+//	    001/
+//	      image.jpg
+//	      expected.json
+//
+// One subdirectory per scale app (kora#314's acceptance criterion needs
+// proof against at least Renpho and Omron, the two apps the schema was
+// measured off — see BodyCompositionReading's doc comment in
+// internal/ai/types.go). Under each app directory, one subdirectory per
+// fixture case, each holding exactly one image file named "image" with
+// extension .jpg, .jpeg, or .png, plus a sidecar "expected.json" giving the
+// values a real model call should recover. Every field in expected.json is
+// OPTIONAL — omit whatever the screenshot does not legibly show, and this
+// test only asserts the fields that are present:
+//
+//	{
+//	  "weight_kg": 82.4,               // asserted within ±0.5kg
+//	  "visceral_fat_rating_present": true, // asserted non-nil, NOT range-checked
+//	  "reading_date": "2026-08-12"      // asserted present and equal
+//	}
+//
+// This test walks every "expected.json" found anywhere under the directory
+// (via filepath.WalkDir), so adding a fixture is just adding a new
+// subdirectory — no code change and no hardcoded path.
+//
+// Real scale screenshots are personal health data (weight, body-fat
+// percentage, and similar) and MUST NEVER be committed to this repository.
+// This test reads ONLY from the local, non-repo directory named by
+// KORA_BODY_COMP_FIXTURES_DIR — it does not ship any fixtures, and no
+// placeholder directory (not even an empty one with a .gitkeep) exists
+// under api/ for this purpose, on purpose: a tracked placeholder is an
+// invitation for someone to drop real screenshots into a path git watches.
+// Set up your own fixtures directory outside this repo to run this test.
+
+// fixtureExpectation is the sidecar JSON shape described above. Every field
+// is a pointer/zero-value-omittable so "not documented for this fixture"
+// and "documented as absent" stay distinguishable — same reasoning as
+// ai.BodyCompositionReading itself.
+type fixtureExpectation struct {
+	WeightKg                 *float64 `json:"weight_kg,omitempty"`
+	VisceralFatRatingPresent bool     `json:"visceral_fat_rating_present,omitempty"`
+	ReadingDate              string   `json:"reading_date,omitempty"`
+}
+
+// weightToleranceKg is how far a live model's read weight may drift from a
+// fixture's documented value and still count as correct. Loose on purpose —
+// this test pins "the model can read a scale screenshot," not "the model
+// reads to sub-gram precision."
+const weightToleranceKg = 0.5
+
+// bodyCompFixture is one discovered fixture: its image bytes, MIME type, and
+// documented expectations.
+type bodyCompFixture struct {
+	label    string // e.g. "renpho/001", used in test failure output
+	image    []byte
+	mime     string
+	expected fixtureExpectation
+}
+
+// loadBodyCompFixtures walks dir for every "expected.json" sidecar and pairs
+// it with the "image.*" file in the same directory. Fails the test (rather
+// than skipping) if a sidecar has no matching image, or an image extension
+// is not one this test knows how to MIME-type — a malformed fixture
+// directory should be loud, not silently skipped, since a silent skip could
+// hide the exact live-model verification this test exists to provide.
+func loadBodyCompFixtures(t *testing.T, dir string) []bodyCompFixture {
+	t.Helper()
+
+	var fixtures []bodyCompFixture
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || d.Name() != "expected.json" {
+			return nil
+		}
+
+		fixtureDir := filepath.Dir(path)
+		label, relErr := filepath.Rel(dir, fixtureDir)
+		if relErr != nil {
+			label = fixtureDir
+		}
+
+		raw, readErr := os.ReadFile(path)
+		require.NoError(t, readErr, "reading sidecar for fixture %s", label)
+
+		var expected fixtureExpectation
+		require.NoError(t, json.Unmarshal(raw, &expected), "parsing sidecar for fixture %s", label)
+
+		imagePath, mime := findFixtureImage(t, fixtureDir, label)
+		imageBytes, imgErr := os.ReadFile(imagePath)
+		require.NoError(t, imgErr, "reading image for fixture %s", label)
+
+		fixtures = append(fixtures, bodyCompFixture{
+			label:    label,
+			image:    imageBytes,
+			mime:     mime,
+			expected: expected,
+		})
+		return nil
+	})
+	require.NoError(t, err, "walking fixtures directory %s", dir)
+
+	return fixtures
+}
+
+// findFixtureImage locates the "image.*" file in fixtureDir and returns its
+// path and MIME type. Fails the test if none of the three supported
+// extensions is present.
+func findFixtureImage(t *testing.T, fixtureDir, label string) (path, mime string) {
+	t.Helper()
+
+	candidates := map[string]string{
+		"image.jpg":  "image/jpeg",
+		"image.jpeg": "image/jpeg",
+		"image.png":  "image/png",
+	}
+	for name, m := range candidates {
+		p := filepath.Join(fixtureDir, name)
+		if _, err := os.Stat(p); err == nil {
+			return p, m
+		}
+	}
+	t.Fatalf("fixture %s: no image.jpg/.jpeg/.png found alongside expected.json", label)
+	return "", ""
+}
+
+// TestBodyComposition_Smoke makes ONE real Gemini call per discovered
+// fixture and asserts the live model's answer against each fixture's
+// documented expectations.
+//
+// This exists because every other test in this package drives a stub that
+// returns exactly the JSON the test asked for — proving decoding and
+// validation, but assuming away the part most likely to break: whether the
+// real prompt and schema actually get a real vision model to read a real
+// scale screenshot correctly. This test calls ai.Provider directly (not
+// bodyread.Reader) — validation is bodyread's job and is already covered by
+// validate_test.go; this test is provider+prompt+schema only.
+//
+// Excluded from `go test ./...` (needs `-tags smoke`) and gated on BOTH
+// GEMINI_API_KEY and KORA_BODY_COMP_FIXTURES_DIR, so it never runs by
+// accident and never runs against a directory that doesn't exist.
+func TestBodyComposition_Smoke(t *testing.T) {
+	apiKey := os.Getenv("GEMINI_API_KEY")
+	fixturesDir := os.Getenv("KORA_BODY_COMP_FIXTURES_DIR")
+	if apiKey == "" || fixturesDir == "" {
+		t.Skip("GEMINI_API_KEY and KORA_BODY_COMP_FIXTURES_DIR must both be set; skipping live body-composition smoke test")
+	}
+
+	fixtures := loadBodyCompFixtures(t, fixturesDir)
+	require.NotEmpty(t, fixtures, "fixtures directory %s contained no expected.json sidecars", fixturesDir)
+
+	ctx := context.Background()
+	provider, err := providers.NewGeminiProvider(ctx, apiKey)
+	require.NoError(t, err)
+
+	for _, fx := range fixtures {
+		fx := fx
+		t.Run(fx.label, func(t *testing.T) {
+			reading, _, err := provider.IdentifyBodyComposition(ctx, fx.image, fx.mime)
+			require.NoError(t, err, "a real model call must succeed for a legible scale screenshot")
+
+			assertBodyCompReading(t, fx, reading)
+		})
+	}
+}
+
+// assertBodyCompReading holds the loose, shared assertions both
+// TestBodyComposition_Smoke and TestBodyComposition_ThroughRouter_Smoke
+// apply to a live reading. Loose on purpose: an exact live-model answer
+// isn't pinned, but each assertion still proves something real did come
+// back rather than the response being silently empty or mis-shaped.
+func assertBodyCompReading(t *testing.T, fx bodyCompFixture, reading ai.BodyCompositionReading) {
+	t.Helper()
+
+	if fx.expected.WeightKg != nil {
+		require.NotNil(t, reading.WeightKg, "fixture %s: weight_kg expected but not returned", fx.label)
+		diff := *reading.WeightKg - *fx.expected.WeightKg
+		if diff < 0 {
+			diff = -diff
+		}
+		require.LessOrEqualf(t, diff, weightToleranceKg,
+			"fixture %s: weight_kg %.2f too far from expected %.2f", fx.label, *reading.WeightKg, *fx.expected.WeightKg)
+	}
+
+	if fx.expected.VisceralFatRatingPresent {
+		// The point here is NOT range-checking — VisceralFatRating is a
+		// vendor rating, not a percentage (see BodyCompositionReading's doc
+		// comment), and validating it as 0-100 is explicitly bodyread's
+		// mistake to not make, not this test's. This only proves the field
+		// decoded and was not silently dropped.
+		require.NotNil(t, reading.VisceralFatRating,
+			"fixture %s: visceral_fat_rating expected but not returned", fx.label)
+	}
+
+	if fx.expected.ReadingDate != "" {
+		require.NotNil(t, reading.ReadingDate, "fixture %s: reading_date expected but not returned", fx.label)
+		require.Equal(t, fx.expected.ReadingDate, *reading.ReadingDate, "fixture %s: reading_date mismatch", fx.label)
+		_, parseErr := time.Parse("2006-01-02", *reading.ReadingDate)
+		require.NoError(t, parseErr, "fixture %s: reading_date %q must parse as YYYY-MM-DD", fx.label, *reading.ReadingDate)
+	}
+
+	t.Logf("fixture %s: weight=%v body_fat_pct=%v visceral=%v reading_date=%v",
+		fx.label, derefFloat(reading.WeightKg), derefFloat(reading.BodyFatPct),
+		derefFloat(reading.VisceralFatRating), derefString(reading.ReadingDate))
+}
+
+// TestBodyComposition_ThroughRouter_Smoke drives the SAME construction
+// main.go's directProviders builds — Gemini primary behind ai.Router — to
+// prove the photoBudget (which IdentifyBodyComposition shares with
+// IdentifyPhoto, see router.go's doc comment on IdentifyBodyComposition) is
+// wide enough for a real body-composition call, not just an
+// IdentifyPhoto-style single-guess vision call. TestBodyComposition_Smoke
+// above only proves the raw provider works; this proves the budget the
+// Router actually enforces in production doesn't starve it.
+func TestBodyComposition_ThroughRouter_Smoke(t *testing.T) {
+	apiKey := os.Getenv("GEMINI_API_KEY")
+	fixturesDir := os.Getenv("KORA_BODY_COMP_FIXTURES_DIR")
+	if apiKey == "" || fixturesDir == "" {
+		t.Skip("GEMINI_API_KEY and KORA_BODY_COMP_FIXTURES_DIR must both be set; skipping live router body-composition smoke test")
+	}
+
+	fixtures := loadBodyCompFixtures(t, fixturesDir)
+	require.NotEmpty(t, fixtures, "fixtures directory %s contained no expected.json sidecars", fixturesDir)
+
+	ctx := context.Background()
+	gemini, err := providers.NewGeminiProvider(ctx, apiKey)
+	require.NoError(t, err)
+
+	// Fallback must be a DISTINCT, counting provider so a budget regression
+	// (primary killed too early) is visible rather than papered over by the
+	// fallback quietly answering instead — same reasoning as
+	// recipes.TestParseText_ThroughRouter_Smoke's countingProvider.
+	fallback := &countingBodyCompFallback{}
+	router := &ai.Router{Primary: gemini, Fallback: fallback}
+
+	for _, fx := range fixtures {
+		fx := fx
+		t.Run(fx.label, func(t *testing.T) {
+			start := time.Now()
+			reading, _, err := router.IdentifyBodyComposition(ctx, fx.image, fx.mime)
+			elapsed := time.Since(start)
+
+			require.NoError(t, err, "a real model call through the Router must succeed for a legible scale screenshot")
+			require.Zero(t, fallback.calls,
+				"the fallback was reached — IdentifyBodyComposition has no fallback path by design (router.go), so this indicates the primary errored, not a budget miss")
+
+			assertBodyCompReading(t, fx, reading)
+
+			// The mobile client's own upload deadline, mirrored from
+			// recipes.TestParseText_ThroughRouter_Smoke.
+			require.Less(t, elapsed, 20*time.Second,
+				"fixture %s: read took %s — too close to the client's own deadline", fx.label, elapsed)
+		})
+	}
+}
+
+// countingBodyCompFallback is an ai.Provider whose IdentifyBodyComposition
+// counts calls and refuses to answer. Used as the Router's fallback leg so
+// this test can assert the primary served every request — router.go's
+// IdentifyBodyComposition has no fallback path at all, so any non-zero
+// count here means the primary itself failed, not that a budget was missed.
+type countingBodyCompFallback struct{ calls int }
+
+func (p *countingBodyCompFallback) IdentifyText(context.Context, string) ([]ai.Guess, ai.Usage, error) {
+	return nil, ai.Usage{Provider: "counting"}, errBodyCompSmokeFallback
+}
+
+func (p *countingBodyCompFallback) IdentifyPhoto(context.Context, []byte, string) ([]ai.Guess, ai.Usage, error) {
+	return nil, ai.Usage{Provider: "counting"}, errBodyCompSmokeFallback
+}
+
+func (p *countingBodyCompFallback) IdentifyBodyComposition(context.Context, []byte, string) (ai.BodyCompositionReading, ai.Usage, error) {
+	p.calls++
+	return ai.BodyCompositionReading{}, ai.Usage{Provider: "counting"}, errBodyCompSmokeFallback
+}
+
+func (p *countingBodyCompFallback) Decompose(context.Context, string) ([]ai.IngredientGuess, ai.Usage, error) {
+	return nil, ai.Usage{Provider: "counting"}, errBodyCompSmokeFallback
+}
+
+func (p *countingBodyCompFallback) Embed(context.Context, string) ([]float32, ai.Usage, error) {
+	return nil, ai.Usage{Provider: "counting"}, errBodyCompSmokeFallback
+}
+
+func (p *countingBodyCompFallback) Transcribe(context.Context, []byte, string) (string, ai.Usage, error) {
+	return "", ai.Usage{Provider: "counting"}, errBodyCompSmokeFallback
+}
+
+func (p *countingBodyCompFallback) GenerateText(context.Context, string, string) (string, ai.Usage, error) {
+	return "", ai.Usage{Provider: "counting"}, errBodyCompSmokeFallback
+}
+
+func (p *countingBodyCompFallback) Name() string { return "counting" }
+
+var errBodyCompSmokeFallback = errBodyCompSmokeFallbackType{}
+
+type errBodyCompSmokeFallbackType struct{}
+
+func (errBodyCompSmokeFallbackType) Error() string {
+	return "fallback must not be reached: IdentifyBodyComposition has no fallback path by design"
+}
+
+func derefFloat(p *float64) any {
+	if p == nil {
+		return nil
+	}
+	return *p
+}
+
+func derefString(p *string) any {
+	if p == nil {
+		return nil
+	}
+	return *p
+}
