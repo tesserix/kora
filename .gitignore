@@ -41,3 +41,6 @@ dist/
 # and a 25 MB binary was swept into db7cc25 by a `git add -A`.
 *.ipa
 *.app.zip
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+graft/
