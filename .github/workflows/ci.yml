@@ -39,21 +39,23 @@ jobs:
           go test -race -p 1 -coverprofile=coverage.out ./...
 
   mobile:
-    uses: tesserix/tesserix-workflows/.github/workflows/ci.yml@1ecfb919104b0852ee507063af23d0625ee4ffef
+    uses: tesserix/tesserix-workflows/.github/workflows/expo-ci.yml@1ecfb919104b0852ee507063af23d0625ee4ffef
     with:
-      expo_enabled: true
-      expo_working_directory: apps/mobile
-      expo_install_directory: apps/mobile
-      expo_lockfile_path: apps/mobile/package-lock.json
-      expo_node_version: 22.19.0
-      expo_package_manager: npm
-      expo_lint_suppressions_path: apps/mobile/eslint-suppressions.json
-      expo_audit_config_path: apps/mobile/audit-ci.jsonc
+      working_directory: apps/mobile
+      install_directory: apps/mobile
+      lockfile_path: apps/mobile/package-lock.json
+      node_version: 22.19.0
+      package_manager: npm
+      lint_suppressions_path: apps/mobile/eslint-suppressions.json
+      audit_config_path: apps/mobile/audit-ci.jsonc
+
+  secrets:
+    uses: tesserix/tesserix-workflows/.github/workflows/secret-scan.yml@1ecfb919104b0852ee507063af23d0625ee4ffef
 
   gate:
     name: CI gate
     if: ${{ always() }}
-    needs: [api, mobile]
+    needs: [api, mobile, secrets]
     runs-on: ubuntu-latest
     steps:
       - name: Refuse failed or cancelled checks
