@@ -144,7 +144,23 @@ const bodyCompositionSystemPrompt = "You read a smart body-composition " +
 	"fat-free mass, lean mass, fat mass in kilograms, metabolic age, or " +
 	"any qualitative band or label such as \"Average\", \"Low\", \"High\", " +
 	"or \"Excellent\" — these are derived or vendor opinion, not " +
-	"measurements, and must never appear in your answer. Respond with " +
+	"measurements, and must never appear in your answer. " +
+	"instrument identifies WHICH PHYSICAL INSTRUMENT produced this image, " +
+	"and must be exactly one of \"scale_screenshot\", \"inbody\", \"dexa\", " +
+	"or null. \"scale_screenshot\" is a consumer smart-scale app (Renpho, " +
+	"Omron, Tanita, Eufy, Xiaomi, or similar) — the common case. " +
+	"\"inbody\" is an InBody clinical result sheet. \"dexa\" is a DEXA/DXA " +
+	"clinical scan report. Decide this ONLY from what is VISIBLE — app " +
+	"chrome, logos, branding text, screen layout, section headings, or " +
+	"report letterhead — and NEVER from the measurement values " +
+	"themselves. Do NOT reason \"these numbers look clinical, therefore " +
+	"DEXA\" or anything like it; that is inference, exactly the kind this " +
+	"whole task forbids for every other field. If the image does not " +
+	"CLEARLY show which of the three it is, answer null — a confident " +
+	"wrong guess here is worse than no answer, because two instruments " +
+	"can report the same-named metric completely differently and a wrong " +
+	"label would make a chart look like it changed when it did not. " +
+	"Respond with " +
 	"JSON only, matching the provided schema, using only the fields you " +
 	"can actually read."
 
@@ -292,7 +308,7 @@ func bodyCompositionResponseSchema() *genai.Schema {
 		Required: []string{
 			"weight_kg", "body_fat_pct", "subcutaneous_fat_pct", "visceral_fat_rating",
 			"skeletal_muscle_pct", "muscle_mass_kg", "body_water_pct", "protein_pct",
-			"bone_mass_kg", "scale_bmr_kcal", "reading_date_text",
+			"bone_mass_kg", "scale_bmr_kcal", "reading_date_text", "instrument",
 		},
 	}
 }
@@ -398,6 +414,22 @@ func bodyCompositionSchemaProperties() map[string]*genai.Schema {
 				"displayed reading; check all of those before concluding " +
 				"no date is shown. null ONLY if no date for THIS reading " +
 				"appears anywhere on screen.",
+		},
+		"instrument": {
+			Type:     genai.TypeString,
+			Nullable: genai.Ptr(true),
+			Description: "Which PHYSICAL INSTRUMENT produced this image — " +
+				"exactly one of \"scale_screenshot\" (a consumer smart-scale " +
+				"app: Renpho, Omron, Tanita, Eufy, Xiaomi, or similar), " +
+				"\"inbody\" (an InBody clinical result sheet), or \"dexa\" " +
+				"(a DEXA/DXA clinical scan report). Decide this ONLY from " +
+				"what is VISIBLE — app chrome, logos, branding text, screen " +
+				"layout, section headings, or report letterhead — and NEVER " +
+				"from the measurement values themselves; reasoning \"these " +
+				"numbers look clinical, therefore DEXA\" is exactly the " +
+				"kind of inference this whole schema forbids. null if the " +
+				"image does not CLEARLY show which of the three it is — a " +
+				"confident wrong guess here is worse than no answer.",
 		},
 	}
 }

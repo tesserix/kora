@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/tesserix/kora/api/internal/ai"
+	"github.com/tesserix/kora/api/internal/tracking"
 )
 
 // DroppedField records one field validateReading discarded from a provider's
@@ -57,6 +58,23 @@ const (
 	readingDateLayout = "2006-01-02"
 )
 
+// detectableInstruments is the allowlist for BodyCompositionReading.
+// Instrument — the subset of tracking.Sources a vision model could ever
+// legitimately DETECT from an image. Deliberately narrower than
+// tracking.Sources: "manual" and "healthkit" describe HOW a reading
+// entered Kora, not what is visible in a screenshot, so a model returning
+// either of those (or anything else) is malformed output, not a real
+// detection, and must be dropped exactly like any other implausible
+// value — never let it reach the client, since the write path's CHECK
+// constraint on weight_entries would still accept "manual"/"healthkit"
+// there and silently misattribute provenance for a reading that actually
+// came from a photo.
+var detectableInstruments = map[string]bool{
+	string(tracking.SourceScaleScreenshot): true,
+	string(tracking.SourceInBody):          true,
+	string(tracking.SourceDEXA):            true,
+}
+
 // validateReading returns a NEW reading with every implausible field set to
 // nil, plus the list of what was dropped and why. It never mutates r: each
 // field below is either carried over unchanged (the same pointer — the
@@ -92,6 +110,7 @@ func validateReading(r ai.BodyCompositionReading, now time.Time) (ai.BodyComposi
 		// same as before this fix.
 		ReadingDateText: r.ReadingDateText,
 		ReadingDate:     validateReadingDate(r.ReadingDate, now, &dropped),
+		Instrument:      validateInstrument(r.Instrument, &dropped),
 	}
 
 	return out, dropped
@@ -185,6 +204,28 @@ func validateReadingDate(s *string, now time.Time, dropped *[]DroppedField) *str
 	}
 
 	val := *s
+	return &val
+}
+
+// validateInstrument enforces the detectableInstruments allowlist (rule #3
+// on kora#314: the write path's CHECK constraint on weight_entries.source
+// would reject an unknown string outright and the user would lose an
+// otherwise-good, confirmed reading — this must never let that happen by
+// dropping anything outside the known three to nil BEFORE it reaches the
+// client). nil in, nil out — the model declining to detect an instrument is
+// not a drop, it is the conservative behavior kora#314 asks for.
+func validateInstrument(v *string, dropped *[]DroppedField) *string {
+	if v == nil {
+		return nil
+	}
+	if !detectableInstruments[*v] {
+		*dropped = append(*dropped, DroppedField{
+			Field:  "instrument",
+			Reason: fmt.Sprintf("instrument %q is not one of scale_screenshot, inbody, dexa", *v),
+		})
+		return nil
+	}
+	val := *v
 	return &val
 }
 

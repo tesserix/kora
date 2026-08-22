@@ -272,7 +272,16 @@ func TestOpenAITranscribeNotSupported(t *testing.T) {
 var bodyCompositionFieldNames = []string{
 	"weight_kg", "body_fat_pct", "subcutaneous_fat_pct", "visceral_fat_rating",
 	"skeletal_muscle_pct", "muscle_mass_kg", "body_water_pct", "protein_pct",
-	"bone_mass_kg", "scale_bmr_kcal", "reading_date_text",
+	"bone_mass_kg", "scale_bmr_kcal", "reading_date_text", "instrument",
+}
+
+// bodyCompositionStringFieldNames is the subset of bodyCompositionFieldNames
+// typed ["string", "null"] rather than ["number", "null"] — reading_date_text
+// (raw transcribed text) and instrument (one of three detected-instrument
+// strings), both prose rather than a measurement.
+var bodyCompositionStringFieldNames = map[string]bool{
+	"reading_date_text": true,
+	"instrument":        true,
 }
 
 func TestBodyCompositionJSONSchema_Shape(t *testing.T) {
@@ -302,8 +311,8 @@ func TestBodyCompositionJSONSchema_Shape(t *testing.T) {
 	for _, name := range bodyCompositionFieldNames {
 		prop, ok := props[name].(map[string]any)
 		require.Truef(t, ok, "property %q missing or not an object", name)
-		if name == "reading_date_text" {
-			assert.Equal(t, []string{"string", "null"}, prop["type"], "reading_date_text must be nullable string")
+		if bodyCompositionStringFieldNames[name] {
+			assert.Equal(t, []string{"string", "null"}, prop["type"], "%s must be nullable string", name)
 		} else {
 			assert.Equal(t, []string{"number", "null"}, prop["type"], "%s must be nullable number", name)
 		}

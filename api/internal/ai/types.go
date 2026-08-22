@@ -95,6 +95,37 @@ type BodyCompositionReading struct {
 	// ambiguous to resolve safely — PR B's editable date row is what
 	// catches both cases and the rare stale-screenshot case besides.
 	ReadingDate *string `json:"reading_date,omitempty"`
+	// Instrument is which physical instrument produced this reading, as one
+	// of tracking.Source's three device-detectable values (kept as a plain
+	// string here, not tracking.Source, so this package does not import
+	// internal/tracking — internal/bodyread converts and validates against
+	// the real constants):
+	//
+	//	"scale_screenshot" — a consumer smart-scale app (Renpho, Omron,
+	//	                      Tanita, Eufy, Xiaomi, ...)
+	//	"inbody"            — an InBody clinical result sheet
+	//	"dexa"              — a DEXA / DXA clinical scan report
+	//
+	// This is provenance, not metadata (migrations/000039_body_composition
+	// .up.sql): the same-named metric is not comparable across instruments
+	// — Renpho reports Skeletal Muscle at 48.9% where Omron reports 25.7%
+	// for the same body, and DEXA body fat differs from consumer
+	// bioimpedance by several points on the same day. A chart that joins
+	// two readings without checking this field can show a step change that
+	// never happened and read as real progress or real loss.
+	//
+	// MUST be detected from what is VISIBLE — app chrome, branding, layout,
+	// section headings — and NEVER from the measurement values themselves.
+	// "these numbers look clinical, therefore DEXA" is exactly the
+	// inference this field must not make; it is the same class of mistake
+	// this whole type exists to forbid for every other field (see the
+	// struct doc above). nil when the image does not clearly indicate an
+	// instrument class — a confident wrong answer here is worse than no
+	// answer, because it silently joins two incomparable readings into one
+	// trend line. A caller must never write anything other than the three
+	// values above; internal/bodyread's validation enforces that server
+	// side and drops anything else to nil.
+	Instrument *string `json:"instrument,omitempty"`
 }
 
 // Usage records one provider call for metering.

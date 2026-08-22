@@ -226,6 +226,68 @@ func TestValidateReading(t *testing.T) {
 			},
 		},
 		{
+			name:        "instrument scale_screenshot is kept",
+			in:          ai.BodyCompositionReading{Instrument: sptr("scale_screenshot")},
+			wantDropped: nil,
+			check: func(t *testing.T, out ai.BodyCompositionReading) {
+				require.NotNil(t, out.Instrument)
+				assert.Equal(t, "scale_screenshot", *out.Instrument)
+			},
+		},
+		{
+			name:        "instrument inbody is kept",
+			in:          ai.BodyCompositionReading{Instrument: sptr("inbody")},
+			wantDropped: nil,
+			check: func(t *testing.T, out ai.BodyCompositionReading) {
+				require.NotNil(t, out.Instrument)
+				assert.Equal(t, "inbody", *out.Instrument)
+			},
+		},
+		{
+			name:        "instrument dexa is kept",
+			in:          ai.BodyCompositionReading{Instrument: sptr("dexa")},
+			wantDropped: nil,
+			check: func(t *testing.T, out ai.BodyCompositionReading) {
+				require.NotNil(t, out.Instrument)
+				assert.Equal(t, "dexa", *out.Instrument)
+			},
+		},
+		{
+			// The exact trap rule #3 exists for: a value outside the three
+			// known instruments must never reach the client, because the
+			// write path's weight_entries_source_check CHECK constraint
+			// would reject it outright and the user would lose an
+			// otherwise-good, already-confirmed reading.
+			name:        "instrument unknown value is dropped",
+			in:          ai.BodyCompositionReading{Instrument: sptr("bathroom_scale")},
+			wantDropped: []string{"instrument"},
+			check:       func(t *testing.T, out ai.BodyCompositionReading) { assert.Nil(t, out.Instrument) },
+		},
+		{
+			// "manual" and "healthkit" are real tracking.Source values, but
+			// describe HOW a reading entered Kora, not what a vision model
+			// can detect from an image — a model returning either is
+			// malformed output and must be dropped exactly like any other
+			// implausible instrument value, not silently accepted because
+			// the string happens to be a valid Source elsewhere.
+			name:        "instrument manual (a valid Source, but not detectable) is dropped",
+			in:          ai.BodyCompositionReading{Instrument: sptr("manual")},
+			wantDropped: []string{"instrument"},
+			check:       func(t *testing.T, out ai.BodyCompositionReading) { assert.Nil(t, out.Instrument) },
+		},
+		{
+			name:        "instrument healthkit (a valid Source, but not detectable) is dropped",
+			in:          ai.BodyCompositionReading{Instrument: sptr("healthkit")},
+			wantDropped: []string{"instrument"},
+			check:       func(t *testing.T, out ai.BodyCompositionReading) { assert.Nil(t, out.Instrument) },
+		},
+		{
+			name:        "instrument absent stays nil and is not reported as dropped",
+			in:          ai.BodyCompositionReading{},
+			wantDropped: nil,
+			check:       func(t *testing.T, out ai.BodyCompositionReading) { assert.Nil(t, out.Instrument) },
+		},
+		{
 			name: "every field implausible yields a fully empty reading",
 			in: ai.BodyCompositionReading{
 				WeightKg:           ptr(-1),
@@ -239,11 +301,12 @@ func TestValidateReading(t *testing.T) {
 				BoneMassKg:         ptr(-1),
 				ScaleBMRKcal:       ptr(-1),
 				ReadingDate:        sptr("garbage"),
+				Instrument:         sptr("bathroom_scale"),
 			},
 			wantDropped: []string{
 				"weight_kg", "body_fat_pct", "subcutaneous_fat_pct", "visceral_fat_rating",
 				"skeletal_muscle_pct", "muscle_mass_kg", "body_water_pct", "protein_pct",
-				"bone_mass_kg", "scale_bmr_kcal", "reading_date",
+				"bone_mass_kg", "scale_bmr_kcal", "reading_date", "instrument",
 			},
 			check: func(t *testing.T, out ai.BodyCompositionReading) {
 				assert.True(t, isEmpty(out), "expected every field nil")
