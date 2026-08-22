@@ -2,6 +2,8 @@ package providers
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -247,6 +249,149 @@ func TestOpenAITranscribeNotSupported(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected Transcribe to return an error on the fallback provider")
 	}
+}
+
+// bodyCompositionFieldNames is the exact property set bodyCompositionJSONSchema
+// must expose — every field of ai.BodyCompositionReading, JSON-tag spelling.
+var bodyCompositionFieldNames = []string{
+	"weight_kg", "body_fat_pct", "subcutaneous_fat_pct", "visceral_fat_rating",
+	"skeletal_muscle_pct", "muscle_mass_kg", "body_water_pct", "protein_pct",
+	"bone_mass_kg", "scale_bmr_kcal", "reading_date",
+}
+
+func TestBodyCompositionJSONSchema_Shape(t *testing.T) {
+	schema := bodyCompositionJSONSchema()
+
+	require.Equal(t, "object", schema["type"])
+	require.Equal(t, false, schema["additionalProperties"])
+
+	props, ok := schema["properties"].(map[string]any)
+	require.True(t, ok)
+
+	gotProps := make([]string, 0, len(props))
+	for name := range props {
+		gotProps = append(gotProps, name)
+	}
+	// Every field of ai.BodyCompositionReading must be present, and nothing
+	// else — an extra property here would let a hallucinated derived value
+	// (BMI, fat-free mass, ...) flow straight into the struct.
+	assert.ElementsMatch(t, bodyCompositionFieldNames, gotProps)
+
+	// strict:true requires every property in "required" even though the
+	// field is logically optional — see bodyCompositionJSONSchema's doc
+	// comment for why nullable-type + required is how "may be absent from
+	// the screenshot" is expressed under Structured Outputs.
+	assert.ElementsMatch(t, bodyCompositionFieldNames, schema["required"])
+
+	for _, name := range bodyCompositionFieldNames {
+		prop, ok := props[name].(map[string]any)
+		require.Truef(t, ok, "property %q missing or not an object", name)
+		if name == "reading_date" {
+			assert.Equal(t, []string{"string", "null"}, prop["type"], "reading_date must be nullable string")
+		} else {
+			assert.Equal(t, []string{"number", "null"}, prop["type"], "%s must be nullable number", name)
+		}
+	}
+}
+
+func TestBodyCompositionJSONSchema_MarshalsToValidJSON(t *testing.T) {
+	data, err := json.Marshal(bodyCompositionJSONSchema())
+	require.NoError(t, err)
+	var round map[string]any
+	require.NoError(t, json.Unmarshal(data, &round))
+}
+
+// newOpenAIStubServer starts an httptest server that returns responseBody as
+// the assistant message content of a single Chat Completions response,
+// mirroring the stub pattern in agentgateway_test.go.
+func newOpenAIStubServer(t *testing.T, responseBody string) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+			"id":     "completion-1",
+			"object": "chat.completion",
+			"choices": []map[string]any{{
+				"index":         0,
+				"message":       map[string]any{"role": "assistant", "content": responseBody},
+				"finish_reason": "stop",
+			}},
+			"usage": map[string]int{"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12},
+		}))
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+func TestOpenAIProvider_IdentifyBodyComposition_NullFieldsDecodeToNil(t *testing.T) {
+	// weight_kg and reading_date are present; every other field is
+	// explicitly JSON null (as strict:true's required-but-nullable schema
+	// forces the model to answer for anything unreadable) and must decode
+	// to a nil pointer, not a zero value.
+	server := newOpenAIStubServer(t, `{
+		"weight_kg": 72.4,
+		"body_fat_pct": null,
+		"subcutaneous_fat_pct": null,
+		"visceral_fat_rating": null,
+		"skeletal_muscle_pct": null,
+		"muscle_mass_kg": null,
+		"body_water_pct": null,
+		"protein_pct": null,
+		"bone_mass_kg": null,
+		"scale_bmr_kcal": null,
+		"reading_date": "2026-08-20"
+	}`)
+
+	p := NewOpenAIProvider("test-key", server.URL+"/v1", "", false)
+	reading, usage, err := p.IdentifyBodyComposition(t.Context(), []byte("image"), "image/png")
+
+	require.NoError(t, err)
+	require.NotNil(t, reading.WeightKg)
+	assert.Equal(t, 72.4, *reading.WeightKg)
+	require.NotNil(t, reading.ReadingDate)
+	assert.Equal(t, "2026-08-20", *reading.ReadingDate)
+	assert.Nil(t, reading.BodyFatPct)
+	assert.Nil(t, reading.SubcutaneousFatPct)
+	assert.Nil(t, reading.VisceralFatRating)
+	assert.Nil(t, reading.SkeletalMusclePct)
+	assert.Nil(t, reading.MuscleMassKg)
+	assert.Nil(t, reading.BodyWaterPct)
+	assert.Nil(t, reading.ProteinPct)
+	assert.Nil(t, reading.BoneMassKg)
+	assert.Nil(t, reading.ScaleBMRKcal)
+	assert.Equal(t, "openai", usage.Provider)
+}
+
+func TestOpenAIProvider_IdentifyBodyComposition_DropsUnschemaedExtraKey(t *testing.T) {
+	// Even if a model injected a hallucinated derived field (bmi, say) into
+	// its JSON output, ai.BodyCompositionReading has no field to decode it
+	// into — the parse-layer half of the "never a computed value"
+	// invariant, proven here against OpenAI's schema the same way Task 1
+	// proved it against Gemini's.
+	server := newOpenAIStubServer(t, `{
+		"weight_kg": 60,
+		"body_fat_pct": 22.1,
+		"subcutaneous_fat_pct": null,
+		"visceral_fat_rating": null,
+		"skeletal_muscle_pct": null,
+		"muscle_mass_kg": null,
+		"body_water_pct": null,
+		"protein_pct": null,
+		"bone_mass_kg": null,
+		"scale_bmr_kcal": null,
+		"reading_date": null,
+		"bmi": 21.3
+	}`)
+
+	p := NewOpenAIProvider("test-key", server.URL+"/v1", "", false)
+	reading, _, err := p.IdentifyBodyComposition(t.Context(), []byte("image"), "image/png")
+
+	require.NoError(t, err)
+	require.NotNil(t, reading.WeightKg)
+	assert.Equal(t, 60.0, *reading.WeightKg)
+	require.NotNil(t, reading.BodyFatPct)
+	assert.Equal(t, 22.1, *reading.BodyFatPct)
+	assert.Nil(t, reading.ReadingDate)
 }
 
 func TestOpenAIProvider_Embed_ErrorsNotGemini(t *testing.T) {

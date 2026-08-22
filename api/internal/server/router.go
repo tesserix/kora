@@ -17,6 +17,7 @@ import (
 	"github.com/tesserix/kora/api/internal/auth"
 	"github.com/tesserix/kora/api/internal/bffauth"
 	"github.com/tesserix/kora/api/internal/billing"
+	"github.com/tesserix/kora/api/internal/bodyread"
 	"github.com/tesserix/kora/api/internal/challenges"
 	"github.com/tesserix/kora/api/internal/coach"
 	"github.com/tesserix/kora/api/internal/compare"
@@ -64,6 +65,16 @@ type Deps struct {
 	// disabled (no GEMINI_API_KEY) or Redis is unreachable — foodlog.Service
 	// treats a nil cache as a silent no-op.
 	ResolveCache ai.Cache
+	// BodyCompositionCache backs bodyread.Reader's cache of validated
+	// body-composition readings, keyed by the downscaled screenshot's
+	// content hash. NOT the same instance as ResolveCache — ai.Cache is
+	// hard-typed to ai.Resolution and cannot carry a bodyread.Result (see
+	// bodyread/cache.go) — but it shares the same underlying Redis
+	// connection when Redis is reachable (cmd/api/main.go's
+	// buildResolveHandler). Nil-safe: bodyread.NewReader is only
+	// constructed when Provider is non-nil, and cmd/api/main.go always
+	// supplies at least bodyread.NoCache{} rather than a literal nil.
+	BodyCompositionCache bodyread.Cache
 	// BFFHMACKey is the shared secret the tesserix-home admin portal signs
 	// /v1/admin/* requests with. When nil the admin routes are not mounted
 	// at all, so an unconfigured environment answers 404 rather than 401 —
@@ -123,7 +134,7 @@ func NewRouter(deps Deps) *gin.Engine {
 		// service in the app; main.go builds only external clients.
 		userSvc := user.NewService(
 			deps.DB,
-			deletionCache(deps.ResolveCache),
+			deletionCache(deps.ResolveCache, deps.BodyCompositionCache),
 			identityDeleter(deps.IdentityDeleter),
 			deps.AppleRevoker, // may legitimately be nil; Delete tolerates it
 			auditDeletion,
@@ -259,6 +270,27 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.DELETE("/recipes/:id", recipeHandler.Delete)
 		v1.POST("/recipes/:id/log", recipeHandler.Log)
 
+		// Body-composition screenshot reader (kora#314). Reuses the same
+		// ai.Provider as recipes/coach/resolve — same reasoning as
+		// recipeParser above: nil when Provider is unset, so
+		// bodyread.Handler.Read answers 503 and manual entry still works.
+		var bodyCompositionHandler bodyread.Handler
+		if deps.Provider != nil {
+			// deps.BodyCompositionCache may be a nil bodyread.Cache in a
+			// test-constructed Deps that never set it — fall back to
+			// bodyread.NoCache{} rather than handing Reader a nil interface
+			// it would panic dereferencing.
+			bodyCache := deps.BodyCompositionCache
+			if bodyCache == nil {
+				bodyCache = bodyread.NoCache{}
+			}
+			bodyReader := bodyread.NewReader(deps.Provider, bodyCache, billing.NewMeter(deps.DB))
+			bodyCompositionHandler = bodyread.NewHandler(bodyReader)
+		} else {
+			bodyCompositionHandler = bodyread.NewHandler(nil)
+		}
+		v1.POST("/body-composition/read", bodyCompositionHandler.Read)
+
 		trackingRepo := tracking.NewRepository(deps.DB)
 		trackingHandler := tracking.NewHandler(trackingRepo)
 		v1.POST("/water", trackingHandler.Add)
@@ -366,16 +398,44 @@ func auditDeletion(tx *gorm.DB, actorID, actorEmail string, targetID uuid.UUID) 
 		admin.ActionUserDeleted, admin.TargetTypeUser, targetID, nil, nil)
 }
 
-// deletionCache narrows the resolve cache to the eviction surface account
-// deletion needs. A nil ai.Cache (resolve engine disabled, or Redis
-// unreachable at startup) becomes ai.NoCache{} rather than being passed
-// through: user.Service.Delete calls DeleteByUser unconditionally, and a nil
-// interface there would panic AFTER the row was already destroyed.
-func deletionCache(cache ai.Cache) user.CacheEvicter {
-	if cache == nil {
-		return ai.NoCache{}
+// deletionCache narrows BOTH the resolve cache and the body-composition
+// cache to the single eviction surface account deletion needs. Both store
+// AI data keyed by user id — resolve.Resolution and bodyread.Result
+// respectively — so a deletion that swept only the resolve cache would
+// leave a deleted user's cached body-composition readings (weight, body
+// fat, visceral fat, scale BMR — health data) sitting in Redis for up to
+// the cache's full TTL after their row is destroyed (kora#314 review
+// finding #1). A nil cache (resolve engine disabled, Redis unreachable at
+// startup, or no ai.Provider configured) becomes the matching NoCache{}
+// rather than being passed through: user.Service.Delete calls DeleteByUser
+// unconditionally, and a nil interface there would panic AFTER the row was
+// already destroyed.
+func deletionCache(resolveCache ai.Cache, bodyCache bodyread.Cache) user.CacheEvicter {
+	if resolveCache == nil {
+		resolveCache = ai.NoCache{}
 	}
-	return cache
+	if bodyCache == nil {
+		bodyCache = bodyread.NoCache{}
+	}
+	return multiCacheEvicter{resolve: resolveCache, body: bodyCache}
+}
+
+// multiCacheEvicter fans DeleteByUser out to every per-user AI cache this
+// server maintains. Both evictions are attempted even if the first fails —
+// a partial sweep (resolve cleared, bodyread not, or vice versa) is
+// strictly better than an early return that skips the second cache
+// entirely — and both errors are joined so the caller (user.Service.Delete,
+// which only logs this and never treats it as fatal — the row is already
+// gone by the time this runs) doesn't lose either one.
+type multiCacheEvicter struct {
+	resolve ai.Cache
+	body    bodyread.Cache
+}
+
+func (m multiCacheEvicter) DeleteByUser(ctx context.Context, userID uuid.UUID) error {
+	resolveErr := m.resolve.DeleteByUser(ctx, userID)
+	bodyErr := m.body.DeleteByUser(ctx, userID)
+	return errors.Join(resolveErr, bodyErr)
 }
 
 // unwiredIdentityDeleter stands in when Deps.IdentityDeleter is nil. It

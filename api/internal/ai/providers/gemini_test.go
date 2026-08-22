@@ -166,3 +166,105 @@ func TestNewGeminiProvider_Name(t *testing.T) {
 	p := GeminiProvider{}
 	assert.Equal(t, "gemini", p.Name())
 }
+
+// f64 and str are local pointer-of-literal helpers for building expected
+// ai.BodyCompositionReading values — every field on that struct is a
+// pointer, so a plain literal cannot be assigned directly.
+func f64(v float64) *float64 { return &v }
+func str(v string) *string   { return &v }
+
+func TestParseBodyCompositionReading_MissingKeysDecodeToNil(t *testing.T) {
+	// Only two of ten possible numeric fields plus the date are present. The
+	// point of this test is that the ABSENT fields come back nil, not 0 —
+	// 0 would be indistinguishable from "the scale read exactly zero",
+	// which is the whole reason every field on BodyCompositionReading is a
+	// pointer.
+	data := []byte(`{"weight_kg": 72.4, "body_fat_pct": 18.2, "reading_date": "2026-08-20"}`)
+
+	reading, err := parseBodyCompositionReading(data)
+
+	require.NoError(t, err)
+	assert.Equal(t, ai.BodyCompositionReading{
+		WeightKg:    f64(72.4),
+		BodyFatPct:  f64(18.2),
+		ReadingDate: str("2026-08-20"),
+	}, reading)
+	assert.Nil(t, reading.SubcutaneousFatPct)
+	assert.Nil(t, reading.VisceralFatRating)
+	assert.Nil(t, reading.SkeletalMusclePct)
+	assert.Nil(t, reading.MuscleMassKg)
+	assert.Nil(t, reading.BodyWaterPct)
+	assert.Nil(t, reading.ProteinPct)
+	assert.Nil(t, reading.BoneMassKg)
+	assert.Nil(t, reading.ScaleBMRKcal)
+}
+
+func TestParseBodyCompositionReading_IgnoresUnschemaedKeys(t *testing.T) {
+	// A model that tried to report BMI or metabolic age anyway must have
+	// that value silently dropped — BodyCompositionReading has no field to
+	// receive it. This is the parse-layer half of the "never a computed
+	// value" invariant; bodyCompositionResponseSchema's lack of these
+	// properties is the other half, and is not independently testable
+	// without a live call (Task 5's smoke test covers that side).
+	data := []byte(`{"weight_kg": 80.0, "bmi": 24.1, "metabolic_age": 30}`)
+
+	reading, err := parseBodyCompositionReading(data)
+
+	require.NoError(t, err)
+	assert.Equal(t, ai.BodyCompositionReading{WeightKg: f64(80.0)}, reading)
+}
+
+func TestParseBodyCompositionReading_VisceralFatRatingIsNotPercentShaped(t *testing.T) {
+	// visceral_fat_rating is a vendor RATING (e.g. 7, or 7.5), never a
+	// percentage — this decodes it through the exact same float64 pointer
+	// field as every other measurement, proving there is no separate
+	// percent-shaped parsing path that could misinterpret a bare integer
+	// like 7 as "7%".
+	data := []byte(`{"visceral_fat_rating": 7}`)
+
+	reading, err := parseBodyCompositionReading(data)
+
+	require.NoError(t, err)
+	assert.Equal(t, ai.BodyCompositionReading{VisceralFatRating: f64(7)}, reading)
+}
+
+func TestParseBodyCompositionReading_ReadingDateRoundTripsAndOmitsWhenAbsent(t *testing.T) {
+	withDate, err := parseBodyCompositionReading([]byte(`{"reading_date": "2026-08-20"}`))
+	require.NoError(t, err)
+	require.NotNil(t, withDate.ReadingDate)
+	assert.Equal(t, "2026-08-20", *withDate.ReadingDate)
+
+	withoutDate, err := parseBodyCompositionReading([]byte(`{"weight_kg": 65.0}`))
+	require.NoError(t, err)
+	assert.Nil(t, withoutDate.ReadingDate)
+}
+
+func TestParseBodyCompositionReading_Malformed(t *testing.T) {
+	_, err := parseBodyCompositionReading([]byte(`[1, 2, 3]`))
+	require.Error(t, err)
+}
+
+func TestBodyCompositionResponseSchema_NoRequiredList(t *testing.T) {
+	schema := bodyCompositionResponseSchema()
+
+	require.Equal(t, genai.TypeObject, schema.Type)
+	// Every field must be independently omittable — a Required list here
+	// would force the model to invent a value the screen never displayed.
+	// See bodyCompositionResponseSchema's doc comment.
+	assert.Empty(t, schema.Required)
+
+	gotProps := make([]string, 0, len(schema.Properties))
+	for name := range schema.Properties {
+		gotProps = append(gotProps, name)
+	}
+	assert.ElementsMatch(t, []string{
+		"weight_kg", "body_fat_pct", "subcutaneous_fat_pct", "visceral_fat_rating",
+		"skeletal_muscle_pct", "muscle_mass_kg", "body_water_pct", "protein_pct",
+		"bone_mass_kg", "scale_bmr_kcal", "reading_date",
+	}, gotProps)
+
+	for _, forbidden := range []string{"bmi", "fat_free_mass", "lean_mass", "fat_mass_kg", "metabolic_age"} {
+		_, present := schema.Properties[forbidden]
+		assert.Falsef(t, present, "schema must not have a %q property", forbidden)
+	}
+}

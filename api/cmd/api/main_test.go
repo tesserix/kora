@@ -28,6 +28,10 @@ func (s stubProvider) IdentifyPhoto(context.Context, []byte, string) ([]ai.Guess
 	return nil, ai.Usage{}, errors.New("not used")
 }
 
+func (s stubProvider) IdentifyBodyComposition(context.Context, []byte, string) (ai.BodyCompositionReading, ai.Usage, error) {
+	return ai.BodyCompositionReading{}, ai.Usage{}, errors.New("not used")
+}
+
 func (s stubProvider) Decompose(context.Context, string) ([]ai.IngredientGuess, ai.Usage, error) {
 	return nil, ai.Usage{}, errors.New("not used")
 }

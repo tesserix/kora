@@ -44,6 +44,17 @@ func TestAgentGatewayProviderRoutesEveryCapabilityThroughTheLogicalModel(t *test
 			content:    `{"guesses":[]}`,
 		},
 		{
+			name: "identify body composition is structured JSON",
+			call: func(provider AgentGatewayProvider) error {
+				_, _, err := provider.IdentifyBodyComposition(t.Context(), []byte("image"), "image/png")
+				return err
+			},
+			capability: "identify_body_composition",
+			kind:       "json_api",
+			path:       "/v1/chat/completions",
+			content:    `{"weight_kg":null,"body_fat_pct":null,"subcutaneous_fat_pct":null,"visceral_fat_rating":null,"skeletal_muscle_pct":null,"muscle_mass_kg":null,"body_water_pct":null,"protein_pct":null,"bone_mass_kg":null,"scale_bmr_kcal":null,"reading_date":null}`,
+		},
+		{
 			name: "decompose is structured JSON",
 			call: func(provider AgentGatewayProvider) error {
 				_, _, err := provider.Decompose(t.Context(), "salad")

@@ -43,6 +43,10 @@ func (f *fakeProvider) IdentifyPhoto(ctx context.Context, image []byte, mime str
 	return nil, ai.Usage{}, nil
 }
 
+func (f *fakeProvider) IdentifyBodyComposition(ctx context.Context, image []byte, mime string) (ai.BodyCompositionReading, ai.Usage, error) {
+	return ai.BodyCompositionReading{}, ai.Usage{}, nil
+}
+
 func (f *fakeProvider) Decompose(ctx context.Context, dish string) ([]ai.IngredientGuess, ai.Usage, error) {
 	return nil, ai.Usage{}, nil
 }
@@ -77,6 +81,10 @@ func (e *errorProvider) IdentifyText(ctx context.Context, phrase string) ([]ai.G
 
 func (e *errorProvider) IdentifyPhoto(ctx context.Context, image []byte, mime string) ([]ai.Guess, ai.Usage, error) {
 	return nil, ai.Usage{}, nil
+}
+
+func (e *errorProvider) IdentifyBodyComposition(ctx context.Context, image []byte, mime string) (ai.BodyCompositionReading, ai.Usage, error) {
+	return ai.BodyCompositionReading{}, ai.Usage{}, nil
 }
 
 func (e *errorProvider) Decompose(ctx context.Context, dish string) ([]ai.IngredientGuess, ai.Usage, error) {
@@ -114,6 +122,10 @@ func (r *recordingProvider) IdentifyText(ctx context.Context, phrase string) ([]
 
 func (r *recordingProvider) IdentifyPhoto(ctx context.Context, image []byte, mime string) ([]ai.Guess, ai.Usage, error) {
 	return nil, ai.Usage{}, nil
+}
+
+func (r *recordingProvider) IdentifyBodyComposition(ctx context.Context, image []byte, mime string) (ai.BodyCompositionReading, ai.Usage, error) {
+	return ai.BodyCompositionReading{}, ai.Usage{}, nil
 }
 
 func (r *recordingProvider) Decompose(ctx context.Context, dish string) ([]ai.IngredientGuess, ai.Usage, error) {

@@ -28,6 +28,7 @@ import (
 	"github.com/tesserix/kora/api/internal/appleid"
 	"github.com/tesserix/kora/api/internal/auth"
 	"github.com/tesserix/kora/api/internal/billing"
+	"github.com/tesserix/kora/api/internal/bodyread"
 	"github.com/tesserix/kora/api/internal/challenges"
 	"github.com/tesserix/kora/api/internal/config"
 	"github.com/tesserix/kora/api/internal/database"
@@ -85,7 +86,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	resolveHandler, aiProvider, resolveCache := buildResolveHandler(context.Background(), cfg, db, logger)
+	resolveHandler, aiProvider, resolveCache, bodyCompositionCache := buildResolveHandler(context.Background(), cfg, db, logger)
 
 	schedCtx, schedCancel := context.WithCancel(context.Background())
 	if cfg.SchedulerInterval > 0 {
@@ -178,16 +179,17 @@ func main() {
 	srv := &http.Server{
 		Addr: ":" + cfg.Port,
 		Handler: server.NewRouter(server.Deps{
-			DB:              db,
-			Verifier:        verifier,
-			Resolver:        resolveHandler,
-			Provider:        aiProvider,
-			Agents:          coordinator,
-			ResolveCache:    resolveCache,
-			BFFHMACKey:      cfg.BFFHMACKey,
-			AppleExchanger:  appleExchanger,
-			IdentityDeleter: identityDeleter,
-			AppleRevoker:    appleRevoker,
+			DB:                   db,
+			Verifier:             verifier,
+			Resolver:             resolveHandler,
+			Provider:             aiProvider,
+			Agents:               coordinator,
+			ResolveCache:         resolveCache,
+			BodyCompositionCache: bodyCompositionCache,
+			BFFHMACKey:           cfg.BFFHMACKey,
+			AppleExchanger:       appleExchanger,
+			IdentityDeleter:      identityDeleter,
+			AppleRevoker:         appleRevoker,
 		}),
 		// Nothing bounded a request server-side: a client that hung up left the
 		// handler running against whatever budgets the AI Router happened to
@@ -292,11 +294,12 @@ func directProviders(cfg config.Config, gemini providers.GeminiProvider) aiProvi
 
 // buildResolveHandler composes the AI resolution engine from config. It
 // returns a nil handler (resolve endpoints stay unmounted), a nil provider,
-// and a nil cache when no Gemini key is set — the rest of the API runs
-// unchanged. The OpenAI-compatible fallback is optional: with no OpenAI key,
-// Gemini serves alone (no Router). The returned provider is also threaded
-// into server.Deps.Provider so the coach's Q&A endpoint can generate text
-// without building a second client.
+// and a nil cache (both the resolve cache and the body-composition cache)
+// when no Gemini key is set — the rest of the API runs unchanged. The
+// OpenAI-compatible fallback is optional: with no OpenAI key, Gemini serves
+// alone (no Router). The returned provider is also threaded into
+// server.Deps.Provider so the coach's Q&A endpoint AND bodyread's reader can
+// generate/identify without building a second client.
 //
 // THE `cache` VARIABLE BELOW IS DELIBERATELY SINGLE, AND MUST STAY THAT WAY.
 // It is passed to ai.NewResolver (the reader) and returned for
@@ -315,7 +318,7 @@ func directProviders(cfg config.Config, gemini providers.GeminiProvider) aiProvi
 // both: corrections and retirements would keep reporting success while users
 // were served the stale food for up to the cache's 24h TTL. The identity is
 // pinned by server.TestAdminMutationBumpsTheSameCacheInstanceWiredIntoDeps.
-func buildResolveHandler(ctx context.Context, cfg config.Config, db *gorm.DB, logger *slog.Logger) (*resolve.Handler, ai.Provider, ai.Cache) {
+func buildResolveHandler(ctx context.Context, cfg config.Config, db *gorm.DB, logger *slog.Logger) (*resolve.Handler, ai.Provider, ai.Cache, bodyread.Cache) {
 	var wiring aiProviders
 	if cfg.AIGatewayEnabled {
 		wiring = gatewayProviders(cfg)
@@ -330,19 +333,19 @@ func buildResolveHandler(ctx context.Context, cfg config.Config, db *gorm.DB, lo
 			gemini, err = providers.NewVertexProvider(ctx, cfg.VertexProject, cfg.VertexLocation)
 			if err != nil {
 				logger.Error("vertex provider init failed — resolve engine disabled", "err", err)
-				return nil, nil, nil
+				return nil, nil, nil, nil
 			}
 			logger.Info("resolve engine: vertex ai", "project", cfg.VertexProject, "location", cfg.VertexLocation)
 		case cfg.GeminiAPIKey != "":
 			gemini, err = providers.NewGeminiProvider(ctx, cfg.GeminiAPIKey)
 			if err != nil {
 				logger.Error("gemini provider init failed — resolve engine disabled", "err", err)
-				return nil, nil, nil
+				return nil, nil, nil, nil
 			}
 			logger.Info("resolve engine: gemini api key")
 		default:
 			logger.Info("resolve engine disabled (AI gateway, VERTEX_PROJECT, and GEMINI_API_KEY are unset)")
-			return nil, nil, nil
+			return nil, nil, nil, nil
 		}
 		wiring = directProviders(cfg, gemini)
 		if cfg.OpenAIAPIKey != "" {
@@ -354,10 +357,21 @@ func buildResolveHandler(ctx context.Context, cfg config.Config, db *gorm.DB, lo
 	provider := wiring.requests
 
 	var cache ai.Cache = ai.NoCache{}
+	// bodyCache is bodyread's own Cache, built off the SAME *redis.Client
+	// connection as `cache` above (when Redis is reachable) rather than a
+	// second connection pool — but it is a DIFFERENT concrete type
+	// (bodyread.RedisCache, not ai.RedisCache) because ai.Cache's Get/Set
+	// are hard-typed to ai.Resolution and cannot carry a bodyread.Result
+	// (see bodyread/cache.go's doc comment for the full reasoning). It
+	// shares no state and no key namespace with `cache`, so nothing here
+	// risks the identity-pinning invariant buildResolveHandler's own doc
+	// comment describes for `cache`/ResolveCache.
+	var bodyCache bodyread.Cache = bodyread.NoCache{}
 	if opt, err := redis.ParseURL(cfg.RedisURL); err == nil {
 		client := redis.NewClient(opt)
 		if pingErr := client.Ping(ctx).Err(); pingErr == nil {
 			cache = ai.NewRedisCache(client, 24*time.Hour)
+			bodyCache = bodyread.NewRedisCache(client, 24*time.Hour)
 			logger.Info("resolve engine: redis cache enabled")
 		} else {
 			_ = client.Close() // don't leak the pool for an unreachable cache
@@ -379,7 +393,7 @@ func buildResolveHandler(ctx context.Context, cfg config.Config, db *gorm.DB, lo
 	h := resolve.NewHandler(resolver, func(c context.Context, code string) (*nutrition.FoodItem, bool, error) {
 		return foods.ResolveBarcode(c, off, code)
 	})
-	return &h, provider, cache
+	return &h, provider, cache, bodyCache
 }
 
 // userLocales adapts the user repository to ai.LocaleSource, mapping the

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/postgres"
@@ -18,6 +20,7 @@ import (
 	"github.com/tesserix/kora/api/internal/ai"
 	"github.com/tesserix/kora/api/internal/auth"
 	"github.com/tesserix/kora/api/internal/bffauth"
+	"github.com/tesserix/kora/api/internal/bodyread"
 	"github.com/tesserix/kora/api/internal/resolve"
 )
 
@@ -30,6 +33,9 @@ func (stubProvider) IdentifyText(context.Context, string) ([]ai.Guess, ai.Usage,
 }
 func (stubProvider) IdentifyPhoto(context.Context, []byte, string) ([]ai.Guess, ai.Usage, error) {
 	return nil, ai.Usage{}, nil
+}
+func (stubProvider) IdentifyBodyComposition(context.Context, []byte, string) (ai.BodyCompositionReading, ai.Usage, error) {
+	return ai.BodyCompositionReading{}, ai.Usage{}, nil
 }
 func (stubProvider) Decompose(context.Context, string) ([]ai.IngredientGuess, ai.Usage, error) {
 	return nil, ai.Usage{}, nil
@@ -153,6 +159,7 @@ func TestAnonymousRequestsCannotReachAnyPublicAICapability(t *testing.T) {
 		"/v1/resolve/voice",
 		"/v1/coach/ask",
 		"/v1/recipes/parse",
+		"/v1/body-composition/read",
 	} {
 		t.Run(path, func(t *testing.T) {
 			w := httptest.NewRecorder()
@@ -203,6 +210,44 @@ func TestRecipeRoutesRegisteredWithoutProvider(t *testing.T) {
 	r := NewRouter(Deps{DB: &gorm.DB{}, Verifier: stubVerifier{}}) // Provider nil
 	routes := r.Routes()
 	for _, rt := range recipeRoutes {
+		if !hasRoute(routes, rt.method, rt.path) {
+			t.Errorf("expected %s %s to still be registered with Provider nil", rt.method, rt.path)
+		}
+	}
+}
+
+// bodyCompositionRoutes is the full set of body-composition routes; used to
+// confirm they are always registered regardless of Deps.Provider — mirrors
+// recipeRoutes above.
+var bodyCompositionRoutes = []struct{ method, path string }{
+	{"POST", "/v1/body-composition/read"},
+}
+
+// TestBodyCompositionRouteRegisteredWithProvider proves the body-composition
+// route registers the same way with a real (non-nil) ai.Provider wired in —
+// the counterpart to TestBodyCompositionRouteRegisteredWithoutProvider
+// below. Route registration is static regardless of Provider, so this is
+// deliberately the same assertion as the nil case; see that test's comment
+// for why both are kept — mirrors TestRecipeRoutesRegisteredWithProvider.
+func TestBodyCompositionRouteRegisteredWithProvider(t *testing.T) {
+	r := NewRouter(Deps{DB: &gorm.DB{}, Verifier: stubVerifier{}, Provider: stubProvider{}})
+	routes := r.Routes()
+	for _, rt := range bodyCompositionRoutes {
+		if !hasRoute(routes, rt.method, rt.path) {
+			t.Errorf("expected %s %s to be registered", rt.method, rt.path)
+		}
+	}
+}
+
+// TestBodyCompositionRouteRegisteredWithoutProvider pins the
+// degrade-not-disappear contract: the route must stay mounted — answering
+// 503 "unavailable" rather than 404 — even when no AI provider key is
+// configured. Only Handler.Read's BEHAVIOR (not its registration) changes
+// when Provider is nil — mirrors TestRecipeRoutesRegisteredWithoutProvider.
+func TestBodyCompositionRouteRegisteredWithoutProvider(t *testing.T) {
+	r := NewRouter(Deps{DB: &gorm.DB{}, Verifier: stubVerifier{}}) // Provider nil
+	routes := r.Routes()
+	for _, rt := range bodyCompositionRoutes {
 		if !hasRoute(routes, rt.method, rt.path) {
 			t.Errorf("expected %s %s to still be registered with Provider nil", rt.method, rt.path)
 		}
@@ -313,4 +358,111 @@ func TestAdminFoodsIsUnmountedWithoutAKey(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/admin/foods", nil))
 	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+// fakeResolveCache and fakeBodyCompositionCache are minimal ai.Cache /
+// bodyread.Cache doubles used ONLY to prove deletionCache's multiCacheEvicter
+// (kora#314 review finding #1) actually reaches BOTH caches on account
+// deletion, not just the resolve cache. Every method beyond DeleteByUser is
+// unreachable in these tests and panics if ever called, so a future caller
+// that starts exercising Get/Set through these fakes finds out immediately
+// rather than silently getting zero values.
+
+type fakeResolveCache struct {
+	deletedFor uuid.UUID
+	calls      int
+	err        error
+}
+
+func (f *fakeResolveCache) Get(context.Context, string) (*ai.Resolution, bool) {
+	panic("fakeResolveCache.Get: unexpected call")
+}
+func (f *fakeResolveCache) Set(context.Context, string, ai.Resolution) {
+	panic("fakeResolveCache.Set: unexpected call")
+}
+func (f *fakeResolveCache) Delete(context.Context, string) error {
+	panic("fakeResolveCache.Delete: unexpected call")
+}
+func (f *fakeResolveCache) DeleteByUser(_ context.Context, userID uuid.UUID) error {
+	f.calls++
+	f.deletedFor = userID
+	return f.err
+}
+
+type fakeBodyCompositionCache struct {
+	deletedFor uuid.UUID
+	calls      int
+	err        error
+}
+
+func (f *fakeBodyCompositionCache) Get(context.Context, string) (*bodyread.Result, bool) {
+	panic("fakeBodyCompositionCache.Get: unexpected call")
+}
+func (f *fakeBodyCompositionCache) Set(context.Context, string, bodyread.Result) {
+	panic("fakeBodyCompositionCache.Set: unexpected call")
+}
+func (f *fakeBodyCompositionCache) DeleteByUser(_ context.Context, userID uuid.UUID) error {
+	f.calls++
+	f.deletedFor = userID
+	return f.err
+}
+
+// TestDeletionCache_EvictsBothResolveAndBodyCompositionCaches is the
+// regression test for kora#314 review finding #1: account deletion evicted
+// only the resolve cache, leaving a deleted user's cached body-composition
+// readings (weight, body fat, visceral fat, scale BMR — health data) in
+// Redis for up to the cache's full TTL. deletionCache's multiCacheEvicter
+// must reach BOTH caches, and BOTH must be attempted even if one fails, so
+// a resolve-cache outage never silently skips evicting body-composition
+// data (or vice versa).
+func TestDeletionCache_EvictsBothResolveAndBodyCompositionCaches(t *testing.T) {
+	userID := uuid.New()
+	resolveCache := &fakeResolveCache{}
+	bodyCache := &fakeBodyCompositionCache{}
+
+	evicter := deletionCache(resolveCache, bodyCache)
+	err := evicter.DeleteByUser(context.Background(), userID)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, resolveCache.calls, "the resolve cache must be evicted")
+	assert.Equal(t, userID, resolveCache.deletedFor)
+	assert.Equal(t, 1, bodyCache.calls, "the body-composition cache must ALSO be evicted — this is the finding #1 regression")
+	assert.Equal(t, userID, bodyCache.deletedFor)
+}
+
+// TestDeletionCache_BothCachesAttemptedEvenIfOneFails proves the second
+// cache is not skipped when the first errors — a partial sweep is strictly
+// better than an early return that silently leaves the second cache
+// untouched, and errors.Join must carry both failures so nothing is lost
+// even though user.Service.Delete only logs this (never treats it as
+// fatal — the row is already gone by the time this runs).
+func TestDeletionCache_BothCachesAttemptedEvenIfOneFails(t *testing.T) {
+	userID := uuid.New()
+	resolveErr := errors.New("resolve cache: redis down")
+	bodyErr := errors.New("body composition cache: redis down")
+	resolveCache := &fakeResolveCache{err: resolveErr}
+	bodyCache := &fakeBodyCompositionCache{err: bodyErr}
+
+	evicter := deletionCache(resolveCache, bodyCache)
+	err := evicter.DeleteByUser(context.Background(), userID)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, resolveErr, "the resolve cache's error must survive in the joined error")
+	assert.ErrorIs(t, err, bodyErr, "the body-composition cache's error must ALSO survive in the joined error")
+	assert.Equal(t, 1, resolveCache.calls)
+	assert.Equal(t, 1, bodyCache.calls, "the body cache must still be attempted even though the resolve cache errored first")
+}
+
+// TestDeletionCache_NilCachesBecomeNoCache proves a nil ai.Cache/bodyread.Cache
+// (resolve engine disabled, Redis unreachable at startup, or no ai.Provider
+// configured) degrades to a silent no-op rather than reaching a nil
+// interface's method and panicking AFTER the user's row has already been
+// destroyed.
+func TestDeletionCache_NilCachesBecomeNoCache(t *testing.T) {
+	evicter := deletionCache(nil, nil)
+
+	require.NotPanics(t, func() {
+		err := evicter.DeleteByUser(context.Background(), uuid.New())
+		require.NoError(t, err)
+	})
 }

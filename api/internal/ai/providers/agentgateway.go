@@ -22,12 +22,13 @@ const (
 // Gateway. The classification headers are constructed server-side and are
 // never copied from an inbound Kora request.
 type AgentGatewayProvider struct {
-	identify   OpenAIProvider
-	photo      OpenAIProvider
-	decompose  OpenAIProvider
-	embed      OpenAIProvider
-	transcribe OpenAIProvider
-	coach      OpenAIProvider
+	identify        OpenAIProvider
+	photo           OpenAIProvider
+	bodyComposition OpenAIProvider
+	decompose       OpenAIProvider
+	embed           OpenAIProvider
+	transcribe      OpenAIProvider
+	coach           OpenAIProvider
 }
 
 func NewAgentGatewayProvider(apiKey, baseURL, model string) AgentGatewayProvider {
@@ -43,12 +44,20 @@ func NewAgentGatewayProvider(apiKey, baseURL, model string) AgentGatewayProvider
 		)
 	}
 	return AgentGatewayProvider{
-		identify:   classified("identify_text", "json_api"),
-		photo:      classified("identify_photo", "json_api"),
-		decompose:  classified("decompose", "json_api"),
-		embed:      classified("embedding", "embedding"),
-		transcribe: classified("transcribe", "audio"),
-		coach:      classified("coach", "conversation"),
+		identify: classified("identify_text", "json_api"),
+		photo:    classified("identify_photo", "json_api"),
+		// "identify_body_composition" is duplicated as a literal here rather
+		// than importing providers.callTypeIdentifyBodyComposition — this file
+		// already duplicates "identify_photo" etc. the same way, matching the
+		// existing convention of the classification header value equaling
+		// (but not being wired to) the call-type constant used elsewhere.
+		// context kind is "json_api", same as photo: still a single
+		// structured JSON response, not audio or embedding.
+		bodyComposition: classified("identify_body_composition", "json_api"),
+		decompose:       classified("decompose", "json_api"),
+		embed:           classified("embedding", "embedding"),
+		transcribe:      classified("transcribe", "audio"),
+		coach:           classified("coach", "conversation"),
 	}
 }
 
@@ -60,6 +69,11 @@ func (p AgentGatewayProvider) IdentifyText(ctx context.Context, phrase string) (
 func (p AgentGatewayProvider) IdentifyPhoto(ctx context.Context, image []byte, mime string) ([]ai.Guess, ai.Usage, error) {
 	guesses, usage, err := p.photo.IdentifyPhoto(ctx, image, mime)
 	return guesses, gatewayUsage(usage), err
+}
+
+func (p AgentGatewayProvider) IdentifyBodyComposition(ctx context.Context, image []byte, mime string) (ai.BodyCompositionReading, ai.Usage, error) {
+	reading, usage, err := p.bodyComposition.IdentifyBodyComposition(ctx, image, mime)
+	return reading, gatewayUsage(usage), err
 }
 
 func (p AgentGatewayProvider) Decompose(ctx context.Context, dish string) ([]ai.IngredientGuess, ai.Usage, error) {

@@ -32,12 +32,13 @@ const embedOutputDimensionality int32 = 768
 
 // Call types recorded on ai.Usage, matching the doc comment on Usage.CallType.
 const (
-	callTypeIdentifyText  = "identify_text"
-	callTypeIdentifyPhoto = "identify_photo"
-	callTypeDecompose     = "decompose"
-	callTypeEmbed         = "embed"
-	callTypeTranscribe    = "transcribe"
-	callTypeCoach         = "coach"
+	callTypeIdentifyText            = "identify_text"
+	callTypeIdentifyPhoto           = "identify_photo"
+	callTypeIdentifyBodyComposition = "identify_body_composition"
+	callTypeDecompose               = "decompose"
+	callTypeEmbed                   = "embed"
+	callTypeTranscribe              = "transcribe"
+	callTypeCoach                   = "coach"
 )
 
 const (
@@ -80,6 +81,49 @@ const (
 		"any calorie or nutrition number. If the audio contains no discernible " +
 		"speech, return an empty string."
 )
+
+// bodyCompositionSystemPrompt encodes every trap a smart-scale screenshot
+// sets: unit conversion is fine but computation is not, several fields look
+// interchangeable but are not, and vendor opinion (bands like "Average") must
+// never be mistaken for a measurement. Do not paraphrase it away — each
+// sentence here corresponds to a specific way a vision model gets this
+// wrong.
+const bodyCompositionSystemPrompt = "You read a smart body-composition " +
+	"scale's result screen (for example Renpho, Omron, or Tanita) and " +
+	"report ONLY the values that are clearly legible in the image. For " +
+	"every field, if you cannot see it stated on screen, OMIT it entirely " +
+	"— do not guess, do not estimate, and NEVER compute a value from other " +
+	"values. Do not compute BMI from weight and height. Do not compute a " +
+	"fat-free or lean mass from weight and body fat percentage. A value " +
+	"you calculate rather than read is worse than no value at all. " +
+	"Report weight in kilograms as weight_kg — convert from pounds if the " +
+	"screen shows pounds (1 lb = 0.453592 kg); that is unit conversion of " +
+	"a single displayed number, not inference of a new fact, so it is " +
+	"fine. body_fat_pct is the body fat PERCENTAGE only — if the screen " +
+	"also shows a fat mass in kilograms, ignore that number and report " +
+	"only the percentage. visceral_fat_rating is the scale's own visceral " +
+	"fat number exactly as displayed — usually a small bare number like 7, " +
+	"or \"7.5 level\", or a value on a 1-59 scale. This is a VENDOR " +
+	"RATING, not a percentage: report it even when the screen shows no " +
+	"percent sign, and never treat it as one. skeletal_muscle_pct and " +
+	"muscle_mass_kg are TWO DIFFERENT quantities, not the same number in " +
+	"two units — some apps show both. Report each ONLY if its own value " +
+	"is shown; never derive one from the other. bone_mass_kg is bone MASS " +
+	"in kilograms as the scale reports it — this is NOT bone density, a " +
+	"T-score, or a BMD number. If the screen shows only a density or " +
+	"T-score, leave bone_mass_kg unset. body_water_pct and protein_pct are " +
+	"percentages as shown. scale_bmr_kcal is the scale's own estimated " +
+	"basal metabolic rate in kilocalories, if shown. reading_date is the " +
+	"calendar date the screenshot itself displays for this reading — " +
+	"scale apps almost always show one. Report it as YYYY-MM-DD. Omit it " +
+	"if no date is legible on screen, and NEVER use today's date or any " +
+	"date that is not actually printed on the screen. Do NOT report BMI, " +
+	"fat-free mass, lean mass, fat mass in kilograms, metabolic age, or " +
+	"any qualitative band or label such as \"Average\", \"Low\", \"High\", " +
+	"or \"Excellent\" — these are derived or vendor opinion, not " +
+	"measurements, and must never appear in your answer. Respond with " +
+	"JSON only, matching the provided schema, using only the fields you " +
+	"can actually read."
 
 // GeminiProvider implements ai.Provider over the Gemini API via
 // google.golang.org/genai.
@@ -195,6 +239,35 @@ func ingredientResponseSchema() *genai.Schema {
 	}
 }
 
+// bodyCompositionResponseSchema builds the JSON schema for a body-composition
+// read. Unlike guessResponseSchema and ingredientResponseSchema, this
+// schema has NO Required list — every field must be independently
+// omittable, because "not shown on this scale's screen" is the expected
+// case for most fields on any given reading (a Renpho screen and a Tanita
+// screen legibly show different subsets). A Required list here would force
+// the model to invent a value for a field the screen never displayed,
+// which is exactly the fabrication the system prompt spends most of its
+// words forbidding — this is that same rule enforced at the schema layer,
+// not just the prompt layer.
+func bodyCompositionResponseSchema() *genai.Schema {
+	return &genai.Schema{
+		Type: genai.TypeObject,
+		Properties: map[string]*genai.Schema{
+			"weight_kg":            {Type: genai.TypeNumber},
+			"body_fat_pct":         {Type: genai.TypeNumber},
+			"subcutaneous_fat_pct": {Type: genai.TypeNumber},
+			"visceral_fat_rating":  {Type: genai.TypeNumber},
+			"skeletal_muscle_pct":  {Type: genai.TypeNumber},
+			"muscle_mass_kg":       {Type: genai.TypeNumber},
+			"body_water_pct":       {Type: genai.TypeNumber},
+			"protein_pct":          {Type: genai.TypeNumber},
+			"bone_mass_kg":         {Type: genai.TypeNumber},
+			"scale_bmr_kcal":       {Type: genai.TypeNumber},
+			"reading_date":         {Type: genai.TypeString},
+		},
+	}
+}
+
 // IdentifyText identifies foods from a free-text phrase using Flash-Lite.
 func (p GeminiProvider) IdentifyText(ctx context.Context, phrase string) ([]ai.Guess, ai.Usage, error) {
 	data, usage, err := p.generateJSON(ctx, modelFlashLite, callTypeIdentifyText,
@@ -221,6 +294,24 @@ func (p GeminiProvider) IdentifyPhoto(ctx context.Context, image []byte, mime st
 		return nil, usage, fmt.Errorf("gemini: identify photo: parse response: %w", err)
 	}
 	return guesses, usage, nil
+}
+
+// IdentifyBodyComposition reads a smart-scale result screenshot using Flash
+// (multimodal) and returns only the fields legibly shown — see
+// bodyCompositionSystemPrompt and bodyCompositionResponseSchema for the two
+// independent layers (prompt + schema) that together forbid a computed or
+// vendor-opinion value from ever reaching ai.BodyCompositionReading.
+func (p GeminiProvider) IdentifyBodyComposition(ctx context.Context, image []byte, mime string) (ai.BodyCompositionReading, ai.Usage, error) {
+	data, usage, err := p.generateJSON(ctx, modelFlash, callTypeIdentifyBodyComposition,
+		bodyCompositionSystemPrompt, []*genai.Part{genai.NewPartFromBytes(image, mime)}, bodyCompositionResponseSchema())
+	if err != nil {
+		return ai.BodyCompositionReading{}, usage, err
+	}
+	reading, err := parseBodyCompositionReading(data)
+	if err != nil {
+		return ai.BodyCompositionReading{}, usage, fmt.Errorf("gemini: identify body composition: parse response: %w", err)
+	}
+	return reading, usage, nil
 }
 
 // Decompose breaks a dish into its ingredients using Flash-Lite.
@@ -371,6 +462,24 @@ func parseIngredients(data []byte) ([]ai.IngredientGuess, error) {
 		return nil, fmt.Errorf("parse ingredients: %w", err)
 	}
 	return ingredients, nil
+}
+
+// parseBodyCompositionReading decodes the model's JSON object response into
+// ai.BodyCompositionReading. Pure function (no SDK/network dependency) so it
+// can be unit-tested directly against hand-written sample JSON — see
+// parseGuesses. Every field in the target struct is a pointer, so a key
+// absent from data decodes to nil rather than a zero value, and any
+// unschemaed key present in data (a hallucinated "bmi", say) is silently
+// dropped by encoding/json because BodyCompositionReading has no field to
+// receive it — this is the parse-layer half of the "never a computed value"
+// invariant; bodyCompositionResponseSchema's lack of a BMI property is the
+// other half.
+func parseBodyCompositionReading(data []byte) (ai.BodyCompositionReading, error) {
+	var reading ai.BodyCompositionReading
+	if err := json.Unmarshal(data, &reading); err != nil {
+		return ai.BodyCompositionReading{}, fmt.Errorf("parse body composition reading: %w", err)
+	}
+	return reading, nil
 }
 
 // Compile-time assertion that GeminiProvider satisfies ai.Provider.

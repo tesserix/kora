@@ -286,28 +286,48 @@ func (r *Router) IdentifyText(ctx context.Context, phrase string) ([]Guess, Usag
 // so, give it its own model config rather than reusing p.model, which the text
 // paths depend on.
 func (r *Router) IdentifyPhoto(ctx context.Context, image []byte, mime string) ([]Guess, Usage, error) {
-	pctx, cancel := context.WithTimeout(ctx, r.photoBudgetOrDefault())
+	return retryPrimaryOnTransient(ctx, r.photoBudgetOrDefault(),
+		func(c context.Context) ([]Guess, Usage, error) { return r.Primary.IdentifyPhoto(c, image, mime) },
+	)
+}
+
+// retryPrimaryOnTransient runs call against the primary provider only,
+// bounded by budget, retrying exactly once on a transient error
+// (isTransientProviderError), gated by hasRetryHeadroom and paced by
+// sleepWithin(photoRetryDelay) — the policy IdentifyPhoto's doc above
+// explains in full (kora#179): no fallback because the deployed fallback for
+// these call types is not vision-capable, and a transient 503 must not take
+// the only leg down.
+//
+// Generic over T so IdentifyPhoto and IdentifyBodyComposition — which share
+// this policy byte-for-byte, including photoBudget and photoAttempts — call
+// through one implementation instead of maintaining two copies of the same
+// ~20-line loop. The failed attempt's Usage is carried forward and summed
+// into the next attempt's (TokensIn/TokensOut/LatencyMs) for the same reason
+// IdentifyPhoto always did: ai_usage_events records failures as well as
+// successes, so dropping a retried attempt's tokens would under-count spend
+// (the same class of gap kora#152 tracks for the abandoned fallback leg).
+func retryPrimaryOnTransient[T any](ctx context.Context, budget time.Duration, call func(context.Context) (T, Usage, error)) (T, Usage, error) {
+	pctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 
 	var last Usage
 	for attempt := 1; ; attempt++ {
-		guesses, usage, err := r.Primary.IdentifyPhoto(pctx, image, mime)
-		// Carry the failed attempt's cost forward. ai_usage_events records
-		// failures as well as successes (see Usage.Outcome), so dropping a
-		// retried attempt's tokens would under-count spend — the same class of
-		// gap kora#152 tracks for the abandoned fallback leg.
+		result, usage, err := call(pctx)
 		usage.TokensIn += last.TokensIn
 		usage.TokensOut += last.TokensOut
 		usage.LatencyMs += last.LatencyMs
 		if err == nil {
-			return guesses, usage, nil
+			return result, usage, nil
 		}
 		last = usage
 		if attempt >= photoAttempts || !isTransientProviderError(err) || !hasRetryHeadroom(pctx) {
-			return nil, usage, err
+			var zero T
+			return zero, usage, err
 		}
 		if !sleepWithin(pctx, photoRetryDelay) {
-			return nil, usage, err
+			var zero T
+			return zero, usage, err
 		}
 	}
 }
@@ -389,6 +409,24 @@ func (r *Router) GenerateText(ctx context.Context, systemPrompt, userPrompt stri
 		},
 		func(c context.Context) (string, Usage, error) {
 			return r.Fallback.GenerateText(c, systemPrompt, userPrompt)
+		},
+	)
+}
+
+// IdentifyBodyComposition calls the primary DIRECTLY — no fallback — for the
+// exact reason IdentifyPhoto does: the deployed fallback is an
+// OpenAI-compatible endpoint driven by ONE configured model, and prod sets
+// that to a text-only model. Handing it a base64 scale screenshot would
+// guarantee a failure that burns a paid call and real latency only to
+// replace the primary's real error with a meaningless one — strictly worse
+// than surfacing the primary's error directly. It shares IdentifyPhoto's
+// exact retry policy (photoBudget, one retry on a transient 503, same
+// headroom gate) via retryPrimaryOnTransient — see that function and
+// IdentifyPhoto's doc above for the full reasoning behind each choice.
+func (r *Router) IdentifyBodyComposition(ctx context.Context, image []byte, mime string) (BodyCompositionReading, Usage, error) {
+	return retryPrimaryOnTransient(ctx, r.photoBudgetOrDefault(),
+		func(c context.Context) (BodyCompositionReading, Usage, error) {
+			return r.Primary.IdentifyBodyComposition(c, image, mime)
 		},
 	)
 }
