@@ -11,6 +11,10 @@ const T = INSTRUMENT_DARK_FIXED;
 
 interface Props {
   children: ReactNode;
+  /** Who answered, as published in the agent registry. Omitted when the
+   *  bubble is Otto's own copy — a greeting or an error — rather than a
+   *  reply some agent produced. */
+  agent?: string;
 }
 
 // Otto's chat bubble — camera avatar + translucent bubble, top-left corner
@@ -18,7 +22,7 @@ interface Props {
 // Springs in on entrance to mark each new Otto message in the thread. Neutral
 // ink/glass tokens, not accent — the bubble is not the surface's single
 // primary action (that's the composer's mic/send button).
-export function OttoBubble({ children }: Props) {
+export function OttoBubble({ children, agent }: Props) {
   // Reduce Motion: Reanimated 4.5 degrades this to an instant jump, not a
   // cross-fade, so the guard has to substitute a gentler entrance rather than
   // lean on the built-in degradation. Dropping the translate and keeping the
@@ -42,7 +46,7 @@ export function OttoBubble({ children }: Props) {
           borderColor: withAlpha(T.ink, 0.22),
         }}
       >
-        <Icon name="camera" size={16} color={T.bg} />
+        <Icon name="sparkles" size={16} color={T.bg} />
       </View>
       <View
         style={{
@@ -57,6 +61,21 @@ export function OttoBubble({ children }: Props) {
           maxWidth: "80%",
         }}
       >
+        {agent ? (
+          <AppText
+            testID="otto-bubble-agent"
+            style={{
+              color: T.mut,
+              fontSize: 10,
+              fontWeight: "700",
+              letterSpacing: 1,
+              textTransform: "uppercase",
+              marginBottom: 6,
+            }}
+          >
+            {agent}
+          </AppText>
+        ) : null}
         <AppText style={{ color: T.ink, fontSize: 14, lineHeight: 21 }}>{children}</AppText>
       </View>
     </Animated.View>

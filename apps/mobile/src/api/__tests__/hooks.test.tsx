@@ -55,6 +55,7 @@ import {
   useRepeatLog,
   useResolveBarcode,
   useResolvePhoto,
+  useCaptureMessage,
   useResolveText,
   useResolveVoice,
   useSavedMeals,
@@ -283,6 +284,46 @@ test("useResolveText posts phrase to /v1/resolve/text", async () => {
     signal: undefined,
   });
   expect(result.current.data).toEqual(resolution);
+});
+
+// kora#264: the composer's own endpoint, whose reply says what the message
+// WAS. useResolveText stays for the paths that are food by construction.
+test("useCaptureMessage posts text to /v1/capture/message", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({ kind: "resolution", resolution });
+
+  const { result } = await renderHook(() => useCaptureMessage(), { wrapper });
+  result.current.mutate({ input: "2 eggs" });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+  expect(apiFetch).toHaveBeenCalledWith("/v1/capture/message", {
+    method: "POST",
+    body: JSON.stringify({ text: "2 eggs" }),
+    signal: undefined,
+  });
+  expect(result.current.data).toEqual({ kind: "resolution", resolution });
+});
+
+test("useCaptureMessage passes an answer through with its agent", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({
+    kind: "answer",
+    answer: "Here is a week of meals.",
+    citations: null,
+    show_support: false,
+    agent: { name: "Kora Meal Planner", skill: "plan-meals" },
+  });
+
+  const { result } = await renderHook(() => useCaptureMessage(), { wrapper });
+  const data = await result.current.mutateAsync({ input: "plan my meals" });
+
+  expect(data).toEqual({
+    kind: "answer",
+    answer: "Here is a week of meals.",
+    // null on the wire whenever the answer cited nothing — coerced once here,
+    // exactly as normalizeResolution does for candidates.
+    citations: [],
+    show_support: false,
+    agent: { name: "Kora Meal Planner", skill: "plan-meals" },
+  });
 });
 
 test("useResolveText refreshes AI usage after the request settles", async () => {

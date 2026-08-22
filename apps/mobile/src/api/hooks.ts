@@ -10,7 +10,7 @@ import {
 import * as Crypto from "expo-crypto";
 import { localDateNow } from "@/lib/localDate";
 import { apiFetch, apiFetchEnvelope, apiFetchMultipart, currentUserId, isNetworkError, TimeoutError } from "@/lib/api";
-import { buildCaptureForm, normalizeResolution, type ResolveFile } from "./resolveWire";
+import { buildCaptureForm, normalizeCaptureMessage, normalizeResolution, type ResolveFile } from "./resolveWire";
 import { isOnline } from "@/offline/connectivity";
 import { reconcileWeightReminder } from "@/reminders/reconcileWeightReminder";
 import {
@@ -796,6 +796,23 @@ export function useResolveText() {
         body: JSON.stringify({ phrase }),
         signal,
       }).then(normalizeResolution),
+    onSettled: refreshAIUsage,
+  });
+}
+
+/** Posts what the user typed to the composer's single entry point, which
+ *  decides whether it is food to log or a question to answer before anything
+ *  acts on it (kora#264). useResolveText stays for the paths that are food by
+ *  construction: offline drain and the ask-again sheet. */
+export function useCaptureMessage() {
+  const refreshAIUsage = useRefreshAIUsage();
+  return useMutation({
+    mutationFn: ({ input: text, signal }: ResolveVars<string>) =>
+      apiFetch("/v1/capture/message", {
+        method: "POST",
+        body: JSON.stringify({ text }),
+        signal,
+      }).then(normalizeCaptureMessage),
     onSettled: refreshAIUsage,
   });
 }
