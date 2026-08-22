@@ -8,8 +8,8 @@
   "shotsClock": "2026-08-19T09:41:00",
   "statusBarTime": "9:41",
   "scheme": "com.tesserix.kora",
-  "capturedAt": "2026-08-21T10:49:32.586Z",
-  "gitCommit": "7bd2b692",
+  "capturedAt": "2026-08-22T09:32:36.102Z",
+  "gitCommit": "860aec9d",
   "rule": {
     "scale": 3,
     "threshold": 48,
@@ -67,19 +67,19 @@
       "route": "sign-in",
       "width": 440,
       "height": 956,
-      "bytes": 184598
+      "bytes": 184390
     },
     {
       "route": "tab-diary",
       "width": 440,
       "height": 956,
-      "bytes": 185942
+      "bytes": 175418
     },
     {
       "route": "tab-progress",
       "width": 440,
       "height": 956,
-      "bytes": 135059
+      "bytes": 124263
     }
   ],
   "excluded": [
