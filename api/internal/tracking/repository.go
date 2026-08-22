@@ -72,6 +72,15 @@ type WeightInput struct {
 	// derives a deterministic per-user ID so a resubmitted or retried
 	// onboarding can never produce a second entry.
 	ID uuid.UUID
+	// HKUUID, when set, makes the write idempotent on the HealthKit sample's
+	// own identity rather than on a caller-chosen ID. Foreground sync
+	// (kora#30) re-sends its window after any failure, so this is the
+	// ordinary path, not an error path.
+	//
+	// Deliberately NOT the deterministic-ID trick onboarding uses: a primary
+	// key derived from an external system's UUID is invisible to anyone
+	// reading the table, while a named hk_uuid column says what it is.
+	HKUUID *uuid.UUID
 }
 
 // AddWeight records a weight-only entry.
@@ -105,6 +114,34 @@ func (r Repository) AddWeightEntry(ctx context.Context, userID uuid.UUID, in Wei
 		LoggedAt:        at,
 		LocalDate:       in.LocalDate,
 		BodyComposition: comp,
+	}
+
+	if in.HKUUID != nil {
+		e.HKUUID = in.HKUUID
+		res := r.db.WithContext(ctx).
+			Clauses(clause.OnConflict{
+				Columns: []clause.Column{{Name: "user_id"}, {Name: "hk_uuid"}},
+				// Must mirror weight_entries_hk_uuid_key's predicate exactly:
+				// postgres only matches ON CONFLICT against a partial index
+				// when the target's WHERE clause is repeated verbatim.
+				TargetWhere: clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: "hk_uuid IS NOT NULL"}}},
+				DoNothing:   true,
+			}).Create(&e)
+		if res.Error != nil {
+			return WeightEntry{}, fmt.Errorf("tracking: add weight hk: %w", res.Error)
+		}
+		if res.RowsAffected == 0 {
+			// Already stored by an earlier sync. Return the existing row so the
+			// caller sees the same identity it would have got the first time.
+			var existing WeightEntry
+			if err := r.db.WithContext(ctx).
+				Where("user_id = ? AND hk_uuid = ?", userID, in.HKUUID).
+				First(&existing).Error; err != nil {
+				return WeightEntry{}, fmt.Errorf("tracking: load existing hk weight: %w", err)
+			}
+			return existing, nil
+		}
+		return e, nil
 	}
 
 	if in.ID == uuid.Nil {
