@@ -51,6 +51,97 @@ const searchLimitMax = 25
 // virtually any query while staying cheap to score in Go.
 const resolveScanLimit = 100
 
+const referenceScanLimit = 100
+
+const referenceLocaleBoost = 0.03
+
+var reviewedReferenceProvenance = []string{
+	ProvenanceAFCD,
+	ProvenanceAUSNUT,
+	ProvenanceIFCT,
+	ProvenanceUSDA,
+}
+
+// ReferenceCandidate is one globally reviewed nutrition row retrieved as
+// evidence for an AI response. It deliberately excludes aliases and all
+// user-created/estimated sources; this data can be shared across users.
+type ReferenceCandidate struct {
+	Item       FoodItem
+	Similarity float64
+}
+
+// SearchReferenceFoods performs bounded semantic retrieval over the reviewed
+// national datasets. The stored vectors describe food identity, so this is
+// evidence retrieval, not a recommendation engine: the coach still applies
+// the user's confirmed preferences and safety policy after retrieval.
+func (r Repository) SearchReferenceFoods(
+	ctx context.Context,
+	queryVec []float32,
+	locale Locale,
+	limit int,
+) ([]ReferenceCandidate, error) {
+	if len(queryVec) == 0 {
+		return nil, fmt.Errorf("nutrition: search references: empty query embedding")
+	}
+	if limit <= 0 || limit > searchLimitMax {
+		limit = searchLimitMax
+	}
+
+	type referenceRow struct {
+		FoodItem
+		Distance float64 `gorm:"column:distance"`
+	}
+	var rows []referenceRow
+	vector := pgvector.NewVector(queryVec)
+	err := r.db.WithContext(ctx).Raw(`
+		SELECT id, name, brand, provenance, entity_type, locale, barcode,
+		       serving_desc, serving_grams, base_unit, serving_units,
+		       kcal_per_100g, protein_per_100g, carbs_per_100g,
+		       fat_per_100g, fiber_per_100g, created_at,
+		       (embedding <=> ?) AS distance
+		FROM food_items
+		WHERE deleted_at IS NULL
+		  AND embedding IS NOT NULL
+		  AND entity_type = ?
+		  AND provenance IN ?
+		ORDER BY embedding <=> ?, id
+		LIMIT ?`, vector, EntityTypeGeneric, reviewedReferenceProvenance, vector, referenceScanLimit).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("nutrition: search references: %w", err)
+	}
+
+	sort.SliceStable(rows, func(i, j int) bool {
+		left := rows[i].Distance
+		right := rows[j].Distance
+		if locale != LocaleUnknown {
+			if rows[i].Locale == locale {
+				left -= referenceLocaleBoost
+			}
+			if rows[j].Locale == locale {
+				right -= referenceLocaleBoost
+			}
+		}
+		if left == right {
+			return rows[i].ID.String() < rows[j].ID.String()
+		}
+		return left < right
+	})
+	if len(rows) > limit {
+		rows = rows[:limit]
+	}
+
+	out := make([]ReferenceCandidate, len(rows))
+	for i, row := range rows {
+		similarity := 1 - row.Distance
+		if similarity < 0 {
+			similarity = 0
+		}
+		out[i] = ReferenceCandidate{Item: row.FoodItem, Similarity: similarity}
+	}
+	return out, nil
+}
+
 func (r Repository) Search(ctx context.Context, query string, limit int) ([]FoodItem, error) {
 	if limit <= 0 || limit > searchLimitMax {
 		limit = searchLimitMax

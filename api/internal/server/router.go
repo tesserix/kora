@@ -348,7 +348,9 @@ func NewRouter(deps Deps) *gin.Engine {
 		coachGrounder := coach.NewGrounder(dashSvc, logRepo, memSvc, trackingRepo).WithMentor(mentorRepo)
 		coachMeter := billing.NewMeter(deps.DB)
 		coachThread := coach.NewThreadRepository(deps.DB)
-		coachService := coach.NewService(&coachGrounder, deps.Provider, coachMeter, &coachThread).WithAgents(deps.Agents)
+		coachService := coach.NewService(&coachGrounder, deps.Provider, coachMeter, &coachThread).
+			WithAgents(deps.Agents).
+			WithNutritionReferences(coach.NewNutritionReferenceSource(nutrition.NewRepository(deps.DB), deps.Provider))
 		coachHandler := coach.NewHandler(coachService)
 		if deps.Resolver != nil {
 			// The capture composer posts here: one endpoint that decides

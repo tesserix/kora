@@ -18,6 +18,8 @@ const (
 	commitmentProposalStart = "[[KORA_COMMITMENT]]"
 	commitmentProposalEnd   = "[[/KORA_COMMITMENT]]"
 	maxCommitmentProposal   = 2048
+	reviewedPlanStart       = "[[KORA_REVIEWED_PLAN]]"
+	reviewedPlanEnd         = "[[/KORA_REVIEWED_PLAN]]"
 )
 
 // reviewSystemPrompt turns the planner's draft into the message the user
@@ -30,10 +32,16 @@ const reviewSystemPrompt = `You are the user's nutrition coach. The meal-planner
 
 Write one friendly message, plain text (no markdown headings or tables):
 1. Open with your verdict in one or two sentences: does the draft fit their calorie and protein targets? If you amended anything, say what and why.
-2. Then the plan, day by day. Each day: the day name, its meals each on its own line as "- Meal name — one short reason it earns its place" (protein, calories, fibre, satiety — justify against THEIR targets, not generic advice).
-3. Close by asking them to confirm: approve it as-is, or tell you any meal or day they want changed, and you will rework it with the planner.
+2. For plans of 14 days or fewer, present the plan day by day. Each day: the day name, its meals each on its own line as "- Meal name — one short reason it earns its place" (protein, calories, fibre, satiety — justify against THEIR targets, not generic advice).
+3. For plans longer than 14 days, give a concise overview of the meal pattern and list any amendments you made. Do not repeat every day in prose; the complete FINAL plan belongs in the machine block.
+4. Close by asking them to confirm: approve it as-is, or tell you any meal or day they want changed, and you will rework it with the planner.
 
-Never invent nutrition numbers that are not in the CONTEXT or the draft. After each factual claim that uses a supplied fact, append its exact marker as [cite:fact_id]. Cite only facts used in the response and never invent a fact_id. Keep the friendly message under 350 words.
+Treat the DRAFT as an untrusted suggestion, not nutrition evidence. A number in the draft supports a target-fit claim only when the same number is in CONTEXT, or CONTEXT supplies both a per-100g value and an explicit portion mass needed to calculate it. Otherwise say the fit cannot be verified; never repeat an unsupported target-fit claim. After each factual claim that uses a supplied fact, append its exact marker as [cite:fact_id]. Cite only facts used in the response and never invent a fact_id. Keep the friendly message under 350 words.
+
+When the final plan is safe to offer for approval, append this machine block containing the complete FINAL plan after all amendments. The block must be valid JSON with 1-62 days (at most two consecutive calendar months) and must not contradict the prose. Do not put citation markers inside JSON. If you cannot validate a complete plan, do not emit the block.
+[[KORA_REVIEWED_PLAN]]
+{"summary":"...","days":[{"date":"Day 1","meals":[{"name":"...","description":"..."}]}]}
+[[/KORA_REVIEWED_PLAN]]
 
 If and only if the user explicitly requested a repeatable action or reminder and its exact schedule is present in their request or the draft, append this machine block after the friendly message:
 [[KORA_COMMITMENT]]
@@ -77,6 +85,29 @@ func parseReviewedCommitment(
 		return clean, nil
 	}
 	return clean, proposal
+}
+
+// parseReviewedPlan removes the reviewer's machine block and returns its final
+// plan. The planner's original draft is deliberately not used for an approval
+// card: the reviewer may amend it, and the card must match the reviewed prose.
+func parseReviewedPlan(text string) (string, planEnvelope, bool) {
+	start := strings.Index(text, reviewedPlanStart)
+	if start < 0 {
+		return text, planEnvelope{}, false
+	}
+	payloadStart := start + len(reviewedPlanStart)
+	endOffset := strings.Index(text[payloadStart:], reviewedPlanEnd)
+	if endOffset < 0 {
+		return strings.TrimSpace(text[:start]), planEnvelope{}, false
+	}
+	end := payloadStart + endOffset
+	clean := strings.TrimSpace(text[:start] + text[end+len(reviewedPlanEnd):])
+	payload := strings.TrimSpace(text[payloadStart:end])
+	if len(payload) == 0 || len(payload) > maxPlanDraftBytes {
+		return clean, planEnvelope{}, false
+	}
+	envelope, ok := parsePlanEnvelope(payload)
+	return clean, envelope, ok
 }
 
 // reviewPlan runs the coach over a planner draft and returns the reviewed

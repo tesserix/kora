@@ -76,7 +76,7 @@ func TestNewPlanProposal_BoundsTheDraftItWasGiven(t *testing.T) {
 	plan := newPlanProposal(uuid.New(), envelope, "", "")
 
 	require.NotNil(t, plan)
-	require.Len(t, plan.Days, maxPlanDays)
+	require.Len(t, plan.Days, 62, "the runtime agent contract permits at most two calendar months")
 	require.Len(t, plan.Days[0].Meals, maxPlanMealsPerDay)
 	require.Len(t, []rune(plan.Summary), maxPlanSummary)
 	require.Len(t, []rune(plan.Days[0].Date), maxPlanDateChars)
@@ -84,6 +84,27 @@ func TestNewPlanProposal_BoundsTheDraftItWasGiven(t *testing.T) {
 	require.Len(t, []rune(plan.Days[0].Meals[0].Description), maxPlanMealDetail)
 	require.Equal(t, fallbackAgentName, plan.AgentName, "an unnamed author is still attributed")
 	require.Equal(t, fallbackAgentName, plan.ReviewedBy)
+}
+
+func TestCoachPlanProposalDaysCheckAllowsAtMostTwoCalendarMonths(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	plan := seedPlanProposal(t, NewThreadRepository(db), userID)
+
+	days := func(count int) PlanDays {
+		out := make(PlanDays, count)
+		for i := range out {
+			out[i] = PlanDay{Date: "Day", Meals: []PlanMeal{{Name: "Meal"}}}
+		}
+		return out
+	}
+
+	require.NoError(t, db.Exec(
+		"UPDATE coach_plan_proposals SET days = ? WHERE id = ?", days(62), plan.ID,
+	).Error)
+	require.Error(t, db.Exec(
+		"UPDATE coach_plan_proposals SET days = ? WHERE id = ?", days(63), plan.ID,
+	).Error)
 }
 
 // A draft this large is not a plan, and parsing it would be work done on

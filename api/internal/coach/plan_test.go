@@ -59,6 +59,38 @@ func TestParseReviewedCommitmentRequiresReviewerAttribution(t *testing.T) {
 	require.Nil(t, proposal)
 }
 
+func TestParseReviewedPlanReturnsOnlyTheReviewersFinalStructure(t *testing.T) {
+	review := `I replaced the unsupported meal. Approve this version.
+[[KORA_REVIEWED_PLAN]]
+{"summary":"Reviewed plan","days":[{"date":"Monday","meals":[{"name":"Lentil bowl","description":"Reviewed option"}]}]}
+[[/KORA_REVIEWED_PLAN]]`
+
+	clean, envelope, ok := parseReviewedPlan(review)
+
+	require.True(t, ok)
+	require.Equal(t, "I replaced the unsupported meal. Approve this version.", clean)
+	require.Equal(t, "Reviewed plan", envelope.Summary)
+	require.Equal(t, "Lentil bowl", envelope.Days[0].Meals[0].Name)
+}
+
+func TestParseReviewedPlanStripsAnInvalidMachineBlock(t *testing.T) {
+	review := `I could not validate a complete plan.
+[[KORA_REVIEWED_PLAN]]
+{"summary":"No days","days":[]}
+[[/KORA_REVIEWED_PLAN]]`
+
+	clean, _, ok := parseReviewedPlan(review)
+
+	require.False(t, ok)
+	require.Equal(t, "I could not validate a complete plan.", clean)
+}
+
+func TestReviewPromptSupportsTwoMonthPlansWithoutDuplicatingEveryDayInProse(t *testing.T) {
+	require.Contains(t, reviewSystemPrompt, "1-62 days")
+	require.Contains(t, reviewSystemPrompt, "For plans longer than 14 days")
+	require.Contains(t, reviewSystemPrompt, "complete FINAL plan")
+}
+
 func TestFormatPlanDraftRendersTheEnvelopeAsReadableText(t *testing.T) {
 	draft := `{"summary":"High-protein dinners.","days":[{"date":"Day 1","meals":[{"name":"Dinner: Steak","description":"180g sirloin."},{"name":"Lunch: Wrap","description":"150g tuna."}]}]}`
 

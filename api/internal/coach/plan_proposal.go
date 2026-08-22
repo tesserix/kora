@@ -15,14 +15,14 @@ import (
 // contributes is treated as untrusted length: a card the user has to read and
 // approve must stay a card.
 const (
-	maxPlanDays        = 14
+	maxPlanDays        = 62
 	maxPlanMealsPerDay = 8
 	maxPlanSummary     = 600
 	maxPlanDateChars   = 40
 	maxPlanMealName    = 120
 	maxPlanMealDetail  = 400
 	// maxPlanDraftBytes bounds what is even attempted, ahead of parsing. A
-	// two-week plan is a few kilobytes; anything past this is not a plan.
+	// two-month plan is still bounded; anything past this is not a plan.
 	maxPlanDraftBytes = 64 << 10
 )
 

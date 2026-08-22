@@ -176,6 +176,25 @@ func (m *stubMeter) WithinBudget(ctx context.Context, userID uuid.UUID) (bool, e
 
 var _ ai.Meter = (*stubMeter)(nil)
 
+type stubNutritionReferences struct {
+	items  []NutritionReference
+	usage  ai.Usage
+	err    error
+	query  string
+	locale nutrition.Locale
+}
+
+func (s *stubNutritionReferences) Search(
+	_ context.Context,
+	query string,
+	locale nutrition.Locale,
+	_ int,
+) ([]NutritionReference, ai.Usage, error) {
+	s.query = query
+	s.locale = locale
+	return s.items, s.usage, s.err
+}
+
 func TestAsk_GroundedAnswerReturnsCitations(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db, 2000, 120)
@@ -186,7 +205,7 @@ func TestAsk_GroundedAnswerReturnsCitations(t *testing.T) {
 	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{})
 
 	provider := &fakeProvider{
-		text:      "You have 55g protein to go.",
+		text:      "Your protein target is 120g. [cite:today_protein_g_target]",
 		textUsage: ai.Usage{Provider: "stub", Model: "test-model", CallType: "generate_text"},
 	}
 	meter := &stubMeter{withinBudget: true}
@@ -196,10 +215,109 @@ func TestAsk_GroundedAnswerReturnsCitations(t *testing.T) {
 	a, err := svc.Ask(context.Background(), userID, now, time.UTC, "how's my protein?")
 
 	require.NoError(t, err)
-	require.NotEmpty(t, a.Text)
-	require.NotEmpty(t, a.Citations)
+	require.Equal(t, "Your protein target is 120g.", a.Text)
+	require.Equal(t, []Fact{{Label: "today_protein_g_target", Value: "120"}}, a.Citations)
 	require.Equal(t, 1, provider.calls, "provider must be called when within budget")
 	require.Len(t, meter.records, 1, "usage must be recorded")
+}
+
+func TestAskDropsUnknownCitationMarkers(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	logRepo := foodlog.NewRepository(db)
+	g := NewGrounder(
+		dashboard.NewService(logRepo, tracking.NewRepository(db), db),
+		logRepo,
+		memory.NewService(logRepo),
+		fakeWeightSource{},
+	)
+	svc := NewService(
+		&g,
+		&fakeProvider{text: "This claim has no supplied evidence. [cite:not_a_real_fact]"},
+		&stubMeter{withinBudget: true},
+		nil,
+	)
+
+	answer, err := svc.Ask(t.Context(), userID, time.Now().UTC(), time.UTC, "Tell me something")
+
+	require.NoError(t, err)
+	require.Equal(t, "This claim has no supplied evidence.", answer.Text)
+	require.Empty(t, answer.Citations)
+}
+
+func TestAskRetrievesCountryNutritionEvidenceForTheAgentAndResponse(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	logRepo := foodlog.NewRepository(db)
+	g := NewGrounder(
+		dashboard.NewService(logRepo, tracking.NewRepository(db), db),
+		logRepo,
+		memory.NewService(logRepo),
+		fakeWeightSource{},
+	)
+
+	provider := &recordingProvider{answer: "Choose lentils for a protein-rich lunch. [cite:reference_food_1]"}
+	meter := &stubMeter{withinBudget: true}
+	references := &stubNutritionReferences{
+		items: []NutritionReference{
+			{
+				Name: "Lentil, whole, dried", Provenance: nutrition.ProvenanceIFCT,
+				Locale: nutrition.LocaleIN, KcalPer100g: 352, ProteinPer100g: 24.4,
+				CarbsPer100g: 60.3, FatPer100g: 1.3, FiberPer100g: 10.7,
+			},
+			{
+				Name: "Chickpea, dried", Provenance: nutrition.ProvenanceIFCT,
+				Locale: nutrition.LocaleIN, KcalPer100g: 360, ProteinPer100g: 19.3,
+				CarbsPer100g: 60.7, FatPer100g: 6, FiberPer100g: 17.4,
+			},
+		},
+		usage: ai.Usage{Provider: "agentgateway", Model: "kora-auto", CallType: "embed"},
+	}
+	svc := NewService(&g, provider, meter, nil).WithNutritionReferences(references)
+	loc, err := time.LoadLocation("Asia/Kolkata")
+	require.NoError(t, err)
+
+	answer, err := svc.Ask(
+		t.Context(), userID, time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC), loc,
+		"What is a local high-protein lunch option?",
+	)
+	require.NoError(t, err)
+
+	require.Equal(t, "What is a local high-protein lunch option?", references.query)
+	require.Equal(t, nutrition.LocaleIN, references.locale)
+	require.Contains(t, provider.userPrompt, "Reviewed nutrition reference facts")
+	require.Contains(t, provider.userPrompt, `"Lentil, whole, dried" [ifct, "IN"]`)
+	require.Contains(t, provider.userPrompt, "protein 24.4g per 100g")
+	require.NotContains(t, answer.Text, "[cite:")
+	require.Equal(t, []Fact{{
+		Label: "reference_food_1",
+		Value: "Lentil, whole, dried | ifct | IN | 352 kcal, 24.4g protein, 60.3g carbs, 1.3g fat, 10.7g fibre per 100g",
+	}}, answer.Citations, "only evidence cited in the response may be returned to the app")
+	require.Len(t, meter.records, 2, "retrieval embedding and answer generation must both be metered")
+}
+
+func TestAskUsesUnknownNutritionLocaleWhenTimezoneIsNil(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	logRepo := foodlog.NewRepository(db)
+	g := NewGrounder(
+		dashboard.NewService(logRepo, tracking.NewRepository(db), db),
+		logRepo,
+		memory.NewService(logRepo),
+		fakeWeightSource{},
+	)
+	references := &stubNutritionReferences{}
+	svc := NewService(&g, &fakeProvider{text: "I don't have a matching reference."}, &stubMeter{withinBudget: true}, nil).
+		WithNutritionReferences(references)
+
+	_, err := svc.Ask(t.Context(), userID, time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC), nil, "What should I eat?")
+
+	require.NoError(t, err)
+	require.Equal(t, nutrition.LocaleUnknown, references.locale)
+}
+
+func TestNewNutritionReferenceSourceIsNilWithoutAnEmbeddingProvider(t *testing.T) {
+	require.Nil(t, NewNutritionReferenceSource(nutrition.Repository{}, nil))
 }
 
 // A successful GenerateText call that leaves Usage.Outcome unset (exactly
@@ -681,7 +799,12 @@ func TestServiceAsk_PersistsExchange(t *testing.T) {
 	g := NewGrounder(dashSvc, logRepo, memSvc, trackRepo)
 	threadRepo := NewThreadRepository(db)
 
-	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, &threadRepo)
+	svc := NewService(
+		&g,
+		&fakeProvider{text: "Your protein target is 120g. [cite:today_protein_g_target]"},
+		&stubMeter{withinBudget: true},
+		&threadRepo,
+	)
 
 	_, err := svc.Ask(context.Background(), userID, time.Now().UTC(), time.UTC, "what should I eat?")
 	require.NoError(t, err)

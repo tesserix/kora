@@ -100,6 +100,47 @@ func TestRowsMissingEmbeddingExcludesSoftDeleted(t *testing.T) {
 	require.False(t, containsID(missing, retired.ID), "a retired row must not consume a scarce embedding-backfill slot")
 }
 
+func TestSearchReferenceFoodsUsesOnlyReviewedCountryDatasets(t *testing.T) {
+	tx := fixtureTx(t)
+	repo := NewRepository(tx)
+	query := partialVector768(233, 1)
+
+	au := FoodItem{
+		Name: "Reference AU " + uuid.NewString(), Provenance: ProvenanceAFCD,
+		Locale: LocaleAU, KcalPer100g: 120, ProteinPer100g: 20,
+	}
+	in := FoodItem{
+		Name: "Reference IN " + uuid.NewString(), Provenance: ProvenanceIFCT,
+		Locale: LocaleIN, KcalPer100g: 180, ProteinPer100g: 12,
+	}
+	unreviewed := FoodItem{
+		Name: "Unreviewed estimate " + uuid.NewString(), Provenance: ProvenanceUserEstimate,
+		KcalPer100g: 1, ProteinPer100g: 99,
+	}
+	retired := FoodItem{
+		Name: "Retired reference " + uuid.NewString(), Provenance: ProvenanceUSDA,
+		Locale: LocaleUS, KcalPer100g: 100,
+	}
+	for _, item := range []*FoodItem{&au, &in, &unreviewed, &retired} {
+		require.NoError(t, tx.Create(item).Error)
+		require.NoError(t, repo.SetEmbedding(t.Context(), item.ID, query))
+	}
+	require.NoError(t, tx.Exec("UPDATE food_items SET deleted_at = now() WHERE id = ?", retired.ID).Error)
+
+	got, err := repo.SearchReferenceFoods(t.Context(), query, LocaleAU, 25)
+	require.NoError(t, err)
+
+	ids := make([]uuid.UUID, 0, len(got))
+	for _, item := range got {
+		ids = append(ids, item.Item.ID)
+	}
+	require.Contains(t, ids, au.ID)
+	require.Contains(t, ids, in.ID)
+	require.NotContains(t, ids, unreviewed.ID, "user estimates must never become shared AI evidence")
+	require.NotContains(t, ids, retired.ID)
+	require.Equal(t, au.ID, got[0].Item.ID, "the caller's locale should break equally similar ties")
+}
+
 func containsID(items []FoodItem, id uuid.UUID) bool {
 	for _, it := range items {
 		if it.ID == id {

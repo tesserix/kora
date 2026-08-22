@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
+	"regexp"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/tesserix/kora/api/internal/guardrails"
 	"github.com/tesserix/kora/api/internal/httpx"
 	"github.com/tesserix/kora/api/internal/mentor"
+	"github.com/tesserix/kora/api/internal/nutrition"
 )
 
 // qaSystemPrompt is the strict grounding contract for the coach's Q&A
@@ -27,6 +29,7 @@ const qaSystemPrompt = `You are Kora, a supportive nutrition coach. Answer the u
 Rules:
 - Never invent or guess a number that is not explicitly present in CONTEXT.
 - If the answer isn't in CONTEXT, say plainly that you don't have that information — never make one up.
+- After each factual claim that uses a supplied fact, append its exact marker as [cite:fact_id]. Cite only facts used in the answer and never invent a fact_id.
 - Be additive and encouraging: never tell the user to eat less, restrict, skip meals, or stop eating.
 - Keep the answer short and conversational.`
 
@@ -38,6 +41,8 @@ const budgetDegradedText = "I've reached your AI usage limit — try again after
 // GEMINI_API_KEY unset) — Ask degrades gracefully instead of nil-panicking
 // on the provider call.
 const providerUnavailableText = "Q&A isn't available right now — try again later."
+
+const planReviewUnavailableText = "I drafted your plan, but I couldn't complete its nutrition review. Please try again — no unreviewed plan was saved."
 
 // emptyQuestionMessage is the client-safe message for a blank/whitespace-only
 // question, surfaced via httpx.ValidationError so the HTTP layer maps it to
@@ -69,6 +74,11 @@ var restrictivePhrases = []string{
 	"too many calories",
 	"go to bed hungry",
 }
+
+var (
+	citationMarkerPattern = regexp.MustCompile(`(?i)\[cite:([a-z0-9_]{1,64})\]`)
+	citationLikePattern   = regexp.MustCompile(`(?i)\[cite:[^\]\r\n]{0,128}\]`)
+)
 
 // looksRestrictive reports whether text contains any restrictivePhrases,
 // case-insensitively. It is a pure heuristic over the raw provider answer —
@@ -132,11 +142,23 @@ type AgentRunner interface {
 // deterministic Context, budget-gated via ai.Meter, and guardrail-gated via
 // the Protective policy.
 type Service struct {
-	g        *Grounder
-	provider ai.Provider
-	meter    ai.Meter
-	thread   *ThreadRepository
-	runner   AgentRunner
+	g          *Grounder
+	provider   ai.Provider
+	meter      ai.Meter
+	thread     *ThreadRepository
+	runner     AgentRunner
+	references NutritionReferenceSource
+}
+
+// WithNutritionReferences returns a copy that augments each answer with a
+// bounded pgvector retrieval over reviewed national food datasets.
+func (s *Service) WithNutritionReferences(source NutritionReferenceSource) *Service {
+	if source == nil {
+		return s
+	}
+	out := *s
+	out.references = source
+	return &out
 }
 
 // NewService builds a Service over its collaborators. thread may be nil, in
@@ -184,6 +206,19 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 	if !ok {
 		return Answer{Text: budgetDegradedText, ShowSupport: guardrails.AtRisk(signals)}, nil
 	}
+	if s.references != nil {
+		items, usage, referenceErr := s.references.Search(
+			ctx, question, nutrition.LocaleFromTimezone(loc.String()), nutritionReferenceLimit,
+		)
+		if referenceErr != nil {
+			usage.Outcome = outcomeFor(referenceErr)
+			s.record(ctx, userID, usage)
+			slog.WarnContext(ctx, "coach: nutrition reference retrieval failed, answering without it", "err", referenceErr)
+		} else {
+			s.record(ctx, userID, usage)
+			grounded.NutritionReferences = items
+		}
+	}
 
 	skill := s.classifySkill(ctx, question)
 	userPrompt := fmt.Sprintf("CONTEXT:\n%s\n%s\nQUESTION: %s", grounded.Render(), s.renderHistory(ctx, userID), question)
@@ -200,19 +235,17 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 		if skill == planningSkill {
 			// Planner drafts are machine-shaped and unvetted; the coach
 			// reviews them against the user's numbers and presents the result
-			// as a proposal to approve or challenge. A failed review keeps
-			// the draft — worse, but still an answer.
-			draft := raw
+			// as a proposal to approve or challenge. A failed review must not
+			// expose or persist a draft that has not passed this boundary.
 			if reviewed, reviewer := s.reviewPlan(ctx, userID, grounded.Render(), question, raw); reviewed != "" {
 				by.ReviewedBy = reviewer
+				reviewed, envelope, hasReviewedPlan := parseReviewedPlan(reviewed)
 				raw, proposal = parseReviewedCommitment(reviewed, userID, now, loc, by.Agent, reviewer)
-				// The card is built from the PLANNER's draft, not the review:
-				// the review is prose by design, and re-deriving days and meals
-				// from prose would guess at what the planner already stated
-				// exactly. It is only built once a review has passed.
-				if envelope, ok := parsePlanEnvelope(draft); ok {
+				if hasReviewedPlan {
 					plan = newPlanProposal(userID, envelope, by.Agent, by.ReviewedBy)
 				}
+			} else {
+				raw = planReviewUnavailableText
 			}
 			raw = formatPlanDraft(raw)
 		}
@@ -244,10 +277,14 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 		proposal = nil
 		plan = nil
 	}
+	text, citations := citedFacts(text, grounded.Facts())
+	if decision.Action == guardrails.Suppress {
+		citations = []Fact{}
+	}
 
 	answer := Answer{
 		Text:        text,
-		Citations:   grounded.Facts(),
+		Citations:   citations,
 		ShowSupport: decision.ShowSupport || guardrails.AtRisk(signals),
 		By:          by,
 		Proposal:    proposal,
@@ -270,6 +307,40 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 	}
 
 	return answer, nil
+}
+
+// citedFacts removes model citation markers from user-visible text and
+// returns only facts whose exact IDs were cited. Unknown IDs are discarded,
+// so prompt injection cannot manufacture evidence that was not supplied.
+func citedFacts(text string, facts []Fact) (string, []Fact) {
+	byLabel := make(map[string]Fact, len(facts))
+	for _, fact := range facts {
+		byLabel[strings.ToLower(fact.Label)] = fact
+	}
+
+	citations := make([]Fact, 0)
+	seen := make(map[string]struct{})
+	for _, match := range citationMarkerPattern.FindAllStringSubmatch(text, -1) {
+		label := strings.ToLower(match[1])
+		fact, ok := byLabel[label]
+		if !ok {
+			continue
+		}
+		if _, duplicate := seen[label]; duplicate {
+			continue
+		}
+		seen[label] = struct{}{}
+		citations = append(citations, fact)
+	}
+
+	clean := citationLikePattern.ReplaceAllString(text, "")
+	for _, punctuation := range []string{".", ",", ";", ":", "!", "?"} {
+		clean = strings.ReplaceAll(clean, " "+punctuation, punctuation)
+	}
+	for strings.Contains(clean, "  ") {
+		clean = strings.ReplaceAll(clean, "  ", " ")
+	}
+	return strings.TrimSpace(clean), citations
 }
 
 // historyTurns is how many prior turns are replayed into the prompt. Enough

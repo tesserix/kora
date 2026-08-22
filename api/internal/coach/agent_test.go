@@ -316,15 +316,15 @@ func TestAsk_AReviewedRoutineReturnsAndPersistsAUserReviewProposal(t *testing.T)
 	require.Equal(t, answer.Proposal.ID, turns[1].Proposal.ID)
 }
 
-// A review that cannot happen must not cost the user the plan: the draft is
-// still the answer, with no reviewer attributed.
-func TestAsk_AFailedReviewKeepsThePlannerDraft(t *testing.T) {
+// A review that cannot happen must not expose the planner's prose as though it
+// had passed. The response stays retryable and carries no approval artefact.
+func TestAsk_AFailedReviewDoesNotExposeAProseDraft(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db, 2000, 120)
 	g, meter := askFixture(t)
 
 	// The provider answers the classifier with "plan", then fails every later
-	// call — so the review's provider fallback fails too and the draft stands.
+	// call — so the review's provider fallback fails too.
 	provider := &flakyProvider{fakeProvider: fakeProvider{text: "plan"}, failAfter: 1}
 	runner := &fakeRunner{
 		bySkill: map[string]agents.Run{
@@ -343,9 +343,11 @@ func TestAsk_AFailedReviewKeepsThePlannerDraft(t *testing.T) {
 		"plan my meals for the week")
 
 	require.NoError(t, err)
-	require.Equal(t, "Day 1: oats. Day 2: eggs.", a.Text, "the draft survives a failed review")
+	require.Equal(t, planReviewUnavailableText, a.Text)
+	require.NotContains(t, a.Text, "oats")
 	require.Equal(t, "Kora Meal Planner", a.By.Agent)
 	require.Empty(t, a.By.ReviewedBy)
+	require.Nil(t, a.Plan)
 	_ = db
 }
 
@@ -408,10 +410,10 @@ func (f *flakyProvider) GenerateText(ctx context.Context, systemPrompt, userProm
 	return f.fakeProvider.GenerateText(ctx, systemPrompt, userPrompt)
 }
 
-// A review can fail — a gateway timeout, a provider outage — and when it does
-// the draft is still the only answer there is. It must reach the user as
-// prose, never as the planner's raw JSON envelope (kora capture thread).
-func TestAsk_AnUnreviewedPlanDraftIsStillReadable(t *testing.T) {
+// A planner draft is not safe to show until the nutrition coach has reviewed
+// it against the user's constraints. If both review paths fail, fail closed
+// with a retryable message rather than presenting an unreviewed plan.
+func TestAsk_AnUnreviewedPlanDraftIsNotShown(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db, 2000, 120)
 	g, meter := askFixture(t)
@@ -434,19 +436,20 @@ func TestAsk_AnUnreviewedPlanDraftIsStillReadable(t *testing.T) {
 		"plan my dinner for tonight")
 
 	require.NoError(t, err)
-	require.NotContains(t, a.Text, `"summary"`, "the user never reads raw JSON")
-	require.NotContains(t, a.Text, "{")
-	require.Contains(t, a.Text, "High-protein dinners.")
-	require.Contains(t, a.Text, "Day 1")
-	require.Contains(t, a.Text, "- Dinner: Steak — 180g sirloin.")
+	require.Equal(t, "I drafted your plan, but I couldn't complete its nutrition review. Please try again — no unreviewed plan was saved.", a.Text)
+	require.NotContains(t, a.Text, "High-protein dinners.")
+	require.NotContains(t, a.Text, "Steak")
 	require.Empty(t, a.By.ReviewedBy, "an unreviewed draft claims no reviewer")
+	require.Nil(t, a.Proposal)
+	require.Nil(t, a.Plan)
 	_ = db
 }
 
 // The review stage turns the planner's JSON into prose, which is what the user
 // reads — but prose is not something a client can render an approve button on.
-// The structured draft is kept alongside it, so the thread shows a card the
-// user can act on and a paragraph that says why it fits.
+// The reviewer's final structured plan is kept alongside it, so the thread
+// shows the same reviewed plan the prose describes, never the planner's
+// unreviewed draft.
 func TestAsk_AReviewedPlanIsAlsoReturnedAsAnApprovableCard(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db, 2000, 120)
@@ -455,11 +458,14 @@ func TestAsk_AReviewedPlanIsAlsoReturnedAsAnApprovableCard(t *testing.T) {
 	runner := &fakeRunner{bySkill: map[string]agents.Run{
 		planningSkill: {
 			Agent: "meal-planner", DisplayName: "Kora Meal Planner", State: "completed",
-			Text: `{"summary":"Hits 2000 kcal and 120g protein","days":[{"date":"Monday","meals":[{"name":"Oats and whey","description":"32g protein"}]}]}`,
+			Text: `{"summary":"UNREVIEWED target claim","days":[{"date":"Monday","meals":[{"name":"Steak","description":"unsupported numbers"}]}]}`,
 		},
 		guidanceSkill: {
 			Agent: "nutrition-coach", DisplayName: "Kora Nutrition Coach", State: "completed",
-			Text: "This fits your 2000 kcal target. Approve it, or tell me what to change.",
+			Text: `This was amended against your 2000 kcal target. [cite:today_kcal_target] Approve it, or tell me what to change.
+[[KORA_REVIEWED_PLAN]]
+{"summary":"Reviewed meal plan","days":[{"date":"Monday","meals":[{"name":"Lentil bowl","description":"A reviewed option"}]}]}
+[[/KORA_REVIEWED_PLAN]]`,
 		},
 	}}
 	thread := NewThreadRepository(db)
@@ -469,12 +475,13 @@ func TestAsk_AReviewedPlanIsAlsoReturnedAsAnApprovableCard(t *testing.T) {
 		time.Date(2026, 8, 22, 1, 0, 0, 0, time.UTC), time.UTC, "plan my meals for the week")
 
 	require.NoError(t, err)
-	require.Equal(t, "This fits your 2000 kcal target. Approve it, or tell me what to change.", answer.Text)
+	require.Equal(t, "This was amended against your 2000 kcal target. Approve it, or tell me what to change.", answer.Text)
 	require.NotNil(t, answer.Plan)
 	require.NotZero(t, answer.Plan.ID, "the card is approvable, so it has an id")
-	require.Equal(t, "Hits 2000 kcal and 120g protein", answer.Plan.Summary)
+	require.Equal(t, "Reviewed meal plan", answer.Plan.Summary)
 	require.Len(t, answer.Plan.Days, 1)
-	require.Equal(t, "Oats and whey", answer.Plan.Days[0].Meals[0].Name)
+	require.Equal(t, "Lentil bowl", answer.Plan.Days[0].Meals[0].Name)
+	require.NotContains(t, answer.Plan.Summary, "UNREVIEWED")
 	require.Equal(t, "Kora Meal Planner", answer.Plan.AgentName)
 	require.Equal(t, "Kora Nutrition Coach", answer.Plan.ReviewedBy)
 	require.Nil(t, answer.Plan.AcceptedAt, "a plan is a proposal until the user approves it")
@@ -501,7 +508,10 @@ func TestAsk_AnUnstoredPlanCarriesNoCard(t *testing.T) {
 		},
 		guidanceSkill: {
 			Agent: "nutrition-coach", DisplayName: "Kora Nutrition Coach", State: "completed",
-			Text: "Looks good against your targets.",
+			Text: `Looks good against your targets.
+[[KORA_REVIEWED_PLAN]]
+{"summary":"Reviewed week","days":[{"date":"Monday","meals":[{"name":"Oats"}]}]}
+[[/KORA_REVIEWED_PLAN]]`,
 		},
 	}}
 	svc := NewService(g, &fakeProvider{text: "plan"}, meter, nil).WithAgents(runner)
