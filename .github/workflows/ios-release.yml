@@ -24,7 +24,7 @@ permissions:
 
 jobs:
   release:
-    uses: tesserix/tesserix-workflows/.github/workflows/expo-ios-release.yml@1ecfb919104b0852ee507063af23d0625ee4ffef
+    uses: tesserix/tesserix-workflows/.github/workflows/expo-ios-release.yml@0e53e4eb28bc52c5dd24f5872c643fc87406e3ec
     with:
       working_directory: apps/mobile
       install_directory: apps/mobile
