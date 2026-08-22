@@ -10,6 +10,12 @@ import (
 // Same bounds internal/bodyread uses. 20kg is generous enough for a real adult
 // outlier while still catching a decimal misread; 300kg catches an extra digit.
 // Neither is a clinical judgement.
+//
+// These bounds MUST stay at least as tight as tracking.AddWeightEntry's check
+// (weight_kg > 0). If either bound is loosened, a record passing this validation
+// but failing the tracking check would cause Service.Sync to abort the whole batch
+// with a 500; validation issues should instead be per-record rejections with 200.
+// Keep the bounds linked: if loosening, update both or document the exception.
 const (
 	weightMinKg = 20.0
 	weightMaxKg = 300.0
