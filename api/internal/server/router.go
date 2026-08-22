@@ -17,6 +17,7 @@ import (
 	"github.com/tesserix/kora/api/internal/auth"
 	"github.com/tesserix/kora/api/internal/bffauth"
 	"github.com/tesserix/kora/api/internal/billing"
+	"github.com/tesserix/kora/api/internal/bodyread"
 	"github.com/tesserix/kora/api/internal/challenges"
 	"github.com/tesserix/kora/api/internal/coach"
 	"github.com/tesserix/kora/api/internal/compare"
@@ -64,6 +65,16 @@ type Deps struct {
 	// disabled (no GEMINI_API_KEY) or Redis is unreachable — foodlog.Service
 	// treats a nil cache as a silent no-op.
 	ResolveCache ai.Cache
+	// BodyCompositionCache backs bodyread.Reader's cache of validated
+	// body-composition readings, keyed by the downscaled screenshot's
+	// content hash. NOT the same instance as ResolveCache — ai.Cache is
+	// hard-typed to ai.Resolution and cannot carry a bodyread.Result (see
+	// bodyread/cache.go) — but it shares the same underlying Redis
+	// connection when Redis is reachable (cmd/api/main.go's
+	// buildResolveHandler). Nil-safe: bodyread.NewReader is only
+	// constructed when Provider is non-nil, and cmd/api/main.go always
+	// supplies at least bodyread.NoCache{} rather than a literal nil.
+	BodyCompositionCache bodyread.Cache
 	// BFFHMACKey is the shared secret the tesserix-home admin portal signs
 	// /v1/admin/* requests with. When nil the admin routes are not mounted
 	// at all, so an unconfigured environment answers 404 rather than 401 —
@@ -258,6 +269,27 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.PUT("/recipes/:id", recipeHandler.Update)
 		v1.DELETE("/recipes/:id", recipeHandler.Delete)
 		v1.POST("/recipes/:id/log", recipeHandler.Log)
+
+		// Body-composition screenshot reader (kora#314). Reuses the same
+		// ai.Provider as recipes/coach/resolve — same reasoning as
+		// recipeParser above: nil when Provider is unset, so
+		// bodyread.Handler.Read answers 503 and manual entry still works.
+		var bodyCompositionHandler bodyread.Handler
+		if deps.Provider != nil {
+			// deps.BodyCompositionCache may be a nil bodyread.Cache in a
+			// test-constructed Deps that never set it — fall back to
+			// bodyread.NoCache{} rather than handing Reader a nil interface
+			// it would panic dereferencing.
+			bodyCache := deps.BodyCompositionCache
+			if bodyCache == nil {
+				bodyCache = bodyread.NoCache{}
+			}
+			bodyReader := bodyread.NewReader(deps.Provider, bodyCache, billing.NewMeter(deps.DB))
+			bodyCompositionHandler = bodyread.NewHandler(bodyReader)
+		} else {
+			bodyCompositionHandler = bodyread.NewHandler(nil)
+		}
+		v1.POST("/body-composition/read", bodyCompositionHandler.Read)
 
 		trackingRepo := tracking.NewRepository(deps.DB)
 		trackingHandler := tracking.NewHandler(trackingRepo)
