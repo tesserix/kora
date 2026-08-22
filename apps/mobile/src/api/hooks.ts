@@ -77,7 +77,9 @@ import type {
   SaveRecipeBody,
   SubmitFeedbackInput,
   WeightEntry,
+  WeightSource,
 } from "./types";
+import type { AddWeightPayload } from "@/lib/bodyCompositionForm";
 
 // upsertFoods is a best-effort cache fill: a failure (e.g. AsyncStorage
 // quota) must never surface to the user, and — this codebase has no logging
@@ -1008,13 +1010,27 @@ export function useResolvePhoto() {
   });
 }
 
+/**
+ * What POST /v1/weight accepts.
+ *
+ * Widened for kora#45: the same endpoint now takes optional body composition
+ * alongside the weight. `source` and every metric are OPTIONAL and are spread
+ * through untouched — a key that is absent here is absent on the wire and
+ * lands as SQL NULL, which is the whole point (a body fat of 0.0% is a
+ * measurement, "not measured" is not). Do not default any of them in.
+ */
+export type AddWeightVars = Omit<AddWeightPayload, "source"> & {
+  source?: WeightSource;
+  logged_at?: string;
+};
+
 export function useAddWeight() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ weight_kg, logged_at }: { weight_kg: number; logged_at?: string }) =>
+    mutationFn: (vars: AddWeightVars) =>
       apiFetch("/v1/weight", {
         method: "POST",
-        body: JSON.stringify({ weight_kg, logged_at, local_date: localDateNow() }),
+        body: JSON.stringify({ ...vars, local_date: localDateNow() }),
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["weight"] });
