@@ -84,11 +84,39 @@ test("shows real current weight when entries exist", async () => {
   expect(getByText("Avg sleep")).toBeTruthy();
 });
 
-test("seeds current weight from profile when the range is empty", async () => {
+// The card used to fall back to the profile's own weight for the hero figure
+// when there were no weigh-ins yet — which meant a user with zero weigh-ins
+// saw "70.0 kg" as the hero AND "No weigh-ins yet" directly below it,
+// contradicting itself. The hero now means one thing for every metric: the
+// latest REAL reading, so an empty series shows no figure at all.
+test("shows no hero figure — not the profile's weight — when there are no weigh-ins", async () => {
   mockSeries.mockReturnValue({ data: [] });
-  const { getByText } = await render(<Progress />);
-  expect(getByText("80.0")).toBeTruthy();            // profile.weight_kg seed
-  expect(getByText(/Log your weight/i)).toBeTruthy(); // hint, no chart — the >=2 points guard
+  mockProfile.mockReturnValue({ data: { weight_kg: 80 } });
+  const { getAllByText, queryByText } = await render(<Progress />);
+  expect(queryByText("80.0")).toBeNull();
+  // The 34pt hero figure is the only "—" at that size — the Energy panel's
+  // unlabeled day cells (see below) render their own "—" glyphs too, so a
+  // plain getByText("—") would match more than one node.
+  const heroPlaceholder = getAllByText("—")
+    .map((n) => StyleSheet.flatten(n.props.style))
+    .find((s) => s?.fontSize === 34);
+  expect(heroPlaceholder).toBeTruthy();
+});
+
+// The common new-user state now that onboarding always writes a first
+// weigh-in: one real reading, no trend yet (hasChart needs 2+ points). The
+// hero figure shows the real number, and a single quiet line replaces the
+// chart — no icon, no CTA (the hero figure itself is the tap-to-log
+// affordance while the charted metric is weight).
+test("shows the hero figure and a quiet trend hint, with no CTA, for exactly one reading", async () => {
+  mockSeries.mockReturnValue({ data: [
+    { id: "1", weight_kg: 71.9, logged_at: "2026-07-23T08:00:00Z" },
+  ] });
+  const { getByText, queryByText } = await render(<Progress />);
+  expect(getByText("71.9")).toBeTruthy();
+  expect(getByText(/once more to see a trend/i)).toBeTruthy();
+  expect(queryByText("No weigh-ins yet")).toBeNull();
+  expect(queryByText("Log weight")).toBeNull(); // no duplicate CTA — only the pressable hero figure
 });
 
 test("shows the no-weigh-ins empty state and opens the weight-log sheet from its CTA", async () => {
@@ -154,7 +182,9 @@ test("shows real sleep and renders the energy-vs-budget bars when Health is auth
   // only the most recent bar is labeled ("today"); the rest are unlabeled
   // rather than misattributed to the wrong day.
   expect(getByText("today")).toBeTruthy();
-  expect(getAllByText("—").length).toBe(6);
+  // 6 unlabeled energy-bar days + the hero figure's own "—" (this test's
+  // series has no weigh-ins, so there is no real reading to show).
+  expect(getAllByText("—").length).toBe(7);
   // Finding 2 (Dynamic Type cap pass): EnergyBars' day labels and the
   // In-budget/Over/Target legend need an explicit cap — the cap IS the
   // overflow protection for this fixed-width bar chart.
