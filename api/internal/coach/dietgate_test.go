@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -125,6 +126,21 @@ func TestScreenDietRegeneratesAroundABlockingRule(t *testing.T) {
 	require.Len(t, provider.seen, 1, "one retry, not a loop")
 	require.Contains(t, provider.seen[0], "peanut",
 		"the retry must name the constraint it just broke")
+}
+
+func TestScreenDietDoesNotBypassAConfiguredAgentWhenItsRetryFails(t *testing.T) {
+	svc, provider := gateService("Coconut chutney with your dosa.")
+	svc = svc.WithAgents(&fakeRunner{err: errors.New("gateway unreachable")})
+
+	text, flags, blocked := svc.screenDiet(
+		context.Background(), uuid.New(), blockProfile(t, "peanut"),
+		"what should I have with dosa?", guidanceSkill,
+		"Peanut chutney with your dosa.", true)
+
+	require.True(t, blocked)
+	require.Empty(t, flags)
+	require.Contains(t, strings.ToLower(text), "peanut")
+	require.Empty(t, provider.seen, "a failed agent retry must not fall through to a direct provider")
 }
 
 func TestScreenDietWithholdsAnAnswerThatStaysUnsafe(t *testing.T) {

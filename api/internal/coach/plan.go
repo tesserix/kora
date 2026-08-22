@@ -3,6 +3,7 @@ package coach
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -141,12 +142,13 @@ func (s *Service) reviewPlan(ctx context.Context, userID uuid.UUID, grounded, qu
 	prompt := fmt.Sprintf("CONTEXT:\n%s\nREQUEST: %s\nDRAFT PLAN (from the meal-planner agent):\n%s\n\nReview and present this plan.", grounded, question, draft)
 
 	// The published supervisor owns its review instructions. Kora sends only
-	// the grounded review input here; reviewSystemPrompt remains the system
-	// prompt for the direct-provider fallback below.
+	// the grounded review input here. Direct provider mode is reserved for
+	// environments without a Registry-backed runner.
 	if reviewed, run, err := s.askAgent(ctx, userID, prompt, planReviewSkill); err == nil {
 		return reviewed, run.DisplayName
-	} else if err != errNoAgent {
-		slog.WarnContext(ctx, "coach: plan review via agent failed, trying the provider", "err", err)
+	} else if !errors.Is(err, errNoAgent) {
+		slog.WarnContext(ctx, "coach: plan review via agent failed", "err", err)
+		return "", ""
 	}
 
 	if s.provider == nil {

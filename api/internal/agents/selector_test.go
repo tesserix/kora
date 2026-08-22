@@ -106,6 +106,51 @@ func TestRunFailsWhenNoPublishedAgentDeclaresTheSkill(t *testing.T) {
 	}
 }
 
+func TestRunRejectsAnAgentWithUnresolvedRegistryReferences(t *testing.T) {
+	resolved := resolvedFixture()
+	resolved.Unresolved = []UnresolvedRef{{
+		Kind:   "MCPServer",
+		Ref:    "kora-nutrition",
+		Reason: "not found",
+	}}
+	registrySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v0/agents/":
+			_ = json.NewEncoder(w).Encode([]Object{resolved.Agent})
+		case "/v0/agents/nutrition-coach/resolved":
+			_ = json.NewEncoder(w).Encode(resolved)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer registrySrv.Close()
+
+	gatewayCalls := 0
+	gatewaySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		gatewayCalls++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer gatewaySrv.Close()
+
+	var observed []string
+	c := NewCoordinator(
+		NewRegistry(RegistryOptions{BaseURL: registrySrv.URL, APIKey: "test-key"}),
+		NewGateway(gatewaySrv.URL, "gw-key", nil),
+		func(agent, skill, outcome string) { observed = append(observed, agent+"/"+skill+"/"+outcome) },
+	)
+
+	_, err := c.Run(context.Background(), "nutrition-guidance", "hello")
+	if err == nil || !strings.Contains(err.Error(), "MCPServer/kora-nutrition") {
+		t.Fatalf("Run with an unresolved MCP reference = %v, want a fail-closed error naming the reference", err)
+	}
+	if gatewayCalls != 0 {
+		t.Fatalf("gateway calls = %d, want none for a partially resolved agent", gatewayCalls)
+	}
+	if len(observed) != 1 || observed[0] != "nutrition-coach/nutrition-guidance/unresolved" {
+		t.Errorf("observed = %v, want the rejected run attributed as unresolved", observed)
+	}
+}
+
 func TestCatalogReportsWhatIsPublishedRightNow(t *testing.T) {
 	registrySrv := twoAgentRegistry(t)
 	defer registrySrv.Close()

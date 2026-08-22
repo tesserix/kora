@@ -263,17 +263,9 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 			}
 			raw = formatPlanDraft(raw)
 		}
+	} else if !errors.Is(err, errNoAgent) {
+		return Answer{}, fmt.Errorf("coach: ask: agent: %w", err)
 	} else {
-		// The agent path is preferred, not required: a registry that publishes
-		// no matching agent, or a gateway that fails, must not cost the user an
-		// answer the direct provider can still give. An unconfigured runner is
-		// the expected state in dev and is not worth a line per request. A
-		// configured path that FAILED is worth disclosing, though: the user
-		// asked the published coach and someone else answered.
-		if !errors.Is(err, errNoAgent) {
-			slog.WarnContext(ctx, "coach: agent run failed, falling back to the provider", "err", err, "skill", skill)
-			by = Attribution{Agent: fallbackAgentName, Skill: skill}
-		}
 		viaAgent = false
 		raw, err = s.askProvider(ctx, userID, userPrompt)
 	}
@@ -472,8 +464,8 @@ func (s *Service) generate(
 	return raw, nil
 }
 
-// errNoAgent marks "the agent path is not configured", so the fallback log
-// distinguishes it from an agent that was tried and failed.
+// errNoAgent marks "the agent path is not configured", which permits direct
+// provider mode for local environments without a Registry-backed runner.
 var errNoAgent = errors.New("coach: no agent runner configured")
 
 // errNoProvider marks the mirror case: the agent path failed and there is no

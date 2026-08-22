@@ -58,10 +58,12 @@ func (c *Coordinator) Run(ctx context.Context, skill, prompt string) (Run, error
 
 	name := resolved.Agent.Metadata.Name
 	if len(resolved.Unresolved) > 0 {
-		// A missing skill or tool reference means the agent is running with
-		// less than it declares. Surface it rather than silently degrading.
-		slog.WarnContext(ctx, "agents: running a partially resolved agent",
-			"agent", name, "skill", skill, "unresolved", summarize(resolved.Unresolved))
+		c.observe(name, skill, "unresolved")
+		return Run{}, fmt.Errorf(
+			"agents: %s has unresolved registry references: %s",
+			name,
+			summarize(resolved.Unresolved),
+		)
 	}
 
 	run, err := c.gateway.Send(ctx, resolved, prompt)
