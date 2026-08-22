@@ -8,14 +8,7 @@ import { SegmentedGlass } from "@/components/instrument/SegmentedGlass";
 import type { WeightSource } from "@/api/types";
 import { derivedComposition } from "@/lib/bodyComposition";
 import { localDateNow } from "@/lib/localDate";
-import {
-  COMPOSITION_METRICS,
-  MANUAL_SOURCES,
-  metricAccessibilityLabel,
-  sourceLabel,
-  unitLabel,
-  type CompositionMetric,
-} from "@/lib/bodyCompositionFields";
+import { COMPOSITION_METRICS, MANUAL_SOURCES, sourceLabel, type CompositionMetric } from "@/lib/bodyCompositionFields";
 import {
   draftFromValues,
   parseCompositionDraft,
@@ -28,6 +21,14 @@ import {
 } from "@/lib/bodyCompositionForm";
 import { useTheme } from "@/theme";
 import { lbFromKg, useUnits, weightUnitLabel } from "@/units";
+import { CompositionMetricField } from "./CompositionMetricField";
+import { CompositionMoreToggle } from "./CompositionMoreToggle";
+
+// COMPOSITION_METRICS[0] is weight_kg by construction (see that catalogue's
+// own "Order is the order a Renpho screenshot reads" comment, and the
+// "covers every measured column" test that pins this exact order) — the row
+// that stays outside the expanding section, always.
+const [WEIGHT_METRIC, ...OTHER_METRICS] = COMPOSITION_METRICS;
 
 export interface BodyCompositionFormProps {
   /**
@@ -51,7 +52,10 @@ export interface BodyCompositionFormProps {
   /**
    * The instruments the user may choose between. One entry renders as a stated
    * fact rather than a control, which is what a screenshot import wants: the
-   * source is known, and it is not the user's to claim otherwise.
+   * source is known, and it is not the user's to claim otherwise. Pass more
+   * than one (kora#314 PR C: `orderSourcesDetectedFirst`) to offer a
+   * pre-selected but CORRECTABLE guess instead — the same control, just fed a
+   * detected default as `sources[0]`.
    */
   sources?: readonly WeightSource[];
   /** Profile height, for BMI. Absent simply means no BMI — never a guess. */
@@ -60,18 +64,35 @@ export interface BodyCompositionFormProps {
   submitLabel?: string;
   /** A save failure from the caller's mutation, shown above the button. */
   error?: string | null;
+  /**
+   * kora#314 PR C: when true, only the weight field and Save show up front —
+   * the other nine fields (source, date, the eight remaining metrics, and the
+   * derived readout) sit behind a "More fields" disclosure. Default false
+   * keeps every existing caller's full-form layout (kora#45's original
+   * manual-entry surface, and #314 PR B's screenshot-confirm surface before
+   * this prop existed) exactly as it was.
+   */
+  expandable?: boolean;
+  /**
+   * Only consulted when `expandable` is true. `LogWeightSheet` opens Manual
+   * mode collapsed (nothing to show yet — protects #45's two-tap weigh-in)
+   * and Screenshot mode expanded (a read arrives WITH composition values, so
+   * there is something to show immediately). Default false.
+   */
+  initiallyExpanded?: boolean;
   onSubmit: (payload: AddWeightPayload) => void;
 }
 
 /**
- * The body-composition entry surface (kora#45, slice 2).
+ * The body-composition entry surface (kora#45, slice 2; expand/collapse added
+ * kora#314 PR C).
  *
  * Presentational on purpose — it takes values in and hands a payload back, and
  * knows nothing about the API. That is what lets #314 reuse it as its
  * confirm-with-edit step instead of building a parallel form that would drift
  * on every rule this one encodes.
  *
- * Three of those rules are load-bearing:
+ * Four of those rules are load-bearing:
  *
  * - Every field but weight is OPTIONAL, and an untouched one stays ABSENT. The
  *   parsing that guarantees it lives in src/lib/bodyCompositionForm.ts, where
@@ -82,8 +103,12 @@ export interface BodyCompositionFormProps {
  *   derived live from what is on screen, which puts the schema's
  *   derive-don't-store rule where the user can see it rather than only in the
  *   model. There is deliberately no field for them.
+ * - Collapsing the "More fields" section (when `expandable`) never resets or
+ *   discards anything in it — `source`, the date and every metric keep
+ *   whatever state they hold while hidden, because a user who expands, types
+ *   a value, then collapses to double check the weight must not lose it.
  *
- * A fourth rule, added for #314: the date row defaults to today and is
+ * A fifth rule, added for #314 PR B: the date row defaults to today and is
  * always editable, and every save states its own `logged_at`/`local_date`
  * explicitly rather than letting the caller's mutation default it — see
  * useAddWeight's own comment on the bug that guards against.
@@ -99,6 +124,8 @@ export function BodyCompositionForm({
   submitting = false,
   submitLabel = "Save",
   error,
+  expandable = false,
+  initiallyExpanded = false,
   onSubmit,
 }: BodyCompositionFormProps) {
   const { instrument, spacing } = useTheme();
@@ -112,15 +139,19 @@ export function BodyCompositionForm({
   const [source, setSource] = useState<WeightSource>(sources[0] ?? "manual");
   const [dateText, setDateText] = useState<string>(() => initialReadingDate ?? localDateNow());
   const [dateError, setDateError] = useState<string | null>(null);
+  // Only meaningful when `expandable` — the non-expandable form always shows
+  // every field, exactly as it did before this prop existed.
+  const [expanded, setExpanded] = useState(initiallyExpanded);
+  const showRest = !expandable || expanded;
 
-  const setField = (metric: CompositionMetric, text: string) => {
+  const setField = (key: CompositionMetric, text: string) => {
     // A new object, never a mutation of the old draft — and the field's error
     // clears as soon as it is touched, so a message cannot outlive the value
     // that caused it.
-    setDraft((prev) => ({ ...prev, [metric.key]: text }));
+    setDraft((prev) => ({ ...prev, [key.key]: text }));
     setErrors((prev) => {
-      if (!(metric.key in prev)) return prev;
-      const { [metric.key]: _cleared, ...rest } = prev;
+      if (!(key.key in prev)) return prev;
+      const { [key.key]: _cleared, ...rest } = prev;
       return rest;
     });
   };
@@ -168,86 +199,88 @@ export function BodyCompositionForm({
         unrecorded rather than being stored as zero.
       </AppText>
 
-      <View style={{ gap: 6 }}>
-        <Overline style={{ fontSize: 11 }}>Measured with</Overline>
-        {sources.length > 1 ? (
-          <SegmentedGlass
-            testID="composition-source"
-            options={sources.map((s) => ({ key: s, label: sourceLabel(s) }))}
-            value={source}
-            onChange={(key) => setSource(key as WeightSource)}
-          />
-        ) : (
-          <AppText testID="composition-source-fixed" style={{ fontSize: 15, color: instrument.ink }}>
-            {sourceLabel(source)}
-          </AppText>
-        )}
-        <AppText muted style={{ fontSize: 12 }}>
-          Two instruments measure these differently, so Kora charts each one separately rather than joining them.
-        </AppText>
-      </View>
+      <CompositionMetricField
+        metric={WEIGHT_METRIC}
+        system={system}
+        value={draft[WEIGHT_METRIC.key] ?? ""}
+        onChangeText={(text) => setField(WEIGHT_METRIC, text)}
+        error={errors[WEIGHT_METRIC.key]}
+      />
 
-      <View style={{ gap: 4 }}>
-        <Field
-          label="Date"
-          testID="composition-date"
-          accessibilityLabel="Reading date"
-          value={dateText}
-          onChangeText={(text) => {
-            setDateText(text);
-            setDateError(null);
-          }}
-          keyboardType="numbers-and-punctuation"
-          placeholder="YYYY-MM-DD"
-          error={dateError ?? undefined}
-        />
-        <AppText muted style={{ fontSize: 12 }}>
-          Defaults to today — change it if this reading is from another day.
-        </AppText>
-      </View>
+      {expandable ? (
+        <CompositionMoreToggle expanded={expanded} onToggle={() => setExpanded((prev) => !prev)} />
+      ) : null}
 
-      {COMPOSITION_METRICS.map((metric) => {
-        const unit = unitLabel(metric, system);
-        return (
-          <View key={metric.key} style={{ gap: 4 }}>
+      {showRest ? (
+        <>
+          <View style={{ gap: 6 }}>
+            <Overline style={{ fontSize: 11 }}>Measured with</Overline>
+            {sources.length > 1 ? (
+              <SegmentedGlass
+                testID="composition-source"
+                options={sources.map((s) => ({ key: s, label: sourceLabel(s) }))}
+                value={source}
+                onChange={(key) => setSource(key as WeightSource)}
+              />
+            ) : (
+              <AppText testID="composition-source-fixed" style={{ fontSize: 15, color: instrument.ink }}>
+                {sourceLabel(source)}
+              </AppText>
+            )}
+            <AppText muted style={{ fontSize: 12 }}>
+              Two instruments measure these differently, so Kora charts each one separately rather than joining them.
+            </AppText>
+          </View>
+
+          <View style={{ gap: 4 }}>
             <Field
-              // The unit rides in the visible label so it cannot drift away from
-              // the field at accessibility sizes, the way a separate suffix
-              // column does. Visceral fat gets none, because it has none.
-              label={unit ? `${metric.label} (${unit})` : metric.label}
-              accessibilityLabel={metricAccessibilityLabel(metric, system)}
+              label="Date"
+              testID="composition-date"
+              accessibilityLabel="Reading date"
+              value={dateText}
+              onChangeText={(text) => {
+                setDateText(text);
+                setDateError(null);
+              }}
+              keyboardType="numbers-and-punctuation"
+              placeholder="YYYY-MM-DD"
+              error={dateError ?? undefined}
+            />
+            <AppText muted style={{ fontSize: 12 }}>
+              Defaults to today — change it if this reading is from another day.
+            </AppText>
+          </View>
+
+          {OTHER_METRICS.map((metric) => (
+            <CompositionMetricField
+              key={metric.key}
+              metric={metric}
+              system={system}
               value={draft[metric.key] ?? ""}
               onChangeText={(text) => setField(metric, text)}
-              keyboardType="decimal-pad"
-              placeholder={metric.required ? "" : "Optional"}
               error={errors[metric.key]}
             />
-            {metric.note ? (
-              <AppText muted style={{ fontSize: 12 }}>
-                {metric.note}
-              </AppText>
-            ) : null}
-          </View>
-        );
-      })}
+          ))}
 
-      <View
-        testID="composition-derived"
-        style={{
-          gap: 6,
-          padding: spacing.md,
-          borderRadius: 12,
-          backgroundColor: instrument.inset,
-        }}
-      >
-        <Overline style={{ fontSize: 11 }}>Calculated</Overline>
-        <AppText muted style={{ fontSize: 12 }}>
-          {"Worked out from your weight, height and body fat — not stored, and not editable. Your scale's own figures for these may differ."}
-        </AppText>
-        <DerivedRow label="BMI" value={derived.bmi === null ? "—" : derived.bmi.toFixed(1)} />
-        <DerivedRow label="Fat mass" value={showMass(derived.fatMassKg)} />
-        <DerivedRow label="Fat-free mass" value={showMass(derived.fatFreeMassKg)} />
-      </View>
+          <View
+            testID="composition-derived"
+            style={{
+              gap: 6,
+              padding: spacing.md,
+              borderRadius: 12,
+              backgroundColor: instrument.inset,
+            }}
+          >
+            <Overline style={{ fontSize: 11 }}>Calculated</Overline>
+            <AppText muted style={{ fontSize: 12 }}>
+              {"Worked out from your weight, height and body fat — not stored, and not editable. Your scale's own figures for these may differ."}
+            </AppText>
+            <DerivedRow label="BMI" value={derived.bmi === null ? "—" : derived.bmi.toFixed(1)} />
+            <DerivedRow label="Fat mass" value={showMass(derived.fatMassKg)} />
+            <DerivedRow label="Fat-free mass" value={showMass(derived.fatFreeMassKg)} />
+          </View>
+        </>
+      ) : null}
 
       {error ? (
         <AppText accessibilityLiveRegion="polite" style={{ color: instrument.danger }}>

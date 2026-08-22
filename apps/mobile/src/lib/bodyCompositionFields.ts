@@ -1,4 +1,4 @@
-import type { WeightEntry, WeightSource } from "@/api/types";
+import type { BodyCompositionReading, WeightEntry, WeightSource } from "@/api/types";
 import { lbFromKg, weightUnitLabel, type UnitSystem } from "@/units";
 
 /**
@@ -192,6 +192,65 @@ const SOURCE_LABELS: Record<WeightSource, string> = {
 
 export function sourceLabel(source: WeightSource): string {
   return SOURCE_LABELS[source] ?? source;
+}
+
+/**
+ * The instruments a screenshot's own pixels could plausibly identify (kora#314
+ * PR C). Not `MANUAL_SOURCES`' complement — `manual` and `healthkit` are never
+ * something a screenshot detects, they're the absence of a screenshot.
+ */
+export const DETECTABLE_SOURCES: readonly WeightSource[] = ["scale_screenshot", "inbody", "dexa"] as const;
+
+function isDetectableSource(value: unknown): value is WeightSource {
+  return typeof value === "string" && (DETECTABLE_SOURCES as readonly string[]).includes(value);
+}
+
+/**
+ * Reads the API's detected-instrument field defensively (kora#314 PR C).
+ *
+ * A sibling PR is adding a nullable field to POST /v1/body-composition/read's
+ * response — the vision pass' best guess at which instrument (`scale_screenshot`,
+ * `inbody` or `dexa`) produced the screenshot. This branch is being built
+ * against api/ before that lands, and it must work correctly whichever order
+ * the two PRs merge in. So this reads the field through an untyped index
+ * rather than a typed property of `BodyCompositionReading` — the type may not
+ * even declare it yet — and validates whatever comes back against the three
+ * values detection is allowed to produce.
+ *
+ * Anything else — the field absent (API not yet updated), null (nothing
+ * detected), or a string outside `DETECTABLE_SOURCES` (a future instrument
+ * this build doesn't know about) — falls back to `scale_screenshot`, which is
+ * exactly what every screenshot read meant before detection existed. A
+ * misdetection is not fatal either way: the caller offers this as the
+ * PRE-SELECTED option in an editable control (see `orderSourcesDetectedFirst`
+ * below), never as an unchangeable fact — source decides which readings may
+ * share a trend line (migration 000039), so a wrong guess must stay
+ * correctable.
+ */
+export function detectedInstrumentSource(reading: BodyCompositionReading): WeightSource {
+  // Wire name is `instrument`, matching the API's ai.BodyCompositionReading
+  // field (kora#314). Read via an index rather than a declared property
+  // because the two halves of this change landed as separate PRs and this
+  // build's BodyCompositionReading type may not declare it yet; the guard
+  // below means an absent or unknown value degrades to the pre-detection
+  // behaviour rather than erroring.
+  const raw = (reading as Record<string, unknown>).instrument;
+  return isDetectableSource(raw) ? raw : "scale_screenshot";
+}
+
+/**
+ * `DETECTABLE_SOURCES`, reordered so `detected` is first.
+ *
+ * `BodyCompositionForm` defaults its selected source to `sources[0]`, so this
+ * is what turns a detected instrument into the control's pre-selection while
+ * still handing it all three options to correct to — the multi-entry branch
+ * of `sources` (a SegmentedGlass control), not the single-entry branch (a
+ * stated, unchangeable fact). Kept a plain array op rather than a new form
+ * prop: the "detected value goes first" rule lives here, once, instead of
+ * being re-derived by every caller that wants a detected default.
+ */
+export function orderSourcesDetectedFirst(detected: WeightSource): readonly WeightSource[] {
+  return [detected, ...DETECTABLE_SOURCES.filter((s) => s !== detected)];
 }
 
 /**

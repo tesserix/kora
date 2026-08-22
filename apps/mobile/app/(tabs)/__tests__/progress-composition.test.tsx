@@ -15,13 +15,13 @@ jest.mock("@/api/hooks", () => ({
   useWeightSeries: (range: string) => mockSeries(range),
   useAddWeight: () => ({ mutate: jest.fn(), isPending: false }),
   useAvgIntake7d: () => ({ avg: null, series: [], isLoading: false }),
-  // kora#314 PR B: Progress now also mounts BodyCompositionScanSheet, which
+  // kora#314 PR C: Progress now mounts LogWeightSheet (Screenshot mode), which
   // calls this. Not exercised by any test in this file — a bare stub keeps
   // Progress's render tree happy.
   useReadBodyComposition: () => ({ mutate: jest.fn(), isPending: false }),
 }));
 
-// See progress.test.tsx's own comment: BodyCompositionScanSheet imports
+// See progress.test.tsx's own comment: LogWeightSheet's screenshot mode imports
 // ApiError from "@/lib/api" directly, which pulls in real firebase/auth ESM
 // that Jest cannot parse unmocked.
 jest.mock("@/lib/api", () => ({
@@ -151,20 +151,28 @@ test("the change is measured since the instrument changed, not across the switch
   expect(queryByText("▾ 7.3 %")).toBeNull();
 });
 
-test("reaches the body-composition form from the Trends panel", async () => {
+// kora#314 PR C: "Add body composition" and "Import from screenshot" no
+// longer exist as separate buttons — both entry points now live inside the
+// one "Log weight" sheet, as Manual mode's expanding section and Screenshot
+// mode respectively. See LogWeightSheet.test.tsx for full mode coverage;
+// these two tests just prove Trends' one remaining tap still reaches both.
+test("reaches the composition fields from the Trends panel, behind the expanding section", async () => {
   mockSeries.mockReturnValue({ data: [weighIn({ weight_kg: 71.9 })] });
-  const { getByText, findByText, queryByTestId } = await render(<Progress />);
-  expect(queryByTestId("body-composition-form")).toBeNull();
-  await fireEvent.press(getByText("Add body composition"));
-  expect(await findByText("Body composition")).toBeTruthy();
+  const { getByLabelText, getByTestId, queryByTestId } = await render(<Progress />);
+  expect(queryByTestId("composition-derived")).toBeNull();
+  await fireEvent.press(getByLabelText("Log weight"));
+  await fireEvent.press(getByTestId("composition-expand-toggle"));
+  expect(getByTestId("composition-derived")).toBeTruthy();
 });
 
-test("the daily weigh-in stays a separate, one-field sheet", async () => {
+test("the daily weigh-in stays two taps: open the sheet, Save", async () => {
   mockSeries.mockReturnValue({ data: [weighIn({ weight_kg: 71.9 })] });
   const { getByLabelText, findByText, queryByTestId } = await render(<Progress />);
   await fireEvent.press(getByLabelText("Log weight"));
-  expect(await findByText("Log weight")).toBeTruthy();
-  // kora#45 explicitly does NOT put the composition fields in front of the
-  // daily weigh-in: most days are weight and nothing else.
-  expect(queryByTestId("body-composition-form")).toBeNull();
+  expect(await findByText("Save")).toBeTruthy();
+  // kora#45's rule survives consolidation (kora#314 PR C): the nine
+  // composition fields and the derived readout stay collapsed until "More
+  // fields" is tapped — most days are weight and nothing else.
+  expect(queryByTestId("composition-derived")).toBeNull();
+  expect(queryByTestId("composition-date")).toBeNull();
 });
