@@ -3,6 +3,7 @@ package health
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -13,11 +14,13 @@ import (
 )
 
 type fakeWriter struct {
-	calls []tracking.WeightInput
-	err   error
+	calls     []tracking.WeightInput
+	err       error
+	callCount int
 }
 
 func (f *fakeWriter) AddWeightEntry(_ context.Context, _ uuid.UUID, in tracking.WeightInput) (tracking.WeightEntry, error) {
+	f.callCount++
 	if f.err != nil {
 		return tracking.WeightEntry{}, f.err
 	}
@@ -60,3 +63,18 @@ func TestSyncWritesHealthKitSourceAndNoComposition(t *testing.T) {
 	require.Nil(t, in.Composition.MuscleMassKg)
 	require.Nil(t, in.Composition.VisceralFatRating)
 }
+
+// A WRITE failure (the database, not the record) must abort the batch: the
+// caller must not receive a partial Accepted count that would let the device
+// advance its anchor past records that were never durably written.
+func TestSyncAbortsOnWriteFailure(t *testing.T) {
+	sentinel := errors.New("db unavailable")
+	w := &fakeWriter{err: sentinel}
+	resp, err := NewService(w).Sync(context.Background(), uuid.New(), SyncRequest{
+		Weights: []WeightRecord{rec(70.4), rec(71.1)},
+	})
+	require.ErrorIs(t, err, sentinel)
+	require.Equal(t, SyncResponse{}, resp)
+	require.Equal(t, 1, w.callCount)
+}
+
