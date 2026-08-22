@@ -145,7 +145,10 @@ func NewRouter(deps Deps) *gin.Engine {
 			auditDeletion,
 		)
 		userHandler := user.NewHandler(userRepo, userSvc)
-		onboardingHandler := onboarding.NewHandler(userRepo)
+		// tracking.NewRepository is a cheap wrapper (holds only *gorm.DB), so
+		// constructing it again below at the /weight routes is harmless --
+		// both wrap the same deps.DB.
+		onboardingHandler := onboarding.NewHandler(userRepo, tracking.NewRepository(deps.DB))
 		notificationsSvc := notifications.NewService(notifications.NewRepository(deps.DB), groups.NewRepository(deps.DB))
 		notificationsHandler := notifications.NewHandler(notificationsSvc)
 
