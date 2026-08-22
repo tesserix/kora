@@ -14,7 +14,10 @@ import { SegmentedGlass } from "@/components/instrument/SegmentedGlass";
 import { engravedStyle, monoStyle } from "@/components/instrument/typography";
 import { WeightChart } from "@/components/progress/WeightChart";
 import { WeightLogSheet } from "@/components/progress/WeightLogSheet";
+import { BodyCompositionSheet } from "@/components/progress/BodyCompositionSheet";
+import { MetricChips } from "@/components/progress/MetricChips";
 import { deltaColor } from "@/components/progress/deltaColor";
+import { Button } from "@/components/Button";
 import { EmptyState } from "@/components/common/EmptyState";
 import { LoadErrorNotice } from "@/components/common/LoadErrorNotice";
 import { useAvgIntake7d, useDashboard, useProfile, useWeightSeries } from "@/api/hooks";
@@ -23,7 +26,21 @@ import { useHealth } from "@/health";
 import { AnimatedNumber, PressableScale, ScreenEntrance, useMotionPrefs } from "@/motion";
 import { useTheme } from "@/theme";
 import { todayLocalDate } from "@/lib/shotsClock";
-import { formatWeight, lbFromKg, useUnits, weightUnitLabel } from "@/units";
+import {
+  compositionMetric,
+  displayNumber,
+  formatMetricNumber,
+  sourceLabel,
+  unitLabel,
+  type CompositionMetricKey,
+} from "@/lib/bodyCompositionFields";
+import {
+  chartableMetrics,
+  hasInstrumentChange,
+  lastComparableRun,
+  metricSeries,
+} from "@/lib/bodyCompositionSeries";
+import { useUnits } from "@/units";
 import { TAB_BAR_SCROLL_INSET } from "@/components/FloatingTabBar";
 
 const RANGES = ["1W", "1M", "3M", "1Y"] as const;
@@ -44,7 +61,6 @@ function today(): string {
   return todayLocalDate();
 }
 const shortDate = (isoStr: string) => new Date(isoStr).toLocaleDateString([], { month: "short", day: "numeric" });
-const weightFormat = (n: number) => n.toFixed(1);
 
 // Data-honesty fix (task-11 review, finding 2): useAvgIntake7d's `series`
 // (src/api/hooks.ts) is `number[]` — it carries NO dates, and only includes
@@ -90,6 +106,8 @@ export default function Progress() {
   const insets = useSafeAreaInsets();
   const [range, setRange] = useState<(typeof RANGES)[number]>("1W");
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [compositionOpen, setCompositionOpen] = useState(false);
+  const [metricKey, setMetricKey] = useState<CompositionMetricKey>("weight_kg");
   const dashboard = useDashboard(today());
   const profile = useProfile();
   const series = useWeightSeries(range);
@@ -145,20 +163,63 @@ export default function Progress() {
   // draws: "we couldn't load this" is not "you have none".
   const seriesError = series.isError;
   const entries = (series.data ?? []) as WeightEntry[];
-  const points = entries.map((e) => e.weight_kg);
+
+  // kora#45: the panel charts ONE metric at a time, picked from the metrics
+  // this history actually holds. Nine more charts would have been the other
+  // option; nine mostly-empty panels on a screen where most users only ever
+  // log weight is not a trade worth making.
+  // The weigh-in sheet's seed, which is the WEIGHT regardless of what the
+  // chart is showing: the last logged one, or the profile's figure before
+  // there is one.
+  const latestWeightKg = entries.length ? entries[entries.length - 1].weight_kg : (profile.data?.weight_kg ?? 0);
+
+  const chartable = chartableMetrics(entries);
+  // A range switch can drop the selected metric out of the window entirely
+  // (body fat logged in March, viewing 1W). Falling back to weight beats
+  // charting nothing with a chip still lit.
+  const activeKey = chartable.some((m) => m.key === metricKey) ? metricKey : "weight_kg";
+  const metric = compositionMetric(activeKey);
+  const trend = metricSeries(entries, activeKey);
+  const points = trend.points.map((p) => displayNumber(metric, p.value, system));
   const hasChart = points.length >= 2;
-  const current = entries.length ? entries[entries.length - 1].weight_kg : (profile.data?.weight_kg ?? 0);
-  const delta = hasChart ? points[points.length - 1] - points[0] : null;
-  const w = current > 0 ? formatWeight(current, system) : null;
-  const d = delta !== null ? (system === "imperial" ? lbFromKg(delta) : delta) : null;
-  const deltaText = d !== null ? `${d <= 0 ? "▾" : "▴"} ${Math.abs(d).toFixed(1)} ${weightUnitLabel(system)}` : null;
+  const instrumentChanged = hasInstrumentChange(trend);
+
+  const latest = trend.points[trend.points.length - 1]?.value;
+  // Weight falls back to the profile's own figure before the first weigh-in.
+  // A composition metric has no such fallback and shows an em dash instead —
+  // there is no plausible stand-in for a body fat percentage, and a 0 would
+  // read as one.
+  const current = latest ?? (activeKey === "weight_kg" ? (profile.data?.weight_kg ?? 0) : undefined);
+  const hasCurrent = typeof current === "number" && (activeKey !== "weight_kg" || current > 0);
+  const currentShown = hasCurrent ? displayNumber(metric, current as number, system) : null;
+  const metricUnit = unitLabel(metric, system);
+
+  // The change is measured over the trailing run of readings from ONE
+  // instrument. Across a switch it would report Renpho's 48.9% minus Omron's
+  // 25.7% as 23 points of muscle lost — see lastComparableRun.
+  const run = lastComparableRun(trend);
+  const delta =
+    run.length >= 2
+      ? displayNumber(metric, run[run.length - 1].value, system) - displayNumber(metric, run[0].value, system)
+      : null;
+  const deltaText =
+    delta !== null
+      ? `${delta <= 0 ? "▾" : "▴"} ${formatMetricNumber(metric, Math.abs(delta))}${metricUnit ? ` ${metricUnit}` : ""}`
+      : null;
   // Accent-budget demotion (kora ignition Task 8): the delta used to carry
   // the accent unconditionally — Trends now spends its one accent on the
   // chart's endpoint dot, so the delta reads ink when it's moving toward the
   // stated goal and danger when it's moving away (see deltaColor.ts).
   // "maintenance" (and a profile that hasn't loaded yet) has no away
   // direction to judge, so it defaults to ink.
-  const deltaTextColor = d !== null ? deltaColor(d, profile.data?.goal ?? "maintenance", instrument) : instrument.ink;
+  // deltaColor judges a change against the user's stated GOAL, and the goal is
+  // about weight. Nothing in the profile says which way body water or protein
+  // ought to move, so every other metric reads plain ink rather than being
+  // coloured as progress or loss on an invented direction.
+  const deltaTextColor =
+    delta !== null && activeKey === "weight_kg"
+      ? deltaColor(delta, profile.data?.goal ?? "maintenance", instrument)
+      : instrument.ink;
 
   const dash = dashboard.data;
   const dashError = dashboard.isError;
@@ -193,26 +254,36 @@ export default function Progress() {
               rule Home and Diary already follow for their own heroes. */}
           <BezelCluster radius={26} glow>
             <View style={{ padding: 18 }}>
+            {/* The hero figure follows the CHARTED metric, so the number and
+                the line below it are always the same quantity. It stays
+                pressable-to-log only while that metric is weight — "tap to log
+                weight" under a body-fat figure would be a lie about what the
+                tap does. */}
             <PressableScale
-              accessibilityRole="button"
-              accessibilityLabel="Log weight"
+              accessibilityRole={activeKey === "weight_kg" ? "button" : "none"}
+              accessibilityLabel={activeKey === "weight_kg" ? "Log weight" : undefined}
               haptic="selection"
+              disabled={activeKey !== "weight_kg"}
               onPress={() => setSheetOpen(true)}
             >
               <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
                 <View>
-                  <AppText maxFontSizeMultiplier={1.5} style={engravedStyle(instrument)}>Weight</AppText>
+                  <AppText maxFontSizeMultiplier={1.5} style={engravedStyle(instrument)}>{metric.label}</AppText>
                   <View style={{ flexDirection: "row", alignItems: "baseline", gap: 6, marginTop: 2 }}>
-                    {current > 0 ? (
+                    {currentShown !== null ? (
                       <AnimatedNumber
-                        value={system === "imperial" ? lbFromKg(current) : current}
-                        format={weightFormat}
+                        value={currentShown}
+                        format={(n) => formatMetricNumber(metric, n)}
                         style={weightFigure}
                       />
                     ) : (
                       <AppText style={weightFigure}>—</AppText>
                     )}
-                    <AppText style={{ fontSize: 14, color: instrument.mut }}>{w ? w.unit : "kg"}</AppText>
+                    {/* Nothing at all for the visceral rating: it is a vendor
+                        rating, and a unit beside it — any unit — misstates it. */}
+                    {metricUnit ? (
+                      <AppText style={{ fontSize: 14, color: instrument.mut }}>{metricUnit}</AppText>
+                    ) : null}
                   </View>
                 </View>
                 {deltaText ? (
@@ -223,11 +294,24 @@ export default function Progress() {
 
             {hasChart ? (
               <>
-                <WeightChart points={points} />
+                <WeightChart points={points} breaksAfter={trend.breaksAfter} />
                 <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 4 }}>
-                  <AppText style={[mutedLabel, mono]}>{shortDate(entries[0].logged_at)}</AppText>
-                  <AppText style={[mutedLabel, mono]}>{shortDate(entries[entries.length - 1].logged_at)}</AppText>
+                  {/* The CHARTED metric's own first and last dates, which are
+                      not the weigh-ins' whenever a metric was logged less
+                      often than weight was. */}
+                  <AppText style={[mutedLabel, mono]}>{shortDate(trend.points[0].loggedAt)}</AppText>
+                  <AppText style={[mutedLabel, mono]}>
+                    {shortDate(trend.points[trend.points.length - 1].loggedAt)}
+                  </AppText>
                 </View>
+                {instrumentChanged ? (
+                  // The break is drawn; this says what it means. Without the
+                  // sentence a reader sees a gap and reads a slope across it,
+                  // which is the failure the split exists to prevent.
+                  <AppText testID="instrument-change-note" style={[mutedLabel, { marginTop: 6 }]}>
+                    {`Measured by ${trend.sources.map(sourceLabel).join(", then ")}. Shown as separate lines — the two don't measure this the same way.`}
+                  </AppText>
+                ) : null}
               </>
             ) : seriesError ? (
               <LoadErrorNotice message="Couldn't load your weigh-ins." onRetry={() => void series.refetch()} />
@@ -240,11 +324,34 @@ export default function Progress() {
                 variant="instrument"
               />
             ) : (
-              <AppText style={[mutedLabel, { fontSize: 13, paddingVertical: 16, textAlign: "center" }]}>Log your weight to see a trend.</AppText>
+              <AppText style={[mutedLabel, { fontSize: 13, paddingVertical: 16, textAlign: "center" }]}>
+                {`Log ${metric.label.toLowerCase()} once more to see a trend.`}
+              </AppText>
             )}
+
+            {/* Only shown once there is more than weight to chart, so a
+                weight-only history sees no picker rather than nine chips that
+                all lead to an empty panel. */}
+            {chartable.length > 1 ? (
+              <View style={{ marginTop: 14 }}>
+                <MetricChips metrics={chartable} value={activeKey} onChange={setMetricKey} />
+              </View>
+            ) : null}
 
             <View style={{ marginTop: 14 }}>
               <SegmentedGlass options={RANGE_OPTIONS} value={range} onChange={(key) => setRange(key as (typeof RANGES)[number])} />
+            </View>
+
+            {/* The way in to the ten-field form. Kept OUT of the weigh-in tap
+                above on purpose (kora#45): most days are weight and nothing
+                else, and putting nine optional fields in front of that would
+                be a regression for the common case. */}
+            <View style={{ marginTop: 10 }}>
+              <Button
+                title="Add body composition"
+                variant="secondary"
+                onPress={() => setCompositionOpen(true)}
+              />
             </View>
             </View>
           </BezelCluster>
@@ -317,7 +424,17 @@ export default function Progress() {
         </Animated.View>
       </View>
 
-      <WeightLogSheet visible={sheetOpen} initialKg={current} onClose={() => setSheetOpen(false)} />
+      <WeightLogSheet
+        visible={sheetOpen}
+        // Still the WEIGHT, whichever metric the chart is showing.
+        initialKg={latestWeightKg}
+        onClose={() => setSheetOpen(false)}
+      />
+      <BodyCompositionSheet
+        visible={compositionOpen}
+        heightCm={profile.data?.height_cm}
+        onClose={() => setCompositionOpen(false)}
+      />
       </ScrollView>
     </View>
     </ScreenEntrance>

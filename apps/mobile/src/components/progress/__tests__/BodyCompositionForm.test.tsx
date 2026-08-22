@@ -1,0 +1,194 @@
+import { fireEvent, render } from "@testing-library/react-native";
+import { BodyCompositionForm } from "../BodyCompositionForm";
+
+const mockUseUnits = jest.fn();
+jest.mock("@/units", () => ({
+  ...jest.requireActual("@/units"),
+  useUnits: () => mockUseUnits(),
+}));
+
+beforeEach(() => {
+  mockUseUnits.mockReturnValue({ system: "metric", setSystem: jest.fn() });
+});
+
+// jest performs no layout (see the reanimated mock note in jest.setup.js,
+// kora#257). These assert the props and the payload — that a field exists, is
+// labelled, and that what leaves the form is what was typed. They prove
+// NOTHING about whether the form fits on a screen at accessibility sizes; that
+// remains a device check.
+
+test("saves only the fields that were filled, omitting the rest entirely", async () => {
+  const onSubmit = jest.fn();
+  const { getByLabelText, getByText } = await render(<BodyCompositionForm onSubmit={onSubmit} />);
+
+  await fireEvent.changeText(getByLabelText("Weight in kilograms"), "70.2");
+  await fireEvent.changeText(getByLabelText("Body fat percent"), "24.2");
+  await fireEvent.press(getByText("Save"));
+
+  expect(onSubmit).toHaveBeenCalledTimes(1);
+  const payload = onSubmit.mock.calls[0][0];
+  expect(payload).toEqual({ weight_kg: 70.2, body_fat_pct: 24.2, source: "manual" });
+  // The eight untouched metrics are absent, not zero.
+  expect("visceral_fat_rating" in payload).toBe(false);
+  expect("muscle_mass_kg" in payload).toBe(false);
+});
+
+test("a weight-only entry carries the weight and nothing else — not nine zeroes", async () => {
+  const onSubmit = jest.fn();
+  const { getByLabelText, getByText } = await render(<BodyCompositionForm onSubmit={onSubmit} />);
+  await fireEvent.changeText(getByLabelText("Weight in kilograms"), "70.2");
+  await fireEvent.press(getByText("Save"));
+  // Exact equality on purpose: this is the assertion that fails if anything on
+  // the path from field to payload ever coalesces an untouched metric to 0.
+  expect(onSubmit.mock.calls[0][0]).toEqual({ weight_kg: 70.2, source: "manual" });
+});
+
+test("refuses to save without a weight, and says so on the field", async () => {
+  const onSubmit = jest.fn();
+  const { getByLabelText, getByText, getAllByTestId } = await render(
+    <BodyCompositionForm onSubmit={onSubmit} />,
+  );
+  await fireEvent.changeText(getByLabelText("Body fat percent"), "24.2");
+  await fireEvent.press(getByText("Save"));
+  expect(onSubmit).not.toHaveBeenCalled();
+  expect(getAllByTestId("field-error")[0].props.children).toBe("Enter a weight in kg.");
+});
+
+test("a field's error clears as soon as that field is corrected", async () => {
+  const onSubmit = jest.fn();
+  const { getByLabelText, getByText, queryAllByTestId } = await render(
+    <BodyCompositionForm onSubmit={onSubmit} />,
+  );
+  await fireEvent.changeText(getByLabelText("Weight in kilograms"), "70");
+  await fireEvent.changeText(getByLabelText("Body fat percent"), "132");
+  await fireEvent.press(getByText("Save"));
+  expect(queryAllByTestId("field-error")).toHaveLength(1);
+  await fireEvent.changeText(getByLabelText("Body fat percent"), "32");
+  expect(queryAllByTestId("field-error")).toHaveLength(0);
+});
+
+describe("units and labels", () => {
+  test("labels visceral fat as a rating with no unit, in either system", async () => {
+    const { getByText, queryByText, getByLabelText } = await render(<BodyCompositionForm onSubmit={jest.fn()} />);
+    // No "(%)" and no unit at all in the visible label.
+    expect(getByText("Visceral fat")).toBeTruthy();
+    expect(queryByText("Visceral fat (%)")).toBeNull();
+    expect(getByLabelText("Visceral fat rating")).toBeTruthy();
+  });
+
+  test("labels the percentage and mass fields with their units", async () => {
+    const { getByText } = await render(<BodyCompositionForm onSubmit={jest.fn()} />);
+    expect(getByText("Body fat (%)")).toBeTruthy();
+    expect(getByText("Muscle mass (kg)")).toBeTruthy();
+    expect(getByText("Scale BMR (kcal)")).toBeTruthy();
+  });
+
+  test("imperial shows the kg-backed fields in lb and converts back on save", async () => {
+    mockUseUnits.mockReturnValue({ system: "imperial", setSystem: jest.fn() });
+    const onSubmit = jest.fn();
+    const { getByText, getByLabelText } = await render(<BodyCompositionForm onSubmit={onSubmit} />);
+    expect(getByText("Weight (lb)")).toBeTruthy();
+    // Still a percentage in Ohio.
+    expect(getByText("Body fat (%)")).toBeTruthy();
+
+    await fireEvent.changeText(getByLabelText("Weight in pounds"), "150");
+    await fireEvent.press(getByText("Save"));
+    expect(onSubmit.mock.calls[0][0].weight_kg).toBeCloseTo(68.0388555, 4);
+  });
+});
+
+describe("derived values", () => {
+  test("has no input for BMI, fat mass or fat-free mass — they cannot be typed", async () => {
+    const { getAllByPlaceholderText, getByLabelText, queryByLabelText } = await render(
+      <BodyCompositionForm onSubmit={jest.fn()} />,
+    );
+    // Nine optional inputs — the nine measured metrics beside weight, and
+    // nothing else. A derived value with a text input would be exactly the
+    // second source of truth these columns were left out to avoid.
+    expect(getAllByPlaceholderText("Optional")).toHaveLength(9);
+    // The labels they would carry if they were fields, by this form's own
+    // naming convention (see metricAccessibilityLabel).
+    expect(queryByLabelText("BMI")).toBeNull();
+    expect(queryByLabelText("Fat mass in kilograms")).toBeNull();
+    expect(queryByLabelText("Fat-free mass in kilograms")).toBeNull();
+    // They are read-only readouts instead.
+    expect(getByLabelText("BMI, calculated: —")).toBeTruthy();
+  });
+
+  test("computes them live from what is on screen plus the profile height", async () => {
+    const { getByLabelText } = await render(<BodyCompositionForm heightCm={165} onSubmit={jest.fn()} />);
+    await fireEvent.changeText(getByLabelText("Weight in kilograms"), "70.2");
+    await fireEvent.changeText(getByLabelText("Body fat percent"), "32.6");
+    expect(getByLabelText("BMI, calculated: 25.8")).toBeTruthy();
+    expect(getByLabelText("Fat mass, calculated: 22.9 kg")).toBeTruthy();
+    expect(getByLabelText("Fat-free mass, calculated: 47.3 kg")).toBeTruthy();
+  });
+
+  test("shows an em dash rather than a number when its inputs are missing", async () => {
+    const { getByLabelText } = await render(<BodyCompositionForm onSubmit={jest.fn()} />);
+    // No height and no body fat: BMI and both masses are unknowable, and an
+    // unknown that renders as 0 is indistinguishable from a measurement.
+    await fireEvent.changeText(getByLabelText("Weight in kilograms"), "70.2");
+    expect(getByLabelText("BMI, calculated: —")).toBeTruthy();
+    expect(getByLabelText("Fat mass, calculated: —")).toBeTruthy();
+  });
+
+  test("shows the derived masses in the reader's own units", async () => {
+    mockUseUnits.mockReturnValue({ system: "imperial", setSystem: jest.fn() });
+    const { getByLabelText } = await render(<BodyCompositionForm heightCm={165} onSubmit={jest.fn()} />);
+    await fireEvent.changeText(getByLabelText("Weight in pounds"), "154.8");
+    await fireEvent.changeText(getByLabelText("Body fat percent"), "32.6");
+    expect(getByLabelText("Fat mass, calculated: 50.5 lb")).toBeTruthy();
+  });
+});
+
+describe("reuse as kora#314's confirm surface", () => {
+  test("pre-fills the values a caller hands it, and leaves the rest empty", async () => {
+    const { getByLabelText } = await render(
+      <BodyCompositionForm
+        initialValues={{ weight_kg: 70.2, body_fat_pct: 24.2, visceral_fat_rating: 7 }}
+        sources={["scale_screenshot"]}
+        onSubmit={jest.fn()}
+      />,
+    );
+    expect(getByLabelText("Weight in kilograms").props.value).toBe("70.2");
+    expect(getByLabelText("Visceral fat rating").props.value).toBe("7");
+    // Not read from the screenshot, so not filled in — and not a zero.
+    expect(getByLabelText("Protein percent").props.value).toBe("");
+  });
+
+  test("every pre-filled value stays editable, and an edit is what gets saved", async () => {
+    const onSubmit = jest.fn();
+    const { getByLabelText, getByText } = await render(
+      <BodyCompositionForm
+        initialValues={{ weight_kg: 70.2, body_fat_pct: 24.2 }}
+        sources={["scale_screenshot"]}
+        onSubmit={onSubmit}
+      />,
+    );
+    await fireEvent.changeText(getByLabelText("Body fat percent"), "23.9");
+    await fireEvent.press(getByText("Save"));
+    expect(onSubmit.mock.calls[0][0]).toEqual({
+      weight_kg: 70.2,
+      body_fat_pct: 23.9,
+      source: "scale_screenshot",
+    });
+  });
+
+  test("a single source is stated, not offered as a choice the user could misclaim", async () => {
+    const { getByTestId, queryByTestId } = await render(
+      <BodyCompositionForm sources={["scale_screenshot"]} onSubmit={jest.fn()} />,
+    );
+    expect(getByTestId("composition-source-fixed").props.children).toBe("Scale screenshot");
+    expect(queryByTestId("composition-source")).toBeNull();
+  });
+});
+
+test("the chosen instrument is what the payload carries", async () => {
+  const onSubmit = jest.fn();
+  const { getByLabelText, getByText, getByTestId } = await render(<BodyCompositionForm onSubmit={onSubmit} />);
+  await fireEvent.changeText(getByLabelText("Weight in kilograms"), "70.2");
+  await fireEvent.press(getByTestId("composition-source-segment-dexa"));
+  await fireEvent.press(getByText("Save"));
+  expect(onSubmit.mock.calls[0][0].source).toBe("dexa");
+});
