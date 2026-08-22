@@ -44,3 +44,8 @@ dist/
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 graft/
+
+# Local agent tooling: `.ignore` re-admits graft's cache to ripgrep, and
+# .agents/ holds per-machine skill scaffolding. Neither belongs to the build.
+.ignore
+.agents/
