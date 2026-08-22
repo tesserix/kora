@@ -182,13 +182,17 @@ export default function Progress() {
   const instrumentChanged = hasInstrumentChange(trend);
 
   const latest = trend.points[trend.points.length - 1]?.value;
-  // Weight falls back to the profile's own figure before the first weigh-in.
-  // A composition metric has no such fallback and shows an em dash instead —
-  // there is no plausible stand-in for a body fat percentage, and a 0 would
-  // read as one.
-  const current = latest ?? (activeKey === "weight_kg" ? (profile.data?.weight_kg ?? 0) : undefined);
-  const hasCurrent = typeof current === "number" && (activeKey !== "weight_kg" || current > 0);
-  const currentShown = hasCurrent ? displayNumber(metric, current as number, system) : null;
+  // The hero figure means one thing for every metric, weight included: the
+  // latest REAL reading, nothing else. There used to be a profile-weight
+  // fallback here so weight had a figure before the first weigh-in — but that
+  // let the card show a number while the empty state directly below it said
+  // "No weigh-ins yet", contradicting itself. A sibling change makes
+  // onboarding write a real first weigh-in (plus a migration backfilling one
+  // for existing profiles), so there is no gap left for a stand-in to paper
+  // over.
+  const current = latest;
+  const hasCurrent = typeof current === "number";
+  const currentShown = hasCurrent ? displayNumber(metric, current, system) : null;
   const metricUnit = unitLabel(metric, system);
 
   // The change is measured over the trailing run of readings from ONE
@@ -289,6 +293,18 @@ export default function Progress() {
               </View>
             </PressableScale>
 
+            {/* Three states, ordered by how much history the charted metric
+                has. The middle one is the common new-user case now that
+                onboarding always writes a first weigh-in: a real hero figure
+                above, no chart yet (hasChart needs 2+ points), so a single
+                quiet line replaces the chart's vertical space instead of
+                leaving it dead. It carries no icon and no CTA — the hero
+                figure above is already the tappable "log again" affordance
+                for weight. The zero-reading EmptyState below is reachable
+                only by accounts that onboarded before that backfill, which is
+                also the one state that still needs its own "Log weight"
+                button: nothing else on screen hints the hero figure is
+                pressable when there is no figure to press. */}
             {hasChart ? (
               <>
                 <WeightChart points={points} breaksAfter={trend.breaksAfter} />

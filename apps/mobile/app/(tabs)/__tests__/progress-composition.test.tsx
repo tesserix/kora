@@ -91,6 +91,24 @@ test("offers a chip per metric the history holds, and charts the chosen one", as
   // observable here. Its delta, above, is ordinary text and is.
 });
 
+// The hero figure's "tap to log weight" affordance only means what it says
+// while the charted metric IS weight — a tap under a body-fat figure doing
+// the same thing would be logging weight while a body-fat number sits above
+// it, which is not what the tap does.
+test("the hero figure stops being pressable once a composition metric is charted", async () => {
+  mockSeries.mockReturnValue({
+    data: [
+      weighIn({ weight_kg: 74, body_fat_pct: 26.4, logged_at: "2026-07-20T08:00:00Z" }),
+      weighIn({ weight_kg: 71.9, body_fat_pct: 24.2, logged_at: "2026-07-23T08:00:00Z" }),
+    ],
+  });
+  const { getByTestId, getByLabelText, queryByLabelText } = await render(<Progress />);
+  expect(getByLabelText("Log weight")).toBeTruthy(); // pressable while weight is charted
+
+  await fireEvent.press(getByTestId("metric-chip-body_fat_pct"));
+  expect(queryByLabelText("Log weight")).toBeNull();
+});
+
 test("the visceral rating is charted without a percent sign anywhere near it", async () => {
   mockSeries.mockReturnValue({
     data: [weighIn({ visceral_fat_rating: 8 }), weighIn({ visceral_fat_rating: 7 })],
