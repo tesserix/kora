@@ -1,0 +1,69 @@
+{
+  "high": true,
+  "report-type": "summary",
+  "allowlist": [
+    {
+      "GHSA-2v35-w6hq-6mfw|@bacons/apple-targets>@bacons/xcode>@expo/plist>@xmldom/xmldom": {
+        "active": true,
+        "notes": "Build-time plist input is repository-owned; upstream @bacons/xcode has no fixed release.",
+        "expiry": "2026-09-30"
+      }
+    },
+    {
+      "GHSA-f6ww-3ggp-fr8h|@bacons/apple-targets>@bacons/xcode>@expo/plist>@xmldom/xmldom": {
+        "active": true,
+        "notes": "Build-time plist input is repository-owned; upstream @bacons/xcode has no fixed release.",
+        "expiry": "2026-09-30"
+      }
+    },
+    {
+      "GHSA-j759-j44w-7fr8|@bacons/apple-targets>@bacons/xcode>@expo/plist>@xmldom/xmldom": {
+        "active": true,
+        "notes": "Build-time plist input is repository-owned; upstream @bacons/xcode has no fixed release.",
+        "expiry": "2026-09-30"
+      }
+    },
+    {
+      "GHSA-wh4c-j3r5-mjhp|@bacons/apple-targets>@bacons/xcode>@expo/plist>@xmldom/xmldom": {
+        "active": true,
+        "notes": "Build-time plist input is repository-owned; upstream @bacons/xcode has no fixed release.",
+        "expiry": "2026-09-30"
+      }
+    },
+    {
+      "GHSA-x6wf-f3px-wcqx|@bacons/apple-targets>@bacons/xcode>@expo/plist>@xmldom/xmldom": {
+        "active": true,
+        "notes": "Build-time plist input is repository-owned; upstream @bacons/xcode has no fixed release.",
+        "expiry": "2026-09-30"
+      }
+    },
+    {
+      "GHSA-5p2g-fcmc-qvqq|metro-config>metro>image-size>": {
+        "active": true,
+        "notes": "Metro parses repository-owned assets during builds; image-size has no fixed release.",
+        "expiry": "2026-09-30"
+      }
+    },
+    {
+      "GHSA-5p2g-fcmc-qvqq|metro-transform-worker>metro>image-size>": {
+        "active": true,
+        "notes": "Metro parses repository-owned assets during builds; image-size has no fixed release.",
+        "expiry": "2026-09-30"
+      }
+    },
+    {
+      "GHSA-w3rx-r6r6-pgpr|metro-config>metro>image-size>": {
+        "active": true,
+        "notes": "Metro parses repository-owned assets during builds; image-size has no fixed release.",
+        "expiry": "2026-09-30"
+      }
+    },
+    {
+      "GHSA-w3rx-r6r6-pgpr|metro-transform-worker>metro>image-size>": {
+        "active": true,
+        "notes": "Metro parses repository-owned assets during builds; image-size has no fixed release.",
+        "expiry": "2026-09-30"
+      }
+    }
+  ]
+}
