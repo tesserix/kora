@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -267,4 +268,47 @@ func TestBodyCompositionResponseSchema_NoRequiredList(t *testing.T) {
 		_, present := schema.Properties[forbidden]
 		assert.Falsef(t, present, "schema must not have a %q property", forbidden)
 	}
+}
+
+// TestBodyCompositionResponseSchema_EveryPropertyHasDescription pins
+// kora#314's second fix: bare {Type: TypeNumber} properties carried none of
+// the field-specific rules the system prompt spends most of its words on.
+// Restating each rule directly on the property the model consults gives it
+// a second, structurally-attached place to find it.
+func TestBodyCompositionResponseSchema_EveryPropertyHasDescription(t *testing.T) {
+	schema := bodyCompositionResponseSchema()
+	for name, prop := range schema.Properties {
+		assert.NotEmptyf(t, prop.Description, "property %q has no Description", name)
+	}
+}
+
+// TestBodyCompositionResponseSchema_MuscleMassDescriptionWarnsAgainstSkeletalConflation
+// mirrors the OpenAI-side test of the same name: muscle_mass_kg must never
+// receive a skeletal-muscle-mass figure, which is the exact trap migration
+// 000039 documents.
+func TestBodyCompositionResponseSchema_MuscleMassDescriptionWarnsAgainstSkeletalConflation(t *testing.T) {
+	schema := bodyCompositionResponseSchema()
+	desc := strings.ToLower(schema.Properties["muscle_mass_kg"].Description)
+	assert.Contains(t, desc, "skeletal", "muscle_mass_kg description must warn against skeletal muscle mass conflation")
+}
+
+// TestBuildGenerateContentConfig_FoodPathsLeaveTemperatureUnset pins the
+// CRITICAL constraint from kora#314's fix: IdentifyText/IdentifyPhoto/
+// Decompose all call generateJSON with a nil temperature, so this asserts
+// the shared config builder passes nil straight through to
+// genai.GenerateContentConfig.Temperature untouched — food-path sampling
+// must never regress as a side effect of fixing body-composition reads.
+func TestBuildGenerateContentConfig_FoodPathsLeaveTemperatureUnset(t *testing.T) {
+	cfg := buildGenerateContentConfig(identifySystemPrompt, guessResponseSchema(), nil)
+	assert.Nil(t, cfg.Temperature, "food-path config must leave Temperature nil (SDK/model default)")
+}
+
+// TestBuildGenerateContentConfig_BodyCompositionPinsZeroTemperature pins
+// the primary root-cause fix: near-deterministic sampling for a
+// transcription task. See bodyCompositionTemperature's doc comment.
+func TestBuildGenerateContentConfig_BodyCompositionPinsZeroTemperature(t *testing.T) {
+	temperature := bodyCompositionTemperature
+	cfg := buildGenerateContentConfig(bodyCompositionSystemPrompt, bodyCompositionResponseSchema(), &temperature)
+	require.NotNil(t, cfg.Temperature)
+	assert.Equal(t, float32(0), *cfg.Temperature)
 }
