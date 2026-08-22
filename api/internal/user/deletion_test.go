@@ -223,11 +223,12 @@ func seedEveryCascadingTable(t *testing.T, db *gorm.DB, userID, otherID uuid.UUI
 	t.Helper()
 	ids := map[string]uuid.UUID{}
 
-	insert := func(table, stmt string, args ...any) {
+	insert := func(table, stmt string, args ...any) uuid.UUID {
 		t.Helper()
 		id := uuid.New()
 		require.NoError(t, db.Exec(stmt, append([]any{id}, args...)...).Error)
 		ids[table] = id
+		return id
 	}
 
 	insert("water_entries",
@@ -239,12 +240,36 @@ func seedEveryCascadingTable(t *testing.T, db *gorm.DB, userID, otherID uuid.UUI
 	insert("saved_meals",
 		`INSERT INTO saved_meals (id, user_id, name, meal_slot) VALUES (?, ?, 'Test Meal', 'lunch')`,
 		userID)
-	insert("coach_turns",
+	coachTurnID := insert("coach_turns",
 		`INSERT INTO coach_turns (id, user_id, role, text) VALUES (?, ?, 'user', 'hello')`,
 		userID)
 	insert("feedback", `
 		INSERT INTO feedback (id, user_id, kind, subject, description)
 		VALUES (?, ?, 'bug', 'Test subject', 'Test description')`, userID)
+	require.NoError(t, db.Exec(`
+		INSERT INTO mentor_profiles (user_id, motivation)
+		VALUES (?, 'Deletion should remove this')`, userID).Error)
+	require.NoError(t, db.Exec(`
+		INSERT INTO health_daily_summaries
+			(user_id, local_date, timezone, steps, observed_at)
+		VALUES (?, current_date, 'Australia/Melbourne', 4200, now())`, userID).Error)
+	commitmentID := insert("mentor_commitments", `
+		INSERT INTO mentor_commitments
+			(id, user_id, title, kind, cadence, weekdays_mask, start_minute,
+			 timezone, starts_on, status, source)
+		VALUES (?, ?, 'Deletion walk', 'walking', 'fixed', 127, 1080,
+			'Australia/Melbourne', current_date, 'active', 'user')`, userID)
+	insert("mentor_check_ins", `
+		INSERT INTO mentor_check_ins
+			(id, user_id, commitment_id, scheduled_for, local_date, action)
+		VALUES (?, ?, ?, now(), current_date, 'done')`, userID, commitmentID)
+	insert("mentor_commitment_proposals", `
+		INSERT INTO mentor_commitment_proposals
+			(id, user_id, coach_turn_id, title, kind, cadence, weekdays_mask,
+			 start_minute, timezone, starts_on, source, agent_name, reviewed_by)
+		VALUES (?, ?, ?, 'Deletion walk proposal', 'walking', 'fixed', 127,
+			1080, 'Australia/Melbourne', current_date, 'meal_planner',
+			'Kora Meal Planner', 'Kora Nutrition Coach')`, userID, coachTurnID)
 
 	foodID := seedFoodItem(t, db)
 	insert("pins",
@@ -296,7 +321,9 @@ func cleanupAdminEvents(t *testing.T, db *gorm.DB, targetID uuid.UUID) {
 var victimCascadeTables = []string{
 	"food_logs", "weight_entries", "water_entries", "device_tokens", "pins",
 	"saved_meals", "food_aliases", "coach_turns", "group_members",
-	"challenge_participants", "feedback",
+	"challenge_participants", "feedback", "mentor_profiles",
+	"health_daily_summaries", "mentor_commitments", "mentor_check_ins",
+	"mentor_commitment_proposals",
 }
 
 // --- tests -----------------------------------------------------------------

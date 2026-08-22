@@ -17,6 +17,13 @@ import { applyAllReminders, cancelAllReminders } from "@/reminders/schedule";
 import { DEFAULT_WEIGHT_PREF } from "@/reminders/weightPrefs";
 import { fetchLatestWeighInDate } from "@/reminders/lastWeighIn";
 import { resolveAuthState } from "@/lib/authState";
+import { recordMentorCheckIn } from "@/mentor/checkInOutbox";
+import {
+  MENTOR_ACTION_CHANGE,
+  MENTOR_ACTION_DONE,
+  MENTOR_ACTION_SNOOZE,
+  MENTOR_NOTIFICATION_CATEGORY,
+} from "@/mentor/notificationConstants";
 
 jest.mock("../pushApi", () => ({
   registerDevice: jest.fn(async () => {}),
@@ -36,6 +43,7 @@ jest.mock("expo-router", () => ({ router: { push: jest.fn(), replace: jest.fn() 
 // The auth gate (#171). Reminders and their deep links belong to a signed-in
 // user; tests that are not about the gate declare the signed-in case.
 jest.mock("@/lib/authState", () => ({ resolveAuthState: jest.fn(async () => "signed-in") }));
+jest.mock("@/mentor/checkInOutbox", () => ({ recordMentorCheckIn: jest.fn(async () => {}) }));
 
 // usePushResponder's non-reminder branch only needs targetFor's return value,
 // not its real switch logic — mocked here to keep the routing test focused.
@@ -170,6 +178,19 @@ test("setupPushHandler still arms the reminder when the last weigh-in cannot be 
   );
 });
 
+test("setupPushHandler registers Done, Snooze, and Change mentor actions", () => {
+  setupPushHandler();
+
+  expect(Notifications.setNotificationCategoryAsync).toHaveBeenCalledWith(
+    MENTOR_NOTIFICATION_CATEGORY,
+    [
+      expect.objectContaining({ identifier: MENTOR_ACTION_DONE, buttonTitle: "Done" }),
+      expect.objectContaining({ identifier: MENTOR_ACTION_SNOOZE, buttonTitle: "Snooze 15 min" }),
+      expect.objectContaining({ identifier: MENTOR_ACTION_CHANGE, buttonTitle: "Change" }),
+    ],
+  );
+});
+
 test("unregisterPushToken deletes and clears the cached token", async () => {
   await AsyncStorage.setItem("kora.pushToken", "ExponentPushToken[abc]");
   await unregisterPushToken();
@@ -189,10 +210,12 @@ let nextResponseId = 0;
 function fakeResponse(
   data: unknown,
   identity?: { identifier: string; date: number },
+  actionIdentifier?: string,
 ): Notifications.NotificationResponse {
   const id = identity ?? { identifier: `req-${++nextResponseId}`, date: 1_700_000_000_000 };
   return {
-    notification: { date: id.date, request: { identifier: id.identifier, content: { data } } },
+    actionIdentifier,
+    notification: { date: id.date, request: { identifier: id.identifier, content: { title: "Drink water", body: "Reminder", data } } },
   } as unknown as Notifications.NotificationResponse;
 }
 
@@ -238,6 +261,77 @@ test("tapping a weight check-in reminder routes to Progress, where weight is log
   expect(router.replace).toHaveBeenCalledWith("/progress");
   expect(router.replace).toHaveBeenCalledTimes(1);
   expect(targetFor).not.toHaveBeenCalled();
+});
+
+test("Done records a retry-safe mentor check-in without opening the app", async () => {
+  const callback = await listenerFrom();
+  const commitmentId = "0a38f2c2-97b8-4f8f-a0ce-44caf5134532";
+
+  await callback(fakeResponse({
+    kind: "mentor",
+    commitmentId,
+    scheduledFor: "2026-08-24T08:00:00.000Z",
+    localDate: "2026-08-24",
+  }, undefined, MENTOR_ACTION_DONE));
+
+  expect(recordMentorCheckIn).toHaveBeenCalledWith({
+    commitmentId,
+    scheduled_for: "2026-08-24T08:00:00.000Z",
+    local_date: "2026-08-24",
+    action: "done",
+    snoozed_until: null,
+  });
+  expect(router.replace).not.toHaveBeenCalled();
+});
+
+test("Done on a recurring reminder derives a stable occurrence from its delivery", async () => {
+  const callback = await listenerFrom();
+  const commitmentId = "0a38f2c2-97b8-4f8f-a0ce-44caf5134532";
+  const deliveredAt = new Date(2026, 7, 24, 8, 0, 0, 0);
+
+  await callback(fakeResponse(
+    { kind: "mentor", commitmentId },
+    { identifier: "daily-water", date: deliveredAt.getTime() },
+    MENTOR_ACTION_DONE,
+  ));
+
+  expect(recordMentorCheckIn).toHaveBeenCalledWith({
+    commitmentId,
+    scheduled_for: deliveredAt.toISOString(),
+    local_date: "2026-08-24",
+    action: "done",
+    snoozed_until: null,
+  });
+});
+
+test("Snooze records the check-in and schedules one follow-up in 15 minutes", async () => {
+  jest.spyOn(Date, "now").mockReturnValue(new Date("2026-08-24T08:05:00.000Z").getTime());
+  const callback = await listenerFrom();
+  const commitmentId = "0a38f2c2-97b8-4f8f-a0ce-44caf5134532";
+
+  await callback(fakeResponse({
+    kind: "mentor",
+    commitmentId,
+    scheduledFor: "2026-08-24T08:00:00.000Z",
+    localDate: "2026-08-24",
+  }, undefined, MENTOR_ACTION_SNOOZE));
+
+  expect(recordMentorCheckIn).toHaveBeenCalledWith(expect.objectContaining({
+    commitmentId,
+    action: "snoozed",
+  }));
+  expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledWith(expect.objectContaining({
+    content: expect.objectContaining({ categoryIdentifier: MENTOR_NOTIFICATION_CATEGORY }),
+    trigger: { type: "date", date: new Date("2026-08-24T08:20:00.000Z") },
+  }));
+});
+
+test("Change opens the Personal Mentor screen", async () => {
+  const callback = await listenerFrom();
+
+  await callback(fakeResponse({ kind: "mentor", commitmentId: "c1" }, undefined, MENTOR_ACTION_CHANGE));
+
+  expect(router.replace).toHaveBeenCalledWith("/mentor");
 });
 
 test("non-reminder tap still routes via the existing targetFor deep-link path, not /capture", async () => {

@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { router } from "expo-router";
+import type { MentorCommitmentProposal } from "@/api/types";
 import { useCoachAsk, useCoachNudges, useCoachThread } from "@/api/hooks";
 import { AppBackground } from "@/components/AppBackground";
 import { ScreenHeader } from "@/components/ScreenHeader";
@@ -19,6 +21,25 @@ import { useTheme } from "@/theme";
 // DEFAULT_AGENT names the capability Kora routes every coach question to, so
 // the thinking line reads honestly before any agent has identified itself.
 const DEFAULT_AGENT = "Coach";
+
+function reviewProposal(proposal: MentorCommitmentProposal): void {
+  router.push({
+    pathname: "/mentor-commitment",
+    params: {
+      proposalId: proposal.id,
+      title: proposal.title,
+      kind: proposal.kind,
+      cadence: proposal.cadence,
+      weekdaysMask: String(proposal.weekdays_mask),
+      startMinute: String(proposal.start_minute),
+      intervalMinutes: proposal.interval_minutes === null ? "" : String(proposal.interval_minutes),
+      endMinute: proposal.end_minute === null ? "" : String(proposal.end_minute),
+      timezone: proposal.timezone,
+      startsOn: proposal.starts_on.slice(0, 10),
+      endsOn: proposal.ends_on?.slice(0, 10) ?? "",
+    },
+  });
+}
 
 function InlineRetry({ message, label, onPress }: { message: string; label: string; onPress: () => void }) {
   const { instrument } = useTheme();
@@ -138,6 +159,8 @@ export default function CoachScreen() {
                 text={turn.text}
                 citations={turn.citations}
                 agent={turn.agent}
+                proposal={turn.proposal}
+                onReviewProposal={reviewProposal}
               />
             ))
           )}

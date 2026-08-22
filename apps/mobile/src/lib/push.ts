@@ -11,6 +11,13 @@ import { targetFor } from "@/lib/notificationTarget";
 import { reconcileWeightReminder } from "@/reminders/reconcileWeightReminder";
 import { resolveAuthState } from "@/lib/authState";
 import type { NotificationType } from "@/api/types";
+import { recordMentorCheckIn } from "@/mentor/checkInOutbox";
+import {
+  MENTOR_ACTION_CHANGE,
+  MENTOR_ACTION_DONE,
+  MENTOR_ACTION_SNOOZE,
+  MENTOR_NOTIFICATION_CATEGORY,
+} from "@/mentor/notificationConstants";
 
 const TOKEN_KEY = "kora.pushToken";
 
@@ -92,6 +99,23 @@ export function setupPushHandler(): void {
       shouldSetBadge: false,
     }),
   });
+  void Notifications.setNotificationCategoryAsync(MENTOR_NOTIFICATION_CATEGORY, [
+    {
+      identifier: MENTOR_ACTION_DONE,
+      buttonTitle: "Done",
+      options: { opensAppToForeground: false },
+    },
+    {
+      identifier: MENTOR_ACTION_SNOOZE,
+      buttonTitle: "Snooze 15 min",
+      options: { opensAppToForeground: false },
+    },
+    {
+      identifier: MENTOR_ACTION_CHANGE,
+      buttonTitle: "Change",
+      options: { opensAppToForeground: true },
+    },
+  ]).catch(() => {});
   // Reschedule reminders on every launch so they survive reinstalls and
   // permission changes. setupPushHandler runs once at module scope
   // (app/_layout.tsx), so no additional once-guard is needed here.
@@ -122,6 +146,42 @@ let handledResponseKey: string | null = null;
 function responseKey(response: Notifications.NotificationResponse): string {
   const { identifier } = response.notification.request;
   return `${identifier}:${response.notification.date ?? ""}:${response.actionIdentifier ?? ""}`;
+}
+
+type MentorNotificationData = {
+  kind: "mentor";
+  commitmentId: string;
+  scheduledFor: string;
+  localDate: string;
+};
+
+function localDate(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function mentorNotificationData(
+  data: unknown,
+  deliveredAt: number,
+): MentorNotificationData | null {
+  const value = data as Partial<MentorNotificationData> | null;
+  if (!value
+    || value.kind !== "mentor"
+    || typeof value.commitmentId !== "string"
+    || !/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(value.commitmentId)) return null;
+  if (typeof value.scheduledFor === "string"
+    && Number.isFinite(Date.parse(value.scheduledFor))
+    && typeof value.localDate === "string"
+    && /^\d{4}-\d{2}-\d{2}$/.test(value.localDate)) {
+    return value as MentorNotificationData;
+  }
+  const delivered = new Date(deliveredAt);
+  if (!Number.isFinite(delivered.getTime())) return null;
+  return {
+    kind: "mentor",
+    commitmentId: value.commitmentId,
+    scheduledFor: delivered.toISOString(),
+    localDate: localDate(delivered),
+  };
 }
 
 // usePushResponder deep-links when the user taps a push.
@@ -157,6 +217,47 @@ export function usePushResponder(): void {
         entity_id?: string;
         kind?: string;
       };
+      if (data?.kind === "mentor") {
+        if (response.actionIdentifier === MENTOR_ACTION_CHANGE
+          || response.actionIdentifier === Notifications.DEFAULT_ACTION_IDENTIFIER
+          || !response.actionIdentifier) {
+          router.replace("/mentor");
+          return;
+        }
+        const mentorData = mentorNotificationData(data, response.notification.date);
+        if (!mentorData) return;
+        if (response.actionIdentifier === MENTOR_ACTION_DONE) {
+          await recordMentorCheckIn({
+            commitmentId: mentorData.commitmentId,
+            scheduled_for: mentorData.scheduledFor,
+            local_date: mentorData.localDate,
+            action: "done",
+            snoozed_until: null,
+          });
+          return;
+        }
+        if (response.actionIdentifier === MENTOR_ACTION_SNOOZE) {
+          const snoozedUntil = new Date(Date.now() + 15 * 60 * 1000);
+          await Notifications.scheduleNotificationAsync({
+            content: {
+              title: response.notification.request.content.title ?? "Your Kora commitment",
+              body: response.notification.request.content.body ?? "A gentle reminder from your Kora mentor.",
+              categoryIdentifier: MENTOR_NOTIFICATION_CATEGORY,
+              data: mentorData,
+            },
+            trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: snoozedUntil },
+          });
+          await recordMentorCheckIn({
+            commitmentId: mentorData.commitmentId,
+            scheduled_for: mentorData.scheduledFor,
+            local_date: mentorData.localDate,
+            action: "snoozed",
+            snoozed_until: snoozedUntil.toISOString(),
+          });
+          return;
+        }
+        return;
+      }
       if (data?.kind === "reminder") {
         router.replace("/capture");
         return;

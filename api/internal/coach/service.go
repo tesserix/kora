@@ -15,6 +15,7 @@ import (
 	"github.com/tesserix/kora/api/internal/ai"
 	"github.com/tesserix/kora/api/internal/guardrails"
 	"github.com/tesserix/kora/api/internal/httpx"
+	"github.com/tesserix/kora/api/internal/mentor"
 )
 
 // qaSystemPrompt is the strict grounding contract for the coach's Q&A
@@ -90,6 +91,7 @@ type Answer struct {
 	Text        string
 	Citations   []Fact
 	ShowSupport bool
+	Proposal    *mentor.CommitmentProposal
 	// By names the agent that produced Text. It is zero when the direct
 	// provider answered, which the client shows as the plain assistant.
 	By Attribution
@@ -105,6 +107,11 @@ type Attribution struct {
 	// shown. Empty on every other path — a plain answer has no review stage.
 	ReviewedBy string
 }
+
+// fallbackAgentName is who the thread credits when no published agent
+// answered. An unattributed reply is the misleading case: it reads as if the
+// registry's coach wrote it, so the app's own persona says otherwise.
+const fallbackAgentName = "Otto"
 
 // guidanceSkill is the registry skill id Q&A routes to. Kora names the
 // capability, not the agent: whichever published agent declares this skill
@@ -179,6 +186,7 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 	userPrompt := fmt.Sprintf("CONTEXT:\n%s\n%s\nQUESTION: %s", grounded.Render(), s.renderHistory(ctx, userID), question)
 
 	by := Attribution{}
+	var proposal *mentor.CommitmentProposal
 	raw, run, err := s.askAgent(ctx, userID, userPrompt, skill)
 	if err == nil {
 		// The skill is the one Kora asked for, not the one the run echoes
@@ -191,17 +199,23 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 			// as a proposal to approve or challenge. A failed review keeps
 			// the draft — worse, but still an answer.
 			if reviewed, reviewer := s.reviewPlan(ctx, userID, grounded.Render(), question, raw); reviewed != "" {
-				raw = reviewed
 				by.ReviewedBy = reviewer
+				raw, proposal = parseReviewedCommitment(reviewed, userID, now, loc, by.Agent, reviewer)
 			}
+			raw = formatPlanDraft(raw)
 		}
 	} else {
 		// The agent path is preferred, not required: a registry that publishes
 		// no matching agent, or a gateway that fails, must not cost the user an
 		// answer the direct provider can still give. An unconfigured runner is
 		// the expected state in dev and is not worth a line per request.
+		// A configured agent path that FAILED is the case worth disclosing: the
+		// user asked the published coach and someone else answered. With no
+		// agent path at all there is nothing to disclose, and the reply stays
+		// unattributed as it always has.
 		if !errors.Is(err, errNoAgent) {
 			slog.WarnContext(ctx, "coach: agent run failed, falling back to the provider", "err", err, "skill", skill)
+			by = Attribution{Agent: fallbackAgentName, Skill: skill}
 		}
 		raw, err = s.askProvider(ctx, userID, userPrompt)
 	}
@@ -217,6 +231,7 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 		// Suppress means Decision.Text is "" — never surface an empty
 		// answer, fall back to a safe supportive message instead.
 		text = suppressedAnswerMessage
+		proposal = nil
 	}
 
 	answer := Answer{
@@ -224,14 +239,18 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 		Citations:   grounded.Facts(),
 		ShowSupport: decision.ShowSupport || guardrails.AtRisk(signals),
 		By:          by,
+		Proposal:    proposal,
 	}
 
 	// A storage failure must not lose an answer the user is already owed, so
 	// log and continue rather than returning an error.
 	if s.thread != nil {
-		if err := s.thread.AppendExchange(ctx, userID, question, answer.Text, answer.Citations); err != nil {
+		if err := s.thread.AppendExchange(ctx, userID, question, answer.Text, answer.Citations, answer.Proposal); err != nil {
 			slog.WarnContext(ctx, "coach: failed to persist thread exchange", "err", err, "user_id", userID)
+			answer.Proposal = nil
 		}
+	} else {
+		answer.Proposal = nil
 	}
 
 	return answer, nil
@@ -404,13 +423,18 @@ func regateStoredTurns(turns []StoredTurn, signals guardrails.Signals) []StoredT
 		decision := guardrails.Evaluate(guardrails.Nudge{Text: t.Text, Restrictive: restrictive}, signals)
 
 		text := decision.Text
+		proposal := t.Proposal
 		if decision.Action == guardrails.Suppress {
 			// Suppress means Decision.Text is "" — never surface an empty
 			// answer, fall back to the same safe supportive message Ask uses.
 			text = suppressedAnswerMessage
+			proposal = nil
 		}
 
-		out[i] = StoredTurn{Role: t.Role, Text: text, CreatedAt: t.CreatedAt, Citations: t.Citations}
+		out[i] = StoredTurn{
+			Role: t.Role, Text: text, CreatedAt: t.CreatedAt,
+			Citations: t.Citations, Proposal: proposal,
+		}
 	}
 	return out
 }

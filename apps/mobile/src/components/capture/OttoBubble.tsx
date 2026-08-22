@@ -6,8 +6,54 @@ import { AppText } from "@/components/Text";
 import { useMotionPrefs } from "@/motion";
 import { INSTRUMENT_DARK_FIXED } from "@/theme";
 import { withAlpha } from "@/lib/color";
+import { parseCoachText, type Block } from "@/lib/coachText";
 
 const T = INSTRUMENT_DARK_FIXED;
+const BODY = { color: T.ink, fontSize: 14, lineHeight: 21 } as const;
+
+// Agent replies arrive as markdown-ish prose, and a single AppText renders
+// their asterisks and bullets literally. Blocks lay the answer out instead.
+function CoachBlocks({ text }: { text: string }) {
+  const blocks = parseCoachText(text);
+  if (blocks.length === 0) return <AppText style={BODY}>{text}</AppText>;
+  return (
+    <View style={{ gap: 6 }}>
+      {blocks.map((block, index) => (
+        <CoachBlock key={index} block={block} />
+      ))}
+    </View>
+  );
+}
+
+function CoachBlock({ block }: { block: Block }) {
+  const spans = block.spans.map((span, index) => (
+    <AppText
+      key={index}
+      style={[
+        BODY,
+        span.bold ? { fontWeight: "700" as const } : null,
+        span.italic ? { fontStyle: "italic" as const } : null,
+      ]}
+    >
+      {span.text}
+    </AppText>
+  ));
+
+  if (block.kind === "heading") {
+    return (
+      <AppText style={{ ...BODY, fontWeight: "700", marginTop: 2 }}>{spans}</AppText>
+    );
+  }
+  if (block.kind === "bullet") {
+    return (
+      <View style={{ flexDirection: "row", gap: 8 }}>
+        <AppText style={{ ...BODY, color: T.mut }}>{block.marker}</AppText>
+        <AppText style={{ ...BODY, flexShrink: 1 }}>{spans}</AppText>
+      </View>
+    );
+  }
+  return <AppText style={BODY}>{spans}</AppText>;
+}
 
 interface Props {
   children: ReactNode;
@@ -76,7 +122,11 @@ export function OttoBubble({ children, agent }: Props) {
             {agent}
           </AppText>
         ) : null}
-        <AppText style={{ color: T.ink, fontSize: 14, lineHeight: 21 }}>{children}</AppText>
+        {typeof children === "string" ? (
+          <CoachBlocks text={children} />
+        ) : (
+          <AppText style={BODY}>{children}</AppText>
+        )}
       </View>
     </Animated.View>
   );

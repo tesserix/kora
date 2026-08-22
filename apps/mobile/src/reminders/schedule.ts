@@ -3,6 +3,8 @@ import type { MealSlot } from "@/lib/mealSlot";
 import type { ReminderPrefs } from "./prefs";
 import type { CustomReminder, Weekday } from "./customPrefs";
 import { nextWeightReminderAt, type WeightReminderPref } from "./weightPrefs";
+import { MENTOR_NOTIFICATION_CATEGORY } from "@/mentor/notificationConstants";
+import { deactivateMentorProjection, loadActiveMentorProjection, type MentorProjection } from "@/mentor/projection";
 
 export type WeightReminderInput = { pref: WeightReminderPref; lastWeighedAt: Date | null; now: Date };
 
@@ -19,6 +21,14 @@ export type ScheduledNotification = {
   trigger: NotificationTrigger;
 };
 
+export type ScheduledMentorNotification = {
+  content: Notifications.NotificationContentInput;
+  trigger:
+    | { type: "date"; date: Date }
+    | { type: "daily"; hour: number; minute: number }
+    | { type: "weekly"; weekday: number; hour: number; minute: number };
+};
+
 // iOS allows at most 64 pending local-notification requests app-wide; beyond that
 // scheduleNotificationAsync silently drops requests. Cap our total below that so
 // scheduling degrades deterministically (meals first) instead of iOS dropping
@@ -28,6 +38,7 @@ export const MAX_SCHEDULED_NOTIFICATIONS = 60;
 const SLOTS: MealSlot[] = ["breakfast", "lunch", "dinner", "snack"];
 const LABEL: Record<MealSlot, string> = { breakfast: "Breakfast", lunch: "Lunch", dinner: "Dinner", snack: "Snack" };
 const ALL_DAYS = 7;
+const MENTOR_HORIZON_DAYS = 7;
 
 // jsDayToExpoWeekday maps Date.getDay() (0=Sun) to expo's WEEKLY weekday (1=Sun).
 function jsDayToExpoWeekday(d: Weekday): number {
@@ -65,6 +76,114 @@ export function buildCustomSchedule(reminders: CustomReminder[]): ScheduledNotif
     }
   }
   return out;
+}
+
+function localDate(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function inQuietHours(minute: number, start: number, end: number): boolean {
+  if (start === end) return false;
+  return start < end ? minute >= start && minute < end : minute >= start || minute < end;
+}
+
+function commitmentTimes(commitment: MentorProjection["commitments"][number]): number[] {
+  if (commitment.cadence === "fixed") return [commitment.start_minute];
+  if (!commitment.interval_minutes || commitment.end_minute === null) return [];
+  const times: number[] = [];
+  for (let minute = commitment.start_minute; minute <= commitment.end_minute; minute += commitment.interval_minutes) {
+    times.push(minute);
+  }
+  return times;
+}
+
+function mentorContent(
+  commitment: MentorProjection["commitments"][number],
+  occurrence?: { scheduledFor: string; localDate: string },
+): Notifications.NotificationContentInput {
+  return {
+    title: commitment.title,
+    body: "A gentle reminder from your Kora mentor.",
+    categoryIdentifier: MENTOR_NOTIFICATION_CATEGORY,
+    data: {
+      kind: "mentor",
+      commitmentId: commitment.id,
+      ...(occurrence ?? {}),
+    },
+  };
+}
+
+export function buildMentorSchedule(
+  projection: MentorProjection | null,
+  now: Date,
+  horizonDays = MENTOR_HORIZON_DAYS,
+): ScheduledMentorNotification[] {
+  if (!projection || horizonDays <= 0) return [];
+  const scheduled: ScheduledMentorNotification[] = [];
+  const day = new Date(now);
+  day.setHours(0, 0, 0, 0);
+  const today = localDate(day);
+
+  for (const commitment of projection.commitments) {
+    if (commitment.status !== "active" || commitment.ends_on !== null || commitment.starts_on.slice(0, 10) > today) continue;
+    const times = commitmentTimes(commitment).filter((minute) => !inQuietHours(
+      minute,
+      projection.profile.quiet_start_minute,
+      projection.profile.quiet_end_minute,
+    ));
+    const weekdays = Array.from({ length: ALL_DAYS }, (_, weekday) => weekday)
+      .filter((weekday) => (commitment.weekdays_mask & (1 << weekday)) !== 0);
+
+    for (const minute of times) {
+      const hour = Math.floor(minute / 60);
+      const minuteOfHour = minute % 60;
+      if (weekdays.length === ALL_DAYS) {
+        scheduled.push({
+          content: mentorContent(commitment),
+          trigger: { type: "daily", hour, minute: minuteOfHour },
+        });
+        continue;
+      }
+      for (const weekday of weekdays) {
+        scheduled.push({
+          content: mentorContent(commitment),
+          trigger: { type: "weekly", weekday: jsDayToExpoWeekday(weekday as Weekday), hour, minute: minuteOfHour },
+        });
+      }
+    }
+  }
+
+  for (let offset = 0; offset < horizonDays; offset++) {
+    const occurrenceDay = new Date(day);
+    occurrenceDay.setDate(day.getDate() + offset);
+    const date = localDate(occurrenceDay);
+    const weekdayBit = 1 << occurrenceDay.getDay();
+
+    for (const commitment of projection.commitments) {
+      const startsOn = commitment.starts_on.slice(0, 10);
+      const endsOn = commitment.ends_on?.slice(0, 10) ?? null;
+      if (endsOn === null && startsOn <= today) continue;
+      if (commitment.status !== "active" || date < startsOn || (endsOn !== null && date > endsOn)) continue;
+      if ((commitment.weekdays_mask & weekdayBit) === 0) continue;
+
+      for (const minute of commitmentTimes(commitment)) {
+        if (inQuietHours(minute, projection.profile.quiet_start_minute, projection.profile.quiet_end_minute)) continue;
+        const at = new Date(occurrenceDay);
+        at.setHours(Math.floor(minute / 60), minute % 60, 0, 0);
+        if (at.getTime() <= now.getTime()) continue;
+        const scheduledFor = at.toISOString();
+        scheduled.push({
+          content: mentorContent(commitment, { scheduledFor, localDate: date }),
+          trigger: { type: "date", date: at },
+        });
+      }
+    }
+  }
+
+  return scheduled;
 }
 
 // applyAllReminders re-syncs the OS schedule to the current meal prefs AND custom
@@ -116,7 +235,10 @@ export function applyAllReminders(
 export function cancelAllReminders(): Promise<void> {
   const run = applyTail
     .catch(() => {})
-    .then(() => Notifications.cancelAllScheduledNotificationsAsync())
+    .then(async () => {
+      await deactivateMentorProjection();
+      await Notifications.cancelAllScheduledNotificationsAsync();
+    })
     .catch(() => {
       // Deliberately swallowed — see above.
     });
@@ -134,6 +256,7 @@ async function applyOnce(
   weight: WeightReminderInput,
 ): Promise<void> {
   await Notifications.cancelAllScheduledNotificationsAsync();
+  const mentorProjection = await loadActiveMentorProjection();
   let scheduled = 0;
   // Meals first: they are the baseline and must always win when the total would
   // otherwise exceed iOS's pending-notification ceiling.
@@ -167,6 +290,35 @@ async function applyOnce(
           hour: n.trigger.hour,
           minute: n.trigger.minute,
         },
+      });
+    }
+    scheduled++;
+  }
+  for (const mentor of buildMentorSchedule(mentorProjection, weight.now)) {
+    if (scheduled >= MAX_SCHEDULED_NOTIFICATIONS) return;
+    if (mentor.trigger.type === "daily") {
+      await Notifications.scheduleNotificationAsync({
+        content: mentor.content,
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.DAILY,
+          hour: mentor.trigger.hour,
+          minute: mentor.trigger.minute,
+        },
+      });
+    } else if (mentor.trigger.type === "weekly") {
+      await Notifications.scheduleNotificationAsync({
+        content: mentor.content,
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
+          weekday: mentor.trigger.weekday,
+          hour: mentor.trigger.hour,
+          minute: mentor.trigger.minute,
+        },
+      });
+    } else {
+      await Notifications.scheduleNotificationAsync({
+        content: mentor.content,
+        trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: mentor.trigger.date },
       });
     }
     scheduled++;

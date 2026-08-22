@@ -2,6 +2,7 @@ package database
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -152,4 +153,84 @@ func TestWeightEntriesDoesNotStoreDerivedValues(t *testing.T) {
 			Scan(&count).Error)
 		assert.Zero(t, count, "%s is derived or vendor-invented and must not be stored", name)
 	}
+}
+
+func TestPersonalMentorSchemaOwnsUserDataAndRetryIdentity(t *testing.T) {
+	db := testDB(t)
+
+	for _, table := range []string{
+		"mentor_profiles",
+		"health_daily_summaries",
+		"mentor_commitments",
+		"mentor_check_ins",
+		"mentor_commitment_proposals",
+	} {
+		var name string
+		require.NoError(t, db.Raw(`SELECT to_regclass(?)::text`, "public."+table).Scan(&name).Error)
+		require.Equal(t, table, name)
+	}
+
+	var healthPrimaryKey string
+	require.NoError(t, db.Raw(`
+		SELECT pg_get_constraintdef(oid)
+		FROM pg_constraint
+		WHERE conrelid = 'health_daily_summaries'::regclass AND contype = 'p'`).
+		Scan(&healthPrimaryKey).Error)
+	require.Contains(t, healthPrimaryKey, "user_id, local_date")
+
+	var checkInIdentity string
+	require.NoError(t, db.Raw(`
+		SELECT pg_get_constraintdef(oid)
+		FROM pg_constraint
+		WHERE conrelid = 'mentor_check_ins'::regclass
+		  AND conname = 'mentor_check_ins_occurrence_unique'`).
+		Scan(&checkInIdentity).Error)
+	require.Contains(t, checkInIdentity, "commitment_id, scheduled_for")
+
+	for _, table := range []string{
+		"mentor_profiles",
+		"health_daily_summaries",
+		"mentor_commitments",
+		"mentor_check_ins",
+	} {
+		var definitions []string
+		require.NoError(t, db.Raw(`
+			SELECT pg_get_constraintdef(oid)
+			FROM pg_constraint
+			WHERE conrelid = ?::regclass AND contype = 'f'`, table).
+			Scan(&definitions).Error)
+		require.NotEmpty(t, definitions, "%s must be owned through a foreign key", table)
+		for _, definition := range definitions {
+			require.Contains(t, definition, "ON DELETE CASCADE", "%s must not outlive its owner", table)
+		}
+	}
+
+	var proposalForeignKeys []string
+	require.NoError(t, db.Raw(`
+		SELECT pg_get_constraintdef(oid)
+		FROM pg_constraint
+		WHERE conrelid = 'mentor_commitment_proposals'::regclass AND contype = 'f'`).
+		Scan(&proposalForeignKeys).Error)
+	require.Len(t, proposalForeignKeys, 3)
+	require.Equal(t, 2, countContaining(proposalForeignKeys, "ON DELETE CASCADE"))
+	require.Equal(t, 1, countContaining(proposalForeignKeys, "ON DELETE SET NULL"))
+
+	var proposalTurnIdentity string
+	require.NoError(t, db.Raw(`
+		SELECT pg_get_constraintdef(oid)
+		FROM pg_constraint
+		WHERE conrelid = 'mentor_commitment_proposals'::regclass
+		  AND contype = 'u' AND pg_get_constraintdef(oid) LIKE '%coach_turn_id%'`).
+		Scan(&proposalTurnIdentity).Error)
+	require.Contains(t, proposalTurnIdentity, "coach_turn_id")
+}
+
+func countContaining(values []string, needle string) int {
+	count := 0
+	for _, value := range values {
+		if strings.Contains(value, needle) {
+			count++
+		}
+	}
+	return count
 }

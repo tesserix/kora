@@ -1,4 +1,5 @@
 import { fireEvent, render, waitFor } from "@testing-library/react-native";
+import { router } from "expo-router";
 
 import CoachScreen from "../coach";
 
@@ -11,7 +12,7 @@ const mockAskMutate = jest.fn();
 const mockOnline = jest.fn(() => true);
 
 jest.mock("expo-router", () => ({
-  router: { back: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => true) },
+  router: { back: jest.fn(), push: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => true) },
 }));
 jest.mock("@/api/hooks", () => ({
   useCoachNudges: () => mockNudges(),
@@ -56,6 +57,51 @@ test("renders grounded focus, stored conversation, and citation chips", async ()
   expect(getByText("How is my protein?")).toBeTruthy();
   expect(getByText("You have 18g to go today.")).toBeTruthy();
   expect(getByText("Protein · 142 / 160g")).toBeTruthy();
+});
+
+test("a structured agent proposal is reviewable but never activates itself", async () => {
+  mockThread.mockReturnValue({
+    data: {
+      turns: [{
+        role: "otto",
+        text: "A short walk after lunch fits the routine you requested.",
+        citations: [],
+        created_at: "2026-08-19T00:00:01Z",
+        proposal: {
+          id: "proposal-1",
+          title: "Walk after lunch",
+          kind: "walking",
+          cadence: "fixed",
+          weekdays_mask: 62,
+          start_minute: 780,
+          interval_minutes: null,
+          end_minute: null,
+          timezone: "Australia/Melbourne",
+          starts_on: "2026-08-22",
+          ends_on: null,
+          source: "meal_planner",
+          agent_name: "Kora Meal Planner",
+          reviewed_by: "Kora Nutrition Coach",
+          accepted_commitment_id: null,
+          accepted_at: null,
+          created_at: "2026-08-19T00:00:01Z",
+        },
+      }],
+      show_support: false,
+    },
+    isLoading: false,
+    isError: false,
+    refetch: mockThreadRefetch,
+  });
+
+  const { getByLabelText, getByText } = await render(<CoachScreen />);
+  expect(getByText("Suggested by Kora Meal Planner · reviewed by Kora Nutrition Coach")).toBeTruthy();
+  fireEvent.press(getByLabelText("Review suggested commitment"));
+
+  expect(router.push).toHaveBeenCalledWith(expect.objectContaining({
+    pathname: "/mentor-commitment",
+    params: expect.objectContaining({ proposalId: "proposal-1", title: "Walk after lunch" }),
+  }));
 });
 
 test("show_support adds help without replacing safe focus cards", async () => {

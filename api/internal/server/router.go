@@ -27,6 +27,7 @@ import (
 	"github.com/tesserix/kora/api/internal/groups"
 	"github.com/tesserix/kora/api/internal/httpx"
 	"github.com/tesserix/kora/api/internal/memory"
+	"github.com/tesserix/kora/api/internal/mentor"
 	"github.com/tesserix/kora/api/internal/notifications"
 	"github.com/tesserix/kora/api/internal/nutrition"
 	"github.com/tesserix/kora/api/internal/onboarding"
@@ -151,6 +152,18 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.GET("/notifications", notificationsHandler.List)
 		v1.GET("/notifications/unread-count", notificationsHandler.UnreadCount)
 		v1.POST("/notifications/read", notificationsHandler.MarkAllRead)
+
+		mentorRepo := mentor.NewRepository(deps.DB)
+		mentorHandler := mentor.NewHandler(mentor.NewService(mentorRepo))
+		v1.GET("/mentor/profile", mentorHandler.GetProfile)
+		v1.PUT("/mentor/profile", mentorHandler.PutProfile)
+		v1.GET("/mentor/health/days", mentorHandler.ListHealthDays)
+		v1.PUT("/mentor/health/days", mentorHandler.PutHealthDays)
+		v1.DELETE("/mentor/health/days", mentorHandler.DeleteHealthDays)
+		v1.GET("/mentor/commitments", mentorHandler.ListCommitments)
+		v1.PUT("/mentor/commitments/:id", mentorHandler.PutCommitment)
+		v1.PUT("/mentor/commitments/:id/check-ins", mentorHandler.PutCheckIn)
+		v1.PUT("/mentor/proposals/:id/accept", mentorHandler.AcceptProposal)
 
 		devicesHandler := devices.NewHandler(devices.NewRepository(deps.DB))
 		v1.POST("/devices", devicesHandler.Register)
@@ -300,7 +313,7 @@ func NewRouter(deps Deps) *gin.Engine {
 			v1.POST("/resolve/barcode", deps.Resolver.ResolveBarcode)
 		}
 
-		coachGrounder := coach.NewGrounder(dashSvc, logRepo, memSvc, trackingRepo)
+		coachGrounder := coach.NewGrounder(dashSvc, logRepo, memSvc, trackingRepo).WithMentor(mentorRepo)
 		coachMeter := billing.NewMeter(deps.DB)
 		coachThread := coach.NewThreadRepository(deps.DB)
 		coachService := coach.NewService(&coachGrounder, deps.Provider, coachMeter, &coachThread).WithAgents(deps.Agents)

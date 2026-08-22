@@ -115,6 +115,29 @@ func TestAIUsageRouteIsAlwaysRegisteredInsideTheAuthenticatedAPI(t *testing.T) {
 	}
 }
 
+func TestPersonalMentorRoutesAreRegisteredInsideAuthenticatedAPI(t *testing.T) {
+	r := NewRouter(Deps{DB: &gorm.DB{}, Verifier: stubVerifier{}})
+	routes := r.Routes()
+	for _, route := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/v1/mentor/profile"},
+		{http.MethodPut, "/v1/mentor/profile"},
+		{http.MethodGet, "/v1/mentor/health/days"},
+		{http.MethodPut, "/v1/mentor/health/days"},
+		{http.MethodDelete, "/v1/mentor/health/days"},
+		{http.MethodGet, "/v1/mentor/commitments"},
+		{http.MethodPut, "/v1/mentor/commitments/:id"},
+		{http.MethodPut, "/v1/mentor/commitments/:id/check-ins"},
+		{http.MethodPut, "/v1/mentor/proposals/:id/accept"},
+	} {
+		if !hasRoute(routes, route.method, route.path) {
+			t.Errorf("expected %s %s to be registered", route.method, route.path)
+		}
+	}
+}
+
 func TestAnonymousRequestsCannotReachAnyPublicAICapability(t *testing.T) {
 	h := resolve.NewHandler(nil, nil)
 	r := NewRouter(Deps{

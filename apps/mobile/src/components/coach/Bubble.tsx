@@ -1,6 +1,7 @@
 import { StyleSheet, View } from "react-native";
-import type { CoachCitation, CoachRole } from "@/api/types";
+import type { CoachCitation, CoachRole, MentorCommitmentProposal } from "@/api/types";
 import { AppText } from "@/components/Text";
+import { PressableScale } from "@/motion";
 import { useTheme } from "@/theme";
 import { CitationChips } from "./CitationChips";
 
@@ -9,11 +10,15 @@ export function Bubble({
   text,
   citations = [],
   agent,
+  proposal,
+  onReviewProposal,
 }: {
   role: CoachRole;
   text: string;
   citations?: CoachCitation[];
   agent?: string;
+  proposal?: MentorCommitmentProposal;
+  onReviewProposal?: (proposal: MentorCommitmentProposal) => void;
 }) {
   const { instrument } = useTheme();
   const user = role === "user";
@@ -55,6 +60,38 @@ export function Bubble({
         <AppText style={{ color: instrument.ink, fontSize: 15, lineHeight: 21 }}>{text}</AppText>
       </View>
       {!user ? <CitationChips citations={citations} /> : null}
+      {!user && proposal ? (
+        <View
+          style={{
+            width: "86%",
+            marginTop: 8,
+            padding: 12,
+            gap: 6,
+            borderRadius: 14,
+            backgroundColor: instrument.inset,
+            borderWidth: StyleSheet.hairlineWidth,
+            borderColor: instrument.glassBorder,
+          }}
+        >
+          <AppText style={{ color: instrument.mut, fontSize: 11 }}>
+            Suggested by {proposal.agent_name} · reviewed by {proposal.reviewed_by}
+          </AppText>
+          <AppText style={{ color: instrument.ink, fontSize: 15, fontWeight: "700" }}>{proposal.title}</AppText>
+          {proposal.accepted_commitment_id ? (
+            <AppText style={{ color: instrument.teal, fontSize: 13, fontWeight: "600" }}>Commitment active</AppText>
+          ) : (
+            <PressableScale
+              accessibilityRole="button"
+              accessibilityLabel="Review suggested commitment"
+              haptic="selection"
+              onPress={() => onReviewProposal?.(proposal)}
+              style={{ minHeight: 44, alignItems: "center", justifyContent: "center", borderRadius: 12, backgroundColor: instrument.ink }}
+            >
+              <AppText style={{ color: instrument.bg, fontWeight: "700" }}>Review & activate</AppText>
+            </PressableScale>
+          )}
+        </View>
+      ) : null}
     </View>
   );
 }

@@ -187,22 +187,25 @@ func TestAsk_AttributesTheAnswerToTheAgentThatProducedIt(t *testing.T) {
 	_ = db
 }
 
-func TestAsk_ProviderFallbackIsNotAttributedToAnAgent(t *testing.T) {
+// A gateway 502 costs the user the agent, not the answer — but an unlabelled
+// fallback is the misleading part: the published coach and the plain provider
+// produced identical-looking replies. The answer names whoever wrote it, and
+// that is never the agent whose run just failed.
+func TestAsk_AProviderFallbackIsAttributedToOttoNotTheFailedAgent(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db, 2000, 120)
 	g, meter := askFixture(t)
 
-	// A failed agent run must not leave the previous agent's name on an
-	// answer the plain provider actually wrote.
-	runner := &fakeRunner{err: errors.New("gateway unreachable")}
+	runner := &fakeRunner{err: errors.New("agents: a2a returned 502")}
 	svc := NewService(g, &fakeProvider{text: "from the provider"}, meter, nil).WithAgents(runner)
 
 	a, err := svc.Ask(context.Background(), userID, time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC), time.UTC, "how's my protein?")
 
 	require.NoError(t, err)
 	require.Equal(t, "from the provider", a.Text)
-	require.Empty(t, a.By.Agent)
-	require.Empty(t, a.By.Skill)
+	require.Equal(t, fallbackAgentName, a.By.Agent, "the thread never shows an anonymous reply")
+	require.Equal(t, guidanceSkill, a.By.Skill)
+	require.Empty(t, a.By.ReviewedBy)
 	_ = db
 }
 
@@ -273,6 +276,44 @@ func TestAsk_APlanDraftIsReviewedByTheCoach(t *testing.T) {
 	require.Equal(t, "Kora Meal Planner", a.By.Agent)
 	require.Equal(t, "Kora Nutrition Coach", a.By.ReviewedBy)
 	_ = db
+}
+
+func TestAsk_AReviewedRoutineReturnsAndPersistsAUserReviewProposal(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	g, meter := askFixture(t)
+	provider := &fakeProvider{text: "plan"}
+	runner := &fakeRunner{bySkill: map[string]agents.Run{
+		planningSkill: {
+			Agent: "meal-planner", DisplayName: "Kora Meal Planner",
+			State: "completed", Text: `{"summary":"hydration rhythm"}`,
+		},
+		guidanceSkill: {
+			Agent: "nutrition-coach", DisplayName: "Kora Nutrition Coach",
+			State: "completed", Text: `This is a gentle rhythm. Review it before activation.
+[[KORA_COMMITMENT]]
+{"title":"Drink water","kind":"hydration","cadence":"interval","weekdays_mask":127,"start_minute":480,"interval_minutes":120,"end_minute":1200}
+[[/KORA_COMMITMENT]]`,
+		},
+	}}
+	thread := NewThreadRepository(db)
+	svc := NewService(g, provider, meter, &thread).WithAgents(runner)
+
+	answer, err := svc.Ask(
+		context.Background(), userID,
+		time.Date(2026, 8, 22, 1, 0, 0, 0, time.UTC),
+		time.UTC, "remind me to drink water every two hours",
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, "This is a gentle rhythm. Review it before activation.", answer.Text)
+	require.NotNil(t, answer.Proposal)
+	require.Equal(t, "Drink water", answer.Proposal.Title)
+	turns, err := thread.ListRecent(t.Context(), userID, maxThreadTurns)
+	require.NoError(t, err)
+	require.Len(t, turns, 2)
+	require.NotNil(t, turns[1].Proposal)
+	require.Equal(t, answer.Proposal.ID, turns[1].Proposal.ID)
 }
 
 // A review that cannot happen must not cost the user the plan: the draft is
@@ -365,4 +406,39 @@ func (f *flakyProvider) GenerateText(ctx context.Context, systemPrompt, userProm
 		return "", ai.Usage{}, errors.New("provider down")
 	}
 	return f.fakeProvider.GenerateText(ctx, systemPrompt, userPrompt)
+}
+
+// A review can fail — a gateway timeout, a provider outage — and when it does
+// the draft is still the only answer there is. It must reach the user as
+// prose, never as the planner's raw JSON envelope (kora capture thread).
+func TestAsk_AnUnreviewedPlanDraftIsStillReadable(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	g, meter := askFixture(t)
+
+	provider := &fakeProvider{text: "plan", textErrAfter: 1}
+	runner := &fakeRunner{
+		bySkill: map[string]agents.Run{
+			planningSkill: {
+				Agent:       "meal-planner",
+				DisplayName: "Kora Meal Planner",
+				State:       "completed",
+				Text:        `{"summary":"High-protein dinners.","days":[{"date":"Day 1","meals":[{"name":"Dinner: Steak","description":"180g sirloin."}]}]}`,
+			},
+		},
+		errBy: map[string]error{guidanceSkill: errors.New("gateway timeout")},
+	}
+	svc := NewService(g, provider, meter, nil).WithAgents(runner)
+
+	a, err := svc.Ask(context.Background(), userID, time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC), time.UTC,
+		"plan my dinner for tonight")
+
+	require.NoError(t, err)
+	require.NotContains(t, a.Text, `"summary"`, "the user never reads raw JSON")
+	require.NotContains(t, a.Text, "{")
+	require.Contains(t, a.Text, "High-protein dinners.")
+	require.Contains(t, a.Text, "Day 1")
+	require.Contains(t, a.Text, "- Dinner: Steak — 180g sirloin.")
+	require.Empty(t, a.By.ReviewedBy, "an unreviewed draft claims no reviewer")
+	_ = db
 }
