@@ -295,6 +295,24 @@ func TestUpdateFoodRenameClearsEmbeddingButMacrosOnlyEditPreservesIt(t *testing.
 	assert.False(t, hasEmbedding(t, tx, original.ID), "a rename must null the embedding in the same statement")
 }
 
+func TestUpdateFoodRetagsARenamedFood(t *testing.T) {
+	db := testDB(t)
+	tx := seedTx(t, db)
+	original := seedFoodTx(t, tx, "Veggie patty "+uuid.NewString(), "")
+
+	repo := NewMutationRepository(tx, ai.NoCache{})
+	in := inputFrom(original)
+	in.Name = "Beef patty " + uuid.NewString()
+	_, err := repo.UpdateFood(context.Background(), Actor{ID: "admin-1", Email: "ops@kora.test"},
+		original.ID, in, loadUpdatedAt(t, tx, original.ID))
+	require.NoError(t, err)
+
+	var stored nutrition.FoodItem
+	require.NoError(t, tx.First(&stored, "id = ?", original.ID).Error)
+	assert.Contains(t, []string(stored.DietTags), "contains-beef",
+		"an admin rename must retag, or a blocking rule stops matching the food it names")
+}
+
 // TestUpdateFoodClearsEmbeddingOnPunctuationOnlyRenameThatNormalizesIdentically
 // is invariant 2's minor fix (task-4 fix round 1): the embedding-clear
 // decision compares in.Name against the RAW before.Name, not two freshly

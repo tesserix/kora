@@ -32,6 +32,10 @@ func mentorRouter(userID uuid.UUID, h Handler) *gin.Engine {
 	r.PUT("/v1/mentor/commitments/:id", h.PutCommitment)
 	r.PUT("/v1/mentor/commitments/:id/check-ins", h.PutCheckIn)
 	r.PUT("/v1/mentor/proposals/:id/accept", h.AcceptProposal)
+	r.GET("/v1/mentor/food-rules", h.ListFoodRules)
+	r.PUT("/v1/mentor/food-rules", h.PutFoodRules)
+	r.PUT("/v1/mentor/food-rules/:subject/confirm", h.ConfirmFoodRule)
+	r.DELETE("/v1/mentor/food-rules/:subject", h.DeleteFoodRule)
 	return r
 }
 
@@ -297,4 +301,100 @@ func TestHandlerCreatesListsPausesAndChecksInCommitment(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &paused))
 	require.Equal(t, CommitmentStatusPaused, paused.Data.Status)
+}
+
+func TestHandlerFoodRulesRoundTripAndServesTheEnforceableCatalog(t *testing.T) {
+	db := mentorTestDB(t)
+	owner := seedMentorUser(t, db)
+	r := mentorRouter(owner, NewHandler(NewService(NewRepository(db))))
+
+	w := serveJSON(r, http.MethodPut, "/v1/mentor/food-rules", map[string]any{
+		"rules": []map[string]any{
+			{"subject": "beef", "kind": "exclusion"},
+			{"subject": "peanut", "kind": "allergy"},
+		},
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+
+	w = serveJSON(r, http.MethodGet, "/v1/mentor/food-rules", nil)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var listed struct {
+		Rules    []FoodRule `json:"rules"`
+		Subjects []struct {
+			Subject string `json:"subject"`
+		} `json:"subjects"`
+		Patterns []string `json:"patterns"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &listed))
+	require.Len(t, listed.Rules, 2)
+	// The picker is served from the same taxonomy the server enforces, so a
+	// client cannot offer a subject that would then be rejected on save.
+	require.NotEmpty(t, listed.Subjects)
+	require.Contains(t, listed.Patterns, "vegetarian")
+}
+
+func TestHandlerFoodRulesRejectAnUnenforceableSubject(t *testing.T) {
+	db := mentorTestDB(t)
+	owner := seedMentorUser(t, db)
+	r := mentorRouter(owner, NewHandler(NewService(NewRepository(db))))
+
+	w := serveJSON(r, http.MethodPut, "/v1/mentor/food-rules", map[string]any{
+		"rules": []map[string]any{{"subject": "moon cheese", "kind": "exclusion"}},
+	})
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestHandlerFoodRulesAreOwnerScoped(t *testing.T) {
+	db := mentorTestDB(t)
+	owner := seedMentorUser(t, db)
+	other := seedMentorUser(t, db)
+	svc := NewService(NewRepository(db))
+
+	ownerRouter := mentorRouter(owner, NewHandler(svc))
+	w := serveJSON(ownerRouter, http.MethodPut, "/v1/mentor/food-rules", map[string]any{
+		"rules": []map[string]any{{"subject": "beef", "kind": "exclusion"}},
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+
+	otherRouter := mentorRouter(other, NewHandler(svc))
+	w = serveJSON(otherRouter, http.MethodGet, "/v1/mentor/food-rules", nil)
+	require.Equal(t, http.StatusOK, w.Code)
+	var listed struct {
+		Rules []FoodRule `json:"rules"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &listed))
+	require.Empty(t, listed.Rules, "one user's rules must not appear in another's list")
+
+	w = serveJSON(otherRouter, http.MethodDelete, "/v1/mentor/food-rules/beef", nil)
+	require.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestHandlerConfirmFoodRulePutsAProposalInForce(t *testing.T) {
+	db := mentorTestDB(t)
+	owner := seedMentorUser(t, db)
+	svc := NewService(NewRepository(db))
+	r := mentorRouter(owner, NewHandler(svc))
+
+	w := serveJSON(r, http.MethodPut, "/v1/mentor/profile", map[string]any{
+		"motivation": "", "dietary_preferences": "", "allergies": "",
+		"diet_pattern": "vegetarian", "coaching_style": CoachingStyleSupportive,
+		"reminder_intensity": ReminderIntensityBalanced,
+		"quiet_start_minute": 22 * 60, "quiet_end_minute": 7 * 60,
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+
+	w = serveJSON(r, http.MethodPut, "/v1/mentor/food-rules/beef/confirm", nil)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var confirmed struct {
+		Data FoodRule `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &confirmed))
+	require.NotNil(t, confirmed.Data.ConfirmedAt)
+
+	w = serveJSON(r, http.MethodPut, "/v1/mentor/food-rules/pork/confirm", nil)
+	require.Equal(t, http.StatusOK, w.Code)
+	w = serveJSON(r, http.MethodPut, "/v1/mentor/food-rules/mushroom/confirm", nil)
+	require.Equal(t, http.StatusNotFound, w.Code, "a rule that was never proposed cannot be confirmed")
 }

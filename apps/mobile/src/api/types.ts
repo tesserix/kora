@@ -137,6 +137,17 @@ export interface CoachAgent {
   reviewed_by?: string;
 }
 
+/** One preference this answer touches. Allergies and exclusions never appear
+ *  here — those are enforced server-side, so an answer that reaches the client
+ *  has already been kept clear of them. */
+export interface CoachDietFlag {
+  subject: string;
+  label: string;
+  kind: MentorFoodRuleKind;
+  severity: "block" | "flag";
+  match: string;
+}
+
 export interface CoachAnswer {
   answer: string;
   citations: CoachCitation[];
@@ -144,6 +155,7 @@ export interface CoachAnswer {
   agent?: CoachAgent;
   proposal?: MentorCommitmentProposal | null;
   plan?: MealPlanProposal | null;
+  diet_flags?: CoachDietFlag[];
 }
 
 export interface MealPlanMeal {
@@ -180,10 +192,20 @@ export interface MealPlanProposal {
 export type MentorCoachingStyle = "supportive" | "direct" | "educational" | "accountability";
 export type MentorReminderIntensity = "light" | "balanced" | "frequent";
 
+export type MentorDietPattern =
+  | ""
+  | "vegetarian"
+  | "vegan"
+  | "eggetarian"
+  | "jain"
+  | "halal"
+  | "pescatarian";
+
 export interface MentorProfileInput {
   motivation: string;
   dietary_preferences: string;
   allergies: string;
+  diet_pattern: MentorDietPattern;
   coaching_style: MentorCoachingStyle;
   reminder_intensity: MentorReminderIntensity;
   quiet_start_minute: number;
@@ -197,6 +219,48 @@ export interface MentorProfile extends MentorProfileInput {
   confirmed_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+// A rule's severity decides what Kora does with it: "block" is an allergy or
+// absolute exclusion and is never shown in a plan, "flag" is a preference and
+// is only annotated.
+export type MentorFoodRuleSeverity = "block" | "flag";
+export type MentorFoodRuleKind = "allergy" | "exclusion" | "preference";
+export type MentorFoodRuleSource = "user" | "pattern" | "coach";
+
+export interface MentorFoodRuleInput {
+  subject: string;
+  kind: MentorFoodRuleKind;
+  severity?: MentorFoodRuleSeverity;
+  label?: string;
+}
+
+export interface MentorFoodRule {
+  id: string;
+  subject: string;
+  kind: MentorFoodRuleKind;
+  severity: MentorFoodRuleSeverity;
+  label: string;
+  source: MentorFoodRuleSource;
+  // Null until the user accepts it. Kora enforces confirmed rules only, so a
+  // proposal it inferred never silently constrains a plan.
+  confirmed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MentorFoodSubject {
+  subject: string;
+  label: string;
+  family?: string;
+}
+
+export interface MentorFoodRules {
+  rules: MentorFoodRule[];
+  // The picker's options come from the server so it cannot offer a subject the
+  // server would then refuse.
+  subjects: MentorFoodSubject[];
+  patterns: MentorDietPattern[];
 }
 
 export type MentorCommitmentKind = "hydration" | "walking" | "meal" | "custom";

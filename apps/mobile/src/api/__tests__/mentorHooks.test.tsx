@@ -102,6 +102,7 @@ test("mentor mutations use retry-safe PUT contracts and refresh only the current
       motivation: "More energy",
       dietary_preferences: "Vegetarian",
       allergies: "",
+      diet_pattern: "vegetarian",
       coaching_style: "educational",
       reminder_intensity: "light",
       quiet_start_minute: 1320,

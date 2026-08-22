@@ -45,6 +45,7 @@ type Profile struct {
 	Motivation            string     `json:"motivation"`
 	DietaryPreferences    string     `json:"dietary_preferences"`
 	Allergies             string     `json:"allergies"`
+	DietPattern           string     `json:"diet_pattern"`
 	CoachingStyle         string     `json:"coaching_style"`
 	ReminderIntensity     string     `json:"reminder_intensity"`
 	QuietStartMinute      int        `json:"quiet_start_minute"`
@@ -133,3 +134,21 @@ type CheckIn struct {
 }
 
 func (CheckIn) TableName() string { return "mentor_check_ins" }
+
+// FoodRule is one structured dietary constraint. It is the enforceable form of
+// what the profile's free-text fields describe, and only a rule with
+// ConfirmedAt set is in force.
+type FoodRule struct {
+	ID          uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
+	UserID      uuid.UUID  `gorm:"type:uuid;not null;index" json:"-"`
+	Subject     string     `json:"subject"`
+	Kind        string     `json:"kind"`
+	Severity    string     `json:"severity"`
+	Label       string     `json:"label"`
+	Source      string     `json:"source"`
+	ConfirmedAt *time.Time `json:"confirmed_at"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+}
+
+func (FoodRule) TableName() string { return "mentor_food_rules" }

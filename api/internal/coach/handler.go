@@ -118,7 +118,7 @@ func (h Handler) Ask(c *gin.Context) {
 	body := gin.H{
 		"answer": answer.Text, "citations": cites,
 		"show_support": answer.ShowSupport, "proposal": answer.Proposal,
-		"plan": answer.Plan,
+		"plan": answer.Plan, "diet_flags": dietFlags(answer),
 	}
 	if answer.By.Agent != "" {
 		// Omitted entirely when the direct provider answered, so the client

@@ -127,7 +127,7 @@ func TestSearchReferenceFoodsUsesOnlyReviewedCountryDatasets(t *testing.T) {
 	}
 	require.NoError(t, tx.Exec("UPDATE food_items SET deleted_at = now() WHERE id = ?", retired.ID).Error)
 
-	got, err := repo.SearchReferenceFoods(t.Context(), query, LocaleAU, 25)
+	got, err := repo.SearchReferenceFoods(t.Context(), query, LocaleAU, 25, nil)
 	require.NoError(t, err)
 
 	ids := make([]uuid.UUID, 0, len(got))
@@ -139,6 +139,36 @@ func TestSearchReferenceFoodsUsesOnlyReviewedCountryDatasets(t *testing.T) {
 	require.NotContains(t, ids, unreviewed.ID, "user estimates must never become shared AI evidence")
 	require.NotContains(t, ids, retired.ID)
 	require.Equal(t, au.ID, got[0].Item.ID, "the caller's locale should break equally similar ties")
+}
+
+func TestSearchReferenceFoodsDropsRowsTaggedWithABlockedSubject(t *testing.T) {
+	tx := fixtureTx(t)
+	repo := NewRepository(tx)
+	query := partialVector768(241, 1)
+
+	beef := FoodItem{
+		Name: "Beef mince, lean " + uuid.NewString(), Provenance: ProvenanceAFCD,
+		Locale: LocaleAU, KcalPer100g: 250, ProteinPer100g: 26,
+	}
+	lentils := FoodItem{
+		Name: "Lentils, red, boiled " + uuid.NewString(), Provenance: ProvenanceIFCT,
+		Locale: LocaleIN, KcalPer100g: 116, ProteinPer100g: 9,
+	}
+	for _, item := range []*FoodItem{&beef, &lentils} {
+		require.NoError(t, tx.Create(item).Error)
+		require.NoError(t, repo.SetEmbedding(t.Context(), item.ID, query))
+	}
+	require.Contains(t, []string(beef.DietTags), "contains-beef", "the write hook must tag the row it stores")
+
+	got, err := repo.SearchReferenceFoods(t.Context(), query, LocaleAU, 25, []string{"contains-beef"})
+	require.NoError(t, err)
+
+	ids := make([]uuid.UUID, 0, len(got))
+	for _, item := range got {
+		ids = append(ids, item.Item.ID)
+	}
+	require.NotContains(t, ids, beef.ID, "a blocked food must not reach the model as evidence")
+	require.Contains(t, ids, lentils.ID)
 }
 
 func containsID(items []FoodItem, id uuid.UUID) bool {

@@ -172,6 +172,48 @@ test("the answering agent is named on its bubble and on the next thinking line",
   expect(getByText("OTTO · NUTRITION COACH")).toBeTruthy();
 });
 
+test("an answer that touches a preference says so without withholding it", async () => {
+  mockAskMutate.mockImplementation((_question, options) =>
+    options.onSuccess({
+      answer: "Mushroom risotto tonight.",
+      citations: [],
+      show_support: false,
+      diet_flags: [{ subject: "mushroom", label: "Mushroom", kind: "preference", severity: "flag", match: "mushroom" }],
+    }),
+  );
+  const { getByLabelText, getByTestId, queryByTestId } = await render(<CoachScreen />);
+
+  expect(queryByTestId("coach-diet-flags")).toBeNull();
+  await fireEvent.changeText(getByLabelText("Ask Otto a nutrition question"), "What's for dinner?");
+  await fireEvent.press(getByLabelText("Send question"));
+
+  expect(getByTestId("coach-diet-flags")).toBeTruthy();
+  expect(getByLabelText("This answer mentions mushroom, which you prefer to avoid.")).toBeTruthy();
+});
+
+test("the preference note clears when the next question is asked", async () => {
+  mockAskMutate.mockImplementation((_question, options) =>
+    options.onSuccess({
+      answer: "Mushroom risotto tonight.",
+      citations: [],
+      show_support: false,
+      diet_flags: [{ subject: "mushroom", label: "Mushroom", kind: "preference", severity: "flag", match: "mushroom" }],
+    }),
+  );
+  const { getByLabelText, getByTestId, queryByTestId } = await render(<CoachScreen />);
+  await fireEvent.changeText(getByLabelText("Ask Otto a nutrition question"), "What's for dinner?");
+  await fireEvent.press(getByLabelText("Send question"));
+  expect(getByTestId("coach-diet-flags")).toBeTruthy();
+
+  // A note left standing over a later, unrelated answer would be a lie about
+  // that answer.
+  mockAskMutate.mockImplementation(() => undefined);
+  await fireEvent.changeText(getByLabelText("Ask Otto a nutrition question"), "And my fibre?");
+  await fireEvent.press(getByLabelText("Send question"));
+
+  expect(queryByTestId("coach-diet-flags")).toBeNull();
+});
+
 test("an answer with no agent stays attributed to plain Otto", async () => {
   mockThread.mockReturnValue({
     data: {

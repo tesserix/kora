@@ -196,6 +196,10 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.PUT("/mentor/commitments/:id", mentorHandler.PutCommitment)
 		v1.PUT("/mentor/commitments/:id/check-ins", mentorHandler.PutCheckIn)
 		v1.PUT("/mentor/proposals/:id/accept", mentorHandler.AcceptProposal)
+		v1.GET("/mentor/food-rules", mentorHandler.ListFoodRules)
+		v1.PUT("/mentor/food-rules", mentorHandler.PutFoodRules)
+		v1.PUT("/mentor/food-rules/:subject/confirm", mentorHandler.ConfirmFoodRule)
+		v1.DELETE("/mentor/food-rules/:subject", mentorHandler.DeleteFoodRule)
 
 		devicesHandler := devices.NewHandler(devices.NewRepository(deps.DB))
 		v1.POST("/devices", devicesHandler.Register)

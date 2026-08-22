@@ -14,6 +14,7 @@ import (
 
 	"github.com/tesserix/kora/api/internal/agents"
 	"github.com/tesserix/kora/api/internal/ai"
+	"github.com/tesserix/kora/api/internal/diet"
 	"github.com/tesserix/kora/api/internal/guardrails"
 	"github.com/tesserix/kora/api/internal/httpx"
 	"github.com/tesserix/kora/api/internal/mentor"
@@ -108,6 +109,9 @@ type Answer struct {
 	// By names the agent that produced Text. It is zero when the direct
 	// provider answered, which the client shows as the plain assistant.
 	By Attribution
+	// DietFlags are the user's flagging rules this answer touches. Blocking
+	// rules never reach here — they are retried, and failing that replaced.
+	DietFlags []diet.Violation
 }
 
 // Attribution is who answered: the agent's published display name and the
@@ -209,6 +213,7 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 	if s.references != nil {
 		items, usage, referenceErr := s.references.Search(
 			ctx, question, nutrition.LocaleFromTimezone(loc.String()), nutritionReferenceLimit,
+			diet.BlockedTags(grounded.DietProfile),
 		)
 		if referenceErr != nil {
 			usage.Outcome = outcomeFor(referenceErr)
@@ -226,6 +231,7 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 	by := Attribution{}
 	var proposal *mentor.CommitmentProposal
 	var plan *PlanProposal
+	viaAgent := true
 	raw, run, err := s.askAgent(ctx, userID, userPrompt, skill)
 	if err == nil {
 		// The skill is the one Kora asked for, not the one the run echoes
@@ -268,11 +274,23 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 			slog.WarnContext(ctx, "coach: agent run failed, falling back to the provider", "err", err, "skill", skill)
 			by = Attribution{Agent: fallbackAgentName, Skill: skill}
 		}
+		viaAgent = false
 		raw, err = s.askProvider(ctx, userID, userPrompt)
 	}
 	if err != nil {
 		return Answer{}, fmt.Errorf("coach: ask: generate: %w", err)
 	}
+
+	// The prompt already carries the user's constraints, but a prompt is
+	// guidance. This is the gate that decides what the user actually sees.
+	screened, dietFlags, _ := s.screenDiet(ctx, userID, grounded.DietProfile, userPrompt, skill, raw, viaAgent)
+	if screened != raw {
+		// The proposal and the plan were parsed out of the text the screen just
+		// replaced, so they describe food the user is no longer being shown.
+		proposal = nil
+		plan = nil
+	}
+	raw = screened
 
 	restrictive := looksRestrictive(raw)
 	decision := guardrails.Evaluate(guardrails.Nudge{Text: raw, Restrictive: restrictive}, signals)
@@ -297,6 +315,7 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 		By:          by,
 		Proposal:    proposal,
 		Plan:        plan,
+		DietFlags:   dietFlags,
 	}
 
 	// A storage failure must not lose an answer the user is already owed, so
