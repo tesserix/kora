@@ -50,6 +50,7 @@ export interface CoachTurn {
   created_at: string;
   /** Set only on turns answered in this session — the stored thread has no attribution. */
   agent?: string;
+  proposal?: MentorCommitmentProposal;
 }
 
 export interface CoachNudgesResponse {
@@ -66,6 +67,8 @@ export interface CoachThreadResponse {
 export interface CoachAgent {
   name: string;
   skill: string;
+  /** Set when a planner draft was reviewed by another agent before being shown. */
+  reviewed_by?: string;
 }
 
 export interface CoachAnswer {
@@ -73,6 +76,95 @@ export interface CoachAnswer {
   citations: CoachCitation[];
   show_support: boolean;
   agent?: CoachAgent;
+  proposal?: MentorCommitmentProposal | null;
+}
+
+export type MentorCoachingStyle = "supportive" | "direct" | "educational" | "accountability";
+export type MentorReminderIntensity = "light" | "balanced" | "frequent";
+
+export interface MentorProfileInput {
+  motivation: string;
+  dietary_preferences: string;
+  allergies: string;
+  coaching_style: MentorCoachingStyle;
+  reminder_intensity: MentorReminderIntensity;
+  quiet_start_minute: number;
+  quiet_end_minute: number;
+  health_steps_enabled: boolean;
+  health_sleep_enabled: boolean;
+  health_workouts_enabled: boolean;
+}
+
+export interface MentorProfile extends MentorProfileInput {
+  confirmed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type MentorCommitmentKind = "hydration" | "walking" | "meal" | "custom";
+export type MentorCommitmentCadence = "fixed" | "interval";
+export type MentorCommitmentStatus = "active" | "paused" | "archived";
+
+export interface MentorCommitmentInput {
+  title: string;
+  kind: MentorCommitmentKind;
+  cadence: MentorCommitmentCadence;
+  weekdays_mask: number;
+  start_minute: number;
+  interval_minutes: number | null;
+  end_minute: number | null;
+  timezone: string;
+  starts_on: string;
+  ends_on: string | null;
+  status: MentorCommitmentStatus;
+}
+
+export interface MentorCommitment extends MentorCommitmentInput {
+  id: string;
+  source: string;
+  agent_name: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type MentorCommitmentProposal = Omit<MentorCommitmentInput, "status"> & {
+  id: string;
+  source: string;
+  agent_name: string;
+  reviewed_by: string;
+  accepted_commitment_id: string | null;
+  accepted_at: string | null;
+  created_at: string;
+};
+
+export type MentorProposalAcceptance = Omit<MentorCommitmentInput, "status"> & {
+  proposalId: string;
+  commitmentId: string;
+};
+
+export interface MentorHealthDayInput {
+  local_date: string;
+  timezone: string;
+  steps?: number | null;
+  sleep_minutes?: number | null;
+  workout_minutes?: number | null;
+  observed_at: string;
+}
+
+export type MentorCheckInAction = "done" | "skipped" | "snoozed";
+
+export interface MentorCheckInInput {
+  scheduled_for: string;
+  local_date: string;
+  action: MentorCheckInAction;
+  snoozed_until: string | null;
+}
+
+export interface MentorCheckIn extends MentorCheckInInput {
+  id: string;
+  commitment_id: string;
+  created_at: string;
+  updated_at: string;
 }
 
 /** What the capture composer's message turned out to BE.

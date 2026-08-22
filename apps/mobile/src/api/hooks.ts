@@ -4,6 +4,7 @@ import {
   useQueries,
   useQuery,
   useQueryClient,
+  type QueryClient,
   type UseMutationResult,
   type UseQueryResult,
 } from "@tanstack/react-query";
@@ -56,6 +57,14 @@ import type {
   LogSource,
   Memory,
   Metric,
+  MentorCheckIn,
+  MentorCheckInInput,
+  MentorCommitment,
+  MentorCommitmentInput,
+  MentorHealthDayInput,
+  MentorProfile,
+  MentorProfileInput,
+  MentorProposalAcceptance,
   MyFriendCode,
   OnboardingInput,
   LogRecipeResult,
@@ -140,6 +149,7 @@ export function useCoachAsk(): UseMutationResult<CoachAnswer, Error, string> {
           citations: answer.citations ?? [],
           created_at: createdAt,
           agent: answer.agent?.name,
+          proposal: answer.proposal ?? undefined,
         },
       ];
       qc.setQueryData<CoachThreadResponse>(coachThreadQueryKey(ownerID), (current) => ({
@@ -170,6 +180,123 @@ export function useSubmitOnboarding() {
     // refetch lands. /v1/onboarding returns the same full user row as /v1/me, so
     // the response is safe to use as the profile outright.
     onSuccess: (profile) => qc.setQueryData(["profile"], profile),
+  });
+}
+
+function mentorQueryKey(resource: "profile" | "commitments", ownerID: string | null) {
+  return ["mentor", resource, ownerID] as const;
+}
+
+export function useMentorProfile(): UseQueryResult<MentorProfile, Error> {
+  const ownerID = currentUserId();
+  return useQuery({
+    queryKey: mentorQueryKey("profile", ownerID),
+    queryFn: () => apiFetch("/v1/mentor/profile") as Promise<MentorProfile>,
+    enabled: ownerID !== null,
+  });
+}
+
+export function useMentorCommitments(): UseQueryResult<MentorCommitment[], Error> {
+  const ownerID = currentUserId();
+  return useQuery({
+    queryKey: mentorQueryKey("commitments", ownerID),
+    queryFn: () => apiFetch("/v1/mentor/commitments") as Promise<MentorCommitment[]>,
+    enabled: ownerID !== null,
+  });
+}
+
+export function usePutMentorProfile(): UseMutationResult<MentorProfile, Error, MentorProfileInput> {
+  const qc = useQueryClient();
+  const ownerID = currentUserId();
+  return useMutation({
+    mutationFn: (input) => apiFetch("/v1/mentor/profile", {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }) as Promise<MentorProfile>,
+    onSuccess: (profile) => qc.setQueryData(mentorQueryKey("profile", ownerID), profile),
+  });
+}
+
+function cacheMentorCommitment(
+  qc: QueryClient,
+  ownerID: string | null,
+  commitment: MentorCommitment,
+): void {
+  qc.setQueryData<MentorCommitment[]>(mentorQueryKey("commitments", ownerID), (current) => {
+    if (!current) return [commitment];
+    const index = current.findIndex((item) => item.id === commitment.id);
+    if (index < 0) return [...current, commitment];
+    return current.map((item) => item.id === commitment.id ? commitment : item);
+  });
+}
+
+export function usePutMentorCommitment(): UseMutationResult<
+  MentorCommitment,
+  Error,
+  MentorCommitmentInput & { id: string }
+> {
+  const qc = useQueryClient();
+  const ownerID = currentUserId();
+  return useMutation({
+    mutationFn: ({ id, ...input }) => apiFetch(`/v1/mentor/commitments/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }) as Promise<MentorCommitment>,
+    onSuccess: (commitment) => cacheMentorCommitment(qc, ownerID, commitment),
+  });
+}
+
+export function useAcceptMentorProposal(): UseMutationResult<
+  MentorCommitment,
+  Error,
+  MentorProposalAcceptance
+> {
+  const qc = useQueryClient();
+  const ownerID = currentUserId();
+  return useMutation({
+    mutationFn: ({ proposalId, commitmentId, ...input }) => apiFetch(`/v1/mentor/proposals/${proposalId}/accept`, {
+      method: "PUT",
+      body: JSON.stringify({ commitment_id: commitmentId, ...input }),
+    }) as Promise<MentorCommitment>,
+    onSuccess: (commitment) => {
+      cacheMentorCommitment(qc, ownerID, commitment);
+      qc.invalidateQueries({ queryKey: coachThreadQueryKey(ownerID) });
+    },
+  });
+}
+
+export function usePutMentorCheckIn(): UseMutationResult<
+  MentorCheckIn,
+  Error,
+  MentorCheckInInput & { commitmentId: string }
+> {
+  const qc = useQueryClient();
+  const ownerID = currentUserId();
+  return useMutation({
+    mutationFn: ({ commitmentId, ...input }) => apiFetch(`/v1/mentor/commitments/${commitmentId}/check-ins`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }) as Promise<MentorCheckIn>,
+    onSuccess: () => qc.invalidateQueries({ queryKey: mentorQueryKey("commitments", ownerID) }),
+  });
+}
+
+export function useSyncMentorHealth(): UseMutationResult<
+  { synced: number },
+  Error,
+  { days: MentorHealthDayInput[] }
+> {
+  return useMutation({
+    mutationFn: (input) => apiFetch("/v1/mentor/health/days", {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }) as Promise<{ synced: number }>,
+  });
+}
+
+export function useDeleteMentorHealth(): UseMutationResult<void, Error, void> {
+  return useMutation({
+    mutationFn: () => apiFetch("/v1/mentor/health/days", { method: "DELETE" }) as Promise<void>,
   });
 }
 

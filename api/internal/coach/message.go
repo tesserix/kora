@@ -85,7 +85,11 @@ func (h Handler) Message(c *gin.Context) {
 		"show_support": answer.ShowSupport,
 	}
 	if answer.By.Agent != "" {
-		body["agent"] = gin.H{"name": answer.By.Agent, "skill": answer.By.Skill}
+		agent := gin.H{"name": answer.By.Agent, "skill": answer.By.Skill}
+		if answer.By.ReviewedBy != "" {
+			agent["reviewed_by"] = answer.By.ReviewedBy
+		}
+		body["agent"] = agent
 	}
 	httpx.OK(c, body)
 }

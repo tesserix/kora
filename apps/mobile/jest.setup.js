@@ -122,6 +122,10 @@ jest.mock("expo-notifications", () => ({
   requestPermissionsAsync: jest.fn(async () => ({ status: "granted" })),
   getExpoPushTokenAsync: jest.fn(async () => ({ data: "ExponentPushToken[test]" })),
   addNotificationResponseReceivedListener: jest.fn(() => ({ remove: jest.fn() })),
+  setNotificationCategoryAsync: jest.fn(async () => ({})),
+  scheduleNotificationAsync: jest.fn(async () => "notification-id"),
+  SchedulableTriggerInputTypes: { DATE: "date", DAILY: "daily", WEEKLY: "weekly" },
+  DEFAULT_ACTION_IDENTIFIER: "expo.modules.notifications.actions.DEFAULT",
 }));
 
 jest.mock("expo-device", () => ({ isDevice: true }));
@@ -667,4 +671,3 @@ jest.mock(
   }),
   { virtual: true },
 );
-

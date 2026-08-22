@@ -7,6 +7,8 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+
+	"github.com/tesserix/kora/api/internal/mentor"
 )
 
 // maxThreadTurns is the number of most-recent turns GET /v1/coach/thread
@@ -19,6 +21,7 @@ type StoredTurn struct {
 	Text      string
 	CreatedAt time.Time
 	Citations []Fact
+	Proposal  *mentor.CommitmentProposal
 }
 
 // ThreadRepository persists and replays a user's coach thread.
@@ -31,7 +34,16 @@ func NewThreadRepository(db *gorm.DB) ThreadRepository { return ThreadRepository
 // AppendExchange stores a question and its answer as two turns in ONE
 // transaction, so a partial write can never leave a question without an
 // answer. citations belong to the answer; a user turn never has any.
-func (r ThreadRepository) AppendExchange(ctx context.Context, userID uuid.UUID, question, answer string, citations []Fact) error {
+func (r ThreadRepository) AppendExchange(
+	ctx context.Context,
+	userID uuid.UUID,
+	question, answer string,
+	citations []Fact,
+	proposals ...*mentor.CommitmentProposal,
+) error {
+	if len(proposals) > 1 {
+		return fmt.Errorf("coach: append exchange: at most one commitment proposal is allowed")
+	}
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		userTurn := Turn{UserID: userID, Role: TurnRoleUser, Text: question}
 		if err := tx.Create(&userTurn).Error; err != nil {
@@ -41,7 +53,18 @@ func (r ThreadRepository) AppendExchange(ctx context.Context, userID uuid.UUID, 
 		if err := tx.Create(&ottoTurn).Error; err != nil {
 			return err
 		}
-		return insertCitations(tx, ottoTurn.ID, citations)
+		if err := insertCitations(tx, ottoTurn.ID, citations); err != nil {
+			return err
+		}
+		if len(proposals) == 1 && proposals[0] != nil {
+			proposal := *proposals[0]
+			proposal.UserID = userID
+			proposal.CoachTurnID = ottoTurn.ID
+			if err := tx.Create(&proposal).Error; err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return fmt.Errorf("coach: append exchange: %w", err)
@@ -82,10 +105,42 @@ func (r ThreadRepository) ListRecent(ctx context.Context, userID uuid.UUID, limi
 	if err != nil {
 		return nil, err
 	}
+	proposals, err := r.proposalsFor(ctx, userID, rows)
+	if err != nil {
+		return nil, err
+	}
 
 	out := make([]StoredTurn, len(rows))
 	for i, t := range rows {
-		out[i] = StoredTurn{Role: t.Role, Text: t.Text, CreatedAt: t.CreatedAt, Citations: cites[t.ID]}
+		out[i] = StoredTurn{
+			Role: t.Role, Text: t.Text, CreatedAt: t.CreatedAt,
+			Citations: cites[t.ID], Proposal: proposals[t.ID],
+		}
+	}
+	return out, nil
+}
+
+func (r ThreadRepository) proposalsFor(
+	ctx context.Context,
+	userID uuid.UUID,
+	turns []Turn,
+) (map[uuid.UUID]*mentor.CommitmentProposal, error) {
+	if len(turns) == 0 {
+		return map[uuid.UUID]*mentor.CommitmentProposal{}, nil
+	}
+	ids := make([]uuid.UUID, 0, len(turns))
+	for _, turn := range turns {
+		ids = append(ids, turn.ID)
+	}
+	var rows []mentor.CommitmentProposal
+	if err := r.db.WithContext(ctx).
+		Where("user_id = ? AND coach_turn_id IN ?", userID, ids).
+		Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("coach: list commitment proposals: %w", err)
+	}
+	out := make(map[uuid.UUID]*mentor.CommitmentProposal, len(rows))
+	for i := range rows {
+		out[rows[i].CoachTurnID] = &rows[i]
 	}
 	return out, nil
 }

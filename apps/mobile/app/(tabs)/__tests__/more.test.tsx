@@ -58,11 +58,17 @@ test("tapping Groups navigates to /groups", async () => {
   expect(mockPush).toHaveBeenCalledWith("/groups");
 });
 
-test("tapping Notifications navigates to /notifications", async () => {
+  test("tapping Notifications navigates to /notifications", async () => {
   const { getByText } = await render(<More />);
   await fireEvent.press(getByText("Notifications"));
   expect(mockPush).toHaveBeenCalledWith("/notifications");
-});
+  });
+
+  test("tapping Personal Mentor navigates to /mentor", async () => {
+    const { getByText } = await render(<More />);
+    await fireEvent.press(getByText("Personal Mentor"));
+    expect(mockPush).toHaveBeenCalledWith("/mentor");
+  });
 
 test("tapping AI usage navigates to the quota details", async () => {
   const { getByText } = await render(<More />);

@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/tesserix/kora/api/internal/mentor"
 )
 
 func TestThreadRepository_AppendAndListRoundTrip(t *testing.T) {
@@ -32,6 +34,30 @@ func TestThreadRepository_AppendAndListRoundTrip(t *testing.T) {
 	require.Equal(t, "Protein today", turns[1].Citations[0].Label)
 	require.Equal(t, "65g", turns[1].Citations[0].Value)
 	require.Equal(t, "Kcal left", turns[1].Citations[1].Label)
+}
+
+func TestThreadRepository_RoundTripsACommitmentProposalWithTheReviewedTurn(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	repo := NewThreadRepository(db)
+	interval := 120
+	end := 20 * 60
+	proposal, err := mentor.NewCommitmentProposal(userID, time.Date(2026, 8, 22, 0, 0, 0, 0, time.UTC), time.UTC, mentor.CommitmentProposalDraft{
+		Title: "Drink water", Kind: mentor.CommitmentKindHydration,
+		Cadence: mentor.CadenceInterval, WeekdaysMask: 127,
+		StartMinute: 8 * 60, IntervalMinutes: &interval, EndMinute: &end,
+	}, "Kora Meal Planner", "Kora Nutrition Coach")
+	require.NoError(t, err)
+
+	require.NoError(t, repo.AppendExchange(t.Context(), userID, "help me hydrate", "Review this rhythm", nil, proposal))
+
+	turns, err := repo.ListRecent(t.Context(), userID, maxThreadTurns)
+	require.NoError(t, err)
+	require.Len(t, turns, 2)
+	require.Nil(t, turns[0].Proposal)
+	require.NotNil(t, turns[1].Proposal)
+	require.Equal(t, proposal.ID, turns[1].Proposal.ID)
+	require.Equal(t, "Kora Nutrition Coach", turns[1].Proposal.ReviewedBy)
 }
 
 func TestThreadRepository_ListRecentIsOldestFirst(t *testing.T) {

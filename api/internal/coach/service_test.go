@@ -28,6 +28,9 @@ type fakeProvider struct {
 	text      string
 	textUsage ai.Usage
 	textErr   error
+	// Fails only once the classifier has had its answer, so a test can route
+	// a message and still starve the generation that follows it.
+	textErrAfter int
 
 	calls int
 }
@@ -54,6 +57,9 @@ func (f *fakeProvider) Transcribe(ctx context.Context, audio []byte, mime string
 
 func (f *fakeProvider) GenerateText(ctx context.Context, systemPrompt, userPrompt string) (string, ai.Usage, error) {
 	f.calls++
+	if f.textErrAfter > 0 && f.calls > f.textErrAfter {
+		return "", ai.Usage{}, errors.New("provider unavailable")
+	}
 	return f.text, f.textUsage, f.textErr
 }
 

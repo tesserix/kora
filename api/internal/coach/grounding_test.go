@@ -16,6 +16,7 @@ import (
 	"github.com/tesserix/kora/api/internal/foodlog"
 	"github.com/tesserix/kora/api/internal/guardrails"
 	"github.com/tesserix/kora/api/internal/memory"
+	"github.com/tesserix/kora/api/internal/mentor"
 	"github.com/tesserix/kora/api/internal/nutrition"
 	"github.com/tesserix/kora/api/internal/tracking"
 )
@@ -114,6 +115,66 @@ func TestBuildContextAggregatesRecentDailyAndRenders(t *testing.T) {
 	rendered := ctx.Render()
 	require.Contains(t, rendered, "2000", "Render must cite today's kcal target")
 	require.Contains(t, rendered, "600", "Render must cite today's consumed kcal")
+}
+
+func TestBuildContextIncludesOnlyTheAskingUsersConfirmedMentorContext(t *testing.T) {
+	db := testDB(t)
+	owner := seedUser(t, db, 2000, 120)
+	other := seedUser(t, db, 2000, 120)
+	logRepo := foodlog.NewRepository(db)
+	mentorRepo := mentor.NewRepository(db)
+	ctx := context.Background()
+	now := time.Date(2026, 8, 22, 18, 0, 0, 0, time.UTC)
+
+	require.NoError(t, mentorRepo.UpsertProfile(ctx, mentor.Profile{
+		UserID: owner, Motivation: "Have energy for family walks",
+		DietaryPreferences: "Vegetarian weekdays", Allergies: "Peanuts",
+		CoachingStyle:     mentor.CoachingStyleEducational,
+		ReminderIntensity: mentor.ReminderIntensityBalanced,
+		QuietStartMinute:  22 * 60, QuietEndMinute: 7 * 60,
+		HealthStepsEnabled: true, HealthSleepEnabled: true,
+	}))
+	require.NoError(t, mentorRepo.UpsertProfile(ctx, mentor.Profile{
+		UserID: other, Motivation: "OTHER_USER_PRIVATE_MOTIVATION",
+		CoachingStyle:     mentor.CoachingStyleDirect,
+		ReminderIntensity: mentor.ReminderIntensityFrequent,
+		QuietStartMinute:  0, QuietEndMinute: 1,
+	}))
+	steps, sleep := 7200, 455
+	require.NoError(t, mentorRepo.UpsertHealthDays(ctx, owner, []mentor.HealthDay{{
+		UserID: owner, LocalDate: now, Timezone: "UTC", Steps: &steps,
+		SleepMinutes: &sleep, Source: mentor.HealthSourceHealthKit, ObservedAt: now,
+	}}))
+	_, err := mentorRepo.PutCommitment(ctx, mentor.Commitment{
+		ID: uuid.New(), UserID: owner, Title: "Walk after work",
+		Kind: mentor.CommitmentKindWalking, Cadence: mentor.CadenceFixed,
+		WeekdaysMask: 127, StartMinute: 18*60 + 30, Timezone: "UTC",
+		StartsOn: now, Status: mentor.CommitmentStatusActive,
+		Source: mentor.CommitmentSourceUser,
+	})
+	require.NoError(t, err)
+
+	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
+	g := NewGrounder(dashSvc, logRepo, memory.NewService(logRepo), tracking.NewRepository(db)).
+		WithMentor(mentorRepo)
+	grounded, err := g.BuildContext(ctx, owner, now, time.UTC)
+	require.NoError(t, err)
+	require.NotNil(t, grounded.MentorProfile)
+	require.Len(t, grounded.HealthDays, 1)
+	require.Len(t, grounded.Commitments, 1)
+
+	rendered := grounded.Render()
+	require.Contains(t, rendered, "Have energy for family walks")
+	require.Contains(t, rendered, "Vegetarian weekdays")
+	require.Contains(t, rendered, "Peanuts")
+	require.Contains(t, rendered, "7200")
+	require.Contains(t, rendered, "Walk after work")
+	require.NotContains(t, rendered, "OTHER_USER_PRIVATE_MOTIVATION")
+
+	facts := grounded.Facts()
+	require.Contains(t, facts, Fact{Label: "health_steps_latest", Value: "7200"})
+	require.Contains(t, facts, Fact{Label: "health_sleep_minutes_latest", Value: "455"})
+	require.Contains(t, facts, Fact{Label: "active_commitments", Value: "1"})
 }
 
 // TestBuildContextFastingStreakExcludesTodayAndRequiresPriorLogging replaces

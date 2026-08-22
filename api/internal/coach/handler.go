@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/tesserix/kora/api/internal/httpx"
+	"github.com/tesserix/kora/api/internal/mentor"
 	"github.com/tesserix/kora/api/internal/user"
 )
 
@@ -113,12 +114,19 @@ func (h Handler) Ask(c *gin.Context) {
 	if cites == nil {
 		cites = []Fact{}
 	}
-	body := gin.H{"answer": answer.Text, "citations": cites, "show_support": answer.ShowSupport}
+	body := gin.H{
+		"answer": answer.Text, "citations": cites,
+		"show_support": answer.ShowSupport, "proposal": answer.Proposal,
+	}
 	if answer.By.Agent != "" {
 		// Omitted entirely when the direct provider answered, so the client
 		// can tell "the coach agent replied" from "the plain model replied"
 		// rather than having to compare against a sentinel name.
-		body["agent"] = gin.H{"name": answer.By.Agent, "skill": answer.By.Skill}
+		agent := gin.H{"name": answer.By.Agent, "skill": answer.By.Skill}
+		if answer.By.ReviewedBy != "" {
+			agent["reviewed_by"] = answer.By.ReviewedBy
+		}
+		body["agent"] = agent
 	}
 	httpx.OK(c, body)
 }
@@ -126,10 +134,11 @@ func (h Handler) Ask(c *gin.Context) {
 // threadTurnResponse is one replayed turn in the wire format. Field names are
 // snake_case because the mobile client codes against them.
 type threadTurnResponse struct {
-	Role      TurnRole  `json:"role"`
-	Text      string    `json:"text"`
-	Citations []Fact    `json:"citations"`
-	CreatedAt time.Time `json:"created_at"`
+	Role      TurnRole                   `json:"role"`
+	Text      string                     `json:"text"`
+	Citations []Fact                     `json:"citations"`
+	CreatedAt time.Time                  `json:"created_at"`
+	Proposal  *mentor.CommitmentProposal `json:"proposal,omitempty"`
 }
 
 // Thread replays the authenticated user's stored coach turns.
@@ -153,7 +162,10 @@ func (h Handler) Thread(c *gin.Context) {
 		if cites == nil {
 			cites = []Fact{}
 		}
-		turns[i] = threadTurnResponse{Role: t.Role, Text: t.Text, Citations: cites, CreatedAt: t.CreatedAt}
+		turns[i] = threadTurnResponse{
+			Role: t.Role, Text: t.Text, Citations: cites,
+			CreatedAt: t.CreatedAt, Proposal: t.Proposal,
+		}
 	}
 
 	httpx.OK(c, gin.H{"turns": turns, "show_support": result.ShowSupport})

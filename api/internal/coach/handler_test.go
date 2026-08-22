@@ -18,6 +18,7 @@ import (
 	"github.com/tesserix/kora/api/internal/dashboard"
 	"github.com/tesserix/kora/api/internal/foodlog"
 	"github.com/tesserix/kora/api/internal/memory"
+	"github.com/tesserix/kora/api/internal/mentor"
 	"github.com/tesserix/kora/api/internal/tracking"
 )
 
@@ -310,6 +311,33 @@ func TestHandlerThread_ReturnsStoredTurnsWithSnakeCaseKeys(t *testing.T) {
 	require.True(t, strings.Contains(raw, `"show_support"`), "raw body must use snake_case show_support, got: %s", raw)
 	require.True(t, strings.Contains(raw, `"created_at"`), "raw body must use snake_case created_at, got: %s", raw)
 	require.False(t, strings.Contains(raw, `"showSupport"`), "raw body must not use camelCase, got: %s", raw)
+}
+
+func TestHandlerThread_ReturnsAStoredCommitmentProposal(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	logRepo := foodlog.NewRepository(db)
+	trackRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackRepo, db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackRepo)
+	threadRepo := NewThreadRepository(db)
+	proposal, err := mentor.NewCommitmentProposal(userID, time.Now(), time.UTC, mentor.CommitmentProposalDraft{
+		Title: "Walk after lunch", Kind: mentor.CommitmentKindWalking,
+		Cadence: mentor.CadenceFixed, WeekdaysMask: 127, StartMinute: 13 * 60,
+	}, "Kora Meal Planner", "Kora Nutrition Coach")
+	require.NoError(t, err)
+	require.NoError(t, threadRepo.AppendExchange(t.Context(), userID, "help me walk", "Review this walk", nil, proposal))
+
+	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, &threadRepo)
+	router := newTestRouter(userID, NewHandler(svc))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/coach/thread", nil))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Contains(t, w.Body.String(), `"proposal":{"id":"`)
+	require.Contains(t, w.Body.String(), `"title":"Walk after lunch"`)
+	require.Contains(t, w.Body.String(), `"accepted_commitment_id":null`)
 }
 
 // TestHandlerThread_CitationsSerialiseAsEmptyArrayNotNull pins the per-turn
