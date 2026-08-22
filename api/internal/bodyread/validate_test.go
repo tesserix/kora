@@ -1,6 +1,7 @@
 package bodyread
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -180,8 +181,25 @@ func TestValidateReading(t *testing.T) {
 			wantDropped: []string{"reading_date"},
 		},
 		{
-			name:        "future reading date is dropped",
+			// fixedNow is 2026-08-22 18:30 UTC; one day of grace makes
+			// 2026-08-23 (tomorrow, UTC-relative) the LAST date still kept
+			// — this is the exact IST-evening case the grace window exists
+			// for: a screenshot genuinely dated "today" in IST can read as
+			// "tomorrow" in a UTC server clock.
+			name:        "one day ahead (timezone-skew case) is kept, not dropped",
 			in:          ai.BodyCompositionReading{ReadingDate: sptr("2026-08-23")},
+			wantDropped: nil,
+			check: func(t *testing.T, out ai.BodyCompositionReading) {
+				require.NotNil(t, out.ReadingDate)
+				assert.Equal(t, "2026-08-23", *out.ReadingDate)
+			},
+		},
+		{
+			// Two days ahead is no longer explainable by timezone skew (no
+			// real timezone offset is a full day) and must still be dropped
+			// — the grace window is bounded, not a blank check disabled.
+			name:        "two days ahead is genuinely in the future and is dropped",
+			in:          ai.BodyCompositionReading{ReadingDate: sptr("2026-08-24")},
 			wantDropped: []string{"reading_date"},
 		},
 		{
@@ -261,4 +279,22 @@ func TestValidateReading_DoesNotMutateInput(t *testing.T) {
 	_, _ = validateReading(in, fixedNow)
 
 	assert.Equal(t, 72.4, weight, "validateReading must not write through the input reading's pointers")
+}
+
+// TestValidateReading_NothingDroppedYieldsEmptySliceNotNil is the regression
+// test for the final whole-branch review's Minor finding #2: a nil
+// []DroppedField marshals as JSON `null`, an empty-but-non-nil one marshals
+// as `[]`. A client binding Result.Dropped to an array type should never
+// have to special-case `null` — validateReading must return a non-nil
+// (possibly empty) slice on every call, not just when something WAS
+// dropped.
+func TestValidateReading_NothingDroppedYieldsEmptySliceNotNil(t *testing.T) {
+	_, dropped := validateReading(ai.BodyCompositionReading{WeightKg: ptr(70)}, fixedNow)
+
+	require.NotNil(t, dropped, "dropped must be a non-nil (possibly empty) slice")
+	assert.Empty(t, dropped)
+
+	marshaled, err := json.Marshal(dropped)
+	require.NoError(t, err)
+	assert.Equal(t, "[]", string(marshaled), "an empty dropped list must serialize as JSON [], never null")
 }

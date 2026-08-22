@@ -63,7 +63,12 @@ const (
 // pointee is never written to) or replaced with nil, so the caller's copy of
 // r is untouched either way.
 func validateReading(r ai.BodyCompositionReading, now time.Time) (ai.BodyCompositionReading, []DroppedField) {
-	var dropped []DroppedField
+	// Initialized to a non-nil empty slice, not left as a nil zero value:
+	// json.Marshal renders a nil slice as `null` and a non-nil empty slice
+	// as `[]`. Result.Dropped reaching the wire as `null` when nothing was
+	// dropped would force every client to handle two different "empty"
+	// shapes for the same field.
+	dropped := []DroppedField{}
 
 	out := ai.BodyCompositionReading{
 		WeightKg:           validateRange("weight_kg", r.WeightKg, weightMinKg, weightMaxKg, "kg", &dropped),
@@ -147,11 +152,24 @@ func validateReadingDate(s *string, now time.Time, dropped *[]DroppedField) *str
 		return nil
 	}
 
+	// One day of grace on the future side, not zero: `now` is server-local
+	// (UTC in production), and the whole point of reading_date is the
+	// CLIENT's own calendar day — a screenshot genuinely dated "today" in
+	// IST (Kora's primary market, UTC+5:30) reads as "tomorrow" in UTC for
+	// the entire 18:30-24:00 IST window, which would silently drop a
+	// perfectly legible, perfectly true date on every single evening
+	// upload. internal/localday.Resolve reconciles this exact class of
+	// client-day-vs-server-day mismatch by accepting one day either side —
+	// this mirrors that same tolerance rather than inventing a new one.
+	// Anything beyond one day ahead is no longer explainable by timezone
+	// skew and is genuinely implausible (a screenshot cannot show a date
+	// that has not happened yet).
 	today := truncateToDate(now)
-	if truncateToDate(parsed).After(today) {
+	maxAllowedDate := today.AddDate(0, 0, 1)
+	if truncateToDate(parsed).After(maxAllowedDate) {
 		*dropped = append(*dropped, DroppedField{
 			Field:  "reading_date",
-			Reason: fmt.Sprintf("reading_date %s is after today (%s)", *s, today.Format(readingDateLayout)),
+			Reason: fmt.Sprintf("reading_date %s is too far in the future (today is %s)", *s, today.Format(readingDateLayout)),
 		})
 		return nil
 	}
