@@ -475,10 +475,12 @@ func (p GeminiProvider) GenerateText(ctx context.Context, systemPrompt, userProm
 }
 
 // bodyCompositionTemperature pins IdentifyBodyComposition's sampling to
-// near-deterministic. This is a TRANSCRIPTION task (read the printed
-// numbers off a screen), not a creative one — the unset SDK default
-// (~1.0) is why kora#314 read only weight_kg on 5 of 6 real calls despite a
-// prompt and schema that already forbid nothing else. generateJSON's other
+// near-deterministic. The REASONING is that this is a TRANSCRIPTION task
+// (read the printed numbers off a screen), not a creative one, so the unset
+// SDK default (~1.0) was HYPOTHESISED to be why kora#314 read only
+// weight_kg on 5 of 6 real calls despite a prompt and schema that already
+// forbid nothing else. Read that as a hypothesis, not a finding — the
+// caveat below records evidence pointing the other way. generateJSON's other
 // three callers (IdentifyText, IdentifyPhoto, Decompose) pass a nil
 // temperature deliberately: food-phrase resolution is the app's core path,
 // and tightening its sampling is a real regression risk that is explicitly
