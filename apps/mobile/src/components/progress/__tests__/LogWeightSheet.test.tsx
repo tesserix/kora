@@ -159,7 +159,7 @@ describe("Screenshot mode", () => {
     expect(utils.getByLabelText("Reading date").props.value).toBe("2026-08-19");
   });
 
-  test("a fully absent detected_source (API hasn't shipped it yet) falls back to scale_screenshot, pre-selected", async () => {
+  test("a fully absent instrument (API hasn't shipped it yet) falls back to scale_screenshot, pre-selected", async () => {
     mockPickedPhoto();
     mockReadMutate.mockImplementation((_file, { onSuccess }) =>
       onSuccess({ reading: { weight_kg: 70.2 }, dropped_fields: [], unreadable: false }),
@@ -176,7 +176,7 @@ describe("Screenshot mode", () => {
     expect(mockAddMutate.mock.calls[0][0].source).toBe("scale_screenshot");
   });
 
-  test("a recognised detected_source (once the API sends one) pre-selects that instrument, correctably", async () => {
+  test("a recognised instrument (once the API sends one) pre-selects that instrument, correctably", async () => {
     mockPickedPhoto();
     mockReadMutate.mockImplementation((_file, { onSuccess }) =>
       onSuccess({
@@ -184,7 +184,7 @@ describe("Screenshot mode", () => {
         // exactly what the sibling instrument-detection PR will add. Cast
         // through `as never` at the call site is unnecessary here because
         // this is the raw mutation-mocked object, not a typed import.
-        reading: { weight_kg: 70.2, detected_source: "dexa" },
+        reading: { weight_kg: 70.2, instrument: "dexa" },
         dropped_fields: [],
         unreadable: false,
       }),
@@ -201,7 +201,7 @@ describe("Screenshot mode", () => {
   test("the detected instrument is correctable — pressing a different segment changes what saves", async () => {
     mockPickedPhoto();
     mockReadMutate.mockImplementation((_file, { onSuccess }) =>
-      onSuccess({ reading: { weight_kg: 70.2, detected_source: "dexa" }, dropped_fields: [], unreadable: false }),
+      onSuccess({ reading: { weight_kg: 70.2, instrument: "dexa" }, dropped_fields: [], unreadable: false }),
     );
     const utils = await render(<LogWeightSheet visible onClose={jest.fn()} />);
     await switchToScreenshot(utils);
@@ -213,11 +213,11 @@ describe("Screenshot mode", () => {
     expect(mockAddMutate.mock.calls[0][0].source).toBe("inbody");
   });
 
-  test("an unrecognised detected_source falls back to scale_screenshot rather than erroring", async () => {
+  test("an unrecognised instrument falls back to scale_screenshot rather than erroring", async () => {
     mockPickedPhoto();
     mockReadMutate.mockImplementation((_file, { onSuccess }) =>
       onSuccess({
-        reading: { weight_kg: 70.2, detected_source: "some_future_instrument" },
+        reading: { weight_kg: 70.2, instrument: "some_future_instrument" },
         dropped_fields: [],
         unreadable: false,
       }),

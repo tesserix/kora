@@ -228,7 +228,13 @@ function isDetectableSource(value: unknown): value is WeightSource {
  * correctable.
  */
 export function detectedInstrumentSource(reading: BodyCompositionReading): WeightSource {
-  const raw = (reading as Record<string, unknown>).detected_source;
+  // Wire name is `instrument`, matching the API's ai.BodyCompositionReading
+  // field (kora#314). Read via an index rather than a declared property
+  // because the two halves of this change landed as separate PRs and this
+  // build's BodyCompositionReading type may not declare it yet; the guard
+  // below means an absent or unknown value degrades to the pre-detection
+  // behaviour rather than erroring.
+  const raw = (reading as Record<string, unknown>).instrument;
   return isDetectableSource(raw) ? raw : "scale_screenshot";
 }
 

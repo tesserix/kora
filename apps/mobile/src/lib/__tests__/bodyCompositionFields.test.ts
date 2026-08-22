@@ -122,7 +122,7 @@ describe("displayNumber / formatMetricNumber", () => {
   });
 });
 
-// kora#314 PR C: a sibling PR is adding a nullable `detected_source` field to
+// kora#314 PR C: a sibling PR is adding a nullable `instrument` field to
 // the read response, and this branch is built against api/ before that PR
 // necessarily lands. These tests construct readings with the field present
 // via an unknown-cast (BodyCompositionReading does not declare it yet on
@@ -137,22 +137,22 @@ describe("detectedInstrumentSource", () => {
   });
 
   it("falls back to scale_screenshot when the field is present but null", () => {
-    expect(detectedInstrumentSource(reading({ detected_source: null }))).toBe("scale_screenshot");
+    expect(detectedInstrumentSource(reading({ instrument: null }))).toBe("scale_screenshot");
   });
 
   it("falls back to scale_screenshot for a value outside the three it's allowed to be", () => {
-    expect(detectedInstrumentSource(reading({ detected_source: "some_future_instrument" }))).toBe(
+    expect(detectedInstrumentSource(reading({ instrument: "some_future_instrument" }))).toBe(
       "scale_screenshot",
     );
     // Not even every OTHER real WeightSource — "manual" and "healthkit" are
     // never something a screenshot detects.
-    expect(detectedInstrumentSource(reading({ detected_source: "manual" }))).toBe("scale_screenshot");
+    expect(detectedInstrumentSource(reading({ instrument: "manual" }))).toBe("scale_screenshot");
   });
 
   it("trusts each of the three values detection is allowed to produce", () => {
-    expect(detectedInstrumentSource(reading({ detected_source: "scale_screenshot" }))).toBe("scale_screenshot");
-    expect(detectedInstrumentSource(reading({ detected_source: "inbody" }))).toBe("inbody");
-    expect(detectedInstrumentSource(reading({ detected_source: "dexa" }))).toBe("dexa");
+    expect(detectedInstrumentSource(reading({ instrument: "scale_screenshot" }))).toBe("scale_screenshot");
+    expect(detectedInstrumentSource(reading({ instrument: "inbody" }))).toBe("inbody");
+    expect(detectedInstrumentSource(reading({ instrument: "dexa" }))).toBe("dexa");
   });
 });
 
