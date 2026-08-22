@@ -14,6 +14,7 @@ import { AGENT_REQUEST_TIMEOUT_MS, apiFetch, apiFetchEnvelope, apiFetchMultipart
 import { buildCaptureForm, normalizeCaptureMessage, normalizeResolution, type ResolveFile } from "./resolveWire";
 import { isOnline } from "@/offline/connectivity";
 import { reconcileWeightReminder } from "@/reminders/reconcileWeightReminder";
+import { activateMealPlanProjection } from "@/reminders/mealPlanProjection";
 import {
   foodsFromMemory,
   foodsFromPins,
@@ -269,8 +270,8 @@ export function useAcceptMentorProposal(): UseMutationResult<
   });
 }
 
-/** Records the user's approval of a reviewed meal plan. The thread is
- *  invalidated so a cold start replays the plan with its decision on it. */
+/** Records approval, activates the owner-scoped reminder projection, and
+ *  refreshes the persisted coach thread. */
 export function useAcceptMealPlan(): UseMutationResult<MealPlanProposal, Error, string> {
   const qc = useQueryClient();
   const ownerID = currentUserId();
@@ -279,7 +280,15 @@ export function useAcceptMealPlan(): UseMutationResult<MealPlanProposal, Error, 
       apiFetch(`/v1/coach/plans/${planId}/accept`, { method: "PUT" }).then(
         (data) => (data as { plan: MealPlanProposal }).plan,
       ),
-    onSuccess: () => {
+    onSuccess: async (plan) => {
+      if (ownerID) {
+        try {
+          await activateMealPlanProjection(ownerID, plan);
+          await reconcileWeightReminder();
+        } catch (err) {
+          console.warn("reminders: meal plan projection failed after accept", err);
+        }
+      }
       qc.invalidateQueries({ queryKey: coachThreadQueryKey(ownerID) });
     },
   });

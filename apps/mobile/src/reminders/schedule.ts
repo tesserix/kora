@@ -1,10 +1,12 @@
 import * as Notifications from "expo-notifications";
 import type { MealSlot } from "@/lib/mealSlot";
+import type { MealPlanProposal } from "@/api/types";
 import type { ReminderPrefs } from "./prefs";
 import type { CustomReminder, Weekday } from "./customPrefs";
 import { nextWeightReminderAt, type WeightReminderPref } from "./weightPrefs";
 import { MENTOR_NOTIFICATION_CATEGORY } from "@/mentor/notificationConstants";
 import { deactivateMentorProjection, loadActiveMentorProjection, type MentorProjection } from "@/mentor/projection";
+import { deactivateMealPlanProjection, loadActiveMealPlanProjection } from "./mealPlanProjection";
 
 export type WeightReminderInput = { pref: WeightReminderPref; lastWeighedAt: Date | null; now: Date };
 
@@ -29,6 +31,11 @@ export type ScheduledMentorNotification = {
     | { type: "weekly"; weekday: number; hour: number; minute: number };
 };
 
+export type ScheduledMealPlanNotification = {
+  content: Notifications.NotificationContentInput;
+  trigger: { type: "date"; date: Date };
+};
+
 // iOS allows at most 64 pending local-notification requests app-wide; beyond that
 // scheduleNotificationAsync silently drops requests. Cap our total below that so
 // scheduling degrades deterministically (meals first) instead of iOS dropping
@@ -39,6 +46,8 @@ const SLOTS: MealSlot[] = ["breakfast", "lunch", "dinner", "snack"];
 const LABEL: Record<MealSlot, string> = { breakfast: "Breakfast", lunch: "Lunch", dinner: "Dinner", snack: "Snack" };
 const ALL_DAYS = 7;
 const MENTOR_HORIZON_DAYS = 7;
+const MEAL_PLAN_HORIZON_DAYS = 7;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 // jsDayToExpoWeekday maps Date.getDay() (0=Sun) to expo's WEEKLY weekday (1=Sun).
 function jsDayToExpoWeekday(d: Weekday): number {
@@ -236,6 +245,7 @@ export function cancelAllReminders(): Promise<void> {
   const run = applyTail
     .catch(() => {})
     .then(async () => {
+      await deactivateMealPlanProjection();
       await deactivateMentorProjection();
       await Notifications.cancelAllScheduledNotificationsAsync();
     })
@@ -256,7 +266,10 @@ async function applyOnce(
   weight: WeightReminderInput,
 ): Promise<void> {
   await Notifications.cancelAllScheduledNotificationsAsync();
-  const mentorProjection = await loadActiveMentorProjection();
+  const [mentorProjection, mealPlanProjection] = await Promise.all([
+    loadActiveMentorProjection(),
+    loadActiveMealPlanProjection(),
+  ]);
   let scheduled = 0;
   // Meals first: they are the baseline and must always win when the total would
   // otherwise exceed iOS's pending-notification ceiling.
@@ -265,6 +278,14 @@ async function applyOnce(
     await Notifications.scheduleNotificationAsync({
       content: { title: r.title, body: r.body, data: { kind: "reminder", slot: r.slot } },
       trigger: { type: Notifications.SchedulableTriggerInputTypes.DAILY, hour: r.hour, minute: r.minute },
+    });
+    scheduled++;
+  }
+  for (const planReminder of buildMealPlanSchedule(mealPlanProjection, mealPrefs, weight.now)) {
+    if (scheduled >= MAX_SCHEDULED_NOTIFICATIONS) return;
+    await Notifications.scheduleNotificationAsync({
+      content: planReminder.content,
+      trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: planReminder.trigger.date },
     });
     scheduled++;
   }
@@ -334,4 +355,52 @@ async function applyOnce(
     });
     scheduled++;
   }
+}
+
+// buildMealPlanSchedule turns an approved plan into one dated reminder per
+// planned day, at the user's first enabled meal time. The plan's day labels
+// are the planner's own words ("Training day"), so they are display data only:
+// day N of the plan is N days after the date the user approved it, and a plan
+// never schedules past its final day.
+export function buildMealPlanSchedule(
+  plan: MealPlanProposal | null,
+  prefs: ReminderPrefs,
+  now: Date,
+  horizonDays = MEAL_PLAN_HORIZON_DAYS,
+): ScheduledMealPlanNotification[] {
+  if (!plan || !plan.accepted_at || !plan.starts_on || !plan.timezone || horizonDays <= 0) return [];
+  const firstMealTime = SLOTS
+    .map((slot) => prefs[slot])
+    .filter((pref) => pref.enabled)
+    .sort((a, b) => (a.hour * 60 + a.minute) - (b.hour * 60 + b.minute))[0];
+  if (!firstMealTime) return [];
+
+  const start = /^(\d{4})-(\d{2})-(\d{2})$/.exec(plan.starts_on);
+  if (!start) return [];
+  const year = Number(start[1]);
+  const month = Number(start[2]) - 1;
+  const date = Number(start[3]);
+  const startsOn = new Date(year, month, date);
+  if (startsOn.getFullYear() !== year || startsOn.getMonth() !== month || startsOn.getDate() !== date) return [];
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) / DAY_MS;
+  const horizonEnd = today + Math.floor(horizonDays) - 1;
+
+  const scheduled: ScheduledMealPlanNotification[] = [];
+  plan.days.forEach((day, dayIndex) => {
+    const at = new Date(startsOn);
+    at.setDate(startsOn.getDate() + dayIndex);
+    const planDay = Date.UTC(at.getFullYear(), at.getMonth(), at.getDate()) / DAY_MS;
+    if (planDay < today || planDay > horizonEnd) return;
+    at.setHours(firstMealTime.hour, firstMealTime.minute, 0, 0);
+    if (at.getTime() <= now.getTime()) return;
+    scheduled.push({
+      content: {
+        title: `${day.date} · today's reviewed plan`,
+        body: day.meals.map((meal) => meal.name).join(" · "),
+        data: { kind: "meal-plan", planId: plan.id, dayIndex },
+      },
+      trigger: { type: "date", date: at },
+    });
+  });
+  return scheduled;
 }

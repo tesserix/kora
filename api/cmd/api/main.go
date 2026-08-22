@@ -433,7 +433,11 @@ func buildAgents(cfg config.Config, logger *slog.Logger) *agents.Coordinator {
 			metrics.RecordAgentResolve(agent, string(result))
 		},
 	})
-	gateway := agents.NewGateway(cfg.AIGatewayBaseURL, cfg.AIGatewayAPIKey, nil)
+	gateway := agents.NewGateway(
+		cfg.AIGatewayBaseURL,
+		cfg.AIGatewayAPIKey,
+		&http.Client{Timeout: cfg.AIAgentTimeout},
+	)
 
 	coordinator := agents.NewCoordinator(registry, gateway, metrics.RecordAgentRun)
 	if coordinator == nil {

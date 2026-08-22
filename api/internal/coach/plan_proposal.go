@@ -15,14 +15,17 @@ import (
 // contributes is treated as untrusted length: a card the user has to read and
 // approve must stay a card.
 const (
-	maxPlanDays        = 14
-	maxPlanMealsPerDay = 8
+	maxPlanDays        = 62
+	maxPlanMealsPerDay = 6
 	maxPlanSummary     = 600
 	maxPlanDateChars   = 40
 	maxPlanMealName    = 120
 	maxPlanMealDetail  = 400
+	// maxPlanMealPreparation is longer than the description: it has to carry
+	// enough method to cook from, not a one-line justification.
+	maxPlanMealPreparation = 500
 	// maxPlanDraftBytes bounds what is even attempted, ahead of parsing. A
-	// two-week plan is a few kilobytes; anything past this is not a plan.
+	// two-month plan is still bounded; anything past this is not a plan.
 	maxPlanDraftBytes = 64 << 10
 )
 
@@ -30,6 +33,9 @@ const (
 type PlanMeal struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	// Preparation is how the meal is actually made. A card without it names
+	// food the user cannot cook, so a meal missing it is dropped.
+	Preparation string `json:"preparation"`
 }
 
 // PlanDay is one day of a proposed plan. Date is the planner's own label
@@ -72,9 +78,8 @@ func (d *PlanDays) Scan(src any) error {
 // plan fits, and this says what the plan IS, so the client can render a card
 // with an approve action instead of asking the user to parse a paragraph.
 //
-// Approval records the user's decision and nothing else. Kora has no feature
-// that schedules a plan's meals into the diary, and a card that implied
-// otherwise would be lying about what the button did.
+// Approval activates the plan's finite reminder projection. It still does not
+// log meals into the diary; logging remains an explicit user action.
 type PlanProposal struct {
 	ID          uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	UserID      uuid.UUID  `gorm:"type:uuid;not null;index" json:"-"`
@@ -84,7 +89,13 @@ type PlanProposal struct {
 	AgentName   string     `json:"agent_name"`
 	ReviewedBy  string     `json:"reviewed_by"`
 	AcceptedAt  *time.Time `json:"accepted_at"`
-	CreatedAt   time.Time  `json:"created_at"`
+	// StartsOn is the user's local calendar date on the day they approved the
+	// plan, and Timezone is the zone that date was read in. Both are written
+	// once, at acceptance: a plan the user approves tonight starts on the day
+	// they are living in, not on a UTC date that may already be tomorrow.
+	StartsOn  *time.Time `gorm:"type:date" json:"starts_on"`
+	Timezone  string     `json:"timezone"`
+	CreatedAt time.Time  `json:"created_at"`
 }
 
 func (PlanProposal) TableName() string { return "coach_plan_proposals" }
@@ -103,12 +114,14 @@ func newPlanProposal(userID uuid.UUID, plan planEnvelope, agentName, reviewedBy 
 		meals := make([]PlanMeal, 0, len(day.Meals))
 		for _, meal := range day.Meals {
 			name := clampPlanText(meal.Name, maxPlanMealName)
-			if name == "" {
+			preparation := clampPlanText(meal.Preparation, maxPlanMealPreparation)
+			if name == "" || preparation == "" {
 				continue
 			}
 			meals = append(meals, PlanMeal{
 				Name:        name,
 				Description: clampPlanText(meal.Description, maxPlanMealDetail),
+				Preparation: preparation,
 			})
 			if len(meals) == maxPlanMealsPerDay {
 				break

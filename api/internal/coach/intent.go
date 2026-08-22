@@ -12,6 +12,13 @@ import (
 // registry republish rather than a Kora deploy.
 const planningSkill = "plan-meals"
 
+// planReviewSkill is the capability that reviews a planner draft before the
+// user ever sees it. It is deliberately not guidanceSkill: reviewing a plan
+// against someone's targets is a supervisory job with its own contract, and
+// separating it lets the registry publish a specialist without changing the
+// agent that answers ordinary questions.
+const planReviewSkill = "review-meal-plan"
+
 // Routes a message from the capture composer can take. RouteLog is the only
 // one that ends in food being written to the diary.
 const (

@@ -233,6 +233,17 @@ func TestLoadAgentGatewayFeatureFlag(t *testing.T) {
 	assert.Equal(t, "http://agentgateway.kora.svc.cluster.local/v1", cfg.AIGatewayBaseURL)
 	assert.Equal(t, "internal-key", cfg.AIGatewayAPIKey)
 	assert.Equal(t, "kora-auto", cfg.AIGatewayModel)
+	assert.Equal(t, 60*time.Second, cfg.AIAgentTimeout)
+}
+
+func TestLoadReadsAgentTimeoutFromEnv(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
+	t.Setenv("AI_AGENT_TIMEOUT", "42s")
+
+	cfg, err := Load()
+
+	require.NoError(t, err)
+	assert.Equal(t, 42*time.Second, cfg.AIAgentTimeout)
 }
 
 func TestLoadRejectsIncompleteAgentGatewayConfig(t *testing.T) {

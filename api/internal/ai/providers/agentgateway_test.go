@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/tesserix/kora/api/internal/auth"
 )
 
 func TestAgentGatewayProviderRoutesEveryCapabilityThroughTheLogicalModel(t *testing.T) {
@@ -147,4 +150,28 @@ func TestAgentGatewayProviderRoutesEveryCapabilityThroughTheLogicalModel(t *test
 			assert.Equal(t, "false", gotHeader.Get("X-Kora-Rtk-Applied"))
 		})
 	}
+}
+
+func TestAgentGatewayProviderDelegatesTheVerifiedEndUserIdentity(t *testing.T) {
+	var got http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+			"id": "completion-1", "object": "chat.completion",
+			"choices": []map[string]any{{
+				"index": 0, "message": map[string]any{"role": "assistant", "content": "answer"},
+				"finish_reason": "stop",
+			}},
+			"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+		}))
+	}))
+	t.Cleanup(server.Close)
+
+	provider := NewAgentGatewayProvider("gateway-key", server.URL+"/v1", "kora-auto")
+	ctx := auth.WithVerifiedToken(context.Background(), "firebase-user-token")
+	_, _, err := provider.GenerateText(ctx, "system", "question")
+	require.NoError(t, err)
+
+	assert.Equal(t, "Bearer firebase-user-token", got.Get("X-Kora-End-User-Token"))
 }

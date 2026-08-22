@@ -2,6 +2,8 @@ import { act, renderHook, waitFor } from "@testing-library/react-native";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { apiFetch, currentUserId } from "@/lib/api";
+import { activateMealPlanProjection } from "@/reminders/mealPlanProjection";
+import { reconcileWeightReminder } from "@/reminders/reconcileWeightReminder";
 import {
   useAcceptMealPlan,
   useAcceptMentorProposal,
@@ -29,6 +31,13 @@ jest.mock("@/lib/api", () => ({
   TimeoutError: class extends Error {},
   CancelledError: class extends Error {},
   isNetworkError: () => false,
+}));
+
+jest.mock("@/reminders/mealPlanProjection", () => ({
+  activateMealPlanProjection: jest.fn(async () => {}),
+}));
+jest.mock("@/reminders/reconcileWeightReminder", () => ({
+  reconcileWeightReminder: jest.fn(async () => {}),
 }));
 
 function createHarness() {
@@ -218,7 +227,14 @@ test("accepting an AI proposal is an explicit owner-scoped PUT and refreshes the
 
 test("approving a meal plan is an owner-scoped PUT that unwraps the plan and refreshes the thread", async () => {
   const { client, wrapper } = createHarness();
-  const plan = { id: "plan-1", summary: "Hits your targets", days: [], accepted_at: "2026-08-22T06:00:00Z" };
+  const plan = {
+    id: "plan-1",
+    summary: "Hits your targets",
+    days: [],
+    accepted_at: "2026-08-22T06:00:00Z",
+    starts_on: "2026-08-22",
+    timezone: "Australia/Melbourne",
+  };
   (apiFetch as jest.Mock).mockResolvedValue({ plan });
   client.setQueryData(["coach", "thread", "user-a"], { turns: [] });
   const { result } = await renderHook(() => useAcceptMealPlan(), { wrapper });
@@ -230,5 +246,7 @@ test("approving a meal plan is an owner-scoped PUT that unwraps the plan and ref
 
   expect(apiFetch).toHaveBeenCalledWith("/v1/coach/plans/plan-1/accept", { method: "PUT" });
   expect(approved).toEqual(plan);
+  expect(activateMealPlanProjection).toHaveBeenCalledWith("user-a", plan);
+  expect(reconcileWeightReminder).toHaveBeenCalledTimes(1);
   await waitFor(() => expect(client.getQueryState(["coach", "thread", "user-a"])?.isInvalidated).toBe(true));
 });

@@ -240,6 +240,16 @@ test("reminder tap routes straight to /capture and skips the targetFor deep-link
   expect(targetFor).not.toHaveBeenCalled();
 });
 
+test("reviewed meal-plan reminder tap opens the plan journey", async () => {
+  const callback = await listenerFrom();
+
+  await callback(fakeResponse({ kind: "meal-plan", planId: "plan-1", dayIndex: 0 }));
+
+  expect(router.replace).toHaveBeenCalledWith("/capture");
+  expect(router.replace).toHaveBeenCalledTimes(1);
+  expect(targetFor).not.toHaveBeenCalled();
+});
+
 test("tapping a custom reminder routes to Home", async () => {
   const callback = await listenerFrom();
 

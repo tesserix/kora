@@ -91,6 +91,9 @@ export interface CoachAnswer {
 export interface MealPlanMeal {
   name: string;
   description: string;
+  /** How the meal is made. Required on every reviewed meal — a card that names
+   *  food it cannot tell you how to cook is not approvable. */
+  preparation: string;
 }
 
 /** `date` is the planner's own label ("Monday", "2026-08-25"), shown verbatim —
@@ -100,10 +103,8 @@ export interface MealPlanDay {
   meals: MealPlanMeal[];
 }
 
-/** A reviewed plan the user has yet to approve. The prose in the answer says
- *  why it fits; this is what the plan IS, so it can be rendered as a card with
- *  an approve action. Approving records the decision — it does not log or
- *  schedule anything. */
+/** A reviewed plan the user has yet to approve. Approval activates its finite
+ *  reminder projection, but never logs meals into the diary. */
 export interface MealPlanProposal {
   id: string;
   summary: string;
@@ -111,6 +112,10 @@ export interface MealPlanProposal {
   agent_name: string;
   reviewed_by: string;
   accepted_at: string | null;
+  /** The user's local calendar date when they approved, and the zone it was
+   *  read in. Both are null/empty until approval. */
+  starts_on: string | null;
+  timezone: string;
   created_at: string;
 }
 

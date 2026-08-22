@@ -448,8 +448,11 @@ func TestHandlerAsk_NamesTheAnsweringAgentOnlyWhenOneAnswered(t *testing.T) {
 func seedPlanProposal(t *testing.T, repo ThreadRepository, userID uuid.UUID) PlanProposal {
 	t.Helper()
 	plan := &PlanProposal{
-		Summary:    "Hits your 2000 kcal target",
-		Days:       PlanDays{{Date: "Monday", Meals: []PlanMeal{{Name: "Oats and whey", Description: "32g protein"}}}},
+		Summary: "Hits your 2000 kcal target",
+		Days: PlanDays{{Date: "Monday", Meals: []PlanMeal{{
+			Name: "Oats and whey", Description: "32g protein",
+			Preparation: "Simmer oats, then stir through whey.",
+		}}}},
 		AgentName:  "Kora Meal Planner",
 		ReviewedBy: "Kora Nutrition Coach",
 	}
@@ -463,13 +466,14 @@ func seedPlanProposal(t *testing.T, repo ThreadRepository, userID uuid.UUID) Pla
 func TestHandlerAcceptPlan_RecordsTheApprovalAndIsIdempotent(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db, 2000, 120)
+	require.NoError(t, db.Exec("UPDATE users SET timezone = ? WHERE id = ?", "Australia/Melbourne", userID).Error)
 	threadRepo := NewThreadRepository(db)
 	plan := seedPlanProposal(t, threadRepo, userID)
 
 	svc := NewService(&Grounder{}, nil, &stubMeter{withinBudget: true}, &threadRepo)
 	router := newTestRouter(userID, NewHandler(svc))
 
-	accept := func() time.Time {
+	accept := func() PlanProposal {
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/v1/coach/plans/"+plan.ID.String()+"/accept", nil))
 		require.Equal(t, http.StatusOK, w.Code)
@@ -480,13 +484,16 @@ func TestHandlerAcceptPlan_RecordsTheApprovalAndIsIdempotent(t *testing.T) {
 		}
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 		require.NotNil(t, body.Data.Plan.AcceptedAt)
-		return *body.Data.Plan.AcceptedAt
+		require.NotNil(t, body.Data.Plan.StartsOn)
+		require.Equal(t, "Australia/Melbourne", body.Data.Plan.Timezone)
+		return body.Data.Plan
 	}
 
 	first := accept()
 	second := accept()
 
-	require.True(t, first.Equal(second), "a double tap is not a second decision")
+	require.True(t, first.AcceptedAt.Equal(*second.AcceptedAt), "a double tap is not a second decision")
+	require.True(t, first.StartsOn.Equal(*second.StartsOn), "a retry must not restart the plan")
 }
 
 // The id must not be confirmable by anyone it does not belong to, so another

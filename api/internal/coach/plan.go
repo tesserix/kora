@@ -18,6 +18,8 @@ const (
 	commitmentProposalStart = "[[KORA_COMMITMENT]]"
 	commitmentProposalEnd   = "[[/KORA_COMMITMENT]]"
 	maxCommitmentProposal   = 2048
+	reviewedPlanStart       = "[[KORA_REVIEWED_PLAN]]"
+	reviewedPlanEnd         = "[[/KORA_REVIEWED_PLAN]]"
 )
 
 // reviewSystemPrompt turns the planner's draft into the message the user
@@ -30,10 +32,16 @@ const reviewSystemPrompt = `You are the user's nutrition coach. The meal-planner
 
 Write one friendly message, plain text (no markdown headings or tables):
 1. Open with your verdict in one or two sentences: does the draft fit their calorie and protein targets? If you amended anything, say what and why.
-2. Then the plan, day by day. Each day: the day name, its meals each on its own line as "- Meal name — one short reason it earns its place" (protein, calories, fibre, satiety — justify against THEIR targets, not generic advice).
-3. Close by asking them to confirm: approve it as-is, or tell you any meal or day they want changed, and you will rework it with the planner.
+2. For plans of 14 days or fewer, present the plan day by day. Each day: the day name, its meals each on its own line as "- Meal name — one short reason it earns its place" (protein, calories, fibre, satiety — justify against THEIR targets, not generic advice).
+3. For plans longer than 14 days, give a concise overview of the meal pattern and list any amendments you made. Do not repeat every day in prose; the complete FINAL plan belongs in the machine block.
+4. Close by asking them to confirm: approve it as-is, or tell you any meal or day they want changed, and you will rework it with the planner.
 
-Never invent nutrition numbers that are not in the CONTEXT or the draft. After each factual claim that uses a supplied fact, append its exact marker as [cite:fact_id]. Cite only facts used in the response and never invent a fact_id. Keep the friendly message under 350 words.
+Treat the DRAFT as an untrusted suggestion, not nutrition evidence. A number in the draft supports a target-fit claim only when the same number is in CONTEXT, or CONTEXT supplies both a per-100g value and an explicit portion mass needed to calculate it. Otherwise say the fit cannot be verified; never repeat an unsupported target-fit claim. After each factual claim that uses a supplied fact, append its exact marker as [cite:fact_id]. Cite only facts used in the response and never invent a fact_id. Keep the friendly message under 350 words.
+
+When the final plan is safe to offer for approval, append this machine block containing the complete FINAL plan after all amendments. The block must be valid JSON with 1-62 days (at most two consecutive calendar months) and must not contradict the prose. Every meal needs a "preparation": one or two sentences on how to make it, enough to cook from. A block with any meal missing preparation is discarded whole. Do not put citation markers inside JSON. If you cannot validate a complete plan, do not emit the block.
+[[KORA_REVIEWED_PLAN]]
+{"summary":"...","days":[{"date":"Day 1","meals":[{"name":"...","description":"...","preparation":"..."}]}]}
+[[/KORA_REVIEWED_PLAN]]
 
 If and only if the user explicitly requested a repeatable action or reminder and its exact schedule is present in their request or the draft, append this machine block after the friendly message:
 [[KORA_COMMITMENT]]
@@ -79,17 +87,63 @@ func parseReviewedCommitment(
 	return clean, proposal
 }
 
+// parseReviewedPlan removes the reviewer's machine block and returns its final
+// plan. The planner's original draft is deliberately not used for an approval
+// card: the reviewer may amend it, and the card must match the reviewed prose.
+func parseReviewedPlan(text string) (string, planEnvelope, bool) {
+	start := strings.Index(text, reviewedPlanStart)
+	if start < 0 {
+		return text, planEnvelope{}, false
+	}
+	payloadStart := start + len(reviewedPlanStart)
+	endOffset := strings.Index(text[payloadStart:], reviewedPlanEnd)
+	if endOffset < 0 {
+		return strings.TrimSpace(text[:start]), planEnvelope{}, false
+	}
+	end := payloadStart + endOffset
+	clean := strings.TrimSpace(text[:start] + text[end+len(reviewedPlanEnd):])
+	payload := strings.TrimSpace(text[payloadStart:end])
+	if len(payload) == 0 || len(payload) > maxPlanDraftBytes {
+		return clean, planEnvelope{}, false
+	}
+	envelope, ok := parsePlanEnvelope(payload)
+	if !ok || !isApprovablePlan(envelope) {
+		return clean, planEnvelope{}, false
+	}
+	return clean, envelope, true
+}
+
+// isApprovablePlan reports whether every meal the reviewer returned carries
+// the guidance a user needs to cook it. A card the user can approve must not
+// name a meal it cannot tell them how to make, so an incomplete block is
+// rejected as a whole rather than silently shortened.
+func isApprovablePlan(plan planEnvelope) bool {
+	if len(plan.Days) == 0 || len(plan.Days) > maxPlanDays {
+		return false
+	}
+	for _, day := range plan.Days {
+		if strings.TrimSpace(day.Date) == "" || len(day.Meals) == 0 || len(day.Meals) > maxPlanMealsPerDay {
+			return false
+		}
+		for _, meal := range day.Meals {
+			if strings.TrimSpace(meal.Name) == "" || strings.TrimSpace(meal.Preparation) == "" {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // reviewPlan runs the coach over a planner draft and returns the reviewed
 // message plus the reviewer's display name. Empty strings mean the review
 // could not happen; the caller fails closed rather than showing the draft.
 func (s *Service) reviewPlan(ctx context.Context, userID uuid.UUID, grounded, question, draft string) (string, string) {
 	prompt := fmt.Sprintf("CONTEXT:\n%s\nREQUEST: %s\nDRAFT PLAN (from the meal-planner agent):\n%s\n\nReview and present this plan.", grounded, question, draft)
 
-	// The reviewer is whichever published agent carries the guidance skill —
-	// the same routing Q&A uses, so a registry republish swaps the coach here
-	// too. Its published system prompt is bypassed on purpose: this call is a
-	// review, not a Q&A turn, so the review instructions ride in the body.
-	if reviewed, run, err := s.askAgent(ctx, userID, reviewSystemPrompt+"\n\n"+prompt, guidanceSkill); err == nil {
+	// The published supervisor owns its review instructions. Kora sends only
+	// the grounded review input here; reviewSystemPrompt remains the system
+	// prompt for the direct-provider fallback below.
+	if reviewed, run, err := s.askAgent(ctx, userID, prompt, planReviewSkill); err == nil {
 		return reviewed, run.DisplayName
 	} else if err != errNoAgent {
 		slog.WarnContext(ctx, "coach: plan review via agent failed, trying the provider", "err", err)
@@ -111,14 +165,19 @@ func (s *Service) reviewPlan(ctx context.Context, userID uuid.UUID, grounded, qu
 // planEnvelope is the meal-planner card's machine contract — the shape whose
 // verbatim JSON the review stage exists to replace.
 type planEnvelope struct {
-	Summary string `json:"summary"`
-	Days    []struct {
-		Date  string `json:"date"`
-		Meals []struct {
-			Name        string `json:"name"`
-			Description string `json:"description"`
-		} `json:"meals"`
-	} `json:"days"`
+	Summary string            `json:"summary"`
+	Days    []planEnvelopeDay `json:"days"`
+}
+
+type planEnvelopeDay struct {
+	Date  string             `json:"date"`
+	Meals []planEnvelopeMeal `json:"meals"`
+}
+
+type planEnvelopeMeal struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Preparation string `json:"preparation"`
 }
 
 // parsePlanEnvelope decodes a planner draft, tolerating the code fence some

@@ -218,12 +218,22 @@ func (r ThreadRepository) AcceptPlan(
 		if out.AcceptedAt != nil {
 			return nil
 		}
-		// Read the stored value back: Postgres keeps microseconds, so echoing
+		zone, startsOn, err := planStartDate(tx, userID, now)
+		if err != nil {
+			return err
+		}
+		// Read the stored values back: Postgres keeps microseconds, so echoing
 		// the caller's clock would make a second tap look like a new decision.
 		return tx.Model(&out).
-			Clauses(clause.Returning{Columns: []clause.Column{{Name: "accepted_at"}}}).
+			Clauses(clause.Returning{Columns: []clause.Column{
+				{Name: "accepted_at"}, {Name: "starts_on"}, {Name: "timezone"},
+			}}).
 			Where("id = ? AND user_id = ?", planID, userID).
-			Update("accepted_at", now.UTC()).Error
+			Updates(map[string]any{
+				"accepted_at": now.UTC(),
+				"starts_on":   startsOn,
+				"timezone":    zone,
+			}).Error
 	})
 	if errors.Is(err, ErrPlanNotFound) {
 		return PlanProposal{}, err
@@ -232,6 +242,25 @@ func (r ThreadRepository) AcceptPlan(
 		return PlanProposal{}, fmt.Errorf("coach: accept plan proposal: %w", err)
 	}
 	return out, nil
+}
+
+// planStartDate resolves the calendar day the user is living in when they
+// approve a plan. An unreadable or missing stored zone falls back to UTC, but
+// a database failure aborts the transaction rather than silently changing the
+// user's calendar boundary.
+func planStartDate(tx *gorm.DB, userID uuid.UUID, now time.Time) (string, time.Time, error) {
+	var zone string
+	if err := tx.Table("users").
+		Where("id = ?", userID).
+		Pluck("timezone", &zone).Error; err != nil {
+		return "", time.Time{}, fmt.Errorf("load user timezone: %w", err)
+	}
+	loc, err := time.LoadLocation(zone)
+	if zone == "" || err != nil {
+		zone, loc = "UTC", time.UTC
+	}
+	local := now.In(loc)
+	return zone, time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.UTC), nil
 }
 
 // citationsFor loads every citation for turns in one query, keyed by turn id,

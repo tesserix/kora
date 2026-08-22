@@ -28,6 +28,7 @@ type OpenAIProvider struct {
 	client     openai.Client
 	model      string
 	jsonObject bool
+	options    func(context.Context) []option.RequestOption
 }
 
 // NewOpenAIProvider builds the OpenAI-compatible FALLBACK provider. baseURL,
@@ -337,7 +338,7 @@ func (p OpenAIProvider) GenerateText(ctx context.Context, systemPrompt, userProm
 		},
 	}
 
-	resp, err := p.client.Chat.Completions.New(ctx, params)
+	resp, err := p.client.Chat.Completions.New(ctx, params, p.requestOptions(ctx)...)
 
 	usage := ai.Usage{
 		Provider:  p.Name(),
@@ -434,7 +435,7 @@ func (p OpenAIProvider) generateJSON(
 
 	params := p.buildParams(model, systemPrompt, userParts, schemaName, schema)
 
-	resp, err := p.client.Chat.Completions.New(ctx, params)
+	resp, err := p.client.Chat.Completions.New(ctx, params, p.requestOptions(ctx)...)
 
 	usage := ai.Usage{
 		Provider:  p.Name(),
@@ -454,6 +455,13 @@ func (p OpenAIProvider) generateJSON(
 	}
 
 	return []byte(resp.Choices[0].Message.Content), usage, nil
+}
+
+func (p OpenAIProvider) requestOptions(ctx context.Context) []option.RequestOption {
+	if p.options == nil {
+		return nil
+	}
+	return p.options(ctx)
 }
 
 // Compile-time assertion that OpenAIProvider satisfies ai.Provider.

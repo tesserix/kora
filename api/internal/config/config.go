@@ -29,6 +29,7 @@ type Config struct {
 	AIGatewayBaseURL string
 	AIGatewayAPIKey  string
 	AIGatewayModel   string
+	AIAgentTimeout   time.Duration
 	// AIRegistryBaseURL points at the Agentic Registry. When set, Kora
 	// resolves its agents, skills and tools from the catalog at request time
 	// instead of routing a bare model capability. Unset leaves the agent path
@@ -95,6 +96,7 @@ func Load() (Config, error) {
 		AIGatewayBaseURL:         os.Getenv("AI_GATEWAY_BASE_URL"),
 		AIGatewayAPIKey:          os.Getenv("AI_GATEWAY_API_KEY"),
 		AIGatewayModel:           getenv("AI_GATEWAY_MODEL", "kora-auto"),
+		AIAgentTimeout:           getdur("AI_AGENT_TIMEOUT", 60*time.Second),
 		AIRegistryBaseURL:        os.Getenv("AI_REGISTRY_BASE_URL"),
 		AIRegistryAPIKey:         os.Getenv("AI_REGISTRY_API_KEY"),
 		AIRegistryTTL:            getdur("AI_REGISTRY_TTL", 0),
