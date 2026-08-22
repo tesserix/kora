@@ -271,6 +271,13 @@ func seedEveryCascadingTable(t *testing.T, db *gorm.DB, userID, otherID uuid.UUI
 			1080, 'Australia/Melbourne', current_date, 'meal_planner',
 			'Kora Meal Planner', 'Kora Nutrition Coach')`, userID, coachTurnID)
 
+	insert("coach_plan_proposals", `
+		INSERT INTO coach_plan_proposals
+			(id, user_id, coach_turn_id, summary, days, agent_name, reviewed_by)
+		VALUES (?, ?, ?, 'Deletion plan',
+			'[{"date":"Monday","meals":[{"name":"Oats","description":"32g protein"}]}]'::jsonb,
+			'Kora Meal Planner', 'Kora Nutrition Coach')`, userID, coachTurnID)
+
 	foodID := seedFoodItem(t, db)
 	insert("pins",
 		`INSERT INTO pins (id, user_id, food_item_id, grams, meal_slot) VALUES (?, ?, ?, 100, 'lunch')`,
@@ -323,7 +330,7 @@ var victimCascadeTables = []string{
 	"saved_meals", "food_aliases", "coach_turns", "group_members",
 	"challenge_participants", "feedback", "mentor_profiles",
 	"health_daily_summaries", "mentor_commitments", "mentor_check_ins",
-	"mentor_commitment_proposals",
+	"mentor_commitment_proposals", "coach_plan_proposals",
 }
 
 // --- tests -----------------------------------------------------------------

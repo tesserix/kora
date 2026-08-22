@@ -17,7 +17,7 @@ func TestThreadRepository_AppendAndListRoundTrip(t *testing.T) {
 	ctx := context.Background()
 
 	err := repo.AppendExchange(ctx, userID, "what should I eat?", "more protein",
-		[]Fact{{Label: "Protein today", Value: "65g"}, {Label: "Kcal left", Value: "750"}})
+		[]Fact{{Label: "Protein today", Value: "65g"}, {Label: "Kcal left", Value: "750"}}, Attachments{})
 	require.NoError(t, err)
 
 	turns, err := repo.ListRecent(ctx, userID, maxThreadTurns)
@@ -49,7 +49,7 @@ func TestThreadRepository_RoundTripsACommitmentProposalWithTheReviewedTurn(t *te
 	}, "Kora Meal Planner", "Kora Nutrition Coach")
 	require.NoError(t, err)
 
-	require.NoError(t, repo.AppendExchange(t.Context(), userID, "help me hydrate", "Review this rhythm", nil, proposal))
+	require.NoError(t, repo.AppendExchange(t.Context(), userID, "help me hydrate", "Review this rhythm", nil, Attachments{Commitment: proposal}))
 
 	turns, err := repo.ListRecent(t.Context(), userID, maxThreadTurns)
 	require.NoError(t, err)
@@ -66,8 +66,8 @@ func TestThreadRepository_ListRecentIsOldestFirst(t *testing.T) {
 	repo := NewThreadRepository(db)
 	ctx := context.Background()
 
-	require.NoError(t, repo.AppendExchange(ctx, userID, "q1", "a1", nil))
-	require.NoError(t, repo.AppendExchange(ctx, userID, "q2", "a2", nil))
+	require.NoError(t, repo.AppendExchange(ctx, userID, "q1", "a1", nil, Attachments{}))
+	require.NoError(t, repo.AppendExchange(ctx, userID, "q2", "a2", nil, Attachments{}))
 
 	turns, err := repo.ListRecent(ctx, userID, maxThreadTurns)
 	require.NoError(t, err)
@@ -86,7 +86,7 @@ func TestThreadRepository_ListRecentReturnsMostRecentWhenOverLimit(t *testing.T)
 
 	// 30 exchanges == 60 turns, over the 50 cap.
 	for i := 0; i < 30; i++ {
-		require.NoError(t, repo.AppendExchange(ctx, userID, "q", "a", nil))
+		require.NoError(t, repo.AppendExchange(ctx, userID, "q", "a", nil, Attachments{}))
 	}
 
 	turns, err := repo.ListRecent(ctx, userID, maxThreadTurns)
@@ -116,8 +116,8 @@ func TestThreadRepository_OrdersBySeqNotCreatedAt(t *testing.T) {
 	repo := NewThreadRepository(db)
 	ctx := context.Background()
 
-	require.NoError(t, repo.AppendExchange(ctx, userID, "q1", "a1", nil))
-	require.NoError(t, repo.AppendExchange(ctx, userID, "q2", "a2", nil))
+	require.NoError(t, repo.AppendExchange(ctx, userID, "q1", "a1", nil, Attachments{}))
+	require.NoError(t, repo.AppendExchange(ctx, userID, "q2", "a2", nil, Attachments{}))
 
 	// Read rows back ordered by seq so we know each row's id and its
 	// insertion order.
@@ -164,7 +164,7 @@ func TestThreadRepository_ScopedToUser(t *testing.T) {
 	repo := NewThreadRepository(db)
 	ctx := context.Background()
 
-	require.NoError(t, repo.AppendExchange(ctx, alice, "alice q", "alice a", nil))
+	require.NoError(t, repo.AppendExchange(ctx, alice, "alice q", "alice a", nil, Attachments{}))
 
 	turns, err := repo.ListRecent(ctx, bob, maxThreadTurns)
 	require.NoError(t, err)

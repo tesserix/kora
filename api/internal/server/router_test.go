@@ -131,6 +131,7 @@ func TestPersonalMentorRoutesAreRegisteredInsideAuthenticatedAPI(t *testing.T) {
 		{http.MethodPut, "/v1/mentor/commitments/:id"},
 		{http.MethodPut, "/v1/mentor/commitments/:id/check-ins"},
 		{http.MethodPut, "/v1/mentor/proposals/:id/accept"},
+		{http.MethodPut, "/v1/coach/plans/:id/accept"},
 	} {
 		if !hasRoute(routes, route.method, route.path) {
 			t.Errorf("expected %s %s to be registered", route.method, route.path)

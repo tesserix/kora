@@ -33,7 +33,7 @@ Write one friendly message, plain text (no markdown headings or tables):
 2. Then the plan, day by day. Each day: the day name, its meals each on its own line as "- Meal name — one short reason it earns its place" (protein, calories, fibre, satiety — justify against THEIR targets, not generic advice).
 3. Close by asking them to confirm: approve it as-is, or tell you any meal or day they want changed, and you will rework it with the planner.
 
-Never invent nutrition numbers that are not in the CONTEXT or the draft. Keep the friendly message under 350 words.
+Never invent nutrition numbers that are not in the CONTEXT or the draft. After each factual claim that uses a supplied fact, append its exact marker as [cite:fact_id]. Cite only facts used in the response and never invent a fact_id. Keep the friendly message under 350 words.
 
 If and only if the user explicitly requested a repeatable action or reminder and its exact schedule is present in their request or the draft, append this machine block after the friendly message:
 [[KORA_COMMITMENT]]
@@ -81,8 +81,7 @@ func parseReviewedCommitment(
 
 // reviewPlan runs the coach over a planner draft and returns the reviewed
 // message plus the reviewer's display name. Empty strings mean the review
-// could not happen — the caller keeps the draft, because a raw draft is a
-// worse answer than a reviewed one but still an answer.
+// could not happen; the caller fails closed rather than showing the draft.
 func (s *Service) reviewPlan(ctx context.Context, userID uuid.UUID, grounded, question, draft string) (string, string) {
 	prompt := fmt.Sprintf("CONTEXT:\n%s\nREQUEST: %s\nDRAFT PLAN (from the meal-planner agent):\n%s\n\nReview and present this plan.", grounded, question, draft)
 
@@ -101,7 +100,7 @@ func (s *Service) reviewPlan(ctx context.Context, userID uuid.UUID, grounded, qu
 	}
 	reviewed, err := s.generate(ctx, userID, reviewSystemPrompt, prompt)
 	if err != nil {
-		slog.WarnContext(ctx, "coach: plan review failed, returning the draft", "err", err)
+		slog.WarnContext(ctx, "coach: plan review failed", "err", err)
 		return "", ""
 	}
 	// The provider has no registry card, so the reviewer is the app's own
@@ -122,11 +121,14 @@ type planEnvelope struct {
 	} `json:"days"`
 }
 
-// formatPlanDraft renders a planner draft as prose. The review stage normally
-// does this with the user's own numbers; this is the floor under it, so a
-// failed review costs the user a good answer rather than a readable one.
-func formatPlanDraft(draft string) string {
+// parsePlanEnvelope decodes a planner draft, tolerating the code fence some
+// models wrap their JSON in. ok is false whenever the draft is prose, which is
+// every non-planner answer and any planner answer that ignored its contract.
+func parsePlanEnvelope(draft string) (planEnvelope, bool) {
 	body := strings.TrimSpace(draft)
+	if len(body) > maxPlanDraftBytes {
+		return planEnvelope{}, false
+	}
 	if fenced := strings.TrimPrefix(body, "```json"); fenced != body {
 		body = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(fenced), "```"))
 	} else if fenced := strings.TrimPrefix(body, "```"); fenced != body {
@@ -134,6 +136,17 @@ func formatPlanDraft(draft string) string {
 	}
 	var plan planEnvelope
 	if err := json.Unmarshal([]byte(body), &plan); err != nil || len(plan.Days) == 0 {
+		return planEnvelope{}, false
+	}
+	return plan, true
+}
+
+// formatPlanDraft renders a planner draft as prose. The review stage normally
+// does this with the user's own numbers; this is the floor under it, so a
+// failed review costs the user a good answer rather than a readable one.
+func formatPlanDraft(draft string) string {
+	plan, ok := parsePlanEnvelope(draft)
+	if !ok {
 		return draft
 	}
 

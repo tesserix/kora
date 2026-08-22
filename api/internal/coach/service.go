@@ -92,6 +92,9 @@ type Answer struct {
 	Citations   []Fact
 	ShowSupport bool
 	Proposal    *mentor.CommitmentProposal
+	// Plan is the reviewed meal plan in its structured form, so the client
+	// can render an approvable card next to the prose that justifies it.
+	Plan *PlanProposal
 	// By names the agent that produced Text. It is zero when the direct
 	// provider answered, which the client shows as the plain assistant.
 	By Attribution
@@ -187,6 +190,7 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 
 	by := Attribution{}
 	var proposal *mentor.CommitmentProposal
+	var plan *PlanProposal
 	raw, run, err := s.askAgent(ctx, userID, userPrompt, skill)
 	if err == nil {
 		// The skill is the one Kora asked for, not the one the run echoes
@@ -198,9 +202,17 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 			// reviews them against the user's numbers and presents the result
 			// as a proposal to approve or challenge. A failed review keeps
 			// the draft — worse, but still an answer.
+			draft := raw
 			if reviewed, reviewer := s.reviewPlan(ctx, userID, grounded.Render(), question, raw); reviewed != "" {
 				by.ReviewedBy = reviewer
 				raw, proposal = parseReviewedCommitment(reviewed, userID, now, loc, by.Agent, reviewer)
+				// The card is built from the PLANNER's draft, not the review:
+				// the review is prose by design, and re-deriving days and meals
+				// from prose would guess at what the planner already stated
+				// exactly. It is only built once a review has passed.
+				if envelope, ok := parsePlanEnvelope(draft); ok {
+					plan = newPlanProposal(userID, envelope, by.Agent, by.ReviewedBy)
+				}
 			}
 			raw = formatPlanDraft(raw)
 		}
@@ -230,6 +242,7 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 		// answer, fall back to a safe supportive message instead.
 		text = suppressedAnswerMessage
 		proposal = nil
+		plan = nil
 	}
 
 	answer := Answer{
@@ -238,17 +251,22 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 		ShowSupport: decision.ShowSupport || guardrails.AtRisk(signals),
 		By:          by,
 		Proposal:    proposal,
+		Plan:        plan,
 	}
 
 	// A storage failure must not lose an answer the user is already owed, so
 	// log and continue rather than returning an error.
 	if s.thread != nil {
-		if err := s.thread.AppendExchange(ctx, userID, question, answer.Text, answer.Citations, answer.Proposal); err != nil {
+		attachments := Attachments{Commitment: answer.Proposal, Plan: answer.Plan}
+		if err := s.thread.AppendExchange(ctx, userID, question, answer.Text, answer.Citations, attachments); err != nil {
 			slog.WarnContext(ctx, "coach: failed to persist thread exchange", "err", err, "user_id", userID)
 			answer.Proposal = nil
+			answer.Plan = nil
 		}
 	} else {
+		// Nothing was stored, so nothing has an id the user could approve.
 		answer.Proposal = nil
+		answer.Plan = nil
 	}
 
 	return answer, nil
@@ -422,19 +440,31 @@ func regateStoredTurns(turns []StoredTurn, signals guardrails.Signals) []StoredT
 
 		text := decision.Text
 		proposal := t.Proposal
+		plan := t.Plan
 		if decision.Action == guardrails.Suppress {
 			// Suppress means Decision.Text is "" — never surface an empty
 			// answer, fall back to the same safe supportive message Ask uses.
 			text = suppressedAnswerMessage
 			proposal = nil
+			plan = nil
 		}
 
 		out[i] = StoredTurn{
 			Role: t.Role, Text: text, CreatedAt: t.CreatedAt,
-			Citations: t.Citations, Proposal: proposal,
+			Citations: t.Citations, Proposal: proposal, Plan: plan,
 		}
 	}
 	return out
+}
+
+// AcceptPlan records the user's approval of one of their plan proposals. A
+// service with no thread repository has no proposals to approve, so the id is
+// unknown by definition rather than a 500.
+func (s *Service) AcceptPlan(ctx context.Context, userID, planID uuid.UUID, now time.Time) (PlanProposal, error) {
+	if s.thread == nil {
+		return PlanProposal{}, ErrPlanNotFound
+	}
+	return s.thread.AcceptPlan(ctx, userID, planID, now)
 }
 
 // Nudges is a thin wrapper: build the Context, derive Signals, and run them

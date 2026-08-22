@@ -751,7 +751,7 @@ func TestServiceAsk_PriorTurnsEnterThePromptAsHistory(t *testing.T) {
 
 	// A prior exchange with a distinctive marker already in the thread.
 	require.NoError(t, threadRepo.AppendExchange(context.Background(), userID,
-		"UNIQUEPRIORQUESTION", "UNIQUEPRIORANSWER", nil))
+		"UNIQUEPRIORQUESTION", "UNIQUEPRIORANSWER", nil, Attachments{}))
 
 	rec := &recordingProvider{}
 	svc := NewService(&g, rec, &stubMeter{withinBudget: true}, &threadRepo)
@@ -782,7 +782,7 @@ func TestServiceAsk_HistoryIsScopedToTheAskingUser(t *testing.T) {
 	threadRepo := NewThreadRepository(db)
 
 	require.NoError(t, threadRepo.AppendExchange(context.Background(), theirs,
-		"SOMEONEELSESQUESTION", "SOMEONEELSESANSWER", nil))
+		"SOMEONEELSESQUESTION", "SOMEONEELSESANSWER", nil, Attachments{}))
 
 	rec := &recordingProvider{}
 	svc := NewService(&g, rec, &stubMeter{withinBudget: true}, &threadRepo)
@@ -809,7 +809,7 @@ func TestServiceAsk_HistoryIsBounded(t *testing.T) {
 	// Comfortably more exchanges than historyTurns can carry.
 	for i := 0; i < historyTurns; i++ {
 		require.NoError(t, threadRepo.AppendExchange(context.Background(), userID,
-			fmt.Sprintf("QUESTION%02d", i), fmt.Sprintf("ANSWER%02d", i), nil))
+			fmt.Sprintf("QUESTION%02d", i), fmt.Sprintf("ANSWER%02d", i), nil, Attachments{}))
 	}
 
 	rec := &recordingProvider{}
@@ -921,7 +921,7 @@ func TestServiceThread_ShowSupportReflectsLiveSignalsNotStoredState(t *testing.T
 
 	// Store an exchange while the user is still at-risk.
 	require.NoError(t, threadRepo.AppendExchange(context.Background(), userID,
-		"how am I doing?", "an answer", nil))
+		"how am I doing?", "an answer", nil, Attachments{}))
 
 	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, &threadRepo)
 
@@ -960,7 +960,7 @@ func TestServiceThread_ReplayedRestrictiveTurnSuppressedForAtRiskUser(t *testing
 
 	const restrictiveRaw = "You've eaten enough today — try to cut back tomorrow."
 	require.NoError(t, threadRepo.AppendExchange(context.Background(), userID,
-		"how am I doing?", restrictiveRaw, nil))
+		"how am I doing?", restrictiveRaw, nil, Attachments{}))
 
 	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, &threadRepo)
 	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
@@ -998,7 +998,7 @@ func TestServiceThread_ReplayedBenignTurnUnchanged(t *testing.T) {
 
 	const supportiveRaw = "You have 55g protein to go — a yoghurt would help."
 	require.NoError(t, threadRepo.AppendExchange(context.Background(), userID,
-		"how's my protein?", supportiveRaw, nil))
+		"how's my protein?", supportiveRaw, nil, Attachments{}))
 
 	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, &threadRepo)
 	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
@@ -1044,7 +1044,7 @@ func TestServiceThread_UserTurnsNeverRewritten(t *testing.T) {
 	const userQuestion = "should I eat less?"
 	const restrictiveRaw = "You've eaten enough today — try to cut back tomorrow."
 	require.NoError(t, threadRepo.AppendExchange(context.Background(), userID,
-		userQuestion, restrictiveRaw, nil))
+		userQuestion, restrictiveRaw, nil, Attachments{}))
 
 	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, &threadRepo)
 
