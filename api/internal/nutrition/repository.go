@@ -520,11 +520,9 @@ func (r Repository) ResolveQuery(ctx context.Context, userID uuid.UUID, q Query,
 		if brandNamed && wantBrand != "" && brandMatches(wantBrand, s.item.Brand) {
 			s.rankKey += brandMatchBonus
 		}
-		// Locale preference. Both sides must be known: an unknown user locale
-		// must not favour unknown-locale rows, which would quietly promote
-		// user estimates over reference data for every user whose timezone we
-		// do not map.
-		if q.Locale != LocaleUnknown && s.item.Locale == q.Locale {
+		// Locale preference; LocalePrefers holds the unknown-side and
+		// NZ→AU adjacency rules.
+		if LocalePrefers(q.Locale, s.item.Locale) {
 			s.rankKey += localeBonus
 		}
 		// Reward a row prepared the way the user said. Like every other signal

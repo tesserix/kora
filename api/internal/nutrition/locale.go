@@ -31,6 +31,10 @@ func LocaleFromTimezone(tz string) Locale {
 	// would silently get no locale preference.
 	case normalized == "asia/kolkata", normalized == "asia/calcutta":
 		return LocaleIN
+	// Pacific/ is NOT prefix-matched the way Australia/ is: it spans Honolulu
+	// to Fiji, almost none of which is New Zealand.
+	case normalized == "pacific/auckland", normalized == "pacific/chatham":
+		return LocaleNZ
 	case strings.HasPrefix(normalized, "america/"), normalized == "us/eastern",
 		normalized == "us/central", normalized == "us/mountain", normalized == "us/pacific":
 		return LocaleUS
