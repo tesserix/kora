@@ -1,5 +1,5 @@
 import { copyIntoQueue, deleteQueuedMedia } from "./captureMedia";
-import { append, type QueuedCapture, type TextCapture } from "./captureQueue";
+import { append, type BarcodeCapture, type QueuedCapture, type TextCapture } from "./captureQueue";
 import { NoOwnerError, resolveOwnerId } from "./owner";
 
 export type CaptureFile = { uri: string; name: string; type: string };
@@ -66,4 +66,32 @@ export async function enqueueTextCapture(
     ownerId,
     mealSlot,
   })) as TextCapture;
+}
+
+// The barcode sibling (kora#241), for the one case the offline cache cannot
+// answer: the FIRST scan of a given product while offline. A seen barcode is
+// already served locally by cachedResolution.ts and never reaches here.
+//
+// Shares enqueueTextCapture's shape rather than enqueueCapture's for the same
+// reason: no file, so no copy-before-append invariant and nothing a refused
+// append could leak. append() dedupes on `code`, so a scanner firing at the
+// same product repeatedly gets one row back, not three — it may therefore
+// return a row that was queued earlier, which is still "saved" from the
+// caller's point of view.
+export async function enqueueBarcodeCapture(
+  code: string,
+  mealSlot?: string,
+): Promise<BarcodeCapture> {
+  const ownerId = await resolveOwnerId();
+  if (!ownerId) throw new NoOwnerError();
+
+  return (await append({
+    id: `cap_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    kind: "barcode",
+    code,
+    // The user is holding the phone now: capture time IS now (decision 2).
+    capturedAt: new Date().toISOString(),
+    ownerId,
+    mealSlot,
+  })) as BarcodeCapture;
 }

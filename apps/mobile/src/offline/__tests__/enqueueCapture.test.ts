@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { MAX_CAPTURES, append, list } from "../captureQueue";
-import { enqueueCapture, enqueueTextCapture } from "../enqueueCapture";
+import { enqueueBarcodeCapture, enqueueCapture, enqueueTextCapture } from "../enqueueCapture";
 import { NoOwnerError } from "../owner";
 
 jest.mock("@/lib/api", () => ({
@@ -119,5 +119,36 @@ describe("enqueueTextCapture (kora#196)", () => {
     const { resolveOwnerId } = jest.requireMock("../owner");
     resolveOwnerId.mockResolvedValueOnce(null);
     await expect(enqueueTextCapture("two eggs")).rejects.toBeInstanceOf(NoOwnerError);
+  });
+});
+
+// kora#241. Same shape as the text sibling — no file, so none of the
+// copy-before-append machinery applies.
+describe("enqueueBarcodeCapture (kora#241)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it("queues the code without writing any media", async () => {
+    const row = await enqueueBarcodeCapture("5000112637922", "lunch");
+    expect(row).toMatchObject({ kind: "barcode", code: "5000112637922", mealSlot: "lunch" });
+    const { copyIntoQueue } = jest.requireMock("../captureMedia");
+    expect(copyIntoQueue).not.toHaveBeenCalled();
+  });
+
+  // The scanner fires repeatedly at one product, so the caller can and will
+  // ask twice. It gets back the row that IS queued — "saved" either way, and
+  // never a second row.
+  it("hands back the existing row rather than queueing the same code twice", async () => {
+    const first = await enqueueBarcodeCapture("5000112637922");
+    const second = await enqueueBarcodeCapture("5000112637922");
+    expect(second.id).toBe(first.id);
+    expect(await list()).toHaveLength(1);
+  });
+
+  it("refuses to queue with nobody signed in, rather than queueing an ownerless row", async () => {
+    const { resolveOwnerId } = jest.requireMock("../owner");
+    resolveOwnerId.mockResolvedValueOnce(null);
+    await expect(enqueueBarcodeCapture("5000112637922")).rejects.toBeInstanceOf(NoOwnerError);
   });
 });

@@ -47,7 +47,9 @@ import {
 import { ApiError, AuthTokenError, NetworkError, ResponseParseError, TimeoutError } from "@/lib/api";
 import { OfflineUnknownBarcodeError } from "@/offline/cachedResolution";
 import { CaptureQueueFullError } from "@/offline/captureQueue";
-import { enqueueCapture, enqueueTextCapture, type CaptureFile } from "@/offline/enqueueCapture";
+import {
+  enqueueBarcodeCapture, enqueueCapture, enqueueTextCapture, type CaptureFile,
+} from "@/offline/enqueueCapture";
 import { NoOwnerError } from "@/offline/owner";
 import { QUEUED_CAPTURES_KEY } from "@/offline/queryKeys";
 import { isLoggable } from "@/lib/candidateTier";
@@ -982,21 +984,18 @@ function ottoErrorMessage(error: Error): string {
   // identify that" would claim the food does not exist when we simply cannot
   // see the index from here.
   if (error instanceof OfflineUnknownBarcodeError) {
-    // Says what is true and what the user can do — it does NOT promise to
-    // handle it later.
+    // The NOT-saved copy. Since kora#241 the scan is normally queued, and
+    // handleBarcodeScanned says so with OFFLINE_BARCODE_QUEUED below — this
+    // string is reached only when the queue REFUSED the row for a reason that
+    // carries no copy of its own, so nothing was saved and the message must
+    // not pretend otherwise.
     //
-    // This read "I'll recognise it once you're back online", which describes a
-    // capture that has been SAVED and will be replayed. Nothing is saved: the
-    // barcode path never calls enqueueCapture (only handleResolveFailure does,
-    // and only photo/voice reach it). So the user put the phone away, came back
-    // online, and found no meal and no record they had tried — a promise the
-    // code does not keep, which is worse than a plain failure because it stops
-    // them doing the one thing that would have worked: scanning again later
-    // (kora#191).
-    //
-    // Queueing the scan properly is the better fix and is tracked as kora#196;
-    // the capture queue is media-shaped (kind: photo | voice, storedName,
-    // mimeType) and has no text/barcode variant yet.
+    // It once read "I'll recognise it once you're back online", which describes
+    // a capture that has been saved and will be replayed, while nothing was.
+    // The user put the phone away, came back online, and found no meal and no
+    // record they had tried — a promise the code did not keep, which is worse
+    // than a plain failure because it stopped them doing the one thing that
+    // would have worked: scanning again later (kora#191). Keep it honest.
     return "You're offline, and this isn't a barcode you've scanned before. Scan it again once you're back online.";
   }
   if (error instanceof ApiError) {
@@ -1020,12 +1019,14 @@ function ottoErrorMessage(error: Error): string {
     return "The server answered, but I couldn't make sense of it. Mind trying again?";
   }
   if (error instanceof TimeoutError) {
-    // Reached from the BARCODE path (handleBarcodeScanned), which still does
-    // not queue — kora#241 tracks giving it one. The typed path now queues on
-    // timeout (kora#196) and sets its own copy in handleSend's onError, and
-    // handleResolveFailure does the same for photo and voice, so this generic
-    // text is only ever seen by a caller with nothing saved. It therefore
-    // stays honest about the timeout itself and promises no save.
+    // No longer reachable from the BARCODE path: useResolveBarcode's
+    // withCacheFallback turns a timeout into a cache lookup, which either
+    // answers or raises OfflineUnknownBarcodeError above — and that now
+    // queues (kora#241). The typed path queues on timeout (kora#196) and sets
+    // its own copy in handleSend's onError, and handleResolveFailure does the
+    // same for photo and voice, so this generic text is only ever seen by a
+    // caller with nothing saved. It therefore stays honest about the timeout
+    // itself and promises no save.
     return "That took too long — mind trying again?";
   }
   return "Something went wrong while I looked at that. Please try again.";
@@ -1766,9 +1767,45 @@ export default function CaptureScreen() {
       onError: (error) => {
         scannedRef.current = false;
         if (controller.signal.aborted) return;
+        // The one failure this path can SAVE (kora#241). Every transport
+        // failure of a barcode resolve arrives here as
+        // OfflineUnknownBarcodeError — useResolveBarcode's withCacheFallback
+        // converts a network error or a timeout into a cache lookup, and a
+        // miss raises this — so it means exactly "the request did not get an
+        // answer AND this device has never seen this code". A code the cache
+        // DOES know never reaches onError at all: it resolves offline, marked
+        // CACHED_MATCH_TIER, and that path is untouched here.
+        if (error instanceof OfflineUnknownBarcodeError) {
+          void queueUnknownBarcode(data);
+          return;
+        }
         setErrorMsg(ottoErrorMessage(error));
       },
     });
+  }
+
+  // Saves the scan itself, since the resolve could not (kora#241). The copy
+  // keeps the first clause of the old message — explaining WHY nothing can be
+  // identified now is what made kora#191's version honest — and replaces the
+  // "scan it again" advice with the promise the typed path makes on the same
+  // failure, which the queue now actually keeps.
+  async function queueUnknownBarcode(code: string) {
+    try {
+      await enqueueBarcodeCapture(code, mealSlot);
+      setErrorMsg(
+        "You're offline, and this isn't a barcode you've scanned before — I've saved the scan, and I'll identify it as soon as you're back online.",
+      );
+      void queryClient.invalidateQueries({ queryKey: [QUEUED_CAPTURES_KEY] });
+    } catch (queueError) {
+      // Nothing was saved. CaptureQueueFullError and NoOwnerError each carry
+      // user-facing copy that says which; anything else falls back to the
+      // scan-again message, which is still true and still actionable.
+      setErrorMsg(
+        queueError instanceof CaptureQueueFullError || queueError instanceof NoOwnerError
+          ? queueError.message
+          : ottoErrorMessage(new OfflineUnknownBarcodeError()),
+      );
+    }
   }
 
   // Logs every not-yet-succeeded candidate in the current resolution as its
