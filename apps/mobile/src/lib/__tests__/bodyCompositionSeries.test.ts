@@ -1,10 +1,15 @@
 import type { WeightEntry } from "@/api/types";
 import {
   chartableMetrics,
+  comparableRunFor,
+  fitsAcrossInstruments,
   hasInstrumentChange,
   lastComparableRun,
   metricSeries,
 } from "../bodyCompositionSeries";
+import { COMPOSITION_METRICS } from "../bodyCompositionFields";
+
+const metricFor = (key: string) => COMPOSITION_METRICS.find((m) => m.key === key)!;
 
 let n = 0;
 const entry = (over: Partial<WeightEntry> = {}): WeightEntry => ({
@@ -178,5 +183,63 @@ describe("lastComparableRun", () => {
     // A change computed over the whole series would report -5.1 points of fat
     // lost, when 4.6 of that is DEXA and bioimpedance disagreeing.
     expect(lastComparableRun(series).map((p) => p.value)).toEqual([19.4, 19.1]);
+  });
+});
+
+// kora#397: the delta beneath the chart used lastComparableRun for EVERY
+// metric, while the weekly rate beside it fits weight across instruments. On a
+// weight history spanning a scale change the two described different windows
+// and could disagree in sign — "Up 0.8 kg" above "About 0.4 kg per week down".
+describe("comparableRunFor (kora#397)", () => {
+  it("spans instruments for weight, matching the rate shown beneath it", () => {
+    const series = metricSeries(
+      [
+        entry({ weight_kg: 80, source: "manual" }),
+        entry({ weight_kg: 79, source: "manual" }),
+        entry({ weight_kg: 78, source: "healthkit" }),
+        entry({ weight_kg: 77, source: "healthkit" }),
+      ],
+      "weight_kg",
+    );
+    expect(comparableRunFor(series, metricFor("weight_kg")).map((p) => p.value)).toEqual([80, 79, 78, 77]);
+  });
+
+  it("spans instruments for a tape measurement, which the weigh-in's source says nothing about", () => {
+    const series = metricSeries(
+      [
+        entry({ waist_cm: 90, source: "manual" }),
+        entry({ waist_cm: 89, source: "manual" }),
+        entry({ waist_cm: 88, source: "scale_screenshot" }),
+      ],
+      "waist_cm",
+    );
+    expect(comparableRunFor(series, metricFor("waist_cm")).map((p) => p.value)).toEqual([90, 89, 88]);
+  });
+
+  it("still truncates a composition percentage, where vendors genuinely disagree", () => {
+    const series = metricSeries(
+      [
+        entry({ body_fat_pct: 24.2, source: "manual" }),
+        entry({ body_fat_pct: 24.0, source: "manual" }),
+        entry({ body_fat_pct: 19.4, source: "dexa" }),
+      ],
+      "body_fat_pct",
+    );
+    expect(comparableRunFor(series, metricFor("body_fat_pct")).map((p) => p.value)).toEqual([19.4]);
+  });
+});
+
+describe("fitsAcrossInstruments (kora#397)", () => {
+  it("is true for weight and every tape measurement, false for everything else", () => {
+    const across = COMPOSITION_METRICS.filter(fitsAcrossInstruments).map((m) => m.key);
+    expect(across).toEqual([
+      "weight_kg",
+      "neck_cm",
+      "chest_cm",
+      "waist_cm",
+      "hip_cm",
+      "arm_cm",
+      "thigh_cm",
+    ]);
   });
 });
