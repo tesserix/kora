@@ -97,3 +97,36 @@ export function lastComparableRun(series: MetricSeries): MetricPoint[] {
   const lastBreak = series.breaksAfter[series.breaksAfter.length - 1];
   return lastBreak === undefined ? series.points : series.points.slice(lastBreak + 1);
 }
+
+/**
+ * Whether a metric's readings may be compared across a change of instrument
+ * (kora#397). The client-side mirror of Go's `FitsAcrossInstruments`.
+ *
+ * Derived from `unitKind` rather than a hardcoded key list, so it cannot drift
+ * as tape measurements are added or renamed — `length` IS the tape metrics.
+ *
+ * Two reasons this is per-metric rather than the blanket rule the rest of this
+ * module applies. Vendors disagree about body fat by 20+ points, which is the
+ * artefact `lastComparableRun` exists to prevent; they disagree about weight by
+ * a few hundred grams. And `source` records the instrument that produced the
+ * WEIGH-IN, so splitting a tape series on it would split on something entirely
+ * unrelated to how the tape was read.
+ *
+ * Kept in step with the server by construction of the same rule, not by a
+ * shared list — see the design doc's decision 3.
+ */
+export function fitsAcrossInstruments(metric: CompositionMetric): boolean {
+  return metric.key === "weight_kg" || metric.unitKind === "length";
+}
+
+/**
+ * The points a "change over this range" figure should be computed over.
+ *
+ * Before kora#397 every metric used `lastComparableRun`, while the weekly rate
+ * beneath it fitted weight across instruments — so the same card could show
+ * "Up 0.8 kg" above "About 0.4 kg per week down" and both be internally
+ * correct. This makes the two agree.
+ */
+export function comparableRunFor(series: MetricSeries, metric: CompositionMetric): MetricPoint[] {
+  return fitsAcrossInstruments(metric) ? series.points : lastComparableRun(series);
+}

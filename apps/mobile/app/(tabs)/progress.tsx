@@ -36,7 +36,7 @@ import {
 import {
   chartableMetrics,
   hasInstrumentChange,
-  lastComparableRun,
+  comparableRunFor,
   metricSeries,
 } from "@/lib/bodyCompositionSeries";
 import { trendSentence } from "@/lib/trendCopy";
@@ -222,10 +222,13 @@ export default function Progress() {
   const currentShown = hasCurrent ? displayNumber(metric, current, system) : null;
   const metricUnit = unitLabel(metric, system);
 
-  // The change is measured over the trailing run of readings from ONE
-  // instrument. Across a switch it would report Renpho's 48.9% minus Omron's
-  // 25.7% as 23 points of muscle lost — see lastComparableRun.
-  const run = lastComparableRun(trend);
+  // Which readings the change is measured over depends on the metric
+  // (kora#397). A composition percentage uses the trailing single-instrument
+  // run, because across a switch it would report Renpho's 48.9% minus Omron's
+  // 25.7% as 23 points of muscle lost. Weight and tape measurements span the
+  // whole range, matching the rate shown beneath — before this, the two
+  // disagreed on the same card and could disagree in SIGN.
+  const run = comparableRunFor(trend, metric);
   const delta =
     run.length >= 2
       ? displayNumber(metric, run[run.length - 1].value, system) - displayNumber(metric, run[0].value, system)
