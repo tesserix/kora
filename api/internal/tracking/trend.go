@@ -1,6 +1,21 @@
 package tracking
 
-import "time"
+import (
+	"context"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/tesserix/kora/api/internal/guardrails"
+)
+
+// SignalsSource supplies the risk signals the Protective policy needs.
+// Declared here and satisfied by coach so that tracking never imports it —
+// the risk computation must have exactly one definition (design doc,
+// decision 5).
+type SignalsSource interface {
+	SignalsFor(ctx context.Context, userID uuid.UUID) (guardrails.Signals, error)
+}
 
 // minRateReadings and minRateSpanDays are the gate from the design doc.
 // BOTH are required: a count alone lets four weigh-ins in one morning
