@@ -165,54 +165,63 @@ func spansMoreThanOne(sources []Source) bool {
 	return false
 }
 
-// metricValue reads one metric off an entry. The bool is false when the
-// entry did not record it — absent is NOT zero, which is the rule the whole
-// composition schema is built on.
+// compositionAccessors maps every metric key stored on BodyComposition to the
+// field it reads.
 //
-// Exhaustive on purpose, with no value-returning default: a default of
-// `0, true` would turn an unknown metric name into a fabricated reading of
-// zero and fit a rate through it.
+// A table rather than a switch, deliberately (kora#399). With a switch, the
+// endpoint's allow-list had to be a SECOND hand-maintained list, and a metric
+// added to one but not the other was undetectable: the obvious test walks the
+// allow-list, and a reverse-direction test would have to walk a hand-written
+// expectation map that shares the same blind spot. Deriving knownMetric from
+// this table makes the two agree by construction instead of by vigilance.
+var compositionAccessors = map[string]func(BodyComposition) *float64{
+	"body_fat_pct":         func(c BodyComposition) *float64 { return c.BodyFatPct },
+	"subcutaneous_fat_pct": func(c BodyComposition) *float64 { return c.SubcutaneousFatPct },
+	"visceral_fat_rating":  func(c BodyComposition) *float64 { return c.VisceralFatRating },
+	"skeletal_muscle_pct":  func(c BodyComposition) *float64 { return c.SkeletalMusclePct },
+	"muscle_mass_kg":       func(c BodyComposition) *float64 { return c.MuscleMassKg },
+	"body_water_pct":       func(c BodyComposition) *float64 { return c.BodyWaterPct },
+	"protein_pct":          func(c BodyComposition) *float64 { return c.ProteinPct },
+	"bone_mass_kg":         func(c BodyComposition) *float64 { return c.BoneMassKg },
+	"scale_bmr_kcal":       func(c BodyComposition) *float64 { return c.ScaleBMRKcal },
+	"neck_cm":              func(c BodyComposition) *float64 { return c.NeckCm },
+	"chest_cm":             func(c BodyComposition) *float64 { return c.ChestCm },
+	"waist_cm":             func(c BodyComposition) *float64 { return c.WaistCm },
+	"hip_cm":               func(c BodyComposition) *float64 { return c.HipCm },
+	"arm_cm":               func(c BodyComposition) *float64 { return c.ArmCm },
+	"thigh_cm":             func(c BodyComposition) *float64 { return c.ThighCm },
+}
+
+// weightMetricKey is the one metric that is not on BodyComposition -- it is
+// the weigh-in itself, a plain non-pointer field, and therefore always present.
+const weightMetricKey = "weight_kg"
+
+// metricValue reads one metric off an entry. The bool is false when the entry
+// did not record it -- absent is NOT zero, which is the rule the whole
+// composition schema is built on. An unknown metric name is also false, never
+// a fabricated reading of zero fitted through the gap.
 func metricValue(e WeightEntry, metric string) (float64, bool) {
-	if metric == "weight_kg" {
+	if metric == weightMetricKey {
 		return e.WeightKg, true
 	}
-	var p *float64
-	switch metric {
-	case "body_fat_pct":
-		p = e.BodyFatPct
-	case "subcutaneous_fat_pct":
-		p = e.SubcutaneousFatPct
-	case "visceral_fat_rating":
-		p = e.VisceralFatRating
-	case "skeletal_muscle_pct":
-		p = e.SkeletalMusclePct
-	case "muscle_mass_kg":
-		p = e.MuscleMassKg
-	case "body_water_pct":
-		p = e.BodyWaterPct
-	case "protein_pct":
-		p = e.ProteinPct
-	case "bone_mass_kg":
-		p = e.BoneMassKg
-	case "scale_bmr_kcal":
-		p = e.ScaleBMRKcal
-	case "neck_cm":
-		p = e.NeckCm
-	case "chest_cm":
-		p = e.ChestCm
-	case "waist_cm":
-		p = e.WaistCm
-	case "hip_cm":
-		p = e.HipCm
-	case "arm_cm":
-		p = e.ArmCm
-	case "thigh_cm":
-		p = e.ThighCm
-	default:
+	accessor, ok := compositionAccessors[metric]
+	if !ok {
 		return 0, false
 	}
+	p := accessor(e.BodyComposition)
 	if p == nil {
 		return 0, false
 	}
 	return *p, true
+}
+
+// knownMetric reports whether a rate may be fitted over this metric. Derived
+// from compositionAccessors so the allow-list cannot drift from what
+// metricValue can actually read (kora#399).
+func knownMetric(metric string) bool {
+	if metric == weightMetricKey {
+		return true
+	}
+	_, ok := compositionAccessors[metric]
+	return ok
 }

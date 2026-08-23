@@ -202,7 +202,10 @@ export default function Progress() {
   // The fitted weekly rate (kora#45) — a separate estimate from the chart
   // above, keyed by the same charted metric and range so switching either
   // one cannot show a stale rate for the metric or window no longer shown.
-  const weightTrend = useWeightTrend(activeKey, range);
+  // hasChart (2+ points) is a cheaper gate than the fit's own 4-reading
+  // minimum, and deliberately so: it only skips the users for whom NO rate can
+  // exist, without second-guessing the server's gate (kora#399).
+  const weightTrend = useWeightTrend(activeKey, range, hasChart);
   const trendText = weightTrend.data ? trendSentence(weightTrend.data, metric, system) : null;
 
   const latest = trend.points[trend.points.length - 1]?.value;
