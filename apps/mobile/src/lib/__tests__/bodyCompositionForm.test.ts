@@ -229,3 +229,68 @@ describe("previewValues — what the live derived readout reads", () => {
     expect(previewValues({ weight_kg: "150" }, "imperial").weight_kg).toBeCloseTo(68.0388555, 4);
   });
 });
+
+// kora#45's tape measurements. The values here are deliberately synthetic
+// repeating-digit figures, not anyone's measurements — this repo is public.
+describe("tape measurements", () => {
+  it("omits every untouched tape field, exactly as it does the scale metrics", () => {
+    const payload = ok(parseCompositionDraft({ weight_kg: "70.2" }, "manual", "metric"));
+    for (const key of ["neck_cm", "chest_cm", "waist_cm", "hip_cm", "arm_cm", "thigh_cm"]) {
+      expect(key in payload).toBe(false);
+    }
+    // Belt and braces against a `?? 0` anywhere on the path: a request body
+    // carrying `"waist_cm":0` would be stored as a measured 0cm waist.
+    expect(JSON.stringify(payload)).not.toContain("_cm");
+  });
+
+  it("carries only the tape fields that were filled in", () => {
+    const payload = ok(
+      parseCompositionDraft({ weight_kg: "70.2", waist_cm: "88.8", arm_cm: "22.2" }, "manual", "metric"),
+    );
+    expect(payload).toEqual({ weight_kg: 70.2, waist_cm: 88.8, arm_cm: 22.2, source: "manual" });
+  });
+
+  it("reads an imperial entry as INCHES and sends centimetres", () => {
+    // The column is centimetres whatever the user's preference. 35 in is
+    // 88.9 cm; storing the typed 35 would be a different body.
+    const payload = ok(parseCompositionDraft({ weight_kg: "154", waist_cm: "35" }, "manual", "imperial"));
+    expect(payload.waist_cm).toBeCloseTo(88.9, 6);
+  });
+
+  it("rejects a 0, which is an empty field that arrived as a number rather than a measurement", () => {
+    expect(bad(parseCompositionDraft({ weight_kg: "70", waist_cm: "0" }, "manual", "metric")).waist_cm).toBe(
+      "Waist must be between 0 and 300 cm.",
+    );
+  });
+
+  it("rejects a value past 300cm, catching millimetres typed into a centimetre field", () => {
+    const errors = bad(parseCompositionDraft({ weight_kg: "70", hip_cm: "999" }, "manual", "metric"));
+    expect(errors.hip_cm).toBe("Hip must be between 0 and 300 cm.");
+    // 300 exactly is the server's inclusive maximum, so the form must take it.
+    expect(ok(parseCompositionDraft({ weight_kg: "70", hip_cm: "300" }, "manual", "metric")).hip_cm).toBe(300);
+  });
+
+  it("states the bound in the unit the field is SHOWING, not in stored centimetres", () => {
+    // "between 0 and 300 in" would be 762cm — a limit this very form then
+    // refuses, telling the user a number it will not accept.
+    const errors = bad(parseCompositionDraft({ weight_kg: "154", waist_cm: "999" }, "manual", "imperial"));
+    expect(errors.waist_cm).toBe("Waist must be between 0 and 118.1 in.");
+    expect(errors.waist_cm).not.toContain("300");
+  });
+
+  it("round-trips a stored centimetre value back into an imperial field as inches", () => {
+    expect(draftFromValues({ waist_cm: 88.9 }, "imperial").waist_cm).toBe("35.0");
+    expect(draftFromValues({ waist_cm: 88.9 }, "metric").waist_cm).toBe("88.9");
+  });
+
+  it("keeps an unreadable or out-of-range tape value out of the live preview", () => {
+    // Lenient where parseCompositionDraft is strict — mid-keystroke these are
+    // simply not values yet, so they contribute nothing rather than a zero.
+    expect(previewValues({ weight_kg: "70", waist_cm: "88.8.8" }, "metric")).toEqual({ weight_kg: 70 });
+    expect(previewValues({ weight_kg: "70", thigh_cm: "999" }, "metric")).toEqual({ weight_kg: 70 });
+    expect(previewValues({ weight_kg: "70", thigh_cm: "44.4" }, "metric")).toEqual({
+      weight_kg: 70,
+      thigh_cm: 44.4,
+    });
+  });
+});

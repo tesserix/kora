@@ -179,6 +179,13 @@ func (r Repository) AddWeightEntry(ctx context.Context, userID uuid.UUID, in Wei
 // it exceeds 59 rather than being stored as a plausible-looking rating.
 const maxVisceralFatRating = 59
 
+// maxMeasurementCm bounds a tape measurement (kora#45). 300cm is past any
+// human circumference, so it rejects the mistakes that actually happen — a
+// value typed in millimetres, or two fields run together — while admitting
+// every real reading. Inches are never stored, so a number below the bound is
+// unambiguous.
+const maxMeasurementCm = 300
+
 // validateComposition returns a copy with Source defaulted, rejecting values
 // that cannot be true. It never mutates its argument.
 func validateComposition(c BodyComposition) (BodyComposition, error) {
@@ -202,6 +209,24 @@ func validateComposition(c BodyComposition) (BodyComposition, error) {
 	for name, v := range masses {
 		if v != nil && *v <= 0 {
 			return BodyComposition{}, httpx.ValidationError{Message: name + " must be positive"}
+		}
+	}
+	// Tape measurements: exclusive minimum, because a 0cm circumference is not
+	// a measurement anyone can take — it is an empty field that arrived as a
+	// number. Upper bound catches millimetres typed into a centimetre field.
+	lengths := map[string]*float64{
+		"neck_cm":  c.NeckCm,
+		"chest_cm": c.ChestCm,
+		"waist_cm": c.WaistCm,
+		"hip_cm":   c.HipCm,
+		"arm_cm":   c.ArmCm,
+		"thigh_cm": c.ThighCm,
+	}
+	for name, v := range lengths {
+		if v != nil && (*v <= 0 || *v > maxMeasurementCm) {
+			return BodyComposition{}, httpx.ValidationError{
+				Message: fmt.Sprintf("%s must be between 0 and %d", name, maxMeasurementCm),
+			}
 		}
 	}
 	if c.VisceralFatRating != nil && (*c.VisceralFatRating <= 0 || *c.VisceralFatRating > maxVisceralFatRating) {

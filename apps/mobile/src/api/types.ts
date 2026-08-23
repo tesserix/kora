@@ -619,6 +619,28 @@ export type WeightEntry = {
    * so a scale-driven target would jump when the user changes scales.
    */
   scale_bmr_kcal?: number;
+  /**
+   * Tape measurements in CENTIMETRES (kora#45), whatever the user's units
+   * preference — the client converts for display, exactly as it does for kg.
+   *
+   * Optional and independent of one another: someone who measures only their
+   * waist has a waist and nothing else, and every absent one means NOT
+   * MEASURED rather than zero. They come from a tape, not the scale that
+   * produced the metrics above, which is why they sit apart from them here
+   * and at the end of the catalogue in src/lib/bodyCompositionFields.ts.
+   *
+   * Deliberately NOT on `BodyCompositionReading` below: a scale screenshot
+   * cannot contain a tape measurement, so the vision pass must never be
+   * asked for one.
+   */
+  neck_cm?: number;
+  chest_cm?: number;
+  waist_cm?: number;
+  hip_cm?: number;
+  /** ONE arm — whichever the user measures consistently. Not a left/right pair. */
+  arm_cm?: number;
+  /** ONE thigh, on the same reasoning as `arm_cm`. */
+  thigh_cm?: number;
   source: WeightSource;
 };
 

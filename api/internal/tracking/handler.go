@@ -99,6 +99,14 @@ type addWeightRequest struct {
 	// ScaleBMRKcal is stored for comparison only — it never feeds a calorie
 	// target, which stays derived by internal/onboarding/calc.go.
 	ScaleBMRKcal *float64 `json:"scale_bmr_kcal"`
+	// Tape measurements in centimetres (kora#45). Optional and independent of
+	// each other: a caller who measured only their waist sends only waist_cm.
+	NeckCm  *float64 `json:"neck_cm"`
+	ChestCm *float64 `json:"chest_cm"`
+	WaistCm *float64 `json:"waist_cm"`
+	HipCm   *float64 `json:"hip_cm"`
+	ArmCm   *float64 `json:"arm_cm"`
+	ThighCm *float64 `json:"thigh_cm"`
 	// Source is the measuring instrument. Empty defaults to manual in the
 	// repository; an unrecognised value is a 400, not a constraint violation.
 	Source Source `json:"source"`
@@ -115,6 +123,12 @@ func (req addWeightRequest) composition() BodyComposition {
 		ProteinPct:         req.ProteinPct,
 		BoneMassKg:         req.BoneMassKg,
 		ScaleBMRKcal:       req.ScaleBMRKcal,
+		NeckCm:             req.NeckCm,
+		ChestCm:            req.ChestCm,
+		WaistCm:            req.WaistCm,
+		HipCm:              req.HipCm,
+		ArmCm:              req.ArmCm,
+		ThighCm:            req.ThighCm,
 		Source:             req.Source,
 	}
 }

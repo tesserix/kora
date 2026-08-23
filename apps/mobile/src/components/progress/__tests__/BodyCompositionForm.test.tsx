@@ -36,12 +36,14 @@ test("saves only the fields that were filled, omitting the rest entirely", async
   expect(onSubmit).toHaveBeenCalledTimes(1);
   const payload = onSubmit.mock.calls[0][0];
   expect(payload).toEqual({ weight_kg: 70.2, body_fat_pct: 24.2, source: "manual", ...todayFields });
-  // The eight untouched metrics are absent, not zero.
+  // Every untouched metric is absent, not zero — the six tape measurements
+  // (kora#45) included.
   expect("visceral_fat_rating" in payload).toBe(false);
   expect("muscle_mass_kg" in payload).toBe(false);
+  expect("waist_cm" in payload).toBe(false);
 });
 
-test("a weight-only entry carries the weight and nothing else — not nine zeroes", async () => {
+test("a weight-only entry carries the weight and nothing else — not fifteen zeroes", async () => {
   const onSubmit = jest.fn();
   const { getByLabelText, getByText } = await render(<BodyCompositionForm onSubmit={onSubmit} />);
   await fireEvent.changeText(getByLabelText("Weight in kilograms"), "70.2");
@@ -110,10 +112,11 @@ describe("derived values", () => {
     const { getAllByPlaceholderText, getByLabelText, queryByLabelText } = await render(
       <BodyCompositionForm onSubmit={jest.fn()} />,
     );
-    // Nine optional inputs — the nine measured metrics beside weight, and
-    // nothing else. A derived value with a text input would be exactly the
-    // second source of truth these columns were left out to avoid.
-    expect(getAllByPlaceholderText("Optional")).toHaveLength(9);
+    // Fifteen optional inputs — the nine measured scale metrics beside
+    // weight plus kora#45's six tape measurements, and nothing else. A
+    // derived value with a text input would be exactly the second source of
+    // truth these columns were left out to avoid.
+    expect(getAllByPlaceholderText("Optional")).toHaveLength(15);
     // The labels they would carry if they were fields, by this form's own
     // naming convention (see metricAccessibilityLabel).
     expect(queryByLabelText("BMI")).toBeNull();
@@ -354,7 +357,7 @@ describe("expandable (kora#314 PR C)", () => {
     expect(getByTestId("composition-derived")).toBeTruthy();
   });
 
-  test("a weight-only save while collapsed sends no composition keys — not nine zeroes, not nine absences typed in", async () => {
+  test("a weight-only save while collapsed sends no composition keys — not fifteen zeroes, not fifteen absences typed in", async () => {
     const onSubmit = jest.fn();
     const { getByLabelText, getByText } = await render(<BodyCompositionForm expandable onSubmit={onSubmit} />);
     await fireEvent.changeText(getByLabelText("Weight in kilograms"), "70.2");
@@ -382,6 +385,45 @@ describe("expandable (kora#314 PR C)", () => {
     expect(onSubmit.mock.calls[0][0]).toEqual({
       weight_kg: 70.2,
       body_fat_pct: 24.2,
+      source: "manual",
+      ...todayFields,
+    });
+  });
+
+  // kora#45's tape measurements. They are appended to the END of
+  // COMPOSITION_METRICS, which is what puts all six inside OTHER_METRICS and
+  // therefore behind this disclosure.
+  test("keeps every tape field behind More fields, out of the two-tap weigh-in", async () => {
+    const { getByLabelText, queryByLabelText } = await render(
+      <BodyCompositionForm expandable onSubmit={jest.fn()} />,
+    );
+    expect(getByLabelText("Weight in kilograms")).toBeTruthy();
+    for (const label of ["Neck", "Chest", "Waist", "Hip", "Arm", "Thigh"]) {
+      expect(queryByLabelText(`${label} in centimetres`)).toBeNull();
+    }
+  });
+
+  test("reveals all six tape fields when the section is opened", async () => {
+    const { getByTestId, getByLabelText } = await render(
+      <BodyCompositionForm expandable onSubmit={jest.fn()} />,
+    );
+    await fireEvent.press(getByTestId("composition-expand-toggle"));
+    for (const label of ["Neck", "Chest", "Waist", "Hip", "Arm", "Thigh"]) {
+      expect(getByLabelText(`${label} in centimetres`)).toBeTruthy();
+    }
+  });
+
+  test("a tape measurement typed while expanded reaches the payload in centimetres", async () => {
+    const onSubmit = jest.fn();
+    const { getByLabelText, getByText } = await render(
+      <BodyCompositionForm expandable initiallyExpanded onSubmit={onSubmit} />,
+    );
+    await fireEvent.changeText(getByLabelText("Weight in kilograms"), "70.2");
+    await fireEvent.changeText(getByLabelText("Waist in centimetres"), "88.8");
+    await fireEvent.press(getByText("Save"));
+    expect(onSubmit.mock.calls[0][0]).toEqual({
+      weight_kg: 70.2,
+      waist_cm: 88.8,
       source: "manual",
       ...todayFields,
     });
@@ -471,5 +513,36 @@ describe("logged_at is never in the future (kora#378)", () => {
     await fireEvent.press(getByText("Save"));
 
     expect(onSubmit.mock.calls[0][0].logged_at).toBe("2026-08-19T12:00:00Z");
+  });
+});
+
+// kora#45: an imperial user types INCHES into a tape field, and centimetres
+// are what leave the form. The label is the tell that the field is asking for
+// inches at all.
+describe("tape measurements in imperial", () => {
+  beforeEach(() => {
+    mockUseUnits.mockReturnValue({ system: "imperial", setSystem: jest.fn() });
+  });
+
+  test("asks for inches and sends centimetres", async () => {
+    const onSubmit = jest.fn();
+    const { getByLabelText, getByText, queryByLabelText } = await render(
+      <BodyCompositionForm onSubmit={onSubmit} />,
+    );
+    expect(getByLabelText("Waist in inches")).toBeTruthy();
+    // Never spoken as centimetres to someone being asked for inches.
+    expect(queryByLabelText("Waist in centimetres")).toBeNull();
+
+    await fireEvent.changeText(getByLabelText("Weight in pounds"), "154");
+    await fireEvent.changeText(getByLabelText("Waist in inches"), "35");
+    await fireEvent.press(getByText("Save"));
+    expect(onSubmit.mock.calls[0][0].waist_cm).toBeCloseTo(88.9, 6);
+  });
+
+  test("pre-fills an existing centimetre value as inches", async () => {
+    const { getByLabelText } = await render(
+      <BodyCompositionForm initialValues={{ weight_kg: 70, waist_cm: 88.9 }} onSubmit={jest.fn()} />,
+    );
+    expect(getByLabelText("Waist in inches").props.value).toBe("35.0");
   });
 });

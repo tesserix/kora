@@ -8,8 +8,10 @@ import {
   displayNumber,
   formatMetricNumber,
   metricAccessibilityLabel,
+  isConvertedMetric,
   metricValue,
   orderSourcesDetectedFirst,
+  storedNumber,
   sourceLabel,
   unitLabel,
 } from "../bodyCompositionFields";
@@ -35,7 +37,36 @@ describe("the catalogue", () => {
       "protein_pct",
       "bone_mass_kg",
       "scale_bmr_kcal",
+      // kora#45's tape measurements, appended AFTER the scale metrics. See
+      // the ordering comment on COMPOSITION_METRICS: the list above is a
+      // Renpho screenshot read top to bottom, and a tape measurement is not
+      // on that screenshot.
+      "neck_cm",
+      "chest_cm",
+      "waist_cm",
+      "hip_cm",
+      "arm_cm",
+      "thigh_cm",
     ]);
+  });
+
+  it("keeps weight first, because BodyCompositionForm destructures it off the front", () => {
+    // `const [WEIGHT_METRIC, ...OTHER_METRICS] = COMPOSITION_METRICS` — if
+    // weight stops being index 0 the weigh-in sheet silently renders some
+    // other metric as its always-visible field.
+    expect(COMPOSITION_METRICS[0].key).toBe("weight_kg");
+  });
+
+  it("puts every tape measurement in the tail, so all six land inside More fields", () => {
+    // The same destructure sends everything after index 0 into the
+    // disclosure. Being LAST is additionally what keeps the six off the
+    // first screen of the two-tap weigh-in; a tape metric slotted in beside
+    // body fat would still be in OTHER_METRICS but would push the scale
+    // metrics down for no reason.
+    const keys = COMPOSITION_METRICS.map((m) => m.key);
+    const lengthKeys = COMPOSITION_METRICS.filter((m) => m.unitKind === "length").map((m) => m.key);
+    expect(lengthKeys).toHaveLength(6);
+    expect(keys.slice(-6)).toEqual(lengthKeys);
   });
 
   it("makes weight the only required field", () => {
@@ -58,6 +89,21 @@ describe("unitLabel", () => {
     expect(unitLabel(compositionMetric("body_fat_pct"), "imperial")).toBe("%");
     expect(unitLabel(compositionMetric("scale_bmr_kcal"), "imperial")).toBe("kcal");
   });
+
+  it("labels a tape measurement cm or in, never kg or lb (kora#45)", () => {
+    const waist = compositionMetric("waist_cm");
+    expect(unitLabel(waist, "metric")).toBe("cm");
+    expect(unitLabel(waist, "imperial")).toBe("in");
+    // A length sharing the mass unit is the specific mistake `length`
+    // exists to make impossible.
+    expect(unitLabel(waist, "imperial")).not.toBe("lb");
+  });
+
+  it("gives all six tape measurements the same unit, not just the one that was tested", () => {
+    const lengths = COMPOSITION_METRICS.filter((m) => m.unitKind === "length");
+    expect(lengths.map((m) => unitLabel(m, "metric"))).toEqual(["cm", "cm", "cm", "cm", "cm", "cm"]);
+    expect(lengths.map((m) => unitLabel(m, "imperial"))).toEqual(["in", "in", "in", "in", "in", "in"]);
+  });
 });
 
 describe("metricAccessibilityLabel", () => {
@@ -67,6 +113,12 @@ describe("metricAccessibilityLabel", () => {
     expect(metricAccessibilityLabel(compositionMetric("scale_bmr_kcal"), "metric")).toBe(
       "Scale BMR in kilocalories",
     );
+  });
+
+  it("speaks a tape measurement's unit in words, following the same convention", () => {
+    expect(metricAccessibilityLabel(compositionMetric("waist_cm"), "metric")).toBe("Waist in centimetres");
+    expect(metricAccessibilityLabel(compositionMetric("waist_cm"), "imperial")).toBe("Waist in inches");
+    expect(metricAccessibilityLabel(compositionMetric("hip_cm"), "metric")).toBe("Hip in centimetres");
   });
 
   it("says rating for visceral fat, so it is not heard as a percentage", () => {
@@ -110,6 +162,13 @@ describe("displayNumber / formatMetricNumber", () => {
   it("converts only the kg-backed metrics for display", () => {
     expect(displayNumber(compositionMetric("muscle_mass_kg"), 50, "imperial")).toBeCloseTo(110.23, 2);
     expect(displayNumber(compositionMetric("body_fat_pct"), 24.2, "imperial")).toBe(24.2);
+  });
+
+  it("converts a tape measurement cm to in, and only for an imperial reader", () => {
+    const waist = compositionMetric("waist_cm");
+    // 2.54 cm to the inch: 88.9 cm is exactly 35 in.
+    expect(displayNumber(waist, 88.9, "imperial")).toBeCloseTo(35, 6);
+    expect(displayNumber(waist, 88.9, "metric")).toBe(88.9);
   });
 
   it("writes a tenth for a scale's tenths, including Omron's 7.5 visceral rating", () => {
@@ -161,5 +220,60 @@ describe("orderSourcesDetectedFirst", () => {
     expect(orderSourcesDetectedFirst("dexa")).toEqual(["dexa", "scale_screenshot", "inbody"]);
     expect(orderSourcesDetectedFirst("inbody")).toEqual(["inbody", "scale_screenshot", "dexa"]);
     expect(orderSourcesDetectedFirst("scale_screenshot")).toEqual(DETECTABLE_SOURCES);
+  });
+});
+
+describe("storedNumber", () => {
+  it("is the exact inverse of displayNumber for every converted metric", () => {
+    // The failure this guards is subtle and silent: if these two directions
+    // ever disagree, a typed 35 in round-trips into a 35 cm column and
+    // nothing on screen looks wrong.
+    for (const metric of COMPOSITION_METRICS) {
+      for (const system of ["metric", "imperial"] as const) {
+        const stored = 33.3;
+        expect(storedNumber(metric, displayNumber(metric, stored, system), system)).toBeCloseTo(stored, 6);
+      }
+    }
+  });
+
+  it("reads an imperial tape entry as inches, so cm is what actually gets stored", () => {
+    expect(storedNumber(compositionMetric("waist_cm"), 35, "imperial")).toBeCloseTo(88.9, 6);
+    // Metric types cm directly; nothing to convert.
+    expect(storedNumber(compositionMetric("waist_cm"), 88.9, "metric")).toBe(88.9);
+  });
+
+  it("leaves a percentage, a rating and a kcal figure alone in either system", () => {
+    expect(storedNumber(compositionMetric("body_fat_pct"), 22.2, "imperial")).toBe(22.2);
+    expect(storedNumber(compositionMetric("visceral_fat_rating"), 7.5, "imperial")).toBe(7.5);
+    expect(storedNumber(compositionMetric("scale_bmr_kcal"), 1620, "imperial")).toBe(1620);
+  });
+});
+
+describe("isConvertedMetric", () => {
+  it("covers length as well as mass — the reason it replaced isMassMetric at the conversion sites", () => {
+    expect(isConvertedMetric(compositionMetric("weight_kg"))).toBe(true);
+    expect(isConvertedMetric(compositionMetric("waist_cm"))).toBe(true);
+    expect(isConvertedMetric(compositionMetric("body_fat_pct"))).toBe(false);
+    expect(isConvertedMetric(compositionMetric("visceral_fat_rating"))).toBe(false);
+    expect(isConvertedMetric(compositionMetric("scale_bmr_kcal"))).toBe(false);
+  });
+});
+
+describe("the tape measurements' own bounds", () => {
+  it("mirrors validateComposition's 0-exclusive to 300cm, in centimetres", () => {
+    // Stated in STORED units because that is what the form range-checks
+    // against, after converting whatever the user typed. Mirrors
+    // maxMeasurementCm in api/internal/tracking/repository.go — a form that
+    // accepted more than the server does would turn a typo into a save
+    // failure with no field to point at.
+    for (const metric of COMPOSITION_METRICS.filter((m) => m.unitKind === "length")) {
+      expect(metric.range).toEqual({ min: 0, max: 300, exclusiveMin: true });
+    }
+  });
+
+  it("leaves every tape measurement optional — weight stays the only required field", () => {
+    for (const metric of COMPOSITION_METRICS.filter((m) => m.unitKind === "length")) {
+      expect(metric.required).toBeUndefined();
+    }
   });
 });

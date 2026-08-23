@@ -1,10 +1,10 @@
 import type { BodyCompositionReading, WeightEntry, WeightSource } from "@/api/types";
-import { lbFromKg, weightUnitLabel, type UnitSystem } from "@/units";
+import { cmFromIn, inFromCm, kgFromLb, lbFromKg, weightUnitLabel, type UnitSystem } from "@/units";
 
 /**
  * The one description of every body-composition metric Kora stores (kora#45).
  *
- * Three surfaces need the same facts about these ten numbers — the manual
+ * Three surfaces need the same facts about these sixteen numbers — the manual
  * entry form, the trend picker, and #314's screenshot-confirm screen — and the
  * facts are the kind that go wrong when they are restated: whether a metric is
  * a percentage or a vendor rating, what unit its label must say, and what
@@ -28,7 +28,16 @@ export type CompositionMetricKey =
   | "body_water_pct"
   | "protein_pct"
   | "bone_mass_kg"
-  | "scale_bmr_kcal";
+  | "scale_bmr_kcal"
+  // Tape measurements (kora#45). Stored in centimetres, appended after the
+  // scale metrics — see COMPOSITION_METRICS' ordering comment for why they
+  // cannot be interleaved with them.
+  | "neck_cm"
+  | "chest_cm"
+  | "waist_cm"
+  | "hip_cm"
+  | "arm_cm"
+  | "thigh_cm";
 
 /**
  * What kind of quantity a metric is, which decides its unit label.
@@ -37,8 +46,14 @@ export type CompositionMetricKey =
  * It is a vendor rating on a vendor scale — Renpho prints a bare `7`, Omron
  * `7.5 level`, Tanita a 1-59 band — and a `%` next to it is not a cosmetic
  * slip, it is a claim about the number that is false.
+ *
+ * `length` is the tape measurements (kora#45). It exists as its own kind
+ * rather than reusing `mass` because both are stored metric and converted for
+ * an imperial user, but they convert by DIFFERENT constants into DIFFERENT
+ * units — a waist rendered with `lb` would be as wrong as a rating rendered
+ * with `%`.
  */
-export type CompositionUnitKind = "mass" | "percent" | "rating" | "kcal";
+export type CompositionUnitKind = "mass" | "percent" | "rating" | "kcal" | "length";
 
 /** Bounds mirroring validateComposition in api/internal/tracking/repository.go. */
 export interface CompositionRange {
@@ -63,8 +78,19 @@ export interface CompositionMetric {
 /** The widest vendor scale in use is Tanita's 1-59; mirrors maxVisceralFatRating. */
 const MAX_VISCERAL_FAT_RATING = 59;
 
+/**
+ * Mirrors maxMeasurementCm in api/internal/tracking/repository.go. 300cm is
+ * past any human circumference, so it rejects the mistake that actually
+ * happens — millimetres typed into a centimetre field — without refusing a
+ * real reading. Kept the same number as the server's so a value this form
+ * accepts is never one the server then rejects.
+ */
+const MAX_MEASUREMENT_CM = 300;
+
 const PERCENT: CompositionRange = { min: 0, max: 100 };
 const POSITIVE: CompositionRange = { min: 0, max: Number.POSITIVE_INFINITY, exclusiveMin: true };
+/** Bounds in CENTIMETRES, which is what `inRange` checks — it is handed the stored value. */
+const LENGTH_CM: CompositionRange = { min: 0, max: MAX_MEASUREMENT_CM, exclusiveMin: true };
 
 /**
  * Order is the order a Renpho screenshot reads top to bottom, so someone
@@ -106,6 +132,32 @@ export const COMPOSITION_METRICS: readonly CompositionMetric[] = [
     note: "Recorded for comparison only — your daily target stays Kora's own.",
     range: POSITIVE,
   },
+  // Tape measurements (kora#45), and they go at the END on purpose. The order
+  // above is a Renpho screenshot read top to bottom; a tape measurement is not
+  // on that screenshot, so slotting one in beside body fat would break the
+  // read-down-the-list property for the people the order exists for. Being
+  // last is also what puts all six inside BodyCompositionForm's OTHER_METRICS
+  // — the "More fields" disclosure — so they never intrude on the two-tap
+  // weigh-in. Neither is incidental: reordering this list moves them onto the
+  // first screen of the weigh-in sheet.
+  { key: "neck_cm", label: "Neck", unitKind: "length", range: LENGTH_CM },
+  { key: "chest_cm", label: "Chest", unitKind: "length", range: LENGTH_CM },
+  { key: "waist_cm", label: "Waist", unitKind: "length", range: LENGTH_CM },
+  { key: "hip_cm", label: "Hip", unitKind: "length", range: LENGTH_CM },
+  {
+    key: "arm_cm",
+    label: "Arm",
+    unitKind: "length",
+    note: "One arm — whichever you measure. Keep to the same one so the trend is a trend.",
+    range: LENGTH_CM,
+  },
+  {
+    key: "thigh_cm",
+    label: "Thigh",
+    unitKind: "length",
+    note: "One thigh, on the same reasoning as arm.",
+    range: LENGTH_CM,
+  },
 ] as const;
 
 export function compositionMetric(key: CompositionMetricKey): CompositionMetric {
@@ -130,6 +182,8 @@ export function unitLabel(metric: CompositionMetric, system: UnitSystem): string
       return "%";
     case "kcal":
       return "kcal";
+    case "length":
+      return system === "imperial" ? "in" : "cm";
     case "rating":
       return "";
   }
@@ -150,6 +204,8 @@ export function metricAccessibilityLabel(metric: CompositionMetric, system: Unit
       return `${metric.label} percent`;
     case "kcal":
       return `${metric.label} in kilocalories`;
+    case "length":
+      return `${metric.label} in ${system === "imperial" ? "inches" : "centimetres"}`;
     case "rating":
       return `${metric.label} rating`;
   }
@@ -158,6 +214,19 @@ export function metricAccessibilityLabel(metric: CompositionMetric, system: Unit
 /** Whether a metric's stored value is in kg and therefore unit-converted for display. */
 export function isMassMetric(metric: CompositionMetric): boolean {
   return metric.unitKind === "mass";
+}
+
+/**
+ * Whether a metric is stored in a metric unit that an imperial user sees
+ * converted — mass (kg→lb) or length (cm→in).
+ *
+ * The predicate callers actually want. Every conversion site used to ask
+ * `isMassMetric` because mass was the only converted kind; asking that question
+ * now would silently write an imperial user's typed INCHES into a centimetre
+ * column, which is a wrong measurement rather than a visible bug.
+ */
+export function isConvertedMetric(metric: CompositionMetric): boolean {
+  return metric.unitKind === "mass" || metric.unitKind === "length";
 }
 
 /**
@@ -254,11 +323,41 @@ export function orderSourcesDetectedFirst(detected: WeightSource): readonly Weig
 }
 
 /**
- * The stored value converted for display. Only the kg-backed metrics move; a
- * percentage, a rating and a kcal figure are the same number in either system.
+ * The stored value converted for display. Only the kg- and cm-backed metrics
+ * move; a percentage, a rating and a kcal figure are the same number in either
+ * system.
  */
 export function displayNumber(metric: CompositionMetric, stored: number, system: UnitSystem): number {
-  return isMassMetric(metric) && system === "imperial" ? lbFromKg(stored) : stored;
+  if (system !== "imperial") return stored;
+  switch (metric.unitKind) {
+    case "mass":
+      return lbFromKg(stored);
+    case "length":
+      return inFromCm(stored);
+    default:
+      return stored;
+  }
+}
+
+/**
+ * The inverse of `displayNumber`: what the user typed, in the unit they were
+ * shown, turned back into what the column stores.
+ *
+ * Lives here rather than in the form so the two directions sit next to each
+ * other. They have to agree exactly — a display path converting cm→in while
+ * the parse path left inches alone would round-trip a 32in waist into a 32cm
+ * one, and nothing on screen would look wrong.
+ */
+export function storedNumber(metric: CompositionMetric, typed: number, system: UnitSystem): number {
+  if (system !== "imperial") return typed;
+  switch (metric.unitKind) {
+    case "mass":
+      return kgFromLb(typed);
+    case "length":
+      return cmFromIn(typed);
+    default:
+      return typed;
+  }
 }
 
 /**

@@ -114,6 +114,49 @@ describe("chartableMetrics", () => {
   it("offers nothing at all for an empty history", () => {
     expect(chartableMetrics([])).toEqual([]);
   });
+
+  // kora#45's tape measurements need no work here — the picker derives its
+  // chips from COMPOSITION_METRICS — but "needs no work" is exactly the claim
+  // worth pinning, since it is what would break silently if the catalogue
+  // ever grew a metric the chart could not read.
+  it("offers a tape measurement as a chip once one has been recorded", () => {
+    const metrics = chartableMetrics([entry({ waist_cm: 88.8 }), entry({ thigh_cm: 44.4 })]);
+    expect(metrics.map((m) => m.key)).toEqual(["weight_kg", "waist_cm", "thigh_cm"]);
+  });
+
+  it("offers no chip for a tape measurement that was never recorded", () => {
+    // The behaviour that keeps six always-empty chips off a screen where most
+    // people only ever log weight.
+    const keys = chartableMetrics([entry({ waist_cm: 88.8 })]).map((m) => m.key);
+    expect(keys).not.toContain("neck_cm");
+    expect(keys).not.toContain("hip_cm");
+    expect(keys).toEqual(["weight_kg", "waist_cm"]);
+  });
+});
+
+describe("a tape measurement with no readings", () => {
+  it("is an empty series rather than a throw or a zero point", () => {
+    // progress.tsx charts `metricSeries(entries, activeKey)` and falls back to
+    // weight when the selected metric is not in `chartableMetrics`; this is
+    // the behaviour that fallback rests on.
+    const series = metricSeries([entry(), entry()], "neck_cm");
+    expect(series.points).toEqual([]);
+    expect(series.breaksAfter).toEqual([]);
+    expect(series.sources).toEqual([]);
+    expect(lastComparableRun(series)).toEqual([]);
+    expect(hasInstrumentChange(series)).toBe(false);
+  });
+
+  it("plots a tape measurement the same way as any other metric once it has readings", () => {
+    const series = metricSeries(
+      [entry({ waist_cm: 88.8 }), entry(), entry({ waist_cm: 87.7, source: "dexa" })],
+      "waist_cm",
+    );
+    // The weight-only day in the middle is dropped, not plotted as 0cm.
+    expect(series.points.map((p) => p.value)).toEqual([88.8, 87.7]);
+    // And an instrument switch breaks a tape line just like a scale one.
+    expect(series.breaksAfter).toEqual([0]);
+  });
 });
 
 describe("lastComparableRun", () => {
