@@ -66,7 +66,11 @@ func TestWeeklyRateRejectsTooShortASpan(t *testing.T) {
 	require.False(t, ok, "10 days is below the 14-day gate")
 }
 
-func TestWeeklyRateRejectsReadingsAllAtOneInstant(t *testing.T) {
+func TestWeeklyRateRejectsReadingsAllAtOneInstantViaTheSpanGate(t *testing.T) {
+	// All readings share one instant, so spanDays == 0. It is the SPAN GATE
+	// (spanDays < minRateSpanDays) that rejects this input, not the den == 0
+	// guard further down -- that guard is unreachable while the span gate
+	// stands, since identical timestamps can never clear it.
 	at := day(0)
 	_, ok := WeeklyRate([]RatePoint{
 		{At: at, Value: 80}, {At: at, Value: 80.1},

@@ -64,9 +64,14 @@ func WeeklyRate(points []RatePoint) (RateResult, bool) {
 		den += dx * dx
 	}
 	if den == 0 {
-		// Every reading at the same instant: no slope exists. Guarded
-		// explicitly rather than relying on the span gate, because equal
-		// timestamps can still clear a span if the caller passes odd data.
+		// Every reading at the same instant: no slope exists.
+		//
+		// Currently UNREACHABLE -- den == 0 requires every timestamp to be
+		// identical, which forces spanDays == 0, which the span gate above
+		// already rejects. Kept deliberately: it is the only thing standing
+		// between a relaxed gate and a NaN reaching the user, and it costs
+		// one comparison. Do not write a test claiming to cover it; nothing
+		// can reach it while the gate stands.
 		return RateResult{}, false
 	}
 
