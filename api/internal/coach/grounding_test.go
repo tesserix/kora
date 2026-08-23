@@ -697,3 +697,34 @@ func localDayOf(t time.Time) time.Time {
 	}
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 }
+
+// kora#372: active energy and resting heart rate must reach the coach, not
+// merely reach the database. Without an entry in Facts they are columns
+// nothing reads — the state #373 was closed for proposing.
+func TestFactsCarryActiveEnergyAndRestingHeartRate(t *testing.T) {
+	energy, hr := 512, 58 // synthetic; the repo is public
+	c := Context{
+		HealthDays: []mentor.HealthDay{{
+			LocalDate:           time.Date(2026, 8, 23, 0, 0, 0, 0, time.UTC),
+			ActiveEnergyKcal:    &energy,
+			RestingHeartRateBpm: &hr,
+		}},
+	}
+	facts := c.Facts()
+	require.Contains(t, facts, Fact{Label: "health_active_energy_kcal_latest", Value: "512"})
+	require.Contains(t, facts, Fact{Label: "health_resting_heart_rate_bpm_latest", Value: "58"})
+}
+
+// The absent case: an unmeasured metric must not appear as a fact at all.
+// A zero would read to the model as "burned nothing today".
+func TestFactsOmitAbsentEnergyAndHeartRate(t *testing.T) {
+	c := Context{
+		HealthDays: []mentor.HealthDay{{
+			LocalDate: time.Date(2026, 8, 23, 0, 0, 0, 0, time.UTC),
+		}},
+	}
+	for _, f := range c.Facts() {
+		require.NotEqual(t, "health_active_energy_kcal_latest", f.Label)
+		require.NotEqual(t, "health_resting_heart_rate_bpm_latest", f.Label)
+	}
+}

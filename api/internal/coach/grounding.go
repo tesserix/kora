@@ -623,6 +623,15 @@ func (c Context) Facts() []Fact {
 		if latest.WorkoutMinutes != nil {
 			facts = append(facts, Fact{Label: "health_workout_minutes_latest", Value: strconv.Itoa(*latest.WorkoutMinutes)})
 		}
+		// kora#372. Without these two the metrics sync, pass consent and reach
+		// the database, and then never reach the coach -- columns nothing
+		// reads, which is exactly what #373 was closed for proposing.
+		if latest.ActiveEnergyKcal != nil {
+			facts = append(facts, Fact{Label: "health_active_energy_kcal_latest", Value: strconv.Itoa(*latest.ActiveEnergyKcal)})
+		}
+		if latest.RestingHeartRateBpm != nil {
+			facts = append(facts, Fact{Label: "health_resting_heart_rate_bpm_latest", Value: strconv.Itoa(*latest.RestingHeartRateBpm)})
+		}
 	}
 	facts = append(facts, Fact{Label: "active_commitments", Value: strconv.Itoa(len(c.Commitments))})
 	for i, item := range c.NutritionReferences {
