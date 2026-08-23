@@ -78,3 +78,68 @@ func TestWeeklyRateRejectsReadingsAllAtOneInstantViaTheSpanGate(t *testing.T) {
 	})
 	require.False(t, ok, "zero time variance has no slope and must not divide by zero")
 }
+
+func entry(n int, src Source, weight float64, bodyFat *float64) WeightEntry {
+	return WeightEntry{LoggedAt: day(n), WeightKg: weight, BodyComposition: BodyComposition{BodyFatPct: bodyFat, Source: src}}
+}
+
+func pct(v float64) *float64 { return &v }
+
+// Weight is a kilogram whichever scale reported it, so all sources fit.
+func TestPointsForWeightSpanAllSources(t *testing.T) {
+	entries := []WeightEntry{
+		entry(0, SourceManual, 80, nil),
+		entry(7, SourceManual, 79.5, nil),
+		entry(14, SourceHealthKit, 79, nil),
+		entry(21, SourceScaleScreenshot, 78.5, nil),
+	}
+	points, spans := PointsForMetric(entries, "weight_kg")
+	require.Len(t, points, 4, "weight must not be split by instrument")
+	require.True(t, spans)
+}
+
+// Vendors disagree about body fat by 20+ points, so only the trailing run fits.
+func TestPointsForBodyFatUseTrailingInstrumentRunOnly(t *testing.T) {
+	entries := []WeightEntry{
+		entry(0, SourceManual, 80, pct(30)),
+		entry(7, SourceManual, 79.5, pct(29)),
+		entry(14, SourceScaleScreenshot, 79, pct(24)),
+		entry(21, SourceScaleScreenshot, 78.5, pct(23.5)),
+	}
+	points, spans := PointsForMetric(entries, "body_fat_pct")
+	require.Len(t, points, 2, "only the trailing scale_screenshot run may be fitted")
+	require.False(t, spans, "a single-instrument run never spans instruments")
+	require.InDelta(t, 24, points[0].Value, 0.0001)
+}
+
+// A tape is a tape; source describes the WEIGH-IN, not the measurement.
+func TestPointsForTapeMeasurementSpanAllSources(t *testing.T) {
+	waist := func(v float64) *float64 { return &v }
+	entries := []WeightEntry{
+		{LoggedAt: day(0), WeightKg: 80, BodyComposition: BodyComposition{WaistCm: waist(90), Source: SourceManual}},
+		{LoggedAt: day(7), WeightKg: 79.5, BodyComposition: BodyComposition{WaistCm: waist(89), Source: SourceManual}},
+		{LoggedAt: day(14), WeightKg: 79, BodyComposition: BodyComposition{WaistCm: waist(88), Source: SourceScaleScreenshot}},
+		{LoggedAt: day(21), WeightKg: 78.5, BodyComposition: BodyComposition{WaistCm: waist(87), Source: SourceScaleScreenshot}},
+	}
+	points, _ := PointsForMetric(entries, "waist_cm")
+	require.Len(t, points, 4, "a tape series must not be split on the weigh-in's instrument")
+}
+
+func TestPointsForMetricSkipsEntriesMissingThatMetric(t *testing.T) {
+	entries := []WeightEntry{
+		entry(0, SourceManual, 80, pct(30)),
+		entry(7, SourceManual, 79.5, nil),
+		entry(14, SourceManual, 79, pct(29)),
+	}
+	points, _ := PointsForMetric(entries, "body_fat_pct")
+	require.Len(t, points, 2, "an absent optional metric is not a zero reading")
+}
+
+func TestFitsAcrossInstruments(t *testing.T) {
+	require.True(t, FitsAcrossInstruments("weight_kg"))
+	require.True(t, FitsAcrossInstruments("waist_cm"))
+	require.True(t, FitsAcrossInstruments("thigh_cm"))
+	require.False(t, FitsAcrossInstruments("body_fat_pct"))
+	require.False(t, FitsAcrossInstruments("muscle_mass_kg"))
+	require.False(t, FitsAcrossInstruments("scale_bmr_kcal"))
+}
