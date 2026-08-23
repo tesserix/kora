@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { Sheet } from "@/components/Sheet";
 import { Button } from "@/components/Button";
@@ -13,7 +13,7 @@ import { detectedInstrumentSource, MANUAL_SOURCES, orderSourcesDetectedFirst } f
 import { droppedFieldsNotice, pickScaleScreenshot, readFailureMessage } from "@/lib/bodyCompositionScan";
 import { compositionValuesFromReading, type AddWeightPayload, type CompositionValues } from "@/lib/bodyCompositionForm";
 import { useTheme } from "@/theme";
-import { BodyCompositionForm } from "./BodyCompositionForm";
+import { BodyCompositionForm, type BodyCompositionFormHandle } from "./BodyCompositionForm";
 
 interface Props {
   visible: boolean;
@@ -73,6 +73,11 @@ export function LogWeightSheet({ visible, onClose, initialKg = 0, heightCm }: Pr
 
   const [mode, setMode] = useState<Mode>("manual");
   const [manualError, setManualError] = useState<string | null>(null);
+  // One ref, safe to share across Manual and Screenshot: `mode === ...`
+  // below mounts at most one BodyCompositionForm at a time (the other branch
+  // renders nothing), so there is never a moment where two forms compete to
+  // own it.
+  const formRef = useRef<BodyCompositionFormHandle>(null);
 
   const [screenshotStage, setScreenshotStage] = useState<ScreenshotStage>("capture");
   const [notice, setNotice] = useState<string | null>(null);
@@ -180,8 +185,23 @@ export function LogWeightSheet({ visible, onClose, initialKg = 0, heightCm }: Pr
   // misdetection stays correctable rather than a stated, unchangeable fact.
   const screenshotSources = orderSourcesDetectedFirst(detectedSource ?? "scale_screenshot");
 
+  // A BodyCompositionForm is mounted in exactly two of the three visible
+  // states: Manual mode, and Screenshot mode once a read (or its manual
+  // fallback) has produced a form to confirm. The capture step has no form
+  // and nothing to save yet, so it gets no footer — Sheet already renders
+  // with none exactly as it did before this prop existed.
+  const formMounted = mode === "manual" || screenshotStage === "form";
+  const footer = formMounted ? (
+    <Button
+      testID="log-weight-save"
+      title="Save"
+      onPress={() => formRef.current?.submit()}
+      disabled={addWeight.isPending}
+    />
+  ) : undefined;
+
   return (
-    <Sheet visible={visible} onClose={onClose}>
+    <Sheet visible={visible} onClose={onClose} footer={footer}>
       <View style={{ paddingHorizontal: 22, paddingBottom: 30, gap: spacing.md }}>
         <Overline>Log weight</Overline>
         <SegmentedGlass
@@ -197,6 +217,7 @@ export function LogWeightSheet({ visible, onClose, initialKg = 0, heightCm }: Pr
             // switches back to "manual" — see this component's own doc
             // comment on why that's the right trade for a mode toggle.
             key="manual"
+            ref={formRef}
             initialValues={initialKg > 0 ? { weight_kg: initialKg } : undefined}
             sources={MANUAL_SOURCES}
             heightCm={heightCm}
@@ -204,6 +225,7 @@ export function LogWeightSheet({ visible, onClose, initialKg = 0, heightCm }: Pr
             initiallyExpanded={false}
             submitting={addWeight.isPending}
             error={manualError}
+            hideSubmitButton
             onSubmit={onManualSubmit}
           />
         ) : screenshotStage === "capture" ? (
@@ -245,6 +267,7 @@ export function LogWeightSheet({ visible, onClose, initialKg = 0, heightCm }: Pr
             {notice ? <AppText style={{ color: instrument.mut, fontSize: 13 }}>{notice}</AppText> : null}
             <BodyCompositionForm
               key="screenshot"
+              ref={formRef}
               initialValues={screenshotInitialValues}
               initialReadingDate={screenshotInitialReadingDate}
               sources={screenshotSources}
@@ -253,6 +276,7 @@ export function LogWeightSheet({ visible, onClose, initialKg = 0, heightCm }: Pr
               initiallyExpanded
               submitting={addWeight.isPending}
               error={screenshotError}
+              hideSubmitButton
               onSubmit={onScreenshotSubmit}
             />
           </>
