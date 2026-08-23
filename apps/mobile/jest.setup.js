@@ -354,7 +354,24 @@ jest.mock("@kingstinct/react-native-healthkit", () => ({
   isHealthDataAvailable: jest.fn(() => false),
   isHealthDataAvailableAsync: jest.fn(async () => false),
   requestAuthorization: jest.fn(async () => false),
+  // Apple's HKAuthorizationRequestStatus, re-exported by the package via
+  // lib/typescript/types/Auth.d.ts. The numeric values are copied from there,
+  // not guessed -- src/health/weightPermission.ts compares against this enum
+  // at runtime (it reaches it through the same lazy require as every other
+  // call), so a wrong value here would make the #375 launch-prompt gate pass
+  // for the wrong status.
+  AuthorizationRequestStatus: { unknown: 0, shouldRequest: 1, unnecessary: 2 },
+  // getRequestStatusForAuthorization(toCheck) => Promise<AuthorizationRequestStatus>.
+  // Defaults to shouldRequest (1): "the user has never been prompted", which is
+  // the state a fresh install is in and the one the launch-path gate must skip on.
+  getRequestStatusForAuthorization: jest.fn(async () => 1),
   queryQuantitySamples: jest.fn(async () => []),
+  // The anchored query useHealthSync's weight sync runs. Signature from the
+  // installed package's lib/typescript/healthkit.d.ts:
+  //   queryQuantitySamplesWithAnchor(identifier, options)
+  //     => Promise<{ samples, deletedSamples, newAnchor }>
+  // Default response is an empty window with a fresh cursor.
+  queryQuantitySamplesWithAnchor: jest.fn(async () => ({ samples: [], deletedSamples: [], newAnchor: "" })),
   // Today's step total is read through the cumulative-sum statistics query, not raw
   // samples, so HealthKit's source-priority dedup applies (an iPhone + Apple Watch
   // user would otherwise double-count). Signature from the installed package's

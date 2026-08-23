@@ -4,6 +4,7 @@ import { apiFetch } from "@/lib/api";
 import { resolveAuthState } from "@/lib/authState";
 import { readAnchor, writeAnchor } from "./anchorStore";
 import { syncWeight, type WeightRecord, type WeightSample, type WeightSyncResponse } from "./syncWeight";
+import { BODY_MASS_IDENTIFIER, weightPermissionRequested } from "./weightPermission";
 
 // Lazy require, same reasoning as src/health/useHealth.ts and
 // src/mentor/healthSync.ts: `@kingstinct/react-native-healthkit` is a Nitro
@@ -16,18 +17,27 @@ function loadHealthKit(): HealthKitModule {
   return require("@kingstinct/react-native-healthkit") as HealthKitModule;
 }
 
-const BODY_MASS_IDENTIFIER = "HKQuantityTypeIdentifierBodyMass";
-
 // Throwing (rather than returning an empty batch) when HealthKit is
-// unreachable or unauthorized matters: syncWeight only advances the anchor
-// after `queryWeights` succeeds, so a throw here leaves the anchor untouched
-// and the next launch tries again -- the same self-healing behaviour as a
-// failed post.
+// unreachable or has never been asked matters: syncWeight only advances the
+// anchor after `queryWeights` succeeds, so a throw here leaves the anchor
+// untouched and the next launch tries again -- the same self-healing
+// behaviour as a failed post. That property is what makes the permission
+// gate below safe: every launch before the user has been prompted is simply
+// skipped, and the first launch after they are prompted picks up the whole
+// window as if nothing had been missed.
 async function queryWeights(anchor: string | null): Promise<{ samples: WeightSample[]; newAnchor: string }> {
   const healthKit = loadHealthKit();
   if (!healthKit.isHealthDataAvailable()) throw new Error("HealthKit unavailable");
-  if (!await healthKit.requestAuthorization({ toRead: [BODY_MASS_IDENTIFIER] })) {
-    throw new Error("HealthKit authorization denied");
+  // #375: this runs on mount and on every foreground, so it MUST NOT be the
+  // thing that first shows iOS's Health permission sheet -- a user who is
+  // handed that sheet on their very first launch, before anything explains
+  // why, has every reason to decline, and a read denial is sticky (only
+  // reversible in Settings, and undetectable to us). So the launch path only
+  // ever ASKS whether the prompt has already happened; the prompt itself
+  // belongs to LogWeightSheet, where the user has just tapped "Log weight"
+  // and the ask explains itself.
+  if (!(await weightPermissionRequested())) {
+    throw new Error("HealthKit weight permission not requested yet");
   }
 
   const response = await healthKit.queryQuantitySamplesWithAnchor(BODY_MASS_IDENTIFIER, {
