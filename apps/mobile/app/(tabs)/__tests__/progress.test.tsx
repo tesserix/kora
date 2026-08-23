@@ -18,6 +18,11 @@ jest.mock("@/api/hooks", () => ({
   useDashboard: () => ({ data: { streak_days: 3, targets: { kcal: 2000 } } }),
   useProfile: () => mockProfile(),
   useWeightSeries: (range: string) => mockSeries(range),
+  // kora#45 (task 7): Progress now fits a weekly rate alongside the chart.
+  // No test in this file exercises the sentence itself — that lives in
+  // progress-composition.test.tsx — so a bare "no rate" stub keeps this
+  // file's render tree happy without a second mocking style.
+  useWeightTrend: () => ({ data: undefined, isSuccess: false }),
   useAddWeight: () => ({ mutate: jest.fn(), isPending: false }),
   useAvgIntake7d: () => mockAvgIntake7d(),
   // kora#314 PR C: Progress now mounts LogWeightSheet (Screenshot mode), which

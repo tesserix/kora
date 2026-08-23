@@ -19,7 +19,7 @@ import { MetricChips } from "@/components/progress/MetricChips";
 import { deltaColor } from "@/components/progress/deltaColor";
 import { EmptyState } from "@/components/common/EmptyState";
 import { LoadErrorNotice } from "@/components/common/LoadErrorNotice";
-import { useAvgIntake7d, useDashboard, useProfile, useWeightSeries } from "@/api/hooks";
+import { useAvgIntake7d, useDashboard, useProfile, useWeightSeries, useWeightTrend } from "@/api/hooks";
 import type { WeightEntry } from "@/api/types";
 import { useHealth } from "@/health";
 import { AnimatedNumber, PressableScale, ScreenEntrance, useMotionPrefs } from "@/motion";
@@ -39,6 +39,7 @@ import {
   lastComparableRun,
   metricSeries,
 } from "@/lib/bodyCompositionSeries";
+import { trendSentence } from "@/lib/trendCopy";
 import { useUnits } from "@/units";
 import { TAB_BAR_SCROLL_INSET } from "@/components/FloatingTabBar";
 
@@ -198,6 +199,12 @@ export default function Progress() {
   const hasChart = points.length >= 2;
   const instrumentChanged = hasInstrumentChange(trend);
 
+  // The fitted weekly rate (kora#45) — a separate estimate from the chart
+  // above, keyed by the same charted metric and range so switching either
+  // one cannot show a stale rate for the metric or window no longer shown.
+  const weightTrend = useWeightTrend(activeKey, range);
+  const trendText = weightTrend.data ? trendSentence(weightTrend.data, metric, system) : null;
+
   const latest = trend.points[trend.points.length - 1]?.value;
   // The hero figure means one thing for every metric, weight included: the
   // latest REAL reading, nothing else. There used to be a profile-weight
@@ -344,6 +351,22 @@ export default function Progress() {
                   <AppText testID="instrument-change-note" style={[mutedLabel, { marginTop: 6 }]}>
                     {`Measured by ${trend.sources.map(sourceLabel).join(", then ")}. Shown as separate lines — the two don't measure this the same way.`}
                   </AppText>
+                ) : null}
+                {/* The fitted weekly rate (kora#45) — an estimate, not a
+                    prediction; see trendSentence's own comment for why it
+                    never gets a future tense or a goal attached. Renders
+                    nothing at all for anything but a fitted rate: an
+                    insufficient or suppressed trend carries no number here,
+                    same as the OLS fit itself decided to say nothing. */}
+                {trendText ? (
+                  <View style={{ marginTop: 6 }}>
+                    <AppText style={mutedLabel}>{trendText}</AppText>
+                    {weightTrend.data?.spans_instruments ? (
+                      <AppText style={[mutedLabel, { marginTop: 2 }]}>
+                        These readings come from more than one instrument.
+                      </AppText>
+                    ) : null}
+                  </View>
                 ) : null}
               </>
             ) : seriesError ? (

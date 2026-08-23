@@ -9,10 +9,12 @@ jest.mock("expo-router", () => ({ useFocusEffect: () => {} }));
 
 const mockSeries = jest.fn();
 const mockProfile = jest.fn();
+const mockUseWeightTrend = jest.fn();
 jest.mock("@/api/hooks", () => ({
   useDashboard: () => ({ data: { streak_days: 3 } }),
   useProfile: () => mockProfile(),
   useWeightSeries: (range: string) => mockSeries(range),
+  useWeightTrend: (metric: string, range: string) => mockUseWeightTrend(metric, range),
   useAddWeight: () => ({ mutate: jest.fn(), isPending: false }),
   useAvgIntake7d: () => ({ avg: null, series: [], days: [], isLoading: false, isError: false, refetch: jest.fn() }),
   // kora#314 PR C: Progress now mounts LogWeightSheet (Screenshot mode), which
@@ -48,6 +50,7 @@ jest.mock("@/units", () => ({
 beforeEach(() => {
   mockProfile.mockReturnValue({ data: { weight_kg: 80, height_cm: 165, goal: "fat_loss" } });
   mockUseUnits.mockReturnValue({ system: "metric", setSystem: jest.fn() });
+  mockUseWeightTrend.mockReturnValue({ data: undefined, isSuccess: false });
 });
 
 const weighIn = (over: Record<string, unknown>) => ({
@@ -196,4 +199,39 @@ test("the daily weigh-in stays two taps: open the sheet, Save", async () => {
   // fields" is tapped — most days are weight and nothing else.
   expect(queryByTestId("composition-derived")).toBeNull();
   expect(queryByTestId("composition-date")).toBeNull();
+});
+
+// kora#45 (task 7): the fitted weekly rate reads beneath the chart, framed
+// as an estimate rather than a prediction — see src/lib/trendCopy.ts.
+// A chart needs 2+ points to mount at all (hasChart), so these give the
+// weight series two weigh-ins even though the assertions are all about the
+// trend sentence, not the chart itself.
+test("shows the estimate-framed rate under the chart", async () => {
+  mockSeries.mockReturnValue({ data: [weighIn({ weight_kg: 74 }), weighIn({ weight_kg: 71.9 })] });
+  mockUseWeightTrend.mockReturnValue({
+    data: { status: "ok", rate_per_week: -0.4, basis: { readings: 9, days: 42 }, spans_instruments: false, show_support: false },
+    isSuccess: true,
+  });
+  const { findByText } = await render(<Progress />);
+  expect(await findByText(/About 0.4 kg per week down/)).toBeTruthy();
+});
+
+test("shows nothing at all when the rate is suppressed", async () => {
+  mockSeries.mockReturnValue({ data: [weighIn({ weight_kg: 74 }), weighIn({ weight_kg: 71.9 })] });
+  mockUseWeightTrend.mockReturnValue({
+    data: { status: "suppressed", spans_instruments: false, show_support: true },
+    isSuccess: true,
+  });
+  const { queryByText } = await render(<Progress />);
+  expect(queryByText(/per week/)).toBeNull();
+});
+
+test("notes an instrument change beside the rate rather than hiding it", async () => {
+  mockSeries.mockReturnValue({ data: [weighIn({ weight_kg: 74 }), weighIn({ weight_kg: 71.9 })] });
+  mockUseWeightTrend.mockReturnValue({
+    data: { status: "ok", rate_per_week: -0.4, basis: { readings: 9, days: 42 }, spans_instruments: true, show_support: false },
+    isSuccess: true,
+  });
+  const { findByText } = await render(<Progress />);
+  expect(await findByText(/more than one instrument/i)).toBeTruthy();
 });
