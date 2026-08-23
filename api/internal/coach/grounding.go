@@ -29,6 +29,27 @@ import (
 // compute averages, logging cadence, and the fasting streak.
 const recentWindowDays = 7
 
+// establishedLoggedDays and establishedLookbackDays define what counts as a
+// logging HABIT — the precondition for reading silence as observed fasting
+// rather than as absent data (kora#408).
+//
+// The check this replaced was "has this user ever logged anything", which a
+// single entry satisfied forever. Observed in production: one 165 kcal log,
+// one day before the window, and seven subsequent unlogged days were reported
+// as a seven-day fasting streak — tripping the ED-risk threshold of 3 and
+// silently suppressing features for a user who was simply not using food
+// logging that week.
+//
+// 3 days mirrors minDeficitLoggedDays' existing reasoning (one sample is not
+// evidence) with a wider margin, because this signal reads ABSENCE as
+// behaviour and so needs more standing behind it than one that reads a
+// present measurement. 30 days bounds it so a habit abandoned months ago does
+// not license the same inference today.
+const (
+	establishedLoggedDays   = 3
+	establishedLookbackDays = 30
+)
+
 // weightWindowDays is the trailing window used for the weight trend. It is
 // deliberately longer than recentWindowDays: a 7-day weight delta is mostly
 // water-weight noise, so the trend is stated over a month.
@@ -66,14 +87,16 @@ type Context struct {
 	// summarizeRecent's doc comment.
 	DaysLogged        int
 	FastingStreakDays int
-	// LoggedBeforeWindow reports whether the user has any log strictly
-	// before the start of RecentDaily's window (see LogSource.HasLoggedBefore).
+	// EstablishedLogging reports whether the user logged on at least
+	// establishedLoggedDays distinct days in the establishedLookbackDays
+	// before RecentDaily's window — i.e. whether there is a habit behind
+	// the silence (see LogSource.DaysLoggedBetween).
 	// fastingStreak uses it to tell "never logged" apart from "established
 	// logging history has gone completely silent for the whole window" —
 	// without it, a silence spanning recentWindowDays or longer looks
 	// identical to a brand-new user who has simply never logged, and the
 	// streak resets to 0 exactly when the gap is longest.
-	LoggedBeforeWindow  bool
+	EstablishedLogging  bool
 	Usual               memory.Memory
 	WeightTrend         WeightTrend
 	MentorProfile       *mentor.Profile
@@ -104,14 +127,18 @@ type WeightTrend struct {
 // satisfies it; tests can supply a fake.
 type LogSource interface {
 	ListForUserSince(ctx context.Context, userID uuid.UUID, since time.Time) ([]foodlog.FoodLog, error)
-	// HasLoggedBefore reports whether the user has any log strictly before
-	// `before`. BuildContext uses it (with the window's own start as
-	// `before`) to tell "this user has never logged" apart from "this user
-	// has established logging history and has since gone silent" — a
-	// distinction the bounded recentWindowDays window alone cannot make
-	// once a silence outlasts the window itself. See
-	// Context.LoggedBeforeWindow and fastingStreak.
-	HasLoggedBefore(ctx context.Context, userID uuid.UUID, before time.Time) (bool, error)
+	// DaysLoggedBetween counts the DISTINCT local days the user logged
+	// anything in [from, before). BuildContext uses it to tell "this user
+	// has never really logged" apart from "this user had a logging habit
+	// and has since gone silent" — a distinction the bounded
+	// recentWindowDays window alone cannot make once a silence outlasts the
+	// window itself.
+	//
+	// A COUNT rather than the EXISTS it replaced (kora#408): one log, ever,
+	// is not a habit, and treating it as one turned a single stray entry
+	// into a multi-day observed fasting streak. See establishedLoggedDays
+	// and fastingStreak.
+	DaysLoggedBetween(ctx context.Context, userID uuid.UUID, from, before time.Time) (int, error)
 }
 
 // WeightSource is the read used to compute WeightTrend.
@@ -170,10 +197,13 @@ func (g Grounder) BuildContext(ctx context.Context, userID uuid.UUID, now time.T
 	}
 	recentDaily := aggregateDaily(logs, since)
 
-	loggedBeforeWindow, err := g.Logs.HasLoggedBefore(ctx, userID, since)
+	// kora#408: a habit, not a single entry. See establishedLoggedDays.
+	priorLoggedDays, err := g.Logs.DaysLoggedBetween(
+		ctx, userID, since.AddDate(0, 0, -establishedLookbackDays), since)
 	if err != nil {
-		return Context{}, fmt.Errorf("coach: build context: logged-before-window check: %w", err)
+		return Context{}, fmt.Errorf("coach: build context: prior logged days: %w", err)
 	}
+	establishedLogging := priorLoggedDays >= establishedLoggedDays
 
 	usual, err := g.Mem.Build(ctx, userID, now, loc)
 	if err != nil {
@@ -217,8 +247,8 @@ func (g Grounder) BuildContext(ctx context.Context, userID uuid.UUID, now time.T
 		AvgProteinG:        avgProtein,
 		LogsPerDay:         logsPerDay,
 		DaysLogged:         daysLogged,
-		FastingStreakDays:  fastingStreak(recentDaily, loggedBeforeWindow),
-		LoggedBeforeWindow: loggedBeforeWindow,
+		FastingStreakDays:  fastingStreak(recentDaily, establishedLogging),
+		EstablishedLogging: establishedLogging,
 		Usual:              usual,
 		WeightTrend:        weightTrend,
 		MentorProfile:      profile,
@@ -469,18 +499,21 @@ func summarizeRecent(daily []DailyTotal) (avgKcal, avgProtein, logsPerDay float6
 //
 // fastingStreak alone adds one more rule on top, specific to streak
 // counting: days before the user's first log IN THE WINDOW do not count as
-// a fast — UNLESS the user has established logging history from before the
-// window (loggedBeforeWindow), in which case the entire complete-day span
+// a fast — UNLESS the user has an established logging habit from before the
+// window (establishedLogging), in which case the entire complete-day span
 // is countable evidence, not just the days after an in-window first log.
 //
 // That "unless" matters more than it looks. Without it, a silence that
 // outlasts recentWindowDays becomes INVISIBLE: the pre-fix version searched
 // for firstLogged only inside the window, so once the last in-window log
 // aged out, firstLogged went to -1 and the streak reset to 0 — exactly when
-// the gap was longest and protection mattered most. loggedBeforeWindow (see
-// Context.LoggedBeforeWindow) is what distinguishes that established user
+// the gap was longest and protection mattered most. establishedLogging (see
+// Context.EstablishedLogging) is what distinguishes that established user
 // gone silent from a genuinely brand-new user who has never logged at all;
-// both look identical from inside the window alone.
+// both look identical from inside the window alone. It requires
+// establishedLoggedDays distinct prior days (not merely one log, ever —
+// see kora#407), so a single stray entry can't manufacture the same
+// permanent flag.
 //
 // recentDeficitPct and avgKcal need no equivalent rule: averaging simply
 // ignores unlogged days wherever they fall, with no need to anchor on where
@@ -490,7 +523,7 @@ func summarizeRecent(daily []DailyTotal) (avgKcal, avgProtein, logsPerDay float6
 // unlogged day. That is the point: a flag that fires for every user carries
 // no information. A genuine gap after established logging still fires — now
 // even when that gap spans the whole window.
-func fastingStreak(daily []DailyTotal, loggedBeforeWindow bool) int {
+func fastingStreak(daily []DailyTotal, establishedLogging bool) int {
 	// Exclude today (the last entry): it is incomplete.
 	if len(daily) < 2 {
 		return 0
@@ -498,9 +531,11 @@ func fastingStreak(daily []DailyTotal, loggedBeforeWindow bool) int {
 	complete := daily[:len(daily)-1]
 
 	start := -1
-	if loggedBeforeWindow {
-		// Established history predates the window: the whole complete-day
-		// span is countable, not just what follows an in-window first log.
+	if establishedLogging {
+		// A logging HABIT predates the window (kora#408: at least
+		// establishedLoggedDays distinct days, not merely one entry ever),
+		// so the whole complete-day span is countable rather than only what
+		// follows an in-window first log.
 		start = 0
 	} else {
 		// Find the first day the user logged anything IN the window.

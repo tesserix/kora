@@ -388,9 +388,15 @@ func TestFastingStreak_NeverLoggedAnywhereStaysZeroEvenWithTheFlag(t *testing.T)
 // fastingStreak's firstLogged search was confined to the window: once the
 // user's last in-window log aged out, firstLogged went to -1 and the streak
 // silently reset to 0 — invisible protection exactly when the gap was
-// longest. A log seeded safely before the window (10 days ago, well past
-// the 7-day recentWindowDays) establishes history without itself entering
-// RecentDaily; nothing at all is logged inside the window.
+// longest.
+//
+// This is also the PROTECTIVE half of kora#407: EstablishedLogging now
+// requires establishedLoggedDays (3) distinct days within
+// establishedLookbackDays, not merely "ever logged once", so this test
+// seeds THREE distinct prior days — well before the 7-day recentWindowDays —
+// none of which enter RecentDaily. Nothing at all is logged inside the
+// window. This behaviour must NOT regress: it is the reason the whole
+// EstablishedLogging concept exists.
 func TestBuildContextFastingStreak_SilentWholeWindowAfterEstablishedLogging(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db, 2000, 120)
@@ -406,13 +412,16 @@ func TestBuildContextFastingStreak_SilentWholeWindowAfterEstablishedLogging(t *t
 	loc := time.UTC
 	now := time.Date(2026, 3, 10, 12, 0, 0, 0, loc)
 
-	// Established logging history WELL before the 7-day window (10 days
-	// ago); total silence for the entire window, including today.
-	seedLog(t, db, logRepo, foodlog.FoodLog{
-		UserID: userID, FoodItemID: &item.ID, LoggedAt: now.AddDate(0, 0, -10), LocalDate: localDayOf(now.AddDate(0, 0, -10)),
-		MealSlot: "lunch", Source: "manual", Provenance: nutrition.ProvenanceAFCD,
-		QuantityGrams: 200, Kcal: 400, ProteinG: 40,
-	})
+	// Established logging history: THREE distinct days, all WELL before the
+	// 7-day window (10, 12, 14 days ago); total silence for the entire
+	// window, including today.
+	for _, daysAgo := range []int{10, 12, 14} {
+		seedLog(t, db, logRepo, foodlog.FoodLog{
+			UserID: userID, FoodItemID: &item.ID, LoggedAt: now.AddDate(0, 0, -daysAgo), LocalDate: localDayOf(now.AddDate(0, 0, -daysAgo)),
+			MealSlot: "lunch", Source: "manual", Provenance: nutrition.ProvenanceAFCD,
+			QuantityGrams: 200, Kcal: 400, ProteinG: 40,
+		})
+	}
 
 	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
 	memSvc := memory.NewService(logRepo)
@@ -425,7 +434,7 @@ func TestBuildContextFastingStreak_SilentWholeWindowAfterEstablishedLogging(t *t
 	ctx, err := g.BuildContext(context.Background(), userID, now, loc)
 	require.NoError(t, err)
 
-	require.True(t, ctx.LoggedBeforeWindow, "the user has logging history from before the window")
+	require.True(t, ctx.EstablishedLogging, "three distinct days of logging history before the window is an established habit")
 	require.Equal(t, recentWindowDays-1, ctx.FastingStreakDays,
 		"total silence across the whole window must register once the user has established logging history, not reset to 0")
 
@@ -442,7 +451,7 @@ func TestBuildContextFastingStreak_SilentWholeWindowAfterEstablishedLogging(t *t
 // TestBuildContextFastingStreak_NeverLoggedStaysNotAtRisk is the "never
 // logged" counterpart to the long-silence test above, run through the same
 // real BuildContext + BuildNudges path: a brand-new user with zero logs
-// anywhere (not even before the window) must have LoggedBeforeWindow false
+// anywhere (not even before the window) must have EstablishedLogging false
 // and must not be flagged, proving the FIX 2 existence check doesn't turn
 // every silent window into a false positive.
 func TestBuildContextFastingStreak_NeverLoggedStaysNotAtRisk(t *testing.T) {
@@ -458,11 +467,65 @@ func TestBuildContextFastingStreak_NeverLoggedStaysNotAtRisk(t *testing.T) {
 	ctx, err := g.BuildContext(context.Background(), userID, time.Now().UTC(), time.UTC)
 	require.NoError(t, err)
 
-	require.False(t, ctx.LoggedBeforeWindow, "a user who has never logged has no history before the window either")
+	require.False(t, ctx.EstablishedLogging, "a user who has never logged has no history before the window either")
 	require.Equal(t, 0, ctx.FastingStreakDays)
 
 	s := SignalsFrom(ctx)
 	require.False(t, guardrails.AtRisk(s), "no logging history anywhere must not read as ED-risk")
+}
+
+// TestBuildContextFastingStreak_OneStrayPriorLogStaysNotAtRisk is the direct
+// regression test for the production bug in kora#407: a user who logged
+// exactly ONE day before the window (e.g. one 165 kcal entry) and then goes
+// silent for the whole window must NOT be read as an observed fasting
+// streak. Under the pre-fix "has this user EVER logged" existence check,
+// that single day satisfied the established-history flag permanently and
+// produced a reported 7-day fast for a user who simply was not using the
+// app that week — silently tripping riskFastingStreakDays and suppressing
+// features. EstablishedLogging now requires establishedLoggedDays (3)
+// distinct prior days, so one stray log must leave FastingStreakDays at 0
+// and the user not at-risk.
+//
+// This test must go red if establishedLoggedDays is ever lowered to 1.
+func TestBuildContextFastingStreak_OneStrayPriorLogStaysNotAtRisk(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	item := nutrition.FoodItem{
+		Name: "Coach One Stray Log Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD,
+		KcalPer100g: 165, ProteinPer100g: 5,
+	}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	loc := time.UTC
+	now := time.Date(2026, 3, 10, 12, 0, 0, 0, loc)
+
+	// A single synthetic 165 kcal entry one day before the 7-day window
+	// itself starts (the window covers now.AddDate(0,0,-(recentWindowDays-1))
+	// through now, so this must land at or before recentWindowDays days
+	// ago to sit outside it) — the exact shape of the production report —
+	// then total silence for the entire window, including today.
+	seedLog(t, db, logRepo, foodlog.FoodLog{
+		UserID: userID, FoodItemID: &item.ID, LoggedAt: now.AddDate(0, 0, -recentWindowDays), LocalDate: localDayOf(now.AddDate(0, 0, -recentWindowDays)),
+		MealSlot: "snack", Source: "manual", Provenance: nutrition.ProvenanceAFCD,
+		QuantityGrams: 100, Kcal: 165, ProteinG: 5,
+	})
+
+	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{})
+
+	ctx, err := g.BuildContext(context.Background(), userID, now, loc)
+	require.NoError(t, err)
+
+	require.False(t, ctx.EstablishedLogging, "one prior logged day is not an established habit")
+	require.Equal(t, 0, ctx.FastingStreakDays,
+		"a single stray prior log followed by silence must not be reported as a fasting streak (kora#407)")
+
+	s := SignalsFrom(ctx)
+	require.False(t, guardrails.AtRisk(s), "one stray prior log must not trip ED-risk")
 }
 
 // TestBuildContextWindowStartMatchesAcrossFetchAndBucketing is a regression

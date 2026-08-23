@@ -191,32 +191,69 @@ func TestLastPortionForPhraseNotFound(t *testing.T) {
 	require.False(t, found)
 }
 
-func TestHasLoggedBefore(t *testing.T) {
+// TestDaysLoggedBetween pins the two properties kora#407 depends on:
+// COUNT(DISTINCT local day), not COUNT(rows), and a half-open [from, before)
+// bound. Both matter beyond this test's own assertions — coach.BuildContext
+// uses this count against establishedLoggedDays to decide whether a silent
+// window is observed fasting or absent data (see grounding.go). If this
+// counted rows instead of days, or included `before` itself, that threshold
+// would be gameable in ways that either over- or under-protect a user.
+func TestDaysLoggedBetween(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db)
-	item := nutrition.FoodItem{Name: "HasLoggedBefore Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100, ProteinPer100g: 10}
+	item := nutrition.FoodItem{Name: "DaysLoggedBetween Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 100, ProteinPer100g: 10}
 	require.NoError(t, db.Create(&item).Error)
 	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
 
 	repo := NewRepository(db)
 	ctx := context.Background()
-	now := time.Now()
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
 
-	got, err := repo.HasLoggedBefore(ctx, userID, now)
+	got, err := repo.DaysLoggedBetween(ctx, userID, now.AddDate(0, 0, -30), now)
 	require.NoError(t, err)
-	require.False(t, got, "a user with no logs at all has not logged before anything")
+	require.Equal(t, 0, got, "a user with no logs at all has zero distinct logged days")
 
-	old, err := repo.Create(ctx, FoodLog{UserID: userID, FoodItemID: &item.ID, LoggedAt: now.Add(-10 * 24 * time.Hour), LocalDate: dayOf(now.Add(-10 * 24 * time.Hour)), MealSlot: "breakfast", Source: "manual", QuantityGrams: 60, Kcal: 100})
+	// Four logs in one day must count as ONE day, not four.
+	sameDay := now.AddDate(0, 0, -10)
+	for _, hour := range []int{6, 9, 13, 20} {
+		ts := time.Date(sameDay.Year(), sameDay.Month(), sameDay.Day(), hour, 0, 0, 0, time.UTC)
+		l, err := repo.Create(ctx, FoodLog{UserID: userID, FoodItemID: &item.ID, LoggedAt: ts, LocalDate: dayOf(ts), MealSlot: "breakfast", Source: "manual", QuantityGrams: 60, Kcal: 100})
+		require.NoError(t, err)
+		t.Cleanup(func() { db.Exec("DELETE FROM food_logs WHERE id = ?", l.ID) })
+	}
+
+	got, err = repo.DaysLoggedBetween(ctx, userID, now.AddDate(0, 0, -30), now)
 	require.NoError(t, err)
-	t.Cleanup(func() { db.Exec("DELETE FROM food_logs WHERE id = ?", old.ID) })
+	require.Equal(t, 1, got, "four logs on one day must count as one distinct day, not four")
 
-	got, err = repo.HasLoggedBefore(ctx, userID, now)
-	require.NoError(t, err, "a log strictly before `before` must be found")
-	require.True(t, got)
-
-	got, err = repo.HasLoggedBefore(ctx, userID, old.LoggedAt.Add(-time.Hour))
+	// A second, distinct day adds to the count.
+	secondDay := now.AddDate(0, 0, -5)
+	second, err := repo.Create(ctx, FoodLog{UserID: userID, FoodItemID: &item.ID, LoggedAt: secondDay, LocalDate: dayOf(secondDay), MealSlot: "lunch", Source: "manual", QuantityGrams: 60, Kcal: 100})
 	require.NoError(t, err)
-	require.False(t, got, "nothing was logged before an hour prior to the only seeded log")
+	t.Cleanup(func() { db.Exec("DELETE FROM food_logs WHERE id = ?", second.ID) })
+
+	got, err = repo.DaysLoggedBetween(ctx, userID, now.AddDate(0, 0, -30), now)
+	require.NoError(t, err)
+	require.Equal(t, 2, got, "a distinct day of logging must add to the count")
+
+	// Half-open upper bound: a log logged_at exactly `before` must be EXCLUDED.
+	atBefore, err := repo.Create(ctx, FoodLog{UserID: userID, FoodItemID: &item.ID, LoggedAt: now, LocalDate: dayOf(now), MealSlot: "dinner", Source: "manual", QuantityGrams: 60, Kcal: 100})
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_logs WHERE id = ?", atBefore.ID) })
+
+	got, err = repo.DaysLoggedBetween(ctx, userID, now.AddDate(0, 0, -30), now)
+	require.NoError(t, err)
+	require.Equal(t, 2, got, "a log logged_at exactly `before` must not count — the upper bound is exclusive")
+
+	// Half-open lower bound: a log logged_at exactly `from` must be INCLUDED.
+	from := now.AddDate(0, 0, -30)
+	atFrom, err := repo.Create(ctx, FoodLog{UserID: userID, FoodItemID: &item.ID, LoggedAt: from, LocalDate: dayOf(from), MealSlot: "breakfast", Source: "manual", QuantityGrams: 60, Kcal: 100})
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_logs WHERE id = ?", atFrom.ID) })
+
+	got, err = repo.DaysLoggedBetween(ctx, userID, from, now)
+	require.NoError(t, err)
+	require.Equal(t, 3, got, "a log logged_at exactly `from` must count — the lower bound is inclusive")
 }
 
 // TestCreateIdempotentReplayReturnsExistingRow is the core safety property of
