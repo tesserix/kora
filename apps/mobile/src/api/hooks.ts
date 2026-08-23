@@ -86,8 +86,10 @@ import type {
   SubmitFeedbackInput,
   WeightEntry,
   WeightSource,
+  WeightTrend,
 } from "./types";
 import type { AddWeightPayload } from "@/lib/bodyCompositionForm";
+import type { CompositionMetricKey } from "@/lib/bodyCompositionFields";
 
 // upsertFoods is a best-effort cache fill: a failure (e.g. AsyncStorage
 // quota) must never surface to the user, and — this codebase has no logging
@@ -1280,6 +1282,21 @@ export function useWeightSeries(range: WeightRange) {
       const from = new Date(to.getTime() - WEIGHT_RANGE_DAYS[range] * 24 * 60 * 60 * 1000);
       return apiFetch(`/v1/weight?from=${from.toISOString()}&to=${to.toISOString()}`) as Promise<WeightEntry[]>;
     },
+  });
+}
+
+// Deliberately no `placeholderData: keepPreviousData` here, unlike
+// useWeightSeries above. Carrying the previous metric's rate across a chip
+// switch would show a WRONG NUMBER under the RIGHT LABEL — e.g. the waist
+// rate rendered while the label already reads "Body Fat" — which is worse
+// than a brief empty state.
+export function useWeightTrend(metric: CompositionMetricKey, range: WeightRange) {
+  return useQuery({
+    // Keyed by BOTH, so switching a chip cannot show the previous metric's
+    // rate under the new metric's name.
+    queryKey: ["weight-trend", metric, range],
+    queryFn: () =>
+      apiFetch(`/v1/weight/trend?metric=${metric}&range=${range}`) as Promise<WeightTrend>,
   });
 }
 

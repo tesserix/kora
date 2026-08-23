@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react
 import type { ReactNode } from "react";
 import { CACHED_MATCH_TIER } from "@/api/types";
 import type { FoodItem } from "@/api/types";
+import type { CompositionMetricKey } from "@/lib/bodyCompositionFields";
 import { OfflineUnknownBarcodeError } from "@/offline/cachedResolution";
 import {
   AGENT_REQUEST_TIMEOUT_MS,
@@ -67,6 +68,7 @@ import {
   useUnfriend,
   useUnreadCount,
   useWeightSeries,
+  useWeightTrend,
 } from "../hooks";
 
 // The reminder scheduler now consults the signed-in user before it (re-)arms
@@ -787,6 +789,93 @@ test("useWeightSeries asks for a window that reaches the end of today", async ()
   const now = new Date();
   const midday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 12));
   expect(to.getTime()).toBeGreaterThan(midday.getTime());
+});
+
+test("useWeightTrend GETs /v1/weight/trend for the selected metric and range", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({
+    status: "ok",
+    rate_per_week: -0.4,
+    basis: { readings: 9, days: 42 },
+    spans_instruments: false,
+    show_support: false,
+  });
+  const { result } = await renderHook(() => useWeightTrend("waist_cm", "3M"), { wrapper });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+  const calls = (apiFetch as jest.Mock).mock.calls;
+  expect(calls[calls.length - 1][0]).toBe("/v1/weight/trend?metric=waist_cm&range=3M");
+  expect(result.current.data?.status).toBe("ok");
+});
+
+// A shared QueryClient is load-bearing here, exactly as it is for
+// useDashboard's owner-keyed cache test below: the default `wrapper` mints a
+// FRESH QueryClient per renderHook call, so two renderHooks under it are
+// never on the same cache regardless of queryKey — that variant cannot tell
+// a keyed cache from an unkeyed one, since each hook instance only ever sees
+// its own request. Asserting on `client.getQueryData` against ONE client is
+// what actually exercises "does metric B's chip reuse metric A's cache slot".
+test("useWeightTrend caches per metric, so switching chips does not reuse a stale rate", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrap = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+  (apiFetch as jest.Mock)
+    .mockResolvedValueOnce({ status: "ok", rate_per_week: -0.4, spans_instruments: false, show_support: false })
+    .mockResolvedValueOnce({ status: "insufficient_data", spans_instruments: false, show_support: false });
+
+  const { result: a } = await renderHook(() => useWeightTrend("weight_kg", "1M"), { wrapper: wrap });
+  await waitFor(() => expect(a.current.isSuccess).toBe(true));
+  const { result: b } = await renderHook(() => useWeightTrend("body_fat_pct", "1M"), { wrapper: wrap });
+  await waitFor(() => expect(b.current.isSuccess).toBe(true));
+
+  expect(client.getQueryData(["weight-trend", "weight_kg", "1M"])).toMatchObject({ status: "ok" });
+  expect(client.getQueryData(["weight-trend", "body_fat_pct", "1M"])).toMatchObject({
+    status: "insufficient_data",
+  });
+  // The stronger guarantee the hook exists for: metric B's own cache slot
+  // never inherits metric A's rate.
+  expect(b.current.data?.rate_per_week).toBeUndefined();
+
+  const urls = (apiFetch as jest.Mock).mock.calls.map((c) => c[0] as string);
+  expect(urls).toContain("/v1/weight/trend?metric=weight_kg&range=1M");
+  expect(urls).toContain("/v1/weight/trend?metric=body_fat_pct&range=1M");
+});
+
+// kora#45: placeholderData: keepPreviousData is a wrong-number-under-a-right-
+// label bug for this hook specifically (see useWeightTrend's own comment).
+// The two tests above do NOT catch it — TanStack's keepPreviousData reuses a
+// prior successful result only for the SAME observer (i.e. the SAME
+// useWeightTrend call re-rendering with new args), and both tests above use
+// two separately-mounted hook instances, which are two separate observers
+// with nothing to carry over regardless. This test re-renders ONE hook
+// instance across a metric switch — the actual "user picks a different chip"
+// shape — and asserts the one observable difference: with no placeholder,
+// `data` goes back to undefined the instant the new metric's query starts,
+// rather than showing the previous metric's rate while the new one loads.
+test("useWeightTrend clears data on a metric switch instead of showing the previous metric's rate", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrap = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+  let resolveB!: (value: unknown) => void;
+  (apiFetch as jest.Mock)
+    .mockResolvedValueOnce({ status: "ok", rate_per_week: -0.4, spans_instruments: false, show_support: false })
+    .mockReturnValueOnce(new Promise((resolve) => (resolveB = resolve)));
+
+  const { result, rerender } = await renderHook(({ metric }: { metric: CompositionMetricKey }) => useWeightTrend(metric, "1M"), {
+    wrapper: wrap,
+    initialProps: { metric: "weight_kg" },
+  });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(result.current.data?.rate_per_week).toBe(-0.4);
+
+  await act(async () => {
+    rerender({ metric: "body_fat_pct" });
+  });
+  expect(result.current.data).toBeUndefined();
+
+  resolveB({ status: "insufficient_data" });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
 });
 
 test("useSendFriendRequest POSTs the body to /v1/friends/requests", async () => {
