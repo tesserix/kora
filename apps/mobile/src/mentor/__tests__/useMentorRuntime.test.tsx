@@ -47,6 +47,8 @@ beforeEach(() => {
     health_steps_enabled: false,
     health_sleep_enabled: false,
     health_workouts_enabled: false,
+    health_energy_enabled: false,
+    health_heart_rate_enabled: false,
   } });
   (useMentorCommitments as jest.Mock).mockReturnValue({ data: [{
     id: "c1",
@@ -109,6 +111,8 @@ test("confirmed Health consent syncs on mount and again after a later foreground
     health_steps_enabled: true,
     health_sleep_enabled: false,
     health_workouts_enabled: true,
+    health_energy_enabled: false,
+    health_heart_rate_enabled: false,
   } });
   (collectMentorHealthDays as jest.Mock).mockResolvedValue({
     status: "ready",
@@ -126,7 +130,40 @@ test("confirmed Health consent syncs on mount and again after a later foreground
   });
 
   await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(2));
-  expect(collectMentorHealthDays).toHaveBeenCalledWith({ steps: true, sleep: false, workouts: true });
+  expect(collectMentorHealthDays).toHaveBeenCalledWith({
+    steps: true, sleep: false, workouts: true, energy: false, heartRate: false,
+  });
+});
+
+test("confirmed Health consent syncs when only active-energy or resting-heart-rate is enabled", async () => {
+  const mutateAsync = jest.fn().mockResolvedValue({ synced: 1 });
+  useSyncMentorHealth.mockReturnValue({ mutateAsync });
+  (useMentorProfile as jest.Mock).mockReturnValue({ data: {
+    quiet_start_minute: 1320,
+    quiet_end_minute: 420,
+    confirmed_at: "2026-08-22T00:00:00Z",
+    health_steps_enabled: false,
+    health_sleep_enabled: false,
+    health_workouts_enabled: false,
+    health_energy_enabled: true,
+    health_heart_rate_enabled: true,
+  } });
+  (collectMentorHealthDays as jest.Mock).mockResolvedValue({
+    status: "ready",
+    days: [{
+      local_date: "2026-08-22",
+      timezone: "Australia/Melbourne",
+      active_energy_kcal: 480,
+      resting_heart_rate_bpm: 58,
+      observed_at: "now",
+    }],
+  });
+
+  await renderHook(() => useMentorRuntime());
+  await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1));
+  expect(collectMentorHealthDays).toHaveBeenCalledWith({
+    steps: false, sleep: false, workouts: false, energy: true, heartRate: true,
+  });
 });
 
 test("a Health read started before consent revocation cannot upload afterward", async () => {

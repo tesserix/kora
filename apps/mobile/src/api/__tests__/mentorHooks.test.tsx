@@ -110,6 +110,8 @@ test("mentor mutations use retry-safe PUT contracts and refresh only the current
       health_steps_enabled: true,
       health_sleep_enabled: false,
       health_workouts_enabled: false,
+      health_energy_enabled: false,
+      health_heart_rate_enabled: false,
     });
   });
   expect(client.getQueryData(["mentor", "profile", "user-a"])).toEqual(profile);

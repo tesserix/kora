@@ -21,6 +21,8 @@ const profile = {
   health_steps_enabled: true,
   health_sleep_enabled: false,
   health_workouts_enabled: false,
+  health_energy_enabled: false,
+  health_heart_rate_enabled: false,
   confirmed_at: "2026-08-22T00:00:00Z",
   created_at: "2026-08-22T00:00:00Z",
   updated_at: "2026-08-22T00:00:00Z",
@@ -127,6 +129,44 @@ test("saving revoked Health consent updates the profile and deletes uploaded sum
     health_workouts_enabled: false,
   })));
   expect(mockDeleteHealth).toHaveBeenCalledTimes(1);
+});
+
+test("revoking active-energy consent alone still deletes uploaded summaries", async () => {
+  const originalEnergy = profile.health_energy_enabled;
+  profile.health_energy_enabled = true;
+  try {
+    const { getByTestId, getByRole, getByDisplayValue } = await render(<MentorScreen />);
+    await waitFor(() => expect(getByDisplayValue("Feel more energetic")).toBeTruthy());
+    await act(async () => {
+      fireEvent(getByTestId("mentor-health-energy"), "valueChange", false);
+    });
+    await act(async () => {
+      fireEvent.press(getByRole("button", { name: "Save mentor settings" }));
+    });
+
+    await waitFor(() => expect(mockDeleteHealth).toHaveBeenCalledTimes(1));
+  } finally {
+    profile.health_energy_enabled = originalEnergy;
+  }
+});
+
+test("revoking resting-heart-rate consent alone still deletes uploaded summaries", async () => {
+  const originalHeartRate = profile.health_heart_rate_enabled;
+  profile.health_heart_rate_enabled = true;
+  try {
+    const { getByTestId, getByRole, getByDisplayValue } = await render(<MentorScreen />);
+    await waitFor(() => expect(getByDisplayValue("Feel more energetic")).toBeTruthy());
+    await act(async () => {
+      fireEvent(getByTestId("mentor-health-heart-rate"), "valueChange", false);
+    });
+    await act(async () => {
+      fireEvent.press(getByRole("button", { name: "Save mentor settings" }));
+    });
+
+    await waitFor(() => expect(mockDeleteHealth).toHaveBeenCalledTimes(1));
+  } finally {
+    profile.health_heart_rate_enabled = originalHeartRate;
+  }
 });
 
 test("commitments activate and pause only through an explicit user toggle", async () => {

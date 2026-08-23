@@ -59,6 +59,8 @@ const EMPTY_PROFILE: MentorProfileInput = {
   health_steps_enabled: false,
   health_sleep_enabled: false,
   health_workouts_enabled: false,
+  health_energy_enabled: false,
+  health_heart_rate_enabled: false,
 };
 
 function inputFromProfile(profile: MentorProfileInput): MentorProfileInput {
@@ -74,6 +76,8 @@ function inputFromProfile(profile: MentorProfileInput): MentorProfileInput {
     health_steps_enabled: profile.health_steps_enabled,
     health_sleep_enabled: profile.health_sleep_enabled,
     health_workouts_enabled: profile.health_workouts_enabled,
+    health_energy_enabled: profile.health_energy_enabled,
+    health_heart_rate_enabled: profile.health_heart_rate_enabled,
   };
 }
 
@@ -161,6 +165,8 @@ export default function MentorScreen() {
       (previous.health_steps_enabled && !draft.health_steps_enabled)
       || (previous.health_sleep_enabled && !draft.health_sleep_enabled)
       || (previous.health_workouts_enabled && !draft.health_workouts_enabled)
+      || (previous.health_energy_enabled && !draft.health_energy_enabled)
+      || (previous.health_heart_rate_enabled && !draft.health_heart_rate_enabled)
     );
     setError(null);
     setSaved(false);
@@ -384,6 +390,8 @@ export default function MentorScreen() {
                   <HealthToggle label="Share steps" detail="Daily step total" testID="mentor-health-steps" value={draft.health_steps_enabled} onChange={(value) => update("health_steps_enabled", value)} />
                   <HealthToggle label="Share sleep" detail="Daily sleep minutes" testID="mentor-health-sleep" value={draft.health_sleep_enabled} onChange={(value) => update("health_sleep_enabled", value)} />
                   <HealthToggle label="Share workouts" detail="Daily workout minutes" testID="mentor-health-workouts" value={draft.health_workouts_enabled} onChange={(value) => update("health_workouts_enabled", value)} />
+                  <HealthToggle label="Share active energy" detail="Daily active energy (kcal)" testID="mentor-health-energy" value={draft.health_energy_enabled} onChange={(value) => update("health_energy_enabled", value)} />
+                  <HealthToggle label="Share resting heart rate" detail="Daily resting heart rate (bpm)" testID="mentor-health-heart-rate" value={draft.health_heart_rate_enabled} onChange={(value) => update("health_heart_rate_enabled", value)} />
 
                   {error ? <AppText accessibilityRole="alert" style={{ color: instrument.danger }}>{error}</AppText> : null}
                   {saved ? <AppText accessibilityRole="alert" style={{ color: instrument.teal }}>Mentor settings saved.</AppText> : null}
