@@ -1,6 +1,7 @@
 package tracking
 
 import (
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -307,6 +308,7 @@ func (h Handler) WeightTrend(c *gin.Context) {
 	}
 
 	if h.signals == nil {
+		slog.WarnContext(c.Request.Context(), "tracking: trend suppressed, signals source not wired")
 		suppressed(c, false)
 		return
 	}
@@ -314,6 +316,7 @@ func (h Handler) WeightTrend(c *gin.Context) {
 	// computation excludes "today" by LOCAL day.
 	signals, err := h.signals.SignalsFor(c.Request.Context(), userID, user.LocFromContext(c))
 	if err != nil {
+		slog.WarnContext(c.Request.Context(), "tracking: trend suppressed, signals unavailable", "err", err)
 		suppressed(c, false)
 		return
 	}
