@@ -213,6 +213,8 @@ export interface MentorProfileInput {
   health_steps_enabled: boolean;
   health_sleep_enabled: boolean;
   health_workouts_enabled: boolean;
+  health_energy_enabled: boolean;
+  health_heart_rate_enabled: boolean;
 }
 
 export interface MentorProfile extends MentorProfileInput {
@@ -310,6 +312,8 @@ export interface MentorHealthDayInput {
   steps?: number | null;
   sleep_minutes?: number | null;
   workout_minutes?: number | null;
+  active_energy_kcal?: number | null;
+  resting_heart_rate_bpm?: number | null;
   observed_at: string;
 }
 

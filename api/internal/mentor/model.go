@@ -41,36 +41,40 @@ const (
 )
 
 type Profile struct {
-	UserID                uuid.UUID  `gorm:"type:uuid;primaryKey" json:"-"`
-	Motivation            string     `json:"motivation"`
-	DietaryPreferences    string     `json:"dietary_preferences"`
-	Allergies             string     `json:"allergies"`
-	DietPattern           string     `json:"diet_pattern"`
-	CoachingStyle         string     `json:"coaching_style"`
-	ReminderIntensity     string     `json:"reminder_intensity"`
-	QuietStartMinute      int        `json:"quiet_start_minute"`
-	QuietEndMinute        int        `json:"quiet_end_minute"`
-	HealthStepsEnabled    bool       `json:"health_steps_enabled"`
-	HealthSleepEnabled    bool       `json:"health_sleep_enabled"`
-	HealthWorkoutsEnabled bool       `json:"health_workouts_enabled"`
-	ConfirmedAt           *time.Time `json:"confirmed_at"`
-	CreatedAt             time.Time  `json:"created_at"`
-	UpdatedAt             time.Time  `json:"updated_at"`
+	UserID                 uuid.UUID  `gorm:"type:uuid;primaryKey" json:"-"`
+	Motivation             string     `json:"motivation"`
+	DietaryPreferences     string     `json:"dietary_preferences"`
+	Allergies              string     `json:"allergies"`
+	DietPattern            string     `json:"diet_pattern"`
+	CoachingStyle          string     `json:"coaching_style"`
+	ReminderIntensity      string     `json:"reminder_intensity"`
+	QuietStartMinute       int        `json:"quiet_start_minute"`
+	QuietEndMinute         int        `json:"quiet_end_minute"`
+	HealthStepsEnabled     bool       `json:"health_steps_enabled"`
+	HealthSleepEnabled     bool       `json:"health_sleep_enabled"`
+	HealthWorkoutsEnabled  bool       `json:"health_workouts_enabled"`
+	HealthEnergyEnabled    bool       `json:"health_energy_enabled"`
+	HealthHeartRateEnabled bool       `json:"health_heart_rate_enabled"`
+	ConfirmedAt            *time.Time `json:"confirmed_at"`
+	CreatedAt              time.Time  `json:"created_at"`
+	UpdatedAt              time.Time  `json:"updated_at"`
 }
 
 func (Profile) TableName() string { return "mentor_profiles" }
 
 type HealthDay struct {
-	UserID         uuid.UUID `gorm:"type:uuid;primaryKey" json:"-"`
-	LocalDate      time.Time `gorm:"type:date;primaryKey" json:"local_date"`
-	Timezone       string    `json:"timezone"`
-	Steps          *int      `json:"steps"`
-	SleepMinutes   *int      `json:"sleep_minutes"`
-	WorkoutMinutes *int      `json:"workout_minutes"`
-	Source         string    `json:"source"`
-	ObservedAt     time.Time `json:"observed_at"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	UserID              uuid.UUID `gorm:"type:uuid;primaryKey" json:"-"`
+	LocalDate           time.Time `gorm:"type:date;primaryKey" json:"local_date"`
+	Timezone            string    `json:"timezone"`
+	Steps               *int      `json:"steps"`
+	SleepMinutes        *int      `json:"sleep_minutes"`
+	WorkoutMinutes      *int      `json:"workout_minutes"`
+	ActiveEnergyKcal    *int      `json:"active_energy_kcal"`
+	RestingHeartRateBpm *int      `json:"resting_heart_rate_bpm"`
+	Source              string    `json:"source"`
+	ObservedAt          time.Time `json:"observed_at"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 func (HealthDay) TableName() string { return "health_daily_summaries" }

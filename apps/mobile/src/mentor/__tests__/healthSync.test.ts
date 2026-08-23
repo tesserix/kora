@@ -33,7 +33,7 @@ test("Health sync requests only consented metrics and uploads seven-day aggregat
     { startDate: new Date(2026, 7, 22, 7, 0), duration: { unit: "s", quantity: 1860 } },
   ]);
 
-  const result = await collectMentorHealthDays({ steps: true, sleep: false, workouts: true }, new Date(2026, 7, 22, 12, 0));
+  const result = await collectMentorHealthDays({ steps: true, sleep: false, workouts: true, energy: false, heartRate: false }, new Date(2026, 7, 22, 12, 0));
 
   expect(requestAuthorization).toHaveBeenCalledWith({
     toRead: ["HKQuantityTypeIdentifierStepCount", "HKWorkoutTypeIdentifier"],
@@ -54,15 +54,58 @@ test("overlapping HealthKit sleep stages are merged instead of double-counted", 
     { value: 5, startDate: new Date(2026, 7, 22, 0, 30), endDate: new Date(2026, 7, 22, 2, 0) },
   ]);
 
-  const result = await collectMentorHealthDays({ steps: false, sleep: true, workouts: false }, new Date(2026, 7, 22, 12, 0));
+  const result = await collectMentorHealthDays({ steps: false, sleep: true, workouts: false, energy: false, heartRate: false }, new Date(2026, 7, 22, 12, 0));
 
   expect(result.days).toEqual([expect.objectContaining({ local_date: "2026-08-22", sleep_minutes: 180 })]);
+});
+
+test("active energy is summed per day and resting heart rate is averaged per day", async () => {
+  const day = new Date(2026, 7, 22, 0, 0);
+  (queryStatisticsCollectionForQuantity as jest.Mock).mockImplementation(async (identifier: string) => {
+    if (identifier === "HKQuantityTypeIdentifierActiveEnergyBurned") {
+      return [{ startDate: day, sumQuantity: { unit: "kcal", quantity: 483.6 } }];
+    }
+    if (identifier === "HKQuantityTypeIdentifierRestingHeartRate") {
+      return [{ startDate: day, averageQuantity: { unit: "count/min", quantity: 57.5 } }];
+    }
+    return [];
+  });
+
+  const result = await collectMentorHealthDays(
+    { steps: false, sleep: false, workouts: false, energy: true, heartRate: true },
+    new Date(2026, 7, 22, 12, 0),
+  );
+
+  expect(requestAuthorization).toHaveBeenCalledWith({
+    toRead: ["HKQuantityTypeIdentifierActiveEnergyBurned", "HKQuantityTypeIdentifierRestingHeartRate"],
+  });
+  expect(result.days).toEqual([expect.objectContaining({
+    local_date: "2026-08-22",
+    active_energy_kcal: 484,
+    resting_heart_rate_bpm: 58,
+  })]);
+});
+
+test("active energy and resting heart rate are not queried without consent", async () => {
+  const day = new Date(2026, 7, 22, 0, 0);
+  (queryStatisticsCollectionForQuantity as jest.Mock).mockResolvedValue([
+    { startDate: day, sumQuantity: { unit: "count", quantity: 7210.4 } },
+  ]);
+
+  const result = await collectMentorHealthDays(
+    { steps: true, sleep: false, workouts: false, energy: false, heartRate: false },
+    new Date(2026, 7, 22, 12, 0),
+  );
+
+  expect(requestAuthorization).toHaveBeenCalledWith({ toRead: ["HKQuantityTypeIdentifierStepCount"] });
+  expect(result.days[0]).not.toHaveProperty("active_energy_kcal");
+  expect(result.days[0]).not.toHaveProperty("resting_heart_rate_bpm");
 });
 
 test("Health sync degrades without querying when HealthKit is unavailable", async () => {
   (isHealthDataAvailable as jest.Mock).mockReturnValue(false);
 
-  const result = await collectMentorHealthDays({ steps: true, sleep: true, workouts: true }, new Date());
+  const result = await collectMentorHealthDays({ steps: true, sleep: true, workouts: true, energy: true, heartRate: true }, new Date());
 
   expect(result).toEqual({ status: "unavailable", days: [] });
   expect(requestAuthorization).not.toHaveBeenCalled();

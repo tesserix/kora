@@ -248,7 +248,7 @@ func (g Grounder) mentorContext(
 	}
 
 	healthDays := []mentor.HealthDay{}
-	if profile != nil && (profile.HealthStepsEnabled || profile.HealthSleepEnabled || profile.HealthWorkoutsEnabled) {
+	if profile != nil && anyHealthConsented(*profile) {
 		from := windowStartDays(now, loc, recentWindowDays)
 		days, err := g.Mentor.HealthDaysSince(ctx, userID, from, recentWindowDays)
 		if err != nil {
@@ -272,6 +272,18 @@ func (g Grounder) mentorContext(
 	return profile, healthDays, commitments
 }
 
+// anyHealthConsented reports whether any HealthKit metric is consented,
+// which decides whether health days are fetched at all. It must list every
+// flag filterHealthByConsent knows about below it -- a flag missing here
+// means a user who consents only to a newer metric (e.g. active energy)
+// never has health days fetched for the coach in the first place, so
+// filterHealthByConsent's per-metric nil-out never even runs for them.
+func anyHealthConsented(profile mentor.Profile) bool {
+	return profile.HealthStepsEnabled || profile.HealthSleepEnabled ||
+		profile.HealthWorkoutsEnabled || profile.HealthEnergyEnabled ||
+		profile.HealthHeartRateEnabled
+}
+
 func filterHealthByConsent(days []mentor.HealthDay, profile mentor.Profile) []mentor.HealthDay {
 	out := make([]mentor.HealthDay, len(days))
 	for i, day := range days {
@@ -284,6 +296,12 @@ func filterHealthByConsent(days []mentor.HealthDay, profile mentor.Profile) []me
 		}
 		if !profile.HealthWorkoutsEnabled {
 			out[i].WorkoutMinutes = nil
+		}
+		if !profile.HealthEnergyEnabled {
+			out[i].ActiveEnergyKcal = nil
+		}
+		if !profile.HealthHeartRateEnabled {
+			out[i].RestingHeartRateBpm = nil
 		}
 	}
 	return out
@@ -604,6 +622,15 @@ func (c Context) Facts() []Fact {
 		}
 		if latest.WorkoutMinutes != nil {
 			facts = append(facts, Fact{Label: "health_workout_minutes_latest", Value: strconv.Itoa(*latest.WorkoutMinutes)})
+		}
+		// kora#372. Without these two the metrics sync, pass consent and reach
+		// the database, and then never reach the coach -- columns nothing
+		// reads, which is exactly what #373 was closed for proposing.
+		if latest.ActiveEnergyKcal != nil {
+			facts = append(facts, Fact{Label: "health_active_energy_kcal_latest", Value: strconv.Itoa(*latest.ActiveEnergyKcal)})
+		}
+		if latest.RestingHeartRateBpm != nil {
+			facts = append(facts, Fact{Label: "health_resting_heart_rate_bpm_latest", Value: strconv.Itoa(*latest.RestingHeartRateBpm)})
 		}
 	}
 	facts = append(facts, Fact{Label: "active_commitments", Value: strconv.Itoa(len(c.Commitments))})

@@ -12,6 +12,8 @@ export type MentorHealthConsent = {
   steps: boolean;
   sleep: boolean;
   workouts: boolean;
+  energy: boolean;
+  heartRate: boolean;
 };
 
 export type MentorHealthCollection = {
@@ -22,7 +24,10 @@ export type MentorHealthCollection = {
 const STEP_COUNT_IDENTIFIER = "HKQuantityTypeIdentifierStepCount";
 const SLEEP_ANALYSIS_IDENTIFIER = "HKCategoryTypeIdentifierSleepAnalysis";
 const WORKOUT_IDENTIFIER = "HKWorkoutTypeIdentifier";
+const ACTIVE_ENERGY_IDENTIFIER = "HKQuantityTypeIdentifierActiveEnergyBurned";
+const RESTING_HEART_RATE_IDENTIFIER = "HKQuantityTypeIdentifierRestingHeartRate";
 const CUMULATIVE_SUM: readonly ["cumulativeSum"] = ["cumulativeSum"];
+const DISCRETE_AVERAGE: readonly ["discreteAverage"] = ["discreteAverage"];
 const ASLEEP_VALUES = new Set([1, 3, 4, 5]);
 const WINDOW_DAYS = 7;
 const MS_PER_MINUTE = 60_000;
@@ -40,7 +45,7 @@ function addMetric(
   date: string,
   observedAt: string,
   zone: string,
-  metric: Partial<Pick<MentorHealthDayInput, "steps" | "sleep_minutes" | "workout_minutes">>,
+  metric: Partial<Pick<MentorHealthDayInput, "steps" | "sleep_minutes" | "workout_minutes" | "active_energy_kcal" | "resting_heart_rate_bpm">>,
 ): void {
   days.set(date, { local_date: date, timezone: zone, observed_at: observedAt, ...days.get(date), ...metric });
 }
@@ -78,10 +83,14 @@ export async function collectMentorHealthDays(
     | typeof STEP_COUNT_IDENTIFIER
     | typeof SLEEP_ANALYSIS_IDENTIFIER
     | typeof WORKOUT_IDENTIFIER
+    | typeof ACTIVE_ENERGY_IDENTIFIER
+    | typeof RESTING_HEART_RATE_IDENTIFIER
   )[] = [];
   if (consent.steps) toRead.push(STEP_COUNT_IDENTIFIER);
   if (consent.sleep) toRead.push(SLEEP_ANALYSIS_IDENTIFIER);
   if (consent.workouts) toRead.push(WORKOUT_IDENTIFIER);
+  if (consent.energy) toRead.push(ACTIVE_ENERGY_IDENTIFIER);
+  if (consent.heartRate) toRead.push(RESTING_HEART_RATE_IDENTIFIER);
   if (toRead.length === 0) return { status: "disabled", days: [] };
   if (Platform.OS !== "ios") return { status: "unavailable", days: [] };
 
@@ -95,7 +104,7 @@ export async function collectMentorHealthDays(
     windowStart.setDate(windowStart.getDate() - (WINDOW_DAYS - 1));
     const sleepWindowStart = new Date(windowStart.getTime() - 18 * 60 * MS_PER_MINUTE);
 
-    const [stepBuckets, sleepSamples, workouts] = await Promise.all([
+    const [stepBuckets, sleepSamples, workouts, energyBuckets, heartRateBuckets] = await Promise.all([
       consent.steps
         ? healthKit.queryStatisticsCollectionForQuantity(
           STEP_COUNT_IDENTIFIER,
@@ -116,6 +125,24 @@ export async function collectMentorHealthDays(
           filter: { date: { startDate: windowStart, endDate: now } },
           limit: 0,
         })
+        : Promise.resolve([]),
+      consent.energy
+        ? healthKit.queryStatisticsCollectionForQuantity(
+          ACTIVE_ENERGY_IDENTIFIER,
+          CUMULATIVE_SUM,
+          windowStart,
+          { day: 1 },
+          { filter: { date: { startDate: windowStart, endDate: now } }, unit: "kcal" },
+        )
+        : Promise.resolve([]),
+      consent.heartRate
+        ? healthKit.queryStatisticsCollectionForQuantity(
+          RESTING_HEART_RATE_IDENTIFIER,
+          DISCRETE_AVERAGE,
+          windowStart,
+          { day: 1 },
+          { filter: { date: { startDate: windowStart, endDate: now } }, unit: "count/min" },
+        )
         : Promise.resolve([]),
     ]);
 
@@ -156,6 +183,24 @@ export async function collectMentorHealthDays(
     }
     for (const [date, minutes] of workoutByDay) {
       addMetric(days, date, observedAt, zone, { workout_minutes: minutes });
+    }
+
+    for (const bucket of energyBuckets) {
+      const value = bucket.sumQuantity?.quantity;
+      if (!bucket.startDate || typeof value !== "number" || !Number.isFinite(value) || value < 0) continue;
+      const date = localDate(new Date(bucket.startDate));
+      if (date >= firstDate && date <= lastDate) {
+        addMetric(days, date, observedAt, zone, { active_energy_kcal: Math.round(value) });
+      }
+    }
+
+    for (const bucket of heartRateBuckets) {
+      const value = bucket.averageQuantity?.quantity;
+      if (!bucket.startDate || typeof value !== "number" || !Number.isFinite(value) || value < 0) continue;
+      const date = localDate(new Date(bucket.startDate));
+      if (date >= firstDate && date <= lastDate) {
+        addMetric(days, date, observedAt, zone, { resting_heart_rate_bpm: Math.round(value) });
+      }
     }
 
     return { status: "ready", days: [...days.values()].sort((a, b) => a.local_date.localeCompare(b.local_date)) };

@@ -25,17 +25,19 @@ func NewService(repo Repository) Service {
 }
 
 type ProfileInput struct {
-	Motivation            string `json:"motivation"`
-	DietaryPreferences    string `json:"dietary_preferences"`
-	Allergies             string `json:"allergies"`
-	DietPattern           string `json:"diet_pattern"`
-	CoachingStyle         string `json:"coaching_style"`
-	ReminderIntensity     string `json:"reminder_intensity"`
-	QuietStartMinute      int    `json:"quiet_start_minute"`
-	QuietEndMinute        int    `json:"quiet_end_minute"`
-	HealthStepsEnabled    bool   `json:"health_steps_enabled"`
-	HealthSleepEnabled    bool   `json:"health_sleep_enabled"`
-	HealthWorkoutsEnabled bool   `json:"health_workouts_enabled"`
+	Motivation             string `json:"motivation"`
+	DietaryPreferences     string `json:"dietary_preferences"`
+	Allergies              string `json:"allergies"`
+	DietPattern            string `json:"diet_pattern"`
+	CoachingStyle          string `json:"coaching_style"`
+	ReminderIntensity      string `json:"reminder_intensity"`
+	QuietStartMinute       int    `json:"quiet_start_minute"`
+	QuietEndMinute         int    `json:"quiet_end_minute"`
+	HealthStepsEnabled     bool   `json:"health_steps_enabled"`
+	HealthSleepEnabled     bool   `json:"health_sleep_enabled"`
+	HealthWorkoutsEnabled  bool   `json:"health_workouts_enabled"`
+	HealthEnergyEnabled    bool   `json:"health_energy_enabled"`
+	HealthHeartRateEnabled bool   `json:"health_heart_rate_enabled"`
 }
 
 func (s Service) Profile(ctx context.Context, userID uuid.UUID) (Profile, error) {
@@ -89,19 +91,21 @@ func (s Service) PutProfile(
 	}
 	now := s.now().UTC()
 	profile := Profile{
-		UserID:                userID,
-		Motivation:            input.Motivation,
-		DietaryPreferences:    input.DietaryPreferences,
-		Allergies:             input.Allergies,
-		DietPattern:           input.DietPattern,
-		CoachingStyle:         input.CoachingStyle,
-		ReminderIntensity:     input.ReminderIntensity,
-		QuietStartMinute:      input.QuietStartMinute,
-		QuietEndMinute:        input.QuietEndMinute,
-		HealthStepsEnabled:    input.HealthStepsEnabled,
-		HealthSleepEnabled:    input.HealthSleepEnabled,
-		HealthWorkoutsEnabled: input.HealthWorkoutsEnabled,
-		ConfirmedAt:           &now,
+		UserID:                 userID,
+		Motivation:             input.Motivation,
+		DietaryPreferences:     input.DietaryPreferences,
+		Allergies:              input.Allergies,
+		DietPattern:            input.DietPattern,
+		CoachingStyle:          input.CoachingStyle,
+		ReminderIntensity:      input.ReminderIntensity,
+		QuietStartMinute:       input.QuietStartMinute,
+		QuietEndMinute:         input.QuietEndMinute,
+		HealthStepsEnabled:     input.HealthStepsEnabled,
+		HealthSleepEnabled:     input.HealthSleepEnabled,
+		HealthWorkoutsEnabled:  input.HealthWorkoutsEnabled,
+		HealthEnergyEnabled:    input.HealthEnergyEnabled,
+		HealthHeartRateEnabled: input.HealthHeartRateEnabled,
+		ConfirmedAt:            &now,
 	}
 	if err := s.repo.UpsertProfile(ctx, profile); err != nil {
 		return Profile{}, err
@@ -129,12 +133,14 @@ func (s Service) syncDerivedRules(ctx context.Context, userID uuid.UUID, profile
 }
 
 type HealthDayInput struct {
-	LocalDate      string    `json:"local_date"`
-	Timezone       string    `json:"timezone"`
-	Steps          *int      `json:"steps"`
-	SleepMinutes   *int      `json:"sleep_minutes"`
-	WorkoutMinutes *int      `json:"workout_minutes"`
-	ObservedAt     time.Time `json:"observed_at"`
+	LocalDate           string    `json:"local_date"`
+	Timezone            string    `json:"timezone"`
+	Steps               *int      `json:"steps"`
+	SleepMinutes        *int      `json:"sleep_minutes"`
+	WorkoutMinutes      *int      `json:"workout_minutes"`
+	ActiveEnergyKcal    *int      `json:"active_energy_kcal"`
+	RestingHeartRateBpm *int      `json:"resting_heart_rate_bpm"`
+	ObservedAt          time.Time `json:"observed_at"`
 }
 
 type HealthDaysInput struct {
@@ -170,7 +176,8 @@ func (s Service) PutHealthDays(
 		if item.ObservedAt.IsZero() {
 			return 0, validation("health observed_at is required")
 		}
-		if item.Steps == nil && item.SleepMinutes == nil && item.WorkoutMinutes == nil {
+		if item.Steps == nil && item.SleepMinutes == nil && item.WorkoutMinutes == nil &&
+			item.ActiveEnergyKcal == nil && item.RestingHeartRateBpm == nil {
 			return 0, validation("health day must contain at least one measured value")
 		}
 		if item.Steps != nil && *item.Steps < 0 {
@@ -182,9 +189,16 @@ func (s Service) PutHealthDays(
 		if !optionalRange(item.WorkoutMinutes, 0, 1440) {
 			return 0, validation("health workout minutes must be between 0 and 1440")
 		}
+		if item.ActiveEnergyKcal != nil && *item.ActiveEnergyKcal < 0 {
+			return 0, validation("health active energy cannot be negative")
+		}
+		if !optionalRange(item.RestingHeartRateBpm, 20, 250) {
+			return 0, validation("health resting heart rate must be between 20 and 250")
+		}
 		days[i] = HealthDay{
 			UserID: userID, LocalDate: day, Timezone: zone, Steps: item.Steps,
 			SleepMinutes: item.SleepMinutes, WorkoutMinutes: item.WorkoutMinutes,
+			ActiveEnergyKcal: item.ActiveEnergyKcal, RestingHeartRateBpm: item.RestingHeartRateBpm,
 			Source: HealthSourceHealthKit, ObservedAt: item.ObservedAt.UTC(),
 		}
 	}

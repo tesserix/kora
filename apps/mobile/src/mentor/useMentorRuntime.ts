@@ -62,9 +62,11 @@ export function useMentorRuntime(): void {
       steps: data.health_steps_enabled,
       sleep: data.health_sleep_enabled,
       workouts: data.health_workouts_enabled,
+      energy: data.health_energy_enabled,
+      heartRate: data.health_heart_rate_enabled,
     };
-    if (!consent.steps && !consent.sleep && !consent.workouts) return;
-    const consentKey = `${consent.steps}:${consent.sleep}:${consent.workouts}`;
+    if (!consent.steps && !consent.sleep && !consent.workouts && !consent.energy && !consent.heartRate) return;
+    const consentKey = `${consent.steps}:${consent.sleep}:${consent.workouts}:${consent.energy}:${consent.heartRate}`;
     const now = Date.now();
     const last = lastHealthAttempt.current;
     if (last?.consent === consentKey && now - last.at < HEALTH_SYNC_INTERVAL_MS) return;
