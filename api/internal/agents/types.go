@@ -1,11 +1,10 @@
 // Package agents resolves Kora's agents, skills and tools from the Agentic
 // Registry at request time and runs them over A2A through the Agent Gateway.
 //
-// Nothing here is compiled into the binary: an agent's identity, its skills,
-// its tools and its transport all come from the registry, so publishing a new
-// revision changes behaviour without a Kora deploy. Resolution is cached with
-// a TTL and falls back to the last good copy when the registry is unreachable,
-// so a registry outage degrades to stale composition rather than to no agent.
+// Agent composition, skills, tools and transport come from the Registry. Kora
+// separately restricts execution to its reviewed pilot agents; publishing a
+// Registry object alone cannot make it reachable. Resolution is cached with a
+// TTL and falls back to the last good copy when the Registry is unreachable.
 package agents
 
 import "strings"

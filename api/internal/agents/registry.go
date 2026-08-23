@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -161,10 +160,7 @@ func (r *Registry) get(ctx context.Context, path string, out any) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		// The body can carry the registry's own error message but is
-		// attacker-influenced only in the path, so a bounded read is safe.
-		detail, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("agents: registry %s returned %d: %s", path, resp.StatusCode, strings.TrimSpace(string(detail)))
+		return fmt.Errorf("agents: registry %s returned %d", path, resp.StatusCode)
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {

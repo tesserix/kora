@@ -130,6 +130,45 @@ func TestSendSurfacesAJSONRPCError(t *testing.T) {
 	}
 }
 
+func TestSendDoesNotSurfaceTheA2AHTTPErrorBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("upstream-sensitive-detail"))
+	}))
+	defer srv.Close()
+
+	g := NewGateway(srv.URL, "gw-key", nil)
+	resolved := resolvedFixture()
+	_, err := g.Send(context.Background(), &resolved, "hi")
+	if err == nil {
+		t.Fatal("Send = nil error, want an A2A failure")
+	}
+	if strings.Contains(err.Error(), "upstream-sensitive-detail") {
+		t.Fatalf("Send error exposed the A2A HTTP body: %v", err)
+	}
+}
+
+func TestSendDoesNotSurfaceTheA2AJSONRPCErrorMessage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      "1",
+			"error":   map[string]any{"code": -32000, "message": "upstream-sensitive-detail"},
+		})
+	}))
+	defer srv.Close()
+
+	g := NewGateway(srv.URL, "gw-key", nil)
+	resolved := resolvedFixture()
+	_, err := g.Send(context.Background(), &resolved, "hi")
+	if err == nil {
+		t.Fatal("Send = nil error, want a JSON-RPC failure")
+	}
+	if strings.Contains(err.Error(), "upstream-sensitive-detail") {
+		t.Fatalf("Send error exposed the A2A JSON-RPC message: %v", err)
+	}
+}
+
 func TestSendRejectsAnUnsupportedTransport(t *testing.T) {
 	resolved := resolvedFixture()
 	resolved.Agent.Spec["a2a"].(map[string]any)["preferredTransport"] = "GRPC"
