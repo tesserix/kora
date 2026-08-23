@@ -1246,6 +1246,17 @@ export function useAddWeight() {
 }
 
 const WEIGHT_RANGE_DAYS = { "1W": 7, "1M": 30, "3M": 90, "1Y": 365 } as const;
+
+/**
+ * The exclusive end of `d`'s UTC day (kora#378).
+ *
+ * A whole UTC day rather than a local one, deliberately, and matching the
+ * server's own default for an omitted `to`: erring wide only ever includes an
+ * entry the user themselves logged, while erring narrow hides their data.
+ */
+function endOfUTCDay(d: Date): Date {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1));
+}
 export type WeightRange = keyof typeof WEIGHT_RANGE_DAYS;
 
 export function useWeightSeries(range: WeightRange) {
@@ -1259,7 +1270,13 @@ export function useWeightSeries(range: WeightRange) {
     // the user has no weigh-ins on the way to showing that they do.
     placeholderData: keepPreviousData,
     queryFn: () => {
-      const to = new Date();
+      // The window reaches the END of today, not the current instant
+      // (kora#378). A date-only weigh-in is stamped midday UTC, so for most
+      // of the day `to = now` excluded the user's own morning entry from the
+      // series meant to display it -- it saved, then simply did not appear.
+      // `from` stays relative to `to`, so each range still spans exactly the
+      // number of days it names.
+      const to = endOfUTCDay(new Date());
       const from = new Date(to.getTime() - WEIGHT_RANGE_DAYS[range] * 24 * 60 * 60 * 1000);
       return apiFetch(`/v1/weight?from=${from.toISOString()}&to=${to.toISOString()}`) as Promise<WeightEntry[]>;
     },

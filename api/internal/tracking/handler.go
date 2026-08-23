@@ -154,7 +154,7 @@ func (h Handler) ListWeight(c *gin.Context) {
 	}
 	to, err := time.Parse(time.RFC3339, c.Query("to"))
 	if err != nil {
-		to = time.Now()
+		to = endOfUTCDay(time.Now())
 	}
 	from, err := time.Parse(time.RFC3339, c.Query("from"))
 	if err != nil {
@@ -166,6 +166,24 @@ func (h Handler) ListWeight(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, entries)
+}
+
+// endOfUTCDay is the exclusive upper bound of `t`'s UTC day.
+//
+// It is what ListWeight defaults `to` to, rather than time.Now(), because
+// "the weight series" means everything logged up to and including today, and
+// a client that omits `to` is asking for exactly that (kora#378). Defaulting
+// to the current instant instead silently excluded any entry stamped later
+// today -- which a date-only entry always is before midday UTC, since the
+// client sends one as `T12:00:00Z`. The result was a weigh-in that saved
+// correctly and then did not appear, with no error on any layer to say so.
+//
+// Deliberately a whole UTC day and not a local one: this handler has no
+// reliable timezone for the caller, and erring wide only ever includes an
+// entry the user themselves logged. Erring narrow hides their data.
+func endOfUTCDay(t time.Time) time.Time {
+	u := t.UTC()
+	return time.Date(u.Year(), u.Month(), u.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, 1)
 }
 
 // orNow mirrors the repository's zero-time defaulting so the local day is
