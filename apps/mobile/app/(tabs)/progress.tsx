@@ -21,7 +21,7 @@ import { EmptyState } from "@/components/common/EmptyState";
 import { LoadErrorNotice } from "@/components/common/LoadErrorNotice";
 import { useAvgIntake7d, useDashboard, useProfile, useWeightSeries, useWeightTrend } from "@/api/hooks";
 import type { WeightEntry } from "@/api/types";
-import { useHealth } from "@/health";
+import { shouldOfferConnect, useHealth } from "@/health";
 import { AnimatedNumber, PressableScale, ScreenEntrance, useMotionPrefs } from "@/motion";
 import { useTheme } from "@/theme";
 import { todayLocalDate } from "@/lib/shotsClock";
@@ -489,6 +489,19 @@ export default function Progress() {
             {health.sleep ? (
               <AppText style={[{ fontSize: 15, fontWeight: "600", color: instrument.ink, marginTop: 2 }, mono]}>
                 {`${health.sleep.lastNightHours}h`}
+              </AppText>
+            ) : !shouldOfferConnect(health.status) ? (
+              // kora#406: connected, but nothing recorded for the period.
+              // Absence of a MEASUREMENT is not absence of PERMISSION, and
+              // showing "Connect Apple Health" here sent an already-connected
+              // user into a permission flow that fixes nothing — the figure
+              // still would not appear, because the real reason is that no
+              // sleep was recorded.
+              <AppText
+                accessibilityLabel="No sleep recorded"
+                style={[{ fontSize: 15, fontWeight: "600", color: instrument.mut, marginTop: 2 }, mono]}
+              >
+                —
               </AppText>
             ) : (
               <PressableScale

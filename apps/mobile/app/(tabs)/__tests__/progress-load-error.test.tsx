@@ -49,6 +49,9 @@ jest.mock("@/lib/api", () => ({
 }));
 
 jest.mock("@/health", () => ({
+  // kora#406: the factory replaces the WHOLE module, so anything the screen
+  // imports must be listed here or it arrives undefined at render.
+  shouldOfferConnect: (status: string) => status !== "authorized",
   useHealth: () => ({ status: "unavailable", steps: null, sleep: null, connect: jest.fn() }),
 }));
 
