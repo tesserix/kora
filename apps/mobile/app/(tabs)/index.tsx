@@ -21,7 +21,7 @@ import { SpecularSweep } from "@/components/instrument/SpecularSweep";
 import { BezelCluster, ZoneRule, WellFooter } from "@/components/instrument/BezelCluster";
 import { monoStyle } from "@/components/instrument/typography";
 import { useProfile, useDashboard, useDayLogs, useUnreadCount, useCoachNudges } from "@/api/hooks";
-import { useHealth } from "@/health";
+import { shouldOfferConnect, useHealth } from "@/health";
 import { useTheme } from "@/theme";
 import { accessibleMealLabel } from "@/lib/portionAssumedLabel";
 import { now, todayLocalDate } from "@/lib/shotsClock";
@@ -164,38 +164,32 @@ export default function Home() {
 
   // Dashboard `Totals` (src/api/types.ts) has no burned/active-energy field —
   // GaugeDial's `burned` prop is intentionally omitted rather than guessed.
+  // kora#406: three states, not two. "Connected but nothing recorded" was
+  // rendering as "Connect Apple Health", which sent an already-connected user
+  // into a permission flow that fixes nothing — the figure still would not
+  // appear, because the real reason is that no data exists for the period.
+  // A plain icon with an em dash says "nothing to show", which is true.
+  const offerConnect = shouldOfferConnect(health.status);
+  const telemetryIcon = (name: "footprints" | "moon") =>
+    !offerConnect ? (
+      <Icon name={name} size={16} color={instrument.mut} />
+    ) : (
+      <PressableScale
+        accessibilityRole="button"
+        accessibilityLabel="Connect Apple Health"
+        haptic="selection"
+        onPress={health.connect}
+      >
+        <Icon name={name} size={16} color={instrument.mut} />
+      </PressableScale>
+    );
+
   const stepsCell: TelemetryCell = health.steps
     ? { icon: <Icon name="footprints" size={16} color={instrument.mut} />, value: health.steps.today.toLocaleString(), label: "Steps" }
-    : {
-        icon: (
-          <PressableScale
-            accessibilityRole="button"
-            accessibilityLabel="Connect Apple Health"
-            haptic="selection"
-            onPress={health.connect}
-          >
-            <Icon name="footprints" size={16} color={instrument.mut} />
-          </PressableScale>
-        ),
-        value: "—",
-        label: "Steps",
-      };
+    : { icon: telemetryIcon("footprints"), value: "—", label: "Steps" };
   const sleepCell: TelemetryCell = health.sleep
     ? { icon: <Icon name="moon" size={16} color={instrument.mut} />, value: `${health.sleep.lastNightHours}h`, label: "Sleep" }
-    : {
-        icon: (
-          <PressableScale
-            accessibilityRole="button"
-            accessibilityLabel="Connect Apple Health"
-            haptic="selection"
-            onPress={health.connect}
-          >
-            <Icon name="moon" size={16} color={instrument.mut} />
-          </PressableScale>
-        ),
-        value: "—",
-        label: "Sleep",
-      };
+    : { icon: telemetryIcon("moon"), value: "—", label: "Sleep" };
 
   const openMeal = (log: FoodLog) =>
     router.push({

@@ -37,8 +37,12 @@ jest.mock("@/lib/api", () => ({
   },
 }));
 
+const mockHealth = jest.fn(() => ({ status: "unavailable", steps: null, sleep: null, connect: jest.fn() }));
 jest.mock("@/health", () => ({
-  useHealth: () => ({ status: "unavailable", steps: null, sleep: null, connect: jest.fn() }),
+  // kora#406: the factory replaces the WHOLE module, so anything the screen
+  // imports must be listed here or it arrives undefined at render.
+  shouldOfferConnect: (status: string) => status !== "authorized",
+  useHealth: () => mockHealth(),
 }));
 
 const mockUseUnits = jest.fn();
@@ -224,4 +228,34 @@ test("shows nothing at all when the rate is suppressed", async () => {
   });
   const { queryByText } = await render(<Progress />);
   expect(queryByText(/per week/)).toBeNull();
+});
+
+
+// kora#406: "connected but nothing recorded" and "not connected" rendered
+// identically, so an already-connected user was told to connect. The failing
+// case is the FIRST test below — a test asserting only "shows Connect when
+// there is no value" passes under the bug, because both states have no value.
+describe("Apple Health connection vs. missing data (kora#406)", () => {
+  afterEach(() => {
+    mockHealth.mockReturnValue({ status: "unavailable", steps: null, sleep: null, connect: jest.fn() });
+  });
+
+  test("a connected user with no sleep recorded is NOT told to connect", async () => {
+    mockHealth.mockReturnValue({ status: "authorized", steps: null, sleep: null, connect: jest.fn() });
+    const { queryByLabelText, getByLabelText } = await render(<Progress />);
+    expect(queryByLabelText("Connect Apple Health")).toBeNull();
+    expect(getByLabelText("No sleep recorded")).toBeTruthy();
+  });
+
+  test("a user who has not connected still sees the prompt", async () => {
+    mockHealth.mockReturnValue({ status: "unavailable", steps: null, sleep: null, connect: jest.fn() });
+    const { getByLabelText } = await render(<Progress />);
+    expect(getByLabelText("Connect Apple Health")).toBeTruthy();
+  });
+
+  test("a denied user sees the prompt, since re-granting is the real remedy", async () => {
+    mockHealth.mockReturnValue({ status: "denied", steps: null, sleep: null, connect: jest.fn() });
+    const { getByLabelText } = await render(<Progress />);
+    expect(getByLabelText("Connect Apple Health")).toBeTruthy();
+  });
 });

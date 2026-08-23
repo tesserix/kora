@@ -285,3 +285,20 @@ export function useHealth(): HealthData {
 
   return { status, steps, sleep, connect, refresh: load };
 }
+
+/**
+ * Whether to offer "Connect Apple Health" (kora#406).
+ *
+ * The bug this exists to prevent: three screens branched on whether the
+ * DATA existed, so "connected, but nothing recorded for this period"
+ * rendered the same prompt as "never connected". An already-connected user
+ * was sent into a permission flow that fixes nothing — the figure still
+ * would not appear, because the real reason is that no measurement exists.
+ *
+ * Absence of a measurement is not absence of permission. `denied` and
+ * `unavailable` both DO warrant the prompt: for those, granting access is
+ * genuinely the remedy.
+ */
+export function shouldOfferConnect(status: HealthStatus): boolean {
+  return status !== "authorized";
+}
