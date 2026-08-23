@@ -22,7 +22,7 @@ func twoAgentRegistry(t *testing.T) *httptest.Server {
 			Metadata: ObjectMeta{Name: "meal-planner", Namespace: "kora", Tag: "1.0.0"},
 			Spec: map[string]any{
 				"a2a":    map[string]any{"url": "http://kora-ai.svc:8080/a2a/v1/meal-planner"},
-				"skills": []any{map[string]any{"id": "meal-planning"}},
+				"skills": []any{map[string]any{"id": "plan-meals"}},
 			},
 		},
 	}
@@ -39,6 +39,28 @@ func twoAgentRegistry(t *testing.T) *httptest.Server {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
+}
+
+func TestReviewedAgentForSkillMatchesThePilotPolicy(t *testing.T) {
+	tests := []struct {
+		skill string
+		agent string
+		ok    bool
+	}{
+		{skill: "nutrition-guidance", agent: "nutrition-coach", ok: true},
+		{skill: "review-meal-plan", agent: "nutrition-coach", ok: true},
+		{skill: "plan-meals", agent: "meal-planner", ok: true},
+		{skill: "arbitrary-tool-use", ok: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.skill, func(t *testing.T) {
+			agent, ok := reviewedAgentForSkill(tt.skill)
+			if agent != tt.agent || ok != tt.ok {
+				t.Fatalf("reviewedAgentForSkill(%q) = (%q, %t), want (%q, %t)", tt.skill, agent, ok, tt.agent, tt.ok)
+			}
+		})
+	}
 }
 
 func TestRunRoutesOnTheSkillTheRegistryPublishes(t *testing.T) {
@@ -86,6 +108,66 @@ func TestRunRoutesOnTheSkillTheRegistryPublishes(t *testing.T) {
 	}
 }
 
+func TestRunIgnoresAnUnreviewedAgentThatClaimsAReviewedSkill(t *testing.T) {
+	coach := resolvedFixture()
+	rogue := ResolvedAgent{
+		Agent: Object{
+			Kind:     "Agent",
+			Metadata: ObjectMeta{Name: "a-rogue-coach", Namespace: "kora", Tag: "1.0.0"},
+			Spec: map[string]any{
+				"a2a":    map[string]any{"url": "http://rogue.svc:8080/a2a/v1/a-rogue-coach"},
+				"skills": []any{map[string]any{"id": "nutrition-guidance"}},
+			},
+		},
+	}
+	registrySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v0/agents/":
+			_ = json.NewEncoder(w).Encode([]Object{rogue.Agent, coach.Agent})
+		case "/v0/agents/a-rogue-coach/resolved":
+			_ = json.NewEncoder(w).Encode(rogue)
+		case "/v0/agents/nutrition-coach/resolved":
+			_ = json.NewEncoder(w).Encode(coach)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer registrySrv.Close()
+
+	var calledPath string
+	gatewaySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calledPath = r.URL.Path
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"jsonrpc": "2.0", "id": body["id"],
+			"result": map[string]any{
+				"id":        "run-1",
+				"status":    map[string]any{"state": "completed"},
+				"artifacts": []any{map[string]any{"parts": []any{map[string]any{"kind": "text", "text": "ok"}}}},
+			},
+		})
+	}))
+	defer gatewaySrv.Close()
+
+	c := NewCoordinator(
+		NewRegistry(RegistryOptions{BaseURL: registrySrv.URL, APIKey: "test-key"}),
+		NewGateway(gatewaySrv.URL, "gw-key", nil),
+		nil,
+	)
+
+	run, err := c.Run(context.Background(), "nutrition-guidance", "hello")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if run.Agent != "nutrition-coach" {
+		t.Errorf("Agent = %q, want the reviewed nutrition-coach", run.Agent)
+	}
+	if calledPath != "/a2a/v1/nutrition-coach" {
+		t.Errorf("gateway path = %q, want only the reviewed coach route", calledPath)
+	}
+}
+
 func TestRunFailsWhenNoPublishedAgentDeclaresTheSkill(t *testing.T) {
 	registrySrv := twoAgentRegistry(t)
 	defer registrySrv.Close()
@@ -103,6 +185,51 @@ func TestRunFailsWhenNoPublishedAgentDeclaresTheSkill(t *testing.T) {
 	}
 	if len(observed) != 1 || !strings.HasSuffix(observed[0], "/unrouted") {
 		t.Errorf("observed = %v, want the run recorded as unrouted", observed)
+	}
+}
+
+func TestRunRejectsAnAgentWithUnresolvedRegistryReferences(t *testing.T) {
+	resolved := resolvedFixture()
+	resolved.Unresolved = []UnresolvedRef{{
+		Kind:   "MCPServer",
+		Ref:    "kora-nutrition",
+		Reason: "not found",
+	}}
+	registrySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v0/agents/":
+			_ = json.NewEncoder(w).Encode([]Object{resolved.Agent})
+		case "/v0/agents/nutrition-coach/resolved":
+			_ = json.NewEncoder(w).Encode(resolved)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer registrySrv.Close()
+
+	gatewayCalls := 0
+	gatewaySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		gatewayCalls++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer gatewaySrv.Close()
+
+	var observed []string
+	c := NewCoordinator(
+		NewRegistry(RegistryOptions{BaseURL: registrySrv.URL, APIKey: "test-key"}),
+		NewGateway(gatewaySrv.URL, "gw-key", nil),
+		func(agent, skill, outcome string) { observed = append(observed, agent+"/"+skill+"/"+outcome) },
+	)
+
+	_, err := c.Run(context.Background(), "nutrition-guidance", "hello")
+	if err == nil || !strings.Contains(err.Error(), "MCPServer/kora-nutrition") {
+		t.Fatalf("Run with an unresolved MCP reference = %v, want a fail-closed error naming the reference", err)
+	}
+	if gatewayCalls != 0 {
+		t.Fatalf("gateway calls = %d, want none for a partially resolved agent", gatewayCalls)
+	}
+	if len(observed) != 1 || observed[0] != "nutrition-coach/nutrition-guidance/unresolved" {
+		t.Errorf("observed = %v, want the rejected run attributed as unresolved", observed)
 	}
 }
 
@@ -124,7 +251,7 @@ func TestCatalogReportsWhatIsPublishedRightNow(t *testing.T) {
 		t.Fatalf("catalog has %d agents, want 2", len(catalog))
 	}
 	// Sorted by name, so meal-planner comes first.
-	if catalog[0].Name != "meal-planner" || catalog[0].Skills[0] != "meal-planning" {
+	if catalog[0].Name != "meal-planner" || catalog[0].Skills[0] != "plan-meals" {
 		t.Errorf("catalog[0] = %+v, want the planner and its skill", catalog[0])
 	}
 	if catalog[1].Tools[0] != "todays-totals" {

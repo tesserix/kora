@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -144,8 +143,7 @@ func (g *Gateway) Send(ctx context.Context, resolved *ResolvedAgent, prompt stri
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		detail, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return Run{}, fmt.Errorf("agents: a2a %s returned %d: %s", path, resp.StatusCode, strings.TrimSpace(string(detail)))
+		return Run{}, fmt.Errorf("agents: a2a %s returned %d", path, resp.StatusCode)
 	}
 
 	var envelope a2aResponse
@@ -153,7 +151,7 @@ func (g *Gateway) Send(ctx context.Context, resolved *ResolvedAgent, prompt stri
 		return Run{}, fmt.Errorf("agents: decode a2a response: %w", err)
 	}
 	if envelope.Error != nil {
-		return Run{}, fmt.Errorf("agents: a2a error %d: %s", envelope.Error.Code, envelope.Error.Message)
+		return Run{}, fmt.Errorf("agents: a2a error %d", envelope.Error.Code)
 	}
 
 	text := envelope.text()

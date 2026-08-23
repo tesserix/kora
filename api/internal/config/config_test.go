@@ -74,6 +74,13 @@ func TestLoadConfig(t *testing.T) {
 				OpenAIBaseURL:     "https://integrate.api.nvidia.com/v1",
 				OpenAIModel:       "meta/llama-3.3-70b-instruct",
 				OpenAIJSONObject:  true,
+				AIGatewayEnabled:  true,
+				AIGatewayBaseURL:  "http://kora-ai.agentgateway-system.svc.cluster.local:8080/v1",
+				AIGatewayAPIKey:   "gateway-key",
+				AIGatewayModel:    "kora-auto",
+				AIAgentTimeout:    60 * time.Second,
+				AIRegistryBaseURL: "http://agentregistry.agentregistry-system.svc.cluster.local:12121",
+				AIRegistryAPIKey:  "registry-key",
 			},
 		},
 	}
@@ -95,6 +102,18 @@ func TestLoadConfig(t *testing.T) {
 			t.Setenv("OPENAI_BASE_URL", tt.openAIBaseURL)
 			t.Setenv("OPENAI_MODEL", tt.openAIModel)
 			t.Setenv("OPENAI_JSON_OBJECT", tt.openAIJSONObject)
+			t.Setenv("AI_GATEWAY_ENABLED", "")
+			t.Setenv("AI_GATEWAY_BASE_URL", "")
+			t.Setenv("AI_GATEWAY_API_KEY", "")
+			t.Setenv("AI_REGISTRY_BASE_URL", "")
+			t.Setenv("AI_REGISTRY_API_KEY", "")
+			if tt.env == "production" {
+				t.Setenv("AI_GATEWAY_ENABLED", "true")
+				t.Setenv("AI_GATEWAY_BASE_URL", "http://kora-ai.agentgateway-system.svc.cluster.local:8080/v1")
+				t.Setenv("AI_GATEWAY_API_KEY", "gateway-key")
+				t.Setenv("AI_REGISTRY_BASE_URL", "http://agentregistry.agentregistry-system.svc.cluster.local:12121")
+				t.Setenv("AI_REGISTRY_API_KEY", "registry-key")
+			}
 
 			// Call Load()
 			cfg, err := Load()
@@ -201,6 +220,30 @@ func TestLoadRejectsMetricsPortEqualToPort(t *testing.T) {
 	_, err := Load()
 	require.Error(t, err, "a colliding METRICS_PORT must be rejected at startup")
 	require.Contains(t, err.Error(), "METRICS_PORT")
+}
+
+func TestLoadProductionRequiresTheGatewayAndRegistry(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
+	t.Setenv("ENV", "production")
+	t.Setenv("AI_GATEWAY_ENABLED", "")
+	t.Setenv("AI_GATEWAY_BASE_URL", "")
+	t.Setenv("AI_GATEWAY_API_KEY", "")
+	t.Setenv("AI_REGISTRY_BASE_URL", "")
+	t.Setenv("AI_REGISTRY_API_KEY", "")
+
+	_, err := Load()
+	require.ErrorContains(t, err, "AI_GATEWAY_ENABLED")
+
+	t.Setenv("AI_GATEWAY_ENABLED", "true")
+	t.Setenv("AI_GATEWAY_BASE_URL", "http://kora-ai.agentgateway-system.svc.cluster.local:8080/v1")
+	t.Setenv("AI_GATEWAY_API_KEY", "gateway-key")
+	_, err = Load()
+	require.ErrorContains(t, err, "AI_REGISTRY_BASE_URL")
+
+	t.Setenv("AI_REGISTRY_BASE_URL", "http://agentregistry.agentregistry-system.svc.cluster.local:12121")
+	t.Setenv("AI_REGISTRY_API_KEY", "registry-key")
+	_, err = Load()
+	require.NoError(t, err)
 }
 
 func TestLoadDefaultsFoodIndexRefreshIntervalTo60s(t *testing.T) {

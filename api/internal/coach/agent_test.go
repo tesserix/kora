@@ -110,7 +110,7 @@ func TestAsk_MetersTheAgentRunAgainstTheUsersBudget(t *testing.T) {
 	require.Equal(t, ai.OutcomeOK, meter.records[0].Outcome)
 }
 
-func TestAsk_FallsBackToTheProviderWhenTheAgentFails(t *testing.T) {
+func TestAsk_FailsClosedWhenTheConfiguredAgentFails(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db, 2000, 120)
 	g, meter := askFixture(t)
@@ -122,15 +122,14 @@ func TestAsk_FallsBackToTheProviderWhenTheAgentFails(t *testing.T) {
 	runner := &fakeRunner{err: errors.New("gateway unreachable")}
 	svc := NewService(g, provider, meter, nil).WithAgents(runner)
 
-	a, err := svc.Ask(context.Background(), userID, time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC), time.UTC, "how am I doing?")
+	_, err := svc.Ask(context.Background(), userID, time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC), time.UTC, "how am I doing?")
 
-	require.NoError(t, err, "a failed agent must not cost the user an answer the provider can still give")
-	require.Equal(t, "from the provider", a.Text)
-	// Two: one to route, one to answer once the agent failed.
-	require.Equal(t, 2, provider.calls)
-	require.Len(t, meter.records, 2, "both the failed run and the fallback call must be metered")
+	require.ErrorContains(t, err, "gateway unreachable")
+	// The provider classifies the skill before the agent run. It must not then
+	// answer outside the Registry-resolved agent path.
+	require.Equal(t, 1, provider.calls)
+	require.Len(t, meter.records, 1, "only the failed agent run is metered")
 	require.Equal(t, ai.OutcomeError, meter.records[0].Outcome)
-	require.Equal(t, ai.OutcomeOK, meter.records[1].Outcome)
 }
 
 func TestAsk_AgentAnswersWhenNoProviderIsConfigured(t *testing.T) {
@@ -187,25 +186,21 @@ func TestAsk_AttributesTheAnswerToTheAgentThatProducedIt(t *testing.T) {
 	_ = db
 }
 
-// A gateway 502 costs the user the agent, not the answer — but an unlabelled
-// fallback is the misleading part: the published coach and the plain provider
-// produced identical-looking replies. The answer names whoever wrote it, and
-// that is never the agent whose run just failed.
-func TestAsk_AProviderFallbackIsAttributedToOttoNotTheFailedAgent(t *testing.T) {
+// An A2A failure must remain visible instead of being masked by a plain model
+// answer that skipped the Registry-resolved agent.
+func TestAsk_DoesNotMaskAnA2AFailureWithAProviderAnswer(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db, 2000, 120)
 	g, meter := askFixture(t)
 
 	runner := &fakeRunner{err: errors.New("agents: a2a returned 502")}
-	svc := NewService(g, &fakeProvider{text: "from the provider"}, meter, nil).WithAgents(runner)
+	provider := &fakeProvider{text: "from the provider"}
+	svc := NewService(g, provider, meter, nil).WithAgents(runner)
 
-	a, err := svc.Ask(context.Background(), userID, time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC), time.UTC, "how's my protein?")
+	_, err := svc.Ask(context.Background(), userID, time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC), time.UTC, "how's my protein?")
 
-	require.NoError(t, err)
-	require.Equal(t, "from the provider", a.Text)
-	require.Equal(t, fallbackAgentName, a.By.Agent, "the thread never shows an anonymous reply")
-	require.Equal(t, guidanceSkill, a.By.Skill)
-	require.Empty(t, a.By.ReviewedBy)
+	require.ErrorContains(t, err, "agents: a2a returned 502")
+	require.Equal(t, 1, provider.calls, "the provider may classify the request but must not answer it")
 	_ = db
 }
 
@@ -321,16 +316,14 @@ func TestAsk_AReviewedRoutineReturnsAndPersistsAUserReviewProposal(t *testing.T)
 	require.Equal(t, answer.Proposal.ID, turns[1].Proposal.ID)
 }
 
-// A review that cannot happen must not expose the planner's prose as though it
-// had passed. The response stays retryable and carries no approval artefact.
-func TestAsk_AFailedReviewDoesNotExposeAProseDraft(t *testing.T) {
+// A review that cannot happen must not bypass the published supervisor or
+// expose the planner's prose as though it had passed.
+func TestAsk_AFailedSupervisorReviewDoesNotBypassRegistry(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db, 2000, 120)
 	g, meter := askFixture(t)
 
-	// The provider answers the classifier with "plan", then fails every later
-	// call — so the review's provider fallback fails too.
-	provider := &flakyProvider{fakeProvider: fakeProvider{text: "plan"}, failAfter: 1}
+	provider := &fakeProvider{text: "plan"}
 	runner := &fakeRunner{
 		bySkill: map[string]agents.Run{
 			planningSkill: {
@@ -353,6 +346,7 @@ func TestAsk_AFailedReviewDoesNotExposeAProseDraft(t *testing.T) {
 	require.Equal(t, "Kora Meal Planner", a.By.Agent)
 	require.Empty(t, a.By.ReviewedBy)
 	require.Nil(t, a.Plan)
+	require.Equal(t, 1, provider.calls, "only intent classification may use the provider when the supervisor is configured")
 	_ = db
 }
 
@@ -398,21 +392,6 @@ func TestAsk_ClassifierFailureFallsBackToGuidance(t *testing.T) {
 	require.Equal(t, guidanceSkill, runner.skill)
 	require.Equal(t, "Still answered.", a.Text)
 	_ = db
-}
-
-// flakyProvider succeeds for its first failAfter GenerateText calls and then
-// errors — the shape of "the classifier worked, the fallback did not".
-type flakyProvider struct {
-	fakeProvider
-	failAfter int
-}
-
-func (f *flakyProvider) GenerateText(ctx context.Context, systemPrompt, userPrompt string) (string, ai.Usage, error) {
-	if f.calls >= f.failAfter {
-		f.calls++
-		return "", ai.Usage{}, errors.New("provider down")
-	}
-	return f.fakeProvider.GenerateText(ctx, systemPrompt, userPrompt)
 }
 
 // A planner draft is not safe to show until the nutrition coach has reviewed

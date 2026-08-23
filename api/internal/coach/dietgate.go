@@ -68,9 +68,8 @@ func dietFlags(a Answer) []diet.Violation {
 	return a.DietFlags
 }
 
-// regenerate re-runs the same path that produced an answer. Falling back to the
-// provider when the agent retry fails keeps the retry from costing the user an
-// answer entirely.
+// regenerate re-runs the same path that produced an answer. Once an agent path
+// is selected, a failed retry stays failed rather than bypassing the Registry.
 func (s *Service) regenerate(
 	ctx context.Context,
 	userID uuid.UUID,
@@ -78,9 +77,8 @@ func (s *Service) regenerate(
 	viaAgent bool,
 ) (string, error) {
 	if viaAgent {
-		if raw, _, err := s.askAgent(ctx, userID, userPrompt, skill); err == nil {
-			return raw, nil
-		}
+		raw, _, err := s.askAgent(ctx, userID, userPrompt, skill)
+		return raw, err
 	}
 	return s.askProvider(ctx, userID, userPrompt)
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -27,6 +28,7 @@ func resolvedFixture() ResolvedAgent {
 				},
 				"skills": []any{
 					map[string]any{"id": "nutrition-guidance", "name": "Nutrition Guidance"},
+					map[string]any{"id": "review-meal-plan", "name": "Review Meal Plan"},
 				},
 			},
 		},
@@ -188,6 +190,23 @@ func TestResolveFailsWhenRegistryFailsWithNothingCached(t *testing.T) {
 	r := NewRegistry(RegistryOptions{BaseURL: srv.URL, APIKey: "test-key"})
 	if _, err := r.Resolve(context.Background(), "nutrition-coach", ""); err == nil {
 		t.Fatal("Resolve = nil error, want a failure — there is no stale copy to serve")
+	}
+}
+
+func TestResolveDoesNotSurfaceTheRegistryErrorBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("upstream-sensitive-detail"))
+	}))
+	defer srv.Close()
+
+	r := NewRegistry(RegistryOptions{BaseURL: srv.URL, APIKey: "test-key"})
+	_, err := r.Resolve(context.Background(), "nutrition-coach", "")
+	if err == nil {
+		t.Fatal("Resolve = nil error, want a Registry failure")
+	}
+	if strings.Contains(err.Error(), "upstream-sensitive-detail") {
+		t.Fatalf("Resolve error exposed the Registry body: %v", err)
 	}
 }
 

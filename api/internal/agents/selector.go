@@ -10,11 +10,9 @@ import (
 	"time"
 )
 
-// Coordinator picks an agent for a skill and runs it. Selection is driven
-// entirely by what the registry publishes: Kora names a skill, and whichever
-// agent declares that skill serves it. No agent name is compiled in, so
-// publishing a new agent that declares an existing skill is enough to route to
-// it.
+// Coordinator resolves and runs the reviewed Kora agent for a capability. The
+// Registry supplies composition; it does not grant a newly published agent
+// authority to receive Kora traffic.
 type Coordinator struct {
 	registry *Registry
 	gateway  *Gateway
@@ -58,10 +56,12 @@ func (c *Coordinator) Run(ctx context.Context, skill, prompt string) (Run, error
 
 	name := resolved.Agent.Metadata.Name
 	if len(resolved.Unresolved) > 0 {
-		// A missing skill or tool reference means the agent is running with
-		// less than it declares. Surface it rather than silently degrading.
-		slog.WarnContext(ctx, "agents: running a partially resolved agent",
-			"agent", name, "skill", skill, "unresolved", summarize(resolved.Unresolved))
+		c.observe(name, skill, "unresolved")
+		return Run{}, fmt.Errorf(
+			"agents: %s has unresolved registry references: %s",
+			name,
+			summarize(resolved.Unresolved),
+		)
 	}
 
 	run, err := c.gateway.Send(ctx, resolved, prompt)
@@ -128,25 +128,34 @@ type AgentSummary struct {
 	Tools  []string `json:"tools"`
 }
 
-// agentForSkill finds the first agent declaring skill, in stable name order so
-// two agents offering the same skill route deterministically.
+// agentForSkill resolves only the agent Kora reviewed for skill. KAI-03 will
+// move this policy into a signed, digest-pinned product bundle; until then the
+// small pilot allowlist is deliberately compiled with the product.
 func (c *Coordinator) agentForSkill(ctx context.Context, skill string) (*ResolvedAgent, error) {
-	names, err := c.agentNames(ctx)
-	if err != nil {
-		return nil, err
+	name, ok := reviewedAgentForSkill(skill)
+	if !ok {
+		return nil, fmt.Errorf("agents: no reviewed agent is approved for skill %q", skill)
 	}
 
-	for _, name := range names {
-		resolved, err := c.registry.Resolve(ctx, name, "")
-		if err != nil {
-			slog.WarnContext(ctx, "agents: skipped an agent while routing", "agent", name, "skill", skill, "err", err)
-			continue
-		}
-		if resolved.HasSkill(skill) {
-			return resolved, nil
-		}
+	resolved, err := c.registry.Resolve(ctx, name, "")
+	if err != nil {
+		return nil, fmt.Errorf("agents: resolve reviewed agent %q for skill %q: %w", name, skill, err)
 	}
-	return nil, fmt.Errorf("agents: no registered agent declares skill %q", skill)
+	if !resolved.HasSkill(skill) {
+		return nil, fmt.Errorf("agents: reviewed agent %q does not declare skill %q", name, skill)
+	}
+	return resolved, nil
+}
+
+func reviewedAgentForSkill(skill string) (string, bool) {
+	switch skill {
+	case "nutrition-guidance", "review-meal-plan":
+		return "nutrition-coach", true
+	case "plan-meals":
+		return "meal-planner", true
+	default:
+		return "", false
+	}
 }
 
 // agentNames lists the readable agents, cached on the same TTL as a

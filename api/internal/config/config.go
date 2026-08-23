@@ -162,6 +162,14 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("config: AI_REGISTRY_API_KEY is required when AI_REGISTRY_BASE_URL is set")
 		}
 	}
+	if cfg.Env == "production" {
+		if !cfg.AIGatewayEnabled {
+			return Config{}, fmt.Errorf("config: AI_GATEWAY_ENABLED must be true in production")
+		}
+		if cfg.AIRegistryBaseURL == "" {
+			return Config{}, fmt.Errorf("config: AI_REGISTRY_BASE_URL is required in production")
+		}
+	}
 	if raw := os.Getenv("KORA_BFF_HMAC_KEY"); raw != "" {
 		key, err := base64.StdEncoding.DecodeString(raw)
 		if err != nil {
