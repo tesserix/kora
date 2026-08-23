@@ -225,13 +225,3 @@ test("shows nothing at all when the rate is suppressed", async () => {
   const { queryByText } = await render(<Progress />);
   expect(queryByText(/per week/)).toBeNull();
 });
-
-test("notes an instrument change beside the rate rather than hiding it", async () => {
-  mockSeries.mockReturnValue({ data: [weighIn({ weight_kg: 74 }), weighIn({ weight_kg: 71.9 })] });
-  mockUseWeightTrend.mockReturnValue({
-    data: { status: "ok", rate_per_week: -0.4, basis: { readings: 9, days: 42 }, spans_instruments: true, show_support: false },
-    isSuccess: true,
-  });
-  const { findByText } = await render(<Progress />);
-  expect(await findByText(/more than one instrument/i)).toBeTruthy();
-});

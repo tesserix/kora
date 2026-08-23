@@ -358,16 +358,7 @@ export default function Progress() {
                     nothing at all for anything but a fitted rate: an
                     insufficient or suppressed trend carries no number here,
                     same as the OLS fit itself decided to say nothing. */}
-                {trendText ? (
-                  <View style={{ marginTop: 6 }}>
-                    <AppText style={mutedLabel}>{trendText}</AppText>
-                    {weightTrend.data?.spans_instruments ? (
-                      <AppText style={[mutedLabel, { marginTop: 2 }]}>
-                        These readings come from more than one instrument.
-                      </AppText>
-                    ) : null}
-                  </View>
-                ) : null}
+                {trendText ? <AppText style={[mutedLabel, { marginTop: 6 }]}>{trendText}</AppText> : null}
               </>
             ) : seriesError ? (
               <LoadErrorNotice message="Couldn't load your weigh-ins." onRetry={() => void series.refetch()} />
