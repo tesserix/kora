@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, View } from "react-native";
+import { ActivityIndicator, Platform, View } from "react-native";
 import { Sheet } from "@/components/Sheet";
 import { Button } from "@/components/Button";
 import { Overline } from "@/components/Overline";
@@ -12,6 +12,7 @@ import { isOnline, useIsOnline } from "@/offline/connectivity";
 import { detectedInstrumentSource, MANUAL_SOURCES, orderSourcesDetectedFirst } from "@/lib/bodyCompositionFields";
 import { droppedFieldsNotice, pickScaleScreenshot, readFailureMessage } from "@/lib/bodyCompositionScan";
 import { compositionValuesFromReading, type AddWeightPayload, type CompositionValues } from "@/lib/bodyCompositionForm";
+import { requestWeightPermission } from "@/health/weightPermission";
 import { useTheme } from "@/theme";
 import { BodyCompositionForm, type BodyCompositionFormHandle } from "./BodyCompositionForm";
 
@@ -103,6 +104,29 @@ export function LogWeightSheet({ visible, onClose, initialKg = 0, heightCm }: Pr
     setScreenshotInitialReadingDate(undefined);
     setDetectedSource(null);
     setScreenshotError(null);
+  }, [visible]);
+
+  // #375: the ONE place Kora asks for HealthKit weight access.
+  //
+  // The launch-time sync (src/health/useHealthSync.ts) deliberately never
+  // prompts -- a Health sheet thrown at a user on their first launch, before
+  // anything has explained why, invites a "Don't Allow" that is effectively
+  // permanent (a read denial is reversible only in Settings, and iOS will
+  // not tell us it happened). Here the ask explains itself: the user has
+  // just tapped "Log weight", so "Kora would like to read your weight" is
+  // the obvious next sentence, and granting it means the scale readings
+  // they already have show up without re-typing.
+  //
+  // Fire-and-forget, and failures are swallowed on purpose. iOS shows this
+  // sheet at most once per read type per install, so on every later open
+  // this resolves with no UI at all; and on a build without HealthKit linked
+  // the lazy require inside throws. Neither is the user's problem -- manual
+  // logging, which is what this sheet is actually for, works identically
+  // either way, so there is nothing worth interrupting them with.
+  useEffect(() => {
+    if (!visible) return;
+    if (Platform.OS !== "ios") return;
+    void requestWeightPermission().catch(() => {});
   }, [visible]);
 
   function openManualFallback(explanation: string) {

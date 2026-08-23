@@ -1,5 +1,7 @@
 import { act, fireEvent, render, within } from "@testing-library/react-native";
 import * as ImagePicker from "expo-image-picker";
+import { Platform } from "react-native";
+import { requestAuthorization } from "@kingstinct/react-native-healthkit";
 import { LogWeightSheet } from "../LogWeightSheet";
 
 // See RecipeParseSheet.test.tsx's own comment: the real "@/lib/api" pulls in
@@ -66,6 +68,8 @@ beforeEach(() => {
   (ImagePicker.launchImageLibraryAsync as jest.Mock).mockReset();
   (ImagePicker.requestMediaLibraryPermissionsAsync as jest.Mock).mockReset();
   (ImagePicker.requestMediaLibraryPermissionsAsync as jest.Mock).mockResolvedValue({ granted: true });
+  (requestAuthorization as jest.Mock).mockReset();
+  (requestAuthorization as jest.Mock).mockResolvedValue(true);
 });
 
 function mockPickedPhoto() {
@@ -408,4 +412,65 @@ test("reopening the sheet resets back to Manual mode, collapsed", async () => {
   await rerender(<LogWeightSheet visible onClose={jest.fn()} />);
   expect(getByTestId("log-weight-mode-segment-manual").props.accessibilityState.selected).toBe(true);
   expect(await findByText("Save")).toBeTruthy();
+});
+
+
+// #375. The launch-time sync (src/health/useHealthSync.ts) no longer prompts
+// for HealthKit weight access, so SOMETHING has to, and this sheet is the
+// point of use: the user has just tapped "Log weight", which is the one
+// moment "may I read your weight?" needs no explanation.
+describe("HealthKit permission (#375)", () => {
+  const originalOS = Platform.OS;
+  // Platform.OS is a getter on a shared singleton under jest-expo, so it is
+  // overridden via defineProperty rather than jest.mock — the same
+  // convention useHealth.test.tsx and Icon.test.tsx already use.
+  function setPlatformOS(os: string) {
+    Object.defineProperty(Platform, "OS", { get: () => os, configurable: true });
+  }
+  afterEach(() => setPlatformOS(originalOS));
+
+  test("requests weight permission when the sheet opens on iOS", async () => {
+    setPlatformOS("ios");
+
+    await render(<LogWeightSheet visible onClose={jest.fn()} />);
+
+    expect(requestAuthorization).toHaveBeenCalledWith({ toRead: ["HKQuantityTypeIdentifierBodyMass"] });
+  });
+
+  // A sheet that is mounted but hidden is not a point of use — every screen
+  // holding one would otherwise prompt at launch, which is the exact bug.
+  test("does not request anything while the sheet is closed", async () => {
+    setPlatformOS("ios");
+
+    await render(<LogWeightSheet visible={false} onClose={jest.fn()} />);
+
+    expect(requestAuthorization).not.toHaveBeenCalled();
+  });
+
+  test("does not touch HealthKit on a non-iOS platform", async () => {
+    setPlatformOS("android");
+
+    await render(<LogWeightSheet visible onClose={jest.fn()} />);
+
+    expect(requestAuthorization).not.toHaveBeenCalled();
+  });
+
+  // The sheet's actual job is manual logging, and that works with or without
+  // Health. A rejected request (no entitlement, HealthKit unlinked, user
+  // dismissal) must therefore be invisible: no toast, no error copy, and the
+  // form still usable.
+  test("a rejected request never surfaces an error and leaves the sheet working", async () => {
+    setPlatformOS("ios");
+    (requestAuthorization as jest.Mock).mockRejectedValue(new Error("HealthKit unavailable"));
+
+    const { getByLabelText, getByText } = await render(<LogWeightSheet visible onClose={jest.fn()} />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockToastShow).not.toHaveBeenCalled();
+    await fireEvent.changeText(getByLabelText("Weight in kilograms"), "11.1");
+    await fireEvent.press(getByText("Save"));
+    expect(mockAddMutate).toHaveBeenCalledTimes(1);
+  });
 });
