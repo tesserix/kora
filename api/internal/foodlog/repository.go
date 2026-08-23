@@ -148,23 +148,28 @@ func (r Repository) ListForUserSince(ctx context.Context, userID uuid.UUID, sinc
 	return logs, nil
 }
 
-// HasLoggedBefore reports whether the user has any log (resolved to a food
-// item, same definition ListForUserSince uses) strictly before `before`. It
-// exists to answer "has this user ever logged anything?" over an unbounded
-// lookback — distinguishing a user who has simply never logged from one
-// with established history who has since gone silent, which a single
-// bounded-window read can't tell apart (see coach.LogSource). An
-// EXISTS/LIMIT-1 read: only presence matters, so no rows are fetched.
-func (r Repository) HasLoggedBefore(ctx context.Context, userID uuid.UUID, before time.Time) (bool, error) {
-	var exists bool
+// DaysLoggedBetween counts the DISTINCT local days in [from, before) on which
+// the user logged anything (resolved to a food item, the same definition
+// ListForUserSince uses).
+//
+// It replaced an EXISTS "has this user ever logged" check (kora#408). That
+// check was used to decide whether silence could be read as observed fasting,
+// and a single entry satisfied it permanently — so one stray log turned a week
+// of not using the app into a reported seven-day fast. Counting distinct DAYS
+// rather than rows matters for the same reason: four entries in one sitting is
+// one day of evidence, not four.
+func (r Repository) DaysLoggedBetween(ctx context.Context, userID uuid.UUID, from, before time.Time) (int, error) {
+	var days int64
 	err := r.db.WithContext(ctx).
-		Raw("SELECT EXISTS (SELECT 1 FROM food_logs WHERE user_id = ? AND food_item_id IS NOT NULL AND logged_at < ? LIMIT 1) AS logged_before",
-			userID, before).
-		Scan(&exists).Error
+		Raw(`SELECT COUNT(DISTINCT local_date) FROM food_logs
+		     WHERE user_id = ? AND food_item_id IS NOT NULL
+		       AND logged_at >= ? AND logged_at < ?`,
+			userID, from, before).
+		Scan(&days).Error
 	if err != nil {
-		return false, fmt.Errorf("foodlog: has logged before: %w", err)
+		return 0, fmt.Errorf("foodlog: days logged between: %w", err)
 	}
-	return exists, nil
+	return int(days), nil
 }
 
 // LastPortionForPhrase returns the QuantityGrams from userID's most recent

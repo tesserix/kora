@@ -78,8 +78,8 @@ func (f failingLogSource) ListForUserSince(_ context.Context, _ uuid.UUID, _ tim
 	return nil, f.err
 }
 
-func (f failingLogSource) HasLoggedBefore(_ context.Context, _ uuid.UUID, _ time.Time) (bool, error) {
-	return false, f.err
+func (f failingLogSource) DaysLoggedBetween(_ context.Context, _ uuid.UUID, _, _ time.Time) (int, error) {
+	return 0, f.err
 }
 
 func TestSignalsSourcePropagatesBuildFailure(t *testing.T) {
