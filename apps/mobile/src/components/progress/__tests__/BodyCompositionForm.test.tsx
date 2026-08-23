@@ -415,3 +415,61 @@ describe("expandable (kora#314 PR C)", () => {
     expect(onSubmit.mock.calls[1][0].source).toBe("dexa");
   });
 });
+
+// kora#378: the midday-UTC stamp for a date-only entry is in the FUTURE for
+// most of the day. `useWeightSeries` asks the API for `to = now` and
+// `WeightSeries` filters `logged_at < to`, so a weigh-in saved this morning
+// was written correctly and then excluded from its own series until 12:00
+// UTC -- 17:30 in IST, 22:00 in AEST. It looked exactly like a failed save.
+describe("logged_at is never in the future (kora#378)", () => {
+  const RealDate = Date;
+  function freezeNow(iso: string) {
+    const fixed = new RealDate(iso).getTime();
+    // Only `Date.now` and `new Date()` (no args) are frozen; every other
+    // construction must keep working, because the form parses date strings.
+    global.Date = class extends RealDate {
+      constructor(...args: unknown[]) {
+        super(...((args.length ? args : [fixed]) as [any]));
+      }
+      static now() {
+        return fixed;
+      }
+    } as DateConstructor;
+  }
+  afterEach(() => {
+    global.Date = RealDate;
+  });
+
+  test("a weigh-in saved before midday UTC carries the current instant, not midday", async () => {
+    freezeNow(`${TODAY}T03:51:00Z`);
+    const onSubmit = jest.fn();
+    const { getByLabelText, getByText } = await render(<BodyCompositionForm onSubmit={onSubmit} />);
+    await fireEvent.changeText(getByLabelText("Weight in kilograms"), "70.2");
+    await fireEvent.press(getByText("Save"));
+
+    const loggedAt = onSubmit.mock.calls[0][0].logged_at;
+    expect(new RealDate(loggedAt).getTime()).toBeLessThanOrEqual(Date.now());
+    expect(loggedAt).toBe(`${TODAY}T03:51:00.000Z`);
+  });
+
+  test("a weigh-in saved after midday UTC keeps the midday stamp", async () => {
+    freezeNow(`${TODAY}T18:00:00Z`);
+    const onSubmit = jest.fn();
+    const { getByLabelText, getByText } = await render(<BodyCompositionForm onSubmit={onSubmit} />);
+    await fireEvent.changeText(getByLabelText("Weight in kilograms"), "70.2");
+    await fireEvent.press(getByText("Save"));
+
+    expect(onSubmit.mock.calls[0][0].logged_at).toBe(`${TODAY}T12:00:00Z`);
+  });
+
+  test("a past date is untouched -- midday keeps it clear of timezone edges", async () => {
+    freezeNow(`${TODAY}T03:51:00Z`);
+    const onSubmit = jest.fn();
+    const { getByLabelText, getByText } = await render(<BodyCompositionForm onSubmit={onSubmit} />);
+    await fireEvent.changeText(getByLabelText("Weight in kilograms"), "70.2");
+    await fireEvent.changeText(getByLabelText("Reading date"), "2026-08-19");
+    await fireEvent.press(getByText("Save"));
+
+    expect(onSubmit.mock.calls[0][0].logged_at).toBe("2026-08-19T12:00:00Z");
+  });
+});

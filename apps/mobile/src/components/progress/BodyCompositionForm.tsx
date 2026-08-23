@@ -30,6 +30,21 @@ import { CompositionMoreToggle } from "./CompositionMoreToggle";
 // that stays outside the expanding section, always.
 const [WEIGHT_METRIC, ...OTHER_METRICS] = COMPOSITION_METRICS;
 
+/**
+ * The earlier of a date-only entry's midday-UTC stamp and the current
+ * instant, as an ISO string (kora#378).
+ *
+ * Returning `now` rather than, say, end-of-day matters: the entry is being
+ * saved right now, so once midday has been ruled out "now" is both the most
+ * truthful time available and the one value guaranteed to satisfy every
+ * `logged_at < to` read the app makes.
+ */
+function notAfterNow(iso: string): string {
+  const stamp = new Date(iso);
+  const now = new Date();
+  return stamp.getTime() > now.getTime() ? now.toISOString() : iso;
+}
+
 export interface BodyCompositionFormProps {
   /**
    * Values to pre-fill, in the units the API stores (kg, percent, rating).
@@ -212,7 +227,16 @@ export const BodyCompositionForm = forwardRef<BodyCompositionFormHandle, BodyCom
       // date-only entry: a fixed midday-UTC instant keeps logged_at inside
       // localday.Resolve's one-day-either-side tolerance for any real
       // timezone, without claiming a time of day nothing actually recorded.
-      logged_at: `${dateResult.value}T12:00:00Z`,
+      //
+      // Clamped to now (kora#378). For a PAST date midday is already behind
+      // us and nothing changes -- that is the only case the tolerance
+      // argument above was ever about. But for TODAY midday UTC is in the
+      // future for most of the day, and a future logged_at is invisible to
+      // the very screen that just wrote it: useWeightSeries requests
+      // `to = now` and the server filters `logged_at < to`, so a weigh-in
+      // saved this morning silently vanished until 12:00 UTC -- 17:30 in
+      // IST, 22:00 in AEST. It read as a failed save.
+      logged_at: notAfterNow(`${dateResult.value}T12:00:00Z`),
       local_date: dateResult.value,
     });
   };
