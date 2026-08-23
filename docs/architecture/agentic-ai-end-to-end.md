@@ -4,6 +4,11 @@ Status: current-state design and integration contract
 Last verified: 2026-08-20
 Owners: Kora, AI Platform, and Platform Engineering
 
+Future multi-product direction: [Multi-product AI platform
+RFC](multi-product-ai-platform-rfc.md). This document remains the detailed
+current-state contract for Kora. The approved delivery sequence is the [Kora AI
+platform pilot plan](kora-ai-platform-pilot-execution-plan.md).
+
 ## Purpose
 
 This document explains how a food photo, text description, voice clip, barcode,
