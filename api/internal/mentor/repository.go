@@ -39,6 +39,7 @@ func (r Repository) UpsertProfile(ctx context.Context, profile Profile) error {
 			"motivation", "dietary_preferences", "allergies", "diet_pattern", "coaching_style",
 			"reminder_intensity", "quiet_start_minute", "quiet_end_minute",
 			"health_steps_enabled", "health_sleep_enabled", "health_workouts_enabled",
+			"health_energy_enabled", "health_heart_rate_enabled",
 			"confirmed_at", "updated_at",
 		}),
 	}).Create(&profile).Error
@@ -63,7 +64,8 @@ func (r Repository) UpsertHealthDays(ctx context.Context, userID uuid.UUID, days
 	err := r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "user_id"}, {Name: "local_date"}},
 		DoUpdates: clause.AssignmentColumns([]string{
-			"timezone", "steps", "sleep_minutes", "workout_minutes", "source",
+			"timezone", "steps", "sleep_minutes", "workout_minutes",
+			"active_energy_kcal", "resting_heart_rate_bpm", "source",
 			"observed_at", "updated_at",
 		}),
 	}).Create(&days).Error
