@@ -651,3 +651,34 @@ func TestDeleteTransfersGroupOwnershipBeforeTheCascade(t *testing.T) {
 	require.NoError(t, db.Raw(`SELECT owner_id FROM groups WHERE id = ?`, g.ID).Row().Scan(&got))
 	assert.Equal(t, heir.ID, got, "the group survived the cascade because ownership moved first")
 }
+
+// TestDeleteAccountRemovesHealthKitWeights pins that a synced HealthKit
+// weight -- an ordinary weight_entries row with source 'healthkit' and a
+// non-null hk_uuid (kora#30) -- is removed by the SAME cascade as every
+// other weight_entries row, via weight_entries.user_id -> users(id) ON
+// DELETE CASCADE (000002_phase1_core.up.sql).
+//
+// Kora's account deletion has been broken twice by data living somewhere the
+// deletion path did not reach. A synced HealthKit weight is health data the
+// user did not type into Kora, which makes leaving it behind worse, not
+// better. This test passed on the first run: weight_entries already
+// cascades on user_id regardless of source or hk_uuid, so no production
+// code changed for this task -- the test exists to pin that a later schema
+// change (e.g. a health-specific weights table split off from
+// weight_entries) cannot silently reopen the gap.
+func TestDeleteAccountRemovesHealthKitWeights(t *testing.T) {
+	db := testDB(t)
+	svc := newTestService(t, db)
+	victim := seedUser(t, db)
+	hk := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO weight_entries (user_id, weight_kg, logged_at, local_date, source, hk_uuid)
+		 VALUES (?, 70.4, now(), current_date, 'healthkit', ?)`, victim.ID, hk).Error)
+
+	_, err := svc.Delete(context.Background(), victim.ID, DeleteActor{})
+	require.NoError(t, err)
+
+	var count int64
+	require.NoError(t, db.Table("weight_entries").Where("user_id = ?", victim.ID).Count(&count).Error)
+	require.EqualValues(t, 0, count)
+}

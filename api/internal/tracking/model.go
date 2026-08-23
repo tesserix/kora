@@ -110,5 +110,10 @@ type WeightEntry struct {
 	// Embedded rather than nested so the columns stay flat on weight_entries
 	// and the JSON stays flat for the client (kora#45).
 	BodyComposition `gorm:"embedded"`
-	CreatedAt       time.Time `json:"created_at"`
+	// HKUUID is the HealthKit sample's own identifier, present only on rows
+	// synced from Apple Health (kora#30). It is what makes a re-sync a no-op
+	// rather than a duplicate. NULL for manual, screenshot and InBody rows --
+	// they have no HealthKit sample behind them.
+	HKUUID    *uuid.UUID `gorm:"column:hk_uuid" json:"hk_uuid,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
 }
