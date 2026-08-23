@@ -431,7 +431,7 @@ func metricValue(e WeightEntry, metric string) (float64, bool) {
 }
 ```
 
-Verify these field names against `api/internal/tracking/model.go` before running — they are copied from it, but it is the source of truth. `knownMetric` in Task 4 is the same list of fifteen keys; keep the two in step.
+Verify these field names against `api/internal/tracking/model.go` before running — they are copied from it, but it is the source of truth. `knownMetric` in Task 4 is the same list of sixteen keys; keep the two in step.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -804,7 +804,7 @@ func (h Handler) WeightTrend(c *gin.Context) {
 }
 ```
 
-Add the `signals SignalsSource` field to `Handler`, plus `knownMetric` and `rangeDays` helpers. `knownMetric` must be an explicit allow-list of the fifteen keys — never a permissive default.
+Add the `signals SignalsSource` field to `Handler`, plus `knownMetric` and `rangeDays` helpers. `knownMetric` must be an explicit allow-list of the sixteen keys — never a permissive default.
 
 Register in `router.go` immediately after line 328:
 
