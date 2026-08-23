@@ -79,8 +79,14 @@ func TestWeeklyRateIsNotDominatedBySingleOutlier(t *testing.T) {
 	base, _ := WeeklyRate(steady)
 	out, ok := WeeklyRate(spiked)
 	require.True(t, ok)
-	// First-minus-last would flip the sign to +0.25/week. OLS stays negative.
-	require.Less(t, out.PerWeek, 0.0)
+	// One bloated final reading does flip the sign either way -- the claim
+	// OLS earns is that it is flipped LESS far. Last-minus-first hands the
+	// whole slope to that one reading (+0.25/week); OLS gives +0.1/week,
+	// because the three readings in between still pull on the fit.
+	lastMinusFirst := (spiked[len(spiked)-1].Value - spiked[0].Value) / 4
+	require.InDelta(t, 0.25, lastMinusFirst, 0.0001)
+	require.Less(t, out.PerWeek, lastMinusFirst,
+		"OLS must be swung less by a single outlier than last-minus-first")
 	require.Greater(t, out.PerWeek, base.PerWeek)
 }
 
@@ -207,7 +213,7 @@ Apply each, confirm RED, restore, confirm GREEN. Report each concretely.
 1. `minRateReadings` 4 → 3 — expect `TestWeeklyRateRejectsTooFewReadings` to fail.
 2. `minRateSpanDays` 14 → 7 — expect `TestWeeklyRateRejectsTooShortASpan` to fail.
 3. `* 7` → `* 1` — expect `TestWeeklyRateFitsASteadyDecline` to fail on `PerWeek`.
-4. Replace the OLS block with `(last.Value - first.Value) / spanWeeks` — expect `TestWeeklyRateIsNotDominatedBySingleOutlier` to fail on the sign.
+4. Replace the OLS block with `(last.Value - first.Value) / spanWeeks` — expect `TestWeeklyRateIsNotDominatedBySingleOutlier` to fail on the `Less(out.PerWeek, lastMinusFirst)` assertion (they become equal).
 5. Delete the `den == 0` guard — expect `TestWeeklyRateRejectsReadingsAllAtOneInstant` to fail (NaN, not false).
 
 - [ ] **Step 6: Commit**
