@@ -185,7 +185,16 @@ func TestAddWeightEntryRoundTripsComposition(t *testing.T) {
 			ProteinPct:         ptr(16.1),
 			BoneMassKg:         ptr(2.6),
 			ScaleBMRKcal:       ptr(1627),
-			Source:             SourceScaleScreenshot,
+			// Synthetic tape figures, not anyone's measurements — they exist
+			// to prove six distinct columns round-trip to six distinct
+			// fields, so no two of them share a value.
+			NeckCm:  ptr(31),
+			ChestCm: ptr(91),
+			WaistCm: ptr(71),
+			HipCm:   ptr(101),
+			ArmCm:   ptr(26),
+			ThighCm: ptr(51),
+			Source:  SourceScaleScreenshot,
 		},
 	}
 
@@ -211,6 +220,14 @@ func TestAddWeightEntryRoundTripsComposition(t *testing.T) {
 	require.Equal(t, 16.1, *stored.ProteinPct)
 	require.Equal(t, 2.6, *stored.BoneMassKg)
 	require.Equal(t, 1627.0, *stored.ScaleBMRKcal)
+	// Distinct values per column: a transposed pair would survive assertions
+	// written against a shared number.
+	require.Equal(t, 31.0, *stored.NeckCm)
+	require.Equal(t, 91.0, *stored.ChestCm)
+	require.Equal(t, 71.0, *stored.WaistCm)
+	require.Equal(t, 101.0, *stored.HipCm)
+	require.Equal(t, 26.0, *stored.ArmCm)
+	require.Equal(t, 51.0, *stored.ThighCm)
 }
 
 // The whole reason the metrics are pointers: a user who steps on a basic scale
@@ -247,6 +264,8 @@ func TestAbsentMetricRoundTripsAsAbsentNotZero(t *testing.T) {
 	require.Nil(t, got[1].BodyFatPct, "an unmeasured metric must stay absent, never become 0")
 	require.Nil(t, got[1].MuscleMassKg)
 	require.Nil(t, got[1].ScaleBMRKcal)
+	require.Nil(t, got[1].WaistCm, "an untaken tape measurement must stay absent")
+	require.Nil(t, got[1].NeckCm)
 }
 
 // An entry with no stated instrument is a typed one, and the column is NOT
@@ -293,6 +312,15 @@ func TestAddWeightEntryRejectsImpossibleComposition(t *testing.T) {
 		"visceral rating above vendor scale": {VisceralFatRating: ptr(60)},
 		"non-positive visceral rating":       {VisceralFatRating: ptr(0)},
 		"unknown instrument":                 {Source: Source("renpho")},
+		// A tape measurement of 0 is an empty field that arrived as a number,
+		// and a negative one cannot be measured at all. Above the bound is
+		// millimetres typed into a centimetre field.
+		"zero neck":          {NeckCm: ptr(0)},
+		"negative chest":     {ChestCm: ptr(-91)},
+		"waist beyond bound": {WaistCm: ptr(maxMeasurementCm + 0.1)},
+		"hip in millimetres": {HipCm: ptr(1010)},
+		"zero arm":           {ArmCm: ptr(0)},
+		"thigh beyond bound": {ThighCm: ptr(510)},
 	}
 	for name, comp := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -306,6 +334,28 @@ func TestAddWeightEntryRejectsImpossibleComposition(t *testing.T) {
 			require.IsType(t, httpx.ValidationError{}, err, "must be a 400, not a constraint violation")
 		})
 	}
+}
+
+// A rejection has to say WHICH measurement was wrong. Six length fields share
+// one bound, so an error reading only "must be between 0 and 300" leaves the
+// caller guessing which of six inputs to fix.
+func TestTapeMeasurementRejectionNamesTheField(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	repo := NewRepository(db)
+
+	at := time.Now()
+	_, err := repo.AddWeightEntry(context.Background(), userID, WeightInput{
+		WeightKg:    70.2,
+		LoggedAt:    at,
+		LocalDate:   dayOf(at),
+		Composition: BodyComposition{ThighCm: ptr(510)},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "thigh_cm")
+	// Named for the column and the wire, so the message is greppable from
+	// either end.
+	require.NotContains(t, err.Error(), "ThighCm")
 }
 
 // The bounds admit real readings, not just reject bad ones — a validation that
@@ -324,7 +374,11 @@ func TestAddWeightEntryAcceptsEdgeOfRangeValues(t *testing.T) {
 			BodyFatPct:        ptr(100),
 			ProteinPct:        ptr(0),
 			VisceralFatRating: ptr(maxVisceralFatRating),
-			Source:            SourceDEXA,
+			// The tape bound is inclusive at the top and exclusive at the
+			// bottom, so the largest admissible measurement must be accepted.
+			WaistCm: ptr(maxMeasurementCm),
+			NeckCm:  ptr(0.1),
+			Source:  SourceDEXA,
 		},
 	})
 	require.NoError(t, err)

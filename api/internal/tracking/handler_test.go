@@ -77,8 +77,11 @@ func TestAddWeightHandlerAcceptsAndReturnsComposition(t *testing.T) {
 	userID := seedUser(t, db)
 	r := weightRouter(userID, NewRepository(db))
 
+	// waist_cm and arm_cm only: a tape is used piecemeal, so the wire has to
+	// carry a partial set without the untouched measurements becoming 0.
 	body := `{"weight_kg":70.2,"body_fat_pct":32.6,"visceral_fat_rating":7.5,` +
-		`"skeletal_muscle_pct":25.7,"scale_bmr_kcal":1423,"source":"scale_screenshot"}`
+		`"skeletal_muscle_pct":25.7,"scale_bmr_kcal":1423,` +
+		`"waist_cm":80,"arm_cm":30,"source":"scale_screenshot"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/weight", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -94,10 +97,19 @@ func TestAddWeightHandlerAcceptsAndReturnsComposition(t *testing.T) {
 	require.Equal(t, 25.7, resp.Data["skeletal_muscle_pct"])
 	require.Equal(t, 1423.0, resp.Data["scale_bmr_kcal"])
 	require.Equal(t, "scale_screenshot", resp.Data["source"])
+	require.Equal(t, 80.0, resp.Data["waist_cm"])
+	require.Equal(t, 30.0, resp.Data["arm_cm"])
 
 	// Unmeasured metrics are absent from the payload, not zero.
 	_, present := resp.Data["muscle_mass_kg"]
 	require.False(t, present, "an unmeasured metric must not be serialised at all")
+
+	// The same rule for the tape measurements this caller did not take. A
+	// serialised 0 here would draw a neck that shrank to nothing.
+	for _, untaken := range []string{"neck_cm", "chest_cm", "hip_cm", "thigh_cm"} {
+		_, present := resp.Data[untaken]
+		require.False(t, present, "%s was never measured and must not be serialised", untaken)
+	}
 
 	// Derived values are never echoed back, because they are never stored.
 	for _, derived := range []string{"bmi", "fat_mass_kg", "fat_free_mass_kg", "metabolic_age"} {
@@ -117,6 +129,10 @@ func TestAddWeightHandlerRejectsImpossibleComposition(t *testing.T) {
 		`{"weight_kg":70.2,"body_fat_pct":132.6}`,
 		`{"weight_kg":70.2,"visceral_fat_rating":95}`,
 		`{"weight_kg":70.2,"source":"renpho"}`,
+		// A tape measurement typed in millimetres, and one left at 0. Both
+		// must be a 400 naming the field, never a silent store.
+		`{"weight_kg":70.2,"waist_cm":800}`,
+		`{"weight_kg":70.2,"neck_cm":0}`,
 	} {
 		req := httptest.NewRequest(http.MethodPost, "/v1/weight", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")

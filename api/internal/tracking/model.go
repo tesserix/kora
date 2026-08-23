@@ -93,6 +93,23 @@ type BodyComposition struct {
 	// its floor. Renpho and Omron disagree by ~200 kcal/day on the same body,
 	// so a scale-driven target would jump when the user changes scales.
 	ScaleBMRKcal *float64 `json:"scale_bmr_kcal,omitempty"`
+	// Tape measurements (kora#45). Stored in centimetres; the client converts
+	// for display. Unlike the metrics above they come from a tape, not a
+	// scale, so they are typically filled in one or two at a time — which is
+	// exactly why each is a pointer with omitempty, like everything else here.
+	//
+	// They are NOT part of the screenshot reader's schema: a scale screenshot
+	// can never contain a tape measurement, so ai.BodyCompositionReading in
+	// internal/ai/types.go must not gain these fields.
+	NeckCm  *float64 `json:"neck_cm,omitempty"`
+	ChestCm *float64 `json:"chest_cm,omitempty"`
+	WaistCm *float64 `json:"waist_cm,omitempty"`
+	HipCm   *float64 `json:"hip_cm,omitempty"`
+	// ArmCm and ThighCm are singular by design: whichever limb the user
+	// measures consistently. A left/right pair would double the fields for a
+	// difference a consumer tape does not reliably resolve.
+	ArmCm   *float64 `json:"arm_cm,omitempty"`
+	ThighCm *float64 `json:"thigh_cm,omitempty"`
 	// Source defaults to SourceManual when unset — see the Source doc comment
 	// for why it is load-bearing rather than metadata.
 	Source Source `gorm:"not null;default:manual" json:"source"`
