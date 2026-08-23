@@ -19,7 +19,29 @@ export function kgFromLb(lb: number): number {
 }
 
 export function cmFromFtIn(ft: number, inch: number): number {
-  return ft * 12 * CM_PER_IN + inch * CM_PER_IN;
+  return cmFromIn(ft * 12 + inch);
+}
+
+/**
+ * Plain inches to centimetres (kora#45).
+ *
+ * `cmFromFtIn` already existed for HEIGHT, which imperial users state as a
+ * feet-and-inches pair. A tape measurement is not stated that way — nobody
+ * reports a 0ft 32in waist — so it needs the single-argument direction, and
+ * calling `cmFromFtIn(0, inch)` to get it would read as a height conversion
+ * everywhere it appeared.
+ */
+export function cmFromIn(inch: number): number {
+  return inch * CM_PER_IN;
+}
+
+/**
+ * Centimetres to inches — the display direction, which had no helper at all
+ * before tape measurements existed (kora#45). Every stored length is metric;
+ * this is the only place the imperial figure comes from.
+ */
+export function inFromCm(cm: number): number {
+  return cm / CM_PER_IN;
 }
 
 export function formatWeight(kg: number, system: UnitSystem): { value: string; unit: string } {

@@ -1,15 +1,17 @@
 import type { BodyCompositionReading, WeightSource } from "@/api/types";
-import { kgFromLb, lbFromKg, type UnitSystem } from "@/units";
+import { type UnitSystem } from "@/units";
 import {
   COMPOSITION_METRICS,
-  isMassMetric,
+  displayNumber,
+  isConvertedMetric,
+  storedNumber,
   unitLabel,
   type CompositionMetric,
   type CompositionMetricKey,
 } from "./bodyCompositionFields";
 
 /**
- * Turning ten optional text fields into a write, without inventing data
+ * Turning sixteen optional text fields into a write, without inventing data
  * (kora#45).
  *
  * This is deliberately pure and separate from the form component. What it
@@ -23,7 +25,7 @@ import {
 /** What the user has typed, per field. A key may be missing or blank; both mean untouched. */
 export type CompositionDraft = Partial<Record<CompositionMetricKey, string>>;
 
-/** Metric values as the API stores them: kg, percent, rating, kcal. */
+/** Metric values as the API stores them: kg, cm, percent, rating, kcal. */
 export type CompositionValues = Partial<Record<CompositionMetricKey, number>>;
 
 /**
@@ -72,14 +74,29 @@ function readNumber(text: string): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
-/** The message shown when a value is outside what the server will store. */
+/**
+ * The message shown when a value is outside what the server will store.
+ *
+ * The bounds are STATED IN THE UNIT THE FIELD IS SHOWING. `metric.range` is in
+ * stored units (kg, cm) because that is what `inRange` checks, so an imperial
+ * user must not be told a waist "must be between 0 and 300 in" — that is 762cm,
+ * a bound this form would then refuse to accept. `displayNumber` converts,
+ * and the result is rounded because a limit printed as 118.11023622047244 in
+ * reads as a bug.
+ */
+function boundText(metric: CompositionMetric, bound: number, system: UnitSystem): string {
+  const shown = displayNumber(metric, bound, system);
+  return Number.isInteger(shown) ? String(shown) : shown.toFixed(1);
+}
+
 function rangeMessage(metric: CompositionMetric, system: UnitSystem): string {
   const unit = unitLabel(metric, system);
   const suffix = unit ? ` ${unit}` : "";
+  const min = boundText(metric, metric.range.min, system);
   if (metric.range.max === Number.POSITIVE_INFINITY) {
-    return `${metric.label} must be more than ${metric.range.min}${suffix}.`;
+    return `${metric.label} must be more than ${min}${suffix}.`;
   }
-  return `${metric.label} must be between ${metric.range.min} and ${metric.range.max}${suffix}.`;
+  return `${metric.label} must be between ${min} and ${boundText(metric, metric.range.max, system)}${suffix}.`;
 }
 
 function inRange(metric: CompositionMetric, stored: number): boolean {
@@ -88,15 +105,17 @@ function inRange(metric: CompositionMetric, stored: number): boolean {
   return stored <= max;
 }
 
-/** Display value -> stored value. Only the kg-backed metrics convert. */
-function toStored(metric: CompositionMetric, typed: number, system: UnitSystem): number {
-  if (isMassMetric(metric) && system === "imperial") return kgFromLb(typed);
-  return typed;
-}
-
-/** Stored value -> the string that field should show. */
+/**
+ * Stored value -> the string that field should show.
+ *
+ * A converted metric is fixed to a tenth; an unconverted one is printed as-is,
+ * because rounding a rating or a BMR here would silently rewrite a value the
+ * user is only being shown in order to edit.
+ */
 function toDisplayText(metric: CompositionMetric, stored: number, system: UnitSystem): string {
-  if (isMassMetric(metric) && system === "imperial") return lbFromKg(stored).toFixed(1);
+  if (isConvertedMetric(metric) && system === "imperial") {
+    return displayNumber(metric, stored, system).toFixed(1);
+  }
   return String(stored);
 }
 
@@ -144,7 +163,7 @@ export function parseCompositionDraft(
     const typed = readNumber(text);
     if (typed === null) return { metric, error: `${metric.label} must be a number.` };
 
-    const stored = toStored(metric, typed, system);
+    const stored = storedNumber(metric, typed, system);
     if (!inRange(metric, stored)) return { metric, error: rangeMessage(metric, system) };
 
     return { metric, stored };
@@ -178,7 +197,7 @@ export function previewValues(draft: CompositionDraft, system: UnitSystem): Comp
     COMPOSITION_METRICS.flatMap((metric) => {
       const typed = readNumber(draft[metric.key] ?? "");
       if (typed === null) return [];
-      const stored = toStored(metric, typed, system);
+      const stored = storedNumber(metric, typed, system);
       return inRange(metric, stored) ? [[metric.key, stored]] : [];
     }),
   );

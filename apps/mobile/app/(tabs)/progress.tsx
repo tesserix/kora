@@ -179,7 +179,7 @@ export default function Progress() {
   const entries = (series.data ?? []) as WeightEntry[];
 
   // kora#45: the panel charts ONE metric at a time, picked from the metrics
-  // this history actually holds. Nine more charts would have been the other
+  // this history actually holds. Fifteen more charts would have been the other
   // option; nine mostly-empty panels on a screen where most users only ever
   // log weight is not a trade worth making.
   // The weigh-in sheet's seed, which is the WEIGHT regardless of what the

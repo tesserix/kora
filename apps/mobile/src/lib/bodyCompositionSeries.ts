@@ -69,7 +69,7 @@ export function metricSeries(entries: readonly WeightEntry[], key: CompositionMe
  * The metrics this history can actually chart.
  *
  * The picker is built from this rather than from the full catalogue, so
- * someone who only ever logs weight sees no picker at all instead of nine
+ * someone who only ever logs weight sees no picker at all instead of fifteen
  * chips that all lead to an empty chart. Weight is not special-cased — it
  * qualifies the same way, by having values.
  */
