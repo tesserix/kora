@@ -3,6 +3,7 @@ package tracking
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+
+	"github.com/tesserix/kora/api/internal/guardrails"
 )
 
 func weightRouter(userID uuid.UUID, repo Repository) *gin.Engine {
@@ -176,4 +179,308 @@ func TestListWeightHandlerIncludesEntriesStampedLaterToday(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 	require.Len(t, body.Data, 1, "an entry stamped later today must be in its own series")
+}
+
+// fakeSignals stands in for the coach adapter. It takes loc per call because
+// SignalsFor does: recentDeficitPct excludes "today" by LOCAL day, so a
+// server-wide fixed zone would count the wrong days for a user outside it.
+type fakeSignals struct {
+	signals guardrails.Signals
+	err     error
+	gotLoc  *time.Location
+}
+
+func (f *fakeSignals) SignalsFor(_ context.Context, _ uuid.UUID, loc *time.Location) (guardrails.Signals, error) {
+	f.gotLoc = loc
+	return f.signals, f.err
+}
+
+func trendRouter(userID uuid.UUID, repo Repository, sig SignalsSource) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(func(c *gin.Context) { c.Set("user_id", userID); c.Next() })
+	h := NewHandler(repo).WithSignals(sig)
+	r.GET("/v1/weight/trend", h.WeightTrend)
+	return r
+}
+
+// seedDecline writes five synthetic readings a week apart, declining 0.5 a
+// week. Invented figures: this repo is public and carries no real body data.
+func seedDecline(t *testing.T, repo Repository, userID uuid.UUID) {
+	t.Helper()
+	for i, w := range []float64{80, 79.5, 79, 78.5, 78} {
+		at := time.Now().AddDate(0, 0, -28+(i*7))
+		_, err := repo.AddWeight(context.Background(), userID, w, at, dayOf(at))
+		require.NoError(t, err)
+	}
+}
+
+func TestWeightTrendReturnsARateWhenNotAtRisk(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	repo := NewRepository(db)
+	seedDecline(t, repo, userID)
+
+	r := trendRouter(userID, repo, &fakeSignals{})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/weight/trend?metric=weight_kg&range=3M", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var body struct {
+		Data struct {
+			Status      string   `json:"status"`
+			RatePerWeek *float64 `json:"rate_per_week"`
+			Basis       struct {
+				Readings int `json:"readings"`
+				Days     int `json:"days"`
+			} `json:"basis"`
+			ShowSupport      bool `json:"show_support"`
+			SpansInstruments bool `json:"spans_instruments"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Equal(t, "ok", body.Data.Status)
+	require.NotNil(t, body.Data.RatePerWeek)
+	require.InDelta(t, -0.5, *body.Data.RatePerWeek, 0.05)
+	require.Equal(t, 5, body.Data.Basis.Readings)
+	require.Equal(t, 28, body.Data.Basis.Days)
+	require.False(t, body.Data.ShowSupport)
+	require.False(t, body.Data.SpansInstruments, "one instrument throughout")
+}
+
+// spans_instruments drives a user-visible accuracy caveat (tasks 6/7), so the
+// handler must forward the TRUE case, not just the false one. Without this
+// the flag could be hardcoded false and the whole suite would stay green,
+// silently dropping the caveat from every cross-instrument series.
+func TestWeightTrendFlagsASeriesSpanningInstruments(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	repo := NewRepository(db)
+
+	// weight_kg is the metric FitsAcrossInstruments permits, so the points
+	// are fitted across the change rather than truncated to the last run.
+	// Synthetic figures: this repo is public and holds no real body data.
+	sources := []Source{SourceManual, SourceManual, SourceHealthKit, SourceHealthKit, SourceHealthKit}
+	for i, kg := range []float64{80, 79.5, 79, 78.5, 78} {
+		at := time.Now().AddDate(0, 0, -28+(i*7))
+		_, err := repo.AddWeightEntry(context.Background(), userID, WeightInput{
+			WeightKg:    kg,
+			LoggedAt:    at,
+			LocalDate:   dayOf(at),
+			Composition: BodyComposition{Source: sources[i]},
+		})
+		require.NoError(t, err)
+	}
+
+	r := trendRouter(userID, repo, &fakeSignals{})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/weight/trend?metric=weight_kg&range=3M", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var body struct {
+		Data struct {
+			Status           string   `json:"status"`
+			RatePerWeek      *float64 `json:"rate_per_week"`
+			SpansInstruments bool     `json:"spans_instruments"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Equal(t, "ok", body.Data.Status)
+	require.NotNil(t, body.Data.RatePerWeek, "a change of instrument does not withhold the rate")
+	require.True(t, body.Data.SpansInstruments, "the caveat must reach the client")
+}
+
+// The guardrail. This is the test that must go red if suppression is removed.
+func TestWeightTrendSuppressesForAnAtRiskUser(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	repo := NewRepository(db)
+	seedDecline(t, repo, userID)
+
+	atRisk := guardrails.Signals{RecentDeficitPct: 0.95, AvgIntakeKcal: 600, LogsPerDay: 1}
+	require.True(t, guardrails.AtRisk(atRisk), "fixture must actually trip the policy")
+
+	r := trendRouter(userID, repo, &fakeSignals{signals: atRisk})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/weight/trend?metric=weight_kg&range=3M", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var body struct {
+		Data struct {
+			Status      string   `json:"status"`
+			RatePerWeek *float64 `json:"rate_per_week"`
+			ShowSupport bool     `json:"show_support"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Equal(t, "suppressed", body.Data.Status)
+	require.Nil(t, body.Data.RatePerWeek, "a suppressed rate must not be on the wire at all")
+	require.NotContains(t, w.Body.String(), "rate_per_week", "the key itself must not appear")
+	require.True(t, body.Data.ShowSupport)
+}
+
+// Fails closed: unknown risk is not no-risk.
+func TestWeightTrendSuppressesWhenSignalsAreUnavailable(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	repo := NewRepository(db)
+	seedDecline(t, repo, userID)
+
+	r := trendRouter(userID, repo, &fakeSignals{err: errors.New("grounding failed")})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/weight/trend?metric=weight_kg&range=3M", nil))
+	require.Equal(t, http.StatusOK, w.Code, "a signals failure is not the caller's error")
+
+	var body struct {
+		Data struct {
+			Status      string   `json:"status"`
+			RatePerWeek *float64 `json:"rate_per_week"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Equal(t, "suppressed", body.Data.Status)
+	require.Nil(t, body.Data.RatePerWeek)
+}
+
+// A handler wired without a signals source cannot know the risk state, so it
+// must suppress too — the same fail-closed rule as an errored lookup.
+func TestWeightTrendSuppressesWithoutASignalsSource(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	repo := NewRepository(db)
+	seedDecline(t, repo, userID)
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(func(c *gin.Context) { c.Set("user_id", userID); c.Next() })
+	r.GET("/v1/weight/trend", NewHandler(repo).WeightTrend)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/weight/trend?metric=weight_kg&range=3M", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var body struct {
+		Data struct {
+			Status      string   `json:"status"`
+			RatePerWeek *float64 `json:"rate_per_week"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Equal(t, "suppressed", body.Data.Status)
+	require.Nil(t, body.Data.RatePerWeek)
+}
+
+func TestWeightTrendReportsInsufficientData(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	repo := NewRepository(db)
+	at := time.Now().AddDate(0, 0, -3)
+	_, err := repo.AddWeight(context.Background(), userID, 80, at, dayOf(at))
+	require.NoError(t, err)
+
+	r := trendRouter(userID, repo, &fakeSignals{})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/weight/trend?metric=weight_kg&range=3M", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var body struct {
+		Data struct {
+			Status      string   `json:"status"`
+			RatePerWeek *float64 `json:"rate_per_week"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Equal(t, "insufficient_data", body.Data.Status)
+	require.Nil(t, body.Data.RatePerWeek)
+}
+
+func TestWeightTrendRejectsAnUnknownMetric(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	r := trendRouter(userID, NewRepository(db), &fakeSignals{})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/weight/trend?metric=nonsense&range=3M", nil))
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// An empty metric is not a licence to guess one. The allow-list has to reject
+// it explicitly, or a client bug becomes a silently-wrong figure.
+func TestWeightTrendRejectsAMissingMetric(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	r := trendRouter(userID, NewRepository(db), &fakeSignals{})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/weight/trend?range=3M", nil))
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// The allow-list and metricValue must never drift apart: a key accepted here
+// that metricValue cannot read yields a permanent insufficient_data, and a
+// key metricValue reads but the list rejects is an unreachable metric.
+//
+// Every field carries a DISTINCT synthetic value, so this also pins the
+// mapping itself: a metricValue case reading the wrong field — "hip_cm"
+// returning e.NeckCm, say — would still be "readable" under a uniform
+// fixture and would silently fit a rate over the wrong series.
+func TestKnownMetricAgreesWithMetricValue(t *testing.T) {
+	entry := WeightEntry{WeightKg: 1, BodyComposition: BodyComposition{
+		BodyFatPct: ptr(2), SubcutaneousFatPct: ptr(3), VisceralFatRating: ptr(4),
+		SkeletalMusclePct: ptr(5), MuscleMassKg: ptr(6), BodyWaterPct: ptr(7),
+		ProteinPct: ptr(8), BoneMassKg: ptr(9), ScaleBMRKcal: ptr(10),
+		NeckCm: ptr(11), ChestCm: ptr(12), WaistCm: ptr(13),
+		HipCm: ptr(14), ArmCm: ptr(15), ThighCm: ptr(16),
+	}}
+	want := map[string]float64{
+		"weight_kg": 1, "body_fat_pct": 2, "subcutaneous_fat_pct": 3,
+		"visceral_fat_rating": 4, "skeletal_muscle_pct": 5, "muscle_mass_kg": 6,
+		"body_water_pct": 7, "protein_pct": 8, "bone_mass_kg": 9,
+		"scale_bmr_kcal": 10, "neck_cm": 11, "chest_cm": 12,
+		"waist_cm": 13, "hip_cm": 14, "arm_cm": 15, "thigh_cm": 16,
+	}
+	require.Len(t, want, len(knownMetrics), "every allow-listed metric needs a distinct expectation")
+
+	for metric := range knownMetrics {
+		got, ok := metricValue(entry, metric)
+		require.True(t, ok, "allow-listed metric %q is not readable by metricValue", metric)
+		require.Equal(t, want[metric], got, "metric %q reads the wrong field", metric)
+	}
+}
+
+// Range keys must match the client's WEIGHT_RANGE_DAYS; an unrecognised key
+// falls back to a month rather than to zero days.
+func TestRangeDays(t *testing.T) {
+	require.Equal(t, 7, rangeDays("1W"))
+	require.Equal(t, 30, rangeDays("1M"))
+	require.Equal(t, 90, rangeDays("3M"))
+	require.Equal(t, 365, rangeDays("1Y"))
+	require.Equal(t, 30, rangeDays(""))
+	require.Equal(t, 30, rangeDays("nonsense"))
+}
+
+// The location must come from the request, not from a value pinned at
+// construction: SignalsFor's day arithmetic is local, so a server-wide zone
+// would classify risk on the wrong days for a user outside it.
+func TestWeightTrendPassesTheRequestLocationToSignals(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	repo := NewRepository(db)
+	seedDecline(t, repo, userID)
+
+	kolkata, err := time.LoadLocation("Asia/Kolkata")
+	require.NoError(t, err)
+
+	sig := &fakeSignals{}
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Set("user_id", userID)
+		c.Set("user_loc", kolkata)
+		c.Next()
+	})
+	r.GET("/v1/weight/trend", NewHandler(repo).WithSignals(sig).WeightTrend)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/weight/trend?metric=weight_kg&range=3M", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, kolkata, sig.gotLoc)
 }

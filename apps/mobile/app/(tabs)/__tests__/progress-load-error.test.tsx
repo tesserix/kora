@@ -22,6 +22,10 @@ jest.mock("@/api/hooks", () => ({
   useDashboard: () => mockDashboard(),
   useProfile: () => ({ data: { weight_kg: 80 } }),
   useWeightSeries: () => mockSeries(),
+  // kora#45 (task 7): Progress now fits a weekly rate alongside the chart.
+  // This file only exercises the load-error path, so a bare "no rate" stub
+  // keeps its render tree happy without a second mocking style.
+  useWeightTrend: () => ({ data: undefined, isSuccess: false }),
   useAddWeight: () => ({ mutate: jest.fn(), isPending: false }),
   useAvgIntake7d: () => ({ avg: null, series: [], days: [], isLoading: false, isError: false, refetch: jest.fn() }),
   // kora#314 PR C: Progress now mounts LogWeightSheet (Screenshot mode), which

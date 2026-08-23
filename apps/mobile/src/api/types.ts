@@ -645,6 +645,22 @@ export type WeightEntry = {
 };
 
 /**
+ * GET /v1/weight/trend's decided result (kora#45): a per-metric, per-range
+ * weekly rate of change, already guardrailed server-side.
+ *
+ * `rate_per_week` and `basis` are OPTIONAL, not nullable — they are absent
+ * entirely from the wire unless `status` is "ok". A suppressed or
+ * insufficient-data result never carries a rate.
+ */
+export type WeightTrend = {
+  status: "ok" | "insufficient_data" | "suppressed";
+  rate_per_week?: number;
+  basis?: { readings: number; days: number };
+  spans_instruments: boolean;
+  show_support: boolean;
+};
+
+/**
  * What POST /v1/body-composition/read returns (kora#314, PR B) — the vision
  * pass' best legible read of a smart-scale screenshot. Mirrors
  * api/internal/ai/types.go's BodyCompositionReading field for field. Every
