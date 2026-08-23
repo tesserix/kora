@@ -437,9 +437,9 @@ func TestKnownMetricAgreesWithMetricValue(t *testing.T) {
 		"scale_bmr_kcal": 10, "neck_cm": 11, "chest_cm": 12,
 		"waist_cm": 13, "hip_cm": 14, "arm_cm": 15, "thigh_cm": 16,
 	}
-	require.Len(t, want, len(knownMetrics), "every allow-listed metric needs a distinct expectation")
+	require.Len(t, want, len(compositionAccessors)+1, "every readable metric needs a distinct expectation")
 
-	for metric := range knownMetrics {
+	for metric := range want {
 		got, ok := metricValue(entry, metric)
 		require.True(t, ok, "allow-listed metric %q is not readable by metricValue", metric)
 		require.Equal(t, want[metric], got, "metric %q reads the wrong field", metric)

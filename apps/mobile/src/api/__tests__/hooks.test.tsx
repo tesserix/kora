@@ -1767,3 +1767,13 @@ test("scan online, then offline: the repeat scan is logged and lands in the diar
   expect(result.current.diary.rows[0].description).not.toBe("Queued item");
   expect(result.current.diary.rows[0].kcal).toBeCloseTo(240);
 });
+
+// kora#399: the trend request grounds a full coach context server-side, so it
+// must not fire for a user who cannot have a rate at all.
+test("useWeightTrend does not fetch while disabled", async () => {
+  (apiFetch as jest.Mock).mockClear();
+  const { result } = await renderHook(() => useWeightTrend("weight_kg", "1M", false), { wrapper });
+  await waitFor(() => expect(result.current.isPending).toBe(true));
+  expect((apiFetch as jest.Mock).mock.calls.filter((c) => String(c[0]).includes("/v1/weight/trend"))).toHaveLength(0);
+  expect(result.current.data).toBeUndefined();
+});

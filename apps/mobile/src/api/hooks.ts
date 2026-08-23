@@ -1290,13 +1290,19 @@ export function useWeightSeries(range: WeightRange) {
 // switch would show a WRONG NUMBER under the RIGHT LABEL — e.g. the waist
 // rate rendered while the label already reads "Body Fat" — which is worse
 // than a brief empty state.
-export function useWeightTrend(metric: CompositionMetricKey, range: WeightRange) {
+export function useWeightTrend(metric: CompositionMetricKey, range: WeightRange, enabled = true) {
   return useQuery({
     // Keyed by BOTH, so switching a chip cannot show the previous metric's
     // rate under the new metric's name.
     queryKey: ["weight-trend", metric, range],
     queryFn: () =>
       apiFetch(`/v1/weight/trend?metric=${metric}&range=${range}`) as Promise<WeightTrend>,
+    // kora#399. This request is not cheap on the server: it grounds a full
+    // coach context (dashboard, logs, memory, mentor) to obtain the risk
+    // signals the guardrail needs. Callers pass false when no rate can
+    // possibly render — the fit needs four readings, so a user with none is
+    // paying the heaviest read in the API for a figure that cannot appear.
+    enabled,
   });
 }
 

@@ -224,31 +224,6 @@ func orNow(t time.Time) time.Time {
 	return t
 }
 
-// knownMetrics is the allow-list of series a rate may be fitted over. It is
-// explicit, with no permissive default, because an unrecognised name must be
-// a 400 rather than an empty series silently reported as insufficient_data
-// -- or, worse, a fabricated zero fitted through the gap. It is kept in
-// lockstep with metricValue by TestKnownMetricAgreesWithMetricValue.
-var knownMetrics = map[string]bool{
-	"weight_kg":            true,
-	"body_fat_pct":         true,
-	"subcutaneous_fat_pct": true,
-	"visceral_fat_rating":  true,
-	"skeletal_muscle_pct":  true,
-	"muscle_mass_kg":       true,
-	"body_water_pct":       true,
-	"protein_pct":          true,
-	"bone_mass_kg":         true,
-	"scale_bmr_kcal":       true,
-	"neck_cm":              true,
-	"chest_cm":             true,
-	"waist_cm":             true,
-	"hip_cm":               true,
-	"arm_cm":               true,
-	"thigh_cm":             true,
-}
-
-func knownMetric(metric string) bool { return knownMetrics[metric] }
 
 // rangeDays mirrors the client's WEIGHT_RANGE_DAYS. An unrecognised key
 // falls back to a month rather than to zero days, which would otherwise turn

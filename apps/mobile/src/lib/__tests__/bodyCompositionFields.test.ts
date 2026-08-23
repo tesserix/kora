@@ -277,3 +277,34 @@ describe("the tape measurements' own bounds", () => {
     }
   });
 });
+
+// kora#399: the sixteen metric keys exist here AND in Go
+// (tracking.compositionAccessors + weight_kg). Nothing in this repo can verify
+// the two agree — that would need codegen or a shared schema, which is far more
+// machinery than sixteen strings justify.
+//
+// So this asserts the list against a checked-in literal instead. It does not
+// prove Go matches; it makes adding a key here a deliberate edit that shows up
+// in review next to the Go change it requires. Without it, a seventeenth key
+// renders a chip, requests a metric the endpoint rejects with 400, and the
+// sentence silently never appears — no error, no empty state, nothing to notice.
+test("the metric keys are a closed set, changed only deliberately (kora#399)", () => {
+  expect(COMPOSITION_METRICS.map((m) => m.key)).toEqual([
+    "weight_kg",
+    "body_fat_pct",
+    "subcutaneous_fat_pct",
+    "visceral_fat_rating",
+    "skeletal_muscle_pct",
+    "muscle_mass_kg",
+    "body_water_pct",
+    "protein_pct",
+    "bone_mass_kg",
+    "scale_bmr_kcal",
+    "neck_cm",
+    "chest_cm",
+    "waist_cm",
+    "hip_cm",
+    "arm_cm",
+    "thigh_cm",
+  ]);
+});
