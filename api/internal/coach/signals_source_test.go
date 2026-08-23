@@ -54,9 +54,9 @@ func TestSignalsSourceReturnsSignalsFromBuiltContext(t *testing.T) {
 	memSvc := memory.NewService(logRepo)
 
 	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{})
-	src := NewSignalsSource(g, time.UTC)
+	src := NewSignalsSource(g)
 
-	got, err := src.SignalsFor(context.Background(), userID)
+	got, err := src.SignalsFor(context.Background(), userID, time.UTC)
 	require.NoError(t, err)
 
 	built, err := g.BuildContext(context.Background(), userID, now, time.UTC)
@@ -91,8 +91,8 @@ func TestSignalsSourcePropagatesBuildFailure(t *testing.T) {
 	memSvc := memory.NewService(foodlog.NewRepository(db))
 
 	g := NewGrounder(dashSvc, logs, memSvc, fakeWeightSource{})
-	src := NewSignalsSource(g, time.UTC)
+	src := NewSignalsSource(g)
 
-	_, err := src.SignalsFor(context.Background(), userID)
+	_, err := src.SignalsFor(context.Background(), userID, time.UTC)
 	require.Error(t, err, "an unknown risk state must reach the caller, never read as no-risk")
 }

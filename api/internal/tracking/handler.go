@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/tesserix/kora/api/internal/guardrails"
 	"github.com/tesserix/kora/api/internal/httpx"
 	"github.com/tesserix/kora/api/internal/localday"
 	"github.com/tesserix/kora/api/internal/user"
@@ -14,10 +15,22 @@ import (
 
 type Handler struct {
 	repo Repository
+	// signals is optional so every existing NewHandler caller (onboarding,
+	// tests) compiles unchanged. A nil source means the risk state is
+	// unknown, which WeightTrend treats as a reason to suppress -- never as
+	// a reason to show a figure.
+	signals SignalsSource
 }
 
 func NewHandler(repo Repository) Handler {
 	return Handler{repo: repo}
+}
+
+// WithSignals returns a copy of the handler that can gate a trend on the
+// Protective policy.
+func (h Handler) WithSignals(s SignalsSource) Handler {
+	h.signals = s
+	return h
 }
 
 func (h Handler) resolveUser(c *gin.Context) (uuid.UUID, bool) {
@@ -208,4 +221,121 @@ func orNow(t time.Time) time.Time {
 		return time.Now()
 	}
 	return t
+}
+
+// knownMetrics is the allow-list of series a rate may be fitted over. It is
+// explicit, with no permissive default, because an unrecognised name must be
+// a 400 rather than an empty series silently reported as insufficient_data
+// -- or, worse, a fabricated zero fitted through the gap. It is kept in
+// lockstep with metricValue by TestKnownMetricAgreesWithMetricValue.
+var knownMetrics = map[string]bool{
+	"weight_kg":            true,
+	"body_fat_pct":         true,
+	"subcutaneous_fat_pct": true,
+	"visceral_fat_rating":  true,
+	"skeletal_muscle_pct":  true,
+	"muscle_mass_kg":       true,
+	"body_water_pct":       true,
+	"protein_pct":          true,
+	"bone_mass_kg":         true,
+	"scale_bmr_kcal":       true,
+	"neck_cm":              true,
+	"chest_cm":             true,
+	"waist_cm":             true,
+	"hip_cm":               true,
+	"arm_cm":               true,
+	"thigh_cm":             true,
+}
+
+func knownMetric(metric string) bool { return knownMetrics[metric] }
+
+// rangeDays mirrors the client's WEIGHT_RANGE_DAYS. An unrecognised key
+// falls back to a month rather than to zero days, which would otherwise turn
+// a typo into a permanent insufficient_data.
+func rangeDays(key string) int {
+	switch key {
+	case "1W":
+		return 7
+	case "3M":
+		return 90
+	case "1Y":
+		return 365
+	default:
+		return 30
+	}
+}
+
+type trendBasis struct {
+	Readings int `json:"readings"`
+	Days     int `json:"days"`
+}
+
+// trendResponse omits the rate and its basis when they are absent, so a
+// suppressed result carries no figure on the wire at all -- not a null, not
+// a zero. The client cannot render what was never sent.
+type trendResponse struct {
+	Status           string      `json:"status"`
+	RatePerWeek      *float64    `json:"rate_per_week,omitempty"`
+	Basis            *trendBasis `json:"basis,omitempty"`
+	SpansInstruments bool        `json:"spans_instruments"`
+	ShowSupport      bool        `json:"show_support"`
+}
+
+func suppressed(c *gin.Context, showSupport bool) {
+	c.JSON(http.StatusOK, gin.H{"data": trendResponse{Status: "suppressed", ShowSupport: showSupport}})
+}
+
+// WeightTrend serves the rate of change shown beneath the Trends chart.
+//
+// The risk lookup comes FIRST and fails closed: a weight-loss figure is the
+// single most harmful thing this API can show a user the eating-disorder
+// policy has flagged, so an unknown risk state is treated exactly like a
+// known-at-risk one. HTTP 200 with a suppressed status -- rather than a 5xx
+// -- is deliberate: a grounding failure is not the caller's error, and a
+// retry loop on the Trends screen would be worse than a missing figure.
+func (h Handler) WeightTrend(c *gin.Context) {
+	userID, ok := h.resolveUser(c)
+	if !ok {
+		return
+	}
+	metric := c.Query("metric")
+	if !knownMetric(metric) {
+		httpx.Error(c, http.StatusBadRequest, "invalid_metric", "unknown metric")
+		return
+	}
+
+	if h.signals == nil {
+		suppressed(c, false)
+		return
+	}
+	// The location is per request, never a server-wide default: the risk
+	// computation excludes "today" by LOCAL day.
+	signals, err := h.signals.SignalsFor(c.Request.Context(), userID, user.LocFromContext(c))
+	if err != nil {
+		suppressed(c, false)
+		return
+	}
+	if guardrails.AtRisk(signals) {
+		suppressed(c, true)
+		return
+	}
+
+	to := endOfUTCDay(time.Now())
+	from := to.AddDate(0, 0, -rangeDays(c.Query("range")))
+	entries, err := h.repo.WeightSeries(c.Request.Context(), userID, from, to)
+	if err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not load weight series")
+		return
+	}
+
+	points, spans := PointsForMetric(entries, metric)
+	result, fitted := WeeklyRate(points)
+	if !fitted {
+		c.JSON(http.StatusOK, gin.H{"data": trendResponse{Status: "insufficient_data", SpansInstruments: spans}})
+		return
+	}
+	basis := trendBasis{Readings: result.Basis.Readings, Days: result.Basis.Days}
+	c.JSON(http.StatusOK, gin.H{"data": trendResponse{
+		Status: "ok", RatePerWeek: &result.PerWeek, Basis: &basis, SpansInstruments: spans,
+	}})
 }

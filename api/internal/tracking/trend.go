@@ -13,8 +13,14 @@ import (
 // Declared here and satisfied by coach so that tracking never imports it —
 // the risk computation must have exactly one definition (design doc,
 // decision 5).
+//
+// loc is taken per call, not pinned at construction: the risk computation
+// behind it excludes "today" by LOCAL day, so a server-wide fixed zone would
+// count the wrong days for any user outside it and feed a wrong
+// eating-disorder classification. Every other caller of BuildContext already
+// takes the location per request (see coach/handler.go).
 type SignalsSource interface {
-	SignalsFor(ctx context.Context, userID uuid.UUID) (guardrails.Signals, error)
+	SignalsFor(ctx context.Context, userID uuid.UUID, loc *time.Location) (guardrails.Signals, error)
 }
 
 // minRateReadings and minRateSpanDays are the gate from the design doc.

@@ -384,6 +384,15 @@ func NewRouter(deps Deps) *gin.Engine {
 			WithAgents(deps.Agents).
 			WithNutritionReferences(coach.NewNutritionReferenceSource(nutrition.NewRepository(deps.DB), deps.Provider))
 		coachHandler := coach.NewHandler(coachService)
+
+		// Registered here rather than beside the other /weight routes because
+		// the rate is gated on the Protective policy, and coachGrounder --
+		// the single definition of risk -- only exists from this point on.
+		// Building a second grounder to move it up would create a second
+		// place risk could be computed, which is exactly what #23 forbids.
+		v1.GET("/weight/trend", trackingHandler.WithSignals(
+			coach.NewSignalsSource(coachGrounder),
+		).WeightTrend)
 		if deps.Resolver != nil {
 			// The capture composer posts here: one endpoint that decides
 			// whether a message is food to log or something to talk about,
