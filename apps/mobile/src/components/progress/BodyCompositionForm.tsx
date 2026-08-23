@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { forwardRef, useImperativeHandle, useMemo, useState } from "react";
 import { View } from "react-native";
 import { AppText } from "@/components/Text";
 import { Button } from "@/components/Button";
@@ -80,7 +80,32 @@ export interface BodyCompositionFormProps {
    * there is something to show immediately). Default false.
    */
   initiallyExpanded?: boolean;
+  /**
+   * When true, this component renders no inline Save button at all — the
+   * caller is responsible for triggering the submit imperatively (see
+   * `BodyCompositionFormHandle`). kora#314's silent-failure fix (a Screenshot-
+   * mode Save button measuring 743pt below the fold, reachable only by a
+   * scroll nothing on screen asked for) is the reason this exists:
+   * `LogWeightSheet` hides the inline button here and pins the SAME control,
+   * built from this component's own `submit`, in `Sheet`'s `footer` instead.
+   * Validation and the save path both stay owned by this component either
+   * way — only WHERE the resulting button is drawn moves. Default false
+   * keeps every other caller's inline-button layout exactly as it was.
+   */
+  hideSubmitButton?: boolean;
   onSubmit: (payload: AddWeightPayload) => void;
+}
+
+/** Imperative escape hatch for `hideSubmitButton` — see that prop's own comment. */
+export interface BodyCompositionFormHandle {
+  /**
+   * Runs the exact same validate-then-`onSubmit` path the inline Save button
+   * would have run: both errors are computed together, both are shown
+   * together, and a valid save carries the identical payload shape. A caller
+   * that pins the button elsewhere is triggering this component's own logic,
+   * never a second copy of it.
+   */
+  submit: () => void;
 }
 
 /**
@@ -116,18 +141,23 @@ export interface BodyCompositionFormProps {
  * Not offered here, and not an oversight: this form does not edit an existing
  * entry. `POST /v1/weight` only creates.
  */
-export function BodyCompositionForm({
-  initialValues,
-  initialReadingDate,
-  sources = MANUAL_SOURCES,
-  heightCm,
-  submitting = false,
-  submitLabel = "Save",
-  error,
-  expandable = false,
-  initiallyExpanded = false,
-  onSubmit,
-}: BodyCompositionFormProps) {
+export const BodyCompositionForm = forwardRef<BodyCompositionFormHandle, BodyCompositionFormProps>(
+  function BodyCompositionForm(
+    {
+      initialValues,
+      initialReadingDate,
+      sources = MANUAL_SOURCES,
+      heightCm,
+      submitting = false,
+      submitLabel = "Save",
+      error,
+      expandable = false,
+      initiallyExpanded = false,
+      hideSubmitButton = false,
+      onSubmit,
+    },
+    ref,
+  ) {
   const { instrument, spacing } = useTheme();
   const { system } = useUnits();
 
@@ -186,6 +216,12 @@ export function BodyCompositionForm({
       local_date: dateResult.value,
     });
   };
+
+  // No deps array: `onSave` closes over `draft`/`source`/`dateText`, so the
+  // handle must be rebuilt every render or a caller triggering it late (the
+  // pinned-footer case this exists for) would validate and submit STALE
+  // field values instead of whatever the user actually typed last.
+  useImperativeHandle(ref, () => ({ submit: onSave }));
 
   const massUnit = weightUnitLabel(system);
   const showMass = (kg: number | null) =>
@@ -288,10 +324,11 @@ export function BodyCompositionForm({
         </AppText>
       ) : null}
 
-      <Button title={submitLabel} onPress={onSave} disabled={submitting} />
+      {hideSubmitButton ? null : <Button title={submitLabel} onPress={onSave} disabled={submitting} />}
     </View>
   );
-}
+  },
+);
 
 /**
  * One read-only derived figure.

@@ -1,13 +1,42 @@
 import { type ReactNode, useEffect } from "react";
 import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, useWindowDimensions, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { interpolate, runOnJS, useAnimatedStyle, useSharedValue, withSpring, withTiming } from "react-native-reanimated";
 import { springs } from "@/motion/springs";
 import { useMotionPrefs } from "@/motion/useMotionPrefs";
 import { useTheme } from "@/theme";
 import { REDUCED_TRANSPARENCY_FALLBACK } from "@/components/instrument/GlassPanel";
 
-interface Props { visible: boolean; onClose: () => void; children: ReactNode }
+interface Props {
+  visible: boolean;
+  onClose: () => void;
+  children: ReactNode;
+  /**
+   * Rendered AFTER the ScrollView, outside it — a pinned counterpart to
+   * AuthScaffold's own `footer` (same rationale: "a long form plus an open
+   * keyboard can push it out of reach"). kora#314's silent-failure fix is the
+   * first caller: BodyCompositionForm's Save button measured 743pt below the
+   * fold in Screenshot mode on an iPhone 17 Pro Max, so a real TestFlight user
+   * who never scrolled saw their read values, believed the import worked, and
+   * dismissed — nothing was written. The sheet DID scroll; nothing on screen
+   * said a hidden button was the difference between a reading being stored
+   * and discarded.
+   *
+   * ScrollView's own default style already sets `flexShrink: 1` (see
+   * react-native's ScrollView.js `baseVertical`), so adding this sibling
+   * needs no manual height math on either side: the ScrollView simply cedes
+   * whatever room the footer's own content claims, and the two stack without
+   * overlapping — nothing is obscured by construction, the way it would need
+   * a hand-measured `paddingBottom` to be if this were an absolutely
+   * positioned overlay instead.
+   *
+   * Omitted (the default for every other sheet), this renders exactly as it
+   * did before this prop existed — no wrapping view, no hairline, no layout
+   * change at all.
+   */
+  footer?: ReactNode;
+}
 
 // Instrument Glass surface (spec: Sheet.tsx > "surface from colors.card
 // (green-tinted) → dark-elevated instrument surface"). Shares the exact
@@ -16,11 +45,12 @@ interface Props { visible: boolean; onClose: () => void; children: ReactNode }
 // blurred, so a plain (non-blurred) sheet and a reduced-transparency glass
 // panel look like the same material. This closes review finding I7 (meal
 // detail's sheet was the last surface still on the old green card color).
-export function Sheet({ visible, onClose, children }: Props) {
-  const { radius, scheme, instrument } = useTheme();
+export function Sheet({ visible, onClose, children, footer }: Props) {
+  const { radius, scheme, instrument, spacing } = useTheme();
   const surface = REDUCED_TRANSPARENCY_FALLBACK[scheme];
   const { reduceMotion } = useMotionPrefs();
   const { height: screenH } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const translateY = useSharedValue(screenH);
 
   useEffect(() => {
@@ -88,7 +118,21 @@ export function Sheet({ visible, onClose, children }: Props) {
             <View style={{ alignItems: "center", paddingTop: 8, paddingBottom: 4 }}>
               <View style={{ width: 36, height: 5, borderRadius: 999, backgroundColor: instrument.mut }} />
             </View>
-            <ScrollView keyboardShouldPersistTaps="handled">{children}</ScrollView>
+            <ScrollView testID="sheet-scroll" keyboardShouldPersistTaps="handled">{children}</ScrollView>
+            {footer ? (
+              <View
+                testID="sheet-footer"
+                style={{
+                  paddingHorizontal: 22,
+                  paddingTop: spacing.md,
+                  paddingBottom: insets.bottom + spacing.md,
+                  borderTopWidth: 1,
+                  borderTopColor: instrument.hairline,
+                }}
+              >
+                {footer}
+              </View>
+            ) : null}
           </Animated.View>
         </GestureDetector>
       </KeyboardAvoidingView>

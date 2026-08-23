@@ -1,5 +1,6 @@
-import { fireEvent, render } from "@testing-library/react-native";
-import { BodyCompositionForm } from "../BodyCompositionForm";
+import { createRef } from "react";
+import { act, fireEvent, render } from "@testing-library/react-native";
+import { BodyCompositionForm, type BodyCompositionFormHandle } from "../BodyCompositionForm";
 
 const mockUseUnits = jest.fn();
 jest.mock("@/units", () => ({
@@ -254,6 +255,51 @@ describe("the date row (kora#314)", () => {
     expect(queryAllByTestId("field-error")).toHaveLength(1);
     await fireEvent.changeText(getByLabelText("Reading date"), "2026-08-19");
     expect(queryAllByTestId("field-error")).toHaveLength(0);
+  });
+});
+
+// kora#314's silent-failure fix (LogWeightSheet pins Save in Sheet's footer):
+// this component's own validation and save path must be identical whether
+// the caller renders the inline button or triggers it through the ref.
+describe("hideSubmitButton + imperative submit (kora#314)", () => {
+  test("hideSubmitButton renders no inline Save control at all", async () => {
+    const { queryByText } = await render(<BodyCompositionForm hideSubmitButton onSubmit={jest.fn()} />);
+    expect(queryByText("Save")).toBeNull();
+  });
+
+  test("ref.submit() runs the SAME validate-then-submit path as the inline button", async () => {
+    const onSubmit = jest.fn();
+    const ref = createRef<BodyCompositionFormHandle>();
+    const { getByLabelText } = await render(
+      <BodyCompositionForm ref={ref} hideSubmitButton onSubmit={onSubmit} />,
+    );
+    await fireEvent.changeText(getByLabelText("Weight in kilograms"), "70.2");
+    await act(async () => ref.current?.submit());
+    expect(onSubmit.mock.calls[0][0]).toEqual({ weight_kg: 70.2, source: "manual", ...todayFields });
+  });
+
+  test("ref.submit() is blocked by the same per-field errors, shown the same way", async () => {
+    const onSubmit = jest.fn();
+    const ref = createRef<BodyCompositionFormHandle>();
+    const { getAllByTestId } = await render(<BodyCompositionForm ref={ref} hideSubmitButton onSubmit={onSubmit} />);
+    // No weight typed at all — the one field this form refuses to save without.
+    await act(async () => ref.current?.submit());
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(getAllByTestId("field-error")[0].props.children).toBe("Enter a weight in kg.");
+  });
+
+  test("submit() always runs against the LATEST typed values, not whatever they were when the ref was captured", async () => {
+    // Guards the no-deps-array choice on useImperativeHandle: if the handle
+    // were built once and never refreshed, this would submit an empty draft
+    // instead of "70.2".
+    const onSubmit = jest.fn();
+    const ref = createRef<BodyCompositionFormHandle>();
+    const { getByLabelText } = await render(
+      <BodyCompositionForm ref={ref} hideSubmitButton onSubmit={onSubmit} />,
+    );
+    await fireEvent.changeText(getByLabelText("Weight in kilograms"), "70.2");
+    await act(async () => ref.current?.submit());
+    expect(onSubmit.mock.calls[0][0].weight_kg).toBe(70.2);
   });
 });
 

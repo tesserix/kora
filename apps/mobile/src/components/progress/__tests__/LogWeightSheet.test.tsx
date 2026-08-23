@@ -1,4 +1,4 @@
-import { act, fireEvent, render } from "@testing-library/react-native";
+import { act, fireEvent, render, within } from "@testing-library/react-native";
 import * as ImagePicker from "expo-image-picker";
 import { LogWeightSheet } from "../LogWeightSheet";
 
@@ -86,6 +86,21 @@ describe("Manual mode", () => {
     expect(queryByTestId("composition-derived")).toBeNull();
   });
 
+  // kora#314's silent-failure fix: Save is pinned in Sheet's footer, outside
+  // the scrolling region, rather than as the form's own last child — this is
+  // the regression test that the wiring (LogWeightSheet -> Sheet's `footer`
+  // -> BodyCompositionForm's ref) actually connects Save to the form, in
+  // BOTH shapes ("Save" is textually identical either way, so this checks
+  // the STRUCTURE, not just that a button labelled "Save" exists somewhere).
+  test("Save lives in the sheet's pinned footer, not inline in the form", async () => {
+    const { getByTestId, getAllByText } = await render(<LogWeightSheet visible onClose={jest.fn()} />);
+    const footer = getByTestId("sheet-footer");
+    expect(within(footer).getByText("Save")).toBeTruthy();
+    // Exactly one — the form's own inline button must be hidden, not merely
+    // supplemented by a second copy in the footer.
+    expect(getAllByText("Save")).toHaveLength(1);
+  });
+
   test("the expanding section reveals composition fields", async () => {
     const { getByTestId, getByLabelText } = await render(<LogWeightSheet visible onClose={jest.fn()} />);
     await fireEvent.press(getByTestId("composition-expand-toggle"));
@@ -133,6 +148,16 @@ describe("Screenshot mode", () => {
   async function switchToScreenshot(utils: Awaited<ReturnType<typeof render>>) {
     await fireEvent.press(utils.getByTestId("log-weight-mode-segment-screenshot"));
   }
+
+  // The capture step has no BodyCompositionForm mounted yet — nothing to
+  // save — so Sheet must get no footer at all here, exactly like every Sheet
+  // caller that never passes one.
+  test("the capture step shows no pinned footer — there is nothing to save yet", async () => {
+    const utils = await render(<LogWeightSheet visible onClose={jest.fn()} />);
+    await switchToScreenshot(utils);
+    expect(utils.queryByTestId("sheet-footer")).toBeNull();
+    expect(utils.queryByText("Save")).toBeNull();
+  });
 
   test("choosing a screenshot reads it, opens the confirm form ALREADY EXPANDED and pre-filled", async () => {
     mockPickedPhoto();
