@@ -125,3 +125,39 @@ func TestAddWeightHandlerRejectsImpossibleComposition(t *testing.T) {
 		require.Equal(t, http.StatusBadRequest, w.Code, "body: %s", body)
 	}
 }
+
+// kora#378: a weigh-in stamped later today must still appear in its own
+// series. The client sends a date-only entry as midday UTC, which is in the
+// future for most of the day, and ListWeight used to default `to` to
+// time.Now() -- so a morning weigh-in was written correctly and then
+// excluded from the very read meant to display it, with no error anywhere.
+func TestListWeightHandlerIncludesEntriesStampedLaterToday(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	repo := NewRepository(db)
+	r := weightRouter(userID, repo)
+
+	// Midday UTC today, exactly as BodyCompositionForm stamps a date-only
+	// entry. Skipped after midday, when it is no longer a future instant and
+	// so cannot exercise the bug.
+	now := time.Now().UTC()
+	midday := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, time.UTC)
+	if !midday.After(now) {
+		t.Skip("past midday UTC: the future-stamp case cannot be reproduced now")
+	}
+	_, err := repo.AddWeight(context.Background(), userID, 74.0, midday, dayOf(midday))
+	require.NoError(t, err)
+
+	// No `to` -- the default is what decides whether today's entry is visible.
+	from := now.Add(-72 * time.Hour).Format(time.RFC3339)
+	req := httptest.NewRequest(http.MethodGet, "/v1/weight?from="+from, nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var body struct {
+		Data []WeightEntry `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Len(t, body.Data, 1, "an entry stamped later today must be in its own series")
+}

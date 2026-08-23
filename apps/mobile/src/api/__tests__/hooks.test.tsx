@@ -772,6 +772,23 @@ test("useWeightSeries GETs /v1/weight with a ~30d from/to for 1M", async () => {
   expect(Math.round(days)).toBe(30);
 });
 
+// kora#378: a date-only weigh-in is stamped midday UTC, which is in the
+// future for most of the day. Asking the API for `to = now` excluded the
+// user's own morning weigh-in from the series that was meant to show it.
+test("useWeightSeries asks for a window that reaches the end of today", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce([]);
+  const { result } = await renderHook(() => useWeightSeries("1M"), { wrapper });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  const calls = (apiFetch as jest.Mock).mock.calls;
+  const url = calls[calls.length - 1][0] as string;
+  const to = new Date(new URLSearchParams(url.split("?")[1]).get("to") as string);
+
+  // Midday UTC today is what the form stamps; the window must contain it.
+  const now = new Date();
+  const midday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 12));
+  expect(to.getTime()).toBeGreaterThan(midday.getTime());
+});
+
 test("useSendFriendRequest POSTs the body to /v1/friends/requests", async () => {
   (apiFetch as jest.Mock).mockResolvedValueOnce({ id: "f1", status: "pending" });
   const { result } = await renderHook(() => useSendFriendRequest(), { wrapper });
