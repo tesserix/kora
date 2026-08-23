@@ -256,6 +256,8 @@ func rangeDays(key string) int {
 	switch key {
 	case "1W":
 		return 7
+	case "1M":
+		return 30
 	case "3M":
 		return 90
 	case "1Y":

@@ -234,7 +234,8 @@ func TestWeightTrendReturnsARateWhenNotAtRisk(t *testing.T) {
 				Readings int `json:"readings"`
 				Days     int `json:"days"`
 			} `json:"basis"`
-			ShowSupport bool `json:"show_support"`
+			ShowSupport      bool `json:"show_support"`
+			SpansInstruments bool `json:"spans_instruments"`
 		} `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
@@ -244,6 +245,49 @@ func TestWeightTrendReturnsARateWhenNotAtRisk(t *testing.T) {
 	require.Equal(t, 5, body.Data.Basis.Readings)
 	require.Equal(t, 28, body.Data.Basis.Days)
 	require.False(t, body.Data.ShowSupport)
+	require.False(t, body.Data.SpansInstruments, "one instrument throughout")
+}
+
+// spans_instruments drives a user-visible accuracy caveat (tasks 6/7), so the
+// handler must forward the TRUE case, not just the false one. Without this
+// the flag could be hardcoded false and the whole suite would stay green,
+// silently dropping the caveat from every cross-instrument series.
+func TestWeightTrendFlagsASeriesSpanningInstruments(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	repo := NewRepository(db)
+
+	// weight_kg is the metric FitsAcrossInstruments permits, so the points
+	// are fitted across the change rather than truncated to the last run.
+	// Synthetic figures: this repo is public and holds no real body data.
+	sources := []Source{SourceManual, SourceManual, SourceHealthKit, SourceHealthKit, SourceHealthKit}
+	for i, kg := range []float64{80, 79.5, 79, 78.5, 78} {
+		at := time.Now().AddDate(0, 0, -28+(i*7))
+		_, err := repo.AddWeightEntry(context.Background(), userID, WeightInput{
+			WeightKg:    kg,
+			LoggedAt:    at,
+			LocalDate:   dayOf(at),
+			Composition: BodyComposition{Source: sources[i]},
+		})
+		require.NoError(t, err)
+	}
+
+	r := trendRouter(userID, repo, &fakeSignals{})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/weight/trend?metric=weight_kg&range=3M", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var body struct {
+		Data struct {
+			Status           string   `json:"status"`
+			RatePerWeek      *float64 `json:"rate_per_week"`
+			SpansInstruments bool     `json:"spans_instruments"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Equal(t, "ok", body.Data.Status)
+	require.NotNil(t, body.Data.RatePerWeek, "a change of instrument does not withhold the rate")
+	require.True(t, body.Data.SpansInstruments, "the caveat must reach the client")
 }
 
 // The guardrail. This is the test that must go red if suppression is removed.
@@ -373,16 +417,32 @@ func TestWeightTrendRejectsAMissingMetric(t *testing.T) {
 // The allow-list and metricValue must never drift apart: a key accepted here
 // that metricValue cannot read yields a permanent insufficient_data, and a
 // key metricValue reads but the list rejects is an unreachable metric.
+//
+// Every field carries a DISTINCT synthetic value, so this also pins the
+// mapping itself: a metricValue case reading the wrong field — "hip_cm"
+// returning e.NeckCm, say — would still be "readable" under a uniform
+// fixture and would silently fit a rate over the wrong series.
 func TestKnownMetricAgreesWithMetricValue(t *testing.T) {
+	entry := WeightEntry{WeightKg: 1, BodyComposition: BodyComposition{
+		BodyFatPct: ptr(2), SubcutaneousFatPct: ptr(3), VisceralFatRating: ptr(4),
+		SkeletalMusclePct: ptr(5), MuscleMassKg: ptr(6), BodyWaterPct: ptr(7),
+		ProteinPct: ptr(8), BoneMassKg: ptr(9), ScaleBMRKcal: ptr(10),
+		NeckCm: ptr(11), ChestCm: ptr(12), WaistCm: ptr(13),
+		HipCm: ptr(14), ArmCm: ptr(15), ThighCm: ptr(16),
+	}}
+	want := map[string]float64{
+		"weight_kg": 1, "body_fat_pct": 2, "subcutaneous_fat_pct": 3,
+		"visceral_fat_rating": 4, "skeletal_muscle_pct": 5, "muscle_mass_kg": 6,
+		"body_water_pct": 7, "protein_pct": 8, "bone_mass_kg": 9,
+		"scale_bmr_kcal": 10, "neck_cm": 11, "chest_cm": 12,
+		"waist_cm": 13, "hip_cm": 14, "arm_cm": 15, "thigh_cm": 16,
+	}
+	require.Len(t, want, len(knownMetrics), "every allow-listed metric needs a distinct expectation")
+
 	for metric := range knownMetrics {
-		_, ok := metricValue(WeightEntry{BodyComposition: BodyComposition{
-			BodyFatPct: ptr(1), SubcutaneousFatPct: ptr(1), VisceralFatRating: ptr(1),
-			SkeletalMusclePct: ptr(1), MuscleMassKg: ptr(1), BodyWaterPct: ptr(1),
-			ProteinPct: ptr(1), BoneMassKg: ptr(1), ScaleBMRKcal: ptr(1),
-			NeckCm: ptr(1), ChestCm: ptr(1), WaistCm: ptr(1),
-			HipCm: ptr(1), ArmCm: ptr(1), ThighCm: ptr(1),
-		}}, metric)
+		got, ok := metricValue(entry, metric)
 		require.True(t, ok, "allow-listed metric %q is not readable by metricValue", metric)
+		require.Equal(t, want[metric], got, "metric %q reads the wrong field", metric)
 	}
 }
 
