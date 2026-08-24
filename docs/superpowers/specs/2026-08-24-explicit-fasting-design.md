@@ -58,8 +58,25 @@ question, never a column read.
 convention `food_logs` and `weight_entries` already use rather than deriving a
 day from a timestamp.
 
-**One open fast per user**, enforced by a partial unique index on
+**One open fast per user.** Originally enforced by a partial unique index on
 `(user_id) WHERE ended_at IS NULL`.
+
+> **Amendment, 2026-08-24 (kora#407 review, finding C1).** That index was
+> dropped in migration `000053`. It contradicted this decision's own second
+> half: because `ended_at` is written only by an explicit end, a fast the user
+> ended by *eating* — the ordinary case — keeps `ended_at IS NULL` forever, so
+> the index rejected the user's next genuine start and that fast was never
+> recorded. The under-recorded duration then never reached
+> `DeclaredFastHours`, leaving `AtRisk` false where the 24h threshold should
+> have fired. Closing the stale row instead was rejected: it would write
+> `ended_at` outside the one explicit end path.
+>
+> Postgres cannot express the invariant because the invariant is no longer a
+> column. The serialisation that stopped a double-tap opening two fasts moved
+> into the application: `Start` takes a transaction-scoped per-user advisory
+> lock (`pg_advisory_xact_lock`) and re-reads before inserting, which gives the
+> same guarantee (n concurrent starts leave exactly one row, and all n get it
+> back) without constraining rows the user has finished with.
 
 Two traps this repo has already hit apply directly:
 - `ON CONFLICT` against a partial unique index needs `clause.TargetWhere` with
@@ -198,8 +215,12 @@ open under it. Table-driven.
 **Integration:**
 - starting twice returns the same interval
 - a food log closes an open fast at the log's timestamp
-- the partial unique index rejects a second open fast — **mutation-checked in
-  both directions**, because a wrongly non-partial index passes naively
+- ~~the partial unique index rejects a second open fast~~ — superseded by the
+  amendment above: `Start`'s advisory lock rejects a second OPEN fast under
+  genuine concurrency (barrier-forced, n goroutines, one row), and the schema
+  test asserts the index stays dropped
+- **starting again after a meal ended the last fast opens a NEW interval** and
+  does not resurrect the old one (finding C1's reproduction)
 
 ## Not addressed here
 
