@@ -18,4 +18,12 @@ enum EmptyStateCopy {
   /// 7-day window is unreadable — a denied/unavailable HealthKit read, not
   /// "zero steps". Explains the `—` dial rather than leaving it unexplained.
   static let stepsHistoryUnknown = "Health access needed"
+
+  /// The same line when the window was unreadable because the DEVICE IS
+  /// LOCKED (kora#420). "Health access needed" is a permissions problem and
+  /// this is not one — the user has granted everything and simply has their
+  /// phone locked, so telling them to go fix access sends them somewhere
+  /// there is nothing to fix.
+  static let stepsHistoryLocked = "Unlock to update"
 }
+

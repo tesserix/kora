@@ -10,6 +10,10 @@ struct KoraEntry: TimelineEntry {
   /// nil = unknown. Only ever consulted for the steps metric.
   let steps: Int?
   let history: [DayStep]
+  /// Why `steps` is absent, when it is (kora#420). `.locked` means the device
+  /// was locked during the read, which is transient and drives both a shorter
+  /// refresh and copy that does not blame the user's permissions.
+  var availability: StepReading.Availability = .readable
 }
 
 struct KoraProvider: AppIntentTimelineProvider {
@@ -41,7 +45,15 @@ struct KoraProvider: AppIntentTimelineProvider {
     // fresh than a smaller ask would be. Reserve and Protein also get a push
     // reload from the app on every snapshot write (WidgetBridgeModule), so
     // this cadence mainly has to catch the midnight rollover and step drift.
-    let next = Calendar.current.date(byAdding: .minute, value: 30, to: Date()) ?? Date()
+    // 30 minutes normally, but minutes when the read failed only because the
+    // device was locked (kora#420). HealthKit is protected data, so a refresh
+    // landing on a locked phone reads nothing; resting on that for the full
+    // slot is what left the widget blank long after unlocking. `.unreadable`
+    // deliberately keeps the slow cadence -- nothing about it changes on its
+    // own, and retrying it every few minutes would spend the whole daily
+    // budget proving the same negative.
+    let minutes = current.availability == .locked ? 5 : 30
+    let next = Calendar.current.date(byAdding: .minute, value: minutes, to: Date()) ?? Date()
     return Timeline(entries: [current], policy: .after(next))
   }
 
@@ -62,7 +74,7 @@ struct KoraProvider: AppIntentTimelineProvider {
       return KoraEntry(date: Date(), kind: kind, snapshot: snapshot, steps: nil, history: [])
     }
 
-    let steps = await HealthReader.todaySteps()
+    let read = await HealthReader.todaySteps()
 
     // last7Days() is only ever rendered by MediumView's steps history strip.
     // Small, Large and both accessories would pay for an extra
@@ -74,7 +86,9 @@ struct KoraProvider: AppIntentTimelineProvider {
       history = []
     }
 
-    return KoraEntry(date: Date(), kind: kind, snapshot: snapshot, steps: steps, history: history)
+    return KoraEntry(
+      date: Date(), kind: kind, snapshot: snapshot,
+      steps: read.steps, history: history, availability: read.availability)
   }
 
   private static let sample = NutritionSnapshot(
@@ -106,7 +120,9 @@ struct KoraWidgetView: View {
       let presentation = entry.kind.present(snapshot: snapshot, steps: entry.steps)
       switch family {
       case .systemMedium:
-        MediumView(kind: entry.kind, presentation: presentation, snapshot: snapshot, history: entry.history)
+        MediumView(
+          kind: entry.kind, presentation: presentation, snapshot: snapshot,
+          history: entry.history, availability: entry.availability)
       case .systemLarge:
         LargeView(presentation: presentation, snapshot: snapshot, steps: entry.steps)
       case .accessoryRectangular:
