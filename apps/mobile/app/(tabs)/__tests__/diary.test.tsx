@@ -148,6 +148,37 @@ test("offers to end the fast that is open, with its elapsed time", async () => {
   expect(getByLabelText("End fast")).toBeTruthy();
 });
 
+// kora#407: a failed start or end used to be completely silent — mutate() was
+// called with no onError and no error state, so a network failure left the
+// button looking exactly as if the tap had done nothing. The water control
+// fifteen lines above in the same screen already had this; the fast controls
+// now follow it.
+test("a failed start says so instead of looking like nothing happened", async () => {
+  mockCurrentFast.mockReturnValue({ data: null, isSuccess: true });
+  mockStartFastMutate.mockImplementationOnce((_vars, opts) => opts?.onError?.(new Error("offline")));
+  const { getByLabelText, findByText } = await render(<Diary />);
+  await fireEvent.press(getByLabelText("Start fast"));
+  expect(await findByText("Couldn't start your fast. Try again.")).toBeTruthy();
+});
+
+test("a failed end says so instead of looking like nothing happened", async () => {
+  mockCurrentFast.mockReturnValue({
+    data: { id: "f1", started_at: new Date(Date.now() - 3 * 3600_000).toISOString() },
+    isSuccess: true,
+  });
+  mockEndFastMutate.mockImplementationOnce((_vars, opts) => opts?.onError?.(new Error("offline")));
+  const { getByLabelText, findByText } = await render(<Diary />);
+  await fireEvent.press(getByLabelText("End fast"));
+  expect(await findByText("Couldn't end your fast. Try again.")).toBeTruthy();
+});
+
+test("a start that succeeds shows no error", async () => {
+  mockCurrentFast.mockReturnValue({ data: null, isSuccess: true });
+  const { getByLabelText, queryByText } = await render(<Diary />);
+  await fireEvent.press(getByLabelText("Start fast"));
+  expect(queryByText("Couldn't start your fast. Try again.")).toBeNull();
+});
+
 test("a day with zero food logs shows the empty-day EmptyState", async () => {
   mockDayLogs = [];
   const { findByText } = await render(<Diary />);

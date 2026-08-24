@@ -86,6 +86,10 @@ export default function Diary() {
   const endFast = useEndFast();
   const { openCompose } = useSavedMealEditor();
   const [waterErr, setWaterErr] = useState<string | null>(null);
+  // One error slot for both fast controls: only one of them is on screen at a
+  // time. Same shape as waterErr above -- without it a failed start or end
+  // left the button looking like the tap did nothing (kora#407).
+  const [fastErr, setFastErr] = useState<string | null>(null);
   const [copyOpen, setCopyOpen] = useState(false);
   const [failedRowId, setFailedRowId] = useState<string | null>(null);
   // Selection is scoped to the day on screen, which is also the only day this
@@ -131,6 +135,23 @@ export default function Diary() {
         onError: () => setWaterErr("Couldn't add water. Try again."),
       },
     );
+  };
+
+  // Start/end follow addWaterMl above exactly: clear the last error, then
+  // surface a failure inline rather than silently. A fast that fails to start
+  // is not recorded at all, so the user must be told to retry.
+  const startFastNow = () => {
+    setFastErr(null);
+    startFast.mutate(undefined, {
+      onError: () => setFastErr("Couldn't start your fast. Try again."),
+    });
+  };
+
+  const endFastNow = () => {
+    setFastErr(null);
+    endFast.mutate(undefined, {
+      onError: () => setFastErr("Couldn't end your fast. Try again."),
+    });
   };
 
   // Same confirm-Alert → useDeleteLog flow as app/meal.tsx's onDelete (identical
@@ -358,7 +379,7 @@ export default function Diary() {
                 accessibilityRole="button"
                 accessibilityLabel="End fast"
                 haptic="selection"
-                onPress={() => endFast.mutate()}
+                onPress={endFastNow}
                 style={{
                   borderWidth: 1.5,
                   borderStyle: "solid",
@@ -376,7 +397,7 @@ export default function Diary() {
                 accessibilityRole="button"
                 accessibilityLabel="Start fast"
                 haptic="selection"
-                onPress={() => startFast.mutate()}
+                onPress={startFastNow}
                 style={{
                   borderWidth: 1.5,
                   borderStyle: "dashed",
@@ -390,6 +411,17 @@ export default function Diary() {
                 <AppText style={{ color: instrument.mut }}>Start fast</AppText>
               </PressableScale>
             )}
+            {fastErr ? (
+              // Announced, not just drawn — the same live-region treatment
+              // DayTotalCluster gives waterErr, and for the same reason: this
+              // is the only signal the tap failed.
+              <AppText
+                accessibilityLiveRegion="polite"
+                style={{ color: colors.destructive, marginTop: 8 }}
+              >
+                {fastErr}
+              </AppText>
+            ) : null}
           </Animated.View>
 
           {/* Meal log stays OUTSIDE the day-total cluster (spec Step 4): each
