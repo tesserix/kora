@@ -794,7 +794,13 @@ func TestFactsOmitAbsentEnergyAndHeartRate(t *testing.T) {
 }
 
 // The false positive that matters: several routine overnight fasts must not
-// add up into a risk signal. This is the test a "sum them" refactor breaks.
+// add up into a risk signal. This is a pure unit test of the max-selection
+// principle in isolation -- it computes the max itself, inline, and never
+// calls Grounder.BuildContext, so it does NOT exercise (and would NOT catch
+// a regression in) the production max-vs-sum loop. That loop is covered by
+// TestBuildContextWiresDeclaredFastHoursFromLongestInterval below, which
+// drives BuildContext end to end and is the test a "sum them" refactor
+// actually breaks.
 func TestSevenShortDeclaredFastsAreNotRisk(t *testing.T) {
 	var intervals []fasting.Interval
 	base := time.Date(2026, 8, 17, 20, 0, 0, 0, time.UTC)
@@ -839,7 +845,7 @@ func TestBuildContextWiresDeclaredFastHoursFromLongestInterval(t *testing.T) {
 	now := time.Date(2026, 8, 24, 12, 0, 0, 0, loc)
 
 	// A short, routine overnight fast, plus one genuinely long fast -- the
-	// longest single interval, 30h, must win, not the sum of both (46h).
+	// longest single interval, 30h, must win, not the sum of both (44h).
 	shortStart := now.AddDate(0, 0, -5)
 	shortEnd := shortStart.Add(14 * time.Hour)
 	longStart := now.AddDate(0, 0, -2)
@@ -850,9 +856,9 @@ func TestBuildContextWiresDeclaredFastHoursFromLongestInterval(t *testing.T) {
 		{UserID: userID, StartedAt: longStart, EndedAt: &longEnd, LocalDate: localDayOf(longStart)},
 	} {
 		require.NoError(t, db.Create(&in).Error)
-		t.Cleanup(func(id uuid.UUID) func() {
-			return func() { db.Exec("DELETE FROM fasting_intervals WHERE id = ?", id) }
-		}(in.ID))
+		// go.mod is 1.26: `in` is per-iteration, so it is safe to capture
+		// directly without the pre-1.22 IIFE workaround.
+		t.Cleanup(func() { db.Exec("DELETE FROM fasting_intervals WHERE id = ?", in.ID) })
 	}
 
 	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{}).WithFasting(fastingRepo)
@@ -885,5 +891,148 @@ func TestBuildContextPropagatesFastingSourceError(t *testing.T) {
 		WithFasting(fakeFastingSource{err: errors.New("fasting source unavailable")})
 
 	_, err := g.BuildContext(context.Background(), userID, now, loc)
-	require.Error(t, err, "a fasting source error must fail BuildContext, not be swallowed into a false all-clear")
+	require.ErrorContains(t, err, "declared fasts",
+		"the error must be traceable to the fasting read specifically, not merely any error from BuildContext")
+}
+
+// TestBuildContextDeclaredFastHours_AbandonedOpenFastDoesNotCountForever
+// proves the window-intersection fix (kora#407 Decision 4): Repository.Since
+// bounds only ended_at, so a fast that was started long ago and never ended
+// (started_at nowhere near the 7-day window, ended_at NULL) is still
+// returned by the read. EffectiveEnd caps its duration at CapHours, but 48h
+// is still >= riskDeclaredFastHours (24h) -- without the intersection check,
+// one forgotten "start fast" tap would pin the user AtRisk permanently, no
+// matter how long ago it happened. Its capped effective end must fall
+// outside the window and contribute exactly zero.
+func TestBuildContextDeclaredFastHours_AbandonedOpenFastDoesNotCountForever(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
+	memSvc := memory.NewService(logRepo)
+
+	loc := time.UTC
+	now := time.Date(2026, 8, 24, 12, 0, 0, 0, loc)
+
+	// Started 100 days ago, never ended. EffectiveEnd caps it at
+	// start+CapHours -- roughly 98 days before `now` -- which is nowhere
+	// near the trailing 7-day window.
+	abandonedStart := now.AddDate(0, 0, -100)
+	fastingSrc := fakeFastingSource{intervals: []fasting.Interval{
+		{UserID: userID, StartedAt: abandonedStart, EndedAt: nil},
+	}}
+
+	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{}).WithFasting(fastingSrc)
+
+	ctx, err := g.BuildContext(context.Background(), userID, now, loc)
+	require.NoError(t, err)
+
+	require.Zero(t, ctx.DeclaredFastHours,
+		"a fast whose capped effective end fell outside the window must contribute zero, not pin risk forever")
+
+	s := SignalsFrom(ctx)
+	require.False(t, guardrails.AtRisk(guardrails.Signals{DeclaredFastHours: s.DeclaredFastHours}),
+		"an abandoned fast from 100 days ago must not permanently suppress coaching")
+}
+
+// TestBuildContextDeclaredFastHours_StraddlesWindowStartCountsFullDuration
+// is the other edge of the same fix, in the direction that matters most for
+// this guardrail: under-firing. A fast that STARTED before the window but
+// whose effective end falls inside it must still count for its FULL
+// duration -- the window-intersection check is a skip for fasts that ended
+// entirely before the window, not a clip on fasts that merely began early.
+func TestBuildContextDeclaredFastHours_StraddlesWindowStartCountsFullDuration(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
+	memSvc := memory.NewService(logRepo)
+
+	loc := time.UTC
+	now := time.Date(2026, 8, 24, 12, 0, 0, 0, loc)
+	since := windowStart(now, loc)
+
+	// Starts 10 hours before the window opens, ends 30 hours after the
+	// window opens -- a genuine 40-hour fast straddling the boundary.
+	start := since.Add(-10 * time.Hour)
+	end := since.Add(30 * time.Hour)
+	fastingSrc := fakeFastingSource{intervals: []fasting.Interval{
+		{UserID: userID, StartedAt: start, EndedAt: &end},
+	}}
+
+	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{}).WithFasting(fastingSrc)
+
+	ctx, err := g.BuildContext(context.Background(), userID, now, loc)
+	require.NoError(t, err)
+
+	require.InDelta(t, 40.0, ctx.DeclaredFastHours, 0.01,
+		"a fast that straddles the window's start must count its FULL duration, not just the portion inside the window")
+}
+
+// TestBuildContextDeclaredFastHours_PerIntervalFirstLogNotHoisted guards the
+// exact regression the brief already fixed once: computing "first log after
+// this fast began" ONCE (e.g. from logs[0], the earliest log in the whole
+// window) and reusing it for every interval, instead of per interval. With
+// two declared fasts and two food logs positioned so the correct per-fast
+// answer differs from the hoisted one, a hoisted implementation lets the
+// later, still-open fast run all the way to the cap instead of being ended
+// by the log that actually falls after IT started.
+func TestBuildContextDeclaredFastHours_PerIntervalFirstLogNotHoisted(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	item := nutrition.FoodItem{
+		Name: "Per-Interval First Log Food " + uuid.NewString(), Provenance: nutrition.ProvenanceAFCD,
+		KcalPer100g: 200, ProteinPer100g: 20, FiberPer100g: 5,
+	}
+	require.NoError(t, db.Create(&item).Error)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE id = ?", item.ID) })
+
+	logRepo := foodlog.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
+	memSvc := memory.NewService(logRepo)
+
+	loc := time.UTC
+	now := time.Date(2026, 8, 24, 12, 0, 0, 0, loc)
+
+	// Fast A: short, already closed by the user. Ends 2h after it starts,
+	// regardless of any log -- included only so there are two intervals.
+	aStart := now.AddDate(0, 0, -4)
+	aEnd := aStart.Add(2 * time.Hour)
+
+	// Fast B: the LATER, still-open fast. Correctly ended ~12h in by the
+	// second food log (logAfterB). If the per-interval search were hoisted
+	// to use only the earliest log in the window (logBeforeB, which predates
+	// B's start and so is correctly discarded by EffectiveEnd's own guard),
+	// nothing would end B and it would run all the way to CapHours (48h)
+	// instead of the correct ~12h.
+	bStart := now.AddDate(0, 0, -3)
+
+	logBeforeB := aStart.Add(1 * time.Hour) // during fast A, before B starts
+	logAfterB := bStart.Add(12 * time.Hour) // 12h into fast B
+
+	seedLog(t, db, logRepo, foodlog.FoodLog{
+		UserID: userID, FoodItemID: &item.ID, LoggedAt: logBeforeB, LocalDate: localDayOf(logBeforeB),
+		MealSlot: "lunch", Source: "manual", Provenance: nutrition.ProvenanceAFCD,
+		QuantityGrams: 100, Kcal: 200, ProteinG: 20, FiberG: 5,
+	})
+	seedLog(t, db, logRepo, foodlog.FoodLog{
+		UserID: userID, FoodItemID: &item.ID, LoggedAt: logAfterB, LocalDate: localDayOf(logAfterB),
+		MealSlot: "dinner", Source: "manual", Provenance: nutrition.ProvenanceAFCD,
+		QuantityGrams: 100, Kcal: 200, ProteinG: 20, FiberG: 5,
+	})
+
+	fastingSrc := fakeFastingSource{intervals: []fasting.Interval{
+		{UserID: userID, StartedAt: aStart, EndedAt: &aEnd},
+		{UserID: userID, StartedAt: bStart, EndedAt: nil},
+	}}
+
+	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{}).WithFasting(fastingSrc)
+
+	ctx, err := g.BuildContext(context.Background(), userID, now, loc)
+	require.NoError(t, err)
+
+	require.InDelta(t, 12.0, ctx.DeclaredFastHours, 0.01,
+		"fast B must be ended by the log that falls after ITS start (~12h), not run to the 48h cap because the earlier, wrong log was reused")
 }

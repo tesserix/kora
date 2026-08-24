@@ -239,6 +239,23 @@ func (g Grounder) BuildContext(ctx context.Context, userID uuid.UUID, now time.T
 					break
 				}
 			}
+			// A fast counts only if its EFFECTIVE interval intersects the
+			// window (kora#407 Decision 4). Repository.Since bounds only
+			// ended_at, so a long-abandoned open fast -- started months ago,
+			// never ended -- is still returned; EffectiveEnd caps its
+			// duration at CapHours but that still trips riskDeclaredFastHours
+			// forever, permanently pinning the user AtRisk from one
+			// forgotten "start fast" tap. Skip anything whose effective end
+			// falls entirely before the window starts.
+			//
+			// This is a skip, not a clip: a fast that STARTED before the
+			// window but whose effective end falls inside or after it still
+			// counts for its FULL duration, not just the portion inside the
+			// window -- under-firing (missing a genuine long fast that began
+			// slightly early) is the dangerous direction for this guardrail.
+			if fasting.EffectiveEnd(in, firstLog, now).Before(since) {
+				continue
+			}
 			if h := fasting.Hours(in, firstLog, now); h > declaredFastHours {
 				declaredFastHours = h
 			}
