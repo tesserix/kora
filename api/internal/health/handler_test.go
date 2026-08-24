@@ -4,6 +4,7 @@ package health
 import (
 	"bytes"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -77,4 +78,70 @@ func TestSyncRejectsMalformedBody(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// captureLogs redirects slog's default logger into a buffer for the duration
+// of one test and restores it afterwards.
+func captureLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	return &buf
+}
+
+// TestSyncLogsReceivedAndAcceptedCounts covers the instrument kora#30's
+// relaunch check depends on, and the reason it has to exist is worth stating:
+// the two outcomes it distinguishes are INVISIBLE in the database.
+//
+// The device holds an anchor in AsyncStorage. Reused, the client finds no new
+// samples and posts nothing at all -- a healthy re-sync is silence. Lost, the
+// client re-sends the user's whole history, and the unique index on
+// (user_id, hk_uuid) absorbs every row. Same row count, same contents, either
+// way. `received` is the only thing that tells them apart.
+//
+// So this asserts received SEPARATELY from accepted. A log line carrying only
+// accepted would read 0 in both cases and answer nothing.
+func TestSyncLogsReceivedAndAcceptedCounts(t *testing.T) {
+	logs := captureLogs(t)
+	r, _ := testRouter(t)
+
+	// Three records, one of them invalid: received and accepted must differ,
+	// so a line that conflated them cannot pass.
+	body, _ := json.Marshal(SyncRequest{Weights: []WeightRecord{rec(70.4), rec(71.1), rec(0)}})
+	req := httptest.NewRequest(http.MethodPost, "/v1/health/sync", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var line struct {
+		Msg      string  `json:"msg"`
+		Received float64 `json:"received"`
+		Accepted float64 `json:"accepted"`
+		Rejected float64 `json:"rejected"`
+		UserID   string  `json:"user_id"`
+	}
+	require.NoError(t, json.Unmarshal(logs.Bytes(), &line), "the sync must emit exactly one JSON log line")
+	require.Equal(t, "health: weight sync", line.Msg)
+	require.Equal(t, float64(3), line.Received, "received counts what the DEVICE sent -- the anchor evidence")
+	require.Equal(t, float64(2), line.Accepted)
+	require.Equal(t, float64(1), line.Rejected)
+	require.NotEmpty(t, line.UserID, "without the user id the line cannot be attributed -- prod has several accounts")
+}
+
+// TestSyncLogsNoWeightValues guards the public-repo rule: these lines get
+// quoted into issues, so a weight must never reach them.
+func TestSyncLogsNoWeightValues(t *testing.T) {
+	logs := captureLogs(t)
+	r, _ := testRouter(t)
+
+	body, _ := json.Marshal(SyncRequest{Weights: []WeightRecord{rec(70.4)}})
+	req := httptest.NewRequest(http.MethodPost, "/v1/health/sync", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.NotContains(t, logs.String(), "70.4", "a weight value must never be logged")
 }

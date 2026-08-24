@@ -489,7 +489,25 @@ export default function Progress() {
             )}
           </GlassPanel>
           <GlassPanel radius={20} style={{ flex: 1, padding: 14 }}>
-            <AppText style={mutedLabel}>Avg sleep</AppText>
+            {/*
+              "Last night", not "Avg sleep" (kora#417). The value below is
+              `lastNightHours` — one night, from one merge call. Nothing in
+              this path averages anything, and the tile sits beside a genuine
+              multi-day figure (the 7-day logging streak), so "Avg" read as a
+              weekly mean.
+
+              Relabelling was chosen over the two alternatives on purpose.
+              Kora's figure currently AGREES with the Health app's own "Time
+              Asleep" (device-verified, kora#30), and both other fixes put
+              that agreement at risk: narrowing the window can truncate a late
+              sleeper's night, and taking the longest run instead of the sum
+              would undercount fragmented sleep — Apple sums too.
+
+              The window caveat survives this change unfixed: it runs 16h back
+              from local midnight, so a nap can still be absorbed. That is
+              tracked on kora#417 as its own decision.
+            */}
+            <AppText style={mutedLabel}>Last night</AppText>
             {health.sleep ? (
               <AppText style={[{ fontSize: 15, fontWeight: "600", color: instrument.ink, marginTop: 2 }, mono]}>
                 {`${health.sleep.lastNightHours}h`}
