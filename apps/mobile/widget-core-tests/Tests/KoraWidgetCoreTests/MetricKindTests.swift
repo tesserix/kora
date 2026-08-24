@@ -37,7 +37,15 @@ final class MetricKindTests: XCTestCase {
     XCTAssertEqual(p.heroText, "—")
     XCTAssertNotEqual(p.heroText, "0")
     XCTAssertEqual(p.fraction, 0)
-    XCTAssertEqual(p.deepLink, "mobile:///progress")
+  }
+
+  // kora#425: tapping a steps widget must land where steps are RENDERED.
+  // Steps live on the dashboard (app/(tabs)/index.tsx); Trends has no steps
+  // on it at all, so "mobile:///progress" sent the one gesture that means
+  // "show me my steps" to the only screen that cannot answer it.
+  func testStepsDeepLinksToTheDashboardWhereStepsAreShown() {
+    XCTAssertEqual(MetricKind.steps.present(snapshot: snap, steps: 4200).deepLink, "mobile:///")
+    XCTAssertEqual(MetricKind.steps.present(snapshot: snap, steps: nil).deepLink, "mobile:///")
   }
 
   func testStepsKnownZeroRendersZero() {
