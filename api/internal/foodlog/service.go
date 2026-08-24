@@ -510,11 +510,18 @@ func (s Service) CreateBatch(ctx context.Context, userID uuid.UUID, req CreateBa
 
 	out := make([]FoodLog, 0, len(req.Items))
 	err = s.logs.Transaction(ctx, func(txLogs Repository) error {
+		// Resolve items through the TRANSACTION's handle, not the pool
+		// (kora#415). Every read below runs while this transaction holds a
+		// connection, so a pool-bound repository would make each one wait for
+		// a second connection -- and with maxOpenConns = 5 shared by every
+		// endpoint, five concurrent batches deadlocked the entire API. The
+		// sibling defect in fasting.Repository.Start was kora#413.
+		foods := s.foods.WithDB(txLogs.db)
 		for _, it := range req.Items {
 			// The food row is loaded BEFORE the quantity guard (unlike the
 			// original ordering) because unit resolution below needs it —
 			// exactly how LogFood orders these two steps.
-			item, err := s.foods.GetByID(ctx, it.FoodItemID)
+			item, err := foods.GetByID(ctx, it.FoodItemID)
 			if err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					// Client supplied a food_item_id that doesn't resolve — a
@@ -526,7 +533,7 @@ func (s Service) CreateBatch(ctx context.Context, userID uuid.UUID, req CreateBa
 					// we can. NameForID bypasses the soft-delete filter
 					// purely to look up the name for this message; it does
 					// not change the all-or-nothing failure of the batch.
-					if name, ok := s.foods.NameForID(ctx, it.FoodItemID); ok {
+					if name, ok := foods.NameForID(ctx, it.FoodItemID); ok {
 						return httpx.ValidationError{Message: fmt.Sprintf("food no longer available: %s", name)}
 					}
 					return httpx.ValidationError{Message: "unknown food_item_id"}
@@ -547,7 +554,7 @@ func (s Service) CreateBatch(ctx context.Context, userID uuid.UUID, req CreateBa
 					// Name the ingredient. The user picked a meal, not an id —
 					// the unresolvable-food path above already reasons this
 					// way.
-					if name, ok := s.foods.NameForID(ctx, it.FoodItemID); ok {
+					if name, ok := foods.NameForID(ctx, it.FoodItemID); ok {
 						return httpx.ValidationError{Message: fmt.Sprintf("%s: %s", name, units.UnrecognisedUnitMessage)}
 					}
 					return httpx.ValidationError{Message: units.UnrecognisedUnitMessage}

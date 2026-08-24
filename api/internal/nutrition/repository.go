@@ -29,6 +29,25 @@ func NewRepository(db *gorm.DB) Repository {
 	return Repository{db: db}
 }
 
+// WithDB returns a copy of r bound to another *gorm.DB -- in practice a
+// transaction -- leaving the receiver untouched.
+//
+// It exists because of kora#415. foodlog.Service.CreateBatch resolves every
+// item through this repository from INSIDE its own transaction. While the
+// repository stayed bound to the pool, that batch held one connection for its
+// transaction and then blocked waiting for a second; maxOpenConns is 5 and
+// every endpoint shares the pool, so five concurrent batch logs stalled the
+// whole API. Rebinding onto the caller's handle keeps the read on the
+// connection the caller already holds.
+//
+// The same defect in fasting.Repository.Start was kora#413. If you are about
+// to call a repository method from inside a Transaction body, rebind it here
+// first -- a pool-bound read inside a transaction is always this bug.
+func (r Repository) WithDB(db *gorm.DB) Repository {
+	r.db = db
+	return r
+}
+
 // WithEmbedder returns a copy of the repository that embeds a food as soon as
 // it is ingested. A nil embedder (the default) simply skips that step, so every
 // existing construction site keeps working unchanged.
