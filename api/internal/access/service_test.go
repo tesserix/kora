@@ -98,14 +98,48 @@ func TestResolveIsNotReciprocal(t *testing.T) {
 	require.ErrorIs(t, err, ErrNotShared)
 }
 
+// This is the end-to-end assertion: an unknown category never resolves,
+// through the real Postgres path. It does NOT isolate why -- share_grants has
+// a CHECK constraint restricting category to ('progress', 'body') (migration
+// 000054), so no row can ever match category = 'recipes' even if the Go-level
+// Category.Valid() guard in ResolveMany were deleted. That guard is pinned
+// separately, without a database, by TestResolveManyRefusesAnUnknownCategoryWithoutQueryingTheRepository below.
 func TestResolveRefusesAnUnknownCategory(t *testing.T) {
 	db := testDB(t)
 	svc := NewService(NewRepository(db))
 	owner := seedUser(t, db, "owner")
 	viewer := seedUser(t, db, "viewer")
+	seedCircle(t, db, owner, "Household", []uuid.UUID{viewer}, []Category{CategoryBody, CategoryProgress})
 
 	_, err := svc.Resolve(context.Background(), viewer, owner, Category("recipes"))
 	require.ErrorIs(t, err, ErrNotShared)
+}
+
+// alwaysGrants is a fake granter that reports every requested owner as
+// granted, for any category, no matter what. It stands in for "the DB layer
+// offers no protection at all" so this test isolates the Go-level
+// Category.Valid() guard in ResolveMany, which the CHECK constraint on
+// share_grants.category makes impossible to observe through a real database
+// (see the comment on TestResolveRefusesAnUnknownCategory above).
+type alwaysGrants struct {
+	called bool
+}
+
+func (a *alwaysGrants) GrantedOwners(_ context.Context, _ uuid.UUID, owners []uuid.UUID, _ Category) ([]uuid.UUID, error) {
+	a.called = true
+	return owners, nil
+}
+
+func TestResolveManyRefusesAnUnknownCategoryWithoutQueryingTheRepository(t *testing.T) {
+	fake := &alwaysGrants{}
+	svc := NewService(fake)
+	owner := uuid.New()
+	viewer := uuid.New()
+
+	got, err := svc.ResolveMany(context.Background(), viewer, []uuid.UUID{owner}, Category("recipes"))
+	require.NoError(t, err)
+	require.Empty(t, got)
+	require.False(t, fake.called, "an unknown category must be refused before the repository is ever consulted")
 }
 
 func TestResolveManyReturnsOnlyGrantedOwners(t *testing.T) {
@@ -137,6 +171,26 @@ func TestResolveManyDeduplicatesOverlappingCircles(t *testing.T) {
 	got, err := svc.ResolveMany(context.Background(), viewer, []uuid.UUID{owner}, CategoryProgress)
 	require.NoError(t, err)
 	require.Len(t, got, 1)
+}
+
+// The cross-circle bleed this package exists to prevent: one owner runs two
+// circles granting DIFFERENT categories, and the viewer belongs to only one
+// of them. Membership in the "Family" circle must not leak the category only
+// "Gym" grants -- resolution has to be scoped per-circle, not per-owner.
+func TestResolveScopesTheGrantToTheCircleTheViewerBelongsTo(t *testing.T) {
+	db := testDB(t)
+	svc := NewService(NewRepository(db))
+	viewer := seedUser(t, db, "viewer")
+	owner := seedUser(t, db, "owner")
+	seedCircle(t, db, owner, "Family", []uuid.UUID{viewer}, []Category{CategoryBody})
+	seedCircle(t, db, owner, "Gym", nil, []Category{CategoryProgress})
+
+	g, err := svc.Resolve(context.Background(), viewer, owner, CategoryBody)
+	require.NoError(t, err)
+	require.Equal(t, owner, g.Owner())
+
+	_, err = svc.Resolve(context.Background(), viewer, owner, CategoryProgress)
+	require.ErrorIs(t, err, ErrNotShared)
 }
 
 func TestResolveManyWithNoOwnersDoesNotQuery(t *testing.T) {

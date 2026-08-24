@@ -6,11 +6,24 @@ import (
 	"github.com/google/uuid"
 )
 
-type Service struct {
-	repo Repository
+// granter is the minimal repository behavior Service depends on. Defined as
+// an interface here, not the concrete Repository, so tests can substitute a
+// fake that never touches Postgres -- the DB's own CHECK constraint on
+// share_grants.category (see migration 000054) means an invalid category can
+// never match a row, which makes the app-level Category.Valid() guard below
+// impossible to mutation-test through a real DB. A fake exposes it directly.
+type granter interface {
+	GrantedOwners(ctx context.Context, viewer uuid.UUID, owners []uuid.UUID, category Category) ([]uuid.UUID, error)
 }
 
-func NewService(repo Repository) Service { return Service{repo: repo} }
+type Service struct {
+	repo granter
+}
+
+// NewService takes a granter, not a Repository, but Repository satisfies
+// granter, so every existing caller of NewService(access.NewRepository(db))
+// keeps compiling unchanged.
+func NewService(repo granter) Service { return Service{repo: repo} }
 
 // Resolve returns a Grant, or ErrNotShared. It is the ONLY way to obtain a
 // Grant with an owner in it.
