@@ -2,9 +2,7 @@ package fasting
 
 import (
 	"context"
-	"fmt"
 	"os"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -13,7 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
-	gormlogger "gorm.io/gorm/logger"
 )
 
 func testDB(t *testing.T) *gorm.DB {
@@ -40,6 +37,7 @@ func seedUser(t *testing.T, db *gorm.DB) uuid.UUID {
 		// Scoped to this test's own user, never a truncate -- these tests own
 		// their fixtures and must not disturb anyone else's rows (kora#151).
 		db.Exec("DELETE FROM fasting_intervals WHERE user_id = ?", id)
+		db.Exec("DELETE FROM food_logs WHERE user_id = ?", id)
 		db.Exec("DELETE FROM users WHERE id = ?", id)
 	})
 	return id
@@ -48,7 +46,7 @@ func seedUser(t *testing.T, db *gorm.DB) uuid.UUID {
 func TestStartIsIdempotent(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db)
-	repo := NewRepository(db)
+	repo := NewRepository(db, nil)
 	now := time.Now()
 
 	first, err := repo.Start(context.Background(), userID, now, now)
@@ -60,28 +58,34 @@ func TestStartIsIdempotent(t *testing.T) {
 	require.Equal(t, first.ID, second.ID, "starting twice returns the SAME open fast")
 }
 
+// TestASecondOpenFastIsRejectedButASecondClosedFastIsFine covers both halves
+// of "one open fast per user". The rejection half is Start's own idempotency
+// (see TestStartIsIdempotent and TestStartHandlesGenuineConcurrentStarts);
+// it is no longer the partial unique index, which kora#407's read-time
+// openness fix had to drop -- see migration 000053.
 func TestASecondOpenFastIsRejectedButASecondClosedFastIsFine(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db)
-	repo := NewRepository(db)
+	repo := NewRepository(db, nil)
 	now := time.Now()
 
-	_, err := repo.Start(context.Background(), userID, now.Add(-4*time.Hour), now)
+	first, err := repo.Start(context.Background(), userID, now.Add(-4*time.Hour), now)
 	require.NoError(t, err)
 	_, ended, err := repo.End(context.Background(), userID, now.Add(-time.Hour))
 	require.NoError(t, err)
 	require.True(t, ended)
 
-	// The index is PARTIAL: once the first is closed, a second may open.
-	// A non-partial unique index on (user_id) would reject this.
-	_, err = repo.Start(context.Background(), userID, now, now)
+	// Once the first is closed, a second may open -- and it is a genuinely
+	// NEW interval, not the old one handed back.
+	second, err := repo.Start(context.Background(), userID, now, now)
 	require.NoError(t, err, "a user must be able to fast more than once")
+	require.NotEqual(t, first.ID, second.ID, "the closed fast must not be resurrected")
 }
 
 func TestEndReportsWhenThereWasNothingOpen(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db)
-	repo := NewRepository(db)
+	repo := NewRepository(db, nil)
 
 	_, ended, err := repo.End(context.Background(), userID, time.Now())
 	require.NoError(t, err, "ending nothing is not an error, just a no-op")
@@ -96,7 +100,7 @@ func TestEndReportsWhenThereWasNothingOpen(t *testing.T) {
 func TestEndSetsEndedAtAndEndedByTogether(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db)
-	repo := NewRepository(db)
+	repo := NewRepository(db, nil)
 	now := time.Now()
 
 	_, err := repo.Start(context.Background(), userID, now.Add(-time.Hour), now)
@@ -119,7 +123,7 @@ func TestEndSetsEndedAtAndEndedByTogether(t *testing.T) {
 func TestSinceReturnsOpenAndRecentlyClosedIntervals(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db)
-	repo := NewRepository(db)
+	repo := NewRepository(db, nil)
 	now := time.Now()
 
 	// Closed well before the window: excluded.
@@ -150,60 +154,39 @@ func TestSinceReturnsOpenAndRecentlyClosedIntervals(t *testing.T) {
 	require.True(t, ids[open.ID], "still-open must be included regardless of start")
 }
 
-// raceLogWriter captures gorm's Error-level SQL trace lines so the
-// concurrency test below can prove -- not just hope -- that the 23505 path
-// in Start was actually exercised.
-type raceLogWriter struct {
-	mu      sync.Mutex
-	sawRace bool
-}
-
-func (w *raceLogWriter) Printf(format string, args ...any) {
-	line := fmt.Sprintf(format, args...)
-	if strings.Contains(line, "23505") || strings.Contains(line, "duplicate key") {
-		w.mu.Lock()
-		w.sawRace = true
-		w.mu.Unlock()
-	}
-}
-
-func (w *raceLogWriter) raceObserved() bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.sawRace
-}
-
 // TestStartHandlesGenuineConcurrentStarts fires many goroutines at Start for
-// the SAME user and asserts every one comes back with the SAME interval ID
-// and no error -- the concurrent-start race the partial unique index
-// (fasting_intervals_one_open) turns into a 23505 that Start must recover
-// from by re-reading Open(), not surface as a 500.
+// the SAME user and asserts every one comes back with the SAME interval ID,
+// with no error, leaving exactly one row -- the double-tap/retry idempotency
+// contract, under genuine concurrency.
+//
+// The serialisation being exercised is Start's per-user advisory lock. It
+// used to be the partial unique index fasting_intervals_one_open rejecting
+// the loser with SQLSTATE 23505, which Start recovered from by re-reading;
+// kora#407 had to drop that index (a fast ended by eating stays physically
+// open forever, so the index rejected every genuine NEXT fast). The guarantee
+// asserted here is unchanged; only the mechanism moved.
 //
 // Overlap is forced DETERMINISTICALLY, not hoped for. A bare goroutine race
 // against a fast local Postgres round-trip was tried first and was flaky in
-// exactly the direction the coordinator warned about: in 4 of 5 runs, no
-// goroutine ever logged a 23505 at all, because each Start's Open-then-Create
-// pair completed before the next one's Open ran -- the goroutines never
-// actually overlapped, and the test passed without exercising anything.
+// exactly the direction the coordinator warned about: in 4 of 5 runs the
+// goroutines never actually overlapped, each Start completing before the next
+// one began, and the test passed without exercising anything.
 // startRaceHook (test-only, nil in production) is used here as a barrier:
-// every goroutine calls Open(), finds nothing, and then blocks in the hook
-// until ALL n goroutines have reached that same point, so they are released
-// to attempt the INSERT together. n-1 of them are guaranteed to collide on
-// fasting_intervals_one_open and take the 23505 recovery path.
+// every goroutine blocks in it until ALL n have arrived, so they are released
+// into the transaction together and must contend for the lock.
 //
-// writer.raceObserved() is the proof this actually happened: it asserts
-// gorm logged at least one 23505/duplicate-key trace, so this test cannot
-// silently degrade back into testing nothing the way the unbarriered
-// version did.
+// arrived == n after the run is the proof that happened, replacing the old
+// "gorm logged a 23505" proof: it asserts every goroutine was inside Start,
+// before any insert, at the same moment. Without it this test could silently
+// degrade back into testing nothing the way the unbarriered version did.
+//
+// The hook fires BEFORE the transaction opens, not inside it: a barrier that
+// waited for all n while one goroutine held the advisory lock would deadlock.
 func TestStartHandlesGenuineConcurrentStarts(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db)
 
-	writer := &raceLogWriter{}
-	tracedDB := db.Session(&gorm.Session{
-		Logger: gormlogger.New(writer, gormlogger.Config{LogLevel: gormlogger.Error}),
-	})
-	repo := NewRepository(tracedDB)
+	repo := NewRepository(db, nil)
 	now := time.Now()
 
 	const n = 10
@@ -243,8 +226,11 @@ func TestStartHandlesGenuineConcurrentStarts(t *testing.T) {
 		require.Equal(t, first.ID, results[i].ID, "every concurrent starter must get back the SAME open fast")
 	}
 
-	require.True(t, writer.raceObserved(),
-		"no 23505 was logged by any goroutine -- the barrier failed to force a genuine overlap, "+
+	barrierMu.Lock()
+	reachedBarrier := arrived
+	barrierMu.Unlock()
+	require.Equal(t, n, reachedBarrier,
+		"not every goroutine reached the barrier -- the overlap was not forced, "+
 			"so this run did not exercise the race this test exists to check")
 
 	var count int64

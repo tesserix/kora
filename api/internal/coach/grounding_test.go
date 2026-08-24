@@ -850,7 +850,7 @@ func TestBuildContextWiresDeclaredFastHoursFromLongestInterval(t *testing.T) {
 	shortEnd := shortStart.Add(14 * time.Hour)
 	longStart := now.AddDate(0, 0, -2)
 	longEnd := longStart.Add(30 * time.Hour)
-	fastingRepo := fasting.NewRepository(db)
+	fastingRepo := fasting.NewRepository(db, logRepo)
 	for _, in := range []fasting.Interval{
 		{UserID: userID, StartedAt: shortStart, EndedAt: &shortEnd, LocalDate: localDayOf(shortStart)},
 		{UserID: userID, StartedAt: longStart, EndedAt: &longEnd, LocalDate: localDayOf(longStart)},

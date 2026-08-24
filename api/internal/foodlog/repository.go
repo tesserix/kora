@@ -2,6 +2,7 @@ package foodlog
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -146,6 +147,38 @@ func (r Repository) ListForUserSince(ctx context.Context, userID uuid.UUID, sinc
 		return nil, fmt.Errorf("foodlog: list for user since: %w", err)
 	}
 	return logs, nil
+}
+
+// FirstLogAfter returns the timestamp of the user's earliest food log
+// STRICTLY after `after`, or nil when they have not logged since.
+//
+// It exists for fasting.Repository.Open (kora#407): eating IS the end of a
+// fast, and that ending is computed at read time rather than written by a
+// food-log hook, so "is a fast still open?" needs the first log after the
+// fast began. fasting declares the narrow FirstLogSource port this satisfies;
+// the dependency runs fasting -> foodlog, which is the direction the design's
+// decision 3 chose (it ruled out foodlog -> fasting, the write-hook shape).
+//
+// "A log" means the same thing it means in ListForUserSince and
+// DaysLoggedBetween: a row that resolved to a food item. An unresolved
+// capture is not evidence that the user ate.
+func (r Repository) FirstLogAfter(ctx context.Context, userID uuid.UUID, after time.Time) (*time.Time, error) {
+	// sql.NullTime, not *time.Time: MIN over no rows is NULL, and the driver
+	// cannot store a nil into a **time.Time.
+	var first sql.NullTime
+	err := r.db.WithContext(ctx).
+		Raw(`SELECT MIN(logged_at) FROM food_logs
+		     WHERE user_id = ? AND food_item_id IS NOT NULL AND logged_at > ?`,
+			userID, after).
+		Scan(&first).Error
+	if err != nil {
+		return nil, fmt.Errorf("foodlog: first log after: %w", err)
+	}
+	if !first.Valid {
+		return nil, nil
+	}
+	at := first.Time
+	return &at, nil
 }
 
 // DaysLoggedBetween counts the DISTINCT local days in [from, before) on which

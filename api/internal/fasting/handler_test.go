@@ -34,7 +34,7 @@ func fastingRouter(userID uuid.UUID, repo Repository) *gin.Engine {
 func TestEndingNothingIsA200WithNoBody(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db)
-	r := fastingRouter(userID, NewRepository(db))
+	r := fastingRouter(userID, NewRepository(db, nil))
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/fasting/end", nil))
@@ -50,7 +50,7 @@ func TestEndingNothingIsA200WithNoBody(t *testing.T) {
 func TestCurrentReportsTheOpenFast(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db)
-	repo := NewRepository(db)
+	repo := NewRepository(db, nil)
 	r := fastingRouter(userID, repo)
 
 	now := time.Now()
@@ -75,7 +75,7 @@ func TestCurrentReportsTheOpenFast(t *testing.T) {
 // panic on a failed type assertion and not silently proceed as uuid.Nil.
 func TestStartUnauthorizedWithNoUserInContext(t *testing.T) {
 	db := testDB(t)
-	repo := NewRepository(db)
+	repo := NewRepository(db, nil)
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
@@ -85,4 +85,30 @@ func TestStartUnauthorizedWithNoUserInContext(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/fasting/start", nil))
 	require.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+// TestCurrentReportsNothingWhenAMealEndedTheFast is the endpoint half of
+// kora#407's critical finding: before the fix, /v1/fasting/current reported a
+// fast as still running long after the user had eaten, because ended_at IS
+// NULL was read as "open" when it only ever means "nobody tapped End".
+func TestCurrentReportsNothingWhenAMealEndedTheFast(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	now := time.Now()
+	ate := now.Add(-4 * time.Hour)
+	repo := NewRepository(db, fakeFirstLogs{at: &ate})
+	r := fastingRouter(userID, repo)
+
+	_, err := repo.Start(context.Background(), userID, now.Add(-20*time.Hour), now)
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/fasting/current", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var body struct {
+		Data *Interval `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Nil(t, body.Data, "a fast the user ate through is not running")
 }

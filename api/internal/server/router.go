@@ -331,7 +331,10 @@ func NewRouter(deps Deps) *gin.Engine {
 		healthHandler := health.NewHandler(health.NewService(trackingRepo))
 		v1.POST("/health/sync", healthHandler.Sync)
 
-		fastingRepo := fasting.NewRepository(deps.DB)
+		// logRepo answers "did the user eat after this fast began?" -- the
+		// food-log ending fasting.Repository.Open computes rather than reads
+		// from a column (kora#407).
+		fastingRepo := fasting.NewRepository(deps.DB, logRepo)
 		fastingHandler := fasting.NewHandler(fastingRepo)
 		v1.POST("/fasting/start", fastingHandler.Start)
 		v1.POST("/fasting/end", fastingHandler.End)

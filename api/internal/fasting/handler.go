@@ -64,7 +64,7 @@ func (h Handler) Current(c *gin.Context) {
 	if !ok {
 		return
 	}
-	in, open, err := h.repo.Open(c.Request.Context(), userID)
+	in, open, err := h.repo.Open(c.Request.Context(), userID, time.Now())
 	if err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not read the fast")
 		return

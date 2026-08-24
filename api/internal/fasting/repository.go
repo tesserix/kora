@@ -2,84 +2,146 @@ package fasting
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 )
 
-// pgUniqueViolation is the Postgres SQLSTATE for a unique-constraint
-// violation (23505). Same rationale as admin/mutations.go:21-28: gorm.Config
-// here has no TranslateError, so gorm.ErrDuplicatedKey is never returned --
-// the only way to recognise this failure is to unwrap the raw driver error.
-const pgUniqueViolation = "23505"
+// FirstLogSource reports the earliest food log strictly after `after`, or nil.
+//
+// A narrow injected port, mirroring how coach declares FastingSource and
+// tracking declares SignalsSource. foodlog.Repository satisfies it.
+//
+// It exists because "is a fast open?" is a COMPUTED question (kora#407
+// decision 2): ended_at is written only by an explicit end, so a fast ended
+// by eating -- the ordinary case -- leaves its row physically open forever.
+// Answering that question therefore needs the first food log after the fast
+// began, which lives in foodlog.
+//
+// The dependency runs fasting -> foodlog. Decision 3 ruled out the OTHER
+// direction (foodlog -> fasting, the write-hook shape that would have to
+// hook Create's three call sites plus CreateIdempotent). This is not that.
+type FirstLogSource interface {
+	FirstLogAfter(ctx context.Context, userID uuid.UUID, after time.Time) (*time.Time, error)
+}
 
-// startRaceHook, when non-nil, is called by Start immediately after Open()
-// reports no fast is currently open and BEFORE the INSERT that might race
-// against a concurrent Start for the same user. It exists only so
-// TestStartHandlesGenuineConcurrentStarts can force many goroutines to
-// overlap deterministically inside that window -- a bare goroutine race
+// startRaceHook, when non-nil, is called by Start BEFORE it opens the
+// transaction that serialises concurrent starts for the same user. It exists
+// only so TestStartHandlesGenuineConcurrentStarts can force many goroutines
+// to overlap deterministically inside that window -- a bare goroutine race
 // against a fast local Postgres round-trip was observed to frequently NOT
-// overlap at all (each Start completing before the next one's Open ran),
-// which would make that test pass without ever exercising the 23505 path.
-// Production code never sets this; it is always nil there and this branch
-// is then a no-op.
+// overlap at all (each Start completing before the next one's read ran),
+// which would make that test pass without ever exercising the contended
+// path. Production code never sets this; it is always nil there and this
+// branch is then a no-op.
+//
+// It fires before the transaction, not inside it: a barrier that waits for
+// all n goroutines while one of them holds the per-user advisory lock would
+// deadlock, since the other n-1 could never reach it.
 var startRaceHook func()
 
-type Repository struct{ db *gorm.DB }
+type Repository struct {
+	db *gorm.DB
+	// firstLogs answers "did the user eat after this fast began?". Required
+	// in production -- see NewRepository.
+	firstLogs FirstLogSource
+}
 
-func NewRepository(db *gorm.DB) Repository { return Repository{db: db} }
+// NewRepository wires the fasting store.
+//
+// firstLogs is a REQUIRED constructor argument rather than an optional
+// builder on purpose. Without it, Open cannot see the food-log ending and
+// reports a fast that a meal closed hours ago as still running -- which
+// under-counts DeclaredFastHours and under-fires an eating-disorder
+// guardrail. That is the dangerous direction, so the wiring must be
+// impossible to forget rather than merely easy to remember. Passing nil is
+// legal for tests that exercise paths where no food log exists, and means
+// "the user has never logged".
+func NewRepository(db *gorm.DB, firstLogs FirstLogSource) Repository {
+	return Repository{db: db, firstLogs: firstLogs}
+}
+
+// withDB returns a copy of r bound to another *gorm.DB (a transaction),
+// leaving the receiver untouched.
+func (r Repository) withDB(db *gorm.DB) Repository {
+	r.db = db
+	return r
+}
+
+// advisoryLockKey derives a stable 64-bit Postgres advisory-lock key from a
+// user id. The first 8 bytes of a v4 UUID are random, so keys spread evenly;
+// a collision between two users only serialises two unrelated Starts for the
+// duration of one INSERT, which is harmless.
+//
+// Computed in Go rather than with Postgres' hashtext/hashtextextended so this
+// does not depend on an undocumented internal function.
+func advisoryLockKey(userID uuid.UUID) int64 {
+	return int64(binary.BigEndian.Uint64(userID[:8]))
+}
 
 // Start opens a fast, or returns the one already open.
 //
 // Idempotent on purpose: a double-tap and a client retry are the same request
-// as far as the user is concerned, and a 400 for either would be a bug the user
-// experiences as the button not working.
+// as far as the user is concerned, and a 400 for either would be a bug the
+// user experiences as the button not working.
 //
-// The read-then-insert below (Open, then Create) is not atomic with itself:
-// two genuinely concurrent Starts for the same user can both observe "none
-// open" and both attempt the INSERT. fasting_intervals_one_open (the partial
-// unique index) correctly rejects the loser with SQLSTATE 23505 -- but
-// returning that error as-is would surface as a 500, which is exactly the
-// "double-tap 400" bug the idempotency contract exists to prevent, just
-// louder. Same race, same fix as admin/mutations.go's CreateFood barcode
-// backstop (task-5 brief, Rider 2): unwrap the raw driver error, and on a
-// 23505 re-read Open() instead of failing -- the loser gets back the winner's
-// row, which is what "idempotent" means here. Only if that re-read also comes
-// up empty (something other than this exact race) does the error surface.
+// The read-then-insert is serialised per user by a transaction-scoped
+// advisory lock. It used to rely instead on a partial unique index
+// (fasting_intervals_one_open) rejecting the loser of a concurrent start with
+// SQLSTATE 23505, which Start recovered from by re-reading. That index could
+// not survive kora#407's fix: once "open" became a COMPUTED question, a fast
+// the user ended by eating stays physically open (ended_at IS NULL) forever,
+// so the index rejected every genuine NEXT fast -- and the recovery re-read
+// then found nothing open and surfaced a 500. Closing the stale row instead
+// was rejected: that writes ended_at on a non-explicit path, which decision 2
+// forbids. Postgres can no longer express the invariant, because the
+// invariant is no longer a column, so the serialisation moved to the lock.
+// The lock gives the same guarantee the index gave (n concurrent Starts leave
+// exactly one row and all return it) without constraining rows the user has
+// finished with.
 func (r Repository) Start(ctx context.Context, userID uuid.UUID, now, localDate time.Time) (Interval, error) {
-	if existing, ok, err := r.Open(ctx, userID); err != nil {
-		return Interval{}, err
-	} else if ok {
-		return existing, nil
-	}
 	if startRaceHook != nil {
 		startRaceHook()
 	}
-	in := Interval{UserID: userID, StartedAt: now, LocalDate: localDate}
-	if err := r.db.WithContext(ctx).Create(&in).Error; err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
-			if existing, ok, openErr := r.Open(ctx, userID); openErr == nil && ok {
-				return existing, nil
-			}
+	var out Interval
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("SELECT pg_advisory_xact_lock(?)", advisoryLockKey(userID)).Error; err != nil {
+			return fmt.Errorf("lock: %w", err)
 		}
+		existing, ok, err := r.withDB(tx).Open(ctx, userID, now)
+		if err != nil {
+			return err
+		}
+		if ok {
+			out = existing
+			return nil
+		}
+		in := Interval{UserID: userID, StartedAt: now, LocalDate: localDate}
+		if err := tx.Create(&in).Error; err != nil {
+			return err
+		}
+		out = in
+		return nil
+	})
+	if err != nil {
 		return Interval{}, fmt.Errorf("fasting: start: %w", err)
 	}
-	return in, nil
+	return out, nil
 }
 
 // End closes the open fast. ok is false when there was nothing open, which is
-// not an error -- the user tapped end on a screen that had gone stale.
+// not an error -- the user tapped end on a screen that had gone stale, or on
+// a fast that a meal or the cap had already ended.
 //
 // ended_at and ended_by are always written together: the table's CHECK
 // constraints validate each independently but not as a pair, and this is the
 // only write path that sets either.
 func (r Repository) End(ctx context.Context, userID uuid.UUID, now time.Time) (Interval, bool, error) {
-	open, ok, err := r.Open(ctx, userID)
+	open, ok, err := r.Open(ctx, userID, now)
 	if err != nil || !ok {
 		return Interval{}, false, err
 	}
@@ -93,7 +155,34 @@ func (r Repository) End(ctx context.Context, userID uuid.UUID, now time.Time) (I
 	return open, true, nil
 }
 
-func (r Repository) Open(ctx context.Context, userID uuid.UUID) (Interval, bool, error) {
+// Open returns the fast that is running at `now`, if there is one.
+//
+// Openness is COMPUTED, never a column read (kora#407 decision 2: "the
+// food-log and cap endings are computed, never stored -- so 'is a fast open?'
+// is always a computed question"). ended_at IS NULL only means nobody tapped
+// End; the fast may still have ended hours ago because the user ate, or
+// because it hit the 48h cap. A bare column read here reported those fasts as
+// still running, which had three consequences, the last of them a safety one:
+//
+//   - GET /v1/fasting/current showed a fast that ended days ago
+//   - Start returned that stale row instead of declaring the new fast, so the
+//     new one was never recorded
+//   - and so guardrails read the stale fast's short duration instead of the
+//     real one's, leaving AtRisk false where the 24h threshold should have
+//     fired -- under-firing an eating-disorder guardrail for anyone who ends
+//     a fast by eating rather than by tapping.
+//
+// The newest physically-open row wins. Older ones can only be fasts that a
+// meal or the cap already ended (otherwise the newer one could not have been
+// started), and they stay in the table because nothing implicit ever writes
+// ended_at -- they are still counted, at their true capped durations, by
+// Since and the coach grounder.
+//
+// A FirstLogSource failure propagates rather than degrading to "no log", for
+// the reason decision 5 gives about fasting reads generally: swallowing it
+// would report a fast as open, which inflates or deflates a risk input on
+// unknown state instead of failing loudly.
+func (r Repository) Open(ctx context.Context, userID uuid.UUID, now time.Time) (Interval, bool, error) {
 	var in Interval
 	err := r.db.WithContext(ctx).
 		Where("user_id = ? AND ended_at IS NULL", userID).
@@ -103,6 +192,19 @@ func (r Repository) Open(ctx context.Context, userID uuid.UUID) (Interval, bool,
 	}
 	if err != nil {
 		return Interval{}, false, fmt.Errorf("fasting: open: %w", err)
+	}
+
+	var firstLog *time.Time
+	if r.firstLogs != nil {
+		firstLog, err = r.firstLogs.FirstLogAfter(ctx, userID, in.StartedAt)
+		if err != nil {
+			return Interval{}, false, fmt.Errorf("fasting: open: first log: %w", err)
+		}
+	}
+	// EffectiveEnd is bounded above by now, so an end strictly before now is
+	// an end that has already happened: a meal, or the cap.
+	if EffectiveEnd(in, firstLog, now).Before(now) {
+		return Interval{}, false, nil
 	}
 	return in, true, nil
 }
