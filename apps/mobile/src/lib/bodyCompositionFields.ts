@@ -370,3 +370,27 @@ export function storedNumber(metric: CompositionMetric, typed: number, system: U
 export function formatMetricNumber(metric: CompositionMetric, value: number): string {
   return metric.unitKind === "kcal" ? String(Math.round(value)) : value.toFixed(1);
 }
+
+/**
+ * How a stored reading's origin is named in prose, as distinct from how an
+ * instrument is named in the form's "Measured with" picker (kora#419).
+ *
+ * The two questions are genuinely different. The picker asks what you
+ * measured WITH, where `manual` really is a scale you stood on and "Scale" is
+ * the right word. A provenance sentence asks where the number CAME FROM, and
+ * there "Scale" sits beside "Scale screenshot" and reads as one device rather
+ * than as a figure someone typed. Only this second use is renamed; changing
+ * SOURCE_LABELS would have put "Typed in" under "Measured with", which is not
+ * a thing you can measure with.
+ */
+const PROVENANCE_LABELS: Partial<Record<WeightSource, string>> = {
+  // Keeps the word "Scale" -- a typed reading really did come off a scale, so
+  // dropping it would be its own inaccuracy, and "Measured by typed in" is
+  // not a sentence. The parenthetical is what separates it from "Scale
+  // screenshot", which is the same instrument read a different way.
+  manual: "Scale (typed in)",
+};
+
+export function provenanceLabel(source: WeightSource): string {
+  return PROVENANCE_LABELS[source] ?? sourceLabel(source);
+}

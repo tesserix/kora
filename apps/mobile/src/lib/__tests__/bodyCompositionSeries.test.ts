@@ -5,6 +5,7 @@ import {
   fitsAcrossInstruments,
   hasInstrumentChange,
   lastComparableRun,
+  instrumentChangeNote,
   metricSeries,
 } from "../bodyCompositionSeries";
 import { COMPOSITION_METRICS } from "../bodyCompositionFields";
@@ -159,8 +160,11 @@ describe("a tape measurement with no readings", () => {
     );
     // The weight-only day in the middle is dropped, not plotted as 0cm.
     expect(series.points.map((p) => p.value)).toEqual([88.8, 87.7]);
-    // And an instrument switch breaks a tape line just like a scale one.
-    expect(series.breaksAfter).toEqual([0]);
+    // An instrument switch does NOT break a tape line (kora#419). This
+    // asserted the opposite until the #397 rule reached the chart: `source`
+    // records the instrument that produced the WEIGH-IN, so breaking a tape
+    // series on it splits on something unrelated to how the tape was read.
+    expect(series.breaksAfter).toEqual([]);
   });
 });
 
@@ -241,5 +245,77 @@ describe("fitsAcrossInstruments (kora#397)", () => {
       "arm_cm",
       "thigh_cm",
     ]);
+  });
+});
+
+describe("metrics that fit across instruments (#419)", () => {
+  // The rule #397 settled for the delta and the rate, applied to the chart:
+  // scales disagree about weight by a few hundred grams, so a weight series
+  // must NOT be split by instrument. Splitting it drew "separate lines"
+  // under a delta measured straight across those same lines.
+  it("draws no break in a weight series that changes instrument", () => {
+    const series = metricSeries(
+      [
+        entry({ weight_kg: 77.0, source: "healthkit" }),
+        entry({ weight_kg: 77.2, source: "manual" }),
+        entry({ weight_kg: 77.1, source: "scale_screenshot" }),
+      ],
+      "weight_kg",
+    );
+    expect(series.breaksAfter).toEqual([]);
+  });
+
+  it("draws no break in a tape series that changes instrument", () => {
+    // `source` describes the WEIGH-IN, not the tape, so splitting a tape
+    // series on it splits on something unrelated to how it was measured.
+    const series = metricSeries(
+      [entry({ waist_cm: 88.8, source: "manual" }), entry({ waist_cm: 88.2, source: "healthkit" })],
+      "waist_cm",
+    );
+    expect(series.breaksAfter).toEqual([]);
+  });
+
+  it("still breaks a composition percentage, which is the case the split exists for", () => {
+    const series = metricSeries(
+      [
+        entry({ body_fat_pct: 24.2, source: "manual" }),
+        entry({ body_fat_pct: 19.4, source: "dexa" }),
+      ],
+      "body_fat_pct",
+    );
+    expect(series.breaksAfter).toEqual([0]);
+  });
+
+  it("reports no instrument change for weight, so the note never contradicts the delta", () => {
+    const series = metricSeries(
+      [entry({ weight_kg: 77.0, source: "healthkit" }), entry({ weight_kg: 77.2, source: "manual" })],
+      "weight_kg",
+    );
+    expect(hasInstrumentChange(series)).toBe(false);
+  });
+});
+
+describe("instrumentChangeNote (#419)", () => {
+  it("does not say 'the two' when three instruments measured the series", () => {
+    const note = instrumentChangeNote(["scale_screenshot", "healthkit", "manual"]);
+    expect(note).not.toContain("the two");
+    expect(note).toContain("Scale screenshot, then Apple Health, then");
+  });
+
+  it("names a typed-in reading as typed, not as a second kind of scale", () => {
+    // `manual` is labelled "Scale" in the form's "Measured with" picker,
+    // which is right there and wrong here: beside "Scale screenshot" it
+    // reads as one device rather than a number a person entered.
+    const note = instrumentChangeNote(["scale_screenshot", "manual"]);
+    expect(note).toContain("Scale screenshot, then Scale (typed in)");
+    // The bare "Scale" that made the two look like one device must be gone,
+    // while the word "Scale" itself stays -- a typed reading did come off a
+    // scale, and "Measured by typed in" is not a sentence.
+    expect(note).not.toMatch(/then Scale\./);
+    expect(note).toContain("typed in");
+  });
+
+  it("still reads naturally for the two-instrument case", () => {
+    expect(instrumentChangeNote(["manual", "dexa"])).toContain("DEXA");
   });
 });

@@ -29,13 +29,13 @@ import {
   compositionMetric,
   displayNumber,
   formatMetricNumber,
-  sourceLabel,
   unitLabel,
   type CompositionMetricKey,
 } from "@/lib/bodyCompositionFields";
 import {
   chartableMetrics,
   hasInstrumentChange,
+  instrumentChangeNote,
   comparableRunFor,
   metricSeries,
 } from "@/lib/bodyCompositionSeries";
@@ -358,7 +358,7 @@ export default function Progress() {
                   // sentence a reader sees a gap and reads a slope across it,
                   // which is the failure the split exists to prevent.
                   <AppText testID="instrument-change-note" style={[mutedLabel, { marginTop: 6 }]}>
-                    {`Measured by ${trend.sources.map(sourceLabel).join(", then ")}. Shown as separate lines — the two don't measure this the same way.`}
+                    {instrumentChangeNote(trend.sources)}
                   </AppText>
                 ) : null}
                 {/* The fitted weekly rate (kora#45) — an estimate, not a
