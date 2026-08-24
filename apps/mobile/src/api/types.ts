@@ -997,3 +997,13 @@ export interface LogRecipeResult {
   /** Unresolved ingredients that could not be logged — tell the user. */
   skipped: string[];
 }
+
+/** A declared fast. `ended_at`/`ended_by` absent means it is still open. */
+export interface FastingInterval {
+  id: string;
+  user_id: string;
+  started_at: string;
+  ended_at?: string;
+  ended_by?: string;
+  local_date: string;
+}

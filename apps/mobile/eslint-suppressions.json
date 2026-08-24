@@ -1,7 +1,7 @@
 {
   "app/(tabs)/diary.tsx": {
     "react-hooks/refs": {
-      "count": 6
+      "count": 7
     }
   },
   "app/(tabs)/index.tsx": {

@@ -19,7 +19,8 @@ import { QueuedFailedSheet } from "@/components/diary/QueuedFailedSheet";
 import { EmptyState } from "@/components/common/EmptyState";
 import { LoadErrorNotice } from "@/components/common/LoadErrorNotice";
 import { useSavedMealEditor } from "@/components/meals/SavedMealSheetProvider";
-import { useDashboard, useDayLogs, useAddWater, useDeleteLog } from "@/api/hooks";
+import { useDashboard, useDayLogs, useAddWater, useDeleteLog, useCurrentFast, useStartFast, useEndFast } from "@/api/hooks";
+import { fastElapsedLabel } from "@/lib/fastingCopy";
 import { useQueuedLogs } from "@/offline/useQueuedLogs";
 import { useQueuedCaptures } from "@/offline/useQueuedCaptures";
 import { useIsOnline } from "@/offline/connectivity";
@@ -80,6 +81,9 @@ export default function Diary() {
   const online = useIsOnline();
   const addWater = useAddWater();
   const deleteLog = useDeleteLog();
+  const currentFast = useCurrentFast();
+  const startFast = useStartFast();
+  const endFast = useEndFast();
   const { openCompose } = useSavedMealEditor();
   const [waterErr, setWaterErr] = useState<string | null>(null);
   const [copyOpen, setCopyOpen] = useState(false);
@@ -343,6 +347,49 @@ export default function Diary() {
               waterErr={waterErr}
               destructiveColor={colors.destructive}
             />
+          </Animated.View>
+
+          {/* Beside the water control: declare or end a fast. Idempotent on the
+              server (a double-tap on Start just returns the already-open
+              interval), so no local guard against a double press is needed here. */}
+          <Animated.View entering={enter(3)} style={{ marginBottom: 20 }}>
+            {currentFast.data ? (
+              <PressableScale
+                accessibilityRole="button"
+                accessibilityLabel="End fast"
+                haptic="selection"
+                onPress={() => endFast.mutate()}
+                style={{
+                  borderWidth: 1.5,
+                  borderStyle: "solid",
+                  borderColor: instrument.tick,
+                  borderRadius: 24,
+                  paddingVertical: 16,
+                  paddingHorizontal: 16,
+                  alignItems: "center",
+                }}
+              >
+                <AppText>{`End fast · ${fastElapsedLabel(currentFast.data.started_at)}`}</AppText>
+              </PressableScale>
+            ) : (
+              <PressableScale
+                accessibilityRole="button"
+                accessibilityLabel="Start fast"
+                haptic="selection"
+                onPress={() => startFast.mutate()}
+                style={{
+                  borderWidth: 1.5,
+                  borderStyle: "dashed",
+                  borderColor: instrument.tick,
+                  borderRadius: 24,
+                  paddingVertical: 16,
+                  paddingHorizontal: 16,
+                  alignItems: "center",
+                }}
+              >
+                <AppText style={{ color: instrument.mut }}>Start fast</AppText>
+              </PressableScale>
+            )}
           </Animated.View>
 
           {/* Meal log stays OUTSIDE the day-total cluster (spec Step 4): each

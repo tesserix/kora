@@ -15,6 +15,14 @@ const mockDeleteMutate = jest.fn();
 const mockAddWaterMutate = jest.fn();
 const mockUseDashboard = jest.fn();
 const mockUseDayLogs = jest.fn();
+const mockStartFastMutate = jest.fn();
+const mockEndFastMutate = jest.fn();
+// Mutable so a test can supply an open fast; reset in beforeEach. Same shape
+// as react-query's UseQueryResult, since the diary screen reads `.data`.
+const mockCurrentFast = jest.fn<
+  { data: { id: string; started_at: string } | null; isSuccess: boolean },
+  []
+>(() => ({ data: null, isSuccess: true }));
 
 const DASHBOARD_DATA = { consumed: { kcal: 1252 }, targets: { kcal: 2000 }, water_ml: 1400 };
 const LOGS_DATA = [
@@ -73,6 +81,9 @@ jest.mock("@/api/hooks", () => ({
   useAddWater: () => ({ mutate: mockAddWaterMutate, isPending: false }),
   useDeleteLog: () => ({ mutate: mockDeleteMutate, isPending: false }),
   useCopyDay: () => ({ mutate: jest.fn(), isPending: false }),
+  useCurrentFast: () => mockCurrentFast(),
+  useStartFast: () => ({ mutate: mockStartFastMutate, isPending: false }),
+  useEndFast: () => ({ mutate: mockEndFastMutate, isPending: false }),
 }));
 
 const mockUseUnits = jest.fn(() => ({ system: "metric", setSystem: jest.fn() }));
@@ -94,6 +105,10 @@ beforeEach(() => {
   mockDiscardRow.mockClear();
   mockDeleteMutate.mockClear();
   mockAddWaterMutate.mockClear();
+  mockStartFastMutate.mockClear();
+  mockEndFastMutate.mockClear();
+  mockCurrentFast.mockReset();
+  mockCurrentFast.mockReturnValue({ data: null, isSuccess: true });
   mockUseDashboard.mockClear();
   mockUseDayLogs.mockClear();
   mockUseQueuedLogs.mockClear();
@@ -116,6 +131,21 @@ test("Diary shows header, week strip and a logged meal grouped by slot", async (
   expect(await findByText("DINNER")).toBeTruthy();
   expect(await findByText("· 520 KCAL")).toBeTruthy();
   expect(await findByText("Grilled salmon")).toBeTruthy();
+});
+
+test("offers to start a fast when none is open", async () => {
+  mockCurrentFast.mockReturnValue({ data: null, isSuccess: true });
+  const { getByLabelText } = await render(<Diary />);
+  expect(getByLabelText("Start fast")).toBeTruthy();
+});
+
+test("offers to end the fast that is open, with its elapsed time", async () => {
+  mockCurrentFast.mockReturnValue({
+    data: { id: "f1", started_at: new Date(Date.now() - 3 * 3600_000).toISOString() },
+    isSuccess: true,
+  });
+  const { getByLabelText } = await render(<Diary />);
+  expect(getByLabelText("End fast")).toBeTruthy();
 });
 
 test("a day with zero food logs shows the empty-day EmptyState", async () => {

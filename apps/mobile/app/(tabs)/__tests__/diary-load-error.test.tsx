@@ -27,6 +27,9 @@ jest.mock("@/api/hooks", () => ({
   useDayLogs: () => mockLogs(),
   useAddWater: () => ({ mutate: jest.fn(), isPending: false }),
   useDeleteLog: () => ({ mutate: jest.fn(), isPending: false }),
+  useCurrentFast: () => ({ data: null, isSuccess: true }),
+  useStartFast: () => ({ mutate: jest.fn(), isPending: false }),
+  useEndFast: () => ({ mutate: jest.fn(), isPending: false }),
 }));
 
 beforeEach(() => {
