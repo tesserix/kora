@@ -35,7 +35,7 @@
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `fasting.Interval` with fields `ID uuid.UUID`, `UserID uuid.UUID`, `StartedAt time.Time`, `EndedAt *time.Time`, `EndedBy string`, `LocalDate time.Time`, `CreatedAt time.Time`; and `const CapHours = 48`.
+- Produces: `fasting.Interval` with fields `ID uuid.UUID`, `UserID uuid.UUID`, `StartedAt time.Time`, `EndedAt *time.Time`, `EndedBy *string`, `LocalDate time.Time`, `CreatedAt time.Time`; and `const CapHours = 48`.
 
 - [ ] **Step 1: Write the failing schema test**
 
@@ -752,11 +752,20 @@ In `BuildContext`, after the recent-logs read:
 		if err != nil {
 			return Context{}, fmt.Errorf("coach: build context: declared fasts: %w", err)
 		}
-		var firstLog *time.Time
-		if len(logs) > 0 {
-			firstLog = &logs[0].LoggedAt
-		}
 		for _, in := range intervals {
+			// The first log strictly AFTER this fast began -- computed per
+			// interval, not once. logs[0] is the earliest log in the WINDOW,
+			// which for a fast that started later is simply the wrong log:
+			// EffectiveEnd would discard it (it predates the start) and then
+			// nothing would end the fast, over-counting its duration and
+			// over-firing risk.
+			var firstLog *time.Time
+			for i := range logs {
+				if logs[i].LoggedAt.After(in.StartedAt) {
+					firstLog = &logs[i].LoggedAt
+					break
+				}
+			}
 			if h := fasting.Hours(in, firstLog, now); h > declaredFastHours {
 				declaredFastHours = h
 			}
