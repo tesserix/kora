@@ -34,7 +34,7 @@ func TestFirstLogAfter(t *testing.T) {
 	t.Cleanup(func() { db.Exec("DELETE FROM food_logs WHERE user_id = ?", userID) })
 
 	// No logs at all.
-	got, err := repo.FirstLogAfter(ctx, userID, base.Add(-24*time.Hour))
+	got, err := repo.FirstLogAfter(ctx, db, userID, base.Add(-24*time.Hour))
 	require.NoError(t, err)
 	require.Nil(t, got, "never logged means no log after anything")
 
@@ -46,20 +46,20 @@ func TestFirstLogAfter(t *testing.T) {
 
 	// The EARLIEST after the cutoff, not the latest: that is the meal that
 	// ended the fast.
-	got, err = repo.FirstLogAfter(ctx, userID, base.Add(-24*time.Hour))
+	got, err = repo.FirstLogAfter(ctx, db, userID, base.Add(-24*time.Hour))
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	require.WithinDuration(t, earlier, *got, time.Second)
 
 	// Strictly after: a log AT the cutoff is not after it.
-	got, err = repo.FirstLogAfter(ctx, userID, earlier)
+	got, err = repo.FirstLogAfter(ctx, db, userID, earlier)
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	require.WithinDuration(t, later, *got, time.Second,
 		"a log exactly at the fast's start cannot have ended it")
 
 	// Nothing after the last log.
-	got, err = repo.FirstLogAfter(ctx, userID, base)
+	got, err = repo.FirstLogAfter(ctx, db, userID, base)
 	require.NoError(t, err)
 	require.Nil(t, got)
 }
@@ -77,7 +77,7 @@ func TestFirstLogAfterIgnoresUnresolvedCaptures(t *testing.T) {
 
 	insertLog(t, db, userID, base.Add(-3*time.Hour), nil)
 
-	got, err := repo.FirstLogAfter(ctx, userID, base.Add(-12*time.Hour))
+	got, err := repo.FirstLogAfter(ctx, db, userID, base.Add(-12*time.Hour))
 	require.NoError(t, err)
 	require.Nil(t, got, "an unresolved capture is not a meal")
 }

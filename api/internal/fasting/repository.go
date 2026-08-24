@@ -25,8 +25,16 @@ import (
 // The dependency runs fasting -> foodlog. Decision 3 ruled out the OTHER
 // direction (foodlog -> fasting, the write-hook shape that would have to
 // hook Create's three call sites plus CreateIdempotent). This is not that.
+//
+// The read takes the *gorm.DB to run on rather than carrying its own handle
+// (kora#413). Open passes the handle IT is reading the fast row through, so
+// inside Start's transaction the food-log read runs on the transaction's
+// connection. When the source held a pool-bound handle instead, every Start
+// checked out one connection for its transaction and then blocked waiting for
+// a second; maxOpenConns is 5, so five concurrent starts stalled every
+// endpoint sharing the pool.
 type FirstLogSource interface {
-	FirstLogAfter(ctx context.Context, userID uuid.UUID, after time.Time) (*time.Time, error)
+	FirstLogAfter(ctx context.Context, db *gorm.DB, userID uuid.UUID, after time.Time) (*time.Time, error)
 }
 
 // startRaceHook, when non-nil, is called by Start BEFORE it opens the
@@ -196,7 +204,7 @@ func (r Repository) Open(ctx context.Context, userID uuid.UUID, now time.Time) (
 
 	var firstLog *time.Time
 	if r.firstLogs != nil {
-		firstLog, err = r.firstLogs.FirstLogAfter(ctx, userID, in.StartedAt)
+		firstLog, err = r.firstLogs.FirstLogAfter(ctx, r.db, userID, in.StartedAt)
 		if err != nil {
 			return Interval{}, false, fmt.Errorf("fasting: open: first log: %w", err)
 		}

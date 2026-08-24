@@ -22,7 +22,14 @@ type fakeFirstLogs struct {
 	err error
 }
 
-func (f fakeFirstLogs) FirstLogAfter(_ context.Context, _ uuid.UUID, after time.Time) (*time.Time, error) {
+func (f fakeFirstLogs) FirstLogAfter(_ context.Context, db *gorm.DB, _ uuid.UUID, after time.Time) (*time.Time, error) {
+	// kora#413: the port takes the handle to read through, and Open must pass
+	// the one it read the fast row on -- inside Start's transaction, that is
+	// the transaction. A nil handle here would mean Open had stopped doing
+	// that, which is the bug this signature exists to prevent.
+	if db == nil {
+		return nil, errors.New("fasting: Open passed a nil handle to FirstLogAfter")
+	}
 	if f.err != nil {
 		return nil, f.err
 	}
