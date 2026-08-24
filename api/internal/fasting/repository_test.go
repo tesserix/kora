@@ -2,7 +2,10 @@ package fasting
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -10,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 func testDB(t *testing.T) *gorm.DB {
@@ -144,4 +148,106 @@ func TestSinceReturnsOpenAndRecentlyClosedIntervals(t *testing.T) {
 	require.False(t, ids[old.ID], "closed well before the window must be excluded")
 	require.True(t, ids[recent.ID], "closed inside the window must be included")
 	require.True(t, ids[open.ID], "still-open must be included regardless of start")
+}
+
+// raceLogWriter captures gorm's Error-level SQL trace lines so the
+// concurrency test below can prove -- not just hope -- that the 23505 path
+// in Start was actually exercised.
+type raceLogWriter struct {
+	mu      sync.Mutex
+	sawRace bool
+}
+
+func (w *raceLogWriter) Printf(format string, args ...any) {
+	line := fmt.Sprintf(format, args...)
+	if strings.Contains(line, "23505") || strings.Contains(line, "duplicate key") {
+		w.mu.Lock()
+		w.sawRace = true
+		w.mu.Unlock()
+	}
+}
+
+func (w *raceLogWriter) raceObserved() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.sawRace
+}
+
+// TestStartHandlesGenuineConcurrentStarts fires many goroutines at Start for
+// the SAME user and asserts every one comes back with the SAME interval ID
+// and no error -- the concurrent-start race the partial unique index
+// (fasting_intervals_one_open) turns into a 23505 that Start must recover
+// from by re-reading Open(), not surface as a 500.
+//
+// Overlap is forced DETERMINISTICALLY, not hoped for. A bare goroutine race
+// against a fast local Postgres round-trip was tried first and was flaky in
+// exactly the direction the coordinator warned about: in 4 of 5 runs, no
+// goroutine ever logged a 23505 at all, because each Start's Open-then-Create
+// pair completed before the next one's Open ran -- the goroutines never
+// actually overlapped, and the test passed without exercising anything.
+// startRaceHook (test-only, nil in production) is used here as a barrier:
+// every goroutine calls Open(), finds nothing, and then blocks in the hook
+// until ALL n goroutines have reached that same point, so they are released
+// to attempt the INSERT together. n-1 of them are guaranteed to collide on
+// fasting_intervals_one_open and take the 23505 recovery path.
+//
+// writer.raceObserved() is the proof this actually happened: it asserts
+// gorm logged at least one 23505/duplicate-key trace, so this test cannot
+// silently degrade back into testing nothing the way the unbarriered
+// version did.
+func TestStartHandlesGenuineConcurrentStarts(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+
+	writer := &raceLogWriter{}
+	tracedDB := db.Session(&gorm.Session{
+		Logger: gormlogger.New(writer, gormlogger.Config{LogLevel: gormlogger.Error}),
+	})
+	repo := NewRepository(tracedDB)
+	now := time.Now()
+
+	const n = 10
+	var barrierMu sync.Mutex
+	arrived := 0
+	release := make(chan struct{})
+	startRaceHook = func() {
+		barrierMu.Lock()
+		arrived++
+		reached := arrived == n
+		barrierMu.Unlock()
+		if reached {
+			close(release)
+		}
+		<-release
+	}
+	t.Cleanup(func() { startRaceHook = nil })
+
+	var wg sync.WaitGroup
+	results := make([]Interval, n)
+	errs := make([]error, n)
+	for i := 0; i < n; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			in, err := repo.Start(context.Background(), userID, now, now)
+			results[i] = in
+			errs[i] = err
+		}()
+	}
+	wg.Wait()
+
+	first := results[0]
+	for i := 0; i < n; i++ {
+		require.NoError(t, errs[i], "a concurrent start must never surface as an error")
+		require.Equal(t, first.ID, results[i].ID, "every concurrent starter must get back the SAME open fast")
+	}
+
+	require.True(t, writer.raceObserved(),
+		"no 23505 was logged by any goroutine -- the barrier failed to force a genuine overlap, "+
+			"so this run did not exercise the race this test exists to check")
+
+	var count int64
+	require.NoError(t, db.Model(&Interval{}).Where("user_id = ?", userID).Count(&count).Error)
+	require.Equal(t, int64(1), count, "the race must leave exactly one row, never one per goroutine")
 }
