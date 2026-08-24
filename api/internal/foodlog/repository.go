@@ -162,11 +162,26 @@ func (r Repository) ListForUserSince(ctx context.Context, userID uuid.UUID, sinc
 // "A log" means the same thing it means in ListForUserSince and
 // DaysLoggedBetween: a row that resolved to a food item. An unresolved
 // capture is not evidence that the user ate.
-func (r Repository) FirstLogAfter(ctx context.Context, userID uuid.UUID, after time.Time) (*time.Time, error) {
+//
+// db is the handle to read THROUGH, and it is a parameter rather than the
+// repository's own field because of kora#413. fasting.Repository.Start runs
+// this read from inside its transaction; a read bound to the pool instead
+// made that Start hold one connection while waiting for a second, and with
+// maxOpenConns = 5 in production, five concurrent starts deadlocked every
+// endpoint sharing the pool -- not just fasting. Passing the caller's handle
+// keeps the read on the connection the caller already holds.
+//
+// nil is rejected rather than quietly falling back to r.db: that fallback
+// would restore exactly the pool-bound read this signature exists to prevent,
+// and it would do it silently.
+func (r Repository) FirstLogAfter(ctx context.Context, db *gorm.DB, userID uuid.UUID, after time.Time) (*time.Time, error) {
+	if db == nil {
+		return nil, fmt.Errorf("foodlog: first log after: nil db handle")
+	}
 	// sql.NullTime, not *time.Time: MIN over no rows is NULL, and the driver
 	// cannot store a nil into a **time.Time.
 	var first sql.NullTime
-	err := r.db.WithContext(ctx).
+	err := db.WithContext(ctx).
 		Raw(`SELECT MIN(logged_at) FROM food_logs
 		     WHERE user_id = ? AND food_item_id IS NOT NULL AND logged_at > ?`,
 			userID, after).

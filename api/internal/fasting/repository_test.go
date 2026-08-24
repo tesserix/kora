@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+
+	"github.com/tesserix/kora/api/internal/foodlog"
 )
 
 func testDB(t *testing.T) *gorm.DB {
@@ -236,4 +238,109 @@ func TestStartHandlesGenuineConcurrentStarts(t *testing.T) {
 	var count int64
 	require.NoError(t, db.Model(&Interval{}).Where("user_id = ?", userID).Count(&count).Error)
 	require.Equal(t, int64(1), count, "the race must leave exactly one row, never one per goroutine")
+}
+
+// testDBWithMaxOpenConns is testDB with a deliberately tiny pool.
+//
+// The default testDB pool is unbounded, which is why the existing concurrency
+// test could never have caught kora#413: with unlimited connections, a Start
+// that needs two of them at once simply takes two.
+func testDBWithMaxOpenConns(t *testing.T, n int) *gorm.DB {
+	t.Helper()
+	db := testDB(t)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(n)
+	return db
+}
+
+// TestStartDoesNotNeedASecondConnection is the regression test for kora#413.
+//
+// Start opens a transaction -- one connection -- and then calls Open, which
+// asks FirstLogSource whether the user has eaten since the fast began. While
+// that source was bound to the POOL rather than to the transaction, every
+// Start held one connection and then blocked waiting for a second. With
+// maxOpenConns = 5 in production, five concurrent starts deadlocked the whole
+// API, not just fasting: every endpoint shares that pool.
+//
+// Both halves of the setup are load-bearing, and the reason #413 shipped is
+// that TestStartHandlesGenuineConcurrentStarts has neither:
+//
+//   - a NON-NIL firstLogs, so the nested read actually happens. That test
+//     passes nil, so the very path it exists to stress never runs.
+//   - a pool small enough to exhaust. testDB sets no limit, so even a non-nil
+//     source would just take a second connection and pass.
+//
+// A fast is opened BEFORE the concurrent run on purpose. Open only consults
+// firstLogs once it has found a physically-open row, so starts against a user
+// with no fast return early and never reach the nested read. Pre-seeding puts
+// every goroutine on the two-connection path.
+//
+// n == maxOpenConns == 2 is then a deterministic deadlock under the bug: both
+// goroutines check out a connection for their transaction, one takes the
+// per-user advisory lock, and its nested read waits for a third connection
+// that cannot exist. The context deadline is what turns that hang into a
+// failed assertion instead of a test that never returns.
+func TestStartDoesNotNeedASecondConnection(t *testing.T) {
+	const conns = 2
+	db := testDBWithMaxOpenConns(t, conns)
+	userID := seedUser(t, db)
+
+	// The real reader, not a double: the bug is about which handle the read
+	// runs on, and a fake that touches no database cannot express that.
+	repo := NewRepository(db, foodlog.NewRepository(db))
+	now := time.Now()
+
+	seed, err := repo.Start(context.Background(), userID, now.Add(-time.Hour), now)
+	require.NoError(t, err)
+
+	const n = conns
+	var barrierMu sync.Mutex
+	arrived := 0
+	release := make(chan struct{})
+	startRaceHook = func() {
+		barrierMu.Lock()
+		arrived++
+		reached := arrived == n
+		barrierMu.Unlock()
+		if reached {
+			close(release)
+		}
+		<-release
+	}
+	t.Cleanup(func() { startRaceHook = nil })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	results := make([]Interval, n)
+	errs := make([]error, n)
+	for i := 0; i < n; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results[i], errs[i] = repo.Start(ctx, userID, now, now)
+		}()
+	}
+	wg.Wait()
+
+	for i := 0; i < n; i++ {
+		require.NoError(t, errs[i],
+			"a start must not wait on a connection it is itself holding -- "+
+				"with the pool exhausted this is the kora#413 deadlock")
+		require.Equal(t, seed.ID, results[i].ID, "every starter must get back the open fast")
+	}
+
+	barrierMu.Lock()
+	reachedBarrier := arrived
+	barrierMu.Unlock()
+	require.Equal(t, n, reachedBarrier,
+		"not every goroutine reached the barrier -- the overlap was not forced, "+
+			"so this run did not exercise the contention this test exists to check")
+
+	var count int64
+	require.NoError(t, db.Model(&Interval{}).Where("user_id = ?", userID).Count(&count).Error)
+	require.Equal(t, int64(1), count, "the run must leave exactly one row")
 }
