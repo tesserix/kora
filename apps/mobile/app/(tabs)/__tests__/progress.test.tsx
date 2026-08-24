@@ -92,7 +92,7 @@ test("shows real current weight when entries exist", async () => {
   // labeled for what the data actually is.
   expect(getByText("Logging streak")).toBeTruthy();
   expect(getByText("3/7 days")).toBeTruthy(); // mocked streak_days: 3
-  expect(getByText("Avg sleep")).toBeTruthy();
+  expect(getByText("Last night")).toBeTruthy();
 });
 
 // The card used to fall back to the profile's own weight for the hero figure
@@ -208,7 +208,7 @@ test("never renders the old fabricated metrics", async () => {
   expect(queryByText("7.1")).toBeNull();
 });
 
-test("offers Connect Apple Health for the Avg sleep panel", async () => {
+test("offers Connect Apple Health for the sleep panel", async () => {
   mockSeries.mockReturnValue({ data: [] });
   const { getAllByLabelText } = await render(<Progress />);
   // Trends has no Steps widget (spec §Screens.4 lists only Weight, Energy vs
