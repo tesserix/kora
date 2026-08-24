@@ -793,6 +793,24 @@ func TestFactsOmitAbsentEnergyAndHeartRate(t *testing.T) {
 	}
 }
 
+// kora#407: the declared fast must reach the coach as a grounded FACT, not
+// only as a number inside guardrails. Context.DeclaredFastHours was set,
+// carried into Signals and read by AtRisk, while Facts() -- which is what the
+// model is actually shown, and what a citation can point at -- had no entry
+// for it at all. The spec puts fact plumbing in scope; only the prose is out.
+func TestFactsCarryDeclaredFastHours(t *testing.T) {
+	c := Context{DeclaredFastHours: 30}
+	require.Contains(t, c.Facts(), Fact{Label: "declared_fast_hours", Value: "30"})
+}
+
+// Unlike the health metrics above, zero is REPORTED rather than omitted:
+// a declared fast has no "unmeasured" state, so 0 means "no declared fast",
+// which is a fact and not an absence. Omitting it would make that
+// indistinguishable from the plumbing having been dropped again.
+func TestFactsReportZeroDeclaredFastHours(t *testing.T) {
+	require.Contains(t, Context{}.Facts(), Fact{Label: "declared_fast_hours", Value: "0"})
+}
+
 // The false positive that matters: several routine overnight fasts must not
 // add up into a risk signal. This is a pure unit test of the max-selection
 // principle in isolation -- it computes the max itself, inline, and never

@@ -713,6 +713,14 @@ func (c Context) Facts() []Fact {
 		{Label: fmt.Sprintf("logs_per_day_%dd", recentWindowDays), Value: fmtNum(c.LogsPerDay)},
 		{Label: fmt.Sprintf("days_logged_%dd", recentWindowDays), Value: strconv.Itoa(c.DaysLogged)},
 		{Label: "fasting_streak_days", Value: strconv.Itoa(c.FastingStreakDays)},
+		// kora#407. Emitted unconditionally, like fasting_streak_days beside
+		// it and unlike the health facts below: those omit when their pointer
+		// is nil, which means "the device never sent this metric". A declared
+		// fast has no such unknown state -- DeclaredFastHours is 0 exactly
+		// when the user declared no fast, which is itself the fact. Omitting
+		// it would make "no fast" indistinguishable from "not plumbed", in a
+		// number the eating-disorder guardrail reads.
+		{Label: "declared_fast_hours", Value: fmtNum(c.DeclaredFastHours)},
 	}
 	if latest := latestHealth(c.HealthDays); latest != nil {
 		if latest.Steps != nil {
