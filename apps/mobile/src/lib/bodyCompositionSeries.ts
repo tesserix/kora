@@ -2,7 +2,9 @@ import type { WeightEntry, WeightSource } from "@/api/types";
 import { isComparable } from "./bodyComposition";
 import {
   COMPOSITION_METRICS,
+  compositionMetric,
   metricValue,
+  provenanceLabel,
   type CompositionMetric,
   type CompositionMetricKey,
 } from "./bodyCompositionFields";
@@ -53,9 +55,20 @@ export function metricSeries(entries: readonly WeightEntry[], key: CompositionMe
     return [{ value, loggedAt: entry.logged_at, source: entry.source }];
   });
 
-  const breaksAfter = points.flatMap((point, i) =>
-    i < points.length - 1 && !isComparable(point.source, points[i + 1].source) ? [i] : [],
-  );
+  // Only metrics that do NOT survive a change of instrument get a break
+  // (kora#419). Before this, breaksAfter split EVERY metric on raw source
+  // equality while `comparableRunFor` fitted weight and tape across
+  // instruments -- so one card drew weight as separate lines under a delta
+  // measured straight across those same lines, telling the reader in the
+  // same breath that the readings cannot be compared and what the
+  // comparison came to. #397 settled which rule is right; this is that rule
+  // reaching the chart.
+  const splitsOnInstrument = !fitsAcrossInstruments(compositionMetric(key));
+  const breaksAfter = splitsOnInstrument
+    ? points.flatMap((point, i) =>
+        i < points.length - 1 && !isComparable(point.source, points[i + 1].source) ? [i] : [],
+      )
+    : [];
 
   const sources = points.reduce<WeightSource[]>(
     (seen, p) => (seen.includes(p.source) ? seen : [...seen, p.source]),
@@ -129,4 +142,25 @@ export function fitsAcrossInstruments(metric: CompositionMetric): boolean {
  */
 export function comparableRunFor(series: MetricSeries, metric: CompositionMetric): MetricPoint[] {
   return fitsAcrossInstruments(metric) ? series.points : lastComparableRun(series);
+}
+
+/**
+ * The sentence under a broken chart, saying what the break means (kora#419).
+ *
+ * Without it a reader sees a gap and reads a slope across it, which is the
+ * failure the split exists to prevent. It renders only when a break is
+ * actually drawn, so after #419 it never appears for weight or a tape
+ * measurement — the case where it used to contradict the delta above it.
+ *
+ * Two things it must not do, both of which it did:
+ *
+ * - Say "the two" for a series measured by three or more instruments.
+ *   `sources` is unbounded; the pronoun was written for a two-source history
+ *   and silently lied about every longer one.
+ * - Name a typed-in reading "Scale" beside "Scale screenshot", which reads as
+ *   one device. `provenanceLabel` handles that distinction.
+ */
+export function instrumentChangeNote(sources: readonly WeightSource[]): string {
+  const named = sources.map(provenanceLabel).join(", then ");
+  return `Measured by ${named}. Shown as separate lines — they don't measure this the same way.`;
 }
