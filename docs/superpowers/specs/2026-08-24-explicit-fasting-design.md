@@ -47,8 +47,12 @@ New `fasting` package, one table:
 ```
 fasting_intervals
   id, user_id, started_at, ended_at (NULL = open),
-  ended_by ('user' | 'food_log' | 'cap'), local_date, created_at
+  ended_by ('user'), local_date, created_at
 ```
+
+`ended_at` and `ended_by` are set only by an explicit end. The food-log and cap
+endings are computed, never stored — so "is a fast open?" is always a computed
+question, never a column read.
 
 `local_date` is the local day the fast **started**, following the stored-local-day
 convention `food_logs` and `weight_entries` already use rather than deriving a
@@ -70,15 +74,25 @@ neither must a client retry.
 ### 3. Three ways a fast ends — and the cap needs no job
 
 - **Explicitly:** the user taps end. `ended_by = 'user'`.
-- **Implicitly:** the next food log closes it at that log's `logged_at`,
-  `ended_by = 'food_log'`. Eating is the end of a fast by definition, the data
-  already exists, and it costs the user no extra tap. `foodlog` declares a narrow
-  `FastingCloser` interface that `fasting` satisfies — the same seam pattern
-  `tracking` uses for `SignalsSource`, so the dependency points one way.
-- **By cap:** duration is **always**
+- **Implicitly:** the next food log ends it at that log's `logged_at`. Eating is
+  the end of a fast by definition, and the data already exists.
+
+  **Resolved at READ time, not by a write hook** (revised during planning). The
+  original design had `foodlog` call a `FastingCloser` interface. Planning found
+  there is no single write path — `Repository.Create` is called from three places
+  in `foodlog/service.go`, plus `CreateIdempotent` — so hooking it means hooking
+  all of them, and missing one leaves fasts silently open.
+
+  Reading instead of writing removes the `foodlog → fasting` dependency entirely,
+  touches no write path, and makes the two automatic endings (food log and cap)
+  one mechanism rather than two. It applies decision 3's own reasoning
+  consistently.
+- **By cap:** and combining all three, the effective end is **always**
 
 ```
-min(ended_at ?? now, started_at + cap) - started_at
+effective_end = min(explicit ended_at, first food log after started_at,
+                    started_at + cap, now)
+duration      = effective_end - started_at
 ```
 
   with `cap = 48h`.
