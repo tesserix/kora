@@ -57,6 +57,18 @@ enum MetricKind: String, CaseIterable, Sendable {
   /// `steps` is the RESOLVED step count: nil means unknown (see StepReading),
   /// and is rendered "—". It is deliberately not defaulted, so no caller can
   /// forget it and silently get a zero.
+  /// Where a steps widget lands (kora#425).
+  ///
+  /// The dashboard, because that is where steps are RENDERED —
+  /// `app/(tabs)/index.tsx` draws the steps telemetry cell and Trends draws no
+  /// steps at all. It pointed at "mobile:///progress" until #425, which sent
+  /// the one gesture meaning "show me my steps" to the only screen that could
+  /// not answer it, and read to the user as the app opening on the wrong tab.
+  ///
+  /// Named rather than inlined so the known and unknown branches below cannot
+  /// drift apart — they did not, but they were two separate string literals.
+  private static let stepsDeepLink = "mobile:///"
+
   func present(snapshot: NutritionSnapshot, steps: Int?) -> MetricPresentation {
     switch self {
     case .reserve:
@@ -77,7 +89,7 @@ enum MetricKind: String, CaseIterable, Sendable {
       guard let steps else {
         return MetricPresentation(
           label: "STEPS", heroText: "—", caption: "OF \(Format.grouped(Int(goal)))",
-          fraction: 0, isOverTarget: false, deepLink: "mobile:///progress",
+          fraction: 0, isOverTarget: false, deepLink: Self.stepsDeepLink,
           inlineText: "— of \(Format.grouped(Int(goal)))"
         )
       }
@@ -87,7 +99,7 @@ enum MetricKind: String, CaseIterable, Sendable {
         caption: "OF \(Format.grouped(Int(goal)))",
         fraction: Self.ratio(Double(steps), goal),
         isOverTarget: goal > 0 && Double(steps) > goal,
-        deepLink: "mobile:///progress",
+        deepLink: Self.stepsDeepLink,
         inlineText: "\(Format.grouped(steps)) of \(Format.grouped(Int(goal)))"
       )
 
