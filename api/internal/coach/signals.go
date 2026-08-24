@@ -21,6 +21,7 @@ func SignalsFrom(c Context) guardrails.Signals {
 		AvgIntakeKcal:     c.AvgIntakeKcal,
 		LogsPerDay:        c.LogsPerDay,
 		FastingStreakDays: c.FastingStreakDays,
+		DeclaredFastHours: c.DeclaredFastHours,
 	}
 }
 

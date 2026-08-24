@@ -19,6 +19,7 @@ import (
 
 	"github.com/tesserix/kora/api/internal/dashboard"
 	"github.com/tesserix/kora/api/internal/diet"
+	"github.com/tesserix/kora/api/internal/fasting"
 	"github.com/tesserix/kora/api/internal/foodlog"
 	"github.com/tesserix/kora/api/internal/memory"
 	"github.com/tesserix/kora/api/internal/mentor"
@@ -96,7 +97,11 @@ type Context struct {
 	// without it, a silence spanning recentWindowDays or longer looks
 	// identical to a brand-new user who has simply never logged, and the
 	// streak resets to 0 exactly when the gap is longest.
-	EstablishedLogging  bool
+	EstablishedLogging bool
+	// DeclaredFastHours is the longest single DECLARED fast intersecting the
+	// window (kora#407). See guardrails.Signals.DeclaredFastHours for why
+	// this is kept separate from FastingStreakDays.
+	DeclaredFastHours   float64
 	Usual               memory.Memory
 	WeightTrend         WeightTrend
 	MentorProfile       *mentor.Profile
@@ -147,6 +152,11 @@ type WeightSource interface {
 	WeightSeries(ctx context.Context, userID uuid.UUID, from, to time.Time) ([]tracking.WeightEntry, error)
 }
 
+// FastingSource is the DECLARED-fasting read. fasting.Repository satisfies it.
+type FastingSource interface {
+	Since(ctx context.Context, userID uuid.UUID, from time.Time) ([]fasting.Interval, error)
+}
+
 // MentorSource is the bounded, user-scoped personal context read. The
 // concrete mentor.Repository satisfies it; the interface keeps grounding
 // tests independent of handler concerns.
@@ -164,6 +174,7 @@ type Grounder struct {
 	Mem     memory.Service
 	Weights WeightSource
 	Mentor  MentorSource
+	Fasting FastingSource
 }
 
 // NewGrounder constructs a Grounder from its concrete dependencies.
@@ -175,6 +186,13 @@ func NewGrounder(dash dashboard.Service, logs LogSource, mem memory.Service, wei
 // failure degrades to the nutrition-only context rather than breaking Coach.
 func (g Grounder) WithMentor(source MentorSource) Grounder {
 	g.Mentor = source
+	return g
+}
+
+// WithFasting adds the DECLARED-fasting source used to compute
+// Context.DeclaredFastHours.
+func (g Grounder) WithFasting(source FastingSource) Grounder {
+	g.Fasting = source
 	return g
 }
 
@@ -196,6 +214,53 @@ func (g Grounder) BuildContext(ctx context.Context, userID uuid.UUID, now time.T
 		return Context{}, fmt.Errorf("coach: build context: recent logs: %w", err)
 	}
 	recentDaily := aggregateDaily(logs, since)
+
+	// kora#407. NOT swallowed, unlike the WeightSource read above: a swallowed
+	// error here yields 0 hours, which reads as "no long fast" -- failing OPEN
+	// on a risk input. Propagating turns an unknown into a suppression rather
+	// than a false all-clear.
+	var declaredFastHours float64
+	if g.Fasting != nil {
+		intervals, err := g.Fasting.Since(ctx, userID, since)
+		if err != nil {
+			return Context{}, fmt.Errorf("coach: build context: declared fasts: %w", err)
+		}
+		for _, in := range intervals {
+			// The first log strictly AFTER this fast began -- computed per
+			// interval, not once. logs[0] is the earliest log in the WINDOW,
+			// which for a fast that started later is simply the wrong log:
+			// EffectiveEnd would discard it (it predates the start) and then
+			// nothing would end the fast, over-counting its duration and
+			// over-firing risk.
+			var firstLog *time.Time
+			for i := range logs {
+				if logs[i].LoggedAt.After(in.StartedAt) {
+					firstLog = &logs[i].LoggedAt
+					break
+				}
+			}
+			// A fast counts only if its EFFECTIVE interval intersects the
+			// window (kora#407 Decision 4). Repository.Since bounds only
+			// ended_at, so a long-abandoned open fast -- started months ago,
+			// never ended -- is still returned; EffectiveEnd caps its
+			// duration at CapHours but that still trips riskDeclaredFastHours
+			// forever, permanently pinning the user AtRisk from one
+			// forgotten "start fast" tap. Skip anything whose effective end
+			// falls entirely before the window starts.
+			//
+			// This is a skip, not a clip: a fast that STARTED before the
+			// window but whose effective end falls inside or after it still
+			// counts for its FULL duration, not just the portion inside the
+			// window -- under-firing (missing a genuine long fast that began
+			// slightly early) is the dangerous direction for this guardrail.
+			if fasting.EffectiveEnd(in, firstLog, now).Before(since) {
+				continue
+			}
+			if h := fasting.Hours(in, firstLog, now); h > declaredFastHours {
+				declaredFastHours = h
+			}
+		}
+	}
 
 	// kora#408: a habit, not a single entry. See establishedLoggedDays.
 	priorLoggedDays, err := g.Logs.DaysLoggedBetween(
@@ -249,6 +314,7 @@ func (g Grounder) BuildContext(ctx context.Context, userID uuid.UUID, now time.T
 		DaysLogged:         daysLogged,
 		FastingStreakDays:  fastingStreak(recentDaily, establishedLogging),
 		EstablishedLogging: establishedLogging,
+		DeclaredFastHours:  declaredFastHours,
 		Usual:              usual,
 		WeightTrend:        weightTrend,
 		MentorProfile:      profile,
@@ -647,6 +713,14 @@ func (c Context) Facts() []Fact {
 		{Label: fmt.Sprintf("logs_per_day_%dd", recentWindowDays), Value: fmtNum(c.LogsPerDay)},
 		{Label: fmt.Sprintf("days_logged_%dd", recentWindowDays), Value: strconv.Itoa(c.DaysLogged)},
 		{Label: "fasting_streak_days", Value: strconv.Itoa(c.FastingStreakDays)},
+		// kora#407. Emitted unconditionally, like fasting_streak_days beside
+		// it and unlike the health facts below: those omit when their pointer
+		// is nil, which means "the device never sent this metric". A declared
+		// fast has no such unknown state -- DeclaredFastHours is 0 exactly
+		// when the user declared no fast, which is itself the fact. Omitting
+		// it would make "no fast" indistinguishable from "not plumbed", in a
+		// number the eating-disorder guardrail reads.
+		{Label: "declared_fast_hours", Value: fmtNum(c.DeclaredFastHours)},
 	}
 	if latest := latestHealth(c.HealthDays); latest != nil {
 		if latest.Steps != nil {

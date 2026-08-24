@@ -1,0 +1,239 @@
+package fasting
+
+import (
+	"context"
+	"os"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+)
+
+func testDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		url = "postgres://kora:kora_dev@localhost:5432/kora?sslmode=disable"
+	}
+	db, err := gorm.Open(postgres.Open(url), &gorm.Config{})
+	if err != nil {
+		t.Skipf("postgres unavailable: %v", err)
+	}
+	return db
+}
+
+// seedUser inserts a bare user row and returns its id.
+func seedUser(t *testing.T, db *gorm.DB) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	require.NoError(t, db.Exec(
+		"INSERT INTO users (id, firebase_uid, email) VALUES (?, ?, ?)",
+		id, "fa-"+id.String(), "fa@test.dev").Error)
+	t.Cleanup(func() {
+		// Scoped to this test's own user, never a truncate -- these tests own
+		// their fixtures and must not disturb anyone else's rows (kora#151).
+		db.Exec("DELETE FROM fasting_intervals WHERE user_id = ?", id)
+		db.Exec("DELETE FROM food_logs WHERE user_id = ?", id)
+		db.Exec("DELETE FROM users WHERE id = ?", id)
+	})
+	return id
+}
+
+func TestStartIsIdempotent(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	repo := NewRepository(db, nil)
+	now := time.Now()
+
+	first, err := repo.Start(context.Background(), userID, now, now)
+	require.NoError(t, err)
+
+	// A double-tap, or a client retry, must not 400 and must not open a second.
+	second, err := repo.Start(context.Background(), userID, now.Add(time.Minute), now)
+	require.NoError(t, err)
+	require.Equal(t, first.ID, second.ID, "starting twice returns the SAME open fast")
+}
+
+// TestASecondOpenFastIsRejectedButASecondClosedFastIsFine covers both halves
+// of "one open fast per user". The rejection half is Start's own idempotency
+// (see TestStartIsIdempotent and TestStartHandlesGenuineConcurrentStarts);
+// it is no longer the partial unique index, which kora#407's read-time
+// openness fix had to drop -- see migration 000053.
+func TestASecondOpenFastIsRejectedButASecondClosedFastIsFine(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	repo := NewRepository(db, nil)
+	now := time.Now()
+
+	first, err := repo.Start(context.Background(), userID, now.Add(-4*time.Hour), now)
+	require.NoError(t, err)
+	_, ended, err := repo.End(context.Background(), userID, now.Add(-time.Hour))
+	require.NoError(t, err)
+	require.True(t, ended)
+
+	// Once the first is closed, a second may open -- and it is a genuinely
+	// NEW interval, not the old one handed back.
+	second, err := repo.Start(context.Background(), userID, now, now)
+	require.NoError(t, err, "a user must be able to fast more than once")
+	require.NotEqual(t, first.ID, second.ID, "the closed fast must not be resurrected")
+}
+
+func TestEndReportsWhenThereWasNothingOpen(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	repo := NewRepository(db, nil)
+
+	_, ended, err := repo.End(context.Background(), userID, time.Now())
+	require.NoError(t, err, "ending nothing is not an error, just a no-op")
+	require.False(t, ended)
+}
+
+// TestEndSetsEndedAtAndEndedByTogether guards the finding carried from Task
+// 1's review: the table's CHECK constraints validate ended_at > started_at
+// and ended_by = 'user' independently, but not as a pair. Repository.End is
+// the only write path for either, so it must never leave one set without
+// the other.
+func TestEndSetsEndedAtAndEndedByTogether(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	repo := NewRepository(db, nil)
+	now := time.Now()
+
+	_, err := repo.Start(context.Background(), userID, now.Add(-time.Hour), now)
+	require.NoError(t, err)
+
+	ended, ok, err := repo.End(context.Background(), userID, now)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.NotNil(t, ended.EndedAt)
+	require.NotNil(t, ended.EndedBy)
+	require.Equal(t, EndedByUser, *ended.EndedBy)
+
+	var stored Interval
+	require.NoError(t, db.Where("id = ?", ended.ID).First(&stored).Error)
+	require.NotNil(t, stored.EndedAt)
+	require.NotNil(t, stored.EndedBy)
+	require.Equal(t, EndedByUser, *stored.EndedBy)
+}
+
+func TestSinceReturnsOpenAndRecentlyClosedIntervals(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	repo := NewRepository(db, nil)
+	now := time.Now()
+
+	// Closed well before the window: excluded.
+	old, err := repo.Start(context.Background(), userID, now.Add(-72*time.Hour), now)
+	require.NoError(t, err)
+	require.NoError(t, db.Model(&Interval{}).Where("id = ?", old.ID).
+		Updates(map[string]any{"ended_at": now.Add(-70 * time.Hour), "ended_by": EndedByUser}).Error)
+
+	// Closed inside the window: included.
+	recent, err := repo.Start(context.Background(), userID, now.Add(-30*time.Hour), now)
+	require.NoError(t, err)
+	require.NoError(t, db.Model(&Interval{}).Where("id = ?", recent.ID).
+		Updates(map[string]any{"ended_at": now.Add(-1 * time.Hour), "ended_by": EndedByUser}).Error)
+
+	// Still open: included regardless of when it started.
+	open, err := repo.Start(context.Background(), userID, now.Add(-2*time.Hour), now)
+	require.NoError(t, err)
+
+	out, err := repo.Since(context.Background(), userID, now.Add(-24*time.Hour))
+	require.NoError(t, err)
+
+	ids := make(map[uuid.UUID]bool, len(out))
+	for _, in := range out {
+		ids[in.ID] = true
+	}
+	require.False(t, ids[old.ID], "closed well before the window must be excluded")
+	require.True(t, ids[recent.ID], "closed inside the window must be included")
+	require.True(t, ids[open.ID], "still-open must be included regardless of start")
+}
+
+// TestStartHandlesGenuineConcurrentStarts fires many goroutines at Start for
+// the SAME user and asserts every one comes back with the SAME interval ID,
+// with no error, leaving exactly one row -- the double-tap/retry idempotency
+// contract, under genuine concurrency.
+//
+// The serialisation being exercised is Start's per-user advisory lock. It
+// used to be the partial unique index fasting_intervals_one_open rejecting
+// the loser with SQLSTATE 23505, which Start recovered from by re-reading;
+// kora#407 had to drop that index (a fast ended by eating stays physically
+// open forever, so the index rejected every genuine NEXT fast). The guarantee
+// asserted here is unchanged; only the mechanism moved.
+//
+// Overlap is forced DETERMINISTICALLY, not hoped for. A bare goroutine race
+// against a fast local Postgres round-trip was tried first and was flaky in
+// exactly the direction the coordinator warned about: in 4 of 5 runs the
+// goroutines never actually overlapped, each Start completing before the next
+// one began, and the test passed without exercising anything.
+// startRaceHook (test-only, nil in production) is used here as a barrier:
+// every goroutine blocks in it until ALL n have arrived, so they are released
+// into the transaction together and must contend for the lock.
+//
+// arrived == n after the run is the proof that happened, replacing the old
+// "gorm logged a 23505" proof: it asserts every goroutine was inside Start,
+// before any insert, at the same moment. Without it this test could silently
+// degrade back into testing nothing the way the unbarriered version did.
+//
+// The hook fires BEFORE the transaction opens, not inside it: a barrier that
+// waited for all n while one goroutine held the advisory lock would deadlock.
+func TestStartHandlesGenuineConcurrentStarts(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+
+	repo := NewRepository(db, nil)
+	now := time.Now()
+
+	const n = 10
+	var barrierMu sync.Mutex
+	arrived := 0
+	release := make(chan struct{})
+	startRaceHook = func() {
+		barrierMu.Lock()
+		arrived++
+		reached := arrived == n
+		barrierMu.Unlock()
+		if reached {
+			close(release)
+		}
+		<-release
+	}
+	t.Cleanup(func() { startRaceHook = nil })
+
+	var wg sync.WaitGroup
+	results := make([]Interval, n)
+	errs := make([]error, n)
+	for i := 0; i < n; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			in, err := repo.Start(context.Background(), userID, now, now)
+			results[i] = in
+			errs[i] = err
+		}()
+	}
+	wg.Wait()
+
+	first := results[0]
+	for i := 0; i < n; i++ {
+		require.NoError(t, errs[i], "a concurrent start must never surface as an error")
+		require.Equal(t, first.ID, results[i].ID, "every concurrent starter must get back the SAME open fast")
+	}
+
+	barrierMu.Lock()
+	reachedBarrier := arrived
+	barrierMu.Unlock()
+	require.Equal(t, n, reachedBarrier,
+		"not every goroutine reached the barrier -- the overlap was not forced, "+
+			"so this run did not exercise the race this test exists to check")
+
+	var count int64
+	require.NoError(t, db.Model(&Interval{}).Where("user_id = ?", userID).Count(&count).Error)
+	require.Equal(t, int64(1), count, "the race must leave exactly one row, never one per goroutine")
+}

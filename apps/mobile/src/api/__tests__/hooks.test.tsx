@@ -35,10 +35,13 @@ import {
   useCoachAsk,
   useCoachNudges,
   useCoachThread,
+  useCurrentFast,
   useDashboard,
   useDeleteChallenge,
   useDeleteLog,
   useEditLog,
+  useEndFast,
+  useStartFast,
   useFoodSearch,
   useFriendsProgress,
   useGroupChallenges,
@@ -694,6 +697,44 @@ test("useAddWater POSTs /v1/water with volume_ml and logged_at", async () => {
     // the user experienced rather than one derived from the profile zone (kora#84).
     body: JSON.stringify({ volume_ml: 250, logged_at: "2026-07-25T12:00:00Z", local_date: localDateNow() }),
   });
+});
+
+test("useStartFast POSTs and invalidates the current fast", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({
+    id: "f1", user_id: "u1", started_at: "2026-08-24T06:00:00Z", local_date: "2026-08-24",
+  });
+  const { result } = await renderHook(() => useStartFast(), { wrapper });
+  result.current.mutate();
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(apiFetch).toHaveBeenCalledWith("/v1/fasting/start", { method: "POST" });
+});
+
+// useCurrentFast reads apiFetchEnvelope directly (not apiFetch) so that a
+// genuinely open-less day resolves to `null`, not the whole `{ data: null }`
+// envelope apiFetch would hand back — see the comment on the hook itself.
+test("useCurrentFast tolerates no open fast", async () => {
+  (apiFetchEnvelope as jest.Mock).mockResolvedValueOnce({ data: null });
+  const { result } = await renderHook(() => useCurrentFast(), { wrapper });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(result.current.data).toBeNull();
+});
+
+test("useCurrentFast returns the open fast when there is one", async () => {
+  (apiFetchEnvelope as jest.Mock).mockResolvedValueOnce({
+    data: { id: "f1", user_id: "u1", started_at: "2026-08-24T06:00:00Z", local_date: "2026-08-24" },
+  });
+  const { result } = await renderHook(() => useCurrentFast(), { wrapper });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(result.current.data).toEqual({ id: "f1", user_id: "u1", started_at: "2026-08-24T06:00:00Z", local_date: "2026-08-24" });
+});
+
+test("useEndFast POSTs, tolerates nothing having been open, and invalidates the current fast", async () => {
+  (apiFetchEnvelope as jest.Mock).mockResolvedValueOnce({ data: null });
+  const { result } = await renderHook(() => useEndFast(), { wrapper });
+  result.current.mutate();
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(apiFetchEnvelope).toHaveBeenCalledWith("/v1/fasting/end", { method: "POST" });
+  expect(result.current.data).toBeNull();
 });
 
 test("useAddWeight POSTs /v1/weight and invalidates weight", async () => {

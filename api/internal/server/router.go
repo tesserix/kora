@@ -23,6 +23,7 @@ import (
 	"github.com/tesserix/kora/api/internal/compare"
 	"github.com/tesserix/kora/api/internal/dashboard"
 	"github.com/tesserix/kora/api/internal/devices"
+	"github.com/tesserix/kora/api/internal/fasting"
 	"github.com/tesserix/kora/api/internal/feedback"
 	"github.com/tesserix/kora/api/internal/foodlog"
 	"github.com/tesserix/kora/api/internal/groups"
@@ -330,6 +331,15 @@ func NewRouter(deps Deps) *gin.Engine {
 		healthHandler := health.NewHandler(health.NewService(trackingRepo))
 		v1.POST("/health/sync", healthHandler.Sync)
 
+		// logRepo answers "did the user eat after this fast began?" -- the
+		// food-log ending fasting.Repository.Open computes rather than reads
+		// from a column (kora#407).
+		fastingRepo := fasting.NewRepository(deps.DB, logRepo)
+		fastingHandler := fasting.NewHandler(fastingRepo)
+		v1.POST("/fasting/start", fastingHandler.Start)
+		v1.POST("/fasting/end", fastingHandler.End)
+		v1.GET("/fasting/current", fastingHandler.Current)
+
 		socialRepo := social.NewRepository(deps.DB)
 		socialHandler := social.NewHandler(social.NewService(socialRepo, userRepo).WithNotifier(notificationsSvc))
 		v1.GET("/friends", socialHandler.ListFriends)
@@ -377,7 +387,7 @@ func NewRouter(deps Deps) *gin.Engine {
 			v1.POST("/resolve/barcode", deps.Resolver.ResolveBarcode)
 		}
 
-		coachGrounder := coach.NewGrounder(dashSvc, logRepo, memSvc, trackingRepo).WithMentor(mentorRepo)
+		coachGrounder := coach.NewGrounder(dashSvc, logRepo, memSvc, trackingRepo).WithMentor(mentorRepo).WithFasting(fastingRepo)
 		coachMeter := billing.NewMeter(deps.DB)
 		coachThread := coach.NewThreadRepository(deps.DB)
 		coachService := coach.NewService(&coachGrounder, deps.Provider, coachMeter, &coachThread).

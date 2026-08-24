@@ -109,3 +109,21 @@ func TestEvaluate_AllowPassesTitleThrough(t *testing.T) {
 	require.Equal(t, "Protein", d.Title)
 	require.Equal(t, "55g to go", d.Text)
 }
+
+// kora#407. A DECLARED fast is a fact, unlike the inferred FastingStreakDays.
+// It gets its own threshold so the two can be tuned apart, and so a suppression
+// says which signal fired.
+func TestAtRiskOnALongDeclaredFast(t *testing.T) {
+	require.True(t, AtRisk(Signals{DeclaredFastHours: 30}))
+	require.True(t, AtRisk(Signals{DeclaredFastHours: 24}), "the threshold is inclusive")
+}
+
+// The false positive this threshold exists to prevent. A routine 16:8 faster
+// must not be flagged every single day.
+func TestRoutineOvernightFastingIsNotRisk(t *testing.T) {
+	require.False(t, AtRisk(Signals{DeclaredFastHours: 16}))
+}
+
+func TestNoDeclaredFastIsNotRisk(t *testing.T) {
+	require.False(t, AtRisk(Signals{DeclaredFastHours: 0}))
+}

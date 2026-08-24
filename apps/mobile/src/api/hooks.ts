@@ -49,6 +49,7 @@ import type {
   CoachThreadResponse,
   CoachTurn,
   DashboardSummary,
+  FastingInterval,
   FeedbackCreated,
   FoodItem,
   Friend,
@@ -950,6 +951,36 @@ export function useAddWater() {
         body: JSON.stringify({ volume_ml, logged_at, local_date: localDateNow() }),
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["dashboard"] }),
+  });
+}
+
+// current/end can legitimately resolve `data: null` (no open fast). apiFetch's
+// `envelope.data ?? envelope` falls through on a null data field and hands
+// back the WHOLE envelope object instead — see src/lib/api.ts's own test
+// ("apiFetch returns the whole body when data is explicitly null"). Reading
+// apiFetchEnvelope directly here, like useEditLog does, is what keeps a real
+// null a null instead of a truthy `{ data: null }` object.
+export function useCurrentFast(): UseQueryResult<FastingInterval | null, Error> {
+  return useQuery({
+    queryKey: ["fasting-current"],
+    queryFn: async () => (await apiFetchEnvelope<FastingInterval | null>("/v1/fasting/current")).data,
+  });
+}
+
+export function useStartFast(): UseMutationResult<FastingInterval, Error, void> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiFetch("/v1/fasting/start", { method: "POST" }) as Promise<FastingInterval>,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["fasting-current"] }),
+  });
+}
+
+export function useEndFast(): UseMutationResult<FastingInterval | null, Error, void> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () =>
+      (await apiFetchEnvelope<FastingInterval | null>("/v1/fasting/end", { method: "POST" })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["fasting-current"] }),
   });
 }
 
