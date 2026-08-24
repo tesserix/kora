@@ -25,6 +25,7 @@ import { shouldOfferConnect, useHealth } from "@/health";
 import { AnimatedNumber, PressableScale, ScreenEntrance, useMotionPrefs } from "@/motion";
 import { useTheme } from "@/theme";
 import { todayLocalDate } from "@/lib/shotsClock";
+import { sleepDurationLabel } from "@/lib/sleepDuration";
 import {
   compositionMetric,
   displayNumber,
@@ -510,7 +511,7 @@ export default function Progress() {
             <AppText style={mutedLabel}>Last night</AppText>
             {health.sleep ? (
               <AppText style={[{ fontSize: 15, fontWeight: "600", color: instrument.ink, marginTop: 2 }, mono]}>
-                {`${health.sleep.lastNightHours}h`}
+                {sleepDurationLabel(health.sleep.lastNightHours)}
               </AppText>
             ) : !shouldOfferConnect(health.status) ? (
               // kora#406: connected, but nothing recorded for the period.

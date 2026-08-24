@@ -228,7 +228,9 @@ test("shows real sleep and renders the energy-vs-budget bars when Health is auth
   mockAvgIntake7d.mockReturnValue({ avg: 1921, series: [1900, 1950, 1921], days: [null, null, null, null, 1900, 1950, 1921], isLoading: false, isError: false, refetch: jest.fn() });
 
   const { getByText, getByTestId, getAllByText, queryByLabelText } = await render(<Progress />);
-  expect(getByText("7.1h")).toBeTruthy();
+  // Hours and minutes, the way the Health app writes it, so the two figures
+  // can be compared at a glance (7.1h is 7h 6m).
+  expect(getByText("7h 6m")).toBeTruthy();
   expect(queryByLabelText("Connect Apple Health")).toBeNull();
   // The four days with no reading render as empty slots, not zero-height
   // bars: a bar of height zero states "ate nothing", which is a different
