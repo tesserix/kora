@@ -39,7 +39,7 @@ import {
   comparableRunFor,
   metricSeries,
 } from "@/lib/bodyCompositionSeries";
-import { trendSentence } from "@/lib/trendCopy";
+import { trendSentence, trendUnavailableNote } from "@/lib/trendCopy";
 import { useUnits } from "@/units";
 import { TAB_BAR_SCROLL_INSET } from "@/components/FloatingTabBar";
 
@@ -207,6 +207,9 @@ export default function Progress() {
   // exist, without second-guessing the server's gate (kora#399).
   const weightTrend = useWeightTrend(activeKey, range, hasChart);
   const trendText = weightTrend.data ? trendSentence(weightTrend.data, metric, system) : null;
+  // kora#405: when there is no rate, say why — but only for the gate. A
+  // suppressed trend stays silent; see trendUnavailableNote.
+  const trendNote = weightTrend.data ? trendUnavailableNote(weightTrend.data) : null;
 
   const latest = trend.points[trend.points.length - 1]?.value;
   // The hero figure means one thing for every metric, weight included: the
@@ -365,6 +368,7 @@ export default function Progress() {
                     insufficient or suppressed trend carries no number here,
                     same as the OLS fit itself decided to say nothing. */}
                 {trendText ? <AppText style={[mutedLabel, { marginTop: 6 }]}>{trendText}</AppText> : null}
+                {trendNote ? <AppText style={[mutedLabel, { marginTop: 6 }]}>{trendNote}</AppText> : null}
               </>
             ) : seriesError ? (
               <LoadErrorNotice message="Couldn't load your weigh-ins." onRetry={() => void series.refetch()} />
