@@ -25,6 +25,7 @@ import { shouldOfferConnect, useHealth } from "@/health";
 import { useTheme } from "@/theme";
 import { accessibleMealLabel } from "@/lib/portionAssumedLabel";
 import { now, todayLocalDate } from "@/lib/shotsClock";
+import { sleepDurationLabel } from "@/lib/sleepDuration";
 import type { FoodLog } from "@/api/types";
 import type { ReactNode } from "react";
 import { TAB_BAR_SCROLL_INSET_TODAY } from "@/components/FloatingTabBar";
@@ -188,7 +189,7 @@ export default function Home() {
     ? { icon: <Icon name="footprints" size={16} color={instrument.mut} />, value: health.steps.today.toLocaleString(), label: "Steps" }
     : { icon: telemetryIcon("footprints"), value: "—", label: "Steps" };
   const sleepCell: TelemetryCell = health.sleep
-    ? { icon: <Icon name="moon" size={16} color={instrument.mut} />, value: `${health.sleep.lastNightHours}h`, label: "Sleep" }
+    ? { icon: <Icon name="moon" size={16} color={instrument.mut} />, value: sleepDurationLabel(health.sleep.lastNightHours), label: "Sleep" }
     : { icon: telemetryIcon("moon"), value: "—", label: "Sleep" };
 
   const openMeal = (log: FoodLog) =>

@@ -236,7 +236,12 @@ export function useHealth(): HealthData {
         setSteps(weekSamples.length > 0 ? { today: 0, goal: STEP_GOAL } : null);
       }
       const sleepMillis = mergeAsleepMillis(sleepSamples);
-      setSleep(sleepSamples.length > 0 ? { lastNightHours: Math.round((sleepMillis / MS_PER_HOUR) * 10) / 10 } : null);
+      // Stored at full precision, rounded once at render by
+      // sleepDurationLabel. Rounding to one decimal HERE quantised the night
+      // to 6-minute steps, so 4h 26m was stored as 4.4 and could only ever be
+      // rendered back as 4h 24m -- a two-minute error created by the store,
+      // not by the measurement.
+      setSleep(sleepSamples.length > 0 ? { lastNightHours: sleepMillis / MS_PER_HOUR } : null);
       setStatus("authorized");
     } catch {
       // Any HealthKit call (authorization request or either query) can reject —
