@@ -28,3 +28,27 @@ export function trendSentence(
 
   return `About ${magnitude}${unit ? ` ${unit}` : ""} per week${direction} — based on ${readings} readings over the last ${days} days.`;
 }
+
+/**
+ * Why there is no rate, when — and only when — saying so is safe (kora#405).
+ *
+ * `insufficient_data` and `suppressed` both render as nothing today, which is
+ * indistinguishable from a bug. That cost a real investigation: a user with 18
+ * weigh-ins saw a blank space and reasonably concluded the feature was broken.
+ *
+ * So this explains the gate, and stays SILENT for `suppressed`.
+ *
+ * The silence is deliberate and load-bearing, not an oversight. `suppressed`
+ * means the #23 Protective policy classified this user as at eating-disorder
+ * risk. Telling them "we've hidden your weight trend because of your intake"
+ * discloses an inference about them that the policy exists to act on quietly.
+ * A blank space is a worse debugging experience and a better outcome for the
+ * person it is protecting.
+ *
+ * If you are tempted to return a message for `suppressed` too: that is the
+ * change this comment exists to stop. There is a test on it.
+ */
+export function trendUnavailableNote(trend: WeightTrend): string | null {
+  if (trend.status !== "insufficient_data") return null;
+  return "Not enough weigh-ins yet — a weekly rate needs 4, spread over at least 14 days.";
+}

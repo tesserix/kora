@@ -259,3 +259,28 @@ describe("Apple Health connection vs. missing data (kora#406)", () => {
     expect(getByLabelText("Connect Apple Health")).toBeTruthy();
   });
 });
+
+
+// kora#405: a blank space where a rate should be is indistinguishable from a
+// bug. The gate now explains itself on screen; the guardrail still does not.
+describe("why there is no rate (kora#405)", () => {
+  test("tells the user when they simply need more weigh-ins", async () => {
+    mockUseWeightTrend.mockReturnValue({
+      data: { status: "insufficient_data", spans_instruments: false, show_support: false },
+      isSuccess: true,
+    });
+    const { findByText } = await render(<Progress />);
+    expect(await findByText(/Not enough weigh-ins/)).toBeTruthy();
+  });
+
+  test("renders nothing at all when the guardrail suppressed it", async () => {
+    mockUseWeightTrend.mockReturnValue({
+      data: { status: "suppressed", spans_instruments: false, show_support: true },
+      isSuccess: true,
+    });
+    const { queryByText } = await render(<Progress />);
+    expect(queryByText(/Not enough weigh-ins/)).toBeNull();
+    expect(queryByText(/per week/)).toBeNull();
+    expect(queryByText(/intake/i)).toBeNull();
+  });
+});
