@@ -331,7 +331,8 @@ func NewRouter(deps Deps) *gin.Engine {
 		healthHandler := health.NewHandler(health.NewService(trackingRepo))
 		v1.POST("/health/sync", healthHandler.Sync)
 
-		fastingHandler := fasting.NewHandler(fasting.NewRepository(deps.DB))
+		fastingRepo := fasting.NewRepository(deps.DB)
+		fastingHandler := fasting.NewHandler(fastingRepo)
 		v1.POST("/fasting/start", fastingHandler.Start)
 		v1.POST("/fasting/end", fastingHandler.End)
 		v1.GET("/fasting/current", fastingHandler.Current)
@@ -383,7 +384,7 @@ func NewRouter(deps Deps) *gin.Engine {
 			v1.POST("/resolve/barcode", deps.Resolver.ResolveBarcode)
 		}
 
-		coachGrounder := coach.NewGrounder(dashSvc, logRepo, memSvc, trackingRepo).WithMentor(mentorRepo)
+		coachGrounder := coach.NewGrounder(dashSvc, logRepo, memSvc, trackingRepo).WithMentor(mentorRepo).WithFasting(fastingRepo)
 		coachMeter := billing.NewMeter(deps.DB)
 		coachThread := coach.NewThreadRepository(deps.DB)
 		coachService := coach.NewService(&coachGrounder, deps.Provider, coachMeter, &coachThread).

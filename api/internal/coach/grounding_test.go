@@ -13,6 +13,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/tesserix/kora/api/internal/dashboard"
+	"github.com/tesserix/kora/api/internal/fasting"
 	"github.com/tesserix/kora/api/internal/foodlog"
 	"github.com/tesserix/kora/api/internal/guardrails"
 	"github.com/tesserix/kora/api/internal/memory"
@@ -790,4 +791,99 @@ func TestFactsOmitAbsentEnergyAndHeartRate(t *testing.T) {
 		require.NotEqual(t, "health_active_energy_kcal_latest", f.Label)
 		require.NotEqual(t, "health_resting_heart_rate_bpm_latest", f.Label)
 	}
+}
+
+// The false positive that matters: several routine overnight fasts must not
+// add up into a risk signal. This is the test a "sum them" refactor breaks.
+func TestSevenShortDeclaredFastsAreNotRisk(t *testing.T) {
+	var intervals []fasting.Interval
+	base := time.Date(2026, 8, 17, 20, 0, 0, 0, time.UTC)
+	for d := 0; d < 7; d++ {
+		s := base.AddDate(0, 0, d)
+		e := s.Add(16 * time.Hour)
+		intervals = append(intervals, fasting.Interval{StartedAt: s, EndedAt: &e})
+	}
+	var longest float64
+	for _, in := range intervals {
+		if h := fasting.Hours(in, nil, base.AddDate(0, 0, 8)); h > longest {
+			longest = h
+		}
+	}
+	require.InDelta(t, 16, longest, 0.001, "the measure is the LONGEST fast, never the sum")
+	require.False(t, guardrails.AtRisk(guardrails.Signals{DeclaredFastHours: longest}))
+}
+
+// fakeFastingSource is a test double for coach.FastingSource.
+type fakeFastingSource struct {
+	intervals []fasting.Interval
+	err       error
+}
+
+func (f fakeFastingSource) Since(_ context.Context, _ uuid.UUID, _ time.Time) ([]fasting.Interval, error) {
+	return f.intervals, f.err
+}
+
+// TestBuildContextWiresDeclaredFastHoursFromLongestInterval proves the
+// grounder picks the LONGEST declared fast intersecting the window, not a
+// sum, and that it flows into Context.DeclaredFastHours end to end against a
+// real fasting.Repository.
+func TestBuildContextWiresDeclaredFastHoursFromLongestInterval(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
+	memSvc := memory.NewService(logRepo)
+
+	loc := time.UTC
+	now := time.Date(2026, 8, 24, 12, 0, 0, 0, loc)
+
+	// A short, routine overnight fast, plus one genuinely long fast -- the
+	// longest single interval, 30h, must win, not the sum of both (46h).
+	shortStart := now.AddDate(0, 0, -5)
+	shortEnd := shortStart.Add(14 * time.Hour)
+	longStart := now.AddDate(0, 0, -2)
+	longEnd := longStart.Add(30 * time.Hour)
+	fastingRepo := fasting.NewRepository(db)
+	for _, in := range []fasting.Interval{
+		{UserID: userID, StartedAt: shortStart, EndedAt: &shortEnd, LocalDate: localDayOf(shortStart)},
+		{UserID: userID, StartedAt: longStart, EndedAt: &longEnd, LocalDate: localDayOf(longStart)},
+	} {
+		require.NoError(t, db.Create(&in).Error)
+		t.Cleanup(func(id uuid.UUID) func() {
+			return func() { db.Exec("DELETE FROM fasting_intervals WHERE id = ?", id) }
+		}(in.ID))
+	}
+
+	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{}).WithFasting(fastingRepo)
+
+	ctx, err := g.BuildContext(context.Background(), userID, now, loc)
+	require.NoError(t, err)
+
+	require.InDelta(t, 30.0, ctx.DeclaredFastHours, 0.01, "DeclaredFastHours must be the LONGEST single interval, never a sum")
+
+	s := SignalsFrom(ctx)
+	require.InDelta(t, 30.0, s.DeclaredFastHours, 0.01, "SignalsFrom must carry DeclaredFastHours through unchanged")
+}
+
+// TestBuildContextPropagatesFastingSourceError proves the fasting read is
+// NOT swallowed, unlike WeightSource above it: a failed read must fail
+// BuildContext outright rather than silently reporting DeclaredFastHours: 0,
+// which would read as "no long fast" -- a false all-clear on a risk input.
+func TestBuildContextPropagatesFastingSourceError(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, tracking.NewRepository(db), db)
+	memSvc := memory.NewService(logRepo)
+
+	loc := time.UTC
+	now := time.Date(2026, 8, 24, 12, 0, 0, 0, loc)
+
+	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{}).
+		WithFasting(fakeFastingSource{err: errors.New("fasting source unavailable")})
+
+	_, err := g.BuildContext(context.Background(), userID, now, loc)
+	require.Error(t, err, "a fasting source error must fail BuildContext, not be swallowed into a false all-clear")
 }
