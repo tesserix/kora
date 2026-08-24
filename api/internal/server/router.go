@@ -23,6 +23,7 @@ import (
 	"github.com/tesserix/kora/api/internal/compare"
 	"github.com/tesserix/kora/api/internal/dashboard"
 	"github.com/tesserix/kora/api/internal/devices"
+	"github.com/tesserix/kora/api/internal/fasting"
 	"github.com/tesserix/kora/api/internal/feedback"
 	"github.com/tesserix/kora/api/internal/foodlog"
 	"github.com/tesserix/kora/api/internal/groups"
@@ -329,6 +330,11 @@ func NewRouter(deps Deps) *gin.Engine {
 
 		healthHandler := health.NewHandler(health.NewService(trackingRepo))
 		v1.POST("/health/sync", healthHandler.Sync)
+
+		fastingHandler := fasting.NewHandler(fasting.NewRepository(deps.DB))
+		v1.POST("/fasting/start", fastingHandler.Start)
+		v1.POST("/fasting/end", fastingHandler.End)
+		v1.GET("/fasting/current", fastingHandler.Current)
 
 		socialRepo := social.NewRepository(deps.DB)
 		socialHandler := social.NewHandler(social.NewService(socialRepo, userRepo).WithNotifier(notificationsSvc))
