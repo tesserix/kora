@@ -6,6 +6,12 @@ import HealthKit
 // A widget extension CANNOT call requestAuthorization — only the app can —
 // so this either reads or it does not.
 
+/// A step read plus whether its absence was the device being locked (kora#420).
+struct StepRead: Sendable {
+  let steps: Int?
+  let availability: StepReading.Availability
+}
+
 struct DayStep: Identifiable, Sendable {
   let date: Date
   /// nil = unknown for that day. Rendered as a gap, never a zero-height bar.
@@ -17,19 +23,34 @@ enum HealthReader {
   static let store = HKHealthStore()
   private static let probeDays = 7
 
-  /// Today's steps, or nil when unknown. See StepReading for why the probe exists.
-  static func todaySteps() async -> Int? {
-    guard HKHealthStore.isHealthDataAvailable() else { return nil }
+  /// Today's steps, plus why they are missing when they are. See StepReading
+  /// for why the probe exists, and kora#420 for why `locked` is its own answer.
+  static func todaySteps() async -> StepRead {
+    guard HKHealthStore.isHealthDataAvailable() else {
+      return StepRead(steps: nil, availability: .unreadable)
+    }
     let start = Calendar.current.startOfDay(for: Date())
-    let todaySum = await cumulativeSum(from: start, to: Date())
+    let today = await cumulativeSum(from: start, to: Date())
     // A non-finite sum is not evidence of a working read — let it fall
     // through to the probe rather than passing probeFoundSamples: true on
     // its behalf, which would turn "no evidence" into a confident 0.
-    if let todaySum, todaySum.isFinite { return StepReading.resolve(todaySum: todaySum, probeFoundSamples: true) }
+    if let sum = today.sum, sum.isFinite {
+      return StepRead(
+        steps: StepReading.resolve(todaySum: sum, probeFoundSamples: true),
+        availability: .readable)
+    }
 
     let probeStart = Calendar.current.date(byAdding: .day, value: -probeDays, to: start) ?? start
-    let probeSum = await cumulativeSum(from: probeStart, to: Date())
-    return StepReading.resolve(todaySum: nil, probeFoundSamples: probeSum != nil)
+    let probe = await cumulativeSum(from: probeStart, to: Date())
+    // Either query hitting the lock is enough: they are the same store, and a
+    // lock during one is a lock during the pair.
+    let inaccessible = today.inaccessible || probe.inaccessible
+    return StepRead(
+      steps: StepReading.resolve(todaySum: nil, probeFoundSamples: probe.sum != nil),
+      availability: StepReading.availability(
+        todaySum: nil,
+        probeFoundSamples: probe.sum != nil,
+        databaseInaccessible: inaccessible))
   }
 
   /// The last 7 days including today, oldest first, for the medium family's history strip.
@@ -64,20 +85,31 @@ enum HealthReader {
     }
   }
 
-  private static func cumulativeSum(from start: Date, to end: Date) async -> Double? {
+  /// The sum, plus whether the query failed because the store was locked.
+  ///
+  /// The error used to be discarded outright (kora#420). It carries the one
+  /// distinction the layers above cannot recover any other way: HealthKit is
+  /// protected data, so on a LOCKED device every query fails with
+  /// `errorDatabaseInaccessible` instead of returning samples, and that is
+  /// otherwise indistinguishable from a denied read.
+  private static func cumulativeSum(from start: Date, to end: Date) async -> (sum: Double?, inaccessible: Bool) {
     let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: [.strictStartDate])
     return await withCheckedContinuation { continuation in
       let query = HKStatisticsQuery(
         quantityType: HKQuantityType(.stepCount),
         quantitySamplePredicate: predicate,
         options: .cumulativeSum
-      ) { _, statistics, _ in
-        // An error and an absent sum are the same fact here: nothing readable.
-        // StepReading decides what that MEANS.
-        continuation.resume(returning: statistics?.sumQuantity()?.doubleValue(for: .count()))
+      ) { _, statistics, error in
+        continuation.resume(returning: (
+          sum: statistics?.sumQuantity()?.doubleValue(for: .count()),
+          inaccessible: isDatabaseInaccessible(error)))
       }
       store.execute(query)
     }
+  }
+
+  static func isDatabaseInaccessible(_ error: Error?) -> Bool {
+    (error as? HKError)?.code == .errorDatabaseInaccessible
   }
 
   private static func statisticsCollection(anchor: Date) async -> HKStatisticsCollection? {

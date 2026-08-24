@@ -36,3 +36,11 @@ final class EmptyStateCopyTests: XCTestCase {
     XCTAssertNil(EmptyStateCopy.stepsHistoryUnknown.rangeOfCharacter(from: .decimalDigits))
   }
 }
+
+extension EmptyStateCopyTests {
+  // kora#420: a locked phone must not be told it has a permissions problem.
+  func testLockedHistoryDoesNotBlameHealthAccess() {
+    XCTAssertNotEqual(EmptyStateCopy.stepsHistoryLocked, EmptyStateCopy.stepsHistoryUnknown)
+    XCTAssertFalse(EmptyStateCopy.stepsHistoryLocked.lowercased().contains("access"))
+  }
+}

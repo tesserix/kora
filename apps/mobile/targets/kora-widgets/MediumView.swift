@@ -7,6 +7,9 @@ struct MediumView: View {
   let presentation: MetricPresentation
   let snapshot: NutritionSnapshot
   let history: [DayStep]
+  /// Why the history is empty, when it is (kora#420). Only `.locked` changes
+  /// the copy; the strip itself renders unknown days as gaps either way.
+  var availability: StepReading.Availability = .readable
 
   var body: some View {
     HStack(spacing: 14) {
@@ -78,7 +81,12 @@ struct MediumView: View {
 
   private var summaryLine: String {
     let known = history.compactMap(\.steps)
-    guard !known.isEmpty else { return EmptyStateCopy.stepsHistoryUnknown }
+    guard !known.isEmpty else {
+      // A locked device is not a permissions problem, and "Health access
+      // needed" sends the user to Settings to fix something that is not
+      // broken (kora#420).
+      return availability == .locked ? EmptyStateCopy.stepsHistoryLocked : EmptyStateCopy.stepsHistoryUnknown
+    }
     let avg = known.reduce(0, +) / known.count
     let hits = known.filter { snapshot.stepGoal > 0 && Double($0) >= snapshot.stepGoal }.count
     return "avg \(Format.grouped(avg)) · \(hits) goal days"

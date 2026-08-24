@@ -29,3 +29,46 @@ enum StepReading {
     return probeFoundSamples ? 0 : nil
   }
 }
+
+extension StepReading {
+  /// Whether today's step figure could be read, and if not, whether that is
+  /// worth retrying soon (kora#420).
+  ///
+  /// `resolve` answers "what number do we show". This answers "is the absence
+  /// of a number permanent". HealthKit's store is protected data: while the
+  /// device is LOCKED every query fails with `errorDatabaseInaccessible`
+  /// rather than returning samples, so a timeline that happens to refresh on
+  /// a locked phone sees exactly what a denied read sees — no sum, empty
+  /// probe. Folding the two together left the widget showing "unknown" until
+  /// the next 30-minute slot or an app launch, whichever came first, which is
+  /// the intermittent blank people actually report.
+  enum Availability: Equatable {
+    /// A figure was produced, or an absence was proven to be a real zero.
+    case readable
+    /// The store refused because the device is locked. Transient — retry soon.
+    case locked
+    /// No evidence reads work at all. Not going to change by itself, so do
+    /// NOT burn the widget's refresh budget retrying it.
+    case unreadable
+  }
+
+  /// - Parameters:
+  ///   - todaySum: `sumQuantity()` for today, or nil when absent.
+  ///   - probeFoundSamples: whether the 7-day probe found any sample at all.
+  ///   - databaseInaccessible: whether any query failed with HealthKit's
+  ///     `errorDatabaseInaccessible`.
+  ///
+  /// A usable sum or a positive probe wins outright: the lock cost us nothing
+  /// in that case, and scheduling an early refresh for it would spend budget
+  /// on a widget that is already correct.
+  static func availability(
+    todaySum: Double?,
+    probeFoundSamples: Bool,
+    databaseInaccessible: Bool
+  ) -> Availability {
+    if let sum = todaySum, sum.isFinite { return .readable }
+    if probeFoundSamples { return .readable }
+    return databaseInaccessible ? .locked : .unreadable
+  }
+}
+
