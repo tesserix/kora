@@ -13,7 +13,7 @@ issue: 419
    and never reached the chart.
 2. `instrumentChangeNote(sources)` replaces an inline template that hardcoded
    "the two" regardless of how many instruments the series spanned.
-3. `provenanceLabel` renames `manual` to "typed in" **for prose only**.
+3. `provenanceLabel` renames `manual` to "Scale (typed in)" **for prose only**.
    `sourceLabel` is untouched, because the form's "Measured with" picker means
    the instrument — there `manual` really is a scale and "Scale" is right.
 

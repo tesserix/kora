@@ -384,7 +384,11 @@ export function formatMetricNumber(metric: CompositionMetric, value: number): st
  * a thing you can measure with.
  */
 const PROVENANCE_LABELS: Partial<Record<WeightSource, string>> = {
-  manual: "typed in",
+  // Keeps the word "Scale" -- a typed reading really did come off a scale, so
+  // dropping it would be its own inaccuracy, and "Measured by typed in" is
+  // not a sentence. The parenthetical is what separates it from "Scale
+  // screenshot", which is the same instrument read a different way.
+  manual: "Scale (typed in)",
 };
 
 export function provenanceLabel(source: WeightSource): string {

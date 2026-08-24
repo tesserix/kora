@@ -307,7 +307,12 @@ describe("instrumentChangeNote (#419)", () => {
     // which is right there and wrong here: beside "Scale screenshot" it
     // reads as one device rather than a number a person entered.
     const note = instrumentChangeNote(["scale_screenshot", "manual"]);
+    expect(note).toContain("Scale screenshot, then Scale (typed in)");
+    // The bare "Scale" that made the two look like one device must be gone,
+    // while the word "Scale" itself stays -- a typed reading did come off a
+    // scale, and "Measured by typed in" is not a sentence.
     expect(note).not.toMatch(/then Scale\./);
+    expect(note).toContain("typed in");
   });
 
   it("still reads naturally for the two-instrument case", () => {
