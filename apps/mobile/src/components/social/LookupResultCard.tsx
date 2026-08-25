@@ -2,16 +2,9 @@ import { View } from "react-native";
 import { Avatar } from "@/components/Avatar";
 import { AppText } from "@/components/Text";
 import { Button } from "@/components/Button";
+import { initials } from "@/lib/initials";
 import { useTheme } from "@/theme";
 import type { LookupResult } from "@/api/types";
-
-// initials() mirrors app/profile.tsx's fallback so one person renders the same
-// letters everywhere they appear without a picture.
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "";
-  return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
-}
 
 type Props = { result: LookupResult; onSend: () => void; sending: boolean };
 

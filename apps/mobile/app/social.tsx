@@ -19,6 +19,7 @@ import { PressableScale } from "@/motion";
 import { useCircles, useFriends, useFriendRequests, useGroups, useAcceptRequest, useDeclineRequest } from "@/api/hooks";
 import { useToast } from "@/components/Toast";
 import { apiErrorMessage } from "@/lib/apiErrorMessage";
+import { initials } from "@/lib/initials";
 import { useTheme } from "@/theme";
 
 import type { Friend, GroupSummary } from "@/api/types";
@@ -39,16 +40,6 @@ import type { Friend, GroupSummary } from "@/api/types";
 const FRIEND_PREVIEW = 5;
 const GROUP_PREVIEW = 4;
 const REQUEST_PREVIEW = 2;
-
-// kora#449 task 15 finding 8: this returned the literal "K" for an empty
-// name, which reads as a real person's initial rather than a fallback. ""
-// falls through to Avatar's own empty-initials rendering (a blank glyph,
-// same as LookupResultCard.tsx's `initials() || "@"` neighbors it with).
-function initials(name: string): string {
-  const parts = name.split(" ").filter(Boolean);
-  if (parts.length === 0) return "";
-  return parts.map((p) => p[0]).join("").slice(0, 2).toUpperCase();
-}
 
 // kora#449 task 15 finding 3, mirroring LookupResultCard.tsx's fallback
 // (kora#443): a blank display_name must never render as an empty line or an
@@ -130,7 +121,7 @@ function PersonRow({ friend }: { friend: Friend }) {
       onPress={() => router.push(`/friend/${friend.id}` as Href)}
       style={{ flexDirection: "row", alignItems: "center", minHeight: 44, paddingVertical: spacing.xs, gap: spacing.sm }}
     >
-      <Avatar initials={initials(friend.display_name)} size={30} />
+      <Avatar initials={initials(friend.display_name)} uri={friend.avatar_url} size={30} />
       <AppText style={{ flex: 1, fontSize: 15, color: instrument.ink }}>{name}</AppText>
       <Icon name="chevron-right" size={14} color={instrument.mut} />
     </PressableScale>
@@ -219,6 +210,10 @@ export default function Social() {
                     return (
                     <View key={req.id}>
                       <View style={{ flexDirection: "row", alignItems: "center", minHeight: 44, paddingVertical: spacing.xs, gap: spacing.sm }}>
+                        {/* This is the screen where consent is granted — the
+                            face is the whole point of being able to tell who
+                            is asking before accepting (kora#454). */}
+                        <Avatar initials={initials(req.user.display_name)} uri={req.user.avatar_url} size={30} />
                         <AppText style={{ flex: 1, fontSize: 15, color: instrument.ink }}>
                           {reqName}
                         </AppText>

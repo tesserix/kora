@@ -22,6 +22,7 @@ import { BezelCluster, ZoneRule, WellFooter } from "@/components/instrument/Beze
 import { monoStyle } from "@/components/instrument/typography";
 import { useProfile, useDashboard, useDayLogs, useUnreadCount, useCoachNudges } from "@/api/hooks";
 import { shouldOfferConnect, useHealth } from "@/health";
+import { initials } from "@/lib/initials";
 import { useTheme } from "@/theme";
 import { accessibleMealLabel } from "@/lib/portionAssumedLabel";
 import { now, todayLocalDate } from "@/lib/shotsClock";
@@ -51,10 +52,6 @@ function greeting(): string {
 }
 function dateLabel(): string {
   return now().toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
-}
-function initials(name?: string): string {
-  if (!name) return "K";
-  return name.split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase();
 }
 function mealTime(log: FoodLog): string {
   return new Date(log.logged_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
