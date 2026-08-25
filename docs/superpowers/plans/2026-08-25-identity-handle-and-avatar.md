@@ -1586,7 +1586,7 @@ func do(r *gin.Engine, method, path, body string) *httptest.ResponseRecorder {
 func TestHandler_SetThenLookup(t *testing.T) {
 	db := testDB(t)
 	id := seedUser(t, db)
-	t.Cleanup(func() { db.Exec(`DELETE FROM retired_handles WHERE handle_canonical = 'ada1ove'`) })
+	t.Cleanup(func() { db.Exec(`DELETE FROM retired_handles WHERE handle_canonical = 'ada10ve'`) })
 	r := engine(t, db, id)
 
 	rec := do(r, http.MethodPut, "/v1/me/handle", `{"handle":"adalove"}`)
