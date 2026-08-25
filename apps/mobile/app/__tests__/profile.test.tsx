@@ -170,6 +170,20 @@ test("picking a photo uploads it as a new picture", async () => {
   expect(mockUploadAvatar.mock.calls[0][0]).toBeInstanceOf(FormData);
 });
 
+// kora#446 already had to fix one neighbouring surface for shipping a
+// touch target under the iOS 44pt minimum. "Change picture" is a compact
+// text link, not a full-width Button, so nothing else here catches a
+// regression that shrinks its hit area back down to the visible label's own
+// ~17-18pt line box.
+test("keeps the Change picture link at a 44pt touch target, not just its small label", async () => {
+  const { getByTestId } = await render(<Profile />);
+  const target = getByTestId("profile-change-picture-target");
+  const styles = (Array.isArray(target.props.style) ? target.props.style : [target.props.style]).flat(Infinity);
+  const minHeights = styles.filter(Boolean).map((s) => s.minHeight).filter((v) => typeof v === "number");
+  expect(minHeights.length).toBeGreaterThan(0);
+  expect(Math.max(...minHeights)).toBeGreaterThanOrEqual(44);
+});
+
 test("a denied photo-library permission surfaces as recoverable copy, not a silent no-op", async () => {
   (ImagePicker.requestMediaLibraryPermissionsAsync as jest.Mock).mockResolvedValueOnce({
     granted: false,

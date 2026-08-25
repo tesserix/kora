@@ -173,11 +173,17 @@ export default function ProfileScreen() {
         <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>
           {/* Identity hero: one bezel cluster carries avatar, name, handle and
               email together (spec: More "bezel identity hero (56px avatar
-              well + name + mono email)"). The screen's one accent moment is
-              the whisper of orange lume behind the avatar well below — every
-              other affordance here (change/remove picture, save/remove
-              handle) is demoted to lit-ink or danger, never accent, so it
-              doesn't compete with that one moment. */}
+              well + name + mono email)"). The screen's one accent SURFACE is
+              the whisper of orange lume behind the avatar well below —
+              change/remove picture and remove-handle are text links demoted
+              to lit-ink/danger, never accent. "Save handle" is the one
+              exception: it's the screen's sole primary write action, styled
+              as a ghost CTA rather than a filled accent button, which is the
+              contract's own precedent for a primary action (screens-and-
+              accent.md: "ghost-CTA plus stays (primary action)", same as
+              Home's "Log a meal" / Diary's "Add dinner"). A ghost label is
+              accent-colored text with no filled surface, not a second accent
+              block competing with the avatar glow. */}
           <BezelCluster radius={25} testID="profile-identity-hero">
             <View style={{ padding: spacing.md }}>
               <View style={{ flexDirection: "row", alignItems: "center" }}>
@@ -212,15 +218,25 @@ export default function ProfileScreen() {
 
               {/* Compact picture affordances — text links, not full-width
                   ghost buttons, so this stays a single line instead of its
-                  own stacked row. hitSlop keeps the tap target at 44pt even
-                  though the visible label is smaller (spec: touch targets). */}
+                  own stacked row. Each link is wrapped at minHeight: 44 (the
+                  dominant pattern for this, e.g. app/social.tsx's
+                  OverflowRow/PersonRow/GroupRow, InviteFriendSheet.tsx:54,
+                  FriendsLeaderboard.tsx:60) rather than hitSlop, because a
+                  13px label's own line box is only ~17-18pt tall — hitSlop
+                  alone can't reach the 44pt iOS minimum without also risking
+                  the two links' hit areas overlapping across the spacing.lg
+                  gap between them (kora#446 already had to fix one
+                  neighbouring surface for exactly this). minHeight avoids
+                  both problems: the full 44pt lands on each link without
+                  extending sideways into the other's space. */}
               <View style={{ flexDirection: "row", gap: spacing.lg, marginTop: spacing.sm }}>
                 <PressableScale
+                  testID="profile-change-picture-target"
                   accessibilityRole="button"
-                  hitSlop={10}
                   haptic="none"
                   onPress={pickPicture}
                   disabled={uploadAvatar.isPending}
+                  style={{ minHeight: 44, justifyContent: "center" }}
                 >
                   <AppText style={{ fontSize: 13, fontWeight: "600", color: instrument.ink }}>
                     Change picture
@@ -229,10 +245,10 @@ export default function ProfileScreen() {
                 {data?.avatar_url ? (
                   <PressableScale
                     accessibilityRole="button"
-                    hitSlop={10}
                     haptic="none"
                     onPress={onRemovePicture}
                     disabled={deleteAvatar.isPending}
+                    style={{ minHeight: 44, justifyContent: "center" }}
                   >
                     <AppText style={{ fontSize: 13, fontWeight: "600", color: instrument.danger }}>
                       Remove picture
@@ -281,6 +297,7 @@ export default function ProfileScreen() {
                 />
                 <Button
                   title="Save handle"
+                  variant="ghost"
                   onPress={onSaveHandle}
                   disabled={setHandle.isPending || handleInput.trim().length === 0}
                 />
@@ -293,10 +310,9 @@ export default function ProfileScreen() {
               {myHandle.data?.handle ? (
                 <PressableScale
                   accessibilityRole="button"
-                  hitSlop={10}
                   haptic="none"
                   onPress={onRemoveHandle}
-                  style={{ marginTop: spacing.sm, alignSelf: "flex-start" }}
+                  style={{ marginTop: spacing.sm, alignSelf: "flex-start", minHeight: 44, justifyContent: "center" }}
                 >
                   <AppText style={{ fontSize: 13, fontWeight: "600", color: instrument.danger }}>
                     Remove handle
