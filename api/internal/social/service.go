@@ -252,6 +252,39 @@ func (s Service) ListRequests(ctx context.Context, userID uuid.UUID) (incoming, 
 	return incoming, outgoing, nil
 }
 
+// FriendshipStatus reports viewerID's relationship to otherID, satisfying
+// identity.FriendshipStatusProvider structurally (kora#453) -- identity
+// declares that interface rather than taking a *social.Service directly
+// because internal/social already imports internal/identity, and the
+// reverse import would cycle. See FriendshipStatusProvider's doc comment in
+// internal/identity/friendship.go for the full reasoning.
+//
+// Self is identity's job, not this method's: identity.Service.Lookup checks
+// viewerID == otherID BEFORE ever calling this, so a self-lookup never
+// reaches here. This method only ever sees two DISTINCT users, which is why
+// it can answer purely from FindByPair's Status and RequesterID with no
+// extra self-case of its own.
+func (s Service) FriendshipStatus(ctx context.Context, viewerID, otherID uuid.UUID) (identity.FriendshipStatus, error) {
+	f, err := s.repo.FindByPair(ctx, viewerID, otherID)
+	if err != nil {
+		return identity.FriendshipNone, err
+	}
+	if f == nil {
+		return identity.FriendshipNone, nil
+	}
+	switch f.Status {
+	case FriendStatusAccepted:
+		return identity.FriendshipFriends, nil
+	case FriendStatusPending:
+		if f.RequesterID == viewerID {
+			return identity.FriendshipRequestSent, nil
+		}
+		return identity.FriendshipRequestReceived, nil
+	default:
+		return identity.FriendshipNone, nil
+	}
+}
+
 func (s Service) MyCode(ctx context.Context, userID uuid.UUID) (string, string, error) {
 	u, err := s.users.ByID(ctx, userID)
 	if err != nil {

@@ -18,4 +18,9 @@ type LookupView struct {
 	// AvatarURL is "" when the user has no picture. The client falls back to
 	// initials on empty, so a URL that resolves to nothing is worse than none.
 	AvatarURL string `json:"avatar_url"`
+	// FriendshipStatus is the viewer's relationship to this person (kora#453)
+	// -- see FriendshipStatus's doc comment for the exact five wire values.
+	// It is "none" whenever Lookup was not given a FriendshipStatusProvider,
+	// which is a degrade, not a claim that no relationship exists.
+	FriendshipStatus FriendshipStatus `json:"friendship_status"`
 }

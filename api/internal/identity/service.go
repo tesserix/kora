@@ -16,9 +16,10 @@ import (
 // does not depend on object storage to be tested, and so the URL scheme stays a
 // deployment concern rather than something baked into user rows.
 type Service struct {
-	repo      Repository
-	avatarURL func(path string) string
-	store     assets.Store
+	repo        Repository
+	avatarURL   func(path string) string
+	store       assets.Store
+	friendships FriendshipStatusProvider
 }
 
 // NewService takes a bare URL composer, for callers and tests that do not need
@@ -36,6 +37,17 @@ func NewServiceWithAssets(repo Repository, store assets.Store) Service {
 		store = assets.Noop{}
 	}
 	return Service{repo: repo, avatarURL: store.URL, store: store}
+}
+
+// WithFriendships wires a FriendshipStatusProvider (social.Service in
+// production, via router.go) into Lookup so it can report the viewer's
+// relationship to the looked-up person. A Service built without this call
+// still compiles and runs -- Lookup simply degrades friendship_status to
+// FriendshipNone, same nil-tolerant shape as social.Service.WithNotifier /
+// WithHandles.
+func (s Service) WithFriendships(p FriendshipStatusProvider) Service {
+	s.friendships = p
+	return s
 }
 
 // SetAvatar normalises data, stores it at a fresh path, points the user row at
@@ -174,15 +186,15 @@ func (s Service) MyHandle(ctx context.Context, userID uuid.UUID) (string, error)
 	return me.Handle, nil
 }
 
-// Lookup resolves a spoken handle to one person. EXACT MATCH ONLY, after
-// folding -- there is no prefix variant of this method and there must never be
-// one, because prefix search would make the whole user base enumerable and tell
-// anyone who cares who uses a calorie tracker.
+// Lookup resolves a spoken handle to one person, as seen by viewerID. EXACT
+// MATCH ONLY, after folding -- there is no prefix variant of this method and
+// there must never be one, because prefix search would make the whole user
+// base enumerable and tell anyone who cares who uses a calorie tracker.
 //
 // A handle that cannot even be a handle (wrong shape, reserved) returns
 // ErrNotFound rather than a validation error: the caller asked "who is this",
 // and "nobody" is the honest answer for every input that no account can hold.
-func (s Service) Lookup(ctx context.Context, raw string) (LookupView, error) {
+func (s Service) Lookup(ctx context.Context, viewerID uuid.UUID, raw string) (LookupView, error) {
 	_, canonical, err := Canonical(raw)
 	if err != nil {
 		return LookupView{}, ErrNotFound
@@ -192,9 +204,36 @@ func (s Service) Lookup(ctx context.Context, raw string) (LookupView, error) {
 		return LookupView{}, err
 	}
 	return LookupView{
-		ID:          u.ID,
-		DisplayName: u.DisplayName,
-		Handle:      u.Handle,
-		AvatarURL:   s.avatarURL(u.AvatarPath),
+		ID:               u.ID,
+		DisplayName:      u.DisplayName,
+		Handle:           u.Handle,
+		AvatarURL:        s.avatarURL(u.AvatarPath),
+		FriendshipStatus: s.friendshipStatus(ctx, viewerID, u.ID),
 	}, nil
+}
+
+// friendshipStatus resolves the viewer's relationship to other, degrading to
+// FriendshipNone when there is no provider (nil-tolerant, see
+// FriendshipStatusProvider's doc comment) or when the provider itself
+// errors -- a friendship-status lookup failing must not turn a successful
+// handle lookup into a 500, since the worst outcome of getting this wrong is
+// a stale button, not a wrong action (SendRequest is idempotent either way).
+//
+// Self is handled BEFORE the provider is consulted, and unconditionally: a
+// user is never their own pending request or friend, so this needs no DB
+// round trip and holds even when s.friendships is nil.
+func (s Service) friendshipStatus(ctx context.Context, viewerID, other uuid.UUID) FriendshipStatus {
+	if viewerID == other {
+		return FriendshipSelf
+	}
+	if s.friendships == nil {
+		return FriendshipNone
+	}
+	status, err := s.friendships.FriendshipStatus(ctx, viewerID, other)
+	if err != nil {
+		slog.ErrorContext(ctx, "friendship status lookup failed; lookup degrades to none",
+			"viewer_id", viewerID, "other_id", other, "error", err)
+		return FriendshipNone
+	}
+	return status
 }

@@ -263,7 +263,7 @@ func TestSendRequestByHandle_CreatesPendingResolvingSameUserLookupWould(t *testi
 	svc := svcWithHandles(db)
 
 	lookupSvc := identity.NewService(identity.NewRepository(db), func(string) string { return "" })
-	looked, err := lookupSvc.Lookup(context.Background(), "benhandle")
+	looked, err := lookupSvc.Lookup(context.Background(), a, "benhandle")
 	require.NoError(t, err)
 	require.Equal(t, b, looked.ID)
 

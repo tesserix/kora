@@ -355,14 +355,18 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.GET("/fasting/current", fastingHandler.Current)
 
 		socialRepo := social.NewRepository(deps.DB)
-		socialHandler := social.NewHandler(
-			social.NewService(socialRepo, userRepo, assetsStore(deps.Assets).URL).
-				WithNotifier(notificationsSvc).
-				// A handle sent here is resolved through the SAME
-				// identity.Repository.FindByCanonical (kora#449 task 13b) as
-				// GET /v1/users/lookup -- there is exactly one place that
-				// reads by handle_canonical.
-				WithHandles(identity.NewRepository(deps.DB)))
+		// Held in a variable, not built inline, because the identity handler
+		// below also needs it: identity.Service.WithFriendships takes this
+		// same instance (kora#453) so GET /v1/users/lookup and
+		// POST /v1/friends/requests read one friendship graph, not two.
+		socialSvc := social.NewService(socialRepo, userRepo, assetsStore(deps.Assets).URL).
+			WithNotifier(notificationsSvc).
+			// A handle sent here is resolved through the SAME
+			// identity.Repository.FindByCanonical (kora#449 task 13b) as
+			// GET /v1/users/lookup -- there is exactly one place that
+			// reads by handle_canonical.
+			WithHandles(identity.NewRepository(deps.DB))
+		socialHandler := social.NewHandler(socialSvc)
 		v1.GET("/friends", socialHandler.ListFriends)
 		v1.GET("/friends/requests", socialHandler.ListRequests)
 		// "Send a request to this handle" is exact-match lookup in disguise:
@@ -396,7 +400,11 @@ func NewRouter(deps Deps) *gin.Engine {
 		// Handles (kora#449). Exact match only: there is no listing or prefix
 		// route here, and adding one would make the user base enumerable.
 		identityHandler := identity.NewHandler(
-			identity.NewServiceWithAssets(identity.NewRepository(deps.DB), assetsStore(deps.Assets)))
+			identity.NewServiceWithAssets(identity.NewRepository(deps.DB), assetsStore(deps.Assets)).
+				// So GET /v1/users/lookup can report the viewer's
+				// relationship to the looked-up person instead of always
+				// offering a live "Send request" (kora#453).
+				WithFriendships(socialSvc))
 		v1.GET("/me/handle", identityHandler.GetHandle)
 		// SetHandle answers a distinguishable 409 handle_taken (kora#449) --
 		// that is only safe because discovery is rate-bounded, same as

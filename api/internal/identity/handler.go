@@ -63,7 +63,8 @@ func writeErr(c *gin.Context, err error) {
 // Lookup resolves one handle to one person. There is no listing form of this
 // endpoint and there must never be one.
 func (h Handler) Lookup(c *gin.Context) {
-	if _, ok := h.resolveUser(c); !ok {
+	viewerID, ok := h.resolveUser(c)
+	if !ok {
 		return
 	}
 	raw := c.Query("handle")
@@ -71,7 +72,7 @@ func (h Handler) Lookup(c *gin.Context) {
 		httpx.Error(c, http.StatusBadRequest, "invalid_input", "handle is required")
 		return
 	}
-	view, err := h.svc.Lookup(c.Request.Context(), raw)
+	view, err := h.svc.Lookup(c.Request.Context(), viewerID, raw)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			httpx.Error(c, http.StatusNotFound, "not_found", "No Kora account has that handle.")
