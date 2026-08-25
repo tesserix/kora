@@ -45,6 +45,17 @@ type AppleRevoker interface {
 	RevokeRefreshToken(ctx context.Context, refreshToken string) error
 }
 
+// ObjectDeleter removes one stored object. Declared HERE, at the consumer, for
+// the same reason CacheEvicter is: assets.Store satisfies it structurally at
+// the wiring site, and a test fake needs no bucket.
+//
+// It may be nil. A deployment with no bucket configured wires nothing, and
+// Delete must degrade to "skip the object" rather than panic -- the same
+// treatment the nil Apple client already gets.
+type ObjectDeleter interface {
+	Delete(ctx context.Context, path string) error
+}
+
 // AuditRecorder writes the admin audit row for a deletion. It MUST write on
 // the tx it is handed, so the audit row and the DELETE commit or roll back
 // together -- an audit trail that survives a rolled-back delete is worse than
@@ -80,14 +91,15 @@ type Service struct {
 	identities IdentityDeleter
 	apple      AppleRevoker
 	audit      AuditRecorder
+	objects    ObjectDeleter
 }
 
 // NewService builds the deletion service. Both the admin "delete this user"
 // endpoint and the user's own DELETE /v1/me go through the same instance --
 // two implementations of an 18-table cascade is the failure this design
 // exists to prevent.
-func NewService(db *gorm.DB, c CacheEvicter, id IdentityDeleter, a AppleRevoker, audit AuditRecorder) Service {
-	return Service{db: db, cache: c, identities: id, apple: a, audit: audit}
+func NewService(db *gorm.DB, c CacheEvicter, id IdentityDeleter, a AppleRevoker, audit AuditRecorder, objects ObjectDeleter) Service {
+	return Service{db: db, cache: c, identities: id, apple: a, audit: audit, objects: objects}
 }
 
 // DeleteActor identifies who is deleting. IsAdmin drives whether a
@@ -106,6 +118,9 @@ type DeleteResult struct {
 	Transfers               []Transfer `json:"transfers"`
 	FirebaseIdentityRemoved bool       `json:"firebase_identity_removed"`
 	AppleTokenRevoked       bool       `json:"apple_token_revoked"`
+	// AvatarObjectRemoved is false when the DB delete succeeded but the stored
+	// picture survived -- same reporting rule as FirebaseIdentityRemoved.
+	AvatarObjectRemoved bool `json:"avatar_object_removed"`
 }
 
 // Delete removes a user account. Irreversible; there is no grace period.
@@ -126,6 +141,11 @@ type DeleteResult struct {
 //     Reverse the order and a failed DB delete leaves an un-signin-able
 //     identity with orphaned personal data and no retry path -- exactly what
 //     deletion exists to prevent.
+//  6. Avatar object. AFTER the DB delete and non-fatal, for the same reason
+//     Apple revocation is non-fatal: Apple requires deletion to complete
+//     in-app, so a bucket outage cannot be what stops it. u.AvatarPath was
+//     read from the row up front -- like the Apple token and the Firebase
+//     uid, it stops existing the moment the DELETE lands.
 func (s Service) Delete(ctx context.Context, userID uuid.UUID, actor DeleteActor) (DeleteResult, error) {
 	var res DeleteResult
 
@@ -169,6 +189,25 @@ func (s Service) Delete(ctx context.Context, userID uuid.UUID, actor DeleteActor
 			}
 		}
 
+		// Retire the handle BEFORE the DELETE, on the same tx, so the two
+		// commit or roll back together -- a retirement that survives a
+		// rolled-back delete, or a delete that loses its retirement, are both
+		// wrong. See the "No foreign key to users" comment in migration
+		// 000056: retirement must outlive the account that held it, or
+		// deleting an account returns the handle to the pool and reopens the
+		// same impersonation the retired_handles table exists to prevent.
+		//
+		// HandleCanonical is '' (not NULL) for a user who never claimed a
+		// handle -- same AppleRefreshToken trap noted above -- so the guard
+		// MUST be != "".
+		if u.HandleCanonical != "" {
+			if err := tx.Exec(
+				`INSERT INTO retired_handles (handle_canonical) VALUES (?)
+				 ON CONFLICT (handle_canonical) DO NOTHING`, u.HandleCanonical).Error; err != nil {
+				return fmt.Errorf("user: retire handle on delete: %w", err)
+			}
+		}
+
 		out := tx.Exec(`DELETE FROM users WHERE id = ?`, userID)
 		if out.Error != nil {
 			return fmt.Errorf("user: delete row: %w", out.Error)
@@ -194,6 +233,15 @@ func (s Service) Delete(ctx context.Context, userID uuid.UUID, actor DeleteActor
 			"user_id", userID, "firebase_uid", u.FirebaseUID, "error", err)
 	} else {
 		res.FirebaseIdentityRemoved = true
+	}
+
+	if u.AvatarPath != "" && s.objects != nil {
+		if err := s.objects.Delete(ctx, u.AvatarPath); err != nil {
+			slog.ErrorContext(ctx, "avatar object survived deletion; NEEDS MANUAL CLEANUP",
+				"user_id", userID, "path", u.AvatarPath, "error", err)
+		} else {
+			res.AvatarObjectRemoved = true
+		}
 	}
 
 	return res, nil

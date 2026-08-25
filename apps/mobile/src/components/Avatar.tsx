@@ -1,8 +1,9 @@
-import { StyleSheet, View } from "react-native";
+import { useState } from "react";
+import { Image, StyleSheet, View } from "react-native";
 import { AppText } from "./Text";
 import { useTheme } from "@/theme";
 
-type Props = { initials: string; size?: number };
+type Props = { initials: string; size?: number; uri?: string | null };
 
 // The initial is authored at this fraction of the circle's diameter.
 const GLYPH_RATIO = 0.38;
@@ -32,8 +33,25 @@ const MAX_FONT_SCALE = MAX_GLYPH_RATIO / GLYPH_RATIO;
 // Instrument Glass inset well — swapped from `colors.cardSecondary` /
 // `colors.label`, both of which carry a faint green tint in dark mode (spec:
 // "Avatar.tsx ... only if they leak green — check").
-export function Avatar({ initials, size = 40 }: Props) {
+export function Avatar({ initials, size = 40, uri }: Props) {
   const { instrument } = useTheme();
+  // An empty string is the API's "no picture" value, not a URL. Treating it as
+  // one renders a broken image inside a friend row — worse than the initials
+  // it replaced. Same for null, which is what a stale cache returns.
+  const hasPicture = typeof uri === "string" && uri.length > 0;
+  // A 404, a transient CDN blip, or a deleted object with a stale avatar_url
+  // all fail the same way: onError fires, and the letters take over instead
+  // of a permanently blank circle (kora#449 task 15 finding 2). Reset on
+  // every `uri` change so a fresh upload isn't stuck showing initials because
+  // an earlier URL once failed -- adjusted during render (React's documented
+  // pattern for state derived from a changing prop, not an effect) so a
+  // fresh `uri` can't render one stale failed frame first.
+  const [failed, setFailed] = useState(false);
+  const [lastUri, setLastUri] = useState(uri);
+  if (uri !== lastUri) {
+    setLastUri(uri);
+    setFailed(false);
+  }
   return (
     <View
       style={{
@@ -47,12 +65,21 @@ export function Avatar({ initials, size = 40 }: Props) {
         justifyContent: "center",
       }}
     >
-      <AppText
-        maxFontSizeMultiplier={MAX_FONT_SCALE}
-        style={{ fontSize: size * GLYPH_RATIO, fontWeight: "600", color: instrument.ink }}
-      >
-        {initials}
-      </AppText>
+      {hasPicture && !failed ? (
+        <Image
+          source={{ uri }}
+          style={{ width: size, height: size, borderRadius: size / 2 }}
+          accessible={false}
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        <AppText
+          maxFontSizeMultiplier={MAX_FONT_SCALE}
+          style={{ fontSize: size * GLYPH_RATIO, fontWeight: "600", color: instrument.ink }}
+        >
+          {initials}
+        </AppText>
+      )}
     </View>
   );
 }

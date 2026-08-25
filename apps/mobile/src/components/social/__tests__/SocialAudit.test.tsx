@@ -14,7 +14,7 @@ const circle = (over: Partial<Circle> & { id: string }): Circle => ({
   ...over,
 });
 
-const ada = { id: "u1", display_name: "Ada" };
+const ada = { id: "u1", display_name: "Ada" , avatar_url: "" };
 
 beforeEach(() => mockPush.mockClear());
 

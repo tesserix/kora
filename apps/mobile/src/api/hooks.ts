@@ -64,6 +64,7 @@ import type {
   GroupProgress,
   GroupSummary,
   LogSource,
+  LookupResult,
   MealPlanProposal,
   Memory,
   Metric,
@@ -78,6 +79,7 @@ import type {
   MentorProfileInput,
   MentorProposalAcceptance,
   MyFriendCode,
+  MyHandle,
   ShareCategory,
   OnboardingInput,
   LogRecipeResult,
@@ -1367,7 +1369,10 @@ export function useFriendRequests() {
 export function useSendFriendRequest() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: { email?: string; code?: string }) =>
+    // Exactly one of email, code or handle goes on the wire -- the server
+    // returns invalid_input (ErrBadInput) for two or zero (kora#449 task 13b,
+    // api/internal/social/service.go's SendRequest).
+    mutationFn: (input: { email?: string; code?: string; handle?: string }) =>
       apiFetch("/v1/friends/requests", { method: "POST", body: JSON.stringify(input) }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["friend-requests"] });
@@ -1407,6 +1412,77 @@ export function useMyFriendCode() {
   return useQuery({
     queryKey: ["friend-code"],
     queryFn: () => apiFetch("/v1/friends/code") as Promise<MyFriendCode>,
+  });
+}
+
+// Handles (kora#449). Lookup is a MUTATION despite reading: a query keyed on
+// the typed text would fire on every keystroke against the one rate-limited
+// endpoint in the API, and that limiter is what stands between exact-match
+// lookup and enumeration. The user asks once, by pressing a button.
+export function useLookupHandle() {
+  return useMutation({
+    mutationFn: (handle: string) =>
+      apiFetch(`/v1/users/lookup?handle=${encodeURIComponent(handle)}`) as Promise<LookupResult>,
+  });
+}
+
+export function useMyHandle() {
+  return useQuery({
+    queryKey: ["my-handle"],
+    queryFn: () => apiFetch("/v1/me/handle") as Promise<MyHandle>,
+  });
+}
+
+export function useSetHandle() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (handle: string) =>
+      apiFetch("/v1/me/handle", {
+        method: "PUT",
+        body: JSON.stringify({ handle }),
+      }) as Promise<MyHandle>,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["my-handle"] });
+    },
+  });
+}
+
+export function useClearHandle() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiFetch("/v1/me/handle", { method: "DELETE" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["my-handle"] });
+    },
+  });
+}
+
+// Both avatar mutations invalidate every surface that renders a face: the
+// profile itself (["profile"], not ["me"] — GET /v1/me is keyed "profile"),
+// the friends list, the circles audit, and the memberships list (renders
+// share.MemberView, which carries avatar_url) all read an avatar_url, and a
+// stale one shows the old picture until the next cold start.
+function invalidateAvatarSurfaces(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: ["profile"] });
+  qc.invalidateQueries({ queryKey: ["friends"] });
+  qc.invalidateQueries({ queryKey: ["circles"] });
+  qc.invalidateQueries({ queryKey: ["memberships"] });
+}
+
+export function useUploadAvatar() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (form: FormData) =>
+      apiFetchMultipart("/v1/me/avatar", form, { method: "PUT" }) as Promise<{ avatar_url: string }>,
+    onSuccess: () => invalidateAvatarSurfaces(qc),
+  });
+}
+
+export function useDeleteAvatar() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiFetch("/v1/me/avatar", { method: "DELETE" }),
+    onSuccess: () => invalidateAvatarSurfaces(qc),
   });
 }
 

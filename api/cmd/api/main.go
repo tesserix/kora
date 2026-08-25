@@ -26,6 +26,7 @@ import (
 	"github.com/tesserix/kora/api/internal/ai"
 	"github.com/tesserix/kora/api/internal/ai/providers"
 	"github.com/tesserix/kora/api/internal/appleid"
+	"github.com/tesserix/kora/api/internal/assets"
 	"github.com/tesserix/kora/api/internal/auth"
 	"github.com/tesserix/kora/api/internal/billing"
 	"github.com/tesserix/kora/api/internal/bodyread"
@@ -87,6 +88,25 @@ func main() {
 	}
 
 	resolveHandler, aiProvider, resolveCache, bodyCompositionCache := buildResolveHandler(context.Background(), cfg, db, logger)
+
+	// Precedence: a real bucket, else a local directory for laptop work, else
+	// Noop. Never a nil Store -- router.go must not have to nil-check it, the
+	// same reasoning the bodyread.NoCache{} wiring already follows.
+	var assetStore assets.Store = assets.Noop{}
+	switch {
+	case cfg.AssetsBucket != "":
+		s, err := assets.NewGCS(context.Background(), cfg.AssetsBucket, cfg.AssetsPublicBaseURL)
+		if err != nil {
+			// Non-fatal: an API that will not start because object storage is
+			// unreachable takes down food logging with it. Avatars degrade to
+			// "nobody has a picture"; everything else is unaffected.
+			slog.Error("assets: gcs unavailable; profile pictures disabled", "error", err)
+		} else {
+			assetStore = s
+		}
+	case cfg.AssetsLocalDir != "":
+		assetStore = assets.NewLocal(cfg.AssetsLocalDir, cfg.AssetsPublicBaseURL)
+	}
 
 	schedCtx, schedCancel := context.WithCancel(context.Background())
 	if cfg.SchedulerInterval > 0 {
@@ -186,6 +206,7 @@ func main() {
 			Agents:               coordinator,
 			ResolveCache:         resolveCache,
 			BodyCompositionCache: bodyCompositionCache,
+			Assets:               assetStore,
 			BFFHMACKey:           cfg.BFFHMACKey,
 			AppleExchanger:       appleExchanger,
 			IdentityDeleter:      identityDeleter,

@@ -31,6 +31,36 @@ type User struct {
 	// nothing.
 	AppleRefreshToken string `gorm:"column:apple_refresh_token" json:"-"`
 
+	// Handle is what the user typed (trimmed and lowercased); HandleCanonical
+	// is that with confusables folded, and is what the unique index and every
+	// lookup use. Both are nullable in SQL and '' in Go for a user who has no
+	// handle -- a presence check MUST be `!= ""`, the same trap AppleRefreshToken
+	// documents above.
+	//
+	// json:"-" on both: they are hand-projected on every read path and are never
+	// serialised from this struct directly. Serialising the model directly is
+	// how an email leaks.
+	Handle          string `gorm:"column:handle" json:"-"`
+	HandleCanonical string `gorm:"column:handle_canonical" json:"-"`
+
+	// AvatarPath is an object path, never a URL. See the column comment in
+	// migration 000056. json:"-" so it can never reach a client directly --
+	// AvatarURL below is the only client-safe form.
+	AvatarPath string `gorm:"column:avatar_path" json:"-"`
+
+	// AvatarURL is computed, not stored -- gorm:"-" keeps GORM from treating
+	// it as a column. Handler.Me and Handler.UpdateProfile populate it via
+	// their avatarURL composer (Assets.URL(AvatarPath)) before serialising,
+	// the third path (after identity.LookupView and social.FriendView) that
+	// exposes a picture, and the only one that serialises the model directly
+	// rather than a hand-built projection -- see the Handle comment above for
+	// why that is normally avoided; this field is exempt because it is never
+	// populated from the DB, only computed just before response.
+	//
+	// "" for a user with no picture -- the client falls back to initials on
+	// empty, the same rule as every other AvatarURL in this codebase.
+	AvatarURL string `gorm:"-" json:"avatar_url"`
+
 	Sex            string     `json:"sex"`
 	BirthYear      int        `json:"birth_year"`
 	HeightCm       float64    `json:"height_cm"`

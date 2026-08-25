@@ -90,6 +90,13 @@ type Config struct {
 	// the product name: a link the app has not registered opens nothing at
 	// all, stranding the user in a browser after they have paid.
 	CashfreeReturnURL string
+	// Object storage for user-supplied assets (kora#449). Empty AssetsBucket
+	// selects assets.Noop -- an environment with no bucket behaves as if every
+	// user has no picture, rather than failing uploads, so nobody working on
+	// anything else needs GCS credentials.
+	AssetsBucket        string
+	AssetsPublicBaseURL string
+	AssetsLocalDir      string
 }
 
 func Load() (Config, error) {
@@ -130,6 +137,9 @@ func Load() (Config, error) {
 		CashfreeSecretKey:        os.Getenv("CASHFREE_SECRET_KEY"),
 		CashfreeSandbox:          os.Getenv("CASHFREE_SANDBOX") == "true",
 		CashfreeReturnURL:        getenv("CASHFREE_RETURN_URL", "mobile://billing/return"),
+		AssetsBucket:             os.Getenv("ASSETS_BUCKET"),
+		AssetsPublicBaseURL:      os.Getenv("ASSETS_PUBLIC_BASE_URL"),
+		AssetsLocalDir:           os.Getenv("ASSETS_LOCAL_DIR"),
 	}
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("config: DATABASE_URL is required")

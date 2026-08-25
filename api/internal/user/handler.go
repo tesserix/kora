@@ -13,8 +13,9 @@ import (
 )
 
 type Handler struct {
-	repo Repository
-	svc  Service
+	repo      Repository
+	svc       Service
+	avatarURL func(path string) string
 }
 
 // NewHandler takes the deletion Service as a REQUIRED argument rather than an
@@ -22,6 +23,27 @@ type Handler struct {
 // forgets it must fail to compile, not silently serve a handler that panics.
 func NewHandler(repo Repository, svc Service) Handler {
 	return Handler{repo: repo, svc: svc}
+}
+
+// WithAvatarURL sets the composer from a stored object PATH to a public URL
+// (kora#449 task 10) -- an optional builder, like social.Service.WithNotifier,
+// rather than a NewHandler argument, so every pre-existing call site keeps
+// compiling. A Handler with none set has a nil avatarURL; withAvatar guards
+// that the same way assets.Noop{} does, by producing "" rather than panicking.
+func (h Handler) WithAvatarURL(f func(path string) string) Handler {
+	h.avatarURL = f
+	return h
+}
+
+// withAvatar composes u's AvatarURL in place and returns it, so Me and
+// UpdateProfile can serialise the same shape. A nil avatarURL (no builder
+// call, e.g. an older test) degrades to "" -- the same "no picture" value a
+// real composer returns for an empty path -- rather than a nil-func panic.
+func (h Handler) withAvatar(u User) User {
+	if h.avatarURL != nil {
+		u.AvatarURL = h.avatarURL(u.AvatarPath)
+	}
+	return u
 }
 
 func (h Handler) Me(c *gin.Context) {
@@ -36,7 +58,7 @@ func (h Handler) Me(c *gin.Context) {
 		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not load profile")
 		return
 	}
-	httpx.OK(c, u)
+	httpx.OK(c, h.withAvatar(u))
 }
 
 // MaxDisplayNameLen bounds the name at a length no real name exceeds, so a
@@ -112,7 +134,7 @@ func (h Handler) UpdateProfile(c *gin.Context) {
 		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not load profile")
 		return
 	}
-	httpx.OK(c, u)
+	httpx.OK(c, h.withAvatar(u))
 }
 
 // DeleteMe serves DELETE /v1/me — the caller deletes their own account. The

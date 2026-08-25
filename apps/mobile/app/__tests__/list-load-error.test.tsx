@@ -5,6 +5,25 @@ import Groups from "../groups";
 import NotificationsScreen from "../notifications";
 import ChallengeDetailScreen from "../challenge/[id]";
 
+// The real "@/lib/api" pulls in firebase/auth (real ESM), which Jest cannot
+// parse unmocked. Friends renders AddFriendSheet, which imports it directly
+// (not through @/api/hooks, mocked below) -- same reasoning and shape as
+// AddFriendSheet.test.tsx's own mock and social.test.tsx's.
+jest.mock("@/lib/api", () => ({
+  ApiError: class ApiError extends Error {
+    status: number;
+    code: string;
+    requestId?: string;
+    constructor(status: number, code: string, message: string, requestId?: string) {
+      super(message);
+      this.status = status;
+      this.code = code;
+      this.requestId = requestId;
+      this.name = "ApiError";
+    }
+  },
+}));
+
 // #174 item 1, systemic version: four screens read only `data`, so an outage
 // rendered as "you have nothing" — an empty friends list, no groups, an empty
 // inbox, and a challenge with no standings. A list screen does not need the
@@ -29,6 +48,7 @@ jest.mock("@/api/hooks", () => ({
   useDeclineRequest: () => ({ mutate: jest.fn(), isPending: false }),
   useUnfriend: () => ({ mutate: jest.fn(), isPending: false }),
   useSendFriendRequest: () => ({ mutate: jest.fn(), isPending: false }),
+  useLookupHandle: () => ({ mutate: jest.fn(), isPending: false }),
   useMyFriendCode: () => ({ data: undefined }),
   useFriendsProgress: () => ({ data: undefined }),
   useGroups: () => mockGroups(),

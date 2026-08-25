@@ -264,7 +264,11 @@ func TestDropShareProgressBackfillsCirclesFromFriendships(t *testing.T) {
 	require.NoError(t, Migrate(url), "bring schema to latest before stepping 000055 down")
 
 	m := testMigrator(t, url)
-	require.NoError(t, m.Steps(-1), "step 000055 down to restore users.share_progress")
+	// Migrate to the explicit pre-000055 version, not "one step below
+	// latest": later migrations (e.g. 000056) get appended after this test
+	// was written, and Steps(-1) from an unknown latest would undo whichever
+	// migration happens to be newest instead of 000055 specifically.
+	require.NoError(t, m.Migrate(54), "migrate to 000054 to restore users.share_progress")
 	t.Cleanup(func() {
 		// Leave the schema at latest for every other test in this (and
 		// later) run, regardless of how this test exits.

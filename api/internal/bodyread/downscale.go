@@ -1,40 +1,18 @@
 // downscale.go shrinks an oversized body-composition screenshot before it is
-// sent to a vision provider.
-//
-// WHY NOT golang.org/x/image/draw: it is not in go.mod/go.sum (verified) and
-// this file deliberately does not add it. x/image/draw's bilinear/
-// Catmull-Rom interpolators earn their cost on photographs, where smooth
-// resampling avoids visible aliasing on natural detail. A smart-scale
-// result screenshot is the opposite case: rendered UI text on a flat,
-// clean background — exactly the input nearest-neighbor handles adequately,
-// since there is no fine photographic detail to alias against. If a future
-// caller in this package ever needs high-quality interpolation (a real
-// photo, not a screenshot), x/image would need to be added as a new
-// dependency then — this file is not a substitute for that decision.
+// sent to a vision provider. The pixel cap and the resampler both live in
+// internal/imageproc, shared with avatar normalisation -- see kora#365 for why
+// this file averages rather than point-samples, and kora#449 for why a second
+// caller made them shared.
 package bodyread
 
 import (
 	"bytes"
 	"image"
-	"image/color"
 	"image/jpeg"  // also registers jpeg for image.Decode
 	_ "image/png" // format registration for image.Decode; scale-app screenshots are jpeg or png (confirmed against apps/mobile's image-picker mime types)
-)
 
-// maxDecodePixels bounds the pixel count image.Decode is allowed to
-// allocate, checked via the cheap image.DecodeConfig header read BEFORE the
-// real decode ever runs. This is a SECURITY guard, not an optimization: the
-// 8 MiB byte-size cap the handler enforces (internal/bodyread/handler.go)
-// bounds the ENCODED size on the wire, but a crafted PNG can declare
-// enormous pixel dimensions in a few header bytes while staying well under
-// that cap — image.Decode allocates the FULL pixel buffer for whatever
-// dimensions the header claims before this file's own maxDimension
-// downscale logic ever gets a chance to run, so without this check an
-// authenticated user could OOM the pod with one upload that passes every
-// existing size check. 50,000,000 px (e.g. ~7071x7071) is far larger than
-// any real scale-app screenshot (even a 4K photo of a scale display is
-// under 9,000,000 px) while staying a small, bounded allocation.
-const maxDecodePixels = 50_000_000
+	"github.com/tesserix/kora/api/internal/imageproc"
+)
 
 // maxDimension bounds the long side of an image sent to the provider. 1024
 // is deliberately generous for this use case: the source is large,
@@ -50,28 +28,6 @@ const maxDimension = 1024
 // that keeps output size well below the original while leaving numerals and
 // labels sharp enough to read.
 const downscaleJPEGQuality = 85
-
-// declaredPixelsExceedCap reports whether data's HEADER ALONE (read via the
-// cheap image.DecodeConfig, which never allocates a pixel buffer) declares
-// more pixels than maxDecodePixels allows. Extracted from
-// downscaleForProvider as its own function so it can be exercised directly
-// against a crafted header — proving the CAP COMPARISON itself fires,
-// independent of whatever downscaleForProvider's decode-failure fallback
-// would otherwise do with the same bytes (a crafted file with no valid
-// pixel data fails a real image.Decode anyway, which would otherwise mask
-// a broken or missing guard behind the same "return original, no error"
-// outcome).
-//
-// A header that fails to decode at all (cfgErr != nil) is NOT treated as
-// exceeding the cap here — that is downscaleForProvider's decode-failure
-// path to handle, via the full image.Decode call that follows.
-func declaredPixelsExceedCap(data []byte) bool {
-	cfg, _, cfgErr := image.DecodeConfig(bytes.NewReader(data))
-	if cfgErr != nil {
-		return false
-	}
-	return int64(cfg.Width)*int64(cfg.Height) > maxDecodePixels
-}
 
 // downscaleForProvider shrinks data proportionally so its long side is at
 // most maxDimension, re-encoding the result as JPEG. It always returns
@@ -89,10 +45,10 @@ func declaredPixelsExceedCap(data []byte) bool {
 // as a lossy no-op.
 func downscaleForProvider(data []byte, mime string) ([]byte, string, error) {
 	// Cheap header-only read BEFORE the real decode allocates anything — see
-	// maxDecodePixels' doc comment for why this exists and what it defends
-	// against. A config-decode failure is handled identically to a full
-	// decode failure below: fall back to the original bytes, no error.
-	if declaredPixelsExceedCap(data) {
+	// imageproc.MaxDecodePixels' doc comment for why this exists and what it
+	// defends against. A config-decode failure is handled identically to a
+	// full decode failure below: fall back to the original bytes, no error.
+	if imageproc.DeclaredPixelsExceedCap(data) {
 		return data, mime, nil
 	}
 
@@ -115,7 +71,7 @@ func downscaleForProvider(data []byte, mime string) ([]byte, string, error) {
 	newWidth := max(1, int(float64(width)*scale))
 	newHeight := max(1, int(float64(height)*scale))
 
-	dst := boxAverageResize(img, newWidth, newHeight)
+	dst := imageproc.BoxAverageResize(img, newWidth, newHeight)
 
 	var buf bytes.Buffer
 	if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: downscaleJPEGQuality}); err != nil {
@@ -126,80 +82,4 @@ func downscaleForProvider(data []byte, mime string) ([]byte, string, error) {
 	}
 
 	return buf.Bytes(), "image/jpeg", nil
-}
-
-// boxAverageResize maps each destination pixel to the AVERAGE of the source
-// rectangle it covers (kora#365).
-//
-// It replaces a nearest-neighbour resize, whose justification in this file
-// had the reasoning backwards: it argued point sampling was acceptable
-// because the input is "rendered UI text on a clean background, not a
-// photograph". Crisp thin-stroke text is precisely where point sampling does
-// the MOST damage — it discards pixels outright, so at the ~0.64 factor a
-// 736x1600 screenshot takes, roughly a third of rows and columns vanish and
-// thin glyph strokes break up. A photograph's soft gradients are what
-// tolerate point sampling.
-//
-// Averaging is also what this repo already decided elsewhere for the same
-// reason: apps/mobile/shots-golden/README.md records goldens as "box-averaged
-// 3x3 down" from the native capture, chosen because the content is UI text.
-//
-// Source rectangles are computed from destination EDGES rather than centres,
-// so every source pixel contributes to exactly one destination pixel and none
-// is skipped -- that coverage property is the whole point.
-func boxAverageResize(src image.Image, newWidth, newHeight int) *image.RGBA {
-	srcBounds := src.Bounds()
-	srcWidth, srcHeight := srcBounds.Dx(), srcBounds.Dy()
-
-	dst := image.NewRGBA(image.Rect(0, 0, newWidth, newHeight))
-	xRatio := float64(srcWidth) / float64(newWidth)
-	yRatio := float64(srcHeight) / float64(newHeight)
-
-	for dy := 0; dy < newHeight; dy++ {
-		y0 := srcBounds.Min.Y + int(float64(dy)*yRatio)
-		y1 := srcBounds.Min.Y + int(float64(dy+1)*yRatio)
-		if y1 <= y0 {
-			// Upscaling, or a ratio below 1 per axis: still average at
-			// least one row rather than producing an empty box.
-			y1 = y0 + 1
-		}
-		if y1 > srcBounds.Max.Y {
-			y1 = srcBounds.Max.Y
-		}
-		for dx := 0; dx < newWidth; dx++ {
-			x0 := srcBounds.Min.X + int(float64(dx)*xRatio)
-			x1 := srcBounds.Min.X + int(float64(dx+1)*xRatio)
-			if x1 <= x0 {
-				x1 = x0 + 1
-			}
-			if x1 > srcBounds.Max.X {
-				x1 = srcBounds.Max.X
-			}
-
-			var rSum, gSum, bSum, aSum uint64
-			var n uint64
-			for sy := y0; sy < y1; sy++ {
-				for sx := x0; sx < x1; sx++ {
-					r, g, b, a := src.At(sx, sy).RGBA()
-					// RGBA() returns 16-bit premultiplied values; >>8 puts
-					// them back in the 8-bit space image.RGBA stores.
-					rSum += uint64(r >> 8)
-					gSum += uint64(g >> 8)
-					bSum += uint64(b >> 8)
-					aSum += uint64(a >> 8)
-					n++
-				}
-			}
-			if n == 0 {
-				continue
-			}
-			dst.Set(dx, dy, color.RGBA{
-				R: uint8(rSum / n),
-				G: uint8(gSum / n),
-				B: uint8(bSum / n),
-				A: uint8(aSum / n),
-			})
-		}
-	}
-	return dst
 }

@@ -2,6 +2,25 @@ import { render, fireEvent } from "@testing-library/react-native";
 
 import Social from "../social";
 
+// The real "@/lib/api" pulls in firebase/auth (real ESM), which Jest cannot
+// parse unmocked. Social renders AddFriendSheet, which imports it directly
+// (not through @/api/hooks, mocked below) -- same reasoning and shape as
+// AddFriendSheet.test.tsx's own mock and profile.test.tsx's.
+jest.mock("@/lib/api", () => ({
+  ApiError: class ApiError extends Error {
+    status: number;
+    code: string;
+    requestId?: string;
+    constructor(status: number, code: string, message: string, requestId?: string) {
+      super(message);
+      this.status = status;
+      this.code = code;
+      this.requestId = requestId;
+      this.name = "ApiError";
+    }
+  },
+}));
+
 const mockPush = jest.fn();
 const mockAccept = jest.fn();
 const mockDecline = jest.fn();
@@ -24,6 +43,7 @@ jest.mock("@/api/hooks", () => ({
   useAcceptRequest: () => ({ mutate: mockAccept, isPending: false }),
   useDeclineRequest: () => ({ mutate: mockDecline, isPending: false }),
   useSendFriendRequest: () => ({ mutate: jest.fn(), isPending: false }),
+  useLookupHandle: () => ({ mutate: jest.fn(), isPending: false }),
   useMyFriendCode: () => ({ data: { code: "ABC", link: "l" } }),
   useCreateGroup: () => ({ mutate: jest.fn(), isPending: false }),
   useJoinGroup: () => ({ mutate: jest.fn(), isPending: false }),
@@ -77,7 +97,7 @@ test("a failed groups fetch leaves the audit and friends intact", async () => {
 
 test("the empty state explains how to find people, not just that there are none", async () => {
   const { getByText } = await render(<Social />);
-  expect(getByText(/friend code, or by the email they signed up with/i)).toBeTruthy();
+  expect(getByText(/handle, email or friend code/i)).toBeTruthy();
   expect(getByText("Create one, or join with a code.")).toBeTruthy();
 });
 
@@ -113,4 +133,31 @@ test("a group opens its detail screen", async () => {
   const { getByLabelText } = await render(<Social />);
   await fireEvent.press(getByLabelText("Open group Sunday Runners"));
   expect(mockPush).toHaveBeenCalledWith("/group/g1");
+});
+
+// kora#449 task 15 finding 3: a blank display_name rendered as an empty line
+// and an accessibility label with nothing after it ("Open ", "Accept request
+// from "). "@handle" is the same fallback LookupResultCard.tsx uses (kora#443).
+test("a friend with no display name falls back to their handle", async () => {
+  mockFriends = [{ id: "u9", display_name: "", handle: "ada_l" }];
+  const { getByText, getByLabelText } = await render(<Social />);
+  expect(getByText("@ada_l")).toBeTruthy();
+  expect(getByLabelText("Open @ada_l")).toBeTruthy();
+});
+
+test("an incoming request with no display name falls back to their handle, in both the row and the a11y labels", async () => {
+  mockIncoming = [{ id: "r1", user: { id: "u2", display_name: "", handle: "ben_f" } }];
+  const { getByText, getByLabelText } = await render(<Social />);
+  expect(getByText("@ben_f")).toBeTruthy();
+  expect(getByLabelText("Accept request from @ben_f")).toBeTruthy();
+  expect(getByLabelText("Decline request from @ben_f")).toBeTruthy();
+});
+
+// kora#449 task 15 finding 8: a friend with no name used to show a hardcoded
+// "K" avatar glyph -- reading as a real person's initial rather than a
+// fallback. It must never render "K" for someone whose name is blank.
+test("a friend with no display name never shows the hardcoded K avatar glyph", async () => {
+  mockFriends = [{ id: "u9", display_name: "", handle: "ada_l" }];
+  const { queryByText } = await render(<Social />);
+  expect(queryByText("K")).toBeNull();
 });

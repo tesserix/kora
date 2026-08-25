@@ -19,6 +19,14 @@ export type Profile = {
    * src/lib/bodyComposition.ts.
    */
   height_cm: number;
+  /**
+   * Handles and pictures (kora#449). Also on the wire from GET /v1/me for the
+   * same reason height_cm is: internal/user's User is serialised whole, and
+   * this field rides along with it. "" means no picture (and, same as
+   * LookupResult.avatar_url below, no bucket configured) — never treat it as
+   * a broken URL.
+   */
+  avatar_url: string;
 };
 
 export interface AIQuotaWindow {
@@ -788,6 +796,12 @@ export interface Resolution {
 export interface Friend {
   id: string;
   display_name: string;
+  // kora#449: GET /v1/friends and GET /v1/friends/requests both project
+  // social.FriendView, which always carries handle and avatar_url (see
+  // api/internal/social/model.go) -- the type was never updated to match
+  // when handles shipped. avatar_url is "" for a user with no picture.
+  handle: string;
+  avatar_url: string;
 }
 
 export interface FriendRequest {
@@ -805,6 +819,20 @@ export interface MyFriendCode {
   link: string;
 }
 
+// Handles (kora#449). The projection GET /v1/users/lookup returns. There is
+// no listing form of that endpoint — exact match only — so there is no array
+// type here either.
+export type LookupResult = {
+  id: string;
+  display_name: string;
+  handle: string;
+  // "" when the person has no picture, and when no bucket is configured.
+  // Treat it as "no picture", never as a failure.
+  avatar_url: string;
+};
+
+export type MyHandle = { handle: string };
+
 // Sharing circles (kora#326/#437). ShareCategory mirrors the server's
 // access.Category allow-list and the share_grants_category_check constraint;
 // a value outside it can never be granted, so the union is the whole set.
@@ -815,6 +843,10 @@ export type ShareCategory = "progress" | "body";
 export interface CircleMember {
   id: string;
   display_name: string;
+  // "" when the person has no picture, and when no bucket is configured.
+  // Treat it as "no picture", never as a failure — same rule as
+  // LookupResult.avatar_url above.
+  avatar_url: string;
 }
 
 // The MEMBER's view of a circle they were added to (kora#440). Mirrors the

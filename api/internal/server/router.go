@@ -15,6 +15,7 @@ import (
 	"github.com/tesserix/kora/api/internal/admin"
 	"github.com/tesserix/kora/api/internal/agents"
 	"github.com/tesserix/kora/api/internal/ai"
+	"github.com/tesserix/kora/api/internal/assets"
 	"github.com/tesserix/kora/api/internal/auth"
 	"github.com/tesserix/kora/api/internal/bffauth"
 	"github.com/tesserix/kora/api/internal/billing"
@@ -30,12 +31,14 @@ import (
 	"github.com/tesserix/kora/api/internal/groups"
 	"github.com/tesserix/kora/api/internal/health"
 	"github.com/tesserix/kora/api/internal/httpx"
+	"github.com/tesserix/kora/api/internal/identity"
 	"github.com/tesserix/kora/api/internal/memory"
 	"github.com/tesserix/kora/api/internal/mentor"
 	"github.com/tesserix/kora/api/internal/notifications"
 	"github.com/tesserix/kora/api/internal/nutrition"
 	"github.com/tesserix/kora/api/internal/onboarding"
 	"github.com/tesserix/kora/api/internal/pins"
+	"github.com/tesserix/kora/api/internal/ratelimit"
 	"github.com/tesserix/kora/api/internal/recipes"
 	"github.com/tesserix/kora/api/internal/resolve"
 	"github.com/tesserix/kora/api/internal/savedmeals"
@@ -110,6 +113,11 @@ type Deps struct {
 	// AppleExchanger above — so an environment with no gateway advertises no
 	// checkout at all rather than one that takes money and grants nothing.
 	Cashfree billing.CashfreeConfig
+	// Assets is where profile pictures are written (kora#449). Nil in a
+	// test-constructed Deps that never set it — defaulted to assets.Noop{}
+	// the same way ResolveCache/BodyCompositionCache are, so nothing
+	// downstream has to nil-check it.
+	Assets assets.Store
 }
 
 func NewRouter(deps Deps) *gin.Engine {
@@ -147,8 +155,13 @@ func NewRouter(deps Deps) *gin.Engine {
 			identityDeleter(deps.IdentityDeleter),
 			deps.AppleRevoker, // may legitimately be nil; Delete tolerates it
 			auditDeletion,
+			assetsStore(deps.Assets), // same nil-to-Noop default as identity's avatar wiring
 		)
-		userHandler := user.NewHandler(userRepo, userSvc)
+		// avatarURL lets Me/UpdateProfile compose their own avatar_url the same
+		// way identity/social/share do (kora#449 task 10) -- WithAvatarURL,
+		// not a constructor arg, so every existing NewHandler(repo, svc) call
+		// site keeps compiling with "" avatar_url, same default as Noop.
+		userHandler := user.NewHandler(userRepo, userSvc).WithAvatarURL(assetsStore(deps.Assets).URL)
 		// tracking.NewRepository is a cheap wrapper (holds only *gorm.DB), so
 		// constructing it again below at the /weight routes is harmless --
 		// both wrap the same deps.DB.
@@ -342,16 +355,32 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.GET("/fasting/current", fastingHandler.Current)
 
 		socialRepo := social.NewRepository(deps.DB)
-		socialHandler := social.NewHandler(social.NewService(socialRepo, userRepo).WithNotifier(notificationsSvc))
+		socialHandler := social.NewHandler(
+			social.NewService(socialRepo, userRepo, assetsStore(deps.Assets).URL).
+				WithNotifier(notificationsSvc).
+				// A handle sent here is resolved through the SAME
+				// identity.Repository.FindByCanonical (kora#449 task 13b) as
+				// GET /v1/users/lookup -- there is exactly one place that
+				// reads by handle_canonical.
+				WithHandles(identity.NewRepository(deps.DB)))
 		v1.GET("/friends", socialHandler.ListFriends)
 		v1.GET("/friends/requests", socialHandler.ListRequests)
-		v1.POST("/friends/requests", socialHandler.SendRequest)
+		// "Send a request to this handle" is exact-match lookup in disguise:
+		// 404-vs-success on this route is the same oracle GET
+		// /v1/users/lookup gives, so it gets the identical per-user budget
+		// (a SEPARATE Window instance -- ratelimit.PerUser holds one per call
+		// site, not a shared one) rather than being left open to the same
+		// enumeration the lookup limiter exists to close.
+		v1.POST("/friends/requests",
+			ratelimit.PerUser(identity.LookupLimit, identity.LookupPeriod),
+			socialHandler.SendRequest)
 		v1.POST("/friends/requests/:id/accept", socialHandler.Accept)
 		v1.POST("/friends/requests/:id/decline", socialHandler.Decline)
 		v1.DELETE("/friends/:userId", socialHandler.Unfriend)
 		v1.GET("/friends/code", socialHandler.Code)
 
-		shareHandler := share.NewHandler(share.NewService(share.NewRepository(deps.DB), socialRepo))
+		shareHandler := share.NewHandler(
+			share.NewService(share.NewRepository(deps.DB, assetsStore(deps.Assets).URL), socialRepo))
 		v1.GET("/share/circles", shareHandler.List)
 		v1.POST("/share/circles", shareHandler.Create)
 		// The member-side mirror of GET /share/circles (kora#440). It is what
@@ -363,6 +392,28 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.DELETE("/share/circles/:id/members/:userId", shareHandler.RemoveMember)
 		v1.PUT("/share/circles/:id/categories", shareHandler.SetCategories)
 		v1.POST("/share/circles/:id/leave", shareHandler.Leave)
+
+		// Handles (kora#449). Exact match only: there is no listing or prefix
+		// route here, and adding one would make the user base enumerable.
+		identityHandler := identity.NewHandler(
+			identity.NewServiceWithAssets(identity.NewRepository(deps.DB), assetsStore(deps.Assets)))
+		v1.GET("/me/handle", identityHandler.GetHandle)
+		// SetHandle answers a distinguishable 409 handle_taken (kora#449) --
+		// that is only safe because discovery is rate-bounded, same as
+		// /users/lookup below. Without this, an attacker walks the handle
+		// space here at unlimited rate and spends the lookup budget only on
+		// confirmed hits.
+		v1.PUT("/me/handle",
+			ratelimit.PerUser(identity.LookupLimit, identity.LookupPeriod),
+			identityHandler.SetHandle)
+		v1.DELETE("/me/handle", identityHandler.ClearHandle)
+		v1.PUT("/me/avatar", identityHandler.SetAvatar)
+		v1.DELETE("/me/avatar", identityHandler.ClearAvatar)
+		// The limiter is on LOOKUP only, and it is not an optimisation: it is
+		// the only thing between exact-match lookup and offline enumeration.
+		v1.GET("/users/lookup",
+			ratelimit.PerUser(identity.LookupLimit, identity.LookupPeriod),
+			identityHandler.Lookup)
 
 		accessSvc := access.NewService(access.NewRepository(deps.DB))
 
@@ -490,6 +541,16 @@ func auditDeletion(tx *gorm.DB, actorID, actorEmail string, targetID uuid.UUID) 
 // rather than being passed through: user.Service.Delete calls DeleteByUser
 // unconditionally, and a nil interface there would panic AFTER the row was
 // already destroyed.
+// assetsStore defaults a nil Store to assets.Noop{}, the same choice
+// deletionCache makes above for resolveCache/bodyCache: router code must
+// never have to nil-check the store itself.
+func assetsStore(a assets.Store) assets.Store {
+	if a == nil {
+		return assets.Noop{}
+	}
+	return a
+}
+
 func deletionCache(resolveCache ai.Cache, bodyCache bodyread.Cache) user.CacheEvicter {
 	if resolveCache == nil {
 		resolveCache = ai.NoCache{}

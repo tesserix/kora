@@ -177,5 +177,30 @@ attempts across two methods returned nothing usable.
 
 ---
 
+## kora#449 — the assets bucket does not exist yet
+
+Profile pictures need a bucket that has never been created:
+
+- **Name**: `kora-prod-assets-in`, region `asia-south1` — matching the
+  `<app>-<scope>-assets` convention of sibling apps and the Cloud SQL region.
+- **Access**: public read on objects. Paths are unguessable (a v4 UUID version
+  segment), and the picture is already visible to anyone holding the handle,
+  which is the consent boundary the whole feature rests on. Signed URLs would
+  mean re-signing on every render of every friend row for no privacy gain.
+- **Lifecycle**: reap `avatars/**` objects that are not the current version.
+  Each write issues a new path, so superseded objects accumulate otherwise.
+- **Identity**: the `kora-api` workload identity service account needs
+  `roles/storage.objectAdmin` scoped to this bucket, not project-wide.
+- **Env on the deployment**: `ASSETS_BUCKET=kora-prod-assets-in`,
+  `ASSETS_PUBLIC_BASE_URL=https://storage.googleapis.com/kora-prod-assets-in`.
+
+Until all of that exists, `ASSETS_BUCKET` is unset in every environment,
+`assets.Noop` is selected, and uploads silently succeed while every avatar URL
+is empty. **That is the state to expect on first deploy** — it is not a bug, and
+it is why the mobile client must treat an empty `avatar_url` as "no picture"
+rather than as a failure.
+
+---
+
 _When a question is resolved, mark it 🟢, record the decision inline, and reflect any
 user-facing change back into `PRODUCT_SPEC.md`._

@@ -13,10 +13,17 @@ import (
 )
 
 type Repository struct {
-	db *gorm.DB
+	db        *gorm.DB
+	avatarURL func(path string) string
 }
 
-func NewRepository(db *gorm.DB) Repository { return Repository{db: db} }
+// NewRepository takes avatarURL as the composer from a stored object PATH to
+// a public URL (same shape as identity.Service's and social.Service's).
+// MemberView is built directly from SQL here, unlike social.FriendView, so
+// the composer is threaded into the repository rather than a service layer.
+func NewRepository(db *gorm.DB, avatarURL func(path string) string) Repository {
+	return Repository{db: db, avatarURL: avatarURL}
+}
 
 func (r Repository) Create(ctx context.Context, ownerID uuid.UUID, name string) (Circle, error) {
 	c := Circle{OwnerID: ownerID, Name: strings.TrimSpace(name)}
@@ -46,6 +53,15 @@ func (r Repository) FindByID(ctx context.Context, id uuid.UUID) (*Circle, error)
 	return &c, nil
 }
 
+// memberRow is the flat scan target for a circle member. AvatarPath is the
+// raw object path; the repository composes it into a URL via r.avatarURL
+// before it reaches a MemberView.
+type memberRow struct {
+	ID          uuid.UUID
+	DisplayName string
+	AvatarPath  string
+}
+
 func (r Repository) ListForOwner(ctx context.Context, ownerID uuid.UUID) ([]CircleView, error) {
 	circles := []Circle{}
 	if err := r.db.WithContext(ctx).
@@ -57,15 +73,23 @@ func (r Repository) ListForOwner(ctx context.Context, ownerID uuid.UUID) ([]Circ
 
 	views := make([]CircleView, 0, len(circles))
 	for _, c := range circles {
-		members := []MemberView{}
+		memberRows := []memberRow{}
 		if err := r.db.WithContext(ctx).
 			Table("share_circle_members AS m").
-			Select("u.id AS id, u.display_name AS display_name").
+			Select("u.id AS id, u.display_name AS display_name, u.avatar_path AS avatar_path").
 			Joins("JOIN users u ON u.id = m.member_user_id").
 			Where("m.circle_id = ?", c.ID).
 			Order("u.display_name").
-			Scan(&members).Error; err != nil {
+			Scan(&memberRows).Error; err != nil {
 			return nil, fmt.Errorf("share: list members: %w", err)
+		}
+		members := make([]MemberView, 0, len(memberRows))
+		for _, row := range memberRows {
+			members = append(members, MemberView{
+				ID:          row.ID,
+				DisplayName: row.DisplayName,
+				AvatarURL:   r.avatarURL(row.AvatarPath),
+			})
 		}
 
 		cats := []access.Category{}
@@ -162,10 +186,11 @@ func (r Repository) ListForMember(ctx context.Context, memberID uuid.UUID) ([]Me
 		CircleID    uuid.UUID
 		OwnerID     uuid.UUID
 		DisplayName string
+		AvatarPath  string
 	}{}
 	if err := r.db.WithContext(ctx).
 		Table("share_circle_members AS m").
-		Select("m.circle_id AS circle_id, c.owner_id AS owner_id, u.display_name AS display_name").
+		Select("m.circle_id AS circle_id, c.owner_id AS owner_id, u.display_name AS display_name, u.avatar_path AS avatar_path").
 		Joins("JOIN share_circles c ON c.id = m.circle_id").
 		Joins("JOIN users u ON u.id = c.owner_id").
 		Where("m.member_user_id = ? AND c.owner_id <> ?", memberID, memberID).
@@ -185,8 +210,12 @@ func (r Repository) ListForMember(ctx context.Context, memberID uuid.UUID) ([]Me
 			return nil, fmt.Errorf("share: list membership grants: %w", err)
 		}
 		views = append(views, MembershipView{
-			CircleID:   row.CircleID,
-			Owner:      MemberView{ID: row.OwnerID, DisplayName: row.DisplayName},
+			CircleID: row.CircleID,
+			Owner: MemberView{
+				ID:          row.OwnerID,
+				DisplayName: row.DisplayName,
+				AvatarURL:   r.avatarURL(row.AvatarPath),
+			},
 			Categories: cats,
 		})
 	}

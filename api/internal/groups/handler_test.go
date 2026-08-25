@@ -203,8 +203,8 @@ func TestUnfriendingRevokesCircleAccessInGroupProgress(t *testing.T) {
 	a := seedUser(t, db, "Ana")
 	b := seedUser(t, db, "Bo")
 
-	socialSvc := social.NewService(social.NewRepository(db), user.NewRepository(db))
-	_, err := socialSvc.SendRequest(t.Context(), a, "gr-"+b.String()+"@test.dev", "")
+	socialSvc := social.NewService(social.NewRepository(db), user.NewRepository(db), func(string) string { return "" })
+	_, err := socialSvc.SendRequest(t.Context(), a, "gr-"+b.String()+"@test.dev", "", "")
 	require.NoError(t, err)
 	// Accept needs the request id; fetch it via ListRequests on B's side.
 	incomingForB, _, err := socialSvc.ListRequests(t.Context(), b)

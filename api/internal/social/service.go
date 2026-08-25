@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
+	"github.com/tesserix/kora/api/internal/identity"
 	"github.com/tesserix/kora/api/internal/user"
 )
 
@@ -17,18 +18,49 @@ type notifier interface {
 	FriendAccepted(ctx context.Context, recipientID, actorID uuid.UUID) error
 }
 
-type Service struct {
-	repo     Repository
-	users    user.Repository
-	notifier notifier
+// handleResolver is the narrow surface SendRequest needs from
+// identity.Repository: a FOLDED handle to its owner, the exact same lookup
+// GET /v1/users/lookup uses. identity.Repository satisfies this directly.
+//
+// It is an interface (not the concrete identity.Repository, which social
+// otherwise could use directly, since internal/identity does not import
+// internal/social) so a Service built without WithHandles has a nil-checkable
+// zero value instead of a struct wrapping a nil *gorm.DB that would panic on
+// first query.
+type handleResolver interface {
+	FindByCanonical(ctx context.Context, canonical string) (user.User, error)
 }
 
-func NewService(repo Repository, users user.Repository) Service {
-	return Service{repo: repo, users: users}
+type Service struct {
+	repo      Repository
+	users     user.Repository
+	handles   handleResolver
+	notifier  notifier
+	avatarURL func(path string) string
+}
+
+// NewService takes avatarURL as the composer from a stored object PATH to a
+// public URL (same shape as identity.Service's, see internal/identity/service.go).
+// ListAccepted returns FriendView.AvatarURL holding the raw path -- ListFriends
+// runs it through avatarURL before returning to a handler, so the repository
+// itself never has to depend on object storage.
+func NewService(repo Repository, users user.Repository, avatarURL func(path string) string) Service {
+	return Service{repo: repo, users: users, avatarURL: avatarURL}
 }
 
 func (s Service) WithNotifier(n notifier) Service {
 	s.notifier = n
+	return s
+}
+
+// WithHandles wires a handle resolver (identity.Repository in production)
+// into SendRequest so a handle third identifier can be resolved. A Service
+// built without this call still compiles and runs -- a handle argument to
+// SendRequest simply resolves to ErrUserNotFound, same as any other
+// unresolvable identifier -- so every existing caller that never mentions
+// handles keeps working unchanged.
+func (s Service) WithHandles(h handleResolver) Service {
+	s.handles = h
 	return s
 }
 
@@ -46,18 +78,28 @@ func generateCode() (string, error) {
 	return string(b), nil
 }
 
-func (s Service) SendRequest(ctx context.Context, requesterID uuid.UUID, email, code string) (Friendship, error) {
+// SendRequest resolves exactly one of email, code or handle to a target user
+// and sends (or idempotently re-sends) a friend request. handle is resolved
+// through the SAME canonical fold GET /v1/users/lookup uses (identity.Canonical
+// + a handle_canonical lookup) -- there must be exactly one implementation of
+// that fold, and duplicating it here to avoid the identity import would be
+// precisely the class of bug this method exists to close (kora#449 task 13b:
+// a confusable handle like ada_l vs ada_1 sending a friend request to a
+// stranger, who is then invited into a share circle with real body metrics).
+func (s Service) SendRequest(ctx context.Context, requesterID uuid.UUID, email, code, handle string) (Friendship, error) {
 	var target user.User
 	var err error
 	switch {
-	case email != "" && code == "":
+	case email != "" && code == "" && handle == "":
 		target, err = s.users.FindByEmail(ctx, email)
-	case code != "" && email == "":
+	case code != "" && email == "" && handle == "":
 		target, err = s.users.FindByCode(ctx, code)
+	case handle != "" && email == "" && code == "":
+		target, err = s.resolveHandle(ctx, handle)
 	default:
 		return Friendship{}, ErrBadInput
 	}
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, identity.ErrNotFound) {
 		return Friendship{}, ErrUserNotFound
 	}
 	if err != nil {
@@ -96,6 +138,28 @@ func (s Service) SendRequest(ctx context.Context, requesterID uuid.UUID, email, 
 		}
 	}
 	return created, nil
+}
+
+// resolveHandle folds raw through identity.Canonical and looks the result up
+// by handles.FindByCanonical -- the exact same two steps identity.Service.Lookup
+// runs, so a handle sent here always resolves to whoever GET
+// /v1/users/lookup would have shown for it.
+//
+// Every failure mode -- invalid shape, reserved, no such handle, or no
+// resolver wired at all -- collapses to identity.ErrNotFound. SendRequest's
+// caller then sees ErrUserNotFound, the same answer an unknown email or code
+// gets: "that handle can't exist" and "nobody has it" must not be
+// distinguishable from outside, or a client could probe handle shapes for
+// what's reserved.
+func (s Service) resolveHandle(ctx context.Context, raw string) (user.User, error) {
+	if s.handles == nil {
+		return user.User{}, identity.ErrNotFound
+	}
+	_, canonical, err := identity.Canonical(raw)
+	if err != nil {
+		return user.User{}, identity.ErrNotFound
+	}
+	return s.handles.FindByCanonical(ctx, canonical)
 }
 
 func (s Service) Accept(ctx context.Context, addresseeID, requestID uuid.UUID) error {
@@ -151,11 +215,41 @@ func (s Service) Unfriend(ctx context.Context, userID, otherID uuid.UUID) error 
 }
 
 func (s Service) ListFriends(ctx context.Context, userID uuid.UUID) ([]FriendView, error) {
-	return s.repo.ListAccepted(ctx, userID)
+	views, err := s.repo.ListAccepted(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range views {
+		// Guarded here, not left to the composer: a caller-supplied avatarURL
+		// is not guaranteed to treat "" specially (assets.Noop{} and
+		// assets.gcsStore.URL do, but a test double need not), and "no
+		// picture" must never become a URL pointing at nothing.
+		if views[i].AvatarURL != "" {
+			views[i].AvatarURL = s.avatarURL(views[i].AvatarURL) // raw path -> composed URL
+		}
+	}
+	return views, nil
 }
 
 func (s Service) ListRequests(ctx context.Context, userID uuid.UUID) (incoming, outgoing []RequestView, err error) {
-	return s.repo.ListPending(ctx, userID)
+	incoming, outgoing, err = s.repo.ListPending(ctx, userID)
+	if err != nil {
+		return nil, nil, err
+	}
+	// Same raw-path -> composed-URL step ListFriends performs, and the same
+	// "" guard: a caller-supplied avatarURL is not guaranteed to treat ""
+	// specially, and "no picture" must never become a URL pointing at nothing.
+	for i := range incoming {
+		if incoming[i].User.AvatarURL != "" {
+			incoming[i].User.AvatarURL = s.avatarURL(incoming[i].User.AvatarURL)
+		}
+	}
+	for i := range outgoing {
+		if outgoing[i].User.AvatarURL != "" {
+			outgoing[i].User.AvatarURL = s.avatarURL(outgoing[i].User.AvatarURL)
+		}
+	}
+	return incoming, outgoing, nil
 }
 
 func (s Service) MyCode(ctx context.Context, userID uuid.UUID) (string, string, error) {

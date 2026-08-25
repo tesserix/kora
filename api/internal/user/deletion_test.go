@@ -100,11 +100,37 @@ func txProbingAuditRecorder(outer *gorm.DB, visibleBeforeCommit *bool) AuditReco
 	}
 }
 
+// fakeObjectDeleter stands in for assets.Store's Delete method. internal/user
+// cannot import internal/assets for a test dependency any more freely than it
+// can import internal/ai -- same consumer-declared-interface reason as
+// CacheEvicter -- so a two-line fake is what the test gets instead of a
+// bucket.
+type fakeObjectDeleter struct {
+	deleted []string
+	err     error
+}
+
+func (f *fakeObjectDeleter) Delete(_ context.Context, path string) error {
+	f.deleted = append(f.deleted, path)
+	return f.err
+}
+
 // newTestService wires a Service whose every external dependency succeeds, so
 // a failing assertion points at the deletion logic and nothing else.
-func newTestService(t *testing.T, db *gorm.DB) Service {
+//
+// objects is variadic so every existing call site (there are many, across
+// this file) keeps compiling unchanged: newTestService(t, db) still gets a
+// working &fakeObjectDeleter{}. A test that cares about the avatar object --
+// to inspect what was deleted, or to exercise the nil-deleter path -- passes
+// exactly one value: newTestService(t, db, objects) or newTestService(t, db, nil).
+func newTestService(t *testing.T, db *gorm.DB, objects ...ObjectDeleter) Service {
 	t.Helper()
-	return NewService(db, &fakeCacheEvicter{}, &fakeIdentityDeleter{}, &fakeAppleRevoker{}, testAuditRecorder)
+	require.LessOrEqual(t, len(objects), 1, "newTestService takes at most one ObjectDeleter override")
+	var o ObjectDeleter = &fakeObjectDeleter{}
+	if len(objects) == 1 {
+		o = objects[0]
+	}
+	return NewService(db, &fakeCacheEvicter{}, &fakeIdentityDeleter{}, &fakeAppleRevoker{}, testAuditRecorder, o)
 }
 
 // newTestServiceWithFailingFirebase wires a Service whose Firebase identity
@@ -114,7 +140,7 @@ func newTestServiceWithFailingFirebase(t *testing.T, db *gorm.DB) Service {
 	t.Helper()
 	return NewService(db, &fakeCacheEvicter{},
 		&fakeIdentityDeleter{err: errors.New("firebase is down")}, &fakeAppleRevoker{},
-		testAuditRecorder)
+		testAuditRecorder, &fakeObjectDeleter{})
 }
 
 // --- seed helpers ----------------------------------------------------------
@@ -124,6 +150,17 @@ func newTestServiceWithFailingFirebase(t *testing.T, db *gorm.DB) Service {
 // import) internal/user, and these tests live in package user, so importing
 // back would create a cycle. Same constraint that forced seedGroup's raw
 // INSERT in ownership_test.go.
+
+// seedUserWithAvatar seeds an ordinary user via seedUser and then sets
+// avatar_path directly, mirroring how a real upload lands the column (see
+// internal/identity/avatar_handler.go). Returns the user's id so callers
+// don't need the whole row.
+func seedUserWithAvatar(t *testing.T, db *gorm.DB, path string) uuid.UUID {
+	t.Helper()
+	u := seedUser(t, db)
+	require.NoError(t, db.Exec(`UPDATE users SET avatar_path = ? WHERE id = ?`, path, u.ID).Error)
+	return u.ID
+}
 
 // seedFoodLog inserts one food log for userID. food_logs.user_id ->
 // users(id) ON DELETE CASCADE removes it when the user goes, so cleanup rides
@@ -496,7 +533,7 @@ func TestDeleteAuditFailureRollsBackTheDelete(t *testing.T) {
 	quiet := seedUser(t, db)
 	seedFoodLog(t, db, quiet.ID)
 	refusing := NewService(db, &fakeCacheEvicter{}, &fakeIdentityDeleter{}, &fakeAppleRevoker{},
-		func(*gorm.DB, string, string, uuid.UUID) error { return errors.New("recorder refused") })
+		func(*gorm.DB, string, string, uuid.UUID) error { return errors.New("recorder refused") }, &fakeObjectDeleter{})
 
 	_, err = refusing.Delete(context.Background(), quiet.ID,
 		DeleteActor{IsAdmin: true, ID: "admin-1", Email: "a@b.com"})
@@ -517,7 +554,7 @@ func TestDeleteAuditRowIsWrittenOnTheDeleteTransaction(t *testing.T) {
 
 	var visibleBeforeCommit bool
 	svc := NewService(db, &fakeCacheEvicter{}, &fakeIdentityDeleter{}, &fakeAppleRevoker{},
-		txProbingAuditRecorder(db, &visibleBeforeCommit))
+		txProbingAuditRecorder(db, &visibleBeforeCommit), &fakeObjectDeleter{})
 
 	_, err := svc.Delete(context.Background(), victim.ID,
 		DeleteActor{IsAdmin: true, ID: "admin-1", Email: "a@b.com"})
@@ -538,7 +575,7 @@ func TestDeleteAuditRowIsWrittenOnTheDeleteTransaction(t *testing.T) {
 // the fact.
 func TestDeleteWithoutAuditRecorderRefusesAdminDeletion(t *testing.T) {
 	db := testDB(t)
-	svc := NewService(db, &fakeCacheEvicter{}, &fakeIdentityDeleter{}, &fakeAppleRevoker{}, nil)
+	svc := NewService(db, &fakeCacheEvicter{}, &fakeIdentityDeleter{}, &fakeAppleRevoker{}, nil, &fakeObjectDeleter{})
 	victim := seedUser(t, db)
 
 	_, err := svc.Delete(context.Background(), victim.ID,
@@ -570,6 +607,60 @@ func TestDeleteReportsFirebaseFailureWithoutFailing(t *testing.T) {
 	assert.Zero(t, n, "the row is still gone")
 }
 
+// TestDeleteRetiresTheHandleSoADifferentUserCannotClaimIt is the invariant
+// migration 000056 writes down in prose: retirement must outlive the account
+// that held it, or deleting an account returns the handle to the pool and
+// reopens the same impersonation retired_handles exists to prevent. This
+// proves it end to end: claim a handle, delete the account, then prove a
+// DIFFERENT user is refused that exact handle afterwards -- not just that a
+// retired_handles row exists, but that it actually blocks reuse.
+func TestDeleteRetiresTheHandleSoADifferentUserCannotClaimIt(t *testing.T) {
+	db := testDB(t)
+	svc := newTestService(t, db)
+	victim := seedUser(t, db)
+
+	handle := "ada" + uuid.New().String()[:8]
+	require.NoError(t, db.Exec(
+		`UPDATE users SET handle = ?, handle_canonical = ? WHERE id = ?`,
+		handle, handle, victim.ID).Error)
+	t.Cleanup(func() { db.Exec(`DELETE FROM retired_handles WHERE handle_canonical = ?`, handle) })
+
+	_, err := svc.Delete(context.Background(), victim.ID, DeleteActor{IsAdmin: false})
+	require.NoError(t, err)
+
+	var retired int64
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM retired_handles WHERE handle_canonical = ?`, handle).Scan(&retired).Error)
+	assert.Equal(t, int64(1), retired, "the deleted account's handle must be retired")
+
+	// A different user must be refused the retired handle -- the DB's own
+	// unique index would allow it (the victim row is gone), so only the
+	// retired_handles row stands in the way.
+	claimant := seedUser(t, db)
+	out := db.Exec(
+		`UPDATE users SET handle = ?, handle_canonical = ? WHERE id = ?
+		 AND NOT EXISTS (SELECT 1 FROM retired_handles WHERE handle_canonical = ?)`,
+		handle, handle, claimant.ID, handle)
+	require.NoError(t, out.Error)
+	assert.Zero(t, out.RowsAffected, "a different user must not be able to claim a retired handle")
+}
+
+func TestDeleteWithNoHandleRetiresNothing(t *testing.T) {
+	db := testDB(t)
+	svc := newTestService(t, db)
+	victim := seedUser(t, db) // HandleCanonical is "" -- never claimed one.
+
+	var before int64
+	require.NoError(t, db.Raw(`SELECT count(*) FROM retired_handles`).Scan(&before).Error)
+
+	_, err := svc.Delete(context.Background(), victim.ID, DeleteActor{IsAdmin: false})
+	require.NoError(t, err)
+
+	var after int64
+	require.NoError(t, db.Raw(`SELECT count(*) FROM retired_handles`).Scan(&after).Error)
+	assert.Equal(t, before, after, "a user who never claimed a handle must not retire the '' zero value")
+}
+
 func TestDeleteUnknownUserIsNotFound(t *testing.T) {
 	db := testDB(t)
 	svc := newTestService(t, db)
@@ -585,7 +676,7 @@ func TestDeleteRevokesAppleTokenBeforeTheRowIsGone(t *testing.T) {
 
 	revoker := &fakeAppleRevoker{}
 	ids := &fakeIdentityDeleter{}
-	svc := NewService(db, &fakeCacheEvicter{}, ids, revoker, testAuditRecorder)
+	svc := NewService(db, &fakeCacheEvicter{}, ids, revoker, testAuditRecorder, &fakeObjectDeleter{})
 
 	res, err := svc.Delete(context.Background(), victim.ID, DeleteActor{})
 	require.NoError(t, err)
@@ -604,7 +695,7 @@ func TestDeleteReportsAppleRevokeFailureWithoutFailing(t *testing.T) {
 		`UPDATE users SET apple_refresh_token = ? WHERE id = ?`, "rt-bad", victim.ID).Error)
 
 	svc := NewService(db, &fakeCacheEvicter{}, &fakeIdentityDeleter{},
-		&fakeAppleRevoker{err: errors.New("apple is down")}, testAuditRecorder)
+		&fakeAppleRevoker{err: errors.New("apple is down")}, testAuditRecorder, &fakeObjectDeleter{})
 
 	res, err := svc.Delete(context.Background(), victim.ID, DeleteActor{})
 	require.NoError(t, err, "Apple requires deletion completes in-app; an outage must not block it")
@@ -624,7 +715,7 @@ func TestDeleteToleratesNilAppleRevoker(t *testing.T) {
 	require.NoError(t, db.Exec(
 		`UPDATE users SET apple_refresh_token = ? WHERE id = ?`, "rt-orphan", victim.ID).Error)
 
-	svc := NewService(db, &fakeCacheEvicter{}, &fakeIdentityDeleter{}, nil, testAuditRecorder)
+	svc := NewService(db, &fakeCacheEvicter{}, &fakeIdentityDeleter{}, nil, testAuditRecorder, &fakeObjectDeleter{})
 
 	res, err := svc.Delete(context.Background(), victim.ID, DeleteActor{})
 	require.NoError(t, err)
@@ -681,4 +772,67 @@ func TestDeleteAccountRemovesHealthKitWeights(t *testing.T) {
 	var count int64
 	require.NoError(t, db.Table("weight_entries").Where("user_id = ?", victim.ID).Count(&count).Error)
 	require.EqualValues(t, 0, count)
+}
+
+// TestDelete_RemovesTheAvatarObject pins that the stored picture is deleted
+// as part of the same account cascade, using the path read off the row
+// BEFORE the DELETE lands (avatar_path stops existing the moment it does).
+func TestDelete_RemovesTheAvatarObject(t *testing.T) {
+	db := testDB(t)
+	objects := &fakeObjectDeleter{}
+	svc := newTestService(t, db, objects)
+
+	id := seedUserWithAvatar(t, db, "avatars/"+uuid.NewString()+"/v1.jpg")
+	var path string
+	require.NoError(t, db.Raw(`SELECT avatar_path FROM users WHERE id = ?`, id).Scan(&path).Error)
+
+	res, err := svc.Delete(context.Background(), id, DeleteActor{})
+	require.NoError(t, err)
+	require.Equal(t, []string{path}, objects.deleted)
+	require.True(t, res.AvatarObjectRemoved)
+}
+
+// TestDelete_WithNoAvatarTouchesNoObject guards the `u.AvatarPath != ""`
+// condition in Delete. A user with no picture must not produce a Delete call
+// on an empty path -- the GCS store would issue a request for the bucket
+// root.
+func TestDelete_WithNoAvatarTouchesNoObject(t *testing.T) {
+	db := testDB(t)
+	objects := &fakeObjectDeleter{}
+	svc := newTestService(t, db, objects)
+
+	_, err := svc.Delete(context.Background(), seedUser(t, db).ID, DeleteActor{})
+	require.NoError(t, err)
+	require.Empty(t, objects.deleted)
+}
+
+// TestDelete_ObjectFailureIsNonFatal: object storage being unreachable must
+// not block the deletion. Apple requires account deletion to complete
+// in-app; a third-party outage cannot be what stops it. The result reports
+// the object survived so it is visible rather than silent.
+func TestDelete_ObjectFailureIsNonFatal(t *testing.T) {
+	db := testDB(t)
+	objects := &fakeObjectDeleter{err: errors.New("bucket unreachable")}
+	svc := newTestService(t, db, objects)
+
+	id := seedUserWithAvatar(t, db, "avatars/"+uuid.NewString()+"/v1.jpg")
+	res, err := svc.Delete(context.Background(), id, DeleteActor{})
+	require.NoError(t, err, "the account must still be deleted")
+	require.False(t, res.AvatarObjectRemoved)
+
+	var n int64
+	require.NoError(t, db.Raw(`SELECT count(*) FROM users WHERE id = ?`, id).Scan(&n).Error)
+	require.EqualValues(t, 0, n)
+}
+
+// TestDelete_NilObjectDeleterIsSkipped: a nil deleter is what a deployment
+// with no bucket wires. Delete must degrade to "skip", exactly as it already
+// does for a nil Apple client, not panic.
+func TestDelete_NilObjectDeleterIsSkipped(t *testing.T) {
+	db := testDB(t)
+	svc := newTestService(t, db, nil)
+	id := seedUserWithAvatar(t, db, "avatars/"+uuid.NewString()+"/v1.jpg")
+	res, err := svc.Delete(context.Background(), id, DeleteActor{})
+	require.NoError(t, err)
+	require.False(t, res.AvatarObjectRemoved)
 }

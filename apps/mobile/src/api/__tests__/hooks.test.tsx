@@ -929,6 +929,20 @@ test("useSendFriendRequest POSTs the body to /v1/friends/requests", async () => 
   });
 });
 
+// kora#449 task 13b: a third mutually-exclusive identifier alongside email
+// and code, resolved server-side through the same canonical fold the handle
+// lookup used to find the person in the first place.
+test("useSendFriendRequest POSTs a handle body to /v1/friends/requests", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({ id: "f1", status: "pending" });
+  const { result } = await renderHook(() => useSendFriendRequest(), { wrapper });
+  result.current.mutate({ handle: "ada" });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(apiFetch).toHaveBeenCalledWith("/v1/friends/requests", {
+    method: "POST",
+    body: JSON.stringify({ handle: "ada" }),
+  });
+});
+
 test("useAcceptRequest POSTs /v1/friends/requests/:id/accept", async () => {
   (apiFetch as jest.Mock).mockResolvedValueOnce({ accepted: true });
   const { result } = await renderHook(() => useAcceptRequest(), { wrapper });

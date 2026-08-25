@@ -58,11 +58,11 @@ func TestSendRequestWritesFriendRequestNotification(t *testing.T) {
 	recipient := seedU(t, db, "Recipient", "recipient-"+uuid.NewString()+"@t.dev")
 
 	notifSvc := notifications.NewService(notifications.NewRepository(db), nil) // nil members ok — no fan-out here
-	svc := social.NewService(social.NewRepository(db), user.NewRepository(db)).WithNotifier(notifSvc)
+	svc := social.NewService(social.NewRepository(db), user.NewRepository(db), func(string) string { return "" }).WithNotifier(notifSvc)
 
 	var recipEmail string
 	require.NoError(t, db.Raw("SELECT email FROM users WHERE id = ?", recipient).Scan(&recipEmail).Error)
-	_, err := svc.SendRequest(context.Background(), sender, recipEmail, "")
+	_, err := svc.SendRequest(context.Background(), sender, recipEmail, "", "")
 	require.NoError(t, err)
 
 	list, err := notifications.NewRepository(db).ListForUser(context.Background(), recipient, 50)
@@ -78,19 +78,19 @@ func TestReversePendingAutoAcceptWritesFriendAcceptNotificationToOriginalRequest
 	userB := seedU(t, db, "Bob", "bob-"+uuid.NewString()+"@t.dev")
 
 	notifSvc := notifications.NewService(notifications.NewRepository(db), nil) // nil members ok — no fan-out here
-	svc := social.NewService(social.NewRepository(db), user.NewRepository(db)).WithNotifier(notifSvc)
+	svc := social.NewService(social.NewRepository(db), user.NewRepository(db), func(string) string { return "" }).WithNotifier(notifSvc)
 
 	var aEmail, bEmail string
 	require.NoError(t, db.Raw("SELECT email FROM users WHERE id = ?", userA).Scan(&aEmail).Error)
 	require.NoError(t, db.Raw("SELECT email FROM users WHERE id = ?", userB).Scan(&bEmail).Error)
 
 	// A sends a friend request to B → pending A->B, friend_request notification to B.
-	_, err := svc.SendRequest(context.Background(), userA, bEmail, "")
+	_, err := svc.SendRequest(context.Background(), userA, bEmail, "", "")
 	require.NoError(t, err)
 
 	// B sends a friend request back to A → reverse-pending auto-accept branch,
 	// which must fire FriendAccepted to the ORIGINAL requester (A).
-	_, err = svc.SendRequest(context.Background(), userB, aEmail, "")
+	_, err = svc.SendRequest(context.Background(), userB, aEmail, "", "")
 	require.NoError(t, err)
 
 	aNotifs, err := notifications.NewRepository(db).ListForUser(context.Background(), userA, 50)
@@ -110,10 +110,10 @@ func TestNotifierErrorDoesNotFailAction(t *testing.T) {
 	db := wiringDB(t)
 	sender := seedU(t, db, "Sender", "s2-"+uuid.NewString()+"@t.dev")
 	recipient := seedU(t, db, "Recipient", "r2-"+uuid.NewString()+"@t.dev")
-	svc := social.NewService(social.NewRepository(db), user.NewRepository(db)).WithNotifier(failingNotifier{})
+	svc := social.NewService(social.NewRepository(db), user.NewRepository(db), func(string) string { return "" }).WithNotifier(failingNotifier{})
 
 	var recipEmail string
 	require.NoError(t, db.Raw("SELECT email FROM users WHERE id = ?", recipient).Scan(&recipEmail).Error)
-	_, err := svc.SendRequest(context.Background(), sender, recipEmail, "")
+	_, err := svc.SendRequest(context.Background(), sender, recipEmail, "", "")
 	require.NoError(t, err) // action succeeds despite the notifier error
 }
