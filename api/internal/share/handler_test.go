@@ -82,30 +82,61 @@ func TestModifyingAnotherOwnersCircleIs404(t *testing.T) {
 // Leave MUST act only on the authenticated caller. It has no owner-gate of
 // its own -- that's the whole point of Leave -- so if the handler ever took
 // the member ID from request input instead of callerID(c), this endpoint
-// would let anyone remove anyone else from any circle. Prove a non-member
-// caller cannot use Leave to evict someone who IS actually a member.
+// would let anyone remove anyone else from any circle. An outsider (not a
+// member) attempts the attack via every channel a regression could plausibly
+// read from -- a JSON body and a query parameter, each carrying the real
+// member's UUID as the payload -- and the real member must survive both.
+// An empty-body request would NOT catch a handler that trusts request input:
+// it would prove only that an omitted payload doesn't accidentally evict
+// anyone, not that a malicious payload is ignored.
 func TestLeaveOnlyRemovesTheAuthenticatedCaller(t *testing.T) {
 	db := testDB(t)
 	repo := NewRepository(db)
-	owner := seedUser(t, db, "owner")
-	member := seedUser(t, db, "member")
-	outsider := seedUser(t, db, "outsider")
-	circle, err := repo.Create(t.Context(), owner, "Household")
-	require.NoError(t, err)
-	require.NoError(t, repo.AddMember(t.Context(), circle.ID, member))
 
-	// outsider calls Leave -- not a member of the circle at all.
-	r := testRouter(t, db, outsider)
-	req := httptest.NewRequest(http.MethodPost, "/v1/share/circles/"+circle.ID.String()+"/leave", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code)
+	assertMemberSurvives := func(t *testing.T, owner, member uuid.UUID) {
+		t.Helper()
+		views, err := repo.ListForOwner(t.Context(), owner)
+		require.NoError(t, err)
+		require.Len(t, views, 1)
+		require.Len(t, views[0].Members, 1)
+		require.Equal(t, member, views[0].Members[0].ID)
+	}
 
-	// The actual member must still be present -- Leave must not have removed
-	// anyone but the (non-member) caller itself.
-	views, err := repo.ListForOwner(t.Context(), owner)
-	require.NoError(t, err)
-	require.Len(t, views, 1)
-	require.Len(t, views[0].Members, 1)
-	require.Equal(t, member, views[0].Members[0].ID)
+	t.Run("JSON body carrying the member's UUID is ignored", func(t *testing.T) {
+		owner := seedUser(t, db, "owner")
+		member := seedUser(t, db, "member")
+		outsider := seedUser(t, db, "outsider")
+		circle, err := repo.Create(t.Context(), owner, "Household")
+		require.NoError(t, err)
+		require.NoError(t, repo.AddMember(t.Context(), circle.ID, member))
+
+		r := testRouter(t, db, outsider)
+		body, _ := json.Marshal(map[string]string{"user_id": member.String()})
+		req := httptest.NewRequest(http.MethodPost, "/v1/share/circles/"+circle.ID.String()+"/leave",
+			bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		assertMemberSurvives(t, owner, member)
+	})
+
+	t.Run("query parameter carrying the member's UUID is ignored", func(t *testing.T) {
+		owner := seedUser(t, db, "owner")
+		member := seedUser(t, db, "member")
+		outsider := seedUser(t, db, "outsider")
+		circle, err := repo.Create(t.Context(), owner, "Household")
+		require.NoError(t, err)
+		require.NoError(t, repo.AddMember(t.Context(), circle.ID, member))
+
+		r := testRouter(t, db, outsider)
+		req := httptest.NewRequest(http.MethodPost,
+			"/v1/share/circles/"+circle.ID.String()+"/leave?user_id="+member.String(), nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		assertMemberSurvives(t, owner, member)
+	})
 }
