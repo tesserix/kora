@@ -200,6 +200,46 @@ func TestListFriends_NoAvatarIsEmptyURL(t *testing.T) {
 	require.Empty(t, got[0].AvatarURL)
 }
 
+// TestListRequests_ComposesAvatarURLForBothDirections guards the
+// Service.ListRequests half of the kora#449 task 15 finding 1 fix: even once
+// the repository selects handle/avatar_path, ListRequests must run the raw
+// path through the same avatarURL composer ListFriends uses -- otherwise a
+// client gets a bare storage path instead of a fetchable URL.
+func TestListRequests_ComposesAvatarURLForBothDirections(t *testing.T) {
+	db := testDB(t)
+	me := seedUser(t, db, "Me")
+	requester := seedUser(t, db, "Requester")
+	addressee := seedUser(t, db, "Addressee")
+
+	requesterPath := "avatars/" + requester.String() + "/v1.jpg"
+	require.NoError(t, db.Exec(
+		`UPDATE users SET handle = 'req_handle', handle_canonical = 'req_handle', avatar_path = ? WHERE id = ?`,
+		requesterPath, requester).Error)
+
+	repo := NewRepository(db)
+	_, err := repo.Create(context.Background(), Friendship{RequesterID: requester, AddresseeID: me, Status: FriendStatusPending})
+	require.NoError(t, err)
+	_, err = repo.Create(context.Background(), Friendship{RequesterID: me, AddresseeID: addressee, Status: FriendStatusPending})
+	require.NoError(t, err)
+
+	svc := NewService(repo, user.NewRepository(db),
+		func(p string) string {
+			if p == "" {
+				return ""
+			}
+			return "https://assets.test/" + p
+		})
+
+	incoming, outgoing, err := svc.ListRequests(context.Background(), me)
+	require.NoError(t, err)
+	require.Len(t, incoming, 1)
+	require.Equal(t, "req_handle", incoming[0].User.Handle)
+	require.Equal(t, "https://assets.test/"+requesterPath, incoming[0].User.AvatarURL)
+
+	require.Len(t, outgoing, 1)
+	require.Empty(t, outgoing[0].User.AvatarURL) // addressee has no picture -> "" not a broken URL
+}
+
 // claimHandleForTest wires the same identity.Service the real /me/handle
 // route uses to claim raw for userID. It is the only place in this file that
 // writes handle_canonical -- always through identity.Canonical's fold, never

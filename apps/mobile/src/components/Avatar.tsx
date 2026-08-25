@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Image, StyleSheet, View } from "react-native";
 import { AppText } from "./Text";
 import { useTheme } from "@/theme";
@@ -38,6 +39,19 @@ export function Avatar({ initials, size = 40, uri }: Props) {
   // one renders a broken image inside a friend row — worse than the initials
   // it replaced. Same for null, which is what a stale cache returns.
   const hasPicture = typeof uri === "string" && uri.length > 0;
+  // A 404, a transient CDN blip, or a deleted object with a stale avatar_url
+  // all fail the same way: onError fires, and the letters take over instead
+  // of a permanently blank circle (kora#449 task 15 finding 2). Reset on
+  // every `uri` change so a fresh upload isn't stuck showing initials because
+  // an earlier URL once failed -- adjusted during render (React's documented
+  // pattern for state derived from a changing prop, not an effect) so a
+  // fresh `uri` can't render one stale failed frame first.
+  const [failed, setFailed] = useState(false);
+  const [lastUri, setLastUri] = useState(uri);
+  if (uri !== lastUri) {
+    setLastUri(uri);
+    setFailed(false);
+  }
   return (
     <View
       style={{
@@ -51,11 +65,12 @@ export function Avatar({ initials, size = 40, uri }: Props) {
         justifyContent: "center",
       }}
     >
-      {hasPicture ? (
+      {hasPicture && !failed ? (
         <Image
           source={{ uri }}
           style={{ width: size, height: size, borderRadius: size / 2 }}
           accessible={false}
+          onError={() => setFailed(true)}
         />
       ) : (
         <AppText

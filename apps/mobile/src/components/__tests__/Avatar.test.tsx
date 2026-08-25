@@ -1,5 +1,5 @@
 import { StyleSheet } from "react-native";
-import { render } from "@testing-library/react-native";
+import { act, render } from "@testing-library/react-native";
 import type { TestInstance } from "test-renderer";
 import { Avatar } from "../Avatar";
 
@@ -91,5 +91,25 @@ describe("Avatar", () => {
     );
     const style = StyleSheet.flatten(queryImages(container)[0].props.style);
     expect(style).toMatchObject({ width: 72, height: 72, borderRadius: 36 });
+  });
+
+  // kora#449 task 15 finding 2: a 404, a deleted object with a stale
+  // avatar_url, or a transient CDN blip left the circle permanently blank —
+  // strictly worse than the no-picture case, since the initials fallback
+  // never triggered. onError must hand control back to the initials branch.
+  it("falls back to initials when the image fails to load", async () => {
+    const { getByText, queryByText, container } = await render(
+      <Avatar initials="AL" uri="https://assets.test/broken.jpg" />,
+    );
+    expect(queryImages(container)).toHaveLength(1);
+    expect(queryByText("AL")).toBeNull();
+
+    const [image] = queryImages(container);
+    await act(async () => {
+      image.props.onError();
+    });
+
+    expect(getByText("AL")).toBeTruthy();
+    expect(queryImages(container)).toHaveLength(0);
   });
 });

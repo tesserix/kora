@@ -232,7 +232,24 @@ func (s Service) ListFriends(ctx context.Context, userID uuid.UUID) ([]FriendVie
 }
 
 func (s Service) ListRequests(ctx context.Context, userID uuid.UUID) (incoming, outgoing []RequestView, err error) {
-	return s.repo.ListPending(ctx, userID)
+	incoming, outgoing, err = s.repo.ListPending(ctx, userID)
+	if err != nil {
+		return nil, nil, err
+	}
+	// Same raw-path -> composed-URL step ListFriends performs, and the same
+	// "" guard: a caller-supplied avatarURL is not guaranteed to treat ""
+	// specially, and "no picture" must never become a URL pointing at nothing.
+	for i := range incoming {
+		if incoming[i].User.AvatarURL != "" {
+			incoming[i].User.AvatarURL = s.avatarURL(incoming[i].User.AvatarURL)
+		}
+	}
+	for i := range outgoing {
+		if outgoing[i].User.AvatarURL != "" {
+			outgoing[i].User.AvatarURL = s.avatarURL(outgoing[i].User.AvatarURL)
+		}
+	}
+	return incoming, outgoing, nil
 }
 
 func (s Service) MyCode(ctx context.Context, userID uuid.UUID) (string, string, error) {

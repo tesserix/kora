@@ -796,6 +796,12 @@ export interface Resolution {
 export interface Friend {
   id: string;
   display_name: string;
+  // kora#449: GET /v1/friends and GET /v1/friends/requests both project
+  // social.FriendView, which always carries handle and avatar_url (see
+  // api/internal/social/model.go) -- the type was never updated to match
+  // when handles shipped. avatar_url is "" for a user with no picture.
+  handle: string;
+  avatar_url: string;
 }
 
 export interface FriendRequest {

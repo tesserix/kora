@@ -293,7 +293,7 @@ export default function Home() {
             haptic="selection"
             onPress={() => router.push("/profile")}
           >
-            <Avatar initials={initials(profile.data?.display_name)} />
+            <Avatar initials={initials(profile.data?.display_name)} uri={profile.data?.avatar_url} />
           </PressableScale>
         </View>
       </Animated.View>

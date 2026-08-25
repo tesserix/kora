@@ -40,10 +40,22 @@ const FRIEND_PREVIEW = 5;
 const GROUP_PREVIEW = 4;
 const REQUEST_PREVIEW = 2;
 
+// kora#449 task 15 finding 8: this returned the literal "K" for an empty
+// name, which reads as a real person's initial rather than a fallback. ""
+// falls through to Avatar's own empty-initials rendering (a blank glyph,
+// same as LookupResultCard.tsx's `initials() || "@"` neighbors it with).
 function initials(name: string): string {
   const parts = name.split(" ").filter(Boolean);
-  if (parts.length === 0) return "K";
+  if (parts.length === 0) return "";
   return parts.map((p) => p[0]).join("").slice(0, 2).toUpperCase();
+}
+
+// kora#449 task 15 finding 3, mirroring LookupResultCard.tsx's fallback
+// (kora#443): a blank display_name must never render as an empty line or an
+// accessibility label with nothing after it. "@handle" is a true statement
+// about this person; blank is not.
+function displayName(person: Friend): string {
+  return person.display_name.trim() || "@" + person.handle;
 }
 
 function Engraved({ children }: { children: string }) {
@@ -109,16 +121,17 @@ function OverflowRow({ label, onPress }: { label: string; onPress: () => void })
 // audit that grants the same category in the other direction.
 function PersonRow({ friend }: { friend: Friend }) {
   const { instrument, spacing } = useTheme();
+  const name = displayName(friend);
   return (
     <PressableScale
       accessibilityRole="button"
-      accessibilityLabel={`Open ${friend.display_name}`}
+      accessibilityLabel={`Open ${name}`}
       haptic="none"
       onPress={() => router.push(`/friend/${friend.id}` as Href)}
       style={{ flexDirection: "row", alignItems: "center", minHeight: 44, paddingVertical: spacing.xs, gap: spacing.sm }}
     >
       <Avatar initials={initials(friend.display_name)} size={30} />
-      <AppText style={{ flex: 1, fontSize: 15, color: instrument.ink }}>{friend.display_name}</AppText>
+      <AppText style={{ flex: 1, fontSize: 15, color: instrument.ink }}>{name}</AppText>
       <Icon name="chevron-right" size={14} color={instrument.mut} />
     </PressableScale>
   );
@@ -201,18 +214,20 @@ export default function Social() {
             ) : (
               <GlassPanel radius={22}>
                 <View style={{ paddingHorizontal: spacing.md }}>
-                  {incoming.slice(0, REQUEST_PREVIEW).map((req) => (
+                  {incoming.slice(0, REQUEST_PREVIEW).map((req) => {
+                    const reqName = displayName(req.user);
+                    return (
                     <View key={req.id}>
                       <View style={{ flexDirection: "row", alignItems: "center", minHeight: 44, paddingVertical: spacing.xs, gap: spacing.sm }}>
                         <AppText style={{ flex: 1, fontSize: 15, color: instrument.ink }}>
-                          {req.user.display_name}
+                          {reqName}
                         </AppText>
                         {/* 44pt targets. The equivalent controls on the
                             standalone Friends screen are 32pt, below the
                             floor — not carried over here. */}
                         <PressableScale
                           accessibilityRole="button"
-                          accessibilityLabel={`Accept request from ${req.user.display_name}`}
+                          accessibilityLabel={`Accept request from ${reqName}`}
                           haptic="selection"
                           onPress={() => accept.mutate(req.id, surfaceError)}
                           style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}
@@ -221,7 +236,7 @@ export default function Social() {
                         </PressableScale>
                         <PressableScale
                           accessibilityRole="button"
-                          accessibilityLabel={`Decline request from ${req.user.display_name}`}
+                          accessibilityLabel={`Decline request from ${reqName}`}
                           haptic="selection"
                           onPress={() => decline.mutate(req.id, surfaceError)}
                           style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}
@@ -231,7 +246,8 @@ export default function Social() {
                       </View>
                       <Hairline />
                     </View>
-                  ))}
+                    );
+                  })}
                   {incoming.length > REQUEST_PREVIEW ? (
                     <OverflowRow
                       label={`+${incoming.length - REQUEST_PREVIEW} more requests`}

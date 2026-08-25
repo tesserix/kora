@@ -106,6 +106,48 @@ func TestListAcceptedAndPending(t *testing.T) {
 	require.Len(t, outgoing, 0)
 }
 
+// TestListPending_CarriesHandleAndAvatarPath guards against the regression
+// fixed for kora#449 task 15 finding 1: listRequests originally selected only
+// display_name, so RequestView.User.Handle/AvatarURL were always empty for
+// BOTH incoming and outgoing requests -- the one screen where a person must
+// decide whether to grant consent showed no handle and no picture for who was
+// asking. ListAccepted already selected all three columns; listRequests did
+// not. This covers both directions ListAccepted's own sibling test does not
+// touch.
+func TestListPending_CarriesHandleAndAvatarPath(t *testing.T) {
+	db := testDB(t)
+	me := seedUser(t, db, "Me")
+	requester := seedUser(t, db, "Requester")
+	addressee := seedUser(t, db, "Addressee")
+	repo := NewRepository(db)
+
+	requesterPath := "avatars/" + requester.String() + "/v1.jpg"
+	require.NoError(t, db.Exec(
+		`UPDATE users SET handle = 'req_handle', handle_canonical = 'req_handle', avatar_path = ? WHERE id = ?`,
+		requesterPath, requester).Error)
+	addresseePath := "avatars/" + addressee.String() + "/v1.jpg"
+	require.NoError(t, db.Exec(
+		`UPDATE users SET handle = 'addr_handle', handle_canonical = 'addr_handle', avatar_path = ? WHERE id = ?`,
+		addresseePath, addressee).Error)
+
+	// incoming: requester -> me
+	_, err := repo.Create(context.Background(), Friendship{RequesterID: requester, AddresseeID: me, Status: FriendStatusPending})
+	require.NoError(t, err)
+	// outgoing: me -> addressee
+	_, err = repo.Create(context.Background(), Friendship{RequesterID: me, AddresseeID: addressee, Status: FriendStatusPending})
+	require.NoError(t, err)
+
+	incoming, outgoing, err := repo.ListPending(context.Background(), me)
+	require.NoError(t, err)
+	require.Len(t, incoming, 1)
+	require.Equal(t, "req_handle", incoming[0].User.Handle)
+	require.Equal(t, requesterPath, incoming[0].User.AvatarURL) // raw path; Service composes the URL
+
+	require.Len(t, outgoing, 1)
+	require.Equal(t, "addr_handle", outgoing[0].User.Handle)
+	require.Equal(t, addresseePath, outgoing[0].User.AvatarURL)
+}
+
 func TestUpdateStatusAndDelete(t *testing.T) {
 	db := testDB(t)
 	a := seedUser(t, db, "Ada")

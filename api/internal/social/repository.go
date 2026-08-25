@@ -88,18 +88,22 @@ func (r Repository) ListAccepted(ctx context.Context, userID uuid.UUID) ([]Frien
 	return views, nil
 }
 
-// reqRow is a flat scan target; mapped into RequestView below.
+// reqRow is a flat scan target; mapped into RequestView below. AvatarPath is
+// the raw object path, same convention as friendRow -- ListPending returns it
+// as-is; composing it into a URL is Service.ListRequests' job.
 type reqRow struct {
 	ID          uuid.UUID
 	UserID      uuid.UUID
 	DisplayName string
+	Handle      string
+	AvatarPath  string
 }
 
 func (r Repository) listRequests(ctx context.Context, whereCol string, userID uuid.UUID, joinCol string) ([]RequestView, error) {
 	rows := []reqRow{}
 	err := r.db.WithContext(ctx).
 		Table("friendships AS f").
-		Select("f.id AS id, u.id AS user_id, u.display_name AS display_name").
+		Select("f.id AS id, u.id AS user_id, u.display_name AS display_name, u.handle AS handle, u.avatar_path AS avatar_path").
 		Joins("JOIN users u ON u.id = f."+joinCol).
 		Where("f.status = ? AND f."+whereCol+" = ?", FriendStatusPending, userID).
 		Order("f.created_at DESC").
@@ -109,7 +113,12 @@ func (r Repository) listRequests(ctx context.Context, whereCol string, userID uu
 	}
 	out := make([]RequestView, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, RequestView{ID: row.ID, User: FriendView{ID: row.UserID, DisplayName: row.DisplayName}})
+		out = append(out, RequestView{ID: row.ID, User: FriendView{
+			ID:          row.UserID,
+			DisplayName: row.DisplayName,
+			Handle:      row.Handle,
+			AvatarURL:   row.AvatarPath, // raw path; Service composes the URL
+		}})
 	}
 	return out, nil
 }

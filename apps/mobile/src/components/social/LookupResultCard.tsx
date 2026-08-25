@@ -47,7 +47,12 @@ export function LookupResultCard({ result, onSend, sending }: Props) {
           </AppText>
         ) : null}
       </View>
-      <Button title="Send request" onPress={onSend} disabled={sending} />
+      {/* kora#449 task 15 finding 6: with no accessibilityLabel override,
+          VoiceOver announced only "Send request. Button." -- not naming who
+          the request is for. `name` already carries the @handle fallback for
+          a blank display_name (kora#443), so the label never goes blank
+          either. */}
+      <Button title="Send request" accessibilityLabel={`Send request to ${name}`} onPress={onSend} disabled={sending} />
     </View>
   );
 }
