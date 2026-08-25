@@ -10,7 +10,28 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+
+	"github.com/tesserix/kora/api/internal/handlefold"
 )
+
+// retireCleanup deletes the retired_handles row(s) a test created, computing
+// the canonical form with handlefold.Canonical rather than hand-writing the
+// folded spelling. This package cannot import internal/identity to reuse its
+// own retireCleanup (identity already imports user via handler.go and
+// repository.go, so the reverse import would cycle) -- handlefold exists
+// precisely so both sides can compute the identical canonical form without
+// that cycle. Hand-written folded literals are how this suite broke once
+// already: a cleanup targeting 'dropped' never matched the row actually
+// written, 'dr0pped' (o -> 0), leaving a stray retirement that failed the
+// NEXT run.
+func retireCleanup(t *testing.T, db *gorm.DB, raws ...string) {
+	t.Helper()
+	t.Cleanup(func() {
+		for _, raw := range raws {
+			db.Exec(`DELETE FROM retired_handles WHERE handle_canonical = ?`, handlefold.Canonical(raw))
+		}
+	})
+}
 
 // --- fakes -----------------------------------------------------------------
 
@@ -623,7 +644,7 @@ func TestDeleteRetiresTheHandleSoADifferentUserCannotClaimIt(t *testing.T) {
 	require.NoError(t, db.Exec(
 		`UPDATE users SET handle = ?, handle_canonical = ? WHERE id = ?`,
 		handle, handle, victim.ID).Error)
-	t.Cleanup(func() { db.Exec(`DELETE FROM retired_handles WHERE handle_canonical = ?`, handle) })
+	retireCleanup(t, db, handle)
 
 	_, err := svc.Delete(context.Background(), victim.ID, DeleteActor{IsAdmin: false})
 	require.NoError(t, err)

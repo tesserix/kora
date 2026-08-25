@@ -2,7 +2,11 @@
 // by, and the profile picture attached to it.
 package identity
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/tesserix/kora/api/internal/handlefold"
+)
 
 // Handle length bounds, measured on the display form. Three is the shortest
 // thing worth saying aloud; twenty is longer than anyone will read out.
@@ -11,33 +15,15 @@ const (
 	MaxHandleLen = 20
 )
 
-// confusables maps every character in a spoken-ambiguity class to one
-// representative. `l`, `i` and `1` are one class; `o` and `0` are another.
-//
-// This is applied to the canonical form, which the unique index is built on,
-// so at most ONE handle can exist per confusable class. That is what makes
-// folding on LOOKUP unambiguous rather than lossy: whichever member of the
-// class exists is necessarily the one the speaker meant, so a handle heard
-// correctly always resolves.
-var confusables = map[rune]rune{
-	'l': '1', 'i': '1', '1': '1',
-	'o': '0', '0': '0',
-}
-
 // fold applies the confusables mapping to a string, replacing each character
 // with its canonical representative. The result is used for lookups and
-// uniqueness checks.
+// uniqueness checks. The mapping itself lives in internal/handlefold, not
+// here, so that internal/user's tests can compute the same canonical form
+// without importing internal/identity (which would cycle: identity already
+// imports user via handler.go and repository.go). See handlefold's doc
+// comment for the full reasoning.
 func fold(s string) string {
-	var b strings.Builder
-	b.Grow(len(s))
-	for _, r := range s {
-		if folded, ok := confusables[r]; ok {
-			b.WriteRune(folded)
-			continue
-		}
-		b.WriteRune(r)
-	}
-	return b.String()
+	return handlefold.Fold(s)
 }
 
 // reservedNames holds the source-of-truth list of reserved handle names,
