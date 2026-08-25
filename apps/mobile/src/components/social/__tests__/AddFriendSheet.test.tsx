@@ -188,6 +188,33 @@ it("falls back to the handle when the display name is blank", async () => {
   await waitFor(() => expect(getByText("@ada")).toBeTruthy());
 });
 
+// This is the defect that actually shipped: the card's "Send request" must
+// put the resolved person's HANDLE on the wire, not their friend code (there
+// isn't one to put there) and not the code field, which the server resolves
+// against friend_code, never handle_canonical (api/internal/user/repository.go's
+// FindByCode) — a handle sent as `code` 404s a real backend even though the
+// card is showing the right person (kora#449 task 13b).
+it("sends the resolved person's handle, not a code, when Send request is pressed", async () => {
+  mockLookup.mockImplementation((_handle, opts) =>
+    opts.onSuccess?.({ id: "u1", display_name: "Ada L", handle: "ada", avatar_url: "" }),
+  );
+  const { getByLabelText, getByText } = await render(<AddFriendSheet visible onClose={noop} />);
+
+  await fireEvent.changeText(getByLabelText("Handle, email or friend code"), "ada");
+  await fireEvent.press(getByText("Find"));
+  await waitFor(() => expect(getByText("Ada L")).toBeTruthy());
+
+  await fireEvent.press(getByText("Send request"));
+  expect(mockSendRequest).toHaveBeenCalledWith(
+    { handle: "ada" },
+    expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
+  );
+  expect(mockSendRequest).not.toHaveBeenCalledWith(
+    { code: "ada" },
+    expect.anything(),
+  );
+});
+
 // A leading @ is how people write a handle, and stripping it BEFORE the email
 // test is what stops "@ada" being routed as an email.
 it("routes a handle typed with a leading @ to lookup, not email", async () => {

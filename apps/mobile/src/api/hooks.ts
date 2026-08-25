@@ -1369,7 +1369,10 @@ export function useFriendRequests() {
 export function useSendFriendRequest() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: { email?: string; code?: string }) =>
+    // Exactly one of email, code or handle goes on the wire -- the server
+    // returns invalid_input (ErrBadInput) for two or zero (kora#449 task 13b,
+    // api/internal/social/service.go's SendRequest).
+    mutationFn: (input: { email?: string; code?: string; handle?: string }) =>
       apiFetch("/v1/friends/requests", { method: "POST", body: JSON.stringify(input) }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["friend-requests"] });

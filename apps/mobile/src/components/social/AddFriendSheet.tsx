@@ -106,13 +106,11 @@ export function AddFriendSheet({ visible, onClose }: AddFriendSheetProps) {
 
   const onSend = () => {
     if (!found) return;
-    // NOTE: SendRequest only resolves by email or friend_code (see
-    // api/internal/social/handler.go's sendRequestBody) -- there is no
-    // userId/handle path, and api/ is frozen for this task. `code` is the
-    // closest existing shape; this will 404 against a real backend until
-    // the API grows a way to send by the resolved user. Flagged for the
-    // reviewer rather than left silent.
-    send.mutate({ code: found.handle }, { onSuccess: finish, onError: showError });
+    // SendRequest resolves `handle` through the same canonical fold the
+    // lookup used to find this person (api/internal/social/service.go's
+    // resolveHandle), so the request lands on the exact account this card
+    // is showing.
+    send.mutate({ handle: found.handle }, { onSuccess: finish, onError: showError });
   };
 
   const shareCode = () => {
