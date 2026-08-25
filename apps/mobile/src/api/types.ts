@@ -819,6 +819,19 @@ export interface MyFriendCode {
   link: string;
 }
 
+// The viewer's relationship to a looked-up person (kora#453). Mirrors
+// api/internal/identity/friendship.go's FriendshipStatus EXACTLY — these are
+// the only five wire values the server ever sends, and a string-literal
+// union (not `string`) is what makes a typo here a compile error instead of
+// a silent fallthrough to LookupResultCard's default case.
+//   "none"             — no relationship yet -> "Send request"
+//   "request_sent"     — viewer already sent a request, still pending -> "Requested"
+//   "request_received" — the looked-up person already sent THE VIEWER a
+//                         request -> "Respond", not a live send button
+//   "friends"          — accepted friendship -> "Already friends"
+//   "self"             — the viewer looked up their own handle
+export type FriendshipStatus = "none" | "request_sent" | "request_received" | "friends" | "self";
+
 // Handles (kora#449). The projection GET /v1/users/lookup returns. There is
 // no listing form of that endpoint — exact match only — so there is no array
 // type here either.
@@ -829,6 +842,11 @@ export type LookupResult = {
   // "" when the person has no picture, and when no bucket is configured.
   // Treat it as "no picture", never as a failure.
   avatar_url: string;
+  // kora#453. See FriendshipStatus's doc comment above for the exact wire
+  // values. The server degrades this to "none" when it has no relationship
+  // provider wired, which is a degrade, not a claim that no relationship
+  // exists — LookupResultCard must not read anything more into it.
+  friendship_status: FriendshipStatus;
 };
 
 export type MyHandle = { handle: string };

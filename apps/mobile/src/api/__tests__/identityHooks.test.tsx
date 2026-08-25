@@ -96,13 +96,14 @@ it("uploads the avatar as multipart PUT", async () => {
 // (useProfile, src/api/hooks.ts). An invalidation that matches no query
 // returns cleanly and does nothing — this test asserts the queries are
 // actually marked stale, not merely that the mutation resolves.
-it("marks profile, friends, circles and memberships stale after an avatar upload", async () => {
+it("marks profile, friends, friend-requests, circles and memberships stale after an avatar upload", async () => {
   mockMultipart.mockResolvedValue({ avatar_url: "https://assets.test/a.jpg" });
   mockFetch.mockResolvedValue([]);
 
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(["profile"], { id: "u1" });
   client.setQueryData(["friends"], []);
+  client.setQueryData(["friend-requests"], { incoming: [], outgoing: [] });
   client.setQueryData(["circles"], []);
   client.setQueryData(["memberships"], []);
   client.setQueryData(["me"], { shouldNeverBeTouched: true });
@@ -117,6 +118,11 @@ it("marks profile, friends, circles and memberships stale after an avatar upload
 
   expect(client.getQueryState(["profile"])?.isInvalidated).toBe(true);
   expect(client.getQueryState(["friends"])?.isInvalidated).toBe(true);
+  // kora#454: the incoming-request row now renders an Avatar too, so this
+  // list became an avatar-bearing surface and must be invalidated alongside
+  // ["friends"] — this is the "fifth surface" the brief's own tests warned
+  // this function couldn't automatically catch.
+  expect(client.getQueryState(["friend-requests"])?.isInvalidated).toBe(true);
   expect(client.getQueryState(["circles"])?.isInvalidated).toBe(true);
   expect(client.getQueryState(["memberships"])?.isInvalidated).toBe(true);
   // The dead key from the brief's draft — nothing ever queries by it, so
@@ -130,6 +136,7 @@ it("deleting the avatar invalidates the same surfaces", async () => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(["profile"], { id: "u1" });
   client.setQueryData(["friends"], []);
+  client.setQueryData(["friend-requests"], { incoming: [], outgoing: [] });
   client.setQueryData(["circles"], []);
   client.setQueryData(["memberships"], []);
 
@@ -143,6 +150,7 @@ it("deleting the avatar invalidates the same surfaces", async () => {
 
   expect(client.getQueryState(["profile"])?.isInvalidated).toBe(true);
   expect(client.getQueryState(["friends"])?.isInvalidated).toBe(true);
+  expect(client.getQueryState(["friend-requests"])?.isInvalidated).toBe(true);
   expect(client.getQueryState(["circles"])?.isInvalidated).toBe(true);
   expect(client.getQueryState(["memberships"])?.isInvalidated).toBe(true);
 });

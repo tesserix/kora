@@ -1459,12 +1459,21 @@ export function useClearHandle() {
 
 // Both avatar mutations invalidate every surface that renders a face: the
 // profile itself (["profile"], not ["me"] — GET /v1/me is keyed "profile"),
-// the friends list, the circles audit, and the memberships list (renders
+// the friends list, the friend-requests list (kora#454: the incoming-request
+// row now renders an Avatar too, so it reads avatar_url the same as
+// ["friends"] does), the circles audit, and the memberships list (renders
 // share.MemberView, which carries avatar_url) all read an avatar_url, and a
 // stale one shows the old picture until the next cold start.
+//
+// This is the exact "cannot catch a future fifth surface" limitation this
+// function's own tests predicted (kora#454) — friend-requests became an
+// avatar-bearing surface in #451 and this list did not grow to match. Adding
+// a surface here does not, by itself, protect the next one; whoever adds a
+// new avatar-rendering query key still has to remember this list exists.
 function invalidateAvatarSurfaces(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ["profile"] });
   qc.invalidateQueries({ queryKey: ["friends"] });
+  qc.invalidateQueries({ queryKey: ["friend-requests"] });
   qc.invalidateQueries({ queryKey: ["circles"] });
   qc.invalidateQueries({ queryKey: ["memberships"] });
 }

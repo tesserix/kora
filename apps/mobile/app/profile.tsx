@@ -16,6 +16,7 @@ import { Button } from "@/components/Button";
 import { PressableScale } from "@/motion";
 import { useClearHandle, useDeleteAvatar, useMyHandle, useProfile, useSetHandle, useUploadAvatar } from "@/api/hooks";
 import { buildCaptureForm } from "@/api/resolveWire";
+import { initials } from "@/lib/initials";
 import type { Profile } from "@/api/types";
 import { useTheme } from "@/theme";
 import { formatWeight, useUnits } from "@/units";
@@ -36,19 +37,6 @@ const GOAL_LABELS: Record<Profile["goal"], string> = {
   maintenance: "Maintenance",
   muscle_gain: "Muscle gain",
 };
-
-// Falls back to "K" when the name is empty/whitespace-only — otherwise
-// filter(Boolean) on the split leaves nothing to join, and the avatar renders
-// an empty circle (same fallback as app/(tabs)/index.tsx's `initials`).
-function initials(name: string): string {
-  const parts = name.split(" ").filter(Boolean);
-  if (parts.length === 0) return "K";
-  return parts
-    .map((p) => p[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-}
 
 // A blank display_name is a real server state (kora#449), not a bug — never
 // render the empty line that `data.display_name` alone would leave where a

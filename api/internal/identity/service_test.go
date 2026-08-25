@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
@@ -49,7 +50,7 @@ func TestClaim_ThenLookupFindsIt(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "ada", display)
 
-	got, err := svc.Lookup(context.Background(), "ada")
+	got, err := svc.Lookup(context.Background(), uuid.New(), "ada")
 	require.NoError(t, err)
 	require.Equal(t, id, got.ID)
 	require.Equal(t, "ada", got.Handle)
@@ -68,7 +69,7 @@ func TestLookup_FoldsConfusables(t *testing.T) {
 	require.NoError(t, err)
 
 	for _, spoken := range []string{"ada_l", "ada_1", "ada_i", "ADA_L", "@ada_1"} {
-		got, err := svc.Lookup(context.Background(), spoken)
+		got, err := svc.Lookup(context.Background(), uuid.New(), spoken)
 		require.NoError(t, err, "spoken form %q must resolve", spoken)
 		require.Equal(t, id, got.ID)
 		require.Equal(t, "ada_l", got.Handle, "the DISPLAY form is returned, not the folded one")
@@ -77,7 +78,7 @@ func TestLookup_FoldsConfusables(t *testing.T) {
 
 func TestLookup_MissIsNotFound(t *testing.T) {
 	db := testDB(t)
-	_, err := newSvc(db).Lookup(context.Background(), "nobody_here_at_all")
+	_, err := newSvc(db).Lookup(context.Background(), uuid.New(), "nobody_here_at_all")
 	require.ErrorIs(t, err, ErrNotFound)
 }
 
@@ -85,7 +86,7 @@ func TestLookup_MissIsNotFound(t *testing.T) {
 // The caller typed something; the answer is "no such person" either way.
 func TestLookup_InvalidShapeIsNotFound(t *testing.T) {
 	db := testDB(t)
-	_, err := newSvc(db).Lookup(context.Background(), "no")
+	_, err := newSvc(db).Lookup(context.Background(), uuid.New(), "no")
 	require.ErrorIs(t, err, ErrNotFound)
 }
 
@@ -137,7 +138,7 @@ func TestClaim_ChangingRetiresTheOldOneAndFreesNothing(t *testing.T) {
 	require.NoError(t, err)
 
 	// The old handle is gone from the user...
-	_, err = svc.Lookup(context.Background(), "oldname")
+	_, err = svc.Lookup(context.Background(), uuid.New(), "oldname")
 	require.ErrorIs(t, err, ErrNotFound)
 	// ...and nobody else can have it. Not even the person who released it.
 	_, err = svc.Claim(context.Background(), b, "oldname")
@@ -156,7 +157,7 @@ func TestClear_RetiresTheHandle(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, svc.Clear(context.Background(), a))
 
-	_, err = svc.Lookup(context.Background(), "dropped")
+	_, err = svc.Lookup(context.Background(), uuid.New(), "dropped")
 	require.ErrorIs(t, err, ErrNotFound)
 	_, err = svc.Claim(context.Background(), b, "dropped")
 	require.ErrorIs(t, err, ErrHandleRetired)
@@ -191,7 +192,7 @@ func TestLookupView_HasNoEmailField(t *testing.T) {
 	require.NoError(t, db.Raw(`SELECT email FROM users WHERE id = ?`, id).Scan(&email).Error)
 	require.NotEmpty(t, email)
 
-	got, err := svc.Lookup(context.Background(), "private")
+	got, err := svc.Lookup(context.Background(), uuid.New(), "private")
 	require.NoError(t, err)
 	body, err := json.Marshal(got)
 	require.NoError(t, err)
@@ -209,7 +210,7 @@ func TestLookup_ComposesAvatarURLFromPath(t *testing.T) {
 	require.NoError(t, db.Exec(
 		`UPDATE users SET avatar_path = ? WHERE id = ?`, "avatars/"+id.String()+"/v1.jpg", id).Error)
 
-	got, err := svc.Lookup(context.Background(), "withpic")
+	got, err := svc.Lookup(context.Background(), uuid.New(), "withpic")
 	require.NoError(t, err)
 	require.Equal(t, "https://assets.test/avatars/"+id.String()+"/v1.jpg", got.AvatarURL)
 }
@@ -225,7 +226,7 @@ func TestLookup_NoAvatarIsEmptyURL(t *testing.T) {
 	_, err := svc.Claim(context.Background(), id, "nopic")
 	require.NoError(t, err)
 
-	got, err := svc.Lookup(context.Background(), "nopic")
+	got, err := svc.Lookup(context.Background(), uuid.New(), "nopic")
 	require.NoError(t, err)
 	require.Empty(t, got.AvatarURL)
 }

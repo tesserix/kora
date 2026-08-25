@@ -23,14 +23,11 @@ import {
 } from "@/api/hooks";
 import { useToast } from "@/components/Toast";
 import { apiErrorMessage } from "@/lib/apiErrorMessage";
+import { initials } from "@/lib/initials";
 import { useTheme } from "@/theme";
 
 // 32pt visual + 6pt slop each side = a 44pt target, the iOS minimum.
 const TAP_SLOP = { top: 6, bottom: 6, left: 6, right: 6 } as const;
-
-function initials(name: string): string {
-  return name.split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase();
-}
 
 export default function Friends() {
   const { instrument, spacing, radius } = useTheme();
@@ -163,7 +160,7 @@ export default function Friends() {
                     onLongPress={() => onUnfriend(f.id, f.display_name)}
                   >
                     <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, minHeight: 44, paddingHorizontal: spacing.md }}>
-                      <Avatar initials={initials(f.display_name)} size={32} />
+                      <Avatar initials={initials(f.display_name)} uri={f.avatar_url} size={32} />
                       <AppText variant="headline" style={{ color: instrument.ink }}>{f.display_name}</AppText>
                     </View>
                   </PressableScale>

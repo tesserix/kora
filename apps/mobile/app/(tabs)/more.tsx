@@ -17,6 +17,7 @@ import { Badge } from "@/components/Badge";
 import { PressableScale, ScreenEntrance } from "@/motion";
 import { useAIUsage, useProfile, useUnreadCount } from "@/api/hooks";
 import { aiAllowanceBadge } from "@/api/aiUsage";
+import { initials } from "@/lib/initials";
 import { useTheme } from "@/theme";
 import { TAB_BAR_SCROLL_INSET } from "@/components/FloatingTabBar";
 
@@ -81,18 +82,6 @@ function MoreRow({ rowKey, title, icon, right, onPress }: MoreRowProps) {
   );
 }
 
-// Falls back to "K" when the name is empty/whitespace-only — same fallback
-// as app/profile.tsx's own `initials` and app/(tabs)/index.tsx's.
-function initials(name: string): string {
-  const parts = name.split(" ").filter(Boolean);
-  if (parts.length === 0) return "K";
-  return parts
-    .map((p) => p[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-}
-
 function MoreGroup({ children }: { children: ReactNode }) {
   const { instrument, spacing } = useTheme();
   const rows = Array.isArray(children) ? children.filter(Boolean) : [children];
@@ -147,7 +136,7 @@ export default function More() {
                 shadowOffset: { width: 0, height: 0 },
               }}
             >
-              <Avatar initials={data ? initials(data.display_name) : "—"} size={72} />
+              <Avatar initials={data ? initials(data.display_name) : "—"} uri={data?.avatar_url} size={72} />
             </View>
             <AppText style={{ fontSize: 20, fontWeight: "700", color: instrument.ink, marginTop: spacing.sm }}>
               {data ? data.display_name : "Loading…"}
