@@ -209,10 +209,12 @@ noncurrent-version conditions never match — and an age-based rule would delete
 live avatars.
 
 Superseded objects are already removed application-side: on replace, on removal,
-and inside the account-deletion cascade. Orphans arise only when one of those
-deletes fails, and each failure is logged. `SetAvatar` and `ClearAvatar` still
-log "lifecycle rule will reap it" on that path — **that message is wrong** and
-should be reworded; there is no reaper.
+and inside the account-deletion cascade. **That delete is the only collector** —
+so when one fails, the object leaks permanently. Both paths now log
+`NEEDS MANUAL CLEANUP` with the orphaned path, matching what `user/deletion.go`
+already said on the same class of failure (corrected in #457; they previously
+claimed a lifecycle rule would reap it, which sent an operator hunting for a
+collector that does not exist).
 
 ### Rollout note
 
