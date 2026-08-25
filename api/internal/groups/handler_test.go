@@ -167,3 +167,86 @@ func TestCodeAndProgressForbiddenForNonMember(t *testing.T) {
 	rStranger.ServeHTTP(wp, httptest.NewRequest(http.MethodGet, "/v1/groups/"+id.String()+"/progress", nil))
 	require.Equal(t, http.StatusForbidden, wp.Code)
 }
+
+// progressSharingFor extracts (sharing, streak_days present) for displayName
+// from a /v1/groups/:id/progress response.
+func progressSharingFor(t *testing.T, w *httptest.ResponseRecorder, displayName string) (sharing bool, hasStreak bool) {
+	t.Helper()
+	var body struct {
+		Data struct {
+			Members []struct {
+				DisplayName string `json:"display_name"`
+				Sharing     bool   `json:"sharing"`
+				StreakDays  *int   `json:"streak_days"`
+			} `json:"members"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	for _, m := range body.Data.Members {
+		if m.DisplayName == displayName {
+			return m.Sharing, m.StreakDays != nil
+		}
+	}
+	t.Fatalf("member %q not found in progress response", displayName)
+	return false, false
+}
+
+// TestUnfriendingRevokesCircleAccessInGroupProgress is the F2 regression from
+// the kora#326 whole-branch review: Unfriend must revoke share_circle_members
+// too, not just the friendships row. A owner and B viewer are friends, share
+// a group, and A has granted B a "progress" circle. Once A and B unfriend,
+// B's membership in A's circle must be gone -- so B must stop seeing A's
+// figures via GET /v1/groups/:id/progress, the exact leak path a join-free
+// GrantedOwners query would otherwise miss.
+func TestUnfriendingRevokesCircleAccessInGroupProgress(t *testing.T) {
+	db := testDB(t)
+	a := seedUser(t, db, "Ana")
+	b := seedUser(t, db, "Bo")
+
+	socialSvc := social.NewService(social.NewRepository(db), user.NewRepository(db))
+	_, err := socialSvc.SendRequest(t.Context(), a, "gr-"+b.String()+"@test.dev", "")
+	require.NoError(t, err)
+	// Accept needs the request id; fetch it via ListRequests on B's side.
+	incomingForB, _, err := socialSvc.ListRequests(t.Context(), b)
+	require.NoError(t, err)
+	require.Len(t, incomingForB, 1)
+	require.NoError(t, socialSvc.Accept(t.Context(), b, incomingForB[0].ID))
+
+	rA := mountFor(a, db)
+	require.Equal(t, http.StatusCreated, doJSON(rA, http.MethodPost, "/v1/groups", `{"name":"Squad"}`).Code)
+	id := extractFirstGroupID(t, db, a)
+	wc := httptest.NewRecorder()
+	rA.ServeHTTP(wc, httptest.NewRequest(http.MethodGet, "/v1/groups/"+id.String()+"/code", nil))
+	require.Equal(t, http.StatusOK, wc.Code)
+	var codeBody struct {
+		Data struct {
+			Code string `json:"code"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(wc.Body.Bytes(), &codeBody))
+
+	rB := mountFor(b, db)
+	require.Equal(t, http.StatusOK, doJSON(rB, http.MethodPost, "/v1/groups/join",
+		`{"code":"`+codeBody.Data.Code+`"}`).Code)
+
+	// A grants B a "progress" share.
+	seedShareGrant(t, db, a, b, "progress")
+
+	// Before unfriending: B sees A's figures.
+	wBefore := httptest.NewRecorder()
+	rB.ServeHTTP(wBefore, httptest.NewRequest(http.MethodGet, "/v1/groups/"+id.String()+"/progress", nil))
+	require.Equal(t, http.StatusOK, wBefore.Code)
+	sharing, hasStreak := progressSharingFor(t, wBefore, "Ana")
+	require.True(t, sharing, "B must see A as sharing before unfriending")
+	require.True(t, hasStreak, "B must see A's computed streak before unfriending")
+
+	require.NoError(t, socialSvc.Unfriend(t.Context(), a, b))
+
+	// After unfriending: B must no longer see A's figures.
+	wAfter := httptest.NewRecorder()
+	rB.ServeHTTP(wAfter, httptest.NewRequest(http.MethodGet, "/v1/groups/"+id.String()+"/progress", nil))
+	require.Equal(t, http.StatusOK, wAfter.Code)
+	sharing, hasStreak = progressSharingFor(t, wAfter, "Ana")
+	require.False(t, sharing, "unfriending must revoke B's circle membership, closing the group-progress leak")
+	require.False(t, hasStreak, "A's metrics must never be computed for B after unfriending")
+}

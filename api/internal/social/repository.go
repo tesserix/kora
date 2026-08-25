@@ -121,6 +121,34 @@ func (r Repository) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+// DeleteAndRevokeCircles deletes the friendship row AND, in the same
+// transaction, drops both parties' share_circle_members rows in each
+// other's circles.
+//
+// Circle membership is friendship-predicated at write time (share.Service
+// only allows adding a friend), so it must not outlive the friendship: this
+// is the only place that enforces that invariant. `social` reaching into
+// share_circle_members by raw SQL instead of going through share.Repository
+// is a deliberate, narrow coupling -- the alternative (access.Repository
+// joining friendships on every progress/body read) would make the read path,
+// which runs far more often than an unfriend, pay for a check that only
+// matters at write time. Revocation belongs at the edge that breaks it.
+func (r Repository) DeleteAndRevokeCircles(ctx context.Context, friendshipID, a, b uuid.UUID) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Delete(&Friendship{}, "id = ?", friendshipID).Error; err != nil {
+			return fmt.Errorf("social: delete: %w", err)
+		}
+		if err := tx.Exec(`
+			DELETE FROM share_circle_members
+			WHERE (member_user_id = ? AND circle_id IN (SELECT id FROM share_circles WHERE owner_id = ?))
+			   OR (member_user_id = ? AND circle_id IN (SELECT id FROM share_circles WHERE owner_id = ?))
+		`, b, a, a, b).Error; err != nil {
+			return fmt.Errorf("social: revoke circle membership: %w", err)
+		}
+		return nil
+	})
+}
+
 // AreFriends reports whether a and b have an accepted friendship.
 func (r Repository) AreFriends(ctx context.Context, a, b uuid.UUID) (bool, error) {
 	f, err := r.FindByPair(ctx, a, b)
