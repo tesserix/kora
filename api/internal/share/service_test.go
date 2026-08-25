@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tesserix/kora/api/internal/access"
+	"github.com/tesserix/kora/api/internal/httpx"
 )
 
 type stubFriends struct{ areFriends bool }
@@ -38,6 +39,11 @@ func TestAddMemberAcceptsAFriend(t *testing.T) {
 	c, _ := repo.Create(context.Background(), owner, "Household")
 
 	require.NoError(t, svc.AddMember(context.Background(), owner, c.ID, friend))
+
+	views, err := repo.ListForOwner(context.Background(), owner)
+	require.NoError(t, err)
+	require.Len(t, views[0].Members, 1)
+	require.Equal(t, friend, views[0].Members[0].ID)
 }
 
 // Every mutation is owner-gated. Without this, knowing a circle UUID would be
@@ -65,7 +71,8 @@ func TestSetCategoriesRefusesAnUnknownCategory(t *testing.T) {
 	c, _ := repo.Create(context.Background(), owner, "Household")
 
 	err := svc.SetCategories(context.Background(), owner, c.ID, []access.Category{"recipes"})
-	require.Error(t, err)
+	var valErr httpx.ValidationError
+	require.ErrorAs(t, err, &valErr)
 }
 
 // A member may remove themselves. Being shared with carries an implicit
