@@ -31,6 +31,22 @@ type User struct {
 	// nothing.
 	AppleRefreshToken string `gorm:"column:apple_refresh_token" json:"-"`
 
+	// Handle is what the user typed (trimmed and lowercased); HandleCanonical
+	// is that with confusables folded, and is what the unique index and every
+	// lookup use. Both are nullable in SQL and '' in Go for a user who has no
+	// handle -- a presence check MUST be `!= ""`, the same trap AppleRefreshToken
+	// documents above.
+	//
+	// json:"-" on both: they reach clients only through identity.LookupView and
+	// social.FriendView, which are projections chosen field by field. Serialising
+	// the model directly is how an email leaks.
+	Handle          string `gorm:"column:handle" json:"-"`
+	HandleCanonical string `gorm:"column:handle_canonical" json:"-"`
+
+	// AvatarPath is an object path, never a URL. See the column comment in
+	// migration 000056.
+	AvatarPath string `gorm:"column:avatar_path" json:"-"`
+
 	Sex            string     `json:"sex"`
 	BirthYear      int        `json:"birth_year"`
 	HeightCm       float64    `json:"height_cm"`
