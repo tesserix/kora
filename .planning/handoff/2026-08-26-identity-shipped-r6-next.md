@@ -3,8 +3,9 @@
 You are picking up **Kora** (`/Users/Mahesh.Sangawar/personal/tesserix-new/kora`),
 a nutrition-tracking iOS app: Go API + Expo/React Native, pre-launch, ~18 users.
 
-`main` is at **`b83d2aaf`** — the four #449 follow-ups (#452, #453, #454, #455),
-on top of `83a7bd4f` "feat(identity): handles and profile pictures (#449) (#451)".
+`main` is at **`fe7d6497`**. The stack, newest first: doc corrections ·
+`ef71642c` the reaper-log fix (#457) · `b83d2aaf` the four #449 follow-ups
+(#452–#455, PR #456) · `83a7bd4f` handles and profile pictures (#449, PR #451).
 
 **The repo is PUBLIC.** Never put a real weight, measurement or intake value in
 a commit, comment, test fixture, issue or PR. Describe results as counts.
@@ -26,7 +27,24 @@ chart. Note SSH may not be authorised for that repo — the `gh` API works.
 
 **Rollout wrinkle:** rows written while `Noop` was active point at objects that
 were never uploaded, so those users' `avatar_url` 404s. `Avatar`'s `onError`
-falls back to initials, so it is cosmetic and self-corrects on re-upload.
+falls back to initials, so it is cosmetic and self-corrects on re-upload. At
+~18 users, none of whom had a working picture before 2026-08-26, the practical
+impact is nil — but it reads as a bug if you do not know.
+
+**Verified live, not inferred:** the pod carries both `ASSETS_*` vars, `/ready`
+returns 200, the rollout completed, and there is NO `gcs unavailable` line in
+the logs — which is the tell, because `main.go` logs that only when `NewGCS`
+fails. Bucket round-trip was smoke-tested: write as the service account, then an
+anonymous `curl` with no auth header returned HTTP 200 with the right body.
+
+**There is no lifecycle reaper, by necessity.** GCS cannot express "delete
+superseded avatars": each write issues a new object NAME (a fresh uuid in the
+path), not a new object VERSION, so noncurrent-version conditions never match,
+and an age-based rule would delete live avatars. The application-side delete on
+replace / removal / account-deletion is the ONLY collector; when one fails the
+object leaks permanently, and both paths now log `NEEDS MANUAL CLEANUP` (#457
+— they previously claimed a reaper would collect it, which would have sent an
+operator hunting for something that does not exist).
 
 ## What shipped
 
@@ -83,14 +101,19 @@ falls back to initials, so it is cosmetic and self-corrects on re-upload.
   blocked the real Social screen, so this is structural correctness plus 9 tests.
   If the threshold is wrong it is a one-line tune.
 
+### Not looked at — surfaced on a push, outside today's scope
+
+**GitHub reports 8 vulnerabilities on `main` (7 high, 1 moderate)** —
+https://github.com/tesserix/kora/security/dependabot. Nobody triaged these
+today. Seven high on a pre-launch app heading for public launch is worth its own
+session.
+
 ### Residual, worth a follow-up
 
 - `LeaderRow` has a `uri` prop **no caller passes** — `FriendProgress`,
   `GroupMemberView` and challenge leaderboard entries carry no `avatar_url` on
   the wire. An API-side gap.
 - `friends.tsx`'s own incoming-request row still has no avatar, unlike Social's.
-- `SetAvatar`/`ClearAvatar` still log "lifecycle rule will reap it". **There is no
-  reaper** — see `docs/OPEN_QUESTIONS.md`. Reword.
 - `request_received` routes to `/friends` rather than reusing `onSend`, because
   `LookupView` carries no request id. A design decision types cannot enforce.
 
@@ -158,7 +181,18 @@ Everything in the previous handoff still applies. Reconfirmed or new:
   `container.queryAll(instance => instance.type === "Image")`.
 - **`gh pr merge --auto` does not gate here.** The repo has no *required* status
   checks, so `--auto` merges immediately rather than waiting. If you want a gate,
-  wait for `gh pr checks` yourself.
+  wait for `gh pr checks` yourself. (#451 merged ahead of its checks this way.)
+- **`Closes #1, #2, #3` only closes #1.** GitHub parses the keyword against the
+  first number only; each needs its own `closes`. #456 auto-closed one of four.
+- **SSH is not authorised for `tesserix-k8s`** from this machine, though it is
+  for `tesserix/kora`. Use the `gh` API (`git/refs` + `contents`) to branch,
+  commit and PR there.
+- **`gcloud storage buckets create` rejects `--public-access-prevention=inherited`**
+  — omit the flag; inherited is the default.
+- **The org policy `storage.publicAccessPrevention` is NOT enforced**
+  (`booleanPolicy: {}`), even though every sibling `*-assets` bucket sets it at
+  bucket level. `kora-prod-assets-in` is deliberately public-read; do not
+  "correct" it without re-deciding the consent model (see OPEN_QUESTIONS).
 
 ## Session state — cleaned up
 
