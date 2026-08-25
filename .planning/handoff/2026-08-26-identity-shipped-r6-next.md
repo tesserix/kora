@@ -1,7 +1,14 @@
 # Handoff — Kora, #449 is merged; R5 is closed and R6 is next
 
 You are picking up **Kora** (`/Users/Mahesh.Sangawar/personal/tesserix-new/kora`),
-a nutrition-tracking iOS app: Go API + Expo/React Native, pre-launch, ~18 users.
+a nutrition-tracking iOS app: Go API + Expo/React Native, pre-launch.
+
+**There is ONE real user — the owner.** The users table holds ~18 rows, but they
+are test and throwaway accounts, not people. Confirmed by the owner 2026-08-26.
+Read every "18 users" claim in older docs with that correction applied: it
+changes what is urgent (nothing user-facing is), and it means a defect that
+reaches "production" today reaches one person who knows what they are looking
+at.
 
 `main` is at **`fe7d6497`**. The stack, newest first: doc corrections ·
 `ef71642c` the reaper-log fix (#457) · `b83d2aaf` the four #449 follow-ups
@@ -28,7 +35,7 @@ chart. Note SSH may not be authorised for that repo — the `gh` API works.
 **Rollout wrinkle:** rows written while `Noop` was active point at objects that
 were never uploaded, so those users' `avatar_url` 404s. `Avatar`'s `onError`
 falls back to initials, so it is cosmetic and self-corrects on re-upload. At
-~18 users, none of whom had a working picture before 2026-08-26, the practical
+one real user, who had no working picture before 2026-08-26, the practical
 impact is nil — but it reads as a bug if you do not know.
 
 **Verified live, not inferred:** the pod carries both `ASSETS_*` vars, `/ready`
@@ -217,6 +224,14 @@ console can manage Kora: registration, `/admin/audit-logs` (which today shows
 **mark8ly's** rows under Kora's name), `/admin/inbox`, `/admin/entities/{type}`,
 `/admin/health`, `/admin/kpis`. AI usage needs no work.
 
-Still true from before: migration 000055's comment is factually wrong
-("pre-launch with one real account"; production has 18 user rows), and the widget
-extension's `CFBundleVersion` is `1` while the app is `48`.
+**Correction to a task the previous handoff carried:** it said migration
+000055's comment ("pre-launch with one real account") is *factually wrong*
+because production has 18 user rows, and asked for it to be corrected before R6
+onboards testers. **Do not make that change.** The owner confirmed on 2026-08-26
+that there is one real account; the other rows are test and throwaway data. The
+comment was right and the "fix" would have introduced the error. Row count is
+not user count.
+
+Still true from before: the widget extension's `CFBundleVersion` is `1` while
+the app is `48`. Xcode warns these must match; App Store Connect has accepted it
+anyway. Probably the widget target not picking up `autoIncrement`.
