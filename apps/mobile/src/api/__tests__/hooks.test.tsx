@@ -66,7 +66,6 @@ import {
   useResolveVoice,
   useSavedMeals,
   useSendFriendRequest,
-  useSetShareProgress,
   useSubmitOnboarding,
   useUnfriend,
   useUnreadCount,
@@ -951,17 +950,6 @@ test("useFriendsProgress GETs /v1/friends/progress", async () => {
   const { result } = await renderHook(() => useFriendsProgress(), { wrapper });
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
   expect(apiFetch).toHaveBeenCalledWith("/v1/friends/progress");
-});
-
-test("useSetShareProgress PATCHes /v1/me/share-progress with the flag", async () => {
-  (apiFetch as jest.Mock).mockResolvedValueOnce({ share_progress: true });
-  const { result } = await renderHook(() => useSetShareProgress(), { wrapper });
-  result.current.mutate(true);
-  await waitFor(() => expect(result.current.isSuccess).toBe(true));
-  expect(apiFetch).toHaveBeenCalledWith("/v1/me/share-progress", {
-    method: "PATCH",
-    body: JSON.stringify({ share_progress: true }),
-  });
 });
 
 test("useCreateGroup POSTs the name to /v1/groups", async () => {

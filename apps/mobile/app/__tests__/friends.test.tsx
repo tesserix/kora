@@ -6,7 +6,6 @@ import Friends from "../friends";
 const mockAcceptMutate = jest.fn();
 const mockDeclineMutate = jest.fn();
 const mockUnfriendMutate = jest.fn();
-const mockSetShareMutate = jest.fn();
 const mockShow = jest.fn();
 
 jest.mock("expo-router", () => ({ router: { back: jest.fn() } }));
@@ -19,8 +18,6 @@ jest.mock("@/api/hooks", () => ({
   useUnfriend: () => ({ mutate: mockUnfriendMutate, isPending: false }),
   useSendFriendRequest: () => ({ mutate: jest.fn(), isPending: false }),
   useMyFriendCode: () => ({ data: { code: "ABC123XY", link: "mobile://friend/ABC123XY" } }),
-  useProfile: () => ({ data: { share_progress: false } }),
-  useSetShareProgress: () => ({ mutate: mockSetShareMutate, isPending: false }),
   useFriendsProgress: () => ({ data: { me: { streak_days: 2, adherence_days: 1, adherence_window: 7 }, friends: [] } }),
 }));
 
@@ -28,7 +25,6 @@ beforeEach(() => {
   mockAcceptMutate.mockClear();
   mockDeclineMutate.mockClear();
   mockUnfriendMutate.mockClear();
-  mockSetShareMutate.mockClear();
   mockShow.mockClear();
 });
 
@@ -46,12 +42,6 @@ test("renders friends and incoming requests; Accept calls the hook with the requ
   expect(getByText("Ben")).toBeTruthy();
   await fireEvent.press(getByLabelText("Accept request from Ben"));
   expect(mockAcceptMutate).toHaveBeenCalledWith("r1", withOnError);
-});
-
-test("toggling Share my progress calls useSetShareProgress with the new value", async () => {
-  const { getByLabelText } = await render(<Friends />);
-  await fireEvent(getByLabelText("Share my progress"), "valueChange", true);
-  expect(mockSetShareMutate).toHaveBeenCalledWith(true, withOnError);
 });
 
 test("a failed Accept tells the user why", async () => {
@@ -85,11 +75,4 @@ test("a failed Remove-friend tells the user why", async () => {
   mockUnfriendMutate.mock.calls[0][1].onError(OFFLINE);
   expect(mockShow).toHaveBeenCalledWith({ message: OFFLINE_COPY });
   alert.mockRestore();
-});
-
-test("a failed Share-progress toggle tells the user why", async () => {
-  const { getByLabelText } = await render(<Friends />);
-  await fireEvent(getByLabelText("Share my progress"), "valueChange", true);
-  mockSetShareMutate.mock.calls[0][1].onError(OFFLINE);
-  expect(mockShow).toHaveBeenCalledWith({ message: OFFLINE_COPY });
 });
