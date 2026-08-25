@@ -158,6 +158,17 @@ func TestCrossUserPathsLeakNothingWithoutAGrant(t *testing.T) {
 			require.NotContains(t, listJSON, `"streak_days"`)
 			require.NotContains(t, listJSON, `"adherence_days"`)
 			require.Contains(t, listJSON, `"sharing":false`)
+
+			// The absence of streak_days/adherence_days is not, on its own,
+			// proof the owner's row is even present -- data.members also
+			// carries the VIEWER's own row, gated the same way (see the
+			// package comment on this pre-existing asymmetry with
+			// data.friends). A broken membership/friends query that dropped
+			// the owner entirely would satisfy every assertion above while
+			// silently returning nothing about them. Pin the owner's actual
+			// presence so that failure mode is caught too.
+			require.Contains(t, listJSON, owner.String(),
+				"owner must be present in the response, even though none of their figures may be")
 		})
 	}
 }
