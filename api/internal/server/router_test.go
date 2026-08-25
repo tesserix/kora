@@ -22,6 +22,7 @@ import (
 	"github.com/tesserix/kora/api/internal/auth"
 	"github.com/tesserix/kora/api/internal/bffauth"
 	"github.com/tesserix/kora/api/internal/bodyread"
+	"github.com/tesserix/kora/api/internal/handlefold"
 	"github.com/tesserix/kora/api/internal/identity"
 	"github.com/tesserix/kora/api/internal/resolve"
 )
@@ -575,10 +576,29 @@ func TestSetHandleRateLimitIsWiredIntoTheRealRouter(t *testing.T) {
 
 	r := NewRouter(Deps{DB: db, Verifier: fixedUIDVerifier{uid: uid}})
 
+	// Each iteration below claims a DIFFERENT random handle for the SAME
+	// user, and Claim retires whatever that user held before -- see
+	// identity.Service.Claim's doc comment ("Changing your handle retires
+	// the old one PERMANENTLY"). Every handle but the last successfully
+	// claimed one therefore leaves a retired_handles row (kora#455): the raw
+	// handles are collected here so cleanup can delete every one of them by
+	// its computed canonical form, the same way retireCleanup does in
+	// internal/user/deletion_test.go and internal/identity/service_test.go.
+	// This is the exact leak kora#455 measured -- 19 rows shaped
+	// n0b0dy_<hex>, one per claim this loop makes but the last.
+	var claimed []string
+	t.Cleanup(func() {
+		for _, raw := range claimed {
+			db.Exec(`DELETE FROM retired_handles WHERE handle_canonical = ?`, handlefold.Canonical(raw))
+		}
+	})
+
 	var last int
 	for i := 0; i < identity.LookupLimit+1; i++ {
+		handle := "nobody_" + uuid.NewString()[:8]
+		claimed = append(claimed, handle)
 		req := httptest.NewRequest(http.MethodPut, "/v1/me/handle",
-			strings.NewReader(`{"handle":"nobody_`+uuid.NewString()[:8]+`"}`))
+			strings.NewReader(`{"handle":"`+handle+`"}`))
 		req.Header.Set("Authorization", "Bearer any-token")
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
