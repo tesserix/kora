@@ -805,6 +805,20 @@ export interface MyFriendCode {
   link: string;
 }
 
+// Handles (kora#449). The projection GET /v1/users/lookup returns. There is
+// no listing form of that endpoint — exact match only — so there is no array
+// type here either.
+export type LookupResult = {
+  id: string;
+  display_name: string;
+  handle: string;
+  // "" when the person has no picture, and when no bucket is configured.
+  // Treat it as "no picture", never as a failure.
+  avatar_url: string;
+};
+
+export type MyHandle = { handle: string };
+
 // Sharing circles (kora#326/#437). ShareCategory mirrors the server's
 // access.Category allow-list and the share_grants_category_check constraint;
 // a value outside it can never be granted, so the union is the whole set.
