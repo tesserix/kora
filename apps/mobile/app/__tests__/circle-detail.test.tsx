@@ -1,6 +1,13 @@
 import { render, fireEvent } from "@testing-library/react-native";
+import type { TestInstance } from "test-renderer";
 
 import CircleDetail from "../circle/[id]";
+
+// This repo's testing-library build has no UNSAFE_getByType/UNSAFE_queryAllByType
+// (see Avatar.test.tsx) -- component-type queries go through queryAll instead.
+function queryImages(container: TestInstance): TestInstance[] {
+  return container.queryAll((instance) => instance.type === "Image");
+}
 
 const mockSetCategories = jest.fn();
 const mockAddMember = jest.fn();
@@ -42,6 +49,20 @@ test("shows the circle's members", async () => {
   const { getByText } = await render(<CircleDetail />);
   expect(getByText("Ada")).toBeTruthy();
   expect(getByText("Ben")).toBeTruthy();
+});
+
+// kora#454: CircleMember.avatar_url reaches the client (kora#437) but nothing
+// rendered it -- the member list showed name-only rows with no Avatar at all.
+test("a member's picture is passed through to their Avatar", async () => {
+  mockCircles = [{
+    id: "c1",
+    name: "Household",
+    members: [{ ...ada, avatar_url: "https://assets.test/ada.jpg" }, ben],
+    categories: ["progress"],
+  }];
+  const { container } = await render(<CircleDetail />);
+  const images = queryImages(container);
+  expect(images.map((i) => i.props.source)).toContainEqual({ uri: "https://assets.test/ada.jpg" });
 });
 
 // progress is a plain toggle. Sharing a streak is not the same act as sharing

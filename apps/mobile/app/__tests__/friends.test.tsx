@@ -1,7 +1,14 @@
 import { render, fireEvent } from "@testing-library/react-native";
 import { Alert } from "react-native";
+import type { TestInstance } from "test-renderer";
 
 import Friends from "../friends";
+
+// This repo's testing-library build has no UNSAFE_getByType/UNSAFE_queryAllByType
+// (see Avatar.test.tsx) -- component-type queries go through queryAll instead.
+function queryImages(container: TestInstance): TestInstance[] {
+  return container.queryAll((instance) => instance.type === "Image");
+}
 
 // The real "@/lib/api" pulls in firebase/auth (real ESM), which Jest cannot
 // parse unmocked. Friends renders AddFriendSheet, which imports it directly
@@ -30,7 +37,7 @@ const mockShow = jest.fn();
 jest.mock("expo-router", () => ({ router: { back: jest.fn() } }));
 jest.mock("@/components/Toast", () => ({ useToast: () => ({ show: mockShow }) }));
 jest.mock("@/api/hooks", () => ({
-  useFriends: () => ({ data: [{ id: "u1", display_name: "Ada" }] }),
+  useFriends: () => ({ data: [{ id: "u1", display_name: "Ada", avatar_url: "https://assets.test/ada.jpg" }] }),
   useFriendRequests: () => ({ data: { incoming: [{ id: "r1", user: { id: "u2", display_name: "Ben" } }], outgoing: [] } }),
   useAcceptRequest: () => ({ mutate: mockAcceptMutate, isPending: false }),
   useDeclineRequest: () => ({ mutate: mockDeclineMutate, isPending: false }),
@@ -102,6 +109,14 @@ test("a failed Remove-friend tells the user why", async () => {
 // takes the TARGET to the 44pt iOS minimum, and it is load-bearing rather
 // than cosmetic — these two controls sit adjacent with asymmetric
 // consequences, since a mis-tap declines a friend request with no undo.
+// kora#454: `uri` was not wired at this Avatar site, even though
+// Friend.avatar_url has existed since kora#449.
+test("a friend's picture is passed through to their Avatar", async () => {
+  const { container } = await render(<Friends />);
+  const images = queryImages(container);
+  expect(images.map((i) => i.props.source)).toContainEqual({ uri: "https://assets.test/ada.jpg" });
+});
+
 test("accept and decline meet the 44pt touch target via hitSlop", async () => {
   const { getByLabelText } = await render(<Friends />);
   for (const label of ["Accept request from Ben", "Decline request from Ben"]) {

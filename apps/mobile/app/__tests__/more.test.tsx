@@ -1,7 +1,14 @@
 import { render, fireEvent } from "@testing-library/react-native";
+import type { TestInstance } from "test-renderer";
 import { instrumentLight } from "@/theme/palette";
 
 import More from "../(tabs)/more";
+
+// This repo's testing-library build has no UNSAFE_getByType/UNSAFE_queryAllByType
+// (see Avatar.test.tsx) -- component-type queries go through queryAll instead.
+function queryImages(container: TestInstance): TestInstance[] {
+  return container.queryAll((instance) => instance.type === "Image");
+}
 
 const mockPush = jest.fn();
 const mockSignOut = jest.fn(async () => {});
@@ -21,7 +28,9 @@ jest.mock("@/lib/push", () => ({ unregisterPushToken: () => mockUnregisterPushTo
 let mockUnreadCount = 0;
 jest.mock("@/api/hooks", () => ({
   useUnreadCount: () => ({ data: { count: mockUnreadCount } }),
-  useProfile: () => ({ data: { display_name: "Kai Rivers", email: "kai@example.com" } }),
+  useProfile: () => ({
+    data: { display_name: "Kai Rivers", email: "kai@example.com", avatar_url: "https://assets.test/kai.jpg" },
+  }),
   useAIUsage: () => ({ data: undefined }),
 }));
 
@@ -43,6 +52,14 @@ test("renders every row label and the More title", async () => {
   for (const label of ["Profile", "Social", "Notifications", "Recipes", "AI usage", "Settings", "Send feedback", "Sign out"]) {
     expect(getByText(label)).toBeTruthy();
   }
+});
+
+// kora#454: the identity hero's Avatar had no `uri` at all, unlike Profile
+// and Home, which show the picture from the same useProfile data.
+test("the identity hero's picture is passed through to its Avatar", async () => {
+  const { container } = await render(<More />);
+  const images = queryImages(container);
+  expect(images.map((i) => i.props.source)).toContainEqual({ uri: "https://assets.test/kai.jpg" });
 });
 
 test("pressing a row navigates to its route", async () => {

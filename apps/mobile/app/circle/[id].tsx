@@ -9,6 +9,7 @@ import { ScreenHeader } from "@/components/ScreenHeader";
 import { AppBackground } from "@/components/AppBackground";
 import { GlassPanel } from "@/components/instrument/GlassPanel";
 import { ToggleSwitch } from "@/components/ToggleSwitch";
+import { Avatar } from "@/components/Avatar";
 import { Icon } from "@/components/Icon";
 import { EmptyState } from "@/components/common/EmptyState";
 import { ConfirmBodyShareSheet } from "@/components/social/ConfirmBodyShareSheet";
@@ -24,6 +25,7 @@ import {
 } from "@/api/hooks";
 import { useToast } from "@/components/Toast";
 import { apiErrorMessage } from "@/lib/apiErrorMessage";
+import { initials } from "@/lib/initials";
 import { categoryLabel, CATEGORY_ORDER } from "@/lib/shareAudit";
 import { useTheme } from "@/theme";
 
@@ -174,7 +176,8 @@ export default function CircleDetail() {
                   {index > 0 ? (
                     <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: instrument.hairline }} />
                   ) : null}
-                  <View style={{ flexDirection: "row", alignItems: "center", minHeight: 44, paddingVertical: spacing.xs }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, minHeight: 44, paddingVertical: spacing.xs }}>
+                    <Avatar initials={initials(member.display_name)} uri={member.avatar_url} size={30} />
                     <AppText style={{ flex: 1, fontSize: 15, color: instrument.ink }}>{member.display_name}</AppText>
                     <PressableScale
                       accessibilityRole="button"

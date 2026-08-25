@@ -1,6 +1,13 @@
 import { render, fireEvent } from "@testing-library/react-native";
+import type { TestInstance } from "test-renderer";
 
 import Social from "../social";
+
+// This repo's testing-library build has no UNSAFE_getByType/UNSAFE_queryAllByType
+// (see Avatar.test.tsx) -- component-type queries go through queryAll instead.
+function queryImages(container: TestInstance): TestInstance[] {
+  return container.queryAll((instance) => instance.type === "Image");
+}
 
 // The real "@/lib/api" pulls in firebase/auth (real ESM), which Jest cannot
 // parse unmocked. Social renders AddFriendSheet, which imports it directly
@@ -160,4 +167,24 @@ test("a friend with no display name never shows the hardcoded K avatar glyph", a
   mockFriends = [{ id: "u9", display_name: "", handle: "ada_l" }];
   const { queryByText } = await render(<Social />);
   expect(queryByText("K")).toBeNull();
+});
+
+// kora#454: `uri` was passed at only 3 of 7 Avatar sites -- neither the
+// accepted-friends PersonRow nor the incoming-request row here was one of
+// them, though Friend.avatar_url has existed since kora#449.
+test("an accepted friend's picture is passed through to their Avatar", async () => {
+  mockFriends = [{ id: "u1", display_name: "Ada Lovelace", avatar_url: "https://assets.test/ada.jpg" }];
+  const { container } = await render(<Social />);
+  const images = queryImages(container);
+  expect(images.map((i) => i.props.source)).toContainEqual({ uri: "https://assets.test/ada.jpg" });
+});
+
+// This is the screen where consent is granted -- the incoming-request row
+// used to render no Avatar at all, even though the API composes avatar_url
+// for both directions of a pending request.
+test("an incoming request's picture is passed through to their Avatar", async () => {
+  mockIncoming = [{ id: "r1", user: { id: "u2", display_name: "Ben", avatar_url: "https://assets.test/ben.jpg" } }];
+  const { container } = await render(<Social />);
+  const images = queryImages(container);
+  expect(images.map((i) => i.props.source)).toContainEqual({ uri: "https://assets.test/ben.jpg" });
 });
