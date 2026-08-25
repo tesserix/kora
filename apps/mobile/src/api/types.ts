@@ -19,6 +19,14 @@ export type Profile = {
    * src/lib/bodyComposition.ts.
    */
   height_cm: number;
+  /**
+   * Handles and pictures (kora#449). Also on the wire from GET /v1/me for the
+   * same reason height_cm is: internal/user's User is serialised whole, and
+   * this field rides along with it. "" means no picture (and, same as
+   * LookupResult.avatar_url below, no bucket configured) — never treat it as
+   * a broken URL.
+   */
+  avatar_url: string;
 };
 
 export interface AIQuotaWindow {
