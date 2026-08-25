@@ -1,8 +1,8 @@
-import { StyleSheet, View } from "react-native";
+import { Image, StyleSheet, View } from "react-native";
 import { AppText } from "./Text";
 import { useTheme } from "@/theme";
 
-type Props = { initials: string; size?: number };
+type Props = { initials: string; size?: number; uri?: string | null };
 
 // The initial is authored at this fraction of the circle's diameter.
 const GLYPH_RATIO = 0.38;
@@ -32,8 +32,12 @@ const MAX_FONT_SCALE = MAX_GLYPH_RATIO / GLYPH_RATIO;
 // Instrument Glass inset well — swapped from `colors.cardSecondary` /
 // `colors.label`, both of which carry a faint green tint in dark mode (spec:
 // "Avatar.tsx ... only if they leak green — check").
-export function Avatar({ initials, size = 40 }: Props) {
+export function Avatar({ initials, size = 40, uri }: Props) {
   const { instrument } = useTheme();
+  // An empty string is the API's "no picture" value, not a URL. Treating it as
+  // one renders a broken image inside a friend row — worse than the initials
+  // it replaced. Same for null, which is what a stale cache returns.
+  const hasPicture = typeof uri === "string" && uri.length > 0;
   return (
     <View
       style={{
@@ -47,12 +51,20 @@ export function Avatar({ initials, size = 40 }: Props) {
         justifyContent: "center",
       }}
     >
-      <AppText
-        maxFontSizeMultiplier={MAX_FONT_SCALE}
-        style={{ fontSize: size * GLYPH_RATIO, fontWeight: "600", color: instrument.ink }}
-      >
-        {initials}
-      </AppText>
+      {hasPicture ? (
+        <Image
+          source={{ uri }}
+          style={{ width: size, height: size, borderRadius: size / 2 }}
+          accessible={false}
+        />
+      ) : (
+        <AppText
+          maxFontSizeMultiplier={MAX_FONT_SCALE}
+          style={{ fontSize: size * GLYPH_RATIO, fontWeight: "600", color: instrument.ink }}
+        >
+          {initials}
+        </AppText>
+      )}
     </View>
   );
 }

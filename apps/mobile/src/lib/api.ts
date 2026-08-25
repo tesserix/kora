@@ -480,13 +480,15 @@ export async function apiFetch(
 export async function apiFetchMultipart(
   path: string,
   form: FormData,
-  init: { signal?: AbortSignal } = {},
+  // method defaults to POST so no existing caller changes. PUT is here for
+  // /v1/me/avatar, which replaces a resource rather than creating one.
+  init: { signal?: AbortSignal; method?: "POST" | "PUT" } = {},
 ): Promise<unknown> {
   try {
     const res = await fetchWithRetry(
       path,
       (token) => ({
-        method: "POST",
+        method: init.method ?? "POST",
         body: form,
         // No Content-Type — fetch sets multipart/form-data with the boundary.
         headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
