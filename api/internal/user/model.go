@@ -37,9 +37,9 @@ type User struct {
 	// handle -- a presence check MUST be `!= ""`, the same trap AppleRefreshToken
 	// documents above.
 	//
-	// json:"-" on both: they reach clients only through identity.LookupView and
-	// social.FriendView, which are projections chosen field by field. Serialising
-	// the model directly is how an email leaks.
+	// json:"-" on both: they are hand-projected on every read path and are never
+	// serialised from this struct directly. Serialising the model directly is
+	// how an email leaks.
 	Handle          string `gorm:"column:handle" json:"-"`
 	HandleCanonical string `gorm:"column:handle_canonical" json:"-"`
 
