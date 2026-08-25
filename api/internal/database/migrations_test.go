@@ -273,10 +273,11 @@ func TestDropShareProgressBackfillsCirclesFromFriendships(t *testing.T) {
 
 	sharer := uuid.New()
 	nonSharer := uuid.New()
+	nonSharerFriend := uuid.New()
 	acceptedA := uuid.New()
 	acceptedB := uuid.New()
 	pending := uuid.New()
-	seededUsers := []uuid.UUID{sharer, nonSharer, acceptedA, acceptedB, pending}
+	seededUsers := []uuid.UUID{sharer, nonSharer, nonSharerFriend, acceptedA, acceptedB, pending}
 
 	for _, id := range seededUsers {
 		require.NoError(t, db.Exec(
@@ -290,13 +291,32 @@ func TestDropShareProgressBackfillsCirclesFromFriendships(t *testing.T) {
 	})
 	require.NoError(t, db.Exec(`UPDATE users SET share_progress = true WHERE id = ?`, sharer).Error)
 
+	// nonSharer already owns their OWN circle named "Friends", curated by hand
+	// (Task 6 lets any user create one, and it can pre-date this migration).
+	// It starts empty. The migration must never touch it: nonSharer's
+	// share_progress was false, so this circle is not one it created and
+	// matching on name alone would silently widen sharing nonSharer never
+	// consented to.
+	preExistingCircleID := uuid.New()
+	require.NoError(t, db.Exec(
+		`INSERT INTO share_circles (id, owner_id, name) VALUES (?, ?, ?)`,
+		preExistingCircleID, nonSharer, "Friends").Error)
+	t.Cleanup(func() {
+		db.Exec(`DELETE FROM share_circles WHERE id = ?`, preExistingCircleID)
+	})
+
 	for _, f := range []struct {
 		requester, addressee uuid.UUID
-		status                string
+		status               string
 	}{
 		{sharer, acceptedA, "accepted"},
 		{acceptedB, sharer, "accepted"}, // direction must not matter
 		{sharer, pending, "pending"},
+		// nonSharer has an accepted friend too, so the mutation check below
+		// actually exercises the bug this test guards against: without the
+		// scoping fix, this friend would land in nonSharer's PRE-EXISTING
+		// "Friends" circle even though share_progress was false.
+		{nonSharer, nonSharerFriend, "accepted"},
 	} {
 		require.NoError(t, db.Exec(
 			`INSERT INTO friendships (requester_id, addressee_id, status) VALUES (?, ?, ?)`,
@@ -334,10 +354,24 @@ func TestDropShareProgressBackfillsCirclesFromFriendships(t *testing.T) {
 
 	var nonSharerCircles int
 	require.NoError(t, db.Raw(`SELECT COUNT(*) FROM share_circles WHERE owner_id = ?`, nonSharer).Scan(&nonSharerCircles).Error)
-	require.Zero(t, nonSharerCircles, "share_progress = false must produce no circle")
+	require.Equal(t, 1, nonSharerCircles, "the pre-existing circle must still be the only one -- no new circle was created")
 
-	fmt.Printf("backfill test: sharer circle=%d members=%d grants=%d nonSharerCircles=%d\n",
-		len(circleIDs), len(members), grantCount, nonSharerCircles)
+	// The one fragile property under review: the backfill must correlate to
+	// the circles IT created (via users.share_progress = true), never to a
+	// circle name alone. A user's own pre-existing "Friends" circle must come
+	// out exactly as it went in.
+	var preExistingMembers int
+	require.NoError(t, db.Raw(`SELECT COUNT(*) FROM share_circle_members WHERE circle_id = ?`, preExistingCircleID).
+		Scan(&preExistingMembers).Error)
+	require.Zero(t, preExistingMembers, "migration must not add members to a circle it did not create")
+
+	var preExistingGrants int
+	require.NoError(t, db.Raw(`SELECT COUNT(*) FROM share_grants WHERE circle_id = ?`, preExistingCircleID).
+		Scan(&preExistingGrants).Error)
+	require.Zero(t, preExistingGrants, "migration must not grant a category on a circle it did not create")
+
+	fmt.Printf("backfill test: sharer circle=%d members=%d grants=%d nonSharerCircles=%d preExistingMembers=%d preExistingGrants=%d\n",
+		len(circleIDs), len(members), grantCount, nonSharerCircles, preExistingMembers, preExistingGrants)
 }
 
 func countContaining(values []string, needle string) int {
