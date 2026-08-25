@@ -98,7 +98,8 @@
           "organization": "tesserix",
           "project": "kora"
         }
-      ]
+      ],
+      "expo-build-properties"
     ],
     "experiments": {
       "typedRoutes": true,
