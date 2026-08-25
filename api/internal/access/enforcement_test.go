@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -21,6 +20,7 @@ import (
 	"github.com/tesserix/kora/api/internal/foodlog"
 	"github.com/tesserix/kora/api/internal/groups"
 	"github.com/tesserix/kora/api/internal/social"
+	"github.com/tesserix/kora/api/internal/tracking"
 	"github.com/tesserix/kora/api/internal/user"
 )
 
@@ -33,20 +33,49 @@ import (
 // When a new cross-user endpoint is added, add it to crossUserPaths. That is
 // the one manual step, and it is far smaller than remembering the whole rule.
 //
+// Two shapes of cross-user path, and the difference is not cosmetic:
+//
+//   - A LIST path (listField set) answers 200 even to a viewer with no
+//     grant. Membership is not secret, so the other person is still listed;
+//     what must be absent is every figure belonging to them.
+//   - A SINGLE-OWNER path (listField empty) answers 404 with no body. There
+//     is no list to appear in, so serving 200-with-nothing would leak the
+//     fact that the owner exists and has withheld something. Not-shared and
+//     not-there must be indistinguishable.
+//
 // listField names the key under "data" that holds the per-other-user
 // entries (each with its own "sharing"/"streak_days"/"adherence_days"). It
 // is NOT the whole response body: /v1/friends/progress also legitimately
 // echoes the CALLER's own streak/adherence under "data.me" -- that is the
 // viewer's own data, not a leak, so the leak assertion is scoped to
 // listField rather than grepped over the raw response.
+//
+// pathArg says which seeded id fills the path's %s verb: a single-owner path
+// is parameterised by the OWNER, a group path by the group.
 var crossUserPaths = []struct {
 	name      string
 	method    string
 	path      string
 	listField string
+	pathArg   pathArg
 }{
-	{"friends progress", "GET", "/v1/friends/progress", "friends"},
-	{"group progress", "GET", "/v1/groups/%s/progress", "members"},
+	{"friends progress", "GET", "/v1/friends/progress", "friends", argNone},
+	{"group progress", "GET", "/v1/groups/%s/progress", "members", argGroup},
+	{"friend body", "GET", "/v1/friends/%s/body", "", argOwner},
+}
+
+type pathArg int
+
+const (
+	argNone pathArg = iota
+	argGroup
+	argOwner
+)
+
+// leakedFigures are the per-person values no cross-user path may return to a
+// viewer holding no grant, whatever its shape.
+var leakedFigures = []string{
+	`"streak_days"`, `"adherence_days"`, `"weight_kg"`, `"body_fat_pct"`, `"waist_cm"`,
 }
 
 func testDB(t *testing.T) *gorm.DB {
@@ -98,6 +127,16 @@ func seedGroupWithMembers(t *testing.T, db *gorm.DB, ownerID uuid.UUID, members 
 // to the given viewer. A router that differs from production proves nothing
 // about production, so this must be kept in sync with
 // api/internal/server/router.go's wiring of these two routes.
+// seedWeighIn gives the owner one weigh-in carrying the figures the leak
+// assertions look for. Arbitrary fixtures; they describe nobody.
+func seedWeighIn(t *testing.T, db *gorm.DB, userID uuid.UUID) {
+	t.Helper()
+	require.NoError(t, db.Exec(
+		`INSERT INTO weight_entries (id, user_id, weight_kg, body_fat_pct, waist_cm, logged_at, local_date, source)
+		 VALUES (gen_random_uuid(), ?, 70, 20, 80, now(), current_date, 'manual')`, userID).Error)
+	t.Cleanup(func() { db.Exec(`DELETE FROM weight_entries WHERE user_id = ?`, userID) })
+}
+
 func testAPIRouter(t *testing.T, db *gorm.DB, viewer uuid.UUID) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -111,6 +150,9 @@ func testAPIRouter(t *testing.T, db *gorm.DB, viewer uuid.UUID) *gin.Engine {
 
 	compareHandler := compare.NewHandler(compare.NewService(socialRepo, userRepo, logRepo), accessSvc)
 	r.GET("/v1/friends/progress", compareHandler.Get)
+
+	friendBodyHandler := tracking.NewFriendBodyHandler(tracking.NewRepository(db), accessSvc)
+	r.GET("/v1/friends/:userId/body", friendBodyHandler.Get)
 
 	groupsRepo := groups.NewRepository(db)
 	groupsSvc := groups.NewService(groupsRepo, socialRepo, groups.NewCode)
@@ -130,17 +172,35 @@ func TestCrossUserPathsLeakNothingWithoutAGrant(t *testing.T) {
 		 VALUES (gen_random_uuid(), ?, ?, 'accepted')`, viewer, owner).Error)
 	t.Cleanup(func() { db.Exec(`DELETE FROM friendships WHERE requester_id = ? AND addressee_id = ?`, viewer, owner) })
 	groupID := seedGroupWithMembers(t, db, owner, []uuid.UUID{viewer, owner})
+	// The owner must actually HAVE data for "no figures came back" to mean
+	// anything. Without this the leak assertions below pass against a
+	// handler that leaks, simply because there was nothing to leak.
+	seedWeighIn(t, db, owner)
 
 	for _, p := range crossUserPaths {
 		t.Run(p.name, func(t *testing.T) {
 			path := p.path
-			if strings.Contains(path, "%s") {
+			switch p.pathArg {
+			case argGroup:
 				path = fmt.Sprintf(path, groupID)
+			case argOwner:
+				path = fmt.Sprintf(path, owner)
 			}
 			r := testAPIRouter(t, db, viewer)
 			req := httptest.NewRequest(p.method, path, nil)
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, req)
+
+			// The single-owner shape: 404, and not one figure anywhere in
+			// the response -- there is no list the owner may legitimately
+			// appear in, so nothing about them may come back at all.
+			if p.listField == "" {
+				require.Equal(t, http.StatusNotFound, w.Code)
+				for _, figure := range leakedFigures {
+					require.NotContains(t, w.Body.String(), figure)
+				}
+				return
+			}
 
 			require.Equal(t, http.StatusOK, w.Code)
 
@@ -155,8 +215,9 @@ func TestCrossUserPathsLeakNothingWithoutAGrant(t *testing.T) {
 			// The owner may be LISTED -- membership is not secret -- but none
 			// of their figures may appear. omitempty drops nil metric
 			// pointers, so their absence from the JSON is the assertion.
-			require.NotContains(t, listJSON, `"streak_days"`)
-			require.NotContains(t, listJSON, `"adherence_days"`)
+			for _, figure := range leakedFigures {
+				require.NotContains(t, listJSON, figure)
+			}
 			require.Contains(t, listJSON, `"sharing":false`)
 
 			// The absence of streak_days/adherence_days is not, on its own,

@@ -180,14 +180,7 @@ func (h Handler) ListWeight(c *gin.Context) {
 	if !ok {
 		return
 	}
-	to, err := time.Parse(time.RFC3339, c.Query("to"))
-	if err != nil {
-		to = endOfUTCDay(time.Now())
-	}
-	from, err := time.Parse(time.RFC3339, c.Query("from"))
-	if err != nil {
-		from = to.AddDate(-1, 0, 0)
-	}
+	from, to := weightWindow(c)
 	entries, err := h.repo.WeightSeries(c.Request.Context(), userID, from, to)
 	if err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not load weight series")
@@ -223,7 +216,6 @@ func orNow(t time.Time) time.Time {
 	}
 	return t
 }
-
 
 // rangeDays mirrors the client's WEIGHT_RANGE_DAYS. An unrecognised key
 // falls back to a month rather than to zero days, which would otherwise turn
@@ -318,4 +310,24 @@ func (h Handler) WeightTrend(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": trendResponse{
 		Status: "ok", RatePerWeek: &result.PerWeek, Basis: &basis, SpansInstruments: spans,
 	}})
+}
+
+// weightWindow reads the ?from/?to RFC3339 range shared by the own-user
+// weight series and the cross-user body series (kora#438), defaulting to the
+// last year up to the end of today's UTC day.
+//
+// Shared rather than duplicated so the two cannot drift on the defaults --
+// endOfUTCDay in particular exists to fix a specific bug (kora#378) and a
+// second handler quietly using time.Now() would reintroduce it on the path
+// nobody was looking at.
+func weightWindow(c *gin.Context) (from, to time.Time) {
+	to, err := time.Parse(time.RFC3339, c.Query("to"))
+	if err != nil {
+		to = endOfUTCDay(time.Now())
+	}
+	from, err = time.Parse(time.RFC3339, c.Query("from"))
+	if err != nil {
+		from = to.AddDate(-1, 0, 0)
+	}
+	return from, to
 }

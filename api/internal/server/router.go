@@ -365,6 +365,16 @@ func NewRouter(deps Deps) *gin.Engine {
 		compareHandler := compare.NewHandler(compare.NewService(socialRepo, userRepo, logRepo), accessSvc)
 		v1.GET("/friends/progress", compareHandler.Get)
 
+		// Another person's weigh-ins, under an access.CategoryBody grant
+		// (kora#438). Registered after the static /friends/* GET routes above
+		// it, which gin resolves in preference to the :userId parameter.
+		//
+		// A route added here that reads another user's rows MUST also be
+		// added to crossUserPaths in access/enforcement_test.go — that is
+		// what makes forgetting the gateway fail a test that already exists.
+		friendBodyHandler := tracking.NewFriendBodyHandler(trackingRepo, accessSvc)
+		v1.GET("/friends/:userId/body", friendBodyHandler.Get)
+
 		dashSvc := dashboard.NewService(logRepo, trackingRepo, deps.DB)
 		dashboardHandler := dashboard.NewHandler(dashSvc)
 		v1.GET("/dashboard", dashboardHandler.Get)
