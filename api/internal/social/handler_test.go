@@ -20,7 +20,7 @@ func mountFor(callerID uuid.UUID, db *gorm.DB) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(func(c *gin.Context) { c.Set("user_id", callerID); c.Next() })
-	h := NewHandler(NewService(NewRepository(db), user.NewRepository(db)))
+	h := NewHandler(NewService(NewRepository(db), user.NewRepository(db), func(string) string { return "" }))
 	r.GET("/v1/friends", h.ListFriends)
 	r.GET("/v1/friends/requests", h.ListRequests)
 	r.POST("/v1/friends/requests", h.SendRequest)
@@ -62,7 +62,7 @@ func TestAcceptForbiddenForNonAddressee(t *testing.T) {
 	a := seedUser(t, db, "Ada")
 	b := seedUser(t, db, "Ben")
 	c := seedUser(t, db, "Cy")
-	svc := NewService(NewRepository(db), user.NewRepository(db))
+	svc := NewService(NewRepository(db), user.NewRepository(db), func(string) string { return "" })
 	f, err := svc.SendRequest(context.Background(), a, "so-"+b.String()+"@test.dev", "")
 	require.NoError(t, err)
 

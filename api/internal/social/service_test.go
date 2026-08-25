@@ -2,6 +2,7 @@ package social
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/google/uuid"
@@ -13,7 +14,7 @@ import (
 func TestSendRequestRejectsSelfAndMissing(t *testing.T) {
 	db := testDB(t)
 	me := seedUser(t, db, "Me")
-	svc := NewService(NewRepository(db), user.NewRepository(db))
+	svc := NewService(NewRepository(db), user.NewRepository(db), func(string) string { return "" })
 
 	// self by email
 	selfEmail := "so-" + me.String() + "@test.dev"
@@ -33,7 +34,7 @@ func TestSendRequestCreatesPendingThenReversePendingAutoAccepts(t *testing.T) {
 	db := testDB(t)
 	a := seedUser(t, db, "Ada")
 	b := seedUser(t, db, "Ben")
-	svc := NewService(NewRepository(db), user.NewRepository(db))
+	svc := NewService(NewRepository(db), user.NewRepository(db), func(string) string { return "" })
 	bEmail := "so-" + b.String() + "@test.dev"
 	aEmail := "so-" + a.String() + "@test.dev"
 
@@ -62,7 +63,7 @@ func TestAcceptDeclineAuthorizationAndUnfriend(t *testing.T) {
 	a := seedUser(t, db, "Ada")
 	b := seedUser(t, db, "Ben")
 	c := seedUser(t, db, "Cy")
-	svc := NewService(NewRepository(db), user.NewRepository(db))
+	svc := NewService(NewRepository(db), user.NewRepository(db), func(string) string { return "" })
 	bEmail := "so-" + b.String() + "@test.dev"
 
 	f, err := svc.SendRequest(context.Background(), a, bEmail, "") // a->b pending
@@ -83,7 +84,7 @@ func TestAcceptDeclineAuthorizationAndUnfriend(t *testing.T) {
 func TestMyCodeIsStable(t *testing.T) {
 	db := testDB(t)
 	me := seedUser(t, db, "Me")
-	svc := NewService(NewRepository(db), user.NewRepository(db))
+	svc := NewService(NewRepository(db), user.NewRepository(db), func(string) string { return "" })
 	code1, link, err := svc.MyCode(context.Background(), me)
 	require.NoError(t, err)
 	require.NotEmpty(t, code1)
@@ -97,7 +98,7 @@ func TestSendRequestByCode(t *testing.T) {
 	db := testDB(t)
 	a := seedUser(t, db, "Ada")
 	b := seedUser(t, db, "Ben")
-	svc := NewService(NewRepository(db), user.NewRepository(db))
+	svc := NewService(NewRepository(db), user.NewRepository(db), func(string) string { return "" })
 	_, _, err := svc.MyCode(context.Background(), b) // give b a friend_code
 	require.NoError(t, err)
 	bUser, err := user.NewRepository(db).ByID(context.Background(), b)
@@ -111,7 +112,7 @@ func TestSendRequestByCode(t *testing.T) {
 func TestSendRequestNeitherFieldIsBadInput(t *testing.T) {
 	db := testDB(t)
 	a := seedUser(t, db, "Ada")
-	svc := NewService(NewRepository(db), user.NewRepository(db))
+	svc := NewService(NewRepository(db), user.NewRepository(db), func(string) string { return "" })
 	_, err := svc.SendRequest(context.Background(), a, "", "")
 	require.ErrorIs(t, err, ErrBadInput)
 }
@@ -121,7 +122,7 @@ func TestDeclineDeletesAndAuthorizes(t *testing.T) {
 	a := seedUser(t, db, "Ada")
 	b := seedUser(t, db, "Ben")
 	c := seedUser(t, db, "Cy")
-	svc := NewService(NewRepository(db), user.NewRepository(db))
+	svc := NewService(NewRepository(db), user.NewRepository(db), func(string) string { return "" })
 	f, err := svc.SendRequest(context.Background(), a, "so-"+b.String()+"@test.dev", "")
 	require.NoError(t, err)
 	require.ErrorIs(t, svc.Decline(context.Background(), c, f.ID), ErrForbidden) // non-addressee
@@ -134,6 +135,57 @@ func TestDeclineDeletesAndAuthorizes(t *testing.T) {
 func TestAcceptUnknownRequestIsNotFound(t *testing.T) {
 	db := testDB(t)
 	b := seedUser(t, db, "Ben")
-	svc := NewService(NewRepository(db), user.NewRepository(db))
+	svc := NewService(NewRepository(db), user.NewRepository(db), func(string) string { return "" })
 	require.ErrorIs(t, svc.Accept(context.Background(), b, uuid.New()), ErrNotFound)
+}
+
+func TestListFriends_CarriesHandleAndAvatarButNeverEmail(t *testing.T) {
+	db := testDB(t)
+	me := seedUser(t, db, "Me")
+	them := seedUser(t, db, "Ada L")
+	path := "avatars/" + them.String() + "/v1.jpg"
+	require.NoError(t, db.Exec(
+		`UPDATE users SET handle = 'ada', handle_canonical = 'ada', avatar_path = ? WHERE id = ?`,
+		path, them).Error)
+	seedAcceptedFriendship(t, db, me, them)
+
+	svc := NewService(NewRepository(db), user.NewRepository(db),
+		func(p string) string {
+			if p == "" {
+				return ""
+			}
+			return "https://assets.test/" + p
+		})
+
+	got, err := svc.ListFriends(context.Background(), me)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Equal(t, "ada", got[0].Handle)
+	require.Equal(t, "https://assets.test/"+path, got[0].AvatarURL)
+
+	var email string
+	require.NoError(t, db.Raw(`SELECT email FROM users WHERE id = ?`, them).Scan(&email).Error)
+	require.NotEmpty(t, email)
+	body, err := json.Marshal(got)
+	require.NoError(t, err)
+	require.NotContains(t, string(body), email)
+	require.NotContains(t, string(body), "email")
+}
+
+// A friend with no picture must produce "" rather than a URL pointing at
+// nothing — the client falls back to initials on empty, and renders a broken
+// image on a URL that resolves to no object.
+func TestListFriends_NoAvatarIsEmptyURL(t *testing.T) {
+	db := testDB(t)
+	me := seedUser(t, db, "Me")
+	them := seedUser(t, db, "No Picture")
+	seedAcceptedFriendship(t, db, me, them)
+
+	svc := NewService(NewRepository(db), user.NewRepository(db),
+		func(p string) string { return "https://assets.test/" + p })
+
+	got, err := svc.ListFriends(context.Background(), me)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Empty(t, got[0].AvatarURL)
 }

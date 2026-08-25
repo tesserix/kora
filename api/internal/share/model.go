@@ -20,9 +20,13 @@ type Circle struct {
 func (Circle) TableName() string { return "share_circles" }
 
 // MemberView never exposes email -- same projection rule as social.FriendView.
+//
+// AvatarURL is "" for a user with no picture -- the client falls back to
+// initials on empty, same rule as social.FriendView.AvatarURL.
 type MemberView struct {
 	ID          uuid.UUID `json:"id"`
 	DisplayName string    `json:"display_name"`
+	AvatarURL   string    `json:"avatar_url"`
 }
 
 // MembershipView is the MEMBER's view of a circle they were added to

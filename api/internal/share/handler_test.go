@@ -18,7 +18,7 @@ func testRouter(t *testing.T, db *gorm.DB, userID uuid.UUID) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	h := NewHandler(NewService(NewRepository(db), stubFriends{areFriends: true}))
+	h := NewHandler(NewService(NewRepository(db, func(string) string { return "" }), stubFriends{areFriends: true}))
 	g := r.Group("/v1", func(c *gin.Context) { c.Set("user_id", userID) })
 	g.GET("/share/circles", h.List)
 	g.POST("/share/circles", h.Create)
@@ -67,7 +67,7 @@ func TestModifyingAnotherOwnersCircleIs404(t *testing.T) {
 	db := testDB(t)
 	owner := seedUser(t, db, "owner")
 	attacker := seedUser(t, db, "attacker")
-	victim, err := NewRepository(db).Create(t.Context(), owner, "Household")
+	victim, err := NewRepository(db, func(string) string { return "" }).Create(t.Context(), owner, "Household")
 	require.NoError(t, err)
 
 	r := testRouter(t, db, attacker)
@@ -93,7 +93,7 @@ func TestModifyingAnotherOwnersCircleIs404(t *testing.T) {
 // anyone, not that a malicious payload is ignored.
 func TestLeaveOnlyRemovesTheAuthenticatedCaller(t *testing.T) {
 	db := testDB(t)
-	repo := NewRepository(db)
+	repo := NewRepository(db, func(string) string { return "" })
 
 	assertMemberSurvives := func(t *testing.T, owner, member uuid.UUID) {
 		t.Helper()
@@ -149,7 +149,7 @@ func TestMembershipsEndpointListsWhatIsSharedWithYouAndLeaveRemovesIt(t *testing
 	db := testDB(t)
 	owner := seedUser(t, db, "Owner")
 	member := seedUser(t, db, "Member")
-	repo := NewRepository(db)
+	repo := NewRepository(db, func(string) string { return "" })
 
 	c, err := repo.Create(context.Background(), owner, "Gym crew")
 	require.NoError(t, err)
@@ -185,7 +185,7 @@ func TestMembershipsShowsOnlyTheCallersOwnMemberships(t *testing.T) {
 	owner := seedUser(t, db, "Owner")
 	member := seedUser(t, db, "Member")
 	stranger := seedUser(t, db, "Stranger")
-	repo := NewRepository(db)
+	repo := NewRepository(db, func(string) string { return "" })
 
 	c, err := repo.Create(context.Background(), owner, "Household")
 	require.NoError(t, err)

@@ -18,7 +18,7 @@ func TestMembershipsListsCirclesYouWereAddedTo(t *testing.T) {
 	db := testDB(t)
 	owner := seedUser(t, db, "Owner")
 	member := seedUser(t, db, "Member")
-	repo := NewRepository(db)
+	repo := NewRepository(db, func(string) string { return "" })
 
 	c, err := repo.Create(context.Background(), owner, "Household")
 	require.NoError(t, err)
@@ -41,7 +41,7 @@ func TestMembershipsNeverCarriesTheCircleName(t *testing.T) {
 	db := testDB(t)
 	owner := seedUser(t, db, "Owner")
 	member := seedUser(t, db, "Member")
-	repo := NewRepository(db)
+	repo := NewRepository(db, func(string) string { return "" })
 
 	c, err := repo.Create(context.Background(), owner, "Gym crew not Mum")
 	require.NoError(t, err)
@@ -73,7 +73,7 @@ func TestMembershipsNeverCarriesTheOwnersEmail(t *testing.T) {
 	db := testDB(t)
 	owner := seedUser(t, db, "Owner")
 	member := seedUser(t, db, "Member")
-	repo := NewRepository(db)
+	repo := NewRepository(db, func(string) string { return "" })
 
 	c, err := repo.Create(context.Background(), owner, "Household")
 	require.NoError(t, err)
@@ -92,7 +92,7 @@ func TestMembershipsNeverCarriesTheOwnersEmail(t *testing.T) {
 func TestMembershipsExcludesYourOwnCircles(t *testing.T) {
 	db := testDB(t)
 	owner := seedUser(t, db, "Owner")
-	repo := NewRepository(db)
+	repo := NewRepository(db, func(string) string { return "" })
 
 	c, err := repo.Create(context.Background(), owner, "Mine")
 	require.NoError(t, err)
@@ -106,7 +106,7 @@ func TestMembershipsExcludesYourOwnCircles(t *testing.T) {
 func TestMembershipsIsEmptyForSomeoneInNoCircles(t *testing.T) {
 	db := testDB(t)
 	stranger := seedUser(t, db, "Stranger")
-	got, err := NewRepository(db).ListForMember(context.Background(), stranger)
+	got, err := NewRepository(db, func(string) string { return "" }).ListForMember(context.Background(), stranger)
 	require.NoError(t, err)
 	require.Empty(t, got)
 }
@@ -116,7 +116,7 @@ func TestLeavingRemovesTheMembershipFromTheList(t *testing.T) {
 	db := testDB(t)
 	owner := seedUser(t, db, "Owner")
 	member := seedUser(t, db, "Member")
-	repo := NewRepository(db)
+	repo := NewRepository(db, func(string) string { return "" })
 	svc := NewService(repo, stubFriends{areFriends: true})
 
 	c, err := repo.Create(context.Background(), owner, "Household")
@@ -134,7 +134,7 @@ func TestLeavingDoesNotAffectOtherMembers(t *testing.T) {
 	owner := seedUser(t, db, "Owner")
 	quitter := seedUser(t, db, "Quitter")
 	stayer := seedUser(t, db, "Stayer")
-	repo := NewRepository(db)
+	repo := NewRepository(db, func(string) string { return "" })
 	svc := NewService(repo, stubFriends{areFriends: true})
 
 	c, err := repo.Create(context.Background(), owner, "Household")

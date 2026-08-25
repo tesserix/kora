@@ -19,7 +19,7 @@ func (s stubFriends) AreFriends(ctx context.Context, a, b uuid.UUID) (bool, erro
 
 func TestAddMemberRefusesANonFriend(t *testing.T) {
 	db := testDB(t)
-	repo := NewRepository(db)
+	repo := NewRepository(db, func(string) string { return "" })
 	svc := NewService(repo, stubFriends{areFriends: false})
 	owner := seedUser(t, db, "owner")
 	stranger := seedUser(t, db, "stranger")
@@ -32,7 +32,7 @@ func TestAddMemberRefusesANonFriend(t *testing.T) {
 
 func TestAddMemberAcceptsAFriend(t *testing.T) {
 	db := testDB(t)
-	repo := NewRepository(db)
+	repo := NewRepository(db, func(string) string { return "" })
 	svc := NewService(repo, stubFriends{areFriends: true})
 	owner := seedUser(t, db, "owner")
 	friend := seedUser(t, db, "friend")
@@ -50,7 +50,7 @@ func TestAddMemberAcceptsAFriend(t *testing.T) {
 // enough to grant yourself access to its owner's data.
 func TestMutationsRefuseANonOwner(t *testing.T) {
 	db := testDB(t)
-	repo := NewRepository(db)
+	repo := NewRepository(db, func(string) string { return "" })
 	svc := NewService(repo, stubFriends{areFriends: true})
 	owner := seedUser(t, db, "owner")
 	attacker := seedUser(t, db, "attacker")
@@ -70,7 +70,7 @@ func TestMutationsRefuseANonOwner(t *testing.T) {
 // Validation must trim first, so this is rejected as a 400 here instead.
 func TestCreateRejectsAWhitespaceOnlyName(t *testing.T) {
 	db := testDB(t)
-	repo := NewRepository(db)
+	repo := NewRepository(db, func(string) string { return "" })
 	svc := NewService(repo, stubFriends{areFriends: true})
 	owner := seedUser(t, db, "owner")
 
@@ -81,7 +81,7 @@ func TestCreateRejectsAWhitespaceOnlyName(t *testing.T) {
 
 func TestSetCategoriesRefusesAnUnknownCategory(t *testing.T) {
 	db := testDB(t)
-	repo := NewRepository(db)
+	repo := NewRepository(db, func(string) string { return "" })
 	svc := NewService(repo, stubFriends{areFriends: true})
 	owner := seedUser(t, db, "owner")
 	c, _ := repo.Create(context.Background(), owner, "Household")
@@ -95,7 +95,7 @@ func TestSetCategoriesRefusesAnUnknownCategory(t *testing.T) {
 // relationship and possibly notifications, and is not always welcome.
 func TestAMemberMayLeaveACircleTheyDoNotOwn(t *testing.T) {
 	db := testDB(t)
-	repo := NewRepository(db)
+	repo := NewRepository(db, func(string) string { return "" })
 	svc := NewService(repo, stubFriends{areFriends: true})
 	owner := seedUser(t, db, "owner")
 	member := seedUser(t, db, "member")

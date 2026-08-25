@@ -2,6 +2,7 @@ package share
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"testing"
 
@@ -38,7 +39,7 @@ func seedUser(t *testing.T, db *gorm.DB, name string) uuid.UUID {
 
 func TestCreateAndListCircle(t *testing.T) {
 	db := testDB(t)
-	repo := NewRepository(db)
+	repo := NewRepository(db, func(string) string { return "" })
 	owner := seedUser(t, db, "owner")
 
 	c, err := repo.Create(context.Background(), owner, "Household")
@@ -54,7 +55,7 @@ func TestCreateAndListCircle(t *testing.T) {
 
 func TestCreateRejectsADuplicateNameForTheSameOwner(t *testing.T) {
 	db := testDB(t)
-	repo := NewRepository(db)
+	repo := NewRepository(db, func(string) string { return "" })
 	owner := seedUser(t, db, "owner")
 
 	_, err := repo.Create(context.Background(), owner, "Household")
@@ -67,7 +68,7 @@ func TestCreateRejectsADuplicateNameForTheSameOwner(t *testing.T) {
 
 func TestTwoOwnersMayUseTheSameCircleName(t *testing.T) {
 	db := testDB(t)
-	repo := NewRepository(db)
+	repo := NewRepository(db, func(string) string { return "" })
 	a := seedUser(t, db, "a")
 	b := seedUser(t, db, "b")
 
@@ -79,7 +80,7 @@ func TestTwoOwnersMayUseTheSameCircleName(t *testing.T) {
 
 func TestAddAndRemoveMember(t *testing.T) {
 	db := testDB(t)
-	repo := NewRepository(db)
+	repo := NewRepository(db, func(string) string { return "" })
 	owner := seedUser(t, db, "owner")
 	friend := seedUser(t, db, "friend")
 	c, err := repo.Create(context.Background(), owner, "Household")
@@ -99,7 +100,7 @@ func TestAddAndRemoveMember(t *testing.T) {
 
 func TestAddMemberTwiceIsNotAnError(t *testing.T) {
 	db := testDB(t)
-	repo := NewRepository(db)
+	repo := NewRepository(db, func(string) string { return "" })
 	owner := seedUser(t, db, "owner")
 	friend := seedUser(t, db, "friend")
 	c, _ := repo.Create(context.Background(), owner, "Household")
@@ -112,7 +113,7 @@ func TestAddMemberTwiceIsNotAnError(t *testing.T) {
 
 func TestSetCategoriesReplacesRatherThanAppends(t *testing.T) {
 	db := testDB(t)
-	repo := NewRepository(db)
+	repo := NewRepository(db, func(string) string { return "" })
 	owner := seedUser(t, db, "owner")
 	c, _ := repo.Create(context.Background(), owner, "Household")
 
@@ -131,7 +132,7 @@ func TestSetCategoriesReplacesRatherThanAppends(t *testing.T) {
 // tripped an unmapped 23505 unique violation -> 500.
 func TestSetCategoriesDedupesDuplicateCategories(t *testing.T) {
 	db := testDB(t)
-	repo := NewRepository(db)
+	repo := NewRepository(db, func(string) string { return "" })
 	owner := seedUser(t, db, "owner")
 	c, _ := repo.Create(context.Background(), owner, "Household")
 
@@ -147,7 +148,7 @@ func TestSetCategoriesDedupesDuplicateCategories(t *testing.T) {
 // "insert the new set" implementation gets wrong.
 func TestSetCategoriesToEmptyRevokesAll(t *testing.T) {
 	db := testDB(t)
-	repo := NewRepository(db)
+	repo := NewRepository(db, func(string) string { return "" })
 	owner := seedUser(t, db, "owner")
 	c, _ := repo.Create(context.Background(), owner, "Household")
 
@@ -160,7 +161,7 @@ func TestSetCategoriesToEmptyRevokesAll(t *testing.T) {
 
 func TestDeleteCircleRemovesMembersAndGrants(t *testing.T) {
 	db := testDB(t)
-	repo := NewRepository(db)
+	repo := NewRepository(db, func(string) string { return "" })
 	owner := seedUser(t, db, "owner")
 	friend := seedUser(t, db, "friend")
 	c, _ := repo.Create(context.Background(), owner, "Household")
@@ -174,4 +175,35 @@ func TestDeleteCircleRemovesMembersAndGrants(t *testing.T) {
 	db.Raw(`SELECT count(*) FROM share_grants WHERE circle_id = ?`, c.ID).Scan(&grants)
 	require.Zero(t, members)
 	require.Zero(t, grants)
+}
+
+func TestListMembers_CarriesAvatarURLButNeverEmail(t *testing.T) {
+	db := testDB(t)
+	owner := seedUser(t, db, "Owner")
+	member := seedUser(t, db, "Member")
+	path := "avatars/" + member.String() + "/v1.jpg"
+	require.NoError(t, db.Exec(
+		`UPDATE users SET avatar_path = ? WHERE id = ?`, path, member).Error)
+
+	repo := NewRepository(db, func(p string) string {
+		if p == "" {
+			return ""
+		}
+		return "https://assets.test/" + p
+	})
+	circle, err := repo.Create(context.Background(), owner, "Close")
+	require.NoError(t, err)
+	require.NoError(t, repo.AddMember(context.Background(), circle.ID, member))
+
+	circles, err := repo.ListForOwner(context.Background(), owner)
+	require.NoError(t, err)
+	require.Len(t, circles, 1)
+	require.Len(t, circles[0].Members, 1)
+	require.Equal(t, "https://assets.test/"+path, circles[0].Members[0].AvatarURL)
+
+	var email string
+	require.NoError(t, db.Raw(`SELECT email FROM users WHERE id = ?`, member).Scan(&email).Error)
+	body, err := json.Marshal(circles)
+	require.NoError(t, err)
+	require.NotContains(t, string(body), email)
 }

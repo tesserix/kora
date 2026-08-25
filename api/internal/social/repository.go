@@ -50,18 +50,40 @@ func (r Repository) FindByID(ctx context.Context, id uuid.UUID) (*Friendship, er
 	return &f, nil
 }
 
+// friendRow is the flat scan target for ListAccepted. AvatarPath is the raw
+// object path -- ListAccepted returns it as-is; composing it into a URL is
+// Service.ListFriends' job (it holds the avatarURL func, not the repository).
+type friendRow struct {
+	ID          uuid.UUID
+	DisplayName string
+	Handle      string
+	AvatarPath  string
+}
+
 // ListAccepted returns the other party of every accepted friendship for userID.
+// AvatarURL on the returned views holds the raw object PATH, not a composed
+// URL -- callers must run it through an avatarURL func (see
+// Service.ListFriends) before it reaches a client.
 func (r Repository) ListAccepted(ctx context.Context, userID uuid.UUID) ([]FriendView, error) {
-	views := []FriendView{}
+	rows := []friendRow{}
 	err := r.db.WithContext(ctx).
 		Table("friendships AS f").
-		Select("u.id AS id, u.display_name AS display_name").
+		Select("u.id AS id, u.display_name AS display_name, u.handle AS handle, u.avatar_path AS avatar_path").
 		Joins("JOIN users u ON u.id = CASE WHEN f.requester_id = ? THEN f.addressee_id ELSE f.requester_id END", userID).
 		Where("f.status = ? AND (f.requester_id = ? OR f.addressee_id = ?)", FriendStatusAccepted, userID, userID).
 		Order("u.display_name ASC").
-		Scan(&views).Error
+		Scan(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("social: list accepted: %w", err)
+	}
+	views := make([]FriendView, 0, len(rows))
+	for _, row := range rows {
+		views = append(views, FriendView{
+			ID:          row.ID,
+			DisplayName: row.DisplayName,
+			Handle:      row.Handle,
+			AvatarURL:   row.AvatarPath, // raw path; Service composes the URL
+		})
 	}
 	return views, nil
 }

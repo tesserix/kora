@@ -39,6 +39,18 @@ func seedUser(t *testing.T, db *gorm.DB, name string) uuid.UUID {
 	return id
 }
 
+// seedAcceptedFriendship inserts an accepted friendship between a and b
+// directly (rather than through Service.SendRequest+Accept), for tests that
+// only care about the READ side. Cleanup is handled by seedUser's own
+// t.Cleanup (it deletes friendships touching either id), so this helper adds
+// none of its own.
+func seedAcceptedFriendship(t *testing.T, db *gorm.DB, a, b uuid.UUID) {
+	t.Helper()
+	require.NoError(t, db.Exec(
+		`INSERT INTO friendships (requester_id, addressee_id, status) VALUES (?, ?, ?)`,
+		a, b, FriendStatusAccepted).Error)
+}
+
 func TestCreateAndFindByPairEitherDirection(t *testing.T) {
 	db := testDB(t)
 	a := seedUser(t, db, "Ada")

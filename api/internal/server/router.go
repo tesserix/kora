@@ -157,7 +157,11 @@ func NewRouter(deps Deps) *gin.Engine {
 			auditDeletion,
 			assetsStore(deps.Assets), // same nil-to-Noop default as identity's avatar wiring
 		)
-		userHandler := user.NewHandler(userRepo, userSvc)
+		// avatarURL lets Me/UpdateProfile compose their own avatar_url the same
+		// way identity/social/share do (kora#449 task 10) -- WithAvatarURL,
+		// not a constructor arg, so every existing NewHandler(repo, svc) call
+		// site keeps compiling with "" avatar_url, same default as Noop.
+		userHandler := user.NewHandler(userRepo, userSvc).WithAvatarURL(assetsStore(deps.Assets).URL)
 		// tracking.NewRepository is a cheap wrapper (holds only *gorm.DB), so
 		// constructing it again below at the /weight routes is harmless --
 		// both wrap the same deps.DB.
@@ -351,7 +355,8 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.GET("/fasting/current", fastingHandler.Current)
 
 		socialRepo := social.NewRepository(deps.DB)
-		socialHandler := social.NewHandler(social.NewService(socialRepo, userRepo).WithNotifier(notificationsSvc))
+		socialHandler := social.NewHandler(
+			social.NewService(socialRepo, userRepo, assetsStore(deps.Assets).URL).WithNotifier(notificationsSvc))
 		v1.GET("/friends", socialHandler.ListFriends)
 		v1.GET("/friends/requests", socialHandler.ListRequests)
 		v1.POST("/friends/requests", socialHandler.SendRequest)
@@ -360,7 +365,8 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.DELETE("/friends/:userId", socialHandler.Unfriend)
 		v1.GET("/friends/code", socialHandler.Code)
 
-		shareHandler := share.NewHandler(share.NewService(share.NewRepository(deps.DB), socialRepo))
+		shareHandler := share.NewHandler(
+			share.NewService(share.NewRepository(deps.DB, assetsStore(deps.Assets).URL), socialRepo))
 		v1.GET("/share/circles", shareHandler.List)
 		v1.POST("/share/circles", shareHandler.Create)
 		// The member-side mirror of GET /share/circles (kora#440). It is what

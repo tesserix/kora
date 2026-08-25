@@ -18,13 +18,19 @@ type notifier interface {
 }
 
 type Service struct {
-	repo     Repository
-	users    user.Repository
-	notifier notifier
+	repo      Repository
+	users     user.Repository
+	notifier  notifier
+	avatarURL func(path string) string
 }
 
-func NewService(repo Repository, users user.Repository) Service {
-	return Service{repo: repo, users: users}
+// NewService takes avatarURL as the composer from a stored object PATH to a
+// public URL (same shape as identity.Service's, see internal/identity/service.go).
+// ListAccepted returns FriendView.AvatarURL holding the raw path -- ListFriends
+// runs it through avatarURL before returning to a handler, so the repository
+// itself never has to depend on object storage.
+func NewService(repo Repository, users user.Repository, avatarURL func(path string) string) Service {
+	return Service{repo: repo, users: users, avatarURL: avatarURL}
 }
 
 func (s Service) WithNotifier(n notifier) Service {
@@ -151,7 +157,20 @@ func (s Service) Unfriend(ctx context.Context, userID, otherID uuid.UUID) error 
 }
 
 func (s Service) ListFriends(ctx context.Context, userID uuid.UUID) ([]FriendView, error) {
-	return s.repo.ListAccepted(ctx, userID)
+	views, err := s.repo.ListAccepted(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range views {
+		// Guarded here, not left to the composer: a caller-supplied avatarURL
+		// is not guaranteed to treat "" specially (assets.Noop{} and
+		// assets.gcsStore.URL do, but a test double need not), and "no
+		// picture" must never become a URL pointing at nothing.
+		if views[i].AvatarURL != "" {
+			views[i].AvatarURL = s.avatarURL(views[i].AvatarURL) // raw path -> composed URL
+		}
+	}
+	return views, nil
 }
 
 func (s Service) ListRequests(ctx context.Context, userID uuid.UUID) (incoming, outgoing []RequestView, err error) {

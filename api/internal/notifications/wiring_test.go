@@ -58,7 +58,7 @@ func TestSendRequestWritesFriendRequestNotification(t *testing.T) {
 	recipient := seedU(t, db, "Recipient", "recipient-"+uuid.NewString()+"@t.dev")
 
 	notifSvc := notifications.NewService(notifications.NewRepository(db), nil) // nil members ok — no fan-out here
-	svc := social.NewService(social.NewRepository(db), user.NewRepository(db)).WithNotifier(notifSvc)
+	svc := social.NewService(social.NewRepository(db), user.NewRepository(db), func(string) string { return "" }).WithNotifier(notifSvc)
 
 	var recipEmail string
 	require.NoError(t, db.Raw("SELECT email FROM users WHERE id = ?", recipient).Scan(&recipEmail).Error)
@@ -78,7 +78,7 @@ func TestReversePendingAutoAcceptWritesFriendAcceptNotificationToOriginalRequest
 	userB := seedU(t, db, "Bob", "bob-"+uuid.NewString()+"@t.dev")
 
 	notifSvc := notifications.NewService(notifications.NewRepository(db), nil) // nil members ok — no fan-out here
-	svc := social.NewService(social.NewRepository(db), user.NewRepository(db)).WithNotifier(notifSvc)
+	svc := social.NewService(social.NewRepository(db), user.NewRepository(db), func(string) string { return "" }).WithNotifier(notifSvc)
 
 	var aEmail, bEmail string
 	require.NoError(t, db.Raw("SELECT email FROM users WHERE id = ?", userA).Scan(&aEmail).Error)
@@ -110,7 +110,7 @@ func TestNotifierErrorDoesNotFailAction(t *testing.T) {
 	db := wiringDB(t)
 	sender := seedU(t, db, "Sender", "s2-"+uuid.NewString()+"@t.dev")
 	recipient := seedU(t, db, "Recipient", "r2-"+uuid.NewString()+"@t.dev")
-	svc := social.NewService(social.NewRepository(db), user.NewRepository(db)).WithNotifier(failingNotifier{})
+	svc := social.NewService(social.NewRepository(db), user.NewRepository(db), func(string) string { return "" }).WithNotifier(failingNotifier{})
 
 	var recipEmail string
 	require.NoError(t, db.Raw("SELECT email FROM users WHERE id = ?", recipient).Scan(&recipEmail).Error)
