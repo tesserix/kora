@@ -54,6 +54,12 @@ func (s Service) List(ctx context.Context, ownerID uuid.UUID) ([]CircleView, err
 	return s.repo.ListForOwner(ctx, ownerID)
 }
 
+// Memberships lists circles the caller was added to. Not owner-gated, by
+// definition: the whole point is what OTHER people share with you.
+func (s Service) Memberships(ctx context.Context, memberID uuid.UUID) ([]MembershipView, error) {
+	return s.repo.ListForMember(ctx, memberID)
+}
+
 // ownedCircle is the gate on every mutation: knowing a circle's UUID must not
 // be enough to modify it.
 func (s Service) ownedCircle(ctx context.Context, ownerID, circleID uuid.UUID) error {

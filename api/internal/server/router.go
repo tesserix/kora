@@ -354,6 +354,10 @@ func NewRouter(deps Deps) *gin.Engine {
 		shareHandler := share.NewHandler(share.NewService(share.NewRepository(deps.DB), socialRepo))
 		v1.GET("/share/circles", shareHandler.List)
 		v1.POST("/share/circles", shareHandler.Create)
+		// The member-side mirror of GET /share/circles (kora#440). It is what
+		// makes POST /:id/leave reachable — without it a member cannot learn
+		// the circle id that route requires.
+		v1.GET("/share/memberships", shareHandler.Memberships)
 		v1.DELETE("/share/circles/:id", shareHandler.Delete)
 		v1.POST("/share/circles/:id/members", shareHandler.AddMember)
 		v1.DELETE("/share/circles/:id/members/:userId", shareHandler.RemoveMember)

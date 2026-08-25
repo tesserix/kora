@@ -25,6 +25,9 @@ import { useToast } from "@/components/Toast";
 import { apiErrorMessage } from "@/lib/apiErrorMessage";
 import { useTheme } from "@/theme";
 
+// 32pt visual + 6pt slop each side = a 44pt target, the iOS minimum.
+const TAP_SLOP = { top: 6, bottom: 6, left: 6, right: 6 } as const;
+
 function initials(name: string): string {
   return name.split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase();
 }
@@ -103,6 +106,13 @@ export default function Friends() {
                           accessibilityLabel={`Accept request from ${r.user.display_name}`}
                           haptic="success"
                           onPress={() => accept.mutate(r.id, surfaceError)}
+                          // The 32pt circle is the design; hitSlop takes the
+                          // TARGET to 44pt without changing it (kora#446).
+                          // These two sit adjacent with asymmetric
+                          // consequences — a mis-tap declines someone with no
+                          // undo — so they are the worst controls in the app
+                          // to leave under the minimum.
+                          hitSlop={TAP_SLOP}
                           style={{ width: 32, height: 32, borderRadius: radius.full, alignItems: "center", justifyContent: "center", backgroundColor: instrument.accent }}
                         >
                           <Icon name="check" size={16} color={instrument.accentOn} />
@@ -112,6 +122,7 @@ export default function Friends() {
                           accessibilityLabel={`Decline request from ${r.user.display_name}`}
                           haptic="selection"
                           onPress={() => decline.mutate(r.id, surfaceError)}
+                          hitSlop={TAP_SLOP}
                           style={{
                             width: 32,
                             height: 32,

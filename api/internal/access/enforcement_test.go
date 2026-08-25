@@ -50,6 +50,12 @@ import (
 // viewer's own data, not a leak, so the leak assertion is scoped to
 // listField rather than grepped over the raw response.
 //
+// What does NOT belong here: GET /v1/share/memberships (kora#440). It returns
+// who shares with the caller and which categories, never any of that owner's
+// actual data, so there is no grant for a missing grant to leak past. The test
+// below asserts "no figures without a grant"; a path that serves no figures at
+// all would pass it vacuously and imply a guarantee it does not need.
+//
 // pathArg says which seeded id fills the path's %s verb: a single-owner path
 // is parameterised by the OWNER, a group path by the group.
 var crossUserPaths = []struct {

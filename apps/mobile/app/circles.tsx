@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ScrollView, StyleSheet, TextInput, View } from "react-native";
+import { Alert, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, type Href } from "expo-router";
 
@@ -12,13 +12,13 @@ import { Icon } from "@/components/Icon";
 import { LoadErrorNotice } from "@/components/common/LoadErrorNotice";
 import { EmptyState } from "@/components/common/EmptyState";
 import { PressableScale } from "@/motion";
-import { useCircles, useCreateCircle } from "@/api/hooks";
+import { useCircles, useCreateCircle, useMemberships, useLeaveCircle } from "@/api/hooks";
 import { useToast } from "@/components/Toast";
 import { apiErrorMessage } from "@/lib/apiErrorMessage";
 import { categoryLabel, CATEGORY_ORDER } from "@/lib/shareAudit";
 import { useTheme } from "@/theme";
 
-import type { Circle } from "@/api/types";
+import type { Circle, Membership } from "@/api/types";
 
 // The Circles screen: the list of circles and the composer (kora#444).
 //
@@ -52,11 +52,48 @@ function CircleRow({ circle }: { circle: Circle }) {
   );
 }
 
+// A circle someone else put you in. No name — the server does not send one,
+// because circle names are the owner's private labels (kora#440). What a
+// member needs is who is sharing, what, and a way out.
+function MembershipRow({ membership, onLeave }: { membership: Membership; onLeave: () => void }) {
+  const { instrument, spacing } = useTheme();
+  // A display name can legitimately be empty — the column is nullable and
+  // GORM writes "" for an untouched field, so an account that never set one
+  // reads as blank. Verified against a real API: this row rendered nameless.
+  // A blank name here is worse than elsewhere, because the sentence beneath it
+  // says this person can see your body metrics. Never fall back to email.
+  const who = membership.owner.display_name.trim() || "Someone you know";
+  const granted = CATEGORY_ORDER.filter((c) => membership.categories.includes(c));
+  const shares =
+    granted.length === 0
+      ? "Shares nothing with you"
+      : `Shares ${granted.map((c) => categoryLabel(c).toLowerCase()).join(" and ")} with you`;
+
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", minHeight: 44, paddingVertical: spacing.sm }}>
+      <View style={{ flex: 1 }}>
+        <AppText style={{ fontSize: 15, fontWeight: "500", color: instrument.ink }}>{who}</AppText>
+        <AppText style={{ fontSize: 13, color: instrument.mut, marginTop: 1 }}>{shares}</AppText>
+      </View>
+      <PressableScale
+        accessibilityRole="button"
+        accessibilityLabel={`Leave ${who}'s circle`}
+        haptic="selection"
+        onPress={onLeave}
+      >
+        <AppText style={{ fontSize: 15, color: instrument.mut }}>Leave</AppText>
+      </PressableScale>
+    </View>
+  );
+}
+
 export default function Circles() {
   const { instrument, spacing, radius } = useTheme();
   const insets = useSafeAreaInsets();
   const circlesQuery = useCircles();
   const create = useCreateCircle();
+  const memberships = useMemberships();
+  const leave = useLeaveCircle();
   const toast = useToast();
 
   const [composing, setComposing] = useState(false);
@@ -120,6 +157,56 @@ export default function Circles() {
               </View>
             </GlassPanel>
           </View>
+
+          {/* The inbound half. Both directions of the same concept on one
+              screen, because someone asking "how do I stop this?" looks where
+              they went to start it (kora#440). */}
+          {(memberships.data ?? []).length > 0 || memberships.isError ? (
+            <View style={{ gap: spacing.xs }}>
+              <AppText
+                maxFontSizeMultiplier={1.4}
+                style={{ fontSize: 10, letterSpacing: 1.5, textTransform: "uppercase", color: instrument.mut }}
+              >
+                Shared with you
+              </AppText>
+              {memberships.isError ? (
+                <LoadErrorNotice
+                  testID="memberships-load-error"
+                  message="Couldn't load what's shared with you."
+                  onRetry={() => memberships.refetch?.()}
+                />
+              ) : (
+                <GlassPanel radius={22}>
+                  <View style={{ paddingHorizontal: spacing.md }}>
+                    {(memberships.data ?? []).map((m, index) => (
+                      <View key={m.circle_id}>
+                        {index > 0 ? (
+                          <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: instrument.hairline }} />
+                        ) : null}
+                        <MembershipRow
+                          membership={m}
+                          onLeave={() =>
+                            Alert.alert(
+                              "Leave this circle?",
+                              `${m.owner.display_name} will stop sharing with you. They are not told.`,
+                              [
+                                { text: "Cancel", style: "cancel" },
+                                {
+                                  text: "Leave",
+                                  style: "destructive",
+                                  onPress: () => leave.mutate(m.circle_id, surfaceError),
+                                },
+                              ],
+                            )
+                          }
+                        />
+                      </View>
+                    ))}
+                  </View>
+                </GlassPanel>
+              )}
+            </View>
+          ) : null}
 
           {composing ? (
             <GlassPanel radius={18}>
