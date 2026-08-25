@@ -132,7 +132,7 @@ func (a *alwaysGrants) GrantedOwners(_ context.Context, _ uuid.UUID, owners []uu
 
 func TestResolveManyRefusesAnUnknownCategoryWithoutQueryingTheRepository(t *testing.T) {
 	fake := &alwaysGrants{}
-	svc := NewService(fake)
+	svc := newServiceWithGranter(fake)
 	owner := uuid.New()
 	viewer := uuid.New()
 

@@ -17,13 +17,21 @@ type granter interface {
 }
 
 type Service struct {
-	repo granter
+	granter granter
 }
 
-// NewService takes a granter, not a Repository, but Repository satisfies
-// granter, so every existing caller of NewService(access.NewRepository(db))
-// keeps compiling unchanged.
-func NewService(repo granter) Service { return Service{repo: repo} }
+// NewService is the production constructor. It takes the CONCRETE Repository
+// on purpose: an interface parameter here would let any package outside
+// `access` substitute its own granter and have Resolve manufacture a Grant
+// for an owner it was never granted. Go does not enforce unexported
+// interfaces against external structural satisfaction, so the concrete type
+// is the only thing that makes that impossible.
+func NewService(repo Repository) Service { return Service{granter: repo} }
+
+// newServiceWithGranter exists so the category guard can be tested in
+// isolation -- see TestResolveManyRefusesAnUnknownCategoryWithoutQueryingTheRepository.
+// Unexported, so only this package (and its tests) can reach it.
+func newServiceWithGranter(g granter) Service { return Service{granter: g} }
 
 // Resolve returns a Grant, or ErrNotShared. It is the ONLY way to obtain a
 // Grant with an owner in it.
@@ -49,7 +57,7 @@ func (s Service) ResolveMany(ctx context.Context, viewer uuid.UUID, owners []uui
 	if !c.Valid() || len(owners) == 0 {
 		return out, nil
 	}
-	granted, err := s.repo.GrantedOwners(ctx, viewer, owners, c)
+	granted, err := s.granter.GrantedOwners(ctx, viewer, owners, c)
 	if err != nil {
 		return nil, err
 	}
