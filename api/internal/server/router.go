@@ -177,7 +177,6 @@ func NewRouter(deps Deps) *gin.Engine {
 			r.POST("/webhooks/cashfree", purchases.Webhook)
 		}
 		v1.GET("/me", userHandler.Me)
-		v1.PATCH("/me/share-progress", userHandler.UpdateShareProgress)
 		v1.PATCH("/me", userHandler.UpdateProfile)
 		// Mounted unconditionally, unlike the Apple exchange below: Apple
 		// requires in-app account deletion, so this route must never be

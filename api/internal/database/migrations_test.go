@@ -1,10 +1,14 @@
 package database
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
 
+	"github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/postgres"
@@ -223,6 +227,117 @@ func TestPersonalMentorSchemaOwnsUserDataAndRetryIdentity(t *testing.T) {
 		  AND contype = 'u' AND pg_get_constraintdef(oid) LIKE '%coach_turn_id%'`).
 		Scan(&proposalTurnIdentity).Error)
 	require.Contains(t, proposalTurnIdentity, "coach_turn_id")
+}
+
+// testMigrator opens a fresh golang-migrate instance against url so a test
+// can step a single migration up/down without going through cmd/migrate
+// (which only ever applies everything pending).
+func testMigrator(t *testing.T, url string) *migrate.Migrate {
+	t.Helper()
+	src, err := iofs.New(migrationsFS, "migrations")
+	require.NoError(t, err)
+	m, err := migrate.NewWithSourceInstance("iofs", src, url)
+	require.NoError(t, err)
+	return m
+}
+
+// TestDropShareProgressBackfillsCirclesFromFriendships proves the semantics
+// of migration 000055, not just that it runs (kora#326).
+//
+// It always brings the schema to the LATEST migration first, then steps
+// 000055 down (restoring users.share_progress) and back up again, so the
+// assertions hold whether or not 000055 had already been applied when the
+// suite started -- there is no way to seed a share_progress value on a
+// schema that has already dropped the column.
+//
+// share_progress = true must become exactly one "Friends" circle holding
+// only the ACCEPTED friends (never a pending request) with a `progress`
+// grant. share_progress = false must produce no circle at all -- the same
+// deny-by-default the boolean used to encode.
+func TestDropShareProgressBackfillsCirclesFromFriendships(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+	db := testDB(t)
+
+	require.NoError(t, Migrate(url), "bring schema to latest before stepping 000055 down")
+
+	m := testMigrator(t, url)
+	require.NoError(t, m.Steps(-1), "step 000055 down to restore users.share_progress")
+	t.Cleanup(func() {
+		// Leave the schema at latest for every other test in this (and
+		// later) run, regardless of how this test exits.
+		require.NoError(t, Migrate(url))
+	})
+
+	sharer := uuid.New()
+	nonSharer := uuid.New()
+	acceptedA := uuid.New()
+	acceptedB := uuid.New()
+	pending := uuid.New()
+	seededUsers := []uuid.UUID{sharer, nonSharer, acceptedA, acceptedB, pending}
+
+	for _, id := range seededUsers {
+		require.NoError(t, db.Exec(
+			`INSERT INTO users (id, firebase_uid, email, share_progress) VALUES (?, ?, ?, false)`,
+			id, "backfill-"+id.String(), id.String()+"@test.dev").Error)
+	}
+	t.Cleanup(func() {
+		for _, id := range seededUsers {
+			db.Exec(`DELETE FROM users WHERE id = ?`, id)
+		}
+	})
+	require.NoError(t, db.Exec(`UPDATE users SET share_progress = true WHERE id = ?`, sharer).Error)
+
+	for _, f := range []struct {
+		requester, addressee uuid.UUID
+		status                string
+	}{
+		{sharer, acceptedA, "accepted"},
+		{acceptedB, sharer, "accepted"}, // direction must not matter
+		{sharer, pending, "pending"},
+	} {
+		require.NoError(t, db.Exec(
+			`INSERT INTO friendships (requester_id, addressee_id, status) VALUES (?, ?, ?)`,
+			f.requester, f.addressee, f.status).Error)
+	}
+	t.Cleanup(func() {
+		db.Exec(`DELETE FROM friendships WHERE requester_id IN ? OR addressee_id IN ?`, seededUsers, seededUsers)
+	})
+
+	require.NoError(t, m.Steps(1), "step 000055 up: run the backfill and drop the column")
+
+	var hasColumn int
+	require.NoError(t, db.Raw(`
+		SELECT COUNT(*) FROM information_schema.columns
+		WHERE table_name = 'users' AND column_name = 'share_progress'`).Scan(&hasColumn).Error)
+	require.Zero(t, hasColumn, "share_progress must be dropped")
+
+	var circleIDs []uuid.UUID
+	require.NoError(t, db.Raw(`SELECT id FROM share_circles WHERE owner_id = ?`, sharer).Scan(&circleIDs).Error)
+	require.Len(t, circleIDs, 1, "exactly one circle for the sharer")
+
+	var circleName string
+	require.NoError(t, db.Raw(`SELECT name FROM share_circles WHERE id = ?`, circleIDs[0]).Scan(&circleName).Error)
+	require.Equal(t, "Friends", circleName)
+
+	var members []uuid.UUID
+	require.NoError(t, db.Raw(`SELECT member_user_id FROM share_circle_members WHERE circle_id = ? ORDER BY member_user_id`, circleIDs[0]).
+		Scan(&members).Error)
+	require.ElementsMatch(t, []uuid.UUID{acceptedA, acceptedB}, members, "only accepted friends, never the pending one")
+
+	var grantCount int
+	require.NoError(t, db.Raw(`SELECT COUNT(*) FROM share_grants WHERE circle_id = ? AND category = 'progress'`, circleIDs[0]).
+		Scan(&grantCount).Error)
+	require.Equal(t, 1, grantCount)
+
+	var nonSharerCircles int
+	require.NoError(t, db.Raw(`SELECT COUNT(*) FROM share_circles WHERE owner_id = ?`, nonSharer).Scan(&nonSharerCircles).Error)
+	require.Zero(t, nonSharerCircles, "share_progress = false must produce no circle")
+
+	fmt.Printf("backfill test: sharer circle=%d members=%d grants=%d nonSharerCircles=%d\n",
+		len(circleIDs), len(members), grantCount, nonSharerCircles)
 }
 
 func countContaining(values []string, needle string) int {

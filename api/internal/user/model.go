@@ -15,12 +15,11 @@ import (
 const DefaultTimezone = "Australia/Sydney"
 
 type User struct {
-	ID            uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	FirebaseUID   string    `gorm:"uniqueIndex" json:"-"`
-	Email         string    `json:"email"`
-	DisplayName   string    `json:"display_name"`
-	FriendCode    string    `json:"-"`
-	ShareProgress bool      `json:"share_progress"`
+	ID          uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	FirebaseUID string    `gorm:"uniqueIndex" json:"-"`
+	Email       string    `json:"email"`
+	DisplayName string    `json:"display_name"`
+	FriendCode  string    `json:"-"`
 
 	// AppleRefreshToken is a credential and must never be serialised to a
 	// client; the json:"-" tag is load-bearing.
