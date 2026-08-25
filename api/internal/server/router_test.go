@@ -467,3 +467,30 @@ func TestDeletionCache_NilCachesBecomeNoCache(t *testing.T) {
 		require.NoError(t, err)
 	})
 }
+
+// The cross-user body path has to be registered by router.go itself, not
+// merely by the hand-wired routers in the access and tracking tests -- those
+// prove the handler behaves, not that production mounts it (kora#438).
+//
+// It also pins the routing shape: /friends/:userId/body shares a path
+// segment with the static /friends/requests, /friends/code and
+// /friends/progress. gin resolves statics first, so all four coexist; a
+// future rename that turned one of those into a parameter would collide, and
+// this is where that shows up.
+func TestFriendBodyRouteIsRegisteredAlongsideTheStaticFriendsRoutes(t *testing.T) {
+	// A DB and a Verifier are what mount the whole /v1 group; &gorm.DB{}
+	// suffices because nothing here issues a query.
+	r := NewRouter(Deps{DB: &gorm.DB{}, Verifier: stubVerifier{}})
+	registered := map[string]bool{}
+	for _, ri := range r.Routes() {
+		registered[ri.Method+" "+ri.Path] = true
+	}
+	for _, want := range []string{
+		"GET /v1/friends/:userId/body",
+		"GET /v1/friends/progress",
+		"GET /v1/friends/requests",
+		"GET /v1/friends/code",
+	} {
+		require.True(t, registered[want], "route not registered: %s", want)
+	}
+}
