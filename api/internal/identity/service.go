@@ -54,10 +54,11 @@ func (s Service) WithFriendships(p FriendshipStatusProvider) Service {
 // it, and deletes whatever object it replaced.
 //
 // ORDER is load-bearing. The new object is written BEFORE the row is updated,
-// so a failure between them leaves an orphaned object (reaped by the bucket's
-// lifecycle rule) rather than a row pointing at nothing (a broken image in
-// every friend row that renders this person). The OLD object is deleted LAST,
-// and non-fatally: an upload that succeeded must not report failure because
+// so a failure between them leaves an ORPHANED OBJECT rather than a row
+// pointing at nothing (a broken image in every friend row that renders this
+// person). An orphan is the cheaper failure, but nothing collects it: see the
+// note on the Delete error path below. The OLD object is deleted LAST, and
+// non-fatally: an upload that succeeded must not report failure because
 // cleanup of a superseded file did not.
 func (s Service) SetAvatar(ctx context.Context, userID uuid.UUID, data []byte) (string, error) {
 	normalised, err := imageproc.NormalizeAvatar(data)
@@ -79,7 +80,13 @@ func (s Service) SetAvatar(ctx context.Context, userID uuid.UUID, data []byte) (
 	}
 	if me.AvatarPath != "" && me.AvatarPath != path {
 		if err := s.store.Delete(ctx, me.AvatarPath); err != nil {
-			slog.ErrorContext(ctx, "superseded avatar object survived; lifecycle rule will reap it",
+			// NOT reaped by anything. A GCS lifecycle rule cannot express
+			// "delete superseded avatars": every write issues a new object
+			// NAME (a fresh uuid in the path), not a new object VERSION, so
+			// noncurrent-version conditions never match it, and an age-based
+			// rule would delete live avatars. Deletion here is the only
+			// collector, so a failure leaks the object permanently.
+			slog.ErrorContext(ctx, "superseded avatar object survived; NEEDS MANUAL CLEANUP",
 				"user_id", userID, "path", me.AvatarPath, "error", err)
 		}
 	}
@@ -88,9 +95,9 @@ func (s Service) SetAvatar(ctx context.Context, userID uuid.UUID, data []byte) (
 
 // ClearAvatar removes the picture. The ROW is cleared first: if the object
 // delete then fails, the user's picture is gone from every surface, which is
-// what they asked for, and an unreferenced object is reaped by lifecycle. The
-// reverse order would delete the object while the row still pointed at it --
-// a broken image everywhere, on a request to remove one.
+// what they asked for -- at the cost of leaking an unreferenced object that
+// nothing will collect. The reverse order would delete the object while the row
+// still pointed at it -- a broken image everywhere, on a request to remove one.
 func (s Service) ClearAvatar(ctx context.Context, userID uuid.UUID) error {
 	me, err := s.repo.FindByID(ctx, userID)
 	if err != nil {
@@ -103,7 +110,9 @@ func (s Service) ClearAvatar(ctx context.Context, userID uuid.UUID) error {
 		return err
 	}
 	if err := s.store.Delete(ctx, me.AvatarPath); err != nil {
-		slog.ErrorContext(ctx, "avatar object survived removal; lifecycle rule will reap it",
+		// Nothing reaps this -- see the note in SetAvatar. The object is
+		// now unreferenced and permanent until removed by hand.
+		slog.ErrorContext(ctx, "avatar object survived removal; NEEDS MANUAL CLEANUP",
 			"user_id", userID, "path", me.AvatarPath, "error", err)
 	}
 	return nil
