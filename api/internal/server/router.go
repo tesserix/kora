@@ -15,6 +15,7 @@ import (
 	"github.com/tesserix/kora/api/internal/admin"
 	"github.com/tesserix/kora/api/internal/agents"
 	"github.com/tesserix/kora/api/internal/ai"
+	"github.com/tesserix/kora/api/internal/assets"
 	"github.com/tesserix/kora/api/internal/auth"
 	"github.com/tesserix/kora/api/internal/bffauth"
 	"github.com/tesserix/kora/api/internal/billing"
@@ -112,6 +113,11 @@ type Deps struct {
 	// AppleExchanger above — so an environment with no gateway advertises no
 	// checkout at all rather than one that takes money and grants nothing.
 	Cashfree billing.CashfreeConfig
+	// Assets is where profile pictures are written (kora#449). Nil in a
+	// test-constructed Deps that never set it — defaulted to assets.Noop{}
+	// the same way ResolveCache/BodyCompositionCache are, so nothing
+	// downstream has to nil-check it.
+	Assets assets.Store
 }
 
 func NewRouter(deps Deps) *gin.Engine {
@@ -505,6 +511,16 @@ func auditDeletion(tx *gorm.DB, actorID, actorEmail string, targetID uuid.UUID) 
 // rather than being passed through: user.Service.Delete calls DeleteByUser
 // unconditionally, and a nil interface there would panic AFTER the row was
 // already destroyed.
+// assetsStore defaults a nil Store to assets.Noop{}, the same choice
+// deletionCache makes above for resolveCache/bodyCache: router code must
+// never have to nil-check the store itself.
+func assetsStore(a assets.Store) assets.Store {
+	if a == nil {
+		return assets.Noop{}
+	}
+	return a
+}
+
 func deletionCache(resolveCache ai.Cache, bodyCache bodyread.Cache) user.CacheEvicter {
 	if resolveCache == nil {
 		resolveCache = ai.NoCache{}
