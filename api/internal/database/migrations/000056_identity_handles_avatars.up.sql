@@ -16,8 +16,17 @@ ALTER TABLE users
 -- indistinguishable when spoken, and the failure that prevents is not a missed
 -- lookup -- it is sending a friend request to a stranger and then sharing body
 -- metrics with them.
+--
+-- The predicate excludes BOTH NULL and ''. `friend_code` (000009_friendships)
+-- already carries this exact lesson for a nullable TEXT column: GORM's Create
+-- writes Go's '' zero value for an untouched string field, not SQL NULL (see
+-- the AppleRefreshToken comment in user/model.go). Since every signup goes
+-- through UpsertByFirebaseUID -> GORM Create, the second user ever created
+-- would insert handle_canonical = '' -- and '' IS NOT NULL, so a predicate
+-- that only excludes NULL still indexes it and the second signup collides
+-- with the first. Do not simplify this back to IS NOT NULL alone.
 CREATE UNIQUE INDEX users_handle_canonical_key
-    ON users (handle_canonical) WHERE handle_canonical IS NOT NULL;
+    ON users (handle_canonical) WHERE handle_canonical IS NOT NULL AND handle_canonical <> '';
 
 -- Changing your handle retires the old one PERMANENTLY. Otherwise anyone who
 -- wrote down @ada sends requests to whoever claims it next.

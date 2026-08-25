@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"context"
 	"os"
 	"testing"
 
@@ -8,6 +9,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+
+	"github.com/tesserix/kora/api/internal/user"
 )
 
 func testDB(t *testing.T) *gorm.DB {
@@ -36,10 +39,34 @@ func seedUser(t *testing.T, db *gorm.DB) uuid.UUID {
 // The unique index is PARTIAL. Without the WHERE clause, the second user to
 // have no handle at all collides with the first on NULL, which would break
 // every existing account the moment this migration lands.
+//
+// This test seeds with raw SQL, which leaves handle_canonical as a true SQL
+// NULL -- it only covers the NULL path. The real signup path never writes
+// NULL; see TestSchema_TwoRealSignupsCoexist below for the path that
+// actually broke production.
 func TestSchema_TwoUsersMayBothHaveNoHandle(t *testing.T) {
 	db := testDB(t)
 	seedUser(t, db)
 	seedUser(t, db)
+}
+
+// Two REAL signups must coexist. Every other schema test here seeds with raw
+// SQL, which leaves a true NULL -- but UpsertByFirebaseUID goes through GORM
+// Create, which writes '' for untouched string fields (see the AppleRefreshToken
+// comment in user/model.go). '' IS NOT NULL, so an index predicate that only
+// excludes NULL rejects the second signup and takes down account creation.
+func TestSchema_TwoRealSignupsCoexist(t *testing.T) {
+	db := testDB(t)
+	repo := user.NewRepository(db)
+	ctx := context.Background()
+
+	a, err := repo.UpsertByFirebaseUID(ctx, "sig-"+uuid.NewString(), "a@example.test")
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Exec(`DELETE FROM users WHERE id = ?`, a.ID) })
+
+	b, err := repo.UpsertByFirebaseUID(ctx, "sig-"+uuid.NewString(), "b@example.test")
+	require.NoError(t, err, "the second signup is the one that breaks")
+	t.Cleanup(func() { db.Exec(`DELETE FROM users WHERE id = ?`, b.ID) })
 }
 
 func TestSchema_CanonicalHandleIsUnique(t *testing.T) {
