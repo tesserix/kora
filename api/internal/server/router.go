@@ -356,10 +356,24 @@ func NewRouter(deps Deps) *gin.Engine {
 
 		socialRepo := social.NewRepository(deps.DB)
 		socialHandler := social.NewHandler(
-			social.NewService(socialRepo, userRepo, assetsStore(deps.Assets).URL).WithNotifier(notificationsSvc))
+			social.NewService(socialRepo, userRepo, assetsStore(deps.Assets).URL).
+				WithNotifier(notificationsSvc).
+				// A handle sent here is resolved through the SAME
+				// identity.Repository.FindByCanonical (kora#449 task 13b) as
+				// GET /v1/users/lookup -- there is exactly one place that
+				// reads by handle_canonical.
+				WithHandles(identity.NewRepository(deps.DB)))
 		v1.GET("/friends", socialHandler.ListFriends)
 		v1.GET("/friends/requests", socialHandler.ListRequests)
-		v1.POST("/friends/requests", socialHandler.SendRequest)
+		// "Send a request to this handle" is exact-match lookup in disguise:
+		// 404-vs-success on this route is the same oracle GET
+		// /v1/users/lookup gives, so it gets the identical per-user budget
+		// (a SEPARATE Window instance -- ratelimit.PerUser holds one per call
+		// site, not a shared one) rather than being left open to the same
+		// enumeration the lookup limiter exists to close.
+		v1.POST("/friends/requests",
+			ratelimit.PerUser(identity.LookupLimit, identity.LookupPeriod),
+			socialHandler.SendRequest)
 		v1.POST("/friends/requests/:id/accept", socialHandler.Accept)
 		v1.POST("/friends/requests/:id/decline", socialHandler.Decline)
 		v1.DELETE("/friends/:userId", socialHandler.Unfriend)

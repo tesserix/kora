@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -531,4 +532,32 @@ func TestLookupRateLimitIsWiredIntoTheRealRouter(t *testing.T) {
 	}
 	require.Equal(t, http.StatusTooManyRequests, last,
 		"the (LookupLimit+1)th call to /v1/users/lookup by the same user must be refused by ratelimit.PerUser")
+}
+
+// "Send a request to this handle" is a lookup in disguise: 404-vs-success on
+// this route is the same oracle GET /v1/users/lookup gives, so it must carry
+// the identical control (kora#449 task 13b). Mirrors
+// TestLookupRateLimitIsWiredIntoTheRealRouter above -- same fixedUIDVerifier
+// trick, same "hit it LookupLimit+1 times, expect the last to be refused"
+// shape -- but drives POST /v1/friends/requests instead. It also incidentally
+// closes the same hole for the pre-existing email and code paths.
+func TestSendRequestRateLimitIsWiredIntoTheRealRouter(t *testing.T) {
+	db := testDB(t)
+	uid := "ratelimit-wiring-sr-" + uuid.NewString()
+	t.Cleanup(func() { db.Exec(`DELETE FROM users WHERE firebase_uid = ?`, uid) })
+
+	r := NewRouter(Deps{DB: db, Verifier: fixedUIDVerifier{uid: uid}})
+
+	var last int
+	for i := 0; i < identity.LookupLimit+1; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/v1/friends/requests",
+			strings.NewReader(`{"email":"nobody-`+uuid.NewString()+`@nowhere.test"}`))
+		req.Header.Set("Authorization", "Bearer any-token")
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		last = w.Code
+	}
+	require.Equal(t, http.StatusTooManyRequests, last,
+		"the (LookupLimit+1)th call to POST /v1/friends/requests by the same user must be refused by ratelimit.PerUser")
 }

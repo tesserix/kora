@@ -62,7 +62,7 @@ func TestSendRequestWritesFriendRequestNotification(t *testing.T) {
 
 	var recipEmail string
 	require.NoError(t, db.Raw("SELECT email FROM users WHERE id = ?", recipient).Scan(&recipEmail).Error)
-	_, err := svc.SendRequest(context.Background(), sender, recipEmail, "")
+	_, err := svc.SendRequest(context.Background(), sender, recipEmail, "", "")
 	require.NoError(t, err)
 
 	list, err := notifications.NewRepository(db).ListForUser(context.Background(), recipient, 50)
@@ -85,12 +85,12 @@ func TestReversePendingAutoAcceptWritesFriendAcceptNotificationToOriginalRequest
 	require.NoError(t, db.Raw("SELECT email FROM users WHERE id = ?", userB).Scan(&bEmail).Error)
 
 	// A sends a friend request to B → pending A->B, friend_request notification to B.
-	_, err := svc.SendRequest(context.Background(), userA, bEmail, "")
+	_, err := svc.SendRequest(context.Background(), userA, bEmail, "", "")
 	require.NoError(t, err)
 
 	// B sends a friend request back to A → reverse-pending auto-accept branch,
 	// which must fire FriendAccepted to the ORIGINAL requester (A).
-	_, err = svc.SendRequest(context.Background(), userB, aEmail, "")
+	_, err = svc.SendRequest(context.Background(), userB, aEmail, "", "")
 	require.NoError(t, err)
 
 	aNotifs, err := notifications.NewRepository(db).ListForUser(context.Background(), userA, 50)
@@ -114,6 +114,6 @@ func TestNotifierErrorDoesNotFailAction(t *testing.T) {
 
 	var recipEmail string
 	require.NoError(t, db.Raw("SELECT email FROM users WHERE id = ?", recipient).Scan(&recipEmail).Error)
-	_, err := svc.SendRequest(context.Background(), sender, recipEmail, "")
+	_, err := svc.SendRequest(context.Background(), sender, recipEmail, "", "")
 	require.NoError(t, err) // action succeeds despite the notifier error
 }

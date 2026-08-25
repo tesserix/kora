@@ -63,7 +63,7 @@ func TestAcceptForbiddenForNonAddressee(t *testing.T) {
 	b := seedUser(t, db, "Ben")
 	c := seedUser(t, db, "Cy")
 	svc := NewService(NewRepository(db), user.NewRepository(db), func(string) string { return "" })
-	f, err := svc.SendRequest(context.Background(), a, "so-"+b.String()+"@test.dev", "")
+	f, err := svc.SendRequest(context.Background(), a, "so-"+b.String()+"@test.dev", "", "")
 	require.NoError(t, err)
 
 	// c tries to accept a->b request -> 403
