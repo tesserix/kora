@@ -10,14 +10,14 @@ const circle = (over: Partial<Circle> & { id: string }): Circle => ({
 });
 
 test("nobody can see a category no circle grants", () => {
-  const circles = [circle({ id: "c1", members: [{ id: "u1", display_name: "Ada" }], categories: ["progress"] })];
+  const circles = [circle({ id: "c1", members: [{ id: "u1", display_name: "Ada" , avatar_url: "" }], categories: ["progress"] })];
   expect(audienceFor(circles, "body")).toEqual([]);
 });
 
 test("the audience is the members of circles granting that category", () => {
   const circles = [
-    circle({ id: "c1", members: [{ id: "u1", display_name: "Ada" }], categories: ["progress", "body"] }),
-    circle({ id: "c2", members: [{ id: "u2", display_name: "Ben" }], categories: ["progress"] }),
+    circle({ id: "c1", members: [{ id: "u1", display_name: "Ada" , avatar_url: "" }], categories: ["progress", "body"] }),
+    circle({ id: "c2", members: [{ id: "u2", display_name: "Ben" , avatar_url: "" }], categories: ["progress"] }),
   ];
   expect(audienceFor(circles, "progress").map((m) => m.display_name)).toEqual(["Ada", "Ben"]);
   expect(audienceFor(circles, "body").map((m) => m.display_name)).toEqual(["Ada"]);
@@ -27,10 +27,10 @@ test("the audience is the members of circles granting that category", () => {
 // number a person can trust. Someone in two circles that both grant `body` is
 // one person, not two — a count that double-counts is worse than no count.
 test("a member of two granting circles is counted once", () => {
-  const ada = { id: "u1", display_name: "Ada" };
+  const ada = { id: "u1", display_name: "Ada" , avatar_url: "" };
   const circles = [
     circle({ id: "c1", members: [ada], categories: ["body"] }),
-    circle({ id: "c2", members: [ada, { id: "u2", display_name: "Ben" }], categories: ["body"] }),
+    circle({ id: "c2", members: [ada, { id: "u2", display_name: "Ben" , avatar_url: "" }], categories: ["body"] }),
   ];
   const got = audienceFor(circles, "body");
   expect(got.map((m) => m.id)).toEqual(["u1", "u2"]);
@@ -45,8 +45,8 @@ test("two different people with the same name are both counted", () => {
     circle({
       id: "c1",
       members: [
-        { id: "u1", display_name: "Alex" },
-        { id: "u2", display_name: "Alex" },
+        { id: "u1", display_name: "Alex" , avatar_url: "" },
+        { id: "u2", display_name: "Alex" , avatar_url: "" },
       ],
       categories: ["body"],
     }),
@@ -63,9 +63,9 @@ test("names are sorted case-insensitively, so the list is stable between renders
     circle({
       id: "c1",
       members: [
-        { id: "u3", display_name: "Zoe" },
-        { id: "u1", display_name: "ada" },
-        { id: "u2", display_name: "Ben" },
+        { id: "u3", display_name: "Zoe" , avatar_url: "" },
+        { id: "u1", display_name: "ada" , avatar_url: "" },
+        { id: "u2", display_name: "Ben" , avatar_url: "" },
       ],
       categories: ["body"],
     }),

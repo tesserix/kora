@@ -607,6 +607,60 @@ func TestDeleteReportsFirebaseFailureWithoutFailing(t *testing.T) {
 	assert.Zero(t, n, "the row is still gone")
 }
 
+// TestDeleteRetiresTheHandleSoADifferentUserCannotClaimIt is the invariant
+// migration 000056 writes down in prose: retirement must outlive the account
+// that held it, or deleting an account returns the handle to the pool and
+// reopens the same impersonation retired_handles exists to prevent. This
+// proves it end to end: claim a handle, delete the account, then prove a
+// DIFFERENT user is refused that exact handle afterwards -- not just that a
+// retired_handles row exists, but that it actually blocks reuse.
+func TestDeleteRetiresTheHandleSoADifferentUserCannotClaimIt(t *testing.T) {
+	db := testDB(t)
+	svc := newTestService(t, db)
+	victim := seedUser(t, db)
+
+	handle := "ada" + uuid.New().String()[:8]
+	require.NoError(t, db.Exec(
+		`UPDATE users SET handle = ?, handle_canonical = ? WHERE id = ?`,
+		handle, handle, victim.ID).Error)
+	t.Cleanup(func() { db.Exec(`DELETE FROM retired_handles WHERE handle_canonical = ?`, handle) })
+
+	_, err := svc.Delete(context.Background(), victim.ID, DeleteActor{IsAdmin: false})
+	require.NoError(t, err)
+
+	var retired int64
+	require.NoError(t, db.Raw(
+		`SELECT count(*) FROM retired_handles WHERE handle_canonical = ?`, handle).Scan(&retired).Error)
+	assert.Equal(t, int64(1), retired, "the deleted account's handle must be retired")
+
+	// A different user must be refused the retired handle -- the DB's own
+	// unique index would allow it (the victim row is gone), so only the
+	// retired_handles row stands in the way.
+	claimant := seedUser(t, db)
+	out := db.Exec(
+		`UPDATE users SET handle = ?, handle_canonical = ? WHERE id = ?
+		 AND NOT EXISTS (SELECT 1 FROM retired_handles WHERE handle_canonical = ?)`,
+		handle, handle, claimant.ID, handle)
+	require.NoError(t, out.Error)
+	assert.Zero(t, out.RowsAffected, "a different user must not be able to claim a retired handle")
+}
+
+func TestDeleteWithNoHandleRetiresNothing(t *testing.T) {
+	db := testDB(t)
+	svc := newTestService(t, db)
+	victim := seedUser(t, db) // HandleCanonical is "" -- never claimed one.
+
+	var before int64
+	require.NoError(t, db.Raw(`SELECT count(*) FROM retired_handles`).Scan(&before).Error)
+
+	_, err := svc.Delete(context.Background(), victim.ID, DeleteActor{IsAdmin: false})
+	require.NoError(t, err)
+
+	var after int64
+	require.NoError(t, db.Raw(`SELECT count(*) FROM retired_handles`).Scan(&after).Error)
+	assert.Equal(t, before, after, "a user who never claimed a handle must not retire the '' zero value")
+}
+
 func TestDeleteUnknownUserIsNotFound(t *testing.T) {
 	db := testDB(t)
 	svc := newTestService(t, db)

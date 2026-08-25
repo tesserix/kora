@@ -258,7 +258,7 @@ export default function Social() {
                   {friends.length === 0 ? (
                     <EmptyState
                       title="No friends yet"
-                      subtitle="Add someone by their friend code, or by the email they signed up with."
+                      subtitle="Add someone by their handle, email or friend code."
                     />
                   ) : (
                     friends.slice(0, FRIEND_PREVIEW).map((friend, index) => (

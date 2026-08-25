@@ -561,3 +561,30 @@ func TestSendRequestRateLimitIsWiredIntoTheRealRouter(t *testing.T) {
 	require.Equal(t, http.StatusTooManyRequests, last,
 		"the (LookupLimit+1)th call to POST /v1/friends/requests by the same user must be refused by ratelimit.PerUser")
 }
+
+// PUT /v1/me/handle answers a distinguishable 409 handle_taken, which is the
+// same existence oracle GET /v1/users/lookup gives -- probing a taken handle
+// here has no side effect and no cost, so it must carry the identical
+// control. Mirrors TestLookupRateLimitIsWiredIntoTheRealRouter above -- same
+// fixedUIDVerifier trick, same "hit it LookupLimit+1 times, expect the last
+// to be refused" shape -- but drives PUT /v1/me/handle instead.
+func TestSetHandleRateLimitIsWiredIntoTheRealRouter(t *testing.T) {
+	db := testDB(t)
+	uid := "ratelimit-wiring-sh-" + uuid.NewString()
+	t.Cleanup(func() { db.Exec(`DELETE FROM users WHERE firebase_uid = ?`, uid) })
+
+	r := NewRouter(Deps{DB: db, Verifier: fixedUIDVerifier{uid: uid}})
+
+	var last int
+	for i := 0; i < identity.LookupLimit+1; i++ {
+		req := httptest.NewRequest(http.MethodPut, "/v1/me/handle",
+			strings.NewReader(`{"handle":"nobody_`+uuid.NewString()[:8]+`"}`))
+		req.Header.Set("Authorization", "Bearer any-token")
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		last = w.Code
+	}
+	require.Equal(t, http.StatusTooManyRequests, last,
+		"the (LookupLimit+1)th call to PUT /v1/me/handle by the same user must be refused by ratelimit.PerUser")
+}

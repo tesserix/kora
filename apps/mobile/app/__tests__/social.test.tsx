@@ -97,7 +97,7 @@ test("a failed groups fetch leaves the audit and friends intact", async () => {
 
 test("the empty state explains how to find people, not just that there are none", async () => {
   const { getByText } = await render(<Social />);
-  expect(getByText(/friend code, or by the email they signed up with/i)).toBeTruthy();
+  expect(getByText(/handle, email or friend code/i)).toBeTruthy();
   expect(getByText("Create one, or join with a code.")).toBeTruthy();
 });
 

@@ -3,6 +3,25 @@ import { Alert } from "react-native";
 
 import Friends from "../friends";
 
+// The real "@/lib/api" pulls in firebase/auth (real ESM), which Jest cannot
+// parse unmocked. Friends renders AddFriendSheet, which imports it directly
+// (not through @/api/hooks, mocked below) -- same reasoning and shape as
+// AddFriendSheet.test.tsx's own mock and social.test.tsx's.
+jest.mock("@/lib/api", () => ({
+  ApiError: class ApiError extends Error {
+    status: number;
+    code: string;
+    requestId?: string;
+    constructor(status: number, code: string, message: string, requestId?: string) {
+      super(message);
+      this.status = status;
+      this.code = code;
+      this.requestId = requestId;
+      this.name = "ApiError";
+    }
+  },
+}));
+
 const mockAcceptMutate = jest.fn();
 const mockDeclineMutate = jest.fn();
 const mockUnfriendMutate = jest.fn();
@@ -17,6 +36,7 @@ jest.mock("@/api/hooks", () => ({
   useDeclineRequest: () => ({ mutate: mockDeclineMutate, isPending: false }),
   useUnfriend: () => ({ mutate: mockUnfriendMutate, isPending: false }),
   useSendFriendRequest: () => ({ mutate: jest.fn(), isPending: false }),
+  useLookupHandle: () => ({ mutate: jest.fn(), isPending: false }),
   useMyFriendCode: () => ({ data: { code: "ABC123XY", link: "mobile://friend/ABC123XY" } }),
   useFriendsProgress: () => ({ data: { me: { streak_days: 2, adherence_days: 1, adherence_window: 7 }, friends: [] } }),
 }));

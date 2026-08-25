@@ -843,6 +843,10 @@ export type ShareCategory = "progress" | "body";
 export interface CircleMember {
   id: string;
   display_name: string;
+  // "" when the person has no picture, and when no bucket is configured.
+  // Treat it as "no picture", never as a failure — same rule as
+  // LookupResult.avatar_url above.
+  avatar_url: string;
 }
 
 // The MEMBER's view of a circle they were added to (kora#440). Mirrors the

@@ -398,7 +398,14 @@ func NewRouter(deps Deps) *gin.Engine {
 		identityHandler := identity.NewHandler(
 			identity.NewServiceWithAssets(identity.NewRepository(deps.DB), assetsStore(deps.Assets)))
 		v1.GET("/me/handle", identityHandler.GetHandle)
-		v1.PUT("/me/handle", identityHandler.SetHandle)
+		// SetHandle answers a distinguishable 409 handle_taken (kora#449) --
+		// that is only safe because discovery is rate-bounded, same as
+		// /users/lookup below. Without this, an attacker walks the handle
+		// space here at unlimited rate and spends the lookup budget only on
+		// confirmed hits.
+		v1.PUT("/me/handle",
+			ratelimit.PerUser(identity.LookupLimit, identity.LookupPeriod),
+			identityHandler.SetHandle)
 		v1.DELETE("/me/handle", identityHandler.ClearHandle)
 		v1.PUT("/me/avatar", identityHandler.SetAvatar)
 		v1.DELETE("/me/avatar", identityHandler.ClearAvatar)

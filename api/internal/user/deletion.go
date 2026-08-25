@@ -189,6 +189,25 @@ func (s Service) Delete(ctx context.Context, userID uuid.UUID, actor DeleteActor
 			}
 		}
 
+		// Retire the handle BEFORE the DELETE, on the same tx, so the two
+		// commit or roll back together -- a retirement that survives a
+		// rolled-back delete, or a delete that loses its retirement, are both
+		// wrong. See the "No foreign key to users" comment in migration
+		// 000056: retirement must outlive the account that held it, or
+		// deleting an account returns the handle to the pool and reopens the
+		// same impersonation the retired_handles table exists to prevent.
+		//
+		// HandleCanonical is '' (not NULL) for a user who never claimed a
+		// handle -- same AppleRefreshToken trap noted above -- so the guard
+		// MUST be != "".
+		if u.HandleCanonical != "" {
+			if err := tx.Exec(
+				`INSERT INTO retired_handles (handle_canonical) VALUES (?)
+				 ON CONFLICT (handle_canonical) DO NOTHING`, u.HandleCanonical).Error; err != nil {
+				return fmt.Errorf("user: retire handle on delete: %w", err)
+			}
+		}
+
 		out := tx.Exec(`DELETE FROM users WHERE id = ?`, userID)
 		if out.Error != nil {
 			return fmt.Errorf("user: delete row: %w", out.Error)
