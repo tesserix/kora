@@ -30,12 +30,14 @@ import (
 	"github.com/tesserix/kora/api/internal/groups"
 	"github.com/tesserix/kora/api/internal/health"
 	"github.com/tesserix/kora/api/internal/httpx"
+	"github.com/tesserix/kora/api/internal/identity"
 	"github.com/tesserix/kora/api/internal/memory"
 	"github.com/tesserix/kora/api/internal/mentor"
 	"github.com/tesserix/kora/api/internal/notifications"
 	"github.com/tesserix/kora/api/internal/nutrition"
 	"github.com/tesserix/kora/api/internal/onboarding"
 	"github.com/tesserix/kora/api/internal/pins"
+	"github.com/tesserix/kora/api/internal/ratelimit"
 	"github.com/tesserix/kora/api/internal/recipes"
 	"github.com/tesserix/kora/api/internal/resolve"
 	"github.com/tesserix/kora/api/internal/savedmeals"
@@ -363,6 +365,19 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.DELETE("/share/circles/:id/members/:userId", shareHandler.RemoveMember)
 		v1.PUT("/share/circles/:id/categories", shareHandler.SetCategories)
 		v1.POST("/share/circles/:id/leave", shareHandler.Leave)
+
+		// Handles (kora#449). Exact match only: there is no listing or prefix
+		// route here, and adding one would make the user base enumerable.
+		identityHandler := identity.NewHandler(
+			identity.NewService(identity.NewRepository(deps.DB), func(string) string { return "" }))
+		v1.GET("/me/handle", identityHandler.GetHandle)
+		v1.PUT("/me/handle", identityHandler.SetHandle)
+		v1.DELETE("/me/handle", identityHandler.ClearHandle)
+		// The limiter is on LOOKUP only, and it is not an optimisation: it is
+		// the only thing between exact-match lookup and offline enumeration.
+		v1.GET("/users/lookup",
+			ratelimit.PerUser(identity.LookupLimit, identity.LookupPeriod),
+			identityHandler.Lookup)
 
 		accessSvc := access.NewService(access.NewRepository(deps.DB))
 
