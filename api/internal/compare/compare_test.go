@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/tesserix/kora/api/internal/access"
 	"github.com/tesserix/kora/api/internal/social"
 	"github.com/tesserix/kora/api/internal/user"
 )
@@ -38,17 +39,25 @@ func (stubLogs) DailyKcal(context.Context, uuid.UUID, time.Time, time.Time) (map
 }
 
 func TestCompareGatesNonSharingFriends(t *testing.T) {
+	viewerID := uuid.New()
 	sharerID := uuid.New()
 	privateID := uuid.New()
 	svc := NewService(
 		stubFriends{rows: []social.CompareRow{
-			{ID: sharerID, DisplayName: "Sharer", ShareProgress: true, TargetKcal: 2000},
-			{ID: privateID, DisplayName: "Private", ShareProgress: false, TargetKcal: 2000},
+			{ID: sharerID, DisplayName: "Sharer", TargetKcal: 2000},
+			{ID: privateID, DisplayName: "Private", TargetKcal: 2000},
 		}},
 		stubUsers{target: 2000},
 		stubLogs{},
 	)
-	res, err := svc.Compare(context.Background(), uuid.New(), time.Now(), time.UTC)
+	members, err := svc.Friends(context.Background(), viewerID)
+	require.NoError(t, err)
+	// Only the sharer has a resolved grant; the map's presence is the only
+	// thing ProgressForMembers consults, so a zero-value Grant is enough here
+	// -- the real Grant contents are exercised end-to-end by access.Service.
+	grants := map[uuid.UUID]access.Grant{sharerID: {}}
+
+	res, err := svc.Compare(context.Background(), viewerID, time.Now(), time.UTC, members, grants)
 	require.NoError(t, err)
 	require.Len(t, res.Friends, 2)
 
@@ -65,10 +74,11 @@ func TestCompareGatesNonSharingFriends(t *testing.T) {
 
 func TestCompareHandlerShape(t *testing.T) {
 	svc := NewService(stubFriends{}, stubUsers{target: 2000}, stubLogs{})
+	accessSvc := access.NewService(access.NewRepository(nil))
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(func(c *gin.Context) { c.Set("user_id", uuid.New()); c.Next() })
-	r.GET("/v1/friends/progress", NewHandler(svc).Get)
+	r.GET("/v1/friends/progress", NewHandler(svc, accessSvc).Get)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/friends/progress", nil)
 	w := httptest.NewRecorder()

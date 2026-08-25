@@ -7,16 +7,19 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+
+	"github.com/tesserix/kora/api/internal/access"
 )
 
 func TestProgressForMembersGatesNonSharers(t *testing.T) {
 	svc := NewService(stubFriends{}, stubUsers{target: 2000}, stubLogs{})
 	sharer := uuid.New()
 	private := uuid.New()
+	grants := map[uuid.UUID]access.Grant{sharer: {}}
 	out, err := svc.ProgressForMembers(context.Background(), time.Now(), time.UTC, []Member{
-		{ID: sharer, DisplayName: "Sharer", ShareProgress: true, TargetKcal: 2000},
-		{ID: private, DisplayName: "Private", ShareProgress: false, TargetKcal: 2000},
-	})
+		{ID: sharer, DisplayName: "Sharer", TargetKcal: 2000},
+		{ID: private, DisplayName: "Private", TargetKcal: 2000},
+	}, grants)
 	require.NoError(t, err)
 	require.Len(t, out, 2)
 	byName := map[string]FriendProgress{}

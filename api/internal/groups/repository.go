@@ -131,7 +131,7 @@ func (r Repository) ListMembersForProgress(ctx context.Context, groupID uuid.UUI
 	out := []MemberProgressRow{}
 	err := r.db.WithContext(ctx).
 		Table("group_members AS gm").
-		Select("u.id AS id, u.display_name AS display_name, u.share_progress AS share_progress, u.target_kcal AS target_kcal").
+		Select("u.id AS id, u.display_name AS display_name, u.target_kcal AS target_kcal").
 		Joins("JOIN users u ON u.id = gm.user_id").
 		Where("gm.group_id = ?", groupID).
 		Scan(&out).Error

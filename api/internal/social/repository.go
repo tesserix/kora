@@ -131,19 +131,19 @@ func (r Repository) AreFriends(ctx context.Context, a, b uuid.UUID) (bool, error
 }
 
 // CompareRow is an accepted friend plus the fields needed to compute their
-// shared progress (share_progress gates whether metrics are computed at all).
+// metrics. Whether those metrics may be shown is decided by a resolved
+// access.Grant, not by any field on this row (kora#326).
 type CompareRow struct {
-	ID            uuid.UUID
-	DisplayName   string
-	ShareProgress bool
-	TargetKcal    float64
+	ID          uuid.UUID
+	DisplayName string
+	TargetKcal  float64
 }
 
 func (r Repository) ListAcceptedForCompare(ctx context.Context, userID uuid.UUID) ([]CompareRow, error) {
 	rows := []CompareRow{}
 	err := r.db.WithContext(ctx).
 		Table("friendships AS f").
-		Select("u.id AS id, u.display_name AS display_name, u.share_progress AS share_progress, u.target_kcal AS target_kcal").
+		Select("u.id AS id, u.display_name AS display_name, u.target_kcal AS target_kcal").
 		Joins("JOIN users u ON u.id = CASE WHEN f.requester_id = ? THEN f.addressee_id ELSE f.requester_id END", userID).
 		Where("f.status = ? AND (f.requester_id = ? OR f.addressee_id = ?)", FriendStatusAccepted, userID, userID).
 		Order("u.display_name ASC").

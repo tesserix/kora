@@ -7,13 +7,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestListAcceptedForCompareCarriesShareAndTarget(t *testing.T) {
+func TestListAcceptedForCompareCarriesTarget(t *testing.T) {
 	db := testDB(t)
 	me := seedUser(t, db, "Me")
 	sharer := seedUser(t, db, "Sharer")
 	private := seedUser(t, db, "Private")
-	require.NoError(t, db.Exec("UPDATE users SET share_progress = true, target_kcal = 2100 WHERE id = ?", sharer).Error)
-	require.NoError(t, db.Exec("UPDATE users SET share_progress = false, target_kcal = 1800 WHERE id = ?", private).Error)
+	require.NoError(t, db.Exec("UPDATE users SET target_kcal = 2100 WHERE id = ?", sharer).Error)
+	require.NoError(t, db.Exec("UPDATE users SET target_kcal = 1800 WHERE id = ?", private).Error)
 
 	repo := NewRepository(db)
 	_, err := repo.Create(context.Background(), Friendship{RequesterID: me, AddresseeID: sharer, Status: FriendStatusAccepted})
@@ -28,7 +28,6 @@ func TestListAcceptedForCompareCarriesShareAndTarget(t *testing.T) {
 	for _, r := range rows {
 		byName[r.DisplayName] = r
 	}
-	require.True(t, byName["Sharer"].ShareProgress)
 	require.Equal(t, 2100.0, byName["Sharer"].TargetKcal)
-	require.False(t, byName["Private"].ShareProgress)
+	require.Equal(t, 1800.0, byName["Private"].TargetKcal)
 }
