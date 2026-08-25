@@ -177,28 +177,50 @@ attempts across two methods returned nothing usable.
 
 ---
 
-## kora#449 — the assets bucket does not exist yet
+## 🟢 kora#449 — the assets bucket (RESOLVED 2026-08-26)
 
-Profile pictures need a bucket that has never been created:
+`kora-prod-assets-in` **now exists**, and `kora-api` is pointed at it
+(tesserix-k8s#624). Profile pictures render.
 
-- **Name**: `kora-prod-assets-in`, region `asia-south1` — matching the
-  `<app>-<scope>-assets` convention of sibling apps and the Cloud SQL region.
-- **Access**: public read on objects. Paths are unguessable (a v4 UUID version
-  segment), and the picture is already visible to anyone holding the handle,
-  which is the consent boundary the whole feature rests on. Signed URLs would
-  mean re-signing on every render of every friend row for no privacy gain.
-- **Lifecycle**: reap `avatars/**` objects that are not the current version.
-  Each write issues a new path, so superseded objects accumulate otherwise.
-- **Identity**: the `kora-api` workload identity service account needs
-  `roles/storage.objectAdmin` scoped to this bucket, not project-wide.
-- **Env on the deployment**: `ASSETS_BUCKET=kora-prod-assets-in`,
-  `ASSETS_PUBLIC_BASE_URL=https://storage.googleapis.com/kora-prod-assets-in`.
+- **Name / region**: `kora-prod-assets-in`, `asia-south1`, uniform bucket-level
+  access, in `tesseracthub-480811`. The naming matched an existing sibling,
+  `fanzone-prod-assets-in` — the convention was already there.
+- **Access**: public read on objects (`allUsers` → `objectViewer`). Every other
+  `*-assets` bucket in the project sets `publicAccessPrevention: enforced`; this
+  one deliberately does not, because the avatar is already visible to anyone
+  holding the handle — the consent boundary the feature rests on — and paths are
+  unguessable (`avatars/{user_id}/{v4-uuid}.jpg`). Signed URLs would mean
+  re-signing on every render of every friend row for no privacy gain. The org
+  policy `storage.publicAccessPrevention` is NOT enforced (`booleanPolicy: {}`),
+  so this is a per-bucket choice rather than a policy override. **Do not
+  "correct" it to enforced without re-deciding the consent model.**
+- **Identity**: `kora-api-prod@tesseracthub-480811.iam.gserviceaccount.com` →
+  `roles/storage.objectAdmin`, scoped to this bucket. That is the workload
+  identity `kora-api` already runs as.
+- **Verified**: wrote an object as the SA, then read it anonymously with no auth
+  header — HTTP 200, correct body. Probe removed.
 
-Until all of that exists, `ASSETS_BUCKET` is unset in every environment,
-`assets.Noop` is selected, and uploads silently succeed while every avatar URL
-is empty. **That is the state to expect on first deploy** — it is not a bug, and
-it is why the mobile client must treat an empty `avatar_url` as "no picture"
-rather than as a failure.
+### ❌ The lifecycle rule this document used to specify is impossible
+
+It previously said: *"reap `avatars/**` objects that are not the current
+version."* **GCS lifecycle cannot express that.** Each avatar write issues a new
+object *name* (a fresh UUID in the path), not a new object *version*, so
+noncurrent-version conditions never match — and an age-based rule would delete
+live avatars.
+
+Superseded objects are already removed application-side: on replace, on removal,
+and inside the account-deletion cascade. Orphans arise only when one of those
+deletes fails, and each failure is logged. `SetAvatar` and `ClearAvatar` still
+log "lifecycle rule will reap it" on that path — **that message is wrong** and
+should be reworded; there is no reaper.
+
+### Rollout note
+
+Rows written while `assets.Noop` was selected point at objects that were never
+uploaded, so their `avatar_path` is non-empty and the API composes a URL that
+404s. The client handles this: `Avatar`'s `onError` falls back to initials rather
+than a permanently blank circle (kora#451, found on-device). Self-corrects on the
+next upload.
 
 ---
 

@@ -3,30 +3,30 @@
 You are picking up **Kora** (`/Users/Mahesh.Sangawar/personal/tesserix-new/kora`),
 a nutrition-tracking iOS app: Go API + Expo/React Native, pre-launch, ~18 users.
 
-`main` is at **`83a7bd4f`** — "feat(identity): handles and profile pictures
-(#449) (#451)", 28 commits squashed.
+`main` is at **`b83d2aaf`** — the four #449 follow-ups (#452, #453, #454, #455),
+on top of `83a7bd4f` "feat(identity): handles and profile pictures (#449) (#451)".
 
 **The repo is PUBLIC.** Never put a real weight, measurement or intake value in
 a commit, comment, test fixture, issue or PR. Describe results as counts.
 
 ## The single most important thing
 
-**R5 is done. #449 shipped, and the handle half is live while the picture half
-is inert.**
+**R5 is done, #449 shipped, and the pictures are now live too.**
 
-`ASSETS_BUCKET` is unset in every environment because **`kora-prod-assets-in`
-has never been created** — Kora's manifests live in `tesserix-infra` and nothing
-in this repo can create it. Until it exists:
+`kora-prod-assets-in` was created on 2026-08-26 and `kora-api` points at it
+(tesserix-k8s#624), so `assets.GCS` is selected and avatars render. Before that
+the picture half was inert: uploads returned 200, `avatar_path` was written, and
+every `avatar_url` came back `""`.
 
-- `assets.Noop` is selected,
-- uploads return **200**,
-- `avatar_path` **is written to the users row**,
-- every `avatar_url` comes back `""`.
+**Kora's manifests live in `tesserix-k8s`** (chart `charts/apps/kora-api`,
+ArgoCD-managed), NOT `tesserix-infra` — an earlier version of this handoff said
+otherwise and was wrong. Because ArgoCD self-heals, a `kubectl set env` on
+`kora-api` is silently reverted; deployment config changes must go through that
+chart. Note SSH may not be authorised for that repo — the `gh` API works.
 
-So the database accumulates paths pointing at objects that were never written.
-That is documented in `docs/OPEN_QUESTIONS.md` and in PR #451's body. **Do not
-debug it as a bug.** Creating that bucket is the single highest-value next
-action if anyone wants to see a face in the app.
+**Rollout wrinkle:** rows written while `Noop` was active point at objects that
+were never uploaded, so those users' `avatar_url` 404s. `Avatar`'s `onError`
+falls back to initials, so it is cosmetic and self-corrects on re-upload.
 
 ## What shipped
 
@@ -59,14 +59,40 @@ action if anyone wants to see a face in the app.
 - **Reserved handles are derived** from plain names through the same fold, so the
   list cannot drift from the folding rules.
 
-## Open follow-ups
+## Follow-ups — all four shipped
 
-| # | What | Why it was deferred |
-|---|---|---|
-| #452 | Dynamic Type at AX5 breaks the Social screen | Pre-existing (`social.tsx` shipped `ea0c05d0`); needs a row-layout redesign, not a patch |
-| #453 | Lookup offers "Send request" to an existing friend | Harmless — the send is idempotent — but wrong-looking on the consent screen |
-| #454 | Avatars unrendered on 4 list surfaces; `initials()` exists 5× with 2 algorithms | Small but touches several files, wants a screenshot pass |
-| #455 | Deletion tests leak `retired_handles` rows | Randomised handles, so no flake risk; violates the idempotency standard |
+#452, #453, #454 and #455 are **closed**, merged as `b83d2aaf` (PR #456):
+
+- **#455** — the leak was NOT where the issue said. `deletion_test.go` cleaned up
+  fine; the culprit was `TestSetHandleRateLimitIsWiredIntoTheRealRouter`, which
+  claims 21 random handles in a loop, each retiring the previous. The confusables
+  fold moved to a new zero-dependency `internal/handlefold` so test cleanup can
+  compute canonical forms without the `identity`→`user` cycle. **One fold
+  implementation in the codebase.**
+- **#453** — `GET /v1/users/lookup` returns `friendship_status`
+  (`none`/`request_sent`/`request_received`/`friends`/`self`), via a
+  consumer-declared interface because `identity` cannot import `social`. The TS
+  side is a **string-literal union**, which caught a deliberate typo at compile
+  time — the seam that failed silently four times in #449.
+- **#454** — seven `initials()` copies (one more than the issue counted) with two
+  algorithms became one shared helper; the fake `"K"` fallback is gone; every
+  `<Avatar>` passes a `uri`, including the incoming-request row that previously
+  had none.
+- **#452** — rows reflow past a 1.5 font scale, matching `sign-in.tsx`'s existing
+  `HERO_COLLAPSE_FONT_SCALE`. **Not visually confirmed** — the Firebase login wall
+  blocked the real Social screen, so this is structural correctness plus 9 tests.
+  If the threshold is wrong it is a one-line tune.
+
+### Residual, worth a follow-up
+
+- `LeaderRow` has a `uri` prop **no caller passes** — `FriendProgress`,
+  `GroupMemberView` and challenge leaderboard entries carry no `avatar_url` on
+  the wire. An API-side gap.
+- `friends.tsx`'s own incoming-request row still has no avatar, unlike Social's.
+- `SetAvatar`/`ClearAvatar` still log "lifecycle rule will reap it". **There is no
+  reaper** — see `docs/OPEN_QUESTIONS.md`. Reword.
+- `request_received` routes to `/friends` rather than reusing `onSend`, because
+  `LookupView` carries no request id. A design decision types cannot enforce.
 
 Also open and untouched by any of this: **PR #309** (offline barcode queue).
 
@@ -82,8 +108,10 @@ approved, with the join between them broken:
   incoming requests showed nobody — on the one screen where consent is granted.
 - **Four separate instances** of "the Go projection returns a field, the mobile
   TS type never declared it" (`Profile.avatar_url`, `Friend.handle`/`avatar_url`,
-  `CircleMember.avatar_url`, and one more) — nothing type-checks across the wire,
-  and none of it fails loudly.
+  `CircleMember.avatar_url`, and a fourth) — nothing type-checks across the wire,
+  and none of it fails loudly. A fifth (`Friend.handle`) turned up during the
+  follow-ups. **A string-literal union is the cheap defence** — it turns a wrong
+  value into a compile error instead of a silent fallthrough.
 - Account deletion did not retire the handle, against an invariant **this
   branch's own migration writes down in prose**.
 
