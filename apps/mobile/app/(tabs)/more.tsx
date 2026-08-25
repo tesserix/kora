@@ -30,7 +30,7 @@ import { TAB_BAR_SCROLL_INSET } from "@/components/FloatingTabBar";
 // near-identically — MoreRow is kept as-is rather than migrated to avoid
 // churn on an already-shipped screen. The unread-count Badge is the one
 // accent element this screen is allowed.
-type MoreRowKey = "profile" | "mentor" | "friends" | "sharing" | "groups" | "notifications" | "recipes" | "ai-usage" | "settings" | "feedback" | "about";
+type MoreRowKey = "profile" | "mentor" | "social" | "notifications" | "recipes" | "ai-usage" | "settings" | "feedback" | "about";
 
 type MoreRowProps = {
   rowKey: MoreRowKey;
@@ -170,26 +170,15 @@ export default function More() {
             icon="sparkles"
             onPress={() => router.push("/mentor" as Href)}
           />
+          {/* One row, replacing Friends / Sharing / Groups (kora#444). The
+              sharing audit now heads that screen, so "who can see my data" is
+              visible on every visit rather than behind a row you had to know
+              to tap. */}
           <MoreRow
-            rowKey="friends"
-            title="Friends"
+            rowKey="social"
+            title="Social"
             icon="users"
-            onPress={() => router.push("/friends" as Href)}
-          />
-          {/* Sharing sits beside Friends deliberately: circles are built out
-              of friends, and "who can see my data" is a question people go
-              looking for next to the people it is about (kora#437). */}
-          <MoreRow
-            rowKey="sharing"
-            title="Sharing"
-            icon="eye"
-            onPress={() => router.push("/sharing" as Href)}
-          />
-          <MoreRow
-            rowKey="groups"
-            title="Groups"
-            icon="people"
-            onPress={() => router.push("/groups" as Href)}
+            onPress={() => router.push("/social" as Href)}
           />
           <MoreRow
             rowKey="notifications"

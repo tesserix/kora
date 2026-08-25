@@ -46,17 +46,14 @@ test("tapping Profile navigates to /profile", async () => {
   expect(mockPush).toHaveBeenCalledWith("/profile");
 });
 
-test("tapping Friends navigates to /friends", async () => {
+// Friends, Sharing and Groups collapsed into one Social row (kora#444);
+// their own screens still exist and are reached from inside it.
+test("tapping Social navigates to /social", async () => {
   const { getByText } = await render(<More />);
-  await fireEvent.press(getByText("Friends"));
-  expect(mockPush).toHaveBeenCalledWith("/friends");
+  await fireEvent.press(getByText("Social"));
+  expect(mockPush).toHaveBeenCalledWith("/social");
 });
 
-test("tapping Groups navigates to /groups", async () => {
-  const { getByText } = await render(<More />);
-  await fireEvent.press(getByText("Groups"));
-  expect(mockPush).toHaveBeenCalledWith("/groups");
-});
 
   test("tapping Notifications navigates to /notifications", async () => {
   const { getByText } = await render(<More />);

@@ -11,6 +11,7 @@ import { GlassPanel } from "@/components/instrument/GlassPanel";
 import { ToggleSwitch } from "@/components/ToggleSwitch";
 import { Icon } from "@/components/Icon";
 import { EmptyState } from "@/components/common/EmptyState";
+import { ConfirmBodyShareSheet } from "@/components/social/ConfirmBodyShareSheet";
 import { LoadErrorNotice } from "@/components/common/LoadErrorNotice";
 import { PressableScale } from "@/motion";
 import {
@@ -113,7 +114,7 @@ export default function CircleDetail() {
         onPress: () =>
           deleteCircle.mutate(circle.id, {
             onError: surfaceError.onError,
-            onSuccess: () => safeBack("/sharing" as Href),
+            onSuccess: () => safeBack("/circles" as Href),
           }),
       },
     ]);
@@ -150,45 +151,16 @@ export default function CircleDetail() {
         </GlassPanel>
       </View>
 
-      {confirmingBody ? (
-        <GlassPanel radius={18}>
-          <View style={{ padding: spacing.md, gap: spacing.sm }}>
-            <AppText style={{ fontSize: 15, fontWeight: "700", color: instrument.ink }}>
-              Share your body metrics?
-            </AppText>
-            <AppText style={{ fontSize: 14, color: instrument.mut }}>
-              These people will be able to see your weight, measurements and body fat:
-            </AppText>
-            {/* By name, as an actual list. "2 members" is exactly the
-                abstraction that lets someone agree to something they have not
-                pictured. */}
-            <AppText testID="body-confirm-names" style={{ fontSize: 15, color: instrument.ink }}>
-              {memberNames}
-            </AppText>
-            <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: spacing.md }}>
-              <PressableScale
-                accessibilityRole="button"
-                accessibilityLabel="Cancel sharing body metrics"
-                haptic="selection"
-                onPress={() => setConfirmingBody(false)}
-              >
-                <AppText style={{ fontSize: 15, color: instrument.mut }}>Cancel</AppText>
-              </PressableScale>
-              <PressableScale
-                accessibilityRole="button"
-                accessibilityLabel="Confirm sharing body metrics"
-                haptic="selection"
-                onPress={() => {
-                  setConfirmingBody(false);
-                  applyCategories("body", true);
-                }}
-              >
-                <AppText style={{ fontSize: 15, fontWeight: "700", color: instrument.accent }}>Share</AppText>
-              </PressableScale>
-            </View>
-          </View>
-        </GlassPanel>
-      ) : null}
+      <ConfirmBodyShareSheet
+        visible={confirmingBody}
+        members={circle.members}
+        pending={setCategories.isPending}
+        onCancel={() => setConfirmingBody(false)}
+        onConfirm={() => {
+          setConfirmingBody(false);
+          applyCategories("body", true);
+        }}
+      />
 
       <View style={{ gap: spacing.xs }}>
         <Engraved>{`${circle.members.length} ${circle.members.length === 1 ? "person" : "people"}`}</Engraved>
@@ -224,10 +196,21 @@ export default function CircleDetail() {
         <GlassPanel radius={18}>
           <View style={{ paddingHorizontal: spacing.md }}>
             {candidates.length === 0 ? (
-              <EmptyState
-                title="No one left to add"
-                subtitle="Everyone you are friends with is already in this circle."
-              />
+              // Two different reasons the list can be empty, and only one of
+              // them makes the old single string true. Telling someone with no
+              // friends at all that "everyone you're friends with is already
+              // in this circle" is simply false (kora#443).
+              (friends.data ?? []).length === 0 ? (
+                <EmptyState
+                  title="You don't have any friends yet"
+                  subtitle="Add a friend first, then bring them into this circle."
+                />
+              ) : (
+                <EmptyState
+                  title="No one left to add"
+                  subtitle="Everyone you're friends with is already in this circle."
+                />
+              )
             ) : (
               candidates.map((friend, index) => (
                 <View key={friend.id}>
@@ -314,7 +297,7 @@ function Shell({
     <View style={{ flex: 1, backgroundColor: instrument.bg }}>
       <AppBackground />
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets + 8, paddingBottom: 140 }}>
-        <ScreenHeader overline={overline ?? "Circle"} title={title} onBack={() => safeBack("/sharing" as Href)} />
+        <ScreenHeader overline={overline ?? "Circle"} title={title} onBack={() => safeBack("/circles" as Href)} />
         <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>{children}</View>
       </ScrollView>
     </View>

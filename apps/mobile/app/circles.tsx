@@ -8,7 +8,6 @@ import { AppText } from "@/components/Text";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { AppBackground } from "@/components/AppBackground";
 import { GlassPanel } from "@/components/instrument/GlassPanel";
-import { BezelCluster } from "@/components/instrument/BezelCluster";
 import { Icon } from "@/components/Icon";
 import { LoadErrorNotice } from "@/components/common/LoadErrorNotice";
 import { EmptyState } from "@/components/common/EmptyState";
@@ -16,60 +15,17 @@ import { PressableScale } from "@/motion";
 import { useCircles, useCreateCircle } from "@/api/hooks";
 import { useToast } from "@/components/Toast";
 import { apiErrorMessage } from "@/lib/apiErrorMessage";
-import { audienceFor, categoryLabel, CATEGORY_ORDER } from "@/lib/shareAudit";
+import { categoryLabel, CATEGORY_ORDER } from "@/lib/shareAudit";
 import { useTheme } from "@/theme";
 
-import type { Circle, ShareCategory } from "@/api/types";
+import type { Circle } from "@/api/types";
 
-// The Sharing screen (kora#437, spec §Surfaces).
+// The Circles screen: the list of circles and the composer (kora#444).
 //
-// The audit comes FIRST, before the circles that produce it, because "who can
-// see my data" is the question people arrive with — the circles are the
-// mechanism, not the answer. It is cheap to put here precisely because grants
-// come only from circles: the names are a fold over the response the list
-// below already needs, not a second request.
-//
-// Accent budget: this screen's one hero moment is the body audience count in
-// the cluster. Category chips, member counts and the circle list are all
-// lit-ink; nothing else takes accent.
-
-function AuditRow({ category, circles, hero }: { category: ShareCategory; circles: Circle[]; hero: boolean }) {
-  const { instrument, spacing } = useTheme();
-  const audience = audienceFor(circles, category);
-  // "Nobody" rather than "0 people": zero is a count, and the answer most
-  // users should see most of the time deserves a word, not a numeral.
-  const names = audience.length === 0 ? "Nobody" : audience.map((m) => m.display_name).join(", ");
-
-  return (
-    <View style={{ paddingVertical: spacing.sm }}>
-      <View style={{ flexDirection: "row", alignItems: "baseline", gap: spacing.sm }}>
-        <AppText
-          testID={`audit-count-${category}`}
-          style={{
-            fontFamily: "Menlo",
-            fontSize: 28,
-            fontWeight: "600",
-            color: hero && audience.length > 0 ? instrument.accent : instrument.ink,
-          }}
-        >
-          {audience.length}
-        </AppText>
-        <AppText
-          maxFontSizeMultiplier={1.4}
-          style={{ fontSize: 10, letterSpacing: 1.5, textTransform: "uppercase", color: instrument.mut }}
-        >
-          {`can see ${categoryLabel(category)}`}
-        </AppText>
-      </View>
-      <AppText
-        testID={`audit-names-${category}`}
-        style={{ fontSize: 14, color: audience.length === 0 ? instrument.mut : instrument.ink, marginTop: 2 }}
-      >
-        {names}
-      </AppText>
-    </View>
-  );
-}
+// The audit that used to head this screen has moved to Social, where it is
+// the hero and is seen on every visit rather than only by someone who already
+// knew to come here. This screen is now purely circle management, reached by
+// tapping that audit.
 
 function CircleRow({ circle }: { circle: Circle }) {
   const { instrument, spacing } = useTheme();
@@ -96,7 +52,7 @@ function CircleRow({ circle }: { circle: Circle }) {
   );
 }
 
-export default function Sharing() {
+export default function Circles() {
   const { instrument, spacing, radius } = useTheme();
   const insets = useSafeAreaInsets();
   const circlesQuery = useCircles();
@@ -127,28 +83,15 @@ export default function Sharing() {
     <View style={{ flex: 1, backgroundColor: instrument.bg }}>
       <AppBackground />
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
-        <ScreenHeader overline="Who can see your data" title="Sharing" onBack={() => safeBack("/(tabs)/more")} />
+        <ScreenHeader overline="Who can see your data" title="Circles" onBack={() => safeBack("/social" as Href)} />
         <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>
           {failed ? (
             <LoadErrorNotice
-              testID="sharing-load-error"
-              message="Couldn't load your sharing settings."
+              testID="circles-load-error"
+              message="Couldn't load your circles."
               onRetry={() => circlesQuery.refetch?.()}
             />
-          ) : (
-            <BezelCluster radius={25} testID="sharing-audit">
-              <View style={{ paddingHorizontal: spacing.md, paddingVertical: spacing.sm }}>
-                {CATEGORY_ORDER.map((category, index) => (
-                  <View key={category}>
-                    {index > 0 ? (
-                      <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: instrument.hairline }} />
-                    ) : null}
-                    <AuditRow category={category} circles={circles} hero={category === "body"} />
-                  </View>
-                ))}
-              </View>
-            </BezelCluster>
-          )}
+          ) : null}
 
           <View style={{ gap: spacing.xs }}>
             <AppText
