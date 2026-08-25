@@ -35,6 +35,12 @@ func (s Service) Claim(ctx context.Context, userID uuid.UUID, raw string) (strin
 	if err != nil {
 		return "", err
 	}
+	// Not the safety mechanism for "reclaiming doesn't retire": that guarantee
+	// actually comes from SetHandle's own prevCanonical != canonical check
+	// below, which is what stops a same-handle write from inserting a
+	// retirement. This early return only short-circuits the redundant
+	// IsRetired/FindByCanonical/SetHandle round-trip on that path -- it saves
+	// work, not correctness. No test discriminates removing it.
 	if me.HandleCanonical == canonical {
 		return me.Handle, nil
 	}

@@ -19,11 +19,31 @@ func newSvc(db *gorm.DB) Service {
 	})
 }
 
+// retireCleanup removes the retired_handles rows a test created, computing the
+// canonical form with Canonical() rather than hand-writing the folded spelling.
+// Hand-written folded literals are how this suite broke: a cleanup targeting
+// 'dropped' never matched the row actually written, which is 'dr0pped', so a
+// stray retirement survived and failed the NEXT run with ErrHandleRetired.
+// One implementation of the fold, no drift -- the same reasoning as reservedNames.
+func retireCleanup(t *testing.T, db *gorm.DB, raws ...string) {
+	t.Helper()
+	t.Cleanup(func() {
+		for _, raw := range raws {
+			_, canonical, err := Canonical(raw)
+			if err != nil {
+				t.Errorf("retireCleanup: %q is not a valid handle: %v", raw, err)
+				continue
+			}
+			db.Exec(`DELETE FROM retired_handles WHERE handle_canonical = ?`, canonical)
+		}
+	})
+}
+
 func TestClaim_ThenLookupFindsIt(t *testing.T) {
 	db := testDB(t)
 	svc := newSvc(db)
 	id := seedUser(t, db)
-	t.Cleanup(func() { db.Exec(`DELETE FROM retired_handles WHERE handle_canonical LIKE 'ada%'`) })
+	retireCleanup(t, db, "ada")
 
 	display, err := svc.Claim(context.Background(), id, "@AdA")
 	require.NoError(t, err)
@@ -42,7 +62,7 @@ func TestLookup_FoldsConfusables(t *testing.T) {
 	svc := newSvc(db)
 	id := seedUser(t, db)
 	h := "ada_l"
-	t.Cleanup(func() { db.Exec(`DELETE FROM retired_handles WHERE handle_canonical = 'ada_1'`) })
+	retireCleanup(t, db, h)
 
 	_, err := svc.Claim(context.Background(), id, h)
 	require.NoError(t, err)
@@ -73,7 +93,7 @@ func TestClaim_TakenByAnotherUser(t *testing.T) {
 	db := testDB(t)
 	svc := newSvc(db)
 	a, b := seedUser(t, db), seedUser(t, db)
-	t.Cleanup(func() { db.Exec(`DELETE FROM retired_handles WHERE handle_canonical = 'taken1'`) })
+	retireCleanup(t, db, "takenl")
 
 	_, err := svc.Claim(context.Background(), a, "takenl")
 	require.NoError(t, err)
@@ -89,16 +109,19 @@ func TestClaim_SameHandleAgainIsFine(t *testing.T) {
 	db := testDB(t)
 	svc := newSvc(db)
 	id := seedUser(t, db)
-	t.Cleanup(func() { db.Exec(`DELETE FROM retired_handles WHERE handle_canonical = 'stab1e'`) })
+	retireCleanup(t, db, "stable")
 
 	_, err := svc.Claim(context.Background(), id, "stable")
 	require.NoError(t, err)
 	_, err = svc.Claim(context.Background(), id, "stable")
 	require.NoError(t, err)
 
+	_, canonical, err := Canonical("stable")
+	require.NoError(t, err)
+
 	var n int64
 	require.NoError(t, db.Raw(
-		`SELECT count(*) FROM retired_handles WHERE handle_canonical = 'stab1e'`).Scan(&n).Error)
+		`SELECT count(*) FROM retired_handles WHERE handle_canonical = ?`, canonical).Scan(&n).Error)
 	require.EqualValues(t, 0, n, "re-claiming your own handle must not retire it")
 }
 
@@ -106,9 +129,7 @@ func TestClaim_ChangingRetiresTheOldOneAndFreesNothing(t *testing.T) {
 	db := testDB(t)
 	svc := newSvc(db)
 	a, b := seedUser(t, db), seedUser(t, db)
-	t.Cleanup(func() {
-		db.Exec(`DELETE FROM retired_handles WHERE handle_canonical IN ('01dname', 'newname')`)
-	})
+	retireCleanup(t, db, "oldname", "newname")
 
 	_, err := svc.Claim(context.Background(), a, "oldname")
 	require.NoError(t, err)
@@ -129,7 +150,7 @@ func TestClear_RetiresTheHandle(t *testing.T) {
 	db := testDB(t)
 	svc := newSvc(db)
 	a, b := seedUser(t, db), seedUser(t, db)
-	t.Cleanup(func() { db.Exec(`DELETE FROM retired_handles WHERE handle_canonical = 'dropped'`) })
+	retireCleanup(t, db, "dropped")
 
 	_, err := svc.Claim(context.Background(), a, "dropped")
 	require.NoError(t, err)
@@ -162,7 +183,7 @@ func TestLookupView_HasNoEmailField(t *testing.T) {
 	db := testDB(t)
 	svc := newSvc(db)
 	id := seedUser(t, db)
-	t.Cleanup(func() { db.Exec(`DELETE FROM retired_handles WHERE handle_canonical = 'pr1vate'`) })
+	retireCleanup(t, db, "private")
 	_, err := svc.Claim(context.Background(), id, "private")
 	require.NoError(t, err)
 
@@ -182,7 +203,7 @@ func TestLookup_ComposesAvatarURLFromPath(t *testing.T) {
 	db := testDB(t)
 	svc := newSvc(db)
 	id := seedUser(t, db)
-	t.Cleanup(func() { db.Exec(`DELETE FROM retired_handles WHERE handle_canonical = 'w1thp1c'`) })
+	retireCleanup(t, db, "withpic")
 	_, err := svc.Claim(context.Background(), id, "withpic")
 	require.NoError(t, err)
 	require.NoError(t, db.Exec(
@@ -200,7 +221,7 @@ func TestLookup_NoAvatarIsEmptyURL(t *testing.T) {
 	db := testDB(t)
 	svc := newSvc(db)
 	id := seedUser(t, db)
-	t.Cleanup(func() { db.Exec(`DELETE FROM retired_handles WHERE handle_canonical = 'n0p1c'`) })
+	retireCleanup(t, db, "nopic")
 	_, err := svc.Claim(context.Background(), id, "nopic")
 	require.NoError(t, err)
 
