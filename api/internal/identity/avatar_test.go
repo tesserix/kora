@@ -154,6 +154,40 @@ func TestAvatar_MissingFilePartIs400(t *testing.T) {
 	require.Equal(t, 400, rec.Code)
 }
 
+// TestAvatar_OversizedUploadIs413 drives the real handler with a request body
+// one byte over maxAvatarBodyBytes and asserts the 413 path -- the one
+// production branch (the http.MaxBytesError case in SetAvatar, checked
+// BEFORE FormFile even returns a part) that had only ever been verified live
+// and then had its scratch test deleted. "Verified by inspection, no test" is
+// exactly the failure mode this test exists to close off.
+//
+// The overage is measured, not guessed: multipartBody's envelope (boundary,
+// headers, field name, filename) has a fixed byte cost for a given field and
+// filename, so this test measures that cost with an empty payload and then
+// picks a payload length that lands the total body exactly one byte past the
+// cap -- not "some large body", but the precise off-by-one the handler must
+// reject.
+func TestAvatar_OversizedUploadIs413(t *testing.T) {
+	db := testDB(t)
+	r := avatarEngine(t, db, assets.NewLocal(t.TempDir(), "http://x"), seedUser(t, db))
+
+	_, empty := multipartBody(t, "file", "big.bin", nil)
+	overhead := empty.Len()
+	payload := make([]byte, maxAvatarBodyBytes+1-overhead)
+
+	ct, body := multipartBody(t, "file", "big.bin", payload)
+	require.Equal(t, maxAvatarBodyBytes+1, body.Len(),
+		"the request body must land exactly one byte over the cap for this test to mean anything")
+
+	req := httptest.NewRequest(http.MethodPut, "/v1/me/avatar", body)
+	req.Header.Set("Content-Type", ct)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusRequestEntityTooLarge, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), "image_too_large")
+}
+
 // With no bucket configured (assets.Noop), an upload must still SUCCEED and
 // simply produce no picture — the first-deploy state described in
 // docs/OPEN_QUESTIONS.md. A 500 here would break the profile screen in every

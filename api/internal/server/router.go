@@ -155,6 +155,7 @@ func NewRouter(deps Deps) *gin.Engine {
 			identityDeleter(deps.IdentityDeleter),
 			deps.AppleRevoker, // may legitimately be nil; Delete tolerates it
 			auditDeletion,
+			assetsStore(deps.Assets), // same nil-to-Noop default as identity's avatar wiring
 		)
 		userHandler := user.NewHandler(userRepo, userSvc)
 		// tracking.NewRepository is a cheap wrapper (holds only *gorm.DB), so
