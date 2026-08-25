@@ -18,7 +18,7 @@ func testRouter(t *testing.T, db *gorm.DB, userID uuid.UUID) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	h := NewHandler(NewService(NewRepository(db), stubFriends{areFriends: true}))
-	g := r.Group("/v1", func(c *gin.Context) { c.Set("user_id", userID.String()) })
+	g := r.Group("/v1", func(c *gin.Context) { c.Set("user_id", userID) })
 	g.GET("/share/circles", h.List)
 	g.POST("/share/circles", h.Create)
 	g.DELETE("/share/circles/:id", h.Delete)

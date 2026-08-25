@@ -9,6 +9,7 @@ import (
 
 	"github.com/tesserix/kora/api/internal/access"
 	"github.com/tesserix/kora/api/internal/httpx"
+	"github.com/tesserix/kora/api/internal/user"
 )
 
 type Handler struct {
@@ -16,19 +17,6 @@ type Handler struct {
 }
 
 func NewHandler(svc Service) Handler { return Handler{svc: svc} }
-
-func callerID(c *gin.Context) (uuid.UUID, bool) {
-	raw, ok := c.Get("user_id")
-	if !ok {
-		return uuid.Nil, false
-	}
-	s, ok := raw.(string)
-	if !ok {
-		return uuid.Nil, false
-	}
-	id, err := uuid.Parse(s)
-	return id, err == nil
-}
 
 // respond maps service errors to status codes. ErrNotOwner is 404 on purpose:
 // a 403 would confirm the circle exists.
@@ -46,7 +34,7 @@ func respond(c *gin.Context, err error) {
 }
 
 func (h Handler) List(c *gin.Context) {
-	id, ok := callerID(c)
+	id, ok := user.IDFromContext(c)
 	if !ok {
 		httpx.Error(c, http.StatusUnauthorized, "unauthorized", "Sign in to continue.")
 		return
@@ -60,7 +48,7 @@ func (h Handler) List(c *gin.Context) {
 }
 
 func (h Handler) Create(c *gin.Context) {
-	id, ok := callerID(c)
+	id, ok := user.IDFromContext(c)
 	if !ok {
 		httpx.Error(c, http.StatusUnauthorized, "unauthorized", "Sign in to continue.")
 		return
@@ -81,7 +69,7 @@ func (h Handler) Create(c *gin.Context) {
 }
 
 func (h Handler) SetCategories(c *gin.Context) {
-	id, ok := callerID(c)
+	id, ok := user.IDFromContext(c)
 	if !ok {
 		httpx.Error(c, http.StatusUnauthorized, "unauthorized", "Sign in to continue.")
 		return
@@ -106,7 +94,7 @@ func (h Handler) SetCategories(c *gin.Context) {
 }
 
 func (h Handler) AddMember(c *gin.Context) {
-	id, ok := callerID(c)
+	id, ok := user.IDFromContext(c)
 	if !ok {
 		httpx.Error(c, http.StatusUnauthorized, "unauthorized", "Sign in to continue.")
 		return
@@ -131,7 +119,7 @@ func (h Handler) AddMember(c *gin.Context) {
 }
 
 func (h Handler) RemoveMember(c *gin.Context) {
-	id, ok := callerID(c)
+	id, ok := user.IDFromContext(c)
 	if !ok {
 		httpx.Error(c, http.StatusUnauthorized, "unauthorized", "Sign in to continue.")
 		return
@@ -154,7 +142,7 @@ func (h Handler) RemoveMember(c *gin.Context) {
 }
 
 func (h Handler) Delete(c *gin.Context) {
-	id, ok := callerID(c)
+	id, ok := user.IDFromContext(c)
 	if !ok {
 		httpx.Error(c, http.StatusUnauthorized, "unauthorized", "Sign in to continue.")
 		return
@@ -172,14 +160,14 @@ func (h Handler) Delete(c *gin.Context) {
 }
 
 // Leave removes the AUTHENTICATED CALLER from a circle. The member id comes
-// only from callerID(c) -- never from the request body, a query parameter, or
+// only from user.IDFromContext(c) -- never from the request body, a query parameter, or
 // a path segment. share.Service.Leave is deliberately not owner-gated (that's
 // its whole purpose: letting someone exit a circle they don't own), so it
 // offers no protection of its own. If this handler ever read the member id
 // from request input, POST /v1/share/circles/:id/leave would become "remove
 // anyone from any circle."
 func (h Handler) Leave(c *gin.Context) {
-	id, ok := callerID(c)
+	id, ok := user.IDFromContext(c)
 	if !ok {
 		httpx.Error(c, http.StatusUnauthorized, "unauthorized", "Sign in to continue.")
 		return
