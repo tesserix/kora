@@ -38,6 +38,7 @@ import (
 	"github.com/tesserix/kora/api/internal/recipes"
 	"github.com/tesserix/kora/api/internal/resolve"
 	"github.com/tesserix/kora/api/internal/savedmeals"
+	"github.com/tesserix/kora/api/internal/share"
 	"github.com/tesserix/kora/api/internal/social"
 	"github.com/tesserix/kora/api/internal/tracking"
 	"github.com/tesserix/kora/api/internal/user"
@@ -349,6 +350,15 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.POST("/friends/requests/:id/decline", socialHandler.Decline)
 		v1.DELETE("/friends/:userId", socialHandler.Unfriend)
 		v1.GET("/friends/code", socialHandler.Code)
+
+		shareHandler := share.NewHandler(share.NewService(share.NewRepository(deps.DB), socialRepo))
+		v1.GET("/share/circles", shareHandler.List)
+		v1.POST("/share/circles", shareHandler.Create)
+		v1.DELETE("/share/circles/:id", shareHandler.Delete)
+		v1.POST("/share/circles/:id/members", shareHandler.AddMember)
+		v1.DELETE("/share/circles/:id/members/:userId", shareHandler.RemoveMember)
+		v1.PUT("/share/circles/:id/categories", shareHandler.SetCategories)
+		v1.POST("/share/circles/:id/leave", shareHandler.Leave)
 
 		compareHandler := compare.NewHandler(compare.NewService(socialRepo, userRepo, logRepo))
 		v1.GET("/friends/progress", compareHandler.Get)
