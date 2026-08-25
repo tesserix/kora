@@ -76,3 +76,21 @@ test("a failed Remove-friend tells the user why", async () => {
   expect(mockShow).toHaveBeenCalledWith({ message: OFFLINE_COPY });
   alert.mockRestore();
 });
+
+
+// kora#446: the accept/decline circles are 32pt by design. hitSlop is what
+// takes the TARGET to the 44pt iOS minimum, and it is load-bearing rather
+// than cosmetic — these two controls sit adjacent with asymmetric
+// consequences, since a mis-tap declines a friend request with no undo.
+test("accept and decline meet the 44pt touch target via hitSlop", async () => {
+  const { getByLabelText } = await render(<Friends />);
+  for (const label of ["Accept request from Ben", "Decline request from Ben"]) {
+    const props = getByLabelText(label).props;
+    const slop = props.hitSlop;
+    expect(slop).toBeTruthy();
+    const width = 32 + slop.left + slop.right;
+    const height = 32 + slop.top + slop.bottom;
+    expect(width).toBeGreaterThanOrEqual(44);
+    expect(height).toBeGreaterThanOrEqual(44);
+  }
+});

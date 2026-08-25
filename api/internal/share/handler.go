@@ -47,6 +47,23 @@ func (h Handler) List(c *gin.Context) {
 	httpx.OK(c, views)
 }
 
+// Memberships answers "whose data can I see, and how do I stop it" — the
+// mirror of List, and the read path that makes Leave reachable at all
+// (kora#440). The member id comes from the authenticated caller only.
+func (h Handler) Memberships(c *gin.Context) {
+	id, ok := user.IDFromContext(c)
+	if !ok {
+		httpx.Error(c, http.StatusUnauthorized, "unauthorized", "Sign in to continue.")
+		return
+	}
+	views, err := h.svc.Memberships(c.Request.Context(), id)
+	if err != nil {
+		respond(c, err)
+		return
+	}
+	httpx.OK(c, views)
+}
+
 func (h Handler) Create(c *gin.Context) {
 	id, ok := user.IDFromContext(c)
 	if !ok {

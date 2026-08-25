@@ -817,6 +817,41 @@ export interface CircleMember {
   display_name: string;
 }
 
+// The MEMBER's view of a circle they were added to (kora#440). Mirrors the
+// server's share.MembershipView, and deliberately carries no circle name —
+// those are the owner's private labels.
+// One weigh-in as a FRIEND is allowed to see it (kora#438/#441). Mirrors the
+// server's tracking.FriendBodyEntry: every metric optional, and no id,
+// created_at, hk_uuid or source — the server does not send them.
+//
+// A missing field means NOT MEASURED. Never render it as zero.
+export interface FriendBodyEntry {
+  logged_at: string;
+  local_date: string;
+  weight_kg: number;
+  body_fat_pct?: number;
+  subcutaneous_fat_pct?: number;
+  visceral_fat_rating?: number;
+  skeletal_muscle_pct?: number;
+  muscle_mass_kg?: number;
+  body_water_pct?: number;
+  protein_pct?: number;
+  bone_mass_kg?: number;
+  scale_bmr_kcal?: number;
+  neck_cm?: number;
+  chest_cm?: number;
+  waist_cm?: number;
+  hip_cm?: number;
+  arm_cm?: number;
+  thigh_cm?: number;
+}
+
+export interface Membership {
+  circle_id: string;
+  owner: CircleMember;
+  categories: ShareCategory[];
+}
+
 export interface Circle {
   id: string;
   name: string;

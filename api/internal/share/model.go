@@ -25,6 +25,23 @@ type MemberView struct {
 	DisplayName string    `json:"display_name"`
 }
 
+// MembershipView is the MEMBER's view of a circle they were added to
+// (kora#440) — the mirror of CircleView, and deliberately not the same shape.
+//
+// It carries NO circle name. Circle names are private labels the owner writes
+// for their own use — "Gym crew", "Family (not Mum)" — and showing a member
+// which bucket they were filed under exposes a judgement the owner never chose
+// to share. What a member actually needs in order to decide whether to leave
+// is who is sharing, what they are sharing, and an id to act on.
+//
+// Owner is projected without email, the same rule as MemberView and
+// social.FriendView.
+type MembershipView struct {
+	CircleID   uuid.UUID         `json:"circle_id"`
+	Owner      MemberView        `json:"owner"`
+	Categories []access.Category `json:"categories"`
+}
+
 type CircleView struct {
 	ID         uuid.UUID         `json:"id"`
 	Name       string            `json:"name"`

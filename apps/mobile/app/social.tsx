@@ -103,13 +103,24 @@ function OverflowRow({ label, onPress }: { label: string; onPress: () => void })
   );
 }
 
+// Tapping a friend opens their body metrics if they share them, and one calm
+// "nothing shared with you" state otherwise (kora#441). These rows were inert
+// before; this gives them the purpose they were missing, one tap from the
+// audit that grants the same category in the other direction.
 function PersonRow({ friend }: { friend: Friend }) {
   const { instrument, spacing } = useTheme();
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", minHeight: 44, paddingVertical: spacing.xs, gap: spacing.sm }}>
+    <PressableScale
+      accessibilityRole="button"
+      accessibilityLabel={`Open ${friend.display_name}`}
+      haptic="none"
+      onPress={() => router.push(`/friend/${friend.id}` as Href)}
+      style={{ flexDirection: "row", alignItems: "center", minHeight: 44, paddingVertical: spacing.xs, gap: spacing.sm }}
+    >
       <Avatar initials={initials(friend.display_name)} size={30} />
       <AppText style={{ flex: 1, fontSize: 15, color: instrument.ink }}>{friend.display_name}</AppText>
-    </View>
+      <Icon name="chevron-right" size={14} color={instrument.mut} />
+    </PressableScale>
   );
 }
 

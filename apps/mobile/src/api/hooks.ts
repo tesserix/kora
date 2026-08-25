@@ -54,6 +54,8 @@ import type {
   FoodItem,
   Circle,
   Friend,
+  FriendBodyEntry,
+  Membership,
   FriendRequests,
   FriendsProgress,
   FoodLog,
@@ -1416,6 +1418,47 @@ export function useCircles() {
   return useQuery({
     queryKey: ["circles"],
     queryFn: () => apiFetch("/v1/share/circles") as Promise<Circle[]>,
+  });
+}
+
+// Circles OTHER people have put you in (kora#440). Separate query key from
+// ["circles"]: leaving invalidates both, because a membership disappearing is
+// not a change to any circle you own.
+// Another person's body metrics, when they have granted it (kora#441).
+//
+// A 404 is NOT an error state: the server returns it for not-shared, not a
+// friend, no such person and reading yourself, deliberately indistinguishable.
+// `retry: false` matters — retrying a 404 would burn requests re-asking a
+// settled question, and `staleTime: 0` matters more: revocation is immediate
+// server-side, so a cached copy outliving a revoke is the one way the client
+// can undermine the whole permission model.
+export function useFriendBody(userId: string | undefined) {
+  return useQuery({
+    queryKey: ["friend-body", userId],
+    enabled: Boolean(userId),
+    retry: false,
+    staleTime: 0,
+    gcTime: 0,
+    queryFn: () => apiFetch(`/v1/friends/${userId}/body`) as Promise<FriendBodyEntry[]>,
+  });
+}
+
+export function useMemberships() {
+  return useQuery({
+    queryKey: ["memberships"],
+    queryFn: () => apiFetch("/v1/share/memberships") as Promise<Membership[]>,
+  });
+}
+
+export function useLeaveCircle() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (circleId: string) =>
+      apiFetch(`/v1/share/circles/${circleId}/leave`, { method: "POST" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["memberships"] });
+      qc.invalidateQueries({ queryKey: ["circles"] });
+    },
   });
 }
 

@@ -144,3 +144,51 @@ func (r Repository) Delete(ctx context.Context, circleID uuid.UUID) error {
 	}
 	return nil
 }
+
+// ListForMember returns the circles the caller has been ADDED to, with the
+// owner and what that owner shares (kora#440).
+//
+// Deliberately a separate query from ListForOwner rather than a branch inside
+// it. The two answer different questions with different exposure rules — the
+// owner sees names and members, the member must NOT see the circle's name —
+// and one query serving both is exactly how that name leaks by accident later.
+//
+// A circle the caller owns is excluded even if they somehow appear in its
+// member rows: "shared with you" means someone else's data, and listing your
+// own circle here would offer you a Leave action on a circle you should
+// delete instead.
+func (r Repository) ListForMember(ctx context.Context, memberID uuid.UUID) ([]MembershipView, error) {
+	rows := []struct {
+		CircleID    uuid.UUID
+		OwnerID     uuid.UUID
+		DisplayName string
+	}{}
+	if err := r.db.WithContext(ctx).
+		Table("share_circle_members AS m").
+		Select("m.circle_id AS circle_id, c.owner_id AS owner_id, u.display_name AS display_name").
+		Joins("JOIN share_circles c ON c.id = m.circle_id").
+		Joins("JOIN users u ON u.id = c.owner_id").
+		Where("m.member_user_id = ? AND c.owner_id <> ?", memberID, memberID).
+		Order("u.display_name, c.created_at").
+		Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("share: list memberships: %w", err)
+	}
+
+	views := make([]MembershipView, 0, len(rows))
+	for _, row := range rows {
+		cats := []access.Category{}
+		if err := r.db.WithContext(ctx).
+			Table("share_grants").
+			Where("circle_id = ?", row.CircleID).
+			Order("category").
+			Pluck("category", &cats).Error; err != nil {
+			return nil, fmt.Errorf("share: list membership grants: %w", err)
+		}
+		views = append(views, MembershipView{
+			CircleID:   row.CircleID,
+			Owner:      MemberView{ID: row.OwnerID, DisplayName: row.DisplayName},
+			Categories: cats,
+		})
+	}
+	return views, nil
+}

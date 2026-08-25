@@ -2,6 +2,7 @@ package share
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -26,6 +27,7 @@ func testRouter(t *testing.T, db *gorm.DB, userID uuid.UUID) *gin.Engine {
 	g.DELETE("/share/circles/:id/members/:userId", h.RemoveMember)
 	g.PUT("/share/circles/:id/categories", h.SetCategories)
 	g.POST("/share/circles/:id/leave", h.Leave)
+	g.GET("/share/memberships", h.Memberships)
 	return r
 }
 
@@ -139,4 +141,58 @@ func TestLeaveOnlyRemovesTheAuthenticatedCaller(t *testing.T) {
 
 		assertMemberSurvives(t, owner, member)
 	})
+}
+
+// kora#440, at HTTP level: the member-side list, and the leave it exists to
+// make reachable.
+func TestMembershipsEndpointListsWhatIsSharedWithYouAndLeaveRemovesIt(t *testing.T) {
+	db := testDB(t)
+	owner := seedUser(t, db, "Owner")
+	member := seedUser(t, db, "Member")
+	repo := NewRepository(db)
+
+	c, err := repo.Create(context.Background(), owner, "Gym crew")
+	require.NoError(t, err)
+	require.NoError(t, repo.AddMember(context.Background(), c.ID, member))
+
+	r := testRouter(t, db, member)
+
+	get := func() string {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/share/memberships", nil))
+		require.Equal(t, http.StatusOK, w.Code)
+		return w.Body.String()
+	}
+
+	body := get()
+	require.Contains(t, body, c.ID.String())
+	require.Contains(t, body, owner.String())
+	// The owner's private label never crosses the wire to a member.
+	require.NotContains(t, body, "Gym crew")
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/share/circles/"+c.ID.String()+"/leave", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	require.NotContains(t, get(), c.ID.String(), "leaving must remove the membership")
+}
+
+// The member id comes from the authenticated caller alone. Leave is
+// deliberately NOT owner-gated -- that is its purpose -- so the handler is the
+// only guard, and it must never take a member id from request input.
+func TestMembershipsShowsOnlyTheCallersOwnMemberships(t *testing.T) {
+	db := testDB(t)
+	owner := seedUser(t, db, "Owner")
+	member := seedUser(t, db, "Member")
+	stranger := seedUser(t, db, "Stranger")
+	repo := NewRepository(db)
+
+	c, err := repo.Create(context.Background(), owner, "Household")
+	require.NoError(t, err)
+	require.NoError(t, repo.AddMember(context.Background(), c.ID, member))
+
+	w := httptest.NewRecorder()
+	testRouter(t, db, stranger).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/share/memberships", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	require.NotContains(t, w.Body.String(), c.ID.String())
 }
