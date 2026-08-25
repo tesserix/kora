@@ -11,13 +11,6 @@ const (
 	MaxHandleLen = 20
 )
 
-// reserved handles prevent impersonating Kora itself. The check runs against
-// the CANONICAL form, not the display form, so `adm1n` is caught too — a
-// reserved list that folding can walk around is not a reserved list.
-var reserved = map[string]struct{}{
-	"kora": {}, "adm1n": {}, "supp0rt": {}, "help": {}, "team": {},
-}
-
 // confusables maps every character in a spoken-ambiguity class to one
 // representative. `l`, `i` and `1` are one class; `o` and `0` are another.
 //
@@ -29,6 +22,42 @@ var reserved = map[string]struct{}{
 var confusables = map[rune]rune{
 	'l': '1', 'i': '1', '1': '1',
 	'o': '0', '0': '0',
+}
+
+// fold applies the confusables mapping to a string, replacing each character
+// with its canonical representative. The result is used for lookups and
+// uniqueness checks.
+func fold(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if folded, ok := confusables[r]; ok {
+			b.WriteRune(folded)
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// reservedNames holds the source-of-truth list of reserved handle names,
+// expressed in human-readable form (not folded). The list is folded once at
+// package init to create the reserved map, ensuring all reserved names are
+// checked against their canonical forms. This approach (derive, not hand-write)
+// prevents drift when confusables change: the folding logic is identical to
+// what Canonical() uses, and there is a single source of truth.
+var reservedNames = []string{"kora", "admin", "support", "help", "team"}
+
+// reserved maps canonical forms of reserved names to struct{}, used to prevent
+// claiming handles that would impersonate Kora itself. The map is pre-computed
+// from reservedNames to avoid re-folding on every Canonical() call.
+var reserved map[string]struct{}
+
+func init() {
+	reserved = make(map[string]struct{})
+	for _, name := range reservedNames {
+		reserved[fold(name)] = struct{}{}
+	}
 }
 
 // Canonical validates raw and returns the form to display and the form to
@@ -51,16 +80,7 @@ func Canonical(raw string) (string, string, error) {
 		return "", "", ErrHandleInvalid
 	}
 
-	var b strings.Builder
-	b.Grow(len(display))
-	for _, r := range display {
-		if folded, ok := confusables[r]; ok {
-			b.WriteRune(folded)
-			continue
-		}
-		b.WriteRune(r)
-	}
-	canonical := b.String()
+	canonical := fold(display)
 
 	if _, bad := reserved[canonical]; bad {
 		return "", "", ErrHandleReserved

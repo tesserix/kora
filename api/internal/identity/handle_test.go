@@ -81,3 +81,12 @@ func TestErrorsAreDistinct(t *testing.T) {
 	require.False(t, errors.Is(ErrHandleInvalid, ErrHandleReserved))
 	require.False(t, errors.Is(ErrHandleTaken, ErrHandleRetired))
 }
+
+func TestCanonical_EveryReservedNameIsRefused(t *testing.T) {
+	for _, name := range []string{"kora", "admin", "support", "help", "team"} {
+		t.Run(name, func(t *testing.T) {
+			_, _, err := Canonical(name)
+			require.ErrorIs(t, err, ErrHandleReserved)
+		})
+	}
+}
