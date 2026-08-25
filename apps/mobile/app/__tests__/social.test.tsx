@@ -188,3 +188,136 @@ test("an incoming request's picture is passed through to their Avatar", async ()
   const images = queryImages(container);
   expect(images.map((i) => i.props.source)).toContainEqual({ uri: "https://assets.test/ben.jpg" });
 });
+
+// kora#452. At accessibility text sizes, a row shaped [avatar / name /
+// trailing control(s)] squeezes the name to nothing between two fixed-size
+// siblings -- worst for the request row, whose pair of 44pt accept/decline
+// buttons is 88pt of fixed width plus gaps. The fix drops the trailing
+// control(s) to their own line past a font-scale threshold so the name gets
+// (almost) the full row width. jest cannot observe platform font scaling
+// (see sign-in.test.tsx's own note), so this drives useWindowDimensions
+// directly, exactly as that suite does.
+function withFontScale(fontScale: number) {
+  // require, not a top-level import: an ESM namespace object is sealed, so
+  // jest.spyOn cannot redefine a property on it.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const rn = require("react-native");
+  return jest
+    .spyOn(rn, "useWindowDimensions")
+    .mockReturnValue({ width: 440, height: 956, scale: 3, fontScale });
+}
+
+describe("row reflow at accessibility text sizes (kora#452)", () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  test("keeps accept/decline beside the avatar and name at ordinary text sizes", async () => {
+    withFontScale(1);
+    mockIncoming = [{ id: "r1", user: { id: "u2", display_name: "Ben" } }];
+    const { getByLabelText, getByText, unmount } = await render(<Social />);
+
+    const accept = getByLabelText("Accept request from Ben");
+    const name = getByText("Ben");
+    // Same immediate row: the accept button and the name share one parent
+    // View, alongside the Avatar and the decline button -- four children.
+    expect(accept.parent).toBe(name.parent);
+    expect(accept.parent?.children.length).toBe(4);
+    unmount();
+  });
+
+  test("moves accept/decline to their own row past the accessibility threshold, keeping both visible", async () => {
+    // Between iOS's xxxL (~1.35) and AX1 (~1.64) -- same boundary as
+    // sign-in.tsx's HERO_COLLAPSE_FONT_SCALE (kora#173/#260).
+    withFontScale(2.643);
+    mockIncoming = [{ id: "r1", user: { id: "u2", display_name: "Ben" } }];
+    const { getByLabelText, getByText, unmount } = await render(<Social />);
+
+    const accept = getByLabelText("Accept request from Ben");
+    const decline = getByLabelText("Decline request from Ben");
+    const name = getByText("Ben");
+
+    // Consent surface: the requester's name and both actions are all still
+    // reachable -- reflow must never drop who is asking or hide a control.
+    expect(name).toBeTruthy();
+    expect(accept).toBeTruthy();
+    expect(decline).toBeTruthy();
+    // No longer sharing a row with the name.
+    expect(accept.parent).not.toBe(name.parent);
+    // Its own row holds only the two controls.
+    expect(accept.parent).toBe(decline.parent);
+    expect(accept.parent?.children.length).toBe(2);
+    unmount();
+  });
+
+  // Two separate tests rather than a loop over one render: this build's
+  // `render` is async, and looping bare renders in a single test left the
+  // second `render()` racing the first's not-yet-flushed unmount (visible as
+  // React's "overlapping act() calls" warning), which went on to corrupt the
+  // NEXT test's tree rather than this one's assertions.
+  test("accept/decline stay 44pt targets at ordinary text sizes", async () => {
+    withFontScale(1);
+    mockIncoming = [{ id: "r1", user: { id: "u2", display_name: "Ben" } }];
+    const { getByLabelText, unmount } = await render(<Social />);
+    for (const label of ["Accept request from Ben", "Decline request from Ben"]) {
+      const style = getByLabelText(label).props.style;
+      const flat = Array.isArray(style) ? Object.assign({}, ...style.flat().filter(Boolean)) : style;
+      expect(flat.width).toBe(44);
+      expect(flat.height).toBe(44);
+    }
+    unmount();
+  });
+
+  test("accept/decline stay 44pt targets once stacked", async () => {
+    withFontScale(2.643);
+    mockIncoming = [{ id: "r1", user: { id: "u2", display_name: "Ben" } }];
+    const { getByLabelText, unmount } = await render(<Social />);
+    for (const label of ["Accept request from Ben", "Decline request from Ben"]) {
+      const style = getByLabelText(label).props.style;
+      const flat = Array.isArray(style) ? Object.assign({}, ...style.flat().filter(Boolean)) : style;
+      expect(flat.width).toBe(44);
+      expect(flat.height).toBe(44);
+    }
+    unmount();
+  });
+
+  test("a friend row keeps the chevron beside the name at ordinary text sizes", async () => {
+    withFontScale(1);
+    mockFriends = [ada];
+    const { getByText, unmount } = await render(<Social />);
+    const name = getByText("Ada Lovelace");
+    // Avatar + name + chevron on one row.
+    expect(name.parent?.children.length).toBe(3);
+    unmount();
+  });
+
+  test("a friend row drops the chevron to its own line past the accessibility threshold", async () => {
+    withFontScale(2.643);
+    mockFriends = [ada];
+    const { getByText, unmount } = await render(<Social />);
+    const name = getByText("Ada Lovelace");
+    // Just avatar + name now that the chevron moved off this row.
+    expect(name.parent?.children.length).toBe(2);
+    unmount();
+  });
+
+  test("a group row drops the chevron to its own line past the accessibility threshold", async () => {
+    withFontScale(2.643);
+    mockGroups = [{ id: "g1", name: "Sunday Runners", member_count: 3, role: "owner" }];
+    const { getByText, unmount } = await render(<Social />);
+    const name = getByText("Sunday Runners");
+    // The name+meta column is the row's only remaining sibling once the
+    // chevron drops to its own line.
+    expect(name.parent?.parent?.children.length).toBe(1);
+    unmount();
+  });
+});
+
+// kora#452: the title must never truncate. numberOfLines/ellipsizeMode are
+// the props that would produce the reported "Soci..." clip; asserting their
+// absence pins the no-truncation contract regardless of how tall the title
+// renders at accessibility sizes.
+test("the screen title carries no truncation props", async () => {
+  const { getByText } = await render(<Social />);
+  const title = getByText("Social");
+  expect(title.props.numberOfLines).toBeUndefined();
+  expect(title.props.ellipsizeMode).toBeUndefined();
+});

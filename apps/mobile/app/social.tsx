@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ScrollView, StyleSheet, View } from "react-native";
+import { ScrollView, StyleSheet, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, type Href } from "expo-router";
 
@@ -22,7 +22,7 @@ import { apiErrorMessage } from "@/lib/apiErrorMessage";
 import { initials } from "@/lib/initials";
 import { useTheme } from "@/theme";
 
-import type { Friend, GroupSummary } from "@/api/types";
+import type { Friend, FriendRequest, GroupSummary } from "@/api/types";
 
 // Social: one destination for the three More rows that used to be Friends,
 // Sharing and Groups (kora#444).
@@ -40,6 +40,27 @@ import type { Friend, GroupSummary } from "@/api/types";
 const FRIEND_PREVIEW = 5;
 const GROUP_PREVIEW = 4;
 const REQUEST_PREVIEW = 2;
+
+// kora#452: at accessibility text sizes a [avatar · name · trailing control]
+// row breaks because the name is squeezed between two fixed-size siblings —
+// the request row's pair of 44pt accept/decline buttons is the worst of the
+// three, but every row here shares the shape. Past this scale the trailing
+// control drops to its own line under the name instead of sharing one with
+// it, so the name gets (almost) the full row width to wrap into rather than
+// a shrinking sliver.
+//
+// Same boundary and same reasoning as sign-in.tsx's HERO_COLLAPSE_FONT_SCALE
+// (kora#173/#260): 1.5 sits between iOS's largest non-accessibility size
+// (xxxL, ~1.35) and its smallest accessibility one (AX1, ~1.64), so every
+// non-accessibility user's layout is untouched. `useWindowDimensions`, not
+// `PixelRatio.getFontScale()` — the former is reactive, so the screen relays
+// out when the user changes text size and returns to a still-mounted app.
+const ROW_STACK_FONT_SCALE = 1.5;
+
+function useStackedRows(): boolean {
+  const { fontScale } = useWindowDimensions();
+  return fontScale > ROW_STACK_FONT_SCALE;
+}
 
 // kora#449 task 15 finding 3, mirroring LookupResultCard.tsx's fallback
 // (kora#443): a blank display_name must never render as an empty line or an
@@ -112,6 +133,7 @@ function OverflowRow({ label, onPress }: { label: string; onPress: () => void })
 // audit that grants the same category in the other direction.
 function PersonRow({ friend }: { friend: Friend }) {
   const { instrument, spacing } = useTheme();
+  const stacked = useStackedRows();
   const name = displayName(friend);
   return (
     <PressableScale
@@ -119,33 +141,104 @@ function PersonRow({ friend }: { friend: Friend }) {
       accessibilityLabel={`Open ${name}`}
       haptic="none"
       onPress={() => router.push(`/friend/${friend.id}` as Href)}
-      style={{ flexDirection: "row", alignItems: "center", minHeight: 44, paddingVertical: spacing.xs, gap: spacing.sm }}
+      style={{ minHeight: 44, paddingVertical: spacing.xs, gap: spacing.xs }}
     >
-      <Avatar initials={initials(friend.display_name)} uri={friend.avatar_url} size={30} />
-      <AppText style={{ flex: 1, fontSize: 15, color: instrument.ink }}>{name}</AppText>
-      <Icon name="chevron-right" size={14} color={instrument.mut} />
+      <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+        <Avatar initials={initials(friend.display_name)} uri={friend.avatar_url} size={30} />
+        <AppText style={{ flex: 1, fontSize: 15, color: instrument.ink }}>{name}</AppText>
+        {stacked ? null : <Icon name="chevron-right" size={14} color={instrument.mut} />}
+      </View>
+      {/* Past the reflow threshold the chevron drops to its own line, right
+          aligned, so it never shares row width with the name (kora#452). */}
+      {stacked ? (
+        <View style={{ flexDirection: "row", justifyContent: "flex-end" }}>
+          <Icon name="chevron-right" size={14} color={instrument.mut} />
+        </View>
+      ) : null}
     </PressableScale>
   );
 }
 
 function GroupRow({ group }: { group: GroupSummary }) {
   const { instrument, spacing } = useTheme();
+  const stacked = useStackedRows();
   return (
     <PressableScale
       accessibilityRole="button"
       accessibilityLabel={`Open group ${group.name}`}
       haptic="none"
       onPress={() => router.push(`/group/${group.id}` as Href)}
-      style={{ flexDirection: "row", alignItems: "center", minHeight: 44, paddingVertical: spacing.sm }}
+      style={{ minHeight: 44, paddingVertical: spacing.sm, gap: spacing.xs }}
     >
-      <View style={{ flex: 1 }}>
-        <AppText style={{ fontSize: 15, fontWeight: "500", color: instrument.ink }}>{group.name}</AppText>
-        <AppText style={{ fontSize: 13, color: instrument.mut, marginTop: 1 }}>
-          {`${group.member_count} ${group.member_count === 1 ? "member" : "members"}${group.role === "owner" ? " · Owner" : ""}`}
-        </AppText>
+      <View style={{ flexDirection: "row", alignItems: "center" }}>
+        <View style={{ flex: 1 }}>
+          <AppText style={{ fontSize: 15, fontWeight: "500", color: instrument.ink }}>{group.name}</AppText>
+          <AppText style={{ fontSize: 13, color: instrument.mut, marginTop: 1 }}>
+            {`${group.member_count} ${group.member_count === 1 ? "member" : "members"}${group.role === "owner" ? " · Owner" : ""}`}
+          </AppText>
+        </View>
+        {stacked ? null : <Icon name="chevron-right" size={14} color={instrument.mut} />}
       </View>
-      <Icon name="chevron-right" size={14} color={instrument.mut} />
+      {stacked ? (
+        <View style={{ flexDirection: "row", justifyContent: "flex-end" }}>
+          <Icon name="chevron-right" size={14} color={instrument.mut} />
+        </View>
+      ) : null}
     </PressableScale>
+  );
+}
+
+// This is the screen where consent is granted — the face is the whole point
+// of being able to tell who is asking before accepting (kora#454). At the
+// reflow threshold the accept/decline pair (44pt targets each, kora#446) drop
+// to their own row instead of sharing one with the name: two 44pt buttons is
+// 88pt of fixed width plus gaps, and that is exactly the sibling that was
+// squeezing the name to nothing (kora#452).
+function RequestRow({
+  request,
+  onAccept,
+  onDecline,
+}: {
+  request: FriendRequest;
+  onAccept: () => void;
+  onDecline: () => void;
+}) {
+  const { instrument, spacing } = useTheme();
+  const stacked = useStackedRows();
+  const name = displayName(request.user);
+  const controls = (
+    <>
+      <PressableScale
+        accessibilityRole="button"
+        accessibilityLabel={`Accept request from ${name}`}
+        haptic="selection"
+        onPress={onAccept}
+        style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}
+      >
+        <Icon name="check" size={18} color={instrument.accent} />
+      </PressableScale>
+      <PressableScale
+        accessibilityRole="button"
+        accessibilityLabel={`Decline request from ${name}`}
+        haptic="selection"
+        onPress={onDecline}
+        style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}
+      >
+        <Icon name="x" size={18} color={instrument.mut} />
+      </PressableScale>
+    </>
+  );
+  return (
+    <View style={{ gap: spacing.xs }}>
+      <View style={{ flexDirection: "row", alignItems: "center", minHeight: 44, paddingVertical: spacing.xs, gap: spacing.sm }}>
+        <Avatar initials={initials(request.user.display_name)} uri={request.user.avatar_url} size={30} />
+        <AppText style={{ flex: 1, fontSize: 15, color: instrument.ink }}>{name}</AppText>
+        {stacked ? null : controls}
+      </View>
+      {stacked ? (
+        <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: spacing.sm }}>{controls}</View>
+      ) : null}
+    </View>
   );
 }
 
@@ -205,44 +298,19 @@ export default function Social() {
             ) : (
               <GlassPanel radius={22}>
                 <View style={{ paddingHorizontal: spacing.md }}>
-                  {incoming.slice(0, REQUEST_PREVIEW).map((req) => {
-                    const reqName = displayName(req.user);
-                    return (
+                  {/* 44pt targets. The equivalent controls on the standalone
+                      Friends screen are 32pt, below the floor — not carried
+                      over here. */}
+                  {incoming.slice(0, REQUEST_PREVIEW).map((req) => (
                     <View key={req.id}>
-                      <View style={{ flexDirection: "row", alignItems: "center", minHeight: 44, paddingVertical: spacing.xs, gap: spacing.sm }}>
-                        {/* This is the screen where consent is granted — the
-                            face is the whole point of being able to tell who
-                            is asking before accepting (kora#454). */}
-                        <Avatar initials={initials(req.user.display_name)} uri={req.user.avatar_url} size={30} />
-                        <AppText style={{ flex: 1, fontSize: 15, color: instrument.ink }}>
-                          {reqName}
-                        </AppText>
-                        {/* 44pt targets. The equivalent controls on the
-                            standalone Friends screen are 32pt, below the
-                            floor — not carried over here. */}
-                        <PressableScale
-                          accessibilityRole="button"
-                          accessibilityLabel={`Accept request from ${reqName}`}
-                          haptic="selection"
-                          onPress={() => accept.mutate(req.id, surfaceError)}
-                          style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}
-                        >
-                          <Icon name="check" size={18} color={instrument.accent} />
-                        </PressableScale>
-                        <PressableScale
-                          accessibilityRole="button"
-                          accessibilityLabel={`Decline request from ${reqName}`}
-                          haptic="selection"
-                          onPress={() => decline.mutate(req.id, surfaceError)}
-                          style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}
-                        >
-                          <Icon name="x" size={18} color={instrument.mut} />
-                        </PressableScale>
-                      </View>
+                      <RequestRow
+                        request={req}
+                        onAccept={() => accept.mutate(req.id, surfaceError)}
+                        onDecline={() => decline.mutate(req.id, surfaceError)}
+                      />
                       <Hairline />
                     </View>
-                    );
-                  })}
+                  ))}
                   {incoming.length > REQUEST_PREVIEW ? (
                     <OverflowRow
                       label={`+${incoming.length - REQUEST_PREVIEW} more requests`}
