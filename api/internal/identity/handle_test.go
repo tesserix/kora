@@ -83,7 +83,8 @@ func TestErrorsAreDistinct(t *testing.T) {
 }
 
 func TestCanonical_EveryReservedNameIsRefused(t *testing.T) {
-	for _, name := range []string{"kora", "admin", "support", "help", "team"} {
+	require.NotEmpty(t, reservedNames, "the reserved list must not be empty")
+	for _, name := range reservedNames {
 		t.Run(name, func(t *testing.T) {
 			_, _, err := Canonical(name)
 			require.ErrorIs(t, err, ErrHandleReserved)
