@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
+	"github.com/tesserix/kora/api/internal/access"
 	"github.com/tesserix/kora/api/internal/admin"
 	"github.com/tesserix/kora/api/internal/agents"
 	"github.com/tesserix/kora/api/internal/ai"
@@ -38,6 +39,7 @@ import (
 	"github.com/tesserix/kora/api/internal/recipes"
 	"github.com/tesserix/kora/api/internal/resolve"
 	"github.com/tesserix/kora/api/internal/savedmeals"
+	"github.com/tesserix/kora/api/internal/share"
 	"github.com/tesserix/kora/api/internal/social"
 	"github.com/tesserix/kora/api/internal/tracking"
 	"github.com/tesserix/kora/api/internal/user"
@@ -175,7 +177,6 @@ func NewRouter(deps Deps) *gin.Engine {
 			r.POST("/webhooks/cashfree", purchases.Webhook)
 		}
 		v1.GET("/me", userHandler.Me)
-		v1.PATCH("/me/share-progress", userHandler.UpdateShareProgress)
 		v1.PATCH("/me", userHandler.UpdateProfile)
 		// Mounted unconditionally, unlike the Apple exchange below: Apple
 		// requires in-app account deletion, so this route must never be
@@ -350,7 +351,18 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.DELETE("/friends/:userId", socialHandler.Unfriend)
 		v1.GET("/friends/code", socialHandler.Code)
 
-		compareHandler := compare.NewHandler(compare.NewService(socialRepo, userRepo, logRepo))
+		shareHandler := share.NewHandler(share.NewService(share.NewRepository(deps.DB), socialRepo))
+		v1.GET("/share/circles", shareHandler.List)
+		v1.POST("/share/circles", shareHandler.Create)
+		v1.DELETE("/share/circles/:id", shareHandler.Delete)
+		v1.POST("/share/circles/:id/members", shareHandler.AddMember)
+		v1.DELETE("/share/circles/:id/members/:userId", shareHandler.RemoveMember)
+		v1.PUT("/share/circles/:id/categories", shareHandler.SetCategories)
+		v1.POST("/share/circles/:id/leave", shareHandler.Leave)
+
+		accessSvc := access.NewService(access.NewRepository(deps.DB))
+
+		compareHandler := compare.NewHandler(compare.NewService(socialRepo, userRepo, logRepo), accessSvc)
 		v1.GET("/friends/progress", compareHandler.Get)
 
 		dashSvc := dashboard.NewService(logRepo, trackingRepo, deps.DB)
@@ -359,7 +371,7 @@ func NewRouter(deps Deps) *gin.Engine {
 
 		groupsRepo := groups.NewRepository(deps.DB)
 		groupsSvc := groups.NewService(groupsRepo, socialRepo, groups.NewCode).WithNotifier(notificationsSvc)
-		groupsHandler := groups.NewHandler(groupsSvc, groupsRepo, compare.NewService(socialRepo, userRepo, logRepo))
+		groupsHandler := groups.NewHandler(groupsSvc, groupsRepo, compare.NewService(socialRepo, userRepo, logRepo), accessSvc)
 		v1.POST("/groups", groupsHandler.Create)
 		v1.GET("/groups", groupsHandler.List)
 		v1.POST("/groups/join", groupsHandler.Join)

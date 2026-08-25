@@ -8,7 +8,6 @@ import { AppBackground } from "@/components/AppBackground";
 import { Icon } from "@/components/Icon";
 import { Avatar } from "@/components/Avatar";
 import { GroupedSection, Row } from "@/components/GroupedList";
-import { ToggleSwitch } from "@/components/ToggleSwitch";
 import { AddFriendSheet } from "@/components/social/AddFriendSheet";
 import { FriendsLeaderboard } from "@/components/social/FriendsLeaderboard";
 import { EmptyState } from "@/components/common/EmptyState";
@@ -20,8 +19,6 @@ import {
   useAcceptRequest,
   useDeclineRequest,
   useUnfriend,
-  useProfile,
-  useSetShareProgress,
   useFriendsProgress,
 } from "@/api/hooks";
 import { useToast } from "@/components/Toast";
@@ -40,8 +37,6 @@ export default function Friends() {
   const accept = useAcceptRequest();
   const decline = useDeclineRequest();
   const unfriend = useUnfriend();
-  const profile = useProfile();
-  const setShare = useSetShareProgress();
   const compare = useFriendsProgress();
   const toast = useToast();
 
@@ -50,8 +45,6 @@ export default function Friends() {
   // reads the same to the user — the action did not happen, and this is why.
   const surfaceError = { onError: (error: unknown) => toast.show({ message: apiErrorMessage(error) }) };
   const [addOpen, setAddOpen] = useState(false);
-
-  const shareOn = profile.data?.share_progress ?? false;
 
   const incoming = requests.data?.incoming ?? [];
   const list = friends.data ?? [];
@@ -73,20 +66,6 @@ export default function Friends() {
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
           <ScreenHeader overline="Your circle" title="Friends" onBack={() => safeBack("/(tabs)/more")} />
           <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>
-            <GroupedSection>
-              <Row
-                title="Share my progress"
-                subtitle="Friends can see your streak and on-target days."
-                right={
-                  <ToggleSwitch
-                    accessibilityLabel="Share my progress"
-                    value={shareOn}
-                    onValueChange={(v) => setShare.mutate(v, surfaceError)}
-                  />
-                }
-              />
-            </GroupedSection>
-
             <PressableScale
               accessibilityRole="button"
               accessibilityLabel="Add a friend"

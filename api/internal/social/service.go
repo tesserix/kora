@@ -142,7 +142,12 @@ func (s Service) Unfriend(ctx context.Context, userID, otherID uuid.UUID) error 
 	if f == nil || f.Status != FriendStatusAccepted {
 		return ErrNotFound
 	}
-	return s.repo.Delete(ctx, f.ID)
+	// Unfriending must also revoke circle membership in both directions --
+	// otherwise a share_circle_members row outlives the friendship it was
+	// predicated on, and cross-user reads (e.g. groups.Progress) keep
+	// leaking data through the group path even though the friends path is
+	// safe (kora#326 whole-branch review, F2).
+	return s.repo.DeleteAndRevokeCircles(ctx, f.ID, userID, otherID)
 }
 
 func (s Service) ListFriends(ctx context.Context, userID uuid.UUID) ([]FriendView, error) {

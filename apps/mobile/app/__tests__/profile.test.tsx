@@ -24,7 +24,6 @@ jest.mock("@/api/hooks", () => ({
       target_fat_g: 55,
       onboarded_at: "2025-03-14T00:00:00.000Z",
       weight_kg: 68.4,
-      share_progress: false,
     },
   }),
 }));

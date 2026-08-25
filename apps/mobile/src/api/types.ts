@@ -19,7 +19,6 @@ export type Profile = {
    * src/lib/bodyComposition.ts.
    */
   height_cm: number;
-  share_progress: boolean;
 };
 
 export interface AIQuotaWindow {

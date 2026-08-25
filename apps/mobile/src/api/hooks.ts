@@ -1413,18 +1413,6 @@ export function useFriendsProgress() {
   });
 }
 
-export function useSetShareProgress() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (share_progress: boolean) =>
-      apiFetch("/v1/me/share-progress", { method: "PATCH", body: JSON.stringify({ share_progress }) }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["profile"] });
-      qc.invalidateQueries({ queryKey: ["friends-progress"] });
-    },
-  });
-}
-
 // Plain function, not a hook: it is called from the sign-in flow, outside any
 // component that could hold a mutation.
 export function setDisplayName(display_name: string): Promise<unknown> {

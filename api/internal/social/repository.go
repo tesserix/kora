@@ -121,6 +121,34 @@ func (r Repository) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+// DeleteAndRevokeCircles deletes the friendship row AND, in the same
+// transaction, drops both parties' share_circle_members rows in each
+// other's circles.
+//
+// Circle membership is friendship-predicated at write time (share.Service
+// only allows adding a friend), so it must not outlive the friendship: this
+// is the only place that enforces that invariant. `social` reaching into
+// share_circle_members by raw SQL instead of going through share.Repository
+// is a deliberate, narrow coupling -- the alternative (access.Repository
+// joining friendships on every progress/body read) would make the read path,
+// which runs far more often than an unfriend, pay for a check that only
+// matters at write time. Revocation belongs at the edge that breaks it.
+func (r Repository) DeleteAndRevokeCircles(ctx context.Context, friendshipID, a, b uuid.UUID) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Delete(&Friendship{}, "id = ?", friendshipID).Error; err != nil {
+			return fmt.Errorf("social: delete: %w", err)
+		}
+		if err := tx.Exec(`
+			DELETE FROM share_circle_members
+			WHERE (member_user_id = ? AND circle_id IN (SELECT id FROM share_circles WHERE owner_id = ?))
+			   OR (member_user_id = ? AND circle_id IN (SELECT id FROM share_circles WHERE owner_id = ?))
+		`, b, a, a, b).Error; err != nil {
+			return fmt.Errorf("social: revoke circle membership: %w", err)
+		}
+		return nil
+	})
+}
+
 // AreFriends reports whether a and b have an accepted friendship.
 func (r Repository) AreFriends(ctx context.Context, a, b uuid.UUID) (bool, error) {
 	f, err := r.FindByPair(ctx, a, b)
@@ -131,19 +159,19 @@ func (r Repository) AreFriends(ctx context.Context, a, b uuid.UUID) (bool, error
 }
 
 // CompareRow is an accepted friend plus the fields needed to compute their
-// shared progress (share_progress gates whether metrics are computed at all).
+// metrics. Whether those metrics may be shown is decided by a resolved
+// access.Grant, not by any field on this row (kora#326).
 type CompareRow struct {
-	ID            uuid.UUID
-	DisplayName   string
-	ShareProgress bool
-	TargetKcal    float64
+	ID          uuid.UUID
+	DisplayName string
+	TargetKcal  float64
 }
 
 func (r Repository) ListAcceptedForCompare(ctx context.Context, userID uuid.UUID) ([]CompareRow, error) {
 	rows := []CompareRow{}
 	err := r.db.WithContext(ctx).
 		Table("friendships AS f").
-		Select("u.id AS id, u.display_name AS display_name, u.share_progress AS share_progress, u.target_kcal AS target_kcal").
+		Select("u.id AS id, u.display_name AS display_name, u.target_kcal AS target_kcal").
 		Joins("JOIN users u ON u.id = CASE WHEN f.requester_id = ? THEN f.addressee_id ELSE f.requester_id END", userID).
 		Where("f.status = ? AND (f.requester_id = ? OR f.addressee_id = ?)", FriendStatusAccepted, userID, userID).
 		Order("u.display_name ASC").
