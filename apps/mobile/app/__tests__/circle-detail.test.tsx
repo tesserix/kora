@@ -55,7 +55,11 @@ test("progress toggles straight through, with no confirmation", async () => {
 });
 
 test("granting body asks first, and does not grant until confirmed", async () => {
-  const { getByLabelText, getByTestId } = await render(<CircleDetail />);
+  const { getByLabelText, getByTestId, queryByTestId } = await render(<CircleDetail />);
+  // Absent BEFORE the toggle is touched. Without this the assertions below
+  // pass against a sheet that is permanently visible, which is exactly the
+  // mutation that slipped through first time.
+  expect(queryByTestId("body-confirm-names")).toBeNull();
   await fireEvent(getByLabelText("Share Body metrics"), "valueChange", true);
   expect(mockSetCategories).not.toHaveBeenCalled();
   expect(getByTestId("body-confirm-names")).toBeTruthy();
@@ -103,6 +107,26 @@ test("granting body on an empty circle needs no confirmation but still grants", 
   const { getByLabelText } = await render(<CircleDetail />);
   await fireEvent(getByLabelText("Share Body metrics"), "valueChange", true);
   expect(mockSetCategories).toHaveBeenCalledWith({ circleId: "c1", categories: ["body"] }, withOnError);
+});
+
+// The false-claim fix (kora#443): the empty add-picker must say WHY it is
+// empty. Telling someone with no friends that everyone they know is already
+// in the circle is simply untrue.
+test("with no friends at all, the picker says so rather than claiming everyone is already in", async () => {
+  mockFriends = [];
+  mockCircles = [{ id: "c1", name: "Household", members: [], categories: [] }];
+  const { getByLabelText, getByText, queryByText } = await render(<CircleDetail />);
+  await fireEvent.press(getByLabelText("Add someone"));
+  expect(getByText(/don't have any friends yet/i)).toBeTruthy();
+  expect(queryByText(/already in this circle/i)).toBeNull();
+});
+
+test("with friends who are all members, the picker says everyone is already in", async () => {
+  mockFriends = [ada];
+  mockCircles = [{ id: "c1", name: "Household", members: [ada], categories: [] }];
+  const { getByLabelText, getByText } = await render(<CircleDetail />);
+  await fireEvent.press(getByLabelText("Add someone"));
+  expect(getByText(/already in this circle/i)).toBeTruthy();
 });
 
 test("only friends who are not already members can be added", async () => {

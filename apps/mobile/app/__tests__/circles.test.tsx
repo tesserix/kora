@@ -1,6 +1,6 @@
 import { render, fireEvent } from "@testing-library/react-native";
 
-import Sharing from "../sharing";
+import Circles from "../circles";
 
 const mockPush = jest.fn();
 const mockCreate = jest.fn();
@@ -34,42 +34,23 @@ const OFFLINE = Object.assign(new Error("down"), { name: "NetworkError" });
 const OFFLINE_COPY = "Couldn't reach Kora. Check your connection.";
 const withOnError = expect.objectContaining({ onError: expect.any(Function) });
 
-test("the audit answers who can see each category, by count", async () => {
-  const { getByTestId } = await render(<Sharing />);
-  // Ada and Ben are both in a body-granting circle; Ben is in two circles
-  // that grant progress and must still be counted once.
-  expect(getByTestId("audit-count-body")).toHaveTextContent("2");
-  expect(getByTestId("audit-count-progress")).toHaveTextContent("2");
-});
 
-test("the audit names the people, not just the number", async () => {
-  const { getByTestId } = await render(<Sharing />);
-  expect(getByTestId("audit-names-body")).toHaveTextContent(/Ada/);
-  expect(getByTestId("audit-names-body")).toHaveTextContent(/Ben/);
-});
 
-// "Nobody" is a meaningfully different answer from a count of zero people,
-// and it is the answer most users should see most of the time.
-test("a category no circle grants reads as nobody", async () => {
-  mockCircles = [{ id: "c1", name: "Household", members: [ada], categories: ["progress"] }];
-  const { getByTestId } = await render(<Sharing />);
-  expect(getByTestId("audit-names-body")).toHaveTextContent("Nobody");
-});
 
 test("circles are listed with their member counts", async () => {
-  const { getByText } = await render(<Sharing />);
+  const { getByText } = await render(<Circles />);
   expect(getByText("Household")).toBeTruthy();
   expect(getByText("Running club")).toBeTruthy();
 });
 
 test("tapping a circle opens it", async () => {
-  const { getByLabelText } = await render(<Sharing />);
+  const { getByLabelText } = await render(<Circles />);
   await fireEvent.press(getByLabelText("Open circle Household"));
   expect(mockPush).toHaveBeenCalledWith("/circle/c1");
 });
 
 test("a new circle is created by name", async () => {
-  const { getByLabelText, getByPlaceholderText } = await render(<Sharing />);
+  const { getByLabelText, getByPlaceholderText } = await render(<Circles />);
   await fireEvent.press(getByLabelText("New circle"));
   await fireEvent.changeText(getByPlaceholderText("Circle name"), "Gym");
   await fireEvent.press(getByLabelText("Create circle"));
@@ -77,7 +58,7 @@ test("a new circle is created by name", async () => {
 });
 
 test("a failed create tells the user why", async () => {
-  const { getByLabelText, getByPlaceholderText } = await render(<Sharing />);
+  const { getByLabelText, getByPlaceholderText } = await render(<Circles />);
   await fireEvent.press(getByLabelText("New circle"));
   await fireEvent.changeText(getByPlaceholderText("Circle name"), "Gym");
   await fireEvent.press(getByLabelText("Create circle"));
@@ -86,7 +67,7 @@ test("a failed create tells the user why", async () => {
 });
 
 test("a blank name does not create a circle", async () => {
-  const { getByLabelText, getByPlaceholderText } = await render(<Sharing />);
+  const { getByLabelText, getByPlaceholderText } = await render(<Circles />);
   await fireEvent.press(getByLabelText("New circle"));
   await fireEvent.changeText(getByPlaceholderText("Circle name"), "   ");
   await fireEvent.press(getByLabelText("Create circle"));
@@ -96,10 +77,10 @@ test("a blank name does not create a circle", async () => {
 // #174, the rule this screen inherits: an outage must never render as a claim
 // about the user's data. "You share with nobody" is a dangerously reassuring
 // thing to say when the truth is that we could not ask.
-test("a failed load replaces the audit rather than claiming nobody can see anything", async () => {
+test("a failed load says so rather than showing an empty circle list", async () => {
   mockCircles = [];
   mockCirclesState = { isError: true, isLoading: false };
-  const { queryByTestId, getByText } = await render(<Sharing />);
-  expect(queryByTestId("audit-names-body")).toBeNull();
+  const { getByText, queryByText } = await render(<Circles />);
   expect(getByText(/couldn't load/i)).toBeTruthy();
+  expect(queryByText("No circles yet")).toBeNull();
 });
