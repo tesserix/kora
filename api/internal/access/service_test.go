@@ -193,7 +193,7 @@ func TestResolveScopesTheGrantToTheCircleTheViewerBelongsTo(t *testing.T) {
 	require.ErrorIs(t, err, ErrNotShared)
 }
 
-func TestResolveManyWithNoOwnersDoesNotQuery(t *testing.T) {
+func TestResolveManyWithNoOwnersReturnsAnEmptyMap(t *testing.T) {
 	db := testDB(t)
 	svc := NewService(NewRepository(db))
 	viewer := seedUser(t, db, "viewer")

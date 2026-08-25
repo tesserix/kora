@@ -125,6 +125,24 @@ func TestSetCategoriesReplacesRatherThanAppends(t *testing.T) {
 	require.Equal(t, []access.Category{access.CategoryProgress}, views[0].Categories)
 }
 
+// TestSetCategoriesDedupesDuplicateCategories pins the fix for
+// {"categories":["progress","progress"]}: (circle_id, category) is the
+// share_grants primary key, so inserting an un-deduped list previously
+// tripped an unmapped 23505 unique violation -> 500.
+func TestSetCategoriesDedupesDuplicateCategories(t *testing.T) {
+	db := testDB(t)
+	repo := NewRepository(db)
+	owner := seedUser(t, db, "owner")
+	c, _ := repo.Create(context.Background(), owner, "Household")
+
+	err := repo.SetCategories(context.Background(), c.ID,
+		[]access.Category{access.CategoryProgress, access.CategoryProgress})
+	require.NoError(t, err)
+
+	views, _ := repo.ListForOwner(context.Background(), owner)
+	require.Equal(t, []access.Category{access.CategoryProgress}, views[0].Categories)
+}
+
 // Revoking everything must leave no grant behind -- the case a naive
 // "insert the new set" implementation gets wrong.
 func TestSetCategoriesToEmptyRevokesAll(t *testing.T) {

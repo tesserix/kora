@@ -110,11 +110,25 @@ func (r Repository) RemoveMember(ctx context.Context, circleID, memberID uuid.UU
 // revokes -- an implementation that only inserts the new set would leave a
 // revoked category granted, which is the worst direction for this bug to fail.
 func (r Repository) SetCategories(ctx context.Context, circleID uuid.UUID, cats []access.Category) error {
+	// Dedupe before inserting: (circle_id, category) is the share_grants
+	// primary key, so a caller-supplied duplicate (e.g.
+	// {"categories":["progress","progress"]}) would otherwise trip an
+	// unmapped 23505 -> 500 instead of just collapsing harmlessly.
+	seen := make(map[access.Category]struct{}, len(cats))
+	deduped := make([]access.Category, 0, len(cats))
+	for _, c := range cats {
+		if _, ok := seen[c]; ok {
+			continue
+		}
+		seen[c] = struct{}{}
+		deduped = append(deduped, c)
+	}
+
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Exec(`DELETE FROM share_grants WHERE circle_id = ?`, circleID).Error; err != nil {
 			return fmt.Errorf("share: clear grants: %w", err)
 		}
-		for _, c := range cats {
+		for _, c := range deduped {
 			if err := tx.Exec(`INSERT INTO share_grants (circle_id, category) VALUES (?, ?)`,
 				circleID, string(c)).Error; err != nil {
 				return fmt.Errorf("share: insert grant: %w", err)

@@ -3,6 +3,8 @@ package share
 import (
 	"context"
 	"fmt"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -36,7 +38,13 @@ func NewService(repo Repository, friends friendSource) Service {
 }
 
 func (s Service) Create(ctx context.Context, ownerID uuid.UUID, name string) (Circle, error) {
-	if len(name) == 0 || len(name) > 60 {
+	// Trim BEFORE measuring, and measure runes rather than bytes: the
+	// repository trims too (backing share_circles_name_not_blank), so a
+	// name that is only whitespace must fail validation here rather than
+	// passing it, trimming to empty, and tripping the DB's CHECK constraint
+	// as an unmapped 23514 -> 500.
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" || utf8.RuneCountInString(trimmed) > 60 {
 		return Circle{}, httpx.ValidationError{Message: "Circle name must be 1-60 characters."}
 	}
 	return s.repo.Create(ctx, ownerID, name)

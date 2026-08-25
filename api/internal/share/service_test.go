@@ -63,6 +63,22 @@ func TestMutationsRefuseANonOwner(t *testing.T) {
 	require.ErrorIs(t, svc.Delete(context.Background(), attacker, victimCircle.ID), ErrNotOwner)
 }
 
+// TestCreateRejectsAWhitespaceOnlyName pins the fix for a name that is only
+// whitespace: len(name) measures bytes and previously ran BEFORE the
+// repository's strings.TrimSpace, so "   " passed validation, trimmed to "",
+// and tripped share_circles_name_not_blank as an unmapped 23514 -> 500.
+// Validation must trim first, so this is rejected as a 400 here instead.
+func TestCreateRejectsAWhitespaceOnlyName(t *testing.T) {
+	db := testDB(t)
+	repo := NewRepository(db)
+	svc := NewService(repo, stubFriends{areFriends: true})
+	owner := seedUser(t, db, "owner")
+
+	_, err := svc.Create(context.Background(), owner, "   ")
+	var valErr httpx.ValidationError
+	require.ErrorAs(t, err, &valErr)
+}
+
 func TestSetCategoriesRefusesAnUnknownCategory(t *testing.T) {
 	db := testDB(t)
 	repo := NewRepository(db)
