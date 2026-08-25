@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ScrollView, TextInput, View } from "react-native";
+import { ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
@@ -8,10 +8,12 @@ import { AppText } from "@/components/Text";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { AppBackground } from "@/components/AppBackground";
 import { GlassPanel } from "@/components/instrument/GlassPanel";
+import { BezelCluster } from "@/components/instrument/BezelCluster";
 import { engravedStyle, monoStyle } from "@/components/instrument/typography";
 import { GroupedSection, Row } from "@/components/GroupedList";
 import { Avatar } from "@/components/Avatar";
 import { Button } from "@/components/Button";
+import { PressableScale } from "@/motion";
 import { useClearHandle, useDeleteAvatar, useMyHandle, useProfile, useSetHandle, useUploadAvatar } from "@/api/hooks";
 import { buildCaptureForm } from "@/api/resolveWire";
 import type { Profile } from "@/api/types";
@@ -46,6 +48,13 @@ function initials(name: string): string {
     .join("")
     .slice(0, 2)
     .toUpperCase();
+}
+
+// A blank display_name is a real server state (kora#449), not a bug — never
+// render the empty line that `data.display_name` alone would leave where a
+// name belongs.
+function displayNameFor(name: string): string {
+  return name.trim().length > 0 ? name : "Kora member";
 }
 
 function humanizeGoal(goal: string | undefined): string {
@@ -162,49 +171,93 @@ export default function ProfileScreen() {
       >
         <ScreenHeader overline="Your account" title="Profile" onBack={() => safeBack("/(tabs)/more")} />
         <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>
-          <GlassPanel radius={24} style={{ alignItems: "center", paddingVertical: spacing.lg }}>
-            <Avatar initials={data ? initials(data.display_name) : "—"} uri={data?.avatar_url} size={72} />
-            <AppText style={{ fontSize: 22, fontWeight: "700", color: instrument.ink, marginTop: spacing.sm }}>
-              {data ? data.display_name : "Loading…"}
-            </AppText>
-            <AppText style={{ fontSize: 14, color: instrument.mut, marginTop: spacing.xs, textAlign: "center" }}>
-              {data ? data.email : "—"}
-            </AppText>
-            <View style={{ flexDirection: "row", gap: spacing.sm, marginTop: spacing.md }}>
-              <Button
-                title="Change picture"
-                variant="ghost"
-                onPress={pickPicture}
-                disabled={uploadAvatar.isPending}
-              />
-              {data?.avatar_url ? (
-                <Button
-                  title="Remove picture"
-                  variant="ghost"
-                  onPress={onRemovePicture}
-                  disabled={deleteAvatar.isPending}
-                />
-              ) : null}
-            </View>
-            {pictureErr ? (
-              <AppText
-                accessibilityRole="alert"
-                style={{ color: instrument.danger, fontSize: 13, marginTop: spacing.xs, textAlign: "center" }}
-              >
-                {pictureErr}
-              </AppText>
-            ) : null}
-          </GlassPanel>
+          {/* Identity hero: one bezel cluster carries avatar, name, handle and
+              email together (spec: More "bezel identity hero (56px avatar
+              well + name + mono email)"). The screen's one accent moment is
+              the whisper of orange lume behind the avatar well below — every
+              other affordance here (change/remove picture, save/remove
+              handle) is demoted to lit-ink or danger, never accent, so it
+              doesn't compete with that one moment. */}
+          <BezelCluster radius={25} testID="profile-identity-hero">
+            <View style={{ padding: spacing.md }}>
+              <View style={{ flexDirection: "row", alignItems: "center" }}>
+                <View
+                  style={{
+                    borderRadius: 999,
+                    shadowColor: instrument.accent,
+                    shadowOpacity: 0.35,
+                    shadowRadius: 20,
+                    shadowOffset: { width: 0, height: 0 },
+                  }}
+                >
+                  <Avatar initials={data ? initials(data.display_name) : "—"} uri={data?.avatar_url} size={56} />
+                </View>
+                <View style={{ flex: 1, marginLeft: spacing.md }}>
+                  <AppText
+                    numberOfLines={1}
+                    style={{ fontSize: 18, fontWeight: "700", color: instrument.ink }}
+                  >
+                    {data ? displayNameFor(data.display_name) : "Loading…"}
+                  </AppText>
+                  {myHandle.data?.handle ? (
+                    <AppText numberOfLines={1} style={[{ fontSize: 13, color: instrument.mut, marginTop: 1 }, mono]}>
+                      {`@${myHandle.data.handle}`}
+                    </AppText>
+                  ) : null}
+                  <AppText numberOfLines={1} style={[{ fontSize: 13, color: instrument.mut, marginTop: 1 }, mono]}>
+                    {data ? data.email : "—"}
+                  </AppText>
+                </View>
+              </View>
 
-          <View>
-            <AppText style={[engravedStyle(instrument), { marginLeft: spacing.md, marginBottom: spacing.xs }]}>
-              Handle
-            </AppText>
-            <GroupedSection>
-              <View style={{ paddingHorizontal: spacing.md, paddingVertical: spacing.sm, gap: spacing.sm }}>
-                <AppText style={{ fontSize: 13, color: instrument.mut }}>
-                  {myHandle.data?.handle ? "Your handle" : "Pick a handle"}
+              {/* Compact picture affordances — text links, not full-width
+                  ghost buttons, so this stays a single line instead of its
+                  own stacked row. hitSlop keeps the tap target at 44pt even
+                  though the visible label is smaller (spec: touch targets). */}
+              <View style={{ flexDirection: "row", gap: spacing.lg, marginTop: spacing.sm }}>
+                <PressableScale
+                  accessibilityRole="button"
+                  hitSlop={10}
+                  haptic="none"
+                  onPress={pickPicture}
+                  disabled={uploadAvatar.isPending}
+                >
+                  <AppText style={{ fontSize: 13, fontWeight: "600", color: instrument.ink }}>
+                    Change picture
+                  </AppText>
+                </PressableScale>
+                {data?.avatar_url ? (
+                  <PressableScale
+                    accessibilityRole="button"
+                    hitSlop={10}
+                    haptic="none"
+                    onPress={onRemovePicture}
+                    disabled={deleteAvatar.isPending}
+                  >
+                    <AppText style={{ fontSize: 13, fontWeight: "600", color: instrument.danger }}>
+                      Remove picture
+                    </AppText>
+                  </PressableScale>
+                ) : null}
+              </View>
+              {pictureErr ? (
+                <AppText accessibilityRole="alert" style={{ color: instrument.danger, fontSize: 13, marginTop: spacing.xs }}>
+                  {pictureErr}
                 </AppText>
+              ) : null}
+
+              <View
+                style={{
+                  height: StyleSheet.hairlineWidth,
+                  backgroundColor: instrument.hairline,
+                  marginVertical: spacing.md,
+                }}
+              />
+
+              <AppText style={{ fontSize: 13, color: instrument.mut, marginBottom: spacing.xs }}>
+                {myHandle.data?.handle ? "Your handle" : "Pick a handle"}
+              </AppText>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
                 <TextInput
                   value={handleInput}
                   onChangeText={(t) => {
@@ -217,6 +270,7 @@ export default function ProfileScreen() {
                   placeholderTextColor={instrument.mut}
                   accessibilityLabel="Handle"
                   style={{
+                    flex: 1,
                     fontSize: 16,
                     color: instrument.ink,
                     backgroundColor: instrument.inset,
@@ -225,22 +279,32 @@ export default function ProfileScreen() {
                     paddingVertical: 10,
                   }}
                 />
-                {handleErr ? (
-                  <AppText accessibilityRole="alert" style={{ color: instrument.danger, fontSize: 13 }}>
-                    {handleErr}
-                  </AppText>
-                ) : null}
                 <Button
                   title="Save handle"
                   onPress={onSaveHandle}
                   disabled={setHandle.isPending || handleInput.trim().length === 0}
                 />
               </View>
-              {myHandle.data?.handle ? (
-                <Row title="Remove handle" destructive onPress={onRemoveHandle} />
+              {handleErr ? (
+                <AppText accessibilityRole="alert" style={{ color: instrument.danger, fontSize: 13, marginTop: spacing.xs }}>
+                  {handleErr}
+                </AppText>
               ) : null}
-            </GroupedSection>
-          </View>
+              {myHandle.data?.handle ? (
+                <PressableScale
+                  accessibilityRole="button"
+                  hitSlop={10}
+                  haptic="none"
+                  onPress={onRemoveHandle}
+                  style={{ marginTop: spacing.sm, alignSelf: "flex-start" }}
+                >
+                  <AppText style={{ fontSize: 13, fontWeight: "600", color: instrument.danger }}>
+                    Remove handle
+                  </AppText>
+                </PressableScale>
+              ) : null}
+            </View>
+          </BezelCluster>
 
           <View>
             <AppText style={[engravedStyle(instrument), { marginLeft: spacing.md, marginBottom: spacing.xs }]}>
