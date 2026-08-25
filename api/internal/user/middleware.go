@@ -49,6 +49,11 @@ func IDFromContext(c *gin.Context) (uuid.UUID, bool) {
 	return id, ok
 }
 
+// SetIDForTest puts a user id on the context the same way the auth middleware
+// does. Exported only so packages that sit BEHIND auth can test their own
+// middleware without a Firebase token.
+func SetIDForTest(c *gin.Context, id uuid.UUID) { c.Set(contextUserID, id) }
+
 // LocFromContext reads the *time.Location resolved by ResolveMiddleware
 // earlier in the request chain, falling back to UTC if unset or invalid.
 func LocFromContext(c *gin.Context) *time.Location {
