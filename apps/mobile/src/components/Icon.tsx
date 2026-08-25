@@ -5,7 +5,7 @@ import {
   Utensils, TrendingDown, TrendingUp, Minus, Check, ArrowRight, ArrowLeft, Trash2,
   Drumstick, Leaf, Wheat, Egg, Fish, Apple, Coffee, Soup, Salad, Circle,
   X, Images, ScanBarcode, Type, Loader, Barcode, ArrowUp, Repeat, Users, Bell,
-  Search, Trophy, Heart, Star, Bookmark, Sparkles, Keyboard, Footprints, Moon,
+  Search, Trophy, Heart, Star, Bookmark, Sparkles, Keyboard, Footprints, Moon, Eye,
   type LucideIcon,
 } from "lucide-react-native";
 
@@ -25,6 +25,7 @@ const SYMBOLS: Record<string, SFSymbol> = {
   "star": "star", "star-fill": "star.fill",
   "bookmark": "bookmark", "bookmark-fill": "bookmark.fill",
   sparkles: "sparkles", footprints: "shoeprints.fill", moon: "moon.fill",
+  eye: "eye.fill",
 };
 
 const MAP: Record<string, LucideIcon> = {
@@ -39,7 +40,7 @@ const MAP: Record<string, LucideIcon> = {
   search: Search, people: Users, trophy: Trophy, heart: Heart,
   "star": Star, "star-fill": Star,
   "bookmark": Bookmark, "bookmark-fill": Bookmark,
-  sparkles: Sparkles, footprints: Footprints, moon: Moon,
+  sparkles: Sparkles, footprints: Footprints, moon: Moon, eye: Eye,
 };
 
 type Props = { name: string; size?: number; color: string; strokeWidth?: number };

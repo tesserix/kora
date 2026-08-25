@@ -30,7 +30,7 @@ import { TAB_BAR_SCROLL_INSET } from "@/components/FloatingTabBar";
 // near-identically — MoreRow is kept as-is rather than migrated to avoid
 // churn on an already-shipped screen. The unread-count Badge is the one
 // accent element this screen is allowed.
-type MoreRowKey = "profile" | "mentor" | "friends" | "groups" | "notifications" | "recipes" | "ai-usage" | "settings" | "feedback" | "about";
+type MoreRowKey = "profile" | "mentor" | "friends" | "sharing" | "groups" | "notifications" | "recipes" | "ai-usage" | "settings" | "feedback" | "about";
 
 type MoreRowProps = {
   rowKey: MoreRowKey;
@@ -175,6 +175,15 @@ export default function More() {
             title="Friends"
             icon="users"
             onPress={() => router.push("/friends" as Href)}
+          />
+          {/* Sharing sits beside Friends deliberately: circles are built out
+              of friends, and "who can see my data" is a question people go
+              looking for next to the people it is about (kora#437). */}
+          <MoreRow
+            rowKey="sharing"
+            title="Sharing"
+            icon="eye"
+            onPress={() => router.push("/sharing" as Href)}
           />
           <MoreRow
             rowKey="groups"

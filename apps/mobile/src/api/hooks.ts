@@ -52,6 +52,7 @@ import type {
   FastingInterval,
   FeedbackCreated,
   FoodItem,
+  Circle,
   Friend,
   FriendRequests,
   FriendsProgress,
@@ -75,6 +76,7 @@ import type {
   MentorProfileInput,
   MentorProposalAcceptance,
   MyFriendCode,
+  ShareCategory,
   OnboardingInput,
   LogRecipeResult,
   PinnedFood,
@@ -1404,6 +1406,56 @@ export function useMyFriendCode() {
     queryKey: ["friend-code"],
     queryFn: () => apiFetch("/v1/friends/code") as Promise<MyFriendCode>,
   });
+}
+
+// Sharing circles (kora#326/#437). Every mutation invalidates ["circles"]:
+// the audit view is computed from that one response, so a stale cache after a
+// category change would show someone the wrong answer to "who can see my body
+// metrics" — the one question this surface exists to answer truthfully.
+export function useCircles() {
+  return useQuery({
+    queryKey: ["circles"],
+    queryFn: () => apiFetch("/v1/share/circles") as Promise<Circle[]>,
+  });
+}
+
+function useCircleMutation<V>(fn: (vars: V) => Promise<unknown>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["circles"] }),
+  });
+}
+
+export function useCreateCircle() {
+  return useCircleMutation((name: string) =>
+    apiFetch("/v1/share/circles", { method: "POST", body: JSON.stringify({ name }) }),
+  );
+}
+
+export function useDeleteCircle() {
+  return useCircleMutation((id: string) => apiFetch(`/v1/share/circles/${id}`, { method: "DELETE" }));
+}
+
+export function useAddCircleMember() {
+  return useCircleMutation(({ circleId, userId }: { circleId: string; userId: string }) =>
+    apiFetch(`/v1/share/circles/${circleId}/members`, { method: "POST", body: JSON.stringify({ user_id: userId }) }),
+  );
+}
+
+export function useRemoveCircleMember() {
+  return useCircleMutation(({ circleId, userId }: { circleId: string; userId: string }) =>
+    apiFetch(`/v1/share/circles/${circleId}/members/${userId}`, { method: "DELETE" }),
+  );
+}
+
+export function useSetCircleCategories() {
+  return useCircleMutation(({ circleId, categories }: { circleId: string; categories: ShareCategory[] }) =>
+    apiFetch(`/v1/share/circles/${circleId}/categories`, {
+      method: "PUT",
+      body: JSON.stringify({ categories }),
+    }),
+  );
 }
 
 export function useFriendsProgress() {

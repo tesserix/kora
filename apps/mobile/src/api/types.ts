@@ -805,6 +805,25 @@ export interface MyFriendCode {
   link: string;
 }
 
+// Sharing circles (kora#326/#437). ShareCategory mirrors the server's
+// access.Category allow-list and the share_grants_category_check constraint;
+// a value outside it can never be granted, so the union is the whole set.
+export type ShareCategory = "progress" | "body";
+
+// CircleMember never carries an email — same projection rule as Friend and
+// the server's share.MemberView.
+export interface CircleMember {
+  id: string;
+  display_name: string;
+}
+
+export interface Circle {
+  id: string;
+  name: string;
+  members: CircleMember[];
+  categories: ShareCategory[];
+}
+
 export interface ProgressView {
   streak_days: number;
   adherence_days: number;
