@@ -375,10 +375,12 @@ func NewRouter(deps Deps) *gin.Engine {
 		// Handles (kora#449). Exact match only: there is no listing or prefix
 		// route here, and adding one would make the user base enumerable.
 		identityHandler := identity.NewHandler(
-			identity.NewService(identity.NewRepository(deps.DB), func(string) string { return "" }))
+			identity.NewServiceWithAssets(identity.NewRepository(deps.DB), assetsStore(deps.Assets)))
 		v1.GET("/me/handle", identityHandler.GetHandle)
 		v1.PUT("/me/handle", identityHandler.SetHandle)
 		v1.DELETE("/me/handle", identityHandler.ClearHandle)
+		v1.PUT("/me/avatar", identityHandler.SetAvatar)
+		v1.DELETE("/me/avatar", identityHandler.ClearAvatar)
 		// The limiter is on LOOKUP only, and it is not an optimisation: it is
 		// the only thing between exact-match lookup and offline enumeration.
 		v1.GET("/users/lookup",

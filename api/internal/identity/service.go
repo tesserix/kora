@@ -2,9 +2,13 @@ package identity
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 
 	"github.com/google/uuid"
+
+	"github.com/tesserix/kora/api/internal/assets"
+	"github.com/tesserix/kora/api/internal/imageproc"
 )
 
 // Service owns the handle lifecycle. avatarURL composes a public URL from the
@@ -14,10 +18,83 @@ import (
 type Service struct {
 	repo      Repository
 	avatarURL func(path string) string
+	store     assets.Store
 }
 
+// NewService takes a bare URL composer, for callers and tests that do not need
+// to write objects. Its store is assets.Noop{}, so SetAvatar succeeds and
+// produces no picture rather than panicking on a nil interface.
 func NewService(repo Repository, avatarURL func(path string) string) Service {
-	return Service{repo: repo, avatarURL: avatarURL}
+	return Service{repo: repo, avatarURL: avatarURL, store: assets.Noop{}}
+}
+
+// NewServiceWithAssets is the wiring the real API uses: one store supplies both
+// the writes and the URL composition, so the two can never disagree about where
+// an object lives.
+func NewServiceWithAssets(repo Repository, store assets.Store) Service {
+	if store == nil {
+		store = assets.Noop{}
+	}
+	return Service{repo: repo, avatarURL: store.URL, store: store}
+}
+
+// SetAvatar normalises data, stores it at a fresh path, points the user row at
+// it, and deletes whatever object it replaced.
+//
+// ORDER is load-bearing. The new object is written BEFORE the row is updated,
+// so a failure between them leaves an orphaned object (reaped by the bucket's
+// lifecycle rule) rather than a row pointing at nothing (a broken image in
+// every friend row that renders this person). The OLD object is deleted LAST,
+// and non-fatally: an upload that succeeded must not report failure because
+// cleanup of a superseded file did not.
+func (s Service) SetAvatar(ctx context.Context, userID uuid.UUID, data []byte) (string, error) {
+	normalised, err := imageproc.NormalizeAvatar(data)
+	if err != nil {
+		return "", err
+	}
+
+	me, err := s.repo.FindByID(ctx, userID)
+	if err != nil {
+		return "", err
+	}
+
+	path := assets.AvatarPath(userID)
+	if err := s.store.Put(ctx, path, normalised, "image/jpeg"); err != nil {
+		return "", err
+	}
+	if err := s.repo.SetAvatarPath(ctx, userID, path); err != nil {
+		return "", err
+	}
+	if me.AvatarPath != "" && me.AvatarPath != path {
+		if err := s.store.Delete(ctx, me.AvatarPath); err != nil {
+			slog.ErrorContext(ctx, "superseded avatar object survived; lifecycle rule will reap it",
+				"user_id", userID, "path", me.AvatarPath, "error", err)
+		}
+	}
+	return s.avatarURL(path), nil
+}
+
+// ClearAvatar removes the picture. The ROW is cleared first: if the object
+// delete then fails, the user's picture is gone from every surface, which is
+// what they asked for, and an unreferenced object is reaped by lifecycle. The
+// reverse order would delete the object while the row still pointed at it --
+// a broken image everywhere, on a request to remove one.
+func (s Service) ClearAvatar(ctx context.Context, userID uuid.UUID) error {
+	me, err := s.repo.FindByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if me.AvatarPath == "" {
+		return nil
+	}
+	if err := s.repo.SetAvatarPath(ctx, userID, ""); err != nil {
+		return err
+	}
+	if err := s.store.Delete(ctx, me.AvatarPath); err != nil {
+		slog.ErrorContext(ctx, "avatar object survived removal; lifecycle rule will reap it",
+			"user_id", userID, "path", me.AvatarPath, "error", err)
+	}
+	return nil
 }
 
 // Claim sets the caller's handle, retiring whatever they held before.

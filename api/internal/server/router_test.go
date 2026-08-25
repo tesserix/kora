@@ -21,6 +21,7 @@ import (
 	"github.com/tesserix/kora/api/internal/auth"
 	"github.com/tesserix/kora/api/internal/bffauth"
 	"github.com/tesserix/kora/api/internal/bodyread"
+	"github.com/tesserix/kora/api/internal/identity"
 	"github.com/tesserix/kora/api/internal/resolve"
 )
 
@@ -493,4 +494,41 @@ func TestFriendBodyRouteIsRegisteredAlongsideTheStaticFriendsRoutes(t *testing.T
 	} {
 		require.True(t, registered[want], "route not registered: %s", want)
 	}
+}
+
+// fixedUIDVerifier accepts any bearer token and always resolves to the same
+// Firebase UID, so every request through it authenticates as the same user --
+// what TestLookupRateLimitIsWiredIntoTheRealRouter needs to prove the limiter
+// actually throttles one caller across repeated requests.
+type fixedUIDVerifier struct{ uid string }
+
+func (v fixedUIDVerifier) Verify(context.Context, string) (auth.Claims, error) {
+	return auth.Claims{UID: v.uid, Email: v.uid + "@example.test"}, nil
+}
+
+// This is the router-level counterpart to internal/ratelimit's own unit tests
+// and internal/identity's handler tests: both of those build their OWN gin
+// engine, wiring identity.Handler.Lookup directly. Neither would go red if
+// someone deleted `ratelimit.PerUser(...)` from the /users/lookup route in
+// router.go -- the limiter is not part of the handler, it is middleware
+// router.go alone attaches. This test drives the real NewRouter(...) so that
+// deletion has somewhere to be caught: it is the one control standing
+// between exact-match handle lookup and offline enumeration of the user base.
+func TestLookupRateLimitIsWiredIntoTheRealRouter(t *testing.T) {
+	db := testDB(t)
+	uid := "ratelimit-wiring-" + uuid.NewString()
+	t.Cleanup(func() { db.Exec(`DELETE FROM users WHERE firebase_uid = ?`, uid) })
+
+	r := NewRouter(Deps{DB: db, Verifier: fixedUIDVerifier{uid: uid}})
+
+	var last int
+	for i := 0; i < identity.LookupLimit+1; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/v1/users/lookup?handle=nobody", nil)
+		req.Header.Set("Authorization", "Bearer any-token")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		last = w.Code
+	}
+	require.Equal(t, http.StatusTooManyRequests, last,
+		"the (LookupLimit+1)th call to /v1/users/lookup by the same user must be refused by ratelimit.PerUser")
 }

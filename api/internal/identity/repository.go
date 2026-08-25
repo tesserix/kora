@@ -98,3 +98,19 @@ func (r Repository) ClearHandle(ctx context.Context, id uuid.UUID, prevCanonical
 			`UPDATE users SET handle = NULL, handle_canonical = NULL WHERE id = ?`, id).Error
 	})
 }
+
+// SetAvatarPath writes the new object path, or NULL to clear it.
+func (r Repository) SetAvatarPath(ctx context.Context, id uuid.UUID, path string) error {
+	var value any
+	if path != "" {
+		value = path
+	}
+	out := r.db.WithContext(ctx).Exec(`UPDATE users SET avatar_path = ? WHERE id = ?`, value, id)
+	if out.Error != nil {
+		return fmt.Errorf("identity: set avatar path: %w", out.Error)
+	}
+	if out.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
