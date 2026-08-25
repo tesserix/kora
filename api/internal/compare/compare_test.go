@@ -39,9 +39,10 @@ func (stubLogs) DailyKcal(context.Context, uuid.UUID, time.Time, time.Time) (map
 }
 
 func TestCompareGatesNonSharingFriends(t *testing.T) {
-	viewerID := uuid.New()
-	sharerID := uuid.New()
-	privateID := uuid.New()
+	db := testDB(t)
+	viewerID := seedUser(t, db, "viewer")
+	sharerID := seedUser(t, db, "sharer")
+	privateID := seedUser(t, db, "private")
 	svc := NewService(
 		stubFriends{rows: []social.CompareRow{
 			{ID: sharerID, DisplayName: "Sharer", TargetKcal: 2000},
@@ -52,10 +53,12 @@ func TestCompareGatesNonSharingFriends(t *testing.T) {
 	)
 	members, err := svc.Friends(context.Background(), viewerID)
 	require.NoError(t, err)
-	// Only the sharer has a resolved grant; the map's presence is the only
-	// thing ProgressForMembers consults, so a zero-value Grant is enough here
-	// -- the real Grant contents are exercised end-to-end by access.Service.
-	grants := map[uuid.UUID]access.Grant{sharerID: {}}
+	// Only the sharer has a resolved grant, obtained through the real
+	// access.Service so its Owner() is the real sharerID -- a zero-value
+	// Grant{} would carry uuid.Nil and could not catch ProgressForMembers
+	// regressing to querying by the caller-supplied member ID (kora#326
+	// whole-branch review, F3).
+	grants := map[uuid.UUID]access.Grant{sharerID: seedGrant(t, db, viewerID, sharerID, access.CategoryProgress)}
 
 	res, err := svc.Compare(context.Background(), viewerID, time.Now(), time.UTC, members, grants)
 	require.NoError(t, err)

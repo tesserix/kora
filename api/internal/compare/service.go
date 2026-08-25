@@ -83,10 +83,14 @@ func (s Service) ProgressForMembers(ctx context.Context, day time.Time, loc *tim
 	members []Member, grants map[uuid.UUID]access.Grant) ([]FriendProgress, error) {
 	out := make([]FriendProgress, 0, len(members))
 	for _, m := range members {
-		_, shared := grants[m.ID]
+		g, shared := grants[m.ID]
 		fp := FriendProgress{ID: m.ID, DisplayName: m.DisplayName, Sharing: shared}
 		if shared {
-			metrics, err := progress.Compute(ctx, s.logs, m.ID, m.TargetKcal, day, loc)
+			// Query by the Grant's own owner, not by the caller-supplied
+			// member ID: an unforgeable Grant is only meaningful if the
+			// cross-user read is scoped to what it actually attests to
+			// (kora#326 whole-branch review, F3).
+			metrics, err := progress.Compute(ctx, s.logs, g.Owner(), m.TargetKcal, day, loc)
 			if err != nil {
 				return nil, err
 			}
