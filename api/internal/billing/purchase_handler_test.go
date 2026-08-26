@@ -38,6 +38,10 @@ func purchaseRouter(t *testing.T, db *gorm.DB, userID uuid.UUID, gw gateway, now
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.POST("/webhooks/cashfree", handler.Webhook)
+	// Both providers' webhook routes are mounted here so the shared settlement
+	// path is exercised through each of them — the point of the seam. In
+	// production exactly one is mounted (router.go).
+	router.POST("/webhooks/stripe", handler.WithStripeWebhook(testStripeWebhookSecret).StripeWebhook)
 
 	v1 := router.Group("/v1")
 	v1.Use(func(c *gin.Context) {
@@ -298,4 +302,145 @@ func TestOrdersEndpointListsThePurchaseHistory(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 	require.Len(t, body.Data.Orders, 1)
 	require.Equal(t, "spark", body.Data.Orders[0].PackCode)
+}
+
+const testStripeWebhookSecret = "whsec_test_secret"
+
+// stripeEventBody renders a checkout.session event with Kora's order id on
+// client_reference_id, which is what makes a delivery reconcilable.
+func stripeEventBody(t *testing.T, eventType, orderID, paymentStatus string, amountPaise int) []byte {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{
+		"id":   "evt_1",
+		"type": eventType,
+		"data": map[string]any{"object": map[string]any{
+			"id":                  "cs_test_1",
+			"object":              "checkout.session",
+			"client_reference_id": orderID,
+			"payment_status":      paymentStatus,
+			"amount_total":        amountPaise,
+			"payment_intent":      "pi_test_1",
+		}},
+	})
+	require.NoError(t, err)
+	return body
+}
+
+func postStripeWebhook(t *testing.T, router *gin.Engine, body []byte, signedAt time.Time) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Stripe-Signature", stripeSignature(t, testStripeWebhookSecret, signedAt, body))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	return w
+}
+
+// TestStripeWebhookSettlesAPaidOrder drives the SAME settlement path the
+// Cashfree webhook uses, through Stripe's callback shape. That equivalence is
+// the point of the provider seam (kora#478).
+func TestStripeWebhookSettlesAPaidOrder(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	cleanupOrders(t, db, userID)
+	now := time.Date(2026, 8, 22, 9, 0, 0, 0, time.UTC)
+	router := purchaseRouter(t, db, userID, &fakeGateway{}, now)
+
+	created := postJSON(t, router, "/v1/ai/orders", map[string]any{"pack_code": "spark", "phone": "9999999999"})
+	require.Equal(t, http.StatusOK, created.Code)
+	var out struct {
+		Data Order `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(created.Body.Bytes(), &out))
+	order := out.Data
+	require.Equal(t, OrderCreated, order.Status)
+
+	body := stripeEventBody(t, "checkout.session.completed", order.ID.String(), "paid", order.TotalPaise)
+	w := postStripeWebhook(t, router, body, time.Now())
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var settled Order
+	require.NoError(t, db.First(&settled, "id = ?", order.ID).Error)
+	require.Equal(t, OrderPaid, settled.Status, "a paid Stripe callback must settle the order")
+	require.NotNil(t, settled.InvoiceNumber, "settlement must allocate an invoice number")
+}
+
+// TestStripeWebhookDoesNotSettleACompletedButUnpaidSession is the case that
+// separates Stripe from Cashfree. A session reaches `complete` when the
+// customer finishes the flow; for asynchronous methods the money has NOT
+// settled yet. Granting credit there gives away packs for payments that can
+// still fail.
+func TestStripeWebhookDoesNotSettleACompletedButUnpaidSession(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	cleanupOrders(t, db, userID)
+	now := time.Date(2026, 8, 22, 9, 0, 0, 0, time.UTC)
+	router := purchaseRouter(t, db, userID, &fakeGateway{}, now)
+
+	created := postJSON(t, router, "/v1/ai/orders", map[string]any{"pack_code": "spark", "phone": "9999999999"})
+	var out struct {
+		Data Order `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(created.Body.Bytes(), &out))
+	order := out.Data
+
+	body := stripeEventBody(t, "checkout.session.completed", order.ID.String(), "unpaid", order.TotalPaise)
+	w := postStripeWebhook(t, router, body, time.Now())
+	require.Equal(t, http.StatusOK, w.Code, "200 so Stripe stops retrying a delivery Kora understood")
+
+	var after Order
+	require.NoError(t, db.First(&after, "id = ?", order.ID).Error)
+	require.Equal(t, OrderCreated, after.Status, "an unpaid session must NOT grant credit")
+}
+
+// TestStripeWebhookRejectsAReplayedDelivery — the freshness bound, end to end
+// through the HTTP surface rather than only at the verifier.
+func TestStripeWebhookRejectsAReplayedDelivery(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	cleanupOrders(t, db, userID)
+	now := time.Date(2026, 8, 22, 9, 0, 0, 0, time.UTC)
+	router := purchaseRouter(t, db, userID, &fakeGateway{}, now)
+
+	created := postJSON(t, router, "/v1/ai/orders", map[string]any{"pack_code": "spark", "phone": "9999999999"})
+	var out struct {
+		Data Order `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(created.Body.Bytes(), &out))
+	order := out.Data
+
+	body := stripeEventBody(t, "checkout.session.completed", order.ID.String(), "paid", order.TotalPaise)
+	stale := time.Now().Add(-webhookTimestampTolerance - time.Minute)
+	w := postStripeWebhook(t, router, body, stale)
+	require.Equal(t, http.StatusUnauthorized, w.Code, "a captured callback must not be replayable")
+
+	var after Order
+	require.NoError(t, db.First(&after, "id = ?", order.ID).Error)
+	require.Equal(t, OrderCreated, after.Status, "a replayed callback must not settle anything")
+}
+
+// TestStripeWebhookRefusesAnAmountThatDoesNotMatchTheFrozenPrice — this is the
+// check that makes ignoring Stripe's api_version safe: a wrong amount fails
+// loudly instead of granting credit.
+func TestStripeWebhookRefusesAnAmountThatDoesNotMatchTheFrozenPrice(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	cleanupOrders(t, db, userID)
+	now := time.Date(2026, 8, 22, 9, 0, 0, 0, time.UTC)
+	router := purchaseRouter(t, db, userID, &fakeGateway{}, now)
+
+	created := postJSON(t, router, "/v1/ai/orders", map[string]any{"pack_code": "spark", "phone": "9999999999"})
+	var out struct {
+		Data Order `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(created.Body.Bytes(), &out))
+	order := out.Data
+
+	body := stripeEventBody(t, "checkout.session.completed", order.ID.String(), "paid", order.TotalPaise-1)
+	w := postStripeWebhook(t, router, body, time.Now())
+	require.Equal(t, http.StatusOK, w.Code, "200 on purpose: retrying will not make the amounts agree")
+
+	var after Order
+	require.NoError(t, db.First(&after, "id = ?", order.ID).Error)
+	require.Equal(t, OrderCreated, after.Status, "an amount that disagrees with the frozen price must not settle")
 }

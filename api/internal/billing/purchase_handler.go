@@ -12,6 +12,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	stripe "github.com/stripe/stripe-go/v82"
+
 	"github.com/tesserix/kora/api/internal/httpx"
 	"github.com/tesserix/kora/api/internal/user"
 )
@@ -31,7 +33,21 @@ type PurchaseHandler struct {
 	orders    Orders
 	meter     Meter
 	secretKey string
-	now       func() time.Time
+	// stripeWebhookSecret is Stripe's endpoint signing secret, empty when
+	// Cashfree is the configured provider. It is a DIFFERENT credential from
+	// the API key — Cashfree signs with the same secret it authenticates with,
+	// Stripe does not — which is why it cannot be folded into secretKey.
+	stripeWebhookSecret string
+	now                 func() time.Time
+}
+
+// WithStripeWebhook attaches Stripe's endpoint signing secret, enabling
+// StripeWebhook. Only one provider's webhook route is mounted at a time (see
+// router.go), so this being empty is the normal Cashfree case rather than a
+// misconfiguration.
+func (h PurchaseHandler) WithStripeWebhook(secret string) PurchaseHandler {
+	h.stripeWebhookSecret = secret
+	return h
 }
 
 // NewPurchaseHandler builds the handler. secretKey is the Cashfree secret the
@@ -198,6 +214,82 @@ func (h PurchaseHandler) Webhook(c *gin.Context) {
 		httpx.OK(c, gin.H{"handled": false})
 	case err != nil:
 		// 500 so Cashfree retries: this is Kora's fault, and the user has paid.
+		slog.ErrorContext(c.Request.Context(), "billing: failed to settle a paid order",
+			"order_id", orderID.String(), "err", err)
+		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not settle the order")
+	default:
+		httpx.OK(c, gin.H{"handled": true})
+	}
+}
+
+// StripeWebhook settles an order from a Stripe Checkout callback.
+//
+// Mounted outside the v1 group for the same reason /webhooks/cashfree is: the
+// caller holds no Firebase token, and its own signature IS the authentication,
+// verified over the RAW body. Re-serialising the payload before verifying
+// would change the bytes the MAC covers and reject every genuine delivery.
+//
+// The status codes mirror the Cashfree path deliberately, because they are
+// instructions to the SENDER rather than decoration: 200 means "understood,
+// stop retrying", 500 means "my fault, retry".
+func (h PurchaseHandler) StripeWebhook(c *gin.Context) {
+	raw, err := io.ReadAll(io.LimitReader(c.Request.Body, maxWebhookBody))
+	if err != nil {
+		httpx.Error(c, http.StatusBadRequest, "invalid_request", "unreadable body")
+		return
+	}
+
+	event, err := VerifyStripeWebhook(h.stripeWebhookSecret, c.GetHeader("Stripe-Signature"), raw)
+	if err != nil {
+		// Says nothing about WHICH check failed, matching the Cashfree path: a
+		// caller learning whether it holds a valid key learns too much.
+		slog.WarnContext(c.Request.Context(), "billing: rejected an unsigned or stale stripe webhook")
+		httpx.Error(c, http.StatusUnauthorized, "unauthorized", "invalid signature")
+		return
+	}
+
+	var session stripe.CheckoutSession
+	if err := json.Unmarshal(event.Data.Raw, &session); err != nil {
+		httpx.Error(c, http.StatusBadRequest, "invalid_request", "unreadable body")
+		return
+	}
+
+	if !stripeEventIsTerminalSuccess(event, &session) {
+		// Includes the event types Kora does not act on and, importantly,
+		// checkout.session.completed while the payment is still pending: an
+		// asynchronous method completes the session before the money settles,
+		// and async_payment_succeeded is what confirms it later. 200 so Stripe
+		// stops retrying a delivery Kora understood and chose not to act on.
+		httpx.OK(c, gin.H{"handled": false})
+		return
+	}
+
+	// Kora's own order id, carried on client_reference_id at session creation.
+	// Stripe's session id means nothing to Kora, so without this the delivery
+	// could not be matched to a row.
+	orderID, err := uuid.Parse(session.ClientReferenceID)
+	if err != nil {
+		httpx.OK(c, gin.H{"handled": false})
+		return
+	}
+
+	var paymentID string
+	if session.PaymentIntent != nil {
+		paymentID = session.PaymentIntent.ID
+	}
+
+	err = h.orders.Settle(c.Request.Context(), orderID, paymentID, int(session.AmountTotal))
+	switch {
+	case errors.Is(err, ErrOrderNotFound):
+		httpx.OK(c, gin.H{"handled": false})
+	case errors.Is(err, ErrAmountMismatch):
+		// 200 on purpose: retrying will not make the amounts agree. This is
+		// also the check that makes ignoring Stripe's api_version safe — a
+		// wrong amount fails loudly here instead of granting credit.
+		slog.ErrorContext(c.Request.Context(), "billing: settled amount does not match the order",
+			"order_id", orderID.String())
+		httpx.OK(c, gin.H{"handled": false})
+	case err != nil:
 		slog.ErrorContext(c.Request.Context(), "billing: failed to settle a paid order",
 			"order_id", orderID.String(), "err", err)
 		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not settle the order")
