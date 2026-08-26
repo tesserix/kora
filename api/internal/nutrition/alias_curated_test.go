@@ -59,3 +59,59 @@ func TestCuratedParmaAliasResolves(t *testing.T) {
 		require.Equal(t, MatchAlias, got[0].MatchTier, "%q must resolve via the alias tier", phrase)
 	}
 }
+
+// TestCuratedToastAliasResolves pins kora#470.
+//
+// identify splits "X on toast" into components and emits the bare food "toast".
+// That guess returned `French toast, plain` — an egg-battered fried dish — with
+// `Prawn toast` at rank 3, because `French toast, plain` heads on the token
+// "toast" and collects headBonus, while the correct `Bread, ..., toasted` rows
+// score precision 0: "toasted" sits outside the first two comma segments the
+// identity is derived from.
+//
+// Both ranker-side fixes for that shape were measured net-harmful and reverted
+// (kora#219), so a curated alias is the sanctioned route. This asserts the
+// alias actually fires AND that it beats the French toast row that previously
+// won — inserting that row explicitly, so the test fails if the alias is
+// removed rather than passing on an empty index.
+func TestCuratedToastAliasResolves(t *testing.T) {
+	const target = "Bread, white, commercial, toasted"
+
+	b, err := os.ReadFile(filepath.Join("..", "..", "data", "food", "aliases.json"))
+	require.NoError(t, err)
+	var curated []GlobalAlias
+	require.NoError(t, json.Unmarshal(b, &curated))
+
+	tx := fixtureTx(t)
+	repo := NewRepository(tx)
+	ctx := context.Background()
+
+	bread := FoodItem{
+		ID: uuid.New(), Name: target, NormalizedName: Normalize(target),
+		Provenance: "ausnut", KcalPer100g: 296.6, EntityType: EntityTypeGeneric,
+	}
+	// The row that used to win. Without it the test would pass trivially.
+	french := FoodItem{
+		ID: uuid.New(), Name: "French toast, plain", NormalizedName: Normalize("French toast, plain"),
+		Provenance: "ausnut", KcalPer100g: 202, EntityType: EntityTypeGeneric,
+	}
+	require.NoError(t, tx.Create(&bread).Error)
+	require.NoError(t, tx.Create(&french).Error)
+
+	// Guard the premise: without the alias, French toast really does win.
+	lexical, err := repo.ResolveQuery(ctx, uuid.Nil, Query{Text: "toast", CookingMethod: "toasted"}, nil, 5)
+	require.NoError(t, err)
+	require.NotEmpty(t, lexical)
+	require.Equal(t, french.ID, lexical[0].Item.ID,
+		"premise changed: French toast no longer wins the bare query, so this test no longer proves what it claims")
+
+	applied, unresolved, err := repo.UpsertGlobalAliases(ctx, curated)
+	require.NoError(t, err)
+	require.Positive(t, applied, "no curated alias resolved; unresolved=%v", unresolved)
+
+	got, err := repo.ResolveQuery(ctx, uuid.Nil, Query{Text: "toast", CookingMethod: "toasted"}, nil, 5)
+	require.NoError(t, err)
+	require.NotEmpty(t, got)
+	require.Equal(t, bread.ID, got[0].Item.ID, "\"toast\" must resolve to toasted bread, got %q", got[0].Item.Name)
+	require.Equal(t, MatchAlias, got[0].MatchTier)
+}

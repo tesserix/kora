@@ -33,5 +33,10 @@
     "alias": "parmi",
     "food": "Chicken, schnitzel, breadcrumb coating, topped with tomato sauce & cheese (parmigiana)",
     "why": "AU pub idiom for chicken parmigiana. The full word ALREADY resolves lexically; the abbreviation cannot — 'parma'/'parmi' share no token with 'parmigiana', so all three of these phrases return ZERO candidates today (verified against the prod index). The target is the cooked AUSNUT dish at 219 kcal/100g, so there is no raw/cooked shift. Deliberately NOT aliasing the bare word 'parma': it also names Parma ham and Parmesan, and it is the one variant that already has a lexical hit."
+  },
+  {
+    "alias": "toast",
+    "food": "Bread, white, commercial, toasted",
+    "why": "identify splits \"X on toast\" into components and emits the bare food \"toast\". That guess returned `French toast, plain` (202 kcal) — an egg-battered fried dish, not toast — with `Prawn toast` at rank 3, because `French toast, plain` heads on the token \"toast\" and so collects headBonus, while the correct `Bread, ..., toasted` rows score precision 0: \"toasted\" sits outside the first two comma segments the identity is taken from (kora#470, same class as kora#219). Both directions for fixing that in the ranker were measured net-harmful and reverted, so this is the sanctioned interim. Target is the AUSNUT commercial white loaf at 297 kcal/100g — shop-bought is what people eat, and every plain toasted bread row sits in a ~253-315 band, so the choice within it is not load-bearing. Safe at auto tier because \"toast\" has exactly one meaning here: a user who means the fried dish says \"french toast\", which is a different alias key and does not match."
   }
 ]
