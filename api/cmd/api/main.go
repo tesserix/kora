@@ -231,6 +231,11 @@ func main() {
 				Sandbox:   cfg.CashfreeSandbox,
 				ReturnURL: cfg.CashfreeReturnURL,
 			},
+			Stripe: billing.StripeConfig{
+				SecretKey:     cfg.StripeSecretKey,
+				WebhookSecret: cfg.StripeWebhookSecret,
+				ReturnURL:     cfg.StripeReturnURL,
+			},
 		}),
 		// Nothing bounded a request server-side: a client that hung up left the
 		// handler running against whatever budgets the AI Router happened to
