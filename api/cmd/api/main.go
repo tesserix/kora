@@ -168,6 +168,17 @@ func main() {
 		logger.Info("admin surface disabled (no KORA_BFF_HMAC_KEY)")
 	}
 
+	// The platform console's contract surface (#430-#435). Separate secret,
+	// separate signing scheme, same /v1/admin prefix.
+	healthProbes, closeProbes := platformHealthProbes(cfg, logger)
+	defer closeProbes()
+	if cfg.PlatformAdminSecret != "" {
+		logger.Info("platform admin contract surface enabled",
+			"routes", "/v1/admin/{audit-logs,inbox,entities/:type,health,kpis}")
+	} else {
+		logger.Info("platform admin contract surface disabled (no KORA_PLATFORM_ADMIN_SECRET)")
+	}
+
 	// One appleid.Client serves two narrow interfaces: AppleExchanger for
 	// POST /v1/me/apple-authorization and AppleRevoker for account deletion.
 	// Both stay nil when Apple is unconfigured — the exchange endpoint is
@@ -208,6 +219,8 @@ func main() {
 			BodyCompositionCache: bodyCompositionCache,
 			Assets:               assetStore,
 			BFFHMACKey:           cfg.BFFHMACKey,
+			PlatformAdminSecret:  cfg.PlatformAdminSecret,
+			PlatformHealthProbes: healthProbes,
 			AppleExchanger:       appleExchanger,
 			IdentityDeleter:      identityDeleter,
 			AppleRevoker:         appleRevoker,
