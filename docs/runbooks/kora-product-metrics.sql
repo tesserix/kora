@@ -296,6 +296,74 @@ ORDER BY users DESC, corrections DESC
 LIMIT 50;
 
 -- =====================================================================
+-- 7c. THE REAL FIRST-TRY RATE (kora#459), and where the resolver loses.
+--
+-- food_resolution_outcomes carries one row per resolve ATTEMPT, which is what
+-- makes this a rate rather than a count: the denominator is attempts, and a
+-- successful resolve leaves no other trace anywhere (a cache hit never reaches
+-- the provider, so ai_usage_events cannot supply it either).
+--
+-- ## Why cache and alias are excluded from the denominator
+--
+-- An `alias` hit is a phrase the resolver got wrong ONCE ALREADY and a human
+-- fixed. Counting it as a first-try success would let the correction loop
+-- improve the very metric that measures whether corrections are still needed.
+-- A `cache` hit did not exercise the resolver at all. Both are still counted
+-- in `attempts` above, because they did happen -- they are just not evidence
+-- either way about whether the resolver works.
+--
+-- Mirrors resolveoutcome.Rates.FirstTryRate exactly. If the two ever disagree,
+-- the Go one is authoritative: it is the one with tests.
+--
+-- NULL rather than 0 over an empty denominator. A rate over no attempts is not
+-- 0%, and rendering it as one is how an empty window looks like total failure.
+-- =====================================================================
+SELECT count(*)                                                          AS attempts,
+       count(*) FILTER (WHERE kind IN ('cache','alias'))                 AS not_resolver_work,
+       count(*) FILTER (WHERE kind = 'resolved')                         AS first_try,
+       count(*) FILTER (WHERE kind IN ('below_floor','no_match'))        AS needs_human,
+       round(100.0 * count(*) FILTER (WHERE kind = 'resolved')
+             / nullif(count(*) FILTER (WHERE kind NOT IN ('cache','alias')), 0), 1)
+                                                                         AS first_try_rate_pct
+FROM food_resolution_outcomes
+WHERE created_at >= now() - make_interval(days => :days);
+
+-- 7d. Where the resolver loses, by kind and mode.
+--
+-- below_floor and no_match are the two that demand OPPOSITE fixes: the index
+-- has near-misses (lower the floor) versus the index has nothing (add data).
+-- Conflating them is the exact confusion #459 was opened to end, so they are
+-- never summed into one "failures" number here.
+SELECT kind,
+       mode,
+       count(*)                                                          AS attempts,
+       round(100.0 * count(*) / nullif(sum(count(*)) OVER (), 0), 1)     AS pct,
+       round(avg(top_score)::numeric, 3)                                 AS mean_top_score,
+       count(*) FILTER (WHERE status IN ('open','in_progress'))          AS still_open
+FROM food_resolution_outcomes
+WHERE created_at >= now() - make_interval(days => :days)
+GROUP BY kind, mode
+ORDER BY attempts DESC;
+
+-- 7e. The phrases the index cannot serve -- the eval set, from the attempt
+--     side rather than the correction side.
+--
+-- 7b sees only failures a user cared enough to CORRECT. This sees every
+-- failure, including the ones where they gave up. The gap between the two is
+-- itself worth watching.
+SELECT coalesce(phrase, '(photo -- no phrase)')                          AS phrase,
+       kind,
+       count(*)                                                          AS attempts,
+       count(DISTINCT user_id)                                           AS users,
+       max(created_at)::date                                             AS last_seen
+FROM food_resolution_outcomes
+WHERE created_at >= now() - make_interval(days => :days)
+  AND kind IN ('below_floor','no_match')
+GROUP BY 1, 2
+ORDER BY users DESC, attempts DESC
+LIMIT 50;
+
+-- =====================================================================
 -- 8. Food index health, mirroring the exporter's gauges.
 --
 -- Here as well as in Prometheus because it is the one number that silently
