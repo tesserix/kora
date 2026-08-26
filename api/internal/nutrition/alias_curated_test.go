@@ -253,3 +253,55 @@ func TestCuratedAliasesPreferRowsThatCanBePortioned(t *testing.T) {
 		}
 	}
 }
+
+// TestCuratedKebabAliasResolves pins the AU takeaway staple.
+//
+// `kebab` returned the OFF row `10 kebabs` — a packaged product, not the thing
+// anyone means by the word. Same shape as every other case in this file: the
+// branded row is shorter, wins on trigram, and no scoring change reaches it
+// (kora#219).
+//
+// The assertion is on the row ID, and the branded row is inserted so the test
+// cannot pass on an empty index.
+func TestCuratedKebabAliasResolves(t *testing.T) {
+	const target = "Kebab wrap, meat, with salad, takeaway"
+
+	b, err := os.ReadFile(filepath.Join("..", "..", "data", "food", "aliases.json"))
+	require.NoError(t, err)
+	var curated []GlobalAlias
+	require.NoError(t, json.Unmarshal(b, &curated))
+
+	tx := fixtureTx(t)
+	repo := NewRepository(tx)
+	ctx := context.Background()
+
+	wrap := FoodItem{
+		ID: uuid.New(), Name: target, NormalizedName: Normalize(target),
+		Provenance: "ausnut", KcalPer100g: 192.2, ServingGrams: 300,
+		EntityType: EntityTypeGeneric,
+	}
+	packaged := FoodItem{
+		ID: uuid.New(), Name: "10 kebabs", NormalizedName: Normalize("10 kebabs"),
+		Brand: "Zephbrand", Provenance: "off", KcalPer100g: 153.3,
+		EntityType: EntityTypeBrandedProduct,
+	}
+	require.NoError(t, tx.Create(&wrap).Error)
+	require.NoError(t, tx.Create(&packaged).Error)
+
+	before, err := repo.ResolveQuery(ctx, uuid.Nil, Query{Text: "kebab"}, nil, 5)
+	require.NoError(t, err)
+	require.NotEmpty(t, before)
+	require.Equal(t, packaged.ID, before[0].Item.ID,
+		"premise changed: the packaged row no longer wins, so this test no longer proves what it claims")
+
+	applied, unresolved, err := repo.UpsertGlobalAliases(ctx, curated)
+	require.NoError(t, err)
+	require.Positive(t, applied, "no curated alias resolved; unresolved=%v", unresolved)
+
+	got, err := repo.ResolveQuery(ctx, uuid.Nil, Query{Text: "kebab"}, nil, 5)
+	require.NoError(t, err)
+	require.NotEmpty(t, got)
+	require.Equal(t, wrap.ID, got[0].Item.ID, "\"kebab\" must resolve to the wrap, got %q", got[0].Item.Name)
+	require.Equal(t, MatchAlias, got[0].MatchTier)
+	require.Positive(t, got[0].Item.ServingGrams, "a kebab is not 100g; the target must carry a serving")
+}
