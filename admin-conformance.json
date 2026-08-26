@@ -1,0 +1,11 @@
+{
+  "slug": "kora",
+  "contractVersion": 2,
+  "endpoints": {
+    "audit-logs": true,
+    "inbox": { "slaDeclared": false },
+    "entities": { "types": ["users", "foods"] },
+    "health": true,
+    "kpis": true
+  }
+}
