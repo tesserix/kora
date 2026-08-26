@@ -327,3 +327,81 @@ func TestSearchEntitiesRejectsAnUnknownType(t *testing.T) {
 	_, err := repoOn(tx).SearchEntities(context.Background(), "orders", "x", 10, 0)
 	assert.ErrorIs(t, err, ErrUnknownEntityType)
 }
+
+// TestSearchEntitiesBrowsesWhenQIsAbsent pins kora#473.
+//
+// An absent `q` lists the type instead of refusing, so the console's Food index
+// and Users pages have an entry point. The endpoint was search-only, so opening
+// either page with no query yielded a 400 and the first thing an operator saw
+// was an error.
+//
+// The filter is what an absent q drops — nothing else. Retired foods stay
+// excluded, and the total stays unpaged and exact.
+func TestSearchEntitiesBrowsesWhenQIsAbsent(t *testing.T) {
+	tx := tx(t, testDB(t))
+	repo := repoOn(tx)
+
+	live := seedFood(t, tx, "Quuxberry Live", "Zephbrand", false)
+	seedFood(t, tx, "Quuxberry Retired", "Zephbrand", true)
+	other := seedFood(t, tx, "Zzz Unrelated Thing", "", false)
+
+	got, err := repo.SearchEntities(context.Background(), TypeFoods, "", 50, 0)
+	require.NoError(t, err)
+
+	ids := map[string]bool{}
+	for _, it := range got.Items {
+		ids[it.ID] = true
+	}
+	assert.True(t, ids[live.String()], "browse must list a live food")
+	assert.True(t, ids[other.String()], "browse must list rows a search for the first food would have missed")
+	assert.Equal(t, int64(len(ids)), got.Total, "the unpaged total must match what browse can page through")
+
+	// The one filter an absent q must NOT drop.
+	for _, it := range got.Items {
+		assert.NotEqual(t, "Quuxberry Retired", it.Label, "browse must still exclude retired foods")
+	}
+}
+
+// TestSearchEntitiesBrowseStillPaginates — browse is only useful if an operator
+// can page through it, and `total` must describe the whole set rather than the
+// page in hand.
+func TestSearchEntitiesBrowseStillPaginates(t *testing.T) {
+	tx := tx(t, testDB(t))
+	repo := repoOn(tx)
+
+	for i := range 3 {
+		seedFood(t, tx, "Zephfood "+string(rune('A'+i)), "Zephbrand", false)
+	}
+
+	first, err := repo.SearchEntities(context.Background(), TypeFoods, "", 2, 0)
+	require.NoError(t, err)
+	require.Len(t, first.Items, 2)
+
+	second, err := repo.SearchEntities(context.Background(), TypeFoods, "", 2, 2)
+	require.NoError(t, err)
+	require.NotEmpty(t, second.Items)
+
+	assert.Equal(t, first.Total, second.Total, "total is unpaged and must not change between pages")
+	assert.NotEqual(t, first.Items[0].ID, second.Items[0].ID, "page 2 must not repeat page 1")
+}
+
+// TestSearchEntitiesBrowsesUsersToo — koraNav lists Users as an index as well,
+// so the browse path must not be foods-only.
+func TestSearchEntitiesBrowsesUsersToo(t *testing.T) {
+	tx := tx(t, testDB(t))
+	repo := repoOn(tx)
+
+	id := seedUser(t, tx, "zephyr@example.invalid", "Zephyr Quuxson", "zephyrq")
+
+	got, err := repo.SearchEntities(context.Background(), TypeUsers, "", 50, 0)
+	require.NoError(t, err)
+
+	var found bool
+	for _, it := range got.Items {
+		if it.ID == id.String() {
+			found = true
+		}
+	}
+	assert.True(t, found, "browse must list users")
+	assert.Positive(t, got.Total)
+}

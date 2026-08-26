@@ -115,9 +115,32 @@ none.
 
 ### entities (#433)
 
-`users` and `foods`. `q` is **required** and must be at least 2 characters —
-that is the enumeration guard: a search endpoint over user records must not
-answer "everything" when asked for nothing.
+`users` and `foods`. The endpoint **browses and searches**: an absent `q`
+lists the type ordered `created_at DESC`; a present `q` filters by it. Same
+envelope either way (kora#473).
+
+`q` used to be **required**, at 2 characters minimum, as an enumeration guard —
+"a search endpoint over user records must not answer everything when asked for
+nothing". Browse retires that reasoning rather than weakening it. The console's
+Food index and Users pages are *indexes* an operator pages through, so
+"everything, paged" is the intended answer; against a search-only endpoint the
+first thing an operator saw on opening either page was a `400`. With browse
+available the old floor guarded nothing — `q=a` returns a strict SUBSET of what
+an absent `q` returns — while breaking a legitimate narrowing search, so it is
+gone rather than kept as an incoherent hole.
+
+What bounds the response is pagination, unchanged: `limit` is capped and
+`total` is exact and unpaged.
+
+**Estate note.** mark8ly's `/admin/entities/tenants` already browsed, so the two
+implementers disagreed. This closes that divergence in the direction mark8ly had
+already taken; browse-and-search is the contract's shape, not Kora's local
+choice.
+
+**A product can pass conformance with an endpoint the console cannot use.** The
+suite scored the old `400` against §4.4 (a well-formed error with a stable code)
+rather than against the success shape, so search-only passed cleanly while being
+unusable as an index. Worth remembering when reading a green conformance run.
 
 The user row carries `id`, `label`, `sublabel`, `created_at` and nothing else.
 `sublabel` is the handle when the user has one and the email otherwise;
