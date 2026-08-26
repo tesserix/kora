@@ -359,7 +359,21 @@ func (r Repository) ResolveQuery(ctx context.Context, userID uuid.UUID, q Query,
 	// is widened and no previously-matching row is lost. `searchNorm` below is
 	// deliberately left whole: scoring still sees the full phrase.
 	recallNorm := StripConnectors(norm)
-	searchNorm := Normalize(strings.TrimSpace(phrase + " " + strings.Join(q.Qualifiers, " ")))
+	// CookingMethod joins Qualifiers here for the same reason they are here:
+	// searchNorm feeds similarity(), which supplies BOTH the ranking signal and
+	// the ORDER BY that decides who survives resolveScanLimit. Leaving the
+	// method out meant a common food truncated by bare-word similarity alone —
+	// "beef" recalls 1,462 rows against a scan limit of 100, and every
+	// descriptive COOKED row sorted far below the short ones, so `Beef, roast,
+	// lean, baked or roasted, added fat` sat at similarity-rank 309 and never
+	// became a candidate at all. With the method included it lands at 26.
+	// No ranking change could have reached it (kora#467).
+	//
+	// Recall itself still uses the core text only — see the tsquery below:
+	// folding the method into plainto_tsquery would make it MANDATORY and
+	// return zero rows whenever the index words it differently.
+	searchNorm := Normalize(strings.TrimSpace(phrase + " " +
+		strings.Join(q.Qualifiers, " ") + " " + searchableMethod(q.CookingMethod)))
 	if searchNorm == "" {
 		searchNorm = norm
 	}
@@ -665,7 +679,16 @@ func (r Repository) ResolveQuery(ctx context.Context, userID uuid.UUID, q Query,
 		// here this only ever ADDS, so a raw row is never pushed below its own
 		// quality — it simply stops collecting a bonus the cooked row earns.
 		// That asymmetry matters: when no method is stated, nothing changes.
-		if method != "" && strings.Contains(Normalize(s.item.Name), method) {
+		// A row that states it is RAW is withheld from the bonus rather than
+		// penalised — every signal here only ever adds, so nothing may push a
+		// row below its own quality. Withholding is enough: the cooked row
+		// out-earns the raw one by exactly cookingMethodBonus (kora#467).
+		//
+		// Unless the stated method IS "raw", which identify really does emit
+		// (see the vegemite case in ranking.sample.jsonl). For that query the
+		// raw row is the correct answer and must still earn the bonus.
+		if method != "" && strings.Contains(Normalize(s.item.Name), method) &&
+			(method == "raw" || !statesRawPreparation(s.item.Name)) {
 			s.rankKey += cookingMethodBonus
 		}
 	}
