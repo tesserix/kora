@@ -115,8 +115,14 @@ jobs:
           # explicit upgrade, not something that changes what CI enforces
           # between two runs of the same commit.
           set +e
+          # --declaration is REQUIRED here: the CLI defaults to
+          # ./admin-conformance.json, this step runs from api/, and the
+          # declaration lives at the repo root — so the default resolves to
+          # api/admin-conformance.json, which does not exist. That surfaced as
+          # exit 2 ("the suite could not run"), not as a contract failure.
           npx --yes @tesserix/admin-conformance@0.3.0 \
-            --base http://localhost:8099/v1 --slug kora --no-color
+            --base http://localhost:8099/v1 --slug kora --no-color \
+            --declaration "$GITHUB_WORKSPACE/admin-conformance.json"
           code=$?
           set -e
 
