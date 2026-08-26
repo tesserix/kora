@@ -18,5 +18,20 @@
     "alias": "okra",
     "food": "Ladies finger",
     "why": "IFCT names this Ladies finger; okra is what most people call it. Same raw vegetable. NOT aliasing bhindi to it — a user typing bhindi usually means the cooked dish, which the curated Bhindi masala row already answers, and a score-1.0 alias would override it."
+  },
+  {
+    "alias": "chicken parma",
+    "food": "Chicken, schnitzel, breadcrumb coating, topped with tomato sauce & cheese (parmigiana)",
+    "why": "AU pub idiom for chicken parmigiana. The full word ALREADY resolves lexically; the abbreviation cannot — 'parma'/'parmi' share no token with 'parmigiana', so all three of these phrases return ZERO candidates today (verified against the prod index). The target is the cooked AUSNUT dish at 219 kcal/100g, so there is no raw/cooked shift. Deliberately NOT aliasing the bare word 'parma': it also names Parma ham and Parmesan, and it is the one variant that already has a lexical hit."
+  },
+  {
+    "alias": "chicken parmi",
+    "food": "Chicken, schnitzel, breadcrumb coating, topped with tomato sauce & cheese (parmigiana)",
+    "why": "AU pub idiom for chicken parmigiana. The full word ALREADY resolves lexically; the abbreviation cannot — 'parma'/'parmi' share no token with 'parmigiana', so all three of these phrases return ZERO candidates today (verified against the prod index). The target is the cooked AUSNUT dish at 219 kcal/100g, so there is no raw/cooked shift. Deliberately NOT aliasing the bare word 'parma': it also names Parma ham and Parmesan, and it is the one variant that already has a lexical hit."
+  },
+  {
+    "alias": "parmi",
+    "food": "Chicken, schnitzel, breadcrumb coating, topped with tomato sauce & cheese (parmigiana)",
+    "why": "AU pub idiom for chicken parmigiana. The full word ALREADY resolves lexically; the abbreviation cannot — 'parma'/'parmi' share no token with 'parmigiana', so all three of these phrases return ZERO candidates today (verified against the prod index). The target is the cooked AUSNUT dish at 219 kcal/100g, so there is no raw/cooked shift. Deliberately NOT aliasing the bare word 'parma': it also names Parma ham and Parmesan, and it is the one variant that already has a lexical hit."
   }
 ]
