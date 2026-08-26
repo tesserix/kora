@@ -31,14 +31,11 @@ func (g *fakeGateway) CreateOrder(
 	}
 	g.chargedPaise = breakdown.TotalPaise
 	g.sentOrderID = orderID
-	return CreatedOrder{CFOrderID: "cf-" + orderID[:8], PaymentSessionID: "session-" + orderID[:8]}, nil
-}
-
-func (g *fakeGateway) CheckoutURL(sessionID string) string {
-	if sessionID == "" {
-		return ""
-	}
-	return "https://payments-test.cashfree.com/order/#" + sessionID
+	return CreatedOrder{
+		CFOrderID:        "cf-" + orderID[:8],
+		PaymentSessionID: "session-" + orderID[:8],
+		CheckoutURL:      "https://payments-test.cashfree.com/order/#session-" + orderID[:8],
+	}, nil
 }
 
 func (g *fakeGateway) FetchOrder(_ context.Context, _ string) (OrderStatus, error) {
@@ -260,4 +257,32 @@ func TestFinancialYearFollowsTheIndianAprilBoundary(t *testing.T) {
 	require.Equal(t, "26-27", financialYear(time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)))
 	require.Equal(t, "26-27", financialYear(time.Date(2027, 3, 31, 23, 59, 0, 0, time.UTC)))
 	require.Equal(t, "25-26", financialYear(time.Date(2026, 3, 31, 23, 59, 0, 0, time.UTC)))
+}
+
+
+// TestCreateReturnsTheGatewaysCheckoutURL pins the contract kora#478 moved.
+//
+// CheckoutURL is now produced BY the provider and carried on CreatedOrder,
+// rather than derived by the order service from a payment session id. Nothing
+// asserted that it reaches the Order at all — verified by mutation: blanking
+// the assignment in Orders.Create left the whole suite green, so the field the
+// client needs in order to send anyone to a payment page was untested.
+//
+// It is `gorm:"-"`, so it exists only on the returned value: a persisted copy
+// would outlive the session it describes.
+func TestCreateReturnsTheGatewaysCheckoutURL(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	cleanupOrders(t, db, userID)
+	gw := &fakeGateway{}
+	orders := newOrders(t, db, gw, time.Date(2026, 8, 22, 9, 0, 0, 0, time.UTC))
+
+	order, err := orders.Create(context.Background(), userID, "spark", "9999999999", "a@b.dev")
+	require.NoError(t, err)
+
+	require.NotEmpty(t, order.CheckoutURL, "the order must carry the URL the client sends the user to")
+	require.Equal(t,
+		"https://payments-test.cashfree.com/order/#session-"+order.ID.String()[:8],
+		order.CheckoutURL,
+		"the URL must be the provider's, not one reconstructed from the session id")
 }

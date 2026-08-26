@@ -105,6 +105,22 @@ type Config struct {
 	// the product name: a link the app has not registered opens nothing at
 	// all, stranding the user in a browser after they have paid.
 	CashfreeReturnURL string
+
+	// Stripe credentials for paid AI top-ups (kora#478). Selected over
+	// Cashfree when configured; see router.go for the precedence and why it is
+	// stated rather than inferred.
+	//
+	// There is deliberately NO sandbox flag here. Stripe's test and live
+	// environments share one API host and are chosen by the KEY itself, so a
+	// separate switch could only ever disagree with the credential beside it —
+	// which is the state CASHFREE_SANDBOX=true under ENV=production is in
+	// today on the live Deployment.
+	StripeSecretKey     string
+	StripeWebhookSecret string
+	// StripeReturnURL is the deep link Stripe sends the user back to. Defaults
+	// to the same target as Cashfree's: it is the app's return screen, not a
+	// property of the gateway.
+	StripeReturnURL string
 	// Object storage for user-supplied assets (kora#449). Empty AssetsBucket
 	// selects assets.Noop -- an environment with no bucket behaves as if every
 	// user has no picture, rather than failing uploads, so nobody working on
@@ -152,6 +168,9 @@ func Load() (Config, error) {
 		CashfreeSecretKey:        os.Getenv("CASHFREE_SECRET_KEY"),
 		CashfreeSandbox:          os.Getenv("CASHFREE_SANDBOX") == "true",
 		CashfreeReturnURL:        getenv("CASHFREE_RETURN_URL", "mobile://billing/return"),
+		StripeSecretKey:          os.Getenv("STRIPE_SECRET_KEY"),
+		StripeWebhookSecret:      os.Getenv("STRIPE_WEBHOOK_SECRET"),
+		StripeReturnURL:          getenv("STRIPE_RETURN_URL", "mobile://billing/return"),
 		AssetsBucket:             os.Getenv("ASSETS_BUCKET"),
 		AssetsPublicBaseURL:      os.Getenv("ASSETS_PUBLIC_BASE_URL"),
 		AssetsLocalDir:           os.Getenv("ASSETS_LOCAL_DIR"),

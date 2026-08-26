@@ -126,6 +126,14 @@ type Deps struct {
 	// AppleExchanger above — so an environment with no gateway advertises no
 	// checkout at all rather than one that takes money and grants nothing.
 	Cashfree billing.CashfreeConfig
+	// Stripe is the second payment gateway (kora#478). When BOTH are
+	// configured Stripe wins, and the precedence is stated here rather than
+	// left to whichever branch happens to be first: during the migration both
+	// credentials exist at once, and the whole point of keeping Cashfree
+	// mounted is that config — not a revert of merged code — decides which one
+	// takes money. Exactly one provider's routes are ever mounted, so a
+	// half-migrated deployment cannot serve two checkouts at the same time.
+	Stripe billing.StripeConfig
 	// Assets is where profile pictures are written (kora#449). Nil in a
 	// test-constructed Deps that never set it — defaulted to assets.Noop{}
 	// the same way ResolveCache/BodyCompositionCache are, so nothing
@@ -187,16 +195,32 @@ func NewRouter(deps Deps) *gin.Engine {
 		billingMeter := billing.NewMeter(deps.DB)
 		billingHandler := billing.NewHandler(billingMeter)
 		v1.GET("/ai/usage", billingHandler.UsageStatus)
-		if deps.Cashfree.Configured() {
+		// Stripe first: during the migration both credentials are present and
+		// the newer gateway is the one being cut over to. Rolling back is a
+		// config change (clear STRIPE_SECRET_KEY), not a revert.
+		switch {
+		case deps.Stripe.Configured():
+			purchases := billing.NewPurchaseHandler(
+				billing.NewOrders(deps.DB, billing.NewStripeClient(deps.Stripe)),
+				billingMeter,
+				// Cashfree's API secret doubles as its webhook secret; Stripe's
+				// does not, so the purchase handler is given the endpoint
+				// signing secret separately below and nothing here.
+				"",
+			).WithStripeWebhook(deps.Stripe.WebhookSecret).
+				WithProviderName(billing.ProviderStripe)
+			mountPurchaseRoutes(r, v1, purchases)
+			// OUTSIDE the v1 group: the caller is Stripe, which holds no
+			// Firebase token. Its own signature is the authentication, checked
+			// inside the handler over the raw request body.
+			r.POST("/webhooks/stripe", purchases.StripeWebhook)
+		case deps.Cashfree.Configured():
 			purchases := billing.NewPurchaseHandler(
 				billing.NewOrders(deps.DB, billing.NewCashfreeClient(deps.Cashfree)),
 				billingMeter,
 				deps.Cashfree.SecretKey,
-			)
-			v1.GET("/ai/packs", purchases.Packs)
-			v1.POST("/ai/orders", purchases.CreateOrder)
-			v1.GET("/ai/orders", purchases.Orders)
-			v1.GET("/ai/orders/:id", purchases.Order)
+			).WithProviderName(billing.ProviderCashfree)
+			mountPurchaseRoutes(r, v1, purchases)
 			// OUTSIDE the v1 group: the caller is Cashfree, which holds no
 			// Firebase token. Its own signature is the authentication, checked
 			// inside the handler over the raw request body.
@@ -702,4 +726,17 @@ func platformHealthProbes(deps Deps) map[string]platformadmin.Probe {
 		}
 	}
 	return probes
+}
+
+// mountPurchaseRoutes mounts the provider-independent purchase surface.
+//
+// Shared between both gateways on purpose: the routes a buyer uses must not
+// differ by provider, or the mobile app would need to know which gateway is
+// configured. Only the webhook route differs, because only the callback is
+// provider-shaped.
+func mountPurchaseRoutes(_ *gin.Engine, v1 *gin.RouterGroup, purchases billing.PurchaseHandler) {
+	v1.GET("/ai/packs", purchases.Packs)
+	v1.POST("/ai/orders", purchases.CreateOrder)
+	v1.GET("/ai/orders", purchases.Orders)
+	v1.GET("/ai/orders/:id", purchases.Order)
 }

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ActivityIndicator, Linking, ScrollView, StyleSheet, View } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useAIOrder, useAIPacks, useCreateAIOrder, useProfile } from "@/api/hooks";
+import { useAIOrder, useAIPacks, useAIPaymentProvider, useCreateAIOrder, useProfile } from "@/api/hooks";
 import { rupees, ratePercent } from "@/api/aiUsage";
 import type { AIOrder, AIPack } from "@/api/types";
 import { AppBackground } from "@/components/AppBackground";
@@ -16,7 +16,8 @@ import { safeBack } from "@/lib/safeBack";
 import { PressableScale } from "@/motion";
 import { useTheme } from "@/theme";
 
-// Cashfree requires a customer phone on every order. Ten digits is the only
+// The order API requires a customer phone (Cashfree's record needs one, and
+// the field is part of the request shape regardless of gateway). Ten digits is the only
 // shape an Indian gateway will accept, and rejecting it here saves a round
 // trip that ends in an opaque gateway error.
 const PHONE_DIGITS = 10;
@@ -113,7 +114,7 @@ function PackRow({
 }
 
 // What the user sees after checkout opens. The order is NOT paid because the
-// app says so: it is paid when Cashfree's webhook settles it, which is what
+// app says so: it is paid when the gateway's webhook settles it, which is what
 // this poll is waiting for.
 function OrderState({ order }: { order: AIOrder }) {
   const { instrument, fonts, spacing } = useTheme();
@@ -168,6 +169,15 @@ export default function AITopUpScreen() {
   const { instrument, fonts, spacing } = useTheme();
   const insets = useSafeAreaInsets();
   const packs = useAIPacks();
+  // The processor is whatever the SERVER says is live, never a constant in the
+  // app: which gateway takes the card is a config decision (kora#478), and
+  // naming the wrong one is wrong on the one screen where trust is the point.
+  // When the server reports none, the wording names nobody rather than
+  // guessing — an unnamed processor is vague, a wrongly-named one is false.
+  const paymentProvider = useAIPaymentProvider();
+  const processorLine = paymentProvider.data
+    ? `Payments are handled by ${paymentProvider.data}. Kora never sees your card. A GST invoice is issued for every paid top-up.`
+    : "Payments are handled by our payment provider. Kora never sees your card. A GST invoice is issued for every paid top-up.";
   const profile = useProfile();
   const createOrder = useCreateAIOrder();
   const [selected, setSelected] = useState<string | null>(null);
@@ -296,7 +306,7 @@ export default function AITopUpScreen() {
             )}
           </BezelCluster>
           <AppText style={{ color: instrument.mut, fontSize: 12, marginHorizontal: spacing.md, marginTop: spacing.sm }}>
-            Payments are handled by Cashfree. Kora never sees your card. A GST invoice is issued for every paid top-up.
+            {processorLine}
           </AppText>
           <PressableScale
             accessibilityRole="button"
