@@ -696,9 +696,9 @@ func platformHealthProbes(deps Deps) map[string]platformadmin.Probe {
 		probes[name] = probe
 	}
 	if deps.DB != nil {
-		probes[platformadmin.DepPostgres] = func(ctx context.Context) error {
+		probes[platformadmin.DepPostgres] = func(ctx context.Context) (map[string]int64, error) {
 			var one int
-			return deps.DB.WithContext(ctx).Raw("SELECT 1").Scan(&one).Error
+			return nil, deps.DB.WithContext(ctx).Raw("SELECT 1").Scan(&one).Error
 		}
 	}
 	return probes

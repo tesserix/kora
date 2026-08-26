@@ -44,11 +44,13 @@ func platformHealthProbes(cfg config.Config, logger *slog.Logger) (map[string]pl
 
 	client := redis.NewClient(opt)
 	probes := map[string]platformadmin.Probe{
-		platformadmin.DepRedis: func(ctx context.Context) error {
+		platformadmin.DepRedis: func(ctx context.Context) (map[string]int64, error) {
 			if err := client.Ping(ctx).Err(); err != nil {
-				return fmt.Errorf("redis ping: %w", err)
+				return nil, fmt.Errorf("redis ping: %w", err)
 			}
-			return nil
+			// No metrics: Redis here is a cache that either answers or does
+			// not. Reporting a key count would be a number nobody acts on.
+			return nil, nil
 		},
 	}
 	return probes, func() { _ = client.Close() }

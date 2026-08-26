@@ -1,12 +1,14 @@
 package platformadmin
 
 import (
+	"context"
 	"log/slog"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
 	"github.com/tesserix/kora/api/internal/platformauth"
+	"github.com/tesserix/kora/api/internal/resolveoutcome"
 )
 
 // Deps is everything Register needs from main.
@@ -53,6 +55,25 @@ func Register(r *gin.Engine, deps Deps) {
 	}
 
 	repo := NewRepository(deps.DB)
+	outcomes := resolveoutcome.NewRepository(deps.DB)
+
+	// The unresolved-food backlog probe (#434). Registered here rather than
+	// left to main because the depth is a query on the same DB this package
+	// already holds — the same reasoning the Postgres probe follows.
+	probes := make(map[string]Probe, len(deps.Probes)+1)
+	for name, probe := range deps.Probes {
+		probes[name] = probe
+	}
+	probes[DepFoodBacklog] = func(ctx context.Context) (map[string]int64, error) {
+		depth, err := outcomes.BacklogDepth(ctx)
+		if err != nil {
+			return nil, err
+		}
+		// The depth is the point. #459's health consumer is exactly this
+		// COUNT, and a backlog that only ever reports "reachable" would say
+		// nothing about whether anyone is keeping up with it.
+		return map[string]int64{"waiting": depth}, nil
+	}
 	g := r.Group("/v1/admin", platformauth.Middleware(platformauth.Config{
 		Secret: deps.Secret,
 		Nonces: platformauth.NewNonceStore(deps.DB),
@@ -60,9 +81,10 @@ func Register(r *gin.Engine, deps Deps) {
 	}))
 
 	g.GET("/audit-logs", NewAuditHandler(repo, deps.Logger).List)
-	g.GET("/inbox", NewInboxHandler(repo, deps.Logger).List)
+	g.GET("/inbox", NewInboxHandler(repo, deps.Logger).
+		WithUnresolvedFoods(outcomes).List)
 	g.GET("/entities/:type", NewEntitiesHandler(repo, deps.Logger).Search)
-	g.GET("/health", NewHealthHandler(deps.Probes, deps.Logger).Health)
+	g.GET("/health", NewHealthHandler(probes, deps.Logger).Health)
 	g.GET("/kpis", NewKPIsHandler().KPIs)
 
 	// Not mounted, deliberately, so the absences are legible here rather than

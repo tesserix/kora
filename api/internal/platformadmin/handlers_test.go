@@ -439,8 +439,8 @@ func healthResponse(t *testing.T, rec *httptest.ResponseRecorder) map[string]str
 
 func TestHealthReportsEveryRegisteredDependency(t *testing.T) {
 	probes := map[string]Probe{
-		DepPostgres: func(context.Context) error { return nil },
-		DepRedis:    func(context.Context) error { return nil },
+		DepPostgres: func(context.Context) (map[string]int64, error) { return nil, nil },
+		DepRedis:    func(context.Context) (map[string]int64, error) { return nil, nil },
 	}
 
 	rec := call(t, http.MethodGet, "/admin/health", "/admin/health",
@@ -457,8 +457,10 @@ func TestHealthReportsEveryRegisteredDependency(t *testing.T) {
 // unreachable in prod (#105) is a fact only Kora knows.
 func TestHealthReportsAFailedProbeAsDown(t *testing.T) {
 	probes := map[string]Probe{
-		DepPostgres: func(context.Context) error { return nil },
-		DepRedis:    func(context.Context) error { return errors.New("dial tcp: connection refused") },
+		DepPostgres: func(context.Context) (map[string]int64, error) { return nil, nil },
+		DepRedis: func(context.Context) (map[string]int64, error) {
+			return nil, errors.New("dial tcp: connection refused")
+		},
 	}
 
 	rec := call(t, http.MethodGet, "/admin/health", "/admin/health",
@@ -490,7 +492,7 @@ func TestHealthNeverReportsAnUninstrumentedDependencyAsOK(t *testing.T) {
 	// registry says are NOT instrumented — the registry must still win.
 	probes := map[string]Probe{}
 	for _, key := range DependencyRegistry {
-		probes[key.Name] = func(context.Context) error { return nil }
+		probes[key.Name] = func(context.Context) (map[string]int64, error) { return nil, nil }
 	}
 
 	rec := call(t, http.MethodGet, "/admin/health", "/admin/health",
@@ -509,8 +511,8 @@ func TestHealthNeverReportsAnUninstrumentedDependencyAsOK(t *testing.T) {
 // endpoint is down" are different events to the console.
 func TestHealthIsAlwaysTwoHundred(t *testing.T) {
 	probes := map[string]Probe{
-		DepPostgres: func(context.Context) error { return errors.New("down") },
-		DepRedis:    func(context.Context) error { return errors.New("down") },
+		DepPostgres: func(context.Context) (map[string]int64, error) { return nil, errors.New("down") },
+		DepRedis:    func(context.Context) (map[string]int64, error) { return nil, errors.New("down") },
 	}
 
 	rec := call(t, http.MethodGet, "/admin/health", "/admin/health",
@@ -520,11 +522,11 @@ func TestHealthIsAlwaysTwoHundred(t *testing.T) {
 
 func TestHealthBoundsASlowProbe(t *testing.T) {
 	blocked := map[string]Probe{
-		DepPostgres: func(ctx context.Context) error {
+		DepPostgres: func(ctx context.Context) (map[string]int64, error) {
 			<-ctx.Done()
-			return ctx.Err()
+			return nil, ctx.Err()
 		},
-		DepRedis: func(context.Context) error { return nil },
+		DepRedis: func(context.Context) (map[string]int64, error) { return nil, nil },
 	}
 
 	start := time.Now()
