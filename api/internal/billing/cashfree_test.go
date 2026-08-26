@@ -93,7 +93,15 @@ func TestCreateOrderSendsTheExactTotalAndPinnedAPIVersion(t *testing.T) {
 		context.Background(), "order-1", Price(pack), "user-1", "9999999999", "a@b.dev", "Spark top-up")
 	require.NoError(t, err)
 
-	require.Equal(t, CreatedOrder{CFOrderID: "cf-1", PaymentSessionID: "session-1"}, created)
+	// CheckoutURL is now returned BY the provider rather than derived by the
+	// caller (kora#478), so it is part of what CreateOrder must produce. The
+	// host is the production one because this config leaves Sandbox false —
+	// which is the property that must never be assembled app-side.
+	require.Equal(t, CreatedOrder{
+		CFOrderID:        "cf-1",
+		PaymentSessionID: "session-1",
+		CheckoutURL:      "https://payments.cashfree.com/order/#session-1",
+	}, created)
 	require.Equal(t, "/orders", gotPath)
 	require.Equal(t, cashfreeAPIVersion, gotVersion)
 	require.Equal(t, "app", gotClientID)

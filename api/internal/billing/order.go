@@ -60,7 +60,6 @@ func (Order) TableName() string { return "ai_payment_orders" }
 type gateway interface {
 	CreateOrder(ctx context.Context, orderID string, breakdown PriceBreakdown, customerID, phone, email, note string) (CreatedOrder, error)
 	FetchOrder(ctx context.Context, orderID string) (OrderStatus, error)
-	CheckoutURL(paymentSessionID string) string
 }
 
 // Orders owns the purchase lifecycle: price, register with the gateway,
@@ -127,7 +126,7 @@ func (o Orders) Create(ctx context.Context, userID uuid.UUID, packCode, phone, e
 	}
 	order.CFOrderID = &created.CFOrderID
 	order.PaymentSessionID = &created.PaymentSessionID
-	order.CheckoutURL = o.gateway.CheckoutURL(created.PaymentSessionID)
+	order.CheckoutURL = created.CheckoutURL
 	return order, nil
 }
 

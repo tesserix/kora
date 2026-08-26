@@ -100,10 +100,23 @@ func NewCashfreeClient(cfg CashfreeConfig) *CashfreeClient {
 }
 
 // CreatedOrder is what the gateway hands back for a new order: the session the
-// mobile SDK or hosted checkout needs, and the gateway's own order id.
+// mobile SDK or hosted checkout needs, the gateway's own order id, and the URL
+// to send the user to.
+//
+// CheckoutURL is returned by the PROVIDER rather than derived by the caller
+// (kora#478). Cashfree hands back a session id you build a URL from; Stripe
+// returns the URL when it creates the session. Deriving it caller-side forced
+// every provider into Cashfree's shape — Stripe would have had to invent a
+// fake session id and then reconstruct a URL it had already been given.
+//
+// Which one builds it does not change WHO builds it: still the server, never
+// the app. The environment (test or live) is a server-side fact, and an app
+// assembling gateway URLs itself would need to know which gateway it was
+// talking to — a mismatch there sends real customers to the test gateway.
 type CreatedOrder struct {
 	CFOrderID        string
 	PaymentSessionID string
+	CheckoutURL      string
 }
 
 type cashfreeCustomer struct {
@@ -168,7 +181,11 @@ func (c *CashfreeClient) CreateOrder(
 	if out.PaymentSessionID == "" {
 		return CreatedOrder{}, fmt.Errorf("billing: cashfree returned no payment session (%s %s)", out.Code, out.Message)
 	}
-	return CreatedOrder{CFOrderID: out.CFOrderID, PaymentSessionID: out.PaymentSessionID}, nil
+	return CreatedOrder{
+		CFOrderID:        out.CFOrderID,
+		PaymentSessionID: out.PaymentSessionID,
+		CheckoutURL:      c.CheckoutURL(out.PaymentSessionID),
+	}, nil
 }
 
 // OrderStatus is the gateway's view of an order. Kora asks for this rather
