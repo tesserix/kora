@@ -94,6 +94,7 @@ import type {
   WeightEntry,
   WeightSource,
   WeightTrend,
+  AIPacksResponse,
 } from "./types";
 import type { AddWeightPayload } from "@/lib/bodyCompositionForm";
 import type { CompositionMetricKey } from "@/lib/bodyCompositionFields";
@@ -131,12 +132,30 @@ function aiOrdersQueryKey(ownerID: string | null = currentUserId()) {
 
 // The catalogue is the same for everyone and changes only with a deploy, so it
 // is cached for the session rather than refetched per visit.
+//
+// useAIPacks and useAIPaymentProvider share ONE query key, so the two selectors
+// below read the same cached response rather than issuing a second request for
+// a field that arrived with the first.
+const aiPacksQuery = {
+  queryKey: ["ai-packs"],
+  queryFn: async () => (await apiFetch("/v1/ai/packs")) as AIPacksResponse,
+  staleTime: 60 * 60 * 1000,
+} as const;
+
 export function useAIPacks(): UseQueryResult<AIPack[], Error> {
-  return useQuery({
-    queryKey: ["ai-packs"],
-    queryFn: async () => ((await apiFetch("/v1/ai/packs")) as { packs: AIPack[] }).packs,
-    staleTime: 60 * 60 * 1000,
-  });
+  return useQuery({ ...aiPacksQuery, select: (data: AIPacksResponse) => data.packs });
+}
+
+// useAIPaymentProvider returns the processor that will actually take the card,
+// as the SERVER reports it. The app must never hardcode this: which gateway is
+// live is a config decision (kora#478), and naming the wrong one on the payment
+// screen is wrong exactly where trust matters most.
+//
+// Undefined when the API does not report one — older builds, or a gateway that
+// never set it. Callers fall back to wording that names nobody rather than
+// guessing.
+export function useAIPaymentProvider(): UseQueryResult<string | undefined, Error> {
+  return useQuery({ ...aiPacksQuery, select: (data: AIPacksResponse) => data.provider });
 }
 
 export function useAIOrders(): UseQueryResult<AIOrder[], Error> {

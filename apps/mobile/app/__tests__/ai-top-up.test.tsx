@@ -8,12 +8,17 @@ const mockCreateOrder = jest.fn();
 const mockOrder = jest.fn();
 const mockMutateAsync = jest.fn();
 const mockPush = jest.fn();
+const mockProvider = jest.fn<{ data: string | undefined }, []>(() => ({ data: "Cashfree" }));
 
 jest.mock("expo-router", () => ({
   router: { back: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => true), push: (...args: unknown[]) => mockPush(...args) },
 }));
 jest.mock("@/api/hooks", () => ({
   useAIPacks: () => mockPacks(),
+  // The processor name comes from the server (kora#478). Defaulted here so
+  // existing cases keep exercising the named-provider copy; the fallback
+  // wording has its own test below.
+  useAIPaymentProvider: () => mockProvider(),
   useAIOrder: (id: string | null) => mockOrder(id),
   useCreateAIOrder: () => mockCreateOrder(),
   useProfile: () => ({ data: { email: "payer@example.dev" } }),
@@ -193,4 +198,29 @@ test("an unavailable catalogue is honest and retryable", async () => {
   expect(getByText("Top-ups aren't available right now.")).toBeTruthy();
   await fireEvent.press(getByLabelText("Retry"));
   expect(refetch).toHaveBeenCalledTimes(1);
+});
+
+
+describe("the payment processor named on screen", () => {
+  // The app must never hardcode the processor. Which gateway takes the card is
+  // a config decision (kora#478), and naming the wrong one is false on the one
+  // screen where trust is the entire point.
+  it("names whichever processor the server reports", async () => {
+    mockProvider.mockReturnValue({ data: "Stripe" });
+
+    const { getByText } = await render(<AITopUpScreen />);
+    expect(getByText(/^Payments are handled by Stripe\./)).toBeTruthy();
+  });
+
+  // An unnamed processor is vague; a wrongly-named one is false. When the
+  // server reports none, the copy must name nobody rather than fall back to
+  // whichever gateway happened to be first.
+  it("names nobody when the server reports no processor", async () => {
+    mockProvider.mockReturnValue({ data: undefined });
+
+    const { getByText, queryByText } = await render(<AITopUpScreen />);
+    expect(getByText(/^Payments are handled by our payment provider\./)).toBeTruthy();
+    expect(queryByText(/Cashfree/)).toBeNull();
+    expect(queryByText(/Stripe/)).toBeNull();
+  });
 });

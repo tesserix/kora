@@ -32,7 +32,8 @@ func purchaseRouter(t *testing.T, db *gorm.DB, userID uuid.UUID, gw gateway, now
 	orders := Orders{db: db, gateway: gw, now: func() time.Time { return now }}
 	handler := PurchaseHandler{
 		orders: orders, meter: meter, secretKey: testWebhookSecret,
-		now: func() time.Time { return now },
+		providerName: ProviderCashfree,
+		now:          func() time.Time { return now },
 	}
 
 	gin.SetMode(gin.TestMode)
@@ -443,4 +444,27 @@ func TestStripeWebhookRefusesAnAmountThatDoesNotMatchTheFrozenPrice(t *testing.T
 	var after Order
 	require.NoError(t, db.First(&after, "id = ?", order.ID).Error)
 	require.Equal(t, OrderCreated, after.Status, "an amount that disagrees with the frozen price must not settle")
+}
+
+// TestPacksReportTheConfiguredProcessor — the app must not hardcode the
+// processor's name. Telling a user "payments are handled by X" while Y takes
+// the card is wrong on the one screen where trust is the point, and it is
+// precisely what a provider migration breaks (kora#478).
+func TestPacksReportTheConfiguredProcessor(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	router := purchaseRouter(t, db, userID, &fakeGateway{}, time.Now())
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/ai/packs", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var body struct {
+		Data struct {
+			Provider string `json:"provider"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Equal(t, ProviderCashfree, body.Data.Provider,
+		"the packs response must name the processor that will actually take the card")
 }

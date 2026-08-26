@@ -1110,3 +1110,12 @@ export interface FastingInterval {
   ended_by?: string;
   local_date: string;
 }
+
+// AIPacksResponse is the /v1/ai/packs payload. `provider` is the payment
+// processor's display name, reported by the server so no client hardcodes it.
+// Optional because a deployment with no gateway configured mounts no purchase
+// routes at all, and older builds predate the field.
+export interface AIPacksResponse {
+  packs: AIPack[];
+  provider?: string;
+}

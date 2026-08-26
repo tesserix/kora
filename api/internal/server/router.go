@@ -207,7 +207,8 @@ func NewRouter(deps Deps) *gin.Engine {
 				// does not, so the purchase handler is given the endpoint
 				// signing secret separately below and nothing here.
 				"",
-			).WithStripeWebhook(deps.Stripe.WebhookSecret)
+			).WithStripeWebhook(deps.Stripe.WebhookSecret).
+				WithProviderName(billing.ProviderStripe)
 			mountPurchaseRoutes(r, v1, purchases)
 			// OUTSIDE the v1 group: the caller is Stripe, which holds no
 			// Firebase token. Its own signature is the authentication, checked
@@ -218,7 +219,7 @@ func NewRouter(deps Deps) *gin.Engine {
 				billing.NewOrders(deps.DB, billing.NewCashfreeClient(deps.Cashfree)),
 				billingMeter,
 				deps.Cashfree.SecretKey,
-			)
+			).WithProviderName(billing.ProviderCashfree)
 			mountPurchaseRoutes(r, v1, purchases)
 			// OUTSIDE the v1 group: the caller is Cashfree, which holds no
 			// Firebase token. Its own signature is the authentication, checked

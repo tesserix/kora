@@ -38,7 +38,22 @@ type PurchaseHandler struct {
 	// the API key — Cashfree signs with the same secret it authenticates with,
 	// Stripe does not — which is why it cannot be folded into secretKey.
 	stripeWebhookSecret string
-	now                 func() time.Time
+	// providerName is the payment processor shown to the user. Set from
+	// whichever gateway the router mounted, never inferred by the client.
+	providerName string
+	now          func() time.Time
+}
+
+// Payment processor names, as shown to a user.
+const (
+	ProviderCashfree = "Cashfree"
+	ProviderStripe   = "Stripe"
+)
+
+// WithProviderName sets the processor name reported to clients.
+func (h PurchaseHandler) WithProviderName(name string) PurchaseHandler {
+	h.providerName = name
+	return h
 }
 
 // WithStripeWebhook attaches Stripe's endpoint signing secret, enabling
@@ -82,7 +97,11 @@ func (h PurchaseHandler) Packs(c *gin.Context) {
 			TotalRupees: Rupees(price.TotalPaise),
 		}
 	}
-	httpx.OK(c, gin.H{"packs": out})
+	// The processor's name ships with the packs so the app never hardcodes it.
+	// Telling a user "payments are handled by X" while Y actually takes the
+	// card is wrong on a screen where trust is the whole point, and it is
+	// exactly what a provider migration breaks (kora#478).
+	httpx.OK(c, gin.H{"packs": out, "provider": h.providerName})
 }
 
 type createOrderRequest struct {
