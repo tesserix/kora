@@ -406,3 +406,49 @@ func ambiguityFactor(margin float64) float64 {
 	}
 	return f
 }
+
+// statesRawPreparation reports whether a food name declares the row is RAW.
+//
+// It exists because cookingMethodBonus is decided by a substring test against
+// the row name, and AUSNUT names the CUT rather than the preparation: "Lamb,
+// roast, lean, raw" is a roasting joint, sold raw. That row contains the token
+// "roast", so a query stating cooking_method "roast" was paying it the bonus
+// meant to reward a row cooked that way — and every raw sibling collected it
+// too, which put the whole top 5 for "roast lamb" on raw rows at roughly half
+// the calories of the cooked answer (kora#467).
+//
+// Matched as a whole TOKEN, never a substring: "raw" appears inside ordinary
+// words ("strawberry", "prawn", "brawn") and a substring test would read those
+// rows as raw. Tokens come from Normalize, so punctuation and plurals are
+// already handled.
+func statesRawPreparation(rawName string) bool {
+	for _, w := range strings.Fields(Normalize(rawName)) {
+		if w == "raw" || w == "uncooked" {
+			return true
+		}
+	}
+	return false
+}
+
+// searchableMethod returns the cooking method to fold into the search string,
+// or "" when the stated method is not a cooking method at all.
+//
+// identify emits "raw" as a cooking_method for anything uncooked — the
+// `vegemite on toast` case in ranking.sample.jsonl does exactly that. But "raw"
+// is the ABSENCE of a method, and putting it in the similarity string biases
+// retrieval toward rows whose names say "raw", which is precisely backwards for
+// a signal whose whole purpose is to stop raw rows winning (kora#467).
+//
+// Measured: without this guard, "weet-bix with milk" moved from `Milk` to
+// `Milk, cow, fluid, regular fat (~3.5%), raw` — unpasteurised milk, a
+// different product, promoted by the very word the feature exists to demote.
+//
+// The bonus rule in ResolveQuery still honours an explicit "raw" separately, so
+// a query that really means raw keeps matching raw rows on their own merits.
+func searchableMethod(method string) string {
+	switch Normalize(strings.TrimSpace(method)) {
+	case "", "raw", "uncooked", "none", "fresh":
+		return ""
+	}
+	return method
+}
