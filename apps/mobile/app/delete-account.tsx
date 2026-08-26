@@ -17,8 +17,18 @@ import { auth } from "@/lib/firebase";
 import { useTheme } from "@/theme";
 
 // What the server's cascade actually removes, named in the user's words rather
-// than in table names. Kept in sync with the 17 cascading FKs listed in
-// docs/superpowers/specs/2026-08-07-account-deletion-design.md.
+// than in table names.
+//
+// NOT kept in sync with a count. This list is a promise about coverage, and
+// the thing that keeps it honest is the schema's own ON DELETE CASCADE — the
+// server issues one `DELETE FROM users` and every user-scoped table goes with
+// it, so a table added later is covered without anyone editing anything. (An
+// earlier version of this comment pinned "17 cascading FKs"; there are 32
+// today, and nothing broke, because the number was never load-bearing.)
+//
+// The export screen carries the mirror of this list. Its coverage is NOT free
+// in the same way — an exporter has to name tables — so it is enforced by
+// api/internal/export's completeness test against the live schema.
 const DESTROYED = [
   "Your food logs and photos",
   "Saved meals and pinned foods",

@@ -422,6 +422,15 @@ export default function ProfileScreen() {
               Account
             </AppText>
             <GroupedSection>
+              {/* Export sits ABOVE delete deliberately. They are two halves of
+                  the same promise (§20: you can get your data out, and you can
+                  have it removed), and getting a copy first is the order anyone
+                  leaving would want them in. */}
+              <Row
+                title="Export my data"
+                chevron
+                onPress={() => router.push("/export-data")}
+              />
               <Row
                 title="Delete account"
                 destructive

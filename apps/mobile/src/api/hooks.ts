@@ -1618,6 +1618,33 @@ export function deleteAccount(): Promise<unknown> {
   return apiFetch("/v1/me", { method: "DELETE" });
 }
 
+// One user's complete export (kora#24). A plain function for the same reason
+// deleteAccount is one: the result is written to a file and handed to the
+// share sheet, so there is nothing to cache and nothing to invalidate.
+//
+// The response is NOT httpx.OK's envelope — it is its own document, and its
+// table map is deliberately keyed `tables` rather than `data`. apiFetch
+// returns `envelope.data ?? envelope`, so a `data` key on the server side
+// would be unwrapped here and format_version/exported_at/counts/redacted
+// would vanish with nothing failing. Keep this type and the Go
+// export.Document in step; nothing across this wire is checked at compile
+// time in either direction.
+export type DataExport = {
+  format_version: number;
+  exported_at: string;
+  user_id: string;
+  redacted: { table: string; column: string; reason: string }[];
+  counts: Record<string, number>;
+  tables: Record<string, Record<string, unknown>[]>;
+};
+
+export function fetchDataExport(): Promise<DataExport> {
+  // A generous timeout: this is ~40 queries and the whole of one account, and
+  // it runs once. The default would abort a large account's export and report
+  // it as a network failure.
+  return apiFetch("/v1/me/export", {}, { timeoutMs: 60_000 }) as Promise<DataExport>;
+}
+
 export function useGroups() {
   return useQuery({ queryKey: ["groups"], queryFn: () => apiFetch("/v1/groups") as Promise<GroupSummary[]> });
 }

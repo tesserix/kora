@@ -25,6 +25,7 @@ import (
 	"github.com/tesserix/kora/api/internal/compare"
 	"github.com/tesserix/kora/api/internal/dashboard"
 	"github.com/tesserix/kora/api/internal/devices"
+	"github.com/tesserix/kora/api/internal/export"
 	"github.com/tesserix/kora/api/internal/fasting"
 	"github.com/tesserix/kora/api/internal/feedback"
 	"github.com/tesserix/kora/api/internal/foodlog"
@@ -207,6 +208,10 @@ func NewRouter(deps Deps) *gin.Engine {
 		// requires in-app account deletion, so this route must never be
 		// silently absent in any environment.
 		v1.DELETE("/me", userHandler.DeleteMe)
+		// Data export (#24, spec §20). Mounted next to DELETE /v1/me because
+		// they are the same promise — you can get your data out, and you can
+		// have it removed — and a reader looking for one should find the other.
+		v1.GET("/me/export", export.NewHandler(export.NewService(deps.DB), slog.Default()).Export)
 		if deps.AppleExchanger != nil {
 			appleHandler := user.NewAppleHandler(userRepo, deps.AppleExchanger)
 			v1.POST("/me/apple-authorization", appleHandler.Store)
