@@ -53,6 +53,57 @@ is out of scope by design, which is the price of determinism.
 The only assertion is that cases with a KNOWN `expected_name` still pass.
 Everything else is diagnostic.
 
+## au_phrases.txt + TestRecordGuesses — the AU accuracy set
+
+`au_phrases.txt` is 50 ordinary Australian phrases, one per line, chosen to
+cover the shapes that have actually broken rather than just common foods:
+conjunctions the index spells `&` (kora#235), a stated cooking method against a
+raw row (kora#467), colloquial abbreviations (kora#469), composite dishes
+identify must split, and takeaway/brand-named items.
+
+**The guesses are RECORDED from the live provider, never invented.** A case
+whose guesses someone imagined measures a pipeline that does not exist. Record
+them with:
+
+    set -a && . ./.env && set +a
+    KORA_EVAL=1 KORA_EVAL_RECORD=1 \
+      go test -tags eval ./internal/ai/ -run TestRecordGuesses -v
+
+That calls a provider, costs money and is nondeterministic, which is why it sits
+behind its own `KORA_EVAL_RECORD` flag on top of `KORA_EVAL`. It goes through
+`ai.Router` — the real production path, primary plus fallback — because a stub or
+a bare provider records output the product never actually produces. Output is
+ranking-dataset JSONL; it is NOT merged into `ranking.sample.jsonl` automatically,
+because every case still needs a human to decide whether the right answer is
+genuinely known.
+
+### Read the HIT rate correctly — it is a REGRESSION PIN, not an accuracy score
+
+This is the trap worth stating plainly. `expected_name` values are chosen by a
+human LOOKING AT what the resolver currently returns. A 100% hit rate therefore
+means **"nothing has changed since these were recorded"**, not "the resolver is
+right". It is circular by construction, and that is fine — pinning behaviour is
+exactly what a regression suite is for — but it must never be quoted as accuracy.
+
+Measuring accuracy means judging the output against what the food ACTUALLY is,
+independently of what the resolver said. Done by hand over these 50 phrases on
+2026-08-26:
+
+| | |
+|---|---|
+| phrases probed | 50 |
+| resolves acceptably | **34 (68%)** |
+| clearly wrong | 14 |
+| reference value looks wrong | 2 |
+
+The dominant single cause was the bare guess `toast`, which returns `French
+toast, plain` and accounted for 3 of the 14 — "X on toast" being a staple
+Australian breakfast.
+
+**Re-do that judgement by hand when the number is claimed.** It cannot be
+derived from the harness, and the harness will happily report 100% while the
+resolver is 68% right.
+
 ## Thresholds (exit gate)
 - chat top-1 id accuracy  >= 0.90
 - photo top-1 id accuracy >= 0.80
