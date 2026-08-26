@@ -25,14 +25,20 @@ const (
 // and the router can never disagree about what exists.
 var EntityTypes = []string{TypeUsers, TypeFoods}
 
-// MinSearchChars is the shortest `q` this endpoint will run.
+// This endpoint BROWSES when `q` is absent and SEARCHES when it is present
+// (kora#473).
 //
-// This is the enumeration guard #433 asks for, and one character is not
-// enough: "a" would return most of the user table. It is a floor on the
-// SEARCH, not on the route — an absent q is refused outright below, which is
-// the case that matters, because a blank search returning every user is
-// precisely how a directory becomes a data dump.
-const MinSearchChars = 2
+// It used to require `q` of at least 2 characters as an enumeration guard —
+// "a search endpoint over user records must not answer everything when asked
+// for nothing". Browse retires that reasoning rather than weakening it: the
+// console's Food index and Users pages are indexes an operator pages through,
+// so "everything, paged" is now the intended answer and the guard would only
+// leave an incoherent hole. `q=a` returns a strict SUBSET of what an absent q
+// returns, so refusing it protected nothing while breaking a legitimate
+// narrowing search.
+//
+// What still bounds the response is pagination, which is unchanged: `limit` is
+// capped and `total` is exact and unpaged.
 
 // Entity is one searchable record, in the shape the Directory and ⌘K need
 // and no larger.
@@ -107,15 +113,24 @@ var ErrUnknownEntityType = fmt.Errorf("platformadmin: unknown entity type")
 // pg_trgm plus a GIN trgm index on lower(name) — which makes THIS query
 // indexed without changing its semantics — not a narrower search.
 func (r Repository) SearchEntities(ctx context.Context, entityType, q string, limit, offset int) (EntityResult, error) {
+	// An empty q BROWSES: the filter is skipped entirely rather than left to
+	// LIKE '%%'. That pattern does match every row, so browse worked here by
+	// accident before kora#473 — but it made the database run an unindexed
+	// leading-wildcard scan to express "no filter", and it hid the intent from
+	// anyone reading the query. Skipping the predicate is the same answer,
+	// cheaper, and says what it means.
+	browse := strings.TrimSpace(q) == ""
 	pattern := "%" + strings.ToLower(q) + "%"
 
 	switch entityType {
 	case TypeUsers:
-		db := r.db.WithContext(ctx).Table("users").
-			Where("lower(coalesce(display_name, '')) LIKE ?"+
+		db := r.db.WithContext(ctx).Table("users")
+		if !browse {
+			db = db.Where("lower(coalesce(display_name, '')) LIKE ?"+
 				" OR lower(coalesce(email, '')) LIKE ?"+
 				" OR lower(coalesce(handle, '')) LIKE ?",
 				pattern, pattern, pattern)
+		}
 
 		var total int64
 		if err := db.Count(&total).Error; err != nil {
@@ -141,9 +156,15 @@ func (r Repository) SearchEntities(ctx context.Context, entityType, q string, li
 		// operator to act on something users cannot see. GET
 		// /v1/admin/foods/:id still loads one by id, which is the surface
 		// that exists for inspecting what was retired.
+		// deleted_at is NOT part of the search filter — it is the one
+		// predicate browse must keep. A retired food is not findable in the
+		// app either, and listing it invites an operator to act on something
+		// users cannot see.
 		db := r.db.WithContext(ctx).Table("food_items").
-			Where("deleted_at IS NULL").
-			Where("lower(name) LIKE ? OR lower(brand) LIKE ?", pattern, pattern)
+			Where("deleted_at IS NULL")
+		if !browse {
+			db = db.Where("lower(name) LIKE ? OR lower(brand) LIKE ?", pattern, pattern)
+		}
 
 		var total int64
 		if err := db.Count(&total).Error; err != nil {
@@ -232,14 +253,9 @@ func (h *EntitiesHandler) Search(c *gin.Context) {
 
 	q := parseQuery(c, nowUTC())
 
-	// A blank or one-character q is refused, not silently answered with the
-	// whole table. This is a search endpoint over user records; the failure
-	// mode it must not have is "returns everything when asked for nothing".
-	if len([]rune(q.Search)) < MinSearchChars {
-		httpx.Error(c, http.StatusBadRequest, "invalid_input",
-			fmt.Sprintf("q is required and must be at least %d characters", MinSearchChars))
-		return
-	}
+	// No q floor: an absent q browses and any present q searches (kora#473).
+	// q.Search is already trimmed by parseQuery, so "?q=%20%20" reaches the
+	// source as "" and browses rather than searching for whitespace.
 
 	result, err := h.src.SearchEntities(c.Request.Context(), entityType, q.Search, q.Limit, q.Offset())
 	if err != nil {

@@ -331,24 +331,6 @@ func TestEntitiesReturnsTheContractEnvelope(t *testing.T) {
 
 // TestEntitiesRefusesABlankSearch is the enumeration guard. A search endpoint
 // over user records must not answer "everything" when asked for nothing.
-func TestEntitiesRefusesABlankSearch(t *testing.T) {
-	for _, target := range []string{
-		"/admin/entities/users",
-		"/admin/entities/users?q=",
-		"/admin/entities/users?q=%20%20",
-		"/admin/entities/users?q=a",
-	} {
-		t.Run(target, func(t *testing.T) {
-			src := &stubEntities{}
-			rec := entitiesRequest(t, target, src)
-
-			assert.Equal(t, http.StatusBadRequest, rec.Code)
-			assert.Equal(t, "invalid_input", decode(t, rec)["error"])
-			assert.Empty(t, src.gotQ, "the search must not reach the database at all")
-		})
-	}
-}
-
 // TestEntitiesUnknownTypeIsNotFoundNotEmpty — "Kora has no such type" and
 // "this type has no matches" are different answers and must not look alike.
 func TestEntitiesUnknownTypeIsNotFound(t *testing.T) {
@@ -571,4 +553,52 @@ func keysOf(m map[string]any) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// TestEntitiesBrowsesWithoutAQuery pins kora#473.
+//
+// An absent `q` now lists the type rather than refusing. The console's Food
+// index and Users pages are indexes an operator pages through; against a
+// search-only endpoint the first thing they saw on opening either was a 400.
+//
+// The request must reach the source with an EMPTY q — a handler that quietly
+// substituted some default search term would answer 200 while listing the
+// wrong thing.
+func TestEntitiesBrowsesWithoutAQuery(t *testing.T) {
+	for _, target := range []string{
+		"/admin/entities/users",
+		"/admin/entities/users?q=",
+		"/admin/entities/users?q=%20%20",
+		"/admin/entities/foods",
+	} {
+		t.Run(target, func(t *testing.T) {
+			src := &stubEntities{}
+			rec := entitiesRequest(t, target, src)
+
+			assert.Equal(t, http.StatusOK, rec.Code)
+			assert.Equal(t, "", src.gotQ, "browse must reach the source with an empty q, not a substituted default")
+		})
+	}
+}
+
+// TestEntitiesStillSearchesWhenGivenAQuery — adding browse must not turn the
+// endpoint into a list that ignores q.
+func TestEntitiesStillSearchesWhenGivenAQuery(t *testing.T) {
+	src := &stubEntities{}
+	rec := entitiesRequest(t, "/admin/entities/users?q=alex", src)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "alex", src.gotQ)
+}
+
+// TestEntitiesAcceptsAShortQuery — with browse available, refusing a
+// one-character q is incoherent: `q=a` returns a strict SUBSET of what an
+// absent q now returns, so the old MinSearchChars floor guarded nothing and
+// only left a hole where a legitimate narrowing search failed.
+func TestEntitiesAcceptsAShortQuery(t *testing.T) {
+	src := &stubEntities{}
+	rec := entitiesRequest(t, "/admin/entities/users?q=a", src)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "a", src.gotQ)
 }
