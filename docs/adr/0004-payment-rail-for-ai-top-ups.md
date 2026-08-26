@@ -54,6 +54,15 @@ is not an iOS-only constraint.
 
 **AI top-up packs on iOS are sold through StoreKit In-App Purchase.**
 
+**The product shape is BOTH**: an auto-renewable subscription carrying the
+baseline allowance, plus consumable top-ups for bursts. That matches how heavy
+users behave — a steady monthly floor with occasional spikes — and it is the one
+combination where Apple's retention tooling (trials, offer codes, grace periods)
+and one-off purchasing both apply.
+
+It also costs the most to build, because there are two entitlement paths to keep
+consistent rather than one. The ordering rule below is what keeps them honest.
+
 Consequences that follow, rather than needing separate decisions:
 
 - **Apple owns currency, tax and receipts.** Price tiers are chosen once; Apple
@@ -116,13 +125,6 @@ an entry criterion; nutrition quality is.
 
 ## Open questions
 
-0. **Consumable packs or an auto-renewable subscription?** Settled in the
-   implementation issue, not here: this ADR fixes the RAIL (StoreKit), and the
-   product shape is a separate decision with different retention, pricing and
-   restore consequences. ADR 0003's packs map most directly to consumables, but
-   an auto-renewable subscription is the conventional shape for recurring AI
-   usage and is what Apple's tooling (trials, offer codes, grace periods,
-   Family Sharing) is built around.
 1. **Confirm the commission tier.** 15% assumes enrolment in the Small Business
    Program. Worth checking rather than assuming.
 2. **Consumable or non-renewing subscription?** Packs grant N requests valid for
