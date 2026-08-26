@@ -112,6 +112,7 @@ type Resolver struct {
 	meter         Meter
 	portionSource PortionSource
 	locales       LocaleSource
+	outcomes      OutcomeSink
 }
 
 // LocaleSource reports the food locale to prefer for a user (kora#212 Phase 4).
@@ -154,6 +155,17 @@ func (r Resolver) WithPortionSource(ps PortionSource) Resolver {
 // nutrition.LocaleUnknown, which applies no locale preference at all. That is
 // exactly the pre-Phase-4 behaviour, so leaving it unset is a safe no-op rather
 // than a silent downgrade.
+// WithOutcomeSink attaches the recorder for resolve outcomes (kora#459).
+//
+// An optional builder, like WithPortionSource and WithLocales, rather than a
+// NewResolver argument: a nil sink records nothing and every existing call
+// site keeps compiling. Measurement is the one collaborator this resolver must
+// be able to run entirely without.
+func (r Resolver) WithOutcomeSink(s OutcomeSink) Resolver {
+	r.outcomes = s
+	return r
+}
+
 func (r Resolver) WithLocales(ls LocaleSource) Resolver {
 	r.locales = ls
 	return r
@@ -178,12 +190,21 @@ func (r Resolver) localeFor(ctx context.Context, userID uuid.UUID) nutrition.Loc
 // happened; a miss, or any lookup error, falls through to the existing
 // cache -> budget -> identify -> resolve pipeline unchanged.
 func (r Resolver) ResolveText(ctx context.Context, userID uuid.UUID, phrase string) (Resolution, error) {
+	return r.resolveTextAs(ctx, userID, phrase, modeText)
+}
+
+// resolveTextAs is ResolveText with the MODE threaded through, so a voice
+// resolve is recorded as voice rather than as the text resolve it delegates
+// to. Without it every transcript would be filed under `text` and the voice
+// path would be invisible in its own outcome table (kora#459).
+func (r Resolver) resolveTextAs(ctx context.Context, userID uuid.UUID, phrase, mode string) (Resolution, error) {
 	if res, ok := r.aliasShortCircuit(ctx, userID, phrase); ok {
+		r.recordOutcome(ctx, outcomeFor(userID, outcomeAlias, mode, phrasePtr(phrase), res))
 		return res, nil
 	}
 
 	key := CacheKey("phrase", userID, phrase)
-	return r.resolve(ctx, userID, key, phrase,
+	return r.resolve(ctx, userID, key, phrase, mode,
 		func(c context.Context) ([]Guess, Usage, error) { return r.provider.IdentifyText(c, phrase) },
 		func(guesses []Guess) string { return phrase },
 	)
@@ -284,7 +305,7 @@ func (r Resolver) ResolvePhoto(ctx context.Context, userID uuid.UUID, image []by
 	// The empty phrase is load-bearing, not a placeholder: a photo says nothing
 	// that identify could have discarded, so phraseCoverage returns 1 and the
 	// reduction factor is exactly 1.0 — this path behaves as it always has.
-	return r.resolve(ctx, userID, key, "",
+	return r.resolve(ctx, userID, key, "", modePhoto,
 		func(c context.Context) ([]Guess, Usage, error) { return r.provider.IdentifyPhoto(c, image, mime) },
 		func(guesses []Guess) string {
 			if len(guesses) == 0 {
@@ -313,10 +334,12 @@ func (r Resolver) resolve(
 	userID uuid.UUID,
 	key string,
 	phrase string,
+	mode string,
 	identify func(context.Context) ([]Guess, Usage, error),
 	decomposeSubject func([]Guess) string,
 ) (Resolution, error) {
 	if cached, ok := r.cache.Get(ctx, key); ok {
+		r.recordOutcome(ctx, outcomeFor(userID, outcomeCache, mode, phrasePtr(phrase), *cached))
 		return *cached, nil
 	}
 
@@ -325,11 +348,13 @@ func (r Resolver) resolve(
 		return Resolution{}, fmt.Errorf("ai: resolve: check budget: %w", err)
 	}
 	if !ok {
-		return Resolution{
+		res := Resolution{
 			Tier:             TierFollowUp,
 			FollowUpQuestion: budgetFollowUpQuestion,
 			Provenance:       "budget",
-		}, nil
+		}
+		r.recordOutcome(ctx, outcomeFor(userID, outcomeBudget, mode, phrasePtr(phrase), res))
+		return res, nil
 	}
 
 	// A provider call is billed upstream whether or not it produces a usable
@@ -342,6 +367,7 @@ func (r Resolver) resolve(
 	if err != nil {
 		usage.Outcome = OutcomeError
 		r.recordAll(ctx, userID, sink.drain(), usage)
+		r.recordOutcome(ctx, outcomeFor(userID, outcomeError, mode, phrasePtr(phrase), Resolution{}))
 		return Resolution{}, fmt.Errorf("ai: resolve: identify: %w", err)
 	}
 	r.recordAll(ctx, userID, sink.drain(), usage)
@@ -353,6 +379,7 @@ func (r Resolver) resolve(
 
 	if res.Tier == TierAuto || res.Tier == TierConfirm {
 		r.cache.Set(ctx, key, res)
+		r.recordOutcome(ctx, outcomeFor(userID, outcomeResolved, mode, phrasePtr(phrase), res))
 		return res, nil
 	}
 
@@ -395,6 +422,7 @@ func (r Resolver) resolve(
 			"top", topCandidateName(res),
 			"score", topCandidateScore(res),
 		)
+		r.recordOutcome(ctx, outcomeFor(userID, outcomeWeakMatch, mode, phrasePtr(phrase), res))
 		return res, nil
 	}
 
@@ -415,6 +443,7 @@ func (r Resolver) resolve(
 			"score", topCandidateScore(res),
 			"floor", minReturnableMatchScore,
 		)
+		r.recordOutcome(ctx, outcomeFor(userID, outcomeBelowFloor, mode, phrasePtr(phrase), res))
 		return res, nil
 	}
 
@@ -432,6 +461,7 @@ func (r Resolver) resolve(
 			"guesses", summariseGuesses(guesses),
 			"candidates", len(res.Candidates),
 		)
+		r.recordOutcome(ctx, outcomeFor(userID, outcomeNoMatch, mode, phrasePtr(phrase), res))
 		return res, nil
 	}
 
@@ -446,13 +476,18 @@ func (r Resolver) resolve(
 
 	estimate, resolved, err := r.decomposeAndEstimate(ctx, userID, subject)
 	if err != nil {
+		r.recordOutcome(ctx, outcomeFor(userID, outcomeError, mode, phrasePtr(phrase), res))
 		return Resolution{}, fmt.Errorf("ai: resolve: decompose: %w", err)
 	}
 	if !resolved {
+		// Decomposition ran and produced nothing usable, so the attempt ends
+		// where the no-candidate branch above ends: an index gap.
+		r.recordOutcome(ctx, outcomeFor(userID, outcomeNoMatch, mode, phrasePtr(phrase), res))
 		return res, nil
 	}
 
 	r.cache.Set(ctx, key, estimate)
+	r.recordOutcome(ctx, outcomeFor(userID, outcomeDecomposed, mode, phrasePtr(phrase), estimate))
 	return estimate, nil
 }
 
@@ -464,6 +499,11 @@ func (r Resolver) ResolveVoice(ctx context.Context, userID uuid.UUID, audio []by
 	sum := sha256.Sum256(audio)
 	key := CacheKey("voice", userID, hex.EncodeToString(sum[:]))
 	if cached, ok := r.cache.Get(ctx, key); ok {
+		// No phrase: this hit is keyed on the AUDIO hash, so the transcript
+		// was never produced on this request and inventing one from the
+		// cached resolution would attribute words to the user they did not
+		// say on this attempt.
+		r.recordOutcome(ctx, outcomeFor(userID, outcomeCache, modeVoice, nil, *cached))
 		return *cached, nil
 	}
 
@@ -472,7 +512,13 @@ func (r Resolver) ResolveVoice(ctx context.Context, userID uuid.UUID, audio []by
 		return Resolution{}, fmt.Errorf("ai: resolve voice: check budget: %w", err)
 	}
 	if !ok {
-		return Resolution{Tier: TierFollowUp, FollowUpQuestion: budgetFollowUpQuestion, Provenance: "budget"}, nil
+		res := Resolution{Tier: TierFollowUp, FollowUpQuestion: budgetFollowUpQuestion, Provenance: "budget"}
+		// Voice has its OWN budget gate, ahead of the text pipeline's. Without
+		// a recorder here a voice attempt refused for budget would leave no
+		// row at all, and the voice denominator would silently exclude exactly
+		// the users who hit their cap.
+		r.recordOutcome(ctx, outcomeFor(userID, outcomeBudget, modeVoice, nil, res))
+		return res, nil
 	}
 
 	// Same both-paths metering as `resolve` above — see #81. Transcribe has no
@@ -483,17 +529,26 @@ func (r Resolver) ResolveVoice(ctx context.Context, userID uuid.UUID, audio []by
 	if err != nil {
 		usage.Outcome = OutcomeError
 		r.recordAll(ctx, userID, sink.drain(), usage)
+		r.recordOutcome(ctx, outcomeFor(userID, outcomeError, modeVoice, nil, Resolution{}))
 		return Resolution{}, fmt.Errorf("ai: resolve voice: transcribe: %w", err)
 	}
 	r.recordAll(ctx, userID, sink.drain(), usage)
 
 	transcript = strings.TrimSpace(transcript)
 	if transcript == "" {
-		return Resolution{Tier: TierFollowUp, FollowUpQuestion: blankTranscriptFollowUp, Provenance: "voice"}, nil
+		res := Resolution{Tier: TierFollowUp, FollowUpQuestion: blankTranscriptFollowUp, Provenance: "voice"}
+		// A CAPTURE failure, not an index one: the microphone picked up
+		// nothing usable. Recorded with its own kind rather than folded into
+		// `error` (a provider fault) or `no_match` (an index gap), because it
+		// is neither and both of those drive different fixes. Counted, so the
+		// voice denominator stays honest.
+		r.recordOutcome(ctx, outcomeFor(userID, outcomeTranscriptBlank, modeVoice, nil, res))
+		return res, nil
 	}
 
-	// Reuse the full text pipeline (identify → resolve → tiers → decompose).
-	res, err := r.ResolveText(ctx, userID, transcript)
+	// Reuse the full text pipeline (identify → resolve → tiers → decompose),
+	// recorded as VOICE — see resolveTextAs.
+	res, err := r.resolveTextAs(ctx, userID, transcript, modeVoice)
 	if err != nil {
 		return Resolution{}, fmt.Errorf("ai: resolve voice: %w", err)
 	}

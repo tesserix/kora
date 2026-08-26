@@ -54,16 +54,16 @@ type dependencyKey struct {
 // the payload. The handler does not decide membership with conditionals, so a
 // dependency cannot fall silently out of the response.
 //
-// The two uninstrumented entries are honest, not lazy:
+// The one uninstrumented entry is honest, not lazy:
 //
 //   - ai_provider: prod is gateway→Vertex, and the only genuine probe is a
 //     model call, which costs money and quota on every console page render.
 //     Configuration presence is NOT health — a set GEMINI_API_KEY says a
 //     deploy was configured and nothing more — so there is nothing here that
 //     could be reported without lying.
-//   - unresolved_food_backlog: nothing persists a resolution outcome. There
-//     is no table to measure depth against, so any number would be invented.
-//     Same gap that keeps `unresolved_food` out of the inbox; see inbox.go.
+//
+// unresolved_food_backlog became instrumented with kora#459: the outcome
+// table exists, so the depth is a COUNT rather than an invention.
 //
 // Adding an entry here without a probe below yields `unknown`, not `ok` —
 // see the emit loop.
@@ -71,19 +71,31 @@ var DependencyRegistry = []dependencyKey{
 	{Name: DepPostgres, Instrumented: true},
 	{Name: DepRedis, Instrumented: true},
 	{Name: DepAIProvider, Instrumented: false},
-	{Name: DepFoodBacklog, Instrumented: false},
+	{Name: DepFoodBacklog, Instrumented: true},
 }
 
-// Probe is one genuinely-performed dependency check. It returns an error when
-// the dependency is unreachable, and an error from the CHECK ITSELF is
-// indistinguishable from that on purpose: both mean "not known to be
-// working", and the honest answer to both is not `ok`.
-type Probe func(ctx context.Context) error
+// Probe is one genuinely-performed dependency check.
+//
+// It returns an error when the dependency is unreachable, and an error from
+// the CHECK ITSELF is indistinguishable from that on purpose: both mean "not
+// known to be working", and the honest answer to both is not `ok`.
+//
+// The map is what the product knows ABOUT that dependency and nothing else
+// can see — §3.5's "its own queue depths". Nil is the ordinary case: Postgres
+// and Redis either answer or they do not, and there is no number to report.
+// A probe that returns a map on failure has its numbers discarded, because a
+// count from a check that errored is not a measurement.
+type Probe func(ctx context.Context) (map[string]int64, error)
 
 // dependencyRow is one entry in the response.
 type dependencyRow struct {
 	Name   string `json:"name"`
 	Status string `json:"status"`
+	// Metrics is omitempty so an uninstrumented or unknown dependency ships no
+	// metrics key at all. A zeroed block would be indistinguishable from a
+	// healthy one reporting genuine zeroes — the same distinction `unknown`
+	// draws for status.
+	Metrics map[string]int64 `json:"metrics,omitempty"`
 	// Detail is a short, non-sensitive reason for a non-ok status. It never
 	// carries the driver error — DSN fragments and host names do not leave
 	// the process; the real error goes to the log.
@@ -144,12 +156,16 @@ func (h *HealthHandler) check(ctx context.Context, key dependencyKey) dependency
 	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 
-	if err := probe(probeCtx); err != nil {
+	metrics, err := probe(probeCtx)
+	if err != nil {
 		if h.logger != nil {
 			h.logger.Error("platformadmin: dependency probe failed",
 				"dependency", key.Name, "err", err)
 		}
+		// Metrics deliberately dropped: a count produced by a check that
+		// errored is not a measurement, and shipping it beside a `down`
+		// status invites reading it as one.
 		return dependencyRow{Name: key.Name, Status: StatusDown, Detail: "probe failed"}
 	}
-	return dependencyRow{Name: key.Name, Status: StatusOK}
+	return dependencyRow{Name: key.Name, Status: StatusOK, Metrics: metrics}
 }

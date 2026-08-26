@@ -93,13 +93,62 @@ type TextPhotoResolver interface {
 type BarcodeResolver func(ctx context.Context, code string) (*nutrition.FoodItem, bool, error)
 
 type Handler struct {
-	tp TextPhotoResolver
-	bc BarcodeResolver
+	tp       TextPhotoResolver
+	bc       BarcodeResolver
+	outcomes ai.OutcomeSink
 }
 
 func NewHandler(tp TextPhotoResolver, bc BarcodeResolver) Handler {
 	return Handler{tp: tp, bc: bc}
 }
+
+// WithOutcomeSink attaches the resolve-outcome recorder (kora#459), for the
+// BARCODE path only.
+//
+// Text, photo and voice are recorded inside ai.Resolver, which owns their
+// branches. A barcode never reaches the resolver at all — ResolveBarcode is a
+// direct OpenFoodFacts lookup in this handler — so without this the cleanest
+// failure signal in the product would be the one thing not recorded: a barcode
+// miss names the exact product that is missing from the index.
+//
+// Optional, and nil-safe, matching ai.Resolver.WithOutcomeSink.
+func (h Handler) WithOutcomeSink(s ai.OutcomeSink) Handler {
+	h.outcomes = s
+	return h
+}
+
+// recordBarcode writes one barcode attempt's outcome, if a sink is wired.
+func (h Handler) recordBarcode(c *gin.Context, userID uuid.UUID, kind string, item *nutrition.FoodItem) {
+	if h.outcomes == nil {
+		return
+	}
+	code := c.GetString(barcodeContextKey)
+	o := ai.ResolveOutcome{
+		UserID: userID,
+		Kind:   kind,
+		Mode:   "barcode",
+		// The barcode IS the phrase here: it is what the user "said", and it
+		// is the whole diagnostic value of a miss — a row saying only that
+		// some barcode failed cannot be acted on.
+		Phrase: &code,
+	}
+	if item != nil {
+		id := item.ID
+		score := 1.0
+		o.Tier = string(ai.TierAuto)
+		o.TopFoodItemID = &id
+		o.TopScore = &score
+		o.CandidateCount = 1
+	} else {
+		o.Tier = string(ai.TierFollowUp)
+	}
+	h.outcomes.Record(c.Request.Context(), o)
+}
+
+// barcodeContextKey carries the validated barcode from the handler to
+// recordBarcode without re-parsing the request body, which has already been
+// consumed by the time the outcome is recorded.
+const barcodeContextKey = "resolve_barcode"
 
 type textRequest struct {
 	Phrase string `json:"phrase"`
@@ -234,12 +283,23 @@ func (h Handler) ResolveBarcode(c *gin.Context) {
 		httpx.Error(c, http.StatusBadRequest, "invalid_input", "barcode must be 8-14 digits")
 		return
 	}
+	c.Set(barcodeContextKey, req.Barcode)
+	userID, _ := user.IDFromContext(c)
+
 	item, found, err := h.bc(c.Request.Context(), req.Barcode)
 	if err != nil {
+		// An upstream failure, not an index gap. Recorded as `error` so a
+		// flaky OpenFoodFacts does not masquerade as a hole in the catalogue
+		// and send someone off adding foods that are already there.
+		h.recordBarcode(c, userID, "error", nil)
 		httpx.RespondServiceError(c, err)
 		return
 	}
 	if !found {
+		// The cleanest failure signal in the product: the barcode identifies
+		// exactly one product, so this is unambiguously "this food is missing"
+		// rather than "the matcher was unsure".
+		h.recordBarcode(c, userID, "no_match", nil)
 		httpx.OK(c, ai.Resolution{
 			Tier:             ai.TierFollowUp,
 			FollowUpQuestion: barcodeUnknownQuestion,
@@ -247,6 +307,7 @@ func (h Handler) ResolveBarcode(c *gin.Context) {
 		})
 		return
 	}
+	h.recordBarcode(c, userID, "resolved", item)
 	httpx.OK(c, ai.Resolution{
 		Candidates: []ai.ResolvedCandidate{barcodeCandidate(*item)},
 		Tier:       ai.TierAuto,

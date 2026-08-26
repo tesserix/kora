@@ -42,6 +42,7 @@ import (
 	"github.com/tesserix/kora/api/internal/nutrition/refresh"
 	"github.com/tesserix/kora/api/internal/push"
 	"github.com/tesserix/kora/api/internal/resolve"
+	"github.com/tesserix/kora/api/internal/resolveoutcome"
 	"github.com/tesserix/kora/api/internal/scheduler"
 	"github.com/tesserix/kora/api/internal/server"
 	"github.com/tesserix/kora/api/internal/user"
@@ -425,14 +426,20 @@ func buildResolveHandler(ctx context.Context, cfg config.Config, db *gorm.DB, lo
 	// ai.Resolver.ResolveText inherit the portion from the user's last log of
 	// the same phrase (see foodlog.Repository.LastPortionForPhrase), instead
 	// of always falling back to the food's serving size.
+	// The resolve-outcome recorder (kora#459). Wired here rather than inside
+	// NewResolver because it is measurement: a Resolver without it resolves
+	// exactly as before, which is what keeps every test that builds a bare one
+	// compiling.
+	outcomes := resolveoutcome.NewSink(resolveoutcome.NewRepository(db))
 	resolver := ai.NewResolver(provider, foods, cache, meter).
 		WithPortionSource(foodlog.NewRepository(db)).
-		WithLocales(userLocales{users: user.NewRepository(db)})
+		WithLocales(userLocales{users: user.NewRepository(db)}).
+		WithOutcomeSink(outcomes)
 	off := nutrition.NewHTTPOFFClient()
 
 	h := resolve.NewHandler(resolver, func(c context.Context, code string) (*nutrition.FoodItem, bool, error) {
 		return foods.ResolveBarcode(c, off, code)
-	})
+	}).WithOutcomeSink(outcomes)
 	return &h, provider, cache, bodyCache
 }
 
