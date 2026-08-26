@@ -350,6 +350,15 @@ func (r Repository) ResolveQuery(ctx context.Context, userID uuid.UUID, q Query,
 	// scores a perfect 1.0 and wins. Searching "cola zero sugar" instead puts
 	// coverage behind the words that actually distinguish the product.
 	norm := Normalize(phrase)
+	// recallNorm drives the tsquery predicate ONLY. Connector words are
+	// stripped there because plainto_tsquery('simple', ...) makes every term
+	// mandatory and the `simple` config has no stopword list, so a phrase
+	// spelling the conjunction ("bacon and egg roll") could not retrieve a row
+	// spelling it "&" ("Bacon & egg roll") — zero candidates, nothing to rank
+	// (kora#235). Removing a mandatory term can only ADD candidates, so recall
+	// is widened and no previously-matching row is lost. `searchNorm` below is
+	// deliberately left whole: scoring still sees the full phrase.
+	recallNorm := StripConnectors(norm)
 	searchNorm := Normalize(strings.TrimSpace(phrase + " " + strings.Join(q.Qualifiers, " ")))
 	if searchNorm == "" {
 		searchNorm = norm
@@ -482,7 +491,7 @@ func (r Repository) ResolveQuery(ctx context.Context, userID uuid.UUID, q Query,
 		     -- since the Go ranker below sorts stably.
 		     ORDER BY similarity(fi.normalized_name, ?) DESC, fi.id
 		     -- searchNorm ranks (similarity), norm recalls (tsquery).
-		     LIMIT ?`, searchNorm, norm, searchNorm, resolveScanLimit).
+		     LIMIT ?`, searchNorm, recallNorm, searchNorm, resolveScanLimit).
 		Scan(&ftRows).Error; err != nil {
 		return nil, fmt.Errorf("nutrition: resolve fulltext: %w", err)
 	}
