@@ -243,11 +243,22 @@ func TestEvalRanking(t *testing.T) {
 				t.Fatalf("resolve %q (phrase %q): %v", g.Food, c.Phrase, err)
 			}
 			if len(cands) == 0 {
+				// Zero candidates with a KNOWN expected answer is a MISS, not
+				// a neutral "-". It used to be recorded as neutral, which made
+				// the worst possible retrieval outcome — the correct row never
+				// entering the candidate set at all — the one result the suite
+				// could not fail on. kora#235 lived behind a green harness for
+				// exactly that reason: "bacon and egg roll" returned nothing,
+				// scored "-", and the regression went unmeasured.
+				hit := "-"
+				if c.ExpectedName != "" {
+					hit = "MISS"
+				}
 				rows = append(rows, rankingRow{
 					Phrase: c.Phrase, Guess: g.Food, Rank: 0,
 					Name: "(no candidates)", Coverage: coverage, Factor: factor,
 					TierBefore: ai.TierFollowUp, TierAfter: ai.TierFollowUp,
-					Expected: c.ExpectedName, ExpectedHit: "-",
+					Expected: c.ExpectedName, ExpectedHit: hit,
 				})
 				continue
 			}
