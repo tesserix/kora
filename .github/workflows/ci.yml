@@ -38,6 +38,86 @@ jobs:
           go run ./cmd/migrate
           go test -race -p 1 -coverprofile=coverage.out ./...
 
+      # Contract conformance (kora#430, contract §5).
+      #
+      # "A document alone produces exactly the drift it describes. The
+      # enforcement mechanism is the deliverable." Kora's own tests pin its
+      # handlers; this pins that those handlers still match the CONTRACT, which
+      # is a different thing and the one that drifts silently — a console page
+      # rendering nothing is otherwise the first alarm.
+      #
+      # Run against a locally-booted API, never against production: this
+      # surface carries every user record, CI must not need a real credential
+      # to exercise it, and a run depending on prod would fail for reasons that
+      # have nothing to do with the commit under test.
+      #
+      # ONE step, deliberately. The API is a background process, and a process
+      # started in one step is not guaranteed to survive into the next — which
+      # would surface as an unreachable API rather than as the wiring mistake
+      # it is.
+      #
+      # The secret is a throwaway shared between two processes on this runner
+      # for the length of one job, NOT a repo secret: both halves of an HMAC
+      # only need to agree with each other.
+      - name: Conformance — admin contract
+        env:
+          DATABASE_URL: postgres://kora:kora_dev@localhost:5432/kora?sslmode=disable
+          KORA_PLATFORM_ADMIN_SECRET: ci-conformance-secret-not-a-real-key
+          ADMIN_CONFORMANCE_SECRET: ci-conformance-secret-not-a-real-key
+          ENV: development
+          PORT: "8099"
+          METRICS_PORT: "9099"
+        run: |
+          cd api
+          go build -o /tmp/kora-api ./cmd/api
+          /tmp/kora-api > /tmp/kora-api.log 2>&1 &
+          api_pid=$!
+          trap 'kill "$api_pid" 2>/dev/null || true' EXIT
+
+          up=0
+          for _ in $(seq 1 60); do
+            if curl -sf -o /dev/null http://localhost:8099/health; then up=1; break; fi
+            sleep 1
+          done
+          if [ "$up" -ne 1 ]; then
+            echo "::error::the API never became healthy"; cat /tmp/kora-api.log; exit 1
+          fi
+
+          # A fast, specific pre-check that the surface MOUNTED.
+          #
+          # Not load-bearing: the suite already fails an unmounted surface,
+          # because declaring an endpoint opts it into enforcement and a 404 on
+          # a declared endpoint is a failure, not a skip (verified — an API
+          # booted without the secret gives exit 1, six failures). This exists
+          # only so a MISCONFIGURED job says "not mounted" in one line instead
+          # of six contract deviations, which point at Kora's handlers when the
+          # actual fault is an env var.
+          mounted=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8099/v1/admin/kpis)
+          if [ "$mounted" != "401" ]; then
+            echo "::error::/v1/admin/kpis answered $mounted, expected 401 (mounted, refusing unsigned)"
+            cat /tmp/kora-api.log; exit 1
+          fi
+
+          # Pinned, like every action SHA in this file: a new publish must be an
+          # explicit upgrade, not something that changes what CI enforces
+          # between two runs of the same commit.
+          set +e
+          npx --yes @tesserix/admin-conformance@0.3.0 \
+            --base http://localhost:8099/v1 --slug kora --no-color
+          code=$?
+          set -e
+
+          # 1 and 2 mean different things and must not be conflated: 1 is "Kora
+          # deviates from the contract" (fix Kora); 2 is "the suite could not
+          # run" (fix the harness). A job that treats them alike eventually
+          # reports a broken harness as a failing product.
+          case "$code" in
+            0) echo "conformant" ;;
+            1) echo "::error::Kora deviates from the admin contract"; exit 1 ;;
+            2) echo "::error::the conformance suite could not run (secret, flags, or declaration)"; exit 1 ;;
+            *) echo "::error::unexpected conformance exit $code"; cat /tmp/kora-api.log; exit 1 ;;
+          esac
+
   mobile:
     uses: tesserix/tesserix-workflows/.github/workflows/expo-ci.yml@v2.1.0
     with:
