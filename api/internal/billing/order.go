@@ -14,6 +14,20 @@ import (
 // Order states. `created` is a promise to pay, nothing more: no entitlement
 // exists until the gateway says the money moved.
 const (
+	// Gateway status vocabulary. These are the values a `gateway` reports back
+	// from FetchOrder, and every provider maps ITS OWN wire values into them.
+	//
+	// They happen to be Cashfree's literal API strings, because Cashfree was
+	// the first provider and the reconcile switch was written against its
+	// responses directly. That is history, not a contract with Cashfree: a
+	// second provider (kora#478) has no reason to speak Cashfree's dialect, so
+	// the names are stated here as KORA's vocabulary and each client is
+	// responsible for translating into it. Anything a provider reports that is
+	// neither of these is "still in flight" and reconcile leaves the order
+	// alone — which is the safe default, since the webhook is what settles.
+	GatewayPaid    = "PAID"
+	GatewayExpired = "EXPIRED"
+
 	OrderCreated = "created"
 	OrderPaid    = "paid"
 	OrderFailed  = "failed"
@@ -238,11 +252,11 @@ func (o Orders) Reconcile(ctx context.Context, userID, orderID uuid.UUID) (Order
 		return Order{}, fmt.Errorf("billing: reconcile order: %w", err)
 	}
 	switch status.Status {
-	case "PAID":
+	case GatewayPaid:
 		if err := o.Settle(ctx, order.ID, "", status.AmountPaise); err != nil {
 			return Order{}, err
 		}
-	case "EXPIRED":
+	case GatewayExpired:
 		if err := o.db.WithContext(ctx).Model(&Order{}).
 			Where("id = ? AND status = ?", order.ID, OrderCreated).
 			Updates(map[string]any{"status": OrderExpired, "updated_at": o.now().UTC()}).Error; err != nil {
