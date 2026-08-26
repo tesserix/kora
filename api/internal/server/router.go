@@ -38,6 +38,7 @@ import (
 	"github.com/tesserix/kora/api/internal/nutrition"
 	"github.com/tesserix/kora/api/internal/onboarding"
 	"github.com/tesserix/kora/api/internal/pins"
+	"github.com/tesserix/kora/api/internal/platformadmin"
 	"github.com/tesserix/kora/api/internal/ratelimit"
 	"github.com/tesserix/kora/api/internal/recipes"
 	"github.com/tesserix/kora/api/internal/resolve"
@@ -87,6 +88,17 @@ type Deps struct {
 	// at all, so an unconfigured environment answers 404 rather than 401 —
 	// the difference matters when diagnosing a deployment.
 	BFFHMACKey []byte
+	// PlatformAdminSecret is the shared secret the platform console's
+	// federation client signs with. Empty leaves the contract surface
+	// unmounted, exactly as an empty BFFHMACKey leaves the portal's routes
+	// unmounted. It is a DIFFERENT key from BFFHMACKey and a different
+	// signing scheme; see package platformauth.
+	PlatformAdminSecret string
+	// PlatformHealthProbes are the dependency checks GET /v1/admin/health
+	// runs, keyed by dependency name. The Postgres probe is added below from
+	// deps.DB; main supplies the rest. A dependency in
+	// platformadmin.DependencyRegistry with no probe reports `unknown`.
+	PlatformHealthProbes map[string]platformadmin.Probe
 	// AppleExchanger trades Apple authorization codes for refresh tokens.
 	// Nil when the Apple credentials are unset, in which case the endpoint is
 	// not mounted at all — an unconfigured environment answers 404 rather
@@ -276,6 +288,22 @@ func NewRouter(deps Deps) *gin.Engine {
 			// writes the kora_admin_events row inside the same transaction.
 			adminGroup.DELETE("/users/:id", usersAdmin.Delete)
 		}
+
+		// The platform console's contract surface. A SECOND group on the same
+		// /v1/admin prefix, behind a different middleware, because the portal
+		// and the console sign incompatible canonical strings — see
+		// platformadmin.Register for why this is not a merge candidate.
+		platformadmin.Register(r, platformadmin.Deps{
+			DB:     deps.DB,
+			Secret: deps.PlatformAdminSecret,
+			Probes: platformHealthProbes(deps),
+			// main calls slog.SetDefault before building the router, so this
+			// is the same logger every other package here writes through.
+			// Not a Deps field: nothing else in this router takes one, and
+			// adding one only for this surface would be the first of two
+			// conventions.
+			Logger: slog.Default(),
+		})
 
 		pinsHandler := pins.NewHandler(pins.NewService(pins.NewRepository(deps.DB), foodRepo))
 		v1.GET("/pins", pinsHandler.List)
@@ -643,4 +671,30 @@ func resolveGeneration(cache ai.Cache) ai.Generation {
 	slog.Warn("admin mutations: resolve cache exposes no generation counter; food edits will NOT invalidate cached resolutions",
 		"cache_type", fmt.Sprintf("%T", cache))
 	return ai.NoCache{}
+}
+
+// platformHealthProbes adds the Postgres check to whatever main supplied.
+//
+// Postgres is probed here rather than in main because the router already
+// holds the *gorm.DB and handing one back would mean two places that must
+// agree about which connection is Kora's. It is a real round trip
+// (`SELECT 1`), not a pool-state inspection: a pool with idle connections to
+// a database that has stopped answering looks healthy from the inside, which
+// is the failure this endpoint exists to catch.
+//
+// A caller's own map is never mutated — the probes belong to main's lifetime,
+// not the router's, and a mutated input is how a second NewRouter call in a
+// test starts seeing the first one's database.
+func platformHealthProbes(deps Deps) map[string]platformadmin.Probe {
+	probes := make(map[string]platformadmin.Probe, len(deps.PlatformHealthProbes)+1)
+	for name, probe := range deps.PlatformHealthProbes {
+		probes[name] = probe
+	}
+	if deps.DB != nil {
+		probes[platformadmin.DepPostgres] = func(ctx context.Context) error {
+			var one int
+			return deps.DB.WithContext(ctx).Raw("SELECT 1").Scan(&one).Error
+		}
+	}
+	return probes
 }

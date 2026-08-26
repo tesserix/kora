@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -67,6 +68,20 @@ type Config struct {
 	// MAC is computed over the DECODED bytes. Using the encoded form on either
 	// side produces signatures that never verify.
 	BFFHMACKey []byte
+	// PlatformAdminSecret is the shared secret the Tesserix platform console's
+	// federation client signs its requests to /v1/admin/* with. Empty leaves
+	// the contract endpoints unmounted, the same choice BFFHMACKey makes.
+	//
+	// It is a SEPARATE key from BFFHMACKey and must stay one. Two callers sign
+	// two incompatible canonical strings (see package platformauth); sharing a
+	// key between them would mean rotating one caller's credential silently
+	// revokes the other's, and would let either caller's compromise reach the
+	// other's routes.
+	//
+	// Unlike BFFHMACKey this is NOT base64 — the federation client's Sign
+	// takes the secret as a raw string and MACs those bytes, so decoding here
+	// would produce signatures that never verify.
+	PlatformAdminSecret string
 	// Sign in with Apple credentials, used to exchange authorization codes and
 	// to revoke refresh tokens on account deletion. When ApplePrivateKeyPEM is
 	// empty the Apple endpoints are not mounted at all, so an unconfigured
@@ -189,6 +204,17 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("config: KORA_BFF_HMAC_KEY must decode to at least 16 bytes, got %d", len(key))
 		}
 		cfg.BFFHMACKey = key
+	}
+	// A secret that is SET but too short is a hard error rather than a
+	// silently-disabled surface, for the same reason BFFHMACKey's is: the
+	// symptom of the alternative is an unexplained 404 in an environment
+	// someone believed they had configured.
+	if raw := strings.TrimSpace(os.Getenv("KORA_PLATFORM_ADMIN_SECRET")); raw != "" {
+		if len(raw) < 16 {
+			return Config{}, fmt.Errorf(
+				"config: KORA_PLATFORM_ADMIN_SECRET must be at least 16 characters, got %d", len(raw))
+		}
+		cfg.PlatformAdminSecret = raw
 	}
 	// Same philosophy as BFFHMACKey above: a partially configured Apple
 	// integration is worse than a disabled one. With the .p8 key set but
