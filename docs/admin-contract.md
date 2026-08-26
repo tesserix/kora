@@ -127,6 +127,14 @@ directory that cannot tell two people called "Alex" apart does not do the job
 
 Retired (soft-deleted) foods are excluded from both the page and the total.
 
+**Known cost:** the search is `LIKE '%q%'`, which no existing index serves —
+`idx_food_items_name` is a tsvector GIN (word matching, not substring) and
+`idx_food_items_name_trgm` is a plain btree on `lower(name)` despite the name.
+Both the page and the count scan; the count is the expensive half. Substring
+matching is what a ⌘K directory is for, so if this becomes slow on the food
+index the fix is `pg_trgm` plus a GIN trgm index on `lower(name)` — indexed
+without changing what an operator can find — not a narrower search.
+
 ### health (#434)
 
 Genuinely probed: Postgres (`SELECT 1`, a real round trip — a pool with idle

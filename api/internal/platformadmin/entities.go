@@ -89,8 +89,23 @@ var ErrUnknownEntityType = fmt.Errorf("platformadmin: unknown entity type")
 //
 // Matching is case-insensitive substring on the human-facing fields only.
 // Deliberately NOT on id: an operator pasting a uuid is looking that record
-// up, not searching, and ILIKE against a uuid column would cost a full scan
-// on every query to serve a case the Directory does not have.
+// up, not searching, and matching against a uuid column would cost a scan on
+// every query to serve a case the Directory does not have.
+//
+// # The leading wildcard is a known cost
+//
+// `LIKE '%q%'` cannot use an index, and neither existing food_items index
+// helps: idx_food_items_name is a tsvector GIN (word matching, not
+// substring) and idx_food_items_name_trgm is a plain btree on lower(name)
+// despite its name. So both the page AND the count scan the table — the
+// count is the expensive half, since it cannot stop at Limit rows.
+//
+// That is accepted rather than overlooked. Substring matching is what a ⌘K
+// directory is for ("quux" must find "Quuxberry"), and switching to
+// to_tsvector/plainto_tsquery to get an index would silently change what the
+// operator can find. If this becomes slow on the food index, the fix is
+// pg_trgm plus a GIN trgm index on lower(name) — which makes THIS query
+// indexed without changing its semantics — not a narrower search.
 func (r Repository) SearchEntities(ctx context.Context, entityType, q string, limit, offset int) (EntityResult, error) {
 	pattern := "%" + strings.ToLower(q) + "%"
 
