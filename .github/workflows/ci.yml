@@ -69,6 +69,19 @@ jobs:
           METRICS_PORT: "9099"
         run: |
           cd api
+          # cmd/api treats a failed Firebase init as FATAL (os.Exit(1)) on
+          # purpose: DELETE /v1/me is Apple-mandated and a deployment that
+          # cannot delete identities must not start. CI has no Application
+          # Default Credentials, so the binary exited before ever serving
+          # /health and this step failed with "the API never became healthy".
+          #
+          # A syntactically valid service-account file satisfies credential
+          # DISCOVERY, which is all the constructor needs — no network call and
+          # no real project. The conformance suite never exercises a Firebase
+          # path, so nothing here depends on the key being usable.
+          openssl genrsa -out /tmp/ci_sa_key.pem 2048 2>/dev/null
+          python3 -c 'import json,sys; json.dump({"type":"service_account","project_id":"kora-ci","private_key_id":"ci","private_key":open("/tmp/ci_sa_key.pem").read(),"client_email":"ci@kora-ci.iam.gserviceaccount.com","client_id":"0","token_uri":"https://oauth2.googleapis.com/token"}, open("/tmp/ci_sa.json","w"))'
+          export GOOGLE_APPLICATION_CREDENTIALS=/tmp/ci_sa.json
           go build -o /tmp/kora-api ./cmd/api
           /tmp/kora-api > /tmp/kora-api.log 2>&1 &
           api_pid=$!
