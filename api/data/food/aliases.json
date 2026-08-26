@@ -1,8 +1,8 @@
 [
   {
     "alias": "hot chips",
-    "food": "Potato, chips, regular, fast food outlet, deep fried, blended oil, salted",
-    "why": "AU idiom. No lexical signal can reach this row: it competes with Banana chip and Corn chips, all AFCD, all AU, all generic, all legitimately named chip (kora#219). Deliberately NOT aliasing the bare word chips — in Australia that means hot chips OR crisps, ~226 vs ~500 kcal, which is real ambiguity the resolver should ask about rather than settle at score 1.0."
+    "food": "Potato, chips, takeaway outlet, deep fried, blended oil, salted",
+    "why": "AU idiom. No lexical signal can reach this row: it competes with Banana chip and Corn chips, all AFCD, all AU, all generic and all legitimately named chip (kora#219). A curated alias does.\n\nRetargeted from `Potato, chips, regular, fast food outlet, ...` (225.6 kcal/100g), which has serving_grams=0 AND serving_units=[] — no serving information at all, so every portion phrase fell through to the flat 100g default. This row is the same food from the same source at 238.3 kcal/100g and carries AUSNUT's own serving definitions: takeaway serve 100g, bucket 320g, chip 3.9g. The DEFAULT case is unchanged in effect (AUSNUT's takeaway serve is also 100g), but \"a bucket of chips\" and \"10 chips\" now resolve instead of silently becoming 100g.\n\nDeliberately NOT aliasing the bare word chips — in Australia that means hot chips OR crisps, ~226 vs ~500 kcal, which is real ambiguity the resolver should ask about rather than settle at score 1.0."
   },
   {
     "alias": "aubergine",

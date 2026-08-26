@@ -8,7 +8,9 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+
 	"github.com/stretchr/testify/require"
+	"github.com/tesserix/kora/api/internal/units"
 )
 
 // TestCuratedParmaAliasResolves proves the curated AU abbreviation actually
@@ -156,10 +158,10 @@ func TestCuratedFlatWhiteAliasResolves(t *testing.T) {
 	// alias here would fail merely because the row is absent, and the test
 	// would only LOOK like it checks serving size.
 	zeroServing := FoodItem{
-		ID: uuid.New(),
-		Name: "Coffee, flat white/cappuccino/latte, single shot & cow's milk",
+		ID:             uuid.New(),
+		Name:           "Coffee, flat white/cappuccino/latte, single shot & cow's milk",
 		NormalizedName: Normalize("Coffee, flat white/cappuccino/latte, single shot & cow's milk"),
-		Provenance: "ausnut", KcalPer100g: 48, ServingGrams: 0,
+		Provenance:     "ausnut", KcalPer100g: 48, ServingGrams: 0,
 		EntityType: EntityTypeGeneric,
 	}
 	require.NoError(t, tx.Create(&generic).Error)
@@ -189,4 +191,65 @@ func TestCuratedFlatWhiteAliasResolves(t *testing.T) {
 	// portion through the 100g default and logs less than half the drink.
 	require.Positive(t, got[0].Item.ServingGrams,
 		"the alias target must carry a serving size, or the portion falls back to 100g")
+}
+
+// TestCuratedAliasesPreferRowsThatCanBePortioned is the general rule the
+// `flat white` work turned up, applied to the whole curated set.
+//
+// An alias resolves at score 1.0 — the auto-log tier — so whatever it points at
+// is logged without a human looking. If that row carries no serving
+// information, every portion phrase falls through to `defaultPortionGrams`
+// (100g) regardless of what the user actually ate. 4,807 of 26,186 rows have
+// no serving size, so this is easy to hit by picking on provenance alone.
+//
+// The check is deliberately WEAK — it warns rather than fails — because 100g is
+// a defensible default for some foods (a raw vegetable) and indefensible for
+// others (a 240ml drink, a takeaway serve of chips). Judgement belongs with the
+// person adding the alias; this test's job is to make sure they SEE it.
+//
+// It fails only when a target cannot be found at all, which is the silent
+// failure mode: cmd/ingest merely warns, so a typo ships and the alias never
+// fires.
+//
+// READ THE WARNINGS AGAINST THE RIGHT INDEX. Serving coverage differs between
+// databases — 12,660 of 18,876 rows in dev against 21,379 of 26,186 in prod as
+// of 2026-08-27 — so a row that warns here may carry a serving size in
+// production, and vice versa. Verify against prod before retargeting an alias
+// on the strength of a warning from this test.
+func TestCuratedAliasesPreferRowsThatCanBePortioned(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", "data", "food", "aliases.json"))
+	require.NoError(t, err)
+	var curated []GlobalAlias
+	require.NoError(t, json.Unmarshal(b, &curated))
+	require.NotEmpty(t, curated)
+
+	tx := fixtureTx(t)
+	var indexed int64
+	require.NoError(t, tx.Raw("SELECT count(*) FROM food_items WHERE deleted_at IS NULL").Scan(&indexed).Error)
+	if indexed == 0 {
+		t.Skip("no food index in this database; this check reads real rows")
+	}
+
+	for _, a := range curated {
+		var rows []FoodItem
+		require.NoError(t, tx.Raw(
+			`SELECT * FROM food_items WHERE name = ? AND COALESCE(brand,'') = '' AND deleted_at IS NULL
+			 ORDER BY id LIMIT 1`, a.Food).Scan(&rows).Error)
+
+		require.NotEmpty(t, rows,
+			"alias %q names a food that does not exist: %q. cmd/ingest only WARNS about this, so it "+
+				"ships and the alias silently never fires.", a.Alias, a.Food)
+
+		item := rows[0]
+		// DECODE the units rather than measuring the raw JSON. ServingUnits is
+		// json.RawMessage, so an empty list is the two bytes "[]" and a naive
+		// len() check is ALWAYS non-zero — this test silently warned about
+		// nothing until that was found. Production reads it the same way, via
+		// units.DecodeServingUnits in portion.go.
+		if item.ServingGrams <= 0 && len(units.DecodeServingUnits(item.ServingUnits)) == 0 {
+			t.Logf("NOTE: alias %q -> %q carries no serving size or units, so every portion "+
+				"resolves to the flat %.0fg default. Fine for a raw vegetable; wrong for a drink "+
+				"or a takeaway serve.", a.Alias, a.Food, 100.0)
+		}
+	}
 }
