@@ -115,3 +115,78 @@ func TestCuratedToastAliasResolves(t *testing.T) {
 	require.Equal(t, bread.ID, got[0].Item.ID, "\"toast\" must resolve to toasted bread, got %q", got[0].Item.Name)
 	require.Equal(t, MatchAlias, got[0].MatchTier)
 }
+
+// TestCuratedFlatWhiteAliasResolves pins kora#219's last open item.
+//
+// `flat white` returned `Iced Flat White` (branded) at CONFIRM tier — the wrong
+// drink, one tap from being logged. The generic loses because it is the longer
+// string and precision, trigram and headBonus all independently favour the
+// shorter one; both ranker-side fixes were measured net harmful and reverted,
+// so the alias is the sanctioned route.
+//
+// This test asserts on the row ID, not a name substring, deliberately. #219
+// recorded no expectation in the ranking harness precisely because the obvious
+// substring "flat white" MATCHES `Iced Flat White` — a scoreboard that lies.
+// An ID comparison cannot lie that way.
+func TestCuratedFlatWhiteAliasResolves(t *testing.T) {
+	const target = "Flat white, full cream milk"
+
+	b, err := os.ReadFile(filepath.Join("..", "..", "data", "food", "aliases.json"))
+	require.NoError(t, err)
+	var curated []GlobalAlias
+	require.NoError(t, json.Unmarshal(b, &curated))
+
+	tx := fixtureTx(t)
+	repo := NewRepository(tx)
+	ctx := context.Background()
+
+	generic := FoodItem{
+		ID: uuid.New(), Name: target, NormalizedName: Normalize(target),
+		Provenance: "user_estimate", KcalPer100g: 46, ServingGrams: 240,
+		EntityType: EntityTypeGeneric,
+	}
+	// The row that used to win. Without it the test passes trivially.
+	branded := FoodItem{
+		ID: uuid.New(), Name: "Iced Flat White", NormalizedName: Normalize("Iced Flat White"),
+		Brand: "Pablo&Rusty's", Provenance: "off", KcalPer100g: 50.8, ServingGrams: 240,
+		EntityType: EntityTypeBrandedProduct,
+	}
+	// The better-provenance AUSNUT row, present so the serving-size assertion
+	// below actually discriminates: without it in the fixture, pointing the
+	// alias here would fail merely because the row is absent, and the test
+	// would only LOOK like it checks serving size.
+	zeroServing := FoodItem{
+		ID: uuid.New(),
+		Name: "Coffee, flat white/cappuccino/latte, single shot & cow's milk",
+		NormalizedName: Normalize("Coffee, flat white/cappuccino/latte, single shot & cow's milk"),
+		Provenance: "ausnut", KcalPer100g: 48, ServingGrams: 0,
+		EntityType: EntityTypeGeneric,
+	}
+	require.NoError(t, tx.Create(&generic).Error)
+	require.NoError(t, tx.Create(&branded).Error)
+	require.NoError(t, tx.Create(&zeroServing).Error)
+
+	// Guard the premise: without the alias, the branded row really does win.
+	before, err := repo.ResolveQuery(ctx, uuid.Nil, Query{Text: "flat white"}, nil, 5)
+	require.NoError(t, err)
+	require.NotEmpty(t, before)
+	require.Equal(t, branded.ID, before[0].Item.ID,
+		"premise changed: the branded row no longer wins, so this test no longer proves what it claims")
+
+	applied, unresolved, err := repo.UpsertGlobalAliases(ctx, curated)
+	require.NoError(t, err)
+	require.Positive(t, applied, "no curated alias resolved; unresolved=%v", unresolved)
+
+	got, err := repo.ResolveQuery(ctx, uuid.Nil, Query{Text: "flat white"}, nil, 5)
+	require.NoError(t, err)
+	require.NotEmpty(t, got)
+	require.Equal(t, generic.ID, got[0].Item.ID,
+		"\"flat white\" must resolve to the generic drink, got %q", got[0].Item.Name)
+	require.Equal(t, MatchAlias, got[0].MatchTier)
+
+	// The reason this row was chosen over the better-provenance AUSNUT one: it
+	// carries a serving size. A row with serving_grams=0 sends a "1 cup"
+	// portion through the 100g default and logs less than half the drink.
+	require.Positive(t, got[0].Item.ServingGrams,
+		"the alias target must carry a serving size, or the portion falls back to 100g")
+}
