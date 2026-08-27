@@ -40,6 +40,7 @@ const (
 	DepRedis       = "redis"
 	DepAIProvider  = "ai_provider"
 	DepFoodBacklog = "unresolved_food_backlog"
+	DepAIBudget    = "ai_budget"
 )
 
 // dependencyKey is one dependency the console may be told about.
@@ -72,6 +73,7 @@ var DependencyRegistry = []dependencyKey{
 	{Name: DepRedis, Instrumented: true},
 	{Name: DepAIProvider, Instrumented: false},
 	{Name: DepFoodBacklog, Instrumented: true},
+	{Name: DepAIBudget, Instrumented: true},
 }
 
 // Probe is one genuinely-performed dependency check.

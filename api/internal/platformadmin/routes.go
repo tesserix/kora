@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"github.com/tesserix/kora/api/internal/billing"
 	"github.com/tesserix/kora/api/internal/platformauth"
 	"github.com/tesserix/kora/api/internal/resolveoutcome"
 )
@@ -74,6 +75,19 @@ func Register(r *gin.Engine, deps Deps) {
 		// nothing about whether anyone is keeping up with it.
 		return map[string]int64{"waiting": depth}, nil
 	}
+	// The AI budget probe (kora#485). globalMonthlyCostCapUSD is a kill
+	// switch on the whole product's AI, and until now the only way to read it
+	// was to open meter.go. An operator watching spend climb on
+	// /platform/ai-usage could see the number going up and not the ceiling it
+	// was going up toward.
+	//
+	// READ ONLY. Changing a cap is a turn-the-product-off lever and needs the
+	// §8.3 apparatus this package has deliberately not built; see billing.Caps.
+	meter := billing.NewMeter(deps.DB)
+	probes[DepAIBudget] = func(ctx context.Context) (map[string]int64, error) {
+		return meter.BudgetMetrics(ctx)
+	}
+
 	g := r.Group("/v1/admin", platformauth.Middleware(platformauth.Config{
 		Secret: deps.Secret,
 		Nonces: platformauth.NewNonceStore(deps.DB),
