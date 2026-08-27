@@ -72,7 +72,16 @@ export default function CoachScreen() {
   // cannot. The offer to top up belongs next to that reply, not three screens
   // away in More.
   const packs = useAIPacks();
-  const outOfRequests = (usage.data ? aiAllowance(usage.data).blocked : false) && (packs.data?.length ?? 0) > 0;
+  // The EXPLANATION and the OFFER are separate conditions, deliberately.
+  //
+  // They used to be one: the whole banner was gated on packs existing, so
+  // kora#479 (Cashfree removed, no gateway configured) silently took the
+  // "your allowance is spent, it resets on its own" message away with the
+  // purchase button. A blocked tester then got Otto's refusal with nothing
+  // saying why or when it lifts. The reason a user is stuck is not
+  // conditional on whether we can sell them anything.
+  const outOfRequests = usage.data ? aiAllowance(usage.data).blocked : false;
+  const canBuy = (packs.data?.length ?? 0) > 0;
   const ask = useCoachAsk();
   const [input, setInput] = useState("");
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
@@ -211,23 +220,27 @@ export default function CoachScreen() {
               }}
             >
               <AppText style={{ flex: 1, color: instrument.mut, fontSize: 12 }}>
-                Your AI allowance is spent. It resets on its own — or add requests now.
+                {canBuy
+                  ? "Your AI allowance is spent. It resets on its own — or add requests now."
+                  : "Your AI allowance is spent. It resets on its own."}
               </AppText>
-              <PressableScale
-                accessibilityRole="button"
-                accessibilityLabel="Add requests"
-                haptic="selection"
-                onPress={() => router.push("/ai-top-up")}
-                style={{
-                  minHeight: 44,
-                  justifyContent: "center",
-                  paddingHorizontal: 16,
-                  borderRadius: 12,
-                  backgroundColor: instrument.accent,
-                }}
-              >
-                <AppText style={{ color: instrument.accentOn, fontWeight: "700" }}>Add requests</AppText>
-              </PressableScale>
+              {canBuy ? (
+                <PressableScale
+                  accessibilityRole="button"
+                  accessibilityLabel="Add requests"
+                  haptic="selection"
+                  onPress={() => router.push("/ai-top-up")}
+                  style={{
+                    minHeight: 44,
+                    justifyContent: "center",
+                    paddingHorizontal: 16,
+                    borderRadius: 12,
+                    backgroundColor: instrument.accent,
+                  }}
+                >
+                  <AppText style={{ color: instrument.accentOn, fontWeight: "700" }}>Add requests</AppText>
+                </PressableScale>
+              ) : null}
             </View>
           ) : null}
 

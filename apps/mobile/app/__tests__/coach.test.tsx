@@ -315,3 +315,27 @@ test("nothing to sell means no top-up offer, even out of requests", async () => 
 
   expect(queryByLabelText("Add requests")).toBeNull();
 });
+
+// kora#479 removed the only payment gateway, and the explanation used to be
+// gated on packs existing along with the button — so a blocked tester got
+// Otto's refusal with nothing saying why or when it lifts.
+//
+// The reason a user is stuck is not conditional on whether we can sell them
+// anything. This is the assertion that keeps the two apart.
+test("still explains why it is stuck when there is nothing to sell", async () => {
+  mockAIUsage.mockReturnValue({
+    data: {
+      daily: { used: 20, limit: 20, remaining: 0, resets_at: "2026-08-23T00:00:00Z" },
+      weekly: { used: 20, limit: 100, remaining: 80, resets_at: "2026-08-24T00:00:00Z" },
+      monthly: { used: 20, limit: 300, remaining: 280, resets_at: "2026-09-01T00:00:00Z" },
+    },
+  });
+  mockAIPacks.mockReturnValue({ data: [] });
+
+  const { getByText, queryByLabelText } = await render(<CoachScreen />);
+
+  expect(getByText(/Your AI allowance is spent/)).toBeTruthy();
+  // ...and the copy must not dangle an offer that cannot be taken.
+  expect(getByText(/It resets on its own\.$/)).toBeTruthy();
+  expect(queryByLabelText("Add requests")).toBeNull();
+});
