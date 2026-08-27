@@ -22,16 +22,21 @@ import (
 func TestHealthReportsTheAIBudget(t *testing.T) {
 	probes := map[string]Probe{
 		DepAIBudget: func(context.Context) (map[string]int64, error) {
-			return map[string]int64{
-				"global_month_spend_usd_cents":    600,
-				"global_month_cap_usd_cents":      50000,
-				"global_month_headroom_usd_cents": 49400,
+			return map[string]int64{"per_user_daily_requests_cap": 20}, nil
+		},
+	}
+	moneyProbes := map[string]MoneyProbe{
+		DepAIBudget: func(context.Context) (map[string]Money, error) {
+			return map[string]Money{
+				"global_month_spend":    {Amount: 600, Currency: "USD"},
+				"global_month_cap":      {Amount: 50000, Currency: "USD"},
+				"global_month_headroom": {Amount: 49400, Currency: "USD"},
 			}, nil
 		},
 	}
 
 	rec := call(t, http.MethodGet, "/admin/health", "/admin/health",
-		NewHealthHandler(probes, nil).Health)
+		NewHealthHandler(probes, nil).WithMoneyProbes(moneyProbes).Health)
 	require.Equal(t, http.StatusOK, rec.Code)
 
 	for _, raw := range decode(t, rec)["data"].(map[string]any)["dependencies"].([]any) {
@@ -40,11 +45,17 @@ func TestHealthReportsTheAIBudget(t *testing.T) {
 			continue
 		}
 		assert.Equal(t, StatusOK, row["status"])
-		metrics := row["metrics"].(map[string]any)
-		assert.Equal(t, float64(600), metrics["global_month_spend_usd_cents"])
-		assert.Equal(t, float64(50000), metrics["global_month_cap_usd_cents"],
+		budget := row["budget"].(map[string]any)
+		cap := budget["global_month_cap"].(map[string]any)
+		// §4.2: money is { amount, currency }, never a bare number whose unit
+		// lives in its field name. The conformance suite rejected the first
+		// pass here for exactly that.
+		assert.Equal(t, float64(50000), cap["amount"],
 			"the ceiling must travel with the spend, or the surface answers only half the question")
-		assert.Equal(t, float64(49400), metrics["global_month_headroom_usd_cents"])
+		assert.Equal(t, "USD", cap["currency"],
+			"every money value must name its currency explicitly")
+		assert.Equal(t, float64(600), budget["global_month_spend"].(map[string]any)["amount"])
+		assert.Equal(t, float64(49400), budget["global_month_headroom"].(map[string]any)["amount"])
 		return
 	}
 	t.Fatalf("%s is missing from the health payload", DepAIBudget)

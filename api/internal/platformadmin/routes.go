@@ -84,8 +84,24 @@ func Register(r *gin.Engine, deps Deps) {
 	// READ ONLY. Changing a cap is a turn-the-product-off lever and needs the
 	// §8.3 apparatus this package has deliberately not built; see billing.Caps.
 	meter := billing.NewMeter(deps.DB)
-	probes[DepAIBudget] = func(ctx context.Context) (map[string]int64, error) {
-		return meter.BudgetMetrics(ctx)
+	probes[DepAIBudget] = func(context.Context) (map[string]int64, error) {
+		// Request ceilings only. The COST figures carry a currency and travel
+		// on the money channel below, because §4.2 requires money to be an
+		// { amount, currency } object and this map cannot express one.
+		return billing.RequestCapMetrics(), nil
+	}
+	moneyProbes := map[string]MoneyProbe{
+		DepAIBudget: func(ctx context.Context) (map[string]Money, error) {
+			amounts, err := meter.BudgetMoney(ctx)
+			if err != nil {
+				return nil, err
+			}
+			out := make(map[string]Money, len(amounts))
+			for k, v := range amounts {
+				out[k] = Money{Amount: v.Amount, Currency: v.Currency}
+			}
+			return out, nil
+		},
 	}
 
 	g := r.Group("/v1/admin", platformauth.Middleware(platformauth.Config{
@@ -98,7 +114,7 @@ func Register(r *gin.Engine, deps Deps) {
 	g.GET("/inbox", NewInboxHandler(repo, deps.Logger).
 		WithUnresolvedFoods(outcomes).List)
 	g.GET("/entities/:type", NewEntitiesHandler(repo, deps.Logger).Search)
-	g.GET("/health", NewHealthHandler(probes, deps.Logger).Health)
+	g.GET("/health", NewHealthHandler(probes, deps.Logger).WithMoneyProbes(moneyProbes).Health)
 	g.GET("/kpis", NewKPIsHandler().KPIs)
 	// §8.3's execution endpoint. The read side declares actions per item and
 	// this refuses any action that item did not offer, so the declared array

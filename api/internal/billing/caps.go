@@ -69,13 +69,41 @@ func (m Meter) GlobalMonthSpendUSD(ctx context.Context) (float64, error) {
 // Cents keep the figure legible at the magnitudes this product actually spends.
 func usdCents(usd float64) int64 { return int64(usd*100 + 0.5) }
 
-// BudgetMetrics renders the caps and the current estate spend as the
-// health surface's int64 metric map (kora#485).
+// CostCurrency is the ISO-4217 code the AI caps are denominated in.
+//
+// The caps are USD because the provider bills in USD, while Kora's own billing
+// is in paise and the Stripe account is Australian. Three currencies in one
+// product's money paths is exactly why the contract requires the code to
+// travel WITH the amount rather than live in a field name (#485).
+const CostCurrency = "USD"
+
+// MoneyAmount is integer minor units plus an explicit ISO-4217 code.
+//
+// Declared here rather than imported from platformadmin so the dependency
+// direction holds: the admin surface adapts billing, never the reverse.
+type MoneyAmount struct {
+	Amount   int64
+	Currency string
+}
+
+// RequestCapMetrics are the NON-money quota ceilings, for the health surface's
+// int64 metric map. Request counts carry no currency, so they belong there.
+func RequestCapMetrics() map[string]int64 {
+	caps := CapsInEffect()
+	return map[string]int64{
+		"per_user_daily_requests_cap":   int64(caps.PerUserDailyRequests),
+		"per_user_weekly_requests_cap":  int64(caps.PerUserWeeklyRequests),
+		"per_user_monthly_requests_cap": int64(caps.PerUserMonthlyRequests),
+	}
+}
+
+// BudgetMoney renders the cost caps and current estate spend as §4.2 money
+// values — integer minor units with an explicit currency (#485).
 //
 // Headroom is included rather than left for the reader to subtract: the
-// question an operator has is "how close are we?", and a surface that answers
-// it with two numbers to subtract answers it less well.
-func (m Meter) BudgetMetrics(ctx context.Context) (map[string]int64, error) {
+// operator's question is "how close are we?", and a surface answering it with
+// two numbers to subtract answers it less well.
+func (m Meter) BudgetMoney(ctx context.Context) (map[string]MoneyAmount, error) {
 	spend, err := m.GlobalMonthSpendUSD(ctx)
 	if err != nil {
 		return nil, err
@@ -85,13 +113,13 @@ func (m Meter) BudgetMetrics(ctx context.Context) (map[string]int64, error) {
 	if headroom < 0 {
 		headroom = 0
 	}
-	return map[string]int64{
-		"global_month_spend_usd_cents":    usdCents(spend),
-		"global_month_cap_usd_cents":      usdCents(caps.GlobalMonthlyCostUSD),
-		"global_month_headroom_usd_cents": usdCents(headroom),
-		"per_user_month_cap_usd_cents":    usdCents(caps.PerUserMonthlyCostUSD),
-		"per_user_daily_requests_cap":     int64(caps.PerUserDailyRequests),
-		"per_user_weekly_requests_cap":    int64(caps.PerUserWeeklyRequests),
-		"per_user_monthly_requests_cap":   int64(caps.PerUserMonthlyRequests),
+	usd := func(v float64) MoneyAmount {
+		return MoneyAmount{Amount: usdCents(v), Currency: CostCurrency}
+	}
+	return map[string]MoneyAmount{
+		"global_month_spend":    usd(spend),
+		"global_month_cap":      usd(caps.GlobalMonthlyCostUSD),
+		"global_month_headroom": usd(headroom),
+		"per_user_month_cap":    usd(caps.PerUserMonthlyCostUSD),
 	}, nil
 }

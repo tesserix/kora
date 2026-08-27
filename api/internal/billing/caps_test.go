@@ -99,19 +99,26 @@ func TestBudgetMetricsReportsHeadroomAgainstTheCap(t *testing.T) {
 	meter.now = func() time.Time { return now }
 	seedSpend(t, db, userID, 12.34, time.Date(2026, time.August, 5, 9, 0, 0, 0, time.UTC))
 
-	got, err := meter.BudgetMetrics(context.Background())
+	got, err := meter.BudgetMoney(context.Background())
 
 	require.NoError(t, err)
-	assert.Equal(t, usdCents(globalMonthlyCostCapUSD), got["global_month_cap_usd_cents"])
-	assert.Equal(t, int64(perUserDailyRequestCap), got["per_user_daily_requests_cap"])
+	assert.Equal(t, usdCents(globalMonthlyCostCapUSD), got["global_month_cap"].Amount)
+	assert.Equal(t, int64(perUserDailyRequestCap),
+		RequestCapMetrics()["per_user_daily_requests_cap"])
+	// Every money value must name its currency. A first pass encoded it in the
+	// key (`..._usd_cents`) and the conformance suite rejected it under §4.2.
+	for key, amount := range got {
+		assert.Equal(t, CostCurrency, amount.Currency,
+			"%s must carry an explicit ISO-4217 code, not imply one in its name", key)
+	}
 	// Self-consistency rather than an absolute spend, for the shared-database
 	// reason above: whatever the estate total is, headroom must be the cap
 	// minus exactly that, in the same unit.
 	assert.Equal(t,
-		got["global_month_cap_usd_cents"]-got["global_month_spend_usd_cents"],
-		got["global_month_headroom_usd_cents"],
+		got["global_month_cap"].Amount-got["global_month_spend"].Amount,
+		got["global_month_headroom"].Amount,
 		"headroom must be the cap minus the reported spend, in the same unit")
-	assert.GreaterOrEqual(t, got["global_month_spend_usd_cents"], int64(1234),
+	assert.GreaterOrEqual(t, got["global_month_spend"].Amount, int64(1234),
 		"the seeded spend must be included in the estate figure")
 }
 
@@ -126,10 +133,10 @@ func TestBudgetMetricsClampsHeadroomAtZeroOnceTheCapIsCrossed(t *testing.T) {
 	meter.now = func() time.Time { return now }
 	seedSpend(t, db, userID, globalMonthlyCostCapUSD+10, time.Date(2026, time.August, 5, 9, 0, 0, 0, time.UTC))
 
-	got, err := meter.BudgetMetrics(context.Background())
+	got, err := meter.BudgetMoney(context.Background())
 
 	require.NoError(t, err)
-	assert.Zero(t, got["global_month_headroom_usd_cents"])
+	assert.Zero(t, got["global_month_headroom"].Amount)
 }
 
 // TestUsdCentsRoundsRatherThanTruncates — truncation would report a $4.999
@@ -158,12 +165,19 @@ func TestGlobalMonthSpendIncludesSystemEvents(t *testing.T) {
 	before, err := meter.GlobalMonthSpendUSD(context.Background())
 	require.NoError(t, err)
 
+	// A system event has a NULL user_id, so seedUser's cleanup cannot reach it.
+	// Tagged with a unique model so this test can delete exactly its own row —
+	// without that it would permanently inflate the shared dev database's
+	// estate spend, which is the figure this very surface reports.
+	marker := "system-cleanup-" + uuid.NewString()
+	t.Cleanup(func() { db.Exec("DELETE FROM ai_usage_events WHERE model = ?", marker) })
+
 	at := time.Date(2026, time.August, 6, 9, 0, 0, 0, time.UTC)
 	require.NoError(t, db.Exec(
 		`INSERT INTO ai_usage_events
 		   (user_id, provider, model, call_type, tokens_in, tokens_out, latency_ms, cost_usd_est, outcome, created_at)
-		 VALUES (NULL, 'gemini', 'test', 'system', 1, 1, 1, ?, 'success', ?)`,
-		3.5, at).Error)
+		 VALUES (NULL, 'gemini', ?, 'system', 1, 1, 1, ?, 'success', ?)`,
+		marker, 3.5, at).Error)
 
 	after, err := meter.GlobalMonthSpendUSD(context.Background())
 
