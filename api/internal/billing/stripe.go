@@ -18,11 +18,11 @@ import (
 // `sk_live_…`), so a separate switch could only ever disagree with the
 // credential it accompanies.
 //
-// That is not hypothetical here: `kora-api` runs with `ENV=production` and
-// `CASHFREE_SANDBOX=true` at the same time (verified on the live Deployment).
-// With Cashfree those two facts are independent and nothing catches the
-// contradiction. Deriving the environment from the key makes the same mistake
-// unrepresentable (kora#478).
+// That was not hypothetical: the gateway removed in kora#479 carried its own
+// sandbox flag, and `kora-api` ran with `ENV=production` and that flag set to
+// true at the same time (verified on the live Deployment) — two independent
+// facts in contradiction, with nothing to catch it. Deriving the environment
+// from the key makes the same mistake unrepresentable (kora#478).
 type StripeConfig struct {
 	// SecretKey is the Stripe API key. Its prefix decides test versus live.
 	SecretKey string
@@ -31,7 +31,7 @@ type StripeConfig struct {
 	WebhookSecret string
 	// ReturnURL is the deep link Stripe sends the user back to. The payment
 	// result is NOT trusted from it — only the webhook and an explicit status
-	// fetch settle an order, exactly as with Cashfree.
+	// fetch settle an order.
 	ReturnURL string
 }
 
@@ -164,7 +164,7 @@ func (c *StripeClient) FetchOrder(ctx context.Context, orderID string) (OrderSta
 //
 // Tolerance is Kora's own `webhookTimestampTolerance`, passed explicitly rather
 // than relying on webhook.DefaultTolerance. The two happen to be equal today
-// (both five minutes); pinning it means the Cashfree and Stripe paths cannot
+// (both five minutes); pinning it means Kora's and Stripe's tolerances cannot
 // drift apart because a dependency changed its default.
 //
 // The freshness bound is the point, not a detail: the signature alone proves
@@ -203,7 +203,7 @@ func VerifyStripeWebhook(webhookSecret string, signatureHeader string, rawBody [
 			IgnoreAPIVersionMismatch: true,
 		})
 	if err != nil {
-		// Collapsed to one sentinel deliberately, matching the Cashfree path:
+		// Collapsed to one sentinel deliberately:
 		// a caller learning WHICH half failed learns whether it holds a valid
 		// key. ErrTooOld is checked explicitly so a replay is not reported as
 		// a malformed signature in the server log.

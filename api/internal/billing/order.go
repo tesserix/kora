@@ -17,10 +17,11 @@ const (
 	// Gateway status vocabulary. These are the values a `gateway` reports back
 	// from FetchOrder, and every provider maps ITS OWN wire values into them.
 	//
-	// They happen to be Cashfree's literal API strings, because Cashfree was
-	// the first provider and the reconcile switch was written against its
-	// responses directly. That is history, not a contract with Cashfree: a
-	// second provider (kora#478) has no reason to speak Cashfree's dialect, so
+	// They happen to be the first provider's literal API strings, because the
+	// reconcile switch was originally written against its responses directly.
+	// That is history, not a contract with any gateway — that provider was
+	// removed in kora#479 and these outlived it. A future provider has no
+	// reason to speak its dialect, so
 	// the names are stated here as KORA's vocabulary and each client is
 	// responsible for translating into it. Anything a provider reports that is
 	// neither of these is "still in flight" and reconcile leaves the order
@@ -69,8 +70,12 @@ type Order struct {
 
 func (Order) TableName() string { return "ai_payment_orders" }
 
-// gateway is the slice of Cashfree the order service needs, so tests can
-// settle an order without a live gateway.
+// gateway is the slice of a payment provider the order service needs, so
+// tests can settle an order without a live gateway.
+//
+// Deliberately narrow and provider-neutral: it is what let Cashfree be removed
+// (kora#479) without touching the order service, and what a future rail slots
+// into.
 type gateway interface {
 	CreateOrder(ctx context.Context, orderID string, breakdown PriceBreakdown, customerID, phone, email, note string) (CreatedOrder, error)
 	FetchOrder(ctx context.Context, orderID string) (OrderStatus, error)

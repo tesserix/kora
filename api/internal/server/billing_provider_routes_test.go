@@ -19,85 +19,64 @@ func routeSet(r *gin.Engine) map[string]bool {
 	return out
 }
 
-func routerWith(cashfree billing.CashfreeConfig, stripe billing.StripeConfig) *gin.Engine {
+func routerWith(stripe billing.StripeConfig) *gin.Engine {
 	return NewRouter(Deps{
 		DB:       &gorm.DB{},
 		Verifier: stubVerifier{},
-		Cashfree: cashfree,
 		Stripe:   stripe,
 	})
 }
 
-var (
-	configuredCashfree = billing.CashfreeConfig{AppID: "app", SecretKey: "secret"}
-	configuredStripe   = billing.StripeConfig{SecretKey: "sk_test_x", WebhookSecret: "whsec_x"}
-)
+var configuredStripe = billing.StripeConfig{SecretKey: "sk_test_x", WebhookSecret: "whsec_x"}
 
 // TestNoGatewayMountsNoCheckout — an environment with no gateway must advertise
 // no checkout at all, rather than one that takes money and grants nothing.
+//
+// This is Kora's ACTUAL production state since kora#479 removed Cashfree, not
+// a hypothetical: Stripe is merged but configured-off, and the iOS rail
+// (StoreKit IAP, ADR 0004) is kora#487 and unbuilt. So this case is the one
+// that describes today.
 func TestNoGatewayMountsNoCheckout(t *testing.T) {
-	routes := routeSet(routerWith(billing.CashfreeConfig{}, billing.StripeConfig{}))
+	routes := routeSet(routerWith(billing.StripeConfig{}))
 
 	require.False(t, routes["POST /v1/ai/orders"], "no gateway must mean no purchase surface")
-	require.False(t, routes["POST /webhooks/cashfree"])
 	require.False(t, routes["POST /webhooks/stripe"])
 	// The metered read-only surface is NOT gated on a gateway: a user can see
 	// what they have used without being able to buy more.
 	require.True(t, routes["GET /v1/ai/usage"])
 }
 
-// TestCashfreeAloneMountsOnlyItsWebhook
-func TestCashfreeAloneMountsOnlyItsWebhook(t *testing.T) {
-	routes := routeSet(routerWith(configuredCashfree, billing.StripeConfig{}))
-
-	require.True(t, routes["POST /v1/ai/orders"])
-	require.True(t, routes["POST /webhooks/cashfree"])
-	require.False(t, routes["POST /webhooks/stripe"], "an unconfigured Stripe must not expose a callback")
-}
-
-// TestStripeAloneMountsOnlyItsWebhook
-func TestStripeAloneMountsOnlyItsWebhook(t *testing.T) {
-	routes := routeSet(routerWith(billing.CashfreeConfig{}, configuredStripe))
+// TestStripeMountsItsOwnWebhookOnly — a configured gateway exposes its own
+// callback and nothing else. No other provider's route may appear, because a
+// second live checkout path would mean two gateways able to settle the same
+// order.
+func TestStripeMountsItsOwnWebhookOnly(t *testing.T) {
+	routes := routeSet(routerWith(configuredStripe))
 
 	require.True(t, routes["POST /v1/ai/orders"])
 	require.True(t, routes["POST /webhooks/stripe"])
-	require.False(t, routes["POST /webhooks/cashfree"])
+	require.False(t, routes["POST /webhooks/cashfree"],
+		"Cashfree was removed in kora#479; its callback must never reappear")
 }
 
-// TestStripeWinsWhenBothAreConfigured pins the migration's safety margin.
-//
-// During the cutover BOTH credentials exist at once — that overlap is the
-// entire rollback plan for kora#479: if Stripe misbehaves under real traffic,
-// clearing STRIPE_SECRET_KEY points config back at Cashfree rather than
-// requiring a revert of merged code.
-//
-// Exactly ONE provider is mounted, never both. Two live checkout paths would
-// mean two gateways able to settle the same order, and the webhook that lost
-// the race would be reconciled against an order already paid.
-func TestStripeWinsWhenBothAreConfigured(t *testing.T) {
-	routes := routeSet(routerWith(configuredCashfree, configuredStripe))
-
-	require.True(t, routes["POST /webhooks/stripe"], "Stripe is the gateway being cut over to")
-	require.False(t, routes["POST /webhooks/cashfree"], "both gateways must never be mounted at once")
-	require.True(t, routes["POST /v1/ai/orders"], "the buyer-facing surface is provider-independent")
-}
-
-// TestPurchaseRoutesAreIdenticalAcrossProviders — the routes a buyer uses must
-// not differ by gateway, or the mobile app would have to know which one is
+// TestPurchaseRoutesAreProviderIndependent — the routes a buyer uses must not
+// differ by gateway, or the mobile app would have to know which one is
 // configured. Only the webhook is provider-shaped.
-func TestPurchaseRoutesAreIdenticalAcrossProviders(t *testing.T) {
+//
+// Kept with one provider rather than deleted with Cashfree: this is the
+// property a FUTURE rail has to satisfy, and it is the reason the buyer
+// surface survived the removal unchanged.
+func TestPurchaseRoutesAreProviderIndependent(t *testing.T) {
 	buyerSurface := []string{
 		"GET /v1/ai/packs",
 		"POST /v1/ai/orders",
 		"GET /v1/ai/orders",
 		"GET /v1/ai/orders/:id",
 	}
-	cashfree := routeSet(routerWith(configuredCashfree, billing.StripeConfig{}))
-	stripe := routeSet(routerWith(billing.CashfreeConfig{}, configuredStripe))
+	routes := routeSet(routerWith(configuredStripe))
 
 	for _, route := range buyerSurface {
-		require.True(t, cashfree[route], "cashfree is missing %s", route)
-		require.True(t, stripe[route], "stripe is missing %s", route)
+		require.True(t, routes[route], "stripe is missing %s", route)
 	}
 }
 
@@ -105,7 +84,7 @@ func TestPurchaseRoutesAreIdenticalAcrossProviders(t *testing.T) {
 // signing secret could take money but never verify the callback confirming it,
 // stranding every order in `created`.
 func TestStripeNeedsBothCredentialsToMount(t *testing.T) {
-	routes := routeSet(routerWith(billing.CashfreeConfig{}, billing.StripeConfig{SecretKey: "sk_test_x"}))
+	routes := routeSet(routerWith(billing.StripeConfig{SecretKey: "sk_test_x"}))
 
 	require.False(t, routes["POST /webhooks/stripe"])
 	require.False(t, routes["POST /v1/ai/orders"], "a half-configured Stripe must not sell anything")

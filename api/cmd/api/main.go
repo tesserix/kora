@@ -225,12 +225,6 @@ func main() {
 			AppleExchanger:       appleExchanger,
 			IdentityDeleter:      identityDeleter,
 			AppleRevoker:         appleRevoker,
-			Cashfree: billing.CashfreeConfig{
-				AppID:     cfg.CashfreeAppID,
-				SecretKey: cfg.CashfreeSecretKey,
-				Sandbox:   cfg.CashfreeSandbox,
-				ReturnURL: cfg.CashfreeReturnURL,
-			},
 			Stripe: billing.StripeConfig{
 				SecretKey:     cfg.StripeSecretKey,
 				WebhookSecret: cfg.StripeWebhookSecret,
