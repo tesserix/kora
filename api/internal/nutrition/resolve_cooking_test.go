@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-
 // TestStatedCookingMethodDoesNotRewardRawRows pins kora#467.
 //
 // AUSNUT names the CUT, not the preparation: "Lamb, roast, lean, raw" is a
@@ -20,7 +19,7 @@ import (
 // The bonus is WITHHELD from a raw row rather than subtracted from it, because
 // every signal in this ranker only ever adds; see the cookingMethodBonus doc.
 func TestStatedCookingMethodDoesNotRewardRawRows(t *testing.T) {
-	tx := fixtureTx(t)
+	tx := fixtureOnlyTx(t)
 	repo := NewRepository(tx)
 	ctx := context.Background()
 
@@ -55,7 +54,7 @@ func TestStatedCookingMethodDoesNotRewardRawRows(t *testing.T) {
 // and for those queries a raw row is the CORRECT answer and must still earn the
 // bonus. A fix that blanket-demotes raw would break this.
 func TestCookingMethodRawStillMatchesRawRows(t *testing.T) {
-	tx := fixtureTx(t)
+	tx := fixtureOnlyTx(t)
 	repo := NewRepository(tx)
 	ctx := context.Background()
 
