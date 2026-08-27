@@ -1239,6 +1239,10 @@ export default function CaptureScreen() {
   // effect below now genuinely kills an in-flight upload rather than merely
   // dropping a reference to one.
   const resolveControllerRef = useRef<AbortController | null>(null);
+  // Milliseconds since this capture began; read at CONFIRM time so an offline
+  // log queued for later still reports how long the USER waited, not how long
+  // the queue held it. Null until the first capture starts.
+  const captureStartedAtRef = useRef<number | null>(null);
   // Set the moment Cancel fires, cleared the moment a new resolve starts —
   // overrides displayStage below so the UI returns to idle even while the
   // hook's own isPending is still (harmlessly) true.
@@ -1252,9 +1256,21 @@ export default function CaptureScreen() {
   // back (immediately after calling this), so a Cancel on a photo/voice/text
   // resolve never arms the barcode cooldown with a stale code from an
   // earlier, unrelated scan (see #136 part 2 follow-up review).
+  // captureStartedAtRef is when THIS capture began — the start of kora#43's
+  // north-star metric, "median time-to-log a meal (<10s target)".
+  //
+  // Set here rather than at screen mount, which is what app/log.tsx uses:
+  // capture.tsx stays mounted across several logs, so mount time would charge
+  // the second meal for however long the first one took. Every capture path
+  // (photo, voice, message, barcode) funnels through beginResolve, so this is
+  // the one place that sees all of them.
+  //
+  // It is deliberately NOT cleared on cancel: the next capture overwrites it,
+  // and a cancelled resolve logs nothing, so there is nothing to mis-time.
   function beginResolve(): AbortController {
     const controller = new AbortController();
     resolveControllerRef.current = controller;
+    captureStartedAtRef.current = Date.now();
     setCancelledResolve(false);
     lastScannedCodeRef.current = null;
     return controller;
@@ -1887,6 +1903,15 @@ export default function CaptureScreen() {
           meal_slot: mealSlot,
           source,
           logged_at: new Date().toISOString(),
+          // kora#482. Measured at CONFIRM, not when the request leaves: the
+          // offline queue replays writes later, and a duration computed at
+          // send time would report however long the device was offline.
+          // Omitted entirely when no capture started this log (a pin tap, a
+          // "your usual") — NULL means "not measured", which is a different
+          // claim from "logged instantly", and the runbook filters on it.
+          ...(captureStartedAtRef.current !== null
+            ? { client_log_ms: Date.now() - captureStartedAtRef.current }
+            : {}),
           ...(serving ? { entered_amount: serving.amount, entered_unit: serving.unit } : {}),
           ...(resolvedPhrase && (source === "ai_text" || source === "ai_voice")
             ? { input_phrase: resolvedPhrase }
