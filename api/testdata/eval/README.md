@@ -92,13 +92,38 @@ independently of what the resolver said. Done by hand over these 50 phrases on
 | | |
 |---|---|
 | phrases probed | 50 |
-| resolves acceptably | **34 (68%)** |
-| clearly wrong | 14 |
-| reference value looks wrong | 2 |
+| resolves acceptably | **43 (86%)** |
+| clearly wrong | 7 |
+
+Measured against **production** on 2026-08-27, which is the number that
+describes what a tester experiences. The earlier 34/50 was measured against dev
+and is superseded — see the warning above about the two indexes differing.
+
+Still wrong: `iced coffee`, `sausage sizzle` (its `onion` guess), `souvlaki`,
+`roast chicken`, `boiled rice`, `mac and cheese`, `laksa`. Two of those are data
+gaps rather than ranking (`souvlaki` has no generic row at all); `iced coffee`
+is genuine ambiguity the resolver should ask about.
 
 The dominant single cause was the bare guess `toast`, which returns `French
 toast, plain` and accounted for 3 of the 14 — "X on toast" being a staple
 Australian breakfast.
+
+### Run it against PRODUCTION before quoting a number
+
+The harness reads whatever `DATABASE_URL` points at, and **dev is not prod**:
+26,120 live rows in production against 18,876 in dev, and 82% serving coverage
+against 67%, as of 2026-08-27. Those differences change results.
+
+Verified: `long black` passed against dev and MISSED against prod, because prod
+carries a `Coffee, brewed` row dev lacks. The expectation turned out to be wrong
+— but a dev-only run would never have said so.
+
+    kubectl port-forward -n kora svc/kora-postgres-rw 15499:5432 &
+    DATABASE_URL="postgres://kora:$PW@localhost:15499/kora_db?sslmode=disable" \
+      KORA_EVAL=1 go test -tags eval ./internal/ai/ -run TestEvalRanking
+
+The harness is READ-ONLY — it issues SELECTs and writes only its TSV — which is
+what makes pointing it at production acceptable. Keep it that way.
 
 **Re-do that judgement by hand when the number is claimed.** It cannot be
 derived from the harness, and the harness will happily report 100% while the
