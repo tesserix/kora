@@ -98,6 +98,59 @@ type inboxAction struct {
 	Destructive bool   `json:"destructive"`
 }
 
+// Inbox action ids. These are the ONLY actions Kora accepts, and an item
+// offers a subset of them — §8.3 requires refusing an action the item did not
+// declare, so this list is the outer bound and the item's own array is the
+// inner one.
+//
+// All three are TRIAGE transitions: they move a queue row's own status and
+// touch nothing else. Deliberately absent are `resolve-to-food` and
+// `add-alias`, which #484 also proposes: a curated alias resolves at score 1.0
+// — the auto-log tier — so a wrong one silently logs the wrong food for every
+// user. Today those live in a reviewed data file where each entry carries a
+// stated `why` (see data/food/aliases.json), and moving that behind a console
+// button removes the review rather than the work. That is a separate decision
+// from "the console may write", which is the one taken here.
+const (
+	// ActionStart claims an item — the operator is working it.
+	ActionStart = "start"
+	// ActionResolve marks the work done.
+	ActionResolve = "resolve"
+	// ActionDismiss closes an item WITHOUT it having been fixed: noise, a
+	// duplicate, or a phrase nobody will act on. Destructive, because it
+	// removes work from the queue on the strength of a judgement rather than
+	// a fix, and a queue that quietly loses items is worse than a long one.
+	ActionDismiss = "dismiss"
+)
+
+// actionsFor returns what an item in this status may be asked to do.
+//
+// Driven by the CURRENT status rather than fixed per kind: an item already in
+// progress must not offer "start" again, and a terminal item offers nothing.
+// The console renders exactly this list, so an action that is not valid right
+// now must not appear — an offered button that then 400s is the failure §8.3
+// exists to prevent.
+func actionsFor(status string) []inboxAction {
+	switch status {
+	case string(resolveoutcome.StatusOpen):
+		return []inboxAction{
+			{ID: ActionStart, Label: "Start", Destructive: false},
+			{ID: ActionResolve, Label: "Mark resolved", Destructive: false},
+			{ID: ActionDismiss, Label: "Dismiss", Destructive: true},
+		}
+	case string(resolveoutcome.StatusInProgress):
+		return []inboxAction{
+			{ID: ActionResolve, Label: "Mark resolved", Destructive: false},
+			{ID: ActionDismiss, Label: "Dismiss", Destructive: true},
+		}
+	default:
+		// Terminal. The read side only lists open work, so this is defensive
+		// rather than reachable — but an empty list is the honest answer for
+		// an item nobody can act on.
+		return []inboxAction{}
+	}
+}
+
 // inboxItem is §3.2's shape.
 //
 // DueAt is a pointer so it marshals as null rather than as an empty string.
@@ -229,7 +282,7 @@ func toUnresolvedItem(o resolveoutcome.Outcome) inboxItem {
 		DueAt:        nil,
 		Severity:     severity,
 		Href:         "",
-		Actions:      []inboxAction{},
+		Actions:      actionsFor(string(o.Status)),
 	}
 }
 
@@ -262,12 +315,13 @@ func toInboxItem(f feedback.Feedback) inboxItem {
 		// the console, and console-core still marks every Kora route
 		// `pending` — an href to a 404 is worse than no href.
 		Href: "",
-		// No actions are declared. §8.2's execution endpoint
-		// (POST /admin/inbox/{id}/actions/{actionId}) is not implemented
-		// here, and §3.2 says to declare only actions the product can
-		// actually perform. A "Resolve" button that 404s is a worse inbox
-		// than one with no buttons.
-		Actions: []inboxAction{},
+		// The same triage transitions the food half offers, driven by this
+		// item's own status. feedback.Status and resolveoutcome.Status share
+		// the open/in_progress/resolved/closed vocabulary, so one mapping
+		// serves both kinds — and if they ever diverge, the status strings
+		// stop matching and this returns an empty list rather than offering
+		// an action the write side would refuse.
+		Actions: actionsFor(string(f.Status)),
 	}
 }
 

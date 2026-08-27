@@ -86,6 +86,10 @@ func Register(r *gin.Engine, deps Deps) {
 	g.GET("/entities/:type", NewEntitiesHandler(repo, deps.Logger).Search)
 	g.GET("/health", NewHealthHandler(probes, deps.Logger).Health)
 	g.GET("/kpis", NewKPIsHandler().KPIs)
+	// §8.3's execution endpoint. The read side declares actions per item and
+	// this refuses any action that item did not offer, so the declared array
+	// is a contract the console can render against (kora#484).
+	g.POST("/inbox/:id/actions/:actionId", NewInboxActionHandler(repo, deps.Logger).Apply)
 
 	// Not mounted, deliberately, so the absences are legible here rather than
 	// only in an issue:
@@ -94,9 +98,13 @@ func Register(r *gin.Engine, deps Deps) {
 	//     explicit that a product with none implements none of them and must
 	//     NOT return {} or an empty list — 404 from an unmounted route says
 	//     "no such surface", which is the true answer.
-	//   - POST /admin/inbox/{id}/actions/{actionId} (§8.3). The read side
-	//     declares no actions, and §8.3 requires rejecting an action the item
-	//     did not declare — so there is nothing this route could accept.
-	//   - Every write (§8.3 domain writes). #447: the console is read-only
-	//     for Kora. Foods and users are edited through Kora's own portal.
+	//   - Domain writes beyond triage. #447 was reversed on 2026-08-27 — the
+	//     console controls and manages Kora — but the triage actions mounted
+	//     above are deliberately the whole of it for now. `resolve-to-food`
+	//     and `add-alias` are NOT offered: a curated alias resolves at score
+	//     1.0, the auto-log tier, so a wrong one silently logs the wrong food
+	//     for every user. Those entries live in a reviewed data file where
+	//     each carries a stated `why`, and a console button would remove the
+	//     review rather than the work. Foods and users are still edited
+	//     through Kora's own portal.
 }

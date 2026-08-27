@@ -223,7 +223,18 @@ func TestInboxReturnsItemsAndTotal(t *testing.T) {
 	assert.Equal(t, "bug · ios 1.0.0", item["subtitle"])
 	assert.Equal(t, "2026-08-25T09:31:00Z", item["waiting_since"])
 	assert.Equal(t, SeverityHigh, item["severity"], "a defect is not the same waiting as a suggestion")
-	assert.Empty(t, item["actions"], "declare only actions Kora can execute")
+	// Was `assert.Empty` while Kora executed none. #484 mounts §8.3's
+	// execution endpoint, so an open item now declares the triage transitions
+	// it can actually perform — the rule is unchanged ("declare only actions
+	// Kora can execute"), the set of executable actions is what grew.
+	declared, ok := item["actions"].([]any)
+	require.True(t, ok, "actions must be an array, not null")
+	ids := make([]string, 0, len(declared))
+	for _, a := range declared {
+		ids = append(ids, a.(map[string]any)["id"].(string))
+	}
+	assert.Equal(t, []string{"start", "resolve", "dismiss"}, ids,
+		"an open item declares exactly the transitions the write side accepts")
 }
 
 // TestInboxDueAtIsNullNotAbsentAndNotInvented — Kora has no SLA on this
