@@ -101,4 +101,45 @@ describe("mergeAsleepMillis", () => {
     ]);
     expect(millis).toBe(1 * HOUR);
   });
+
+  // --- window clipping (kora#417) ---
+  //
+  // HealthKit's default predicate returns any sample merely OVERLAPPING the
+  // queried window, so a night that began before the window still comes back —
+  // in full. Counting it whole attributes hours slept before the window to the
+  // window, which is how the tile came to disagree with the Health app.
+  //
+  // The steps query already guards against exactly this with strictStartDate,
+  // and its comment says so. Sleep never did.
+
+  test("a sample starting before the window contributes only its part inside", () => {
+    // Window [0, 10). The sample runs [-4, 2): only [0, 2) is inside.
+    const millis = mergeAsleepMillis([sample(3, -4, 2)], at(0).getTime(), at(10).getTime());
+    expect(millis).toBe(2 * HOUR);
+  });
+
+  test("a sample ending after the window contributes only its part inside", () => {
+    const millis = mergeAsleepMillis([sample(3, 8, 14)], at(0).getTime(), at(10).getTime());
+    expect(millis).toBe(2 * HOUR);
+  });
+
+  test("a sample entirely outside the window contributes nothing", () => {
+    const millis = mergeAsleepMillis([sample(3, -8, -4)], at(0).getTime(), at(10).getTime());
+    expect(millis).toBe(0);
+  });
+
+  test("clipping happens before the union, so a clipped sample cannot extend a run", () => {
+    // [-4, 2) clips to [0, 2); [1, 3) is wholly inside. Union inside the window
+    // is [0, 3) = 3h. Unclipped it would have been [-4, 3) = 7h.
+    const millis = mergeAsleepMillis(
+      [sample(3, -4, 2), sample(4, 1, 3)],
+      at(0).getTime(),
+      at(10).getTime(),
+    );
+    expect(millis).toBe(3 * HOUR);
+  });
+
+  test("omitting the window keeps the previous unbounded behaviour", () => {
+    expect(mergeAsleepMillis([sample(3, -4, 2)])).toBe(6 * HOUR);
+  });
 });
