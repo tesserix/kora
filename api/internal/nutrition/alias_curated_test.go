@@ -33,7 +33,7 @@ func TestCuratedParmaAliasResolves(t *testing.T) {
 	var curated []GlobalAlias
 	require.NoError(t, json.Unmarshal(b, &curated))
 
-	tx := fixtureTx(t)
+	tx := fixtureOnlyTx(t)
 	repo := NewRepository(tx)
 	ctx := context.Background()
 
@@ -84,7 +84,7 @@ func TestCuratedToastAliasResolves(t *testing.T) {
 	var curated []GlobalAlias
 	require.NoError(t, json.Unmarshal(b, &curated))
 
-	tx := fixtureTx(t)
+	tx := fixtureOnlyTx(t)
 	repo := NewRepository(tx)
 	ctx := context.Background()
 
@@ -138,7 +138,7 @@ func TestCuratedFlatWhiteAliasResolves(t *testing.T) {
 	var curated []GlobalAlias
 	require.NoError(t, json.Unmarshal(b, &curated))
 
-	tx := fixtureTx(t)
+	tx := fixtureOnlyTx(t)
 	repo := NewRepository(tx)
 	ctx := context.Background()
 
@@ -271,7 +271,7 @@ func TestCuratedKebabAliasResolves(t *testing.T) {
 	var curated []GlobalAlias
 	require.NoError(t, json.Unmarshal(b, &curated))
 
-	tx := fixtureTx(t)
+	tx := fixtureOnlyTx(t)
 	repo := NewRepository(tx)
 	ctx := context.Background()
 

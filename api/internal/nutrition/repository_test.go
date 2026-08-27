@@ -46,6 +46,37 @@ func fixtureTx(t *testing.T) *gorm.DB {
 	return tx
 }
 
+// fixtureOnlyTx is fixtureTx plus the precondition the ranking tests have
+// always had but never stated: food_items must contain nothing except the rows
+// the test itself seeds.
+//
+// Those tests assert that a SEEDED row wins a GLOBAL ranking query. CI
+// satisfies that silently — its Postgres service container starts empty and
+// ci.yml only runs migrations, never an index ingest — but a developer machine
+// carries the committed dev index, where real rows either outrank the fixtures
+// outright or, worse, tie with an identically-named row. On a tie the query
+// falls to `ORDER BY similarity(...) DESC, fi.id`, and the fixture's id is
+// uuid.New() — random per run. That is a coin flip, and it is why these tests
+// were green in CI while failing locally with a set that changed run to run.
+//
+// Skips rather than fails: the unmet precondition is a property of the
+// database, not of the code under test. The inverse guard already exists in
+// TestCuratedAliasesPreferRowsThatCanBePortioned, which needs a POPULATED
+// index and skips without one.
+func fixtureOnlyTx(t *testing.T) *gorm.DB {
+	t.Helper()
+	tx := fixtureTx(t)
+	var indexed int64
+	require.NoError(t, tx.Raw(
+		"SELECT count(*) FROM food_items WHERE deleted_at IS NULL").Scan(&indexed).Error)
+	if indexed > 0 {
+		t.Skipf("food index holds %d committed rows; this test ranks against the WHOLE table and "+
+			"needs a fixture-only index. Point TEST_DATABASE_URL at an empty migrated database, "+
+			"as CI does.", indexed)
+	}
+	return tx
+}
+
 func TestSeedIsIdempotentAndSearchable(t *testing.T) {
 	tx := fixtureTx(t)
 	repo := NewRepository(tx)
