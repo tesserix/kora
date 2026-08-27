@@ -2,12 +2,14 @@ package fasting
 
 import (
 	"context"
+	"errors"
 	"os"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -26,6 +28,40 @@ func testDB(t *testing.T) *gorm.DB {
 		t.Skipf("postgres unavailable: %v", err)
 	}
 	return db
+}
+
+// pgTooManyConnections is SQLSTATE 53300, "sorry, too many clients already".
+const pgTooManyConnections = "53300"
+
+// skipIfPostgresSaturated turns connection exhaustion into a skip.
+//
+// 53300 means the SERVER ran out of connection slots — it says nothing about
+// the code under test. testDB above already takes exactly this posture for a
+// database it cannot reach at all, and a saturated server is the same
+// condition arriving a moment later.
+//
+// It matters here because TestStartHandlesGenuineConcurrentStarts needs TEN
+// simultaneous connections by construction. Under `go test ./...` every
+// package opens its own unbounded pool against the same local Postgres
+// (max_connections defaults to 100), so the suite can exhaust the server
+// while any single package passes comfortably on its own. That is why this
+// test failed roughly once per full run and never in isolation, and why it
+// reported "a concurrent start must never surface as an error" for a reason
+// that had nothing to do with concurrent starts.
+//
+// Deliberately narrow: ONLY 53300 skips. Every other error still fails, so a
+// genuine race regression cannot hide behind this.
+func skipIfPostgresSaturated(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		return
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == pgTooManyConnections {
+		t.Skipf("postgres is out of connection slots (SQLSTATE %s); this test needs several "+
+			"simultaneous connections and cannot run against a saturated server. "+
+			"Run this package on its own, or raise max_connections.", pgTooManyConnections)
+	}
 }
 
 // seedUser inserts a bare user row and returns its id.
@@ -224,6 +260,7 @@ func TestStartHandlesGenuineConcurrentStarts(t *testing.T) {
 
 	first := results[0]
 	for i := 0; i < n; i++ {
+		skipIfPostgresSaturated(t, errs[i])
 		require.NoError(t, errs[i], "a concurrent start must never surface as an error")
 		require.Equal(t, first.ID, results[i].ID, "every concurrent starter must get back the SAME open fast")
 	}
