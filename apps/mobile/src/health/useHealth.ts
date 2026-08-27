@@ -86,12 +86,35 @@ type AsleepSample = {
 // collapse to one interval) and correct when it doesn't. A future "time in deep
 // sleep" readout can filter to staged-only values on its own path; it does not
 // need this total to have dropped unspecified first.
-export function mergeAsleepMillis(samples: readonly AsleepSample[]): number {
+export function mergeAsleepMillis(
+  samples: readonly AsleepSample[],
+  windowStart?: number,
+  windowEnd?: number,
+): number {
+  // CLIP to the queried window before doing anything else (kora#417).
+  //
+  // HealthKit's default predicate returns any sample merely OVERLAPPING the
+  // window, so a night that began before windowStart still comes back — and
+  // comes back WHOLE. Counting it whole credits hours slept outside the window
+  // to the window, which is how this tile came to read higher than the Health
+  // app's own figure for the same night.
+  //
+  // The steps query above already guards against precisely this with
+  // strictStartDate, and carries a comment saying so; sleep never did. Clipping
+  // is used here rather than strictStartDate because strictStartDate DISCARDS
+  // an overlapping sample outright, losing the minutes that genuinely are
+  // inside the window. Clipping keeps them and drops only the rest.
+  //
+  // Bounds are optional so the union logic stays independently testable, and
+  // omitting them preserves the previous unbounded behaviour.
+  const lower = windowStart ?? Number.NEGATIVE_INFINITY;
+  const upper = windowEnd ?? Number.POSITIVE_INFINITY;
+
   const intervals = samples
     .filter((sample) => ASLEEP_CATEGORY_VALUES.has(sample.value))
     .map((sample) => ({
-      start: new Date(sample.startDate).getTime(),
-      end: new Date(sample.endDate).getTime(),
+      start: Math.max(new Date(sample.startDate).getTime(), lower),
+      end: Math.min(new Date(sample.endDate).getTime(), upper),
     }))
     // Drop unparseable dates and zero/negative-duration samples up front so the
     // sweep below never has to special-case them.
@@ -235,7 +258,11 @@ export function useHealth(): HealthData {
         });
         setSteps(weekSamples.length > 0 ? { today: 0, goal: STEP_GOAL } : null);
       }
-      const sleepMillis = mergeAsleepMillis(sleepSamples);
+      const sleepMillis = mergeAsleepMillis(
+        sleepSamples,
+        sleepWindowStart.getTime(),
+        now.getTime(),
+      );
       // Stored at full precision, rounded once at render by
       // sleepDurationLabel. Rounding to one decimal HERE quantised the night
       // to 6-minute steps, so 4h 26m was stored as 4.4 and could only ever be

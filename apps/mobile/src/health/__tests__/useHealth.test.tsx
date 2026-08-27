@@ -127,19 +127,19 @@ describe("useHealth", () => {
     mockIsAvailable.mockReturnValue(true);
     mockRequestAuthorization.mockResolvedValue(true);
     mockQueryStatistics.mockResolvedValue(statsWithSum(5200));
+    // Anchored to the queried window, not to fixed calendar dates. The samples
+    // used to be hardcoded a month in the past: the mock returns them whatever
+    // the filter says, so they only ever counted because the merge ignored the
+    // window. Real HealthKit would not have returned them at all (kora#417).
+    const authDayStart = new Date();
+    authDayStart.setHours(0, 0, 0, 0);
+    const hoursBeforeMidnight = (h: number) =>
+      new Date(authDayStart.getTime() - h * 60 * 60 * 1000);
     mockQueryCategorySamples.mockResolvedValue([
       // asleepCore (3): 3 hours — counted.
-      {
-        value: 3,
-        startDate: new Date("2026-07-26T23:00:00.000Z"),
-        endDate: new Date("2026-07-27T02:00:00.000Z"),
-      },
+      { value: 3, startDate: hoursBeforeMidnight(6), endDate: hoursBeforeMidnight(3) },
       // inBed (0): excluded from the asleep total.
-      {
-        value: 0,
-        startDate: new Date("2026-07-26T22:30:00.000Z"),
-        endDate: new Date("2026-07-26T23:00:00.000Z"),
-      },
+      { value: 0, startDate: hoursBeforeMidnight(6.5), endDate: hoursBeforeMidnight(6) },
     ]);
 
     const { result } = await renderHook(() => useHealth());
@@ -237,6 +237,38 @@ describe("useHealth", () => {
     expect(options.filter.date.strictStartDate).toBe(true);
     expect(options.filter.date.startDate.getHours()).toBe(0);
     expect(options.filter.date.startDate.getMinutes()).toBe(0);
+  });
+
+  // kora#417: the WIRING, not the arithmetic.
+  //
+  // mergeAsleepMillis clips to a window, but only if the hook actually hands it
+  // one. The unit tests pass bounds explicitly and so cannot notice a caller
+  // that forgot — which is exactly the shape of the original bug: the steps
+  // query guarded its boundary with strictStartDate and the sleep query guarded
+  // nothing. This drives the real hook with a sample that straddles the window
+  // start and asserts only the inside part is counted.
+  it("clips a sleep sample that began before the window instead of counting it whole", async () => {
+    mockIsAvailable.mockReturnValue(true);
+    mockRequestAuthorization.mockResolvedValue(true);
+    mockQueryStatistics.mockResolvedValue(statsWithSum(1000));
+
+    // The window opens 16h before local midnight. Start the sample a further 5h
+    // back and end it 1h after the window opens: 6h long, but only 1h inside.
+    const dayStart = new Date();
+    dayStart.setHours(0, 0, 0, 0);
+    const windowStart = new Date(dayStart.getTime() - 16 * 60 * 60 * 1000);
+    mockQueryCategorySamples.mockResolvedValue([
+      {
+        value: 3,
+        startDate: new Date(windowStart.getTime() - 5 * 60 * 60 * 1000),
+        endDate: new Date(windowStart.getTime() + 1 * 60 * 60 * 1000),
+      },
+    ]);
+
+    const { result } = await renderHook(() => useHealth());
+    await waitFor(() => expect(result.current.sleep).not.toBeNull());
+    // 1h inside the window, not the sample's full 6h.
+    expect(result.current.sleep?.lastNightHours).toBeCloseTo(1, 5);
   });
 
   // A statistics response with no sumQuantity is HealthKit saying "nothing in this
