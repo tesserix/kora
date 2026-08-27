@@ -3,6 +3,7 @@ import { AppState, Platform } from "react-native";
 import { apiFetch } from "@/lib/api";
 import { resolveAuthState } from "@/lib/authState";
 import { readAnchor, writeAnchor } from "./anchorStore";
+import * as healthConnect from "./healthConnect";
 import { syncWeight, type WeightRecord, type WeightSample, type WeightSyncResponse } from "./syncWeight";
 import { BODY_MASS_IDENTIFIER, weightPermissionRequested } from "./weightPermission";
 
@@ -57,6 +58,25 @@ async function queryWeights(anchor: string | null): Promise<{ samples: WeightSam
   };
 }
 
+/**
+ * The Android reader. Health Connect's changes token IS the anchor, so the
+ * shape syncWeight sees is identical.
+ *
+ * Gated on the same permission flag as iOS: this runs on mount and every
+ * foreground, and it must never be the thing that first shows a permission
+ * prompt. A user handed that prompt before anything explains why has every
+ * reason to decline, and on both platforms a denial is sticky. The prompt
+ * belongs to LogWeightSheet, where the user has just tapped "Log weight".
+ */
+async function queryWeightsAndroid(
+  anchor: string | null,
+): Promise<{ samples: WeightSample[]; newAnchor: string }> {
+  if (!(await weightPermissionRequested())) {
+    throw new Error("Health Connect weight permission not requested yet");
+  }
+  return healthConnect.readWeightChanges(anchor);
+}
+
 async function post(weights: WeightRecord[]): Promise<WeightSyncResponse> {
   return apiFetch("/v1/health/sync", {
     method: "POST",
@@ -72,10 +92,14 @@ async function post(weights: WeightRecord[]): Promise<WeightSyncResponse> {
 // skipping outright here is not merely tidier than letting it fail, it is
 // the only way most signed-out launches actually skip the attempt.
 async function run(): Promise<void> {
-  if (Platform.OS !== "ios") return;
+  if (Platform.OS !== "ios" && Platform.OS !== "android") return;
   const authState = await resolveAuthState();
   if (authState !== "signed-in") return;
-  await syncWeight({ queryWeights, post, readAnchor, writeAnchor });
+  // Same sync algorithm on both platforms — only the reader differs. syncWeight
+  // owns the anchor discipline (advance only after a successful read AND post),
+  // so it must not learn which platform it is on.
+  const query = Platform.OS === "android" ? queryWeightsAndroid : queryWeights;
+  await syncWeight({ queryWeights: query, post, readAnchor, writeAnchor });
 }
 
 // Runs the weight sync on mount and every time the app returns to the

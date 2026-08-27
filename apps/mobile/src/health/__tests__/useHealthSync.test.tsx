@@ -19,6 +19,14 @@ jest.mock("@/lib/api", () => ({ apiFetch: (...args: unknown[]) => mockApiFetch(.
 const mockResolveAuthState = jest.fn();
 jest.mock("@/lib/authState", () => ({ resolveAuthState: () => mockResolveAuthState() }));
 
+const mockReadWeightChanges = jest.fn();
+const mockHasWeightPermission = jest.fn();
+jest.mock("../healthConnect", () => ({
+  readWeightChanges: (...args: unknown[]) => mockReadWeightChanges(...args),
+  hasWeightPermission: (...args: unknown[]) => mockHasWeightPermission(...args),
+  requestWeightPermission: jest.fn(),
+}));
+
 // The anchor is the whole self-healing mechanism (see syncWeight.ts): mocked
 // so a test can assert it was NOT advanced, which is what "this launch was
 // skipped and will retry" looks like from the outside.
@@ -159,12 +167,33 @@ test("syncs as before once the permission has been requested", async () => {
   expect(mockRequestAuthorization).not.toHaveBeenCalled();
 });
 
-// The gate is not reached at all on the paths that were already guarded —
-// asserted so the new call cannot become a per-launch native round-trip for
-// users it can never help.
-test("does not ask about permission on a non-iOS platform", async () => {
+// Android syncs too now (Health Connect), so the auth gate IS reached — but
+// the HealthKit permission call must still never run there. That was the
+// original point of this test: the gate cannot become a per-launch native
+// round-trip for users it can never help, and a HealthKit call on Android
+// helps nobody.
+test("syncs on android through Health Connect, never HealthKit", async () => {
   setPlatformOS("android");
   mockGetRequestStatus.mockResolvedValue(AuthorizationRequestStatus.unnecessary);
+  mockHasWeightPermission.mockResolvedValue(true);
+  mockReadWeightChanges.mockResolvedValue({ samples: [], newAnchor: "hc-token-2" });
+
+  renderHook(() => useHealthSync());
+  await flushSync();
+
+  expect(mockResolveAuthState).toHaveBeenCalled();
+  // The ROUTING assertion: Android must read through Health Connect. Asserting
+  // only that HealthKit was untouched is vacuous — the permission gate
+  // short-circuits before HealthKit is reached either way.
+  await waitFor(() => expect(mockReadWeightChanges).toHaveBeenCalled());
+  expect(mockGetRequestStatus).not.toHaveBeenCalled();
+  expect(mockRequestAuthorization).not.toHaveBeenCalled();
+});
+
+// A platform with neither health provider does nothing at all — not an auth
+// round-trip, not a native call.
+test("does nothing on a platform with no health provider", async () => {
+  setPlatformOS("web");
 
   renderHook(() => useHealthSync());
   await flushSync();

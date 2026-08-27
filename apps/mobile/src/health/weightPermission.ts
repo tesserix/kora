@@ -1,3 +1,6 @@
+import { Platform } from "react-native";
+
+import * as healthConnect from "./healthConnect";
 // Lazy require, same reasoning as src/health/useHealth.ts,
 // src/health/useHealthSync.ts and src/mentor/healthSync.ts:
 // `@kingstinct/react-native-healthkit` is a Nitro module that throws at
@@ -36,6 +39,9 @@ export const BODY_MASS_IDENTIFIER = "HKQuantityTypeIdentifierBodyMass";
  * no, and returning false keeps every caller on the conservative path.
  */
 export async function weightPermissionRequested(): Promise<boolean> {
+  // Android answers this directly — see healthConnect.hasWeightPermission for
+  // why the two platforms' different questions are interchangeable here.
+  if (Platform.OS === "android") return healthConnect.hasWeightPermission();
   const healthKit = loadHealthKit();
   const status = await healthKit.getRequestStatusForAuthorization({ toRead: [BODY_MASS_IDENTIFIER] });
   return status === healthKit.AuthorizationRequestStatus.unnecessary;
@@ -57,6 +63,7 @@ export async function weightPermissionRequested(): Promise<boolean> {
  * permission to expect data.
  */
 export async function requestWeightPermission(): Promise<void> {
+  if (Platform.OS === "android") return healthConnect.requestWeightPermission();
   const healthKit = loadHealthKit();
   await healthKit.requestAuthorization({ toRead: [BODY_MASS_IDENTIFIER] });
 }

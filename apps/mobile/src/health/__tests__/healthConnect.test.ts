@@ -1,10 +1,20 @@
-import { readSleepSamples, readSteps, requestPermissions } from "../healthConnect";
+import {
+  hasWeightPermission,
+  readDailyStepBuckets,
+  readSleepSamples,
+  readSteps,
+  readWeightChanges,
+  requestPermissions,
+} from "../healthConnect";
 
 const mockGetSdkStatus = jest.fn();
 const mockInitialize = jest.fn();
 const mockRequestPermission = jest.fn();
 const mockReadRecords = jest.fn();
 const mockAggregateRecord = jest.fn();
+const mockAggregateGroupByPeriod = jest.fn();
+const mockGetChanges = jest.fn();
+const mockGetGrantedPermissions = jest.fn();
 
 jest.mock("react-native-health-connect", () => ({
   getSdkStatus: (...a: unknown[]) => mockGetSdkStatus(...a),
@@ -12,6 +22,9 @@ jest.mock("react-native-health-connect", () => ({
   requestPermission: (...a: unknown[]) => mockRequestPermission(...a),
   readRecords: (...a: unknown[]) => mockReadRecords(...a),
   aggregateRecord: (...a: unknown[]) => mockAggregateRecord(...a),
+  aggregateGroupByPeriod: (...a: unknown[]) => mockAggregateGroupByPeriod(...a),
+  getChanges: (...a: unknown[]) => mockGetChanges(...a),
+  getGrantedPermissions: (...a: unknown[]) => mockGetGrantedPermissions(...a),
   SdkAvailabilityStatus: { SDK_UNAVAILABLE: 1, SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED: 2, SDK_AVAILABLE: 3 },
 }));
 
@@ -125,5 +138,127 @@ describe("requestPermissions", () => {
     ]);
 
     await expect(requestPermissions()).resolves.toBe(true);
+  });
+});
+
+describe("readDailyStepBuckets", () => {
+  // The distinction useActivityHistory depends on. A day Health Connect
+  // measured as zero is real evidence of a sedentary day and is KEPT; a day it
+  // has nothing for carries no sumQuantity and is dropped downstream.
+  // Zero-filling the gaps instead drags the mean down and biases the inferred
+  // activity level — and so the calorie target — downward.
+  test("a measured zero keeps its quantity; an unmeasured day carries none", async () => {
+    mockAggregateGroupByPeriod.mockResolvedValue([
+      { startTime: "2026-03-08T00:00:00.000Z", endTime: "2026-03-09T00:00:00.000Z", result: { COUNT_TOTAL: 0 } },
+      { startTime: "2026-03-09T00:00:00.000Z", endTime: "2026-03-10T00:00:00.000Z", result: {} },
+      { startTime: "2026-03-10T00:00:00.000Z", endTime: "2026-03-11T00:00:00.000Z", result: { COUNT_TOTAL: 6200 } },
+    ]);
+
+    const buckets = await readDailyStepBuckets(new Date(), new Date());
+
+    expect(buckets[0].sumQuantity).toEqual({ unit: "count", quantity: 0 });
+    expect(buckets[1].sumQuantity).toBeUndefined();
+    expect(buckets[2].sumQuantity?.quantity).toBe(6200);
+  });
+});
+
+describe("readWeightChanges", () => {
+  beforeEach(() => {
+    mockGetSdkStatus.mockResolvedValue(3);
+    mockInitialize.mockResolvedValue(true);
+  });
+
+  test("maps upsertions and returns the next token as the anchor", async () => {
+    mockGetChanges.mockResolvedValue({
+      upsertionChanges: [
+        {
+          record: {
+            recordType: "Weight",
+            time: "2026-03-10T07:00:00.000Z",
+            weight: { inKilograms: 70.5 },
+            metadata: { id: "rec-1", dataOrigin: "com.example.scale" },
+          },
+        },
+      ],
+      deletionChanges: [],
+      nextChangesToken: "token-2",
+      changesTokenExpired: false,
+      hasMore: false,
+    });
+
+    const result = await readWeightChanges("token-1");
+
+    expect(result.newAnchor).toBe("token-2");
+    expect(result.samples).toEqual([
+      {
+        uuid: "rec-1",
+        quantity: 70.5,
+        startDate: new Date("2026-03-10T07:00:00.000Z"),
+        sourceName: "com.example.scale",
+      },
+    ]);
+    expect(mockGetChanges).toHaveBeenCalledWith({ changesToken: "token-1" });
+  });
+
+  // No anchor yet: ask for a baseline token rather than sending undefined.
+  test("with no anchor it requests a fresh token for Weight", async () => {
+    mockGetChanges.mockResolvedValue({
+      upsertionChanges: [], deletionChanges: [], nextChangesToken: "t0",
+      changesTokenExpired: false, hasMore: false,
+    });
+
+    await readWeightChanges(null);
+
+    expect(mockGetChanges).toHaveBeenCalledWith({ recordTypes: ["Weight"] });
+  });
+
+  // THROWING is the contract. syncWeight only advances the stored anchor after
+  // a successful read, so a throw leaves it untouched and the next launch
+  // retries the same window. Returning empty would advance past readings that
+  // were never posted and lose them silently.
+  test("an expired token throws rather than reporting an empty batch", async () => {
+    mockGetChanges.mockResolvedValue({
+      upsertionChanges: [], deletionChanges: [], nextChangesToken: "t9",
+      changesTokenExpired: true, hasMore: false,
+    });
+
+    await expect(readWeightChanges("stale")).rejects.toThrow(/expired/i);
+  });
+
+  test("unavailable Health Connect throws rather than returning empty", async () => {
+    mockGetSdkStatus.mockResolvedValue(1); // SDK_UNAVAILABLE
+
+    await expect(readWeightChanges("t")).rejects.toThrow(/unavailable/i);
+  });
+
+  // A reading with no mass is not a reading, and one with no id cannot be
+  // de-duplicated server-side. Both are dropped rather than posted as zero.
+  test("drops records with no mass or no id", async () => {
+    mockGetChanges.mockResolvedValue({
+      upsertionChanges: [
+        { record: { recordType: "Weight", time: "2026-03-10T07:00:00.000Z", weight: {}, metadata: { id: "a" } } },
+        { record: { recordType: "Weight", time: "2026-03-10T08:00:00.000Z", weight: { inKilograms: 71 }, metadata: {} } },
+        { record: { recordType: "Steps", time: "2026-03-10T09:00:00.000Z" } },
+      ],
+      deletionChanges: [], nextChangesToken: "t2", changesTokenExpired: false, hasMore: false,
+    });
+
+    const result = await readWeightChanges("t1");
+
+    expect(result.samples).toEqual([]);
+  });
+});
+
+describe("hasWeightPermission", () => {
+  test("true only when the Weight read scope is granted", async () => {
+    mockGetSdkStatus.mockResolvedValue(3);
+    mockInitialize.mockResolvedValue(true);
+    mockGetGrantedPermissions.mockResolvedValue([{ accessType: "read", recordType: "Steps" }]);
+
+    await expect(hasWeightPermission()).resolves.toBe(false);
+
+    mockGetGrantedPermissions.mockResolvedValue([{ accessType: "read", recordType: "Weight" }]);
+
+    await expect(hasWeightPermission()).resolves.toBe(true);
   });
 });
