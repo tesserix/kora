@@ -78,7 +78,12 @@ export function aiAllowance(status: AIUsageStatus): AIAllowance {
   }
   return {
     headline: "AI limit reached",
-    detail: availableAt ? `Available again ${dateText(availableAt)}` : "Add requests to keep going.",
+    // Never promises a purchase. The fallback used to read "Add requests to
+    // keep going", which after kora#479 pointed at a checkout that no longer
+    // exists. Whether requests can be BOUGHT is a server-config question the
+    // screens answer separately; what is always true is that the free windows
+    // reset on their own.
+    detail: availableAt ? `Available again ${dateText(availableAt)}` : "Your allowance resets on its own.",
     blocked: true,
     fromTopUp: false,
   };
