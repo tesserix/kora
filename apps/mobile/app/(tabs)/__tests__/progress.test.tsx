@@ -92,7 +92,7 @@ test("shows real current weight when entries exist", async () => {
   // labeled for what the data actually is.
   expect(getByText("Logging streak")).toBeTruthy();
   expect(getByText("3/7 days")).toBeTruthy(); // mocked streak_days: 3
-  expect(getByText("Sleep, last 16h")).toBeTruthy();
+  expect(getByText("Last night")).toBeTruthy();
 });
 
 // The card used to fall back to the profile's own weight for the hero figure

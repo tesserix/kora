@@ -491,33 +491,29 @@ export default function Progress() {
           </GlassPanel>
           <GlassPanel radius={20} style={{ flex: 1, padding: 14 }}>
             {/*
-              "Sleep, last 16h" (kora#417). Two earlier names were both wrong:
-              "Avg sleep" promised a mean this path never computes, and "Last
-              night" promised an overnight span this window does not query.
+              "Last night" (kora#417). The label is honest again because the
+              WINDOW changed underneath it.
 
-              The window runs 16h back from LOCAL MIDNIGHT and forward to now,
-              so it still absorbs a nap taken yesterday from 08:00 onward or
-              any sleep today. Naming the window is the honest option while
-              that stays true — the alternative fixes both change the number,
-              and narrowing the span can truncate a late sleeper's night.
+              Two earlier names were both wrong. "Avg sleep" promised a mean
+              this path never computes. "Sleep, last 16h" named a window that
+              was really 16h PLUS the time elapsed since midnight, anchored to
+              midnight rather than to a night — so it opened at 08:00 the
+              previous morning and absorbed the tail of the night before last
+              for anyone who sleeps past 8am. A device comparison showed Kora
+              reporting materially more than the Health app for the same night.
 
-              CAVEAT, deliberately not papered over: the span is 16h PLUS the
-              time elapsed since midnight, so late in the day it is wider than
-              the label says. A true rolling 16h window would make the label
-              exact but would start after last night's sleep by evening and
-              render ~0, which is worse. Naming that residue here rather than
-              picking a label that reads precise and is not.
+              useHealth now buckets by APPLE'S sleep day (18:00 -> 18:00,
+              splitting any session that crosses the boundary) and reports the
+              most recent day that has sleep in it. That is the same night, cut
+              the same way, as the figure in the Health app — so "Last night"
+              names exactly what is shown.
 
-              A previous note here claimed Kora's figure AGREES with the Health
-              app's "Time Asleep" (device-verified, kora#30). That no longer
-              holds: build 51 showed Kora materially higher for the same night.
-              Part of that was a real defect — sleep samples were not clipped
-              to the queried window, so a night overlapping the boundary was
-              counted IN FULL (the steps query had guarded this with
-              strictStartDate all along; sleep never did). Fixed in
-              mergeAsleepMillis. Nap absorption remains.
+              Nap absorption is genuinely fixed as a side effect: a nap the
+              previous morning now falls in the previous sleep day. A nap taken
+              AFTER 18:00 still counts toward the night that has just opened,
+              which is also what Apple does.
             */}
-            <AppText style={mutedLabel}>Sleep, last 16h</AppText>
+            <AppText style={mutedLabel}>Last night</AppText>
             {health.sleep ? (
               <AppText style={[{ fontSize: 15, fontWeight: "600", color: instrument.ink, marginTop: 2 }, mono]}>
                 {sleepDurationLabel(health.sleep.lastNightHours)}
