@@ -111,7 +111,8 @@
           }
         }
       ],
-      "react-native-health-connect"
+      "react-native-health-connect",
+      "./plugins/withHealthConnectQueries"
     ],
     "experiments": {
       "typedRoutes": true,
