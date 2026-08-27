@@ -223,31 +223,53 @@ SELECT count(*) AS cohort_users,
 FROM cohort c;
 
 -- =====================================================================
--- 6. Time-to-log is NOT measurable from this database.
+-- 6. TIME-TO-LOG — kora#43's north star, "<10s median".
 --
--- #43 names "median time-to-log a meal (<10s target)" as the north star. It
--- cannot be computed here and no query below pretends to: food_logs records
--- when a meal was LOGGED, never when the user started capturing it. The
--- closest available signal is ai_usage_events.latency_ms, which is the
--- PROVIDER's time — a fraction of what the user waits, excluding capture,
--- upload, review and confirm.
+-- Measurable since kora#482. `client_log_ms` has existed since the original
+-- schema but only app/log.tsx (the MANUAL search screen) ever populated it, so
+-- production had 10 logs and zero timed: every real log arrived through a
+-- capture path that never set it. capture.tsx now stamps the clock in
+-- beginResolve(), which every path (photo, voice, message, barcode) funnels
+-- through, and reads it at CONFIRM — so a log queued offline still reports how
+-- long the USER waited, not how long the queue held it.
 --
--- Reported here so the gap is visible rather than rediscovered. Closing it
--- needs a client-side timing event; kora_ai_latency_seconds (the exporter's
--- histogram, bucketed at the resolver's own budgets) is the server half.
+-- READ THE COVERAGE COLUMN BEFORE THE MEDIAN. NULL means "not measured", which
+-- is NOT zero: an instant log from a pin has no capture phase, and a client
+-- older than kora#482 reports nothing. A median over a small timed subset is a
+-- statement about that subset, so `timed` and `untimed` are reported beside it
+-- rather than left for someone to assume.
+--
+-- Values the server could not believe are already NULL, not clamped:
+-- plausibleClientLogMs drops anything negative or over an hour, because a
+-- clamped value looks like a real observation and would pile a fake mode up at
+-- exactly the ceiling.
 -- =====================================================================
-SELECT call_type,
-       count(*)                                                          AS calls,
-       round(percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms)::numeric, 0) AS median_ms,
-       round(percentile_cont(0.9) WITHIN GROUP (ORDER BY latency_ms)::numeric, 0) AS p90_ms,
-       max(latency_ms)                                                   AS max_ms
-FROM ai_usage_events
-WHERE created_at >= now() - make_interval(days => :days)
-  AND latency_ms IS NOT NULL
-GROUP BY call_type
-ORDER BY calls DESC;
+SELECT count(*)                                                    AS logs,
+       count(client_log_ms)                                        AS timed,
+       count(*) - count(client_log_ms)                             AS untimed,
+       round(percentile_cont(0.5) WITHIN GROUP (
+             ORDER BY client_log_ms) FILTER (WHERE client_log_ms IS NOT NULL)::numeric / 1000, 1)
+                                                                   AS median_seconds,
+       round(percentile_cont(0.9) WITHIN GROUP (
+             ORDER BY client_log_ms) FILTER (WHERE client_log_ms IS NOT NULL)::numeric / 1000, 1)
+                                                                   AS p90_seconds
+FROM food_logs
+WHERE created_at >= now() - make_interval(days => :days);
 
--- =====================================================================
+-- The same split by source, because the north star is really a claim about the
+-- AI paths: a `memory` or pin log is one tap and will always be fast, so
+-- averaging it in flatters the number the target is about.
+SELECT source,
+       count(*)                        AS logs,
+       count(client_log_ms)            AS timed,
+       round(percentile_cont(0.5) WITHIN GROUP (
+             ORDER BY client_log_ms) FILTER (WHERE client_log_ms IS NOT NULL)::numeric / 1000, 1)
+                                       AS median_seconds
+FROM food_logs
+WHERE created_at >= now() - make_interval(days => :days)
+GROUP BY source
+ORDER BY count(*) DESC;
+
 -- 7. THE METRIC THAT MATTERS MOST (#328) — "the user corrected the guess".
 --
 -- Every correction writes a personal food_aliases row: EditLog is the only

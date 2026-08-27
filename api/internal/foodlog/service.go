@@ -214,7 +214,7 @@ func (s Service) LogFood(ctx context.Context, userID uuid.UUID, req LogRequest, 
 		FatG:           item.FatPer100g * f,
 		FiberG:         item.FiberPer100g * f,
 		Provenance:     item.Provenance,
-		ClientLogMs:    req.ClientLogMs,
+		ClientLogMs:    plausibleClientLogMs(req.ClientLogMs),
 		InputPhrase:    phraseForSource(source, req.InputPhrase),
 		PortionAssumed: req.PortionAssumed,
 	}
@@ -644,4 +644,30 @@ func (s Service) RepeatLog(ctx context.Context, userID, logID uuid.UUID, at time
 	clone.LoggedAt = at
 	clone.LocalDate = localDate
 	return s.logs.Create(ctx, clone)
+}
+
+// maxClientLogMs bounds a believable time-to-log at one hour. Past that the
+// app was backgrounded mid-capture, which is not the thing kora#43's
+// "<10s median" is measuring.
+const maxClientLogMs = 3_600_000
+
+// plausibleClientLogMs drops a client-reported time-to-log the server cannot
+// believe, returning nil so the column records NULL — "not measured".
+//
+// The value is computed on a device whose clock the server does not control,
+// and it feeds a MEDIAN (kora#482), so a single absurd reading skews the
+// north-star metric rather than merely adding noise. Dropping is safer than
+// clamping: a clamped value looks like a real observation at the boundary and
+// would pile up a fake mode at exactly one hour.
+//
+// Zero is KEPT. Logging from a pin in under a millisecond is possible, and
+// zero is a real measurement — it is nil that means "no capture was timed".
+func plausibleClientLogMs(v *int) *int {
+	if v == nil {
+		return nil
+	}
+	if *v < 0 || *v > maxClientLogMs {
+		return nil
+	}
+	return v
 }

@@ -1519,3 +1519,39 @@ func TestCreateBatchSourceDefaultsToMemory(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "recipe", tagged[0].Source)
 }
+
+// TestPlausibleClientLogMsRejectsWhatItCannotBelieve pins kora#482's boundary.
+//
+// client_log_ms is measured on a device whose clock the server does not
+// control, and it feeds a MEDIAN — so one absurd value skews the north-star
+// metric kora#43 defines. Implausible values become NULL rather than being
+// stored: "not measured" is honest about a number we do not believe, while
+// keeping it would quietly corrupt the statistic.
+func TestPlausibleClientLogMsRejectsWhatItCannotBelieve(t *testing.T) {
+	ms := func(v int) *int { return &v }
+
+	for _, tc := range []struct {
+		name string
+		in   *int
+		want *int
+	}{
+		{"nil stays nil — not measured", nil, nil},
+		{"a fast log is kept", ms(1200), ms(1200)},
+		{"a slow but real log is kept", ms(90_000), ms(90_000)},
+		{"zero is kept — an instant log is possible", ms(0), ms(0)},
+		{"negative is impossible, so it is dropped", ms(-1), nil},
+		{"an hour is the ceiling, kept", ms(3_600_000), ms(3_600_000)},
+		{"beyond an hour is a backgrounded app, not a slow log", ms(3_600_001), nil},
+		{"a wildly skewed device clock is dropped", ms(999_999_999), nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := plausibleClientLogMs(tc.in)
+			if tc.want == nil {
+				require.Nil(t, got)
+				return
+			}
+			require.NotNil(t, got)
+			require.Equal(t, *tc.want, *got)
+		})
+	}
+}
