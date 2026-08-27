@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState, Linking, Platform } from "react-native";
 import { useFocusEffect } from "expo-router";
 import type { HealthData, HealthStatus } from "./types";
+import * as healthConnect from "./healthConnect";
 import { recentSleepDays, sleepLookbackMs } from "./sleepDay";
 
 // `@kingstinct/react-native-healthkit` is a Nitro native module that throws at
@@ -51,7 +52,7 @@ function startOfLocalDay(): Date {
   return start;
 }
 
-type AsleepSample = {
+export type AsleepSample = {
   readonly value: number;
   readonly startDate: Date;
   readonly endDate: Date;
@@ -176,17 +177,63 @@ export function useHealth(): HealthData {
   // before React has any chance to re-render.
   const inFlight = useRef(false);
 
+  // The Android branch, kept beside load() rather than inside it so the iOS
+  // path reads exactly as it did before Health Connect existed.
+  //
+  // Sleep is derived from the most recent SleepSession rather than from
+  // Apple's 18:00 day: Health Connect models the night directly, so there is
+  // nothing to reconstruct. Both platforms end up reporting the same concept —
+  // last night — via mergeAsleepMillis, which is shared.
+  const loadFromHealthConnect = useCallback(async () => {
+    if (!(await healthConnect.isAvailable())) {
+      setStatus("unavailable");
+      setSteps(null);
+      setSleep(null);
+      return;
+    }
+    if (!(await healthConnect.requestPermissions())) {
+      setStatus("denied");
+      setSteps(null);
+      setSleep(null);
+      return;
+    }
+
+    const now = new Date();
+    const dayStart = startOfLocalDay();
+    // Two sleep days back, matching the iOS lookback: enough to still find last
+    // night when a new one has only just begun.
+    const since = new Date(now.getTime() - sleepLookbackMs(now));
+
+    const [stepTotal, sleepSamples] = await Promise.all([
+      healthConnect.readSteps(dayStart, now),
+      healthConnect.readSleepSamples(since, now),
+    ]);
+
+    setSteps(stepTotal === null ? null : { today: stepTotal, goal: STEP_GOAL });
+    // Clipped to the session's own span rather than to a day boundary — the
+    // session IS the night here. An empty list means nothing was recorded,
+    // which is a real "no sleep logged", not a failure.
+    const sleepMillis = mergeAsleepMillis(sleepSamples);
+    setSleep(sleepSamples.length > 0 ? { lastNightHours: sleepMillis / MS_PER_HOUR } : null);
+    setStatus("authorized");
+  }, []);
+
   const load = useCallback(async () => {
     if (inFlight.current) return;
     inFlight.current = true;
     try {
-      // TODO(health-connect): Android provider. This hook only supports iOS/HealthKit
-      // today. When Android support lands, branch on Platform.OS === "android" here and
-      // read from Health Connect instead, while keeping the same HealthData contract.
-      // `isHealthDataAvailable()` is a native (Nitro) call, so it lives inside the
-      // try/catch too: on a build where the native module isn't linked (e.g. a
-      // dev-client built before HealthKit was added), it throws — degrade to
-      // "unavailable" rather than crashing the screen.
+      // Android reads Health Connect; iOS falls through to HealthKit below.
+      // Both produce the same HealthData contract, so nothing downstream knows
+      // which platform answered.
+      //
+      // Every native call in both branches sits inside this try/catch on
+      // purpose: they are native modules, and on a build where the native side
+      // is not linked they THROW rather than return false — degrading to
+      // "unavailable" beats crashing the screen.
+      if (Platform.OS === "android") {
+        await loadFromHealthConnect();
+        return;
+      }
       if (Platform.OS !== "ios") {
         setStatus("unavailable");
         setSteps(null);
@@ -293,7 +340,7 @@ export function useHealth(): HealthData {
     } finally {
       inFlight.current = false;
     }
-  }, []);
+  }, [loadFromHealthConnect]);
 
   // Cold start. Every early `return` above still releases the guard via `finally`,
   // so a load that bails on a non-iOS platform does not wedge later triggers.
