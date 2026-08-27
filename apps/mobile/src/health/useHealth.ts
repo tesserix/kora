@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState, Linking, Platform } from "react-native";
 import { useFocusEffect } from "expo-router";
 import type { HealthData, HealthStatus } from "./types";
+import { recentSleepDays, sleepLookbackMs } from "./sleepDay";
 
 // `@kingstinct/react-native-healthkit` is a Nitro native module that throws at
 // IMPORT time on any build where the native side isn't linked (e.g. a dev client
@@ -29,14 +30,6 @@ const SLEEP_ANALYSIS_IDENTIFIER = "HKCategoryTypeIdentifierSleepAnalysis";
 // excluded — only genuine sleep stages count toward the total.
 const ASLEEP_CATEGORY_VALUES = new Set<number>([1, 3, 4, 5]);
 
-// KNOWN LIMITATION, not fixed here (#327): this window runs from 08:00 the
-// PREVIOUS day to now, so it will absorb a nap taken yesterday morning or
-// afternoon, or any nap taken today, into a total labelled "last night's
-// sleep". Interval merging (below) fixes the double-counting bug but cannot
-// fix this — it is a product decision (narrow the window, or relabel the
-// field as something like "sleep in the last 16h") deliberately left for a
-// separate change, not bundled into this bug fix.
-const SLEEP_WINDOW_LOOKBACK_HOURS = 16;
 const MS_PER_HOUR = 60 * 60 * 1000;
 
 // How far back to look for ANY step sample before concluding reads are not
@@ -221,7 +214,10 @@ export function useHealth(): HealthData {
 
       const dayStart = startOfLocalDay();
       const now = new Date();
-      const sleepWindowStart = new Date(dayStart.getTime() - SLEEP_WINDOW_LOOKBACK_HOURS * MS_PER_HOUR);
+      // Reach back far enough to cover every candidate sleep day, plus slack
+      // so a session straddling the oldest boundary is still returned and can
+      // be clipped rather than dropped.
+      const sleepWindowStart = new Date(now.getTime() - sleepLookbackMs(now));
 
       const [stepStats, sleepSamples] = await Promise.all([
         hk.queryStatisticsForQuantity(STEP_COUNT_IDENTIFIER, CUMULATIVE_SUM, {
@@ -258,11 +254,28 @@ export function useHealth(): HealthData {
         });
         setSteps(weekSamples.length > 0 ? { today: 0, goal: STEP_GOAL } : null);
       }
-      const sleepMillis = mergeAsleepMillis(
-        sleepSamples,
-        sleepWindowStart.getTime(),
-        now.getTime(),
-      );
+      // Bucket by APPLE'S sleep day (18:00 -> 18:00) rather than summing the
+      // whole query window, and report the most recent day that has any sleep
+      // in it (kora#417).
+      //
+      // Summing the window is what made Kora disagree with the Health app: a
+      // midnight-anchored window opens at 08:00 the previous morning and
+      // absorbs the tail of the night BEFORE last night. Clipping each bucket
+      // to its own boundaries also reproduces Apple's split of a session that
+      // crosses 18:00, instead of crediting the whole session to one day.
+      //
+      // Most recent NON-EMPTY, not simply most recent: after 18:00 a new sleep
+      // day has opened and is legitimately empty, and reporting that as zero
+      // would erase last night at the hour a user is most likely to look.
+      let sleepMillis = 0;
+      for (const day of recentSleepDays(now)) {
+        const end = Math.min(day.end.getTime(), now.getTime());
+        const millis = mergeAsleepMillis(sleepSamples, day.start.getTime(), end);
+        if (millis > 0) {
+          sleepMillis = millis;
+          break;
+        }
+      }
       // Stored at full precision, rounded once at render by
       // sleepDurationLabel. Rounding to one decimal HERE quantised the night
       // to 6-minute steps, so 4h 26m was stored as 4.4 and could only ever be

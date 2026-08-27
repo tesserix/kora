@@ -7,6 +7,7 @@ import {
   queryStatisticsForQuantity,
   requestAuthorization,
 } from "@kingstinct/react-native-healthkit";
+import { recentSleepDays, sleepDayContaining } from "../sleepDay";
 import { useHealth } from "../useHealth";
 
 // expo-router's real useFocusEffect needs a navigation container above it, which a
@@ -244,31 +245,70 @@ describe("useHealth", () => {
   // mergeAsleepMillis clips to a window, but only if the hook actually hands it
   // one. The unit tests pass bounds explicitly and so cannot notice a caller
   // that forgot — which is exactly the shape of the original bug: the steps
-  // query guarded its boundary with strictStartDate and the sleep query guarded
-  // nothing. This drives the real hook with a sample that straddles the window
-  // start and asserts only the inside part is counted.
-  it("clips a sleep sample that began before the window instead of counting it whole", async () => {
+  // query guarded its boundary with strictStartDate and the sleep query
+  // guarded nothing.
+  //
+  // Now that the bucket IS an Apple sleep day, the boundary a straddling
+  // session gets clipped at is 18:00 — the same split the Health app performs.
+  it("clips a sleep session that began before the sleep day started", async () => {
     mockIsAvailable.mockReturnValue(true);
     mockRequestAuthorization.mockResolvedValue(true);
     mockQueryStatistics.mockResolvedValue(statsWithSum(1000));
 
-    // The window opens 16h before local midnight. Start the sample a further 5h
-    // back and end it 1h after the window opens: 6h long, but only 1h inside.
-    const dayStart = new Date();
-    dayStart.setHours(0, 0, 0, 0);
-    const windowStart = new Date(dayStart.getTime() - 16 * 60 * 60 * 1000);
+    const night = recentSleepDays(new Date(), 3)[1];
+    // Starts 3h BEFORE the boundary and ends 1h after it: 4h long, 1h inside.
     mockQueryCategorySamples.mockResolvedValue([
       {
         value: 3,
-        startDate: new Date(windowStart.getTime() - 5 * 60 * 60 * 1000),
-        endDate: new Date(windowStart.getTime() + 1 * 60 * 60 * 1000),
+        startDate: new Date(night.start.getTime() - 3 * 60 * 60 * 1000),
+        endDate: new Date(night.start.getTime() + 60 * 60 * 1000),
       },
     ]);
 
     const { result } = await renderHook(() => useHealth());
     await waitFor(() => expect(result.current.sleep).not.toBeNull());
-    // 1h inside the window, not the sample's full 6h.
     expect(result.current.sleep?.lastNightHours).toBeCloseTo(1, 5);
+  });
+
+  // kora#417, second round: the window boundary, not the clipping.
+  //
+  // Reproduces the shape of a real device disagreement. An evening sleeper's
+  // night sits inside ONE Apple sleep day; the night before ran late into the
+  // previous morning. Kora's old midnight-anchored window opened at 08:00 that
+  // previous morning and summed BOTH, reporting materially more than the
+  // Health app for the same night.
+  //
+  // Anchored to whichever sleep day is current when the test runs, rather than
+  // to a frozen clock: the boundary is 18:00, so a fixture pinned to wall-clock
+  // hours would assert something different depending on the time of day.
+  // Values are synthetic — a 4h session and a 2h one.
+  it("reports one Apple sleep day, not everything since yesterday morning", async () => {
+    mockIsAvailable.mockReturnValue(true);
+    mockRequestAuthorization.mockResolvedValue(true);
+    mockQueryStatistics.mockResolvedValue(statsWithSum(1000));
+
+    // days[1] is the most recent COMPLETED sleep day — entirely in the past
+    // whatever the hour, so the fixture never lands in the future. Using it
+    // also exercises the most-recent-NON-EMPTY fallback, since the day
+    // containing "now" has no samples here.
+    const days = recentSleepDays(new Date(), 3);
+    const night = days[1];
+    const older = days[2];
+    const hoursInto = (day: { start: Date }, h: number) =>
+      new Date(day.start.getTime() + h * 60 * 60 * 1000);
+
+    mockQueryCategorySamples.mockResolvedValue([
+      // Last night: 4h, comfortably inside one sleep day.
+      { value: 3, startDate: hoursInto(night, 1), endDate: hoursInto(night, 5) },
+      // The night BEFORE, 2h. The old midnight-anchored window reached back far
+      // enough to include this; the 18:00 boundary must not.
+      { value: 3, startDate: hoursInto(older, 14), endDate: hoursInto(older, 16) },
+    ]);
+
+    const { result } = await renderHook(() => useHealth());
+    await waitFor(() => expect(result.current.sleep).not.toBeNull());
+
+    expect(result.current.sleep?.lastNightHours).toBeCloseTo(4, 5);
   });
 
   // A statistics response with no sumQuantity is HealthKit saying "nothing in this
