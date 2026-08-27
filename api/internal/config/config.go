@@ -90,36 +90,28 @@ type Config struct {
 	AppleKeyID         string
 	AppleBundleID      string
 	ApplePrivateKeyPEM string
-	// Cashfree credentials for paid AI top-ups. Empty leaves the purchase
-	// routes unmounted, exactly like Apple above: an environment with no
-	// gateway must answer 404 rather than offer a checkout that cannot
-	// complete. A PARTIALLY configured gateway is a startup error.
-	CashfreeAppID     string
-	CashfreeSecretKey string
-	CashfreeSandbox   bool
-	// CashfreeReturnURL is the deep link the hosted checkout sends the user
-	// back to. The result carried on that URL is never trusted; it only closes
-	// the browser and prompts the app to ask the gateway what happened.
+	// Stripe credentials for paid AI top-ups (kora#478). Empty leaves the
+	// purchase routes unmounted, exactly like Apple above: an environment with
+	// no gateway must answer 404 rather than offer a checkout that cannot
+	// complete.
 	//
-	// The scheme is the MOBILE APP's (`mobile://`, apps/mobile/app.json), not
-	// the product name: a link the app has not registered opens nothing at
-	// all, stranding the user in a browser after they have paid.
-	CashfreeReturnURL string
-
-	// Stripe credentials for paid AI top-ups (kora#478). Selected over
-	// Cashfree when configured; see router.go for the precedence and why it is
-	// stated rather than inferred.
+	// Currently the ONLY gateway. Cashfree was removed in kora#479 — the
+	// owner's decision that a future rail may be Stripe or an alternative, but
+	// never Cashfree. Stripe itself is configured-off, intended for a future
+	// WEB checkout; on iOS the rail is StoreKit IAP per ADR 0004 (kora#487).
 	//
 	// There is deliberately NO sandbox flag here. Stripe's test and live
 	// environments share one API host and are chosen by the KEY itself, so a
-	// separate switch could only ever disagree with the credential beside it —
-	// which is the state CASHFREE_SANDBOX=true under ENV=production is in
-	// today on the live Deployment.
+	// separate switch could only ever disagree with the credential beside it.
 	StripeSecretKey     string
 	StripeWebhookSecret string
-	// StripeReturnURL is the deep link Stripe sends the user back to. Defaults
-	// to the same target as Cashfree's: it is the app's return screen, not a
-	// property of the gateway.
+	// StripeReturnURL is the deep link Stripe sends the user back to.
+	//
+	// The scheme is the MOBILE APP's (`mobile://`, apps/mobile/app.json), not
+	// the product name: a link the app has not registered opens nothing at
+	// all, stranding the user in a browser after they have paid. The result
+	// carried on that URL is never trusted; it only closes the browser and
+	// prompts the app to ask the gateway what happened.
 	StripeReturnURL string
 	// Object storage for user-supplied assets (kora#449). Empty AssetsBucket
 	// selects assets.Noop -- an environment with no bucket behaves as if every
@@ -164,10 +156,6 @@ func Load() (Config, error) {
 		AppleKeyID:               os.Getenv("APPLE_KEY_ID"),
 		AppleBundleID:            getenv("APPLE_BUNDLE_ID", "com.tesserix.kora"),
 		ApplePrivateKeyPEM:       os.Getenv("APPLE_PRIVATE_KEY"),
-		CashfreeAppID:            os.Getenv("CASHFREE_APP_ID"),
-		CashfreeSecretKey:        os.Getenv("CASHFREE_SECRET_KEY"),
-		CashfreeSandbox:          os.Getenv("CASHFREE_SANDBOX") == "true",
-		CashfreeReturnURL:        getenv("CASHFREE_RETURN_URL", "mobile://billing/return"),
 		StripeSecretKey:          os.Getenv("STRIPE_SECRET_KEY"),
 		StripeWebhookSecret:      os.Getenv("STRIPE_WEBHOOK_SECRET"),
 		StripeReturnURL:          getenv("STRIPE_RETURN_URL", "mobile://billing/return"),
@@ -248,12 +236,6 @@ func Load() (Config, error) {
 		if cfg.AppleKeyID == "" {
 			return Config{}, fmt.Errorf("config: APPLE_KEY_ID is required when APPLE_PRIVATE_KEY is set")
 		}
-	}
-	// One Cashfree credential without the other cannot sign a webhook or
-	// authenticate an order, so it would mount a checkout that takes money and
-	// then fails to grant anything. Refuse to start instead.
-	if (cfg.CashfreeAppID == "") != (cfg.CashfreeSecretKey == "") {
-		return Config{}, fmt.Errorf("config: CASHFREE_APP_ID and CASHFREE_SECRET_KEY must be set together")
 	}
 	return cfg, nil
 }

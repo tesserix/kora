@@ -121,18 +121,14 @@ type Deps struct {
 	// not configured in every environment — and user.Service.Delete skips
 	// revocation rather than failing when it is.
 	AppleRevoker user.AppleRevoker
-	// Cashfree is the payment gateway paid AI top-ups are bought through.
-	// Unconfigured leaves every purchase route unmounted — the same choice as
-	// AppleExchanger above — so an environment with no gateway advertises no
-	// checkout at all rather than one that takes money and grants nothing.
-	Cashfree billing.CashfreeConfig
-	// Stripe is the second payment gateway (kora#478). When BOTH are
-	// configured Stripe wins, and the precedence is stated here rather than
-	// left to whichever branch happens to be first: during the migration both
-	// credentials exist at once, and the whole point of keeping Cashfree
-	// mounted is that config — not a revert of merged code — decides which one
-	// takes money. Exactly one provider's routes are ever mounted, so a
-	// half-migrated deployment cannot serve two checkouts at the same time.
+	// Stripe is the payment gateway paid AI top-ups would be bought through.
+	//
+	// Kora has no live rail: Cashfree was removed in kora#479 (the owner's
+	// decision — a future gateway may be Stripe or an alternative, never
+	// Cashfree), and Stripe is merged but configured-off, intended for a
+	// future WEB checkout. On iOS the rail is StoreKit IAP per ADR 0004,
+	// which is kora#487 and not built yet. Unconfigured means the purchase
+	// routes are simply not mounted.
 	Stripe billing.StripeConfig
 	// Assets is where profile pictures are written (kora#449). Nil in a
 	// test-constructed Deps that never set it — defaulted to assets.Noop{}
@@ -195,18 +191,18 @@ func NewRouter(deps Deps) *gin.Engine {
 		billingMeter := billing.NewMeter(deps.DB)
 		billingHandler := billing.NewHandler(billingMeter)
 		v1.GET("/ai/usage", billingHandler.UsageStatus)
-		// Stripe first: during the migration both credentials are present and
-		// the newer gateway is the one being cut over to. Rolling back is a
-		// config change (clear STRIPE_SECRET_KEY), not a revert.
+		// Mounted only when a gateway is configured. Kora currently has none
+		// in production, so an environment with no credentials answers 404
+		// rather than offering a checkout that cannot complete.
+		//
+		// A `switch` with one case rather than an `if`: the shape is the seam
+		// a future rail slots into, and kora#479 removed Cashfree from beside
+		// it on the explicit understanding that something replaces it later.
 		switch {
 		case deps.Stripe.Configured():
 			purchases := billing.NewPurchaseHandler(
 				billing.NewOrders(deps.DB, billing.NewStripeClient(deps.Stripe)),
 				billingMeter,
-				// Cashfree's API secret doubles as its webhook secret; Stripe's
-				// does not, so the purchase handler is given the endpoint
-				// signing secret separately below and nothing here.
-				"",
 			).WithStripeWebhook(deps.Stripe.WebhookSecret).
 				WithProviderName(billing.ProviderStripe)
 			mountPurchaseRoutes(r, v1, purchases)
@@ -214,17 +210,6 @@ func NewRouter(deps Deps) *gin.Engine {
 			// Firebase token. Its own signature is the authentication, checked
 			// inside the handler over the raw request body.
 			r.POST("/webhooks/stripe", purchases.StripeWebhook)
-		case deps.Cashfree.Configured():
-			purchases := billing.NewPurchaseHandler(
-				billing.NewOrders(deps.DB, billing.NewCashfreeClient(deps.Cashfree)),
-				billingMeter,
-				deps.Cashfree.SecretKey,
-			).WithProviderName(billing.ProviderCashfree)
-			mountPurchaseRoutes(r, v1, purchases)
-			// OUTSIDE the v1 group: the caller is Cashfree, which holds no
-			// Firebase token. Its own signature is the authentication, checked
-			// inside the handler over the raw request body.
-			r.POST("/webhooks/cashfree", purchases.Webhook)
 		}
 		v1.GET("/me", userHandler.Me)
 		v1.PATCH("/me", userHandler.UpdateProfile)

@@ -11,7 +11,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// fakeGateway stands in for Cashfree. It records what it was asked to charge,
+// fakeGateway stands in for a payment provider. It records what it was asked to charge,
 // which is the assertion that matters most here: the gateway must be asked for
 // the itemised total, never the base price.
 type fakeGateway struct {
@@ -34,7 +34,7 @@ func (g *fakeGateway) CreateOrder(
 	return CreatedOrder{
 		CFOrderID:        "cf-" + orderID[:8],
 		PaymentSessionID: "session-" + orderID[:8],
-		CheckoutURL:      "https://payments-test.cashfree.com/order/#session-" + orderID[:8],
+		CheckoutURL:      "https://checkout.test.example/order/#session-" + orderID[:8],
 	}, nil
 }
 
@@ -259,7 +259,6 @@ func TestFinancialYearFollowsTheIndianAprilBoundary(t *testing.T) {
 	require.Equal(t, "25-26", financialYear(time.Date(2026, 3, 31, 23, 59, 0, 0, time.UTC)))
 }
 
-
 // TestCreateReturnsTheGatewaysCheckoutURL pins the contract kora#478 moved.
 //
 // CheckoutURL is now produced BY the provider and carried on CreatedOrder,
@@ -282,7 +281,7 @@ func TestCreateReturnsTheGatewaysCheckoutURL(t *testing.T) {
 
 	require.NotEmpty(t, order.CheckoutURL, "the order must carry the URL the client sends the user to")
 	require.Equal(t,
-		"https://payments-test.cashfree.com/order/#session-"+order.ID.String()[:8],
+		"https://checkout.test.example/order/#session-"+order.ID.String()[:8],
 		order.CheckoutURL,
 		"the URL must be the provider's, not one reconstructed from the session id")
 }

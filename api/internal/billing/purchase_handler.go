@@ -26,17 +26,15 @@ const maxWebhookBody = 64 << 10
 // maxListedOrders caps the purchase history one request returns.
 const maxListedOrders = 50
 
-// PurchaseHandler exposes the paid top-up flow. It is mounted only when
-// Cashfree is configured, so an environment with no gateway answers 404 rather
-// than offering a checkout that cannot complete.
+// PurchaseHandler exposes the paid top-up flow. It is mounted only when a
+// payment gateway is configured, so an environment with none answers 404
+// rather than offering a checkout that cannot complete.
 type PurchaseHandler struct {
-	orders    Orders
-	meter     Meter
-	secretKey string
-	// stripeWebhookSecret is Stripe's endpoint signing secret, empty when
-	// Cashfree is the configured provider. It is a DIFFERENT credential from
-	// the API key — Cashfree signs with the same secret it authenticates with,
-	// Stripe does not — which is why it cannot be folded into secretKey.
+	orders Orders
+	meter  Meter
+	// stripeWebhookSecret is Stripe's endpoint signing secret. It is a
+	// DIFFERENT credential from the API key, which is why it is set through
+	// its own option rather than folded into the constructor.
 	stripeWebhookSecret string
 	// providerName is the payment processor shown to the user. Set from
 	// whichever gateway the router mounted, never inferred by the client.
@@ -45,9 +43,13 @@ type PurchaseHandler struct {
 }
 
 // Payment processor names, as shown to a user.
+//
+// Kept as a named set with a single member rather than inlined: the order
+// service is written against a gateway seam, and kora#479 removed Cashfree on
+// the understanding that a future rail (Stripe, or an alternative) drops into
+// the same slot. A bare string literal at the call site would erase that.
 const (
-	ProviderCashfree = "Cashfree"
-	ProviderStripe   = "Stripe"
+	ProviderStripe = "Stripe"
 )
 
 // WithProviderName sets the processor name reported to clients.
@@ -58,18 +60,20 @@ func (h PurchaseHandler) WithProviderName(name string) PurchaseHandler {
 
 // WithStripeWebhook attaches Stripe's endpoint signing secret, enabling
 // StripeWebhook. Only one provider's webhook route is mounted at a time (see
-// router.go), so this being empty is the normal Cashfree case rather than a
-// misconfiguration.
+// router.go), so this being empty simply means Stripe is not the configured
+// provider.
 func (h PurchaseHandler) WithStripeWebhook(secret string) PurchaseHandler {
 	h.stripeWebhookSecret = secret
 	return h
 }
 
-// NewPurchaseHandler builds the handler. secretKey is the Cashfree secret the
-// webhook signature is verified with — the same credential used to call the
-// gateway, which is how Cashfree signs.
-func NewPurchaseHandler(orders Orders, meter Meter, secretKey string) PurchaseHandler {
-	return PurchaseHandler{orders: orders, meter: meter, secretKey: secretKey, now: time.Now}
+// NewPurchaseHandler builds the handler.
+//
+// It takes no webhook credential: each gateway signs differently, so the
+// signing secret is attached by the provider's own option (WithStripeWebhook)
+// rather than passed here as an untyped string that only one provider reads.
+func NewPurchaseHandler(orders Orders, meter Meter) PurchaseHandler {
+	return PurchaseHandler{orders: orders, meter: meter, now: time.Now}
 }
 
 // packView is a pack with its price already itemised, so no client ever
@@ -106,7 +110,7 @@ func (h PurchaseHandler) Packs(c *gin.Context) {
 
 type createOrderRequest struct {
 	PackCode string `json:"pack_code" binding:"required"`
-	// Phone is required by Cashfree for a customer record. It is passed
+	// Phone is required by the payment gateway for a customer record. It is passed
 	// through to the gateway and never stored by Kora: the payment processor
 	// is the right custodian for it, and a copy here would be one more place
 	// it could leak from.
@@ -179,76 +183,14 @@ func (h PurchaseHandler) Orders(c *gin.Context) {
 	httpx.OK(c, gin.H{"orders": rows})
 }
 
-// Webhook settles an order from Cashfree's own notification.
-//
-// It is UNAUTHENTICATED in the Firebase sense — the caller is Cashfree, not a
-// user — so the signature is the only thing standing between a stranger and a
-// free unlimited pack. Every failure path answers without detail: a webhook
-// endpoint that explains why it rejected something is an oracle.
-func (h PurchaseHandler) Webhook(c *gin.Context) {
-	raw, err := io.ReadAll(io.LimitReader(c.Request.Body, maxWebhookBody))
-	if err != nil {
-		httpx.Error(c, http.StatusBadRequest, "invalid_request", "unreadable body")
-		return
-	}
-	if err := VerifyWebhook(
-		h.secretKey,
-		c.GetHeader("x-webhook-timestamp"),
-		c.GetHeader("x-webhook-signature"),
-		raw,
-		h.now(),
-	); err != nil {
-		slog.WarnContext(c.Request.Context(), "billing: rejected an unsigned or stale payment webhook")
-		httpx.Error(c, http.StatusUnauthorized, "unauthorized", "invalid signature")
-		return
-	}
-
-	var event WebhookEvent
-	if err := json.Unmarshal(raw, &event); err != nil {
-		httpx.Error(c, http.StatusBadRequest, "invalid_request", "unreadable body")
-		return
-	}
-	if !event.Succeeded() {
-		// A failed payment needs no action: the order stays `created` and
-		// expires. 200 so Cashfree stops retrying a delivery Kora understood.
-		httpx.OK(c, gin.H{"handled": false})
-		return
-	}
-	orderID, err := uuid.Parse(event.Data.Order.OrderID)
-	if err != nil {
-		httpx.OK(c, gin.H{"handled": false})
-		return
-	}
-
-	err = h.orders.Settle(c.Request.Context(), orderID, event.PaymentID(), event.AmountPaise())
-	switch {
-	case errors.Is(err, ErrOrderNotFound):
-		// Nothing to retry into existence.
-		httpx.OK(c, gin.H{"handled": false})
-	case errors.Is(err, ErrAmountMismatch):
-		// Deliberately 200: retrying will not make the amounts agree, and this
-		// needs a human, not a redelivery loop.
-		slog.ErrorContext(c.Request.Context(), "billing: settled amount does not match the order",
-			"order_id", orderID.String())
-		httpx.OK(c, gin.H{"handled": false})
-	case err != nil:
-		// 500 so Cashfree retries: this is Kora's fault, and the user has paid.
-		slog.ErrorContext(c.Request.Context(), "billing: failed to settle a paid order",
-			"order_id", orderID.String(), "err", err)
-		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not settle the order")
-	default:
-		httpx.OK(c, gin.H{"handled": true})
-	}
-}
-
 // StripeWebhook settles an order from a Stripe Checkout callback.
 //
-// Mounted outside the v1 group for the same reason /webhooks/cashfree is: the
+// Mounted outside the v1 group for the reason every gateway callback is: the
 // caller holds no Firebase token, and its own signature IS the authentication,
 // verified over the RAW body. Re-serialising the payload before verifying
 // would change the bytes the MAC covers and reject every genuine delivery.
 //
-// The status codes mirror the Cashfree path deliberately, because they are
+// The status codes are chosen deliberately, because they are
 // instructions to the SENDER rather than decoration: 200 means "understood,
 // stop retrying", 500 means "my fault, retry".
 func (h PurchaseHandler) StripeWebhook(c *gin.Context) {
@@ -260,7 +202,7 @@ func (h PurchaseHandler) StripeWebhook(c *gin.Context) {
 
 	event, err := VerifyStripeWebhook(h.stripeWebhookSecret, c.GetHeader("Stripe-Signature"), raw)
 	if err != nil {
-		// Says nothing about WHICH check failed, matching the Cashfree path: a
+		// Says nothing about WHICH check failed: a
 		// caller learning whether it holds a valid key learns too much.
 		slog.WarnContext(c.Request.Context(), "billing: rejected an unsigned or stale stripe webhook")
 		httpx.Error(c, http.StatusUnauthorized, "unauthorized", "invalid signature")

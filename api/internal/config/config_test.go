@@ -450,25 +450,21 @@ func TestLoadReadsTheRegistryDeployKey(t *testing.T) {
 // The checkout return link must use the scheme the mobile app actually
 // registers (apps/mobile/app.json), or a paid user is left in a browser the
 // app never reopens.
-func TestCashfreeReturnURLDefaultsToTheAppsOwnScheme(t *testing.T) {
+//
+// Repointed from CASHFREE_RETURN_URL when kora#479 removed Cashfree: the
+// property belongs to the DEEP LINK, not to any one gateway, so it outlived
+// the provider that first needed it.
+//
+// Unverified and worth knowing: Stripe may reject a custom scheme for
+// success_url, in which case this default cannot be used as-is and the return
+// leg needs an https bounce. Nothing here asserts Stripe accepts it — only
+// that Kora hands over the scheme the app can actually reopen.
+func TestStripeReturnURLDefaultsToTheAppsOwnScheme(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
-	t.Setenv("CASHFREE_RETURN_URL", "")
+	t.Setenv("STRIPE_RETURN_URL", "")
 
 	cfg, err := Load()
 
 	require.NoError(t, err)
-	assert.Equal(t, "mobile://billing/return", cfg.CashfreeReturnURL)
-}
-
-// Half a credential set mounts a checkout that can take money and then fail
-// to grant anything, so it is a startup error rather than a degraded mode.
-func TestCashfreeCredentialsMustBeSetTogether(t *testing.T) {
-	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
-	t.Setenv("CASHFREE_APP_ID", "app-id")
-	t.Setenv("CASHFREE_SECRET_KEY", "")
-
-	_, err := Load()
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "CASHFREE_SECRET_KEY")
+	assert.Equal(t, "mobile://billing/return", cfg.StripeReturnURL)
 }
