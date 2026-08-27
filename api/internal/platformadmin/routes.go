@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"github.com/tesserix/kora/api/internal/billing"
 	"github.com/tesserix/kora/api/internal/platformauth"
 	"github.com/tesserix/kora/api/internal/resolveoutcome"
 )
@@ -74,6 +75,35 @@ func Register(r *gin.Engine, deps Deps) {
 		// nothing about whether anyone is keeping up with it.
 		return map[string]int64{"waiting": depth}, nil
 	}
+	// The AI budget probe (kora#485). globalMonthlyCostCapUSD is a kill
+	// switch on the whole product's AI, and until now the only way to read it
+	// was to open meter.go. An operator watching spend climb on
+	// /platform/ai-usage could see the number going up and not the ceiling it
+	// was going up toward.
+	//
+	// READ ONLY. Changing a cap is a turn-the-product-off lever and needs the
+	// §8.3 apparatus this package has deliberately not built; see billing.Caps.
+	meter := billing.NewMeter(deps.DB)
+	probes[DepAIBudget] = func(context.Context) (map[string]int64, error) {
+		// Request ceilings only. The COST figures carry a currency and travel
+		// on the money channel below, because §4.2 requires money to be an
+		// { amount, currency } object and this map cannot express one.
+		return billing.RequestCapMetrics(), nil
+	}
+	moneyProbes := map[string]MoneyProbe{
+		DepAIBudget: func(ctx context.Context) (map[string]Money, error) {
+			amounts, err := meter.BudgetMoney(ctx)
+			if err != nil {
+				return nil, err
+			}
+			out := make(map[string]Money, len(amounts))
+			for k, v := range amounts {
+				out[k] = Money{Amount: v.Amount, Currency: v.Currency}
+			}
+			return out, nil
+		},
+	}
+
 	g := r.Group("/v1/admin", platformauth.Middleware(platformauth.Config{
 		Secret: deps.Secret,
 		Nonces: platformauth.NewNonceStore(deps.DB),
@@ -84,7 +114,7 @@ func Register(r *gin.Engine, deps Deps) {
 	g.GET("/inbox", NewInboxHandler(repo, deps.Logger).
 		WithUnresolvedFoods(outcomes).List)
 	g.GET("/entities/:type", NewEntitiesHandler(repo, deps.Logger).Search)
-	g.GET("/health", NewHealthHandler(probes, deps.Logger).Health)
+	g.GET("/health", NewHealthHandler(probes, deps.Logger).WithMoneyProbes(moneyProbes).Health)
 	g.GET("/kpis", NewKPIsHandler().KPIs)
 	// §8.3's execution endpoint. The read side declares actions per item and
 	// this refuses any action that item did not offer, so the declared array

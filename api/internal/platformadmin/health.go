@@ -40,6 +40,7 @@ const (
 	DepRedis       = "redis"
 	DepAIProvider  = "ai_provider"
 	DepFoodBacklog = "unresolved_food_backlog"
+	DepAIBudget    = "ai_budget"
 )
 
 // dependencyKey is one dependency the console may be told about.
@@ -72,6 +73,7 @@ var DependencyRegistry = []dependencyKey{
 	{Name: DepRedis, Instrumented: true},
 	{Name: DepAIProvider, Instrumented: false},
 	{Name: DepFoodBacklog, Instrumented: true},
+	{Name: DepAIBudget, Instrumented: true},
 }
 
 // Probe is one genuinely-performed dependency check.
@@ -87,6 +89,26 @@ var DependencyRegistry = []dependencyKey{
 // count from a check that errored is not a measurement.
 type Probe func(ctx context.Context) (map[string]int64, error)
 
+// Money is a contract §4.2 value: integer MINOR units plus an explicit
+// ISO-4217 code.
+//
+// The currency travels with the amount rather than being encoded in a field
+// name. A first pass at kora#485 shipped `global_month_cap_usd_cents` as a
+// bare int64 and the conformance suite rejected it — correctly. Kora's money
+// paths already span three currencies (AI caps in USD, billing in paise, an
+// Australian Stripe account), which is exactly the situation where a number
+// whose unit lives in its name goes wrong quietly.
+type Money struct {
+	Amount   int64  `json:"amount"`
+	Currency string `json:"currency"`
+}
+
+// MoneyProbe reports money-valued readings for a dependency.
+//
+// Its own channel rather than a widened Probe: Probe carries int64 and money
+// must carry its currency, and none of the existing probes report money.
+type MoneyProbe func(ctx context.Context) (map[string]Money, error)
+
 // dependencyRow is one entry in the response.
 type dependencyRow struct {
 	Name   string `json:"name"`
@@ -96,6 +118,9 @@ type dependencyRow struct {
 	// healthy one reporting genuine zeroes — the same distinction `unknown`
 	// draws for status.
 	Metrics map[string]int64 `json:"metrics,omitempty"`
+	// Budget carries money-valued readings, §4.2-shaped. Separate from
+	// Metrics because that map is int64 and cannot express a currency.
+	Budget map[string]Money `json:"budget,omitempty"`
 	// Detail is a short, non-sensitive reason for a non-ok status. It never
 	// carries the driver error — DSN fragments and host names do not leave
 	// the process; the real error goes to the log.
@@ -106,9 +131,10 @@ type dependencyRow struct {
 // distinct from /health (is the process alive) and /ready (can it serve).
 // Those two are correctly scoped and unchanged.
 type HealthHandler struct {
-	probes map[string]Probe
-	logger *slog.Logger
-	now    func() time.Time
+	probes      map[string]Probe
+	moneyProbes map[string]MoneyProbe
+	logger      *slog.Logger
+	now         func() time.Time
 }
 
 // NewHealthHandler builds the handler. probes is keyed by dependency name;
@@ -116,6 +142,14 @@ type HealthHandler struct {
 // which is the correct answer to "registered as measured, never measured".
 func NewHealthHandler(probes map[string]Probe, logger *slog.Logger) *HealthHandler {
 	return &HealthHandler{probes: probes, logger: logger, now: time.Now}
+}
+
+// WithMoneyProbes attaches money-valued probes, following the same functional
+// -option pattern the rest of this package uses so every existing
+// NewHealthHandler call keeps working unchanged.
+func (h *HealthHandler) WithMoneyProbes(m map[string]MoneyProbe) *HealthHandler {
+	h.moneyProbes = m
+	return h
 }
 
 // Health handles GET /admin/health.
@@ -167,5 +201,21 @@ func (h *HealthHandler) check(ctx context.Context, key dependencyKey) dependency
 		// status invites reading it as one.
 		return dependencyRow{Name: key.Name, Status: StatusDown, Detail: "probe failed"}
 	}
-	return dependencyRow{Name: key.Name, Status: StatusOK, Metrics: metrics}
+	row := dependencyRow{Name: key.Name, Status: StatusOK, Metrics: metrics}
+
+	if moneyProbe, ok := h.moneyProbes[key.Name]; ok && moneyProbe != nil {
+		money, moneyErr := moneyProbe(probeCtx)
+		if moneyErr != nil {
+			if h.logger != nil {
+				h.logger.Error("platformadmin: dependency money probe failed",
+					"dependency", key.Name, "err", moneyErr)
+			}
+			// Same posture as the metrics probe: a figure from a check that
+			// errored is not a measurement, so the row reports `down` rather
+			// than shipping a budget nobody measured.
+			return dependencyRow{Name: key.Name, Status: StatusDown, Detail: "probe failed"}
+		}
+		row.Budget = money
+	}
+	return row
 }
