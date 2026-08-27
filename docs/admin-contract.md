@@ -186,9 +186,25 @@ are not computable yet. When #43 lands, copy mark8ly's `KPIRegistry` shape —
 a declared key list driving both the 200 and the 501 — rather than adding a
 bare value.
 
-## #447 — the console is read-only for Kora
+## #447 — SUPERSEDED 2026-08-27: the console controls and manages Kora
 
-**Decision, 2026-08-26.** Foods and users are edited through Kora's own admin
+**Reversed 2026-08-27.** The console **controls and manages** Kora; it does not
+merely observe. Read-only was the right default while no platform-scoped write
+existed, but it is not the intended end state, and keeping it would force
+operators out of the console for every action the queue describes.
+
+The original decision is preserved below because its *reasoning* still governs
+HOW writes are added, even though its conclusion no longer holds.
+
+**What this does NOT mean.** Every write still arrives through §8.3, still
+declares itself on the item that offers it, and still lands in
+`kora_admin_events` with an actor. "The console can write" is not "the console
+can write anything": an action a product has not declared is still refused, and
+that refusal is what lets the console render a queue safely.
+
+---
+
+**Superseded decision, 2026-08-26.** Foods and users are edited through Kora's own admin
 portal; the console observes. `console-core` should read "Food index" as a
 table, not an editor.
 
