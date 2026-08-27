@@ -368,3 +368,44 @@ func paddedVector(x, y float32) []float32 {
 	v[0], v[1] = x, y
 	return v
 }
+
+// TestPhotoWithNoGuessesRecordsNoMatchAtTheFirstSite pins the OTHER no_match
+// site — the one text can never reach.
+//
+// There are two `outcomeNoMatch` recorders in resolve(). ResolveText passes
+// `func(guesses) string { return phrase }` as decomposeSubject, so its subject
+// is never empty for a real query and it always falls through to the
+// post-decompose site (pinned above). ResolvePhoto's decomposeSubject returns
+// "" when there are no guesses, which is the only way to reach the FIRST site:
+// no candidate AND nothing to decompose, so the engine never calls the
+// provider's Decompose at all.
+//
+// Worth its own test because the two sites report the same kind for opposite
+// reasons, and a refactor that collapsed them would look harmless.
+func TestPhotoWithNoGuessesRecordsNoMatchAtTheFirstSite(t *testing.T) {
+	db := testDB(t)
+	repo := nutrition.NewRepository(db)
+	userID := seedTestUser(t, db)
+
+	sink := &recordingSink{}
+	// No guesses at all: decomposeSubject returns "", so the first site fires.
+	// ingredients is deliberately NON-empty — if the resolver ever reached
+	// decomposition it would produce a `decomposed` outcome instead, so this
+	// doubles as proof that Decompose was never consulted.
+	r := NewResolver(&stubProvider{
+		guesses:     nil,
+		ingredients: []IngredientGuess{{Ingredient: "butter"}},
+	}, repo, NoCache{}, &stubMeter{withinBudget: true}).WithOutcomeSink(sink)
+
+	res, err := r.ResolvePhoto(context.Background(), userID, []byte("fake-jpeg-bytes"), "image/jpeg")
+
+	require.NoError(t, err)
+	require.Empty(t, res.Candidates)
+	require.Equal(t, []string{outcomeNoMatch}, sink.kinds(),
+		"a photo that identified nothing is an index gap, not a decomposition")
+
+	got := sink.got[0]
+	assert.Equal(t, modePhoto, got.Mode, "a photo must never be filed under text")
+	assert.Nil(t, got.Phrase, "a photo has no phrase — nil, not an empty string")
+	assert.Equal(t, 0, got.CandidateCount)
+}
