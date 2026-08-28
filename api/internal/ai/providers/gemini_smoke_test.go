@@ -51,6 +51,13 @@ func TestGeminiProvider_Embed_Smoke(t *testing.T) {
 	require.Len(t, vec, 768)
 	require.Equal(t, "gemini", usage.Provider)
 	require.Equal(t, callTypeEmbed, usage.CallType)
+
+	// kora#376: genai.EmbedContentResponse carries no usage metadata, so a
+	// real successful embed call must still come back with a non-zero,
+	// ESTIMATED token count rather than the zero this issue found in
+	// production (10,213 "ok" rows with tokens_in = 0).
+	require.Greater(t, usage.TokensIn, 0, "embed usage must not record zero tokens for non-empty input")
+	require.True(t, usage.Estimated, "embed usage must be marked Estimated — Gemini never reports a measured count for embeddings")
 }
 
 // TestGeminiProvider_IdentifyText_PreservesStatedQuantity_Smoke is a

@@ -168,6 +168,31 @@ func TestNewGeminiProvider_Name(t *testing.T) {
 	assert.Equal(t, "gemini", p.Name())
 }
 
+// TestEstimateEmbedTokens_NeverZeroForNonEmptyInput pins kora#376's actual
+// fix: 10,213 successful production embed calls recorded TokensIn: 0 because
+// GeminiProvider.Embed never read any token count at all (there is none to
+// read — see Embed's doc comment). The estimator must never repeat that for
+// non-empty input, however short.
+func TestEstimateEmbedTokens_NeverZeroForNonEmptyInput(t *testing.T) {
+	for _, text := range []string{"a", "hi", "grilled chicken", strings.Repeat("x", 3)} {
+		got := estimateEmbedTokens(text)
+		assert.Greaterf(t, got, 0, "estimateEmbedTokens(%q) = 0, want > 0", text)
+	}
+}
+
+func TestEstimateEmbedTokens_EmptyInputIsZero(t *testing.T) {
+	assert.Equal(t, 0, estimateEmbedTokens(""))
+}
+
+// TestEstimateEmbedTokens_RoughlyFourCharsPerToken pins the stated ratio so a
+// future edit to the heuristic has to change this test deliberately rather
+// than by accident.
+func TestEstimateEmbedTokens_RoughlyFourCharsPerToken(t *testing.T) {
+	assert.Equal(t, 1, estimateEmbedTokens("abcd"))    // exactly 4 chars -> 1 token
+	assert.Equal(t, 2, estimateEmbedTokens("abcde"))   // 5 chars rounds up to 2 tokens
+	assert.Equal(t, 2, estimateEmbedTokens("grilled")) // 7 chars -> rounds up to 2 tokens
+}
+
 // f64 and str are local pointer-of-literal helpers for building expected
 // ai.BodyCompositionReading values — every field on that struct is a
 // pointer, so a plain literal cannot be assigned directly.

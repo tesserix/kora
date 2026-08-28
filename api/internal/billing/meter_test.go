@@ -308,6 +308,60 @@ func TestRecordInsertsUsageEvent(t *testing.T) {
 	require.InDelta(t, 0.0123, got.CostUSDEst, 1e-9)
 }
 
+// TestRecordPersistsEstimatedFlag pins kora#376's persistence half: an
+// estimated token count (Gemini's embed path, which has no measured count to
+// report) must survive from ai.Usage into the persisted row, not get
+// silently dropped the way agents.Usage.Estimated used to be before
+// ai.Usage carried the field at all.
+func TestRecordPersistsEstimatedFlag(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	meter := NewMeter(db)
+
+	usage := ai.Usage{
+		Provider:  "gemini",
+		Model:     "gemini-embedding-001",
+		CallType:  "embed",
+		TokensIn:  4,
+		LatencyMs: 50,
+		Outcome:   ai.OutcomeOK,
+		Estimated: true,
+	}
+	require.NoError(t, meter.Record(context.Background(), userID, usage, 0.0000006))
+
+	var got Event
+	require.NoError(t, db.Where("user_id = ?", userID).First(&got).Error)
+	require.True(t, got.Estimated, "estimated flag must survive from ai.Usage into the persisted row")
+}
+
+// TestRecordDoesNotMarkProviderReportedUsageAsEstimated is the flip side of
+// TestRecordPersistsEstimatedFlag: a normal, provider-reported token count
+// (Estimated left at its zero value, false) must NOT come back as
+// estimated=true. The flag would be worthless if it defaulted to "always
+// true" regardless of what the caller set.
+func TestRecordDoesNotMarkProviderReportedUsageAsEstimated(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	meter := NewMeter(db)
+
+	usage := ai.Usage{
+		Provider:  "openai",
+		Model:     "gpt-4o",
+		CallType:  "identify_text",
+		TokensIn:  120,
+		TokensOut: 45,
+		LatencyMs: 850,
+		Outcome:   ai.OutcomeOK,
+		// Estimated deliberately left unset (false): this call's tokens came
+		// straight from the provider's own response.
+	}
+	require.NoError(t, meter.Record(context.Background(), userID, usage, 0.0123))
+
+	var got Event
+	require.NoError(t, db.Where("user_id = ?", userID).First(&got).Error)
+	require.False(t, got.Estimated, "a provider-reported count must not be recorded as estimated")
+}
+
 func TestWithinBudgetTrueWithNoEvents(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db)
