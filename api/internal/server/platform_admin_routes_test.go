@@ -37,6 +37,7 @@ var contractRoutes = []string{
 	"/v1/admin/entities/users",
 	"/v1/admin/health",
 	"/v1/admin/kpis",
+	"/v1/admin/ai-metrics",
 }
 
 // signPlatform builds a request the federation client would recognise as its
