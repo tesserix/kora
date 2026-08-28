@@ -1,6 +1,7 @@
 package user
 
 import (
+	"context"
 	"net/http"
 	"time"
 
@@ -12,6 +13,30 @@ import (
 
 const contextUserID = "user_id"
 const contextUserLoc = "user_loc"
+
+// requestUserIDContextKey is unexported so only this package can mint values
+// under it -- a bare string key would let any importer collide with (or read)
+// it accidentally.
+type requestUserIDContextKey struct{}
+
+// WithID stamps the resolved users.id onto a context.Context, so it survives
+// into every downstream ctx derived from the request -- including the one
+// ai.Resolver hands to the AgentGateway provider for cost attribution
+// (kora#508). This is distinct from the gin-context-keyed contextUserID
+// above: that one only reaches handlers still holding *gin.Context.
+func WithID(ctx context.Context, id uuid.UUID) context.Context {
+	return context.WithValue(ctx, requestUserIDContextKey{}, id)
+}
+
+// IDFromRequestContext reads the users.id stamped by WithID off a plain
+// context.Context. Named distinctly from IDFromContext (which reads the
+// *gin.Context* value set by ResolveMiddleware) so callers can't confuse the
+// two: this one is for code that only has a context.Context, e.g. AI
+// providers.
+func IDFromRequestContext(ctx context.Context) (uuid.UUID, bool) {
+	id, ok := ctx.Value(requestUserIDContextKey{}).(uuid.UUID)
+	return id, ok
+}
 
 // ResolveMiddleware provisions-and-resolves the authenticated user once per
 // request, so every downstream handler can read a guaranteed users.id without
@@ -29,6 +54,7 @@ func ResolveMiddleware(repo Repository) gin.HandlerFunc {
 			return
 		}
 		c.Set(contextUserID, u.ID)
+		c.Request = c.Request.WithContext(WithID(c.Request.Context(), u.ID))
 		loc, err := time.LoadLocation(u.Timezone)
 		if err != nil {
 			loc = time.UTC

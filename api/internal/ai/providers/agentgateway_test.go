@@ -7,10 +7,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/tesserix/kora/api/internal/auth"
+	"github.com/tesserix/kora/api/internal/user"
 )
 
 func TestAgentGatewayProviderRoutesEveryCapabilityThroughTheLogicalModel(t *testing.T) {
@@ -174,4 +176,83 @@ func TestAgentGatewayProviderDelegatesTheVerifiedEndUserIdentity(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "Bearer firebase-user-token", got.Get("X-Kora-End-User-Token"))
+}
+
+func TestAgentGatewayProviderStampsTheActingUserID(t *testing.T) {
+	var got http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+			"id": "completion-1", "object": "chat.completion",
+			"choices": []map[string]any{{
+				"index": 0, "message": map[string]any{"role": "assistant", "content": "answer"},
+				"finish_reason": "stop",
+			}},
+			"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+		}))
+	}))
+	t.Cleanup(server.Close)
+
+	provider := NewAgentGatewayProvider("gateway-key", server.URL+"/v1", "kora-auto")
+	uid := uuid.New()
+	ctx := user.WithID(context.Background(), uid)
+	_, _, err := provider.GenerateText(ctx, "system", "question")
+	require.NoError(t, err)
+
+	assert.Equal(t, uid.String(), got.Get("X-Kora-User-Id"))
+}
+
+func TestAgentGatewayProviderSendsNoUserHeaderWhenAbsent(t *testing.T) {
+	var got http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+			"id": "completion-1", "object": "chat.completion",
+			"choices": []map[string]any{{
+				"index": 0, "message": map[string]any{"role": "assistant", "content": "answer"},
+				"finish_reason": "stop",
+			}},
+			"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+		}))
+	}))
+	t.Cleanup(server.Close)
+
+	provider := NewAgentGatewayProvider("gateway-key", server.URL+"/v1", "kora-auto")
+	// A bare context.Background() is exactly what cmd/embed's backfill
+	// constructs: no user, so no header -- never a zero UUID standing in
+	// for "we don't know".
+	_, _, err := provider.GenerateText(context.Background(), "system", "question")
+	require.NoError(t, err)
+
+	_, present := got["X-Kora-User-Id"]
+	assert.False(t, present, "expected X-Kora-User-Id header to be entirely absent, not merely empty")
+}
+
+func TestAgentGatewayProviderComposesVerifiedTokenAndUserIDHeaders(t *testing.T) {
+	var got http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+			"id": "completion-1", "object": "chat.completion",
+			"choices": []map[string]any{{
+				"index": 0, "message": map[string]any{"role": "assistant", "content": "answer"},
+				"finish_reason": "stop",
+			}},
+			"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+		}))
+	}))
+	t.Cleanup(server.Close)
+
+	provider := NewAgentGatewayProvider("gateway-key", server.URL+"/v1", "kora-auto")
+	uid := uuid.New()
+	ctx := auth.WithVerifiedToken(context.Background(), "firebase-user-token")
+	ctx = user.WithID(ctx, uid)
+	_, _, err := provider.GenerateText(ctx, "system", "question")
+	require.NoError(t, err)
+
+	assert.Equal(t, "Bearer firebase-user-token", got.Get("X-Kora-End-User-Token"))
+	assert.Equal(t, uid.String(), got.Get("X-Kora-User-Id"))
 }
