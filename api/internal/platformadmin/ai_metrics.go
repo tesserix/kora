@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -77,13 +78,67 @@ type userAIMetric struct {
 	LastActivityAt *string `json:"last_activity_at,omitempty"`
 }
 
-// aiMetricsData is the whole "data" object §4.1's envelope wraps.
+// aiMetricsData is the whole "data" object §4.1's envelope wraps, for the
+// default request — both sections.
 type aiMetricsData struct {
 	Window   windowSection   `json:"window"`
 	Outcomes outcomesSection `json:"outcomes"`
 	// Users is allocated with make even when empty — never left nil — so it
 	// marshals as [] and not null (§4.1).
 	Users []userAIMetric `json:"users"`
+}
+
+// aiMetricsOutcomesOnlyData is the "data" object for sections=outcomes: the
+// window and the aggregate, and nothing else.
+//
+// This is a separate type rather than aiMetricsData with `users,omitempty`
+// on purpose. omitempty on a slice drops it whenever it is nil OR empty —
+// but the default (both-sections) response must keep rendering `"users":[]`
+// on an empty page, never omit it (see the make() note above). One field
+// tag cannot mean "omit when the caller didn't ask" on one path and "never
+// omit, even when empty" on the other, so the two shapes get two types.
+type aiMetricsOutcomesOnlyData struct {
+	Window   windowSection   `json:"window"`
+	Outcomes outcomesSection `json:"outcomes"`
+}
+
+// aiMetricsSections is which of #4.1's two blocks a caller asked for via
+// ?sections=. The zero value means "both" — the endpoint's original,
+// unchanged behaviour — so a Query built without going through
+// parseAIMetricsSections (there is no such caller today, but nothing
+// prevents one) still gets the safe, existing default rather than silently
+// dropping the per-user section.
+type aiMetricsSections struct {
+	users bool
+}
+
+// parseAIMetricsSections reads ?sections= and decides whether
+// ListUserAIMetrics — the expensive half of this endpoint and the half that
+// enumerates active user UUIDs — should run at all.
+//
+// This is Kora's own convention, invented for this issue: neither Kora nor
+// the Product Admin Integration Contract has an existing partial-response
+// parameter today. ai-metrics is Kora's own endpoint, not one the contract
+// defines, so this does not bind any other product-admin route, and no
+// other route should copy this shape without its own review.
+//
+// Only one value is recognised right now: sections=outcomes. A
+// comma-separated list (e.g. "outcomes,users") is deferred rather than
+// built — there is exactly one section worth withholding today (the other
+// is "everything"), and generalising to a list before a second caller
+// exists is the field-selection framework this issue said not to build.
+//
+// Absent or unrecognised values take the default of "both", matching
+// parseQuery's own never-fail posture and for the same reason: a caller
+// that sends `sections=banana` (a typo, an old client, a future value this
+// build predates) must get today's full response, not a 400 or a silently
+// narrowed one. The console's Outcomes tab and every other current caller
+// asks for nothing on this parameter, so they are unaffected either way.
+func parseAIMetricsSections(c *gin.Context) aiMetricsSections {
+	if strings.TrimSpace(c.Query("sections")) == "outcomes" {
+		return aiMetricsSections{users: false}
+	}
+	return aiMetricsSections{users: true}
 }
 
 // AIMetricsRatesSource reads the resolver's outcome rates for a window.
@@ -147,6 +202,31 @@ func (h *AIMetricsHandler) Metrics(c *gin.Context) {
 			h.logger.Error("platformadmin: ai-metrics rates", "err", err)
 		}
 		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not read resolution rates")
+		return
+	}
+
+	sections := parseAIMetricsSections(c)
+	if !sections.users {
+		// Skip ListUserAIMetrics ENTIRELY — do not call it and discard the
+		// result. That query is both the expensive half of this endpoint and
+		// the sensitive half (it enumerates active user UUIDs), and the
+		// governing rule from the platform-agent MCP design is that a
+		// narrower principal must cause a narrower QUERY, never a narrower
+		// serialization: data filtered after retrieval has already crossed
+		// into the caller's logs, traces and memory.
+		//
+		// Also deliberately NOT using page(): rendering `"users":[]` with
+		// `"pagination":{"total":0,...}` would assert there are zero active
+		// users when we simply did not ask — the same absent-vs-zero
+		// distinction this handler already enforces for
+		// first_try_rate_pct (see outcomesSection's doc comment, and #507).
+		// §4.1's envelope must not imply a collection nobody requested, so
+		// both `users` and `pagination` are omitted outright rather than
+		// zeroed.
+		c.JSON(http.StatusOK, gin.H{"data": aiMetricsOutcomesOnlyData{
+			Window:   windowSection{From: stamp(from), To: stamp(to)},
+			Outcomes: toOutcomesSection(rates),
+		}})
 		return
 	}
 
