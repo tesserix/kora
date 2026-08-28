@@ -31,9 +31,14 @@ func NewKPIsHandler() *KPIsHandler { return &KPIsHandler{} }
 //     #43 is the issue that decides which of those Kora considers headline.
 //     Choosing them here, ahead of #43, would mean the console renders
 //     whatever was convenient to query rather than what anyone decided.
-//   - Two of the candidate numbers are not even computable yet: nothing
-//     persists a resolution outcome (see inbox.go and health.go), so
-//     "resolutions that failed" has no source.
+//   - "Resolutions that failed" IS computable now — kora#459's
+//     food_resolution_outcomes persists every attempt, and kora#507 already
+//     serves the rate on /v1/admin/ai-metrics. That changes the reason, not
+//     the verdict: a number becoming available is not the same as anyone
+//     deciding it belongs on a dashboard, and #43 is where that is decided.
+//     (This comment previously claimed nothing persists a resolution
+//     outcome. That was true when it was written and stopped being true at
+//     #459.)
 //
 // When #43 lands this becomes a thin projection over it, and the shape to
 // copy is mark8ly's KPIRegistry — a declared key list driving both the 200

@@ -220,8 +220,14 @@ down" the same event.
 
 `501 not_implemented`, deliberately. §3.1 forbids `{}` or zeroes, which render
 as em-dashes that read as "zero activity" rather than "nothing measured".
-Kora is pre-launch; #43 decides which numbers are headline, and two candidates
-are not computable yet. When #43 lands, copy mark8ly's `KPIRegistry` shape —
+Kora is pre-launch and #43 decides which numbers are headline.
+
+The rationale here used to be that the candidates were not computable. One now
+is: #459 persists every resolution attempt and #507 serves the first-try rate
+on `/v1/admin/ai-metrics`. The verdict is unchanged — 501 stands. Shipping a
+headline number *because it became available* is exactly how a dashboard ends
+up rendering whatever was convenient to query, and #43 is where that choice
+belongs. When #43 lands, copy mark8ly's `KPIRegistry` shape —
 a declared key list driving both the 200 and the 501 — rather than adding a
 bare value.
 
