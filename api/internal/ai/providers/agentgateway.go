@@ -11,6 +11,7 @@ import (
 
 	"github.com/tesserix/kora/api/internal/ai"
 	"github.com/tesserix/kora/api/internal/auth"
+	"github.com/tesserix/kora/api/internal/user"
 )
 
 const (
@@ -18,6 +19,7 @@ const (
 	gatewayContextKindHeader = "X-Kora-AI-Context-Kind"
 	gatewayRTKAppliedHeader  = "X-Kora-RTK-Applied"
 	gatewayEndUserHeader     = "X-Kora-End-User-Token"
+	gatewayUserHeader        = "X-Kora-User-Id"
 )
 
 // AgentGatewayProvider routes every model capability through the private Agent
@@ -44,7 +46,7 @@ func NewAgentGatewayProvider(apiKey, baseURL, model string) AgentGatewayProvider
 			option.WithHeader(gatewayContextKindHeader, contextKind),
 			option.WithHeader(gatewayRTKAppliedHeader, "false"),
 		)
-		provider.options = delegatedUserOptions
+		provider.options = gatewayRequestOptions
 		return provider
 	}
 	return AgentGatewayProvider{
@@ -153,6 +155,34 @@ func delegatedUserOptions(ctx context.Context) []option.RequestOption {
 		return nil
 	}
 	return []option.RequestOption{option.WithHeader(gatewayEndUserHeader, "Bearer "+token)}
+}
+
+// userAttributionOptions stamps the acting user's Kora UUID so the platform
+// ledger can attribute cost per user (kora#508).
+//
+// The UUID and nothing else. The gateway does not need to know who someone is
+// to attribute what they spent, and a pseudonymous id keeps the telemetry
+// pipeline out of the personal-data path.
+//
+// Absence is a real case and stays legible: cmd/embed's backfill has no user
+// by construction, and sends no header rather than a zero UUID -- a
+// placeholder would make "no user made this call" indistinguishable from "we
+// failed to record who did".
+func userAttributionOptions(ctx context.Context) []option.RequestOption {
+	id, ok := user.IDFromRequestContext(ctx)
+	if !ok {
+		return nil
+	}
+	return []option.RequestOption{option.WithHeader(gatewayUserHeader, id.String())}
+}
+
+// gatewayRequestOptions composes every per-request option set applied to
+// AgentGatewayProvider's underlying OpenAIProvider.options. Composing here --
+// at the single point where every classified provider is constructed --
+// rather than threading a userID parameter through each call site, means a
+// new call type can't ship unattributed by omission (kora#508).
+func gatewayRequestOptions(ctx context.Context) []option.RequestOption {
+	return append(delegatedUserOptions(ctx), userAttributionOptions(ctx)...)
 }
 
 func (p AgentGatewayProvider) GenerateText(ctx context.Context, systemPrompt, userPrompt string) (string, ai.Usage, error) {

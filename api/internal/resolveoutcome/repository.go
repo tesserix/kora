@@ -134,19 +134,36 @@ func (r Rates) FirstTryRate() (float64, bool) {
 	return 100 * float64(r.FirstTry) / float64(denom), true
 }
 
-// Since reads the outcome counts for a window.
+// Since reads the outcome counts from a lower bound with no upper bound.
+//
+// This is the package's existing public entry point, kept stable rather than
+// widened to take an upper bound: #507's Between is added ALONGSIDE it, not
+// in place of it, so any future caller that only ever wants "everything
+// since X" is not forced to pass a zero upper bound to get that.
 func (r Repository) Since(ctx context.Context, from time.Time) (Rates, error) {
+	return r.Between(ctx, from, time.Time{})
+}
+
+// Between reads the outcome counts for a bounded window: from is the lower
+// bound, to the upper. A zero to means no upper bound, matching Since's
+// existing behaviour — Since is now expressed in terms of this method rather
+// than duplicating the query, so the two can never disagree about what a
+// window counts.
+func (r Repository) Between(ctx context.Context, from, to time.Time) (Rates, error) {
 	type row struct {
 		Kind  Kind
 		Count int64
 	}
-	var rows []row
-	if err := r.db.WithContext(ctx).
+	db := r.db.WithContext(ctx).
 		Model(&Outcome{}).
 		Select("kind, count(*) AS count").
-		Where("created_at >= ?", from).
-		Group("kind").
-		Scan(&rows).Error; err != nil {
+		Where("created_at >= ?", from)
+	if !to.IsZero() {
+		db = db.Where("created_at <= ?", to)
+	}
+
+	var rows []row
+	if err := db.Group("kind").Scan(&rows).Error; err != nil {
 		return Rates{}, fmt.Errorf("resolveoutcome: rates: %w", err)
 	}
 

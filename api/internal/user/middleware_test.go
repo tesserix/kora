@@ -40,6 +40,15 @@ func TestResolveMiddlewareSetsUserID(t *testing.T) {
 		id, ok := IDFromContext(c)
 		require.True(t, ok)
 		require.NotEqual(t, uuid.Nil, id)
+
+		// The gin-context reader (above) must keep working untouched, and
+		// the request's context.Context must ALSO carry the same id, so
+		// every downstream ctx (including the one ai.Resolver hands to the
+		// AgentGateway provider) can attribute the call to this user.
+		ctxID, ok := IDFromRequestContext(c.Request.Context())
+		require.True(t, ok)
+		require.Equal(t, id, ctxID)
+
 		c.JSON(http.StatusOK, gin.H{"id": id.String()})
 	})
 

@@ -234,6 +234,43 @@ func TestSinceHonoursTheWindow(t *testing.T) {
 	assert.Equal(t, int64(1), got.Attempts)
 }
 
+// TestBetweenBoundsBothEnds — #507's whole reason to exist: Since only ever
+// bounded the bottom of the window, and a caller asking about a specific
+// past window (not "since X, forever") needs the top bounded too.
+func TestBetweenBoundsBothEnds(t *testing.T) {
+	db := tx(t)
+	repo := NewRepository(db)
+	userID := seedUser(t, db)
+	now := time.Now().UTC()
+
+	record(t, repo, userID, KindResolved, now.Add(-3*time.Hour)) // before the window
+	record(t, repo, userID, KindResolved, now.Add(-time.Hour))   // inside
+	record(t, repo, userID, KindResolved, now)                   // after the window
+
+	got, err := repo.Between(context.Background(), now.Add(-2*time.Hour), now.Add(-30*time.Minute))
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), got.Attempts, "only the row inside [from, to] counts")
+}
+
+// TestBetweenWithZeroToMatchesSince — a zero upper bound must mean "no upper
+// bound", so Since (from, unbounded) and Between (from, zero) agree.
+func TestBetweenWithZeroToMatchesSince(t *testing.T) {
+	db := tx(t)
+	repo := NewRepository(db)
+	userID := seedUser(t, db)
+	now := time.Now().UTC()
+
+	record(t, repo, userID, KindResolved, now)
+
+	from := now.Add(-time.Hour)
+	since, err := repo.Since(context.Background(), from)
+	require.NoError(t, err)
+	between, err := repo.Between(context.Background(), from, time.Time{})
+	require.NoError(t, err)
+
+	assert.Equal(t, since.Attempts, between.Attempts)
+}
+
 // TestFirstTryRateExcludesCacheAndAlias is the arithmetic that matters for
 // kora#328's "≥90% correct on first try".
 //

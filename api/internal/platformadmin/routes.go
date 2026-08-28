@@ -116,6 +116,12 @@ func Register(r *gin.Engine, deps Deps) {
 	g.GET("/entities/:type", NewEntitiesHandler(repo, deps.Logger).Search)
 	g.GET("/health", NewHealthHandler(probes, deps.Logger).WithMoneyProbes(moneyProbes).Health)
 	g.GET("/kpis", NewKPIsHandler().KPIs)
+	// The food-resolution accuracy numbers the console's AI page needs
+	// (kora#507). Deliberately Kora's own read: the platform's AI gateway
+	// ledger cannot compute these because cache/alias/budget short-circuits
+	// never reach a provider and the resolver's first-try judgement happens
+	// after the provider answers, so neither trace is in the ledger's rows.
+	g.GET("/ai-metrics", NewAIMetricsHandler(outcomes, deps.DB, deps.Logger).Metrics)
 	// §8.3's execution endpoint. The read side declares actions per item and
 	// this refuses any action that item did not offer, so the declared array
 	// is a contract the console can render against (kora#484).
