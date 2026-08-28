@@ -5,7 +5,8 @@ Kora implements the read half of the **Product Admin Integration Contract**
 v2) so the Tesserix platform console can manage it.
 
 Issues: #430 (foundation) · #431 audit-logs · #432 inbox · #433 entities ·
-#434 health · #435 kpis · #447 (writes decision).
+#434 health · #435 kpis · #447 (writes decision) · #484/#496 (inbox actions) ·
+#501 (AI budget probe) · #507 (ai-metrics) · #509 (console reachability).
 
 ## Kora has TWO admin callers, not one
 
@@ -34,9 +35,14 @@ tree keeps them apart. `internal/server/platform_admin_routes_test.go` asserts
 each rejects the other's caller — do not move a route between the groups
 without moving its caller.
 
-## Registration (#430)
+## Registration (#430, #509)
 
-Kora is **not yet registered**. The console side needs:
+Whether Kora is registered is not something this page can assert from the
+merge state of any branch — it is a property of the **deployed console's**
+environment, not of Kora's repo. Per #509, verify it live: the console's
+`FEDERATION_PRODUCTS` environment variable must include `kora`, checked in the
+running deployment, not inferred from what has landed in `tesserix-home`. The
+console side needs:
 
 ```
 FEDERATION_PRODUCTS=mark8ly,kora
@@ -61,24 +67,46 @@ Note mark8ly's registry comment about Istio: its base URL must avoid
 there. Kora has no equivalent policy on `/v1/admin` today — the portal already
 reaches it — but check before assuming.
 
-### Conformance is still blocked
+### Conformance runs in CI
 
-`@tesserix/admin-conformance` does not exist in `tesserix-home/packages/`
-(verified 2026-08-26). Until it does, drift is caught by this repo's own tests
-and by nothing else. Wiring it into CI is the remaining half of #430.
+`@tesserix/admin-conformance@0.3.0` exists and runs on every push, in
+`.github/workflows/ci.yml`, against the declaration at `admin-conformance.json`
+in the repo root. This was the remaining half of #430; it is done, not
+blocked.
+
+Two traps worth knowing before touching that step:
+
+- **`--declaration` is required.** The CLI defaults to
+  `./admin-conformance.json`, the step runs from `api/`, and the declaration
+  lives at the repo root — so an omitted flag resolves to
+  `api/admin-conformance.json`, which does not exist. That surfaced as exit 2
+  ("the suite could not run"), not as a contract failure, and reads like a
+  missing secret rather than a missing flag.
+- **Exit 1 and exit 2 are different failures and the job must not conflate
+  them.** Exit 1 means "Kora deviates from the contract" — fix Kora. Exit 2
+  means "the suite could not run" (secret, flags, or declaration) — fix the
+  harness. Treating them alike eventually reports a broken harness as a
+  failing product.
+
+The declaration also bounds what conformance can see: `admin-conformance.json`
+declares only `audit-logs`, `inbox`, `entities`, `health`, and `kpis`. An
+endpoint outside that set — `ai-metrics` is the current example — is not a
+conformance target at all; it is Kora's own surface, and drift there is
+caught only by this repo's Go tests.
 
 ## What is implemented
 
 | Endpoint | Status |
 |---|---|
 | `GET /v1/admin/audit-logs` | real, over `kora_admin_events` |
-| `GET /v1/admin/inbox` | real, feedback queue only |
+| `GET /v1/admin/inbox` | real, feedback queue **and** the unresolved-food queue (`.WithUnresolvedFoods(outcomes)`, #432 + #459's outcomes) |
 | `GET /v1/admin/entities/{type}` | real, `users` and `foods` |
-| `GET /v1/admin/health` | real probes for Postgres and Redis |
+| `GET /v1/admin/health` | real probes for Postgres and Redis, plus the unresolved-food backlog depth (#434/#459) and the AI budget (#485/#501) — the budget's cost figures travel on the separate §4.2 money channel, not the ordinary `map[string]int64` metrics map, because that map structurally cannot express a `{amount, currency}` object |
 | `GET /v1/admin/kpis` | deliberate `501 not_implemented` |
 | `GET /admin/billing/*` | not implemented — Kora has no billing concept |
-| `POST /admin/inbox/{id}/actions/{id}` | not implemented — no actions declared |
-| any write | not implemented — see #447 below |
+| `POST /admin/inbox/{id}/actions/{id}` | **implemented** (#484/#496) — the read side declares actions per item and this refuses any action that item did not offer |
+| `GET /v1/admin/ai-metrics` | implemented (#507), but it is **Kora's own endpoint, not a contract endpoint** — it is not in `admin-conformance.json` and is covered only by this repo's Go tests. It is also currently unreachable from the console: platform-api federates one route per *contract* endpoint, and routing a non-contract endpoint is an open decision in `tesserix-home#403`, tracked by kora#509. A correctly mounted, correctly signed route that returns nothing to the console is this failure mode, not a Kora bug. |
+| any other write | not implemented — see #447 below |
 
 ### audit-logs (#431)
 
@@ -98,20 +126,26 @@ suggested renaming; it has a live consumer in `apps/web`, so it stays.
 
 ### inbox (#432)
 
-One queue: feedback awaiting triage (`status IN (open, in_progress)`), oldest
-first.
+Two queues, as #432 originally named: feedback awaiting triage
+(`status IN (open, in_progress)`, oldest first) and the unresolved-food queue
+(`kind: "unresolved_food"`), backed by #459's outcome recorder via
+`.WithUnresolvedFoods(outcomes)`.
 
-**The second queue #432 named does not exist.** Nothing in Kora persists a
-food-resolution outcome — no table, no column, no write path — so
-`kind: "unresolved_food"` has no data source. It is omitted rather than
-invented. The same gap makes `unresolved_food_backlog` uninstrumented in
-`/admin/health` and is one reason `/admin/kpis` is a 501.
+**This was wrong before.** The second queue used to have no data source —
+nothing in Kora persisted a food-resolution outcome, so `kind:
+"unresolved_food"` was omitted rather than invented, and the same gap left
+`unresolved_food_backlog` uninstrumented in `/admin/health` and was one
+reason `/admin/kpis` was a 501. #459 closed that gap by giving resolution
+outcomes a table and a write path; the inbox and health sections below now
+read from it.
 
-`due_at` is `null` because Kora has no SLA on this queue. `actions` is empty
-because §8.2's execution endpoint is not implemented and §3.2 says to declare
-only actions the product can perform. `href` is empty because `console-core`
-still marks every Kora route `pending`, and an href to a 404 is worse than
-none.
+`due_at` is `null` because Kora has no SLA on this queue. `actions` is no
+longer always empty: §8.3's execution endpoint (`POST
+/admin/inbox/{id}/actions/{id}`) is implemented (#484/#496), and the read
+side declares, per item, only the actions that item can actually take — the
+write side then refuses anything not declared. `href` is empty because
+`console-core` still marks every Kora route `pending`, and an href to a 404
+is worse than none.
 
 ### entities (#433)
 
@@ -161,17 +195,22 @@ without changing what an operator can find — not a narrower search.
 ### health (#434)
 
 Genuinely probed: Postgres (`SELECT 1`, a real round trip — a pool with idle
-connections to a stopped database looks healthy from the inside) and Redis
+connections to a stopped database looks healthy from the inside), Redis
 (`PING`, through a **dedicated client**, because `buildResolveHandler` closes
 its own after one failed boot ping and therefore holds nothing to probe in
-exactly the state #105 describes).
+exactly the state #105 describes), the unresolved-food backlog depth
+(#434/#459, a `COUNT` on `resolveoutcome`'s table now that outcomes are
+persisted), and the AI budget (#485/#501, request-cap metrics from
+`billing.RequestCapMetrics()`). The budget's cost figures are money, not a
+count, so they do not travel on the ordinary `map[string]int64` metrics map —
+that map cannot express a `{amount, currency}` object — and instead go out on
+a separate `MoneyProbe` channel as §4.2 money objects.
 
 Not instrumented, and reported as such rather than as `ok`:
 
 - `ai_provider` — prod is gateway→Vertex and the only genuine probe is a model
   call, which costs money and quota on every console page render. A set API key
   says a deploy was configured, not that it works.
-- `unresolved_food_backlog` — nothing persists a resolution outcome.
 
 The endpoint is always `200`: it *reports* health, it does not *have* health.
 A 503 would make "Kora says Redis is down" and "Kora's health endpoint is
