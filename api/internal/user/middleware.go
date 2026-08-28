@@ -75,9 +75,10 @@ func IDFromContext(c *gin.Context) (uuid.UUID, bool) {
 	return id, ok
 }
 
-// SetIDForTest puts a user id on the context the same way the auth middleware
-// does. Exported only so packages that sit BEHIND auth can test their own
-// middleware without a Firebase token.
+// SetIDForTest sets the gin-context user ID only. Unlike ResolveMiddleware,
+// it does NOT stamp the request context via WithID—tests will not see the
+// X-Kora-User-Id header sent to the gateway in production. Exported only so
+// packages behind auth can test their handlers without a Firebase token.
 func SetIDForTest(c *gin.Context, id uuid.UUID) { c.Set(contextUserID, id) }
 
 // LocFromContext reads the *time.Location resolved by ResolveMiddleware
