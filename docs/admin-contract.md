@@ -69,10 +69,17 @@ reaches it — but check before assuming.
 
 ### Conformance runs in CI
 
-`@tesserix/admin-conformance@0.3.0` exists and runs on every push, in
+`@tesserix/admin-conformance@0.6.0` exists and runs on every push, in
 `.github/workflows/ci.yml`, against the declaration at `admin-conformance.json`
 in the repo root. This was the remaining half of #430; it is done, not
 blocked.
+
+**A green run is narrower than it looks.** CI's Postgres is a fresh, empty
+container, and the suite refuses to read an empty page as conformance — §8.9's
+entity row-shape check skips with *"the page came back empty, so no row shape
+was exercised"*. So the shape of an `entities` row is asserted by this repo's
+Go tests and by nothing in the suite. Seeding one user and one food before the
+step would turn that skip into a real check (#519).
 
 Two traps worth knowing before touching that step:
 
