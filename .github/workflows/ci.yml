@@ -38,6 +38,23 @@ jobs:
           go run ./cmd/migrate
           go test -race -p 1 -coverprofile=coverage.out ./...
 
+      # Fixture for the conformance step below (kora#519). CI's Postgres is a
+      # fresh, empty container, so before this the §8.9 row-shape checks for
+      # entities/users and entities/foods (and §4.5's empty-array check) had
+      # no rows to exercise and SILENTLY SKIPPED -- not the same thing as
+      # passing. One user and one food item, obviously fake, is enough.
+      #
+      # Runs after migrate (the tables must exist) and before the conformance
+      # step starts the API (rows must already be committed when it serves
+      # its first request). Deliberately not routed through cmd/seed: that
+      # seeds ~50 curated food items for local dev and has no notion of users
+      # at all -- more than this needs, and missing the half it needs most.
+      - name: Seed — conformance fixtures
+        run: |
+          psql "postgres://kora:kora_dev@localhost:5432/kora?sslmode=disable" \
+            -v ON_ERROR_STOP=1 \
+            -f api/internal/database/testdata/ci_conformance_seed.sql
+
       # Contract conformance (kora#430, contract §5).
       #
       # "A document alone produces exactly the drift it describes. The
