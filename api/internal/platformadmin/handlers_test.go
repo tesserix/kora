@@ -132,6 +132,41 @@ func TestAuditLogsClampsAnOversizedLimit(t *testing.T) {
 	assert.Equal(t, MaxLimit, src.got.Limit, "a ceiling here is the backstop for a fan-out asking for too much")
 }
 
+// TestAuditLogsClampsAnOversizedPage bounds the OTHER half of paging.
+//
+// limit has always been clamped; page was not, and Offset() is
+// (page-1)*limit — so page=10000000 asks Postgres for a two-billion-row
+// offset, which it services by scanning and discarding, on a shared
+// db-f1-micro.
+//
+// This is a QUERY COST bound, not an enumeration control: a caller that
+// wants every row still gets it by walking page=1,2,3. Enumeration is
+// bounded by rate limiting, which this surface does not have (#523).
+func TestAuditLogsClampsAnOversizedPage(t *testing.T) {
+	src := &stubAudit{}
+	call(t, http.MethodGet, "/admin/audit-logs", "/admin/audit-logs?page=10000000",
+		NewAuditHandler(src, nil).List)
+	assert.Equal(t, MaxPage, src.got.Page, "an unbounded page is an unbounded OFFSET")
+}
+
+// TestAPageWithinTheCapIsUntouched — the clamp must not disturb real paging.
+func TestAPageWithinTheCapIsUntouched(t *testing.T) {
+	src := &stubAudit{}
+	call(t, http.MethodGet, "/admin/audit-logs", "/admin/audit-logs?page=7&limit=50",
+		NewAuditHandler(src, nil).List)
+	assert.Equal(t, 7, src.got.Page)
+	assert.Equal(t, 300, src.got.Offset(), "(7-1)*50")
+}
+
+// TestTheClampedOffsetIsBounded states the property the cap exists for.
+func TestTheClampedOffsetIsBounded(t *testing.T) {
+	src := &stubAudit{}
+	call(t, http.MethodGet, "/admin/audit-logs", "/admin/audit-logs?page=99999999&limit=99999",
+		NewAuditHandler(src, nil).List)
+	assert.LessOrEqual(t, src.got.Offset(), (MaxPage-1)*MaxLimit,
+		"both halves clamped, so the offset has a ceiling")
+}
+
 // TestAuditLogsIgnoresAnUnparseableBound — a product that 400s on a parameter
 // another product tolerates takes the whole estate timeline down with it.
 func TestAuditLogsIgnoresAnUnparseableBound(t *testing.T) {

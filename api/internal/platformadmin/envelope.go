@@ -32,6 +32,18 @@ import (
 const (
 	DefaultLimit = 50
 	MaxLimit     = 200
+	// MaxPage bounds the other half of paging. Offset() is (page-1)*limit, so
+	// an unbounded page is an unbounded OFFSET — and Postgres services a large
+	// OFFSET by scanning and discarding, on an instance every service shares.
+	//
+	// 10,000 pages x MaxLimit is two million rows, far past any real directory,
+	// so no honest caller meets this ceiling.
+	//
+	// This is a QUERY COST bound and NOT an enumeration control. A caller that
+	// wants every row still gets it by walking page=1,2,3; what stops that is
+	// rate limiting, which this surface does not have (#523). Do not cite this
+	// constant as an access control.
+	MaxPage = 10_000
 )
 
 // Pagination is §4.1's block, verbatim. Page is 1-based.
@@ -84,7 +96,11 @@ func parseQuery(c *gin.Context, now time.Time) Query {
 	}
 	if v := strings.TrimSpace(c.Query("page")); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			q.Page = n
+			// Clamped, not refused — the same choice limit makes, for the
+			// reason this function never fails: a product that 400s on a
+			// parameter another product ignores takes the whole estate
+			// timeline down with it.
+			q.Page = min(n, MaxPage)
 		}
 	}
 	if v := strings.TrimSpace(c.Query("since_hours")); v != "" {
