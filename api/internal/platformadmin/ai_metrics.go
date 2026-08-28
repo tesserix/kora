@@ -45,8 +45,10 @@ type outcomesSection struct {
 	FirstTryRatePct *float64 `json:"first_try_rate_pct,omitempty"`
 }
 
-// windowSection is the [from, to) bound the response was computed over, so
-// the console never has to guess what "the window" meant for a given call.
+// windowSection is the [from, to] bound the response was computed over
+// (inclusive on both ends — the underlying queries use created_at <= to, not
+// <), so the console never has to guess what "the window" meant for a given
+// call.
 type windowSection struct {
 	From string `json:"from"`
 	To   string `json:"to"`
@@ -61,12 +63,14 @@ type userAIMetric struct {
 	Resolves       int64  `json:"resolves"`
 	Corrections    int64  `json:"corrections"`
 	BudgetRefusals int64  `json:"budget_refusals"`
-	// AICalls counts ai_usage_events rows, NOT actions: one user tap can
-	// emit several rows when a fallback leg is abandoned. It deliberately
-	// does not filter to outcome='ok' — mirroring user.ListForAdmin's
-	// ai_calls — because a user with AI calls and zero resolved foods is the
-	// most actionable row on this page, and a success-only count would erase
-	// them.
+	// AICalls counts ai_usage_events rows IN THIS SAME WINDOW, not actions
+	// and not a lifetime total: one user tap can emit several rows when a
+	// fallback leg is abandoned, and every other figure on this row is
+	// bounded by [window.from, window.to], so this one must be too. It
+	// deliberately does not filter to outcome='ok' — mirroring
+	// user.ListForAdmin's ai_calls — because a user with AI calls and zero
+	// resolved foods is the most actionable row on this page, and a
+	// success-only count would erase them.
 	AICalls int64 `json:"ai_calls"`
 	// LastActivityAt is nullable: it renders only when the user has an
 	// outcome at all.

@@ -136,10 +136,10 @@ func (r Rates) FirstTryRate() (float64, bool) {
 
 // Since reads the outcome counts from a lower bound with no upper bound.
 //
-// Kept as its own entry point (rather than asking every caller to pass a
-// zero upper bound) because routes.go's health probe and the backlog reads
-// above already call it, and #507's windowed read (Between) is additive to
-// that contract, not a replacement for it.
+// This is the package's existing public entry point, kept stable rather than
+// widened to take an upper bound: #507's Between is added ALONGSIDE it, not
+// in place of it, so any future caller that only ever wants "everything
+// since X" is not forced to pass a zero upper bound to get that.
 func (r Repository) Since(ctx context.Context, from time.Time) (Rates, error) {
 	return r.Between(ctx, from, time.Time{})
 }

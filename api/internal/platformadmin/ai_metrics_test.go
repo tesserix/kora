@@ -253,10 +253,10 @@ func TestListUserAIMetricsExcludesNullUserRows(t *testing.T) {
 	user := seedUser(t, txn, "ai-metrics-"+uuid.NewString()+"@kora.test", "Tester", "")
 	seedOutcome(t, txn, user, resolveoutcome.KindResolved, now)
 
-	// A failed call for the real user, and a NULL-user system call — neither
-	// outcome='ok' filtering nor user_id filtering should let the system row
-	// leak into the result.
-	seedAIUsageEvent(t, txn, &user, "error", now)
+	// A successful call for the real user, and a NULL-user system call — the
+	// user_id filter must keep the system row from leaking into the result
+	// as its own phantom user or inflating the real one's ai_calls.
+	seedAIUsageEvent(t, txn, &user, "ok", now)
 	seedAIUsageEvent(t, txn, nil, "ok", now)
 
 	result, err := repo.ListUserAIMetrics(context.Background(), Query{Limit: 50, Page: 1})
@@ -265,9 +265,83 @@ func TestListUserAIMetricsExcludesNullUserRows(t *testing.T) {
 	require.Len(t, result.Rows, 1, "the NULL-user row must not appear as its own phantom user")
 	assert.Equal(t, int64(1), result.Total)
 	assert.Equal(t, user, result.Rows[0].UserID)
-	// ai_calls must include the FAILED call — it is not filtered to
-	// outcome='ok' — and must not be inflated by the NULL-user row.
-	assert.Equal(t, int64(1), result.Rows[0].AICalls)
+	assert.Equal(t, int64(1), result.Rows[0].AICalls, "must not be inflated by the NULL-user row")
+}
+
+// TestListUserAIMetricsAICallsIncludesFailedCalls is its own test, split out
+// from TestListUserAIMetricsExcludesNullUserRows: that test asserts NULL-user
+// exclusion, and hiding the outcome!='ok' inclusion rule behind it means
+// whichever regression fires first masks the other.
+//
+// ai_calls deliberately does NOT filter to outcome='ok' — a user with AI
+// calls and zero resolved foods is the most actionable row on this page, and
+// a success-only count would erase them (mirrors user.ListForAdmin).
+func TestListUserAIMetricsAICallsIncludesFailedCalls(t *testing.T) {
+	txn := tx(t, testDB(t))
+	repo := repoOn(txn)
+	now := time.Now().UTC()
+
+	user := seedUser(t, txn, "ai-metrics-failed-"+uuid.NewString()+"@kora.test", "Tester", "")
+	seedOutcome(t, txn, user, resolveoutcome.KindResolved, now)
+	seedAIUsageEvent(t, txn, &user, "error", now)
+
+	result, err := repo.ListUserAIMetrics(context.Background(), Query{Limit: 50, Page: 1})
+	require.NoError(t, err)
+
+	require.Len(t, result.Rows, 1)
+	assert.Equal(t, int64(1), result.Rows[0].AICalls, "a failed call must still be counted")
+}
+
+// TestListUserAIMetricsAICallsAreWindowed — every other column on the row
+// obeys [from, to], and ai_calls must too: an ai_usage_events row outside
+// the requested window must not be counted, or a console reading
+// "attempts: 2, ai_calls: 900" alongside "window: {from, to}" would read 900
+// as happening IN that window when it is a lifetime total.
+func TestListUserAIMetricsAICallsAreWindowed(t *testing.T) {
+	txn := tx(t, testDB(t))
+	repo := repoOn(txn)
+	now := time.Now().UTC()
+
+	user := seedUser(t, txn, "ai-metrics-windowed-"+uuid.NewString()+"@kora.test", "Tester", "")
+	seedOutcome(t, txn, user, resolveoutcome.KindResolved, now)
+	seedAIUsageEvent(t, txn, &user, "ok", now)                    // in window
+	seedAIUsageEvent(t, txn, &user, "ok", now.Add(-48*time.Hour)) // out of window
+
+	result, err := repo.ListUserAIMetrics(context.Background(), Query{
+		Limit: 50, Page: 1, From: now.Add(-time.Hour),
+	})
+	require.NoError(t, err)
+
+	require.Len(t, result.Rows, 1)
+	assert.Equal(t, int64(1), result.Rows[0].AICalls, "the out-of-window call must not be counted")
+}
+
+// TestListUserAIMetricsAttributesEachKindToItsOwnColumn seeds one row of
+// each of resolved, alias, budget, plus a fourth kind that belongs in none
+// of the three named columns — so a swapped or misspelled FILTER predicate
+// (e.g. alias and budget transposed) fails this test rather than passing
+// silently, which every prior test seeding only KindResolved could not
+// catch.
+func TestListUserAIMetricsAttributesEachKindToItsOwnColumn(t *testing.T) {
+	txn := tx(t, testDB(t))
+	repo := repoOn(txn)
+	now := time.Now().UTC()
+
+	user := seedUser(t, txn, "ai-metrics-attrib-"+uuid.NewString()+"@kora.test", "Tester", "")
+	seedOutcome(t, txn, user, resolveoutcome.KindResolved, now)
+	seedOutcome(t, txn, user, resolveoutcome.KindAlias, now)
+	seedOutcome(t, txn, user, resolveoutcome.KindBudget, now)
+	seedOutcome(t, txn, user, resolveoutcome.KindNoMatch, now) // counts toward attempts only
+
+	result, err := repo.ListUserAIMetrics(context.Background(), Query{Limit: 50, Page: 1})
+	require.NoError(t, err)
+
+	require.Len(t, result.Rows, 1)
+	row := result.Rows[0]
+	assert.Equal(t, int64(4), row.Attempts, "every kind counts toward attempts")
+	assert.Equal(t, int64(1), row.Resolves, "kind='resolved' only")
+	assert.Equal(t, int64(1), row.Corrections, "kind='alias' only")
+	assert.Equal(t, int64(1), row.BudgetRefusals, "kind='budget' only")
 }
 
 // TestListUserAIMetricsPagesInsideTheQuery — total must be the full,

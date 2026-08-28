@@ -27,8 +27,9 @@ type UserAIMetricsRow struct {
 	// a pointer anyway because it comes straight off a SQL max(), which the
 	// driver represents as nullable regardless.
 	LastActivityAt *time.Time
-	// AICalls counts ai_usage_events rows for this user, NOT filtered to
-	// outcome='ok'. See ListUserAIMetrics's doc comment for why.
+	// AICalls counts ai_usage_events rows for this user IN THE SAME WINDOW as
+	// every other column on this row, NOT filtered to outcome='ok'. See
+	// ListUserAIMetrics's doc comment for why.
 	AICalls int64
 }
 
@@ -62,7 +63,11 @@ type UserAIMetricsResult struct {
 // one phantom "user" (SQL treats NULL as a single GROUP BY bucket), and with
 // #97 alone that bucket runs to the thousands.
 //
-// ai_calls is deliberately NOT filtered to outcome='ok', mirroring
+// ai_calls is windowed by the SAME [from, to] bound as the driving
+// aggregate — the response reports the window back (kora#507: "two
+// sections, one window parameter"), so every count on a row must be honest
+// about being IN that window, not a lifetime total sitting next to windowed
+// figures. It is still deliberately NOT filtered to outcome='ok', mirroring
 // user.ListForAdmin's ai_calls column: it counts calls, not actions, because
 // one user tap can emit several rows when a fallback leg is abandoned, and a
 // success-only count would make a user who tried and failed look like a user
@@ -113,13 +118,17 @@ func (r Repository) ListUserAIMetrics(ctx context.Context, q Query) (UserAIMetri
 		LEFT JOIN (
 			SELECT user_id, count(*) AS ai_calls
 			FROM ai_usage_events
-			WHERE user_id IS NOT NULL
+			WHERE %s
 			GROUP BY user_id
 		) a ON a.user_id = o.user_id
 		ORDER BY o.attempts DESC, o.user_id
-		LIMIT ? OFFSET ?`, where)
+		LIMIT ? OFFSET ?`, where, where)
 
-	listArgs := append(append([]any{}, args...), q.Limit, q.Offset())
+	// args is used twice in listSQL — once for the driving aggregate's WHERE,
+	// once for the ai_usage_events join's — so the arg slice must repeat
+	// the same window bounds in the same order before the trailing
+	// LIMIT/OFFSET pair.
+	listArgs := append(append(append([]any{}, args...), args...), q.Limit, q.Offset())
 
 	var rows []UserAIMetricsRow
 	if err := r.db.WithContext(ctx).Raw(listSQL, listArgs...).Scan(&rows).Error; err != nil {
