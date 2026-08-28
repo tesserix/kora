@@ -13,6 +13,18 @@ GoogleService-Info.plist
 # untracked makes it an invisible build input — the cloud builder never sees it
 # and the build fails for a reason nothing in the repo explains.
 !apps/mobile/GoogleService-Info.plist
+# The Android half stays UNTRACKED, unlike the iOS plist above.
+#
+# Both files carry a Google api_key. The plist's survives the secret scanner
+# only because gitleaks' gcp-api-key rule matches a JSON "key": "value" and not
+# the plist's XML — it passes by FORMAT, not by policy. Committing
+# google-services.json put a greppable Google API key in a public repo and the
+# scanner correctly caught it; silencing that would have traded a real
+# detection for convenience.
+#
+# It is not an invisible build input either: EAS supplies it as a file-type
+# environment variable (GOOGLE_SERVICES_JSON), which app.config.js reads. See
+# there for the local-development fallback.
 
 # Go
 api/bin/

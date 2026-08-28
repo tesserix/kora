@@ -1,0 +1,48 @@
+name: Android Release
+
+# Mirrors ios-release.yml deliberately: the two platforms are cut the same way,
+# by hand or by tag, never on every push. PR CI does NOT build either platform
+# natively — it lints, typechecks and tests — so this is the only place an
+# Android artifact is produced.
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: EAS build profile
+        type: choice
+        options: [production, preview]
+        default: production
+      submit:
+        description: Submit to the Play Console internal track when the build succeeds
+        type: boolean
+        default: false
+  push:
+    tags: ["v*"]
+
+# Serialised, like the iOS release: two concurrent builds would race for the
+# same remote versionCode and the loser would be rejected at submit time.
+concurrency:
+  group: android-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    uses: tesserix/tesserix-workflows/.github/workflows/expo-eas-build.yml@v2.1.0
+    with:
+      working_directory: apps/mobile
+      install_directory: apps/mobile
+      lockfile_path: apps/mobile/package-lock.json
+      node_version: 22.19.0
+      package_manager: npm
+      platform: android
+      profile: ${{ github.event_name == 'workflow_dispatch' && inputs.profile || 'production' }}
+      # Submit defaults to FALSE, unlike iOS. The Play Console app and its
+      # service-account credential do not exist yet, so an automatic submit
+      # would fail the workflow after a successful build and make a working
+      # build look broken. Flip the default once the internal track is live.
+      auto_submit: ${{ github.event_name == 'workflow_dispatch' && inputs.submit }}
+    secrets:
+      expo_token: ${{ secrets.EXPO_TOKEN }}
