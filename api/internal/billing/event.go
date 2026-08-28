@@ -29,7 +29,14 @@ type Event struct {
 	CostUSDEst float64    `gorm:"column:cost_usd_est" json:"cost_usd_est"`
 	// ok | error | timeout. Failures are recorded too since #81, so any cost
 	// query that does not filter this will OVER-count.
-	Outcome   string    `json:"outcome"`
+	Outcome string `json:"outcome"`
+	// Estimated is true when TokensIn/TokensOut are a proxy computed from
+	// request/response text rather than a count the provider reported (see
+	// ai.Usage.Estimated for why: kora#376 found Gemini's embedding response
+	// has no usage metadata at all). Defaults to false via migration 000060,
+	// which is correct for every row written before it — they were either
+	// provider-reported or a genuine zero-token failure.
+	Estimated bool      `json:"estimated"`
 	CreatedAt time.Time `json:"created_at"`
 }
 

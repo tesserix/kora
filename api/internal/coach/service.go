@@ -421,6 +421,11 @@ func (s *Service) askAgent(ctx context.Context, userID uuid.UUID, userPrompt str
 		TokensIn:  run.Usage.InputTokens,
 		TokensOut: run.Usage.OutputTokens,
 		LatencyMs: int(time.Since(started).Milliseconds()),
+		// The A2A envelope tells us when its own token counts are a guess
+		// (agents.Usage.Estimated, read in gateway.go); ai.Usage has to carry
+		// that through instead of discarding it, or a downstream agent's
+		// estimate would masquerade as a measurement once it lands here.
+		Estimated: run.Usage.Estimated,
 	}
 	if err != nil {
 		// A failed run still consumed gateway quota, so it is metered like any

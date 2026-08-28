@@ -508,6 +508,14 @@ func (p GeminiProvider) Decompose(ctx context.Context, dish string) ([]ai.Ingred
 // OutputDimensionality is set explicitly because the model's native output
 // is wider than 768 dims — without it, values would not match the index's
 // vector(768) column.
+//
+// kora#376: genai.EmbedContentResponse carries no UsageMetadata (unlike
+// every other Gemini response type above) — its only usage-shaped field,
+// Metadata.BillableCharacterCount, is documented "Gemini Enterprise Agent
+// Platform only" and is nil on the plain Gemini API this provider talks to.
+// There is no measured token count to read, so TokensIn is ESTIMATED from
+// the input text via estimateEmbedTokens, and Usage.Estimated is set so
+// this never gets mistaken for a provider-reported figure downstream.
 func (p GeminiProvider) Embed(ctx context.Context, text string) ([]float32, ai.Usage, error) {
 	start := time.Now()
 	dim := embedOutputDimensionality
@@ -520,6 +528,18 @@ func (p GeminiProvider) Embed(ctx context.Context, text string) ([]float32, ai.U
 		CallType:  callTypeEmbed,
 		LatencyMs: int(time.Since(start).Milliseconds()),
 	}
+	// Guarded on resp, exactly as every other method in this file guards its
+	// UsageMetadata read. A call that never produced a response may have
+	// failed before the model saw the text — at DNS, at auth, at the network
+	// — and charging it an estimate derived purely from OUR input would
+	// invent cost for work that may not have happened. The existing 2,122
+	// error rows for this model carry zero tokens; that meaning is preserved
+	// rather than silently rewritten. Over-counting failures is the mirror
+	// of the under-count this change fixes, not an improvement on it.
+	if resp != nil {
+		usage.TokensIn = estimateEmbedTokens(text)
+		usage.Estimated = true
+	}
 	if err != nil {
 		return nil, usage, fmt.Errorf("gemini: embed: %w", err)
 	}
@@ -527,6 +547,27 @@ func (p GeminiProvider) Embed(ctx context.Context, text string) ([]float32, ai.U
 		return nil, usage, fmt.Errorf("gemini: embed: no embeddings in response")
 	}
 	return resp.Embeddings[0].Values, usage, nil
+}
+
+// estimateEmbedTokens approximates the input token count for an embedding
+// call as len(text)/4, rounded up. ~4 characters per token is the standard
+// rough heuristic for this tokenizer family (SentencePiece-style, as used
+// by Gemini) — an ASSUMPTION, not a measured fact, because the embedding
+// response gives us nothing to measure against (see Embed's doc comment).
+// It never returns 0 for non-empty input: a non-empty call that still costs
+// money must never report zero tokens, which is precisely the bug being
+// fixed here.
+func estimateEmbedTokens(text string) int {
+	n := len([]rune(text))
+	if n == 0 {
+		return 0
+	}
+	const charsPerToken = 4
+	tokens := (n + charsPerToken - 1) / charsPerToken // round up
+	if tokens < 1 {
+		tokens = 1
+	}
+	return tokens
 }
 
 // Transcribe converts spoken audio to text using the multimodal Flash model.

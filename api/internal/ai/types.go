@@ -143,6 +143,16 @@ type Usage struct {
 	// recorded too, which means cost queries MUST filter on this or they will
 	// over-count instead of the old under-count.
 	Outcome string
+	// Estimated marks TokensIn/TokensOut as a proxy computed from the request
+	// or response text rather than a count the provider reported. Some call
+	// shapes (Gemini's embedding response has no UsageMetadata) give us no
+	// measured token count at all, so the alternative to estimating is
+	// recording zero — which is indistinguishable from "this call cost
+	// nothing" and is exactly the defect kora#376 found. True here means
+	// "trust this number as an order of magnitude, not as billing-grade
+	// precision"; false means the provider itself reported the count. Cost
+	// and usage queries should treat estimated rows as approximate.
+	Estimated bool
 }
 
 // Usage.Outcome values.

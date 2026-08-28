@@ -110,6 +110,31 @@ func TestAsk_MetersTheAgentRunAgainstTheUsersBudget(t *testing.T) {
 	require.Equal(t, ai.OutcomeOK, meter.records[0].Outcome)
 }
 
+// TestAsk_PreservesEstimatedFlagFromAgentUsage pins kora#376's agents-side
+// fix: the A2A envelope already tells us when its token counts are a guess
+// (agents.Usage.Estimated, read in gateway.go), but that used to be dropped
+// on the floor when mapping onto ai.Usage in askAgent — ai.Usage had no
+// field to carry it. Now it must survive into what gets metered.
+func TestAsk_PreservesEstimatedFlagFromAgentUsage(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	g, meter := askFixture(t)
+
+	runner := &fakeRunner{run: agents.Run{
+		Agent: "nutrition-coach",
+		State: "completed",
+		Text:  "You have 55g protein to go.",
+		Usage: agents.Usage{InputTokens: 120, OutputTokens: 40, Estimated: true},
+	}}
+	svc := NewService(g, &fakeProvider{}, meter, nil).WithAgents(runner)
+
+	_, err := svc.Ask(context.Background(), userID, time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC), time.UTC, "how am I doing?")
+
+	require.NoError(t, err)
+	require.Len(t, meter.records, 1)
+	require.True(t, meter.records[0].Estimated, "the agent's own Estimated flag must survive the ai.Usage mapping")
+}
+
 func TestAsk_FailsClosedWhenTheConfiguredAgentFails(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db, 2000, 120)

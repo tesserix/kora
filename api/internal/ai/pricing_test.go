@@ -28,3 +28,17 @@ func TestEstimateCostUSDNVIDIAFallback(t *testing.T) {
 		t.Fatalf("nvidia cost = %v, want 1.20", got)
 	}
 }
+
+// TestEstimateCostUSDGeminiEmbeddingNonZeroWhenMetered pins the actual
+// production defect kora#376 found: gemini-embedding-001 is priced correctly
+// in pricing.go ({inPerM: 0.15}) — the bug was upstream, GeminiProvider.Embed
+// recording TokensIn: 0 for every successful call regardless of price. This
+// asserts the pricing side is not the thing that needs fixing: once a caller
+// supplies a real TokensIn (as the estimator in providers/gemini.go now
+// does), cost comes out non-zero with no change to this file.
+func TestEstimateCostUSDGeminiEmbeddingNonZeroWhenMetered(t *testing.T) {
+	got := EstimateCostUSD(Usage{Model: "gemini-embedding-001", TokensIn: 4, CallType: "embed", Estimated: true})
+	if got <= 0 {
+		t.Fatalf("gemini-embedding-001 cost = %v, want > 0 once TokensIn is populated", got)
+	}
+}
