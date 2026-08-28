@@ -1,0 +1,46 @@
+-- Give the outcome-rate rollup an index it can actually seek (kora#517).
+--
+-- resolveoutcome.Between -- which backs /v1/admin/ai-metrics' outcomes
+-- section, and Since through it -- range-filters created_at and groups by
+-- kind:
+--
+--   SELECT kind, count(*) FROM food_resolution_outcomes
+--   WHERE created_at >= ? AND created_at <= ? GROUP BY kind
+--
+-- #459 created ix_fro_kind_created (kind, created_at) FOR THIS QUERY -- its
+-- comment says "serves the rate and the per-kind rollups" -- but the column
+-- order cannot serve it. created_at is the RANGE predicate and kind is the
+-- grouping key, so a kind-leading index offers no seek: the cost grew with
+-- the size of the table rather than the size of the window.
+--
+-- This is a SWAP, not an addition. The index count is unchanged, which
+-- matters: food_resolution_outcomes takes a row on every resolve attempt and
+-- is the hottest write path in the product, so a fourth index would be paid
+-- for on every meal logged.
+--
+-- Measured on 200k rows before writing this, for a 24h window:
+--
+--   before  2704 shared buffers, parallel seq scan
+--   after     31 shared buffers, index-only scan (1440 rows read)
+--
+-- Dropping ix_fro_kind_created is the reviewable half. Every query against
+-- this table was enumerated first, and none needs it:
+--
+--   * WHERE id = ?                         -> primary key (inbox actions)
+--   * WHERE user_id = ?                    -> ix_fro_user_created (export)
+--   * kind IN (...) AND status IN (...)    -> ix_fro_triage, a PARTIAL index
+--                                             already restricted to exactly
+--                                             those kinds (inbox, backlog)
+--   * created_at range GROUP BY kind       -> this index
+--   * created_at range GROUP BY user_id    -> ix_fro_user_created
+--
+-- pg_stat_user_indexes confirmed it: after exercising all of them,
+-- ix_fro_kind_created had idx_scan = 0 while ix_fro_triage had 12. Re-checked
+-- after the drop -- the triage count still index-only-scans ix_fro_triage.
+--
+-- Not CONCURRENTLY: no migration in this directory uses it, golang-migrate
+-- runs each file in a transaction, and CREATE INDEX CONCURRENTLY cannot run
+-- inside one.
+DROP INDEX IF EXISTS ix_fro_kind_created;
+
+CREATE INDEX ix_fro_created_kind ON food_resolution_outcomes (created_at, kind);

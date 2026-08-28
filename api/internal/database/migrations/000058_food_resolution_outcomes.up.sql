@@ -96,7 +96,10 @@ ALTER TABLE food_resolution_outcomes ADD CONSTRAINT food_resolution_outcomes_tie
 CREATE INDEX ix_fro_triage ON food_resolution_outcomes (status, created_at)
     WHERE kind IN ('below_floor','no_match');
 
--- Serves the rate and the per-kind rollups.
+-- Intended to serve the rate and the per-kind rollups. It does NOT: the rate
+-- query range-filters created_at and groups by kind, so a kind-leading index
+-- offers no seek. Replaced by ix_fro_created_kind in 000059 (#517). Left here
+-- as written so the migration history stays truthful.
 CREATE INDEX ix_fro_kind_created ON food_resolution_outcomes (kind, created_at);
 
 -- Serves the export's user scoping and the cascade.
