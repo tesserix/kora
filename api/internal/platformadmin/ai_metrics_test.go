@@ -32,9 +32,16 @@ type stubUserMetrics struct {
 	result UserAIMetricsResult
 	err    error
 	got    Query
+	// called records whether ListUserAIMetrics was invoked at all — the
+	// sections=outcomes tests assert on this, not just on the response body,
+	// because a filter-after-fetch implementation (call it, then drop the
+	// result) would produce an identical response while still running the
+	// expensive, sensitive query the issue says must not run.
+	called bool
 }
 
 func (s *stubUserMetrics) ListUserAIMetrics(_ context.Context, q Query) (UserAIMetricsResult, error) {
+	s.called = true
 	s.got = q
 	return s.result, s.err
 }
@@ -221,6 +228,103 @@ func TestAIMetricsUsersFailureIsFiveHundred(t *testing.T) {
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
 	assert.Equal(t, "internal_error", decode(t, rec)["error"])
 	assert.NotContains(t, rec.Body.String(), "db down")
+}
+
+// ---------- sections=outcomes (#525) ----------
+
+// TestAIMetricsSectionsOutcomesSkipsUserQuery is the actual requirement: not
+// just that `users`/`pagination` are absent from the response, but that
+// ListUserAIMetrics never runs. Asserting only on the output would also
+// pass a filter-after-fetch implementation, which is the exact defect this
+// issue exists to rule out — a narrower principal must cause a narrower
+// QUERY, never a narrower serialization.
+func TestAIMetricsSectionsOutcomesSkipsUserQuery(t *testing.T) {
+	users := &stubUserMetrics{result: UserAIMetricsResult{Total: 1, Rows: []UserAIMetricsRow{{UserID: uuid.New()}}}}
+	h := newAIMetricsHandler(&stubRates{}, users)
+
+	rec := call(t, http.MethodGet, "/admin/ai-metrics", "/admin/ai-metrics?sections=outcomes", h.Metrics)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.False(t, users.called, "ListUserAIMetrics must not run at all for sections=outcomes")
+}
+
+// TestAIMetricsSectionsOutcomesOmitsUsersAndPagination asserts on the raw
+// JSON bytes, per the brief, so `"users"` and `"pagination"` really are
+// absent keys and not e.g. `"users":[]` with a zeroed pagination block —
+// which would falsely assert zero active users rather than "not asked".
+func TestAIMetricsSectionsOutcomesOmitsUsersAndPagination(t *testing.T) {
+	h := newAIMetricsHandler(&stubRates{}, &stubUserMetrics{})
+
+	rec := call(t, http.MethodGet, "/admin/ai-metrics", "/admin/ai-metrics?sections=outcomes", h.Metrics)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	body := rec.Body.String()
+	assert.NotContains(t, body, `"users"`)
+	assert.NotContains(t, body, `"pagination"`)
+
+	data := decode(t, rec)["data"].(map[string]any)
+	assert.Contains(t, data, "window")
+	assert.Contains(t, data, "outcomes")
+	assert.NotContains(t, data, "users")
+}
+
+// TestAIMetricsSectionsUnrecognisedOrAbsentMatchesDefault proves both
+// "no sections param" and "an unrecognised value" produce the exact same,
+// byte-identical response as each other — and by extension leave today's
+// console-facing default response untouched. parseQuery's own posture is
+// that a value another product might send but this one doesn't recognise
+// must never 400 or silently change behaviour.
+func TestAIMetricsSectionsUnrecognisedOrAbsentMatchesDefault(t *testing.T) {
+	users := UserAIMetricsResult{Total: 1, Rows: []UserAIMetricsRow{{UserID: uuid.New(), Attempts: 2}}}
+
+	absent := newAIMetricsHandler(&stubRates{}, &stubUserMetrics{result: users})
+	recAbsent := call(t, http.MethodGet, "/admin/ai-metrics", "/admin/ai-metrics", absent.Metrics)
+	require.Equal(t, http.StatusOK, recAbsent.Code)
+
+	unrecognised := newAIMetricsHandler(&stubRates{}, &stubUserMetrics{result: users})
+	recUnrecognised := call(t, http.MethodGet, "/admin/ai-metrics", "/admin/ai-metrics?sections=banana", unrecognised.Metrics)
+	require.Equal(t, http.StatusOK, recUnrecognised.Code)
+
+	assert.JSONEq(t, recAbsent.Body.String(), recUnrecognised.Body.String())
+	assert.Contains(t, recUnrecognised.Body.String(), `"users"`)
+	assert.Contains(t, recUnrecognised.Body.String(), `"pagination"`)
+}
+
+// TestAIMetricsSectionsOutcomesBlockMatchesDefaultPath proves the aggregate
+// itself — all ten zero-filled kinds, first_try_rate_pct's presence rule —
+// is identical whether or not the per-user section was requested. There is
+// one implementation of the aggregate (toOutcomesSection); this guards
+// against a second one drifting from it.
+func TestAIMetricsSectionsOutcomesBlockMatchesDefaultPath(t *testing.T) {
+	rates := resolveoutcome.Rates{
+		Attempts: 5,
+		ByKind:   map[resolveoutcome.Kind]int64{resolveoutcome.KindResolved: 3, resolveoutcome.KindError: 2},
+		FirstTry: 3,
+	}
+
+	full := newAIMetricsHandler(&stubRates{rates: rates}, &stubUserMetrics{})
+	recFull := call(t, http.MethodGet, "/admin/ai-metrics", "/admin/ai-metrics", full.Metrics)
+	require.Equal(t, http.StatusOK, recFull.Code)
+
+	narrow := newAIMetricsHandler(&stubRates{rates: rates}, &stubUserMetrics{})
+	recNarrow := call(t, http.MethodGet, "/admin/ai-metrics", "/admin/ai-metrics?sections=outcomes", narrow.Metrics)
+	require.Equal(t, http.StatusOK, recNarrow.Code)
+
+	fullOutcomes := decode(t, recFull)["data"].(map[string]any)["outcomes"]
+	narrowOutcomes := decode(t, recNarrow)["data"].(map[string]any)["outcomes"]
+	assert.Equal(t, fullOutcomes, narrowOutcomes)
+}
+
+// TestAIMetricsSectionsOutcomesEmptyWindowOmitsFirstTryRate is
+// TestAIMetricsEmptyWindowOmitsFirstTryRate's counterpart on the narrowed
+// path: the absent-vs-zero distinction #507 exists for must hold there too.
+func TestAIMetricsSectionsOutcomesEmptyWindowOmitsFirstTryRate(t *testing.T) {
+	rates := &stubRates{rates: resolveoutcome.Rates{ByKind: map[resolveoutcome.Kind]int64{}}}
+	h := newAIMetricsHandler(rates, &stubUserMetrics{})
+
+	rec := call(t, http.MethodGet, "/admin/ai-metrics", "/admin/ai-metrics?sections=outcomes", h.Metrics)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.NotContains(t, rec.Body.String(), "first_try_rate_pct",
+		"an empty window must not render the field at all, not even as 0.0, on the narrowed path either")
 }
 
 // ---------- repository tests (live database) ----------
