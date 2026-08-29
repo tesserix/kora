@@ -34,6 +34,7 @@ import (
 
 	"github.com/tesserix/kora/api/internal/ai"
 	"github.com/tesserix/kora/api/internal/ai/providers"
+	"github.com/tesserix/kora/api/internal/auth"
 	"github.com/tesserix/kora/api/internal/config"
 	"github.com/tesserix/kora/api/internal/database"
 	"github.com/tesserix/kora/api/internal/nutrition"
@@ -93,6 +94,31 @@ func evalProvider(t *testing.T, cfg config.Config) ai.Provider {
 		}
 		return gemini
 	}
+}
+
+// evalContext returns the context the harness makes provider calls with.
+//
+// KORA_EVAL_END_USER_TOKEN carries a Firebase ID token, which the gateway
+// REQUIRES on the conversation, structured and default sections of the kora-ai
+// route (AgentgatewayPolicy/kora-user-auth, jwtAuthentication Strict). Without
+// it every identify, decompose and coach call through the gateway returns
+// 401 "authentication failure: no bearer token found" — so a gateway arm for
+// anything other than embeddings cannot run without one.
+//
+// Mint one against the project's Firebase Web API key; it is valid ~1h, which
+// is far longer than a 50-phrase run. Nothing is persisted here: the token is
+// read from the environment and never written to the recorded output.
+func evalContext(t *testing.T) context.Context {
+	ctx := context.Background()
+	token := os.Getenv("KORA_EVAL_END_USER_TOKEN")
+	if token == "" {
+		if os.Getenv("KORA_EVAL_PROVIDER") == "gateway" {
+			t.Log("KORA_EVAL_PROVIDER=gateway with no KORA_EVAL_END_USER_TOKEN: " +
+				"non-embedding calls will 401 (see AgentgatewayPolicy/kora-user-auth)")
+		}
+		return ctx
+	}
+	return auth.WithVerifiedToken(ctx, token)
 }
 
 func loadChatCases(t *testing.T) []chatCase {
