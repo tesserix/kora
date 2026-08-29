@@ -52,9 +52,15 @@ func TestSchema_TwoUsersMayBothHaveNoHandle(t *testing.T) {
 
 // Two REAL signups must coexist. Every other schema test here seeds with raw
 // SQL, which leaves a true NULL -- but UpsertByFirebaseUID goes through GORM
-// Create, which writes '' for untouched string fields (see the AppleRefreshToken
-// comment in user/model.go). '' IS NOT NULL, so an index predicate that only
-// excludes NULL rejects the second signup and takes down account creation.
+// Create, which writes the empty string for untouched string fields (see the
+// AppleRefreshToken comment in user/model.go). The empty string IS NOT NULL, so
+// an index predicate that only excludes NULL rejects the second signup and
+// takes down account creation.
+//
+// Spelled out in words rather than as a doubled-quote SQL literal on purpose:
+// gofmt reformats doc comments, and it rewrites a doubled ASCII quote into a
+// typographic close-quote -- which would turn the one detail this comment
+// exists to convey into a smart quote.
 func TestSchema_TwoRealSignupsCoexist(t *testing.T) {
 	db := testDB(t)
 	repo := user.NewRepository(db)

@@ -60,7 +60,9 @@ func TestOnboardingWeighInBackfillOnlyTargetsEntrylessProfiles(t *testing.T) {
 		 VALUES (?, ?, ?, ?, 'manual')`,
 		alreadyHasEntry, createdAt, 99.0, createdAt.Format("2006-01-02"),
 	).Error)
-	t.Cleanup(func() { db.Exec("DELETE FROM weight_entries WHERE user_id IN (?, ?, ?)", withWeightNoEntry, withZeroWeight, alreadyHasEntry) })
+	t.Cleanup(func() {
+		db.Exec("DELETE FROM weight_entries WHERE user_id IN (?, ?, ?)", withWeightNoEntry, withZeroWeight, alreadyHasEntry)
+	})
 
 	require.NoError(t, db.Exec(runBackfill).Error)
 

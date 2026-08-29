@@ -177,9 +177,9 @@ func (m *stubMeter) WithinBudget(ctx context.Context, userID uuid.UUID) (bool, e
 var _ ai.Meter = (*stubMeter)(nil)
 
 type stubNutritionReferences struct {
-	items  []NutritionReference
-	usage  ai.Usage
-	err    error
+	items    []NutritionReference
+	usage    ai.Usage
+	err      error
 	query    string
 	locale   nutrition.Locale
 	excluded []string
