@@ -8,7 +8,8 @@
 //
 // Point KORA_EVAL_DATASET at a dir of chat.jsonl/photos.jsonl (defaults to
 // ../../testdata/eval using chat.sample.jsonl when chat.jsonl is absent).
-// KORA_EVAL_PROVIDER=gemini|fallback selects the provider under test for A/B.
+// KORA_EVAL_PROVIDER=gemini|gateway|fallback selects the provider under test for
+// A/B. Use "gateway" to measure the path production actually serves.
 //
 // NOTE: this is package ai_test (external test package), not package ai.
 // package ai/providers imports package ai (for ai.Guess/ai.Usage), so a
@@ -51,19 +52,47 @@ func requireEval(t *testing.T) {
 	}
 }
 
+// evalProvider builds the provider under test from KORA_EVAL_PROVIDER.
+//
+// "gateway" is the one that matters for release decisions: production runs with
+// AI_GATEWAY_ENABLED=true and config.go refuses to boot without it, so the
+// direct Gemini path this harness used to be limited to is NOT what serves
+// users. Measuring gemini and reporting it as the production quality number
+// measures a path nobody is on. Run gemini and gateway over the same dataset to
+// get the A/B the gateway rollout was supposed to be gated on.
+//
+// The gateway is in-cluster (ClusterIP), so a run from a laptop needs a
+// port-forward and AI_GATEWAY_BASE_URL pointed at it:
+//
+//	kubectl -n agentgateway-system port-forward svc/kora-ai 8080:8080
+//	AI_GATEWAY_BASE_URL=http://localhost:8080/v1 \
+//	AI_GATEWAY_API_KEY=$(kubectl -n kora get secret \
+//	  kora-ai-gateway-client-credentials -o jsonpath='{.data.kora-api}' | base64 -d) \
+//	KORA_EVAL=1 KORA_EVAL_PROVIDER=gateway \
+//	  go test -tags eval ./internal/ai/ -run TestEvalChat -v
+//
+// Each branch constructs only the provider it returns. Building Gemini
+// unconditionally used to make a gateway or fallback run impossible without a
+// Gemini key it never called.
 func evalProvider(t *testing.T, cfg config.Config) ai.Provider {
-	ctx := context.Background()
-	gemini, err := providers.NewGeminiProvider(ctx, cfg.GeminiAPIKey)
-	if err != nil {
-		t.Fatalf("gemini init: %v", err)
-	}
-	if os.Getenv("KORA_EVAL_PROVIDER") == "fallback" {
+	switch os.Getenv("KORA_EVAL_PROVIDER") {
+	case "gateway":
+		if cfg.AIGatewayBaseURL == "" || cfg.AIGatewayAPIKey == "" {
+			t.Skip("KORA_EVAL_PROVIDER=gateway but AI_GATEWAY_BASE_URL/AI_GATEWAY_API_KEY are unset")
+		}
+		return providers.NewAgentGatewayProvider(cfg.AIGatewayAPIKey, cfg.AIGatewayBaseURL, cfg.AIGatewayModel)
+	case "fallback":
 		if cfg.OpenAIAPIKey == "" {
 			t.Skip("KORA_EVAL_PROVIDER=fallback but no OPENAI_API_KEY set")
 		}
 		return providers.NewOpenAIProvider(cfg.OpenAIAPIKey, cfg.OpenAIBaseURL, cfg.OpenAIModel, cfg.OpenAIJSONObject)
+	default:
+		gemini, err := providers.NewGeminiProvider(context.Background(), cfg.GeminiAPIKey)
+		if err != nil {
+			t.Fatalf("gemini init: %v", err)
+		}
+		return gemini
 	}
-	return gemini
 }
 
 func loadChatCases(t *testing.T) []chatCase {
