@@ -24,7 +24,6 @@ package ai_test
 
 import (
 	"bufio"
-	"context"
 	"encoding/json"
 	"math"
 	"os"
@@ -48,7 +47,7 @@ func TestRecordGuesses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config: %v", err)
 	}
-	ctx := context.Background()
+	ctx := evalContext(t)
 
 	// The primary honours KORA_EVAL_PROVIDER (see evalProvider in eval_test.go),
 	// so this can record through the agent gateway — the provider production
