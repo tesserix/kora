@@ -396,6 +396,7 @@ func (p OpenAIProvider) GenerateText(ctx context.Context, systemPrompt, userProm
 	if resp != nil {
 		usage.TokensIn = int(resp.Usage.PromptTokens)
 		usage.TokensOut = int(resp.Usage.CompletionTokens)
+		usage.Model = resolvedModel(resp.Model, p.model)
 	}
 	if err != nil {
 		return "", usage, fmt.Errorf("openai: chat completion: %w", err)
@@ -467,6 +468,29 @@ func (p OpenAIProvider) buildParams(
 	}
 }
 
+// resolvedModel prefers the model the RESPONSE names over the one the request
+// asked for.
+//
+// Against the agent gateway the requested "model" is a routing ALIAS
+// ("kora-auto"); the gateway picks a real model per capability and names it in
+// the response. Recording the alias made the ledger unable to show a routing
+// change — kora#541, where identify silently moved from gemini-3.5-flash-lite
+// to gemini-3.5-flash, roughly a 5x cost difference, while every row still said
+// "kora-auto". It also landed those rows on defaultModelPrice, defeating that
+// fallback's job of flagging genuinely unknown models.
+//
+// Falling back to the requested model when the response names none matters as
+// much as the preference itself: an empty Model would ALSO miss modelPrices and
+// hit defaultModelPrice, trading one wrong price for another. Providers that
+// echo the request (the direct OpenAI-compatible fallback) are unaffected —
+// both values agree.
+func resolvedModel(fromResponse, requested string) string {
+	if fromResponse == "" {
+		return requested
+	}
+	return fromResponse
+}
+
 // generateJSON is the shared SDK glue for IdentifyText/IdentifyPhoto/
 // Decompose: it calls Chat Completions with a JSON-constrained response
 // format (see buildParams) and returns the raw response text for the
@@ -502,6 +526,7 @@ func (p OpenAIProvider) generateJSON(
 	if resp != nil {
 		usage.TokensIn = int(resp.Usage.PromptTokens)
 		usage.TokensOut = int(resp.Usage.CompletionTokens)
+		usage.Model = resolvedModel(resp.Model, model)
 	}
 	if err != nil {
 		return nil, usage, fmt.Errorf("openai: chat completion: %w", err)
