@@ -319,17 +319,18 @@ func gatewayProviders(cfg config.Config) aiProviders {
 }
 
 func directProviders(cfg config.Config, gemini providers.GeminiProvider) aiProviders {
-	var provider ai.Provider = gemini
+	var fallback ai.Provider
 	if cfg.OpenAIAPIKey != "" {
-		fallback := providers.NewOpenAIProvider(
+		fallback = providers.NewOpenAIProvider(
 			cfg.OpenAIAPIKey,
 			cfg.OpenAIBaseURL,
 			cfg.OpenAIModel,
 			cfg.OpenAIJSONObject,
 		)
-		provider = &ai.Router{Primary: gemini, Fallback: fallback}
 	}
-	return aiProviders{requests: provider, embeddings: gemini}
+	// NewRouter hands back gemini itself when no fallback is configured, which
+	// is the conditional this function used to open-code.
+	return aiProviders{requests: ai.NewRouter(gemini, fallback), embeddings: gemini}
 }
 
 // buildResolveHandler composes the AI resolution engine from config. It

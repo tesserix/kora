@@ -151,8 +151,15 @@ const (
 // against Fallback with a fresh budget of its own. Router implements
 // Provider so it is a drop-in replacement wherever a single Provider is
 // expected.
+//
+// Fallback is OPTIONAL. A nil Fallback means every call is served by Primary
+// alone and its error, not a nil dereference, is what the caller sees — the
+// shape production takes whenever no fallback provider is configured. Prefer
+// NewRouter, which returns the bare Primary in that case rather than a Router
+// with nothing to route between.
 type Router struct {
-	Primary  Provider
+	Primary Provider
+	// Fallback may be nil; see the type doc.
 	Fallback Provider
 
 	// PhotoBudget/TextBudget override the default latency budgets
@@ -232,6 +239,9 @@ func (r *Router) fallbackBudgetOrDefault() time.Duration {
 // whichever call served the request is returned as-is, including its Usage —
 // providers set Usage.Provider themselves, so the caller can tell who served
 // just by inspecting it.
+//
+// fallback may be nil, meaning no fallback is configured. The primary's result
+// and error are then returned as-is instead of a nil dereference.
 func withFallback[T any](ctx context.Context, budget, fbBudget time.Duration, primary, fallback func(context.Context) (T, Usage, error)) (T, Usage, error) {
 	primaryCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
@@ -252,6 +262,22 @@ func withFallback[T any](ctx context.Context, budget, fbBudget time.Duration, pr
 	} else {
 		usage.Outcome = OutcomeError
 	}
+
+	// No fallback configured: the primary's outcome IS the request's outcome.
+	//
+	// Returning here rather than deposit-then-call is what keeps the metering
+	// honest. Below, the primary's leg is deposited in the sink precisely
+	// because the fallback's Usage is the one being RETURNED; with no fallback
+	// the primary's Usage is the returned one, so depositing it as well would
+	// count the same call twice — the mirror image of the #81 undercount.
+	//
+	// err may be nil here when the primary answered but blew its budget. With
+	// nobody to fall back to, handing back the answer beats discarding it, so
+	// the result and the nil error both stand; Outcome stays OutcomeTimeout so
+	// the meter still records what actually happened.
+	if fallback == nil {
+		return result, usage, err
+	}
 	addUsage(ctx, usage)
 
 	fallbackCtx, fallbackCancel := context.WithTimeout(ctx, fbBudget)
@@ -265,10 +291,29 @@ func withFallback[T any](ctx context.Context, budget, fbBudget time.Duration, pr
 	return result, fbUsage, fbErr
 }
 
+// NewRouter pairs a primary with an optional fallback.
+//
+// With no fallback there is nothing for a Router to route BETWEEN, so this
+// returns the bare primary rather than a Router that would spend every call
+// checking for a fallback it will never have. Callers therefore cannot
+// accidentally construct the degenerate shape; cmd/api open-coded this
+// conditional before, and anything else building a Router by hand had to
+// remember to.
+func NewRouter(primary, fallback Provider) Provider {
+	if fallback == nil {
+		return primary
+	}
+	return &Router{Primary: primary, Fallback: fallback}
+}
+
 func (r *Router) IdentifyText(ctx context.Context, phrase string) ([]Guess, Usage, error) {
+	var fb func(context.Context) ([]Guess, Usage, error)
+	if r.Fallback != nil {
+		fb = func(c context.Context) ([]Guess, Usage, error) { return r.Fallback.IdentifyText(c, phrase) }
+	}
 	return withFallback(ctx, r.textBudgetOrDefault(), r.textFallbackBudgetOrDefault(),
 		func(c context.Context) ([]Guess, Usage, error) { return r.Primary.IdentifyText(c, phrase) },
-		func(c context.Context) ([]Guess, Usage, error) { return r.Fallback.IdentifyText(c, phrase) },
+		fb,
 	)
 }
 
@@ -389,27 +434,39 @@ func sleepWithin(ctx context.Context, d time.Duration) bool {
 }
 
 func (r *Router) Decompose(ctx context.Context, dish string) ([]IngredientGuess, Usage, error) {
+	var fb func(context.Context) ([]IngredientGuess, Usage, error)
+	if r.Fallback != nil {
+		fb = func(c context.Context) ([]IngredientGuess, Usage, error) { return r.Fallback.Decompose(c, dish) }
+	}
 	return withFallback(ctx, r.textBudgetOrDefault(), r.fallbackBudgetOrDefault(),
 		func(c context.Context) ([]IngredientGuess, Usage, error) { return r.Primary.Decompose(c, dish) },
-		func(c context.Context) ([]IngredientGuess, Usage, error) { return r.Fallback.Decompose(c, dish) },
+		fb,
 	)
 }
 
 func (r *Router) Embed(ctx context.Context, text string) ([]float32, Usage, error) {
+	var fb func(context.Context) ([]float32, Usage, error)
+	if r.Fallback != nil {
+		fb = func(c context.Context) ([]float32, Usage, error) { return r.Fallback.Embed(c, text) }
+	}
 	return withFallback(ctx, r.textBudgetOrDefault(), r.fallbackBudgetOrDefault(),
 		func(c context.Context) ([]float32, Usage, error) { return r.Primary.Embed(c, text) },
-		func(c context.Context) ([]float32, Usage, error) { return r.Fallback.Embed(c, text) },
+		fb,
 	)
 }
 
 func (r *Router) GenerateText(ctx context.Context, systemPrompt, userPrompt string) (string, Usage, error) {
+	var fb func(context.Context) (string, Usage, error)
+	if r.Fallback != nil {
+		fb = func(c context.Context) (string, Usage, error) {
+			return r.Fallback.GenerateText(c, systemPrompt, userPrompt)
+		}
+	}
 	return withFallback(ctx, r.generateBudgetOrDefault(), r.generateFallbackBudgetOrDefault(),
 		func(c context.Context) (string, Usage, error) {
 			return r.Primary.GenerateText(c, systemPrompt, userPrompt)
 		},
-		func(c context.Context) (string, Usage, error) {
-			return r.Fallback.GenerateText(c, systemPrompt, userPrompt)
-		},
+		fb,
 	)
 }
 
@@ -438,5 +495,8 @@ func (r *Router) Transcribe(ctx context.Context, audio []byte, mime string) (str
 }
 
 func (r *Router) Name() string {
+	if r.Fallback == nil {
+		return "router(" + r.Primary.Name() + ")"
+	}
 	return "router(" + r.Primary.Name() + "->" + r.Fallback.Name() + ")"
 }
