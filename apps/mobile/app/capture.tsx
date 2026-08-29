@@ -1204,6 +1204,23 @@ export default function CaptureScreen() {
     });
   }
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  // The SYNCHRONOUS truth about whether a recording is live. isRecordingVoice
+  // drives rendering; this drives the guards.
+  //
+  // kora#331: one hold-and-release produced TWO /v1/resolve/voice requests.
+  // VoiceComposer nests a Pressable inside the GestureDetector on purpose --
+  // hold-and-slide is unusable under VoiceOver, so tap-to-stop is a
+  // first-class path -- and on release the pan's onFinalize AND the
+  // Pressable's onPress both reach onFinish. The guard here was
+  // `if (!isRecordingVoice) return`, but setIsRecordingVoice(false) only takes
+  // effect on the next render, so both calls read `true` in the same tick and
+  // both paid for a transcription: doubled AI spend on the primary input path
+  // and doubled counts against billing.Meter, which per-user quota is built on.
+  //
+  // Same reasoning as scannedRef below. A ref updates in the tick that sets
+  // it, which is the only thing that can gate work started from two callbacks
+  // in one tick.
+  const recordingRef = useRef(false);
   // Guards a single CameraView against firing onBarcodeScanned repeatedly
   // for the same physical scan while the camera keeps detecting the code.
   const scannedRef = useRef(false);
@@ -1411,6 +1428,7 @@ export default function CaptureScreen() {
     if (next !== "voice" && isRecordingVoice) {
       recorder.stop().catch(() => {});
       void endRecordingSession();
+      recordingRef.current = false;
       setIsRecordingVoice(false);
     }
     setMode(next);
@@ -1700,7 +1718,7 @@ export default function CaptureScreen() {
   // silently, mirroring pickMealPhoto's discipline above).
   async function handleStartVoice() {
     setErrorMsg(null);
-    if (isRecordingVoice) return;
+    if (recordingRef.current) return;
     // Same clean-retry reasoning as handleCapturePhoto's reset above.
     setMicPermissionDenied(false);
 
@@ -1717,6 +1735,7 @@ export default function CaptureScreen() {
       await beginRecordingSession();
       await recorder.prepareToRecordAsync();
       recorder.record();
+      recordingRef.current = true;
       setIsRecordingVoice(true);
     } catch (error) {
       // Reported, not just shown. The previous `catch {}` discarded the only
@@ -1731,7 +1750,10 @@ export default function CaptureScreen() {
   }
 
   async function handleFinishVoice() {
-    if (!isRecordingVoice) return;
+    // Claimed synchronously, BEFORE the first await: a duplicate call in the
+    // same tick must lose here rather than at the state check (kora#331).
+    if (!recordingRef.current) return;
+    recordingRef.current = false;
     setErrorMsg(null);
 
     try {
@@ -1779,7 +1801,8 @@ export default function CaptureScreen() {
   // billed. A stop() failure is swallowed rather than surfaced — the user asked
   // to discard, so there is nothing to tell them.
   async function handleCancelVoice() {
-    if (!isRecordingVoice) return;
+    if (!recordingRef.current) return;
+    recordingRef.current = false;
     setErrorMsg(null);
     try {
       await recorder.stop();
