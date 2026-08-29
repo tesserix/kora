@@ -87,7 +87,9 @@ func centreCrop(img image.Image) image.Image {
 	y0 := b.Min.Y + (b.Dy()-edge)/2
 	rect := image.Rect(x0, y0, x0+edge, y0+edge)
 
-	type subImager interface{ SubImage(image.Rectangle) image.Image }
+	type subImager interface {
+		SubImage(image.Rectangle) image.Image
+	}
 	if si, ok := img.(subImager); ok {
 		return si.SubImage(rect)
 	}

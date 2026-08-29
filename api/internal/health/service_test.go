@@ -77,4 +77,3 @@ func TestSyncAbortsOnWriteFailure(t *testing.T) {
 	require.Equal(t, SyncResponse{}, resp)
 	require.Equal(t, 1, w.callCount)
 }
-

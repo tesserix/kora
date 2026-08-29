@@ -18,8 +18,8 @@ import (
 type WeightRecord struct {
 	// HKUUID is the HealthKit sample's identifier and the dedup key. Required:
 	// without it a re-sync would duplicate the reading.
-	HKUUID uuid.UUID `json:"hk_uuid"`
-	WeightKg float64 `json:"weight_kg"`
+	HKUUID     uuid.UUID `json:"hk_uuid"`
+	WeightKg   float64   `json:"weight_kg"`
 	RecordedAt time.Time `json:"recorded_at"`
 	// LocalDate is the device-local day at capture, "YYYY-MM-DD" (kora#84).
 	LocalDate string `json:"local_date"`
