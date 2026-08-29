@@ -121,3 +121,18 @@ func TestNewRouter_WithFallback_ReturnsRouter(t *testing.T) {
 	assert.Same(t, primary, r.Primary)
 	assert.Same(t, fallback, r.Fallback)
 }
+
+// A nil Primary is the one shape a Router genuinely cannot serve. NewRouter
+// rejects it at wiring time rather than letting it surface as a nil
+// dereference inside a closure on the first request.
+func TestNewRouter_NilPrimary_Panics(t *testing.T) {
+	assert.PanicsWithValue(t, "ai: NewRouter requires a non-nil primary provider", func() {
+		NewRouter(nil, &stubProvider{name: "openai"})
+	})
+}
+
+func TestNewRouter_NilPrimaryAndFallback_Panics(t *testing.T) {
+	assert.PanicsWithValue(t, "ai: NewRouter requires a non-nil primary provider", func() {
+		NewRouter(nil, nil)
+	})
+}

@@ -152,11 +152,17 @@ const (
 // Provider so it is a drop-in replacement wherever a single Provider is
 // expected.
 //
-// Fallback is OPTIONAL. A nil Fallback means every call is served by Primary
-// alone and its error, not a nil dereference, is what the caller sees — the
-// shape production takes whenever no fallback provider is configured. Prefer
-// NewRouter, which returns the bare Primary in that case rather than a Router
-// with nothing to route between.
+// Primary is REQUIRED. Fallback is OPTIONAL: a nil Fallback means every call is
+// served by Primary alone and its error, not a nil dereference, is what the
+// caller sees — the shape production takes whenever no fallback provider is
+// configured.
+//
+// Prefer NewRouter over a struct literal. It returns the bare Primary when
+// there is no fallback, rather than a Router with nothing to route between,
+// and it rejects a nil Primary at construction instead of letting the mistake
+// surface as a nil dereference on the first request. The fields stay exported
+// so tests can set the budget overrides below, which means a literal can still
+// omit Primary — NewRouter is the guarded path, not the only one.
 type Router struct {
 	Primary Provider
 	// Fallback may be nil; see the type doc.
@@ -300,6 +306,18 @@ func withFallback[T any](ctx context.Context, budget, fbBudget time.Duration, pr
 // conditional before, and anything else building a Router by hand had to
 // remember to.
 func NewRouter(primary, fallback Provider) Provider {
+	// A nil primary is the one genuinely invalid shape left. A nil Fallback is
+	// merely unconfigured and is handled — every call is served by Primary
+	// alone — but a Router with nothing to call at all cannot serve anything,
+	// and left unchecked it surfaces as a nil dereference deep inside a
+	// closure on the first request, long after the wiring mistake was made.
+	//
+	// Panicking is deliberate and is the same policy main() already applies to
+	// bad configuration: providers are wired once at startup, so this fires on
+	// the first boot after the mistake rather than in front of a user.
+	if primary == nil {
+		panic("ai: NewRouter requires a non-nil primary provider")
+	}
 	if fallback == nil {
 		return primary
 	}
