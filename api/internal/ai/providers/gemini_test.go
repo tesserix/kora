@@ -184,13 +184,20 @@ func TestEstimateEmbedTokens_EmptyInputIsZero(t *testing.T) {
 	assert.Equal(t, 0, estimateEmbedTokens(""))
 }
 
-// TestEstimateEmbedTokens_RoughlyFourCharsPerToken pins the stated ratio so a
-// future edit to the heuristic has to change this test deliberately rather
-// than by accident.
-func TestEstimateEmbedTokens_RoughlyFourCharsPerToken(t *testing.T) {
-	assert.Equal(t, 1, estimateEmbedTokens("abcd"))    // exactly 4 chars -> 1 token
-	assert.Equal(t, 2, estimateEmbedTokens("abcde"))   // 5 chars rounds up to 2 tokens
-	assert.Equal(t, 2, estimateEmbedTokens("grilled")) // 7 chars -> rounds up to 2 tokens
+// TestEstimateEmbedTokens_RoughlyFourPointThreeCharsPerToken pins the stated
+// ratio so a future edit to the heuristic has to change this test deliberately
+// rather than by accident.
+//
+// Updated for kora#538. The ratio was 4 chars/token with rounding UP, which
+// measured +22.5% against provider-reported counts; it is now 4.3 with
+// rounding to NEAREST. The 5-char case below is the one that moved, and it is
+// the whole point: rounding up charged 2 tokens for every 5-character phrase,
+// and Kora's embedding inputs are food phrases averaging ~12 characters, so
+// that rounding alone accounted for about half the over-count.
+func TestEstimateEmbedTokens_RoughlyFourPointThreeCharsPerToken(t *testing.T) {
+	assert.Equal(t, 1, estimateEmbedTokens("abcd"))    // 4 chars -> 0.93 -> 1
+	assert.Equal(t, 1, estimateEmbedTokens("abcde"))   // 5 chars -> 1.16 -> 1 (was 2 under ceil)
+	assert.Equal(t, 2, estimateEmbedTokens("grilled")) // 7 chars -> 1.63 -> 2
 }
 
 // f64 and str are local pointer-of-literal helpers for building expected

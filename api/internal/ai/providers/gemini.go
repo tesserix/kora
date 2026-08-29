@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -550,20 +551,39 @@ func (p GeminiProvider) Embed(ctx context.Context, text string) ([]float32, ai.U
 }
 
 // estimateEmbedTokens approximates the input token count for an embedding
-// call as len(text)/4, rounded up. ~4 characters per token is the standard
-// rough heuristic for this tokenizer family (SentencePiece-style, as used
-// by Gemini) — an ASSUMPTION, not a measured fact, because the embedding
-// response gives us nothing to measure against (see Embed's doc comment).
+// call as len(text)/charsPerToken, rounded to nearest.
+//
+// This IS now calibrated against measured ground truth, which the earlier
+// version could not be. The gateway's embedding response reports
+// provider-counted prompt_tokens, and production runs through the gateway, so
+// the same inputs can be priced both ways and compared. Measured over the 75
+// distinct phrases in testdata/eval/ranking.sample.jsonl (fixture:
+// testdata/embed_token_counts.json), the previous ceil(n/4) ran +22.5% high.
+//
+// Two separate causes, both fixed here:
+//
+//   - Rounding UP on every call is disproportionately expensive when calls are
+//     short, and Kora's embedding inputs are food phrases averaging ~12
+//     characters. Rounding to nearest instead removes roughly half the error
+//     on its own.
+//   - 4 chars/token was too aggressive. The measured ratio is 4.37 over the
+//     fixture, 4.61 and 3.97 over two disjoint 50/25-phrase sets.
+//
+// charsPerToken is 4.3 rather than the fixture's own best fit because it was
+// chosen for worst-case error across those two disjoint sets (+6.1% / -5.1%)
+// rather than tuned to any single one. Per-phrase error is still ~0.6 tokens
+// on average; this is a cheaper-than-tokenizing approximation, not a counter,
+// and Usage.Estimated stays true so it is never mistaken for one.
+//
 // It never returns 0 for non-empty input: a non-empty call that still costs
-// money must never report zero tokens, which is precisely the bug being
-// fixed here.
+// money must never report zero tokens.
 func estimateEmbedTokens(text string) int {
 	n := len([]rune(text))
 	if n == 0 {
 		return 0
 	}
-	const charsPerToken = 4
-	tokens := (n + charsPerToken - 1) / charsPerToken // round up
+	const charsPerToken = 4.3
+	tokens := int(math.Round(float64(n) / charsPerToken))
 	if tokens < 1 {
 		tokens = 1
 	}
