@@ -1778,6 +1778,24 @@ export default function CaptureScreen() {
     resolveVoice.mutate({ input: file, signal: controller.signal }, {
       onSuccess: (data) => {
         if (controller.signal.aborted) return;
+        // Echo what Otto HEARD, as a user turn, exactly like typed input
+        // (kora#332). Voice is the lowest-friction input and the highest-error
+        // one: "oatmeal with a banana and honey" coming back as one banana
+        // looks identical whether Otto misheard or heard right and failed to
+        // resolve two of three foods. Without the transcript the user cannot
+        // tell those apart, has no way to attribute a wrong result, and no
+        // repair action but re-recording blind.
+        //
+        // Appended HERE and not optimistically, unlike the typed path: the
+        // transcript does not exist until the server returns it. It therefore
+        // sits after the aborted guard above, so a cancelled resolve leaves no
+        // words on a screen the user was told was abandoned.
+        //
+        // Guarded on a non-empty string, not just non-null: the server can
+        // answer with no transcript at all, and an empty bubble would read as
+        // "Otto heard silence" rather than "Otto reported nothing".
+        const heard = data.transcript?.trim();
+        if (heard) setTranscript((turns) => [...turns, { role: "user", text: heard }]);
         applyResolution(data, "ai_voice");
         setResolvedPhrase(data.transcript ?? null);
       },
