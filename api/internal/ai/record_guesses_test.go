@@ -26,8 +26,10 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -48,19 +50,31 @@ func TestRecordGuesses(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	gemini, err := providers.NewGeminiProvider(ctx, cfg.GeminiAPIKey)
-	if err != nil {
-		t.Fatalf("gemini init: %v", err)
-	}
-	// The real production shape: Router with a primary and a fallback. If the
-	// fallback is unconfigured the Router still works, it simply has nothing to
-	// fall back TO — recorded output is then primary-only, which is worth
-	// knowing and is why this logs it rather than silently proceeding.
-	router := &ai.Router{Primary: gemini}
+	// The primary honours KORA_EVAL_PROVIDER (see evalProvider in eval_test.go),
+	// so this can record through the agent gateway — the provider production
+	// actually runs — and not only through direct Gemini. Recording gemini and
+	// calling it the production baseline describes a path nobody is on.
+	// Default is unchanged: no KORA_EVAL_PROVIDER still means direct Gemini.
+	primary := evalProvider(t, cfg)
+	// The real production shape, mirroring buildResolveHandler in cmd/api: a
+	// Router ONLY when a fallback exists, and the bare provider otherwise.
+	//
+	// This used to build &ai.Router{Primary: primary} with a nil Fallback and
+	// claim it "still works, it simply has nothing to fall back TO". It does
+	// not: Router.IdentifyText's fallback closure dereferences r.Fallback
+	// unconditionally (router.go:271), so the first phrase the primary fails
+	// or times out on panics on a nil pointer instead of surfacing the error.
+	// Production never hits it because main.go:330 only constructs a Router
+	// when a fallback is configured — so the fix here is to match that shape
+	// rather than to record through a Router production would never build.
+	var under ai.Provider = primary
 	if cfg.OpenAIAPIKey != "" {
-		router.Fallback = providers.NewOpenAIProvider(cfg.OpenAIAPIKey, cfg.OpenAIBaseURL, cfg.OpenAIModel, cfg.OpenAIJSONObject)
+		under = &ai.Router{
+			Primary:  primary,
+			Fallback: providers.NewOpenAIProvider(cfg.OpenAIAPIKey, cfg.OpenAIBaseURL, cfg.OpenAIModel, cfg.OpenAIJSONObject),
+		}
 	} else {
-		t.Log("no OPENAI_API_KEY: recording through the primary only, with no fallback")
+		t.Log("no OPENAI_API_KEY: recording through the primary alone, exactly as production runs with no fallback configured")
 	}
 
 	phrases := loadPhrases(t)
@@ -76,9 +90,36 @@ func TestRecordGuesses(t *testing.T) {
 	}
 	defer f.Close()
 
+	// Token and latency totals make a run comparable against another provider,
+	// which is the whole point of being able to aim this at the gateway: #251
+	// gates the rollout on quality, latency and token savings, and none of the
+	// three can be argued without a number from both arms over one phrase set.
+	// KORA_EVAL_RECORD_DELAY paces the run. A free-tier Gemini key allows 15
+	// requests/minute, and an unpaced 50-phrase run burns through it in seconds
+	// — which does not read as a rate limit, it reads as the provider being
+	// broken for half the dataset. Pacing is what makes the arm a baseline
+	// rather than a partial one. Default is 0: a paid key or the gateway needs
+	// no delay, and forcing one on every run would quadruple its wall time.
+	var delay time.Duration
+	if raw := os.Getenv("KORA_EVAL_RECORD_DELAY"); raw != "" {
+		d, err := time.ParseDuration(raw)
+		if err != nil {
+			t.Fatalf("KORA_EVAL_RECORD_DELAY %q: %v", raw, err)
+		}
+		delay = d
+		t.Logf("pacing %v between phrases", delay)
+	}
+
 	var recorded, failed int
-	for _, phrase := range phrases {
-		guesses, _, err := router.IdentifyText(ctx, phrase)
+	var inTokens, outTokens, estimated int
+	var latencies []float64
+	for i, phrase := range phrases {
+		if delay > 0 && i > 0 {
+			time.Sleep(delay)
+		}
+		start := time.Now()
+		guesses, usage, err := under.IdentifyText(ctx, phrase)
+		elapsed := time.Since(start)
 		if err != nil {
 			// Loud, and NOT fatal: one phrase the provider refuses must not
 			// discard the whole recording run.
@@ -98,9 +139,49 @@ func TestRecordGuesses(t *testing.T) {
 			t.Fatalf("write: %v", err)
 		}
 		t.Logf("%-28s -> %s", phrase, summarise(guesses))
+		inTokens += usage.TokensIn
+		outTokens += usage.TokensOut
+		if usage.Estimated {
+			// A run whose tokens are proxies rather than provider-reported
+			// counts cannot settle a token-savings argument. Surface it rather
+			// than letting an estimate be quoted as a measurement.
+			estimated++
+		}
+		latencies = append(latencies, elapsed.Seconds())
 		recorded++
 	}
 	t.Logf("recorded %d phrase(s), %d failed, into %s", recorded, failed, outPath)
+	t.Logf("provider=%s tokens: in=%d out=%d total=%d (per phrase in=%.1f out=%.1f), estimated_calls=%d/%d",
+		primary.Name(), inTokens, outTokens, inTokens+outTokens,
+		perPhrase(inTokens, recorded), perPhrase(outTokens, recorded), estimated, recorded)
+	t.Logf("provider=%s latency_s: median=%.2f p95=%.2f max=%.2f (n=%d)",
+		primary.Name(), median(latencies), percentile(latencies, 0.95), percentile(latencies, 1.0), len(latencies))
+}
+
+func perPhrase(total, n int) float64 {
+	if n == 0 {
+		return 0
+	}
+	return float64(total) / float64(n)
+}
+
+// percentile takes the nearest-rank value of a sorted copy. Deliberately not
+// interpolating: these runs are tens of samples, where interpolation invents
+// precision the sample size does not support.
+func percentile(xs []float64, p float64) float64 {
+	if len(xs) == 0 {
+		return 0
+	}
+	sorted := append([]float64(nil), xs...)
+	sort.Float64s(sorted)
+	i := int(math.Ceil(p*float64(len(sorted)))) - 1
+	if i < 0 {
+		i = 0
+	}
+	if i >= len(sorted) {
+		i = len(sorted) - 1
+	}
+	return sorted[i]
 }
 
 func summarise(gs []ai.Guess) string {
