@@ -33,6 +33,7 @@ import (
 	"github.com/tesserix/kora/api/internal/health"
 	"github.com/tesserix/kora/api/internal/httpx"
 	"github.com/tesserix/kora/api/internal/identity"
+	"github.com/tesserix/kora/api/internal/internalauth"
 	"github.com/tesserix/kora/api/internal/memory"
 	"github.com/tesserix/kora/api/internal/mentor"
 	"github.com/tesserix/kora/api/internal/notifications"
@@ -89,6 +90,8 @@ type Deps struct {
 	// at all, so an unconfigured environment answers 404 rather than 401 —
 	// the difference matters when diagnosing a deployment.
 	BFFHMACKey []byte
+	// MCPInternalKey guards /internal/v1/*; empty leaves them unmounted.
+	MCPInternalKey string
 	// PlatformAdminSecret is the shared secret the platform console's
 	// federation client signs with. Empty leaves the contract surface
 	// unmounted, exactly as an empty BFFHMACKey leaves the portal's routes
@@ -271,6 +274,11 @@ func NewRouter(deps Deps) *gin.Engine {
 
 		nutritionHandler := nutrition.NewHandler(foodRepo)
 		v1.GET("/foods", nutritionHandler.Search)
+		// Service path for kora-mcp: no Firebase user, so Search sees global aliases only.
+		if deps.MCPInternalKey != "" {
+			internal := r.Group("/internal/v1", internalauth.Middleware(deps.MCPInternalKey))
+			internal.GET("/foods", nutritionHandler.Search)
+		}
 
 		// Admin surface. A SEPARATE group from v1: /v1 carries
 		// auth.Middleware (Firebase end-user tokens) and these callers are

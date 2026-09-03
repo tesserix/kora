@@ -68,6 +68,9 @@ type Config struct {
 	// MAC is computed over the DECODED bytes. Using the encoded form on either
 	// side produces signatures that never verify.
 	BFFHMACKey []byte
+	// MCPInternalKey lets kora-mcp read /internal/v1/* without a Firebase user;
+	// empty leaves those routes unmounted.
+	MCPInternalKey string
 	// PlatformAdminSecret is the shared secret the Tesserix platform console's
 	// federation client signs its requests to /v1/admin/* with. Empty leaves
 	// the contract endpoints unmounted, the same choice BFFHMACKey makes.
@@ -216,6 +219,13 @@ func Load() (Config, error) {
 	// silently-disabled surface, for the same reason BFFHMACKey's is: the
 	// symptom of the alternative is an unexplained 404 in an environment
 	// someone believed they had configured.
+	if raw := strings.TrimSpace(os.Getenv("KORA_MCP_INTERNAL_KEY")); raw != "" {
+		if len(raw) < 16 {
+			return Config{}, fmt.Errorf(
+				"config: KORA_MCP_INTERNAL_KEY must be at least 16 characters, got %d", len(raw))
+		}
+		cfg.MCPInternalKey = raw
+	}
 	if raw := strings.TrimSpace(os.Getenv("KORA_PLATFORM_ADMIN_SECRET")); raw != "" {
 		if len(raw) < 16 {
 			return Config{}, fmt.Errorf(
