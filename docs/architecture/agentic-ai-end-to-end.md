@@ -1,7 +1,7 @@
 # Kora Agentic AI: End-to-End Architecture
 
 Status: current-state design and integration contract
-Last verified: 2026-08-20
+Last verified: 2026-09-04
 Owners: Kora, AI Platform, and Platform Engineering
 
 Future multi-product direction: [Multi-product AI platform
@@ -83,6 +83,87 @@ There are three orchestration paths today:
 Food capture remains direct capability orchestration in Kora. Otto uses the
 separate reviewed agent runtime, but cannot call it directly or discover an
 arbitrary Agent Card URL at request time.
+
+## Kora MCP authentication and authorization
+
+Kora's AI does not hold the credential accepted by `kora-mcp`. The agent proves
+its identity to AgentGateway, and AgentGateway adds the product-specific MCP
+credential only after selecting the reviewed Kora route. The MCP then uses a
+different internal credential when it reads Kora's product API.
+
+```mermaid
+flowchart LR
+    AI[AI Agent / ADK]
+    JWT[Zitadel JWT]
+    GW[AgentGateway]
+    KEY[Product-specific MCP key]
+    MCP[Kora MCP]
+    PA[Kora API]
+    DB[(Kora tenant data)]
+
+    AI -->|Bearer JWT| GW
+    JWT -->|Verify signature, issuer, audience, role| GW
+    GW -->|Inject X-MCP-Key| MCP
+    MCP -->|Validate tool, scope and arguments| PA
+    PA -->|Authorize tenant, user and object| DB
+```
+
+The production path has four independent controls:
+
+1. The public AgentGateway listener verifies a short-lived Zitadel JWT in
+   strict mode, including its signature, issuer, audience, expiry, and
+   `agentgateway.mcp` role. Trusted in-cluster ADK traffic uses the separately
+   protected runtime listener.
+2. AgentGateway reads Kora's backend credential from a Kubernetes Secret and
+   injects it as `X-MCP-Key`. The agent and model never receive that value.
+3. Istio Ambient mTLS authenticates every hop using Kubernetes ServiceAccount
+   SPIFFE identities. The Kora waypoint authorizes the original
+   `agentgateway-mcp` or `support-platform-slm-router` caller at the Service
+   boundary; the MCP workload boundary admits only those direct callers or the
+   Kora waypoint's forwarding identity.
+4. For `search_nutrition`, `kora-mcp` sends a distinct `X-Internal-Key` to
+   `GET /internal/v1/foods`. Kora API validates that service credential and
+   remains the authority for product data. Future user-owned tools must also
+   carry a short-lived, audience-bound user grant and re-authorize the user,
+   tenant, object, and operation at Kora API.
+
+```mermaid
+sequenceDiagram
+    participant Agent as AI Agent / ADK
+    participant Gateway as AgentGateway
+    participant MCP as kora-mcp
+    participant API as kora-api
+    participant Data as Kora data
+
+    Agent->>Gateway: server/discover / tools/list / tools/call + caller credential
+    Gateway->>Gateway: authenticate caller and authorize Kora route
+    Gateway->>MCP: MCP request + injected X-MCP-Key over mTLS
+    MCP->>MCP: validate tool schema, scope, risk and arguments
+    MCP->>API: GET /internal/v1/foods + X-Internal-Key over mTLS
+    API->>API: authenticate service and authorize operation
+    API->>Data: bounded read
+    Data-->>API: reviewed nutrition records
+    API-->>MCP: typed result
+    MCP-->>Gateway: MCP tool result
+    Gateway-->>Agent: bounded result + trace context
+```
+
+These mechanisms answer different questions:
+
+| Mechanism | What it proves | What it does not prove |
+| --- | --- | --- |
+| Zitadel JWT | Which user or machine called AgentGateway and which gateway role it holds | Permission to read a particular Kora object |
+| SPIFFE mTLS certificate | Which Kubernetes workload opened the service connection | End-user identity or product entitlement |
+| `X-MCP-Key` | AgentGateway selected and authenticated to the Kora MCP backend | User or tenant ownership |
+| `X-Internal-Key` | The caller is the deployed Kora MCP service path | Permission for a future user-owned mutation |
+| Kora API authorization | Whether this principal may perform this operation on this tenant-owned object | Nothing outside Kora's product boundary |
+
+The MCP process is stateless. It must be reachable when a tool is discovered or
+called, but the agent does not maintain a permanent connection. The current
+2026-07-28 protocol carries its version, method, client capabilities, and tool
+name in each request rather than creating a server session. Any invocation may
+land on any replica; durable state and authorization remain in Kora API and its
+datastores.
 
 ## Sizing and service targets
 
