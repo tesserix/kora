@@ -220,6 +220,7 @@ func main() {
 			BodyCompositionCache: bodyCompositionCache,
 			Assets:               assetStore,
 			BFFHMACKey:           cfg.BFFHMACKey,
+			MCPInternalKey:       cfg.MCPInternalKey,
 			PlatformAdminSecret:  cfg.PlatformAdminSecret,
 			PlatformHealthProbes: healthProbes,
 			AppleExchanger:       appleExchanger,
