@@ -71,6 +71,11 @@ type Config struct {
 	// MCPInternalKey lets kora-mcp read /internal/v1/* without a Firebase user;
 	// empty leaves those routes unmounted.
 	MCPInternalKey string
+	// AITraceEndpoint is the OTLP/HTTP traces URL; empty disables AI tracing.
+	AITraceEndpoint string
+	// AITraceUserKey HMACs user ids in traces; without it traces carry no user.
+	AITraceUserKey []byte
+	Release        string
 	// PlatformAdminSecret is the shared secret the Tesserix platform console's
 	// federation client signs its requests to /v1/admin/* with. Empty leaves
 	// the contract endpoints unmounted, the same choice BFFHMACKey makes.
@@ -130,6 +135,8 @@ func Load() (Config, error) {
 		Port:                     getenv("PORT", "8080"),
 		MetricsPort:              getenv("METRICS_PORT", "9090"),
 		Env:                      getenv("ENV", "development"),
+		Release:                  os.Getenv("KORA_RELEASE"),
+		AITraceEndpoint:          strings.TrimSpace(os.Getenv("KORA_AI_TRACE_ENDPOINT")),
 		DatabaseURL:              os.Getenv("DATABASE_URL"),
 		RedisURL:                 getenv("REDIS_URL", "redis://localhost:6379/0"),
 		FirebaseProjectID:        os.Getenv("FIREBASE_PROJECT_ID"),
@@ -225,6 +232,13 @@ func Load() (Config, error) {
 				"config: KORA_MCP_INTERNAL_KEY must be at least 16 characters, got %d", len(raw))
 		}
 		cfg.MCPInternalKey = raw
+	}
+	if raw := strings.TrimSpace(os.Getenv("KORA_AI_TRACE_USER_KEY")); raw != "" {
+		if len(raw) < 16 {
+			return Config{}, fmt.Errorf(
+				"config: KORA_AI_TRACE_USER_KEY must be at least 16 characters, got %d", len(raw))
+		}
+		cfg.AITraceUserKey = []byte(raw)
 	}
 	if raw := strings.TrimSpace(os.Getenv("KORA_PLATFORM_ADMIN_SECRET")); raw != "" {
 		if len(raw) < 16 {

@@ -15,6 +15,7 @@ import (
 	"github.com/tesserix/kora/api/internal/admin"
 	"github.com/tesserix/kora/api/internal/agents"
 	"github.com/tesserix/kora/api/internal/ai"
+	"github.com/tesserix/kora/api/internal/aitrace"
 	"github.com/tesserix/kora/api/internal/assets"
 	"github.com/tesserix/kora/api/internal/auth"
 	"github.com/tesserix/kora/api/internal/bffauth"
@@ -92,6 +93,8 @@ type Deps struct {
 	BFFHMACKey []byte
 	// MCPInternalKey guards /internal/v1/*; empty leaves them unmounted.
 	MCPInternalKey string
+	// AITraceUserKey HMACs the user id on AI traces; nil omits the user.
+	AITraceUserKey []byte
 	// PlatformAdminSecret is the shared secret the platform console's
 	// federation client signs with. Empty leaves the contract surface
 	// unmounted, exactly as an empty BFFHMACKey leaves the portal's routes
@@ -363,7 +366,7 @@ func NewRouter(deps Deps) *gin.Engine {
 		recipeHandler := recipes.NewHandler(recipeSvc, recipeParser)
 		v1.GET("/recipes", recipeHandler.List)
 		v1.POST("/recipes", recipeHandler.Create)
-		v1.POST("/recipes/parse", recipeHandler.Parse)
+		v1.POST("/recipes/parse", aitrace.Route("recipe.parse", deps.AITraceUserKey), recipeHandler.Parse)
 		v1.GET("/recipes/:id", recipeHandler.Get)
 		v1.PUT("/recipes/:id", recipeHandler.Update)
 		v1.DELETE("/recipes/:id", recipeHandler.Delete)
@@ -388,7 +391,7 @@ func NewRouter(deps Deps) *gin.Engine {
 		} else {
 			bodyCompositionHandler = bodyread.NewHandler(nil)
 		}
-		v1.POST("/body-composition/read", bodyCompositionHandler.Read)
+		v1.POST("/body-composition/read", aitrace.Route("body_composition.read", deps.AITraceUserKey), bodyCompositionHandler.Read)
 
 		trackingRepo := tracking.NewRepository(deps.DB)
 		trackingHandler := tracking.NewHandler(trackingRepo)
@@ -521,9 +524,9 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.DELETE("/challenges/:cid", challengesHandler.Delete)
 
 		if deps.Resolver != nil {
-			v1.POST("/resolve/text", deps.Resolver.ResolveText)
-			v1.POST("/resolve/photo", deps.Resolver.ResolvePhoto)
-			v1.POST("/resolve/voice", deps.Resolver.ResolveVoice)
+			v1.POST("/resolve/text", aitrace.Route("capture.text", deps.AITraceUserKey), deps.Resolver.ResolveText)
+			v1.POST("/resolve/photo", aitrace.Route("capture.photo", deps.AITraceUserKey), deps.Resolver.ResolvePhoto)
+			v1.POST("/resolve/voice", aitrace.Route("capture.voice", deps.AITraceUserKey), deps.Resolver.ResolveVoice)
 			v1.POST("/resolve/barcode", deps.Resolver.ResolveBarcode)
 		}
 
@@ -548,10 +551,10 @@ func NewRouter(deps Deps) *gin.Engine {
 			// whether a message is food to log or something to talk about,
 			// rather than assuming every message is food.
 			coachHandler = coachHandler.WithFoodResolver(deps.Resolver.TextEngine())
-			v1.POST("/capture/message", coachHandler.Message)
+			v1.POST("/capture/message", aitrace.Route("capture.message", deps.AITraceUserKey), coachHandler.Message)
 		}
 		v1.GET("/coach/nudges", coachHandler.Nudges)
-		v1.POST("/coach/ask", coachHandler.Ask)
+		v1.POST("/coach/ask", aitrace.Route("coach.ask", deps.AITraceUserKey), coachHandler.Ask)
 		v1.GET("/coach/thread", coachHandler.Thread)
 		v1.PUT("/coach/plans/:id/accept", coachHandler.AcceptPlan)
 

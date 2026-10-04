@@ -15,6 +15,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
@@ -552,4 +555,28 @@ func TestRecordConvertsLatencyMsToSecondsNotNanoseconds(t *testing.T) {
 	afterSmallest := bucketCount(t, hist, 0.25)
 	require.Equal(t, beforeSmallest, afterSmallest,
 		"a 20000ms LatencyMs must NOT land in the le=0.25s bucket — it only can if the ms→Duration conversion dropped * time.Millisecond and turned 20000ms into 20000ns")
+}
+
+func TestRecordTracesTheCallUnderTheRequestEvenWhenTheInsertFails(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	previous := otel.GetTracerProvider()
+	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder)))
+	t.Cleanup(func() { otel.SetTracerProvider(previous) })
+
+	db := testDB(t)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	closed, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB}), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, sqlDB.Close())
+
+	ctx, root := otel.Tracer("test").Start(context.Background(), "coach.ask")
+	err = NewMeter(closed).Record(ctx, uuid.New(), ai.Usage{CallType: "coach", Model: "kora-auto", TokensIn: 10, LatencyMs: 5}, 0.001)
+	root.End()
+	require.Error(t, err)
+
+	spans := recorder.Ended()
+	require.Len(t, spans, 2)
+	require.Equal(t, "ai.coach", spans[0].Name())
+	require.Equal(t, root.SpanContext().SpanID(), spans[0].Parent().SpanID())
 }

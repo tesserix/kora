@@ -8,6 +8,12 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/tesserix/kora/api/internal/aitrace"
 )
 
 // Coordinator resolves and runs the reviewed Kora agent for a capability. The
@@ -47,16 +53,22 @@ func (c *Coordinator) Run(ctx context.Context, skill, prompt string) (Run, error
 	if c == nil {
 		return Run{}, ErrNotConfigured
 	}
+	ctx, span := aitrace.Start(ctx, "agent.run", attribute.String("kora.agent.skill", skill))
+	defer span.End()
 
 	resolved, err := c.agentForSkill(ctx, skill)
 	if err != nil {
-		c.observe("", skill, "unrouted")
+		c.finish(span, "", skill, "unrouted")
 		return Run{}, err
 	}
 
 	name := resolved.Agent.Metadata.Name
+	span.SetAttributes(
+		attribute.String("kora.agent.name", name),
+		attribute.String("kora.agent.tag", resolved.Agent.Metadata.Tag),
+	)
 	if len(resolved.Unresolved) > 0 {
-		c.observe(name, skill, "unresolved")
+		c.finish(span, name, skill, "unresolved")
 		return Run{}, fmt.Errorf(
 			"agents: %s has unresolved registry references: %s",
 			name,
@@ -66,13 +78,21 @@ func (c *Coordinator) Run(ctx context.Context, skill, prompt string) (Run, error
 
 	run, err := c.gateway.Send(ctx, resolved, prompt)
 	if err != nil {
-		c.observe(name, skill, "error")
+		c.finish(span, name, skill, "error")
 		return Run{}, err
 	}
 	run.Skill = skill
 
-	c.observe(name, skill, outcomeFor(run.State))
+	c.finish(span, name, skill, outcomeFor(run.State))
 	return run, nil
+}
+
+func (c *Coordinator) finish(span trace.Span, agent, skill, outcome string) {
+	span.SetAttributes(attribute.String("kora.agent.outcome", outcome))
+	if outcome != "ok" {
+		span.SetStatus(codes.Error, outcome)
+	}
+	c.observe(agent, skill, outcome)
 }
 
 // Resolve exposes one agent's resolved composition for diagnostics.

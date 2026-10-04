@@ -25,6 +25,7 @@ import (
 	"github.com/tesserix/kora/api/internal/agents"
 	"github.com/tesserix/kora/api/internal/ai"
 	"github.com/tesserix/kora/api/internal/ai/providers"
+	"github.com/tesserix/kora/api/internal/aitrace"
 	"github.com/tesserix/kora/api/internal/appleid"
 	"github.com/tesserix/kora/api/internal/assets"
 	"github.com/tesserix/kora/api/internal/auth"
@@ -205,6 +206,17 @@ func main() {
 		logger.Info("apple authorization exchange disabled (no APPLE_PRIVATE_KEY)")
 	}
 
+	shutdownTracing, err := aitrace.Setup(context.Background(), aitrace.Config{
+		Endpoint:    cfg.AITraceEndpoint,
+		Environment: cfg.Env,
+		Release:     cfg.Release,
+	})
+	if err != nil {
+		// Tracing must never take down the product.
+		logger.Error("ai tracing disabled", "err", err)
+		shutdownTracing = func(context.Context) error { return nil }
+	}
+
 	coordinator := buildAgents(cfg, logger)
 
 	srv := &http.Server{
@@ -220,6 +232,7 @@ func main() {
 			Assets:               assetStore,
 			BFFHMACKey:           cfg.BFFHMACKey,
 			MCPInternalKey:       cfg.MCPInternalKey,
+			AITraceUserKey:       cfg.AITraceUserKey,
 			PlatformAdminSecret:  cfg.PlatformAdminSecret,
 			PlatformHealthProbes: healthProbes,
 			AppleExchanger:       appleExchanger,
@@ -287,6 +300,9 @@ func main() {
 	}
 	if err := srv.Shutdown(ctx); err != nil {
 		logger.Error("shutdown error", "err", err)
+	}
+	if err := shutdownTracing(ctx); err != nil {
+		logger.Error("ai tracing shutdown error", "err", err)
 	}
 	logger.Info("api stopped")
 }
