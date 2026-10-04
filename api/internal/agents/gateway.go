@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/tesserix/kora/api/internal/aitrace"
 	"github.com/tesserix/kora/api/internal/auth"
 )
 
@@ -143,6 +144,7 @@ func (g *Gateway) Send(ctx context.Context, resolved *ResolvedAgent, prompt stri
 	}
 	req.Header.Set("Authorization", "Bearer "+g.apiKey)
 	req.Header.Set("Content-Type", "application/json")
+	aitrace.Inject(ctx, req.Header)
 	if token, ok := auth.VerifiedTokenFromContext(ctx); ok {
 		req.Header.Set("X-Kora-End-User-Token", "Bearer "+token)
 	}

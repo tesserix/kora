@@ -468,3 +468,24 @@ func TestStripeReturnURLDefaultsToTheAppsOwnScheme(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "mobile://billing/return", cfg.StripeReturnURL)
 }
+
+func TestLoadReadsAITraceSettings(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
+	t.Setenv("KORA_AI_TRACE_ENDPOINT", "http://otel-gateway.observability.svc.cluster.local:4318/v1/traces")
+	t.Setenv("KORA_AI_TRACE_USER_KEY", "test-trace-user-key-0")
+	t.Setenv("KORA_RELEASE", "abc1234")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, "http://otel-gateway.observability.svc.cluster.local:4318/v1/traces", cfg.AITraceEndpoint)
+	require.Equal(t, []byte("test-trace-user-key-0"), cfg.AITraceUserKey)
+	require.Equal(t, "abc1234", cfg.Release)
+}
+
+func TestLoadRejectsAShortAITraceUserKey(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
+	t.Setenv("KORA_AI_TRACE_USER_KEY", "short")
+
+	_, err := Load()
+	require.ErrorContains(t, err, "KORA_AI_TRACE_USER_KEY")
+}

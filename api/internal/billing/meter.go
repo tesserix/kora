@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/tesserix/kora/api/internal/ai"
+	"github.com/tesserix/kora/api/internal/aitrace"
 	"github.com/tesserix/kora/api/internal/metrics"
 )
 
@@ -192,6 +193,7 @@ func (m Meter) record(ctx context.Context, userID *uuid.UUID, u ai.Usage, costUS
 	// provider call already happened and was already billed upstream, whether
 	// or not this row lands. See #43.
 	metrics.RecordAICall(u.CallType, u.Model, u.Outcome, costUSD, time.Duration(u.LatencyMs)*time.Millisecond)
+	aitrace.Generation(ctx, u, costUSD)
 
 	event := Event{
 		UserID:     userID,

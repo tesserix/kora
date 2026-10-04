@@ -4,6 +4,11 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+
+	"github.com/tesserix/kora/api/internal/aitrace"
 )
 
 // planningSkill is the registry skill id a multi-day plan request routes to.
@@ -81,19 +86,22 @@ func (s *Service) ClassifyRoute(ctx context.Context, text string) string {
 	if s.provider == nil {
 		return RouteLog
 	}
+	ctx, span := aitrace.Start(ctx, "intent.classify")
+	defer span.End()
 
+	route := RouteLog
 	raw, _, err := s.provider.GenerateText(ctx, intentSystemPrompt, text)
 	if err != nil {
 		slog.WarnContext(ctx, "coach: intent classification failed, treating as a food log", "err", err)
-		return RouteLog
+		span.SetStatus(codes.Error, "classification failed")
+	} else {
+		switch strings.ToLower(strings.TrimSpace(raw)) {
+		case RoutePlan:
+			route = RoutePlan
+		case RouteAsk:
+			route = RouteAsk
+		}
 	}
-
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case RoutePlan:
-		return RoutePlan
-	case RouteAsk:
-		return RouteAsk
-	default:
-		return RouteLog
-	}
+	span.SetAttributes(attribute.String("kora.intent.route", route))
+	return route
 }
