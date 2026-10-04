@@ -409,3 +409,24 @@ func TestPhotoWithNoGuessesRecordsNoMatchAtTheFirstSite(t *testing.T) {
 	assert.Nil(t, got.Phrase, "a photo has no phrase — nil, not an empty string")
 	assert.Equal(t, 0, got.CandidateCount)
 }
+
+func TestOutcomeForKeepsTheCandidatesInRankOrder(t *testing.T) {
+	first, second := uuid.New(), uuid.New()
+	res := Resolution{Candidates: []ResolvedCandidate{
+		{Item: nutrition.FoodItem{ID: first}}, {Item: nutrition.FoodItem{ID: second}},
+	}}
+
+	o := outcomeFor(uuid.New(), outcomeResolved, modeText, phrasePtr("toast"), res)
+
+	assert.Equal(t, []uuid.UUID{first, second}, o.CandidateIDs)
+}
+
+func TestResolutionIDTravelsOnTheContext(t *testing.T) {
+	_, ok := ResolutionIDFrom(context.Background())
+	assert.False(t, ok, "a bare context carries no resolution id")
+
+	id := uuid.New()
+	got, ok := ResolutionIDFrom(WithResolutionID(context.Background(), id))
+	require.True(t, ok)
+	assert.Equal(t, id, got)
+}

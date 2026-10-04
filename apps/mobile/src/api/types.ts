@@ -791,6 +791,8 @@ export interface Resolution {
   provenance: string;
   /** Speech-to-text transcript, present only on a successful voice resolve. */
   transcript?: string;
+  /** Names this resolution so a log can say which of its items it kept (kora#556). */
+  resolution_id?: string;
 }
 
 export interface Friend {

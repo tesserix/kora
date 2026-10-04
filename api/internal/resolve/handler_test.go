@@ -28,9 +28,11 @@ type stubTP struct {
 	err     error
 	gotMime string
 	gotSize int
+	gotID   uuid.UUID
 }
 
 func (s *stubTP) ResolveText(ctx context.Context, uid uuid.UUID, phrase string) (ai.Resolution, error) {
+	s.gotID, _ = ai.ResolutionIDFrom(ctx)
 	return s.text, s.err
 }
 
@@ -590,4 +592,43 @@ func TestBarcodePortionNotAssumedWhenServingGramsPresent(t *testing.T) {
 
 	assert.False(t, got.PortionAssumed)
 	assert.InDelta(t, 350.0, got.PortionGrams, 1e-9)
+}
+
+type barcodeSink struct{ gotID uuid.UUID }
+
+func (s *barcodeSink) Record(ctx context.Context, _ ai.ResolveOutcome) {
+	s.gotID, _ = ai.ResolutionIDFrom(ctx)
+}
+
+func resolutionIDOf(t *testing.T, w *httptest.ResponseRecorder) uuid.UUID {
+	t.Helper()
+	require.Equal(t, http.StatusOK, w.Code)
+	var body struct {
+		Data ai.Resolution `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.NotNil(t, body.Data.ResolutionID, "the client needs the id to report what it logged")
+	return *body.Data.ResolutionID
+}
+
+func TestResolveTextReturnsTheIDItsOutcomeIsRecordedUnder(t *testing.T) {
+	tp := &stubTP{text: ai.Resolution{Tier: ai.TierAuto}}
+	r := newEngine(NewHandler(tp, nil))
+
+	id := resolutionIDOf(t, doJSON(r, http.MethodPost, "/resolve/text", map[string]string{"phrase": "toast"}))
+
+	assert.Equal(t, tp.gotID, id)
+	assert.NotEqual(t, uuid.Nil, id)
+}
+
+func TestResolveBarcodeReturnsTheIDItsOutcomeIsRecordedUnder(t *testing.T) {
+	bc := func(context.Context, string) (*nutrition.FoodItem, bool, error) {
+		return &nutrition.FoodItem{ID: uuid.New(), Name: "Cola"}, true, nil
+	}
+	sink := &barcodeSink{}
+	r := newEngine(NewHandler(&stubTP{}, bc).WithOutcomeSink(sink))
+
+	id := resolutionIDOf(t, doJSON(r, http.MethodPost, "/resolve/barcode", map[string]string{"barcode": "5449000000123"}))
+
+	assert.Equal(t, sink.gotID, id)
 }

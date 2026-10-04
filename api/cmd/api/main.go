@@ -22,6 +22,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 
+	"github.com/tesserix/kora/api/internal/accuracy"
 	"github.com/tesserix/kora/api/internal/agents"
 	"github.com/tesserix/kora/api/internal/ai"
 	"github.com/tesserix/kora/api/internal/ai/providers"
@@ -217,6 +218,13 @@ func main() {
 		shutdownTracing = func(context.Context) error { return nil }
 	}
 
+	scores := accuracy.NewClient(accuracy.Config{
+		Host:        cfg.LangfuseHost,
+		PublicKey:   cfg.LangfusePublicKey,
+		SecretKey:   cfg.LangfuseSecretKey,
+		Environment: cfg.Env,
+	})
+
 	coordinator := buildAgents(cfg, logger)
 
 	srv := &http.Server{
@@ -233,6 +241,7 @@ func main() {
 			BFFHMACKey:           cfg.BFFHMACKey,
 			MCPInternalKey:       cfg.MCPInternalKey,
 			AITraceUserKey:       cfg.AITraceUserKey,
+			Accuracy:             accuracy.NewRecorder(resolveoutcome.NewRepository(db), scores),
 			PlatformAdminSecret:  cfg.PlatformAdminSecret,
 			PlatformHealthProbes: healthProbes,
 			AppleExchanger:       appleExchanger,
@@ -300,6 +309,9 @@ func main() {
 	}
 	if err := srv.Shutdown(ctx); err != nil {
 		logger.Error("shutdown error", "err", err)
+	}
+	if err := scores.Close(ctx); err != nil {
+		logger.Error("accuracy scores shutdown error", "err", err)
 	}
 	if err := shutdownTracing(ctx); err != nil {
 		logger.Error("ai tracing shutdown error", "err", err)

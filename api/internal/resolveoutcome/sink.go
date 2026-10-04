@@ -3,6 +3,8 @@ package resolveoutcome
 import (
 	"context"
 
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/tesserix/kora/api/internal/ai"
 )
 
@@ -22,7 +24,7 @@ func NewSink(repo Repository) Sink { return Sink{repo: repo} }
 // Record implements ai.OutcomeSink. It cannot return an error, by design —
 // see Repository.Record.
 func (s Sink) Record(ctx context.Context, o ai.ResolveOutcome) {
-	s.repo.Record(ctx, Outcome{
+	out := Outcome{
 		UserID:         o.UserID,
 		Kind:           Kind(o.Kind),
 		Tier:           o.Tier,
@@ -32,7 +34,18 @@ func (s Sink) Record(ctx context.Context, o ai.ResolveOutcome) {
 		TopScore:       o.TopScore,
 		CandidateCount: o.CandidateCount,
 		Status:         StatusOpen,
-	})
+	}
+	if id, ok := ai.ResolutionIDFrom(ctx); ok {
+		out.ID = id
+	}
+	if sc := trace.SpanContextFromContext(ctx); sc.IsValid() {
+		traceID := sc.TraceID().String()
+		out.TraceID = &traceID
+	}
+	for _, id := range o.CandidateIDs {
+		out.CandidateFoodItemIDs = append(out.CandidateFoodItemIDs, id.String())
+	}
+	s.repo.Record(ctx, out)
 }
 
 var _ ai.OutcomeSink = Sink{}

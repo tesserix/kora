@@ -75,7 +75,11 @@ type Config struct {
 	AITraceEndpoint string
 	// AITraceUserKey HMACs user ids in traces; without it traces carry no user.
 	AITraceUserKey []byte
-	Release        string
+	// Langfuse* let kora-api score its own traces; any empty disables scoring.
+	LangfuseHost      string
+	LangfusePublicKey string
+	LangfuseSecretKey string
+	Release           string
 	// PlatformAdminSecret is the shared secret the Tesserix platform console's
 	// federation client signs its requests to /v1/admin/* with. Empty leaves
 	// the contract endpoints unmounted, the same choice BFFHMACKey makes.
@@ -137,6 +141,9 @@ func Load() (Config, error) {
 		Env:                      getenv("ENV", "development"),
 		Release:                  os.Getenv("KORA_RELEASE"),
 		AITraceEndpoint:          strings.TrimSpace(os.Getenv("KORA_AI_TRACE_ENDPOINT")),
+		LangfuseHost:             strings.TrimSpace(os.Getenv("KORA_LANGFUSE_HOST")),
+		LangfusePublicKey:        strings.TrimSpace(os.Getenv("KORA_LANGFUSE_PUBLIC_KEY")),
+		LangfuseSecretKey:        strings.TrimSpace(os.Getenv("KORA_LANGFUSE_SECRET_KEY")),
 		DatabaseURL:              os.Getenv("DATABASE_URL"),
 		RedisURL:                 getenv("REDIS_URL", "redis://localhost:6379/0"),
 		FirebaseProjectID:        os.Getenv("FIREBASE_PROJECT_ID"),

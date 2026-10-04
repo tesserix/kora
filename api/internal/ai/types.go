@@ -3,7 +3,11 @@
 // always come from the nutrition index (never from the model).
 package ai
 
-import "github.com/tesserix/kora/api/internal/nutrition"
+import (
+	"github.com/google/uuid"
+
+	"github.com/tesserix/kora/api/internal/nutrition"
+)
 
 // Guess is a single food identification from a provider. It carries NO
 // nutrition numbers — only identity + portion + confidence.
@@ -232,4 +236,6 @@ type Resolution struct {
 	// blank; a text log already has the client-supplied phrase for
 	// input_phrase, and a photo has no phrase at all.
 	Transcript string `json:"transcript,omitempty"`
+	// ResolutionID names this attempt's outcome; a log that sends it back is scored against it.
+	ResolutionID *uuid.UUID `json:"resolution_id,omitempty"`
 }
