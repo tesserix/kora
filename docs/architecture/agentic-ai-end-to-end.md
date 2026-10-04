@@ -475,8 +475,9 @@ reviewed agents; replica counts and live availability are deployment state:
 | `plan-supervisor` | Reviews the draft against user constraints and returns a bounded plan |
 
 The current one-week bound is deliberate and matches both repositories after
-PR #574. Longer plans require chunking (`tesserix/ai-agents#69`); a larger
-requested duration is not evidence that a longer plan was implemented.
+PR #574 and the cap selected for `tesserix/ai-agents#69`. For a longer request,
+the planner is instructed to produce a representative week and explain weekly
+repetition or re-planning; it does not generate a full multiweek plan.
 
 The runtime exposes authenticated discovery and execution endpoints:
 
@@ -506,7 +507,7 @@ only `kora-auto`.
 ```mermaid
 flowchart TB
     SM[Configured secret stores: GCP Secret Manager or OpenBao] -->|External Secrets Operator| KS[Kubernetes Secrets]
-    KS -->|env/secretRef| API[Kora API: Gateway client credential only]
+    KS -->|env/secretRef| API[Kora API: Gateway client and OCR signing credentials]
     KS -->|env/secretRef| AG[Kora agents: service + Gateway credentials]
     KS -->|client, agent-service, provider secretRefs| GW[Agent Gateway]
     WI[GKE Workload Identity] -->|ADC| GW
