@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -86,8 +87,10 @@ func originOf(raw string) string {
 	return u.Scheme + "://" + u.Host
 }
 
+var agentNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
+
 // Send runs one message against the agent addressed by the resolved card.
-// The card supplies the route; the gateway supplies the host and the key.
+// The card names the agent; the gateway supplies the host and the key.
 func (g *Gateway) Send(ctx context.Context, resolved *ResolvedAgent, prompt string) (Run, error) {
 	if g == nil {
 		return Run{}, ErrNotConfigured
@@ -99,6 +102,11 @@ func (g *Gateway) Send(ctx context.Context, resolved *ResolvedAgent, prompt stri
 	path := resolved.A2APath()
 	if path == "" {
 		return Run{}, fmt.Errorf("agents: %s publishes no a2a url", resolved.Agent.Metadata.Name)
+	}
+	// A registry card must not be able to steer a user's prompt to any other gateway route.
+	name := resolved.Agent.Metadata.Name
+	if !agentNamePattern.MatchString(name) || path != "/a2a/v1/"+name {
+		return Run{}, fmt.Errorf("agents: %q publishes a2a path %q, want /a2a/v1/<name>", name, path)
 	}
 	if transport := resolved.Transport(); transport != "JSONRPC" {
 		return Run{}, fmt.Errorf("agents: %s wants transport %s, which Kora does not speak", resolved.Agent.Metadata.Name, transport)

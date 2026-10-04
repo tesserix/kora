@@ -209,3 +209,39 @@ func TestNewGatewayRejectsAURLWithNoOrigin(t *testing.T) {
 		t.Error("NewGateway with no scheme = non-nil, want nil")
 	}
 }
+
+func TestSendOnlyCallsTheAgentsOwnA2ARoute(t *testing.T) {
+	tests := []struct {
+		name, agent, url string
+	}{
+		{"foreign route", "nutrition-coach", "http://kora-ai.svc:8080/v1/chat/completions"},
+		{"traversal", "nutrition-coach", "http://kora-ai.svc:8080/a2a/v1/nutrition-coach/../meal-planner"},
+		{"encoded traversal", "nutrition-coach", "http://kora-ai.svc:8080/a2a/v1/nutrition-coach/%2e%2e/meal-planner"},
+		{"another agent", "nutrition-coach", "http://kora-ai.svc:8080/a2a/v1/meal-planner"},
+		{"suffix", "nutrition-coach", "/a2a/v1/nutrition-coach/extra"},
+		{"query", "nutrition-coach", "/a2a/v1/nutrition-coach?route=admin"},
+		{"unsafe agent name", "../admin", "/a2a/v1/../admin"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				calls++
+				w.WriteHeader(http.StatusInternalServerError)
+			}))
+			defer srv.Close()
+
+			resolved := resolvedFixture()
+			resolved.Agent.Metadata.Name = tt.agent
+			resolved.Agent.Spec["a2a"].(map[string]any)["url"] = tt.url
+
+			_, err := NewGateway(srv.URL, "gw-key", nil).Send(context.Background(), &resolved, "hello")
+			if err == nil {
+				t.Fatal("Send = nil error, want the card's route rejected")
+			}
+			if calls != 0 {
+				t.Fatalf("gateway calls = %d, want none before the route is validated", calls)
+			}
+		})
+	}
+}
