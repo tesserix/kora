@@ -71,7 +71,7 @@ func TestNewPlanProposal_BoundsTheDraftItWasGiven(t *testing.T) {
 	plan := newPlanProposal(uuid.New(), envelope, "", "")
 
 	require.NotNil(t, plan)
-	require.Len(t, plan.Days, 62, "the runtime agent contract permits at most two calendar months")
+	require.Len(t, plan.Days, 7, "the agent contract permits one week, sized to fit one review")
 	require.Len(t, plan.Days[0].Meals, maxPlanMealsPerDay)
 	require.Len(t, []rune(plan.Summary), maxPlanSummary)
 	require.Len(t, []rune(plan.Days[0].Date), maxPlanDateChars)

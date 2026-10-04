@@ -130,9 +130,10 @@ func TestParseReviewedPlanStripsAnInvalidMachineBlock(t *testing.T) {
 	require.Equal(t, "I could not validate a complete plan.", clean)
 }
 
-func TestReviewPromptSupportsTwoMonthPlansWithoutDuplicatingEveryDayInProse(t *testing.T) {
-	require.Contains(t, reviewSystemPrompt, "1-62 days")
-	require.Contains(t, reviewSystemPrompt, "For plans longer than 14 days")
+func TestReviewPromptAsksForOneRepeatableWeek(t *testing.T) {
+	require.Contains(t, reviewSystemPrompt, "1-7 days")
+	require.Contains(t, reviewSystemPrompt, "one repeatable week")
+	require.NotContains(t, reviewSystemPrompt, "longer than 14 days")
 	require.Contains(t, reviewSystemPrompt, "complete FINAL plan")
 }
 
