@@ -28,7 +28,6 @@ func resolvedFixture() ResolvedAgent {
 				},
 				"skills": []any{
 					map[string]any{"id": "nutrition-guidance", "name": "Nutrition Guidance"},
-					map[string]any{"id": "review-meal-plan", "name": "Review Meal Plan"},
 				},
 			},
 		},

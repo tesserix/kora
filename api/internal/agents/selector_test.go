@@ -9,9 +9,9 @@ import (
 	"testing"
 )
 
-// twoAgentRegistry publishes a planner that declares meal-planning and a coach
-// that declares nutrition-guidance, so routing has to choose on skill rather
-// than on a name Kora knows.
+// twoAgentRegistry publishes a planner, a coach and the plan supervisor with
+// the skills ai-agents declares, so routing has to choose on skill rather than
+// on a name Kora knows.
 func twoAgentRegistry(t *testing.T) *httptest.Server {
 	t.Helper()
 
@@ -27,14 +27,27 @@ func twoAgentRegistry(t *testing.T) *httptest.Server {
 		},
 	}
 
+	supervisor := ResolvedAgent{
+		Agent: Object{
+			Kind:     "Agent",
+			Metadata: ObjectMeta{Name: "plan-supervisor", Namespace: "kora", Tag: "1.0.2"},
+			Spec: map[string]any{
+				"a2a":    map[string]any{"url": "http://kora-ai.svc:8080/a2a/v1/plan-supervisor"},
+				"skills": []any{map[string]any{"id": "review-meal-plan"}},
+			},
+		},
+	}
+
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v0/agents/":
-			_ = json.NewEncoder(w).Encode([]Object{planner.Agent, coach.Agent})
+			_ = json.NewEncoder(w).Encode([]Object{planner.Agent, coach.Agent, supervisor.Agent})
 		case "/v0/agents/nutrition-coach/resolved":
 			_ = json.NewEncoder(w).Encode(coach)
 		case "/v0/agents/meal-planner/resolved":
 			_ = json.NewEncoder(w).Encode(planner)
+		case "/v0/agents/plan-supervisor/resolved":
+			_ = json.NewEncoder(w).Encode(supervisor)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -48,7 +61,7 @@ func TestReviewedAgentForSkillMatchesThePilotPolicy(t *testing.T) {
 		ok    bool
 	}{
 		{skill: "nutrition-guidance", agent: "nutrition-coach", ok: true},
-		{skill: "review-meal-plan", agent: "nutrition-coach", ok: true},
+		{skill: "review-meal-plan", agent: "plan-supervisor", ok: true},
 		{skill: "plan-meals", agent: "meal-planner", ok: true},
 		{skill: "arbitrary-tool-use", ok: false},
 	}
@@ -105,6 +118,41 @@ func TestRunRoutesOnTheSkillTheRegistryPublishes(t *testing.T) {
 	}
 	if len(observed) != 1 || observed[0] != "nutrition-coach/nutrition-guidance/ok" {
 		t.Errorf("observed = %v, want one ok run attributed to the coach", observed)
+	}
+}
+
+func TestRunSendsPlanReviewToThePlanSupervisor(t *testing.T) {
+	registrySrv := twoAgentRegistry(t)
+	defer registrySrv.Close()
+
+	var calledPath string
+	gatewaySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calledPath = r.URL.Path
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"jsonrpc": "2.0", "id": body["id"],
+			"result": map[string]any{
+				"id":        "run-1",
+				"status":    map[string]any{"state": "completed"},
+				"artifacts": []any{map[string]any{"parts": []any{map[string]any{"kind": "text", "text": "reviewed"}}}},
+			},
+		})
+	}))
+	defer gatewaySrv.Close()
+
+	c := NewCoordinator(
+		NewRegistry(RegistryOptions{BaseURL: registrySrv.URL, APIKey: "test-key"}),
+		NewGateway(gatewaySrv.URL, "gw-key", nil),
+		nil,
+	)
+
+	run, err := c.Run(context.Background(), "review-meal-plan", "DRAFT PLAN: {}")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if run.Agent != "plan-supervisor" || calledPath != "/a2a/v1/plan-supervisor" {
+		t.Errorf("review ran on %q via %q, want plan-supervisor via its card path", run.Agent, calledPath)
 	}
 }
 
@@ -247,8 +295,8 @@ func TestCatalogReportsWhatIsPublishedRightNow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Catalog: %v", err)
 	}
-	if len(catalog) != 2 {
-		t.Fatalf("catalog has %d agents, want 2", len(catalog))
+	if len(catalog) != 3 {
+		t.Fatalf("catalog has %d agents, want 3", len(catalog))
 	}
 	// Sorted by name, so meal-planner comes first.
 	if catalog[0].Name != "meal-planner" || catalog[0].Skills[0] != "plan-meals" {
