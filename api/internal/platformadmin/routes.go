@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"github.com/tesserix/kora/api/internal/agents"
 	"github.com/tesserix/kora/api/internal/billing"
 	"github.com/tesserix/kora/api/internal/platformauth"
 	"github.com/tesserix/kora/api/internal/resolveoutcome"
@@ -22,6 +23,8 @@ type Deps struct {
 	// GET /admin/health, keyed by dependency name. A name in
 	// DependencyRegistry with no probe here reports `unknown`, never `ok`.
 	Probes map[string]Probe
+	// Agents mounts the registry diagnostics; nil leaves them unmounted.
+	Agents *agents.Coordinator
 	Logger *slog.Logger
 }
 
@@ -126,6 +129,13 @@ func Register(r *gin.Engine, deps Deps) {
 	// this refuses any action that item did not offer, so the declared array
 	// is a contract the console can render against (kora#484).
 	g.POST("/inbox/:id/actions/:actionId", NewInboxActionHandler(repo, deps.Logger).Apply)
+
+	if deps.Agents != nil {
+		agentsHandler := agents.NewHandler(deps.Agents)
+		g.GET("/agents", agentsHandler.List)
+		g.GET("/agents/:name", agentsHandler.Get)
+		g.POST("/agents/:name/refresh", agentsHandler.Refresh)
+	}
 
 	// Not mounted, deliberately, so the absences are legible here rather than
 	// only in an issue:

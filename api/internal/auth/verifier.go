@@ -4,6 +4,7 @@ package auth
 import (
 	"context"
 	"fmt"
+	"time"
 
 	firebase "firebase.google.com/go/v4"
 	fbauth "firebase.google.com/go/v4/auth"
@@ -20,9 +21,9 @@ type TokenVerifier interface {
 }
 
 // IdentityDeleter removes a Firebase identity. Deliberately a separate
-// interface from TokenVerifier: verification needs only Google's public
-// keys, while deletion needs Firebase Admin privileges. A consumer that only
-// deletes should not have to depend on Verify, and vice versa.
+// interface from TokenVerifier: a consumer that only deletes should not
+// depend on verification. Verification requires firebaseauth.users.get for
+// account status checks; deletion requires firebaseauth.users.delete.
 type IdentityDeleter interface {
 	DeleteIdentity(ctx context.Context, firebaseUID string) error
 }
@@ -44,7 +45,9 @@ func NewFirebaseVerifier(ctx context.Context, projectID string) (TokenVerifier, 
 }
 
 func (v firebaseVerifier) Verify(ctx context.Context, idToken string) (Claims, error) {
-	tok, err := v.client.VerifyIDToken(ctx, idToken)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	tok, err := v.client.VerifyIDTokenAndCheckRevoked(ctx, idToken)
 	if err != nil {
 		return Claims{}, fmt.Errorf("auth: verify token: %w", err)
 	}
@@ -53,8 +56,7 @@ func (v firebaseVerifier) Verify(ctx context.Context, idToken string) (Claims, e
 
 // claimsFromToken extracts the identity fields this package cares about from
 // a verified Firebase token. Pulled out of Verify so it can be unit tested
-// against a hand-built *fbauth.Token without a real Firebase client, which
-// VerifyIDToken requires and cannot be faked in-process.
+// against a hand-built *fbauth.Token independently of signature verification.
 //
 // Non-string or missing claims (e.g. a JSON number, or a token that never
 // carried the claim) yield the zero value rather than panicking: a failed

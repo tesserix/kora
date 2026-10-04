@@ -3,7 +3,7 @@
     "name": "Kora",
     "slug": "kora",
     "owner": "tesserix-org",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "mobile",
@@ -49,6 +49,7 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      "expo-secure-store",
       "expo-router",
       "expo-dev-client",
       [

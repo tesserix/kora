@@ -3,9 +3,11 @@ package platformauth
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -16,6 +18,24 @@ import (
 )
 
 const testSecret = "test-secret"
+
+func TestMiddlewareRejectsBodyBeyondSignedPrefix(t *testing.T) {
+	now := time.Unix(1755859200, 0)
+	req := signedRequest(t, "/v1/admin/probe", "", now)
+	prefix := strings.Repeat("x", maxBodyBytes)
+	sig, err := Sign(testSecret, SignatureInput{
+		Method: req.Method, Path: req.URL.Path, Body: []byte(prefix),
+		Timestamp: req.Header.Get(HeaderTimestamp), Nonce: req.Header.Get(HeaderNonce),
+		Operator: req.Header.Get(HeaderOperator), Capability: req.Header.Get(HeaderCapability),
+	})
+	require.NoError(t, err)
+	req.Header.Set(HeaderSignature, sig)
+	req.Body = io.NopCloser(strings.NewReader(prefix + "unsigned suffix"))
+	req.ContentLength = -1
+	w := httptest.NewRecorder()
+	router(fixedConfig(now, newFakeNonces())).ServeHTTP(w, req)
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}
 
 // fakeNonces is an in-memory NonceStore. Production must not use one (see
 // NewNonceStore) — replay defence that works at one replica is not defence —

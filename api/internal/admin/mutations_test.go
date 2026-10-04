@@ -561,13 +561,13 @@ func TestUpdateFoodAdvancesUpdatedAtForTheEditedRowOnly(t *testing.T) {
 	edited := seedFoodTx(t, tx, "zzz-updatedat-edit-"+uuid.NewString(), "")
 	sibling := seedFoodTx(t, tx, "zzz-updatedat-sibling-"+uuid.NewString(), "")
 
+	require.NoError(t, tx.Exec("UPDATE food_items SET updated_at = ? WHERE id = ?", time.Now().UTC().Add(-time.Hour), edited.ID).Error)
 	beforeEdited := loadUpdatedAt(t, tx, edited.ID)
 	beforeSibling := loadUpdatedAt(t, tx, sibling.ID)
 
 	repo := NewMutationRepository(tx, ai.NoCache{})
 	actor := Actor{ID: "admin-1", Email: "ops@kora.test"}
 
-	time.Sleep(5 * time.Millisecond) // ensure a wall-clock-observable gap
 	in := inputFrom(edited)
 	in.KcalPer100g = edited.KcalPer100g + 1
 	_, err := repo.UpdateFood(context.Background(), actor, edited.ID, in, beforeEdited)
@@ -587,12 +587,12 @@ func TestSoftDeleteFoodAdvancesUpdatedAt(t *testing.T) {
 	tx := seedTx(t, db)
 	target := seedFoodTx(t, tx, "zzz-updatedat-delete-"+uuid.NewString(), "")
 
+	require.NoError(t, tx.Exec("UPDATE food_items SET updated_at = ? WHERE id = ?", time.Now().UTC().Add(-time.Hour), target.ID).Error)
 	before := loadUpdatedAt(t, tx, target.ID)
 
 	repo := NewMutationRepository(tx, ai.NoCache{})
 	actor := Actor{ID: "admin-1", Email: "ops@kora.test"}
 
-	time.Sleep(5 * time.Millisecond)
 	_, err := repo.SoftDeleteFood(context.Background(), actor, target.ID)
 	require.NoError(t, err)
 

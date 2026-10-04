@@ -208,8 +208,9 @@ func trendRouter(userID uuid.UUID, repo Repository, sig SignalsSource) *gin.Engi
 // week. Invented figures: this repo is public and carries no real body data.
 func seedDecline(t *testing.T, repo Repository, userID uuid.UUID) {
 	t.Helper()
+	now := time.Now().UTC()
 	for i, w := range []float64{80, 79.5, 79, 78.5, 78} {
-		at := time.Now().AddDate(0, 0, -28+(i*7))
+		at := now.AddDate(0, 0, -28+(i*7))
 		_, err := repo.AddWeight(context.Background(), userID, w, at, dayOf(at))
 		require.NoError(t, err)
 	}

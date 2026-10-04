@@ -142,8 +142,12 @@ type Deps struct {
 
 func NewRouter(deps Deps) *gin.Engine {
 	r := gin.New()
-	r.Use(gin.Recovery())
+	// RequestLogger records panics without Gin's raw request/credential dump.
+	r.Use(gin.CustomRecoveryWithWriter(nil, func(c *gin.Context, _ any) {
+		httpx.Error(c, http.StatusInternalServerError, "internal_error", "internal server error")
+	}))
 	r.Use(RequestLogger())
+	r.Use(limitRequestBody())
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
@@ -319,6 +323,7 @@ func NewRouter(deps Deps) *gin.Engine {
 			DB:     deps.DB,
 			Secret: deps.PlatformAdminSecret,
 			Probes: platformHealthProbes(deps),
+			Agents: deps.Agents,
 			// main calls slog.SetDefault before building the router, so this
 			// is the same logger every other package here writes through.
 			// Not a Deps field: nothing else in this router takes one, and
@@ -549,13 +554,6 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.POST("/coach/ask", coachHandler.Ask)
 		v1.GET("/coach/thread", coachHandler.Thread)
 		v1.PUT("/coach/plans/:id/accept", coachHandler.AcceptPlan)
-
-		if deps.Agents != nil {
-			agentsHandler := agents.NewHandler(deps.Agents)
-			v1.GET("/agents", agentsHandler.List)
-			v1.GET("/agents/:name", agentsHandler.Get)
-			v1.POST("/agents/:name/refresh", agentsHandler.Refresh)
-		}
 
 		feedbackHandler := feedback.NewHandler(feedback.NewRepository(deps.DB))
 		v1.POST("/feedback", feedbackHandler.Create)
