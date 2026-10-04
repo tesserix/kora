@@ -2,6 +2,7 @@ package aieval
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	"github.com/google/uuid"
@@ -23,17 +24,21 @@ type TextResolver interface {
 }
 
 // Run resolves every item under its own trace, links it to the run and scores it.
-// A resolve error is graded as a miss; a Langfuse write error is logged, never fatal.
-func Run(ctx context.Context, resolver TextResolver, lf *Client, run string, items []Item) []Result {
+// A resolve error is graded as a miss; a recording failure makes the run incomplete.
+func Run(ctx context.Context, resolver TextResolver, lf *Client, run string, items []Item) ([]Result, error) {
 	user := uuid.New()
 	results := make([]Result, 0, len(items))
 	for _, it := range items {
-		results = append(results, runItem(ctx, resolver, lf, run, user, it))
+		result, err := runItem(ctx, resolver, lf, run, user, it)
+		if err != nil {
+			return results, err
+		}
+		results = append(results, result)
 	}
-	return results
+	return results, nil
 }
 
-func runItem(ctx context.Context, resolver TextResolver, lf *Client, run string, user uuid.UUID, it Item) Result {
+func runItem(ctx context.Context, resolver TextResolver, lf *Client, run string, user uuid.UUID, it Item) (Result, error) {
 	ctx, span := aitrace.Start(ctx, traceName,
 		attribute.String("langfuse.trace.name", traceName),
 		attribute.String("langfuse.trace.metadata.dataset_item_id", it.ID),
@@ -49,10 +54,10 @@ func runItem(ctx context.Context, resolver TextResolver, lf *Client, run string,
 	r := Grade(res, it.Expected)
 
 	if err := lf.LinkRun(ctx, run, it.ID, traceID); err != nil {
-		slog.WarnContext(ctx, "aieval: run item not recorded", "item", it.ID, "err", err)
+		return r, fmt.Errorf("record experiment item: %w", err)
 	}
 	if !r.Graded {
-		return r
+		return r, nil
 	}
 	scores := map[string]bool{ScoreTop1: r.Top1Correct}
 	if r.KcalWithin != nil {
@@ -60,8 +65,8 @@ func runItem(ctx context.Context, resolver TextResolver, lf *Client, run string,
 	}
 	for name, ok := range scores {
 		if err := lf.Score(ctx, traceID, name, ok); err != nil {
-			slog.WarnContext(ctx, "aieval: score not recorded", "item", it.ID, "err", err)
+			return r, fmt.Errorf("record experiment score: %w", err)
 		}
 	}
-	return r
+	return r, nil
 }

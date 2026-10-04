@@ -66,6 +66,10 @@ func evaluate(ctx context.Context, lf *aieval.Client, dataset, run string, accep
 		slog.Error("aieval: baseline unreadable", "err", err)
 		return exitBroken
 	}
+	if !hasBaseline && !accept {
+		slog.Error("aieval: no accepted baseline; run with -accept to establish one", "dataset", dataset)
+		return exitBroken
+	}
 	resolver, err := buildResolver()
 	if err != nil {
 		slog.Error("aieval: resolver unavailable", "err", err)
@@ -81,11 +85,17 @@ func evaluate(ctx context.Context, lf *aieval.Client, dataset, run string, accep
 		slog.Error("aieval: tracing unavailable", "err", err)
 		return exitBroken
 	}
-	summary := aieval.Summarize(aieval.Run(ctx, resolver, lf, run, items))
+	results, runErr := aieval.Run(ctx, resolver, lf, run, items)
+	summary := aieval.Summarize(results)
 	flushCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	if err := shutdown(flushCtx); err != nil {
 		slog.Warn("aieval: traces not flushed", "err", err)
+	}
+
+	if runErr != nil {
+		slog.Error("aieval: experiment incomplete", "err", runErr)
+		return exitBroken
 	}
 
 	report, _ := json.Marshal(map[string]any{"dataset": dataset, "run": run, "summary": summary, "baseline": baseline})
@@ -96,10 +106,6 @@ func evaluate(ctx context.Context, lf *aieval.Client, dataset, run string, accep
 			return exitBroken
 		}
 		slog.Info("aieval: baseline accepted", "run", run)
-		return 0
-	}
-	if !hasBaseline {
-		slog.Warn("aieval: no accepted baseline yet; rerun with -accept to set one", "dataset", dataset)
 		return 0
 	}
 	if regressions := aieval.Compare(summary, baseline); len(regressions) > 0 {

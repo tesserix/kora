@@ -152,3 +152,13 @@ func TestRequestsWithBadKeysFail(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestAcceptBaselineRejectsAnUngradedRun(t *testing.T) {
+	f, c := newFakeLangfuse(t, 0)
+	if err := c.AcceptBaseline(t.Context(), "kora-capture-text", Summary{Cases: 3}, "nightly"); err == nil {
+		t.Fatal("accepted a baseline with no graded cases")
+	}
+	if len(f.posts["/api/public/v2/datasets"]) != 0 {
+		t.Fatal("ungraded baseline was persisted")
+	}
+}
