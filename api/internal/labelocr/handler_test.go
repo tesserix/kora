@@ -142,3 +142,10 @@ func TestHandlerChargesEveryLabelReadToTheBudget(t *testing.T) {
 	require.Len(t, failed.recorded, 1, "a failed read still spent a quota slot")
 	assert.Equal(t, ai.OutcomeError, failed.recorded[0].Outcome)
 }
+
+func TestHandlerRejectsUnknownCaloriesInsteadOfReturningAZeroCalorieFood(t *testing.T) {
+	reader := &stubReader{read: Read{Fields: fields(t, map[string]any{"per_100g.energy_kcal": nil})}}
+	rec := post(t, reader, jpeg, true)
+	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
+	assert.Contains(t, rec.Body.String(), "label_unreadable")
+}

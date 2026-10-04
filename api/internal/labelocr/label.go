@@ -4,6 +4,7 @@ package labelocr
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"strings"
 )
 
@@ -14,6 +15,7 @@ const (
 	IssueDerivedFromServing = "derived_from_serving"
 	IssueOutOfRange         = "out_of_range"
 	IssueLowConfidence      = "low_confidence"
+	IssueAtwaterMismatch    = "energy_atwater_mismatch"
 
 	kjPerKcal     = 4.184
 	minConfidence = 0.6
@@ -90,12 +92,15 @@ func Check(fields map[string]Field, failures []Failure) (Label, error) {
 		label.Per100 = label.PerServing.scaled(100 / serving.Amount)
 		label.addIssue(IssueDerivedFromServing)
 	}
-	if label.Per100.EnergyKcal == nil {
+	if label.Per100.EnergyKcal == nil || label.Per100.hasNonFinite() {
 		return Label{}, ErrUnreadable
 	}
 
 	if label.Per100.outOfRange() {
 		label.addIssue(IssueOutOfRange)
+	}
+	if label.Per100.atwaterMismatch() || label.PerServing.atwaterMismatch() {
+		label.addIssue(IssueAtwaterMismatch)
 	}
 	for _, field := range fields {
 		if field.Confidence < minConfidence {
@@ -169,12 +174,30 @@ func (n Nutrients) outOfRange() bool {
 		over(n.CarbohydrateG, 100) || over(n.SugarsG, 100) || over(n.FibreG, 100)
 }
 
+func (n Nutrients) hasNonFinite() bool {
+	for _, value := range []*float64{n.EnergyKcal, n.ProteinG, n.FatG, n.SaturatedFatG, n.CarbohydrateG, n.SugarsG, n.FibreG, n.SodiumMg} {
+		if value != nil && (math.IsNaN(*value) || math.IsInf(*value, 0)) {
+			return true
+		}
+	}
+	return false
+}
+
+func (n Nutrients) atwaterMismatch() bool {
+	if n.EnergyKcal == nil || n.ProteinG == nil || n.CarbohydrateG == nil || n.FatG == nil {
+		return false
+	}
+	expected := 4**n.ProteinG + 4**n.CarbohydrateG + 9**n.FatG
+	// Match the nutrition-label schema's allowance for rounding and unlisted energy sources.
+	return math.Abs(expected-*n.EnergyKcal) > math.Max(0.2**n.EnergyKcal, 15)
+}
+
 func number(fields map[string]Field, name string) *float64 {
-	var v float64
+	var v *float64
 	if !decode(fields, name, &v) {
 		return nil
 	}
-	return &v
+	return v
 }
 
 func decode(fields map[string]Field, name string, into any) bool {

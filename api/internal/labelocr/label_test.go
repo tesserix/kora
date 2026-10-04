@@ -112,3 +112,48 @@ func TestCheckKeepsPer100mlAndIgnoresNonMassServings(t *testing.T) {
 	assert.Nil(t, label.ServingGrams)
 	assert.InDelta(t, 42, *label.Per100.EnergyKcal, 1e-9)
 }
+
+func TestCheckDoesNotTurnUnknownNutritionIntoZero(t *testing.T) {
+	t.Run("missing energy remains unreadable", func(t *testing.T) {
+		_, err := Check(fields(t, map[string]any{"per_100g.energy_kcal": nil}), nil)
+		require.ErrorIs(t, err, ErrUnreadable)
+	})
+	t.Run("null kcal falls back to kJ and null macros remain unknown", func(t *testing.T) {
+		label, err := Check(fields(t, map[string]any{
+			"per_100g.energy_kcal": nil, "per_100g.energy_kj": 418.4, "per_100g.protein_g": nil,
+		}), nil)
+		require.NoError(t, err)
+		require.NotNil(t, label.Per100.EnergyKcal)
+		assert.InDelta(t, 100, *label.Per100.EnergyKcal, 1e-9)
+		assert.Nil(t, label.Per100.ProteinG)
+	})
+}
+
+func TestCheckIndependentlyFlagsAtwaterMismatch(t *testing.T) {
+	for _, prefix := range []string{BasisPer100g, "per_serving"} {
+		t.Run(prefix, func(t *testing.T) {
+			label, err := Check(fields(t, map[string]any{
+				"per_100g.energy_kcal":     100,
+				prefix + ".energy_kcal":    100,
+				prefix + ".protein_g":      20,
+				prefix + ".carbohydrate_g": 20,
+				prefix + ".fat_g":          10,
+			}), nil)
+			require.NoError(t, err)
+			assert.Contains(t, label.Issues, "energy_atwater_mismatch")
+			assert.True(t, label.NeedsReview)
+			assert.Equal(t, 100.0, *label.Per100.EnergyKcal, "report the mismatch without inventing a corrected calorie value")
+		})
+	}
+}
+
+func TestCheckRejectsServingNormalizationOverflow(t *testing.T) {
+	for _, energy := range []float64{0, 100} {
+		_, err := Check(fields(t, map[string]any{
+			"serving_size":            map[string]any{"amount": 1e-308, "unit": "g"},
+			"per_serving.energy_kcal": energy,
+			"per_serving.protein_g":   10,
+		}), nil)
+		require.ErrorIs(t, err, ErrUnreadable, "non-finite derived values cannot be returned as JSON nutrition")
+	}
+}
