@@ -45,6 +45,15 @@ const providerUnavailableText = "Q&A isn't available right now — try again lat
 
 const planReviewUnavailableText = "I drafted your plan, but I couldn't complete its nutrition review. Please try again — no unreviewed plan was saved."
 
+const planTimeoutText = "Planning took longer than I'm allowed to keep you waiting. Please try again — nothing was saved."
+
+// The planner and its reviewer share one deadline that ends before the mobile
+// client's 90s AGENT_REQUEST_TIMEOUT_MS, and the reviewer always keeps its reserve.
+const (
+	defaultAgentDeadline = 80 * time.Second
+	defaultReviewReserve = 30 * time.Second
+)
+
 // emptyQuestionMessage is the client-safe message for a blank/whitespace-only
 // question, surfaced via httpx.ValidationError so the HTTP layer maps it to
 // a 400.
@@ -152,6 +161,9 @@ type Service struct {
 	thread     *ThreadRepository
 	runner     AgentRunner
 	references NutritionReferenceSource
+
+	agentDeadline time.Duration
+	reviewReserve time.Duration
 }
 
 // WithNutritionReferences returns a copy that augments each answer with a
@@ -168,7 +180,10 @@ func (s *Service) WithNutritionReferences(source NutritionReferenceSource) *Serv
 // NewService builds a Service over its collaborators. thread may be nil, in
 // which case exchanges are answered but not persisted.
 func NewService(g *Grounder, p ai.Provider, m ai.Meter, thread *ThreadRepository) *Service {
-	return &Service{g: g, provider: p, meter: m, thread: thread}
+	return &Service{
+		g: g, provider: p, meter: m, thread: thread,
+		agentDeadline: defaultAgentDeadline, reviewReserve: defaultReviewReserve,
+	}
 }
 
 // WithAgents returns a copy of s that prefers the registry-resolved agent for
@@ -232,8 +247,20 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 	var proposal *mentor.CommitmentProposal
 	var plan *PlanProposal
 	viaAgent := true
-	raw, run, err := s.askAgent(ctx, userID, userPrompt, skill)
-	if err == nil {
+	agentCtx, plannerCtx := ctx, ctx
+	if skill == planningSkill {
+		var cancelAgent, cancelPlanner context.CancelFunc
+		agentCtx, cancelAgent = context.WithTimeout(ctx, s.agentDeadline)
+		defer cancelAgent()
+		plannerCtx, cancelPlanner = context.WithTimeout(agentCtx, s.agentDeadline-s.reviewReserve)
+		defer cancelPlanner()
+	}
+	raw, run, err := s.askAgent(plannerCtx, userID, userPrompt, skill)
+	if err != nil && skill == planningSkill && plannerCtx.Err() != nil && ctx.Err() == nil {
+		// An unfinished draft is never reviewed or shown; degrade like a failed review.
+		slog.WarnContext(ctx, "coach: meal planner exceeded its deadline", "err", err)
+		raw, err = planTimeoutText, nil
+	} else if err == nil {
 		// The skill is the one Kora asked for, not the one the run echoes
 		// back: the capability that routed the question is what the user is
 		// told, and it stays right even if a runner omits the field.
@@ -243,7 +270,7 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 			// reviews them against the user's numbers and presents the result
 			// as a proposal to approve or challenge. A failed review must not
 			// expose or persist a draft that has not passed this boundary.
-			if reviewed, reviewer := s.reviewPlan(ctx, userID, grounded.Render(), question, raw); reviewed != "" {
+			if reviewed, reviewer := s.reviewPlan(agentCtx, userID, grounded.Render(), question, raw); reviewed != "" {
 				by.ReviewedBy = reviewer
 				reviewed, envelope, hasReviewedPlan := parseReviewedPlan(reviewed)
 				reviewed, proposal = parseReviewedCommitment(reviewed, userID, now, loc, by.Agent, reviewer)
@@ -589,5 +616,6 @@ func (s *Service) record(ctx context.Context, userID uuid.UUID, u ai.Usage) {
 	if u.Outcome == "" {
 		u.Outcome = ai.OutcomeOK
 	}
-	_ = s.meter.Record(ctx, userID, u, ai.EstimateCostUSD(u))
+	// A run that hit its deadline still spent quota, so metering outlives it.
+	_ = s.meter.Record(context.WithoutCancel(ctx), userID, u, ai.EstimateCostUSD(u))
 }
