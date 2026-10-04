@@ -70,6 +70,7 @@ const (
 // as one built without a cache caches nothing. Every test that constructs a
 // bare Resolver keeps working.
 func (r Resolver) recordOutcome(ctx context.Context, o ResolveOutcome) {
+	traceOutcome(ctx, o)
 	if r.outcomes == nil {
 		return
 	}
