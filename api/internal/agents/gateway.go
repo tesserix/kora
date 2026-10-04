@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -21,9 +23,9 @@ import (
 // without letting a wedged agent hold a request open indefinitely.
 const runTimeout = 60 * time.Second
 
-// maxPromptChars mirrors the A2A text part limit the agents enforce. Trimming
-// here turns a 422 from the gateway into a shorter prompt that still answers.
-const maxPromptChars = 12_000
+// MaxPromptRunes mirrors the agents' max_prompt_chars, which Python counts in
+// characters. Callers fit their prompt first; Send only trims as a last resort.
+const MaxPromptRunes = 12_000
 
 // Usage is the token accounting an agent reports for a run, mapped onto the
 // same shape ai.Usage records so a run bills like any other model call.
@@ -111,8 +113,9 @@ func (g *Gateway) Send(ctx context.Context, resolved *ResolvedAgent, prompt stri
 	if transport := resolved.Transport(); transport != "JSONRPC" {
 		return Run{}, fmt.Errorf("agents: %s wants transport %s, which Kora does not speak", resolved.Agent.Metadata.Name, transport)
 	}
-	if len(prompt) > maxPromptChars {
-		prompt = prompt[:maxPromptChars]
+	if utf8.RuneCountInString(prompt) > MaxPromptRunes {
+		prompt = FirstRunes(prompt, MaxPromptRunes)
+		slog.WarnContext(ctx, "agents: prompt trimmed to the a2a limit", "agent", resolved.Agent.Metadata.Name)
 	}
 
 	requestID := uuid.NewString()
@@ -226,4 +229,15 @@ func (r a2aResponse) text() string {
 		}
 	}
 	return strings.TrimSpace(b.String())
+}
+
+// FirstRunes returns at most n whole characters from the start of s.
+func FirstRunes(s string, n int) string {
+	for i := range s {
+		if n == 0 {
+			return s[:i]
+		}
+		n--
+	}
+	return s
 }
