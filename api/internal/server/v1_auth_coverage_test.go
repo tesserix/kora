@@ -88,6 +88,9 @@ var v1AuthAllowlist = map[string]string{
 	"GET /v1/admin/kpis":                         "platformauth: platform console route, not Firebase auth",
 	"GET /v1/admin/ai-metrics":                   "platformauth: platform console route, not Firebase auth",
 	"POST /v1/admin/inbox/:id/actions/:actionId": "platformauth: platform console route, not Firebase auth",
+	"GET /v1/admin/agents":                       "platformauth: platform console route, not Firebase auth",
+	"GET /v1/admin/agents/:name":                 "platformauth: platform console route, not Firebase auth",
+	"POST /v1/admin/agents/:name/refresh":        "platformauth: platform console route, not Firebase auth",
 }
 
 // concretePath turns a gin route TEMPLATE ("/v1/logs/:id", "/v1/admin/entities/:type")
@@ -122,7 +125,7 @@ func (stubAppleExchanger) ExchangeAuthorizationCode(context.Context, string) (st
 }
 
 // testCoordinator builds a real, but never-called, agents.Coordinator so
-// router.go mounts the /v1/agents routes for discovery below. NewRegistry
+// platformadmin mounts the /v1/admin/agents routes for discovery below. NewRegistry
 // and NewGateway do no network I/O at construction — they only validate that
 // BaseURL/APIKey are non-empty and build a struct — so a bogus, unreachable
 // URL is safe here: nothing in this test ever calls Run or Resolve.
@@ -175,7 +178,7 @@ func TestEveryV1RouteRequiresAuthUnlessAllowlisted(t *testing.T) {
 		// Mounts POST /v1/me/apple-authorization — see the coverage-boundary
 		// comment above v1AuthAllowlist.
 		AppleExchanger: stubAppleExchanger{},
-		// Mounts /v1/agents* — same reasoning.
+		// Mounts /v1/admin/agents* — same reasoning.
 		Agents: testCoordinator(),
 	})
 
