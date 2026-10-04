@@ -57,7 +57,7 @@ func TestSendRequestStatusCodes(t *testing.T) {
 	require.Equal(t, http.StatusCreated, doPOST(r, "/v1/friends/requests", `{"email":"`+otherEmail+`"}`).Code)
 }
 
-func TestAcceptForbiddenForNonAddressee(t *testing.T) {
+func TestAcceptNotFoundForNonAddressee(t *testing.T) {
 	db := testDB(t)
 	a := seedUser(t, db, "Ada")
 	b := seedUser(t, db, "Ben")
@@ -66,9 +66,9 @@ func TestAcceptForbiddenForNonAddressee(t *testing.T) {
 	f, err := svc.SendRequest(context.Background(), a, "so-"+b.String()+"@test.dev", "", "")
 	require.NoError(t, err)
 
-	// c tries to accept a->b request -> 403
+	// An unrelated caller cannot discover the request.
 	rc := mountFor(c, db)
-	require.Equal(t, http.StatusForbidden, doPOST(rc, "/v1/friends/requests/"+f.ID.String()+"/accept", "").Code)
+	require.Equal(t, http.StatusNotFound, doPOST(rc, "/v1/friends/requests/"+f.ID.String()+"/accept", "").Code)
 	// b accepts -> 200
 	rb := mountFor(b, db)
 	require.Equal(t, http.StatusOK, doPOST(rb, "/v1/friends/requests/"+f.ID.String()+"/accept", "").Code)
@@ -92,4 +92,18 @@ func TestListFriendsAndCodeShape(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 	require.NotEmpty(t, body.Data.Code)
 	require.Equal(t, "mobile://friend/"+body.Data.Code, body.Data.Link)
+}
+
+func TestForeignFriendRequestIsIndistinguishableFromMissing(t *testing.T) {
+	db := testDB(t)
+	a, b, outsider := seedUser(t, db, "Ada"), seedUser(t, db, "Ben"), seedUser(t, db, "Cy")
+	svc := NewService(NewRepository(db), user.NewRepository(db), func(string) string { return "" })
+	f, err := svc.SendRequest(t.Context(), a, "so-"+b.String()+"@test.dev", "", "")
+	require.NoError(t, err)
+	for _, action := range []string{"accept", "decline"} {
+		for _, id := range []uuid.UUID{f.ID, uuid.New()} {
+			w := doPOST(mountFor(outsider, db), "/v1/friends/requests/"+id.String()+"/"+action, "")
+			require.Equal(t, http.StatusNotFound, w.Code)
+		}
+	}
 }

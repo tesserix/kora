@@ -157,12 +157,12 @@ func TestUpdateStatusAndDelete(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, repo.UpdateStatus(context.Background(), f.ID, FriendStatusAccepted))
-	got, err := repo.FindByID(context.Background(), f.ID)
+	got, err := repo.FindByID(context.Background(), f.ID, b)
 	require.NoError(t, err)
 	require.Equal(t, FriendStatusAccepted, got.Status)
 
 	require.NoError(t, repo.Delete(context.Background(), f.ID))
-	gone, err := repo.FindByID(context.Background(), f.ID)
+	gone, err := repo.FindByID(context.Background(), f.ID, b)
 	require.NoError(t, err)
 	require.Nil(t, gone)
 }

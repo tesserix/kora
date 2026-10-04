@@ -163,15 +163,12 @@ func (s Service) resolveHandle(ctx context.Context, raw string) (user.User, erro
 }
 
 func (s Service) Accept(ctx context.Context, addresseeID, requestID uuid.UUID) error {
-	f, err := s.repo.FindByID(ctx, requestID)
+	f, err := s.repo.FindByID(ctx, requestID, addresseeID)
 	if err != nil {
 		return err
 	}
 	if f == nil || f.Status != FriendStatusPending {
 		return ErrNotFound
-	}
-	if f.AddresseeID != addresseeID {
-		return ErrForbidden
 	}
 	if err := s.repo.UpdateStatus(ctx, f.ID, FriendStatusAccepted); err != nil {
 		return err
@@ -185,15 +182,12 @@ func (s Service) Accept(ctx context.Context, addresseeID, requestID uuid.UUID) e
 }
 
 func (s Service) Decline(ctx context.Context, addresseeID, requestID uuid.UUID) error {
-	f, err := s.repo.FindByID(ctx, requestID)
+	f, err := s.repo.FindByID(ctx, requestID, addresseeID)
 	if err != nil {
 		return err
 	}
 	if f == nil || f.Status != FriendStatusPending {
 		return ErrNotFound
-	}
-	if f.AddresseeID != addresseeID {
-		return ErrForbidden
 	}
 	return s.repo.Delete(ctx, f.ID)
 }

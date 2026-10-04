@@ -1,4 +1,4 @@
-FROM golang:1.26-alpine AS build
+FROM golang:1.26.8-alpine3.24@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -25,7 +25,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/embed ./cmd/embed
 # nothing from retrieval. Idempotent, so the seed Job re-runs it every sync.
 RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/dietag ./cmd/dietag
 
-FROM alpine:3.19
+FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
 # ca-certificates is required for outbound HTTPS — the Firebase Admin SDK
 # fetches Google's public signing certs to verify ID tokens at runtime.
 RUN apk add --no-cache ca-certificates && adduser -D -u 10001 app

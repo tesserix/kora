@@ -142,8 +142,12 @@ type Deps struct {
 
 func NewRouter(deps Deps) *gin.Engine {
 	r := gin.New()
-	r.Use(gin.Recovery())
+	// RequestLogger records panics without Gin's raw request/credential dump.
+	r.Use(gin.CustomRecoveryWithWriter(nil, func(c *gin.Context, _ any) {
+		httpx.Error(c, http.StatusInternalServerError, "internal_error", "internal server error")
+	}))
 	r.Use(RequestLogger())
+	r.Use(limitRequestBody())
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
