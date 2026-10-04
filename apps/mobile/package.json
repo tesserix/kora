@@ -84,5 +84,12 @@
       "^lucide-react-native$": "<rootDir>/node_modules/lucide-react-native/dist/cjs/lucide-react-native.js"
     }
   },
-  "private": true
+  "private": true,
+  "overrides": {
+    "@grpc/grpc-js@<1.14.5": "1.14.5",
+    "@xmldom/xmldom@<0.8.15": "0.8.15",
+    "brace-expansion@<1.1.21": "1.1.21",
+    "brace-expansion@>=2 <2.1.7": "2.1.7",
+    "brace-expansion@>=5 <5.0.12": "5.0.12"
+  }
 }
