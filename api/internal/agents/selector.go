@@ -149,8 +149,10 @@ func (c *Coordinator) agentForSkill(ctx context.Context, skill string) (*Resolve
 
 func reviewedAgentForSkill(skill string) (string, bool) {
 	switch skill {
-	case "nutrition-guidance", "review-meal-plan":
+	case "nutrition-guidance":
 		return "nutrition-coach", true
+	case "review-meal-plan":
+		return "plan-supervisor", true
 	case "plan-meals":
 		return "meal-planner", true
 	default:
