@@ -241,7 +241,10 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 	}
 
 	skill := s.classifySkill(ctx, question)
-	userPrompt := fmt.Sprintf("CONTEXT:\n%s\n%s\nQUESTION: %s", grounded.Render(), s.renderHistory(ctx, userID), question)
+	userPrompt, trimmed := agentPrompt(grounded.Render(), s.renderHistory(ctx, userID), question)
+	if trimmed {
+		slog.InfoContext(ctx, "coach: prompt trimmed to the agent limit", "user_id", userID)
+	}
 
 	by := Attribution{}
 	var proposal *mentor.CommitmentProposal
@@ -419,7 +422,7 @@ func (s *Service) renderHistory(ctx context.Context, userID uuid.UUID) string {
 	}
 
 	var b strings.Builder
-	b.WriteString("\nCONVERSATION SO FAR:\n")
+	b.WriteString(historyHeader)
 	for _, t := range turns {
 		speaker := "User"
 		if t.Role != TurnRoleUser {

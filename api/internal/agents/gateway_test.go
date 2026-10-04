@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/tesserix/kora/api/internal/auth"
 )
@@ -243,5 +244,22 @@ func TestSendOnlyCallsTheAgentsOwnA2ARoute(t *testing.T) {
 				t.Fatalf("gateway calls = %d, want none before the route is validated", calls)
 			}
 		})
+	}
+}
+
+func TestSendTrimsAnOversizedPromptOnACharacterBoundary(t *testing.T) {
+	var got map[string]any
+	srv := a2aServer(t, &got)
+	defer srv.Close()
+
+	resolved := resolvedFixture()
+	if _, err := NewGateway(srv.URL, "gw-key", nil).Send(context.Background(), &resolved, strings.Repeat("é", MaxPromptRunes+50)); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	parts := got["params"].(map[string]any)["message"].(map[string]any)["parts"].([]any)
+	text := parts[0].(map[string]any)["text"].(string)
+	if !utf8.ValidString(text) || utf8.RuneCountInString(text) != MaxPromptRunes {
+		t.Fatalf("sent %d runes (valid UTF-8: %t), want exactly %d whole characters", utf8.RuneCountInString(text), utf8.ValidString(text), MaxPromptRunes)
 	}
 }
