@@ -148,6 +148,9 @@ func (c *Client) Baseline(ctx context.Context, dataset string) (Summary, bool, e
 
 // AcceptBaseline records s as the dataset's baseline, keeping its other metadata.
 func (c *Client) AcceptBaseline(ctx context.Context, dataset string, s Summary, run string) error {
+	if s.Graded <= 0 {
+		return fmt.Errorf("cannot accept a baseline without graded cases")
+	}
 	d, err := c.dataset(ctx, dataset)
 	if err != nil {
 		return err

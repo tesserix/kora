@@ -47,3 +47,9 @@ func TestCompareImprovementsAreNotRegressions(t *testing.T) {
 		t.Fatalf("got %v", got)
 	}
 }
+
+func TestCompareRejectsRunsWithoutGradedCases(t *testing.T) {
+	if got := Compare(Summary{Cases: 3}, Summary{Cases: 3}); len(got) == 0 {
+		t.Fatal("an evaluation with no graded cases passed the accuracy gate")
+	}
+}

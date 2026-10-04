@@ -11,6 +11,9 @@ const (
 
 // Compare lists how run regressed against the accepted baseline; empty means it passes.
 func Compare(run, baseline Summary) []string {
+	if run.Graded == 0 || baseline.Graded == 0 {
+		return []string{"evaluation and baseline must contain graded cases"}
+	}
 	if run.Graded != baseline.Graded {
 		return []string{fmt.Sprintf("graded items changed from %d to %d: accept a new baseline", baseline.Graded, run.Graded)}
 	}

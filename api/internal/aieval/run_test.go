@@ -3,6 +3,8 @@ package aieval
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 
@@ -40,8 +42,11 @@ func TestRunGradesEachItemAndRecordsItInLangfuse(t *testing.T) {
 		{ID: "c", Input: Input{Phrase: "chicken"}, Expected: Expected{Name: "Chicken"}},
 	}
 
-	results := Run(t.Context(), resolver, c, "nightly-1", items)
+	results, err := Run(t.Context(), resolver, c, "nightly-1", items)
 
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(results) != 3 || !results[0].Top1Correct || results[1].Top1Correct || results[2].Top1Correct || !results[2].Graded {
 		t.Fatalf("got %+v", results)
 	}
@@ -71,8 +76,31 @@ func TestRunGradesEachItemAndRecordsItInLangfuse(t *testing.T) {
 func TestRunDoesNotScoreAJudgementCall(t *testing.T) {
 	f, c := newFakeLangfuse(t, 0)
 	resolver := fakeResolver{"chicken": resolution(ai.TierAuto, "Chicken", uuid.New(), 280, 1)}
-	Run(t.Context(), resolver, c, "nightly-1", []Item{{ID: "a", Input: Input{Phrase: "chicken"}}})
+	if _, err := Run(t.Context(), resolver, c, "nightly-1", []Item{{ID: "a", Input: Input{Phrase: "chicken"}}}); err != nil {
+		t.Fatal(err)
+	}
 	if len(f.posts["/api/public/dataset-run-items"]) != 1 || len(f.posts["/api/public/scores"]) != 0 {
 		t.Fatalf("got %v", f.posts)
+	}
+}
+
+func TestRunRejectsUnrecordedExperiment(t *testing.T) {
+	for _, failingPath := range []string{"/api/public/dataset-run-items", "/api/public/scores"} {
+		t.Run(failingPath, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == failingPath {
+					w.WriteHeader(http.StatusServiceUnavailable)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{}`))
+			}))
+			defer srv.Close()
+			resolver := fakeResolver{"egg": resolution(ai.TierAuto, "Egg", uuid.New(), 150, 1)}
+			_, err := Run(t.Context(), resolver, NewClient(srv.URL, "pk", "sk"), "nightly", []Item{{ID: "a", Input: Input{Phrase: "egg"}, Expected: Expected{Name: "Egg"}}})
+			if err == nil {
+				t.Fatal("experiment passed despite failing to record its results")
+			}
+		})
 	}
 }
