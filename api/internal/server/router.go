@@ -319,6 +319,7 @@ func NewRouter(deps Deps) *gin.Engine {
 			DB:     deps.DB,
 			Secret: deps.PlatformAdminSecret,
 			Probes: platformHealthProbes(deps),
+			Agents: deps.Agents,
 			// main calls slog.SetDefault before building the router, so this
 			// is the same logger every other package here writes through.
 			// Not a Deps field: nothing else in this router takes one, and
@@ -549,13 +550,6 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.POST("/coach/ask", coachHandler.Ask)
 		v1.GET("/coach/thread", coachHandler.Thread)
 		v1.PUT("/coach/plans/:id/accept", coachHandler.AcceptPlan)
-
-		if deps.Agents != nil {
-			agentsHandler := agents.NewHandler(deps.Agents)
-			v1.GET("/agents", agentsHandler.List)
-			v1.GET("/agents/:name", agentsHandler.Get)
-			v1.POST("/agents/:name/refresh", agentsHandler.Refresh)
-		}
 
 		feedbackHandler := feedback.NewHandler(feedback.NewRepository(deps.DB))
 		v1.POST("/feedback", feedbackHandler.Create)
