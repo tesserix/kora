@@ -225,4 +225,5 @@ jobs:
       # Advancing `deploy` only after both pushes succeed makes "this commit is
       # on deploy" mean "this commit's image is pullable".
       - name: Advance deploy branch
+        if: vars.KORA_API_DEPLOY_HOLD != 'true'
         run: git push origin "${{ github.sha }}:refs/heads/deploy" --force
