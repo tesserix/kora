@@ -24,6 +24,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/embed ./cmd/embed
 # without it every row reads as untagged and a user's "no beef" rule excludes
 # nothing from retrieval. Idempotent, so the seed Job re-runs it every sync.
 RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/dietag ./cmd/dietag
+RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/aieval ./cmd/aieval
 
 FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
 # ca-certificates is required for outbound HTTPS — the Firebase Admin SDK
@@ -36,6 +37,7 @@ COPY --from=build /bin/seed /usr/local/bin/seed
 COPY --from=build /bin/ingest /usr/local/bin/ingest
 COPY --from=build /bin/embed /usr/local/bin/embed
 COPY --from=build /bin/dietag /usr/local/bin/dietag
+COPY --from=build /bin/aieval /usr/local/bin/aieval
 # The AFCD/USDA source data cmd/ingest reads. Lives at api/data/food in the
 # repo (deliberately NOT testdata/, which is test-only by Go convention and
 # has no business in a production image). Pass the absolute paths, since the
