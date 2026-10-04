@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 
 	"github.com/tesserix/kora/api/internal/nutrition"
 )
@@ -363,7 +365,13 @@ func (r Resolver) resolve(
 	// trace at all — so a never-working path and a never-attempted path could
 	// not be told apart (#81).
 	sinkCtx, sink := withUsageSink(ctx)
-	guesses, usage, err := identify(sinkCtx)
+	modelCtx, modelSpan := startSpan(sinkCtx, "resolve.model")
+	guesses, usage, err := identify(modelCtx)
+	modelSpan.SetAttributes(attribute.Int("kora.resolve.guesses", len(guesses)))
+	if err != nil {
+		modelSpan.SetStatus(codes.Error, "identify failed")
+	}
+	modelSpan.End()
 	if err != nil {
 		usage.Outcome = OutcomeError
 		r.recordAll(ctx, userID, sink.drain(), usage)
@@ -372,7 +380,13 @@ func (r Resolver) resolve(
 	}
 	r.recordAll(ctx, userID, sink.drain(), usage)
 
-	res, err := r.resolveGuesses(ctx, userID, phrase, guesses)
+	matchCtx, matchSpan := startSpan(ctx, "resolve.index_match")
+	res, err := r.resolveGuesses(matchCtx, userID, phrase, guesses)
+	matchSpan.SetAttributes(attribute.Int("kora.resolve.candidates", len(res.Candidates)))
+	if err != nil {
+		matchSpan.SetStatus(codes.Error, "index match failed")
+	}
+	matchSpan.End()
 	if err != nil {
 		return Resolution{}, fmt.Errorf("ai: resolve: resolve guesses: %w", err)
 	}
@@ -911,9 +925,12 @@ func (r Resolver) decomposeAndEstimate(ctx context.Context, userID uuid.UUID, su
 }
 
 func (r Resolver) embedForResolution(ctx context.Context, userID uuid.UUID, text string) ([]float32, error) {
+	ctx, span := startSpan(ctx, "resolve.embed")
+	defer span.End()
 	providerCtx, collector := WithUsageCollector(ctx)
 	vec, usage, err := r.provider.Embed(providerCtx, text)
 	if err != nil {
+		span.SetStatus(codes.Error, "embed failed")
 		if errors.Is(err, context.DeadlineExceeded) {
 			usage.Outcome = OutcomeTimeout
 		} else {
