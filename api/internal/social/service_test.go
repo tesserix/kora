@@ -80,7 +80,7 @@ func TestAcceptDeclineAuthorizationAndUnfriend(t *testing.T) {
 	require.NoError(t, err)
 
 	// c (not the addressee) cannot accept
-	require.ErrorIs(t, svc.Accept(context.Background(), c, f.ID), ErrForbidden)
+	require.ErrorIs(t, svc.Accept(context.Background(), c, f.ID), ErrNotFound)
 	// b (addressee) accepts
 	require.NoError(t, svc.Accept(context.Background(), b, f.ID))
 
@@ -135,8 +135,8 @@ func TestDeclineDeletesAndAuthorizes(t *testing.T) {
 	svc := NewService(NewRepository(db), user.NewRepository(db), func(string) string { return "" })
 	f, err := svc.SendRequest(context.Background(), a, "so-"+b.String()+"@test.dev", "", "")
 	require.NoError(t, err)
-	require.ErrorIs(t, svc.Decline(context.Background(), c, f.ID), ErrForbidden) // non-addressee
-	require.NoError(t, svc.Decline(context.Background(), b, f.ID))               // addressee
+	require.ErrorIs(t, svc.Decline(context.Background(), c, f.ID), ErrNotFound) // non-addressee
+	require.NoError(t, svc.Decline(context.Background(), b, f.ID))              // addressee
 	incoming, _, err := svc.ListRequests(context.Background(), b)
 	require.NoError(t, err)
 	require.Len(t, incoming, 0)

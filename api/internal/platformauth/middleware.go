@@ -216,7 +216,7 @@ func readAndRestoreBody(c *gin.Context) ([]byte, error) {
 	if c.Request.Body == nil {
 		return nil, nil
 	}
-	body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxBodyBytes))
+	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, maxBodyBytes))
 	if err != nil {
 		return nil, err
 	}

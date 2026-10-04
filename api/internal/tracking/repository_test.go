@@ -55,6 +55,21 @@ func TestAddWaterHappyPath(t *testing.T) {
 	require.NotEqual(t, uuid.Nil, entry.ID)
 }
 
+func TestWeightReplayNeverReturnsAnotherUsersEntry(t *testing.T) {
+	db := testDB(t)
+	owner, other := seedUser(t, db), seedUser(t, db)
+	repo := NewRepository(db)
+	in := WeightInput{ID: uuid.New(), WeightKg: 71, LoggedAt: time.Now(), LocalDate: time.Now()}
+	first, err := repo.AddWeightEntry(t.Context(), owner, in)
+	require.NoError(t, err)
+	replay, err := repo.AddWeightEntry(t.Context(), owner, in)
+	require.NoError(t, err)
+	require.Equal(t, first.ID, replay.ID)
+	leaked, err := repo.AddWeightEntry(t.Context(), other, in)
+	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
+	require.Equal(t, uuid.Nil, leaked.ID)
+}
+
 func TestAddWaterRejectsNonPositiveVolume(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db)

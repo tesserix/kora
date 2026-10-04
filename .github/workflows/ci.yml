@@ -155,7 +155,7 @@ jobs:
           esac
 
   mobile:
-    uses: tesserix/tesserix-workflows/.github/workflows/expo-ci.yml@v2.1.0
+    uses: tesserix/tesserix-workflows/.github/workflows/expo-ci.yml@5a22020a4547f9a3bf23b05551caa12d925bd3a5 # v2.1.0
     with:
       working_directory: apps/mobile
       install_directory: apps/mobile
@@ -166,7 +166,7 @@ jobs:
       audit_config_path: apps/mobile/audit-ci.jsonc
 
   secrets:
-    uses: tesserix/tesserix-workflows/.github/workflows/secret-scan.yml@v2.1.0
+    uses: tesserix/tesserix-workflows/.github/workflows/secret-scan.yml@5a22020a4547f9a3bf23b05551caa12d925bd3a5 # v2.1.0
 
   gate:
     name: CI gate

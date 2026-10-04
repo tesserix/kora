@@ -12,7 +12,7 @@ import (
 	"time"
 
 	// Embeds the IANA timezone database in the binary. Without this, the
-	// production image (alpine:3.19, which installs only ca-certificates)
+	// minimal production image (which installs only ca-certificates)
 	// has no zoneinfo, so every time.LoadLocation for a named zone fails
 	// and silently falls back to UTC -- which would make every user's day
 	// boundary UTC regardless of their stored timezone, and would leave
@@ -75,8 +75,7 @@ func main() {
 	}
 
 	// The same Firebase client, narrowed to its identity-DELETE surface.
-	// auth keeps Verify and DeleteIdentity as two interfaces (verification
-	// needs only Google's public keys; deletion needs Admin privileges), so
+	// auth keeps Verify and DeleteIdentity as two narrow interfaces, so
 	// the concrete verifier has to be asserted back to the second one.
 	//
 	// Fatal rather than degraded: DELETE /v1/me is Apple-mandated, and a
@@ -248,6 +247,7 @@ func main() {
 		// where request latency is actually governed; this only guarantees no
 		// request can be held open indefinitely.
 		ReadHeaderTimeout: 15 * time.Second,
+		ReadTimeout:       150 * time.Second,
 		WriteTimeout:      150 * time.Second,
 	}
 

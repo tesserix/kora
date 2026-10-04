@@ -38,9 +38,9 @@ func (r Repository) FindByPair(ctx context.Context, a, b uuid.UUID) (*Friendship
 	return &f, nil
 }
 
-func (r Repository) FindByID(ctx context.Context, id uuid.UUID) (*Friendship, error) {
+func (r Repository) FindByID(ctx context.Context, id, addresseeID uuid.UUID) (*Friendship, error) {
 	var f Friendship
-	err := r.db.WithContext(ctx).First(&f, "id = ?", id).Error
+	err := r.db.WithContext(ctx).First(&f, "id = ? AND addressee_id = ?", id, addresseeID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}

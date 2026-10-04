@@ -168,7 +168,7 @@ func (r Repository) AddWeightEntry(ctx context.Context, userID uuid.UUID, in Wei
 	// deterministic ID). Load and return it instead of the caller's input,
 	// so a retry observes what is actually stored.
 	var existing WeightEntry
-	if err := r.db.WithContext(ctx).First(&existing, "id = ?", in.ID).Error; err != nil {
+	if err := r.db.WithContext(ctx).First(&existing, "id = ? AND user_id = ?", in.ID, userID).Error; err != nil {
 		return WeightEntry{}, fmt.Errorf("tracking: load existing weight: %w", err)
 	}
 	return existing, nil
