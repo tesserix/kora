@@ -80,6 +80,12 @@ type Config struct {
 	LangfusePublicKey string
 	LangfuseSecretKey string
 	Release           string
+	// OCR* is Kora's Document Intelligence identity for label reads; all empty disables them.
+	OCRUploadURL string
+	OCRJobURL    string
+	OCRKeyID     string
+	OCRTenant    string
+	OCRKeySecret string
 	// PlatformAdminSecret is the shared secret the Tesserix platform console's
 	// federation client signs its requests to /v1/admin/* with. Empty leaves
 	// the contract endpoints unmounted, the same choice BFFHMACKey makes.
@@ -144,6 +150,11 @@ func Load() (Config, error) {
 		LangfuseHost:             strings.TrimSpace(os.Getenv("KORA_LANGFUSE_HOST")),
 		LangfusePublicKey:        strings.TrimSpace(os.Getenv("KORA_LANGFUSE_PUBLIC_KEY")),
 		LangfuseSecretKey:        strings.TrimSpace(os.Getenv("KORA_LANGFUSE_SECRET_KEY")),
+		OCRUploadURL:             strings.TrimSpace(os.Getenv("OCR_UPLOAD_URL")),
+		OCRJobURL:                strings.TrimSpace(os.Getenv("OCR_JOB_URL")),
+		OCRKeyID:                 strings.TrimSpace(os.Getenv("OCR_KEY_ID")),
+		OCRTenant:                strings.TrimSpace(os.Getenv("OCR_TENANT")),
+		OCRKeySecret:             strings.TrimSpace(os.Getenv("OCR_KEY_SECRET")),
 		DatabaseURL:              os.Getenv("DATABASE_URL"),
 		RedisURL:                 getenv("REDIS_URL", "redis://localhost:6379/0"),
 		FirebaseProjectID:        os.Getenv("FIREBASE_PROJECT_ID"),
