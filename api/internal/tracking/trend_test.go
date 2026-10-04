@@ -143,3 +143,34 @@ func TestFitsAcrossInstruments(t *testing.T) {
 	require.False(t, FitsAcrossInstruments("muscle_mass_kg"))
 	require.False(t, FitsAcrossInstruments("scale_bmr_kcal"))
 }
+
+// Readings at the same wall-clock time across a DST change are whole calendar
+// days apart, not whole 24-hour periods.
+func TestWeeklyRateCountsCalendarDaysAcrossDaylightSaving(t *testing.T) {
+	sydney, err := time.LoadLocation("Australia/Sydney")
+	require.NoError(t, err)
+
+	tests := []struct {
+		name  string
+		start time.Time
+		span  int
+	}{
+		{"clocks go forward", time.Date(2026, 9, 20, 7, 0, 0, 0, sydney), 28},
+		{"clocks go back", time.Date(2026, 3, 22, 7, 0, 0, 0, sydney), 28},
+		{"gate at exactly two weeks", time.Date(2026, 9, 27, 7, 0, 0, 0, sydney), minRateSpanDays},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			points := make([]RatePoint, 0, minRateReadings+1)
+			for i := 0; i <= minRateReadings; i++ {
+				points = append(points, RatePoint{At: tt.start.AddDate(0, 0, i*tt.span/minRateReadings), Value: 80})
+			}
+			points[len(points)-1].At = tt.start.AddDate(0, 0, tt.span)
+
+			result, ok := WeeklyRate(points)
+
+			require.True(t, ok, "a %d-day span must pass the gate", tt.span)
+			require.Equal(t, tt.span, result.Basis.Days)
+		})
+	}
+}
