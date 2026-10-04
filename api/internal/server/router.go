@@ -35,6 +35,7 @@ import (
 	"github.com/tesserix/kora/api/internal/httpx"
 	"github.com/tesserix/kora/api/internal/identity"
 	"github.com/tesserix/kora/api/internal/internalauth"
+	"github.com/tesserix/kora/api/internal/labelocr"
 	"github.com/tesserix/kora/api/internal/memory"
 	"github.com/tesserix/kora/api/internal/mentor"
 	"github.com/tesserix/kora/api/internal/notifications"
@@ -93,6 +94,8 @@ type Deps struct {
 	BFFHMACKey []byte
 	// MCPInternalKey guards /internal/v1/*; empty leaves them unmounted.
 	MCPInternalKey string
+	// LabelReader reads nutrition panels through Document Intelligence; nil leaves the route unmounted.
+	LabelReader labelocr.Reader
 	// AITraceUserKey HMACs the user id on AI traces; nil omits the user.
 	AITraceUserKey []byte
 	// Accuracy scores AI answers from the logs that confirm or correct them.
@@ -530,6 +533,12 @@ func NewRouter(deps Deps) *gin.Engine {
 			v1.POST("/resolve/photo", aitrace.Route("capture.photo", deps.AITraceUserKey), deps.Resolver.ResolvePhoto)
 			v1.POST("/resolve/voice", aitrace.Route("capture.voice", deps.AITraceUserKey), deps.Resolver.ResolveVoice)
 			v1.POST("/resolve/barcode", deps.Resolver.ResolveBarcode)
+		}
+		if deps.LabelReader != nil {
+			v1.POST("/resolve/label",
+				ratelimit.PerUser(labelocr.ReadLimit, labelocr.ReadPeriod),
+				aitrace.Route("capture.label", deps.AITraceUserKey),
+				labelocr.NewHandler(deps.LabelReader, billing.NewMeter(deps.DB)).Read)
 		}
 
 		coachGrounder := coach.NewGrounder(dashSvc, logRepo, memSvc, trackingRepo).WithMentor(mentorRepo).WithFasting(fastingRepo)

@@ -38,6 +38,7 @@ import (
 	"github.com/tesserix/kora/api/internal/devices"
 	"github.com/tesserix/kora/api/internal/foodlog"
 	"github.com/tesserix/kora/api/internal/groups"
+	"github.com/tesserix/kora/api/internal/labelocr"
 	"github.com/tesserix/kora/api/internal/metrics"
 	"github.com/tesserix/kora/api/internal/notifications"
 	"github.com/tesserix/kora/api/internal/nutrition"
@@ -227,6 +228,20 @@ func main() {
 
 	coordinator := buildAgents(cfg, logger)
 
+	labelClient, err := labelocr.NewClient(labelocr.Config{
+		UploadURL: cfg.OCRUploadURL, JobURL: cfg.OCRJobURL,
+		KeyID: cfg.OCRKeyID, Tenant: cfg.OCRTenant, SecretHex: cfg.OCRKeySecret,
+	}, nil)
+	if err != nil {
+		logger.Error("label ocr config invalid", "err", err)
+		os.Exit(1)
+	}
+	// A nil *Client in the interface would still mount the route.
+	var labelReader labelocr.Reader
+	if labelClient != nil {
+		labelReader = labelClient
+	}
+
 	srv := &http.Server{
 		Addr: ":" + cfg.Port,
 		Handler: server.NewRouter(server.Deps{
@@ -240,6 +255,7 @@ func main() {
 			Assets:               assetStore,
 			BFFHMACKey:           cfg.BFFHMACKey,
 			MCPInternalKey:       cfg.MCPInternalKey,
+			LabelReader:          labelReader,
 			AITraceUserKey:       cfg.AITraceUserKey,
 			Accuracy:             accuracy.NewRecorder(resolveoutcome.NewRepository(db), scores),
 			PlatformAdminSecret:  cfg.PlatformAdminSecret,
