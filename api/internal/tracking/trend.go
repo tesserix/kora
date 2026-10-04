@@ -64,7 +64,8 @@ func WeeklyRate(points []RatePoint) (RateResult, bool) {
 		return RateResult{}, false
 	}
 	first, last := points[0].At, points[len(points)-1].At
-	spanDays := int(last.Sub(first).Hours() / 24)
+	// A DST change shortens a span of whole calendar days by up to an hour.
+	spanDays := int((last.Sub(first) + time.Hour) / (24 * time.Hour))
 	if spanDays < minRateSpanDays {
 		return RateResult{}, false
 	}
