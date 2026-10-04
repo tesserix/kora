@@ -15,7 +15,7 @@ import (
 // contributes is treated as untrusted length: a card the user has to read and
 // approve must stay a card.
 const (
-	maxPlanDays        = 62
+	maxPlanDays        = 7 // ai-agents MealPlan: the largest valid plan fits one review
 	maxPlanMealsPerDay = 6
 	maxPlanSummary     = 600
 	maxPlanDateChars   = 40
@@ -25,7 +25,7 @@ const (
 	// enough method to cook from, not a one-line justification.
 	maxPlanMealPreparation = 500
 	// maxPlanDraftBytes bounds what is even attempted, ahead of parsing. A
-	// two-month plan is still bounded; anything past this is not a plan.
+	// week-long plan is still bounded; anything past this is not a plan.
 	maxPlanDraftBytes = 64 << 10
 )
 
