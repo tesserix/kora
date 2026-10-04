@@ -135,3 +135,35 @@ resolver is 68% right.
 - resolved-entry correctness (a confident candidate returned) >= 0.90
 - median kcal error <= 0.20
 - zero hallucinated rows (every candidate has a real food_items.id)
+
+## Golden datasets and nightly experiments — `cmd/aieval` (#557)
+
+`aieval` runs the real resolver, through the AI gateway and without the
+resolution cache, over a Langfuse dataset. Each item gets its own trace
+(environment `eval`), is linked to a named experiment run, and is scored with
+plain code: `eval.top1_correct`, plus `eval.kcal_within` when the item states
+a reference kcal. Items with no expected food are judgement calls and are not
+graded.
+
+The run's summary is top-1, auto-tier precision and expected calibration error
+(10 bins over the top candidate's `MatchScore`). The accepted baseline lives in
+the dataset's own metadata, so accepting one needs no deploy. A drop beyond the
+margins in `internal/aieval/baseline.go`, or a different number of graded
+items, fails the run.
+
+Seed `kora-capture-text` from the labelled ranking cases (blank
+`expected_name` lines are skipped; ids are stable, so reseeding updates):
+
+    go run ./cmd/aieval -seed testdata/eval/ranking.sample.jsonl
+
+Run, then accept the first baseline:
+
+    go run ./cmd/aieval -accept
+    go run ./cmd/aieval            # exit 0 passes, 1 regressed, 2 could not run
+
+It needs `DATABASE_URL`, `AI_GATEWAY_BASE_URL`, `AI_GATEWAY_API_KEY`,
+`KORA_LANGFUSE_HOST`, `KORA_LANGFUSE_PUBLIC_KEY`, `KORA_LANGFUSE_SECRET_KEY`,
+`KORA_AI_TRACE_ENDPOINT`, and a gateway end-user token: either
+`KORA_EVAL_END_USER_TOKEN`, or `KORA_EVAL_FIREBASE_API_KEY`, `KORA_EVAL_EMAIL`
+and `KORA_EVAL_PASSWORD` for a dedicated eval account. Spend is not metered
+against any user.
