@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 
 	"github.com/tesserix/kora/api/internal/ai"
+	"github.com/tesserix/kora/api/internal/aitrace"
 	"github.com/tesserix/kora/api/internal/auth"
 	"github.com/tesserix/kora/api/internal/user"
 )
@@ -182,7 +184,15 @@ func userAttributionOptions(ctx context.Context) []option.RequestOption {
 // rather than threading a userID parameter through each call site, means a
 // new call type can't ship unattributed by omission (kora#508).
 func gatewayRequestOptions(ctx context.Context) []option.RequestOption {
-	return append(delegatedUserOptions(ctx), userAttributionOptions(ctx)...)
+	options := append(delegatedUserOptions(ctx), userAttributionOptions(ctx)...)
+	header := make(http.Header)
+	aitrace.Inject(ctx, header)
+	for name, values := range header {
+		for _, value := range values {
+			options = append(options, option.WithHeader(name, value))
+		}
+	}
+	return options
 }
 
 func (p AgentGatewayProvider) GenerateText(ctx context.Context, systemPrompt, userPrompt string) (string, ai.Usage, error) {
