@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/tesserix/kora/api/internal/ai"
 	"github.com/tesserix/kora/api/internal/httpx"
 	"github.com/tesserix/kora/api/internal/user"
 )
@@ -34,6 +35,7 @@ type Reader interface {
 // Budget is the caller's AI quota; billing.Meter satisfies it.
 type Budget interface {
 	WithinBudget(ctx context.Context, userID uuid.UUID) (bool, error)
+	Record(ctx context.Context, userID uuid.UUID, u ai.Usage, costUSD float64) error
 }
 
 type Handler struct {
@@ -92,7 +94,9 @@ func (h Handler) Read(c *gin.Context) {
 		return
 	}
 
+	started := time.Now()
 	read, err := h.reader.Read(c.Request.Context(), photo, mime)
+	h.record(c.Request.Context(), uid, read.CostUSD, time.Since(started), err)
 	if err == nil {
 		var label Label
 		if label, err = Check(read.Fields, read.Failures); err == nil {
@@ -105,4 +109,16 @@ func (h Handler) Read(c *gin.Context) {
 		return
 	}
 	httpx.RespondServiceError(c, err)
+}
+
+// record charges every attempt, failed or not, so label reads spend the same quota as photo reads.
+func (h Handler) record(ctx context.Context, uid uuid.UUID, costUSD float64, took time.Duration, err error) {
+	u := ai.Usage{Provider: "document-intelligence", CallType: "read_label", LatencyMs: int(took.Milliseconds()), Outcome: ai.OutcomeOK}
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		u.Outcome = ai.OutcomeTimeout
+	case err != nil:
+		u.Outcome = ai.OutcomeError
+	}
+	_ = h.budget.Record(context.WithoutCancel(ctx), uid, u, costUSD) // metering must never fail the read
 }

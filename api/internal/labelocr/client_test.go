@@ -102,6 +102,7 @@ func (f *fakeDI) serve(w http.ResponseWriter, r *http.Request) {
 				"per_100g.energy_kcal": map[string]any{"value": 430, "confidence": 0.93, "evidence": []any{map[string]any{}}},
 			},
 			"validation_failures": []any{map[string]any{"code": "sugars_exceed_carbohydrate", "severity": "warning"}},
+			"cost":                map[string]any{"currency": "USD", "decimal": "0.0015"},
 		})
 	default:
 		w.WriteHeader(http.StatusNotFound)
@@ -132,6 +133,7 @@ func TestReadRunsUploadAndExtractionThroughDocumentIntelligence(t *testing.T) {
 	assert.NotEqual(t, fake.idempotency[0], fake.idempotency[1])
 	assert.InDelta(t, 0.93, read.Fields["per_100g.energy_kcal"].Confidence, 1e-9)
 	assert.Equal(t, []Failure{{Code: "sugars_exceed_carbohydrate", Severity: "warning"}}, read.Failures)
+	assert.InDelta(t, 0.0015, read.CostUSD, 1e-12)
 }
 
 func TestReadAcceptsReviewRequiredResults(t *testing.T) {

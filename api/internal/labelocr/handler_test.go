@@ -14,6 +14,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/tesserix/kora/api/internal/ai"
 )
 
 type stubReader struct {
@@ -32,15 +34,23 @@ func (s *stubReader) Read(_ context.Context, _ []byte, mime string) (Read, error
 var jpeg = append([]byte("\xff\xd8\xff\xe0\x00\x10JFIF\x00"), bytes.Repeat([]byte{0}, 64)...)
 
 type stubBudget struct {
-	within bool
-	err    error
+	within   bool
+	err      error
+	recorded []ai.Usage
+	costs    []float64
 }
 
-func (b stubBudget) WithinBudget(context.Context, uuid.UUID) (bool, error) { return b.within, b.err }
+func (b *stubBudget) WithinBudget(context.Context, uuid.UUID) (bool, error) { return b.within, b.err }
+
+func (b *stubBudget) Record(_ context.Context, _ uuid.UUID, u ai.Usage, costUSD float64) error {
+	b.recorded = append(b.recorded, u)
+	b.costs = append(b.costs, costUSD)
+	return nil
+}
 
 func post(t *testing.T, reader Reader, body []byte, signedIn bool) *httptest.ResponseRecorder {
 	t.Helper()
-	return postWithBudget(t, reader, stubBudget{within: true}, body, signedIn)
+	return postWithBudget(t, reader, &stubBudget{within: true}, body, signedIn)
 }
 
 func postWithBudget(t *testing.T, reader Reader, budget Budget, body []byte, signedIn bool) *httptest.ResponseRecorder {
@@ -103,7 +113,7 @@ func TestHandlerRequiresASignedInUser(t *testing.T) {
 
 func TestHandlerSpendsNothingOnceTheAIBudgetIsExhausted(t *testing.T) {
 	reader := &stubReader{}
-	rec := postWithBudget(t, reader, stubBudget{within: false}, jpeg, true)
+	rec := postWithBudget(t, reader, &stubBudget{within: false}, jpeg, true)
 	assert.Equal(t, http.StatusTooManyRequests, rec.Code)
 	assert.Contains(t, rec.Body.String(), "budget_exhausted")
 	assert.Zero(t, reader.calls)
@@ -111,7 +121,24 @@ func TestHandlerSpendsNothingOnceTheAIBudgetIsExhausted(t *testing.T) {
 
 func TestHandlerFailsClosedWhenTheBudgetCannotBeChecked(t *testing.T) {
 	reader := &stubReader{}
-	rec := postWithBudget(t, reader, stubBudget{err: errors.New("db down")}, jpeg, true)
+	rec := postWithBudget(t, reader, &stubBudget{err: errors.New("db down")}, jpeg, true)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	assert.Zero(t, reader.calls)
+}
+
+func TestHandlerChargesEveryLabelReadToTheBudget(t *testing.T) {
+	raw, _ := json.Marshal(430)
+	ok := &stubReader{read: Read{CostUSD: 0.0015, Fields: map[string]Field{"per_100g.energy_kcal": {Value: raw, Confidence: 0.9}}}}
+	budget := &stubBudget{within: true}
+	require.Equal(t, http.StatusOK, postWithBudget(t, ok, budget, jpeg, true).Code)
+
+	require.Len(t, budget.recorded, 1)
+	assert.Equal(t, "read_label", budget.recorded[0].CallType)
+	assert.Equal(t, ai.OutcomeOK, budget.recorded[0].Outcome)
+	assert.InDelta(t, 0.0015, budget.costs[0], 1e-12)
+
+	failed := &stubBudget{within: true}
+	postWithBudget(t, &stubReader{err: errors.New("upstream 503")}, failed, jpeg, true)
+	require.Len(t, failed.recorded, 1, "a failed read still spent a quota slot")
+	assert.Equal(t, ai.OutcomeError, failed.recorded[0].Outcome)
 }

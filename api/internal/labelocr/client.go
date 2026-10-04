@@ -43,6 +43,8 @@ type Config struct {
 type Read struct {
 	Fields   map[string]Field
 	Failures []Failure
+	// CostUSD is what Document Intelligence measured; zero when it reported none.
+	CostUSD float64
 }
 
 // Client signs every call as Kora and never sees a storage bucket or path.
@@ -108,6 +110,10 @@ type job struct {
 type result struct {
 	Fields             map[string]Field `json:"fields"`
 	ValidationFailures []Failure        `json:"validation_failures"`
+	Cost               *struct {
+		Currency string `json:"currency"`
+		Decimal  string `json:"decimal"`
+	} `json:"cost"`
 }
 
 // Read uploads one label photo and extracts it with the kora.nutrition_label v1 schema.
@@ -188,7 +194,11 @@ func (c *Client) Read(ctx context.Context, photo []byte, mime string) (read Read
 	if err := c.call(ctx, http.MethodGet, c.jobURL, jobPath+"/result", nil, "", &res); err != nil {
 		return Read{}, err
 	}
-	return Read{Fields: res.Fields, Failures: res.ValidationFailures}, nil
+	read = Read{Fields: res.Fields, Failures: res.ValidationFailures}
+	if res.Cost != nil && res.Cost.Currency == "USD" {
+		read.CostUSD, _ = strconv.ParseFloat(res.Cost.Decimal, 64) // the schema pattern guarantees a decimal
+	}
+	return read, nil
 }
 
 func (c *Client) wait(ctx context.Context, base, path string, settled func(string) (bool, error)) error {
