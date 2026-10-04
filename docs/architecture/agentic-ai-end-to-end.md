@@ -1,7 +1,7 @@
 # Kora Agentic AI: End-to-End Architecture
 
-Status: current-state design and integration contract
-Last verified: 2026-09-04
+Status: repository implementation and integration contract; rollout verified separately
+Last verified: 2026-10-04
 Owners: Kora, AI Platform, and Platform Engineering
 
 Future multi-product direction: [Multi-product AI platform
@@ -41,7 +41,7 @@ pipelines. GitOps is the common deployment layer. Publishing an agent manifest
 to the Agentic Registry does not deploy its runtime, and deploying
 `kora-ai-agents` does not automatically connect Kora food capture to an agent.
 
-## Current production topology
+## Implemented topology
 
 ```mermaid
 flowchart LR
@@ -49,12 +49,14 @@ flowchart LR
     M -->|text, photo, voice, barcode, coach| API[Kora API]
 
     API --> RES[AI resolver]
+    API -->|explicit label endpoint| DI[Document Intelligence]
     API --> OTTO[Otto grounded supervisor]
     RES -->|logical model: kora-auto| GW[Private Kora Agent Gateway]
     OTTO -->|A2A: reviewed agent name| GW
 
     GW -->|/a2a/v1/nutrition-coach| AGENTS[Kora AI Agents]
     GW -->|/a2a/v1/meal-planner| AGENTS
+    GW -->|/a2a/v1/plan-supervisor| AGENTS
     AGENTS -->|logical model: kora-auto| GW
 
     GW --> OPT[Token optimizer ExtProc]
@@ -72,13 +74,22 @@ flowchart LR
     REG[Agentic Registry] -. Agent Cards advertise Gateway URLs .-> GW
 ```
 
-There are three orchestration paths today:
+This is an implementation map, not proof that every optional dependency is
+enabled in production. API promotion is currently held after the 2026-10-04
+rollback while Firebase user-status lookup permissions are repaired. Merged
+code, published images, and the running production image must be checked
+separately.
+
+There are four orchestration paths in the code:
 
 1. Food capture: mobile -> Kora API resolver -> Agent Gateway -> provider.
 2. Otto coach Q&A: mobile -> Kora API supervisor -> Agent Gateway A2A route ->
    reviewed Kora agent -> the same Agent Gateway model route -> provider.
 3. Direct model capabilities used by the resolver: Kora API -> Agent Gateway ->
    provider.
+4. Explicit nutrition-label reads: Kora API -> Document Intelligence upload/job
+   APIs -> deterministic Kora validation. Production admission is tracked in
+   `tesserix/tesserix-k8s#1297`.
 
 Food capture remains direct capability orchestration in Kora. Otto uses the
 separate reviewed agent runtime, but cannot call it directly or discover an
@@ -180,13 +191,21 @@ Current hard bounds are:
 - voice body: 12 MiB file plus multipart overhead;
 - coach question: 4,000 characters;
 - standalone agent prompt: 12,000 characters;
-- standalone agent execution: at most 20 seconds, two model calls, two
-  iterations, 12,000 input tokens, and 2,000 output tokens;
-- mobile request deadline: 25 seconds;
-- Gateway model-route request timeout: 120 seconds;
-- Gateway A2A request deadline: 23 seconds;
-- Kora Otto A2A request deadline: 24 seconds, inside mobile's 25-second
-  request deadline.
+- published agent budget: 55 seconds, two model calls, two iterations,
+  12,000 input tokens, and 12,000 output tokens (from `ai-agents` definitions);
+- default mobile request deadline: 25 seconds;
+- capture-message mobile deadline: 90 seconds;
+- one Kora A2A call: 60 seconds, shortened by the caller's remaining deadline;
+- meal-plan draft and review: one shared 80-second deadline, with the draft
+  capped at 50 seconds to reserve 30 seconds for review;
+- Gateway A2A route: 70 seconds in the infrastructure chart;
+- Document Intelligence label upload, polling and result retrieval: bounded by
+  the label client's overall 25-second read deadline.
+
+The 80-second budget covers draft and review, not the entire request: intent
+classification and grounding also take time. The mobile 90-second deadline
+still bounds the request. The longer mobile budget is explicitly selected for
+`/v1/capture/message`; it must not be assumed for every API route.
 
 The availability target inherited from the quota ADR is 99.9% monthly for the
 AI path. End-to-end latency SLOs have not yet been ratified or measured. The
@@ -202,7 +221,8 @@ The mobile capture screen accepts text, a camera/library photo, a voice clip,
 or a barcode. The mobile application calls only Kora's public API and never
 calls Agent Gateway or a provider directly.
 
-Every `/v1` route is protected by Firebase authentication. Kora derives the
+Mobile-facing `/v1` routes use Firebase authentication; `/v1/admin` uses the
+separate signed platform-admin boundary. Kora derives the
 user identity from the verified token; the client does not supply a trusted
 `user_id`, tenant, role, model, provider, or Gateway routing header.
 
@@ -214,6 +234,7 @@ The relevant endpoints are:
 | Photo | `POST /v1/resolve/photo` | Multipart field `file` |
 | Voice | `POST /v1/resolve/voice` | Multipart field `file` |
 | Barcode | `POST /v1/resolve/barcode` | JSON `{ "barcode": "..." }` |
+| Nutrition label (when configured) | `POST /v1/resolve/label` | Multipart field `file` |
 
 Implementation references:
 
@@ -252,6 +273,7 @@ model `kora-auto`. Kora attaches server-owned classification headers:
 | --- | --- | --- |
 | Text identification | `identify_text` | `json_api` |
 | Photo identification | `identify_photo` | `json_api` |
+| Body-composition reading | `identify_body_composition` | `json_api` |
 | Dish decomposition | `decompose` | `json_api` |
 | Embedding | `embedding` | `embedding` |
 | Voice transcription | `transcribe` | `audio` |
@@ -266,7 +288,8 @@ Implementation reference: [Agent Gateway provider](../../api/internal/ai/provide
 ### 5. Authenticate, protect, and optimize at Agent Gateway
 
 The Gateway is cluster-private. Kora receives only a Gateway client credential,
-injected from GCP Secret Manager through External Secrets Operator. The mobile
+injected through External Secrets Operator. The infrastructure chart selects
+the secret store; provider entries can also use OpenBao. The mobile
 application never receives this credential.
 
 The Gateway applies:
@@ -393,7 +416,7 @@ sequenceDiagram
     API->>DB: Build authenticated user's grounded context
     API->>API: Check Kora AI quota
     API->>API: Select nutrition-coach or meal-planner
-    API->>GW: JSON-RPC message/send + Gateway client credential
+    API->>GW: message/send + service credential + delegated verified user token
     GW->>GW: Authenticate, rate-limit, replace upstream credential
     GW->>Agent: POST /a2a/v1/{reviewed-agent}
     Agent->>GW: kora-auto model request
@@ -402,18 +425,33 @@ sequenceDiagram
     GW-->>Agent: Model response
     Agent-->>GW: Bounded A2A result + usage metadata
     GW-->>API: JSON-RPC result
+    opt Meal-plan draft
+        API->>GW: Review through /a2a/v1/plan-supervisor within remaining budget
+        GW-->>API: Reviewed structured plan or failure
+    end
     API->>API: Protective nutrition guardrails
     API->>DB: Record AI usage
     API->>DB: Best-effort thread persistence
     API-->>Mobile: Answer, citations, support flag
 ```
 
-The Firebase token terminates at Kora API. Neither it nor a user or tenant
-header is forwarded. The supervisor selector accepts only `nutrition-coach`
-and `meal-planner`; arbitrary agent names and URLs are rejected before network
-I/O. The agent sees rendered, server-derived context and is instructed not to
-invent numbers. Kora applies an additional protective policy after generation.
-An A2A failure never falls back to a direct provider call, while a thread-
+Kora validates the Firebase token and forwards only that verified token as
+`X-Kora-End-User-Token` to the private Gateway, for both model and A2A calls.
+Model calls also carry the server-derived Kora UUID in `X-Kora-User-Id` for cost
+attribution. These authorization headers are distinct from trace attributes;
+Langfuse user identifiers are HMACs, never raw Kora UUIDs. Mobile cannot supply
+trusted routing or identity headers.
+
+The compiled skill mapping permits `nutrition-coach`, `meal-planner`, and
+`plan-supervisor`. Registry metadata must resolve the reviewed skill, and the
+A2A URL path must equal `/a2a/v1/{that-agent-name}` on the configured Gateway
+origin. Catalog and refresh diagnostics require platform-admin authorization.
+
+The agent receives server-derived context. Prompt construction preserves the
+question and review instructions, trimming context to the 12,000-rune budget.
+Kora validates the review envelope and applies deterministic nutrition and diet
+gates. Failed or timed-out review does not expose or save an unreviewed draft.
+An A2A execution failure does not fall back to a direct provider call. A thread
 storage failure does not discard an answer already generated for the user.
 
 Implementation references:
@@ -427,13 +465,19 @@ Implementation references:
 
 ## Standalone Kora AI agents
 
-`kora-ai-agents` is a separate internal service deployed with two replicas. It
-currently publishes two reviewed agents:
+`kora-ai-agents` is a separate internal service. Kora currently permits three
+reviewed agents; replica counts and live availability are deployment state:
 
 | Agent | Contract |
 | --- | --- |
 | `nutrition-coach` | Bounded free-text general nutrition guidance |
-| `meal-planner` | Validated structured meal plans of at most seven days |
+| `meal-planner` | Structured drafts of at most seven days and six meals per day |
+| `plan-supervisor` | Reviews the draft against user constraints and returns a bounded plan |
+
+The current one-week bound is deliberate and matches both repositories after
+PR #574 and the cap selected for `tesserix/ai-agents#69`. For a longer request,
+the planner is instructed to produce a representative week and explain weekly
+repetition or re-planning; it does not generate a full multiweek plan.
 
 The runtime exposes authenticated discovery and execution endpoints:
 
@@ -462,8 +506,8 @@ only `kora-auto`.
 
 ```mermaid
 flowchart TB
-    SM[GCP Secret Manager] -->|External Secrets Operator| KS[Kubernetes Secrets]
-    KS -->|env/secretRef| API[Kora API: Gateway client credential only]
+    SM[Configured secret stores: GCP Secret Manager or OpenBao] -->|External Secrets Operator| KS[Kubernetes Secrets]
+    KS -->|env/secretRef| API[Kora API: Gateway client and OCR signing credentials]
     KS -->|env/secretRef| AG[Kora agents: service + Gateway credentials]
     KS -->|client, agent-service, provider secretRefs| GW[Agent Gateway]
     WI[GKE Workload Identity] -->|ADC| GW
@@ -519,6 +563,55 @@ Logs should contain identifiers and aggregate diagnostics, not raw images,
 audio, access tokens, credentials, full request bodies, or user-entered phrases.
 Any diagnostic that needs content must be explicitly privacy-reviewed and
 retention-bounded.
+
+### Request tracing and confirmation scores
+
+`internal/aitrace` creates request spans for capture text/photo/voice, capture
+messages, coach questions, recipe parsing, body composition and label reads.
+Resolver stage, intent, agent-run, OCR-job and metered generation spans provide
+latency and outcome detail. Gateway and A2A calls propagate W3C `traceparent`.
+
+`KORA_AI_TRACE_ENDPOINT` configures OTLP/HTTP export. Export runs in a bounded
+background batch and collector failures must not fail user requests. Without
+`KORA_AI_TRACE_USER_KEY`, user attributes are omitted. With it, the user UUID is
+HMACed; the current session attribute uses that same pseudonym because the
+persisted coach thread is per user. This is not a distinct conversation ID.
+Prompts, photos, audio and user text are not attached by this instrumentation.
+
+`internal/accuracy` sends confirmation/correction scores to Langfuse when its
+host and credentials are configured. `cmd/aieval` currently evaluates the text
+resolver, links dataset items to traces, and compares top-1 accuracy,
+auto-tier precision and calibration against an accepted baseline. Missing
+baselines, ungraded baselines and failed run/score writes cannot produce a
+passing gate. The broader photo, label, coach and plan datasets and a nightly
+workflow remain work in #557; merged runner code is not evidence of a live
+experiment or a passing nightly schedule.
+
+### Nutrition-label extraction
+
+`internal/labelocr` uploads through Document Intelligence's reservation flow,
+starts an interactive `kora.nutrition_label` v1 job, polls within a deadline,
+and validates the result. Unknown nutrients remain absent; calorie/macro
+mismatches require review, and non-finite serving normalization is rejected.
+The server checks authentication, image bytes,
+8 MiB size, request rate and AI quota before OCR. It converts kJ to kcal and
+mass-based servings to per-100 values, preserving the per-100g/per-100ml basis.
+Label reads return reviewable data; they do not themselves create a food or log.
+The dedicated mobile Scan-label/confirmation flow, production admission and
+real-label accuracy verification are still required for #559.
+
+### Features still awaiting implementation or prerequisites
+
+- Consented content capture (#558) requires explicit consent, deletion/export
+  handling, private storage, a retention policy and reviewed privacy text.
+  Staff status alone must not become an implicit content-export permission.
+- Jev (#560–#562) is not wired into this code path. Provider/privacy selection,
+  gateway admission and a typed contract precede shadow comparisons and judges.
+  Jev must not become the sole allergy, diet or medical safety gate.
+- Plated-food segmentation, quantity uncertainty and dataset-calibrated
+  decisions (#564), plus on-device capture-quality guidance (#565), remain
+  separate work. The current photo resolver is not evidence those pipelines
+  or their accuracy targets have been delivered.
 
 ## Proposed asynchronous post-log agent integration — not implemented
 
@@ -592,6 +685,11 @@ Kora implementation:
 - `api/internal/coach/service.go`
 - `api/internal/agents/gateway.go`
 - `api/internal/agents/selector.go`
+- `api/internal/aitrace/aitrace.go`
+- `api/internal/accuracy/`
+- `api/internal/aieval/`
+- `api/cmd/aieval/main.go`
+- `api/internal/labelocr/`
 - `api/internal/foodlog/service.go`
 - `api/internal/foodlog/repository.go`
 - `docs/adr/0001-ai-quota-authority.md`
