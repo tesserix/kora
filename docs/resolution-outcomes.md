@@ -126,6 +126,25 @@ failure.
   reports a *floor* on the correction rate, because `food_aliases` is an upsert
   and undercounts. This table supersedes that with a true rate.
 
+## Accuracy scores (#556)
+
+Each row keeps its trace id and the candidate food ids in order. A resolve
+response carries the row id as `resolution_id`; the app sends it back with
+`resolution_index`, the slot of the item a log keeps. Candidates are the items on
+one plate, not alternatives, so every item is scored on its own.
+
+`internal/accuracy` posts to Langfuse on the resolve's trace:
+
+- `capture.top1_correct` — the logged food is the one offered in that slot.
+- `capture.tier_correct` — the same check, sent only for `auto` tiers.
+
+Score ids are `<resolution>-<slot>-<name>`, so changing the food on a later edit
+overwrites the score, marked `corrected`, and `metadata.food_item_id` is the
+label. A log only links to a resolution the user owns that has that slot;
+anything else is logged without one. Scoring needs `KORA_LANGFUSE_HOST`,
+`KORA_LANGFUSE_PUBLIC_KEY` and `KORA_LANGFUSE_SECRET_KEY`; without them logs
+still link and nothing is sent.
+
 ## Privacy
 
 `phrase` holds what the user said — the same category as

@@ -1922,7 +1922,7 @@ export default function CaptureScreen() {
       excluded,
       logged: loggedCandidateKeys,
       markLogged: setLoggedCandidateKeys,
-      logCandidate: (candidate) => {
+      logCandidate: (candidate, index) => {
         // Record the portion as one of the food's own named servings when one
         // describes it exactly, so the diary reads "1 portion" instead of
         // "16.5 g" — the same entry the card just showed the user.
@@ -1956,6 +1956,9 @@ export default function CaptureScreen() {
           ...(serving ? { entered_amount: serving.amount, entered_unit: serving.unit } : {}),
           ...(resolvedPhrase && (source === "ai_text" || source === "ai_voice")
             ? { input_phrase: resolvedPhrase }
+            : {}),
+          ...(effectiveResolution.resolution_id
+            ? { resolution_id: effectiveResolution.resolution_id, resolution_index: index }
             : {}),
         });
       },

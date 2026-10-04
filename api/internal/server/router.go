@@ -95,6 +95,8 @@ type Deps struct {
 	MCPInternalKey string
 	// AITraceUserKey HMACs the user id on AI traces; nil omits the user.
 	AITraceUserKey []byte
+	// Accuracy scores AI answers from the logs that confirm or correct them.
+	Accuracy foodlog.AccuracyRecorder
 	// PlatformAdminSecret is the shared secret the platform console's
 	// federation client signs with. Empty leaves the contract surface
 	// unmounted, exactly as an empty BFFHMACKey leaves the portal's routes
@@ -265,7 +267,7 @@ func NewRouter(deps Deps) *gin.Engine {
 		// deps.ResolveCache may be a nil ai.Cache (resolve engine disabled or
 		// Redis unreachable); WithResolutionCache treats a nil cache as a
 		// silent no-op, so this wiring is safe either way.
-		logHandler := foodlog.NewHandler(foodlog.NewService(logRepo, foodRepo).WithResolutionCache(deps.ResolveCache), logRepo)
+		logHandler := foodlog.NewHandler(foodlog.NewService(logRepo, foodRepo).WithResolutionCache(deps.ResolveCache).WithAccuracy(deps.Accuracy), logRepo)
 		v1.POST("/logs", logHandler.Create)
 		v1.GET("/logs", logHandler.List)
 		v1.GET("/logs/:id", logHandler.Get)

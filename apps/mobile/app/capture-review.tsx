@@ -227,7 +227,7 @@ export default function CaptureReviewScreen() {
         excluded,
         logged: loggedCandidateKeys,
         markLogged: setLoggedCandidateKeys,
-        logCandidate: (c) =>
+        logCandidate: (c, index) =>
           appendLog(
             {
               food_item_id: c.item.id,
@@ -237,6 +237,7 @@ export default function CaptureReviewScreen() {
               // confirmed a day late still counts toward the day it was taken.
               logged_at: capture.capturedAt,
               source: sourceOf(capture.kind),
+              ...(resolution?.resolution_id ? { resolution_id: resolution.resolution_id, resolution_index: index } : {}),
             },
             // A FRESH log id per item, never `capture.id`: the capture queue's
             // key is `cap_<millis>_<rand>` and the server binds this field as

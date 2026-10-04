@@ -27,6 +27,8 @@ type ResolveOutcome struct {
 	TopFoodItemID  *uuid.UUID
 	TopScore       *float64
 	CandidateCount int
+	// CandidateIDs are the offered foods in rank order, so a later log can score where its pick ranked.
+	CandidateIDs []uuid.UUID
 }
 
 // OutcomeSink records resolve outcomes.
@@ -85,6 +87,9 @@ func outcomeFor(userID uuid.UUID, kind, mode string, phrase *string, res Resolut
 		Phrase:         phrase,
 		CandidateCount: len(res.Candidates),
 	}
+	for _, c := range res.Candidates {
+		o.CandidateIDs = append(o.CandidateIDs, c.Item.ID)
+	}
 	if len(res.Candidates) > 0 {
 		top := res.Candidates[0]
 		id := top.Item.ID
@@ -93,6 +98,19 @@ func outcomeFor(userID uuid.UUID, kind, mode string, phrase *string, res Resolut
 		o.TopScore = &score
 	}
 	return o
+}
+
+type resolutionIDKey struct{}
+
+// WithResolutionID names the attempt a handler is about to resolve, so the recorded outcome and the response share one id.
+func WithResolutionID(ctx context.Context, id uuid.UUID) context.Context {
+	return context.WithValue(ctx, resolutionIDKey{}, id)
+}
+
+// ResolutionIDFrom returns the id WithResolutionID attached, if any.
+func ResolutionIDFrom(ctx context.Context) (uuid.UUID, bool) {
+	id, ok := ctx.Value(resolutionIDKey{}).(uuid.UUID)
+	return id, ok
 }
 
 // phrasePtr returns a pointer to phrase, or nil when it is empty — so "a photo

@@ -2,12 +2,17 @@ package resolveoutcome
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
+
+// ErrNotFound is returned for an outcome that does not exist or belongs to another user.
+var ErrNotFound = errors.New("resolution outcome not found")
 
 // Repository reads and writes resolution outcomes.
 type Repository struct{ db *gorm.DB }
@@ -47,6 +52,19 @@ func (r Repository) Record(ctx context.Context, o Outcome) {
 		// stopped growing needs this line to tell whether that is good news.
 		slog.WarnContext(ctx, "resolveoutcome: record failed", "err", err, "kind", string(o.Kind))
 	}
+}
+
+// Get loads one of the user's outcomes.
+func (r Repository) Get(ctx context.Context, userID, id uuid.UUID) (Outcome, error) {
+	var o Outcome
+	err := r.db.WithContext(ctx).Where("id = ? AND user_id = ?", id, userID).Take(&o).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return Outcome{}, ErrNotFound
+	}
+	if err != nil {
+		return Outcome{}, fmt.Errorf("get resolution outcome %s: %w", id, err)
+	}
+	return o, nil
 }
 
 // TriageParams bounds a read of the human-waiting queue.

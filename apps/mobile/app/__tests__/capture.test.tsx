@@ -1531,6 +1531,43 @@ describe("Add to diary", () => {
     expect(mockCreateLogMutateAsync).toHaveBeenCalledWith(expect.objectContaining({ portion_assumed: false }));
   });
 
+  // kora#556: each item names its resolution and slot so its log can score the AI.
+  test("sends the resolution id and each item's slot with every log", async () => {
+    const rendered = await render(<CaptureScreen />);
+    const resolution = {
+      ...makeMultiCandidateResolution(),
+      resolution_id: "0b8e1c3e-5a0d-4b41-9f61-0d6f0b1c2a3e",
+      candidates: [
+        makeCandidate("1", "Rice", { grams: 150, kcal: 195 }),
+        makeCandidate("2", "Dal", { grams: 200, kcal: 230 }),
+      ],
+    };
+    await resolveWithMultiCandidates(rendered, resolution);
+
+    await fireEvent.press(await rendered.findByLabelText("Add to diary"));
+
+    await waitFor(() => expect(mockCreateLogMutateAsync).toHaveBeenCalledTimes(2));
+    expect(mockCreateLogMutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ food_item_id: "1", resolution_id: resolution.resolution_id, resolution_index: 0 }),
+    );
+    expect(mockCreateLogMutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ food_item_id: "2", resolution_id: resolution.resolution_id, resolution_index: 1 }),
+    );
+  });
+
+  test("omits the resolution fields when the server sent no resolution id", async () => {
+    const rendered = await render(<CaptureScreen />);
+    const candidate = makeCandidate("1", "Grilled chicken breast", { grams: 140, kcal: 231 });
+    await resolveWithMultiCandidates(rendered, { ...makeMultiCandidateResolution(), candidates: [candidate] });
+
+    await fireEvent.press(await rendered.findByLabelText("Add to diary"));
+
+    await waitFor(() => expect(mockCreateLogMutateAsync).toHaveBeenCalledTimes(1));
+    const sent = mockCreateLogMutateAsync.mock.calls[0][0];
+    expect(sent).not.toHaveProperty("resolution_id");
+    expect(sent).not.toHaveProperty("resolution_index");
+  });
+
   // A single confirm with BOTH an assumed and a non-assumed candidate. The
   // map in handleAddToDiary binds a fresh `candidate` per iteration today, so
   // this isn't a live bug — but it's the regression guard for a future

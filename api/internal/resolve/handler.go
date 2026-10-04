@@ -139,6 +139,7 @@ func (h Handler) recordBarcode(c *gin.Context, userID uuid.UUID, kind string, it
 		o.TopFoodItemID = &id
 		o.TopScore = &score
 		o.CandidateCount = 1
+		o.CandidateIDs = []uuid.UUID{id}
 	} else {
 		o.Tier = string(ai.TierFollowUp)
 	}
@@ -165,11 +166,13 @@ func (h Handler) ResolveText(c *gin.Context) {
 		httpx.Error(c, http.StatusBadRequest, "invalid_input", "phrase must be at least 2 characters")
 		return
 	}
+	id := beginResolution(c)
 	res, err := h.tp.ResolveText(c.Request.Context(), uid, req.Phrase)
 	if err != nil {
 		httpx.RespondServiceError(c, err)
 		return
 	}
+	res.ResolutionID = &id
 	httpx.OK(c, res)
 }
 
@@ -211,11 +214,13 @@ func (h Handler) ResolvePhoto(c *gin.Context) {
 	if mime == "" {
 		mime = http.DetectContentType(buf)
 	}
+	id := beginResolution(c)
 	res, err := h.tp.ResolvePhoto(c.Request.Context(), uid, buf, mime)
 	if err != nil {
 		httpx.RespondServiceError(c, err)
 		return
 	}
+	res.ResolutionID = &id
 	httpx.OK(c, res)
 }
 
@@ -257,11 +262,13 @@ func (h Handler) ResolveVoice(c *gin.Context) {
 	if mime == "" {
 		mime = http.DetectContentType(buf)
 	}
+	id := beginResolution(c)
 	res, err := h.tp.ResolveVoice(c.Request.Context(), uid, buf, mime)
 	if err != nil {
 		httpx.RespondServiceError(c, err)
 		return
 	}
+	res.ResolutionID = &id
 	httpx.OK(c, res)
 }
 
@@ -285,6 +292,7 @@ func (h Handler) ResolveBarcode(c *gin.Context) {
 	}
 	c.Set(barcodeContextKey, req.Barcode)
 	userID, _ := user.IDFromContext(c)
+	id := beginResolution(c)
 
 	item, found, err := h.bc(c.Request.Context(), req.Barcode)
 	if err != nil {
@@ -304,15 +312,24 @@ func (h Handler) ResolveBarcode(c *gin.Context) {
 			Tier:             ai.TierFollowUp,
 			FollowUpQuestion: barcodeUnknownQuestion,
 			Provenance:       "barcode",
+			ResolutionID:     &id,
 		})
 		return
 	}
 	h.recordBarcode(c, userID, "resolved", item)
 	httpx.OK(c, ai.Resolution{
-		Candidates: []ai.ResolvedCandidate{barcodeCandidate(*item)},
-		Tier:       ai.TierAuto,
-		Provenance: item.Provenance,
+		Candidates:   []ai.ResolvedCandidate{barcodeCandidate(*item)},
+		Tier:         ai.TierAuto,
+		Provenance:   item.Provenance,
+		ResolutionID: &id,
 	})
+}
+
+// beginResolution mints the id the attempt's outcome is recorded under and the response returns.
+func beginResolution(c *gin.Context) uuid.UUID {
+	id := uuid.New()
+	c.Request = c.Request.WithContext(ai.WithResolutionID(c.Request.Context(), id))
+	return id
 }
 
 // textEngine adapts the text resolver to an opaque-result interface, so the

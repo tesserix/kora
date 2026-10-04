@@ -382,6 +382,23 @@ describe("confirming a capture with multiple detected items", () => {
     expect((appendLog as jest.Mock).mock.calls[1][0]).toMatchObject({ food_item_id: "food-b", quantity_grams: 50 });
   });
 
+  test("each logged item names its resolution and slot (kora#556)", async () => {
+    const capture = queuedCaptureFixture({
+      resolution: resolutionFixture({
+        resolution_id: "res-1",
+        candidates: [candidateFixture({ id: "food-a" }), candidateFixture({ id: "food-b" })],
+      }),
+    });
+    mockListCaptures([capture]);
+
+    const { getByText } = await render(<CaptureReviewScreen />, { wrapper: wrap(newClient()) });
+    fireEvent.press(getByText("Confirm"));
+
+    await waitFor(() => expect(appendLog).toHaveBeenCalledTimes(2));
+    expect((appendLog as jest.Mock).mock.calls[0][0]).toMatchObject({ resolution_id: "res-1", resolution_index: 0 });
+    expect((appendLog as jest.Mock).mock.calls[1][0]).toMatchObject({ resolution_id: "res-1", resolution_index: 1 });
+  });
+
   test("each logged item gets its own fresh log id", async () => {
     const capture = queuedCaptureFixture({
       resolution: resolutionFixture({

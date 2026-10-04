@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 // Kind is which branch of the resolver terminated the attempt.
@@ -157,6 +158,20 @@ type Outcome struct {
 	CandidateCount int        `gorm:"column:candidate_count" json:"candidate_count"`
 	Status         Status     `gorm:"column:status" json:"status"`
 	CreatedAt      time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	// TraceID is the Langfuse trace a confirmation of this attempt is scored on.
+	TraceID              *string        `gorm:"column:trace_id" json:"-"`
+	CandidateFoodItemIDs pq.StringArray `gorm:"column:candidate_food_item_ids;type:uuid[];default:'{}'" json:"-"`
+}
+
+// Candidates returns the offered foods in rank order.
+func (o Outcome) Candidates() []uuid.UUID {
+	ids := make([]uuid.UUID, 0, len(o.CandidateFoodItemIDs))
+	for _, raw := range o.CandidateFoodItemIDs {
+		if id, err := uuid.Parse(raw); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 // TableName pins the table so GORM's pluraliser cannot drift off it.

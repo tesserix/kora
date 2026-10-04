@@ -82,6 +82,10 @@ type LogRequest struct {
 	// from real data or stated by the user — see #138. Omitted yields Go's
 	// zero value false, matching the column default; no pointer needed.
 	PortionAssumed bool `json:"portion_assumed"`
+	// ResolutionID is the resolve response this log came from, if any.
+	ResolutionID *uuid.UUID `json:"resolution_id"`
+	// ResolutionIndex is the item of that resolution this log keeps.
+	ResolutionIndex *int `json:"resolution_index"`
 }
 
 var validMealSlots = map[string]bool{"breakfast": true, "lunch": true, "dinner": true, "snack": true}
@@ -110,9 +114,22 @@ func phraseForSource(source string, phrase *string) *string {
 }
 
 type Service struct {
-	logs  Repository
-	foods nutrition.Repository
-	cache ResolutionCache
+	logs     Repository
+	foods    nutrition.Repository
+	cache    ResolutionCache
+	accuracy AccuracyRecorder
+}
+
+// AccuracyRecorder scores a logged food against the AI resolution that offered it.
+type AccuracyRecorder interface {
+	Owns(ctx context.Context, userID, resolutionID uuid.UUID, index int) bool
+	Logged(ctx context.Context, userID, resolutionID uuid.UUID, index int, foodItemID uuid.UUID, corrected bool)
+}
+
+// WithAccuracy attaches the optional accuracy recorder; without one logs are never linked or scored.
+func (s Service) WithAccuracy(r AccuracyRecorder) Service {
+	s.accuracy = r
+	return s
 }
 
 func NewService(logs Repository, foods nutrition.Repository) Service {
@@ -224,9 +241,17 @@ func (s Service) LogFood(ctx context.Context, userID uuid.UUID, req LogRequest, 
 	if req.ID != nil {
 		log.ID = *req.ID
 	}
+	if req.ResolutionID != nil && req.ResolutionIndex != nil && s.accuracy != nil &&
+		s.accuracy.Owns(ctx, userID, *req.ResolutionID, *req.ResolutionIndex) {
+		log.ResolutionOutcomeID = req.ResolutionID
+		log.ResolutionIndex = req.ResolutionIndex
+	}
 	created, err := s.logs.CreateIdempotent(ctx, log)
 	if err != nil {
 		return FoodLog{}, err
+	}
+	if log.ResolutionOutcomeID != nil {
+		s.accuracy.Logged(ctx, userID, *log.ResolutionOutcomeID, *log.ResolutionIndex, *req.FoodItemID, false)
 	}
 	// The create path does not go through the joined read scope, so carry the
 	// food's base unit onto the response by hand — a client that renders the
@@ -423,6 +448,10 @@ func (s Service) EditLog(ctx context.Context, userID, logID uuid.UUID, req EditR
 			// now-retracted alias.
 			s.invalidateResolutionCache(ctx, userID, *current.InputPhrase)
 		}
+	}
+
+	if foodChanged && s.accuracy != nil && updated.ResolutionOutcomeID != nil && updated.ResolutionIndex != nil {
+		s.accuracy.Logged(ctx, userID, *updated.ResolutionOutcomeID, *updated.ResolutionIndex, *current.FoodItemID, true)
 	}
 
 	return EditResult{Log: updated, AliasRecorded: aliasRecorded}, nil

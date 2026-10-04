@@ -574,6 +574,9 @@ export type CreateLogInput = {
    * send it on an edit/PATCH path.
    */
   portion_assumed?: boolean;
+  /** The resolution and item slot this log keeps, so the server can score the AI (kora#556). */
+  resolution_id?: string;
+  resolution_index?: number;
 };
 
 export function useCreateLog() {
