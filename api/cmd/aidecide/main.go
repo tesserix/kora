@@ -73,9 +73,7 @@ func run(ctx context.Context, client *decide.Client, out io.Writer) error {
 		report.Cases = append(report.Cases, entry)
 		latencies = append(latencies, entry.LatencyMS)
 	}
-	sort.Slice(latencies, func(i, j int) bool { return latencies[i] < latencies[j] })
-	report.P50MS = latencies[(len(latencies)-1)/2]
-	report.P95MS = latencies[len(latencies)-1]
+	report.P50MS, report.P95MS = latencyPercentiles(latencies)
 	if err := json.NewEncoder(out).Encode(report); err != nil {
 		return errors.New("write synthetic report")
 	}
@@ -83,6 +81,11 @@ func run(ctx context.Context, client *decide.Client, out io.Writer) error {
 		return errors.New("synthetic decision checks failed")
 	}
 	return nil
+}
+
+func latencyPercentiles(latencies []int64) (int64, int64) {
+	sort.Slice(latencies, func(i, j int) bool { return latencies[i] < latencies[j] })
+	return latencies[(len(latencies)-1)/2], latencies[(95*len(latencies)+99)/100-1]
 }
 
 func main() {

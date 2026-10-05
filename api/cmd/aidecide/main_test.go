@@ -99,3 +99,14 @@ func TestSyntheticSuiteAcceptsCompleteCorrectResponses(t *testing.T) {
 	require.Len(t, report.Cases, 26)
 	require.Equal(t, 10400, report.InputTokens)
 }
+
+func TestLatencyPercentilesDoNotReportMaximumAsP95(t *testing.T) {
+	latencies := make([]int64, 26)
+	for i := range latencies {
+		latencies[i] = 10
+	}
+	latencies[0] = 1000
+	p50, p95 := latencyPercentiles(latencies)
+	require.Equal(t, int64(10), p50)
+	require.Equal(t, int64(10), p95)
+}
