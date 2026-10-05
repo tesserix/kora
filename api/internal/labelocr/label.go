@@ -26,8 +26,9 @@ var ErrUnreadable = errors.New("nutrition label unreadable")
 
 // Field is one extracted value as returned by the kora.nutrition_label schema.
 type Field struct {
-	Value      json.RawMessage `json:"value"`
-	Confidence float64         `json:"confidence"`
+	Value      json.RawMessage   `json:"value"`
+	Evidence   []json.RawMessage `json:"evidence,omitempty"`
+	Confidence float64           `json:"confidence"`
 }
 
 // Failure is a schema validation failure reported by Document Intelligence.

@@ -95,7 +95,8 @@ type Deps struct {
 	// MCPInternalKey guards /internal/v1/*; empty leaves them unmounted.
 	MCPInternalKey string
 	// LabelReader reads nutrition panels through Document Intelligence; nil leaves the route unmounted.
-	LabelReader labelocr.Reader
+	LabelReader   labelocr.Reader
+	LabelReviewer labelocr.Reviewer
 	// AITraceUserKey HMACs the user id on AI traces; nil omits the user.
 	AITraceUserKey []byte
 	// Accuracy scores AI answers from the logs that confirm or correct them.
@@ -538,7 +539,7 @@ func NewRouter(deps Deps) *gin.Engine {
 			v1.POST("/resolve/label",
 				ratelimit.PerUser(labelocr.ReadLimit, labelocr.ReadPeriod),
 				aitrace.Route("capture.label", deps.AITraceUserKey),
-				labelocr.NewHandler(deps.LabelReader, billing.NewMeter(deps.DB)).Read)
+				labelocr.NewHandler(deps.LabelReader, billing.NewMeter(deps.DB), deps.LabelReviewer).Read)
 		}
 
 		coachGrounder := coach.NewGrounder(dashSvc, logRepo, memSvc, trackingRepo).WithMentor(mentorRepo).WithFasting(fastingRepo)

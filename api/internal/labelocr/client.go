@@ -43,6 +43,8 @@ type Config struct {
 type Read struct {
 	Fields   map[string]Field
 	Failures []Failure
+	Status   string
+	JobID    string
 	// CostUSD is what Document Intelligence measured; zero when it reported none.
 	CostUSD float64
 }
@@ -178,7 +180,9 @@ func (c *Client) Read(ctx context.Context, photo []byte, mime string) (read Read
 		return Read{}, err
 	}
 	jobPath := "/v1/ocr/jobs/" + created.JobID
+	var finalStatus string
 	if err := c.wait(ctx, c.jobURL, jobPath, func(status string) (bool, error) {
+		finalStatus = status
 		switch status {
 		case "completed", "partial", "review_required":
 			return true, nil
@@ -194,7 +198,7 @@ func (c *Client) Read(ctx context.Context, photo []byte, mime string) (read Read
 	if err := c.call(ctx, http.MethodGet, c.jobURL, jobPath+"/result", nil, "", &res); err != nil {
 		return Read{}, err
 	}
-	read = Read{Fields: res.Fields, Failures: res.ValidationFailures}
+	read = Read{Fields: res.Fields, Failures: res.ValidationFailures, Status: finalStatus, JobID: created.JobID}
 	if res.Cost != nil && res.Cost.Currency == "USD" {
 		read.CostUSD, _ = strconv.ParseFloat(res.Cost.Decimal, 64) // the schema pattern guarantees a decimal
 	}

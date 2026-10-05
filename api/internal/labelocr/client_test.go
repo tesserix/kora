@@ -137,8 +137,9 @@ func TestReadRunsUploadAndExtractionThroughDocumentIntelligence(t *testing.T) {
 }
 
 func TestReadAcceptsReviewRequiredResults(t *testing.T) {
-	_, err := newFakeDI(t, "review_required").client(t).Read(t.Context(), []byte("x"), "image/jpeg")
+	read, err := newFakeDI(t, "review_required").client(t).Read(t.Context(), []byte("x"), "image/jpeg")
 	require.NoError(t, err)
+	require.Equal(t, "review_required", read.Status)
 }
 
 func TestReadTreatsARejectedJobAsUnreadable(t *testing.T) {

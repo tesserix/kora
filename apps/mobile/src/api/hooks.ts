@@ -13,6 +13,7 @@ import * as Crypto from "expo-crypto";
 import { localDateNow } from "@/lib/localDate";
 import { AGENT_REQUEST_TIMEOUT_MS, apiFetch, apiFetchEnvelope, apiFetchMultipart, currentUserId, isNetworkError, TimeoutError } from "@/lib/api";
 import { buildCaptureForm, normalizeCaptureMessage, normalizeResolution, type ResolveFile } from "./resolveWire";
+import { parseLabelAnalysis } from "./labelAnalysis";
 import { isOnline } from "@/offline/connectivity";
 import { reconcileWeightReminder } from "@/reminders/reconcileWeightReminder";
 import { activateMealPlanProjection } from "@/reminders/mealPlanProjection";
@@ -1230,6 +1231,16 @@ export function useResolvePhoto() {
   return useMutation({
     mutationFn: ({ input: file, signal }: ResolveVars<ResolveFile>) =>
       apiFetchMultipart("/v1/resolve/photo", buildCaptureForm(file), { signal }).then(normalizeResolution),
+    onSettled: refreshAIUsage,
+  });
+}
+
+export function useReadLabel() {
+  const refreshAIUsage = useRefreshAIUsage();
+  return useMutation({
+    mutationFn: ({ input: file, signal }: ResolveVars<ResolveFile>) =>
+      apiFetchMultipart("/v1/resolve/label", buildCaptureForm(file), { signal }).then(parseLabelAnalysis),
+    retry: false,
     onSettled: refreshAIUsage,
   });
 }

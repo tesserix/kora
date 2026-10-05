@@ -238,8 +238,12 @@ func main() {
 	}
 	// A nil *Client in the interface would still mount the route.
 	var labelReader labelocr.Reader
+	var labelReviewer labelocr.Reviewer
 	if labelClient != nil {
 		labelReader = labelClient
+		if cfg.AIGatewayEnabled {
+			labelReviewer = providers.NewLabelReviewer(cfg.AIGatewayAPIKey, cfg.AIGatewayBaseURL)
+		}
 	}
 
 	srv := &http.Server{
@@ -256,6 +260,7 @@ func main() {
 			BFFHMACKey:           cfg.BFFHMACKey,
 			MCPInternalKey:       cfg.MCPInternalKey,
 			LabelReader:          labelReader,
+			LabelReviewer:        labelReviewer,
 			AITraceUserKey:       cfg.AITraceUserKey,
 			Accuracy:             accuracy.NewRecorder(resolveoutcome.NewRepository(db), scores),
 			PlatformAdminSecret:  cfg.PlatformAdminSecret,
