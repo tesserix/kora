@@ -39,11 +39,12 @@ type Budget interface {
 }
 
 type Handler struct {
-	reader Reader
-	budget Budget
+	analyzer Analyzer
 }
 
-func NewHandler(reader Reader, budget Budget) Handler { return Handler{reader: reader, budget: budget} }
+func NewHandler(reader Reader, budget Budget, reviewer Reviewer) Handler {
+	return Handler{analyzer: NewAnalyzer(reader, reviewer, budget)}
+}
 
 // Read serves POST /v1/resolve/label: a photo of a nutrition panel in, a checked Label out.
 func (h Handler) Read(c *gin.Context) {
@@ -68,7 +69,7 @@ func (h Handler) Read(c *gin.Context) {
 		httpx.RespondServiceError(c, err)
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // Closing a read-only upload cannot change the result.
 	photo, err := io.ReadAll(io.LimitReader(f, maxPhotoBytes+1))
 	if err != nil {
 		httpx.RespondServiceError(c, err)
@@ -84,41 +85,18 @@ func (h Handler) Read(c *gin.Context) {
 		return
 	}
 
-	within, err := h.budget.WithinBudget(c.Request.Context(), uid)
-	if err != nil {
-		httpx.RespondServiceError(c, err)
+	result, err := h.analyzer.Analyze(c.Request.Context(), uid, photo, mime)
+	if err == nil {
+		httpx.OK(c, result)
 		return
 	}
-	if !within {
+	if errors.Is(err, ErrBudgetExhausted) {
 		httpx.Error(c, http.StatusTooManyRequests, "budget_exhausted", "You've reached your AI usage limit — try again later")
 		return
-	}
-
-	started := time.Now()
-	read, err := h.reader.Read(c.Request.Context(), photo, mime)
-	h.record(c.Request.Context(), uid, read.CostUSD, time.Since(started), err)
-	if err == nil {
-		var label Label
-		if label, err = Check(read.Fields, read.Failures); err == nil {
-			httpx.OK(c, label)
-			return
-		}
 	}
 	if errors.Is(err, ErrUnreadable) {
 		httpx.Error(c, http.StatusUnprocessableEntity, "label_unreadable", "no nutrition panel could be read; retake the photo closer and flat")
 		return
 	}
 	httpx.RespondServiceError(c, err)
-}
-
-// record charges every attempt, failed or not, so label reads spend the same quota as photo reads.
-func (h Handler) record(ctx context.Context, uid uuid.UUID, costUSD float64, took time.Duration, err error) {
-	u := ai.Usage{Provider: "document-intelligence", CallType: "read_label", LatencyMs: int(took.Milliseconds()), Outcome: ai.OutcomeOK}
-	switch {
-	case errors.Is(err, context.DeadlineExceeded):
-		u.Outcome = ai.OutcomeTimeout
-	case err != nil:
-		u.Outcome = ai.OutcomeError
-	}
-	_ = h.budget.Record(context.WithoutCancel(ctx), uid, u, costUSD) // metering must never fail the read
 }

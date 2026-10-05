@@ -138,3 +138,51 @@ OCR text remains untrusted. Numerical conversion and citation membership stay
 deterministic; model confidence cannot bypass allergy/medical gates. See
 https://docs.typesafe.ai/model-jaggedness/jev-1.13 and
 https://docs.typesafe.ai/confidence.
+
+## Image-only label flow
+
+The existing authenticated `POST /v1/resolve/label` now orchestrates image-only
+reading. Its additive response includes checked nutrition, an immutable input
+image SHA-256, the OCR job reference and extracted fields with provider evidence.
+The user uploads one image in More → Read a nutrition label; no measurement
+form, model selector, meal inference or diary write is involved. Printed serving
+size never establishes consumption. Values remain per 100 g/ml; missing values
+remain unknown. The app cancels requests on exit and refreshes quota after each
+attempt. The source image is not placed in logs or new persistent application
+storage; the existing OCR service owns its upload/result retention.
+
+A bounded Go analyzer keeps source review/partial status instead of dropping it.
+Incomplete core nutrition, failed extraction or an existing review issue can
+trigger one independent vision reading through `read_label_review`. The private
+gateway pins that route to the existing Claude Sonnet 4.5 provider group. Its
+actual relative accuracy must be checked on synthetic images before rollout;
+model size and confidence are not correctness guarantees. The review reads the
+original image, not model-produced prose. No Jev numerical decision can bypass
+validation. Each attempt is metered; the second attempt requires another quota
+check and successful persistence of the first usage record. Provider failures
+never loop or retry automatically. A completed source with all core nutrients
+skips the second model. Vision-only recovery and disagreements remain explicitly
+uncertain; a failed reviewer does not discard readable primary results.
+
+Budgets: existing 8 MiB upload cap and 20 reads/user/minute; 22-second overall
+analysis context, 14-second primary budget and at most 12 seconds for the second
+model within the remaining overall budget. Usage writes have a detached two-
+second deadline so client cancellation does not erase accounting. This fits the
+mobile transport's existing 25-second deadline. The second read has no SDK retry.
+No new database, queue, migration or service is introduced. Reuse of the existing
+API keeps ownership and quota enforcement at the authenticated upload boundary.
+
+The separate Python DocumentAgentService was reviewed: it performs one bounded
+Australis tool call and routes a cited document result. It does not read image
+bytes or interpret nutrition. This flow therefore avoids a second extraction
+hop through that adapter; the API performs nutrition orchestration and uses the
+existing AI gateway for the independent model. A future document-agent consumer
+can use the retained source evidence, but it must preserve document identity and
+untrusted-content rules rather than treating the summary as instructions.
+
+Rollout order: reviewed private gateway route, synthetic image tests against that
+route, then the Kora API release, then the mobile release. The existing API
+deployment hold remains enabled until explicitly released. Revert the application
+change to disable automatic review and remove the screen; no customer diary data
+is created or modified by this feature. Device visual QA and live end-to-end
+verification remain release gates, separately reported from mocked contract tests.

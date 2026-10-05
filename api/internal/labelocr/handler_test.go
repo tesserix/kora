@@ -60,7 +60,7 @@ func postWithBudget(t *testing.T, reader Reader, budget Budget, body []byte, sig
 	if signedIn {
 		r.Use(func(c *gin.Context) { c.Set("user_id", uuid.New()); c.Next() })
 	}
-	r.POST("/label", NewHandler(reader, budget).Read)
+	r.POST("/label", NewHandler(reader, budget, nil).Read)
 
 	var form bytes.Buffer
 	w := multipart.NewWriter(&form)
@@ -78,6 +78,9 @@ func postWithBudget(t *testing.T, reader Reader, budget Budget, body []byte, sig
 func TestHandlerReturnsTheCheckedLabel(t *testing.T) {
 	raw, _ := json.Marshal(430)
 	reader := &stubReader{read: Read{Fields: map[string]Field{"per_100g.energy_kcal": {Value: raw, Confidence: 0.9}}}}
+	for key, field := range fields(t, map[string]any{"per_100g.protein_g": 7, "per_100g.fat_g": 10, "per_100g.carbohydrate_g": 75}) {
+		reader.read.Fields[key] = field
+	}
 
 	rec := post(t, reader, jpeg, true)
 
@@ -89,6 +92,13 @@ func TestHandlerReturnsTheCheckedLabel(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
 	assert.Equal(t, BasisPer100g, body.Data.Basis)
 	assert.InDelta(t, 430, *body.Data.Per100.EnergyKcal, 1e-9)
+	var response struct {
+		Data LabelResponse `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	require.Equal(t, "ready", response.Data.Analysis.Status)
+	require.False(t, response.Data.Analysis.ConsumedAmountKnown)
+	require.NotEmpty(t, response.Data.ImageSHA256)
 }
 
 func TestHandlerRejectsNonImagesBeforeCallingDocumentIntelligence(t *testing.T) {
@@ -148,4 +158,117 @@ func TestHandlerRejectsUnknownCaloriesInsteadOfReturningAZeroCalorieFood(t *test
 	rec := post(t, reader, jpeg, true)
 	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
 	assert.Contains(t, rec.Body.String(), "label_unreadable")
+}
+
+type stubReviewer struct {
+	read  Read
+	err   error
+	calls int
+}
+
+func (s *stubReviewer) Review(_ context.Context, _ []byte, _ string) (Read, ai.Usage, error) {
+	s.calls++
+	return s.read, ai.Usage{Model: "strong-vision", TokensIn: 100}, s.err
+}
+
+func TestImageOnlyAnalysisEscalatesOnceWithoutInventingConsumption(t *testing.T) {
+	reader := &stubReader{err: ErrUnreadable}
+	reviewer := &stubReviewer{read: Read{Fields: fields(t, map[string]any{"per_100g.energy_kcal": 200})}}
+	budget := &stubBudget{within: true}
+	service := NewAnalyzer(reader, reviewer, budget)
+	result, err := service.Analyze(t.Context(), uuid.New(), jpeg, "image/jpeg")
+	require.NoError(t, err)
+	require.Equal(t, 1, reader.calls)
+	require.Equal(t, 1, reviewer.calls)
+	require.True(t, result.Analysis.Escalated)
+	require.False(t, result.Analysis.ConsumedAmountKnown)
+	require.Equal(t, "review_required", result.Analysis.Status)
+	require.Equal(t, 200.0, *result.Per100.EnergyKcal)
+	require.Len(t, budget.recorded, 2)
+}
+
+func TestImageOnlyAnalysisKeepsEscalationBoundedAndConservative(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		status      string
+		primaryErr  error
+		reviewErr   error
+		reviewValue float64
+		wantCalls   int
+		wantError   bool
+	}{
+		{"clear_skips_expensive_review", "completed", nil, nil, 200, 0, false},
+		{"partial_escalates_once", "partial", nil, nil, 200, 1, false},
+		{"disagreement_is_not_silently_corrected", "partial", nil, nil, 300, 1, false},
+		{"review_outage_preserves_readable_fields", "partial", nil, errors.New("provider down"), 0, 1, false},
+		{"both_unreadable_require_better_image", "", ErrUnreadable, ErrUnreadable, 0, 1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reader := &stubReader{read: Read{Status: tc.status, Fields: fields(t, map[string]any{"per_100g.energy_kcal": 200})}, err: tc.primaryErr}
+			if tc.status == "completed" {
+				for key, field := range fields(t, map[string]any{"per_100g.protein_g": 5, "per_100g.fat_g": 6.7, "per_100g.carbohydrate_g": 30}) {
+					reader.read.Fields[key] = field
+				}
+			}
+			reviewer := &stubReviewer{read: Read{Fields: fields(t, map[string]any{"per_100g.energy_kcal": tc.reviewValue})}, err: tc.reviewErr}
+			budget := &stubBudget{within: true}
+			result, err := NewAnalyzer(reader, reviewer, budget).Analyze(t.Context(), uuid.New(), jpeg, "image/jpeg")
+			if tc.wantError {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, 200.0, *result.Per100.EnergyKcal)
+				require.Equal(t, tc.wantCalls > 0, result.NeedsReview)
+				if tc.name == "disagreement_is_not_silently_corrected" {
+					require.Contains(t, result.Issues, "review_disagreement")
+				}
+			}
+			require.Equal(t, tc.wantCalls, reviewer.calls)
+			require.Len(t, budget.recorded, 1+tc.wantCalls)
+		})
+	}
+}
+
+type oneAttemptBudget struct{ stubBudget }
+
+func (b *oneAttemptBudget) WithinBudget(context.Context, uuid.UUID) (bool, error) {
+	return len(b.recorded) == 0, nil
+}
+
+type failedUsageBudget struct{ stubBudget }
+
+func (b *failedUsageBudget) Record(_ context.Context, _ uuid.UUID, u ai.Usage, _ float64) error {
+	b.recorded = append(b.recorded, u)
+	return errors.New("usage persistence failed")
+}
+
+func TestImageOnlyAnalysisDoesNotEscalateWhenUsageCannotBeRecorded(t *testing.T) {
+	reader := &stubReader{read: Read{Status: "partial", Fields: fields(t, map[string]any{"per_100g.energy_kcal": 200})}}
+	reviewer := &stubReviewer{}
+	budget := &failedUsageBudget{stubBudget: stubBudget{within: true}}
+	result, err := NewAnalyzer(reader, reviewer, budget).Analyze(t.Context(), uuid.New(), jpeg, "image/jpeg")
+	require.NoError(t, err)
+	require.Equal(t, "usage_unavailable", result.Analysis.ReviewOutcome)
+	require.Zero(t, reviewer.calls)
+}
+
+func TestImageOnlyAnalysisRechecksQuotaBeforeStrongerModel(t *testing.T) {
+	reader := &stubReader{read: Read{Status: "partial", Fields: fields(t, map[string]any{"per_100g.energy_kcal": 200})}}
+	reviewer := &stubReviewer{}
+	budget := &oneAttemptBudget{}
+	result, err := NewAnalyzer(reader, reviewer, budget).Analyze(t.Context(), uuid.New(), jpeg, "image/jpeg")
+	require.NoError(t, err)
+	require.Equal(t, "budget_unavailable", result.Analysis.ReviewOutcome)
+	require.Zero(t, reviewer.calls)
+	require.Len(t, budget.recorded, 1)
+}
+
+func TestImageOnlyAnalysisEscalatesIncompleteNutritionEvenWithConfidentEnergy(t *testing.T) {
+	reader := &stubReader{read: Read{Status: "completed", Fields: fields(t, map[string]any{"per_100g.energy_kcal": 200})}}
+	reviewer := &stubReviewer{err: ErrUnreadable}
+	result, err := NewAnalyzer(reader, reviewer, &stubBudget{within: true}).Analyze(t.Context(), uuid.New(), jpeg, "image/jpeg")
+	require.NoError(t, err)
+	require.Equal(t, 1, reviewer.calls)
+	require.True(t, result.NeedsReview)
+	require.Contains(t, result.Issues, "incomplete_nutrition")
 }

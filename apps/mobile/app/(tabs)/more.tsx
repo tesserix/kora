@@ -31,7 +31,7 @@ import { TAB_BAR_SCROLL_INSET } from "@/components/FloatingTabBar";
 // near-identically — MoreRow is kept as-is rather than migrated to avoid
 // churn on an already-shipped screen. The unread-count Badge is the one
 // accent element this screen is allowed.
-type MoreRowKey = "profile" | "mentor" | "social" | "notifications" | "recipes" | "ai-usage" | "settings" | "feedback" | "about";
+type MoreRowKey = "label-scan" | "profile" | "mentor" | "social" | "notifications" | "recipes" | "ai-usage" | "settings" | "feedback" | "about";
 
 type MoreRowProps = {
   rowKey: MoreRowKey;
@@ -147,6 +147,7 @@ export default function More() {
           </View>
         </BezelCluster>
         <MoreGroup>
+          <MoreRow rowKey="label-scan" title="Read a nutrition label" icon="camera" onPress={() => router.push("/label-scan" as Href)} />
           <MoreRow
             rowKey="profile"
             title="Profile"
