@@ -17,6 +17,22 @@ func TestLabelReviewUsesAuthenticatedStrongerRouteAndNoInventedPortion(t *testin
 		var body map[string]any
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 		require.Equal(t, "kora-auto", body["model"])
+		format := body["response_format"].(map[string]any)["json_schema"].(map[string]any)
+		properties := format["schema"].(map[string]any)["properties"].(map[string]any)
+		for _, name := range []string{"basis", "serving_unit"} {
+			property := properties[name].(map[string]any)
+			if _, incompatible := property["enum"]; incompatible {
+				http.Error(w, "nullable type arrays with enum are rejected by provider", http.StatusBadRequest)
+				return
+			}
+			encoded, err := json.Marshal(property)
+			require.NoError(t, err)
+			if name == "basis" {
+				require.JSONEq(t, `{"anyOf":[{"type":"string","enum":["per_100g","per_100ml","per_serving"]},{"type":"null"}]}`, string(encoded))
+			} else {
+				require.JSONEq(t, `{"anyOf":[{"type":"string","enum":["g","ml"]},{"type":"null"}]}`, string(encoded))
+			}
+		}
 		w.Header().Set("Content-Type", "application/json")
 		content := `{"basis":"per_100g","energy_kcal":200,"protein_g":null,"fat_g":null,"saturated_fat_g":null,"carbohydrate_g":null,"sugars_g":null,"fibre_g":null,"sodium_mg":null}`
 		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"model": "claude-sonnet-4-5", "choices": []any{map[string]any{"message": map[string]any{"content": content}}}, "usage": map[string]int{"prompt_tokens": 100, "completion_tokens": 50}}))

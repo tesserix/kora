@@ -40,8 +40,8 @@ func (r LabelReviewer) Review(ctx context.Context, photo []byte, mime string) (l
 	defer cancel()
 	names := []string{"energy_kcal", "protein_g", "fat_g", "saturated_fat_g", "carbohydrate_g", "sugars_g", "fibre_g", "sodium_mg", "serving_amount"}
 	properties := map[string]any{
-		"basis":        map[string]any{"type": []string{"string", "null"}, "enum": []any{"per_100g", "per_100ml", "per_serving", nil}},
-		"serving_unit": map[string]any{"type": []string{"string", "null"}, "enum": []any{"g", "ml", nil}},
+		"basis":        map[string]any{"anyOf": []any{map[string]any{"type": "string", "enum": []string{"per_100g", "per_100ml", "per_serving"}}, map[string]any{"type": "null"}}},
+		"serving_unit": map[string]any{"anyOf": []any{map[string]any{"type": "string", "enum": []string{"g", "ml"}}, map[string]any{"type": "null"}}},
 	}
 	required := []string{"basis", "serving_unit"}
 	for _, name := range names {
