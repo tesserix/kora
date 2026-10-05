@@ -272,3 +272,12 @@ func TestImageOnlyAnalysisEscalatesIncompleteNutritionEvenWithConfidentEnergy(t 
 	require.True(t, result.NeedsReview)
 	require.Contains(t, result.Issues, "incomplete_nutrition")
 }
+
+func TestImageOnlyAnalysisDoesNotReportFormattingAsModelDisagreement(t *testing.T) {
+	reader := &stubReader{read: Read{Status: "partial", Fields: fields(t, map[string]any{"per_100g.energy_kcal": 200})}}
+	reviewer := &stubReviewer{read: Read{Fields: map[string]Field{"per_100g.energy_kcal": {Value: json.RawMessage(`200.0`), Confidence: 0.5}}}}
+	result, err := NewAnalyzer(reader, reviewer, &stubBudget{within: true}).Analyze(t.Context(), uuid.New(), jpeg, "image/jpeg")
+	require.NoError(t, err)
+	require.NotContains(t, result.Issues, "review_disagreement")
+	require.True(t, result.NeedsReview)
+}

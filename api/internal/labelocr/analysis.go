@@ -5,7 +5,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"reflect"
 	"time"
 
 	"github.com/google/uuid"
@@ -110,7 +112,7 @@ func (a Analyzer) Analyze(ctx context.Context, uid uuid.UUID, photo []byte, mime
 							original, exists := read.Fields[name]
 							if !exists || bytes.Equal(bytes.TrimSpace(original.Value), []byte("null")) {
 								read.Fields[name] = field
-							} else if !bytes.Equal(original.Value, field.Value) && !bytes.Equal(bytes.TrimSpace(field.Value), []byte("null")) {
+							} else if !sameFieldValue(original.Value, field.Value) && !bytes.Equal(bytes.TrimSpace(field.Value), []byte("null")) {
 								label.addIssue("review_disagreement")
 							}
 						}
@@ -137,6 +139,11 @@ func (a Analyzer) Analyze(ctx context.Context, uid uuid.UUID, photo []byte, mime
 	}
 	digest := sha256.Sum256(photo)
 	return LabelResponse{Label: label, Analysis: analysis, Fields: read.Fields, JobID: read.JobID, ImageSHA256: hex.EncodeToString(digest[:])}, nil
+}
+
+func sameFieldValue(a, b json.RawMessage) bool {
+	var left, right any
+	return json.Unmarshal(a, &left) == nil && json.Unmarshal(b, &right) == nil && reflect.DeepEqual(left, right)
 }
 
 func (a Analyzer) record(ctx context.Context, uid uuid.UUID, usage ai.Usage, cost float64, err error) error {
