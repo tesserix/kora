@@ -24,7 +24,7 @@ func TestSyntheticSuitePreservesFailuresAndRejectsFalseSuccess(t *testing.T) {
 	require.Error(t, err)
 	var report Report
 	require.NoError(t, json.Unmarshal(output.Bytes(), &report))
-	require.Equal(t, 26, len(report.Cases))
+	require.Equal(t, 80, len(report.Cases))
 	require.False(t, report.Passed)
 	require.Equal(t, "ask_amount", report.Cases[0].Expected)
 	require.Equal(t, "calculate", report.Cases[0].Actual)
@@ -53,7 +53,7 @@ func TestSyntheticSuiteExercisesIntentAndCandidateDecisions(t *testing.T) {
 	require.True(t, seen["candidate"], "must exercise candidate ambiguity")
 	var report Report
 	require.NoError(t, json.Unmarshal(output.Bytes(), &report))
-	require.Len(t, report.Cases, 26)
+	require.Len(t, report.Cases, 80)
 	for _, item := range report.Cases {
 		require.False(t, item.Passed)
 		require.Equal(t, "decision_unavailable", item.Error)
@@ -96,8 +96,8 @@ func TestSyntheticSuiteAcceptsCompleteCorrectResponses(t *testing.T) {
 	var report Report
 	require.NoError(t, json.Unmarshal(output.Bytes(), &report))
 	require.True(t, report.Passed)
-	require.Len(t, report.Cases, 26)
-	require.Equal(t, 10400, report.InputTokens)
+	require.Len(t, report.Cases, 80)
+	require.Equal(t, 32000, report.InputTokens)
 }
 
 func TestLatencyPercentilesDoNotReportMaximumAsP95(t *testing.T) {
@@ -109,4 +109,29 @@ func TestLatencyPercentilesDoNotReportMaximumAsP95(t *testing.T) {
 	p50, p95 := latencyPercentiles(latencies)
 	require.Equal(t, int64(10), p50)
 	require.Equal(t, int64(10), p95)
+}
+
+func TestGuardedLabelsPreserveRawModelFailures(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(server.Close)
+	client, err := decide.NewClient(server.URL, "test-key", server.Client())
+	require.NoError(t, err)
+	var output bytes.Buffer
+	require.Error(t, run(auth.WithVerifiedToken(t.Context(), "verified"), client, &output))
+	var report Report
+	require.NoError(t, json.Unmarshal(output.Bytes(), &report))
+	require.Len(t, report.Cases, 80)
+	labels := 0
+	for _, item := range report.Cases {
+		require.False(t, item.Passed, "a guarded result must not erase a provider failure")
+		if item.Family == "label" {
+			labels++
+			require.NotNil(t, item.Guarded)
+			require.Equal(t, item.Expected, item.Guarded.Action, item.Name)
+			require.True(t, item.GuardPassed, item.Name)
+		}
+	}
+	require.Equal(t, 22, labels)
 }

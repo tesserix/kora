@@ -13,26 +13,30 @@ import (
 
 	"github.com/tesserix/kora/api/internal/ai/decide"
 	"github.com/tesserix/kora/api/internal/auth"
+	"github.com/tesserix/kora/api/internal/labelocr"
 )
 
 type CaseResult struct {
-	Name      string         `json:"name"`
-	Family    string         `json:"family"`
-	Expected  string         `json:"expected"`
-	Actual    string         `json:"actual,omitempty"`
-	Passed    bool           `json:"passed"`
-	Error     string         `json:"error,omitempty"`
-	LatencyMS int64          `json:"latency_ms"`
-	Result    *decide.Result `json:"result,omitempty"`
+	Guarded     *labelocr.ConsumptionPlan `json:"guarded,omitempty"`
+	GuardPassed bool                      `json:"guard_passed"`
+	Name        string                    `json:"name"`
+	Family      string                    `json:"family"`
+	Expected    string                    `json:"expected"`
+	Actual      string                    `json:"actual,omitempty"`
+	Passed      bool                      `json:"passed"`
+	Error       string                    `json:"error,omitempty"`
+	LatencyMS   int64                     `json:"latency_ms"`
+	Result      *decide.Result            `json:"result,omitempty"`
 }
 type Report struct {
-	SyntheticOnly bool         `json:"synthetic_only"`
-	Passed        bool         `json:"passed"`
-	Cases         []CaseResult `json:"cases"`
-	InputTokens   int          `json:"input_tokens"`
-	OutputTokens  int          `json:"output_tokens"`
-	P50MS         int64        `json:"p50_ms"`
-	P95MS         int64        `json:"p95_ms"`
+	SyntheticOnly       bool         `json:"synthetic_only"`
+	GuardedLabelsPassed bool         `json:"guarded_labels_passed"`
+	Passed              bool         `json:"passed"`
+	Cases               []CaseResult `json:"cases"`
+	InputTokens         int          `json:"input_tokens"`
+	OutputTokens        int          `json:"output_tokens"`
+	P50MS               int64        `json:"p50_ms"`
+	P95MS               int64        `json:"p95_ms"`
 }
 
 var labelCases = []struct {
@@ -51,12 +55,17 @@ var labelCases = []struct {
 
 func run(ctx context.Context, client *decide.Client, out io.Writer) error {
 	cases := evaluationCases()
-	report := Report{SyntheticOnly: true, Passed: true, Cases: make([]CaseResult, 0, len(cases))}
+	report := Report{SyntheticOnly: true, Passed: true, GuardedLabelsPassed: true, Cases: make([]CaseResult, 0, len(cases))}
 	latencies := make([]int64, 0, len(cases))
 	for _, item := range cases {
 		start := time.Now()
 		result, err := client.Decide(ctx, json.RawMessage(item.state), item.questions)
 		entry := CaseResult{Name: item.name, Family: item.family, Expected: item.expected, LatencyMS: time.Since(start).Milliseconds()}
+		if item.family == "label" {
+			guarded := guardedLabel(item.state)
+			entry.Guarded, entry.GuardPassed = &guarded, guarded.Action == item.expected
+			report.GuardedLabelsPassed = report.GuardedLabelsPassed && entry.GuardPassed
+		}
 		if err != nil {
 			entry.Error = "decision_unavailable"
 		} else {
@@ -77,7 +86,7 @@ func run(ctx context.Context, client *decide.Client, out io.Writer) error {
 	if err := json.NewEncoder(out).Encode(report); err != nil {
 		return errors.New("write synthetic report")
 	}
-	if !report.Passed {
+	if !report.Passed || !report.GuardedLabelsPassed {
 		return errors.New("synthetic decision checks failed")
 	}
 	return nil
@@ -95,7 +104,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "Set private AI_GATEWAY_BASE_URL, AI_GATEWAY_API_KEY and a valid KORA_EVAL_END_USER_TOKEN; credentials are never printed")
 		os.Exit(2)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	// The gateway verifies the test account token, as it does for cmd/aieval.
 	ctx = auth.WithVerifiedToken(ctx, token)
