@@ -42,3 +42,10 @@ func TestEstimateCostUSDGeminiEmbeddingNonZeroWhenMetered(t *testing.T) {
 		t.Fatalf("gemini-embedding-001 cost = %v, want > 0 once TokensIn is populated", got)
 	}
 }
+
+func TestEstimateCostUSDLabelReviewModel(t *testing.T) {
+	got := EstimateCostUSD(Usage{Model: "claude-sonnet-5-5", TokensIn: 3000, TokensOut: 500})
+	if math.Abs(got-0.011) > 1e-9 {
+		t.Fatalf("label review cost = %v, want 0.011", got)
+	}
+}

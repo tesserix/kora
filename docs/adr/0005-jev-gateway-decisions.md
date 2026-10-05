@@ -154,8 +154,10 @@ storage; the existing OCR service owns its upload/result retention.
 A bounded Go analyzer keeps source review/partial status instead of dropping it.
 Incomplete core nutrition, failed extraction or an existing review issue can
 trigger one independent vision reading through `read_label_review`. The private
-gateway pins that route to the existing Claude Sonnet 4.5 provider group. Its
-actual relative accuracy must be checked on synthetic images before rollout;
+gateway pins that route to Claude Sonnet 5.5, separately from the general
+conversation provider. The API rejects any other resolved model. This replaces
+Sonnet 4.5 after live synthetic tests found blurred-digit and tilted-row errors.
+Actual relative accuracy must be checked on synthetic images before rollout;
 model size and confidence are not correctness guarantees. The review reads the
 original image, not model-produced prose. No Jev numerical decision can bypass
 validation. Each attempt is metered; the second attempt requires another quota
