@@ -4,6 +4,7 @@ package auth
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	firebase "firebase.google.com/go/v4"
@@ -22,17 +23,24 @@ type TokenVerifier interface {
 
 // IdentityDeleter removes a Firebase identity. Deliberately a separate
 // interface from TokenVerifier: a consumer that only deletes should not
-// depend on verification. Verification requires firebaseauth.users.get for
-// account status checks; deletion requires firebaseauth.users.delete.
+// depend on verification. Administrative account lookup requires
+// firebaseauth.users.get; deletion requires firebaseauth.users.delete.
 type IdentityDeleter interface {
 	DeleteIdentity(ctx context.Context, firebaseUID string) error
 }
 
-type firebaseVerifier struct {
-	client *fbauth.Client
+type firebaseTokenClient interface {
+	VerifyIDToken(context.Context, string) (*fbauth.Token, error)
+	VerifyIDTokenAndCheckRevoked(context.Context, string) (*fbauth.Token, error)
+	DeleteUser(context.Context, string) error
 }
 
-func NewFirebaseVerifier(ctx context.Context, projectID string) (TokenVerifier, error) {
+type firebaseVerifier struct {
+	client        firebaseTokenClient
+	accountStatus *accountStatusClient
+}
+
+func NewFirebaseVerifier(ctx context.Context, projectID, apiKey string) (TokenVerifier, error) {
 	app, err := firebase.NewApp(ctx, &firebase.Config{ProjectID: projectID})
 	if err != nil {
 		return nil, fmt.Errorf("auth: init firebase app: %w", err)
@@ -41,13 +49,26 @@ func NewFirebaseVerifier(ctx context.Context, projectID string) (TokenVerifier, 
 	if err != nil {
 		return nil, fmt.Errorf("auth: init auth client: %w", err)
 	}
-	return firebaseVerifier{client: client}, nil
+	verifier := firebaseVerifier{client: client}
+	if key := strings.TrimSpace(apiKey); key != "" {
+		verifier.accountStatus = newAccountStatusClient(key)
+	}
+	return verifier, nil
 }
 
 func (v firebaseVerifier) Verify(ctx context.Context, idToken string) (Claims, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	tok, err := v.client.VerifyIDTokenAndCheckRevoked(ctx, idToken)
+	var tok *fbauth.Token
+	var err error
+	if v.accountStatus == nil {
+		tok, err = v.client.VerifyIDTokenAndCheckRevoked(ctx, idToken)
+	} else {
+		tok, err = v.client.VerifyIDToken(ctx, idToken)
+		if err == nil {
+			err = v.accountStatus.check(ctx, idToken, tok)
+		}
+	}
 	if err != nil {
 		return Claims{}, fmt.Errorf("auth: verify token: %w", err)
 	}
