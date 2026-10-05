@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"strings"
 	"time"
 
 	"github.com/openai/openai-go"
@@ -56,7 +55,7 @@ func (r LabelReviewer) Review(ctx context.Context, photo []byte, mime string) (l
 	if err != nil {
 		return labelocr.Read{}, usage, errors.New("label review unavailable")
 	}
-	if !strings.HasPrefix(usage.Model, "claude-sonnet-4-5") {
+	if usage.Model != "claude-sonnet-5-5" {
 		return labelocr.Read{}, usage, errors.New("independent label review route unavailable")
 	}
 	var values map[string]json.RawMessage

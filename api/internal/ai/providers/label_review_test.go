@@ -35,7 +35,7 @@ func TestLabelReviewUsesAuthenticatedStrongerRouteAndNoInventedPortion(t *testin
 		}
 		w.Header().Set("Content-Type", "application/json")
 		content := `{"basis":"per_100g","energy_kcal":200,"protein_g":null,"fat_g":null,"saturated_fat_g":null,"carbohydrate_g":null,"sugars_g":null,"fibre_g":null,"sodium_mg":null}`
-		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"model": "claude-sonnet-4-5", "choices": []any{map[string]any{"message": map[string]any{"content": content}}}, "usage": map[string]int{"prompt_tokens": 100, "completion_tokens": 50}}))
+		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"model": "claude-sonnet-5-5", "choices": []any{map[string]any{"message": map[string]any{"content": content}}}, "usage": map[string]int{"prompt_tokens": 100, "completion_tokens": 50}}))
 	}))
 	t.Cleanup(server.Close)
 	reader := NewLabelReviewer("test-key", server.URL+"/v1")
@@ -43,7 +43,7 @@ func TestLabelReviewUsesAuthenticatedStrongerRouteAndNoInventedPortion(t *testin
 	require.NoError(t, err)
 	require.JSONEq(t, `200`, string(read.Fields["per_100g.energy_kcal"].Value))
 	require.NotContains(t, read.Fields, "consumed_amount")
-	require.Equal(t, "claude-sonnet-4-5", usage.Model)
+	require.Equal(t, "claude-sonnet-5-5", usage.Model)
 	require.Equal(t, 100, usage.TokensIn)
 }
 
@@ -61,11 +61,15 @@ func TestLabelReviewRequiresVerifiedIdentityAndNeverRetriesProviderErrors(t *tes
 }
 
 func TestLabelReviewRejectsAnUndeployedOrIncorrectModelRoute(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"model": "gemini-3.5-flash", "choices": []any{map[string]any{"message": map[string]any{"content": `{"basis":"per_100g","energy_kcal":200}`}}}}))
-	}))
-	t.Cleanup(server.Close)
-	_, _, err := NewLabelReviewer("test-key", server.URL+"/v1").Review(auth.WithVerifiedToken(t.Context(), "verified"), []byte("image"), "image/png")
-	require.Error(t, err, "the generic route must not masquerade as an independent review")
+	for _, model := range []string{"gemini-3.5-flash", "claude-sonnet-4-5", "claude-sonnet-5-5-unapproved"} {
+		t.Run(model, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"model": model, "choices": []any{map[string]any{"message": map[string]any{"content": `{"basis":"per_100g","energy_kcal":200}`}}}}))
+			}))
+			t.Cleanup(server.Close)
+			_, _, err := NewLabelReviewer("test-key", server.URL+"/v1").Review(auth.WithVerifiedToken(t.Context(), "verified"), []byte("image"), "image/png")
+			require.Error(t, err, "only the evaluated model may act as an independent review")
+		})
+	}
 }
