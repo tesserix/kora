@@ -31,11 +31,16 @@ the resolved model and token usage, never state or answers.
 
 ## Initial validation
 
-`go run ./cmd/aidecide` uses a fixed 26-case synthetic corpus. Set
+`go run ./cmd/aidecide` uses a fixed 80-case synthetic corpus. Set
 `AI_GATEWAY_BASE_URL`, `AI_GATEWAY_API_KEY` and `KORA_EVAL_END_USER_TOKEN` through
 the environment, as with `cmd/aieval`; never put credentials on the command
 line. The user token must be valid for the deployed gateway. The command emits
-JSON, preserves failed cases and exits nonzero unless every check passes.
+JSON, preserves failed cases and exits nonzero unless every raw model check and
+every deterministic label check passes. `passed` remains the raw-model result;
+`guarded_labels_passed` reports the separate numerical policy checks. Per-case
+`actual`, `result` and `passed` never change when a guard corrects an answer.
+The full run has a two-minute budget; each model call still has a 1.5-second
+deadline and no application retry.
 
 The test checks missing mass/volume, explicit grams/ml/servings, blank or
 unreadable labels and a vague portion. It also checks intent routing (including
@@ -48,6 +53,59 @@ The client and command have deterministic HTTP contract tests. A live synthetic
 probe through the deployed gateway software version (1.4.1), running locally,
 passed eight of eight cases against `jev-1.13.0`. This is not evidence that the
 new Kubernetes route has been rolled out or that Firebase admission passed.
+
+## Hard-case findings and measurement policy
+
+The production gateway is now deployed and authenticated synthetic calls have
+verified the route. Harder tests exposed a different problem: Jev sometimes
+approved negative quantities, missing units, incompatible mass/volume units,
+and missing label bases. One wrong answer had 0.80 confidence. A confidence
+threshold cannot establish numerical correctness.
+
+`labelocr.PlanConsumption` owns measurement eligibility and scaling. It accepts
+a checked `Label` and an explicit `Consumption`, and returns one of:
+
+- `retake`: label basis or essential energy evidence is unavailable/non-finite.
+- `review`: unresolved OCR issues, low confidence or invalid nutrition remain.
+- `ask_amount`: quantity is missing, non-positive, conflicting, non-finite, has
+  incompatible units, or cannot be scaled without overflow/underflow.
+- `calculate`: compatible evidence permits a deterministic nutrition preview.
+
+The source must come from trusted application orchestration of `labelocr.Check`,
+not an arbitrary client-supplied `Label`. OCR partial/review status must become a
+review issue in the future evidence adapter. Consumed amount is customer input,
+never inferred from printed serving size. Cross-dimension conversions require
+additional verified evidence and currently ask for a compatible unit; density
+is never assumed. Unknown nutrients remain null. A zero-energy label is valid.
+`calculate` is a preview, not authorization to save; customer confirmation,
+ownership and quota enforcement remain product-integration requirements.
+
+For the synthetic evaluator only, `guard.go` adapts both historical fixture
+schemas into that policy. This adapter is not an OCR ingestion endpoint. It
+does not take a model answer, so neither confidence nor prompt injection can
+override the measurement checks. The policy remains usable if Jev times out;
+raw model failures still fail the evaluation command.
+
+Intent criteria now distinguish the author's consumption from quoted examples,
+third-person reports, grammar/translation questions, future meals and negation.
+Candidate criteria explicitly preserve brand and preparation distinctions.
+These are advisory semantic decisions and cannot authorize diary mutations.
+
+Validation on 2026-10-05: revised semantic criteria passed 48/48 fixed hard-case
+calls, then 72/72 calls over 24 additional examples fixed before testing. The
+compiled Go client subsequently passed 52/56 raw checks; its four incorrect
+numeric decisions were all corrected by the guard, which passed 22/22 label
+cases. These synthetic figures are not production-population accuracy estimates.
+Original prompts, expected answers and failed reports were retained locally.
+The extra examples are now retained in the 80-case repository corpus.
+
+This is a local deterministic policy with no new service, datastore, network
+call, migration or retry. It adds no provider cost and can avoid an entire model
+call when a future product caller only needs a measurement decision. No new
+capacity/SLO assumption is needed for the existing bounded evaluator. A prompt-
+only fix was rejected because numerical failures recur across schemas. Revert
+this scoped change to roll back; it changes no stored user data. The customer
+OCR-to-agent-to-app integration and API deployment hold remain unchanged.
 
 ## Production integration gates
 
