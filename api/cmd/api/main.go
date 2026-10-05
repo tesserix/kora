@@ -71,7 +71,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	verifier, err := auth.NewFirebaseVerifier(context.Background(), cfg.FirebaseProjectID)
+	verifier, err := auth.NewFirebaseVerifier(context.Background(), cfg.FirebaseProjectID, cfg.FirebaseAPIKey)
 	if err != nil {
 		logger.Error("firebase init failed", "err", err)
 		os.Exit(1)
