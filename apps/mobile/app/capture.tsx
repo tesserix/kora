@@ -367,32 +367,50 @@ function IdleAffordance({
       );
     }
     return (
-      // The app's central action. A raw Pressable here meant the tap had no
-      // acknowledgement at all until the camera fired.
-      <PressableScale
-        testID="capture-idle-photo"
-        accessibilityRole="button"
-        accessibilityLabel="Photo viewfinder"
-        onPress={onCapturePhoto}
-        style={{
-          height: 200,
-          borderRadius: 20,
-          overflow: "hidden",
-          backgroundColor: T.glass,
-          borderWidth: 1,
-          borderColor: T.glassBorder,
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <Icon name="utensils" size={54} color={T.mut} />
-        <ViewfinderReticle />
-        <View style={{ position: "absolute", bottom: 12, left: 0, right: 0 }}>
-          <AppText style={{ textAlign: "center", color: T.mut, fontSize: 13, fontWeight: "600" }}>
-            Tap the viewfinder to capture
+      <View style={{ gap: 12 }}>
+        <PressableScale
+          testID="capture-idle-photo"
+          accessibilityRole="button"
+          accessibilityLabel="Photo viewfinder"
+          onPress={onCapturePhoto}
+          style={{
+            height: 200,
+            borderRadius: 20,
+            overflow: "hidden",
+            backgroundColor: T.glass,
+            borderWidth: 1,
+            borderColor: T.glassBorder,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Icon name="utensils" size={54} color={T.mut} />
+          <ViewfinderReticle />
+          <View style={{ position: "absolute", bottom: 12, left: 0, right: 0 }}>
+            <AppText style={{ textAlign: "center", color: T.mut, fontSize: 13, fontWeight: "600" }}>
+              Tap the viewfinder to capture
+            </AppText>
+          </View>
+        </PressableScale>
+        <PressableScale
+          accessibilityRole="button"
+          accessibilityLabel="Choose from library"
+          onPress={onChooseFromLibrary}
+          style={{
+            minHeight: 48,
+            borderRadius: 16,
+            backgroundColor: T.glass,
+            borderWidth: 1,
+            borderColor: T.glassBorder,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <AppText style={{ color: T.mut, fontSize: 14, fontWeight: "600" }}>
+            Choose from library
           </AppText>
-        </View>
-      </PressableScale>
+        </PressableScale>
+      </View>
     );
   }
 
@@ -548,7 +566,7 @@ interface CaptureBodyProps {
   photoPermissionDenied?: boolean;
   /** True when the CAMERA is denied and Photo mode should say so (kora#201). */
   cameraForPhotoDenied?: boolean;
-  /** Explicit photo-library route offered by the camera-denied card. */
+  /** Explicit photo-library route offered in Photo mode. */
   onChooseFromLibrary?: () => void;
   /** True once expo-audio's mic permission request has actually come back
    *  denied. Drives the Voice idle affordance's denied UI. */
@@ -908,9 +926,7 @@ function assetOutcome(result: ImagePicker.ImagePickerResult): PhotoPickOutcome {
   };
 }
 
-// The explicit library route, reached only when the user ASKS for it from the
-// camera-denied card. Before kora#201 this ran silently as a fallback, so a
-// camera icon produced a photo-library dialog nobody had requested.
+// Shared by the Photo screen and the camera-denied card.
 async function pickMealFromLibrary(): Promise<PhotoPickOutcome> {
   try {
     const libraryPermission = await ImagePicker.requestMediaLibraryPermissionsAsync();
