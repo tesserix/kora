@@ -759,6 +759,30 @@ describe("Type mode", () => {
 });
 
 describe("Photo mode", () => {
+  test("the normal photo screen uploads a library image without opening the camera", async () => {
+    (ImagePicker.launchImageLibraryAsync as jest.Mock).mockResolvedValueOnce({
+      canceled: false,
+      assets: [{ uri: "file://meal.png", fileName: "meal.png", mimeType: "image/png" }],
+    });
+    const { findByRole } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByRole("button", { name: "Choose from library" }));
+    await waitFor(() => expect(mockResolvePhotoMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ input: { uri: "file://meal.png", name: "meal.png", type: "image/png" } }),
+      expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
+    ));
+    expect(ImagePicker.requestCameraPermissionsAsync).not.toHaveBeenCalled();
+    expect(ImagePicker.launchCameraAsync).not.toHaveBeenCalled();
+  });
+
+  test("canceling library selection leaves photo capture available without uploading", async () => {
+    (ImagePicker.launchImageLibraryAsync as jest.Mock).mockResolvedValueOnce({ canceled: true, assets: null });
+    const { findByRole } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByRole("button", { name: "Choose from library" }));
+    await waitFor(() => expect(ImagePicker.launchImageLibraryAsync).toHaveBeenCalledTimes(1));
+    expect(mockResolvePhotoMutate).not.toHaveBeenCalled();
+    expect(await findByRole("button", { name: "Photo viewfinder" })).toBeTruthy();
+  });
+
   test("a captured photo triggers useResolvePhoto with the file", async () => {
     (ImagePicker.launchCameraAsync as jest.Mock).mockResolvedValueOnce({
       canceled: false,
