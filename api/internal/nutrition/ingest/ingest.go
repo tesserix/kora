@@ -32,6 +32,9 @@ func Run(ctx context.Context, repo nutrition.Repository, files map[string]string
 			return total, fmt.Errorf("ingest: insert %s: %w", path, err)
 		}
 		total += n
+		if _, err := repo.BackfillNutrients(ctx, items); err != nil {
+			return total, fmt.Errorf("ingest: backfill nutrients %s: %w", path, err)
+		}
 		// Reconcile locale on rows that already existed. Insert skips those, so
 		// without this a source that starts stating a locale (kora#212 Phase 4)
 		// would only ever label rows ingested AFTER the change. Writes only over

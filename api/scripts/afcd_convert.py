@@ -44,6 +44,8 @@ import sys
 
 import openpyxl
 
+from nutrients import fsanz_nutrients
+
 SHEET = "All solids & liquids per 100 g"
 HEADER_ROW = 3
 
@@ -110,7 +112,8 @@ def main():
     workbook = openpyxl.load_workbook(sys.argv[1], read_only=True, data_only=True)
     sheet = workbook[SHEET]
     rows = sheet.iter_rows(min_row=HEADER_ROW, values_only=True)
-    check_headers(next(rows))
+    header = next(rows)
+    check_headers(header)
 
     out = []
     for row in rows:
@@ -133,6 +136,7 @@ def main():
                 "carbs_per_100g": round(number(row[COL["carbs"]]), 2),
                 "fat_per_100g": round(number(row[COL["fat"]]), 2),
                 "fiber_per_100g": round(number(row[COL["fiber"]]), 2),
+                **fsanz_nutrients(header, row),
             }
         )
 

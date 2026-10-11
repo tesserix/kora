@@ -22,6 +22,10 @@ import json
 import os
 import sys
 
+from nutrients import OFF_FIELDS, USDA_FIELDS, FSANZ_FIELDS
+
+# Keep recipe weights and cooked yields together for source review.
+# fmt: off
 # Staples IFCT 2017 does not carry. Fats and sugar are definitional (oil is
 # 100 g fat; sugar is 100 g carbohydrate); the rest are standard whole-food
 # values in the same per-100 g edible-portion basis as IFCT.
@@ -593,6 +597,9 @@ RECIPES = [
 ]
 
 
+# fmt: on
+
+
 def load_ifct(path):
     with open(path, encoding="utf-8") as fh:
         return {row["name"]: row for row in json.load(fh)}
@@ -609,8 +616,11 @@ def macros(key, ifct):
     if row is None:
         raise KeyError(f"{key!r} maps to {name!r}, absent from ifct.json")
     return (
-        row["kcal_per_100g"], row["protein_per_100g"],
-        row["carbs_per_100g"], row["fat_per_100g"], row["fiber_per_100g"],
+        row["kcal_per_100g"],
+        row["protein_per_100g"],
+        row["carbs_per_100g"],
+        row["fat_per_100g"],
+        row["fiber_per_100g"],
     )
 
 
@@ -623,7 +633,7 @@ def compute(recipe, ifct):
         for i, per100 in enumerate(macros(key, ifct)):
             totals[i] += per100 * grams / 100.0
     per100 = [round(t * 100.0 / yield_g, 1) for t in totals]
-    return {
+    item = {
         "name": name,
         "serving_desc": serving_desc,
         "serving_grams": serving_g,
@@ -634,6 +644,19 @@ def compute(recipe, ifct):
         "fiber_per_100g": per100[4],
         "locale": "IN",
     }
+    fields = set(OFF_FIELDS) | set(USDA_FIELDS) | set(FSANZ_FIELDS)
+    for field in fields:
+        total = 0.0
+        for key, grams in ingredients:
+            if grams <= 0:
+                continue
+            source = ifct.get(IFCT.get(key), {})
+            if field not in source:
+                break
+            total += source[field] * grams / 100.0
+        else:
+            item[field] = round(total * 100.0 / yield_g, 4)
+    return item
 
 
 def usable(item):
@@ -654,14 +677,18 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--outdir", default="data/food")
     ap.add_argument("--ifct", default=None, help="defaults to <outdir>/ifct.json")
-    ap.add_argument("--exclude", default=None, help="defaults to <outdir>/au_in_dishes.json")
+    ap.add_argument(
+        "--exclude", default=None, help="defaults to <outdir>/au_in_dishes.json"
+    )
     args = ap.parse_args()
 
     ifct = load_ifct(args.ifct or os.path.join(args.outdir, "ifct.json"))
 
     # au_in_dishes.json sorts first and wins any collision, so a name it already
     # carries would make the computed row dead weight in the index.
-    with open(args.exclude or os.path.join(args.outdir, "au_in_dishes.json"), encoding="utf-8") as fh:
+    with open(
+        args.exclude or os.path.join(args.outdir, "au_in_dishes.json"), encoding="utf-8"
+    ) as fh:
         taken = {row["name"].strip().lower() for row in json.load(fh)}
 
     items, skipped, dropped = [], [], []
@@ -688,9 +715,15 @@ def main():
 
     print(f"{out}: {len(items)} dishes", file=sys.stderr)
     if skipped:
-        print(f"skipped {len(skipped)} already in au_in_dishes.json: {', '.join(skipped)}", file=sys.stderr)
+        print(
+            f"skipped {len(skipped)} already in au_in_dishes.json: {', '.join(skipped)}",
+            file=sys.stderr,
+        )
     if dropped:
-        print(f"dropped {len(dropped)} failing the quality bar: {dropped}", file=sys.stderr)
+        print(
+            f"dropped {len(dropped)} failing the quality bar: {dropped}",
+            file=sys.stderr,
+        )
 
 
 if __name__ == "__main__":

@@ -117,6 +117,8 @@ import sys
 
 import openpyxl
 
+from nutrients import fsanz_nutrients
+
 SHEET = "Food nutrient profiles"
 HEADER_ROW = 3  # 1-indexed; rows 1-2 are the title block
 
@@ -319,7 +321,8 @@ def convert(path, measures_path):
     workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
     sheet = workbook[SHEET]
     rows = sheet.iter_rows(min_row=HEADER_ROW, values_only=True)
-    check_headers(next(rows))
+    header = next(rows)
+    check_headers(header)
 
     out = []
     matched = 0
@@ -341,6 +344,7 @@ def convert(path, measures_path):
             "carbs_per_100g": round(number(row[COL["carbs"]]), 1),
             "fat_per_100g": round(number(row[COL["fat"]]), 1),
             "fiber_per_100g": round(number(row[COL["fiber"]]), 1),
+            **fsanz_nutrients(header, row),
         }
         # Serving fields are omitted entirely when a food has no measure, so
         # the emitted row is identical to what this script produced before the

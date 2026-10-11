@@ -17,9 +17,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/tesserix/kora/api/internal/nutrition"
 	"github.com/tesserix/kora/api/internal/units"
@@ -98,20 +100,14 @@ func (c Client) deltaFiles(ctx context.Context, since time.Time) ([]string, erro
 // representations (tags as array or comma string, quantities as number or
 // string).
 type product struct {
-	Code                string          `json:"code"`
-	ProductName         string          `json:"product_name"`
-	Brands              string          `json:"brands"`
-	CountriesTags       json.RawMessage `json:"countries_tags"`
-	ServingQuantity     looseFloat      `json:"serving_quantity"`
-	ServingQuantityUnit string          `json:"serving_quantity_unit"`
-	ServingSize         string          `json:"serving_size"`
-	Nutriments          struct {
-		EnergyKcal100g looseFloat `json:"energy-kcal_100g"`
-		Protein100g    looseFloat `json:"proteins_100g"`
-		Carbs100g      looseFloat `json:"carbohydrates_100g"`
-		Fat100g        looseFloat `json:"fat_100g"`
-		Fiber100g      looseFloat `json:"fiber_100g"`
-	} `json:"nutriments"`
+	Code                string                  `json:"code"`
+	ProductName         string                  `json:"product_name"`
+	Brands              string                  `json:"brands"`
+	CountriesTags       json.RawMessage         `json:"countries_tags"`
+	ServingQuantity     looseFloat              `json:"serving_quantity"`
+	ServingQuantityUnit string                  `json:"serving_quantity_unit"`
+	ServingSize         string                  `json:"serving_size"`
+	Nutriments          nutrition.OFFNutriments `json:"nutriments"`
 }
 
 // looseFloat decodes a JSON number or a numeric string; anything else reads
@@ -161,10 +157,10 @@ const (
 // mandatory here (unlike the converter) because barcode is the only identity
 // UpsertBarcoded will update on.
 func (p product) item(countries []Country) (nutrition.FoodItem, bool) {
-	tags := p.countryTags()
+	tags := strings.Split(p.countryTags(), ",")
 	locale := nutrition.LocaleUnknown
 	for _, c := range countries {
-		if strings.Contains(tags, c.Tag) {
+		if slices.Contains(tags, c.Tag) {
 			locale = c.Locale
 			break
 		}
@@ -172,15 +168,15 @@ func (p product) item(countries []Country) (nutrition.FoodItem, bool) {
 	name := strings.TrimSpace(p.ProductName)
 	code := strings.TrimSpace(p.Code)
 	digits := len(code) >= 8 && len(code) <= 14 && strings.IndexFunc(code, func(r rune) bool { return r < '0' || r > '9' }) < 0
-	if locale == nutrition.LocaleUnknown || name == "" || len(name) > maxNameLen || !digits {
+	if locale == nutrition.LocaleUnknown || name == "" || utf8.RuneCountInString(name) > maxNameLen || !digits {
 		return nutrition.FoodItem{}, false
 	}
 	n := p.Nutriments
-	if !n.EnergyKcal100g.set || !n.Protein100g.set || !n.Carbs100g.set || !n.Fat100g.set || !n.Fiber100g.set {
+	if !n.Complete {
 		return nutrition.FoodItem{}, false
 	}
-	kcal := n.EnergyKcal100g.value
-	protein, carbs, fat, fiber := n.Protein100g.value, n.Carbs100g.value, n.Fat100g.value, n.Fiber100g.value
+	kcal := n.EnergyKcal100g
+	protein, carbs, fat, fiber := n.Protein100g, n.Carbs100g, n.Fat100g, n.Fiber100g
 	if kcal <= 0 || kcal > maxKcalPer100g {
 		return nutrition.FoodItem{}, false
 	}
@@ -195,6 +191,7 @@ func (p product) item(countries []Country) (nutrition.FoodItem, bool) {
 
 	brand := strings.TrimSpace(strings.Split(p.Brands, ",")[0])
 	item := nutrition.FoodItem{
+		Nutrients:      n.Nutrients,
 		Name:           name,
 		Brand:          brand,
 		Locale:         locale,

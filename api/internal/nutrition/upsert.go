@@ -23,6 +23,9 @@ import (
 func (r Repository) UpsertBarcoded(ctx context.Context, items []FoodItem) (inserted, updated int, err error) {
 	var creates []FoodItem
 	for _, item := range items {
+		if err := item.Nutrients.Validate(); err != nil {
+			return inserted, updated, err
+		}
 		if item.Barcode == nil || *item.Barcode == "" {
 			continue
 		}
@@ -64,6 +67,13 @@ func (r Repository) UpsertBarcoded(ctx context.Context, items []FoodItem) (inser
 // ServingUnitFetcher's contract warns about.
 func diffForUpdate(old, next FoodItem) map[string]any {
 	changes := map[string]any{}
+	oldValues := old.Nutrients.Values()
+	for column, value := range next.Nutrients.Values() {
+		previous := oldValues[column]
+		if value != nil && (previous == nil || *value != *previous) {
+			changes[column] = *value
+		}
+	}
 	if next.Name != "" && next.Name != old.Name {
 		changes["name"] = next.Name
 		changes["normalized_name"] = Normalize(next.Name)

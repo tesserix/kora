@@ -2,6 +2,7 @@ package refresh
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -62,4 +63,16 @@ func TestItemKeepsMeasuredZeroFiber(t *testing.T) {
 	require.True(t, ok, "zero macros are measurements, not missing data")
 	require.Equal(t, nutrition.LocaleNZ, item.Locale)
 	require.Empty(t, item.BaseUnit, "unstated unit must stay unstated for diffForUpdate")
+}
+
+func TestItemRequiresAnExactCountryTag(t *testing.T) {
+	_, ok := line(t, strings.ReplaceAll(goodAU, "en:australia", "en:australia-fake")).item([]Country{{Tag: "en:australia", Locale: "AU"}})
+	require.False(t, ok)
+}
+
+func TestItemCountsInternationalNamesInCharacters(t *testing.T) {
+	raw := strings.ReplaceAll(goodAU, "Weet-Bix", strings.Repeat("食", 50))
+	item, ok := line(t, raw).item(DefaultCountries())
+	require.True(t, ok, "50 characters must clear the same 120-character bar as the snapshot converter")
+	require.Equal(t, nutrition.LocaleAU, item.Locale)
 }

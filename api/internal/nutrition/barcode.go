@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -44,6 +45,8 @@ type HTTPOFFClient struct {
 	Client  *http.Client
 }
 
+const maxOFFResponseBytes = 2 << 20
+
 func NewHTTPOFFClient() HTTPOFFClient {
 	return HTTPOFFClient{
 		BaseURL: "https://world.openfoodfacts.org",
@@ -69,21 +72,15 @@ func (c HTTPOFFClient) Fetch(ctx context.Context, barcode string) (*FoodItem, er
 	var body struct {
 		Status  int `json:"status"`
 		Product struct {
-			ProductName string `json:"product_name"`
-			Brands      string `json:"brands"`
-			Nutriments  struct {
-				EnergyKcal100g float64 `json:"energy-kcal_100g"`
-				Protein100g    float64 `json:"proteins_100g"`
-				Carbs100g      float64 `json:"carbohydrates_100g"`
-				Fat100g        float64 `json:"fat_100g"`
-				Fiber100g      float64 `json:"fiber_100g"`
-			} `json:"nutriments"`
-			ServingQuantity     float64 `json:"serving_quantity"`
-			ServingQuantityUnit string  `json:"serving_quantity_unit"`
-			ServingSize         string  `json:"serving_size"`
+			ProductName         string        `json:"product_name"`
+			Brands              string        `json:"brands"`
+			Nutriments          OFFNutriments `json:"nutriments"`
+			ServingQuantity     float64       `json:"serving_quantity"`
+			ServingQuantityUnit string        `json:"serving_quantity_unit"`
+			ServingSize         string        `json:"serving_size"`
 		} `json:"product"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxOFFResponseBytes)).Decode(&body); err != nil {
 		return nil, fmt.Errorf("nutrition: off decode: %w", err)
 	}
 	if body.Status != 1 || body.Product.ProductName == "" || body.Product.Nutriments.EnergyKcal100g == 0 {
@@ -91,6 +88,7 @@ func (c HTTPOFFClient) Fetch(ctx context.Context, barcode string) (*FoodItem, er
 	}
 	code := barcode
 	item := &FoodItem{
+		Nutrients:      body.Product.Nutriments.Nutrients,
 		Name:           body.Product.ProductName,
 		Brand:          body.Product.Brands,
 		Provenance:     ProvenanceOFF,
@@ -171,7 +169,7 @@ func (c HTTPOFFClient) FetchServingUnit(ctx context.Context, barcode string) (st
 			ServingQuantityUnit string `json:"serving_quantity_unit"`
 		} `json:"product"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxOFFResponseBytes)).Decode(&body); err != nil {
 		return "", false, fmt.Errorf("nutrition: off serving unit decode: %w", err)
 	}
 	if body.Status != 1 {

@@ -368,6 +368,33 @@ export type FoodItem = {
   protein_per_100g: number;
   carbs_per_100g: number;
   fat_per_100g: number;
+  fiber_per_100g?: number;
+  sugar_per_100g?: number;
+  saturated_fat_per_100g?: number;
+  cholesterol_mg_per_100g?: number;
+  sodium_mg_per_100g?: number;
+  calcium_mg_per_100g?: number;
+  iron_mg_per_100g?: number;
+  potassium_mg_per_100g?: number;
+  magnesium_mg_per_100g?: number;
+  phosphorus_mg_per_100g?: number;
+  zinc_mg_per_100g?: number;
+  selenium_ug_per_100g?: number;
+  iodine_ug_per_100g?: number;
+  vitamin_a_rae_ug_per_100g?: number;
+  vitamin_a_re_ug_per_100g?: number;
+  vitamin_c_mg_per_100g?: number;
+  vitamin_d_ug_per_100g?: number;
+  vitamin_d_equivalents_ug_per_100g?: number;
+  vitamin_e_mg_per_100g?: number;
+  vitamin_k_ug_per_100g?: number;
+  thiamin_mg_per_100g?: number;
+  riboflavin_mg_per_100g?: number;
+  niacin_mg_per_100g?: number;
+  vitamin_b6_mg_per_100g?: number;
+  vitamin_b12_ug_per_100g?: number;
+  folate_ug_per_100g?: number;
+  folate_dfe_ug_per_100g?: number;
   /** Present on barcode-sourced foods; enables an offline repeat scan. */
   barcode?: string;
   /** The base unit of measurement for this food ("g" or "ml"). */

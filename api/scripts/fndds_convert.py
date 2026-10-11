@@ -23,8 +23,16 @@ import os
 import re
 import sys
 
+from nutrients import USDA_FIELDS, optional_nutrients
+
 # FNDDS food_nutrient rows use the legacy nutrient numbers, not FDC ids.
-NUTRIENTS = {"208": "kcal", "203": "protein", "205": "carbs", "204": "fat", "291": "fiber"}
+NUTRIENTS = {
+    "208": "kcal",
+    "203": "protein",
+    "205": "carbs",
+    "204": "fat",
+    "291": "fiber",
+}
 
 # Same plausibility bar as off_convert.py: nothing edible beats pure fat.
 MAX_KCAL_PER_100G = 900
@@ -57,10 +65,13 @@ def main():
     nutrition = {}
     for r in read_rows(directory, "food_nutrient.csv"):
         field = NUTRIENTS.get(r["nutrient_id"])
-        if field is None or r["fdc_id"] not in foods:
+        if r["fdc_id"] not in foods:
             continue
         try:
-            nutrition.setdefault(r["fdc_id"], {})[field] = float(r["amount"])
+            values = nutrition.setdefault(r["fdc_id"], {})
+            values[r["nutrient_id"]] = float(r["amount"])
+            if field is not None:
+                values[field] = float(r["amount"])
         except ValueError:
             continue
 
@@ -80,7 +91,13 @@ def main():
         if not m or not (MIN_SERVING_G <= grams <= MAX_SERVING_G):
             continue
         portions.setdefault(r["fdc_id"], []).append(
-            {"seq": seq, "desc": desc, "name": m.group(2), "amount": float(m.group(1)), "grams": grams}
+            {
+                "seq": seq,
+                "desc": desc,
+                "name": m.group(2),
+                "amount": float(m.group(1)),
+                "grams": grams,
+            }
         )
 
     kept, dropped_incomplete, dropped_implausible = [], 0, 0
@@ -108,11 +125,16 @@ def main():
             "carbs_per_100g": round(n["carbs"], 2),
             "fat_per_100g": round(n["fat"], 2),
             "fiber_per_100g": round(n["fiber"], 2),
+            **optional_nutrients(n, USDA_FIELDS),
         }
         units = sorted(portions.get(fdc_id, []), key=lambda p: p["seq"])
         if units:
             entry["serving_units"] = [
-                {"name": u["name"], "amount": u["amount"], "base_amount": round(u["grams"], 1)}
+                {
+                    "name": u["name"],
+                    "amount": u["amount"],
+                    "base_amount": round(u["grams"], 1),
+                }
                 for u in units
             ]
             # seq_num 1 is the measure survey respondents reported in most —
