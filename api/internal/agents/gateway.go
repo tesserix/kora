@@ -17,6 +17,7 @@ import (
 
 	"github.com/tesserix/kora/api/internal/aitrace"
 	"github.com/tesserix/kora/api/internal/auth"
+	"github.com/tesserix/kora/api/internal/user"
 )
 
 // runTimeout bounds one agent run. The published coach budget is 45s of model
@@ -144,6 +145,10 @@ func (g *Gateway) Send(ctx context.Context, resolved *ResolvedAgent, prompt stri
 	}
 	req.Header.Set("Authorization", "Bearer "+g.apiKey)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Kora-AI-Service", "kora-api")
+	if id, ok := user.IDFromRequestContext(ctx); ok {
+		req.Header.Set("X-Kora-User-Id", id.String())
+	}
 	aitrace.Inject(ctx, req.Header)
 	if token, ok := auth.VerifiedTokenFromContext(ctx); ok {
 		req.Header.Set("X-Kora-End-User-Token", "Bearer "+token)

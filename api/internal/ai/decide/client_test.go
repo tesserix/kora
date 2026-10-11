@@ -10,8 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"github.com/tesserix/kora/api/internal/auth"
+	"github.com/tesserix/kora/api/internal/user"
 )
 
 func TestDecideUsesOnlyGatewayAndPreservesTypedAnswers(t *testing.T) {
@@ -21,6 +23,8 @@ func TestDecideUsesOnlyGatewayAndPreservesTypedAnswers(t *testing.T) {
 		require.Equal(t, "Bearer gateway-test-key", r.Header.Get("Authorization"))
 		require.Equal(t, "Bearer verified-test-token", r.Header.Get("X-Kora-End-User-Token"))
 		require.Equal(t, "decide", r.Header.Get("X-Kora-AI-Capability"))
+		require.Equal(t, "kora-api", r.Header.Get("X-Kora-AI-Service"))
+		require.Equal(t, "11111111-1111-4111-8111-111111111111", r.Header.Get("X-Kora-User-Id"))
 		var body struct {
 			Model     string                     `json:"model"`
 			State     json.RawMessage            `json:"state"`
@@ -36,7 +40,7 @@ func TestDecideUsesOnlyGatewayAndPreservesTypedAnswers(t *testing.T) {
 	t.Cleanup(server.Close)
 	client, err := NewClient(server.URL+"/v1", "gateway-test-key", server.Client())
 	require.NoError(t, err)
-	ctx := auth.WithVerifiedToken(t.Context(), "verified-test-token")
+	ctx := user.WithID(auth.WithVerifiedToken(t.Context(), "verified-test-token"), uuid.MustParse("11111111-1111-4111-8111-111111111111"))
 	answer, err := client.Decide(ctx, json.RawMessage(`{"amount":null}`), map[string]Question{
 		"next":  Choice{Instructions: "Choose next action", Criteria: map[string]string{"ask": "Amount missing", "calculate": "Amount known"}},
 		"known": Noul{Instructions: "Is an amount known?"},

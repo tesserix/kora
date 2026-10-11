@@ -18,6 +18,7 @@ import (
 
 	"github.com/tesserix/kora/api/internal/aitrace"
 	"github.com/tesserix/kora/api/internal/auth"
+	"github.com/tesserix/kora/api/internal/user"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -192,6 +193,10 @@ func (c *Client) Decide(ctx context.Context, state json.RawMessage, questions ma
 	req.Header.Set("Authorization", "Bearer "+c.key)
 	req.Header.Set("X-Kora-End-User-Token", "Bearer "+token)
 	req.Header.Set("X-Kora-AI-Capability", "decide")
+	req.Header.Set("X-Kora-AI-Service", "kora-api")
+	if id, ok := user.IDFromRequestContext(ctx); ok {
+		req.Header.Set("X-Kora-User-Id", id.String())
+	}
 	req.Header.Set("X-Kora-AI-Context-Kind", "decision")
 	req.Header.Set("X-Kora-RTK-Applied", "false")
 	aitrace.Inject(ctx, req.Header)

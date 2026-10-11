@@ -201,6 +201,7 @@ func TestAgentGatewayProviderStampsTheActingUserID(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, uid.String(), got.Get("X-Kora-User-Id"))
+	assert.Equal(t, "kora-api", got.Get("X-Kora-AI-Service"))
 }
 
 func TestAgentGatewayProviderSendsNoUserHeaderWhenAbsent(t *testing.T) {

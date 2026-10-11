@@ -31,8 +31,8 @@ type modelPrice struct {
 var modelPrices = map[string]modelPrice{
 	// https://docs.anthropic.com/en/docs/about-claude/pricing (2026-10-05).
 	"claude-sonnet-5-5":           {inPerM: 2.00, outPerM: 10.00},
-	"gemini-3.5-flash":            {inPerM: 0.30, outPerM: 2.50},
-	"gemini-3.5-flash-lite":       {inPerM: 0.10, outPerM: 0.40},
+	"gemini-3.5-flash":            {inPerM: 1.50, outPerM: 9.00},
+	"gemini-3.5-flash-lite":       {inPerM: 0.30, outPerM: 2.50},
 	"gemini-embedding-001":        {inPerM: 0.15, outPerM: 0.0},
 	"meta/llama-3.3-70b-instruct": {inPerM: 0.60, outPerM: 0.60},
 	"gpt-5-mini":                  {inPerM: 0.25, outPerM: 2.00},
