@@ -1,11 +1,18 @@
 # Kora identity: handles and profile pictures
 
-Status: design, approved in outline. Supersedes #153.
+Status: historical design proposal, approved in outline. Supersedes #153.
+
+Review note (2026-10-11): the production counts and infrastructure assumptions
+below describe the August design snapshot, not current production. Kora has since
+added capture-photo persistence and request protection. Before implementation,
+reconcile this proposal with the current storage, account-deletion, authorization
+and rate-limit code. Reuse those controls where appropriate; this document does
+not authorize new public image access or claim the feature has shipped.
 
 ## The problem
 
 Adding a friend on Kora requires reading an opaque friend code aloud, or typing
-the exact address someone signed up with. Nobody does that twice. Production is
+the exact address someone signed up with. Nobody does that twice. At the August design snapshot, production had
 18 users and **zero friendships**, and #326's whole permission model — circles,
 categories, the body confirmation, the audit — is worth nothing until people can
 add each other.
@@ -104,7 +111,7 @@ working; the handle simply becomes the human-facing identity.
 
 ## Storage
 
-A new bucket, since **Kora currently stores no user images at all** — meal
+A new bucket, since **Kora stored no user images at the August design snapshot** — meal
 photos are sent to the vision provider as base64 and never persisted. That is a
 privacy posture being given up deliberately here, and it is worth naming.
 
@@ -166,8 +173,8 @@ DELETE /v1/me/avatar
 
 - Lookup returns **404 for a miss, and never an email**. Same projection rule as
   `share.MemberView` and `social.FriendView`.
-- Lookup is **rate limited per caller**. There is no rate-limiting middleware in
-  the API today (`internal/guardrails` is the protective-user policy module, not
+- Lookup is **rate limited per caller**. The August snapshot had no rate-limiting middleware in
+  the API (`internal/guardrails` is the protective-user policy module, not
   a limiter), so this needs building — a small fixed-window counter keyed on the
   authenticated user is sufficient, and it is the only thing standing between
   exact-match lookup and offline enumeration.
