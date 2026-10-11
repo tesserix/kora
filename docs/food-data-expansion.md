@@ -98,7 +98,7 @@ AOAC fibre and trace markers are not converted to zero.
   Their values remain recipe estimates based on raw ingredients and cooked
   yield; heat destruction and leaching are not modeled. Only 24 of the 335
   generated recipes currently have complete inputs for sodium and sugar.
-- Migration 000061 adds nullable double-precision columns with finite,
+- Migration 000063 adds nullable double-precision columns with finite,
   nonnegative physical bounds. Adding the fields does not rewrite existing
   food identities or embeddings.
 - Ingestion fills only missing nutrient values from the owning provenance,
@@ -168,7 +168,7 @@ Checks actually run:
 | Check | Status |
 |---|---|
 | `go run ./cmd/migrate` on isolated pgvector/Postgres 15 databases | Passed |
-| Migration 000061 up/down/up on a temporary table; zero accepted and negative/NaN/infinity rejected | Passed, 26 → 0 → 26 columns |
+| Migration 000063 up/down/up on a temporary table; zero accepted and negative/NaN/infinity rejected | Passed, 26 → 0 → 26 columns |
 | Fresh `go run ./cmd/ingest -food-dir data/food` | Passed, 52,480 inserted; the small seed set was initially absent and its flat-white alias unresolved |
 | `go run ./cmd/seed` | Passed, 42 inserted |
 | Repeat `go run ./cmd/ingest -food-dir data/food` | Passed, 0 inserted and all 10 aliases resolved |
@@ -210,7 +210,7 @@ included in either PR.
 
 ## Deployment and rollback
 
-Review and apply migration 000061 through the existing migration Job before
+Review and apply migration 000063 through the existing migration Job before
 deploying code that writes or selects the new columns. The registered source
 files are shipped by the existing image and loaded by its directory-based
 ingestion command. Source attribution must ship with the client changes.

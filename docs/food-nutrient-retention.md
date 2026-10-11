@@ -1,6 +1,6 @@
 # Food nutrient retention
 
-Migration 000061 adds 26 nullable per-100 g measurements to the canonical food
+Migration 000063 adds 26 nullable per-100 g measurements to the canonical food
 index. Existing calories, protein, carbohydrate, fat and fibre remain intact.
 New fields cover sugar, saturated fat, cholesterol, sodium, calcium, iron,
 potassium, magnesium, phosphorus, zinc, selenium, iodine, vitamins A/C/D/E/K,
