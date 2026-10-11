@@ -78,7 +78,9 @@ func NewGateway(baseURL, apiKey string, client *http.Client) *Gateway {
 	if client == nil {
 		client = &http.Client{Timeout: runTimeout}
 	}
-	return &Gateway{baseURL: origin, apiKey: apiKey, client: client}
+	boundedClient := *client
+	boundedClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return &Gateway{baseURL: origin, apiKey: apiKey, client: &boundedClient}
 }
 
 // originOf reduces a URL to scheme://host[:port], returning "" when it has no
@@ -165,13 +167,23 @@ func (g *Gateway) Send(ctx context.Context, resolved *ResolvedAgent, prompt stri
 	}
 
 	var envelope a2aResponse
-	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+	if err := decodeAgentJSON(resp.Body, &envelope); err != nil {
 		return Run{}, fmt.Errorf("agents: decode a2a response: %w", err)
 	}
 	if envelope.Error != nil {
 		return Run{}, fmt.Errorf("agents: a2a error %d", envelope.Error.Code)
 	}
 
+	if envelope.JSONRPC != "2.0" || envelope.ID != requestID {
+		return Run{}, fmt.Errorf("agents: invalid a2a response correlation")
+	}
+	if envelope.Result.ID == "" || envelope.Result.Status.State != "completed" {
+		return Run{}, fmt.Errorf("agents: a2a task did not complete")
+	}
+	usage := envelope.Result.Metadata.Usage
+	if usage.InputTokens < 0 || usage.OutputTokens < 0 || usage.CachedTokens < 0 || usage.CachedTokens > usage.InputTokens {
+		return Run{}, fmt.Errorf("agents: invalid a2a usage")
+	}
 	text := envelope.text()
 	if text == "" {
 		return Run{}, fmt.Errorf("agents: %s returned no text part", resolved.Agent.Metadata.Name)
@@ -194,7 +206,9 @@ func (g *Gateway) Send(ctx context.Context, resolved *ResolvedAgent, prompt stri
 }
 
 type a2aResponse struct {
-	Result struct {
+	JSONRPC string `json:"jsonrpc"`
+	ID      string `json:"id"`
+	Result  struct {
 		ID     string `json:"id"`
 		Status struct {
 			State string `json:"state"`

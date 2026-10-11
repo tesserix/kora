@@ -235,3 +235,46 @@ func TestNilRegistryIsNotConfigured(t *testing.T) {
 		t.Errorf("Resolve on a nil Registry = %v, want ErrNotConfigured", err)
 	}
 }
+
+func TestResolveRevokesCachedAgentOnPermanentRegistryFailure(t *testing.T) {
+	for _, status := range []int{401, 403, 404, 410} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			failed := false
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if failed {
+					w.WriteHeader(status)
+					return
+				}
+				_ = json.NewEncoder(w).Encode(resolvedFixture())
+			}))
+			defer srv.Close()
+			registry := NewRegistry(RegistryOptions{BaseURL: srv.URL, APIKey: "test-key"})
+			now := time.Now()
+			registry.cache.now = func() time.Time { return now }
+			if _, err := registry.Resolve(context.Background(), "nutrition-coach", ""); err != nil {
+				t.Fatal(err)
+			}
+			now = now.Add(time.Hour)
+			failed = true
+			if _, err := registry.Resolve(context.Background(), "nutrition-coach", ""); err == nil {
+				t.Fatal("served revoked cached agent")
+			}
+			if _, ok := registry.cache.stale("nutrition-coach"); ok {
+				t.Fatal("revoked entry retained for later outages")
+			}
+		})
+	}
+}
+
+func TestResolveRejectsDifferentAgentIdentity(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		v := resolvedFixture()
+		v.Agent.Metadata.Name = "unreviewed-agent"
+		_ = json.NewEncoder(w).Encode(v)
+	}))
+	defer srv.Close()
+	registry := NewRegistry(RegistryOptions{BaseURL: srv.URL, APIKey: "test-key"})
+	if _, err := registry.Resolve(context.Background(), "nutrition-coach", ""); err == nil {
+		t.Fatal("accepted a different agent than requested")
+	}
+}

@@ -2,7 +2,7 @@ package agents
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -20,6 +20,14 @@ const registryTimeout = 3 * time.Second
 // order — long enough that the registry sees roughly one request per agent per
 // TTL, short enough that a republished agent takes effect without a deploy.
 const defaultTTL = 5 * time.Minute
+
+var errInvalidAgent = errors.New("agents: registry identity mismatch")
+
+type registryHTTPError struct{ status int }
+
+func (e *registryHTTPError) Error() string {
+	return fmt.Sprintf("agents: registry returned %d", e.status)
+}
 
 // ErrNotConfigured is returned by every Registry method when the registry is
 // not configured. Callers treat it as "no agent available" and fall back.
@@ -61,6 +69,8 @@ func NewRegistry(opts RegistryOptions) *Registry {
 	if client == nil {
 		client = &http.Client{Timeout: registryTimeout}
 	}
+	boundedClient := *client
+	boundedClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	observe := opts.Observe
 	if observe == nil {
 		observe = func(string, CacheResult) {}
@@ -68,7 +78,7 @@ func NewRegistry(opts RegistryOptions) *Registry {
 	return &Registry{
 		baseURL: strings.TrimSuffix(opts.BaseURL, "/"),
 		apiKey:  opts.APIKey,
-		client:  client,
+		client:  &boundedClient,
 		cache:   newCache(ttl),
 		observe: observe,
 	}
@@ -133,8 +143,8 @@ func (r *Registry) fetchResolved(ctx context.Context, name, tag string) (*Resolv
 	if err := r.get(ctx, path, &resolved); err != nil {
 		return nil, err
 	}
-	if resolved.Agent.Metadata.Name == "" {
-		return nil, fmt.Errorf("agents: registry returned no agent for %q", name)
+	if resolved.Agent.Metadata.Name != name || resolved.Agent.Kind != "Agent" {
+		return nil, errInvalidAgent
 	}
 	return &resolved, nil
 }
@@ -160,10 +170,10 @@ func (r *Registry) get(ctx context.Context, path string, out any) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("agents: registry %s returned %d", path, resp.StatusCode)
+		return &registryHTTPError{status: resp.StatusCode}
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+	if err := decodeAgentJSON(resp.Body, out); err != nil {
 		return fmt.Errorf("agents: decode registry response: %w", err)
 	}
 	return nil

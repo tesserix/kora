@@ -2,6 +2,8 @@ package agents
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"net/url"
 	"strings"
 	"sync"
@@ -71,6 +73,14 @@ func (c *cache) load(ctx context.Context, key string, fetch func(context.Context
 
 		value, err := fetch(ctx)
 		if err != nil {
+			var status *registryHTTPError
+			if errors.Is(err, errInvalidAgent) || (errors.As(err, &status) && status.status < 500 && status.status != http.StatusTooManyRequests) {
+				c.invalidate(key)
+				return nil, err
+			}
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			if stale, ok := c.stale(key); ok {
 				return loaded{value: stale, result: CacheStale}, nil
 			}

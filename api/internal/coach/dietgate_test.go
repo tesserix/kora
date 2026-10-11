@@ -295,3 +295,12 @@ func TestAskReturnsARegeneratedAnswerWhenTheRetryIsClean(t *testing.T) {
 
 	require.Contains(t, answer.Text, "Coconut chutney")
 }
+
+func TestScreenDietDoesNotShowAnUnreviewedReplacementPlan(t *testing.T) {
+	svc, provider := gateService("An unreviewed coconut meal plan.")
+	text, _, blocked := svc.screenDiet(context.Background(), uuid.New(),
+		blockProfile(t, "peanut"), "plan my meals", planningSkill, "Peanut meal plan.", false)
+	require.True(t, blocked)
+	require.NotContains(t, text, "unreviewed coconut")
+	require.Empty(t, provider.seen, "a rejected plan needs a new complete planning and review cycle")
+}

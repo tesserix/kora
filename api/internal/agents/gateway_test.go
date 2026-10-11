@@ -92,9 +92,11 @@ func TestSendDelegatesTheVerifiedEndUserIdentity(t *testing.T) {
 	var gotToken, gotID string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotToken = r.Header.Get("X-Kora-End-User-Token")
+		var request map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&request)
 		gotID = r.Header.Get("X-Kora-User-Id")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"jsonrpc": "2.0", "id": "1",
+			"jsonrpc": "2.0", "id": request["id"],
 			"result": map[string]any{
 				"id": "run-1", "status": map[string]any{"state": "completed"},
 				"artifacts": []any{map[string]any{
@@ -268,5 +270,59 @@ func TestSendTrimsAnOversizedPromptOnACharacterBoundary(t *testing.T) {
 	text := parts[0].(map[string]any)["text"].(string)
 	if !utf8.ValidString(text) || utf8.RuneCountInString(text) != MaxPromptRunes {
 		t.Fatalf("sent %d runes (valid UTF-8: %t), want exactly %d whole characters", utf8.RuneCountInString(text), utf8.ValidString(text), MaxPromptRunes)
+	}
+}
+
+func TestSendRejectsIncompleteOrUncorrelatedResponses(t *testing.T) {
+	for _, tc := range []string{"failed", "working", "missing state", "wrong id", "wrong version", "missing run", "negative usage", "oversized", "trailing"} {
+		t.Run(tc, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req map[string]any
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				state, id, version, runID, input := "completed", req["id"], "2.0", "run-1", 10
+				switch tc {
+				case "failed", "working":
+					state = tc
+				case "missing state":
+					state = ""
+				case "wrong id":
+					id = "different"
+				case "wrong version":
+					version = "1.0"
+				case "missing run":
+					runID = ""
+				case "negative usage":
+					input = -1
+				}
+				text := "answer"
+				if tc == "oversized" {
+					text = strings.Repeat("x", 2<<20)
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": version, "id": id, "result": map[string]any{"id": runID, "status": map[string]any{"state": state}, "artifacts": []any{map[string]any{"parts": []any{map[string]any{"kind": "text", "text": text}}}}, "metadata": map[string]any{"usage": map[string]any{"input_tokens": input}}}})
+				if tc == "trailing" {
+					_, _ = w.Write([]byte(`{}`))
+				}
+			}))
+			defer srv.Close()
+			resolved := resolvedFixture()
+			if _, err := NewGateway(srv.URL, "gw-key", nil).Send(context.Background(), &resolved, "question"); err == nil {
+				t.Fatal("accepted invalid A2A result")
+			}
+		})
+	}
+}
+
+func TestSendDoesNotForwardDelegatedCredentialsOnRedirect(t *testing.T) {
+	reached := false
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { reached = true; w.WriteHeader(200) }))
+	defer target.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	defer srv.Close()
+	resolved := resolvedFixture()
+	_, err := NewGateway(srv.URL, "gw-key", nil).Send(auth.WithVerifiedToken(context.Background(), "private-user-token"), &resolved, "question")
+	if reached || err == nil {
+		t.Fatal("followed redirect carrying user credentials")
 	}
 }
