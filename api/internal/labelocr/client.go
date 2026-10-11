@@ -179,10 +179,12 @@ func (c *Client) Read(ctx context.Context, photo []byte, mime string) (read Read
 	}, key+"-j", &created); err != nil {
 		return Read{}, err
 	}
+	read = Read{JobID: created.JobID, Status: created.Status}
 	jobPath := "/v1/ocr/jobs/" + created.JobID
 	var finalStatus string
 	if err := c.wait(ctx, c.jobURL, jobPath, func(status string) (bool, error) {
 		finalStatus = status
+		read.Status = status
 		switch status {
 		case "completed", "partial", "review_required":
 			return true, nil
@@ -191,12 +193,12 @@ func (c *Client) Read(ctx context.Context, photo []byte, mime string) (read Read
 		}
 		return false, nil
 	}); err != nil {
-		return Read{}, err
+		return read, err
 	}
 
 	var res result
 	if err := c.call(ctx, http.MethodGet, c.jobURL, jobPath+"/result", nil, "", &res); err != nil {
-		return Read{}, err
+		return read, err
 	}
 	read = Read{Fields: res.Fields, Failures: res.ValidationFailures, Status: finalStatus, JobID: created.JobID}
 	if res.Cost != nil && res.Cost.Currency == "USD" {

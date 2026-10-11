@@ -152,9 +152,11 @@ func TestReadStopsAtTheCallerDeadline(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
 
-	_, err := fake.client(t).Read(ctx, []byte("x"), "image/jpeg")
+	read, err := fake.client(t).Read(ctx, []byte("x"), "image/jpeg")
 
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Equal(t, "job_1", read.JobID)
+	assert.Equal(t, "processing", read.Status)
 }
 
 func TestNewClientIsNilWhenUnconfiguredAndRejectsBadConfig(t *testing.T) {

@@ -45,7 +45,7 @@ func (p PhotoResolver) ResolvePhoto(ctx context.Context, uid uuid.UUID, image []
 		return ai.Resolution{}, err
 	}
 	started := time.Now()
-	ocrCtx, ocrCancel := context.WithTimeout(ctx, 5*time.Second)
+	ocrCtx, ocrCancel := context.WithTimeout(ctx, 10*time.Second)
 	read, readErr := p.reader.Read(ocrCtx, image, mime)
 	ocrCancel()
 	label, checkErr := checkedRead(read)
@@ -65,15 +65,16 @@ func (p PhotoResolver) ResolvePhoto(ctx context.Context, uid uuid.UUID, image []
 	if readErr != nil {
 		evidence.OCROutcome = "unreadable_or_unavailable"
 	}
+	hasFields := hasLabelFields(read.Fields)
 	// Only validated status flags cross into Jev; OCR strings are untrusted content.
-	state, _ := json.Marshal(map[string]any{"label_readable": readErr == nil, "review_required": label.NeedsReview, "has_extracted_fields": hasLabelFields(read.Fields), "consumed_amount_known": false})
+	state, _ := json.Marshal(map[string]any{"label_readable": readErr == nil, "review_required": hasFields && label.NeedsReview, "has_extracted_fields": hasFields, "consumed_amount_known": false})
 	if err := p.allowed(ctx, uid); err != nil {
 		return ai.Resolution{}, err
 	}
 	started = time.Now()
 	decision, decisionErr := p.decision.Decide(ctx, state, map[string]decide.Question{"route": decide.Choice{
-		Instructions: "Choose the next image processing operation from the evidence flags. Never infer consumption or authorize a diary write.",
-		Criteria:     map[string]string{"label": "Readable nutrition label without review issues; report label facts only.", "review": "Extracted label evidence is incomplete or requires independent vision review.", "vision": "No usable label evidence; identify food using the normal vision model.", "retake": "Evidence cannot support either interpretation; request a clearer image."},
+		Instructions: "Choose the next image processing operation from the evidence flags. Missing OCR text is normal for meal photos and does not mean the image is unclear. With no extracted fields, choose vision. Never infer consumption or authorize a diary write.",
+		Criteria:     map[string]string{"label": "Readable nutrition label without review issues; report label facts only.", "review": "Only when has_extracted_fields is true: existing label evidence is incomplete or requires independent vision review.", "vision": "No usable label evidence; identify food using the normal vision model.", "retake": "Evidence cannot support either interpretation; request a clearer image."},
 	}})
 	usage := ai.Usage{Provider: "typesafe", Model: decision.Model, CallType: "photo_decide", TokensIn: decision.Usage.InputTokens, TokensOut: decision.Usage.OutputTokens, LatencyMs: int(time.Since(started).Milliseconds())}
 	if err := recorder.record(ctx, uid, usage, ai.EstimateCostUSD(usage), decisionErr); err != nil {
@@ -84,6 +85,10 @@ func (p PhotoResolver) ResolvePhoto(ctx context.Context, uid uuid.UUID, image []
 	}
 	evidence.DecisionModel = decision.Model
 	route := decision.Answers["route"].Choice
+	evidence.DecisionRoute = route
+	if route == "review" && !hasFields {
+		route = "vision"
+	}
 	// The model cannot bypass numerical checks or turn a serving into consumption.
 	if route == "label" && (readErr != nil || label.NeedsReview) {
 		route = "retake"

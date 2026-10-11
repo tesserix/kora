@@ -230,6 +230,7 @@ type PhotoEvidence struct {
 	OCRJobID            string          `json:"ocr_job_id,omitempty"`
 	OCRStatus           string          `json:"ocr_status"`
 	DecisionModel       string          `json:"decision_model"`
+	DecisionRoute       string          `json:"decision_route,omitempty"`
 	Route               string          `json:"route"`
 	ConsumedAmountKnown bool            `json:"consumed_amount_known"`
 	Label               json.RawMessage `json:"label,omitempty"`
