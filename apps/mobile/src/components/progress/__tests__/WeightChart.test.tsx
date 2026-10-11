@@ -71,3 +71,57 @@ test("reduced motion renders fully drawn immediately, no retracted state", async
   expect(line.props.strokeDashoffset === 0 || line.props.strokeDashoffset === null).toBe(true);
   expect(area.props.opacity).toBe(1);
 });
+
+// kora#45: a metric measured by two different instruments must not be drawn as
+// one line. These assert the SVG the chart emits, which is all jest can see —
+// it performs no layout (see the reanimated mock note in jest.setup.js, #257),
+// so they prove the geometry and not what a person would perceive on a device.
+test("a single-instrument series is still one line, one area, no break rule", async () => {
+  const { getByTestId, queryByTestId } = await render(<WeightChart points={[70, 71, 72]} breaksAfter={[]} />);
+  expect(getByTestId("weight-chart-line")).toBeTruthy();
+  expect(queryByTestId("weight-chart-line-1")).toBeNull();
+  expect(queryByTestId("weight-chart-break-after-1")).toBeNull();
+});
+
+test("a break splits the polyline in two rather than joining across instruments", async () => {
+  const { getByTestId } = await render(
+    // The Renpho-to-Omron cliff: 48.9 -> 25.7 is a definition change.
+    <WeightChart points={[48.9, 49.1, 25.7, 25.9]} breaksAfter={[1]} />,
+  );
+  const first = coordsFromPath(getByTestId("weight-chart-line").props.d as string);
+  const second = coordsFromPath(getByTestId("weight-chart-line-1").props.d as string);
+  expect(first).toHaveLength(2);
+  expect(second).toHaveLength(2);
+  // No segment spans the seam, and no point is dropped or duplicated at it.
+  expect(first.length + second.length).toBe(4);
+  expect(first[0][0]).toBe(10);
+  expect(second[1][0]).toBe(290);
+});
+
+test("the seam carries a visible dashed rule between the two instruments", async () => {
+  const { getByTestId } = await render(<WeightChart points={[48.9, 49.1, 25.7, 25.9]} breaksAfter={[1]} />);
+  const rule = getByTestId("weight-chart-break-after-1");
+  // Midway between x(1)=103.33 and x(2)=196.67.
+  expect(Number(rule.props.x1)).toBeCloseTo(150, 1);
+  expect(Number(rule.props.x1)).toBe(Number(rule.props.x2));
+  expect(rule.props.strokeDasharray).toEqual([3, 3]);
+});
+
+test("both segments share one vertical scale, so the step change stays visible", async () => {
+  const { getByTestId } = await render(<WeightChart points={[48.9, 49.1, 25.7, 25.9]} breaksAfter={[1]} />);
+  const first = coordsFromPath(getByTestId("weight-chart-line").props.d as string);
+  const second = coordsFromPath(getByTestId("weight-chart-line-1").props.d as string);
+  // A per-segment rescale would have put both runs at similar heights and hidden
+  // the very discontinuity the break exists to show.
+  expect(second[0][1]).toBeGreaterThan(first[1][1] + 50);
+});
+
+test("a lone reading from a new instrument draws its dot but no one-point line", async () => {
+  const { getByTestId, queryByTestId } = await render(
+    <WeightChart points={[48.9, 49.1, 25.7]} breaksAfter={[1]} />,
+  );
+  expect(getByTestId("weight-chart-line")).toBeTruthy();
+  expect(queryByTestId("weight-chart-line-1")).toBeNull();
+  // The endpoint is that lone reading, and it is still drawn.
+  expect(getByTestId("weight-chart-endpoint")).toBeTruthy();
+});

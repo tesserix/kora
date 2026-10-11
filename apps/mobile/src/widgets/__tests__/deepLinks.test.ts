@@ -11,9 +11,24 @@ import { join } from "node:path";
 const TARGETS = join(__dirname, "../../../targets/kora-widgets");
 const APP = join(__dirname, "../../../app");
 
+// Matches EVERY `mobile://` literal in the file, not only ones written
+// inline after `deepLink:` (kora#425). The steps link moved into a named
+// constant, `Self.stepsDeepLink`, and the old `deepLink:\s*"..."` pattern
+// stopped seeing it — so the one widget this test most exists to protect
+// silently dropped out of both assertions while they stayed green-ish.
+// Binding the string to a name must not hide it from the extractor.
 function metricKindDeepLinks(): string[] {
-  const source = readFileSync(join(TARGETS, "MetricKind.swift"), "utf8");
-  return [...source.matchAll(/deepLink:\s*"mobile:\/\/([^"]*)"/g)].map((m) => m[1]);
+  // Whole-line comments are stripped first: the doc comment explaining
+  // kora#425 quotes the OLD "mobile:///progress" value, and a matcher that
+  // reads prose would report a route the code no longer uses.
+  //
+  // Only WHOLE-LINE comments, anchored with ^\s*, because "mobile://"
+  // contains "//" itself -- an unanchored //-to-end-of-line strip deletes
+  // every deep link in the file and leaves both assertions looking at an
+  // empty list.
+  const source = readFileSync(join(TARGETS, "MetricKind.swift"), "utf8")
+    .replace(/^\s*\/\/.*$/gm, "");
+  return [...source.matchAll(/"mobile:\/\/([^"]*)"/g)].map((m) => m[1]);
 }
 
 function routeExists(path: string): boolean {
@@ -27,7 +42,11 @@ function routeExists(path: string): boolean {
 test("KoraWidget's deep links are exactly the expected set of routes", () => {
   const links = metricKindDeepLinks();
   const distinct = [...new Set(links)];
-  expect(distinct.sort()).toEqual(["/", "/progress"]);
+  // Every metric lands on the dashboard. Steps used to point at "/progress"
+  // (Trends), which renders no steps at all — the bug kora#425 fixed. If a
+  // metric ever legitimately needs its own screen, update this list
+  // deliberately rather than to make a red test go green.
+  expect(distinct.sort()).toEqual(["/"]);
 });
 
 test("every KoraWidget deep link resolves to a route that exists", () => {

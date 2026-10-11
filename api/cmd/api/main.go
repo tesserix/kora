@@ -12,7 +12,7 @@ import (
 	"time"
 
 	// Embeds the IANA timezone database in the binary. Without this, the
-	// production image (alpine:3.19, which installs only ca-certificates)
+	// minimal production image (which installs only ca-certificates)
 	// has no zoneinfo, so every time.LoadLocation for a named zone fails
 	// and silently falls back to UTC -- which would make every user's day
 	// boundary UTC regardless of their stored timezone, and would leave
@@ -22,23 +22,32 @@ import (
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 
+	"github.com/tesserix/kora/api/internal/accuracy"
 	"github.com/tesserix/kora/api/internal/agents"
 	"github.com/tesserix/kora/api/internal/ai"
+	"github.com/tesserix/kora/api/internal/ai/decide"
 	"github.com/tesserix/kora/api/internal/ai/providers"
+	"github.com/tesserix/kora/api/internal/aitrace"
 	"github.com/tesserix/kora/api/internal/appleid"
+	"github.com/tesserix/kora/api/internal/assets"
 	"github.com/tesserix/kora/api/internal/auth"
 	"github.com/tesserix/kora/api/internal/billing"
+	"github.com/tesserix/kora/api/internal/bodyread"
+	"github.com/tesserix/kora/api/internal/capturemedia"
 	"github.com/tesserix/kora/api/internal/challenges"
 	"github.com/tesserix/kora/api/internal/config"
 	"github.com/tesserix/kora/api/internal/database"
 	"github.com/tesserix/kora/api/internal/devices"
 	"github.com/tesserix/kora/api/internal/foodlog"
 	"github.com/tesserix/kora/api/internal/groups"
+	"github.com/tesserix/kora/api/internal/labelocr"
 	"github.com/tesserix/kora/api/internal/metrics"
 	"github.com/tesserix/kora/api/internal/notifications"
 	"github.com/tesserix/kora/api/internal/nutrition"
+	"github.com/tesserix/kora/api/internal/nutrition/refresh"
 	"github.com/tesserix/kora/api/internal/push"
 	"github.com/tesserix/kora/api/internal/resolve"
+	"github.com/tesserix/kora/api/internal/resolveoutcome"
 	"github.com/tesserix/kora/api/internal/scheduler"
 	"github.com/tesserix/kora/api/internal/server"
 	"github.com/tesserix/kora/api/internal/user"
@@ -64,15 +73,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	verifier, err := auth.NewFirebaseVerifier(context.Background(), cfg.FirebaseProjectID)
+	verifier, err := auth.NewFirebaseVerifier(context.Background(), cfg.FirebaseProjectID, cfg.FirebaseAPIKey)
 	if err != nil {
 		logger.Error("firebase init failed", "err", err)
 		os.Exit(1)
 	}
 
 	// The same Firebase client, narrowed to its identity-DELETE surface.
-	// auth keeps Verify and DeleteIdentity as two interfaces (verification
-	// needs only Google's public keys; deletion needs Admin privileges), so
+	// auth keeps Verify and DeleteIdentity as two narrow interfaces, so
 	// the concrete verifier has to be asserted back to the second one.
 	//
 	// Fatal rather than degraded: DELETE /v1/me is Apple-mandated, and a
@@ -84,14 +92,40 @@ func main() {
 		os.Exit(1)
 	}
 
-	resolveHandler, aiProvider, resolveCache := buildResolveHandler(context.Background(), cfg, db, logger)
-	agentDelegator, err := buildAgentDelegator(cfg)
-	if err != nil {
-		logger.Error("agent supervisor init failed", "err", err)
-		os.Exit(1)
+	resolveHandler, aiProvider, resolveCache, bodyCompositionCache := buildResolveHandler(context.Background(), cfg, db, logger)
+
+	// Precedence: a real bucket, else a local directory for laptop work, else
+	// Noop. Never a nil Store -- router.go must not have to nil-check it, the
+	// same reasoning the bodyread.NoCache{} wiring already follows.
+	var assetStore assets.Store = assets.Noop{}
+	switch {
+	case cfg.AssetsBucket != "":
+		s, err := assets.NewGCS(context.Background(), cfg.AssetsBucket, cfg.AssetsPublicBaseURL)
+		if err != nil {
+			// Non-fatal: an API that will not start because object storage is
+			// unreachable takes down food logging with it. Avatars degrade to
+			// "nobody has a picture"; everything else is unaffected.
+			slog.Error("assets: gcs unavailable; profile pictures disabled", "error", err)
+		} else {
+			assetStore = s
+		}
+	case cfg.AssetsLocalDir != "":
+		assetStore = assets.NewLocal(cfg.AssetsLocalDir, cfg.AssetsPublicBaseURL)
 	}
 
 	schedCtx, schedCancel := context.WithCancel(context.Background())
+	if cfg.CaptureBucket != "" {
+		objects, err := capturemedia.NewGCS(schedCtx, cfg.CaptureBucket)
+		if err != nil {
+			logger.Error("capture archive initialization failed")
+			os.Exit(1)
+		}
+		archive := capturemedia.New(db, objects)
+		if resolveHandler != nil {
+			*resolveHandler = resolveHandler.WithPhotoArchive(archive)
+		}
+		go archive.Run(schedCtx)
+	}
 	if cfg.SchedulerInterval > 0 {
 		loc, lerr := time.LoadLocation(user.DefaultTimezone)
 		if lerr != nil {
@@ -103,6 +137,20 @@ func main() {
 		sched := scheduler.New(challengesRepo, challengesSvc, notifSvc, loc, cfg.SchedulerInterval, logger)
 		go sched.Run(schedCtx)
 		logger.Info("scheduler started", "interval", cfg.SchedulerInterval.String(), "loc", loc.String())
+	}
+
+	if cfg.FoodRefreshEvery > 0 {
+		foodRefresh := refresh.Runner{
+			DB:        db,
+			Repo:      nutrition.NewRepository(db),
+			Client:    refresh.NewClient(),
+			Countries: refresh.DefaultCountries(),
+			Every:     cfg.FoodRefreshEvery,
+			Check:     time.Hour,
+			Log:       logger,
+		}
+		go foodRefresh.Run(schedCtx)
+		logger.Info("food refresh started", "every", cfg.FoodRefreshEvery.String())
 	}
 
 	pushCtx, pushCancel := context.WithCancel(context.Background())
@@ -137,6 +185,17 @@ func main() {
 		logger.Info("admin surface disabled (no KORA_BFF_HMAC_KEY)")
 	}
 
+	// The platform console's contract surface (#430-#435). Separate secret,
+	// separate signing scheme, same /v1/admin prefix.
+	healthProbes, closeProbes := platformHealthProbes(cfg, logger)
+	defer closeProbes()
+	if cfg.PlatformAdminSecret != "" {
+		logger.Info("platform admin contract surface enabled",
+			"routes", "/v1/admin/{audit-logs,inbox,entities/:type,health,kpis}")
+	} else {
+		logger.Info("platform admin contract surface disabled (no KORA_PLATFORM_ADMIN_SECRET)")
+	}
+
 	// One appleid.Client serves two narrow interfaces: AppleExchanger for
 	// POST /v1/me/apple-authorization and AppleRevoker for account deletion.
 	// Both stay nil when Apple is unconfigured — the exchange endpoint is
@@ -163,19 +222,80 @@ func main() {
 		logger.Info("apple authorization exchange disabled (no APPLE_PRIVATE_KEY)")
 	}
 
+	shutdownTracing, err := aitrace.Setup(context.Background(), aitrace.Config{
+		Endpoint:    cfg.AITraceEndpoint,
+		Environment: cfg.Env,
+		Release:     cfg.Release,
+	})
+	if err != nil {
+		// Tracing must never take down the product.
+		logger.Error("ai tracing disabled", "err", err)
+		shutdownTracing = func(context.Context) error { return nil }
+	}
+
+	scores := accuracy.NewClient(accuracy.Config{
+		Host:        cfg.LangfuseHost,
+		PublicKey:   cfg.LangfusePublicKey,
+		SecretKey:   cfg.LangfuseSecretKey,
+		Environment: cfg.Env,
+	})
+
+	coordinator := buildAgents(cfg, logger)
+
+	labelClient, err := labelocr.NewClient(labelocr.Config{
+		UploadURL: cfg.OCRUploadURL, JobURL: cfg.OCRJobURL,
+		KeyID: cfg.OCRKeyID, Tenant: cfg.OCRTenant, SecretHex: cfg.OCRKeySecret,
+	}, nil)
+	if err != nil {
+		logger.Error("label ocr config invalid", "err", err)
+		os.Exit(1)
+	}
+	// A nil *Client in the interface would still mount the route.
+	var labelReader labelocr.Reader
+	var labelReviewer labelocr.Reviewer
+	if labelClient != nil {
+		labelReader = labelClient
+		if cfg.AIGatewayEnabled {
+			labelReviewer = providers.NewLabelReviewer(cfg.AIGatewayAPIKey, cfg.AIGatewayBaseURL)
+		}
+	}
+
+	if labelReader != nil && resolveHandler != nil {
+		decision, err := decide.NewClient(cfg.AIGatewayBaseURL, cfg.AIGatewayAPIKey, nil)
+		if err != nil || decision == nil {
+			logger.Error("photo evidence requires the private decision gateway")
+			os.Exit(1)
+		}
+		*resolveHandler = resolveHandler.WithPhotoEvidence(labelReader, decision, labelReviewer, billing.NewMeter(db))
+	}
+
 	srv := &http.Server{
 		Addr: ":" + cfg.Port,
 		Handler: server.NewRouter(server.Deps{
-			DB:              db,
-			Verifier:        verifier,
-			Resolver:        resolveHandler,
-			Provider:        aiProvider,
-			AgentDelegator:  agentDelegator,
-			ResolveCache:    resolveCache,
-			BFFHMACKey:      cfg.BFFHMACKey,
-			AppleExchanger:  appleExchanger,
-			IdentityDeleter: identityDeleter,
-			AppleRevoker:    appleRevoker,
+			DB:                   db,
+			Verifier:             verifier,
+			Resolver:             resolveHandler,
+			Provider:             aiProvider,
+			Agents:               coordinator,
+			ResolveCache:         resolveCache,
+			BodyCompositionCache: bodyCompositionCache,
+			Assets:               assetStore,
+			BFFHMACKey:           cfg.BFFHMACKey,
+			MCPInternalKey:       cfg.MCPInternalKey,
+			LabelReader:          labelReader,
+			LabelReviewer:        labelReviewer,
+			AITraceUserKey:       cfg.AITraceUserKey,
+			Accuracy:             accuracy.NewRecorder(resolveoutcome.NewRepository(db), scores),
+			PlatformAdminSecret:  cfg.PlatformAdminSecret,
+			PlatformHealthProbes: healthProbes,
+			AppleExchanger:       appleExchanger,
+			IdentityDeleter:      identityDeleter,
+			AppleRevoker:         appleRevoker,
+			Stripe: billing.StripeConfig{
+				SecretKey:     cfg.StripeSecretKey,
+				WebhookSecret: cfg.StripeWebhookSecret,
+				ReturnURL:     cfg.StripeReturnURL,
+			},
 		}),
 		// Nothing bounded a request server-side: a client that hung up left the
 		// handler running against whatever budgets the AI Router happened to
@@ -193,6 +313,7 @@ func main() {
 		// where request latency is actually governed; this only guarantees no
 		// request can be held open indefinitely.
 		ReadHeaderTimeout: 15 * time.Second,
+		ReadTimeout:       150 * time.Second,
 		WriteTimeout:      150 * time.Second,
 	}
 
@@ -233,14 +354,13 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		logger.Error("shutdown error", "err", err)
 	}
-	logger.Info("api stopped")
-}
-
-func buildAgentDelegator(cfg config.Config) (agents.Delegator, error) {
-	if !cfg.AIGatewayEnabled {
-		return nil, nil
+	if err := scores.Close(ctx); err != nil {
+		logger.Error("accuracy scores shutdown error", "err", err)
 	}
-	return agents.NewGatewayClient(cfg.AIGatewayBaseURL, cfg.AIGatewayAPIKey, cfg.AIAgentTimeout)
+	if err := shutdownTracing(ctx); err != nil {
+		logger.Error("ai tracing shutdown error", "err", err)
+	}
+	logger.Info("api stopped")
 }
 
 // providerEmbedder adapts an ai.Provider's three-value Embed to the narrower
@@ -272,26 +392,28 @@ func gatewayProviders(cfg config.Config) aiProviders {
 }
 
 func directProviders(cfg config.Config, gemini providers.GeminiProvider) aiProviders {
-	var provider ai.Provider = gemini
+	var fallback ai.Provider
 	if cfg.OpenAIAPIKey != "" {
-		fallback := providers.NewOpenAIProvider(
+		fallback = providers.NewOpenAIProvider(
 			cfg.OpenAIAPIKey,
 			cfg.OpenAIBaseURL,
 			cfg.OpenAIModel,
 			cfg.OpenAIJSONObject,
 		)
-		provider = &ai.Router{Primary: gemini, Fallback: fallback}
 	}
-	return aiProviders{requests: provider, embeddings: gemini}
+	// NewRouter hands back gemini itself when no fallback is configured, which
+	// is the conditional this function used to open-code.
+	return aiProviders{requests: ai.NewRouter(gemini, fallback), embeddings: gemini}
 }
 
 // buildResolveHandler composes the AI resolution engine from config. It
 // returns a nil handler (resolve endpoints stay unmounted), a nil provider,
-// and a nil cache when no Gemini key is set — the rest of the API runs
-// unchanged. The OpenAI-compatible fallback is optional: with no OpenAI key,
-// Gemini serves alone (no Router). The returned provider is also threaded
-// into server.Deps.Provider so the coach's Q&A endpoint can generate text
-// without building a second client.
+// and a nil cache (both the resolve cache and the body-composition cache)
+// when no Gemini key is set — the rest of the API runs unchanged. The
+// OpenAI-compatible fallback is optional: with no OpenAI key, Gemini serves
+// alone (no Router). The returned provider is also threaded into
+// server.Deps.Provider so the coach's Q&A endpoint AND bodyread's reader can
+// generate/identify without building a second client.
 //
 // THE `cache` VARIABLE BELOW IS DELIBERATELY SINGLE, AND MUST STAY THAT WAY.
 // It is passed to ai.NewResolver (the reader) and returned for
@@ -310,7 +432,7 @@ func directProviders(cfg config.Config, gemini providers.GeminiProvider) aiProvi
 // both: corrections and retirements would keep reporting success while users
 // were served the stale food for up to the cache's 24h TTL. The identity is
 // pinned by server.TestAdminMutationBumpsTheSameCacheInstanceWiredIntoDeps.
-func buildResolveHandler(ctx context.Context, cfg config.Config, db *gorm.DB, logger *slog.Logger) (*resolve.Handler, ai.Provider, ai.Cache) {
+func buildResolveHandler(ctx context.Context, cfg config.Config, db *gorm.DB, logger *slog.Logger) (*resolve.Handler, ai.Provider, ai.Cache, bodyread.Cache) {
 	var wiring aiProviders
 	if cfg.AIGatewayEnabled {
 		wiring = gatewayProviders(cfg)
@@ -325,19 +447,19 @@ func buildResolveHandler(ctx context.Context, cfg config.Config, db *gorm.DB, lo
 			gemini, err = providers.NewVertexProvider(ctx, cfg.VertexProject, cfg.VertexLocation)
 			if err != nil {
 				logger.Error("vertex provider init failed — resolve engine disabled", "err", err)
-				return nil, nil, nil
+				return nil, nil, nil, nil
 			}
 			logger.Info("resolve engine: vertex ai", "project", cfg.VertexProject, "location", cfg.VertexLocation)
 		case cfg.GeminiAPIKey != "":
 			gemini, err = providers.NewGeminiProvider(ctx, cfg.GeminiAPIKey)
 			if err != nil {
 				logger.Error("gemini provider init failed — resolve engine disabled", "err", err)
-				return nil, nil, nil
+				return nil, nil, nil, nil
 			}
 			logger.Info("resolve engine: gemini api key")
 		default:
 			logger.Info("resolve engine disabled (AI gateway, VERTEX_PROJECT, and GEMINI_API_KEY are unset)")
-			return nil, nil, nil
+			return nil, nil, nil, nil
 		}
 		wiring = directProviders(cfg, gemini)
 		if cfg.OpenAIAPIKey != "" {
@@ -349,10 +471,21 @@ func buildResolveHandler(ctx context.Context, cfg config.Config, db *gorm.DB, lo
 	provider := wiring.requests
 
 	var cache ai.Cache = ai.NoCache{}
+	// bodyCache is bodyread's own Cache, built off the SAME *redis.Client
+	// connection as `cache` above (when Redis is reachable) rather than a
+	// second connection pool — but it is a DIFFERENT concrete type
+	// (bodyread.RedisCache, not ai.RedisCache) because ai.Cache's Get/Set
+	// are hard-typed to ai.Resolution and cannot carry a bodyread.Result
+	// (see bodyread/cache.go's doc comment for the full reasoning). It
+	// shares no state and no key namespace with `cache`, so nothing here
+	// risks the identity-pinning invariant buildResolveHandler's own doc
+	// comment describes for `cache`/ResolveCache.
+	var bodyCache bodyread.Cache = bodyread.NoCache{}
 	if opt, err := redis.ParseURL(cfg.RedisURL); err == nil {
 		client := redis.NewClient(opt)
 		if pingErr := client.Ping(ctx).Err(); pingErr == nil {
 			cache = ai.NewRedisCache(client, 24*time.Hour)
+			bodyCache = bodyread.NewRedisCache(client, 24*time.Hour)
 			logger.Info("resolve engine: redis cache enabled")
 		} else {
 			_ = client.Close() // don't leak the pool for an unreachable cache
@@ -366,15 +499,31 @@ func buildResolveHandler(ctx context.Context, cfg config.Config, db *gorm.DB, lo
 	// ai.Resolver.ResolveText inherit the portion from the user's last log of
 	// the same phrase (see foodlog.Repository.LastPortionForPhrase), instead
 	// of always falling back to the food's serving size.
+	// The resolve-outcome recorder (kora#459). Wired here rather than inside
+	// NewResolver because it is measurement: a Resolver without it resolves
+	// exactly as before, which is what keeps every test that builds a bare one
+	// compiling.
+	outcomes := resolveoutcome.NewSink(resolveoutcome.NewRepository(db))
 	resolver := ai.NewResolver(provider, foods, cache, meter).
 		WithPortionSource(foodlog.NewRepository(db)).
-		WithLocales(userLocales{users: user.NewRepository(db)})
+		WithLocales(userLocales{users: user.NewRepository(db)}).
+		WithOutcomeSink(outcomes)
+
+	if cfg.AIGatewayEnabled {
+		decision, err := decide.NewClient(cfg.AIGatewayBaseURL, cfg.AIGatewayAPIKey, nil)
+		if err != nil || decision == nil {
+			logger.Error("meal review requires decision gateway")
+			return nil, nil, nil, nil
+		}
+		reviewer := providers.NewPhotoReviewProvider(cfg.AIGatewayAPIKey, cfg.AIGatewayBaseURL, cfg.AIGatewayModel)
+		resolver = resolver.WithPhotoIdentifier(labelocr.NewMealIdentifier(provider, reviewer, decision, meter))
+	}
 	off := nutrition.NewHTTPOFFClient()
 
 	h := resolve.NewHandler(resolver, func(c context.Context, code string) (*nutrition.FoodItem, bool, error) {
 		return foods.ResolveBarcode(c, off, code)
-	})
-	return &h, provider, cache
+	}).WithOutcomeSink(outcomes)
+	return &h, provider, cache, bodyCache
 }
 
 // userLocales adapts the user repository to ai.LocaleSource, mapping the
@@ -396,4 +545,35 @@ func (u userLocales) LocaleFor(ctx context.Context, userID uuid.UUID) nutrition.
 		return nutrition.LocaleUnknown
 	}
 	return nutrition.LocaleFromTimezone(usr.Timezone)
+}
+
+// buildAgents wires the Agentic Registry and the Agent Gateway into one
+// coordinator, or returns nil when either is unconfigured. Returning nil is a
+// supported deployment: every caller falls back to the direct provider, which
+// is how Kora behaved before agents were resolved at all.
+//
+// The gateway base URL doubles as the A2A host — the published card carries
+// the in-cluster service URL, and only its path is used (ResolvedAgent.A2APath).
+func buildAgents(cfg config.Config, logger *slog.Logger) *agents.Coordinator {
+	registry := agents.NewRegistry(agents.RegistryOptions{
+		BaseURL: cfg.AIRegistryBaseURL,
+		APIKey:  cfg.AIRegistryAPIKey,
+		TTL:     cfg.AIRegistryTTL,
+		Observe: func(agent string, result agents.CacheResult) {
+			metrics.RecordAgentResolve(agent, string(result))
+		},
+	})
+	gateway := agents.NewGateway(
+		cfg.AIGatewayBaseURL,
+		cfg.AIGatewayAPIKey,
+		&http.Client{Timeout: cfg.AIAgentTimeout},
+	)
+
+	coordinator := agents.NewCoordinator(registry, gateway, metrics.RecordAgentRun)
+	if coordinator == nil {
+		logger.Info("agent path disabled (AI_REGISTRY_BASE_URL or AI_GATEWAY_BASE_URL is unset); coach uses the direct provider")
+		return nil
+	}
+	logger.Info("agent path enabled", "registry", cfg.AIRegistryBaseURL, "gateway", cfg.AIGatewayBaseURL)
+	return coordinator
 }

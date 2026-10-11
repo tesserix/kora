@@ -74,6 +74,13 @@ func TestLoadConfig(t *testing.T) {
 				OpenAIBaseURL:     "https://integrate.api.nvidia.com/v1",
 				OpenAIModel:       "meta/llama-3.3-70b-instruct",
 				OpenAIJSONObject:  true,
+				AIGatewayEnabled:  true,
+				AIGatewayBaseURL:  "http://kora-ai.agentgateway-system.svc.cluster.local:8080/v1",
+				AIGatewayAPIKey:   "gateway-key",
+				AIGatewayModel:    "kora-auto",
+				AIAgentTimeout:    60 * time.Second,
+				AIRegistryBaseURL: "http://agentregistry.agentregistry-system.svc.cluster.local:12121",
+				AIRegistryAPIKey:  "registry-key",
 			},
 		},
 	}
@@ -95,6 +102,18 @@ func TestLoadConfig(t *testing.T) {
 			t.Setenv("OPENAI_BASE_URL", tt.openAIBaseURL)
 			t.Setenv("OPENAI_MODEL", tt.openAIModel)
 			t.Setenv("OPENAI_JSON_OBJECT", tt.openAIJSONObject)
+			t.Setenv("AI_GATEWAY_ENABLED", "")
+			t.Setenv("AI_GATEWAY_BASE_URL", "")
+			t.Setenv("AI_GATEWAY_API_KEY", "")
+			t.Setenv("AI_REGISTRY_BASE_URL", "")
+			t.Setenv("AI_REGISTRY_API_KEY", "")
+			if tt.env == "production" {
+				t.Setenv("AI_GATEWAY_ENABLED", "true")
+				t.Setenv("AI_GATEWAY_BASE_URL", "http://kora-ai.agentgateway-system.svc.cluster.local:8080/v1")
+				t.Setenv("AI_GATEWAY_API_KEY", "gateway-key")
+				t.Setenv("AI_REGISTRY_BASE_URL", "http://agentregistry.agentregistry-system.svc.cluster.local:12121")
+				t.Setenv("AI_REGISTRY_API_KEY", "registry-key")
+			}
 
 			// Call Load()
 			cfg, err := Load()
@@ -203,6 +222,30 @@ func TestLoadRejectsMetricsPortEqualToPort(t *testing.T) {
 	require.Contains(t, err.Error(), "METRICS_PORT")
 }
 
+func TestLoadProductionRequiresTheGatewayAndRegistry(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
+	t.Setenv("ENV", "production")
+	t.Setenv("AI_GATEWAY_ENABLED", "")
+	t.Setenv("AI_GATEWAY_BASE_URL", "")
+	t.Setenv("AI_GATEWAY_API_KEY", "")
+	t.Setenv("AI_REGISTRY_BASE_URL", "")
+	t.Setenv("AI_REGISTRY_API_KEY", "")
+
+	_, err := Load()
+	require.ErrorContains(t, err, "AI_GATEWAY_ENABLED")
+
+	t.Setenv("AI_GATEWAY_ENABLED", "true")
+	t.Setenv("AI_GATEWAY_BASE_URL", "http://kora-ai.agentgateway-system.svc.cluster.local:8080/v1")
+	t.Setenv("AI_GATEWAY_API_KEY", "gateway-key")
+	_, err = Load()
+	require.ErrorContains(t, err, "AI_REGISTRY_BASE_URL")
+
+	t.Setenv("AI_REGISTRY_BASE_URL", "http://agentregistry.agentregistry-system.svc.cluster.local:12121")
+	t.Setenv("AI_REGISTRY_API_KEY", "registry-key")
+	_, err = Load()
+	require.NoError(t, err)
+}
+
 func TestLoadDefaultsFoodIndexRefreshIntervalTo60s(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
 	t.Setenv("FOOD_INDEX_REFRESH_INTERVAL", "")
@@ -233,17 +276,17 @@ func TestLoadAgentGatewayFeatureFlag(t *testing.T) {
 	assert.Equal(t, "http://agentgateway.kora.svc.cluster.local/v1", cfg.AIGatewayBaseURL)
 	assert.Equal(t, "internal-key", cfg.AIGatewayAPIKey)
 	assert.Equal(t, "kora-auto", cfg.AIGatewayModel)
-	assert.Equal(t, 24*time.Second, cfg.AIAgentTimeout)
+	assert.Equal(t, 60*time.Second, cfg.AIAgentTimeout)
 }
 
-func TestLoadReadsAgentTimeout(t *testing.T) {
+func TestLoadReadsAgentTimeoutFromEnv(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
-	t.Setenv("AI_AGENT_TIMEOUT", "18s")
+	t.Setenv("AI_AGENT_TIMEOUT", "42s")
 
 	cfg, err := Load()
 
 	require.NoError(t, err)
-	assert.Equal(t, 18*time.Second, cfg.AIAgentTimeout)
+	assert.Equal(t, 42*time.Second, cfg.AIAgentTimeout)
 }
 
 func TestLoadRejectsIncompleteAgentGatewayConfig(t *testing.T) {
@@ -372,4 +415,77 @@ func TestLoadValidatesAppleConfig(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The registry is a separate trust domain: it matches sha256(bearer) against
+// its own `kora=` deploy-key entry, so the gateway key authenticates as
+// nobody. Inheriting it shipped to production and 401'd every roster lookup
+// behind a silent keyword fallback, which is why this is an error and not a
+// default.
+func TestLoadRequiresItsOwnRegistryDeployKey(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
+	t.Setenv("AI_GATEWAY_API_KEY", "internal-key")
+	t.Setenv("AI_REGISTRY_BASE_URL", "http://agentregistry.agentregistry-system.svc.cluster.local:12121")
+	t.Setenv("AI_REGISTRY_API_KEY", "")
+
+	_, err := Load()
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "AI_REGISTRY_API_KEY")
+	assert.NotContains(t, err.Error(), "AI_GATEWAY_API_KEY", "the gateway key is not an acceptable substitute")
+}
+
+func TestLoadReadsTheRegistryDeployKey(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
+	t.Setenv("AI_GATEWAY_API_KEY", "internal-key")
+	t.Setenv("AI_REGISTRY_BASE_URL", "http://agentregistry.agentregistry-system.svc.cluster.local:12121")
+	t.Setenv("AI_REGISTRY_API_KEY", "deploy-key")
+
+	cfg, err := Load()
+
+	require.NoError(t, err)
+	assert.Equal(t, "deploy-key", cfg.AIRegistryAPIKey)
+}
+
+// The checkout return link must use the scheme the mobile app actually
+// registers (apps/mobile/app.json), or a paid user is left in a browser the
+// app never reopens.
+//
+// Repointed from CASHFREE_RETURN_URL when kora#479 removed Cashfree: the
+// property belongs to the DEEP LINK, not to any one gateway, so it outlived
+// the provider that first needed it.
+//
+// Unverified and worth knowing: Stripe may reject a custom scheme for
+// success_url, in which case this default cannot be used as-is and the return
+// leg needs an https bounce. Nothing here asserts Stripe accepts it — only
+// that Kora hands over the scheme the app can actually reopen.
+func TestStripeReturnURLDefaultsToTheAppsOwnScheme(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
+	t.Setenv("STRIPE_RETURN_URL", "")
+
+	cfg, err := Load()
+
+	require.NoError(t, err)
+	assert.Equal(t, "mobile://billing/return", cfg.StripeReturnURL)
+}
+
+func TestLoadReadsAITraceSettings(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
+	t.Setenv("KORA_AI_TRACE_ENDPOINT", "http://otel-gateway.observability.svc.cluster.local:4318/v1/traces")
+	t.Setenv("KORA_AI_TRACE_USER_KEY", "test-trace-user-key-0")
+	t.Setenv("KORA_RELEASE", "abc1234")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, "http://otel-gateway.observability.svc.cluster.local:4318/v1/traces", cfg.AITraceEndpoint)
+	require.Equal(t, []byte("test-trace-user-key-0"), cfg.AITraceUserKey)
+	require.Equal(t, "abc1234", cfg.Release)
+}
+
+func TestLoadRejectsAShortAITraceUserKey(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
+	t.Setenv("KORA_AI_TRACE_USER_KEY", "short")
+
+	_, err := Load()
+	require.ErrorContains(t, err, "KORA_AI_TRACE_USER_KEY")
 }

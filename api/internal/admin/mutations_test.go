@@ -295,6 +295,24 @@ func TestUpdateFoodRenameClearsEmbeddingButMacrosOnlyEditPreservesIt(t *testing.
 	assert.False(t, hasEmbedding(t, tx, original.ID), "a rename must null the embedding in the same statement")
 }
 
+func TestUpdateFoodRetagsARenamedFood(t *testing.T) {
+	db := testDB(t)
+	tx := seedTx(t, db)
+	original := seedFoodTx(t, tx, "Veggie patty "+uuid.NewString(), "")
+
+	repo := NewMutationRepository(tx, ai.NoCache{})
+	in := inputFrom(original)
+	in.Name = "Beef patty " + uuid.NewString()
+	_, err := repo.UpdateFood(context.Background(), Actor{ID: "admin-1", Email: "ops@kora.test"},
+		original.ID, in, loadUpdatedAt(t, tx, original.ID))
+	require.NoError(t, err)
+
+	var stored nutrition.FoodItem
+	require.NoError(t, tx.First(&stored, "id = ?", original.ID).Error)
+	assert.Contains(t, []string(stored.DietTags), "contains-beef",
+		"an admin rename must retag, or a blocking rule stops matching the food it names")
+}
+
 // TestUpdateFoodClearsEmbeddingOnPunctuationOnlyRenameThatNormalizesIdentically
 // is invariant 2's minor fix (task-4 fix round 1): the embedding-clear
 // decision compares in.Name against the RAW before.Name, not two freshly
@@ -543,13 +561,13 @@ func TestUpdateFoodAdvancesUpdatedAtForTheEditedRowOnly(t *testing.T) {
 	edited := seedFoodTx(t, tx, "zzz-updatedat-edit-"+uuid.NewString(), "")
 	sibling := seedFoodTx(t, tx, "zzz-updatedat-sibling-"+uuid.NewString(), "")
 
+	require.NoError(t, tx.Exec("UPDATE food_items SET updated_at = ? WHERE id = ?", time.Now().UTC().Add(-time.Hour), edited.ID).Error)
 	beforeEdited := loadUpdatedAt(t, tx, edited.ID)
 	beforeSibling := loadUpdatedAt(t, tx, sibling.ID)
 
 	repo := NewMutationRepository(tx, ai.NoCache{})
 	actor := Actor{ID: "admin-1", Email: "ops@kora.test"}
 
-	time.Sleep(5 * time.Millisecond) // ensure a wall-clock-observable gap
 	in := inputFrom(edited)
 	in.KcalPer100g = edited.KcalPer100g + 1
 	_, err := repo.UpdateFood(context.Background(), actor, edited.ID, in, beforeEdited)
@@ -569,12 +587,12 @@ func TestSoftDeleteFoodAdvancesUpdatedAt(t *testing.T) {
 	tx := seedTx(t, db)
 	target := seedFoodTx(t, tx, "zzz-updatedat-delete-"+uuid.NewString(), "")
 
+	require.NoError(t, tx.Exec("UPDATE food_items SET updated_at = ? WHERE id = ?", time.Now().UTC().Add(-time.Hour), target.ID).Error)
 	before := loadUpdatedAt(t, tx, target.ID)
 
 	repo := NewMutationRepository(tx, ai.NoCache{})
 	actor := Actor{ID: "admin-1", Email: "ops@kora.test"}
 
-	time.Sleep(5 * time.Millisecond)
 	_, err := repo.SoftDeleteFood(context.Background(), actor, target.ID)
 	require.NoError(t, err)
 

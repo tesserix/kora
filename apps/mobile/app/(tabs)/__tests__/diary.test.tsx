@@ -15,6 +15,14 @@ const mockDeleteMutate = jest.fn();
 const mockAddWaterMutate = jest.fn();
 const mockUseDashboard = jest.fn();
 const mockUseDayLogs = jest.fn();
+const mockStartFastMutate = jest.fn();
+const mockEndFastMutate = jest.fn();
+// Mutable so a test can supply an open fast; reset in beforeEach. Same shape
+// as react-query's UseQueryResult, since the diary screen reads `.data`.
+const mockCurrentFast = jest.fn<
+  { data: { id: string; started_at: string } | null; isSuccess: boolean },
+  []
+>(() => ({ data: null, isSuccess: true }));
 
 const DASHBOARD_DATA = { consumed: { kcal: 1252 }, targets: { kcal: 2000 }, water_ml: 1400 };
 const LOGS_DATA = [
@@ -73,6 +81,9 @@ jest.mock("@/api/hooks", () => ({
   useAddWater: () => ({ mutate: mockAddWaterMutate, isPending: false }),
   useDeleteLog: () => ({ mutate: mockDeleteMutate, isPending: false }),
   useCopyDay: () => ({ mutate: jest.fn(), isPending: false }),
+  useCurrentFast: () => mockCurrentFast(),
+  useStartFast: () => ({ mutate: mockStartFastMutate, isPending: false }),
+  useEndFast: () => ({ mutate: mockEndFastMutate, isPending: false }),
 }));
 
 const mockUseUnits = jest.fn(() => ({ system: "metric", setSystem: jest.fn() }));
@@ -94,6 +105,10 @@ beforeEach(() => {
   mockDiscardRow.mockClear();
   mockDeleteMutate.mockClear();
   mockAddWaterMutate.mockClear();
+  mockStartFastMutate.mockClear();
+  mockEndFastMutate.mockClear();
+  mockCurrentFast.mockReset();
+  mockCurrentFast.mockReturnValue({ data: null, isSuccess: true });
   mockUseDashboard.mockClear();
   mockUseDayLogs.mockClear();
   mockUseQueuedLogs.mockClear();
@@ -116,6 +131,52 @@ test("Diary shows header, week strip and a logged meal grouped by slot", async (
   expect(await findByText("DINNER")).toBeTruthy();
   expect(await findByText("· 520 KCAL")).toBeTruthy();
   expect(await findByText("Grilled salmon")).toBeTruthy();
+});
+
+test("offers to start a fast when none is open", async () => {
+  mockCurrentFast.mockReturnValue({ data: null, isSuccess: true });
+  const { getByLabelText } = await render(<Diary />);
+  expect(getByLabelText("Start fast")).toBeTruthy();
+});
+
+test("offers to end the fast that is open, with its elapsed time", async () => {
+  mockCurrentFast.mockReturnValue({
+    data: { id: "f1", started_at: new Date(Date.now() - 3 * 3600_000).toISOString() },
+    isSuccess: true,
+  });
+  const { getByLabelText } = await render(<Diary />);
+  expect(getByLabelText("End fast")).toBeTruthy();
+});
+
+// kora#407: a failed start or end used to be completely silent — mutate() was
+// called with no onError and no error state, so a network failure left the
+// button looking exactly as if the tap had done nothing. The water control
+// fifteen lines above in the same screen already had this; the fast controls
+// now follow it.
+test("a failed start says so instead of looking like nothing happened", async () => {
+  mockCurrentFast.mockReturnValue({ data: null, isSuccess: true });
+  mockStartFastMutate.mockImplementationOnce((_vars, opts) => opts?.onError?.(new Error("offline")));
+  const { getByLabelText, findByText } = await render(<Diary />);
+  await fireEvent.press(getByLabelText("Start fast"));
+  expect(await findByText("Couldn't start your fast. Try again.")).toBeTruthy();
+});
+
+test("a failed end says so instead of looking like nothing happened", async () => {
+  mockCurrentFast.mockReturnValue({
+    data: { id: "f1", started_at: new Date(Date.now() - 3 * 3600_000).toISOString() },
+    isSuccess: true,
+  });
+  mockEndFastMutate.mockImplementationOnce((_vars, opts) => opts?.onError?.(new Error("offline")));
+  const { getByLabelText, findByText } = await render(<Diary />);
+  await fireEvent.press(getByLabelText("End fast"));
+  expect(await findByText("Couldn't end your fast. Try again.")).toBeTruthy();
+});
+
+test("a start that succeeds shows no error", async () => {
+  mockCurrentFast.mockReturnValue({ data: null, isSuccess: true });
+  const { getByLabelText, queryByText } = await render(<Diary />);
+  await fireEvent.press(getByLabelText("Start fast"));
+  expect(queryByText("Couldn't start your fast. Try again.")).toBeNull();
 });
 
 test("a day with zero food logs shows the empty-day EmptyState", async () => {

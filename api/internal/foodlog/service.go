@@ -82,6 +82,10 @@ type LogRequest struct {
 	// from real data or stated by the user — see #138. Omitted yields Go's
 	// zero value false, matching the column default; no pointer needed.
 	PortionAssumed bool `json:"portion_assumed"`
+	// ResolutionID is the resolve response this log came from, if any.
+	ResolutionID *uuid.UUID `json:"resolution_id"`
+	// ResolutionIndex is the item of that resolution this log keeps.
+	ResolutionIndex *int `json:"resolution_index"`
 }
 
 var validMealSlots = map[string]bool{"breakfast": true, "lunch": true, "dinner": true, "snack": true}
@@ -110,9 +114,22 @@ func phraseForSource(source string, phrase *string) *string {
 }
 
 type Service struct {
-	logs  Repository
-	foods nutrition.Repository
-	cache ResolutionCache
+	logs     Repository
+	foods    nutrition.Repository
+	cache    ResolutionCache
+	accuracy AccuracyRecorder
+}
+
+// AccuracyRecorder scores a logged food against the AI resolution that offered it.
+type AccuracyRecorder interface {
+	Owns(ctx context.Context, userID, resolutionID uuid.UUID, index int) bool
+	Logged(ctx context.Context, userID, resolutionID uuid.UUID, index int, foodItemID uuid.UUID, corrected bool)
+}
+
+// WithAccuracy attaches the optional accuracy recorder; without one logs are never linked or scored.
+func (s Service) WithAccuracy(r AccuracyRecorder) Service {
+	s.accuracy = r
+	return s
 }
 
 func NewService(logs Repository, foods nutrition.Repository) Service {
@@ -214,7 +231,7 @@ func (s Service) LogFood(ctx context.Context, userID uuid.UUID, req LogRequest, 
 		FatG:           item.FatPer100g * f,
 		FiberG:         item.FiberPer100g * f,
 		Provenance:     item.Provenance,
-		ClientLogMs:    req.ClientLogMs,
+		ClientLogMs:    plausibleClientLogMs(req.ClientLogMs),
 		InputPhrase:    phraseForSource(source, req.InputPhrase),
 		PortionAssumed: req.PortionAssumed,
 	}
@@ -224,9 +241,17 @@ func (s Service) LogFood(ctx context.Context, userID uuid.UUID, req LogRequest, 
 	if req.ID != nil {
 		log.ID = *req.ID
 	}
+	if req.ResolutionID != nil && req.ResolutionIndex != nil && s.accuracy != nil &&
+		s.accuracy.Owns(ctx, userID, *req.ResolutionID, *req.ResolutionIndex) {
+		log.ResolutionOutcomeID = req.ResolutionID
+		log.ResolutionIndex = req.ResolutionIndex
+	}
 	created, err := s.logs.CreateIdempotent(ctx, log)
 	if err != nil {
 		return FoodLog{}, err
+	}
+	if log.ResolutionOutcomeID != nil {
+		s.accuracy.Logged(ctx, userID, *log.ResolutionOutcomeID, *log.ResolutionIndex, *req.FoodItemID, false)
 	}
 	// The create path does not go through the joined read scope, so carry the
 	// food's base unit onto the response by hand — a client that renders the
@@ -425,6 +450,10 @@ func (s Service) EditLog(ctx context.Context, userID, logID uuid.UUID, req EditR
 		}
 	}
 
+	if foodChanged && s.accuracy != nil && updated.ResolutionOutcomeID != nil && updated.ResolutionIndex != nil {
+		s.accuracy.Logged(ctx, userID, *updated.ResolutionOutcomeID, *updated.ResolutionIndex, *current.FoodItemID, true)
+	}
+
 	return EditResult{Log: updated, AliasRecorded: aliasRecorded}, nil
 }
 
@@ -510,11 +539,18 @@ func (s Service) CreateBatch(ctx context.Context, userID uuid.UUID, req CreateBa
 
 	out := make([]FoodLog, 0, len(req.Items))
 	err = s.logs.Transaction(ctx, func(txLogs Repository) error {
+		// Resolve items through the TRANSACTION's handle, not the pool
+		// (kora#415). Every read below runs while this transaction holds a
+		// connection, so a pool-bound repository would make each one wait for
+		// a second connection -- and with maxOpenConns = 5 shared by every
+		// endpoint, five concurrent batches deadlocked the entire API. The
+		// sibling defect in fasting.Repository.Start was kora#413.
+		foods := s.foods.WithDB(txLogs.db)
 		for _, it := range req.Items {
 			// The food row is loaded BEFORE the quantity guard (unlike the
 			// original ordering) because unit resolution below needs it —
 			// exactly how LogFood orders these two steps.
-			item, err := s.foods.GetByID(ctx, it.FoodItemID)
+			item, err := foods.GetByID(ctx, it.FoodItemID)
 			if err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					// Client supplied a food_item_id that doesn't resolve — a
@@ -526,7 +562,7 @@ func (s Service) CreateBatch(ctx context.Context, userID uuid.UUID, req CreateBa
 					// we can. NameForID bypasses the soft-delete filter
 					// purely to look up the name for this message; it does
 					// not change the all-or-nothing failure of the batch.
-					if name, ok := s.foods.NameForID(ctx, it.FoodItemID); ok {
+					if name, ok := foods.NameForID(ctx, it.FoodItemID); ok {
 						return httpx.ValidationError{Message: fmt.Sprintf("food no longer available: %s", name)}
 					}
 					return httpx.ValidationError{Message: "unknown food_item_id"}
@@ -547,7 +583,7 @@ func (s Service) CreateBatch(ctx context.Context, userID uuid.UUID, req CreateBa
 					// Name the ingredient. The user picked a meal, not an id —
 					// the unresolvable-food path above already reasons this
 					// way.
-					if name, ok := s.foods.NameForID(ctx, it.FoodItemID); ok {
+					if name, ok := foods.NameForID(ctx, it.FoodItemID); ok {
 						return httpx.ValidationError{Message: fmt.Sprintf("%s: %s", name, units.UnrecognisedUnitMessage)}
 					}
 					return httpx.ValidationError{Message: units.UnrecognisedUnitMessage}
@@ -637,4 +673,30 @@ func (s Service) RepeatLog(ctx context.Context, userID, logID uuid.UUID, at time
 	clone.LoggedAt = at
 	clone.LocalDate = localDate
 	return s.logs.Create(ctx, clone)
+}
+
+// maxClientLogMs bounds a believable time-to-log at one hour. Past that the
+// app was backgrounded mid-capture, which is not the thing kora#43's
+// "<10s median" is measuring.
+const maxClientLogMs = 3_600_000
+
+// plausibleClientLogMs drops a client-reported time-to-log the server cannot
+// believe, returning nil so the column records NULL — "not measured".
+//
+// The value is computed on a device whose clock the server does not control,
+// and it feeds a MEDIAN (kora#482), so a single absurd reading skews the
+// north-star metric rather than merely adding noise. Dropping is safer than
+// clamping: a clamped value looks like a real observation at the boundary and
+// would pile up a fake mode at exactly one hour.
+//
+// Zero is KEPT. Logging from a pin in under a millisecond is possible, and
+// zero is a real measurement — it is nil that means "no capture was timed".
+func plausibleClientLogMs(v *int) *int {
+	if v == nil {
+		return nil
+	}
+	if *v < 0 || *v > maxClientLogMs {
+		return nil
+	}
+	return v
 }

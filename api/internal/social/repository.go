@@ -38,9 +38,9 @@ func (r Repository) FindByPair(ctx context.Context, a, b uuid.UUID) (*Friendship
 	return &f, nil
 }
 
-func (r Repository) FindByID(ctx context.Context, id uuid.UUID) (*Friendship, error) {
+func (r Repository) FindByID(ctx context.Context, id, addresseeID uuid.UUID) (*Friendship, error) {
 	var f Friendship
-	err := r.db.WithContext(ctx).First(&f, "id = ?", id).Error
+	err := r.db.WithContext(ctx).First(&f, "id = ? AND addressee_id = ?", id, addresseeID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
@@ -50,34 +50,60 @@ func (r Repository) FindByID(ctx context.Context, id uuid.UUID) (*Friendship, er
 	return &f, nil
 }
 
+// friendRow is the flat scan target for ListAccepted. AvatarPath is the raw
+// object path -- ListAccepted returns it as-is; composing it into a URL is
+// Service.ListFriends' job (it holds the avatarURL func, not the repository).
+type friendRow struct {
+	ID          uuid.UUID
+	DisplayName string
+	Handle      string
+	AvatarPath  string
+}
+
 // ListAccepted returns the other party of every accepted friendship for userID.
+// AvatarURL on the returned views holds the raw object PATH, not a composed
+// URL -- callers must run it through an avatarURL func (see
+// Service.ListFriends) before it reaches a client.
 func (r Repository) ListAccepted(ctx context.Context, userID uuid.UUID) ([]FriendView, error) {
-	views := []FriendView{}
+	rows := []friendRow{}
 	err := r.db.WithContext(ctx).
 		Table("friendships AS f").
-		Select("u.id AS id, u.display_name AS display_name").
+		Select("u.id AS id, u.display_name AS display_name, u.handle AS handle, u.avatar_path AS avatar_path").
 		Joins("JOIN users u ON u.id = CASE WHEN f.requester_id = ? THEN f.addressee_id ELSE f.requester_id END", userID).
 		Where("f.status = ? AND (f.requester_id = ? OR f.addressee_id = ?)", FriendStatusAccepted, userID, userID).
 		Order("u.display_name ASC").
-		Scan(&views).Error
+		Scan(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("social: list accepted: %w", err)
+	}
+	views := make([]FriendView, 0, len(rows))
+	for _, row := range rows {
+		views = append(views, FriendView{
+			ID:          row.ID,
+			DisplayName: row.DisplayName,
+			Handle:      row.Handle,
+			AvatarURL:   row.AvatarPath, // raw path; Service composes the URL
+		})
 	}
 	return views, nil
 }
 
-// reqRow is a flat scan target; mapped into RequestView below.
+// reqRow is a flat scan target; mapped into RequestView below. AvatarPath is
+// the raw object path, same convention as friendRow -- ListPending returns it
+// as-is; composing it into a URL is Service.ListRequests' job.
 type reqRow struct {
 	ID          uuid.UUID
 	UserID      uuid.UUID
 	DisplayName string
+	Handle      string
+	AvatarPath  string
 }
 
 func (r Repository) listRequests(ctx context.Context, whereCol string, userID uuid.UUID, joinCol string) ([]RequestView, error) {
 	rows := []reqRow{}
 	err := r.db.WithContext(ctx).
 		Table("friendships AS f").
-		Select("f.id AS id, u.id AS user_id, u.display_name AS display_name").
+		Select("f.id AS id, u.id AS user_id, u.display_name AS display_name, u.handle AS handle, u.avatar_path AS avatar_path").
 		Joins("JOIN users u ON u.id = f."+joinCol).
 		Where("f.status = ? AND f."+whereCol+" = ?", FriendStatusPending, userID).
 		Order("f.created_at DESC").
@@ -87,7 +113,12 @@ func (r Repository) listRequests(ctx context.Context, whereCol string, userID uu
 	}
 	out := make([]RequestView, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, RequestView{ID: row.ID, User: FriendView{ID: row.UserID, DisplayName: row.DisplayName}})
+		out = append(out, RequestView{ID: row.ID, User: FriendView{
+			ID:          row.UserID,
+			DisplayName: row.DisplayName,
+			Handle:      row.Handle,
+			AvatarURL:   row.AvatarPath, // raw path; Service composes the URL
+		}})
 	}
 	return out, nil
 }
@@ -121,6 +152,34 @@ func (r Repository) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+// DeleteAndRevokeCircles deletes the friendship row AND, in the same
+// transaction, drops both parties' share_circle_members rows in each
+// other's circles.
+//
+// Circle membership is friendship-predicated at write time (share.Service
+// only allows adding a friend), so it must not outlive the friendship: this
+// is the only place that enforces that invariant. `social` reaching into
+// share_circle_members by raw SQL instead of going through share.Repository
+// is a deliberate, narrow coupling -- the alternative (access.Repository
+// joining friendships on every progress/body read) would make the read path,
+// which runs far more often than an unfriend, pay for a check that only
+// matters at write time. Revocation belongs at the edge that breaks it.
+func (r Repository) DeleteAndRevokeCircles(ctx context.Context, friendshipID, a, b uuid.UUID) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Delete(&Friendship{}, "id = ?", friendshipID).Error; err != nil {
+			return fmt.Errorf("social: delete: %w", err)
+		}
+		if err := tx.Exec(`
+			DELETE FROM share_circle_members
+			WHERE (member_user_id = ? AND circle_id IN (SELECT id FROM share_circles WHERE owner_id = ?))
+			   OR (member_user_id = ? AND circle_id IN (SELECT id FROM share_circles WHERE owner_id = ?))
+		`, b, a, a, b).Error; err != nil {
+			return fmt.Errorf("social: revoke circle membership: %w", err)
+		}
+		return nil
+	})
+}
+
 // AreFriends reports whether a and b have an accepted friendship.
 func (r Repository) AreFriends(ctx context.Context, a, b uuid.UUID) (bool, error) {
 	f, err := r.FindByPair(ctx, a, b)
@@ -131,19 +190,19 @@ func (r Repository) AreFriends(ctx context.Context, a, b uuid.UUID) (bool, error
 }
 
 // CompareRow is an accepted friend plus the fields needed to compute their
-// shared progress (share_progress gates whether metrics are computed at all).
+// metrics. Whether those metrics may be shown is decided by a resolved
+// access.Grant, not by any field on this row (kora#326).
 type CompareRow struct {
-	ID            uuid.UUID
-	DisplayName   string
-	ShareProgress bool
-	TargetKcal    float64
+	ID          uuid.UUID
+	DisplayName string
+	TargetKcal  float64
 }
 
 func (r Repository) ListAcceptedForCompare(ctx context.Context, userID uuid.UUID) ([]CompareRow, error) {
 	rows := []CompareRow{}
 	err := r.db.WithContext(ctx).
 		Table("friendships AS f").
-		Select("u.id AS id, u.display_name AS display_name, u.share_progress AS share_progress, u.target_kcal AS target_kcal").
+		Select("u.id AS id, u.display_name AS display_name, u.target_kcal AS target_kcal").
 		Joins("JOIN users u ON u.id = CASE WHEN f.requester_id = ? THEN f.addressee_id ELSE f.requester_id END", userID).
 		Where("f.status = ? AND (f.requester_id = ? OR f.addressee_id = ?)", FriendStatusAccepted, userID, userID).
 		Order("u.display_name ASC").

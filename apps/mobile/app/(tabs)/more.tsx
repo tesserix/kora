@@ -16,7 +16,8 @@ import { Icon } from "@/components/Icon";
 import { Badge } from "@/components/Badge";
 import { PressableScale, ScreenEntrance } from "@/motion";
 import { useAIUsage, useProfile, useUnreadCount } from "@/api/hooks";
-import { remainingAIRequests } from "@/api/aiUsage";
+import { aiAllowanceBadge } from "@/api/aiUsage";
+import { initials } from "@/lib/initials";
 import { useTheme } from "@/theme";
 import { TAB_BAR_SCROLL_INSET } from "@/components/FloatingTabBar";
 
@@ -30,7 +31,7 @@ import { TAB_BAR_SCROLL_INSET } from "@/components/FloatingTabBar";
 // near-identically — MoreRow is kept as-is rather than migrated to avoid
 // churn on an already-shipped screen. The unread-count Badge is the one
 // accent element this screen is allowed.
-type MoreRowKey = "profile" | "friends" | "groups" | "notifications" | "recipes" | "ai-usage" | "settings" | "feedback" | "about";
+type MoreRowKey = "label-scan" | "profile" | "mentor" | "social" | "notifications" | "recipes" | "ai-usage" | "settings" | "feedback" | "about";
 
 type MoreRowProps = {
   rowKey: MoreRowKey;
@@ -79,18 +80,6 @@ function MoreRow({ rowKey, title, icon, right, onPress }: MoreRowProps) {
       <Icon name="chevron-right" size={14} color={instrument.mut} />
     </PressableScale>
   );
-}
-
-// Falls back to "K" when the name is empty/whitespace-only — same fallback
-// as app/profile.tsx's own `initials` and app/(tabs)/index.tsx's.
-function initials(name: string): string {
-  const parts = name.split(" ").filter(Boolean);
-  if (parts.length === 0) return "K";
-  return parts
-    .map((p) => p[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
 }
 
 function MoreGroup({ children }: { children: ReactNode }) {
@@ -147,7 +136,7 @@ export default function More() {
                 shadowOffset: { width: 0, height: 0 },
               }}
             >
-              <Avatar initials={data ? initials(data.display_name) : "—"} size={72} />
+              <Avatar initials={data ? initials(data.display_name) : "—"} uri={data?.avatar_url} size={72} />
             </View>
             <AppText style={{ fontSize: 20, fontWeight: "700", color: instrument.ink, marginTop: spacing.sm }}>
               {data ? data.display_name : "Loading…"}
@@ -158,6 +147,7 @@ export default function More() {
           </View>
         </BezelCluster>
         <MoreGroup>
+          <MoreRow rowKey="label-scan" title="Read a nutrition label" icon="camera" onPress={() => router.push("/label-scan" as Href)} />
           <MoreRow
             rowKey="profile"
             title="Profile"
@@ -165,16 +155,20 @@ export default function More() {
             onPress={() => router.push("/profile" as Href)}
           />
           <MoreRow
-            rowKey="friends"
-            title="Friends"
-            icon="users"
-            onPress={() => router.push("/friends" as Href)}
+            rowKey="mentor"
+            title="Personal Mentor"
+            icon="sparkles"
+            onPress={() => router.push("/mentor" as Href)}
           />
+          {/* One row, replacing Friends / Sharing / Groups (kora#444). The
+              sharing audit now heads that screen, so "who can see my data" is
+              visible on every visit rather than behind a row you had to know
+              to tap. */}
           <MoreRow
-            rowKey="groups"
-            title="Groups"
-            icon="people"
-            onPress={() => router.push("/groups" as Href)}
+            rowKey="social"
+            title="Social"
+            icon="users"
+            onPress={() => router.push("/social" as Href)}
           />
           <MoreRow
             rowKey="notifications"
@@ -199,7 +193,7 @@ export default function More() {
             icon="sparkles"
             right={aiUsage.data ? (
               <AppText style={{ color: instrument.mut, fontSize: 12, marginRight: spacing.xs }}>
-                {remainingAIRequests(aiUsage.data)} left
+                {aiAllowanceBadge(aiUsage.data)}
               </AppText>
             ) : null}
             onPress={() => router.push("/ai-usage" as Href)}

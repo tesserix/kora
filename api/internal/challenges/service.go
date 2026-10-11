@@ -151,6 +151,17 @@ func (s Service) Detail(ctx context.Context, userID, challengeID uuid.UUID, now 
 }
 
 // standingsFor scores every participant and ranks them (score desc, name asc).
+//
+// It deliberately does NOT consult share_grants (kora#326). Joining a challenge
+// IS the consent here: ListParticipantsForScoring reads only
+// challenge_participants, so a score can only appear for someone who chose to
+// join. A challenge is a deliberate, scoped, visible act with an end date,
+// which is a different thing from ambient sharing.
+//
+// This is the second consent mechanism in the codebase and that is intentional.
+// Do not "unify" it into access.Resolve: doing so would empty existing
+// leaderboards until every participant also built a circle, which reads as
+// broken rather than private.
 func (s Service) standingsFor(ctx context.Context, ch *Challenge, loc *time.Location) ([]Standing, error) {
 	rows, err := s.repo.ListParticipantsForScoring(ctx, ch.ID)
 	if err != nil {

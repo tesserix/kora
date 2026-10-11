@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import { Platform } from "react-native";
+import * as healthConnect from "./healthConnect";
 import { inferActivityLevel, type ActivityInference } from "./inferActivity";
 
 // Same lazy-require reasoning as useHealth: `@kingstinct/react-native-healthkit`
@@ -89,11 +90,55 @@ export function useActivityHistory(): ActivityHistory {
   const [status, setStatus] = useState<ActivityHistoryStatus>("idle");
   const [inference, setInference] = useState<ActivityInference | null>(null);
 
+  // The Android path. Same inference, same honesty rules — only the source
+  // differs. Kept beside request() rather than inside it so the iOS branch
+  // reads exactly as it did before Health Connect existed.
+  const requestFromHealthConnect = useCallback(async () => {
+    if (!(await healthConnect.isAvailable())) {
+      setStatus("unavailable");
+      return;
+    }
+    if (!(await healthConnect.requestActivityPermissions())) {
+      setStatus("denied");
+      return;
+    }
+
+    // Same calendar-field construction as the iOS branch, and for the same
+    // reason: millisecond subtraction drifts off local midnight across a DST
+    // transition, which would shift every day bucket's boundary.
+    const now = new Date();
+    const windowStart = new Date(now);
+    windowStart.setHours(0, 0, 0, 0);
+    windowStart.setDate(windowStart.getDate() - (WINDOW_DAYS - 1));
+
+    const [stepBuckets, workoutCount] = await Promise.all([
+      healthConnect.readDailyStepBuckets(windowStart, now),
+      healthConnect.readWorkoutCount(windowStart, now),
+    ]);
+
+    const dailySteps = dailyStepTotals(stepBuckets);
+    const result = inferActivityLevel({
+      dailySteps,
+      workoutsPerWeek: workoutsPerWeek(workoutCount, WINDOW_DAYS),
+      daysObserved: dailySteps.length,
+    });
+    if (!result) {
+      setStatus("insufficient");
+      return;
+    }
+    setInference(result);
+    setStatus("ready");
+  }, []);
+
   const request = useCallback(() => {
     void (async () => {
       setStatus("loading");
       setInference(null);
       try {
+        if (Platform.OS === "android") {
+          await requestFromHealthConnect();
+          return;
+        }
         if (Platform.OS !== "ios") {
           setStatus("unavailable");
           return;
@@ -160,7 +205,7 @@ export function useActivityHistory(): ActivityHistory {
         setInference(null);
       }
     })();
-  }, []);
+  }, [requestFromHealthConnect]);
 
   return { status, inference, request };
 }

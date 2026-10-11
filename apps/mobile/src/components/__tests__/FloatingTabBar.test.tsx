@@ -7,7 +7,7 @@ import {
   FloatingTabBar,
   TAB_BAR_OCCUPIED_HEIGHT,
   TAB_BAR_SCROLL_INSET,
-  TAB_BAR_SCROLL_INSET_TIGHT,
+  TAB_BAR_SCROLL_INSET_TODAY,
 } from "@/components/FloatingTabBar";
 import { instrumentLight } from "@/theme/palette";
 
@@ -230,12 +230,12 @@ test("caps the 9px tab label's Dynamic Type growth and keeps it on one line", as
 // y=855 from the live accessibility tree on a 956pt screen.
 test("the exported scroll insets are derived from the dock's own geometry", () => {
   expect(TAB_BAR_OCCUPIED_HEIGHT).toBe(101);
-  // The clearances the four screens shipped with, preserved exactly — kora#280
-  // is an inert refactor, so these are the pre-existing 140 and 130.
   expect(TAB_BAR_SCROLL_INSET).toBe(TAB_BAR_OCCUPIED_HEIGHT + 39);
   expect(TAB_BAR_SCROLL_INSET).toBe(140);
-  expect(TAB_BAR_SCROLL_INSET_TIGHT).toBe(TAB_BAR_OCCUPIED_HEIGHT + 29);
-  expect(TAB_BAR_SCROLL_INSET_TIGHT).toBe(130);
+  // Today ends in a tappable row, so it clears the capture glow by more, not
+  // less — an overscroll bounce used to drag that row into the glow.
+  expect(TAB_BAR_SCROLL_INSET_TODAY).toBe(TAB_BAR_OCCUPIED_HEIGHT + 44);
+  expect(TAB_BAR_SCROLL_INSET_TODAY).toBe(145);
 });
 
 // The other half of the same guarantee: TAB_BAR_OCCUPIED_HEIGHT is only correct
@@ -250,4 +250,18 @@ test("the dock is positioned 24pt from the screen edge, not from the safe area",
   // side insets — a uniform frame inset is the reason it is not safe-area-driven.
   expect(root.left).toBe(24);
   expect(root.right).toBe(24);
+});
+
+// kora#354: the ground-fade scrim is GONE, and must stay gone. It faded to
+// instrument.bg, which AppBackground never paints flat — three radial pools
+// sit over it, one centred at cy 96%, right behind the dock. The scrim
+// therefore drew a flat slab with a hard edge across every tab screen.
+//
+// The scroll insets below are what keep content clear of the dock; they are
+// unchanged and still asserted. This pins the absence so the scrim is not
+// reintroduced without solving the background match it never solved.
+test("draws no ground scrim behind the dock", async () => {
+  const { queryByTestId } = await render(<FloatingTabBar {...props} />);
+  expect(queryByTestId("dock-scrim")).toBeNull();
+  expect(TAB_BAR_SCROLL_INSET_TODAY).toBeGreaterThan(TAB_BAR_SCROLL_INSET);
 });

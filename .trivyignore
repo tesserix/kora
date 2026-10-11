@@ -1,0 +1,12 @@
+# Review by 2026-09-30. The xmldom findings are reachable only through the
+# build-time @bacons/xcode plist parser, whose upstream release has no fixed
+# dependency range. The image-size findings are in Metro's repository-owned
+# asset build path and have no patched image-size release. Remove each entry as
+# soon as the matching upstream dependency is fixed.
+CVE-2025-71329
+CVE-2025-71330
+CVE-2026-34601
+CVE-2026-41672
+CVE-2026-41673
+CVE-2026-41674
+CVE-2026-41675

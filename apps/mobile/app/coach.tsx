@@ -1,12 +1,16 @@
 import { useState } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useCoachAsk, useCoachNudges, useCoachThread } from "@/api/hooks";
+import { router } from "expo-router";
+import type { CoachDietFlag, MentorCommitmentProposal } from "@/api/types";
+import { useAIPacks, useAIUsage, useCoachAsk, useCoachNudges, useCoachThread } from "@/api/hooks";
+import { aiAllowance } from "@/api/aiUsage";
 import { AppBackground } from "@/components/AppBackground";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { AppText } from "@/components/Text";
 import { AskInput } from "@/components/coach/AskInput";
 import { Bubble } from "@/components/coach/Bubble";
+import { DietFlagNotice } from "@/components/coach/DietFlagNotice";
 import { FocusCard } from "@/components/coach/FocusCard";
 import { SuggestionChips } from "@/components/coach/SuggestionChips";
 import { SupportCard } from "@/components/coach/SupportCard";
@@ -15,6 +19,29 @@ import { safeBack } from "@/lib/safeBack";
 import { PressableScale } from "@/motion";
 import { useIsOnline } from "@/offline/connectivity";
 import { useTheme } from "@/theme";
+
+// DEFAULT_AGENT names the capability Kora routes every coach question to, so
+// the thinking line reads honestly before any agent has identified itself.
+const DEFAULT_AGENT = "Coach";
+
+function reviewProposal(proposal: MentorCommitmentProposal): void {
+  router.push({
+    pathname: "/mentor-commitment",
+    params: {
+      proposalId: proposal.id,
+      title: proposal.title,
+      kind: proposal.kind,
+      cadence: proposal.cadence,
+      weekdaysMask: String(proposal.weekdays_mask),
+      startMinute: String(proposal.start_minute),
+      intervalMinutes: proposal.interval_minutes === null ? "" : String(proposal.interval_minutes),
+      endMinute: proposal.end_minute === null ? "" : String(proposal.end_minute),
+      timezone: proposal.timezone,
+      startsOn: proposal.starts_on.slice(0, 10),
+      endsOn: proposal.ends_on?.slice(0, 10) ?? "",
+    },
+  });
+}
 
 function InlineRetry({ message, label, onPress }: { message: string; label: string; onPress: () => void }) {
   const { instrument } = useTheme();
@@ -40,10 +67,32 @@ export default function CoachScreen() {
   const online = useIsOnline();
   const nudges = useCoachNudges();
   const thread = useCoachThread();
+  const usage = useAIUsage();
+  // Otto still answers when the allowance is gone — it just answers that it
+  // cannot. The offer to top up belongs next to that reply, not three screens
+  // away in More.
+  const packs = useAIPacks();
+  // The EXPLANATION and the OFFER are separate conditions, deliberately.
+  //
+  // They used to be one: the whole banner was gated on packs existing, so
+  // kora#479 (Cashfree removed, no gateway configured) silently took the
+  // "your allowance is spent, it resets on its own" message away with the
+  // purchase button. A blocked tester then got Otto's refusal with nothing
+  // saying why or when it lifts. The reason a user is stuck is not
+  // conditional on whether we can sell them anything.
+  const outOfRequests = usage.data ? aiAllowance(usage.data).blocked : false;
+  const canBuy = (packs.data?.length ?? 0) > 0;
   const ask = useCoachAsk();
   const [input, setInput] = useState("");
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
   const [askError, setAskError] = useState(false);
+  // Who answered last. The thinking line names the agent before the answer
+  // lands, so it starts at the capability Kora routes Q&A to and is corrected
+  // to the published name once an agent has actually replied.
+  const [activeAgent, setActiveAgent] = useState(DEFAULT_AGENT);
+  // The preferences the newest answer touched. Held here rather than on the
+  // turn, because the stored thread keeps the answer, not the screening.
+  const [dietFlags, setDietFlags] = useState<CoachDietFlag[]>([]);
 
   const focus = nudges.data?.nudges ?? [];
   const turns = thread.data?.turns ?? [];
@@ -55,8 +104,11 @@ export default function CoachScreen() {
     setInput(question);
     setPendingQuestion(question);
     setAskError(false);
+    setDietFlags([]);
     ask.mutate(question, {
-      onSuccess: () => {
+      onSuccess: (answer) => {
+        setActiveAgent(answer.agent?.name ?? DEFAULT_AGENT);
+        setDietFlags(answer.diet_flags ?? []);
         setInput("");
         setPendingQuestion(null);
         setAskError(false);
@@ -123,11 +175,22 @@ export default function CoachScreen() {
             <Bubble role="otto" text="Hi — ask me about the nutrition you’ve logged, and I’ll stick to the facts in your Kora data." />
           ) : (
             turns.map((turn, index) => (
-              <Bubble key={`${turn.created_at}-${turn.role}-${index}`} role={turn.role} text={turn.text} citations={turn.citations} />
+              <Bubble
+                key={`${turn.created_at}-${turn.role}-${index}`}
+                role={turn.role}
+                text={turn.text}
+                citations={turn.citations}
+                agent={turn.agent}
+                proposal={turn.proposal}
+                onReviewProposal={reviewProposal}
+              />
             ))
           )}
+          {pendingQuestion === null ? <DietFlagNotice flags={dietFlags} /> : null}
           {pendingQuestion ? <Bubble role="user" text={pendingQuestion} /> : null}
-          {pendingQuestion && !askError ? <Bubble role="otto" text="Otto is thinking…" /> : null}
+          {pendingQuestion && !askError ? (
+            <Bubble role="otto" text={`${activeAgent} is thinking…`} agent={activeAgent} />
+          ) : null}
           {pendingQuestion && askError ? (
             <View style={{ marginBottom: 12 }}>
               <Bubble role="otto" text="Couldn't get an answer. Your question is still here." />
@@ -140,6 +203,44 @@ export default function CoachScreen() {
               >
                 <AppText style={{ color: instrument.accent, fontWeight: "700" }}>Try again</AppText>
               </PressableScale>
+            </View>
+          ) : null}
+
+          {outOfRequests ? (
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 12,
+                marginBottom: 12,
+                paddingVertical: 12,
+                paddingHorizontal: 14,
+                borderRadius: 14,
+                backgroundColor: instrument.inset,
+              }}
+            >
+              <AppText style={{ flex: 1, color: instrument.mut, fontSize: 12 }}>
+                {canBuy
+                  ? "Your AI allowance is spent. It resets on its own — or add requests now."
+                  : "Your AI allowance is spent. It resets on its own."}
+              </AppText>
+              {canBuy ? (
+                <PressableScale
+                  accessibilityRole="button"
+                  accessibilityLabel="Add requests"
+                  haptic="selection"
+                  onPress={() => router.push("/ai-top-up")}
+                  style={{
+                    minHeight: 44,
+                    justifyContent: "center",
+                    paddingHorizontal: 16,
+                    borderRadius: 12,
+                    backgroundColor: instrument.accent,
+                  }}
+                >
+                  <AppText style={{ color: instrument.accentOn, fontWeight: "700" }}>Add requests</AppText>
+                </PressableScale>
+              ) : null}
             </View>
           ) : null}
 

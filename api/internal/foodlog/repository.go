@@ -2,6 +2,7 @@ package foodlog
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -148,23 +149,75 @@ func (r Repository) ListForUserSince(ctx context.Context, userID uuid.UUID, sinc
 	return logs, nil
 }
 
-// HasLoggedBefore reports whether the user has any log (resolved to a food
-// item, same definition ListForUserSince uses) strictly before `before`. It
-// exists to answer "has this user ever logged anything?" over an unbounded
-// lookback — distinguishing a user who has simply never logged from one
-// with established history who has since gone silent, which a single
-// bounded-window read can't tell apart (see coach.LogSource). An
-// EXISTS/LIMIT-1 read: only presence matters, so no rows are fetched.
-func (r Repository) HasLoggedBefore(ctx context.Context, userID uuid.UUID, before time.Time) (bool, error) {
-	var exists bool
-	err := r.db.WithContext(ctx).
-		Raw("SELECT EXISTS (SELECT 1 FROM food_logs WHERE user_id = ? AND food_item_id IS NOT NULL AND logged_at < ? LIMIT 1) AS logged_before",
-			userID, before).
-		Scan(&exists).Error
-	if err != nil {
-		return false, fmt.Errorf("foodlog: has logged before: %w", err)
+// FirstLogAfter returns the timestamp of the user's earliest food log
+// STRICTLY after `after`, or nil when they have not logged since.
+//
+// It exists for fasting.Repository.Open (kora#407): eating IS the end of a
+// fast, and that ending is computed at read time rather than written by a
+// food-log hook, so "is a fast still open?" needs the first log after the
+// fast began. fasting declares the narrow FirstLogSource port this satisfies;
+// the dependency runs fasting -> foodlog, which is the direction the design's
+// decision 3 chose (it ruled out foodlog -> fasting, the write-hook shape).
+//
+// "A log" means the same thing it means in ListForUserSince and
+// DaysLoggedBetween: a row that resolved to a food item. An unresolved
+// capture is not evidence that the user ate.
+//
+// db is the handle to read THROUGH, and it is a parameter rather than the
+// repository's own field because of kora#413. fasting.Repository.Start runs
+// this read from inside its transaction; a read bound to the pool instead
+// made that Start hold one connection while waiting for a second, and with
+// maxOpenConns = 5 in production, five concurrent starts deadlocked every
+// endpoint sharing the pool -- not just fasting. Passing the caller's handle
+// keeps the read on the connection the caller already holds.
+//
+// nil is rejected rather than quietly falling back to r.db: that fallback
+// would restore exactly the pool-bound read this signature exists to prevent,
+// and it would do it silently.
+func (r Repository) FirstLogAfter(ctx context.Context, db *gorm.DB, userID uuid.UUID, after time.Time) (*time.Time, error) {
+	if db == nil {
+		return nil, fmt.Errorf("foodlog: first log after: nil db handle")
 	}
-	return exists, nil
+	// sql.NullTime, not *time.Time: MIN over no rows is NULL, and the driver
+	// cannot store a nil into a **time.Time.
+	var first sql.NullTime
+	err := db.WithContext(ctx).
+		Raw(`SELECT MIN(logged_at) FROM food_logs
+		     WHERE user_id = ? AND food_item_id IS NOT NULL AND logged_at > ?`,
+			userID, after).
+		Scan(&first).Error
+	if err != nil {
+		return nil, fmt.Errorf("foodlog: first log after: %w", err)
+	}
+	if !first.Valid {
+		return nil, nil
+	}
+	at := first.Time
+	return &at, nil
+}
+
+// DaysLoggedBetween counts the DISTINCT local days in [from, before) on which
+// the user logged anything (resolved to a food item, the same definition
+// ListForUserSince uses).
+//
+// It replaced an EXISTS "has this user ever logged" check (kora#408). That
+// check was used to decide whether silence could be read as observed fasting,
+// and a single entry satisfied it permanently — so one stray log turned a week
+// of not using the app into a reported seven-day fast. Counting distinct DAYS
+// rather than rows matters for the same reason: four entries in one sitting is
+// one day of evidence, not four.
+func (r Repository) DaysLoggedBetween(ctx context.Context, userID uuid.UUID, from, before time.Time) (int, error) {
+	var days int64
+	err := r.db.WithContext(ctx).
+		Raw(`SELECT COUNT(DISTINCT local_date) FROM food_logs
+		     WHERE user_id = ? AND food_item_id IS NOT NULL
+		       AND logged_at >= ? AND logged_at < ?`,
+			userID, from, before).
+		Scan(&days).Error
+	if err != nil {
+		return 0, fmt.Errorf("foodlog: days logged between: %w", err)
+	}
+	return int(days), nil
 }
 
 // LastPortionForPhrase returns the QuantityGrams from userID's most recent

@@ -1,10 +1,19 @@
 #!/usr/bin/env python3
-"""Filter the OpenFoodFacts CSV export down to usable Australian products.
+"""Filter the OpenFoodFacts CSV export down to usable products per country.
 
     curl -sSL https://static.openfoodfacts.org/data/en.openfoodfacts.org.products.csv.gz \
-      | gunzip -c | python3 scripts/off_convert.py > data/food/off_au.json
+      | gunzip -c | python3 scripts/off_convert.py --countries au,nz,in --outdir data/food
 
-Reads the export on STDIN so the 1.19 GB download is never written to disk.
+Reads the export on STDIN so the 1.19 GB download is never written to disk, and
+emits every requested country in the same single pass (off_au.json, off_nz.json,
+off_in.json). Each row is stamped with its country's locale, which is what lets
+nutrition.DeriveLocale keep a single provenance for OFF: the per-row locale from
+this file wins, exactly as au_in_dishes.json's does.
+
+A product sold in several requested countries lands in each country's file; at
+ingest the alphabetically-first file wins the name+brand collision (see
+ingest.Run), so a trans-Tasman product resolves with locale AU. That is the
+right loss: the nutrition is identical, only the boost differs.
 
 ## Licence — ODbL
 
@@ -32,9 +41,20 @@ Same reason: a data-prep step run by hand, whose OUTPUT is committed. Nothing in
 the build, the tests or the deploy depends on this file.
 """
 
+import argparse
 import csv
 import json
+import os
 import sys
+
+# Country slug → (OFF countries_tags entry, row locale, output file). The
+# locale values must match the nutrition.Locale constants; the filenames must
+# match ingest/sources.go.
+COUNTRIES = {
+    "au": ("en:australia", "AU", "off_au.json"),
+    "nz": ("en:new-zealand", "NZ", "off_nz.json"),
+    "in": ("en:india", "IN", "off_in.json"),
+}
 
 # 0-indexed positions in the export's 211-column tab-separated header.
 # Verified against the header row at runtime — see check_header, which fails
@@ -97,11 +117,23 @@ def number(text):
 
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--countries", default="au",
+                    help="comma-separated country slugs: " + ",".join(COUNTRIES))
+    ap.add_argument("--outdir", default="data/food",
+                    help="directory the per-country JSON files are written to")
+    args = ap.parse_args()
+    slugs = [s.strip() for s in args.countries.split(",") if s.strip()]
+    unknown = [s for s in slugs if s not in COUNTRIES]
+    if unknown:
+        raise SystemExit(f"off_convert: unknown countries {unknown}; know {sorted(COUNTRIES)}")
+
     reader = csv.reader(sys.stdin, delimiter="\t", quoting=csv.QUOTE_NONE)
     check_header(next(reader))
 
-    kept, seen = [], set()
-    scanned = dropped_not_au = dropped_incomplete = dropped_implausible = dropped_dupe = 0
+    kept = {s: [] for s in slugs}
+    seen = {s: set() for s in slugs}
+    scanned = dropped_no_country = dropped_incomplete = dropped_implausible = dropped_dupe = 0
 
     for row in reader:
         scanned += 1
@@ -109,8 +141,10 @@ def main():
             dropped_incomplete += 1
             continue
 
-        if "en:australia" not in row[COL["countries_tags"]]:
-            dropped_not_au += 1
+        tags = row[COL["countries_tags"]]
+        matched = [s for s in slugs if COUNTRIES[s][0] in tags]
+        if not matched:
+            dropped_no_country += 1
             continue
 
         name = row[COL["product_name"]].strip()
@@ -141,10 +175,6 @@ def main():
 
         brand = row[COL["brands"]].strip().split(",")[0].strip()
         key = (name.lower(), brand.lower())
-        if key in seen:
-            dropped_dupe += 1
-            continue
-        seen.add(key)
 
         item = {
             "name": name,
@@ -166,13 +196,25 @@ def main():
         if code.isdigit() and 8 <= len(code) <= 14:
             item["barcode"] = code
 
-        kept.append(item)
+        placed = False
+        for slug in matched:
+            if key in seen[slug]:
+                continue
+            seen[slug].add(key)
+            kept[slug].append({**item, "locale": COUNTRIES[slug][1]})
+            placed = True
+        if not placed:
+            dropped_dupe += 1
 
-    json.dump(kept, sys.stdout, indent=1, ensure_ascii=False)
-    sys.stdout.write("\n")
+    for slug in slugs:
+        path = os.path.join(args.outdir, COUNTRIES[slug][2])
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(kept[slug], f, indent=1, ensure_ascii=False)
+            f.write("\n")
+        print(f"off_convert: {path} kept {len(kept[slug])}", file=sys.stderr)
     print(
-        f"off_convert: scanned {scanned}, kept {len(kept)} "
-        f"(not AU {dropped_not_au}, incomplete {dropped_incomplete}, "
+        f"off_convert: scanned {scanned} "
+        f"(no requested country {dropped_no_country}, incomplete {dropped_incomplete}, "
         f"implausible {dropped_implausible}, duplicate {dropped_dupe})",
         file=sys.stderr,
     )

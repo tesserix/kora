@@ -2,14 +2,17 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/postgres"
@@ -18,6 +21,9 @@ import (
 	"github.com/tesserix/kora/api/internal/ai"
 	"github.com/tesserix/kora/api/internal/auth"
 	"github.com/tesserix/kora/api/internal/bffauth"
+	"github.com/tesserix/kora/api/internal/bodyread"
+	"github.com/tesserix/kora/api/internal/handlefold"
+	"github.com/tesserix/kora/api/internal/identity"
 	"github.com/tesserix/kora/api/internal/resolve"
 )
 
@@ -30,6 +36,9 @@ func (stubProvider) IdentifyText(context.Context, string) ([]ai.Guess, ai.Usage,
 }
 func (stubProvider) IdentifyPhoto(context.Context, []byte, string) ([]ai.Guess, ai.Usage, error) {
 	return nil, ai.Usage{}, nil
+}
+func (stubProvider) IdentifyBodyComposition(context.Context, []byte, string) (ai.BodyCompositionReading, ai.Usage, error) {
+	return ai.BodyCompositionReading{}, ai.Usage{}, nil
 }
 func (stubProvider) Decompose(context.Context, string) ([]ai.IngredientGuess, ai.Usage, error) {
 	return nil, ai.Usage{}, nil
@@ -115,6 +124,30 @@ func TestAIUsageRouteIsAlwaysRegisteredInsideTheAuthenticatedAPI(t *testing.T) {
 	}
 }
 
+func TestPersonalMentorRoutesAreRegisteredInsideAuthenticatedAPI(t *testing.T) {
+	r := NewRouter(Deps{DB: &gorm.DB{}, Verifier: stubVerifier{}})
+	routes := r.Routes()
+	for _, route := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/v1/mentor/profile"},
+		{http.MethodPut, "/v1/mentor/profile"},
+		{http.MethodGet, "/v1/mentor/health/days"},
+		{http.MethodPut, "/v1/mentor/health/days"},
+		{http.MethodDelete, "/v1/mentor/health/days"},
+		{http.MethodGet, "/v1/mentor/commitments"},
+		{http.MethodPut, "/v1/mentor/commitments/:id"},
+		{http.MethodPut, "/v1/mentor/commitments/:id/check-ins"},
+		{http.MethodPut, "/v1/mentor/proposals/:id/accept"},
+		{http.MethodPut, "/v1/coach/plans/:id/accept"},
+	} {
+		if !hasRoute(routes, route.method, route.path) {
+			t.Errorf("expected %s %s to be registered", route.method, route.path)
+		}
+	}
+}
+
 func TestAnonymousRequestsCannotReachAnyPublicAICapability(t *testing.T) {
 	h := resolve.NewHandler(nil, nil)
 	r := NewRouter(Deps{
@@ -130,6 +163,7 @@ func TestAnonymousRequestsCannotReachAnyPublicAICapability(t *testing.T) {
 		"/v1/resolve/voice",
 		"/v1/coach/ask",
 		"/v1/recipes/parse",
+		"/v1/body-composition/read",
 	} {
 		t.Run(path, func(t *testing.T) {
 			w := httptest.NewRecorder()
@@ -180,6 +214,44 @@ func TestRecipeRoutesRegisteredWithoutProvider(t *testing.T) {
 	r := NewRouter(Deps{DB: &gorm.DB{}, Verifier: stubVerifier{}}) // Provider nil
 	routes := r.Routes()
 	for _, rt := range recipeRoutes {
+		if !hasRoute(routes, rt.method, rt.path) {
+			t.Errorf("expected %s %s to still be registered with Provider nil", rt.method, rt.path)
+		}
+	}
+}
+
+// bodyCompositionRoutes is the full set of body-composition routes; used to
+// confirm they are always registered regardless of Deps.Provider — mirrors
+// recipeRoutes above.
+var bodyCompositionRoutes = []struct{ method, path string }{
+	{"POST", "/v1/body-composition/read"},
+}
+
+// TestBodyCompositionRouteRegisteredWithProvider proves the body-composition
+// route registers the same way with a real (non-nil) ai.Provider wired in —
+// the counterpart to TestBodyCompositionRouteRegisteredWithoutProvider
+// below. Route registration is static regardless of Provider, so this is
+// deliberately the same assertion as the nil case; see that test's comment
+// for why both are kept — mirrors TestRecipeRoutesRegisteredWithProvider.
+func TestBodyCompositionRouteRegisteredWithProvider(t *testing.T) {
+	r := NewRouter(Deps{DB: &gorm.DB{}, Verifier: stubVerifier{}, Provider: stubProvider{}})
+	routes := r.Routes()
+	for _, rt := range bodyCompositionRoutes {
+		if !hasRoute(routes, rt.method, rt.path) {
+			t.Errorf("expected %s %s to be registered", rt.method, rt.path)
+		}
+	}
+}
+
+// TestBodyCompositionRouteRegisteredWithoutProvider pins the
+// degrade-not-disappear contract: the route must stay mounted — answering
+// 503 "unavailable" rather than 404 — even when no AI provider key is
+// configured. Only Handler.Read's BEHAVIOR (not its registration) changes
+// when Provider is nil — mirrors TestRecipeRoutesRegisteredWithoutProvider.
+func TestBodyCompositionRouteRegisteredWithoutProvider(t *testing.T) {
+	r := NewRouter(Deps{DB: &gorm.DB{}, Verifier: stubVerifier{}}) // Provider nil
+	routes := r.Routes()
+	for _, rt := range bodyCompositionRoutes {
 		if !hasRoute(routes, rt.method, rt.path) {
 			t.Errorf("expected %s %s to still be registered with Provider nil", rt.method, rt.path)
 		}
@@ -290,4 +362,249 @@ func TestAdminFoodsIsUnmountedWithoutAKey(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/admin/foods", nil))
 	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+// fakeResolveCache and fakeBodyCompositionCache are minimal ai.Cache /
+// bodyread.Cache doubles used ONLY to prove deletionCache's multiCacheEvicter
+// (kora#314 review finding #1) actually reaches BOTH caches on account
+// deletion, not just the resolve cache. Every method beyond DeleteByUser is
+// unreachable in these tests and panics if ever called, so a future caller
+// that starts exercising Get/Set through these fakes finds out immediately
+// rather than silently getting zero values.
+
+type fakeResolveCache struct {
+	deletedFor uuid.UUID
+	calls      int
+	err        error
+}
+
+func (f *fakeResolveCache) Get(context.Context, string) (*ai.Resolution, bool) {
+	panic("fakeResolveCache.Get: unexpected call")
+}
+func (f *fakeResolveCache) Set(context.Context, string, ai.Resolution) {
+	panic("fakeResolveCache.Set: unexpected call")
+}
+func (f *fakeResolveCache) Delete(context.Context, string) error {
+	panic("fakeResolveCache.Delete: unexpected call")
+}
+func (f *fakeResolveCache) DeleteByUser(_ context.Context, userID uuid.UUID) error {
+	f.calls++
+	f.deletedFor = userID
+	return f.err
+}
+
+type fakeBodyCompositionCache struct {
+	deletedFor uuid.UUID
+	calls      int
+	err        error
+}
+
+func (f *fakeBodyCompositionCache) Get(context.Context, string) (*bodyread.Result, bool) {
+	panic("fakeBodyCompositionCache.Get: unexpected call")
+}
+func (f *fakeBodyCompositionCache) Set(context.Context, string, bodyread.Result) {
+	panic("fakeBodyCompositionCache.Set: unexpected call")
+}
+func (f *fakeBodyCompositionCache) DeleteByUser(_ context.Context, userID uuid.UUID) error {
+	f.calls++
+	f.deletedFor = userID
+	return f.err
+}
+
+// TestDeletionCache_EvictsBothResolveAndBodyCompositionCaches is the
+// regression test for kora#314 review finding #1: account deletion evicted
+// only the resolve cache, leaving a deleted user's cached body-composition
+// readings (weight, body fat, visceral fat, scale BMR — health data) in
+// Redis for up to the cache's full TTL. deletionCache's multiCacheEvicter
+// must reach BOTH caches, and BOTH must be attempted even if one fails, so
+// a resolve-cache outage never silently skips evicting body-composition
+// data (or vice versa).
+func TestDeletionCache_EvictsBothResolveAndBodyCompositionCaches(t *testing.T) {
+	userID := uuid.New()
+	resolveCache := &fakeResolveCache{}
+	bodyCache := &fakeBodyCompositionCache{}
+
+	evicter := deletionCache(resolveCache, bodyCache)
+	err := evicter.DeleteByUser(context.Background(), userID)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, resolveCache.calls, "the resolve cache must be evicted")
+	assert.Equal(t, userID, resolveCache.deletedFor)
+	assert.Equal(t, 1, bodyCache.calls, "the body-composition cache must ALSO be evicted — this is the finding #1 regression")
+	assert.Equal(t, userID, bodyCache.deletedFor)
+}
+
+// TestDeletionCache_BothCachesAttemptedEvenIfOneFails proves the second
+// cache is not skipped when the first errors — a partial sweep is strictly
+// better than an early return that silently leaves the second cache
+// untouched, and errors.Join must carry both failures so nothing is lost
+// even though user.Service.Delete only logs this (never treats it as
+// fatal — the row is already gone by the time this runs).
+func TestDeletionCache_BothCachesAttemptedEvenIfOneFails(t *testing.T) {
+	userID := uuid.New()
+	resolveErr := errors.New("resolve cache: redis down")
+	bodyErr := errors.New("body composition cache: redis down")
+	resolveCache := &fakeResolveCache{err: resolveErr}
+	bodyCache := &fakeBodyCompositionCache{err: bodyErr}
+
+	evicter := deletionCache(resolveCache, bodyCache)
+	err := evicter.DeleteByUser(context.Background(), userID)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, resolveErr, "the resolve cache's error must survive in the joined error")
+	assert.ErrorIs(t, err, bodyErr, "the body-composition cache's error must ALSO survive in the joined error")
+	assert.Equal(t, 1, resolveCache.calls)
+	assert.Equal(t, 1, bodyCache.calls, "the body cache must still be attempted even though the resolve cache errored first")
+}
+
+// TestDeletionCache_NilCachesBecomeNoCache proves a nil ai.Cache/bodyread.Cache
+// (resolve engine disabled, Redis unreachable at startup, or no ai.Provider
+// configured) degrades to a silent no-op rather than reaching a nil
+// interface's method and panicking AFTER the user's row has already been
+// destroyed.
+func TestDeletionCache_NilCachesBecomeNoCache(t *testing.T) {
+	evicter := deletionCache(nil, nil)
+
+	require.NotPanics(t, func() {
+		err := evicter.DeleteByUser(context.Background(), uuid.New())
+		require.NoError(t, err)
+	})
+}
+
+// The cross-user body path has to be registered by router.go itself, not
+// merely by the hand-wired routers in the access and tracking tests -- those
+// prove the handler behaves, not that production mounts it (kora#438).
+//
+// It also pins the routing shape: /friends/:userId/body shares a path
+// segment with the static /friends/requests, /friends/code and
+// /friends/progress. gin resolves statics first, so all four coexist; a
+// future rename that turned one of those into a parameter would collide, and
+// this is where that shows up.
+func TestFriendBodyRouteIsRegisteredAlongsideTheStaticFriendsRoutes(t *testing.T) {
+	// A DB and a Verifier are what mount the whole /v1 group; &gorm.DB{}
+	// suffices because nothing here issues a query.
+	r := NewRouter(Deps{DB: &gorm.DB{}, Verifier: stubVerifier{}})
+	registered := map[string]bool{}
+	for _, ri := range r.Routes() {
+		registered[ri.Method+" "+ri.Path] = true
+	}
+	for _, want := range []string{
+		"GET /v1/friends/:userId/body",
+		"GET /v1/friends/progress",
+		"GET /v1/friends/requests",
+		"GET /v1/friends/code",
+	} {
+		require.True(t, registered[want], "route not registered: %s", want)
+	}
+}
+
+// fixedUIDVerifier accepts any bearer token and always resolves to the same
+// Firebase UID, so every request through it authenticates as the same user --
+// what TestLookupRateLimitIsWiredIntoTheRealRouter needs to prove the limiter
+// actually throttles one caller across repeated requests.
+type fixedUIDVerifier struct{ uid string }
+
+func (v fixedUIDVerifier) Verify(context.Context, string) (auth.Claims, error) {
+	return auth.Claims{UID: v.uid, Email: v.uid + "@example.test"}, nil
+}
+
+// This is the router-level counterpart to internal/ratelimit's own unit tests
+// and internal/identity's handler tests: both of those build their OWN gin
+// engine, wiring identity.Handler.Lookup directly. Neither would go red if
+// someone deleted `ratelimit.PerUser(...)` from the /users/lookup route in
+// router.go -- the limiter is not part of the handler, it is middleware
+// router.go alone attaches. This test drives the real NewRouter(...) so that
+// deletion has somewhere to be caught: it is the one control standing
+// between exact-match handle lookup and offline enumeration of the user base.
+func TestLookupRateLimitIsWiredIntoTheRealRouter(t *testing.T) {
+	db := testDB(t)
+	uid := "ratelimit-wiring-" + uuid.NewString()
+	t.Cleanup(func() { db.Exec(`DELETE FROM users WHERE firebase_uid = ?`, uid) })
+
+	r := NewRouter(Deps{DB: db, Verifier: fixedUIDVerifier{uid: uid}})
+
+	var last int
+	for i := 0; i < identity.LookupLimit+1; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/v1/users/lookup?handle=nobody", nil)
+		req.Header.Set("Authorization", "Bearer any-token")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		last = w.Code
+	}
+	require.Equal(t, http.StatusTooManyRequests, last,
+		"the (LookupLimit+1)th call to /v1/users/lookup by the same user must be refused by ratelimit.PerUser")
+}
+
+// "Send a request to this handle" is a lookup in disguise: 404-vs-success on
+// this route is the same oracle GET /v1/users/lookup gives, so it must carry
+// the identical control (kora#449 task 13b). Mirrors
+// TestLookupRateLimitIsWiredIntoTheRealRouter above -- same fixedUIDVerifier
+// trick, same "hit it LookupLimit+1 times, expect the last to be refused"
+// shape -- but drives POST /v1/friends/requests instead. It also incidentally
+// closes the same hole for the pre-existing email and code paths.
+func TestSendRequestRateLimitIsWiredIntoTheRealRouter(t *testing.T) {
+	db := testDB(t)
+	uid := "ratelimit-wiring-sr-" + uuid.NewString()
+	t.Cleanup(func() { db.Exec(`DELETE FROM users WHERE firebase_uid = ?`, uid) })
+
+	r := NewRouter(Deps{DB: db, Verifier: fixedUIDVerifier{uid: uid}})
+
+	var last int
+	for i := 0; i < identity.LookupLimit+1; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/v1/friends/requests",
+			strings.NewReader(`{"email":"nobody-`+uuid.NewString()+`@nowhere.test"}`))
+		req.Header.Set("Authorization", "Bearer any-token")
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		last = w.Code
+	}
+	require.Equal(t, http.StatusTooManyRequests, last,
+		"the (LookupLimit+1)th call to POST /v1/friends/requests by the same user must be refused by ratelimit.PerUser")
+}
+
+// PUT /v1/me/handle answers a distinguishable 409 handle_taken, which is the
+// same existence oracle GET /v1/users/lookup gives -- probing a taken handle
+// here has no side effect and no cost, so it must carry the identical
+// control. Mirrors TestLookupRateLimitIsWiredIntoTheRealRouter above -- same
+// fixedUIDVerifier trick, same "hit it LookupLimit+1 times, expect the last
+// to be refused" shape -- but drives PUT /v1/me/handle instead.
+func TestSetHandleRateLimitIsWiredIntoTheRealRouter(t *testing.T) {
+	db := testDB(t)
+	uid := "ratelimit-wiring-sh-" + uuid.NewString()
+	t.Cleanup(func() { db.Exec(`DELETE FROM users WHERE firebase_uid = ?`, uid) })
+
+	r := NewRouter(Deps{DB: db, Verifier: fixedUIDVerifier{uid: uid}})
+
+	// Each iteration below claims a DIFFERENT random handle for the SAME
+	// user, and Claim retires whatever that user held before -- see
+	// identity.Service.Claim's doc comment ("Changing your handle retires
+	// the old one PERMANENTLY"). Every handle but the last successfully
+	// claimed one therefore leaves a retired_handles row (kora#455): the raw
+	// handles are collected here so cleanup can delete every one of them by
+	// its computed canonical form, the same way retireCleanup does in
+	// internal/user/deletion_test.go and internal/identity/service_test.go.
+	// This is the exact leak kora#455 measured -- 19 rows shaped
+	// n0b0dy_<hex>, one per claim this loop makes but the last.
+	var claimed []string
+	t.Cleanup(func() {
+		for _, raw := range claimed {
+			db.Exec(`DELETE FROM retired_handles WHERE handle_canonical = ?`, handlefold.Canonical(raw))
+		}
+	})
+
+	var last int
+	for i := 0; i < identity.LookupLimit+1; i++ {
+		handle := "nobody_" + uuid.NewString()[:8]
+		claimed = append(claimed, handle)
+		req := httptest.NewRequest(http.MethodPut, "/v1/me/handle",
+			strings.NewReader(`{"handle":"`+handle+`"}`))
+		req.Header.Set("Authorization", "Bearer any-token")
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		last = w.Code
+	}
+	require.Equal(t, http.StatusTooManyRequests, last,
+		"the (LookupLimit+1)th call to PUT /v1/me/handle by the same user must be refused by ratelimit.PerUser")
 }

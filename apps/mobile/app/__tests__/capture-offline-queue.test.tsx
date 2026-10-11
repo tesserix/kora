@@ -76,7 +76,7 @@ jest.mock("@/lib/api", () => ({
 // diary section the meal lands in.
 const expectedMealSlot = () => mealSlotForHour(new Date().getHours());
 
-const mockResolveTextMutate = jest.fn();
+const mockCaptureMessageMutate = jest.fn();
 const mockResolvePhotoMutate = jest.fn();
 const mockResolveVoiceMutate = jest.fn();
 const mockResolveBarcodeMutate = jest.fn();
@@ -102,7 +102,8 @@ function mockUseMutation(mutateFn: jest.Mock) {
 
 jest.mock("@/api/hooks", () => ({
   useProfile: () => ({ data: { display_name: "Alex Stone" } }),
-  useResolveText: () => mockUseMutation(mockResolveTextMutate),
+  useAcceptMealPlan: () => ({ mutate: jest.fn(), isPending: false }),
+  useCaptureMessage: () => mockUseMutation(mockCaptureMessageMutate),
   useResolvePhoto: () => mockUseMutation(mockResolvePhotoMutate),
   useResolveVoice: () => mockUseMutation(mockResolveVoiceMutate),
   useResolveBarcode: () => mockUseMutation(mockResolveBarcodeMutate),
@@ -173,7 +174,7 @@ async function render(ui: React.ReactElement, options?: Parameters<typeof rtlRen
 }
 
 beforeEach(() => {
-  mockResolveTextMutate.mockReset();
+  mockCaptureMessageMutate.mockReset();
   mockResolvePhotoMutate.mockReset();
   mockResolveVoiceMutate.mockReset();
   mockResolveBarcodeMutate.mockReset();
@@ -486,8 +487,8 @@ describe("ottoErrorMessage's TimeoutError copy", () => {
     await fireEvent.changeText(input, "brekkie eggs");
     await fireEvent.press(await rendered.findByLabelText("Send"));
 
-    await waitFor(() => expect(mockResolveTextMutate).toHaveBeenCalled());
-    const [, options] = mockResolveTextMutate.mock.calls[0];
+    await waitFor(() => expect(mockCaptureMessageMutate).toHaveBeenCalled());
+    const [, options] = mockCaptureMessageMutate.mock.calls[0];
     await act(async () => options.onError(new TimeoutError()));
 
     expect(await rendered.findByText(/took too long/i)).toBeTruthy();
@@ -510,10 +511,10 @@ describe("Cancelling a typed resolve", () => {
     await fireEvent.press(await rendered.findByText("Type"));
     await fireEvent.changeText(await rendered.findByLabelText("Tell Otto what you ate"), "chicken and rice");
     await fireEvent.press(await rendered.findByLabelText("Send"));
-    await waitFor(() => expect(mockResolveTextMutate).toHaveBeenCalled());
+    await waitFor(() => expect(mockCaptureMessageMutate).toHaveBeenCalled());
     await fireEvent.press(await rendered.findByLabelText("Cancel"));
 
-    const [, options] = mockResolveTextMutate.mock.calls[0];
+    const [, options] = mockCaptureMessageMutate.mock.calls[0];
     await act(async () => options.onError(error));
     return rendered;
   }
@@ -534,12 +535,17 @@ describe("Cancelling a typed resolve", () => {
     expect(mockEnqueueTextCapture()).toHaveBeenCalledWith("chicken and rice", expectedMealSlot());
   });
 
-  test("a cancelled timeout is queued too — the phrase never reached the server", async () => {
+  // The one error class the typed path does NOT queue (kora#264). This endpoint
+  // runs the agent chain, so a timeout means the message arrived and is being
+  // worked on — replaying it as a food capture turned "plan my meals for the
+  // week" into an attempt to name the foods in it. Photo and voice still queue
+  // their timeouts; see handleResolveFailure's block above.
+  test("a cancelled timeout is not queued — the message did reach the server", async () => {
     mockEnqueueTextCapture().mockResolvedValue({ id: "cap-cancel-text" });
 
     await cancelTypedResolve(new TimeoutError());
 
-    expect(mockEnqueueTextCapture()).toHaveBeenCalledWith("chicken and rice", expectedMealSlot());
+    expect(mockEnqueueTextCapture()).not.toHaveBeenCalled();
   });
 
   // The negative half, and the reason no connectivity check exists: an online
@@ -622,9 +628,9 @@ describe("Cancelling a typed resolve", () => {
     await fireEvent.press(await rendered.findByText("Type"));
     await fireEvent.changeText(await rendered.findByLabelText("Tell Otto what you ate"), "chicken and rice");
     await fireEvent.press(await rendered.findByLabelText("Send"));
-    await waitFor(() => expect(mockResolveTextMutate).toHaveBeenCalled());
+    await waitFor(() => expect(mockCaptureMessageMutate).toHaveBeenCalled());
     await act(async () => {
-      mockResolveTextMutate.mock.calls[0][1].onError(
+      mockCaptureMessageMutate.mock.calls[0][1].onError(
         new NetworkError(new TypeError("Network request failed")),
       );
     });
@@ -642,9 +648,9 @@ describe("Cancelling a typed resolve", () => {
     await fireEvent.press(await rendered.findByText("Type"));
     await fireEvent.changeText(await rendered.findByLabelText("Tell Otto what you ate"), "chicken and rice");
     await fireEvent.press(await rendered.findByLabelText("Send"));
-    await waitFor(() => expect(mockResolveTextMutate).toHaveBeenCalled());
+    await waitFor(() => expect(mockCaptureMessageMutate).toHaveBeenCalled());
 
-    const [, options] = mockResolveTextMutate.mock.calls[0];
+    const [, options] = mockCaptureMessageMutate.mock.calls[0];
     await act(async () => options.onError(new NetworkError(new TypeError("Network request failed"))));
 
     expect(mockEnqueueTextCapture()).toHaveBeenCalledWith("chicken and rice", expectedMealSlot());
@@ -679,7 +685,7 @@ describe("An unseen barcode scanned offline", () => {
     mockEnqueueBarcodeCapture().mockResolvedValue({ id: "cap-1" });
     await scanOffline();
 
-    expect(mockEnqueueBarcodeCapture()).toHaveBeenCalledWith("5000112637922", expectedMealSlot());
+    expect(mockEnqueueBarcodeCapture()).toHaveBeenCalledWith("5000112637922", expectedMealSlot(), expect.any(String));
   });
 
   test("says the scan is saved, and keeps saying why it cannot answer now", async () => {

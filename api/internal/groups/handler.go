@@ -8,19 +8,21 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/tesserix/kora/api/internal/access"
 	"github.com/tesserix/kora/api/internal/compare"
 	"github.com/tesserix/kora/api/internal/httpx"
 	"github.com/tesserix/kora/api/internal/user"
 )
 
 type Handler struct {
-	svc     Service
-	repo    Repository
-	compare compare.Service
+	svc       Service
+	repo      Repository
+	compare   compare.Service
+	accessSvc access.Service
 }
 
-func NewHandler(svc Service, repo Repository, compareSvc compare.Service) Handler {
-	return Handler{svc: svc, repo: repo, compare: compareSvc}
+func NewHandler(svc Service, repo Repository, compareSvc compare.Service, accessSvc access.Service) Handler {
+	return Handler{svc: svc, repo: repo, compare: compareSvc, accessSvc: accessSvc}
 }
 
 func (h Handler) uid(c *gin.Context) (uuid.UUID, bool) {
@@ -184,10 +186,17 @@ func (h Handler) Progress(c *gin.Context) {
 		return
 	}
 	members := make([]compare.Member, 0, len(rows))
+	ownerIDs := make([]uuid.UUID, 0, len(rows))
 	for _, r := range rows {
-		members = append(members, compare.Member{ID: r.ID, DisplayName: r.DisplayName, ShareProgress: r.ShareProgress, TargetKcal: r.TargetKcal})
+		members = append(members, compare.Member{ID: r.ID, DisplayName: r.DisplayName, TargetKcal: r.TargetKcal})
+		ownerIDs = append(ownerIDs, r.ID)
 	}
-	out, err := h.compare.ProgressForMembers(c.Request.Context(), time.Now(), user.LocFromContext(c), members)
+	grants, err := h.accessSvc.ResolveMany(c.Request.Context(), uid, ownerIDs, access.CategoryProgress)
+	if err != nil {
+		httpx.RespondServiceError(c, err)
+		return
+	}
+	out, err := h.compare.ProgressForMembers(c.Request.Context(), time.Now(), user.LocFromContext(c), members, grants)
 	if err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not load progress")
 		return

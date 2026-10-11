@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: pgvector/pgvector:pg15
+        image: pgvector/pgvector:pg15@sha256:a947c45cdc5906a1bc951f20a8709e321256343ee0f251e4ae00b5e7def4e6da
         env:
           POSTGRES_DB: kora
           POSTGRES_USER: kora
@@ -23,8 +23,8 @@ jobs:
           --health-cmd "pg_isready -U kora" --health-interval 5s
           --health-timeout 3s --health-retries 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"
           cache-dependency-path: api/go.sum
@@ -35,32 +35,156 @@ jobs:
           TEST_DATABASE_URL: postgres://kora:kora_dev@localhost:5432/kora?sslmode=disable
         run: |
           cd api
-          TEST_DATABASE_URL=postgres://kora:kora_dev@localhost:5432/kora?sslmode=disable go run ./cmd/migrate
+          go run ./cmd/migrate
           go test -race -p 1 -coverprofile=coverage.out ./...
 
+      # Fixture for the conformance step below (kora#519). CI's Postgres is a
+      # fresh, empty container, so before this the §8.9 row-shape checks for
+      # entities/users and entities/foods (and §4.5's empty-array check) had
+      # no rows to exercise and SILENTLY SKIPPED -- not the same thing as
+      # passing. One user and one food item, obviously fake, is enough.
+      #
+      # Runs after migrate (the tables must exist) and before the conformance
+      # step starts the API (rows must already be committed when it serves
+      # its first request). Deliberately not routed through cmd/seed: that
+      # seeds ~50 curated food items for local dev and has no notion of users
+      # at all -- more than this needs, and missing the half it needs most.
+      - name: Seed — conformance fixtures
+        run: |
+          psql "postgres://kora:kora_dev@localhost:5432/kora?sslmode=disable" \
+            -v ON_ERROR_STOP=1 \
+            -f api/internal/database/testdata/ci_conformance_seed.sql
+
+      # Contract conformance (kora#430, contract §5).
+      #
+      # "A document alone produces exactly the drift it describes. The
+      # enforcement mechanism is the deliverable." Kora's own tests pin its
+      # handlers; this pins that those handlers still match the CONTRACT, which
+      # is a different thing and the one that drifts silently — a console page
+      # rendering nothing is otherwise the first alarm.
+      #
+      # Run against a locally-booted API, never against production: this
+      # surface carries every user record, CI must not need a real credential
+      # to exercise it, and a run depending on prod would fail for reasons that
+      # have nothing to do with the commit under test.
+      #
+      # ONE step, deliberately. The API is a background process, and a process
+      # started in one step is not guaranteed to survive into the next — which
+      # would surface as an unreachable API rather than as the wiring mistake
+      # it is.
+      #
+      # The secret is a throwaway shared between two processes on this runner
+      # for the length of one job, NOT a repo secret: both halves of an HMAC
+      # only need to agree with each other.
+      - name: Conformance — admin contract
+        env:
+          DATABASE_URL: postgres://kora:kora_dev@localhost:5432/kora?sslmode=disable
+          KORA_PLATFORM_ADMIN_SECRET: ci-conformance-secret-not-a-real-key
+          ADMIN_CONFORMANCE_SECRET: ci-conformance-secret-not-a-real-key
+          ENV: development
+          PORT: "8099"
+          METRICS_PORT: "9099"
+        run: |
+          cd api
+          # cmd/api treats a failed Firebase init as FATAL (os.Exit(1)) on
+          # purpose: DELETE /v1/me is Apple-mandated and a deployment that
+          # cannot delete identities must not start. CI has no Application
+          # Default Credentials, so the binary exited before ever serving
+          # /health and this step failed with "the API never became healthy".
+          #
+          # A syntactically valid service-account file satisfies credential
+          # DISCOVERY, which is all the constructor needs — no network call and
+          # no real project. The conformance suite never exercises a Firebase
+          # path, so nothing here depends on the key being usable.
+          openssl genrsa -out /tmp/ci_sa_key.pem 2048 2>/dev/null
+          python3 -c 'import json,sys; json.dump({"type":"service_account","project_id":"kora-ci","private_key_id":"ci","private_key":open("/tmp/ci_sa_key.pem").read(),"client_email":"ci@kora-ci.iam.gserviceaccount.com","client_id":"0","token_uri":"https://oauth2.googleapis.com/token"}, open("/tmp/ci_sa.json","w"))'
+          export GOOGLE_APPLICATION_CREDENTIALS=/tmp/ci_sa.json
+          go build -o /tmp/kora-api ./cmd/api
+          /tmp/kora-api > /tmp/kora-api.log 2>&1 &
+          api_pid=$!
+          trap 'kill "$api_pid" 2>/dev/null || true' EXIT
+
+          up=0
+          for _ in $(seq 1 60); do
+            if curl -sf -o /dev/null http://localhost:8099/health; then up=1; break; fi
+            sleep 1
+          done
+          if [ "$up" -ne 1 ]; then
+            echo "::error::the API never became healthy"; cat /tmp/kora-api.log; exit 1
+          fi
+
+          # A fast, specific pre-check that the surface MOUNTED.
+          #
+          # Not load-bearing: the suite already fails an unmounted surface,
+          # because declaring an endpoint opts it into enforcement and a 404 on
+          # a declared endpoint is a failure, not a skip (verified — an API
+          # booted without the secret gives exit 1, six failures). This exists
+          # only so a MISCONFIGURED job says "not mounted" in one line instead
+          # of six contract deviations, which point at Kora's handlers when the
+          # actual fault is an env var.
+          mounted=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8099/v1/admin/kpis)
+          if [ "$mounted" != "401" ]; then
+            echo "::error::/v1/admin/kpis answered $mounted, expected 401 (mounted, refusing unsigned)"
+            cat /tmp/kora-api.log; exit 1
+          fi
+
+          # Pinned, like every action SHA in this file: a new publish must be an
+          # explicit upgrade, not something that changes what CI enforces
+          # between two runs of the same commit.
+          set +e
+          # --declaration is REQUIRED here: the CLI defaults to
+          # ./admin-conformance.json, this step runs from api/, and the
+          # declaration lives at the repo root — so the default resolves to
+          # api/admin-conformance.json, which does not exist. That surfaced as
+          # exit 2 ("the suite could not run"), not as a contract failure.
+          npx --yes @tesserix/admin-conformance@0.6.0 \
+            --base http://localhost:8099/v1 --slug kora --no-color \
+            --declaration "$GITHUB_WORKSPACE/admin-conformance.json"
+          code=$?
+          set -e
+
+          # 1 and 2 mean different things and must not be conflated: 1 is "Kora
+          # deviates from the contract" (fix Kora); 2 is "the suite could not
+          # run" (fix the harness). A job that treats them alike eventually
+          # reports a broken harness as a failing product.
+          case "$code" in
+            0) echo "conformant" ;;
+            1) echo "::error::Kora deviates from the admin contract"; exit 1 ;;
+            2) echo "::error::the conformance suite could not run (secret, flags, or declaration)"; exit 1 ;;
+            *) echo "::error::unexpected conformance exit $code"; cat /tmp/kora-api.log; exit 1 ;;
+          esac
+
   mobile:
+    uses: tesserix/tesserix-workflows/.github/workflows/expo-ci.yml@5a22020a4547f9a3bf23b05551caa12d925bd3a5 # v2.1.0
+    with:
+      working_directory: apps/mobile
+      install_directory: apps/mobile
+      lockfile_path: apps/mobile/package-lock.json
+      node_version: 22.19.0
+      package_manager: npm
+      lint_suppressions_path: apps/mobile/eslint-suppressions.json
+      audit_config_path: apps/mobile/audit-ci.jsonc
+
+  secrets:
+    uses: tesserix/tesserix-workflows/.github/workflows/secret-scan.yml@5a22020a4547f9a3bf23b05551caa12d925bd3a5 # v2.1.0
+
+  gate:
+    name: CI gate
+    if: ${{ always() }}
+    needs: [api, mobile, secrets]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: apps/mobile/package-lock.json
-      - run: cd apps/mobile && npm ci
-      # app.json sets experiments.typedRoutes, but that is inert until the
-      # route union in .expo/types/router.d.ts exists — and both it and
-      # expo-env.d.ts are gitignored, so a fresh checkout has neither and
-      # expo-router's Href silently falls back to plain string. Without this
-      # step a typo'd router.push("/delete-acount") passes tsc. `expo customize
-      # tsconfig.json` is the supported way to run typegen with no dev server.
-      - run: cd apps/mobile && npx expo customize tsconfig.json
-      - run: cd apps/mobile && npx tsc --noEmit
-      - run: cd apps/mobile && npm test
+      - name: Refuse failed or cancelled checks
+        env:
+          HAS_CANCELLED: ${{ contains(needs.*.result, 'cancelled') }}
+          HAS_FAILURE: ${{ contains(needs.*.result, 'failure') }}
+        run: |
+          test "$HAS_CANCELLED" = false
+          test "$HAS_FAILURE" = false
 
   build-image:
     if: github.ref == 'refs/heads/main'
-    needs: [api]
+    needs: [gate]
     runs-on: ubuntu-latest
     # Push to GHCR under the tesserix org; the GKE fleet pulls it via the
     # ghcr-remote pull-through mirror in tesseracthub-480811 (matches every
@@ -70,8 +194,8 @@ jobs:
       contents: write
       packages: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/login-action@v3
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -101,4 +225,5 @@ jobs:
       # Advancing `deploy` only after both pushes succeed makes "this commit is
       # on deploy" mean "this commit's image is pullable".
       - name: Advance deploy branch
+        if: vars.KORA_API_DEPLOY_HOLD != 'true'
         run: git push origin "${{ github.sha }}:refs/heads/deploy" --force

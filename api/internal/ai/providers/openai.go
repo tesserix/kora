@@ -9,6 +9,7 @@ import (
 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
+	"github.com/openai/openai-go/packages/param"
 	"github.com/openai/openai-go/shared"
 
 	"github.com/tesserix/kora/api/internal/ai"
@@ -28,6 +29,7 @@ type OpenAIProvider struct {
 	client     openai.Client
 	model      string
 	jsonObject bool
+	options    func(context.Context) []option.RequestOption
 }
 
 // NewOpenAIProvider builds the OpenAI-compatible FALLBACK provider. baseURL,
@@ -163,7 +165,7 @@ func unwrapIngredients(data []byte) ([]byte, error) {
 func (p OpenAIProvider) IdentifyText(ctx context.Context, phrase string) ([]ai.Guess, ai.Usage, error) {
 	data, usage, err := p.generateJSON(ctx, p.model, callTypeIdentifyText,
 		identifySystemPrompt, []openai.ChatCompletionContentPartUnionParam{openai.TextContentPart(phrase)},
-		"food_guesses", guessJSONSchema())
+		"food_guesses", guessJSONSchema(), param.Opt[float64]{})
 	if err != nil {
 		return nil, usage, err
 	}
@@ -183,11 +185,11 @@ func (p OpenAIProvider) IdentifyText(ctx context.Context, phrase string) ([]ai.G
 func (p OpenAIProvider) IdentifyPhoto(ctx context.Context, image []byte, mime string) ([]ai.Guess, ai.Usage, error) {
 	dataURL := fmt.Sprintf("data:%s;base64,%s", mime, base64.StdEncoding.EncodeToString(image))
 	data, usage, err := p.generateJSON(ctx, p.model, callTypeIdentifyPhoto,
-		identifySystemPrompt,
+		photoIdentifySystemPrompt,
 		[]openai.ChatCompletionContentPartUnionParam{
 			openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{URL: dataURL}),
 		},
-		"food_guesses", guessJSONSchema())
+		"food_guesses", guessJSONSchema(), param.Opt[float64]{})
 	if err != nil {
 		return nil, usage, err
 	}
@@ -202,12 +204,134 @@ func (p OpenAIProvider) IdentifyPhoto(ctx context.Context, image []byte, mime st
 	return guesses, usage, nil
 }
 
+// bodyCompositionJSONSchema builds the Structured Outputs JSON schema for
+// IdentifyBodyComposition. Unlike guessJSONSchema/ingredientJSONSchema, the
+// root here IS the reading object itself — no "guesses"/"ingredients"
+// envelope key, because a single reading (not an array of them) is the
+// natural top-level shape and OpenAI's Structured Outputs supports an
+// object root directly.
+//
+// Every property is typed nullable (`["number", "null"]` or
+// `["string", "null"]` for reading_date_text) AND listed in "required". This
+// looks contradictory at first glance — "required" usually means "must be
+// present with a value" — but under strict:true, Structured Outputs has no
+// other way to express "optional": every property MUST appear in
+// "required", full stop, so a field that the model may legitimately be
+// unable to read has to be expressed as "required to be present, but its
+// value may be JSON null" rather than "absent from the object". The system
+// prompt (bodyCompositionSystemPrompt) tells the model to answer null for
+// anything not legible on screen, which together with this schema shape
+// satisfies both the strict-mode constraint and the "omit what you can't
+// read" invariant. Compare guessJSONSchema's comment, which anticipates the
+// same kind of reader confusion for its own required list.
+func bodyCompositionJSONSchema() map[string]any {
+	numberOrNull := func(description string) map[string]any {
+		return map[string]any{"type": []string{"number", "null"}, "description": description}
+	}
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"weight_kg": numberOrNull("Body weight in kilograms, as displayed. Convert from " +
+				"pounds if the screen shows lb (1 lb = 0.453592 kg) — that is unit " +
+				"conversion of the one displayed number, not inference."),
+			"body_fat_pct": numberOrNull("Body fat PERCENTAGE only. If the screen also shows a " +
+				"fat mass in kilograms, ignore that number — report only the percentage here."),
+			"subcutaneous_fat_pct": numberOrNull("Subcutaneous fat percentage, if the screen " +
+				"labels one separately from body_fat_pct."),
+			"visceral_fat_rating": numberOrNull("The scale's own visceral fat RATING exactly as " +
+				"displayed — usually a small bare number like 7, or a value on a 1-59 scale. " +
+				"This is a vendor rating, not a percentage: report it even with no percent " +
+				"sign shown, and never treat it as one."),
+			"skeletal_muscle_pct": numberOrNull("Skeletal muscle PERCENTAGE. Distinct from " +
+				"muscle_mass_kg — some scales show both; report each only if its own value " +
+				"is on screen, never derive one from the other."),
+			"muscle_mass_kg": numberOrNull("Muscle mass in kilograms — return this ONLY if the " +
+				"screen labels a value as TOTAL muscle mass. A kg figure labelled SKELETAL " +
+				"muscle mass is a DIFFERENT, SMALLER quantity (skeletal muscle is a subset of " +
+				"total muscle) and reporting it here is a measurement error: many scale apps " +
+				"(Omron included) show only a skeletal-muscle kg figure and never a " +
+				"total-muscle one, so on those screens this field MUST be null even though a " +
+				"muscle-shaped kg number is visible."),
+			"body_water_pct": numberOrNull("Body water percentage, as displayed."),
+			"protein_pct":    numberOrNull("Protein percentage, as displayed."),
+			"bone_mass_kg": numberOrNull("Bone MASS in kilograms as the scale reports it — NOT " +
+				"bone density, a T-score, or a BMD number. If the screen shows only a density " +
+				"or T-score, use null."),
+			"scale_bmr_kcal": numberOrNull("The scale's own estimated basal metabolic rate in " +
+				"kilocalories, if shown."),
+			"reading_date_text": map[string]any{
+				"type": []string{"string", "null"},
+				"description": "The date TEXT EXACTLY AS PRINTED on screen for this reading — " +
+					"copy it verbatim, character for character (\"22/08\", \"Sat, 22/08\", " +
+					"\"2026-08-22\", whatever the screen actually shows). Do NOT reformat it " +
+					"to YYYY-MM-DD, do NOT add a year that is not printed, and do NOT compute " +
+					"or guess a year — a separate, non-model step resolves this text to a " +
+					"calendar date. Scale-app screens usually print this SOMEWHERE near the " +
+					"headline weight or measurement list — not only as a dedicated date " +
+					"label, but also as a timestamp, a day/date line under a metric name, or " +
+					"a history-chart axis entry for the displayed reading; check all of those " +
+					"before concluding no date is shown. Use null ONLY if no date for this " +
+					"reading appears anywhere on screen.",
+			},
+			"instrument": map[string]any{
+				"type": []string{"string", "null"},
+				"description": "Which PHYSICAL INSTRUMENT produced this image — exactly one of " +
+					"\"scale_screenshot\" (a consumer smart-scale app: Renpho, Omron, Tanita, " +
+					"Eufy, Xiaomi, or similar), \"inbody\" (an InBody clinical result sheet), " +
+					"or \"dexa\" (a DEXA/DXA clinical scan report). Decide this ONLY from what " +
+					"is VISIBLE — app chrome, logos, branding text, screen layout, section " +
+					"headings, or report letterhead — and NEVER from the measurement values " +
+					"themselves; reasoning \"these numbers look clinical, therefore DEXA\" is " +
+					"exactly the kind of inference this whole schema forbids. Use null if the " +
+					"image does not CLEARLY show which of the three it is — a confident wrong " +
+					"guess here is worse than no answer.",
+			},
+		},
+		"required": []string{
+			"weight_kg", "body_fat_pct", "subcutaneous_fat_pct", "visceral_fat_rating",
+			"skeletal_muscle_pct", "muscle_mass_kg", "body_water_pct", "protein_pct",
+			"bone_mass_kg", "scale_bmr_kcal", "reading_date_text", "instrument",
+		},
+		"additionalProperties": false,
+	}
+}
+
+// IdentifyBodyComposition reads a smart-scale result screenshot using the
+// configured model's vision input, mirroring IdentifyPhoto's shape exactly.
+// There is no envelope to unwrap here (contrast unwrapGuesses/
+// unwrapIngredients): bodyCompositionJSONSchema's root IS the reading
+// object, so the raw response bytes go straight to
+// parseBodyCompositionReading — the same helper Gemini's implementation
+// uses (defined in gemini.go, same package), since a plain
+// json.Unmarshal into ai.BodyCompositionReading's pointer fields is
+// provider-agnostic: encoding/json sets a *float64/*string field to nil for
+// a JSON null exactly as it does for a missing key, so this decodes
+// correctly whether the field was omitted (Gemini, non-strict schemas) or
+// explicitly null (this schema, under strict:true).
+func (p OpenAIProvider) IdentifyBodyComposition(ctx context.Context, image []byte, mime string) (ai.BodyCompositionReading, ai.Usage, error) {
+	dataURL := fmt.Sprintf("data:%s;base64,%s", mime, base64.StdEncoding.EncodeToString(image))
+	data, usage, err := p.generateJSON(ctx, p.model, callTypeIdentifyBodyComposition,
+		bodyCompositionSystemPrompt,
+		[]openai.ChatCompletionContentPartUnionParam{
+			openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{URL: dataURL}),
+		},
+		"body_composition_reading", bodyCompositionJSONSchema(), param.Opt[float64]{})
+	if err != nil {
+		return ai.BodyCompositionReading{}, usage, err
+	}
+	reading, err := parseBodyCompositionReading(data)
+	if err != nil {
+		return ai.BodyCompositionReading{}, usage, fmt.Errorf("openai: identify body composition: parse response: %w", err)
+	}
+	return reading, usage, nil
+}
+
 // Decompose breaks a dish into its ingredients using the configured model.
 func (p OpenAIProvider) Decompose(ctx context.Context, dish string) ([]ai.IngredientGuess, ai.Usage, error) {
 	prompt := fmt.Sprintf(decomposeSystemPromptTmpl, dish)
 	data, usage, err := p.generateJSON(ctx, p.model, callTypeDecompose,
 		prompt, []openai.ChatCompletionContentPartUnionParam{openai.TextContentPart(dish)},
-		"dish_ingredients", ingredientJSONSchema())
+		"dish_ingredients", ingredientJSONSchema(), param.Opt[float64]{})
 	if err != nil {
 		return nil, usage, err
 	}
@@ -261,7 +385,7 @@ func (p OpenAIProvider) GenerateText(ctx context.Context, systemPrompt, userProm
 		},
 	}
 
-	resp, err := p.client.Chat.Completions.New(ctx, params)
+	resp, err := p.client.Chat.Completions.New(ctx, params, p.requestOptions(ctx)...)
 
 	usage := ai.Usage{
 		Provider:  p.Name(),
@@ -272,6 +396,7 @@ func (p OpenAIProvider) GenerateText(ctx context.Context, systemPrompt, userProm
 	if resp != nil {
 		usage.TokensIn = int(resp.Usage.PromptTokens)
 		usage.TokensOut = int(resp.Usage.CompletionTokens)
+		usage.Model = resolvedModel(resp.Model, p.model)
 	}
 	if err != nil {
 		return "", usage, fmt.Errorf("openai: chat completion: %w", err)
@@ -302,11 +427,18 @@ func jsonObjectSchemaHint(schema map[string]any) string {
 // compensates by appending a description of the expected shape to the
 // system prompt; see generateJSON's doc comment for why the schema itself
 // remains the actual invariant boundary regardless of response format.
+// temperature is per-call and zero-value (param.Opt[float64]{}, meaning
+// "omit — use the API's own default sampling") for every caller, including
+// IdentifyBodyComposition — kora#314's under-reads were never a sampling
+// problem (see bodyCompositionJSONSchema's required+nullable shape, and
+// gemini.go's IdentifyBodyComposition doc comment for the measurement that
+// ruled temperature out), so there is no special case to carry here.
 func (p OpenAIProvider) buildParams(
 	model, systemPrompt string,
 	userParts []openai.ChatCompletionContentPartUnionParam,
 	schemaName string,
 	schema map[string]any,
+	temperature param.Opt[float64],
 ) openai.ChatCompletionNewParams {
 	sys := systemPrompt
 	var rf openai.ChatCompletionNewParamsResponseFormatUnion
@@ -332,7 +464,31 @@ func (p OpenAIProvider) buildParams(
 			openai.UserMessage(userParts),
 		},
 		ResponseFormat: rf,
+		Temperature:    temperature,
 	}
+}
+
+// resolvedModel prefers the model the RESPONSE names over the one the request
+// asked for.
+//
+// Against the agent gateway the requested "model" is a routing ALIAS
+// ("kora-auto"); the gateway picks a real model per capability and names it in
+// the response. Recording the alias made the ledger unable to show a routing
+// change — kora#541, where identify silently moved from gemini-3.5-flash-lite
+// to gemini-3.5-flash, roughly a 5x cost difference, while every row still said
+// "kora-auto". It also landed those rows on defaultModelPrice, defeating that
+// fallback's job of flagging genuinely unknown models.
+//
+// Falling back to the requested model when the response names none matters as
+// much as the preference itself: an empty Model would ALSO miss modelPrices and
+// hit defaultModelPrice, trading one wrong price for another. Providers that
+// echo the request (the direct OpenAI-compatible fallback) are unaffected —
+// both values agree.
+func resolvedModel(fromResponse, requested string) string {
+	if fromResponse == "" {
+		return requested
+	}
+	return fromResponse
 }
 
 // generateJSON is the shared SDK glue for IdentifyText/IdentifyPhoto/
@@ -353,12 +509,13 @@ func (p OpenAIProvider) generateJSON(
 	userParts []openai.ChatCompletionContentPartUnionParam,
 	schemaName string,
 	schema map[string]any,
+	temperature param.Opt[float64],
 ) ([]byte, ai.Usage, error) {
 	start := time.Now()
 
-	params := p.buildParams(model, systemPrompt, userParts, schemaName, schema)
+	params := p.buildParams(model, systemPrompt, userParts, schemaName, schema, temperature)
 
-	resp, err := p.client.Chat.Completions.New(ctx, params)
+	resp, err := p.client.Chat.Completions.New(ctx, params, p.requestOptions(ctx)...)
 
 	usage := ai.Usage{
 		Provider:  p.Name(),
@@ -369,6 +526,7 @@ func (p OpenAIProvider) generateJSON(
 	if resp != nil {
 		usage.TokensIn = int(resp.Usage.PromptTokens)
 		usage.TokensOut = int(resp.Usage.CompletionTokens)
+		usage.Model = resolvedModel(resp.Model, model)
 	}
 	if err != nil {
 		return nil, usage, fmt.Errorf("openai: chat completion: %w", err)
@@ -378,6 +536,13 @@ func (p OpenAIProvider) generateJSON(
 	}
 
 	return []byte(resp.Choices[0].Message.Content), usage, nil
+}
+
+func (p OpenAIProvider) requestOptions(ctx context.Context) []option.RequestOption {
+	if p.options == nil {
+		return nil
+	}
+	return p.options(ctx)
 }
 
 // Compile-time assertion that OpenAIProvider satisfies ai.Provider.

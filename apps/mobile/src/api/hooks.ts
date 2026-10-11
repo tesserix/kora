@@ -1,18 +1,22 @@
 import { useEffect } from "react";
 import {
   useMutation,
+  keepPreviousData,
   useQueries,
   useQuery,
   useQueryClient,
+  type QueryClient,
   type UseMutationResult,
   type UseQueryResult,
 } from "@tanstack/react-query";
 import * as Crypto from "expo-crypto";
 import { localDateNow } from "@/lib/localDate";
-import { apiFetch, apiFetchEnvelope, apiFetchMultipart, currentUserId, isNetworkError, TimeoutError } from "@/lib/api";
-import { buildCaptureForm, normalizeResolution, type ResolveFile } from "./resolveWire";
+import { AGENT_REQUEST_TIMEOUT_MS, apiFetch, apiFetchEnvelope, apiFetchMultipart, currentUserId, isNetworkError, TimeoutError } from "@/lib/api";
+import { buildCaptureForm, normalizeCaptureMessage, normalizeResolution, type ResolveFile } from "./resolveWire";
+import { parseLabelAnalysis } from "./labelAnalysis";
 import { isOnline } from "@/offline/connectivity";
 import { reconcileWeightReminder } from "@/reminders/reconcileWeightReminder";
+import { activateMealPlanProjection } from "@/reminders/mealPlanProjection";
 import {
   foodsFromMemory,
   foodsFromPins,
@@ -34,7 +38,10 @@ import { NoOwnerError, resolveOwnerId } from "@/offline/owner";
 import type { MealSlot } from "@/lib/mealSlot";
 import type {
   AppNotification,
+  AIOrder,
+  AIPack,
   AIUsageStatus,
+  BodyCompositionReadResult,
   Candidate,
   ChallengeDetail,
   ChallengeSummary,
@@ -43,9 +50,13 @@ import type {
   CoachThreadResponse,
   CoachTurn,
   DashboardSummary,
+  FastingInterval,
   FeedbackCreated,
   FoodItem,
+  Circle,
   Friend,
+  FriendBodyEntry,
+  Membership,
   FriendRequests,
   FriendsProgress,
   FoodLog,
@@ -54,9 +65,23 @@ import type {
   GroupProgress,
   GroupSummary,
   LogSource,
+  LookupResult,
+  MealPlanProposal,
   Memory,
   Metric,
+  MentorCheckIn,
+  MentorCheckInInput,
+  MentorCommitment,
+  MentorCommitmentInput,
+  MentorFoodRuleInput,
+  MentorFoodRules,
+  MentorHealthDayInput,
+  MentorProfile,
+  MentorProfileInput,
+  MentorProposalAcceptance,
   MyFriendCode,
+  MyHandle,
+  ShareCategory,
   OnboardingInput,
   LogRecipeResult,
   PinnedFood,
@@ -68,7 +93,12 @@ import type {
   SaveRecipeBody,
   SubmitFeedbackInput,
   WeightEntry,
+  WeightSource,
+  WeightTrend,
+  AIPacksResponse,
 } from "./types";
+import type { AddWeightPayload } from "@/lib/bodyCompositionForm";
+import type { CompositionMetricKey } from "@/lib/bodyCompositionFields";
 
 // upsertFoods is a best-effort cache fill: a failure (e.g. AsyncStorage
 // quota) must never surface to the user, and — this codebase has no logging
@@ -95,6 +125,78 @@ export function useAIUsage() {
     queryKey: aiUsageQueryKey(ownerID),
     queryFn: () => apiFetch("/v1/ai/usage") as Promise<AIUsageStatus>,
   });
+}
+
+function aiOrdersQueryKey(ownerID: string | null = currentUserId()) {
+  return ["ai-orders", ownerID] as const;
+}
+
+// The catalogue is the same for everyone and changes only with a deploy, so it
+// is cached for the session rather than refetched per visit.
+//
+// useAIPacks and useAIPaymentProvider share ONE query key, so the two selectors
+// below read the same cached response rather than issuing a second request for
+// a field that arrived with the first.
+const aiPacksQuery = {
+  queryKey: ["ai-packs"],
+  queryFn: async () => (await apiFetch("/v1/ai/packs")) as AIPacksResponse,
+  staleTime: 60 * 60 * 1000,
+} as const;
+
+export function useAIPacks(): UseQueryResult<AIPack[], Error> {
+  return useQuery({ ...aiPacksQuery, select: (data: AIPacksResponse) => data.packs });
+}
+
+// useAIPaymentProvider returns the processor that will actually take the card,
+// as the SERVER reports it. The app must never hardcode this: which gateway is
+// live is a config decision (kora#478), and naming the wrong one on the payment
+// screen is wrong exactly where trust matters most.
+//
+// Undefined when the API does not report one — older builds, or a gateway that
+// never set it. Callers fall back to wording that names nobody rather than
+// guessing.
+export function useAIPaymentProvider(): UseQueryResult<string | undefined, Error> {
+  return useQuery({ ...aiPacksQuery, select: (data: AIPacksResponse) => data.provider });
+}
+
+export function useAIOrders(): UseQueryResult<AIOrder[], Error> {
+  const ownerID = currentUserId();
+  return useQuery({
+    queryKey: aiOrdersQueryKey(ownerID),
+    queryFn: async () => ((await apiFetch("/v1/ai/orders")) as { orders: AIOrder[] }).orders,
+  });
+}
+
+export function useCreateAIOrder(): UseMutationResult<AIOrder, Error, { pack_code: string; phone: string; email?: string }> {
+  const qc = useQueryClient();
+  const ownerID = currentUserId();
+  return useMutation({
+    mutationFn: (body) =>
+      apiFetch("/v1/ai/orders", { method: "POST", body: JSON.stringify(body) }) as Promise<AIOrder>,
+    onSuccess: () => qc.invalidateQueries({ queryKey: aiOrdersQueryKey(ownerID) }),
+  });
+}
+
+// Polls one order while it is still open. The webhook is what actually settles
+// a payment, so the app cannot know when to stop asking except by asking: the
+// poll ends the moment the order leaves `created`, and the AI allowance is
+// refreshed then so a paid pack shows up without a manual pull.
+export function useAIOrder(orderID: string | null): UseQueryResult<AIOrder, Error> {
+  const qc = useQueryClient();
+  const ownerID = currentUserId();
+  const query = useQuery({
+    queryKey: ["ai-order", ownerID, orderID],
+    queryFn: () => apiFetch(`/v1/ai/orders/${orderID}`) as Promise<AIOrder>,
+    enabled: Boolean(orderID),
+    refetchInterval: (q) => (q.state.data && q.state.data.status !== "created" ? false : 3000),
+  });
+  const settled = query.data && query.data.status !== "created" ? query.data.status : null;
+  useEffect(() => {
+    if (!settled) return;
+    qc.invalidateQueries({ queryKey: aiUsageQueryKey(ownerID) });
+    qc.invalidateQueries({ queryKey: aiOrdersQueryKey(ownerID) });
+  }, [settled, ownerID, qc]);
+  return query;
 }
 
 function coachNudgesQueryKey(ownerID: string | null = currentUserId()) {
@@ -134,7 +236,14 @@ export function useCoachAsk(): UseMutationResult<CoachAnswer, Error, string> {
       const createdAt = new Date().toISOString();
       const exchange: CoachTurn[] = [
         { role: "user", text: question, citations: [], created_at: createdAt },
-        { role: "otto", text: answer.answer, citations: answer.citations ?? [], created_at: createdAt },
+        {
+          role: "otto",
+          text: answer.answer,
+          citations: answer.citations ?? [],
+          created_at: createdAt,
+          agent: answer.agent?.name,
+          proposal: answer.proposal ?? undefined,
+        },
       ];
       qc.setQueryData<CoachThreadResponse>(coachThreadQueryKey(ownerID), (current) => ({
         turns: [...(current?.turns ?? []), ...exchange],
@@ -164,6 +273,191 @@ export function useSubmitOnboarding() {
     // refetch lands. /v1/onboarding returns the same full user row as /v1/me, so
     // the response is safe to use as the profile outright.
     onSuccess: (profile) => qc.setQueryData(["profile"], profile),
+  });
+}
+
+function mentorQueryKey(
+  resource: "profile" | "commitments" | "food-rules",
+  ownerID: string | null,
+) {
+  return ["mentor", resource, ownerID] as const;
+}
+
+export function useMentorProfile(): UseQueryResult<MentorProfile, Error> {
+  const ownerID = currentUserId();
+  return useQuery({
+    queryKey: mentorQueryKey("profile", ownerID),
+    queryFn: () => apiFetch("/v1/mentor/profile") as Promise<MentorProfile>,
+    enabled: ownerID !== null,
+  });
+}
+
+export function useMentorCommitments(): UseQueryResult<MentorCommitment[], Error> {
+  const ownerID = currentUserId();
+  return useQuery({
+    queryKey: mentorQueryKey("commitments", ownerID),
+    queryFn: () => apiFetch("/v1/mentor/commitments") as Promise<MentorCommitment[]>,
+    enabled: ownerID !== null,
+  });
+}
+
+export function usePutMentorProfile(): UseMutationResult<MentorProfile, Error, MentorProfileInput> {
+  const qc = useQueryClient();
+  const ownerID = currentUserId();
+  return useMutation({
+    mutationFn: (input) => apiFetch("/v1/mentor/profile", {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }) as Promise<MentorProfile>,
+    onSuccess: (profile) => qc.setQueryData(mentorQueryKey("profile", ownerID), profile),
+  });
+}
+
+export function useMentorFoodRules(): UseQueryResult<MentorFoodRules, Error> {
+  const ownerID = currentUserId();
+  return useQuery({
+    queryKey: mentorQueryKey("food-rules", ownerID),
+    queryFn: () => apiFetch("/v1/mentor/food-rules") as Promise<MentorFoodRules>,
+    enabled: ownerID !== null,
+  });
+}
+
+// Every food-rule mutation refetches rather than patching the cache: the
+// server derives rules from the diet pattern and free text too, so its list is
+// the only complete one.
+function useMentorFoodRuleMutation<TVariables>(
+  request: (variables: TVariables) => Promise<unknown>,
+): UseMutationResult<unknown, Error, TVariables> {
+  const qc = useQueryClient();
+  const ownerID = currentUserId();
+  return useMutation({
+    mutationFn: request,
+    onSuccess: () => qc.invalidateQueries({ queryKey: mentorQueryKey("food-rules", ownerID) }),
+  });
+}
+
+export function usePutMentorFoodRules() {
+  return useMentorFoodRuleMutation((rules: MentorFoodRuleInput[]) =>
+    apiFetch("/v1/mentor/food-rules", {
+      method: "PUT",
+      body: JSON.stringify({ rules }),
+    }));
+}
+
+export function useConfirmMentorFoodRule() {
+  return useMentorFoodRuleMutation((subject: string) =>
+    apiFetch(`/v1/mentor/food-rules/${encodeURIComponent(subject)}/confirm`, { method: "PUT" }));
+}
+
+export function useDeleteMentorFoodRule() {
+  return useMentorFoodRuleMutation((subject: string) =>
+    apiFetch(`/v1/mentor/food-rules/${encodeURIComponent(subject)}`, { method: "DELETE" }));
+}
+
+function cacheMentorCommitment(
+  qc: QueryClient,
+  ownerID: string | null,
+  commitment: MentorCommitment,
+): void {
+  qc.setQueryData<MentorCommitment[]>(mentorQueryKey("commitments", ownerID), (current) => {
+    if (!current) return [commitment];
+    const index = current.findIndex((item) => item.id === commitment.id);
+    if (index < 0) return [...current, commitment];
+    return current.map((item) => item.id === commitment.id ? commitment : item);
+  });
+}
+
+export function usePutMentorCommitment(): UseMutationResult<
+  MentorCommitment,
+  Error,
+  MentorCommitmentInput & { id: string }
+> {
+  const qc = useQueryClient();
+  const ownerID = currentUserId();
+  return useMutation({
+    mutationFn: ({ id, ...input }) => apiFetch(`/v1/mentor/commitments/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }) as Promise<MentorCommitment>,
+    onSuccess: (commitment) => cacheMentorCommitment(qc, ownerID, commitment),
+  });
+}
+
+export function useAcceptMentorProposal(): UseMutationResult<
+  MentorCommitment,
+  Error,
+  MentorProposalAcceptance
+> {
+  const qc = useQueryClient();
+  const ownerID = currentUserId();
+  return useMutation({
+    mutationFn: ({ proposalId, commitmentId, ...input }) => apiFetch(`/v1/mentor/proposals/${proposalId}/accept`, {
+      method: "PUT",
+      body: JSON.stringify({ commitment_id: commitmentId, ...input }),
+    }) as Promise<MentorCommitment>,
+    onSuccess: (commitment) => {
+      cacheMentorCommitment(qc, ownerID, commitment);
+      qc.invalidateQueries({ queryKey: coachThreadQueryKey(ownerID) });
+    },
+  });
+}
+
+/** Records approval, activates the owner-scoped reminder projection, and
+ *  refreshes the persisted coach thread. */
+export function useAcceptMealPlan(): UseMutationResult<MealPlanProposal, Error, string> {
+  const qc = useQueryClient();
+  const ownerID = currentUserId();
+  return useMutation({
+    mutationFn: (planId: string) =>
+      apiFetch(`/v1/coach/plans/${planId}/accept`, { method: "PUT" }).then(
+        (data) => (data as { plan: MealPlanProposal }).plan,
+      ),
+    onSuccess: async (plan) => {
+      if (ownerID) {
+        try {
+          await activateMealPlanProjection(ownerID, plan);
+          await reconcileWeightReminder();
+        } catch (err) {
+          console.warn("reminders: meal plan projection failed after accept", err);
+        }
+      }
+      qc.invalidateQueries({ queryKey: coachThreadQueryKey(ownerID) });
+    },
+  });
+}
+
+export function usePutMentorCheckIn(): UseMutationResult<
+  MentorCheckIn,
+  Error,
+  MentorCheckInInput & { commitmentId: string }
+> {
+  const qc = useQueryClient();
+  const ownerID = currentUserId();
+  return useMutation({
+    mutationFn: ({ commitmentId, ...input }) => apiFetch(`/v1/mentor/commitments/${commitmentId}/check-ins`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }) as Promise<MentorCheckIn>,
+    onSuccess: () => qc.invalidateQueries({ queryKey: mentorQueryKey("commitments", ownerID) }),
+  });
+}
+
+export function useSyncMentorHealth(): UseMutationResult<
+  { synced: number },
+  Error,
+  { days: MentorHealthDayInput[] }
+> {
+  return useMutation({
+    mutationFn: (input) => apiFetch("/v1/mentor/health/days", {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }) as Promise<{ synced: number }>,
+  });
+}
+
+export function useDeleteMentorHealth(): UseMutationResult<void, Error, void> {
+  return useMutation({
+    mutationFn: () => apiFetch("/v1/mentor/health/days", { method: "DELETE" }) as Promise<void>,
   });
 }
 
@@ -281,6 +575,9 @@ export type CreateLogInput = {
    * send it on an edit/PATCH path.
    */
   portion_assumed?: boolean;
+  /** The resolution and item slot this log keeps, so the server can score the AI (kora#556). */
+  resolution_id?: string;
+  resolution_index?: number;
 };
 
 export function useCreateLog() {
@@ -619,7 +916,31 @@ export function useDashboard(date: string) {
 // A day with `consumed.kcal === 0` is treated as unlogged, not "zero calories
 // eaten" — including it would drag the average down and an all-zero week
 // would otherwise render a fabricated-looking "0" instead of an honest "—".
-export function useAvgIntake7d(endDate: string): { avg: number | null; series: number[]; isLoading: boolean } {
+export function useAvgIntake7d(endDate: string): {
+  avg: number | null;
+  series: number[];
+  /**
+   * The same seven days, POSITIONALLY — index 0 is six days ago, index 6 is
+   * `endDate` — with `null` for any day that failed to load or holds no log.
+   *
+   * `series` cannot be used to draw a per-day chart: it is a FILTERED list, so
+   * a failed or unlogged Monday shortens it and every later day slides one
+   * slot earlier. A caller padding it back to seven then attributes Friday's
+   * calories to Thursday, and labels the last bar "today" when today is the
+   * day that dropped out. `days` keeps the slot and says "nothing here",
+   * which is a different claim from "zero calories" and must stay one.
+   */
+  days: (number | null)[];
+  isLoading: boolean;
+  /** Every day failed. A PARTIAL failure stays visible as nulls in `days`. */
+  isError: boolean;
+  /**
+   * Refetches all seven days. Lives here rather than the caller because this
+   * hook fans out into seven separate queries — a caller retrying would have
+   * to know the key family, which is this module's business, not a screen's.
+   */
+  refetch: () => void;
+} {
   const dates: string[] = [];
   const end = new Date(`${endDate}T00:00:00`);
   for (let i = 6; i >= 0; i--) {
@@ -636,12 +957,18 @@ export function useAvgIntake7d(endDate: string): { avg: number | null; series: n
   });
 
   const isLoading = results.some((r) => r.isLoading);
-  const series = results
-    .filter((r) => r.isSuccess && typeof r.data?.consumed?.kcal === "number" && r.data.consumed.kcal > 0)
-    .map((r) => r.data!.consumed.kcal);
+  const hasKcal = (r: (typeof results)[number]) =>
+    r.isSuccess && typeof r.data?.consumed?.kcal === "number" && r.data.consumed.kcal > 0;
+  const series = results.filter(hasKcal).map((r) => r.data!.consumed.kcal);
+  // Positional twin of `series` — same order as `dates`, holes preserved.
+  const days = results.map((r) => (hasKcal(r) ? r.data!.consumed.kcal : null));
   const avg = series.length > 0 ? Math.round(series.reduce((sum, kcal) => sum + kcal, 0) / series.length) : null;
+  const isError = results.length > 0 && results.every((r) => r.isError);
+  const refetch = () => {
+    for (const r of results) void r.refetch();
+  };
 
-  return { avg, series, isLoading };
+  return { avg, series, days, isLoading, isError, refetch };
 }
 
 export function useAddWater() {
@@ -653,6 +980,36 @@ export function useAddWater() {
         body: JSON.stringify({ volume_ml, logged_at, local_date: localDateNow() }),
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["dashboard"] }),
+  });
+}
+
+// current/end can legitimately resolve `data: null` (no open fast). apiFetch's
+// `envelope.data ?? envelope` falls through on a null data field and hands
+// back the WHOLE envelope object instead — see src/lib/api.ts's own test
+// ("apiFetch returns the whole body when data is explicitly null"). Reading
+// apiFetchEnvelope directly here, like useEditLog does, is what keeps a real
+// null a null instead of a truthy `{ data: null }` object.
+export function useCurrentFast(): UseQueryResult<FastingInterval | null, Error> {
+  return useQuery({
+    queryKey: ["fasting-current"],
+    queryFn: async () => (await apiFetchEnvelope<FastingInterval | null>("/v1/fasting/current")).data,
+  });
+}
+
+export function useStartFast(): UseMutationResult<FastingInterval, Error, void> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiFetch("/v1/fasting/start", { method: "POST" }) as Promise<FastingInterval>,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["fasting-current"] }),
+  });
+}
+
+export function useEndFast(): UseMutationResult<FastingInterval | null, Error, void> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () =>
+      (await apiFetchEnvelope<FastingInterval | null>("/v1/fasting/end", { method: "POST" })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["fasting-current"] }),
   });
 }
 
@@ -794,6 +1151,26 @@ export function useResolveText() {
   });
 }
 
+/** Posts what the user typed to the composer's single entry point, which
+ *  decides whether it is food to log or a question to answer before anything
+ *  acts on it (kora#264). useResolveText stays for the paths that are food by
+ *  construction: offline drain and the ask-again sheet. */
+export function useCaptureMessage() {
+  const refreshAIUsage = useRefreshAIUsage();
+  return useMutation({
+    mutationFn: ({ input: text, signal }: ResolveVars<string>) =>
+      apiFetch(
+        "/v1/capture/message",
+        { method: "POST", body: JSON.stringify({ text }), signal },
+        // The agent chain runs three sequential model calls here; the default
+        // 25s deadline killed every week-long plan request. See
+        // AGENT_REQUEST_TIMEOUT_MS.
+        { timeoutMs: AGENT_REQUEST_TIMEOUT_MS },
+      ).then(normalizeCaptureMessage),
+    onSettled: refreshAIUsage,
+  });
+}
+
 // A barcode the device has resolved once already is answerable with no
 // network — that is the whole reason getFoodByBarcode and the "full" fidelity
 // tier exist. The adapter marks the result as cache-sourced so it can never be
@@ -858,14 +1235,75 @@ export function useResolvePhoto() {
   });
 }
 
+export function useReadLabel() {
+  const refreshAIUsage = useRefreshAIUsage();
+  return useMutation({
+    mutationFn: ({ input: file, signal }: ResolveVars<ResolveFile>) =>
+      apiFetchMultipart("/v1/resolve/label", buildCaptureForm(file), { signal }).then(parseLabelAnalysis),
+    retry: false,
+    onSettled: refreshAIUsage,
+  });
+}
+
+// POST /v1/body-composition/read (kora#314, PR B): reads a smart-scale
+// screenshot with the vision model and returns whatever it could legibly
+// see — see api/internal/bodyread. It WRITES NOTHING; bodyread never touches
+// internal/tracking, and the uploaded image itself is discarded after the
+// provider call (service.go's own comment: "image is never written to disk
+// or any persistent store beyond this point"). Nothing is saved until the
+// confirmed reading goes through useAddWeight below. Multipart, like
+// useResolvePhoto/useParseRecipe's photo branch, for the same reason: apiFetch
+// forces a JSON content-type that would break the multipart boundary fetch()
+// sets for a FormData body. onSettled refreshes AI usage because this spends
+// the same quota those two endpoints do.
+export function useReadBodyComposition() {
+  const refreshAIUsage = useRefreshAIUsage();
+  return useMutation({
+    mutationFn: (file: ResolveFile) =>
+      apiFetchMultipart("/v1/body-composition/read", buildCaptureForm(file)) as Promise<BodyCompositionReadResult>,
+    onSettled: refreshAIUsage,
+  });
+}
+
+/**
+ * What POST /v1/weight accepts.
+ *
+ * Widened for kora#45: the same endpoint now takes optional body composition
+ * alongside the weight. `source` and every metric are OPTIONAL and are spread
+ * through untouched — a key that is absent here is absent on the wire and
+ * lands as SQL NULL, which is the whole point (a body fat of 0.0% is a
+ * measurement, "not measured" is not). Do not default any of them in.
+ *
+ * `local_date` (kora#314) overrides the day this entry is filed under — see
+ * useAddWeight's own comment for the bug this field exists to prevent.
+ */
+export type AddWeightVars = Omit<AddWeightPayload, "source"> & {
+  source?: WeightSource;
+  logged_at?: string;
+  local_date?: string;
+};
+
 export function useAddWeight() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ weight_kg, logged_at }: { weight_kg: number; logged_at?: string }) =>
-      apiFetch("/v1/weight", {
+    mutationFn: (vars: AddWeightVars) => {
+      // THE TRAP (kora#314): this used to hardcode `local_date: localDateNow()`
+      // unconditionally, spread in LAST, which silently clobbered any
+      // `local_date` a caller supplied. BodyCompositionForm's date row lets a
+      // user confirm a scale reading dated days ago — if that override were
+      // dropped here, the entry would end up filed under TODAY's calendar day
+      // (local_date) while its own timestamp (logged_at) said otherwise, which
+      // is the exact mis-filing #314's date row exists to prevent (see
+      // internal/localday and kora#84). `vars.local_date` now wins when the
+      // caller supplies one; every existing caller that never sets it — plain
+      // WeightLogSheet weigh-ins, and BodyCompositionSheet before this field
+      // existed — keeps getting today's date, unchanged.
+      const local_date = vars.local_date ?? localDateNow();
+      return apiFetch("/v1/weight", {
         method: "POST",
-        body: JSON.stringify({ weight_kg, logged_at, local_date: localDateNow() }),
-      }),
+        body: JSON.stringify({ ...vars, local_date }),
+      });
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["weight"] });
       // The user just weighed in — re-arm the one-shot weight reminder trigger
@@ -880,16 +1318,61 @@ export function useAddWeight() {
 }
 
 const WEIGHT_RANGE_DAYS = { "1W": 7, "1M": 30, "3M": 90, "1Y": 365 } as const;
+
+/**
+ * The exclusive end of `d`'s UTC day (kora#378).
+ *
+ * A whole UTC day rather than a local one, deliberately, and matching the
+ * server's own default for an omitted `to`: erring wide only ever includes an
+ * entry the user themselves logged, while erring narrow hides their data.
+ */
+function endOfUTCDay(d: Date): Date {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1));
+}
 export type WeightRange = keyof typeof WEIGHT_RANGE_DAYS;
 
 export function useWeightSeries(range: WeightRange) {
   return useQuery({
     queryKey: ["weight", range],
+    // Each range is its own cache entry, so switching to one not yet fetched
+    // leaves `data` undefined until the request lands — and Trends reads
+    // `data ?? []`, which put the card into its "No weigh-ins yet" empty
+    // state for a beat on every range switch. Keeping the previous range's
+    // readings on screen while the new ones load means the card never claims
+    // the user has no weigh-ins on the way to showing that they do.
+    placeholderData: keepPreviousData,
     queryFn: () => {
-      const to = new Date();
+      // The window reaches the END of today, not the current instant
+      // (kora#378). A date-only weigh-in is stamped midday UTC, so for most
+      // of the day `to = now` excluded the user's own morning entry from the
+      // series meant to display it -- it saved, then simply did not appear.
+      // `from` stays relative to `to`, so each range still spans exactly the
+      // number of days it names.
+      const to = endOfUTCDay(new Date());
       const from = new Date(to.getTime() - WEIGHT_RANGE_DAYS[range] * 24 * 60 * 60 * 1000);
       return apiFetch(`/v1/weight?from=${from.toISOString()}&to=${to.toISOString()}`) as Promise<WeightEntry[]>;
     },
+  });
+}
+
+// Deliberately no `placeholderData: keepPreviousData` here, unlike
+// useWeightSeries above. Carrying the previous metric's rate across a chip
+// switch would show a WRONG NUMBER under the RIGHT LABEL — e.g. the waist
+// rate rendered while the label already reads "Body Fat" — which is worse
+// than a brief empty state.
+export function useWeightTrend(metric: CompositionMetricKey, range: WeightRange, enabled = true) {
+  return useQuery({
+    // Keyed by BOTH, so switching a chip cannot show the previous metric's
+    // rate under the new metric's name.
+    queryKey: ["weight-trend", metric, range],
+    queryFn: () =>
+      apiFetch(`/v1/weight/trend?metric=${metric}&range=${range}`) as Promise<WeightTrend>,
+    // kora#399. This request is not cheap on the server: it grounds a full
+    // coach context (dashboard, logs, memory, mentor) to obtain the risk
+    // signals the guardrail needs. Callers pass false when no rate can
+    // possibly render — the fit needs four readings, so a user with none is
+    // paying the heaviest read in the API for a figure that cannot appear.
+    enabled,
   });
 }
 
@@ -919,7 +1402,10 @@ export function useFriendRequests() {
 export function useSendFriendRequest() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: { email?: string; code?: string }) =>
+    // Exactly one of email, code or handle goes on the wire -- the server
+    // returns invalid_input (ErrBadInput) for two or zero (kora#449 task 13b,
+    // api/internal/social/service.go's SendRequest).
+    mutationFn: (input: { email?: string; code?: string; handle?: string }) =>
       apiFetch("/v1/friends/requests", { method: "POST", body: JSON.stringify(input) }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["friend-requests"] });
@@ -962,22 +1448,181 @@ export function useMyFriendCode() {
   });
 }
 
+// Handles (kora#449). Lookup is a MUTATION despite reading: a query keyed on
+// the typed text would fire on every keystroke against the one rate-limited
+// endpoint in the API, and that limiter is what stands between exact-match
+// lookup and enumeration. The user asks once, by pressing a button.
+export function useLookupHandle() {
+  return useMutation({
+    mutationFn: (handle: string) =>
+      apiFetch(`/v1/users/lookup?handle=${encodeURIComponent(handle)}`) as Promise<LookupResult>,
+  });
+}
+
+export function useMyHandle() {
+  return useQuery({
+    queryKey: ["my-handle"],
+    queryFn: () => apiFetch("/v1/me/handle") as Promise<MyHandle>,
+  });
+}
+
+export function useSetHandle() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (handle: string) =>
+      apiFetch("/v1/me/handle", {
+        method: "PUT",
+        body: JSON.stringify({ handle }),
+      }) as Promise<MyHandle>,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["my-handle"] });
+    },
+  });
+}
+
+export function useClearHandle() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiFetch("/v1/me/handle", { method: "DELETE" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["my-handle"] });
+    },
+  });
+}
+
+// Both avatar mutations invalidate every surface that renders a face: the
+// profile itself (["profile"], not ["me"] — GET /v1/me is keyed "profile"),
+// the friends list, the friend-requests list (kora#454: the incoming-request
+// row now renders an Avatar too, so it reads avatar_url the same as
+// ["friends"] does), the circles audit, and the memberships list (renders
+// share.MemberView, which carries avatar_url) all read an avatar_url, and a
+// stale one shows the old picture until the next cold start.
+//
+// This is the exact "cannot catch a future fifth surface" limitation this
+// function's own tests predicted (kora#454) — friend-requests became an
+// avatar-bearing surface in #451 and this list did not grow to match. Adding
+// a surface here does not, by itself, protect the next one; whoever adds a
+// new avatar-rendering query key still has to remember this list exists.
+function invalidateAvatarSurfaces(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: ["profile"] });
+  qc.invalidateQueries({ queryKey: ["friends"] });
+  qc.invalidateQueries({ queryKey: ["friend-requests"] });
+  qc.invalidateQueries({ queryKey: ["circles"] });
+  qc.invalidateQueries({ queryKey: ["memberships"] });
+}
+
+export function useUploadAvatar() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (form: FormData) =>
+      apiFetchMultipart("/v1/me/avatar", form, { method: "PUT" }) as Promise<{ avatar_url: string }>,
+    onSuccess: () => invalidateAvatarSurfaces(qc),
+  });
+}
+
+export function useDeleteAvatar() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiFetch("/v1/me/avatar", { method: "DELETE" }),
+    onSuccess: () => invalidateAvatarSurfaces(qc),
+  });
+}
+
+// Sharing circles (kora#326/#437). Every mutation invalidates ["circles"]:
+// the audit view is computed from that one response, so a stale cache after a
+// category change would show someone the wrong answer to "who can see my body
+// metrics" — the one question this surface exists to answer truthfully.
+export function useCircles() {
+  return useQuery({
+    queryKey: ["circles"],
+    queryFn: () => apiFetch("/v1/share/circles") as Promise<Circle[]>,
+  });
+}
+
+// Circles OTHER people have put you in (kora#440). Separate query key from
+// ["circles"]: leaving invalidates both, because a membership disappearing is
+// not a change to any circle you own.
+// Another person's body metrics, when they have granted it (kora#441).
+//
+// A 404 is NOT an error state: the server returns it for not-shared, not a
+// friend, no such person and reading yourself, deliberately indistinguishable.
+// `retry: false` matters — retrying a 404 would burn requests re-asking a
+// settled question, and `staleTime: 0` matters more: revocation is immediate
+// server-side, so a cached copy outliving a revoke is the one way the client
+// can undermine the whole permission model.
+export function useFriendBody(userId: string | undefined) {
+  return useQuery({
+    queryKey: ["friend-body", userId],
+    enabled: Boolean(userId),
+    retry: false,
+    staleTime: 0,
+    gcTime: 0,
+    queryFn: () => apiFetch(`/v1/friends/${userId}/body`) as Promise<FriendBodyEntry[]>,
+  });
+}
+
+export function useMemberships() {
+  return useQuery({
+    queryKey: ["memberships"],
+    queryFn: () => apiFetch("/v1/share/memberships") as Promise<Membership[]>,
+  });
+}
+
+export function useLeaveCircle() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (circleId: string) =>
+      apiFetch(`/v1/share/circles/${circleId}/leave`, { method: "POST" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["memberships"] });
+      qc.invalidateQueries({ queryKey: ["circles"] });
+    },
+  });
+}
+
+function useCircleMutation<V>(fn: (vars: V) => Promise<unknown>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["circles"] }),
+  });
+}
+
+export function useCreateCircle() {
+  return useCircleMutation((name: string) =>
+    apiFetch("/v1/share/circles", { method: "POST", body: JSON.stringify({ name }) }),
+  );
+}
+
+export function useDeleteCircle() {
+  return useCircleMutation((id: string) => apiFetch(`/v1/share/circles/${id}`, { method: "DELETE" }));
+}
+
+export function useAddCircleMember() {
+  return useCircleMutation(({ circleId, userId }: { circleId: string; userId: string }) =>
+    apiFetch(`/v1/share/circles/${circleId}/members`, { method: "POST", body: JSON.stringify({ user_id: userId }) }),
+  );
+}
+
+export function useRemoveCircleMember() {
+  return useCircleMutation(({ circleId, userId }: { circleId: string; userId: string }) =>
+    apiFetch(`/v1/share/circles/${circleId}/members/${userId}`, { method: "DELETE" }),
+  );
+}
+
+export function useSetCircleCategories() {
+  return useCircleMutation(({ circleId, categories }: { circleId: string; categories: ShareCategory[] }) =>
+    apiFetch(`/v1/share/circles/${circleId}/categories`, {
+      method: "PUT",
+      body: JSON.stringify({ categories }),
+    }),
+  );
+}
+
 export function useFriendsProgress() {
   return useQuery({
     queryKey: ["friends-progress"],
     queryFn: () => apiFetch("/v1/friends/progress") as Promise<FriendsProgress>,
-  });
-}
-
-export function useSetShareProgress() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (share_progress: boolean) =>
-      apiFetch("/v1/me/share-progress", { method: "PATCH", body: JSON.stringify({ share_progress }) }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["profile"] });
-      qc.invalidateQueries({ queryKey: ["friends-progress"] });
-    },
   });
 }
 
@@ -1004,6 +1649,33 @@ export function storeAppleAuthorization(authorization_code: string): Promise<unk
 // request and nothing to forge. Returns 204 with no body.
 export function deleteAccount(): Promise<unknown> {
   return apiFetch("/v1/me", { method: "DELETE" });
+}
+
+// One user's complete export (kora#24). A plain function for the same reason
+// deleteAccount is one: the result is written to a file and handed to the
+// share sheet, so there is nothing to cache and nothing to invalidate.
+//
+// The response is NOT httpx.OK's envelope — it is its own document, and its
+// table map is deliberately keyed `tables` rather than `data`. apiFetch
+// returns `envelope.data ?? envelope`, so a `data` key on the server side
+// would be unwrapped here and format_version/exported_at/counts/redacted
+// would vanish with nothing failing. Keep this type and the Go
+// export.Document in step; nothing across this wire is checked at compile
+// time in either direction.
+export type DataExport = {
+  format_version: number;
+  exported_at: string;
+  user_id: string;
+  redacted: { table: string; column: string; reason: string }[];
+  counts: Record<string, number>;
+  tables: Record<string, Record<string, unknown>[]>;
+};
+
+export function fetchDataExport(): Promise<DataExport> {
+  // A generous timeout: this is ~40 queries and the whole of one account, and
+  // it runs once. The default would abort a large account's export and report
+  // it as a network failure.
+  return apiFetch("/v1/me/export", {}, { timeoutMs: 60_000 }) as Promise<DataExport>;
 }
 
 export function useGroups() {

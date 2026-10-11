@@ -45,8 +45,7 @@ type MemberView struct {
 
 // MemberProgressRow feeds the group leaderboard (mapped to compare.Member in the handler).
 type MemberProgressRow struct {
-	ID            uuid.UUID
-	DisplayName   string
-	ShareProgress bool
-	TargetKcal    float64
+	ID          uuid.UUID
+	DisplayName string
+	TargetKcal  float64
 }

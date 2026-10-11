@@ -22,11 +22,36 @@ jest.mock("@/api/hooks", () => ({
   useDashboard: () => mockDashboard(),
   useProfile: () => ({ data: { weight_kg: 80 } }),
   useWeightSeries: () => mockSeries(),
+  // kora#45 (task 7): Progress now fits a weekly rate alongside the chart.
+  // This file only exercises the load-error path, so a bare "no rate" stub
+  // keeps its render tree happy without a second mocking style.
+  useWeightTrend: () => ({ data: undefined, isSuccess: false }),
   useAddWeight: () => ({ mutate: jest.fn(), isPending: false }),
-  useAvgIntake7d: () => ({ avg: null, series: [], isLoading: false }),
+  useAvgIntake7d: () => ({ avg: null, series: [], days: [], isLoading: false, isError: false, refetch: jest.fn() }),
+  // kora#314 PR C: Progress now mounts LogWeightSheet (Screenshot mode), which
+  // calls this. Not exercised by any test in this file — a bare stub keeps
+  // Progress's render tree happy.
+  useReadBodyComposition: () => ({ mutate: jest.fn(), isPending: false }),
+}));
+
+// See progress.test.tsx's own comment: LogWeightSheet's screenshot mode imports
+// ApiError from "@/lib/api" directly, which pulls in real firebase/auth ESM
+// that Jest cannot parse unmocked.
+jest.mock("@/lib/api", () => ({
+  ApiError: class ApiError extends Error {
+    status: number;
+    constructor(status: number, code: string, message: string) {
+      super(message);
+      this.status = status;
+      this.name = "ApiError";
+    }
+  },
 }));
 
 jest.mock("@/health", () => ({
+  // kora#406: the factory replaces the WHOLE module, so anything the screen
+  // imports must be listed here or it arrives undefined at render.
+  shouldOfferConnect: (status: string) => status !== "authorized",
   useHealth: () => ({ status: "unavailable", steps: null, sleep: null, connect: jest.fn() }),
 }));
 

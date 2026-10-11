@@ -4,8 +4,10 @@ import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react
 import type { ReactNode } from "react";
 import { CACHED_MATCH_TIER } from "@/api/types";
 import type { FoodItem } from "@/api/types";
+import type { CompositionMetricKey } from "@/lib/bodyCompositionFields";
 import { OfflineUnknownBarcodeError } from "@/offline/cachedResolution";
 import {
+  AGENT_REQUEST_TIMEOUT_MS,
   CancelledError,
   NetworkError,
   TimeoutError,
@@ -33,10 +35,13 @@ import {
   useCoachAsk,
   useCoachNudges,
   useCoachThread,
+  useCurrentFast,
   useDashboard,
   useDeleteChallenge,
   useDeleteLog,
   useEditLog,
+  useEndFast,
+  useStartFast,
   useFoodSearch,
   useFriendsProgress,
   useGroupChallenges,
@@ -51,19 +56,21 @@ import {
   useNotifications,
   usePins,
   useProfile,
+  useReadBodyComposition,
   useRenameGroup,
   useRepeatLog,
   useResolveBarcode,
   useResolvePhoto,
+  useCaptureMessage,
   useResolveText,
   useResolveVoice,
   useSavedMeals,
   useSendFriendRequest,
-  useSetShareProgress,
   useSubmitOnboarding,
   useUnfriend,
   useUnreadCount,
   useWeightSeries,
+  useWeightTrend,
 } from "../hooks";
 
 // The reminder scheduler now consults the signed-in user before it (re-)arms
@@ -91,6 +98,9 @@ jest.mock("@/lib/api", () => {
   // be proven NOT to fire for it while it still fires for MockNetworkError.
   class MockCancelledError extends Error {}
   return {
+    // Mirrors the real constant (src/lib/api.ts) so the hook's deadline
+    // argument is asserted against a value, not against undefined.
+    AGENT_REQUEST_TIMEOUT_MS: 90_000,
     apiFetch: jest.fn().mockResolvedValue({ id: "u1", email: "a@b.c", goal: "", onboarded_at: null }),
     currentUserId: jest.fn(() => "user-a"),
     apiFetchEnvelope: jest.fn(),
@@ -283,6 +293,53 @@ test("useResolveText posts phrase to /v1/resolve/text", async () => {
     signal: undefined,
   });
   expect(result.current.data).toEqual(resolution);
+});
+
+// kora#264: the composer's own endpoint, whose reply says what the message
+// WAS. useResolveText stays for the paths that are food by construction.
+test("useCaptureMessage posts text to /v1/capture/message", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({ kind: "resolution", resolution });
+
+  const { result } = await renderHook(() => useCaptureMessage(), { wrapper });
+  result.current.mutate({ input: "2 eggs" });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+  // The third argument is the point of kora#264: this endpoint runs the agent
+  // chain, so it gets the long deadline rather than the 25s default that was
+  // cutting week-long plans off and reporting them as being offline.
+  expect(apiFetch).toHaveBeenCalledWith(
+    "/v1/capture/message",
+    {
+      method: "POST",
+      body: JSON.stringify({ text: "2 eggs" }),
+      signal: undefined,
+    },
+    { timeoutMs: AGENT_REQUEST_TIMEOUT_MS },
+  );
+  expect(result.current.data).toEqual({ kind: "resolution", resolution });
+});
+
+test("useCaptureMessage passes an answer through with its agent", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({
+    kind: "answer",
+    answer: "Here is a week of meals.",
+    citations: null,
+    show_support: false,
+    agent: { name: "Kora Meal Planner", skill: "plan-meals" },
+  });
+
+  const { result } = await renderHook(() => useCaptureMessage(), { wrapper });
+  const data = await result.current.mutateAsync({ input: "plan my meals" });
+
+  expect(data).toEqual({
+    kind: "answer",
+    answer: "Here is a week of meals.",
+    // null on the wire whenever the answer cited nothing — coerced once here,
+    // exactly as normalizeResolution does for candidates.
+    citations: [],
+    show_support: false,
+    agent: { name: "Kora Meal Planner", skill: "plan-meals" },
+  });
 });
 
 test("useResolveText refreshes AI usage after the request settles", async () => {
@@ -509,6 +566,27 @@ test("useResolvePhoto posts to /v1/resolve/photo and returns the normalized reso
   expect(result.current.data).toEqual(resolution);
 });
 
+// kora#314 PR B: reads a smart-scale screenshot, writes nothing. Same
+// multipart shape as useResolvePhoto — this asserts the file is posted to the
+// RIGHT endpoint and the RIGHT-shaped result flows through untouched, which
+// is the only thing this thin wrapper is responsible for; useReadBodyComposition
+// itself does no parsing of the response.
+test("useReadBodyComposition posts to /v1/body-composition/read and returns the reading", async () => {
+  const readResult = {
+    reading: { weight_kg: 70.2, reading_date: "2026-08-19" },
+    dropped_fields: [{ field: "bone_mass_kg", reason: "bone_mass_kg -3.1 is not positive" }],
+    unreadable: false,
+  };
+  (apiFetchMultipart as jest.Mock).mockResolvedValueOnce(readResult);
+
+  const { result } = await renderHook(() => useReadBodyComposition(), { wrapper });
+  result.current.mutate({ uri: "file:///scale.jpg", name: "scale.jpg", type: "image/jpeg" });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+  expect(apiFetchMultipart).toHaveBeenCalledWith("/v1/body-composition/read", expect.any(FormData));
+  expect(result.current.data).toEqual(readResult);
+});
+
 test("useResolveVoice posts to /v1/resolve/voice and returns the normalized resolution", async () => {
   (apiFetchMultipart as jest.Mock).mockResolvedValueOnce(resolution);
 
@@ -620,6 +698,44 @@ test("useAddWater POSTs /v1/water with volume_ml and logged_at", async () => {
   });
 });
 
+test("useStartFast POSTs and invalidates the current fast", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({
+    id: "f1", user_id: "u1", started_at: "2026-08-24T06:00:00Z", local_date: "2026-08-24",
+  });
+  const { result } = await renderHook(() => useStartFast(), { wrapper });
+  result.current.mutate();
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(apiFetch).toHaveBeenCalledWith("/v1/fasting/start", { method: "POST" });
+});
+
+// useCurrentFast reads apiFetchEnvelope directly (not apiFetch) so that a
+// genuinely open-less day resolves to `null`, not the whole `{ data: null }`
+// envelope apiFetch would hand back — see the comment on the hook itself.
+test("useCurrentFast tolerates no open fast", async () => {
+  (apiFetchEnvelope as jest.Mock).mockResolvedValueOnce({ data: null });
+  const { result } = await renderHook(() => useCurrentFast(), { wrapper });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(result.current.data).toBeNull();
+});
+
+test("useCurrentFast returns the open fast when there is one", async () => {
+  (apiFetchEnvelope as jest.Mock).mockResolvedValueOnce({
+    data: { id: "f1", user_id: "u1", started_at: "2026-08-24T06:00:00Z", local_date: "2026-08-24" },
+  });
+  const { result } = await renderHook(() => useCurrentFast(), { wrapper });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(result.current.data).toEqual({ id: "f1", user_id: "u1", started_at: "2026-08-24T06:00:00Z", local_date: "2026-08-24" });
+});
+
+test("useEndFast POSTs, tolerates nothing having been open, and invalidates the current fast", async () => {
+  (apiFetchEnvelope as jest.Mock).mockResolvedValueOnce({ data: null });
+  const { result } = await renderHook(() => useEndFast(), { wrapper });
+  result.current.mutate();
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(apiFetchEnvelope).toHaveBeenCalledWith("/v1/fasting/end", { method: "POST" });
+  expect(result.current.data).toBeNull();
+});
+
 test("useAddWeight POSTs /v1/weight and invalidates weight", async () => {
   (apiFetch as jest.Mock).mockResolvedValueOnce({ id: "w1" });
   const { result } = await renderHook(() => useAddWeight(), { wrapper });
@@ -628,6 +744,30 @@ test("useAddWeight POSTs /v1/weight and invalidates weight", async () => {
   expect(apiFetch).toHaveBeenCalledWith("/v1/weight", {
     method: "POST",
     body: JSON.stringify({ weight_kg: 72.4, logged_at: undefined, local_date: localDateNow() }),
+  });
+});
+
+// THE TRAP (kora#314): useAddWeight used to hardcode `local_date:
+// localDateNow()` unconditionally, spread in LAST, which silently clobbered
+// any local_date the caller supplied. BodyCompositionForm's date row lets a
+// user confirm a scale reading dated days in the past — if this override
+// were ever dropped, the entry would be filed under TODAY's calendar day
+// regardless of what the user confirmed. Mutation-checked: reverting
+// useAddWeight's `vars.local_date ?? localDateNow()` back to the bare
+// `localDateNow()` call turns this red (it asserts a fixed past date the
+// bug's hardcoded value can never produce).
+test("useAddWeight lets a caller-supplied local_date override today's default", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({ id: "w2" });
+  const { result } = await renderHook(() => useAddWeight(), { wrapper });
+  result.current.mutate({ weight_kg: 68.5, logged_at: "2026-08-19T12:00:00Z", local_date: "2026-08-19" });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(apiFetch).toHaveBeenCalledWith("/v1/weight", {
+    method: "POST",
+    body: JSON.stringify({
+      weight_kg: 68.5,
+      logged_at: "2026-08-19T12:00:00Z",
+      local_date: "2026-08-19",
+    }),
   });
 });
 
@@ -674,6 +814,110 @@ test("useWeightSeries GETs /v1/weight with a ~30d from/to for 1M", async () => {
   expect(Math.round(days)).toBe(30);
 });
 
+// kora#378: a date-only weigh-in is stamped midday UTC, which is in the
+// future for most of the day. Asking the API for `to = now` excluded the
+// user's own morning weigh-in from the series that was meant to show it.
+test("useWeightSeries asks for a window that reaches the end of today", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce([]);
+  const { result } = await renderHook(() => useWeightSeries("1M"), { wrapper });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  const calls = (apiFetch as jest.Mock).mock.calls;
+  const url = calls[calls.length - 1][0] as string;
+  const to = new Date(new URLSearchParams(url.split("?")[1]).get("to") as string);
+
+  // Midday UTC today is what the form stamps; the window must contain it.
+  const now = new Date();
+  const midday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 12));
+  expect(to.getTime()).toBeGreaterThan(midday.getTime());
+});
+
+test("useWeightTrend GETs /v1/weight/trend for the selected metric and range", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({
+    status: "ok",
+    rate_per_week: -0.4,
+    basis: { readings: 9, days: 42 },
+    spans_instruments: false,
+    show_support: false,
+  });
+  const { result } = await renderHook(() => useWeightTrend("waist_cm", "3M"), { wrapper });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+  const calls = (apiFetch as jest.Mock).mock.calls;
+  expect(calls[calls.length - 1][0]).toBe("/v1/weight/trend?metric=waist_cm&range=3M");
+  expect(result.current.data?.status).toBe("ok");
+});
+
+// A shared QueryClient is load-bearing here, exactly as it is for
+// useDashboard's owner-keyed cache test below: the default `wrapper` mints a
+// FRESH QueryClient per renderHook call, so two renderHooks under it are
+// never on the same cache regardless of queryKey — that variant cannot tell
+// a keyed cache from an unkeyed one, since each hook instance only ever sees
+// its own request. Asserting on `client.getQueryData` against ONE client is
+// what actually exercises "does metric B's chip reuse metric A's cache slot".
+test("useWeightTrend caches per metric, so switching chips does not reuse a stale rate", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrap = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+  (apiFetch as jest.Mock)
+    .mockResolvedValueOnce({ status: "ok", rate_per_week: -0.4, spans_instruments: false, show_support: false })
+    .mockResolvedValueOnce({ status: "insufficient_data", spans_instruments: false, show_support: false });
+
+  const { result: a } = await renderHook(() => useWeightTrend("weight_kg", "1M"), { wrapper: wrap });
+  await waitFor(() => expect(a.current.isSuccess).toBe(true));
+  const { result: b } = await renderHook(() => useWeightTrend("body_fat_pct", "1M"), { wrapper: wrap });
+  await waitFor(() => expect(b.current.isSuccess).toBe(true));
+
+  expect(client.getQueryData(["weight-trend", "weight_kg", "1M"])).toMatchObject({ status: "ok" });
+  expect(client.getQueryData(["weight-trend", "body_fat_pct", "1M"])).toMatchObject({
+    status: "insufficient_data",
+  });
+  // The stronger guarantee the hook exists for: metric B's own cache slot
+  // never inherits metric A's rate.
+  expect(b.current.data?.rate_per_week).toBeUndefined();
+
+  const urls = (apiFetch as jest.Mock).mock.calls.map((c) => c[0] as string);
+  expect(urls).toContain("/v1/weight/trend?metric=weight_kg&range=1M");
+  expect(urls).toContain("/v1/weight/trend?metric=body_fat_pct&range=1M");
+});
+
+// kora#45: placeholderData: keepPreviousData is a wrong-number-under-a-right-
+// label bug for this hook specifically (see useWeightTrend's own comment).
+// The two tests above do NOT catch it — TanStack's keepPreviousData reuses a
+// prior successful result only for the SAME observer (i.e. the SAME
+// useWeightTrend call re-rendering with new args), and both tests above use
+// two separately-mounted hook instances, which are two separate observers
+// with nothing to carry over regardless. This test re-renders ONE hook
+// instance across a metric switch — the actual "user picks a different chip"
+// shape — and asserts the one observable difference: with no placeholder,
+// `data` goes back to undefined the instant the new metric's query starts,
+// rather than showing the previous metric's rate while the new one loads.
+test("useWeightTrend clears data on a metric switch instead of showing the previous metric's rate", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrap = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+  let resolveB!: (value: unknown) => void;
+  (apiFetch as jest.Mock)
+    .mockResolvedValueOnce({ status: "ok", rate_per_week: -0.4, spans_instruments: false, show_support: false })
+    .mockReturnValueOnce(new Promise((resolve) => (resolveB = resolve)));
+
+  const { result, rerender } = await renderHook(({ metric }: { metric: CompositionMetricKey }) => useWeightTrend(metric, "1M"), {
+    wrapper: wrap,
+    initialProps: { metric: "weight_kg" },
+  });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(result.current.data?.rate_per_week).toBe(-0.4);
+
+  await act(async () => {
+    rerender({ metric: "body_fat_pct" });
+  });
+  expect(result.current.data).toBeUndefined();
+
+  resolveB({ status: "insufficient_data" });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+});
+
 test("useSendFriendRequest POSTs the body to /v1/friends/requests", async () => {
   (apiFetch as jest.Mock).mockResolvedValueOnce({ id: "f1", status: "pending" });
   const { result } = await renderHook(() => useSendFriendRequest(), { wrapper });
@@ -682,6 +926,20 @@ test("useSendFriendRequest POSTs the body to /v1/friends/requests", async () => 
   expect(apiFetch).toHaveBeenCalledWith("/v1/friends/requests", {
     method: "POST",
     body: JSON.stringify({ code: "ABC123XY" }),
+  });
+});
+
+// kora#449 task 13b: a third mutually-exclusive identifier alongside email
+// and code, resolved server-side through the same canonical fold the handle
+// lookup used to find the person in the first place.
+test("useSendFriendRequest POSTs a handle body to /v1/friends/requests", async () => {
+  (apiFetch as jest.Mock).mockResolvedValueOnce({ id: "f1", status: "pending" });
+  const { result } = await renderHook(() => useSendFriendRequest(), { wrapper });
+  result.current.mutate({ handle: "ada" });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(apiFetch).toHaveBeenCalledWith("/v1/friends/requests", {
+    method: "POST",
+    body: JSON.stringify({ handle: "ada" }),
   });
 });
 
@@ -706,17 +964,6 @@ test("useFriendsProgress GETs /v1/friends/progress", async () => {
   const { result } = await renderHook(() => useFriendsProgress(), { wrapper });
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
   expect(apiFetch).toHaveBeenCalledWith("/v1/friends/progress");
-});
-
-test("useSetShareProgress PATCHes /v1/me/share-progress with the flag", async () => {
-  (apiFetch as jest.Mock).mockResolvedValueOnce({ share_progress: true });
-  const { result } = await renderHook(() => useSetShareProgress(), { wrapper });
-  result.current.mutate(true);
-  await waitFor(() => expect(result.current.isSuccess).toBe(true));
-  expect(apiFetch).toHaveBeenCalledWith("/v1/me/share-progress", {
-    method: "PATCH",
-    body: JSON.stringify({ share_progress: true }),
-  });
 });
 
 test("useCreateGroup POSTs the name to /v1/groups", async () => {
@@ -1562,4 +1809,14 @@ test("scan online, then offline: the repeat scan is logged and lands in the diar
   expect(result.current.diary.rows[0].description).toBe("Choc protein bar");
   expect(result.current.diary.rows[0].description).not.toBe("Queued item");
   expect(result.current.diary.rows[0].kcal).toBeCloseTo(240);
+});
+
+// kora#399: the trend request grounds a full coach context server-side, so it
+// must not fire for a user who cannot have a rate at all.
+test("useWeightTrend does not fetch while disabled", async () => {
+  (apiFetch as jest.Mock).mockClear();
+  const { result } = await renderHook(() => useWeightTrend("weight_kg", "1M", false), { wrapper });
+  await waitFor(() => expect(result.current.isPending).toBe(true));
+  expect((apiFetch as jest.Mock).mock.calls.filter((c) => String(c[0]).includes("/v1/weight/trend"))).toHaveLength(0);
+  expect(result.current.data).toBeUndefined();
 });

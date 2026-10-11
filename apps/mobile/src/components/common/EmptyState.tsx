@@ -11,7 +11,8 @@ interface EmptyStateCta {
 }
 
 interface EmptyStateProps {
-  icon: string;
+  // Optional: a screen whose own controls already carry the glyph omits the tile.
+  icon?: string;
   title: string;
   subtitle: string;
   cta?: EmptyStateCta;
@@ -56,7 +57,9 @@ export function EmptyState({ icon, title, subtitle, cta, variant }: EmptyStatePr
 
   return (
     <View style={{ alignItems: "center", paddingHorizontal: spacing.lg, paddingVertical: spacing.xl, gap: spacing.md }}>
+      {icon ? (
       <View
+        testID="empty-state-icon"
         style={{
           width: iconSize,
           height: iconSize,
@@ -69,6 +72,7 @@ export function EmptyState({ icon, title, subtitle, cta, variant }: EmptyStatePr
       >
         <Icon name={icon} size={iconInnerSize} color={iconColor} />
       </View>
+      ) : null}
       <View style={{ alignItems: "center", gap: spacing.xs }}>
         <AppText
           variant="title2"

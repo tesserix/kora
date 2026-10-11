@@ -17,7 +17,7 @@ jest.mock("@/offline/enqueueCapture", () => ({
   enqueueTextCapture: jest.fn(),
 }));
 import { router } from "expo-router";
-import { ApiError, AuthTokenError, NetworkError, ResponseParseError } from "@/lib/api";
+import { ApiError, AuthTokenError, NetworkError, ResponseParseError, TimeoutError } from "@/lib/api";
 import type { FoodItem, Resolution } from "@/api/types";
 import { OfflineUnknownBarcodeError, resolutionFromCachedFood } from "@/offline/cachedResolution";
 import { StyleSheet } from "react-native";
@@ -90,22 +90,23 @@ jest.mock("@/lib/api", () => ({
   },
 }));
 
-const mockResolveTextMutate = jest.fn();
+const mockCaptureMessageMutate = jest.fn();
 const mockResolvePhotoMutate = jest.fn();
 const mockResolveVoiceMutate = jest.fn();
 const mockResolveBarcodeMutate = jest.fn();
 const mockCreateLogMutateAsync = jest.fn();
-let mockResolveTextIsPending = false;
+let mockCaptureMessageIsPending = false;
 let mockResolvePhotoIsPending = false;
 let mockResolveVoiceIsPending = false;
 let mockResolveBarcodeIsPending = false;
 
 jest.mock("@/api/hooks", () => ({
   useProfile: () => ({ data: { display_name: "Alex Stone" } }),
-  useResolveText: () => ({
-    mutate: mockResolveTextMutate,
+  useAcceptMealPlan: () => ({ mutate: jest.fn(), isPending: false }),
+  useCaptureMessage: () => ({
+    mutate: mockCaptureMessageMutate,
     get isPending() {
-      return mockResolveTextIsPending;
+      return mockCaptureMessageIsPending;
     },
   }),
   useResolvePhoto: () => ({
@@ -303,8 +304,14 @@ async function resolveWithMultiCandidates(
   const input = await findByLabelText("Tell Otto what you ate");
   await fireEvent.changeText(input, "big breakfast");
   await fireEvent.press(await findByLabelText("Send"));
-  const [, options] = mockResolveTextMutate.mock.calls[callIndex];
-  await act(async () => options.onSuccess(resolution));
+  const [, options] = mockCaptureMessageMutate.mock.calls[callIndex];
+  await act(async () => options.onSuccess(asResolution(resolution)));
+}
+
+// The composer's endpoint answers with a tagged union, so a resolution has to
+// arrive wrapped — the "answer" arm is what the questions path returns instead.
+function asResolution(resolution: Resolution) {
+  return { kind: "resolution" as const, resolution };
 }
 
 // Two candidates, one of which the server flagged as follow_up. That row is
@@ -322,7 +329,7 @@ function makeMixedCertaintyResolution(): Resolution {
 }
 
 const noopBodyProps = {
-  sentPhrase: null,
+  transcript: [],
   excluded: new Set<number>(),
   onToggleExclude: () => {},
   displayName: "Alex",
@@ -350,7 +357,7 @@ const noopBodyProps = {
 };
 
 beforeEach(() => {
-  mockResolveTextMutate.mockReset();
+  mockCaptureMessageMutate.mockReset();
   mockResolvePhotoMutate.mockReset();
   mockResolveVoiceMutate.mockReset();
   mockResolveBarcodeMutate.mockReset();
@@ -358,7 +365,7 @@ beforeEach(() => {
   (enqueueTextCapture as jest.Mock).mockReset();
   (router.back as jest.Mock).mockReset();
   (router.push as jest.Mock).mockReset();
-  mockResolveTextIsPending = false;
+  mockCaptureMessageIsPending = false;
   mockResolvePhotoIsPending = false;
   mockResolveVoiceIsPending = false;
   mockResolveBarcodeIsPending = false;
@@ -447,6 +454,46 @@ test("tapping a mode pill switches mode and changes the idle affordance", async 
   expect(queryByTestId("capture-idle-scan")).toBeNull();
 });
 
+test("analyzing locks capture controls but leaves cancel available", async () => {
+  const onSend = jest.fn();
+  const onCapturePhoto = jest.fn();
+  const onModeChange = jest.fn();
+  const onChangeText = jest.fn();
+  const onCancelResolve = jest.fn();
+  const screen = await render(<CaptureBody {...noopBodyProps} stage="analyzing" resolution={null}
+    text="fish curry" onSend={onSend} onCapturePhoto={onCapturePhoto}
+    onModeChange={onModeChange} onChangeText={onChangeText} onCancelResolve={onCancelResolve} />);
+  for (const name of ["Photo", "Voice", "Scan", "Type", "Quick photo capture", "Send"]) {
+    const button = screen.getByRole("button", { name });
+    expect(button).toBeDisabled();
+    await fireEvent.press(button);
+  }
+  const input = screen.getByLabelText("Tell Otto what you ate");
+  expect(input).toBeDisabled();
+  await fireEvent.changeText(input, "second meal");
+  await fireEvent(input, "submitEditing");
+  expect(onSend).not.toHaveBeenCalled();
+  expect(onCapturePhoto).not.toHaveBeenCalled();
+  expect(onModeChange).not.toHaveBeenCalled();
+  expect(onChangeText).not.toHaveBeenCalled();
+  await fireEvent.press(screen.getByRole("button", { name: "Cancel" }));
+  expect(onCancelResolve).toHaveBeenCalledTimes(1);
+});
+
+test("a selected meal photo appears in the conversation before and after its result", async () => {
+  (ImagePicker.launchImageLibraryAsync as jest.Mock).mockResolvedValueOnce({
+    canceled: false,
+    assets: [{ uri: "file://fish.jpg", fileName: "fish.jpg", mimeType: "image/jpeg" }],
+  });
+  const screen = await render(<CaptureScreen />);
+  await fireEvent.press(await screen.findByRole("button", { name: "Choose from library" }));
+  const photo = await screen.findByLabelText("Uploaded meal photo");
+  expect(photo.props.source).toEqual({ uri: "file://fish.jpg" });
+  const [, options] = mockResolvePhotoMutate.mock.calls[0];
+  await act(async () => options.onSuccess(makeResolution()));
+  expect(screen.getByLabelText("Uploaded meal photo").props.source).toEqual({ uri: "file://fish.jpg" });
+});
+
 test("analyzing stage shows the spinner", async () => {
   const { getByTestId } = await render(
     <CaptureBody {...noopBodyProps} stage="analyzing" resolution={null} />,
@@ -489,7 +536,7 @@ test("error message renders as an Otto bubble", async () => {
 });
 
 describe("Type mode", () => {
-  test("typing and pressing send calls useResolveText with the phrase", async () => {
+  test("typing and pressing send calls useCaptureMessage with the phrase", async () => {
     const { findByText, findByLabelText } = await render(<CaptureScreen />);
     await fireEvent.press(await findByText("Type"));
 
@@ -497,7 +544,7 @@ describe("Type mode", () => {
     await fireEvent.changeText(input, "grilled chicken and rice");
     await fireEvent.press(await findByLabelText("Send"));
 
-    expect(mockResolveTextMutate).toHaveBeenCalledWith(
+    expect(mockCaptureMessageMutate).toHaveBeenCalledWith(
       expect.objectContaining({ input: "grilled chicken and rice" }),
       expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
     );
@@ -514,17 +561,17 @@ describe("Type mode", () => {
 
     await fireEvent.changeText(input, "grilled chicken");
     await fireEvent(input, "submitEditing");
-    expect(mockResolveTextMutate).toHaveBeenCalledWith(
+    expect(mockCaptureMessageMutate).toHaveBeenCalledWith(
       expect.objectContaining({ input: "grilled chicken" }),
       expect.anything(),
     );
   });
 
-  test("empty input does not call useResolveText", async () => {
+  test("empty input does not call useCaptureMessage", async () => {
     const { findByText, findByLabelText } = await render(<CaptureScreen />);
     await fireEvent.press(await findByText("Type"));
     await fireEvent.press(await findByLabelText("Send"));
-    expect(mockResolveTextMutate).not.toHaveBeenCalled();
+    expect(mockCaptureMessageMutate).not.toHaveBeenCalled();
   });
 
   test("whitespace-only input keeps the send button disabled and inactive-colored", async () => {
@@ -542,7 +589,7 @@ describe("Type mode", () => {
     expect(StyleSheet.flatten(sendButton.props.style).backgroundColor).toBe("rgba(237, 230, 212, 0.15)");
 
     await fireEvent.press(sendButton);
-    expect(mockResolveTextMutate).not.toHaveBeenCalled();
+    expect(mockCaptureMessageMutate).not.toHaveBeenCalled();
   });
 
   // kora#243. The server refuses a phrase shorter than two characters
@@ -561,7 +608,7 @@ describe("Type mode", () => {
     expect(sendButton.props.accessibilityState).toEqual({ disabled: true });
 
     await fireEvent.press(sendButton);
-    expect(mockResolveTextMutate).not.toHaveBeenCalled();
+    expect(mockCaptureMessageMutate).not.toHaveBeenCalled();
     expect(enqueueTextCapture).not.toHaveBeenCalled();
   });
 
@@ -575,7 +622,7 @@ describe("Type mode", () => {
     await fireEvent.changeText(input, "a");
     await fireEvent(input, "submitEditing");
 
-    expect(mockResolveTextMutate).not.toHaveBeenCalled();
+    expect(mockCaptureMessageMutate).not.toHaveBeenCalled();
   });
 
   // The boundary from the other side: two characters is the server's own
@@ -591,7 +638,7 @@ describe("Type mode", () => {
     expect(sendButton.props.accessibilityState).toEqual({ disabled: false });
 
     await fireEvent.press(sendButton);
-    expect(mockResolveTextMutate).toHaveBeenCalledWith(
+    expect(mockCaptureMessageMutate).toHaveBeenCalledWith(
       expect.objectContaining({ input: "ha" }),
       expect.anything(),
     );
@@ -605,7 +652,7 @@ describe("Type mode", () => {
     await fireEvent.changeText(await findByLabelText("Tell Otto what you ate"), "  a  ");
     await fireEvent.press(await findByLabelText("Send"));
 
-    expect(mockResolveTextMutate).not.toHaveBeenCalled();
+    expect(mockCaptureMessageMutate).not.toHaveBeenCalled();
   });
 
   test("a successful resolve renders the DetectedCard", async () => {
@@ -616,8 +663,8 @@ describe("Type mode", () => {
     await fireEvent.changeText(input, "grilled chicken and rice");
     await fireEvent.press(await findByLabelText("Send"));
 
-    const [, options] = mockResolveTextMutate.mock.calls[0];
-    await act(async () => options.onSuccess(makeResolution()));
+    const [, options] = mockCaptureMessageMutate.mock.calls[0];
+    await act(async () => options.onSuccess(asResolution(makeResolution())));
 
     expect(await findByText("Grilled chicken breast")).toBeTruthy();
   });
@@ -630,7 +677,7 @@ describe("Type mode", () => {
     await fireEvent.changeText(input, "mystery mush");
     await fireEvent.press(await findByLabelText("Send"));
 
-    const [, options] = mockResolveTextMutate.mock.calls[0];
+    const [, options] = mockCaptureMessageMutate.mock.calls[0];
     await act(async () => options.onError(new ApiError(422, "no_match", "no confident match")));
 
     expect(await findByText(/no confident match/i)).toBeTruthy();
@@ -644,7 +691,7 @@ describe("Type mode", () => {
     await fireEvent.changeText(input, "mystery mush");
     await fireEvent.press(await findByLabelText("Send"));
 
-    const [, options] = mockResolveTextMutate.mock.calls[0];
+    const [, options] = mockCaptureMessageMutate.mock.calls[0];
     await act(async () => options.onError(new NetworkError(new TypeError("Network request failed"))));
 
     expect(enqueueTextCapture).toHaveBeenCalledWith("mystery mush", expect.anything());
@@ -662,7 +709,7 @@ describe("Type mode", () => {
     await fireEvent.changeText(input, "mystery mush");
     await fireEvent.press(await findByLabelText("Send"));
 
-    const [, options] = mockResolveTextMutate.mock.calls[0];
+    const [, options] = mockCaptureMessageMutate.mock.calls[0];
     await act(async () => options.onError(new ResponseParseError(new SyntaxError("bad json"))));
 
     expect(await findByText(/couldn't make sense/i)).toBeTruthy();
@@ -679,7 +726,7 @@ describe("Type mode", () => {
     await fireEvent.changeText(input, "mystery mush");
     await fireEvent.press(await findByLabelText("Send"));
 
-    const [, options] = mockResolveTextMutate.mock.calls[0];
+    const [, options] = mockCaptureMessageMutate.mock.calls[0];
     await act(async () => options.onError(new AuthTokenError(new Error("token unavailable"))));
 
     // AuthTokenError joins NetworkError and TimeoutError in the recoverable
@@ -703,7 +750,7 @@ describe("Type mode", () => {
     await fireEvent.changeText(input, "mystery mush");
     await fireEvent.press(await findByLabelText("Send"));
 
-    const [, options] = mockResolveTextMutate.mock.calls[0];
+    const [, options] = mockCaptureMessageMutate.mock.calls[0];
     await act(async () => options.onError(new Error("totally unrelated failure")));
 
     expect(
@@ -712,13 +759,13 @@ describe("Type mode", () => {
   });
 
   test("shows the analyzing stage while the text resolve is pending", async () => {
-    mockResolveTextIsPending = true;
+    mockCaptureMessageIsPending = true;
     const { getByTestId } = await render(<CaptureScreen />);
     expect(getByTestId("capture-analyzing-spinner")).toBeTruthy();
   });
 
   test("Cancel aborts the in-flight resolve and returns the screen to idle", async () => {
-    mockResolveTextIsPending = true;
+    mockCaptureMessageIsPending = true;
     const { getByTestId, findByLabelText, findByTestId, queryByTestId } = await render(<CaptureScreen />);
     expect(getByTestId("capture-analyzing-spinner")).toBeTruthy();
 
@@ -732,26 +779,47 @@ describe("Type mode", () => {
   });
 
   test("a response that arrives after Cancel does not apply", async () => {
-    // The mock isPending flag is static, not driven by mutate() itself, so
-    // it's set true up front — the composer (and its Send button) render
-    // regardless of stage, so the send below still fires normally.
-    mockResolveTextIsPending = true;
-    const { findByText, findByLabelText, queryByText } = await render(<CaptureScreen />);
+    const screen = await render(<CaptureScreen />);
+    const { findByText, findByLabelText, queryByText } = screen;
     await fireEvent.press(await findByText("Type"));
     const input = await findByLabelText("Tell Otto what you ate");
     await fireEvent.changeText(input, "grilled chicken and rice");
+    mockCaptureMessageIsPending = true;
     await fireEvent.press(await findByLabelText("Send"));
-
     await fireEvent.press(await findByLabelText("Cancel"));
 
-    const [, options] = mockResolveTextMutate.mock.calls[0];
-    await act(async () => options.onSuccess(makeResolution()));
+    const [, options] = mockCaptureMessageMutate.mock.calls[0];
+    await act(async () => options.onSuccess(asResolution(makeResolution())));
 
     expect(queryByText("Grilled chicken breast")).toBeNull();
   });
 });
 
 describe("Photo mode", () => {
+  test("the normal photo screen uploads a library image without opening the camera", async () => {
+    (ImagePicker.launchImageLibraryAsync as jest.Mock).mockResolvedValueOnce({
+      canceled: false,
+      assets: [{ uri: "file://meal.png", fileName: "meal.png", mimeType: "image/png" }],
+    });
+    const { findByRole } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByRole("button", { name: "Choose from library" }));
+    await waitFor(() => expect(mockResolvePhotoMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ input: { uri: "file://meal.png", name: "meal.png", type: "image/png" } }),
+      expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
+    ));
+    expect(ImagePicker.requestCameraPermissionsAsync).not.toHaveBeenCalled();
+    expect(ImagePicker.launchCameraAsync).not.toHaveBeenCalled();
+  });
+
+  test("canceling library selection leaves photo capture available without uploading", async () => {
+    (ImagePicker.launchImageLibraryAsync as jest.Mock).mockResolvedValueOnce({ canceled: true, assets: null });
+    const { findByRole } = await render(<CaptureScreen />);
+    await fireEvent.press(await findByRole("button", { name: "Choose from library" }));
+    await waitFor(() => expect(ImagePicker.launchImageLibraryAsync).toHaveBeenCalledTimes(1));
+    expect(mockResolvePhotoMutate).not.toHaveBeenCalled();
+    expect(await findByRole("button", { name: "Photo viewfinder" })).toBeTruthy();
+  });
+
   test("a captured photo triggers useResolvePhoto with the file", async () => {
     (ImagePicker.launchCameraAsync as jest.Mock).mockResolvedValueOnce({
       canceled: false,
@@ -1308,8 +1376,8 @@ describe("Result tiers", () => {
     await fireEvent.changeText(input, "a mystery bowl");
     await fireEvent.press(await findByLabelText("Send"));
 
-    const [, options] = mockResolveTextMutate.mock.calls[0];
-    await act(async () => options.onSuccess(makeFollowUpResolution()));
+    const [, options] = mockCaptureMessageMutate.mock.calls[0];
+    await act(async () => options.onSuccess(asResolution(makeFollowUpResolution())));
 
     await fireEvent.press(await findByLabelText("Search manually"));
     expect(router.push).toHaveBeenCalledWith("/log");
@@ -1524,6 +1592,43 @@ describe("Add to diary", () => {
     expect(mockCreateLogMutateAsync).toHaveBeenCalledWith(expect.objectContaining({ portion_assumed: false }));
   });
 
+  // kora#556: each item names its resolution and slot so its log can score the AI.
+  test("sends the resolution id and each item's slot with every log", async () => {
+    const rendered = await render(<CaptureScreen />);
+    const resolution = {
+      ...makeMultiCandidateResolution(),
+      resolution_id: "0b8e1c3e-5a0d-4b41-9f61-0d6f0b1c2a3e",
+      candidates: [
+        makeCandidate("1", "Rice", { grams: 150, kcal: 195 }),
+        makeCandidate("2", "Dal", { grams: 200, kcal: 230 }),
+      ],
+    };
+    await resolveWithMultiCandidates(rendered, resolution);
+
+    await fireEvent.press(await rendered.findByLabelText("Add to diary"));
+
+    await waitFor(() => expect(mockCreateLogMutateAsync).toHaveBeenCalledTimes(2));
+    expect(mockCreateLogMutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ food_item_id: "1", resolution_id: resolution.resolution_id, resolution_index: 0 }),
+    );
+    expect(mockCreateLogMutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ food_item_id: "2", resolution_id: resolution.resolution_id, resolution_index: 1 }),
+    );
+  });
+
+  test("omits the resolution fields when the server sent no resolution id", async () => {
+    const rendered = await render(<CaptureScreen />);
+    const candidate = makeCandidate("1", "Grilled chicken breast", { grams: 140, kcal: 231 });
+    await resolveWithMultiCandidates(rendered, { ...makeMultiCandidateResolution(), candidates: [candidate] });
+
+    await fireEvent.press(await rendered.findByLabelText("Add to diary"));
+
+    await waitFor(() => expect(mockCreateLogMutateAsync).toHaveBeenCalledTimes(1));
+    const sent = mockCreateLogMutateAsync.mock.calls[0][0];
+    expect(sent).not.toHaveProperty("resolution_id");
+    expect(sent).not.toHaveProperty("resolution_index");
+  });
+
   // A single confirm with BOTH an assumed and a non-assumed candidate. The
   // map in handleAddToDiary binds a fresh `candidate` per iteration today, so
   // this isn't a live bug — but it's the regression guard for a future
@@ -1589,8 +1694,8 @@ describe("Add to diary — source follows the resolve, not the tab", () => {
     await fireEvent.changeText(input, "a bowl of oats");
     await fireEvent.press(await rendered.findByLabelText("Send"));
 
-    const [, options] = mockResolveTextMutate.mock.calls[0];
-    await act(async () => options.onSuccess(makeResolution()));
+    const [, options] = mockCaptureMessageMutate.mock.calls[0];
+    await act(async () => options.onSuccess(asResolution(makeResolution())));
 
     await fireEvent.press(await rendered.findByLabelText("Add to diary"));
 
@@ -1703,8 +1808,8 @@ describe("Add to diary — source follows the resolve, not the tab", () => {
     const input = await rendered.findByLabelText("Tell Otto what you ate");
     await fireEvent.changeText(input, "actually it was toast");
     await fireEvent.press(await rendered.findByLabelText("Send"));
-    const [, textOptions] = mockResolveTextMutate.mock.calls[0];
-    await act(async () => textOptions.onSuccess(makeResolution()));
+    const [, textOptions] = mockCaptureMessageMutate.mock.calls[0];
+    await act(async () => textOptions.onSuccess(asResolution(makeResolution())));
 
     await fireEvent.press(await rendered.findByLabelText("Add to diary"));
 
@@ -1978,6 +2083,103 @@ describe("closing capture with no navigation history", () => {
 // the message went nowhere. Nothing on screen changed after pressing Send,
 // which reads as "did that send?". Photo felt right only because it has no
 // field to linger in.
+// kora#264. The composer used to post everything typed to food resolution,
+// which asks a model "what foods are in this?" — so "help me build a meal
+// plan" came back as four invented foods with an Add to diary button under
+// them. A question now comes back as an answer, and nothing is offered for
+// logging.
+describe("a question gets an answer, not a food card", () => {
+  async function askAndAnswer(
+    rendered: Awaited<ReturnType<typeof render>>,
+    answer: { answer: string; agent?: { name: string; skill: string; reviewed_by?: string } },
+  ) {
+    const { findByText, findByLabelText } = rendered;
+    await fireEvent.press(await findByText("Type"));
+    const input = await findByLabelText("Tell Otto what you ate");
+    await fireEvent.changeText(input, "can you please help create a proper meal plan for the next 1 week");
+    await fireEvent.press(await findByLabelText("Send"));
+    const [, options] = mockCaptureMessageMutate.mock.calls[0];
+    await act(async () => options.onSuccess({ kind: "answer", citations: [], show_support: false, ...answer }));
+  }
+
+  // A follow-up is only answerable if the user can still see what it follows.
+  // The screen kept one message and one answer, so the second question wiped
+  // the plan it was asking to amend — the server had the history, the thread
+  // did not.
+  test("a follow-up keeps the exchange it follows", async () => {
+    const rendered = await render(<CaptureScreen />);
+    await askAndAnswer(rendered, { answer: "Here's a week of meals to start from." });
+
+    const input = await rendered.findByLabelText("Tell Otto what you ate");
+    await fireEvent.changeText(input, "also include breakfast");
+    await fireEvent.press(await rendered.findByLabelText("Send"));
+    const [, options] = mockCaptureMessageMutate.mock.calls[1];
+    await act(async () =>
+      options.onSuccess({
+        kind: "answer",
+        citations: [],
+        show_support: false,
+        answer: "Breakfast added to each day.",
+      }),
+    );
+
+    expect(rendered.queryByText("Here's a week of meals to start from.")).toBeTruthy();
+    expect(
+      rendered.queryByText("can you please help create a proper meal plan for the next 1 week"),
+    ).toBeTruthy();
+    expect(rendered.queryByText("also include breakfast")).toBeTruthy();
+    expect(rendered.queryByText("Breakfast added to each day.")).toBeTruthy();
+  });
+
+  test("renders the answer in the thread with no Add to diary", async () => {
+    const rendered = await render(<CaptureScreen />);
+    await askAndAnswer(rendered, { answer: "Here's a week of meals to start from." });
+
+    expect(await rendered.findByText("Here's a week of meals to start from.")).toBeTruthy();
+    expect(rendered.queryByLabelText("Add to diary")).toBeNull();
+  });
+
+  // The plan path is two agents: the planner drafts, the coach reviews. The
+  // label carries both so the user knows the plan was vetted, not just made.
+  test("names the reviewer when a plan draft was reviewed", async () => {
+    const rendered = await render(<CaptureScreen />);
+    await askAndAnswer(rendered, {
+      answer: "Day 1: ... Approve, or tell me what to change.",
+      agent: { name: "Kora Meal Planner", skill: "plan-meals", reviewed_by: "Kora Nutrition Coach" },
+    });
+
+    expect(await rendered.findByText("Kora Meal Planner · reviewed by Kora Nutrition Coach")).toBeTruthy();
+  });
+
+  test("names the agent that answered", async () => {
+    const rendered = await render(<CaptureScreen />);
+    await askAndAnswer(rendered, {
+      answer: "Here's a week of meals to start from.",
+      agent: { name: "Kora Meal Planner", skill: "plan-meals" },
+    });
+
+    expect(await rendered.findByText("Kora Meal Planner")).toBeTruthy();
+  });
+
+  // Without attribution the bubble is Otto's own copy — a greeting or an
+  // error — and must not grow an empty label row.
+  test("omits the label when the plain model answered", async () => {
+    const rendered = await render(<CaptureScreen />);
+    await askAndAnswer(rendered, { answer: "Brown rice keeps more fibre." });
+
+    await rendered.findByText("Brown rice keeps more fibre.");
+    expect(rendered.queryByTestId("otto-bubble-agent")).toBeNull();
+  });
+
+  test("a later food log clears the answer from the thread", async () => {
+    const rendered = await render(<CaptureScreen />);
+    await askAndAnswer(rendered, { answer: "Here's a week of meals to start from." });
+
+    await resolveWithMultiCandidates(rendered, makeMultiCandidateResolution(), 1);
+    expect(rendered.queryByText("Here's a week of meals to start from.")).toBeNull();
+  });
+});
+
 describe("a typed phrase enters the thread", () => {
   test("Send clears the composer immediately and shows the message", async () => {
     const { findByText, findByLabelText, queryByText } = await render(<CaptureScreen />);
@@ -1999,7 +2201,7 @@ describe("a typed phrase enters the thread", () => {
     await fireEvent.changeText(input, "chicken and rice");
     await fireEvent.press(await findByLabelText("Send"));
 
-    const [, options] = mockResolveTextMutate.mock.calls[0];
+    const [, options] = mockCaptureMessageMutate.mock.calls[0];
     await act(async () => options.onError(new Error("boom")));
 
     expect(input.props.value).toBe("");
@@ -2027,7 +2229,7 @@ describe("a typed phrase enters the thread", () => {
     await fireEvent.changeText(await findByPlaceholderText(/tell otto/i), "chicken and rice");
     await fireEvent.press(await findByLabelText("Send"));
 
-    const [, options] = mockResolveTextMutate.mock.calls[0];
+    const [, options] = mockCaptureMessageMutate.mock.calls[0];
     await act(async () => options.onError(new NetworkError("offline")));
 
     expect(enqueueTextCapture).toHaveBeenCalledWith("chicken and rice", expect.anything());
@@ -2043,11 +2245,33 @@ describe("a typed phrase enters the thread", () => {
     await fireEvent.changeText(field, "chicken and rice");
     await fireEvent.press(await findByLabelText("Send"));
 
-    const [, options] = mockResolveTextMutate.mock.calls[0];
+    const [, options] = mockCaptureMessageMutate.mock.calls[0];
     await act(async () => options.onError(new NetworkError("offline")));
 
     expect(await findByText("chicken and rice")).toBeTruthy();
     expect(field.props.value).toBe("");
+  });
+
+  // kora#264. A timeout on /v1/capture/message is NOT "offline": the request
+  // arrived and the agent chain is still running it. Queueing it replayed a
+  // question ("plan my meals for the week") through FOOD resolution, and the
+  // "You're offline" copy was flatly untrue on a device with full signal.
+  it("does not queue or claim offline when the agent chain times out", async () => {
+    const { findByText, findByLabelText, findByPlaceholderText, queryByText } = await render(
+      <CaptureScreen />,
+    );
+    await fireEvent.press(await findByText("Type"));
+    const field = await findByPlaceholderText(/tell otto/i);
+    await fireEvent.changeText(field, "plan my meals for the week");
+    await fireEvent.press(await findByLabelText("Send"));
+
+    const [, options] = mockCaptureMessageMutate.mock.calls[0];
+    await act(async () => options.onError(new TimeoutError()));
+
+    expect(enqueueTextCapture).not.toHaveBeenCalled();
+    expect(queryByText(/you're offline/i)).toBeNull();
+    expect(await findByText(/took too long/i)).toBeTruthy();
+    expect(await findByText("plan my meals for the week")).toBeTruthy();
   });
 
   // A genuine refusal is NOT queued — retrying it would fail identically.
@@ -2058,7 +2282,7 @@ describe("a typed phrase enters the thread", () => {
     await fireEvent.changeText(field, "chicken and rice");
     await fireEvent.press(await findByLabelText("Send"));
 
-    const [, options] = mockResolveTextMutate.mock.calls[0];
+    const [, options] = mockCaptureMessageMutate.mock.calls[0];
     await act(async () => options.onError(new ApiError(422, "no_match", "bad request")));
 
     expect(enqueueTextCapture).not.toHaveBeenCalled();

@@ -3,7 +3,7 @@ package social
 import "errors"
 
 var (
-	ErrBadInput     = errors.New("provide exactly one of email or code")
+	ErrBadInput     = errors.New("provide exactly one of email, code or handle")
 	ErrUserNotFound = errors.New("no matching Kora account")
 	ErrSelfFriend   = errors.New("cannot friend yourself")
 	ErrNotFound     = errors.New("friendship not found")

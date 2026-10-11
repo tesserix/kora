@@ -50,3 +50,54 @@ final class StepReadingTests: XCTestCase {
     XCTAssertEqual(StepReading.resolve(todaySum: -5, probeFoundSamples: false), 0)
   }
 }
+
+// kora#420. "HealthKit is locked right now" and "this app cannot read Health
+// at all" both arrive as an absent sum with an empty probe, and both used to
+// resolve to the same silent unknown. They need different handling: one is
+// transient and worth retrying in minutes, the other is not going to change
+// on its own.
+final class StepAvailabilityTests: XCTestCase {
+  func testAUsableSumIsReadable() {
+    XCTAssertEqual(
+      StepReading.availability(todaySum: 6420, probeFoundSamples: false, databaseInaccessible: false),
+      .readable)
+  }
+
+  // A locked read that still produced a sum is readable — the lock did not
+  // cost us anything, so do not schedule a needless early refresh.
+  func testASumWinsOverALockedFlag() {
+    XCTAssertEqual(
+      StepReading.availability(todaySum: 6420, probeFoundSamples: false, databaseInaccessible: true),
+      .readable)
+  }
+
+  // No sum today, but the probe found samples: reads work, today is a real
+  // zero. Still readable.
+  func testProbeSamplesMakeItReadable() {
+    XCTAssertEqual(
+      StepReading.availability(todaySum: nil, probeFoundSamples: true, databaseInaccessible: true),
+      .readable)
+  }
+
+  // Nothing anywhere AND the store said it was inaccessible: the device is
+  // locked. Transient.
+  func testNoEvidenceWithLockedStoreIsLocked() {
+    XCTAssertEqual(
+      StepReading.availability(todaySum: nil, probeFoundSamples: false, databaseInaccessible: true),
+      .locked)
+  }
+
+  // Nothing anywhere and no lock reported: the pre-existing unknown, which
+  // must NOT be retried every few minutes.
+  func testNoEvidenceWithoutLockedStoreIsUnreadable() {
+    XCTAssertEqual(
+      StepReading.availability(todaySum: nil, probeFoundSamples: false, databaseInaccessible: false),
+      .unreadable)
+  }
+
+  func testNonFiniteSumIsNotEvidenceOfAReadableStore() {
+    XCTAssertEqual(
+      StepReading.availability(todaySum: Double.nan, probeFoundSamples: false, databaseInaccessible: true),
+      .locked)
+  }
+}

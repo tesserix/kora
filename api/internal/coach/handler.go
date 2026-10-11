@@ -2,6 +2,7 @@ package coach
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"time"
@@ -10,12 +11,16 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/tesserix/kora/api/internal/httpx"
+	"github.com/tesserix/kora/api/internal/mentor"
 	"github.com/tesserix/kora/api/internal/user"
 )
 
 // Handler exposes the coach's nudges and Q&A endpoints over Service.
 type Handler struct {
 	svc *Service
+	// food is optional: set via WithFoodResolver so the capture composer can
+	// dispatch a food log without this package importing package resolve.
+	food FoodResolver
 }
 
 // NewHandler builds a Handler over svc.
@@ -110,16 +115,33 @@ func (h Handler) Ask(c *gin.Context) {
 	if cites == nil {
 		cites = []Fact{}
 	}
-	httpx.OK(c, gin.H{"answer": answer.Text, "citations": cites, "show_support": answer.ShowSupport})
+	body := gin.H{
+		"answer": answer.Text, "citations": cites,
+		"show_support": answer.ShowSupport, "proposal": answer.Proposal,
+		"plan": answer.Plan, "diet_flags": dietFlags(answer),
+	}
+	if answer.By.Agent != "" {
+		// Omitted entirely when the direct provider answered, so the client
+		// can tell "the coach agent replied" from "the plain model replied"
+		// rather than having to compare against a sentinel name.
+		agent := gin.H{"name": answer.By.Agent, "skill": answer.By.Skill}
+		if answer.By.ReviewedBy != "" {
+			agent["reviewed_by"] = answer.By.ReviewedBy
+		}
+		body["agent"] = agent
+	}
+	httpx.OK(c, body)
 }
 
 // threadTurnResponse is one replayed turn in the wire format. Field names are
 // snake_case because the mobile client codes against them.
 type threadTurnResponse struct {
-	Role      TurnRole  `json:"role"`
-	Text      string    `json:"text"`
-	Citations []Fact    `json:"citations"`
-	CreatedAt time.Time `json:"created_at"`
+	Role      TurnRole                   `json:"role"`
+	Text      string                     `json:"text"`
+	Citations []Fact                     `json:"citations"`
+	CreatedAt time.Time                  `json:"created_at"`
+	Proposal  *mentor.CommitmentProposal `json:"proposal,omitempty"`
+	Plan      *PlanProposal              `json:"plan,omitempty"`
 }
 
 // Thread replays the authenticated user's stored coach turns.
@@ -143,8 +165,39 @@ func (h Handler) Thread(c *gin.Context) {
 		if cites == nil {
 			cites = []Fact{}
 		}
-		turns[i] = threadTurnResponse{Role: t.Role, Text: t.Text, Citations: cites, CreatedAt: t.CreatedAt}
+		turns[i] = threadTurnResponse{
+			Role: t.Role, Text: t.Text, Citations: cites,
+			CreatedAt: t.CreatedAt, Proposal: t.Proposal, Plan: t.Plan,
+		}
 	}
 
 	httpx.OK(c, gin.H{"turns": turns, "show_support": result.ShowSupport})
+}
+
+// AcceptPlan records the authenticated user's approval of a plan proposal.
+//
+// Approval is a decision, not a scheduling action: it marks the plan the user
+// agreed to so the thread can show it as settled, and the client's copy says
+// exactly that. A plan belonging to anyone else is a 404 for the same reason
+// its lookup is — the id must not be confirmable.
+func (h Handler) AcceptPlan(c *gin.Context) {
+	userID, ok := h.resolveUser(c)
+	if !ok {
+		return
+	}
+	planID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		httpx.Error(c, http.StatusNotFound, "not_found", "plan not found")
+		return
+	}
+	plan, err := h.svc.AcceptPlan(c.Request.Context(), userID, planID, time.Now().UTC())
+	if errors.Is(err, ErrPlanNotFound) {
+		httpx.Error(c, http.StatusNotFound, "not_found", "plan not found")
+		return
+	}
+	if err != nil {
+		httpx.RespondServiceError(c, err)
+		return
+	}
+	httpx.OK(c, gin.H{"plan": plan})
 }

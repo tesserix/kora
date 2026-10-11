@@ -61,6 +61,9 @@ jest.mock("@/api/hooks", () => ({
   useAddWater: () => ({ mutate: jest.fn(), isPending: false }),
   useDeleteLog: () => ({ mutate: jest.fn(), isPending: false }),
   useCopyDay: () => ({ mutate: jest.fn(), isPending: false }),
+  useCurrentFast: () => ({ data: null, isSuccess: true }),
+  useStartFast: () => ({ mutate: jest.fn(), isPending: false }),
+  useEndFast: () => ({ mutate: jest.fn(), isPending: false }),
 }));
 
 // A UTC instant that lands at midday on the given LOCAL calendar day, so the

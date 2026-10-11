@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState, Linking, Platform } from "react-native";
 import { useFocusEffect } from "expo-router";
 import type { HealthData, HealthStatus } from "./types";
+import * as healthConnect from "./healthConnect";
+import { recentSleepDays, sleepLookbackMs } from "./sleepDay";
 
 // `@kingstinct/react-native-healthkit` is a Nitro native module that throws at
 // IMPORT time on any build where the native side isn't linked (e.g. a dev client
@@ -29,7 +31,6 @@ const SLEEP_ANALYSIS_IDENTIFIER = "HKCategoryTypeIdentifierSleepAnalysis";
 // excluded — only genuine sleep stages count toward the total.
 const ASLEEP_CATEGORY_VALUES = new Set<number>([1, 3, 4, 5]);
 
-const SLEEP_WINDOW_LOOKBACK_HOURS = 16;
 const MS_PER_HOUR = 60 * 60 * 1000;
 
 // How far back to look for ANY step sample before concluding reads are not
@@ -51,20 +52,95 @@ function startOfLocalDay(): Date {
   return start;
 }
 
-function sumAsleepMillis(
-  samples: readonly {
-    readonly value: number;
-    readonly startDate: Date;
-    readonly endDate: Date;
-  }[],
+export type AsleepSample = {
+  readonly value: number;
+  readonly startDate: Date;
+  readonly endDate: Date;
+};
+
+// Interval union, not a sum. queryCategorySamples — like queryQuantitySamples for
+// steps above — returns every writing source's raw samples with no dedup, and
+// HKStatisticsQuery (the fix used for steps) only works on QUANTITY types; sleep
+// is a CATEGORY type, so that trick isn't available here (see #327). Worse, sleep
+// has a second failure mode steps doesn't: even a SINGLE source's samples overlap
+// each other, because sources describe the night at different granularity — a
+// third-party app writes one `asleepUnspecified` block for the whole night while
+// Apple Watch writes Core/Deep/REM samples layered across that same span. Summing
+// raw durations counts both in full (~7h unspecified + ~6h staged = the reported
+// 12.8h). Merging overlapping/adjacent intervals first and summing the union
+// measures TIME ASLEEP rather than THE SUM OF CLAIMS ABOUT TIME ASLEEP, which is
+// correct no matter how many sources write or how finely each one buckets stages.
+//
+// Deliberately keeps `asleepUnspecified` (1) in the union instead of dropping it
+// whenever staged (3/4/5) samples are also present. A source that only ever
+// writes unspecified blocks can cover minutes no staged sample touches — partial
+// Watch battery coverage, a stretch where only the third-party app was running —
+// and dropping unspecified outright would silently UNDER-count exactly those
+// minutes. Merging makes inclusion free when coverage matches (the spans just
+// collapse to one interval) and correct when it doesn't. A future "time in deep
+// sleep" readout can filter to staged-only values on its own path; it does not
+// need this total to have dropped unspecified first.
+export function mergeAsleepMillis(
+  samples: readonly AsleepSample[],
+  windowStart?: number,
+  windowEnd?: number,
 ): number {
-  return samples.reduce((total, sample) => {
-    if (!ASLEEP_CATEGORY_VALUES.has(sample.value)) return total;
-    const start = new Date(sample.startDate).getTime();
-    const end = new Date(sample.endDate).getTime();
-    if (!Number.isFinite(start) || !Number.isFinite(end)) return total;
-    return total + Math.max(0, end - start);
-  }, 0);
+  // CLIP to the queried window before doing anything else (kora#417).
+  //
+  // HealthKit's default predicate returns any sample merely OVERLAPPING the
+  // window, so a night that began before windowStart still comes back — and
+  // comes back WHOLE. Counting it whole credits hours slept outside the window
+  // to the window, which is how this tile came to read higher than the Health
+  // app's own figure for the same night.
+  //
+  // The steps query above already guards against precisely this with
+  // strictStartDate, and carries a comment saying so; sleep never did. Clipping
+  // is used here rather than strictStartDate because strictStartDate DISCARDS
+  // an overlapping sample outright, losing the minutes that genuinely are
+  // inside the window. Clipping keeps them and drops only the rest.
+  //
+  // Bounds are optional so the union logic stays independently testable, and
+  // omitting them preserves the previous unbounded behaviour.
+  const lower = windowStart ?? Number.NEGATIVE_INFINITY;
+  const upper = windowEnd ?? Number.POSITIVE_INFINITY;
+
+  const intervals = samples
+    .filter((sample) => ASLEEP_CATEGORY_VALUES.has(sample.value))
+    .map((sample) => ({
+      start: Math.max(new Date(sample.startDate).getTime(), lower),
+      end: Math.min(new Date(sample.endDate).getTime(), upper),
+    }))
+    // Drop unparseable dates and zero/negative-duration samples up front so the
+    // sweep below never has to special-case them.
+    .filter((interval) => Number.isFinite(interval.start) && Number.isFinite(interval.end) && interval.end > interval.start)
+    .sort((a, b) => a.start - b.start);
+
+  let totalMillis = 0;
+  let runStart: number | null = null;
+  let runEnd: number | null = null;
+
+  for (const interval of intervals) {
+    if (runStart === null || runEnd === null) {
+      runStart = interval.start;
+      runEnd = interval.end;
+      continue;
+    }
+    if (interval.start <= runEnd) {
+      // Overlaps, or touches exactly (one ends the instant the next begins) —
+      // both describe one continuous span of sleep, so extend the run rather
+      // than double-counting the shared or adjoining minutes.
+      runEnd = Math.max(runEnd, interval.end);
+      continue;
+    }
+    // A genuine gap (interval.start > runEnd): close out the run and start a new one.
+    totalMillis += runEnd - runStart;
+    runStart = interval.start;
+    runEnd = interval.end;
+  }
+  if (runStart !== null && runEnd !== null) {
+    totalMillis += runEnd - runStart;
+  }
+  return totalMillis;
 }
 
 /**
@@ -101,17 +177,63 @@ export function useHealth(): HealthData {
   // before React has any chance to re-render.
   const inFlight = useRef(false);
 
+  // The Android branch, kept beside load() rather than inside it so the iOS
+  // path reads exactly as it did before Health Connect existed.
+  //
+  // Sleep is derived from the most recent SleepSession rather than from
+  // Apple's 18:00 day: Health Connect models the night directly, so there is
+  // nothing to reconstruct. Both platforms end up reporting the same concept —
+  // last night — via mergeAsleepMillis, which is shared.
+  const loadFromHealthConnect = useCallback(async () => {
+    if (!(await healthConnect.isAvailable())) {
+      setStatus("unavailable");
+      setSteps(null);
+      setSleep(null);
+      return;
+    }
+    if (!(await healthConnect.requestPermissions())) {
+      setStatus("denied");
+      setSteps(null);
+      setSleep(null);
+      return;
+    }
+
+    const now = new Date();
+    const dayStart = startOfLocalDay();
+    // Two sleep days back, matching the iOS lookback: enough to still find last
+    // night when a new one has only just begun.
+    const since = new Date(now.getTime() - sleepLookbackMs(now));
+
+    const [stepTotal, sleepSamples] = await Promise.all([
+      healthConnect.readSteps(dayStart, now),
+      healthConnect.readSleepSamples(since, now),
+    ]);
+
+    setSteps(stepTotal === null ? null : { today: stepTotal, goal: STEP_GOAL });
+    // Clipped to the session's own span rather than to a day boundary — the
+    // session IS the night here. An empty list means nothing was recorded,
+    // which is a real "no sleep logged", not a failure.
+    const sleepMillis = mergeAsleepMillis(sleepSamples);
+    setSleep(sleepSamples.length > 0 ? { lastNightHours: sleepMillis / MS_PER_HOUR } : null);
+    setStatus("authorized");
+  }, []);
+
   const load = useCallback(async () => {
     if (inFlight.current) return;
     inFlight.current = true;
     try {
-      // TODO(health-connect): Android provider. This hook only supports iOS/HealthKit
-      // today. When Android support lands, branch on Platform.OS === "android" here and
-      // read from Health Connect instead, while keeping the same HealthData contract.
-      // `isHealthDataAvailable()` is a native (Nitro) call, so it lives inside the
-      // try/catch too: on a build where the native module isn't linked (e.g. a
-      // dev-client built before HealthKit was added), it throws — degrade to
-      // "unavailable" rather than crashing the screen.
+      // Android reads Health Connect; iOS falls through to HealthKit below.
+      // Both produce the same HealthData contract, so nothing downstream knows
+      // which platform answered.
+      //
+      // Every native call in both branches sits inside this try/catch on
+      // purpose: they are native modules, and on a build where the native side
+      // is not linked they THROW rather than return false — degrading to
+      // "unavailable" beats crashing the screen.
+      if (Platform.OS === "android") {
+        await loadFromHealthConnect();
+        return;
+      }
       if (Platform.OS !== "ios") {
         setStatus("unavailable");
         setSteps(null);
@@ -139,7 +261,10 @@ export function useHealth(): HealthData {
 
       const dayStart = startOfLocalDay();
       const now = new Date();
-      const sleepWindowStart = new Date(dayStart.getTime() - SLEEP_WINDOW_LOOKBACK_HOURS * MS_PER_HOUR);
+      // Reach back far enough to cover every candidate sleep day, plus slack
+      // so a session straddling the oldest boundary is still returned and can
+      // be clipped rather than dropped.
+      const sleepWindowStart = new Date(now.getTime() - sleepLookbackMs(now));
 
       const [stepStats, sleepSamples] = await Promise.all([
         hk.queryStatisticsForQuantity(STEP_COUNT_IDENTIFIER, CUMULATIVE_SUM, {
@@ -176,8 +301,34 @@ export function useHealth(): HealthData {
         });
         setSteps(weekSamples.length > 0 ? { today: 0, goal: STEP_GOAL } : null);
       }
-      const sleepMillis = sumAsleepMillis(sleepSamples);
-      setSleep(sleepSamples.length > 0 ? { lastNightHours: Math.round((sleepMillis / MS_PER_HOUR) * 10) / 10 } : null);
+      // Bucket by APPLE'S sleep day (18:00 -> 18:00) rather than summing the
+      // whole query window, and report the most recent day that has any sleep
+      // in it (kora#417).
+      //
+      // Summing the window is what made Kora disagree with the Health app: a
+      // midnight-anchored window opens at 08:00 the previous morning and
+      // absorbs the tail of the night BEFORE last night. Clipping each bucket
+      // to its own boundaries also reproduces Apple's split of a session that
+      // crosses 18:00, instead of crediting the whole session to one day.
+      //
+      // Most recent NON-EMPTY, not simply most recent: after 18:00 a new sleep
+      // day has opened and is legitimately empty, and reporting that as zero
+      // would erase last night at the hour a user is most likely to look.
+      let sleepMillis = 0;
+      for (const day of recentSleepDays(now)) {
+        const end = Math.min(day.end.getTime(), now.getTime());
+        const millis = mergeAsleepMillis(sleepSamples, day.start.getTime(), end);
+        if (millis > 0) {
+          sleepMillis = millis;
+          break;
+        }
+      }
+      // Stored at full precision, rounded once at render by
+      // sleepDurationLabel. Rounding to one decimal HERE quantised the night
+      // to 6-minute steps, so 4h 26m was stored as 4.4 and could only ever be
+      // rendered back as 4h 24m -- a two-minute error created by the store,
+      // not by the measurement.
+      setSleep(sleepSamples.length > 0 ? { lastNightHours: sleepMillis / MS_PER_HOUR } : null);
       setStatus("authorized");
     } catch {
       // Any HealthKit call (authorization request or either query) can reject —
@@ -189,7 +340,7 @@ export function useHealth(): HealthData {
     } finally {
       inFlight.current = false;
     }
-  }, []);
+  }, [loadFromHealthConnect]);
 
   // Cold start. Every early `return` above still releases the guard via `finally`,
   // so a load that bails on a non-iOS platform does not wedge later triggers.
@@ -225,4 +376,21 @@ export function useHealth(): HealthData {
   }, [load]);
 
   return { status, steps, sleep, connect, refresh: load };
+}
+
+/**
+ * Whether to offer "Connect Apple Health" (kora#406).
+ *
+ * The bug this exists to prevent: three screens branched on whether the
+ * DATA existed, so "connected, but nothing recorded for this period"
+ * rendered the same prompt as "never connected". An already-connected user
+ * was sent into a permission flow that fixes nothing — the figure still
+ * would not appear, because the real reason is that no measurement exists.
+ *
+ * Absence of a measurement is not absence of permission. `denied` and
+ * `unavailable` both DO warrant the prompt: for those, granting access is
+ * genuinely the remedy.
+ */
+export function shouldOfferConnect(status: HealthStatus): boolean {
+  return status !== "authorized";
 }

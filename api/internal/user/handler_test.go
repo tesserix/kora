@@ -335,3 +335,136 @@ func TestUpdateProfileRejectsBadTimezones(t *testing.T) {
 		})
 	}
 }
+
+// fakeAvatarURL is the test double used everywhere below that a composer is
+// wired: it mirrors the real contract (assets.Store.URL / assetsStore(...).URL)
+// of returning "" for an empty path, so a test asserting "" for "no picture"
+// is actually exercising the handler's own behaviour, not a quirk of a naive
+// stub -- the same shape as social's and share's test composers.
+func fakeAvatarURL(path string) string {
+	if path == "" {
+		return ""
+	}
+	return "https://assets.test/" + path
+}
+
+// newMeRouter mounts GET /v1/me with an optional avatarURL composer, so
+// tests can exercise both Handler.WithAvatarURL(...) wired and NOT wired
+// (nil avatarURL is a real, currently-shipped code path -- assetsStore(nil)
+// degrades to assets.Noop{} in router.go, and a Handler built without the
+// builder call must behave the same way: avatar_url "").
+func newMeRouter(t *testing.T, db *gorm.DB, uid, email string, avatarURL func(string) string) *gin.Engine {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	v := staticVerifier{claims: auth.Claims{UID: uid, Email: email}}
+	h := NewHandler(NewRepository(db), Service{})
+	if avatarURL != nil {
+		h = h.WithAvatarURL(avatarURL)
+	}
+	r.GET("/v1/me", auth.Middleware(v), h.Me)
+	return r
+}
+
+func getMe(t *testing.T, r *gin.Engine) *httptest.ResponseRecorder {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/v1/me", nil)
+	req.Header.Set("Authorization", "Bearer anything")
+	r.ServeHTTP(w, req)
+	return w
+}
+
+func TestMeReturnsEmptyAvatarURLWithNoPicture(t *testing.T) {
+	db := testDB(t)
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", "test-uid-avatar-none") })
+	r := newMeRouter(t, db, "test-uid-avatar-none", "avatar-none@test.dev", fakeAvatarURL)
+
+	w := getMe(t, r)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"avatar_url":""`)
+}
+
+func TestMeReturnsComposedAvatarURLWhenAvatarPathSet(t *testing.T) {
+	db := testDB(t)
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", "test-uid-avatar-set") })
+	// First call provisions the row (UpsertByFirebaseUID), same as
+	// TestMeCreatesUserOnFirstCall -- avatar_path cannot be seeded before the
+	// row exists.
+	r := newMeRouter(t, db, "test-uid-avatar-set", "avatar-set@test.dev", fakeAvatarURL)
+	require.Equal(t, http.StatusOK, getMe(t, r).Code)
+
+	require.NoError(t, db.Exec(
+		"UPDATE users SET avatar_path = ? WHERE firebase_uid = ?",
+		"avatars/test-uid-avatar-set/v1.jpg", "test-uid-avatar-set").Error)
+
+	w := getMe(t, r)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"avatar_url":"https://assets.test/avatars/test-uid-avatar-set/v1.jpg"`)
+}
+
+// A Handler built WITHOUT .WithAvatarURL(...) is a real, currently-shipped
+// state -- a nil avatarURL must degrade to "" rather than panic, the same
+// "no composer wired = no picture" contract assets.Noop{} gives everywhere
+// else avatars are wired.
+func TestMeWithoutAvatarURLComposerStillRespondsEmpty(t *testing.T) {
+	db := testDB(t)
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", "test-uid-avatar-nocomposer") })
+	r := newMeRouter(t, db, "test-uid-avatar-nocomposer", "avatar-nocomposer@test.dev", nil)
+	require.Equal(t, http.StatusOK, getMe(t, r).Code)
+
+	require.NoError(t, db.Exec(
+		"UPDATE users SET avatar_path = ? WHERE firebase_uid = ?",
+		"avatars/test-uid-avatar-nocomposer/v1.jpg", "test-uid-avatar-nocomposer").Error)
+
+	w := getMe(t, r)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	// Not "https://..." -- with no composer wired the picture must not
+	// silently disappear into a broken link either; "" is the only safe
+	// value and is what the client falls back to initials on.
+	assert.Contains(t, w.Body.String(), `"avatar_url":""`)
+}
+
+// newProfileRouterWithAvatar is newProfileRouter plus a wired avatarURL
+// composer, for asserting PATCH /v1/me also serialises avatar_url (kora#449
+// task 10 review finding: WithAvatarURL shipped with no PATCH coverage).
+func newProfileRouterWithAvatar(t *testing.T, db *gorm.DB, uid, email string, avatarURL func(string) string) *gin.Engine {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	v := staticVerifier{claims: auth.Claims{UID: uid, Email: email}}
+	repo := NewRepository(db)
+	h := NewHandler(repo, Service{}).WithAvatarURL(avatarURL)
+	r.PATCH("/v1/me", auth.Middleware(v), ResolveMiddleware(repo), h.UpdateProfile)
+	return r
+}
+
+// TestUpdateProfileReturnsAvatarURLAndDoesNotClobberPicture pins two things
+// at once: PATCH /v1/me carries avatar_url (not just GET), and patching an
+// UNRELATED field (timezone here) must not touch the stored avatar_path --
+// UpdateProfile only ever writes DisplayName/Timezone, but this is the test
+// that would catch a future change accidentally zeroing AvatarPath on write.
+func TestUpdateProfileReturnsAvatarURLAndDoesNotClobberPicture(t *testing.T) {
+	db := testDB(t)
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", "test-uid-avatar-patch") })
+	meRouter := newMeRouter(t, db, "test-uid-avatar-patch", "avatar-patch@test.dev", fakeAvatarURL)
+	require.Equal(t, http.StatusOK, getMe(t, meRouter).Code) // provisions the row
+
+	require.NoError(t, db.Exec(
+		"UPDATE users SET avatar_path = ? WHERE firebase_uid = ?",
+		"avatars/test-uid-avatar-patch/v1.jpg", "test-uid-avatar-patch").Error)
+
+	r := newProfileRouterWithAvatar(t, db, "test-uid-avatar-patch", "avatar-patch@test.dev", fakeAvatarURL)
+	w := patchProfile(t, r, `{"timezone":"Asia/Kolkata"}`)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"avatar_url":"https://assets.test/avatars/test-uid-avatar-patch/v1.jpg"`,
+		"an unrelated field patch must not clear the picture")
+
+	var path string
+	db.Raw("SELECT avatar_path FROM users WHERE firebase_uid = ?", "test-uid-avatar-patch").Scan(&path)
+	assert.Equal(t, "avatars/test-uid-avatar-patch/v1.jpg", path, "the stored path itself must survive an unrelated patch")
+}

@@ -25,7 +25,54 @@ email (`profile`, `tab-more` — excluded), and the server's real calendar date
 
 ### The account fixture
 
-The harness does not script sign-up; do it by hand, once:
+**Scriptable since kora#299 — the manual recipe below is the fallback, not the
+first resort.** Sign-UP is what resists automation, not sign-IN: iOS's "Use
+Strong Password?" sheet only fires on a new-password field, and `idb ui text`
+truncates long strings (measured: it stopped at 13 characters of a 34-character
+address, silently). Both are avoidable.
+
+Create the account out of band, then drive the ordinary sign-in screen:
+
+```bash
+set -a && . ./.env && set +a
+EMAIL=s@kora.test          # SHORT. idb ui text truncates around 13 chars.
+PASS=Shots1!               # >= 6 chars for Firebase.
+
+curl -s -X POST \
+  "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$EXPO_PUBLIC_FIREBASE_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$EMAIL\",\"password\":\"$PASS\",\"returnSecureToken\":true}"
+```
+
+Then, on the simulator: tap **Continue with email**, type both fields, tap
+**Sign in**. Two things will catch you out:
+
+- iOS raises a **"Save Password?"** system alert after signing in. It renders in
+  another process, so `idb ui describe-all` returns *only* the Application node
+  and the app looks hung. Screenshot to see it; dismiss "Not Now".
+- The account lands on **onboarding**, which is correct for a new user. Change
+  nothing and tap **Start with this plan** — see step 2 below.
+
+Delete it the same way when done:
+
+```bash
+TOKEN=$(curl -s -X POST \
+  "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=$EXPO_PUBLIC_FIREBASE_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$EMAIL\",\"password\":\"$PASS\",\"returnSecureToken\":true}" \
+  | python3 -c "import sys,json;print(json.load(sys.stdin)['idToken'])")
+
+curl -s -X POST \
+  "https://identitytoolkit.googleapis.com/v1/accounts:delete?key=$EXPO_PUBLIC_FIREBASE_API_KEY" \
+  -H 'Content-Type: application/json' -d "{\"idToken\":\"$TOKEN\"}"
+```
+
+Note this deletes the auth identity only. Identities live in a different GCP
+project from the rest of Kora, which has bitten account deletion before.
+
+---
+
+If you would rather do it by hand, the original recipe still works:
 
 1. Sign-in screen → **Create an account** → any throwaway email and password.
    (iOS's "Use Strong Password?" sheet renders in another process and swallows
@@ -42,6 +89,20 @@ Verified: goldens captured under one account compare clean against a capture
 taken with a **different** account created by the same recipe, after a Metro
 restart and fresh app launches. Nothing in the committed set depends on who
 captured it.
+
+## Capture goldens the same way you compare them
+
+`npm run shots:golden -- --routes <one>` captures that route **alone**. The
+comparison run captures the **whole walk**. Those are not the same picture:
+`feedback` renders about 26pt lower in the walk than it does solo — same content
+size, same golden, both passing the ready gate — because it is reached with a
+navigation stack behind it rather than as a fresh root.
+
+So a golden re-captured with `--routes` will fail the next full comparison, and
+the failure looks like a real regression. **Regenerate with a bare
+`npm run shots:golden`** unless you are certain the route is insensitive to how
+it was reached. (The underlying inconsistency is its own bug, not a harness
+quirk to work around — see kora#310.)
 
 ## Check a build against them
 

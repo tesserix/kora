@@ -7,7 +7,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"gorm.io/gorm"
+
+	"github.com/tesserix/kora/api/internal/diet"
 )
 
 type Provenance = string
@@ -50,6 +53,10 @@ const (
 	LocaleAU Locale = "AU"
 	LocaleIN Locale = "IN"
 	LocaleUS Locale = "US"
+	// LocaleNZ exists for the OFF New Zealand slice; NZ has no national
+	// reference rows of its own yet (FOODfiles is registration-gated), so NZ
+	// users also lean on AU rows — see LocalePrefers.
+	LocaleNZ Locale = "NZ"
 	// LocaleUnknown is a real state, not a gap: the row gets no locale
 	// preference in either direction. Correct for user estimates and for any
 	// source that is not national reference data.
@@ -67,10 +74,13 @@ const (
 func DeriveLocale(provenance Provenance) Locale {
 	switch provenance {
 	case ProvenanceAFCD, ProvenanceAUSNUT, ProvenanceOFF:
-		// OFF is Australian here specifically because off_au.json is filtered
-		// to Australian products at conversion time. If a second OFF region is
-		// ever ingested, this rule stops being true and must move to the
-		// converter, like curated's did.
+		// OFF rows normally carry an explicit per-row locale stamped by
+		// off_convert.py (the rule moved to the converter when the NZ and IN
+		// slices arrived, as this comment always said it would). This AU
+		// fallback remains for the rows that cannot carry one: live
+		// barcode-scan inserts (ResolveBarcode), whose scanning user base the
+		// index treats as AU-first, and any pre-locale off_au.json still in
+		// the wild.
 		return LocaleAU
 	case ProvenanceIFCT:
 		return LocaleIN
@@ -79,6 +89,25 @@ func DeriveLocale(provenance Provenance) Locale {
 	default:
 		return LocaleUnknown
 	}
+}
+
+// LocalePrefers reports whether a user with locale `user` should have rows
+// with locale `row` boosted. Exact match, plus one asymmetric case: NZ users
+// also prefer AU rows, because the AU reference data IS the NZ reference data
+// — FSANZ is the bi-national Australia–New Zealand agency and NZ has no
+// generic rows of its own in this index. One-way on purpose: AU users get no
+// boost on NZ rows, since AU has ample native coverage and the NZ slice is
+// packaged products only.
+func LocalePrefers(user, row Locale) bool {
+	if user == LocaleUnknown || row == LocaleUnknown {
+		// An unknown user locale must not favour unknown-locale rows, which
+		// would quietly promote user estimates over reference data.
+		return false
+	}
+	if user == row {
+		return true
+	}
+	return user == LocaleNZ && row == LocaleAU
 }
 
 // EntityType is what KIND of thing a food row is, as distinct from Provenance,
@@ -170,7 +199,27 @@ type FoodItem struct {
 	CarbsPer100g   float64         `gorm:"column:carbs_per_100g" json:"carbs_per_100g"`
 	FatPer100g     float64         `gorm:"column:fat_per_100g" json:"fat_per_100g"`
 	FiberPer100g   float64         `gorm:"column:fiber_per_100g" json:"fiber_per_100g"`
-	CreatedAt      time.Time       `json:"created_at"`
+	// DietTags are the containment facts derived from the food's own name and
+	// brand — "contains-dairy", "contains-peanut". They are json:"-" because a
+	// client must not treat a derived tag as an ingredient declaration; they
+	// exist so a user's blocking rules can be applied as an indexed query
+	// rather than a scan.
+	DietTags  pq.StringArray `gorm:"column:diet_tags;type:text[]" json:"-"`
+	CreatedAt time.Time      `json:"created_at"`
+}
+
+// deriveDietTags keeps diet_tags in step with the name and brand on every
+// write path. Doing it in the model rather than at each call site is what makes
+// "a food is tagged" an invariant instead of a checklist item — the same
+// reasoning as BeforeCreate below.
+func (f *FoodItem) deriveDietTags() {
+	f.DietTags = diet.TagsFor(f.Name, f.Brand, nil)
+}
+
+// BeforeSave runs for both creates and updates, so a rename retags the row.
+func (f *FoodItem) BeforeSave(*gorm.DB) error {
+	f.deriveDietTags()
+	return nil
 }
 
 // BeforeCreate types any row that reaches the database without an EntityType.

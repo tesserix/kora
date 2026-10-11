@@ -118,7 +118,7 @@ export const TAB_BAR_OCCUPIED_HEIGHT =
 // Breathing room between the last pixel of scrollable content and the top of
 // the dock, at the true scroll bottom.
 const TAB_BAR_CONTENT_GAP = 39;
-const TAB_BAR_CONTENT_GAP_TIGHT = 29;
+const TAB_BAR_CONTENT_GAP_TODAY = 44;
 
 /**
  * `paddingBottom` for a tab screen's scroll content, so the last item clears
@@ -127,17 +127,29 @@ const TAB_BAR_CONTENT_GAP_TIGHT = 29;
 export const TAB_BAR_SCROLL_INSET = TAB_BAR_OCCUPIED_HEIGHT + TAB_BAR_CONTENT_GAP;
 
 /**
- * The same, 10pt tighter. Used ONLY by Today. (= 130)
+ * The same, 5pt looser. Used ONLY by Today. (= 145)
  *
- * The two values are historical drift, not a design distinction — the four tab
- * screens each hardcoded their own number and Today's was written 10 lower.
- * Preserved rather than unified because kora#280 is an inert refactor: both
- * clearances were verified adequate in kora#277 (content clears the dock at the
- * true scroll bottom on all four tabs at both content sizes), so collapsing
- * them would move pixels on Today to no end. Unify when there is a reason to
- * move Today's content, and delete this export then.
+ * Today ends in a tappable row ("Log a meal") rather than a list, and an
+ * overscroll bounce dragged it into the capture cap's glow. The extra clearance
+ * parks it above the fade's start so the bounce fades it out instead.
  */
-export const TAB_BAR_SCROLL_INSET_TIGHT = TAB_BAR_OCCUPIED_HEIGHT + TAB_BAR_CONTENT_GAP_TIGHT;
+export const TAB_BAR_SCROLL_INSET_TODAY = TAB_BAR_OCCUPIED_HEIGHT + TAB_BAR_CONTENT_GAP_TODAY;
+
+// REMOVED (kora#354): a "ground fade" scrim used to sit under the dock,
+// fading transparent -> instrument.bg so content scrolling underneath faded
+// out rather than colliding with the pill.
+//
+// It could never be invisible. AppBackground does not paint instrument.bg
+// flat — it lays three radial pools over it, and bg-pool-3 sits at cy 96%,
+// which is exactly where the dock is. So the scrim painted a flat cool grey
+// over the warmest part of the background: a slab, edged where the gradient
+// reached full opacity, across the whole screen width on every tab.
+//
+// Matching it was the wrong repair. A vertical linear gradient cannot equal a
+// radial pool, and any scrim that has to mirror AppBackground's internals
+// breaks again the moment those internals change. If the fade is wanted back,
+// fade the CONTENT (a mask over the scrolling view) instead of painting a
+// replica of the background over it.
 
 // Domed capture face — precomputed [highlight, accent, shadow] mixes per
 // scheme so the button reads as lit from above rather than a flat disc.

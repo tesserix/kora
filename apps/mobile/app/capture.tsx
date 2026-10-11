@@ -3,6 +3,7 @@ import {
   Animated,
   AppState,
   Easing,
+  Image,
   Keyboard,
   KeyboardAvoidingView,
   Linking,
@@ -24,6 +25,7 @@ import { RecordingPresets, requestRecordingPermissionsAsync, useAudioRecorder } 
 import { Icon } from "@/components/Icon";
 import { AppText } from "@/components/Text";
 import { OttoBubble } from "@/components/capture/OttoBubble";
+import { PlanCard } from "@/components/capture/PlanCard";
 import { UserBubble } from "@/components/capture/UserBubble";
 import { ModePill } from "@/components/capture/ModePill";
 import { Waveform } from "@/components/capture/Waveform";
@@ -37,11 +39,12 @@ import { useToast } from "@/components/Toast";
 import { INSTRUMENT_DARK_FIXED } from "@/theme";
 import { haptics, PressableScale, useMotionPrefs } from "@/motion";
 import {
+  useAcceptMealPlan,
   useCreateLog,
   useProfile,
   useResolveBarcode,
   useResolvePhoto,
-  useResolveText,
+  useCaptureMessage,
   useResolveVoice,
 } from "@/api/hooks";
 import { ApiError, AuthTokenError, NetworkError, ResponseParseError, TimeoutError } from "@/lib/api";
@@ -55,7 +58,7 @@ import { QUEUED_CAPTURES_KEY } from "@/offline/queryKeys";
 import { isLoggable } from "@/lib/candidateTier";
 import { runRetryLedger } from "@/lib/retryLedger";
 import { servingEntryFor } from "@/units/portion";
-import type { FoodItem, Resolution, ResolutionSource } from "@/api/types";
+import type { FoodItem, MealPlanProposal, Resolution, ResolutionSource } from "@/api/types";
 import { mealSlotForHour, type MealSlot } from "@/lib/mealSlot";
 import { initialPortionFor } from "@/lib/promotedPortion";
 
@@ -323,7 +326,7 @@ interface IdleAffordanceProps {
    *  back denied (see handleStartVoice) — same "only known after a tap" story
    *  as photoPermissionDenied. */
   micPermissionDenied: boolean;
-  onBarcodeScanned: (data: string) => void;
+  onBarcodeScanned: (data: string, scannedAt: number) => void;
   onDescribeInstead: () => void;
 }
 
@@ -367,32 +370,50 @@ function IdleAffordance({
       );
     }
     return (
-      // The app's central action. A raw Pressable here meant the tap had no
-      // acknowledgement at all until the camera fired.
-      <PressableScale
-        testID="capture-idle-photo"
-        accessibilityRole="button"
-        accessibilityLabel="Photo viewfinder"
-        onPress={onCapturePhoto}
-        style={{
-          height: 200,
-          borderRadius: 20,
-          overflow: "hidden",
-          backgroundColor: T.glass,
-          borderWidth: 1,
-          borderColor: T.glassBorder,
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <Icon name="utensils" size={54} color={T.mut} />
-        <ViewfinderReticle />
-        <View style={{ position: "absolute", bottom: 12, left: 0, right: 0 }}>
-          <AppText style={{ textAlign: "center", color: T.mut, fontSize: 13, fontWeight: "600" }}>
-            Tap the viewfinder to capture
+      <View style={{ gap: 12 }}>
+        <PressableScale
+          testID="capture-idle-photo"
+          accessibilityRole="button"
+          accessibilityLabel="Photo viewfinder"
+          onPress={onCapturePhoto}
+          style={{
+            height: 200,
+            borderRadius: 20,
+            overflow: "hidden",
+            backgroundColor: T.glass,
+            borderWidth: 1,
+            borderColor: T.glassBorder,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Icon name="utensils" size={54} color={T.mut} />
+          <ViewfinderReticle />
+          <View style={{ position: "absolute", bottom: 12, left: 0, right: 0 }}>
+            <AppText style={{ textAlign: "center", color: T.mut, fontSize: 13, fontWeight: "600" }}>
+              Tap the viewfinder to capture
+            </AppText>
+          </View>
+        </PressableScale>
+        <PressableScale
+          accessibilityRole="button"
+          accessibilityLabel="Choose from library"
+          onPress={onChooseFromLibrary}
+          style={{
+            minHeight: 48,
+            borderRadius: 16,
+            backgroundColor: T.glass,
+            borderWidth: 1,
+            borderColor: T.glassBorder,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <AppText style={{ color: T.mut, fontSize: 14, fontWeight: "600" }}>
+            Choose from library
           </AppText>
-        </View>
-      </PressableScale>
+        </PressableScale>
+      </View>
     );
   }
 
@@ -471,7 +492,7 @@ function IdleAffordance({
                 testID="barcode-scanner"
                 style={{ width: "100%", height: "100%" }}
                 barcodeScannerSettings={{ barcodeTypes: ["ean13", "ean8", "upc_a", "upc_e"] }}
-                onBarcodeScanned={({ data }) => onBarcodeScanned(data)}
+                onBarcodeScanned={({ data }) => onBarcodeScanned(data, Date.now())}
               />
               {/* The real scan line — over the live camera feed this screen
                   can actually scan with. Distinct from (and not to be
@@ -503,6 +524,13 @@ function IdleAffordance({
   return <View testID="capture-idle-type" />;
 }
 
+/** One settled turn in the Ask Otto thread, oldest first. */
+export type ThreadEntry =
+  | { role: "user"; text: string; photoUri?: string }
+  /** `plan` is the reviewed meal plan in its structured form — the text says
+   *  why it fits, the card is what the user can approve (kora#264). */
+  | { role: "otto"; text: string; agent?: string; reviewedBy?: string; plan?: MealPlanProposal | null };
+
 interface CaptureBodyProps {
   displayName: string;
   insetTop: number;
@@ -513,10 +541,11 @@ interface CaptureBodyProps {
   resolution: Resolution | null;
   errorMsg: string | null;
   /**
-   * The phrase the user has just sent, shown as their own message in the
-   * thread while Otto works (kora#199).
+   * Every turn so far — the user's messages (kora#199) and Otto's replies
+   * (kora#264). Append-only: a second question must not erase the exchange it
+   * follows, or "also include breakfast" loses the plan it refers to.
    */
-  sentPhrase: string | null;
+  transcript: readonly ThreadEntry[];
   mealSlot: MealSlot;
   onChangeMealSlot: (slot: MealSlot) => void;
   onAdd: () => void;
@@ -540,12 +569,12 @@ interface CaptureBodyProps {
   photoPermissionDenied?: boolean;
   /** True when the CAMERA is denied and Photo mode should say so (kora#201). */
   cameraForPhotoDenied?: boolean;
-  /** Explicit photo-library route offered by the camera-denied card. */
+  /** Explicit photo-library route offered in Photo mode. */
   onChooseFromLibrary?: () => void;
   /** True once expo-audio's mic permission request has actually come back
    *  denied. Drives the Voice idle affordance's denied UI. */
   micPermissionDenied?: boolean;
-  onBarcodeScanned: (data: string) => void;
+  onBarcodeScanned: (data: string, scannedAt: number) => void;
   onClose: () => void;
   /** Forwarded to DetectedCard — asked when the user taps an uncertain row. */
   onResolveUncertain?: (index: number) => void;
@@ -556,6 +585,12 @@ interface CaptureBodyProps {
   onChangePortion?: (index: number, baseQuantity: number) => void;
   /** Bails out of the in-flight resolve and returns to idle. Analyzing-state only. */
   onCancelResolve?: () => void;
+  /** Approves the plan on one of the thread's Otto turns. The index is the
+   *  turn's position, so a repeated plan in a long thread still updates the
+   *  turn the user tapped. */
+  onApprovePlan?: (planID: string, turnIndex: number) => void;
+  /** The plan currently being approved, so only its own button spins. */
+  approvingPlanID?: string | null;
 }
 
 // Presentational capture surface — pure props in, no state, no API calls.
@@ -570,7 +605,7 @@ export function CaptureBody({
   stage,
   resolution,
   errorMsg,
-  sentPhrase,
+  transcript,
   mealSlot,
   onChangeMealSlot,
   onAdd,
@@ -597,6 +632,8 @@ export function CaptureBody({
   onToggleExclude,
   onChangePortion,
   onCancelResolve,
+  onApprovePlan = () => {},
+  approvingPlanID = null,
 }: CaptureBodyProps) {
   const scrollViewRef = useRef<ScrollView>(null);
   const composerFieldRef = useRef<TextInput>(null);
@@ -607,16 +644,17 @@ export function CaptureBody({
   // Send is unavailable below MIN_PHRASE_CHARS rather than accepting a press
   // that could only ever fail — the rule is visible in the affordance, which
   // is how every other unavailable control on this screen behaves (kora#243).
-  const canSend = text.trim().length >= MIN_PHRASE_CHARS;
+  const inputsLocked = stage === "analyzing";
+  const canSend = !inputsLocked && text.trim().length >= MIN_PHRASE_CHARS;
 
   // Bring the newest Otto message (an error bubble or the detected-food
   // result) into view — on short viewports or with the keyboard open, the
   // in-thread bubble can otherwise land below the fold with no signal.
   useEffect(() => {
-    if (errorMsg || resolution) {
+    if (errorMsg || resolution || transcript.length > 0) {
       scrollViewRef.current?.scrollToEnd({ animated: true });
     }
-  }, [errorMsg, resolution]);
+  }, [errorMsg, resolution, transcript.length]);
 
   return (
     <KeyboardAvoidingView
@@ -637,7 +675,7 @@ export function CaptureBody({
           <Icon name="x" size={20} color={T.ink} />
         </PressableScale>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
-          <Icon name="camera" size={17} color={T.accent} />
+          <Icon name="sparkles" size={17} color={T.accent} />
           <AppText style={{ color: T.ink, fontWeight: "700" }}>Ask Otto</AppText>
         </View>
         {/* Balances the Close button on the left so the title stays centered
@@ -672,15 +710,45 @@ export function CaptureBody({
           />
         )}
 
-        {/* The user's own message, in the thread where they put it.
-            UserBubble has existed — styled, tested, with its own reduced-motion
-            entrance — since the capture screen was built, and no screen ever
-            rendered it. So a typed phrase went nowhere: the text sat in the
-            composer for the whole 2-3s resolve (setText("") was inside
-            onSuccess) while the thread showed nothing, which reads as "did that
-            send?". Photo felt fine only because it has no field to linger in.
-            kora#199. */}
-        {sentPhrase ? <UserBubble>{sentPhrase}</UserBubble> : null}
+        {/* The conversation so far, oldest first. The user's turn is appended
+            optimistically on send (kora#199) and Otto's reply when it lands, so
+            the thread reads back the way the server already remembers it —
+            /v1/coach/message replays the last turns into every prompt. */}
+        {transcript.map((entry, index) =>
+          entry.role === "user" ? (
+            entry.photoUri ? (
+              <View key={index} style={{ alignSelf: "flex-end", maxWidth: "80%", gap: 6 }}>
+                <Image
+                  source={{ uri: entry.photoUri }}
+                  accessibilityLabel="Uploaded meal photo"
+                  accessible
+                  resizeMode="contain"
+                  style={{ width: 240, maxWidth: "100%", height: 220, borderRadius: 16, backgroundColor: T.inset }}
+                />
+              </View>
+            ) : <UserBubble key={index}>{entry.text}</UserBubble>
+          ) : (
+            <View key={index} style={{ gap: 10 }}>
+              <OttoBubble
+                agent={
+                  entry.agent
+                    ? entry.agent + (entry.reviewedBy ? ` · reviewed by ${entry.reviewedBy}` : "")
+                    : undefined
+                }
+              >
+                {entry.text}
+              </OttoBubble>
+              {entry.plan ? (
+                <PlanCard
+                  plan={entry.plan}
+                  disabled={inputsLocked}
+                  onApprove={() => { if (!inputsLocked) onApprovePlan(entry.plan!.id, index); }}
+                  approving={approvingPlanID === entry.plan.id}
+                />
+              ) : null}
+            </View>
+          ),
+        )}
 
         {stage === "analyzing" && (
           <View
@@ -759,7 +827,7 @@ export function CaptureBody({
             Same mechanism DetectedCard already uses for these pills. */}
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
           {MODE_PILLS.map(({ mode: m, icon, label }) => (
-            <ModePill key={m} icon={icon} label={label} active={mode === m} onPress={() => onModeChange(m)} />
+            <ModePill key={m} icon={icon} label={label} active={mode === m} disabled={inputsLocked} onPress={() => onModeChange(m)} />
           ))}
         </View>
 
@@ -780,7 +848,7 @@ export function CaptureBody({
               changed the pills and the thread affordance but left a camera
               button and a text field sitting in the composer. Voice owns its
               own control (hold-to-record); the others share one Pressable. */}
-          {mode === "voice" ? (
+          {mode === "voice" && !inputsLocked ? (
             <VoiceComposer
               isRecording={isRecordingVoice}
               onStart={onStartVoice}
@@ -790,7 +858,9 @@ export function CaptureBody({
           ) : (
             <PressableScale
               accessibilityRole="button"
-              accessibilityLabel={COMPOSER_BUTTON[mode].label}
+              accessibilityLabel={mode === "voice" ? "Record voice" : COMPOSER_BUTTON[mode].label}
+              accessibilityState={{ disabled: inputsLocked }}
+              disabled={inputsLocked}
               onPress={mode === "type" ? () => composerFieldRef.current?.focus() : onCapturePhoto}
               style={{
                 width: 38,
@@ -801,7 +871,7 @@ export function CaptureBody({
                 justifyContent: "center",
               }}
             >
-              <Icon name={COMPOSER_BUTTON[mode].icon} size={19} color={T.accentOn} />
+              <Icon name={mode === "voice" ? "mic" : COMPOSER_BUTTON[mode].icon} size={19} color={T.accentOn} />
             </PressableScale>
           )}
           {/* Typing is only an input in photo/type. In voice and scan the middle
@@ -811,11 +881,13 @@ export function CaptureBody({
               ref={composerFieldRef}
               accessibilityLabel="Tell Otto what you ate"
               value={text}
-              onChangeText={onChangeText}
+              editable={!inputsLocked}
+              accessibilityState={{ disabled: inputsLocked }}
+              onChangeText={inputsLocked ? undefined : onChangeText}
               autoCorrect
               spellCheck
               returnKeyType="send"
-              onSubmitEditing={onSend}
+              onSubmitEditing={inputsLocked ? undefined : onSend}
               placeholder="Tell Otto what you ate…"
               placeholderTextColor={T.mut}
               style={{ flex: 1, color: T.ink, fontSize: 15 }}
@@ -825,7 +897,7 @@ export function CaptureBody({
               {mode === "voice" ? "Hold the mic to record" : "Point at a barcode"}
             </AppText>
           )}
-          {/* Send — resolves the typed phrase via useResolveText. */}
+          {/* Send — posts the typed phrase via useCaptureMessage. */}
           {showsTextField ? (
           <PressableScale
             accessibilityRole="button"
@@ -873,9 +945,7 @@ function assetOutcome(result: ImagePicker.ImagePickerResult): PhotoPickOutcome {
   };
 }
 
-// The explicit library route, reached only when the user ASKS for it from the
-// camera-denied card. Before kora#201 this ran silently as a fallback, so a
-// camera icon produced a photo-library dialog nobody had requested.
+// Shared by the Photo screen and the camera-denied card.
 async function pickMealFromLibrary(): Promise<PhotoPickOutcome> {
   try {
     const libraryPermission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -1004,14 +1074,7 @@ function ottoErrorMessage(error: Error): string {
     return "The server answered, but I couldn't make sense of it. Mind trying again?";
   }
   if (error instanceof TimeoutError) {
-    // No longer reachable from the BARCODE path: useResolveBarcode's
-    // withCacheFallback turns a timeout into a cache lookup, which either
-    // answers or raises OfflineUnknownBarcodeError above — and that now
-    // queues (kora#241). The typed path queues on timeout (kora#196) and sets
-    // its own copy in handleSend's onError, and handleResolveFailure does the
-    // same for photo and voice, so this generic text is only ever seen by a
-    // caller with nothing saved. It therefore stays honest about the timeout
-    // itself and promises no save.
+    // Barcode cache misses queue separately; an unsaved timeout promises no save.
     return "That took too long — mind trying again?";
   }
   return "Something went wrong while I looked at that. Please try again.";
@@ -1022,7 +1085,7 @@ export default function CaptureScreen() {
   const queryClient = useQueryClient();
   const toast = useToast();
   const profile = useProfile();
-  const resolveText = useResolveText();
+  const captureMessage = useCaptureMessage();
   const resolvePhoto = useResolvePhoto();
   const resolveVoice = useResolveVoice();
   const resolveBarcode = useResolveBarcode();
@@ -1089,6 +1152,9 @@ export default function CaptureScreen() {
   // read `ai_text`.
   const [resolutionSource, setResolutionSource] = useState<ResolutionSource | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // The conversation, not the latest line of it. Kept separate from errorMsg
+  // because these are ANSWERS, not failures, and each carries who answered.
+  const [transcript, setTranscript] = useState<readonly ThreadEntry[]>([]);
   const [mealSlot, setMealSlot] = useState<MealSlot>(() => mealSlotForHour(new Date().getHours()));
   const [adding, setAdding] = useState(false);
   // Candidate keys (see candidateKey) already logged successfully across
@@ -1136,12 +1202,51 @@ export default function CaptureScreen() {
   // cleared to null) in the same onSuccess handler that calls applyResolution,
   // so it can never lag behind — and never a later, unrelated resolution.
   const [resolvedPhrase, setResolvedPhrase] = useState<string | null>(null);
-  // What the user just said, shown as their own bubble while Otto works.
-  // Distinct from resolvedPhrase, which is the phrase attached to the LOG for
-  // the correction loop — this one is presentation, and is cleared whenever the
-  // thread is reset.
-  const [sentPhrase, setSentPhrase] = useState<string | null>(null);
+  // Cancel means the in-flight message never became an exchange, so it leaves
+  // the thread with the request it belonged to. A failed request does NOT go
+  // through here: its bubble stays as the retry context (see handleSend).
+  function dropPendingUserTurn() {
+    setTranscript((turns) =>
+      turns.length > 0 && turns[turns.length - 1].role === "user" ? turns.slice(0, -1) : turns,
+    );
+  }
+  const acceptPlan = useAcceptMealPlan();
+  const [approvingPlanID, setApprovingPlanID] = useState<string | null>(null);
+  // Approval is a decision, not a log: the card flips to "approved" and the
+  // thread keeps the plan exactly as reviewed. A failure leaves the button
+  // where it was, so the user can simply tap again.
+  function handleApprovePlan(planID: string, turnIndex: number) {
+    setApprovingPlanID(planID);
+    acceptPlan.mutate(planID, {
+      onSuccess: (plan) => {
+        setTranscript((turns) =>
+          turns.map((turn, index) =>
+            index === turnIndex && turn.role === "otto" ? { ...turn, plan } : turn,
+          ),
+        );
+      },
+      onError: () => setErrorMsg("I couldn't save that approval — try again."),
+      onSettled: () => setApprovingPlanID(null),
+    });
+  }
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  // The SYNCHRONOUS truth about whether a recording is live. isRecordingVoice
+  // drives rendering; this drives the guards.
+  //
+  // kora#331: one hold-and-release produced TWO /v1/resolve/voice requests.
+  // VoiceComposer nests a Pressable inside the GestureDetector on purpose --
+  // hold-and-slide is unusable under VoiceOver, so tap-to-stop is a
+  // first-class path -- and on release the pan's onFinalize AND the
+  // Pressable's onPress both reach onFinish. The guard here was
+  // `if (!isRecordingVoice) return`, but setIsRecordingVoice(false) only takes
+  // effect on the next render, so both calls read `true` in the same tick and
+  // both paid for a transcription: doubled AI spend on the primary input path
+  // and doubled counts against billing.Meter, which per-user quota is built on.
+  //
+  // Same reasoning as scannedRef below. A ref updates in the tick that sets
+  // it, which is the only thing that can gate work started from two callbacks
+  // in one tick.
+  const recordingRef = useRef(false);
   // Guards a single CameraView against firing onBarcodeScanned repeatedly
   // for the same physical scan while the camera keeps detecting the code.
   const scannedRef = useRef(false);
@@ -1177,6 +1282,10 @@ export default function CaptureScreen() {
   // effect below now genuinely kills an in-flight upload rather than merely
   // dropping a reference to one.
   const resolveControllerRef = useRef<AbortController | null>(null);
+  // Milliseconds since this capture began; read at CONFIRM time so an offline
+  // log queued for later still reports how long the USER waited, not how long
+  // the queue held it. Null until the first capture starts.
+  const captureStartedAtRef = useRef<number | null>(null);
   // Set the moment Cancel fires, cleared the moment a new resolve starts —
   // overrides displayStage below so the UI returns to idle even while the
   // hook's own isPending is still (harmlessly) true.
@@ -1190,9 +1299,21 @@ export default function CaptureScreen() {
   // back (immediately after calling this), so a Cancel on a photo/voice/text
   // resolve never arms the barcode cooldown with a stale code from an
   // earlier, unrelated scan (see #136 part 2 follow-up review).
+  // captureStartedAtRef is when THIS capture began — the start of kora#43's
+  // north-star metric, "median time-to-log a meal (<10s target)".
+  //
+  // Set here rather than at screen mount, which is what app/log.tsx uses:
+  // capture.tsx stays mounted across several logs, so mount time would charge
+  // the second meal for however long the first one took. Every capture path
+  // (photo, voice, message, barcode) funnels through beginResolve, so this is
+  // the one place that sees all of them.
+  //
+  // It is deliberately NOT cleared on cancel: the next capture overwrites it,
+  // and a cancelled resolve logs nothing, so there is nothing to mis-time.
   function beginResolve(): AbortController {
     const controller = new AbortController();
     resolveControllerRef.current = controller;
+    captureStartedAtRef.current = Date.now();
     setCancelledResolve(false);
     lastScannedCodeRef.current = null;
     return controller;
@@ -1200,7 +1321,7 @@ export default function CaptureScreen() {
 
   function handleCancelResolve() {
     // Cancel means "I've moved on" — the message goes with the request.
-    setSentPhrase(null);
+    dropPendingUserTurn();
     resolveControllerRef.current?.abort();
     // Do NOT reset scannedRef here — the abort above releases it through
     // handleBarcodeScanned's onError (see #136 part 1). Resetting it a
@@ -1230,7 +1351,7 @@ export default function CaptureScreen() {
 
   const displayStage: CaptureStage =
     !cancelledResolve &&
-    (resolveText.isPending || resolvePhoto.isPending || resolveVoice.isPending || resolveBarcode.isPending)
+    (captureMessage.isPending || resolvePhoto.isPending || resolveVoice.isPending || resolveBarcode.isPending)
       ? "analyzing"
       : stage;
 
@@ -1325,14 +1446,15 @@ export default function CaptureScreen() {
   }
 
   function handleModeChange(next: CaptureMode) {
-    // The bubble belongs to the thread being left behind.
-    setSentPhrase(null);
+    // The thread belongs to the mode being left behind.
+    setTranscript([]);
     // Switching away from Voice mid-recording must not leave the native
     // recorder running in the background — stop it (best-effort) and reset
     // the mic button back to its start state.
     if (next !== "voice" && isRecordingVoice) {
       recorder.stop().catch(() => {});
       void endRecordingSession();
+      recordingRef.current = false;
       setIsRecordingVoice(false);
     }
     setMode(next);
@@ -1356,19 +1478,40 @@ export default function CaptureScreen() {
     // the thread the instant it is sent, exactly as every messaging app
     // behaves. Clearing inside onSuccess (as this did) left the text sitting in
     // the composer for the whole resolve with nothing else on screen changing.
-    setSentPhrase(phrase);
+    setTranscript((turns) => [...turns, { role: "user", text: phrase }]);
     setText("");
     // Fires right as send is pressed — the composer's own keyboard should
     // not stay up covering the result thread once a send is in flight.
     Keyboard.dismiss();
     const controller = beginResolve();
-    resolveText.mutate({ input: phrase, signal: controller.signal }, {
+    // Not resolveText: the server decides what the message IS first. Posting
+    // straight to food resolution asked a model to name the foods in "help me
+    // build a meal plan", and it duly invented four and offered to log them
+    // (kora#264).
+    captureMessage.mutate({ input: phrase, signal: controller.signal }, {
       onSuccess: (data) => {
         // A cancel that lands between mutate() firing and this callback
         // means the user has already moved on — applying it now would
         // resurrect a result onto a screen that told them it was abandoned.
         if (controller.signal.aborted) return;
-        applyResolution(data, "ai_text");
+        if (data.kind === "answer") {
+          // Conversation, so nothing to confirm and nothing to log: the thread
+          // keeps the user's message and gains Otto's reply, and the screen
+          // goes back to idle rather than to the add-to-diary card.
+          setTranscript((turns) => [
+            ...turns,
+            {
+              role: "otto",
+              text: data.answer,
+              agent: data.agent?.name,
+              reviewedBy: data.agent?.reviewed_by,
+              plan: data.plan,
+            },
+          ]);
+          setStage("idle");
+          return;
+        }
+        applyResolution(data.resolution, "ai_text");
         setResolvedPhrase(phrase);
       },
       onError: async (error) => {
@@ -1389,14 +1532,23 @@ export default function CaptureScreen() {
         // suppresses a queue refusal: a phrase that could not be saved must
         // say so (see the catch below).
         const cancelled = controller.signal.aborted;
-        // Same classifier handleResolveFailure uses: these three mean the
-        // request never arrived, so the phrase is still good and belongs in
-        // the queue (kora#196). Anything else is a genuine refusal that would
-        // fail identically on replay.
-        const recoverable =
-          error instanceof NetworkError ||
-          error instanceof AuthTokenError ||
-          error instanceof TimeoutError;
+        // Same classifier handleResolveFailure uses, MINUS TimeoutError: these
+        // two mean the request never arrived, so the phrase is still good and
+        // belongs in the queue (kora#196). Anything else is a genuine refusal
+        // that would fail identically on replay.
+        //
+        // TimeoutError is excluded here alone (kora#264). This endpoint runs
+        // the agent chain — classify, draft, review — so a timeout means the
+        // request DID arrive and is still being worked on, which is the
+        // opposite of what the queue is for. Two things went wrong when it was
+        // treated as offline: a week-long plan request was told "You're
+        // offline" on a device with full signal, and the question itself was
+        // enqueued as a FOOD capture, so "plan my meals for the week" came
+        // back later as an attempt to name the foods in it. The deadline that
+        // makes a timeout here rare is AGENT_REQUEST_TIMEOUT_MS in
+        // src/lib/api.ts; when one still happens, the honest thing is to say
+        // it took too long and let the user ask again.
+        const recoverable = error instanceof NetworkError || error instanceof AuthTokenError;
         if (!recoverable) {
           // Hand the words back. The bubble goes with them: a message that
           // never arrived should not sit in the thread as though it did.
@@ -1559,6 +1711,8 @@ export default function CaptureScreen() {
       setErrorMsg("Something went wrong opening your photos — try again.");
       return;
     }
+    setTranscript((turns) => [...turns, { role: "user", text: "Meal photo", photoUri: outcome.file.uri }]);
+    Keyboard.dismiss();
     const controller = beginResolve();
     resolvePhoto.mutate({ input: outcome.file, signal: controller.signal }, {
       onSuccess: (data) => {
@@ -1592,7 +1746,7 @@ export default function CaptureScreen() {
   // silently, mirroring pickMealPhoto's discipline above).
   async function handleStartVoice() {
     setErrorMsg(null);
-    if (isRecordingVoice) return;
+    if (recordingRef.current) return;
     // Same clean-retry reasoning as handleCapturePhoto's reset above.
     setMicPermissionDenied(false);
 
@@ -1609,6 +1763,7 @@ export default function CaptureScreen() {
       await beginRecordingSession();
       await recorder.prepareToRecordAsync();
       recorder.record();
+      recordingRef.current = true;
       setIsRecordingVoice(true);
     } catch (error) {
       // Reported, not just shown. The previous `catch {}` discarded the only
@@ -1623,7 +1778,10 @@ export default function CaptureScreen() {
   }
 
   async function handleFinishVoice() {
-    if (!isRecordingVoice) return;
+    // Claimed synchronously, BEFORE the first await: a duplicate call in the
+    // same tick must lose here rather than at the state check (kora#331).
+    if (!recordingRef.current) return;
+    recordingRef.current = false;
     setErrorMsg(null);
 
     try {
@@ -1648,6 +1806,24 @@ export default function CaptureScreen() {
     resolveVoice.mutate({ input: file, signal: controller.signal }, {
       onSuccess: (data) => {
         if (controller.signal.aborted) return;
+        // Echo what Otto HEARD, as a user turn, exactly like typed input
+        // (kora#332). Voice is the lowest-friction input and the highest-error
+        // one: "oatmeal with a banana and honey" coming back as one banana
+        // looks identical whether Otto misheard or heard right and failed to
+        // resolve two of three foods. Without the transcript the user cannot
+        // tell those apart, has no way to attribute a wrong result, and no
+        // repair action but re-recording blind.
+        //
+        // Appended HERE and not optimistically, unlike the typed path: the
+        // transcript does not exist until the server returns it. It therefore
+        // sits after the aborted guard above, so a cancelled resolve leaves no
+        // words on a screen the user was told was abandoned.
+        //
+        // Guarded on a non-empty string, not just non-null: the server can
+        // answer with no transcript at all, and an empty bubble would read as
+        // "Otto heard silence" rather than "Otto reported nothing".
+        const heard = data.transcript?.trim();
+        if (heard) setTranscript((turns) => [...turns, { role: "user", text: heard }]);
         applyResolution(data, "ai_voice");
         setResolvedPhrase(data.transcript ?? null);
       },
@@ -1671,7 +1847,8 @@ export default function CaptureScreen() {
   // billed. A stop() failure is swallowed rather than surfaced — the user asked
   // to discard, so there is nothing to tell them.
   async function handleCancelVoice() {
-    if (!isRecordingVoice) return;
+    if (!recordingRef.current) return;
+    recordingRef.current = false;
     setErrorMsg(null);
     try {
       await recorder.stop();
@@ -1691,7 +1868,7 @@ export default function CaptureScreen() {
   // api/internal/resolve/handler.go), which lands in onSuccess like any other
   // resolution. Resetting only in onError (the previous version) left the
   // scanner dead after the very first successful — or unrecognised — scan.
-  function handleBarcodeScanned(data: string) {
+  function handleBarcodeScanned(data: string, scannedAt: number) {
     if (scannedRef.current) return;
     // The cooldown left by a just-cancelled resolve of THIS code (see
     // handleCancelResolve) — scannedRef has already released by the time
@@ -1699,7 +1876,7 @@ export default function CaptureScreen() {
     // without this check the cancelled code would instantly restart itself.
     if (
       cancelledCodeRef.current === data &&
-      Date.now() - cancelledAtRef.current < CANCELLED_CODE_COOLDOWN_MS
+      scannedAt - cancelledAtRef.current < CANCELLED_CODE_COOLDOWN_MS
     ) {
       return;
     }
@@ -1737,7 +1914,7 @@ export default function CaptureScreen() {
         // DOES know never reaches onError at all: it resolves offline, marked
         // CACHED_MATCH_TIER, and that path is untouched here.
         if (error instanceof OfflineUnknownBarcodeError) {
-          void queueUnknownBarcode(data);
+          void queueUnknownBarcode(data, new Date(scannedAt).toISOString());
           return;
         }
         setErrorMsg(ottoErrorMessage(error));
@@ -1750,9 +1927,9 @@ export default function CaptureScreen() {
   // identified now is what made kora#191's version honest — and replaces the
   // "scan it again" advice with the promise the typed path makes on the same
   // failure, which the queue now actually keeps.
-  async function queueUnknownBarcode(code: string) {
+  async function queueUnknownBarcode(code: string, capturedAt: string) {
     try {
-      await enqueueBarcodeCapture(code, mealSlot);
+      await enqueueBarcodeCapture(code, mealSlot, capturedAt);
       setErrorMsg(
         "You're offline, and this isn't a barcode you've scanned before — I've saved the scan, and I'll identify it as soon as you're back online.",
       );
@@ -1809,7 +1986,7 @@ export default function CaptureScreen() {
       excluded,
       logged: loggedCandidateKeys,
       markLogged: setLoggedCandidateKeys,
-      logCandidate: (candidate) => {
+      logCandidate: (candidate, index) => {
         // Record the portion as one of the food's own named servings when one
         // describes it exactly, so the diary reads "1 portion" instead of
         // "16.5 g" — the same entry the card just showed the user.
@@ -1831,9 +2008,21 @@ export default function CaptureScreen() {
           meal_slot: mealSlot,
           source,
           logged_at: new Date().toISOString(),
+          // kora#482. Measured at CONFIRM, not when the request leaves: the
+          // offline queue replays writes later, and a duration computed at
+          // send time would report however long the device was offline.
+          // Omitted entirely when no capture started this log (a pin tap, a
+          // "your usual") — NULL means "not measured", which is a different
+          // claim from "logged instantly", and the runbook filters on it.
+          ...(captureStartedAtRef.current !== null
+            ? { client_log_ms: Date.now() - captureStartedAtRef.current }
+            : {}),
           ...(serving ? { entered_amount: serving.amount, entered_unit: serving.unit } : {}),
           ...(resolvedPhrase && (source === "ai_text" || source === "ai_voice")
             ? { input_phrase: resolvedPhrase }
+            : {}),
+          ...(effectiveResolution.resolution_id
+            ? { resolution_id: effectiveResolution.resolution_id, resolution_index: index }
             : {}),
         });
       },
@@ -1878,7 +2067,7 @@ export default function CaptureScreen() {
         stage={displayStage}
         resolution={effectiveResolution}
         errorMsg={errorMsg}
-        sentPhrase={sentPhrase}
+        transcript={transcript}
         mealSlot={mealSlot}
         onChangeMealSlot={setMealSlot}
         onAdd={handleAddToDiary}
@@ -1919,6 +2108,8 @@ export default function CaptureScreen() {
           setPromotedPortion((prev) => ({ ...prev, [index]: { grams, assumed: false } }))
         }
         onCancelResolve={handleCancelResolve}
+        onApprovePlan={handleApprovePlan}
+        approvingPlanID={approvingPlanID}
       />
       {/* Opened from a row's "Change". Seeded from effectiveResolution, NOT
           `resolution` — otherwise a second visit to an already-corrected row

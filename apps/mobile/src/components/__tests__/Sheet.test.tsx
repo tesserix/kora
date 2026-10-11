@@ -1,4 +1,4 @@
-import { render, fireEvent } from "@testing-library/react-native";
+import { render, fireEvent, within } from "@testing-library/react-native";
 import { AppText } from "../Text";
 import { Sheet } from "../Sheet";
 
@@ -57,4 +57,40 @@ test("the sheet body is wrapped in a keyboard-avoiding container", async () => {
   // KeyboardAvoidingView renders, which does not carry it, so an assertion
   // here would be testing the mock rather than the choice.
   expect(getByTestId("sheet-keyboard-avoider")).toBeTruthy();
+});
+
+// kora#314: BodyCompositionForm's Save button measured 743pt below the fold
+// in Screenshot mode on an iPhone 17 Pro Max — reachable by scrolling, but
+// nothing on screen said a hidden control was the difference between a
+// reading being stored and discarded. `footer` exists so a caller can pin
+// its confirm action outside the scrolling region entirely.
+//
+// Jest performs no layout (see jest.setup.js's reanimated-mock note), so
+// "outside the scroll region" is asserted the one way this harness actually
+// can: structurally, via `within(sheet-scroll)` never finding the footer's
+// content. That proves the footer is not a descendant of the ScrollView —
+// it does NOT prove it is visible without scrolling on a real device, which
+// needs a simulator/device check.
+test("a supplied footer renders outside the scrolling region", async () => {
+  const { getByTestId, getByText } = await render(
+    <Sheet visible onClose={() => {}} footer={<AppText>Pinned action</AppText>}>
+      <AppText>Sheet body</AppText>
+    </Sheet>
+  );
+  expect(getByText("Pinned action")).toBeTruthy();
+  expect(within(getByTestId("sheet-scroll")).queryByText("Pinned action")).toBeNull();
+  // And the reverse holds too: ordinary scrolling content is NOT hoisted
+  // into the footer just because one was supplied.
+  expect(within(getByTestId("sheet-scroll")).getByText("Sheet body")).toBeTruthy();
+});
+
+// Every existing Sheet caller passes no `footer` at all — this is the
+// guarantee from the brief that they keep rendering exactly as before.
+test("no footer prop renders no footer wrapper at all", async () => {
+  const { queryByTestId } = await render(
+    <Sheet visible onClose={() => {}}>
+      <AppText>Sheet body</AppText>
+    </Sheet>
+  );
+  expect(queryByTestId("sheet-footer")).toBeNull();
 });

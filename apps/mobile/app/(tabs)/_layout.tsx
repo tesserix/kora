@@ -12,6 +12,7 @@ import { BrandMark } from "@/components/BrandMark";
 import { AppText } from "@/components/Text";
 import { Button } from "@/components/Button";
 import { useTheme } from "@/theme";
+import { useMentorRuntime } from "@/mentor/useMentorRuntime";
 
 export default function TabsLayout() {
   const { colors, spacing } = useTheme();
@@ -19,6 +20,7 @@ export default function TabsLayout() {
   usePushRegistration();
   usePushResponder();
   useWidgetSync();
+  useMentorRuntime();
 
   useEffect(() => {
     if (!isFirebaseConfigured || !auth) return;

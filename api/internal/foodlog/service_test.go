@@ -679,19 +679,37 @@ func TestCreateBatchRetiredFoodItemNamesTheUnavailableFood(t *testing.T) {
 }
 
 func TestCreateBatchInfraFaultIsNotMisclassifiedAsValidation(t *testing.T) {
-	// Log repo is healthy (transaction begins, cleanups run); the FOODS repo is
-	// broken so GetByID fails with a driver error (not gorm.ErrRecordNotFound).
-	// That infra fault must surface as a 500-class error, never a client 400.
+	// A read of food_items fails with a driver-level error (NOT
+	// gorm.ErrRecordNotFound). That infra fault must surface as a 500-class
+	// error, never a client 400.
+	//
+	// The fault is injected into the HANDLE rather than into a second,
+	// separately-broken foods repository. It used to be the latter: build the
+	// foods repository on a closed pool and hand it to the service. kora#415
+	// made that inoperative -- CreateBatch now rebinds the foods repository
+	// onto its own transaction's handle precisely so the read cannot go to
+	// the pool, so a fault planted in the repository's own handle is no
+	// longer reachable from this path. Injecting at the handle the batch
+	// actually uses is the same fault, aimed where the read now goes.
+	//
+	// The callback is registered on this test's own gorm.DB (testDB opens a
+	// fresh one per call), so it cannot leak into another test.
 	db := testDB(t)
 	userID := seedUser(t, db)
 
-	brokenDB := testDB(t)
-	brokenPool, err := brokenDB.DB()
-	require.NoError(t, err)
-	require.NoError(t, brokenPool.Close())
+	require.NoError(t, db.Callback().Query().Before("gorm:query").
+		Register("test:break_food_items_read", func(q *gorm.DB) {
+			table := q.Statement.Table
+			if table == "" && q.Statement.Schema != nil {
+				table = q.Statement.Schema.Table
+			}
+			if table == "food_items" {
+				q.AddError(errors.New("simulated driver fault reading food_items"))
+			}
+		}))
 
-	svc := NewService(NewRepository(db), nutrition.NewRepository(brokenDB))
-	_, err = svc.CreateBatch(context.Background(), userID, CreateBatchRequest{
+	svc := NewService(NewRepository(db), nutrition.NewRepository(db))
+	_, err := svc.CreateBatch(context.Background(), userID, CreateBatchRequest{
 		LoggedAt: time.Now(), MealSlot: "breakfast",
 		Items: []BatchItem{{FoodItemID: uuid.New(), QuantityGrams: 100}},
 	}, nil)
@@ -1500,4 +1518,40 @@ func TestCreateBatchSourceDefaultsToMemory(t *testing.T) {
 	}, nil)
 	require.NoError(t, err)
 	require.Equal(t, "recipe", tagged[0].Source)
+}
+
+// TestPlausibleClientLogMsRejectsWhatItCannotBelieve pins kora#482's boundary.
+//
+// client_log_ms is measured on a device whose clock the server does not
+// control, and it feeds a MEDIAN — so one absurd value skews the north-star
+// metric kora#43 defines. Implausible values become NULL rather than being
+// stored: "not measured" is honest about a number we do not believe, while
+// keeping it would quietly corrupt the statistic.
+func TestPlausibleClientLogMsRejectsWhatItCannotBelieve(t *testing.T) {
+	ms := func(v int) *int { return &v }
+
+	for _, tc := range []struct {
+		name string
+		in   *int
+		want *int
+	}{
+		{"nil stays nil — not measured", nil, nil},
+		{"a fast log is kept", ms(1200), ms(1200)},
+		{"a slow but real log is kept", ms(90_000), ms(90_000)},
+		{"zero is kept — an instant log is possible", ms(0), ms(0)},
+		{"negative is impossible, so it is dropped", ms(-1), nil},
+		{"an hour is the ceiling, kept", ms(3_600_000), ms(3_600_000)},
+		{"beyond an hour is a backgrounded app, not a slow log", ms(3_600_001), nil},
+		{"a wildly skewed device clock is dropped", ms(999_999_999), nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := plausibleClientLogMs(tc.in)
+			if tc.want == nil {
+				require.Nil(t, got)
+				return
+			}
+			require.NotNil(t, got)
+			require.Equal(t, *tc.want, *got)
+		})
+	}
 }

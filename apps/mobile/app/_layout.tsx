@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { AppState } from "react-native";
 import { Stack, router } from "expo-router";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+import * as SplashScreen from "expo-splash-screen";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { isFirebaseConfigured } from "@/lib/firebase";
@@ -14,11 +15,27 @@ import { AppearanceProvider } from "@/theme";
 import { ToastProvider } from "@/components/Toast";
 import { SavedMealSheetProvider } from "@/components/meals/SavedMealSheetProvider";
 import { reconcileWeightReminder } from "@/reminders/reconcileWeightReminder";
+import { useHealthSync } from "@/health/useHealthSync";
 import { syncTimezone } from "@/profile/syncTimezone";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { createSentrySink } from "@/observability/sentry";
 import { initReporting, reportError } from "@/observability/reporter";
 import { ReportingUserBinder } from "@/observability/ReportingUserBinder";
+
+// Hold the native splash until AppearanceProvider knows which scheme to draw
+// (kora#320). The preference lives in AsyncStorage, so it cannot be known on
+// the first render — kora#139 covered that by applying dark synchronously,
+// which is right for an unset preference and for dark users, and gives anyone
+// who chose Light a dark flash while the read resolves.
+//
+// The flash is not fixed by making that read faster. It is fixed by not
+// showing it: the switch now happens BEHIND the splash. AppearanceProvider
+// calls hideAsync() once it has hydrated — see src/theme/AppearanceProvider.tsx.
+//
+// Module scope, before any component renders: preventAutoHideAsync() has to
+// win the race against the splash's own auto-hide. A rejection here means the
+// splash was already gone, which is survivable — never let it throw.
+void SplashScreen.preventAutoHideAsync().catch(() => {});
 
 setupPushHandler();
 
@@ -88,6 +105,13 @@ export default function RootLayout() {
   useEffect(() => installAppFocus(), []);
 
   useEffect(() => installDrainTriggers(queryClient), []);
+
+  // Weight sync from HealthKit (kora#30). useHealthSync is self-contained --
+  // it runs its own mount + AppState("active") pass and gates on being
+  // signed in -- so this is the single call site, mirroring how
+  // installConnectivity/installAppFocus/installDrainTriggers above are each
+  // mounted exactly once. Two mount points would double-post every batch.
+  useHealthSync();
 
   // Re-arm the weight reminder's one-shot trigger on foreground: the user may
   // have weighed in (or the day may have rolled over) while the app was

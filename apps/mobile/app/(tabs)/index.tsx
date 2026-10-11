@@ -21,13 +21,15 @@ import { SpecularSweep } from "@/components/instrument/SpecularSweep";
 import { BezelCluster, ZoneRule, WellFooter } from "@/components/instrument/BezelCluster";
 import { monoStyle } from "@/components/instrument/typography";
 import { useProfile, useDashboard, useDayLogs, useUnreadCount, useCoachNudges } from "@/api/hooks";
-import { useHealth } from "@/health";
+import { shouldOfferConnect, useHealth } from "@/health";
+import { initials } from "@/lib/initials";
 import { useTheme } from "@/theme";
 import { accessibleMealLabel } from "@/lib/portionAssumedLabel";
 import { now, todayLocalDate } from "@/lib/shotsClock";
+import { sleepDurationLabel } from "@/lib/sleepDuration";
 import type { FoodLog } from "@/api/types";
 import type { ReactNode } from "react";
-import { TAB_BAR_SCROLL_INSET_TIGHT } from "@/components/FloatingTabBar";
+import { TAB_BAR_SCROLL_INSET_TODAY } from "@/components/FloatingTabBar";
 
 // Shape of the steps/sleep telemetry cells rendered below (kora ignition
 // review, Finding 4: was imported from the now-deleted TeleStrip.tsx, which
@@ -50,10 +52,6 @@ function greeting(): string {
 }
 function dateLabel(): string {
   return now().toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
-}
-function initials(name?: string): string {
-  if (!name) return "K";
-  return name.split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase();
 }
 function mealTime(log: FoodLog): string {
   return new Date(log.logged_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -164,38 +162,32 @@ export default function Home() {
 
   // Dashboard `Totals` (src/api/types.ts) has no burned/active-energy field —
   // GaugeDial's `burned` prop is intentionally omitted rather than guessed.
+  // kora#406: three states, not two. "Connected but nothing recorded" was
+  // rendering as "Connect Apple Health", which sent an already-connected user
+  // into a permission flow that fixes nothing — the figure still would not
+  // appear, because the real reason is that no data exists for the period.
+  // A plain icon with an em dash says "nothing to show", which is true.
+  const offerConnect = shouldOfferConnect(health.status);
+  const telemetryIcon = (name: "footprints" | "moon") =>
+    !offerConnect ? (
+      <Icon name={name} size={16} color={instrument.mut} />
+    ) : (
+      <PressableScale
+        accessibilityRole="button"
+        accessibilityLabel="Connect Apple Health"
+        haptic="selection"
+        onPress={health.connect}
+      >
+        <Icon name={name} size={16} color={instrument.mut} />
+      </PressableScale>
+    );
+
   const stepsCell: TelemetryCell = health.steps
     ? { icon: <Icon name="footprints" size={16} color={instrument.mut} />, value: health.steps.today.toLocaleString(), label: "Steps" }
-    : {
-        icon: (
-          <PressableScale
-            accessibilityRole="button"
-            accessibilityLabel="Connect Apple Health"
-            haptic="selection"
-            onPress={health.connect}
-          >
-            <Icon name="footprints" size={16} color={instrument.mut} />
-          </PressableScale>
-        ),
-        value: "—",
-        label: "Steps",
-      };
+    : { icon: telemetryIcon("footprints"), value: "—", label: "Steps" };
   const sleepCell: TelemetryCell = health.sleep
-    ? { icon: <Icon name="moon" size={16} color={instrument.mut} />, value: `${health.sleep.lastNightHours}h`, label: "Sleep" }
-    : {
-        icon: (
-          <PressableScale
-            accessibilityRole="button"
-            accessibilityLabel="Connect Apple Health"
-            haptic="selection"
-            onPress={health.connect}
-          >
-            <Icon name="moon" size={16} color={instrument.mut} />
-          </PressableScale>
-        ),
-        value: "—",
-        label: "Sleep",
-      };
+    ? { icon: <Icon name="moon" size={16} color={instrument.mut} />, value: sleepDurationLabel(health.sleep.lastNightHours), label: "Sleep" }
+    : { icon: telemetryIcon("moon"), value: "—", label: "Sleep" };
 
   const openMeal = (log: FoodLog) =>
     router.push({
@@ -210,7 +202,7 @@ export default function Home() {
       <ScrollView
         testID="home-scroll"
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingTop: insets.top + spacing.sm, paddingBottom: TAB_BAR_SCROLL_INSET_TIGHT }}
+        contentContainerStyle={{ paddingTop: insets.top + spacing.sm, paddingBottom: TAB_BAR_SCROLL_INSET_TODAY }}
         refreshControl={
           <RefreshControl
             testID="home-refresh"
@@ -298,7 +290,7 @@ export default function Home() {
             haptic="selection"
             onPress={() => router.push("/profile")}
           >
-            <Avatar initials={initials(profile.data?.display_name)} />
+            <Avatar initials={initials(profile.data?.display_name)} uri={profile.data?.avatar_url} />
           </PressableScale>
         </View>
       </Animated.View>
@@ -449,9 +441,10 @@ export default function Home() {
               ))}
             </View>
           ) : (
+            /* No icon tile: the dock's capture button is already a camera two
+               rows below, and a second one read as a stray control. */
             <EmptyState
               variant="instrument"
-              icon="camera"
               title="No meals logged yet"
               subtitle="The gauge is full and waiting. Point the camera at your first meal."
             />

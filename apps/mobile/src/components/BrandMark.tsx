@@ -1,4 +1,5 @@
 import Svg, { Circle, Line, Rect } from "react-native-svg";
+import { useTheme } from "@/theme";
 
 // Kora's mark: the "dial K". An open 230° gauge arc of 41 ticks — lit up to
 // the needle at 65%, dimmed past it — around a K whose upper arm is the
@@ -8,9 +9,23 @@ import Svg, { Circle, Line, Rect } from "react-native-svg";
 //
 // Brand rules (assets/brand): the needle and hub are the only orange, the
 // needle never rotates (65% depicts a healthy reserve, not a time of day),
-// and the bottom gap stays open. Colors are brand-fixed, not themed — the
-// mark does not recolor with the palette.
+// and the bottom gap stays open.
+//
+// The NEEDLE is brand-fixed. The lume is NOT, and the claim that it was cost
+// the mark its visibility (kora#318): `#EDE6D4` on the light ground `#ECEDEF`
+// measures **1.06:1** — 1.0 being indistinguishable — so on light the arc, the
+// K's stem and its arm all vanished and only the orange needle survived, at a
+// different hue. That is the splash screen on every launch for a light-mode
+// user.
+//
+// The two-variant mapping below is not invented here: assets/brand ships
+// kora-mark-dark.svg and kora-mark-light.svg, and they differ in exactly this
+// way — same geometry, same opacities, `rgba(237,230,212,a)` swapped for
+// `rgba(22,24,28,a)`, needle `#FF4A00` in both. This component always claimed
+// to render "kora-*.svg"; it only ever implemented one of them.
 export const BRAND_LUME = "#EDE6D4";
+// Ink, from kora-mark-light.svg. 15.0:1 on the light ground.
+export const BRAND_LUME_LIGHT = "#16181C";
 export const BRAND_NEEDLE = "#FF4A00";
 
 const VIEW = 240;
@@ -74,6 +89,12 @@ export interface BrandMarkProps {
 }
 
 export function BrandMark({ size = 40 }: BrandMarkProps) {
+  // Read from the THEME, not from useColorScheme(): capture is dark-fixed
+  // (INSTRUMENT_DARK_FIXED) regardless of the device, so a mark placed there
+  // must stay lume even on a light phone. No consumer does that today — this
+  // is why the source is the theme rather than the device.
+  const { scheme } = useTheme();
+  const lume = scheme === "dark" ? BRAND_LUME : BRAND_LUME_LIGHT;
   return (
     <Svg width={size} height={size} viewBox={`0 0 ${VIEW} ${VIEW}`} testID="brand-mark">
       {TICK_GEOMETRY.map((tick, i) => (
@@ -84,7 +105,7 @@ export function BrandMark({ size = 40 }: BrandMarkProps) {
           y1={tick.y1}
           x2={tick.x2}
           y2={tick.y2}
-          stroke={BRAND_LUME}
+          stroke={lume}
           strokeOpacity={tick.opacity}
           strokeWidth={tick.width}
           strokeLinecap="round"
@@ -97,7 +118,7 @@ export function BrandMark({ size = 40 }: BrandMarkProps) {
         width={STEM_WIDTH}
         height={STEM_BOTTOM - STEM_TOP}
         rx={STEM_WIDTH / 2}
-        fill={BRAND_LUME}
+        fill={lume}
       />
       <Line
         testID="brand-arm"
@@ -105,7 +126,7 @@ export function BrandMark({ size = 40 }: BrandMarkProps) {
         y1={HUB.y}
         x2={ARM_DOWN.x}
         y2={ARM_DOWN.y}
-        stroke={BRAND_LUME}
+        stroke={lume}
         strokeWidth={ARM_WIDTH}
         strokeLinecap="round"
       />
@@ -120,7 +141,7 @@ export function BrandMark({ size = 40 }: BrandMarkProps) {
         strokeLinecap="round"
       />
       <Circle testID="brand-hub" cx={HUB.x} cy={HUB.y} r={HUB_RADIUS} fill={BRAND_NEEDLE} />
-      <Circle cx={HUB.x} cy={HUB.y} r={HUB_PIN_RADIUS} fill={BRAND_LUME} />
+      <Circle cx={HUB.x} cy={HUB.y} r={HUB_PIN_RADIUS} fill={lume} />
     </Svg>
   );
 }

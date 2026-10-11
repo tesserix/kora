@@ -6,3 +6,9 @@
 # ranking.sample.jsonl is the opposite: a committed regression suite, not
 # user-provided data. Its measured output (ranking.out.tsv) stays ignored.
 !ranking.sample.jsonl
+# au_phrases.txt is the same kind of thing and was excluded by oversight: the
+# README documents it as "the AU accuracy set", but being untracked it existed
+# on exactly one laptop, so every accuracy run over it was unreproducible by
+# anyone else and no CI test could depend on it. It holds curated food phrases
+# chosen to cover shapes that have actually broken -- no user data.
+!au_phrases.txt

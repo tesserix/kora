@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"regexp"
 
@@ -17,7 +18,9 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/tesserix/kora/api/internal/ai"
+	"github.com/tesserix/kora/api/internal/capturemedia"
 	"github.com/tesserix/kora/api/internal/httpx"
+	"github.com/tesserix/kora/api/internal/labelocr"
 	"github.com/tesserix/kora/api/internal/nutrition"
 	"github.com/tesserix/kora/api/internal/user"
 )
@@ -93,13 +96,75 @@ type TextPhotoResolver interface {
 type BarcodeResolver func(ctx context.Context, code string) (*nutrition.FoodItem, bool, error)
 
 type Handler struct {
-	tp TextPhotoResolver
-	bc BarcodeResolver
+	tp       TextPhotoResolver
+	photo    labelocr.PhotoVision
+	bc       BarcodeResolver
+	outcomes ai.OutcomeSink
+	photos   *capturemedia.Service
 }
 
 func NewHandler(tp TextPhotoResolver, bc BarcodeResolver) Handler {
 	return Handler{tp: tp, bc: bc}
 }
+
+func (h Handler) WithPhotoEvidence(reader labelocr.Reader, decision labelocr.PhotoDecider, reviewer labelocr.Reviewer, budget labelocr.Budget) Handler {
+	h.photo = labelocr.NewPhotoResolver(reader, decision, reviewer, h.tp, budget)
+	return h
+}
+
+func (h Handler) WithPhotoArchive(photos *capturemedia.Service) Handler {
+	h.photos = photos
+	return h
+}
+
+// WithOutcomeSink attaches the resolve-outcome recorder (kora#459), for the
+// BARCODE path only.
+//
+// Text, photo and voice are recorded inside ai.Resolver, which owns their
+// branches. A barcode never reaches the resolver at all — ResolveBarcode is a
+// direct OpenFoodFacts lookup in this handler — so without this the cleanest
+// failure signal in the product would be the one thing not recorded: a barcode
+// miss names the exact product that is missing from the index.
+//
+// Optional, and nil-safe, matching ai.Resolver.WithOutcomeSink.
+func (h Handler) WithOutcomeSink(s ai.OutcomeSink) Handler {
+	h.outcomes = s
+	return h
+}
+
+// recordBarcode writes one barcode attempt's outcome, if a sink is wired.
+func (h Handler) recordBarcode(c *gin.Context, userID uuid.UUID, kind string, item *nutrition.FoodItem) {
+	if h.outcomes == nil {
+		return
+	}
+	code := c.GetString(barcodeContextKey)
+	o := ai.ResolveOutcome{
+		UserID: userID,
+		Kind:   kind,
+		Mode:   "barcode",
+		// The barcode IS the phrase here: it is what the user "said", and it
+		// is the whole diagnostic value of a miss — a row saying only that
+		// some barcode failed cannot be acted on.
+		Phrase: &code,
+	}
+	if item != nil {
+		id := item.ID
+		score := 1.0
+		o.Tier = string(ai.TierAuto)
+		o.TopFoodItemID = &id
+		o.TopScore = &score
+		o.CandidateCount = 1
+		o.CandidateIDs = []uuid.UUID{id}
+	} else {
+		o.Tier = string(ai.TierFollowUp)
+	}
+	h.outcomes.Record(c.Request.Context(), o)
+}
+
+// barcodeContextKey carries the validated barcode from the handler to
+// recordBarcode without re-parsing the request body, which has already been
+// consumed by the time the outcome is recorded.
+const barcodeContextKey = "resolve_barcode"
 
 type textRequest struct {
 	Phrase string `json:"phrase"`
@@ -116,11 +181,13 @@ func (h Handler) ResolveText(c *gin.Context) {
 		httpx.Error(c, http.StatusBadRequest, "invalid_input", "phrase must be at least 2 characters")
 		return
 	}
+	id := beginResolution(c)
 	res, err := h.tp.ResolveText(c.Request.Context(), uid, req.Phrase)
 	if err != nil {
 		httpx.RespondServiceError(c, err)
 		return
 	}
+	res.ResolutionID = &id
 	httpx.OK(c, res)
 }
 
@@ -162,11 +229,47 @@ func (h Handler) ResolvePhoto(c *gin.Context) {
 	if mime == "" {
 		mime = http.DetectContentType(buf)
 	}
-	res, err := h.tp.ResolvePhoto(c.Request.Context(), uid, buf, mime)
+	id := beginResolution(c)
+	if h.photos != nil {
+		buf, err = h.photos.Start(c.Request.Context(), uid, id, buf)
+		if err != nil {
+			if errors.Is(err, capturemedia.ErrInvalidImage) {
+				httpx.Error(c, http.StatusBadRequest, "invalid_input", "Use a JPEG, PNG or WebP image up to 8 MB and 16 megapixels.")
+			} else {
+				slog.ErrorContext(c.Request.Context(), "photo archive upload failed", "capture_id", id)
+				httpx.Error(c, http.StatusServiceUnavailable, "unavailable", "Photo storage is temporarily unavailable. Please try again.")
+			}
+			return
+		}
+		mime = "image/jpeg"
+	}
+	photoResolver := h.photo
+	if photoResolver == nil {
+		photoResolver = h.tp
+	}
+	res, err := photoResolver.ResolvePhoto(c.Request.Context(), uid, buf, mime)
+	res.ResolutionID = &id
+	if h.photos != nil {
+		if archiveErr := h.photos.Finish(c.Request.Context(), uid, id, res, err); archiveErr != nil {
+			slog.ErrorContext(c.Request.Context(), "photo archive analysis persistence failed", "capture_id", id)
+			if err == nil {
+				httpx.Error(c, http.StatusServiceUnavailable, "unavailable", "The analysis could not be saved. Please try again.")
+				return
+			}
+		}
+	}
 	if err != nil {
-		httpx.RespondServiceError(c, err)
+		switch {
+		case errors.Is(err, labelocr.ErrDecisionUnavailable):
+			httpx.Error(c, http.StatusServiceUnavailable, "ai_decision_unavailable", "AI analysis is temporarily unavailable. Please try again.")
+		case errors.Is(err, labelocr.ErrBudgetExhausted):
+			httpx.Error(c, http.StatusTooManyRequests, "budget_exhausted", "You've reached your AI usage limit.")
+		default:
+			httpx.RespondServiceError(c, err)
+		}
 		return
 	}
+	res.ResolutionID = &id
 	httpx.OK(c, res)
 }
 
@@ -208,11 +311,13 @@ func (h Handler) ResolveVoice(c *gin.Context) {
 	if mime == "" {
 		mime = http.DetectContentType(buf)
 	}
+	id := beginResolution(c)
 	res, err := h.tp.ResolveVoice(c.Request.Context(), uid, buf, mime)
 	if err != nil {
 		httpx.RespondServiceError(c, err)
 		return
 	}
+	res.ResolutionID = &id
 	httpx.OK(c, res)
 }
 
@@ -234,22 +339,59 @@ func (h Handler) ResolveBarcode(c *gin.Context) {
 		httpx.Error(c, http.StatusBadRequest, "invalid_input", "barcode must be 8-14 digits")
 		return
 	}
+	c.Set(barcodeContextKey, req.Barcode)
+	userID, _ := user.IDFromContext(c)
+	id := beginResolution(c)
+
 	item, found, err := h.bc(c.Request.Context(), req.Barcode)
 	if err != nil {
+		// An upstream failure, not an index gap. Recorded as `error` so a
+		// flaky OpenFoodFacts does not masquerade as a hole in the catalogue
+		// and send someone off adding foods that are already there.
+		h.recordBarcode(c, userID, "error", nil)
 		httpx.RespondServiceError(c, err)
 		return
 	}
 	if !found {
+		// The cleanest failure signal in the product: the barcode identifies
+		// exactly one product, so this is unambiguously "this food is missing"
+		// rather than "the matcher was unsure".
+		h.recordBarcode(c, userID, "no_match", nil)
 		httpx.OK(c, ai.Resolution{
 			Tier:             ai.TierFollowUp,
 			FollowUpQuestion: barcodeUnknownQuestion,
 			Provenance:       "barcode",
+			ResolutionID:     &id,
 		})
 		return
 	}
+	h.recordBarcode(c, userID, "resolved", item)
 	httpx.OK(c, ai.Resolution{
-		Candidates: []ai.ResolvedCandidate{barcodeCandidate(*item)},
-		Tier:       ai.TierAuto,
-		Provenance: item.Provenance,
+		Candidates:   []ai.ResolvedCandidate{barcodeCandidate(*item)},
+		Tier:         ai.TierAuto,
+		Provenance:   item.Provenance,
+		ResolutionID: &id,
 	})
 }
+
+// beginResolution mints the id the attempt's outcome is recorded under and the response returns.
+func beginResolution(c *gin.Context) uuid.UUID {
+	id := uuid.New()
+	c.Request = c.Request.WithContext(ai.WithResolutionID(c.Request.Context(), id))
+	return id
+}
+
+// textEngine adapts the text resolver to an opaque-result interface, so the
+// coach's capture endpoint can dispatch a food log without importing this
+// package's response types. A separate type rather than a method on Handler
+// because Handler.ResolveText is already the gin transport handler.
+type textEngine struct {
+	tp TextPhotoResolver
+}
+
+func (t textEngine) ResolveText(ctx context.Context, userID uuid.UUID, phrase string) (any, error) {
+	return t.tp.ResolveText(ctx, userID, phrase)
+}
+
+// TextEngine exposes the handler's text resolution for capture routing.
+func (h Handler) TextEngine() textEngine { return textEngine{tp: h.tp} }

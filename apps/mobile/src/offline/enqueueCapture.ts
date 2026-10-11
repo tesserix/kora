@@ -81,6 +81,7 @@ export async function enqueueTextCapture(
 export async function enqueueBarcodeCapture(
   code: string,
   mealSlot?: string,
+  capturedAt = new Date().toISOString(),
 ): Promise<BarcodeCapture> {
   const ownerId = await resolveOwnerId();
   if (!ownerId) throw new NoOwnerError();
@@ -89,8 +90,7 @@ export async function enqueueBarcodeCapture(
     id: `cap_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     kind: "barcode",
     code,
-    // The user is holding the phone now: capture time IS now (decision 2).
-    capturedAt: new Date().toISOString(),
+    capturedAt,
     ownerId,
     mealSlot,
   })) as BarcodeCapture;

@@ -19,6 +19,10 @@ type stubProvider struct {
 	guessUsage Usage
 	guessErr   error
 
+	bodyComp      BodyCompositionReading
+	bodyCompUsage Usage
+	bodyCompErr   error
+
 	ingredients      []IngredientGuess
 	ingredientsUsage Usage
 	ingredientsErr   error
@@ -80,6 +84,22 @@ func (s *stubProvider) IdentifyPhoto(ctx context.Context, image []byte, mime str
 		return nil, Usage{}, ctx.Err()
 	}
 	return s.guesses, s.guessUsage, s.guessErr
+}
+
+func (s *stubProvider) IdentifyBodyComposition(ctx context.Context, image []byte, mime string) (BodyCompositionReading, Usage, error) {
+	s.calls++
+	if s.delay > 0 {
+		select {
+		case <-time.After(s.delay):
+		case <-ctx.Done():
+			return BodyCompositionReading{}, Usage{}, ctx.Err()
+		}
+	}
+	if s.block {
+		<-ctx.Done()
+		return BodyCompositionReading{}, Usage{}, ctx.Err()
+	}
+	return s.bodyComp, s.bodyCompUsage, s.bodyCompErr
 }
 
 func (s *stubProvider) Decompose(ctx context.Context, dish string) ([]IngredientGuess, Usage, error) {

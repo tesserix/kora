@@ -8,10 +8,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/lib/pq"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
 	"github.com/tesserix/kora/api/internal/ai"
+	"github.com/tesserix/kora/api/internal/diet"
 	"github.com/tesserix/kora/api/internal/nutrition"
 )
 
@@ -382,6 +384,10 @@ func (r MutationRepository) UpdateFood(ctx context.Context, actor Actor, id uuid
 			"carbs_per_100g":   in.CarbsPer100g,
 			"fat_per_100g":     in.FatPer100g,
 			"fiber_per_100g":   in.FiberPer100g,
+			// Retagged in the same statement as the rename, for the same reason
+			// the embedding is cleared below: a row whose name no longer matches
+			// its diet_tags is one a user's allergy rule would silently miss.
+			"diet_tags": pq.StringArray(diet.TagsFor(in.Name, in.Brand, nil)),
 			// There are no triggers in this schema (migration 000023), and
 			// GORM's map-form Updates bypasses autoUpdateTime hooks entirely
 			// even if FoodItem had one, so updated_at MUST be set explicitly

@@ -1,0 +1,21 @@
+-- Drop fasting_intervals_one_open (kora#407).
+--
+-- The index enforced "at most one row per user WHERE ended_at IS NULL". That
+-- was the right invariant while ended_at meant "this fast is over", but
+-- ended_at is written ONLY by an explicit end: a fast ended by eating -- the
+-- ordinary case -- keeps ended_at NULL forever, and so does an abandoned one
+-- that the 48h cap closed. Openness is a COMPUTED question (decision 2), and
+-- the computed answer and the column disagree by design.
+--
+-- With the index in place that disagreement was not cosmetic: the next
+-- genuine "start fast" hit a unique violation against a fast the user had
+-- finished with days earlier, so the new fast could never be recorded --
+-- which also left its duration out of the eating-disorder risk signal.
+--
+-- Closing the stale row instead would write ended_at outside the one explicit
+-- end path, which decision 2 forbids. Postgres cannot express the invariant
+-- because the invariant is no longer a column, so the serialisation that
+-- stopped a double-tap opening two fasts moved into the application: Start
+-- takes a transaction-scoped per-user advisory lock (pg_advisory_xact_lock)
+-- and re-reads before inserting. See fasting.Repository.Start.
+DROP INDEX IF EXISTS fasting_intervals_one_open;

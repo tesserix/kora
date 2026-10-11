@@ -1,0 +1,70 @@
+# Ordinary Australian food, one phrase per line, as a tester would type or say it.
+# Fed to TestRecordGuesses, which records what identify ACTUALLY emits for each.
+# Recording is a paid, nondeterministic step; the ranking harness stays free.
+#
+# Chosen to cover the shapes that have actually broken, not just common foods:
+#   - conjunctions the index spells "&"        (kora#235)
+#   - a stated cooking method vs a raw row     (kora#467)
+#   - AU colloquial abbreviations              (kora#469)
+#   - composite dishes identify must split
+#   - takeaway and brand-named items
+
+# --- breakfast ---
+bacon and egg roll
+vegemite on toast
+avocado on toast
+weet-bix with milk
+porridge with honey
+scrambled eggs on toast
+banana bread
+flat white
+long black
+iced coffee
+
+# --- pub and takeaway ---
+chicken parma
+fish and chips
+hot chips
+sausage roll
+meat pie
+steak sandwich
+hamburger with the lot
+sausage sizzle
+dim sim
+potato scallop
+kebab
+souvlaki
+spring roll
+
+# --- cooked mains, method stated ---
+roast lamb
+roast chicken
+grilled steak
+grilled salmon
+fried egg
+boiled rice
+steamed rice
+baked potato
+shepherds pie
+spaghetti bolognese
+mac and cheese
+butter chicken
+pad thai
+laksa
+fried rice
+
+# --- snacks, sweets, packaged ---
+tim tam
+lamington
+anzac biscuit
+pavlova
+milo
+muesli bar
+greek yoghurt
+apple
+banana
+
+# --- salads and sides ---
+chicken caesar salad
+garden salad
+steamed broccoli

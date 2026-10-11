@@ -14,9 +14,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/tesserix/kora/api/internal/agents"
 	"github.com/tesserix/kora/api/internal/dashboard"
 	"github.com/tesserix/kora/api/internal/foodlog"
 	"github.com/tesserix/kora/api/internal/memory"
+	"github.com/tesserix/kora/api/internal/mentor"
 	"github.com/tesserix/kora/api/internal/tracking"
 )
 
@@ -35,6 +37,7 @@ func newTestRouter(userID uuid.UUID, h Handler) *gin.Engine {
 	r.GET("/v1/coach/nudges", h.Nudges)
 	r.POST("/v1/coach/ask", h.Ask)
 	r.GET("/v1/coach/thread", h.Thread)
+	r.PUT("/v1/coach/plans/:id/accept", h.AcceptPlan)
 	return r
 }
 
@@ -188,7 +191,7 @@ func TestHandlerAsk_RealQuestionReturns200WithAnswerAndCitations(t *testing.T) {
 	memSvc := memory.NewService(logRepo)
 	g := NewGrounder(dashSvc, logRepo, memSvc, trackingRepo)
 
-	provider := &fakeProvider{text: "You have protein remaining today."}
+	provider := &fakeProvider{text: "Your protein target is 120g. [cite:today_protein_g_target]"}
 	svc := NewService(&g, provider, &stubMeter{withinBudget: true}, nil)
 	router := newTestRouter(userID, NewHandler(svc))
 
@@ -274,7 +277,7 @@ func TestHandlerThread_ReturnsStoredTurnsWithSnakeCaseKeys(t *testing.T) {
 	threadRepo := NewThreadRepository(db)
 
 	require.NoError(t, threadRepo.AppendExchange(context.Background(), userID,
-		"what should I eat?", "more protein", []Fact{{Label: "Protein today", Value: "65g"}}))
+		"what should I eat?", "more protein", []Fact{{Label: "Protein today", Value: "65g"}}, Attachments{}))
 
 	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, &threadRepo)
 	router := newTestRouter(userID, NewHandler(svc))
@@ -311,6 +314,33 @@ func TestHandlerThread_ReturnsStoredTurnsWithSnakeCaseKeys(t *testing.T) {
 	require.False(t, strings.Contains(raw, `"showSupport"`), "raw body must not use camelCase, got: %s", raw)
 }
 
+func TestHandlerThread_ReturnsAStoredCommitmentProposal(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	logRepo := foodlog.NewRepository(db)
+	trackRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackRepo, db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackRepo)
+	threadRepo := NewThreadRepository(db)
+	proposal, err := mentor.NewCommitmentProposal(userID, time.Now(), time.UTC, mentor.CommitmentProposalDraft{
+		Title: "Walk after lunch", Kind: mentor.CommitmentKindWalking,
+		Cadence: mentor.CadenceFixed, WeekdaysMask: 127, StartMinute: 13 * 60,
+	}, "Kora Meal Planner", "Kora Nutrition Coach")
+	require.NoError(t, err)
+	require.NoError(t, threadRepo.AppendExchange(t.Context(), userID, "help me walk", "Review this walk", nil, Attachments{Commitment: proposal}))
+
+	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, &threadRepo)
+	router := newTestRouter(userID, NewHandler(svc))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/coach/thread", nil))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Contains(t, w.Body.String(), `"proposal":{"id":"`)
+	require.Contains(t, w.Body.String(), `"title":"Walk after lunch"`)
+	require.Contains(t, w.Body.String(), `"accepted_commitment_id":null`)
+}
+
 // TestHandlerThread_CitationsSerialiseAsEmptyArrayNotNull pins the per-turn
 // citations wire format: the upcoming mobile UI maps over this array, so a
 // null would crash the client. Decoding into a Go []Fact cannot distinguish
@@ -332,7 +362,7 @@ func TestHandlerThread_CitationsSerialiseAsEmptyArrayNotNull(t *testing.T) {
 
 	// nil citations: the stored answer cited nothing.
 	require.NoError(t, threadRepo.AppendExchange(context.Background(), userID,
-		"what should I eat?", "an uncited answer", nil))
+		"what should I eat?", "an uncited answer", nil, Attachments{}))
 
 	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, &threadRepo)
 	router := newTestRouter(userID, NewHandler(svc))
@@ -371,4 +401,152 @@ func TestHandlerThread_EmptyThreadReturnsEmptyList(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	// turns must serialise as [] not null, so the client can map over it.
 	require.Contains(t, w.Body.String(), `"turns":[]`)
+}
+
+// TestHandlerAsk_NamesTheAnsweringAgentOnlyWhenOneAnswered pins both halves
+// of the attribution contract the chat UI reads: the agent block is present
+// with the published display name when an agent answered, and absent — not
+// an empty string — when the direct provider did.
+func TestHandlerAsk_NamesTheAnsweringAgentOnlyWhenOneAnswered(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	trackingRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackingRepo, db)
+	g := NewGrounder(dashSvc, logRepo, memory.NewService(logRepo), trackingRepo)
+
+	ask := func(svc *Service) string {
+		payload, err := json.Marshal(askRequest{Question: "how's my protein?"})
+		require.NoError(t, err)
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/coach/ask", bytes.NewReader(payload))
+		req.Header.Set("Content-Type", "application/json")
+		newTestRouter(userID, NewHandler(svc)).ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		return w.Body.String()
+	}
+
+	runner := &fakeRunner{run: agents.Run{
+		Agent:       "nutrition-coach",
+		DisplayName: "Nutrition Coach",
+		State:       "completed",
+		Text:        "You have 55g protein to go.",
+	}}
+	withAgent := ask(NewService(&g, &fakeProvider{text: "from the provider"}, &stubMeter{withinBudget: true}, nil).WithAgents(runner))
+	require.Contains(t, withAgent, `"agent"`)
+	require.Contains(t, withAgent, `"name":"Nutrition Coach"`)
+	require.Contains(t, withAgent, `"skill":"nutrition-guidance"`)
+
+	withoutAgent := ask(NewService(&g, &fakeProvider{text: "from the provider"}, &stubMeter{withinBudget: true}, nil))
+	require.NotContains(t, withoutAgent, `"agent"`)
+}
+
+// seedPlanProposal stores one reviewed plan against a fresh turn for userID
+// and returns it, so the acceptance tests start from the state Ask leaves
+// behind rather than restating how a plan is built.
+func seedPlanProposal(t *testing.T, repo ThreadRepository, userID uuid.UUID) PlanProposal {
+	t.Helper()
+	plan := &PlanProposal{
+		Summary: "Hits your 2000 kcal target",
+		Days: PlanDays{{Date: "Monday", Meals: []PlanMeal{{
+			Name: "Oats and whey", Description: "32g protein",
+			Preparation: "Simmer oats, then stir through whey.",
+		}}}},
+		AgentName:  "Kora Meal Planner",
+		ReviewedBy: "Kora Nutrition Coach",
+	}
+	require.NoError(t, repo.AppendExchange(
+		t.Context(), userID, "plan my week", "Here is the week, approve it or tell me what to change.",
+		nil, Attachments{Plan: plan},
+	))
+	return *plan
+}
+
+func TestHandlerAcceptPlan_RecordsTheApprovalAndIsIdempotent(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	require.NoError(t, db.Exec("UPDATE users SET timezone = ? WHERE id = ?", "Australia/Melbourne", userID).Error)
+	threadRepo := NewThreadRepository(db)
+	plan := seedPlanProposal(t, threadRepo, userID)
+
+	svc := NewService(&Grounder{}, nil, &stubMeter{withinBudget: true}, &threadRepo)
+	router := newTestRouter(userID, NewHandler(svc))
+
+	accept := func() PlanProposal {
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/v1/coach/plans/"+plan.ID.String()+"/accept", nil))
+		require.Equal(t, http.StatusOK, w.Code)
+		var body struct {
+			Data struct {
+				Plan PlanProposal `json:"plan"`
+			} `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		require.NotNil(t, body.Data.Plan.AcceptedAt)
+		require.NotNil(t, body.Data.Plan.StartsOn)
+		require.Equal(t, "Australia/Melbourne", body.Data.Plan.Timezone)
+		return body.Data.Plan
+	}
+
+	first := accept()
+	second := accept()
+
+	require.True(t, first.AcceptedAt.Equal(*second.AcceptedAt), "a double tap is not a second decision")
+	require.True(t, first.StartsOn.Equal(*second.StartsOn), "a retry must not restart the plan")
+}
+
+// The id must not be confirmable by anyone it does not belong to, so another
+// user's plan is indistinguishable from one that never existed.
+func TestHandlerAcceptPlan_AnotherUsersPlanIs404(t *testing.T) {
+	db := testDB(t)
+	owner := seedUser(t, db, 2000, 120)
+	stranger := seedUser(t, db, 2000, 120)
+	threadRepo := NewThreadRepository(db)
+	plan := seedPlanProposal(t, threadRepo, owner)
+
+	svc := NewService(&Grounder{}, nil, &stubMeter{withinBudget: true}, &threadRepo)
+	router := newTestRouter(stranger, NewHandler(svc))
+
+	for _, path := range []string{
+		"/v1/coach/plans/" + plan.ID.String() + "/accept",
+		"/v1/coach/plans/" + uuid.NewString() + "/accept",
+		"/v1/coach/plans/not-a-uuid/accept",
+	} {
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, httptest.NewRequest(http.MethodPut, path, nil))
+		require.Equal(t, http.StatusNotFound, w.Code, path)
+	}
+
+	var unaccepted int
+	require.NoError(t, db.Raw(
+		`SELECT COUNT(*) FROM coach_plan_proposals WHERE id = ? AND accepted_at IS NULL`, plan.ID,
+	).Scan(&unaccepted).Error)
+	require.Equal(t, 1, unaccepted, "the owner's plan is untouched")
+}
+
+// The thread is what the client replays on cold start, so an approved plan has
+// to come back as a card with its decision on it — not as prose the client
+// would have to re-parse.
+func TestHandlerThread_ReplaysThePlanCard(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	logRepo := foodlog.NewRepository(db)
+	trackRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackRepo, db)
+	memSvc := memory.NewService(logRepo)
+	g := NewGrounder(dashSvc, logRepo, memSvc, trackRepo)
+	threadRepo := NewThreadRepository(db)
+	seedPlanProposal(t, threadRepo, userID)
+
+	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, &threadRepo)
+	router := newTestRouter(userID, NewHandler(svc))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/coach/thread", nil))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Contains(t, w.Body.String(), `"plan":{"id":"`)
+	require.Contains(t, w.Body.String(), `"summary":"Hits your 2000 kcal target"`)
+	require.Contains(t, w.Body.String(), `"name":"Oats and whey"`)
+	require.Contains(t, w.Body.String(), `"accepted_at":null`)
 }

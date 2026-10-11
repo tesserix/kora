@@ -1,0 +1,20 @@
+{
+  "high": true,
+  "report-type": "summary",
+  "allowlist": [
+    {
+      "GHSA-vfj7-8cjw-p6xm": {
+        "active": true,
+        "notes": "braces has no patched release; reached only through metro and jest build tooling on repository-owned globs.",
+        "expiry": "2026-12-31"
+      }
+    },
+    {
+      "GHSA-86w9-cpqp-85rv": {
+        "active": true,
+        "notes": "node-forge has no patched release; reached only through @expo/cli code-signing tooling, not the shipped app.",
+        "expiry": "2026-12-31"
+      }
+    }
+  ]
+}

@@ -1,5 +1,7 @@
 import {
   cmFromFtIn,
+  cmFromIn,
+  inFromCm,
   mlToFlOz,
   flOzToMl,
   formatWeight,
@@ -27,6 +29,25 @@ describe("lbFromKg / kgFromLb round-trips", () => {
 describe("cmFromFtIn", () => {
   test("cmFromFtIn converts feet+inches to cm", () => {
     expect(cmFromFtIn(5, 11)).toBeCloseTo(180.34, 2);
+  });
+});
+
+// kora#45: the two plain-inch directions, added for tape measurements.
+describe("cmFromIn / inFromCm", () => {
+  test("cmFromIn converts inches to cm", () => {
+    expect(cmFromIn(35)).toBeCloseTo(88.9, 6);
+  });
+
+  test("inFromCm converts cm to inches", () => {
+    expect(inFromCm(88.9)).toBeCloseTo(35, 6);
+  });
+
+  test("round-trips cm -> in -> cm", () => {
+    expect(cmFromIn(inFromCm(33.3))).toBeCloseTo(33.3, 9);
+  });
+
+  test("cmFromFtIn stays consistent with cmFromIn, since it is now built on it", () => {
+    expect(cmFromFtIn(5, 11)).toBeCloseTo(cmFromIn(71), 9);
   });
 });
 

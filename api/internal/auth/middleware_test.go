@@ -40,6 +40,24 @@ func TestMiddlewareAcceptsValidToken(t *testing.T) {
 	assert.JSONEq(t, `{"uid":"u123"}`, w.Body.String())
 }
 
+func TestMiddlewareCarriesOnlyTheVerifiedTokenInRequestContext(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	var got string
+	r.GET("/protected", Middleware(fakeVerifier{claims: Claims{UID: "u123"}}), func(c *gin.Context) {
+		got, _ = VerifiedTokenFromContext(c.Request.Context())
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	req.Header.Set("Authorization", "Bearer verified-firebase-token")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNoContent, w.Code)
+	assert.Equal(t, "verified-firebase-token", got)
+}
+
 func TestMiddlewareRejectsMissingHeader(t *testing.T) {
 	r := setup(fakeVerifier{})
 	w := httptest.NewRecorder()

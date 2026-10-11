@@ -1,4 +1,5 @@
 import {
+  AGENT_REQUEST_TIMEOUT_MS,
   ApiError,
   CancelledError,
   NetworkError,
@@ -212,6 +213,37 @@ test("a genuine fetch failure with a caller signal attached is still a NetworkEr
 
 test("the client deadline is below the gateway's 30s cut-off", () => {
   expect(REQUEST_TIMEOUT_MS).toBeLessThan(30_000);
+});
+
+// kora#264. The agent routes are the one exception to the rule above: they run
+// three sequential model calls, which a 25s deadline cut off mid-plan and
+// reported to the user as being offline. They are served by the AI route in
+// tesserix-k8s (manifests/kora-istio/virtualservice.yaml), which does not
+// retry and allows 100s per try — so the client deadline must sit between the
+// default and that ceiling, never above it.
+test("the agent deadline outlives the default one and stays under the AI route's 100s try", () => {
+  expect(AGENT_REQUEST_TIMEOUT_MS).toBeGreaterThan(REQUEST_TIMEOUT_MS);
+  expect(AGENT_REQUEST_TIMEOUT_MS).toBeLessThan(100_000);
+});
+
+test("a caller-supplied deadline replaces the default one", async () => {
+  jest.useFakeTimers();
+  (global.fetch as jest.Mock).mockImplementation(() => new Promise(() => {}));
+
+  const promise = apiFetch("/v1/capture/message", {}, { timeoutMs: AGENT_REQUEST_TIMEOUT_MS });
+  // Past the default deadline, well short of the agent one: the request that
+  // was being killed here is exactly the week-long plan.
+  jest.advanceTimersByTime(REQUEST_TIMEOUT_MS + 1);
+  const settled = jest.fn();
+  void promise.then(settled, settled);
+  // Several ticks: the rejection travels through the retry wrapper's awaits
+  // before it reaches this handler, so one flush is not enough to see it.
+  for (let i = 0; i < 10; i += 1) await Promise.resolve();
+  expect(settled).not.toHaveBeenCalled();
+
+  jest.advanceTimersByTime(AGENT_REQUEST_TIMEOUT_MS);
+  await expect(promise).rejects.toMatchObject({ name: "TimeoutError" });
+  jest.useRealTimers();
 });
 
 test("a fast response clears the deadline timer instead of leaving it pending", async () => {

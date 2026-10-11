@@ -177,5 +177,54 @@ attempts across two methods returned nothing usable.
 
 ---
 
+## 🟢 kora#449 — the assets bucket (RESOLVED 2026-08-26)
+
+`kora-prod-assets-in` **now exists**, and `kora-api` is pointed at it
+(tesserix-k8s#624). Profile pictures render.
+
+- **Name / region**: `kora-prod-assets-in`, `asia-south1`, uniform bucket-level
+  access, in `tesseracthub-480811`. The naming matched an existing sibling,
+  `fanzone-prod-assets-in` — the convention was already there.
+- **Access**: public read on objects (`allUsers` → `objectViewer`). Every other
+  `*-assets` bucket in the project sets `publicAccessPrevention: enforced`; this
+  one deliberately does not, because the avatar is already visible to anyone
+  holding the handle — the consent boundary the feature rests on — and paths are
+  unguessable (`avatars/{user_id}/{v4-uuid}.jpg`). Signed URLs would mean
+  re-signing on every render of every friend row for no privacy gain. The org
+  policy `storage.publicAccessPrevention` is NOT enforced (`booleanPolicy: {}`),
+  so this is a per-bucket choice rather than a policy override. **Do not
+  "correct" it to enforced without re-deciding the consent model.**
+- **Identity**: `kora-api-prod@tesseracthub-480811.iam.gserviceaccount.com` →
+  `roles/storage.objectAdmin`, scoped to this bucket. That is the workload
+  identity `kora-api` already runs as.
+- **Verified**: wrote an object as the SA, then read it anonymously with no auth
+  header — HTTP 200, correct body. Probe removed.
+
+### ❌ The lifecycle rule this document used to specify is impossible
+
+It previously said: *"reap `avatars/**` objects that are not the current
+version."* **GCS lifecycle cannot express that.** Each avatar write issues a new
+object *name* (a fresh UUID in the path), not a new object *version*, so
+noncurrent-version conditions never match — and an age-based rule would delete
+live avatars.
+
+Superseded objects are already removed application-side: on replace, on removal,
+and inside the account-deletion cascade. **That delete is the only collector** —
+so when one fails, the object leaks permanently. Both paths now log
+`NEEDS MANUAL CLEANUP` with the orphaned path, matching what `user/deletion.go`
+already said on the same class of failure (corrected in #457; they previously
+claimed a lifecycle rule would reap it, which sent an operator hunting for a
+collector that does not exist).
+
+### Rollout note
+
+Rows written while `assets.Noop` was selected point at objects that were never
+uploaded, so their `avatar_path` is non-empty and the API composes a URL that
+404s. The client handles this: `Avatar`'s `onError` falls back to initials rather
+than a permanently blank circle (kora#451, found on-device). Self-corrects on the
+next upload.
+
+---
+
 _When a question is resolved, mark it 🟢, record the decision inline, and reflect any
 user-facing change back into `PRODUCT_SPEC.md`._

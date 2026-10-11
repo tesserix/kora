@@ -24,9 +24,16 @@ type Friendship struct {
 }
 
 // FriendView is the public projection of a user — never exposes email.
+//
+// Handle and AvatarURL are here so a friend row can show a face and a sayable
+// name rather than initials and a display name that is not unique. AvatarURL is
+// "" for a user with no picture, which is what the client falls back to
+// initials on.
 type FriendView struct {
 	ID          uuid.UUID `json:"id"`
 	DisplayName string    `json:"display_name"`
+	Handle      string    `json:"handle"`
+	AvatarURL   string    `json:"avatar_url"`
 }
 
 // RequestView is a pending request plus the other user involved.

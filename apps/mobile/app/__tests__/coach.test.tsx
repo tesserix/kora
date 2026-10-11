@@ -1,4 +1,5 @@
 import { fireEvent, render, waitFor } from "@testing-library/react-native";
+import { router } from "expo-router";
 
 import CoachScreen from "../coach";
 
@@ -11,14 +12,19 @@ const mockAskMutate = jest.fn();
 const mockOnline = jest.fn(() => true);
 
 jest.mock("expo-router", () => ({
-  router: { back: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => true) },
+  router: { back: jest.fn(), push: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => true) },
 }));
 jest.mock("@/api/hooks", () => ({
+  useAIUsage: () => mockAIUsage(),
+  useAIPacks: () => mockAIPacks(),
   useCoachNudges: () => mockNudges(),
   useCoachThread: () => mockThread(),
   useCoachAsk: () => mockAsk(),
 }));
 jest.mock("@/offline/connectivity", () => ({ useIsOnline: () => mockOnline() }));
+
+const mockAIUsage = jest.fn();
+const mockAIPacks = jest.fn();
 
 const nudgeData = {
   nudges: [{ kind: "protein", title: "Protein", text: "142 / 160g — 18g to go" }],
@@ -42,6 +48,9 @@ beforeEach(() => {
   mockThreadRefetch.mockClear();
   mockAskMutate.mockReset();
   mockOnline.mockReturnValue(true);
+  mockAIUsage.mockReturnValue({ data: undefined });
+  mockAIPacks.mockReturnValue({ data: [{ code: "spark" }] });
+  (router.push as jest.Mock).mockClear();
   mockNudges.mockReturnValue({ data: nudgeData, isLoading: false, isError: false, refetch: mockNudgesRefetch });
   mockThread.mockReturnValue({ data: threadData, isLoading: false, isError: false, refetch: mockThreadRefetch });
   mockAsk.mockReturnValue({ mutate: mockAskMutate, isPending: false });
@@ -56,6 +65,51 @@ test("renders grounded focus, stored conversation, and citation chips", async ()
   expect(getByText("How is my protein?")).toBeTruthy();
   expect(getByText("You have 18g to go today.")).toBeTruthy();
   expect(getByText("Protein · 142 / 160g")).toBeTruthy();
+});
+
+test("a structured agent proposal is reviewable but never activates itself", async () => {
+  mockThread.mockReturnValue({
+    data: {
+      turns: [{
+        role: "otto",
+        text: "A short walk after lunch fits the routine you requested.",
+        citations: [],
+        created_at: "2026-08-19T00:00:01Z",
+        proposal: {
+          id: "proposal-1",
+          title: "Walk after lunch",
+          kind: "walking",
+          cadence: "fixed",
+          weekdays_mask: 62,
+          start_minute: 780,
+          interval_minutes: null,
+          end_minute: null,
+          timezone: "Australia/Melbourne",
+          starts_on: "2026-08-22",
+          ends_on: null,
+          source: "meal_planner",
+          agent_name: "Kora Meal Planner",
+          reviewed_by: "Kora Nutrition Coach",
+          accepted_commitment_id: null,
+          accepted_at: null,
+          created_at: "2026-08-19T00:00:01Z",
+        },
+      }],
+      show_support: false,
+    },
+    isLoading: false,
+    isError: false,
+    refetch: mockThreadRefetch,
+  });
+
+  const { getByLabelText, getByText } = await render(<CoachScreen />);
+  expect(getByText("Suggested by Kora Meal Planner · reviewed by Kora Nutrition Coach")).toBeTruthy();
+  fireEvent.press(getByLabelText("Review suggested commitment"));
+
+  expect(router.push).toHaveBeenCalledWith(expect.objectContaining({
+    pathname: "/mentor-commitment",
+    params: expect.objectContaining({ proposalId: "proposal-1", title: "Walk after lunch" }),
+  }));
 });
 
 test("show_support adds help without replacing safe focus cards", async () => {
@@ -86,7 +140,97 @@ test("sending shows the optimistic user turn and asks the coach", async () => {
 
   expect(mockAskMutate).toHaveBeenCalledWith("How is my fibre?", expect.any(Object));
   expect(getByText("How is my fibre?")).toBeTruthy();
-  expect(getByText("Otto is thinking…")).toBeTruthy();
+  expect(getByText("Coach is thinking…")).toBeTruthy();
+});
+
+test("the answering agent is named on its bubble and on the next thinking line", async () => {
+  mockThread.mockReturnValue({
+    data: { turns: [], show_support: false },
+    isLoading: false,
+    isError: false,
+    refetch: mockThreadRefetch,
+  });
+  mockAskMutate.mockImplementation((_question, options) =>
+    options.onSuccess({
+      answer: "You have 18g to go today.",
+      citations: [],
+      show_support: false,
+      agent: { name: "Nutrition Coach", skill: "nutrition-guidance" },
+    }),
+  );
+  const { getByLabelText, getByText } = await render(<CoachScreen />);
+
+  await fireEvent.changeText(getByLabelText("Ask Otto a nutrition question"), "How is my fibre?");
+  await fireEvent.press(getByLabelText("Send question"));
+
+  // The named agent carries into the next question's thinking line.
+  mockAskMutate.mockImplementation(() => undefined);
+  await fireEvent.changeText(getByLabelText("Ask Otto a nutrition question"), "And my fat?");
+  await fireEvent.press(getByLabelText("Send question"));
+
+  expect(getByText("Nutrition Coach is thinking…")).toBeTruthy();
+  expect(getByText("OTTO · NUTRITION COACH")).toBeTruthy();
+});
+
+test("an answer that touches a preference says so without withholding it", async () => {
+  mockAskMutate.mockImplementation((_question, options) =>
+    options.onSuccess({
+      answer: "Mushroom risotto tonight.",
+      citations: [],
+      show_support: false,
+      diet_flags: [{ subject: "mushroom", label: "Mushroom", kind: "preference", severity: "flag", match: "mushroom" }],
+    }),
+  );
+  const { getByLabelText, getByTestId, queryByTestId } = await render(<CoachScreen />);
+
+  expect(queryByTestId("coach-diet-flags")).toBeNull();
+  await fireEvent.changeText(getByLabelText("Ask Otto a nutrition question"), "What's for dinner?");
+  await fireEvent.press(getByLabelText("Send question"));
+
+  expect(getByTestId("coach-diet-flags")).toBeTruthy();
+  expect(getByLabelText("This answer mentions mushroom, which you prefer to avoid.")).toBeTruthy();
+});
+
+test("the preference note clears when the next question is asked", async () => {
+  mockAskMutate.mockImplementation((_question, options) =>
+    options.onSuccess({
+      answer: "Mushroom risotto tonight.",
+      citations: [],
+      show_support: false,
+      diet_flags: [{ subject: "mushroom", label: "Mushroom", kind: "preference", severity: "flag", match: "mushroom" }],
+    }),
+  );
+  const { getByLabelText, getByTestId, queryByTestId } = await render(<CoachScreen />);
+  await fireEvent.changeText(getByLabelText("Ask Otto a nutrition question"), "What's for dinner?");
+  await fireEvent.press(getByLabelText("Send question"));
+  expect(getByTestId("coach-diet-flags")).toBeTruthy();
+
+  // A note left standing over a later, unrelated answer would be a lie about
+  // that answer.
+  mockAskMutate.mockImplementation(() => undefined);
+  await fireEvent.changeText(getByLabelText("Ask Otto a nutrition question"), "And my fibre?");
+  await fireEvent.press(getByLabelText("Send question"));
+
+  expect(queryByTestId("coach-diet-flags")).toBeNull();
+});
+
+test("an answer with no agent stays attributed to plain Otto", async () => {
+  mockThread.mockReturnValue({
+    data: {
+      turns: [
+        { role: "otto", text: "Plain answer.", citations: [], created_at: "2026-08-19T00:00:01Z" },
+      ],
+      show_support: false,
+    },
+    isLoading: false,
+    isError: false,
+    refetch: mockThreadRefetch,
+  });
+  const { getByText, queryByText, getByLabelText } = await render(<CoachScreen />);
+
+  expect(getByLabelText("Otto: Plain answer.")).toBeTruthy();
+  expect(queryByText(/OTTO ·/)).toBeNull();
+  expect(getByText("Plain answer.")).toBeTruthy();
 });
 
 test("a failed answer keeps the question and provides an inline retry", async () => {
@@ -133,4 +277,65 @@ test("a suggestion sends the exact grounded question", async () => {
   await waitFor(() =>
     expect(mockAskMutate).toHaveBeenCalledWith("How is my protein today?", expect.any(Object)),
   );
+});
+
+test("a spent allowance offers a top-up next to the reply that says so", async () => {
+  mockAIUsage.mockReturnValue({
+    data: {
+      daily: { used: 20, limit: 20, remaining: 0, resets_at: "2026-08-23T00:00:00Z" },
+      weekly: { used: 20, limit: 100, remaining: 80, resets_at: "2026-08-24T00:00:00Z" },
+      monthly: { used: 20, limit: 300, remaining: 280, resets_at: "2026-09-01T00:00:00Z" },
+    },
+  });
+
+  const { getByLabelText, getByText } = await render(<CoachScreen />);
+
+  expect(getByText(/Your AI allowance is spent/)).toBeTruthy();
+  await fireEvent.press(getByLabelText("Add requests"));
+  expect(router.push).toHaveBeenCalledWith("/ai-top-up");
+});
+
+test("a healthy allowance says nothing about paying", async () => {
+  const { queryByLabelText } = await render(<CoachScreen />);
+
+  expect(queryByLabelText("Add requests")).toBeNull();
+});
+
+test("nothing to sell means no top-up offer, even out of requests", async () => {
+  mockAIUsage.mockReturnValue({
+    data: {
+      daily: { used: 20, limit: 20, remaining: 0, resets_at: "2026-08-23T00:00:00Z" },
+      weekly: { used: 20, limit: 100, remaining: 80, resets_at: "2026-08-24T00:00:00Z" },
+      monthly: { used: 20, limit: 300, remaining: 280, resets_at: "2026-09-01T00:00:00Z" },
+    },
+  });
+  mockAIPacks.mockReturnValue({ data: [] });
+
+  const { queryByLabelText } = await render(<CoachScreen />);
+
+  expect(queryByLabelText("Add requests")).toBeNull();
+});
+
+// kora#479 removed the only payment gateway, and the explanation used to be
+// gated on packs existing along with the button — so a blocked tester got
+// Otto's refusal with nothing saying why or when it lifts.
+//
+// The reason a user is stuck is not conditional on whether we can sell them
+// anything. This is the assertion that keeps the two apart.
+test("still explains why it is stuck when there is nothing to sell", async () => {
+  mockAIUsage.mockReturnValue({
+    data: {
+      daily: { used: 20, limit: 20, remaining: 0, resets_at: "2026-08-23T00:00:00Z" },
+      weekly: { used: 20, limit: 100, remaining: 80, resets_at: "2026-08-24T00:00:00Z" },
+      monthly: { used: 20, limit: 300, remaining: 280, resets_at: "2026-09-01T00:00:00Z" },
+    },
+  });
+  mockAIPacks.mockReturnValue({ data: [] });
+
+  const { getByText, queryByLabelText } = await render(<CoachScreen />);
+
+  expect(getByText(/Your AI allowance is spent/)).toBeTruthy();
+  // ...and the copy must not dangle an offer that cannot be taken.
+  expect(getByText(/It resets on its own\.$/)).toBeTruthy();
+  expect(queryByLabelText("Add requests")).toBeNull();
 });

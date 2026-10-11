@@ -151,8 +151,21 @@ const (
 // against Fallback with a fresh budget of its own. Router implements
 // Provider so it is a drop-in replacement wherever a single Provider is
 // expected.
+//
+// Primary is REQUIRED. Fallback is OPTIONAL: a nil Fallback means every call is
+// served by Primary alone and its error, not a nil dereference, is what the
+// caller sees — the shape production takes whenever no fallback provider is
+// configured.
+//
+// Prefer NewRouter over a struct literal. It returns the bare Primary when
+// there is no fallback, rather than a Router with nothing to route between,
+// and it rejects a nil Primary at construction instead of letting the mistake
+// surface as a nil dereference on the first request. The fields stay exported
+// so tests can set the budget overrides below, which means a literal can still
+// omit Primary — NewRouter is the guarded path, not the only one.
 type Router struct {
-	Primary  Provider
+	Primary Provider
+	// Fallback may be nil; see the type doc.
 	Fallback Provider
 
 	// PhotoBudget/TextBudget override the default latency budgets
@@ -232,6 +245,9 @@ func (r *Router) fallbackBudgetOrDefault() time.Duration {
 // whichever call served the request is returned as-is, including its Usage —
 // providers set Usage.Provider themselves, so the caller can tell who served
 // just by inspecting it.
+//
+// fallback may be nil, meaning no fallback is configured. The primary's result
+// and error are then returned as-is instead of a nil dereference.
 func withFallback[T any](ctx context.Context, budget, fbBudget time.Duration, primary, fallback func(context.Context) (T, Usage, error)) (T, Usage, error) {
 	primaryCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
@@ -252,6 +268,22 @@ func withFallback[T any](ctx context.Context, budget, fbBudget time.Duration, pr
 	} else {
 		usage.Outcome = OutcomeError
 	}
+
+	// No fallback configured: the primary's outcome IS the request's outcome.
+	//
+	// Returning here rather than deposit-then-call is what keeps the metering
+	// honest. Below, the primary's leg is deposited in the sink precisely
+	// because the fallback's Usage is the one being RETURNED; with no fallback
+	// the primary's Usage is the returned one, so depositing it as well would
+	// count the same call twice — the mirror image of the #81 undercount.
+	//
+	// err may be nil here when the primary answered but blew its budget. With
+	// nobody to fall back to, handing back the answer beats discarding it, so
+	// the result and the nil error both stand; Outcome stays OutcomeTimeout so
+	// the meter still records what actually happened.
+	if fallback == nil {
+		return result, usage, err
+	}
 	addUsage(ctx, usage)
 
 	fallbackCtx, fallbackCancel := context.WithTimeout(ctx, fbBudget)
@@ -265,10 +297,41 @@ func withFallback[T any](ctx context.Context, budget, fbBudget time.Duration, pr
 	return result, fbUsage, fbErr
 }
 
+// NewRouter pairs a primary with an optional fallback.
+//
+// With no fallback there is nothing for a Router to route BETWEEN, so this
+// returns the bare primary rather than a Router that would spend every call
+// checking for a fallback it will never have. Callers therefore cannot
+// accidentally construct the degenerate shape; cmd/api open-coded this
+// conditional before, and anything else building a Router by hand had to
+// remember to.
+func NewRouter(primary, fallback Provider) Provider {
+	// A nil primary is the one genuinely invalid shape left. A nil Fallback is
+	// merely unconfigured and is handled — every call is served by Primary
+	// alone — but a Router with nothing to call at all cannot serve anything,
+	// and left unchecked it surfaces as a nil dereference deep inside a
+	// closure on the first request, long after the wiring mistake was made.
+	//
+	// Panicking is deliberate and is the same policy main() already applies to
+	// bad configuration: providers are wired once at startup, so this fires on
+	// the first boot after the mistake rather than in front of a user.
+	if primary == nil {
+		panic("ai: NewRouter requires a non-nil primary provider")
+	}
+	if fallback == nil {
+		return primary
+	}
+	return &Router{Primary: primary, Fallback: fallback}
+}
+
 func (r *Router) IdentifyText(ctx context.Context, phrase string) ([]Guess, Usage, error) {
+	var fb func(context.Context) ([]Guess, Usage, error)
+	if r.Fallback != nil {
+		fb = func(c context.Context) ([]Guess, Usage, error) { return r.Fallback.IdentifyText(c, phrase) }
+	}
 	return withFallback(ctx, r.textBudgetOrDefault(), r.textFallbackBudgetOrDefault(),
 		func(c context.Context) ([]Guess, Usage, error) { return r.Primary.IdentifyText(c, phrase) },
-		func(c context.Context) ([]Guess, Usage, error) { return r.Fallback.IdentifyText(c, phrase) },
+		fb,
 	)
 }
 
@@ -286,28 +349,48 @@ func (r *Router) IdentifyText(ctx context.Context, phrase string) ([]Guess, Usag
 // so, give it its own model config rather than reusing p.model, which the text
 // paths depend on.
 func (r *Router) IdentifyPhoto(ctx context.Context, image []byte, mime string) ([]Guess, Usage, error) {
-	pctx, cancel := context.WithTimeout(ctx, r.photoBudgetOrDefault())
+	return retryPrimaryOnTransient(ctx, r.photoBudgetOrDefault(),
+		func(c context.Context) ([]Guess, Usage, error) { return r.Primary.IdentifyPhoto(c, image, mime) },
+	)
+}
+
+// retryPrimaryOnTransient runs call against the primary provider only,
+// bounded by budget, retrying exactly once on a transient error
+// (isTransientProviderError), gated by hasRetryHeadroom and paced by
+// sleepWithin(photoRetryDelay) — the policy IdentifyPhoto's doc above
+// explains in full (kora#179): no fallback because the deployed fallback for
+// these call types is not vision-capable, and a transient 503 must not take
+// the only leg down.
+//
+// Generic over T so IdentifyPhoto and IdentifyBodyComposition — which share
+// this policy byte-for-byte, including photoBudget and photoAttempts — call
+// through one implementation instead of maintaining two copies of the same
+// ~20-line loop. The failed attempt's Usage is carried forward and summed
+// into the next attempt's (TokensIn/TokensOut/LatencyMs) for the same reason
+// IdentifyPhoto always did: ai_usage_events records failures as well as
+// successes, so dropping a retried attempt's tokens would under-count spend
+// (the same class of gap kora#152 tracks for the abandoned fallback leg).
+func retryPrimaryOnTransient[T any](ctx context.Context, budget time.Duration, call func(context.Context) (T, Usage, error)) (T, Usage, error) {
+	pctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 
 	var last Usage
 	for attempt := 1; ; attempt++ {
-		guesses, usage, err := r.Primary.IdentifyPhoto(pctx, image, mime)
-		// Carry the failed attempt's cost forward. ai_usage_events records
-		// failures as well as successes (see Usage.Outcome), so dropping a
-		// retried attempt's tokens would under-count spend — the same class of
-		// gap kora#152 tracks for the abandoned fallback leg.
+		result, usage, err := call(pctx)
 		usage.TokensIn += last.TokensIn
 		usage.TokensOut += last.TokensOut
 		usage.LatencyMs += last.LatencyMs
 		if err == nil {
-			return guesses, usage, nil
+			return result, usage, nil
 		}
 		last = usage
 		if attempt >= photoAttempts || !isTransientProviderError(err) || !hasRetryHeadroom(pctx) {
-			return nil, usage, err
+			var zero T
+			return zero, usage, err
 		}
 		if !sleepWithin(pctx, photoRetryDelay) {
-			return nil, usage, err
+			var zero T
+			return zero, usage, err
 		}
 	}
 }
@@ -369,26 +452,56 @@ func sleepWithin(ctx context.Context, d time.Duration) bool {
 }
 
 func (r *Router) Decompose(ctx context.Context, dish string) ([]IngredientGuess, Usage, error) {
+	var fb func(context.Context) ([]IngredientGuess, Usage, error)
+	if r.Fallback != nil {
+		fb = func(c context.Context) ([]IngredientGuess, Usage, error) { return r.Fallback.Decompose(c, dish) }
+	}
 	return withFallback(ctx, r.textBudgetOrDefault(), r.fallbackBudgetOrDefault(),
 		func(c context.Context) ([]IngredientGuess, Usage, error) { return r.Primary.Decompose(c, dish) },
-		func(c context.Context) ([]IngredientGuess, Usage, error) { return r.Fallback.Decompose(c, dish) },
+		fb,
 	)
 }
 
 func (r *Router) Embed(ctx context.Context, text string) ([]float32, Usage, error) {
+	var fb func(context.Context) ([]float32, Usage, error)
+	if r.Fallback != nil {
+		fb = func(c context.Context) ([]float32, Usage, error) { return r.Fallback.Embed(c, text) }
+	}
 	return withFallback(ctx, r.textBudgetOrDefault(), r.fallbackBudgetOrDefault(),
 		func(c context.Context) ([]float32, Usage, error) { return r.Primary.Embed(c, text) },
-		func(c context.Context) ([]float32, Usage, error) { return r.Fallback.Embed(c, text) },
+		fb,
 	)
 }
 
 func (r *Router) GenerateText(ctx context.Context, systemPrompt, userPrompt string) (string, Usage, error) {
+	var fb func(context.Context) (string, Usage, error)
+	if r.Fallback != nil {
+		fb = func(c context.Context) (string, Usage, error) {
+			return r.Fallback.GenerateText(c, systemPrompt, userPrompt)
+		}
+	}
 	return withFallback(ctx, r.generateBudgetOrDefault(), r.generateFallbackBudgetOrDefault(),
 		func(c context.Context) (string, Usage, error) {
 			return r.Primary.GenerateText(c, systemPrompt, userPrompt)
 		},
-		func(c context.Context) (string, Usage, error) {
-			return r.Fallback.GenerateText(c, systemPrompt, userPrompt)
+		fb,
+	)
+}
+
+// IdentifyBodyComposition calls the primary DIRECTLY — no fallback — for the
+// exact reason IdentifyPhoto does: the deployed fallback is an
+// OpenAI-compatible endpoint driven by ONE configured model, and prod sets
+// that to a text-only model. Handing it a base64 scale screenshot would
+// guarantee a failure that burns a paid call and real latency only to
+// replace the primary's real error with a meaningless one — strictly worse
+// than surfacing the primary's error directly. It shares IdentifyPhoto's
+// exact retry policy (photoBudget, one retry on a transient 503, same
+// headroom gate) via retryPrimaryOnTransient — see that function and
+// IdentifyPhoto's doc above for the full reasoning behind each choice.
+func (r *Router) IdentifyBodyComposition(ctx context.Context, image []byte, mime string) (BodyCompositionReading, Usage, error) {
+	return retryPrimaryOnTransient(ctx, r.photoBudgetOrDefault(),
+		func(c context.Context) (BodyCompositionReading, Usage, error) {
+			return r.Primary.IdentifyBodyComposition(c, image, mime)
 		},
 	)
 }
@@ -400,5 +513,8 @@ func (r *Router) Transcribe(ctx context.Context, audio []byte, mime string) (str
 }
 
 func (r *Router) Name() string {
+	if r.Fallback == nil {
+		return "router(" + r.Primary.Name() + ")"
+	}
 	return "router(" + r.Primary.Name() + "->" + r.Fallback.Name() + ")"
 }

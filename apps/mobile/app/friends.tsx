@@ -8,7 +8,6 @@ import { AppBackground } from "@/components/AppBackground";
 import { Icon } from "@/components/Icon";
 import { Avatar } from "@/components/Avatar";
 import { GroupedSection, Row } from "@/components/GroupedList";
-import { ToggleSwitch } from "@/components/ToggleSwitch";
 import { AddFriendSheet } from "@/components/social/AddFriendSheet";
 import { FriendsLeaderboard } from "@/components/social/FriendsLeaderboard";
 import { EmptyState } from "@/components/common/EmptyState";
@@ -20,17 +19,15 @@ import {
   useAcceptRequest,
   useDeclineRequest,
   useUnfriend,
-  useProfile,
-  useSetShareProgress,
   useFriendsProgress,
 } from "@/api/hooks";
 import { useToast } from "@/components/Toast";
 import { apiErrorMessage } from "@/lib/apiErrorMessage";
+import { initials } from "@/lib/initials";
 import { useTheme } from "@/theme";
 
-function initials(name: string): string {
-  return name.split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase();
-}
+// 32pt visual + 6pt slop each side = a 44pt target, the iOS minimum.
+const TAP_SLOP = { top: 6, bottom: 6, left: 6, right: 6 } as const;
 
 export default function Friends() {
   const { instrument, spacing, radius } = useTheme();
@@ -40,8 +37,6 @@ export default function Friends() {
   const accept = useAcceptRequest();
   const decline = useDeclineRequest();
   const unfriend = useUnfriend();
-  const profile = useProfile();
-  const setShare = useSetShareProgress();
   const compare = useFriendsProgress();
   const toast = useToast();
 
@@ -50,8 +45,6 @@ export default function Friends() {
   // reads the same to the user — the action did not happen, and this is why.
   const surfaceError = { onError: (error: unknown) => toast.show({ message: apiErrorMessage(error) }) };
   const [addOpen, setAddOpen] = useState(false);
-
-  const shareOn = profile.data?.share_progress ?? false;
 
   const incoming = requests.data?.incoming ?? [];
   const list = friends.data ?? [];
@@ -73,20 +66,6 @@ export default function Friends() {
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 140 }}>
           <ScreenHeader overline="Your circle" title="Friends" onBack={() => safeBack("/(tabs)/more")} />
           <View style={{ paddingHorizontal: 20, gap: spacing.lg }}>
-            <GroupedSection>
-              <Row
-                title="Share my progress"
-                subtitle="Friends can see your streak and on-target days."
-                right={
-                  <ToggleSwitch
-                    accessibilityLabel="Share my progress"
-                    value={shareOn}
-                    onValueChange={(v) => setShare.mutate(v, surfaceError)}
-                  />
-                }
-              />
-            </GroupedSection>
-
             <PressableScale
               accessibilityRole="button"
               accessibilityLabel="Add a friend"
@@ -124,6 +103,13 @@ export default function Friends() {
                           accessibilityLabel={`Accept request from ${r.user.display_name}`}
                           haptic="success"
                           onPress={() => accept.mutate(r.id, surfaceError)}
+                          // The 32pt circle is the design; hitSlop takes the
+                          // TARGET to 44pt without changing it (kora#446).
+                          // These two sit adjacent with asymmetric
+                          // consequences — a mis-tap declines someone with no
+                          // undo — so they are the worst controls in the app
+                          // to leave under the minimum.
+                          hitSlop={TAP_SLOP}
                           style={{ width: 32, height: 32, borderRadius: radius.full, alignItems: "center", justifyContent: "center", backgroundColor: instrument.accent }}
                         >
                           <Icon name="check" size={16} color={instrument.accentOn} />
@@ -133,6 +119,7 @@ export default function Friends() {
                           accessibilityLabel={`Decline request from ${r.user.display_name}`}
                           haptic="selection"
                           onPress={() => decline.mutate(r.id, surfaceError)}
+                          hitSlop={TAP_SLOP}
                           style={{
                             width: 32,
                             height: 32,
@@ -173,7 +160,7 @@ export default function Friends() {
                     onLongPress={() => onUnfriend(f.id, f.display_name)}
                   >
                     <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, minHeight: 44, paddingHorizontal: spacing.md }}>
-                      <Avatar initials={initials(f.display_name)} size={32} />
+                      <Avatar initials={initials(f.display_name)} uri={f.avatar_url} size={32} />
                       <AppText variant="headline" style={{ color: instrument.ink }}>{f.display_name}</AppText>
                     </View>
                   </PressableScale>

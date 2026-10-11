@@ -24,6 +24,16 @@ const (
 	// riskFastingStreakDays is the consecutive fasting-day streak at or
 	// above which risk fires.
 	riskFastingStreakDays = 3
+
+	// riskDeclaredFastHours is the length of a single DECLARED fast at or
+	// above which risk fires (kora#407).
+	//
+	// 24h so that routine intermittent fasting -- 16:8 tops out at 16 --
+	// never trips it, while a fast spanning a full day does. This is the
+	// LONGEST single fast, never a sum: seven 16-hour overnight fasts total
+	// 112 hours and mean nothing, and summing would flag exactly the
+	// practice this threshold exists to spare.
+	riskDeclaredFastHours = 24
 )
 
 // softenedText is the fixed positive reframe returned for Soften
@@ -60,6 +70,12 @@ type Signals struct {
 	AvgIntakeKcal     float64 // avg daily intake last 7d
 	LogsPerDay        float64 // avg food logs/day last 7d (obsessive-logging proxy)
 	FastingStreakDays int
+	// DeclaredFastHours is the longest SINGLE declared fast intersecting the
+	// window, capped per fasting.CapHours. Separate from FastingStreakDays on
+	// purpose: that one is inferred from an absence of logs and needed its own
+	// fix (kora#408), and conflating "we guessed" with "they told us" would
+	// make both harder to reason about.
+	DeclaredFastHours float64
 }
 
 // Action is the outcome of evaluating a Nudge against Signals.
@@ -144,6 +160,9 @@ func AtRisk(s Signals) bool {
 		return true
 	}
 	if s.FastingStreakDays >= riskFastingStreakDays {
+		return true
+	}
+	if s.DeclaredFastHours >= riskDeclaredFastHours {
 		return true
 	}
 	return false

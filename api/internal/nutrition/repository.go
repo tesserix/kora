@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/pgvector/pgvector-go"
 	"gorm.io/gorm"
 )
@@ -26,6 +27,25 @@ type Repository struct {
 
 func NewRepository(db *gorm.DB) Repository {
 	return Repository{db: db}
+}
+
+// WithDB returns a copy of r bound to another *gorm.DB -- in practice a
+// transaction -- leaving the receiver untouched.
+//
+// It exists because of kora#415. foodlog.Service.CreateBatch resolves every
+// item through this repository from INSIDE its own transaction. While the
+// repository stayed bound to the pool, that batch held one connection for its
+// transaction and then blocked waiting for a second; maxOpenConns is 5 and
+// every endpoint shares the pool, so five concurrent batch logs stalled the
+// whole API. Rebinding onto the caller's handle keeps the read on the
+// connection the caller already holds.
+//
+// The same defect in fasting.Repository.Start was kora#413. If you are about
+// to call a repository method from inside a Transaction body, rebind it here
+// first -- a pool-bound read inside a transaction is always this bug.
+func (r Repository) WithDB(db *gorm.DB) Repository {
+	r.db = db
+	return r
 }
 
 // WithEmbedder returns a copy of the repository that embeds a food as soon as
@@ -50,6 +70,113 @@ const searchLimitMax = 25
 // scoring entirely. 100 is generous enough to hold the true best row for
 // virtually any query while staying cheap to score in Go.
 const resolveScanLimit = 100
+
+const referenceScanLimit = 100
+
+const referenceLocaleBoost = 0.03
+
+var reviewedReferenceProvenance = []string{
+	ProvenanceAFCD,
+	ProvenanceAUSNUT,
+	ProvenanceIFCT,
+	ProvenanceUSDA,
+}
+
+// ReferenceCandidate is one globally reviewed nutrition row retrieved as
+// evidence for an AI response. It deliberately excludes aliases and all
+// user-created/estimated sources; this data can be shared across users.
+type ReferenceCandidate struct {
+	Item       FoodItem
+	Similarity float64
+}
+
+// SearchReferenceFoods performs bounded semantic retrieval over the reviewed
+// national datasets. The stored vectors describe food identity, so this is
+// evidence retrieval, not a recommendation engine: the coach still applies
+// the user's confirmed preferences and safety policy after retrieval.
+//
+// excludedTags drops rows carrying a diet_tags entry the user's blocking rules
+// forbid. Excluding here rather than after retrieval means the model is not
+// handed evidence it must then be told to ignore, and the scan still returns a
+// full set of usable candidates instead of a set with holes in it.
+func (r Repository) SearchReferenceFoods(
+	ctx context.Context,
+	queryVec []float32,
+	locale Locale,
+	limit int,
+	excludedTags []string,
+) ([]ReferenceCandidate, error) {
+	if len(queryVec) == 0 {
+		return nil, fmt.Errorf("nutrition: search references: empty query embedding")
+	}
+	if limit <= 0 || limit > searchLimitMax {
+		limit = searchLimitMax
+	}
+	// A nil slice binds as SQL NULL, which would make the guard NULL and filter
+	// every row out; an empty array keeps "no rules" meaning "exclude nothing".
+	excluded := pq.StringArray(excludedTags)
+	if excluded == nil {
+		excluded = pq.StringArray{}
+	}
+
+	type referenceRow struct {
+		FoodItem
+		Distance float64 `gorm:"column:distance"`
+	}
+	var rows []referenceRow
+	vector := pgvector.NewVector(queryVec)
+	err := r.db.WithContext(ctx).Raw(`
+		SELECT id, name, brand, provenance, entity_type, locale, barcode,
+		       serving_desc, serving_grams, base_unit, serving_units,
+		       kcal_per_100g, protein_per_100g, carbs_per_100g,
+		       fat_per_100g, fiber_per_100g, created_at,
+		       (embedding <=> ?) AS distance
+		FROM food_items
+		WHERE deleted_at IS NULL
+		  AND embedding IS NOT NULL
+		  AND entity_type = ?
+		  AND provenance IN ?
+		  AND (cardinality(?::text[]) = 0 OR NOT (diet_tags && ?::text[]))
+		ORDER BY embedding <=> ?, id
+		LIMIT ?`,
+		vector, EntityTypeGeneric, reviewedReferenceProvenance,
+		excluded, excluded,
+		vector, referenceScanLimit).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("nutrition: search references: %w", err)
+	}
+
+	sort.SliceStable(rows, func(i, j int) bool {
+		left := rows[i].Distance
+		right := rows[j].Distance
+		if locale != LocaleUnknown {
+			if rows[i].Locale == locale {
+				left -= referenceLocaleBoost
+			}
+			if rows[j].Locale == locale {
+				right -= referenceLocaleBoost
+			}
+		}
+		if left == right {
+			return rows[i].ID.String() < rows[j].ID.String()
+		}
+		return left < right
+	})
+	if len(rows) > limit {
+		rows = rows[:limit]
+	}
+
+	out := make([]ReferenceCandidate, len(rows))
+	for i, row := range rows {
+		similarity := 1 - row.Distance
+		if similarity < 0 {
+			similarity = 0
+		}
+		out[i] = ReferenceCandidate{Item: row.FoodItem, Similarity: similarity}
+	}
+	return out, nil
+}
 
 func (r Repository) Search(ctx context.Context, query string, limit int) ([]FoodItem, error) {
 	if limit <= 0 || limit > searchLimitMax {
@@ -223,7 +350,30 @@ func (r Repository) ResolveQuery(ctx context.Context, userID uuid.UUID, q Query,
 	// scores a perfect 1.0 and wins. Searching "cola zero sugar" instead puts
 	// coverage behind the words that actually distinguish the product.
 	norm := Normalize(phrase)
-	searchNorm := Normalize(strings.TrimSpace(phrase + " " + strings.Join(q.Qualifiers, " ")))
+	// recallNorm drives the tsquery predicate ONLY. Connector words are
+	// stripped there because plainto_tsquery('simple', ...) makes every term
+	// mandatory and the `simple` config has no stopword list, so a phrase
+	// spelling the conjunction ("bacon and egg roll") could not retrieve a row
+	// spelling it "&" ("Bacon & egg roll") — zero candidates, nothing to rank
+	// (kora#235). Removing a mandatory term can only ADD candidates, so recall
+	// is widened and no previously-matching row is lost. `searchNorm` below is
+	// deliberately left whole: scoring still sees the full phrase.
+	recallNorm := StripConnectors(norm)
+	// CookingMethod joins Qualifiers here for the same reason they are here:
+	// searchNorm feeds similarity(), which supplies BOTH the ranking signal and
+	// the ORDER BY that decides who survives resolveScanLimit. Leaving the
+	// method out meant a common food truncated by bare-word similarity alone —
+	// "beef" recalls 1,462 rows against a scan limit of 100, and every
+	// descriptive COOKED row sorted far below the short ones, so `Beef, roast,
+	// lean, baked or roasted, added fat` sat at similarity-rank 309 and never
+	// became a candidate at all. With the method included it lands at 26.
+	// No ranking change could have reached it (kora#467).
+	//
+	// Recall itself still uses the core text only — see the tsquery below:
+	// folding the method into plainto_tsquery would make it MANDATORY and
+	// return zero rows whenever the index words it differently.
+	searchNorm := Normalize(strings.TrimSpace(phrase + " " +
+		strings.Join(q.Qualifiers, " ") + " " + searchableMethod(q.CookingMethod)))
 	if searchNorm == "" {
 		searchNorm = norm
 	}
@@ -355,7 +505,7 @@ func (r Repository) ResolveQuery(ctx context.Context, userID uuid.UUID, q Query,
 		     -- since the Go ranker below sorts stably.
 		     ORDER BY similarity(fi.normalized_name, ?) DESC, fi.id
 		     -- searchNorm ranks (similarity), norm recalls (tsquery).
-		     LIMIT ?`, searchNorm, norm, searchNorm, resolveScanLimit).
+		     LIMIT ?`, searchNorm, recallNorm, searchNorm, resolveScanLimit).
 		Scan(&ftRows).Error; err != nil {
 		return nil, fmt.Errorf("nutrition: resolve fulltext: %w", err)
 	}
@@ -520,18 +670,25 @@ func (r Repository) ResolveQuery(ctx context.Context, userID uuid.UUID, q Query,
 		if brandNamed && wantBrand != "" && brandMatches(wantBrand, s.item.Brand) {
 			s.rankKey += brandMatchBonus
 		}
-		// Locale preference. Both sides must be known: an unknown user locale
-		// must not favour unknown-locale rows, which would quietly promote
-		// user estimates over reference data for every user whose timezone we
-		// do not map.
-		if q.Locale != LocaleUnknown && s.item.Locale == q.Locale {
+		// Locale preference; LocalePrefers holds the unknown-side and
+		// NZ→AU adjacency rules.
+		if LocalePrefers(q.Locale, s.item.Locale) {
 			s.rankKey += localeBonus
 		}
 		// Reward a row prepared the way the user said. Like every other signal
 		// here this only ever ADDS, so a raw row is never pushed below its own
 		// quality — it simply stops collecting a bonus the cooked row earns.
 		// That asymmetry matters: when no method is stated, nothing changes.
-		if method != "" && strings.Contains(Normalize(s.item.Name), method) {
+		// A row that states it is RAW is withheld from the bonus rather than
+		// penalised — every signal here only ever adds, so nothing may push a
+		// row below its own quality. Withholding is enough: the cooked row
+		// out-earns the raw one by exactly cookingMethodBonus (kora#467).
+		//
+		// Unless the stated method IS "raw", which identify really does emit
+		// (see the vegemite case in ranking.sample.jsonl). For that query the
+		// raw row is the correct answer and must still earn the bonus.
+		if method != "" && strings.Contains(Normalize(s.item.Name), method) &&
+			(method == "raw" || !statesRawPreparation(s.item.Name)) {
 			s.rankKey += cookingMethodBonus
 		}
 	}

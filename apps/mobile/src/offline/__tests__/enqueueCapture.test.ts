@@ -152,3 +152,9 @@ describe("enqueueBarcodeCapture (kora#241)", () => {
     await expect(enqueueBarcodeCapture("5000112637922")).rejects.toBeInstanceOf(NoOwnerError);
   });
 });
+
+it("preserves the scan time when network failure delays barcode queueing", async () => {
+  const capturedAt = "2026-10-11T01:00:00.000Z";
+  const row = await enqueueBarcodeCapture("5000112637922", "lunch", capturedAt);
+  expect(row.capturedAt).toBe(capturedAt);
+});

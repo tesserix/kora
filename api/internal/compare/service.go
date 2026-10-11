@@ -1,6 +1,6 @@
 // Package compare composes a user's habit metrics with those of their
 // sharing friends. The consent gate lives here: a friend's metrics are only
-// computed when their ShareProgress is true.
+// computed when the caller holds a resolved access.Grant for them.
 package compare
 
 import (
@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/tesserix/kora/api/internal/access"
 	"github.com/tesserix/kora/api/internal/progress"
 	"github.com/tesserix/kora/api/internal/social"
 	"github.com/tesserix/kora/api/internal/user"
@@ -46,22 +47,50 @@ type Result struct {
 }
 
 // Member is the minimal per-user input to the consent-gated leaderboard.
+// Whether a member's metrics are visible is decided entirely by the grants
+// map passed to ProgressForMembers/Compare -- it carries no consent flag of
+// its own.
 type Member struct {
-	ID            uuid.UUID
-	DisplayName   string
-	ShareProgress bool
-	TargetKcal    float64
+	ID          uuid.UUID
+	DisplayName string
+	TargetKcal  float64
+}
+
+// Friends lists the caller's accepted friends as candidate leaderboard
+// members. It does NOT decide who is visible -- callers resolve grants for
+// the returned IDs (via access.Service.ResolveMany) before calling Compare or
+// ProgressForMembers.
+func (s Service) Friends(ctx context.Context, userID uuid.UUID) ([]Member, error) {
+	rows, err := s.friends.ListAcceptedForCompare(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	members := make([]Member, 0, len(rows))
+	for _, row := range rows {
+		members = append(members, Member{ID: row.ID, DisplayName: row.DisplayName, TargetKcal: row.TargetKcal})
+	}
+	return members, nil
 }
 
 // ProgressForMembers is the single consent gate: a member's metrics are
-// computed ONLY when ShareProgress is true; otherwise the metric pointers
-// stay nil and serialize away (omitempty).
-func (s Service) ProgressForMembers(ctx context.Context, day time.Time, loc *time.Location, members []Member) ([]FriendProgress, error) {
+// computed ONLY when a resolved grant is present for them; otherwise the
+// metric pointers stay nil and serialize away (omitempty).
+//
+// The grant map comes from access.Service.ResolveMany -- one query for the
+// whole list, never one per member, because this path fans out over every
+// friend or group member (kora#326).
+func (s Service) ProgressForMembers(ctx context.Context, day time.Time, loc *time.Location,
+	members []Member, grants map[uuid.UUID]access.Grant) ([]FriendProgress, error) {
 	out := make([]FriendProgress, 0, len(members))
 	for _, m := range members {
-		fp := FriendProgress{ID: m.ID, DisplayName: m.DisplayName, Sharing: m.ShareProgress}
-		if m.ShareProgress {
-			metrics, err := progress.Compute(ctx, s.logs, m.ID, m.TargetKcal, day, loc)
+		g, shared := grants[m.ID]
+		fp := FriendProgress{ID: m.ID, DisplayName: m.DisplayName, Sharing: shared}
+		if shared {
+			// Query by the Grant's own owner, not by the caller-supplied
+			// member ID: an unforgeable Grant is only meaningful if the
+			// cross-user read is scoped to what it actually attests to
+			// (kora#326 whole-branch review, F3).
+			metrics, err := progress.Compute(ctx, s.logs, g.Owner(), m.TargetKcal, day, loc)
 			if err != nil {
 				return nil, err
 			}
@@ -74,7 +103,12 @@ func (s Service) ProgressForMembers(ctx context.Context, day time.Time, loc *tim
 	return out, nil
 }
 
-func (s Service) Compare(ctx context.Context, userID uuid.UUID, day time.Time, loc *time.Location) (Result, error) {
+// Compare composes the caller's own metrics with the gated metrics of the
+// given members. members and grants are supplied by the caller so the grant
+// resolution (one ResolveMany call, keyed by the same member IDs) happens
+// exactly once per request.
+func (s Service) Compare(ctx context.Context, userID uuid.UUID, day time.Time, loc *time.Location,
+	members []Member, grants map[uuid.UUID]access.Grant) (Result, error) {
 	me, err := s.users.ByID(ctx, userID)
 	if err != nil {
 		return Result{}, err
@@ -83,15 +117,7 @@ func (s Service) Compare(ctx context.Context, userID uuid.UUID, day time.Time, l
 	if err != nil {
 		return Result{}, err
 	}
-	rows, err := s.friends.ListAcceptedForCompare(ctx, userID)
-	if err != nil {
-		return Result{}, err
-	}
-	members := make([]Member, 0, len(rows))
-	for _, row := range rows {
-		members = append(members, Member{ID: row.ID, DisplayName: row.DisplayName, ShareProgress: row.ShareProgress, TargetKcal: row.TargetKcal})
-	}
-	friends, err := s.ProgressForMembers(ctx, day, loc, members)
+	friends, err := s.ProgressForMembers(ctx, day, loc, members, grants)
 	if err != nil {
 		return Result{}, err
 	}

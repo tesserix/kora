@@ -3,36 +3,45 @@ package providers
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 
 	"github.com/tesserix/kora/api/internal/ai"
+	"github.com/tesserix/kora/api/internal/aitrace"
+	"github.com/tesserix/kora/api/internal/auth"
+	"github.com/tesserix/kora/api/internal/user"
 )
 
 const (
 	gatewayCapabilityHeader  = "X-Kora-AI-Capability"
 	gatewayContextKindHeader = "X-Kora-AI-Context-Kind"
 	gatewayRTKAppliedHeader  = "X-Kora-RTK-Applied"
+	gatewayEndUserHeader     = "X-Kora-End-User-Token"
+	gatewayUserHeader        = "X-Kora-User-Id"
 )
 
 // AgentGatewayProvider routes every model capability through the private Agent
 // Gateway. The classification headers are constructed server-side and are
 // never copied from an inbound Kora request.
 type AgentGatewayProvider struct {
-	identify   OpenAIProvider
-	photo      OpenAIProvider
-	decompose  OpenAIProvider
-	embed      OpenAIProvider
-	transcribe OpenAIProvider
-	coach      OpenAIProvider
+	photoReview     bool
+	identify        OpenAIProvider
+	photo           OpenAIProvider
+	bodyComposition OpenAIProvider
+	decompose       OpenAIProvider
+	embed           OpenAIProvider
+	transcribe      OpenAIProvider
+	coach           OpenAIProvider
 }
 
 func NewAgentGatewayProvider(apiKey, baseURL, model string) AgentGatewayProvider {
 	classified := func(capability, contextKind string) OpenAIProvider {
-		return newOpenAIProvider(
+		provider := newOpenAIProvider(
 			apiKey,
 			baseURL,
 			model,
@@ -41,15 +50,37 @@ func NewAgentGatewayProvider(apiKey, baseURL, model string) AgentGatewayProvider
 			option.WithHeader(gatewayContextKindHeader, contextKind),
 			option.WithHeader(gatewayRTKAppliedHeader, "false"),
 		)
+		provider.options = gatewayRequestOptions
+		return provider
 	}
 	return AgentGatewayProvider{
-		identify:   classified("identify_text", "json_api"),
-		photo:      classified("identify_photo", "json_api"),
-		decompose:  classified("decompose", "json_api"),
-		embed:      classified("embedding", "embedding"),
-		transcribe: classified("transcribe", "audio"),
-		coach:      classified("coach", "conversation"),
+		identify: classified("identify_text", "json_api"),
+		photo:    classified("identify_photo", "json_api"),
+		// "identify_body_composition" is duplicated as a literal here rather
+		// than importing providers.callTypeIdentifyBodyComposition — this file
+		// already duplicates "identify_photo" etc. the same way, matching the
+		// existing convention of the classification header value equaling
+		// (but not being wired to) the call-type constant used elsewhere.
+		// context kind is "json_api", same as photo: still a single
+		// structured JSON response, not audio or embedding.
+		bodyComposition: classified("identify_body_composition", "json_api"),
+		decompose:       classified("decompose", "json_api"),
+		embed:           classified("embedding", "embedding"),
+		transcribe:      classified("transcribe", "audio"),
+		coach:           classified("coach", "conversation"),
 	}
+}
+
+func NewPhotoReviewProvider(key, baseURL, model string) AgentGatewayProvider {
+	p := NewAgentGatewayProvider(key, baseURL, model)
+	p.photoReview = true
+	p.photo = newOpenAIProvider(key, baseURL, model, false,
+		option.WithMaxRetries(0),
+		option.WithHeader(gatewayCapabilityHeader, "identify_photo_review"),
+		option.WithHeader(gatewayContextKindHeader, "json_api"),
+		option.WithHeader(gatewayRTKAppliedHeader, "false"))
+	p.photo.options = gatewayRequestOptions
+	return p
 }
 
 func (p AgentGatewayProvider) IdentifyText(ctx context.Context, phrase string) ([]ai.Guess, ai.Usage, error) {
@@ -59,7 +90,15 @@ func (p AgentGatewayProvider) IdentifyText(ctx context.Context, phrase string) (
 
 func (p AgentGatewayProvider) IdentifyPhoto(ctx context.Context, image []byte, mime string) ([]ai.Guess, ai.Usage, error) {
 	guesses, usage, err := p.photo.IdentifyPhoto(ctx, image, mime)
+	if err == nil && p.photoReview && usage.Model != independentReviewModel {
+		return nil, gatewayUsage(usage), errors.New("independent photo review model mismatch")
+	}
 	return guesses, gatewayUsage(usage), err
+}
+
+func (p AgentGatewayProvider) IdentifyBodyComposition(ctx context.Context, image []byte, mime string) (ai.BodyCompositionReading, ai.Usage, error) {
+	reading, usage, err := p.bodyComposition.IdentifyBodyComposition(ctx, image, mime)
+	return reading, gatewayUsage(usage), err
 }
 
 func (p AgentGatewayProvider) Decompose(ctx context.Context, dish string) ([]ai.IngredientGuess, ai.Usage, error) {
@@ -74,7 +113,7 @@ func (p AgentGatewayProvider) Embed(ctx context.Context, text string) ([]float32
 		Model:          p.embed.model,
 		Dimensions:     openai.Int(int64(embedOutputDimensionality)),
 		EncodingFormat: openai.EmbeddingNewParamsEncodingFormatFloat,
-	})
+	}, p.embed.requestOptions(ctx)...)
 	usage := ai.Usage{
 		Provider:  "agentgateway",
 		Model:     p.embed.model,
@@ -109,7 +148,7 @@ func (p AgentGatewayProvider) Transcribe(ctx context.Context, audio []byte, mime
 				openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{URL: dataURL}),
 			}),
 		},
-	})
+	}, p.transcribe.requestOptions(ctx)...)
 	usage := ai.Usage{
 		Provider:  "agentgateway",
 		Model:     p.transcribe.model,
@@ -127,6 +166,51 @@ func (p AgentGatewayProvider) Transcribe(ctx context.Context, audio []byte, mime
 		return "", usage, fmt.Errorf("agentgateway: transcribe: no choices in response")
 	}
 	return response.Choices[0].Message.Content, usage, nil
+}
+
+func delegatedUserOptions(ctx context.Context) []option.RequestOption {
+	token, ok := auth.VerifiedTokenFromContext(ctx)
+	if !ok {
+		return nil
+	}
+	return []option.RequestOption{option.WithHeader(gatewayEndUserHeader, "Bearer "+token)}
+}
+
+// userAttributionOptions stamps the acting user's Kora UUID so the platform
+// ledger can attribute cost per user (kora#508).
+//
+// The UUID and nothing else. The gateway does not need to know who someone is
+// to attribute what they spent, and a pseudonymous id keeps the telemetry
+// pipeline out of the personal-data path.
+//
+// Absence is a real case and stays legible: cmd/embed's backfill has no user
+// by construction, and sends no header rather than a zero UUID -- a
+// placeholder would make "no user made this call" indistinguishable from "we
+// failed to record who did".
+func userAttributionOptions(ctx context.Context) []option.RequestOption {
+	id, ok := user.IDFromRequestContext(ctx)
+	if !ok {
+		return nil
+	}
+	return []option.RequestOption{option.WithHeader(gatewayUserHeader, id.String())}
+}
+
+// gatewayRequestOptions composes every per-request option set applied to
+// AgentGatewayProvider's underlying OpenAIProvider.options. Composing here --
+// at the single point where every classified provider is constructed --
+// rather than threading a userID parameter through each call site, means a
+// new call type can't ship unattributed by omission (kora#508).
+func gatewayRequestOptions(ctx context.Context) []option.RequestOption {
+	options := append(delegatedUserOptions(ctx), userAttributionOptions(ctx)...)
+	options = append(options, option.WithHeader("X-Kora-AI-Service", "kora-api"))
+	header := make(http.Header)
+	aitrace.Inject(ctx, header)
+	for name, values := range header {
+		for _, value := range values {
+			options = append(options, option.WithHeader(name, value))
+		}
+	}
+	return options
 }
 
 func (p AgentGatewayProvider) GenerateText(ctx context.Context, systemPrompt, userPrompt string) (string, ai.Usage, error) {

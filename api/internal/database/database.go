@@ -12,6 +12,7 @@ import (
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 //go:embed migrations/*.sql
@@ -28,7 +29,7 @@ func Connect(url string) (*gorm.DB, error) {
 	var lastErr error
 	backoff := 500 * time.Millisecond
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		db, err := gorm.Open(postgres.Open(url), &gorm.Config{})
+		db, err := gorm.Open(postgres.Open(url), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 		if err == nil {
 			sqlDB, derr := db.DB()
 			if derr != nil {

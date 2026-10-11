@@ -20,9 +20,12 @@ const mockUseCoachNudges = jest.fn();
 // Home's pull-to-refresh calls refetch() on both queries; the per-test mock returns
 // below only carry `data`/`isError`, so the default is spread in underneath.
 const mockRefetch = jest.fn(async () => ({}));
+// Mutable so a single test (the avatar chip one, kora#449 task 15 finding 5)
+// can add avatar_url without touching every other test's fixture.
+let mockProfileData: Record<string, unknown> = { display_name: "Alex Stone", onboarded_at: "2026-07-01" };
 
 jest.mock("@/api/hooks", () => ({
-  useProfile: () => ({ data: { display_name: "Alex Stone", onboarded_at: "2026-07-01" } }),
+  useProfile: () => ({ data: mockProfileData }),
   useDashboard: (...args: unknown[]) => ({ refetch: mockRefetch, ...mockUseDashboard(...args) }),
   useDayLogs: (...args: unknown[]) => ({ refetch: mockRefetch, ...mockUseDayLogs(...args) }),
   useUnreadCount: () => ({ data: { count: 0 } }),
@@ -47,6 +50,7 @@ beforeEach(() => {
   mockUseDayLogs.mockReset();
   mockUseCoachNudges.mockReset().mockReturnValue({ data: { nudges: [], show_support: false } });
   mockPush.mockClear();
+  mockProfileData = { display_name: "Alex Stone", onboarded_at: "2026-07-01" };
 });
 
 test("coach remains reachable when there is no proactive nudge", async () => {
@@ -263,4 +267,22 @@ test("renders the light theme: app-background is the light instrument ground and
   expect(await findByTestId("gauge-dial")).toBeTruthy();
 
   schemeSpy.mockRestore();
+});
+
+// kora#449 task 15 finding 5: the header's own avatar chip never received a
+// `uri`, so a user who set a profile picture never saw it on the screen they
+// open the app to — only on Profile and in friend rows. It only needed the
+// existing profile.data?.avatar_url already in scope at this call site.
+test("the header avatar chip shows the profile picture when one is set", async () => {
+  mockProfileData = { display_name: "Alex Stone", onboarded_at: "2026-07-01", avatar_url: "https://assets.test/avatars/me/v1.jpg" };
+  mockUseDashboard.mockReturnValue({
+    data: { consumed: { kcal: 1252, protein_g: 96, carbs_g: 140, fat_g: 40 }, targets: { kcal: 2000, protein_g: 140, carbs_g: 220, fat_g: 70 }, water_ml: 1400, streak_days: 12 },
+    isError: false,
+  });
+  mockUseDayLogs.mockReturnValue({ data: [], isError: false });
+
+  const { findByLabelText } = await render(<Home />);
+  const avatarButton = await findByLabelText("Profile");
+  const image = avatarButton.queryAll((instance) => instance.type === "Image")[0];
+  expect(image.props.source).toEqual({ uri: "https://assets.test/avatars/me/v1.jpg" });
 });

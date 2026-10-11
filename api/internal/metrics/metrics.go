@@ -12,7 +12,9 @@
 // The registry is dedicated rather than prometheus.DefaultRegisterer, and the
 // Go/process collectors are deliberately NOT registered: scraping is done by
 // GCP Managed Prometheus, which bills per sample ingested, so the exported
-// surface is kept to the four series this product actually reasons about.
+// surface is kept to the handful of series this product actually reasons
+// about. agents.go carries the same guarantee for labels the registry
+// supplies rather than this binary.
 package metrics
 
 import (
@@ -38,6 +40,9 @@ type Collectors struct {
 	aiCostUSD *prometheus.CounterVec
 	aiLatency *prometheus.HistogramVec
 	foodLogs  *prometheus.CounterVec
+
+	agentRuns     *prometheus.CounterVec
+	agentResolves *prometheus.CounterVec
 
 	foodIndexItems    prometheus.Gauge
 	foodIndexEmbedded prometheus.Gauge
@@ -66,6 +71,14 @@ func New() *Collectors {
 			Name: "kora_food_logs_total",
 			Help: "Food logs created, by resolution source.",
 		}, []string{"source"}),
+		agentRuns: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "kora_agent_runs_total",
+			Help: "A2A agent runs through the Agent Gateway, by the registry skill that routed them. outcome=unrouted means no published agent declares the skill.",
+		}, []string{"agent", "skill", "outcome"}),
+		agentResolves: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "kora_agent_resolves_total",
+			Help: "Agent resolutions from the Agentic Registry. result=stale means the registry was unreachable and the last good composition was served instead — the agent path is up but no longer tracking published revisions.",
+		}, []string{"agent", "result"}),
 		foodIndexItems: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "kora_food_index_items",
 			Help: "Rows in food_items. A gauge, not a counter: refreshed from the database on a timer, so a restart re-reads truth rather than resetting to zero.",
@@ -80,8 +93,26 @@ func New() *Collectors {
 		}),
 	}
 	c.registry.MustRegister(c.aiCalls, c.aiCostUSD, c.aiLatency, c.foodLogs,
+		c.agentRuns, c.agentResolves,
 		c.foodIndexItems, c.foodIndexEmbedded, c.foodIndexMissing)
 	return c
+}
+
+// RecordAgentRun records one A2A run. agent is empty when no agent declared
+// the skill, which is exactly the case worth alerting on.
+func (c *Collectors) RecordAgentRun(agent, skill, outcome string) {
+	c.agentRuns.WithLabelValues(normalizeAgentLabel(agent), normalizeAgentLabel(skill), normalizeOutcome(outcome)).Inc()
+}
+
+// RecordAgentResolve records one registry resolution and how it was served.
+func (c *Collectors) RecordAgentResolve(agent, result string) {
+	c.agentResolves.WithLabelValues(normalizeAgentLabel(agent), normalizeResolveResult(result)).Inc()
+}
+
+// AgentRunsCounter exposes one labelled run counter for assertions in tests.
+// Not used by production code.
+func (c *Collectors) AgentRunsCounter(agent, skill, outcome string) prometheus.Counter {
+	return c.agentRuns.WithLabelValues(agent, skill, outcome)
 }
 
 // RecordAICall records one AI provider call. costUSD is the estimate already
@@ -158,6 +189,14 @@ func RecordAICall(callType, model, outcome string, costUSD float64, latency time
 
 // RecordFoodLog records one newly created food log on the default collectors.
 func RecordFoodLog(source string) { defaultCollectors.RecordFoodLog(source) }
+
+// RecordAgentRun records one A2A run on the default collectors.
+func RecordAgentRun(agent, skill, outcome string) {
+	defaultCollectors.RecordAgentRun(agent, skill, outcome)
+}
+
+// RecordAgentResolve records one registry resolution on the default collectors.
+func RecordAgentResolve(agent, result string) { defaultCollectors.RecordAgentResolve(agent, result) }
 
 // SetFoodIndex publishes the food-index gauges on the default collectors.
 func SetFoodIndex(total, embedded int64) { defaultCollectors.SetFoodIndex(total, embedded) }

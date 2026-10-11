@@ -3,6 +3,7 @@ package coach
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -27,6 +28,9 @@ type fakeProvider struct {
 	text      string
 	textUsage ai.Usage
 	textErr   error
+	// Fails only once the classifier has had its answer, so a test can route
+	// a message and still starve the generation that follows it.
+	textErrAfter int
 
 	calls int
 }
@@ -37,6 +41,10 @@ func (f *fakeProvider) IdentifyText(ctx context.Context, phrase string) ([]ai.Gu
 
 func (f *fakeProvider) IdentifyPhoto(ctx context.Context, image []byte, mime string) ([]ai.Guess, ai.Usage, error) {
 	return nil, ai.Usage{}, nil
+}
+
+func (f *fakeProvider) IdentifyBodyComposition(ctx context.Context, image []byte, mime string) (ai.BodyCompositionReading, ai.Usage, error) {
+	return ai.BodyCompositionReading{}, ai.Usage{}, nil
 }
 
 func (f *fakeProvider) Decompose(ctx context.Context, dish string) ([]ai.IngredientGuess, ai.Usage, error) {
@@ -53,6 +61,9 @@ func (f *fakeProvider) Transcribe(ctx context.Context, audio []byte, mime string
 
 func (f *fakeProvider) GenerateText(ctx context.Context, systemPrompt, userPrompt string) (string, ai.Usage, error) {
 	f.calls++
+	if f.textErrAfter > 0 && f.calls > f.textErrAfter {
+		return "", ai.Usage{}, errors.New("provider unavailable")
+	}
 	return f.text, f.textUsage, f.textErr
 }
 
@@ -70,6 +81,10 @@ func (e *errorProvider) IdentifyText(ctx context.Context, phrase string) ([]ai.G
 
 func (e *errorProvider) IdentifyPhoto(ctx context.Context, image []byte, mime string) ([]ai.Guess, ai.Usage, error) {
 	return nil, ai.Usage{}, nil
+}
+
+func (e *errorProvider) IdentifyBodyComposition(ctx context.Context, image []byte, mime string) (ai.BodyCompositionReading, ai.Usage, error) {
+	return ai.BodyCompositionReading{}, ai.Usage{}, nil
 }
 
 func (e *errorProvider) Decompose(ctx context.Context, dish string) ([]ai.IngredientGuess, ai.Usage, error) {
@@ -107,6 +122,10 @@ func (r *recordingProvider) IdentifyText(ctx context.Context, phrase string) ([]
 
 func (r *recordingProvider) IdentifyPhoto(ctx context.Context, image []byte, mime string) ([]ai.Guess, ai.Usage, error) {
 	return nil, ai.Usage{}, nil
+}
+
+func (r *recordingProvider) IdentifyBodyComposition(ctx context.Context, image []byte, mime string) (ai.BodyCompositionReading, ai.Usage, error) {
+	return ai.BodyCompositionReading{}, ai.Usage{}, nil
 }
 
 func (r *recordingProvider) Decompose(ctx context.Context, dish string) ([]ai.IngredientGuess, ai.Usage, error) {
@@ -157,6 +176,28 @@ func (m *stubMeter) WithinBudget(ctx context.Context, userID uuid.UUID) (bool, e
 
 var _ ai.Meter = (*stubMeter)(nil)
 
+type stubNutritionReferences struct {
+	items    []NutritionReference
+	usage    ai.Usage
+	err      error
+	query    string
+	locale   nutrition.Locale
+	excluded []string
+}
+
+func (s *stubNutritionReferences) Search(
+	_ context.Context,
+	query string,
+	locale nutrition.Locale,
+	_ int,
+	excludedTags []string,
+) ([]NutritionReference, ai.Usage, error) {
+	s.query = query
+	s.locale = locale
+	s.excluded = excludedTags
+	return s.items, s.usage, s.err
+}
+
 func TestAsk_GroundedAnswerReturnsCitations(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db, 2000, 120)
@@ -167,7 +208,7 @@ func TestAsk_GroundedAnswerReturnsCitations(t *testing.T) {
 	g := NewGrounder(dashSvc, logRepo, memSvc, fakeWeightSource{})
 
 	provider := &fakeProvider{
-		text:      "You have 55g protein to go.",
+		text:      "Your protein target is 120g. [cite:today_protein_g_target]",
 		textUsage: ai.Usage{Provider: "stub", Model: "test-model", CallType: "generate_text"},
 	}
 	meter := &stubMeter{withinBudget: true}
@@ -177,10 +218,109 @@ func TestAsk_GroundedAnswerReturnsCitations(t *testing.T) {
 	a, err := svc.Ask(context.Background(), userID, now, time.UTC, "how's my protein?")
 
 	require.NoError(t, err)
-	require.NotEmpty(t, a.Text)
-	require.NotEmpty(t, a.Citations)
+	require.Equal(t, "Your protein target is 120g.", a.Text)
+	require.Equal(t, []Fact{{Label: "today_protein_g_target", Value: "120"}}, a.Citations)
 	require.Equal(t, 1, provider.calls, "provider must be called when within budget")
 	require.Len(t, meter.records, 1, "usage must be recorded")
+}
+
+func TestAskDropsUnknownCitationMarkers(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	logRepo := foodlog.NewRepository(db)
+	g := NewGrounder(
+		dashboard.NewService(logRepo, tracking.NewRepository(db), db),
+		logRepo,
+		memory.NewService(logRepo),
+		fakeWeightSource{},
+	)
+	svc := NewService(
+		&g,
+		&fakeProvider{text: "This claim has no supplied evidence. [cite:not_a_real_fact]"},
+		&stubMeter{withinBudget: true},
+		nil,
+	)
+
+	answer, err := svc.Ask(t.Context(), userID, time.Now().UTC(), time.UTC, "Tell me something")
+
+	require.NoError(t, err)
+	require.Equal(t, "This claim has no supplied evidence.", answer.Text)
+	require.Empty(t, answer.Citations)
+}
+
+func TestAskRetrievesCountryNutritionEvidenceForTheAgentAndResponse(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	logRepo := foodlog.NewRepository(db)
+	g := NewGrounder(
+		dashboard.NewService(logRepo, tracking.NewRepository(db), db),
+		logRepo,
+		memory.NewService(logRepo),
+		fakeWeightSource{},
+	)
+
+	provider := &recordingProvider{answer: "Choose lentils for a protein-rich lunch. [cite:reference_food_1]"}
+	meter := &stubMeter{withinBudget: true}
+	references := &stubNutritionReferences{
+		items: []NutritionReference{
+			{
+				Name: "Lentil, whole, dried", Provenance: nutrition.ProvenanceIFCT,
+				Locale: nutrition.LocaleIN, KcalPer100g: 352, ProteinPer100g: 24.4,
+				CarbsPer100g: 60.3, FatPer100g: 1.3, FiberPer100g: 10.7,
+			},
+			{
+				Name: "Chickpea, dried", Provenance: nutrition.ProvenanceIFCT,
+				Locale: nutrition.LocaleIN, KcalPer100g: 360, ProteinPer100g: 19.3,
+				CarbsPer100g: 60.7, FatPer100g: 6, FiberPer100g: 17.4,
+			},
+		},
+		usage: ai.Usage{Provider: "agentgateway", Model: "kora-auto", CallType: "embed"},
+	}
+	svc := NewService(&g, provider, meter, nil).WithNutritionReferences(references)
+	loc, err := time.LoadLocation("Asia/Kolkata")
+	require.NoError(t, err)
+
+	answer, err := svc.Ask(
+		t.Context(), userID, time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC), loc,
+		"What is a local high-protein lunch option?",
+	)
+	require.NoError(t, err)
+
+	require.Equal(t, "What is a local high-protein lunch option?", references.query)
+	require.Equal(t, nutrition.LocaleIN, references.locale)
+	require.Contains(t, provider.userPrompt, "Reviewed nutrition reference facts")
+	require.Contains(t, provider.userPrompt, `"Lentil, whole, dried" [ifct, "IN"]`)
+	require.Contains(t, provider.userPrompt, "protein 24.4g per 100g")
+	require.NotContains(t, answer.Text, "[cite:")
+	require.Equal(t, []Fact{{
+		Label: "reference_food_1",
+		Value: "Lentil, whole, dried | ifct | IN | 352 kcal, 24.4g protein, 60.3g carbs, 1.3g fat, 10.7g fibre per 100g",
+	}}, answer.Citations, "only evidence cited in the response may be returned to the app")
+	require.Len(t, meter.records, 2, "retrieval embedding and answer generation must both be metered")
+}
+
+func TestAskUsesUnknownNutritionLocaleWhenTimezoneIsNil(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	logRepo := foodlog.NewRepository(db)
+	g := NewGrounder(
+		dashboard.NewService(logRepo, tracking.NewRepository(db), db),
+		logRepo,
+		memory.NewService(logRepo),
+		fakeWeightSource{},
+	)
+	references := &stubNutritionReferences{}
+	svc := NewService(&g, &fakeProvider{text: "I don't have a matching reference."}, &stubMeter{withinBudget: true}, nil).
+		WithNutritionReferences(references)
+
+	_, err := svc.Ask(t.Context(), userID, time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC), nil, "What should I eat?")
+
+	require.NoError(t, err)
+	require.Equal(t, nutrition.LocaleUnknown, references.locale)
+}
+
+func TestNewNutritionReferenceSourceIsNilWithoutAnEmbeddingProvider(t *testing.T) {
+	require.Nil(t, NewNutritionReferenceSource(nutrition.Repository{}, nil))
 }
 
 // A successful GenerateText call that leaves Usage.Outcome unset (exactly
@@ -662,7 +802,12 @@ func TestServiceAsk_PersistsExchange(t *testing.T) {
 	g := NewGrounder(dashSvc, logRepo, memSvc, trackRepo)
 	threadRepo := NewThreadRepository(db)
 
-	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, &threadRepo)
+	svc := NewService(
+		&g,
+		&fakeProvider{text: "Your protein target is 120g. [cite:today_protein_g_target]"},
+		&stubMeter{withinBudget: true},
+		&threadRepo,
+	)
 
 	_, err := svc.Ask(context.Background(), userID, time.Now().UTC(), time.UTC, "what should I eat?")
 	require.NoError(t, err)
@@ -720,14 +865,18 @@ func TestServiceAsk_DoesNotPersistWhenNoProvider(t *testing.T) {
 }
 
 // TestServiceAsk_PriorTurnsNeverEnterThePrompt is the single most important
-// guard in this PR: persisting the thread for replay must never change what
-// the model sees. A prior exchange with a distinctive marker is stored, then
-// Ask is called for a new question — the marker must never appear in the
-// prompt passed to the provider. This must pass on first run: Task 3 wired
-// storage and replay only, it never touched prompt construction. If this
-// test ever fails, prompt construction was changed and must be reverted —
-// this test is the guard, never a target to satisfy by editing the assertion.
-func TestServiceAsk_PriorTurnsNeverEnterThePrompt(t *testing.T) {
+// guard that asserted the exact opposite — that a stored turn could never
+// reach the prompt. That guard was scope discipline for the PR which added
+// thread storage: it wired "storage and replay only" and proved it changed
+// nothing about prompt construction. It was not a privacy or safety
+// invariant, and no other test or comment treats it as one.
+//
+// It is reversed deliberately here. A coach that cannot see its own last turn
+// cannot ask a clarifying question and then read the answer to it, which is
+// the whole of a planning conversation. What must still hold is that the
+// history is the user's OWN thread and that it stays bounded — both asserted
+// below and in TestServiceAsk_HistoryIsBounded.
+func TestServiceAsk_PriorTurnsEnterThePromptAsHistory(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db, 2000, 120)
 
@@ -740,7 +889,7 @@ func TestServiceAsk_PriorTurnsNeverEnterThePrompt(t *testing.T) {
 
 	// A prior exchange with a distinctive marker already in the thread.
 	require.NoError(t, threadRepo.AppendExchange(context.Background(), userID,
-		"UNIQUEPRIORQUESTION", "UNIQUEPRIORANSWER", nil))
+		"UNIQUEPRIORQUESTION", "UNIQUEPRIORANSWER", nil, Attachments{}))
 
 	rec := &recordingProvider{}
 	svc := NewService(&g, rec, &stubMeter{withinBudget: true}, &threadRepo)
@@ -748,11 +897,68 @@ func TestServiceAsk_PriorTurnsNeverEnterThePrompt(t *testing.T) {
 	_, err := svc.Ask(context.Background(), userID, time.Now().UTC(), time.UTC, "today's question")
 	require.NoError(t, err)
 
-	require.NotContains(t, rec.userPrompt, "UNIQUEPRIORQUESTION",
-		"store+replay only: a prior turn must never reach the prompt")
-	require.NotContains(t, rec.userPrompt, "UNIQUEPRIORANSWER",
-		"store+replay only: a prior answer must never reach the prompt")
+	require.Contains(t, rec.userPrompt, "UNIQUEPRIORQUESTION",
+		"the coach must see the user's own prior turn to hold a conversation")
+	require.Contains(t, rec.userPrompt, "UNIQUEPRIORANSWER",
+		"and its own prior answer, or it re-asks what it already asked")
+	require.Contains(t, rec.userPrompt, "CONVERSATION SO FAR:")
 	require.Contains(t, rec.userPrompt, "today's question")
+}
+
+// One user's conversation must never ground another's answer. This is the
+// invariant that actually matters now that history reaches the prompt, and it
+// is the one the reversed guard above never covered.
+func TestServiceAsk_HistoryIsScopedToTheAskingUser(t *testing.T) {
+	db := testDB(t)
+	mine := seedUser(t, db, 2000, 120)
+	theirs := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	trackRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackRepo, db)
+	g := NewGrounder(dashSvc, logRepo, memory.NewService(logRepo), trackRepo)
+	threadRepo := NewThreadRepository(db)
+
+	require.NoError(t, threadRepo.AppendExchange(context.Background(), theirs,
+		"SOMEONEELSESQUESTION", "SOMEONEELSESANSWER", nil, Attachments{}))
+
+	rec := &recordingProvider{}
+	svc := NewService(&g, rec, &stubMeter{withinBudget: true}, &threadRepo)
+
+	_, err := svc.Ask(context.Background(), mine, time.Now().UTC(), time.UTC, "my question")
+	require.NoError(t, err)
+
+	require.NotContains(t, rec.userPrompt, "SOMEONEELSESQUESTION")
+	require.NotContains(t, rec.userPrompt, "SOMEONEELSESANSWER")
+}
+
+// History is bounded so a long thread cannot crowd out the grounded CONTEXT
+// or grow the call without limit.
+func TestServiceAsk_HistoryIsBounded(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+
+	logRepo := foodlog.NewRepository(db)
+	trackRepo := tracking.NewRepository(db)
+	dashSvc := dashboard.NewService(logRepo, trackRepo, db)
+	g := NewGrounder(dashSvc, logRepo, memory.NewService(logRepo), trackRepo)
+	threadRepo := NewThreadRepository(db)
+
+	// Comfortably more exchanges than historyTurns can carry.
+	for i := 0; i < historyTurns; i++ {
+		require.NoError(t, threadRepo.AppendExchange(context.Background(), userID,
+			fmt.Sprintf("QUESTION%02d", i), fmt.Sprintf("ANSWER%02d", i), nil, Attachments{}))
+	}
+
+	rec := &recordingProvider{}
+	svc := NewService(&g, rec, &stubMeter{withinBudget: true}, &threadRepo)
+
+	_, err := svc.Ask(context.Background(), userID, time.Now().UTC(), time.UTC, "latest question")
+	require.NoError(t, err)
+
+	// The oldest exchange has fallen out of the window; the newest is still in.
+	require.NotContains(t, rec.userPrompt, "QUESTION00")
+	require.Contains(t, rec.userPrompt, fmt.Sprintf("ANSWER%02d", historyTurns-1))
 }
 
 // TestServiceThread_NilThreadRepositoryReturnsEmptyTurns proves nil-tolerance
@@ -853,7 +1059,7 @@ func TestServiceThread_ShowSupportReflectsLiveSignalsNotStoredState(t *testing.T
 
 	// Store an exchange while the user is still at-risk.
 	require.NoError(t, threadRepo.AppendExchange(context.Background(), userID,
-		"how am I doing?", "an answer", nil))
+		"how am I doing?", "an answer", nil, Attachments{}))
 
 	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, &threadRepo)
 
@@ -892,7 +1098,7 @@ func TestServiceThread_ReplayedRestrictiveTurnSuppressedForAtRiskUser(t *testing
 
 	const restrictiveRaw = "You've eaten enough today — try to cut back tomorrow."
 	require.NoError(t, threadRepo.AppendExchange(context.Background(), userID,
-		"how am I doing?", restrictiveRaw, nil))
+		"how am I doing?", restrictiveRaw, nil, Attachments{}))
 
 	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, &threadRepo)
 	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
@@ -930,7 +1136,7 @@ func TestServiceThread_ReplayedBenignTurnUnchanged(t *testing.T) {
 
 	const supportiveRaw = "You have 55g protein to go — a yoghurt would help."
 	require.NoError(t, threadRepo.AppendExchange(context.Background(), userID,
-		"how's my protein?", supportiveRaw, nil))
+		"how's my protein?", supportiveRaw, nil, Attachments{}))
 
 	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, &threadRepo)
 	now := time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC)
@@ -976,7 +1182,7 @@ func TestServiceThread_UserTurnsNeverRewritten(t *testing.T) {
 	const userQuestion = "should I eat less?"
 	const restrictiveRaw = "You've eaten enough today — try to cut back tomorrow."
 	require.NoError(t, threadRepo.AppendExchange(context.Background(), userID,
-		userQuestion, restrictiveRaw, nil))
+		userQuestion, restrictiveRaw, nil, Attachments{}))
 
 	svc := NewService(&g, &fakeProvider{}, &stubMeter{withinBudget: true}, &threadRepo)
 

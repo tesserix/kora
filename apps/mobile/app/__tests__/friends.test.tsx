@@ -1,26 +1,50 @@
 import { render, fireEvent } from "@testing-library/react-native";
 import { Alert } from "react-native";
+import type { TestInstance } from "test-renderer";
 
 import Friends from "../friends";
+
+// This repo's testing-library build has no UNSAFE_getByType/UNSAFE_queryAllByType
+// (see Avatar.test.tsx) -- component-type queries go through queryAll instead.
+function queryImages(container: TestInstance): TestInstance[] {
+  return container.queryAll((instance) => instance.type === "Image");
+}
+
+// The real "@/lib/api" pulls in firebase/auth (real ESM), which Jest cannot
+// parse unmocked. Friends renders AddFriendSheet, which imports it directly
+// (not through @/api/hooks, mocked below) -- same reasoning and shape as
+// AddFriendSheet.test.tsx's own mock and social.test.tsx's.
+jest.mock("@/lib/api", () => ({
+  ApiError: class ApiError extends Error {
+    status: number;
+    code: string;
+    requestId?: string;
+    constructor(status: number, code: string, message: string, requestId?: string) {
+      super(message);
+      this.status = status;
+      this.code = code;
+      this.requestId = requestId;
+      this.name = "ApiError";
+    }
+  },
+}));
 
 const mockAcceptMutate = jest.fn();
 const mockDeclineMutate = jest.fn();
 const mockUnfriendMutate = jest.fn();
-const mockSetShareMutate = jest.fn();
 const mockShow = jest.fn();
 
 jest.mock("expo-router", () => ({ router: { back: jest.fn() } }));
 jest.mock("@/components/Toast", () => ({ useToast: () => ({ show: mockShow }) }));
 jest.mock("@/api/hooks", () => ({
-  useFriends: () => ({ data: [{ id: "u1", display_name: "Ada" }] }),
+  useFriends: () => ({ data: [{ id: "u1", display_name: "Ada", avatar_url: "https://assets.test/ada.jpg" }] }),
   useFriendRequests: () => ({ data: { incoming: [{ id: "r1", user: { id: "u2", display_name: "Ben" } }], outgoing: [] } }),
   useAcceptRequest: () => ({ mutate: mockAcceptMutate, isPending: false }),
   useDeclineRequest: () => ({ mutate: mockDeclineMutate, isPending: false }),
   useUnfriend: () => ({ mutate: mockUnfriendMutate, isPending: false }),
   useSendFriendRequest: () => ({ mutate: jest.fn(), isPending: false }),
+  useLookupHandle: () => ({ mutate: jest.fn(), isPending: false }),
   useMyFriendCode: () => ({ data: { code: "ABC123XY", link: "mobile://friend/ABC123XY" } }),
-  useProfile: () => ({ data: { share_progress: false } }),
-  useSetShareProgress: () => ({ mutate: mockSetShareMutate, isPending: false }),
   useFriendsProgress: () => ({ data: { me: { streak_days: 2, adherence_days: 1, adherence_window: 7 }, friends: [] } }),
 }));
 
@@ -28,7 +52,6 @@ beforeEach(() => {
   mockAcceptMutate.mockClear();
   mockDeclineMutate.mockClear();
   mockUnfriendMutate.mockClear();
-  mockSetShareMutate.mockClear();
   mockShow.mockClear();
 });
 
@@ -46,12 +69,6 @@ test("renders friends and incoming requests; Accept calls the hook with the requ
   expect(getByText("Ben")).toBeTruthy();
   await fireEvent.press(getByLabelText("Accept request from Ben"));
   expect(mockAcceptMutate).toHaveBeenCalledWith("r1", withOnError);
-});
-
-test("toggling Share my progress calls useSetShareProgress with the new value", async () => {
-  const { getByLabelText } = await render(<Friends />);
-  await fireEvent(getByLabelText("Share my progress"), "valueChange", true);
-  expect(mockSetShareMutate).toHaveBeenCalledWith(true, withOnError);
 });
 
 test("a failed Accept tells the user why", async () => {
@@ -87,9 +104,28 @@ test("a failed Remove-friend tells the user why", async () => {
   alert.mockRestore();
 });
 
-test("a failed Share-progress toggle tells the user why", async () => {
+
+// kora#446: the accept/decline circles are 32pt by design. hitSlop is what
+// takes the TARGET to the 44pt iOS minimum, and it is load-bearing rather
+// than cosmetic — these two controls sit adjacent with asymmetric
+// consequences, since a mis-tap declines a friend request with no undo.
+// kora#454: `uri` was not wired at this Avatar site, even though
+// Friend.avatar_url has existed since kora#449.
+test("a friend's picture is passed through to their Avatar", async () => {
+  const { container } = await render(<Friends />);
+  const images = queryImages(container);
+  expect(images.map((i) => i.props.source)).toContainEqual({ uri: "https://assets.test/ada.jpg" });
+});
+
+test("accept and decline meet the 44pt touch target via hitSlop", async () => {
   const { getByLabelText } = await render(<Friends />);
-  await fireEvent(getByLabelText("Share my progress"), "valueChange", true);
-  mockSetShareMutate.mock.calls[0][1].onError(OFFLINE);
-  expect(mockShow).toHaveBeenCalledWith({ message: OFFLINE_COPY });
+  for (const label of ["Accept request from Ben", "Decline request from Ben"]) {
+    const props = getByLabelText(label).props;
+    const slop = props.hitSlop;
+    expect(slop).toBeTruthy();
+    const width = 32 + slop.left + slop.right;
+    const height = 32 + slop.top + slop.bottom;
+    expect(width).toBeGreaterThanOrEqual(44);
+    expect(height).toBeGreaterThanOrEqual(44);
+  }
 });

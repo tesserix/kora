@@ -29,7 +29,7 @@ func (h Handler) resolveUser(c *gin.Context) (uuid.UUID, bool) {
 func mapErr(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, ErrBadInput):
-		httpx.Error(c, http.StatusBadRequest, "invalid_input", "provide exactly one of email or code")
+		httpx.Error(c, http.StatusBadRequest, "invalid_input", "provide exactly one of email, code or handle")
 	case errors.Is(err, ErrUserNotFound):
 		httpx.Error(c, http.StatusNotFound, "not_found", "no Kora account matches that email or code")
 	case errors.Is(err, ErrSelfFriend):
@@ -70,8 +70,9 @@ func (h Handler) ListRequests(c *gin.Context) {
 }
 
 type sendRequestBody struct {
-	Email string `json:"email"`
-	Code  string `json:"code"`
+	Email  string `json:"email"`
+	Code   string `json:"code"`
+	Handle string `json:"handle"`
 }
 
 func (h Handler) SendRequest(c *gin.Context) {
@@ -84,7 +85,7 @@ func (h Handler) SendRequest(c *gin.Context) {
 		httpx.Error(c, http.StatusBadRequest, "invalid_input", "malformed body")
 		return
 	}
-	f, err := h.svc.SendRequest(c.Request.Context(), uid, req.Email, req.Code)
+	f, err := h.svc.SendRequest(c.Request.Context(), uid, req.Email, req.Code, req.Handle)
 	if err != nil {
 		mapErr(c, err)
 		return

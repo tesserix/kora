@@ -12,11 +12,38 @@ const mockSeries = jest.fn();
 const mockAvgIntake7d = jest.fn();
 const mockProfile = jest.fn();
 jest.mock("@/api/hooks", () => ({
-  useDashboard: () => ({ data: { streak_days: 3 } }),
+  // targets.kcal is load-bearing for the energy panel: "Energy vs budget"
+  // cannot draw a bar without a budget to scale it against, so with no target
+  // every day renders as an empty slot rather than a misleading zero bar.
+  useDashboard: () => ({ data: { streak_days: 3, targets: { kcal: 2000 } } }),
   useProfile: () => mockProfile(),
   useWeightSeries: (range: string) => mockSeries(range),
+  // kora#45 (task 7): Progress now fits a weekly rate alongside the chart.
+  // No test in this file exercises the sentence itself — that lives in
+  // progress-composition.test.tsx — so a bare "no rate" stub keeps this
+  // file's render tree happy without a second mocking style.
+  useWeightTrend: () => ({ data: undefined, isSuccess: false }),
   useAddWeight: () => ({ mutate: jest.fn(), isPending: false }),
   useAvgIntake7d: () => mockAvgIntake7d(),
+  // kora#314 PR C: Progress now mounts LogWeightSheet (Screenshot mode), which
+  // calls this. Not exercised by any test in this file — a bare stub keeps
+  // Progress's render tree happy.
+  useReadBodyComposition: () => ({ mutate: jest.fn(), isPending: false }),
+}));
+
+// LogWeightSheet (kora#314 PR C, mounted unconditionally by
+// Progress) imports ApiError from "@/lib/api" directly, same as
+// RecipeParseSheet does — and "@/lib/api" pulls in real firebase/auth ESM,
+// which Jest cannot parse unmocked. Only ApiError is needed here.
+jest.mock("@/lib/api", () => ({
+  ApiError: class ApiError extends Error {
+    status: number;
+    constructor(status: number, code: string, message: string) {
+      super(message);
+      this.status = status;
+      this.name = "ApiError";
+    }
+  },
 }));
 
 const mockUseUnits = jest.fn();
@@ -31,12 +58,15 @@ jest.mock("@/units", () => ({
 // path test below.
 const mockUseHealth = jest.fn();
 jest.mock("@/health", () => ({
+  // kora#406: the factory replaces the WHOLE module, so anything the screen
+  // imports must be listed here or it arrives undefined at render.
+  shouldOfferConnect: (status: string) => status !== "authorized",
   useHealth: () => mockUseHealth(),
 }));
 
 beforeEach(() => {
   mockProfile.mockReturnValue({ data: { weight_kg: 80 } });
-  mockAvgIntake7d.mockReturnValue({ avg: null, series: [], isLoading: false });
+  mockAvgIntake7d.mockReturnValue({ avg: null, series: [], days: [], isLoading: false, isError: false, refetch: jest.fn() });
   mockUseHealth.mockReturnValue({ status: "unavailable", steps: null, sleep: null, connect: jest.fn() });
   mockUseUnits.mockReturnValue({ system: "metric", setSystem: jest.fn() });
 });
@@ -62,14 +92,86 @@ test("shows real current weight when entries exist", async () => {
   // labeled for what the data actually is.
   expect(getByText("Logging streak")).toBeTruthy();
   expect(getByText("3/7 days")).toBeTruthy(); // mocked streak_days: 3
-  expect(getByText("Avg sleep")).toBeTruthy();
+  expect(getByText("Last night")).toBeTruthy();
 });
 
-test("seeds current weight from profile when the range is empty", async () => {
+// The card used to fall back to the profile's own weight for the hero figure
+// when there were no weigh-ins yet — which meant a user with zero weigh-ins
+// saw "70.0 kg" as the hero AND "No weigh-ins yet" directly below it,
+// contradicting itself. The hero now means one thing for every metric: the
+// latest REAL reading, so an empty series shows no figure at all.
+test("shows no hero figure — not the profile's weight — when there are no weigh-ins", async () => {
   mockSeries.mockReturnValue({ data: [] });
-  const { getByText } = await render(<Progress />);
-  expect(getByText("80.0")).toBeTruthy();            // profile.weight_kg seed
-  expect(getByText(/Log your weight/i)).toBeTruthy(); // hint, no chart — the >=2 points guard
+  mockProfile.mockReturnValue({ data: { weight_kg: 80 } });
+  const { getAllByText, queryByText } = await render(<Progress />);
+  expect(queryByText("80.0")).toBeNull();
+  // The 34pt hero figure is the only "—" at that size — the Energy panel's
+  // unlabeled day cells (see below) render their own "—" glyphs too, so a
+  // plain getByText("—") would match more than one node.
+  const heroPlaceholder = getAllByText("—")
+    .map((n) => StyleSheet.flatten(n.props.style))
+    .find((s) => s?.fontSize === 34);
+  expect(heroPlaceholder).toBeTruthy();
+});
+
+// The common new-user state now that onboarding always writes a first
+// weigh-in: one real reading, no trend yet (hasChart needs 2+ points). The
+// hero figure shows the real number and a single quiet line replaces the
+// chart — no icon, and no big EmptyState block.
+test("shows the hero figure and a quiet trend hint for exactly one reading", async () => {
+  mockSeries.mockReturnValue({ data: [
+    { id: "1", weight_kg: 71.9, logged_at: "2026-07-23T08:00:00Z" },
+  ] });
+  const { getByText, queryByText } = await render(<Progress />);
+  expect(getByText("71.9")).toBeTruthy();
+  expect(getByText(/once more to see a trend/i)).toBeTruthy();
+  expect(queryByText("No weigh-ins yet")).toBeNull();
+});
+
+// Regression: with one reading the card briefly had NO visible way to log.
+// The hero figure was the only affordance and nothing says a number is
+// pressable, so a second weigh-in was undiscoverable. The button must be
+// present in every state that does not already offer its own CTA.
+test("offers a visible Log weight button once there is any reading", async () => {
+  mockSeries.mockReturnValue({ data: [
+    { id: "1", weight_kg: 71.9, logged_at: "2026-07-23T08:00:00Z" },
+  ] });
+  const { getByText, findByText } = await render(<Progress />);
+  fireEvent.press(getByText("Log weight"));
+  expect(await findByText("Save")).toBeTruthy();
+});
+
+// The error branch keeps Retry as its action: offering "log a weigh-in" when
+// we could not read the ones that may already exist is the wrong invitation.
+test("offers no Log weight button when the series failed to load", async () => {
+  mockSeries.mockReturnValue({ data: undefined, isError: true });
+  const { queryByText } = await render(<Progress />);
+  expect(queryByText("Log weight")).toBeNull();
+});
+
+// Regression: switching 1W/1M/3M/1Y flashed "No weigh-ins yet". Each range is
+// its own query key, so an uncached one had no data until it landed and the
+// card claimed the user had no weigh-ins on the way to showing that they do.
+// The hook keeps the previous range's data now; this pins the other half —
+// a genuine first load must not render the empty state either.
+test("does not claim there are no weigh-ins while the first load is still pending", async () => {
+  mockSeries.mockReturnValue({ data: undefined, isPending: true });
+  const { queryByText } = await render(<Progress />);
+  expect(queryByText("No weigh-ins yet")).toBeNull();
+  expect(queryByText("Log your weight to see your trend.")).toBeNull();
+});
+
+// A row of empty bars is a CLAIM about what was eaten. When every day failed
+// to load, the panel must say so rather than draw seven days of nothing —
+// the same rule the streak panel beside it already states in its own comment.
+test("says the energy history could not be loaded rather than drawing an empty week", async () => {
+  mockSeries.mockReturnValue({ data: [] });
+  mockAvgIntake7d.mockReturnValue({
+    avg: null, series: [], days: [], isLoading: false, isError: true, refetch: jest.fn(),
+  });
+  const { getByText, queryByTestId } = await render(<Progress />);
+  expect(getByText("Couldn't load your energy history.")).toBeTruthy();
+  expect(queryByTestId("ebar-target")).toBeNull();
 });
 
 test("shows the no-weigh-ins empty state and opens the weight-log sheet from its CTA", async () => {
@@ -106,7 +208,7 @@ test("never renders the old fabricated metrics", async () => {
   expect(queryByText("7.1")).toBeNull();
 });
 
-test("offers Connect Apple Health for the Avg sleep panel", async () => {
+test("offers Connect Apple Health for the sleep panel", async () => {
   mockSeries.mockReturnValue({ data: [] });
   const { getAllByLabelText } = await render(<Progress />);
   // Trends has no Steps widget (spec §Screens.4 lists only Weight, Energy vs
@@ -123,19 +225,27 @@ test("shows real sleep and renders the energy-vs-budget bars when Health is auth
     sleep: { lastNightHours: 7.1 },
     connect: jest.fn(),
   });
-  mockAvgIntake7d.mockReturnValue({ avg: 1921, series: [1900, 1950, 1921], isLoading: false });
+  mockAvgIntake7d.mockReturnValue({ avg: 1921, series: [1900, 1950, 1921], days: [null, null, null, null, 1900, 1950, 1921], isLoading: false, isError: false, refetch: jest.fn() });
 
   const { getByText, getByTestId, getAllByText, queryByLabelText } = await render(<Progress />);
-  expect(getByText("7.1h")).toBeTruthy();
+  // Hours and minutes, the way the Health app writes it, so the two figures
+  // can be compared at a glance (7.1h is 7h 6m).
+  expect(getByText("7h 6m")).toBeTruthy();
   expect(queryByLabelText("Connect Apple Health")).toBeNull();
-  for (let i = 0; i < 7; i++) expect(getByTestId(`ebar-${i}`)).toBeTruthy();
+  // The four days with no reading render as empty slots, not zero-height
+  // bars: a bar of height zero states "ate nothing", which is a different
+  // claim from "nothing logged, or we could not load it". Only the three days
+  // that actually carry calories draw a bar.
+  for (let i = 0; i < 4; i++) expect(getByTestId(`ebar-${i}-nodata`)).toBeTruthy();
+  for (let i = 4; i < 7; i++) expect(getByTestId(`ebar-${i}`)).toBeTruthy();
   expect(getByTestId("ebar-target")).toBeTruthy();
-  // useAvgIntake7d's series carries no dates (only the trailing days that had
-  // logged data, in order), so bars can't be attributed to real weekdays —
-  // only the most recent bar is labeled ("today"); the rest are unlabeled
-  // rather than misattributed to the wrong day.
+  // `days` is positional, so a gap keeps its slot instead of sliding later
+  // days earlier — but the slots still carry no weekday names, so only the
+  // most recent is labeled ("today") rather than misattributing the rest.
   expect(getByText("today")).toBeTruthy();
-  expect(getAllByText("—").length).toBe(6);
+  // 6 unlabeled energy-bar days + the hero figure's own "—" (this test's
+  // series has no weigh-ins, so there is no real reading to show).
+  expect(getAllByText("—").length).toBe(7);
   // Finding 2 (Dynamic Type cap pass): EnergyBars' day labels and the
   // In-budget/Over/Target legend need an explicit cap — the cap IS the
   // overflow protection for this fixed-width bar chart.

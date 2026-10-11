@@ -22,6 +22,9 @@ jest.mock("@/api/hooks", () => ({
   useAddWater: () => ({ mutate: jest.fn(), isPending: false }),
   useDeleteLog: () => ({ mutate: jest.fn(), isPending: false }),
   useCopyDay: () => ({ mutate: mockCopyMutate, isPending: false }),
+  useCurrentFast: () => ({ data: null, isSuccess: true }),
+  useStartFast: () => ({ mutate: jest.fn(), isPending: false }),
+  useEndFast: () => ({ mutate: jest.fn(), isPending: false }),
 }));
 
 test("empty day shows the Copy-from-another-day CTA and it opens the picker", async () => {

@@ -2,164 +2,327 @@ package agents
 
 import (
 	"context"
-	"errors"
-	"io"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
-	"time"
+	"unicode/utf8"
 
-	"github.com/stretchr/testify/require"
+	"github.com/google/uuid"
+	"github.com/tesserix/kora/api/internal/auth"
+	"github.com/tesserix/kora/api/internal/user"
 )
 
-func TestSelectForQuestion(t *testing.T) {
-	t.Parallel()
+// a2aServer answers one message/send the way kora_agents.api does, and records
+// the request it received so the wire contract can be asserted.
+func a2aServer(t *testing.T, capture *map[string]any) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer gw-key" {
+			t.Errorf("Authorization = %q, want the gateway key", got)
+		}
+		if r.URL.Path != "/a2a/v1/nutrition-coach" {
+			t.Errorf("path = %q, want the card's a2a path", r.URL.Path)
+		}
 
-	tests := []struct {
-		name     string
-		question string
-		want     Name
-	}{
-		{name: "general nutrition", question: "How can I add more protein to lunch?", want: NutritionCoach},
-		{name: "explicit meal plan", question: "Please make me a 3 day meal plan", want: MealPlanner},
-		{name: "weekly menu", question: "Can you plan my weekly menu?", want: MealPlanner},
-		{name: "single meal advice", question: "What should I eat with lunch?", want: NutritionCoach},
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		*capture = body
+
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      body["id"],
+			"result": map[string]any{
+				"id":     "run-1",
+				"status": map[string]any{"state": "completed"},
+				"artifacts": []any{map[string]any{
+					"parts": []any{map[string]any{"kind": "text", "text": "You have logged 17.4g of protein."}},
+				}},
+				"metadata": map[string]any{
+					"usage": map[string]any{"input_tokens": 120, "output_tokens": 40, "estimated": false},
+				},
+			},
+		})
+	}))
+}
+
+func TestSendSpeaksTheAgentsA2AContract(t *testing.T) {
+	var got map[string]any
+	srv := a2aServer(t, &got)
+	defer srv.Close()
+
+	g := NewGateway(srv.URL, "gw-key", nil)
+	resolved := resolvedFixture()
+
+	run, err := g.Send(context.Background(), &resolved, "CONTEXT:\nprotein 17.4g\n\nQUESTION: how am I doing?")
+	if err != nil {
+		t.Fatalf("Send: %v", err)
 	}
 
+	if got["method"] != "message/send" {
+		t.Errorf("method = %v, want message/send", got["method"])
+	}
+	params := got["params"].(map[string]any)["message"].(map[string]any)
+	if params["role"] != "user" {
+		t.Errorf("role = %v, want user", params["role"])
+	}
+	part := params["parts"].([]any)[0].(map[string]any)
+	if part["kind"] != "text" || !strings.Contains(part["text"].(string), "QUESTION:") {
+		t.Errorf("part = %v, want one text part carrying the grounded prompt", part)
+	}
+
+	if run.Text != "You have logged 17.4g of protein." {
+		t.Errorf("Text = %q, want the artifact's text part", run.Text)
+	}
+	if run.State != "completed" || run.RunID != "run-1" {
+		t.Errorf("run = %+v, want the agent's state and run id", run)
+	}
+	if run.Usage.InputTokens != 120 || run.Usage.OutputTokens != 40 {
+		t.Errorf("Usage = %+v, want the tokens the agent reported", run.Usage)
+	}
+	if run.Digest != "sha256:abc" {
+		t.Errorf("Digest = %q, want the resolved revision's digest", run.Digest)
+	}
+}
+
+func TestSendDelegatesTheVerifiedEndUserIdentity(t *testing.T) {
+	var gotToken, gotID string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotToken = r.Header.Get("X-Kora-End-User-Token")
+		var request map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&request)
+		gotID = r.Header.Get("X-Kora-User-Id")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"jsonrpc": "2.0", "id": request["id"],
+			"result": map[string]any{
+				"id": "run-1", "status": map[string]any{"state": "completed"},
+				"artifacts": []any{map[string]any{
+					"parts": []any{map[string]any{"kind": "text", "text": "answer"}},
+				}},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	g := NewGateway(srv.URL, "gw-key", nil)
+	resolved := resolvedFixture()
+	id := uuid.New()
+	ctx := user.WithID(auth.WithVerifiedToken(context.Background(), "firebase-user-token"), id)
+	_, err := g.Send(ctx, &resolved, "question")
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if gotID != id.String() {
+		t.Fatalf("missing user ID: %q", gotID)
+	}
+	if gotToken != "Bearer firebase-user-token" {
+		t.Fatalf("X-Kora-End-User-Token = %q, want delegated Firebase token", gotToken)
+	}
+}
+
+func TestSendSurfacesAJSONRPCError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      "1",
+			"error":   map[string]any{"code": -32000, "message": "agent execution failed"},
+		})
+	}))
+	defer srv.Close()
+
+	g := NewGateway(srv.URL, "gw-key", nil)
+	resolved := resolvedFixture()
+	if _, err := g.Send(context.Background(), &resolved, "hi"); err == nil {
+		t.Fatal("Send = nil error, want the agent's JSON-RPC error surfaced")
+	}
+}
+
+func TestSendDoesNotSurfaceTheA2AHTTPErrorBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("upstream-sensitive-detail"))
+	}))
+	defer srv.Close()
+
+	g := NewGateway(srv.URL, "gw-key", nil)
+	resolved := resolvedFixture()
+	_, err := g.Send(context.Background(), &resolved, "hi")
+	if err == nil {
+		t.Fatal("Send = nil error, want an A2A failure")
+	}
+	if strings.Contains(err.Error(), "upstream-sensitive-detail") {
+		t.Fatalf("Send error exposed the A2A HTTP body: %v", err)
+	}
+}
+
+func TestSendDoesNotSurfaceTheA2AJSONRPCErrorMessage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      "1",
+			"error":   map[string]any{"code": -32000, "message": "upstream-sensitive-detail"},
+		})
+	}))
+	defer srv.Close()
+
+	g := NewGateway(srv.URL, "gw-key", nil)
+	resolved := resolvedFixture()
+	_, err := g.Send(context.Background(), &resolved, "hi")
+	if err == nil {
+		t.Fatal("Send = nil error, want a JSON-RPC failure")
+	}
+	if strings.Contains(err.Error(), "upstream-sensitive-detail") {
+		t.Fatalf("Send error exposed the A2A JSON-RPC message: %v", err)
+	}
+}
+
+func TestSendRejectsAnUnsupportedTransport(t *testing.T) {
+	resolved := resolvedFixture()
+	resolved.Agent.Spec["a2a"].(map[string]any)["preferredTransport"] = "GRPC"
+
+	g := NewGateway("https://agentgateway.example", "gw-key", nil)
+	_, err := g.Send(context.Background(), &resolved, "hi")
+	if err == nil || !strings.Contains(err.Error(), "GRPC") {
+		t.Fatalf("Send with a GRPC card = %v, want a transport error naming it", err)
+	}
+}
+
+func TestNilGatewayIsNotConfigured(t *testing.T) {
+	var g *Gateway
+	resolved := resolvedFixture()
+	if _, err := g.Send(context.Background(), &resolved, "hi"); err != ErrNotConfigured {
+		t.Errorf("Send on a nil Gateway = %v, want ErrNotConfigured", err)
+	}
+}
+
+// AI_GATEWAY_BASE_URL carries the OpenAI /v1 suffix for the model path. A2A is
+// routed at /a2a/v1/ on the same gateway, so keeping the suffix would address
+// /v1/a2a/v1/<agent> and 404 every run.
+func TestSendIgnoresTheModelPathOnTheGatewayBaseURL(t *testing.T) {
+	var got map[string]any
+	srv := a2aServer(t, &got)
+	defer srv.Close()
+
+	g := NewGateway(srv.URL+"/v1", "gw-key", nil)
+	resolved := resolvedFixture()
+
+	if _, err := g.Send(context.Background(), &resolved, "hi"); err != nil {
+		t.Fatalf("Send against a /v1 base URL: %v", err)
+	}
+}
+
+func TestNewGatewayRejectsAURLWithNoOrigin(t *testing.T) {
+	if g := NewGateway("kora-ai.svc:8080", "gw-key", nil); g != nil {
+		t.Error("NewGateway with no scheme = non-nil, want nil")
+	}
+}
+
+func TestSendOnlyCallsTheAgentsOwnA2ARoute(t *testing.T) {
+	tests := []struct {
+		name, agent, url string
+	}{
+		{"foreign route", "nutrition-coach", "http://kora-ai.svc:8080/v1/chat/completions"},
+		{"traversal", "nutrition-coach", "http://kora-ai.svc:8080/a2a/v1/nutrition-coach/../meal-planner"},
+		{"encoded traversal", "nutrition-coach", "http://kora-ai.svc:8080/a2a/v1/nutrition-coach/%2e%2e/meal-planner"},
+		{"another agent", "nutrition-coach", "http://kora-ai.svc:8080/a2a/v1/meal-planner"},
+		{"suffix", "nutrition-coach", "/a2a/v1/nutrition-coach/extra"},
+		{"query", "nutrition-coach", "/a2a/v1/nutrition-coach?route=admin"},
+		{"unsafe agent name", "../admin", "/a2a/v1/../admin"},
+	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			require.Equal(t, tt.want, SelectForQuestion(tt.question))
+			calls := 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				calls++
+				w.WriteHeader(http.StatusInternalServerError)
+			}))
+			defer srv.Close()
+
+			resolved := resolvedFixture()
+			resolved.Agent.Metadata.Name = tt.agent
+			resolved.Agent.Spec["a2a"].(map[string]any)["url"] = tt.url
+
+			_, err := NewGateway(srv.URL, "gw-key", nil).Send(context.Background(), &resolved, "hello")
+			if err == nil {
+				t.Fatal("Send = nil error, want the card's route rejected")
+			}
+			if calls != 0 {
+				t.Fatalf("gateway calls = %d, want none before the route is validated", calls)
+			}
 		})
 	}
 }
 
-func TestGatewayClientDelegatesOnlyThroughConfiguredGateway(t *testing.T) {
-	t.Parallel()
+func TestSendTrimsAnOversizedPromptOnACharacterBoundary(t *testing.T) {
+	var got map[string]any
+	srv := a2aServer(t, &got)
+	defer srv.Close()
 
-	var gotPath string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		require.Equal(t, "Bearer gateway-key", r.Header.Get("Authorization"))
-		require.Empty(t, r.Header.Get("X-User-ID"))
-		require.Empty(t, r.Header.Get("X-Tenant-ID"))
-		require.Equal(t, "application/json", r.Header.Get("Content-Type"))
-		body, err := io.ReadAll(r.Body)
-		require.NoError(t, err)
-		require.Contains(t, string(body), `"method":"message/send"`)
-		require.Contains(t, string(body), `"text":"trusted prompt"`)
+	resolved := resolvedFixture()
+	if _, err := NewGateway(srv.URL, "gw-key", nil).Send(context.Background(), &resolved, strings.Repeat("é", MaxPromptRunes+50)); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
 
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":"request-1","result":{"id":"run-1","status":{"state":"completed"},"artifacts":[{"parts":[{"kind":"text","text":"agent answer"}]}],"metadata":{"usage":{"input_tokens":12,"output_tokens":5}}}}`)
+	parts := got["params"].(map[string]any)["message"].(map[string]any)["parts"].([]any)
+	text := parts[0].(map[string]any)["text"].(string)
+	if !utf8.ValidString(text) || utf8.RuneCountInString(text) != MaxPromptRunes {
+		t.Fatalf("sent %d runes (valid UTF-8: %t), want exactly %d whole characters", utf8.RuneCountInString(text), utf8.ValidString(text), MaxPromptRunes)
+	}
+}
+
+func TestSendRejectsIncompleteOrUncorrelatedResponses(t *testing.T) {
+	for _, tc := range []string{"failed", "working", "missing state", "wrong id", "wrong version", "missing run", "negative usage", "oversized", "trailing"} {
+		t.Run(tc, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req map[string]any
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				state, id, version, runID, input := "completed", req["id"], "2.0", "run-1", 10
+				switch tc {
+				case "failed", "working":
+					state = tc
+				case "missing state":
+					state = ""
+				case "wrong id":
+					id = "different"
+				case "wrong version":
+					version = "1.0"
+				case "missing run":
+					runID = ""
+				case "negative usage":
+					input = -1
+				}
+				text := "answer"
+				if tc == "oversized" {
+					text = strings.Repeat("x", 2<<20)
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": version, "id": id, "result": map[string]any{"id": runID, "status": map[string]any{"state": state}, "artifacts": []any{map[string]any{"parts": []any{map[string]any{"kind": "text", "text": text}}}}, "metadata": map[string]any{"usage": map[string]any{"input_tokens": input}}}})
+				if tc == "trailing" {
+					_, _ = w.Write([]byte(`{}`))
+				}
+			}))
+			defer srv.Close()
+			resolved := resolvedFixture()
+			if _, err := NewGateway(srv.URL, "gw-key", nil).Send(context.Background(), &resolved, "question"); err == nil {
+				t.Fatal("accepted invalid A2A result")
+			}
+		})
+	}
+}
+
+func TestSendDoesNotForwardDelegatedCredentialsOnRedirect(t *testing.T) {
+	reached := false
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { reached = true; w.WriteHeader(200) }))
+	defer target.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
 	}))
-	t.Cleanup(server.Close)
-
-	client, err := NewGatewayClient(server.URL+"/v1", "gateway-key", 2*time.Second)
-	require.NoError(t, err)
-	client.newID = func() string { return "request-1" }
-
-	result, err := client.Delegate(t.Context(), NutritionCoach, "trusted prompt")
-
-	require.NoError(t, err)
-	require.Equal(t, "/a2a/v1/nutrition-coach", gotPath)
-	require.Equal(t, "agent answer", result.Text)
-	require.Equal(t, 12, result.Usage.TokensIn)
-	require.Equal(t, 5, result.Usage.TokensOut)
-	require.Equal(t, "agentgateway", result.Usage.Provider)
-	require.Equal(t, "nutrition-coach", result.Usage.Model)
-}
-
-func TestGatewayClientFormatsMealPlannerOutput(t *testing.T) {
-	t.Parallel()
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":"request-1","result":{"id":"run-1","status":{"state":"completed"},"artifacts":[{"parts":[{"kind":"text","text":"{\"summary\":\"A practical plan\",\"days\":[{\"date\":\"2026-08-21\",\"meals\":[{\"name\":\"Lunch\",\"description\":\"Lentil bowl\"}]}]}"}] }]}}`)
-	}))
-	t.Cleanup(server.Close)
-
-	client, err := NewGatewayClient(server.URL, "gateway-key", 2*time.Second)
-	require.NoError(t, err)
-	client.newID = func() string { return "request-1" }
-
-	result, err := client.Delegate(t.Context(), MealPlanner, "plan meals")
-
-	require.NoError(t, err)
-	require.Contains(t, result.Text, "A practical plan")
-	require.Contains(t, result.Text, "2026-08-21")
-	require.Contains(t, result.Text, "Lunch — Lentil bowl")
-	require.NotContains(t, result.Text, `"summary"`)
-}
-
-func TestGatewayClientRejectsUnknownAgentBeforeNetwork(t *testing.T) {
-	t.Parallel()
-
-	client, err := NewGatewayClient("https://gateway.invalid/v1", "gateway-key", time.Second)
-	require.NoError(t, err)
-
-	_, err = client.Delegate(t.Context(), Name("unreviewed-agent"), "prompt")
-
-	require.ErrorIs(t, err, ErrUnknownAgent)
-}
-
-func TestGatewayClientPropagatesCancellation(t *testing.T) {
-	t.Parallel()
-
-	client, err := NewGatewayClient("https://gateway.invalid/v1", "gateway-key", time.Second)
-	require.NoError(t, err)
-	client.httpClient.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		<-r.Context().Done()
-		return nil, r.Context().Err()
-	})
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-
-	result, err := client.Delegate(ctx, NutritionCoach, "prompt")
-
-	require.Error(t, err)
-	require.True(t, errors.Is(err, context.Canceled))
-	require.Equal(t, "agentgateway", result.Usage.Provider)
-	require.Equal(t, "nutrition-coach", result.Usage.Model)
-}
-
-func TestGatewayClientRejectsFailedJSONRPCResponse(t *testing.T) {
-	t.Parallel()
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":"request-1","error":{"code":-32603,"message":"private upstream detail"}}`)
-	}))
-	t.Cleanup(server.Close)
-	client, err := NewGatewayClient(server.URL+"/v1", "gateway-key", time.Second)
-	require.NoError(t, err)
-	client.newID = func() string { return "request-1" }
-
-	_, err = client.Delegate(t.Context(), NutritionCoach, "prompt")
-
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "-32603")
-	require.NotContains(t, err.Error(), "private upstream detail")
-}
-
-func TestGatewayClientRejectsMismatchedJSONRPCID(t *testing.T) {
-	t.Parallel()
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":"different-request","result":{"status":{"state":"completed"},"artifacts":[{"parts":[{"kind":"text","text":"answer"}]}]}}`)
-	}))
-	t.Cleanup(server.Close)
-	client, err := NewGatewayClient(server.URL+"/v1", "gateway-key", time.Second)
-	require.NoError(t, err)
-	client.newID = func() string { return "request-1" }
-
-	_, err = client.Delegate(t.Context(), NutritionCoach, "prompt")
-
-	require.ErrorIs(t, err, ErrInvalidResponse)
-}
-
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
-	return f(r)
+	defer srv.Close()
+	resolved := resolvedFixture()
+	_, err := NewGateway(srv.URL, "gw-key", nil).Send(auth.WithVerifiedToken(context.Background(), "private-user-token"), &resolved, "question")
+	if reached || err == nil {
+		t.Fatal("followed redirect carrying user credentials")
+	}
 }

@@ -38,9 +38,12 @@ type FoodLog struct {
 	// resolve-sourced logs so a later correction can teach the index which
 	// phrase resolved wrong. Description holds the RESOLVED food's name;
 	// these are deliberately different fields.
-	InputPhrase *string   `json:"input_phrase,omitempty"`
-	ClientLogMs *int      `json:"client_log_ms,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
+	InputPhrase *string `json:"input_phrase,omitempty"`
+	// ResolutionOutcomeID is the AI resolution this log confirmed, scored again if the food is corrected.
+	ResolutionOutcomeID *uuid.UUID `gorm:"type:uuid" json:"resolution_id,omitempty"`
+	ResolutionIndex     *int       `json:"resolution_index,omitempty"`
+	ClientLogMs         *int       `json:"client_log_ms,omitempty"`
+	CreatedAt           time.Time  `json:"created_at"`
 	// BaseUnit is the LOGGED FOOD's base unit ("g" or "ml"), joined in from
 	// food_items — it is not a column on food_logs, which is why it is
 	// read-only to gorm ("->") and excluded from migration.

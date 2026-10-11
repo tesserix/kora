@@ -2,11 +2,15 @@ package coach
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+
+	"github.com/tesserix/kora/api/internal/mentor"
 )
 
 // maxThreadTurns is the number of most-recent turns GET /v1/coach/thread
@@ -19,6 +23,17 @@ type StoredTurn struct {
 	Text      string
 	CreatedAt time.Time
 	Citations []Fact
+	Proposal  *mentor.CommitmentProposal
+	Plan      *PlanProposal
+}
+
+// Attachments are the structured artefacts an answer can carry alongside its
+// text: a commitment the user can adopt, a plan they can approve. They are one
+// struct because both are written in the same transaction as the turn they
+// belong to — a proposal whose turn is missing has nothing to attach to.
+type Attachments struct {
+	Commitment *mentor.CommitmentProposal
+	Plan       *PlanProposal
 }
 
 // ThreadRepository persists and replays a user's coach thread.
@@ -31,7 +46,13 @@ func NewThreadRepository(db *gorm.DB) ThreadRepository { return ThreadRepository
 // AppendExchange stores a question and its answer as two turns in ONE
 // transaction, so a partial write can never leave a question without an
 // answer. citations belong to the answer; a user turn never has any.
-func (r ThreadRepository) AppendExchange(ctx context.Context, userID uuid.UUID, question, answer string, citations []Fact) error {
+func (r ThreadRepository) AppendExchange(
+	ctx context.Context,
+	userID uuid.UUID,
+	question, answer string,
+	citations []Fact,
+	attach Attachments,
+) error {
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		userTurn := Turn{UserID: userID, Role: TurnRoleUser, Text: question}
 		if err := tx.Create(&userTurn).Error; err != nil {
@@ -41,7 +62,28 @@ func (r ThreadRepository) AppendExchange(ctx context.Context, userID uuid.UUID, 
 		if err := tx.Create(&ottoTurn).Error; err != nil {
 			return err
 		}
-		return insertCitations(tx, ottoTurn.ID, citations)
+		if err := insertCitations(tx, ottoTurn.ID, citations); err != nil {
+			return err
+		}
+		if attach.Commitment != nil {
+			proposal := *attach.Commitment
+			proposal.UserID = userID
+			proposal.CoachTurnID = ottoTurn.ID
+			if err := tx.Create(&proposal).Error; err != nil {
+				return err
+			}
+		}
+		if attach.Plan != nil {
+			plan := *attach.Plan
+			plan.UserID = userID
+			plan.CoachTurnID = ottoTurn.ID
+			if err := tx.Create(&plan).Error; err != nil {
+				return err
+			}
+			attach.Plan.ID = plan.ID
+			attach.Plan.CreatedAt = plan.CreatedAt
+		}
+		return nil
 	})
 	if err != nil {
 		return fmt.Errorf("coach: append exchange: %w", err)
@@ -82,12 +124,143 @@ func (r ThreadRepository) ListRecent(ctx context.Context, userID uuid.UUID, limi
 	if err != nil {
 		return nil, err
 	}
+	proposals, err := r.proposalsFor(ctx, userID, rows)
+	if err != nil {
+		return nil, err
+	}
+	plans, err := r.plansFor(ctx, userID, rows)
+	if err != nil {
+		return nil, err
+	}
 
 	out := make([]StoredTurn, len(rows))
 	for i, t := range rows {
-		out[i] = StoredTurn{Role: t.Role, Text: t.Text, CreatedAt: t.CreatedAt, Citations: cites[t.ID]}
+		out[i] = StoredTurn{
+			Role: t.Role, Text: t.Text, CreatedAt: t.CreatedAt,
+			Citations: cites[t.ID], Proposal: proposals[t.ID], Plan: plans[t.ID],
+		}
 	}
 	return out, nil
+}
+
+func (r ThreadRepository) proposalsFor(
+	ctx context.Context,
+	userID uuid.UUID,
+	turns []Turn,
+) (map[uuid.UUID]*mentor.CommitmentProposal, error) {
+	if len(turns) == 0 {
+		return map[uuid.UUID]*mentor.CommitmentProposal{}, nil
+	}
+	ids := make([]uuid.UUID, 0, len(turns))
+	for _, turn := range turns {
+		ids = append(ids, turn.ID)
+	}
+	var rows []mentor.CommitmentProposal
+	if err := r.db.WithContext(ctx).
+		Where("user_id = ? AND coach_turn_id IN ?", userID, ids).
+		Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("coach: list commitment proposals: %w", err)
+	}
+	out := make(map[uuid.UUID]*mentor.CommitmentProposal, len(rows))
+	for i := range rows {
+		out[rows[i].CoachTurnID] = &rows[i]
+	}
+	return out, nil
+}
+
+func (r ThreadRepository) plansFor(
+	ctx context.Context,
+	userID uuid.UUID,
+	turns []Turn,
+) (map[uuid.UUID]*PlanProposal, error) {
+	if len(turns) == 0 {
+		return map[uuid.UUID]*PlanProposal{}, nil
+	}
+	ids := make([]uuid.UUID, 0, len(turns))
+	for _, turn := range turns {
+		ids = append(ids, turn.ID)
+	}
+	var rows []PlanProposal
+	if err := r.db.WithContext(ctx).
+		Where("user_id = ? AND coach_turn_id IN ?", userID, ids).
+		Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("coach: list plan proposals: %w", err)
+	}
+	out := make(map[uuid.UUID]*PlanProposal, len(rows))
+	for i := range rows {
+		out[rows[i].CoachTurnID] = &rows[i]
+	}
+	return out, nil
+}
+
+// AcceptPlan records the user's approval of a plan proposal and returns it.
+//
+// It is idempotent: re-approving keeps the first accepted_at, because the
+// timestamp is when the user decided, and a double-tap is not a second
+// decision. A plan owned by anybody else is ErrPlanNotFound, not a 403 — the
+// caller must not learn that the id exists.
+func (r ThreadRepository) AcceptPlan(
+	ctx context.Context,
+	userID, planID uuid.UUID,
+	now time.Time,
+) (PlanProposal, error) {
+	var out PlanProposal
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND user_id = ?", planID, userID).
+			First(&out).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrPlanNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if out.AcceptedAt != nil {
+			return nil
+		}
+		zone, startsOn, err := planStartDate(tx, userID, now)
+		if err != nil {
+			return err
+		}
+		// Read the stored values back: Postgres keeps microseconds, so echoing
+		// the caller's clock would make a second tap look like a new decision.
+		return tx.Model(&out).
+			Clauses(clause.Returning{Columns: []clause.Column{
+				{Name: "accepted_at"}, {Name: "starts_on"}, {Name: "timezone"},
+			}}).
+			Where("id = ? AND user_id = ?", planID, userID).
+			Updates(map[string]any{
+				"accepted_at": now.UTC(),
+				"starts_on":   startsOn,
+				"timezone":    zone,
+			}).Error
+	})
+	if errors.Is(err, ErrPlanNotFound) {
+		return PlanProposal{}, err
+	}
+	if err != nil {
+		return PlanProposal{}, fmt.Errorf("coach: accept plan proposal: %w", err)
+	}
+	return out, nil
+}
+
+// planStartDate resolves the calendar day the user is living in when they
+// approve a plan. An unreadable or missing stored zone falls back to UTC, but
+// a database failure aborts the transaction rather than silently changing the
+// user's calendar boundary.
+func planStartDate(tx *gorm.DB, userID uuid.UUID, now time.Time) (string, time.Time, error) {
+	var zone string
+	if err := tx.Table("users").
+		Where("id = ?", userID).
+		Pluck("timezone", &zone).Error; err != nil {
+		return "", time.Time{}, fmt.Errorf("load user timezone: %w", err)
+	}
+	loc, err := time.LoadLocation(zone)
+	if zone == "" || err != nil {
+		zone, loc = "UTC", time.UTC
+	}
+	local := now.In(loc)
+	return zone, time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.UTC), nil
 }
 
 // citationsFor loads every citation for turns in one query, keyed by turn id,

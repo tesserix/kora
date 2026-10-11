@@ -3,7 +3,12 @@
 // always come from the nutrition index (never from the model).
 package ai
 
-import "github.com/tesserix/kora/api/internal/nutrition"
+import (
+	"encoding/json"
+	"github.com/google/uuid"
+
+	"github.com/tesserix/kora/api/internal/nutrition"
+)
 
 // Guess is a single food identification from a provider. It carries NO
 // nutrition numbers — only identity + portion + confidence.
@@ -46,6 +51,88 @@ type IngredientGuess struct {
 	Confidence      float64 `json:"confidence"`
 }
 
+// BodyCompositionReading is what a smart-scale screenshot legibly shows,
+// read by a vision model (kora#314). Every field is a POINTER because
+// absent must not collapse into zero — the same reasoning as
+// tracking.BodyComposition (internal/tracking/model.go), which this
+// mirrors field-for-field on purpose so a reading can be handed straight
+// into that struct's shape without renaming.
+//
+// This type carries ONLY measured values. BMI, fat-free mass, fat mass in
+// kg, metabolic age, and qualitative bands are structurally impossible to
+// return here: there is no field for them, so a model that tries to supply
+// one anyway has it silently dropped by encoding/json. See
+// migrations/000039_body_composition.up.sql for why each is excluded.
+type BodyCompositionReading struct {
+	WeightKg           *float64 `json:"weight_kg,omitempty"`
+	BodyFatPct         *float64 `json:"body_fat_pct,omitempty"`
+	SubcutaneousFatPct *float64 `json:"subcutaneous_fat_pct,omitempty"`
+	// VisceralFatRating is a vendor RATING, not a percentage — see the
+	// struct doc on tracking.BodyComposition for the same warning. Never
+	// render or validate this as a 0-100 percent.
+	VisceralFatRating *float64 `json:"visceral_fat_rating,omitempty"`
+	// SkeletalMusclePct and MuscleMassKg are DIFFERENT quantities (a scale
+	// like Renpho reports both) — never derive one from the other.
+	SkeletalMusclePct *float64 `json:"skeletal_muscle_pct,omitempty"`
+	MuscleMassKg      *float64 `json:"muscle_mass_kg,omitempty"`
+	BodyWaterPct      *float64 `json:"body_water_pct,omitempty"`
+	ProteinPct        *float64 `json:"protein_pct,omitempty"`
+	// BoneMassKg is bone MASS, not bone DENSITY/BMD/T-score.
+	BoneMassKg *float64 `json:"bone_mass_kg,omitempty"`
+	// ScaleBMRKcal is the scale's own BMR estimate — comparison only, never
+	// wired to Kora's own Mifflin-St Jeor target (see tracking.BodyComposition).
+	ScaleBMRKcal *float64 `json:"scale_bmr_kcal,omitempty"`
+	// ReadingDateText is the date text EXACTLY as printed on the screenshot
+	// — "22/08", "Sat, 22/08, 10:57", "2026-08-22", whatever the screen
+	// actually shows, verbatim, nil when no date is legible at all. This is
+	// the vision model's ENTIRE contribution to the date: it transcribes,
+	// it never resolves a year or reformats. A provider must never invent
+	// a year that is not printed (kora#314) — asking the model to do that
+	// is the same fabrication class this whole type exists to prevent.
+	ReadingDateText *string `json:"reading_date_text,omitempty"`
+	// ReadingDate is the RESOLVED calendar date, "YYYY-MM-DD", derived from
+	// ReadingDateText by Go code (internal/bodyread's date resolver), never
+	// by the model — see that package's resolveReadingDateText for the
+	// deterministic, unit-tested rule (most recent occurrence of a
+	// year-less day/month at or before the server's today) and which
+	// ambiguities it deliberately leaves as nil rather than guesses. nil
+	// here means either no date was legible, or the text was too
+	// ambiguous to resolve safely — PR B's editable date row is what
+	// catches both cases and the rare stale-screenshot case besides.
+	ReadingDate *string `json:"reading_date,omitempty"`
+	// Instrument is which physical instrument produced this reading, as one
+	// of tracking.Source's three device-detectable values (kept as a plain
+	// string here, not tracking.Source, so this package does not import
+	// internal/tracking — internal/bodyread converts and validates against
+	// the real constants):
+	//
+	//	"scale_screenshot" — a consumer smart-scale app (Renpho, Omron,
+	//	                      Tanita, Eufy, Xiaomi, ...)
+	//	"inbody"            — an InBody clinical result sheet
+	//	"dexa"              — a DEXA / DXA clinical scan report
+	//
+	// This is provenance, not metadata (migrations/000039_body_composition
+	// .up.sql): the same-named metric is not comparable across instruments
+	// — Renpho reports Skeletal Muscle at 48.9% where Omron reports 25.7%
+	// for the same body, and DEXA body fat differs from consumer
+	// bioimpedance by several points on the same day. A chart that joins
+	// two readings without checking this field can show a step change that
+	// never happened and read as real progress or real loss.
+	//
+	// MUST be detected from what is VISIBLE — app chrome, branding, layout,
+	// section headings — and NEVER from the measurement values themselves.
+	// "these numbers look clinical, therefore DEXA" is exactly the
+	// inference this field must not make; it is the same class of mistake
+	// this whole type exists to forbid for every other field (see the
+	// struct doc above). nil when the image does not clearly indicate an
+	// instrument class — a confident wrong answer here is worse than no
+	// answer, because it silently joins two incomparable readings into one
+	// trend line. A caller must never write anything other than the three
+	// values above; internal/bodyread's validation enforces that server
+	// side and drops anything else to nil.
+	Instrument *string `json:"instrument,omitempty"`
+}
+
 // Usage records one provider call for metering.
 type Usage struct {
 	Provider  string
@@ -61,6 +148,16 @@ type Usage struct {
 	// recorded too, which means cost queries MUST filter on this or they will
 	// over-count instead of the old under-count.
 	Outcome string
+	// Estimated marks TokensIn/TokensOut as a proxy computed from the request
+	// or response text rather than a count the provider reported. Some call
+	// shapes (Gemini's embedding response has no UsageMetadata) give us no
+	// measured token count at all, so the alternative to estimating is
+	// recording zero — which is indistinguishable from "this call cost
+	// nothing" and is exactly the defect kora#376 found. True here means
+	// "trust this number as an order of magnitude, not as billing-grade
+	// precision"; false means the provider itself reported the count. Cost
+	// and usage queries should treat estimated rows as approximate.
+	Estimated bool
 }
 
 // Usage.Outcome values.
@@ -122,8 +219,26 @@ type ResolvedCandidate struct {
 	PortionAssumed bool `json:"portion_assumed"`
 }
 
+// PhotoEvidence records the bounded OCR and Jev routing evidence.
+type PhotoEvidence struct {
+	MealDecisionModel   string          `json:"meal_decision_model,omitempty"`
+	MealReviewModel     string          `json:"meal_review_model,omitempty"`
+	MealReviewStatus    string          `json:"meal_review_status,omitempty"`
+	OCRFields           json.RawMessage `json:"ocr_fields,omitempty"`
+	OCROutcome          string          `json:"ocr_outcome"`
+	PolicyVersion       string          `json:"policy_version"`
+	OCRJobID            string          `json:"ocr_job_id,omitempty"`
+	OCRStatus           string          `json:"ocr_status"`
+	DecisionModel       string          `json:"decision_model"`
+	DecisionRoute       string          `json:"decision_route,omitempty"`
+	Route               string          `json:"route"`
+	ConsumedAmountKnown bool            `json:"consumed_amount_known"`
+	Label               json.RawMessage `json:"label,omitempty"`
+}
+
 // Resolution is the engine's answer for one resolve request.
 type Resolution struct {
+	PhotoEvidence    *PhotoEvidence      `json:"photo_evidence,omitempty"`
 	Candidates       []ResolvedCandidate `json:"candidates"`
 	Tier             Tier                `json:"tier"`
 	FollowUpQuestion string              `json:"follow_up_question,omitempty"`
@@ -140,4 +255,6 @@ type Resolution struct {
 	// blank; a text log already has the client-supplied phrase for
 	// input_phrase, and a photo has no phrase at all.
 	Transcript string `json:"transcript,omitempty"`
+	// ResolutionID names this attempt's outcome; a log that sends it back is scored against it.
+	ResolutionID *uuid.UUID `json:"resolution_id,omitempty"`
 }

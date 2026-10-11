@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/tesserix/kora/api/internal/mentor"
 )
 
 func TestThreadRepository_AppendAndListRoundTrip(t *testing.T) {
@@ -15,7 +17,7 @@ func TestThreadRepository_AppendAndListRoundTrip(t *testing.T) {
 	ctx := context.Background()
 
 	err := repo.AppendExchange(ctx, userID, "what should I eat?", "more protein",
-		[]Fact{{Label: "Protein today", Value: "65g"}, {Label: "Kcal left", Value: "750"}})
+		[]Fact{{Label: "Protein today", Value: "65g"}, {Label: "Kcal left", Value: "750"}}, Attachments{})
 	require.NoError(t, err)
 
 	turns, err := repo.ListRecent(ctx, userID, maxThreadTurns)
@@ -34,14 +36,38 @@ func TestThreadRepository_AppendAndListRoundTrip(t *testing.T) {
 	require.Equal(t, "Kcal left", turns[1].Citations[1].Label)
 }
 
+func TestThreadRepository_RoundTripsACommitmentProposalWithTheReviewedTurn(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	repo := NewThreadRepository(db)
+	interval := 120
+	end := 20 * 60
+	proposal, err := mentor.NewCommitmentProposal(userID, time.Date(2026, 8, 22, 0, 0, 0, 0, time.UTC), time.UTC, mentor.CommitmentProposalDraft{
+		Title: "Drink water", Kind: mentor.CommitmentKindHydration,
+		Cadence: mentor.CadenceInterval, WeekdaysMask: 127,
+		StartMinute: 8 * 60, IntervalMinutes: &interval, EndMinute: &end,
+	}, "Kora Meal Planner", "Kora Nutrition Coach")
+	require.NoError(t, err)
+
+	require.NoError(t, repo.AppendExchange(t.Context(), userID, "help me hydrate", "Review this rhythm", nil, Attachments{Commitment: proposal}))
+
+	turns, err := repo.ListRecent(t.Context(), userID, maxThreadTurns)
+	require.NoError(t, err)
+	require.Len(t, turns, 2)
+	require.Nil(t, turns[0].Proposal)
+	require.NotNil(t, turns[1].Proposal)
+	require.Equal(t, proposal.ID, turns[1].Proposal.ID)
+	require.Equal(t, "Kora Nutrition Coach", turns[1].Proposal.ReviewedBy)
+}
+
 func TestThreadRepository_ListRecentIsOldestFirst(t *testing.T) {
 	db := testDB(t)
 	userID := seedUser(t, db, 2000, 120)
 	repo := NewThreadRepository(db)
 	ctx := context.Background()
 
-	require.NoError(t, repo.AppendExchange(ctx, userID, "q1", "a1", nil))
-	require.NoError(t, repo.AppendExchange(ctx, userID, "q2", "a2", nil))
+	require.NoError(t, repo.AppendExchange(ctx, userID, "q1", "a1", nil, Attachments{}))
+	require.NoError(t, repo.AppendExchange(ctx, userID, "q2", "a2", nil, Attachments{}))
 
 	turns, err := repo.ListRecent(ctx, userID, maxThreadTurns)
 	require.NoError(t, err)
@@ -60,7 +86,7 @@ func TestThreadRepository_ListRecentReturnsMostRecentWhenOverLimit(t *testing.T)
 
 	// 30 exchanges == 60 turns, over the 50 cap.
 	for i := 0; i < 30; i++ {
-		require.NoError(t, repo.AppendExchange(ctx, userID, "q", "a", nil))
+		require.NoError(t, repo.AppendExchange(ctx, userID, "q", "a", nil, Attachments{}))
 	}
 
 	turns, err := repo.ListRecent(ctx, userID, maxThreadTurns)
@@ -90,8 +116,8 @@ func TestThreadRepository_OrdersBySeqNotCreatedAt(t *testing.T) {
 	repo := NewThreadRepository(db)
 	ctx := context.Background()
 
-	require.NoError(t, repo.AppendExchange(ctx, userID, "q1", "a1", nil))
-	require.NoError(t, repo.AppendExchange(ctx, userID, "q2", "a2", nil))
+	require.NoError(t, repo.AppendExchange(ctx, userID, "q1", "a1", nil, Attachments{}))
+	require.NoError(t, repo.AppendExchange(ctx, userID, "q2", "a2", nil, Attachments{}))
 
 	// Read rows back ordered by seq so we know each row's id and its
 	// insertion order.
@@ -138,9 +164,59 @@ func TestThreadRepository_ScopedToUser(t *testing.T) {
 	repo := NewThreadRepository(db)
 	ctx := context.Background()
 
-	require.NoError(t, repo.AppendExchange(ctx, alice, "alice q", "alice a", nil))
+	require.NoError(t, repo.AppendExchange(ctx, alice, "alice q", "alice a", nil, Attachments{}))
 
 	turns, err := repo.ListRecent(ctx, bob, maxThreadTurns)
 	require.NoError(t, err)
 	require.Empty(t, turns, "must never return another user's turns")
+}
+
+// Postgres stores timestamps to the microsecond, so an accepted_at echoed
+// straight back from memory disagrees with the one a second call reads from
+// the row whenever the clock carries nanoseconds.
+func TestThreadRepository_AcceptPlanReturnsThePersistedTimestamp(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	require.NoError(t, db.Exec("UPDATE users SET timezone = ? WHERE id = ?", "Australia/Melbourne", userID).Error)
+	repo := NewThreadRepository(db)
+	plan := seedPlanProposal(t, repo, userID)
+	// 23:13 UTC is already the next local calendar day in Melbourne.
+	now := time.Date(2026, 8, 22, 23, 13, 41, 863886612, time.UTC)
+
+	first, err := repo.AcceptPlan(t.Context(), userID, plan.ID, now)
+	require.NoError(t, err)
+	require.NotNil(t, first.AcceptedAt)
+	require.NotNil(t, first.StartsOn)
+	require.Equal(t, "2026-08-23", first.StartsOn.Format("2006-01-02"))
+	require.Equal(t, "Australia/Melbourne", first.Timezone)
+
+	second, err := repo.AcceptPlan(t.Context(), userID, plan.ID, now.Add(time.Minute))
+	require.NoError(t, err)
+	require.NotNil(t, second.AcceptedAt)
+	require.NotNil(t, second.StartsOn)
+
+	require.True(t, first.AcceptedAt.Equal(*second.AcceptedAt),
+		"a double tap is not a second decision")
+	require.True(t, first.StartsOn.Equal(*second.StartsOn),
+		"a double tap must not restart the plan on another calendar day")
+}
+
+// A user whose zone is missing or unreadable still gets their approval
+// recorded; the stored zone says which day the date was read in.
+func TestThreadRepository_AcceptPlanFallsBackToUTCForAnUnknownZone(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db, 2000, 120)
+	require.NoError(t, db.Exec("UPDATE users SET timezone = ? WHERE id = ?", "Mars/Olympus", userID).Error)
+	repo := NewThreadRepository(db)
+	plan := seedPlanProposal(t, repo, userID)
+
+	accepted, err := repo.AcceptPlan(
+		t.Context(), userID, plan.ID,
+		time.Date(2026, 8, 22, 23, 13, 41, 0, time.UTC),
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, "UTC", accepted.Timezone)
+	require.NotNil(t, accepted.StartsOn)
+	require.Equal(t, "2026-08-22", accepted.StartsOn.Format("2006-01-02"))
 }

@@ -1,8 +1,8 @@
 [
   {
     "alias": "hot chips",
-    "food": "Potato, chips, regular, fast food outlet, deep fried, blended oil, salted",
-    "why": "AU idiom. No lexical signal can reach this row: it competes with Banana chip and Corn chips, all AFCD, all AU, all generic, all legitimately named chip (kora#219). Deliberately NOT aliasing the bare word chips — in Australia that means hot chips OR crisps, ~226 vs ~500 kcal, which is real ambiguity the resolver should ask about rather than settle at score 1.0."
+    "food": "Potato, chips, takeaway outlet, deep fried, blended oil, salted",
+    "why": "AU idiom. No lexical signal can reach this row: it competes with Banana chip and Corn chips, all AFCD, all AU, all generic and all legitimately named chip (kora#219). A curated alias does.\n\nRetargeted from `Potato, chips, regular, fast food outlet, ...` (225.6 kcal/100g), which has serving_grams=0 AND serving_units=[] — no serving information at all, so every portion phrase fell through to the flat 100g default. This row is the same food from the same source at 238.3 kcal/100g and carries AUSNUT's own serving definitions: takeaway serve 100g, bucket 320g, chip 3.9g. The DEFAULT case is unchanged in effect (AUSNUT's takeaway serve is also 100g), but \"a bucket of chips\" and \"10 chips\" now resolve instead of silently becoming 100g.\n\nDeliberately NOT aliasing the bare word chips — in Australia that means hot chips OR crisps, ~226 vs ~500 kcal, which is real ambiguity the resolver should ask about rather than settle at score 1.0."
   },
   {
     "alias": "aubergine",
@@ -18,5 +18,35 @@
     "alias": "okra",
     "food": "Ladies finger",
     "why": "IFCT names this Ladies finger; okra is what most people call it. Same raw vegetable. NOT aliasing bhindi to it — a user typing bhindi usually means the cooked dish, which the curated Bhindi masala row already answers, and a score-1.0 alias would override it."
+  },
+  {
+    "alias": "chicken parma",
+    "food": "Chicken, schnitzel, breadcrumb coating, topped with tomato sauce & cheese (parmigiana)",
+    "why": "AU pub idiom for chicken parmigiana. The full word ALREADY resolves lexically; the abbreviation cannot — 'parma'/'parmi' share no token with 'parmigiana', so all three of these phrases return ZERO candidates today (verified against the prod index). The target is the cooked AUSNUT dish at 219 kcal/100g, so there is no raw/cooked shift. Deliberately NOT aliasing the bare word 'parma': it also names Parma ham and Parmesan, and it is the one variant that already has a lexical hit."
+  },
+  {
+    "alias": "chicken parmi",
+    "food": "Chicken, schnitzel, breadcrumb coating, topped with tomato sauce & cheese (parmigiana)",
+    "why": "AU pub idiom for chicken parmigiana. The full word ALREADY resolves lexically; the abbreviation cannot — 'parma'/'parmi' share no token with 'parmigiana', so all three of these phrases return ZERO candidates today (verified against the prod index). The target is the cooked AUSNUT dish at 219 kcal/100g, so there is no raw/cooked shift. Deliberately NOT aliasing the bare word 'parma': it also names Parma ham and Parmesan, and it is the one variant that already has a lexical hit."
+  },
+  {
+    "alias": "parmi",
+    "food": "Chicken, schnitzel, breadcrumb coating, topped with tomato sauce & cheese (parmigiana)",
+    "why": "AU pub idiom for chicken parmigiana. The full word ALREADY resolves lexically; the abbreviation cannot — 'parma'/'parmi' share no token with 'parmigiana', so all three of these phrases return ZERO candidates today (verified against the prod index). The target is the cooked AUSNUT dish at 219 kcal/100g, so there is no raw/cooked shift. Deliberately NOT aliasing the bare word 'parma': it also names Parma ham and Parmesan, and it is the one variant that already has a lexical hit."
+  },
+  {
+    "alias": "toast",
+    "food": "Bread, white, commercial, toasted",
+    "why": "identify splits \"X on toast\" into components and emits the bare food \"toast\". That guess returned `French toast, plain` (202 kcal) — an egg-battered fried dish, not toast — with `Prawn toast` at rank 3, because `French toast, plain` heads on the token \"toast\" and so collects headBonus, while the correct `Bread, ..., toasted` rows score precision 0: \"toasted\" sits outside the first two comma segments the identity is taken from (kora#470, same class as kora#219). Both directions for fixing that in the ranker were measured net-harmful and reverted, so this is the sanctioned interim. Target is the AUSNUT commercial white loaf at 297 kcal/100g — shop-bought is what people eat, and every plain toasted bread row sits in a ~253-315 band, so the choice within it is not load-bearing. Safe at auto tier because \"toast\" has exactly one meaning here: a user who means the fried dish says \"french toast\", which is a different alias key and does not match."
+  },
+  {
+    "alias": "flat white",
+    "food": "Flat white, full cream milk",
+    "why": "kora#219's last open item. `flat white` returned `Iced Flat White` (Pablo&Rusty's) — the wrong drink — at CONFIRM tier, because the branded row is shorter than the generic and all three lexical signals favour the shorter string. Both ranker-side fixes for that were measured net harmful and reverted, so an alias is the sanctioned route.\n\nTarget is deliberately NOT the better-provenance AUSNUT row. `Coffee, flat white/cappuccino/latte, single shot & cow's milk` (48.0 kcal/100g) has serving_units=[] and serving_grams=0, so a portion of \"1 cup\" falls through to the 100g default and logs ~48 kcal for a drink that is ~240ml. This row carries a 240g serving, so the same phrase logs ~110 kcal, and its density (46.0) is corroborated by that AUSNUT row to within 5%. Provenance user_estimate is one of only 11 such rows — a small hand-added set for common items the reference data sizes badly, not user-generated noise.\n\nSafe at auto tier: a flat white is espresso and steamed milk, unambiguously. Milk choice moves it ~30-50 kcal at the extremes, and full cream is the default. Deliberately NOT aliasing `iced coffee`: in Australia that is a cafe drink OR a bottled milk drink at very different densities, which is real ambiguity to ask about rather than settle at 1.0 — the same reasoning that leaves bare `chips` alone."
+  },
+  {
+    "alias": "kebab",
+    "food": "Kebab wrap, meat, with salad, takeaway",
+    "why": "AU takeaway staple. `kebab` returned the OFF row `10 kebabs` (153.3 kcal/100g) — a packaged product, not the thing anyone means. No lexical signal separates them: the branded row is shorter and wins on trigram, the shape kora#219 measured and could not fix by scoring.\n\nTarget carries a real serving (300g, plus a `wrap` unit), so a kebab logs ~577 kcal rather than falling through to the 100g default — the trap the `hot chips` retarget documents.\n\n`meat` over `chicken` because unqualified \"kebab\" in Australia most often means the mixed meat one; they are 192.2 vs 160.9 kcal/100g, ~19% apart, which is inside the noise of any food estimate and far closer than the branded row it replaces. `with salad` over `with salad & cheese` because cheese is an addition someone asks for, not the default.\n\nNOT aliasing `souvlaki`: the index has no generic souvlaki at all, only branded products (Coles seasoned strips, Mission souvlaki bread, a high-protein wrap). That is a data gap, and pointing it at a kebab wrap would settle a DIFFERENT food at score 1.0."
   }
 ]
