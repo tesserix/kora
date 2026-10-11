@@ -60,7 +60,10 @@ func archiveUser(t *testing.T, db *gorm.DB) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
 	require.NoError(t, db.Exec("INSERT INTO users (id,firebase_uid,email) VALUES (?,?,?)", id, "archive-"+id.String(), id.String()+"@test.invalid").Error)
-	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE id = ?", id) })
+	t.Cleanup(func() {
+		require.NoError(t, db.Exec("DELETE FROM users WHERE id = ?", id).Error)
+		require.NoError(t, db.Exec("DELETE FROM photo_object_deletions WHERE object_key LIKE ?", "captures/"+id.String()+"/%").Error)
+	})
 	return id
 }
 func TestArchivePersistsNormalizedPhotoAndAnalysis(t *testing.T) {

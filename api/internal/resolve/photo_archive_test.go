@@ -56,7 +56,10 @@ func TestPhotoArchiveHTTPBoundary(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			owner := uuid.New()
 			require.NoError(t, db.Exec("INSERT INTO users(id,firebase_uid,email) VALUES (?,?,?)", owner, "archive-http-"+owner.String(), owner.String()+"@test.invalid").Error)
-			t.Cleanup(func() { db.Exec("DELETE FROM users WHERE id = ?", owner) })
+			t.Cleanup(func() {
+				require.NoError(t, db.Exec("DELETE FROM users WHERE id = ?", owner).Error)
+				require.NoError(t, db.Exec("DELETE FROM photo_object_deletions WHERE object_key LIKE ?", "captures/"+owner.String()+"/%").Error)
+			})
 			objects := &archiveObjects{fail: tc.fail}
 			tp := &stubTP{photo: ai.Resolution{Tier: ai.TierFollowUp}}
 			h := NewHandler(tp, nil).WithPhotoArchive(capturemedia.New(db, objects))
