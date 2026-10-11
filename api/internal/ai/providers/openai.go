@@ -185,7 +185,7 @@ func (p OpenAIProvider) IdentifyText(ctx context.Context, phrase string) ([]ai.G
 func (p OpenAIProvider) IdentifyPhoto(ctx context.Context, image []byte, mime string) ([]ai.Guess, ai.Usage, error) {
 	dataURL := fmt.Sprintf("data:%s;base64,%s", mime, base64.StdEncoding.EncodeToString(image))
 	data, usage, err := p.generateJSON(ctx, p.model, callTypeIdentifyPhoto,
-		identifySystemPrompt,
+		photoIdentifySystemPrompt,
 		[]openai.ChatCompletionContentPartUnionParam{
 			openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{URL: dataURL}),
 		},

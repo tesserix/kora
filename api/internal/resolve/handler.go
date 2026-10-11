@@ -20,6 +20,7 @@ import (
 	"github.com/tesserix/kora/api/internal/ai"
 	"github.com/tesserix/kora/api/internal/capturemedia"
 	"github.com/tesserix/kora/api/internal/httpx"
+	"github.com/tesserix/kora/api/internal/labelocr"
 	"github.com/tesserix/kora/api/internal/nutrition"
 	"github.com/tesserix/kora/api/internal/user"
 )
@@ -96,6 +97,7 @@ type BarcodeResolver func(ctx context.Context, code string) (*nutrition.FoodItem
 
 type Handler struct {
 	tp       TextPhotoResolver
+	photo    labelocr.PhotoVision
 	bc       BarcodeResolver
 	outcomes ai.OutcomeSink
 	photos   *capturemedia.Service
@@ -103,6 +105,11 @@ type Handler struct {
 
 func NewHandler(tp TextPhotoResolver, bc BarcodeResolver) Handler {
 	return Handler{tp: tp, bc: bc}
+}
+
+func (h Handler) WithPhotoEvidence(reader labelocr.Reader, decision labelocr.PhotoDecider, reviewer labelocr.Reviewer, budget labelocr.Budget) Handler {
+	h.photo = labelocr.NewPhotoResolver(reader, decision, reviewer, h.tp, budget)
+	return h
 }
 
 func (h Handler) WithPhotoArchive(photos *capturemedia.Service) Handler {
@@ -236,7 +243,11 @@ func (h Handler) ResolvePhoto(c *gin.Context) {
 		}
 		mime = "image/jpeg"
 	}
-	res, err := h.tp.ResolvePhoto(c.Request.Context(), uid, buf, mime)
+	photoResolver := h.photo
+	if photoResolver == nil {
+		photoResolver = h.tp
+	}
+	res, err := photoResolver.ResolvePhoto(c.Request.Context(), uid, buf, mime)
 	res.ResolutionID = &id
 	if h.photos != nil {
 		if archiveErr := h.photos.Finish(c.Request.Context(), uid, id, res, err); archiveErr != nil {
@@ -248,7 +259,14 @@ func (h Handler) ResolvePhoto(c *gin.Context) {
 		}
 	}
 	if err != nil {
-		httpx.RespondServiceError(c, err)
+		switch {
+		case errors.Is(err, labelocr.ErrDecisionUnavailable):
+			httpx.Error(c, http.StatusServiceUnavailable, "ai_decision_unavailable", "AI analysis is temporarily unavailable. Please try again.")
+		case errors.Is(err, labelocr.ErrBudgetExhausted):
+			httpx.Error(c, http.StatusTooManyRequests, "budget_exhausted", "You've reached your AI usage limit.")
+		default:
+			httpx.RespondServiceError(c, err)
+		}
 		return
 	}
 	res.ResolutionID = &id

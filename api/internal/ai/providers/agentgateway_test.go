@@ -256,3 +256,22 @@ func TestAgentGatewayProviderComposesVerifiedTokenAndUserIDHeaders(t *testing.T)
 	assert.Equal(t, "Bearer firebase-user-token", got.Get("X-Kora-End-User-Token"))
 	assert.Equal(t, uid.String(), got.Get("X-Kora-User-Id"))
 }
+
+func TestPhotoReviewRequiresIndependentModel(t *testing.T) {
+	for _, model := range []string{"gemini-3.5-flash", "claude-sonnet-5-5"} {
+		t.Run(model, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				require.Equal(t, "identify_photo_review", r.Header.Get("X-Kora-AI-Capability"))
+				w.Header().Set("Content-Type", "application/json")
+				require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"id": "synthetic", "model": model, "choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": `{"guesses":[]}`}}}, "usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1}}))
+			}))
+			defer server.Close()
+			_, _, err := NewPhotoReviewProvider("test-key", server.URL+"/v1", "kora-auto").IdentifyPhoto(t.Context(), []byte("image"), "image/jpeg")
+			if model == "claude-sonnet-5-5" {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+		})
+	}
+}

@@ -102,19 +102,29 @@ type PortionSource interface {
 	LastPortionForPhrase(ctx context.Context, userID uuid.UUID, phrase string) (float64, bool, error)
 }
 
+type PhotoIdentifier interface {
+	IdentifyPhoto(context.Context, uuid.UUID, []byte, string) ([]Guess, error)
+}
+
+func (r Resolver) WithPhotoIdentifier(identifier PhotoIdentifier) Resolver {
+	r.photoIdentifier = identifier
+	return r
+}
+
 // Resolver is the resolution engine: it turns a free-text phrase or a photo
 // into a Resolution. All nutrition numbers in the result come from
 // nutrition.FoodItem rows looked up via the foods repository — never from
 // the AI provider, whose Guess/IngredientGuess types structurally carry no
 // nutrition numbers at all.
 type Resolver struct {
-	provider      Provider
-	foods         nutrition.Repository
-	cache         Cache
-	meter         Meter
-	portionSource PortionSource
-	locales       LocaleSource
-	outcomes      OutcomeSink
+	photoIdentifier PhotoIdentifier
+	provider        Provider
+	foods           nutrition.Repository
+	cache           Cache
+	meter           Meter
+	portionSource   PortionSource
+	locales         LocaleSource
+	outcomes        OutcomeSink
 }
 
 // LocaleSource reports the food locale to prefer for a user (kora#212 Phase 4).
@@ -303,12 +313,22 @@ func (r Resolver) resolveAliasPortion(ctx context.Context, userID uuid.UUID, phr
 // the image's content hash instead of a phrase.
 func (r Resolver) ResolvePhoto(ctx context.Context, userID uuid.UUID, image []byte, mime string) (Resolution, error) {
 	sum := sha256.Sum256(image)
-	key := CacheKey("photo", userID, hex.EncodeToString(sum[:]))
+	mode := "photo"
+	if r.photoIdentifier != nil {
+		mode = "photo-evidence-v1"
+	}
+	key := CacheKey(mode, userID, hex.EncodeToString(sum[:]))
 	// The empty phrase is load-bearing, not a placeholder: a photo says nothing
 	// that identify could have discarded, so phraseCoverage returns 1 and the
 	// reduction factor is exactly 1.0 — this path behaves as it always has.
 	return r.resolve(ctx, userID, key, "", modePhoto,
-		func(c context.Context) ([]Guess, Usage, error) { return r.provider.IdentifyPhoto(c, image, mime) },
+		func(c context.Context) ([]Guess, Usage, error) {
+			if r.photoIdentifier != nil {
+				guesses, err := r.photoIdentifier.IdentifyPhoto(c, userID, image, mime)
+				return guesses, Usage{}, err
+			}
+			return r.provider.IdentifyPhoto(c, image, mime)
+		},
 		func(guesses []Guess) string {
 			if len(guesses) == 0 {
 				return ""
