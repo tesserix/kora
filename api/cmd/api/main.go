@@ -32,6 +32,7 @@ import (
 	"github.com/tesserix/kora/api/internal/auth"
 	"github.com/tesserix/kora/api/internal/billing"
 	"github.com/tesserix/kora/api/internal/bodyread"
+	"github.com/tesserix/kora/api/internal/capturemedia"
 	"github.com/tesserix/kora/api/internal/challenges"
 	"github.com/tesserix/kora/api/internal/config"
 	"github.com/tesserix/kora/api/internal/database"
@@ -112,6 +113,18 @@ func main() {
 	}
 
 	schedCtx, schedCancel := context.WithCancel(context.Background())
+	if cfg.CaptureBucket != "" {
+		objects, err := capturemedia.NewGCS(schedCtx, cfg.CaptureBucket)
+		if err != nil {
+			logger.Error("capture archive initialization failed")
+			os.Exit(1)
+		}
+		archive := capturemedia.New(db, objects)
+		if resolveHandler != nil {
+			*resolveHandler = resolveHandler.WithPhotoArchive(archive)
+		}
+		go archive.Run(schedCtx)
+	}
 	if cfg.SchedulerInterval > 0 {
 		loc, lerr := time.LoadLocation(user.DefaultTimezone)
 		if lerr != nil {

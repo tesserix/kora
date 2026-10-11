@@ -454,6 +454,46 @@ test("tapping a mode pill switches mode and changes the idle affordance", async 
   expect(queryByTestId("capture-idle-scan")).toBeNull();
 });
 
+test("analyzing locks capture controls but leaves cancel available", async () => {
+  const onSend = jest.fn();
+  const onCapturePhoto = jest.fn();
+  const onModeChange = jest.fn();
+  const onChangeText = jest.fn();
+  const onCancelResolve = jest.fn();
+  const screen = await render(<CaptureBody {...noopBodyProps} stage="analyzing" resolution={null}
+    text="fish curry" onSend={onSend} onCapturePhoto={onCapturePhoto}
+    onModeChange={onModeChange} onChangeText={onChangeText} onCancelResolve={onCancelResolve} />);
+  for (const name of ["Photo", "Voice", "Scan", "Type", "Quick photo capture", "Send"]) {
+    const button = screen.getByRole("button", { name });
+    expect(button).toBeDisabled();
+    await fireEvent.press(button);
+  }
+  const input = screen.getByLabelText("Tell Otto what you ate");
+  expect(input).toBeDisabled();
+  await fireEvent.changeText(input, "second meal");
+  await fireEvent(input, "submitEditing");
+  expect(onSend).not.toHaveBeenCalled();
+  expect(onCapturePhoto).not.toHaveBeenCalled();
+  expect(onModeChange).not.toHaveBeenCalled();
+  expect(onChangeText).not.toHaveBeenCalled();
+  await fireEvent.press(screen.getByRole("button", { name: "Cancel" }));
+  expect(onCancelResolve).toHaveBeenCalledTimes(1);
+});
+
+test("a selected meal photo appears in the conversation before and after its result", async () => {
+  (ImagePicker.launchImageLibraryAsync as jest.Mock).mockResolvedValueOnce({
+    canceled: false,
+    assets: [{ uri: "file://fish.jpg", fileName: "fish.jpg", mimeType: "image/jpeg" }],
+  });
+  const screen = await render(<CaptureScreen />);
+  await fireEvent.press(await screen.findByRole("button", { name: "Choose from library" }));
+  const photo = await screen.findByLabelText("Uploaded meal photo");
+  expect(photo.props.source).toEqual({ uri: "file://fish.jpg" });
+  const [, options] = mockResolvePhotoMutate.mock.calls[0];
+  await act(async () => options.onSuccess(makeResolution()));
+  expect(screen.getByLabelText("Uploaded meal photo").props.source).toEqual({ uri: "file://fish.jpg" });
+});
+
 test("analyzing stage shows the spinner", async () => {
   const { getByTestId } = await render(
     <CaptureBody {...noopBodyProps} stage="analyzing" resolution={null} />,
@@ -739,16 +779,13 @@ describe("Type mode", () => {
   });
 
   test("a response that arrives after Cancel does not apply", async () => {
-    // The mock isPending flag is static, not driven by mutate() itself, so
-    // it's set true up front — the composer (and its Send button) render
-    // regardless of stage, so the send below still fires normally.
-    mockCaptureMessageIsPending = true;
-    const { findByText, findByLabelText, queryByText } = await render(<CaptureScreen />);
+    const screen = await render(<CaptureScreen />);
+    const { findByText, findByLabelText, queryByText } = screen;
     await fireEvent.press(await findByText("Type"));
     const input = await findByLabelText("Tell Otto what you ate");
     await fireEvent.changeText(input, "grilled chicken and rice");
+    mockCaptureMessageIsPending = true;
     await fireEvent.press(await findByLabelText("Send"));
-
     await fireEvent.press(await findByLabelText("Cancel"));
 
     const [, options] = mockCaptureMessageMutate.mock.calls[0];

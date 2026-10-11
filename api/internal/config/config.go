@@ -139,6 +139,7 @@ type Config struct {
 	AssetsBucket        string
 	AssetsPublicBaseURL string
 	AssetsLocalDir      string
+	CaptureBucket       string
 }
 
 func Load() (Config, error) {
@@ -192,6 +193,7 @@ func Load() (Config, error) {
 		AssetsBucket:             os.Getenv("ASSETS_BUCKET"),
 		AssetsPublicBaseURL:      os.Getenv("ASSETS_PUBLIC_BASE_URL"),
 		AssetsLocalDir:           os.Getenv("ASSETS_LOCAL_DIR"),
+		CaptureBucket:            os.Getenv("CAPTURE_BUCKET"),
 	}
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("config: DATABASE_URL is required")

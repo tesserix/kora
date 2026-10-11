@@ -13,6 +13,7 @@ interface Props {
   plan: MealPlanProposal;
   onApprove: () => void;
   approving?: boolean;
+  disabled?: boolean;
 }
 
 // The origin is fixed in code and only the meal name is interpolated, so a
@@ -132,7 +133,7 @@ function formatStartsOn(startsOn: string | null): string {
   });
 }
 
-export function PlanCard({ plan, onApprove, approving = false }: Props) {
+export function PlanCard({ plan, onApprove, approving = false, disabled = false }: Props) {
   const approved = plan.accepted_at !== null;
   const startsOn = formatStartsOn(plan.starts_on ?? null);
   return (
@@ -202,8 +203,8 @@ export function PlanCard({ plan, onApprove, approving = false }: Props) {
           testID="plan-card-approve"
           accessibilityRole="button"
           accessibilityLabel={approving ? "Approving plan" : "Approve this plan"}
-          accessibilityState={{ disabled: approving }}
-          disabled={approving}
+          accessibilityState={{ disabled: approving || disabled }}
+          disabled={approving || disabled}
           onPress={onApprove}
           style={(state) => ({
             flexDirection: "row",
@@ -214,7 +215,7 @@ export function PlanCard({ plan, onApprove, approving = false }: Props) {
             borderRadius: 14,
             marginTop: 4,
             backgroundColor: T.accent,
-            opacity: state.pressed ? 0.85 : 1,
+            opacity: disabled ? 0.45 : state.pressed ? 0.85 : 1,
           })}
         >
           {approving ? (
