@@ -54,6 +54,18 @@ const SOURCES: ReadonlyArray<Source> = [
     licence: "Public domain",
     url: USDA_URL,
   },
+  {
+    name: "UK Composition of Foods Integrated Dataset",
+    detail: "CoFID 2021, Public Health England. UK food composition data, adapted for Kora. Contains public sector information licensed under the Open Government Licence v3.0.",
+    licence: "Open Government Licence v3.0",
+    url: "https://www.gov.uk/government/publications/composition-of-foods-integrated-dataset-cofid",
+  },
+  {
+    name: "Standard Tables of Food Composition in Japan",
+    detail: "Ministry of Education, Culture, Sports, Science and Technology (MEXT). English 2015 edition, adapted for Kora; estimated source values remain estimates.",
+    licence: "MEXT Public Data License · CC BY 4.0 compatible",
+    url: "https://www.mext.go.jp/en/policy/science_technology/policy/title01/detail01/sdetail01/sdetail01/1385122.htm",
+  },
 ];
 
 export default function AboutScreen() {

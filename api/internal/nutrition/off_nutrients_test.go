@@ -19,6 +19,7 @@ func TestBarcodeLookupRetainsNutrientsInCanonicalUnits(t *testing.T) {
 	item, err := (HTTPOFFClient{BaseURL: srv.URL, Client: srv.Client()}).Fetch(t.Context(), "4000000000000")
 	require.NoError(t, err)
 	require.NotNil(t, item)
+	require.Equal(t, LocaleJP, item.Locale)
 	encoded, err := json.Marshal(item)
 	require.NoError(t, err)
 	var got map[string]any

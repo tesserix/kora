@@ -72,7 +72,8 @@ func TestItemRequiresAnExactCountryTag(t *testing.T) {
 
 func TestItemCountsInternationalNamesInCharacters(t *testing.T) {
 	raw := strings.ReplaceAll(goodAU, "Weet-Bix", strings.Repeat("食", 50))
+	raw = strings.ReplaceAll(raw, "en:australia", "en:japan")
 	item, ok := line(t, raw).item(DefaultCountries())
 	require.True(t, ok, "50 characters must clear the same 120-character bar as the snapshot converter")
-	require.Equal(t, nutrition.LocaleAU, item.Locale)
+	require.Equal(t, nutrition.LocaleJP, item.Locale)
 }

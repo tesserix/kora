@@ -35,6 +35,33 @@ func LocaleFromTimezone(tz string) Locale {
 	// to Fiji, almost none of which is New Zealand.
 	case normalized == "pacific/auckland", normalized == "pacific/chatham":
 		return LocaleNZ
+	case normalized == "europe/london", normalized == "europe/belfast", normalized == "gb", normalized == "gb-eire":
+		return LocaleGB
+	case normalized == "europe/paris":
+		return LocaleFR
+	case normalized == "asia/tokyo", normalized == "japan":
+		return LocaleJP
+	case normalized == "asia/singapore", normalized == "singapore":
+		return LocaleSG
+	case normalized == "asia/bangkok":
+		return LocaleTH
+	case normalized == "asia/dubai":
+		return LocaleAE
+	case normalized == "africa/johannesburg":
+		return LocaleZA
+	case strings.HasPrefix(normalized, "brazil/"), normalized == "america/sao_paulo", normalized == "america/manaus",
+		normalized == "america/fortaleza", normalized == "america/recife", normalized == "america/bahia",
+		normalized == "america/belem", normalized == "america/cuiaba", normalized == "america/porto_velho",
+		normalized == "america/boa_vista", normalized == "america/rio_branco", normalized == "america/noronha",
+		normalized == "america/araguaina", normalized == "america/maceio", normalized == "america/santarem",
+		normalized == "america/campo_grande", normalized == "america/eirunepe":
+		return LocaleBR
+	case strings.HasPrefix(normalized, "mexico/"), normalized == "america/mexico_city", normalized == "america/cancun",
+		normalized == "america/tijuana", normalized == "america/monterrey", normalized == "america/merida",
+		normalized == "america/mazatlan", normalized == "america/chihuahua", normalized == "america/hermosillo",
+		normalized == "america/matamoros", normalized == "america/ojinaga", normalized == "america/bahia_banderas",
+		normalized == "america/ciudad_juarez":
+		return LocaleMX
 	case strings.HasPrefix(normalized, "america/"), normalized == "us/eastern",
 		normalized == "us/central", normalized == "us/mountain", normalized == "us/pacific":
 		return LocaleUS

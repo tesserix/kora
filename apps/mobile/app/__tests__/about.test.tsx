@@ -41,3 +41,15 @@ test("the page states that Kora never invents a figure", async () => {
   // source row, never derived client-side or produced by the model.
   expect(getByText(/never invents a calorie figure/i)).toBeTruthy();
 });
+
+test("UK and Japanese reference data are attributed with their reuse terms", async () => {
+  const { getByText, getByLabelText } = await render(<AboutScreen />);
+  expect(getByText("UK Composition of Foods Integrated Dataset")).toBeTruthy();
+  expect(getByText("Open Government Licence v3.0")).toBeTruthy();
+  expect(getByText("Standard Tables of Food Composition in Japan")).toBeTruthy();
+  expect(getByText(/MEXT.*CC BY 4.0/i)).toBeTruthy();
+  const spy = jest.spyOn(Linking, "openURL").mockResolvedValue(undefined as never);
+  await fireEvent.press(getByLabelText(/UK Composition of Foods Integrated Dataset, opens/i));
+  expect(spy).toHaveBeenCalledWith("https://www.gov.uk/government/publications/composition-of-foods-integrated-dataset-cofid");
+  spy.mockRestore();
+});

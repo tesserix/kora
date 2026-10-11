@@ -56,6 +56,15 @@ COUNTRIES = {
     "au": ("en:australia", "AU", "off_au.json"),
     "nz": ("en:new-zealand", "NZ", "off_nz.json"),
     "in": ("en:india", "IN", "off_in.json"),
+    "gb": ("en:united-kingdom", "GB", "off_gb.json"),
+    "fr": ("en:france", "FR", "off_fr.json"),
+    "br": ("en:brazil", "BR", "off_br.json"),
+    "mx": ("en:mexico", "MX", "off_mx.json"),
+    "za": ("en:south-africa", "ZA", "off_za.json"),
+    "ae": ("en:united-arab-emirates", "AE", "off_ae.json"),
+    "jp": ("en:japan", "JP", "off_jp.json"),
+    "sg": ("en:singapore", "SG", "off_sg.json"),
+    "th": ("en:thailand", "TH", "off_th.json"),
 }
 
 # Resolve by verified names; the export can insert or reorder columns.
@@ -114,7 +123,15 @@ def main():
         default="data/food",
         help="directory the per-country JSON files are written to",
     )
+    ap.add_argument(
+        "--limit-per-country",
+        type=int,
+        default=0,
+        help="optional snapshot cap; 0 keeps every eligible product",
+    )
     args = ap.parse_args()
+    if args.limit_per_country < 0:
+        ap.error("--limit-per-country must be non-negative")
     slugs = [s.strip() for s in args.countries.split(",") if s.strip()]
     unknown = [s for s in slugs if s not in COUNTRIES]
     if unknown:
@@ -211,6 +228,16 @@ def main():
             dropped_dupe += 1
 
     for slug in slugs:
+        if args.limit_per_country:
+            kept[slug].sort(
+                key=lambda item: (
+                    -sum(key in item for key in OFF_FIELDS),
+                    item["name"].casefold(),
+                    item["brand"].casefold(),
+                    item.get("barcode", ""),
+                )
+            )
+            kept[slug] = kept[slug][: args.limit_per_country]
         path = os.path.join(args.outdir, COUNTRIES[slug][2])
         with open(path, "w", encoding="utf-8") as f:
             json.dump(kept[slug], f, indent=1, ensure_ascii=False)

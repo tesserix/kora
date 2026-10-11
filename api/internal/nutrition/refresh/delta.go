@@ -29,20 +29,12 @@ import (
 
 // Country is one OFF countries_tags value and the locale its products carry —
 // the runtime mirror of off_convert.py's COUNTRIES table.
-type Country struct {
-	Tag    string
-	Locale nutrition.Locale
-}
+type Country = nutrition.OFFCountry
 
-// DefaultCountries matches the committed OFF slices (off_au/off_nz/off_in).
-// Order matters: a trans-Tasman product takes the FIRST matching locale, the
-// same priority the sorted-filename collision rule gives the snapshots.
+// DefaultCountries follows the committed OFF slices' sorted filename order.
+// A product sold in several countries takes the first matching locale.
 func DefaultCountries() []Country {
-	return []Country{
-		{Tag: "en:australia", Locale: nutrition.LocaleAU},
-		{Tag: "en:new-zealand", Locale: nutrition.LocaleNZ},
-		{Tag: "en:india", Locale: nutrition.LocaleIN},
-	}
+	return nutrition.OFFCountries()
 }
 
 // Client reads OpenFoodFacts delta exports.

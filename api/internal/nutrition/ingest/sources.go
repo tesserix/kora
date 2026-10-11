@@ -93,6 +93,17 @@ var sources = []Source{
 	// 28 states and the UTs. Sorts after au_in_dishes.json, which wins any name
 	// overlap; the converter also excludes those names outright.
 	{"in_dishes.json", nutrition.ProvenanceCurated},
+	{"cofid_2021.json", nutrition.ProvenanceCoFID},
+	{"mext_2015.json", nutrition.ProvenanceMEXT},
+	{"off_gb.json", nutrition.ProvenanceOFF},
+	{"off_fr.json", nutrition.ProvenanceOFF},
+	{"off_br.json", nutrition.ProvenanceOFF},
+	{"off_mx.json", nutrition.ProvenanceOFF},
+	{"off_za.json", nutrition.ProvenanceOFF},
+	{"off_ae.json", nutrition.ProvenanceOFF},
+	{"off_jp.json", nutrition.ProvenanceOFF},
+	{"off_sg.json", nutrition.ProvenanceOFF},
+	{"off_th.json", nutrition.ProvenanceOFF},
 }
 
 // Sources resolves the source table against dir, returning the path→provenance

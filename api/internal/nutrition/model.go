@@ -30,6 +30,8 @@ const (
 	ProvenanceAUSNUT       Provenance = "ausnut"
 	ProvenanceOFF          Provenance = "off"
 	ProvenanceUSDA         Provenance = "usda"
+	ProvenanceCoFID        Provenance = "cofid"
+	ProvenanceMEXT         Provenance = "mext"
 	ProvenanceLabelOCR     Provenance = "label_ocr"
 	ProvenanceUserEstimate Provenance = "user_estimate"
 	// ProvenanceCurated marks hand-authored entries — dishes no public dataset
@@ -53,6 +55,15 @@ const (
 	LocaleAU Locale = "AU"
 	LocaleIN Locale = "IN"
 	LocaleUS Locale = "US"
+	LocaleGB Locale = "GB"
+	LocaleFR Locale = "FR"
+	LocaleBR Locale = "BR"
+	LocaleMX Locale = "MX"
+	LocaleZA Locale = "ZA"
+	LocaleAE Locale = "AE"
+	LocaleJP Locale = "JP"
+	LocaleSG Locale = "SG"
+	LocaleTH Locale = "TH"
 	// LocaleNZ exists for the OFF New Zealand slice; NZ has no national
 	// reference rows of its own yet (FOODfiles is registration-gated), so NZ
 	// users also lean on AU rows — see LocalePrefers.
@@ -86,6 +97,10 @@ func DeriveLocale(provenance Provenance) Locale {
 		return LocaleIN
 	case ProvenanceUSDA:
 		return LocaleUS
+	case ProvenanceCoFID:
+		return LocaleGB
+	case ProvenanceMEXT:
+		return LocaleJP
 	default:
 		return LocaleUnknown
 	}
