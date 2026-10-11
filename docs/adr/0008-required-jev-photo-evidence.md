@@ -1,6 +1,6 @@
 # Required Jev decisions and OCR evidence
 
-Status: implemented locally; automated and provider-contract checks passed; production rollout pending.
+Status: accepted. Deployment and live verification are tracked in Kora PR #596 and infrastructure PRs #1344 and the processor release PR.
 
 ## Boundaries and budgets
 
@@ -63,8 +63,9 @@ logged. Image retention and account deletion remain governed by ADR-0007.
 
 First build and verify an external-processor image supporting mandatory Jev and
 16 MiB buffering. Pin its digest before enabling credentials/egress and the
-registry-owned fail-closed policy. The infrastructure draft still has the old
-digest and MUST NOT be applied as-is. Test synthetic chat, image, speech, workload
+registry-owned fail-closed policy. Cloud Build `0f006cff-692a-4151-bea1-68d5ce0fbeb6` verified and published
+processor digest `sha256:4e58d6ac0922db2954d24f6f81d7624d1f99944002e8ea7415b25d37133643db`.
+Deploy that processor before the gateway policy; the previous image does not enforce Jev. Test synthetic chat, image, speech, workload
 embeddings and induced Jev failure. Then release the OCR-first API and verify
 upload, analysis, archive and diary behavior through the real API.
 
