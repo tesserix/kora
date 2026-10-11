@@ -47,6 +47,8 @@ import json
 import os
 import sys
 
+from nutrients import OFF_FIELDS, optional_nutrients
+
 # Country slug → (OFF countries_tags entry, row locale, output file). The
 # locale values must match the nutrition.Locale constants; the filenames must
 # match ingest/sources.go.
@@ -56,22 +58,7 @@ COUNTRIES = {
     "in": ("en:india", "IN", "off_in.json"),
 }
 
-# 0-indexed positions in the export's 211-column tab-separated header.
-# Verified against the header row at runtime — see check_header, which fails
-# loudly rather than silently importing the wrong nutrient into a health app.
-COL = {
-    "code": 0,
-    "product_name": 10,
-    "brands": 18,
-    "countries_tags": 40,
-    "serving_quantity": 51,
-    "kcal": 89,
-    "fat": 92,
-    "carbs": 129,
-    "fiber": 146,
-    "protein": 150,
-}
-
+# Resolve by verified names; the export can insert or reorder columns.
 EXPECTED = {
     "code": "code",
     "product_name": "product_name",
@@ -98,13 +85,12 @@ MAX_SERVING_G = 500
 
 
 def check_header(header):
-    for field, idx in COL.items():
-        if idx >= len(header) or header[idx] != EXPECTED[field]:
-            actual = header[idx] if idx < len(header) else "<out of range>"
-            raise SystemExit(
-                f"off_convert: column {idx} is {actual!r}, expected {EXPECTED[field]!r}. "
-                "OpenFoodFacts has changed the export layout — remap COL."
-            )
+    columns = {}
+    for field, name in EXPECTED.items():
+        if header.count(name) != 1:
+            raise SystemExit(f"off_convert: expected exactly one {name!r} column.")
+        columns[field] = header.index(name)
+    return columns
 
 
 def number(text):
@@ -118,42 +104,56 @@ def number(text):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--countries", default="au",
-                    help="comma-separated country slugs: " + ",".join(COUNTRIES))
-    ap.add_argument("--outdir", default="data/food",
-                    help="directory the per-country JSON files are written to")
+    ap.add_argument(
+        "--countries",
+        default="au",
+        help="comma-separated country slugs: " + ",".join(COUNTRIES),
+    )
+    ap.add_argument(
+        "--outdir",
+        default="data/food",
+        help="directory the per-country JSON files are written to",
+    )
     args = ap.parse_args()
     slugs = [s.strip() for s in args.countries.split(",") if s.strip()]
     unknown = [s for s in slugs if s not in COUNTRIES]
     if unknown:
-        raise SystemExit(f"off_convert: unknown countries {unknown}; know {sorted(COUNTRIES)}")
+        raise SystemExit(
+            f"off_convert: unknown countries {unknown}; know {sorted(COUNTRIES)}"
+        )
 
     reader = csv.reader(sys.stdin, delimiter="\t", quoting=csv.QUOTE_NONE)
-    check_header(next(reader))
+    header = next(reader)
+    col = check_header(header)
+    optional_columns = {
+        name: header.index(name) for name, _ in OFF_FIELDS.values() if name in header
+    }
 
     kept = {s: [] for s in slugs}
     seen = {s: set() for s in slugs}
-    scanned = dropped_no_country = dropped_incomplete = dropped_implausible = dropped_dupe = 0
+    scanned = dropped_no_country = dropped_incomplete = dropped_implausible = (
+        dropped_dupe
+    ) = 0
 
     for row in reader:
         scanned += 1
-        if len(row) <= COL["protein"]:
+        if len(row) <= max(col.values()):
             dropped_incomplete += 1
             continue
 
-        tags = row[COL["countries_tags"]]
+        tags = set(row[col["countries_tags"]].split(","))
         matched = [s for s in slugs if COUNTRIES[s][0] in tags]
         if not matched:
             dropped_no_country += 1
             continue
 
-        name = row[COL["product_name"]].strip()
+        name = row[col["product_name"]].strip()
         if not name or len(name) > 120:
             dropped_incomplete += 1
             continue
 
-        kcal = number(row[COL["kcal"]])
-        macros = {k: number(row[COL[k]]) for k in ("protein", "carbs", "fat", "fiber")}
+        kcal = number(row[col["kcal"]])
+        macros = {k: number(row[col[k]]) for k in ("protein", "carbs", "fat", "fiber")}
         # All four macros required, not just energy: a row without them cannot
         # answer a nutrition question, and an incomplete row that wins a name
         # match is worse than no row at all.
@@ -173,7 +173,7 @@ def main():
             dropped_implausible += 1
             continue
 
-        brand = row[COL["brands"]].strip().split(",")[0].strip()
+        brand = row[col["brands"]].strip().split(",")[0].strip()
         key = (name.lower(), brand.lower())
 
         item = {
@@ -184,15 +184,19 @@ def main():
             "carbs_per_100g": round(macros["carbs"], 2),
             "fat_per_100g": round(macros["fat"], 2),
             "fiber_per_100g": round(macros["fiber"], 2),
+            **optional_nutrients(
+                {name: row[i] for name, i in optional_columns.items() if i < len(row)},
+                OFF_FIELDS,
+            ),
         }
 
-        serving = number(row[COL["serving_quantity"]])
+        serving = number(row[col["serving_quantity"]])
         if serving is not None and MIN_SERVING_G <= serving <= MAX_SERVING_G:
             item["serving_grams"] = round(serving, 1)
 
         # The barcode is why this source is worth more than its rows alone: it
         # feeds the scan path directly (internal/nutrition/barcode.go).
-        code = row[COL["code"]].strip()
+        code = row[col["code"]].strip()
         if code.isdigit() and 8 <= len(code) <= 14:
             item["barcode"] = code
 

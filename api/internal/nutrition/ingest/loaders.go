@@ -9,6 +9,7 @@ import (
 )
 
 type row struct {
+	nutrition.Nutrients
 	Name         string  `json:"name"`
 	Brand        string  `json:"brand"`
 	ServingDesc  string  `json:"serving_desc"`
@@ -85,6 +86,9 @@ func LoadFile(path, provenance string) ([]nutrition.FoodItem, error) {
 	}
 	var items []nutrition.FoodItem
 	for _, r := range rows {
+		if err := r.Nutrients.Validate(); err != nil {
+			return nil, fmt.Errorf("ingest: %s: %w", r.Name, err)
+		}
 		// Drop unnamed and NEGATIVE-energy rows only. A kcal of exactly 0 is a
 		// real measurement, not missing data, and conflating the two removed
 		// every zero-energy food from the index: water, tap water, plain
@@ -115,6 +119,7 @@ func LoadFile(path, provenance string) ([]nutrition.FoodItem, error) {
 			locale = nutrition.DeriveLocale(provenance)
 		}
 		item := nutrition.FoodItem{
+			Nutrients:      r.Nutrients,
 			Name:           name,
 			Brand:          brand,
 			Locale:         locale,

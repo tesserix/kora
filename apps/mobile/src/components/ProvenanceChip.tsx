@@ -2,8 +2,7 @@ import { View } from "react-native";
 import { AppText } from "./Text";
 import { useTheme } from "@/theme";
 import { UNKNOWN_PROVENANCE } from "@/api/types";
-
-const VERIFIED = new Set(["afcd", "off", "usda"]);
+import { foodProvenanceDescriptor } from "@/lib/foodProvenance";
 
 export function ProvenanceChip({ provenance }: { provenance: string }) {
   const { colors, radius, spacing, fontSize } = useTheme();
@@ -17,8 +16,9 @@ export function ProvenanceChip({ provenance }: { provenance: string }) {
   // silencing the disclaimer for it would be an accidental loss of a warning
   // this app should err on the side of keeping.
   if (provenance === UNKNOWN_PROVENANCE) return null;
-  const isVerified = VERIFIED.has(provenance);
-  const label = isVerified ? `${provenance.toUpperCase()} · verified` : "AI estimate ±15%";
+  const descriptor = foodProvenanceDescriptor(provenance);
+  const isVerified = descriptor === "Verified";
+  const label = isVerified ? `${provenance.toUpperCase()} · verified` : descriptor === "Recipe estimate" ? descriptor : "AI estimate ±15%";
   const bg = isVerified ? colors.secondary : colors.cardSecondary;
   const fg = isVerified ? colors.secondaryForeground : colors.mutedForeground;
   return (

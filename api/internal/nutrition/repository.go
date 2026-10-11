@@ -125,11 +125,16 @@ func (r Repository) SearchReferenceFoods(
 	}
 	var rows []referenceRow
 	vector := pgvector.NewVector(queryVec)
+	columns := make([]string, 0, len((Nutrients{}).Values()))
+	for column := range (Nutrients{}).Values() {
+		columns = append(columns, column)
+	}
+	sort.Strings(columns)
 	err := r.db.WithContext(ctx).Raw(`
 		SELECT id, name, brand, provenance, entity_type, locale, barcode,
 		       serving_desc, serving_grams, base_unit, serving_units,
 		       kcal_per_100g, protein_per_100g, carbs_per_100g,
-		       fat_per_100g, fiber_per_100g, created_at,
+		       fat_per_100g, fiber_per_100g, `+strings.Join(columns, ", ")+`, created_at,
 		       (embedding <=> ?) AS distance
 		FROM food_items
 		WHERE deleted_at IS NULL

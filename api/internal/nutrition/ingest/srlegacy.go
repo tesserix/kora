@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+
+	"github.com/tesserix/kora/api/internal/nutrition"
 )
 
 // USDA FoodData Central nutrient IDs. 1062 is Energy in kJ and is deliberately
@@ -100,6 +102,32 @@ func ConvertSRLegacy(r io.Reader, w io.Writer) (SRLegacyStats, error) {
 		}
 
 		rows = append(rows, row{
+			Nutrients: nutrition.Nutrients{
+				SugarPer100g:         srOptional(amounts, 2000),
+				SaturatedFatPer100g:  srOptional(amounts, 1258),
+				CholesterolMgPer100g: srOptional(amounts, 1253),
+				SodiumMgPer100g:      srOptional(amounts, 1093),
+				CalciumMgPer100g:     srOptional(amounts, 1087),
+				IronMgPer100g:        srOptional(amounts, 1089),
+				PotassiumMgPer100g:   srOptional(amounts, 1092),
+				MagnesiumMgPer100g:   srOptional(amounts, 1090),
+				PhosphorusMgPer100g:  srOptional(amounts, 1091),
+				ZincMgPer100g:        srOptional(amounts, 1095),
+				SeleniumUgPer100g:    srOptional(amounts, 1103),
+				IodineUgPer100g:      srOptional(amounts, 1100),
+				VitaminARAEUgPer100g: srOptional(amounts, 1106),
+				VitaminCMgPer100g:    srOptional(amounts, 1162),
+				VitaminDUgPer100g:    srOptional(amounts, 1114),
+				VitaminEMgPer100g:    srOptional(amounts, 1109),
+				VitaminKUgPer100g:    srOptional(amounts, 1185),
+				ThiaminMgPer100g:     srOptional(amounts, 1165),
+				RiboflavinMgPer100g:  srOptional(amounts, 1166),
+				NiacinMgPer100g:      srOptional(amounts, 1167),
+				VitaminB6MgPer100g:   srOptional(amounts, 1175),
+				VitaminB12UgPer100g:  srOptional(amounts, 1178),
+				FolateUgPer100g:      srOptional(amounts, 1177),
+				FolateDFEUgPer100g:   srOptional(amounts, 1190),
+			},
 			Name:           f.Description,
 			ServingDesc:    servingDesc,
 			ServingGrams:   servingGrams,
@@ -116,4 +144,12 @@ func ConvertSRLegacy(r io.Reader, w io.Writer) (SRLegacyStats, error) {
 		return stats, fmt.Errorf("srlegacy: encode: %w", err)
 	}
 	return stats, nil
+}
+
+func srOptional(amounts map[int]float64, id int) *float64 {
+	value, exists := amounts[id]
+	if !exists || value < 0 {
+		return nil
+	}
+	return &value
 }

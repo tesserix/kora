@@ -172,6 +172,7 @@ type Candidate struct {
 }
 
 type FoodItem struct {
+	Nutrients      `gorm:"embedded"`
 	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	Name           string    `json:"name"`
 	Brand          string    `json:"brand"`
@@ -219,7 +220,7 @@ func (f *FoodItem) deriveDietTags() {
 // BeforeSave runs for both creates and updates, so a rename retags the row.
 func (f *FoodItem) BeforeSave(*gorm.DB) error {
 	f.deriveDietTags()
-	return nil
+	return f.Nutrients.Validate()
 }
 
 // BeforeCreate types any row that reaches the database without an EntityType.

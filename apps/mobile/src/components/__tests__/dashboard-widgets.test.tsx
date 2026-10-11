@@ -1,6 +1,7 @@
 import { render } from "@testing-library/react-native";
 import { ProvenanceChip } from "../ProvenanceChip";
 import { UNKNOWN_PROVENANCE } from "@/api/types";
+import { provenanceDescriptor } from "../meal/mealProvenance";
 
 test("ProvenanceChip labels verified vs estimate", async () => {
   const verified = await render(<ProvenanceChip provenance="afcd" />);
@@ -27,4 +28,17 @@ test("ProvenanceChip renders nothing for an unknown/synthesized provenance", asy
 test("ProvenanceChip still shows the estimate disclaimer for a plain empty provenance", async () => {
   const { getByText } = await render(<ProvenanceChip provenance="" />);
   expect(getByText(/estimate/i)).toBeTruthy();
+});
+
+test.each(["ifct", "ausnut"])("%s uses the reference source badge in search and meal details", async (source) => {
+  const { getByText } = await render(<ProvenanceChip provenance={source} />);
+  expect(getByText(`${source.toUpperCase()} · verified`)).toBeTruthy();
+  expect(provenanceDescriptor(source)).toBe("Verified");
+});
+
+test("computed recipes are labelled as recipe estimates", async () => {
+  const { getByText, queryByText } = await render(<ProvenanceChip provenance="curated" />);
+  expect(getByText("Recipe estimate")).toBeTruthy();
+  expect(queryByText(/AI estimate/i)).toBeNull();
+  expect(provenanceDescriptor("curated")).toBe("Recipe estimate");
 });

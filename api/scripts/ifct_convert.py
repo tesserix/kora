@@ -59,6 +59,47 @@ import csv
 import json
 import sys
 
+from nutrients import measurement, optional_nutrients
+
+
+IFCT_FIELDS = {
+    "sugar_per_100g": ("fsugar", 1),
+    "saturated_fat_per_100g": ("fasat", 1),
+    "cholesterol_mg_per_100g": ("cholc", 1000),
+    "sodium_mg_per_100g": ("na", 1000),
+    "calcium_mg_per_100g": ("ca", 1000),
+    "iron_mg_per_100g": ("fe", 1000),
+    "potassium_mg_per_100g": ("k", 1000),
+    "magnesium_mg_per_100g": ("mg", 1000),
+    "phosphorus_mg_per_100g": ("p", 1000),
+    "zinc_mg_per_100g": ("zn", 1000),
+    "selenium_ug_per_100g": ("se", 1000000),
+    "vitamin_c_mg_per_100g": ("vitc", 1000),
+    "vitamin_e_mg_per_100g": ("tocpha", 1000),
+    "vitamin_k_ug_per_100g": ("vitk1", 1000000),
+    "thiamin_mg_per_100g": ("thia", 1000),
+    "riboflavin_mg_per_100g": ("ribf", 1000),
+    "niacin_mg_per_100g": ("nia", 1000),
+    "vitamin_b6_mg_per_100g": ("vitb6c", 1000),
+    "folate_ug_per_100g": ("folsum", 1000000),
+}
+
+
+def micronutrients(source):
+    result = optional_nutrients(source, IFCT_FIELDS)
+    # This transcription expresses micronutrients in grams, including carotenoids.
+    retinol = measurement(source.get("retol"))
+    carotene = measurement(source.get("cartbeq"))
+    if retinol is not None and carotene is not None:
+        result["vitamin_a_re_ug_per_100g"] = round(
+            (retinol + carotene / 6) * 1000000, 4
+        )
+    d2, d3 = measurement(source.get("ergcal")), measurement(source.get("chocal"))
+    if d2 is not None and d3 is not None:
+        result["vitamin_d_ug_per_100g"] = round((d2 + d3) * 1000000, 4)
+    return result
+
+
 # Kilojoules per kilocalorie (thermochemical), the factor IFCT's own tables use.
 KJ_PER_KCAL = 4.184
 
@@ -111,7 +152,9 @@ def convert(csv_path):
         atwater = 4 * carbs + 4 * protein + 9 * fat
         deviation = abs(atwater - kcal) / kcal * 100
         if deviation > ATWATER_MAX_DEVIATION:
-            dropped_atwater.append((name, round(kcal, 1), round(atwater, 1), round(deviation, 1)))
+            dropped_atwater.append(
+                (name, round(kcal, 1), round(atwater, 1), round(deviation, 1))
+            )
             continue
 
         row = {
@@ -124,6 +167,7 @@ def convert(csv_path):
         # Fibre is genuinely absent for some rows; omit rather than assert 0.
         if fiber is not None:
             row["fiber_per_100g"] = round(fiber, 2)
+        row.update(micronutrients(source))
         rows.append(row)
 
     return rows, dropped_incomplete, dropped_atwater
@@ -136,7 +180,9 @@ def main():
     rows, dropped_incomplete, dropped_atwater = convert(sys.argv[1])
 
     print(f"ifct_convert: {len(rows)} rows emitted", file=sys.stderr)
-    print(f"ifct_convert: {len(dropped_incomplete)} dropped, incomplete", file=sys.stderr)
+    print(
+        f"ifct_convert: {len(dropped_incomplete)} dropped, incomplete", file=sys.stderr
+    )
     print(
         f"ifct_convert: {len(dropped_atwater)} dropped, Atwater deviation "
         f"> {ATWATER_MAX_DEVIATION}%",

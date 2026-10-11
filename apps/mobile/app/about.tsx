@@ -20,20 +20,7 @@ interface Source {
   url: string;
 }
 
-// Kora's nutrition figures come from three public datasets, and one of them
-// obliges us to say so.
-//
-// OpenFoodFacts is published under the Open Database License. ODbL requires
-// attribution wherever the data is used — that is not optional and not
-// satisfied by a line in a repo, so it lives here, in the app, where the person
-// reading a calorie figure can see where it came from (kora#197).
-//
-// The other two are listed alongside it deliberately. Naming only the one with
-// a licence obligation would read as legal boilerplate; naming all three makes
-// this a statement about provenance, which is the more useful thing for a user
-// deciding how much to trust a number. It also matters that they are visibly
-// DIFFERENT: an FSANZ laboratory measurement and a community-entered barcode
-// row are not equally authoritative, and the descriptions say so.
+// Source licences require attribution in the app where their figures are used.
 const SOURCES: ReadonlyArray<Source> = [
   {
     name: "Australian Food Composition Database",
@@ -41,6 +28,18 @@ const SOURCES: ReadonlyArray<Source> = [
       "Food Standards Australia New Zealand (FSANZ), Release 3. Laboratory-measured nutrients for foods sold in Australia.",
     licence: "© FSANZ",
     url: AFCD_URL,
+  },
+  {
+    name: "AUSNUT 2023",
+    detail: "FSANZ survey data for Australian foods as consumed, including prepared meals and takeaway foods.",
+    licence: "© FSANZ",
+    url: "https://www.foodstandards.gov.au/science-data/food-nutrient-databases/ausnut",
+  },
+  {
+    name: "Indian Food Composition Tables 2017",
+    detail: "National Institute of Nutrition, Hyderabad. Ingredient measurements from the MIT-licensed IFCT transcription, version 2.0.5.",
+    licence: "MIT transcription · IFCT 2017",
+    url: "https://github.com/ifct2017/compositions/tree/2.0.5",
   },
   {
     name: "Open Food Facts",
@@ -51,7 +50,7 @@ const SOURCES: ReadonlyArray<Source> = [
   },
   {
     name: "USDA FoodData Central",
-    detail: "SR Legacy reference data from the United States Department of Agriculture.",
+    detail: "SR Legacy reference data and FNDDS survey foods from the United States Department of Agriculture.",
     licence: "Public domain",
     url: USDA_URL,
   },
@@ -75,6 +74,10 @@ export default function AboutScreen() {
           <AppText style={{ fontSize: 13, color: instrument.mut, lineHeight: 19 }}>
             Nutrition figures in Kora come from the public food databases below. Kora never invents a
             calorie figure — every number is read from one of these sources.
+          </AppText>
+          <AppText style={{ fontSize: 13, color: instrument.mut, lineHeight: 19 }}>
+            Recipe-based foods use ingredient weights and cooked yields to estimate nutrition.
+            Ingredients, preparation and product labels can change these figures.
           </AppText>
 
           {SOURCES.map((source) => (
