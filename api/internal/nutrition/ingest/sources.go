@@ -45,7 +45,7 @@ var sources = []Source{
 	// AFCD staples: the colloquial-naming Australian set ("White rice,
 	// cooked"), and the only AFCD file carrying serving sizes.
 	{"afcd_staples.json", nutrition.ProvenanceAFCD},
-	// The full FSANZ release (1,578 foods), from scripts/afcd_convert.py.
+	// The full FSANZ release (1,588 foods), from scripts/afcd_convert.py.
 	// Kept separate from staples rather than replacing it: the two do not
 	// overlap by name — Release 3 uses formal naming ("Rice, white, cooked") —
 	// and it is per-100 g reference data with no serving stated. See kora#184.

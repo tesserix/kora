@@ -47,6 +47,8 @@ import json
 import os
 import sys
 
+from micronutrients import fields
+
 # Country slug → (OFF countries_tags entry, row locale, output file). The
 # locale values must match the nutrition.Locale constants; the filenames must
 # match ingest/sources.go.
@@ -70,6 +72,16 @@ COL = {
     "carbs": 129,
     "fiber": 146,
     "protein": 150,
+    "sat_fat": 93,
+    "cholesterol": 128,
+    "sugar": 130,
+    "sodium": 156,
+    "vitamin_a": 158,
+    "vitamin_d": 160,
+    "vitamin_c": 163,
+    "potassium": 175,
+    "calcium": 177,
+    "iron": 179,
 }
 
 EXPECTED = {
@@ -83,6 +95,32 @@ EXPECTED = {
     "carbs": "carbohydrates_100g",
     "fiber": "fiber_100g",
     "protein": "proteins_100g",
+    "sat_fat": "saturated-fat_100g",
+    "cholesterol": "cholesterol_100g",
+    "sugar": "sugars_100g",
+    "sodium": "sodium_100g",
+    "vitamin_a": "vitamin-a_100g",
+    "vitamin_d": "vitamin-d_100g",
+    "vitamin_c": "vitamin-c_100g",
+    "potassium": "potassium_100g",
+    "calcium": "calcium_100g",
+    "iron": "iron_100g",
+}
+
+# OFF stores every *_100g figure in grams: (output key, scale to output unit,
+# ceiling in grams). Ceilings sit above the richest real food (pure salt is
+# ~39 g sodium, liver ~0.03 g vitamin A) so only unit errors and typos fall out.
+MICRONUTRIENTS = {
+    "sugar": ("sugar_per_100g", 1, 100),
+    "sat_fat": ("sat_fat_per_100g", 1, 100),
+    "sodium": ("sodium_mg_per_100g", 1e3, 40),
+    "cholesterol": ("cholesterol_mg_per_100g", 1e3, 3),
+    "calcium": ("calcium_mg_per_100g", 1e3, 5),
+    "iron": ("iron_mg_per_100g", 1e3, 0.2),
+    "potassium": ("potassium_mg_per_100g", 1e3, 10),
+    "vitamin_a": ("vitamin_a_ug_per_100g", 1e6, 0.05),
+    "vitamin_c": ("vitamin_c_mg_per_100g", 1e3, 3),
+    "vitamin_d": ("vitamin_d_ug_per_100g", 1e6, 0.0005),
 }
 
 # Nothing edible exceeds pure fat, which is ~900 kcal/100 g. A figure above that
@@ -114,6 +152,20 @@ def number(text):
         return float(text)
     except ValueError:
         return None
+
+
+def micronutrients(row, macros):
+    """Plausible label figures only; a bad figure drops itself, not the row."""
+    values = {}
+    for col, (key, scale, ceiling) in MICRONUTRIENTS.items():
+        grams = number(row[COL[col]]) if COL[col] < len(row) else None
+        if grams is not None and 0 <= grams <= ceiling:
+            values[key] = grams * scale
+    if values.get("sugar_per_100g", 0) > macros["carbs"] + 1:
+        values.pop("sugar_per_100g")
+    if values.get("sat_fat_per_100g", 0) > macros["fat"] + 1:
+        values.pop("sat_fat_per_100g")
+    return fields(values)
 
 
 def main():
@@ -184,6 +236,7 @@ def main():
             "carbs_per_100g": round(macros["carbs"], 2),
             "fat_per_100g": round(macros["fat"], 2),
             "fiber_per_100g": round(macros["fiber"], 2),
+            **micronutrients(row, macros),
         }
 
         serving = number(row[COL["serving_quantity"]])

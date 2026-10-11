@@ -45,3 +45,24 @@ func TestRunIsDeterministicForOverlappingFoods(t *testing.T) {
 	require.NoError(t, db.First(&item, "name = 'Zdup' AND brand = 'zdup'").Error)
 	require.Equal(t, float64(100), item.KcalPer100g)
 }
+
+// Re-ingesting a file must give rows inserted before the micronutrient columns
+// existed their figures, since Insert skips names it already holds.
+func TestRunBackfillsMicronutrientsOntoExistingRows(t *testing.T) {
+	db := testDB(t)
+	repo := nutrition.NewRepository(db)
+	t.Cleanup(func() { db.Exec("DELETE FROM food_items WHERE name IN ('Measured Spinach', 'Unmeasured Dish')") })
+
+	require.NoError(t, db.Create(&nutrition.FoodItem{
+		Name: "Measured Spinach", Provenance: nutrition.ProvenanceAFCD, KcalPer100g: 23,
+		NormalizedName: nutrition.Normalize("Measured Spinach"),
+	}).Error)
+
+	_, err := Run(context.Background(), repo, map[string]string{"testdata/micronutrients.json": nutrition.ProvenanceAFCD})
+	require.NoError(t, err)
+
+	var item nutrition.FoodItem
+	require.NoError(t, db.First(&item, "name = 'Measured Spinach'").Error)
+	require.NotNil(t, item.Micros.SodiumMgPer100g)
+	require.Equal(t, 79.0, *item.Micros.SodiumMgPer100g)
+}

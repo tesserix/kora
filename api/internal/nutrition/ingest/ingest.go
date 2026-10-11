@@ -49,6 +49,9 @@ func Run(ctx context.Context, repo nutrition.Repository, files map[string]string
 		if _, err := repo.BackfillServings(ctx, items); err != nil {
 			return total, fmt.Errorf("ingest: backfill servings %s: %w", path, err)
 		}
+		if _, err := repo.BackfillMicronutrients(ctx, items); err != nil {
+			return total, fmt.Errorf("ingest: backfill micronutrients %s: %w", path, err)
+		}
 		// AFTER the backfill, and distinct from it: the backfill only ever
 		// fills an EMPTY row, so it cannot repair a serving this pipeline
 		// previously wrote wrong. It did write some wrong — see

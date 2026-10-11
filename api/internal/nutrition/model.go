@@ -199,6 +199,7 @@ type FoodItem struct {
 	CarbsPer100g   float64         `gorm:"column:carbs_per_100g" json:"carbs_per_100g"`
 	FatPer100g     float64         `gorm:"column:fat_per_100g" json:"fat_per_100g"`
 	FiberPer100g   float64         `gorm:"column:fiber_per_100g" json:"fiber_per_100g"`
+	Micros         Micronutrients  `gorm:"embedded" json:"micros"`
 	// DietTags are the containment facts derived from the food's own name and
 	// brand — "contains-dairy", "contains-peanut". They are json:"-" because a
 	// client must not treat a derived tag as an ingredient declaration; they
@@ -206,6 +207,42 @@ type FoodItem struct {
 	// rather than a scan.
 	DietTags  pq.StringArray `gorm:"column:diet_tags;type:text[]" json:"-"`
 	CreatedAt time.Time      `json:"created_at"`
+}
+
+// Micronutrients are per-100 g figures a source may or may not measure; nil
+// means unmeasured, which is distinct from a measured zero.
+type Micronutrients struct {
+	SugarPer100g         *float64 `gorm:"column:sugar_per_100g" json:"sugar_per_100g,omitempty"`
+	SatFatPer100g        *float64 `gorm:"column:sat_fat_per_100g" json:"sat_fat_per_100g,omitempty"`
+	SodiumMgPer100g      *float64 `gorm:"column:sodium_mg_per_100g" json:"sodium_mg_per_100g,omitempty"`
+	CholesterolMgPer100g *float64 `gorm:"column:cholesterol_mg_per_100g" json:"cholesterol_mg_per_100g,omitempty"`
+	CalciumMgPer100g     *float64 `gorm:"column:calcium_mg_per_100g" json:"calcium_mg_per_100g,omitempty"`
+	IronMgPer100g        *float64 `gorm:"column:iron_mg_per_100g" json:"iron_mg_per_100g,omitempty"`
+	PotassiumMgPer100g   *float64 `gorm:"column:potassium_mg_per_100g" json:"potassium_mg_per_100g,omitempty"`
+	VitaminAUgPer100g    *float64 `gorm:"column:vitamin_a_ug_per_100g" json:"vitamin_a_ug_per_100g,omitempty"`
+	VitaminCMgPer100g    *float64 `gorm:"column:vitamin_c_mg_per_100g" json:"vitamin_c_mg_per_100g,omitempty"`
+	VitaminDUgPer100g    *float64 `gorm:"column:vitamin_d_ug_per_100g" json:"vitamin_d_ug_per_100g,omitempty"`
+}
+
+// columns pairs each figure with its column so writers need no second list.
+func (m Micronutrients) columns() map[string]*float64 {
+	return map[string]*float64{
+		"sugar_per_100g": m.SugarPer100g, "sat_fat_per_100g": m.SatFatPer100g,
+		"sodium_mg_per_100g": m.SodiumMgPer100g, "cholesterol_mg_per_100g": m.CholesterolMgPer100g,
+		"calcium_mg_per_100g": m.CalciumMgPer100g, "iron_mg_per_100g": m.IronMgPer100g,
+		"potassium_mg_per_100g": m.PotassiumMgPer100g, "vitamin_a_ug_per_100g": m.VitaminAUgPer100g,
+		"vitamin_c_mg_per_100g": m.VitaminCMgPer100g, "vitamin_d_ug_per_100g": m.VitaminDUgPer100g,
+	}
+}
+
+// Empty reports whether no figure is measured.
+func (m Micronutrients) Empty() bool {
+	for _, f := range m.columns() {
+		if f != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // deriveDietTags keeps diet_tags in step with the name and brand on every

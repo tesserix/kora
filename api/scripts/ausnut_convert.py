@@ -117,6 +117,8 @@ import sys
 
 import openpyxl
 
+from micronutrients import from_fsanz
+
 SHEET = "Food nutrient profiles"
 HEADER_ROW = 3  # 1-indexed; rows 1-2 are the title block
 
@@ -133,6 +135,17 @@ COL = {
     "carbs": 9,  # available carbohydrate, with sugar alcohols
     "fiber": 15,
     "alcohol": 16,
+    "sugar": 12,
+    "calcium": 18,
+    "iron": 20,
+    "potassium": 23,
+    "sodium": 25,
+    "retinol": 27,
+    "beta_carotene_eq": 29,
+    "vitamin_c": 41,
+    "vitamin_d": 46,
+    "sat_fat": 49,
+    "cholesterol": 60,
 }
 
 EXPECTED = {
@@ -144,6 +157,17 @@ EXPECTED = {
     "carbs": "available carbohydrate, with sugar alcohols",
     "fiber": "dietary fibre",
     "alcohol": "alcohol",
+    "sugar": "total sugars",
+    "calcium": "calcium (ca)",
+    "iron": "iron (fe)",
+    "potassium": "potassium (k)",
+    "sodium": "sodium (na)",
+    "retinol": "preformed vitamin a",
+    "beta_carotene_eq": "pro vitamin a (beta-carotene equivalents)",
+    "vitamin_c": "vitamin c",
+    "vitamin_d": "vitamin d3 equivalents",
+    "sat_fat": "total saturated fat",
+    "cholesterol": "cholesterol",
 }
 
 # --- Food measures workbook -------------------------------------------------
@@ -210,6 +234,17 @@ def number(value):
         return float(value)
     except (TypeError, ValueError):
         return 0.0
+
+
+def measured(value):
+    """Like number(), but a blank cell is unmeasured (None) rather than zero."""
+    if value is None or str(value).strip() == "":
+        return None
+    return number(value)
+
+
+def micronutrients(row):
+    return from_fsanz(lambda field: measured(row[COL[field]]))
 
 
 def check_headers(header_row, columns=None, expected=None, what="COL"):
@@ -341,6 +376,7 @@ def convert(path, measures_path):
             "carbs_per_100g": round(number(row[COL["carbs"]]), 1),
             "fat_per_100g": round(number(row[COL["fat"]]), 1),
             "fiber_per_100g": round(number(row[COL["fiber"]]), 1),
+            **micronutrients(row),
         }
         # Serving fields are omitted entirely when a food has no measure, so
         # the emitted row is identical to what this script produced before the
