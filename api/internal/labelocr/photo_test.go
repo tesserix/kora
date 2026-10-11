@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -124,4 +125,49 @@ func TestPhotoReviewDisagreementCannotBecomeCaloriesEaten(t *testing.T) {
 	require.Empty(t, res.Candidates)
 	require.Empty(t, res.PhotoEvidence.Label)
 	require.Contains(t, res.FollowUpQuestion, "couldn't verify")
+}
+
+func TestPhotoWithoutLabelFieldsDoesNotEnterLabelOnlyReview(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		read Read
+		err  error
+	}{
+		{name: "OCR deadline", err: context.DeadlineExceeded},
+		{name: "empty extraction", read: Read{Status: "completed", Fields: fields(t, map[string]any{"per_100g.energy_kcal": nil})}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			decision := &photoDecision{choice: "review"}
+			vision := &photoVision{}
+			reviewer := &photoReviewer{}
+			res, err := NewPhotoResolver(&stubReader{read: tc.read, err: tc.err}, decision, reviewer, vision, &stubBudget{within: true}).ResolvePhoto(t.Context(), uuid.New(), []byte("photo"), "image/jpeg")
+			require.NoError(t, err)
+			require.Equal(t, 1, decision.calls)
+			require.Equal(t, 1, vision.calls)
+			require.Zero(t, reviewer.calls)
+			require.Equal(t, "vision", res.PhotoEvidence.Route)
+			require.Equal(t, "review", res.PhotoEvidence.DecisionRoute)
+			require.True(t, res.Candidates[0].PortionAssumed)
+		})
+	}
+}
+
+type delayedPhotoReader struct{ read Read }
+
+func (r delayedPhotoReader) Read(ctx context.Context, _ []byte, _ string) (Read, error) {
+	select {
+	case <-ctx.Done():
+		return Read{}, ctx.Err()
+	case <-time.After(6 * time.Second):
+		return r.read, nil
+	}
+}
+func TestPhotoWaitsForNormalOCRJobLatency(t *testing.T) {
+	reader := delayedPhotoReader{read: Read{Status: "completed", JobID: "synthetic-job", Fields: fields(t, map[string]any{"per_100g.energy_kcal": 100, "per_100g.protein_g": 10, "per_100g.carbohydrate_g": 15, "per_100g.fat_g": 0})}}
+	vision := &photoVision{}
+	res, err := NewPhotoResolver(reader, &photoDecision{choice: "label"}, nil, vision, &stubBudget{within: true}).ResolvePhoto(t.Context(), uuid.New(), []byte("photo"), "image/jpeg")
+	require.NoError(t, err)
+	require.Equal(t, "label", res.PhotoEvidence.Route)
+	require.Equal(t, "synthetic-job", res.PhotoEvidence.OCRJobID)
+	require.Zero(t, vision.calls)
 }
