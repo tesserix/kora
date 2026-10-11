@@ -6,11 +6,10 @@ import (
 )
 
 func TestEstimateCostUSDKnownModel(t *testing.T) {
-	// gemini-3.5-flash-lite: $0.10/1M in, $0.40/1M out (list-price proxy).
-	// 1000 in + 500 out => 1000/1e6*0.10 + 500/1e6*0.40 = 0.0001 + 0.0002 = 0.0003
+	// Vertex global list rates verified 2026-10-11: $0.30 input, $2.50 output / million.
 	got := EstimateCostUSD(Usage{Model: "gemini-3.5-flash-lite", TokensIn: 1000, TokensOut: 500})
-	if math.Abs(got-0.0003) > 1e-9 {
-		t.Fatalf("flash-lite cost = %v, want 0.0003", got)
+	if math.Abs(got-0.00155) > 1e-9 {
+		t.Fatalf("flash-lite cost = %v, want 0.00155", got)
 	}
 }
 
@@ -47,5 +46,13 @@ func TestEstimateCostUSDLabelReviewModel(t *testing.T) {
 	got := EstimateCostUSD(Usage{Model: "claude-sonnet-5-5", TokensIn: 3000, TokensOut: 500})
 	if math.Abs(got-0.011) > 1e-9 {
 		t.Fatalf("label review cost = %v, want 0.011", got)
+	}
+}
+
+func TestCurrentVertexGlobalRates(t *testing.T) {
+	for model, want := range map[string]float64{"gemini-3.5-flash": 10.5, "gemini-3.5-flash-lite": 2.8} {
+		if got := EstimateCostUSD(Usage{Model: model, TokensIn: 1_000_000, TokensOut: 1_000_000}); math.Abs(got-want) > 1e-9 {
+			t.Errorf("%s: got %v want %v", model, got, want)
+		}
 	}
 }

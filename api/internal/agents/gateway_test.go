@@ -9,7 +9,9 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
 	"github.com/tesserix/kora/api/internal/auth"
+	"github.com/tesserix/kora/api/internal/user"
 )
 
 // a2aServer answers one message/send the way kora_agents.api does, and records
@@ -87,9 +89,10 @@ func TestSendSpeaksTheAgentsA2AContract(t *testing.T) {
 }
 
 func TestSendDelegatesTheVerifiedEndUserIdentity(t *testing.T) {
-	var gotToken string
+	var gotToken, gotID string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotToken = r.Header.Get("X-Kora-End-User-Token")
+		gotID = r.Header.Get("X-Kora-User-Id")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"jsonrpc": "2.0", "id": "1",
 			"result": map[string]any{
@@ -104,10 +107,14 @@ func TestSendDelegatesTheVerifiedEndUserIdentity(t *testing.T) {
 
 	g := NewGateway(srv.URL, "gw-key", nil)
 	resolved := resolvedFixture()
-	ctx := auth.WithVerifiedToken(context.Background(), "firebase-user-token")
+	id := uuid.New()
+	ctx := user.WithID(auth.WithVerifiedToken(context.Background(), "firebase-user-token"), id)
 	_, err := g.Send(ctx, &resolved, "question")
 	if err != nil {
 		t.Fatalf("Send: %v", err)
+	}
+	if gotID != id.String() {
+		t.Fatalf("missing user ID: %q", gotID)
 	}
 	if gotToken != "Bearer firebase-user-token" {
 		t.Fatalf("X-Kora-End-User-Token = %q, want delegated Firebase token", gotToken)

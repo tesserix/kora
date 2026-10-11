@@ -202,6 +202,7 @@ func userAttributionOptions(ctx context.Context) []option.RequestOption {
 // new call type can't ship unattributed by omission (kora#508).
 func gatewayRequestOptions(ctx context.Context) []option.RequestOption {
 	options := append(delegatedUserOptions(ctx), userAttributionOptions(ctx)...)
+	options = append(options, option.WithHeader("X-Kora-AI-Service", "kora-api"))
 	header := make(http.Header)
 	aitrace.Inject(ctx, header)
 	for name, values := range header {
