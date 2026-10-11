@@ -8,6 +8,7 @@ interface Props {
   icon: string;
   label: string;
   active: boolean;
+  disabled?: boolean;
   onPress: () => void;
 }
 
@@ -19,14 +20,15 @@ interface Props {
 // screen, which must ignore the device's light/dark scheme entirely — an
 // engraving-style label, per the spec's "camera modes are an instrument-
 // engraving zone" allowance.
-export function ModePill({ icon, label, active, onPress }: Props) {
+export function ModePill({ icon, label, active, disabled = false, onPress }: Props) {
   // Spec: "active chip ink text, inactive mut" — the accent lives in the
   // fill, not the label.
   const fg = active ? INSTRUMENT_DARK_FIXED.ink : INSTRUMENT_DARK_FIXED.mut;
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityState={{ selected: active }}
+      accessibilityState={{ selected: active, disabled }}
+      disabled={disabled}
       onPress={() => {
         haptics.selection();
         onPress();
@@ -53,7 +55,7 @@ export function ModePill({ icon, label, active, onPress }: Props) {
         backgroundColor: active ? INSTRUMENT_DARK_FIXED.accent : INSTRUMENT_DARK_FIXED.glass,
         borderWidth: active ? 0 : 1,
         borderColor: INSTRUMENT_DARK_FIXED.glassBorder,
-        opacity: state.pressed ? 0.85 : 1,
+        opacity: disabled ? 0.45 : state.pressed ? 0.85 : 1,
       })}
     >
       <Icon name={icon} size={16} color={fg} />

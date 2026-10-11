@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"regexp"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/tesserix/kora/api/internal/ai"
+	"github.com/tesserix/kora/api/internal/capturemedia"
 	"github.com/tesserix/kora/api/internal/httpx"
 	"github.com/tesserix/kora/api/internal/nutrition"
 	"github.com/tesserix/kora/api/internal/user"
@@ -96,10 +98,16 @@ type Handler struct {
 	tp       TextPhotoResolver
 	bc       BarcodeResolver
 	outcomes ai.OutcomeSink
+	photos   *capturemedia.Service
 }
 
 func NewHandler(tp TextPhotoResolver, bc BarcodeResolver) Handler {
 	return Handler{tp: tp, bc: bc}
+}
+
+func (h Handler) WithPhotoArchive(photos *capturemedia.Service) Handler {
+	h.photos = photos
+	return h
 }
 
 // WithOutcomeSink attaches the resolve-outcome recorder (kora#459), for the
@@ -215,7 +223,30 @@ func (h Handler) ResolvePhoto(c *gin.Context) {
 		mime = http.DetectContentType(buf)
 	}
 	id := beginResolution(c)
+	if h.photos != nil {
+		buf, err = h.photos.Start(c.Request.Context(), uid, id, buf)
+		if err != nil {
+			if errors.Is(err, capturemedia.ErrInvalidImage) {
+				httpx.Error(c, http.StatusBadRequest, "invalid_input", "Use a JPEG, PNG or WebP image up to 8 MB and 16 megapixels.")
+			} else {
+				slog.ErrorContext(c.Request.Context(), "photo archive upload failed", "capture_id", id)
+				httpx.Error(c, http.StatusServiceUnavailable, "unavailable", "Photo storage is temporarily unavailable. Please try again.")
+			}
+			return
+		}
+		mime = "image/jpeg"
+	}
 	res, err := h.tp.ResolvePhoto(c.Request.Context(), uid, buf, mime)
+	res.ResolutionID = &id
+	if h.photos != nil {
+		if archiveErr := h.photos.Finish(c.Request.Context(), uid, id, res, err); archiveErr != nil {
+			slog.ErrorContext(c.Request.Context(), "photo archive analysis persistence failed", "capture_id", id)
+			if err == nil {
+				httpx.Error(c, http.StatusServiceUnavailable, "unavailable", "The analysis could not be saved. Please try again.")
+				return
+			}
+		}
+	}
 	if err != nil {
 		httpx.RespondServiceError(c, err)
 		return

@@ -3,6 +3,7 @@ import {
   Animated,
   AppState,
   Easing,
+  Image,
   Keyboard,
   KeyboardAvoidingView,
   Linking,
@@ -523,7 +524,7 @@ function IdleAffordance({
 
 /** One settled turn in the Ask Otto thread, oldest first. */
 export type ThreadEntry =
-  | { role: "user"; text: string }
+  | { role: "user"; text: string; photoUri?: string }
   /** `plan` is the reviewed meal plan in its structured form — the text says
    *  why it fits, the card is what the user can approve (kora#264). */
   | { role: "otto"; text: string; agent?: string; reviewedBy?: string; plan?: MealPlanProposal | null };
@@ -641,7 +642,8 @@ export function CaptureBody({
   // Send is unavailable below MIN_PHRASE_CHARS rather than accepting a press
   // that could only ever fail — the rule is visible in the affordance, which
   // is how every other unavailable control on this screen behaves (kora#243).
-  const canSend = text.trim().length >= MIN_PHRASE_CHARS;
+  const inputsLocked = stage === "analyzing";
+  const canSend = !inputsLocked && text.trim().length >= MIN_PHRASE_CHARS;
 
   // Bring the newest Otto message (an error bubble or the detected-food
   // result) into view — on short viewports or with the keyboard open, the
@@ -712,7 +714,17 @@ export function CaptureBody({
             /v1/coach/message replays the last turns into every prompt. */}
         {transcript.map((entry, index) =>
           entry.role === "user" ? (
-            <UserBubble key={index}>{entry.text}</UserBubble>
+            entry.photoUri ? (
+              <View key={index} style={{ alignSelf: "flex-end", maxWidth: "80%", gap: 6 }}>
+                <Image
+                  source={{ uri: entry.photoUri }}
+                  accessibilityLabel="Uploaded meal photo"
+                  accessible
+                  resizeMode="contain"
+                  style={{ width: 240, maxWidth: "100%", height: 220, borderRadius: 16, backgroundColor: T.inset }}
+                />
+              </View>
+            ) : <UserBubble key={index}>{entry.text}</UserBubble>
           ) : (
             <View key={index} style={{ gap: 10 }}>
               <OttoBubble
@@ -727,7 +739,8 @@ export function CaptureBody({
               {entry.plan ? (
                 <PlanCard
                   plan={entry.plan}
-                  onApprove={() => onApprovePlan(entry.plan!.id, index)}
+                  disabled={inputsLocked}
+                  onApprove={() => { if (!inputsLocked) onApprovePlan(entry.plan!.id, index); }}
                   approving={approvingPlanID === entry.plan.id}
                 />
               ) : null}
@@ -812,7 +825,7 @@ export function CaptureBody({
             Same mechanism DetectedCard already uses for these pills. */}
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
           {MODE_PILLS.map(({ mode: m, icon, label }) => (
-            <ModePill key={m} icon={icon} label={label} active={mode === m} onPress={() => onModeChange(m)} />
+            <ModePill key={m} icon={icon} label={label} active={mode === m} disabled={inputsLocked} onPress={() => onModeChange(m)} />
           ))}
         </View>
 
@@ -833,7 +846,7 @@ export function CaptureBody({
               changed the pills and the thread affordance but left a camera
               button and a text field sitting in the composer. Voice owns its
               own control (hold-to-record); the others share one Pressable. */}
-          {mode === "voice" ? (
+          {mode === "voice" && !inputsLocked ? (
             <VoiceComposer
               isRecording={isRecordingVoice}
               onStart={onStartVoice}
@@ -843,7 +856,9 @@ export function CaptureBody({
           ) : (
             <PressableScale
               accessibilityRole="button"
-              accessibilityLabel={COMPOSER_BUTTON[mode].label}
+              accessibilityLabel={mode === "voice" ? "Record voice" : COMPOSER_BUTTON[mode].label}
+              accessibilityState={{ disabled: inputsLocked }}
+              disabled={inputsLocked}
               onPress={mode === "type" ? () => composerFieldRef.current?.focus() : onCapturePhoto}
               style={{
                 width: 38,
@@ -854,7 +869,7 @@ export function CaptureBody({
                 justifyContent: "center",
               }}
             >
-              <Icon name={COMPOSER_BUTTON[mode].icon} size={19} color={T.accentOn} />
+              <Icon name={mode === "voice" ? "mic" : COMPOSER_BUTTON[mode].icon} size={19} color={T.accentOn} />
             </PressableScale>
           )}
           {/* Typing is only an input in photo/type. In voice and scan the middle
@@ -864,11 +879,13 @@ export function CaptureBody({
               ref={composerFieldRef}
               accessibilityLabel="Tell Otto what you ate"
               value={text}
-              onChangeText={onChangeText}
+              editable={!inputsLocked}
+              accessibilityState={{ disabled: inputsLocked }}
+              onChangeText={inputsLocked ? undefined : onChangeText}
               autoCorrect
               spellCheck
               returnKeyType="send"
-              onSubmitEditing={onSend}
+              onSubmitEditing={inputsLocked ? undefined : onSend}
               placeholder="Tell Otto what you ate…"
               placeholderTextColor={T.mut}
               style={{ flex: 1, color: T.ink, fontSize: 15 }}
@@ -1701,6 +1718,8 @@ export default function CaptureScreen() {
       setErrorMsg("Something went wrong opening your photos — try again.");
       return;
     }
+    setTranscript((turns) => [...turns, { role: "user", text: "Meal photo", photoUri: outcome.file.uri }]);
+    Keyboard.dismiss();
     const controller = beginResolve();
     resolvePhoto.mutate({ input: outcome.file, signal: controller.signal }, {
       onSuccess: (data) => {

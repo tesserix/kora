@@ -93,6 +93,7 @@ var Tables = []Table{
 	// failed by name the moment the table existed — which is the mechanism
 	// working, not a nuisance.
 	owned("food_resolution_outcomes"),
+	owned("photo_captures"),
 	// Both sides. A friendship this user RECEIVED is as much a record of
 	// their social graph as one they sent, and binding the id once would
 	// export half of it with nothing to show that half was missing.

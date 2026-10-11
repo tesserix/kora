@@ -8,6 +8,7 @@ import { Linking } from "react-native";
 import type { MealPlanProposal } from "@/api/types";
 
 import CaptureScreen from "../capture";
+import { PlanCard } from "@/components/capture/PlanCard";
 
 jest.mock("expo-router", () => ({
   router: { back: jest.fn(), push: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => true) },
@@ -96,6 +97,15 @@ beforeEach(() => {
     jest.fn(async () => ({ granted: true, status: "granted" })),
     jest.fn(async () => ({ granted: true, status: "granted" })),
   ]);
+});
+
+test("analysis lock disables plan approval", async () => {
+  const approve = jest.fn();
+  const view = await render(<PlanCard plan={makePlan()} onApprove={approve} disabled />);
+  const button = await view.findByLabelText("Approve this plan");
+  expect(button).toBeDisabled();
+  await fireEvent.press(button);
+  expect(approve).not.toHaveBeenCalled();
 });
 
 async function sendPlanRequest(plan: MealPlanProposal | null = makePlan()) {
