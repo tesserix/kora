@@ -37,16 +37,17 @@ func (s *Service) screenDiet(
 		return raw, violations, false
 	}
 
+	// A regenerated planner draft has not passed supervisor review. Start a new
+	// complete planning cycle rather than delivering a safety retry as reviewed.
+	if skill == planningSkill {
+		return dietBlockedText(violations), nil, true
+	}
+
 	slog.WarnContext(ctx, "coach: answer broke a hard dietary constraint, retrying",
 		"user_id", userID, "skill", skill, "subjects", blockedSubjects(violations))
 
 	retried, err := s.regenerate(ctx, userID, userPrompt+"\n"+diet.RetryInstruction(violations), skill, viaAgent)
 	if err == nil && strings.TrimSpace(retried) != "" {
-		if skill == planningSkill {
-			retried = formatPlanDraft(retried)
-		}
-		// The retry is not re-reviewed by the coach: this is a safety redo,
-		// and a second review call buys less than answering promptly.
 		if again := diet.Screen(retried, profile); !diet.HasBlocking(again) {
 			return retried, again, false
 		}
