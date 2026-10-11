@@ -13,8 +13,10 @@ const withCaptureLock = createLock();
 // well under 100 MB worst case.
 export const MAX_CAPTURES = 20;
 
-// Text has no byte budget — MAX_CAPTURES exists for megabytes of media and
-// that rationale does not transfer. Still bounded rather than unlimited: an
+// The ceiling for every LIGHTWEIGHT arm — text and barcode both — not for text
+// alone, despite the name it kept from kora#196. Neither has a byte budget:
+// MAX_CAPTURES exists for megabytes of media and that rationale does not
+// transfer to a short string. Still bounded rather than unlimited: an
 // abandoned-owner queue growing without limit is a known leak already recorded
 // against the log queue (kora#85), and this must not add a second instance.
 export const MAX_TEXT_CAPTURES = 50;
@@ -72,11 +74,25 @@ export type TextCapture = QueuedCaptureBase & {
   phrase: string;
 };
 
-export type QueuedCapture = MediaCapture | TextCapture;
+// An unseen barcode scanned while offline (kora#241). Lightweight like text —
+// the payload is a short digit string — so it shares MAX_TEXT_CAPTURES rather
+// than the media budget. `code` is the raw scan, not a food id: nothing on this
+// device knows what it is yet, which is the entire reason the row exists.
+export type BarcodeCapture = QueuedCaptureBase & {
+  kind: "barcode";
+  code: string;
+};
+
+export type QueuedCapture = MediaCapture | TextCapture | BarcodeCapture;
 
 // The single narrowing helper. Consumers use this rather than re-deriving
 // `kind === "photo" || kind === "voice"` at each site, so adding a future
 // media modality touches one predicate.
+//
+// It is also the capacity split (see append/restore below): "has media" is
+// what MAX_CAPTURES is actually about, and phrasing the split as
+// `kind === "text"` silently put kora#241's barcode arm in the megabyte
+// bucket, capped alongside photos, with nothing failing to say so.
 export function hasMedia(c: QueuedCapture): c is MediaCapture {
   return c.kind === "photo" || c.kind === "voice";
 }
@@ -91,7 +107,24 @@ type AppendTextInput = Pick<
   "id" | "kind" | "phrase" | "capturedAt" | "ownerId"
 > & { mealSlot?: string };
 
-export type AppendCaptureInput = AppendMediaInput | AppendTextInput;
+type AppendBarcodeInput = Pick<
+  BarcodeCapture,
+  "id" | "kind" | "code" | "capturedAt" | "ownerId"
+> & { mealSlot?: string };
+
+export type AppendCaptureInput = AppendMediaInput | AppendTextInput | AppendBarcodeInput;
+
+// Capacity is per BUCKET, not per kind. Media rows share MAX_CAPTURES because
+// they share a byte budget; lightweight rows (text, barcode) share
+// MAX_TEXT_CAPTURES because they have none. Counted per bucket so a queue of
+// 20 photos never refuses a typed or scanned capture, and 50 lightweight rows
+// never refuse a photo.
+function bucketLimit(item: QueuedCapture): number {
+  return hasMedia(item) ? MAX_CAPTURES : MAX_TEXT_CAPTURES;
+}
+function bucketUsed(items: QueuedCapture[], item: QueuedCapture): number {
+  return items.filter((i) => hasMedia(i) === hasMedia(item)).length;
+}
 
 function isValid(v: unknown): v is QueuedCapture {
   const q = v as QueuedCapture;
@@ -110,6 +143,13 @@ function isValid(v: unknown): v is QueuedCapture {
   // of nothing and fail as "unidentified", which reads as an AI failure rather
   // than the empty input it actually is.
   if (q.kind === "text") return typeof q.phrase === "string" && q.phrase.length > 0;
+  // Same reasoning as text: an empty code is not a scan, and queueing one
+  // would drain into a resolve the server 400s as invalid_input — a delivery
+  // failure that reads to the user as if the scan itself was rejected.
+  // Deliberately NOT the server's 8-14 digit pattern: a row already in the
+  // queue must not be dropped by a client-side rule the queue never applied
+  // when it accepted it (kora#243 — the upgrade contract).
+  if (q.kind === "barcode") return typeof q.code === "string" && q.code.length > 0;
   return false;
 }
 
@@ -136,17 +176,34 @@ export async function append(input: AppendCaptureInput): Promise<QueuedCapture> 
     ...input, status: "pending", attempts: 0, queuedAt: new Date().toISOString(),
   } as QueuedCapture;
   let full = false;
+  // The row an identical pending scan already put in the queue, if any. Handed
+  // back in place of `item` so the caller can still report "saved" without a
+  // second row appearing (kora#241).
+  let existing: QueuedCapture | undefined;
   await withCaptureLock(async () => {
     const items = await list();
-    // Counted PER ARM: a queue of 20 photos must not refuse a text capture,
-    // and 50 queued phrases must not refuse a photo.
-    const limit = item.kind === "text" ? MAX_TEXT_CAPTURES : MAX_CAPTURES;
-    const used = items.filter((i) => (i.kind === "text") === (item.kind === "text")).length;
-    if (used >= limit) { full = true; return; }
+    // Scanning the same unseen code three times offline is one intent, not
+    // three meals — a barcode carries no per-scan content to distinguish them,
+    // unlike two photos of the same plate. Deduped INSIDE the lock, because
+    // a scanner fires repeatedly and a pre-flight check outside it could let
+    // two scans both pass before either wrote.
+    //
+    // Pending only: a row already in review or failed is one the user can see
+    // and act on, so a fresh scan of that code is a deliberate retry and gets
+    // its own row. Scoped to the owner too — one account's queue must never
+    // absorb another's scan.
+    if (item.kind === "barcode") {
+      existing = items.find(
+        (i) => i.kind === "barcode" && i.code === item.code
+          && i.status === "pending" && i.ownerId === item.ownerId,
+      );
+      if (existing) return;
+    }
+    if (bucketUsed(items, item) >= bucketLimit(item)) { full = true; return; }
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([...items, item]));
   });
   if (full) throw new CaptureQueueFullError();
-  return item;
+  return existing ?? item;
 }
 
 export async function markReview(id: string, resolution: Resolution): Promise<void> {
@@ -199,16 +256,18 @@ export async function discard(id: string): Promise<void> {
 //
 // Idempotent on id (a double-tapped Undo cannot duplicate the row) and capped
 // the same way append is — throws if the queue filled to its limit for the
-// row's arm (MAX_CAPTURES for photo/voice, MAX_TEXT_CAPTURES for text), so
-// the caller can say so.
+// row's bucket (MAX_CAPTURES for media, MAX_TEXT_CAPTURES for text and
+// barcode), so the caller can say so.
+//
+// Deliberately does NOT apply append's barcode dedupe: this restores a row the
+// user asked to have back, by id. Refusing it because a later scan of the same
+// code is pending would make Undo silently do nothing.
 export async function restore(item: QueuedCapture): Promise<void> {
   let full = false;
   await withCaptureLock(async () => {
     const items = await list();
     if (items.some((i) => i.id === item.id)) return;
-    const limit = item.kind === "text" ? MAX_TEXT_CAPTURES : MAX_CAPTURES;
-    const used = items.filter((i) => (i.kind === "text") === (item.kind === "text")).length;
-    if (used >= limit) {
+    if (bucketUsed(items, item) >= bucketLimit(item)) {
       full = true;
       return;
     }

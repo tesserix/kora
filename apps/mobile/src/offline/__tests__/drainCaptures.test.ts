@@ -69,6 +69,15 @@ async function seed(id: string, over: Record<string, unknown> = {}) {
   } as Parameters<typeof appendCapture>[0]);
 }
 
+// A queued unknown barcode (kora#241) — lightweight like text, so it gets its
+// own builder for the same reason.
+async function seedBarcode(id: string, over: Record<string, unknown> = {}) {
+  return appendCapture({
+    id, kind: "barcode", code: "5000112637922",
+    capturedAt: atLocalNoon(2026, 8, 6), ownerId: OWNER, ...over,
+  } as Parameters<typeof appendCapture>[0]);
+}
+
 // seed() builds a MEDIA row. A text capture has no media at all, so it gets
 // its own builder rather than a pile of `undefined` overrides (kora#196).
 async function seedText(id: string, over: Record<string, unknown> = {}) {
@@ -289,6 +298,45 @@ describe("text captures (kora#196)", () => {
 
   it("sends a non-auto text resolution to review, like every other modality", async () => {
     await seedText("cap_t1");
+    const result = await drainCaptureQueue(
+      deps({ resolve: jest.fn(async () => res("confirm")) }),
+    );
+    expect(result.review).toBe(1);
+  });
+});
+
+// kora#241. Same shape as the text arm above: no media, so the loop's
+// missing-media guard must skip it, and the source label must be its own.
+describe("barcode captures", () => {
+  it("skips the missing-media check for a barcode row", async () => {
+    await seedBarcode("cap_b1");
+    const mediaExists = jest.fn(() => false);
+    const deleteMedia = jest.fn(async () => {});
+
+    await drainCaptureQueue(deps({ mediaExists, deleteMedia }));
+
+    expect(mediaExists).not.toHaveBeenCalled();
+    expect(deleteMedia).not.toHaveBeenCalled();
+  });
+
+  // "ai_barcode" is in the server's allowlist (api/internal/metrics/labels.go).
+  // sourceOf used to fall through to "ai_voice" for anything that was not
+  // photo or text, so this row would have been counted as a voice note in the
+  // by-source share metric with nothing failing.
+  it("hands an auto-tier barcode resolution to the log queue as ai_barcode", async () => {
+    await seedBarcode("cap_b1");
+    const result = await drainCaptureQueue(deps());
+
+    expect(result.logged).toBe(1);
+    expect(appendLog).toHaveBeenCalledWith(
+      expect.objectContaining({ source: "ai_barcode" }),
+      expect.stringMatching(UUID_V4),
+      OWNER,
+    );
+  });
+
+  it("sends a non-auto barcode resolution to review, like every other modality", async () => {
+    await seedBarcode("cap_b1");
     const result = await drainCaptureQueue(
       deps({ resolve: jest.fn(async () => res("confirm")) }),
     );

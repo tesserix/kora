@@ -235,3 +235,130 @@ describe("text captures (kora#196)", () => {
     expect(hasMedia(row!)).toBe(false);
   });
 });
+
+// kora#241. The first-ever scan of a product while offline: the cache has no
+// answer (cachedResolution's OfflineUnknownBarcodeError), so the SCAN itself
+// is queued.
+describe("barcode captures (kora#241)", () => {
+  const barcodeInput = {
+    id: "cap_bc_1",
+    kind: "barcode" as const,
+    code: "5000112637922",
+    capturedAt: "2026-08-21T10:00:00.000Z",
+    ownerId: "owner-1",
+  };
+
+  const photoInput = (id: string) => ({
+    id, kind: "photo" as const, storedName: `${id}.jpg`, fileName: "m.jpg",
+    mimeType: "image/jpeg", capturedAt: "2026-08-21T10:00:00.000Z", ownerId: "owner-1",
+  });
+
+  it("accepts a barcode row and reads it back with its code", async () => {
+    await append(barcodeInput);
+    const [row] = await list();
+    expect(row!.kind).toBe("barcode");
+    expect(row).toMatchObject({ code: "5000112637922", status: "pending", attempts: 0 });
+  });
+
+  it("drops a barcode row with no code rather than queueing an empty scan", async () => {
+    await AsyncStorage.setItem(
+      "kora.captureQueue",
+      JSON.stringify([{
+        id: "cap_bad", kind: "barcode", code: "",
+        capturedAt: "2026-08-21T10:00:00.000Z", queuedAt: "2026-08-21T10:00:00.000Z",
+        status: "pending", attempts: 0, ownerId: "owner-1",
+      }]),
+    );
+    expect(await list()).toEqual([]);
+  });
+
+  // TRAP 1. The capacity split was written as `kind === "text"`, so a barcode
+  // row — not text — landed in the MEDIA bucket and was capped at
+  // MAX_CAPTURES (20) instead of MAX_TEXT_CAPTURES (50). Nothing throws and
+  // nothing logs; the queue just quietly holds 20. Only a test that queues
+  // past MAX_CAPTURES sees it. It is a lightweight row: a 13-digit string has
+  // no byte budget to protect.
+  it("caps barcodes at the lightweight ceiling, not the media one", async () => {
+    for (let i = 0; i < MAX_CAPTURES; i++) {
+      await append({ ...barcodeInput, id: `cap_bc_${i}`, code: `500011263${1000 + i}` });
+    }
+    await expect(
+      append({ ...barcodeInput, id: "cap_bc_past_media_cap", code: "5000112630000" }),
+    ).resolves.toMatchObject({ kind: "barcode" });
+    expect(await list()).toHaveLength(MAX_CAPTURES + 1);
+  });
+
+  it("refuses a barcode past the lightweight ceiling it shares with text", async () => {
+    for (let i = 0; i < MAX_TEXT_CAPTURES; i++) {
+      await append({ ...barcodeInput, id: `cap_bc_${i}`, code: `500011263${1000 + i}` });
+    }
+    await expect(
+      append({ ...barcodeInput, id: "cap_bc_over", code: "5000112630000" }),
+    ).rejects.toThrow(CaptureQueueFullError);
+  });
+
+  // The other side of the same split: a full media queue must not refuse a
+  // scan, exactly as it must not refuse a typed phrase.
+  it("does not let a full media queue refuse a barcode", async () => {
+    for (let i = 0; i < MAX_CAPTURES; i++) await append(photoInput(`cap_p_${i}`));
+    await expect(append(barcodeInput)).resolves.toMatchObject({ kind: "barcode" });
+  });
+
+  it("does not let a full lightweight queue refuse a photo", async () => {
+    for (let i = 0; i < MAX_TEXT_CAPTURES; i++) {
+      await append({ ...barcodeInput, id: `cap_bc_${i}`, code: `500011263${1000 + i}` });
+    }
+    await expect(append(photoInput("cap_photo"))).resolves.toMatchObject({ kind: "photo" });
+  });
+
+  // A scanner fires continuously while a code is in frame, and a user who
+  // sees "saved" will often scan again to be sure. Three scans of one unknown
+  // product is one intent, not three meals.
+  it("queues one row for the same unknown code scanned three times", async () => {
+    await append(barcodeInput);
+    await append({ ...barcodeInput, id: "cap_bc_2" });
+    await append({ ...barcodeInput, id: "cap_bc_3" });
+    const rows = await list();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.id).toBe("cap_bc_1");
+  });
+
+  // The caller cannot tell a dedupe from a fresh append, and must not have to:
+  // both mean "this scan is saved". Returning the row that IS in the queue is
+  // what makes that true.
+  it("hands back the already-queued row when it dedupes", async () => {
+    const first = await append(barcodeInput);
+    const second = await append({ ...barcodeInput, id: "cap_bc_2" });
+    expect(second).toMatchObject({ id: first.id, code: "5000112637922" });
+  });
+
+  it("does not dedupe a different code", async () => {
+    await append(barcodeInput);
+    await append({ ...barcodeInput, id: "cap_bc_2", code: "8901030865278" });
+    expect(await list()).toHaveLength(2);
+  });
+
+  // Dedupe is scoped to PENDING rows. A row in review is one the user can see
+  // and act on, so scanning that code again is a deliberate second attempt.
+  it("does not dedupe against a row that is no longer pending", async () => {
+    await append(barcodeInput);
+    await markReview("cap_bc_1", RESOLUTION);
+    await append({ ...barcodeInput, id: "cap_bc_2" });
+    expect(await list()).toHaveLength(2);
+  });
+
+  // One account's queue must never absorb another's scan — the drain filters
+  // by ownerId, so a deduped cross-owner row would strand the second user's
+  // scan behind the first user's.
+  it("does not dedupe across owners", async () => {
+    await append(barcodeInput);
+    await append({ ...barcodeInput, id: "cap_bc_2", ownerId: "owner-2" });
+    expect(await list()).toHaveLength(2);
+  });
+
+  it("hasMedia rejects a barcode row", async () => {
+    await append(barcodeInput);
+    const [row] = await list();
+    expect(hasMedia(row!)).toBe(false);
+  });
+});

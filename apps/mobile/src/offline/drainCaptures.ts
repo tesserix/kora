@@ -3,6 +3,8 @@ import type { Resolution, ResolutionSource } from "@/api/types";
 import { apiFetch, apiFetchMultipart, currentUserId } from "@/lib/api";
 import { buildCaptureForm, normalizeResolution } from "@/api/resolveWire";
 import { deleteQueuedMedia, mediaExists, queuedMediaUri } from "./captureMedia";
+import { resolutionFromCachedFood } from "./cachedResolution";
+import { getFoodByBarcode } from "./foodCache";
 import {
   discard, hasMedia, list, markFailed, markReview, recordAttempt, type QueuedCapture,
 } from "./captureQueue";
@@ -47,10 +49,22 @@ function firstCandidate(resolution: Resolution) {
 // literal, so the compiler — not a human re-reading api/internal/metrics/
 // labels.go's allowlist — rejects a value the server would silently bucket
 // into "other" and corrupt the by-source share metric.
+//
+// A switch with an exhaustive default, not a fallthrough chain: the previous
+// shape returned "ai_voice" for anything that was not photo or text, so
+// kora#241's barcode arm would have been logged as a voice note with nothing
+// failing. `never` makes the next arm a compile error instead.
 function sourceOf(kind: QueuedCapture["kind"]): ResolutionSource {
-  if (kind === "photo") return "ai_photo";
-  if (kind === "text") return "ai_text";
-  return "ai_voice";
+  switch (kind) {
+    case "photo": return "ai_photo";
+    case "text": return "ai_text";
+    case "voice": return "ai_voice";
+    case "barcode": return "ai_barcode";
+    default: {
+      const unhandled: never = kind;
+      throw new Error(`unhandled capture kind: ${String(unhandled)}`);
+    }
+  }
 }
 
 export async function drainCaptureQueue(deps: DrainDeps) {
@@ -63,9 +77,10 @@ export async function drainCaptureQueue(deps: DrainDeps) {
     // The file can be gone: an OS purge, cleared app data, or a crash between
     // append and copy. Terminal, and handled per item so one missing file
     // cannot strand the rest of the pass.
-    // Media rows only (kora#196). A text capture has no file, so asking
-    // whether its media exists would fail it as "missing-media" on the first
-    // line of the loop — reporting a lost file for a capture that never had one.
+    // Media rows only (kora#196, kora#241). A text or barcode capture has no
+    // file, so asking whether its media exists would fail it as "missing-media"
+    // on the first line of the loop — reporting a lost file for a capture that
+    // never had one.
     if (hasMedia(item) && !deps.mediaExists(item.storedName)) {
       await markFailed(item.id, "The photo or recording is no longer on this device.", "missing-media");
       failed++;
@@ -134,12 +149,51 @@ export async function drainCaptureQueue(deps: DrainDeps) {
   return { logged, review, failed, deferred };
 }
 
+// Server first, local cache only if the request never arrived — the same order
+// useResolveBarcode's withCacheFallback uses online, and deliberately not
+// cache-first (kora#241 leaves this open; this is the decision).
+//
+// The queued row exists BECAUSE the cache had no answer, but by drain time it
+// may: the user can have scanned the same product online in between, and
+// useResolveBarcode caches what it resolves at "full" fidelity. Asking the
+// server anyway is still right. A found barcode comes back `tier: "auto"`
+// (api/internal/resolve/handler.go's barcodeCandidate) and is logged without a
+// confirmation tap, whereas resolutionFromCachedFood is deliberately
+// `tier: "confirm"` — so cache-first would charge the user a tap that scanning
+// the same product online would not, for the same identity. A barcode resolve
+// is an exact-key lookup on the server, not an AI call, so there is no COGS
+// argument for skipping it either.
+//
+// The fallback is worth having all the same: a drain fired on a connection
+// that is back but flaky would otherwise defer a row the device can answer
+// exactly, and CACHED_MATCH_TIER keeps that answer honest about where it came
+// from. Restricted to errors with NO http status — the request never reached
+// the server. A 4xx is the server refusing this code and must stay a delivery
+// failure, not be papered over with a local guess.
+async function resolveQueuedBarcode(code: string): Promise<Resolution> {
+  try {
+    return normalizeResolution(
+      await apiFetch("/v1/resolve/barcode", {
+        method: "POST",
+        // `barcode`, matching barcodeRequest in the handler — NOT `code`,
+        // which binds to the empty string and 400s as invalid_input.
+        body: JSON.stringify({ barcode: code }),
+      }),
+    );
+  } catch (err) {
+    if (statusOf(err) !== undefined) throw err;
+    const cached = await getFoodByBarcode(code);
+    if (!cached) throw err;
+    return resolutionFromCachedFood(cached);
+  }
+}
+
 async function resolveCapture(capture: QueuedCapture): Promise<Resolution> {
   // Text posts plain JSON to the same endpoint useResolveText uses; only media
   // needs the multipart body. normalizeResolution lives in the resolveWire leaf
   // module precisely so this file can use it without inverting the
   // @/api -> @/offline dependency (see that file's header).
-  if (!hasMedia(capture)) {
+  if (capture.kind === "text") {
     return normalizeResolution(
       await apiFetch("/v1/resolve/text", {
         method: "POST",
@@ -147,6 +201,7 @@ async function resolveCapture(capture: QueuedCapture): Promise<Resolution> {
       }),
     );
   }
+  if (capture.kind === "barcode") return resolveQueuedBarcode(capture.code);
   const path = capture.kind === "photo" ? "/v1/resolve/photo" : "/v1/resolve/voice";
   const form = buildCaptureForm({
     uri: queuedMediaUri(capture.storedName),
