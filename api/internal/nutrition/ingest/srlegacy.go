@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+
+	"github.com/tesserix/kora/api/internal/nutrition"
 )
 
 // USDA FoodData Central nutrient IDs. 1062 is Energy in kJ and is deliberately
@@ -15,6 +17,37 @@ const (
 	srNutrientFat     = 1004
 	srNutrientFiber   = 1079
 )
+
+// Units match the micronutrient columns: 1106 is vitamin A as RAE µg and 1114
+// is vitamin D in µg; their IU siblings (1104, 1110) are not comparable.
+const (
+	srNutrientSugar       = 2000
+	srNutrientSatFat      = 1258
+	srNutrientSodium      = 1093
+	srNutrientCholesterol = 1253
+	srNutrientCalcium     = 1087
+	srNutrientIron        = 1089
+	srNutrientPotassium   = 1092
+	srNutrientVitaminA    = 1106
+	srNutrientVitaminC    = 1162
+	srNutrientVitaminD    = 1114
+)
+
+func srMicronutrients(amounts map[int]float64) nutrition.Micronutrients {
+	get := func(id int) *float64 {
+		if v, ok := amounts[id]; ok {
+			return &v
+		}
+		return nil
+	}
+	return nutrition.Micronutrients{
+		SugarPer100g: get(srNutrientSugar), SatFatPer100g: get(srNutrientSatFat),
+		SodiumMgPer100g: get(srNutrientSodium), CholesterolMgPer100g: get(srNutrientCholesterol),
+		CalciumMgPer100g: get(srNutrientCalcium), IronMgPer100g: get(srNutrientIron),
+		PotassiumMgPer100g: get(srNutrientPotassium), VitaminAUgPer100g: get(srNutrientVitaminA),
+		VitaminCMgPer100g: get(srNutrientVitaminC), VitaminDUgPer100g: get(srNutrientVitaminD),
+	}
+}
 
 // srDefaultServingGrams is the fallback serve for records with no usable
 // foodPortions entry. 0 would make any portion-scaled log silently zero.
@@ -108,6 +141,7 @@ func ConvertSRLegacy(r io.Reader, w io.Writer) (SRLegacyStats, error) {
 			CarbsPer100g:   carbs,
 			FatPer100g:     fat,
 			FiberPer100g:   amounts[srNutrientFiber], // absent -> 0
+			Micronutrients: srMicronutrients(amounts),
 		})
 		stats.Converted++
 	}

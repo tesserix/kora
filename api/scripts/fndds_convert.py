@@ -23,8 +23,24 @@ import os
 import re
 import sys
 
+from micronutrients import fields
+
 # FNDDS food_nutrient rows use the legacy nutrient numbers, not FDC ids.
 NUTRIENTS = {"208": "kcal", "203": "protein", "205": "carbs", "204": "fat", "291": "fiber"}
+
+# Units already match: 320 is vitamin A as RAE µg, 328 is vitamin D in µg.
+MICRONUTRIENTS = {
+    "269": "sugar_per_100g",
+    "606": "sat_fat_per_100g",
+    "307": "sodium_mg_per_100g",
+    "601": "cholesterol_mg_per_100g",
+    "301": "calcium_mg_per_100g",
+    "303": "iron_mg_per_100g",
+    "306": "potassium_mg_per_100g",
+    "320": "vitamin_a_ug_per_100g",
+    "401": "vitamin_c_mg_per_100g",
+    "328": "vitamin_d_ug_per_100g",
+}
 
 # Same plausibility bar as off_convert.py: nothing edible beats pure fat.
 MAX_KCAL_PER_100G = 900
@@ -56,7 +72,7 @@ def main():
 
     nutrition = {}
     for r in read_rows(directory, "food_nutrient.csv"):
-        field = NUTRIENTS.get(r["nutrient_id"])
+        field = NUTRIENTS.get(r["nutrient_id"]) or MICRONUTRIENTS.get(r["nutrient_id"])
         if field is None or r["fdc_id"] not in foods:
             continue
         try:
@@ -108,6 +124,7 @@ def main():
             "carbs_per_100g": round(n["carbs"], 2),
             "fat_per_100g": round(n["fat"], 2),
             "fiber_per_100g": round(n["fiber"], 2),
+            **fields({k: n.get(k) for k in MICRONUTRIENTS.values()}),
         }
         units = sorted(portions.get(fdc_id, []), key=lambda p: p["seq"])
         if units:

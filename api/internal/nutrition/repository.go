@@ -129,7 +129,10 @@ func (r Repository) SearchReferenceFoods(
 		SELECT id, name, brand, provenance, entity_type, locale, barcode,
 		       serving_desc, serving_grams, base_unit, serving_units,
 		       kcal_per_100g, protein_per_100g, carbs_per_100g,
-		       fat_per_100g, fiber_per_100g, created_at,
+		       fat_per_100g, fiber_per_100g, sugar_per_100g, sat_fat_per_100g,
+		       sodium_mg_per_100g, cholesterol_mg_per_100g, calcium_mg_per_100g,
+		       iron_mg_per_100g, potassium_mg_per_100g, vitamin_a_ug_per_100g,
+		       vitamin_c_mg_per_100g, vitamin_d_ug_per_100g, created_at,
 		       (embedding <=> ?) AS distance
 		FROM food_items
 		WHERE deleted_at IS NULL
@@ -866,6 +869,36 @@ func (r Repository) BackfillServings(ctx context.Context, items []FoodItem) (int
 			Updates(updates)
 		if res.Error != nil {
 			return updated, fmt.Errorf("nutrition: backfill servings: %w", res.Error)
+		}
+		updated += int(res.RowsAffected)
+	}
+	return updated, nil
+}
+
+// BackfillMicronutrients fills unmeasured micronutrient columns on rows that
+// predate them. Only the row's own provenance may fill it, and only NULL
+// columns are written, so a second run is a no-op.
+func (r Repository) BackfillMicronutrients(ctx context.Context, items []FoodItem) (int, error) {
+	updated := 0
+	for _, item := range items {
+		updates := map[string]any{}
+		var missing []string
+		for col, v := range item.Micros.columns() {
+			if v == nil {
+				continue
+			}
+			updates[col] = gorm.Expr("COALESCE("+col+", ?)", *v)
+			missing = append(missing, col+" IS NULL")
+		}
+		if len(updates) == 0 {
+			continue
+		}
+		res := r.db.WithContext(ctx).Model(&FoodItem{}).
+			Where("name = ? AND brand = ? AND provenance = ?", item.Name, item.Brand, item.Provenance).
+			Where(strings.Join(missing, " OR ")).
+			UpdateColumns(updates)
+		if res.Error != nil {
+			return updated, fmt.Errorf("nutrition: backfill micronutrients: %w", res.Error)
 		}
 		updated += int(res.RowsAffected)
 	}

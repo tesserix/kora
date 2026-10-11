@@ -59,6 +59,8 @@ import csv
 import json
 import sys
 
+from micronutrients import fields, vitamin_a_rae
+
 # Kilojoules per kilocalorie (thermochemical), the factor IFCT's own tables use.
 KJ_PER_KCAL = 4.184
 
@@ -81,6 +83,43 @@ def parse_float(value):
         return float(text)
     except ValueError:
         return None
+
+
+# Animal foods IFCT never analysed for retinol or cholesterol; index.csv still
+# writes 0, which would read as cholesterol-free ghee and paneer.
+UNANALYSED_ANIMAL_GROUPS = {"Milk and Milk Products"}
+UNANALYSED_ANIMAL_NAMES = {"Ghee"}
+
+
+def micronutrients(source):
+    """index.csv states every figure in grams and writes 0 where IFCT did not
+    analyse, so 0 is treated as unmeasured."""
+
+    def get(tag, scale):
+        value = parse_float(source.get(tag))
+        return value * scale if value else None
+
+    unanalysed = (
+        source.get("grup") in UNANALYSED_ANIMAL_GROUPS
+        or source.get("name", "").strip() in UNANALYSED_ANIMAL_NAMES
+    )
+    # Plants carry no retinol, so carotene alone gives their RAE.
+    vitamin_a = None if unanalysed else vitamin_a_rae(get("retol", 1e6) or 0, get("cartbeq", 1e6) or 0) or None
+
+    return fields(
+        {
+            "sugar_per_100g": get("fsugar", 1),
+            "sat_fat_per_100g": get("fasat", 1),
+            "sodium_mg_per_100g": get("na", 1e3),
+            "cholesterol_mg_per_100g": None if unanalysed else get("cholc", 1e3),
+            "calcium_mg_per_100g": get("ca", 1e3),
+            "iron_mg_per_100g": get("fe", 1e3),
+            "potassium_mg_per_100g": get("k", 1e3),
+            "vitamin_a_ug_per_100g": vitamin_a,
+            "vitamin_c_mg_per_100g": get("vitc", 1e3),
+            "vitamin_d_ug_per_100g": get("vitd", 1e6),
+        }
+    )
 
 
 def convert(csv_path):
@@ -124,6 +163,7 @@ def convert(csv_path):
         # Fibre is genuinely absent for some rows; omit rather than assert 0.
         if fiber is not None:
             row["fiber_per_100g"] = round(fiber, 2)
+        row.update(micronutrients(source))
         rows.append(row)
 
     return rows, dropped_incomplete, dropped_atwater

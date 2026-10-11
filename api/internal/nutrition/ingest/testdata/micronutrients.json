@@ -1,0 +1,7 @@
+[
+  {"name": "Measured Spinach", "kcal_per_100g": 23, "protein_per_100g": 2.9, "carbs_per_100g": 3.6, "fat_per_100g": 0.4,
+   "sugar_per_100g": 0.4, "sat_fat_per_100g": 0.06, "sodium_mg_per_100g": 79, "cholesterol_mg_per_100g": 0,
+   "calcium_mg_per_100g": 99, "iron_mg_per_100g": 2.71, "potassium_mg_per_100g": 558,
+   "vitamin_a_ug_per_100g": 469, "vitamin_c_mg_per_100g": 28.1, "vitamin_d_ug_per_100g": 0},
+  {"name": "Unmeasured Dish", "kcal_per_100g": 150, "protein_per_100g": 5, "carbs_per_100g": 20, "fat_per_100g": 5}
+]

@@ -27,7 +27,8 @@ type row struct {
 	CarbsPer100g   float64       `json:"carbs_per_100g"`
 	FatPer100g     float64       `json:"fat_per_100g"`
 	FiberPer100g   float64       `json:"fiber_per_100g"`
-	Barcode        string        `json:"barcode"`
+	nutrition.Micronutrients
+	Barcode string `json:"barcode"`
 	// Locale is set only by sources whose rows are not all one locale —
 	// today just au_in_dishes.json, which mixes Indian and Australian dishes.
 	// Everything else leaves it empty and takes nutrition.DeriveLocale's
@@ -127,6 +128,7 @@ func LoadFile(path, provenance string) ([]nutrition.FoodItem, error) {
 			CarbsPer100g:   r.CarbsPer100g,
 			FatPer100g:     r.FatPer100g,
 			FiberPer100g:   r.FiberPer100g,
+			Micros:         r.Micronutrients,
 		}
 		if r.Barcode != "" {
 			b := r.Barcode

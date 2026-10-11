@@ -44,6 +44,8 @@ import sys
 
 import openpyxl
 
+from micronutrients import from_fsanz
+
 SHEET = "All solids & liquids per 100 g"
 HEADER_ROW = 3
 
@@ -58,6 +60,17 @@ COL = {
     "fat": 9,
     "fiber": 11,
     "carbs": 39,  # available carbohydrate, with sugar alcohols
+    "sugar": 19,
+    "calcium": 55,
+    "iron": 62,
+    "potassium": 70,
+    "sodium": 72,
+    "retinol": 76,
+    "beta_carotene_eq": 80,
+    "vitamin_c": 98,
+    "vitamin_d": 103,
+    "sat_fat": 191,
+    "cholesterol": 235,
 }
 
 EXPECTED = {
@@ -68,6 +81,17 @@ EXPECTED = {
     "fat": "fat, total",
     "fiber": "total dietary fibre",
     "carbs": "available carbohydrate, with sugar alcohols",
+    "sugar": "total sugars",
+    "calcium": "calcium (ca)",
+    "iron": "iron (fe)",
+    "potassium": "potassium (k)",
+    "sodium": "sodium (na)",
+    "retinol": "retinol (preformed vitamin a)",
+    "beta_carotene_eq": "beta-carotene equivalents",
+    "vitamin_c": "vitamin c",
+    "vitamin_d": "vitamin d3 equivalents",
+    "sat_fat": "total saturated fatty acids, equated  (g)",
+    "cholesterol": "cholesterol",
 }
 
 # FSANZ states energy in kilojoules; the index stores kcal.
@@ -103,6 +127,17 @@ def number(value):
         return 0.0
 
 
+def measured(value):
+    """Like number(), but a blank cell is unmeasured (None) rather than zero."""
+    if value is None or str(value).strip() in ("", "-", "n/a"):
+        return None
+    return number(value)
+
+
+def micronutrients(row):
+    return from_fsanz(lambda field: measured(row[COL[field]]))
+
+
 def main():
     if len(sys.argv) != 2:
         raise SystemExit(__doc__)
@@ -133,6 +168,7 @@ def main():
                 "carbs_per_100g": round(number(row[COL["carbs"]]), 2),
                 "fat_per_100g": round(number(row[COL["fat"]]), 2),
                 "fiber_per_100g": round(number(row[COL["fiber"]]), 2),
+                **micronutrients(row),
             }
         )
 

@@ -45,4 +45,15 @@ func TestConvertSRLegacy(t *testing.T) {
 	require.Equal(t, "100 g", rows[1].ServingDesc)
 	// Fibre is absent on this record and defaults to 0.
 	require.Equal(t, 0.0, rows[1].FiberPer100g)
+
+	// Micronutrients carry over when USDA states them, a measured zero stays
+	// zero, and an unstated one stays nil rather than defaulting like fibre.
+	m := rows[0].Micronutrients
+	require.Equal(t, 653.0, *m.SodiumMgPer100g)
+	require.Equal(t, 18.9, *m.SatFatPer100g)
+	require.Equal(t, 99.0, *m.CholesterolMgPer100g)
+	require.Equal(t, 265.0, *m.VitaminAUgPer100g)
+	require.Equal(t, 0.0, *m.VitaminCMgPer100g)
+	require.Nil(t, m.SugarPer100g)
+	require.True(t, rows[1].Micronutrients.Empty())
 }
