@@ -133,3 +133,31 @@ USDA_FIELDS = {
     "folate_ug_per_100g": ("417", 1),
     "folate_dfe_ug_per_100g": ("435", 1),
 }
+
+
+def reference_food(
+    name: str,
+    locale: str,
+    source: Mapping[str, object],
+    fields: Mapping[str, tuple[str, float]],
+) -> dict[str, object] | None:
+    core = {
+        key: measurement(source.get(key))
+        for key in ("kcal", "protein", "carbs", "fat", "fiber")
+    }
+    if not name or any(value is None for value in core.values()):
+        return None
+    kcal = core["kcal"]
+    if kcal is None or kcal > 900:
+        return None
+    macros = [core[key] for key in ("protein", "carbs", "fat", "fiber")]
+    if any(value is None or value > 100 for value in macros):
+        return None
+    if sum(value for value in macros[:3] if value is not None) > 100:
+        return None
+    return {
+        "name": name,
+        "locale": locale,
+        **{f"{key}_per_100g": value for key, value in core.items()},
+        **optional_nutrients(source, fields),
+    }

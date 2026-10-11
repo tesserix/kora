@@ -72,12 +72,13 @@ func (c HTTPOFFClient) Fetch(ctx context.Context, barcode string) (*FoodItem, er
 	var body struct {
 		Status  int `json:"status"`
 		Product struct {
-			ProductName         string        `json:"product_name"`
-			Brands              string        `json:"brands"`
-			Nutriments          OFFNutriments `json:"nutriments"`
-			ServingQuantity     float64       `json:"serving_quantity"`
-			ServingQuantityUnit string        `json:"serving_quantity_unit"`
-			ServingSize         string        `json:"serving_size"`
+			CountriesTags       json.RawMessage `json:"countries_tags"`
+			ProductName         string          `json:"product_name"`
+			Brands              string          `json:"brands"`
+			Nutriments          OFFNutriments   `json:"nutriments"`
+			ServingQuantity     float64         `json:"serving_quantity"`
+			ServingQuantityUnit string          `json:"serving_quantity_unit"`
+			ServingSize         string          `json:"serving_size"`
 		} `json:"product"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxOFFResponseBytes)).Decode(&body); err != nil {
@@ -89,6 +90,7 @@ func (c HTTPOFFClient) Fetch(ctx context.Context, barcode string) (*FoodItem, er
 	code := barcode
 	item := &FoodItem{
 		Nutrients:      body.Product.Nutriments.Nutrients,
+		Locale:         OFFLocale(body.Product.CountriesTags),
 		Name:           body.Product.ProductName,
 		Brand:          body.Product.Brands,
 		Provenance:     ProvenanceOFF,

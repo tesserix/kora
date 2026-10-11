@@ -24,8 +24,8 @@ func TestLocaleFromTimezone(t *testing.T) {
 		{"asia/kolkata", LocaleIN, "case must not matter"},
 		{"  Australia/Sydney  ", LocaleAU, "surrounding whitespace must not matter"},
 		{"", LocaleUnknown, "no timezone means no preference, not a guessed one"},
-		{"Europe/London", LocaleUnknown, "the index holds no GB rows, so a guess would be noise"},
-		{"Asia/Tokyo", LocaleUnknown, "same — unrecognised must mean no preference"},
+		{"Europe/London", LocaleGB, "UK reference rows and packaged foods"},
+		{"Asia/Tokyo", LocaleJP, "Japanese reference rows and packaged foods"},
 		{"Antarctica/Casey", LocaleUnknown, "an Australian territory, but not an Australian food locale"},
 	}
 	for _, tc := range tests {

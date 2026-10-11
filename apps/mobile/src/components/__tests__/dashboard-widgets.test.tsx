@@ -30,7 +30,7 @@ test("ProvenanceChip still shows the estimate disclaimer for a plain empty prove
   expect(getByText(/estimate/i)).toBeTruthy();
 });
 
-test.each(["ifct", "ausnut"])("%s uses the reference source badge in search and meal details", async (source) => {
+test.each(["cofid", "mext", "ifct", "ausnut"])("%s uses the reference source badge in search and meal details", async (source) => {
   const { getByText } = await render(<ProvenanceChip provenance={source} />);
   expect(getByText(`${source.toUpperCase()} · verified`)).toBeTruthy();
   expect(provenanceDescriptor(source)).toBe("Verified");

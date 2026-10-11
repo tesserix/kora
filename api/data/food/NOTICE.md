@@ -13,6 +13,15 @@ are calculations from ingredients and cooked yields, not laboratory analyses.
   [Original database](https://world.openfoodfacts.org/). The country snapshots
   are adapted, filtered extracts. Public distribution of an OFF-derived
   database remains subject to ODbL's attribution and share-alike terms.
+- UK CoFID 2021, Public Health England: contains public sector information
+  licensed under the [Open Government Licence v3.0](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/).
+  [Original workbook](https://www.gov.uk/government/publications/composition-of-foods-integrated-dataset-cofid).
+  Adapted for Kora by joining nutrient tables and retaining usable records.
+- Standard Tables of Food Composition in Japan, English 2015 edition:
+  Ministry of Education, Culture, Sports, Science and Technology (MEXT).
+  [Original workbook and tables](https://www.mext.go.jp/en/policy/science_technology/policy/title01/detail01/sdetail01/sdetail01/1385122.htm).
+  Adapted for Kora. Reused under [MEXT's Public Data License](https://www.mext.go.jp/b_menu/1351168.htm),
+  compatible with CC BY 4.0. Published estimates remain source estimates.
 - IFCT 2017: National Institute of Nutrition, Hyderabad, through the
   [compositions transcription at tag 2.0.5](https://github.com/ifct2017/compositions/tree/2.0.5).
   The transcription's MIT licence is reproduced below. Later tags and HEAD

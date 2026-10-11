@@ -124,13 +124,13 @@ def test_fndds_keeps_sodium_and_rae_without_confusing_iu(tmp_path):
 
 def test_off_reads_named_headers_and_converts_micronutrient_units(tmp_path):
     header = "code\tproduct_name\tbrands\tcountries_tags\tserving_quantity\tenergy-kcal_100g\tfat_100g\tcarbohydrates_100g\tfiber_100g\tproteins_100g\tsugars_100g\tsaturated-fat_100g\tsodium_100g\tvitamin-d_100g\n"
-    product = "4000000000000\tTest snack\tBrand\ten:australia\t30\t100\t2\t15\t1\t5\t0\t1\t0.42\t0.000005\n"
+    product = "4000000000000\tTest snack\tBrand\ten:japan\t30\t100\t2\t15\t1\t5\t0\t1\t0.42\t0.000005\n"
     result = subprocess.run(
         [
             sys.executable,
             str(SCRIPTS / "off_convert.py"),
             "--countries",
-            "au",
+            "jp",
             "--outdir",
             str(tmp_path),
         ],
@@ -139,8 +139,8 @@ def test_off_reads_named_headers_and_converts_micronutrient_units(tmp_path):
         text=True,
     )
     assert result.returncode == 0, result.stderr
-    food = json.loads((tmp_path / "off_au.json").read_text())[0]
-    assert food["locale"] == "AU"
+    food = json.loads((tmp_path / "off_jp.json").read_text())[0]
+    assert food["locale"] == "JP"
     assert food["sodium_mg_per_100g"] == 420
     assert food["vitamin_d_ug_per_100g"] == 5
     assert food["sugar_per_100g"] == 0

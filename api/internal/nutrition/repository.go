@@ -80,6 +80,8 @@ var reviewedReferenceProvenance = []string{
 	ProvenanceAUSNUT,
 	ProvenanceIFCT,
 	ProvenanceUSDA,
+	ProvenanceCoFID,
+	ProvenanceMEXT,
 }
 
 // ReferenceCandidate is one globally reviewed nutrition row retrieved as
