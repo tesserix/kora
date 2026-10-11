@@ -4,6 +4,7 @@
 package ai
 
 import (
+	"encoding/json"
 	"github.com/google/uuid"
 
 	"github.com/tesserix/kora/api/internal/nutrition"
@@ -218,8 +219,25 @@ type ResolvedCandidate struct {
 	PortionAssumed bool `json:"portion_assumed"`
 }
 
+// PhotoEvidence records the bounded OCR and Jev routing evidence.
+type PhotoEvidence struct {
+	MealDecisionModel   string          `json:"meal_decision_model,omitempty"`
+	MealReviewModel     string          `json:"meal_review_model,omitempty"`
+	MealReviewStatus    string          `json:"meal_review_status,omitempty"`
+	OCRFields           json.RawMessage `json:"ocr_fields,omitempty"`
+	OCROutcome          string          `json:"ocr_outcome"`
+	PolicyVersion       string          `json:"policy_version"`
+	OCRJobID            string          `json:"ocr_job_id,omitempty"`
+	OCRStatus           string          `json:"ocr_status"`
+	DecisionModel       string          `json:"decision_model"`
+	Route               string          `json:"route"`
+	ConsumedAmountKnown bool            `json:"consumed_amount_known"`
+	Label               json.RawMessage `json:"label,omitempty"`
+}
+
 // Resolution is the engine's answer for one resolve request.
 type Resolution struct {
+	PhotoEvidence    *PhotoEvidence      `json:"photo_evidence,omitempty"`
 	Candidates       []ResolvedCandidate `json:"candidates"`
 	Tier             Tier                `json:"tier"`
 	FollowUpQuestion string              `json:"follow_up_question,omitempty"`

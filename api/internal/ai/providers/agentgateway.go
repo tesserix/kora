@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -28,6 +29,7 @@ const (
 // Gateway. The classification headers are constructed server-side and are
 // never copied from an inbound Kora request.
 type AgentGatewayProvider struct {
+	photoReview     bool
 	identify        OpenAIProvider
 	photo           OpenAIProvider
 	bodyComposition OpenAIProvider
@@ -69,6 +71,18 @@ func NewAgentGatewayProvider(apiKey, baseURL, model string) AgentGatewayProvider
 	}
 }
 
+func NewPhotoReviewProvider(key, baseURL, model string) AgentGatewayProvider {
+	p := NewAgentGatewayProvider(key, baseURL, model)
+	p.photoReview = true
+	p.photo = newOpenAIProvider(key, baseURL, model, false,
+		option.WithMaxRetries(0),
+		option.WithHeader(gatewayCapabilityHeader, "identify_photo_review"),
+		option.WithHeader(gatewayContextKindHeader, "json_api"),
+		option.WithHeader(gatewayRTKAppliedHeader, "false"))
+	p.photo.options = gatewayRequestOptions
+	return p
+}
+
 func (p AgentGatewayProvider) IdentifyText(ctx context.Context, phrase string) ([]ai.Guess, ai.Usage, error) {
 	guesses, usage, err := p.identify.IdentifyText(ctx, phrase)
 	return guesses, gatewayUsage(usage), err
@@ -76,6 +90,9 @@ func (p AgentGatewayProvider) IdentifyText(ctx context.Context, phrase string) (
 
 func (p AgentGatewayProvider) IdentifyPhoto(ctx context.Context, image []byte, mime string) ([]ai.Guess, ai.Usage, error) {
 	guesses, usage, err := p.photo.IdentifyPhoto(ctx, image, mime)
+	if err == nil && p.photoReview && usage.Model != independentReviewModel {
+		return nil, gatewayUsage(usage), errors.New("independent photo review model mismatch")
+	}
 	return guesses, gatewayUsage(usage), err
 }
 

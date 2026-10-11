@@ -18,6 +18,7 @@ import (
 
 	"github.com/tesserix/kora/api/internal/ai"
 	"github.com/tesserix/kora/api/internal/httpx"
+	"github.com/tesserix/kora/api/internal/labelocr"
 	"github.com/tesserix/kora/api/internal/nutrition"
 )
 
@@ -631,4 +632,28 @@ func TestResolveBarcodeReturnsTheIDItsOutcomeIsRecordedUnder(t *testing.T) {
 	id := resolutionIDOf(t, doJSON(r, http.MethodPost, "/resolve/barcode", map[string]string{"barcode": "5449000000123"}))
 
 	assert.Equal(t, sink.gotID, id)
+}
+
+func TestResolvePhotoEvidenceErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		err    error
+		status int
+		code   string
+	}{
+		{"decision unavailable", labelocr.ErrDecisionUnavailable, 503, "ai_decision_unavailable"},
+		{"quota exhausted", labelocr.ErrBudgetExhausted, 429, "budget_exhausted"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := NewHandler(&stubTP{}, nil)
+			h.photo = &stubTP{err: fmt.Errorf("photo: %w", tc.err)}
+			body, contentType := buildMultipart(t, "file", "meal.jpg", "image/jpeg", []byte("synthetic"))
+			req := httptest.NewRequest(http.MethodPost, "/resolve/photo", body)
+			req.Header.Set("Content-Type", contentType)
+			w := httptest.NewRecorder()
+			newEngine(h).ServeHTTP(w, req)
+			require.Equal(t, tc.status, w.Code, w.Body.String())
+			require.Contains(t, w.Body.String(), tc.code)
+		})
+	}
 }

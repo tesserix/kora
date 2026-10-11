@@ -16,6 +16,8 @@ import (
 	"github.com/tesserix/kora/api/internal/labelocr"
 )
 
+const independentReviewModel = "claude-sonnet-5-5"
+
 // LabelReviewer reads printed label facts through the stronger private gateway route.
 type LabelReviewer struct{ provider OpenAIProvider }
 
@@ -55,7 +57,7 @@ func (r LabelReviewer) Review(ctx context.Context, photo []byte, mime string) (l
 	if err != nil {
 		return labelocr.Read{}, usage, errors.New("label review unavailable")
 	}
-	if usage.Model != "claude-sonnet-5-5" {
+	if usage.Model != independentReviewModel {
 		return labelocr.Read{}, usage, errors.New("independent label review route unavailable")
 	}
 	var values map[string]json.RawMessage

@@ -25,6 +25,7 @@ import (
 	"github.com/tesserix/kora/api/internal/accuracy"
 	"github.com/tesserix/kora/api/internal/agents"
 	"github.com/tesserix/kora/api/internal/ai"
+	"github.com/tesserix/kora/api/internal/ai/decide"
 	"github.com/tesserix/kora/api/internal/ai/providers"
 	"github.com/tesserix/kora/api/internal/aitrace"
 	"github.com/tesserix/kora/api/internal/appleid"
@@ -257,6 +258,15 @@ func main() {
 		if cfg.AIGatewayEnabled {
 			labelReviewer = providers.NewLabelReviewer(cfg.AIGatewayAPIKey, cfg.AIGatewayBaseURL)
 		}
+	}
+
+	if labelReader != nil && resolveHandler != nil {
+		decision, err := decide.NewClient(cfg.AIGatewayBaseURL, cfg.AIGatewayAPIKey, nil)
+		if err != nil || decision == nil {
+			logger.Error("photo evidence requires the private decision gateway")
+			os.Exit(1)
+		}
+		*resolveHandler = resolveHandler.WithPhotoEvidence(labelReader, decision, labelReviewer, billing.NewMeter(db))
 	}
 
 	srv := &http.Server{
@@ -498,6 +508,16 @@ func buildResolveHandler(ctx context.Context, cfg config.Config, db *gorm.DB, lo
 		WithPortionSource(foodlog.NewRepository(db)).
 		WithLocales(userLocales{users: user.NewRepository(db)}).
 		WithOutcomeSink(outcomes)
+
+	if cfg.AIGatewayEnabled {
+		decision, err := decide.NewClient(cfg.AIGatewayBaseURL, cfg.AIGatewayAPIKey, nil)
+		if err != nil || decision == nil {
+			logger.Error("meal review requires decision gateway")
+			return nil, nil, nil, nil
+		}
+		reviewer := providers.NewPhotoReviewProvider(cfg.AIGatewayAPIKey, cfg.AIGatewayBaseURL, cfg.AIGatewayModel)
+		resolver = resolver.WithPhotoIdentifier(labelocr.NewMealIdentifier(provider, reviewer, decision, meter))
+	}
 	off := nutrition.NewHTTPOFFClient()
 
 	h := resolve.NewHandler(resolver, func(c context.Context, code string) (*nutrition.FoodItem, bool, error) {
