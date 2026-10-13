@@ -31,8 +31,7 @@
 
 1. Add `k8s/operators/zitadel/claims/kora.yaml`.
    - `ZitadelProject` `kora` in org TESSERIX, with `access: public`.
-   - Native apps `kora-ios` and `kora-android`, with `refreshToken: true` and redirect `kora:/auth/callback`.
-   - Set `loginBaseUri` to `/ui/v2/login`.
+   - Native apps `kora-ios` and `kora-android`, with `refreshToken: true`, redirect `com.tesserix.kora:/auth/callback`, post-logout `com.tesserix.kora:/auth/logout` (reverse-DNS per RFC 8252).
    - The operator always creates these as JWT access tokens (Q1, resolved). The mobile app sends the **access token** as the bearer, the same way mark8ly mobile-admin does, not the ID token as HomeChef does.
 2. Update `istio-auth-policies.yaml`.
    - Append the Kora project ID to the **existing** `-agentgateway-zitadel` audiences.
@@ -88,7 +87,7 @@
    - `GoogleService-Info.plist`, `firebase.json`, the google-signin plugin and `iosUrlScheme`, `ios.googleServicesFile`, and Android `GOOGLE_SERVICES_JSON`
    - the `firebase` and `@react-native-google-signin/google-signin` dependencies
    - `expo-apple-authentication` and `ios.usesAppleSignIn` (D7)
-7. Config: add `EXPO_PUBLIC_ZITADEL_ISSUER`, `_PROJECT_ID`, `_CLIENT_ID` (per platform) in `eas.json`. Point `config-missing` at them. Register the `kora` scheme in `app.json`.
+7. Config: add `EXPO_PUBLIC_ZITADEL_ISSUER`, `_PROJECT_ID`, `_CLIENT_ID` (per platform) in `eas.json`. Point `config-missing` at them. Add `com.tesserix.kora` as a second scheme in `app.json` (`"scheme": ["mobile", "com.tesserix.kora"]`). Widgets and the billing return still use `mobile://`.
 8. Add the min-build gate screen (D6).
 9. Device test:
    - register and sign in with email, Apple and Google
