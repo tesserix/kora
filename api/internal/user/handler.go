@@ -48,12 +48,14 @@ func (h Handler) withAvatar(u User) User {
 
 func (h Handler) Me(c *gin.Context) {
 	uid := c.GetString("uid")
-	email := c.GetString("email")
 	if uid == "" {
 		httpx.Error(c, http.StatusUnauthorized, "unauthorized", "invalid or missing token")
 		return
 	}
-	u, err := h.repo.UpsertByFirebaseUID(c.Request.Context(), uid, email)
+	// EnsureUser, not an upsert: an upsert writes the token's email over the
+	// stored one, and a Zitadel access token carries none, so every /v1/me
+	// would blank it.
+	u, err := h.repo.EnsureUser(c.Request.Context(), uid, c.GetString("email"), c.GetString("name"))
 	if err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not load profile")
 		return

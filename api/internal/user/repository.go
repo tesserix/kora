@@ -70,18 +70,59 @@ func seedableDisplayName(name string) string {
 // via SetDisplayName (used by Apple sign-in and manual rename), and a later
 // Google sign-in must not clobber that choice.
 func (r Repository) EnsureUser(ctx context.Context, firebaseUID, email, name string) (User, error) {
+	return r.EnsureUserWithProfile(ctx, firebaseUID, StaticProfile(email, name))
+}
+
+// ProfileLoader supplies the email and display name for a user row that lacks
+// them. Zitadel access tokens carry neither, so in production this reads
+// userinfo; EnsureUserWithProfile calls it only when the row needs it, never
+// for a complete row, which keeps Zitadel off the hot path.
+type ProfileLoader func(context.Context) (email, name string, err error)
+
+// StaticProfile is a ProfileLoader for values already in hand.
+func StaticProfile(email, name string) ProfileLoader {
+	return func(context.Context) (string, string, error) { return email, name, nil }
+}
+
+// EnsureUserWithProfile is EnsureUser with the profile loaded lazily. A row
+// with both an email and a display name never calls load. A failed load is
+// not fatal, for the same reason a failed display-name seed is not: the
+// fields self-heal on the next request while they are still empty.
+func (r Repository) EnsureUserWithProfile(ctx context.Context, firebaseUID string, load ProfileLoader) (User, error) {
 	var u User
+	found := true
 	err := r.db.WithContext(ctx).Where("firebase_uid = ?", firebaseUID).First(&u).Error
 	switch {
 	case err == nil:
-		// existing row, fall through to the seeding check below
+		if u.Email != "" && u.DisplayName != "" {
+			return u, nil
+		}
 	case errors.Is(err, gorm.ErrRecordNotFound):
+		found = false
+	default:
+		return User{}, fmt.Errorf("user: ensure lookup: %w", err)
+	}
+
+	email, name, err := load(ctx)
+	if err != nil {
+		slog.WarnContext(ctx, "user: load profile failed", "err", err)
+	}
+
+	switch {
+	case !found:
 		u, err = r.UpsertByFirebaseUID(ctx, firebaseUID, email)
 		if err != nil {
 			return User{}, err
 		}
-	default:
-		return User{}, fmt.Errorf("user: ensure lookup: %w", err)
+	case u.Email == "" && email != "":
+		// Only ever fills an empty email. Friend requests resolve users by
+		// email, so it must not be silently swapped once set.
+		if err := r.db.WithContext(ctx).Model(&User{}).Where("id = ?", u.ID).
+			Update("email", email).Error; err != nil {
+			slog.WarnContext(ctx, "user: fill email failed", "err", err, "user_id", u.ID)
+		} else {
+			u.Email = email
+		}
 	}
 
 	if seed := seedableDisplayName(name); u.DisplayName == "" && seed != "" {
