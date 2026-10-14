@@ -1,37 +1,32 @@
-import { useEffect, useState } from "react";
-import { useWindowDimensions, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { type TextInput, useWindowDimensions, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
-import { AuthSessionError, isAuthConfigured, signIn } from "@/auth/session";
+import { AuthSessionError, isAuthConfigured, signInWithPassword, signInWithProvider, type Provider } from "@/auth/session";
+import { authErrorMessage, holdCredentials } from "@/auth/flow";
 import { clearSnapshot } from "../modules/widget-bridge";
 import { AppText } from "@/components/Text";
 import { Button } from "@/components/Button";
 import { BrandLockup } from "@/components/BrandLockup";
 import { AuthScaffold } from "@/components/AuthScaffold";
+import { Field } from "@/components/Field";
+import { OrDivider } from "@/components/OrDivider";
+import { SocialSignIn } from "@/components/SocialSignIn";
 import { useTheme } from "@/theme";
 
-// Ceiling for the collapsible gap between the lockup and the buttons
-// (kora#172). Not a spacing token on purpose: it is the measured height that
-// gap settles at on the narrowest device we support, captured so that taller
-// screens stop inflating it.
-const SIGN_IN_TOP_GAP_MAX = 248;
-
-// Above this font scale the hero gives up its subtitle (kora#173), so both
-// buttons stay above the fold at accessibility sizes. 1.5 sits between iOS's
+// Above this font scale the hero gives up its subtitle (kora#173), so the
+// form stays above the fold at accessibility sizes. 1.5 sits between iOS's
 // largest non-accessibility size (~1.35) and its smallest accessibility one
 // (~1.64). The brand lockup stays: it says which app is asking.
 const HERO_COLLAPSE_FONT_SCALE = 1.5;
 
-// signInMessage maps a failed hosted login to copy. Credentials are entered in
-// Zitadel's own pages, so wrong-password and provider errors are shown there;
-// what reaches the app is only whether the round trip completed.
-export function signInMessage(err: unknown): string | null {
-  if (err instanceof AuthSessionError) {
-    if (err.code === "cancelled") return null;
-    if (err.code === "access_denied") return "Sign-in was declined. Please try again.";
-  }
-  if (err instanceof TypeError) return "You appear to be offline. Check your connection and try again.";
-  return "Something went wrong signing in. Please try again.";
-}
+// Why the screen was opened, from the redirect that sent the person here.
+const REASONS: Record<string, string> = {
+  // api.ts's forced sign-out (a 401 that survived a token refresh), via the
+  // redirect (tabs)/_layout.tsx makes; absent on a manual sign-out.
+  expired: "Your session expired. Please sign in again.",
+  // verify-email.tsx, when it has no password held to sign in with.
+  verified: "Your email is confirmed. Sign in to continue.",
+};
 
 export default function SignIn() {
   const { colors, spacing } = useTheme();
@@ -39,13 +34,13 @@ export default function SignIn() {
   // and returns to a still-mounted app (kora#260's pattern).
   const { fontScale } = useWindowDimensions();
   const compactHero = fontScale > HERO_COLLAPSE_FONT_SCALE;
-  // Set by api.ts's forced sign-out (a 401 that survived a token refresh) via
-  // the redirect (tabs)/_layout.tsx makes; absent on a manual sign-out.
-  const { reason } = useLocalSearchParams<{ reason?: string }>();
-  const [error, setError] = useState<string | null>(() =>
-    reason === "expired" ? "Your session expired. Please sign in again." : null,
-  );
+  const { reason, email: emailParam } = useLocalSearchParams<{ reason?: string; email?: string }>();
+  const [email, setEmail] = useState(emailParam ?? "");
+  const [password, setPassword] = useState("");
+  const [notice, setNotice] = useState<string | null>(() => (reason ? (REASONS[reason] ?? null) : null));
+  const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const passwordRef = useRef<TextInput>(null);
 
   // Belt-and-braces: useWidgetSync clears the snapshot on sign-out, but only
   // while the tabs layout is mounted to observe it. Landing here means
@@ -59,74 +54,114 @@ export default function SignIn() {
   // app/_layout.tsx redirects to /config-missing before this mounts anyway.
   if (!isAuthConfigured) return null;
 
-  async function start(register: boolean) {
+  // viaPassword: only a password sign-in can be refused for an unverified
+  // email and continue on the code screen. A provider's unverified email is a
+  // dead end with its own message.
+  async function run(step: () => Promise<void>, viaPassword: boolean) {
     if (busy) return;
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
-      await signIn({ register });
+      await step();
       router.replace("/");
     } catch (e: unknown) {
-      setError(signInMessage(e));
+      if (viaPassword && e instanceof AuthSessionError && e.code === "email_not_verified") {
+        // kora-api has just sent a fresh code. Hold the password so a correct
+        // code signs straight in.
+        const typed = email.trim();
+        holdCredentials(typed, password);
+        router.push({ pathname: "/verify-email", params: { email: typed } });
+        return;
+      }
+      setError(authErrorMessage(e));
     } finally {
       setBusy(false);
     }
   }
 
+  function submit() {
+    if (!email.trim() || !password) {
+      setError("Enter your email and password.");
+      return;
+    }
+    void run(() => signInWithPassword(email.trim(), password), true);
+  }
+
+  function social(provider: Provider) {
+    void run(() => signInWithProvider(provider), false);
+  }
+
   return (
     <AuthScaffold
       footer={
-        <AppText muted variant="footnote" style={{ textAlign: "center" }}>
-          Email, Apple and Google sign-in all continue in a secure Tesserix page.
-        </AppText>
+        <View style={{ gap: spacing.xs }}>
+          <Button
+            testID="sign-in-submit"
+            accessibilityLabel="Sign in"
+            title={busy ? "…" : "Sign in"}
+            icon="arrow-right"
+            iconPosition="trailing"
+            disabled={busy}
+            onPress={submit}
+          />
+          <Button
+            testID="sign-in-create"
+            accessibilityLabel="Create account"
+            title="New to Kora? Create account"
+            variant="ghost"
+            disabled={busy}
+            onPress={() => router.push("/sign-up")}
+          />
+        </View>
       }
     >
       <BrandLockup />
       <AppText variant="title1" style={{ marginTop: compactHero ? 0 : spacing.sm }}>
         Welcome to Kora.
       </AppText>
-      {compactHero ? null : (
-        <AppText muted>Sign in to pick up where you left off, or create an account to start.</AppText>
-      )}
+      {compactHero ? null : <AppText muted>Sign in to pick up where you left off.</AppText>}
 
-      {/* Collapsible: minHeight lets it give way at large text sizes, and
-          maxHeight (kora#172) stops taller devices pooling all their extra
-          height into this one gap. */}
-      <View
-        style={{
-          flex: 1,
-          minHeight: compactHero ? 0 : spacing.xl,
-          maxHeight: SIGN_IN_TOP_GAP_MAX,
-        }}
-      />
+      {notice ? (
+        <AppText variant="footnote" accessibilityLiveRegion="polite" muted>
+          {notice}
+        </AppText>
+      ) : null}
 
-      {/* flexShrink: 0 is load-bearing (kora#173): without it the scaffold's
-          flexGrow clamps content to the viewport at accessibility sizes and
-          the last button is clipped rather than scrollable. */}
-      <View style={{ gap: spacing.sm, flexShrink: 0 }}>
-        <Button
-          testID="sign-in-continue"
-          accessibilityLabel="Continue"
-          title={busy ? "…" : "Continue"}
-          icon="arrow-right"
-          iconPosition="trailing"
-          disabled={busy}
-          onPress={() => void start(false)}
+      <View style={{ gap: spacing.md, marginTop: spacing.sm }}>
+        <Field
+          label="Email"
+          value={email}
+          onChangeText={setEmail}
+          autoCapitalize="none"
+          autoCorrect={false}
+          autoComplete="email"
+          keyboardType="email-address"
+          textContentType="username"
+          returnKeyType="next"
+          onSubmitEditing={() => passwordRef.current?.focus()}
+          editable={!busy}
+        />
+        <Field
+          ref={passwordRef}
+          label="Password"
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry
+          autoCapitalize="none"
+          autoComplete="current-password"
+          textContentType="password"
+          returnKeyType="go"
+          onSubmitEditing={submit}
+          editable={!busy}
         />
         <Button
-          testID="sign-in-create"
-          accessibilityLabel="Create account"
-          title="Create account"
-          variant="secondary"
+          testID="sign-in-forgot"
+          title="Forgot password?"
+          variant="ghost"
           disabled={busy}
-          onPress={() => void start(true)}
-          style={{
-            backgroundColor: colors.card,
-            borderWidth: 1,
-            borderColor: colors.border,
-            opacity: busy ? 0.6 : 1,
-            minHeight: 48,
-          }}
+          onPress={() => router.push({ pathname: "/reset-password", params: { email: email.trim() } })}
+          style={{ alignSelf: "flex-end", minHeight: 36, paddingHorizontal: 0 }}
         />
       </View>
 
@@ -136,9 +171,8 @@ export default function SignIn() {
         </AppText>
       ) : null}
 
-      {/* With the spacer above, this 2:1 split lands the buttons around
-          55-60% of the screen: low enough for the thumb, not centred. */}
-      <View style={{ flex: 0.5, minHeight: spacing.md }} />
+      <OrDivider />
+      <SocialSignIn onPress={social} disabled={busy} />
     </AuthScaffold>
   );
 }
