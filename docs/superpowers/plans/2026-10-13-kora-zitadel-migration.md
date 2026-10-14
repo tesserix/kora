@@ -48,13 +48,13 @@
    - It returns the same `Claims{UID: sub, Email, Name}`, so middleware, `EnsureUser` and downstream code are unchanged.
 2. Delete `account_status.go`.
    - Rely on local JWT validation with a short access-token TTL (5–10 min).
-   - Write ADR 0007 superseding ADR 0006.
-3. Implement `IdentityDeleter` against Zitadel `DELETE /v2/users/{id}` using the machine-user JWT profile.
+   - Write ADR 0009 superseding ADR 0006 (0007 was taken).
+3. Implement `IdentityDeleter` against Zitadel `DELETE /v2/users/{id}` with a machine user PAT, the credential shape mark8ly auth-bff uses.
    - Keep the `deletion.go` ordering.
    - Rename `firebase_identity_removed` → `identity_removed`.
 4. Add migration `firebase_uid` → `idp_subject` (D5). Update the GORM tag, `UpsertByFirebaseUID`, `IDByFirebaseUID`, and the conformance seed.
 5. Config:
-   - Add `ZITADEL_ISSUER`, `ZITADEL_PROJECT_ID`, `ZITADEL_DELETER_KEY`.
+   - Add `ZITADEL_ISSUER`, `ZITADEL_PROJECT_ID`, `ZITADEL_DELETER_TOKEN` (required in production).
    - Remove `FIREBASE_*` and the `firebase.google.com/go/v4` dependency.
    - Remove the dummy service-account step in CI (`ci.yml:89-101`).
 6. Remove the Firebase-era Apple plumbing (D7).

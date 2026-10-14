@@ -10,14 +10,19 @@ import (
 )
 
 type Config struct {
-	Port              string
-	MetricsPort       string
-	Env               string
-	DatabaseURL       string
-	RedisURL          string
-	FirebaseProjectID string
-	FirebaseAPIKey    string
-	GeminiAPIKey      string
+	Port        string
+	MetricsPort string
+	Env         string
+	DatabaseURL string
+	RedisURL    string
+	// Zitadel issues Kora's end-user tokens. ZitadelProjectID is the audience
+	// every Kora access token carries, whichever platform client minted it.
+	ZitadelIssuer    string
+	ZitadelProjectID string
+	// ZitadelDeleterToken is a machine user's PAT, used only to delete the
+	// caller's own Zitadel user on account deletion.
+	ZitadelDeleterToken string
+	GeminiAPIKey        string
 	// VertexProject, when set, switches the resolve engine from the Gemini API
 	// (personal API key, free-tier quotas) to Vertex AI authenticated by the
 	// workload's own service account. See providers.NewVertexProvider.
@@ -69,7 +74,7 @@ type Config struct {
 	// MAC is computed over the DECODED bytes. Using the encoded form on either
 	// side produces signatures that never verify.
 	BFFHMACKey []byte
-	// MCPInternalKey lets kora-mcp read /internal/v1/* without a Firebase user;
+	// MCPInternalKey lets kora-mcp read /internal/v1/* without a Kora end user;
 	// empty leaves those routes unmounted.
 	MCPInternalKey string
 	// AITraceEndpoint is the OTLP/HTTP traces URL; empty disables AI tracing.
@@ -159,8 +164,9 @@ func Load() (Config, error) {
 		OCRKeySecret:             strings.TrimSpace(os.Getenv("OCR_KEY_SECRET")),
 		DatabaseURL:              os.Getenv("DATABASE_URL"),
 		RedisURL:                 getenv("REDIS_URL", "redis://localhost:6379/0"),
-		FirebaseProjectID:        os.Getenv("FIREBASE_PROJECT_ID"),
-		FirebaseAPIKey:           strings.TrimSpace(os.Getenv("FIREBASE_API_KEY")),
+		ZitadelIssuer:            strings.TrimSpace(getenv("ZITADEL_ISSUER", "https://auth.tesserix.app")),
+		ZitadelProjectID:         strings.TrimSpace(os.Getenv("ZITADEL_PROJECT_ID")),
+		ZitadelDeleterToken:      strings.TrimSpace(os.Getenv("ZITADEL_DELETER_TOKEN")),
 		GeminiAPIKey:             os.Getenv("GEMINI_API_KEY"),
 		VertexProject:            os.Getenv("VERTEX_PROJECT"),
 		VertexLocation:           getenv("VERTEX_LOCATION", "global"),
@@ -232,6 +238,11 @@ func Load() (Config, error) {
 		}
 		if cfg.AIRegistryBaseURL == "" {
 			return Config{}, fmt.Errorf("config: AI_REGISTRY_BASE_URL is required in production")
+		}
+		// DELETE /v1/me is Apple-mandated. A production API that would leave
+		// every deleted user's Zitadel identity behind must not start.
+		if cfg.ZitadelDeleterToken == "" {
+			return Config{}, fmt.Errorf("config: ZITADEL_DELETER_TOKEN is required in production")
 		}
 	}
 	if raw := os.Getenv("KORA_BFF_HMAC_KEY"); raw != "" {

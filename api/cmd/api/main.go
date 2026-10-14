@@ -73,23 +73,24 @@ func main() {
 		os.Exit(1)
 	}
 
-	verifier, err := auth.NewFirebaseVerifier(context.Background(), cfg.FirebaseProjectID, cfg.FirebaseAPIKey)
+	verifier, profiles, err := auth.NewZitadelVerifier(context.Background(), cfg.ZitadelIssuer, cfg.ZitadelProjectID)
 	if err != nil {
-		logger.Error("firebase init failed", "err", err)
+		logger.Error("zitadel init failed", "err", err)
 		os.Exit(1)
 	}
 
-	// The same Firebase client, narrowed to its identity-DELETE surface.
-	// auth keeps Verify and DeleteIdentity as two narrow interfaces, so
-	// the concrete verifier has to be asserted back to the second one.
-	//
-	// Fatal rather than degraded: DELETE /v1/me is Apple-mandated, and a
-	// deployment that silently leaves live Firebase identities behind after
-	// every account deletion must not start.
-	identityDeleter, ok := verifier.(auth.IdentityDeleter)
-	if !ok {
-		logger.Error("firebase verifier cannot delete identities; account deletion would orphan them")
-		os.Exit(1)
+	// Production config refuses to load without a deleter token (DELETE /v1/me
+	// is Apple-mandated). Elsewhere it may be absent, and deletion then logs
+	// the identity as needing manual cleanup.
+	var identityDeleter auth.IdentityDeleter
+	if cfg.ZitadelDeleterToken != "" {
+		identityDeleter, err = auth.NewZitadelIdentityDeleter(cfg.ZitadelIssuer, cfg.ZitadelDeleterToken)
+		if err != nil {
+			logger.Error("zitadel deleter init failed", "err", err)
+			os.Exit(1)
+		}
+	} else {
+		logger.Warn("zitadel identity deletion disabled (no ZITADEL_DELETER_TOKEN)")
 	}
 
 	resolveHandler, aiProvider, resolveCache, bodyCompositionCache := buildResolveHandler(context.Background(), cfg, db, logger)
@@ -274,6 +275,7 @@ func main() {
 		Handler: server.NewRouter(server.Deps{
 			DB:                   db,
 			Verifier:             verifier,
+			ProfileSource:        profiles,
 			Resolver:             resolveHandler,
 			Provider:             aiProvider,
 			Agents:               coordinator,

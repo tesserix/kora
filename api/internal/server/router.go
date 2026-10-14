@@ -58,7 +58,11 @@ import (
 type Deps struct {
 	DB       *gorm.DB
 	Verifier auth.TokenVerifier
-	Resolver *resolve.Handler
+	// ProfileSource fills a new user's email and name from Zitadel userinfo,
+	// because Zitadel access tokens carry only the subject. Nil leaves both
+	// empty, which is what tests that never sign in through Zitadel want.
+	ProfileSource user.ProfileSource
+	Resolver      *resolve.Handler
 	// Provider is the AI backend the coach's Q&A endpoint generates text
 	// with. If nil (e.g. GEMINI_API_KEY unset), coach.Service.Ask degrades
 	// gracefully instead of calling it — /coach/nudges is unaffected either
@@ -117,11 +121,9 @@ type Deps struct {
 	// not mounted at all — an unconfigured environment answers 404 rather
 	// than 500, the same choice BFFHMACKey makes above.
 	AppleExchanger user.AppleExchanger
-	// IdentityDeleter removes the caller's Firebase identity during account
-	// deletion. It is the SAME Firebase client the verifier is built from
-	// (see cmd/api/main.go), narrowed to its delete surface — verification
-	// needs only Google's public keys, deletion needs Admin privileges, so
-	// auth keeps them as two interfaces.
+	// IdentityDeleter removes the caller's Zitadel user during account
+	// deletion. It is separate from Verifier because verification needs only
+	// the issuer's public keys, while deletion needs a machine user's token.
 	//
 	// Nil is tolerated rather than fatal: the identity step runs AFTER the DB
 	// delete has committed, so a nil here must degrade to a logged
@@ -203,7 +205,7 @@ func NewRouter(deps Deps) *gin.Engine {
 		notificationsHandler := notifications.NewHandler(notificationsSvc)
 
 		v1 := r.Group("/v1", auth.Middleware(deps.Verifier))
-		v1.Use(user.ResolveMiddleware(userRepo))
+		v1.Use(user.ResolveMiddleware(userRepo, user.WithProfileSource(deps.ProfileSource)))
 		billingMeter := billing.NewMeter(deps.DB)
 		billingHandler := billing.NewHandler(billingMeter)
 		v1.GET("/ai/usage", billingHandler.UsageStatus)
@@ -223,7 +225,7 @@ func NewRouter(deps Deps) *gin.Engine {
 				WithProviderName(billing.ProviderStripe)
 			mountPurchaseRoutes(r, v1, purchases)
 			// OUTSIDE the v1 group: the caller is Stripe, which holds no
-			// Firebase token. Its own signature is the authentication, checked
+			// Kora end-user token. Its own signature is the authentication, checked
 			// inside the handler over the raw request body.
 			r.POST("/webhooks/stripe", purchases.StripeWebhook)
 		}
@@ -287,15 +289,15 @@ func NewRouter(deps Deps) *gin.Engine {
 
 		nutritionHandler := nutrition.NewHandler(foodRepo)
 		v1.GET("/foods", nutritionHandler.Search)
-		// Service path for kora-mcp: no Firebase user, so Search sees global aliases only.
+		// Service path for kora-mcp: no Kora end user, so Search sees global aliases only.
 		if deps.MCPInternalKey != "" {
 			internal := r.Group("/internal/v1", internalauth.Middleware(deps.MCPInternalKey))
 			internal.GET("/foods", nutritionHandler.Search)
 		}
 
 		// Admin surface. A SEPARATE group from v1: /v1 carries
-		// auth.Middleware (Firebase end-user tokens) and these callers are
-		// platform admins with no Firebase identity and no Kora user row.
+		// auth.Middleware (Zitadel end-user tokens) and these callers are
+		// platform admins with no Kora identity and no Kora user row.
 		// Gin's radix tree keeps /v1/foods and /v1/admin/foods distinct, so
 		// the two groups never collide.
 		if len(deps.BFFHMACKey) > 0 {
@@ -652,14 +654,14 @@ func (m multiCacheEvicter) DeleteByUser(ctx context.Context, userID uuid.UUID) e
 
 // unwiredIdentityDeleter stands in when Deps.IdentityDeleter is nil. It
 // deliberately returns an error instead of succeeding silently: Service.Delete
-// treats a Firebase failure as non-fatal and logs it as "firebase identity
-// survived deletion; NEEDS MANUAL CLEANUP", which is exactly the truth here.
+// treats an identity failure as non-fatal and logs it as "identity survived
+// deletion; NEEDS MANUAL CLEANUP", which is exactly the truth here.
 // A no-op that returned nil would report the identity as removed when it was
 // never touched.
 type unwiredIdentityDeleter struct{}
 
 func (unwiredIdentityDeleter) DeleteIdentity(context.Context, string) error {
-	return errors.New("server: no identity deleter wired; firebase identity not removed")
+	return errors.New("server: no identity deleter wired; zitadel user not removed")
 }
 
 func identityDeleter(d user.IdentityDeleter) user.IdentityDeleter {

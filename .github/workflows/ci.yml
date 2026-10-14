@@ -86,23 +86,21 @@ jobs:
           METRICS_PORT: "9099"
         run: |
           cd api
-          # cmd/api treats a failed Firebase init as FATAL (os.Exit(1)) on
-          # purpose: DELETE /v1/me is Apple-mandated and a deployment that
-          # cannot delete identities must not start. CI has no Application
-          # Default Credentials, so the binary exited before ever serving
-          # /health and this step failed with "the API never became healthy".
-          #
-          # A syntactically valid service-account file satisfies credential
-          # DISCOVERY, which is all the constructor needs — no network call and
-          # no real project. The conformance suite never exercises a Firebase
-          # path, so nothing here depends on the key being usable.
-          openssl genrsa -out /tmp/ci_sa_key.pem 2048 2>/dev/null
-          python3 -c 'import json,sys; json.dump({"type":"service_account","project_id":"kora-ci","private_key_id":"ci","private_key":open("/tmp/ci_sa_key.pem").read(),"client_email":"ci@kora-ci.iam.gserviceaccount.com","client_id":"0","token_uri":"https://oauth2.googleapis.com/token"}, open("/tmp/ci_sa.json","w"))'
-          export GOOGLE_APPLICATION_CREDENTIALS=/tmp/ci_sa.json
+          # cmd/api runs OIDC discovery against ZITADEL_ISSUER at startup and
+          # exits if it fails: an API that cannot verify tokens must not
+          # start. CI has no Zitadel, so serve a stub discovery document. The
+          # admin contract never sends an end-user token, so the keys behind
+          # it are never fetched.
+          mkdir -p /tmp/oidc/.well-known
+          printf '{"issuer":"http://localhost:8098","authorization_endpoint":"http://localhost:8098/oauth/v2/authorize","token_endpoint":"http://localhost:8098/oauth/v2/token","jwks_uri":"http://localhost:8098/oauth/v2/keys","userinfo_endpoint":"http://localhost:8098/oidc/v1/userinfo","id_token_signing_alg_values_supported":["RS256"]}' > /tmp/oidc/.well-known/openid-configuration
+          python3 -m http.server 8098 --bind 127.0.0.1 --directory /tmp/oidc > /tmp/oidc.log 2>&1 &
+          oidc_pid=$!
+          export ZITADEL_ISSUER=http://localhost:8098
+          export ZITADEL_PROJECT_ID=ci-conformance
           go build -o /tmp/kora-api ./cmd/api
           /tmp/kora-api > /tmp/kora-api.log 2>&1 &
           api_pid=$!
-          trap 'kill "$api_pid" 2>/dev/null || true' EXIT
+          trap 'kill "$api_pid" "$oidc_pid" 2>/dev/null || true' EXIT
 
           up=0
           for _ in $(seq 1 60); do
