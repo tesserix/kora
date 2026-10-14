@@ -32,7 +32,7 @@ func testDB(t *testing.T) *gorm.DB {
 func TestForDayAggregatesConsumedAndSources(t *testing.T) {
 	db := testDB(t)
 	id := uuid.New()
-	require.NoError(t, db.Exec("INSERT INTO users (id, firebase_uid, email, target_kcal, target_protein_g) VALUES (?, ?, ?, ?, ?)",
+	require.NoError(t, db.Exec("INSERT INTO users (id, idp_subject, email, target_kcal, target_protein_g) VALUES (?, ?, ?, ?, ?)",
 		id, "dash-"+id.String(), "d@test.dev", 2000.0, 150.0).Error)
 	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE id = ?", id) })
 
@@ -62,7 +62,7 @@ func TestForDayAggregatesConsumedAndSources(t *testing.T) {
 func TestForDayStreakNonUTCTimezone(t *testing.T) {
 	db := testDB(t)
 	id := uuid.New()
-	require.NoError(t, db.Exec("INSERT INTO users (id, firebase_uid, email, target_kcal, target_protein_g) VALUES (?, ?, ?, ?, ?)",
+	require.NoError(t, db.Exec("INSERT INTO users (id, idp_subject, email, target_kcal, target_protein_g) VALUES (?, ?, ?, ?, ?)",
 		id, "dash-tz-"+id.String(), "dtz@test.dev", 2000.0, 150.0).Error)
 	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE id = ?", id) })
 

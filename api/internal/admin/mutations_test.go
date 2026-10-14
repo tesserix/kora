@@ -58,7 +58,7 @@ func seedUser(t *testing.T, tx *gorm.DB) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
 	require.NoError(t, tx.Exec(
-		"INSERT INTO users (id, firebase_uid, email) VALUES (?, ?, ?)",
+		"INSERT INTO users (id, idp_subject, email) VALUES (?, ?, ?)",
 		id, "admin-mut-"+id.String(), "admin-mut@test.dev").Error)
 	return id
 }

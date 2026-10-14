@@ -33,7 +33,7 @@ type CacheEvicter interface {
 // consumer-declared-interface reason as CacheEvicter, minus the cycle:
 // auth.IdentityDeleter satisfies it, and a test fake needs no Zitadel.
 type IdentityDeleter interface {
-	DeleteIdentity(ctx context.Context, firebaseUID string) error
+	DeleteIdentity(ctx context.Context, subject string) error
 }
 
 // ObjectDeleter removes one stored object. Declared HERE, at the consumer, for
@@ -195,9 +195,9 @@ func (s Service) Delete(ctx context.Context, userID uuid.UUID, actor DeleteActor
 			"user_id", userID, "error", err)
 	}
 
-	if err := s.identities.DeleteIdentity(ctx, u.FirebaseUID); err != nil {
+	if err := s.identities.DeleteIdentity(ctx, u.IDPSubject); err != nil {
 		slog.ErrorContext(ctx, "identity survived deletion; NEEDS MANUAL CLEANUP",
-			"user_id", userID, "subject", u.FirebaseUID, "error", err)
+			"user_id", userID, "subject", u.IDPSubject, "error", err)
 	} else {
 		res.IdentityRemoved = true
 	}

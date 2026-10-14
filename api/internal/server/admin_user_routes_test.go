@@ -73,7 +73,7 @@ func TestAdminUserDeleteUnknownIs404ThroughTheRouter(t *testing.T) {
 // trail silently writing a value nothing reads.
 //
 // It also pins the 200-with-body divergence from DELETE /v1/me's bare 204:
-// with no IdentityDeleter wired, unwiredIdentityDeleter errors, the Firebase
+// with no IdentityDeleter wired, unwiredIdentityDeleter errors, the Zitadel
 // identity survives, and the operator must be TOLD — an admin has no
 // self-healing retry through the user, so a surviving identity means the
 // person they deleted can sign in and be re-provisioned by EnsureUser.
@@ -143,5 +143,5 @@ func TestAdminUserDetailIsReachableWithAValidSignature(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.Contains(t, w.Body.String(), `"counts"`)
-	assert.NotContains(t, w.Body.String(), "firebase_uid")
+	assert.NotContains(t, w.Body.String(), "idp_subject")
 }

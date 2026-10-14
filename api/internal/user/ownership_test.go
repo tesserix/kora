@@ -13,17 +13,17 @@ import (
 	"gorm.io/gorm"
 )
 
-// seedUser provisions a user row with a unique firebase_uid via the
-// established EnsureUser/UpsertByFirebaseUID path (fills all the NOT NULL
+// seedUser provisions a user row with a unique idp_subject via the
+// established EnsureUser/UpsertBySubject path (fills all the NOT NULL
 // defaults), and registers cleanup for the row it created.
 func seedUser(t *testing.T, db *gorm.DB) User {
 	t.Helper()
 	fuid := fmt.Sprintf("ownership-test-%s", uuid.NewString())
 	repo := NewRepository(db)
-	u, err := repo.UpsertByFirebaseUID(context.Background(), fuid, fuid+"@test.dev")
+	u, err := repo.UpsertBySubject(context.Background(), fuid, fuid+"@test.dev")
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		db.Exec("DELETE FROM users WHERE firebase_uid = ?", fuid)
+		db.Exec("DELETE FROM users WHERE idp_subject = ?", fuid)
 	})
 	return u
 }

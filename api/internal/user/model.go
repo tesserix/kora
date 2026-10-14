@@ -16,7 +16,7 @@ const DefaultTimezone = "Australia/Sydney"
 
 type User struct {
 	ID          uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	FirebaseUID string    `gorm:"uniqueIndex" json:"-"`
+	IDPSubject  string    `gorm:"column:idp_subject;uniqueIndex" json:"-"`
 	Email       string    `json:"email"`
 	DisplayName string    `json:"display_name"`
 	FriendCode  string    `json:"-"`
@@ -26,7 +26,7 @@ type User struct {
 	// lookup use.
 	//
 	// Both columns are nullable, but rows created via
-	// Repository.UpsertByFirebaseUID (every new user) get '' (empty string),
+	// Repository.UpsertBySubject (every new user) get '' (empty string),
 	// not SQL NULL -- GORM's Create writes the Go zero value for an untouched
 	// string field. A presence check MUST be `!= ""`; `IS NULL` matches
 	// nothing.

@@ -32,7 +32,7 @@ func wiringDB(t *testing.T) *gorm.DB {
 func seedU(t *testing.T, db *gorm.DB, name, email string) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
-	require.NoError(t, db.Exec("INSERT INTO users (id, firebase_uid, email, display_name) VALUES (?, ?, ?, ?)",
+	require.NoError(t, db.Exec("INSERT INTO users (id, idp_subject, email, display_name) VALUES (?, ?, ?, ?)",
 		id, "wi-"+id.String(), email, name).Error)
 	t.Cleanup(func() {
 		db.Exec("DELETE FROM notifications WHERE user_id = ? OR actor_id = ?", id, id)

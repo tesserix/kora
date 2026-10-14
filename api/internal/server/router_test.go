@@ -330,18 +330,18 @@ func TestAdminFoodsRejectsAnUnsignedRequest(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }
 
-// A Firebase bearer token — an END USER's credential — does not open the
+// A end-user bearer token — an END USER's credential — does not open the
 // admin surface either, but this does NOT independently pin that the two
 // auth systems are disjoint: nothing on the admin path reads the
 // Authorization header at all, so this 401s for the exact same reason
 // TestAdminFoodsRejectsAnUnsignedRequest does (a missing/invalid
 // X-Internal-Auth signature), and no mutation can redden one without
 // reddening the other. The actual disjointness — that auth.Middleware's
-// Firebase verification is not in this route's chain — is pinned by the
+// Zitadel verification is not in this route's chain — is pinned by the
 // admin group being registered directly on the router rather than nested
 // under /v1: TestAdminFoodsIsReachableWithAValidSignature goes red if that
 // nesting ever regresses.
-func TestAdminFoodsRejectsAFirebaseBearerToken(t *testing.T) {
+func TestAdminFoodsRejectsAnEndUserBearerToken(t *testing.T) {
 	r := NewRouter(Deps{DB: testDB(t), Verifier: stubVerifier{}, BFFHMACKey: []byte("kora-test-hmac-key-123456")})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/admin/foods", nil)
@@ -499,7 +499,7 @@ func TestFriendBodyRouteIsRegisteredAlongsideTheStaticFriendsRoutes(t *testing.T
 }
 
 // fixedUIDVerifier accepts any bearer token and always resolves to the same
-// Firebase UID, so every request through it authenticates as the same user --
+// identity subject, so every request through it authenticates as the same user --
 // what TestLookupRateLimitIsWiredIntoTheRealRouter needs to prove the limiter
 // actually throttles one caller across repeated requests.
 type fixedUIDVerifier struct{ uid string }
@@ -519,7 +519,7 @@ func (v fixedUIDVerifier) Verify(context.Context, string) (auth.Claims, error) {
 func TestLookupRateLimitIsWiredIntoTheRealRouter(t *testing.T) {
 	db := testDB(t)
 	uid := "ratelimit-wiring-" + uuid.NewString()
-	t.Cleanup(func() { db.Exec(`DELETE FROM users WHERE firebase_uid = ?`, uid) })
+	t.Cleanup(func() { db.Exec(`DELETE FROM users WHERE idp_subject = ?`, uid) })
 
 	r := NewRouter(Deps{DB: db, Verifier: fixedUIDVerifier{uid: uid}})
 
@@ -545,7 +545,7 @@ func TestLookupRateLimitIsWiredIntoTheRealRouter(t *testing.T) {
 func TestSendRequestRateLimitIsWiredIntoTheRealRouter(t *testing.T) {
 	db := testDB(t)
 	uid := "ratelimit-wiring-sr-" + uuid.NewString()
-	t.Cleanup(func() { db.Exec(`DELETE FROM users WHERE firebase_uid = ?`, uid) })
+	t.Cleanup(func() { db.Exec(`DELETE FROM users WHERE idp_subject = ?`, uid) })
 
 	r := NewRouter(Deps{DB: db, Verifier: fixedUIDVerifier{uid: uid}})
 
@@ -572,7 +572,7 @@ func TestSendRequestRateLimitIsWiredIntoTheRealRouter(t *testing.T) {
 func TestSetHandleRateLimitIsWiredIntoTheRealRouter(t *testing.T) {
 	db := testDB(t)
 	uid := "ratelimit-wiring-sh-" + uuid.NewString()
-	t.Cleanup(func() { db.Exec(`DELETE FROM users WHERE firebase_uid = ?`, uid) })
+	t.Cleanup(func() { db.Exec(`DELETE FROM users WHERE idp_subject = ?`, uid) })
 
 	r := NewRouter(Deps{DB: db, Verifier: fixedUIDVerifier{uid: uid}})
 

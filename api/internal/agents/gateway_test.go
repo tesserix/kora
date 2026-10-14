@@ -110,7 +110,7 @@ func TestSendDelegatesTheVerifiedEndUserIdentity(t *testing.T) {
 	g := NewGateway(srv.URL, "gw-key", nil)
 	resolved := resolvedFixture()
 	id := uuid.New()
-	ctx := user.WithID(auth.WithVerifiedToken(context.Background(), "firebase-user-token"), id)
+	ctx := user.WithID(auth.WithVerifiedToken(context.Background(), "end-user-token"), id)
 	_, err := g.Send(ctx, &resolved, "question")
 	if err != nil {
 		t.Fatalf("Send: %v", err)
@@ -118,8 +118,8 @@ func TestSendDelegatesTheVerifiedEndUserIdentity(t *testing.T) {
 	if gotID != id.String() {
 		t.Fatalf("missing user ID: %q", gotID)
 	}
-	if gotToken != "Bearer firebase-user-token" {
-		t.Fatalf("X-Kora-End-User-Token = %q, want delegated Firebase token", gotToken)
+	if gotToken != "Bearer end-user-token" {
+		t.Fatalf("X-Kora-End-User-Token = %q, want delegated end-user token", gotToken)
 	}
 }
 

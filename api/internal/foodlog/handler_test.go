@@ -23,10 +23,10 @@ func TestCreateAndListLog(t *testing.T) {
 	db := testDB(t)
 	gin.SetMode(gin.TestMode)
 
-	// Seed a user with a known firebase uid and a food item.
+	// Seed a user with a known identity subject and a food item.
 	fuid := "handler-" + uuid.NewString()
 	uRepo := user.NewRepository(db)
-	u, err := uRepo.UpsertByFirebaseUID(context.Background(), fuid, "h@test.dev")
+	u, err := uRepo.UpsertBySubject(context.Background(), fuid, "h@test.dev")
 	require.NoError(t, err)
 	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE id = ?", u.ID) })
 
@@ -69,7 +69,7 @@ func TestCreateBatchHandler(t *testing.T) {
 
 	fuid := "batch-" + uuid.NewString()
 	uRepo := user.NewRepository(db)
-	u, err := uRepo.UpsertByFirebaseUID(context.Background(), fuid, "batch@test.dev")
+	u, err := uRepo.UpsertBySubject(context.Background(), fuid, "batch@test.dev")
 	require.NoError(t, err)
 	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE id = ?", u.ID) })
 
@@ -103,12 +103,12 @@ func TestUpdateHandler(t *testing.T) {
 
 	fuid := "update-" + uuid.NewString()
 	uRepo := user.NewRepository(db)
-	u, err := uRepo.UpsertByFirebaseUID(context.Background(), fuid, "u@test.dev")
+	u, err := uRepo.UpsertBySubject(context.Background(), fuid, "u@test.dev")
 	require.NoError(t, err)
 	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE id = ?", u.ID) })
 
 	otherFuid := "update-other-" + uuid.NewString()
-	otherU, err := uRepo.UpsertByFirebaseUID(context.Background(), otherFuid, "other@test.dev")
+	otherU, err := uRepo.UpsertBySubject(context.Background(), otherFuid, "other@test.dev")
 	require.NoError(t, err)
 	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE id = ?", otherU.ID) })
 
@@ -186,7 +186,7 @@ func TestRepeatWithEmptyBodyDefaultsToNow(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	fuid := "repeat-" + uuid.NewString()
 	uRepo := user.NewRepository(db)
-	u, err := uRepo.UpsertByFirebaseUID(context.Background(), fuid, "r@test.dev")
+	u, err := uRepo.UpsertBySubject(context.Background(), fuid, "r@test.dev")
 	require.NoError(t, err)
 	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE id = ?", u.ID) })
 

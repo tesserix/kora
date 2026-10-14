@@ -69,7 +69,7 @@ func seedUser(t *testing.T, db *gorm.DB) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
 	require.NoError(t, db.Exec(
-		"INSERT INTO users (id, firebase_uid, email) VALUES (?, ?, ?)",
+		"INSERT INTO users (id, idp_subject, email) VALUES (?, ?, ?)",
 		id, "fa-"+id.String(), "fa@test.dev").Error)
 	t.Cleanup(func() {
 		// Scoped to this test's own user, never a truncate -- these tests own

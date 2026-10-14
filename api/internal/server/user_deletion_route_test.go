@@ -15,7 +15,7 @@ import (
 	"github.com/tesserix/kora/api/internal/user"
 )
 
-// uidVerifier authenticates every request as one fixed Firebase uid.
+// uidVerifier authenticates every request as one fixed identity subject.
 // stubVerifier cannot be reused here: it returns empty Claims, so
 // ResolveMiddleware would reject with 401 before any handler ran and this
 // test would pass for the wrong reason.
@@ -25,20 +25,20 @@ func (v uidVerifier) Verify(context.Context, string) (auth.Claims, error) {
 	return auth.Claims{UID: v.uid, Email: v.uid + "@test.dev"}, nil
 }
 
-// recordingIdentityDeleter stands in for the Firebase Admin client. It also
+// recordingIdentityDeleter stands in for the Zitadel deleter. It also
 // proves the wiring reached the Service: the uid it records can only have
 // come off the users row that Delete loaded before destroying it.
 type recordingIdentityDeleter struct{ uids []string }
 
-func (d *recordingIdentityDeleter) DeleteIdentity(_ context.Context, firebaseUID string) error {
-	d.uids = append(d.uids, firebaseUID)
+func (d *recordingIdentityDeleter) DeleteIdentity(_ context.Context, subject string) error {
+	d.uids = append(d.uids, subject)
 	return nil
 }
 
 func seedRouteUser(t *testing.T, db *gorm.DB, uid string) user.User {
 	t.Helper()
-	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", uid) })
-	u, err := user.NewRepository(db).UpsertByFirebaseUID(context.Background(), uid, uid+"@test.dev")
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE idp_subject = ?", uid) })
+	u, err := user.NewRepository(db).UpsertBySubject(context.Background(), uid, uid+"@test.dev")
 	require.NoError(t, err)
 	return u
 }
@@ -69,7 +69,7 @@ func TestDeleteMeThroughTheRouterDeletesOnlyTheCaller(t *testing.T) {
 	survivor := seedRouteUser(t, db, "delete-me-survivor-"+uuid.NewString())
 
 	fb := &recordingIdentityDeleter{}
-	r := NewRouter(Deps{DB: db, Verifier: uidVerifier{uid: victim.FirebaseUID}, IdentityDeleter: fb})
+	r := NewRouter(Deps{DB: db, Verifier: uidVerifier{uid: victim.IDPSubject}, IdentityDeleter: fb})
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodDelete, "/v1/me", nil)
@@ -79,8 +79,8 @@ func TestDeleteMeThroughTheRouterDeletesOnlyTheCaller(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, w.Code)
 	assert.Zero(t, countRouteUsers(t, db, victim.ID), "the caller's row must actually be gone")
 	assert.Equal(t, int64(1), countRouteUsers(t, db, survivor.ID), "only the caller may be deleted")
-	assert.Equal(t, []string{victim.FirebaseUID}, fb.uids,
-		"the wired IdentityDeleter must be called with the deleted row's firebase uid")
+	assert.Equal(t, []string{victim.IDPSubject}, fb.uids,
+		"the wired IdentityDeleter must be called with the deleted row's identity subject")
 }
 
 // An unwired IdentityDeleter must not panic the request: the DB delete has
@@ -90,7 +90,7 @@ func TestDeleteMeSurvivesAnUnwiredIdentityDeleter(t *testing.T) {
 	db := testDB(t)
 	victim := seedRouteUser(t, db, "delete-me-unwired-"+uuid.NewString())
 
-	r := NewRouter(Deps{DB: db, Verifier: uidVerifier{uid: victim.FirebaseUID}}) // no IdentityDeleter
+	r := NewRouter(Deps{DB: db, Verifier: uidVerifier{uid: victim.IDPSubject}}) // no IdentityDeleter
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodDelete, "/v1/me", nil)

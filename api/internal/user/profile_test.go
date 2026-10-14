@@ -39,7 +39,7 @@ func TestEnsureUserWithProfileSkipsLoadForCompleteRow(t *testing.T) {
 	db := idTestDB(t)
 	repo := NewRepository(db)
 	const uid = "profile-complete-uid"
-	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", uid) })
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE idp_subject = ?", uid) })
 	_, err := repo.EnsureUser(context.Background(), uid, "complete@test.dev", "Ada")
 	require.NoError(t, err)
 
@@ -56,7 +56,7 @@ func TestEnsureUserWithProfileProvisionsFromLoader(t *testing.T) {
 	db := idTestDB(t)
 	repo := NewRepository(db)
 	const uid = "profile-new-uid"
-	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", uid) })
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE idp_subject = ?", uid) })
 
 	profiles := &countingProfiles{profile: auth.Profile{Email: "new@test.dev", Name: "Grace Hopper"}}
 	u, err := repo.EnsureUserWithProfile(context.Background(), uid, loaderFor(profiles))
@@ -71,7 +71,7 @@ func TestEnsureUserWithProfileFillsEmptyEmailButNeverReplacesOne(t *testing.T) {
 	db := idTestDB(t)
 	repo := NewRepository(db)
 	const blank, set = "profile-blank-email-uid", "profile-set-email-uid"
-	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid IN (?, ?)", blank, set) })
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE idp_subject IN (?, ?)", blank, set) })
 	_, err := repo.EnsureUser(context.Background(), blank, "", "Named")
 	require.NoError(t, err)
 	_, err = repo.EnsureUser(context.Background(), set, "kept@test.dev", "")
@@ -96,7 +96,7 @@ func TestEnsureUserWithProfileProvisionsEvenWhenLoaderFails(t *testing.T) {
 	db := idTestDB(t)
 	repo := NewRepository(db)
 	const uid = "profile-loadfail-uid"
-	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", uid) })
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE idp_subject = ?", uid) })
 
 	profiles := &countingProfiles{err: errors.New("userinfo down")}
 	u, err := repo.EnsureUserWithProfile(context.Background(), uid, loaderFor(profiles))
@@ -110,7 +110,7 @@ func TestResolveMiddlewareFetchesProfileWithTheVerifiedToken(t *testing.T) {
 	db := idTestDB(t)
 	repo := NewRepository(db)
 	const uid = "profile-mw-uid"
-	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", uid) })
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE idp_subject = ?", uid) })
 	profiles := &countingProfiles{profile: auth.Profile{Email: "mw@test.dev", Name: "Middle Ware"}}
 
 	gin.SetMode(gin.TestMode)
@@ -138,7 +138,7 @@ func TestResolveMiddlewarePrefersProfileClaimsInTheToken(t *testing.T) {
 	db := idTestDB(t)
 	repo := NewRepository(db)
 	const uid = "profile-claims-uid"
-	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", uid) })
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE idp_subject = ?", uid) })
 	profiles := &countingProfiles{}
 
 	gin.SetMode(gin.TestMode)

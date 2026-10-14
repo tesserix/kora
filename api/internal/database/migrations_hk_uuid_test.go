@@ -33,7 +33,7 @@ func seedTrackingUser(t *testing.T, db *gorm.DB) uuid.UUID {
 	t.Helper()
 	uid := uuid.New()
 	require.NoError(t, db.Exec(
-		"INSERT INTO users (id, firebase_uid, email) VALUES (?, ?, ?)",
+		"INSERT INTO users (id, idp_subject, email) VALUES (?, ?, ?)",
 		uid, "hkuuid-"+uid.String(), "hkuuid-"+uid.String()+"@test.dev").Error)
 	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE id = ?", uid) })
 	return uid

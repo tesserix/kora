@@ -30,7 +30,7 @@ func seedUser(t *testing.T, db *gorm.DB, name string) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
 	require.NoError(t, db.Exec(
-		"INSERT INTO users (id, firebase_uid, email, display_name) VALUES (?, ?, ?, ?)",
+		"INSERT INTO users (id, idp_subject, email, display_name) VALUES (?, ?, ?, ?)",
 		id, "so-"+id.String(), "so-"+id.String()+"@test.dev", name).Error)
 	t.Cleanup(func() {
 		db.Exec("DELETE FROM friendships WHERE requester_id = ? OR addressee_id = ?", id, id)
@@ -185,9 +185,9 @@ func TestUserLookupsAndFriendCode(t *testing.T) {
 func TestTwoUsersWithoutFriendCodeDoNotCollide(t *testing.T) {
 	db := testDB(t)
 	ur := user.NewRepository(db)
-	u1, err := ur.UpsertByFirebaseUID(context.Background(), "fc-a-"+uuid.NewString(), "fc-a@test.dev")
+	u1, err := ur.UpsertBySubject(context.Background(), "fc-a-"+uuid.NewString(), "fc-a@test.dev")
 	require.NoError(t, err)
-	u2, err := ur.UpsertByFirebaseUID(context.Background(), "fc-b-"+uuid.NewString(), "fc-b@test.dev")
+	u2, err := ur.UpsertBySubject(context.Background(), "fc-b-"+uuid.NewString(), "fc-b@test.dev")
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		db.Exec("DELETE FROM users WHERE id IN (?, ?)", u1.ID, u2.ID)

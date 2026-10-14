@@ -9,7 +9,7 @@ import (
 )
 
 // AdminRow is one row of the admin user list: activation facts for a single
-// user. It deliberately never carries firebase_uid or any target_* VALUE -- HasTargets is a boolean derived from whether
+// user. It deliberately never carries idp_subject or any target_* VALUE -- HasTargets is a boolean derived from whether
 // target_kcal is set, and the underlying number never leaves the API.
 //
 // target_kcal is NOT NULL DEFAULT 0 (migration 000002_phase1_core.up.sql),
@@ -50,7 +50,7 @@ type AdminListResult struct {
 //
 // Counts only. A user's actual food logs, weights and coach turns are their
 // own history, not an admin surface -- and AdminRow, which this embeds,
-// already carries no firebase_uid and no target_* value.
+// already carries no idp_subject and no target_* value.
 type AdminDetail struct {
 	AdminRow
 	Counts    map[string]int64 `json:"counts"`

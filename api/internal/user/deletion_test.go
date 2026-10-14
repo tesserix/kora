@@ -36,17 +36,17 @@ func retireCleanup(t *testing.T, db *gorm.DB, raws ...string) {
 // --- fakes -----------------------------------------------------------------
 
 // fakeIdentityDeleter stands in for auth.IdentityDeleter so the deletion tests
-// never touch Firebase. It records the uid it was handed, which is the only
-// way to prove Delete read the FirebaseUID off the row BEFORE deleting it.
+// never touch Zitadel. It records the uid it was handed, which is the only
+// way to prove Delete read the IDPSubject off the row BEFORE deleting it.
 type fakeIdentityDeleter struct {
 	uid   string
 	calls int
 	err   error
 }
 
-func (f *fakeIdentityDeleter) DeleteIdentity(_ context.Context, firebaseUID string) error {
+func (f *fakeIdentityDeleter) DeleteIdentity(_ context.Context, subject string) error {
 	f.calls++
-	f.uid = firebaseUID
+	f.uid = subject
 	return f.err
 }
 
@@ -139,13 +139,13 @@ func newTestService(t *testing.T, db *gorm.DB, objects ...ObjectDeleter) Service
 	return NewService(db, &fakeCacheEvicter{}, &fakeIdentityDeleter{}, testAuditRecorder, o)
 }
 
-// newTestServiceWithFailingFirebase wires a Service whose Firebase identity
+// newTestServiceWithFailingIdentityDelete wires a Service whose Zitadel identity
 // delete always fails, which is the one third-party failure that must be
 // REPORTED in the result rather than failing the deletion.
-func newTestServiceWithFailingFirebase(t *testing.T, db *gorm.DB) Service {
+func newTestServiceWithFailingIdentityDelete(t *testing.T, db *gorm.DB) Service {
 	t.Helper()
 	return NewService(db, &fakeCacheEvicter{},
-		&fakeIdentityDeleter{err: errors.New("firebase is down")},
+		&fakeIdentityDeleter{err: errors.New("zitadel is down")},
 		testAuditRecorder, &fakeObjectDeleter{})
 }
 
@@ -598,14 +598,14 @@ func TestDeleteWithoutAuditRecorderRefusesAdminDeletion(t *testing.T) {
 	require.NoError(t, err, "a missing recorder must not block non-admin deletion")
 }
 
-func TestDeleteReportsFirebaseFailureWithoutFailing(t *testing.T) {
+func TestDeleteReportsIdentityFailureWithoutFailing(t *testing.T) {
 	db := testDB(t)
-	svc := newTestServiceWithFailingFirebase(t, db)
+	svc := newTestServiceWithFailingIdentityDelete(t, db)
 	victim := seedUser(t, db)
 	cleanupAdminEvents(t, db, victim.ID)
 
 	res, err := svc.Delete(context.Background(), victim.ID, DeleteActor{IsAdmin: true, ID: "a", Email: "a@b.com"})
-	require.NoError(t, err, "a Firebase failure must NOT fail the deletion")
+	require.NoError(t, err, "an identity-provider failure must NOT fail the deletion")
 	assert.False(t, res.IdentityRemoved, "but it must be reported, not swallowed")
 
 	var n int64

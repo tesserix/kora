@@ -28,7 +28,7 @@ func testDB(t *testing.T) *gorm.DB {
 func seedUser(t *testing.T, db *gorm.DB, name string, targetKcal float64) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
-	require.NoError(t, db.Exec("INSERT INTO users (id, firebase_uid, email, display_name, target_kcal) VALUES (?, ?, ?, ?, ?)",
+	require.NoError(t, db.Exec("INSERT INTO users (id, idp_subject, email, display_name, target_kcal) VALUES (?, ?, ?, ?, ?)",
 		id, "ch-"+id.String(), "ch-"+id.String()+"@test.dev", name, targetKcal).Error)
 	t.Cleanup(func() {
 		db.Exec("DELETE FROM challenge_participants WHERE user_id = ?", id)

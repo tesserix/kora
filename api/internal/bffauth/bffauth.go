@@ -40,7 +40,7 @@ const (
 
 // Gin context keys carrying the verified caller. Named admin_* rather than
 // user_* so they can never be confused with the end-user identity that
-// auth.Middleware sets from a Firebase token — these are disjoint populations
+// auth.Middleware sets from an end-user token — these are disjoint populations
 // and a platform admin has no Kora user row.
 const (
 	CtxAdminID    = "admin_id"

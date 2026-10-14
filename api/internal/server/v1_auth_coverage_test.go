@@ -55,23 +55,23 @@ import (
 var v1AuthAllowlist = map[string]string{
 	// /v1/admin/* (tesserix-home admin portal). Mounted on its OWN group in
 	// router.go (`r.Group("/v1/admin", bffauth.Middleware(...))`), separate
-	// from the Firebase-authed `v1` group: the caller is a platform admin
-	// signing an HMAC request, never a Firebase end user. Expected scheme:
+	// from the end-user-authed `v1` group: the caller is a platform admin
+	// signing an HMAC request, never a Kora end user. Expected scheme:
 	// bffauth. An unauthenticated request here is still refused —
 	// bffauth.Middleware answers 401 "invalid or missing signature" — just
 	// not with auth.Middleware's "invalid or missing token" body this test
 	// checks for on every non-allowlisted route.
-	"GET /v1/admin/foods":          "bffauth: admin portal route, not Firebase auth",
-	"GET /v1/admin/foods/:id":      "bffauth: admin portal route, not Firebase auth",
-	"GET /v1/admin/events":         "bffauth: admin portal route, not Firebase auth",
-	"POST /v1/admin/foods":         "bffauth: admin portal route, not Firebase auth",
-	"PATCH /v1/admin/foods/:id":    "bffauth: admin portal route, not Firebase auth",
-	"DELETE /v1/admin/foods/:id":   "bffauth: admin portal route, not Firebase auth",
-	"GET /v1/admin/feedback":       "bffauth: admin portal route, not Firebase auth",
-	"PATCH /v1/admin/feedback/:id": "bffauth: admin portal route, not Firebase auth",
-	"GET /v1/admin/users":          "bffauth: admin portal route, not Firebase auth",
-	"GET /v1/admin/users/:id":      "bffauth: admin portal route, not Firebase auth",
-	"DELETE /v1/admin/users/:id":   "bffauth: admin portal route, not Firebase auth",
+	"GET /v1/admin/foods":          "bffauth: admin portal route, not end-user auth",
+	"GET /v1/admin/foods/:id":      "bffauth: admin portal route, not end-user auth",
+	"GET /v1/admin/events":         "bffauth: admin portal route, not end-user auth",
+	"POST /v1/admin/foods":         "bffauth: admin portal route, not end-user auth",
+	"PATCH /v1/admin/foods/:id":    "bffauth: admin portal route, not end-user auth",
+	"DELETE /v1/admin/foods/:id":   "bffauth: admin portal route, not end-user auth",
+	"GET /v1/admin/feedback":       "bffauth: admin portal route, not end-user auth",
+	"PATCH /v1/admin/feedback/:id": "bffauth: admin portal route, not end-user auth",
+	"GET /v1/admin/users":          "bffauth: admin portal route, not end-user auth",
+	"GET /v1/admin/users/:id":      "bffauth: admin portal route, not end-user auth",
+	"DELETE /v1/admin/users/:id":   "bffauth: admin portal route, not end-user auth",
 
 	// /v1/admin/* (platform console). A SECOND group on the same prefix
 	// (platformadmin.Register), behind platformauth instead of bffauth — see
@@ -79,16 +79,16 @@ var v1AuthAllowlist = map[string]string{
 	// scheme. Expected scheme: platformauth. An unsigned caller is still
 	// refused (401 "unauthenticated"), again just not with auth.Middleware's
 	// body.
-	"GET /v1/admin/audit-logs":                   "platformauth: platform console route, not Firebase auth",
-	"GET /v1/admin/inbox":                        "platformauth: platform console route, not Firebase auth",
-	"GET /v1/admin/entities/:type":               "platformauth: platform console route, not Firebase auth",
-	"GET /v1/admin/health":                       "platformauth: platform console route, not Firebase auth",
-	"GET /v1/admin/kpis":                         "platformauth: platform console route, not Firebase auth",
-	"GET /v1/admin/ai-metrics":                   "platformauth: platform console route, not Firebase auth",
-	"POST /v1/admin/inbox/:id/actions/:actionId": "platformauth: platform console route, not Firebase auth",
-	"GET /v1/admin/agents":                       "platformauth: platform console route, not Firebase auth",
-	"GET /v1/admin/agents/:name":                 "platformauth: platform console route, not Firebase auth",
-	"POST /v1/admin/agents/:name/refresh":        "platformauth: platform console route, not Firebase auth",
+	"GET /v1/admin/audit-logs":                   "platformauth: platform console route, not end-user auth",
+	"GET /v1/admin/inbox":                        "platformauth: platform console route, not end-user auth",
+	"GET /v1/admin/entities/:type":               "platformauth: platform console route, not end-user auth",
+	"GET /v1/admin/health":                       "platformauth: platform console route, not end-user auth",
+	"GET /v1/admin/kpis":                         "platformauth: platform console route, not end-user auth",
+	"GET /v1/admin/ai-metrics":                   "platformauth: platform console route, not end-user auth",
+	"POST /v1/admin/inbox/:id/actions/:actionId": "platformauth: platform console route, not end-user auth",
+	"GET /v1/admin/agents":                       "platformauth: platform console route, not end-user auth",
+	"GET /v1/admin/agents/:name":                 "platformauth: platform console route, not end-user auth",
+	"POST /v1/admin/agents/:name/refresh":        "platformauth: platform console route, not end-user auth",
 }
 
 // concretePath turns a gin route TEMPLATE ("/v1/logs/:id", "/v1/admin/entities/:type")
@@ -138,7 +138,7 @@ func testCoordinator() *agents.Coordinator {
 //   - requires the route to be named in v1AuthAllowlist with a reason, AND
 //     still confirms an unauthenticated request is refused with SOME 4xx
 //     (see the allowlisted sub-test below) — allowlisting exempts a route
-//     from the exact Firebase-auth body, never from being checked at all.
+//     from the exact end-user-auth body, never from being checked at all.
 //
 // A route registered by `r.GET(...)` instead of `v1.GET(...)` would be
 // discovered here, would not produce the 401 body, and is not (and must
@@ -228,7 +228,7 @@ func TestEveryV1RouteRequiresAuthUnlessAllowlisted(t *testing.T) {
 			}
 
 			assert.Equal(t, http.StatusUnauthorized, w.Code,
-				"%s %s must require Firebase auth (or be added to v1AuthAllowlist with a reason)", route.Method, route.Path)
+				"%s %s must require end-user auth (or be added to v1AuthAllowlist with a reason)", route.Method, route.Path)
 			assert.JSONEq(t, `{"error":"unauthorized","message":"invalid or missing token"}`, w.Body.String(),
 				"%s %s did not produce auth.Middleware's specific refusal", route.Method, route.Path)
 		})

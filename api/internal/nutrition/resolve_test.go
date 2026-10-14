@@ -375,7 +375,7 @@ func TestResolvePersonalAliasExcludesSoftDeleted(t *testing.T) {
 
 	userID := uuid.New()
 	require.NoError(t, tx.Exec(
-		"INSERT INTO users (id, firebase_uid, email) VALUES (?, ?, ?)",
+		"INSERT INTO users (id, idp_subject, email) VALUES (?, ?, ?)",
 		userID, "resolve-retired-"+userID.String(), "resolve-retired@test.dev").Error)
 
 	retired := FoodItem{Name: "Retired Personal Alias Food " + uuid.NewString(), Provenance: ProvenanceCurated, KcalPer100g: 100}

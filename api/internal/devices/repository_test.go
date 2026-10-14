@@ -27,7 +27,7 @@ func testDB(t *testing.T) *gorm.DB {
 func seedUser(t *testing.T, db *gorm.DB, name string) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
-	require.NoError(t, db.Exec("INSERT INTO users (id, firebase_uid, email, display_name) VALUES (?, ?, ?, ?)",
+	require.NoError(t, db.Exec("INSERT INTO users (id, idp_subject, email, display_name) VALUES (?, ?, ?, ?)",
 		id, "dv-"+id.String(), "dv-"+id.String()+"@test.dev", name).Error)
 	t.Cleanup(func() {
 		db.Exec("DELETE FROM device_tokens WHERE user_id = ?", id)

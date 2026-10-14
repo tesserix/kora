@@ -26,8 +26,8 @@ import (
 
 func seedBodyUser(t *testing.T, db *gorm.DB, uid string) user.User {
 	t.Helper()
-	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", uid) })
-	u, err := user.NewRepository(db).UpsertByFirebaseUID(context.Background(), uid, uid+"@test.dev")
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE idp_subject = ?", uid) })
+	u, err := user.NewRepository(db).UpsertBySubject(context.Background(), uid, uid+"@test.dev")
 	require.NoError(t, err)
 	t.Cleanup(func() { db.Exec("DELETE FROM weight_entries WHERE user_id = ?", u.ID) })
 	return u
@@ -61,7 +61,7 @@ func seedBodyWeighIn(t *testing.T, db *gorm.DB, userID uuid.UUID) {
 
 func getBodyThroughRouter(t *testing.T, db *gorm.DB, viewer user.User, ownerID uuid.UUID) *httptest.ResponseRecorder {
 	t.Helper()
-	r := NewRouter(Deps{DB: db, Verifier: uidVerifier{uid: viewer.FirebaseUID}})
+	r := NewRouter(Deps{DB: db, Verifier: uidVerifier{uid: viewer.IDPSubject}})
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/friends/"+ownerID.String()+"/body", nil)
 	req.Header.Set("Authorization", "Bearer anything")

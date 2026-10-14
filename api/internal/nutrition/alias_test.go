@@ -15,7 +15,7 @@ func seedAliasUser(t *testing.T, db *gorm.DB) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
 	require.NoError(t, db.Exec(
-		"INSERT INTO users (id, firebase_uid, email) VALUES (?, ?, ?)",
+		"INSERT INTO users (id, idp_subject, email) VALUES (?, ?, ?)",
 		id, "alias-"+id.String(), "alias@test.dev").Error)
 	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE id = ?", id) })
 	return id
@@ -293,7 +293,7 @@ func TestLookupPersonalAliasExcludesSoftDeleted(t *testing.T) {
 
 	userID := uuid.New()
 	require.NoError(t, tx.Exec(
-		"INSERT INTO users (id, firebase_uid, email) VALUES (?, ?, ?)",
+		"INSERT INTO users (id, idp_subject, email) VALUES (?, ?, ?)",
 		userID, "lookup-retired-"+userID.String(), "lookup-retired@test.dev").Error)
 
 	retired := FoodItem{Name: "Retired Lookup Food " + uuid.NewString(), Provenance: ProvenanceCurated, KcalPer100g: 100}
