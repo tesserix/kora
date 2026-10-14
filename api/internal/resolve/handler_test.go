@@ -642,6 +642,7 @@ func TestResolvePhotoEvidenceErrors(t *testing.T) {
 		code   string
 	}{
 		{"decision unavailable", labelocr.ErrDecisionUnavailable, 503, "ai_decision_unavailable"},
+		{"vision deadline", context.DeadlineExceeded, 503, "ai_analysis_timeout"},
 		{"quota exhausted", labelocr.ErrBudgetExhausted, 429, "budget_exhausted"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

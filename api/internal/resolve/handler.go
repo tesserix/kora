@@ -262,6 +262,8 @@ func (h Handler) ResolvePhoto(c *gin.Context) {
 		switch {
 		case errors.Is(err, labelocr.ErrDecisionUnavailable):
 			httpx.Error(c, http.StatusServiceUnavailable, "ai_decision_unavailable", "AI analysis is temporarily unavailable. Please try again.")
+		case errors.Is(err, context.DeadlineExceeded):
+			httpx.Error(c, http.StatusServiceUnavailable, "ai_analysis_timeout", "Image analysis took too long. Please try again.")
 		case errors.Is(err, labelocr.ErrBudgetExhausted):
 			httpx.Error(c, http.StatusTooManyRequests, "budget_exhausted", "You've reached your AI usage limit.")
 		default:

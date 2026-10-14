@@ -1,6 +1,6 @@
 module github.com/tesserix/kora/api
 
-go 1.26.0
+go 1.27.2
 
 require (
 	cloud.google.com/go/storage v1.62.1

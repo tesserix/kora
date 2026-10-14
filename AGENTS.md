@@ -2,7 +2,7 @@
 
 ## Scope and architecture
 
-- Treat `api/` as a Go 1.26 Gin service backed by Postgres/pgvector and Redis-compatible infrastructure.
+- Treat `api/` as a Go 1.27.2 Gin service backed by Postgres/pgvector and Redis-compatible infrastructure. Keep the module, CI, and Docker build pins aligned to exactly 1.27.2.
 - Treat `apps/mobile/` as an Expo SDK 57 React Native application. The nested `apps/mobile/AGENTS.md` adds version-specific documentation guidance.
 - Load `sketch-findings-kora` before building or restyling mobile UI.
 - Reuse existing patterns and dependencies before adding abstractions or packages.

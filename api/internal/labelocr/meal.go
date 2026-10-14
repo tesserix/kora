@@ -72,7 +72,11 @@ func (m MealIdentifier) identify(ctx context.Context, uid uuid.UUID, provider ai
 	if err := (PhotoResolver{budget: m.budget}).allowed(ctx, uid); err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	timeout := 25 * time.Second
+	if callType == "identify_photo_review" {
+		timeout = 15 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	providerCtx, collector := ai.WithUsageCollector(ctx)
 	guesses, usage, callErr := provider.IdentifyPhoto(providerCtx, image, mime)
