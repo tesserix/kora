@@ -25,7 +25,7 @@ import (
 )
 
 const (
-	Deadline         = 1500 * time.Millisecond
+	Deadline         = 4 * time.Second
 	MaxRequestBytes  = 16000
 	MaxResponseBytes = 64000
 	MaxQuestions     = 16

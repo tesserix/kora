@@ -12,8 +12,10 @@ adds one Jev call; photo evidence routing and meal-identity review add decisions
 vision, but net savings and accuracy improvements are not yet established.
 
 The existing targets are 99.9% availability and photo p99 under 30 seconds, not
-measured results. Photo orchestration is bounded to 22 seconds: OCR at most five,
-Jev 1.5, independent label review at most ten within the remaining overall time.
+measured results. Photo orchestration is bounded to 22 seconds: OCR at most ten,
+Jev at most four (gateway at most three), independent label review at most ten
+within the remaining overall time. The overall 22-second limit remains in force;
+these per-step limits do not extend it.
 Existing storage precedes analysis. Gateway buffering is bounded to 16 MiB for
 base64 overhead. Jev concurrency uses a bounded HTTP connection pool.
 

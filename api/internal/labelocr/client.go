@@ -188,7 +188,7 @@ func (c *Client) Read(ctx context.Context, photo []byte, mime string) (read Read
 		switch status {
 		case "completed", "partial", "review_required":
 			return true, nil
-		case "rejected", "cancelled", "cancelling":
+		case "failed", "rejected", "cancelled", "cancelling":
 			return true, ErrUnreadable
 		}
 		return false, nil

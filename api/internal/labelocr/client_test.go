@@ -147,6 +147,17 @@ func TestReadTreatsARejectedJobAsUnreadable(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrUnreadable))
 }
 
+func TestReadTreatsAFailedJobAsTerminalUnreadable(t *testing.T) {
+	client := newFakeDI(t, "failed").client(t)
+	client.pause = time.Millisecond
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	read, err := client.Read(ctx, []byte("x"), "image/jpeg")
+	require.ErrorIs(t, err, ErrUnreadable)
+	require.Equal(t, "failed", read.Status)
+	require.Equal(t, "job_1", read.JobID)
+}
+
 func TestReadStopsAtTheCallerDeadline(t *testing.T) {
 	fake := newFakeDI(t, "processing")
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
