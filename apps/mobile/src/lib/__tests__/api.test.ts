@@ -4,6 +4,7 @@ import {
   CancelledError,
   NetworkError,
   REQUEST_TIMEOUT_MS,
+  PHOTO_REQUEST_TIMEOUT_MS,
   apiFetch,
   apiFetchEnvelope,
   apiFetchMultipart,
@@ -347,4 +348,38 @@ test("apiFetchMultipart forwards a caller signal that can abort the request", as
   controller.abort();
 
   await expect(promise).rejects.toBeInstanceOf(CancelledError);
+});
+
+
+test("photo multipart waits for OCR, Jev and reviewed vision beyond the ordinary deadline", async () => {
+  jest.useFakeTimers();
+  try {
+    (global.fetch as jest.Mock).mockImplementation(() => new Promise((resolve) => {
+      setTimeout(() => resolve({ ok: true, json: async () => ({ data: { candidates: [], tier: "confirm" } }) }), 40_000);
+    }));
+    const promise = apiFetchMultipart("/v1/resolve/photo", new FormData());
+    const result = promise.then((data) => ({ data }), (error: Error) => ({ error }));
+    await jest.advanceTimersByTimeAsync(40_001);
+    expect(await result).toEqual({ data: { candidates: [], tier: "confirm" } });
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+
+test.each([
+  ["/v1/resolve/photo", PHOTO_REQUEST_TIMEOUT_MS],
+  ["/v1/resolve/voice", REQUEST_TIMEOUT_MS],
+])("multipart %s retains a hard deadline", async (path, deadline) => {
+  jest.useFakeTimers();
+  try {
+    (global.fetch as jest.Mock).mockImplementation(() => new Promise(() => {}));
+    const controller = new AbortController();
+    const promise = apiFetchMultipart(path, new FormData(), { signal: controller.signal });
+    const outcome = promise.then(() => undefined, (error: Error) => error.name);
+    await jest.advanceTimersByTimeAsync(deadline + 1);
+    expect(await outcome).toBe("TimeoutError");
+  } finally {
+    jest.useRealTimers();
+  }
 });

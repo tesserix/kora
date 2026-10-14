@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/google/uuid"
@@ -275,4 +276,20 @@ func TestPhotoReviewRequiresIndependentModel(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPrimaryPhotoDoesNotRetryPaidProviderFailure(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":{"message":"provider unavailable","type":"server_error"}}`))
+	}))
+	t.Cleanup(server.Close)
+	provider := NewAgentGatewayProvider("test-key", server.URL+"/v1", "kora-auto")
+	ctx := auth.WithVerifiedToken(t.Context(), "isolated-test-token")
+	_, _, err := provider.IdentifyPhoto(ctx, []byte("image"), "image/jpeg")
+	require.Error(t, err)
+	require.EqualValues(t, 1, calls.Load(), "an accepted paid photo call must not be retried by the SDK")
 }

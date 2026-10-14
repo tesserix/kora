@@ -104,6 +104,10 @@ export class TimeoutError extends Error {
 // than fail (see src/api/resolveWire.ts).
 export const REQUEST_TIMEOUT_MS = 25_000;
 
+// Photo analysis includes native OCR, Jev routing and independent image review.
+// The API bounds analysis to 65s, plus bounded archive work; Istio allows 100s.
+export const PHOTO_REQUEST_TIMEOUT_MS = 75_000;
+
 // AGENT_REQUEST_TIMEOUT_MS is the deadline for routes that run the A2A agent
 // chain — classify, then draft with the planner, then review with the coach.
 // Three sequential model calls do not fit in 25s: a week-long plan measured
@@ -500,6 +504,7 @@ export async function apiFetchMultipart(
         headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       }),
       init.signal,
+      path === "/v1/resolve/photo" ? PHOTO_REQUEST_TIMEOUT_MS : undefined,
     );
 
     if (!res.ok) return await throwApiError(res);

@@ -51,6 +51,11 @@ func NewAgentGatewayProvider(apiKey, baseURL, model string) AgentGatewayProvider
 			option.WithHeader(gatewayRTKAppliedHeader, "false"),
 		)
 		provider.options = gatewayRequestOptions
+		if capability == "identify_photo" {
+			provider.options = func(ctx context.Context) []option.RequestOption {
+				return append(gatewayRequestOptions(ctx), option.WithMaxRetries(0))
+			}
+		}
 		return provider
 	}
 	return AgentGatewayProvider{

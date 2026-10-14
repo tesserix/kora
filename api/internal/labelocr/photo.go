@@ -39,7 +39,7 @@ func NewPhotoResolver(reader Reader, decision PhotoDecider, reviewer Reviewer, v
 }
 
 func (p PhotoResolver) ResolvePhoto(ctx context.Context, uid uuid.UUID, image []byte, mime string) (ai.Resolution, error) {
-	ctx, cancel := context.WithTimeout(ctx, 22*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 65*time.Second)
 	defer cancel()
 	if err := p.allowed(ctx, uid); err != nil {
 		return ai.Resolution{}, err

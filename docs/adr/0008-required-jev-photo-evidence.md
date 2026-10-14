@@ -12,10 +12,22 @@ adds one Jev call; photo evidence routing and meal-identity review add decisions
 vision, but net savings and accuracy improvements are not yet established.
 
 The existing targets are 99.9% availability and photo p99 under 30 seconds, not
-measured results. Photo orchestration is bounded to 22 seconds: OCR at most ten,
-Jev at most four (gateway at most three), independent label review at most ten
-within the remaining overall time. The overall 22-second limit remains in force;
-these per-step limits do not extend it.
+measured results. The former ten-second food-identification limit canceled real
+Vertex reads, and the 22-second overall limit could not contain OCR plus required
+meal review. Photo analysis is now bounded to 65 seconds: OCR at most ten,
+each Jev decision at most four (gateway at most three), primary identification at
+most 25 and independent meal review at most 15. Their serial maxima total 58
+seconds, leaving seven for database matching and orchestration. Independent label
+review remains bounded to ten. Caller cancellation and shorter deadlines take
+precedence. Archive upload precedes analysis (at most five seconds), and persistence
+adds at most two; the photo multipart client allows 75 seconds, inside the existing
+100-second Istio per-try bound and the HTTP server's 150-second limit. Other mobile
+requests retain their original deadlines. This bounded repair does not establish
+the p99 target; measure before claiming it. No new queue or store is introduced.
+Primary photo calls disable SDK retries, as independent review already does, so a
+paid provider failure cannot silently run the same image three times. An analysis
+deadline returns a retryable 503 with `ai_analysis_timeout`; Jev failures retain
+their separate fail-closed error.
 Existing storage precedes analysis. Gateway buffering is bounded to 16 MiB for
 base64 overhead. Jev concurrency uses a bounded HTTP connection pool.
 
