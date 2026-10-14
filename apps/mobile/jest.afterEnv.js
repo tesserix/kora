@@ -17,3 +17,9 @@
 beforeEach(() => {
   require("expo-file-system").File.__reset();
 });
+
+// Same reasoning for the session mock: who is signed in, and every listener
+// registered with onAuthChange, must not leak from one test into the next.
+beforeEach(() => {
+  require("./src/test/sessionMock").sessionMock.reset();
+});

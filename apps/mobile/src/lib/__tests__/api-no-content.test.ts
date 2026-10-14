@@ -9,14 +9,7 @@
 
 import { apiFetch, apiFetchEnvelope } from "../api";
 
-jest.mock("../firebase", () => ({
-  auth: { currentUser: { getIdToken: jest.fn().mockResolvedValue("test-token") } },
-}));
 
-jest.mock("firebase/auth", () => ({
-  onAuthStateChanged: jest.fn(),
-  signOut: jest.fn(),
-}));
 
 beforeEach(() => {
   global.fetch = jest.fn();

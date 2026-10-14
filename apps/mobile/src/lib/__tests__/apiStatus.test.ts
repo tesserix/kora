@@ -5,8 +5,6 @@
 import { ApiError } from "../api";
 import { isNotFound } from "../apiStatus";
 
-jest.mock("../firebase", () => ({ auth: null }));
-jest.mock("firebase/auth", () => ({ onAuthStateChanged: jest.fn(), signOut: jest.fn() }));
 
 test("a real ApiError 404 is recognised", () => {
   expect(isNotFound(new ApiError(404, "not_found", "Not found."))).toBe(true);

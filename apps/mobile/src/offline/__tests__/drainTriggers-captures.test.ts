@@ -6,8 +6,6 @@ import { installDrainTriggers } from "../drainTriggers";
 jest.mock("@/lib/api", () => ({
   currentUserId: jest.fn(() => null),
 }));
-jest.mock("@/lib/firebase", () => ({ auth: { name: "test-auth" }, isFirebaseConfigured: true }));
-jest.mock("firebase/auth", () => ({ onAuthStateChanged: jest.fn(() => jest.fn()) }));
 jest.mock("../drainCaptures", () => ({ drainCaptures: jest.fn(async () => {}) }));
 jest.mock("../drainLogs", () => ({ drainLogs: jest.fn(async () => {}) }));
 jest.mock("../captureMedia", () => ({ sweepOrphans: jest.fn(async () => 0) }));

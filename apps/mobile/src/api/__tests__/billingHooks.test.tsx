@@ -4,10 +4,6 @@ import type { ReactNode } from "react";
 import { apiFetch } from "@/lib/api";
 import { useAIOrder, useAIOrders, useAIPacks, useCreateAIOrder } from "../hooks";
 
-jest.mock("@/lib/firebase", () => ({
-  isFirebaseConfigured: true,
-  auth: { authStateReady: async () => {}, currentUser: { uid: "user-a" } },
-}));
 
 jest.mock("@/lib/api", () => ({
   apiFetch: jest.fn(),

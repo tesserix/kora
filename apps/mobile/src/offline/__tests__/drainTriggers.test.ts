@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AppState } from "react-native";
 import { QueryClient, onlineManager } from "@tanstack/react-query";
-import { onAuthStateChanged } from "firebase/auth";
+import { sessionMock } from "@/test/sessionMock";
 import { apiFetch, currentUserId } from "@/lib/api";
 import { append, list } from "../queue";
 import { rememberOwner, resolveOwnerId } from "../owner";
@@ -13,9 +13,7 @@ jest.mock("@/lib/api", () => ({
   ApiError: class ApiError extends Error {},
 }));
 
-jest.mock("@/lib/firebase", () => ({ auth: { name: "test-auth" }, isFirebaseConfigured: true }));
 
-jest.mock("firebase/auth", () => ({ onAuthStateChanged: jest.fn(() => jest.fn()) }));
 
 const payload = {
   food_item_id: "f1", meal_slot: "lunch", source: "manual" as const,
@@ -52,12 +50,12 @@ test("a queued log drains when sign-in completes, not on the signed-out cold sta
   expect(await list()).toHaveLength(1);
 
   // The sign-in trigger must exist; without it nothing below could ever fire.
-  const authCalls = (onAuthStateChanged as jest.Mock).mock.calls;
+  const authCalls = sessionMock.onAuthChange.mock.calls;
   expect(authCalls).toHaveLength(1);
 
   // Firebase restores the session.
   (currentUserId as jest.Mock).mockReturnValue("user-a");
-  authCalls[0][1]({ uid: "u1" });
+  authCalls[0][0]("u1");
 
   await eventually(async () => {
     expect(apiFetch).toHaveBeenCalledWith("/v1/logs", expect.objectContaining({ method: "POST" }));
@@ -75,7 +73,7 @@ test("sign-in records the uid so the next launch can attribute writes", async ()
   expect(await resolveOwnerId()).toBeNull();
 
   const uninstall = installDrainTriggers(new QueryClient());
-  (onAuthStateChanged as jest.Mock).mock.calls[0][1]({ uid: "user-b" });
+  sessionMock.onAuthChange.mock.calls[0][0]("user-b");
 
   await eventually(async () => expect(await resolveOwnerId()).toBe("user-b"));
   uninstall();
@@ -92,7 +90,7 @@ test("signing out forgets the uid", async () => {
   expect(await resolveOwnerId()).toBe("user-a");
 
   const uninstall = installDrainTriggers(new QueryClient());
-  (onAuthStateChanged as jest.Mock).mock.calls[0][1](null);
+  sessionMock.onAuthChange.mock.calls[0][0](null);
 
   await eventually(async () => expect(await resolveOwnerId()).toBeNull());
   uninstall();
@@ -109,7 +107,7 @@ test("uninstall detaches every listener it installed", async () => {
   const unsubscribeAuth = jest.fn();
   const unsubscribeOnline = jest.fn();
   const removeAppState = jest.fn();
-  (onAuthStateChanged as jest.Mock).mockReturnValueOnce(unsubscribeAuth);
+  sessionMock.onAuthChange.mockReturnValueOnce(unsubscribeAuth);
   const onlineSpy = jest.spyOn(onlineManager, "subscribe").mockReturnValue(unsubscribeOnline);
   const appStateSpy = jest
     .spyOn(AppState, "addEventListener")

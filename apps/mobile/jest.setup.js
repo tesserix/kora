@@ -692,3 +692,8 @@ jest.mock(
   }),
   { virtual: true },
 );
+
+// Every test runs against a controllable session (src/test/sessionMock.ts)
+// instead of the real Zitadel client, starting signed in as "test-user".
+// src/auth/__tests__/session.test.ts unmocks it to test the real module.
+jest.mock("@/auth/session", () => require("./src/test/sessionMock").sessionMock);

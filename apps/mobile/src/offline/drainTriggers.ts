@@ -1,7 +1,6 @@
 import { AppState } from "react-native";
 import { onlineManager, type QueryClient } from "@tanstack/react-query";
-import { onAuthStateChanged } from "firebase/auth";
-import { auth, isFirebaseConfigured } from "@/lib/firebase";
+import { isAuthConfigured, onAuthChange } from "@/auth/session";
 import { sweepOrphans } from "./captureMedia";
 import { list as listCaptures, hasMedia } from "./captureQueue";
 import { drainCaptures } from "./drainCaptures";
@@ -46,21 +45,20 @@ export function installDrainTriggers(queryClient: QueryClient): () => void {
 
   // Sign-in completes. This is the trigger that actually drains a queue on
   // launch, because the cold-start drain above almost always loses the race
-  // against Firebase reading the persisted session out of AsyncStorage.
+  // against the persisted session being read out of SecureStore.
   // It is also the one moment the app reliably learns who the user is, so it
   // records the uid for writes that happen during the NEXT launch's restore
   // window, before live auth is available (see src/offline/owner.ts).
-  const unsubscribeAuth =
-    isFirebaseConfigured && auth
-      ? onAuthStateChanged(auth, (user) => {
-          if (!user) {
-            void forgetOwner().catch(() => {});
-            return;
-          }
-          void rememberOwner(user.uid).catch(() => {});
-          drain();
-        })
-      : () => {};
+  const unsubscribeAuth = isAuthConfigured
+    ? onAuthChange((uid) => {
+        if (!uid) {
+          void forgetOwner().catch(() => {});
+          return;
+        }
+        void rememberOwner(uid).catch(() => {});
+        drain();
+      })
+    : () => {};
 
   return () => {
     unsubscribeOnline();

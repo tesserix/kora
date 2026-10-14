@@ -3,9 +3,8 @@ import { Platform } from "react-native";
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { onAuthStateChanged } from "firebase/auth";
 import { router } from "expo-router";
-import { auth, isFirebaseConfigured } from "@/lib/firebase";
+import { isAuthConfigured, onAuthChange } from "@/auth/session";
 import { registerDevice, unregisterDevice } from "@/lib/pushApi";
 import { targetFor } from "@/lib/notificationTarget";
 import { reconcileWeightReminder } from "@/reminders/reconcileWeightReminder";
@@ -77,9 +76,9 @@ export async function unregisterPushToken(): Promise<void> {
 // foreground pass would eventually fix it, which is not the same as working.
 export function usePushRegistration(): void {
   useEffect(() => {
-    if (!isFirebaseConfigured || !auth) return;
-    const unsub = onAuthStateChanged(auth, (user) => {
-      if (!user) return;
+    if (!isAuthConfigured) return;
+    const unsub = onAuthChange((uid) => {
+      if (!uid) return;
       void registerPushToken();
       void reconcileWeightReminder().catch(() => {});
     });
@@ -199,13 +198,13 @@ export function usePushResponder(): void {
       handledResponseKey = key;
 
       // Auth gate (#171). The listener is registered at the top of TabsLayout,
-      // whereas the onAuthStateChanged -> /sign-in redirect runs later in an
+      // whereas the onAuthChange -> /sign-in redirect runs later in an
       // effect, so this callback is live during the signed-out moments of a
       // launch — which is how a deleted account's reminder opened the capture
       // screen on the sign-in screen.
       //
-      // Awaited rather than read from auth.currentUser: persistence is
-      // AsyncStorage-backed, so a signed-in user cold-starting FROM a
+      // Awaited rather than read from currentUserId(): the session is
+      // restored from SecureStore asynchronously, so a signed-in user cold-starting FROM a
       // notification tap has a null currentUser at delivery time, and a
       // synchronous check would drop their deep link. The key is already
       // claimed above, so a response that belongs to a dead session stays

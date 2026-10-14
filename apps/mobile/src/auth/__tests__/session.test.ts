@@ -1,3 +1,4 @@
+jest.unmock("@/auth/session");
 const mockStore = new Map<string, string>();
 jest.mock("expo-secure-store", () => ({
   AFTER_FIRST_UNLOCK: "AFTER_FIRST_UNLOCK",

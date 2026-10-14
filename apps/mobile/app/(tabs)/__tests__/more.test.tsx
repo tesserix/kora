@@ -1,6 +1,7 @@
 import { render, fireEvent, waitFor } from "@testing-library/react-native";
 
 import More from "../more";
+import { sessionMock } from "@/test/sessionMock";
 
 const mockPush = jest.fn();
 // useFocusEffect: ScreenEntrance (Task 9) wraps More's root content and
@@ -10,10 +11,12 @@ jest.mock("expo-router", () => ({
   router: { push: (...a: unknown[]) => mockPush(...a) },
   useFocusEffect: () => {},
 }));
-jest.mock("@/lib/firebase", () => ({ auth: { name: "fake-auth" } }));
 
 const mockSignOut = jest.fn();
-jest.mock("firebase/auth", () => ({ signOut: (...a: unknown[]) => mockSignOut(...a) }));
+// signOut is the session mock's (jest.setup.js); route it through this spy.
+beforeEach(() => {
+  sessionMock.signOut.mockImplementation((...args: unknown[]) => mockSignOut(...args));
+});
 jest.mock("@/api/hooks", () => ({
   useUnreadCount: () => ({ data: { count: 2 } }),
   useProfile: () => ({ data: { display_name: "Kai Rivers", email: "kai@example.com" } }),

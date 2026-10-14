@@ -3,6 +3,7 @@ import type { TestInstance } from "test-renderer";
 import { instrumentLight } from "@/theme/palette";
 
 import More from "../(tabs)/more";
+import { sessionMock } from "@/test/sessionMock";
 
 // This repo's testing-library build has no UNSAFE_getByType/UNSAFE_queryAllByType
 // (see Avatar.test.tsx) -- component-type queries go through queryAll instead.
@@ -12,6 +13,10 @@ function queryImages(container: TestInstance): TestInstance[] {
 
 const mockPush = jest.fn();
 const mockSignOut = jest.fn(async () => {});
+// signOut is the session mock's (jest.setup.js); route it through this spy.
+beforeEach(() => {
+  sessionMock.signOut.mockImplementation(() => mockSignOut());
+});
 const mockUnregisterPushToken = jest.fn(async () => {});
 
 // useFocusEffect: ScreenEntrance (Task 9) wraps More's root content and
@@ -21,8 +26,6 @@ jest.mock("expo-router", () => ({
   router: { push: (...a: unknown[]) => mockPush(...a) },
   useFocusEffect: () => {},
 }));
-jest.mock("firebase/auth", () => ({ signOut: () => mockSignOut() }));
-jest.mock("@/lib/firebase", () => ({ auth: {} }));
 jest.mock("@/lib/push", () => ({ unregisterPushToken: () => mockUnregisterPushToken() }));
 
 let mockUnreadCount = 0;

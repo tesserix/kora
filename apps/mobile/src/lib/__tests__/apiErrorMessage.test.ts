@@ -4,8 +4,6 @@
 import { ApiError } from "../api";
 import { apiErrorMessage } from "../apiErrorMessage";
 
-jest.mock("../firebase", () => ({ auth: null }));
-jest.mock("firebase/auth", () => ({ onAuthStateChanged: jest.fn(), signOut: jest.fn() }));
 
 const CHECK_DETAILS = "Please check your details and try again.";
 const SERVER = "Kora is having trouble right now. Please try again in a moment.";

@@ -3,7 +3,7 @@ import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import { router } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { onAuthStateChanged } from "firebase/auth";
+import { sessionMock } from "@/test/sessionMock";
 import {
   registerPushToken,
   unregisterPushToken,
@@ -30,13 +30,8 @@ jest.mock("../pushApi", () => ({
   unregisterDevice: jest.fn(async () => {}),
 }));
 
-// Firebase is initialised elsewhere; a light mock keeps the module import
-// clean. Configured (not null) so usePushRegistration's auth subscription is
-// actually reachable.
-jest.mock("@/lib/firebase", () => ({ auth: { name: "fake-auth" }, isFirebaseConfigured: true }));
-// firebase/auth ships ESM that Jest can't transform out of the box; the repo's
-// existing tests (e.g. more.test.tsx) mock it directly for the same reason.
-jest.mock("firebase/auth", () => ({ onAuthStateChanged: jest.fn(() => jest.fn()) }));
+// The session is the global mock from jest.setup.js (src/test/sessionMock.ts),
+// configured, so usePushRegistration's auth subscription is reachable.
 
 jest.mock("expo-router", () => ({ router: { push: jest.fn(), replace: jest.fn() } }));
 
@@ -360,7 +355,7 @@ test("non-reminder tap still routes via the existing targetFor deep-link path, n
 // Reported from a real device: after deleting their account and sitting on the
 // sign-in screen, a "log dinner" reminder fired and opened the CAPTURE screen
 // while signed out. usePushResponder() is called at the top of TabsLayout,
-// before the onAuthStateChanged -> /sign-in redirect in its effect has run, so
+// before the onAuthChange -> /sign-in redirect in its effect has run, so
 // the listener is live during the signed-out moments of a launch.
 test("a reminder tap while signed out navigates nowhere", async () => {
   (resolveAuthState as jest.Mock).mockResolvedValue("signed-out");
@@ -450,9 +445,7 @@ test("setupPushHandler does NOT re-arm reminders while signed out", async () => 
 // the session (until the next foreground pass).
 test("signing in re-arms the reminders the signed-out launch declined to arm", async () => {
   await renderHook(() => usePushRegistration());
-  const onAuth = (onAuthStateChanged as jest.Mock).mock.calls[0][1];
-
-  onAuth({ uid: "u1" });
+  sessionMock.emit("u1");
 
   await waitFor(() => expect(applyAllReminders).toHaveBeenCalled());
 });
@@ -460,9 +453,7 @@ test("signing in re-arms the reminders the signed-out launch declined to arm", a
 test("an auth callback with no user arms nothing", async () => {
   (resolveAuthState as jest.Mock).mockResolvedValue("signed-out");
   await renderHook(() => usePushRegistration());
-  const onAuth = (onAuthStateChanged as jest.Mock).mock.calls[0][1];
-
-  onAuth(null);
+  sessionMock.emit(null);
 
   await waitFor(() => expect(registerDevice).not.toHaveBeenCalled());
   expect(applyAllReminders).not.toHaveBeenCalled();

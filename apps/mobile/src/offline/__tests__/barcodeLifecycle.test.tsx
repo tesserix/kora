@@ -8,17 +8,14 @@ import { enqueueBarcodeCapture } from "../enqueueCapture";
 import { list as captures } from "../captureQueue";
 import { list as logs } from "../queue";
 import { drainCaptures } from "../drainCaptures";
+import { sessionMock } from "@/test/sessionMock";
 import { upsertFoods } from "../foodCache";
 import type { FoodItem } from "@/api/types";
 
-jest.mock("@/lib/firebase", () => ({
-  isFirebaseConfigured: true,
-  auth: {
-    authStateReady: async () => {},
-    currentUser: { uid: "barcode-test-user", getIdToken: async () => "test-token" },
-  },
-}));
-jest.mock("firebase/auth", () => ({ onAuthStateChanged: jest.fn(), signOut: jest.fn() }));
+
+beforeEach(() => {
+  sessionMock.setUser("barcode-test-user");
+});
 
 const code = "5000112637922";
 const food = { id: "barcode-food", name: "Test food", barcode: code, serving_grams: 60 } as FoodItem;

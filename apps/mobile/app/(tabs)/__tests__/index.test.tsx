@@ -3,8 +3,6 @@ import * as RN from "react-native";
 
 import Home from "../index";
 
-jest.mock("@/lib/firebase", () => ({ auth: null, isFirebaseConfigured: true }));
-jest.mock("firebase/auth", () => ({ onAuthStateChanged: () => () => {}, signOut: jest.fn() }));
 
 const mockPush = jest.fn();
 // useHealth (rendered for real here) subscribes with useFocusEffect; the real one needs

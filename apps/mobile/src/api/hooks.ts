@@ -1632,15 +1632,6 @@ export function setDisplayName(display_name: string): Promise<unknown> {
   return apiFetch("/v1/me", { method: "PATCH", body: JSON.stringify({ display_name }) });
 }
 
-// Plain function, not a hook: called from the sign-in flow, outside any
-// component that could hold a mutation.
-export function storeAppleAuthorization(authorization_code: string): Promise<unknown> {
-  return apiFetch("/v1/me/apple-authorization", {
-    method: "POST",
-    body: JSON.stringify({ authorization_code }),
-  });
-}
-
 // Plain function, not a hook: the caller unmounts as a direct result of the
 // call succeeding (the screen signs out and navigates away), so there is no
 // component left to hold mutation state or a cache to invalidate.

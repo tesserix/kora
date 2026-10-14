@@ -1,27 +1,27 @@
-import { auth, isFirebaseConfigured } from "@/lib/firebase";
+import { authReady, currentUserId, isAuthConfigured } from "@/auth/session";
 
-// Three states, not a boolean. "Not signed in" and "we have no Firebase at all"
-// demand opposite responses from the reminder code: a signed-out user's local
-// reminders must be disarmed, whereas a missing config must NOT destroy
-// a working user's schedule as a side effect of a configuration problem.
+// Three states, not a boolean. "Not signed in" and "this build has no sign-in
+// configured" demand opposite responses from the reminder code: a signed-out
+// user's local reminders must be disarmed, whereas a missing config must NOT
+// destroy a working user's schedule as a side effect of a configuration
+// problem.
 export type AuthState = "unconfigured" | "signed-in" | "signed-out";
 
-// resolveAuthState answers "is someone signed in right now" AFTER Firebase has
-// finished restoring any persisted session.
+// resolveAuthState answers "is someone signed in right now" AFTER the persisted
+// session has been read.
 //
-// The await is the load-bearing part. Auth persistence is AsyncStorage-backed
-// (src/lib/firebase.ts), so `auth.currentUser` is null for the first moments of
+// The await is the load-bearing part. The session lives in SecureStore
+// (src/auth/session.ts), so currentUserId() is null for the first moments of
 // every cold start — including for a user who is very much signed in. Reading
 // it synchronously at launch (setupPushHandler runs at module scope) would
 // classify every launch as signed-out and wipe the user's reminders.
 export async function resolveAuthState(): Promise<AuthState> {
-  if (!isFirebaseConfigured || !auth) return "unconfigured";
+  if (!isAuthConfigured) return "unconfigured";
   try {
-    await auth.authStateReady();
+    await authReady();
   } catch {
     // Deliberately swallowed — see src/lib/push.ts for this convention. If the
-    // readiness promise ever rejects we still fall through to currentUser,
-    // which is the same answer this function gave before authStateReady existed.
+    // restore ever rejects we still fall through to the in-memory session.
   }
-  return auth.currentUser ? "signed-in" : "signed-out";
+  return currentUserId() ? "signed-in" : "signed-out";
 }

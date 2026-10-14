@@ -24,9 +24,6 @@ function abortError(): DOMException {
   return new DOMException("Aborted", "AbortError");
 }
 
-jest.mock("../firebase", () => ({
-  auth: { currentUser: { getIdToken: jest.fn().mockResolvedValue("test-token") } },
-}));
 
 // This file's requests always resolve to "test-token" on refresh too, so a
 // 401 here never actually recovers — some of the failure-envelope tests
@@ -35,10 +32,6 @@ jest.mock("../firebase", () => ({
 // vs 500, no signed-in user) is covered end to end in
 // api-session-recovery.test.ts, which is why this mock only needs to not
 // crash, not assert call counts.
-jest.mock("firebase/auth", () => ({
-  onAuthStateChanged: jest.fn(),
-  signOut: jest.fn(),
-}));
 
 beforeEach(() => {
   global.fetch = jest.fn();

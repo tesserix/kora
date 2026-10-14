@@ -5,7 +5,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import * as SplashScreen from "expo-splash-screen";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
-import { isFirebaseConfigured } from "@/lib/firebase";
+import { isAuthConfigured } from "@/auth/session";
 import { setupPushHandler } from "@/lib/push";
 import { installAppFocus } from "@/lib/appFocus";
 import { installConnectivity } from "@/offline/connectivity";
@@ -93,7 +93,7 @@ try {
 
 export default function RootLayout() {
   useEffect(() => {
-    if (!isFirebaseConfigured) router.replace("/config-missing");
+    if (!isAuthConfigured) router.replace("/config-missing");
   }, []);
 
   useEffect(() => installConnectivity(), []);
