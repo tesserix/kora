@@ -5,14 +5,14 @@ const STORAGE_KEY = "kora.lastOwnerId";
 
 // Every queued log is stamped with its author so a drain can never replay one
 // user's meal into another's diary. Live auth is the truth whenever it exists —
-// but on cold start Firebase restores the session from AsyncStorage
-// asynchronously, and the Home tab is mounted and tappable before that lands
+// but on cold start the session is restored from SecureStore asynchronously,
+// and the Home tab is mounted and tappable before that lands
 // (app/(tabs)/_layout.tsx only redirects to /sign-in from inside the
-// onAuthStateChanged callback). A write in that window would otherwise be
+// onAuthChange callback). A write in that window would otherwise be
 // stamped with nothing and become permanently unsendable: drain skips unowned
 // items by design, and nothing surfaces them.
 //
-// On a single-user device the last uid seen is exactly the one Firebase is
+// On a single-user device the last uid seen is exactly the one the session is
 // about to restore, so remembering it closes the window completely.
 
 // NoOwnerError is thrown when a log cannot be attributed to any account.

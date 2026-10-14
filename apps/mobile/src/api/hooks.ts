@@ -608,8 +608,8 @@ export function useCreateLog() {
       const id = Crypto.randomUUID();
       // Stamped so a queued log is only ever replayed into the diary of the
       // user who wrote it — the queue is one device-wide list, accounts are not.
-      // resolveOwnerId falls back to the last remembered uid while Firebase is
-      // still restoring the session, because a write with no owner can never be
+      // resolveOwnerId falls back to the last remembered uid while the session is
+      // still being restored, because a write with no owner can never be
       // drained. With no owner at all there is nothing honest to do but refuse:
       // queueing would swallow the meal into a black hole.
       const ownerId = await resolveOwnerId();

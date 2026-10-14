@@ -11,7 +11,7 @@ export interface ReportContext {
 }
 
 // Duck-typed rather than `instanceof ApiError`: importing api.ts here would
-// drag firebase/auth into this module and its tests purely to read two fields.
+// drag the auth session into this module and its tests purely to read two fields.
 // Same reasoning as src/observability/redact.ts:37-49.
 function isApiErrorShape(e: unknown): boolean {
   return (

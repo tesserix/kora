@@ -1,5 +1,5 @@
 // Duck-typed HTTP status classification, deliberately NOT `instanceof
-// ApiError`: importing api.ts drags firebase/auth into every consumer and
+// ApiError`: importing api.ts drags the auth session into every consumer and
 // every consumer's test, purely to read a number. Same convention and same
 // reasoning as apiErrorMessage.ts, and pinned against the real class in
 // apiStatus.test.ts so the shape cannot drift apart from it silently.

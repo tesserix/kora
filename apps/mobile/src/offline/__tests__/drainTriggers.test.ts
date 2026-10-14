@@ -6,6 +6,7 @@ import { apiFetch, currentUserId } from "@/lib/api";
 import { append, list } from "../queue";
 import { rememberOwner, resolveOwnerId } from "../owner";
 import { installDrainTriggers } from "../drainTriggers";
+import { __resetIdentityCutoverForTests } from "../identityCutover";
 
 jest.mock("@/lib/api", () => ({
   apiFetch: jest.fn(),
@@ -32,6 +33,9 @@ async function eventually(check: () => Promise<unknown>): Promise<void> {
 
 beforeEach(async () => {
   await AsyncStorage.clear();
+  // Post-cutover by default; the cutover itself has its own tests below.
+  await AsyncStorage.setItem("kora.identityProvider", "zitadel");
+  __resetIdentityCutoverForTests();
   jest.clearAllMocks();
   (currentUserId as jest.Mock).mockReturnValue("user-a");
 });
@@ -127,4 +131,30 @@ test("uninstall detaches every listener it installed", async () => {
   // Settle the cold-start drain's promise before the test ends.
   await new Promise((r) => setTimeout(r, 0));
   expect(apiFetch).not.toHaveBeenCalled();
+});
+
+// The first launch after the move from Firebase. Every row and the remembered
+// owner carry a Firebase uid, so none could ever drain; they are dropped before
+// any drain or owner write can see them, and only once.
+test("the first launch after the identity cutover drops Firebase-era queues once", async () => {
+  await AsyncStorage.removeItem("kora.identityProvider");
+  await append(payload, "id-1", "firebase-uid");
+  await rememberOwner("firebase-uid");
+  (currentUserId as jest.Mock).mockReturnValue(null);
+
+  // Not torn down: the uninstall test above restores AppState's spy, which
+  // leaves its listener without a remove() for later tests.
+  installDrainTriggers(new QueryClient());
+  await eventually(async () => {
+    expect(await list()).toHaveLength(0);
+    expect(await AsyncStorage.getItem("kora.lastOwnerId")).toBeNull();
+    expect(await AsyncStorage.getItem("kora.identityProvider")).toBe("zitadel");
+  });
+
+  // A later launch keeps what the new session queued.
+  __resetIdentityCutoverForTests();
+  await append(payload, "id-2", "user-a");
+  installDrainTriggers(new QueryClient());
+  await new Promise((r) => setTimeout(r, 10));
+  expect((await list()).map((i) => i.id)).toEqual(["id-2"]);
 });

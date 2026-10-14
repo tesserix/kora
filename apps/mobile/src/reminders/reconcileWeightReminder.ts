@@ -32,7 +32,7 @@ async function run(justWeighedAt: Date | null): Promise<void> {
   // are cleaned up the next time the app opens.
   //
   // Unconfigured is neither. Destroying a working user's schedule because the
-  // Firebase config went missing would be a worse bug than the one this fixes.
+  // sign-in config went missing would be a worse bug than the one this fixes.
   const authState = await resolveAuthState();
   if (authState === "unconfigured") return;
   if (authState === "signed-out") {

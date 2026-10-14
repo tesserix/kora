@@ -23,7 +23,7 @@ import { formatWeight, useUnits } from "@/units";
 
 // Duck-typed rather than `instanceof ApiError`, same reasoning as
 // apiErrorMessage.ts and feedback.tsx's errorMessageFor: this screen must not
-// pull @/lib/api (and firebase/auth) in just to format a string. Passing the
+// pull @/lib/api (and the auth session) in just to format a string. Passing the
 // server's own message through — rather than a generic replacement — is the
 // whole point here: the four handle-write failures (invalid shape, reserved,
 // taken, retired) answer differently, and that distinction is what tells a

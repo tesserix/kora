@@ -56,17 +56,17 @@ export default function ConfigMissing() {
       >
         {/* No onBack: this screen is where startup stopped, not somewhere you
             navigated to. A back button would land on a blank stack. */}
-        <ScreenHeader overline="Setup" title="Firebase isn't configured" />
+        <ScreenHeader overline="Setup" title="Sign-in isn't configured" />
 
         <View style={{ paddingHorizontal: spacing.md, gap: spacing.md }}>
           <AppText style={{ fontSize: 13, color: instrument.mut, lineHeight: 19 }}>
-            Kora cannot sign anyone in without Firebase credentials, so startup stops here.
+            Kora cannot sign anyone in without its Zitadel client settings, so startup stops here.
           </AppText>
 
           <GlassPanel radius={18}>
             <View style={{ padding: spacing.md, gap: 8 }}>
               <AppText style={{ fontSize: 15, fontWeight: "600", color: instrument.ink }}>
-                {missing.length > 0 ? "Not set in this build" : "All four are set in this process"}
+                {missing.length > 0 ? "Not set in this build" : "All are set in this process"}
               </AppText>
               {missing.length > 0 ? (
                 missing.map((name) => (

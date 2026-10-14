@@ -7,8 +7,8 @@ import { drain } from "./queue";
 // The id travels in the body so a replay of a write whose response was lost
 // resolves to the same server row instead of a duplicate.
 async function runDrain(queryClient: QueryClient): Promise<void> {
-  // The cold-start trigger races Firebase restoring the session from
-  // AsyncStorage, so this usually runs signed out. Sending then would go out
+  // The cold-start trigger races the session being restored from
+  // SecureStore, so this usually runs signed out. Sending then would go out
   // with no Authorization header and come back 401 — burning the item's one
   // clean shot for nothing. The queue is durable and installDrainTriggers
   // drains again the moment sign-in completes, so waiting costs nothing.

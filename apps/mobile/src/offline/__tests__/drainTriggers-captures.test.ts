@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { onlineManager } from "@tanstack/react-query";
 import { append as appendCapture } from "../captureQueue";
 import { installDrainTriggers } from "../drainTriggers";
+import { __resetIdentityCutoverForTests } from "../identityCutover";
 
 jest.mock("@/lib/api", () => ({
   currentUserId: jest.fn(() => null),
@@ -10,15 +11,20 @@ jest.mock("../drainCaptures", () => ({ drainCaptures: jest.fn(async () => {}) })
 jest.mock("../drainLogs", () => ({ drainLogs: jest.fn(async () => {}) }));
 jest.mock("../captureMedia", () => ({ sweepOrphans: jest.fn(async () => 0) }));
 
-it("drains captures on reconnect, not only logs", () => {
+it("drains captures on reconnect, not only logs", async () => {
+  await AsyncStorage.setItem("kora.identityProvider", "zitadel");
+  __resetIdentityCutoverForTests();
   const { drainCaptures } = jest.requireMock("../drainCaptures");
   // Start OFFLINE, so the transition below is a real reconnect. A test that
   // begins online never exercises the path it names — the exact trap slice 1 hit.
   onlineManager.setOnline(false);
   const teardown = installDrainTriggers({} as never);
+  await new Promise((resolve) => setImmediate(resolve));
   drainCaptures.mockClear();
 
   onlineManager.setOnline(true);
+  // Drains wait on the one-time identity cutover check.
+  await new Promise((resolve) => setImmediate(resolve));
 
   expect(drainCaptures).toHaveBeenCalled();
   teardown();
@@ -43,6 +49,8 @@ async function seedCapture(id: string, storedName: string) {
 // join passes.
 it("sweeps orphaned media on install, keeping every queued capture's file", async () => {
   await AsyncStorage.clear();
+  await AsyncStorage.setItem("kora.identityProvider", "zitadel");
+  __resetIdentityCutoverForTests();
   await seedCapture("c1", "c1.jpg");
   await seedCapture("c2", "c2.m4a");
 
@@ -60,6 +68,8 @@ it("sweeps orphaned media on install, keeping every queued capture's file", asyn
 // media names, and a text row in the queue must not disturb the sweep.
 it("passes only media names to the orphan sweep when the queue also holds text", async () => {
   await AsyncStorage.clear();
+  await AsyncStorage.setItem("kora.identityProvider", "zitadel");
+  __resetIdentityCutoverForTests();
   await seedCapture("c1", "c1.jpg");
   await appendCapture({
     id: "c2", kind: "text", phrase: "chicken and rice",

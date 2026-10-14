@@ -1603,10 +1603,10 @@ export default function CaptureScreen() {
   // feature dead in the only condition it exists for. api.ts's fetchWithRetry
   // awaits getToken(user) BEFORE it ever calls fetch (src/lib/api.ts), and
   // src/lib/__tests__/api-error-modes.test.ts pins that ordering: when
-  // getIdToken rejects, fetch is never attempted, so NO NetworkError is ever
-  // produced. Firebase serves getIdToken() from cache while the ID token is
+  // getAccessToken rejects, fetch is never attempted, so NO NetworkError is
+  // ever produced. The session serves its access token from memory while it is
   // still valid — roughly an hour — but the moment it needs refreshing it goes
-  // to the network, and offline that rejects with auth/network-request-failed.
+  // to the network, and offline that refresh rejects.
   // So a user offline for more than an hour (a flight, a hike: precisely the
   // scenario this queue was designed for) hit AuthTokenError, fell through to
   // the plain-message branch, and lost the capture entirely.
