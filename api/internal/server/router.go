@@ -116,11 +116,6 @@ type Deps struct {
 	// deps.DB; main supplies the rest. A dependency in
 	// platformadmin.DependencyRegistry with no probe reports `unknown`.
 	PlatformHealthProbes map[string]platformadmin.Probe
-	// AppleExchanger trades Apple authorization codes for refresh tokens.
-	// Nil when the Apple credentials are unset, in which case the endpoint is
-	// not mounted at all — an unconfigured environment answers 404 rather
-	// than 500, the same choice BFFHMACKey makes above.
-	AppleExchanger user.AppleExchanger
 	// IdentityDeleter removes the caller's Zitadel user during account
 	// deletion. It is separate from Verifier because verification needs only
 	// the issuer's public keys, while deletion needs a machine user's token.
@@ -130,11 +125,6 @@ type Deps struct {
 	// "NEEDS MANUAL CLEANUP" (see unwiredIdentityDeleter), never to a panic
 	// that turns a completed deletion into a 500.
 	IdentityDeleter user.IdentityDeleter
-	// AppleRevoker revokes the user's Apple refresh token before the row that
-	// holds it is destroyed. Nil whenever AppleExchanger is nil — Apple is
-	// not configured in every environment — and user.Service.Delete skips
-	// revocation rather than failing when it is.
-	AppleRevoker user.AppleRevoker
 	// Stripe is the payment gateway paid AI top-ups would be bought through.
 	//
 	// Kora has no live rail: Cashfree was removed in kora#479 (the owner's
@@ -188,7 +178,6 @@ func NewRouter(deps Deps) *gin.Engine {
 			deps.DB,
 			deletionCache(deps.ResolveCache, deps.BodyCompositionCache),
 			identityDeleter(deps.IdentityDeleter),
-			deps.AppleRevoker, // may legitimately be nil; Delete tolerates it
 			auditDeletion,
 			assetsStore(deps.Assets), // same nil-to-Noop default as identity's avatar wiring
 		)
@@ -231,18 +220,13 @@ func NewRouter(deps Deps) *gin.Engine {
 		}
 		v1.GET("/me", userHandler.Me)
 		v1.PATCH("/me", userHandler.UpdateProfile)
-		// Mounted unconditionally, unlike the Apple exchange below: Apple
-		// requires in-app account deletion, so this route must never be
-		// silently absent in any environment.
+		// Mounted unconditionally: Apple requires in-app account deletion, so
+		// this route must never be silently absent in any environment.
 		v1.DELETE("/me", userHandler.DeleteMe)
 		// Data export (#24, spec §20). Mounted next to DELETE /v1/me because
 		// they are the same promise — you can get your data out, and you can
 		// have it removed — and a reader looking for one should find the other.
 		v1.GET("/me/export", export.NewHandler(export.NewService(deps.DB), slog.Default()).Export)
-		if deps.AppleExchanger != nil {
-			appleHandler := user.NewAppleHandler(userRepo, deps.AppleExchanger)
-			v1.POST("/me/apple-authorization", appleHandler.Store)
-		}
 		v1.POST("/onboarding", onboardingHandler.Submit)
 		v1.GET("/notifications", notificationsHandler.List)
 		v1.GET("/notifications/unread-count", notificationsHandler.UnreadCount)

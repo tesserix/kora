@@ -53,13 +53,13 @@ const (
 // when handle-based friend requests shipped, kora#449 task 13b) -- the
 // reverse import would cycle. social.Service satisfies this structurally at
 // the wiring site (internal/server/router.go), the same consumer-declared-
-// interface pattern as CacheEvicter / IdentityDeleter / AppleRevoker in
+// interface pattern as CacheEvicter / IdentityDeleter in
 // internal/user/deletion.go.
 //
 // It may be nil: a Service wired without one (identity's own unit tests,
 // or a future caller that only needs Claim/Clear/avatars) must degrade
 // Lookup's friendship_status to FriendshipNone rather than panic -- the same
-// treatment the nil Apple client and nil ObjectDeleter get in
+// treatment the nil ObjectDeleter gets in
 // internal/user/deletion.go.
 type FriendshipStatusProvider interface {
 	FriendshipStatus(ctx context.Context, viewerID, otherID uuid.UUID) (FriendshipStatus, error)

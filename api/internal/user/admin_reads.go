@@ -9,8 +9,7 @@ import (
 )
 
 // AdminRow is one row of the admin user list: activation facts for a single
-// user. It deliberately never carries firebase_uid, apple_refresh_token, or
-// any target_* VALUE -- HasTargets is a boolean derived from whether
+// user. It deliberately never carries firebase_uid or any target_* VALUE -- HasTargets is a boolean derived from whether
 // target_kcal is set, and the underlying number never leaves the API.
 //
 // target_kcal is NOT NULL DEFAULT 0 (migration 000002_phase1_core.up.sql),
@@ -51,14 +50,11 @@ type AdminListResult struct {
 //
 // Counts only. A user's actual food logs, weights and coach turns are their
 // own history, not an admin surface -- and AdminRow, which this embeds,
-// already carries no firebase_uid, no apple_refresh_token and no target_*
-// value. HasAppleToken is a boolean derived from the token's PRESENCE; the
-// token itself never leaves the API.
+// already carries no firebase_uid and no target_* value.
 type AdminDetail struct {
 	AdminRow
-	Counts        map[string]int64 `json:"counts"`
-	Transfers     []Transfer       `json:"transfers"`
-	HasAppleToken bool             `json:"has_apple_token"`
+	Counts    map[string]int64 `json:"counts"`
+	Transfers []Transfer       `json:"transfers"`
 }
 
 // adminCountTables are the per-user tables whose row counts the detail panel
@@ -113,16 +109,6 @@ func (r Repository) GetForAdmin(ctx context.Context, id uuid.UUID) (AdminDetail,
 		return AdminDetail{}, err
 	}
 	d.Transfers = transfers
-
-	// Presence only. COALESCE because the column is '' for rows created via
-	// UpsertByFirebaseUID but NULL is still representable.
-	var token string
-	if err := r.db.WithContext(ctx).
-		Raw(`SELECT COALESCE(apple_refresh_token, '') FROM users WHERE id = ?`, id).
-		Scan(&token).Error; err != nil {
-		return AdminDetail{}, fmt.Errorf("user: read apple token presence: %w", err)
-	}
-	d.HasAppleToken = token != ""
 
 	return d, nil
 }

@@ -63,7 +63,6 @@ func TestAdminHandlerListReturnsEnvelope(t *testing.T) {
 	// a substring of the email already asserted on below -- that would make
 	// this assertion pass for the wrong reason.
 	assert.NotContains(t, body, "firebase_uid", "firebase_uid must never be serialised")
-	assert.NotContains(t, body, "apple_refresh_token")
 
 	var parsed struct {
 		Data AdminListResult `json:"data"`
@@ -104,7 +103,7 @@ func TestAdminHandlerListInternalErrorUsesHttpxError(t *testing.T) {
 
 // TestAdminHandlerGetReturnsCountsNotContent is the privacy assertion for the
 // detail view: an operator gets NUMBERS, never a user's actual food logs, and
-// never a body metric, target value, firebase uid or Apple refresh token.
+// never a body metric, target value or firebase uid.
 // Scoped to one seeded user; nothing here reads a global total.
 func TestAdminHandlerGetReturnsCountsNotContent(t *testing.T) {
 	db := testDB(t)
@@ -123,7 +122,6 @@ func TestAdminHandlerGetReturnsCountsNotContent(t *testing.T) {
 
 	body := w.Body.String()
 	assert.NotContains(t, body, "firebase_uid")
-	assert.NotContains(t, body, "apple_refresh_token")
 	assert.NotContains(t, body, "target_kcal", "target VALUES must never leave the API")
 	assert.NotContains(t, body, "weight_kg", "body metrics must never leave the API")
 	assert.NotContains(t, body, "test log", "the detail view is counts only, never a user's meals")
@@ -135,7 +133,6 @@ func TestAdminHandlerGetReturnsCountsNotContent(t *testing.T) {
 	assert.Equal(t, u.ID, parsed.Data.ID)
 	assert.Equal(t, int64(1), parsed.Data.Counts["food_logs"])
 	assert.Equal(t, int64(1), parsed.Data.Counts["weight_entries"])
-	assert.False(t, parsed.Data.HasAppleToken)
 }
 
 func TestAdminHandlerGetMalformedIDIs400(t *testing.T) {
@@ -181,7 +178,7 @@ func TestAdminDeleteReportsFirebaseSurvival(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	assert.Contains(t, w.Body.String(), `"firebase_identity_removed":false`)
+	assert.Contains(t, w.Body.String(), `"identity_removed":false`)
 
 	var n int64
 	require.NoError(t, db.Raw(`SELECT count(*) FROM users WHERE id = ?`, u.ID).Scan(&n).Error)

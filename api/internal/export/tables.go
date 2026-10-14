@@ -176,12 +176,6 @@ type RedactedColumn struct {
 // inside one outlives every assumption about where it went.
 var RedactedColumns = []RedactedColumn{
 	{
-		Table:  "users",
-		Column: "apple_refresh_token",
-		Reason: "a live credential: it exchanges for access to this user's Apple " +
-			"identity. Anyone holding the export could act as them.",
-	},
-	{
 		Table:  "device_tokens",
 		Column: "token",
 		Reason: "a push capability: anyone holding it can send notifications to " +

@@ -67,21 +67,6 @@ func (f *fakeCacheEvicter) DeleteByUser(_ context.Context, userID uuid.UUID) err
 	return f.err
 }
 
-// fakeAppleRevoker stands in for the appleid client. The method name matches
-// appleid.Client.RevokeRefreshToken exactly so the real client satisfies the
-// consumer-declared AppleRevoker interface without an adapter.
-type fakeAppleRevoker struct {
-	token string
-	calls int
-	err   error
-}
-
-func (f *fakeAppleRevoker) RevokeRefreshToken(_ context.Context, refreshToken string) error {
-	f.calls++
-	f.token = refreshToken
-	return f.err
-}
-
 // testAuditRecorder writes the same kora_admin_events row that
 // admin.RecordEvent writes, using raw SQL.
 //
@@ -151,7 +136,7 @@ func newTestService(t *testing.T, db *gorm.DB, objects ...ObjectDeleter) Service
 	if len(objects) == 1 {
 		o = objects[0]
 	}
-	return NewService(db, &fakeCacheEvicter{}, &fakeIdentityDeleter{}, &fakeAppleRevoker{}, testAuditRecorder, o)
+	return NewService(db, &fakeCacheEvicter{}, &fakeIdentityDeleter{}, testAuditRecorder, o)
 }
 
 // newTestServiceWithFailingFirebase wires a Service whose Firebase identity
@@ -160,7 +145,7 @@ func newTestService(t *testing.T, db *gorm.DB, objects ...ObjectDeleter) Service
 func newTestServiceWithFailingFirebase(t *testing.T, db *gorm.DB) Service {
 	t.Helper()
 	return NewService(db, &fakeCacheEvicter{},
-		&fakeIdentityDeleter{err: errors.New("firebase is down")}, &fakeAppleRevoker{},
+		&fakeIdentityDeleter{err: errors.New("firebase is down")},
 		testAuditRecorder, &fakeObjectDeleter{})
 }
 
@@ -553,7 +538,7 @@ func TestDeleteAuditFailureRollsBackTheDelete(t *testing.T) {
 	// touching the database is the case that pins the error check itself.
 	quiet := seedUser(t, db)
 	seedFoodLog(t, db, quiet.ID)
-	refusing := NewService(db, &fakeCacheEvicter{}, &fakeIdentityDeleter{}, &fakeAppleRevoker{},
+	refusing := NewService(db, &fakeCacheEvicter{}, &fakeIdentityDeleter{},
 		func(*gorm.DB, string, string, uuid.UUID) error { return errors.New("recorder refused") }, &fakeObjectDeleter{})
 
 	_, err = refusing.Delete(context.Background(), quiet.ID,
@@ -574,7 +559,7 @@ func TestDeleteAuditRowIsWrittenOnTheDeleteTransaction(t *testing.T) {
 	cleanupAdminEvents(t, db, victim.ID)
 
 	var visibleBeforeCommit bool
-	svc := NewService(db, &fakeCacheEvicter{}, &fakeIdentityDeleter{}, &fakeAppleRevoker{},
+	svc := NewService(db, &fakeCacheEvicter{}, &fakeIdentityDeleter{},
 		txProbingAuditRecorder(db, &visibleBeforeCommit), &fakeObjectDeleter{})
 
 	_, err := svc.Delete(context.Background(), victim.ID,
@@ -596,7 +581,7 @@ func TestDeleteAuditRowIsWrittenOnTheDeleteTransaction(t *testing.T) {
 // the fact.
 func TestDeleteWithoutAuditRecorderRefusesAdminDeletion(t *testing.T) {
 	db := testDB(t)
-	svc := NewService(db, &fakeCacheEvicter{}, &fakeIdentityDeleter{}, &fakeAppleRevoker{}, nil, &fakeObjectDeleter{})
+	svc := NewService(db, &fakeCacheEvicter{}, &fakeIdentityDeleter{}, nil, &fakeObjectDeleter{})
 	victim := seedUser(t, db)
 
 	_, err := svc.Delete(context.Background(), victim.ID,
@@ -621,7 +606,7 @@ func TestDeleteReportsFirebaseFailureWithoutFailing(t *testing.T) {
 
 	res, err := svc.Delete(context.Background(), victim.ID, DeleteActor{IsAdmin: true, ID: "a", Email: "a@b.com"})
 	require.NoError(t, err, "a Firebase failure must NOT fail the deletion")
-	assert.False(t, res.FirebaseIdentityRemoved, "but it must be reported, not swallowed")
+	assert.False(t, res.IdentityRemoved, "but it must be reported, not swallowed")
 
 	var n int64
 	require.NoError(t, db.Raw(`SELECT count(*) FROM users WHERE id = ?`, victim.ID).Scan(&n).Error)
@@ -687,64 +672,6 @@ func TestDeleteUnknownUserIsNotFound(t *testing.T) {
 	svc := newTestService(t, db)
 	_, err := svc.Delete(context.Background(), uuid.New(), DeleteActor{})
 	assert.ErrorIs(t, err, ErrNotFound)
-}
-
-func TestDeleteRevokesAppleTokenBeforeTheRowIsGone(t *testing.T) {
-	db := testDB(t)
-	victim := seedUser(t, db)
-	require.NoError(t, db.Exec(
-		`UPDATE users SET apple_refresh_token = ? WHERE id = ?`, "rt-abc", victim.ID).Error)
-
-	revoker := &fakeAppleRevoker{}
-	ids := &fakeIdentityDeleter{}
-	svc := NewService(db, &fakeCacheEvicter{}, ids, revoker, testAuditRecorder, &fakeObjectDeleter{})
-
-	res, err := svc.Delete(context.Background(), victim.ID, DeleteActor{})
-	require.NoError(t, err)
-
-	assert.Equal(t, 1, revoker.calls, "the token lives on the users row, so revoke runs before the DELETE")
-	assert.Equal(t, "rt-abc", revoker.token)
-	assert.True(t, res.AppleTokenRevoked)
-	assert.True(t, res.FirebaseIdentityRemoved)
-	assert.Equal(t, victim.FirebaseUID, ids.uid, "the uid must be read off the row before it is deleted")
-}
-
-func TestDeleteReportsAppleRevokeFailureWithoutFailing(t *testing.T) {
-	db := testDB(t)
-	victim := seedUser(t, db)
-	require.NoError(t, db.Exec(
-		`UPDATE users SET apple_refresh_token = ? WHERE id = ?`, "rt-bad", victim.ID).Error)
-
-	svc := NewService(db, &fakeCacheEvicter{}, &fakeIdentityDeleter{},
-		&fakeAppleRevoker{err: errors.New("apple is down")}, testAuditRecorder, &fakeObjectDeleter{})
-
-	res, err := svc.Delete(context.Background(), victim.ID, DeleteActor{})
-	require.NoError(t, err, "Apple requires deletion completes in-app; an outage must not block it")
-	assert.False(t, res.AppleTokenRevoked, "but the failure is reported, not swallowed")
-
-	var n int64
-	require.NoError(t, db.Raw(`SELECT count(*) FROM users WHERE id = ?`, victim.ID).Scan(&n).Error)
-	assert.Zero(t, n)
-}
-
-// TestDeleteToleratesNilAppleRevoker pins the deployment reality that Apple
-// may not be configured at all: router.go nil-checks deps.AppleExchanger for
-// exactly this reason, so Delete must skip revocation rather than nil-panic.
-func TestDeleteToleratesNilAppleRevoker(t *testing.T) {
-	db := testDB(t)
-	victim := seedUser(t, db)
-	require.NoError(t, db.Exec(
-		`UPDATE users SET apple_refresh_token = ? WHERE id = ?`, "rt-orphan", victim.ID).Error)
-
-	svc := NewService(db, &fakeCacheEvicter{}, &fakeIdentityDeleter{}, nil, testAuditRecorder, &fakeObjectDeleter{})
-
-	res, err := svc.Delete(context.Background(), victim.ID, DeleteActor{})
-	require.NoError(t, err)
-	assert.False(t, res.AppleTokenRevoked, "no revoker configured means nothing was revoked")
-
-	var n int64
-	require.NoError(t, db.Raw(`SELECT count(*) FROM users WHERE id = ?`, victim.ID).Scan(&n).Error)
-	assert.Zero(t, n, "an unconfigured Apple client must not block deletion")
 }
 
 func TestDeleteTransfersGroupOwnershipBeforeTheCascade(t *testing.T) {
@@ -847,8 +774,7 @@ func TestDelete_ObjectFailureIsNonFatal(t *testing.T) {
 }
 
 // TestDelete_NilObjectDeleterIsSkipped: a nil deleter is what a deployment
-// with no bucket wires. Delete must degrade to "skip", exactly as it already
-// does for a nil Apple client, not panic.
+// with no bucket wires. Delete must degrade to "skip", not panic.
 func TestDelete_NilObjectDeleterIsSkipped(t *testing.T) {
 	db := testDB(t)
 	svc := newTestService(t, db, nil)

@@ -95,7 +95,7 @@ func TestAdminUserDeleteWritesTheRealAuditConstants(t *testing.T) {
 	r.ServeHTTP(w, signedAdminRequest(t, key, http.MethodDelete, path, ""))
 
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	assert.Contains(t, w.Body.String(), `"firebase_identity_removed":false`,
+	assert.Contains(t, w.Body.String(), `"identity_removed":false`,
 		"an admin has no retry through the user, so a surviving identity must be reported")
 
 	assert.Zero(t, countRouteUsers(t, db, victim.ID), "the targeted row must actually be gone")
@@ -144,5 +144,4 @@ func TestAdminUserDetailIsReachableWithAValidSignature(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.Contains(t, w.Body.String(), `"counts"`)
 	assert.NotContains(t, w.Body.String(), "firebase_uid")
-	assert.NotContains(t, w.Body.String(), "apple_refresh_token")
 }

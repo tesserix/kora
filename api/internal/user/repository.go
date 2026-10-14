@@ -64,10 +64,10 @@ func seedableDisplayName(name string) string {
 // wired through) that still has ”. The presence check is `== ""`, not a
 // nullness check: display_name is a nullable column, but every row ever
 // written via UpsertByFirebaseUID/Create got the Go zero value ” rather
-// than SQL NULL (see the identical trap documented on User.AppleRefreshToken
+// than SQL NULL (see the identical trap documented on User.Handle
 // in model.go), so 'IS NULL' would never match and the repair would be dead
 // code. A non-empty display_name is never overwritten -- users can rename
-// via SetDisplayName (used by Apple sign-in and manual rename), and a later
+// via SetDisplayName, and a later
 // Google sign-in must not clobber that choice.
 func (r Repository) EnsureUser(ctx context.Context, firebaseUID, email, name string) (User, error) {
 	return r.EnsureUserWithProfile(ctx, firebaseUID, StaticProfile(email, name))
@@ -191,13 +191,6 @@ func (r Repository) SetTimezone(ctx context.Context, id uuid.UUID, tz string) er
 func (r Repository) SetDisplayName(ctx context.Context, id uuid.UUID, name string) error {
 	if err := r.db.WithContext(ctx).Model(&User{}).Where("id = ?", id).Update("display_name", name).Error; err != nil {
 		return fmt.Errorf("user: set display name: %w", err)
-	}
-	return nil
-}
-
-func (r Repository) SetAppleRefreshToken(ctx context.Context, id uuid.UUID, token string) error {
-	if err := r.db.WithContext(ctx).Model(&User{}).Where("id = ?", id).Update("apple_refresh_token", token).Error; err != nil {
-		return fmt.Errorf("user: set apple refresh token: %w", err)
 	}
 	return nil
 }

@@ -143,7 +143,7 @@ func (h Handler) UpdateProfile(c *gin.Context) {
 // row comes from IDFromContext (set by ResolveMiddleware), so there is no
 // user id in the request to forge.
 //
-// Returns 204 even when the Firebase identity survived: from the user's
+// Returns 204 even when the Zitadel identity survived: from the user's
 // perspective their data genuinely IS gone, and the path self-heals — they
 // sign in, EnsureUser provisions a fresh empty row, they delete again.
 // Returning 500 would tell them nothing happened when everything did. The

@@ -54,7 +54,7 @@ func (h AdminHandler) Get(c *gin.Context) {
 // Delete serves DELETE /v1/admin/users/:id. Irreversible; no grace period.
 //
 // Returns 200 WITH A BODY, not the bare 204 that DELETE /v1/me returns, and
-// the body is the whole point. If the Firebase identity survives the
+// the body is the whole point. If the Zitadel identity survives the
 // deletion, the user can still sign in, EnsureUser provisions a fresh row,
 // and the person the admin deleted REAPPEARS. A self-deleting user self-heals
 // -- they sign in, get an empty row, and delete again -- so /v1/me can stay

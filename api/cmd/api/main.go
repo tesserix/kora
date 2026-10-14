@@ -28,7 +28,6 @@ import (
 	"github.com/tesserix/kora/api/internal/ai/decide"
 	"github.com/tesserix/kora/api/internal/ai/providers"
 	"github.com/tesserix/kora/api/internal/aitrace"
-	"github.com/tesserix/kora/api/internal/appleid"
 	"github.com/tesserix/kora/api/internal/assets"
 	"github.com/tesserix/kora/api/internal/auth"
 	"github.com/tesserix/kora/api/internal/billing"
@@ -197,32 +196,6 @@ func main() {
 		logger.Info("platform admin contract surface disabled (no KORA_PLATFORM_ADMIN_SECRET)")
 	}
 
-	// One appleid.Client serves two narrow interfaces: AppleExchanger for
-	// POST /v1/me/apple-authorization and AppleRevoker for account deletion.
-	// Both stay nil when Apple is unconfigured — the exchange endpoint is
-	// then not mounted at all, and user.Service.Delete skips revocation
-	// rather than failing.
-	var appleExchanger user.AppleExchanger
-	var appleRevoker user.AppleRevoker
-	if cfg.ApplePrivateKeyPEM != "" {
-		key, err := appleid.ParsePrivateKey([]byte(cfg.ApplePrivateKeyPEM))
-		if err != nil {
-			logger.Error("apple: parse private key failed", "err", err)
-			os.Exit(1)
-		}
-		appleClient := appleid.NewClient(appleid.Config{
-			TeamID:     cfg.AppleTeamID,
-			KeyID:      cfg.AppleKeyID,
-			BundleID:   cfg.AppleBundleID,
-			PrivateKey: key,
-		}, nil)
-		appleExchanger = appleClient
-		appleRevoker = appleClient
-		logger.Info("apple authorization exchange enabled")
-	} else {
-		logger.Info("apple authorization exchange disabled (no APPLE_PRIVATE_KEY)")
-	}
-
 	shutdownTracing, err := aitrace.Setup(context.Background(), aitrace.Config{
 		Endpoint:    cfg.AITraceEndpoint,
 		Environment: cfg.Env,
@@ -290,9 +263,7 @@ func main() {
 			Accuracy:             accuracy.NewRecorder(resolveoutcome.NewRepository(db), scores),
 			PlatformAdminSecret:  cfg.PlatformAdminSecret,
 			PlatformHealthProbes: healthProbes,
-			AppleExchanger:       appleExchanger,
 			IdentityDeleter:      identityDeleter,
-			AppleRevoker:         appleRevoker,
 			Stripe: billing.StripeConfig{
 				SecretKey:     cfg.StripeSecretKey,
 				WebhookSecret: cfg.StripeWebhookSecret,

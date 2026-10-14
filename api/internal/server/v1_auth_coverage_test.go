@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -33,14 +32,13 @@ import (
 //
 // This test only sees routes that the router IT BUILDS actually mounts.
 // router.go gates several groups of /v1 routes behind Deps fields being
-// non-nil/non-empty (DB, Verifier, AppleExchanger, Resolver, Agents, Stripe,
-// BFFHMACKey, PlatformAdminSecret) — see the `if deps.X != nil` / `switch`
-// blocks in NewRouter. TestEveryV1RouteRequiresAuthUnlessAllowlisted below
-// deliberately supplies ALL of these (including a real, unreachable
-// agents.Coordinator and a stub AppleExchanger — both cheap to construct
-// with no network I/O, since construction alone is enough to register their
-// routes) so that every conditionally-mounted /v1 route is discovered, not
-// just the ones that happen to be wired in a minimal test Deps. If a future
+// non-nil/non-empty (DB, Verifier, Resolver, Agents, Stripe, BFFHMACKey,
+// PlatformAdminSecret) — see the `if deps.X != nil` / `switch` blocks in
+// NewRouter. TestEveryV1RouteRequiresAuthUnlessAllowlisted below deliberately
+// supplies ALL of these (including a real, unreachable agents.Coordinator —
+// cheap to construct with no network I/O, since construction alone is enough
+// to register its routes) so that every conditionally-mounted /v1 route is
+// discovered, not just the ones that happen to be wired in a minimal test Deps. If a future
 // route is added inside a NEW conditional block gated on a Deps field this
 // test does not set, it would silently escape this test the same way #371's
 // route escaped the curated list — so any new gating field added to Deps
@@ -116,14 +114,6 @@ func concretePath(pattern string) string {
 	return strings.Join(segments, "/")
 }
 
-// stubAppleExchanger is never invoked — its only job is to be non-nil so
-// router.go mounts POST /v1/me/apple-authorization for discovery below.
-type stubAppleExchanger struct{}
-
-func (stubAppleExchanger) ExchangeAuthorizationCode(context.Context, string) (string, error) {
-	return "", nil
-}
-
 // testCoordinator builds a real, but never-called, agents.Coordinator so
 // platformadmin mounts the /v1/admin/agents routes for discovery below. NewRegistry
 // and NewGateway do no network I/O at construction — they only validate that
@@ -175,10 +165,8 @@ func TestEveryV1RouteRequiresAuthUnlessAllowlisted(t *testing.T) {
 			SecretKey:     "sk_test_dummy",
 			WebhookSecret: "whsec_dummy",
 		},
-		// Mounts POST /v1/me/apple-authorization — see the coverage-boundary
-		// comment above v1AuthAllowlist.
-		AppleExchanger: stubAppleExchanger{},
-		// Mounts /v1/admin/agents* — same reasoning.
+		// Mounts /v1/admin/agents* — see the coverage-boundary comment above
+		// v1AuthAllowlist.
 		Agents: testCoordinator(),
 	})
 

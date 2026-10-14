@@ -53,7 +53,7 @@ func TestSchema_TwoUsersMayBothHaveNoHandle(t *testing.T) {
 // Two REAL signups must coexist. Every other schema test here seeds with raw
 // SQL, which leaves a true NULL -- but UpsertByFirebaseUID goes through GORM
 // Create, which writes the empty string for untouched string fields (see the
-// AppleRefreshToken comment in user/model.go). The empty string IS NOT NULL, so
+// Handle comment in user/model.go). The empty string IS NOT NULL, so
 // an index predicate that only excludes NULL rejects the second signup and
 // takes down account creation.
 //
