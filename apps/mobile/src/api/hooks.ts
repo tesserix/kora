@@ -608,8 +608,8 @@ export function useCreateLog() {
       const id = Crypto.randomUUID();
       // Stamped so a queued log is only ever replayed into the diary of the
       // user who wrote it — the queue is one device-wide list, accounts are not.
-      // resolveOwnerId falls back to the last remembered uid while Firebase is
-      // still restoring the session, because a write with no owner can never be
+      // resolveOwnerId falls back to the last remembered uid while the session is
+      // still being restored, because a write with no owner can never be
       // drained. With no owner at all there is nothing honest to do but refuse:
       // queueing would swallow the meal into a black hole.
       const ownerId = await resolveOwnerId();
@@ -1630,15 +1630,6 @@ export function useFriendsProgress() {
 // component that could hold a mutation.
 export function setDisplayName(display_name: string): Promise<unknown> {
   return apiFetch("/v1/me", { method: "PATCH", body: JSON.stringify({ display_name }) });
-}
-
-// Plain function, not a hook: called from the sign-in flow, outside any
-// component that could hold a mutation.
-export function storeAppleAuthorization(authorization_code: string): Promise<unknown> {
-  return apiFetch("/v1/me/apple-authorization", {
-    method: "POST",
-    body: JSON.stringify({ authorization_code }),
-  });
 }
 
 // Plain function, not a hook: the caller unmounts as a direct result of the

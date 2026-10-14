@@ -1,5 +1,7 @@
 # Firebase self-account status verification
 
+Status: superseded by ADR-0009 when Kora moved to Zitadel.
+
 ## Context
 
 The production workload cannot administratively read users in the separate Firebase project. Both available operator accounts also lack authority to grant that access. Authentication must still reject revoked, disabled and deleted sessions. Assets are user diaries, uploads and AI quota; hostile clients must not cross the authenticated-user boundary with forged or stale sessions.

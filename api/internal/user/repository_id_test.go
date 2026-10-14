@@ -25,23 +25,23 @@ func idTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-func TestIDByFirebaseUID(t *testing.T) {
+func TestIDBySubject(t *testing.T) {
 	db := idTestDB(t)
 	repo := NewRepository(db)
-	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", "id-test-uid") })
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE idp_subject = ?", "id-test-uid") })
 
-	created, err := repo.UpsertByFirebaseUID(context.Background(), "id-test-uid", "id@test.dev")
+	created, err := repo.UpsertBySubject(context.Background(), "id-test-uid", "id@test.dev")
 	require.NoError(t, err)
 
-	got, err := repo.IDByFirebaseUID(context.Background(), "id-test-uid")
+	got, err := repo.IDBySubject(context.Background(), "id-test-uid")
 	require.NoError(t, err)
 	require.Equal(t, created.ID, got)
 }
 
-func TestIDByFirebaseUIDNotFound(t *testing.T) {
+func TestIDBySubjectNotFound(t *testing.T) {
 	db := idTestDB(t)
 	repo := NewRepository(db)
-	_, err := repo.IDByFirebaseUID(context.Background(), "does-not-exist-uid")
+	_, err := repo.IDBySubject(context.Background(), "does-not-exist-uid")
 	require.Error(t, err)
 }
 
@@ -49,7 +49,7 @@ func TestEnsureUserProvisionsThenReturnsExisting(t *testing.T) {
 	db := idTestDB(t)
 	repo := NewRepository(db)
 	fuid := "ensure-" + uuid.NewString()
-	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", fuid) })
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE idp_subject = ?", fuid) })
 
 	// First call provisions.
 	u1, err := repo.EnsureUser(context.Background(), fuid, "ensure@test.dev", "")
@@ -62,7 +62,7 @@ func TestEnsureUserProvisionsThenReturnsExisting(t *testing.T) {
 	require.Equal(t, u1.ID, u2.ID)
 
 	var count int64
-	db.Model(&User{}).Where("firebase_uid = ?", fuid).Count(&count)
+	db.Model(&User{}).Where("idp_subject = ?", fuid).Count(&count)
 	require.Equal(t, int64(1), count)
 }
 
@@ -70,7 +70,7 @@ func TestEnsureUserGetsDefaultTimezone(t *testing.T) {
 	db := idTestDB(t)
 	repo := NewRepository(db)
 	fuid := "tz-" + uuid.NewString()
-	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", fuid) })
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE idp_subject = ?", fuid) })
 	u, err := repo.EnsureUser(context.Background(), fuid, "tz@test.dev", "")
 	require.NoError(t, err)
 	require.Equal(t, DefaultTimezone, u.Timezone)
@@ -80,14 +80,14 @@ func TestEnsureUserSeedsDisplayNameOnNewUser(t *testing.T) {
 	db := idTestDB(t)
 	repo := NewRepository(db)
 	fuid := "seed-new-" + uuid.NewString()
-	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", fuid) })
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE idp_subject = ?", fuid) })
 
 	u, err := repo.EnsureUser(context.Background(), fuid, "seed-new@test.dev", "Ada Lovelace")
 	require.NoError(t, err)
 	require.Equal(t, "Ada Lovelace", u.DisplayName)
 
 	var stored User
-	require.NoError(t, db.Where("firebase_uid = ?", fuid).First(&stored).Error)
+	require.NoError(t, db.Where("idp_subject = ?", fuid).First(&stored).Error)
 	require.Equal(t, "Ada Lovelace", stored.DisplayName)
 }
 
@@ -95,11 +95,11 @@ func TestEnsureUserRepairsEmptyDisplayNameOnExistingUser(t *testing.T) {
 	db := idTestDB(t)
 	repo := NewRepository(db)
 	fuid := "seed-repair-" + uuid.NewString()
-	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", fuid) })
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE idp_subject = ?", fuid) })
 
 	// Provision the row first with no name, mirroring an existing Google user
 	// whose display_name is '' because the claim used to be discarded.
-	created, err := repo.UpsertByFirebaseUID(context.Background(), fuid, "seed-repair@test.dev")
+	created, err := repo.UpsertBySubject(context.Background(), fuid, "seed-repair@test.dev")
 	require.NoError(t, err)
 	require.Empty(t, created.DisplayName)
 
@@ -108,7 +108,7 @@ func TestEnsureUserRepairsEmptyDisplayNameOnExistingUser(t *testing.T) {
 	require.Equal(t, "Grace Hopper", u.DisplayName)
 
 	var stored User
-	require.NoError(t, db.Where("firebase_uid = ?", fuid).First(&stored).Error)
+	require.NoError(t, db.Where("idp_subject = ?", fuid).First(&stored).Error)
 	require.Equal(t, "Grace Hopper", stored.DisplayName)
 }
 
@@ -116,9 +116,9 @@ func TestEnsureUserDoesNotOverwriteExistingDisplayName(t *testing.T) {
 	db := idTestDB(t)
 	repo := NewRepository(db)
 	fuid := "seed-noclobber-" + uuid.NewString()
-	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", fuid) })
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE idp_subject = ?", fuid) })
 
-	created, err := repo.UpsertByFirebaseUID(context.Background(), fuid, "seed-noclobber@test.dev")
+	created, err := repo.UpsertBySubject(context.Background(), fuid, "seed-noclobber@test.dev")
 	require.NoError(t, err)
 	require.NoError(t, repo.SetDisplayName(context.Background(), created.ID, "My Chosen Name"))
 
@@ -129,7 +129,7 @@ func TestEnsureUserDoesNotOverwriteExistingDisplayName(t *testing.T) {
 	require.Equal(t, "My Chosen Name", u.DisplayName)
 
 	var stored User
-	require.NoError(t, db.Where("firebase_uid = ?", fuid).First(&stored).Error)
+	require.NoError(t, db.Where("idp_subject = ?", fuid).First(&stored).Error)
 	require.Equal(t, "My Chosen Name", stored.DisplayName)
 }
 
@@ -137,14 +137,14 @@ func TestEnsureUserWhitespaceOnlyNameWritesNothing(t *testing.T) {
 	db := idTestDB(t)
 	repo := NewRepository(db)
 	fuid := "seed-blank-" + uuid.NewString()
-	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", fuid) })
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE idp_subject = ?", fuid) })
 
 	u, err := repo.EnsureUser(context.Background(), fuid, "seed-blank@test.dev", "   \t  ")
 	require.NoError(t, err)
 	require.Empty(t, u.DisplayName)
 
 	var stored User
-	require.NoError(t, db.Where("firebase_uid = ?", fuid).First(&stored).Error)
+	require.NoError(t, db.Where("idp_subject = ?", fuid).First(&stored).Error)
 	require.Empty(t, stored.DisplayName)
 }
 
@@ -152,11 +152,11 @@ func TestEnsureUserSeedFailureDoesNotFailWholeCall(t *testing.T) {
 	db := idTestDB(t)
 	repo := NewRepository(db)
 	fuid := "seed-writefail-" + uuid.NewString()
-	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", fuid) })
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE idp_subject = ?", fuid) })
 
 	// Provision the row first (with a live context) so the row exists with
 	// display_name == '' before we force the seed write itself to fail.
-	created, err := repo.UpsertByFirebaseUID(context.Background(), fuid, "seed-writefail@test.dev")
+	created, err := repo.UpsertBySubject(context.Background(), fuid, "seed-writefail@test.dev")
 	require.NoError(t, err)
 	require.Empty(t, created.DisplayName)
 
@@ -188,7 +188,7 @@ func TestEnsureUserSeedFailureDoesNotFailWholeCall(t *testing.T) {
 	require.Empty(t, u.DisplayName, "returned user must reflect what is actually persisted, not the un-written seed")
 
 	var stored User
-	require.NoError(t, db.Where("firebase_uid = ?", fuid).First(&stored).Error)
+	require.NoError(t, db.Where("idp_subject = ?", fuid).First(&stored).Error)
 	require.Empty(t, stored.DisplayName, "seed write must not have persisted")
 }
 
@@ -196,7 +196,7 @@ func TestEnsureUserOverLongNameWritesNothing(t *testing.T) {
 	db := idTestDB(t)
 	repo := NewRepository(db)
 	fuid := "seed-toolong-" + uuid.NewString()
-	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", fuid) })
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE idp_subject = ?", fuid) })
 
 	tooLong := strings.Repeat("a", MaxDisplayNameLen+1)
 	u, err := repo.EnsureUser(context.Background(), fuid, "seed-toolong@test.dev", tooLong)
@@ -204,6 +204,6 @@ func TestEnsureUserOverLongNameWritesNothing(t *testing.T) {
 	require.Empty(t, u.DisplayName)
 
 	var stored User
-	require.NoError(t, db.Where("firebase_uid = ?", fuid).First(&stored).Error)
+	require.NoError(t, db.Where("idp_subject = ?", fuid).First(&stored).Error)
 	require.Empty(t, stored.DisplayName)
 }

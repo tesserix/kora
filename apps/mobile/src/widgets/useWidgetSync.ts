@@ -1,10 +1,9 @@
 import { useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { onAuthStateChanged } from "firebase/auth";
 import { clearSnapshot, setSnapshot } from "../../modules/widget-bridge";
 import { useDashboard } from "@/api/hooks";
 import { STEP_GOAL } from "@/health/useHealth";
-import { auth, isFirebaseConfigured } from "@/lib/firebase";
+import { isAuthConfigured, onAuthChange } from "@/auth/session";
 import { buildSnapshot } from "./snapshot";
 
 function today(): string {
@@ -39,9 +38,8 @@ export function useWidgetSync(): void {
   // on sign-out the tabs layout unmounts and the clear would never fire.
   // Mirrors usePushRegistration in src/lib/push.ts.
   useEffect(() => {
-    if (!isFirebaseConfigured || !auth) return;
-    return onAuthStateChanged(auth, (user) => {
-      const uid = user ? user.uid : null;
+    if (!isAuthConfigured) return;
+    return onAuthChange((uid) => {
       const prev = lastUid.current;
       // Sign-out always clears. A DIFFERENT uid replacing a known previous
       // one also clears — otherwise user B's dashboard write would land on

@@ -38,7 +38,7 @@ func adminUsersRouter(h AdminHandler) *gin.Engine {
 
 // TestAdminHandlerListReturnsEnvelope checks the handler wraps
 // Repository.ListForAdmin's result in the {"data": ...} envelope and never
-// leaks firebase_uid. It seeds one user into the shared database and looks
+// leaks idp_subject. It seeds one user into the shared database and looks
 // it up in the response body by id -- the response's item COUNT is ambient
 // (shared DB), so only the presence and shape of this one seeded user's
 // fields are asserted, never a total or a fixed index.
@@ -58,12 +58,11 @@ func TestAdminHandlerListReturnsEnvelope(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 
 	body := w.Body.String()
-	// Check for the JSON KEY, not u.FirebaseUID's value: seedUser derives the
-	// email from the firebase uid (fuid+"@test.dev"), so the value itself is
+	// Check for the JSON KEY, not u.IDPSubject's value: seedUser derives the
+	// email from the identity subject (fuid+"@test.dev"), so the value itself is
 	// a substring of the email already asserted on below -- that would make
 	// this assertion pass for the wrong reason.
-	assert.NotContains(t, body, "firebase_uid", "firebase_uid must never be serialised")
-	assert.NotContains(t, body, "apple_refresh_token")
+	assert.NotContains(t, body, "idp_subject", "idp_subject must never be serialised")
 
 	var parsed struct {
 		Data AdminListResult `json:"data"`
@@ -104,7 +103,7 @@ func TestAdminHandlerListInternalErrorUsesHttpxError(t *testing.T) {
 
 // TestAdminHandlerGetReturnsCountsNotContent is the privacy assertion for the
 // detail view: an operator gets NUMBERS, never a user's actual food logs, and
-// never a body metric, target value, firebase uid or Apple refresh token.
+// never a body metric, target value or identity subject.
 // Scoped to one seeded user; nothing here reads a global total.
 func TestAdminHandlerGetReturnsCountsNotContent(t *testing.T) {
 	db := testDB(t)
@@ -122,8 +121,7 @@ func TestAdminHandlerGetReturnsCountsNotContent(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
 	body := w.Body.String()
-	assert.NotContains(t, body, "firebase_uid")
-	assert.NotContains(t, body, "apple_refresh_token")
+	assert.NotContains(t, body, "idp_subject")
 	assert.NotContains(t, body, "target_kcal", "target VALUES must never leave the API")
 	assert.NotContains(t, body, "weight_kg", "body metrics must never leave the API")
 	assert.NotContains(t, body, "test log", "the detail view is counts only, never a user's meals")
@@ -135,7 +133,6 @@ func TestAdminHandlerGetReturnsCountsNotContent(t *testing.T) {
 	assert.Equal(t, u.ID, parsed.Data.ID)
 	assert.Equal(t, int64(1), parsed.Data.Counts["food_logs"])
 	assert.Equal(t, int64(1), parsed.Data.Counts["weight_entries"])
-	assert.False(t, parsed.Data.HasAppleToken)
 }
 
 func TestAdminHandlerGetMalformedIDIs400(t *testing.T) {
@@ -163,17 +160,17 @@ func TestAdminHandlerGetUnknownIs404(t *testing.T) {
 	assert.JSONEq(t, `{"error":"not_found","message":"user not found"}`, w.Body.String())
 }
 
-// TestAdminDeleteReportsFirebaseSurvival pins the 200-with-body divergence
-// from DELETE /v1/me's bare 204. If the Firebase identity survives, the user
+// TestAdminDeleteReportsIdentitySurvival pins the 200-with-body divergence
+// from DELETE /v1/me's bare 204. If the Zitadel identity survives, the user
 // can sign in, EnsureUser provisions a fresh row, and the person the admin
 // deleted REAPPEARS. A self-deleting user retries; an admin cannot, so the
 // admin must be told in the response body.
-func TestAdminDeleteReportsFirebaseSurvival(t *testing.T) {
+func TestAdminDeleteReportsIdentitySurvival(t *testing.T) {
 	db := testDB(t)
 	u := seedUser(t, db)
 	cleanupAdminEvents(t, db, u.ID)
 
-	h := NewAdminHandler(NewRepository(db), newTestServiceWithFailingFirebase(t, db))
+	h := NewAdminHandler(NewRepository(db), newTestServiceWithFailingIdentityDelete(t, db))
 	r := adminUsersRouter(h)
 
 	w := httptest.NewRecorder()
@@ -181,11 +178,11 @@ func TestAdminDeleteReportsFirebaseSurvival(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	assert.Contains(t, w.Body.String(), `"firebase_identity_removed":false`)
+	assert.Contains(t, w.Body.String(), `"identity_removed":false`)
 
 	var n int64
 	require.NoError(t, db.Raw(`SELECT count(*) FROM users WHERE id = ?`, u.ID).Scan(&n).Error)
-	assert.Zero(t, n, "the row must actually be gone despite the Firebase failure")
+	assert.Zero(t, n, "the row must actually be gone despite the identity-provider failure")
 }
 
 func TestAdminDeleteUnknownIs404(t *testing.T) {

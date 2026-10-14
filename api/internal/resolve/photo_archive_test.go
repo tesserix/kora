@@ -55,7 +55,7 @@ func TestPhotoArchiveHTTPBoundary(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			owner := uuid.New()
-			require.NoError(t, db.Exec("INSERT INTO users(id,firebase_uid,email) VALUES (?,?,?)", owner, "archive-http-"+owner.String(), owner.String()+"@test.invalid").Error)
+			require.NoError(t, db.Exec("INSERT INTO users(id,idp_subject,email) VALUES (?,?,?)", owner, "archive-http-"+owner.String(), owner.String()+"@test.invalid").Error)
 			t.Cleanup(func() {
 				require.NoError(t, db.Exec("DELETE FROM users WHERE id = ?", owner).Error)
 				require.NoError(t, db.Exec("DELETE FROM photo_object_deletions WHERE object_key LIKE ?", "captures/"+owner.String()+"/%").Error)

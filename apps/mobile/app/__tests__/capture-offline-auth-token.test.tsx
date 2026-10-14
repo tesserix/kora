@@ -22,6 +22,7 @@ import { AuthTokenError, NetworkError, apiFetchMultipart } from "@/lib/api";
 import { mealSlotForHour } from "@/lib/mealSlot";
 
 import CaptureScreen from "../capture";
+import { sessionMock } from "@/test/sessionMock";
 
 // canGoBack/replace back safeBack(): capture is deep-link reachable (a
 // notification tap), so it can mount with an empty stack and must not rely on a
@@ -34,14 +35,11 @@ jest.mock("expo-router", () => ({
 // token does on an offline device; firebase/auth's other exports are only used by
 // api.ts's session-expiry bookkeeping.
 const mockGetIdToken = jest.fn();
-jest.mock("firebase/auth", () => ({
-  signOut: jest.fn(async () => {}),
-  onAuthStateChanged: jest.fn(() => jest.fn()),
-}));
-jest.mock("@/lib/firebase", () => ({
-  auth: { currentUser: { uid: "uid-1", getIdToken: (...a: unknown[]) => mockGetIdToken(...a) } },
-  isFirebaseConfigured: true,
-}));
+// getAccessToken is the session mock's (jest.setup.js); route it through this spy.
+beforeEach(() => {
+  sessionMock.setUser("uid-1");
+  sessionMock.getAccessToken.mockImplementation((...a: unknown[]) => mockGetIdToken(...a));
+});
 
 // The resolve hooks are stubbed, but useResolvePhoto's `mutate` runs the REAL
 // apiFetchMultipart and routes its rejection into the caller's onError exactly as

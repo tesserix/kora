@@ -10,7 +10,7 @@ import (
 
 // UserAIMetricsRow is one user's resolution activity over the requested
 // window, counts only. It carries the same posture as user.AdminDetail: no
-// food logs, no coach turns, no target_* value, no firebase_uid, no email —
+// food logs, no coach turns, no target_* value, no idp_subject, no email —
 // this surface counts what happened, it does not narrate it.
 type UserAIMetricsRow struct {
 	UserID uuid.UUID

@@ -47,9 +47,9 @@ func withUID(uid string) gin.HandlerFunc {
 func TestSubmitHappyPath(t *testing.T) {
 	db := handlerTestDB(t)
 	fuid := uuid.NewString()
-	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", fuid) })
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE idp_subject = ?", fuid) })
 
-	_, err := user.NewRepository(db).UpsertByFirebaseUID(t.Context(), fuid, fuid+"@test.dev")
+	_, err := user.NewRepository(db).UpsertBySubject(t.Context(), fuid, fuid+"@test.dev")
 	require.NoError(t, err)
 
 	gin.SetMode(gin.TestMode)
@@ -90,9 +90,9 @@ func TestSubmitHappyPath(t *testing.T) {
 func TestSubmitInvalidEnum(t *testing.T) {
 	db := handlerTestDB(t)
 	fuid := uuid.NewString()
-	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", fuid) })
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE idp_subject = ?", fuid) })
 
-	_, err := user.NewRepository(db).UpsertByFirebaseUID(t.Context(), fuid, fuid+"@test.dev")
+	_, err := user.NewRepository(db).UpsertBySubject(t.Context(), fuid, fuid+"@test.dev")
 	require.NoError(t, err)
 
 	gin.SetMode(gin.TestMode)
@@ -178,10 +178,10 @@ func submitOnboardingWith(t *testing.T, body string, now time.Time, weights Weig
 	t.Helper()
 	db := handlerTestDB(t)
 	fuid := uuid.NewString()
-	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", fuid) })
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE idp_subject = ?", fuid) })
 
 	userRepo := user.NewRepository(db)
-	_, err := userRepo.UpsertByFirebaseUID(t.Context(), fuid, fuid+"@test.dev")
+	_, err := userRepo.UpsertBySubject(t.Context(), fuid, fuid+"@test.dev")
 	require.NoError(t, err)
 
 	if weights == nil {
@@ -200,7 +200,7 @@ func submitOnboardingWith(t *testing.T, body string, now time.Time, weights Weig
 
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
-	uid, err := userRepo.IDByFirebaseUID(t.Context(), fuid)
+	uid, err := userRepo.IDBySubject(t.Context(), fuid)
 	require.NoError(t, err)
 	saved, err := userRepo.ByID(t.Context(), uid)
 	require.NoError(t, err)
@@ -251,10 +251,10 @@ func TestSubmitRecordsFirstWeighIn(t *testing.T) {
 func TestSubmitTwiceRecordsOnlyOneWeighIn(t *testing.T) {
 	db := handlerTestDB(t)
 	fuid := uuid.NewString()
-	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", fuid) })
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE idp_subject = ?", fuid) })
 
 	userRepo := user.NewRepository(db)
-	_, err := userRepo.UpsertByFirebaseUID(t.Context(), fuid, fuid+"@test.dev")
+	_, err := userRepo.UpsertBySubject(t.Context(), fuid, fuid+"@test.dev")
 	require.NoError(t, err)
 
 	gin.SetMode(gin.TestMode)
@@ -273,7 +273,7 @@ func TestSubmitTwiceRecordsOnlyOneWeighIn(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	}
 
-	uid, err := userRepo.IDByFirebaseUID(t.Context(), fuid)
+	uid, err := userRepo.IDBySubject(t.Context(), fuid)
 	require.NoError(t, err)
 	var entries []tracking.WeightEntry
 	require.NoError(t, db.Where("user_id = ?", uid).Find(&entries).Error)

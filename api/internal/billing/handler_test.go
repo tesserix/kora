@@ -22,12 +22,12 @@ func TestUsageStatusReturnsTheResolvedUsersQuotaOnly(t *testing.T) {
 	day := quotaWindowsAt(now)[0]
 	setQuotaCount(t, db, userID, quotaDay, day.start, 6)
 
-	var firebaseUID string
-	require.NoError(t, db.Raw("SELECT firebase_uid FROM users WHERE id = ?", userID).Scan(&firebaseUID).Error)
+	var subject string
+	require.NoError(t, db.Raw("SELECT idp_subject FROM users WHERE id = ?", userID).Scan(&subject).Error)
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
-		c.Set("uid", firebaseUID)
+		c.Set("uid", subject)
 		c.Next()
 	})
 	router.Use(user.ResolveMiddleware(user.NewRepository(db)))

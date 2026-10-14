@@ -1,8 +1,7 @@
 import { useEffect } from "react";
 import { View } from "react-native";
 import { Tabs, router } from "expo-router";
-import { onAuthStateChanged } from "firebase/auth";
-import { auth, isFirebaseConfigured } from "@/lib/firebase";
+import { isAuthConfigured, onAuthChange } from "@/auth/session";
 import { ApiError, takeSessionExpiredNotice } from "@/lib/api";
 import { usePushRegistration, usePushResponder } from "@/lib/push";
 import { useWidgetSync } from "@/widgets/useWidgetSync";
@@ -23,9 +22,9 @@ export default function TabsLayout() {
   useMentorRuntime();
 
   useEffect(() => {
-    if (!isFirebaseConfigured || !auth) return;
-    const unsub = onAuthStateChanged(auth, (user) => {
-      if (user) return;
+    if (!isAuthConfigured) return;
+    const unsub = onAuthChange((uid) => {
+      if (uid) return;
       // A forced sign-out (api.ts, after a 401 survives a token refresh)
       // sets this notice right before calling signOut — this is the same
       // redirect a manual sign-out takes, just with a reason attached so
@@ -86,7 +85,7 @@ export default function TabsLayout() {
   if (profile.isPending && !offlinePaused) return <Splash />;
 
   if (profile.isError || offlinePaused) {
-    // A 401 means api.ts already forced a sign-out and the onAuthStateChanged
+    // A 401 means api.ts already forced a sign-out and the onAuthChange
     // effect above is redirecting to /sign-in?reason=expired. Offering "Retry"
     // here would be misleadingly actionable: the session is gone.
     //

@@ -9,16 +9,20 @@
       "distribution": "internal",
       "env": {
         "EXPO_PUBLIC_API_URL": "http://localhost:8080",
-        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "564299717841-45p3feut4bgauj6e2k4hijtcm5b5u72l.apps.googleusercontent.com",
-        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "564299717841-k80q23k7nouu7525plsjb812gn5bajm7.apps.googleusercontent.com"
+        "EXPO_PUBLIC_ZITADEL_ISSUER": "https://auth.tesserix.app",
+        "EXPO_PUBLIC_ZITADEL_PROJECT_ID": "394926080202442797",
+        "EXPO_PUBLIC_ZITADEL_CLIENT_ID_IOS": "394926081745881133",
+        "EXPO_PUBLIC_ZITADEL_CLIENT_ID_ANDROID": "394926084329572397"
       }
     },
     "preview": {
       "distribution": "internal",
       "env": {
         "EXPO_PUBLIC_API_URL": "https://kora-api.tesserix.app",
-        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "564299717841-45p3feut4bgauj6e2k4hijtcm5b5u72l.apps.googleusercontent.com",
-        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "564299717841-k80q23k7nouu7525plsjb812gn5bajm7.apps.googleusercontent.com"
+        "EXPO_PUBLIC_ZITADEL_ISSUER": "https://auth.tesserix.app",
+        "EXPO_PUBLIC_ZITADEL_PROJECT_ID": "394926080202442797",
+        "EXPO_PUBLIC_ZITADEL_CLIENT_ID_IOS": "394926081745881133",
+        "EXPO_PUBLIC_ZITADEL_CLIENT_ID_ANDROID": "394926084329572397"
       },
       "node": "22.19.0",
       "android": {
@@ -32,8 +36,10 @@
       },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://kora-api.tesserix.app",
-        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "564299717841-45p3feut4bgauj6e2k4hijtcm5b5u72l.apps.googleusercontent.com",
-        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "564299717841-k80q23k7nouu7525plsjb812gn5bajm7.apps.googleusercontent.com",
+        "EXPO_PUBLIC_ZITADEL_ISSUER": "https://auth.tesserix.app",
+        "EXPO_PUBLIC_ZITADEL_PROJECT_ID": "394926080202442797",
+        "EXPO_PUBLIC_ZITADEL_CLIENT_ID_IOS": "394926081745881133",
+        "EXPO_PUBLIC_ZITADEL_CLIENT_ID_ANDROID": "394926084329572397",
         "SENTRY_ORG": "tesserix",
         "SENTRY_PROJECT": "kora",
         "EXPO_PUBLIC_SENTRY_DSN": "https://804f2b00da5e555f6f9882903c4a5f77@o4511120959209472.ingest.de.sentry.io/4511907546857552"

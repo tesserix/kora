@@ -5,19 +5,25 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
 
 type Config struct {
-	Port              string
-	MetricsPort       string
-	Env               string
-	DatabaseURL       string
-	RedisURL          string
-	FirebaseProjectID string
-	FirebaseAPIKey    string
-	GeminiAPIKey      string
+	Port        string
+	MetricsPort string
+	Env         string
+	DatabaseURL string
+	RedisURL    string
+	// Zitadel issues Kora's end-user tokens. ZitadelProjectID is the audience
+	// every Kora access token carries, whichever platform client minted it.
+	ZitadelIssuer    string
+	ZitadelProjectID string
+	// ZitadelDeleterToken is a machine user's PAT, used only to delete the
+	// caller's own Zitadel user on account deletion.
+	ZitadelDeleterToken string
+	GeminiAPIKey        string
 	// VertexProject, when set, switches the resolve engine from the Gemini API
 	// (personal API key, free-tier quotas) to Vertex AI authenticated by the
 	// workload's own service account. See providers.NewVertexProvider.
@@ -69,7 +75,7 @@ type Config struct {
 	// MAC is computed over the DECODED bytes. Using the encoded form on either
 	// side produces signatures that never verify.
 	BFFHMACKey []byte
-	// MCPInternalKey lets kora-mcp read /internal/v1/* without a Firebase user;
+	// MCPInternalKey lets kora-mcp read /internal/v1/* without a Kora end user;
 	// empty leaves those routes unmounted.
 	MCPInternalKey string
 	// AITraceEndpoint is the OTLP/HTTP traces URL; empty disables AI tracing.
@@ -101,16 +107,8 @@ type Config struct {
 	// takes the secret as a raw string and MACs those bytes, so decoding here
 	// would produce signatures that never verify.
 	PlatformAdminSecret string
-	// Sign in with Apple credentials, used to exchange authorization codes and
-	// to revoke refresh tokens on account deletion. When ApplePrivateKeyPEM is
-	// empty the Apple endpoints are not mounted at all, so an unconfigured
-	// environment answers 404 rather than 500.
-	AppleTeamID        string
-	AppleKeyID         string
-	AppleBundleID      string
-	ApplePrivateKeyPEM string
 	// Stripe credentials for paid AI top-ups (kora#478). Empty leaves the
-	// purchase routes unmounted, exactly like Apple above: an environment with
+	// purchase routes unmounted: an environment with
 	// no gateway must answer 404 rather than offer a checkout that cannot
 	// complete.
 	//
@@ -132,6 +130,11 @@ type Config struct {
 	// carried on that URL is never trusted; it only closes the browser and
 	// prompts the app to ask the gateway what happened.
 	StripeReturnURL string
+	// MinBuildIOS and MinBuildAndroid are the oldest native build numbers the
+	// API still serves; GET /v1/app-config hands them to the app, which blocks
+	// on an update screen below them. Zero gates nothing.
+	MinBuildIOS     int
+	MinBuildAndroid int
 	// Object storage for user-supplied assets (kora#449). Empty AssetsBucket
 	// selects assets.Noop -- an environment with no bucket behaves as if every
 	// user has no picture, rather than failing uploads, so nobody working on
@@ -159,8 +162,9 @@ func Load() (Config, error) {
 		OCRKeySecret:             strings.TrimSpace(os.Getenv("OCR_KEY_SECRET")),
 		DatabaseURL:              os.Getenv("DATABASE_URL"),
 		RedisURL:                 getenv("REDIS_URL", "redis://localhost:6379/0"),
-		FirebaseProjectID:        os.Getenv("FIREBASE_PROJECT_ID"),
-		FirebaseAPIKey:           strings.TrimSpace(os.Getenv("FIREBASE_API_KEY")),
+		ZitadelIssuer:            strings.TrimSpace(getenv("ZITADEL_ISSUER", "https://auth.tesserix.app")),
+		ZitadelProjectID:         strings.TrimSpace(os.Getenv("ZITADEL_PROJECT_ID")),
+		ZitadelDeleterToken:      strings.TrimSpace(os.Getenv("ZITADEL_DELETER_TOKEN")),
 		GeminiAPIKey:             os.Getenv("GEMINI_API_KEY"),
 		VertexProject:            os.Getenv("VERTEX_PROJECT"),
 		VertexLocation:           getenv("VERTEX_LOCATION", "global"),
@@ -183,13 +187,11 @@ func Load() (Config, error) {
 		PushFreshness:            getdur("PUSH_FRESHNESS", 15*time.Minute),
 		ExpoAccessToken:          os.Getenv("EXPO_ACCESS_TOKEN"),
 		FoodIndexRefreshInterval: getdur("FOOD_INDEX_REFRESH_INTERVAL", 60*time.Second),
-		AppleTeamID:              os.Getenv("APPLE_TEAM_ID"),
-		AppleKeyID:               os.Getenv("APPLE_KEY_ID"),
-		AppleBundleID:            getenv("APPLE_BUNDLE_ID", "com.tesserix.kora"),
-		ApplePrivateKeyPEM:       os.Getenv("APPLE_PRIVATE_KEY"),
 		StripeSecretKey:          os.Getenv("STRIPE_SECRET_KEY"),
 		StripeWebhookSecret:      os.Getenv("STRIPE_WEBHOOK_SECRET"),
 		StripeReturnURL:          getenv("STRIPE_RETURN_URL", "mobile://billing/return"),
+		MinBuildIOS:              getint("KORA_MIN_BUILD_IOS"),
+		MinBuildAndroid:          getint("KORA_MIN_BUILD_ANDROID"),
 		AssetsBucket:             os.Getenv("ASSETS_BUCKET"),
 		AssetsPublicBaseURL:      os.Getenv("ASSETS_PUBLIC_BASE_URL"),
 		AssetsLocalDir:           os.Getenv("ASSETS_LOCAL_DIR"),
@@ -233,6 +235,11 @@ func Load() (Config, error) {
 		if cfg.AIRegistryBaseURL == "" {
 			return Config{}, fmt.Errorf("config: AI_REGISTRY_BASE_URL is required in production")
 		}
+		// DELETE /v1/me is Apple-mandated. A production API that would leave
+		// every deleted user's Zitadel identity behind must not start.
+		if cfg.ZitadelDeleterToken == "" {
+			return Config{}, fmt.Errorf("config: ZITADEL_DELETER_TOKEN is required in production")
+		}
 	}
 	if raw := os.Getenv("KORA_BFF_HMAC_KEY"); raw != "" {
 		key, err := base64.StdEncoding.DecodeString(raw)
@@ -269,20 +276,6 @@ func Load() (Config, error) {
 		}
 		cfg.PlatformAdminSecret = raw
 	}
-	// Same philosophy as BFFHMACKey above: a partially configured Apple
-	// integration is worse than a disabled one. With the .p8 key set but
-	// AppleTeamID or AppleKeyID empty, appleid.Client signs a client_secret
-	// with an empty iss/kid, the route still mounts, and every exchange fails
-	// with invalid_client — permanently, silently, and indistinguishable from
-	// success to the app. Fail at startup instead.
-	if cfg.ApplePrivateKeyPEM != "" {
-		if cfg.AppleTeamID == "" {
-			return Config{}, fmt.Errorf("config: APPLE_TEAM_ID is required when APPLE_PRIVATE_KEY is set")
-		}
-		if cfg.AppleKeyID == "" {
-			return Config{}, fmt.Errorf("config: APPLE_KEY_ID is required when APPLE_PRIVATE_KEY is set")
-		}
-	}
 	return cfg, nil
 }
 
@@ -291,6 +284,17 @@ func getenv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// getint reads a non-negative integer, treating unset or malformed as 0. For
+// the min-build gate, failing open is right: a typo must not lock every user
+// out of the app.
+func getint(key string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(os.Getenv(key)))
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
 }
 
 func getdur(key string, fallback time.Duration) time.Duration {

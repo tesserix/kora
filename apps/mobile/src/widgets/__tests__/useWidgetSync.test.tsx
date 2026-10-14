@@ -1,4 +1,5 @@
 import { render } from "@testing-library/react-native";
+import { sessionMock } from "@/test/sessionMock";
 
 import { useWidgetSync } from "../useWidgetSync";
 
@@ -31,16 +32,9 @@ jest.mock("@/health/useHealth", () => ({
 // Mirrors src/lib/push.ts's usePushRegistration: the widget sync subscribes to
 // auth state rather than reading it, because a sign-out must clear the snapshot
 // even though nothing re-renders this hook.
+// The listener useWidgetSync registered with the session mock, or null before
+// it mounts. Takes a Firebase-shaped user so each test reads as a transition.
 let authCallback: ((user: { uid: string } | null) => void) | null = null;
-jest.mock("firebase/auth", () => ({
-  onAuthStateChanged: (_auth: unknown, cb: (user: { uid: string } | null) => void) => {
-    authCallback = cb;
-    return () => {
-      authCallback = null;
-    };
-  },
-}));
-jest.mock("@/lib/firebase", () => ({ auth: {}, isFirebaseConfigured: true }));
 
 function Harness() {
   useWidgetSync();
@@ -62,6 +56,12 @@ beforeEach(() => {
   mockQcClear.mockClear();
   mockDashboard = { data: undefined, isError: false };
   authCallback = null;
+  sessionMock.onAuthChange.mockImplementation((listener: (uid: string | null) => void) => {
+    authCallback = (user) => listener(user ? user.uid : null);
+    return () => {
+      authCallback = null;
+    };
+  });
 });
 
 test("writes a snapshot once the dashboard resolves", async () => {

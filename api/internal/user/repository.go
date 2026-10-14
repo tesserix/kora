@@ -22,11 +22,11 @@ func NewRepository(db *gorm.DB) Repository {
 	return Repository{db: db}
 }
 
-func (r Repository) UpsertByFirebaseUID(ctx context.Context, firebaseUID, email string) (User, error) {
-	u := User{FirebaseUID: firebaseUID, Email: email, Timezone: DefaultTimezone}
+func (r Repository) UpsertBySubject(ctx context.Context, subject, email string) (User, error) {
+	u := User{IDPSubject: subject, Email: email, Timezone: DefaultTimezone}
 	err := r.db.WithContext(ctx).
 		Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "firebase_uid"}},
+			Columns:   []clause.Column{{Name: "idp_subject"}},
 			DoUpdates: clause.AssignmentColumns([]string{"email", "updated_at"}),
 		}).
 		Create(&u).Error
@@ -34,7 +34,7 @@ func (r Repository) UpsertByFirebaseUID(ctx context.Context, firebaseUID, email 
 		return User{}, fmt.Errorf("user: upsert: %w", err)
 	}
 	var out User
-	if err := r.db.WithContext(ctx).Where("firebase_uid = ?", firebaseUID).First(&out).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("idp_subject = ?", subject).First(&out).Error; err != nil {
 		return User{}, fmt.Errorf("user: fetch after upsert: %w", err)
 	}
 	return out, nil
@@ -54,8 +54,8 @@ func seedableDisplayName(name string) string {
 	return trimmed
 }
 
-// EnsureUser resolves the user for firebaseUID, provisioning a new row via
-// UpsertByFirebaseUID only when none exists yet. This lets non-/me endpoints
+// EnsureUser resolves the user for subject, provisioning a new row via
+// UpsertBySubject only when none exists yet. This lets non-/me endpoints
 // safely resolve a user that has never hit /me, instead of 500ing.
 //
 // It also seeds display_name from name whenever the row's current
@@ -63,25 +63,66 @@ func seedableDisplayName(name string) string {
 // pre-existing row (e.g. a Google user provisioned before this claim was
 // wired through) that still has ”. The presence check is `== ""`, not a
 // nullness check: display_name is a nullable column, but every row ever
-// written via UpsertByFirebaseUID/Create got the Go zero value ” rather
-// than SQL NULL (see the identical trap documented on User.AppleRefreshToken
+// written via UpsertBySubject/Create got the Go zero value ” rather
+// than SQL NULL (see the identical trap documented on User.Handle
 // in model.go), so 'IS NULL' would never match and the repair would be dead
 // code. A non-empty display_name is never overwritten -- users can rename
-// via SetDisplayName (used by Apple sign-in and manual rename), and a later
+// via SetDisplayName, and a later
 // Google sign-in must not clobber that choice.
-func (r Repository) EnsureUser(ctx context.Context, firebaseUID, email, name string) (User, error) {
+func (r Repository) EnsureUser(ctx context.Context, subject, email, name string) (User, error) {
+	return r.EnsureUserWithProfile(ctx, subject, StaticProfile(email, name))
+}
+
+// ProfileLoader supplies the email and display name for a user row that lacks
+// them. Zitadel access tokens carry neither, so in production this reads
+// userinfo; EnsureUserWithProfile calls it only when the row needs it, never
+// for a complete row, which keeps Zitadel off the hot path.
+type ProfileLoader func(context.Context) (email, name string, err error)
+
+// StaticProfile is a ProfileLoader for values already in hand.
+func StaticProfile(email, name string) ProfileLoader {
+	return func(context.Context) (string, string, error) { return email, name, nil }
+}
+
+// EnsureUserWithProfile is EnsureUser with the profile loaded lazily. A row
+// with both an email and a display name never calls load. A failed load is
+// not fatal, for the same reason a failed display-name seed is not: the
+// fields self-heal on the next request while they are still empty.
+func (r Repository) EnsureUserWithProfile(ctx context.Context, subject string, load ProfileLoader) (User, error) {
 	var u User
-	err := r.db.WithContext(ctx).Where("firebase_uid = ?", firebaseUID).First(&u).Error
+	found := true
+	err := r.db.WithContext(ctx).Where("idp_subject = ?", subject).First(&u).Error
 	switch {
 	case err == nil:
-		// existing row, fall through to the seeding check below
+		if u.Email != "" && u.DisplayName != "" {
+			return u, nil
+		}
 	case errors.Is(err, gorm.ErrRecordNotFound):
-		u, err = r.UpsertByFirebaseUID(ctx, firebaseUID, email)
+		found = false
+	default:
+		return User{}, fmt.Errorf("user: ensure lookup: %w", err)
+	}
+
+	email, name, err := load(ctx)
+	if err != nil {
+		slog.WarnContext(ctx, "user: load profile failed", "err", err)
+	}
+
+	switch {
+	case !found:
+		u, err = r.UpsertBySubject(ctx, subject, email)
 		if err != nil {
 			return User{}, err
 		}
-	default:
-		return User{}, fmt.Errorf("user: ensure lookup: %w", err)
+	case u.Email == "" && email != "":
+		// Only ever fills an empty email. Friend requests resolve users by
+		// email, so it must not be silently swapped once set.
+		if err := r.db.WithContext(ctx).Model(&User{}).Where("id = ?", u.ID).
+			Update("email", email).Error; err != nil {
+			slog.WarnContext(ctx, "user: fill email failed", "err", err, "user_id", u.ID)
+		} else {
+			u.Email = email
+		}
 	}
 
 	if seed := seedableDisplayName(name); u.DisplayName == "" && seed != "" {
@@ -154,20 +195,13 @@ func (r Repository) SetDisplayName(ctx context.Context, id uuid.UUID, name strin
 	return nil
 }
 
-func (r Repository) SetAppleRefreshToken(ctx context.Context, id uuid.UUID, token string) error {
-	if err := r.db.WithContext(ctx).Model(&User{}).Where("id = ?", id).Update("apple_refresh_token", token).Error; err != nil {
-		return fmt.Errorf("user: set apple refresh token: %w", err)
-	}
-	return nil
-}
-
-func (r Repository) IDByFirebaseUID(ctx context.Context, firebaseUID string) (uuid.UUID, error) {
+func (r Repository) IDBySubject(ctx context.Context, subject string) (uuid.UUID, error) {
 	var u User
 	if err := r.db.WithContext(ctx).
 		Select("id").
-		Where("firebase_uid = ?", firebaseUID).
+		Where("idp_subject = ?", subject).
 		First(&u).Error; err != nil {
-		return uuid.Nil, fmt.Errorf("user: id by firebase uid: %w", err)
+		return uuid.Nil, fmt.Errorf("user: id by identity subject: %w", err)
 	}
 	return u.ID, nil
 }

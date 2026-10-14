@@ -19,7 +19,7 @@
 -- One user with a HANDLE, so §8.9's sublabel rule -- handle when present,
 -- email otherwise -- is exercised on the branch that actually distinguishes
 -- two people, not the fallback.
-INSERT INTO users (id, firebase_uid, email, display_name, handle, handle_canonical)
+INSERT INTO users (id, idp_subject, email, display_name, handle, handle_canonical)
 VALUES (
     '00000000-0000-0000-0000-0000000005f9',
     'ci-conformance-fixture-user-519',

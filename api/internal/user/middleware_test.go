@@ -31,7 +31,7 @@ func TestResolveMiddlewareSetsUserID(t *testing.T) {
 	repo := NewRepository(db)
 	gin.SetMode(gin.TestMode)
 	fuid := "mw-" + uuid.NewString()
-	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", fuid) })
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE idp_subject = ?", fuid) })
 
 	r := gin.New()
 	r.Use(func(c *gin.Context) { c.Set("uid", fuid); c.Set("email", "mw@test.dev"); c.Next() })

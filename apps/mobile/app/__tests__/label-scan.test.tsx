@@ -5,7 +5,6 @@ import * as ImagePicker from "expo-image-picker";
 import { apiFetchMultipart } from "@/lib/api";
 import LabelScan from "../label-scan";
 
-jest.mock("@/lib/firebase", () => ({ auth: { currentUser: null } }));
 jest.mock("expo-image-picker", () => ({ requestMediaLibraryPermissionsAsync: jest.fn(), launchImageLibraryAsync: jest.fn(), UIImagePickerPreferredAssetRepresentationMode: { Compatible: "compatible" } }));
 jest.mock("expo-router", () => ({ router: { back: jest.fn(), replace: jest.fn(), canGoBack: () => true } }));
 jest.mock("@/lib/api", () => ({ apiFetchMultipart: jest.fn(), currentUserId: () => "test-user" }));

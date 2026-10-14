@@ -12,22 +12,33 @@
 // getIdToken/fetch can be configured per test without interference.
 
 const mockSignOut = jest.fn(async (..._args: unknown[]) => {});
-const mockOnAuthStateChanged = jest.fn((..._args: unknown[]) => jest.fn());
 
-jest.mock("firebase/auth", () => ({
-  signOut: (...args: unknown[]) => mockSignOut(...args),
-  onAuthStateChanged: (...args: unknown[]) => mockOnAuthStateChanged(...args),
-}));
 
-function mockUser(getIdToken: jest.Mock): { currentUser: { getIdToken: jest.Mock } } {
-  return { currentUser: { getIdToken } };
+type SessionMock = typeof import("@/test/sessionMock").sessionMock;
+let session: SessionMock;
+
+function mockUser(getIdToken: jest.Mock): { uid: string; getIdToken: jest.Mock } {
+  return { uid: "test-user", getIdToken };
 }
 
 let api: typeof import("../api");
 
-function loadApiWithAuth(auth: unknown): void {
-  jest.doMock("../firebase", () => ({ auth }));
+// Loads a fresh api.ts against a fresh session mock from the same isolated
+// registry, so the mock this test drives is the one api.ts imported.
+// getIdToken stands in for getAccessToken: called with no arguments normally
+// and with `true` when api.ts forces a refresh after a 401.
+function loadApiWithAuth(auth: { uid: string; getIdToken: jest.Mock } | { currentUser: null }): void {
   jest.isolateModules(() => {
+    session = require("@/auth/session");
+    session.signOut.mockImplementation((...args: unknown[]) => mockSignOut(...args));
+    if ("currentUser" in auth) {
+      session.setUser(null);
+    } else {
+      session.setUser(auth.uid);
+      session.getAccessToken.mockImplementation((force?: boolean) =>
+        force ? auth.getIdToken(true) : auth.getIdToken(),
+      );
+    }
     api = require("../api");
   });
 }
@@ -35,7 +46,6 @@ function loadApiWithAuth(auth: unknown): void {
 beforeEach(() => {
   jest.resetModules();
   mockSignOut.mockClear();
-  mockOnAuthStateChanged.mockClear();
   global.fetch = jest.fn();
 });
 

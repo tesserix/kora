@@ -4,13 +4,13 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -29,7 +29,7 @@ import (
 const (
 	exitRegressed = 1
 	exitBroken    = 2
-	signInURL     = "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key="
+	defaultIssuer = "https://auth.tesserix.app"
 )
 
 func main() {
@@ -156,33 +156,57 @@ func buildResolver() (ai.Resolver, error) {
 	return ai.NewResolver(provider, foods, ai.NoCache{}, noMeter{}), nil
 }
 
-// withEndUserToken supplies the Firebase ID token the gateway requires, minting one for the eval account when none is given.
+// withEndUserToken supplies the Zitadel access token the gateway requires,
+// minting one for the eval machine user when none is given.
 func withEndUserToken(ctx context.Context) (context.Context, error) {
 	if token := os.Getenv("KORA_EVAL_END_USER_TOKEN"); token != "" {
 		return auth.WithVerifiedToken(ctx, token), nil
 	}
-	apiKey, email, password := os.Getenv("KORA_EVAL_FIREBASE_API_KEY"), os.Getenv("KORA_EVAL_EMAIL"), os.Getenv("KORA_EVAL_PASSWORD")
-	if apiKey == "" || email == "" || password == "" {
-		return ctx, fmt.Errorf("set KORA_EVAL_END_USER_TOKEN, or KORA_EVAL_FIREBASE_API_KEY, KORA_EVAL_EMAIL and KORA_EVAL_PASSWORD")
+	issuer := strings.TrimSuffix(os.Getenv("ZITADEL_ISSUER"), "/")
+	if issuer == "" {
+		issuer = defaultIssuer
 	}
-	body, _ := json.Marshal(map[string]any{"email": email, "password": password, "returnSecureToken": true})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, signInURL+apiKey, bytes.NewReader(body))
+	projectID, clientID, secret := os.Getenv("ZITADEL_PROJECT_ID"), os.Getenv("KORA_EVAL_CLIENT_ID"), os.Getenv("KORA_EVAL_CLIENT_SECRET")
+	if projectID == "" || clientID == "" || secret == "" {
+		return ctx, fmt.Errorf("set KORA_EVAL_END_USER_TOKEN, or ZITADEL_PROJECT_ID, KORA_EVAL_CLIENT_ID and KORA_EVAL_CLIENT_SECRET")
+	}
+	token, err := mintEvalToken(ctx, issuer+"/oauth/v2/token", projectID, clientID, secret)
 	if err != nil {
 		return ctx, err
 	}
-	req.Header.Set("Content-Type", "application/json")
+	return auth.WithVerifiedToken(ctx, token), nil
+}
+
+// mintEvalToken runs the client credentials grant for the eval machine user.
+// The project audience scope is what lets the gateway's Kora rule accept the
+// token. The machine user must be set to issue JWT access tokens: an opaque
+// one would fail every gateway call, so it is refused here with that cause.
+func mintEvalToken(ctx context.Context, tokenURL, projectID, clientID, secret string) (string, error) {
+	form := url.Values{
+		"grant_type": {"client_credentials"},
+		"scope":      {"openid urn:zitadel:iam:org:project:id:" + projectID + ":aud"},
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetBasicAuth(url.QueryEscape(clientID), url.QueryEscape(secret))
 	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
 	if err != nil {
-		return ctx, fmt.Errorf("sign in eval account: %w", err)
+		return "", fmt.Errorf("mint eval token: %w", err)
 	}
 	defer resp.Body.Close()
 	var out struct {
-		IDToken string `json:"idToken"`
+		AccessToken string `json:"access_token"`
 	}
-	if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&out) != nil || out.IDToken == "" {
-		return ctx, fmt.Errorf("sign in eval account: status %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&out) != nil || out.AccessToken == "" {
+		return "", fmt.Errorf("mint eval token: status %d", resp.StatusCode)
 	}
-	return auth.WithVerifiedToken(ctx, out.IDToken), nil
+	if strings.Count(out.AccessToken, ".") != 2 {
+		return "", fmt.Errorf("mint eval token: not a JWT; set the eval machine user's access token type to JWT")
+	}
+	return out.AccessToken, nil
 }
 
 type embedder struct{ p ai.Provider }

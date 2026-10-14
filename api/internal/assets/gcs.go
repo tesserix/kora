@@ -9,9 +9,8 @@ import (
 )
 
 // GCS stores objects in a Cloud Storage bucket. Authentication is Application
-// Default Credentials -- the same mechanism firebase.NewApp already relies on
-// in internal/auth/verifier.go, so a pod that can verify a token can also write
-// an object, with no second credential to manage.
+// Default Credentials, the pod's workload identity, so there is no separate
+// credential to manage.
 type GCS struct {
 	client        *storage.Client
 	bucket        string

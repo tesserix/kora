@@ -2,7 +2,6 @@ import { useRef, useState } from "react";
 import { ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
-import { signOut } from "firebase/auth";
 import { AppText } from "@/components/Text";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { AppBackground } from "@/components/AppBackground";
@@ -13,7 +12,7 @@ import { deleteAccount } from "@/api/hooks";
 import { registerPushToken, unregisterPushToken } from "@/lib/push";
 import { cancelAllReminders } from "@/reminders/schedule";
 import { apiErrorMessage } from "@/lib/apiErrorMessage";
-import { auth } from "@/lib/firebase";
+import { signOut } from "@/auth/session";
 import { useTheme } from "@/theme";
 
 // What the server's cascade actually removes, named in the user's words rather
@@ -116,7 +115,7 @@ export default function DeleteAccountScreen() {
       // between the user and /sign-in.
     }
     try {
-      if (auth) await signOut(auth);
+      await signOut();
     } catch {
       // Deliberately swallowed — the session is dead server-side either way.
     }

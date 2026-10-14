@@ -41,13 +41,13 @@ func tx(t *testing.T, db *gorm.DB) *gorm.DB {
 
 func repoOn(tx *gorm.DB) Repository { return Repository{db: tx} }
 
-// seedUser inserts a user directly. firebase_uid is UNIQUE NOT NULL and has
+// seedUser inserts a user directly. idp_subject is UNIQUE NOT NULL and has
 // no default, so it must be unique per row rather than left out.
 func seedUser(t *testing.T, tx *gorm.DB, email, name, handle string) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
 	require.NoError(t, tx.Exec(
-		`INSERT INTO users (id, firebase_uid, email, display_name, handle, handle_canonical, created_at)
+		`INSERT INTO users (id, idp_subject, email, display_name, handle, handle_canonical, created_at)
 		 VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), now())`,
 		id, "fb_"+id.String(), email, name, handle, handle).Error)
 	return id

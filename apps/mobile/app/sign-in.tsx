@@ -1,387 +1,144 @@
 import { useEffect, useState } from "react";
-import { KeyboardAvoidingView, useWindowDimensions, View } from "react-native";
+import { useWindowDimensions, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
-import {
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-  type AuthCredential,
-} from "firebase/auth";
-import { auth, isFirebaseConfigured } from "@/lib/firebase";
+import { AuthSessionError, isAuthConfigured, signIn } from "@/auth/session";
 import { clearSnapshot } from "../modules/widget-bridge";
 import { AppText } from "@/components/Text";
 import { Button } from "@/components/Button";
-import { Field } from "@/components/Field";
 import { BrandLockup } from "@/components/BrandLockup";
 import { AuthScaffold } from "@/components/AuthScaffold";
-import { AppleSignInButton } from "@/components/auth/AppleSignInButton";
-import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
-import { firebaseAuthMessage } from "@/lib/firebaseAuthMessage";
 import { useTheme } from "@/theme";
-import { PressableScale } from "@/motion";
-import {
-  signInWithAppleCredential,
-  signInWithGoogleCredential,
-  type SocialSignInOutcome,
-} from "@/auth/socialCredentials";
-import {
-  configureGoogleSignin,
-  signInWithAppleNative,
-  signInWithGoogleNative,
-} from "@/lib/socialAuth";
-import { LinkAccountPrompt } from "@/components/auth/LinkAccountPrompt";
 
-type Mode = "in" | "up";
-
-// Ceiling for the collapsible gap between the lockup and the provider buttons
-// (kora#172). Not a spacing token on purpose: this is not a rhythm value to be
-// picked from a scale, it is the measured height that gap settles at on the
-// narrowest device we support, captured so that taller screens stop inflating
-// it. Raising it re-opens the bug; lowering it pulls the button cluster up on
-// every device, which is a design change rather than a fix.
+// Ceiling for the collapsible gap between the lockup and the buttons
+// (kora#172). Not a spacing token on purpose: it is the measured height that
+// gap settles at on the narrowest device we support, captured so that taller
+// screens stop inflating it.
 const SIGN_IN_TOP_GAP_MAX = 248;
 
-// Above this font scale the hero gives up its decorative half (kora#173).
-//
-// At accessibility-extra-large only Apple and Google were visible on first
-// paint; "Continue with email" needed a scroll. Reachable, so this was
-// discoverability rather than a blocker — but this is the screen a user lands
-// on when they CANNOT get in, and the one control that does not depend on a
-// third-party sheet is the one that fell off it.
-//
-// Measured on device (iPhone 17 Pro Max): at that size the email button needs
-// roughly 126pt more than the viewport has. The subtitle is two lines, ~96pt
-// plus the scaffold's 16pt gap, and the collapsible spacer above the buttons
-// still holds a 32pt floor — ~144pt, which is enough, and neither is
-// load-bearing: the subtitle restates the title, and the spacer exists to place
-// the cluster rather than to say anything. Verified after the change: all three
-// controls above the fold on first paint with ~40pt to spare.
-//
-// The brand lockup deliberately STAYS. It was the obvious next thing to drop
-// and it turned out not to be needed, and it is the only thing on the screen
-// that says which app is asking for the credentials.
-//
-// Deliberately NOT capping the title's type. Shrinking the headline to fit is
-// the wrong trade on a sign-in screen — the point of Dynamic Type is that the
-// words get bigger, and this screen has decorative height to spend first.
-//
-// 1.5 is the boundary between iOS's largest non-accessibility size (xxxL,
-// ~1.35) and its smallest accessibility one (AX1, ~1.64), so the layout every
-// non-accessibility user sees is untouched.
+// Above this font scale the hero gives up its subtitle (kora#173), so both
+// buttons stay above the fold at accessibility sizes. 1.5 sits between iOS's
+// largest non-accessibility size (~1.35) and its smallest accessibility one
+// (~1.64). The brand lockup stays: it says which app is asking.
 const HERO_COLLAPSE_FONT_SCALE = 1.5;
 
+// signInMessage maps a failed hosted login to copy. Credentials are entered in
+// Zitadel's own pages, so wrong-password and provider errors are shown there;
+// what reaches the app is only whether the round trip completed.
+export function signInMessage(err: unknown): string | null {
+  if (err instanceof AuthSessionError) {
+    if (err.code === "cancelled") return null;
+    if (err.code === "access_denied") return "Sign-in was declined. Please try again.";
+  }
+  if (err instanceof TypeError) return "You appear to be offline. Check your connection and try again.";
+  return "Something went wrong signing in. Please try again.";
+}
+
 export default function SignIn() {
-  // The `!isFirebaseConfigured` guard USED to sit here, above every hook below
-  // — a conditional-hooks violation (#159). It never crashed, because
-  // isFirebaseConfigured is `config !== null` evaluated once at module scope,
-  // so the hook order was stable by accident rather than by construction. The
-  // moment that value became anything computed per render, every hook below it
-  // would shift index. The guard now sits after the last hook instead; nothing
-  // between here and there has a side effect that matters in an unconfigured
-  // build, and app/_layout.tsx redirects to /config-missing before this screen
-  // mounts anyway. Pinned by sign-in-unconfigured.test.tsx.
   const { colors, spacing } = useTheme();
-  // useWindowDimensions, not PixelRatio.getFontScale(): the former is reactive,
-  // so the screen relays out when the user changes their text size and returns
-  // to a still-mounted app (kora#260's pattern).
+  // Reactive, so the screen relays out when the user changes their text size
+  // and returns to a still-mounted app (kora#260's pattern).
   const { fontScale } = useWindowDimensions();
   const compactHero = fontScale > HERO_COLLAPSE_FONT_SCALE;
-  // Set by api.ts's forced sign-out (a 401 that survived a token refresh)
-  // via the redirect (tabs)/_layout.tsx makes when the session becomes
-  // unusable — not present on a manual sign-out.
+  // Set by api.ts's forced sign-out (a 401 that survived a token refresh) via
+  // the redirect (tabs)/_layout.tsx makes; absent on a manual sign-out.
   const { reason } = useLocalSearchParams<{ reason?: string }>();
-  // Mode is explicit rather than inferred from which of two equally-weighted
-  // buttons was pressed. The old screen greeted brand-new users with "Welcome
-  // back" and had no way to word an error correctly for both paths.
-  const [mode, setMode] = useState<Mode>("in");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(() =>
     reason === "expired" ? "Your session expired. Please sign in again." : null,
   );
   const [busy, setBusy] = useState(false);
-  const [pendingLink, setPendingLink] = useState<
-    Extract<SocialSignInOutcome, { status: "needs-link" }> | null
-  >(null);
-  const [showEmail, setShowEmail] = useState(false);
 
-  // Belt-and-braces: useWidgetSync clears the snapshot on sign-out, but that
-  // relies on the tabs layout being mounted to observe the auth transition.
-  // A dead-app auth drop or a swallowed Firebase signOut() never fires that
-  // path, so the previous user's calories can persist in the widget past
-  // sign-out. Landing here means whatever session existed is over one way or
-  // another, so scrub on mount as a second, independent guarantee. Guarded
-  // for module availability the same way modules/widget-bridge itself is
-  // (absent on Android, absent in jest) — fire-and-forget, nothing here
-  // should block or fail the sign-in screen.
+  // Belt-and-braces: useWidgetSync clears the snapshot on sign-out, but only
+  // while the tabs layout is mounted to observe it. Landing here means
+  // whatever session existed is over, so scrub on mount as an independent
+  // guarantee.
   useEffect(() => {
     clearSnapshot();
   }, []);
 
-  // Last hook is above; the guard is safe from here down.
-  if (!isFirebaseConfigured) return null;
+  // After the last hook, so hook order cannot depend on it (#159).
+  // app/_layout.tsx redirects to /config-missing before this mounts anyway.
+  if (!isAuthConfigured) return null;
 
-  async function submit() {
-    if (!auth) return;
-    setBusy(true);
-    setError(null);
-    try {
-      if (mode === "in") await signInWithEmailAndPassword(auth, email, password);
-      else await createUserWithEmailAndPassword(auth, email, password);
-      router.replace("/");
-    } catch (e: unknown) {
-      setError(firebaseAuthMessage(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function runSocial(
-    fn: () => Promise<SocialSignInOutcome>,
-    provider: "google.com" | "apple.com",
-  ) {
+  async function start(register: boolean) {
     if (busy) return;
     setBusy(true);
     setError(null);
     try {
-      const outcome = await fn();
-      if (outcome.status === "needs-link") {
-        setPendingLink(outcome);
-        return;
-      }
+      await signIn({ register });
       router.replace("/");
     } catch (e: unknown) {
-      // null means cancelled — clears any stale error and shows nothing new.
-      // Tagged "social" so firebaseAuthMessage never renders password copy for
-      // a screen where no password was entered (e.g. auth/invalid-credential,
-      // which is what a not-yet-enabled provider throws).
-      setError(firebaseAuthMessage(e, { method: "social", provider }));
+      setError(signInMessage(e));
     } finally {
       setBusy(false);
     }
   }
 
-  function signInApple() {
-    void runSocial(async () => {
-      const { idToken, rawNonce, fullName, authorizationCode } = await signInWithAppleNative();
-      return signInWithAppleCredential(idToken, rawNonce, fullName, authorizationCode);
-    }, "apple.com");
-  }
-
-  function signInGoogle() {
-    void runSocial(async () => {
-      configureGoogleSignin();
-      return signInWithGoogleCredential(await signInWithGoogleNative());
-    }, "google.com");
-  }
-
-  const cta = mode === "in" ? "Sign in" : "Create account";
-  // Firebase/Apple console setup for this branch hasn't happened yet: no Google
-  // OAuth client IDs exist, and configureGoogleSignin() throws when this is
-  // empty. Rendering the button anyway would ship a control that can only
-  // fail — same precedent as the `!isFirebaseConfigured` guard above.
-  const googleConfigured = Boolean(process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID);
-
   return (
-    <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
-      <AuthScaffold
-        footer={
-          // flexWrap so the two halves stack instead of running off the screen
-          // (kora#173). A centred row with no wrap overflows BOTH edges once the
-          // text outgrows the width, which at accessibility text sizes put
-          // "Create an account" -- the only way to reach signup -- partly past
-          // the right edge.
-          <View
-            style={{
-              flexDirection: "row",
-              flexWrap: "wrap",
-              justifyContent: "center",
-              alignItems: "center",
-              gap: 6,
-            }}
-          >
-            <AppText muted variant="footnote">
-              {mode === "in" ? "New here?" : "Already have an account?"}
-            </AppText>
-            <PressableScale
-              accessibilityRole="button"
-              accessibilityLabel={mode === "in" ? "Create an account" : "Sign in"}
-              haptic="selection"
-              hitSlop={12}
-              onPress={() => {
-                setMode(mode === "in" ? "up" : "in");
-                // An error raised by the other mode no longer applies, and would
-                // read as a failure of the action just switched to.
-                setError(null);
-                // On first paint, with the email form hidden, this link only
-                // moved a heading ~400px above the tap — the tap appeared to do
-                // nothing. Revealing the form gives feedback at the touch point.
-                setShowEmail(true);
-              }}
-            >
-              <AppText variant="footnote" style={{ color: colors.primary, fontWeight: "600" }}>
-                {mode === "in" ? "Create an account" : "Sign in"}
-              </AppText>
-            </PressableScale>
-          </View>
-        }
-      >
-        <BrandLockup />
-        <AppText variant="title1" style={{ marginTop: compactHero ? 0 : spacing.sm }}>
-          {mode === "in" ? "Welcome back." : "Start with Kora."}
+    <AuthScaffold
+      footer={
+        <AppText muted variant="footnote" style={{ textAlign: "center" }}>
+          Email, Apple and Google sign-in all continue in a secure Tesserix page.
         </AppText>
-        {compactHero ? null : (
-          <AppText muted>
-            {mode === "in"
-              ? "Sign in to pick up where you left off."
-              : "Create an account and log your first meal in seconds."}
-          </AppText>
-        )}
+      }
+    >
+      <BrandLockup />
+      <AppText variant="title1" style={{ marginTop: compactHero ? 0 : spacing.sm }}>
+        Welcome to Kora.
+      </AppText>
+      {compactHero ? null : (
+        <AppText muted>Sign in to pick up where you left off, or create an account to start.</AppText>
+      )}
 
-        {/* Collapsible: the email reveal grows downward, so the lockup stays
-            top-anchored and this spacer shrinks instead of the lockup jumping
-            to stay centred. minHeight is what lets it collapse once content
-            (the form, the keyboard) needs the room.
+      {/* Collapsible: minHeight lets it give way at large text sizes, and
+          maxHeight (kora#172) stops taller devices pooling all their extra
+          height into this one gap. */}
+      <View
+        style={{
+          flex: 1,
+          minHeight: compactHero ? 0 : spacing.xl,
+          maxHeight: SIGN_IN_TOP_GAP_MAX,
+        }}
+      />
 
-            maxHeight is the kora#172 half. Without a ceiling this spacer takes
-            two thirds of every extra point a taller device offers (flex 1 here
-            against flex 0.5 below), so the surplus pools into one dead band
-            instead of the layout breathing. Measured on the sign-in screen:
-            going 17 Pro -> 17 Pro Max adds 82pt of height, of which 54.7pt --
-            67%, exactly the 2:1 flex split -- landed in this single gap, while
-            content grew 16.7pt. The cap is the gap this spacer already settles
-            at on the smaller device, so that layout is unchanged and larger
-            screens stop inflating it; what is left flows to the spacer below
-            the buttons, lifting the cluster rather than stretching the void. */}
-        <View
+      {/* flexShrink: 0 is load-bearing (kora#173): without it the scaffold's
+          flexGrow clamps content to the viewport at accessibility sizes and
+          the last button is clipped rather than scrollable. */}
+      <View style={{ gap: spacing.sm, flexShrink: 0 }}>
+        <Button
+          testID="sign-in-continue"
+          accessibilityLabel="Continue"
+          title={busy ? "…" : "Continue"}
+          icon="arrow-right"
+          iconPosition="trailing"
+          disabled={busy}
+          onPress={() => void start(false)}
+        />
+        <Button
+          testID="sign-in-create"
+          accessibilityLabel="Create account"
+          title="Create account"
+          variant="secondary"
+          disabled={busy}
+          onPress={() => void start(true)}
           style={{
-            flex: 1,
-            // The floor goes with the rest of the decorative height at
-            // accessibility sizes — a 32pt void above the buttons is exactly
-            // the kind of room this screen has no business keeping when the
-            // third button is off the bottom of it.
-            minHeight: compactHero ? 0 : spacing.xl,
-            maxHeight: SIGN_IN_TOP_GAP_MAX,
+            backgroundColor: colors.card,
+            borderWidth: 1,
+            borderColor: colors.border,
+            opacity: busy ? 0.6 : 1,
+            minHeight: 48,
           }}
         />
+      </View>
 
-        {/* flexShrink: 0 is load-bearing (kora#173). The scaffold's ScrollView
-            sets contentContainerStyle.flexGrow = 1, and the spacers around this
-            block are `flex`, which means flexShrink: 1. At accessibility text
-            sizes the buttons grow past the viewport, the flexible children
-            absorb the difference, and the content ends up clamped to EXACTLY
-            the viewport height -- so the ScrollView has no overflow to scroll
-            and simply clips the last button. Verified on device: two
-            screenshots either side of a swipe were byte-identical, with
-            "Continue with email" cut through the middle of the word and no way
-            to reach it. Refusing to shrink lets the content exceed the viewport,
-            which is what turns the scaffold's ScrollView back into a scroll
-            view. */}
-        <View style={{ gap: spacing.sm, flexShrink: 0 }}>
-          <AppleSignInButton
-            accessibilityLabel="Continue with Apple"
-            disabled={busy}
-            onPress={signInApple}
-          />
-          {googleConfigured ? (
-            <GoogleSignInButton
-              accessibilityLabel="Continue with Google"
-              title="Continue with Google"
-              disabled={busy}
-              onPress={signInGoogle}
-            />
-          ) : null}
-        </View>
+      {error ? (
+        <AppText variant="footnote" accessibilityLiveRegion="polite" style={{ color: colors.destructive }}>
+          {error}
+        </AppText>
+      ) : null}
 
-        {/* A social failure belongs under the providers it came from, not
-            beneath the unrelated email affordance below. */}
-        {error ? (
-          <AppText
-            variant="footnote"
-            accessibilityLiveRegion="polite"
-            style={{ color: colors.destructive }}
-          >
-            {error}
-          </AppText>
-        ) : null}
-
-        {showEmail ? (
-          <View style={{ gap: spacing.sm }}>
-            <Field
-              label="Email"
-              value={email}
-              onChangeText={setEmail}
-              autoCapitalize="none"
-              autoComplete="email"
-              textContentType="emailAddress"
-              keyboardType="email-address"
-              autoFocus
-            />
-            <Field
-              label="Password"
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-              autoComplete={mode === "in" ? "current-password" : "new-password"}
-              textContentType={mode === "in" ? "password" : "newPassword"}
-            />
-            {/* The submit sits next to its own fields. AuthScaffold's sticky
-                footer no longer carries it, which is what fixes the stranded
-                primary action. */}
-            <Button
-              testID="auth-submit"
-              accessibilityLabel={cta}
-              title={busy ? "…" : cta}
-              icon="arrow-right"
-              iconPosition="trailing"
-              onPress={submit}
-              disabled={busy}
-            />
-          </View>
-        ) : (
-          // A peer of the two provider buttons, not an escape hatch — same
-          // width and height, but the secondary/outline treatment (no green)
-          // since the accent is reserved for the action Kora wants taken.
-          <Button
-            accessibilityLabel="Continue with email"
-            title="Continue with email"
-            variant="secondary"
-            disabled={busy}
-            onPress={() => setShowEmail(true)}
-            style={{
-              backgroundColor: colors.card,
-              borderWidth: 1,
-              borderColor: colors.border,
-              opacity: busy ? 0.6 : 1,
-              minHeight: 48,
-            }}
-          />
-        )}
-
-        {/* Paired with the flex:1 spacer above, this 2:1 split lands the action
-            cluster around 55-60% of the screen — low enough for the thumb,
-            asymmetric rather than centred. Without a flex here the upper spacer
-            takes ALL the slack and bottom-anchors the cluster against the
-            footer rule, which is what shipped and read as unbalanced.
-
-            The floor tightens once the form is revealed, so the slack the
-            keyboard forces out goes to the form rather than to dead space
-            below the submit. */}
-        <View style={{ flex: 0.5, minHeight: showEmail ? spacing.sm : spacing.md }} />
-
-        {pendingLink ? (
-          <LinkAccountPrompt
-            visible
-            email={pendingLink.email}
-            provider={pendingLink.provider}
-            pendingCredential={pendingLink.pendingCredential as AuthCredential}
-            onCancel={() => setPendingLink(null)}
-            onLinked={() => {
-              setPendingLink(null);
-              router.replace("/");
-            }}
-          />
-        ) : null}
-      </AuthScaffold>
-    </KeyboardAvoidingView>
+      {/* With the spacer above, this 2:1 split lands the buttons around
+          55-60% of the screen: low enough for the thumb, not centred. */}
+      <View style={{ flex: 0.5, minHeight: spacing.md }} />
+    </AuthScaffold>
   );
 }

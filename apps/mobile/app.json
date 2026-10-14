@@ -6,11 +6,13 @@
     "version": "1.0.3",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "mobile",
+    "scheme": [
+      "mobile",
+      "com.tesserix.kora"
+    ],
     "userInterfaceStyle": "automatic",
     "ios": {
       "bundleIdentifier": "com.tesserix.kora",
-      "usesAppleSignIn": true,
       "config": {
         "usesNonExemptEncryption": false
       },
@@ -20,8 +22,7 @@
           "group.com.tesserix.kora"
         ]
       },
-      "appleTeamId": "2CRHRRYBPL",
-      "googleServicesFile": "./GoogleService-Info.plist"
+      "appleTeamId": "2CRHRRYBPL"
     },
     "android": {
       "package": "com.tesserix.kora",
@@ -86,13 +87,6 @@
         }
       ],
       "@react-native-community/datetimepicker",
-      "expo-apple-authentication",
-      [
-        "@react-native-google-signin/google-signin",
-        {
-          "iosUrlScheme": "com.googleusercontent.apps.564299717841-k80q23k7nouu7525plsjb812gn5bajm7"
-        }
-      ],
       "@bacons/apple-targets",
       "expo-asset",
       "expo-font",

@@ -1,16 +1,11 @@
-// Package auth verifies Firebase ID tokens and exposes identity to handlers.
+// Package auth verifies Zitadel access tokens and exposes identity to handlers.
 package auth
 
-import (
-	"context"
-	"fmt"
-	"strings"
-	"time"
+import "context"
 
-	firebase "firebase.google.com/go/v4"
-	fbauth "firebase.google.com/go/v4/auth"
-)
-
+// Claims is the verified identity of a request. Zitadel access tokens carry
+// only UID (the subject); Email and Name stay empty and the user package
+// fills them from userinfo when a row needs them.
 type Claims struct {
 	UID   string
 	Email string
@@ -18,88 +13,12 @@ type Claims struct {
 }
 
 type TokenVerifier interface {
-	Verify(ctx context.Context, idToken string) (Claims, error)
+	Verify(ctx context.Context, token string) (Claims, error)
 }
 
-// IdentityDeleter removes a Firebase identity. Deliberately a separate
-// interface from TokenVerifier: a consumer that only deletes should not
-// depend on verification. Administrative account lookup requires
-// firebaseauth.users.get; deletion requires firebaseauth.users.delete.
+// IdentityDeleter removes a user from the identity provider. Deliberately a
+// separate interface from TokenVerifier: verification needs only the
+// issuer's public keys, deletion needs an administrative credential.
 type IdentityDeleter interface {
-	DeleteIdentity(ctx context.Context, firebaseUID string) error
-}
-
-type firebaseTokenClient interface {
-	VerifyIDToken(context.Context, string) (*fbauth.Token, error)
-	VerifyIDTokenAndCheckRevoked(context.Context, string) (*fbauth.Token, error)
-	DeleteUser(context.Context, string) error
-}
-
-type firebaseVerifier struct {
-	client        firebaseTokenClient
-	accountStatus *accountStatusClient
-}
-
-func NewFirebaseVerifier(ctx context.Context, projectID, apiKey string) (TokenVerifier, error) {
-	app, err := firebase.NewApp(ctx, &firebase.Config{ProjectID: projectID})
-	if err != nil {
-		return nil, fmt.Errorf("auth: init firebase app: %w", err)
-	}
-	client, err := app.Auth(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("auth: init auth client: %w", err)
-	}
-	verifier := firebaseVerifier{client: client}
-	if key := strings.TrimSpace(apiKey); key != "" {
-		verifier.accountStatus = newAccountStatusClient(key)
-	}
-	return verifier, nil
-}
-
-func (v firebaseVerifier) Verify(ctx context.Context, idToken string) (Claims, error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	var tok *fbauth.Token
-	var err error
-	if v.accountStatus == nil {
-		tok, err = v.client.VerifyIDTokenAndCheckRevoked(ctx, idToken)
-	} else {
-		tok, err = v.client.VerifyIDToken(ctx, idToken)
-		if err == nil {
-			err = v.accountStatus.check(ctx, idToken, tok)
-		}
-	}
-	if err != nil {
-		return Claims{}, fmt.Errorf("auth: verify token: %w", err)
-	}
-	return claimsFromToken(tok), nil
-}
-
-// claimsFromToken extracts the identity fields this package cares about from
-// a verified Firebase token. Pulled out of Verify so it can be unit tested
-// against a hand-built *fbauth.Token independently of signature verification.
-//
-// Non-string or missing claims (e.g. a JSON number, or a token that never
-// carried the claim) yield the zero value rather than panicking: a failed
-// type assertion with the ", ok" form never panics, it just reports false.
-func claimsFromToken(tok *fbauth.Token) Claims {
-	email, _ := tok.Claims["email"].(string)
-	name, _ := tok.Claims["name"].(string)
-	return Claims{UID: tok.UID, Email: email, Name: name}
-}
-
-// DeleteIdentity removes the Firebase identity for firebaseUID.
-//
-// An empty uid is rejected rather than passed through: Firebase would reject
-// it anyway, but the account-deletion caller treats a Firebase failure as
-// NON-fatal, so a silent no-op here would leave a live identity behind while
-// reporting success. Failing loudly gives the caller something to log.
-func (v firebaseVerifier) DeleteIdentity(ctx context.Context, firebaseUID string) error {
-	if firebaseUID == "" {
-		return fmt.Errorf("auth: delete identity: empty firebase uid")
-	}
-	if err := v.client.DeleteUser(ctx, firebaseUID); err != nil {
-		return fmt.Errorf("auth: delete identity: %w", err)
-	}
-	return nil
+	DeleteIdentity(ctx context.Context, subject string) error
 }

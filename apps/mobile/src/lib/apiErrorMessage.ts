@@ -10,7 +10,7 @@ const SERVER = "Kora is having trouble right now. Please try again in a moment."
 const OFFLINE = "Couldn't reach Kora. Check your connection.";
 
 // Deliberately duck-typed rather than `instanceof ApiError`: importing api.ts
-// would drag firebase/auth into every consumer (and every consumer's tests)
+// would drag the auth session into every consumer (and every consumer's tests)
 // purely to format a string. ApiError sets `name = "ApiError"` and a numeric
 // `status`; apiErrorMessage.test.ts pins this against the real class so the
 // shape cannot drift apart from it silently.

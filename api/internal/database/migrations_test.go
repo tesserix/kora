@@ -283,6 +283,7 @@ func TestDropShareProgressBackfillsCirclesFromFriendships(t *testing.T) {
 	pending := uuid.New()
 	seededUsers := []uuid.UUID{sharer, nonSharer, nonSharerFriend, acceptedA, acceptedB, pending}
 
+	// firebase_uid, not idp_subject: this runs at 000054, before 000065 renamed it.
 	for _, id := range seededUsers {
 		require.NoError(t, db.Exec(
 			`INSERT INTO users (id, firebase_uid, email, share_progress) VALUES (?, ?, ?, false)`,

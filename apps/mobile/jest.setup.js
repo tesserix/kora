@@ -668,10 +668,14 @@ jest.mock("expo-file-system", () => {
 jest.mock("expo-crypto", () => ({
   randomUUID: jest.fn(() => require("crypto").randomUUID()),
   getRandomBytes: jest.fn((byteCount) => require("crypto").randomBytes(byteCount)),
-  digestStringAsync: jest.fn(async (algorithm, data) =>
-    require("crypto").createHash("sha256").update(data).digest("hex"),
+  digestStringAsync: jest.fn(async (algorithm, data, options) =>
+    require("crypto")
+      .createHash("sha256")
+      .update(data)
+      .digest(options?.encoding === "base64" ? "base64" : "hex"),
   ),
   CryptoDigestAlgorithm: { SHA256: "SHA-256" },
+  CryptoEncoding: { HEX: "hex", BASE64: "base64" },
 }));
 
 // The native Crashlytics module cannot load under Jest. createCrashlyticsSink
@@ -688,3 +692,8 @@ jest.mock(
   }),
   { virtual: true },
 );
+
+// Every test runs against a controllable session (src/test/sessionMock.ts)
+// instead of the real Zitadel client, starting signed in as "test-user".
+// src/auth/__tests__/session.test.ts unmocks it to test the real module.
+jest.mock("@/auth/session", () => require("./src/test/sessionMock").sessionMock);

@@ -29,8 +29,8 @@ func seedUser(t *testing.T, db *gorm.DB, email string) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
 	require.NoError(t, db.Exec(
-		`INSERT INTO users (id, firebase_uid, email, display_name, apple_refresh_token)
-		 VALUES (?, ?, ?, 'Tester', 'apple-refresh-secret')`,
+		`INSERT INTO users (id, idp_subject, email, display_name)
+		 VALUES (?, ?, ?, 'Tester')`,
 		id, "fb_"+id.String(), email).Error)
 	return id
 }
@@ -152,16 +152,12 @@ func TestRedactedValuesAreAbsentAndDeclared(t *testing.T) {
 
 	doc := exportFor(t, db, userID)
 
-	require.Len(t, doc.Tables["users"], 1)
-	assert.NotContains(t, doc.Tables["users"][0], "apple_refresh_token")
-
 	require.Len(t, doc.Tables["device_tokens"], 1)
 	assert.NotContains(t, doc.Tables["device_tokens"][0], "token")
 
-	// Nothing anywhere in the serialised file carries either secret.
+	// Nothing anywhere in the serialised file carries the secret.
 	raw, err := json.Marshal(doc)
 	require.NoError(t, err)
-	assert.NotContains(t, string(raw), "apple-refresh-secret")
 	assert.NotContains(t, string(raw), "ExponentPushToken[secret]")
 
 	// ...and the file says so, rather than being quietly incomplete.
@@ -170,7 +166,6 @@ func TestRedactedValuesAreAbsentAndDeclared(t *testing.T) {
 		declared[r.Table+"."+r.Column] = true
 		assert.NotEmpty(t, r.Reason)
 	}
-	assert.True(t, declared["users.apple_refresh_token"])
 	assert.True(t, declared["device_tokens.token"])
 }
 

@@ -58,6 +58,12 @@ import (
 type Deps struct {
 	DB       *gorm.DB
 	Verifier auth.TokenVerifier
+	// ProfileSource fills a new user's email and name from Zitadel userinfo,
+	// because Zitadel access tokens carry only the subject. Nil leaves both
+	// empty, which is what tests that never sign in through Zitadel want.
+	ProfileSource user.ProfileSource
+	// MinBuild is served by GET /v1/app-config. The zero value gates nothing.
+	MinBuild MinBuild
 	Resolver *resolve.Handler
 	// Provider is the AI backend the coach's Q&A endpoint generates text
 	// with. If nil (e.g. GEMINI_API_KEY unset), coach.Service.Ask degrades
@@ -112,27 +118,15 @@ type Deps struct {
 	// deps.DB; main supplies the rest. A dependency in
 	// platformadmin.DependencyRegistry with no probe reports `unknown`.
 	PlatformHealthProbes map[string]platformadmin.Probe
-	// AppleExchanger trades Apple authorization codes for refresh tokens.
-	// Nil when the Apple credentials are unset, in which case the endpoint is
-	// not mounted at all — an unconfigured environment answers 404 rather
-	// than 500, the same choice BFFHMACKey makes above.
-	AppleExchanger user.AppleExchanger
-	// IdentityDeleter removes the caller's Firebase identity during account
-	// deletion. It is the SAME Firebase client the verifier is built from
-	// (see cmd/api/main.go), narrowed to its delete surface — verification
-	// needs only Google's public keys, deletion needs Admin privileges, so
-	// auth keeps them as two interfaces.
+	// IdentityDeleter removes the caller's Zitadel user during account
+	// deletion. It is separate from Verifier because verification needs only
+	// the issuer's public keys, while deletion needs a machine user's token.
 	//
 	// Nil is tolerated rather than fatal: the identity step runs AFTER the DB
 	// delete has committed, so a nil here must degrade to a logged
 	// "NEEDS MANUAL CLEANUP" (see unwiredIdentityDeleter), never to a panic
 	// that turns a completed deletion into a 500.
 	IdentityDeleter user.IdentityDeleter
-	// AppleRevoker revokes the user's Apple refresh token before the row that
-	// holds it is destroyed. Nil whenever AppleExchanger is nil — Apple is
-	// not configured in every environment — and user.Service.Delete skips
-	// revocation rather than failing when it is.
-	AppleRevoker user.AppleRevoker
 	// Stripe is the payment gateway paid AI top-ups would be bought through.
 	//
 	// Kora has no live rail: Cashfree was removed in kora#479 (the owner's
@@ -162,6 +156,14 @@ func NewRouter(deps Deps) *gin.Engine {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
+	// Unauthenticated on purpose: the builds it exists to stop are exactly the
+	// ones whose sign-in no longer works, so they hold no token this API accepts.
+	// Under /v1 because the edge only routes /v1/* on kora-api.tesserix.app;
+	// v1_auth_coverage_test.go lists it in v1PublicRoutes.
+	r.GET("/v1/app-config", func(c *gin.Context) {
+		httpx.OK(c, gin.H{"min_build": gin.H{"ios": deps.MinBuild.IOS, "android": deps.MinBuild.Android}})
+	})
+
 	r.GET("/ready", func(c *gin.Context) {
 		if deps.DB == nil {
 			httpx.Error(c, http.StatusServiceUnavailable, "not_ready", "database unavailable")
@@ -186,7 +188,6 @@ func NewRouter(deps Deps) *gin.Engine {
 			deps.DB,
 			deletionCache(deps.ResolveCache, deps.BodyCompositionCache),
 			identityDeleter(deps.IdentityDeleter),
-			deps.AppleRevoker, // may legitimately be nil; Delete tolerates it
 			auditDeletion,
 			assetsStore(deps.Assets), // same nil-to-Noop default as identity's avatar wiring
 		)
@@ -203,7 +204,7 @@ func NewRouter(deps Deps) *gin.Engine {
 		notificationsHandler := notifications.NewHandler(notificationsSvc)
 
 		v1 := r.Group("/v1", auth.Middleware(deps.Verifier))
-		v1.Use(user.ResolveMiddleware(userRepo))
+		v1.Use(user.ResolveMiddleware(userRepo, user.WithProfileSource(deps.ProfileSource)))
 		billingMeter := billing.NewMeter(deps.DB)
 		billingHandler := billing.NewHandler(billingMeter)
 		v1.GET("/ai/usage", billingHandler.UsageStatus)
@@ -223,24 +224,19 @@ func NewRouter(deps Deps) *gin.Engine {
 				WithProviderName(billing.ProviderStripe)
 			mountPurchaseRoutes(r, v1, purchases)
 			// OUTSIDE the v1 group: the caller is Stripe, which holds no
-			// Firebase token. Its own signature is the authentication, checked
+			// Kora end-user token. Its own signature is the authentication, checked
 			// inside the handler over the raw request body.
 			r.POST("/webhooks/stripe", purchases.StripeWebhook)
 		}
 		v1.GET("/me", userHandler.Me)
 		v1.PATCH("/me", userHandler.UpdateProfile)
-		// Mounted unconditionally, unlike the Apple exchange below: Apple
-		// requires in-app account deletion, so this route must never be
-		// silently absent in any environment.
+		// Mounted unconditionally: Apple requires in-app account deletion, so
+		// this route must never be silently absent in any environment.
 		v1.DELETE("/me", userHandler.DeleteMe)
 		// Data export (#24, spec §20). Mounted next to DELETE /v1/me because
 		// they are the same promise — you can get your data out, and you can
 		// have it removed — and a reader looking for one should find the other.
 		v1.GET("/me/export", export.NewHandler(export.NewService(deps.DB), slog.Default()).Export)
-		if deps.AppleExchanger != nil {
-			appleHandler := user.NewAppleHandler(userRepo, deps.AppleExchanger)
-			v1.POST("/me/apple-authorization", appleHandler.Store)
-		}
 		v1.POST("/onboarding", onboardingHandler.Submit)
 		v1.GET("/notifications", notificationsHandler.List)
 		v1.GET("/notifications/unread-count", notificationsHandler.UnreadCount)
@@ -287,15 +283,15 @@ func NewRouter(deps Deps) *gin.Engine {
 
 		nutritionHandler := nutrition.NewHandler(foodRepo)
 		v1.GET("/foods", nutritionHandler.Search)
-		// Service path for kora-mcp: no Firebase user, so Search sees global aliases only.
+		// Service path for kora-mcp: no Kora end user, so Search sees global aliases only.
 		if deps.MCPInternalKey != "" {
 			internal := r.Group("/internal/v1", internalauth.Middleware(deps.MCPInternalKey))
 			internal.GET("/foods", nutritionHandler.Search)
 		}
 
 		// Admin surface. A SEPARATE group from v1: /v1 carries
-		// auth.Middleware (Firebase end-user tokens) and these callers are
-		// platform admins with no Firebase identity and no Kora user row.
+		// auth.Middleware (Zitadel end-user tokens) and these callers are
+		// platform admins with no Kora identity and no Kora user row.
 		// Gin's radix tree keeps /v1/foods and /v1/admin/foods distinct, so
 		// the two groups never collide.
 		if len(deps.BFFHMACKey) > 0 {
@@ -650,16 +646,23 @@ func (m multiCacheEvicter) DeleteByUser(ctx context.Context, userID uuid.UUID) e
 	return errors.Join(resolveErr, bodyErr)
 }
 
+// MinBuild is the oldest native build number per platform that the API still
+// serves.
+type MinBuild struct {
+	IOS     int
+	Android int
+}
+
 // unwiredIdentityDeleter stands in when Deps.IdentityDeleter is nil. It
 // deliberately returns an error instead of succeeding silently: Service.Delete
-// treats a Firebase failure as non-fatal and logs it as "firebase identity
-// survived deletion; NEEDS MANUAL CLEANUP", which is exactly the truth here.
+// treats an identity failure as non-fatal and logs it as "identity survived
+// deletion; NEEDS MANUAL CLEANUP", which is exactly the truth here.
 // A no-op that returned nil would report the identity as removed when it was
 // never touched.
 type unwiredIdentityDeleter struct{}
 
 func (unwiredIdentityDeleter) DeleteIdentity(context.Context, string) error {
-	return errors.New("server: no identity deleter wired; firebase identity not removed")
+	return errors.New("server: no identity deleter wired; zitadel user not removed")
 }
 
 func identityDeleter(d user.IdentityDeleter) user.IdentityDeleter {

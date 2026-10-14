@@ -12,7 +12,7 @@ import (
 
 type verifiedTokenContextKey struct{}
 
-// WithVerifiedToken carries a Firebase token only after TokenVerifier has
+// WithVerifiedToken carries an access token only after TokenVerifier has
 // accepted it. Outbound AI clients use this delegated credential so the mesh
 // can authorize the logged-in user as well as the calling workload.
 func WithVerifiedToken(ctx context.Context, token string) context.Context {
@@ -22,7 +22,7 @@ func WithVerifiedToken(ctx context.Context, token string) context.Context {
 	return context.WithValue(ctx, verifiedTokenContextKey{}, token)
 }
 
-// VerifiedTokenFromContext returns the already-verified Firebase token for
+// VerifiedTokenFromContext returns the already-verified access token for
 // delegation to an internal user-aware service. Callers must never log it.
 func VerifiedTokenFromContext(ctx context.Context) (string, bool) {
 	token, ok := ctx.Value(verifiedTokenContextKey{}).(string)

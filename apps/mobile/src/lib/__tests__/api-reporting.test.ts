@@ -7,11 +7,6 @@ jest.mock("@/observability/reporter", () => ({
   setReportingUser: jest.fn(),
 }));
 
-jest.mock("../firebase", () => ({ auth: null, isFirebaseConfigured: false }));
-jest.mock("firebase/auth", () => ({
-  onAuthStateChanged: jest.fn(),
-  signOut: jest.fn(),
-}));
 
 const realFetch = global.fetch;
 

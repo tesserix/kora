@@ -35,7 +35,7 @@ export function templateRoute(path: string): string {
 }
 
 // Duck-typed rather than `instanceof ApiError`: importing api.ts here would
-// drag firebase/auth into this module and its tests purely to read two
+// drag the auth session into this module and its tests purely to read two
 // fields. Same reasoning as src/lib/apiErrorMessage.ts:12-24.
 function isApiErrorShape(e: unknown): e is { status: number; requestId?: string } {
   return (

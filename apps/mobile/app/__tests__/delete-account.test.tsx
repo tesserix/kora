@@ -1,6 +1,7 @@
 import { act, render, fireEvent, waitFor } from "@testing-library/react-native";
 
 import DeleteAccount from "../delete-account";
+import { sessionMock } from "@/test/sessionMock";
 
 const mockReplace = jest.fn();
 const mockBack = jest.fn();
@@ -28,8 +29,10 @@ const mockCancelReminders = jest.fn();
 jest.mock("@/reminders/schedule", () => ({ cancelAllReminders: () => mockCancelReminders() }));
 
 const mockSignOut = jest.fn();
-jest.mock("firebase/auth", () => ({ signOut: (...a: unknown[]) => mockSignOut(...a) }));
-jest.mock("@/lib/firebase", () => ({ auth: { name: "fake-auth" } }));
+// signOut is the session mock's (jest.setup.js); route it through this spy.
+beforeEach(() => {
+  sessionMock.signOut.mockImplementation((...args: unknown[]) => mockSignOut(...args));
+});
 
 beforeEach(() => {
   mockReplace.mockClear();

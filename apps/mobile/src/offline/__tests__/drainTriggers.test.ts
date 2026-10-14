@@ -1,11 +1,12 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AppState } from "react-native";
 import { QueryClient, onlineManager } from "@tanstack/react-query";
-import { onAuthStateChanged } from "firebase/auth";
+import { sessionMock } from "@/test/sessionMock";
 import { apiFetch, currentUserId } from "@/lib/api";
 import { append, list } from "../queue";
 import { rememberOwner, resolveOwnerId } from "../owner";
 import { installDrainTriggers } from "../drainTriggers";
+import { __resetIdentityCutoverForTests } from "../identityCutover";
 
 jest.mock("@/lib/api", () => ({
   apiFetch: jest.fn(),
@@ -13,9 +14,7 @@ jest.mock("@/lib/api", () => ({
   ApiError: class ApiError extends Error {},
 }));
 
-jest.mock("@/lib/firebase", () => ({ auth: { name: "test-auth" }, isFirebaseConfigured: true }));
 
-jest.mock("firebase/auth", () => ({ onAuthStateChanged: jest.fn(() => jest.fn()) }));
 
 const payload = {
   food_item_id: "f1", meal_slot: "lunch", source: "manual" as const,
@@ -34,6 +33,9 @@ async function eventually(check: () => Promise<unknown>): Promise<void> {
 
 beforeEach(async () => {
   await AsyncStorage.clear();
+  // Post-cutover by default; the cutover itself has its own tests below.
+  await AsyncStorage.setItem("kora.identityProvider", "zitadel");
+  __resetIdentityCutoverForTests();
   jest.clearAllMocks();
   (currentUserId as jest.Mock).mockReturnValue("user-a");
 });
@@ -52,12 +54,12 @@ test("a queued log drains when sign-in completes, not on the signed-out cold sta
   expect(await list()).toHaveLength(1);
 
   // The sign-in trigger must exist; without it nothing below could ever fire.
-  const authCalls = (onAuthStateChanged as jest.Mock).mock.calls;
+  const authCalls = sessionMock.onAuthChange.mock.calls;
   expect(authCalls).toHaveLength(1);
 
   // Firebase restores the session.
   (currentUserId as jest.Mock).mockReturnValue("user-a");
-  authCalls[0][1]({ uid: "u1" });
+  authCalls[0][0]("u1");
 
   await eventually(async () => {
     expect(apiFetch).toHaveBeenCalledWith("/v1/logs", expect.objectContaining({ method: "POST" }));
@@ -75,7 +77,7 @@ test("sign-in records the uid so the next launch can attribute writes", async ()
   expect(await resolveOwnerId()).toBeNull();
 
   const uninstall = installDrainTriggers(new QueryClient());
-  (onAuthStateChanged as jest.Mock).mock.calls[0][1]({ uid: "user-b" });
+  sessionMock.onAuthChange.mock.calls[0][0]("user-b");
 
   await eventually(async () => expect(await resolveOwnerId()).toBe("user-b"));
   uninstall();
@@ -92,7 +94,7 @@ test("signing out forgets the uid", async () => {
   expect(await resolveOwnerId()).toBe("user-a");
 
   const uninstall = installDrainTriggers(new QueryClient());
-  (onAuthStateChanged as jest.Mock).mock.calls[0][1](null);
+  sessionMock.onAuthChange.mock.calls[0][0](null);
 
   await eventually(async () => expect(await resolveOwnerId()).toBeNull());
   uninstall();
@@ -109,7 +111,7 @@ test("uninstall detaches every listener it installed", async () => {
   const unsubscribeAuth = jest.fn();
   const unsubscribeOnline = jest.fn();
   const removeAppState = jest.fn();
-  (onAuthStateChanged as jest.Mock).mockReturnValueOnce(unsubscribeAuth);
+  sessionMock.onAuthChange.mockReturnValueOnce(unsubscribeAuth);
   const onlineSpy = jest.spyOn(onlineManager, "subscribe").mockReturnValue(unsubscribeOnline);
   const appStateSpy = jest
     .spyOn(AppState, "addEventListener")
@@ -129,4 +131,30 @@ test("uninstall detaches every listener it installed", async () => {
   // Settle the cold-start drain's promise before the test ends.
   await new Promise((r) => setTimeout(r, 0));
   expect(apiFetch).not.toHaveBeenCalled();
+});
+
+// The first launch after the move from Firebase. Every row and the remembered
+// owner carry a Firebase uid, so none could ever drain; they are dropped before
+// any drain or owner write can see them, and only once.
+test("the first launch after the identity cutover drops Firebase-era queues once", async () => {
+  await AsyncStorage.removeItem("kora.identityProvider");
+  await append(payload, "id-1", "firebase-uid");
+  await rememberOwner("firebase-uid");
+  (currentUserId as jest.Mock).mockReturnValue(null);
+
+  // Not torn down: the uninstall test above restores AppState's spy, which
+  // leaves its listener without a remove() for later tests.
+  installDrainTriggers(new QueryClient());
+  await eventually(async () => {
+    expect(await list()).toHaveLength(0);
+    expect(await AsyncStorage.getItem("kora.lastOwnerId")).toBeNull();
+    expect(await AsyncStorage.getItem("kora.identityProvider")).toBe("zitadel");
+  });
+
+  // A later launch keeps what the new session queued.
+  __resetIdentityCutoverForTests();
+  await append(payload, "id-2", "user-a");
+  installDrainTriggers(new QueryClient());
+  await new Promise((r) => setTimeout(r, 10));
+  expect((await list()).map((i) => i.id)).toEqual(["id-2"]);
 });

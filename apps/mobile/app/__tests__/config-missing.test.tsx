@@ -3,16 +3,15 @@ import { render } from "@testing-library/react-native";
 import ConfigMissing from "../config-missing";
 
 // kora#174: this screen used to say "reload the app" with no way to, and no
-// indication of WHICH of the four variables was missing. The list is the part
+// indication of WHICH variable was missing. The list is the part
 // with logic in it, and the part that could leak a secret if it were built
 // carelessly — so both properties are pinned here.
 
 const NAMES = [
-  "EXPO_PUBLIC_FIREBASE_API_KEY",
-  "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN",
-  "EXPO_PUBLIC_FIREBASE_PROJECT_ID",
-  "EXPO_PUBLIC_FIREBASE_APP_ID",
-] as const;
+  "EXPO_PUBLIC_ZITADEL_PROJECT_ID",
+  "EXPO_PUBLIC_ZITADEL_CLIENT_ID_IOS",
+  "EXPO_PUBLIC_ZITADEL_CLIENT_ID_ANDROID",
+];
 
 const saved = new Map<string, string | undefined>();
 
@@ -32,25 +31,22 @@ afterEach(() => {
 });
 
 test("names only the variables that are actually absent", async () => {
-  process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN = "x.firebaseapp.com";
-  process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID = "x";
+  // jest runs as iOS, so only the iOS client id is this platform's.
+  process.env.EXPO_PUBLIC_ZITADEL_CLIENT_ID_IOS = "123";
 
   const { queryByText } = await render(<ConfigMissing />);
 
-  expect(queryByText("EXPO_PUBLIC_FIREBASE_API_KEY")).toBeTruthy();
-  expect(queryByText("EXPO_PUBLIC_FIREBASE_APP_ID")).toBeTruthy();
-  // A generic "set all four" instruction is what made the old copy useless.
-  expect(queryByText("EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN")).toBeNull();
-  expect(queryByText("EXPO_PUBLIC_FIREBASE_PROJECT_ID")).toBeNull();
+  expect(queryByText("EXPO_PUBLIC_ZITADEL_PROJECT_ID")).toBeTruthy();
+  // A generic "set all of them" instruction is what made the old copy useless,
+  // and the other platform's client id is not needed to sign in here.
+  expect(queryByText("EXPO_PUBLIC_ZITADEL_CLIENT_ID_IOS")).toBeNull();
+  expect(queryByText("EXPO_PUBLIC_ZITADEL_CLIENT_ID_ANDROID")).toBeNull();
 });
 
 test("never renders a variable's value, only its name", async () => {
-  // An API key on screen is shoulder-surfable off a shared screen or a
-  // screenshot, and the diagnostic value is entirely in the names.
-  process.env.EXPO_PUBLIC_FIREBASE_API_KEY = "AIza-leak-canary-key";
-  process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN = "leak-canary.firebaseapp.com";
-  process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID = "leak-canary-project";
-  process.env.EXPO_PUBLIC_FIREBASE_APP_ID = "1:2:web:leak-canary";
+  // The diagnostic value is entirely in the names.
+  process.env.EXPO_PUBLIC_ZITADEL_PROJECT_ID = "leak-canary-project";
+  process.env.EXPO_PUBLIC_ZITADEL_CLIENT_ID_ANDROID = "leak-canary-client";
 
   const { toJSON } = await render(<ConfigMissing />);
 

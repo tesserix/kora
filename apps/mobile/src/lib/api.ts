@@ -1,5 +1,9 @@
-import { onAuthStateChanged, signOut, type User } from "firebase/auth";
-import { auth } from "./firebase";
+import {
+  currentUserId as sessionUserId,
+  getAccessToken,
+  onAuthChange,
+  signOut,
+} from "@/auth/session";
 import { reportError } from "@/observability/reporter";
 import { cancelAllReminders } from "@/reminders/schedule";
 
@@ -28,7 +32,7 @@ export class ApiError extends Error {
 // preserves the original error as `cause` so nothing is lost, and callers
 // (e.g. capture.tsx's ottoErrorMessage) can tell them apart with `instanceof`.
 
-// user.getIdToken() rejected — this happens BEFORE any HTTP request is
+// getAccessToken() rejected — this happens BEFORE any HTTP request is
 // built, so nothing ever reached the server.
 export class AuthTokenError extends Error {
   constructor(cause: unknown) {
@@ -225,10 +229,10 @@ function raceWithSignal<T>(promise: Promise<T>, signal: AbortSignal, abortReason
 
 // --- Session-expiry recovery ---------------------------------------------
 //
-// A 401 can mean the cached ID token merely went stale (Firebase caches it
-// until near expiry) or that the session itself is unusable server-side
-// (expired session, revoked user, a token minted for a different Firebase
-// project, a user row missing server-side). fetchWithRetry below forces a
+// A 401 can mean the cached access token merely went stale (it is reused
+// until a minute before expiry) or that the session itself is unusable
+// server-side (revoked user, a token minted for a different project, a user
+// row missing server-side). fetchWithRetry below forces a
 // fresh token and retries once on the first 401; only a 401 that survives a
 // *fresh* token is treated as an unusable session.
 //
@@ -248,15 +252,13 @@ let hasSignedOutForExpiredSession = false;
 // once by whichever screen redirects next.
 let sessionExpiredNotice = false;
 
-if (auth) {
-  onAuthStateChanged(auth, (user) => {
-    if (user) hasSignedOutForExpiredSession = false;
-  });
-}
+onAuthChange((uid) => {
+  if (uid) hasSignedOutForExpiredSession = false;
+});
 
 // takeSessionExpiredNotice reports (and clears) whether the most recent
 // sign-out was forced by an unrecoverable 401. `(tabs)/_layout.tsx` calls
-// this from its existing onAuthStateChanged guard to decide whether the
+// this from its existing onAuthChange guard to decide whether the
 // /sign-in redirect should carry a "your session expired" explanation.
 export function takeSessionExpiredNotice(): boolean {
   if (!sessionExpiredNotice) return false;
@@ -265,7 +267,7 @@ export function takeSessionExpiredNotice(): boolean {
 }
 
 async function signOutForExpiredSession(): Promise<void> {
-  if (hasSignedOutForExpiredSession || !auth) return;
+  if (hasSignedOutForExpiredSession) return;
   hasSignedOutForExpiredSession = true;
   sessionExpiredNotice = true;
   // A forced sign-out is a sign-out. The user lands on /sign-in with a dead
@@ -276,11 +278,11 @@ async function signOutForExpiredSession(): Promise<void> {
   // once rather than once per request. cancelAllReminders never rejects.
   await cancelAllReminders();
   try {
-    await signOut(auth);
+    await signOut();
   } catch {
-    // Best-effort: if Firebase's own signOut fails, the caller still gets
+    // Best-effort: if signOut itself fails, the caller still gets
     // the real 401 (ApiError) back below rather than an opaque signOut
-    // failure. onAuthStateChanged not firing just means the stuck-session
+    // failure. onAuthChange not firing just means the stuck-session
     // state persists — no worse than before this fix, and never masks the
     // original error.
   }
@@ -290,22 +292,22 @@ async function signOutForExpiredSession(): Promise<void> {
 // exactly once with a force-refreshed ID token — the retry request never
 // notices this happened if it succeeds. If the retry also comes back 401,
 // the session is treated as unusable and the user is signed out so the
-// existing onAuthStateChanged guard in (tabs)/_layout.tsx redirects to
+// existing onAuthChange guard in (tabs)/_layout.tsx redirects to
 // /sign-in. Any other status (403, 500, network failure surfaced as a
 // thrown error, ...) is returned/thrown as-is with no sign-out — only a 401
 // that survives the refresh-and-retry triggers it. With no signed-in user
 // there is no token to refresh, so neither the retry nor the sign-out runs.
 // getToken and doFetch exist purely to translate a rejection into the right
-// typed error at the point it happens — getIdToken() failures become
+// typed error at the point it happens — getAccessToken() failures become
 // AuthTokenError, fetch() failures become NetworkError. Both are called twice
 // below (initial attempt + 401 retry), so factoring the try/catch out keeps
 // fetchWithRetry's control flow identical to before this change.
-async function getToken(user: User, forceRefresh?: true): Promise<string> {
+// A null from getAccessToken is a session that ended between the caller's
+// check and now (invalid_grant); the request goes out unauthenticated and
+// comes back 401, the same as a signed-out caller.
+async function getToken(forceRefresh?: true): Promise<string | null> {
   try {
-    // Called with no arguments (not `getIdToken(undefined)`) on the initial
-    // attempt to match the pre-existing call signature exactly — some
-    // callers/tests assert on arg count, not just the resolved value.
-    return await (forceRefresh ? user.getIdToken(true) : user.getIdToken());
+    return await getAccessToken(forceRefresh === true);
   } catch (err) {
     throw new AuthTokenError(err);
   }
@@ -346,13 +348,13 @@ async function runAttempt(
   path: string,
   buildInit: (token: string | null) => RequestInit,
   callerSignal: AbortSignal | null | undefined,
-  user: User | null,
+  signedIn: boolean,
   forceRefresh?: true,
   timeoutMs?: number,
 ): Promise<Response> {
   const composed = composeDeadlineSignal(callerSignal, timeoutMs);
   try {
-    const token = user ? await getToken(user, forceRefresh) : null;
+    const token = signedIn ? await getToken(forceRefresh) : null;
     return await doFetch(path, buildInit(token), composed);
   } finally {
     composed.clear();
@@ -365,15 +367,19 @@ async function fetchWithRetry(
   callerSignal?: AbortSignal | null,
   timeoutMs?: number,
 ): Promise<Response> {
-  const user = auth?.currentUser ?? null;
-  const res = await runAttempt(path, buildInit, callerSignal, user, undefined, timeoutMs);
+  // Synchronous on purpose: runAttempt must arm its deadline before the first
+  // await. During cold start, before the session is restored, this is false
+  // and the request goes out unauthenticated, as it did under Firebase;
+  // background work waits on currentUserId() instead (see below).
+  const signedIn = sessionUserId() !== null;
+  const res = await runAttempt(path, buildInit, callerSignal, signedIn, undefined, timeoutMs);
 
-  if (res.status !== 401 || !user) return res;
+  if (res.status !== 401 || !signedIn) return res;
 
   // A fresh deadline for the retry, not the remainder of the first attempt's
   // — a slow-but-recovering first attempt must not leave the retry with no
   // time left to even try.
-  const retryRes = await runAttempt(path, buildInit, callerSignal, user, true, timeoutMs);
+  const retryRes = await runAttempt(path, buildInit, callerSignal, signedIn, true, timeoutMs);
 
   if (retryRes.status === 401) await signOutForExpiredSession();
 
@@ -382,16 +388,16 @@ async function fetchWithRetry(
 
 // currentUserId returns the uid a request built right now would authenticate
 // as, or null when there is none. fetchWithRetry attaches a Bearer token only
-// when auth.currentUser exists, and with no user it also skips the
+// when a session exists, and with no user it also skips the
 // refresh-and-retry — so an unauthenticated call comes straight back as
 // ApiError(401). Background work that can simply wait (the offline log queue's
-// drain, which races Firebase restoring the session on cold start) checks this
+// drain, which races the session being restored on cold start) checks this
 // rather than spending its payload on a 401, and the queue uses the uid to keep
 // one user's logs out of another's diary on a shared device. Interactive
 // requests should NOT check it: they belong to a screen that already requires a
 // signed-in user.
 export function currentUserId(): string | null {
-  return auth?.currentUser?.uid ?? null;
+  return sessionUserId();
 }
 
 async function throwApiError(res: Response): Promise<never> {

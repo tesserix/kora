@@ -16,26 +16,20 @@ const DefaultTimezone = "Australia/Sydney"
 
 type User struct {
 	ID          uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	FirebaseUID string    `gorm:"uniqueIndex" json:"-"`
+	IDPSubject  string    `gorm:"column:idp_subject;uniqueIndex" json:"-"`
 	Email       string    `json:"email"`
 	DisplayName string    `json:"display_name"`
 	FriendCode  string    `json:"-"`
 
-	// AppleRefreshToken is a credential and must never be serialised to a
-	// client; the json:"-" tag is load-bearing.
+	// Handle is what the user typed (trimmed and lowercased); HandleCanonical
+	// is that with confusables folded, and is what the unique index and every
+	// lookup use.
 	//
-	// The column is nullable, but rows created via
-	// Repository.UpsertByFirebaseUID (every new user) get '' (empty string),
+	// Both columns are nullable, but rows created via
+	// Repository.UpsertBySubject (every new user) get '' (empty string),
 	// not SQL NULL -- GORM's Create writes the Go zero value for an untouched
 	// string field. A presence check MUST be `!= ""`; `IS NULL` matches
 	// nothing.
-	AppleRefreshToken string `gorm:"column:apple_refresh_token" json:"-"`
-
-	// Handle is what the user typed (trimmed and lowercased); HandleCanonical
-	// is that with confusables folded, and is what the unique index and every
-	// lookup use. Both are nullable in SQL and '' in Go for a user who has no
-	// handle -- a presence check MUST be `!= ""`, the same trap AppleRefreshToken
-	// documents above.
 	//
 	// json:"-" on both: they are hand-projected on every read path and are never
 	// serialised from this struct directly. Serialising the model directly is

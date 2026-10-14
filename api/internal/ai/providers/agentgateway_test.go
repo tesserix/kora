@@ -171,11 +171,11 @@ func TestAgentGatewayProviderDelegatesTheVerifiedEndUserIdentity(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	provider := NewAgentGatewayProvider("gateway-key", server.URL+"/v1", "kora-auto")
-	ctx := auth.WithVerifiedToken(context.Background(), "firebase-user-token")
+	ctx := auth.WithVerifiedToken(context.Background(), "end-user-token")
 	_, _, err := provider.GenerateText(ctx, "system", "question")
 	require.NoError(t, err)
 
-	assert.Equal(t, "Bearer firebase-user-token", got.Get("X-Kora-End-User-Token"))
+	assert.Equal(t, "Bearer end-user-token", got.Get("X-Kora-End-User-Token"))
 }
 
 func TestAgentGatewayProviderStampsTheActingUserID(t *testing.T) {
@@ -249,12 +249,12 @@ func TestAgentGatewayProviderComposesVerifiedTokenAndUserIDHeaders(t *testing.T)
 
 	provider := NewAgentGatewayProvider("gateway-key", server.URL+"/v1", "kora-auto")
 	uid := uuid.New()
-	ctx := auth.WithVerifiedToken(context.Background(), "firebase-user-token")
+	ctx := auth.WithVerifiedToken(context.Background(), "end-user-token")
 	ctx = user.WithID(ctx, uid)
 	_, _, err := provider.GenerateText(ctx, "system", "question")
 	require.NoError(t, err)
 
-	assert.Equal(t, "Bearer firebase-user-token", got.Get("X-Kora-End-User-Token"))
+	assert.Equal(t, "Bearer end-user-token", got.Get("X-Kora-End-User-Token"))
 	assert.Equal(t, uid.String(), got.Get("X-Kora-User-Id"))
 }
 

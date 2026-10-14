@@ -31,18 +31,9 @@ type CacheEvicter interface {
 
 // IdentityDeleter removes the caller's identity from the auth provider. Same
 // consumer-declared-interface reason as CacheEvicter, minus the cycle:
-// auth.IdentityDeleter satisfies it, and a test fake needs no Firebase.
+// auth.IdentityDeleter satisfies it, and a test fake needs no Zitadel.
 type IdentityDeleter interface {
-	DeleteIdentity(ctx context.Context, firebaseUID string) error
-}
-
-// AppleRevoker is the slice of appleid.Client this service needs. Declared
-// here so the deletion tests can drive a fake without an Apple client, exactly
-// as AppleExchanger is in apple_handler.go. The method name matches
-// (*appleid.Client).RevokeRefreshToken so the real client satisfies it
-// directly, with no adapter.
-type AppleRevoker interface {
-	RevokeRefreshToken(ctx context.Context, refreshToken string) error
+	DeleteIdentity(ctx context.Context, subject string) error
 }
 
 // ObjectDeleter removes one stored object. Declared HERE, at the consumer, for
@@ -50,8 +41,7 @@ type AppleRevoker interface {
 // the wiring site, and a test fake needs no bucket.
 //
 // It may be nil. A deployment with no bucket configured wires nothing, and
-// Delete must degrade to "skip the object" rather than panic -- the same
-// treatment the nil Apple client already gets.
+// Delete must degrade to "skip the object" rather than panic.
 type ObjectDeleter interface {
 	Delete(ctx context.Context, path string) error
 }
@@ -81,15 +71,10 @@ type AuditRecorder func(tx *gorm.DB, actorID, actorEmail string, targetID uuid.U
 var ErrNoAuditRecorder = errors.New("user: admin deletion requires an audit recorder")
 
 // Service owns user operations that span more than the users table.
-//
-// apple may be nil: router.go already nil-checks deps.AppleExchanger because
-// Apple is not configured in every environment, and Delete must degrade to
-// "skip revocation" rather than panic when it is not.
 type Service struct {
 	db         *gorm.DB
 	cache      CacheEvicter
 	identities IdentityDeleter
-	apple      AppleRevoker
 	audit      AuditRecorder
 	objects    ObjectDeleter
 }
@@ -98,8 +83,8 @@ type Service struct {
 // endpoint and the user's own DELETE /v1/me go through the same instance --
 // two implementations of an 18-table cascade is the failure this design
 // exists to prevent.
-func NewService(db *gorm.DB, c CacheEvicter, id IdentityDeleter, a AppleRevoker, audit AuditRecorder, objects ObjectDeleter) Service {
-	return Service{db: db, cache: c, identities: id, apple: a, audit: audit, objects: objects}
+func NewService(db *gorm.DB, c CacheEvicter, id IdentityDeleter, audit AuditRecorder, objects ObjectDeleter) Service {
+	return Service{db: db, cache: c, identities: id, audit: audit, objects: objects}
 }
 
 // DeleteActor identifies who is deleting. IsAdmin drives whether a
@@ -111,15 +96,14 @@ type DeleteActor struct {
 	Email   string
 }
 
-// DeleteResult reports what the deletion actually did. FirebaseIdentityRemoved
-// is false when the DB delete succeeded but the identity survived -- see the
+// DeleteResult reports what the deletion actually did. IdentityRemoved is
+// false when the DB delete succeeded but the identity survived -- see the
 // comment on Delete.
 type DeleteResult struct {
-	Transfers               []Transfer `json:"transfers"`
-	FirebaseIdentityRemoved bool       `json:"firebase_identity_removed"`
-	AppleTokenRevoked       bool       `json:"apple_token_revoked"`
+	Transfers       []Transfer `json:"transfers"`
+	IdentityRemoved bool       `json:"identity_removed"`
 	// AvatarObjectRemoved is false when the DB delete succeeded but the stored
-	// picture survived -- same reporting rule as FirebaseIdentityRemoved.
+	// picture survived -- same reporting rule as IdentityRemoved.
 	AvatarObjectRemoved bool `json:"avatar_object_removed"`
 }
 
@@ -128,48 +112,32 @@ type DeleteResult struct {
 // The ORDER of these steps is load-bearing and must not be "tidied":
 //
 //  1. Ownership transfer FIRST -- once the cascade fires the groups are gone.
-//  2. Apple revoke BEFORE the DB delete -- the token lives on the users row.
-//     NON-FATAL: blocking on a third-party outage would break the one thing
-//     Apple requires, that deletion completes in-app.
-//  3. DELETE FROM users -- 18 cascades, one statement, inside the transaction
+//  2. DELETE FROM users -- 18 cascades, one statement, inside the transaction
 //     that also writes the audit row.
-//  4. Redis eviction -- the cached values are the user's own resolutions.
+//  3. Redis eviction -- the cached values are the user's own resolutions.
 //     Non-fatal.
-//  5. Firebase identity LAST. If it fails after the DB delete, the personal
+//  4. Zitadel identity LAST. If it fails after the DB delete, the personal
 //     data is already gone and the path self-heals for a self-deleting user
 //     (they sign in, EnsureUser makes a fresh empty row, they delete again).
 //     Reverse the order and a failed DB delete leaves an un-signin-able
 //     identity with orphaned personal data and no retry path -- exactly what
 //     deletion exists to prevent.
-//  6. Avatar object. AFTER the DB delete and non-fatal, for the same reason
-//     Apple revocation is non-fatal: Apple requires deletion to complete
-//     in-app, so a bucket outage cannot be what stops it. u.AvatarPath was
-//     read from the row up front -- like the Apple token and the Firebase
-//     uid, it stops existing the moment the DELETE lands.
+//  5. Avatar object. AFTER the DB delete and non-fatal: Apple requires
+//     deletion to complete in-app, so a bucket outage cannot be what stops
+//     it. u.AvatarPath was read from the row up front -- like the identity
+//     subject, it stops existing the moment the DELETE lands.
 func (s Service) Delete(ctx context.Context, userID uuid.UUID, actor DeleteActor) (DeleteResult, error) {
 	var res DeleteResult
 
 	// The row is loaded up front because two later steps need columns that
-	// stop existing the moment the DELETE lands: the Apple refresh token and
-	// the Firebase uid.
+	// stop existing the moment the DELETE lands: the identity subject and the
+	// avatar path.
 	var u User
 	if err := s.db.WithContext(ctx).Where("id = ?", userID).First(&u).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return res, ErrNotFound
 		}
 		return res, fmt.Errorf("user: load for delete: %w", err)
-	}
-
-	// AppleRefreshToken is '' (not NULL) for every row created via
-	// UpsertByFirebaseUID -- see model.go. The presence check MUST be != "".
-	// s.apple is nil when Apple is not configured for this deployment.
-	if u.AppleRefreshToken != "" && s.apple != nil {
-		if err := s.apple.RevokeRefreshToken(ctx, u.AppleRefreshToken); err != nil {
-			slog.ErrorContext(ctx, "apple token revoke failed; continuing with deletion",
-				"user_id", userID, "error", err)
-		} else {
-			res.AppleTokenRevoked = true
-		}
 	}
 
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -198,8 +166,7 @@ func (s Service) Delete(ctx context.Context, userID uuid.UUID, actor DeleteActor
 		// same impersonation the retired_handles table exists to prevent.
 		//
 		// HandleCanonical is '' (not NULL) for a user who never claimed a
-		// handle -- same AppleRefreshToken trap noted above -- so the guard
-		// MUST be != "".
+		// handle -- see model.go -- so the guard MUST be != "".
 		if u.HandleCanonical != "" {
 			if err := tx.Exec(
 				`INSERT INTO retired_handles (handle_canonical) VALUES (?)
@@ -228,11 +195,11 @@ func (s Service) Delete(ctx context.Context, userID uuid.UUID, actor DeleteActor
 			"user_id", userID, "error", err)
 	}
 
-	if err := s.identities.DeleteIdentity(ctx, u.FirebaseUID); err != nil {
-		slog.ErrorContext(ctx, "firebase identity survived deletion; NEEDS MANUAL CLEANUP",
-			"user_id", userID, "firebase_uid", u.FirebaseUID, "error", err)
+	if err := s.identities.DeleteIdentity(ctx, u.IDPSubject); err != nil {
+		slog.ErrorContext(ctx, "identity survived deletion; NEEDS MANUAL CLEANUP",
+			"user_id", userID, "subject", u.IDPSubject, "error", err)
 	} else {
-		res.FirebaseIdentityRemoved = true
+		res.IdentityRemoved = true
 	}
 
 	if u.AvatarPath != "" && s.objects != nil {

@@ -120,7 +120,6 @@ func TestGetForAdminPreviewsWhatDeletionDestroys(t *testing.T) {
 	assert.Equal(t, member.ID, d.Transfers[0].NewOwnerID)
 	assert.Equal(t, g.ID, d.Transfers[0].ID)
 	assert.Equal(t, "group", d.Transfers[0].Kind)
-	assert.False(t, d.HasAppleToken, "a seeded user has no Apple refresh token")
 }
 
 // The preview MUST NOT be a dry run that actually transfers. GetForAdmin runs

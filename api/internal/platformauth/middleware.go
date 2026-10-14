@@ -17,7 +17,7 @@ import (
 // Gin context keys carrying the verified caller.
 //
 // Named platform_* so they can never be confused with bffauth's admin_* (the
-// portal's operator) or auth's user_* (a Firebase end user). Three disjoint
+// portal's operator) or auth's user_* (a Kora end user). Three disjoint
 // populations reach this process; collapsing any two of them into one key is
 // how an audit row ends up attributed to the wrong human.
 const (

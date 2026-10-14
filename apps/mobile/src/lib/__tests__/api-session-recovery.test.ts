@@ -9,26 +9,37 @@
 // so full module isolation is how tests get a clean slate instead.
 
 const mockSignOut = jest.fn(async (..._args: unknown[]) => {});
-const mockOnAuthStateChanged = jest.fn((..._args: unknown[]) => jest.fn());
 
-jest.mock("firebase/auth", () => ({
-  signOut: (...args: unknown[]) => mockSignOut(...args),
-  onAuthStateChanged: (...args: unknown[]) => mockOnAuthStateChanged(...args),
-}));
 
 // A forced sign-out is a sign-out: it must disarm the local reminders too (#171).
 const mockCancelReminders = jest.fn(async () => {});
 jest.mock("@/reminders/schedule", () => ({ cancelAllReminders: () => mockCancelReminders() }));
 
-function mockUser(getIdToken: jest.Mock): { currentUser: { getIdToken: jest.Mock } } {
-  return { currentUser: { getIdToken } };
+type SessionMock = typeof import("@/test/sessionMock").sessionMock;
+let session: SessionMock;
+
+function mockUser(getIdToken: jest.Mock): { uid: string; getIdToken: jest.Mock } {
+  return { uid: "test-user", getIdToken };
 }
 
 let api: typeof import("../api");
 
-function loadApiWithAuth(auth: unknown): void {
-  jest.doMock("../firebase", () => ({ auth }));
+// Loads a fresh api.ts against a fresh session mock from the same isolated
+// registry, so the mock this test drives is the one api.ts imported.
+// getIdToken stands in for getAccessToken: called with no arguments normally
+// and with `true` when api.ts forces a refresh after a 401.
+function loadApiWithAuth(auth: { uid: string; getIdToken: jest.Mock } | { currentUser: null }): void {
   jest.isolateModules(() => {
+    session = require("@/auth/session");
+    session.signOut.mockImplementation((...args: unknown[]) => mockSignOut(...args));
+    if ("currentUser" in auth) {
+      session.setUser(null);
+    } else {
+      session.setUser(auth.uid);
+      session.getAccessToken.mockImplementation((force?: boolean) =>
+        force ? auth.getIdToken(true) : auth.getIdToken(),
+      );
+    }
     api = require("../api");
   });
 }
@@ -36,7 +47,6 @@ function loadApiWithAuth(auth: unknown): void {
 beforeEach(() => {
   jest.resetModules();
   mockSignOut.mockClear();
-  mockOnAuthStateChanged.mockClear();
   mockCancelReminders.mockClear();
   global.fetch = jest.fn();
 });
@@ -199,8 +209,8 @@ test("signing back in resets the sign-out guard for a later session", async () =
   const auth = mockUser(getIdToken);
   loadApiWithAuth(auth);
 
-  // Capture the onAuthStateChanged callback api.ts registered at load time.
-  const authStateCallback = mockOnAuthStateChanged.mock.calls[0][1] as (user: unknown) => void;
+  // Deliver a sign-in to the onAuthChange listener api.ts registered at load time.
+  const authStateCallback = (user: { uid: string }) => session.emit(user.uid);
 
   (global.fetch as jest.Mock).mockResolvedValue(
     jsonResponse(401, false, { error: "unauthorized", message: "expired" }),

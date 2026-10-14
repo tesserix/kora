@@ -14,10 +14,6 @@ import * as api from "@/lib/api";
 // Same rationale as hooks.test.tsx: @/lib/firebase pulls in firebase's ESM
 // build, which Jest cannot transform, and hooks.ts's import graph now reaches
 // it transitively. Stub it out rather than requireActual-ing @/lib/api.
-jest.mock("@/lib/firebase", () => ({
-  isFirebaseConfigured: true,
-  auth: { authStateReady: async () => {}, currentUser: { uid: "test-user" } },
-}));
 
 jest.mock("@/lib/api", () => ({
   apiFetch: jest.fn(),

@@ -171,7 +171,7 @@ func TestScopeClausePlaceholderCountMatchesArgs(t *testing.T) {
 
 // TestRedactedColumnsExist stops a redaction from silently becoming a no-op.
 //
-// If `users.apple_refresh_token` were renamed, the redaction rule would match
+// If `device_tokens.token` were renamed, the redaction rule would match
 // nothing, the column would start appearing in exports, and the Redacted list
 // would still promise it had been withheld. That is worse than never having
 // redacted it, because the file would assert something untrue.

@@ -186,7 +186,7 @@ func (h PurchaseHandler) Orders(c *gin.Context) {
 // StripeWebhook settles an order from a Stripe Checkout callback.
 //
 // Mounted outside the v1 group for the reason every gateway callback is: the
-// caller holds no Firebase token, and its own signature IS the authentication,
+// caller holds no end-user token, and its own signature IS the authentication,
 // verified over the RAW body. Re-serialising the payload before verifying
 // would change the bytes the MAC covers and reject every genuine delivery.
 //

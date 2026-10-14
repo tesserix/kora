@@ -87,15 +87,14 @@ Word boundaries matter in the coverage check: a substring match would let
 
 ## What is withheld, and why it is declared
 
-Two values are dropped. The test is not "is this sensitive" — the whole file is
+One value is dropped. The test is not "is this sensitive" — the whole file is
 sensitive and it is going to the person it is about. The test is **could
 someone holding this file act as the user, or act on their devices**:
 
-- `users.apple_refresh_token` — exchanges for access to their Apple identity.
 - `device_tokens.token` — anyone holding it can push to their device.
 
-They are **dropped, not nulled** (a null is indistinguishable from a column the
-user genuinely has no value for), and the `redacted` array names them with the
+It is **dropped, not nulled** (a null is indistinguishable from a column the
+user genuinely has no value for), and the `redacted` array names it with the
 reason. Withholding a field and saying nothing makes the export quietly untrue,
 which is the same defect as omitting a table. The array is present even when
 the user has no such row: it describes the export's rules, not their data.
@@ -143,8 +142,8 @@ closure and both pass. The same guard `delete-account.tsx` uses.
 
 - `DELETE FROM users`, and the schema's `ON DELETE CASCADE` takes every
   user-scoped table with it
-- Firebase identity removed — the user genuinely can no longer authenticate
-- Apple refresh token revoked
+- Zitadel user removed, with its Apple and Google links. Revoking the Apple
+  grant itself is a platform job (tesserix/tesserix-k8s#1388)
 - Avatar object removed from GCS, logging `NEEDS MANUAL CLEANUP` on failure
   (there is no lifecycle reaper — kora#457)
 - Handle retired permanently, so nobody can reclaim it and inherit their

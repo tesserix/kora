@@ -30,7 +30,7 @@ func seedUser(t *testing.T, db *gorm.DB) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
 	require.NoError(t, db.Exec(
-		`INSERT INTO users (id, firebase_uid, email, display_name) VALUES (?, ?, ?, ?)`,
+		`INSERT INTO users (id, idp_subject, email, display_name) VALUES (?, ?, ?, ?)`,
 		id, "identity-"+id.String(), id.String()+"@example.test", "Test Person").Error)
 	t.Cleanup(func() { db.Exec(`DELETE FROM users WHERE id = ?`, id) })
 	return id
@@ -51,9 +51,9 @@ func TestSchema_TwoUsersMayBothHaveNoHandle(t *testing.T) {
 }
 
 // Two REAL signups must coexist. Every other schema test here seeds with raw
-// SQL, which leaves a true NULL -- but UpsertByFirebaseUID goes through GORM
+// SQL, which leaves a true NULL -- but UpsertBySubject goes through GORM
 // Create, which writes the empty string for untouched string fields (see the
-// AppleRefreshToken comment in user/model.go). The empty string IS NOT NULL, so
+// Handle comment in user/model.go). The empty string IS NOT NULL, so
 // an index predicate that only excludes NULL rejects the second signup and
 // takes down account creation.
 //
@@ -66,11 +66,11 @@ func TestSchema_TwoRealSignupsCoexist(t *testing.T) {
 	repo := user.NewRepository(db)
 	ctx := context.Background()
 
-	a, err := repo.UpsertByFirebaseUID(ctx, "sig-"+uuid.NewString(), "a@example.test")
+	a, err := repo.UpsertBySubject(ctx, "sig-"+uuid.NewString(), "a@example.test")
 	require.NoError(t, err)
 	t.Cleanup(func() { db.Exec(`DELETE FROM users WHERE id = ?`, a.ID) })
 
-	b, err := repo.UpsertByFirebaseUID(ctx, "sig-"+uuid.NewString(), "b@example.test")
+	b, err := repo.UpsertBySubject(ctx, "sig-"+uuid.NewString(), "b@example.test")
 	require.NoError(t, err, "the second signup is the one that breaks")
 	t.Cleanup(func() { db.Exec(`DELETE FROM users WHERE id = ?`, b.ID) })
 }

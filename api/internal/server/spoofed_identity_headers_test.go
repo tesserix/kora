@@ -26,7 +26,7 @@ import (
 // defeat the whole point of this file).
 var errUnknownToken = errors.New("unknown bearer token")
 
-// keyedVerifier maps a bearer token to the Firebase claims it was legitimately
+// keyedVerifier maps a bearer token to the claims it was legitimately
 // issued for. Unlike stubVerifier (router_test.go), which answers every token
 // identically, this lets the test hand out a real, distinguishable identity
 // for "user A" and prove that identity -- not anything an attacker put in a
@@ -90,17 +90,17 @@ func newCapturingGateway(t *testing.T, captured *http.Header) *httptest.Server {
 	return server
 }
 
-// ensureTestUser provisions (or reuses) a users row for firebaseUID, exactly
+// ensureTestUser provisions (or reuses) a users row for subject, exactly
 // as user.ResolveMiddleware's real EnsureUser call would on a genuine sign-in,
 // and registers cleanup. It exists so this file's tests can assert on the
 // REAL, DB-resolved UUID for "user A" -- not a value the test invented -- as
 // the one true source the gateway should ever see.
-func ensureTestUser(t *testing.T, db *gorm.DB, repo user.Repository, firebaseUID string) uuid.UUID {
+func ensureTestUser(t *testing.T, db *gorm.DB, repo user.Repository, subject string) uuid.UUID {
 	t.Helper()
-	u, err := repo.EnsureUser(context.Background(), firebaseUID, firebaseUID+"@test.dev", "")
+	u, err := repo.EnsureUser(context.Background(), subject, subject+"@test.dev", "")
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		db.Exec("DELETE FROM users WHERE firebase_uid = ?", firebaseUID)
+		db.Exec("DELETE FROM users WHERE idp_subject = ?", subject)
 	})
 	return u.ID
 }
@@ -127,11 +127,11 @@ func TestSpoofedIdentityHeadersAreIgnoredForAnAuthenticatedUser(t *testing.T) {
 	db := testDB(t)
 	repo := user.NewRepository(db)
 
-	const legitToken = "user-a-genuine-firebase-token"
-	firebaseUID := "spoof-test-a-" + uuid.NewString()
-	userAID := ensureTestUser(t, db, repo, firebaseUID)
+	const legitToken = "user-a-genuine-access-token"
+	subject := "spoof-test-a-" + uuid.NewString()
+	userAID := ensureTestUser(t, db, repo, subject)
 
-	verifier := keyedVerifier{legitToken: auth.Claims{UID: firebaseUID, Email: firebaseUID + "@test.dev"}}
+	verifier := keyedVerifier{legitToken: auth.Claims{UID: subject, Email: subject + "@test.dev"}}
 
 	var captured http.Header
 	gateway := newCapturingGateway(t, &captured)

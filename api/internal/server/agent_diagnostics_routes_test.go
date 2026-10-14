@@ -18,7 +18,7 @@ func TestAgentDiagnosticsAreNotOnTheAppUserGroup(t *testing.T) {
 		{http.MethodGet, "/v1/agents/:name"},
 		{http.MethodPost, "/v1/agents/:name/refresh"},
 	} {
-		assert.False(t, hasRoute(routes, tc.method, tc.path), "%s %s is reachable with only a Firebase login", tc.method, tc.path)
+		assert.False(t, hasRoute(routes, tc.method, tc.path), "%s %s is reachable with only an end-user login", tc.method, tc.path)
 	}
 }
 

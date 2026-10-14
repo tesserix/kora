@@ -28,7 +28,7 @@ func seedMentorUser(t *testing.T, db *gorm.DB) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
 	require.NoError(t, db.Exec(`
-		INSERT INTO users (id, firebase_uid, email, display_name)
+		INSERT INTO users (id, idp_subject, email, display_name)
 		VALUES (?, ?, ?, 'Mentor Test')`, id, "mentor-"+id.String(), id.String()+"@test.dev").Error)
 	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE id = ?", id) })
 	return id

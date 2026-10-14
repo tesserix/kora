@@ -71,7 +71,7 @@ func TestLocalDayRejectsGoZeroTime(t *testing.T) {
 
 	uid := uuid.New()
 	require.NoError(t, db.Exec(
-		"INSERT INTO users (id, firebase_uid, email) VALUES (?, ?, ?)",
+		"INSERT INTO users (id, idp_subject, email) VALUES (?, ?, ?)",
 		uid, "localday-"+uid.String(), "localday@test.dev").Error)
 	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE id = ?", uid) })
 

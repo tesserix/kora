@@ -140,7 +140,7 @@ export async function discard(id: string): Promise<void> {
 //
 // 401 is the one exception, for the same reason AuthTokenError is treated as
 // transient: it means "not authenticated YET", not "never will be". Its usual
-// cause here is a drain that raced Firebase restoring the session on cold
+// cause here is a drain that raced the session being restored on cold
 // start, and it self-heals the moment a token exists. api.ts already handles a
 // genuinely unusable session — a 401 that survives a forced token refresh — by
 // signing the user out, so a 401 reaching this classifier is never the last
@@ -182,7 +182,7 @@ export const MAX_DELIVERY_ATTEMPTS = 5;
 // A 401 DOES carry a status and so does count, which is compatible with
 // treating it as transient rather than permanent. It stays transient (one 401
 // is genuinely "not authenticated yet"), but five of them are not: drainLogs
-// refuses to send at all while signed out, so a 401 here means Firebase
+// refuses to send at all while signed out, so a 401 here means the session
 // reported a user whose token the server still rejected, and api.ts escalates a
 // session that survives a forced refresh to a sign-out — after which the drain
 // stops entirely and no further attempts accrue. Five refusals with a live
@@ -194,7 +194,7 @@ function countsAsAttempt(err: unknown): boolean {
 // drain sends pending items OLDEST FIRST and sequentially, so the diary fills
 // in the order the food was eaten rather than by whichever request wins a
 // race. `send` and `ownerId` are both injected so this module never imports
-// the API layer or Firebase.
+// the API layer or the auth session.
 export async function drain(
   send: (item: QueuedLog) => Promise<void>,
   ownerId: string,

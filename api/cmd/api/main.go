@@ -28,7 +28,6 @@ import (
 	"github.com/tesserix/kora/api/internal/ai/decide"
 	"github.com/tesserix/kora/api/internal/ai/providers"
 	"github.com/tesserix/kora/api/internal/aitrace"
-	"github.com/tesserix/kora/api/internal/appleid"
 	"github.com/tesserix/kora/api/internal/assets"
 	"github.com/tesserix/kora/api/internal/auth"
 	"github.com/tesserix/kora/api/internal/billing"
@@ -73,23 +72,24 @@ func main() {
 		os.Exit(1)
 	}
 
-	verifier, err := auth.NewFirebaseVerifier(context.Background(), cfg.FirebaseProjectID, cfg.FirebaseAPIKey)
+	verifier, profiles, err := auth.NewZitadelVerifier(context.Background(), cfg.ZitadelIssuer, cfg.ZitadelProjectID)
 	if err != nil {
-		logger.Error("firebase init failed", "err", err)
+		logger.Error("zitadel init failed", "err", err)
 		os.Exit(1)
 	}
 
-	// The same Firebase client, narrowed to its identity-DELETE surface.
-	// auth keeps Verify and DeleteIdentity as two narrow interfaces, so
-	// the concrete verifier has to be asserted back to the second one.
-	//
-	// Fatal rather than degraded: DELETE /v1/me is Apple-mandated, and a
-	// deployment that silently leaves live Firebase identities behind after
-	// every account deletion must not start.
-	identityDeleter, ok := verifier.(auth.IdentityDeleter)
-	if !ok {
-		logger.Error("firebase verifier cannot delete identities; account deletion would orphan them")
-		os.Exit(1)
+	// Production config refuses to load without a deleter token (DELETE /v1/me
+	// is Apple-mandated). Elsewhere it may be absent, and deletion then logs
+	// the identity as needing manual cleanup.
+	var identityDeleter auth.IdentityDeleter
+	if cfg.ZitadelDeleterToken != "" {
+		identityDeleter, err = auth.NewZitadelIdentityDeleter(cfg.ZitadelIssuer, cfg.ZitadelDeleterToken)
+		if err != nil {
+			logger.Error("zitadel deleter init failed", "err", err)
+			os.Exit(1)
+		}
+	} else {
+		logger.Warn("zitadel identity deletion disabled (no ZITADEL_DELETER_TOKEN)")
 	}
 
 	resolveHandler, aiProvider, resolveCache, bodyCompositionCache := buildResolveHandler(context.Background(), cfg, db, logger)
@@ -196,32 +196,6 @@ func main() {
 		logger.Info("platform admin contract surface disabled (no KORA_PLATFORM_ADMIN_SECRET)")
 	}
 
-	// One appleid.Client serves two narrow interfaces: AppleExchanger for
-	// POST /v1/me/apple-authorization and AppleRevoker for account deletion.
-	// Both stay nil when Apple is unconfigured — the exchange endpoint is
-	// then not mounted at all, and user.Service.Delete skips revocation
-	// rather than failing.
-	var appleExchanger user.AppleExchanger
-	var appleRevoker user.AppleRevoker
-	if cfg.ApplePrivateKeyPEM != "" {
-		key, err := appleid.ParsePrivateKey([]byte(cfg.ApplePrivateKeyPEM))
-		if err != nil {
-			logger.Error("apple: parse private key failed", "err", err)
-			os.Exit(1)
-		}
-		appleClient := appleid.NewClient(appleid.Config{
-			TeamID:     cfg.AppleTeamID,
-			KeyID:      cfg.AppleKeyID,
-			BundleID:   cfg.AppleBundleID,
-			PrivateKey: key,
-		}, nil)
-		appleExchanger = appleClient
-		appleRevoker = appleClient
-		logger.Info("apple authorization exchange enabled")
-	} else {
-		logger.Info("apple authorization exchange disabled (no APPLE_PRIVATE_KEY)")
-	}
-
 	shutdownTracing, err := aitrace.Setup(context.Background(), aitrace.Config{
 		Endpoint:    cfg.AITraceEndpoint,
 		Environment: cfg.Env,
@@ -274,6 +248,8 @@ func main() {
 		Handler: server.NewRouter(server.Deps{
 			DB:                   db,
 			Verifier:             verifier,
+			ProfileSource:        profiles,
+			MinBuild:             server.MinBuild{IOS: cfg.MinBuildIOS, Android: cfg.MinBuildAndroid},
 			Resolver:             resolveHandler,
 			Provider:             aiProvider,
 			Agents:               coordinator,
@@ -288,9 +264,7 @@ func main() {
 			Accuracy:             accuracy.NewRecorder(resolveoutcome.NewRepository(db), scores),
 			PlatformAdminSecret:  cfg.PlatformAdminSecret,
 			PlatformHealthProbes: healthProbes,
-			AppleExchanger:       appleExchanger,
 			IdentityDeleter:      identityDeleter,
-			AppleRevoker:         appleRevoker,
 			Stripe: billing.StripeConfig{
 				SecretKey:     cfg.StripeSecretKey,
 				WebhookSecret: cfg.StripeWebhookSecret,

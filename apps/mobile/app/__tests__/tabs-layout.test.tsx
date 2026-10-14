@@ -13,8 +13,6 @@ jest.mock("expo-router", () => ({
     { Screen: () => null },
   ),
 }));
-jest.mock("@/lib/firebase", () => ({ auth: null, isFirebaseConfigured: false }));
-jest.mock("firebase/auth", () => ({ onAuthStateChanged: jest.fn(() => jest.fn()) }));
 jest.mock("@/lib/push", () => ({ usePushRegistration: jest.fn(), usePushResponder: jest.fn() }));
 jest.mock("@/mentor/useMentorRuntime", () => ({ useMentorRuntime: jest.fn() }));
 const mockUseWidgetSync = jest.fn();

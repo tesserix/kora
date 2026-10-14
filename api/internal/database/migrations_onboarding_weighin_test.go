@@ -41,7 +41,7 @@ func TestOnboardingWeighInBackfillOnlyTargetsEntrylessProfiles(t *testing.T) {
 		{alreadyHasEntry, 68.0},
 	} {
 		require.NoError(t, db.Exec(
-			`INSERT INTO users (id, firebase_uid, email, weight_kg, created_at, updated_at)
+			`INSERT INTO users (id, idp_subject, email, weight_kg, created_at, updated_at)
 			 VALUES (?, ?, ?, ?, ?, ?)`,
 			u.id, "backfill-"+u.id.String(), u.id.String()+"@test.dev", u.weightKg, createdAt, createdAt,
 		).Error)
@@ -110,7 +110,7 @@ func TestOnboardingWeighInBackfillDatesAtProfileCreation(t *testing.T) {
 	createdAt := time.Date(2024, 6, 1, 10, 0, 0, 0, time.UTC)
 
 	require.NoError(t, db.Exec(
-		`INSERT INTO users (id, firebase_uid, email, weight_kg, created_at, updated_at)
+		`INSERT INTO users (id, idp_subject, email, weight_kg, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?)`,
 		id, "backfill-date-"+id.String(), id.String()+"@test.dev", 60.0, createdAt, createdAt,
 	).Error)
@@ -136,7 +136,7 @@ func TestOnboardingWeighInBackfillLeavesCompositionColumnsNull(t *testing.T) {
 	id := uuid.New()
 	createdAt := time.Date(2025, 3, 10, 8, 0, 0, 0, time.UTC)
 	require.NoError(t, db.Exec(
-		`INSERT INTO users (id, firebase_uid, email, weight_kg, created_at, updated_at)
+		`INSERT INTO users (id, idp_subject, email, weight_kg, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?)`,
 		id, "backfill-comp-"+id.String(), id.String()+"@test.dev", 65.0, createdAt, createdAt,
 	).Error)
@@ -206,7 +206,7 @@ func TestOnboardingWeighInBackfillDownDeletesOnlyMatchingSignature(t *testing.T)
 		{realWeighInUser, 55.0},
 	} {
 		require.NoError(t, db.Exec(
-			`INSERT INTO users (id, firebase_uid, email, weight_kg, created_at, updated_at)
+			`INSERT INTO users (id, idp_subject, email, weight_kg, created_at, updated_at)
 			 VALUES (?, ?, ?, ?, ?, ?)`,
 			u.id, "down-"+u.id.String(), u.id.String()+"@test.dev", u.weightKg, createdAt, createdAt,
 		).Error)

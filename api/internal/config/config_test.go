@@ -16,7 +16,7 @@ func TestLoadConfig(t *testing.T) {
 		env              string
 		databaseURL      string
 		redisURL         string
-		firebaseProject  string
+		zitadelProject   string
 		geminiAPIKey     string
 		openAIAPIKey     string
 		openAIBaseURL    string
@@ -26,27 +26,27 @@ func TestLoadConfig(t *testing.T) {
 		expectConfig     Config
 	}{
 		{
-			name:            "DATABASE_URL unset returns error",
-			port:            "",
-			env:             "",
-			databaseURL:     "",
-			redisURL:        "",
-			firebaseProject: "",
-			expectErr:       true,
-			expectConfig:    Config{},
+			name:           "DATABASE_URL unset returns error",
+			port:           "",
+			env:            "",
+			databaseURL:    "",
+			redisURL:       "",
+			zitadelProject: "",
+			expectErr:      true,
+			expectConfig:   Config{},
 		},
 		{
 			name:        "DATABASE_URL set with defaults for others",
 			databaseURL: "postgres://user:pass@localhost/testdb",
 			expectErr:   false,
 			expectConfig: Config{
-				Port:              "8080",
-				Env:               "development",
-				DatabaseURL:       "postgres://user:pass@localhost/testdb",
-				RedisURL:          "redis://localhost:6379/0",
-				FirebaseProjectID: "",
-				GeminiAPIKey:      "",
-				OpenAIAPIKey:      "",
+				Port:             "8080",
+				Env:              "development",
+				DatabaseURL:      "postgres://user:pass@localhost/testdb",
+				RedisURL:         "redis://localhost:6379/0",
+				ZitadelProjectID: "",
+				GeminiAPIKey:     "",
+				OpenAIAPIKey:     "",
 			},
 		},
 		{
@@ -56,7 +56,7 @@ func TestLoadConfig(t *testing.T) {
 			env:              "production",
 			databaseURL:      "postgres://prod:secret@host/proddb",
 			redisURL:         "redis://prod-redis:6379/1",
-			firebaseProject:  "my-firebase-project",
+			zitadelProject:   "394926080202442797",
 			geminiAPIKey:     "gemini-test-key",
 			openAIAPIKey:     "openai-test-key",
 			openAIBaseURL:    "https://integrate.api.nvidia.com/v1",
@@ -68,7 +68,7 @@ func TestLoadConfig(t *testing.T) {
 				Env:               "production",
 				DatabaseURL:       "postgres://prod:secret@host/proddb",
 				RedisURL:          "redis://prod-redis:6379/1",
-				FirebaseProjectID: "my-firebase-project",
+				ZitadelProjectID:  "394926080202442797",
 				GeminiAPIKey:      "gemini-test-key",
 				OpenAIAPIKey:      "openai-test-key",
 				OpenAIBaseURL:     "https://integrate.api.nvidia.com/v1",
@@ -96,7 +96,7 @@ func TestLoadConfig(t *testing.T) {
 			t.Setenv("ENV", tt.env)
 			t.Setenv("DATABASE_URL", tt.databaseURL)
 			t.Setenv("REDIS_URL", tt.redisURL)
-			t.Setenv("FIREBASE_PROJECT_ID", tt.firebaseProject)
+			t.Setenv("ZITADEL_PROJECT_ID", tt.zitadelProject)
 			t.Setenv("GEMINI_API_KEY", tt.geminiAPIKey)
 			t.Setenv("OPENAI_API_KEY", tt.openAIAPIKey)
 			t.Setenv("OPENAI_BASE_URL", tt.openAIBaseURL)
@@ -113,6 +113,7 @@ func TestLoadConfig(t *testing.T) {
 				t.Setenv("AI_GATEWAY_API_KEY", "gateway-key")
 				t.Setenv("AI_REGISTRY_BASE_URL", "http://agentregistry.agentregistry-system.svc.cluster.local:12121")
 				t.Setenv("AI_REGISTRY_API_KEY", "registry-key")
+				t.Setenv("ZITADEL_DELETER_TOKEN", "deleter-pat")
 			}
 
 			// Call Load()
@@ -131,7 +132,7 @@ func TestLoadConfig(t *testing.T) {
 				assert.Equal(t, tt.expectConfig.Env, cfg.Env, "Env mismatch")
 				assert.Equal(t, tt.expectConfig.DatabaseURL, cfg.DatabaseURL, "DatabaseURL mismatch")
 				assert.Equal(t, tt.expectConfig.RedisURL, cfg.RedisURL, "RedisURL mismatch")
-				assert.Equal(t, tt.expectConfig.FirebaseProjectID, cfg.FirebaseProjectID, "FirebaseProjectID mismatch")
+				assert.Equal(t, tt.expectConfig.ZitadelProjectID, cfg.ZitadelProjectID, "ZitadelProjectID mismatch")
 				assert.Equal(t, tt.expectConfig.GeminiAPIKey, cfg.GeminiAPIKey, "GeminiAPIKey mismatch")
 				assert.Equal(t, tt.expectConfig.OpenAIAPIKey, cfg.OpenAIAPIKey, "OpenAIAPIKey mismatch")
 				assert.Equal(t, tt.expectConfig.OpenAIBaseURL, cfg.OpenAIBaseURL, "OpenAIBaseURL mismatch")
@@ -222,7 +223,7 @@ func TestLoadRejectsMetricsPortEqualToPort(t *testing.T) {
 	require.Contains(t, err.Error(), "METRICS_PORT")
 }
 
-func TestLoadProductionRequiresTheGatewayAndRegistry(t *testing.T) {
+func TestLoadProductionRequiresTheGatewayRegistryAndDeleter(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
 	t.Setenv("ENV", "production")
 	t.Setenv("AI_GATEWAY_ENABLED", "")
@@ -242,6 +243,11 @@ func TestLoadProductionRequiresTheGatewayAndRegistry(t *testing.T) {
 
 	t.Setenv("AI_REGISTRY_BASE_URL", "http://agentregistry.agentregistry-system.svc.cluster.local:12121")
 	t.Setenv("AI_REGISTRY_API_KEY", "registry-key")
+	t.Setenv("ZITADEL_DELETER_TOKEN", "")
+	_, err = Load()
+	require.ErrorContains(t, err, "ZITADEL_DELETER_TOKEN")
+
+	t.Setenv("ZITADEL_DELETER_TOKEN", "deleter-pat")
 	_, err = Load()
 	require.NoError(t, err)
 }
@@ -351,72 +357,6 @@ func TestLoadRejectsShortBFFHMACKey(t *testing.T) {
 	assert.Contains(t, err.Error(), "16")
 }
 
-// Same philosophy as the BFFHMACKey tests above: a partially configured Apple
-// integration must fail at startup, not mount a route that silently fails
-// every exchange with invalid_client (empty iss/kid in the client_secret JWT).
-func TestLoadValidatesAppleConfig(t *testing.T) {
-	tests := []struct {
-		name       string
-		privateKey string
-		teamID     string
-		keyID      string
-		expectErr  bool
-		errSubstr  string
-	}{
-		{
-			name:       "all three set is valid",
-			privateKey: "fake-pem-key",
-			teamID:     "TEAM123",
-			keyID:      "KEY456",
-			expectErr:  false,
-		},
-		{
-			name:       "key set with team missing is an error",
-			privateKey: "fake-pem-key",
-			teamID:     "",
-			keyID:      "KEY456",
-			expectErr:  true,
-			errSubstr:  "APPLE_TEAM_ID",
-		},
-		{
-			name:       "key set with key id missing is an error",
-			privateKey: "fake-pem-key",
-			teamID:     "TEAM123",
-			keyID:      "",
-			expectErr:  true,
-			errSubstr:  "APPLE_KEY_ID",
-		},
-		{
-			name:       "all three empty means Apple is simply disabled",
-			privateKey: "",
-			teamID:     "",
-			keyID:      "",
-			expectErr:  false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
-			t.Setenv("APPLE_PRIVATE_KEY", tt.privateKey)
-			t.Setenv("APPLE_TEAM_ID", tt.teamID)
-			t.Setenv("APPLE_KEY_ID", tt.keyID)
-
-			cfg, err := Load()
-
-			if tt.expectErr {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), tt.errSubstr)
-			} else {
-				require.NoError(t, err)
-				assert.Equal(t, tt.privateKey, cfg.ApplePrivateKeyPEM)
-				assert.Equal(t, tt.teamID, cfg.AppleTeamID)
-				assert.Equal(t, tt.keyID, cfg.AppleKeyID)
-			}
-		})
-	}
-}
-
 // The registry is a separate trust domain: it matches sha256(bearer) against
 // its own `kora=` deploy-key entry, so the gateway key authenticates as
 // nobody. Inheriting it shipped to production and 401'd every roster lookup
@@ -488,4 +428,21 @@ func TestLoadRejectsAShortAITraceUserKey(t *testing.T) {
 
 	_, err := Load()
 	require.ErrorContains(t, err, "KORA_AI_TRACE_USER_KEY")
+}
+
+func TestLoadReadsMinBuildsAndFailsOpenOnBadValues(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
+	t.Setenv("KORA_MIN_BUILD_IOS", " 42 ")
+	t.Setenv("KORA_MIN_BUILD_ANDROID", "17")
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, 42, cfg.MinBuildIOS)
+	assert.Equal(t, 17, cfg.MinBuildAndroid)
+
+	t.Setenv("KORA_MIN_BUILD_IOS", "forty")
+	t.Setenv("KORA_MIN_BUILD_ANDROID", "-3")
+	cfg, err = Load()
+	require.NoError(t, err)
+	assert.Zero(t, cfg.MinBuildIOS)
+	assert.Zero(t, cfg.MinBuildAndroid)
 }

@@ -2,8 +2,7 @@ import type { ReactNode } from "react";
 import { ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, type Href } from "expo-router";
-import { signOut } from "firebase/auth";
-import { auth } from "@/lib/firebase";
+import { signOut } from "@/auth/session";
 import { unregisterPushToken } from "@/lib/push";
 import { cancelAllReminders } from "@/reminders/schedule";
 import { AppBackground } from "@/components/AppBackground";
@@ -229,7 +228,6 @@ export default function More() {
             haptic="none"
             style={{ flexDirection: "row", alignItems: "center", minHeight: 44, paddingHorizontal: spacing.md }}
             onPress={async () => {
-              if (!auth) return;
               try {
                 await unregisterPushToken();
               } catch {
@@ -245,7 +243,7 @@ export default function More() {
               } catch {
                 // best-effort: never trap the user in a session they left
               }
-              await signOut(auth);
+              await signOut();
             }}
           >
             <AppText style={{ flex: 1, fontSize: 15, fontWeight: "500", color: instrument.danger }}>

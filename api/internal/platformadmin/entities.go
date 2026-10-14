@@ -48,7 +48,7 @@ var EntityTypes = []string{TypeUsers, TypeFoods}
 // Kora's own social.FriendView never exposes an email, and this follows it as
 // far as it can, but a directory that cannot tell two people called "Alex"
 // apart does not do the job #433 exists to do. Nothing else about a user
-// leaves through here: no firebase_uid, no targets, no intake, no counts.
+// leaves through here: no idp_subject, no targets, no intake, no counts.
 type Entity struct {
 	ID        string `json:"id"`
 	Type      string `json:"type"`

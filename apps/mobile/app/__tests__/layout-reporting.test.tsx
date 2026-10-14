@@ -21,11 +21,6 @@ jest.mock("expo-router", () => ({
   Stack: Object.assign(() => null, { Screen: () => null }),
 }));
 
-jest.mock("@/lib/firebase", () => ({ auth: null, isFirebaseConfigured: false }));
-jest.mock("firebase/auth", () => ({
-  onAuthStateChanged: jest.fn(() => jest.fn()),
-  signOut: jest.fn(),
-}));
 
 const mockPreviousHandler = jest.fn();
 

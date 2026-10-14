@@ -39,7 +39,7 @@ func seedTestUser(t *testing.T, db *gorm.DB) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
 	require.NoError(t, db.Exec(
-		"INSERT INTO users (id, firebase_uid, email) VALUES (?, ?, ?)",
+		"INSERT INTO users (id, idp_subject, email) VALUES (?, ?, ?)",
 		id, "resolver-"+id.String(), "resolver-"+id.String()+"@test.dev").Error)
 	t.Cleanup(func() {
 		db.Exec("DELETE FROM ai_usage_events WHERE user_id = ?", id)

@@ -57,7 +57,7 @@ type windowSection struct {
 
 // userAIMetric is one user's row in #4.1's "users" section. Counts only,
 // matching user.AdminDetail's posture — no food logs, no coach turns, no
-// target_* value, no firebase_uid, no email. Nothing here widens that.
+// target_* value, no idp_subject, no email. Nothing here widens that.
 type userAIMetric struct {
 	UserID         string `json:"user_id"`
 	Attempts       int64  `json:"attempts"`

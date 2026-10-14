@@ -20,8 +20,8 @@ import (
 // as userID.
 func purchaseRouter(t *testing.T, db *gorm.DB, userID uuid.UUID, gw gateway, now time.Time) *gin.Engine {
 	t.Helper()
-	var firebaseUID string
-	require.NoError(t, db.Raw("SELECT firebase_uid FROM users WHERE id = ?", userID).Scan(&firebaseUID).Error)
+	var subject string
+	require.NoError(t, db.Raw("SELECT idp_subject FROM users WHERE id = ?", userID).Scan(&subject).Error)
 
 	meter := NewMeter(db)
 	meter.now = func() time.Time { return now }
@@ -40,7 +40,7 @@ func purchaseRouter(t *testing.T, db *gorm.DB, userID uuid.UUID, gw gateway, now
 
 	v1 := router.Group("/v1")
 	v1.Use(func(c *gin.Context) {
-		c.Set("uid", firebaseUID)
+		c.Set("uid", subject)
 		c.Next()
 	})
 	v1.Use(user.ResolveMiddleware(user.NewRepository(db)))

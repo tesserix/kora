@@ -20,7 +20,7 @@ func seedUserNamed(t *testing.T, db *gorm.DB, email, displayName string) uuid.UU
 	t.Helper()
 	id := uuid.New()
 	require.NoError(t, db.Exec(
-		"INSERT INTO users (id, firebase_uid, email, display_name) VALUES (?, ?, ?, ?)",
+		"INSERT INTO users (id, idp_subject, email, display_name) VALUES (?, ?, ?, ?)",
 		id, "feedback-"+id.String(), email, displayName).Error)
 	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE id = ?", id) })
 	return id

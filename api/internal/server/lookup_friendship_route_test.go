@@ -29,8 +29,8 @@ import (
 // exist for these fixtures.
 func seedLookupUser(t *testing.T, db *gorm.DB, uid string) user.User {
 	t.Helper()
-	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE firebase_uid = ?", uid) })
-	u, err := user.NewRepository(db).UpsertByFirebaseUID(context.Background(), uid, uid+"@test.dev")
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE idp_subject = ?", uid) })
+	u, err := user.NewRepository(db).UpsertBySubject(context.Background(), uid, uid+"@test.dev")
 	require.NoError(t, err)
 	return u
 }
@@ -47,7 +47,7 @@ func claimLookupHandle(t *testing.T, db *gorm.DB, userID uuid.UUID, raw string) 
 
 func lookupThroughRouter(t *testing.T, db *gorm.DB, as user.User, handle string) *httptest.ResponseRecorder {
 	t.Helper()
-	r := NewRouter(Deps{DB: db, Verifier: uidVerifier{uid: as.FirebaseUID}})
+	r := NewRouter(Deps{DB: db, Verifier: uidVerifier{uid: as.IDPSubject}})
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/users/lookup?handle="+handle, nil)
 	req.Header.Set("Authorization", "Bearer anything")
@@ -57,7 +57,7 @@ func lookupThroughRouter(t *testing.T, db *gorm.DB, as user.User, handle string)
 
 func sendRequestThroughRouter(t *testing.T, db *gorm.DB, as user.User, targetHandle string) *httptest.ResponseRecorder {
 	t.Helper()
-	r := NewRouter(Deps{DB: db, Verifier: uidVerifier{uid: as.FirebaseUID}})
+	r := NewRouter(Deps{DB: db, Verifier: uidVerifier{uid: as.IDPSubject}})
 	w := httptest.NewRecorder()
 	body := `{"handle":"` + targetHandle + `"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/friends/requests", strings.NewReader(body))
@@ -69,7 +69,7 @@ func sendRequestThroughRouter(t *testing.T, db *gorm.DB, as user.User, targetHan
 
 func acceptRequestThroughRouter(t *testing.T, db *gorm.DB, as user.User, requestID uuid.UUID) *httptest.ResponseRecorder {
 	t.Helper()
-	r := NewRouter(Deps{DB: db, Verifier: uidVerifier{uid: as.FirebaseUID}})
+	r := NewRouter(Deps{DB: db, Verifier: uidVerifier{uid: as.IDPSubject}})
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/friends/requests/"+requestID.String()+"/accept", nil)
 	req.Header.Set("Authorization", "Bearer anything")
@@ -135,7 +135,7 @@ func TestLookupThroughTheRouter_RequestReceivedWhenTargetAlreadyAsked(t *testing
 	sr := sendRequestThroughRouter(t, db, target, "lkrecvviewer")
 	require.Equal(t, http.StatusCreated, sr.Code, sr.Body.String())
 
-	// viewer looks target up by their firebase-derived handle... but target
+	// viewer looks target up by their subject-derived handle... but target
 	// has none claimed, so look up by email instead is not possible (Lookup
 	// is handle-only). Claim one for target too.
 	claimLookupHandle(t, db, target.ID, "lkrecvtarget")

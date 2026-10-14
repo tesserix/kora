@@ -50,12 +50,12 @@ func TestMiddlewareCarriesOnlyTheVerifiedTokenInRequestContext(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
-	req.Header.Set("Authorization", "Bearer verified-firebase-token")
+	req.Header.Set("Authorization", "Bearer verified-access-token")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNoContent, w.Code)
-	assert.Equal(t, "verified-firebase-token", got)
+	assert.Equal(t, "verified-access-token", got)
 }
 
 func TestMiddlewareRejectsMissingHeader(t *testing.T) {

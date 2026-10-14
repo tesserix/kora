@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -33,14 +32,13 @@ import (
 //
 // This test only sees routes that the router IT BUILDS actually mounts.
 // router.go gates several groups of /v1 routes behind Deps fields being
-// non-nil/non-empty (DB, Verifier, AppleExchanger, Resolver, Agents, Stripe,
-// BFFHMACKey, PlatformAdminSecret) — see the `if deps.X != nil` / `switch`
-// blocks in NewRouter. TestEveryV1RouteRequiresAuthUnlessAllowlisted below
-// deliberately supplies ALL of these (including a real, unreachable
-// agents.Coordinator and a stub AppleExchanger — both cheap to construct
-// with no network I/O, since construction alone is enough to register their
-// routes) so that every conditionally-mounted /v1 route is discovered, not
-// just the ones that happen to be wired in a minimal test Deps. If a future
+// non-nil/non-empty (DB, Verifier, Resolver, Agents, Stripe, BFFHMACKey,
+// PlatformAdminSecret) — see the `if deps.X != nil` / `switch` blocks in
+// NewRouter. TestEveryV1RouteRequiresAuthUnlessAllowlisted below deliberately
+// supplies ALL of these (including a real, unreachable agents.Coordinator —
+// cheap to construct with no network I/O, since construction alone is enough
+// to register its routes) so that every conditionally-mounted /v1 route is
+// discovered, not just the ones that happen to be wired in a minimal test Deps. If a future
 // route is added inside a NEW conditional block gated on a Deps field this
 // test does not set, it would silently escape this test the same way #371's
 // route escaped the curated list — so any new gating field added to Deps
@@ -54,26 +52,32 @@ import (
 // sends an unauthenticated request to every allowlisted route and requires
 // it to come back refused (some 4xx), just under a different scheme that
 // this test does not pin exactly — see the allowlisted sub-test's comment.
+// v1PublicRoutes answer with no credential at all, by design. Kept apart from
+// v1AuthAllowlist, whose routes must still refuse under another scheme.
+var v1PublicRoutes = map[string]string{
+	"GET /v1/app-config": "min-build gate: the builds it stops are the ones that can no longer sign in",
+}
+
 var v1AuthAllowlist = map[string]string{
 	// /v1/admin/* (tesserix-home admin portal). Mounted on its OWN group in
 	// router.go (`r.Group("/v1/admin", bffauth.Middleware(...))`), separate
-	// from the Firebase-authed `v1` group: the caller is a platform admin
-	// signing an HMAC request, never a Firebase end user. Expected scheme:
+	// from the end-user-authed `v1` group: the caller is a platform admin
+	// signing an HMAC request, never a Kora end user. Expected scheme:
 	// bffauth. An unauthenticated request here is still refused —
 	// bffauth.Middleware answers 401 "invalid or missing signature" — just
 	// not with auth.Middleware's "invalid or missing token" body this test
 	// checks for on every non-allowlisted route.
-	"GET /v1/admin/foods":          "bffauth: admin portal route, not Firebase auth",
-	"GET /v1/admin/foods/:id":      "bffauth: admin portal route, not Firebase auth",
-	"GET /v1/admin/events":         "bffauth: admin portal route, not Firebase auth",
-	"POST /v1/admin/foods":         "bffauth: admin portal route, not Firebase auth",
-	"PATCH /v1/admin/foods/:id":    "bffauth: admin portal route, not Firebase auth",
-	"DELETE /v1/admin/foods/:id":   "bffauth: admin portal route, not Firebase auth",
-	"GET /v1/admin/feedback":       "bffauth: admin portal route, not Firebase auth",
-	"PATCH /v1/admin/feedback/:id": "bffauth: admin portal route, not Firebase auth",
-	"GET /v1/admin/users":          "bffauth: admin portal route, not Firebase auth",
-	"GET /v1/admin/users/:id":      "bffauth: admin portal route, not Firebase auth",
-	"DELETE /v1/admin/users/:id":   "bffauth: admin portal route, not Firebase auth",
+	"GET /v1/admin/foods":          "bffauth: admin portal route, not end-user auth",
+	"GET /v1/admin/foods/:id":      "bffauth: admin portal route, not end-user auth",
+	"GET /v1/admin/events":         "bffauth: admin portal route, not end-user auth",
+	"POST /v1/admin/foods":         "bffauth: admin portal route, not end-user auth",
+	"PATCH /v1/admin/foods/:id":    "bffauth: admin portal route, not end-user auth",
+	"DELETE /v1/admin/foods/:id":   "bffauth: admin portal route, not end-user auth",
+	"GET /v1/admin/feedback":       "bffauth: admin portal route, not end-user auth",
+	"PATCH /v1/admin/feedback/:id": "bffauth: admin portal route, not end-user auth",
+	"GET /v1/admin/users":          "bffauth: admin portal route, not end-user auth",
+	"GET /v1/admin/users/:id":      "bffauth: admin portal route, not end-user auth",
+	"DELETE /v1/admin/users/:id":   "bffauth: admin portal route, not end-user auth",
 
 	// /v1/admin/* (platform console). A SECOND group on the same prefix
 	// (platformadmin.Register), behind platformauth instead of bffauth — see
@@ -81,16 +85,16 @@ var v1AuthAllowlist = map[string]string{
 	// scheme. Expected scheme: platformauth. An unsigned caller is still
 	// refused (401 "unauthenticated"), again just not with auth.Middleware's
 	// body.
-	"GET /v1/admin/audit-logs":                   "platformauth: platform console route, not Firebase auth",
-	"GET /v1/admin/inbox":                        "platformauth: platform console route, not Firebase auth",
-	"GET /v1/admin/entities/:type":               "platformauth: platform console route, not Firebase auth",
-	"GET /v1/admin/health":                       "platformauth: platform console route, not Firebase auth",
-	"GET /v1/admin/kpis":                         "platformauth: platform console route, not Firebase auth",
-	"GET /v1/admin/ai-metrics":                   "platformauth: platform console route, not Firebase auth",
-	"POST /v1/admin/inbox/:id/actions/:actionId": "platformauth: platform console route, not Firebase auth",
-	"GET /v1/admin/agents":                       "platformauth: platform console route, not Firebase auth",
-	"GET /v1/admin/agents/:name":                 "platformauth: platform console route, not Firebase auth",
-	"POST /v1/admin/agents/:name/refresh":        "platformauth: platform console route, not Firebase auth",
+	"GET /v1/admin/audit-logs":                   "platformauth: platform console route, not end-user auth",
+	"GET /v1/admin/inbox":                        "platformauth: platform console route, not end-user auth",
+	"GET /v1/admin/entities/:type":               "platformauth: platform console route, not end-user auth",
+	"GET /v1/admin/health":                       "platformauth: platform console route, not end-user auth",
+	"GET /v1/admin/kpis":                         "platformauth: platform console route, not end-user auth",
+	"GET /v1/admin/ai-metrics":                   "platformauth: platform console route, not end-user auth",
+	"POST /v1/admin/inbox/:id/actions/:actionId": "platformauth: platform console route, not end-user auth",
+	"GET /v1/admin/agents":                       "platformauth: platform console route, not end-user auth",
+	"GET /v1/admin/agents/:name":                 "platformauth: platform console route, not end-user auth",
+	"POST /v1/admin/agents/:name/refresh":        "platformauth: platform console route, not end-user auth",
 }
 
 // concretePath turns a gin route TEMPLATE ("/v1/logs/:id", "/v1/admin/entities/:type")
@@ -114,14 +118,6 @@ func concretePath(pattern string) string {
 		}
 	}
 	return strings.Join(segments, "/")
-}
-
-// stubAppleExchanger is never invoked — its only job is to be non-nil so
-// router.go mounts POST /v1/me/apple-authorization for discovery below.
-type stubAppleExchanger struct{}
-
-func (stubAppleExchanger) ExchangeAuthorizationCode(context.Context, string) (string, error) {
-	return "", nil
 }
 
 // testCoordinator builds a real, but never-called, agents.Coordinator so
@@ -148,7 +144,7 @@ func testCoordinator() *agents.Coordinator {
 //   - requires the route to be named in v1AuthAllowlist with a reason, AND
 //     still confirms an unauthenticated request is refused with SOME 4xx
 //     (see the allowlisted sub-test below) — allowlisting exempts a route
-//     from the exact Firebase-auth body, never from being checked at all.
+//     from the exact end-user-auth body, never from being checked at all.
 //
 // A route registered by `r.GET(...)` instead of `v1.GET(...)` would be
 // discovered here, would not produce the 401 body, and is not (and must
@@ -175,10 +171,8 @@ func TestEveryV1RouteRequiresAuthUnlessAllowlisted(t *testing.T) {
 			SecretKey:     "sk_test_dummy",
 			WebhookSecret: "whsec_dummy",
 		},
-		// Mounts POST /v1/me/apple-authorization — see the coverage-boundary
-		// comment above v1AuthAllowlist.
-		AppleExchanger: stubAppleExchanger{},
-		// Mounts /v1/admin/agents* — same reasoning.
+		// Mounts /v1/admin/agents* — see the coverage-boundary comment above
+		// v1AuthAllowlist.
 		Agents: testCoordinator(),
 	})
 
@@ -189,6 +183,18 @@ func TestEveryV1RouteRequiresAuthUnlessAllowlisted(t *testing.T) {
 			continue
 		}
 		key := route.Method + " " + route.Path
+
+		if reason, ok := v1PublicRoutes[key]; ok {
+			allowlisted++
+			t.Run(key+"/public", func(t *testing.T) {
+				w := httptest.NewRecorder()
+				r.ServeHTTP(w, httptest.NewRequest(route.Method, concretePath(route.Path), nil))
+				if w.Code != http.StatusOK {
+					t.Fatalf("%s is public (%s) but an unauthenticated request got %d", key, reason, w.Code)
+				}
+			})
+			continue
+		}
 
 		if reason, ok := v1AuthAllowlist[key]; ok {
 			allowlisted++
@@ -240,7 +246,7 @@ func TestEveryV1RouteRequiresAuthUnlessAllowlisted(t *testing.T) {
 			}
 
 			assert.Equal(t, http.StatusUnauthorized, w.Code,
-				"%s %s must require Firebase auth (or be added to v1AuthAllowlist with a reason)", route.Method, route.Path)
+				"%s %s must require end-user auth (or be added to v1AuthAllowlist with a reason)", route.Method, route.Path)
 			assert.JSONEq(t, `{"error":"unauthorized","message":"invalid or missing token"}`, w.Body.String(),
 				"%s %s did not produce auth.Middleware's specific refusal", route.Method, route.Path)
 		})
