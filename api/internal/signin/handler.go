@@ -63,6 +63,9 @@ type Config struct {
 	// on the org: see idpFinish.
 	IDPs    map[string]string
 	Deleter IdentityDeleter
+	// Mailer, when set, sends verification and reset codes in Kora's own
+	// email. Nil leaves Zitadel sending them.
+	Mailer Mailer
 }
 
 type Handler struct {
@@ -318,7 +321,7 @@ func (h *Handler) signIn(c *gin.Context) {
 	// Only after the password is proven: otherwise this would tell anyone
 	// which addresses have an unfinished sign-up.
 	if !u.emailVerified {
-		if err := h.zitadel.resendEmailCode(ctx, u.id); err != nil {
+		if err := h.sendCode(ctx, verifyCode, u); err != nil {
 			slog.Warn("signin: resend code on unverified sign-in", "err", err)
 		}
 		httpx.Error(c, http.StatusForbidden, "email_not_verified", "Check your email for a code to confirm your address.")
@@ -367,7 +370,15 @@ func (h *Handler) signUp(c *gin.Context) {
 	if !h.clearUnverified(c, email) {
 		return
 	}
-	_, err := h.zitadel.createPasswordUser(ctx, profileFromName(name, email), email, req.Password)
+	p := profileFromName(name, email)
+	id, code, err := h.zitadel.createPasswordUser(ctx, p, email, req.Password, h.cfg.Mailer != nil)
+	if err == nil && code != "" {
+		// Not an error to the caller: the account exists, and the verify
+		// screen's "send a new code" recovers a lost email.
+		if err := h.deliver(ctx, verifyCode, id, email, p.givenName, code); err != nil {
+			slog.Error("signin: sign-up code", "err", err)
+		}
+	}
 	switch {
 	case errors.Is(err, errWeakPassword):
 		weakPassword(c)
@@ -500,15 +511,51 @@ func (h *Handler) resendCode(c *gin.Context) {
 		if u.emailVerified {
 			return nil
 		}
-		return h.zitadel.resendEmailCode(ctx, u.id)
+		return h.sendCode(ctx, verifyCode, u)
 	})
 }
 
 // passwordReset mails a reset code, answering 202 either way like resendCode.
 func (h *Handler) passwordReset(c *gin.Context) {
 	h.mailToAccount(c, "password reset", func(ctx context.Context, u user) error {
-		return h.zitadel.requestPasswordReset(ctx, u.id)
+		return h.sendCode(ctx, resetCode, u)
 	})
+}
+
+// sendCode issues u a fresh code of kind, replacing any earlier one, and
+// gets it to them: in Kora's own email when a mailer is set, else Zitadel's.
+func (h *Handler) sendCode(ctx context.Context, kind codeKind, u user) error {
+	own := h.cfg.Mailer != nil
+	var code string
+	var err error
+	if kind == resetCode {
+		code, err = h.zitadel.requestPasswordReset(ctx, u.id, own)
+	} else {
+		code, err = h.zitadel.resendEmailCode(ctx, u.id, own)
+	}
+	if err != nil || !own {
+		return err
+	}
+	return h.deliver(ctx, kind, u.id, u.email, u.givenName, code)
+}
+
+// deliver mails code in Kora's own email. If that fails, Zitadel issues and
+// mails a replacement, so a Resend outage costs the branding, not the sign-up.
+func (h *Handler) deliver(ctx context.Context, kind codeKind, userID, to, name, code string) error {
+	msg, err := codeEmail(kind, to, name, code)
+	if err == nil {
+		err = h.cfg.Mailer.Send(ctx, msg)
+	}
+	if err == nil {
+		return nil
+	}
+	slog.Warn("signin: own code email failed, falling back to Zitadel's", "err", err)
+	if kind == resetCode {
+		_, err = h.zitadel.requestPasswordReset(ctx, userID, false)
+	} else {
+		_, err = h.zitadel.resendEmailCode(ctx, userID, false)
+	}
+	return err
 }
 
 func (h *Handler) mailToAccount(c *gin.Context, op string, send func(context.Context, user) error) {

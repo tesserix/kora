@@ -136,16 +136,21 @@ func (d *recordingDeleter) DeleteIdentity(_ context.Context, subject string) err
 }
 
 func newTestHandler(f *fakeZitadel, deleter IdentityDeleter) *gin.Engine {
+	return newHandlerWith(f, func(c *Config) { c.Deleter = deleter })
+}
+
+func newHandlerWith(f *fakeZitadel, configure func(*Config)) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	NewHandler(Config{
+	cfg := Config{
 		Issuer:    f.srv.URL,
 		ProjectID: "proj-kora",
 		Token:     "pat",
 		ClientIDs: map[string]string{"ios": "client-ios", "android": "client-android"},
 		IDPs:      map[string]string{"google": testGoogleIDP, "apple": testAppleIDP},
-		Deleter:   deleter,
-	}).Mount(r)
+	}
+	configure(&cfg)
+	NewHandler(cfg).Mount(r)
 	return r
 }
 
