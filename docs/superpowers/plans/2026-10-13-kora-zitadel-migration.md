@@ -84,7 +84,8 @@
 5. Reduce `sign-in.tsx` to **Continue** and **Create account** (`prompt=create`). Keep `?reason=expired`.
 6. Delete:
    - `firebase.ts`, `firebaseConfig.ts`, `firebaseAuthMessage.ts`, `secureAuthStorage.ts` (Firebase-key adapter), `socialAuth.ts`, `socialCredentials.ts`, `link.ts`, `LinkAccountPrompt.tsx`, `AppleSignInButton.tsx`, and their tests
-   - `GoogleService-Info.plist`, `firebase.json`, the google-signin plugin and `iosUrlScheme`, `ios.googleServicesFile`, and Android `GOOGLE_SERVICES_JSON`
+   - `GoogleService-Info.plist`, `firebase.json`, the google-signin plugin and `iosUrlScheme`, and `ios.googleServicesFile`
+   - Keep Android `googleServicesFile` / `GOOGLE_SERVICES_JSON`. `expo-notifications` gets Android push tokens through FCM, which reads that file, so removing it breaks Android push. It stays even with no Firebase SDK in the app.
    - the `firebase` and `@react-native-google-signin/google-signin` dependencies
    - `expo-apple-authentication` and `ios.usesAppleSignIn` (D7)
 7. Config: add `EXPO_PUBLIC_ZITADEL_ISSUER`, `_PROJECT_ID`, `_CLIENT_ID` (per platform) in `eas.json`. Point `config-missing` at them. Add `com.tesserix.kora` as a second scheme in `app.json` (`"scheme": ["mobile", "com.tesserix.kora"]`). Widgets and the billing return still use `mobile://`.
@@ -115,7 +116,7 @@
    - Remove `FIREBASE_*` and `APPLE_*` from `charts/apps/kora-api/values.yaml`.
    - Remove the `kora-apple-*` ExternalSecret entries and their OpenBao keys.
 2. Replace `docs/runbooks/kora-firebase-identity-deletion.md` with a Zitadel equivalent, and fix the stale `api/.env.example`.
-3. After human sign-off, remove the custom IAM role `koraFirebaseUserDelete` and disable Firebase Auth on `kora-app-e6d38`. Leave the GCP project itself until confirmed nothing else uses it.
+3. After human sign-off, remove the custom IAM role `koraFirebaseUserDelete` and disable Firebase Auth on `kora-app-e6d38`. Keep the project: Expo push delivers to Android through its Cloud Messaging (FCM v1) credentials.
 
 ## Rollback
 
