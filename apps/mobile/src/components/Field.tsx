@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type Ref } from "react";
 import { StyleSheet, TextInput, View, type TextInputProps } from "react-native";
 import { AppText } from "./Text";
 import { useTheme } from "@/theme";
@@ -6,6 +6,8 @@ import { useTheme } from "@/theme";
 export interface FieldProps extends TextInputProps {
   label: string;
   error?: string;
+  // A plain prop under React 19, so a form can move focus to the next field.
+  ref?: Ref<TextInput>;
 }
 
 // A labelled input: persistent label above, input below, optional error slot
@@ -22,7 +24,7 @@ export interface FieldProps extends TextInputProps {
 // with a glassBorder edge, ink text, mut placeholder, and an accent-colored
 // border while focused (spec: Field.tsx > "inset well bg, glassBorder
 // border, ink text, mut placeholder, accent focus ring").
-export function Field({ label, error, accessibilityLabel, style, onFocus, onBlur, ...inputProps }: FieldProps) {
+export function Field({ label, error, accessibilityLabel, style, onFocus, onBlur, ref, ...inputProps }: FieldProps) {
   const { instrument, spacing, fontSize, fonts } = useTheme();
   const [focused, setFocused] = useState(false);
 
@@ -45,6 +47,7 @@ export function Field({ label, error, accessibilityLabel, style, onFocus, onBlur
         }}
       >
         <TextInput
+          ref={ref}
           accessibilityLabel={accessibilityLabel ?? label}
           placeholderTextColor={instrument.mut}
           onFocus={(e) => {

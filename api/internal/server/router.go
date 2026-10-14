@@ -48,6 +48,7 @@ import (
 	"github.com/tesserix/kora/api/internal/resolve"
 	"github.com/tesserix/kora/api/internal/savedmeals"
 	"github.com/tesserix/kora/api/internal/share"
+	"github.com/tesserix/kora/api/internal/signin"
 	"github.com/tesserix/kora/api/internal/social"
 	"github.com/tesserix/kora/api/internal/tracking"
 	"github.com/tesserix/kora/api/internal/user"
@@ -127,6 +128,10 @@ type Deps struct {
 	// "NEEDS MANUAL CLEANUP" (see unwiredIdentityDeleter), never to a panic
 	// that turns a completed deletion into a 500.
 	IdentityDeleter user.IdentityDeleter
+	// SignIn backs the app's own sign-in, sign-up and reset screens under
+	// /v1/auth/*, which are public: the caller has no token yet. Nil leaves
+	// them unmounted.
+	SignIn *signin.Handler
 	// Stripe is the payment gateway paid AI top-ups would be bought through.
 	//
 	// Kora has no live rail: Cashfree was removed in kora#479 (the owner's
@@ -163,6 +168,10 @@ func NewRouter(deps Deps) *gin.Engine {
 	r.GET("/v1/app-config", func(c *gin.Context) {
 		httpx.OK(c, gin.H{"min_build": gin.H{"ios": deps.MinBuild.IOS, "android": deps.MinBuild.Android}})
 	})
+
+	if deps.SignIn != nil {
+		deps.SignIn.Mount(r)
+	}
 
 	r.GET("/ready", func(c *gin.Context) {
 		if deps.DB == nil {

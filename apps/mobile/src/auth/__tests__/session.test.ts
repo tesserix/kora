@@ -34,51 +34,96 @@ function tokenResponse(body: Record<string, unknown>, ok = true) {
   return { ok, status: ok ? 200 : 400, json: async () => body };
 }
 
+function apiResponse(status: number, body: Record<string, unknown>) {
+  return { ok: status >= 200 && status < 300, status, json: async () => body };
+}
+
 async function signInAs(sub: string, expiresIn = 3600) {
-  mockOpenAuthSession.mockImplementation(async (url: string) => {
-    const state = new URLSearchParams(url.split("?")[1]).get("state");
-    return { type: "success", url: `com.tesserix.kora:/auth/callback?code=c1&state=${state}` };
-  });
+  fetchMock.mockResolvedValueOnce(apiResponse(200, { data: { code: "c1" } }));
   fetchMock.mockResolvedValueOnce(
     tokenResponse({ access_token: jwt({ sub }), refresh_token: "rt-1", expires_in: expiresIn }),
   );
-  await session.signIn();
+  await session.signInWithPassword("ann@example.com", "pw");
 }
 
-test("sign-in requests the Kora project audience with PKCE and stores the session", async () => {
+test("password sign-in goes through kora-api, then redeems the code with PKCE", async () => {
   const seen: (string | null)[] = [];
   session.onAuthChange((uid) => seen.push(uid));
   await signInAs("user-1");
 
-  const url: string = mockOpenAuthSession.mock.calls[0][0];
-  const params = new URLSearchParams(url.split("?")[1]);
-  expect(params.get("scope")).toContain("urn:zitadel:iam:org:project:id:394926080202442797:aud");
-  expect(params.get("scope")).toContain("offline_access");
-  expect(params.get("code_challenge_method")).toBe("S256");
-  expect(params.get("redirect_uri")).toBe("com.tesserix.kora:/auth/callback");
-  expect(params.get("prompt")).toBeNull();
+  const [apiURL, apiInit] = fetchMock.mock.calls[0];
+  expect(apiURL).toBe("http://localhost:8080/v1/auth/sign-in");
+  const sent = JSON.parse(apiInit.body);
+  expect(sent).toMatchObject({ email: "ann@example.com", password: "pw", platform: "ios" });
+  expect(sent.code_challenge).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  // The verifier never leaves the device except to Zitadel's token endpoint.
+  expect(apiInit.body).not.toContain("code_verifier");
 
-  const form = new URLSearchParams(fetchMock.mock.calls[0][1].body);
+  expect(fetchMock.mock.calls[1][0]).toBe("https://auth.tesserix.app/oauth/v2/token");
+  const form = new URLSearchParams(fetchMock.mock.calls[1][1].body);
   expect(form.get("grant_type")).toBe("authorization_code");
+  expect(form.get("code")).toBe("c1");
+  expect(form.get("redirect_uri")).toBe("com.tesserix.kora:/auth/callback");
+  expect(form.get("client_id")).toBe("kora-ios-client");
   expect(form.get("code_verifier")).toBeTruthy();
 
   expect(session.currentUserId()).toBe("user-1");
   expect(seen).toEqual([null, "user-1"]);
   expect(JSON.parse(mockStore.get("kora.zitadel.session")!).sub).toBe("user-1");
+  expect(mockOpenAuthSession).not.toHaveBeenCalled();
 });
 
-test("register opens the hosted registration screen", async () => {
-  mockOpenAuthSession.mockResolvedValue({ type: "cancel" });
-  await expect(session.signIn({ register: true })).rejects.toMatchObject({ code: "cancelled" });
-  const params = new URLSearchParams(mockOpenAuthSession.mock.calls[0][0].split("?")[1]);
-  expect(params.get("prompt")).toBe("create");
-});
-
-test("a callback with the wrong state is refused", async () => {
-  mockOpenAuthSession.mockResolvedValue({ type: "success", url: "com.tesserix.kora:/auth/callback?code=c&state=forged" });
-  await expect(session.signIn()).rejects.toMatchObject({ code: "state_mismatch" });
-  expect(fetchMock).not.toHaveBeenCalled();
+test("a refusal carries kora-api's code and wording and redeems nothing", async () => {
+  fetchMock.mockResolvedValueOnce(
+    apiResponse(401, { error: "invalid_credentials", message: "That email and password don't match." }),
+  );
+  await expect(session.signInWithPassword("ann@example.com", "nope")).rejects.toMatchObject({
+    code: "invalid_credentials",
+    userMessage: "That email and password don't match.",
+  });
+  expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(session.currentUserId()).toBeNull();
+});
+
+test("provider sign-in goes straight to the provider and finishes through kora-api", async () => {
+  fetchMock.mockResolvedValueOnce(apiResponse(200, { data: { auth_url: "https://accounts.google.com/o/oauth2/auth?x" } }));
+  mockOpenAuthSession.mockResolvedValue({
+    type: "success",
+    url: "com.tesserix.kora:/auth/idp?id=i-1&token=t-1&user=someone-else",
+  });
+  fetchMock.mockResolvedValueOnce(apiResponse(200, { data: { code: "c2" } }));
+  fetchMock.mockResolvedValueOnce(tokenResponse({ access_token: jwt({ sub: "user-3" }), refresh_token: "rt", expires_in: 3600 }));
+
+  await session.signInWithProvider("google");
+
+  expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ provider: "google" });
+  expect(mockOpenAuthSession).toHaveBeenCalledWith("https://accounts.google.com/o/oauth2/auth?x", "com.tesserix.kora:/auth/idp");
+  const [finishURL, finishInit] = fetchMock.mock.calls[1];
+  expect(finishURL).toBe("http://localhost:8080/v1/auth/idp/finish");
+  const finish = JSON.parse(finishInit.body);
+  expect(finish).toMatchObject({ provider: "google", intent_id: "i-1", intent_token: "t-1", platform: "ios" });
+  // The browser-carried `user` is never forwarded as an identity.
+  expect(finish.user).toBeUndefined();
+  expect(session.currentUserId()).toBe("user-3");
+});
+
+test("closing the provider sheet or declining there is a cancel, not an error", async () => {
+  for (const result of [{ type: "cancel" }, { type: "success", url: "com.tesserix.kora:/auth/idp?id=i&error=access_denied" }]) {
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValueOnce(apiResponse(200, { data: { auth_url: "https://appleid.apple.com/auth" } }));
+    mockOpenAuthSession.mockResolvedValueOnce(result);
+    await expect(session.signInWithProvider("apple")).rejects.toMatchObject({ code: "cancelled" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  }
+});
+
+test("account calls post to their kora-api routes", async () => {
+  fetchMock.mockResolvedValue(apiResponse(202, { data: { verification_sent: true } }));
+  await session.account.signUp("Ann", "ann@example.com", "pw");
+  await session.account.confirmPasswordReset("ann@example.com", "ABC123", "pw2");
+  expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:8080/v1/auth/sign-up");
+  expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ name: "Ann", email: "ann@example.com", password: "pw" });
+  expect(fetchMock.mock.calls[1][0]).toBe("http://localhost:8080/v1/auth/password-reset/confirm");
 });
 
 test("a persisted session is restored before the first auth callback", async () => {
@@ -99,8 +144,9 @@ test("a nearly expired token is refreshed once for concurrent callers", async ()
   const [a, b] = await Promise.all([session.getAccessToken(), session.getAccessToken()]);
 
   expect(a).toBe(b);
-  expect(fetchMock).toHaveBeenCalledTimes(2);
-  const form = new URLSearchParams(fetchMock.mock.calls[1][1].body);
+  // Sign-in made two calls (kora-api, then the token endpoint); one refresh follows.
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+  const form = new URLSearchParams(fetchMock.mock.calls[2][1].body);
   expect(form.get("grant_type")).toBe("refresh_token");
   expect(form.get("refresh_token")).toBe("rt-1");
   expect(JSON.parse(mockStore.get("kora.zitadel.session")!).refreshToken).toBe("rt-2");
@@ -130,8 +176,8 @@ test("sign-out clears locally first and revokes the refresh token best-effort", 
 
   expect(session.currentUserId()).toBeNull();
   expect(mockStore.has("kora.zitadel.session")).toBe(false);
-  expect(fetchMock.mock.calls[1][0]).toBe("https://auth.tesserix.app/oauth/v2/revoke");
-  expect(new URLSearchParams(fetchMock.mock.calls[1][1].body).get("token")).toBe("rt-1");
+  expect(fetchMock.mock.calls[2][0]).toBe("https://auth.tesserix.app/oauth/v2/revoke");
+  expect(new URLSearchParams(fetchMock.mock.calls[2][1].body).get("token")).toBe("rt-1");
 });
 
 test("subjectOf reads sub and rejects garbage", () => {

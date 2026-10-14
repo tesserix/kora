@@ -12,6 +12,7 @@ import (
 	"github.com/tesserix/kora/api/internal/agents"
 	"github.com/tesserix/kora/api/internal/billing"
 	"github.com/tesserix/kora/api/internal/resolve"
+	"github.com/tesserix/kora/api/internal/signin"
 )
 
 // This file guards a STRUCTURAL property, not a curated list of endpoints:
@@ -95,6 +96,18 @@ var v1AuthAllowlist = map[string]string{
 	"GET /v1/admin/agents":                       "platformauth: platform console route, not end-user auth",
 	"GET /v1/admin/agents/:name":                 "platformauth: platform console route, not end-user auth",
 	"POST /v1/admin/agents/:name/refresh":        "platformauth: platform console route, not end-user auth",
+	// /v1/auth/* (package signin) is how a caller GETS a token, so it cannot
+	// require one. The credential is the body instead: an email and password,
+	// an emailed code, or a finished Google/Apple intent. With no body every
+	// route refuses with 400 before reaching Zitadel.
+	"POST /v1/auth/sign-in":                "signin: credential is in the body",
+	"POST /v1/auth/sign-up":                "signin: creates the account a token will be issued for",
+	"POST /v1/auth/verify-email":           "signin: credential is the emailed code",
+	"POST /v1/auth/resend-code":            "signin: answers 202 whether or not the account exists",
+	"POST /v1/auth/password-reset":         "signin: answers 202 whether or not the account exists",
+	"POST /v1/auth/password-reset/confirm": "signin: credential is the emailed code",
+	"POST /v1/auth/idp/start":              "signin: returns a provider URL, grants nothing",
+	"POST /v1/auth/idp/finish":             "signin: credential is the finished intent",
 }
 
 // concretePath turns a gin route TEMPLATE ("/v1/logs/:id", "/v1/admin/entities/:type")
@@ -174,6 +187,9 @@ func TestEveryV1RouteRequiresAuthUnlessAllowlisted(t *testing.T) {
 		// Mounts /v1/admin/agents* — see the coverage-boundary comment above
 		// v1AuthAllowlist.
 		Agents: testCoordinator(),
+		// Mounts /v1/auth/*. Any non-empty token builds the client; no request
+		// in this test gets far enough to use it.
+		SignIn: signin.NewHandler(signin.Config{Token: "unused"}),
 	})
 
 	routes := r.Routes()

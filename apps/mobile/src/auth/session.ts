@@ -1,8 +1,10 @@
-// Kora's sign-in session: Zitadel hosted login (authorization code + PKCE)
-// against the kora-ios / kora-android native clients, modelled on HomeChef's
+// Kora's sign-in session: Zitadel authorization codes (with PKCE) for the
+// kora-ios / kora-android native clients, obtained through kora-api's
+// /v1/auth/* rather than Zitadel's hosted login, so every sign-in screen is
+// Kora's own. Token handling is modelled on HomeChef's
 // packages/mobile-shared/src/auth/zitadel.ts.
 //
-// The system browser owns credentials. The app keeps the access token, which
+// The app keeps the access token, which
 // kora-api verifies locally, and the refresh token that renews it. Everything
 // that used to read Firebase's `auth` reads this module instead:
 // onAuthChange for transitions, currentUserId for a synchronous snapshot, and
@@ -56,7 +58,12 @@ let ready: Promise<void> | null = null;
 let refreshing: Promise<string | null> | null = null;
 
 export class AuthSessionError extends Error {
-  constructor(public readonly code: string) {
+  // userMessage is kora-api's own wording for a refusal, written for people;
+  // absent for errors raised on the device.
+  constructor(
+    public readonly code: string,
+    public readonly userMessage?: string,
+  ) {
     super(code);
     this.name = "AuthSessionError";
   }
@@ -191,13 +198,21 @@ function sessionFrom(tokens: TokenResponse, previous: Session | null): Session {
   return { sub, accessToken, refreshToken, expiresAt: Date.now() + (tokens.expires_in ?? 0) * 1000 };
 }
 
-// signIn runs the hosted-login round trip in the system browser. `register`
-// opens Zitadel's registration screen instead of sign-in. Throws
-// AuthSessionError("cancelled") when the user closes the browser.
-export async function signIn(options: { register?: boolean } = {}): Promise<void> {
-  if (!isAuthConfigured) throw new AuthSessionError("unconfigured");
+// The app's own sign-in screens post to kora-api's /v1/auth/*, which checks
+// the credential through Zitadel's Session API and answers with an
+// authorization code for this client. The app redeems the code itself with the
+// PKCE verifier it never sent, so the tokens are issued to this device alone
+// and kora-api never holds them. Zitadel's hosted login is never shown.
+const API_URL = (process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:8080").replace(/\/$/, "");
+// Where Zitadel sends the browser after Google or Apple. kora-api fixes this
+// URL on its side; the app only has to close its auth session on it.
+const IDP_CALLBACK = "com.tesserix.kora:/auth/idp";
+const PLATFORM = Platform.OS === "android" ? "android" : "ios";
+
+export type Provider = "google" | "apple";
+
+async function pkce(): Promise<{ verifier: string; challenge: string }> {
   const verifier = base64Url(Crypto.getRandomBytes(32));
-  const state = base64Url(Crypto.getRandomBytes(16));
   const challenge = (
     await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, verifier, {
       encoding: Crypto.CryptoEncoding.BASE64,
@@ -206,34 +221,27 @@ export async function signIn(options: { register?: boolean } = {}): Promise<void
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=+$/, "");
-  const params: Record<string, string> = {
-    client_id: CLIENT_ID,
-    redirect_uri: REDIRECT_URI,
-    response_type: "code",
-    // The project audience scope is what lets kora-api and the AI gateway
-    // accept the access token: both pin aud to the Kora project.
-    scope: `openid profile email offline_access urn:zitadel:iam:org:project:id:${PROJECT_ID}:aud`,
-    state,
-    code_challenge: challenge,
-    code_challenge_method: "S256",
-  };
-  if (options.register) params.prompt = "create";
-  const qs = Object.entries(params)
-    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
-    .join("&");
+  return { verifier, challenge };
+}
 
-  const result = await WebBrowser.openAuthSessionAsync(`${ISSUER}/oauth/v2/authorize?${qs}`, REDIRECT_URI);
-  if (result.type !== "success" || !result.url) {
-    throw new AuthSessionError(result.type === "cancel" || result.type === "dismiss" ? "cancelled" : "browser_failed");
-  }
-  const callback = parseCallbackParams(result.url);
-  if (callback.error) throw new AuthSessionError(callback.error);
-  if (callback.state !== state) throw new AuthSessionError("state_mismatch");
-  if (!callback.code) throw new AuthSessionError("no_code");
+// authPost calls one of kora-api's public /v1/auth routes. A refusal becomes
+// an AuthSessionError carrying the API's error code and its user-facing
+// message; a network failure stays a TypeError, which screens read as offline.
+export async function authPost<T>(path: string, body: Record<string, string>): Promise<T> {
+  const res = await fetch(`${API_URL}/v1/auth/${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const parsed = (await res.json().catch(() => ({}))) as { data?: T; error?: string; message?: string };
+  if (!res.ok) throw new AuthSessionError(parsed.error ?? `http_${res.status}`, parsed.message);
+  return (parsed.data ?? {}) as T;
+}
 
+async function redeem(code: string, verifier: string): Promise<void> {
   const tokens = await tokenRequest({
     grant_type: "authorization_code",
-    code: callback.code,
+    code,
     redirect_uri: REDIRECT_URI,
     client_id: CLIENT_ID,
     code_verifier: verifier,
@@ -242,6 +250,61 @@ export async function signIn(options: { register?: boolean } = {}): Promise<void
   await persist(sessionFrom(tokens, null));
   emit();
 }
+
+// signInWithPassword signs in with an email and password. Throws
+// AuthSessionError("invalid_credentials"), ("email_not_verified") when the
+// account still needs its emailed code (a fresh one has just been sent), or
+// another code from kora-api.
+export async function signInWithPassword(email: string, password: string): Promise<void> {
+  if (!isAuthConfigured) throw new AuthSessionError("unconfigured");
+  const { verifier, challenge } = await pkce();
+  const { code } = await authPost<{ code: string }>("sign-in", {
+    email,
+    password,
+    platform: PLATFORM,
+    code_challenge: challenge,
+  });
+  await redeem(code, verifier);
+}
+
+// signInWithProvider goes straight to Google's or Apple's own sign-in in the
+// system auth sheet, then finishes through kora-api. First use creates the
+// Kora account. Throws AuthSessionError("cancelled") when the sheet is closed.
+export async function signInWithProvider(provider: Provider): Promise<void> {
+  if (!isAuthConfigured) throw new AuthSessionError("unconfigured");
+  const { auth_url: authUrl } = await authPost<{ auth_url: string }>("idp/start", { provider });
+  const result = await WebBrowser.openAuthSessionAsync(authUrl, IDP_CALLBACK);
+  if (result.type !== "success" || !result.url) {
+    throw new AuthSessionError(result.type === "cancel" || result.type === "dismiss" ? "cancelled" : "browser_failed");
+  }
+  // `user` is also on this URL and is deliberately ignored: kora-api resolves
+  // the identity from the intent alone.
+  const callback = parseCallbackParams(result.url);
+  if (callback.error) {
+    throw new AuthSessionError(callback.error === "access_denied" ? "cancelled" : "provider_failed");
+  }
+  if (!callback.id || !callback.token) throw new AuthSessionError("provider_failed");
+  const { verifier, challenge } = await pkce();
+  const { code } = await authPost<{ code: string }>("idp/finish", {
+    provider,
+    intent_id: callback.id,
+    intent_token: callback.token,
+    platform: PLATFORM,
+    code_challenge: challenge,
+  });
+  await redeem(code, verifier);
+}
+
+// The account steps that end in no session of their own: the screens follow
+// each with signInWithPassword.
+export const account = {
+  signUp: (name: string, email: string, password: string) => authPost("sign-up", { name, email, password }),
+  verifyEmail: (email: string, code: string) => authPost("verify-email", { email, code }),
+  resendCode: (email: string) => authPost("resend-code", { email }),
+  requestPasswordReset: (email: string) => authPost("password-reset", { email }),
+  confirmPasswordReset: (email: string, code: string, password: string) =>
+    authPost("password-reset/confirm", { email, code, password }),
+};
 
 async function refresh(): Promise<string | null> {
   const current = session;

@@ -49,6 +49,7 @@ import (
 	"github.com/tesserix/kora/api/internal/resolveoutcome"
 	"github.com/tesserix/kora/api/internal/scheduler"
 	"github.com/tesserix/kora/api/internal/server"
+	"github.com/tesserix/kora/api/internal/signin"
 	"github.com/tesserix/kora/api/internal/user"
 )
 
@@ -90,6 +91,9 @@ func main() {
 		}
 	} else {
 		logger.Warn("zitadel identity deletion disabled (no ZITADEL_DELETER_TOKEN)")
+	}
+	if cfg.ZitadelLoginClientToken == "" {
+		logger.Warn("in-app sign-in disabled (no ZITADEL_LOGIN_CLIENT_TOKEN); /v1/auth/* answers 503")
 	}
 
 	resolveHandler, aiProvider, resolveCache, bodyCompositionCache := buildResolveHandler(context.Background(), cfg, db, logger)
@@ -265,6 +269,14 @@ func main() {
 			PlatformAdminSecret:  cfg.PlatformAdminSecret,
 			PlatformHealthProbes: healthProbes,
 			IdentityDeleter:      identityDeleter,
+			SignIn: signin.NewHandler(signin.Config{
+				Issuer:    cfg.ZitadelIssuer,
+				ProjectID: cfg.ZitadelProjectID,
+				Token:     cfg.ZitadelLoginClientToken,
+				ClientIDs: map[string]string{"ios": cfg.ZitadelClientIDIOS, "android": cfg.ZitadelClientIDAndroid},
+				IDPs:      map[string]string{"google": cfg.ZitadelGoogleIDPID, "apple": cfg.ZitadelAppleIDPID},
+				Deleter:   identityDeleter,
+			}),
 			Stripe: billing.StripeConfig{
 				SecretKey:     cfg.StripeSecretKey,
 				WebhookSecret: cfg.StripeWebhookSecret,

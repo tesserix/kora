@@ -11,7 +11,10 @@ const listeners = new Set<Listener>();
 const state = { uid: DEFAULT_USER as string | null, token: "test-token" as string | null };
 
 class AuthSessionError extends Error {
-  constructor(public readonly code: string) {
+  constructor(
+    public readonly code: string,
+    public readonly userMessage?: string,
+  ) {
     super(code);
     this.name = "AuthSessionError";
   }
@@ -27,7 +30,9 @@ const defaults = {
       listeners.delete(listener);
     };
   },
-  signIn: async (_options?: { register?: boolean }) => {},
+  signInWithPassword: async (_email: string, _password: string) => {},
+  signInWithProvider: async (_provider: "google" | "apple") => {},
+  authPost: async (_path: string, _body: Record<string, string>) => ({}),
   signOut: async () => {},
   subjectOf: (_jwt: string): string | null => null,
   parseCallbackParams: (_url: string): Record<string, string> => ({}),
@@ -41,7 +46,16 @@ export const sessionMock = {
   currentUserId: jest.fn(defaults.currentUserId),
   getAccessToken: jest.fn(defaults.getAccessToken),
   onAuthChange: jest.fn(defaults.onAuthChange),
-  signIn: jest.fn(defaults.signIn),
+  signInWithPassword: jest.fn(defaults.signInWithPassword),
+  signInWithProvider: jest.fn(defaults.signInWithProvider),
+  authPost: jest.fn(defaults.authPost),
+  account: {
+    signUp: jest.fn(async (_name: string, _email: string, _password: string) => ({})),
+    verifyEmail: jest.fn(async (_email: string, _code: string) => ({})),
+    resendCode: jest.fn(async (_email: string) => ({})),
+    requestPasswordReset: jest.fn(async (_email: string) => ({})),
+    confirmPasswordReset: jest.fn(async (_email: string, _code: string, _password: string) => ({})),
+  },
   signOut: jest.fn(defaults.signOut),
   subjectOf: jest.fn(defaults.subjectOf),
   parseCallbackParams: jest.fn(defaults.parseCallbackParams),
@@ -66,6 +80,7 @@ export const sessionMock = {
     state.uid = DEFAULT_USER;
     state.token = "test-token";
     sessionMock.isAuthConfigured = true;
+    for (const fn of Object.values(sessionMock.account)) fn.mockReset().mockResolvedValue({});
     for (const [name, impl] of Object.entries(defaults)) {
       (sessionMock[name as keyof typeof defaults] as jest.Mock).mockReset().mockImplementation(impl);
     }
