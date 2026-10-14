@@ -29,7 +29,7 @@
 // system cares about.
 //
 // The embedding route is also the ONLY gateway capability reachable without a
-// Firebase end-user token: AgentgatewayPolicy/kora-user-auth targets the
+// Zitadel end-user token: AgentgatewayPolicy/kora-user-auth targets the
 // conversation, structured and default sections of the kora-ai HTTPRoute, and
 // the embedding section is not among them. So this arm can be run today while
 // identify and coach cannot.
