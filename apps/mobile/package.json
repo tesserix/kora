@@ -34,6 +34,7 @@
     "expo-secure-store": "~57.0.4",
     "expo-splash-screen": "~57.0.10",
     "expo-symbols": "~57.0.2",
+    "expo-web-browser": "~57.0.3",
     "firebase": "^12.16.0",
     "lucide-react-native": "^1.26.0",
     "react": "19.2.3",
