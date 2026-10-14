@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -129,6 +130,11 @@ type Config struct {
 	// carried on that URL is never trusted; it only closes the browser and
 	// prompts the app to ask the gateway what happened.
 	StripeReturnURL string
+	// MinBuildIOS and MinBuildAndroid are the oldest native build numbers the
+	// API still serves; GET /v1/app-config hands them to the app, which blocks
+	// on an update screen below them. Zero gates nothing.
+	MinBuildIOS     int
+	MinBuildAndroid int
 	// Object storage for user-supplied assets (kora#449). Empty AssetsBucket
 	// selects assets.Noop -- an environment with no bucket behaves as if every
 	// user has no picture, rather than failing uploads, so nobody working on
@@ -184,6 +190,8 @@ func Load() (Config, error) {
 		StripeSecretKey:          os.Getenv("STRIPE_SECRET_KEY"),
 		StripeWebhookSecret:      os.Getenv("STRIPE_WEBHOOK_SECRET"),
 		StripeReturnURL:          getenv("STRIPE_RETURN_URL", "mobile://billing/return"),
+		MinBuildIOS:              getint("KORA_MIN_BUILD_IOS"),
+		MinBuildAndroid:          getint("KORA_MIN_BUILD_ANDROID"),
 		AssetsBucket:             os.Getenv("ASSETS_BUCKET"),
 		AssetsPublicBaseURL:      os.Getenv("ASSETS_PUBLIC_BASE_URL"),
 		AssetsLocalDir:           os.Getenv("ASSETS_LOCAL_DIR"),
@@ -276,6 +284,17 @@ func getenv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// getint reads a non-negative integer, treating unset or malformed as 0. For
+// the min-build gate, failing open is right: a typo must not lock every user
+// out of the app.
+func getint(key string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(os.Getenv(key)))
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
 }
 
 func getdur(key string, fallback time.Duration) time.Duration {

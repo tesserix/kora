@@ -52,6 +52,12 @@ import (
 // sends an unauthenticated request to every allowlisted route and requires
 // it to come back refused (some 4xx), just under a different scheme that
 // this test does not pin exactly — see the allowlisted sub-test's comment.
+// v1PublicRoutes answer with no credential at all, by design. Kept apart from
+// v1AuthAllowlist, whose routes must still refuse under another scheme.
+var v1PublicRoutes = map[string]string{
+	"GET /v1/app-config": "min-build gate: the builds it stops are the ones that can no longer sign in",
+}
+
 var v1AuthAllowlist = map[string]string{
 	// /v1/admin/* (tesserix-home admin portal). Mounted on its OWN group in
 	// router.go (`r.Group("/v1/admin", bffauth.Middleware(...))`), separate
@@ -177,6 +183,18 @@ func TestEveryV1RouteRequiresAuthUnlessAllowlisted(t *testing.T) {
 			continue
 		}
 		key := route.Method + " " + route.Path
+
+		if reason, ok := v1PublicRoutes[key]; ok {
+			allowlisted++
+			t.Run(key+"/public", func(t *testing.T) {
+				w := httptest.NewRecorder()
+				r.ServeHTTP(w, httptest.NewRequest(route.Method, concretePath(route.Path), nil))
+				if w.Code != http.StatusOK {
+					t.Fatalf("%s is public (%s) but an unauthenticated request got %d", key, reason, w.Code)
+				}
+			})
+			continue
+		}
 
 		if reason, ok := v1AuthAllowlist[key]; ok {
 			allowlisted++

@@ -249,6 +249,7 @@ func main() {
 			DB:                   db,
 			Verifier:             verifier,
 			ProfileSource:        profiles,
+			MinBuild:             server.MinBuild{IOS: cfg.MinBuildIOS, Android: cfg.MinBuildAndroid},
 			Resolver:             resolveHandler,
 			Provider:             aiProvider,
 			Agents:               coordinator,

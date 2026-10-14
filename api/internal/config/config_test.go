@@ -429,3 +429,20 @@ func TestLoadRejectsAShortAITraceUserKey(t *testing.T) {
 	_, err := Load()
 	require.ErrorContains(t, err, "KORA_AI_TRACE_USER_KEY")
 }
+
+func TestLoadReadsMinBuildsAndFailsOpenOnBadValues(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/testdb")
+	t.Setenv("KORA_MIN_BUILD_IOS", " 42 ")
+	t.Setenv("KORA_MIN_BUILD_ANDROID", "17")
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, 42, cfg.MinBuildIOS)
+	assert.Equal(t, 17, cfg.MinBuildAndroid)
+
+	t.Setenv("KORA_MIN_BUILD_IOS", "forty")
+	t.Setenv("KORA_MIN_BUILD_ANDROID", "-3")
+	cfg, err = Load()
+	require.NoError(t, err)
+	assert.Zero(t, cfg.MinBuildIOS)
+	assert.Zero(t, cfg.MinBuildAndroid)
+}

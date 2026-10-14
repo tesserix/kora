@@ -24,7 +24,7 @@
 | D3 | **Hosted login + PKCE** (HomeChef `packages/mobile-shared/src/auth/zitadel.ts`). Uses `expo-web-browser` `openAuthSessionAsync`, `offline_access`, and a refresh token in SecureStore. | Simplest proven mobile template on the platform. It needs no custom login BFF and no instance PAT. |
 | D4 | **Apple and Google via the TESSERIX org IdPs** on the hosted page. Remove native `expo-apple-authentication` and `google-signin` for sign-in. | Nobody has done a native-token → Zitadel exchange. Guideline 4.8 is satisfied by offering Apple. Account linking moves to Zitadel (`AUTO_LINKING_OPTION_EMAIL`), so `LinkAccountPrompt` goes away. |
 | D5 | **Rename `users.firebase_uid` → `users.idp_subject` now.** | The table is empty after D1, so the rename is cheap and leaves no Firebase naming behind. |
-| D6 | **Add a min-build gate** (`GET /v1/app-config` → `min_build`) in the same release. | Optional, but cheap. It means the next auth change won't strand old builds. |
+| D6 | **Add a min-build gate** (`GET /v1/app-config` → `min_build`, public because it must answer without a token) in the same release. | Optional, but cheap. It means the next auth change won't strand old builds. |
 | D7 | **Pure Zitadel: no native Apple path and no Kora-side Apple tokens.** Remove `internal/appleid`, `POST /v1/me/apple-authorization`, `users.apple_refresh_token` and the `APPLE_*` config. Apple revocation becomes a platform concern, solved once in Zitadel or the identity layer for every product (Q4). | Kora can no longer obtain an Apple code once Zitadel brokers Apple. Keeping a native capture path means a second Apple prompt and a provider-specific side channel, which is exactly the coupling we're removing. HomeChef and mark8ly have the same gap. |
 
 ## Phase 0: Provisioning (tesserix-k8s, merge first)
@@ -63,7 +63,7 @@
    - Add a migration dropping `users.apple_refresh_token`.
    - Remove `APPLE_*` from config and `main.go`.
    - Drop the `has_apple_token` / `apple_token_revoked` fields from admin responses, and the matching tesserix-home `kora-admin.ts` fields in the same change.
-7. Add `/v1/app-config` (D6).
+7. Add public `GET /v1/app-config` (D6). `KORA_MIN_BUILD_IOS` and `KORA_MIN_BUILD_ANDROID` set the floor.
 8. Update `cmd/aieval` and `cmd/aidecide` to obtain a Zitadel end-user token (Q3).
 
 ## Phase 2: Mobile (kora `apps/mobile/`)

@@ -608,3 +608,14 @@ func TestSetHandleRateLimitIsWiredIntoTheRealRouter(t *testing.T) {
 	require.Equal(t, http.StatusTooManyRequests, last,
 		"the (LookupLimit+1)th call to PUT /v1/me/handle by the same user must be refused by ratelimit.PerUser")
 }
+
+func TestAppConfigServesTheMinBuildWithoutAToken(t *testing.T) {
+	r := NewRouter(Deps{MinBuild: MinBuild{IOS: 42, Android: 17}})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/v1/app-config", nil)
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.JSONEq(t, `{"data":{"min_build":{"ios":42,"android":17}}}`, w.Body.String())
+}

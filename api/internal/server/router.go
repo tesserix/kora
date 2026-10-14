@@ -62,7 +62,9 @@ type Deps struct {
 	// because Zitadel access tokens carry only the subject. Nil leaves both
 	// empty, which is what tests that never sign in through Zitadel want.
 	ProfileSource user.ProfileSource
-	Resolver      *resolve.Handler
+	// MinBuild is served by GET /v1/app-config. The zero value gates nothing.
+	MinBuild MinBuild
+	Resolver *resolve.Handler
 	// Provider is the AI backend the coach's Q&A endpoint generates text
 	// with. If nil (e.g. GEMINI_API_KEY unset), coach.Service.Ask degrades
 	// gracefully instead of calling it — /coach/nudges is unaffected either
@@ -152,6 +154,14 @@ func NewRouter(deps Deps) *gin.Engine {
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	// Unauthenticated on purpose: the builds it exists to stop are exactly the
+	// ones whose sign-in no longer works, so they hold no token this API accepts.
+	// Under /v1 because the edge only routes /v1/* on kora-api.tesserix.app;
+	// v1_auth_coverage_test.go lists it in v1PublicRoutes.
+	r.GET("/v1/app-config", func(c *gin.Context) {
+		httpx.OK(c, gin.H{"min_build": gin.H{"ios": deps.MinBuild.IOS, "android": deps.MinBuild.Android}})
 	})
 
 	r.GET("/ready", func(c *gin.Context) {
@@ -634,6 +644,13 @@ func (m multiCacheEvicter) DeleteByUser(ctx context.Context, userID uuid.UUID) e
 	resolveErr := m.resolve.DeleteByUser(ctx, userID)
 	bodyErr := m.body.DeleteByUser(ctx, userID)
 	return errors.Join(resolveErr, bodyErr)
+}
+
+// MinBuild is the oldest native build number per platform that the API still
+// serves.
+type MinBuild struct {
+	IOS     int
+	Android int
 }
 
 // unwiredIdentityDeleter stands in when Deps.IdentityDeleter is nil. It
